@@ -14,6 +14,6 @@ public abstract class SystemBase
 
     internal bool ShouldExecute()
     {
-        return ++_counter % ExecuteFrequency == 0;
+        return ExecuteFrequency == 1 || (_counter++ > 0 && _counter % ExecuteFrequency == 0);
     }
 }

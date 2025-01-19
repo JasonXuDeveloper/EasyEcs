@@ -7,7 +7,7 @@ namespace EasyEcs.UnitTest.Systems;
 public class ModificationSystem: SystemBase, IExecuteSystem, IEndSystem
 {
     public override int ExecuteFrequency => 5;
-    public override int Priority => -1;
+    public override int Priority => 1;
 
     /// <summary>
     /// Halve the size of all entities that have a SizeComponent

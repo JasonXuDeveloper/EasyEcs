@@ -12,9 +12,11 @@ namespace EasyEcs.Core;
 /// <br/>
 /// You should create a context and add systems to it. Then you should call <see cref="Update"/> in a loop, at certain intervals.
 /// You can create entities and add components to them. Systems will then process these entities.
+/// <br/>
+/// You should not have multiple contexts in the same thread.
 /// </summary>
 [SuppressMessage("ReSharper", "SuspiciousTypeConversion.Global")]
-public class Context: IAsyncDisposable
+public class Context : IAsyncDisposable
 {
     private readonly Random _random = new();
     private readonly List<Entity> _entities = new();
@@ -25,9 +27,9 @@ public class Context: IAsyncDisposable
     private bool _started;
     private bool _disposed;
 
-    private ReadOnlyCollection<Entity> _currentUpdateAllEntities;
+    private readonly List<Entity> _currentEntities = new();
     private readonly ConcurrentDictionary<long, List<Entity>> _groupsCache = new();
-    private readonly ConcurrentQueue<List<Entity>> _pool = new();
+    private static readonly ConcurrentQueue<List<Entity>> Pool = new();
 
     [ThreadStatic] private static List<Entity> _group;
     private static List<Entity> Group => _group ??= new();
@@ -50,26 +52,69 @@ public class Context: IAsyncDisposable
             _initSystems.Add(system.Priority, initSystem);
         if (system is IEndSystem endSystem)
             _endSystems.Add(system.Priority, endSystem);
-        
+
         return this;
     }
+
+    /// <summary>
+    /// Create a new entity.
+    /// </summary>
+    /// <returns></returns>
+    public Entity CreateEntity()
+    {
+        var entity = new Entity(this, _random.Next());
+        _entities.Add(entity);
+        _currentEntities.Add(entity);
+        return entity;
+    }
+
+    /// <summary>
+    /// Destroy an entity.
+    /// </summary>
+    /// <param name="entity"></param>
+    /// <param name="immediate"></param>
+    public void DestroyEntity(Entity entity, bool immediate = false)
+    {
+        if (immediate)
+        {
+            _entities.Remove(entity);
+            _currentEntities.Remove(entity);
+            InvalidateGroupCache();
+            return;
+        }
+
+        _removeList.Add(entity);
+    }
+
+    /// <summary>
+    /// Get all entities.
+    /// <br/>
+    /// Note: Newly created entities from the current update will not be included.
+    /// </summary>
+    public ReadOnlyCollection<Entity> AllEntities => _currentEntities.AsReadOnly();
 
     /// <summary>
     /// Initialize all systems. Use this when starting the context.
     /// </summary>
     public async ValueTask<Context> Init()
     {
-        if(_started)
+        if (_started)
             throw new InvalidOperationException("Context already started.");
+
+        // all entities before executing all systems at this update
+        _currentEntities.Clear();
+        _currentEntities.AddRange(_entities);
+        // clear the cache of the groups
+        InvalidateGroupCache();
 
         // initialize all systems
         foreach (var system in _initSystems.Values)
         {
             await system.OnInit(this);
         }
-        
+
         _started = true;
-        
+
         return this;
     }
 
@@ -80,22 +125,29 @@ public class Context: IAsyncDisposable
     {
         if (_disposed)
             return;
-        
+
+        // all entities before executing all systems at this update
+        _currentEntities.Clear();
+        _currentEntities.AddRange(_entities);
+        // clear the cache of the groups
+        InvalidateGroupCache();
+
         // dispose all systems
         foreach (var system in _endSystems.Values)
         {
             await system.OnEnd(this);
         }
-        
+
         // clear all entities
         _entities.Clear();
+        _currentEntities.Clear();
         // clear all systems
         _executeSystems.Clear();
         _initSystems.Clear();
         _endSystems.Clear();
         // clear the cache of the groups
         InvalidateGroupCache();
-        
+
         _disposed = true;
     }
 
@@ -106,15 +158,16 @@ public class Context: IAsyncDisposable
     public async ValueTask Update(bool parallel = true)
     {
         // check if the context is started
-        if(!_started)
+        if (!_started)
             throw new InvalidOperationException("Context not started.");
-        
+
         // check if the context is disposed
-        if(_disposed)
+        if (_disposed)
             throw new InvalidOperationException("Context disposed.");
-        
+
         // all entities before executing all systems at this update
-        _currentUpdateAllEntities = _entities.AsReadOnly();
+        _currentEntities.Clear();
+        _currentEntities.AddRange(_entities);
         // clear the cache of the groups
         InvalidateGroupCache();
         // execute the systems
@@ -143,42 +196,16 @@ public class Context: IAsyncDisposable
         foreach (var entity in _removeList)
         {
             _entities.Remove(entity);
+            _currentEntities.Remove(entity);
         }
 
         _removeList.Clear();
     }
 
     /// <summary>
-    /// Create a new entity.
-    /// </summary>
-    /// <returns></returns>
-    public Entity CreateEntity()
-    {
-        var entity = new Entity(this, _random.Next());
-        _entities.Add(entity);
-        return entity;
-    }
-
-    /// <summary>
-    /// Destroy an entity.
-    /// </summary>
-    /// <param name="entity"></param>
-    public void DestroyEntity(Entity entity)
-    {
-        _removeList.Add(entity);
-    }
-
-    /// <summary>
-    /// Get all entities.
+    /// Get all entities that have the specified components.
     /// <br/>
-    /// Note: Newly created entities from the current update will not be included.
-    /// </summary>
-    public ReadOnlyCollection<Entity> AllEntities => _currentUpdateAllEntities;
-
-    /// <summary>
-    /// Get all entities that have the specified components. Only use it in OnExecute
-    /// <br/>
-    /// Note: You should save the result (via LINQ) if you want to call <see cref="GroupOf"/> again, or to call <see cref="AllEntities"/>
+    /// Note: You should save the result (via LINQ) if you want to call <see cref="GroupOf"/> again
     /// </summary>
     /// <param name="components"></param>
     /// <returns></returns>
@@ -200,13 +227,13 @@ public class Context: IAsyncDisposable
         }
 
         // attempt to reuse a list
-        if (!_pool.TryDequeue(out entities))
+        if (!Pool.TryDequeue(out entities))
         {
             entities = new List<Entity>();
         }
 
         // iterate over all entities and check if they have the components, then cache it
-        foreach (var entity in _currentUpdateAllEntities)
+        foreach (var entity in _currentEntities)
         {
             if (entity.HasComponents(components))
             {
@@ -233,7 +260,7 @@ public class Context: IAsyncDisposable
         {
             // enqueue the hashset to the pool, so we can reuse it later
             group.Clear();
-            _pool.Enqueue(group);
+            Pool.Enqueue(group);
         }
 
         _groupsCache.Clear();
