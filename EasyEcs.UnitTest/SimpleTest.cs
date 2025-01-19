@@ -24,7 +24,7 @@ public class SimpleTest
         
         // Start the shared context, automatically initializing all systems,
         // then when it is out of scope, it will dispose the context
-        using (await Context.Shared.Init())
+        await using (await Context.Shared.Init())
         {
             // Set the components' values
             sizeComponent.Width = 10;

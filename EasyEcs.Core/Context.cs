@@ -14,7 +14,7 @@ namespace EasyEcs.Core;
 /// You can create entities and add components to them. Systems will then process these entities.
 /// </summary>
 [SuppressMessage("ReSharper", "SuspiciousTypeConversion.Global")]
-public class Context: IDisposable
+public class Context: IAsyncDisposable
 {
     private readonly Random _random = new();
     private readonly List<Entity> _entities = new();
@@ -73,7 +73,10 @@ public class Context: IDisposable
         return this;
     }
 
-    public void Dispose()
+    /// <summary>
+    /// Dispose the context.
+    /// </summary>
+    public async ValueTask DisposeAsync()
     {
         if (_disposed)
             return;
@@ -81,7 +84,7 @@ public class Context: IDisposable
         // dispose all systems
         foreach (var system in _endSystems.Values)
         {
-            system.OnEnd(this).AsTask().Wait();
+            await system.OnEnd(this);
         }
         
         // clear all entities
