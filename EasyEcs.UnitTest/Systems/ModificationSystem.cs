@@ -4,9 +4,12 @@ using EasyEcs.UnitTest.Components;
 
 namespace EasyEcs.UnitTest.Systems;
 
-public class RandomModificationSystem: ExecuteSystem
+public class ModificationSystem: SystemBase, IExecuteSystem
 {
-    public override ValueTask Execute(Context context)
+    public override int Frequency => 5;
+    public override int Priority => -1;
+
+    public ValueTask Execute(Context context)
     {
         var candidates = context.GroupOf(
             typeof(SizeComponent));

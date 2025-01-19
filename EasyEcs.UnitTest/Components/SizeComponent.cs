@@ -1,6 +1,9 @@
+using EasyEcs.Core;
+
 namespace EasyEcs.UnitTest.Components;
 
-public struct SizeComponent
+public class SizeComponent : IComponent
 {
-    
+    public int Width;
+    public int Height;
 }

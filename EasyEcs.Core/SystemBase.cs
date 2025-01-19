@@ -7,21 +7,15 @@ namespace EasyEcs.Core;
 /// <br/>
 /// Systems in a context are sorted and updated by priority.
 /// </summary>
-public abstract class ExecuteSystem
+public abstract class SystemBase
 {
     public virtual int Priority => 0;
     public virtual int Frequency => 1;
-    public abstract ValueTask Execute(Context context);
 
     private int _counter;
 
-    internal ValueTask Update(Context context)
+    internal bool ShouldUpdate()
     {
-        if (++_counter % Frequency == 0)
-        {
-            return Execute(context);
-        }
-
-        return ValueTask.CompletedTask;
+        return ++_counter % Frequency == 0;
     }
 }
