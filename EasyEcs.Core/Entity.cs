@@ -56,6 +56,8 @@ public class Entity
 
         if (idx == -1)
         {
+            // Invalidate cache in the context
+            _context.InvalidateGroupCache();
             // Add component
             _components.Add(new T());
 
@@ -101,7 +103,7 @@ public class Entity
 
         return false;
     }
-    
+
     /// <summary>
     /// Does the entity have all the components?
     /// </summary>
@@ -114,11 +116,9 @@ public class Entity
             var found = false;
             foreach (var component in _components)
             {
-                if (component.GetType() == type)
-                {
-                    found = true;
-                    break;
-                }
+                if (component.GetType() != type) continue;
+                found = true;
+                break;
             }
 
             if (!found)
@@ -141,6 +141,8 @@ public class Entity
         {
             if (_components[i] is T)
             {
+                // Invalidate cache in the context
+                _context.InvalidateGroupCache();
                 // Remove component
                 _components.RemoveAt(i);
 

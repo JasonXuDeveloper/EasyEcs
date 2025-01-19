@@ -1,12 +1,13 @@
+using System;
 using System.Threading.Tasks;
 using EasyEcs.Core;
 using EasyEcs.UnitTest.Components;
 
 namespace EasyEcs.UnitTest.Systems;
 
-public class ResizeSystem : SystemBase, IExecuteSystem
+public class ResizeSystem : SystemBase, IExecuteSystem, IInitSystem
 {
-    public ValueTask Execute(Context context)
+    public ValueTask OnExecute(Context context)
     {
         // Get all entities that have both ScaleComponent and SizeComponent
         var candidates = context.GroupOf(
@@ -29,6 +30,13 @@ public class ResizeSystem : SystemBase, IExecuteSystem
             entity.RemoveComponent<ScaleComponent>();
         }
 
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask OnInit(Context context)
+    {
+        Console.WriteLine("ResizeSystem initialized");
+        
         return ValueTask.CompletedTask;
     }
 }

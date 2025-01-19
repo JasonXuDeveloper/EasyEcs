@@ -4,5 +4,5 @@ namespace EasyEcs.Core;
 
 public interface IExecuteSystem
 {
-    ValueTask Execute(Context context);
+    ValueTask OnExecute(Context context);
 }

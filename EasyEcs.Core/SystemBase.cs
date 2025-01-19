@@ -1,5 +1,3 @@
-using System.Threading.Tasks;
-
 namespace EasyEcs.Core;
 
 /// <summary>
@@ -10,12 +8,12 @@ namespace EasyEcs.Core;
 public abstract class SystemBase
 {
     public virtual int Priority => 0;
-    public virtual int Frequency => 1;
+    public virtual int ExecuteFrequency => 1;
 
     private int _counter;
 
-    internal bool ShouldUpdate()
+    internal bool ShouldExecute()
     {
-        return ++_counter % Frequency == 0;
+        return ++_counter % ExecuteFrequency == 0;
     }
 }
