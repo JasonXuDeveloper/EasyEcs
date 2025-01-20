@@ -4,6 +4,28 @@
         <TargetFramework>net6.0</TargetFramework>
         <ImplicitUsings>disable</ImplicitUsings>
         <Nullable>disable</Nullable>
+        <LangVersion>10</LangVersion>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <Version>1.0.0</Version>
+        <PackageId>EasyEcs</PackageId>
+        <Title>EasyEcs</Title>
+        <Authors>JasonXuDeveloper</Authors>
+        <Description>An Entity-Component-System library</Description>
+        <Copyright>JasonXuDeveloper</Copyright>
+        <PackageProjectUrl>https://github.com/JasonXuDeveloper/EasyEcs</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/JasonXuDeveloper/EasyEcs</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageTags>ECS</PackageTags>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+        <BranchName>refs/heads/master</BranchName>
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
     </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="..\README.md" Pack="true" PackagePath="\"/>
+    </ItemGroup>
 
 </Project>
