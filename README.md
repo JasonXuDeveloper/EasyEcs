@@ -46,6 +46,7 @@ Well, as a human, we (entities) live in a world (context), and we have some prop
 
 - We have **priority** for `System`, so you can control the order of systems.
 - We have **frequency** for `System`, so you can control the frequency of systems being executed.
+- We only allow **asynchronous** interfaces for `System` and `Context`, so our ECS should not block the thread (unless you screw up).
 - We have a cool guy who is maintaining this library. (Just kidding)
 
 ## Example
