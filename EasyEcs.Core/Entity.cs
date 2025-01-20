@@ -23,7 +23,7 @@ public class Entity
     /// <summary>
     /// The components this entity holds.
     /// </summary>
-    private readonly List<IComponent> _components = new();
+    private readonly Dictionary<Type, IComponent> _components = new();
 
     /// <summary>
     /// Create a new entity.
@@ -44,27 +44,18 @@ public class Entity
     public T AddComponent<T>() where T : class, IComponent, new()
     {
         // Check if component already exists
-        int idx = -1;
-        for (var i = 0; i < _components.Count; i++)
+        if (_components.TryGetValue(typeof(T), out var component))
         {
-            if (_components[i] is T)
-            {
-                idx = i;
-                break;
-            }
+            return (T)component;
         }
 
-        if (idx == -1)
-        {
-            // Invalidate cache in the context
-            _context.InvalidateGroupCache();
-            // Add component
-            _components.Add(new T());
+        // Invalidate cache in the context
+        _context.InvalidateGroupCache();
+        // Add component
+        var newComponent = new T();
+        _components.Add(typeof(T), newComponent);
 
-            idx = _components.Count - 1;
-        }
-
-        return (T)_components[idx];
+        return newComponent;
     }
 
     /// <summary>
@@ -75,12 +66,9 @@ public class Entity
     /// <exception cref="InvalidOperationException"></exception>
     public T GetComponent<T>() where T : class, IComponent, new()
     {
-        foreach (var component in _components)
+        if (TryGetComponent(out T component))
         {
-            if (component is T comp)
-            {
-                return comp;
-            }
+            return component;
         }
 
         throw new InvalidOperationException($"Component {typeof(T)} not found.");
@@ -94,13 +82,10 @@ public class Entity
     /// <returns></returns>
     public bool TryGetComponent<T>([NotNullWhen(true)] out T component) where T : class, IComponent, new()
     {
-        foreach (var c in _components)
+        if (_components.TryGetValue(typeof(T), out var c))
         {
-            if (c is T comp)
-            {
-                component = comp;
-                return true;
-            }
+            component = (T)c;
+            return true;
         }
 
         component = null;
@@ -114,15 +99,7 @@ public class Entity
     /// <returns></returns>
     public bool HasComponent<T>() where T : class, IComponent, new()
     {
-        foreach (var component in _components)
-        {
-            if (component is T)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return _components.ContainsKey(typeof(T));
     }
 
     /// <summary>
@@ -134,15 +111,7 @@ public class Entity
     {
         foreach (var type in types)
         {
-            var found = false;
-            foreach (var component in _components)
-            {
-                if (component.GetType() != type) continue;
-                found = true;
-                break;
-            }
-
-            if (!found)
+            if (!_components.ContainsKey(type))
             {
                 return false;
             }
@@ -158,19 +127,12 @@ public class Entity
     /// <returns></returns>
     public bool RemoveComponent<T>() where T : class, IComponent, new()
     {
-        for (var i = 0; i < _components.Count; i++)
+        if (_components.Remove(typeof(T)))
         {
-            if (_components[i] is T)
-            {
-                // Invalidate cache in the context
-                _context.InvalidateGroupCache();
-                // Remove component
-                _components.RemoveAt(i);
-
-                return true;
-            }
+            _context.InvalidateGroupCache();
+            return true;
         }
-
+        
         return false;
     }
 
