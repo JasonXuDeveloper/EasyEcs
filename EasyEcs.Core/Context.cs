@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Threading.Tasks;
 
@@ -21,18 +20,20 @@ public class Context : IAsyncDisposable
     private readonly Random _random = new();
     private readonly List<Entity> _entities = new();
     private readonly List<Entity> _removeList = new();
-    private readonly SortedList<int, IExecuteSystem> _executeSystems = new();
+    private readonly List<Task> _executeTasks = new();
+    private readonly SortedList<int, ExecuteSystemWrapper> _executeSystems = new();
     private readonly SortedList<int, IInitSystem> _initSystems = new();
     private readonly SortedList<int, IEndSystem> _endSystems = new();
     private bool _started;
     private bool _disposed;
 
-    private readonly List<Entity> _currentEntities = new();
     private readonly ConcurrentDictionary<long, List<Entity>> _groupsCache = new();
     private static readonly ConcurrentQueue<List<Entity>> Pool = new();
-
-    [ThreadStatic] private static List<Entity> _group;
-    private static List<Entity> Group => _group ??= new();
+    
+    /// <summary>
+    /// Called when an error occurs.
+    /// </summary>
+    public event Action<Exception> OnError;
 
     /// <summary>
     /// The shared context.
@@ -47,7 +48,7 @@ public class Context : IAsyncDisposable
     {
         var system = new T();
         if (system is IExecuteSystem executeSystem)
-            _executeSystems.Add(system.Priority, executeSystem);
+            _executeSystems.Add(system.Priority, new ExecuteSystemWrapper(executeSystem));
         if (system is IInitSystem initSystem)
             _initSystems.Add(system.Priority, initSystem);
         if (system is IEndSystem endSystem)
@@ -64,7 +65,6 @@ public class Context : IAsyncDisposable
     {
         var entity = new Entity(this, _random.Next());
         _entities.Add(entity);
-        _currentEntities.Add(entity);
         return entity;
     }
 
@@ -78,7 +78,6 @@ public class Context : IAsyncDisposable
         if (immediate)
         {
             _entities.Remove(entity);
-            _currentEntities.Remove(entity);
             InvalidateGroupCache();
             return;
         }
@@ -91,7 +90,17 @@ public class Context : IAsyncDisposable
     /// <br/>
     /// Note: Newly created entities from the current update will not be included.
     /// </summary>
-    public ReadOnlyCollection<Entity> AllEntities => _currentEntities.AsReadOnly();
+    public PooledCollection<List<Entity>, Entity> AllEntities
+    {
+        get
+        {
+            var ret = PooledCollection<List<Entity>, Entity>.Create();
+            var lst = ret.Collection;
+            lst.Clear();
+            lst.AddRange(_entities);
+            return ret;
+        }
+    }
 
     /// <summary>
     /// Initialize all systems. Use this when starting the context.
@@ -101,9 +110,6 @@ public class Context : IAsyncDisposable
         if (_started)
             throw new InvalidOperationException("Context already started.");
 
-        // all entities before executing all systems at this update
-        _currentEntities.Clear();
-        _currentEntities.AddRange(_entities);
         // clear the cache of the groups
         InvalidateGroupCache();
 
@@ -126,9 +132,6 @@ public class Context : IAsyncDisposable
         if (_disposed)
             return;
 
-        // all entities before executing all systems at this update
-        _currentEntities.Clear();
-        _currentEntities.AddRange(_entities);
         // clear the cache of the groups
         InvalidateGroupCache();
 
@@ -140,7 +143,6 @@ public class Context : IAsyncDisposable
 
         // clear all entities
         _entities.Clear();
-        _currentEntities.Clear();
         // clear all systems
         _executeSystems.Clear();
         _initSystems.Clear();
@@ -165,9 +167,6 @@ public class Context : IAsyncDisposable
         if (_disposed)
             throw new InvalidOperationException("Context disposed.");
 
-        // all entities before executing all systems at this update
-        _currentEntities.Clear();
-        _currentEntities.AddRange(_entities);
         // clear the cache of the groups
         InvalidateGroupCache();
         // execute the systems
@@ -175,28 +174,32 @@ public class Context : IAsyncDisposable
         {
             foreach (var system in _executeSystems.Values)
             {
-                if (((SystemBase)system).ShouldExecute())
-                {
-                    await system.OnExecute(this);
-                }
+                await system.Update(this);
             }
         }
         else
         {
-            await Parallel.ForEachAsync(_executeSystems.Values, async (system, _) =>
+            _executeTasks.Clear();
+            // sort by priority
+            foreach (var system in _executeSystems.Values)
             {
-                if (((SystemBase)system).ShouldExecute())
-                {
-                    await system.OnExecute(this);
-                }
-            });
+                _executeTasks.Add(system.Update(this));
+            }
+         
+            try
+            {
+                await Task.WhenAll(_executeTasks);
+            }
+            catch (Exception e)
+            {
+                OnError?.Invoke(e);
+            }
         }
 
         // remove entities
         foreach (var entity in _removeList)
         {
             _entities.Remove(entity);
-            _currentEntities.Remove(entity);
         }
 
         _removeList.Clear();
@@ -205,11 +208,14 @@ public class Context : IAsyncDisposable
     /// <summary>
     /// Get all entities that have the specified components.
     /// <br/>
-    /// Note: You should save the result (via LINQ) if you want to call <see cref="GroupOf"/> again
+    /// Note: remember to dispose the returned enumerable. (i.e. using)
+    /// <code>
+    /// using var entities = context.GroupOf(typeof(Component1), typeof(Component2));
+    /// </code>
     /// </summary>
     /// <param name="components"></param>
     /// <returns></returns>
-    public ReadOnlyCollection<Entity> GroupOf(params Type[] components)
+    public PooledCollection<List<Entity>, Entity> GroupOf(params Type[] components)
     {
         // compute an id for these components
         long group = 0;
@@ -218,12 +224,16 @@ public class Context : IAsyncDisposable
             group += component.GetHashCode();
         }
 
-        Group.Clear();
+        // request a pooled enumerable
+        var ret = PooledCollection<List<Entity>, Entity>.Create();
+        var lst = ret.Collection;
+        lst.Clear();
+        
         // if we have already looked up this group at this update, we simply copy the results
         if (_groupsCache.TryGetValue(group, out var entities))
         {
-            Group.AddRange(entities);
-            return Group.AsReadOnly();
+            lst.AddRange(entities);
+            return ret;
         }
 
         // attempt to reuse a list
@@ -233,7 +243,8 @@ public class Context : IAsyncDisposable
         }
 
         // iterate over all entities and check if they have the components, then cache it
-        foreach (var entity in _currentEntities)
+        using var allEntities = AllEntities;
+        foreach (var entity in allEntities)
         {
             if (entity.HasComponents(components))
             {
@@ -243,8 +254,8 @@ public class Context : IAsyncDisposable
 
         // try cache it
         _groupsCache.TryAdd(group, entities);
-        Group.AddRange(entities);
-        return Group.AsReadOnly();
+        lst.AddRange(entities);
+        return ret;
     }
 
     /// <summary>

@@ -4,5 +4,5 @@ namespace EasyEcs.Core;
 
 public interface IInitSystem
 {
-    ValueTask OnInit(Context context);
+    Task OnInit(Context context);
 }

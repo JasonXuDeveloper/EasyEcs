@@ -12,6 +12,7 @@ public class SimpleTest
     public async Task TrivialTest()
     {
         var ctx = new Context();
+        ctx.OnError += e => Assert.Fail(e.Message);
         
         // Add systems to the context
         ctx
@@ -80,6 +81,7 @@ public class SimpleTest
     public async Task DestroyTest()
     {
         var ctx = new Context();
+        ctx.OnError += e => Assert.Fail(e.Message);
         
         // Add systems to the context
         ctx

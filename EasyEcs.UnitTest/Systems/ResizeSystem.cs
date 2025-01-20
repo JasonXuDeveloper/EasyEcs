@@ -6,10 +6,10 @@ namespace EasyEcs.UnitTest.Systems;
 
 public class ResizeSystem : SystemBase, IInitSystem, IExecuteSystem
 {
-    public ValueTask OnInit(Context context)
+    public Task OnInit(Context context)
     {
         // Get all entities that have ScaleComponent
-        var candidates = context.GroupOf(
+        using var candidates = context.GroupOf(
             typeof(ScaleComponent));
         
         // Iterate over all entities
@@ -19,13 +19,13 @@ public class ResizeSystem : SystemBase, IInitSystem, IExecuteSystem
             entity.GetComponent<ScaleComponent>().Factor = 2;
         }
 
-        return ValueTask.CompletedTask;
+        return Task.CompletedTask;
     }
 
-    public ValueTask OnExecute(Context context)
+    public Task OnExecute(Context context)
     {
         // Get all entities that have both ScaleComponent and SizeComponent
-        var candidates = context.GroupOf(
+        using var candidates = context.GroupOf(
             typeof(ScaleComponent),
             typeof(SizeComponent));
 
@@ -45,6 +45,6 @@ public class ResizeSystem : SystemBase, IInitSystem, IExecuteSystem
             entity.RemoveComponent<ScaleComponent>();
         }
 
-        return ValueTask.CompletedTask;
+        return Task.CompletedTask;
     }
 }

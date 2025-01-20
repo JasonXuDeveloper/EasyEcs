@@ -4,5 +4,5 @@ namespace EasyEcs.Core;
 
 public interface IEndSystem
 {
-    ValueTask OnEnd(Context context);
+    Task OnEnd(Context context);
 }

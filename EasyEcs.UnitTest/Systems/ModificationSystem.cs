@@ -6,7 +6,7 @@ namespace EasyEcs.UnitTest.Systems;
 
 public class ModificationSystem: SystemBase, IExecuteSystem, IEndSystem
 {
-    public override int ExecuteFrequency => 5;
+    public int ExecuteFrequency => 5;
     public override int Priority => 1;
 
     /// <summary>
@@ -14,9 +14,9 @@ public class ModificationSystem: SystemBase, IExecuteSystem, IEndSystem
     /// </summary>
     /// <param name="context"></param>
     /// <returns></returns>
-    public ValueTask OnExecute(Context context)
+    public Task OnExecute(Context context)
     {
-        var candidates = context.GroupOf(
+        using var candidates = context.GroupOf(
             typeof(SizeComponent));
 
         foreach (var entity in candidates)
@@ -25,7 +25,7 @@ public class ModificationSystem: SystemBase, IExecuteSystem, IEndSystem
             comp.Factor = 0.5f;
         }
 
-        return ValueTask.CompletedTask;
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -33,9 +33,9 @@ public class ModificationSystem: SystemBase, IExecuteSystem, IEndSystem
     /// </summary>
     /// <param name="context"></param>
     /// <returns></returns>
-    public ValueTask OnEnd(Context context)
+    public Task OnEnd(Context context)
     {
-        var candidates = context.GroupOf(
+        using var candidates = context.GroupOf(
             typeof(SizeComponent));
 
         foreach (var entity in candidates)
@@ -45,6 +45,6 @@ public class ModificationSystem: SystemBase, IExecuteSystem, IEndSystem
             sizeComponent.Height = 0;
         }
         
-        return ValueTask.CompletedTask;
+        return Task.CompletedTask;
     }
 }
