@@ -30,7 +30,7 @@ Well, as a human, we (entities) live in a world (context), and we have some prop
 - Each `Component` has only data properties.
 - Each `System` can filter lots of `Entity` instances in the same `Context` by their components and operate logics on them.
 
-## Why it removes circular dependencies?
+## Why it removes bidirectional dependencies?
 
 - Only `System` contains logics and none of them should reference on each other. But we allow one system depends on another by specifying `Priority`. (They should only depend on the filtered entities/components)
 - `Component` only contains data properties and no logics. (Again, no way to have dependency)
