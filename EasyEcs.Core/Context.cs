@@ -199,30 +199,20 @@ public partial class Context : IAsyncDisposable
         // clear the cache of the groups
         InvalidateGroupCache();
         // execute the systems
-        if (!parallel)
+        _executeTasks.Clear();
+        // sort by priority
+        foreach (var system in _executeSystems.Values)
         {
-            foreach (var system in _executeSystems.Values)
-            {
-                await system.Update(this);
-            }
+            _executeTasks.Add(parallel ? Task.Run(() => system.Update(this)) : system.Update(this));
         }
-        else
-        {
-            _executeTasks.Clear();
-            // sort by priority
-            foreach (var system in _executeSystems.Values)
-            {
-                _executeTasks.Add(system.Update(this));
-            }
 
-            try
-            {
-                await Task.WhenAll(_executeTasks);
-            }
-            catch (Exception e)
-            {
-                OnError?.Invoke(e);
-            }
+        try
+        {
+            await Task.WhenAll(_executeTasks);
+        }
+        catch (Exception e)
+        {
+            OnError?.Invoke(e);
         }
 
         while (_removeList.TryDequeue(out var entity))

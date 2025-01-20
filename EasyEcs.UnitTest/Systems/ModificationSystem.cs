@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 using EasyEcs.Core;
 using EasyEcs.UnitTest.Components;
@@ -16,6 +17,9 @@ public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
     /// <returns></returns>
     public Task OnExecute(Context context)
     {
+        // Should be run concurrently if possible
+        Console.WriteLine($"{this.GetType()} is executing on thread {Environment.CurrentManagedThreadId}");
+
         using var candidates = context.GroupOf(
             typeof(SizeComponent));
 
