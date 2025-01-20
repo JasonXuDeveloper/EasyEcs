@@ -18,7 +18,7 @@ public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
     public Task OnExecute(Context context)
     {
         // Should be run concurrently if possible
-        Console.WriteLine($"{this.GetType()} is executing on thread {Environment.CurrentManagedThreadId}");
+        Console.WriteLine($"{GetType()} is executing on thread {Environment.CurrentManagedThreadId}");
 
         using var candidates = context.GroupOf(
             typeof(SizeComponent));
