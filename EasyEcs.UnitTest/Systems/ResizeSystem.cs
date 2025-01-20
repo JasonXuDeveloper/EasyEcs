@@ -9,14 +9,13 @@ public class ResizeSystem : SystemBase, IInitSystem, IExecuteSystem
     public Task OnInit(Context context)
     {
         // Get all entities that have ScaleComponent
-        using var candidates = context.GroupOf(
-            typeof(ScaleComponent));
+        using var candidates = context.GroupOf<ScaleComponent>();
         
         // Iterate over all entities
-        foreach (var entity in candidates)
+        foreach (var (_, scaleComponent) in candidates)
         {
             // Set the factor to 2
-            entity.GetComponent<ScaleComponent>().Factor = 2;
+            scaleComponent.Factor = 2;
         }
 
         return Task.CompletedTask;
@@ -25,17 +24,13 @@ public class ResizeSystem : SystemBase, IInitSystem, IExecuteSystem
     public Task OnExecute(Context context)
     {
         // Get all entities that have both ScaleComponent and SizeComponent
-        using var candidates = context.GroupOf(
-            typeof(ScaleComponent),
-            typeof(SizeComponent));
+        using var candidates = context.GroupOf<ScaleComponent, SizeComponent>();
 
         // Iterate over all entities
-        foreach (var entity in candidates)
+        foreach (var (entity, scaleComponent, sizeComponent) in candidates)
         {
-            // Get the SizeComponent
-            var sizeComponent = entity.GetComponent<SizeComponent>();
             // Get the ScaleComponent's factor
-            var factor = entity.GetComponent<ScaleComponent>().Factor;
+            var factor = scaleComponent.Factor;
 
             // Resize the size component
             sizeComponent.Width = (int)(sizeComponent.Width * factor);

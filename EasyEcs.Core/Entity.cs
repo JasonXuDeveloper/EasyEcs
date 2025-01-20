@@ -87,6 +87,27 @@ public class Entity
     }
 
     /// <summary>
+    /// Try to get a component from the entity.
+    /// </summary>
+    /// <param name="component"></param>
+    /// <typeparam name="T"></typeparam>
+    /// <returns></returns>
+    public bool TryGetComponent<T>([NotNullWhen(true)] out T component) where T : class, IComponent, new()
+    {
+        foreach (var c in _components)
+        {
+            if (c is T comp)
+            {
+                component = comp;
+                return true;
+            }
+        }
+
+        component = null;
+        return false;
+    }
+
+    /// <summary>
     /// Does the entity have a component?
     /// </summary>
     /// <typeparam name="T"></typeparam>

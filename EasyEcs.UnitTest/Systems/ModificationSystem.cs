@@ -4,7 +4,7 @@ using EasyEcs.UnitTest.Components;
 
 namespace EasyEcs.UnitTest.Systems;
 
-public class ModificationSystem: SystemBase, IExecuteSystem, IEndSystem
+public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
 {
     public int ExecuteFrequency => 5;
     public override int Priority => 1;
@@ -35,16 +35,14 @@ public class ModificationSystem: SystemBase, IExecuteSystem, IEndSystem
     /// <returns></returns>
     public Task OnEnd(Context context)
     {
-        using var candidates = context.GroupOf(
-            typeof(SizeComponent));
+        using var candidates = context.GroupOf<SizeComponent>();
 
-        foreach (var entity in candidates)
+        foreach (var (_, sizeComponent) in candidates)
         {
-            var sizeComponent = entity.GetComponent<SizeComponent>();
             sizeComponent.Width = 0;
             sizeComponent.Height = 0;
         }
-        
+
         return Task.CompletedTask;
     }
 }
