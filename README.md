@@ -52,3 +52,7 @@ Well, as a human, we (entities) live in a world (context), and we have some prop
 ## Example
 
 Just check out the `EasyEcs.UnitTest` project. I have comments there.
+
+## Documentation
+
+Believe me, one day I will make a website for this and document everything.
