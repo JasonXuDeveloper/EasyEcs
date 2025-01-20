@@ -196,23 +196,39 @@ public partial class Context : IAsyncDisposable
         if (_disposed)
             throw new InvalidOperationException("Context disposed.");
 
+        // if empty, return
+        if (_executeSystems.Count == 0)
+            return;
+
         // clear the cache of the groups
         InvalidateGroupCache();
-        // execute the systems
-        _executeTasks.Clear();
-        // sort by priority
-        foreach (var system in _executeSystems.Values)
+        // group by priority
+        int remaining = _executeSystems.Count;
+        int index = 0;
+        while (remaining > 0)
         {
-            _executeTasks.Add(parallel ? Task.Run(() => system.Update(this)) : system.Update(this));
-        }
+            // execute the systems with the same priority
+            _executeTasks.Clear();
+            ExecuteSystemWrapper system = _executeSystems.Values[index];
+            var currentPriority = system.Priority;
+            while (system.Priority == currentPriority && remaining > 0)
+            {
+                var systemWrapper = system;
+                _executeTasks.Add(parallel ? Task.Run(() => systemWrapper.Update(this)) : systemWrapper.Update(this));
+                index++;
+                if (--remaining > 0)
+                    system = _executeSystems.Values[index];
+            }
 
-        try
-        {
-            await Task.WhenAll(_executeTasks);
-        }
-        catch (Exception e)
-        {
-            OnError?.Invoke(e);
+            // dispatch all tasks of the same priority
+            try
+            {
+                await Task.WhenAll(_executeTasks);
+            }
+            catch (Exception e)
+            {
+                OnError?.Invoke(e);
+            }
         }
 
         while (_removeList.TryDequeue(out var entity))

@@ -11,6 +11,8 @@ internal class ExecuteSystemWrapper
     private readonly IExecuteSystem _system;
     private int _counter;
 
+    internal int Priority => ((SystemBase)_system).Priority;
+
     public ExecuteSystemWrapper(IExecuteSystem system)
     {
         _system = system;
