@@ -163,6 +163,8 @@ public partial class Context : IAsyncDisposable
     {
         if (_started)
             throw new InvalidOperationException("Context already started.");
+        
+        _started = true;
 
         // clear the cache of the groups
         InvalidateGroupCache();
@@ -181,7 +183,6 @@ public partial class Context : IAsyncDisposable
         }
 
         _initSystems.Clear();
-        _started = true;
 
         return this;
     }
