@@ -9,7 +9,7 @@ An Entity-Component-System library
 
 Sometimes we may want to remove bidirectional dependencies between our code, and ECS is a good way to do this.
 
-This design pattern offers a clean way to separate the data from the logic, and it's also a good way to improve the performance of our game.
+This design pattern offers a clean way to separate the data from the logic, and it's also a good way to improve the performance.
 
 ## What is ECS?
 
@@ -21,7 +21,7 @@ S - System
 
 But what really is it?
 
-Well, as a human, we (entities) live in a world (context), and we have some properties (components). Moreover, we have things to do based on our properties (systems).
+Well, as a human, we (entities) live in the world (context), and we have some properties (components). Moreover, we have things to do based on our properties (systems).
 
 ## Concepts in EasyEcs
 
