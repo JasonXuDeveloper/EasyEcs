@@ -22,6 +22,7 @@ public partial class Context : IAsyncDisposable
     private readonly List<Entity> _entities = new();
     private readonly ReaderWriterLockSlim _entitiesLock = new();
     private readonly ConcurrentQueue<Entity> _removeList = new();
+    private readonly ConcurrentQueue<SystemBase> _runtimeAddSystemList = new();
     private readonly List<Task> _executeTasks = new();
     private readonly SortedList<int, ExecuteSystemWrapper> _executeSystems = new();
     private readonly SortedList<int, IInitSystem> _initSystems = new();
@@ -38,25 +39,37 @@ public partial class Context : IAsyncDisposable
     public event Action<Exception> OnError;
 
     /// <summary>
-    /// The shared context.
-    /// </summary>
-    public static Context Shared { get; } = new();
-
-    /// <summary>
     /// Add a system to the context.
     /// </summary>
     /// <typeparam name="T"></typeparam>
     public Context AddSystem<T>() where T : SystemBase, new()
     {
         var system = new T();
+
+        // if the context is started, we need to add the system to a list, so we can add it later
+        // we should add the system after the current update, so we don't mess up the current iteration
+        if (_started)
+        {
+            _runtimeAddSystemList.Enqueue(system);
+            return this;
+        }
+
+        AddSystem(system);
+        return this;
+    }
+
+    /// <summary>
+    /// Add a system to the context.
+    /// </summary>
+    /// <param name="system"></param>
+    private void AddSystem(SystemBase system)
+    {
         if (system is IExecuteSystem executeSystem)
             _executeSystems.Add(system.Priority, new ExecuteSystemWrapper(executeSystem));
         if (system is IInitSystem initSystem)
             _initSystems.Add(system.Priority, initSystem);
         if (system is IEndSystem endSystem)
             _endSystems.Add(system.Priority, endSystem);
-
-        return this;
     }
 
     /// <summary>
@@ -145,9 +158,17 @@ public partial class Context : IAsyncDisposable
         // initialize all systems
         foreach (var system in _initSystems.Values)
         {
-            await system.OnInit(this);
+            try
+            {
+                await system.OnInit(this);
+            }
+            catch (Exception e)
+            {
+                OnError?.Invoke(e);
+            }
         }
 
+        _initSystems.Clear();
         _started = true;
 
         return this;
@@ -167,7 +188,14 @@ public partial class Context : IAsyncDisposable
         // dispose all systems
         foreach (var system in _endSystems.Values)
         {
-            await system.OnEnd(this);
+            try
+            {
+                await system.OnEnd(this);
+            }
+            catch (Exception e)
+            {
+                OnError?.Invoke(e);
+            }
         }
 
         // clear all entities
@@ -176,6 +204,12 @@ public partial class Context : IAsyncDisposable
         _executeSystems.Clear();
         _initSystems.Clear();
         _endSystems.Clear();
+        // clear the remove list
+        _removeList.Clear();
+        // clear the runtime add system list
+        _runtimeAddSystemList.Clear();
+        // clear the execute tasks
+        _executeTasks.Clear();
         // clear the cache of the groups
         InvalidateGroupCache();
 
@@ -196,6 +230,24 @@ public partial class Context : IAsyncDisposable
         if (_disposed)
             throw new InvalidOperationException("Context disposed.");
 
+        // are there any newly added systems to initialize?
+        if (_initSystems.Count > 0)
+        {
+            foreach (var system in _initSystems.Values)
+            {
+                try
+                {
+                    await system.OnInit(this);
+                }
+                catch (Exception e)
+                {
+                    OnError?.Invoke(e);
+                }
+            }
+
+            _initSystems.Clear();
+        }
+
         // if empty, return
         if (_executeSystems.Count == 0)
             return;
@@ -205,10 +257,10 @@ public partial class Context : IAsyncDisposable
         // group by priority
         int remaining = _executeSystems.Count;
         int index = 0;
+        _executeTasks.Clear();
         while (remaining > 0)
         {
             // execute the systems with the same priority
-            _executeTasks.Clear();
             ExecuteSystemWrapper system = _executeSystems.Values[index];
             var currentPriority = system.Priority;
             while (system.Priority == currentPriority && remaining > 0)
@@ -224,6 +276,7 @@ public partial class Context : IAsyncDisposable
             try
             {
                 await Task.WhenAll(_executeTasks);
+                _executeTasks.Clear();
             }
             catch (Exception e)
             {
@@ -231,6 +284,7 @@ public partial class Context : IAsyncDisposable
             }
         }
 
+        // remove entities
         while (_removeList.TryDequeue(out var entity))
         {
             _entitiesLock.EnterWriteLock();
@@ -242,6 +296,12 @@ public partial class Context : IAsyncDisposable
             {
                 _entitiesLock.ExitWriteLock();
             }
+        }
+
+        // add new systems
+        while (_runtimeAddSystemList.TryDequeue(out var system))
+        {
+            AddSystem(system);
         }
     }
 
