@@ -6,8 +6,10 @@ namespace EasyEcs.Core;
 
 /// <summary>
 /// An entity holds several components.
+/// <br/>
+/// It is not recommended to hold a reference to an entity at any time, since it may escape from the context (when destroyed) and cause memory leaks.
+/// Simply get the entity from the context when needed via <see cref="Context.GetEntityById"/> (This operation is roughly O(1)).
 /// </summary>
-[SuppressMessage("ReSharper", "NotAccessedField.Local")]
 public class Entity
 {
     /// <summary>

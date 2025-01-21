@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -15,11 +14,11 @@ namespace EasyEcs.Core;
 /// <br/>
 /// You should not have multiple contexts in the same thread.
 /// </summary>
-[SuppressMessage("ReSharper", "SuspiciousTypeConversion.Global")]
 public partial class Context : IAsyncDisposable
 {
     private readonly Random _random = new();
     private readonly List<Entity> _entities = new();
+    private readonly Dictionary<int, Entity> _entitiesById = new();
     private readonly ReaderWriterLockSlim _entitiesLock = new();
     private readonly ConcurrentQueue<Entity> _removeList = new();
     private readonly ConcurrentQueue<SystemBase> _runtimeAddSystemList = new();
@@ -83,6 +82,7 @@ public partial class Context : IAsyncDisposable
         try
         {
             _entities.Add(entity);
+            _entitiesById.Add(entity.Id, entity);
         }
         finally
         {
@@ -105,6 +105,7 @@ public partial class Context : IAsyncDisposable
             try
             {
                 _entities.Remove(entity);
+                _entitiesById.Remove(entity.Id);
             }
             finally
             {
@@ -116,6 +117,17 @@ public partial class Context : IAsyncDisposable
         }
 
         _removeList.Enqueue(entity);
+    }
+
+    /// <summary>
+    /// Get an entity by id.
+    /// </summary>
+    /// <param name="id"></param>
+    /// <returns></returns>
+    public Entity GetEntityById(int id)
+    {
+        _entitiesById.TryGetValue(id, out var entity);
+        return entity;
     }
 
     /// <summary>
@@ -200,6 +212,7 @@ public partial class Context : IAsyncDisposable
 
         // clear all entities
         _entities.Clear();
+        _entitiesById.Clear();
         // clear all systems
         _executeSystems.Clear();
         _initSystems.Clear();
@@ -291,6 +304,7 @@ public partial class Context : IAsyncDisposable
             try
             {
                 _entities.Remove(entity);
+                _entitiesById.Remove(entity.Id);
             }
             finally
             {
