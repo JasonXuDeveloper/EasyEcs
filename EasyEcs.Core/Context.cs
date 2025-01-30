@@ -23,9 +23,9 @@ public partial class Context : IAsyncDisposable
     private readonly ConcurrentQueue<Entity> _removeList = new();
     private readonly ConcurrentQueue<SystemBase> _runtimeAddSystemList = new();
     private readonly List<Task> _executeTasks = new();
-    private readonly SortedList<int, ExecuteSystemWrapper> _executeSystems = new();
-    private readonly SortedList<int, IInitSystem> _initSystems = new();
-    private readonly SortedList<int, IEndSystem> _endSystems = new();
+    private readonly SortedList<int, List<ExecuteSystemWrapper>> _executeSystems = new();
+    private readonly SortedList<int, List<IInitSystem>> _initSystems = new();
+    private readonly SortedList<int, List<IEndSystem>> _endSystems = new();
     private bool _started;
     private bool _disposed;
 
@@ -64,11 +64,37 @@ public partial class Context : IAsyncDisposable
     private void AddSystem(SystemBase system)
     {
         if (system is IExecuteSystem executeSystem)
-            _executeSystems.Add(system.Priority, new ExecuteSystemWrapper(executeSystem));
+        {
+            if (!_executeSystems.TryGetValue(system.Priority, out var list))
+            {
+                list = new List<ExecuteSystemWrapper>();
+                _executeSystems.Add(system.Priority, list);
+            }
+
+            list.Add(new ExecuteSystemWrapper(executeSystem));
+        }
+
         if (system is IInitSystem initSystem)
-            _initSystems.Add(system.Priority, initSystem);
+        {
+            if (!_initSystems.TryGetValue(system.Priority, out var list))
+            {
+                list = new List<IInitSystem>();
+                _initSystems.Add(system.Priority, list);
+            }
+
+            list.Add(initSystem);
+        }
+
         if (system is IEndSystem endSystem)
-            _endSystems.Add(system.Priority, endSystem);
+        {
+            if (!_endSystems.TryGetValue(system.Priority, out var list))
+            {
+                list = new List<IEndSystem>();
+                _endSystems.Add(system.Priority, list);
+            }
+
+            list.Add(endSystem);
+        }
     }
 
     /// <summary>
@@ -163,22 +189,25 @@ public partial class Context : IAsyncDisposable
     {
         if (_started)
             throw new InvalidOperationException("Context already started.");
-        
+
         _started = true;
 
         // clear the cache of the groups
         InvalidateGroupCache();
 
         // initialize all systems
-        foreach (var system in _initSystems.Values)
+        foreach (var sequence in _initSystems.Values)
         {
-            try
+            foreach (var system in sequence)
             {
-                await system.OnInit(this);
-            }
-            catch (Exception e)
-            {
-                OnError?.Invoke(e);
+                try
+                {
+                    await system.OnInit(this);
+                }
+                catch (Exception e)
+                {
+                    OnError?.Invoke(e);
+                }
             }
         }
 
@@ -199,15 +228,18 @@ public partial class Context : IAsyncDisposable
         InvalidateGroupCache();
 
         // dispose all systems
-        foreach (var system in _endSystems.Values)
+        foreach (var sequence in _endSystems.Values)
         {
-            try
+            foreach (var system in sequence)
             {
-                await system.OnEnd(this);
-            }
-            catch (Exception e)
-            {
-                OnError?.Invoke(e);
+                try
+                {
+                    await system.OnEnd(this);
+                }
+                catch (Exception e)
+                {
+                    OnError?.Invoke(e);
+                }
             }
         }
 
@@ -247,15 +279,18 @@ public partial class Context : IAsyncDisposable
         // are there any newly added systems to initialize?
         if (_initSystems.Count > 0)
         {
-            foreach (var system in _initSystems.Values)
+            foreach (var sequence in _initSystems.Values)
             {
-                try
+                foreach (var system in sequence)
                 {
-                    await system.OnInit(this);
-                }
-                catch (Exception e)
-                {
-                    OnError?.Invoke(e);
+                    try
+                    {
+                        await system.OnInit(this);
+                    }
+                    catch (Exception e)
+                    {
+                        OnError?.Invoke(e);
+                    }
                 }
             }
 
@@ -269,33 +304,28 @@ public partial class Context : IAsyncDisposable
         // clear the cache of the groups
         InvalidateGroupCache();
         // group by priority
-        int remaining = _executeSystems.Count;
-        int index = 0;
-        _executeTasks.Clear();
-        while (remaining > 0)
+        foreach (var sequence in _executeSystems.Values)
         {
-            // execute the systems with the same priority
-            ExecuteSystemWrapper system = _executeSystems.Values[index];
-            var currentPriority = system.Priority;
-            while (system.Priority == currentPriority && remaining > 0)
-            {
-                var systemWrapper = system;
-                _executeTasks.Add(parallel ? Task.Run(() => systemWrapper.Update(this)) : systemWrapper.Update(this));
-                index++;
-                if (--remaining > 0)
-                    system = _executeSystems.Values[index];
-            }
+            // clear previous tasks
+            _executeTasks.Clear();
 
+            // collect tasks for the current priority
+            foreach (var system in sequence)
+            {
+                _executeTasks.Add(parallel ? Task.Run(() => system.Update(this)) : system.Update(this));
+            }
+            
             // dispatch all tasks of the same priority
             try
             {
                 await Task.WhenAll(_executeTasks);
-                _executeTasks.Clear();
             }
             catch (Exception e)
             {
                 OnError?.Invoke(e);
             }
+
+            _executeTasks.Clear();
         }
 
         // remove entities
