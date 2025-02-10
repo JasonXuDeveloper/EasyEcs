@@ -25,9 +25,9 @@ Well, as a human, we (entities) live in the world (context), and we have some pr
 
 ## Concepts in EasyEcs
 
-- A `Context` holds several `Entity` instances and some `System` instances. 
+- A `Context` holds several `Entity` instances, some `System` instances and some `SingletonComponent` instances.
 - Each `Entity` has some `Component` instances. 
-- Each `Component` has only data properties.
+- Each `Component` (or `SingletonComponent`) has only data properties.
 - Each `System` can filter lots of `Entity` instances in the same `Context` by their components and operate logics on them.
 
 ## Why it removes bidirectional dependencies?

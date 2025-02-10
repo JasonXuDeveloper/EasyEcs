@@ -24,6 +24,7 @@ public partial class Context : IAsyncDisposable
     private readonly ReaderWriterLockSlim _entitiesLock = new();
     private readonly ConcurrentQueue<Entity> _removeList = new();
     private readonly ConcurrentQueue<SystemBase> _runtimeAddSystemList = new();
+    private readonly ConcurrentDictionary<Type, ISingletonComponent> _singletons = new();
     private readonly List<Task> _executeTasks = new();
     private readonly SortedList<int, List<ExecuteSystemWrapper>> _executeSystems = new();
     private readonly SortedList<int, List<IInitSystem>> _initSystems = new();
@@ -34,6 +35,11 @@ public partial class Context : IAsyncDisposable
     private readonly ConcurrentDictionary<long, List<Entity>> _groupsCache = new();
 
     private static readonly ConcurrentQueue<List<Entity>> Pool = new();
+
+    /// <summary>
+    /// Called when an error occurs.
+    /// </summary>
+    public event Action<Exception> OnError;
 
     /// <summary>
     /// Create a new context.
@@ -65,11 +71,29 @@ public partial class Context : IAsyncDisposable
             LevelOfParallelism = levelOfParallelism == -1 ? Environment.ProcessorCount : levelOfParallelism;
         }
     }
-
+    
     /// <summary>
-    /// Called when an error occurs.
+    /// Add a singleton component to the context.
     /// </summary>
-    public event Action<Exception> OnError;
+    /// <typeparam name="T"></typeparam>
+    /// <returns></returns>
+    public T AddSingletonComponent<T>() where T : ISingletonComponent, new()
+    {
+        var component = new T();
+        _singletons.TryAdd(typeof(T), component);
+        return component;
+    }
+    
+    /// <summary>
+    /// Get a singleton component from the context.
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    /// <returns></returns>
+    public T GetSingletonComponent<T>() where T : ISingletonComponent, new()
+    {
+        _singletons.TryGetValue(typeof(T), out var component);
+        return (T) component;
+    }
 
     /// <summary>
     /// Add a system to the context.
