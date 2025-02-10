@@ -25,7 +25,9 @@ public class ResizeSystem : SystemBase, IInitSystem, IExecuteSystem
     public Task OnExecute(Context context)
     {
         // Should be run concurrently if possible
-        Console.WriteLine($"{GetType()} is executing on thread {Environment.CurrentManagedThreadId}");
+        Console.WriteLine($"{GetType().Name} (Priority: {Priority}, " +
+                          $"Thread: {Environment.CurrentManagedThreadId}, " +
+                          $"Time: {DateTime.Now:HH:mm:ss.fff})");
 
         // Get all entities that have both ScaleComponent and SizeComponent
         using var candidates = context.GroupOf<ScaleComponent, SizeComponent>();

@@ -17,6 +17,7 @@ public class SimpleTest
         // Add systems to the context
         ctx
             .AddSystem<HelloWorldSystem>()
+            .AddSystem<TimeConsumingSystem>()
             .AddSystem<ResizeSystem>()
             .AddSystem<ModificationSystem>();
 

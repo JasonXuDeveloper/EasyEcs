@@ -17,6 +17,8 @@ namespace EasyEcs.Core;
 public partial class Context : IAsyncDisposable
 {
     private readonly Random _random = new();
+    private readonly Options _options;
+    private readonly ParallelOptions _parallelOptions;
     private readonly List<Entity> _entities = new();
     private readonly Dictionary<int, Entity> _entitiesById = new();
     private readonly ReaderWriterLockSlim _entitiesLock = new();
@@ -30,7 +32,39 @@ public partial class Context : IAsyncDisposable
     private bool _disposed;
 
     private readonly ConcurrentDictionary<long, List<Entity>> _groupsCache = new();
+
     private static readonly ConcurrentQueue<List<Entity>> Pool = new();
+
+    /// <summary>
+    /// Create a new context.
+    /// </summary>
+    /// <param name="options"></param>
+    public Context(Options options = null)
+    {
+        _options = options ?? new Options();
+        if (_options.Parallel)
+        {
+            _parallelOptions = new ParallelOptions
+            {
+                MaxDegreeOfParallelism = _options.LevelOfParallelism
+            };
+        }
+    }
+
+    /// <summary>
+    /// Options for the context.
+    /// </summary>
+    public class Options
+    {
+        public readonly bool Parallel;
+        public readonly int LevelOfParallelism;
+
+        public Options(bool parallel = true, int levelOfParallelism = -1)
+        {
+            Parallel = parallel;
+            LevelOfParallelism = levelOfParallelism == -1 ? Environment.ProcessorCount : levelOfParallelism;
+        }
+    }
 
     /// <summary>
     /// Called when an error occurs.
@@ -183,6 +217,53 @@ public partial class Context : IAsyncDisposable
     }
 
     /// <summary>
+    /// Query all tasks based on the options
+    /// </summary>
+    /// <param name="list"></param>
+    /// <param name="action"></param>
+    /// <typeparam name="T"></typeparam>
+    private async Task QueryTasks<T>(List<T> list, Func<T, Task> action)
+    {
+        if (_options.Parallel)
+        {
+            await Parallel.ForEachAsync(list, _parallelOptions, async (item, _) =>
+            {
+                try
+                {
+                    await action(item);
+                }
+                catch (Exception e)
+                {
+                    OnError?.Invoke(e);
+                }
+            });
+        }
+        else
+        {
+            // clear previous tasks
+            _executeTasks.Clear();
+
+            // collect tasks for the current priority
+            foreach (var item in list)
+            {
+                _executeTasks.Add(action(item));
+            }
+
+            // dispatch all tasks of the same priority
+            try
+            {
+                await Task.WhenAll(_executeTasks);
+            }
+            catch (Exception e)
+            {
+                OnError?.Invoke(e);
+            }
+
+            _executeTasks.Clear();
+        }
+    }
+
+    /// <summary>
     /// Initialize all systems. Use this when starting the context.
     /// </summary>
     public async ValueTask<Context> Init()
@@ -198,17 +279,7 @@ public partial class Context : IAsyncDisposable
         // initialize all systems
         foreach (var sequence in _initSystems.Values)
         {
-            foreach (var system in sequence)
-            {
-                try
-                {
-                    await system.OnInit(this);
-                }
-                catch (Exception e)
-                {
-                    OnError?.Invoke(e);
-                }
-            }
+            await QueryTasks(sequence, async system => await system.OnInit(this));
         }
 
         _initSystems.Clear();
@@ -230,17 +301,7 @@ public partial class Context : IAsyncDisposable
         // dispose all systems
         foreach (var sequence in _endSystems.Values)
         {
-            foreach (var system in sequence)
-            {
-                try
-                {
-                    await system.OnEnd(this);
-                }
-                catch (Exception e)
-                {
-                    OnError?.Invoke(e);
-                }
-            }
+            await QueryTasks(sequence, async system => await system.OnEnd(this));
         }
 
         // clear all entities
@@ -265,8 +326,7 @@ public partial class Context : IAsyncDisposable
     /// <summary>
     /// Update all systems.
     /// </summary>
-    /// <param name="parallel"></param>
-    public async ValueTask Update(bool parallel = true)
+    public async ValueTask Update()
     {
         // check if the context is started
         if (!_started)
@@ -281,17 +341,7 @@ public partial class Context : IAsyncDisposable
         {
             foreach (var sequence in _initSystems.Values)
             {
-                foreach (var system in sequence)
-                {
-                    try
-                    {
-                        await system.OnInit(this);
-                    }
-                    catch (Exception e)
-                    {
-                        OnError?.Invoke(e);
-                    }
-                }
+                await QueryTasks(sequence, async system => await system.OnInit(this));
             }
 
             _initSystems.Clear();
@@ -306,26 +356,7 @@ public partial class Context : IAsyncDisposable
         // group by priority
         foreach (var sequence in _executeSystems.Values)
         {
-            // clear previous tasks
-            _executeTasks.Clear();
-
-            // collect tasks for the current priority
-            foreach (var system in sequence)
-            {
-                _executeTasks.Add(parallel ? Task.Run(() => system.Update(this)) : system.Update(this));
-            }
-            
-            // dispatch all tasks of the same priority
-            try
-            {
-                await Task.WhenAll(_executeTasks);
-            }
-            catch (Exception e)
-            {
-                OnError?.Invoke(e);
-            }
-
-            _executeTasks.Clear();
+            await QueryTasks(sequence, async system => await system.Update(this));
         }
 
         // remove entities

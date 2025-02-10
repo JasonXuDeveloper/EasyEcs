@@ -47,6 +47,7 @@ Well, as a human, we (entities) live in the world (context), and we have some pr
 - We have **priority** for `System`, so you can control the order of systems.
 - We have **frequency** for `System`, so you can control the frequency of systems being executed.
 - We only allow **asynchronous** interfaces for `System` and `Context`, so our ECS should not block the thread (unless you screw up).
+- We introduce built-in **parallelism** and/or **concurrency** for `System`, so you can easily parallelize your systems (for those who are in the same priority) and well utilize the multi-core CPU.
 - We have a cool guy who is maintaining this library. (Just kidding)
 
 ## Example
