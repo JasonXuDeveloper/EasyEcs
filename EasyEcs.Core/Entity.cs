@@ -16,6 +16,11 @@ public class Entity
     /// Unique identifier of the entity.
     /// </summary>
     public int Id { get; }
+    
+    /// <summary>
+    /// The context that holds the entity.
+    /// </summary>
+    public Context Context => _context;
 
     /// <summary>
     /// The context that holds the entity.

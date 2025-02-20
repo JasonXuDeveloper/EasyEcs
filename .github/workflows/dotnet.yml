@@ -140,10 +140,6 @@ jobs:
 
       # Build the solution
       - name: Build solution
-        run: dotnet build --configuration Release
-
-      # Build the solution
-      - name: Build solution
         run: dotnet build --configuration Release /p:OutputPath=../artifacts
 
       # Push NuGet packages
