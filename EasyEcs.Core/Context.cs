@@ -249,13 +249,20 @@ public partial class Context : IAsyncDisposable
     /// </summary>
     /// <param name="list"></param>
     /// <param name="action"></param>
+    /// <param name="catchError"></param>
     /// <typeparam name="T"></typeparam>
-    private async Task QueryTasks<T>(List<T> list, Func<T, Task> action)
+    private async Task QueryTasks<T>(List<T> list, Func<T, Task> action, bool catchError = true)
     {
         if (_options.Parallel)
         {
             await Parallel.ForEachAsync(list, _parallelOptions, async (item, _) =>
             {
+                if (!catchError)
+                {
+                    await action(item);
+                    return;
+                }
+
                 try
                 {
                     await action(item);
@@ -278,13 +285,20 @@ public partial class Context : IAsyncDisposable
             }
 
             // dispatch all tasks of the same priority
-            try
+            if (catchError)
             {
                 await Task.WhenAll(_executeTasks);
             }
-            catch (Exception e)
+            else
             {
-                OnError?.Invoke(e);
+                try
+                {
+                    await Task.WhenAll(_executeTasks);
+                }
+                catch (Exception e)
+                {
+                    OnError?.Invoke(e);
+                }
             }
 
             _executeTasks.Clear();
@@ -307,7 +321,7 @@ public partial class Context : IAsyncDisposable
         // initialize all systems
         foreach (var sequence in _initSystems.Values)
         {
-            await QueryTasks(sequence, async system => await system.OnInit(this));
+            await QueryTasks(sequence, async system => await system.OnInit(this), false);
         }
 
         _initSystems.Clear();
