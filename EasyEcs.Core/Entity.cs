@@ -16,7 +16,7 @@ public class Entity
     /// Unique identifier of the entity.
     /// </summary>
     public int Id { get; }
-    
+
     /// <summary>
     /// The context that holds the entity.
     /// </summary>
@@ -30,7 +30,7 @@ public class Entity
     /// <summary>
     /// The components this entity holds.
     /// </summary>
-    private readonly Dictionary<Type, IComponent> _components = new();
+    private readonly Dictionary<Type, Component> _components = new();
 
     /// <summary>
     /// Create a new entity.
@@ -48,7 +48,7 @@ public class Entity
     /// </summary>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
-    public T AddComponent<T>() where T : class, IComponent, new()
+    public T AddComponent<T>() where T : Component, new()
     {
         // Check if component already exists
         if (_components.TryGetValue(typeof(T), out var component))
@@ -60,6 +60,7 @@ public class Entity
         _context.InvalidateGroupCache();
         // Add component
         var newComponent = new T();
+        newComponent.EntityRef = this;
         _components.Add(typeof(T), newComponent);
 
         return newComponent;
@@ -71,7 +72,7 @@ public class Entity
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
     /// <exception cref="InvalidOperationException"></exception>
-    public T GetComponent<T>() where T : class, IComponent, new()
+    public T GetComponent<T>() where T : Component, new()
     {
         if (TryGetComponent(out T component))
         {
@@ -87,7 +88,7 @@ public class Entity
     /// <param name="component"></param>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
-    public bool TryGetComponent<T>([NotNullWhen(true)] out T component) where T : class, IComponent, new()
+    public bool TryGetComponent<T>([NotNullWhen(true)] out T component) where T : Component, new()
     {
         if (_components.TryGetValue(typeof(T), out var c))
         {
@@ -104,7 +105,7 @@ public class Entity
     /// </summary>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
-    public bool HasComponent<T>() where T : class, IComponent, new()
+    public bool HasComponent<T>() where T : Component, new()
     {
         return _components.ContainsKey(typeof(T));
     }
@@ -132,14 +133,14 @@ public class Entity
     /// </summary>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
-    public bool RemoveComponent<T>() where T : class, IComponent, new()
+    public bool RemoveComponent<T>() where T : Component, new()
     {
         if (_components.Remove(typeof(T)))
         {
             _context.InvalidateGroupCache();
             return true;
         }
-        
+
         return false;
     }
 

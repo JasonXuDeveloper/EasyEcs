@@ -18,7 +18,7 @@ public partial class Context
     /// </summary>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
-    public PooledCollection<List<(Entity, T)>, (Entity, T)> GroupOf<T>() where T : class, IComponent, new()
+    public PooledCollection<List<(Entity, T)>, (Entity, T)> GroupOf<T>() where T : Component, new()
     {
         // request a pooled enumerable
         var ret = PooledCollection<List<(Entity, T)>, (Entity, T)>.Create();
@@ -57,8 +57,8 @@ public partial class Context
     /// <typeparam name="T2"></typeparam>
     /// <returns></returns>
     public PooledCollection<List<(Entity, T1, T2)>, (Entity, T1, T2)> GroupOf<T1, T2>()
-        where T1 : class, IComponent, new()
-        where T2 : class, IComponent, new()
+        where T1 : Component, new()
+        where T2 : Component, new()
     {
         // request a pooled enumerable
         var ret = PooledCollection<List<(Entity, T1, T2)>, (Entity, T1, T2)>.Create();
@@ -99,9 +99,9 @@ public partial class Context
     /// <typeparam name="T3"></typeparam>
     /// <returns></returns>
     public PooledCollection<List<(Entity, T1, T2, T3)>, (Entity, T1, T2, T3)> GroupOf<T1, T2, T3>()
-        where T1 : class, IComponent, new()
-        where T2 : class, IComponent, new()
-        where T3 : class, IComponent, new()
+        where T1 : Component, new()
+        where T2 : Component, new()
+        where T3 : Component, new()
     {
         // request a pooled enumerable
         var ret = PooledCollection<List<(Entity, T1, T2, T3)>, (Entity, T1, T2, T3)>.Create();
@@ -144,10 +144,10 @@ public partial class Context
     /// <typeparam name="T4"></typeparam>
     /// <returns></returns>
     public PooledCollection<List<(Entity, T1, T2, T3, T4)>, (Entity, T1, T2, T3, T4)> GroupOf<T1, T2, T3, T4>()
-        where T1 : class, IComponent, new()
-        where T2 : class, IComponent, new()
-        where T3 : class, IComponent, new()
-        where T4 : class, IComponent, new()
+        where T1 : Component, new()
+        where T2 : Component, new()
+        where T3 : Component, new()
+        where T4 : Component, new()
     {
         // request a pooled enumerable
         var ret = PooledCollection<List<(Entity, T1, T2, T3, T4)>, (Entity, T1, T2, T3, T4)>.Create();
@@ -193,11 +193,11 @@ public partial class Context
     /// <returns></returns>
     public PooledCollection<List<(Entity, T1, T2, T3, T4, T5)>, (Entity, T1, T2, T3, T4, T5)> GroupOf<T1, T2, T3, T4,
         T5>()
-        where T1 : class, IComponent, new()
-        where T2 : class, IComponent, new()
-        where T3 : class, IComponent, new()
-        where T4 : class, IComponent, new()
-        where T5 : class, IComponent, new()
+        where T1 : Component, new()
+        where T2 : Component, new()
+        where T3 : Component, new()
+        where T4 : Component, new()
+        where T5 : Component, new()
     {
         // request a pooled enumerable
         var ret = PooledCollection<List<(Entity, T1, T2, T3, T4, T5)>, (Entity, T1, T2, T3, T4, T5)>.Create();
@@ -245,12 +245,12 @@ public partial class Context
     /// <returns></returns>
     public PooledCollection<List<(Entity, T1, T2, T3, T4, T5, T6)>,
         (Entity, T1, T2, T3, T4, T5, T6)> GroupOf<T1, T2, T3, T4, T5, T6>()
-        where T1 : class, IComponent, new()
-        where T2 : class, IComponent, new()
-        where T3 : class, IComponent, new()
-        where T4 : class, IComponent, new()
-        where T5 : class, IComponent, new()
-        where T6 : class, IComponent, new()
+        where T1 : Component, new()
+        where T2 : Component, new()
+        where T3 : Component, new()
+        where T4 : Component, new()
+        where T5 : Component, new()
+        where T6 : Component, new()
     {
         // request a pooled enumerable
         var ret = PooledCollection<List<(Entity, T1, T2, T3, T4, T5, T6)>,
@@ -301,13 +301,13 @@ public partial class Context
     /// <returns></returns>
     public PooledCollection<List<(Entity, T1, T2, T3, T4, T5, T6, T7)>,
         (Entity, T1, T2, T3, T4, T5, T6, T7)> GroupOf<T1, T2, T3, T4, T5, T6, T7>()
-        where T1 : class, IComponent, new()
-        where T2 : class, IComponent, new()
-        where T3 : class, IComponent, new()
-        where T4 : class, IComponent, new()
-        where T5 : class, IComponent, new()
-        where T6 : class, IComponent, new()
-        where T7 : class, IComponent, new()
+        where T1 : Component, new()
+        where T2 : Component, new()
+        where T3 : Component, new()
+        where T4 : Component, new()
+        where T5 : Component, new()
+        where T6 : Component, new()
+        where T7 : Component, new()
     {
         // request a pooled enumerable
         var ret = PooledCollection<List<(Entity, T1, T2, T3, T4, T5, T6, T7)>,
