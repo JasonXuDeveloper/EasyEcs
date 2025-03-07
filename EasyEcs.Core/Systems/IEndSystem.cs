@@ -1,6 +1,6 @@
 using System.Threading.Tasks;
 
-namespace EasyEcs.Core;
+namespace EasyEcs.Core.Systems;
 
 public interface IEndSystem
 {

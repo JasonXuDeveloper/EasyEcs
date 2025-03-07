@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using EasyEcs.Core;
+using EasyEcs.Core.Systems;
 using EasyEcs.UnitTest.Components;
 
 namespace EasyEcs.UnitTest.Systems;
@@ -22,13 +23,13 @@ public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
                           $"Thread: {Environment.CurrentManagedThreadId}, " +
                           $"Time: {DateTime.Now:HH:mm:ss.fff})");
 
-        using var candidates = context.GroupOf(
-            typeof(SizeComponent));
+        var candidates = context.GroupOf(typeof(SizeComponent));
 
-        foreach (var entity in candidates)
+        foreach (var result in candidates)
         {
-            var comp = entity.AddComponent<ScaleComponent>();
-            comp.Factor = 0.5f;
+            result.Entity.Value.AddComponent<ScaleComponent>(
+                comp =>
+                    comp.Value.Factor = 0.5f);
         }
 
         return Task.CompletedTask;
@@ -41,10 +42,11 @@ public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
     /// <returns></returns>
     public Task OnEnd(Context context)
     {
-        using var candidates = context.GroupOf<SizeComponent>();
+        var candidates = context.GroupOf<SizeComponent>();
 
-        foreach (var (_, sizeComponent) in candidates)
+        foreach (var result in candidates)
         {
+            ref var sizeComponent = ref result.Component;
             sizeComponent.Width = 0;
             sizeComponent.Height = 0;
         }

@@ -1,40 +1,47 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Threading;
 using System.Threading.Tasks;
+using EasyEcs.Core.Commands;
+using EasyEcs.Core.Components;
+using EasyEcs.Core.Systems;
 
 namespace EasyEcs.Core;
 
 /// <summary>
 /// A context holds many entities and many systems.
 /// <br/>
+/// <br/>
 /// You should create a context and add systems to it. Then you should call <see cref="Update"/> in a loop, at certain intervals.
 /// You can create entities and add components to them. Systems will then process these entities.
 /// <br/>
-/// You should not have multiple contexts in the same thread.
+/// <br/>
+/// Note that adding/removing entities/components/systems are async operations, they will be processed at the end of the frame.
+/// So that they will be ready for the next frame.
 /// </summary>
 public partial class Context : IAsyncDisposable
 {
-    private readonly Random _random = new();
+    private int _entityIdCounter = 1;
     private readonly Options _options;
     private readonly ParallelOptions _parallelOptions;
-    private readonly List<Entity> _entities = new();
-    private readonly Dictionary<int, Entity> _entitiesById = new();
-    private readonly ReaderWriterLockSlim _entitiesLock = new();
-    private readonly ConcurrentQueue<Entity> _removeList = new();
-    private readonly ConcurrentQueue<SystemBase> _runtimeAddSystemList = new();
-    private readonly ConcurrentDictionary<Type, SingletonComponent> _singletons = new();
-    private readonly List<Task> _executeTasks = new();
+
+    private readonly CommandBuffer _commandBuffer = new();
+    internal readonly TagRegistry TagRegistry = new();
+
+    internal Array[] Components;
+    internal readonly SortedDictionary<Tag, SortedList<int, Entity>> Groups = new();
+
+    internal Entity[] Entities = new Entity[1];
+    private readonly SortedList<int, int> _activeEntityIds = new();
+    private readonly Queue<int> _reusableIds = new();
+
     private readonly SortedList<int, List<ExecuteSystemWrapper>> _executeSystems = new();
     private readonly SortedList<int, List<IInitSystem>> _initSystems = new();
     private readonly SortedList<int, List<IEndSystem>> _endSystems = new();
+
     private bool _started;
     private bool _disposed;
 
-    private readonly ConcurrentDictionary<long, List<Entity>> _groupsCache = new();
-
-    private static readonly ConcurrentQueue<List<Entity>> Pool = new();
+    private readonly List<Task> _executeTasks = new();
 
     /// <summary>
     /// Called when an error occurs.
@@ -73,19 +80,163 @@ public partial class Context : IAsyncDisposable
     }
 
     /// <summary>
-    /// Add a singleton component to the context.
+    /// Get count of all entities.
     /// </summary>
-    /// <typeparam name="T"></typeparam>
+    public int EntityCount => _activeEntityIds.Count;
+
+    /// <summary>
+    /// Get an entity by index.
+    /// </summary>
+    /// <param name="index"></param>
     /// <returns></returns>
-    public T AddSingletonComponent<T>() where T : SingletonComponent, new()
+    public ref Entity EntityAt(int index) => ref Entities[_activeEntityIds.Values[index]];
+
+    /// <summary>
+    /// Try to get an entity by id.
+    /// </summary>
+    /// <param name="id"></param>
+    /// <param name="entityRef"></param>
+    /// <returns></returns>
+    public bool TryGetEntityById(int id, out EntityRef entityRef)
     {
-        var component = new T();
-        if (!_singletons.TryAdd(typeof(T), component))
+        if (id > 0 && _activeEntityIds.ContainsKey(id))
         {
-            return (T)_singletons[typeof(T)];
+            entityRef = new EntityRef(id, this);
+            return true;
         }
 
-        return component;
+        entityRef = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Get an entity by id.
+    /// </summary>
+    /// <param name="id"></param>
+    /// <returns></returns>
+    public EntityRef GetEntityById(int id)
+    {
+        if (id > 0 && _activeEntityIds.ContainsKey(id))
+            return new EntityRef(id, this);
+
+        throw new InvalidOperationException($"Entity with id {id} not found.");
+    }
+
+
+    /// <summary>
+    /// Get all entities.
+    /// </summary>
+    public IEnumerable<EntityRef> AllEntities()
+    {
+        foreach (var (id, _) in _activeEntityIds)
+        {
+            yield return new EntityRef(id, this);
+        }
+    }
+
+    /// <summary>
+    /// Create a new entity.
+    /// </summary>
+    public void CreateEntity(Action<EntityRef> callback = null)
+    {
+        _commandBuffer.AddCommand(new CreateEntityCommand(entity =>
+        {
+            try
+            {
+                callback?.Invoke(entity);
+            }
+            catch (Exception e)
+            {
+                OnError?.Invoke(new AggregateException("Create Entity error", e));
+            }
+        }));
+    }
+
+    /// <summary>
+    /// Destroy an entity.
+    /// </summary>
+    /// <param name="entity"></param>
+    public void DestroyEntity(Entity entity)
+    {
+        _commandBuffer.AddCommand(new DeleteEntityCommand(entity.Id));
+    }
+
+    /// <summary>
+    /// Add a system to the context.
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    public void AddSystem<T>() where T : SystemBase, new()
+    {
+        _commandBuffer.AddCommand(new AddSystemCommand(typeof(T)));
+    }
+
+    /// <summary>
+    /// Remove a system from the context.
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    public void RemoveSystem<T>() where T : SystemBase, new()
+    {
+        _commandBuffer.AddCommand(new RemoveSystemCommand(typeof(T)));
+    }
+
+    /// <summary>
+    /// Add a component to an entity.
+    /// </summary>
+    /// <param name="entity"></param>
+    /// <param name="callback"></param>
+    /// <typeparam name="T"></typeparam>
+    public void AddComponent<T>(Entity entity, Action<ComponentRef<T>> callback = null) where T : struct, IComponent
+    {
+        _commandBuffer.AddCommand(new AddComponentCommand(entity.Id, typeof(T),
+            () =>
+            {
+                var arr = (T[])Components[TagRegistry.GetTagBitIndex(typeof(T))];
+                ref var compRef = ref arr[entity.Id];
+                compRef = new T();
+                try
+                {
+                    callback?.Invoke(new ComponentRef<T>(entity.Id, this));
+                }
+                catch (Exception e)
+                {
+                    OnError?.Invoke(new AggregateException($"Add Component {typeof(T).Name} error", e));
+                }
+            }));
+    }
+
+    /// <summary>
+    /// Remove a component from an entity.
+    /// </summary>
+    /// <param name="entity"></param>
+    /// <typeparam name="T"></typeparam>
+    public void RemoveComponent<T>(Entity entity) where T : struct, IComponent
+    {
+        _commandBuffer.AddCommand(new RemoveComponentCommand(entity.Id, typeof(T)));
+    }
+
+    /// <summary>
+    /// Add a singleton component to the context.
+    /// </summary>
+    /// <param name="callback"></param>
+    /// <typeparam name="T"></typeparam>
+    /// <returns></returns>
+    public void AddSingletonComponent<T>(Action<T> callback = null) where T : struct, ISingletonComponent
+    {
+        _commandBuffer.AddCommand(new AddComponentCommand(0, typeof(T),
+            () =>
+            {
+                var arr = (T[])Components[TagRegistry.GetTagBitIndex(typeof(T))];
+                var component = new T();
+                arr[0] = component;
+                try
+                {
+                    callback?.Invoke(new SingletonComponentRef<T>(0, this).Value);
+                }
+                catch (Exception e)
+                {
+                    OnError?.Invoke(new AggregateException($"Add SingletonComponent {typeof(T).Name} error", e));
+                }
+            }));
     }
 
     /// <summary>
@@ -93,30 +244,26 @@ public partial class Context : IAsyncDisposable
     /// </summary>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
-    public T GetSingletonComponent<T>() where T : SingletonComponent, new()
+    public SingletonComponentRef<T> GetSingletonComponent<T>() where T : struct, ISingletonComponent
     {
-        _singletons.TryGetValue(typeof(T), out var component);
-        return (T)component;
+        ref var entity = ref Entities[0];
+        if (!entity.Tag.HasBit(TagRegistry.GetTagBitIndex(typeof(T))))
+            throw new InvalidOperationException($"Component {typeof(T)} not found.");
+
+        return new SingletonComponentRef<T>(0, this);
     }
 
     /// <summary>
-    /// Add a system to the context.
+    /// Try to get a singleton component from the context.
     /// </summary>
+    /// <param name="value"></param>
     /// <typeparam name="T"></typeparam>
-    public Context AddSystem<T>() where T : SystemBase, new()
+    /// <returns></returns>
+    public bool TryGetSingletonComponent<T>(out SingletonComponentRef<T> value) where T : struct, ISingletonComponent
     {
-        var system = new T();
-
-        // if the context is started, we need to add the system to a list, so we can add it later
-        // we should add the system after the current update, so we don't mess up the current iteration
-        if (_started)
-        {
-            _runtimeAddSystemList.Enqueue(system);
-            return this;
-        }
-
-        AddSystem(system);
-        return this;
+        ref var entity = ref Entities[0];
+        value = new SingletonComponentRef<T>(0, this);
+        return entity.Tag.HasBit(TagRegistry.GetTagBitIndex(typeof(T)));
     }
 
     /// <summary>
@@ -160,91 +307,6 @@ public partial class Context : IAsyncDisposable
     }
 
     /// <summary>
-    /// Create a new entity.
-    /// </summary>
-    /// <returns></returns>
-    public Entity CreateEntity()
-    {
-        var entity = new Entity(this, _random.Next());
-        _entitiesLock.EnterWriteLock();
-        try
-        {
-            _entities.Add(entity);
-            _entitiesById.Add(entity.Id, entity);
-        }
-        finally
-        {
-            _entitiesLock.ExitWriteLock();
-        }
-
-        return entity;
-    }
-
-    /// <summary>
-    /// Destroy an entity.
-    /// </summary>
-    /// <param name="entity"></param>
-    /// <param name="immediate"></param>
-    public void DestroyEntity(Entity entity, bool immediate = false)
-    {
-        if (immediate)
-        {
-            _entitiesLock.EnterWriteLock();
-            try
-            {
-                _entities.Remove(entity);
-                _entitiesById.Remove(entity.Id);
-            }
-            finally
-            {
-                _entitiesLock.ExitWriteLock();
-            }
-
-            InvalidateGroupCache();
-            return;
-        }
-
-        _removeList.Enqueue(entity);
-    }
-
-    /// <summary>
-    /// Get an entity by id.
-    /// </summary>
-    /// <param name="id"></param>
-    /// <returns></returns>
-    public Entity GetEntityById(int id)
-    {
-        _entitiesById.TryGetValue(id, out var entity);
-        return entity;
-    }
-
-    /// <summary>
-    /// Get all entities.
-    /// <br/>
-    /// Note: Newly created entities from the current update will not be included.
-    /// </summary>
-    public PooledCollection<List<Entity>, Entity> AllEntities
-    {
-        get
-        {
-            var ret = PooledCollection<List<Entity>, Entity>.Create();
-            var lst = ret.Collection;
-            lst.Clear();
-            _entitiesLock.EnterReadLock();
-            try
-            {
-                lst.AddRange(_entities);
-            }
-            finally
-            {
-                _entitiesLock.ExitReadLock();
-            }
-
-            return ret;
-        }
-    }
-
-    /// <summary>
     /// Query all tasks based on the options
     /// </summary>
     /// <param name="list"></param>
@@ -269,7 +331,7 @@ public partial class Context : IAsyncDisposable
                 }
                 catch (Exception e)
                 {
-                    OnError?.Invoke(e);
+                    OnError?.Invoke(new AggregateException($"{item.GetType().Name} error", e));
                 }
             });
         }
@@ -315,8 +377,36 @@ public partial class Context : IAsyncDisposable
 
         _started = true;
 
-        // clear the cache of the groups
-        InvalidateGroupCache();
+        //TODO maybe use source generator to support AOT
+        // add all components to TagRegistry
+        Dictionary<byte, Type> tagToType = new();
+        // iterate all assemblies
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            // iterate all types
+            foreach (var type in assembly.GetTypes())
+            {
+                if (type.IsAssignableTo(typeof(IComponent)) || type.IsAssignableTo(typeof(ISingletonComponent)))
+                {
+                    if (type == typeof(IComponent) || type == typeof(ISingletonComponent))
+                        continue;
+                    if (!type.IsValueType)
+                        throw new InvalidOperationException($"Component {type.Name} must be a struct.");
+                    TagRegistry.RegisterTag(type);
+                    tagToType.Add(TagRegistry.GetTagBitIndex(type), type);
+                }
+            }
+        }
+
+        // create lists for all components
+        Components = new Array[TagRegistry.TagCount];
+        for (int i = 0; i < Components.Length; i++)
+        {
+            Components[i] = Array.CreateInstance(tagToType[(byte)i], 0);
+        }
+
+        // dequeue all commands
+        ProcessCommandBuffer();
 
         // initialize all systems
         foreach (var sequence in _initSystems.Values)
@@ -337,9 +427,6 @@ public partial class Context : IAsyncDisposable
         if (_disposed)
             return;
 
-        // clear the cache of the groups
-        InvalidateGroupCache();
-
         // dispose all systems
         foreach (var sequence in _endSystems.Values)
         {
@@ -347,20 +434,27 @@ public partial class Context : IAsyncDisposable
         }
 
         // clear all entities
-        _entities.Clear();
-        _entitiesById.Clear();
+        _activeEntityIds.Clear();
+        Entities.AsSpan().Clear();
+        _reusableIds.Clear();
+        // clear all groups
+        foreach (var group in Groups.Values)
+        {
+            group.Clear();
+        }
+        Groups.Clear();
+        // clear all components
+        foreach (var arr in Components)
+        {
+            Array.Clear(arr, 0, arr.Length);
+        }
+        Components = null;
         // clear all systems
         _executeSystems.Clear();
         _initSystems.Clear();
         _endSystems.Clear();
-        // clear the remove list
-        _removeList.Clear();
-        // clear the runtime add system list
-        _runtimeAddSystemList.Clear();
         // clear the execute tasks
         _executeTasks.Clear();
-        // clear the cache of the groups
-        InvalidateGroupCache();
 
         _disposed = true;
     }
@@ -393,112 +487,183 @@ public partial class Context : IAsyncDisposable
         if (_executeSystems.Count == 0)
             return;
 
-        // clear the cache of the groups
-        InvalidateGroupCache();
         // group by priority
         foreach (var sequence in _executeSystems.Values)
         {
             await QueryTasks(sequence, async system => await system.Update(this));
         }
 
-        // remove entities
-        while (_removeList.TryDequeue(out var entity))
+        // dequeue all commands
+        ProcessCommandBuffer();
+    }
+
+    private void ProcessCommandBuffer()
+    {
+        while (_commandBuffer.TryGetCommand(out var command))
         {
-            _entitiesLock.EnterWriteLock();
             try
             {
-                _entities.Remove(entity);
-                _entitiesById.Remove(entity.Id);
-            }
-            finally
-            {
-                _entitiesLock.ExitWriteLock();
-            }
-        }
-
-        // add new systems
-        while (_runtimeAddSystemList.TryDequeue(out var system))
-        {
-            AddSystem(system);
-        }
-    }
-
-    /// <summary>
-    /// Get all entities that have the specified components.
-    /// <br/>
-    /// Note: remember to dispose the returned enumerable. (i.e. using)
-    /// <code>
-    /// using var entities = context.GroupOf(typeof(Component1), typeof(Component2));
-    /// </code>
-    /// </summary>
-    /// <param name="components"></param>
-    /// <returns></returns>
-    public PooledCollection<List<Entity>, Entity> GroupOf(params Type[] components)
-    {
-        // compute an id for these components
-        long group = 0;
-        foreach (var component in components)
-        {
-            group += component.GetHashCode();
-        }
-
-        // request a pooled enumerable
-        var ret = PooledCollection<List<Entity>, Entity>.Create();
-        var lst = ret.Collection;
-        lst.Clear();
-
-        // if we have already looked up this group at this update, we simply copy the results
-        if (_groupsCache.TryGetValue(group, out var entities))
-        {
-            lst.AddRange(entities);
-            return ret;
-        }
-
-        // attempt to reuse a list
-        if (!Pool.TryDequeue(out entities))
-        {
-            entities = new List<Entity>();
-        }
-
-        // iterate over all entities and check if they have the components, then cache it
-        _entitiesLock.EnterReadLock();
-        try
-        {
-            foreach (var entity in _entities)
-            {
-                if (entity.HasComponents(components))
+                switch (command)
                 {
-                    entities.Add(entity);
+                    case CreateEntityCommand createEntityCommand:
+                    {
+                        // create entity
+                        var id = _reusableIds.Count > 0 ? _reusableIds.Dequeue() : _entityIdCounter++;
+                        var entity = new Entity(this, id);
+                        // ensure array size
+                        if (id >= Entities.Length)
+                        {
+                            var arr2 = new Entity[id + 1];
+                            Array.Copy(Entities, arr2, Entities.Length);
+                            Entities = arr2;
+                        }
+
+                        Entities[id] = entity;
+                        // add to active entities
+                        _activeEntityIds.Add(id, id);
+                        if (!Groups.TryGetValue(entity.Tag, out var group))
+                        {
+                            group = new SortedList<int, Entity>();
+                            Groups.Add(entity.Tag, group);
+                        }
+
+                        group.Add(entity.Id, entity);
+
+                        createEntityCommand.Callback?.Invoke(entity);
+                        break;
+                    }
+                    case DeleteEntityCommand deleteEntityCommand:
+                    {
+                        if (!_activeEntityIds.ContainsKey(deleteEntityCommand.Id) || deleteEntityCommand.Id == 0)
+                            throw new InvalidOperationException(
+                                $"Entity with id {deleteEntityCommand.Id} not found.");
+
+                        var entity = Entities[deleteEntityCommand.Id];
+                        if (Groups.TryGetValue(entity.Tag, out var group))
+                        {
+                            group.Remove(entity.Id);
+                        }
+
+                        _activeEntityIds.Remove(entity.Id);
+                        _reusableIds.Enqueue(entity.Id);
+
+                        break;
+                    }
+                    case AddSystemCommand addSystemCommand:
+                        AddSystem(Activator.CreateInstance(addSystemCommand.SystemType) as SystemBase);
+                        break;
+                    case RemoveSystemCommand removeSystemCommand:
+                        foreach (var list in _initSystems.Values)
+                        {
+                            list.RemoveAll(system => system.GetType() == removeSystemCommand.SystemType);
+                        }
+
+                        foreach (var list in _executeSystems.Values)
+                        {
+                            list.RemoveAll(system => system.System.GetType() == removeSystemCommand.SystemType);
+                        }
+
+                        foreach (var list in _endSystems.Values)
+                        {
+                            list.RemoveAll(system => system.GetType() == removeSystemCommand.SystemType);
+                        }
+
+                        break;
+                    case AddComponentCommand addComponentCommand:
+                    {
+                        if (!_activeEntityIds.ContainsKey(addComponentCommand.Id) && addComponentCommand.Id != 0)
+                            throw new InvalidOperationException($"Entity with id {addComponentCommand.Id} not found.");
+                        if (addComponentCommand.Id == 0)
+                        {
+                            // check if type is singleton
+                            if (!addComponentCommand.ComponentType.IsAssignableTo(typeof(ISingletonComponent)))
+                            {
+                                throw new InvalidOperationException(
+                                    $"Component {addComponentCommand.ComponentType} is not a singleton component.");
+                            }
+                        }
+
+                        ref Entity entity = ref Entities[addComponentCommand.Id];
+
+                        // add to array
+                        var arr = Components[TagRegistry.GetTagBitIndex(addComponentCommand.ComponentType)];
+                        if (arr.Length < entity.Id + 1)
+                        {
+                            var arr2 = Array.CreateInstance(addComponentCommand.ComponentType, entity.Id + 1);
+                            Array.Copy(arr, arr2, arr.Length);
+                            Components[TagRegistry.GetTagBitIndex(addComponentCommand.ComponentType)] = arr2;
+                        }
+
+                        // set tag
+                        var oldTag = entity.Tag;
+                        entity.Tag.SetBit(
+                            TagRegistry.GetTagBitIndex(addComponentCommand.ComponentType));
+                        // move group
+                        if (Groups.TryGetValue(oldTag, out var oldGroup))
+                        {
+                            oldGroup.Remove(entity.Id);
+                        }
+
+                        if (!Groups.TryGetValue(entity.Tag, out var group))
+                        {
+                            group = new SortedList<int, Entity>();
+                            Groups.Add(entity.Tag, group);
+                        }
+
+                        group.Add(entity.Id, entity);
+
+                        // callback
+                        addComponentCommand.OnComponentAdded?.Invoke();
+                        break;
+                    }
+                    case RemoveComponentCommand removeComponentCommand:
+                    {
+                        if (!_activeEntityIds.ContainsKey(removeComponentCommand.Id) && removeComponentCommand.Id != 0)
+                            throw new InvalidOperationException(
+                                $"Entity with id {removeComponentCommand.Id} not found.");
+                        if (removeComponentCommand.Id == 0)
+                        {
+                            // check if type is singleton
+                            if (!removeComponentCommand.ComponentType.IsAssignableTo(typeof(ISingletonComponent)))
+                            {
+                                throw new InvalidOperationException(
+                                    $"Component {removeComponentCommand.ComponentType} is not a singleton component.");
+                            }
+                        }
+
+                        ref Entity entity = ref Entities[removeComponentCommand.Id];
+                        int bitIdx = TagRegistry.GetTagBitIndex(removeComponentCommand.ComponentType);
+
+                        // remove from array
+                        var arr = Components[bitIdx];
+                        arr.SetValue(null, entity.Id);
+
+                        // set tag
+                        Tag oldCompTag = entity.Tag;
+                        entity.Tag.ClearBit(bitIdx);
+                        // remove from group 
+                        if (Groups.TryGetValue(oldCompTag, out var oldGroup))
+                        {
+                            oldGroup.Remove(entity.Id);
+                        }
+
+                        // if the entity still has a tag, add it to the group
+                        if (!Groups.TryGetValue(entity.Tag, out var group))
+                        {
+                            group = new SortedList<int, Entity>();
+                            Groups.Add(entity.Tag, group);
+                        }
+
+                        group.Add(entity.Id, entity);
+
+                        break;
+                    }
                 }
             }
+            catch (Exception e)
+            {
+                OnError?.Invoke(new AggregateException($"{command.GetType().Name} error", e));
+            }
         }
-        finally
-        {
-            _entitiesLock.ExitReadLock();
-        }
-
-        // try cache it
-        _groupsCache.TryAdd(group, entities);
-        lst.AddRange(entities);
-        return ret;
-    }
-
-    /// <summary>
-    /// Invalidate the group cache. Happens when a component is added or removed from an entity. Or at a new update.
-    /// </summary>
-    internal void InvalidateGroupCache()
-    {
-        if (_groupsCache.Count == 0)
-            return;
-
-        // clear all groups
-        foreach (var group in _groupsCache.Values)
-        {
-            // enqueue the hashset to the pool, so we can reuse it later
-            group.Clear();
-            Pool.Enqueue(group);
-        }
-
-        _groupsCache.Clear();
     }
 }

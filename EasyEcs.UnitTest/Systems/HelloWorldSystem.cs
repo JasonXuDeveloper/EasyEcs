@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using EasyEcs.Core;
+using EasyEcs.Core.Systems;
 using EasyEcs.UnitTest.Components;
 
 namespace EasyEcs.UnitTest.Systems;
@@ -13,8 +14,8 @@ public class HelloWorldSystem : SystemBase, IExecuteSystem
     public Task OnExecute(Context context)
     {
         // Get a singleton component from the context
-        var frameComp = context.GetSingletonComponent<FrameComponent>();
-        
+        ref var frameComp = ref context.GetSingletonComponent<FrameComponent>().Value;
+
         // Print Hello, World and some info
         Console.WriteLine();
         Console.WriteLine($"Hello, World at frame {frameComp.FrameCount}! (Priority: {Priority}, " +

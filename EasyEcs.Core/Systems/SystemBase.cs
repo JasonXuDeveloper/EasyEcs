@@ -1,4 +1,4 @@
-namespace EasyEcs.Core;
+namespace EasyEcs.Core.Systems;
 
 /// <summary>
 /// A system updates in a certain frequency and should gather some entities and apply some logic.

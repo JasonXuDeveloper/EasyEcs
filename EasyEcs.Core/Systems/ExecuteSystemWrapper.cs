@@ -1,6 +1,6 @@
 using System.Threading.Tasks;
 
-namespace EasyEcs.Core;
+namespace EasyEcs.Core.Systems;
 
 /// <summary>
 /// A wrapper for an <see cref="IExecuteSystem"/> that will only execute the system at certain intervals.
@@ -8,19 +8,19 @@ namespace EasyEcs.Core;
 /// </summary>
 internal class ExecuteSystemWrapper
 {
-    private readonly IExecuteSystem _system;
+    internal readonly IExecuteSystem System;
     private int _counter;
     
     internal ExecuteSystemWrapper(IExecuteSystem system)
     {
-        _system = system;
+        System = system;
     }
 
     internal Task Update(Context context)
     {
-        if (_system.ExecuteFrequency == 1 || (_counter++ > 0 && _counter % _system.ExecuteFrequency == 0))
+        if (System.ExecuteFrequency == 1 || (_counter++ > 0 && _counter % System.ExecuteFrequency == 0))
         {
-            return _system.OnExecute(context);
+            return System.OnExecute(context);
         }
 
         return Task.CompletedTask;

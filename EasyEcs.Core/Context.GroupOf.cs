@@ -1,189 +1,84 @@
-using System.Collections.Generic;
+using System;
+using EasyEcs.Core.Components;
+using EasyEcs.Core.Group;
 
 namespace EasyEcs.Core;
 
 public partial class Context
 {
-    /*
-     * I miss C++ templates.
-     */
-
     /// <summary>
     /// Get all entities that have the specified components.
-    /// <br/>
-    /// Note: remember to dispose the returned enumerable. (i.e. using)
-    /// <code>
-    /// using var entities = context.GroupOf<![CDATA[<Component>]]>();
-    /// </code>
     /// </summary>
-    /// <typeparam name="T"></typeparam>
+    /// <param name="components"></param>
     /// <returns></returns>
-    public PooledCollection<List<(Entity, T)>, (Entity, T)> GroupOf<T>() where T : Component, new()
+    public GroupResultEnumerator GroupOf(params Type[] components)
     {
-        // request a pooled enumerable
-        var ret = PooledCollection<List<(Entity, T)>, (Entity, T)>.Create();
-        var lst = ret.Collection;
-        lst.Clear();
-
-        // iterate over all entities and check if they have the components, then add it
-        _entitiesLock.EnterReadLock();
-        try
+        var tag = new Tag();
+        foreach (var component in components)
         {
-            foreach (var entity in _entities)
-            {
-                if (entity.TryGetComponent(out T component))
-                {
-                    lst.Add((entity, component));
-                }
-            }
-        }
-        finally
-        {
-            _entitiesLock.ExitReadLock();
+            tag.SetBit(TagRegistry.GetTagBitIndex(component));
         }
 
-        return ret;
+        return new GroupResultEnumerator(components, this);
     }
 
     /// <summary>
     /// Get all entities that have the specified components.
-    /// <br/>
-    /// Note: remember to dispose the returned enumerable. (i.e. using)
-    /// <code>
-    /// using var entities = context.GroupOf<![CDATA[<Component1, ...>]]>();
-    /// </code>
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    /// <returns></returns>
+    public GroupResultEnumerator<T> GroupOf<T>() where T : struct, IComponent
+    {
+        return new GroupResultEnumerator<T>(this);
+    }
+
+    /// <summary>
+    /// Get all entities that have the specified components.
     /// </summary>
     /// <typeparam name="T1"></typeparam>
     /// <typeparam name="T2"></typeparam>
     /// <returns></returns>
-    public PooledCollection<List<(Entity, T1, T2)>, (Entity, T1, T2)> GroupOf<T1, T2>()
-        where T1 : Component, new()
-        where T2 : Component, new()
+    public GroupResultEnumerator<T1, T2> GroupOf<T1, T2>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
     {
-        // request a pooled enumerable
-        var ret = PooledCollection<List<(Entity, T1, T2)>, (Entity, T1, T2)>.Create();
-        var lst = ret.Collection;
-        lst.Clear();
-
-        // iterate over all entities and check if they have the components, then add it
-        _entitiesLock.EnterReadLock();
-        try
-        {
-            foreach (var entity in _entities)
-            {
-                if (entity.TryGetComponent(out T1 component1) &&
-                    entity.TryGetComponent(out T2 component2))
-                {
-                    lst.Add((entity, component1, component2));
-                }
-            }
-        }
-        finally
-        {
-            _entitiesLock.ExitReadLock();
-        }
-
-        return ret;
+        return new GroupResultEnumerator<T1, T2>(this);
     }
 
     /// <summary>
     /// Get all entities that have the specified components.
-    /// <br/>
-    /// Note: remember to dispose the returned enumerable. (i.e. using)
-    /// <code>
-    /// using var entities = context.GroupOf<![CDATA[<Component1, ...>]]>();
-    /// </code>
     /// </summary>
     /// <typeparam name="T1"></typeparam>
     /// <typeparam name="T2"></typeparam>
     /// <typeparam name="T3"></typeparam>
     /// <returns></returns>
-    public PooledCollection<List<(Entity, T1, T2, T3)>, (Entity, T1, T2, T3)> GroupOf<T1, T2, T3>()
-        where T1 : Component, new()
-        where T2 : Component, new()
-        where T3 : Component, new()
+    public GroupResultEnumerator<T1, T2, T3> GroupOf<T1, T2, T3>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
     {
-        // request a pooled enumerable
-        var ret = PooledCollection<List<(Entity, T1, T2, T3)>, (Entity, T1, T2, T3)>.Create();
-        var lst = ret.Collection;
-        lst.Clear();
-
-        // iterate over all entities and check if they have the components, then add it
-        _entitiesLock.EnterReadLock();
-        try
-        {
-            foreach (var entity in _entities)
-            {
-                if (entity.TryGetComponent(out T1 component1) &&
-                    entity.TryGetComponent(out T2 component2) &&
-                    entity.TryGetComponent(out T3 component3))
-                {
-                    lst.Add((entity, component1, component2, component3));
-                }
-            }
-        }
-        finally
-        {
-            _entitiesLock.ExitReadLock();
-        }
-
-        return ret;
+        return new GroupResultEnumerator<T1, T2, T3>(this);
     }
 
     /// <summary>
     /// Get all entities that have the specified components.
-    /// <br/>
-    /// Note: remember to dispose the returned enumerable. (i.e. using)
-    /// <code>
-    /// using var entities = context.GroupOf<![CDATA[<Component1, ...>]]>();
-    /// </code>
     /// </summary>
     /// <typeparam name="T1"></typeparam>
     /// <typeparam name="T2"></typeparam>
     /// <typeparam name="T3"></typeparam>
     /// <typeparam name="T4"></typeparam>
     /// <returns></returns>
-    public PooledCollection<List<(Entity, T1, T2, T3, T4)>, (Entity, T1, T2, T3, T4)> GroupOf<T1, T2, T3, T4>()
-        where T1 : Component, new()
-        where T2 : Component, new()
-        where T3 : Component, new()
-        where T4 : Component, new()
+    public GroupResultEnumerator<T1, T2, T3, T4> GroupOf<T1, T2, T3, T4>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
     {
-        // request a pooled enumerable
-        var ret = PooledCollection<List<(Entity, T1, T2, T3, T4)>, (Entity, T1, T2, T3, T4)>.Create();
-        var lst = ret.Collection;
-        lst.Clear();
-
-        // iterate over all entities and check if they have the components, then add it
-        _entitiesLock.EnterReadLock();
-        try
-        {
-            foreach (var entity in _entities)
-            {
-                if (entity.TryGetComponent(out T1 component1) &&
-                    entity.TryGetComponent(out T2 component2) &&
-                    entity.TryGetComponent(out T3 component3) &&
-                    entity.TryGetComponent(out T4 component4))
-                {
-                    lst.Add((entity, component1, component2, component3, component4));
-                }
-            }
-        }
-        finally
-        {
-            _entitiesLock.ExitReadLock();
-        }
-
-        return ret;
+        return new GroupResultEnumerator<T1, T2, T3, T4>(this);
     }
 
     /// <summary>
     /// Get all entities that have the specified components.
-    /// <br/>
-    /// Note: remember to dispose the returned enumerable. (i.e. using)
-    /// <code>
-    /// using var entities = context.GroupOf<![CDATA[<Component1, ...>]]>();
-    /// </code>
     /// </summary>
     /// <typeparam name="T1"></typeparam>
     /// <typeparam name="T2"></typeparam>
@@ -191,50 +86,19 @@ public partial class Context
     /// <typeparam name="T4"></typeparam>
     /// <typeparam name="T5"></typeparam>
     /// <returns></returns>
-    public PooledCollection<List<(Entity, T1, T2, T3, T4, T5)>, (Entity, T1, T2, T3, T4, T5)> GroupOf<T1, T2, T3, T4,
+    public GroupResultEnumerator<T1, T2, T3, T4, T5> GroupOf<T1, T2, T3, T4,
         T5>()
-        where T1 : Component, new()
-        where T2 : Component, new()
-        where T3 : Component, new()
-        where T4 : Component, new()
-        where T5 : Component, new()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+        where T5 : struct, IComponent
     {
-        // request a pooled enumerable
-        var ret = PooledCollection<List<(Entity, T1, T2, T3, T4, T5)>, (Entity, T1, T2, T3, T4, T5)>.Create();
-        var lst = ret.Collection;
-        lst.Clear();
-
-        // iterate over all entities and check if they have the components, then add it
-        _entitiesLock.EnterReadLock();
-        try
-        {
-            foreach (var entity in _entities)
-            {
-                if (entity.TryGetComponent(out T1 component1) &&
-                    entity.TryGetComponent(out T2 component2) &&
-                    entity.TryGetComponent(out T3 component3) &&
-                    entity.TryGetComponent(out T4 component4) &&
-                    entity.TryGetComponent(out T5 component5))
-                {
-                    lst.Add((entity, component1, component2, component3, component4, component5));
-                }
-            }
-        }
-        finally
-        {
-            _entitiesLock.ExitReadLock();
-        }
-
-        return ret;
+        return new GroupResultEnumerator<T1, T2, T3, T4, T5>(this);
     }
 
     /// <summary>
     /// Get all entities that have the specified components.
-    /// <br/>
-    /// Note: remember to dispose the returned enumerable. (i.e. using)
-    /// <code>
-    /// using var entities = context.GroupOf<![CDATA[<Component1, ...>]]>();
-    /// </code>
     /// </summary>
     /// <typeparam name="T1"></typeparam>
     /// <typeparam name="T2"></typeparam>
@@ -243,53 +107,19 @@ public partial class Context
     /// <typeparam name="T5"></typeparam>
     /// <typeparam name="T6"></typeparam>
     /// <returns></returns>
-    public PooledCollection<List<(Entity, T1, T2, T3, T4, T5, T6)>,
-        (Entity, T1, T2, T3, T4, T5, T6)> GroupOf<T1, T2, T3, T4, T5, T6>()
-        where T1 : Component, new()
-        where T2 : Component, new()
-        where T3 : Component, new()
-        where T4 : Component, new()
-        where T5 : Component, new()
-        where T6 : Component, new()
+    public GroupResultEnumerator<T1, T2, T3, T4, T5, T6> GroupOf<T1, T2, T3, T4, T5, T6>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+        where T5 : struct, IComponent
+        where T6 : struct, IComponent
     {
-        // request a pooled enumerable
-        var ret = PooledCollection<List<(Entity, T1, T2, T3, T4, T5, T6)>,
-            (Entity, T1, T2, T3, T4, T5, T6)>.Create();
-        var lst = ret.Collection;
-        lst.Clear();
-
-        // iterate over all entities and check if they have the components, then add it
-        _entitiesLock.EnterReadLock();
-        try
-        {
-            foreach (var entity in _entities)
-            {
-                if (entity.TryGetComponent(out T1 component1) &&
-                    entity.TryGetComponent(out T2 component2) &&
-                    entity.TryGetComponent(out T3 component3) &&
-                    entity.TryGetComponent(out T4 component4) &&
-                    entity.TryGetComponent(out T5 component5) &&
-                    entity.TryGetComponent(out T6 component6))
-                {
-                    lst.Add((entity, component1, component2, component3, component4, component5, component6));
-                }
-            }
-        }
-        finally
-        {
-            _entitiesLock.ExitReadLock();
-        }
-
-        return ret;
+        return new GroupResultEnumerator<T1, T2, T3, T4, T5, T6>(this);
     }
 
     /// <summary>
     /// Get all entities that have the specified components.
-    /// <br/>
-    /// Note: remember to dispose the returned enumerable. (i.e. using)
-    /// <code>
-    /// using var entities = context.GroupOf<![CDATA[<Component1, ...>]]>();
-    /// </code>
     /// </summary>
     /// <typeparam name="T1"></typeparam>
     /// <typeparam name="T2"></typeparam>
@@ -299,46 +129,67 @@ public partial class Context
     /// <typeparam name="T6"></typeparam>
     /// <typeparam name="T7"></typeparam>
     /// <returns></returns>
-    public PooledCollection<List<(Entity, T1, T2, T3, T4, T5, T6, T7)>,
-        (Entity, T1, T2, T3, T4, T5, T6, T7)> GroupOf<T1, T2, T3, T4, T5, T6, T7>()
-        where T1 : Component, new()
-        where T2 : Component, new()
-        where T3 : Component, new()
-        where T4 : Component, new()
-        where T5 : Component, new()
-        where T6 : Component, new()
-        where T7 : Component, new()
+    public GroupResultEnumerator<T1, T2, T3, T4, T5, T6, T7> GroupOf<T1, T2, T3, T4, T5, T6, T7>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+        where T5 : struct, IComponent
+        where T6 : struct, IComponent
+        where T7 : struct, IComponent
     {
-        // request a pooled enumerable
-        var ret = PooledCollection<List<(Entity, T1, T2, T3, T4, T5, T6, T7)>,
-            (Entity, T1, T2, T3, T4, T5, T6, T7)>.Create();
-        var lst = ret.Collection;
-        lst.Clear();
+        return new GroupResultEnumerator<T1, T2, T3, T4, T5, T6, T7>(this);
+    }
 
-        // iterate over all entities and check if they have the components, then add it
-        _entitiesLock.EnterReadLock();
-        try
-        {
-            foreach (var entity in _entities)
-            {
-                if (entity.TryGetComponent(out T1 component1) &&
-                    entity.TryGetComponent(out T2 component2) &&
-                    entity.TryGetComponent(out T3 component3) &&
-                    entity.TryGetComponent(out T4 component4) &&
-                    entity.TryGetComponent(out T5 component5) &&
-                    entity.TryGetComponent(out T6 component6) &&
-                    entity.TryGetComponent(out T7 component7))
-                {
-                    lst.Add((entity, component1, component2, component3, component4, component5, component6,
-                        component7));
-                }
-            }
-        }
-        finally
-        {
-            _entitiesLock.ExitReadLock();
-        }
+    /// <summary>
+    /// Get all entities that have the specified components.
+    /// </summary>
+    /// <typeparam name="T1"></typeparam>
+    /// <typeparam name="T2"></typeparam>
+    /// <typeparam name="T3"></typeparam>
+    /// <typeparam name="T4"></typeparam>
+    /// <typeparam name="T5"></typeparam>
+    /// <typeparam name="T6"></typeparam>
+    /// <typeparam name="T7"></typeparam>
+    /// <typeparam name="T8"></typeparam>
+    /// <returns></returns>
+    public GroupResultEnumerator<T1, T2, T3, T4, T5, T6, T7, T8> GroupOf<T1, T2, T3, T4, T5, T6, T7, T8>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+        where T5 : struct, IComponent
+        where T6 : struct, IComponent
+        where T7 : struct, IComponent
+        where T8 : struct, IComponent
+    {
+        return new GroupResultEnumerator<T1, T2, T3, T4, T5, T6, T7, T8>(this);
+    }
 
-        return ret;
+    /// <summary>
+    /// Get all entities that have the specified components.
+    /// </summary>
+    /// <typeparam name="T1"></typeparam>
+    /// <typeparam name="T2"></typeparam>
+    /// <typeparam name="T3"></typeparam>
+    /// <typeparam name="T4"></typeparam>
+    /// <typeparam name="T5"></typeparam>
+    /// <typeparam name="T6"></typeparam>
+    /// <typeparam name="T7"></typeparam>
+    /// <typeparam name="T8"></typeparam>
+    /// <typeparam name="T9"></typeparam>
+    /// <returns></returns>
+    public GroupResultEnumerator<T1, T2, T3, T4, T5, T6, T7, T8, T9> GroupOf<T1, T2, T3, T4, T5, T6, T7, T8, T9>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+        where T5 : struct, IComponent
+        where T6 : struct, IComponent
+        where T7 : struct, IComponent
+        where T8 : struct, IComponent
+        where T9 : struct, IComponent
+    {
+        return new GroupResultEnumerator<T1, T2, T3, T4, T5, T6, T7, T8, T9>(this);
     }
 }

@@ -1,8 +1,9 @@
 using EasyEcs.Core;
+using EasyEcs.Core.Components;
 
 namespace EasyEcs.UnitTest.Components;
 
-public class FrameComponent: SingletonComponent
+public struct FrameComponent: ISingletonComponent
 {
     public int FrameCount;
 }

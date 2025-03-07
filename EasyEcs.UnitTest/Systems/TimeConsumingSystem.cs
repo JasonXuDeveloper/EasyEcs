@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using EasyEcs.Core;
+using EasyEcs.Core.Systems;
 
 namespace EasyEcs.UnitTest.Systems;
 

@@ -1,6 +1,5 @@
 using System;
-using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
+using EasyEcs.Core.Components;
 
 namespace EasyEcs.Core;
 
@@ -10,60 +9,51 @@ namespace EasyEcs.Core;
 /// It is not recommended to hold a reference to an entity at any time, since it may escape from the context (when destroyed) and cause memory leaks.
 /// Simply get the entity from the context when needed via <see cref="Context.GetEntityById"/> (This operation is roughly O(1)).
 /// </summary>
-public class Entity
+public struct Entity : IEquatable<Entity>
 {
     /// <summary>
     /// Unique identifier of the entity.
     /// </summary>
-    public int Id { get; }
+    public readonly int Id;
+
+    internal Tag Tag = new();
 
     /// <summary>
     /// The context that holds the entity.
     /// </summary>
-    public Context Context => _context;
-
-    /// <summary>
-    /// The context that holds the entity.
-    /// </summary>
-    private readonly Context _context;
-
-    /// <summary>
-    /// The components this entity holds.
-    /// </summary>
-    private readonly Dictionary<Type, Component> _components = new();
+    public Context Context { get; }
 
     /// <summary>
     /// Create a new entity.
     /// </summary>
     /// <param name="context"></param>
     /// <param name="id"></param>
-    public Entity(Context context, int id)
+    internal Entity(Context context, int id)
     {
-        _context = context;
+        Context = context;
         Id = id;
     }
 
     /// <summary>
     /// Add a component to the entity. Returns a reference to the component. If the component already exists, returns a reference to the existing component.
     /// </summary>
+    /// <param name="callback"></param>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
-    public T AddComponent<T>() where T : Component, new()
+    ///
+    public void AddComponent<T>(Action<ComponentRef<T>> callback = null) where T : struct, IComponent
     {
-        // Check if component already exists
-        if (_components.TryGetValue(typeof(T), out var component))
-        {
-            return (T)component;
-        }
+        Context.AddComponent(this, callback);
+    }
 
-        // Invalidate cache in the context
-        _context.InvalidateGroupCache();
-        // Add component
-        var newComponent = new T();
-        newComponent.EntityRef = this;
-        _components.Add(typeof(T), newComponent);
-
-        return newComponent;
+    /// <summary>
+    /// Remove a component from the entity. Returns true if the component was removed.
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    /// <returns></returns>
+    public void RemoveComponent<T>() where T : struct, IComponent
+    {
+        Context.RemoveComponent<T>(this);
     }
 
     /// <summary>
@@ -72,32 +62,24 @@ public class Entity
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
     /// <exception cref="InvalidOperationException"></exception>
-    public T GetComponent<T>() where T : Component, new()
+    public ComponentRef<T> GetComponent<T>() where T : struct, IComponent
     {
-        if (TryGetComponent(out T component))
-        {
-            return component;
-        }
+        if (!Tag.HasBit(Context.TagRegistry.GetTagBitIndex(typeof(T))))
+            throw new InvalidOperationException($"Component {typeof(T)} not found.");
 
-        throw new InvalidOperationException($"Component {typeof(T)} not found.");
+        return new ComponentRef<T>(Id, Context);
     }
 
     /// <summary>
     /// Try to get a component from the entity.
     /// </summary>
-    /// <param name="component"></param>
+    /// <param name="value"></param>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
-    public bool TryGetComponent<T>([NotNullWhen(true)] out T component) where T : Component, new()
+    public bool TryGetComponent<T>(out ComponentRef<T> value) where T : struct, IComponent
     {
-        if (_components.TryGetValue(typeof(T), out var c))
-        {
-            component = (T)c;
-            return true;
-        }
-
-        component = null;
-        return false;
+        value = new ComponentRef<T>(Id, Context);
+        return Tag.HasBit(Context.TagRegistry.GetTagBitIndex(typeof(T)));
     }
 
     /// <summary>
@@ -105,9 +87,9 @@ public class Entity
     /// </summary>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
-    public bool HasComponent<T>() where T : Component, new()
+    public bool HasComponent<T>() where T : struct, IComponent
     {
-        return _components.ContainsKey(typeof(T));
+        return Tag.HasBit(Context.TagRegistry.GetTagBitIndex(typeof(T)));
     }
 
     /// <summary>
@@ -117,31 +99,13 @@ public class Entity
     /// <returns></returns>
     public bool HasComponents(params Type[] types)
     {
+        Tag tag = new();
         foreach (var type in types)
         {
-            if (!_components.ContainsKey(type))
-            {
-                return false;
-            }
+            tag.SetBit(Context.TagRegistry.GetTagBitIndex(type));
         }
 
-        return true;
-    }
-
-    /// <summary>
-    /// Remove a component from the entity. Returns true if the component was removed.
-    /// </summary>
-    /// <typeparam name="T"></typeparam>
-    /// <returns></returns>
-    public bool RemoveComponent<T>() where T : Component, new()
-    {
-        if (_components.Remove(typeof(T)))
-        {
-            _context.InvalidateGroupCache();
-            return true;
-        }
-
-        return false;
+        return Tag == tag;
     }
 
     /// <summary>
@@ -151,6 +115,16 @@ public class Entity
     public override int GetHashCode()
     {
         return Id;
+    }
+
+    /// <summary>
+    /// Is the entity equal to another entity?
+    /// </summary>
+    /// <param name="other"></param>
+    /// <returns></returns>
+    public bool Equals(Entity other)
+    {
+        return Id == other.Id;
     }
 
     /// <summary>
@@ -175,5 +149,15 @@ public class Entity
     public override string ToString()
     {
         return $"Entity {Id}";
+    }
+
+    public static bool operator ==(Entity left, Entity right)
+    {
+        return left.Equals(right);
+    }
+
+    public static bool operator !=(Entity left, Entity right)
+    {
+        return !(left == right);
     }
 }
