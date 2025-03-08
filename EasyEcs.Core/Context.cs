@@ -384,34 +384,7 @@ public partial class Context : IAsyncDisposable
             throw new InvalidOperationException("Context already started.");
 
         _started = true;
-
-        //TODO maybe use source generator to support AOT
-        // add all components to TagRegistry
-        Dictionary<byte, Type> tagToType = new();
-        // iterate all assemblies
-        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            // iterate all types
-            foreach (var type in assembly.GetTypes())
-            {
-                if (type.IsAssignableTo(typeof(IComponent)) || type.IsAssignableTo(typeof(ISingletonComponent)))
-                {
-                    if (type == typeof(IComponent) || type == typeof(ISingletonComponent))
-                        continue;
-                    if (!type.IsValueType)
-                        throw new InvalidOperationException($"Component {type.Name} must be a struct.");
-                    TagRegistry.RegisterTag(type);
-                    tagToType.Add(TagRegistry.GetTagBitIndex(type), type);
-                }
-            }
-        }
-
-        // create lists for all components
-        Components = new Array[TagRegistry.TagCount];
-        for (int i = 0; i < Components.Length; i++)
-        {
-            Components[i] = Array.CreateInstance(tagToType[(byte)i], 0);
-        }
+        Components = Array.Empty<Array>();
 
         // dequeue all commands
         ProcessCommandBuffer();
@@ -455,6 +428,8 @@ public partial class Context : IAsyncDisposable
         // clear all components
         foreach (var arr in Components)
         {
+            if (arr == null)
+                continue;
             Array.Clear(arr, 0, arr.Length);
         }
 
@@ -599,22 +574,55 @@ public partial class Context : IAsyncDisposable
                         }
 
                         ref Entity entity = ref Entities[addComponentCommand.Id];
-                        byte bitIdx = TagRegistry.GetTagBitIndex(addComponentCommand.ComponentType);
-
-                        // add to array
-                        var arr = Components[bitIdx];
-                        int newLen = Math.Max(1, arr.Length);
                         int targetLen = entity.Id + 1;
-                        while (newLen < targetLen)
-                        {
-                            newLen *= 2;
-                        }
+                        byte bitIdx;
+                        Array arr;
 
-                        if (arr.Length < newLen)
+                        // unregistered tag
+                        if (!TagRegistry.HasTag(addComponentCommand.ComponentType))
                         {
-                            var arr2 = Array.CreateInstance(addComponentCommand.ComponentType, newLen);
-                            Array.Copy(arr, arr2, arr.Length);
-                            Components[bitIdx] = arr2;
+                            var type = addComponentCommand.ComponentType;
+                            if (type == typeof(IComponent) || type == typeof(ISingletonComponent))
+                                continue;
+                            if (!type.IsValueType)
+                                throw new InvalidOperationException($"Component {type.Name} must be a struct.");
+                            // register
+                            TagRegistry.RegisterTag(type);
+                            // ensure array size
+                            if (Components.Length <= TagRegistry.TagCount)
+                            {
+                                Array.Resize(ref Components, TagRegistry.TagCount * 2);
+                            }
+
+                            // create array of components
+                            var arrLen = 1;
+                            while (arrLen < targetLen)
+                            {
+                                arrLen *= 2;
+                            }
+
+                            arr = Array.CreateInstance(type, arrLen);
+
+                            // set component array to the correct index
+                            bitIdx = TagRegistry.GetTagBitIndex(type);
+                            Components[bitIdx] = arr;
+                        }
+                        else
+                        {
+                            bitIdx = TagRegistry.GetTagBitIndex(addComponentCommand.ComponentType);
+                            arr = Components[bitIdx];
+                            int newLen = Math.Max(1, arr.Length);
+                            while (newLen < targetLen)
+                            {
+                                newLen *= 2;
+                            }
+
+                            if (arr.Length < newLen)
+                            {
+                                var arr2 = Array.CreateInstance(addComponentCommand.ComponentType, newLen);
+                                Array.Copy(arr, arr2, arr.Length);
+                                Components[bitIdx] = arr2;
+                            }
                         }
 
                         // set tag

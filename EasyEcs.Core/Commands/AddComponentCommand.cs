@@ -3,7 +3,7 @@ using EasyEcs.Core.Components;
 
 namespace EasyEcs.Core.Commands;
 
-public struct AddComponentCommand : ICommand
+internal struct AddComponentCommand : ICommand
 {
     public readonly int Id;
     public readonly Type ComponentType;

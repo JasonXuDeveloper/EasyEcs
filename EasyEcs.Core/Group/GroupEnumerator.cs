@@ -26,7 +26,12 @@ public readonly struct GroupResultEnumerator : IEnumerable<GroupResult>
         Tag tag = new();
         foreach (var type in _types)
         {
-            tag.SetBit(_context.TagRegistry.GetTagBitIndex(type));
+            if (!_context.TagRegistry.TryGetTagBitIndex(type, out var bitIdx))
+            {
+                yield break;
+            }
+
+            tag.SetBit(bitIdx);
         }
 
         foreach (var group in _context.Groups)
@@ -63,9 +68,14 @@ public readonly struct GroupResultEnumerator<T> : IEnumerable<GroupResult<T>>
             yield break;
         }
 
-        var bitIdx = _context.TagRegistry.GetTagBitIndex(typeof(T));
         Tag tag = new();
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T), out var bitIdx))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx);
+
         Entity[] entities = _context.Entities;
         T[] components = _context.Components[bitIdx] as T[];
 
@@ -103,11 +113,20 @@ public readonly struct GroupResultEnumerator<T1, T2> : IEnumerable<GroupResult<T
             yield break;
         }
 
-        var bitIdx1 = _context.TagRegistry.GetTagBitIndex(typeof(T1));
-        var bitIdx2 = _context.TagRegistry.GetTagBitIndex(typeof(T2));
         Tag tag = new();
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T1), out var bitIdx1))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx1);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T2), out var bitIdx2))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx2);
+
         Entity[] entities = _context.Entities;
         T1[] components1 = _context.Components[bitIdx1] as T1[];
         T2[] components2 = _context.Components[bitIdx2] as T2[];
@@ -146,13 +165,26 @@ public readonly struct GroupResultEnumerator<T1, T2, T3> : IEnumerable<GroupResu
             yield break;
         }
 
-        var bitIdx1 = _context.TagRegistry.GetTagBitIndex(typeof(T1));
-        var bitIdx2 = _context.TagRegistry.GetTagBitIndex(typeof(T2));
-        var bitIdx3 = _context.TagRegistry.GetTagBitIndex(typeof(T3));
         Tag tag = new();
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T1), out var bitIdx1))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx1);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T2), out var bitIdx2))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx2);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T3), out var bitIdx3))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx3);
+
         Entity[] entities = _context.Entities;
         T1[] components1 = _context.Components[bitIdx1] as T1[];
         T2[] components2 = _context.Components[bitIdx2] as T2[];
@@ -192,15 +224,32 @@ public readonly struct GroupResultEnumerator<T1, T2, T3, T4> : IEnumerable<Group
             yield break;
         }
 
-        var bitIdx1 = _context.TagRegistry.GetTagBitIndex(typeof(T1));
-        var bitIdx2 = _context.TagRegistry.GetTagBitIndex(typeof(T2));
-        var bitIdx3 = _context.TagRegistry.GetTagBitIndex(typeof(T3));
-        var bitIdx4 = _context.TagRegistry.GetTagBitIndex(typeof(T4));
         Tag tag = new();
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T1), out var bitIdx1))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx1);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T2), out var bitIdx2))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx2);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T3), out var bitIdx3))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx3);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T4), out var bitIdx4))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx4);
+
         Entity[] entities = _context.Entities;
         T1[] components1 = _context.Components[bitIdx1] as T1[];
         T2[] components2 = _context.Components[bitIdx2] as T2[];
@@ -242,17 +291,38 @@ public readonly struct GroupResultEnumerator<T1, T2, T3, T4, T5> : IEnumerable<G
             yield break;
         }
 
-        var bitIdx1 = _context.TagRegistry.GetTagBitIndex(typeof(T1));
-        var bitIdx2 = _context.TagRegistry.GetTagBitIndex(typeof(T2));
-        var bitIdx3 = _context.TagRegistry.GetTagBitIndex(typeof(T3));
-        var bitIdx4 = _context.TagRegistry.GetTagBitIndex(typeof(T4));
-        var bitIdx5 = _context.TagRegistry.GetTagBitIndex(typeof(T5));
         Tag tag = new();
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T1), out var bitIdx1))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx1);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T2), out var bitIdx2))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx2);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T3), out var bitIdx3))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx3);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T4), out var bitIdx4))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx4);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T5), out var bitIdx5))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx5);
+
         Entity[] entities = _context.Entities;
         T1[] components1 = _context.Components[bitIdx1] as T1[];
         T2[] components2 = _context.Components[bitIdx2] as T2[];
@@ -295,19 +365,44 @@ public readonly struct GroupResultEnumerator<T1, T2, T3, T4, T5, T6> : IEnumerab
             yield break;
         }
 
-        var bitIdx1 = _context.TagRegistry.GetTagBitIndex(typeof(T1));
-        var bitIdx2 = _context.TagRegistry.GetTagBitIndex(typeof(T2));
-        var bitIdx3 = _context.TagRegistry.GetTagBitIndex(typeof(T3));
-        var bitIdx4 = _context.TagRegistry.GetTagBitIndex(typeof(T4));
-        var bitIdx5 = _context.TagRegistry.GetTagBitIndex(typeof(T5));
-        var bitIdx6 = _context.TagRegistry.GetTagBitIndex(typeof(T6));
         Tag tag = new();
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T1), out var bitIdx1))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx1);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T2), out var bitIdx2))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx2);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T3), out var bitIdx3))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx3);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T4), out var bitIdx4))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx4);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T5), out var bitIdx5))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx5);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T6), out var bitIdx6))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx6);
+
         Entity[] entities = _context.Entities;
         T1[] components1 = _context.Components[bitIdx1] as T1[];
         T2[] components2 = _context.Components[bitIdx2] as T2[];
@@ -352,21 +447,50 @@ public readonly struct
             yield break;
         }
 
-        var bitIdx1 = _context.TagRegistry.GetTagBitIndex(typeof(T1));
-        var bitIdx2 = _context.TagRegistry.GetTagBitIndex(typeof(T2));
-        var bitIdx3 = _context.TagRegistry.GetTagBitIndex(typeof(T3));
-        var bitIdx4 = _context.TagRegistry.GetTagBitIndex(typeof(T4));
-        var bitIdx5 = _context.TagRegistry.GetTagBitIndex(typeof(T5));
-        var bitIdx6 = _context.TagRegistry.GetTagBitIndex(typeof(T6));
-        var bitIdx7 = _context.TagRegistry.GetTagBitIndex(typeof(T7));
         Tag tag = new();
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T1), out var bitIdx1))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx1);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T2), out var bitIdx2))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx2);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T3), out var bitIdx3))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx3);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T4), out var bitIdx4))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx4);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T5), out var bitIdx5))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx5);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T6), out var bitIdx6))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx6);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T7), out var bitIdx7))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx7);
+
         Entity[] entities = _context.Entities;
         T1[] components1 = _context.Components[bitIdx1] as T1[];
         T2[] components2 = _context.Components[bitIdx2] as T2[];
@@ -412,23 +536,56 @@ public readonly struct
             yield break;
         }
 
-        var bitIdx1 = _context.TagRegistry.GetTagBitIndex(typeof(T1));
-        var bitIdx2 = _context.TagRegistry.GetTagBitIndex(typeof(T2));
-        var bitIdx3 = _context.TagRegistry.GetTagBitIndex(typeof(T3));
-        var bitIdx4 = _context.TagRegistry.GetTagBitIndex(typeof(T4));
-        var bitIdx5 = _context.TagRegistry.GetTagBitIndex(typeof(T5));
-        var bitIdx6 = _context.TagRegistry.GetTagBitIndex(typeof(T6));
-        var bitIdx7 = _context.TagRegistry.GetTagBitIndex(typeof(T7));
-        var bitIdx8 = _context.TagRegistry.GetTagBitIndex(typeof(T8));
         Tag tag = new();
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T1), out var bitIdx1))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx1);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T2), out var bitIdx2))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx2);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T3), out var bitIdx3))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx3);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T4), out var bitIdx4))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx4);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T5), out var bitIdx5))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx5);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T6), out var bitIdx6))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx6);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T7), out var bitIdx7))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx7);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T8), out var bitIdx8))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx8);
+
         Entity[] entities = _context.Entities;
         T1[] components1 = _context.Components[bitIdx1] as T1[];
         T2[] components2 = _context.Components[bitIdx2] as T2[];
@@ -476,25 +633,62 @@ public readonly struct
             yield break;
         }
 
-        var bitIdx1 = _context.TagRegistry.GetTagBitIndex(typeof(T1));
-        var bitIdx2 = _context.TagRegistry.GetTagBitIndex(typeof(T2));
-        var bitIdx3 = _context.TagRegistry.GetTagBitIndex(typeof(T3));
-        var bitIdx4 = _context.TagRegistry.GetTagBitIndex(typeof(T4));
-        var bitIdx5 = _context.TagRegistry.GetTagBitIndex(typeof(T5));
-        var bitIdx6 = _context.TagRegistry.GetTagBitIndex(typeof(T6));
-        var bitIdx7 = _context.TagRegistry.GetTagBitIndex(typeof(T7));
-        var bitIdx8 = _context.TagRegistry.GetTagBitIndex(typeof(T8));
-        var bitIdx9 = _context.TagRegistry.GetTagBitIndex(typeof(T9));
         Tag tag = new();
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T1), out var bitIdx1))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx1);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T2), out var bitIdx2))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx2);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T3), out var bitIdx3))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx3);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T4), out var bitIdx4))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx4);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T5), out var bitIdx5))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx5);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T6), out var bitIdx6))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx6);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T7), out var bitIdx7))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx7);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T8), out var bitIdx8))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx8);
+        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T9), out var bitIdx9))
+        {
+            yield break;
+        }
+
         tag.SetBit(bitIdx9);
+
         Entity[] entities = _context.Entities;
         T1[] components1 = _context.Components[bitIdx1] as T1[];
         T2[] components2 = _context.Components[bitIdx2] as T2[];

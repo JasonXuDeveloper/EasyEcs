@@ -9,6 +9,8 @@ internal class TagRegistry
     private readonly Dictionary<Type, byte> _typeToBitIndex = new();
     public int TagCount => _typeToBitIndex.Count;
 
+    public bool HasTag(Type type) => _typeToBitIndex.ContainsKey(type);
+
     public void RegisterTag(Type type)
     {
         if (_typeToBitIndex.ContainsKey(type))
@@ -32,5 +34,10 @@ internal class TagRegistry
         }
 
         return bitIndex;
+    }
+
+    public bool TryGetTagBitIndex(Type type, out byte bitIndex)
+    {
+        return _typeToBitIndex.TryGetValue(type, out bitIndex);
     }
 }

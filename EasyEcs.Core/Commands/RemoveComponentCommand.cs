@@ -2,7 +2,7 @@ using System;
 
 namespace EasyEcs.Core.Commands;
 
-public struct RemoveComponentCommand : ICommand
+internal struct RemoveComponentCommand : ICommand
 {
     public readonly int Id;
     public readonly Type ComponentType;

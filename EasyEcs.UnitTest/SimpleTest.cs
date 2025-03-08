@@ -151,6 +151,8 @@ public class SimpleTest
             Assert.That(ctx.EntityCount, Is.EqualTo(0));
             // Update the context
             await ctx.Update();
+            
+            ctx.RemoveSystem<NotUnmanagedSystem>();
 
             // Remove 1 entity
             ctx.DestroyEntity(ctx.EntityAt(0));

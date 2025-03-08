@@ -2,7 +2,7 @@ using System;
 
 namespace EasyEcs.Core.Commands;
 
-public struct RemoveSystemCommand : ICommand
+internal struct RemoveSystemCommand : ICommand
 {
     public readonly Type SystemType;
 
