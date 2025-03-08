@@ -13,12 +13,6 @@ public partial class Context
     /// <returns></returns>
     public GroupResultEnumerator GroupOf(params Type[] components)
     {
-        var tag = new Tag();
-        foreach (var component in components)
-        {
-            tag.SetBit(TagRegistry.GetTagBitIndex(component));
-        }
-
         return new GroupResultEnumerator(components, this);
     }
 

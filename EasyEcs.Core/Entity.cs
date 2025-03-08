@@ -64,10 +64,11 @@ public struct Entity : IEquatable<Entity>
     /// <exception cref="InvalidOperationException"></exception>
     public ComponentRef<T> GetComponent<T>() where T : struct, IComponent
     {
-        if (!Tag.HasBit(Context.TagRegistry.GetTagBitIndex(typeof(T))))
+        var idx = Context.TagRegistry.GetTagBitIndex(typeof(T));
+        if (!Tag.HasBit(idx))
             throw new InvalidOperationException($"Component {typeof(T)} not found.");
 
-        return new ComponentRef<T>(Id, Context);
+        return new ComponentRef<T>(Id, idx, Context);
     }
 
     /// <summary>
@@ -78,8 +79,15 @@ public struct Entity : IEquatable<Entity>
     /// <returns></returns>
     public bool TryGetComponent<T>(out ComponentRef<T> value) where T : struct, IComponent
     {
-        value = new ComponentRef<T>(Id, Context);
-        return Tag.HasBit(Context.TagRegistry.GetTagBitIndex(typeof(T)));
+        var idx = Context.TagRegistry.GetTagBitIndex(typeof(T));
+        if (!Tag.HasBit(idx))
+        {
+            value = default;
+            return false;
+        }
+
+        value = new ComponentRef<T>(Id, idx, Context);
+        return true;
     }
 
     /// <summary>

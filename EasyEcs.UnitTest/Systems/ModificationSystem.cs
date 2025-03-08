@@ -27,7 +27,7 @@ public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
 
         foreach (var result in candidates)
         {
-            result.Entity.Value.AddComponent<ScaleComponent>(
+            result.Entity.AddComponent<ScaleComponent>(
                 comp =>
                     comp.Value.Factor = 0.5f);
         }
@@ -46,7 +46,7 @@ public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
 
         foreach (var result in candidates)
         {
-            ref var sizeComponent = ref result.Component;
+            ref var sizeComponent = ref result.Component1;
             sizeComponent.Width = 0;
             sizeComponent.Height = 0;
         }

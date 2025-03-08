@@ -19,8 +19,8 @@ public class NotUnmanagedSystem : SystemBase, IExecuteSystem
 
         foreach (var result in results)
         {
-            ref var entity = ref result.Entity.Value;
-            ref var component = ref result.Component;
+            ref var entity = ref result.Entity;
+            ref var component = ref result.Component1;
             Console.WriteLine(
                 $"Entity: {entity.Id}, Word: {component.Word}, Dictionary:" +
                 $" {string.Join(", ", component.Dictionary.Select(kv => $"{kv.Key}: {kv.Value}"))}");

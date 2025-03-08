@@ -16,7 +16,7 @@ public class ResizeSystem : SystemBase, IInitSystem, IExecuteSystem
         // Iterate over all entities
         foreach (var result in candidates)
         {
-            ref var scaleComponent = ref result.Component;
+            ref var scaleComponent = ref result.Component1;
             // Set the factor to 2
             scaleComponent.Factor = 2;
         }
@@ -37,7 +37,7 @@ public class ResizeSystem : SystemBase, IInitSystem, IExecuteSystem
         // Iterate over all entities
         foreach (var result in candidates)
         {
-            ref var entity = ref result.Entity.Value;
+            ref var entity = ref result.Entity;
             ref var scaleComponent = ref result.Component1;
             ref var sizeComponent = ref result.Component2;
 

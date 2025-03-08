@@ -1,21 +1,19 @@
-using System;
-
 namespace EasyEcs.Core.Components;
 
 public readonly struct ComponentRef<T> where T : struct, IComponent
 {
     private readonly int _index;
-    private readonly Type _type;
+    private readonly byte _bitIndex;
     private readonly Context _context;
 
-    public ComponentRef(int index, Context context)
+    public ComponentRef(int index, byte bitIndex, Context context)
     {
         _index = index;
-        _type = typeof(T);
+        _bitIndex = bitIndex;
         _context = context;
     }
 
-    public ref T Value => ref ((T[])_context.Components[_context.TagRegistry.GetTagBitIndex(_type)])[_index];
+    public ref T Value => ref ((T[])_context.Components[_bitIndex])[_index];
 
     public static implicit operator T(ComponentRef<T> componentRef)
     {
@@ -25,18 +23,16 @@ public readonly struct ComponentRef<T> where T : struct, IComponent
 
 public readonly struct SingletonComponentRef<T> where T : struct, ISingletonComponent
 {
-    private readonly int _index;
-    private readonly Type _type;
+    private readonly byte _bitIndex;
     private readonly Context _context;
 
-    public SingletonComponentRef(int index, Context context)
+    public ref T Value => ref ((T[])_context.Components[_bitIndex])[0];
+
+    public SingletonComponentRef(byte bitIndex, Context context)
     {
-        _index = index;
-        _type = typeof(T);
+        _bitIndex = bitIndex;
         _context = context;
     }
-
-    public ref T Value => ref ((T[])_context.Components[_context.TagRegistry.GetTagBitIndex(_type)])[_index];
 
     public static implicit operator T(SingletonComponentRef<T> componentRef)
     {

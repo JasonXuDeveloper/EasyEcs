@@ -190,12 +190,13 @@ public partial class Context : IAsyncDisposable
         _commandBuffer.AddCommand(new AddComponentCommand(entity.Id, typeof(T),
             () =>
             {
-                var arr = (T[])Components[TagRegistry.GetTagBitIndex(typeof(T))];
+                var idx = TagRegistry.GetTagBitIndex(typeof(T));
+                var arr = (T[])Components[idx];
                 ref var compRef = ref arr[entity.Id];
                 compRef = new T();
                 try
                 {
-                    callback?.Invoke(new ComponentRef<T>(entity.Id, this));
+                    callback?.Invoke(new ComponentRef<T>(entity.Id, idx, this));
                 }
                 catch (Exception e)
                 {
@@ -225,12 +226,13 @@ public partial class Context : IAsyncDisposable
         _commandBuffer.AddCommand(new AddComponentCommand(0, typeof(T),
             () =>
             {
-                var arr = (T[])Components[TagRegistry.GetTagBitIndex(typeof(T))];
+                var idx = TagRegistry.GetTagBitIndex(typeof(T));
+                var arr = (T[])Components[idx];
                 var component = new T();
                 arr[0] = component;
                 try
                 {
-                    callback?.Invoke(new SingletonComponentRef<T>(0, this).Value);
+                    callback?.Invoke(new SingletonComponentRef<T>(idx, this));
                 }
                 catch (Exception e)
                 {
@@ -247,10 +249,11 @@ public partial class Context : IAsyncDisposable
     public SingletonComponentRef<T> GetSingletonComponent<T>() where T : struct, ISingletonComponent
     {
         ref var entity = ref Entities[0];
-        if (!entity.Tag.HasBit(TagRegistry.GetTagBitIndex(typeof(T))))
+        var idx = TagRegistry.GetTagBitIndex(typeof(T));
+        if (!entity.Tag.HasBit(idx))
             throw new InvalidOperationException($"Component {typeof(T)} not found.");
 
-        return new SingletonComponentRef<T>(0, this);
+        return new SingletonComponentRef<T>(idx, this);
     }
 
     /// <summary>
@@ -261,9 +264,14 @@ public partial class Context : IAsyncDisposable
     /// <returns></returns>
     public bool TryGetSingletonComponent<T>(out SingletonComponentRef<T> value) where T : struct, ISingletonComponent
     {
+        value = default;
         ref var entity = ref Entities[0];
-        value = new SingletonComponentRef<T>(0, this);
-        return entity.Tag.HasBit(TagRegistry.GetTagBitIndex(typeof(T)));
+        var idx = TagRegistry.GetTagBitIndex(typeof(T));
+        if (!entity.Tag.HasBit(idx))
+            return false;
+
+        value = new SingletonComponentRef<T>(idx, this);
+        return true;
     }
 
     /// <summary>
@@ -442,12 +450,14 @@ public partial class Context : IAsyncDisposable
         {
             group.Clear();
         }
+
         Groups.Clear();
         // clear all components
         foreach (var arr in Components)
         {
             Array.Clear(arr, 0, arr.Length);
         }
+
         Components = null;
         // clear all systems
         _executeSystems.Clear();
@@ -511,11 +521,16 @@ public partial class Context : IAsyncDisposable
                         var id = _reusableIds.Count > 0 ? _reusableIds.Dequeue() : _entityIdCounter++;
                         var entity = new Entity(this, id);
                         // ensure array size
-                        if (id >= Entities.Length)
+                        int newLen = Math.Max(1, Entities.Length);
+                        int targetLen = id + 1;
+                        while (newLen < targetLen)
                         {
-                            var arr2 = new Entity[id + 1];
-                            Array.Copy(Entities, arr2, Entities.Length);
-                            Entities = arr2;
+                            newLen *= 2;
+                        }
+
+                        if (Entities.Length < newLen)
+                        {
+                            Array.Resize(ref Entities, newLen);
                         }
 
                         Entities[id] = entity;
@@ -584,20 +599,27 @@ public partial class Context : IAsyncDisposable
                         }
 
                         ref Entity entity = ref Entities[addComponentCommand.Id];
+                        byte bitIdx = TagRegistry.GetTagBitIndex(addComponentCommand.ComponentType);
 
                         // add to array
-                        var arr = Components[TagRegistry.GetTagBitIndex(addComponentCommand.ComponentType)];
-                        if (arr.Length < entity.Id + 1)
+                        var arr = Components[bitIdx];
+                        int newLen = Math.Max(1, arr.Length);
+                        int targetLen = entity.Id + 1;
+                        while (newLen < targetLen)
                         {
-                            var arr2 = Array.CreateInstance(addComponentCommand.ComponentType, entity.Id + 1);
+                            newLen *= 2;
+                        }
+
+                        if (arr.Length < newLen)
+                        {
+                            var arr2 = Array.CreateInstance(addComponentCommand.ComponentType, newLen);
                             Array.Copy(arr, arr2, arr.Length);
-                            Components[TagRegistry.GetTagBitIndex(addComponentCommand.ComponentType)] = arr2;
+                            Components[bitIdx] = arr2;
                         }
 
                         // set tag
                         var oldTag = entity.Tag;
-                        entity.Tag.SetBit(
-                            TagRegistry.GetTagBitIndex(addComponentCommand.ComponentType));
+                        entity.Tag.SetBit(bitIdx);
                         // move group
                         if (Groups.TryGetValue(oldTag, out var oldGroup))
                         {
