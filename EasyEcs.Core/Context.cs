@@ -221,7 +221,7 @@ public partial class Context : IAsyncDisposable
     /// <param name="callback"></param>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
-    public void AddSingletonComponent<T>(Action<T> callback = null) where T : struct, ISingletonComponent
+    public void AddSingletonComponent<T>(Action<SingletonComponentRef<T>> callback = null) where T : struct, ISingletonComponent
     {
         _commandBuffer.AddCommand(new AddComponentCommand(0, typeof(T),
             () =>
