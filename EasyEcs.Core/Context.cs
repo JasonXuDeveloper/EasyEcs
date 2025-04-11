@@ -221,7 +221,8 @@ public partial class Context : IAsyncDisposable
     /// <param name="callback"></param>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
-    public void AddSingletonComponent<T>(Action<SingletonComponentRef<T>> callback = null) where T : struct, ISingletonComponent
+    public void AddSingletonComponent<T>(Action<SingletonComponentRef<T>> callback = null)
+        where T : struct, ISingletonComponent
     {
         _commandBuffer.AddCommand(new AddComponentCommand(0, typeof(T),
             () =>
@@ -266,7 +267,8 @@ public partial class Context : IAsyncDisposable
     {
         value = default;
         ref var entity = ref Entities[0];
-        var idx = TagRegistry.GetTagBitIndex(typeof(T));
+        if (!TagRegistry.TryGetTagBitIndex(typeof(T), out var idx))
+            return false;
         if (!entity.Tag.HasBit(idx))
             return false;
 

@@ -15,7 +15,7 @@ internal class TagRegistry
     {
         if (_typeToBitIndex.ContainsKey(type))
         {
-            throw new InvalidOperationException($"Tag {type.Name} is already registered");
+            return;
         }
 
         if (TagCount == Unsafe.SizeOf<Tag>())
@@ -30,8 +30,7 @@ internal class TagRegistry
     {
         if (!_typeToBitIndex.TryGetValue(type, out var bitIndex))
         {
-            RegisterTag(type);
-            bitIndex = (byte)(TagCount - 1);
+            throw new InvalidOperationException($"Tag {type} not registered");
         }
 
         return bitIndex;

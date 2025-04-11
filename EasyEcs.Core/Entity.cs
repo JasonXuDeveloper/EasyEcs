@@ -79,12 +79,11 @@ public struct Entity : IEquatable<Entity>
     /// <returns></returns>
     public bool TryGetComponent<T>(out ComponentRef<T> value) where T : struct, IComponent
     {
-        var idx = Context.TagRegistry.GetTagBitIndex(typeof(T));
-        if (!Tag.HasBit(idx))
-        {
-            value = default;
+        value = default;
+        if (!Context.TagRegistry.TryGetTagBitIndex(typeof(T), out var idx))
             return false;
-        }
+        if (!Tag.HasBit(idx))
+            return false;
 
         value = new ComponentRef<T>(Id, idx, Context);
         return true;
@@ -97,7 +96,9 @@ public struct Entity : IEquatable<Entity>
     /// <returns></returns>
     public bool HasComponent<T>() where T : struct, IComponent
     {
-        return Tag.HasBit(Context.TagRegistry.GetTagBitIndex(typeof(T)));
+        if (Context.TagRegistry.TryGetTagBitIndex(typeof(T), out var idx))
+            return Tag.HasBit(idx);
+        return false;
     }
 
     /// <summary>
@@ -110,7 +111,9 @@ public struct Entity : IEquatable<Entity>
         Tag tag = new();
         foreach (var type in types)
         {
-            tag.SetBit(Context.TagRegistry.GetTagBitIndex(type));
+            if (!Context.TagRegistry.TryGetTagBitIndex(type, out var idx))
+                return false;
+            tag.SetBit(idx);
         }
 
         return Tag == tag;
