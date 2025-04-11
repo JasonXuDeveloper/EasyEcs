@@ -18,19 +18,20 @@ internal class TagRegistry
             throw new InvalidOperationException($"Tag {type.Name} is already registered");
         }
 
-        if (_typeToBitIndex.Count == Unsafe.SizeOf<Tag>())
+        if (TagCount == Unsafe.SizeOf<Tag>())
         {
             throw new InvalidOperationException("Maximum number of tags is reached");
         }
 
-        _typeToBitIndex.Add(type, (byte)_typeToBitIndex.Count);
+        _typeToBitIndex.Add(type, (byte)TagCount);
     }
 
     public byte GetTagBitIndex(Type type)
     {
         if (!_typeToBitIndex.TryGetValue(type, out var bitIndex))
         {
-            throw new InvalidOperationException($"Tag {type.Name} is not registered");
+            RegisterTag(type);
+            bitIndex = (byte)(TagCount - 1);
         }
 
         return bitIndex;
