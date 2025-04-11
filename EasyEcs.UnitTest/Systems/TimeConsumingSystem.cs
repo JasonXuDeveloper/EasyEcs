@@ -7,7 +7,7 @@ namespace EasyEcs.UnitTest.Systems;
 
 public class TimeConsumingSystem : SystemBase, IExecuteSystem
 {
-    public Task OnExecute(Context context)
+    public async ValueTask OnExecute(Context context)
     {
         Console.WriteLine($"{GetType().Name} (Priority: {Priority}, " +
                           $"Thread: {Environment.CurrentManagedThreadId}, " +
@@ -17,6 +17,6 @@ public class TimeConsumingSystem : SystemBase, IExecuteSystem
         // other tasks at the same priority level should be able to run concurrently on other threads
         // if the system is set to run in parallel. Tasks with lower priority will be queued until
         // this task (or the most time-consuming task) is finished
-        return Task.Delay(Random.Shared.Next(10, 100));
+        await Task.Delay(Random.Shared.Next(10, 100));
     }
 }

@@ -8,7 +8,7 @@ namespace EasyEcs.UnitTest.Systems;
 
 public class ResizeSystem : SystemBase, IInitSystem, IExecuteSystem
 {
-    public Task OnInit(Context context)
+    public ValueTask OnInit(Context context)
     {
         // Get all entities that have ScaleComponent
         var candidates = context.GroupOf<ScaleComponent>();
@@ -21,10 +21,10 @@ public class ResizeSystem : SystemBase, IInitSystem, IExecuteSystem
             scaleComponent.Factor = 2;
         }
 
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
-    public Task OnExecute(Context context)
+    public ValueTask OnExecute(Context context)
     {
         // Should be run concurrently if possible
         Console.WriteLine($"{GetType().Name} (Priority: {Priority}, " +
@@ -52,6 +52,6 @@ public class ResizeSystem : SystemBase, IInitSystem, IExecuteSystem
             entity.RemoveComponent<ScaleComponent>();
         }
 
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }

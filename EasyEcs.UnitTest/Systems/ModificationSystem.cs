@@ -16,7 +16,7 @@ public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
     /// </summary>
     /// <param name="context"></param>
     /// <returns></returns>
-    public Task OnExecute(Context context)
+    public ValueTask OnExecute(Context context)
     {
         // Should be run concurrently if possible
         Console.WriteLine($"{GetType().Name} (Priority: {Priority}, " +
@@ -32,7 +32,7 @@ public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
                     comp.Value.Factor = 0.5f);
         }
 
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -40,7 +40,7 @@ public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
     /// </summary>
     /// <param name="context"></param>
     /// <returns></returns>
-    public Task OnEnd(Context context)
+    public ValueTask OnEnd(Context context)
     {
         var candidates = context.GroupOf<SizeComponent>();
 
@@ -51,6 +51,6 @@ public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
             sizeComponent.Height = 0;
         }
 
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }

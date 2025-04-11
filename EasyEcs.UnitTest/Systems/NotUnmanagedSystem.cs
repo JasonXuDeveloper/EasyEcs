@@ -9,7 +9,7 @@ namespace EasyEcs.UnitTest.Systems;
 
 public class NotUnmanagedSystem : SystemBase, IExecuteSystem
 {
-    public Task OnExecute(Context context)
+    public ValueTask OnExecute(Context context)
     {
         var results = context.GroupOf<NotUnmanagedComponent>();
 
@@ -26,6 +26,6 @@ public class NotUnmanagedSystem : SystemBase, IExecuteSystem
                 $" {string.Join(", ", component.Dictionary.Select(kv => $"{kv.Key}: {kv.Value}"))}");
         }
 
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }

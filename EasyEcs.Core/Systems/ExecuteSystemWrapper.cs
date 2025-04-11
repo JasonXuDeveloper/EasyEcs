@@ -16,13 +16,13 @@ internal class ExecuteSystemWrapper
         System = system;
     }
 
-    internal Task Update(Context context)
+    internal ValueTask Update(Context context)
     {
         if (System.ExecuteFrequency == 1 || (_counter++ > 0 && _counter % System.ExecuteFrequency == 0))
         {
             return System.OnExecute(context);
         }
 
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }

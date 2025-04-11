@@ -323,7 +323,7 @@ public partial class Context : IAsyncDisposable
     /// <param name="action"></param>
     /// <param name="catchError"></param>
     /// <typeparam name="T"></typeparam>
-    private async Task QueryTasks<T>(List<T> list, Func<T, Task> action, bool catchError = true)
+    private async ValueTask QueryTasks<T>(List<T> list, Func<T, ValueTask> action, bool catchError = true)
     {
         if (_options.Parallel)
         {
@@ -353,7 +353,7 @@ public partial class Context : IAsyncDisposable
             // collect tasks for the current priority
             foreach (var item in list)
             {
-                _executeTasks.Add(action(item));
+                _executeTasks.Add(action(item).AsTask());
             }
 
             // dispatch all tasks of the same priority
