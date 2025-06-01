@@ -12,10 +12,10 @@ public readonly struct GroupResult
         return ref ((T[])_context.Components[_context.TagRegistry.GetTagBitIndex(typeof(T))])[_entityId];
     }
 
-    public GroupResult(Entity entity)
+    public GroupResult(int id, Context context)
     {
-        _entityId = entity.Id;
-        _context = entity.Context;
+        _entityId = id;
+        _context = context;
     }
 }
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using EasyEcs.Core.Commands;
 using EasyEcs.Core.Components;
@@ -28,10 +29,10 @@ public partial class Context : IAsyncDisposable
     internal readonly TagRegistry TagRegistry = new();
 
     internal Array[] Components;
-    internal readonly SortedDictionary<Tag, SortedList<int, Entity>> Groups = new();
+    internal readonly SortedDictionary<Tag, List<int>> Groups = new();
 
     internal Entity[] Entities = new Entity[1];
-    private readonly SortedList<int, int> _activeEntityIds = new();
+    private readonly HashSet<int> _activeEntityIds = new();
     private readonly Queue<int> _reusableIds = new();
 
     private readonly SortedList<int, List<ExecuteSystemWrapper>> _executeSystems = new();
@@ -89,7 +90,7 @@ public partial class Context : IAsyncDisposable
     /// </summary>
     /// <param name="index"></param>
     /// <returns></returns>
-    public ref Entity EntityAt(int index) => ref Entities[_activeEntityIds.Values[index]];
+    public ref Entity EntityAt(int index) => ref Entities[_activeEntityIds.ElementAt(index)];
 
     /// <summary>
     /// Try to get an entity by id.
@@ -99,7 +100,7 @@ public partial class Context : IAsyncDisposable
     /// <returns></returns>
     public bool TryGetEntityById(int id, out EntityRef entityRef)
     {
-        if (id > 0 && _activeEntityIds.ContainsKey(id))
+        if (id > 0 && _activeEntityIds.Contains(id))
         {
             entityRef = new EntityRef(id, this);
             return true;
@@ -116,7 +117,7 @@ public partial class Context : IAsyncDisposable
     /// <returns></returns>
     public EntityRef GetEntityById(int id)
     {
-        if (id > 0 && _activeEntityIds.ContainsKey(id))
+        if (id > 0 && _activeEntityIds.Contains(id))
             return new EntityRef(id, this);
 
         throw new InvalidOperationException($"Entity with id {id} not found.");
@@ -128,7 +129,7 @@ public partial class Context : IAsyncDisposable
     /// </summary>
     public IEnumerable<EntityRef> AllEntities()
     {
-        foreach (var (id, _) in _activeEntityIds)
+        foreach (var id in _activeEntityIds)
         {
             yield return new EntityRef(id, this);
         }
@@ -512,21 +513,21 @@ public partial class Context : IAsyncDisposable
 
                         Entities[id] = entity;
                         // add to active entities
-                        _activeEntityIds.Add(id, id);
+                        _activeEntityIds.Add(id);
                         if (!Groups.TryGetValue(entity.Tag, out var group))
                         {
-                            group = new SortedList<int, Entity>();
+                            group = new(Entities.Length);
                             Groups.Add(entity.Tag, group);
                         }
 
-                        group.Add(entity.Id, entity);
+                        group.Add(entity.Id);
 
                         createEntityCommand.Callback?.Invoke(entity);
                         break;
                     }
                     case DeleteEntityCommand deleteEntityCommand:
                     {
-                        if (!_activeEntityIds.ContainsKey(deleteEntityCommand.Id) || deleteEntityCommand.Id == 0)
+                        if (!_activeEntityIds.Remove(deleteEntityCommand.Id) || deleteEntityCommand.Id == 0)
                             throw new InvalidOperationException(
                                 $"Entity with id {deleteEntityCommand.Id} not found.");
 
@@ -536,7 +537,6 @@ public partial class Context : IAsyncDisposable
                             group.Remove(entity.Id);
                         }
 
-                        _activeEntityIds.Remove(entity.Id);
                         _reusableIds.Enqueue(entity.Id);
 
                         break;
@@ -563,7 +563,7 @@ public partial class Context : IAsyncDisposable
                         break;
                     case AddComponentCommand addComponentCommand:
                     {
-                        if (!_activeEntityIds.ContainsKey(addComponentCommand.Id) && addComponentCommand.Id != 0)
+                        if (!_activeEntityIds.Contains(addComponentCommand.Id) && addComponentCommand.Id != 0)
                             throw new InvalidOperationException($"Entity with id {addComponentCommand.Id} not found.");
                         if (addComponentCommand.Id == 0)
                         {
@@ -638,11 +638,11 @@ public partial class Context : IAsyncDisposable
 
                         if (!Groups.TryGetValue(entity.Tag, out var group))
                         {
-                            group = new SortedList<int, Entity>();
+                            group = new(Entities.Length);
                             Groups.Add(entity.Tag, group);
                         }
 
-                        group.Add(entity.Id, entity);
+                        group.Add(entity.Id);
 
                         // callback
                         addComponentCommand.OnComponentAdded?.Invoke();
@@ -650,7 +650,7 @@ public partial class Context : IAsyncDisposable
                     }
                     case RemoveComponentCommand removeComponentCommand:
                     {
-                        if (!_activeEntityIds.ContainsKey(removeComponentCommand.Id) && removeComponentCommand.Id != 0)
+                        if (!_activeEntityIds.Contains(removeComponentCommand.Id) && removeComponentCommand.Id != 0)
                             throw new InvalidOperationException(
                                 $"Entity with id {removeComponentCommand.Id} not found.");
                         if (removeComponentCommand.Id == 0)
@@ -682,11 +682,11 @@ public partial class Context : IAsyncDisposable
                         // if the entity still has a tag, add it to the group
                         if (!Groups.TryGetValue(entity.Tag, out var group))
                         {
-                            group = new SortedList<int, Entity>();
+                            group = new(Entities.Length);
                             Groups.Add(entity.Tag, group);
                         }
 
-                        group.Add(entity.Id, entity);
+                        group.Add(entity.Id);
 
                         break;
                     }

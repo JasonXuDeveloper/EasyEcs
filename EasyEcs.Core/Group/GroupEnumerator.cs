@@ -38,9 +38,9 @@ public readonly struct GroupResultEnumerator : IEnumerable<GroupResult>
         {
             if ((group.Key & tag) == tag)
             {
-                foreach (var (_, entity) in group.Value)
+                foreach (var id in group.Value)
                 {
-                    yield return new GroupResult(entity);
+                    yield return new GroupResult(id, _context);
                 }
             }
         }
@@ -83,7 +83,7 @@ public readonly struct GroupResultEnumerator<T> : IEnumerable<GroupResult<T>>
         {
             if ((group.Key & tag) == tag)
             {
-                foreach (var (id, _) in group.Value)
+                foreach (var id in group.Value)
                 {
                     yield return new GroupResult<T>(id, entities, components);
                 }
@@ -135,7 +135,7 @@ public readonly struct GroupResultEnumerator<T1, T2> : IEnumerable<GroupResult<T
         {
             if ((group.Key & tag) == tag)
             {
-                foreach (var (id, _) in group.Value)
+                foreach (var id in group.Value)
                 {
                     yield return new GroupResult<T1, T2>(id, entities, components1, components2);
                 }
@@ -194,7 +194,7 @@ public readonly struct GroupResultEnumerator<T1, T2, T3> : IEnumerable<GroupResu
         {
             if ((group.Key & tag) == tag)
             {
-                foreach (var (id, _) in group.Value)
+                foreach (var id in group.Value)
                 {
                     yield return new GroupResult<T1, T2, T3>(id, entities, components1, components2, components3);
                 }
@@ -260,7 +260,7 @@ public readonly struct GroupResultEnumerator<T1, T2, T3, T4> : IEnumerable<Group
         {
             if ((group.Key & tag) == tag)
             {
-                foreach (var (id, _) in group.Value)
+                foreach (var id in group.Value)
                 {
                     yield return new GroupResult<T1, T2, T3, T4>(id, entities, components1, components2, components3,
                         components4);
@@ -334,7 +334,7 @@ public readonly struct GroupResultEnumerator<T1, T2, T3, T4, T5> : IEnumerable<G
         {
             if ((group.Key & tag) == tag)
             {
-                foreach (var (id, _) in group.Value)
+                foreach (var id in group.Value)
                 {
                     yield return new GroupResult<T1, T2, T3, T4, T5>(id, entities, components1, components2,
                         components3, components4, components5);
@@ -415,7 +415,7 @@ public readonly struct GroupResultEnumerator<T1, T2, T3, T4, T5, T6> : IEnumerab
         {
             if ((group.Key & tag) == tag)
             {
-                foreach (var (id, _) in group.Value)
+                foreach (var id in group.Value)
                 {
                     yield return new GroupResult<T1, T2, T3, T4, T5, T6>(id, entities, components1, components2,
                         components3, components4, components5, components6);
@@ -504,7 +504,7 @@ public readonly struct
         {
             if ((group.Key & tag) == tag)
             {
-                foreach (var (id, _) in group.Value)
+                foreach (var id in group.Value)
                 {
                     yield return new GroupResult<T1, T2, T3, T4, T5, T6, T7>(id, entities, components1, components2,
                         components3, components4, components5, components6, components7);
@@ -600,7 +600,7 @@ public readonly struct
         {
             if ((group.Key & tag) == tag)
             {
-                foreach (var (id, _) in group.Value)
+                foreach (var id in group.Value)
                 {
                     yield return new GroupResult<T1, T2, T3, T4, T5, T6, T7, T8>(id, entities, components1, components2,
                         components3, components4, components5, components6, components7, components8);
@@ -704,7 +704,7 @@ public readonly struct
         {
             if ((group.Key & tag) == tag)
             {
-                foreach (var (id, _) in group.Value)
+                foreach (var id in group.Value)
                 {
                     yield return new GroupResult<T1, T2, T3, T4, T5, T6, T7, T8, T9>(id, entities, components1,
                         components2,
