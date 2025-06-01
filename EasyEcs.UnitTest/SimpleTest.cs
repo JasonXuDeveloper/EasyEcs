@@ -96,6 +96,8 @@ public class SimpleTest
         ctx.AddSystem<ResizeSystem>();
         ctx.AddSystem<ModificationSystem>();
         ctx.AddSystem<NotUnmanagedSystem>();
+        
+        ctx.EnsureEntityCapacity(1000);
 
         // Create an entity
         ctx.CreateEntity(entityRef =>

@@ -86,6 +86,34 @@ public partial class Context : IAsyncDisposable
     public int EntityCount => _activeEntityCount;
 
     /// <summary>
+    /// Resize the entity array to ensure it can hold at least the specified capacity.
+    /// </summary>
+    /// <param name="capacity"></param>
+    public void EnsureEntityCapacity(int capacity)
+    {
+        if (Entities.Length < capacity)
+        {
+            Array.Resize(ref Entities, capacity);
+            Array.Resize(ref _activeEntityIds, capacity);
+            if (Components == null || Components.Length == 0)
+            {
+                return;
+            }
+
+            for (var index = 0; index < Components.Length; index++)
+            {
+                var arr = Components[index];
+                if (arr != null && arr.Length < capacity)
+                {
+                    var arr2 = Array.CreateInstance(arr.GetType()!.GetElementType()!, capacity);
+                    Array.Copy(arr, arr2, arr.Length);
+                    Components[index] = arr2;
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Get an entity by index.
     /// </summary>
     /// <param name="index"></param>
@@ -467,7 +495,7 @@ public partial class Context : IAsyncDisposable
         _endSystems.Clear();
         // clear the execute tasks
         _executeTasks.Clear();
-        
+
         // clear the tag registry
         TagRegistry.Clear();
 
@@ -608,7 +636,6 @@ public partial class Context : IAsyncDisposable
                         }
 
                         ref Entity entity = ref Entities[addComponentCommand.Id];
-                        int targetLen = entity.Id + 1;
                         byte bitIdx;
                         Array arr;
 
@@ -629,13 +656,7 @@ public partial class Context : IAsyncDisposable
                             }
 
                             // create array of components
-                            var arrLen = 1;
-                            while (arrLen < targetLen)
-                            {
-                                arrLen *= 2;
-                            }
-
-                            arr = Array.CreateInstance(type, arrLen);
+                            arr = Array.CreateInstance(type, Entities.Length * 2);
 
                             // set component array to the correct index
                             bitIdx = addComponentCommand.GetTagBitIndex();
@@ -645,15 +666,9 @@ public partial class Context : IAsyncDisposable
                         {
                             bitIdx = addComponentCommand.GetTagBitIndex();
                             arr = Components[bitIdx];
-                            int newLen = Math.Max(1, arr.Length);
-                            while (newLen < targetLen)
+                            if (arr.Length < Entities.Length)
                             {
-                                newLen *= 2;
-                            }
-
-                            if (arr.Length < newLen)
-                            {
-                                var arr2 = Array.CreateInstance(addComponentCommand.ComponentType, newLen);
+                                var arr2 = Array.CreateInstance(addComponentCommand.ComponentType, Entities.Length * 2);
                                 Array.Copy(arr, arr2, arr.Length);
                                 Components[bitIdx] = arr2;
                             }
