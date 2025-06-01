@@ -7,8 +7,8 @@ public readonly struct EntityRef : IEquatable<EntityRef>
 {
     private readonly int _id;
     private readonly Context _context;
-    public ref Entity Value => ref _context.Entities[_id];
-    
+    public ref Entity Value => ref _context.Entities.AsSpan()[_id];
+
     public EntityRef(int id, Context context)
     {
         _id = id;
@@ -19,22 +19,22 @@ public readonly struct EntityRef : IEquatable<EntityRef>
     {
         return new EntityRef(entity.Id, entity.Context);
     }
-    
+
     public static implicit operator Entity(EntityRef entityRef)
     {
         return entityRef.Value;
     }
-    
+
     public static bool operator ==(EntityRef left, EntityRef right)
     {
         return left._id == right._id && left._context == right._context;
     }
-    
+
     public static bool operator !=(EntityRef left, EntityRef right)
     {
         return left._id != right._id || left._context != right._context;
     }
-    
+
     public override bool Equals(object obj)
     {
         return obj is EntityRef other && this == other;

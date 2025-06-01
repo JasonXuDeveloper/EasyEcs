@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading.Tasks;
 using EasyEcs.Core.Commands;
 using EasyEcs.Core.Components;
@@ -32,8 +31,9 @@ public partial class Context : IAsyncDisposable
     internal readonly SortedDictionary<Tag, List<int>> Groups = new();
 
     internal Entity[] Entities = new Entity[1];
-    private readonly HashSet<int> _activeEntityIds = new();
+    private bool[] _activeEntityIds = new bool[1];
     private readonly Queue<int> _reusableIds = new();
+    private int _activeEntityCount;
 
     private readonly SortedList<int, List<ExecuteSystemWrapper>> _executeSystems = new();
     private readonly SortedList<int, List<IInitSystem>> _initSystems = new();
@@ -83,14 +83,27 @@ public partial class Context : IAsyncDisposable
     /// <summary>
     /// Get count of all entities.
     /// </summary>
-    public int EntityCount => _activeEntityIds.Count;
+    public int EntityCount => _activeEntityCount;
 
     /// <summary>
     /// Get an entity by index.
     /// </summary>
     /// <param name="index"></param>
     /// <returns></returns>
-    public ref Entity EntityAt(int index) => ref Entities[_activeEntityIds.ElementAt(index)];
+    public ref Entity EntityAt(int index)
+    {
+        var span = _activeEntityIds.AsSpan();
+        for (var i = 0; i < span.Length; i++)
+        {
+            var isActive = span[i];
+            if (isActive && index-- == 0)
+            {
+                return ref Entities.AsSpan()[i];
+            }
+        }
+
+        throw new IndexOutOfRangeException($"Entity at index {index} not found.");
+    }
 
     /// <summary>
     /// Try to get an entity by id.
@@ -100,7 +113,7 @@ public partial class Context : IAsyncDisposable
     /// <returns></returns>
     public bool TryGetEntityById(int id, out EntityRef entityRef)
     {
-        if (id > 0 && _activeEntityIds.Contains(id))
+        if (id > 0 && _activeEntityIds[id])
         {
             entityRef = new EntityRef(id, this);
             return true;
@@ -117,7 +130,7 @@ public partial class Context : IAsyncDisposable
     /// <returns></returns>
     public EntityRef GetEntityById(int id)
     {
-        if (id > 0 && _activeEntityIds.Contains(id))
+        if (id > 0 && _activeEntityIds[id])
             return new EntityRef(id, this);
 
         throw new InvalidOperationException($"Entity with id {id} not found.");
@@ -129,9 +142,12 @@ public partial class Context : IAsyncDisposable
     /// </summary>
     public IEnumerable<EntityRef> AllEntities()
     {
-        foreach (var id in _activeEntityIds)
+        for (var i = 0; i < _activeEntityIds.Length; i++)
         {
-            yield return new EntityRef(id, this);
+            var isActive = _activeEntityIds[i];
+            if (!isActive || i == 0)
+                continue;
+            yield return new EntityRef(i, this);
         }
     }
 
@@ -418,7 +434,7 @@ public partial class Context : IAsyncDisposable
         }
 
         // clear all entities
-        _activeEntityIds.Clear();
+        _activeEntityIds.AsSpan().Clear();
         Entities.AsSpan().Clear();
         _reusableIds.Clear();
         // clear all groups
@@ -444,6 +460,7 @@ public partial class Context : IAsyncDisposable
         // clear the execute tasks
         _executeTasks.Clear();
 
+        _activeEntityCount = 0;
         _disposed = true;
     }
 
@@ -509,11 +526,12 @@ public partial class Context : IAsyncDisposable
                         if (Entities.Length < newLen)
                         {
                             Array.Resize(ref Entities, newLen);
+                            Array.Resize(ref _activeEntityIds, newLen);
                         }
 
                         Entities[id] = entity;
                         // add to active entities
-                        _activeEntityIds.Add(id);
+                        _activeEntityIds[id] = true;
                         if (!Groups.TryGetValue(entity.Tag, out var group))
                         {
                             group = new(Entities.Length);
@@ -521,13 +539,14 @@ public partial class Context : IAsyncDisposable
                         }
 
                         group.Add(entity.Id);
+                        _activeEntityCount++;
 
                         createEntityCommand.Callback?.Invoke(entity);
                         break;
                     }
                     case DeleteEntityCommand deleteEntityCommand:
                     {
-                        if (!_activeEntityIds.Remove(deleteEntityCommand.Id) || deleteEntityCommand.Id == 0)
+                        if (!_activeEntityIds[deleteEntityCommand.Id] || deleteEntityCommand.Id == 0)
                             throw new InvalidOperationException(
                                 $"Entity with id {deleteEntityCommand.Id} not found.");
 
@@ -537,6 +556,8 @@ public partial class Context : IAsyncDisposable
                             group.Remove(entity.Id);
                         }
 
+                        _activeEntityIds[deleteEntityCommand.Id] = false;
+                        _activeEntityCount--;
                         _reusableIds.Enqueue(entity.Id);
 
                         break;
@@ -563,7 +584,7 @@ public partial class Context : IAsyncDisposable
                         break;
                     case AddComponentCommand addComponentCommand:
                     {
-                        if (!_activeEntityIds.Contains(addComponentCommand.Id) && addComponentCommand.Id != 0)
+                        if (!_activeEntityIds[addComponentCommand.Id] && addComponentCommand.Id != 0)
                             throw new InvalidOperationException($"Entity with id {addComponentCommand.Id} not found.");
                         if (addComponentCommand.Id == 0)
                         {
@@ -650,7 +671,7 @@ public partial class Context : IAsyncDisposable
                     }
                     case RemoveComponentCommand removeComponentCommand:
                     {
-                        if (!_activeEntityIds.Contains(removeComponentCommand.Id) && removeComponentCommand.Id != 0)
+                        if (!_activeEntityIds[removeComponentCommand.Id] && removeComponentCommand.Id != 0)
                             throw new InvalidOperationException(
                                 $"Entity with id {removeComponentCommand.Id} not found.");
                         if (removeComponentCommand.Id == 0)
