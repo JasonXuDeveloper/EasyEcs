@@ -23,7 +23,7 @@ public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
                           $"Thread: {Environment.CurrentManagedThreadId}, " +
                           $"Time: {DateTime.Now:HH:mm:ss.fff})");
 
-        var candidates = context.GroupOf(typeof(SizeComponent));
+        var candidates = context.GroupOf<SizeComponent>();
 
         foreach (var result in candidates)
         {

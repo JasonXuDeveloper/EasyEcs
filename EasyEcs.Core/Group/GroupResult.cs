@@ -11,7 +11,7 @@ public readonly struct GroupResult
 
     public ref T GetComponent<T>() where T : struct
     {
-        return ref ((T[])_context.Components[_context.TagRegistry.GetTagBitIndex(typeof(T))]).AsSpan()[_entityId];
+        return ref ((T[])_context.Components[_context.TagRegistry.GetTagBitIndex<T>()]).AsSpan()[_entityId];
     }
 
     public GroupResult(int id, Context context)
@@ -54,7 +54,7 @@ public readonly struct GroupResult<T1, T2>
 
     public GroupResult(int id, Entity[] entities, T1[] components1, T2[] components2)
     {
-        _entityId =id;
+        _entityId = id;
         _entities = entities;
         _components1 = components1;
         _components2 = components2;
@@ -79,7 +79,7 @@ public readonly struct GroupResult<T1, T2, T3>
 
     public GroupResult(int id, Entity[] entities, T1[] components1, T2[] components2, T3[] components3)
     {
-        _entityId =id;
+        _entityId = id;
         _entities = entities;
         _components1 = components1;
         _components2 = components2;
@@ -106,9 +106,10 @@ public readonly struct GroupResult<T1, T2, T3, T4>
 
     public ref T4 Component4 => ref _components4.AsSpan()[_entityId];
 
-    public GroupResult(int id, Entity[] entities, T1[] components1, T2[] components2, T3[] components3, T4[] components4)
+    public GroupResult(int id, Entity[] entities, T1[] components1, T2[] components2, T3[] components3,
+        T4[] components4)
     {
-        _entityId =id;
+        _entityId = id;
         _entities = entities;
         _components1 = components1;
         _components2 = components2;
@@ -139,9 +140,10 @@ public readonly struct GroupResult<T1, T2, T3, T4, T5>
 
     public ref T5 Component5 => ref _components5.AsSpan()[_entityId];
 
-    public GroupResult(int id, Entity[] entities, T1[] components1, T2[] components2, T3[] components3, T4[] components4, T5[] components5)
+    public GroupResult(int id, Entity[] entities, T1[] components1, T2[] components2, T3[] components3,
+        T4[] components4, T5[] components5)
     {
-        _entityId =id;
+        _entityId = id;
         _entities = entities;
         _components1 = components1;
         _components2 = components2;
@@ -176,9 +178,10 @@ public readonly struct GroupResult<T1, T2, T3, T4, T5, T6>
 
     public ref T6 Component6 => ref _components6.AsSpan()[_entityId];
 
-    public GroupResult(int id, Entity[] entities, T1[] components1, T2[] components2, T3[] components3, T4[] components4, T5[] components5, T6[] components6)
+    public GroupResult(int id, Entity[] entities, T1[] components1, T2[] components2, T3[] components3,
+        T4[] components4, T5[] components5, T6[] components6)
     {
-        _entityId =id;
+        _entityId = id;
         _entities = entities;
         _components1 = components1;
         _components2 = components2;
@@ -217,9 +220,10 @@ public readonly struct GroupResult<T1, T2, T3, T4, T5, T6, T7>
 
     public ref T7 Component7 => ref _components7.AsSpan()[_entityId];
 
-    public GroupResult(int id, Entity[] entities, T1[] components1, T2[] components2, T3[] components3, T4[] components4, T5[] components5, T6[] components6, T7[] components7)
+    public GroupResult(int id, Entity[] entities, T1[] components1, T2[] components2, T3[] components3,
+        T4[] components4, T5[] components5, T6[] components6, T7[] components7)
     {
-        _entityId =id;
+        _entityId = id;
         _entities = entities;
         _components1 = components1;
         _components2 = components2;
@@ -262,9 +266,10 @@ public readonly struct GroupResult<T1, T2, T3, T4, T5, T6, T7, T8>
 
     public ref T8 Component8 => ref _components8.AsSpan()[_entityId];
 
-    public GroupResult(int id, Entity[] entities, T1[] components1, T2[] components2, T3[] components3, T4[] components4, T5[] components5, T6[] components6, T7[] components7, T8[] components8)
+    public GroupResult(int id, Entity[] entities, T1[] components1, T2[] components2, T3[] components3,
+        T4[] components4, T5[] components5, T6[] components6, T7[] components7, T8[] components8)
     {
-        _entityId =id;
+        _entityId = id;
         _entities = entities;
         _components1 = components1;
         _components2 = components2;
@@ -311,7 +316,8 @@ public readonly struct GroupResult<T1, T2, T3, T4, T5, T6, T7, T8, T9>
 
     public ref T9 Component9 => ref _components9.AsSpan()[_entityId];
 
-    public GroupResult(int id, Entity[] entities, T1[] components1, T2[] components2, T3[] components3, T4[] components4, T5[] components5, T6[] components6, T7[] components7, T8[] components8, T9[] components9)
+    public GroupResult(int id, Entity[] entities, T1[] components1, T2[] components2, T3[] components3,
+        T4[] components4, T5[] components5, T6[] components6, T7[] components7, T8[] components8, T9[] components9)
     {
         _entityId = id;
         _entities = entities;

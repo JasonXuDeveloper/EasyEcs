@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using EasyEcs.Core.Components;
 
 namespace EasyEcs.Core;
@@ -40,7 +41,7 @@ public struct Entity : IEquatable<Entity>
     /// <param name="callback"></param>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
-    ///
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddComponent<T>(Action<ComponentRef<T>> callback = null) where T : struct, IComponent
     {
         Context.AddComponent(this, callback);
@@ -51,6 +52,7 @@ public struct Entity : IEquatable<Entity>
     /// </summary>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void RemoveComponent<T>() where T : struct, IComponent
     {
         Context.RemoveComponent<T>(this);
@@ -62,9 +64,10 @@ public struct Entity : IEquatable<Entity>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
     /// <exception cref="InvalidOperationException"></exception>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ComponentRef<T> GetComponent<T>() where T : struct, IComponent
     {
-        var idx = Context.TagRegistry.GetTagBitIndex(typeof(T));
+        var idx = Context.TagRegistry.GetTagBitIndex<T>();
         if (!Tag.HasBit(idx))
             throw new InvalidOperationException($"Component {typeof(T)} not found.");
 
@@ -77,10 +80,11 @@ public struct Entity : IEquatable<Entity>
     /// <param name="value"></param>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetComponent<T>(out ComponentRef<T> value) where T : struct, IComponent
     {
         value = default;
-        if (!Context.TagRegistry.TryGetTagBitIndex(typeof(T), out var idx))
+        if (!Context.TagRegistry.TryGetTagBitIndex<T>(out var idx))
             return false;
         if (!Tag.HasBit(idx))
             return false;
@@ -94,35 +98,19 @@ public struct Entity : IEquatable<Entity>
     /// </summary>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool HasComponent<T>() where T : struct, IComponent
     {
-        if (Context.TagRegistry.TryGetTagBitIndex(typeof(T), out var idx))
+        if (Context.TagRegistry.TryGetTagBitIndex<T>(out var idx))
             return Tag.HasBit(idx);
         return false;
-    }
-
-    /// <summary>
-    /// Does the entity have all the components?
-    /// </summary>
-    /// <param name="types"></param>
-    /// <returns></returns>
-    public bool HasComponents(params Type[] types)
-    {
-        Tag tag = new();
-        foreach (var type in types)
-        {
-            if (!Context.TagRegistry.TryGetTagBitIndex(type, out var idx))
-                return false;
-            tag.SetBit(idx);
-        }
-
-        return Tag == tag;
     }
 
     /// <summary>
     /// Get the hash code of the entity.
     /// </summary>
     /// <returns></returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override int GetHashCode()
     {
         return Id;

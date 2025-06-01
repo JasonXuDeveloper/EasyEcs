@@ -207,7 +207,7 @@ public partial class Context : IAsyncDisposable
         _commandBuffer.AddCommand(new AddComponentCommand(entity.Id, typeof(T),
             () =>
             {
-                var idx = TagRegistry.GetTagBitIndex(typeof(T));
+                var idx = TagRegistry.GetTagBitIndex<T>();
                 var arr = (T[])Components[idx];
                 ref var compRef = ref arr[entity.Id];
                 compRef = new T();
@@ -219,7 +219,11 @@ public partial class Context : IAsyncDisposable
                 {
                     OnError?.Invoke(new AggregateException($"Add Component {typeof(T).Name} error", e));
                 }
-            }));
+            },
+            () => TagRegistry.HasTag<T>(),
+            () => TagRegistry.GetTagBitIndex<T>(),
+            () => TagRegistry.RegisterTag<T>()
+        ));
     }
 
     /// <summary>
@@ -229,7 +233,8 @@ public partial class Context : IAsyncDisposable
     /// <typeparam name="T"></typeparam>
     public void RemoveComponent<T>(Entity entity) where T : struct, IComponent
     {
-        _commandBuffer.AddCommand(new RemoveComponentCommand(entity.Id, typeof(T)));
+        _commandBuffer.AddCommand(new RemoveComponentCommand(entity.Id, typeof(T),
+            () => TagRegistry.GetTagBitIndex<T>()));
     }
 
     /// <summary>
@@ -244,7 +249,7 @@ public partial class Context : IAsyncDisposable
         _commandBuffer.AddCommand(new AddComponentCommand(0, typeof(T),
             () =>
             {
-                var idx = TagRegistry.GetTagBitIndex(typeof(T));
+                var idx = TagRegistry.GetTagBitIndex<T>();
                 var arr = (T[])Components[idx];
                 var component = new T();
                 arr[0] = component;
@@ -256,7 +261,10 @@ public partial class Context : IAsyncDisposable
                 {
                     OnError?.Invoke(new AggregateException($"Add SingletonComponent {typeof(T).Name} error", e));
                 }
-            }));
+            },
+            () => TagRegistry.HasTag<T>(),
+            () => TagRegistry.GetTagBitIndex<T>(),
+            () => TagRegistry.RegisterTag<T>()));
     }
 
     /// <summary>
@@ -267,7 +275,7 @@ public partial class Context : IAsyncDisposable
     public SingletonComponentRef<T> GetSingletonComponent<T>() where T : struct, ISingletonComponent
     {
         ref var entity = ref Entities[0];
-        var idx = TagRegistry.GetTagBitIndex(typeof(T));
+        var idx = TagRegistry.GetTagBitIndex<T>();
         if (!entity.Tag.HasBit(idx))
             throw new InvalidOperationException($"Component {typeof(T)} not found.");
 
@@ -284,7 +292,7 @@ public partial class Context : IAsyncDisposable
     {
         value = default;
         ref var entity = ref Entities[0];
-        if (!TagRegistry.TryGetTagBitIndex(typeof(T), out var idx))
+        if (!TagRegistry.TryGetTagBitIndex<T>(out var idx))
             return false;
         if (!entity.Tag.HasBit(idx))
             return false;
@@ -459,6 +467,9 @@ public partial class Context : IAsyncDisposable
         _endSystems.Clear();
         // clear the execute tasks
         _executeTasks.Clear();
+        
+        // clear the tag registry
+        TagRegistry.Clear();
 
         _activeEntityCount = 0;
         _disposed = true;
@@ -602,7 +613,7 @@ public partial class Context : IAsyncDisposable
                         Array arr;
 
                         // unregistered tag
-                        if (!TagRegistry.HasTag(addComponentCommand.ComponentType))
+                        if (!addComponentCommand.HasTag())
                         {
                             var type = addComponentCommand.ComponentType;
                             if (type == typeof(IComponent) || type == typeof(ISingletonComponent))
@@ -610,7 +621,7 @@ public partial class Context : IAsyncDisposable
                             if (!type.IsValueType)
                                 throw new InvalidOperationException($"Component {type.Name} must be a struct.");
                             // register
-                            TagRegistry.RegisterTag(type);
+                            addComponentCommand.RegisterTag();
                             // ensure array size
                             if (Components.Length <= TagRegistry.TagCount)
                             {
@@ -627,12 +638,12 @@ public partial class Context : IAsyncDisposable
                             arr = Array.CreateInstance(type, arrLen);
 
                             // set component array to the correct index
-                            bitIdx = TagRegistry.GetTagBitIndex(type);
+                            bitIdx = addComponentCommand.GetTagBitIndex();
                             Components[bitIdx] = arr;
                         }
                         else
                         {
-                            bitIdx = TagRegistry.GetTagBitIndex(addComponentCommand.ComponentType);
+                            bitIdx = addComponentCommand.GetTagBitIndex();
                             arr = Components[bitIdx];
                             int newLen = Math.Max(1, arr.Length);
                             while (newLen < targetLen)
@@ -685,7 +696,7 @@ public partial class Context : IAsyncDisposable
                         }
 
                         ref Entity entity = ref Entities[removeComponentCommand.Id];
-                        int bitIdx = TagRegistry.GetTagBitIndex(removeComponentCommand.ComponentType);
+                        int bitIdx = removeComponentCommand.GetTagBitIndex();
 
                         // remove from array
                         var arr = Components[bitIdx];

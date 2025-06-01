@@ -1,4 +1,3 @@
-using System;
 using EasyEcs.Core.Components;
 using EasyEcs.Core.Group;
 
@@ -6,16 +5,6 @@ namespace EasyEcs.Core;
 
 public partial class Context
 {
-    /// <summary>
-    /// Get all entities that have the specified components.
-    /// </summary>
-    /// <param name="components"></param>
-    /// <returns></returns>
-    public GroupResultEnumerator GroupOf(params Type[] components)
-    {
-        return new GroupResultEnumerator(components, this);
-    }
-
     /// <summary>
     /// Get all entities that have the specified components.
     /// </summary>

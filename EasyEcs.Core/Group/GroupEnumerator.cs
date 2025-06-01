@@ -1,58 +1,11 @@
-using System;
 using System.Collections;
 using System.Collections.Generic;
 using EasyEcs.Core.Components;
 
 namespace EasyEcs.Core.Group;
 
-public readonly struct GroupResultEnumerator : IEnumerable<GroupResult>
-{
-    private readonly Type[] _types;
-    private readonly Context _context;
-
-    public GroupResultEnumerator(Type[] types, Context context)
-    {
-        _types = types;
-        _context = context;
-    }
-
-    public IEnumerator<GroupResult> GetEnumerator()
-    {
-        if (_context.Groups.Count == 0)
-        {
-            yield break;
-        }
-
-        Tag tag = new();
-        foreach (var type in _types)
-        {
-            if (!_context.TagRegistry.TryGetTagBitIndex(type, out var bitIdx))
-            {
-                yield break;
-            }
-
-            tag.SetBit(bitIdx);
-        }
-
-        foreach (var group in _context.Groups)
-        {
-            if ((group.Key & tag) == tag)
-            {
-                foreach (var id in group.Value)
-                {
-                    yield return new GroupResult(id, _context);
-                }
-            }
-        }
-    }
-
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        return GetEnumerator();
-    }
-}
-
 public readonly struct GroupResultEnumerator<T> : IEnumerable<GroupResult<T>>
+    where T : struct
 {
     private readonly Context _context;
 
@@ -69,7 +22,7 @@ public readonly struct GroupResultEnumerator<T> : IEnumerable<GroupResult<T>>
         }
 
         Tag tag = new();
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T), out var bitIdx))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T>(out var bitIdx))
         {
             yield break;
         }
@@ -98,6 +51,8 @@ public readonly struct GroupResultEnumerator<T> : IEnumerable<GroupResult<T>>
 }
 
 public readonly struct GroupResultEnumerator<T1, T2> : IEnumerable<GroupResult<T1, T2>>
+    where T1 : struct
+    where T2 : struct
 {
     private readonly Context _context;
 
@@ -114,13 +69,13 @@ public readonly struct GroupResultEnumerator<T1, T2> : IEnumerable<GroupResult<T
         }
 
         Tag tag = new();
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T1), out var bitIdx1))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T1>(out var bitIdx1))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx1);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T2), out var bitIdx2))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T2>(out var bitIdx2))
         {
             yield break;
         }
@@ -150,6 +105,9 @@ public readonly struct GroupResultEnumerator<T1, T2> : IEnumerable<GroupResult<T
 }
 
 public readonly struct GroupResultEnumerator<T1, T2, T3> : IEnumerable<GroupResult<T1, T2, T3>>
+    where T1 : struct
+    where T2 : struct
+    where T3 : struct
 {
     private readonly Context _context;
 
@@ -166,19 +124,19 @@ public readonly struct GroupResultEnumerator<T1, T2, T3> : IEnumerable<GroupResu
         }
 
         Tag tag = new();
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T1), out var bitIdx1))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T1>(out var bitIdx1))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx1);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T2), out var bitIdx2))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T2>(out var bitIdx2))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx2);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T3), out var bitIdx3))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T3>(out var bitIdx3))
         {
             yield break;
         }
@@ -209,6 +167,10 @@ public readonly struct GroupResultEnumerator<T1, T2, T3> : IEnumerable<GroupResu
 }
 
 public readonly struct GroupResultEnumerator<T1, T2, T3, T4> : IEnumerable<GroupResult<T1, T2, T3, T4>>
+    where T1 : struct
+    where T2 : struct
+    where T3 : struct
+    where T4 : struct
 {
     private readonly Context _context;
 
@@ -225,25 +187,25 @@ public readonly struct GroupResultEnumerator<T1, T2, T3, T4> : IEnumerable<Group
         }
 
         Tag tag = new();
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T1), out var bitIdx1))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T1>(out var bitIdx1))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx1);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T2), out var bitIdx2))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T2>(out var bitIdx2))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx2);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T3), out var bitIdx3))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T3>(out var bitIdx3))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx3);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T4), out var bitIdx4))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T4>(out var bitIdx4))
         {
             yield break;
         }
@@ -276,6 +238,11 @@ public readonly struct GroupResultEnumerator<T1, T2, T3, T4> : IEnumerable<Group
 }
 
 public readonly struct GroupResultEnumerator<T1, T2, T3, T4, T5> : IEnumerable<GroupResult<T1, T2, T3, T4, T5>>
+    where T1 : struct
+    where T2 : struct
+    where T3 : struct
+    where T4 : struct
+    where T5 : struct
 {
     private readonly Context _context;
 
@@ -292,31 +259,31 @@ public readonly struct GroupResultEnumerator<T1, T2, T3, T4, T5> : IEnumerable<G
         }
 
         Tag tag = new();
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T1), out var bitIdx1))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T1>(out var bitIdx1))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx1);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T2), out var bitIdx2))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T2>(out var bitIdx2))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx2);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T3), out var bitIdx3))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T3>(out var bitIdx3))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx3);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T4), out var bitIdx4))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T4>(out var bitIdx4))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx4);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T5), out var bitIdx5))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T5>(out var bitIdx5))
         {
             yield break;
         }
@@ -350,6 +317,12 @@ public readonly struct GroupResultEnumerator<T1, T2, T3, T4, T5> : IEnumerable<G
 }
 
 public readonly struct GroupResultEnumerator<T1, T2, T3, T4, T5, T6> : IEnumerable<GroupResult<T1, T2, T3, T4, T5, T6>>
+    where T1 : struct
+    where T2 : struct
+    where T3 : struct
+    where T4 : struct
+    where T5 : struct
+    where T6 : struct
 {
     private readonly Context _context;
 
@@ -366,37 +339,37 @@ public readonly struct GroupResultEnumerator<T1, T2, T3, T4, T5, T6> : IEnumerab
         }
 
         Tag tag = new();
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T1), out var bitIdx1))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T1>(out var bitIdx1))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx1);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T2), out var bitIdx2))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T2>(out var bitIdx2))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx2);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T3), out var bitIdx3))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T3>(out var bitIdx3))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx3);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T4), out var bitIdx4))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T4>(out var bitIdx4))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx4);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T5), out var bitIdx5))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T5>(out var bitIdx5))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx5);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T6), out var bitIdx6))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T6>(out var bitIdx6))
         {
             yield break;
         }
@@ -432,6 +405,13 @@ public readonly struct GroupResultEnumerator<T1, T2, T3, T4, T5, T6> : IEnumerab
 
 public readonly struct
     GroupResultEnumerator<T1, T2, T3, T4, T5, T6, T7> : IEnumerable<GroupResult<T1, T2, T3, T4, T5, T6, T7>>
+    where T1 : struct
+    where T2 : struct
+    where T3 : struct
+    where T4 : struct
+    where T5 : struct
+    where T6 : struct
+    where T7 : struct
 {
     private readonly Context _context;
 
@@ -448,43 +428,43 @@ public readonly struct
         }
 
         Tag tag = new();
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T1), out var bitIdx1))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T1>(out var bitIdx1))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx1);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T2), out var bitIdx2))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T2>(out var bitIdx2))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx2);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T3), out var bitIdx3))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T3>(out var bitIdx3))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx3);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T4), out var bitIdx4))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T4>(out var bitIdx4))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx4);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T5), out var bitIdx5))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T5>(out var bitIdx5))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx5);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T6), out var bitIdx6))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T6>(out var bitIdx6))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx6);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T7), out var bitIdx7))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T7>(out var bitIdx7))
         {
             yield break;
         }
@@ -521,6 +501,14 @@ public readonly struct
 
 public readonly struct
     GroupResultEnumerator<T1, T2, T3, T4, T5, T6, T7, T8> : IEnumerable<GroupResult<T1, T2, T3, T4, T5, T6, T7, T8>>
+    where T1 : struct
+    where T2 : struct
+    where T3 : struct
+    where T4 : struct
+    where T5 : struct
+    where T6 : struct
+    where T7 : struct
+    where T8 : struct
 {
     private readonly Context _context;
 
@@ -537,49 +525,49 @@ public readonly struct
         }
 
         Tag tag = new();
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T1), out var bitIdx1))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T1>(out var bitIdx1))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx1);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T2), out var bitIdx2))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T2>(out var bitIdx2))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx2);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T3), out var bitIdx3))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T3>(out var bitIdx3))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx3);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T4), out var bitIdx4))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T4>(out var bitIdx4))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx4);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T5), out var bitIdx5))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T5>(out var bitIdx5))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx5);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T6), out var bitIdx6))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T6>(out var bitIdx6))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx6);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T7), out var bitIdx7))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T7>(out var bitIdx7))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx7);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T8), out var bitIdx8))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T8>(out var bitIdx8))
         {
             yield break;
         }
@@ -618,6 +606,15 @@ public readonly struct
 public readonly struct
     GroupResultEnumerator<T1, T2, T3, T4, T5, T6, T7, T8, T9> : IEnumerable<
     GroupResult<T1, T2, T3, T4, T5, T6, T7, T8, T9>>
+    where T1 : struct
+    where T2 : struct
+    where T3 : struct
+    where T4 : struct
+    where T5 : struct
+    where T6 : struct
+    where T7 : struct
+    where T8 : struct
+    where T9 : struct
 {
     private readonly Context _context;
 
@@ -634,55 +631,55 @@ public readonly struct
         }
 
         Tag tag = new();
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T1), out var bitIdx1))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T1>(out var bitIdx1))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx1);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T2), out var bitIdx2))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T2>(out var bitIdx2))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx2);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T3), out var bitIdx3))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T3>(out var bitIdx3))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx3);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T4), out var bitIdx4))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T4>(out var bitIdx4))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx4);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T5), out var bitIdx5))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T5>(out var bitIdx5))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx5);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T6), out var bitIdx6))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T6>(out var bitIdx6))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx6);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T7), out var bitIdx7))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T7>(out var bitIdx7))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx7);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T8), out var bitIdx8))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T8>(out var bitIdx8))
         {
             yield break;
         }
 
         tag.SetBit(bitIdx8);
-        if (!_context.TagRegistry.TryGetTagBitIndex(typeof(T9), out var bitIdx9))
+        if (!_context.TagRegistry.TryGetTagBitIndex<T9>(out var bitIdx9))
         {
             yield break;
         }
