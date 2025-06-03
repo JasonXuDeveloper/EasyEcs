@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using EasyEcs.Core.Commands;
 using EasyEcs.Core.Components;
@@ -20,7 +21,7 @@ namespace EasyEcs.Core;
 /// </summary>
 public partial class Context : IAsyncDisposable
 {
-    private int _entityIdCounter = 1;
+    private int _entityIdCounter;
     private readonly Options _options;
     private readonly ParallelOptions _parallelOptions;
 
@@ -120,6 +121,7 @@ public partial class Context : IAsyncDisposable
     /// <returns></returns>
     public ref Entity EntityAt(int index)
     {
+        var idx = index;
         var span = _activeEntityIds.AsSpan();
         for (var i = 0; i < span.Length; i++)
         {
@@ -130,7 +132,7 @@ public partial class Context : IAsyncDisposable
             }
         }
 
-        throw new IndexOutOfRangeException($"Entity at index {index} not found.");
+        throw new IndexOutOfRangeException($"Entity at index {idx} not found.");
     }
 
     /// <summary>
@@ -141,7 +143,7 @@ public partial class Context : IAsyncDisposable
     /// <returns></returns>
     public bool TryGetEntityById(int id, out EntityRef entityRef)
     {
-        if (id > 0 && _activeEntityIds[id])
+        if (_activeEntityIds[id])
         {
             entityRef = new EntityRef(id, this);
             return true;
@@ -158,7 +160,7 @@ public partial class Context : IAsyncDisposable
     /// <returns></returns>
     public EntityRef GetEntityById(int id)
     {
-        if (id > 0 && _activeEntityIds[id])
+        if (_activeEntityIds[id])
             return new EntityRef(id, this);
 
         throw new InvalidOperationException($"Entity with id {id} not found.");
@@ -277,13 +279,11 @@ public partial class Context : IAsyncDisposable
         _commandBuffer.AddCommand(new AddComponentCommand(0, typeof(T),
             () =>
             {
-                var idx = TagRegistry.GetTagBitIndex<T>();
-                var arr = (T[])Components[idx];
-                var component = new T();
-                arr[0] = component;
+                Singleton<T>.Instance.Value = new T();
+                Singleton<T>.Instance.Initialized = true;
                 try
                 {
-                    callback?.Invoke(new SingletonComponentRef<T>(idx, this));
+                    callback?.Invoke(new SingletonComponentRef<T>());
                 }
                 catch (Exception e)
                 {
@@ -300,14 +300,12 @@ public partial class Context : IAsyncDisposable
     /// </summary>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public SingletonComponentRef<T> GetSingletonComponent<T>() where T : struct, ISingletonComponent
     {
-        ref var entity = ref Entities[0];
-        var idx = TagRegistry.GetTagBitIndex<T>();
-        if (!entity.Tag.HasBit(idx))
+        if (!Singleton<T>.Instance.Initialized)
             throw new InvalidOperationException($"Component {typeof(T)} not found.");
-
-        return new SingletonComponentRef<T>(idx, this);
+        return new SingletonComponentRef<T>();
     }
 
     /// <summary>
@@ -318,15 +316,14 @@ public partial class Context : IAsyncDisposable
     /// <returns></returns>
     public bool TryGetSingletonComponent<T>(out SingletonComponentRef<T> value) where T : struct, ISingletonComponent
     {
-        value = default;
-        ref var entity = ref Entities[0];
-        if (!TagRegistry.TryGetTagBitIndex<T>(out var idx))
-            return false;
-        if (!entity.Tag.HasBit(idx))
-            return false;
+        if (Singleton<T>.Instance.Initialized)
+        {
+            value = new SingletonComponentRef<T>();
+            return true;
+        }
 
-        value = new SingletonComponentRef<T>(idx, this);
-        return true;
+        value = default;
+        return false;
     }
 
     /// <summary>
@@ -369,6 +366,25 @@ public partial class Context : IAsyncDisposable
         }
     }
 
+    private static async ValueTask ActionWrapper<T>(T item, bool catchError, Func<T, ValueTask> action, Context context)
+    {
+        if (!catchError)
+        {
+            await action(item);
+        }
+        else
+        {
+            try
+            {
+                await action(item);
+            }
+            catch (Exception e)
+            {
+                context.OnError?.Invoke(new AggregateException($"{item.GetType().Name} error", e));
+            }
+        }
+    }
+
     /// <summary>
     /// Query all tasks based on the options
     /// </summary>
@@ -380,23 +396,8 @@ public partial class Context : IAsyncDisposable
     {
         if (_options.Parallel)
         {
-            await Parallel.ForEachAsync(list, _parallelOptions, async (item, _) =>
-            {
-                if (!catchError)
-                {
-                    await action(item);
-                    return;
-                }
-
-                try
-                {
-                    await action(item);
-                }
-                catch (Exception e)
-                {
-                    OnError?.Invoke(new AggregateException($"{item.GetType().Name} error", e));
-                }
-            });
+            await Parallel.ForEachAsync(list, _parallelOptions,
+                (item, _) => ActionWrapper(item, catchError, action, this));
         }
         else
         {
@@ -585,7 +586,7 @@ public partial class Context : IAsyncDisposable
                     }
                     case DeleteEntityCommand deleteEntityCommand:
                     {
-                        if (!_activeEntityIds[deleteEntityCommand.Id] || deleteEntityCommand.Id == 0)
+                        if (deleteEntityCommand.Id < 0 || !_activeEntityIds[deleteEntityCommand.Id])
                             throw new InvalidOperationException(
                                 $"Entity with id {deleteEntityCommand.Id} not found.");
 
@@ -623,17 +624,17 @@ public partial class Context : IAsyncDisposable
                         break;
                     case AddComponentCommand addComponentCommand:
                     {
-                        if (!_activeEntityIds[addComponentCommand.Id] && addComponentCommand.Id != 0)
-                            throw new InvalidOperationException($"Entity with id {addComponentCommand.Id} not found.");
-                        if (addComponentCommand.Id == 0)
+                        // check if type is singleton
+                        if (addComponentCommand.ComponentType.IsAssignableTo(typeof(ISingletonComponent)))
                         {
-                            // check if type is singleton
-                            if (!addComponentCommand.ComponentType.IsAssignableTo(typeof(ISingletonComponent)))
-                            {
-                                throw new InvalidOperationException(
-                                    $"Component {addComponentCommand.ComponentType} is not a singleton component.");
-                            }
+                            //call the callback
+                            addComponentCommand.OnComponentAdded?.Invoke();
+                            break;
                         }
+
+                        // normal component
+                        if (addComponentCommand.Id < 0 || !_activeEntityIds[addComponentCommand.Id])
+                            throw new InvalidOperationException($"Entity with id {addComponentCommand.Id} not found.");
 
                         ref Entity entity = ref Entities[addComponentCommand.Id];
                         byte bitIdx;
@@ -697,18 +698,30 @@ public partial class Context : IAsyncDisposable
                     }
                     case RemoveComponentCommand removeComponentCommand:
                     {
-                        if (!_activeEntityIds[removeComponentCommand.Id] && removeComponentCommand.Id != 0)
+                        // check if type is singleton
+                        if (removeComponentCommand.ComponentType.IsAssignableTo(typeof(ISingletonComponent)))
+                        {
+                            Type singletonType =
+                                typeof(Singleton<>).MakeGenericType(removeComponentCommand.ComponentType);
+                            var instanceField = singletonType.GetField("Instance",
+                                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                            var valueField = singletonType.GetField("Value",
+                                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                            if (instanceField == null || valueField == null)
+                                throw new InvalidOperationException(
+                                    $"Singleton {removeComponentCommand.ComponentType.Name} not found.");
+                            var instance = instanceField.GetValue(null);
+                            if (instance == null)
+                                throw new InvalidOperationException(
+                                    $"Singleton {removeComponentCommand.ComponentType.Name} not initialized.");
+                            valueField.SetValue(instance,
+                                Activator.CreateInstance(removeComponentCommand.ComponentType));
+                            break;
+                        }
+
+                        if (removeComponentCommand.Id < 0 || !_activeEntityIds[removeComponentCommand.Id])
                             throw new InvalidOperationException(
                                 $"Entity with id {removeComponentCommand.Id} not found.");
-                        if (removeComponentCommand.Id == 0)
-                        {
-                            // check if type is singleton
-                            if (!removeComponentCommand.ComponentType.IsAssignableTo(typeof(ISingletonComponent)))
-                            {
-                                throw new InvalidOperationException(
-                                    $"Component {removeComponentCommand.ComponentType} is not a singleton component.");
-                            }
-                        }
 
                         ref Entity entity = ref Entities[removeComponentCommand.Id];
                         int bitIdx = removeComponentCommand.GetTagBitIndex();

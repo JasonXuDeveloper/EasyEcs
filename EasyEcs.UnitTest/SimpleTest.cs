@@ -37,7 +37,7 @@ public class SimpleTest
         // then when it is out of scope, it will dispose the context
         await using (await ctx.Init())
         {
-            var entity = ctx.GetEntityById(1);
+            var entity = ctx.GetEntityById(0);
 
             // Check if factor is 2, implying ResizeSystem has set it in its OnInit
             Assert.That(entity.Value.GetComponent<ScaleComponent>().Value.Factor, Is.EqualTo(2));
@@ -96,7 +96,7 @@ public class SimpleTest
         ctx.AddSystem<ResizeSystem>();
         ctx.AddSystem<ModificationSystem>();
         ctx.AddSystem<NotUnmanagedSystem>();
-        
+
         ctx.EnsureEntityCapacity(1000);
 
         // Create an entity
@@ -114,7 +114,7 @@ public class SimpleTest
         {
             // Ensure the context has only one entity
             Assert.That(ctx.EntityCount, Is.EqualTo(1));
-            var entity = ctx.GetEntityById(1);
+            var entity = ctx.GetEntityById(0);
 
             // Update the context
             await ctx.Update();
@@ -153,7 +153,7 @@ public class SimpleTest
             Assert.That(ctx.EntityCount, Is.EqualTo(0));
             // Update the context
             await ctx.Update();
-            
+
             ctx.RemoveSystem<NotUnmanagedSystem>();
 
             // Remove 1 entity
