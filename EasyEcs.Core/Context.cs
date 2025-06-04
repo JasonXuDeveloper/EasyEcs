@@ -48,6 +48,7 @@ public partial class Context : IAsyncDisposable
     private readonly List<UniTask> _initQuery = new();
     private readonly List<UniTask> _updateQuery = new();
     private readonly List<UniTask> _endQuery = new();
+    private readonly List<UniTask.Awaiter> _query = new();
 
     /// <summary>
     /// Called when an error occurs.
@@ -373,13 +374,61 @@ public partial class Context : IAsyncDisposable
         // dispatch all tasks of the same priority
         return _options.Parallel
             ? ParallelTasks(actions)
-            : UniTask.WhenAll(actions);
+            : WaitAllNoAlloc(this, actions);
     }
 
     private UniTask ParallelTasks(List<UniTask> actions) =>
         Parallel
             .ForEachAsync(actions, _parallelOptions,
                 (item, _) => item).AsUniTask(false);
+
+    private static async UniTask WaitAllNoAlloc(Context context, List<UniTask> tasks)
+    {
+        if (tasks.Count == 0)
+            return;
+
+        int remaining = tasks.Count;
+        Exception firstEx = null;
+        
+        context._query.Clear();
+        for (int i = 0; i < tasks.Count; i++)
+        {
+            context._query.Add(tasks[i].GetAwaiter());
+        }
+
+        while (remaining > 0)
+        {
+            for (int i = 0; i < context._query.Count; i++)
+            {
+                if (context._query[i].IsCompleted)
+                {
+                    try
+                    {
+                        context._query[i].GetResult();
+                    }
+                    catch (Exception ex)
+                    {
+                        firstEx ??= ex;
+                    }
+
+                    remaining--;
+                    context._query[i] = default;
+                }
+            }
+
+            if (remaining > 0)
+            {
+                await UniTask.Yield();
+            }
+        }
+
+        context._query.Clear();
+        if (firstEx != null)
+        {
+            throw firstEx;
+        }
+    }
+
 
     /// <summary>
     /// Initialize all systems. Use this when starting the context.
