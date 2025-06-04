@@ -1,5 +1,5 @@
 using System;
-using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using EasyEcs.Core;
 using EasyEcs.Core.Systems;
 using EasyEcs.UnitTest.Components;
@@ -8,7 +8,7 @@ namespace EasyEcs.UnitTest.Systems;
 
 public class ResizeSystem : SystemBase, IInitSystem, IExecuteSystem
 {
-    public ValueTask OnInit(Context context)
+    public UniTask OnInit(Context context)
     {
         // Get all entities that have ScaleComponent
         var candidates = context.GroupOf<ScaleComponent>();
@@ -21,10 +21,10 @@ public class ResizeSystem : SystemBase, IInitSystem, IExecuteSystem
             scaleComponent.Factor = 2;
         }
 
-        return ValueTask.CompletedTask;
+        return UniTask.CompletedTask;
     }
 
-    public ValueTask OnExecute(Context context)
+    public UniTask OnExecute(Context context)
     {
         // Should be run concurrently if possible
         Console.WriteLine($"{GetType().Name} (Priority: {Priority}, " +
@@ -52,6 +52,6 @@ public class ResizeSystem : SystemBase, IInitSystem, IExecuteSystem
             entity.RemoveComponent<ScaleComponent>();
         }
 
-        return ValueTask.CompletedTask;
+        return UniTask.CompletedTask;
     }
 }

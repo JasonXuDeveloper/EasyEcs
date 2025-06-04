@@ -1,6 +1,6 @@
 using System;
 using System.Linq;
-using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using EasyEcs.Core;
 using EasyEcs.Core.Systems;
 using EasyEcs.UnitTest.Components;
@@ -9,7 +9,7 @@ namespace EasyEcs.UnitTest.Systems;
 
 public class NotUnmanagedSystem : SystemBase, IExecuteSystem
 {
-    public ValueTask OnExecute(Context context)
+    public UniTask OnExecute(Context context)
     {
         var results = context.GroupOf<NotUnmanagedComponent>();
 
@@ -26,6 +26,6 @@ public class NotUnmanagedSystem : SystemBase, IExecuteSystem
                 $" {string.Join(", ", component.Dictionary.Select(kv => $"{kv.Key}: {kv.Value}"))}");
         }
 
-        return ValueTask.CompletedTask;
+        return UniTask.CompletedTask;
     }
 }

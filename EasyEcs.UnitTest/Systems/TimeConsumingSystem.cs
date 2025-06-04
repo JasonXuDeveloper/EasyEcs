@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using EasyEcs.Core;
 using EasyEcs.Core.Systems;
 
@@ -7,7 +8,7 @@ namespace EasyEcs.UnitTest.Systems;
 
 public class TimeConsumingSystem : SystemBase, IExecuteSystem
 {
-    public async ValueTask OnExecute(Context context)
+    public async UniTask OnExecute(Context context)
     {
         Console.WriteLine($"{GetType().Name} (Priority: {Priority}, " +
                           $"Thread: {Environment.CurrentManagedThreadId}, " +

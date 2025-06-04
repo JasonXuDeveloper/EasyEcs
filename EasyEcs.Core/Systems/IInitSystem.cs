@@ -1,8 +1,8 @@
-using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 
 namespace EasyEcs.Core.Systems;
 
 public interface IInitSystem
 {
-    ValueTask OnInit(Context context);
+    UniTask OnInit(Context context);
 }

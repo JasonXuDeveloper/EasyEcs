@@ -1,4 +1,5 @@
-using System.Threading.Tasks;
+using System;
+using Cysharp.Threading.Tasks;
 
 namespace EasyEcs.Core.Systems;
 
@@ -10,19 +11,28 @@ internal class ExecuteSystemWrapper
 {
     internal readonly IExecuteSystem System;
     private int _counter;
-    
+
     internal ExecuteSystemWrapper(IExecuteSystem system)
     {
         System = system;
     }
 
-    internal ValueTask Update(Context context)
+    internal async UniTask Update(Context context, Action<Exception> onError)
     {
-        if (System.ExecuteFrequency == 1 || (_counter++ > 0 && _counter % System.ExecuteFrequency == 0))
+        try
         {
-            return System.OnExecute(context);
+            if (System.ExecuteFrequency == 1 || (_counter++ > 0 && _counter % System.ExecuteFrequency == 0))
+            {
+                await System.OnExecute(context);
+            }
         }
-
-        return ValueTask.CompletedTask;
+        catch (Exception e)
+        {
+            onError?.Invoke(e);
+        }
+        finally
+        {
+            _counter %= System.ExecuteFrequency;
+        }
     }
 }

@@ -1,5 +1,5 @@
 using System;
-using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using EasyEcs.Core;
 using EasyEcs.Core.Systems;
 using EasyEcs.UnitTest.Components;
@@ -16,7 +16,7 @@ public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
     /// </summary>
     /// <param name="context"></param>
     /// <returns></returns>
-    public ValueTask OnExecute(Context context)
+    public UniTask OnExecute(Context context)
     {
         // Should be run concurrently if possible
         Console.WriteLine($"{GetType().Name} (Priority: {Priority}, " +
@@ -32,7 +32,7 @@ public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
                     comp.Value.Factor = 0.5f);
         }
 
-        return ValueTask.CompletedTask;
+        return UniTask.CompletedTask;
     }
 
     /// <summary>
@@ -40,7 +40,7 @@ public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
     /// </summary>
     /// <param name="context"></param>
     /// <returns></returns>
-    public ValueTask OnEnd(Context context)
+    public UniTask OnEnd(Context context)
     {
         var candidates = context.GroupOf<SizeComponent>();
 
@@ -51,6 +51,6 @@ public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
             sizeComponent.Height = 0;
         }
 
-        return ValueTask.CompletedTask;
+        return UniTask.CompletedTask;
     }
 }

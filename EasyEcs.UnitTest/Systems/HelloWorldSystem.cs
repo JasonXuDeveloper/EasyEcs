@@ -1,5 +1,5 @@
 using System;
-using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using EasyEcs.Core;
 using EasyEcs.Core.Systems;
 using EasyEcs.UnitTest.Components;
@@ -11,7 +11,7 @@ public class HelloWorldSystem : SystemBase, IExecuteSystem
     // Make this system to execute first
     public override int Priority => -1;
 
-    public ValueTask OnExecute(Context context)
+    public UniTask OnExecute(Context context)
     {
         // Get a singleton component from the context
         ref var frameComp = ref context.GetSingletonComponent<FrameComponent>().Value;
@@ -23,6 +23,6 @@ public class HelloWorldSystem : SystemBase, IExecuteSystem
                           $"Time: {DateTime.Now:HH:mm:ss.fff})");
         // count frames (update singleton component data)
         frameComp.FrameCount++;
-        return ValueTask.CompletedTask;
+        return UniTask.CompletedTask;
     }
 }

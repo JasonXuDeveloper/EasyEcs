@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using EasyEcs.Core.Commands;
 using EasyEcs.Core.Components;
+using EasyEcs.Core.Enumerators;
 using EasyEcs.Core.Systems;
 
 namespace EasyEcs.Core;
@@ -43,7 +45,9 @@ public partial class Context : IAsyncDisposable
     private bool _started;
     private bool _disposed;
 
-    private readonly List<Task> _executeTasks = new();
+    private readonly List<UniTask> _initQuery = new();
+    private readonly List<UniTask> _updateQuery = new();
+    private readonly List<UniTask> _endQuery = new();
 
     /// <summary>
     /// Called when an error occurs.
@@ -170,15 +174,9 @@ public partial class Context : IAsyncDisposable
     /// <summary>
     /// Get all entities.
     /// </summary>
-    public IEnumerable<EntityRef> AllEntities()
+    public ActiveEntityEnumerator AllEntities()
     {
-        for (var i = 0; i < _activeEntityIds.Length; i++)
-        {
-            var isActive = _activeEntityIds[i];
-            if (!isActive || i == 0)
-                continue;
-            yield return new EntityRef(i, this);
-        }
+        return new ActiveEntityEnumerator(_activeEntityIds, this);
     }
 
     /// <summary>
@@ -366,75 +364,27 @@ public partial class Context : IAsyncDisposable
         }
     }
 
-    private static async ValueTask ActionWrapper<T>(T item, bool catchError, Func<T, ValueTask> action, Context context)
-    {
-        if (!catchError)
-        {
-            await action(item);
-        }
-        else
-        {
-            try
-            {
-                await action(item);
-            }
-            catch (Exception e)
-            {
-                context.OnError?.Invoke(new AggregateException($"{item.GetType().Name} error", e));
-            }
-        }
-    }
-
     /// <summary>
     /// Query all tasks based on the options
     /// </summary>
-    /// <param name="list"></param>
-    /// <param name="action"></param>
-    /// <param name="catchError"></param>
-    /// <typeparam name="T"></typeparam>
-    private async ValueTask QueryTasks<T>(List<T> list, Func<T, ValueTask> action, bool catchError = true)
+    /// <param name="actions"></param>
+    private UniTask QueryTasks(List<UniTask> actions)
     {
-        if (_options.Parallel)
-        {
-            await Parallel.ForEachAsync(list, _parallelOptions,
-                (item, _) => ActionWrapper(item, catchError, action, this));
-        }
-        else
-        {
-            // clear previous tasks
-            _executeTasks.Clear();
-
-            // collect tasks for the current priority
-            foreach (var item in list)
-            {
-                _executeTasks.Add(action(item).AsTask());
-            }
-
-            // dispatch all tasks of the same priority
-            if (catchError)
-            {
-                await Task.WhenAll(_executeTasks);
-            }
-            else
-            {
-                try
-                {
-                    await Task.WhenAll(_executeTasks);
-                }
-                catch (Exception e)
-                {
-                    OnError?.Invoke(e);
-                }
-            }
-
-            _executeTasks.Clear();
-        }
+        // dispatch all tasks of the same priority
+        return _options.Parallel
+            ? ParallelTasks(actions)
+            : UniTask.WhenAll(actions);
     }
+
+    private UniTask ParallelTasks(List<UniTask> actions) =>
+        Parallel
+            .ForEachAsync(actions, _parallelOptions,
+                (item, _) => item).AsUniTask(false);
 
     /// <summary>
     /// Initialize all systems. Use this when starting the context.
     /// </summary>
-    public async ValueTask<Context> Init()
+    public async UniTask<Context> Init()
     {
         if (_started)
             throw new InvalidOperationException("Context already started.");
@@ -448,7 +398,14 @@ public partial class Context : IAsyncDisposable
         // initialize all systems
         foreach (var sequence in _initSystems.Values)
         {
-            await QueryTasks(sequence, async system => await system.OnInit(this), false);
+            _initQuery.Clear();
+            foreach (var system in sequence)
+            {
+                _initQuery.Add(system.OnInit(this));
+            }
+
+            await QueryTasks(_initQuery);
+            _initQuery.Clear();
         }
 
         _initSystems.Clear();
@@ -467,7 +424,14 @@ public partial class Context : IAsyncDisposable
         // dispose all systems
         foreach (var sequence in _endSystems.Values)
         {
-            await QueryTasks(sequence, async system => await system.OnEnd(this));
+            _endQuery.Clear();
+            foreach (var system in sequence)
+            {
+                _endQuery.Add(system.Execute(this, OnError));
+            }
+
+            await QueryTasks(_endQuery);
+            _endQuery.Clear();
         }
 
         // clear all entities
@@ -495,7 +459,9 @@ public partial class Context : IAsyncDisposable
         _initSystems.Clear();
         _endSystems.Clear();
         // clear the execute tasks
-        _executeTasks.Clear();
+        _updateQuery.Clear();
+        _initQuery.Clear();
+        _endQuery.Clear();
 
         // clear the tag registry
         TagRegistry.Clear();
@@ -507,7 +473,7 @@ public partial class Context : IAsyncDisposable
     /// <summary>
     /// Update all systems.
     /// </summary>
-    public async ValueTask Update()
+    public async UniTask Update()
     {
         // check if the context is started
         if (!_started)
@@ -522,7 +488,14 @@ public partial class Context : IAsyncDisposable
         {
             foreach (var sequence in _initSystems.Values)
             {
-                await QueryTasks(sequence, async system => await system.OnInit(this));
+                _initQuery.Clear();
+                foreach (var system in sequence)
+                {
+                    _initQuery.Add(system.OnInit(this));
+                }
+
+                await QueryTasks(_initQuery);
+                _initQuery.Clear();
             }
 
             _initSystems.Clear();
@@ -535,7 +508,14 @@ public partial class Context : IAsyncDisposable
         // group by priority
         foreach (var sequence in _executeSystems.Values)
         {
-            await QueryTasks(sequence, async system => await system.Update(this));
+            _updateQuery.Clear();
+            foreach (var wrapper in sequence)
+            {
+                _updateQuery.Add(wrapper.Update(this, OnError));
+            }
+
+            await QueryTasks(_updateQuery);
+            _updateQuery.Clear();
         }
 
         // dequeue all commands

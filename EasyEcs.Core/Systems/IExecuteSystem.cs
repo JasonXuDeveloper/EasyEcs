@@ -1,9 +1,9 @@
-using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 
 namespace EasyEcs.Core.Systems;
 
 public interface IExecuteSystem
 {
     int ExecuteFrequency => 1;
-    ValueTask OnExecute(Context context);
+    UniTask OnExecute(Context context);
 }

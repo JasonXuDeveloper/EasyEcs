@@ -1,8 +1,21 @@
-using System.Threading.Tasks;
+using System;
+using Cysharp.Threading.Tasks;
 
 namespace EasyEcs.Core.Systems;
 
 public interface IEndSystem
 {
-    ValueTask OnEnd(Context context);
+    UniTask OnEnd(Context context);
+
+    internal async UniTask Execute(Context context, Action<Exception> onError)
+    {
+        try
+        {
+            await OnEnd(context);
+        }
+        catch (Exception e)
+        {
+            onError?.Invoke(e);
+        }
+    }
 }
