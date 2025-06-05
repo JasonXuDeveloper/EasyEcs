@@ -534,8 +534,10 @@ public partial class Context : IAsyncDisposable
         // are there any newly added systems to initialize?
         if (_initSystems.Count > 0)
         {
-            foreach (var sequence in _initSystems.Values)
+            var lst = _initSystems.Values;
+            for (var index = 0; index < lst.Count; index++)
             {
+                var sequence = lst[index];
                 _initQuery.Clear();
                 foreach (var system in sequence)
                 {
@@ -554,8 +556,10 @@ public partial class Context : IAsyncDisposable
             return;
 
         // group by priority
-        foreach (var sequence in _executeSystems.Values)
+        var sys = _executeSystems.Values;
+        for (var index = 0; index < sys.Count; index++)
         {
+            var sequence = sys[index];
             _updateQuery.Clear();
             foreach (var wrapper in sequence)
             {
