@@ -18,7 +18,7 @@ public struct GroupResultEnumerator<T1, T2, T3, T4> : IDisposable
     private readonly T3[] _components3;
     private readonly T4[] _components4;
     private readonly Tag _tag;
-    private readonly SortedDictionary<Tag, List<int>> _contextGroups;
+    private readonly Dictionary<Tag, List<int>> _contextGroups;
     private List<List<int>> _groups;
     private int _groupIdx;
     private int _elementIdx;
@@ -63,7 +63,7 @@ public struct GroupResultEnumerator<T1, T2, T3, T4> : IDisposable
     }
 
     private GroupResultEnumerator(Entity[] entities, T1[] components1, T2[] components2, T3[] components3,
-        T4[] components4, Tag tag, int groupIdx, int elementIdx, SortedDictionary<Tag, List<int>> contextGroups)
+        T4[] components4, Tag tag, int groupIdx, int elementIdx, Dictionary<Tag, List<int>> contextGroups)
     {
         _entities = entities;
         _components1 = components1;

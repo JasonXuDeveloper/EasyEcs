@@ -31,7 +31,7 @@ public partial class Context : IAsyncDisposable
     internal readonly TagRegistry TagRegistry = new();
 
     internal Array[] Components;
-    internal readonly SortedDictionary<Tag, List<int>> Groups = new();
+    internal readonly Dictionary<Tag, List<int>> Groups = new();
 
     internal Entity[] Entities = new Entity[1];
     private bool[] _activeEntityIds = new bool[1];

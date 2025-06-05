@@ -1,4 +1,3 @@
-using EasyEcs.Core;
 using EasyEcs.Core.Components;
 
 namespace EasyEcs.UnitTest.Components;
