@@ -48,7 +48,7 @@ public partial class Context : IAsyncDisposable
     private readonly List<UniTask> _initQuery = new();
     private readonly List<UniTask> _updateQuery = new();
     private readonly List<UniTask> _endQuery = new();
-    private readonly List<UniTask.Awaiter> _query = new();
+    private readonly List<UniTask.Awaiter> _query = new(1024);
 
     /// <summary>
     /// Called when an error occurs.
@@ -409,8 +409,10 @@ public partial class Context : IAsyncDisposable
                         firstEx ??= ex;
                     }
 
+                    int last = context._query.Count - 1;
+                    context._query[i] = context._query[last];
+                    context._query.RemoveAt(last);
                     remaining--;
-                    context._query[i] = default;
                 }
             }
 
@@ -426,7 +428,6 @@ public partial class Context : IAsyncDisposable
             throw firstEx;
         }
     }
-
 
     /// <summary>
     /// Initialize all systems. Use this when starting the context.
