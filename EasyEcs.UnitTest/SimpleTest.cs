@@ -47,6 +47,11 @@ public class SimpleTest
             sizeComponentRef.Value.Width = 10;
             sizeComponentRef.Value.Height = 20;
 
+            foreach (var @ref in ctx.AllEntities)
+            {
+                Console.WriteLine(@ref.Value.Id);
+            }
+
             // Update the context
             await ctx.Update();
 

@@ -175,10 +175,8 @@ public partial class Context : IAsyncDisposable
     /// <summary>
     /// Get all entities.
     /// </summary>
-    public ActiveEntityEnumerator AllEntities()
-    {
-        return new ActiveEntityEnumerator(_activeEntityIds, this);
-    }
+    public ActiveEntityEnumerator AllEntities => new(_activeEntityIds, this);
+
 
     /// <summary>
     /// Create a new entity.
@@ -389,7 +387,7 @@ public partial class Context : IAsyncDisposable
 
         int remaining = tasks.Count;
         Exception firstEx = null;
-        
+
         context._query.Clear();
         for (int i = 0; i < tasks.Count; i++)
         {
