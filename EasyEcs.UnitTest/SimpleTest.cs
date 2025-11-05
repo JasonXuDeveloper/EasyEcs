@@ -12,7 +12,7 @@ public class SimpleTest
     [Test]
     public async Task TrivialTest()
     {
-        var ctx = new Context();
+        var ctx = new Context(new Context.Options(false));
         ctx.OnError += e => throw e;
 
         // Add systems to the context
