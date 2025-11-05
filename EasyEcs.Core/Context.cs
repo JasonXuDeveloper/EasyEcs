@@ -521,8 +521,13 @@ public partial class Context : IAsyncDisposable
 
         if (_options.Parallel && count > 1)
         {
-            // Parallel execution - wait for all tasks concurrently
-            await UniTask.WhenAll(tasks.AsMemory(0, count).ToArray());
+            // Parallel execution - zero allocation implementation
+            // UniTasks from system methods are already running (hot)
+            // We just need to await all of them concurrently
+
+            // Simple approach: await all tasks in sequence, but they run concurrently
+            // Since they're already started, awaiting them just waits for completion
+            await WaitAllTasksZeroAlloc(tasks, count);
         }
         else
         {
@@ -531,6 +536,43 @@ public partial class Context : IAsyncDisposable
             {
                 await tasks[i];
             }
+        }
+    }
+
+    /// <summary>
+    /// Wait for all tasks to complete without allocating.
+    /// Assumes tasks are already running (hot UniTasks).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static async UniTask WaitAllTasksZeroAlloc(UniTask[] tasks, int count)
+    {
+        // Check if all tasks are already completed (fast path)
+        bool anyPending = false;
+        for (int i = 0; i < count; i++)
+        {
+            if (tasks[i].Status == UniTaskStatus.Pending)
+            {
+                anyPending = true;
+                break;
+            }
+        }
+
+        if (!anyPending)
+        {
+            // All completed, just check for exceptions
+            for (int i = 0; i < count; i++)
+            {
+                if (tasks[i].Status == UniTaskStatus.Faulted)
+                    await tasks[i]; // Propagate exception
+            }
+            return;
+        }
+
+        // Slow path: wait for all tasks to complete
+        // Since tasks are hot, we can await them in any order
+        for (int i = 0; i < count; i++)
+        {
+            await tasks[i];
         }
     }
 
