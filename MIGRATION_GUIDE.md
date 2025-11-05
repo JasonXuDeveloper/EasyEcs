@@ -80,8 +80,10 @@ EntityRef and ComponentRef validate version on access, throwing if entity was de
 **After (.csproj):**
 ```xml
 <TargetFramework>net8.0</TargetFramework>
-<LangVersion>12</LangVersion>
+<LangVersion>13</LangVersion>
 ```
+
+> **Note:** C# 13 is required for ref field support and other performance optimizations.
 
 ### Step 2: Remove Callback-Based Code
 
@@ -115,6 +117,34 @@ entity.AddComponent<Health>(health => {
 var health = entity.AddComponent<Health>();
 health.Value.HP = 100;
 ```
+
+**Pattern 2b: Modifying Components (IMPORTANT)**
+
+Since components are **structs**, you must modify them correctly:
+
+✅ **Correct - Direct assignment:**
+```csharp
+var health = entity.AddComponent<Health>();
+health.Value.HP = 100;  // Directly modify via ComponentRef
+```
+
+✅ **Correct - Using ref:**
+```csharp
+var health = entity.AddComponent<Health>();
+ref var h = ref health.Value;  // Get ref to modify in-place
+h.HP = 100;
+h.MaxHP = 150;
+```
+
+❌ **WRONG - Local copy (immutable):**
+```csharp
+var health = entity.AddComponent<Health>();
+var h = health.Value;  // Creates a COPY!
+h.HP = 100;            // Modifies the COPY, not the component!
+// Component unchanged - changes lost!
+```
+
+**Rule:** Always use either `compRef.Value.field = ...` or `ref compRef.Value` to modify components. Never copy the Value to a local variable for modification.
 
 **Pattern 3: Nested Callbacks**
 
@@ -247,11 +277,12 @@ Automatically uses:
 - **AdvSimd (NEON)** on ARM
 - **Scalar fallback** on other platforms
 
-### 2. Unlimited Component Types
+### 2. Extended Component Types Support
 
-- First 256 components: inline (32 bytes)
+- Supports up to **65,536 component types** (ushort max)
+- First 256 components: inline storage (32 bytes, 2x SIMD Vector128)
 - Beyond 256: automatic overflow array
-- No hard limits
+- Component index changed from byte to ushort in v3.0
 
 ### 3. Archetype Query Cache
 
@@ -482,6 +513,31 @@ for (int i = 0; i < 1000; i++)
 }
 
 // Lock acquired once per operation, not per batch
+```
+
+### 5. Modify Components In-Place
+
+```csharp
+// ❌ Bad: Creates copy, modifications lost
+foreach (var result in context.GroupOf<Position, Velocity>())
+{
+    var pos = result.Component1.Value;  // COPY!
+    pos.X += 1;  // Modifying copy, not the actual component
+}
+
+// ✅ Good: Direct modification
+foreach (var result in context.GroupOf<Position, Velocity>())
+{
+    result.Component1.Value.X += 1;
+}
+
+// ✅ Good: Using ref for multiple modifications
+foreach (var result in context.GroupOf<Position, Velocity>())
+{
+    ref var pos = ref result.Component1.Value;
+    pos.X += result.Component2.Value.X;
+    pos.Y += result.Component2.Value.Y;
+}
 ```
 
 ## Summary
