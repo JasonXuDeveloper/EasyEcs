@@ -37,6 +37,9 @@ public partial class Context : IAsyncDisposable
     private UniTask[] _initTasks = new UniTask[32];
     private UniTask[] _updateTasks = new UniTask[32];
     private UniTask[] _endTasks = new UniTask[32];
+    private Task[] _initTasksConverted = new Task[32];
+    private Task[] _updateTasksConverted = new Task[32];
+    private Task[] _endTasksConverted = new Task[32];
     private int _initTaskCount;
     private int _updateTaskCount;
     private int _endTaskCount;
@@ -445,13 +448,18 @@ public partial class Context : IAsyncDisposable
             for (int i = 0; i < sequence.Count; i++)
             {
                 if (_initTaskCount >= _initTasks.Length)
+                {
                     Array.Resize(ref _initTasks, _initTasks.Length * 2);
+                    Array.Resize(ref _initTasksConverted, _initTasksConverted.Length * 2);
+                }
 
-                _initTasks[_initTaskCount++] = sequence[i].OnInit(this);
+                _initTasks[_initTaskCount] = sequence[i].OnInit(this);
+                _initTasksConverted[_initTaskCount] = _initTasks[_initTaskCount].AsTask();
+                _initTaskCount++;
             }
 
             // Execute all systems at this priority level before moving to next priority
-            await ExecuteTasks(_initTasks, _initTaskCount);
+            await ExecuteTasks(_initTasks, _initTasksConverted, _initTaskCount);
         }
 
         _initSystems.Clear();
@@ -480,12 +488,17 @@ public partial class Context : IAsyncDisposable
                 for (int i = 0; i < sequence.Count; i++)
                 {
                     if (_initTaskCount >= _initTasks.Length)
+                    {
                         Array.Resize(ref _initTasks, _initTasks.Length * 2);
+                        Array.Resize(ref _initTasksConverted, _initTasksConverted.Length * 2);
+                    }
 
-                    _initTasks[_initTaskCount++] = sequence[i].OnInit(this);
+                    _initTasks[_initTaskCount] = sequence[i].OnInit(this);
+                    _initTasksConverted[_initTaskCount] = _initTasks[_initTaskCount].AsTask();
+                    _initTaskCount++;
                 }
 
-                await ExecuteTasks(_initTasks, _initTaskCount);
+                await ExecuteTasks(_initTasks, _initTasksConverted, _initTaskCount);
             }
 
             _initSystems.Clear();
@@ -500,12 +513,17 @@ public partial class Context : IAsyncDisposable
             for (int i = 0; i < sequence.Count; i++)
             {
                 if (_updateTaskCount >= _updateTasks.Length)
+                {
                     Array.Resize(ref _updateTasks, _updateTasks.Length * 2);
+                    Array.Resize(ref _updateTasksConverted, _updateTasksConverted.Length * 2);
+                }
 
-                _updateTasks[_updateTaskCount++] = sequence[i].Update(this, OnError);
+                _updateTasks[_updateTaskCount] = sequence[i].Update(this, OnError);
+                _updateTasksConverted[_updateTaskCount] = _updateTasks[_updateTaskCount].AsTask();
+                _updateTaskCount++;
             }
 
-            await ExecuteTasks(_updateTasks, _updateTaskCount);
+            await ExecuteTasks(_updateTasks, _updateTasksConverted, _updateTaskCount);
         }
     }
 
@@ -514,41 +532,24 @@ public partial class Context : IAsyncDisposable
     /// Zero allocation after warmup (when using pre-allocated arrays).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private async UniTask ExecuteTasks(UniTask[] tasks, int count)
+    private async UniTask ExecuteTasks(UniTask[] uniTasks, Task[] convertedTasks, int count)
     {
         if (count == 0)
             return;
 
         if (_options.Parallel && count > 1)
         {
-            // Parallel execution using TPL
-            // Use Parallel.For to dispatch tasks to thread pool, then await completion
-            Exception caughtException = null;
-
-            Parallel.For(0, count, _parallelOptions, i =>
-            {
-                try
-                {
-                    // GetAwaiter().GetResult() blocks synchronously but allows the work to run on thread pool
-                    tasks[i].GetAwaiter().GetResult();
-                }
-                catch (Exception ex)
-                {
-                    // Capture first exception
-                    Interlocked.CompareExchange(ref caughtException, ex, null);
-                }
-            });
-
-            // Propagate exception if any task faulted
-            if (caughtException != null)
-                throw caughtException;
+            // Parallel execution using Task.WaitAll (zero allocation, no closures)
+            // All tasks are already running, just wait for completion
+            // Task.WaitAll blocks until all tasks complete
+            Task.WaitAll(convertedTasks, 0, count);
         }
         else
         {
             // Sequential execution (zero allocation)
             for (int i = 0; i < count; i++)
             {
-                await tasks[i];
+                await uniTasks[i];
             }
         }
     }
@@ -570,12 +571,17 @@ public partial class Context : IAsyncDisposable
             for (int i = 0; i < sequence.Count; i++)
             {
                 if (_endTaskCount >= _endTasks.Length)
+                {
                     Array.Resize(ref _endTasks, _endTasks.Length * 2);
+                    Array.Resize(ref _endTasksConverted, _endTasksConverted.Length * 2);
+                }
 
-                _endTasks[_endTaskCount++] = sequence[i].Execute(this, OnError);
+                _endTasks[_endTaskCount] = sequence[i].Execute(this, OnError);
+                _endTasksConverted[_endTaskCount] = _endTasks[_endTaskCount].AsTask();
+                _endTaskCount++;
             }
 
-            await ExecuteTasks(_endTasks, _endTaskCount);
+            await ExecuteTasks(_endTasks, _endTasksConverted, _endTaskCount);
         }
 
         // Clear all data
