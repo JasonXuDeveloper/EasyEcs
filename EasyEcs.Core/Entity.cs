@@ -43,15 +43,14 @@ public struct Entity : IEquatable<Entity>
     }
 
     /// <summary>
-    /// Add a component to the entity. Returns a reference to the component. If the component already exists, returns a reference to the existing component.
+    /// Add a component to the entity immediately and return a reference to it.
     /// </summary>
-    /// <param name="callback"></param>
     /// <typeparam name="T"></typeparam>
-    /// <returns></returns>
+    /// <returns>Reference to the newly added component</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void AddComponent<T>(Action<ComponentRef<T>> callback = null) where T : struct, IComponent
+    public ComponentRef<T> AddComponent<T>() where T : struct, IComponent
     {
-        Context.AddComponent(this, callback);
+        return Context.AddComponent<T>(this);
     }
 
     /// <summary>

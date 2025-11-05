@@ -534,4 +534,48 @@ public partial class Context : IAsyncDisposable
         _activeEntityCount = 0;
         _disposed = true;
     }
+
+    /// <summary>
+    /// Add a singleton component to the context immediately.
+    /// </summary>
+    public SingletonComponentRef<T> AddSingletonComponent<T>() where T : struct, ISingletonComponent
+    {
+        using (_structuralLock.EnterScope())
+        {
+            Singleton<T>.Instance.Value = new T();
+            Singleton<T>.Instance.Initialized = true;
+            return new SingletonComponentRef<T>();
+        }
+    }
+
+    /// <summary>
+    /// Get a singleton component from the context.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public SingletonComponentRef<T> GetSingletonComponent<T>() where T : struct, ISingletonComponent
+    {
+        if (!Singleton<T>.Instance.Initialized)
+            throw new InvalidOperationException($"Singleton component {typeof(T)} not initialized.");
+        return new SingletonComponentRef<T>();
+    }
+
+    /// <summary>
+    /// Try to get a singleton component from the context.
+    /// </summary>
+    public bool TryGetSingletonComponent<T>(out SingletonComponentRef<T> value) where T : struct, ISingletonComponent
+    {
+        if (Singleton<T>.Instance.Initialized)
+        {
+            value = new SingletonComponentRef<T>();
+            return true;
+        }
+
+        value = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Get all active entities.
+    /// </summary>
+    public ActiveEntityEnumerator AllEntities => new ActiveEntityEnumerator(_activeEntityIds, this);
 }

@@ -89,4 +89,28 @@ internal class TagRegistry
         bitIndex = instance.BitIndex;
         return true;
     }
+
+    /// <summary>
+    /// Get existing tag index or register a new one if it doesn't exist.
+    /// Thread-safe via caller's lock.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public byte GetOrRegisterTag<T>() where T : struct
+    {
+        var instance = TypeBitIndex<T>.Instance;
+        if (instance.IsRegistered)
+            return instance.BitIndex;
+
+        // Register new tag
+        if (TagCount >= 256 * 4)  // Max supported by Tag structure
+            throw new InvalidOperationException("Maximum number of component types reached");
+
+        var bitIndex = (byte)TagCount;
+        instance.BitIndex = bitIndex;
+        instance.IsRegistered = true;
+        TagCount++;
+        _tags.Add(instance);
+
+        return bitIndex;
+    }
 }
