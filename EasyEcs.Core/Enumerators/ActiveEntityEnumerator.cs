@@ -24,7 +24,7 @@ public struct ActiveEntityEnumerator
         {
             if (_activeEntityIds[_index])
             {
-                Current = new EntityRef(_index, _context);
+                Current = new EntityRef(_index, _context.EntityVersions[_index], _context);
                 _index++;
                 return true;
             }

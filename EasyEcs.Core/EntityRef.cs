@@ -20,11 +20,17 @@ public readonly struct EntityRef : IEquatable<EntityRef>
         _context = context;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int Id => (int)_packed;
+    private int Id
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => (int)_packed;
+    }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int Version => (int)(_packed >> 32);
+    private int Version
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => (int)(_packed >> 32);
+    }
 
     public ref Entity Value
     {

@@ -22,11 +22,17 @@ public readonly struct ComponentRef<T> where T : struct, IComponent
         _context = context;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int EntityId => (int)_packed;
+    private int EntityId
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => (int)_packed;
+    }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int Version => (int)(_packed >> 32);
+    private int Version
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => (int)(_packed >> 32);
+    }
 
     public ref T Value
     {

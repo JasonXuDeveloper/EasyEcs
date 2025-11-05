@@ -15,7 +15,7 @@ public partial class Context
     private readonly Dictionary<Tag, List<Archetype>> _queryCache = new();
 
     // .NET 8.0 Lock for structural modifications (faster than ReaderWriterLockSlim)
-    private readonly Lock _structuralLock = new();
+    private readonly System.Threading.Lock _structuralLock = new();
 
     /// <summary>
     /// Get or create an archetype for the given component mask.

@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using EasyEcs.Core.Components;
+using EasyEcs.Core.Enumerators;
 using EasyEcs.Core.Systems;
 
 namespace EasyEcs.Core;
