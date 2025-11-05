@@ -148,22 +148,27 @@ h.HP = 100;            // Modifies the COPY, not the component!
 
 ⚠️ **CRITICAL: Ref Safety Warning**
 
-Using `ref` to hold component or entity data can be **dangerous** if you perform structural changes while the ref is alive:
+Using `ref` to hold component or entity data can be **dangerous** if arrays are resized while the ref is alive:
 
 ```csharp
-// ⚠️ DANGEROUS: ref becomes invalid after structural changes
+// ⚠️ DANGEROUS: ref becomes invalid if arrays resize
 var entity = context.CreateEntity();
 var health = entity.AddComponent<Health>();
 ref var h = ref health.Value;
 h.HP = 100;
 
-// Any of these operations invalidate the ref:
-context.CreateEntity();              // May resize arrays → ref dangles
-entity.AddComponent<Armor>();        // Changes archetype → ref invalid
-context.DestroyEntity(someEntity);   // May affect storage → ref invalid
+// ONLY this operation invalidates refs:
+context.CreateEntity();  // May resize ALL component arrays → ALL refs dangle!
 
-h.HP = 50;  // UNSAFE! ref may point to wrong data or crash
+h.HP = 50;  // UNSAFE! ref may point to old array or crash
+
+// These operations are SAFE for refs:
+entity.AddComponent<Armor>();        // ✅ Safe: doesn't resize arrays, only changes archetype
+context.DestroyEntity(someEntity);   // ✅ Safe: doesn't resize arrays
+entity.RemoveComponent<Shield>();    // ✅ Safe: doesn't resize arrays
 ```
+
+**Key insight:** Component data is stored in `Context.Components[typeIndex][entityId]` arrays. Only **CreateEntity** resizes these arrays (when capacity is exceeded). AddComponent/RemoveComponent only change which archetype list an entity belongs to—they don't move or resize component data.
 
 **When to use ref:**
 - ✅ **Inside tight loops** with no structural changes:
@@ -176,9 +181,9 @@ h.HP = 50;  // UNSAFE! ref may point to wrong data or crash
   ```
 
 **When NOT to use ref:**
-- ❌ **When creating/destroying entities** while ref is alive
-- ❌ **When adding/removing components** while ref is alive
-- ❌ **Across multiple operations** where structural changes might occur
+- ❌ **When creating entities** while ref is alive (may resize arrays)
+- ✅ **Adding/removing components is SAFE** (doesn't resize arrays)
+- ✅ **Destroying entities is SAFE** (doesn't resize arrays, but logically wrong if destroying the entity whose component you're referencing)
 
 **Safe Alternative:**
 ```csharp
@@ -195,7 +200,7 @@ entity.AddComponent<Armor>();
 health.Value.HP = 50;  // Safe: ComponentRef validates and accesses current data
 ```
 
-**Rule of thumb:** If you're unsure, **always use `compRef.Value.field`** instead of `ref compRef.Value`. Only use `ref` for short-lived, local optimizations where you can guarantee no structural changes occur.
+**Rule of thumb:** If you're unsure, **always use `compRef.Value.field`** instead of `ref compRef.Value`. Only use `ref` for short-lived, local optimizations where you can guarantee no entity creation occurs (which could resize arrays). AddComponent/RemoveComponent are safe with refs.
 
 **Pattern 3: Nested Callbacks**
 
@@ -550,25 +555,31 @@ See **Pattern 2b: Modifying Components** for detailed guidance.
 
 ### Issue: Crash or Corruption When Using `ref`
 
-**Cause:** Holding `ref` to component/entity while performing structural changes.
+**Cause:** Holding `ref` to component while creating entities (which may resize arrays).
 
-**Symptoms:** Access violations, wrong data, corrupted state.
+**Symptoms:** Access violations, wrong data, corrupted state after CreateEntity.
 
-**Solution:** Don't hold `ref` across structural changes:
+**Solution:** Don't hold `ref` across CreateEntity calls:
 
 ```csharp
-// ❌ Crash: ref held during structural change
+// ❌ Crash: ref held during CreateEntity (array resize)
 ref var health = ref entity.GetComponent<Health>().Value;
-context.CreateEntity();  // Array resize → ref invalid!
-health.HP = 100;  // CRASH!
+context.CreateEntity();  // May resize ALL arrays → ref invalid!
+health.HP = 100;  // CRASH or wrong data!
 
 // ✅ Safe: Use ComponentRef
 var health = entity.GetComponent<Health>();
 context.CreateEntity();  // Safe
 health.Value.HP = 100;  // Safe: ComponentRef gets current location
+
+// ✅ Also safe: AddComponent/RemoveComponent with ref
+ref var health = ref entity.GetComponent<Health>().Value;
+entity.AddComponent<Armor>();     // Safe: doesn't resize arrays
+entity.RemoveComponent<Shield>(); // Safe: doesn't resize arrays
+health.HP = 100;  // Safe: array wasn't resized
 ```
 
-**Rule:** Only use `ref` inside tight loops with no structural changes.
+**Rule:** Only use `ref` when no entity creation will occur. AddComponent/RemoveComponent are safe with refs.
 
 ### Issue: Iteration Behavior Changed
 
@@ -632,7 +643,7 @@ foreach (var result in context.GroupOf<Position, Velocity>())
     result.Component1.Value.X += 1;
 }
 
-// ✅ Good: Using ref for multiple modifications (SAFE: no structural changes in loop)
+// ✅ Good: Using ref for multiple modifications (SAFE: no entity creation)
 foreach (var result in context.GroupOf<Position, Velocity>())
 {
     ref var pos = ref result.Component1.Value;
@@ -640,29 +651,41 @@ foreach (var result in context.GroupOf<Position, Velocity>())
     pos.Y += result.Component2.Value.Y;
 }
 
-// ⚠️ UNSAFE: ref held during structural changes
+// ⚠️ UNSAFE: ref held during CreateEntity
+var health = player.GetComponent<Health>();
+ref var h = ref health.Value;
+h.HP = 100;
+// Spawn new enemies - may resize arrays!
+for (int i = 0; i < 1000; i++)
+{
+    context.CreateEntity().AddComponent<Enemy>();
+}
+h.MaxHP = 150;  // CRASH! Arrays were resized, ref is invalid
+
+// ✅ SAFE: Use ComponentRef across CreateEntity
+var health = player.GetComponent<Health>();
+health.Value.HP = 100;
+// Spawn enemies - ComponentRef handles array changes
+for (int i = 0; i < 1000; i++)
+{
+    context.CreateEntity().AddComponent<Enemy>();
+}
+health.Value.MaxHP = 150;  // Safe: ComponentRef gets current array location
+
+// ✅ ALSO SAFE: ref with AddComponent/RemoveComponent (no CreateEntity)
 foreach (var result in context.GroupOf<Health>())
 {
     ref var health = ref result.Component1.Value;
     if (health.HP <= 0)
     {
-        // Structural change while holding ref - DANGEROUS!
-        context.DestroyEntity(result.Entity);
-        health.HP = 0;  // ref is now invalid, may crash!
-    }
-}
-
-// ✅ SAFE: Use ComponentRef when making structural changes
-foreach (var result in context.GroupOf<Health>())
-{
-    if (result.Component1.Value.HP <= 0)
-    {
-        context.DestroyEntity(result.Entity);  // Safe: not holding ref
+        // AddComponent/RemoveComponent don't resize arrays - safe with ref!
+        result.Entity.AddComponent<Dead>();
+        health.HP = 0;  // Safe: array wasn't resized
     }
 }
 ```
 
-**⚠️ Ref Safety Reminder:** Only use `ref` when you're certain no structural changes (create/destroy entities, add/remove components) will occur while the ref is alive. Otherwise, use `compRef.Value.field` for safety. See "Pattern 2b: Modifying Components" for full details.
+**⚠️ Ref Safety Reminder:** Only use `ref` when you're certain **no entity creation** will occur while the ref is alive (CreateEntity may resize ALL arrays). AddComponent/RemoveComponent are safe with refs. See "Pattern 2b: Modifying Components" for full details.
 
 ## Summary
 
