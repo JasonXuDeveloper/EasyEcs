@@ -1,16 +1,13 @@
-using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using System.Threading;
 using EasyEcs.Core.Components;
 
 namespace EasyEcs.Core;
 
 public partial class Context
 {
-    // Archetype storage: Tag -> Archetype (thread-safe for concurrent reads and writes)
-    internal readonly ConcurrentDictionary<Tag, Archetype> Archetypes = new();
+    // Archetype storage: Tag -> Archetype
+    internal readonly Dictionary<Tag, Archetype> Archetypes = new();
 
     // Query cache: QueryTag -> List of matching archetypes (O(1) lookup after first query)
     private readonly Dictionary<Tag, List<Archetype>> _queryCache = new();
@@ -20,16 +17,28 @@ public partial class Context
 
     /// <summary>
     /// Get or create an archetype for the given component mask.
-    /// Thread-safe using ConcurrentDictionary.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal Archetype GetOrCreateArchetype(in Tag componentMask)
     {
-        return Archetypes.GetOrAdd(componentMask, static (tag) =>
+        // ReSharper disable once InconsistentlySynchronizedField
+        if (!Archetypes.TryGetValue(componentMask, out var archetype))
         {
-            return new Archetype(in tag, initialCapacity: 1024);
-        });
-        // Note: Query cache invalidation happens in structural operations (add/remove component)
+            lock (_structuralLock)
+            {
+                // Double-check after acquiring lock
+                if (!Archetypes.TryGetValue(componentMask, out archetype))
+                {
+                    archetype = new Archetype(in componentMask, initialCapacity: 1024);
+                    Archetypes[componentMask] = archetype;
+
+                    // Invalidate query cache (new archetype may match existing queries)
+                    _queryCache.Clear();
+                }
+            }
+        }
+
+        return archetype;
     }
 
     /// <summary>
