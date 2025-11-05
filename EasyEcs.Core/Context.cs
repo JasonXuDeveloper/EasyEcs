@@ -264,7 +264,7 @@ public partial class Context : IAsyncDisposable
                 throw new InvalidOperationException($"Entity {entity.Id} not found.");
 
             // Get or register component type
-            byte componentIdx = TagRegistry.GetOrRegisterTag<T>();
+            int componentIdx = TagRegistry.GetOrRegisterTag<T>();
 
             // Ensure component array exists
             if (Components == null || componentIdx >= Components.Length)
@@ -346,7 +346,7 @@ public partial class Context : IAsyncDisposable
     /// Thread-safe.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    internal T[] EnsureComponentArrayInitialized<T>(byte componentIdx) where T : struct, IComponent
+    internal T[] EnsureComponentArrayInitialized<T>(int componentIdx) where T : struct, IComponent
     {
         lock (_structuralLock)
         {

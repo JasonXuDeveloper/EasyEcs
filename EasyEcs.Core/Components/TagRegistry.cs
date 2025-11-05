@@ -14,7 +14,7 @@ internal class TagRegistry
 
     private class TypeBitIndex<T> : ITypeBitIndex
     {
-        internal byte BitIndex;
+        internal int BitIndex;
         internal bool IsRegistered;
         public static TypeBitIndex<T> Instance = new();
 
@@ -45,28 +45,8 @@ internal class TagRegistry
         return TypeBitIndex<T>.Instance.IsRegistered;
     }
 
-    public void RegisterTag<T>() where T : struct
-    {
-        var instance = TypeBitIndex<T>.Instance;
-        if (instance.IsRegistered)
-        {
-            return;
-        }
-
-        if (TagCount == Unsafe.SizeOf<Tag>())
-        {
-            throw new InvalidOperationException("Maximum number of tags is reached");
-        }
-
-        var bitIndex = (byte)TagCount;
-        instance.BitIndex = bitIndex;
-        instance.IsRegistered = true;
-        TagCount++;
-        _tags.Add(instance);
-    }
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public byte GetTagBitIndex<T>() where T : struct
+    public int GetTagBitIndex<T>() where T : struct
     {
         var instance = TypeBitIndex<T>.Instance;
         if (!instance.IsRegistered)
@@ -78,7 +58,7 @@ internal class TagRegistry
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool TryGetTagBitIndex<T>(out byte bitIndex) where T : struct
+    public bool TryGetTagBitIndex<T>(out int bitIndex) where T : struct
     {
         var instance = TypeBitIndex<T>.Instance;
         if (!instance.IsRegistered)
@@ -93,20 +73,18 @@ internal class TagRegistry
 
     /// <summary>
     /// Get existing tag index or register a new one if it doesn't exist.
+    /// Supports unlimited component types with Tag's overflow system.
     /// Thread-safe via caller's lock.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public byte GetOrRegisterTag<T>() where T : struct
+    public int GetOrRegisterTag<T>() where T : struct
     {
         var instance = TypeBitIndex<T>.Instance;
         if (instance.IsRegistered)
             return instance.BitIndex;
 
-        // Register new tag
-        if (TagCount >= 256 * 4)  // Max supported by Tag structure
-            throw new InvalidOperationException("Maximum number of component types reached");
-
-        var bitIndex = (byte)TagCount;
+        // Register new tag - no hard limit, Tag handles overflow beyond 256 components
+        int bitIndex = TagCount;
         instance.BitIndex = bitIndex;
         instance.IsRegistered = true;
         TagCount++;
