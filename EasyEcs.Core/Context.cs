@@ -21,7 +21,6 @@ public partial class Context : IAsyncDisposable
     internal Entity[] Entities;
     internal int[] EntityVersions;  // Version tracking for destroyed entities
     private bool[] _activeEntityIds;
-    private readonly Queue<int> _reusableIds = new();
     private int _activeEntityCount;
 
     // Component storage
@@ -40,7 +39,6 @@ public partial class Context : IAsyncDisposable
 
     // Configuration
     private readonly Options _options;
-    private readonly ParallelOptions _parallelOptions;
 
     // State
     private bool _started;
@@ -54,15 +52,7 @@ public partial class Context : IAsyncDisposable
     public Context(Options options = null)
     {
         _options = options ?? new Options();
-
-        if (_options.Parallel)
-        {
-            _parallelOptions = new ParallelOptions
-            {
-                MaxDegreeOfParallelism = _options.LevelOfParallelism
-            };
-        }
-
+        
         // Pre-allocate entity storage
         int initialCapacity = _options.InitialEntityCapacity;
         Entities = new Entity[initialCapacity];
@@ -227,9 +217,6 @@ public partial class Context : IAsyncDisposable
             // Mark inactive
             _activeEntityIds[entity.Id] = false;
             _activeEntityCount--;
-
-            // Reuse ID
-            _reusableIds.Enqueue(entity.Id);
         }
     }
 
@@ -549,7 +536,6 @@ public partial class Context : IAsyncDisposable
         // Clear all data
         Array.Clear(_activeEntityIds, 0, _activeEntityIds.Length);
         Array.Clear(Entities, 0, Entities.Length);
-        _reusableIds.Clear();
 
         foreach (var archetype in Archetypes.Values)
         {
