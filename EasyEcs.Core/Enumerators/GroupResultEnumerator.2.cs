@@ -37,14 +37,19 @@ public struct GroupResultEnumerator<T1, T2> : IDisposable
         if (context.TagRegistry.TryGetTagBitIndex<T1>(out var bitIdx1) &&
             context.TagRegistry.TryGetTagBitIndex<T2>(out var bitIdx2))
         {
-            _components1 = context.Components[bitIdx1] as T1[];
-            _components2 = context.Components[bitIdx2] as T2[];
+            if (context.Components != null &&
+                bitIdx1 < context.Components.Length &&
+                bitIdx2 < context.Components.Length)
+            {
+                _components1 = Unsafe.As<T1[]>(context.Components[bitIdx1]);
+                _components2 = Unsafe.As<T2[]>(context.Components[bitIdx2]);
 
-            var queryTag = new Tag();
-            queryTag.SetBit(bitIdx1);
-            queryTag.SetBit(bitIdx2);
+                var queryTag = new Tag();
+                queryTag.SetBit(bitIdx1);
+                queryTag.SetBit(bitIdx2);
 
-            _matchingArchetypes = context.GetMatchingArchetypes(queryTag);
+                _matchingArchetypes = context.GetMatchingArchetypes(queryTag);
+            }
         }
     }
 

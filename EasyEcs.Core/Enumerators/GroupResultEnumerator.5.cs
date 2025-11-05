@@ -49,20 +49,28 @@ public struct GroupResultEnumerator<T1, T2, T3, T4, T5> : IDisposable
             context.TagRegistry.TryGetTagBitIndex<T4>(out var bitIdx4) &&
             context.TagRegistry.TryGetTagBitIndex<T5>(out var bitIdx5))
         {
-            _components1 = context.Components[bitIdx1] as T1[];
-            _components2 = context.Components[bitIdx2] as T2[];
-            _components3 = context.Components[bitIdx3] as T3[];
-            _components4 = context.Components[bitIdx4] as T4[];
-            _components5 = context.Components[bitIdx5] as T5[];
+            if (context.Components != null &&
+                bitIdx1 < context.Components.Length &&
+                bitIdx2 < context.Components.Length &&
+                bitIdx3 < context.Components.Length &&
+                bitIdx4 < context.Components.Length &&
+                bitIdx5 < context.Components.Length)
+            {
+                _components1 = Unsafe.As<T1[]>(context.Components[bitIdx1]);
+                _components2 = Unsafe.As<T2[]>(context.Components[bitIdx2]);
+                _components3 = Unsafe.As<T3[]>(context.Components[bitIdx3]);
+                _components4 = Unsafe.As<T4[]>(context.Components[bitIdx4]);
+                _components5 = Unsafe.As<T5[]>(context.Components[bitIdx5]);
 
-            var queryTag = new Tag();
-            queryTag.SetBit(bitIdx1);
-            queryTag.SetBit(bitIdx2);
-            queryTag.SetBit(bitIdx3);
-            queryTag.SetBit(bitIdx4);
-            queryTag.SetBit(bitIdx5);
+                var queryTag = new Tag();
+                queryTag.SetBit(bitIdx1);
+                queryTag.SetBit(bitIdx2);
+                queryTag.SetBit(bitIdx3);
+                queryTag.SetBit(bitIdx4);
+                queryTag.SetBit(bitIdx5);
 
-            _matchingArchetypes = context.GetMatchingArchetypes(queryTag);
+                _matchingArchetypes = context.GetMatchingArchetypes(queryTag);
+            }
         }
     }
 

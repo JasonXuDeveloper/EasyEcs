@@ -37,14 +37,18 @@ public struct GroupResultEnumerator<T> : IDisposable
 
         if (context.TagRegistry.TryGetTagBitIndex<T>(out var bitIdx))
         {
-            _components = context.Components[bitIdx] as T[];
+            // Safely access Components array (may not be initialized yet)
+            if (context.Components != null && bitIdx < context.Components.Length)
+            {
+                _components = Unsafe.As<T[]>(context.Components[bitIdx]);
 
-            // Build query tag
-            var queryTag = new Tag();
-            queryTag.SetBit(bitIdx);
+                // Build query tag
+                var queryTag = new Tag();
+                queryTag.SetBit(bitIdx);
 
-            // Get matching archetypes from cache (O(1) after first access)
-            _matchingArchetypes = context.GetMatchingArchetypes(queryTag);
+                // Get matching archetypes from cache (O(1) after first access)
+                _matchingArchetypes = context.GetMatchingArchetypes(queryTag);
+            }
         }
     }
 
