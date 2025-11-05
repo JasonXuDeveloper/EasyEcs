@@ -33,16 +33,10 @@ public partial class Context : IAsyncDisposable
     private readonly PrioritySystemList<IInitSystem> _initSystems = new();
     private readonly PrioritySystemList<IEndSystem> _endSystems = new();
 
-    // System execution (pre-allocated arrays for zero allocation)
-    private UniTask[] _initTasks = new UniTask[32];
-    private UniTask[] _updateTasks = new UniTask[32];
-    private UniTask[] _endTasks = new UniTask[32];
-    private Task[] _initTasksConverted = new Task[32];
-    private Task[] _updateTasksConverted = new Task[32];
-    private Task[] _endTasksConverted = new Task[32];
-    private int _initTaskCount;
-    private int _updateTaskCount;
-    private int _endTaskCount;
+    // System execution (pre-allocated lists for zero allocation)
+    private readonly List<UniTask> _initTasks = new(32);
+    private readonly List<UniTask> _updateTasks = new(32);
+    private readonly List<UniTask> _endTasks = new(32);
 
     // Configuration
     private readonly Options _options;
@@ -443,23 +437,15 @@ public partial class Context : IAsyncDisposable
         for (int bucketIdx = 0; bucketIdx < _initSystems.BucketCount; bucketIdx++)
         {
             var sequence = _initSystems[bucketIdx];
-            _initTaskCount = 0;
+            _initTasks.Clear();
 
             for (int i = 0; i < sequence.Count; i++)
             {
-                if (_initTaskCount >= _initTasks.Length)
-                {
-                    Array.Resize(ref _initTasks, _initTasks.Length * 2);
-                    Array.Resize(ref _initTasksConverted, _initTasksConverted.Length * 2);
-                }
-
-                _initTasks[_initTaskCount] = sequence[i].OnInit(this);
-                _initTasksConverted[_initTaskCount] = _initTasks[_initTaskCount].AsTask();
-                _initTaskCount++;
+                _initTasks.Add(sequence[i].OnInit(this));
             }
 
             // Execute all systems at this priority level before moving to next priority
-            await ExecuteTasks(_initTasks, _initTasksConverted, _initTaskCount);
+            await ExecuteTasks(_initTasks);
         }
 
         _initSystems.Clear();
@@ -483,22 +469,14 @@ public partial class Context : IAsyncDisposable
             for (int bucketIdx = 0; bucketIdx < _initSystems.BucketCount; bucketIdx++)
             {
                 var sequence = _initSystems[bucketIdx];
-                _initTaskCount = 0;
+                _initTasks.Clear();
 
                 for (int i = 0; i < sequence.Count; i++)
                 {
-                    if (_initTaskCount >= _initTasks.Length)
-                    {
-                        Array.Resize(ref _initTasks, _initTasks.Length * 2);
-                        Array.Resize(ref _initTasksConverted, _initTasksConverted.Length * 2);
-                    }
-
-                    _initTasks[_initTaskCount] = sequence[i].OnInit(this);
-                    _initTasksConverted[_initTaskCount] = _initTasks[_initTaskCount].AsTask();
-                    _initTaskCount++;
+                    _initTasks.Add(sequence[i].OnInit(this));
                 }
 
-                await ExecuteTasks(_initTasks, _initTasksConverted, _initTaskCount);
+                await ExecuteTasks(_initTasks);
             }
 
             _initSystems.Clear();
@@ -508,48 +486,40 @@ public partial class Context : IAsyncDisposable
         for (int bucketIdx = 0; bucketIdx < _executeSystems.BucketCount; bucketIdx++)
         {
             var sequence = _executeSystems[bucketIdx];
-            _updateTaskCount = 0;
+            _updateTasks.Clear();
 
             for (int i = 0; i < sequence.Count; i++)
             {
-                if (_updateTaskCount >= _updateTasks.Length)
-                {
-                    Array.Resize(ref _updateTasks, _updateTasks.Length * 2);
-                    Array.Resize(ref _updateTasksConverted, _updateTasksConverted.Length * 2);
-                }
-
-                _updateTasks[_updateTaskCount] = sequence[i].Update(this, OnError);
-                _updateTasksConverted[_updateTaskCount] = _updateTasks[_updateTaskCount].AsTask();
-                _updateTaskCount++;
+                _updateTasks.Add(sequence[i].Update(this, OnError));
             }
 
-            await ExecuteTasks(_updateTasks, _updateTasksConverted, _updateTaskCount);
+            await ExecuteTasks(_updateTasks);
         }
     }
 
     /// <summary>
     /// Execute tasks either sequentially or in parallel based on options.
-    /// Zero allocation after warmup (when using pre-allocated arrays).
+    /// Zero allocation after warmup (when using pre-allocated lists).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private async UniTask ExecuteTasks(UniTask[] uniTasks, Task[] convertedTasks, int count)
+    private async UniTask ExecuteTasks(List<UniTask> tasks)
     {
-        if (count == 0)
+        if (tasks.Count == 0)
             return;
 
-        if (_options.Parallel && count > 1)
+        if (_options.Parallel && tasks.Count > 1)
         {
-            // Parallel execution using Task.WaitAll (zero allocation, no closures)
-            // All tasks are already running, just wait for completion
-            // Task.WaitAll blocks until all tasks complete
-            Task.WaitAll(convertedTasks, 0, count);
+            // Parallel execution using UniTask.WhenAll with List
+            // List<T> implements IEnumerable<T>, and List<T>.GetEnumerator() returns a struct
+            // No allocation for enumeration, no closures, optimal performance
+            await UniTask.WhenAll(tasks);
         }
         else
         {
             // Sequential execution (zero allocation)
-            for (int i = 0; i < count; i++)
+            for (int i = 0; i < tasks.Count; i++)
             {
-                await uniTasks[i];
+                await tasks[i];
             }
         }
     }
@@ -566,22 +536,14 @@ public partial class Context : IAsyncDisposable
         for (int bucketIdx = 0; bucketIdx < _endSystems.BucketCount; bucketIdx++)
         {
             var sequence = _endSystems[bucketIdx];
-            _endTaskCount = 0;
+            _endTasks.Clear();
 
             for (int i = 0; i < sequence.Count; i++)
             {
-                if (_endTaskCount >= _endTasks.Length)
-                {
-                    Array.Resize(ref _endTasks, _endTasks.Length * 2);
-                    Array.Resize(ref _endTasksConverted, _endTasksConverted.Length * 2);
-                }
-
-                _endTasks[_endTaskCount] = sequence[i].Execute(this, OnError);
-                _endTasksConverted[_endTaskCount] = _endTasks[_endTaskCount].AsTask();
-                _endTaskCount++;
+                _endTasks.Add(sequence[i].Execute(this, OnError));
             }
 
-            await ExecuteTasks(_endTasks, _endTasksConverted, _endTaskCount);
+            await ExecuteTasks(_endTasks);
         }
 
         // Clear all data
