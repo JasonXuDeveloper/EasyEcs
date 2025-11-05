@@ -146,6 +146,57 @@ h.HP = 100;            // Modifies the COPY, not the component!
 
 **Rule:** Always use either `compRef.Value.field = ...` or `ref compRef.Value` to modify components. Never copy the Value to a local variable for modification.
 
+⚠️ **CRITICAL: Ref Safety Warning**
+
+Using `ref` to hold component or entity data can be **dangerous** if you perform structural changes while the ref is alive:
+
+```csharp
+// ⚠️ DANGEROUS: ref becomes invalid after structural changes
+var entity = context.CreateEntity();
+var health = entity.AddComponent<Health>();
+ref var h = ref health.Value;
+h.HP = 100;
+
+// Any of these operations invalidate the ref:
+context.CreateEntity();              // May resize arrays → ref dangles
+entity.AddComponent<Armor>();        // Changes archetype → ref invalid
+context.DestroyEntity(someEntity);   // May affect storage → ref invalid
+
+h.HP = 50;  // UNSAFE! ref may point to wrong data or crash
+```
+
+**When to use ref:**
+- ✅ **Inside tight loops** with no structural changes:
+  ```csharp
+  foreach (var result in context.GroupOf<Position, Velocity>())
+  {
+      ref var pos = ref result.Component1.Value;
+      pos.X += result.Component2.Value.X;  // Safe: no structural changes
+  }
+  ```
+
+**When NOT to use ref:**
+- ❌ **When creating/destroying entities** while ref is alive
+- ❌ **When adding/removing components** while ref is alive
+- ❌ **Across multiple operations** where structural changes might occur
+
+**Safe Alternative:**
+```csharp
+// ✅ SAFE: Always get fresh reference through ComponentRef
+var entity = context.CreateEntity();
+var health = entity.AddComponent<Health>();
+health.Value.HP = 100;
+
+// Structural changes are safe
+context.CreateEntity();
+entity.AddComponent<Armor>();
+
+// Access through ComponentRef is always valid
+health.Value.HP = 50;  // Safe: ComponentRef validates and accesses current data
+```
+
+**Rule of thumb:** If you're unsure, **always use `compRef.Value.field`** instead of `ref compRef.Value`. Only use `ref` for short-lived, local optimizations where you can guarantee no structural changes occur.
+
 **Pattern 3: Nested Callbacks**
 
 ❌ **Old:**
@@ -469,6 +520,56 @@ var entity = context.CreateEntity();
 Assert.NotNull(entity);
 ```
 
+### Issue: Component Modifications Not Working
+
+**Cause:** Copying component value to local variable (components are structs).
+
+**Symptoms:** Changes to components don't persist, or crash when using `ref` with structural changes.
+
+**Solution:** Use correct modification patterns:
+
+```csharp
+// ❌ Bad: Local copy
+var health = entity.GetComponent<Health>();
+var h = health.Value;  // COPY!
+h.HP = 100;  // Lost!
+
+// ✅ Good: Direct modification
+var health = entity.GetComponent<Health>();
+health.Value.HP = 100;
+
+// ✅ Good: Using ref (only if NO structural changes)
+var health = entity.GetComponent<Health>();
+ref var h = ref health.Value;
+h.HP = 100;
+h.MaxHP = 150;
+// Don't create/destroy entities or add/remove components while holding ref!
+```
+
+See **Pattern 2b: Modifying Components** for detailed guidance.
+
+### Issue: Crash or Corruption When Using `ref`
+
+**Cause:** Holding `ref` to component/entity while performing structural changes.
+
+**Symptoms:** Access violations, wrong data, corrupted state.
+
+**Solution:** Don't hold `ref` across structural changes:
+
+```csharp
+// ❌ Crash: ref held during structural change
+ref var health = ref entity.GetComponent<Health>().Value;
+context.CreateEntity();  // Array resize → ref invalid!
+health.HP = 100;  // CRASH!
+
+// ✅ Safe: Use ComponentRef
+var health = entity.GetComponent<Health>();
+context.CreateEntity();  // Safe
+health.Value.HP = 100;  // Safe: ComponentRef gets current location
+```
+
+**Rule:** Only use `ref` inside tight loops with no structural changes.
+
 ### Issue: Iteration Behavior Changed
 
 **Cause:** v3.0 uses tombstone pattern for safe iteration.
@@ -531,14 +632,37 @@ foreach (var result in context.GroupOf<Position, Velocity>())
     result.Component1.Value.X += 1;
 }
 
-// ✅ Good: Using ref for multiple modifications
+// ✅ Good: Using ref for multiple modifications (SAFE: no structural changes in loop)
 foreach (var result in context.GroupOf<Position, Velocity>())
 {
     ref var pos = ref result.Component1.Value;
     pos.X += result.Component2.Value.X;
     pos.Y += result.Component2.Value.Y;
 }
+
+// ⚠️ UNSAFE: ref held during structural changes
+foreach (var result in context.GroupOf<Health>())
+{
+    ref var health = ref result.Component1.Value;
+    if (health.HP <= 0)
+    {
+        // Structural change while holding ref - DANGEROUS!
+        context.DestroyEntity(result.Entity);
+        health.HP = 0;  // ref is now invalid, may crash!
+    }
+}
+
+// ✅ SAFE: Use ComponentRef when making structural changes
+foreach (var result in context.GroupOf<Health>())
+{
+    if (result.Component1.Value.HP <= 0)
+    {
+        context.DestroyEntity(result.Entity);  // Safe: not holding ref
+    }
+}
 ```
+
+**⚠️ Ref Safety Reminder:** Only use `ref` when you're certain no structural changes (create/destroy entities, add/remove components) will occur while the ref is alive. Otherwise, use `compRef.Value.field` for safety. See "Pattern 2b: Modifying Components" for full details.
 
 ## Summary
 
