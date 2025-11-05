@@ -17,7 +17,7 @@ internal class Archetype
 
     private const int Tombstone = -1;
 
-    public Archetype(Tag componentMask, int initialCapacity = 1024)
+    public Archetype(in Tag componentMask, int initialCapacity = 1024)
     {
         ComponentMask = componentMask;
         EntityIds = new int[initialCapacity];

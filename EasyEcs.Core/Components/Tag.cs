@@ -178,7 +178,7 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
     public static bool operator !=(Tag a, Tag b) => !a.Equals(b);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public bool Equals(Tag other)
+    public bool Equals(in Tag other)
     {
         if (!SimdOps.AreEqual(_bits0, other._bits0) || !SimdOps.AreEqual(_bits1, other._bits1))
             return false;
@@ -196,9 +196,12 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
         return true;
     }
 
+    // IEquatable<Tag> implementation for interface compatibility
+    bool IEquatable<Tag>.Equals(Tag other) => Equals(in other);
+
     public override bool Equals(object obj)
     {
-        return obj is Tag tag && Equals(tag);
+        return obj is Tag tag && Equals(in tag);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -216,7 +219,7 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
         return $"Tag {Unsafe.Add(ref bits0, 0):x16} {Unsafe.Add(ref bits0, 1):x16} {Unsafe.Add(ref bits1, 0):x16} {Unsafe.Add(ref bits1, 1):x16}";
     }
 
-    public int CompareTo(Tag other)
+    public int CompareTo(in Tag other)
     {
         ref long thisBits = ref Unsafe.As<Vector128<long>, long>(ref Unsafe.AsRef(in _bits0));
         ref long otherBits = ref Unsafe.As<Vector128<long>, long>(ref Unsafe.AsRef(in other._bits0));
@@ -248,6 +251,9 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
 
         return 0;
     }
+
+    // IComparable<Tag> implementation for interface compatibility
+    int IComparable<Tag>.CompareTo(Tag other) => CompareTo(in other);
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private void EnsureOverflow(int requiredCount)

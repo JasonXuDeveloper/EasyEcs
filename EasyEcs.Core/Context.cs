@@ -414,15 +414,36 @@ public partial class Context : IAsyncDisposable
         {
             var systemType = typeof(T);
 
-            // Manual iteration to avoid closure allocation
+            // Manual iteration to avoid closure allocation - iterate backwards to safely remove
             for (int i = 0; i < _initSystems.BucketCount; i++)
-                _initSystems[i].RemoveAll(s => s.GetType() == systemType);
+            {
+                var list = _initSystems[i];
+                for (int j = list.Count - 1; j >= 0; j--)
+                {
+                    if (list[j].GetType() == systemType)
+                        list.RemoveAt(j);
+                }
+            }
 
             for (int i = 0; i < _executeSystems.BucketCount; i++)
-                _executeSystems[i].RemoveAll(s => s.System.GetType() == systemType);
+            {
+                var list = _executeSystems[i];
+                for (int j = list.Count - 1; j >= 0; j--)
+                {
+                    if (list[j].System.GetType() == systemType)
+                        list.RemoveAt(j);
+                }
+            }
 
             for (int i = 0; i < _endSystems.BucketCount; i++)
-                _endSystems[i].RemoveAll(s => s.GetType() == systemType);
+            {
+                var list = _endSystems[i];
+                for (int j = list.Count - 1; j >= 0; j--)
+                {
+                    if (list[j].GetType() == systemType)
+                        list.RemoveAt(j);
+                }
+            }
         }
     }
 
@@ -558,9 +579,10 @@ public partial class Context : IAsyncDisposable
         Array.Clear(_activeEntityIds, 0, _activeEntityIds.Length);
         Array.Clear(Entities, 0, Entities.Length);
 
-        foreach (var archetype in Archetypes.Values)
+        // Use direct enumeration to avoid allocating Dictionary.Values collection
+        foreach (var kvp in Archetypes)
         {
-            Array.Clear(archetype.EntityIds, 0, archetype.EntityIds.Length);
+            Array.Clear(kvp.Value.EntityIds, 0, kvp.Value.EntityIds.Length);
         }
 
         Archetypes.Clear();

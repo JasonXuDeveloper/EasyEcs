@@ -7,32 +7,33 @@ namespace EasyEcs.Core.Components;
 
 internal class TagRegistry
 {
-    private class TypeBitIndex<T>
+    private interface ITypeBitIndex
+    {
+        void Reset();
+    }
+
+    private class TypeBitIndex<T> : ITypeBitIndex
     {
         internal byte BitIndex;
         internal bool IsRegistered;
         public static TypeBitIndex<T> Instance = new();
+
+        public void Reset()
+        {
+            BitIndex = 0;
+            IsRegistered = false;
+        }
     }
 
     public int TagCount;
-    private List<object> _tags = new();
+    private List<ITypeBitIndex> _tags = new();
 
     public void Clear()
     {
-        foreach (var tag in _tags)
+        // Zero-allocation iteration with direct method call
+        for (int i = 0; i < _tags.Count; i++)
         {
-            var type = tag.GetType();
-            FieldInfo bitIndexField = type.GetField("BitIndex", BindingFlags.Instance | BindingFlags.NonPublic);
-            if (bitIndexField != null)
-            {
-                bitIndexField.SetValue(tag, (byte)0);
-            }
-
-            FieldInfo isRegisteredField = type.GetField("IsRegistered", BindingFlags.Instance | BindingFlags.NonPublic);
-            if (isRegisteredField != null)
-            {
-                isRegisteredField.SetValue(tag, false);
-            }
+            _tags[i].Reset();
         }
 
         _tags.Clear();

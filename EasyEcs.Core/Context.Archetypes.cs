@@ -21,7 +21,7 @@ public partial class Context
     /// Get or create an archetype for the given component mask.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal Archetype GetOrCreateArchetype(Tag componentMask)
+    internal Archetype GetOrCreateArchetype(in Tag componentMask)
     {
         if (!Archetypes.TryGetValue(componentMask, out var archetype))
         {
@@ -30,8 +30,8 @@ public partial class Context
                 // Double-check after acquiring lock
                 if (!Archetypes.TryGetValue(componentMask, out archetype))
                 {
-                    archetype = new Archetype(componentMask, initialCapacity: 1024);
-                    Archetypes[componentMask] = archetype;
+                    archetype = new Archetype(in componentMask, initialCapacity: 1024);
+                    Archetypes[componentMask] = componentMask;
 
                     // Invalidate query cache (new archetype may match existing queries)
                     _queryCache.Clear();
@@ -47,7 +47,7 @@ public partial class Context
     /// Uses O(1) cached lookup after first access.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    internal List<Archetype> GetMatchingArchetypes(Tag queryTag)
+    internal List<Archetype> GetMatchingArchetypes(in Tag queryTag)
     {
         // Fast path: check cache without lock (read-only access is safe)
         if (_queryCache.TryGetValue(queryTag, out var cached))
@@ -62,8 +62,10 @@ public partial class Context
             // Build list of matching archetypes
             var matching = new List<Archetype>(16);
 
-            foreach (var archetype in Archetypes.Values)
+            // Use direct enumeration to avoid allocating Dictionary.Values collection
+            foreach (var kvp in Archetypes)
             {
+                var archetype = kvp.Value;
                 // SIMD-accelerated bitwise AND
                 // An archetype matches if it contains all required components
                 if ((archetype.ComponentMask & queryTag) == queryTag)
@@ -86,8 +88,10 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            foreach (var archetype in Archetypes.Values)
+            // Use direct enumeration to avoid allocating Dictionary.Values collection
+            foreach (var kvp in Archetypes)
             {
+                var archetype = kvp.Value;
                 if (archetype.AliveCount < archetype.Count)
                 {
                     archetype.Compact();
@@ -106,8 +110,10 @@ public partial class Context
 
         lock (_structuralLock)
         {
-            foreach (var archetype in Archetypes.Values)
+            // Use direct enumeration to avoid allocating Dictionary.Values collection
+            foreach (var kvp in Archetypes)
             {
+                var archetype = kvp.Value;
                 totalSlots += archetype.Count;
                 aliveEntities += archetype.AliveCount;
             }
