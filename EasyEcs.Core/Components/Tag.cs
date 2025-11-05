@@ -66,7 +66,7 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
         int vectorIndex = bitIndex >> 7;
         int bitOffset = bitIndex & 127;
 
-        ref Vector128<long> vector;
+        ref Vector128<long> vector = ref (vectorIndex == 0 ? ref _bits0 : ref _bits1);
 
         if (vectorIndex == 0)
             vector = ref _bits0;

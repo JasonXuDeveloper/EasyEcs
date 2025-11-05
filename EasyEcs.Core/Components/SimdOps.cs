@@ -65,8 +65,8 @@ internal static class SimdOps
         }
         if (UseAdvSimd)
         {
-            var cmp = AdvSimd.CompareEqual(left, right);
-            return cmp.Equals(Vector128<long>.AllBitsSet);
+            var cmp = AdvSimd.CompareEqual(left.AsUInt64(), right.AsUInt64());
+            return AdvSimd.Arm64.MinAcross(cmp) == ulong.MaxValue;
         }
         return left.Equals(right);
     }

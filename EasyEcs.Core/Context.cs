@@ -274,7 +274,9 @@ public partial class Context : IAsyncDisposable
             }
             else if (Components[componentIdx].Length < Entities.Length)
             {
-                Array.Resize(ref (T[])Components[componentIdx], Entities.Length);
+                var tempArray = (T[])Components[componentIdx];
+                Array.Resize(ref tempArray, Entities.Length);
+                Components[componentIdx] = tempArray;
             }
 
             var componentArray = (T[])Components[componentIdx];
@@ -483,7 +485,7 @@ public partial class Context : IAsyncDisposable
 
     /// <summary>
     /// Execute tasks either sequentially or in parallel based on options.
-    /// Zero allocation after warmup.
+    /// Zero allocation after warmup (when using pre-allocated arrays).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private async UniTask ExecuteTasks(UniTask[] tasks, int count)
@@ -491,14 +493,10 @@ public partial class Context : IAsyncDisposable
         if (count == 0)
             return;
 
-        if (_options.Parallel)
+        if (_options.Parallel && count > 1)
         {
-            // Parallel execution using Parallel.ForEachAsync
-            await Parallel.ForEachAsync(
-                tasks.AsMemory(0, count),
-                _parallelOptions,
-                async (task, ct) => await task
-            ).AsUniTask(false);
+            // Parallel execution - wait for all tasks concurrently
+            await UniTask.WhenAll(tasks.AsMemory(0, count).ToArray());
         }
         else
         {
