@@ -154,6 +154,27 @@ public partial class Context : IAsyncDisposable
     }
 
     /// <summary>
+    /// Get the Nth active entity (0-indexed).
+    /// </summary>
+    public EntityRef EntityAt(int index)
+    {
+        var span = _activeEntityIds.AsSpan();
+        int currentIndex = 0;
+
+        for (var i = 0; i < span.Length; i++)
+        {
+            if (span[i])
+            {
+                if (currentIndex == index)
+                    return new EntityRef(i, EntityVersions[i], this);
+                currentIndex++;
+            }
+        }
+
+        throw new IndexOutOfRangeException($"Entity at index {index} not found.");
+    }
+
+    /// <summary>
     /// Create a new entity immediately.
     /// Thread-safe and returns entity directly (no callbacks).
     /// </summary>
@@ -212,6 +233,16 @@ public partial class Context : IAsyncDisposable
             // Reuse ID
             _reusableIds.Enqueue(entity.Id);
         }
+    }
+
+    /// <summary>
+    /// Destroy an entity immediately (EntityRef overload).
+    /// Thread-safe.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void DestroyEntity(EntityRef entityRef)
+    {
+        DestroyEntity(entityRef.Value);
     }
 
     /// <summary>
