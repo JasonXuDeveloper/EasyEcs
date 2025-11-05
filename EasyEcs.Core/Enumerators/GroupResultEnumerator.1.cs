@@ -33,8 +33,12 @@ public struct GroupResultEnumerator<T> : IDisposable
         _entityIndexInArchetype = 0;
         Current = default;
 
+        Console.WriteLine($"GroupResultEnumerator<{typeof(T).Name}>: Starting query");
+
         if (context.TagRegistry.TryGetTagBitIndex<T>(out var bitIdx))
         {
+            Console.WriteLine($"GroupResultEnumerator<{typeof(T).Name}>: Found bitIdx = {bitIdx}");
+
             // Safely access Components array (may not be initialized yet)
             if (context.Components != null && bitIdx < context.Components.Length)
             {
@@ -46,7 +50,16 @@ public struct GroupResultEnumerator<T> : IDisposable
 
                 // Get matching archetypes from cache (O(1) after first access)
                 _matchingArchetypes = context.GetMatchingArchetypes(queryTag);
+                Console.WriteLine($"GroupResultEnumerator<{typeof(T).Name}>: Found {_matchingArchetypes.Count} matching archetypes");
             }
+            else
+            {
+                Console.WriteLine($"GroupResultEnumerator<{typeof(T).Name}>: Components is null or bitIdx out of range. Components != null: {context.Components != null}, Components.Length: {context.Components?.Length ?? -1}, bitIdx: {bitIdx}");
+            }
+        }
+        else
+        {
+            Console.WriteLine($"GroupResultEnumerator<{typeof(T).Name}>: TryGetTagBitIndex returned false");
         }
     }
 
