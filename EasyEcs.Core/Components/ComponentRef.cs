@@ -50,8 +50,16 @@ public readonly struct ComponentRef<T> where T : struct, IComponent
             if (actualVersion != version)
                 ThrowEntityDestroyed();
 
+            // Bounds checking for Components array
+            if (_context.Components == null || _componentIndex >= _context.Components.Length)
+                ThrowComponentNotInitialized();
+
+            var componentArrayObj = _context.Components[_componentIndex];
+            if (componentArrayObj == null)
+                ThrowComponentNotInitialized();
+
             // Get component array and access using Unsafe (zero bounds checks)
-            var componentArray = Unsafe.As<T[]>(_context.Components[_componentIndex]);
+            var componentArray = Unsafe.As<T[]>(componentArrayObj);
 
             return ref Unsafe.Add(
                 ref MemoryMarshal.GetArrayDataReference(componentArray),
@@ -62,6 +70,10 @@ public readonly struct ComponentRef<T> where T : struct, IComponent
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowEntityDestroyed() =>
         throw new InvalidOperationException("Entity has been destroyed");
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowComponentNotInitialized() =>
+        throw new InvalidOperationException($"Component array for {typeof(T).Name} is not initialized");
 
     public static implicit operator T(ComponentRef<T> componentRef)
     {
