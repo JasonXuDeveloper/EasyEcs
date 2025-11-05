@@ -60,7 +60,8 @@ internal static class SimdOps
         if (UseAvx2)
         {
             var cmp = Avx2.CompareEqual(left, right);
-            return Avx2.MoveMask(cmp.AsByte()) == -1;
+            // Vector128 has 16 bytes, so we expect a 16-bit mask (0xFFFF), not -1 (0xFFFFFFFF)
+            return Avx2.MoveMask(cmp.AsByte()) == 0xFFFF;
         }
         if (UseAdvSimd)
         {
