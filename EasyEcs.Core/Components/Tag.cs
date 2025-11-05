@@ -183,13 +183,18 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
         if (!SimdOps.AreEqual(_bits0, other._bits0) || !SimdOps.AreEqual(_bits1, other._bits1))
             return false;
 
-        if (_overflow == null && other._overflow == null) return true;
-        if (_overflow == null || other._overflow == null) return false;
-        if (_overflow.Length != other._overflow.Length) return false;
+        // Handle overflow comparison - treat null and empty as equivalent
+        int thisLen = _overflow?.Length ?? 0;
+        int otherLen = other._overflow?.Length ?? 0;
+        int maxLen = Math.Max(thisLen, otherLen);
 
-        for (int i = 0; i < _overflow.Length; i++)
+        // If one has overflow and the other doesn't, check if the overflow vectors are all zero
+        for (int i = 0; i < maxLen; i++)
         {
-            if (!SimdOps.AreEqual(_overflow[i], other._overflow[i]))
+            var thisVec = i < thisLen ? _overflow[i] : Vector128<long>.Zero;
+            var otherVec = i < otherLen ? other._overflow[i] : Vector128<long>.Zero;
+
+            if (!SimdOps.AreEqual(thisVec, otherVec))
                 return false;
         }
 
