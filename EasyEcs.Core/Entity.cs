@@ -75,7 +75,7 @@ public struct Entity : IEquatable<Entity>
     {
         var idx = Context.TagRegistry.GetTagBitIndex<T>();
         if (!Tag.HasBit(idx))
-            throw new InvalidOperationException($"Component {typeof(T)} not found.");
+            throw new InvalidOperationException("Component not found");
 
         return new ComponentRef<T>(Id, Version, idx, Context);
     }

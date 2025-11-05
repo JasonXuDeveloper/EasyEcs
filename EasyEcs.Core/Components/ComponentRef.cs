@@ -12,10 +12,10 @@ public readonly struct ComponentRef<T> where T : struct, IComponent
 {
     // Pack entity ID (lower 32 bits) + version (upper 32 bits)
     private readonly long _packed;
-    private readonly byte _componentIndex;
+    private readonly ushort _componentIndex;  // Supports up to 65536 component types
     private readonly Context _context;
 
-    public ComponentRef(int entityId, int version, byte componentIndex, Context context)
+    public ComponentRef(int entityId, int version, ushort componentIndex, Context context)
     {
         _packed = ((long)version << 32) | (uint)entityId;
         _componentIndex = componentIndex;

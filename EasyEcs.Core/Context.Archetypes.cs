@@ -17,45 +17,38 @@ public partial class Context
 
     /// <summary>
     /// Get or create an archetype for the given component mask.
+    /// Thread-safe: always locks to prevent race conditions.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal Archetype GetOrCreateArchetype(in Tag componentMask)
     {
-        // ReSharper disable once InconsistentlySynchronizedField
-        if (!Archetypes.TryGetValue(componentMask, out var archetype))
+        lock (_structuralLock)
         {
-            lock (_structuralLock)
+            if (!Archetypes.TryGetValue(componentMask, out var archetype))
             {
-                // Double-check after acquiring lock
-                if (!Archetypes.TryGetValue(componentMask, out archetype))
-                {
-                    archetype = new Archetype(in componentMask, initialCapacity: 1024);
-                    Archetypes[componentMask] = archetype;
+                archetype = new Archetype(in componentMask, initialCapacity: 1024);
+                Archetypes[componentMask] = archetype;
 
-                    // Invalidate query cache (new archetype may match existing queries)
-                    _queryCache.Clear();
-                }
+                // Invalidate query cache (new archetype may match existing queries)
+                _queryCache.Clear();
             }
-        }
 
-        return archetype;
+            return archetype;
+        }
     }
 
     /// <summary>
     /// Get all archetypes matching the query tag.
     /// Uses O(1) cached lookup after first access.
+    /// Thread-safe: always locks to prevent race conditions with cache invalidation.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     internal List<Archetype> GetMatchingArchetypes(in Tag queryTag)
     {
-        // Fast path: check cache without lock (read-only access is safe)
-        if (_queryCache.TryGetValue(queryTag, out var cached))
-            return cached;
-
         lock (_structuralLock)
         {
-            // Double-check after acquiring lock
-            if (_queryCache.TryGetValue(queryTag, out cached))
+            // Check cache
+            if (_queryCache.TryGetValue(queryTag, out var cached))
                 return cached;
 
             // Build list of matching archetypes

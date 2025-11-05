@@ -63,12 +63,15 @@ public struct GroupResultEnumerator<T> : IDisposable
         {
             var archetype = _matchingArchetypes[_archetypeIndex];
 
-            // CRITICAL: Get fresh span on EACH MoveNext() to handle array resize
-            var entitySpan = archetype.GetEntitySpan();
-
             // Iterate entities in current archetype
-            while (_entityIndexInArchetype < entitySpan.Length)
+            while (true)
             {
+                // CRITICAL: Get fresh span on EACH iteration to handle concurrent modifications
+                var entitySpan = archetype.GetEntitySpan();
+
+                if (_entityIndexInArchetype >= entitySpan.Length)
+                    break;
+
                 int entityId = entitySpan[_entityIndexInArchetype++];
 
                 // Skip tombstones (-1) - safe iteration during modifications

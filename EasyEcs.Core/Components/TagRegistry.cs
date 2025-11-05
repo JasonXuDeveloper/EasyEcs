@@ -13,8 +13,10 @@ internal class TagRegistry
 
     private class TypeBitIndex<T> : ITypeBitIndex
     {
-        internal int BitIndex;
-        internal bool IsRegistered;
+        // Volatile fields for cross-thread visibility
+        // Static instance shared across all Context instances by design
+        internal volatile ushort BitIndex;  // Supports up to 65536 component types
+        internal volatile bool IsRegistered;
         public static TypeBitIndex<T> Instance = new();
 
         public void Reset()
@@ -23,6 +25,9 @@ internal class TagRegistry
             IsRegistered = false;
         }
     }
+
+    // Static lock for thread-safe registration across all Context instances
+    private static readonly object _globalRegistrationLock = new();
 
     public int TagCount;
     private List<ITypeBitIndex> _tags = new();
@@ -45,19 +50,19 @@ internal class TagRegistry
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public int GetTagBitIndex<T>() where T : struct
+    public ushort GetTagBitIndex<T>() where T : struct
     {
         var instance = TypeBitIndex<T>.Instance;
         if (!instance.IsRegistered)
         {
-            throw new InvalidOperationException($"Tag {typeof(T)} not registered");
+            throw new InvalidOperationException("Tag not registered");
         }
 
         return instance.BitIndex;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool TryGetTagBitIndex<T>(out int bitIndex) where T : struct
+    public bool TryGetTagBitIndex<T>(out ushort bitIndex) where T : struct
     {
         var instance = TypeBitIndex<T>.Instance;
         if (!instance.IsRegistered)
@@ -72,23 +77,36 @@ internal class TagRegistry
 
     /// <summary>
     /// Get existing tag index or register a new one if it doesn't exist.
-    /// Supports unlimited component types with Tag's overflow system.
-    /// Thread-safe via caller's lock.
+    /// Supports up to 65536 component types (ushort max).
+    /// Thread-safe: uses static lock to protect shared TypeBitIndex across contexts.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public int GetOrRegisterTag<T>() where T : struct
+    public ushort GetOrRegisterTag<T>() where T : struct
     {
         var instance = TypeBitIndex<T>.Instance;
+
+        // Fast path: already registered (volatile read ensures visibility)
         if (instance.IsRegistered)
             return instance.BitIndex;
 
-        // Register new tag - no hard limit, Tag handles overflow beyond 256 components
-        int bitIndex = TagCount;
-        instance.BitIndex = bitIndex;
-        instance.IsRegistered = true;
-        TagCount++;
-        _tags.Add(instance);
+        // Slow path: need to register (lock globally since TypeBitIndex is static)
+        lock (_globalRegistrationLock)
+        {
+            // Double-check after acquiring lock
+            if (instance.IsRegistered)
+                return instance.BitIndex;
 
-        return bitIndex;
+            // Register new tag - limited to 65536 component types (ushort max)
+            if (TagCount >= ushort.MaxValue)
+                throw new InvalidOperationException($"Maximum number of component types reached ({ushort.MaxValue})");
+
+            ushort bitIndex = (ushort)TagCount;
+            instance.BitIndex = bitIndex;
+            instance.IsRegistered = true;  // Volatile write ensures visibility
+            TagCount++;
+            _tags.Add(instance);
+
+            return bitIndex;
+        }
     }
 }

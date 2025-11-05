@@ -69,10 +69,15 @@ public struct GroupResultEnumerator<T1, T2, T3> : IDisposable
         while (_archetypeIndex < _matchingArchetypes.Count)
         {
             var archetype = _matchingArchetypes[_archetypeIndex];
-            var entitySpan = archetype.GetEntitySpan();
 
-            while (_entityIndexInArchetype < entitySpan.Length)
+            while (true)
             {
+                // Get fresh span on each iteration to handle concurrent modifications
+                var entitySpan = archetype.GetEntitySpan();
+
+                if (_entityIndexInArchetype >= entitySpan.Length)
+                    break;
+
                 int entityId = entitySpan[_entityIndexInArchetype++];
 
                 if (entityId == Tombstone)

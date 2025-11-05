@@ -137,7 +137,7 @@ public partial class Context : IAsyncDisposable
         if (id >= 0 && id < _activeEntityIds.Length && _activeEntityIds[id])
             return new EntityRef(id, EntityVersions[id], this);
 
-        throw new InvalidOperationException($"Entity with id {id} not found.");
+        throw new InvalidOperationException("Entity not found");
     }
 
     /// <summary>
@@ -158,7 +158,7 @@ public partial class Context : IAsyncDisposable
             }
         }
 
-        throw new IndexOutOfRangeException($"Entity at index {index} not found.");
+        throw new IndexOutOfRangeException("Entity index out of range");
     }
 
     /// <summary>
@@ -260,10 +260,10 @@ public partial class Context : IAsyncDisposable
         lock (_structuralLock)
         {
             if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException($"Entity {entity.Id} not found.");
+                throw new InvalidOperationException("Entity not found");
 
             // Get or register component type
-            int componentIdx = TagRegistry.GetOrRegisterTag<T>();
+            ushort componentIdx = TagRegistry.GetOrRegisterTag<T>();
 
             // Ensure component array exists
             if (Components == null || componentIdx >= Components.Length)
@@ -314,7 +314,7 @@ public partial class Context : IAsyncDisposable
         lock (_structuralLock)
         {
             if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException($"Entity {entity.Id} not found.");
+                throw new InvalidOperationException("Entity not found");
 
             if (!TagRegistry.TryGetTagBitIndex<T>(out var componentIdx))
                 return;
@@ -345,7 +345,7 @@ public partial class Context : IAsyncDisposable
     /// Thread-safe.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    internal T[] EnsureComponentArrayInitialized<T>(int componentIdx) where T : struct, IComponent
+    internal T[] EnsureComponentArrayInitialized<T>(ushort componentIdx) where T : struct, IComponent
     {
         lock (_structuralLock)
         {
@@ -628,7 +628,7 @@ public partial class Context : IAsyncDisposable
     public SingletonComponentRef<T> GetSingletonComponent<T>() where T : struct, ISingletonComponent
     {
         if (!Singleton<T>.Instance.Initialized)
-            throw new InvalidOperationException($"Singleton component {typeof(T)} not initialized.");
+            throw new InvalidOperationException("Singleton component not initialized");
         return new SingletonComponentRef<T>();
     }
 

@@ -111,10 +111,15 @@ public struct GroupResultEnumerator<T1, T2, T3, T4, T5, T6, T7, T8, T9> : IDispo
         while (_archetypeIndex < _matchingArchetypes.Count)
         {
             var archetype = _matchingArchetypes[_archetypeIndex];
-            var entitySpan = archetype.GetEntitySpan();
 
-            while (_entityIndexInArchetype < entitySpan.Length)
+            while (true)
             {
+                // Get fresh span on each iteration to handle concurrent modifications
+                var entitySpan = archetype.GetEntitySpan();
+
+                if (_entityIndexInArchetype >= entitySpan.Length)
+                    break;
+
                 int entityId = entitySpan[_entityIndexInArchetype++];
 
                 if (entityId == Tombstone)
