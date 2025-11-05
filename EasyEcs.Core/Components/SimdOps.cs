@@ -65,10 +65,10 @@ internal static class SimdOps
         }
         if (UseAdvSimd)
         {
-            // ARM: CompareEqual returns vector with all bits set (0xFFFF...) if equal
-            // Extract both ulong elements and check if both are all-bits-set
-            var cmp = AdvSimd.CompareEqual(left.AsUInt64(), right.AsUInt64());
-            return cmp.GetElement(0) == ulong.MaxValue && cmp.GetElement(1) == ulong.MaxValue;
+            // ARM doesn't support 64-bit CompareEqual in Vector128
+            // Use element extraction - still faster than scalar due to reduced memory ops
+            return left.GetElement(0) == right.GetElement(0) &&
+                   left.GetElement(1) == right.GetElement(1);
         }
         return left.Equals(right);
     }
