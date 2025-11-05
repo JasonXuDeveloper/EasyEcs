@@ -336,6 +336,41 @@ public partial class Context : IAsyncDisposable
     }
 
     /// <summary>
+    /// Ensure component array is initialized for the given component index.
+    /// Called lazily from ComponentRef when accessing component data.
+    /// Thread-safe.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    internal T[] EnsureComponentArrayInitialized<T>(byte componentIdx) where T : struct, IComponent
+    {
+        lock (_structuralLock)
+        {
+            // Double-check after acquiring lock
+            if (Components != null &&
+                componentIdx < Components.Length &&
+                Components[componentIdx] != null)
+            {
+                return (T[])Components[componentIdx];
+            }
+
+            // Ensure Components array exists
+            if (Components == null || componentIdx >= Components.Length)
+            {
+                int newSize = Math.Max((Components?.Length ?? 0) * 2, componentIdx + 1);
+                Array.Resize(ref Components, newSize);
+            }
+
+            // Create component array if it doesn't exist
+            if (Components[componentIdx] == null)
+            {
+                Components[componentIdx] = new T[Entities.Length];
+            }
+
+            return (T[])Components[componentIdx];
+        }
+    }
+
+    /// <summary>
     /// Add a system to the context immediately.
     /// </summary>
     public void AddSystem<T>() where T : SystemBase, new()

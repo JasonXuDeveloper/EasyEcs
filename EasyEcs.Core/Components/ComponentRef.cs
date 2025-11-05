@@ -36,7 +36,7 @@ public readonly struct ComponentRef<T> where T : struct, IComponent
 
     public ref T Value
     {
-        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
         get
         {
             int id = EntityId;
@@ -50,16 +50,9 @@ public readonly struct ComponentRef<T> where T : struct, IComponent
             if (actualVersion != version)
                 ThrowEntityDestroyed();
 
-            // Bounds checking for Components array
-            if (_context.Components == null || _componentIndex >= _context.Components.Length)
-                ThrowComponentNotInitialized();
-
-            var componentArrayObj = _context.Components[_componentIndex];
-            if (componentArrayObj == null)
-                ThrowComponentNotInitialized();
-
-            // Get component array and access using Unsafe (zero bounds checks)
-            var componentArray = Unsafe.As<T[]>(componentArrayObj);
+            // Lazy initialization: ensure component array exists
+            // This handles cases where TagRegistry static indices are shared across contexts
+            T[] componentArray = EnsureComponentArray();
 
             return ref Unsafe.Add(
                 ref MemoryMarshal.GetArrayDataReference(componentArray),
@@ -68,12 +61,23 @@ public readonly struct ComponentRef<T> where T : struct, IComponent
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void ThrowEntityDestroyed() =>
-        throw new InvalidOperationException("Entity has been destroyed");
+    private T[] EnsureComponentArray()
+    {
+        // Fast path: component array already initialized
+        if (_context.Components != null &&
+            _componentIndex < _context.Components.Length &&
+            _context.Components[_componentIndex] != null)
+        {
+            return Unsafe.As<T[]>(_context.Components[_componentIndex]);
+        }
+
+        // Slow path: need to initialize (happens when static TypeBitIndex is shared across contexts)
+        return _context.EnsureComponentArrayInitialized<T>(_componentIndex);
+    }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void ThrowComponentNotInitialized() =>
-        throw new InvalidOperationException($"Component array for {typeof(T).Name} is not initialized");
+    private static void ThrowEntityDestroyed() =>
+        throw new InvalidOperationException("Entity has been destroyed");
 
     public static implicit operator T(ComponentRef<T> componentRef)
     {
