@@ -65,8 +65,10 @@ internal static class SimdOps
         }
         if (UseAdvSimd)
         {
+            // ARM: CompareEqual returns vector with all bits set (0xFFFF...) if equal
+            // Extract both ulong elements and check if both are all-bits-set
             var cmp = AdvSimd.CompareEqual(left.AsUInt64(), right.AsUInt64());
-            return AdvSimd.Arm64.MinAcross(cmp) == ulong.MaxValue;
+            return cmp.GetElement(0) == ulong.MaxValue && cmp.GetElement(1) == ulong.MaxValue;
         }
         return left.Equals(right);
     }
