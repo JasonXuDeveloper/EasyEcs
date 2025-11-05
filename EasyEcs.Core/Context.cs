@@ -100,7 +100,7 @@ public partial class Context : IAsyncDisposable
         if (Entities.Length >= capacity)
             return;
 
-        using (_structuralLock.EnterScope())
+        lock (_structuralLock)
         {
             if (Entities.Length >= capacity)
                 return;
@@ -195,7 +195,7 @@ public partial class Context : IAsyncDisposable
         var entity = new Entity(this, id, EntityVersions[id]);
         Entities[id] = entity;
 
-        using (_structuralLock.EnterScope())
+        lock (_structuralLock)
         {
             _activeEntityIds[id] = true;
             _activeEntityCount++;
@@ -215,7 +215,7 @@ public partial class Context : IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public void DestroyEntity(Entity entity)
     {
-        using (_structuralLock.EnterScope())
+        lock (_structuralLock)
         {
             if (!_activeEntityIds[entity.Id])
                 return;
@@ -253,7 +253,7 @@ public partial class Context : IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public ComponentRef<T> AddComponent<T>(Entity entity) where T : struct, IComponent
     {
-        using (_structuralLock.EnterScope())
+        lock (_structuralLock)
         {
             if (!_activeEntityIds[entity.Id])
                 throw new InvalidOperationException($"Entity {entity.Id} not found.");
@@ -305,7 +305,7 @@ public partial class Context : IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public void RemoveComponent<T>(Entity entity) where T : struct, IComponent
     {
-        using (_structuralLock.EnterScope())
+        lock (_structuralLock)
         {
             if (!_activeEntityIds[entity.Id])
                 throw new InvalidOperationException($"Entity {entity.Id} not found.");
@@ -338,7 +338,7 @@ public partial class Context : IAsyncDisposable
     /// </summary>
     public void AddSystem<T>() where T : SystemBase, new()
     {
-        using (_structuralLock.EnterScope())
+        lock (_structuralLock)
         {
             var system = new T();
             AddSystemInternal(system);
@@ -383,7 +383,7 @@ public partial class Context : IAsyncDisposable
     /// </summary>
     public void RemoveSystem<T>() where T : SystemBase
     {
-        using (_structuralLock.EnterScope())
+        lock (_structuralLock)
         {
             var systemType = typeof(T);
 
@@ -572,7 +572,7 @@ public partial class Context : IAsyncDisposable
     /// </summary>
     public SingletonComponentRef<T> AddSingletonComponent<T>() where T : struct, ISingletonComponent
     {
-        using (_structuralLock.EnterScope())
+        lock (_structuralLock)
         {
             Singleton<T>.Instance.Value = new T();
             Singleton<T>.Instance.Initialized = true;

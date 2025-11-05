@@ -14,8 +14,8 @@ public partial class Context
     // Query cache: QueryTag -> List of matching archetypes (O(1) lookup after first query)
     private readonly Dictionary<Tag, List<Archetype>> _queryCache = new();
 
-    // .NET 8.0 Lock for structural modifications (faster than ReaderWriterLockSlim)
-    private readonly System.Threading.Lock _structuralLock = new();
+    // Lock for structural modifications (simple object lock for .NET 8.0 compatibility)
+    private readonly object _structuralLock = new();
 
     /// <summary>
     /// Get or create an archetype for the given component mask.
@@ -25,7 +25,7 @@ public partial class Context
     {
         if (!Archetypes.TryGetValue(componentMask, out var archetype))
         {
-            using (_structuralLock.EnterScope())
+            lock (_structuralLock)
             {
                 // Double-check after acquiring lock
                 if (!Archetypes.TryGetValue(componentMask, out archetype))
@@ -53,7 +53,7 @@ public partial class Context
         if (_queryCache.TryGetValue(queryTag, out var cached))
             return cached;
 
-        using (_structuralLock.EnterScope())
+        lock (_structuralLock)
         {
             // Double-check after acquiring lock
             if (_queryCache.TryGetValue(queryTag, out cached))
@@ -84,7 +84,7 @@ public partial class Context
     /// </summary>
     public void CompactArchetypes()
     {
-        using (_structuralLock.EnterScope())
+        lock (_structuralLock)
         {
             foreach (var archetype in Archetypes.Values)
             {
@@ -104,7 +104,7 @@ public partial class Context
         int totalSlots = 0;
         int aliveEntities = 0;
 
-        using (_structuralLock.EnterScope())
+        lock (_structuralLock)
         {
             foreach (var archetype in Archetypes.Values)
             {
