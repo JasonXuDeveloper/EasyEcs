@@ -28,10 +28,10 @@ public partial class Context : IAsyncDisposable
     internal Array[] Components;
     internal readonly TagRegistry TagRegistry = new();
 
-    // System storage
-    private readonly SortedList<int, List<ExecuteSystemWrapper>> _executeSystems = new();
-    private readonly SortedList<int, List<IInitSystem>> _initSystems = new();
-    private readonly SortedList<int, List<IEndSystem>> _endSystems = new();
+    // System storage (zero-allocation priority lists)
+    private readonly PrioritySystemList<ExecuteSystemWrapper> _executeSystems = new();
+    private readonly PrioritySystemList<IInitSystem> _initSystems = new();
+    private readonly PrioritySystemList<IEndSystem> _endSystems = new();
 
     // System execution (pre-allocated arrays for zero allocation)
     private UniTask[] _initTasks = new UniTask[32];
@@ -386,32 +386,17 @@ public partial class Context : IAsyncDisposable
     {
         if (system is IExecuteSystem executeSystem)
         {
-            if (!_executeSystems.TryGetValue(system.Priority, out var list))
-            {
-                list = new List<ExecuteSystemWrapper>();
-                _executeSystems.Add(system.Priority, list);
-            }
-            list.Add(new ExecuteSystemWrapper(executeSystem));
+            _executeSystems.Add(system.Priority, new ExecuteSystemWrapper(executeSystem));
         }
 
         if (system is IInitSystem initSystem)
         {
-            if (!_initSystems.TryGetValue(system.Priority, out var list))
-            {
-                list = new List<IInitSystem>();
-                _initSystems.Add(system.Priority, list);
-            }
-            list.Add(initSystem);
+            _initSystems.Add(system.Priority, initSystem);
         }
 
         if (system is IEndSystem endSystem)
         {
-            if (!_endSystems.TryGetValue(system.Priority, out var list))
-            {
-                list = new List<IEndSystem>();
-                _endSystems.Add(system.Priority, list);
-            }
-            list.Add(endSystem);
+            _endSystems.Add(system.Priority, endSystem);
         }
     }
 
@@ -424,20 +409,15 @@ public partial class Context : IAsyncDisposable
         {
             var systemType = typeof(T);
 
-            foreach (var list in _initSystems.Values)
-            {
-                list.RemoveAll(s => s.GetType() == systemType);
-            }
+            // Manual iteration to avoid closure allocation
+            for (int i = 0; i < _initSystems.BucketCount; i++)
+                _initSystems[i].RemoveAll(s => s.GetType() == systemType);
 
-            foreach (var list in _executeSystems.Values)
-            {
-                list.RemoveAll(s => s.System.GetType() == systemType);
-            }
+            for (int i = 0; i < _executeSystems.BucketCount; i++)
+                _executeSystems[i].RemoveAll(s => s.System.GetType() == systemType);
 
-            foreach (var list in _endSystems.Values)
-            {
-                list.RemoveAll(s => s.GetType() == systemType);
-            }
+            for (int i = 0; i < _endSystems.BucketCount; i++)
+                _endSystems[i].RemoveAll(s => s.GetType() == systemType);
         }
     }
 
@@ -450,20 +430,27 @@ public partial class Context : IAsyncDisposable
             throw new InvalidOperationException("Context already started.");
 
         _started = true;
-        Components = Array.Empty<Array>();
 
-        // Initialize all systems by priority
-        foreach (var sequence in _initSystems.Values)
+        // Only initialize Components if it hasn't been initialized yet
+        // (AddComponent may have already created it before Init was called)
+        if (Components == null)
+            Components = Array.Empty<Array>();
+
+        // Initialize all systems by priority (zero allocation iteration)
+        for (int bucketIdx = 0; bucketIdx < _initSystems.BucketCount; bucketIdx++)
         {
+            var sequence = _initSystems[bucketIdx];
             _initTaskCount = 0;
-            foreach (var system in sequence)
+
+            for (int i = 0; i < sequence.Count; i++)
             {
                 if (_initTaskCount >= _initTasks.Length)
                     Array.Resize(ref _initTasks, _initTasks.Length * 2);
 
-                _initTasks[_initTaskCount++] = system.OnInit(this);
+                _initTasks[_initTaskCount++] = sequence[i].OnInit(this);
             }
 
+            // Execute all systems at this priority level before moving to next priority
             await ExecuteTasks(_initTasks, _initTaskCount);
         }
 
@@ -483,17 +470,19 @@ public partial class Context : IAsyncDisposable
             throw new InvalidOperationException("Context disposed.");
 
         // Initialize newly added systems
-        if (_initSystems.Count > 0)
+        if (_initSystems.BucketCount > 0)
         {
-            foreach (var sequence in _initSystems.Values)
+            for (int bucketIdx = 0; bucketIdx < _initSystems.BucketCount; bucketIdx++)
             {
+                var sequence = _initSystems[bucketIdx];
                 _initTaskCount = 0;
-                foreach (var system in sequence)
+
+                for (int i = 0; i < sequence.Count; i++)
                 {
                     if (_initTaskCount >= _initTasks.Length)
                         Array.Resize(ref _initTasks, _initTasks.Length * 2);
 
-                    _initTasks[_initTaskCount++] = system.OnInit(this);
+                    _initTasks[_initTaskCount++] = sequence[i].OnInit(this);
                 }
 
                 await ExecuteTasks(_initTasks, _initTaskCount);
@@ -502,16 +491,18 @@ public partial class Context : IAsyncDisposable
             _initSystems.Clear();
         }
 
-        // Execute all systems by priority
-        foreach (var sequence in _executeSystems.Values)
+        // Execute all systems by priority (zero allocation iteration)
+        for (int bucketIdx = 0; bucketIdx < _executeSystems.BucketCount; bucketIdx++)
         {
+            var sequence = _executeSystems[bucketIdx];
             _updateTaskCount = 0;
-            foreach (var wrapper in sequence)
+
+            for (int i = 0; i < sequence.Count; i++)
             {
                 if (_updateTaskCount >= _updateTasks.Length)
                     Array.Resize(ref _updateTasks, _updateTasks.Length * 2);
 
-                _updateTasks[_updateTaskCount++] = wrapper.Update(this, OnError);
+                _updateTasks[_updateTaskCount++] = sequence[i].Update(this, OnError);
             }
 
             await ExecuteTasks(_updateTasks, _updateTaskCount);
@@ -551,16 +542,18 @@ public partial class Context : IAsyncDisposable
         if (_disposed)
             return;
 
-        // Execute all end systems
-        foreach (var sequence in _endSystems.Values)
+        // Execute all end systems (zero allocation iteration)
+        for (int bucketIdx = 0; bucketIdx < _endSystems.BucketCount; bucketIdx++)
         {
+            var sequence = _endSystems[bucketIdx];
             _endTaskCount = 0;
-            foreach (var system in sequence)
+
+            for (int i = 0; i < sequence.Count; i++)
             {
                 if (_endTaskCount >= _endTasks.Length)
                     Array.Resize(ref _endTasks, _endTasks.Length * 2);
 
-                _endTasks[_endTaskCount++] = system.Execute(this, OnError);
+                _endTasks[_endTaskCount++] = sequence[i].Execute(this, OnError);
             }
 
             await ExecuteTasks(_endTasks, _endTaskCount);
