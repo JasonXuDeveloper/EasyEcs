@@ -177,16 +177,24 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public static bool operator !=(Tag a, Tag b) => !a.Equals(b);
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    // Temporarily remove inlining for debugging
     public bool Equals(in Tag other)
     {
-        if (!SimdOps.AreEqual(_bits0, other._bits0) || !SimdOps.AreEqual(_bits1, other._bits1))
+        bool bits0Equal = SimdOps.AreEqual(_bits0, other._bits0);
+        bool bits1Equal = SimdOps.AreEqual(_bits1, other._bits1);
+
+        if (!bits0Equal || !bits1Equal)
+        {
+            Console.WriteLine($"Tag.Equals: bits mismatch - bits0Equal={bits0Equal}, bits1Equal={bits1Equal}");
             return false;
+        }
 
         // Handle overflow comparison - treat null and empty as equivalent
         int thisLen = _overflow?.Length ?? 0;
         int otherLen = other._overflow?.Length ?? 0;
         int maxLen = Math.Max(thisLen, otherLen);
+
+        Console.WriteLine($"Tag.Equals: bits match, checking overflow - thisLen={thisLen}, otherLen={otherLen}, maxLen={maxLen}");
 
         // If one has overflow and the other doesn't, check if the overflow vectors are all zero
         for (int i = 0; i < maxLen; i++)
@@ -195,9 +203,13 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
             var otherVec = i < otherLen ? other._overflow[i] : Vector128<long>.Zero;
 
             if (!SimdOps.AreEqual(thisVec, otherVec))
+            {
+                Console.WriteLine($"Tag.Equals: overflow mismatch at index {i}");
                 return false;
+            }
         }
 
+        Console.WriteLine($"Tag.Equals: returning true");
         return true;
     }
 
