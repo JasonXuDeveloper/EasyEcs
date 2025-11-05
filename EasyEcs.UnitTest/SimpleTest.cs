@@ -30,19 +30,13 @@ public class SimpleTest
 
         // Add components to the entity (immediate execution - no callbacks!)
         entity.AddComponent<SizeComponent>();
-        var scaleCompRef = entity.AddComponent<ScaleComponent>(); // ResizeSystem will set factor to 2 in its OnInit
-
-        Console.WriteLine($"Before Init: Entity {entity.Id} has ScaleComponent: {entity.HasComponent<ScaleComponent>()}");
-        Console.WriteLine($"Before Init: ScaleComponent.Factor = {scaleCompRef.Value.Factor}");
+        entity.AddComponent<ScaleComponent>(); // ResizeSystem will set factor to 2 in its OnInit
 
         // Start the context, automatically initializing all systems,
         // then when it is out of scope, it will dispose the context
         await using (await ctx.Init())
         {
             var entityById = ctx.GetEntityById(0);
-
-            Console.WriteLine($"After Init: Entity {entityById.Value.Id} has ScaleComponent: {entityById.Value.HasComponent<ScaleComponent>()}");
-            Console.WriteLine($"After Init: ScaleComponent.Factor = {entityById.Value.GetComponent<ScaleComponent>().Value.Factor}");
 
             // Check if factor is 2, implying ResizeSystem has set it in its OnInit
             Assert.That(entityById.Value.GetComponent<ScaleComponent>().Value.Factor, Is.EqualTo(2));

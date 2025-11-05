@@ -48,14 +48,9 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            Console.WriteLine($"GetMatchingArchetypes: Searching for queryTag, Total archetypes: {Archetypes.Count}");
-
             // Check cache
             if (_queryCache.TryGetValue(queryTag, out var cached))
-            {
-                Console.WriteLine($"GetMatchingArchetypes: Found in cache, {cached.Count} archetypes");
                 return cached;
-            }
 
             // Build list of matching archetypes
             var matching = new List<Archetype>(16);
@@ -64,22 +59,13 @@ public partial class Context
             foreach (var kvp in Archetypes)
             {
                 var archetype = kvp.Value;
-                var result = (archetype.ComponentMask & queryTag);
-                bool matches = result == queryTag;
-                Console.WriteLine($"GetMatchingArchetypes: Archetype with {archetype.AliveCount} entities, matches={matches}");
-                Console.WriteLine($"  - archetype.ComponentMask: {archetype.ComponentMask}");
-                Console.WriteLine($"  - queryTag: {queryTag}");
-                Console.WriteLine($"  - result: {result}");
-
                 // SIMD-accelerated bitwise AND
                 // An archetype matches if it contains all required components
-                if (matches)
+                if ((archetype.ComponentMask & queryTag) == queryTag)
                 {
                     matching.Add(archetype);
                 }
             }
-
-            Console.WriteLine($"GetMatchingArchetypes: Found {matching.Count} matching archetypes (not from cache)");
 
             // Cache for future queries
             _queryCache[queryTag] = matching;
