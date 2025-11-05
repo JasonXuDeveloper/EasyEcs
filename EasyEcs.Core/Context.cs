@@ -169,30 +169,51 @@ public partial class Context : IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public EntityRef CreateEntity()
     {
-        // Lock-free ID allocation
-        int id = Interlocked.Increment(ref _entityIdCounter) - 1;
-
-        // Ensure capacity
-        if (id >= Entities.Length)
-        {
-            int newCapacity = Math.Max(Entities.Length * 2, id + 1);
-            EnsureEntityCapacity(newCapacity);
-        }
-
-        var entity = new Entity(this, id, EntityVersions[id]);
-        Entities[id] = entity;
-
         lock (_structuralLock)
         {
+            // ID allocation inside lock to ensure capacity check is atomic
+            int id = _entityIdCounter++;
+
+            // Ensure capacity inside lock
+            if (id >= Entities.Length)
+            {
+                int newCapacity = Math.Max(Entities.Length * 2, id + 1);
+                // EnsureEntityCapacity already uses lock, but we're already inside it
+                // So we need to check again inside EnsureEntityCapacity
+                if (Entities.Length < newCapacity)
+                {
+                    Array.Resize(ref Entities, newCapacity);
+                    Array.Resize(ref EntityVersions, newCapacity);
+                    Array.Resize(ref _activeEntityIds, newCapacity);
+
+                    // Resize component arrays
+                    if (Components != null)
+                    {
+                        for (int i = 0; i < Components.Length; i++)
+                        {
+                            var arr = Components[i];
+                            if (arr != null && arr.Length < newCapacity)
+                            {
+                                var newArr = Array.CreateInstance(arr.GetType().GetElementType()!, newCapacity);
+                                Array.Copy(arr, newArr, arr.Length);
+                                Components[i] = newArr;
+                            }
+                        }
+                    }
+                }
+            }
+
+            var entity = new Entity(this, id, EntityVersions[id]);
+            Entities[id] = entity;
             _activeEntityIds[id] = true;
             _activeEntityCount++;
 
             // Add to empty archetype
             var archetype = GetOrCreateArchetype(new Tag());
             archetype.Add(id);
-        }
 
-        return new EntityRef(id, EntityVersions[id], this);
+            return new EntityRef(id, EntityVersions[id], this);
+        }
     }
 
     /// <summary>
@@ -608,5 +629,5 @@ public partial class Context : IAsyncDisposable
     /// <summary>
     /// Get all active entities.
     /// </summary>
-    public ActiveEntityEnumerator AllEntities => new ActiveEntityEnumerator(_activeEntityIds, this);
+    public ActiveEntityEnumerator AllEntities => new ActiveEntityEnumerator(_activeEntityIds, EntityVersions, this);
 }

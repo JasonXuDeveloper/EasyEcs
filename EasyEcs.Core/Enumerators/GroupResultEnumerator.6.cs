@@ -16,13 +16,12 @@ public struct GroupResultEnumerator<T1, T2, T3, T4, T5, T6> : IDisposable
 {
     private readonly Context _context;
     private readonly List<Archetype> _matchingArchetypes;
-    private readonly T1[] _components1;
-    private readonly T2[] _components2;
-    private readonly T3[] _components3;
-    private readonly T4[] _components4;
-    private readonly T5[] _components5;
-    private readonly T6[] _components6;
-    private readonly Entity[] _entities;
+    private readonly int _bitIdx1;
+    private readonly int _bitIdx2;
+    private readonly int _bitIdx3;
+    private readonly int _bitIdx4;
+    private readonly int _bitIdx5;
+    private readonly int _bitIdx6;
 
     private int _archetypeIndex;
     private int _entityIndexInArchetype;
@@ -34,13 +33,12 @@ public struct GroupResultEnumerator<T1, T2, T3, T4, T5, T6> : IDisposable
     public GroupResultEnumerator(Context context)
     {
         _context = context;
-        _entities = context.Entities;
-        _components1 = null;
-        _components2 = null;
-        _components3 = null;
-        _components4 = null;
-        _components5 = null;
-        _components6 = null;
+        _bitIdx1 = -1;
+        _bitIdx2 = -1;
+        _bitIdx3 = -1;
+        _bitIdx4 = -1;
+        _bitIdx5 = -1;
+        _bitIdx6 = -1;
         _matchingArchetypes = null;
         _archetypeIndex = 0;
         _entityIndexInArchetype = 0;
@@ -61,12 +59,12 @@ public struct GroupResultEnumerator<T1, T2, T3, T4, T5, T6> : IDisposable
                 bitIdx5 < context.Components.Length &&
                 bitIdx6 < context.Components.Length)
             {
-                _components1 = Unsafe.As<T1[]>(context.Components[bitIdx1]);
-                _components2 = Unsafe.As<T2[]>(context.Components[bitIdx2]);
-                _components3 = Unsafe.As<T3[]>(context.Components[bitIdx3]);
-                _components4 = Unsafe.As<T4[]>(context.Components[bitIdx4]);
-                _components5 = Unsafe.As<T5[]>(context.Components[bitIdx5]);
-                _components6 = Unsafe.As<T6[]>(context.Components[bitIdx6]);
+                _bitIdx1 = bitIdx1;
+                _bitIdx2 = bitIdx2;
+                _bitIdx3 = bitIdx3;
+                _bitIdx4 = bitIdx4;
+                _bitIdx5 = bitIdx5;
+                _bitIdx6 = bitIdx6;
 
                 var queryTag = new Tag();
                 queryTag.SetBit(bitIdx1);
@@ -86,7 +84,7 @@ public struct GroupResultEnumerator<T1, T2, T3, T4, T5, T6> : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public bool MoveNext()
     {
-        if (_matchingArchetypes == null || _components1 == null || _components2 == null || _components3 == null || _components4 == null || _components5 == null || _components6 == null)
+        if (_matchingArchetypes == null || _bitIdx1 < 0 || _bitIdx2 < 0 || _bitIdx3 < 0 || _bitIdx4 < 0 || _bitIdx5 < 0 || _bitIdx6 < 0)
             return false;
 
         while (_archetypeIndex < _matchingArchetypes.Count)
@@ -101,7 +99,7 @@ public struct GroupResultEnumerator<T1, T2, T3, T4, T5, T6> : IDisposable
                 if (entityId == Tombstone)
                     continue;
 
-                Current = new GroupResult<T1, T2, T3, T4, T5, T6>(entityId, _entities, _components1, _components2, _components3, _components4, _components5, _components6);
+                Current = new GroupResult<T1, T2, T3, T4, T5, T6>(entityId, _context, _bitIdx1, _bitIdx2, _bitIdx3, _bitIdx4, _bitIdx5, _bitIdx6);
                 return true;
             }
 

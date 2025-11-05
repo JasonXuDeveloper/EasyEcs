@@ -15,8 +15,7 @@ public struct GroupResultEnumerator<T> : IDisposable
 {
     private readonly Context _context;
     private readonly List<Archetype> _matchingArchetypes;
-    private readonly T[] _components;
-    private readonly Entity[] _entities;
+    private readonly int _bitIdx;
 
     private int _archetypeIndex;
     private int _entityIndexInArchetype;
@@ -28,8 +27,7 @@ public struct GroupResultEnumerator<T> : IDisposable
     public GroupResultEnumerator(Context context)
     {
         _context = context;
-        _entities = context.Entities;
-        _components = null;
+        _bitIdx = -1;
         _matchingArchetypes = null;
         _archetypeIndex = 0;
         _entityIndexInArchetype = 0;
@@ -40,7 +38,7 @@ public struct GroupResultEnumerator<T> : IDisposable
             // Safely access Components array (may not be initialized yet)
             if (context.Components != null && bitIdx < context.Components.Length)
             {
-                _components = Unsafe.As<T[]>(context.Components[bitIdx]);
+                _bitIdx = bitIdx;
 
                 // Build query tag
                 var queryTag = new Tag();
@@ -57,7 +55,7 @@ public struct GroupResultEnumerator<T> : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public bool MoveNext()
     {
-        if (_matchingArchetypes == null || _components == null)
+        if (_matchingArchetypes == null || _bitIdx < 0)
             return false;
 
         // Iterate through archetypes
@@ -77,7 +75,7 @@ public struct GroupResultEnumerator<T> : IDisposable
                 if (entityId == Tombstone)
                     continue;
 
-                Current = new GroupResult<T>(entityId, _entities, _components);
+                Current = new GroupResult<T>(entityId, _context, _bitIdx);
                 return true;
             }
 
