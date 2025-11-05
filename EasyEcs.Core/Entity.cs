@@ -17,6 +17,11 @@ public struct Entity : IEquatable<Entity>
     /// </summary>
     public readonly int Id;
 
+    /// <summary>
+    /// Version number for detecting destroyed entities (increments on destroy).
+    /// </summary>
+    public readonly int Version;
+
     internal Tag Tag = new();
 
     /// <summary>
@@ -29,22 +34,23 @@ public struct Entity : IEquatable<Entity>
     /// </summary>
     /// <param name="context"></param>
     /// <param name="id"></param>
-    internal Entity(Context context, int id)
+    /// <param name="version"></param>
+    internal Entity(Context context, int id, int version)
     {
         Context = context;
         Id = id;
+        Version = version;
     }
 
     /// <summary>
-    /// Add a component to the entity. Returns a reference to the component. If the component already exists, returns a reference to the existing component.
+    /// Add a component to the entity immediately and return a reference to it.
     /// </summary>
-    /// <param name="callback"></param>
     /// <typeparam name="T"></typeparam>
-    /// <returns></returns>
+    /// <returns>Reference to the newly added component</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void AddComponent<T>(Action<ComponentRef<T>> callback = null) where T : struct, IComponent
+    public ComponentRef<T> AddComponent<T>() where T : struct, IComponent
     {
-        Context.AddComponent(this, callback);
+        return Context.AddComponent<T>(this);
     }
 
     /// <summary>
@@ -69,9 +75,9 @@ public struct Entity : IEquatable<Entity>
     {
         var idx = Context.TagRegistry.GetTagBitIndex<T>();
         if (!Tag.HasBit(idx))
-            throw new InvalidOperationException($"Component {typeof(T)} not found.");
+            throw new InvalidOperationException("Component not found");
 
-        return new ComponentRef<T>(Id, idx, Context);
+        return new ComponentRef<T>(Id, Version, idx, Context);
     }
 
     /// <summary>
@@ -89,7 +95,7 @@ public struct Entity : IEquatable<Entity>
         if (!Tag.HasBit(idx))
             return false;
 
-        value = new ComponentRef<T>(Id, idx, Context);
+        value = new ComponentRef<T>(Id, Version, idx, Context);
         return true;
     }
 

@@ -1,119 +1,97 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 using EasyEcs.Core.Components;
 using EasyEcs.Core.Group;
 
 namespace EasyEcs.Core.Enumerators;
 
+/// <summary>
+/// Zero-allocation enumerator for entities with a single component type.
+/// Uses live iteration with tombstone handling for safe concurrent modifications.
+/// </summary>
 public struct GroupResultEnumerator<T> : IDisposable
-    where T : struct
+    where T : struct, IComponent
 {
-    private readonly Entity[] _entities;
-    private readonly T[] _components;
-    private readonly Tag _tag;
-    private readonly Dictionary<Tag, List<int>> _contextGroups;
-    private List<List<int>> _groups;
-    private int _groupIdx;
-    private int _elementIdx;
+    private readonly Context _context;
+    private readonly List<Archetype> _matchingArchetypes;
+    private readonly int _bitIdx;
+
+    private int _archetypeIndex;
+    private int _entityIndexInArchetype;
+
     public GroupResult<T> Current { get; private set; }
+
+    private const int Tombstone = -1;
 
     public GroupResultEnumerator(Context context)
     {
-        _entities = Array.Empty<Entity>();
-        _components = Array.Empty<T>();
-        _groups = null;
-        _groupIdx = 0;
-        _elementIdx = 0;
+        _context = context;
+        _bitIdx = -1;
+        _matchingArchetypes = null;
+        _archetypeIndex = 0;
+        _entityIndexInArchetype = 0;
         Current = default;
-        _tag = default;
-        _contextGroups = null;
 
-        if (context.Groups.Count == 0)
+        if (context.TagRegistry.TryGetTagBitIndex<T>(out var bitIdx))
         {
-            return;
-        }
-
-        _tag = new();
-        if (!context.TagRegistry.TryGetTagBitIndex<T>(out var bitIdx)) return;
-        _tag.SetBit(bitIdx);
-
-        _entities = context.Entities;
-        _components = context.Components[bitIdx] as T[];
-        _contextGroups = context.Groups;
-        _groupIdx = 0;
-        _elementIdx = 0;
-        Current = default;
-    }
-
-    private GroupResultEnumerator(Entity[] entities, T[] components, Tag tag, int groupIdx,
-        int elementIdx, Dictionary<Tag, List<int>> contextGroups)
-    {
-        _entities = entities;
-        _components = components;
-        _tag = tag;
-        _groupIdx = groupIdx;
-        _elementIdx = elementIdx;
-        Current = default;
-        _contextGroups = contextGroups;
-
-        if (_contextGroups == null)
-        {
-            _groups = null;
-            return;
-        }
-
-        _groups = Pool<List<List<int>>>.Rent();
-        _groups.Clear();
-
-        foreach (var group in contextGroups)
-        {
-            if ((group.Key & _tag) == _tag)
+            // Safely access Components array (may not be initialized yet)
+            if (context.Components != null && bitIdx < context.Components.Length)
             {
-                _groups.Add(group.Value);
+                _bitIdx = bitIdx;
+
+                // Build query tag
+                var queryTag = new Tag();
+                queryTag.SetBit(bitIdx);
+
+                // Get matching archetypes from cache (O(1) after first access)
+                _matchingArchetypes = context.GetMatchingArchetypes(queryTag);
             }
         }
     }
 
-    public GroupResultEnumerator<T> GetEnumerator() =>
-        new(_entities, _components, _tag, _groupIdx, _elementIdx, _contextGroups);
+    public GroupResultEnumerator<T> GetEnumerator() => this;
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public bool MoveNext()
     {
-        if (_groups == null || _groups.Count == 0)
-        {
+        if (_matchingArchetypes == null || _bitIdx < 0)
             return false;
-        }
 
-        Span<List<int>> groupsSpan = CollectionsMarshal.AsSpan(_groups);
-        while (_groupIdx < _groups.Count)
+        // Iterate through archetypes
+        while (_archetypeIndex < _matchingArchetypes.Count)
         {
-            Span<int> group = CollectionsMarshal.AsSpan(groupsSpan[_groupIdx]);
-            if (_elementIdx < group.Length)
+            var archetype = _matchingArchetypes[_archetypeIndex];
+
+            // Iterate entities in current archetype
+            while (true)
             {
-                Current = new GroupResult<T>(group[_elementIdx], _entities, _components);
-                _elementIdx++;
+                // CRITICAL: Get fresh span on EACH iteration to handle concurrent modifications
+                var entitySpan = archetype.GetEntitySpan();
+
+                if (_entityIndexInArchetype >= entitySpan.Length)
+                    break;
+
+                int entityId = entitySpan[_entityIndexInArchetype++];
+
+                // Skip tombstones (-1) - safe iteration during modifications
+                if (entityId == Tombstone)
+                    continue;
+
+                Current = new GroupResult<T>(entityId, _context, _bitIdx);
                 return true;
             }
 
-            _groupIdx++;
-            _elementIdx = 0;
+            // Move to next archetype
+            _archetypeIndex++;
+            _entityIndexInArchetype = 0;
         }
 
-        Current = default;
-        _groups.Clear();
-        Pool<List<List<int>>>.Return(_groups);
-        _groups = null;
         return false;
     }
 
     public void Dispose()
     {
-        if (_groups != null)
-        {
-            _groups.Clear();
-            Pool<List<List<int>>>.Return(_groups);
-            _groups = null;
-        }
+        // Zero allocations - nothing to dispose
     }
 }

@@ -27,9 +27,9 @@ public class ModificationSystem : SystemBase, IExecuteSystem, IEndSystem
 
         foreach (var result in candidates)
         {
-            result.Entity.AddComponent<ScaleComponent>(
-                comp =>
-                    comp.Value.Factor = 0.5f);
+            // Immediate execution - no callback needed!
+            var comp = result.Entity.AddComponent<ScaleComponent>();
+            comp.Value.Factor = 0.5f;
         }
 
         return UniTask.CompletedTask;
