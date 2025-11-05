@@ -67,6 +67,9 @@ public partial class Context
                 var result = (archetype.ComponentMask & queryTag);
                 bool matches = result == queryTag;
                 Console.WriteLine($"GetMatchingArchetypes: Archetype with {archetype.AliveCount} entities, matches={matches}");
+                Console.WriteLine($"  - archetype.ComponentMask: {archetype.ComponentMask}");
+                Console.WriteLine($"  - queryTag: {queryTag}");
+                Console.WriteLine($"  - result: {result}");
 
                 // SIMD-accelerated bitwise AND
                 // An archetype matches if it contains all required components
