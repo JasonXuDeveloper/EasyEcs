@@ -27,7 +27,7 @@ internal class TagRegistry
     }
 
     // Static lock for thread-safe registration across all Context instances
-    private static readonly object _globalRegistrationLock = new();
+    private static readonly object GlobalRegistrationLock = new();
 
     public int TagCount;
     private List<ITypeBitIndex> _tags = new();
@@ -90,7 +90,7 @@ internal class TagRegistry
             return instance.BitIndex;
 
         // Slow path: need to register (lock globally since TypeBitIndex is static)
-        lock (_globalRegistrationLock)
+        lock (GlobalRegistrationLock)
         {
             // Double-check after acquiring lock
             if (instance.IsRegistered)
