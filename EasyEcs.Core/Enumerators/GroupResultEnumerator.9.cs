@@ -1,23 +1,24 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 using EasyEcs.Core.Components;
 using EasyEcs.Core.Group;
 
 namespace EasyEcs.Core.Enumerators;
 
 public struct GroupResultEnumerator<T1, T2, T3, T4, T5, T6, T7, T8, T9> : IDisposable
-    where T1 : struct
-    where T2 : struct
-    where T3 : struct
-    where T4 : struct
-    where T5 : struct
-    where T6 : struct
-    where T7 : struct
-    where T8 : struct
-    where T9 : struct
+    where T1 : struct, IComponent
+    where T2 : struct, IComponent
+    where T3 : struct, IComponent
+    where T4 : struct, IComponent
+    where T5 : struct, IComponent
+    where T6 : struct, IComponent
+    where T7 : struct, IComponent
+    where T8 : struct, IComponent
+    where T9 : struct, IComponent
 {
-    private readonly Entity[] _entities;
+    private readonly Context _context;
+    private readonly List<Archetype> _matchingArchetypes;
     private readonly T1[] _components1;
     private readonly T2[] _components2;
     private readonly T3[] _components3;
@@ -27,147 +28,100 @@ public struct GroupResultEnumerator<T1, T2, T3, T4, T5, T6, T7, T8, T9> : IDispo
     private readonly T7[] _components7;
     private readonly T8[] _components8;
     private readonly T9[] _components9;
-    private readonly Tag _tag;
-    private readonly Dictionary<Tag, List<int>> _contextGroups;
-    private List<List<int>> _groups;
-    private int _groupIdx;
-    private int _elementIdx;
+    private readonly Entity[] _entities;
+
+    private int _archetypeIndex;
+    private int _entityIndexInArchetype;
+
     public GroupResult<T1, T2, T3, T4, T5, T6, T7, T8, T9> Current { get; private set; }
+
+    private const int Tombstone = -1;
 
     public GroupResultEnumerator(Context context)
     {
-        _entities = Array.Empty<Entity>();
-        _components1 = Array.Empty<T1>();
-        _components2 = Array.Empty<T2>();
-        _components3 = Array.Empty<T3>();
-        _components4 = Array.Empty<T4>();
-        _components5 = Array.Empty<T5>();
-        _components6 = Array.Empty<T6>();
-        _components7 = Array.Empty<T7>();
-        _components8 = Array.Empty<T8>();
-        _components9 = Array.Empty<T9>();
-        _groups = null;
-        _groupIdx = 0;
-        _elementIdx = 0;
-        Current = default;
-        _tag = default;
-        _contextGroups = null;
-
-        if (context.Groups.Count == 0) return;
-
-        Tag tmp = new();
-        if (!context.TagRegistry.TryGetTagBitIndex<T1>(out var bitIdx1)) return;
-        tmp.SetBit(bitIdx1);
-        if (!context.TagRegistry.TryGetTagBitIndex<T2>(out var bitIdx2)) return;
-        tmp.SetBit(bitIdx2);
-        if (!context.TagRegistry.TryGetTagBitIndex<T3>(out var bitIdx3)) return;
-        tmp.SetBit(bitIdx3);
-        if (!context.TagRegistry.TryGetTagBitIndex<T4>(out var bitIdx4)) return;
-        tmp.SetBit(bitIdx4);
-        if (!context.TagRegistry.TryGetTagBitIndex<T5>(out var bitIdx5)) return;
-        tmp.SetBit(bitIdx5);
-        if (!context.TagRegistry.TryGetTagBitIndex<T6>(out var bitIdx6)) return;
-        tmp.SetBit(bitIdx6);
-        if (!context.TagRegistry.TryGetTagBitIndex<T7>(out var bitIdx7)) return;
-        tmp.SetBit(bitIdx7);
-        if (!context.TagRegistry.TryGetTagBitIndex<T8>(out var bitIdx8)) return;
-        tmp.SetBit(bitIdx8);
-        if (!context.TagRegistry.TryGetTagBitIndex<T9>(out var bitIdx9)) return;
-        tmp.SetBit(bitIdx9);
-
-        _tag = tmp;
+        _context = context;
         _entities = context.Entities;
-        _components1 = context.Components[bitIdx1] as T1[];
-        _components2 = context.Components[bitIdx2] as T2[];
-        _components3 = context.Components[bitIdx3] as T3[];
-        _components4 = context.Components[bitIdx4] as T4[];
-        _components5 = context.Components[bitIdx5] as T5[];
-        _components6 = context.Components[bitIdx6] as T6[];
-        _components7 = context.Components[bitIdx7] as T7[];
-        _components8 = context.Components[bitIdx8] as T8[];
-        _components9 = context.Components[bitIdx9] as T9[];
-        _contextGroups = context.Groups;
-        _groupIdx = 0;
-        _elementIdx = 0;
+        _components1 = null;
+        _components2 = null;
+        _components3 = null;
+        _components4 = null;
+        _components5 = null;
+        _components6 = null;
+        _components7 = null;
+        _components8 = null;
+        _components9 = null;
+        _matchingArchetypes = null;
+        _archetypeIndex = 0;
+        _entityIndexInArchetype = 0;
         Current = default;
-    }
 
-    private GroupResultEnumerator(Entity[] entities, T1[] components1, T2[] components2, T3[] components3,
-        T4[] components4, T5[] components5, T6[] components6, T7[] components7, T8[] components8, T9[] components9,
-        Tag tag, int groupIdx, int elementIdx, Dictionary<Tag, List<int>> contextGroups)
-    {
-        _entities = entities;
-        _components1 = components1;
-        _components2 = components2;
-        _components3 = components3;
-        _components4 = components4;
-        _components5 = components5;
-        _components6 = components6;
-        _components7 = components7;
-        _components8 = components8;
-        _components9 = components9;
-        _tag = tag;
-        _groupIdx = groupIdx;
-        _elementIdx = elementIdx;
-        Current = default;
-        _contextGroups = contextGroups;
-
-        if (_contextGroups == null)
+        if (context.TagRegistry.TryGetTagBitIndex<T1>(out var bitIdx1) &&
+            context.TagRegistry.TryGetTagBitIndex<T2>(out var bitIdx2) &&
+            context.TagRegistry.TryGetTagBitIndex<T3>(out var bitIdx3) &&
+            context.TagRegistry.TryGetTagBitIndex<T4>(out var bitIdx4) &&
+            context.TagRegistry.TryGetTagBitIndex<T5>(out var bitIdx5) &&
+            context.TagRegistry.TryGetTagBitIndex<T6>(out var bitIdx6) &&
+            context.TagRegistry.TryGetTagBitIndex<T7>(out var bitIdx7) &&
+            context.TagRegistry.TryGetTagBitIndex<T8>(out var bitIdx8) &&
+            context.TagRegistry.TryGetTagBitIndex<T9>(out var bitIdx9))
         {
-            _groups = null;
-            return;
-        }
+            _components1 = context.Components[bitIdx1] as T1[];
+            _components2 = context.Components[bitIdx2] as T2[];
+            _components3 = context.Components[bitIdx3] as T3[];
+            _components4 = context.Components[bitIdx4] as T4[];
+            _components5 = context.Components[bitIdx5] as T5[];
+            _components6 = context.Components[bitIdx6] as T6[];
+            _components7 = context.Components[bitIdx7] as T7[];
+            _components8 = context.Components[bitIdx8] as T8[];
+            _components9 = context.Components[bitIdx9] as T9[];
 
-        _groups = Pool<List<List<int>>>.Rent();
-        _groups.Clear();
-        foreach (var kvp in contextGroups)
-        {
-            if ((kvp.Key & tag) == tag)
-            {
-                _groups.Add(kvp.Value);
-            }
+            var queryTag = new Tag();
+            queryTag.SetBit(bitIdx1);
+            queryTag.SetBit(bitIdx2);
+            queryTag.SetBit(bitIdx3);
+            queryTag.SetBit(bitIdx4);
+            queryTag.SetBit(bitIdx5);
+            queryTag.SetBit(bitIdx6);
+            queryTag.SetBit(bitIdx7);
+            queryTag.SetBit(bitIdx8);
+            queryTag.SetBit(bitIdx9);
+
+            _matchingArchetypes = context.GetMatchingArchetypes(queryTag);
         }
     }
 
-    public GroupResultEnumerator<T1, T2, T3, T4, T5, T6, T7, T8, T9> GetEnumerator() =>
-        new(_entities, _components1, _components2, _components3, _components4, _components5, _components6, _components7,
-            _components8, _components9, _tag, _groupIdx, _elementIdx, _contextGroups);
+    public GroupResultEnumerator<T1, T2, T3, T4, T5, T6, T7, T8, T9> GetEnumerator() => this;
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public bool MoveNext()
     {
-        if (_groups == null || _groups.Count == 0) return false;
+        if (_matchingArchetypes == null || _components1 == null || _components2 == null || _components3 == null || _components4 == null || _components5 == null || _components6 == null || _components7 == null || _components8 == null || _components9 == null)
+            return false;
 
-        Span<List<int>> span = CollectionsMarshal.AsSpan(_groups);
-        while (_groupIdx < _groups.Count)
+        while (_archetypeIndex < _matchingArchetypes.Count)
         {
-            Span<int> group = CollectionsMarshal.AsSpan(span[_groupIdx]);
-            if (_elementIdx < group.Length)
+            var archetype = _matchingArchetypes[_archetypeIndex];
+            var entitySpan = archetype.GetEntitySpan();
+
+            while (_entityIndexInArchetype < entitySpan.Length)
             {
-                Current = new GroupResult<T1, T2, T3, T4, T5, T6, T7, T8, T9>(group[_elementIdx], _entities,
-                    _components1, _components2, _components3, _components4, _components5, _components6, _components7,
-                    _components8, _components9);
-                _elementIdx++;
+                int entityId = entitySpan[_entityIndexInArchetype++];
+
+                if (entityId == Tombstone)
+                    continue;
+
+                Current = new GroupResult<T1, T2, T3, T4, T5, T6, T7, T8, T9>(entityId, _entities, _components1, _components2, _components3, _components4, _components5, _components6, _components7, _components8, _components9);
                 return true;
             }
 
-            _groupIdx++;
-            _elementIdx = 0;
+            _archetypeIndex++;
+            _entityIndexInArchetype = 0;
         }
 
-        Current = default;
-        _groups.Clear();
-        Pool<List<List<int>>>.Return(_groups);
-        _groups = null;
         return false;
     }
 
     public void Dispose()
     {
-        if (_groups != null)
-        {
-            _groups.Clear();
-            Pool<List<List<int>>>.Return(_groups);
-            _groups = null;
-        }
     }
 }

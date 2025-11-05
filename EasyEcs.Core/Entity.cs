@@ -17,6 +17,11 @@ public struct Entity : IEquatable<Entity>
     /// </summary>
     public readonly int Id;
 
+    /// <summary>
+    /// Version number for detecting destroyed entities (increments on destroy).
+    /// </summary>
+    public readonly int Version;
+
     internal Tag Tag = new();
 
     /// <summary>
@@ -29,10 +34,12 @@ public struct Entity : IEquatable<Entity>
     /// </summary>
     /// <param name="context"></param>
     /// <param name="id"></param>
-    internal Entity(Context context, int id)
+    /// <param name="version"></param>
+    internal Entity(Context context, int id, int version)
     {
         Context = context;
         Id = id;
+        Version = version;
     }
 
     /// <summary>
@@ -71,7 +78,7 @@ public struct Entity : IEquatable<Entity>
         if (!Tag.HasBit(idx))
             throw new InvalidOperationException($"Component {typeof(T)} not found.");
 
-        return new ComponentRef<T>(Id, idx, Context);
+        return new ComponentRef<T>(Id, Version, idx, Context);
     }
 
     /// <summary>
@@ -89,7 +96,7 @@ public struct Entity : IEquatable<Entity>
         if (!Tag.HasBit(idx))
             return false;
 
-        value = new ComponentRef<T>(Id, idx, Context);
+        value = new ComponentRef<T>(Id, Version, idx, Context);
         return true;
     }
 
