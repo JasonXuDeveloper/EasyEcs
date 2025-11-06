@@ -33,7 +33,7 @@ public struct GroupResultEnumerator<T> : IDisposable
         _entityIndexInArchetype = 0;
         Current = default;
 
-        if (context.TagRegistry.TryGetTagBitIndex<T>(out var bitIdx))
+        if (TagRegistry.TryGetTagBitIndex<T>(out var bitIdx))
         {
             // Safely access Components array (may not be initialized yet)
             if (context.Components != null && bitIdx < context.Components.Length)
@@ -45,7 +45,7 @@ public struct GroupResultEnumerator<T> : IDisposable
                 queryTag.SetBit(bitIdx);
 
                 // Get matching archetypes from cache (O(1) after first access)
-                _matchingArchetypes = context.GetMatchingArchetypes(queryTag);
+                _matchingArchetypes = context.GetMatchingArchetypes(in queryTag);
             }
         }
     }

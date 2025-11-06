@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using EasyEcs.Core.Components;
 
@@ -8,6 +9,7 @@ namespace EasyEcs.Core;
 /// Archetype stores entities with the same component configuration.
 /// Uses tombstone pattern (-1) for safe iteration during modifications.
 /// Uses free list for O(1) tombstone slot reuse.
+/// Uses reverse lookup dictionary for O(1) removal.
 /// </summary>
 internal class Archetype
 {
@@ -20,13 +22,17 @@ internal class Archetype
     private int[] _freeSlots;
     private int _freeCount;
 
+    // Reverse lookup: entityId -> index in EntityIds array (O(1) removal)
+    private readonly Dictionary<int, int> _entityToIndex;
+
     private const int Tombstone = -1;
 
     public Archetype(in Tag componentMask, int initialCapacity = 1024)
     {
         ComponentMask = componentMask;
         EntityIds = new int[initialCapacity];
-        _freeSlots = new int[initialCapacity / 4]; // Start smaller, grow as needed
+        _freeSlots = new int[initialCapacity]; // Match capacity to avoid early resizing
+        _entityToIndex = new Dictionary<int, int>(initialCapacity);
         Count = 0;
         AliveCount = 0;
         _freeCount = 0;
@@ -39,10 +45,12 @@ internal class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public void Add(int entityId)
     {
+        int slot;
+
         // Fast path: Reuse free slot from free list (O(1))
         if (_freeCount > 0)
         {
-            int slot = _freeSlots[--_freeCount];
+            slot = _freeSlots[--_freeCount];
             EntityIds[slot] = entityId;
             AliveCount++;
         }
@@ -55,43 +63,49 @@ internal class Archetype
                 Array.Resize(ref EntityIds, EntityIds.Length * 2);
             }
 
-            EntityIds[Count++] = entityId;
+            slot = Count++;
+            EntityIds[slot] = entityId;
             AliveCount++;
         }
+
+        // Update reverse lookup for O(1) removal
+        _entityToIndex[entityId] = slot;
     }
 
     /// <summary>
     /// Remove an entity from this archetype.
+    /// O(1) removal using reverse lookup dictionary.
     /// Marks the slot as tombstone (-1) and adds to free list for O(1) reuse.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public void Remove(int entityId)
     {
-        // Find and tombstone the entity
-        var span = EntityIds.AsSpan(0, Count);
-        int idx = span.IndexOf(entityId);
+        // O(1) lookup using reverse index
+        if (!_entityToIndex.TryGetValue(entityId, out int idx))
+            return;
 
-        if (idx >= 0)
+        // Tombstone the slot
+        EntityIds[idx] = Tombstone;
+        AliveCount--;
+
+        // Remove from reverse lookup
+        _entityToIndex.Remove(entityId);
+
+        // Add to free list for O(1) reuse
+        if (_freeCount >= _freeSlots.Length)
         {
-            EntityIds[idx] = Tombstone;
-            AliveCount--;
-
-            // Add to free list for O(1) reuse
-            if (_freeCount >= _freeSlots.Length)
-            {
-                Array.Resize(ref _freeSlots, _freeSlots.Length * 2);
-            }
-            _freeSlots[_freeCount++] = idx;
-
-            // Note: Auto-compaction is disabled to avoid unpredictable performance spikes mid-frame.
-            // Call Context.CompactArchetypes() manually during loading screens or maintenance windows
-            // to remove tombstones and reduce fragmentation.
+            Array.Resize(ref _freeSlots, _freeSlots.Length * 2);
         }
+        _freeSlots[_freeCount++] = idx;
+
+        // Note: Auto-compaction is disabled to avoid unpredictable performance spikes mid-frame.
+        // Call Context.CompactArchetypes() manually during loading screens or maintenance windows
+        // to remove tombstones and reduce fragmentation.
     }
 
     /// <summary>
     /// Compact the array by removing all tombstones.
-    /// Clears the free list since all gaps are removed.
+    /// Clears the free list and rebuilds reverse lookup since all gaps are removed.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public void Compact()
@@ -99,11 +113,17 @@ internal class Archetype
         int writeIdx = 0;
         var span = EntityIds.AsSpan(0, Count);
 
+        // Clear and rebuild reverse lookup
+        _entityToIndex.Clear();
+
         for (int readIdx = 0; readIdx < Count; readIdx++)
         {
-            if (span[readIdx] != Tombstone)
+            int entityId = span[readIdx];
+            if (entityId != Tombstone)
             {
-                EntityIds[writeIdx++] = EntityIds[readIdx];
+                EntityIds[writeIdx] = entityId;
+                _entityToIndex[entityId] = writeIdx;  // Rebuild reverse lookup
+                writeIdx++;
             }
         }
 

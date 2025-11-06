@@ -4,7 +4,11 @@ using System.Runtime.CompilerServices;
 
 namespace EasyEcs.Core.Components;
 
-internal class TagRegistry
+/// <summary>
+/// Global component type registry. Thread-safe and shared across all Context instances.
+/// Component types are registered once globally and persist for the lifetime of the process.
+/// </summary>
+internal static class TagRegistry
 {
     private interface ITypeBitIndex
     {
@@ -14,10 +18,9 @@ internal class TagRegistry
     private class TypeBitIndex<T> : ITypeBitIndex
     {
         // Volatile fields for cross-thread visibility
-        // Static instance shared across all Context instances by design
         internal volatile ushort BitIndex;  // Supports up to 65536 component types
         internal volatile bool IsRegistered;
-        public static TypeBitIndex<T> Instance = new();
+        public static readonly TypeBitIndex<T> Instance = new();
 
         public void Reset()
         {
@@ -26,31 +29,42 @@ internal class TagRegistry
         }
     }
 
-    // Static lock for thread-safe registration across all Context instances
-    private static readonly object GlobalRegistrationLock = new();
+    // Global lock for thread-safe registration
+    private static readonly object GlobalLock = new();
 
-    public int TagCount;
-    private List<ITypeBitIndex> _tags = new();
+    // Global tag counter - thread-safe via lock
+    private static int _tagCount;
 
-    public void Clear()
+    // Track all registered tags for cleanup (primarily for testing scenarios)
+    private static readonly List<ITypeBitIndex> Tags = new();
+
+    /// <summary>
+    /// Clear all registered component types.
+    /// WARNING: Only use this in testing scenarios. This will invalidate all existing Tags and Archetypes.
+    /// </summary>
+    public static void Clear()
     {
-        // Zero-allocation iteration with direct method call
-        for (int i = 0; i < _tags.Count; i++)
+        lock (GlobalLock)
         {
-            _tags[i].Reset();
-        }
+            // Reset all registered types
+            for (int i = 0; i < Tags.Count; i++)
+            {
+                Tags[i].Reset();
+            }
 
-        _tags.Clear();
+            Tags.Clear();
+            _tagCount = 0;
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool HasTag<T>() where T : struct
+    public static bool HasTag<T>() where T : struct
     {
         return TypeBitIndex<T>.Instance.IsRegistered;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ushort GetTagBitIndex<T>() where T : struct
+    public static ushort GetTagBitIndex<T>() where T : struct
     {
         var instance = TypeBitIndex<T>.Instance;
         if (!instance.IsRegistered)
@@ -62,7 +76,7 @@ internal class TagRegistry
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool TryGetTagBitIndex<T>(out ushort bitIndex) where T : struct
+    public static bool TryGetTagBitIndex<T>(out ushort bitIndex) where T : struct
     {
         var instance = TypeBitIndex<T>.Instance;
         if (!instance.IsRegistered)
@@ -78,10 +92,10 @@ internal class TagRegistry
     /// <summary>
     /// Get existing tag index or register a new one if it doesn't exist.
     /// Supports up to 65536 component types (ushort max).
-    /// Thread-safe: uses static lock to protect shared TypeBitIndex across contexts.
+    /// Thread-safe: uses global lock for registration.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ushort GetOrRegisterTag<T>() where T : struct
+    public static ushort GetOrRegisterTag<T>() where T : struct
     {
         var instance = TypeBitIndex<T>.Instance;
 
@@ -89,22 +103,22 @@ internal class TagRegistry
         if (instance.IsRegistered)
             return instance.BitIndex;
 
-        // Slow path: need to register (lock globally since TypeBitIndex is static)
-        lock (GlobalRegistrationLock)
+        // Slow path: need to register
+        lock (GlobalLock)
         {
             // Double-check after acquiring lock
             if (instance.IsRegistered)
                 return instance.BitIndex;
 
             // Register new tag - limited to 65536 component types (ushort max)
-            if (TagCount >= ushort.MaxValue)
+            if (_tagCount >= ushort.MaxValue)
                 throw new InvalidOperationException($"Maximum number of component types reached ({ushort.MaxValue})");
 
-            ushort bitIndex = (ushort)TagCount;
+            ushort bitIndex = (ushort)_tagCount;
             instance.BitIndex = bitIndex;
             instance.IsRegistered = true;  // Volatile write ensures visibility
-            TagCount++;
-            _tags.Add(instance);
+            _tagCount++;
+            Tags.Add(instance);
 
             return bitIndex;
         }

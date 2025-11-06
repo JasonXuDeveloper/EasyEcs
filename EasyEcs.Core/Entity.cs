@@ -321,7 +321,7 @@ public struct Entity : IEquatable<Entity>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ComponentRef<T> GetComponent<T>() where T : struct, IComponent
     {
-        var idx = Context.TagRegistry.GetTagBitIndex<T>();
+        var idx = TagRegistry.GetTagBitIndex<T>();
         if (!Tag.HasBit(idx))
             throw new InvalidOperationException("Component not found");
 
@@ -338,7 +338,7 @@ public struct Entity : IEquatable<Entity>
     public bool TryGetComponent<T>(out ComponentRef<T> value) where T : struct, IComponent
     {
         value = default;
-        if (!Context.TagRegistry.TryGetTagBitIndex<T>(out var idx))
+        if (!TagRegistry.TryGetTagBitIndex<T>(out var idx))
             return false;
         if (!Tag.HasBit(idx))
             return false;
@@ -355,7 +355,7 @@ public struct Entity : IEquatable<Entity>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool HasComponent<T>() where T : struct, IComponent
     {
-        if (Context.TagRegistry.TryGetTagBitIndex<T>(out var idx))
+        if (TagRegistry.TryGetTagBitIndex<T>(out var idx))
             return Tag.HasBit(idx);
         return false;
     }

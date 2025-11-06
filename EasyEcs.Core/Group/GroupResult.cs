@@ -1,26 +1,6 @@
-using System;
 using System.Runtime.CompilerServices;
 
 namespace EasyEcs.Core.Group;
-
-public readonly struct GroupResult
-{
-    private readonly int _entityId;
-    private readonly Context _context;
-
-    public ref Entity Entity => ref _context.Entities[_entityId];
-
-    public ref T GetComponent<T>() where T : struct
-    {
-        return ref ((T[])_context.Components[_context.TagRegistry.GetTagBitIndex<T>()])[_entityId];
-    }
-
-    public GroupResult(int id, Context context)
-    {
-        _entityId = id;
-        _context = context;
-    }
-}
 
 public readonly struct GroupResult<T1>
 {

@@ -24,7 +24,6 @@ public partial class Context : IAsyncDisposable
 
     // Component storage
     internal Array[] Components;
-    internal readonly TagRegistry TagRegistry = new();
 
     // System storage (zero-allocation priority lists)
     private readonly PrioritySystemList<ExecuteSystemWrapper> _executeSystems = new();
@@ -466,7 +465,9 @@ public partial class Context : IAsyncDisposable
         _initSystems.Clear();
         _endSystems.Clear();
 
-        TagRegistry.Clear();
+        // Note: TagRegistry is global and shared across all contexts.
+        // It is NOT cleared here to avoid breaking other Context instances.
+        // Only clear TagRegistry in isolated testing scenarios via TagRegistry.Clear().
 
         _activeEntityCount = 0;
         _disposed = true;

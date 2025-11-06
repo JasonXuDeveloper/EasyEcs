@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using EasyEcs.Core.Components;
@@ -30,8 +29,19 @@ public partial class Context
                 archetype = new Archetype(in componentMask, initialCapacity: 1024);
                 Archetypes[componentMask] = archetype;
 
-                // Invalidate query cache (new archetype may match existing queries)
-                _queryCache.Clear();
+                // Incrementally update query cache: add new archetype to matching queries
+                // This is smarter than clearing the entire cache
+                foreach (var kvp in _queryCache)
+                {
+                    var queryTag = kvp.Key;
+                    var cachedList = kvp.Value;
+
+                    // Check if new archetype matches this cached query
+                    if ((componentMask & queryTag) == queryTag)
+                    {
+                        cachedList.Add(archetype);
+                    }
+                }
             }
 
             return archetype;

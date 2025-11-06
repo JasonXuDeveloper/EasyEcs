@@ -50,14 +50,14 @@ public struct GroupResultEnumerator<T1, T2, T3, T4, T5, T6, T7, T8> : IDisposabl
         _entityIndexInArchetype = 0;
         Current = default;
 
-        if (context.TagRegistry.TryGetTagBitIndex<T1>(out var bitIdx1) &&
-            context.TagRegistry.TryGetTagBitIndex<T2>(out var bitIdx2) &&
-            context.TagRegistry.TryGetTagBitIndex<T3>(out var bitIdx3) &&
-            context.TagRegistry.TryGetTagBitIndex<T4>(out var bitIdx4) &&
-            context.TagRegistry.TryGetTagBitIndex<T5>(out var bitIdx5) &&
-            context.TagRegistry.TryGetTagBitIndex<T6>(out var bitIdx6) &&
-            context.TagRegistry.TryGetTagBitIndex<T7>(out var bitIdx7) &&
-            context.TagRegistry.TryGetTagBitIndex<T8>(out var bitIdx8))
+        if (TagRegistry.TryGetTagBitIndex<T1>(out var bitIdx1) &&
+            TagRegistry.TryGetTagBitIndex<T2>(out var bitIdx2) &&
+            TagRegistry.TryGetTagBitIndex<T3>(out var bitIdx3) &&
+            TagRegistry.TryGetTagBitIndex<T4>(out var bitIdx4) &&
+            TagRegistry.TryGetTagBitIndex<T5>(out var bitIdx5) &&
+            TagRegistry.TryGetTagBitIndex<T6>(out var bitIdx6) &&
+            TagRegistry.TryGetTagBitIndex<T7>(out var bitIdx7) &&
+            TagRegistry.TryGetTagBitIndex<T8>(out var bitIdx8))
         {
             if (context.Components != null &&
                 bitIdx1 < context.Components.Length &&
@@ -88,7 +88,7 @@ public struct GroupResultEnumerator<T1, T2, T3, T4, T5, T6, T7, T8> : IDisposabl
                 queryTag.SetBit(bitIdx7);
                 queryTag.SetBit(bitIdx8);
 
-                _matchingArchetypes = context.GetMatchingArchetypes(queryTag);
+                _matchingArchetypes = context.GetMatchingArchetypes(in queryTag);
             }
         }
     }
