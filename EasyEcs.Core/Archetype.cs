@@ -7,6 +7,7 @@ namespace EasyEcs.Core;
 /// <summary>
 /// Archetype stores entities with the same component configuration.
 /// Uses tombstone pattern (-1) for safe iteration during modifications.
+/// Uses free list for O(1) tombstone slot reuse.
 /// </summary>
 internal class Archetype
 {
@@ -15,36 +16,39 @@ internal class Archetype
     public int Count;          // Total slots (including tombstones)
     public int AliveCount;     // Living entities only
 
+    // Free list for O(1) tombstone reuse (stack-based)
+    private int[] _freeSlots;
+    private int _freeCount;
+
     private const int Tombstone = -1;
 
     public Archetype(in Tag componentMask, int initialCapacity = 1024)
     {
         ComponentMask = componentMask;
         EntityIds = new int[initialCapacity];
+        _freeSlots = new int[initialCapacity / 4]; // Start smaller, grow as needed
         Count = 0;
         AliveCount = 0;
+        _freeCount = 0;
     }
 
     /// <summary>
     /// Add an entity to this archetype.
-    /// Reuses tombstone slots first, then appends.
+    /// Reuses tombstone slots (O(1) via free list), then appends.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public void Add(int entityId)
     {
-        // Try to find a tombstone slot for reuse
-        var span = EntityIds.AsSpan(0, Count);
-        int emptySlot = span.IndexOf(Tombstone);
-
-        if (emptySlot >= 0)
+        // Fast path: Reuse free slot from free list (O(1))
+        if (_freeCount > 0)
         {
-            // Reuse tombstone slot
-            EntityIds[emptySlot] = entityId;
+            int slot = _freeSlots[--_freeCount];
+            EntityIds[slot] = entityId;
             AliveCount++;
         }
         else
         {
-            // No tombstones available, append to end
+            // No free slots, append to end
             if (Count >= EntityIds.Length)
             {
                 // Grow array (doubling strategy)
@@ -58,7 +62,7 @@ internal class Archetype
 
     /// <summary>
     /// Remove an entity from this archetype.
-    /// Marks the slot as tombstone (-1) for safe iteration.
+    /// Marks the slot as tombstone (-1) and adds to free list for O(1) reuse.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public void Remove(int entityId)
@@ -72,18 +76,22 @@ internal class Archetype
             EntityIds[idx] = Tombstone;
             AliveCount--;
 
-            // Optional: Compact if heavily fragmented (>50% tombstones)
-            // This prevents memory waste while keeping iteration safe
-            if (AliveCount > 0 && AliveCount < Count / 2)
+            // Add to free list for O(1) reuse
+            if (_freeCount >= _freeSlots.Length)
             {
-                Compact();
+                Array.Resize(ref _freeSlots, _freeSlots.Length * 2);
             }
+            _freeSlots[_freeCount++] = idx;
+
+            // Note: Auto-compaction is disabled to avoid unpredictable performance spikes mid-frame.
+            // Call Context.CompactArchetypes() manually during loading screens or maintenance windows
+            // to remove tombstones and reduce fragmentation.
         }
     }
 
     /// <summary>
     /// Compact the array by removing all tombstones.
-    /// Only called when heavily fragmented (>50% dead slots).
+    /// Clears the free list since all gaps are removed.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public void Compact()
@@ -101,6 +109,9 @@ internal class Archetype
 
         Count = writeIdx;
         // AliveCount should already match Count after compaction
+
+        // Clear free list since there are no more tombstones
+        _freeCount = 0;
     }
 
     /// <summary>

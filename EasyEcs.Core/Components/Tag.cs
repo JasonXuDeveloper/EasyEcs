@@ -2,6 +2,8 @@ using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.Arm;
+using System.Runtime.Intrinsics.X86;
 
 namespace EasyEcs.Core.Components;
 
@@ -12,31 +14,34 @@ namespace EasyEcs.Core.Components;
 [StructLayout(LayoutKind.Sequential)]
 internal struct Tag : IEquatable<Tag>, IComparable<Tag>
 {
-    // Inline 256 bits using 2x Vector128 (covers first 256 component types)
-    private Vector128<long> _bits0;  // Bits 0-127
-    private Vector128<long> _bits1;  // Bits 128-255
+    // Inline 256 bits (covers first 256 component types)
+    private Vector256<long> _bits;
 
     // Overflow for >256 components (allocated on demand)
-    private Vector128<long>[] _overflow;
+    private Vector256<long>[] _overflow;
+
+    /// <summary>
+    /// Static empty tag to avoid allocations when creating entities with no components.
+    /// </summary>
+    internal static readonly Tag Empty = new();
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public void SetBit(int bitIndex)
     {
-        int vectorIndex = bitIndex >> 7;  // Divide by 128
-        int bitOffset = bitIndex & 127;   // Modulo 128
+        int vectorIndex = bitIndex >> 8; // Divide by 256
+        int bitOffset = bitIndex & 255; // Modulo 256
 
-        if (vectorIndex < 2)
+        if (vectorIndex == 0)
         {
-            // Fast path: inline vectors
-            ref var vector = ref (vectorIndex == 0 ? ref _bits0 : ref _bits1);
-            ref long longValue = ref Unsafe.As<Vector128<long>, long>(ref vector);
+            // Fast path: inline vector
+            ref long longValue = ref Unsafe.As<Vector256<long>, long>(ref _bits);
             Unsafe.Add(ref longValue, bitOffset >> 6) |= 1L << (bitOffset & 63);
         }
         else
         {
             // Overflow path
-            EnsureOverflow(vectorIndex - 1);
-            ref long longValue = ref Unsafe.As<Vector128<long>, long>(ref _overflow[vectorIndex - 2]);
+            EnsureOverflow(vectorIndex);
+            ref long longValue = ref Unsafe.As<Vector256<long>, long>(ref _overflow[vectorIndex - 1]);
             Unsafe.Add(ref longValue, bitOffset >> 6) |= 1L << (bitOffset & 63);
         }
     }
@@ -44,83 +49,80 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public void ClearBit(int bitIndex)
     {
-        int vectorIndex = bitIndex >> 7;
-        int bitOffset = bitIndex & 127;
+        int vectorIndex = bitIndex >> 8;
+        int bitOffset = bitIndex & 255;
 
-        if (vectorIndex < 2)
+        if (vectorIndex == 0)
         {
-            ref var vector = ref (vectorIndex == 0 ? ref _bits0 : ref _bits1);
-            ref long longValue = ref Unsafe.As<Vector128<long>, long>(ref vector);
+            ref long longValue = ref Unsafe.As<Vector256<long>, long>(ref _bits);
             Unsafe.Add(ref longValue, bitOffset >> 6) &= ~(1L << (bitOffset & 63));
         }
-        else if (_overflow != null && vectorIndex - 2 < _overflow.Length)
+        else if (_overflow != null && vectorIndex - 1 < _overflow.Length)
         {
-            ref long longValue = ref Unsafe.As<Vector128<long>, long>(ref _overflow[vectorIndex - 2]);
+            ref long longValue = ref Unsafe.As<Vector256<long>, long>(ref _overflow[vectorIndex - 1]);
             Unsafe.Add(ref longValue, bitOffset >> 6) &= ~(1L << (bitOffset & 63));
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public bool HasBit(int bitIndex)
+    public readonly bool HasBit(int bitIndex)
     {
-        int vectorIndex = bitIndex >> 7;
-        int bitOffset = bitIndex & 127;
-
-        ref Vector128<long> vector = ref (vectorIndex == 0 ? ref _bits0 : ref _bits1);
+        int vectorIndex = bitIndex >> 8;
+        int bitOffset = bitIndex & 255;
 
         if (vectorIndex == 0)
-            vector = ref _bits0;
-        else if (vectorIndex == 1)
-            vector = ref _bits1;
-        else if (_overflow == null || vectorIndex - 2 >= _overflow.Length)
-            return false;
-        else
-            vector = ref _overflow[vectorIndex - 2];
+        {
+            ref long longValue0 = ref Unsafe.As<Vector256<long>, long>(ref Unsafe.AsRef(in _bits));
+            return (Unsafe.Add(ref longValue0, bitOffset >> 6) & (1L << (bitOffset & 63))) != 0;
+        }
 
-        ref long longValue = ref Unsafe.As<Vector128<long>, long>(ref vector);
+        if (_overflow == null || vectorIndex - 1 >= _overflow.Length)
+        {
+            return false;
+        }
+
+        ref long longValue = ref Unsafe.As<Vector256<long>, long>(ref _overflow[vectorIndex - 1]);
         return (Unsafe.Add(ref longValue, bitOffset >> 6) & (1L << (bitOffset & 63))) != 0;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public static Tag operator &(Tag a, Tag b)
+    public static Tag operator &(in Tag a, in Tag b)
     {
         var result = new Tag
         {
-            _bits0 = SimdOps.And(a._bits0, b._bits0),
-            _bits1 = SimdOps.And(a._bits1, b._bits1)
+            _bits = Vector256.BitwiseAnd(a._bits, b._bits)
         };
 
         if (a._overflow != null && b._overflow != null)
         {
             int minLen = Math.Min(a._overflow.Length, b._overflow.Length);
-            result._overflow = new Vector128<long>[minLen];
+            result._overflow = new Vector256<long>[minLen];
 
             for (int i = 0; i < minLen; i++)
-                result._overflow[i] = SimdOps.And(a._overflow[i], b._overflow[i]);
+                result._overflow[i] = Vector256.BitwiseAnd(a._overflow[i], b._overflow[i]);
         }
 
         return result;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public static Tag operator |(Tag a, Tag b)
+    public static Tag operator |(in Tag a, in Tag b)
     {
         var result = new Tag
         {
-            _bits0 = SimdOps.Or(a._bits0, b._bits0),
-            _bits1 = SimdOps.Or(a._bits1, b._bits1)
+            _bits = Vector256.BitwiseOr(a._bits, b._bits)
         };
 
         if (a._overflow != null || b._overflow != null)
         {
             int maxLen = Math.Max(a._overflow?.Length ?? 0, b._overflow?.Length ?? 0);
-            result._overflow = new Vector128<long>[maxLen];
+            result._overflow = new Vector256<long>[maxLen];
 
             for (int i = 0; i < maxLen; i++)
             {
-                var aVec = a._overflow != null && i < a._overflow.Length ? a._overflow[i] : Vector128<long>.Zero;
-                var bVec = b._overflow != null && i < b._overflow.Length ? b._overflow[i] : Vector128<long>.Zero;
-                result._overflow[i] = SimdOps.Or(aVec, bVec);
+                var aVec = a._overflow != null && i < a._overflow.Length ? a._overflow[i] : Vector256<long>.Zero;
+                var bVec = b._overflow != null && i < b._overflow.Length ? b._overflow[i] : Vector256<long>.Zero;
+                result._overflow[i] = Vector256.BitwiseOr(aVec, bVec);
             }
         }
 
@@ -128,24 +130,23 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public static Tag operator ^(Tag a, Tag b)
+    public static Tag operator ^(in Tag a, in Tag b)
     {
         var result = new Tag
         {
-            _bits0 = SimdOps.Xor(a._bits0, b._bits0),
-            _bits1 = SimdOps.Xor(a._bits1, b._bits1)
+            _bits = Vector256.Xor(a._bits, b._bits)
         };
 
         if (a._overflow != null || b._overflow != null)
         {
             int maxLen = Math.Max(a._overflow?.Length ?? 0, b._overflow?.Length ?? 0);
-            result._overflow = new Vector128<long>[maxLen];
+            result._overflow = new Vector256<long>[maxLen];
 
             for (int i = 0; i < maxLen; i++)
             {
-                var aVec = a._overflow != null && i < a._overflow.Length ? a._overflow[i] : Vector128<long>.Zero;
-                var bVec = b._overflow != null && i < b._overflow.Length ? b._overflow[i] : Vector128<long>.Zero;
-                result._overflow[i] = SimdOps.Xor(aVec, bVec);
+                var aVec = a._overflow != null && i < a._overflow.Length ? a._overflow[i] : Vector256<long>.Zero;
+                var bVec = b._overflow != null && i < b._overflow.Length ? b._overflow[i] : Vector256<long>.Zero;
+                result._overflow[i] = Vector256.Xor(aVec, bVec);
             }
         }
 
@@ -153,105 +154,173 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Tag operator ~(Tag a)
+    public static Tag operator ~(in Tag a)
     {
         return new Tag
         {
-            _bits0 = Vector128.OnesComplement(a._bits0),
-            _bits1 = Vector128.OnesComplement(a._bits1),
+            _bits = Vector256.OnesComplement(a._bits),
             _overflow = a._overflow != null ? InvertOverflow(a._overflow) : null
         };
     }
 
-    private static Vector128<long>[] InvertOverflow(Vector128<long>[] overflow)
+    private static Vector256<long>[] InvertOverflow(Vector256<long>[] overflow)
     {
-        var result = new Vector128<long>[overflow.Length];
+        var result = new Vector256<long>[overflow.Length];
         for (int i = 0; i < overflow.Length; i++)
-            result[i] = Vector128.OnesComplement(overflow[i]);
+            result[i] = Vector256.OnesComplement(overflow[i]);
         return result;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public static bool operator ==(Tag a, Tag b) => a.Equals(b);
+    public static bool operator ==(in Tag a, in Tag b) => a.Equals(in b);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public static bool operator !=(Tag a, Tag b) => !a.Equals(b);
+    public static bool operator !=(in Tag a, in Tag b) => !a.Equals(in b);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public bool Equals(in Tag other)
+    public readonly bool Equals(in Tag other)
     {
-        if (!SimdOps.AreEqual(_bits0, other._bits0) || !SimdOps.AreEqual(_bits1, other._bits1))
+        // XOR-based equality: a == b iff (a ^ b) == 0
+        var xor = Vector256.Xor(_bits, other._bits);
+
+        // Fast zero check using platform-specific intrinsics
+        if (!IsVectorZero(xor))
             return false;
 
-        // Handle overflow comparison - treat null and empty as equivalent
+        // Handle overflow (rare case - >256 components)
         int thisLen = _overflow?.Length ?? 0;
         int otherLen = other._overflow?.Length ?? 0;
         int maxLen = Math.Max(thisLen, otherLen);
 
-        // If one has overflow and the other doesn't, check if the overflow vectors are all zero
         for (int i = 0; i < maxLen; i++)
         {
-            var thisVec = i < thisLen ? _overflow[i] : Vector128<long>.Zero;
-            var otherVec = i < otherLen ? other._overflow[i] : Vector128<long>.Zero;
+            var thisVec = i < thisLen ? _overflow![i] : Vector256<long>.Zero;
+            var otherVec = i < otherLen ? other._overflow![i] : Vector256<long>.Zero;
 
-            if (!SimdOps.AreEqual(thisVec, otherVec))
+            if (!IsVectorZero(Vector256.Xor(thisVec, otherVec)))
                 return false;
         }
 
         return true;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsVectorZero(Vector256<long> vec)
+    {
+        // x86 AVX2: Single TestZ instruction (~1 cycle)
+        if (Avx2.IsSupported)
+        {
+            return Avx2.TestZ(vec, vec);
+        }
+
+        // ARM NEON: Vector256 is emulated on ARM, so work with 128-bit halves (~2 cycles)
+        if (AdvSimd.Arm64.IsSupported)
+        {
+            // Split into two 128-bit vectors and OR them together
+            var lower = vec.GetLower();
+            var upper = vec.GetUpper();
+            var combined = AdvSimd.Or(lower, upper);
+
+            // OR both lanes using direct memory access (faster than GetElement)
+            ref long combinedRef = ref Unsafe.As<Vector128<long>, long>(ref combined);
+            return (combinedRef | Unsafe.Add(ref combinedRef, 1)) == 0;
+        }
+
+        // Fallback: OR all elements and check if zero (~4 cycles)
+        ref long longRef = ref Unsafe.As<Vector256<long>, long>(ref vec);
+        return (longRef | Unsafe.Add(ref longRef, 1) |
+                Unsafe.Add(ref longRef, 2) | Unsafe.Add(ref longRef, 3)) == 0;
+    }
+
     // IEquatable<Tag> implementation for interface compatibility
     bool IEquatable<Tag>.Equals(Tag other) => Equals(in other);
 
-    public override bool Equals(object obj)
+    public readonly override bool Equals(object obj)
     {
         return obj is Tag tag && Equals(in tag);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public override int GetHashCode()
+    public readonly override int GetHashCode()
     {
-        // Extract first int from vector for hash
-        return Unsafe.As<Vector128<long>, int>(ref Unsafe.AsRef(in _bits0));
+        // Use SIMD to quickly fold Vector256 into a hash
+        // XOR upper and lower halves
+        var lower = _bits.GetLower();
+        var upper = _bits.GetUpper();
+        var combined = Vector128.Xor(lower, upper);
+
+        // Extract both longs using Unsafe (faster than GetElement)
+        ref long combinedRef = ref Unsafe.As<Vector128<long>, long>(ref combined);
+        long hash = combinedRef ^ Unsafe.Add(ref combinedRef, 1);
+
+        // Include overflow in hash (rare case - >256 components)
+        if (_overflow != null)
+        {
+            for (int i = 0; i < _overflow.Length; i++)
+            {
+                lower = _overflow[i].GetLower();
+                upper = _overflow[i].GetUpper();
+                combined = Vector128.Xor(lower, upper);
+                combinedRef = ref Unsafe.As<Vector128<long>, long>(ref combined);
+                hash ^= combinedRef ^ Unsafe.Add(ref combinedRef, 1);
+            }
+        }
+
+        // Fold the 64-bit hash into 32 bits
+        return (int)(hash ^ (hash >> 32));
     }
 
-    public override string ToString()
+    public readonly override string ToString()
     {
-        ref long bits0 = ref Unsafe.As<Vector128<long>, long>(ref Unsafe.AsRef(in _bits0));
-        ref long bits1 = ref Unsafe.As<Vector128<long>, long>(ref Unsafe.AsRef(in _bits1));
+        ref long bits = ref Unsafe.As<Vector256<long>, long>(ref Unsafe.AsRef(in _bits));
 
-        return $"Tag {Unsafe.Add(ref bits0, 0):x16} {Unsafe.Add(ref bits0, 1):x16} {Unsafe.Add(ref bits1, 0):x16} {Unsafe.Add(ref bits1, 1):x16}";
+        return
+            $"Tag {Unsafe.Add(ref bits, 0):x16} {Unsafe.Add(ref bits, 1):x16} {Unsafe.Add(ref bits, 2):x16} {Unsafe.Add(ref bits, 3):x16}";
     }
 
-    public int CompareTo(in Tag other)
+    public readonly int CompareTo(in Tag other)
     {
-        ref long thisBits = ref Unsafe.As<Vector128<long>, long>(ref Unsafe.AsRef(in _bits0));
-        ref long otherBits = ref Unsafe.As<Vector128<long>, long>(ref Unsafe.AsRef(in other._bits0));
+        // Fast path: Use SIMD to check equality first
+        var xor = Vector256.Xor(_bits, other._bits);
+        if (IsVectorZero(xor))
+        {
+            // Inline bits are equal, check overflow
+            int thisLen = _overflow?.Length ?? 0;
+            int otherLen = other._overflow?.Length ?? 0;
+
+            if (thisLen != otherLen)
+                return thisLen.CompareTo(otherLen);
+
+            // Check overflow vectors
+            for (int i = 0; i < thisLen; i++)
+            {
+                xor = Vector256.Xor(_overflow![i], other._overflow![i]);
+                if (!IsVectorZero(xor))
+                {
+                    // Use XOR to find first differing long
+                    ref long xorRef = ref Unsafe.As<Vector256<long>, long>(ref xor);
+                    ref long thisRef = ref Unsafe.As<Vector256<long>, long>(ref _overflow[i]);
+                    ref long otherRef = ref Unsafe.As<Vector256<long>, long>(ref Unsafe.AsRef(in other._overflow[i]));
+
+                    for (int j = 0; j < 4; j++)
+                    {
+                        if (Unsafe.Add(ref xorRef, j) != 0)
+                            return Unsafe.Add(ref thisRef, j).CompareTo(Unsafe.Add(ref otherRef, j));
+                    }
+                }
+            }
+
+            return 0; // Fully equal
+        }
+
+        // Not equal - use XOR to find first differing long in inline storage
+        ref long xorRef2 = ref Unsafe.As<Vector256<long>, long>(ref xor);
+        ref long thisRef2 = ref Unsafe.As<Vector256<long>, long>(ref Unsafe.AsRef(in _bits));
+        ref long otherRef2 = ref Unsafe.As<Vector256<long>, long>(ref Unsafe.AsRef(in other._bits));
 
         for (int i = 0; i < 4; i++)
         {
-            var cmp = Unsafe.Add(ref thisBits, i).CompareTo(Unsafe.Add(ref otherBits, i));
-            if (cmp != 0) return cmp;
-        }
-
-        // Compare overflow if present
-        int thisLen = _overflow?.Length ?? 0;
-        int otherLen = other._overflow?.Length ?? 0;
-
-        if (thisLen != otherLen)
-            return thisLen.CompareTo(otherLen);
-
-        for (int i = 0; i < thisLen; i++)
-        {
-            ref long thisOverflow = ref Unsafe.As<Vector128<long>, long>(ref _overflow[i]);
-            ref long otherOverflow = ref Unsafe.As<Vector128<long>, long>(ref other._overflow[i]);
-
-            for (int j = 0; j < 2; j++)
-            {
-                var cmp = Unsafe.Add(ref thisOverflow, j).CompareTo(Unsafe.Add(ref otherOverflow, j));
-                if (cmp != 0) return cmp;
-            }
+            if (Unsafe.Add(ref xorRef2, i) != 0)
+                return Unsafe.Add(ref thisRef2, i).CompareTo(Unsafe.Add(ref otherRef2, i));
         }
 
         return 0;
@@ -265,11 +334,11 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
     {
         if (_overflow == null)
         {
-            _overflow = new Vector128<long>[Math.Max(4, requiredCount)];
+            _overflow = new Vector256<long>[Math.Max(4, requiredCount)];
         }
         else if (_overflow.Length < requiredCount)
         {
-            var newArray = new Vector128<long>[Math.Max(_overflow.Length * 2, requiredCount)];
+            var newArray = new Vector256<long>[Math.Max(_overflow.Length * 2, requiredCount)];
             Array.Copy(_overflow, newArray, _overflow.Length);
             _overflow = newArray;
         }

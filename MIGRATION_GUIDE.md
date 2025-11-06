@@ -155,35 +155,105 @@ Using `ref` to hold component or entity data can be **dangerous** if arrays are 
 var entity = context.CreateEntity();
 var health = entity.AddComponent<Health>();
 ref var h = ref health.Value;
-h.HP = 100;
+h.HP = 100;  // ✅ Safe: ref is still valid here
 
-// ONLY this operation invalidates refs:
-context.CreateEntity();  // May resize ALL component arrays → ALL refs dangle!
+// Operations that invalidate component refs (resize component arrays):
+context.CreateEntity();         // ⚠️ May resize ALL component arrays → ALL refs dangle!
 
-h.HP = 50;  // UNSAFE! ref may point to old array or crash
+h.HP = 50;  // ❌ UNSAFE! ref may point to old array or crash
 
 // These operations are SAFE for refs:
-entity.AddComponent<Armor>();        // ✅ Safe: doesn't resize arrays, only changes archetype
-context.DestroyEntity(someEntity);   // ✅ Safe: doesn't resize arrays
-entity.RemoveComponent<Shield>();    // ✅ Safe: doesn't resize arrays
+entity.AddComponent<Armor>();        // ✅ Safe: doesn't resize component arrays
+context.DestroyEntity(someEntity);   // ✅ Safe: doesn't resize component arrays
+entity.RemoveComponent<Shield>();    // ✅ Safe: doesn't resize component arrays
+context.CompactArchetypes();         // ✅ Safe: only compacts archetype lists, doesn't resize component arrays
 ```
 
-**Key insight:** Component data is stored in `Context.Components[typeIndex][entityId]` arrays. Only **CreateEntity** resizes these arrays (when capacity is exceeded). AddComponent/RemoveComponent only change which archetype list an entity belongs to—they don't move or resize component data.
+**Key insight:** Component data is stored in `Context.Components[typeIndex][entityId]` arrays. Only **CreateEntity** (when capacity is exceeded) resizes these component arrays. AddComponent/RemoveComponent only change which archetype list an entity belongs to—they don't move or resize component data. CompactArchetypes only compacts archetype entity lists (removes tombstones) without touching component arrays.
+
+**✅ Singleton Components are Safe with Refs:**
+
+Singleton components are stored separately and are **NOT affected** by `CreateEntity()` or `CompactArchetypes()`:
+
+```csharp
+// ✅ SAFE: Singleton component refs are always valid
+var config = context.AddSingletonComponent<GameConfig>();
+ref var cfg = ref config.Value;
+cfg.MaxPlayers = 100;
+
+// Safe: singleton data doesn't move
+context.CreateEntity();
+context.CompactArchetypes();
+
+cfg.MaxPlayers = 200;  // Still safe!
+```
+
+⚠️ **Warning:** Don't repeatedly add the same singleton component type - it will erase the old data:
+```csharp
+var config = context.AddSingletonComponent<GameConfig>();
+config.Value.MaxPlayers = 100;
+
+// ❌ BAD: Re-adding same singleton erases previous data!
+context.AddSingletonComponent<GameConfig>();  // Old data lost!
+```
+
+⚠️ **Warning:** Similarly, don't repeatedly add the same component to an entity - it will erase the old data:
+```csharp
+var entity = context.CreateEntity();
+var health = entity.AddComponent<Health>();
+health.Value.HP = 100;
+health.Value.MaxHP = 150;
+
+// ❌ BAD: Re-adding same component erases previous data!
+var health2 = entity.AddComponent<Health>();  // Old HP/MaxHP values lost! Reinitialized to default.
+// health2.Value.HP is now 0 (default), not 100!
+```
+
+If the entity already has a component, use `GetComponent` or `TryGetComponent` instead:
+```csharp
+// ✅ Good: Check first
+if (!entity.TryGetComponent<Health>(out var health))
+{
+    health = entity.AddComponent<Health>();
+}
+health.Value.HP = 100;
+```
 
 **When to use ref:**
-- ✅ **Inside tight loops** with no structural changes:
+- ✅ **Inside tight loops** during GroupOf iteration (when NOT creating entities):
   ```csharp
   foreach (var result in context.GroupOf<Position, Velocity>())
   {
       ref var pos = ref result.Component1.Value;
-      pos.X += result.Component2.Value.X;  // Safe: no structural changes
+      ref var vel = ref result.Component2.Value;
+      pos.X += vel.X;
+      pos.Y += vel.Y;  // ✅ Safe: no CreateEntity calls, refs remain valid
+
+      // ✅ Safe during GroupOf iteration (doesn't break iterator OR invalidate refs):
+      context.DestroyEntity(someEntity);   // Safe: uses tombstones, doesn't resize arrays
+      result.Entity.AddComponent<Dead>();  // Safe: changes archetype, doesn't resize arrays
+      result.Entity.RemoveComponent<AI>(); // Safe: changes archetype, doesn't resize arrays
+
+      // ❌ UNSAFE with ref: CreateEntity may resize arrays!
+      // context.CreateEntity();           // Iterator OK, but ref pos/vel become INVALID!
+      // pos.X = 0;                        // CRASH! ref is now dangling!
+
+      // ⚠️ Don't call CompactArchetypes() here - invalidates GroupOf iterator!
+      // context.CompactArchetypes();      // CRASH! Breaks the iterator itself!
   }
   ```
 
+  **Note:** During GroupOf iteration, you can safely call DestroyEntity/AddComponent/RemoveComponent (tombstone pattern handles these), but:
+  - **CreateEntity** may resize component arrays → invalidates component `ref` variables (but iterator continues)
+  - **CompactArchetypes** removes tombstones → invalidates the `GroupOf` iterator itself (crashes immediately)
+
+  If you need to create entities during iteration, don't use `ref` - use `result.Component1.Value` directly.
+
 **When NOT to use ref:**
-- ❌ **When creating entities** while ref is alive (may resize arrays)
-- ✅ **Adding/removing components is SAFE** (doesn't resize arrays)
-- ✅ **Destroying entities is SAFE** (doesn't resize arrays, but logically wrong if destroying the entity whose component you're referencing)
+- ❌ **When creating entities** while ref is alive (may resize component arrays)
+- ✅ **Adding/removing components is SAFE** (doesn't resize component arrays)
+- ✅ **Destroying entities is SAFE** (doesn't resize component arrays, but logically wrong if destroying the entity whose component you're referencing)
+- ✅ **CompactArchetypes is SAFE** (only compacts archetype lists, doesn't resize component arrays)
 
 **Safe Alternative:**
 ```csharp
@@ -200,7 +270,7 @@ entity.AddComponent<Armor>();
 health.Value.HP = 50;  // Safe: ComponentRef validates and accesses current data
 ```
 
-**Rule of thumb:** If you're unsure, **always use `compRef.Value.field`** instead of `ref compRef.Value`. Only use `ref` for short-lived, local optimizations where you can guarantee no entity creation occurs (which could resize arrays). AddComponent/RemoveComponent are safe with refs.
+**Rule of thumb:** If you're unsure, **always use `compRef.Value.field`** instead of `ref compRef.Value`. Only use `ref` for short-lived, local optimizations where you can guarantee no entity creation occurs (which could resize component arrays). AddComponent/RemoveComponent/CompactArchetypes are safe with refs.
 
 **Pattern 3: Nested Callbacks**
 
@@ -247,7 +317,38 @@ config.Value.MaxPlayers = 100;
 context.DestroyEntity(entity);  // Same in both versions
 ```
 
-### Step 5: Iteration (No Changes)
+### Step 5: Use Batch Component Methods (New in v3.0)
+
+**For adding/removing multiple components, use batch methods for better performance:**
+
+✅ **Efficient - Single archetype transition:**
+```csharp
+// Add multiple components at once
+var (pos, vel) = entity.AddComponents<Position, Velocity>();
+pos.Value.X = 10;
+vel.Value.X = 5;
+
+// Or with 3 components
+var (pos, vel, health) = entity.AddComponents<Position, Velocity, Health>();
+
+// Remove multiple components at once
+entity.RemoveComponents<Position, Velocity>();
+```
+
+❌ **Inefficient - Multiple archetype transitions:**
+```csharp
+// Each call moves entity between archetypes
+entity.AddComponent<Position>();  // Archetype transition #1
+entity.AddComponent<Velocity>();  // Archetype transition #2
+// 2x more expensive than batch method!
+```
+
+**When to use batch methods:**
+- Adding/removing 2-3 components to the same entity
+- Building entities with multiple components
+- Optimizing hot paths with frequent component changes
+
+### Step 6: Iteration (No Changes)
 
 **GroupOf iteration is unchanged:**
 ```csharp
@@ -257,7 +358,7 @@ foreach (var result in context.GroupOf<Position, Velocity>())
 }
 ```
 
-### Step 6: System Implementation (Mostly Unchanged)
+### Step 7: System Implementation (Mostly Unchanged)
 
 Systems work the same way, just use the new immediate API:
 
@@ -543,12 +644,12 @@ h.HP = 100;  // Lost!
 var health = entity.GetComponent<Health>();
 health.Value.HP = 100;
 
-// ✅ Good: Using ref (only if NO structural changes)
+// ✅ Good: Using ref (only if NO entity creation)
 var health = entity.GetComponent<Health>();
 ref var h = ref health.Value;
 h.HP = 100;
 h.MaxHP = 150;
-// Don't create/destroy entities or add/remove components while holding ref!
+// Don't create entities while holding ref! (AddComponent/RemoveComponent/CompactArchetypes are safe)
 ```
 
 See **Pattern 2b: Modifying Components** for detailed guidance.
@@ -572,14 +673,15 @@ var health = entity.GetComponent<Health>();
 context.CreateEntity();  // Safe
 health.Value.HP = 100;  // Safe: ComponentRef gets current location
 
-// ✅ Also safe: AddComponent/RemoveComponent with ref
+// ✅ Also safe: AddComponent/RemoveComponent/CompactArchetypes with ref
 ref var health = ref entity.GetComponent<Health>().Value;
-entity.AddComponent<Armor>();     // Safe: doesn't resize arrays
-entity.RemoveComponent<Shield>(); // Safe: doesn't resize arrays
-health.HP = 100;  // Safe: array wasn't resized
+entity.AddComponent<Armor>();     // Safe: doesn't resize component arrays
+entity.RemoveComponent<Shield>(); // Safe: doesn't resize component arrays
+context.CompactArchetypes();      // Safe: doesn't resize component arrays
+health.HP = 100;  // Safe: component arrays weren't resized
 ```
 
-**Rule:** Only use `ref` when no entity creation will occur. AddComponent/RemoveComponent are safe with refs.
+**Rule:** Only use `ref` when no entity creation will occur. AddComponent/RemoveComponent/CompactArchetypes are safe with refs.
 
 ### Issue: Iteration Behavior Changed
 
@@ -597,37 +699,82 @@ health.HP = 100;  // Safe: array wasn't resized
 context.EnsureEntityCapacity(expected_max_entities);
 ```
 
-### 2. Check Fragmentation Periodically
+### 2. Check Fragmentation and Compact Manually
+
+Archetype fragmentation occurs when entities are destroyed, leaving "tombstone" slots. Use `CompactArchetypes()` during loading screens or maintenance windows:
 
 ```csharp
-var (_, _, frag) = context.GetFragmentationStats();
+// Check fragmentation
+var (totalSlots, aliveEntities, frag) = context.GetFragmentationStats();
 if (frag > 0.5f)  // >50% tombstones
 {
+    // Compact during loading screen or between levels
     context.CompactArchetypes();
 }
 ```
 
-### 3. Use Parallel Execution
+⚠️ **Warning:** `CompactArchetypes()` compacts archetype entity lists (removes tombstones), which affects `GroupOf` iterators but NOT component refs:
+
+```csharp
+// ❌ UNSAFE: GroupOf iterator invalidated by compaction
+foreach (var result in context.GroupOf<Health>())
+{
+    context.CompactArchetypes();  // CRASH! Invalidates iterator!
+    result.Component1.Value.HP = 100;  // Iterator is broken!
+}
+
+// ✅ SAFE: Component refs are unaffected by compaction
+ref var health = ref player.GetComponent<Health>().Value;
+context.CompactArchetypes();  // Safe: doesn't move component data
+health.HP = 100;  // Safe: component arrays unchanged
+
+// ✅ SAFE: Call CompactArchetypes outside iteration
+foreach (var result in context.GroupOf<Health>())
+{
+    result.Component1.Value.HP = 100;
+}
+context.CompactArchetypes();  // Safe: no active iteration
+```
+
+**Key distinction:**
+- `CreateEntity()` may resize component arrays → invalidates component `ref` variables
+- `CompactArchetypes()` compacts archetype entity lists → invalidates `GroupOf` iterators
+- Component refs are safe across `CompactArchetypes()`, but NOT across `CreateEntity()`
+
+### 3. Use Batch Component Methods
+
+Use `AddComponents` and `RemoveComponents` to reduce archetype transitions:
+
+```csharp
+// ✅ Efficient: Single archetype transition
+var (pos, vel, health) = entity.AddComponents<Position, Velocity, Health>();
+pos.Value.X = 10;
+
+// ❌ Inefficient: 3 archetype transitions
+entity.AddComponent<Position>();
+entity.AddComponent<Velocity>();
+entity.AddComponent<Health>();
+```
+
+### 4. Use Parallel Execution
 
 ```csharp
 var options = new Context.Options(parallel: true);
 var context = new Context(options);
 ```
 
-### 4. Batch Operations
+### 5. Batch Entity Creation
 
 ```csharp
-// Efficient
+// Efficient: Lock acquired once per operation
 for (int i = 0; i < 1000; i++)
 {
     var entity = context.CreateEntity();
     entity.AddComponent<Position>();
 }
-
-// Lock acquired once per operation, not per batch
 ```
 
-### 5. Modify Components In-Place
+### 6. Modify Components In-Place
 
 ```csharp
 // ❌ Bad: Creates copy, modifications lost
@@ -672,20 +819,20 @@ for (int i = 0; i < 1000; i++)
 }
 health.Value.MaxHP = 150;  // Safe: ComponentRef gets current array location
 
-// ✅ ALSO SAFE: ref with AddComponent/RemoveComponent (no CreateEntity)
+// ✅ ALSO SAFE: ref with AddComponent/RemoveComponent/CompactArchetypes (no CreateEntity)
 foreach (var result in context.GroupOf<Health>())
 {
     ref var health = ref result.Component1.Value;
     if (health.HP <= 0)
     {
-        // AddComponent/RemoveComponent don't resize arrays - safe with ref!
+        // AddComponent/RemoveComponent/CompactArchetypes don't resize component arrays - safe with ref!
         result.Entity.AddComponent<Dead>();
-        health.HP = 0;  // Safe: array wasn't resized
+        health.HP = 0;  // Safe: component arrays weren't resized
     }
 }
 ```
 
-**⚠️ Ref Safety Reminder:** Only use `ref` when you're certain **no entity creation** will occur while the ref is alive (CreateEntity may resize ALL arrays). AddComponent/RemoveComponent are safe with refs. See "Pattern 2b: Modifying Components" for full details.
+**⚠️ Ref Safety Reminder:** Only use `ref` when you're certain **no entity creation** will occur while the ref is alive (CreateEntity may resize ALL component arrays). AddComponent/RemoveComponent/CompactArchetypes are safe with refs. See "Pattern 2b: Modifying Components" for full details.
 
 ## Summary
 

@@ -9,19 +9,13 @@ namespace EasyEcs.Core;
 /// </summary>
 internal class PrioritySystemList<T>
 {
-    private struct PriorityBucket
+    private class PriorityBucket(int priority)
     {
-        public int Priority;
-        public List<T> Systems;
-
-        public PriorityBucket(int priority)
-        {
-            Priority = priority;
-            Systems = new List<T>();
-        }
+        public readonly int Priority = priority;
+        public readonly List<T> Systems = new(16);
     }
 
-    private readonly List<PriorityBucket> _buckets = new();
+    private readonly List<PriorityBucket> _buckets = new(16);
 
     /// <summary>
     /// Add a system with the given priority. Systems are automatically sorted by priority.
@@ -38,7 +32,8 @@ internal class PrioritySystemList<T>
                 bucketIndex = i;
                 break;
             }
-            else if (_buckets[i].Priority > priority)
+
+            if (_buckets[i].Priority > priority)
             {
                 // Insert new bucket at this position to maintain sorted order
                 bucketIndex = i;

@@ -65,6 +65,254 @@ public struct Entity : IEquatable<Entity>
     }
 
     /// <summary>
+    /// Add multiple components to the entity with a single archetype transition.
+    /// More efficient than calling AddComponent multiple times.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public (ComponentRef<T1>, ComponentRef<T2>) AddComponents<T1, T2>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+    {
+        return Context.AddComponents<T1, T2>(this);
+    }
+
+    /// <summary>
+    /// Add multiple components to the entity with a single archetype transition.
+    /// More efficient than calling AddComponent multiple times.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>) AddComponents<T1, T2, T3>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+    {
+        return Context.AddComponents<T1, T2, T3>(this);
+    }
+
+    /// <summary>
+    /// Remove multiple components from the entity with a single archetype transition.
+    /// More efficient than calling RemoveComponent multiple times.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void RemoveComponents<T1, T2>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+    {
+        Context.RemoveComponents<T1, T2>(this);
+    }
+
+    /// <summary>
+    /// Add multiple components to the entity with a single archetype transition.
+    /// More efficient than calling AddComponent multiple times.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>) AddComponents<T1, T2, T3, T4>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+    {
+        return Context.AddComponents<T1, T2, T3, T4>(this);
+    }
+
+    /// <summary>
+    /// Add multiple components to the entity with a single archetype transition.
+    /// More efficient than calling AddComponent multiple times.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>) AddComponents<T1, T2, T3, T4, T5>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+        where T5 : struct, IComponent
+    {
+        return Context.AddComponents<T1, T2, T3, T4, T5>(this);
+    }
+
+    /// <summary>
+    /// Add multiple components to the entity with a single archetype transition.
+    /// More efficient than calling AddComponent multiple times.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>) AddComponents<T1, T2, T3, T4, T5, T6>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+        where T5 : struct, IComponent
+        where T6 : struct, IComponent
+    {
+        return Context.AddComponents<T1, T2, T3, T4, T5, T6>(this);
+    }
+
+    /// <summary>
+    /// Add multiple components to the entity with a single archetype transition.
+    /// More efficient than calling AddComponent multiple times.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>, ComponentRef<T7>) AddComponents<T1, T2, T3, T4, T5, T6, T7>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+        where T5 : struct, IComponent
+        where T6 : struct, IComponent
+        where T7 : struct, IComponent
+    {
+        return Context.AddComponents<T1, T2, T3, T4, T5, T6, T7>(this);
+    }
+
+    /// <summary>
+    /// Add multiple components to the entity with a single archetype transition.
+    /// More efficient than calling AddComponent multiple times.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>, ComponentRef<T7>, ComponentRef<T8>) AddComponents<T1, T2, T3, T4, T5, T6, T7, T8>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+        where T5 : struct, IComponent
+        where T6 : struct, IComponent
+        where T7 : struct, IComponent
+        where T8 : struct, IComponent
+    {
+        return Context.AddComponents<T1, T2, T3, T4, T5, T6, T7, T8>(this);
+    }
+
+    /// <summary>
+    /// Add multiple components to the entity with a single archetype transition.
+    /// More efficient than calling AddComponent multiple times.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>, ComponentRef<T7>, ComponentRef<T8>, ComponentRef<T9>) AddComponents<T1, T2, T3, T4, T5, T6, T7, T8, T9>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+        where T5 : struct, IComponent
+        where T6 : struct, IComponent
+        where T7 : struct, IComponent
+        where T8 : struct, IComponent
+        where T9 : struct, IComponent
+    {
+        return Context.AddComponents<T1, T2, T3, T4, T5, T6, T7, T8, T9>(this);
+    }
+
+    /// <summary>
+    /// Remove multiple components from the entity with a single archetype transition.
+    /// More efficient than calling RemoveComponent multiple times.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void RemoveComponents<T1, T2, T3>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+    {
+        Context.RemoveComponents<T1, T2, T3>(this);
+    }
+
+    /// <summary>
+    /// Remove multiple components from the entity with a single archetype transition.
+    /// More efficient than calling RemoveComponent multiple times.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void RemoveComponents<T1, T2, T3, T4>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+    {
+        Context.RemoveComponents<T1, T2, T3, T4>(this);
+    }
+
+    /// <summary>
+    /// Remove multiple components from the entity with a single archetype transition.
+    /// More efficient than calling RemoveComponent multiple times.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void RemoveComponents<T1, T2, T3, T4, T5>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+        where T5 : struct, IComponent
+    {
+        Context.RemoveComponents<T1, T2, T3, T4, T5>(this);
+    }
+
+    /// <summary>
+    /// Remove multiple components from the entity with a single archetype transition.
+    /// More efficient than calling RemoveComponent multiple times.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void RemoveComponents<T1, T2, T3, T4, T5, T6>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+        where T5 : struct, IComponent
+        where T6 : struct, IComponent
+    {
+        Context.RemoveComponents<T1, T2, T3, T4, T5, T6>(this);
+    }
+
+    /// <summary>
+    /// Remove multiple components from the entity with a single archetype transition.
+    /// More efficient than calling RemoveComponent multiple times.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void RemoveComponents<T1, T2, T3, T4, T5, T6, T7>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+        where T5 : struct, IComponent
+        where T6 : struct, IComponent
+        where T7 : struct, IComponent
+    {
+        Context.RemoveComponents<T1, T2, T3, T4, T5, T6, T7>(this);
+    }
+
+    /// <summary>
+    /// Remove multiple components from the entity with a single archetype transition.
+    /// More efficient than calling RemoveComponent multiple times.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void RemoveComponents<T1, T2, T3, T4, T5, T6, T7, T8>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+        where T5 : struct, IComponent
+        where T6 : struct, IComponent
+        where T7 : struct, IComponent
+        where T8 : struct, IComponent
+    {
+        Context.RemoveComponents<T1, T2, T3, T4, T5, T6, T7, T8>(this);
+    }
+
+    /// <summary>
+    /// Remove multiple components from the entity with a single archetype transition.
+    /// More efficient than calling RemoveComponent multiple times.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void RemoveComponents<T1, T2, T3, T4, T5, T6, T7, T8, T9>()
+        where T1 : struct, IComponent
+        where T2 : struct, IComponent
+        where T3 : struct, IComponent
+        where T4 : struct, IComponent
+        where T5 : struct, IComponent
+        where T6 : struct, IComponent
+        where T7 : struct, IComponent
+        where T8 : struct, IComponent
+        where T9 : struct, IComponent
+    {
+        Context.RemoveComponents<T1, T2, T3, T4, T5, T6, T7, T8, T9>(this);
+    }
+
+    /// <summary>
     /// Get a component from the entity.
     /// </summary>
     /// <typeparam name="T"></typeparam>

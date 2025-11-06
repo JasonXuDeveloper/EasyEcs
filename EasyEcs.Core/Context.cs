@@ -91,22 +91,32 @@ public partial class Context : IAsyncDisposable
             if (Entities.Length >= capacity)
                 return;
 
-            Array.Resize(ref Entities, capacity);
-            Array.Resize(ref EntityVersions, capacity);
-            Array.Resize(ref _activeEntityIds, capacity);
+            ResizeEntityArrays(capacity);
+        }
+    }
 
-            // Resize component arrays
-            if (Components != null)
+    /// <summary>
+    /// Resize all entity and component arrays to the specified capacity.
+    /// Must be called inside _structuralLock.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private void ResizeEntityArrays(int newCapacity)
+    {
+        Array.Resize(ref Entities, newCapacity);
+        Array.Resize(ref EntityVersions, newCapacity);
+        Array.Resize(ref _activeEntityIds, newCapacity);
+
+        // Resize component arrays
+        if (Components != null)
+        {
+            for (int i = 0; i < Components.Length; i++)
             {
-                for (int i = 0; i < Components.Length; i++)
+                var arr = Components[i];
+                if (arr != null && arr.Length < newCapacity)
                 {
-                    var arr = Components[i];
-                    if (arr != null && arr.Length < capacity)
-                    {
-                        var newArr = Array.CreateInstance(arr.GetType().GetElementType()!, capacity);
-                        Array.Copy(arr, newArr, arr.Length);
-                        Components[i] = newArr;
-                    }
+                    var newArr = Array.CreateInstance(arr.GetType().GetElementType()!, newCapacity);
+                    Array.Copy(arr, newArr, arr.Length);
+                    Components[i] = newArr;
                 }
             }
         }
@@ -177,29 +187,7 @@ public partial class Context : IAsyncDisposable
             if (id >= Entities.Length)
             {
                 int newCapacity = Math.Max(Entities.Length * 2, id + 1);
-                // EnsureEntityCapacity already uses lock, but we're already inside it
-                // So we need to check again inside EnsureEntityCapacity
-                if (Entities.Length < newCapacity)
-                {
-                    Array.Resize(ref Entities, newCapacity);
-                    Array.Resize(ref EntityVersions, newCapacity);
-                    Array.Resize(ref _activeEntityIds, newCapacity);
-
-                    // Resize component arrays
-                    if (Components != null)
-                    {
-                        for (int i = 0; i < Components.Length; i++)
-                        {
-                            var arr = Components[i];
-                            if (arr != null && arr.Length < newCapacity)
-                            {
-                                var newArr = Array.CreateInstance(arr.GetType().GetElementType()!, newCapacity);
-                                Array.Copy(arr, newArr, arr.Length);
-                                Components[i] = newArr;
-                            }
-                        }
-                    }
-                }
+                ResizeEntityArrays(newCapacity);
             }
 
             var entity = new Entity(this, id, EntityVersions[id]);
@@ -208,7 +196,7 @@ public partial class Context : IAsyncDisposable
             _activeEntityCount++;
 
             // Add to empty archetype
-            var archetype = GetOrCreateArchetype(new Tag());
+            var archetype = GetOrCreateArchetype(in Tag.Empty);
             archetype.Add(id);
 
             return new EntityRef(id, EntityVersions[id], this);
@@ -231,7 +219,7 @@ public partial class Context : IAsyncDisposable
             EntityVersions[entity.Id]++;
 
             // Remove from archetype
-            var archetype = GetOrCreateArchetype(entity.Tag);
+            var archetype = GetOrCreateArchetype(in entity.Tag);
             archetype.Remove(entity.Id);
 
             // Mark inactive
@@ -248,130 +236,6 @@ public partial class Context : IAsyncDisposable
     public void DestroyEntity(EntityRef entityRef)
     {
         DestroyEntity(entityRef.Value);
-    }
-
-    /// <summary>
-    /// Add a component to an entity immediately (returns ComponentRef directly).
-    /// Thread-safe.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public ComponentRef<T> AddComponent<T>(Entity entity) where T : struct, IComponent
-    {
-        lock (_structuralLock)
-        {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
-
-            // Get or register component type
-            ushort componentIdx = TagRegistry.GetOrRegisterTag<T>();
-
-            // Ensure component array exists
-            if (Components == null || componentIdx >= Components.Length)
-            {
-                int newSize = Math.Max((Components?.Length ?? 0) * 2, componentIdx + 1);
-                Array.Resize(ref Components, newSize);
-            }
-
-            if (Components[componentIdx] == null)
-            {
-                Components[componentIdx] = new T[Entities.Length];
-            }
-            else if (Components[componentIdx].Length < Entities.Length)
-            {
-                var tempArray = (T[])Components[componentIdx];
-                Array.Resize(ref tempArray, Entities.Length);
-                Components[componentIdx] = tempArray;
-            }
-
-            var componentArray = (T[])Components[componentIdx];
-
-            // Update entity archetype
-            ref var entityRef = ref Entities[entity.Id];
-            var oldTag = entityRef.Tag;
-            entityRef.Tag.SetBit(componentIdx);
-
-            // Move to new archetype
-            var oldArchetype = GetOrCreateArchetype(oldTag);
-            oldArchetype.Remove(entity.Id);
-
-            var newArchetype = GetOrCreateArchetype(entityRef.Tag);
-            newArchetype.Add(entity.Id);
-
-            // Initialize component
-            componentArray[entity.Id] = new T();
-
-            return new ComponentRef<T>(entity.Id, EntityVersions[entity.Id], componentIdx, this);
-        }
-    }
-
-    /// <summary>
-    /// Remove a component from an entity immediately.
-    /// Thread-safe.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public void RemoveComponent<T>(Entity entity) where T : struct, IComponent
-    {
-        lock (_structuralLock)
-        {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
-
-            if (!TagRegistry.TryGetTagBitIndex<T>(out var componentIdx))
-                return;
-
-            // Update entity archetype
-            ref var entityRef = ref Entities[entity.Id];
-            var oldTag = entityRef.Tag;
-            entityRef.Tag.ClearBit(componentIdx);
-
-            // Move to new archetype
-            var oldArchetype = GetOrCreateArchetype(oldTag);
-            oldArchetype.Remove(entity.Id);
-
-            var newArchetype = GetOrCreateArchetype(entityRef.Tag);
-            newArchetype.Add(entity.Id);
-
-            // Clear component data
-            if (Components[componentIdx] is T[] componentArray)
-            {
-                componentArray[entity.Id] = default;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Ensure component array is initialized for the given component index.
-    /// Called lazily from ComponentRef when accessing component data.
-    /// Thread-safe.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    internal T[] EnsureComponentArrayInitialized<T>(ushort componentIdx) where T : struct, IComponent
-    {
-        lock (_structuralLock)
-        {
-            // Double-check after acquiring lock
-            if (Components != null &&
-                componentIdx < Components.Length &&
-                Components[componentIdx] != null)
-            {
-                return (T[])Components[componentIdx];
-            }
-
-            // Ensure Components array exists
-            if (Components == null || componentIdx >= Components.Length)
-            {
-                int newSize = Math.Max((Components?.Length ?? 0) * 2, componentIdx + 1);
-                Array.Resize(ref Components, newSize);
-            }
-
-            // Create component array if it doesn't exist
-            if (Components[componentIdx] == null)
-            {
-                Components[componentIdx] = new T[Entities.Length];
-            }
-
-            return (T[])Components[componentIdx];
-        }
     }
 
     /// <summary>
