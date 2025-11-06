@@ -41,8 +41,8 @@ jobs:
         run: |
           FULL_MESSAGE="${{ github.event.head_commit.message }}"
 
-          SUMMARY=$(echo "$FULL_MESSAGE" | head -n 1)
-          DESCRIPTION=$(echo "$FULL_MESSAGE" | tail -n +3)
+          SUMMARY=$(printf '%s\n' "$FULL_MESSAGE" | head -n 1)
+          DESCRIPTION=$(printf '%s\n' "$FULL_MESSAGE" | tail -n +3)
 
           if [[ $SUMMARY =~ ^release\ v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
             VERSION="${BASH_REMATCH[1]}"
