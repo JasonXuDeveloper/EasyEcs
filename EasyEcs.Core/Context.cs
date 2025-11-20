@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
@@ -18,7 +19,7 @@ public partial class Context : IAsyncDisposable
     // Entity storage
     private int _entityIdCounter;
     internal Entity[] Entities;
-    internal int[] EntityVersions;  // Version tracking for destroyed entities
+    internal int[] EntityVersions; // Version tracking for destroyed entities
     private bool[] _activeEntityIds;
     private int _activeEntityCount;
 
@@ -29,11 +30,6 @@ public partial class Context : IAsyncDisposable
     private readonly PrioritySystemList<ExecuteSystemWrapper> _executeSystems = new();
     private readonly PrioritySystemList<IInitSystem> _initSystems = new();
     private readonly PrioritySystemList<IEndSystem> _endSystems = new();
-
-    // System execution (pre-allocated lists for zero allocation)
-    private readonly List<UniTask> _initTasks = new(32);
-    private readonly List<UniTask> _updateTasks = new(32);
-    private readonly List<UniTask> _endTasks = new(32);
 
     // Configuration
     private readonly Options _options;
@@ -50,7 +46,7 @@ public partial class Context : IAsyncDisposable
     public Context(Options options = null)
     {
         _options = options ?? new Options();
-        
+
         // Pre-allocate entity storage
         int initialCapacity = _options.InitialEntityCapacity;
         Entities = new Entity[initialCapacity];
@@ -328,15 +324,17 @@ public partial class Context : IAsyncDisposable
         for (int bucketIdx = 0; bucketIdx < _initSystems.BucketCount; bucketIdx++)
         {
             var sequence = _initSystems[bucketIdx];
-            _initTasks.Clear();
+            UniTask[] arr = ArrayPool<UniTask>.Shared.Rent(sequence.Count);
+            Array.Fill(arr, default);
 
             for (int i = 0; i < sequence.Count; i++)
             {
-                _initTasks.Add(sequence[i].OnInit(this));
+                arr[i] = sequence[i].OnInit(this);
             }
 
             // Execute all systems at this priority level before moving to next priority
-            await ExecuteTasks(_initTasks);
+            await ExecuteTasks(arr);
+            ArrayPool<UniTask>.Shared.Return(arr);
         }
 
         _initSystems.Clear();
@@ -360,14 +358,16 @@ public partial class Context : IAsyncDisposable
             for (int bucketIdx = 0; bucketIdx < _initSystems.BucketCount; bucketIdx++)
             {
                 var sequence = _initSystems[bucketIdx];
-                _initTasks.Clear();
+                var arr = ArrayPool<UniTask>.Shared.Rent(sequence.Count);
+                Array.Fill(arr, default);
 
                 for (int i = 0; i < sequence.Count; i++)
                 {
-                    _initTasks.Add(sequence[i].OnInit(this));
+                    arr[i] = sequence[i].OnInit(this);
                 }
 
-                await ExecuteTasks(_initTasks);
+                await ExecuteTasks(arr);
+                ArrayPool<UniTask>.Shared.Return(arr);
             }
 
             _initSystems.Clear();
@@ -377,14 +377,16 @@ public partial class Context : IAsyncDisposable
         for (int bucketIdx = 0; bucketIdx < _executeSystems.BucketCount; bucketIdx++)
         {
             var sequence = _executeSystems[bucketIdx];
-            _updateTasks.Clear();
+            var arr = ArrayPool<UniTask>.Shared.Rent(sequence.Count);
+            Array.Fill(arr, default);
 
             for (int i = 0; i < sequence.Count; i++)
             {
-                _updateTasks.Add(sequence[i].Update(this, OnError));
+                arr[i] = sequence[i].Update(this, OnError);
             }
 
-            await ExecuteTasks(_updateTasks);
+            await ExecuteTasks(arr);
+            ArrayPool<UniTask>.Shared.Return(arr);
         }
     }
 
@@ -393,22 +395,20 @@ public partial class Context : IAsyncDisposable
     /// Zero allocation after warmup (when using pre-allocated lists).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private async UniTask ExecuteTasks(List<UniTask> tasks)
+    private async UniTask ExecuteTasks(UniTask[] tasks)
     {
-        if (tasks.Count == 0)
+        if (tasks.Length == 0)
             return;
 
-        if (_options.Parallel && tasks.Count > 1)
+        if (_options.Parallel && tasks.Length > 1)
         {
-            // Parallel execution using UniTask.WhenAll with List
-            // List<T> implements IEnumerable<T>, and List<T>.GetEnumerator() returns a struct
-            // No allocation for enumeration, no closures, optimal performance
+            // Parallel execution using UniTask.WhenAll
             await UniTask.WhenAll(tasks);
         }
         else
         {
             // Sequential execution (zero allocation)
-            for (int i = 0; i < tasks.Count; i++)
+            for (int i = 0; i < tasks.Length; i++)
             {
                 await tasks[i];
             }
@@ -427,14 +427,16 @@ public partial class Context : IAsyncDisposable
         for (int bucketIdx = 0; bucketIdx < _endSystems.BucketCount; bucketIdx++)
         {
             var sequence = _endSystems[bucketIdx];
-            _endTasks.Clear();
+            var arr = ArrayPool<UniTask>.Shared.Rent(sequence.Count);
+            Array.Fill(arr, default);
 
             for (int i = 0; i < sequence.Count; i++)
             {
-                _endTasks.Add(sequence[i].Execute(this, OnError));
+                arr[i] = sequence[i].OnEnd(this);
             }
 
-            await ExecuteTasks(_endTasks);
+            await ExecuteTasks(arr);
+            ArrayPool<UniTask>.Shared.Return(arr);
         }
 
         // Clear all data
