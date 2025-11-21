@@ -365,7 +365,12 @@ public partial class Context : IAsyncDisposable
                     arr[i] = sequence[i].OnInit(this);
                 }
 
-                await ExecuteTasks(arr, 0, sequence.Count);
+                var task = ExecuteTasks(arr, 0, sequence.Count);
+                if (task.Status != UniTaskStatus.Succeeded)
+                {
+                    await task;
+                }
+
                 ArrayPool<UniTask>.Shared.Return(arr);
             }
 
@@ -384,7 +389,12 @@ public partial class Context : IAsyncDisposable
                 arr[i] = sequence[i].Update(this, OnError);
             }
 
-            await ExecuteTasks(arr, 0, sequence.Count);
+            var task = ExecuteTasks(arr, 0, sequence.Count);
+            if (task.Status != UniTaskStatus.Succeeded)
+            {
+                await task;
+            }
+
             ArrayPool<UniTask>.Shared.Return(arr);
         }
     }
@@ -407,35 +417,79 @@ public partial class Context : IAsyncDisposable
         // If count is 1, just await directly to avoid overhead
         else if (actualCount == 1)
         {
-            await tasks[actualStartIndex];
+            ref var task = ref tasks[actualStartIndex];
+            if (task.Status != UniTaskStatus.Succeeded)
+            {
+                await task;
+            }
         }
         // Else if count is 2, unroll the loop for slight performance gain
         else if (actualCount == 2)
         {
-            await tasks[actualStartIndex];
-            await tasks[actualStartIndex + 1];
+            ref var task0 = ref tasks[actualStartIndex];
+            if (task0.Status != UniTaskStatus.Succeeded)
+            {
+                await task0;
+            }
+            ref var task1 = ref tasks[actualStartIndex + 1];
+            if (task1.Status != UniTaskStatus.Succeeded)
+            {
+                await task1;
+            }
         }
         // Else if count is 3, unroll the loop for slight performance gain
         else if (actualCount == 3)
         {
-            await tasks[actualStartIndex];
-            await tasks[actualStartIndex + 1];
-            await tasks[actualStartIndex + 2];
+            ref var task0 = ref tasks[actualStartIndex];
+            if (task0.Status != UniTaskStatus.Succeeded)
+            {
+                await task0;
+            }
+            ref var task1 = ref tasks[actualStartIndex + 1];
+            if (task1.Status != UniTaskStatus.Succeeded)
+            {
+                await task1;
+            }
+            ref var task2 = ref tasks[actualStartIndex + 2];
+            if (task2.Status != UniTaskStatus.Succeeded)
+            {
+                await task2;
+            }
         }
         // Else if count is 4, unroll the loop for slight performance gain
         else if (actualCount == 4)
         {
-            await tasks[actualStartIndex];
-            await tasks[actualStartIndex + 1];
-            await tasks[actualStartIndex + 2];
-            await tasks[actualStartIndex + 3];
+            ref var task0 = ref tasks[actualStartIndex];
+            if (task0.Status != UniTaskStatus.Succeeded)
+            {
+                await task0;
+            }
+            ref var task1 = ref tasks[actualStartIndex + 1];
+            if (task1.Status != UniTaskStatus.Succeeded)
+            {
+                await task1;
+            }
+            ref var task2 = ref tasks[actualStartIndex + 2];
+            if (task2.Status != UniTaskStatus.Succeeded)
+            {
+                await task2;
+            }
+            ref var task3 = ref tasks[actualStartIndex + 3];
+            if (task3.Status != UniTaskStatus.Succeeded)
+            {
+                await task3;
+            }
         }
         else
         {
             // Sequential execution (zero allocation)
             for (int i = actualStartIndex; i < actualStartIndex + actualCount; i++)
             {
-                await tasks[i];
+                ref var task = ref tasks[i];
+                if (task.Status != UniTaskStatus.Succeeded)
+                {
+                    await task;
+                }
             }
         }
     }
