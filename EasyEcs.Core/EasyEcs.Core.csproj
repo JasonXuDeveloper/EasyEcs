@@ -6,7 +6,7 @@
         <Nullable>disable</Nullable>
         <LangVersion>preview</LangVersion>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-        <Version>3.0.4</Version>
+        <Version>3.0.5</Version>
         <PackageId>EasyEcs</PackageId>
         <Title>EasyEcs</Title>
         <Authors>JasonXuDeveloper</Authors>
