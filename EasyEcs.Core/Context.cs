@@ -1,6 +1,5 @@
 using System;
 using System.Buffers;
-using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
@@ -333,7 +332,7 @@ public partial class Context : IAsyncDisposable
             }
 
             // Execute all systems at this priority level before moving to next priority
-            await ExecuteTasks(arr);
+            await ExecuteTasks(arr, 0, sequence.Count);
             ArrayPool<UniTask>.Shared.Return(arr);
         }
 
@@ -366,7 +365,7 @@ public partial class Context : IAsyncDisposable
                     arr[i] = sequence[i].OnInit(this);
                 }
 
-                await ExecuteTasks(arr);
+                await ExecuteTasks(arr, 0, sequence.Count);
                 ArrayPool<UniTask>.Shared.Return(arr);
             }
 
@@ -385,7 +384,7 @@ public partial class Context : IAsyncDisposable
                 arr[i] = sequence[i].Update(this, OnError);
             }
 
-            await ExecuteTasks(arr);
+            await ExecuteTasks(arr, 0, sequence.Count);
             ArrayPool<UniTask>.Shared.Return(arr);
         }
     }
@@ -395,20 +394,46 @@ public partial class Context : IAsyncDisposable
     /// Zero allocation after warmup (when using pre-allocated lists).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private async UniTask ExecuteTasks(UniTask[] tasks)
+    private async UniTask ExecuteTasks(UniTask[] tasks, int actualStartIndex, int actualCount)
     {
         if (tasks.Length == 0)
             return;
 
-        if (_options.Parallel && tasks.Length > 1)
+        if (_options.Parallel && actualCount > 4)
         {
             // Parallel execution using UniTask.WhenAll
             await UniTask.WhenAll(tasks);
         }
+        // If count is 1, just await directly to avoid overhead
+        else if (actualCount == 1)
+        {
+            await tasks[actualStartIndex];
+        }
+        // Else if count is 2, unroll the loop for slight performance gain
+        else if (actualCount == 2)
+        {
+            await tasks[actualStartIndex];
+            await tasks[actualStartIndex + 1];
+        }
+        // Else if count is 3, unroll the loop for slight performance gain
+        else if (actualCount == 3)
+        {
+            await tasks[actualStartIndex];
+            await tasks[actualStartIndex + 1];
+            await tasks[actualStartIndex + 2];
+        }
+        // Else if count is 4, unroll the loop for slight performance gain
+        else if (actualCount == 4)
+        {
+            await tasks[actualStartIndex];
+            await tasks[actualStartIndex + 1];
+            await tasks[actualStartIndex + 2];
+            await tasks[actualStartIndex + 3];
+        }
         else
         {
             // Sequential execution (zero allocation)
-            for (int i = 0; i < tasks.Length; i++)
+            for (int i = actualStartIndex; i < actualStartIndex + actualCount; i++)
             {
                 await tasks[i];
             }
@@ -435,7 +460,7 @@ public partial class Context : IAsyncDisposable
                 arr[i] = sequence[i].OnEnd(this);
             }
 
-            await ExecuteTasks(arr);
+            await ExecuteTasks(arr, 0, sequence.Count);
             ArrayPool<UniTask>.Shared.Return(arr);
         }
 
