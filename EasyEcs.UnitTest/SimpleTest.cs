@@ -166,7 +166,7 @@ public class SimpleTest
             // Remove 1 entity (get fresh reference)
             var firstEntity = ctx.EntityAt(0);
             ctx.DestroyEntity(firstEntity);
-            
+
             // Ensure the context has 9 entities (immediate destruction)
             Assert.That(ctx.EntityCount, Is.EqualTo(9));
 

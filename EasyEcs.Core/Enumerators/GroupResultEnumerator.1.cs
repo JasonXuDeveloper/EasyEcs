@@ -22,6 +22,25 @@ public struct GroupResultEnumerator<T> : IDisposable
 
     public GroupResult<T> Current { get; private set; }
 
+    public readonly int Count
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            if (_matchingArchetypes == null) return 0;
+            int count = 0;
+            for (int i = 0; i < _matchingArchetypes.Count; i++)
+                count += _matchingArchetypes[i].AliveCount;
+            return count;
+        }
+    }
+
+    public readonly bool IsEmpty
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Count == 0;
+    }
+
     private const int Tombstone = -1;
 
     public GroupResultEnumerator(Context context)

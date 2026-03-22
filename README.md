@@ -9,7 +9,8 @@ An Entity-Component-System library
 
 Sometimes we may want to remove bidirectional dependencies between our code, and ECS is a good way to do this.
 
-This design pattern offers a clean way to separate the data from the logic, and it's also a good way to improve the performance.
+This design pattern offers a clean way to separate the data from the logic, and it's also a good way to improve the
+performance.
 
 ## What is ECS?
 
@@ -21,21 +22,23 @@ S - System
 
 But what really is it?
 
-Well, as a human, we (entities) live in the world (context), and we have some properties (components). Moreover, we have things to do based on our properties (systems).
+Well, as a human, we (entities) live in the world (context), and we have some properties (components). Moreover, we have
+things to do based on our properties (systems).
 
 ## Concepts in EasyEcs
 
 - A `Context` holds several `Entity` instances, some `System` instances and some `SingletonComponent` instances.
-- Each `Entity` has some `Component` instances. 
+- Each `Entity` has some `Component` instances.
 - Each `Component` (or `SingletonComponent`) has only data properties.
-- Each `System` can filter lots of `Entity` instances in the same `Context` by their components and operate logics on them.
+- Each `System` can filter lots of `Entity` instances in the same `Context` by their components and operate logics on
+  them.
 
 ## Why it removes bidirectional dependencies?
 
-- Only `System` contains logics and none of them should reference on each other. But we allow one system depends on another by specifying `Priority`. (They should only depend on the filtered entities/components)
+- Only `System` contains logics and none of them should reference on each other. But we allow one system depends on
+  another by specifying `Priority`. (They should only depend on the filtered entities/components)
 - `Component` only contains data properties and no logics. (Again, no way to have dependency)
 - `Entity` only contains components. (It is really just a container)
-
 
 ## Why is it fast?
 
@@ -46,9 +49,40 @@ Well, as a human, we (entities) live in the world (context), and we have some pr
 
 - We have **priority** for `System`, so you can control the order of systems.
 - We have **frequency** for `System`, so you can control the frequency of systems being executed.
-- We only allow **asynchronous** interfaces for `System` and `Context`, so our ECS should not block the thread (unless you screw up).
-- We introduce built-in **parallelism** and/or **concurrency** for `System`, so you can easily parallelize your systems (for those who are in the same priority) and well utilize the multi-core CPU.
+- We only allow **asynchronous** interfaces for `System` and `Context`, so our ECS should not block the thread (unless
+  you screw up).
+- We introduce built-in **parallelism** and/or **concurrency** for `System`, so you can easily parallelize your
+  systems (for those who are in the same priority) and well utilize the multi-core CPU.
 - We have a cool guy who is maintaining this library. (Just kidding)
+
+## What's New in v3.1.0
+
+### New Features
+
+- **`Count` and `IsEmpty`** on `GroupResultEnumerator` — check query result count without iterating:
+  ```csharp
+  var group = ctx.GroupOf<Health, Position>();
+  if (!group.IsEmpty) { /* ... */ }
+  int n = group.Count;
+  ```
+- **`CountOf<T>()` and `AnyOf<T>()`** on `Context` — lightweight alternatives that skip enumerator creation:
+  ```csharp
+  if (ctx.AnyOf<Health>()) { /* ... */ }
+  int count = ctx.CountOf<Health, Position>();
+  ```
+- **`Tag.SetBits` / `Tag.ClearBits`** — bulk bit operations with `params ReadOnlySpan<int>`:
+  ```csharp
+  tag.SetBits(bitIdx1, bitIdx2, bitIdx3);
+  ```
+- **`Tag.ContainsAll`** — SIMD-optimized archetype matching via `Vector256.AndNot`, replacing the previous `(mask & query) == query` pattern (eliminates temporary `Tag` allocation and reduces from 2 SIMD ops to 1).
+
+### Performance Optimizations
+
+- **`GetFragmentationStats()`** is now lock-free (previously locked + iterated all archetypes every call).
+- **`Update()`** reuses a cached task buffer instead of per-bucket `ArrayPool.Rent`/`Return`.
+- **`ExecuteFrequency`** is cached as a local variable per `Update` call to avoid repeated interface property access.
+- **`AggressiveInlining`** added to `GroupOf`, `CountOf`, and `AnyOf` methods.
+- All archetype dictionary iterations replaced with index-based `List` traversal for better cache locality.
 
 ## Example
 

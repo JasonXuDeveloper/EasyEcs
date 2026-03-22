@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using EasyEcs.Core.Components;
 
@@ -9,6 +10,9 @@ public partial class Context
 {
     // Archetype storage: Tag -> Archetype
     internal readonly Dictionary<Tag, Archetype> Archetypes = new();
+
+    // Flat list of all archetypes for lock-free iteration (only grows, never shrinks except on Dispose)
+    private readonly List<Archetype> _allArchetypes = new();
 
     // Query cache: QueryTag -> List of matching archetypes (O(1) lookup after first query)
     // Using ConcurrentDictionary for lock-free reads on cache hits
@@ -30,6 +34,7 @@ public partial class Context
             {
                 archetype = new Archetype(in componentMask, initialCapacity: 1024);
                 Archetypes[componentMask] = archetype;
+                _allArchetypes.Add(archetype);
 
                 // Incrementally update query cache: add new archetype to matching queries
                 // This is smarter than clearing the entire cache
@@ -39,7 +44,7 @@ public partial class Context
                     var cachedList = kvp.Value;
 
                     // Check if new archetype matches this cached query
-                    if ((componentMask & queryTag) == queryTag)
+                    if (componentMask.ContainsAll(in queryTag))
                     {
                         cachedList.Add(archetype);
                     }
@@ -74,13 +79,11 @@ public partial class Context
             // Build list of matching archetypes
             var matching = new List<Archetype>(16);
 
-            // Use direct enumeration to avoid allocating Dictionary.Values collection
-            foreach (var kvp in Archetypes)
+            for (int i = 0; i < _allArchetypes.Count; i++)
             {
-                var archetype = kvp.Value;
-                // SIMD-accelerated bitwise AND
-                // An archetype matches if it contains all required components
-                if ((archetype.ComponentMask & queryTag) == queryTag)
+                var archetype = _allArchetypes[i];
+                // SIMD-accelerated ContainsAll check
+                if (archetype.ComponentMask.ContainsAll(in queryTag))
                 {
                     matching.Add(archetype);
                 }
@@ -100,10 +103,9 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            // Use direct enumeration to avoid allocating Dictionary.Values collection
-            foreach (var kvp in Archetypes)
+            for (int i = 0; i < _allArchetypes.Count; i++)
             {
-                var archetype = kvp.Value;
+                var archetype = _allArchetypes[i];
                 if (archetype.AliveCount < archetype.Count)
                 {
                     archetype.Compact();
@@ -115,20 +117,18 @@ public partial class Context
     /// <summary>
     /// Get archetype fragmentation statistics for monitoring.
     /// </summary>
+    [SuppressMessage("ReSharper", "InconsistentlySynchronizedField")]
     public (int TotalSlots, int AliveEntities, float FragmentationRatio) GetFragmentationStats()
     {
         int totalSlots = 0;
         int aliveEntities = 0;
 
-        lock (_structuralLock)
+        // Lock-free: _allArchetypes only grows, index-based for loop is safe during concurrent append.
+        // Individual int reads (Count, AliveCount) are atomic on all .NET platforms.
+        for (int i = 0; i < _allArchetypes.Count; i++)
         {
-            // Use direct enumeration to avoid allocating Dictionary.Values collection
-            foreach (var kvp in Archetypes)
-            {
-                var archetype = kvp.Value;
-                totalSlots += archetype.Count;
-                aliveEntities += archetype.AliveCount;
-            }
+            totalSlots += _allArchetypes[i].Count;
+            aliveEntities += _allArchetypes[i].AliveCount;
         }
 
         float fragmentation = totalSlots > 0 ? 1.0f - (float)aliveEntities / totalSlots : 0f;

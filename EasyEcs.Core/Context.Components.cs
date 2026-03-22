@@ -191,7 +191,8 @@ public partial class Context
     /// Thread-safe. More efficient than calling AddComponent multiple times.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>) AddComponents<T1, T2, T3, T4>(Entity entity)
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>) AddComponents<T1, T2, T3, T4>(
+        Entity entity)
         where T1 : struct, IComponent
         where T2 : struct, IComponent
         where T3 : struct, IComponent
@@ -251,7 +252,8 @@ public partial class Context
     /// Thread-safe. More efficient than calling AddComponent multiple times.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>) AddComponents<T1, T2, T3, T4, T5>(Entity entity)
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>) AddComponents<T1,
+        T2, T3, T4, T5>(Entity entity)
         where T1 : struct, IComponent
         where T2 : struct, IComponent
         where T3 : struct, IComponent
@@ -318,7 +320,8 @@ public partial class Context
     /// Thread-safe. More efficient than calling AddComponent multiple times.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>) AddComponents<T1, T2, T3, T4, T5, T6>(Entity entity)
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>)
+        AddComponents<T1, T2, T3, T4, T5, T6>(Entity entity)
         where T1 : struct, IComponent
         where T2 : struct, IComponent
         where T3 : struct, IComponent
@@ -392,7 +395,8 @@ public partial class Context
     /// Thread-safe. More efficient than calling AddComponent multiple times.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>, ComponentRef<T7>) AddComponents<T1, T2, T3, T4, T5, T6, T7>(Entity entity)
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>,
+        ComponentRef<T7>) AddComponents<T1, T2, T3, T4, T5, T6, T7>(Entity entity)
         where T1 : struct, IComponent
         where T2 : struct, IComponent
         where T3 : struct, IComponent
@@ -473,7 +477,8 @@ public partial class Context
     /// Thread-safe. More efficient than calling AddComponent multiple times.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>, ComponentRef<T7>, ComponentRef<T8>) AddComponents<T1, T2, T3, T4, T5, T6, T7, T8>(Entity entity)
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>,
+        ComponentRef<T7>, ComponentRef<T8>) AddComponents<T1, T2, T3, T4, T5, T6, T7, T8>(Entity entity)
         where T1 : struct, IComponent
         where T2 : struct, IComponent
         where T3 : struct, IComponent
@@ -561,7 +566,9 @@ public partial class Context
     /// Thread-safe. More efficient than calling AddComponent multiple times.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>, ComponentRef<T7>, ComponentRef<T8>, ComponentRef<T9>) AddComponents<T1, T2, T3, T4, T5, T6, T7, T8, T9>(Entity entity)
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>,
+        ComponentRef<T7>, ComponentRef<T8>, ComponentRef<T9>) AddComponents<T1, T2, T3, T4, T5, T6, T7, T8, T9>(
+            Entity entity)
         where T1 : struct, IComponent
         where T2 : struct, IComponent
         where T3 : struct, IComponent

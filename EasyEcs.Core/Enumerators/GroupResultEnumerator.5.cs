@@ -26,6 +26,25 @@ public struct GroupResultEnumerator<T1, T2, T3, T4, T5> : IDisposable
 
     public GroupResult<T1, T2, T3, T4, T5> Current { get; private set; }
 
+    public readonly int Count
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            if (_matchingArchetypes == null) return 0;
+            int count = 0;
+            for (int i = 0; i < _matchingArchetypes.Count; i++)
+                count += _matchingArchetypes[i].AliveCount;
+            return count;
+        }
+    }
+
+    public readonly bool IsEmpty
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Count == 0;
+    }
+
     private const int Tombstone = -1;
 
     public GroupResultEnumerator(Context context)
@@ -97,7 +116,8 @@ public struct GroupResultEnumerator<T1, T2, T3, T4, T5> : IDisposable
                 if (entityId == Tombstone)
                     continue;
 
-                Current = new GroupResult<T1, T2, T3, T4, T5>(entityId, _context, _bitIdx1, _bitIdx2, _bitIdx3, _bitIdx4, _bitIdx5);
+                Current = new GroupResult<T1, T2, T3, T4, T5>(entityId, _context, _bitIdx1, _bitIdx2, _bitIdx3,
+                    _bitIdx4, _bitIdx5);
                 return true;
             }
 

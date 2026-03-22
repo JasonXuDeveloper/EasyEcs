@@ -18,7 +18,7 @@ internal static class TagRegistry
     private class TypeBitIndex<T> : ITypeBitIndex
     {
         // Volatile fields for cross-thread visibility
-        internal volatile ushort BitIndex;  // Supports up to 65536 component types
+        internal volatile ushort BitIndex; // Supports up to 65536 component types
         internal volatile bool IsRegistered;
         public static readonly TypeBitIndex<T> Instance = new();
 
@@ -116,7 +116,7 @@ internal static class TagRegistry
 
             ushort bitIndex = (ushort)_tagCount;
             instance.BitIndex = bitIndex;
-            instance.IsRegistered = true;  // Volatile write ensures visibility
+            instance.IsRegistered = true; // Volatile write ensures visibility
             _tagCount++;
             Tags.Add(instance);
 

@@ -120,7 +120,8 @@ public struct Entity : IEquatable<Entity>
     /// More efficient than calling AddComponent multiple times.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>) AddComponents<T1, T2, T3, T4, T5>()
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>) AddComponents<T1,
+        T2, T3, T4, T5>()
         where T1 : struct, IComponent
         where T2 : struct, IComponent
         where T3 : struct, IComponent
@@ -135,7 +136,8 @@ public struct Entity : IEquatable<Entity>
     /// More efficient than calling AddComponent multiple times.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>) AddComponents<T1, T2, T3, T4, T5, T6>()
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>)
+        AddComponents<T1, T2, T3, T4, T5, T6>()
         where T1 : struct, IComponent
         where T2 : struct, IComponent
         where T3 : struct, IComponent
@@ -151,7 +153,8 @@ public struct Entity : IEquatable<Entity>
     /// More efficient than calling AddComponent multiple times.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>, ComponentRef<T7>) AddComponents<T1, T2, T3, T4, T5, T6, T7>()
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>,
+        ComponentRef<T7>) AddComponents<T1, T2, T3, T4, T5, T6, T7>()
         where T1 : struct, IComponent
         where T2 : struct, IComponent
         where T3 : struct, IComponent
@@ -168,7 +171,8 @@ public struct Entity : IEquatable<Entity>
     /// More efficient than calling AddComponent multiple times.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>, ComponentRef<T7>, ComponentRef<T8>) AddComponents<T1, T2, T3, T4, T5, T6, T7, T8>()
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>,
+        ComponentRef<T7>, ComponentRef<T8>) AddComponents<T1, T2, T3, T4, T5, T6, T7, T8>()
         where T1 : struct, IComponent
         where T2 : struct, IComponent
         where T3 : struct, IComponent
@@ -186,7 +190,8 @@ public struct Entity : IEquatable<Entity>
     /// More efficient than calling AddComponent multiple times.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>, ComponentRef<T7>, ComponentRef<T8>, ComponentRef<T9>) AddComponents<T1, T2, T3, T4, T5, T6, T7, T8, T9>()
+    public (ComponentRef<T1>, ComponentRef<T2>, ComponentRef<T3>, ComponentRef<T4>, ComponentRef<T5>, ComponentRef<T6>,
+        ComponentRef<T7>, ComponentRef<T8>, ComponentRef<T9>) AddComponents<T1, T2, T3, T4, T5, T6, T7, T8, T9>()
         where T1 : struct, IComponent
         where T2 : struct, IComponent
         where T3 : struct, IComponent

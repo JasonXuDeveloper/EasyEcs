@@ -15,8 +15,8 @@ internal class Archetype
 {
     public Tag ComponentMask;
     public int[] EntityIds;
-    public int Count;          // Total slots (including tombstones)
-    public int AliveCount;     // Living entities only
+    public int Count; // Total slots (including tombstones)
+    public int AliveCount; // Living entities only
 
     // Free list for O(1) tombstone reuse (stack-based)
     private int[] _freeSlots;
@@ -96,6 +96,7 @@ internal class Archetype
         {
             Array.Resize(ref _freeSlots, _freeSlots.Length * 2);
         }
+
         _freeSlots[_freeCount++] = idx;
 
         // Note: Auto-compaction is disabled to avoid unpredictable performance spikes mid-frame.
@@ -122,7 +123,7 @@ internal class Archetype
             if (entityId != Tombstone)
             {
                 EntityIds[writeIdx] = entityId;
-                _entityToIndex[entityId] = writeIdx;  // Rebuild reverse lookup
+                _entityToIndex[entityId] = writeIdx; // Rebuild reverse lookup
                 writeIdx++;
             }
         }

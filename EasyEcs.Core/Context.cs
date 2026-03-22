@@ -33,6 +33,9 @@ public partial class Context : IAsyncDisposable
     // Configuration
     private readonly Options _options;
 
+    // Cached task buffer for Update() to avoid per-bucket ArrayPool Rent/Return
+    private UniTask[] _updateTaskBuffer;
+
     // State
     private bool _started;
     private bool _disposed;
@@ -377,25 +380,28 @@ public partial class Context : IAsyncDisposable
             _initSystems.Clear();
         }
 
-        // Execute all systems by priority (zero allocation iteration)
+        // Execute all systems by priority (zero allocation after first resize)
         for (int bucketIdx = 0; bucketIdx < _executeSystems.BucketCount; bucketIdx++)
         {
             var sequence = _executeSystems[bucketIdx];
-            var arr = ArrayPool<UniTask>.Shared.Rent(sequence.Count);
-            Array.Fill(arr, default);
+
+            // Ensure task buffer is large enough for this bucket
+            if (_updateTaskBuffer == null || _updateTaskBuffer.Length < sequence.Count)
+                _updateTaskBuffer = new UniTask[sequence.Count * 2];
 
             for (int i = 0; i < sequence.Count; i++)
             {
-                arr[i] = sequence[i].Update(this, OnError);
+                _updateTaskBuffer[i] = sequence[i].Update(this, OnError);
             }
 
-            var task = ExecuteTasks(arr, 0, sequence.Count);
+            var task = ExecuteTasks(_updateTaskBuffer, 0, sequence.Count);
             if (task.Status != UniTaskStatus.Succeeded)
             {
                 await task;
             }
 
-            ArrayPool<UniTask>.Shared.Return(arr);
+            // Clear used entries to avoid holding references to completed tasks
+            Array.Clear(_updateTaskBuffer, 0, sequence.Count);
         }
     }
 
@@ -431,6 +437,7 @@ public partial class Context : IAsyncDisposable
             {
                 await task0;
             }
+
             ref var task1 = ref tasks[actualStartIndex + 1];
             if (task1.Status != UniTaskStatus.Succeeded)
             {
@@ -445,11 +452,13 @@ public partial class Context : IAsyncDisposable
             {
                 await task0;
             }
+
             ref var task1 = ref tasks[actualStartIndex + 1];
             if (task1.Status != UniTaskStatus.Succeeded)
             {
                 await task1;
             }
+
             ref var task2 = ref tasks[actualStartIndex + 2];
             if (task2.Status != UniTaskStatus.Succeeded)
             {
@@ -464,16 +473,19 @@ public partial class Context : IAsyncDisposable
             {
                 await task0;
             }
+
             ref var task1 = ref tasks[actualStartIndex + 1];
             if (task1.Status != UniTaskStatus.Succeeded)
             {
                 await task1;
             }
+
             ref var task2 = ref tasks[actualStartIndex + 2];
             if (task2.Status != UniTaskStatus.Succeeded)
             {
                 await task2;
             }
+
             ref var task3 = ref tasks[actualStartIndex + 3];
             if (task3.Status != UniTaskStatus.Succeeded)
             {
@@ -522,13 +534,11 @@ public partial class Context : IAsyncDisposable
         Array.Clear(_activeEntityIds, 0, _activeEntityIds.Length);
         Array.Clear(Entities, 0, Entities.Length);
 
-        // Use direct enumeration to avoid allocating Dictionary.Values collection
-        foreach (var kvp in Archetypes)
-        {
-            Array.Clear(kvp.Value.EntityIds, 0, kvp.Value.EntityIds.Length);
-        }
+        for (int i = 0; i < _allArchetypes.Count; i++)
+            Array.Clear(_allArchetypes[i].EntityIds, 0, _allArchetypes[i].EntityIds.Length);
 
         Archetypes.Clear();
+        _allArchetypes.Clear();
         _queryCache.Clear();
 
         if (Components != null)

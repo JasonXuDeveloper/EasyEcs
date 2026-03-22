@@ -46,6 +46,16 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
         }
     }
 
+    /// <summary>
+    /// Set multiple bits at once.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public void SetBits(params ReadOnlySpan<int> bitIndices)
+    {
+        for (int i = 0; i < bitIndices.Length; i++)
+            SetBit(bitIndices[i]);
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public void ClearBit(int bitIndex)
     {
@@ -62,6 +72,16 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
             ref long longValue = ref Unsafe.As<Vector256<long>, long>(ref _overflow[vectorIndex - 1]);
             Unsafe.Add(ref longValue, bitOffset >> 6) &= ~(1L << (bitOffset & 63));
         }
+    }
+
+    /// <summary>
+    /// Clear multiple bits at once.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public void ClearBits(params ReadOnlySpan<int> bitIndices)
+    {
+        for (int i = 0; i < bitIndices.Length; i++)
+            ClearBit(bitIndices[i]);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
@@ -83,6 +103,28 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
 
         ref long longValue = ref Unsafe.As<Vector256<long>, long>(ref _overflow[vectorIndex - 1]);
         return (Unsafe.Add(ref longValue, bitOffset >> 6) & (1L << (bitOffset & 63))) != 0;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public readonly bool ContainsAll(in Tag query)
+    {
+        // query & ~this == 0 means this contains all bits of query
+        // Vector256.AndNot(a, b) = a & ~b → maps to x86 VPANDN, ARM BIC
+        if (!IsVectorZero(Vector256.AndNot(query._bits, _bits)))
+            return false;
+
+        int queryLen = query._overflow?.Length ?? 0;
+        if (queryLen == 0) return true;
+
+        int thisLen = _overflow?.Length ?? 0;
+        for (int i = 0; i < queryLen; i++)
+        {
+            var thisVec = i < thisLen ? _overflow![i] : Vector256<long>.Zero;
+            if (!IsVectorZero(Vector256.AndNot(query._overflow![i], thisVec)))
+                return false;
+        }
+
+        return true;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
@@ -207,10 +249,10 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsVectorZero(Vector256<long> vec)
     {
-        // x86 AVX2: Single TestZ instruction (~1 cycle)
-        if (Avx2.IsSupported)
+        // x86 AVX: Single TestZ instruction (~1 cycle)
+        if (Avx.IsSupported)
         {
-            return Avx2.TestZ(vec, vec);
+            return Avx.TestZ(vec, vec);
         }
 
         // ARM NEON: Vector256 is emulated on ARM, so work with 128-bit halves (~2 cycles)

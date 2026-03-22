@@ -19,9 +19,10 @@ internal class ExecuteSystemWrapper
 
     internal async UniTask Update(Context context, Action<Exception> onError)
     {
+        int freq = System.ExecuteFrequency;
         try
         {
-            if (System.ExecuteFrequency == 1 || (_counter++ > 0 && _counter % System.ExecuteFrequency == 0))
+            if (freq == 1 || (_counter++ > 0 && _counter % freq == 0))
             {
                 await System.OnExecute(context);
             }
@@ -32,7 +33,7 @@ internal class ExecuteSystemWrapper
         }
         finally
         {
-            _counter %= System.ExecuteFrequency;
+            _counter %= freq;
         }
     }
 }
