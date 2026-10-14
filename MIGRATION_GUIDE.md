@@ -79,9 +79,8 @@ public partial class S : EcsSystem
 6. **Systems should be stateless and independent**: the analyzer warns about mutable fields on systems (`EECS007`,
    move the state into a component or singleton) and about systems referencing other systems (`EECS008`,
    communicate through data). See [doc/ecs-principles.md](doc/ecs-principles.md).
-7. **No event bus.** `IEvent`, `IEventHandler<T>` and `Publish` are gone. Write state changes as data (a tag or a
-   field) and let later systems query them; messaging between modules or processes belongs to the host (e.g.
-   DaServer cluster events).
+7. **`IEvent`, `IEventHandler<T>` and `Publish` are removed.** Write state changes as data (a tag or a field) and
+   let later systems query them.
 
 ## Source generator and analyzer
 

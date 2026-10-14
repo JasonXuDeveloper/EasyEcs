@@ -126,9 +126,6 @@ When something happens to an entity, write its new state: set a tag (`Dead`) or 
 that state later in the update, in the order `Priority` declares: movement and combat skip `Dead` entities,
 `CorpseSystem` removes them, `RespawnSystem` revives players. None of them is known to `DeathSystem`.
 
-EasyEcs has no events. Messages between modules, actors, servers or processes are the host's job (DaServer, for
-example, has cluster events); the host writes what a message means into components or singletons before systems run.
-
 ### 5. Choose the cheapest representation for frequent changes
 
 Adding or removing a component moves the entity to another archetype: a cached edge lookup plus copying its

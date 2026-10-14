@@ -93,8 +93,8 @@ mutated.
 - `Update()` is synchronous. For each due, enabled system it calls `OnUpdate()` and then the generated
   `GeneratedUpdate()` ([ForEach] methods).
 - `AddSystem` calls `OnCreate()`; `RemoveSystem` and `Dispose` call `OnDestroy()`, `Dispose` in reverse order.
-- There is no event bus: systems cooperate through data only, so all behavior runs in schedule order (see
-  [ecs-principles.md](ecs-principles.md#4-state-changes-are-data)). Messaging is the host's job.
+- Systems cooperate through data only, so all behavior runs in schedule order (see
+  [ecs-principles.md](ecs-principles.md#4-state-changes-are-data)).
 - Errors go to `World.SystemError`. Without a subscriber they propagate.
 
 ## Source generators and analyzer (`EasyEcs.Generator`)

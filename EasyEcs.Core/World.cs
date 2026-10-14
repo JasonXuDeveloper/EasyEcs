@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 namespace EasyEcs;
 
 /// <summary>
-/// An ECS world: entities, their components, singletons, events and the systems that update them. Worlds are fully
+/// An ECS world: entities, their components, singletons and the systems that update them. Worlds are fully
 /// isolated; the recommended server layout is one world per thread (shard), which needs no synchronization at all.
 /// </summary>
 public sealed partial class World : IDisposable

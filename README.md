@@ -151,12 +151,6 @@ world.Update();               // fixed tick
 
 Priority, `UpdateInterval` and `Enabled` apply within each group. The attribute is inherited.
 
-### No events
-
-EasyEcs is data plus systems. It has no event bus: messaging (between modules, actors, servers or processes) is the
-host's job, for example DaServer's cluster events, and the host writes what a message means into components or
-singletons before systems run.
-
 ### Compile-time checks (EasyEcs analyzer)
 
 | Id | Error |
