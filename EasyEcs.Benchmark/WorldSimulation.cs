@@ -3,9 +3,9 @@ using System.Runtime.CompilerServices;
 namespace EasyEcs.Benchmark.Scenario;
 
 // A realistic MMO/battle-server world: players and NPCs move, fight, gain and lose status effects,
-// projectiles spawn and expire every tick, deaths are published as events. Systems are written as users should write
-// them: one responsibility each, stateless (world state lives in the WorldStats singleton), coupled only via data and
-// events.
+// projectiles spawn and expire every tick, deaths are announced with a one-update notification component. Systems
+// are written as users should write them: one responsibility each, stateless (world state lives in the WorldStats
+// singleton), coupled only via data.
 
 public struct Position : IComponent { public float X, Y; }
 public struct Velocity : IComponent { public float X, Y; }
@@ -20,8 +20,8 @@ public struct Projectile : IComponent { public int OwnerId; }
 public struct Stunned : IComponent { public int Ticks; }
 public struct Dead : IComponent;
 
-/// <summary>Published when an entity dies (consumed by the reward system: decoupled from combat).</summary>
-public record struct Died(int EntityId, bool IsPlayer) : IEvent;
+/// <summary>Notification: the entity died this update (read by RewardSystem, removed by NotificationCleanupSystem).</summary>
+public struct Died : IComponent;
 
 public struct WorldStats : ISingletonComponent
 {
@@ -130,15 +130,26 @@ public partial class DeathSystem : EcsSystem
     private static void CheckDeath(Entity entity, in Health health, World world)
     {
         if (health.Value > 0) return;
-        entity.Set(new Dead());
-        world.Publish(new Died(entity.Id, entity.Has<Player>()));
+        entity.Set(new Dead(), new Died());
     }
+}
+
+/// <summary>Rewards and statistics react to deaths without combat knowing about them (reads the Died notification).</summary>
+public partial class RewardSystem : EcsSystem
+{
+    public override int Priority => 5;
+
+    [ForEach]
+    private static void CountDeath(in Died _, World world) => world.GetSingleton<WorldStats>().Deaths++;
+
+    [ForEach, With<Npc>]
+    private static void CountNpcKill(in Died _, World world) => world.GetSingleton<WorldStats>().NpcKills++;
 }
 
 /// <summary>Projectiles expire (entity churn every tick).</summary>
 public partial class LifetimeSystem : EcsSystem
 {
-    public override int Priority => 5;
+    public override int Priority => 6;
 
     [ForEach]
     private static void Expire(Entity entity, ref Lifetime lifetime)
@@ -151,7 +162,7 @@ public partial class LifetimeSystem : EcsSystem
 /// <summary>Dead NPCs are replaced by fresh ones; dead players respawn in place.</summary>
 public partial class RespawnSystem : EcsSystem
 {
-    public override int Priority => 6;
+    public override int Priority => 7;
 
     [ForEach, With<Npc>]
     private static void Despawn(Entity entity, in Dead _, World world)
@@ -171,7 +182,7 @@ public partial class RespawnSystem : EcsSystem
 /// <summary>About 5% of living players fire a projectile each tick.</summary>
 public partial class ShootingSystem : EcsSystem
 {
-    public override int Priority => 7;
+    public override int Priority => 8;
 
     [ForEach, With<Player>, Without<Dead>]
     private static void Shoot(Entity shooter, in Position p, in Velocity v, World world)
@@ -184,15 +195,13 @@ public partial class ShootingSystem : EcsSystem
     }
 }
 
-/// <summary>Rewards and statistics react to deaths without combat knowing about them (event handler).</summary>
-public partial class RewardSystem : EcsSystem, IEventHandler<Died>
+/// <summary>Removes notifications after every consumer ran, so each death is seen exactly once.</summary>
+public partial class NotificationCleanupSystem : EcsSystem
 {
-    public void Handle(in Died e)
-    {
-        ref var stats = ref World.GetSingleton<WorldStats>();
-        stats.Deaths++;
-        if (!e.IsPlayer) stats.NpcKills++;
-    }
+    public override int Priority => 99;
+
+    [ForEach]
+    private static void Clear(Entity entity, in Died _) => entity.Remove<Died>();
 }
 
 /// <summary>Ticks the world clock (last).</summary>
@@ -232,6 +241,7 @@ public static class Simulation
         world.AddSystem<RespawnSystem>();
         world.AddSystem<ShootingSystem>();
         world.AddSystem<RewardSystem>();
+        world.AddSystem<NotificationCleanupSystem>();
         world.AddSystem<ClockSystem>();
 
         for (int i = 0; i < entities; i++)

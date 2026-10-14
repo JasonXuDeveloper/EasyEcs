@@ -23,13 +23,6 @@ public struct Clock : ISingletonComponent
     public long Tick;
 }
 
-public struct PingTotal : ISingletonComponent
-{
-    public long Value;
-}
-
-public record struct Ping(int Value) : IEvent;
-
 /// <summary>[ForEach] system doing the same work as ForEachWrite (the only system of its world).</summary>
 public partial class IntegrateSystem : EcsSystem
 {
@@ -39,12 +32,6 @@ public partial class IntegrateSystem : EcsSystem
         p.X += v.X;
         p.Y += v.Y;
     }
-}
-
-/// <summary>Event handler system (subscribed by the generator); the total is world state, so it is a singleton.</summary>
-public partial class PingCounter : EcsSystem, IEventHandler<Ping>
-{
-    public void Handle(in Ping e) => World.GetSingleton<PingTotal>().Value += e.Value;
 }
 
 /// <summary>
@@ -69,8 +56,6 @@ public class MicroBenchmarks
         }
 
         _queryCtx.AddSingleton<Clock>();
-        _queryCtx.AddSingleton<PingTotal>();
-        _queryCtx.AddSystem<PingCounter>();
         _systemWorld = new World();
         for (int i = 0; i < N; i++) _systemWorld.CreateEntity(new Position(), new Velocity());
         _systemWorld.AddSystem<IntegrateSystem>();
@@ -233,13 +218,6 @@ public class MicroBenchmarks
         }
 
         return sum;
-    }
-
-    /// <summary>Publish 1000 events to one handler.</summary>
-    [Benchmark]
-    public void PublishEvents()
-    {
-        for (int i = 0; i < 1000; i++) _queryCtx.Publish(new Ping(i));
     }
 
     /// <summary>1000 component reads/writes through entity handles (version-checked).</summary>
