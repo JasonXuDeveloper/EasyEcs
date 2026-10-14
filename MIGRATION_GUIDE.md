@@ -1,24 +1,47 @@
 # Migration Guide: EasyECS v3.x → v4.0
 
-v4 targets **.NET 10 only**, adopts standard ECS vocabulary, makes systems synchronous and generates repetitive code.
+v4 targets **.NET 10 only**, moves the whole API into the `EasyEcs` namespace with standard ECS vocabulary, makes
+systems synchronous and generates the repetitive parts (arity overloads, per-entity jobs, event subscriptions).
 
-## Renames
+## Namespaces
+
+`EasyEcs.Core`, `EasyEcs.Core.Components` and `EasyEcs.Core.Systems` → **`using EasyEcs;`**
+
+## Entities and components
+
+v3 had three handle types (`Entity` value, `EntityRef`, `ComponentRef<T>`). v4 has one: `Entity`, a version-checked
+16-byte handle. Component access returns `ref T` directly.
 
 | v3 | v4 |
 |---|---|
 | `Context` | `World` |
-| `new Context(new Context.Options(parallel, levelOfParallelism, initialEntityCapacity))` | `new World(new WorldOptions { Parallel = .., MaxDegreeOfParallelism = .., InitialEntityCapacity = .. })` (parallel is now **off** by default) |
-| `ctx.GroupOf<T..>()` → `GroupResultEnumerator` of `GroupResult` | `world.Query<T..>(filter)` → `QueryEnumerator` of `QueryItem` |
-| `ctx.CountOf<T..>()` / `ctx.AnyOf<T..>()` | `world.Count<T..>(filter)` / `world.Any<T..>(filter)` |
-| `AddSingletonComponent<T>()` / `GetSingletonComponent<T>().Value` | `AddSingleton<T>()` / `GetSingleton<T>()` (both return `ref T`) |
-| `TryGetSingletonComponent<T>(out SingletonComponentRef<T>)` | `TryGetSingleton<T>(out SingletonRef<T>)` |
-| `Entity.Context` | `Entity.World` |
-| `IExecuteSystem.ExecuteFrequency` | `SystemBase.UpdateInterval` |
+| `EntityRef e = ctx.CreateEntity()` | `Entity e = world.CreateEntity()` or `world.CreateEntity(new Position(..), new Velocity(..))` |
+| `e.Value.AddComponent<T>().Value.X = 1` | `e.Add<T>().X = 1` (`ref T`) |
+| `e.Value.AddComponents<A, B>()` | `e.Set(new A(..), new B(..))` (add or overwrite values, one transition) |
+| `e.Value.GetComponent<T>().Value` | `e.Get<T>()` (`ref T`) |
+| `e.Value.TryGetComponent<T>(out ComponentRef<T> r)` | `e.TryGet<T>(out T value)` / `ref var x = ref e.GetOrAdd<T>()` |
+| `e.Value.HasComponent<T>()` | `e.Has<T>()` |
+| `e.Value.RemoveComponent(s)<..>()` | `e.Remove<..>()` |
+| `ctx.DestroyEntity(e)` | `e.Destroy()` or `world.DestroyEntity(e)` |
+| `ctx.GetEntityById(id)` / `TryGetEntityById` | `world.GetEntity(id)` / `TryGetEntity` |
+| `ctx.AllEntities` | `world.Entities` |
+| `ctx.GroupOf<T..>()` → `GroupResult` | `world.Query<T..>(filter)` → `QueryItem` (`item.Entity`, `item.Component1..n`) |
+| `ctx.CountOf<T..>()` / `AnyOf<T..>()` | `world.Count<T..>(filter)` / `world.Any<T..>(filter)` |
+| `new Context(new Context.Options(parallel, levels, capacity))` | `new World(new WorldOptions { Parallel = .., MaxDegreeOfParallelism = .., InitialEntityCapacity = .. })` (parallel is **off** by default) |
+
+## Singletons
+
+| v3 | v4 |
+|---|---|
+| `AddSingletonComponent<T>()` / `GetSingletonComponent<T>().Value` | `AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` (all `ref T`) |
+| `TryGetSingletonComponent<T>(out SingletonComponentRef<T>)` | `TryGetSingleton<T>(out T value)` |
+
+Singletons are now **per world** (v3 shared them process-wide).
 
 ## Systems
 
-v3 systems implemented `IInitSystem` / `IExecuteSystem` / `IEndSystem` with `UniTask` methods. v4 systems override
-synchronous hooks on `SystemBase` (the UniTask dependency is gone):
+v3 systems implemented `IInitSystem` / `IExecuteSystem` / `IEndSystem` with `UniTask` methods. v4 systems derive from
+`EcsSystem` and override synchronous hooks (the UniTask dependency is gone):
 
 ```csharp
 // v3
@@ -29,35 +52,36 @@ public class S : SystemBase, IInitSystem, IExecuteSystem
 }
 
 // v4
-public partial class S : SystemBase
+public partial class S : EcsSystem, IEventHandler<Died>
 {
     protected override void OnCreate() { ... }      // when added to the world
     protected override void OnUpdate() { ... }      // every update (World property available)
 
-    [Each] static void Step(ref Position p, in Velocity v) { ... }   // per entity, after OnUpdate
+    [ForEach] static void Step(ref Position p, in Velocity v) { ... }   // per entity, after OnUpdate
+
+    public void Handle(in Died e) { ... }           // subscribed automatically while in the world
 }
 ```
 
 - `ctx.Init()` is gone: `OnCreate` runs when the system is added. `await ctx.Update()` → `world.Update()`;
-  `await ctx.DisposeAsync()` → `world.Dispose()` (calls `OnDestroy` in reverse order).
-- `AddSystem<T>()` returns the system; `GetSystem<T>()`, `RemoveSystem<T>()`, `SystemBase.Enabled` were added.
+  `await ctx.DisposeAsync()` → `world.Dispose()` (`OnDestroy` in reverse order).
+- `IExecuteSystem.ExecuteFrequency` → `EcsSystem.UpdateInterval`; `AddSystem<T>()` returns the system;
+  `GetSystem<T>()`, `RemoveSystem<T>()`, `Enabled` were added.
 - Exceptions: `world.SystemError` (system, exception); without a subscriber the exception propagates.
 
 ## Behavioral changes
 
-1. **Entity ids are recycled.** `Entity.Id` is unique only among live entities; store `EntityRef` (id + version).
-   `Entity` equality now includes the version.
-2. **Stale handles are rejected** (`AddComponent` on a stale `Entity` copy throws; `DestroyEntity` of a stale handle
-   is ignored).
-3. **Singletons are per world** (v3 shared them process-wide).
-4. **Destroying an entity / removing a component clears its data** (managed references can be collected).
-5. Never call `CompactArchetypes()` while iterating.
+1. **Entity ids are recycled.** `Entity.Id` is unique only among live entities; keep the `Entity` handle (id +
+   version). Equality includes the version.
+2. **Stale handles are rejected**: access and structural changes throw; `Destroy` of a stale handle is ignored.
+3. **Removing a component / destroying an entity releases managed references** held by the component.
+4. **Components, singletons and events must be structs**: the analyzer reports `EECS006` for classes.
+5. Never call `CompactArchetypes()` while iterating (it now also sorts entity ids).
+6. **Systems should be stateless and independent**: the analyzer warns about mutable fields on systems (`EECS007`,
+   move the state into a component or singleton) and about systems referencing other systems (`EECS008`,
+   communicate through data or events). See [doc/ecs-principles.md](doc/ecs-principles.md).
 
-## Removed
-
-`World.EntityAt(index)`, `Tag` set operators, `TagRegistry.Clear()`, the public `Singleton<T>` class.
-
-## Source generator
+## Source generator and analyzer
 
 Shipped in the package (`analyzers/dotnet/cs`). Projects referencing `EasyEcs.Core` by `ProjectReference` must also
 reference `EasyEcs.Generator.csproj` with `OutputItemType="Analyzer" ReferenceOutputAssembly="false"`.
