@@ -6,8 +6,8 @@ zero allocation on hot paths, bounded memory under churn and safe structural cha
 ## Storage model: sparse component columns + archetype entity lists
 
 ```
-Context
-├── Entities[id]            Entity { Id, Version, Tag (component bitset), Context }
+World
+├── Entities[id]            Entity { Id, Version, Tag (component bitset), World }
 ├── Meta[id]                EntityMeta { Archetype, Version, Slot } = 16 bytes, 4 per 64-byte cache line;
 │                           Archetype == null means the id is free. Version is bumped on destroy and
 │                           EntityRef/ComponentRef validate it on access
@@ -19,7 +19,7 @@ Context
 - **Component data** lives in one array per component type, indexed directly by entity id. Access is
   `Components[bit][id]`: one indirection, no lookup, stable addresses until the arrays grow.
 - **Archetypes** do not hold component data. They hold the list of entity ids that share a component set
-  (`Tag`), which is what queries iterate. A query (`GroupOf`, `ForEach`, `CountOf`, `AnyOf`) builds a query
+  (`Tag`), which is what queries iterate. A query (`Query`, `ForEach`, `Count`, `Any`) builds a query
   tag, gets the cached list of matching archetypes (`GetMatchingArchetypes`), and walks their id lists.
 - **Tags** are 256-bit SIMD bitsets with overflow for more than 256 component types. A component type gets its bit
   index from the process-wide `TagRegistry` the first time it is used.
@@ -56,11 +56,11 @@ entities ever created.
 
 ## Generated API surface
 
-Every T1..T9 API (`AddComponents`, `RemoveComponents`, `ForEach`, `GroupOf`, `CountOf`, `AnyOf`, `GroupResult`,
-enumerators, `Entity` wrappers) is emitted by `EasyEcs.Generator/ArityGenerator.cs` from one template per family,
+Every T1..T9 API (`AddComponents`, `RemoveComponents`, `ForEach`, `Query`, `Count`, `Any`, `QueryItem`,
+`QueryEnumerator`, `Entity` wrappers) is emitted by `EasyEcs.Generator/ArityGenerator.cs` from one template per family,
 on top of a small shared core: `PrepareColumn<T>`, `AddBits`, `RemoveBits`, `GetMatchingArchetypes`,
-`ArchetypeCursor`. User `[Query]` methods are compiled by `QueryGenerator.cs` into a struct `IForEach` job (inlined
-by the JIT), a static `QueryFilter` and `Run{Method}(Context)`.
+`ArchetypeCursor`. User `[Each]` methods are compiled by `EachGenerator.cs` into a struct `IForEach` job (inlined by the
+JIT), a static `QueryFilter`, and an override of `SystemBase.RunEach()` that `World.Update` calls after `OnUpdate()`.
 
 ## Query cache
 
@@ -72,21 +72,26 @@ copy-on-write and published with `Volatile.Write`. Readers never lock and never 
 
 Structural changes during iteration are allowed:
 
-- `GroupOf` enumerators re-read `archetype.Count` and `archetype.EntityIds` on every step.
-- `ForEach` snapshots the arrays for speed and refreshes them when `Context.StorageVersion` changes. Any code
+- `Query` enumerators re-read `archetype.Count` and `archetype.EntityIds` on every step.
+- `ForEach` snapshots the arrays for speed and refreshes them when `World.StorageVersion` changes. Any code
   path that reallocates storage must bump it: component columns, entity arrays, archetype id arrays and
   compaction all do.
 - Entities added during a pass may or may not be visited. Removed entities are skipped through tombstones.
 
 ## Systems and scheduling
 
-- Systems are grouped into priority buckets (`PrioritySystemList`), and buckets run in ascending priority.
-- `IExecuteSystem.ExecuteFrequency = n` runs a system every n-th `Update()`.
-- With `Options.Parallel`, a bucket with more than 4 systems is awaited through `UniTask.WhenAll`. Systems run
-  synchronously when they complete synchronously, and completed tasks are never awaited, to avoid state-machine
-  costs.
-- `IInitSystem` runs on `Init()` and for systems added later on the next `Update()`. `IEndSystem` runs on
-  `DisposeAsync()`.
+- Systems are kept in one array sorted by `Priority` (stable: registration order breaks ties) and grouped into buckets
+  of equal priority. The array is replaced copy-on-write when systems are added/removed.
+- `World.Update()` is synchronous: for every enabled system whose `UpdateInterval` is due it calls `OnUpdate()` then
+  the generated `RunEach()`. With `WorldOptions.Parallel`, a bucket with several systems runs on the thread pool.
+- `OnCreate` runs in `AddSystem`, `OnDestroy` in `RemoveSystem` / `Dispose` (reverse order).
+- Errors go to `World.SystemError`; without a subscriber they propagate.
+
+## Type indices
+
+`TypeIndex<TFamily, T>` assigns a dense process-wide index per type and family on first use (static readonly, so the
+JIT folds it to a constant). `ComponentType<T>.Bit` (tag bit + column index) and `SingletonType<T>.Index` (singleton
+slot) are the two families; every world uses the same indices, so archetype tags are comparable across worlds.
 
 ## Threading
 

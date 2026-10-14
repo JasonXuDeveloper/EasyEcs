@@ -1,32 +1,66 @@
 # Migration Guide: EasyECS v3.x → v4.0
 
-## Platform
+v4 targets **.NET 10 only**, adopts standard ECS vocabulary, makes systems synchronous and generates repetitive code.
 
-- **.NET 10 only** (`net10.0`). v4 uses .NET 10 / C# 14 features (`System.Threading.Lock`, generic attributes, ...).
-- The package ships a **source generator** (`analyzers/dotnet/cs/EasyEcs.Generator.dll`). Projects that reference
-  `EasyEcs.Core` by `ProjectReference` instead of the package must add it explicitly:
-  `<ProjectReference Include="...EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>`.
+## Renames
+
+| v3 | v4 |
+|---|---|
+| `Context` | `World` |
+| `new Context(new Context.Options(parallel, levelOfParallelism, initialEntityCapacity))` | `new World(new WorldOptions { Parallel = .., MaxDegreeOfParallelism = .., InitialEntityCapacity = .. })` (parallel is now **off** by default) |
+| `ctx.GroupOf<T..>()` → `GroupResultEnumerator` of `GroupResult` | `world.Query<T..>(filter)` → `QueryEnumerator` of `QueryItem` |
+| `ctx.CountOf<T..>()` / `ctx.AnyOf<T..>()` | `world.Count<T..>(filter)` / `world.Any<T..>(filter)` |
+| `AddSingletonComponent<T>()` / `GetSingletonComponent<T>().Value` | `AddSingleton<T>()` / `GetSingleton<T>()` (both return `ref T`) |
+| `TryGetSingletonComponent<T>(out SingletonComponentRef<T>)` | `TryGetSingleton<T>(out SingletonRef<T>)` |
+| `Entity.Context` | `Entity.World` |
+| `IExecuteSystem.ExecuteFrequency` | `SystemBase.UpdateInterval` |
+
+## Systems
+
+v3 systems implemented `IInitSystem` / `IExecuteSystem` / `IEndSystem` with `UniTask` methods. v4 systems override
+synchronous hooks on `SystemBase` (the UniTask dependency is gone):
+
+```csharp
+// v3
+public class S : SystemBase, IInitSystem, IExecuteSystem
+{
+    public UniTask OnInit(Context ctx) { ...; return UniTask.CompletedTask; }
+    public UniTask OnExecute(Context ctx) { ...; return UniTask.CompletedTask; }
+}
+
+// v4
+public partial class S : SystemBase
+{
+    protected override void OnCreate() { ... }      // when added to the world
+    protected override void OnUpdate() { ... }      // every update (World property available)
+
+    [Each] static void Step(ref Position p, in Velocity v) { ... }   // per entity, after OnUpdate
+}
+```
+
+- `ctx.Init()` is gone: `OnCreate` runs when the system is added. `await ctx.Update()` → `world.Update()`;
+  `await ctx.DisposeAsync()` → `world.Dispose()` (calls `OnDestroy` in reverse order).
+- `AddSystem<T>()` returns the system; `GetSystem<T>()`, `RemoveSystem<T>()`, `SystemBase.Enabled` were added.
+- Exceptions: `world.SystemError` (system, exception); without a subscriber the exception propagates.
 
 ## Behavioral changes
 
-1. **Entity ids are recycled.** `Entity.Id` is unique only among *live* entities. Store `EntityRef` (id + version)
-   rather than raw ids, or remove id mappings when the entity is destroyed. `TryGetEntityById(id)` may return a newer
-   entity reusing that id.
-2. **Stale `Entity` copies throw.** `AddComponent`/`RemoveComponent` on an `Entity` value copied before the entity
-   was destroyed now throw `InvalidOperationException("Entity not found")` instead of mutating the new occupant.
-3. **Singletons are per context.** The old process-wide static is gone (`Singleton<T>` removed): add the singleton to
-   every context that needs it.
-4. **Destroying an entity clears its component data** (managed references inside components can be collected).
-5. **Do not call `CompactArchetypes()` while iterating** (`GroupOf` / `ForEach` / `[Query]`).
+1. **Entity ids are recycled.** `Entity.Id` is unique only among live entities; store `EntityRef` (id + version).
+   `Entity` equality now includes the version.
+2. **Stale handles are rejected** (`AddComponent` on a stale `Entity` copy throws; `DestroyEntity` of a stale handle
+   is ignored).
+3. **Singletons are per world** (v3 shared them process-wide).
+4. **Destroying an entity / removing a component clears its data** (managed references can be collected).
+5. Never call `CompactArchetypes()` while iterating.
 
-## API changes
+## Removed
 
-- `GroupResult<...>` / `GroupResultEnumerator<...>` constructors are internal (obtain them from `GroupOf`), and
-  `GroupResult` type parameters are now constrained to `struct, IComponent`. `GroupResult` gained `EntityId`.
-- `GroupOf`, `CountOf`, `AnyOf` and `ForEach` accept an optional `in QueryFilter filter` (`With<T>` / `Without<T>`).
-- `ForEach` supports 1..9 components (was 1..6). `IForEach<T1..T9>` is in namespace `EasyEcs.Core`.
-- New: `[Query]`, `[With<T>]`, `[Without<T>]` (namespace `EasyEcs.Core.Systems`) for generated query systems;
-  `HasSingletonComponent<T>()`, `RemoveSingletonComponent<T>()`.
+`World.EntityAt(index)`, `Tag` set operators, `TagRegistry.Clear()`, the public `Singleton<T>` class.
+
+## Source generator
+
+Shipped in the package (`analyzers/dotnet/cs`). Projects referencing `EasyEcs.Core` by `ProjectReference` must also
+reference `EasyEcs.Generator.csproj` with `OutputItemType="Analyzer" ReferenceOutputAssembly="false"`.
 
 ---
 

@@ -18,21 +18,25 @@ dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*Iterate*' --job 
 
 ```
 EasyEcs.Core/                  net10.0 library (hand-written shared core only)
-  Context.cs                   entity lifecycle (create/destroy, id recycling), systems, Init/Update/Dispose, singletons
-  Context.Components.cs        column preparation + AddBits/RemoveBits (shared core of every Add/Remove overload)
-  Context.Archetypes.cs        archetype registry, entity membership, transition edges, copy-on-write query cache
+  World.cs                     entity lifecycle (create/destroy, id recycling, lookup)
+  World.Components.cs          column preparation + AddBits/RemoveBits (shared core of every Add/Remove overload)
+  World.Archetypes.cs          archetype registry, entity membership, transition edges, copy-on-write query cache
+  World.Systems.cs             system list (priority buckets), synchronous Update, Dispose
+  World.Singletons.cs          per-world singletons (ref returns)
+  WorldOptions.cs              configuration
   Query.cs                     QueryFilter (With/Without), QueryKey, ArchetypeCursor (shared iteration core)
+  TypeIndex.cs                 dense per-type indices (ComponentType<T>.Bit, SingletonType<T>.Index), SingletonBox
   EntityMeta.cs                16-byte per-entity record (archetype, version, slot)
   Archetype.cs                 entity-id list with tombstones + free slots, add/remove edge caches
-  Entity.cs / EntityRef.cs     entity value (id, version, tag) and version-checked reference
-  Components/                  Tag (SIMD bitset + overflow), TagRegistry (global type -> bit), ComponentRef
-  Systems/                     SystemBase, IInit/IExecute/IEndSystem, [Query]/[With]/[Without] attributes
-  Singleton.cs                 per-type dense index + per-context box for singleton components
-EasyEcs.Generator/             Roslyn incremental generators (netstandard2.0), packed into the NuGet analyzers folder
-  ArityGenerator.cs            T1..T9 families for EasyEcs.Core itself: Add/RemoveComponent(s), Entity wrappers,
-                               IForEach/ForEach/GroupOf/CountOf/AnyOf, GroupResult + enumerators (one template each)
-  QueryGenerator.cs            user [Query] methods -> struct job + filter + Run{Method} + OnExecute; EECS001-004
-EasyEcs.UnitTest/              NUnit tests (lifecycle, queries/filters, concurrency, generated systems)
+  Entity.cs / EntityRef.cs     entity value (id, version, tag) and version-checked handle
+  Components/                  IComponent, ISingletonComponent, Tag (SIMD bitset), ComponentRef, SingletonRef
+  Systems/                     SystemBase (OnCreate/OnUpdate/OnDestroy + generated RunEach), [Each]/[With]/[Without]
+EasyEcs.Generator/             Roslyn incremental generators (netstandard2.0, required by Roslyn hosts)
+  ArityGenerator.cs            T1..T9 families for EasyEcs.Core itself (Add/RemoveComponent(s), Entity wrappers,
+                               IForEach/ForEach/Query/Count/Any, QueryItem + QueryEnumerator), one template each
+  EachGenerator.cs             user [Each] methods -> struct jobs + filters + RunEach override; EECS001-005
+EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, Query, ForEach, EachSystem, System,
+                               Singleton, Archetype, Concurrency, Allocation (0 B budget), Generator (diagnostics)
 EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / ShardedWorldBenchmark (headline, realistic
                                server tick) + MicroBenchmarks (diagnostics). Always measure with BenchmarkDotNet.
 doc/                           architecture.md, performance.md
