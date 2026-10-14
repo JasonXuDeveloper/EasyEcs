@@ -65,12 +65,12 @@ public partial class AoiSystem : EcsSystem
     public override int Priority => 1;
 
     [ForEach, Without<Dead>]
-    private static void UpdateCell(in Position p, ref AoiCell aoi, World world)
+    private static void UpdateCell(in Position p, ref AoiCell aoi, ref WorldStats stats)
     {
         int cell = (int)(p.Y * (1f / 64f)) * 64 + (int)(p.X * (1f / 64f));
         if (cell == aoi.Cell) return;
         aoi.Cell = cell;
-        world.GetSingleton<WorldStats>().CellChanges++;
+        stats.CellChanges++;
     }
 }
 
@@ -80,12 +80,10 @@ public partial class CombatSystem : EcsSystem
     public override int Priority => 2;
 
     [ForEach, Without<Dead>, Without<Stunned>]
-    private static void Fight(Entity entity, ref Attack attack, ref Health health, World world)
+    private static void Fight(Entity entity, ref Attack attack, ref Health health, ref WorldStats stats)
     {
         if (--attack.Cooldown > 0) return;
         attack.Cooldown = attack.Interval;
-
-        ref var stats = ref world.GetSingleton<WorldStats>();
         stats.Hits++;
         health.Value -= attack.Damage;
 
@@ -123,11 +121,10 @@ public partial class DeathSystem : EcsSystem
     public override int Priority => 4;
 
     [ForEach, Without<Dead>]
-    private static void CheckDeath(Entity entity, in Health health, World world)
+    private static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
     {
         if (health.Value > 0) return;
         entity.Set(new Dead());
-        ref var stats = ref world.GetSingleton<WorldStats>();
         stats.Deaths++;
         if (entity.Has<Npc>()) stats.NpcKills++;
     }
@@ -172,9 +169,8 @@ public partial class ShootingSystem : EcsSystem
     public override int Priority => 7;
 
     [ForEach, With<Player>, Without<Dead>]
-    private static void Shoot(Entity shooter, in Position p, in Velocity v, World world)
+    private static void Shoot(Entity shooter, in Position p, in Velocity v, ref WorldStats stats, World world)
     {
-        ref var stats = ref world.GetSingleton<WorldStats>();
         if (!Rng.Chance(stats.Tick, shooter.Id, 3, 50)) return;
         stats.Spawns++;
         world.CreateEntity(p, new Velocity { X = v.X * 4, Y = v.Y * 4 }, new Lifetime { Ticks = 20 },
