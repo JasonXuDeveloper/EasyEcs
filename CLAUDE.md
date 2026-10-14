@@ -18,9 +18,9 @@ dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*Iterate*' --job 
 
 ```
 EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written shared core only)
-  Contracts.cs                 IComponent, ISingletonComponent, IEvent, IEventHandler<T>
+  Contracts.cs                 IComponent, ISingletonComponent
   Entity.cs                    the entity handle (id, version, world): Has/Get/TryGet/Add/GetOrAdd/Destroy
-  EcsSystem.cs                 OnCreate/OnUpdate/OnDestroy + generated GeneratedCreate/GeneratedUpdate
+  EcsSystem.cs                 OnCreate/OnUpdate/OnDestroy + generated GeneratedUpdate
   ForEachAttributes.cs         [ForEach], [With<T>], [Without<T>]
   SystemGroups.cs              ISystemGroup, [UpdateInGroup<T>] (World.Update<T>() runs a group)
   World.cs                     entity lifecycle (create/destroy, id recycling, lookup, enumeration)
@@ -28,20 +28,19 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
   World.Archetypes.cs          archetype registry, transition edges, copy-on-write query cache, compaction
   World.Systems.cs             system groups (priority buckets each), synchronous Update / Update<TGroup>, Dispose
   World.Singletons.cs          per-world singletons (ref returns)
-  World.Events.cs              typed event channels (Publish/Subscribe), copy-on-write handler arrays
   WorldOptions.cs              configuration
   Query.cs                     QueryFilter (With/Without), QueryKey, ArchetypeCursor (shared iteration core)
-  TypeIndex.cs                 dense per-type indices (component bit, singleton slot, event channel)
+  TypeIndex.cs                 dense per-type indices (component bit, singleton slot, system group)
   EntityMeta.cs                16-byte per-entity record (archetype, version, slot)
   Archetype.cs                 mask + component bits + entity ids (tombstones, free slots) + edges; sorted Compact
   Tag.cs                       256-bit SIMD bitset with overflow
 EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, required by Roslyn hosts)
   ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove, World.CreateEntity, IForEach,
                                ForEach/Query/Count/Any, QueryItem/QueryEnumerator), one template each
-  SystemGenerator.cs           [ForEach] -> struct jobs + GeneratedUpdate; IEventHandler<T> -> GeneratedCreate
+  SystemGenerator.cs           [ForEach] -> struct jobs + GeneratedUpdate
   EasyEcsAnalyzer.cs           EECS001-008 (generators never report diagnostics)
   Symbols.cs                   symbol checks shared by generator and analyzer
-EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, Query, System, ForEachSystem, Event,
+EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, Query, System, ForEachSystem,
                                Singleton, Concurrency, Allocation (0 B budget), Generator (diagnostics + caching)
 EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / ShardedWorldBenchmark (headline, realistic
                                server tick) + MicroBenchmarks (diagnostics). Always measure with BenchmarkDotNet.
@@ -71,7 +70,8 @@ doc/                           ecs-principles.md, architecture.md, performance.m
 - **Follow the ECS principles in `doc/ecs-principles.md`, including in tests, benchmarks and docs**: components and
   singletons are plain data structs; one system per responsibility; systems are stateless (state goes into
   components or singletons, EECS007) and never reference other systems (EECS008); state changes are data,
-  notifications are events. Examples are what users copy, so they must be exemplary.
+  notifications are one-update components (no event bus: every reaction runs in schedule order). Examples are what
+  users copy, so they must be exemplary.
 - **Performance changes must be measured.** Run the relevant `EasyEcs.Benchmark` cases before and after; a change
   ships only if it is a net improvement (time and allocations) with no regression elsewhere. Add a benchmark
   when you optimize something not covered yet.

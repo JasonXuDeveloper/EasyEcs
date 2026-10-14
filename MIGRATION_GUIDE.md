@@ -1,7 +1,7 @@
 # Migration Guide: EasyECS v3.x → v4.0
 
 v4 targets **.NET 10 only**, moves the whole API into the `EasyEcs` namespace with standard ECS vocabulary, makes
-systems synchronous and generates the repetitive parts (arity overloads, per-entity jobs, event subscriptions).
+systems synchronous and generates the repetitive parts (arity overloads, per-entity jobs).
 
 ## Namespaces
 
@@ -52,14 +52,12 @@ public class S : SystemBase, IInitSystem, IExecuteSystem
 }
 
 // v4
-public partial class S : EcsSystem, IEventHandler<Died>
+public partial class S : EcsSystem
 {
     protected override void OnCreate() { ... }      // when added to the world
     protected override void OnUpdate() { ... }      // every update (World property available)
 
     [ForEach] static void Step(ref Position p, in Velocity v) { ... }   // per entity, after OnUpdate
-
-    public void Handle(in Died e) { ... }           // subscribed automatically while in the world
 }
 ```
 
@@ -75,11 +73,14 @@ public partial class S : EcsSystem, IEventHandler<Died>
    version). Equality includes the version.
 2. **Stale handles are rejected**: access and structural changes throw; `Destroy` of a stale handle is ignored.
 3. **Removing a component / destroying an entity releases managed references** held by the component.
-4. **Components, singletons and events must be structs**: the analyzer reports `EECS006` for classes.
+4. **Components and singletons must be structs**: the analyzer reports `EECS006` for classes.
 5. Never call `CompactArchetypes()` while iterating (it now also sorts entity ids).
 6. **Systems should be stateless and independent**: the analyzer warns about mutable fields on systems (`EECS007`,
    move the state into a component or singleton) and about systems referencing other systems (`EECS008`,
-   communicate through data or events). See [doc/ecs-principles.md](doc/ecs-principles.md).
+   communicate through data). See [doc/ecs-principles.md](doc/ecs-principles.md).
+7. **No event bus.** Notifications are data: the producer adds a component that lives for one update (`Died`),
+   later systems consume it with `[ForEach]`, and a cleanup system removes it. Every reaction runs in schedule
+   order instead of inside the publisher. Cross-process messages belong to the host (e.g. DaServer cluster events).
 
 ## Source generator and analyzer
 

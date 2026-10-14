@@ -7,16 +7,17 @@
 A fast, allocation-free Entity-Component-System for .NET 10 servers and other long-running processes.
 
 - **Write the logic, the generator writes the plumbing.** A `[ForEach]` method becomes a JIT-inlined struct job.
-  An `IEventHandler<T>` on a system is subscribed automatically. Misuse is a compile error.
+  Misuse, including breaking the ECS principles, is reported at compile time.
 - **Zero GC in steady state.** A full tick of a 100k-entity world allocates 0 bytes. That tick includes movement,
-  AOI, combat, buff add/remove, projectile spawn/despawn and death events, and a unit test guards the budget.
+  AOI, combat, buff add/remove, projectile spawn/despawn and death notifications, and a unit test guards the budget.
 - **Cache-friendly.** Per entity, a world stores one 16-byte record (4 per cache line). Component data lives in one
   dense column per type. Compaction sorts entities so iteration walks each column front to back.
 - **Cheap structural changes.** Archetype transitions are cached. Placement is single-step: `CreateEntity(a, b, c)`
   lands in its final archetype directly.
-- **Decoupled modules.** Synchronous, typed in-world events (`world.Publish(new Died(..))`) with no allocation.
-- **One namespace, standard vocabulary:** `World`, `Entity`, components, singletons, events, `EcsSystem`,
-  `[ForEach]`, `Query`.
+- **Decoupled modules, pure ECS.** Systems cooperate only through data: state in components and singletons,
+  notifications in short-lived components that later systems query. No callbacks, no hidden call order.
+- **One namespace, standard vocabulary:** `World`, `Entity`, components, singletons, `EcsSystem`, `[ForEach]`,
+  `Query`, system groups.
 
 ```
 dotnet add package EasyEcs        # net10.0; source generator and analyzer included
@@ -33,7 +34,7 @@ public record struct Velocity(float X, float Y) : IComponent;
 public record struct Health(int Value) : IComponent;
 public struct Dead : IComponent;                                         // tag component
 public record struct Stats(long Tick, int Kills) : ISingletonComponent;  // world state lives in data, not systems
-public record struct Died(Entity Entity) : IEvent;
+public struct Died : IComponent;                                         // notification: lives for one update
 
 // Behavior: one stateless system per responsibility.
 public partial class MovementSystem : EcsSystem
@@ -48,22 +49,24 @@ public partial class DeathSystem : EcsSystem
     static void Die(Entity entity, in Health hp, World world)
     {
         if (hp.Value > 0) return;
-        entity.Set(new Dead());                                          // state change = data
-        world.Publish(new Died(entity));                                 // notification = event
+        entity.Set(new Dead(), new Died());                              // state (Dead) + notification (Died)
     }
 }
 
-public partial class KillCounterSystem : EcsSystem, IEventHandler<Died>  // subscribed while in the world
+public partial class KillCounterSystem : EcsSystem                       // reacts; DeathSystem does not know it
 {
-    public void Handle(in Died e) => World.GetSingleton<Stats>().Kills++;
+    public override int Priority => 1;
+
+    [ForEach]
+    static void Count(in Died _, World world) => world.GetSingleton<Stats>().Kills++;
 }
 
 public partial class CorpseSystem : EcsSystem
 {
-    public override int Priority => 10;                                  // after everything else
+    public override int Priority => 10;                                  // after every consumer of Died
 
     [ForEach]
-    static void Remove(Entity entity, in Dead _) => entity.Destroy();
+    static void Remove(Entity entity, in Dead _) => entity.Destroy();   // also ends the Died notification
 }
 
 public sealed class ClockSystem : EcsSystem
@@ -85,8 +88,8 @@ e.Get<Health>().Value -= 100;                                        // Get retu
 while (running) world.Update();
 ```
 
-None of these systems knows the others exist: they share components, a singleton and an event. Any of them can be
-removed, reordered or tested alone. See [ECS principles](#ecs-principles).
+None of these systems knows the others exist: they share components and a singleton. Any of them can be removed,
+reordered or tested alone. See [ECS principles](#ecs-principles).
 
 ## Concepts
 
@@ -96,18 +99,17 @@ flowchart LR
     W -->|one column per type| C[Components<br/>struct : IComponent]
     W -->|one value each| S[Singletons<br/>struct : ISingletonComponent]
     W -->|priority order| Y[EcsSystem<br/>OnUpdate + ForEach]
-    Y -->|Publish| V[Events<br/>struct : IEvent]
-    V -->|Handle| H[IEventHandler&lt;T&gt;]
-    Y -->|Query / ForEach| C
+    Y -->|Query / ForEach: read and write| C
+    Y -->|read and write| S
 ```
 
 | Concept | API | Meaning |
 |---|---|---|
-| World | `World` | Owns entities, component storage, singletons, events and systems. Worlds are fully isolated. |
+| World | `World` | Owns entities, component storage, singletons and systems. Worlds are fully isolated. |
 | Entity | `Entity` | 16-byte handle (id, version, world). Every access validates the version, so stale handles throw. |
 | Component | `struct : IComponent` | Plain data. A tag component is an empty struct. |
 | Singleton | `struct : ISingletonComponent` | One value per world: clock, configuration, world state. |
-| Event | `struct : IEvent`, `IEventHandler<T>` | Synchronous typed messages between modules. |
+| Notification | `struct : IComponent` added for one update | "Something happened" (`Died`): consumers query it, a cleanup system removes it. |
 | System | `EcsSystem` | `OnCreate`, then every update `OnUpdate` + `[ForEach]` methods, and `OnDestroy`. |
 | Query | `Query`, `ForEach`, `Count`, `Any`, `QueryFilter` | Entities that have a set of components, optionally filtered. |
 
@@ -120,7 +122,7 @@ sequenceDiagram
     U->>S: skip if disabled or UpdateInterval not due
     S->>S: OnUpdate()
     S->>S: [ForEach] methods, in declaration order (base class first)
-    S-->>S: Publish(event) runs handlers synchronously, inline
+    S-->>S: structural changes apply immediately: later systems see them
 ```
 
 Systems with equal priority form a bucket. With `WorldOptions.Parallel`, the systems of a bucket run in parallel and
@@ -134,7 +136,7 @@ method. Its parameters:
 | Parameter | Meaning |
 |---|---|
 | `ref T` / `in T` (`T : IComponent`) | component data, 1–9 of them (`ref` to write, `in` to read) |
-| `Entity entity` | handle of the current entity (structural changes, destroy, events) |
+| `Entity entity` | handle of the current entity (structural changes, destroy) |
 | `World world` | the world (useful in static methods) |
 
 Filters are `[With<T>]` (the entity must have T, but T is not passed in) and `[Without<T>]` (the entity must not
@@ -158,30 +160,34 @@ world.Update();               // fixed tick
 
 Priority, `UpdateInterval` and `Enabled` apply within each group. The attribute is inherited.
 
-### Events
+### Notifications are data
 
-`world.Publish(in e)` calls every `IEventHandler<T>.Handle(in e)` immediately, in subscription order. It does not
-allocate.
+EasyEcs has no event bus. A callback that runs inside the publishing system is a hidden call from one system into
+another: it runs outside the schedule, in an order nobody declared. Instead, a notification is a component that lives
+for one update:
 
-- A `partial` system that implements `IEventHandler<T>` is subscribed when it is added and unsubscribed when it is
-  removed.
-- Any other object subscribes itself with `world.Subscribe(handler)`.
+1. The producer adds it (`entity.Set(new Dead(), new Died())`).
+2. Consumers are ordinary `[ForEach]` jobs over it (`[ForEach] static void Count(in Died _, World w)`), ordered after
+   the producer by `Priority`. Any number of them can be added without touching the producer.
+3. A cleanup system with the highest priority removes it (or destroys the entity), so each notification is seen
+   exactly once.
 
-Use events to decouple modules. For example, combat publishes `Died`, and loot, quests and achievements react to it
-without combat referencing them.
+A notification without an entity (match started, wave cleared) is a field or a list in a singleton, cleared the same
+way. Messages between servers, actors or processes are not ECS: they belong to the host (for example DaServer's
+cluster events), which turns them into data before systems see them.
 
 ### Compile-time checks (EasyEcs analyzer)
 
 | Id | Error |
 |---|---|
-| EECS001 | a system with `[ForEach]` methods or `IEventHandler<T>` is not `partial` |
+| EECS001 | a system with `[ForEach]` methods is not `partial` |
 | EECS002 | invalid `[ForEach]` parameter |
 | EECS003 | a `[ForEach]` method takes no components, or more than 9 |
 | EECS004 | generic system or method |
 | EECS005 | `[ForEach]` method outside an `EcsSystem` |
-| EECS006 | a class implements `IComponent`, `ISingletonComponent` or `IEvent` (they must be structs) |
+| EECS006 | a class implements `IComponent` or `ISingletonComponent` (they must be structs) |
 | EECS007 (warning) | a system has a mutable field or settable auto-property (state belongs in components/singletons) |
-| EECS008 (warning) | a system holds a reference to another system (communicate through data or events) |
+| EECS008 (warning) | a system holds a reference to another system (communicate through data) |
 
 ## ECS principles
 
@@ -193,8 +199,8 @@ exactly one role:
 | `Entity` | identity | An id. No data, no behavior. Hold it as a handle and never keep a `ref` into its storage. |
 | Component | per-entity data | A struct with fields only (computed getters are fine). No logic and no references to systems. |
 | Singleton | per-world data | Clock, configuration, counters, indexes: anything with one value per world. |
-| Event | one-way notification | "Something happened" (`Died`), not "please do X". The publisher never depends on handlers. |
-| System | behavior, one responsibility | Stateless, reads and writes components and singletons, publishes events, never references another system. |
+| Notification | a component that lives for one update | "Something happened" (`Died`), not "please do X". The producer never depends on its consumers. |
+| System | behavior, one responsibility | Stateless, reads and writes components and singletons, never references another system. |
 
 How to follow them:
 
@@ -205,8 +211,9 @@ How to follow them:
    fields for dependencies or reusable scratch buffers are fine (EECS007 allows them).
 3. **Systems never call systems** (EECS008). They cooperate through data: one writes a component or singleton,
    another reads it later in the update (order them with `Priority`).
-4. **State changes are data, notifications are events.** Mark `Dead` with a tag so later systems can query it.
-   Publish `Died` so modules that care (loot, quests, statistics) react without the publisher knowing them.
+4. **Everything is data, notifications included.** Mark `Dead` with a tag so later systems can query it. Add a
+   one-update `Died` component so modules that care (loot, quests, statistics) react in schedule order without the
+   producer knowing them; a cleanup system removes it.
 5. **Prefer data flags to churn for frequent changes.** Adding and removing a component moves the entity between
    archetypes. That is cheap, but a field (`Changed`, `Ticks`) or a comparison against a sync component is cheaper
    for something that flips every tick.
@@ -223,7 +230,6 @@ Notation:
 - *c*: components of the entity.
 - *M*: archetypes matching a query.
 - *S*: slots in those archetypes, alive entities plus tombstones.
-- *H*: handlers of an event type.
 - "Amortized": storage occasionally doubles.
 
 ### Entities
@@ -263,7 +269,7 @@ Notation:
 The first time a query shape is used, building its cache entry costs O(all archetypes). After that, each lookup is
 one hash probe.
 
-### Systems, singletons, events, maintenance
+### Systems, singletons, maintenance
 
 | API | Complexity |
 |---|---|
@@ -272,8 +278,6 @@ one hash probe.
 | `world.Update()` (default group) / `world.Update<TGroup>()` | Σ systems of the group, allocation-free |
 | `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` → `ref T` | O(1) |
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) |
-| `world.Publish(in T)` | O(H) |
-| `world.Subscribe(handler)` / `Unsubscribe(handler)` | O(H) |
 | `world.CompactArchetypes()` | O(S log S) |
 | `world.GetFragmentationStats()` | O(archetypes) |
 
@@ -375,7 +379,7 @@ tick, not a toy loop:
   - an AOI grid
   - combat that randomly adds `Burning` / `Stunned`
   - status expiry that removes those components
-  - death, which adds `Dead` and publishes a `Died` event that a reward system handles
+  - death, which adds `Dead` and a one-update `Died` notification that a reward system counts
   - NPC despawn and respawn
   - projectile spawn (about 5% of players per tick) and expiry
 
@@ -390,12 +394,12 @@ Measured with BenchmarkDotNet's default job on .NET 10, on a 4-core Xeon VM at 2
 
 | Benchmark | Entities | Mean | Allocated |
 |---|---:|---:|---:|
-| WorldSimulation.Tick | 10,000 | 333 μs | 0 B |
-| WorldSimulation.Tick | 100,000 | 4.51 ms | 0 B |
-| ShardedWorld.TickAllShards (4 worlds × 25k) | 100,000 | 2.09 ms | 0 B |
+| WorldSimulation.Tick | 10,000 | 336 μs | 0 B |
+| WorldSimulation.Tick | 100,000 | 4.80 ms | 0 B |
+| ShardedWorld.TickAllShards (4 worlds × 25k) | 100,000 | 2.02 ms | 0 B |
 
 **Micro benchmarks** (N = 10,000; the v3.1.1 column is BenchmarkDotNet ShortRun on the same machine). "–" means
-the operation has no v3.1.1 equivalent (struct jobs, `[ForEach]` systems, events and handles are new in v4). Every
+the operation has no v3.1.1 equivalent (struct jobs, `[ForEach]` systems and handles are new in v4). Every
 operation that exists in both versions is faster in v4 and allocates less or nothing:
 
 | Benchmark | v3.1.1 | v4 | Allocated (v4) |
@@ -411,19 +415,18 @@ operation that exists in both versions is faster in v4 and allocates less or not
 | RawArrayWrite (two plain arrays, the floor) | – | 11.0 μs | 0 B |
 | QueryIterate3 (half the entities match) | 16.2 μs | 9.1 μs | 0 B |
 | HandleAccess (`Entity.Get`, ×1000) | – | 3.56 μs | 0 B |
-| PublishEvents (×1000, one handler) | – | 3.77 μs | 0 B |
 | SingletonAccess (×1000) | 1.42 μs | 0.90 μs | 0 B |
 
 ## Upgrading from v3
 
 v4 targets .NET 10 and moves everything into one `EasyEcs` namespace with standard ECS terms. The main renames are
 `Context` → `World`, `GroupOf` → `Query`, and a single `Entity` handle. Systems are synchronous `EcsSystem`s with
-`[ForEach]` methods and generated event subscriptions, and entity ids are recycled. See
+`[ForEach]` methods, and entity ids are recycled. See
 [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md).
 
 ## Documentation
 
-- [doc/ecs-principles.md](doc/ecs-principles.md): roles of entities, components, singletons, events and systems,
+- [doc/ecs-principles.md](doc/ecs-principles.md): roles of entities, components, singletons, notifications and systems,
   and how to design with them.
 - [doc/architecture.md](doc/architecture.md): storage, archetypes, id recycling, iteration safety, threading,
   generators.

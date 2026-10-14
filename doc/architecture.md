@@ -17,7 +17,6 @@ flowchart TB
         Arch["Archetypes: mask → Archetype<br/>EntityIds (tombstones + free slots)<br/>add/remove edges"]
         QC["Query cache: (all, none) → Archetype[]<br/>copy-on-write"]
         Single["Singletons[index] : SingletonBox&lt;T&gt;"]
-        Ev["Event channels[index] : IEventHandler&lt;T&gt;[]"]
         Sys["Systems: sorted by priority, buckets"]
     end
     Meta --> Arch
@@ -85,23 +84,16 @@ mutated.
 - An entity moved into a *later* matching archetype during a pass may be visited again. Systems make their methods
   idempotent with filters. This is documented in the README.
 
-## Events
-
-Each event type has one channel per world: an immutable `IEventHandler<T>[]`, indexed by `EventType<T>.Index`.
-
-- `Publish` is a loop of interface calls over that array: no allocation, no queue, no boxing.
-- Subscribing or unsubscribing replaces the array copy-on-write, so handlers can (un)subscribe while an event is
-  being delivered.
-- `EcsSystem.Destroy` unsubscribes the system from every channel.
-
 ## Systems
 
 - Systems are kept in an array sorted by `Priority`, with registration order breaking ties, and are grouped into
   buckets of equal priority. The array is copy-on-write.
 - `Update()` is synchronous. For each due, enabled system it calls `OnUpdate()` and then the generated
   `GeneratedUpdate()` ([ForEach] methods).
-- `AddSystem` calls the generated `GeneratedCreate()` (event subscriptions) and then `OnCreate()`.
-- `RemoveSystem` and `Dispose` call `OnDestroy()` and then unsubscribe events; `Dispose` goes in reverse order.
+- `AddSystem` calls `OnCreate()`; `RemoveSystem` and `Dispose` call `OnDestroy()`, `Dispose` in reverse order.
+- There is no event bus: notifications are components consumed by later systems (see
+  [ecs-principles.md](ecs-principles.md#4-everything-is-data-notifications-included)), so all behavior runs in
+  schedule order.
 - Errors go to `World.SystemError`. Without a subscriber they propagate.
 
 ## Source generators and analyzer (`EasyEcs.Generator`)
@@ -109,7 +101,7 @@ Each event type has one channel per world: an immutable `IEventHandler<T>[]`, in
 | Component | What it does |
 |---|---|
 | `ArityGenerator` | Emits every T1..T9 family of `EasyEcs.Core` from one template each: `Entity.Set` / `Remove`, `World.CreateEntity`, `IForEach`, `ForEach`, `Query`, `Count`, `Any`, `QueryItem` / `QueryEnumerator`. Runs only for `EasyEcs.Core`. |
-| `SystemGenerator` | Turns `[ForEach]` methods into struct jobs, static filters and a `GeneratedUpdate` override. Turns `IEventHandler<T>` on systems into a `GeneratedCreate` override that subscribes. |
+| `SystemGenerator` | Turns `[ForEach]` methods into struct jobs, static filters and a `GeneratedUpdate` override. |
 | `EasyEcsAnalyzer` | Reports EECS001–EECS006 (errors) and EECS007–EECS008 (ECS-principle warnings, see [ecs-principles.md](ecs-principles.md)). |
 
 Following the incremental-generator guidelines:
@@ -125,17 +117,16 @@ Following the incremental-generator guidelines:
 ## Type indices
 
 `TypeIndex<TFamily, T>` assigns each type a dense, process-wide index within a family on first use. It is a static
-readonly field, so the JIT folds it to a constant. There are three families:
+readonly field, so the JIT folds it to a constant. There are two families (plus system groups):
 
 - `ComponentType<T>.Bit`: mask bit and column index.
 - `SingletonType<T>.Index`
-- `EventType<T>.Index`
 
 Every world uses the same indices, so masks are comparable across worlds.
 
 ## Threading
 
-- Structural operations, subscriptions and singleton creation take the world's `System.Threading.Lock`.
-- Queries, `Publish`, `Get` and `Has` are lock-free.
+- Structural operations, system changes and singleton creation take the world's `System.Threading.Lock`.
+- Queries, `Get` and `Has` are lock-free.
 - Component values are unsynchronized by design. The recommended layout is **one world per shard, owned by one
   thread**, where the lock is always uncontended.
