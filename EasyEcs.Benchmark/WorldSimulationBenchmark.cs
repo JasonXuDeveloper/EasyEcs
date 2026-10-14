@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 using BenchmarkDotNet.Attributes;
-using EasyEcs.Benchmark.Simulation;
+using EasyEcs.Benchmark.Scenario;
 using EasyEcs.Core;
 
 namespace EasyEcs.Benchmark;
@@ -15,22 +15,22 @@ public class WorldSimulationBenchmark
 {
     [Params(10_000, 100_000)] public int Entities;
 
-    private Context _world;
+    private World _world;
 
     [GlobalSetup]
     public void Setup()
     {
-        _world = World.Create(Entities);
+        _world = Simulation.Create(Entities);
         // Let projectile counts, status effects and archetypes reach steady state (and assert the world is busy).
-        World.WarmUp(_world);
+        Simulation.WarmUp(_world);
     }
 
     [GlobalCleanup]
-    public void Cleanup() => _world.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    public void Cleanup() => _world.Dispose();
 
     /// <summary>One full world tick.</summary>
     [Benchmark]
-    public void Tick() => _world.Update().GetAwaiter().GetResult();
+    public void Tick() => _world.Update();
 }
 
 /// <summary>
@@ -42,7 +42,7 @@ public class ShardedWorldBenchmark
 {
     [Params(100_000)] public int TotalEntities;
 
-    private Context[] _worlds;
+    private World[] _worlds;
     private Thread[] _threads;
     private Barrier _start, _done;
     private volatile bool _stop;
@@ -51,11 +51,11 @@ public class ShardedWorldBenchmark
     public void Setup()
     {
         int shards = Environment.ProcessorCount;
-        _worlds = new Context[shards];
+        _worlds = new World[shards];
         for (int i = 0; i < shards; i++)
         {
-            _worlds[i] = World.Create(TotalEntities / shards);
-            World.WarmUp(_worlds[i]);
+            _worlds[i] = Simulation.Create(TotalEntities / shards);
+            Simulation.WarmUp(_worlds[i]);
         }
 
         // Long-lived shard threads, like a real server (no thread pool hops per tick).
@@ -71,7 +71,7 @@ public class ShardedWorldBenchmark
                 {
                     _start.SignalAndWait();
                     if (_stop) return;
-                    world.Update().GetAwaiter().GetResult();
+                    world.Update();
                     _done.SignalAndWait();
                 }
             }) { IsBackground = true };
@@ -84,7 +84,7 @@ public class ShardedWorldBenchmark
     {
         _stop = true;
         _start.SignalAndWait();
-        foreach (var w in _worlds) w.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        foreach (var w in _worlds) w.Dispose();
     }
 
     /// <summary>One tick of every shard in parallel.</summary>

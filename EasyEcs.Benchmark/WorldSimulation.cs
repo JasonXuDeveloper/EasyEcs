@@ -3,10 +3,10 @@ using EasyEcs.Core;
 using EasyEcs.Core.Components;
 using EasyEcs.Core.Systems;
 
-namespace EasyEcs.Benchmark.Simulation;
+namespace EasyEcs.Benchmark.Scenario;
 
 // A realistic MMO/battle-server world: players and NPCs move, fight, gain and lose status effects,
-// projectiles spawn and expire every tick. Every system is a [Query] system, as users would write it.
+// projectiles spawn and expire every tick. Every system is a [Each] system, as users would write it.
 
 public struct Position : IComponent { public float X, Y; }
 public struct Velocity : IComponent { public float X, Y; }
@@ -51,7 +51,7 @@ public partial class MovementSystem : SystemBase
 {
     public override int Priority => 0;
 
-    [Query, Without<Stunned>, Without<Dead>]
+    [Each, Without<Stunned>, Without<Dead>]
     private static void Move(ref Position p, ref Velocity v)
     {
         p.X += v.X;
@@ -66,13 +66,13 @@ public partial class AoiSystem : SystemBase
 {
     public override int Priority => 1;
 
-    [Query, Without<Dead>]
-    private static void UpdateCell(in Position p, ref AoiCell aoi, Context context)
+    [Each, Without<Dead>]
+    private static void UpdateCell(in Position p, ref AoiCell aoi, World world)
     {
         int cell = (int)(p.Y * (1f / 64f)) * 64 + (int)(p.X * (1f / 64f));
         if (cell == aoi.Cell) return;
         aoi.Cell = cell;
-        context.GetSingletonComponent<WorldStats>().Value.CellChanges++;
+        world.GetSingleton<WorldStats>().CellChanges++;
     }
 }
 
@@ -81,17 +81,17 @@ public partial class CombatSystem : SystemBase
 {
     public override int Priority => 2;
 
-    [Query, Without<Dead>, Without<Stunned>]
-    private static void Fight(int entityId, ref Attack attack, ref Health health, Context context)
+    [Each, Without<Dead>, Without<Stunned>]
+    private static void Fight(int entityId, ref Attack attack, ref Health health, World world)
     {
         if (--attack.Cooldown > 0) return;
         attack.Cooldown = attack.Interval;
 
-        ref var stats = ref context.GetSingletonComponent<WorldStats>().Value;
+        ref var stats = ref world.GetSingleton<WorldStats>();
         stats.Hits++;
         health.Value -= attack.Damage;
 
-        var entity = context.GetEntityById(entityId);
+        var entity = world.GetEntityById(entityId);
         if (Rng.Chance(stats.Tick, entityId, 1, 50) && !entity.Value.HasComponent<Burning>())
         {
             ref var burning = ref entity.Value.AddComponent<Burning>().Value;
@@ -110,27 +110,27 @@ public partial class StatusSystem : SystemBase
 {
     public override int Priority => 3;
 
-    [Query]
-    private static void Burn(int entityId, ref Burning burning, ref Health health, Context context)
+    [Each]
+    private static void Burn(int entityId, ref Burning burning, ref Health health, World world)
     {
         health.Value -= burning.DamagePerTick;
         if (--burning.Ticks <= 0)
-            context.GetEntityById(entityId).Value.RemoveComponent<Burning>();
+            world.GetEntityById(entityId).Value.RemoveComponent<Burning>();
     }
 
-    [Query]
-    private static void Recover(int entityId, ref Stunned stunned, Context context)
+    [Each]
+    private static void Recover(int entityId, ref Stunned stunned, World world)
     {
         if (--stunned.Ticks <= 0)
-            context.GetEntityById(entityId).Value.RemoveComponent<Stunned>();
+            world.GetEntityById(entityId).Value.RemoveComponent<Stunned>();
     }
 
-    [Query, Without<Dead>]
-    private static void CheckDeath(int entityId, ref Health health, Context context)
+    [Each, Without<Dead>]
+    private static void CheckDeath(int entityId, ref Health health, World world)
     {
         if (health.Value > 0) return;
-        context.GetEntityById(entityId).Value.AddComponent<Dead>();
-        context.GetSingletonComponent<WorldStats>().Value.Deaths++;
+        world.GetEntityById(entityId).Value.AddComponent<Dead>();
+        world.GetSingleton<WorldStats>().Deaths++;
     }
 }
 
@@ -139,35 +139,35 @@ public partial class LifecycleSystem : SystemBase
 {
     public override int Priority => 4;
 
-    [Query]
-    private static void Expire(int entityId, ref Lifetime lifetime, Context context)
+    [Each]
+    private static void Expire(int entityId, ref Lifetime lifetime, World world)
     {
         if (--lifetime.Ticks <= 0)
-            context.DestroyEntity(context.GetEntityById(entityId));
+            world.DestroyEntity(world.GetEntityById(entityId));
     }
 
-    [Query, With<Dead>, With<Npc>]
-    private static void Despawn(int entityId, in Position p, Context context)
+    [Each, With<Dead>, With<Npc>]
+    private static void Despawn(int entityId, in Position p, World world)
     {
-        context.DestroyEntity(context.GetEntityById(entityId));
-        World.SpawnNpc(context, entityId * 31 + 7);
+        world.DestroyEntity(world.GetEntityById(entityId));
+        Simulation.SpawnNpc(world, entityId * 31 + 7);
     }
 
-    [Query, With<Dead>, With<Player>]
-    private static void Respawn(int entityId, ref Health health, Context context)
+    [Each, With<Dead>, With<Player>]
+    private static void Respawn(int entityId, ref Health health, World world)
     {
         health.Value = health.Max;
-        context.GetEntityById(entityId).Value.RemoveComponent<Dead>();
+        world.GetEntityById(entityId).Value.RemoveComponent<Dead>();
     }
 
-    [Query, With<Player>, Without<Dead>]
-    private static void Shoot(int entityId, in Position p, in Velocity v, Context context)
+    [Each, With<Player>, Without<Dead>]
+    private static void Shoot(int entityId, in Position p, in Velocity v, World world)
     {
         // ~5% of players fire a projectile each tick
-        ref var stats = ref context.GetSingletonComponent<WorldStats>().Value;
+        ref var stats = ref world.GetSingleton<WorldStats>();
         if (!Rng.Chance(stats.Tick, entityId, 3, 50)) return;
         stats.Spawns++;
-        var bullet = context.CreateEntity();
+        var bullet = world.CreateEntity();
         var (bp, bv, life, proj) = bullet.Value.AddComponents<Position, Velocity, Lifetime, Projectile>();
         bp.Value = p;
         bv.Value.X = v.X * 4;
@@ -178,37 +178,33 @@ public partial class LifecycleSystem : SystemBase
 }
 
 /// <summary>Ticks the world clock (last).</summary>
-public partial class ClockSystem : SystemBase, IExecuteSystem
+public sealed class ClockSystem : SystemBase
 {
     public override int Priority => 100;
 
-    public Cysharp.Threading.Tasks.UniTask OnExecute(Context context)
-    {
-        context.GetSingletonComponent<WorldStats>().Value.Tick++;
-        return Cysharp.Threading.Tasks.UniTask.CompletedTask;
-    }
+    protected override void OnUpdate() => World.GetSingleton<WorldStats>().Tick++;
 }
 
-public static class World
+public static class Simulation
 {
     /// <summary>
     /// Run warm-up ticks and verify the simulation is actually busy (fights, deaths, spawns, AOI churn), so a
     /// benchmark can never silently measure an idle world.
     /// </summary>
-    public static void WarmUp(Context world, int ticks = 200)
+    public static void WarmUp(World world, int ticks = 200)
     {
-        ref var stats = ref world.GetSingletonComponent<WorldStats>().Value;
-        for (int i = 0; i < ticks; i++) world.Update().GetAwaiter().GetResult();
+        ref var stats = ref world.GetSingleton<WorldStats>();
+        for (int i = 0; i < ticks; i++) world.Update();
         if (stats.Hits == 0 || stats.Deaths == 0 || stats.Spawns == 0 || stats.CellChanges == 0)
             throw new System.InvalidOperationException(
                 $"Simulation is idle: hits={stats.Hits} deaths={stats.Deaths} spawns={stats.Spawns} cells={stats.CellChanges}");
     }
 
     /// <summary>Build a world with <paramref name="entities"/> actors: 30% players, 70% NPCs.</summary>
-    public static Context Create(int entities)
+    public static World Create(int entities)
     {
-        var ctx = new Context(new Context.Options(parallel: false, initialEntityCapacity: entities * 2));
-        ctx.AddSingletonComponent<WorldStats>();
+        var ctx = new World(new WorldOptions { InitialEntityCapacity = entities * 2 });
+        ctx.AddSingleton<WorldStats>();
         ctx.AddSystem<MovementSystem>();
         ctx.AddSystem<AoiSystem>();
         ctx.AddSystem<CombatSystem>();
@@ -222,11 +218,10 @@ public static class World
             else SpawnNpc(ctx, i);
         }
 
-        ctx.Init().GetAwaiter().GetResult();
         return ctx;
     }
 
-    private static void SpawnPlayer(Context ctx, int seed)
+    private static void SpawnPlayer(World ctx, int seed)
     {
         var e = ctx.CreateEntity();
         var (p, v, h, a) = e.Value.AddComponents<Position, Velocity, Health, Attack>();
@@ -237,7 +232,7 @@ public static class World
         aoi.Value.Cell = -1;
     }
 
-    public static void SpawnNpc(Context ctx, int seed)
+    public static void SpawnNpc(World ctx, int seed)
     {
         var e = ctx.CreateEntity();
         var (p, v, h, a, aoi, npc) = e.Value.AddComponents<Position, Velocity, Health, Attack, AoiCell, Npc>();

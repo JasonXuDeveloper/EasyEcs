@@ -28,14 +28,14 @@ public struct Clock : ISingletonComponent
 /// <summary>[Query]-generated system doing the same work as ForEachWrite.</summary>
 public partial class IntegrateSystem : EasyEcs.Core.Systems.SystemBase
 {
-    [EasyEcs.Core.Systems.Query]
+    [EasyEcs.Core.Systems.Each]
     private static void Integrate(ref Position p, in Velocity v)
     {
         p.X += v.X;
         p.Y += v.Y;
     }
 
-    public void Run(Context ctx) => RunIntegrate(ctx);
+    public void Run() => RunEach();
 }
 
 /// <summary>
@@ -47,12 +47,12 @@ public class MicroBenchmarks
 {
     [Params(10_000)] public int N;
 
-    private Context _queryCtx;
+    private World _queryCtx;
 
     [GlobalSetup]
     public void Setup()
     {
-        _queryCtx = new Context(new Context.Options(parallel: false));
+        _queryCtx = new World();
         for (int i = 0; i < N; i++)
         {
             var e = _queryCtx.CreateEntity();
@@ -60,14 +60,15 @@ public class MicroBenchmarks
             if ((i & 1) == 0) e.Value.AddComponent<Health>();
         }
 
-        _queryCtx.AddSingletonComponent<Clock>();
+        _queryCtx.AddSingleton<Clock>();
+        _integrate = _queryCtx.AddSystem<IntegrateSystem>();
     }
 
     /// <summary>Create N entities with 2 components, then destroy them all (one lifecycle round).</summary>
     [Benchmark]
     public int CreateAddDestroy()
     {
-        var ctx = new Context(new Context.Options(parallel: false));
+        var ctx = new World();
         var refs = new EntityRef[N];
         for (int i = 0; i < N; i++)
         {
@@ -81,11 +82,11 @@ public class MicroBenchmarks
         return ctx.EntityCount;
     }
 
-    /// <summary>Long-running process: 10 rounds of create -> add -> destroy in the same context.</summary>
+    /// <summary>Long-running process: 10 rounds of create -> add -> destroy in the same world.</summary>
     [Benchmark]
     public int Churn()
     {
-        var ctx = new Context(new Context.Options(parallel: false, initialEntityCapacity: 1024));
+        var ctx = new World(new WorldOptions { InitialEntityCapacity = 1024 });
         var refs = new EntityRef[N / 10];
         for (int round = 0; round < 10; round++)
         {
@@ -108,7 +109,7 @@ public class MicroBenchmarks
     public int ToggleComponent()
     {
         int c = 0;
-        foreach (var r in _queryCtx.GroupOf<Position, Velocity>())
+        foreach (var r in _queryCtx.Query<Position, Velocity>())
         {
             ref var e = ref r.Entity;
             if (e.HasComponent<Health>())
@@ -127,7 +128,7 @@ public class MicroBenchmarks
     public float QueryIterate()
     {
         float sum = 0;
-        foreach (var r in _queryCtx.GroupOf<Position, Velocity>())
+        foreach (var r in _queryCtx.Query<Position, Velocity>())
         {
             ref var p = ref r.Component1;
             ref readonly var v = ref r.Component2;
@@ -173,7 +174,7 @@ public class MicroBenchmarks
     [Benchmark]
     public void QueryWrite()
     {
-        foreach (var r in _queryCtx.GroupOf<Position, Velocity>())
+        foreach (var r in _queryCtx.Query<Position, Velocity>())
         {
             ref var p = ref r.Component1;
             ref readonly var v = ref r.Component2;
@@ -200,11 +201,11 @@ public class MicroBenchmarks
         }
     }
 
-    private readonly IntegrateSystem _integrate = new();
+    private IntegrateSystem _integrate;
 
     /// <summary>Pure write via a [Query] system (generated job).</summary>
     [Benchmark]
-    public void QuerySystemWrite() => _integrate.Run(_queryCtx);
+    public void EachSystemWrite() => _integrate.Run();
 
     /// <summary>Pure write: ForEach.</summary>
     [Benchmark]
@@ -219,7 +220,7 @@ public class MicroBenchmarks
     public int QueryIterate3()
     {
         int sum = 0;
-        foreach (var r in _queryCtx.GroupOf<Position, Velocity, Health>())
+        foreach (var r in _queryCtx.Query<Position, Velocity, Health>())
         {
             sum += ++r.Component3.Value;
         }
@@ -234,7 +235,7 @@ public class MicroBenchmarks
         long s = 0;
         for (int i = 0; i < 1000; i++)
         {
-            ref var c = ref _queryCtx.GetSingletonComponent<Clock>().Value;
+            ref var c = ref _queryCtx.GetSingleton<Clock>();
             s += ++c.Tick;
         }
 
