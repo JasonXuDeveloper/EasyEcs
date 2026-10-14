@@ -1,7 +1,5 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
-using EasyEcs.Core;
-using EasyEcs.Core.Components;
 
 namespace EasyEcs.Benchmark;
 
@@ -25,17 +23,28 @@ public struct Clock : ISingletonComponent
     public long Tick;
 }
 
-/// <summary>[Query]-generated system doing the same work as ForEachWrite.</summary>
-public partial class IntegrateSystem : EasyEcs.Core.Systems.SystemBase
+public struct PingTotal : ISingletonComponent
 {
-    [EasyEcs.Core.Systems.Each]
+    public long Value;
+}
+
+public record struct Ping(int Value) : IEvent;
+
+/// <summary>[ForEach] system doing the same work as ForEachWrite (the only system of its world).</summary>
+public partial class IntegrateSystem : EcsSystem
+{
+    [ForEach]
     private static void Integrate(ref Position p, in Velocity v)
     {
         p.X += v.X;
         p.Y += v.Y;
     }
+}
 
-    public void Run() => RunEach();
+/// <summary>Event handler system (subscribed by the generator); the total is world state, so it is a singleton.</summary>
+public partial class PingCounter : EcsSystem, IEventHandler<Ping>
+{
+    public void Handle(in Ping e) => World.GetSingleton<PingTotal>().Value += e.Value;
 }
 
 /// <summary>
@@ -55,53 +64,51 @@ public class MicroBenchmarks
         _queryCtx = new World();
         for (int i = 0; i < N; i++)
         {
-            var e = _queryCtx.CreateEntity();
-            e.Value.AddComponents<Position, Velocity>();
-            if ((i & 1) == 0) e.Value.AddComponent<Health>();
+            var e = _queryCtx.CreateEntity(new Position(), new Velocity());
+            if ((i & 1) == 0) e.Add<Health>();
         }
 
         _queryCtx.AddSingleton<Clock>();
-        _integrate = _queryCtx.AddSystem<IntegrateSystem>();
+        _queryCtx.AddSingleton<PingTotal>();
+        _queryCtx.AddSystem<PingCounter>();
+        _systemWorld = new World();
+        for (int i = 0; i < N; i++) _systemWorld.CreateEntity(new Position(), new Velocity());
+        _systemWorld.AddSystem<IntegrateSystem>();
     }
 
     /// <summary>Create N entities with 2 components, then destroy them all (one lifecycle round).</summary>
     [Benchmark]
     public int CreateAddDestroy()
     {
-        var ctx = new World();
-        var refs = new EntityRef[N];
+        var world = new World();
+        var entities = new Entity[N];
         for (int i = 0; i < N; i++)
         {
-            var e = ctx.CreateEntity();
-            e.Value.AddComponent<Position>();
-            e.Value.AddComponent<Velocity>();
-            refs[i] = e;
+            var e = world.CreateEntity();
+            e.Add<Position>();
+            e.Add<Velocity>();
+            entities[i] = e;
         }
 
-        for (int i = 0; i < N; i++) ctx.DestroyEntity(refs[i]);
-        return ctx.EntityCount;
+        for (int i = 0; i < N; i++) entities[i].Destroy();
+        return world.EntityCount;
     }
 
     /// <summary>Long-running process: 10 rounds of create -> add -> destroy in the same world.</summary>
     [Benchmark]
     public int Churn()
     {
-        var ctx = new World(new WorldOptions { InitialEntityCapacity = 1024 });
-        var refs = new EntityRef[N / 10];
+        var world = new World(new WorldOptions { InitialEntityCapacity = 1024 });
+        var entities = new Entity[N / 10];
         for (int round = 0; round < 10; round++)
         {
-            for (int i = 0; i < refs.Length; i++)
-            {
-                var e = ctx.CreateEntity();
-                e.Value.AddComponent<Position>();
-                e.Value.AddComponent<Health>();
-                refs[i] = e;
-            }
+            for (int i = 0; i < entities.Length; i++)
+                entities[i] = world.CreateEntity(new Position(), new Health());
 
-            for (int i = 0; i < refs.Length; i++) ctx.DestroyEntity(refs[i]);
+            for (int i = 0; i < entities.Length; i++) entities[i].Destroy();
         }
 
-        return ctx.EntityCount;
+        return world.EntityCount;
     }
 
     /// <summary>Remove + add a component (state toggles such as buffs or combat state).</summary>
@@ -111,11 +118,11 @@ public class MicroBenchmarks
         int c = 0;
         foreach (var r in _queryCtx.Query<Position, Velocity>())
         {
-            ref var e = ref r.Entity;
-            if (e.HasComponent<Health>())
+            var e = r.Entity;
+            if (e.Has<Health>())
             {
-                e.RemoveComponent<Health>();
-                e.AddComponent<Health>();
+                e.Remove<Health>();
+                e.Add<Health>();
                 c++;
             }
         }
@@ -170,7 +177,7 @@ public class MicroBenchmarks
         }
     }
 
-    /// <summary>Pure write (no cross-entity dependency chain) measuring iteration overhead: GroupOf.</summary>
+    /// <summary>Pure write (no cross-entity dependency chain) measuring Query iteration overhead.</summary>
     [Benchmark]
     public void QueryWrite()
     {
@@ -201,11 +208,11 @@ public class MicroBenchmarks
         }
     }
 
-    private IntegrateSystem _integrate;
+    private World _systemWorld;
 
-    /// <summary>Pure write via a [Query] system (generated job).</summary>
+    /// <summary>Pure write via a [ForEach] system: one World.Update of a world holding only that system.</summary>
     [Benchmark]
-    public void EachSystemWrite() => _integrate.Run();
+    public void ForEachSystemWrite() => _systemWorld.Update();
 
     /// <summary>Pure write: ForEach.</summary>
     [Benchmark]
@@ -226,6 +233,35 @@ public class MicroBenchmarks
         }
 
         return sum;
+    }
+
+    /// <summary>Publish 1000 events to one handler.</summary>
+    [Benchmark]
+    public void PublishEvents()
+    {
+        for (int i = 0; i < 1000; i++) _queryCtx.Publish(new Ping(i));
+    }
+
+    /// <summary>1000 component reads/writes through entity handles (version-checked).</summary>
+    [Benchmark]
+    public int HandleAccess()
+    {
+        _handles ??= CollectHandles();
+        int sum = 0;
+        var handles = _handles;
+        for (int i = 0; i < handles.Length; i++)
+            sum += (int)(handles[i].Get<Position>().X += 1);
+        return sum;
+    }
+
+    private Entity[] _handles;
+
+    private Entity[] CollectHandles()
+    {
+        var list = new System.Collections.Generic.List<Entity>();
+        foreach (var r in _queryCtx.Query<Position>())
+            if (list.Count < 1000) list.Add(r.Entity);
+        return list.ToArray();
     }
 
     /// <summary>Singleton component read/write.</summary>

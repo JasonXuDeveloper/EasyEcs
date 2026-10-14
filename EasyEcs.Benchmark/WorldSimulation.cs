@@ -1,12 +1,11 @@
 using System.Runtime.CompilerServices;
-using EasyEcs.Core;
-using EasyEcs.Core.Components;
-using EasyEcs.Core.Systems;
 
 namespace EasyEcs.Benchmark.Scenario;
 
 // A realistic MMO/battle-server world: players and NPCs move, fight, gain and lose status effects,
-// projectiles spawn and expire every tick. Every system is a [Each] system, as users would write it.
+// projectiles spawn and expire every tick, deaths are published as events. Systems are written as users should write
+// them: one responsibility each, stateless (world state lives in the WorldStats singleton), coupled only via data and
+// events.
 
 public struct Position : IComponent { public float X, Y; }
 public struct Velocity : IComponent { public float X, Y; }
@@ -19,12 +18,15 @@ public struct Player : IComponent { public long AccountId; }
 public struct Npc : IComponent { public int TemplateId; }
 public struct Projectile : IComponent { public int OwnerId; }
 public struct Stunned : IComponent { public int Ticks; }
-public struct Dead : IComponent { }
+public struct Dead : IComponent;
+
+/// <summary>Published when an entity dies (consumed by the reward system: decoupled from combat).</summary>
+public record struct Died(int EntityId, bool IsPlayer) : IEvent;
 
 public struct WorldStats : ISingletonComponent
 {
     public long Tick;
-    public int CellChanges, Hits, Deaths, Spawns;
+    public int CellChanges, Hits, Deaths, NpcKills, Spawns;
     public int Width;
     public float CellSize;
 }
@@ -47,11 +49,11 @@ public static class Rng
 }
 
 /// <summary>Integrates movement, bounces at the borders, skips stunned and dead entities.</summary>
-public partial class MovementSystem : SystemBase
+public partial class MovementSystem : EcsSystem
 {
     public override int Priority => 0;
 
-    [Each, Without<Stunned>, Without<Dead>]
+    [ForEach, Without<Stunned>, Without<Dead>]
     private static void Move(ref Position p, ref Velocity v)
     {
         p.X += v.X;
@@ -62,11 +64,11 @@ public partial class MovementSystem : SystemBase
 }
 
 /// <summary>Area-of-interest grid: recompute the cell, count cell changes (would trigger enter/leave sync).</summary>
-public partial class AoiSystem : SystemBase
+public partial class AoiSystem : EcsSystem
 {
     public override int Priority => 1;
 
-    [Each, Without<Dead>]
+    [ForEach, Without<Dead>]
     private static void UpdateCell(in Position p, ref AoiCell aoi, World world)
     {
         int cell = (int)(p.Y * (1f / 64f)) * 64 + (int)(p.X * (1f / 64f));
@@ -77,12 +79,12 @@ public partial class AoiSystem : SystemBase
 }
 
 /// <summary>NPC/player attacks on cooldown; some hits set the target on fire or stun it (structural changes).</summary>
-public partial class CombatSystem : SystemBase
+public partial class CombatSystem : EcsSystem
 {
     public override int Priority => 2;
 
-    [Each, Without<Dead>, Without<Stunned>]
-    private static void Fight(int entityId, ref Attack attack, ref Health health, World world)
+    [ForEach, Without<Dead>, Without<Stunned>]
+    private static void Fight(Entity entity, ref Attack attack, ref Health health, World world)
     {
         if (--attack.Cooldown > 0) return;
         attack.Cooldown = attack.Interval;
@@ -91,94 +93,110 @@ public partial class CombatSystem : SystemBase
         stats.Hits++;
         health.Value -= attack.Damage;
 
-        var entity = world.GetEntityById(entityId);
-        if (Rng.Chance(stats.Tick, entityId, 1, 50) && !entity.Value.HasComponent<Burning>())
-        {
-            ref var burning = ref entity.Value.AddComponent<Burning>().Value;
-            burning.Ticks = 10;
-            burning.DamagePerTick = 3;
-        }
-        else if (Rng.Chance(stats.Tick, entityId, 2, 20) && !entity.Value.HasComponent<Stunned>())
-        {
-            entity.Value.AddComponent<Stunned>().Value.Ticks = 5;
-        }
+        if (Rng.Chance(stats.Tick, entity.Id, 1, 50) && !entity.Has<Burning>())
+            entity.Set(new Burning { Ticks = 10, DamagePerTick = 3 });
+        else if (Rng.Chance(stats.Tick, entity.Id, 2, 20) && !entity.Has<Stunned>())
+            entity.Set(new Stunned { Ticks = 5 });
     }
 }
 
-/// <summary>Status effects expire (component removal = archetype transition every few ticks per entity).</summary>
-public partial class StatusSystem : SystemBase
+/// <summary>Status effects tick and expire (component removal = archetype transition every few ticks per entity).</summary>
+public partial class StatusSystem : EcsSystem
 {
     public override int Priority => 3;
 
-    [Each]
-    private static void Burn(int entityId, ref Burning burning, ref Health health, World world)
+    [ForEach]
+    private static void Burn(Entity entity, ref Burning burning, ref Health health)
     {
         health.Value -= burning.DamagePerTick;
         if (--burning.Ticks <= 0)
-            world.GetEntityById(entityId).Value.RemoveComponent<Burning>();
+            entity.Remove<Burning>();
     }
 
-    [Each]
-    private static void Recover(int entityId, ref Stunned stunned, World world)
+    [ForEach]
+    private static void Recover(Entity entity, ref Stunned stunned)
     {
         if (--stunned.Ticks <= 0)
-            world.GetEntityById(entityId).Value.RemoveComponent<Stunned>();
-    }
-
-    [Each, Without<Dead>]
-    private static void CheckDeath(int entityId, ref Health health, World world)
-    {
-        if (health.Value > 0) return;
-        world.GetEntityById(entityId).Value.AddComponent<Dead>();
-        world.GetSingleton<WorldStats>().Deaths++;
+            entity.Remove<Stunned>();
     }
 }
 
-/// <summary>Projectiles expire; dead NPCs respawn; players respawn in place. Entity churn every tick.</summary>
-public partial class LifecycleSystem : SystemBase
+/// <summary>Turns depleted health into death: marks the entity and announces it (rewards, respawn react later).</summary>
+public partial class DeathSystem : EcsSystem
 {
     public override int Priority => 4;
 
-    [Each]
-    private static void Expire(int entityId, ref Lifetime lifetime, World world)
+    [ForEach, Without<Dead>]
+    private static void CheckDeath(Entity entity, in Health health, World world)
+    {
+        if (health.Value > 0) return;
+        entity.Set(new Dead());
+        world.Publish(new Died(entity.Id, entity.Has<Player>()));
+    }
+}
+
+/// <summary>Projectiles expire (entity churn every tick).</summary>
+public partial class LifetimeSystem : EcsSystem
+{
+    public override int Priority => 5;
+
+    [ForEach]
+    private static void Expire(Entity entity, ref Lifetime lifetime)
     {
         if (--lifetime.Ticks <= 0)
-            world.DestroyEntity(world.GetEntityById(entityId));
+            entity.Destroy();
     }
+}
 
-    [Each, With<Dead>, With<Npc>]
-    private static void Despawn(int entityId, in Position p, World world)
+/// <summary>Dead NPCs are replaced by fresh ones; dead players respawn in place.</summary>
+public partial class RespawnSystem : EcsSystem
+{
+    public override int Priority => 6;
+
+    [ForEach, With<Npc>]
+    private static void Despawn(Entity entity, in Dead _, World world)
     {
-        world.DestroyEntity(world.GetEntityById(entityId));
-        Simulation.SpawnNpc(world, entityId * 31 + 7);
+        entity.Destroy();
+        Simulation.SpawnNpc(world, entity.Id * 31 + 7);
     }
 
-    [Each, With<Dead>, With<Player>]
-    private static void Respawn(int entityId, ref Health health, World world)
+    [ForEach, With<Player>]
+    private static void Respawn(Entity entity, in Dead _, ref Health health)
     {
         health.Value = health.Max;
-        world.GetEntityById(entityId).Value.RemoveComponent<Dead>();
+        entity.Remove<Dead>();
     }
+}
 
-    [Each, With<Player>, Without<Dead>]
-    private static void Shoot(int entityId, in Position p, in Velocity v, World world)
+/// <summary>About 5% of living players fire a projectile each tick.</summary>
+public partial class ShootingSystem : EcsSystem
+{
+    public override int Priority => 7;
+
+    [ForEach, With<Player>, Without<Dead>]
+    private static void Shoot(Entity shooter, in Position p, in Velocity v, World world)
     {
-        // ~5% of players fire a projectile each tick
         ref var stats = ref world.GetSingleton<WorldStats>();
-        if (!Rng.Chance(stats.Tick, entityId, 3, 50)) return;
+        if (!Rng.Chance(stats.Tick, shooter.Id, 3, 50)) return;
         stats.Spawns++;
-        var bullet = world.CreateEntity();
-        var (bp, bv, life, proj) = bullet.Value.AddComponents<Position, Velocity, Lifetime, Projectile>();
-        bp.Value = p;
-        bv.Value.X = v.X * 4;
-        bv.Value.Y = v.Y * 4;
-        life.Value.Ticks = 20;
-        proj.Value.OwnerId = entityId;
+        world.CreateEntity(p, new Velocity { X = v.X * 4, Y = v.Y * 4 }, new Lifetime { Ticks = 20 },
+            new Projectile { OwnerId = shooter.Id });
+    }
+}
+
+/// <summary>Rewards and statistics react to deaths without combat knowing about them (event handler).</summary>
+public partial class RewardSystem : EcsSystem, IEventHandler<Died>
+{
+    public void Handle(in Died e)
+    {
+        ref var stats = ref World.GetSingleton<WorldStats>();
+        stats.Deaths++;
+        if (!e.IsPlayer) stats.NpcKills++;
     }
 }
 
 /// <summary>Ticks the world clock (last).</summary>
-public sealed class ClockSystem : SystemBase
+public sealed class ClockSystem : EcsSystem
 {
     public override int Priority => 100;
 
@@ -203,54 +221,48 @@ public static class Simulation
     /// <summary>Build a world with <paramref name="entities"/> actors: 30% players, 70% NPCs.</summary>
     public static World Create(int entities)
     {
-        var ctx = new World(new WorldOptions { InitialEntityCapacity = entities * 2 });
-        ctx.AddSingleton<WorldStats>();
-        ctx.AddSystem<MovementSystem>();
-        ctx.AddSystem<AoiSystem>();
-        ctx.AddSystem<CombatSystem>();
-        ctx.AddSystem<StatusSystem>();
-        ctx.AddSystem<LifecycleSystem>();
-        ctx.AddSystem<ClockSystem>();
+        var world = new World(new WorldOptions { InitialEntityCapacity = entities * 2 });
+        world.AddSingleton<WorldStats>();
+        world.AddSystem<MovementSystem>();
+        world.AddSystem<AoiSystem>();
+        world.AddSystem<CombatSystem>();
+        world.AddSystem<StatusSystem>();
+        world.AddSystem<DeathSystem>();
+        world.AddSystem<LifetimeSystem>();
+        world.AddSystem<RespawnSystem>();
+        world.AddSystem<ShootingSystem>();
+        world.AddSystem<RewardSystem>();
+        world.AddSystem<ClockSystem>();
 
         for (int i = 0; i < entities; i++)
         {
-            if (i % 10 < 3) SpawnPlayer(ctx, i);
-            else SpawnNpc(ctx, i);
+            if (i % 10 < 3) SpawnPlayer(world, i);
+            else SpawnNpc(world, i);
         }
 
-        return ctx;
+        return world;
     }
 
-    private static void SpawnPlayer(World ctx, int seed)
+    private static void SpawnPlayer(World world, int seed)
     {
-        var e = ctx.CreateEntity();
-        var (p, v, h, a) = e.Value.AddComponents<Position, Velocity, Health, Attack>();
-        var (aoi, player) = e.Value.AddComponents<AoiCell, Player>();
-        Init(seed, ref p.Value, ref v.Value, ref h.Value, ref a.Value);
-        h.Value.Max = h.Value.Value = 500;
-        player.Value.AccountId = seed;
-        aoi.Value.Cell = -1;
+        var (p, v, h, a) = Roll(seed);
+        h.Max = h.Value = 500;
+        world.CreateEntity(p, v, h, a, new AoiCell { Cell = -1 }, new Player { AccountId = seed });
     }
 
-    public static void SpawnNpc(World ctx, int seed)
+    public static void SpawnNpc(World world, int seed)
     {
-        var e = ctx.CreateEntity();
-        var (p, v, h, a, aoi, npc) = e.Value.AddComponents<Position, Velocity, Health, Attack, AoiCell, Npc>();
-        Init(seed, ref p.Value, ref v.Value, ref h.Value, ref a.Value);
-        npc.Value.TemplateId = seed % 50;
-        aoi.Value.Cell = -1;
+        var (p, v, h, a) = Roll(seed);
+        world.CreateEntity(p, v, h, a, new AoiCell { Cell = -1 }, new Npc { TemplateId = seed % 50 });
     }
 
-    private static void Init(int seed, ref Position p, ref Velocity v, ref Health h, ref Attack a)
+    private static (Position, Velocity, Health, Attack) Roll(int seed)
     {
         uint r = Rng.Hash(seed, seed);
-        p.X = r % 4096;
-        p.Y = (r >> 12) % 4096;
-        v.X = (int)(r % 7) - 3;
-        v.Y = (int)((r >> 8) % 7) - 3;
-        h.Max = h.Value = 100 + (int)(r % 100);
-        a.Interval = 5 + (int)(r % 10);
-        a.Cooldown = (int)(r % 10);
-        a.Damage = 5 + (int)(r % 5);
+        int hp = 100 + (int)(r % 100);
+        return (new Position { X = r % 4096, Y = (r >> 12) % 4096 },
+            new Velocity { X = (int)(r % 7) - 3, Y = (int)((r >> 8) % 7) - 3 },
+            new Health { Value = hp, Max = hp },
+            new Attack { Interval = 5 + (int)(r % 10), Cooldown = (int)(r % 10), Damage = 5 + (int)(r % 5) });
     }
 }

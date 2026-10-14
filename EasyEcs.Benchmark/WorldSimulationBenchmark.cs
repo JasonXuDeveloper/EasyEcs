@@ -2,7 +2,6 @@ using System;
 using System.Threading;
 using BenchmarkDotNet.Attributes;
 using EasyEcs.Benchmark.Scenario;
-using EasyEcs.Core;
 
 namespace EasyEcs.Benchmark;
 
