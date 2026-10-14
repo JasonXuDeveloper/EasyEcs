@@ -6,6 +6,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EasyEcs.UnitTest", "EasyEcs
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EasyEcs.Benchmark", "EasyEcs.Benchmark\EasyEcs.Benchmark.csproj", "{532CFACB-79E2-469C-AA35-D3FC83B2DC88}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EasyEcs.Generator", "EasyEcs.Generator\EasyEcs.Generator.csproj", "{8FF0617F-63CD-451F-A46B-EF20CF4BC18A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -52,6 +54,18 @@ Global
 		{532CFACB-79E2-469C-AA35-D3FC83B2DC88}.Release|x64.Build.0 = Release|Any CPU
 		{532CFACB-79E2-469C-AA35-D3FC83B2DC88}.Release|x86.ActiveCfg = Release|Any CPU
 		{532CFACB-79E2-469C-AA35-D3FC83B2DC88}.Release|x86.Build.0 = Release|Any CPU
+		{8FF0617F-63CD-451F-A46B-EF20CF4BC18A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8FF0617F-63CD-451F-A46B-EF20CF4BC18A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8FF0617F-63CD-451F-A46B-EF20CF4BC18A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{8FF0617F-63CD-451F-A46B-EF20CF4BC18A}.Debug|x64.Build.0 = Debug|Any CPU
+		{8FF0617F-63CD-451F-A46B-EF20CF4BC18A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{8FF0617F-63CD-451F-A46B-EF20CF4BC18A}.Debug|x86.Build.0 = Debug|Any CPU
+		{8FF0617F-63CD-451F-A46B-EF20CF4BC18A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8FF0617F-63CD-451F-A46B-EF20CF4BC18A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8FF0617F-63CD-451F-A46B-EF20CF4BC18A}.Release|x64.ActiveCfg = Release|Any CPU
+		{8FF0617F-63CD-451F-A46B-EF20CF4BC18A}.Release|x64.Build.0 = Release|Any CPU
+		{8FF0617F-63CD-451F-A46B-EF20CF4BC18A}.Release|x86.ActiveCfg = Release|Any CPU
+		{8FF0617F-63CD-451F-A46B-EF20CF4BC18A}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

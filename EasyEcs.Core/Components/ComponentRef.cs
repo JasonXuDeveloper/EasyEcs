@@ -36,44 +36,27 @@ public readonly struct ComponentRef<T> where T : struct, IComponent
 
     public ref T Value
     {
-        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
             int id = EntityId;
-            int version = Version;
+            var context = _context;
 
-            // Validate version using Unsafe (zero bounds checks)
-            ref int actualVersion = ref Unsafe.Add(
-                ref MemoryMarshal.GetArrayDataReference(_context.EntityVersions),
-                id);
-
-            if (actualVersion != version)
+            // Validate version without bounds checks (id < Meta.Length is an invariant of live refs)
+            if (Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(context.Meta), id).Version != Version)
                 ThrowEntityDestroyed();
 
-            // Lazy initialization: ensure component array exists
-            // This handles cases where TagRegistry static indices are shared across contexts
-            T[] componentArray = EnsureComponentArray();
+            // Fast path inline: the column exists whenever this context added the component
+            var columns = context.Components;
+            if (columns == null || _componentIndex >= (uint)columns.Length || columns[_componentIndex] == null)
+                return ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(EnsureComponentArraySlow()), id);
 
-            return ref Unsafe.Add(
-                ref MemoryMarshal.GetArrayDataReference(componentArray),
-                id);
+            return ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Unsafe.As<T[]>(columns[_componentIndex])), id);
         }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private T[] EnsureComponentArray()
-    {
-        // Fast path: component array already initialized
-        if (_context.Components != null &&
-            _componentIndex < _context.Components.Length &&
-            _context.Components[_componentIndex] != null)
-        {
-            return Unsafe.As<T[]>(_context.Components[_componentIndex]);
-        }
-
-        // Slow path: need to initialize (happens when static TypeBitIndex is shared across contexts)
-        return _context.EnsureComponentArrayInitialized<T>(_componentIndex);
-    }
+    private T[] EnsureComponentArraySlow() => _context.EnsureComponentArrayInitialized<T>(_componentIndex);
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowEntityDestroyed() =>

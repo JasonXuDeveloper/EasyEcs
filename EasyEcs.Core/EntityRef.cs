@@ -41,8 +41,7 @@ public readonly struct EntityRef : IEquatable<EntityRef>
 
             // Validate version using Unsafe (zero bounds checks)
             ref int actualVersion = ref Unsafe.Add(
-                ref MemoryMarshal.GetArrayDataReference(_context.EntityVersions),
-                id);
+                ref MemoryMarshal.GetArrayDataReference(_context.Meta), id).Version;
 
             if (actualVersion != Version)
                 ThrowEntityDestroyed();

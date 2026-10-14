@@ -26,8 +26,7 @@ public partial class Context : IAsyncDisposable
     // Per-context singleton storage indexed by SingletonIndex<T>.Value.
     private object[] _singletons = Array.Empty<object>();
     internal Entity[] Entities;
-    internal int[] EntityVersions; // Version tracking for destroyed entities
-    private bool[] _activeEntityIds;
+    internal EntityMeta[] Meta; // version + archetype membership per entity id (see EntityMeta)
     private int _activeEntityCount;
 
     // Component storage
@@ -60,10 +59,7 @@ public partial class Context : IAsyncDisposable
         // Pre-allocate entity storage
         int initialCapacity = _options.InitialEntityCapacity;
         Entities = new Entity[initialCapacity];
-        EntityVersions = new int[initialCapacity];
-        _activeEntityIds = new bool[initialCapacity];
-        EntityArchetypes = new Archetype[initialCapacity];
-        EntitySlots = new int[initialCapacity];
+        Meta = new EntityMeta[initialCapacity];
     }
 
     public class Options
@@ -110,10 +106,7 @@ public partial class Context : IAsyncDisposable
     private void ResizeEntityArrays(int newCapacity)
     {
         Array.Resize(ref Entities, newCapacity);
-        Array.Resize(ref EntityVersions, newCapacity);
-        Array.Resize(ref _activeEntityIds, newCapacity);
-        Array.Resize(ref EntityArchetypes, newCapacity);
-        Array.Resize(ref EntitySlots, newCapacity);
+        Array.Resize(ref Meta, newCapacity);
 
         StorageVersion++;
 
@@ -139,9 +132,10 @@ public partial class Context : IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetEntityById(int id, out EntityRef entityRef)
     {
-        if (id >= 0 && id < _activeEntityIds.Length && _activeEntityIds[id])
+        var meta = Meta;
+        if ((uint)id < (uint)meta.Length && meta[id].Archetype != null)
         {
-            entityRef = new EntityRef(id, EntityVersions[id], this);
+            entityRef = new EntityRef(id, meta[id].Version, this);
             return true;
         }
 
@@ -155,8 +149,9 @@ public partial class Context : IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public EntityRef GetEntityById(int id)
     {
-        if (id >= 0 && id < _activeEntityIds.Length && _activeEntityIds[id])
-            return new EntityRef(id, EntityVersions[id], this);
+        var meta = Meta;
+        if ((uint)id < (uint)meta.Length && meta[id].Archetype != null)
+            return new EntityRef(id, meta[id].Version, this);
 
         throw new InvalidOperationException("Entity not found");
     }
@@ -166,15 +161,15 @@ public partial class Context : IAsyncDisposable
     /// </summary>
     public EntityRef EntityAt(int index)
     {
-        var span = _activeEntityIds.AsSpan();
+        var span = Meta.AsSpan();
         int currentIndex = 0;
 
         for (var i = 0; i < span.Length; i++)
         {
-            if (span[i])
+            if (span[i].Archetype != null)
             {
                 if (currentIndex == index)
-                    return new EntityRef(i, EntityVersions[i], this);
+                    return new EntityRef(i, span[i].Version, this);
                 currentIndex++;
             }
         }
@@ -207,15 +202,14 @@ public partial class Context : IAsyncDisposable
                 }
             }
 
-            Entities[id] = new Entity(this, id, EntityVersions[id]);
-            _activeEntityIds[id] = true;
+            Entities[id] = new Entity(this, id, Meta[id].Version);
             _activeEntityCount++;
 
             // Add to empty archetype
             _emptyArchetype ??= GetOrCreateArchetype(in Tag.Empty);
             MoveToArchetype(id, _emptyArchetype);
 
-            return new EntityRef(id, EntityVersions[id], this);
+            return new EntityRef(id, Meta[id].Version, this);
         }
     }
 
@@ -229,11 +223,12 @@ public partial class Context : IAsyncDisposable
         lock (_structuralLock)
         {
             int id = entity.Id;
-            if (!_activeEntityIds[id] || EntityVersions[id] != entity.Version)
+            ref var meta = ref Meta[id];
+            if (meta.Archetype == null || meta.Version != entity.Version)
                 return;
 
             // Increment version to invalidate all existing references
-            EntityVersions[id]++;
+            meta.Version++;
 
             DetachFromArchetype(id);
 
@@ -251,8 +246,7 @@ public partial class Context : IAsyncDisposable
 
             stored = default;
 
-            // Mark inactive and recycle the id
-            _activeEntityIds[id] = false;
+            // Recycle the id (DetachFromArchetype already marked it inactive)
             _activeEntityCount--;
 
             if (_freeEntityIdCount >= _freeEntityIds.Length)
@@ -270,7 +264,8 @@ public partial class Context : IAsyncDisposable
     private void ThrowIfStale(in Entity entity)
     {
         int id = entity.Id;
-        if ((uint)id >= (uint)_activeEntityIds.Length || !_activeEntityIds[id] || EntityVersions[id] != entity.Version)
+        var meta = Meta;
+        if ((uint)id >= (uint)meta.Length || meta[id].Archetype == null || meta[id].Version != entity.Version)
             ThrowEntityNotFound();
     }
 
@@ -583,15 +578,10 @@ public partial class Context : IAsyncDisposable
         }
 
         // Clear all data
-        Array.Clear(_activeEntityIds, 0, _activeEntityIds.Length);
+        Array.Clear(Meta, 0, Meta.Length);
         Array.Clear(Entities, 0, Entities.Length);
 
-        for (int i = 0; i < _allArchetypes.Count; i++)
-            Array.Clear(_allArchetypes[i].EntityIds, 0, _allArchetypes[i].EntityIds.Length);
-
-        Archetypes.Clear();
-        _allArchetypes.Clear();
-        _queryCache.Clear();
+        ClearArchetypes();
 
         if (Components != null)
         {
@@ -604,7 +594,6 @@ public partial class Context : IAsyncDisposable
 
         Components = null;
         _singletons = Array.Empty<object>();
-        Array.Clear(EntityArchetypes, 0, EntityArchetypes.Length);
         _emptyArchetype = null;
         _freeEntityIdCount = 0;
 
@@ -695,5 +684,5 @@ public partial class Context : IAsyncDisposable
     /// <summary>
     /// Get all active entities.
     /// </summary>
-    public ActiveEntityEnumerator AllEntities => new ActiveEntityEnumerator(_activeEntityIds, EntityVersions, this);
+    public ActiveEntityEnumerator AllEntities => new ActiveEntityEnumerator(this);
 }

@@ -127,6 +127,35 @@ internal struct Tag : IEquatable<Tag>, IComparable<Tag>
         return true;
     }
 
+    /// <summary>True when this tag and <paramref name="other"/> share at least one bit.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public readonly bool Intersects(in Tag other)
+    {
+        if (!IsVectorZero(Vector256.BitwiseAnd(_bits, other._bits)))
+            return true;
+
+        int len = Math.Min(_overflow?.Length ?? 0, other._overflow?.Length ?? 0);
+        for (int i = 0; i < len; i++)
+        {
+            if (!IsVectorZero(Vector256.BitwiseAnd(_overflow![i], other._overflow![i])))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Copy with its own overflow storage (a plain struct copy shares the overflow array, so mutating the copy
+    /// beyond bit 255 would also mutate the original).
+    /// </summary>
+    public readonly Tag Clone()
+    {
+        var copy = this;
+        if (_overflow != null)
+            copy._overflow = (Vector256<long>[])_overflow.Clone();
+        return copy;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public static Tag operator &(in Tag a, in Tag b)
     {

@@ -1,33 +1,40 @@
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using EasyEcs.Core.Components;
 
 namespace EasyEcs.Core;
 
+// Archetype registry, entity membership and the query cache.
+//
+// Thread-safety contract:
+// - All mutation (archetype creation, membership changes, cache updates) happens under _structuralLock.
+// - Lock-free readers (queries) only see immutable Archetype[] snapshots: _allArchetypes and every query cache entry
+//   are replaced copy-on-write and published with Volatile.Write, never mutated in place.
 public partial class Context
 {
-    // Archetype storage: Tag -> Archetype
-    internal readonly Dictionary<Tag, Archetype> Archetypes = new();
+    // Lock for structural modifications (System.Threading.Lock: cheaper than Monitor, no object header sync block).
+    private readonly Lock _structuralLock = new();
 
-    // Flat list of all archetypes for lock-free iteration (only grows, never shrinks except on Dispose)
-    private readonly List<Archetype> _allArchetypes = new();
+    // Bumped whenever storage arrays may be reallocated (component columns, entity arrays, archetype id arrays,
+    // compaction) so in-flight ForEach passes refresh their cached array references.
+    internal int StorageVersion;
 
-    // Query cache: QueryTag -> List of matching archetypes (O(1) lookup after first query)
-    // Using ConcurrentDictionary for lock-free reads on cache hits
-    private readonly ConcurrentDictionary<Tag, List<Archetype>> _queryCache = new();
+    // Tag -> archetype (only touched under the lock).
+    private readonly Dictionary<Tag, Archetype> _archetypes = new();
 
-    // Lock for structural modifications. System.Threading.Lock is cheaper than Monitor on .NET 9+.
-#if NET9_0_OR_GREATER
-    private readonly System.Threading.Lock _structuralLock = new();
-#else
-    private readonly object _structuralLock = new();
-#endif
+    // Copy-on-write snapshot of all archetypes (archetype creation is rare, reads are frequent).
+    private Archetype[] _allArchetypes = Array.Empty<Archetype>();
 
-    // Per-entity archetype membership (indexed by entity id), replaces per-archetype hash lookups.
-    internal Archetype[] EntityArchetypes;
-    internal int[] EntitySlots;
+    // Query -> matching archetypes. Entries are created once and their array is replaced copy-on-write.
+    private readonly ConcurrentDictionary<QueryKey, QueryCacheEntry> _queryCache = new();
+
+    private sealed class QueryCacheEntry(Archetype[] archetypes)
+    {
+        public Archetype[] Archetypes = archetypes;
+    }
 
     /// <summary>
     /// Move an entity into <paramref name="target"/>, leaving its current archetype (if any).
@@ -36,14 +43,15 @@ public partial class Context
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void MoveToArchetype(int entityId, Archetype target)
     {
-        var current = EntityArchetypes[entityId];
+        ref var meta = ref Meta[entityId];
+        var current = meta.Archetype;
         if (ReferenceEquals(current, target))
             return;
 
-        current?.RemoveAt(EntitySlots[entityId]);
+        current?.RemoveAt(meta.Slot);
         var ids = target.EntityIds;
-        EntitySlots[entityId] = target.Add(entityId);
-        EntityArchetypes[entityId] = target;
+        meta.Slot = target.Add(entityId);
+        meta.Archetype = target;
 
         // Archetype storage reallocated: invalidate snapshots held by in-flight ForEach passes
         if (!ReferenceEquals(ids, target.EntityIds))
@@ -51,24 +59,23 @@ public partial class Context
     }
 
     /// <summary>
-    /// Remove an entity from its archetype (used on destroy).
-    /// Must be called inside _structuralLock.
+    /// Remove an entity from its archetype, marking the id as not alive. Must be called inside _structuralLock.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void DetachFromArchetype(int entityId)
     {
-        var current = EntityArchetypes[entityId];
+        ref var meta = ref Meta[entityId];
+        var current = meta.Archetype;
         if (current == null)
             return;
 
-        current.RemoveAt(EntitySlots[entityId]);
-        EntityArchetypes[entityId] = null;
+        current.RemoveAt(meta.Slot);
+        meta.Archetype = null;
     }
 
     /// <summary>
-    /// Archetype reached from <paramref name="from"/> by adding a single component bit (edge-cached).
-    /// The entity's tag must already contain the new bit.
-    /// Must be called inside _structuralLock.
+    /// Archetype reached from <paramref name="from"/> by adding one component bit (edge-cached, no Tag hashing).
+    /// <paramref name="newTag"/> already contains the bit. Must be called inside _structuralLock.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private Archetype ArchetypeAfterAdd(Archetype from, int bit, in Tag newTag)
@@ -84,9 +91,8 @@ public partial class Context
     }
 
     /// <summary>
-    /// Archetype reached from <paramref name="from"/> by removing a single component bit (edge-cached).
-    /// The entity's tag must already have the bit cleared.
-    /// Must be called inside _structuralLock.
+    /// Archetype reached from <paramref name="from"/> by removing one component bit (edge-cached).
+    /// <paramref name="newTag"/> already has the bit cleared. Must be called inside _structuralLock.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private Archetype ArchetypeAfterRemove(Archetype from, int bit, in Tag newTag)
@@ -102,93 +108,79 @@ public partial class Context
     }
 
     /// <summary>
-    /// Get or create an archetype for the given component mask.
-    /// Thread-safe: always locks to prevent race conditions.
+    /// Get or create the archetype for <paramref name="componentMask"/>. A new archetype is appended (copy-on-write)
+    /// to every cached query it matches. Must be called inside _structuralLock.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal Archetype GetOrCreateArchetype(in Tag componentMask)
+    private Archetype GetOrCreateArchetype(in Tag componentMask)
     {
-        lock (_structuralLock)
-        {
-            if (!Archetypes.TryGetValue(componentMask, out var archetype))
-            {
-                archetype = new Archetype(in componentMask);
-                Archetypes[componentMask] = archetype;
-                _allArchetypes.Add(archetype);
-
-                // Incrementally update query cache: add new archetype to matching queries
-                // This is smarter than clearing the entire cache
-                foreach (var kvp in _queryCache)
-                {
-                    var queryTag = kvp.Key;
-                    var cachedList = kvp.Value;
-
-                    // Check if new archetype matches this cached query
-                    if (componentMask.ContainsAll(in queryTag))
-                    {
-                        cachedList.Add(archetype);
-                    }
-                }
-            }
-
+        if (_archetypes.TryGetValue(componentMask, out var archetype))
             return archetype;
+
+        archetype = new Archetype(in componentMask);
+        _archetypes[componentMask] = archetype;
+        Volatile.Write(ref _allArchetypes, Append(_allArchetypes, archetype));
+
+        foreach (var pair in _queryCache)
+        {
+            if (pair.Key.Matches(in archetype.ComponentMask))
+                Volatile.Write(ref pair.Value.Archetypes, Append(pair.Value.Archetypes, archetype));
         }
+
+        return archetype;
+    }
+
+    private static Archetype[] Append(Archetype[] source, Archetype item)
+    {
+        var result = new Archetype[source.Length + 1];
+        Array.Copy(source, result, source.Length);
+        result[source.Length] = item;
+        return result;
     }
 
     /// <summary>
-    /// Get all archetypes matching the query tag.
-    /// Uses O(1) cached lookup after first access with lock-free fast path.
-    /// Thread-safe: uses double-checked locking for cache misses only.
+    /// Archetypes containing all <paramref name="bits"/> and matching <paramref name="filter"/>.
+    /// Lock-free on cache hits; the returned array is an immutable snapshot.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    internal List<Archetype> GetMatchingArchetypes(in Tag queryTag)
+    internal Archetype[] GetMatchingArchetypes(ReadOnlySpan<ushort> bits, in QueryFilter filter)
     {
-        // Fast path: lock-free cache lookup (common case for GroupOf operations)
-        // ConcurrentDictionary.TryGetValue is thread-safe and doesn't require locking
-        if (_queryCache.TryGetValue(queryTag, out var cached))
-            return cached;
+        var key = new QueryKey(bits, in filter);
+        if (_queryCache.TryGetValue(key, out var entry))
+            return Volatile.Read(ref entry.Archetypes);
 
-        // Slow path: cache miss, need to build and cache the result
-        // Use lock to ensure only one thread builds the cache entry and to safely read Archetypes
         lock (_structuralLock)
         {
-            // Double-check after acquiring lock (another thread might have built it)
-            if (_queryCache.TryGetValue(queryTag, out cached))
-                return cached;
+            if (_queryCache.TryGetValue(key, out entry))
+                return entry.Archetypes;
 
-            // Build list of matching archetypes
-            var matching = new List<Archetype>(16);
-
-            for (int i = 0; i < _allArchetypes.Count; i++)
+            var all = _allArchetypes;
+            var matching = new List<Archetype>();
+            for (int i = 0; i < all.Length; i++)
             {
-                var archetype = _allArchetypes[i];
-                // SIMD-accelerated ContainsAll check
-                if (archetype.ComponentMask.ContainsAll(in queryTag))
-                {
-                    matching.Add(archetype);
-                }
+                if (key.Matches(in all[i].ComponentMask))
+                    matching.Add(all[i]);
             }
 
-            // Cache for future queries (ConcurrentDictionary handles concurrent access)
-            _queryCache[queryTag] = matching;
-            return matching;
+            var result = matching.ToArray();
+            _queryCache[key] = new QueryCacheEntry(result);
+            return result;
         }
     }
 
     /// <summary>
     /// Compact all archetypes to remove tombstones.
-    /// Call during loading screens or maintenance windows.
+    /// Call between frames (e.g. when <see cref="GetFragmentationStats"/> reports high fragmentation),
+    /// never while a query is iterating.
     /// </summary>
     public void CompactArchetypes()
     {
         lock (_structuralLock)
         {
-            for (int i = 0; i < _allArchetypes.Count; i++)
+            var all = _allArchetypes;
+            for (int i = 0; i < all.Length; i++)
             {
-                var archetype = _allArchetypes[i];
-                if (archetype.AliveCount < archetype.Count)
+                if (all[i].AliveCount < all[i].Count)
                 {
-                    archetype.Compact(EntitySlots);
+                    all[i].Compact(Meta);
                     StorageVersion++;
                 }
             }
@@ -196,23 +188,31 @@ public partial class Context
     }
 
     /// <summary>
-    /// Get archetype fragmentation statistics for monitoring.
+    /// Archetype fragmentation statistics for monitoring (lock-free, approximate under concurrent changes).
     /// </summary>
-    [SuppressMessage("ReSharper", "InconsistentlySynchronizedField")]
     public (int TotalSlots, int AliveEntities, float FragmentationRatio) GetFragmentationStats()
     {
+        var all = Volatile.Read(ref _allArchetypes);
         int totalSlots = 0;
         int aliveEntities = 0;
-
-        // Lock-free: _allArchetypes only grows, index-based for loop is safe during concurrent append.
-        // Individual int reads (Count, AliveCount) are atomic on all .NET platforms.
-        for (int i = 0; i < _allArchetypes.Count; i++)
+        for (int i = 0; i < all.Length; i++)
         {
-            totalSlots += _allArchetypes[i].Count;
-            aliveEntities += _allArchetypes[i].AliveCount;
+            totalSlots += all[i].Count;
+            aliveEntities += all[i].AliveCount;
         }
 
         float fragmentation = totalSlots > 0 ? 1.0f - (float)aliveEntities / totalSlots : 0f;
         return (totalSlots, aliveEntities, fragmentation);
+    }
+
+    private void ClearArchetypes()
+    {
+        var all = _allArchetypes;
+        for (int i = 0; i < all.Length; i++)
+            Array.Clear(all[i].EntityIds, 0, all[i].EntityIds.Length);
+
+        _archetypes.Clear();
+        _allArchetypes = Array.Empty<Archetype>();
+        _queryCache.Clear();
     }
 }

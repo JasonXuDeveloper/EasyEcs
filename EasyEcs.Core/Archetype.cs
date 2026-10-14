@@ -91,7 +91,7 @@ internal class Archetype
     /// Rewrites the entity -> slot table for every moved entity.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public void Compact(int[] entitySlots)
+    public void Compact(EntityMeta[] meta)
     {
         int writeIdx = 0;
 
@@ -101,7 +101,7 @@ internal class Archetype
             if (entityId != Tombstone)
             {
                 EntityIds[writeIdx] = entityId;
-                entitySlots[entityId] = writeIdx;
+                meta[entityId].Slot = writeIdx;
                 writeIdx++;
             }
         }

@@ -1,41 +1,38 @@
 namespace EasyEcs.Core.Enumerators;
 
+/// <summary>
+/// Enumerates every alive entity in id order. Entities created during enumeration beyond the captured
+/// capacity are not visited.
+/// </summary>
 public struct ActiveEntityEnumerator
 {
-    private readonly bool[] _activeEntityIds;
-    private readonly int[] _entityVersions;
     private readonly Context _context;
-    private readonly int _maxLength; // Capture length to avoid resizing issues
+    private readonly EntityMeta[] _meta; // captured: a resize swaps the array, ids beyond it are not visited
     private int _index;
+
     public EntityRef Current { get; private set; }
 
-    public ActiveEntityEnumerator(bool[] activeEntityIds, int[] entityVersions, Context context)
+    public ActiveEntityEnumerator(Context context)
     {
-        _activeEntityIds = activeEntityIds;
-        _entityVersions = entityVersions;
         _context = context;
-        // Capture min length to ensure we don't go out of bounds if arrays are resized
-        _maxLength = System.Math.Min(activeEntityIds.Length, entityVersions.Length);
+        _meta = context.Meta;
         _index = 0;
         Current = default;
     }
 
     // ReSharper disable once UnusedMember.Global
-    public ActiveEntityEnumerator GetEnumerator() => new(_activeEntityIds, _entityVersions, _context);
+    public ActiveEntityEnumerator GetEnumerator() => new(_context);
 
     public bool MoveNext()
     {
-        // Use captured length to avoid ArrayIndexOutOfBoundsException during concurrent resize
-        while (_index < _maxLength)
+        var meta = _meta;
+        while (_index < meta.Length)
         {
-            // Read active flag first
-            bool isActive = _activeEntityIds[_index];
-
-            if (isActive)
+            ref var m = ref meta[_index];
+            if (m.Archetype != null)
             {
-                // Then read version - might be stale if entity was just destroyed, but EntityRef.Value will validate
-                int version = _entityVersions[_index];
-                Current = new EntityRef(_index, version, _context);
+                // Version might be stale if the entity is destroyed concurrently; EntityRef.Value validates it.
+                Current = new EntityRef(_index, m.Version, _context);
                 _index++;
                 return true;
             }
