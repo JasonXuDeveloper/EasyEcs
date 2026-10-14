@@ -94,11 +94,11 @@ public record struct Score(int Deaths) : ISingletonComponent;
 public partial class DeathSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
-    static void Die(Entity e, in Health h, World world)
+    static void Die(Entity e, in Health h, ref Score score)
     {
         if (h.Value > 0) return;
         e.Set(new Dead());
-        world.GetSingleton<Score>().Deaths++;
+        score.Deaths++;
     }
 }
 ```

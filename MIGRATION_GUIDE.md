@@ -36,7 +36,8 @@ v3 had three handle types (`Entity` value, `EntityRef`, `ComponentRef<T>`). v4 h
 | `AddSingletonComponent<T>()` / `GetSingletonComponent<T>().Value` | `AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` (all `ref T`) |
 | `TryGetSingletonComponent<T>(out SingletonComponentRef<T>)` | `TryGetSingleton<T>(out T value)` |
 
-Singletons are now **per world** (v3 shared them process-wide).
+Singletons are now **per world** (v3 shared them process-wide). A `[ForEach]` method takes a singleton as a
+`ref`/`in` parameter (resolved once per pass), so systems rarely call `GetSingleton` themselves.
 
 ## Systems
 

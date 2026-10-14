@@ -45,11 +45,11 @@ public partial class MovementSystem : EcsSystem
 public partial class DeathSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
-    static void Die(Entity entity, in Health hp, World world)
+    static void Die(Entity entity, in Health hp, ref Stats stats)        // singleton: resolved once per pass
     {
         if (hp.Value > 0) return;
         entity.Set(new Dead());                                          // state change = data
-        world.GetSingleton<Stats>().Deaths++;
+        stats.Deaths++;
     }
 }
 
@@ -126,6 +126,7 @@ method. Its parameters:
 | Parameter | Meaning |
 |---|---|
 | `ref T` / `in T` (`T : IComponent`) | component data, 1–9 of them (`ref` to write, `in` to read) |
+| `ref T` / `in T` (`T : ISingletonComponent`) | the world's singleton, resolved once per pass (added if missing) |
 | `Entity entity` | handle of the current entity (structural changes, destroy) |
 | `World world` | the world (useful in static methods) |
 
@@ -255,6 +256,7 @@ one hash probe.
 | `world.RemoveSystem<T>()` (calls `OnDestroy`) / `GetSystem<T>()` | O(systems) |
 | `world.Update()` (default group) / `world.Update<TGroup>()` | Σ systems of the group, allocation-free |
 | `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` → `ref T` | O(1) |
+| `world.SingletonRef<T>()` → `SingletonRef<T>` (stable handle, `.Value` is `ref T`; adds if missing) | O(1) |
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) |
 | `world.CompactArchetypes()` | O(S log S) |
 | `world.GetFragmentationStats()` | O(archetypes) |
@@ -372,9 +374,9 @@ Measured with BenchmarkDotNet's default job on .NET 10, on a 4-core Xeon VM at 2
 
 | Benchmark | Entities | Mean | Allocated |
 |---|---:|---:|---:|
-| WorldSimulation.Tick | 10,000 | 340 μs | 0 B |
-| WorldSimulation.Tick | 100,000 | 4.89 ms | 0 B |
-| ShardedWorld.TickAllShards (4 worlds × 25k) | 100,000 | 1.97 ms | 0 B |
+| WorldSimulation.Tick | 10,000 | 322 μs | 0 B |
+| WorldSimulation.Tick | 100,000 | 4.33 ms | 0 B |
+| ShardedWorld.TickAllShards (4 worlds × 25k) | 100,000 | 1.85 ms | 0 B |
 
 **Micro benchmarks** (N = 10,000; the v3.1.1 column is BenchmarkDotNet ShortRun on the same machine). "–" means
 the operation has no v3.1.1 equivalent (struct jobs, `[ForEach]` systems and handles are new in v4). Every
