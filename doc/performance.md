@@ -7,7 +7,7 @@
 | Per-entity logic of a system | `[ForEach]` method | Generated struct job; same speed as a hand-written `ForEach`. `[With<T>]` / `[Without<T>]` filters. |
 | Ad-hoc iteration over 1–9 components | `world.ForEach<…, TJob>(ref job, filter)` | Struct job, specialized and inlined by the JIT. Keep `Execute` small and branch-light. |
 | Ad-hoc loop needing the `Entity` | `foreach (var item in world.Query<…>(filter))` | Zero allocation; `item.Entity`, `item.Component1..n` are refs. (`[ForEach]` methods can take an `Entity` parameter too.) |
-| React to something that happened (death, level up) | add a one-update component (`Died`), consume it with `[ForEach]` in later systems, remove it in a cleanup system | One batched pass per consumer, in schedule order; keeps modules decoupled. |
+| React to a state change (death, level up) | write the state (`Dead` tag or a field) and query it in later systems | One batched pass per consumer, in schedule order; keeps modules decoupled. |
 | "Is there any …?" | `world.Any<…>(filter)` | Early exit, no enumeration. |
 | "How many …?" | `world.Count<…>(filter)` | Sums archetype counts. |
 

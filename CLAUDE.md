@@ -70,8 +70,7 @@ doc/                           ecs-principles.md, architecture.md, performance.m
 - **Follow the ECS principles in `doc/ecs-principles.md`, including in tests, benchmarks and docs**: components and
   singletons are plain data structs; one system per responsibility; systems are stateless (state goes into
   components or singletons, EECS007) and never reference other systems (EECS008); state changes are data,
-  notifications are one-update components (no event bus: every reaction runs in schedule order). Examples are what
-  users copy, so they must be exemplary.
+  there is no event bus (messaging is the host's job). Examples are what users copy, so they must be exemplary.
 - **Performance changes must be measured.** Run the relevant `EasyEcs.Benchmark` cases before and after; a change
   ships only if it is a net improvement (time and allocations) with no regression elsewhere. Add a benchmark
   when you optimize something not covered yet.

@@ -35,7 +35,9 @@ flowchart TB
     so references don't outlive the entity. Unmanaged data is simply overwritten by the next `Add` or `Set`.
 - **Archetypes** hold entity ids, not data. Moving an entity between archetypes moves an id; component data never
   moves. This keeps structural changes O(1), which suits servers, where state flips constantly (buffs, combat, AOI).
-- **Masks** (`Tag`) are 256-bit SIMD bitsets, with overflow storage beyond 256 component types.
+- **Masks** (`Tag`) are 256-bit SIMD bitsets. There is no limit on component types: the first 256 are inline (one
+  `Vector256` test per archetype match), each further 256 add one overflow vector, allocated once when an archetype
+  is created (never on the iteration or add/remove path after warm-up).
 
 Trade-off: iteration reads archetype ids and then gathers from each column. That is not as dense as chunked SoA
 storage, but structural changes are much cheaper. `CompactArchetypes()` removes tombstones and **sorts ids
@@ -91,9 +93,8 @@ mutated.
 - `Update()` is synchronous. For each due, enabled system it calls `OnUpdate()` and then the generated
   `GeneratedUpdate()` ([ForEach] methods).
 - `AddSystem` calls `OnCreate()`; `RemoveSystem` and `Dispose` call `OnDestroy()`, `Dispose` in reverse order.
-- There is no event bus: notifications are components consumed by later systems (see
-  [ecs-principles.md](ecs-principles.md#4-everything-is-data-notifications-included)), so all behavior runs in
-  schedule order.
+- There is no event bus: systems cooperate through data only, so all behavior runs in schedule order (see
+  [ecs-principles.md](ecs-principles.md#4-state-changes-are-data)). Messaging is the host's job.
 - Errors go to `World.SystemError`. Without a subscriber they propagate.
 
 ## Source generators and analyzer (`EasyEcs.Generator`)
