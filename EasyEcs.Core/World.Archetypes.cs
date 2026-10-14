@@ -13,7 +13,7 @@ namespace EasyEcs.Core;
 // - All mutation (archetype creation, membership changes, cache updates) happens under _structuralLock.
 // - Lock-free readers (queries) only see immutable Archetype[] snapshots: _allArchetypes and every query cache entry
 //   are replaced copy-on-write and published with Volatile.Write, never mutated in place.
-public partial class Context
+public partial class World
 {
     // Lock for structural modifications (System.Threading.Lock: cheaper than Monitor, no object header sync block).
     private readonly Lock _structuralLock = new();

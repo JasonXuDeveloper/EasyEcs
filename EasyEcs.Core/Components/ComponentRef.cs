@@ -13,13 +13,13 @@ public readonly struct ComponentRef<T> where T : struct, IComponent
     // Pack entity ID (lower 32 bits) + version (upper 32 bits)
     private readonly long _packed;
     private readonly ushort _componentIndex; // Supports up to 65536 component types
-    private readonly Context _context;
+    private readonly World _world;
 
-    public ComponentRef(int entityId, int version, ushort componentIndex, Context context)
+    public ComponentRef(int entityId, int version, ushort componentIndex, World world)
     {
         _packed = ((long)version << 32) | (uint)entityId;
         _componentIndex = componentIndex;
-        _context = context;
+        _world = world;
     }
 
     private int EntityId
@@ -40,23 +40,17 @@ public readonly struct ComponentRef<T> where T : struct, IComponent
         get
         {
             int id = EntityId;
-            var context = _context;
+            var world = _world;
 
             // Validate version without bounds checks (id < Meta.Length is an invariant of live refs)
-            if (Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(context.Meta), id).Version != Version)
+            if (Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(world.Meta), id).Version != Version)
                 ThrowEntityDestroyed();
 
-            // Fast path inline: the column exists whenever this context added the component
-            var columns = context.Components;
-            if (columns == null || _componentIndex >= (uint)columns.Length || columns[_componentIndex] == null)
-                return ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(EnsureComponentArraySlow()), id);
-
-            return ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Unsafe.As<T[]>(columns[_componentIndex])), id);
+            // Invariant: a ComponentRef only exists for a component the entity has, and a component bit is only ever
+            // set after its column was created in this world, so the column exists and covers the id.
+            return ref world.ColumnRef<T>(_componentIndex, id);
         }
     }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private T[] EnsureComponentArraySlow() => _context.EnsureComponentArrayInitialized<T>(_componentIndex);
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowEntityDestroyed() =>
@@ -68,20 +62,18 @@ public readonly struct ComponentRef<T> where T : struct, IComponent
     }
 }
 
-public readonly struct SingletonComponentRef<T> where T : struct, ISingletonComponent
+/// <summary>Handle to a world singleton (from <see cref="World.TryGetSingleton{T}"/>).</summary>
+public readonly struct SingletonRef<T> where T : struct, ISingletonComponent
 {
     private readonly SingletonBox<T> _box;
 
-    internal SingletonComponentRef(SingletonBox<T> box) => _box = box;
+    internal SingletonRef(SingletonBox<T> box) => _box = box;
+
+    public bool IsValid => _box != null;
 
     public ref T Value
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => ref _box.Value;
-    }
-
-    public static implicit operator T(SingletonComponentRef<T> componentRef)
-    {
-        return componentRef.Value;
     }
 }

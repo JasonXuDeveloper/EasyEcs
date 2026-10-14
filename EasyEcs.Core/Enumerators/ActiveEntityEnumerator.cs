@@ -6,22 +6,22 @@ namespace EasyEcs.Core.Enumerators;
 /// </summary>
 public struct ActiveEntityEnumerator
 {
-    private readonly Context _context;
+    private readonly World _world;
     private readonly EntityMeta[] _meta; // captured: a resize swaps the array, ids beyond it are not visited
     private int _index;
 
     public EntityRef Current { get; private set; }
 
-    public ActiveEntityEnumerator(Context context)
+    public ActiveEntityEnumerator(World world)
     {
-        _context = context;
-        _meta = context.Meta;
+        _world = world;
+        _meta = world.Meta;
         _index = 0;
         Current = default;
     }
 
     // ReSharper disable once UnusedMember.Global
-    public ActiveEntityEnumerator GetEnumerator() => new(_context);
+    public ActiveEntityEnumerator GetEnumerator() => new(_world);
 
     public bool MoveNext()
     {
@@ -32,7 +32,7 @@ public struct ActiveEntityEnumerator
             if (m.Archetype != null)
             {
                 // Version might be stale if the entity is destroyed concurrently; EntityRef.Value validates it.
-                Current = new EntityRef(_index, m.Version, _context);
+                Current = new EntityRef(_index, m.Version, _world);
                 _index++;
                 return true;
             }

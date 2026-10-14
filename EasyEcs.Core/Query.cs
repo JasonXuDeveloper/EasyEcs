@@ -27,7 +27,7 @@ public readonly struct QueryFilter
     public QueryFilter With<T>() where T : struct, IComponent
     {
         var all = All.Clone();
-        all.SetBit(TagRegistry.GetOrRegisterTag<T>());
+        all.SetBit(ComponentType<T>.Bit);
         return new QueryFilter(in all, in None);
     }
 
@@ -35,7 +35,7 @@ public readonly struct QueryFilter
     public QueryFilter Without<T>() where T : struct, IComponent
     {
         var none = None.Clone();
-        none.SetBit(TagRegistry.GetOrRegisterTag<T>());
+        none.SetBit(ComponentType<T>.Bit);
         return new QueryFilter(in All, in none);
     }
 }

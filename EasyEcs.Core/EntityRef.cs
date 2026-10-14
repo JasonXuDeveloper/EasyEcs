@@ -12,21 +12,21 @@ public readonly struct EntityRef : IEquatable<EntityRef>
 {
     // Pack ID (lower 32 bits) + version (upper 32 bits) into single long
     private readonly long _packed;
-    private readonly Context _context;
+    private readonly World _world;
 
-    public EntityRef(int id, int version, Context context)
+    public EntityRef(int id, int version, World world)
     {
         _packed = ((long)version << 32) | (uint)id;
-        _context = context;
+        _world = world;
     }
 
-    private int Id
+    internal int Id
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => (int)_packed;
     }
 
-    private int Version
+    internal int Version
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => (int)(_packed >> 32);
@@ -41,13 +41,13 @@ public readonly struct EntityRef : IEquatable<EntityRef>
 
             // Validate version using Unsafe (zero bounds checks)
             ref int actualVersion = ref Unsafe.Add(
-                ref MemoryMarshal.GetArrayDataReference(_context.Meta), id).Version;
+                ref MemoryMarshal.GetArrayDataReference(_world.Meta), id).Version;
 
             if (actualVersion != Version)
                 ThrowEntityDestroyed();
 
             return ref Unsafe.Add(
-                ref MemoryMarshal.GetArrayDataReference(_context.Entities),
+                ref MemoryMarshal.GetArrayDataReference(_world.Entities),
                 id);
         }
     }
@@ -58,7 +58,7 @@ public readonly struct EntityRef : IEquatable<EntityRef>
 
     public static implicit operator EntityRef(Entity entity)
     {
-        return new EntityRef(entity.Id, entity.Version, entity.Context);
+        return new EntityRef(entity.Id, entity.Version, entity.World);
     }
 
     public static implicit operator Entity(EntityRef entityRef)
@@ -69,13 +69,13 @@ public readonly struct EntityRef : IEquatable<EntityRef>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator ==(EntityRef left, EntityRef right)
     {
-        return left._packed == right._packed && left._context == right._context;
+        return left._packed == right._packed && left._world == right._world;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool operator !=(EntityRef left, EntityRef right)
     {
-        return left._packed != right._packed || left._context != right._context;
+        return left._packed != right._packed || left._world != right._world;
     }
 
     public override bool Equals(object obj)
@@ -86,7 +86,7 @@ public readonly struct EntityRef : IEquatable<EntityRef>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Equals(EntityRef other)
     {
-        return _packed == other._packed && ReferenceEquals(_context, other._context);
+        return _packed == other._packed && ReferenceEquals(_world, other._world);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

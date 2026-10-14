@@ -19,10 +19,10 @@ public sealed class ArityGenerator : IIncrementalGenerator
         context.RegisterSourceOutput(isCore, static (spc, isCoreAssembly) =>
         {
             if (!isCoreAssembly) return;
-            spc.AddSource("Context.Structural.g.cs", Structural());
+            spc.AddSource("World.Structural.g.cs", Structural());
             spc.AddSource("Entity.Structural.g.cs", EntityWrappers());
-            spc.AddSource("Context.Queries.g.cs", Queries());
-            spc.AddSource("GroupResults.g.cs", GroupResults());
+            spc.AddSource("World.Queries.g.cs", Queries());
+            spc.AddSource("QueryItems.g.cs", QueryItems());
         });
     }
 
@@ -31,7 +31,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
     private static string Structural()
     {
         var sb = new StringBuilder(Header).Append(
-            "using System;\nusing EasyEcs.Core.Components;\n\nnamespace EasyEcs.Core;\n\npublic partial class Context\n{\n");
+            "using System;\nusing EasyEcs.Core.Components;\n\nnamespace EasyEcs.Core;\n\npublic sealed partial class World\n{\n");
 
         for (int n = 1; n <= MaxArity; n++)
         {
@@ -73,10 +73,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     lock (_structuralLock)
                     {
                         ThrowIfStale(in entity);
-                        Span<ushort> bits = stackalloc ushort[{{n}}];
-                        int count = 0;
-            {{Lines(n, i => $"            if (TagRegistry.TryGetTagBitIndex<T{i}>(out var b{i})) bits[count++] = b{i};")}}
-                        RemoveBits(entity.Id, bits.Slice(0, count));
+                        RemoveBits(entity.Id, stackalloc ushort[] { {{List(n, i => $"ComponentType<T{i}>.Bit")}} });
                     }
                 }
 
@@ -99,17 +96,17 @@ public sealed class ArityGenerator : IIncrementalGenerator
             string add = n == 1 ? "AddComponent" : "AddComponents";
             string remove = n == 1 ? "RemoveComponent" : "RemoveComponents";
             sb.Append($$"""
-                /// <inheritdoc cref="Context.{{add}}{{"{"}}{{tps}}{{"}"}}(Entity)"/>
+                /// <inheritdoc cref="World.{{add}}{{"{"}}{{tps}}{{"}"}}(Entity)"/>
                 [MethodImpl(MethodImplOptions.AggressiveInlining)]
                 public {{returns}} {{add}}<{{tps}}>()
             {{Constraints(n, "        ")}}
-                    => Context.{{add}}<{{tps}}>(this);
+                    => World.{{add}}<{{tps}}>(this);
 
-                /// <inheritdoc cref="Context.{{remove}}{{"{"}}{{tps}}{{"}"}}(Entity)"/>
+                /// <inheritdoc cref="World.{{remove}}{{"{"}}{{tps}}{{"}"}}(Entity)"/>
                 [MethodImpl(MethodImplOptions.AggressiveInlining)]
                 public void {{remove}}<{{tps}}>()
             {{Constraints(n, "        ")}}
-                    => Context.{{remove}}<{{tps}}>(this);
+                    => World.{{remove}}<{{tps}}>(this);
 
 
             """);
@@ -126,7 +123,6 @@ public sealed class ArityGenerator : IIncrementalGenerator
             using System.Runtime.CompilerServices;
             using System.Runtime.InteropServices;
             using EasyEcs.Core.Components;
-            using EasyEcs.Core.Enumerators;
 
             namespace EasyEcs.Core;
 
@@ -137,7 +133,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
         {
             sb.Append($$"""
                 /// <summary>
-                /// Struct callback for <c>Context.ForEach</c>. Being a struct-constrained generic, calls are devirtualized and
+                /// Struct callback for <c>World.ForEach</c>. Being a struct-constrained generic, calls are devirtualized and
                 /// usually inlined by the JIT: no delegate, no closure, no allocation.
                 /// </summary>
                 public interface IForEach<{{TypeParams(n)}}>
@@ -150,7 +146,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 """);
         }
 
-        sb.Append("public partial class Context\n{\n");
+        sb.Append("public sealed partial class World\n{\n");
         for (int n = 1; n <= MaxArity; n++)
         {
             string tps = TypeParams(n);
@@ -162,9 +158,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     private Archetype[] Match<{{tps}}>(in QueryFilter filter, {{List(n, i => $"out ushort b{i}")}})
                 {{cons}}
                     {
-                {{Lines(n, i => $"        b{i} = 0;")}}
-                        if ({{List(n, i => $"!TagRegistry.TryGetTagBitIndex<T{i}>(out b{i})", " || ")}})
-                            return System.Array.Empty<Archetype>();
+                {{Lines(n, i => $"        b{i} = ComponentType<T{i}>.Bit;")}}
                         return GetMatchingArchetypes(stackalloc ushort[] { {{bits}} }, in filter);
                     }
 
@@ -209,24 +203,24 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         }
                     }
 
-                    /// <summary>Enumerate entities having all of <c>{{tps}}</c> (and matching <paramref name="filter"/>). Allocation-free.</summary>
+                    /// <summary>Query entities having all of <c>{{tps}}</c> (and matching <paramref name="filter"/>). Allocation-free.</summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                    public GroupResultEnumerator<{{tps}}> GroupOf<{{tps}}>(in QueryFilter filter = default)
+                    public QueryEnumerator<{{tps}}> Query<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}
                     {
                         var archetypes = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
-                        return new GroupResultEnumerator<{{tps}}>(this, archetypes, {{bits}});
+                        return new QueryEnumerator<{{tps}}>(this, archetypes, {{bits}});
                     }
 
                     /// <summary>Number of alive entities having all of <c>{{tps}}</c>, without iterating them.</summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                    public int CountOf<{{tps}}>(in QueryFilter filter = default)
+                    public int Count<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}
                         => ArchetypeCursor.CountAlive(Match<{{tps}}>(in filter, {{List(n, i => "out _")}}));
 
                     /// <summary>Whether any alive entity has all of <c>{{tps}}</c>, with early exit.</summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                    public bool AnyOf<{{tps}}>(in QueryFilter filter = default)
+                    public bool Any<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}
                         => ArchetypeCursor.AnyAlive(Match<{{tps}}>(in filter, {{List(n, i => "out _")}}));
 
@@ -237,16 +231,15 @@ public sealed class ArityGenerator : IIncrementalGenerator
         return sb.Append("}\n").ToString();
     }
 
-    private static string GroupResults()
+    private static string QueryItems()
     {
         var sb = new StringBuilder(Header).Append("""
             using System;
             using System.Runtime.CompilerServices;
             using System.Runtime.InteropServices;
             using EasyEcs.Core.Components;
-            using EasyEcs.Core.Group;
 
-            namespace EasyEcs.Core.Group
+            namespace EasyEcs.Core
             {
 
             """);
@@ -255,17 +248,17 @@ public sealed class ArityGenerator : IIncrementalGenerator
         {
             string tps = TypeParams(n);
             sb.Append($$"""
-                    /// <summary>One query hit: the entity and refs to its queried components.</summary>
-                    public readonly struct GroupResult<{{tps}}>
+                    /// <summary>One query result: the entity and refs to its queried components.</summary>
+                    public readonly struct QueryItem<{{tps}}>
                 {{Constraints(n, "        ")}}
                     {
-                        private readonly Context _context;
+                        private readonly World _world;
                         private readonly int _entityId;
                 {{Lines(n, i => $"        private readonly ushort _b{i};")}}
 
-                        internal GroupResult(Context context, int entityId, {{List(n, i => $"ushort b{i}")}})
+                        internal QueryItem(World world, int entityId, {{List(n, i => $"ushort b{i}")}})
                         {
-                            _context = context;
+                            _world = world;
                             _entityId = entityId;
                 {{Lines(n, i => $"            _b{i} = b{i};")}}
                         }
@@ -275,14 +268,14 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         public ref Entity Entity
                         {
                             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                            get => ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_context.Entities), _entityId);
+                            get => ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_world.Entities), _entityId);
                         }
 
                 {{Lines(n, i => $$"""
                         public ref T{{i}} Component{{i}}
                         {
                             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                            get => ref _context.ColumnRef<T{{i}}>(_b{{i}}, _entityId);
+                            get => ref _world.ColumnRef<T{{i}}>(_b{{i}}, _entityId);
                         }
 
                 """)}}
@@ -292,35 +285,35 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 """);
         }
 
-        sb.Append("}\n\nnamespace EasyEcs.Core.Enumerators\n{\n");
+
         for (int n = 1; n <= MaxArity; n++)
         {
             string tps = TypeParams(n);
             sb.Append($$"""
                     /// <summary>Allocation-free query enumerator; safe under structural changes during iteration.</summary>
-                    public struct GroupResultEnumerator<{{tps}}> : IDisposable
+                    public struct QueryEnumerator<{{tps}}> : IDisposable
                 {{Constraints(n, "        ")}}
                     {
-                        private readonly Context _context;
+                        private readonly World _world;
                         private ArchetypeCursor _cursor;
                 {{Lines(n, i => $"        private readonly ushort _b{i};")}}
 
-                        internal GroupResultEnumerator(Context context, Archetype[] archetypes, {{List(n, i => $"ushort b{i}")}})
+                        internal QueryEnumerator(World world, Archetype[] archetypes, {{List(n, i => $"ushort b{i}")}})
                         {
-                            _context = context;
+                            _world = world;
                             _cursor = new ArchetypeCursor(archetypes);
                 {{Lines(n, i => $"            _b{i} = b{i};")}}
                             Current = default;
                         }
 
-                        public GroupResult<{{tps}}> Current { get; private set; }
+                        public QueryItem<{{tps}}> Current { get; private set; }
 
                         /// <summary>Number of alive matching entities (sums archetype counts, does not iterate).</summary>
                         public readonly int Count => _cursor.AliveCount;
 
                         public readonly bool IsEmpty => !_cursor.AnyAlive();
 
-                        public GroupResultEnumerator<{{tps}}> GetEnumerator() => this;
+                        public QueryEnumerator<{{tps}}> GetEnumerator() => this;
 
                         [MethodImpl(MethodImplOptions.AggressiveInlining)]
                         public bool MoveNext()
@@ -328,7 +321,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             if (!_cursor.MoveNext(out int id))
                                 return false;
 
-                            Current = new GroupResult<{{tps}}>(_context, id, {{List(n, i => $"_b{i}")}});
+                            Current = new QueryItem<{{tps}}>(_world, id, {{List(n, i => $"_b{i}")}});
                             return true;
                         }
 

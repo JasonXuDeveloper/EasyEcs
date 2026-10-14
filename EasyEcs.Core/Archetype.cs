@@ -9,7 +9,7 @@ namespace EasyEcs.Core;
 /// Uses tombstone pattern (-1) for safe iteration during modifications.
 /// Uses free list for O(1) tombstone slot reuse.
 /// <br/>
-/// The slot of each entity is tracked by the owning <see cref="Context"/> (entity id -> slot),
+/// The slot of each entity is tracked by the owning <see cref="World"/> (entity id -> slot),
 /// so removal is a plain array write instead of a hash lookup.
 /// </summary>
 internal class Archetype
@@ -82,7 +82,7 @@ internal class Archetype
         _freeSlots[_freeCount++] = slot;
 
         // Note: Auto-compaction is disabled to avoid unpredictable performance spikes mid-frame.
-        // Call Context.CompactArchetypes() manually during loading screens or maintenance windows
+        // Call World.CompactArchetypes() manually during loading screens or maintenance windows
         // to remove tombstones and reduce fragmentation.
     }
 
@@ -140,12 +140,4 @@ internal class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ReadOnlySpan<int> GetEntitySpan() => new ReadOnlySpan<int>(EntityIds, 0, Count);
 
-    /// <summary>
-    /// Get fragmentation ratio (percentage of tombstones).
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public float GetFragmentation()
-    {
-        return Count > 0 ? 1.0f - (float)AliveCount / Count : 0f;
-    }
 }

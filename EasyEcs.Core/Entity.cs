@@ -7,8 +7,8 @@ namespace EasyEcs.Core;
 /// <summary>
 /// An entity holds several components.
 /// <br/>
-/// It is not recommended to hold a reference to an entity at any time, since it may escape from the context (when destroyed) and cause memory leaks.
-/// Simply get the entity from the context when needed via <see cref="Context.GetEntityById"/> (This operation is roughly O(1)).
+/// It is not recommended to hold a reference to an entity at any time, since it may escape from the world (when destroyed) and cause memory leaks.
+/// Simply get the entity from the world when needed via <see cref="World.GetEntityById"/> (This operation is roughly O(1)).
 /// </summary>
 public partial struct Entity : IEquatable<Entity>
 {
@@ -25,19 +25,19 @@ public partial struct Entity : IEquatable<Entity>
     internal Tag Tag = new();
 
     /// <summary>
-    /// The context that holds the entity.
+    /// The world that holds the entity.
     /// </summary>
-    public Context Context { get; }
+    public World World { get; }
 
     /// <summary>
     /// Create a new entity.
     /// </summary>
-    /// <param name="context"></param>
+    /// <param name="world"></param>
     /// <param name="id"></param>
     /// <param name="version"></param>
-    internal Entity(Context context, int id, int version)
+    internal Entity(World world, int id, int version)
     {
-        Context = context;
+        World = world;
         Id = id;
         Version = version;
     }
@@ -53,12 +53,14 @@ public partial struct Entity : IEquatable<Entity>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ComponentRef<T> GetComponent<T>() where T : struct, IComponent
     {
-        var idx = TagRegistry.GetTagBitIndex<T>();
-        if (!Tag.HasBit(idx))
-            throw new InvalidOperationException("Component not found");
-
-        return new ComponentRef<T>(Id, Version, idx, Context);
+        if (!TryGetComponent<T>(out var component))
+            ThrowComponentMissing(typeof(T));
+        return component;
     }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowComponentMissing(Type type) =>
+        throw new InvalidOperationException($"Entity has no {type.Name} component");
 
     /// <summary>
     /// Try to get a component from the entity.
@@ -69,14 +71,10 @@ public partial struct Entity : IEquatable<Entity>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetComponent<T>(out ComponentRef<T> value) where T : struct, IComponent
     {
-        value = default;
-        if (!TagRegistry.TryGetTagBitIndex<T>(out var idx))
-            return false;
-        if (!Tag.HasBit(idx))
-            return false;
-
-        value = new ComponentRef<T>(Id, Version, idx, Context);
-        return true;
+        ushort bit = ComponentType<T>.Bit;
+        bool has = Tag.HasBit(bit);
+        value = has ? new ComponentRef<T>(Id, Version, bit, World) : default;
+        return has;
     }
 
     /// <summary>
@@ -87,62 +85,19 @@ public partial struct Entity : IEquatable<Entity>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool HasComponent<T>() where T : struct, IComponent
     {
-        if (TagRegistry.TryGetTagBitIndex<T>(out var idx))
-            return Tag.HasBit(idx);
-        return false;
+        return Tag.HasBit(ComponentType<T>.Bit);
     }
 
-    /// <summary>
-    /// Get the hash code of the entity.
-    /// </summary>
-    /// <returns></returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public override int GetHashCode()
-    {
-        return Id;
-    }
+    /// <summary>Entities are equal when they are the same incarnation (id and version) in the same world.</summary>
+    public bool Equals(Entity other) => Id == other.Id && Version == other.Version && ReferenceEquals(World, other.World);
 
-    /// <summary>
-    /// Is the entity equal to another entity?
-    /// </summary>
-    /// <param name="other"></param>
-    /// <returns></returns>
-    public bool Equals(Entity other)
-    {
-        return Id == other.Id;
-    }
+    public override bool Equals(object obj) => obj is Entity other && Equals(other);
 
-    /// <summary>
-    /// Is the entity equal to another object?
-    /// </summary>
-    /// <param name="obj"></param>
-    /// <returns></returns>
-    public override bool Equals(object obj)
-    {
-        if (obj is Entity entity)
-        {
-            return entity.Id == Id;
-        }
+    public override int GetHashCode() => HashCode.Combine(Id, Version);
 
-        return false;
-    }
+    public override string ToString() => $"Entity {Id}v{Version}";
 
-    /// <summary>
-    /// Get the string representation of the entity.
-    /// </summary>
-    /// <returns></returns>
-    public override string ToString()
-    {
-        return $"Entity {Id}";
-    }
+    public static bool operator ==(Entity left, Entity right) => left.Equals(right);
 
-    public static bool operator ==(Entity left, Entity right)
-    {
-        return left.Equals(right);
-    }
-
-    public static bool operator !=(Entity left, Entity right)
-    {
-        return !(left == right);
-    }
+    public static bool operator !=(Entity left, Entity right) => !left.Equals(right);
 }
