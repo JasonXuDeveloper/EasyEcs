@@ -138,16 +138,17 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
-          8.0.x
-          10.0.x
+            8.0.x
+            10.0.x
 
       # Restore dependencies
       - name: Restore dependencies
         run: dotnet restore
 
-      # Build the solution
-      - name: Build solution
-        run: dotnet build --configuration Release /p:OutputPath=../artifacts
+      # Build the library only; each target framework keeps its own output folder and the
+      # package (GeneratePackageOnBuild) lands in ./artifacts
+      - name: Build and pack
+        run: dotnet build EasyEcs.Core/EasyEcs.Core.csproj --configuration Release -p:PackageOutputPath=../artifacts
 
       # Push NuGet packages
       - name: Push NuGet Packages
