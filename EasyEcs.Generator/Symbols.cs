@@ -17,8 +17,6 @@ internal static class Symbols
     public const string EcsSystem = "EasyEcs.EcsSystem";
     public const string Component = "EasyEcs.IComponent";
     public const string Singleton = "EasyEcs.ISingletonComponent";
-    public const string Event = "EasyEcs.IEvent";
-    public const string EventHandler = "EasyEcs.IEventHandler<T>";
     public const string Entity = "EasyEcs.Entity";
     public const string World = "EasyEcs.World";
     public const int MaxComponents = 9;
@@ -50,11 +48,6 @@ internal static class Symbols
             if (t.IsGenericType) return true;
         return false;
     }
-
-    /// <summary>Event types handled directly by <paramref name="type"/> (IEventHandler&lt;T&gt; it declares itself).</summary>
-    public static IEnumerable<ITypeSymbol> DeclaredEvents(INamedTypeSymbol type) => type.Interfaces
-        .Where(i => i.IsGenericType && i.ConstructedFrom.ToDisplayString() == EventHandler)
-        .Select(i => i.TypeArguments[0]);
 
     public enum ParamKind
     {

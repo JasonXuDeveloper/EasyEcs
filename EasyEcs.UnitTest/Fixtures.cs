@@ -20,5 +20,4 @@ public record struct C8(int V) : IComponent;
 public record struct C9(int V) : IComponent;
 public record struct Clock(long Tick) : ISingletonComponent;
 public record struct Score(int Deaths, int Points) : ISingletonComponent;
-public record struct Died(int EntityId) : IEvent;
-public record struct Scored(int Points) : IEvent;
+public struct Died : IComponent;                          // notification: lives for one update (see Cleanup)

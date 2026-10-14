@@ -191,7 +191,6 @@ public sealed partial class World
         ClearArchetypes();
         Components = [];
         _columnHasReferences = [];
-        _channels = [];
         ClearSingletons();
         _freeIdCount = 0;
         _entityCount = 0;

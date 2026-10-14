@@ -10,12 +10,8 @@ using static EasyEcs.Generator.Code;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// Generates the plumbing of partial <c>EcsSystem</c>s:
-/// <list type="bullet">
-/// <item><c>[ForEach]</c> methods: one struct job per method and a <c>GeneratedUpdate</c> override running them.</item>
-/// <item><c>IEventHandler&lt;T&gt;</c>: a <c>GeneratedCreate</c> override subscribing the system (unsubscription is
-/// automatic on removal).</item>
-/// </list>
+/// Generates the plumbing of partial <c>EcsSystem</c>s: one struct job per <c>[ForEach]</c> method and a
+/// <c>GeneratedUpdate</c> override running them.
 /// Incremental-generator rules followed: <c>ForAttributeWithMetadataName</c> / cheap syntax predicates as entry points,
 /// models are equatable records of strings (no symbols, syntax or locations survive the transform), invalid input is
 /// skipped silently (EasyEcsAnalyzer reports it), and every stage has a tracking name for cache tests.
@@ -40,21 +36,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             .WithTrackingName("SystemUpdates");
         context.RegisterSourceOutput(updates, static (spc, model) =>
             spc.AddSource($"{model.Owner.HintName}.ForEach.g.cs", SourceText.From(EmitUpdate(model), Encoding.UTF8)));
-
-        var events = context.SyntaxProvider
-            .CreateSyntaxProvider(static (node, _) => DeclaresEventHandler(node), static (ctx, ct) => EventsModel.Create(ctx, ct))
-            .Where(static m => m is not null)
-            .Collect()
-            .SelectMany(static (all, _) => all.Distinct())
-            .WithTrackingName("SystemEvents");
-        context.RegisterSourceOutput(events, static (spc, model) =>
-            spc.AddSource($"{model!.Owner.HintName}.Events.g.cs", SourceText.From(EmitEvents(model), Encoding.UTF8)));
     }
-
-    /// <summary>Syntax-only filter: a class whose base list names <c>IEventHandler&lt;...&gt;</c>.</summary>
-    private static bool DeclaresEventHandler(SyntaxNode node) =>
-        node is ClassDeclarationSyntax { BaseList: { } baseList } &&
-        baseList.Types.Any(t => (t.Type is QualifiedNameSyntax q ? q.Right : t.Type) is GenericNameSyntax { Identifier.ValueText: "IEventHandler" });
 
     // ---------------- emit ----------------
 
@@ -100,16 +82,6 @@ public sealed class SystemGenerator : IIncrementalGenerator
         if (method.With.Length + method.Without.Length == 0) return;
         var chain = method.With.Select(t => $".With<{t}>()").Concat(method.Without.Select(t => $".Without<{t}>()"));
         sb.Append($"    private static readonly global::EasyEcs.QueryFilter __{method.Name}Filter = global::EasyEcs.QueryFilter.Create(){string.Concat(chain)};\n\n");
-    }
-
-    private static string EmitEvents(EventsModel model)
-    {
-        var sb = Open(model.Owner, "");
-        sb.Append("    /// <summary>Subscribes this system to the events it handles (unsubscribed automatically on removal).</summary>\n");
-        sb.Append("    protected override void GeneratedCreate()\n    {\n        base.GeneratedCreate();\n");
-        foreach (var e in model.Events) sb.Append($"        World.Subscribe<{e}>(this);\n");
-        sb.Append("    }\n");
-        return Close(sb, model.Owner);
     }
 
     private static StringBuilder Open(OwnerModel owner, string usings)
@@ -172,15 +144,4 @@ public sealed class SystemGenerator : IIncrementalGenerator
     }
 
     private sealed record UpdateModel(OwnerModel Owner, EquatableArray<ForEachModel> Methods);
-
-    private sealed record EventsModel(OwnerModel Owner, EquatableArray<string> Events)
-    {
-        public static EventsModel? Create(GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
-        {
-            if (ctx.SemanticModel.GetDeclaredSymbol(ctx.Node, ct) is not INamedTypeSymbol type) return null;
-            if (!Symbols.IsSystem(type) || !Symbols.IsPartialChain(type) || Symbols.IsGenericChain(type)) return null;
-            var events = Symbols.DeclaredEvents(type).Select(t => t.ToDisplayString(Symbols.Fqn)).OrderBy(t => t).ToArray();
-            return events.Length == 0 ? null : new EventsModel(OwnerModel.From(type), new EquatableArray<string>(events));
-        }
-    }
 }

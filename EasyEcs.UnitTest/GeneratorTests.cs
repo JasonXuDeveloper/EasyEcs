@@ -34,7 +34,6 @@ public class GeneratorTests
     private const string Components = """
         public struct P : IComponent { public int V; }
         public struct Q : IComponent { public int V; }
-        public struct Tick : IEvent { }
         """;
 
     [Test]
@@ -44,13 +43,12 @@ public class GeneratorTests
             namespace Game;
             public partial class Outer
             {
-                public partial class S : EcsSystem, IEventHandler<Tick>
+                public partial class S : EcsSystem
                 {
                     [ForEach, With<Q>] static void A(ref P p) => p.V++;
                     private readonly System.Collections.Generic.List<int> _scratch = []; // readonly: allowed
                     public int Speed => 3;                                              // computed: allowed
                     [ForEach, Without<Q>] void B(Entity e, in P p, World w) => _scratch.Clear();
-                    public void Handle(in Tick e) { }
                 }
             }
             """);
@@ -58,7 +56,6 @@ public class GeneratorTests
     }
 
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) { } }", "EECS001")]
-    [TestCase("public class S : EcsSystem, IEventHandler<Tick> { public void Handle(in Tick e) { } }", "EECS001")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, int x) { } }", "EECS002")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(P p) { } }", "EECS002")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(World w) { } }", "EECS003")]
@@ -66,7 +63,6 @@ public class GeneratorTests
     [TestCase("public partial class S { [ForEach] static void A(ref P p) { } }", "EECS005")]
     [TestCase("public class Bad : IComponent { }", "EECS006")]
     [TestCase("public record Bad : ISingletonComponent;", "EECS006")]
-    [TestCase("public class Bad : IEvent { }", "EECS006")]
     [TestCase("public class S : EcsSystem { int _kills; void K() => _kills++; }", "EECS007")]
     [TestCase("public class S : EcsSystem { public int Kills { get; set; } }", "EECS007")]
     [TestCase("public class A : EcsSystem { } public class S : EcsSystem { private readonly A _a = new(); }", "EECS008")]
@@ -81,7 +77,7 @@ public class GeneratorTests
     public void UnrelatedEditsHitTheCache()
     {
         var system = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components +
-            "public partial class S : EcsSystem, IEventHandler<Tick> { [ForEach] static void A(ref P p) { } public void Handle(in Tick e) { } }", Parse);
+            "public partial class S : EcsSystem { [ForEach] static void A(ref P p) { } }", Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         var compilation = Compile().AddSyntaxTrees(system, other);
 
@@ -90,7 +86,7 @@ public class GeneratorTests
             CSharpSyntaxTree.ParseText("public class Unrelated { int x; }", Parse)));
 
         var steps = driver.GetRunResult().Results[0].TrackedSteps;
-        foreach (var name in new[] { "ForEachMethods", "SystemUpdates", "SystemEvents" })
+        foreach (var name in new[] { "ForEachMethods", "SystemUpdates" })
             Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
                 Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged), name);
     }

@@ -15,7 +15,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
     private const string Category = "EasyEcs";
 
     public static readonly DiagnosticDescriptor NotPartial = new("EECS001", "System must be partial",
-        "System '{0}' uses [ForEach] methods or IEventHandler<T> and must be partial (including containing types)",
+        "System '{0}' declares [ForEach] methods and must be partial (including containing types)",
         Category, DiagnosticSeverity.Error, true);
 
     public static readonly DiagnosticDescriptor BadParameter = new("EECS002", "Invalid [ForEach] parameter",
@@ -26,14 +26,14 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "[ForEach] method '{0}' must take between 1 and 9 components", Category, DiagnosticSeverity.Error, true);
 
     public static readonly DiagnosticDescriptor Generic = new("EECS004", "Generic systems are not supported",
-        "[ForEach] method or event handler '{0}' is declared in a generic type or is generic itself",
+        "[ForEach] method '{0}' is declared in a generic type or is generic itself",
         Category, DiagnosticSeverity.Error, true);
 
     public static readonly DiagnosticDescriptor NotASystem = new("EECS005", "[ForEach] outside a system",
         "Type '{0}' declares [ForEach] methods but does not derive from EcsSystem", Category, DiagnosticSeverity.Error, true);
 
     public static readonly DiagnosticDescriptor NotStruct = new("EECS006", "ECS data must be a struct",
-        "'{0}' implements {1} and must be a struct: components, singletons and events are stored by value",
+        "'{0}' implements {1} and must be a struct: components and singletons are stored by value",
         Category, DiagnosticSeverity.Error, true);
 
     public static readonly DiagnosticDescriptor StatefulSystem = new("EECS007", "Systems should be stateless",
@@ -44,10 +44,10 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "buffers) are allowed.");
 
     public static readonly DiagnosticDescriptor SystemReference = new("EECS008", "Systems must not reference systems",
-        "System '{0}' references system '{1}' through '{2}'; communicate through components, singletons or events",
+        "System '{0}' references system '{1}' through '{2}'; communicate through components or singletons",
         Category, DiagnosticSeverity.Warning, true,
         "Systems that call each other are coupled: neither can be removed, reordered or tested alone. Write the data " +
-        "another system reads (component or singleton), or publish an event it handles.");
+        "another system reads (a component, a short-lived notification component, or a singleton).");
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference);
@@ -67,7 +67,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
 
         if (type.TypeKind is TypeKind.Class or TypeKind.Interface)
         {
-            foreach (var name in new[] { Symbols.Component, Symbols.Singleton, Symbols.Event })
+            foreach (var name in new[] { Symbols.Component, Symbols.Singleton })
             {
                 // Interfaces may extend the marker (e.g. a project-wide IStateComponent); classes may not implement it.
                 if (type.TypeKind == TypeKind.Class && Symbols.Implements(type, name))
@@ -78,9 +78,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (type.TypeKind != TypeKind.Class || !Symbols.IsSystem(type)) return;
         AnalyzeSystemFields(context, type);
 
-        bool generated = Symbols.DeclaredEvents(type).Any() ||
-                         type.GetMembers().OfType<IMethodSymbol>().Any(HasForEach);
-        if (!generated) return;
+        if (!type.GetMembers().OfType<IMethodSymbol>().Any(HasForEach)) return;
         if (!Symbols.IsPartialChain(type))
             context.ReportDiagnostic(Diagnostic.Create(NotPartial, location, type.Name));
         if (Symbols.IsGenericChain(type))
