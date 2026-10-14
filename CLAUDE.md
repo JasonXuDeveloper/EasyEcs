@@ -93,7 +93,9 @@ doc/                           ecs-principles.md, architecture.md, performance.m
 - Behavioral/breaking changes need a `MIGRATION_GUIDE.md` entry and a README "What's new" entry.
 - Commits: logic, docs and CI in separate commits. The author is the repository owner; the committer is the
   environment's signing identity so the signature shows as Verified. No session links in commit messages.
-- Releases are cut manually by the owner: GitHub Actions -> Release -> Run workflow on `master` with a version. It
-  builds, tests, pushes the package to NuGet (secret `MYTOKEN`), commits the `<Version>` bump, tags `vX.Y.Z` and
-  creates the GitHub release with notes grouped from the commit subjects (no prefix = change; `bench:`, `docs:`,
-  `ci:`/`chore:`). Keep subjects meaningful: they are the release notes. Do not trigger releases unless asked.
+- The version lives only in `Directory.Build.props` (package, EasyEcs.Core and the bundled generator carry it).
+- Releases are cut manually by the owner: GitHub Actions -> Release -> Run workflow on `master` with a version. Job
+  `tag` bumps `Directory.Build.props`, builds and tests, commits `Bump to vX.Y.Z` and tags it; job `publish` packs that
+  tag, pushes to NuGet (secret `MYTOKEN`) and creates the GitHub release with notes grouped from the commit subjects
+  (no prefix = change; `bench:`, `docs:`, `ci:`/`chore:`), so keep subjects meaningful. A failed publish is retried
+  with "Re-run failed jobs". Do not trigger releases unless asked.
