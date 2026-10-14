@@ -4,7 +4,8 @@
 
 | Need | Use | Notes |
 |---|---|---|
-| Per-entity work over 1–6 components | `ctx.ForEach<..., TJob>(ref job)` | Fastest. The struct job is specialized and inlined. Keep `Execute` small and branch-light. |
+| Per-entity work in a system | `[Query]` method | Generated struct job, same speed as hand-written `ForEach`. Supports `[With<T>]` / `[Without<T>]`. |
+| Ad-hoc iteration over 1–9 components | `ctx.ForEach<..., TJob>(ref job, filter)` | Struct job, specialized and inlined by the JIT. Keep `Execute` small and branch-light. |
 | Need the `Entity` (add/remove components, destroy) or 7–9 components | `foreach (var r in ctx.GroupOf<...>())` | Zero allocation. `r.Entity` and `r.ComponentN` return refs. |
 | "Is there any …?" | `ctx.AnyOf<...>()` | Early exit, no enumerator. |
 | "How many …?" | `ctx.CountOf<...>()` | Sums archetype alive counts; does not iterate entities. |
@@ -38,8 +39,9 @@ Every performance claim needs a number from `EasyEcs.Benchmark`:
 
 ```bash
 dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*' --job short   # quick
-dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*Churn*'         # full precision, one case
+dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*World*'         # full precision, headline cases
 ```
 
-`RawArrayWrite` is the theoretical floor: two plain arrays and no ECS. Compare `ForEachWrite` and `QueryWrite`
+Headline numbers come from `WorldSimulationBenchmark` / `ShardedWorldBenchmark`, a realistic server tick
+that must stay at 0 B allocated. `RawArrayWrite` is the theoretical floor: two plain arrays and no ECS. Compare `ForEachWrite` and `QueryWrite`
 against it.

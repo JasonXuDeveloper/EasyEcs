@@ -4,182 +4,252 @@
 ![license](https://img.shields.io/github/license/JasonXuDeveloper/EasyEcs)
 ![nuget](https://img.shields.io/nuget/v/EasyEcs)
 
-A small, fast, allocation-free Entity-Component-System for .NET servers (and anything long-running).
+A fast, allocation-free Entity-Component-System for .NET 10 servers and other long-running processes.
 
-- **Struct components, immediate API**: `CreateEntity()` / `AddComponent<T>()` return refs right away. There's no command buffer and no callbacks.
-- **Zero GC on the hot path**: queries, iteration, component access and add/remove don't allocate once warmed up.
-- **Built for long-running processes**: entity ids are recycled, so memory stays bounded by the peak live entity count no matter how many entities come and go.
-- **Archetype queries** with SIMD tag matching, cached query results and cached archetype transitions.
-- **Struct-job iteration** (`ForEach<..., TJob>`). The JIT specializes and inlines it, with no delegates and no closures.
-- **Async systems** with priority, execution frequency and optional parallelism inside a priority bucket.
-- Targets `net8.0` and `net10.0`.
+- **Write a method, get a system.** Annotate `[Query] void Move(ref Position p, in Velocity v)` and the bundled source generator produces the zero-allocation iteration job and `OnExecute`.
+- **Zero GC in steady state.** A full tick of a 100k-entity world allocates 0 bytes. That tick covers movement, AOI, combat, buff add/remove, and projectile spawn/despawn.
+- **Bounded memory.** Entity ids are recycled, so storage tracks the peak live entity count, not the total number of entities ever created.
+- **Cheap structural changes.** Add/remove follows cached archetype transitions. Membership is a 16-byte record per entity.
+- **Queries with filters.** `With<T>` / `Without<T>`, served from a lock-free copy-on-write archetype cache.
+- **Async systems** with priority, execution frequency and optional parallelism.
 
 ```
-dotnet add package EasyEcs
+dotnet add package EasyEcs        # net10.0, source generator included
 ```
-
-## Concepts
-
-| Concept | What it is |
-|---|---|
-| `Context` | A world. It owns entities, component storage, systems and singleton components. Contexts are fully isolated from each other. |
-| `Entity` / `EntityRef` | An id plus a version. Hold `EntityRef` rather than `Entity`; it is validated on access and throws if the entity was destroyed. |
-| `IComponent` | A plain `struct` with data only. |
-| `ISingletonComponent` | A `struct` that exists once per context, such as clocks or configuration. |
-| `SystemBase` + `IInitSystem` / `IExecuteSystem` / `IEndSystem` | Logic. Systems run in ascending `Priority` order. Systems in the same priority bucket may run in parallel. |
-
-Logic lives only in systems. Components hold data and nothing else. Systems don't reference each other; they only see the entities they query. That keeps dependencies one-directional.
 
 ## Quick start
 
 ```csharp
-using Cysharp.Threading.Tasks;
 using EasyEcs.Core;
 using EasyEcs.Core.Components;
 using EasyEcs.Core.Systems;
 
 public struct Position : IComponent { public float X, Y; }
 public struct Velocity : IComponent { public float X, Y; }
-public struct Clock : ISingletonComponent { public long Tick; }
+public struct Frozen   : IComponent { }                  // tag component
+public struct Clock    : ISingletonComponent { public long Tick; }
 
-public sealed class MoveSystem : SystemBase, IExecuteSystem
+// A system is a partial class with [Query] methods. The generator emits OnExecute.
+public partial class MoveSystem : SystemBase
 {
-    public override int Priority => 0;     // lower runs first
-    public int ExecuteFrequency => 1;      // every Update(); 2 = every other Update(), ...
-
-    private struct Move : IForEach<Position, Velocity>
+    [Query, Without<Frozen>]
+    static void Move(ref Position p, in Velocity v)
     {
-        public void Execute(int entityId, ref Position p, ref Velocity v)
-        {
-            p.X += v.X;
-            p.Y += v.Y;
-        }
-    }
-
-    public UniTask OnExecute(Context ctx)
-    {
-        var job = new Move();
-        ctx.ForEach<Position, Velocity, Move>(ref job);    // fastest path, zero allocation
-        ctx.GetSingletonComponent<Clock>().Value.Tick++;
-        return UniTask.CompletedTask;
+        p.X += v.X;
+        p.Y += v.Y;
     }
 }
 
-var ctx = new Context(new Context.Options(parallel: false, initialEntityCapacity: 4096));
+var ctx = new Context(new Context.Options(parallel: false, initialEntityCapacity: 100_000));
 ctx.AddSystem<MoveSystem>();
 ctx.AddSingletonComponent<Clock>();
 
 var e = ctx.CreateEntity();
 var (pos, vel) = e.Value.AddComponents<Position, Velocity>();   // one archetype transition
-vel.Value.X = 1;
+vel.Value.X = 1;                                                // always write through .Value (a ref)
 
 await ctx.Init();
-while (running)
-    await ctx.Update();
+while (running) await ctx.Update();
 await ctx.DisposeAsync();
 ```
 
-## API overview
+### `[Query]` methods
 
-**Entities**
+A `[Query]` method lives in a `partial` class (usually a `SystemBase`). It may be static or an instance method. Its parameters can be:
 
-```csharp
-EntityRef e = ctx.CreateEntity();
-ref Entity entity = ref e.Value;          // throws if destroyed
-ctx.DestroyEntity(e);                     // id is recycled, old refs become invalid
-ctx.TryGetEntityById(id, out var r);
-foreach (var r in ctx.AllEntities) { }
-```
+| Parameter | Meaning |
+|---|---|
+| `ref T` / `in T` where `T : IComponent` | Component data. Use 1 to 9 of them. `ref` to write, `in` to read. |
+| `int entityId` | Id of the current entity. |
+| `EntityRef entity` | Version-checked reference to the current entity. |
+| `Context context` | The context, for structural changes or singletons. |
 
-**Components**
+Add `[With<T>]` to require a component without reading it, and `[Without<T>]` to exclude entities that have it. Both can be repeated.
 
-```csharp
-ComponentRef<Hp> hp = entity.AddComponent<Hp>();
-var (a, b) = entity.AddComponents<A, B>();      // up to 9, single archetype transition
-entity.RemoveComponent<Hp>();
-entity.RemoveComponents<A, B>();                // up to 9
-entity.HasComponent<Hp>();
-entity.TryGetComponent<Hp>(out var r);
-ref Hp v = ref entity.GetComponent<Hp>().Value; // always mutate through ref
-```
-
-**Queries**
+For every query the generator emits `Run{Method}(Context)`. If the class doesn't define `OnExecute`, it also implements `IExecuteSystem.OnExecute`, which runs the queries in declaration order. To add your own logic around them, write `OnExecute` yourself and call `Run{Method}`:
 
 ```csharp
-// Struct job: fastest, zero allocation. 1..6 components.
-ctx.ForEach<A, B, MyJob>(ref job);
-
-// Enumerator: convenient, zero allocation. 1..9 components.
-foreach (var r in ctx.GroupOf<A, B>())
+public partial class DamageSystem : SystemBase, IExecuteSystem
 {
-    ref var a = ref r.Component1;
-    ref var entity = ref r.Entity;
+    public UniTask OnExecute(Context context)
+    {
+        // ... pre-processing ...
+        RunBurn(context);
+        return UniTask.CompletedTask;
+    }
+
+    [Query]
+    void Burn(int entityId, ref Health hp, ref Burning burning, Context context)
+    {
+        hp.Value -= burning.DamagePerTick;
+        if (--burning.Ticks == 0)
+            context.GetEntityById(entityId).Value.RemoveComponent<Burning>();   // allowed during iteration
+    }
 }
-
-ctx.AnyOf<A, B>();     // existence check without building an enumerator
-ctx.CountOf<A, B>();   // count without iterating
 ```
 
-You can make structural changes (create, destroy, add, remove) while iterating. Entities added during a pass may or may not be visited; destroyed ones are skipped.
+The generator reports these diagnostics: `EECS001` (the class or a containing type isn't `partial`), `EECS002` (invalid parameter), `EECS003` (component count not between 1 and 9), `EECS004` (generic system).
 
-**Singletons** (scoped per context)
+## API and complexity
+
+Notation:
+
+| Symbol | Meaning |
+|---|---|
+| *n* | Number of components in the call (1–9) |
+| *K* | Component types registered in the context |
+| *M* | Archetypes matching a query |
+| *S* | Slots (alive entities + tombstones) in those archetypes |
+
+"Amortized" means storage occasionally doubles.
+
+### Entities
+
+| API | Complexity | Notes |
+|---|---|---|
+| `ctx.CreateEntity()` → `EntityRef` | O(1) amortized | Reuses a recycled id when one is available. |
+| `ctx.DestroyEntity(e)` | O(K) | Clears the entity's component slots. The id is recycled and old refs become invalid. |
+| `ctx.TryGetEntityById(id, out r)` / `GetEntityById(id)` | O(1) | |
+| `entityRef.Value` → `ref Entity` | O(1) | Version check. Throws if the entity was destroyed. |
+| `ctx.EntityCount` | O(1) | |
+| `ctx.AllEntities` | O(capacity) | Diagnostics only. |
+| `ctx.EntityAt(index)` | O(capacity) | Diagnostics only. |
+
+### Components
+
+| API | Complexity | Notes |
+|---|---|---|
+| `entity.AddComponent<T>()` → `ComponentRef<T>` | O(1) amortized | Follows a cached transition edge. Creating the first archetype of a new combination costs O(cached queries). |
+| `entity.AddComponents<T1..Tn>()` | O(n) | Single archetype transition. Returns a tuple of refs. |
+| `entity.RemoveComponent<T>()` / `RemoveComponents<T1..Tn>()` | O(1) / O(n) | Components the entity doesn't have are ignored. |
+| `entity.GetComponent<T>()` / `TryGetComponent<T>(out r)` / `HasComponent<T>()` | O(1) | Bit test. |
+| `componentRef.Value` → `ref T` | O(1) | Version check plus one indexed load. Inlined. |
+
+### Queries
+
+| API | Complexity | Notes |
+|---|---|---|
+| `[Query]` method / `ctx.ForEach<T1..Tn, TJob>(ref job, filter)` | O(M + S) | The fastest path. Struct job, no delegate, inlined. |
+| `foreach (var r in ctx.GroupOf<T1..Tn>(filter))` | O(M + S) | Gives `r.Entity` and `r.Component1..n` as refs. |
+| `ctx.CountOf<T1..Tn>(filter)` | O(M) | Sums archetype counts. Doesn't iterate entities. |
+| `ctx.AnyOf<T1..Tn>(filter)` | O(M) worst case | Exits early. |
+| `QueryFilter.Create().With<T>().Without<U>()` | O(1) | Build once and keep it in a `static readonly` field. |
+
+The first call of a given query shape costs O(all archetypes) to build its cache entry. After that the lookup is one hash probe.
+
+### Singletons (scoped per context)
+
+| API | Complexity |
+|---|---|
+| `ctx.AddSingletonComponent<T>()` / `RemoveSingletonComponent<T>()` | O(1) |
+| `ctx.GetSingletonComponent<T>().Value` → `ref T` / `TryGet…` / `Has…` | O(1) |
+
+### Maintenance
+
+| API | Complexity | Notes |
+|---|---|---|
+| `ctx.GetFragmentationStats()` | O(archetypes) | Lock-free. |
+| `ctx.CompactArchetypes()` | O(total slots) | Call between frames when fragmentation is high. Never call it while iterating. |
+
+## `ref` everywhere, and `ref` across `await`
+
+Components are structs stored in arrays. Always mutate them through a `ref`. A local copy is just a copy:
 
 ```csharp
-ctx.AddSingletonComponent<Clock>();
-ref var clock = ref ctx.GetSingletonComponent<Clock>().Value;
-ctx.TryGetSingletonComponent<Clock>(out var c);
-ctx.HasSingletonComponent<Clock>();
-ctx.RemoveSingletonComponent<Clock>();
+var hp = entity.GetComponent<Health>().Value;        // ❌ copy: the change below is lost
+hp.Value -= 10;
+
+ref var hp = ref entity.GetComponent<Health>().Value; // ✅ ref into storage
+hp.Value -= 10;
 ```
 
-**Maintenance**
+**A `ref` into ECS storage is only valid until the next structural change.** Storage arrays grow when entities or components are added. When they grow, the arrays are reallocated and an old `ref` silently points at the stale copy. Creating an entity, adding a component or creating a new archetype can each trigger this, whether your own code does it or another system does.
+
+That is why `ref` and `await` don't mix:
+
+- C# doesn't allow `ref` locals to live across an `await` in async methods. Keep it that way: don't smuggle refs through `Unsafe`, pointers or `Span` fields.
+- During an `await`, other systems run and may create entities or add components, which reallocates storage. The entity itself may be destroyed and its id recycled for a different entity.
+- After an `await`, **re-acquire** the data from a version-checked handle. `EntityRef` or `ComponentRef<T>` throws if the entity was destroyed:
 
 ```csharp
-var (slots, alive, fragmentation) = ctx.GetFragmentationStats();
-if (fragmentation > 0.5f) ctx.CompactArchetypes();   // between frames, never while iterating
+public async UniTask OnExecute(Context ctx)
+{
+    ComponentRef<Health> hpRef = _player.Value.GetComponent<Health>(); // handle (id + version), safe to keep
+    int before = hpRef.Value.Value;                                    // read what you need before awaiting
+
+    await SaveToDatabaseAsync(before);                                 // other systems may run here
+
+    if (_player.Value.TryGetComponent<Health>(out var hp))             // re-validate after the await
+        hp.Value.Value = before;                                       // fresh ref, current storage
+}
 ```
 
-## Threading model
+Rules of thumb:
 
-- Structural changes (create, destroy, add and remove component, add and remove system) take a per-context lock, so they're safe from any thread.
-- Reading and writing component **values** is not synchronized. Give each context one owner thread, or partition the work so that systems in the same priority bucket touch disjoint data. For servers, the recommended layout is **one context per shard or world, each driven by its own thread**.
-- With `Options(parallel: true)`, systems in the same priority bucket run concurrently when a bucket has more than 4 systems.
+1. Inside `[Query]` / `ForEach` / `GroupOf` bodies, use `ref` freely. They are synchronous, and the iterators refresh their storage after structural changes.
+2. Never keep a `ref T` or a `ref Entity` in a field, and never keep one across an `await`. Keep `EntityRef` / `ComponentRef<T>` instead.
+3. Read values into locals before `await` and write back through a re-acquired ref after it.
+
+## Threading
+
+- **Recommended layout: one `Context` per shard or world, driven by one thread.** Contexts are fully isolated: storage, singletons and the query cache are per context.
+- Structural operations take a per-context `System.Threading.Lock`, so they're safe from any thread.
+- Queries are lock-free. They read immutable copy-on-write archetype snapshots, so creating new archetypes concurrently is safe.
+- Component **values** aren't synchronized. Writing the same component from two threads is a data race. That is why one owner per context is the model.
+- `Options(parallel: true)` runs the systems of one priority bucket concurrently when the bucket holds more than 4 systems. Those systems must touch disjoint data.
 
 ## Performance
 
-Measured with `EasyEcs.Benchmark`: N = 10,000, .NET 10, BenchmarkDotNet ShortRun, on a 4-core Xeon VM.
+All numbers below are from BenchmarkDotNet; run `dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*'` to reproduce them. The headline benchmarks simulate a real server tick, not a toy loop:
 
-| Benchmark | v3.1.1 | v4.0.0 | Change |
+- **`WorldSimulationBenchmark.Tick`** runs one tick of a world with 30% players and 70% NPCs, and projectiles on top. The tick contains:
+  - movement (`Without<Stunned>`, `Without<Dead>`)
+  - an AOI grid
+  - combat that randomly adds `Burning` / `Stunned`
+  - status expiry that removes those components
+  - death that adds `Dead`
+  - NPC despawn and respawn
+  - projectile spawn (~5% of players per tick) and expiry
+
+  Setup asserts that the world is busy. With 100k entities, one tick does about 11k hits, 430 deaths, 1,500 projectile spawns and 5,600 AOI cell changes.
+- **`ShardedWorldBenchmark.TickAllShards`** runs one world per core on a long-lived thread each, the recommended server layout. It measures scaling and cross-world contention.
+- **`MicroBenchmarks`** isolate single operations for diagnosis. `RawArrayWrite` is the no-ECS floor.
+
+Measured with BenchmarkDotNet's default job on .NET 10, on a 4-core Xeon VM at 2.1 GHz.
+
+**Realistic server tick** (the "Allocated" column is per tick):
+
+| Benchmark | Entities | Mean | Allocated |
 |---|---:|---:|---:|
-| CreateAddDestroy | 5,358 μs | 3,501 μs | -35% |
-| Churn: 10 rounds of create, add and destroy in one context | 5,247 μs / 3,190 KB | 1,794 μs / 156 KB | -66% time, -95% alloc |
-| ToggleComponent: remove + add | 1,185 μs | 428 μs | -64% |
-| QueryIterate (`GroupOf<P,V>`) | 40.6 μs | 43.5 μs | within noise |
-| ForEachIterate (new; same work as QueryIterate) | – | 32.2 μs | -21% vs `GroupOf` |
-| QueryIterate3 | 16.2 μs | 12.1 μs | -25% |
-| SingletonAccess (×1000) | 1.42 μs | 0.89 μs | -37% |
+| WorldSimulation.Tick | 10,000 | 375 μs | 0 B |
+| WorldSimulation.Tick | 100,000 | 5.24 ms | 0 B |
+| ShardedWorld.TickAllShards (4 worlds × 25k) | 100,000 | 2.16 ms | 0 B |
 
-None of the query or access benchmarks allocate. To run the benchmarks:
+**Micro benchmarks** (N = 10,000). The v3.1.1 column comes from BenchmarkDotNet ShortRun on the same machine.
 
-```
-dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*'
-```
+| Benchmark | v3.1.1 | v4.0.0 | Allocated (v4) |
+|---|---:|---:|---:|
+| CreateAddDestroy (fresh context) | 5,358 μs | 3,289 μs | 4.1 MB (array growth of the new context) |
+| Churn: 10 rounds of create, add and destroy in one context | 5,247 μs / 3.19 MB | 1,692 μs | 155 KB (steady state reached in round 1) |
+| ToggleComponent: remove + add | 1,185 μs | 441 μs | 0 B |
+| QueryIterate (`GroupOf<P,V>` + reduction) | 40.6 μs | 34.7 μs | 0 B |
+| QueryWrite (`GroupOf`, pure write) | – | 29.9 μs | 0 B |
+| QuerySystemWrite (`[Query]` system) | – | 31.0 μs | 0 B |
+| ForEachWrite (`ForEach` struct job) | – | 31.6 μs | 0 B |
+| RawArrayWrite (two plain arrays, the floor) | – | 11.5 μs | 0 B |
+| QueryIterate3 (half the entities match) | 16.2 μs | 9.7 μs | 0 B |
+| SingletonAccess (×1000) | 1.42 μs | 1.05 μs | 0 B |
 
-## What's new in v4.0.0
+`GroupOf`, `ForEach` and `[Query]` iterate at the same speed. All three are about 2.6× the plain-array floor; the gap is the price of sparse ids, tombstones and per-entity indirection, which in turn make structural changes O(1).
 
-- **Entity id recycling**: destroyed ids are reused. Versions are bumped, so stale `EntityRef` or `Entity` copies are rejected rather than mutating the new occupant.
-- **Destroy releases component data**, so managed references inside components can be collected.
-- **O(1) archetype membership without hashing**: the context tracks entity → (archetype, slot). Single-component add and remove follow cached archetype transition edges instead of hashing a 256-bit tag. New archetypes start small.
-- **Per-context singletons**. Before v4 they were a process-wide static shared by every context. Also added: `HasSingletonComponent<T>()` and `RemoveSingletonComponent<T>()`.
-- **`ForEach<T1..T6, TJob>(ref TJob job)`**: struct-job iteration.
-- `System.Threading.Lock` on .NET 9+; query accessors skip redundant bounds checks.
-- New `EasyEcs.Benchmark` project.
+## Upgrading from v3
 
-Upgrading from v3? See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md). The breaking changes are behavioral: ids are recycled and singletons are per context.
+v4 targets .NET 10 only. Ids are recycled, singletons are per context, and there are new `[Query]`, filter and `ForEach` APIs. See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md).
 
-## More examples
+## Documentation
 
-The `EasyEcs.UnitTest` project has commented examples of systems, priorities, frequencies, structural changes during iteration and the entity lifecycle.
+- [doc/architecture.md](doc/architecture.md): storage layout, archetypes, id recycling, iteration safety, threading contract.
+- [doc/performance.md](doc/performance.md): which API to use when, do's and don'ts, how to measure.
 
 ## License
 

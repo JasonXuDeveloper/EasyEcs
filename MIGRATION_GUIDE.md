@@ -1,24 +1,35 @@
 # Migration Guide: EasyECS v3.x → v4.0
 
-v4.0 has no API removals for normal usage; the breaking changes are behavioral:
+## Platform
 
-1. **Entity ids are recycled.** `Entity.Id` is unique only among *live* entities. If you store ids outside
-   the ECS (e.g. in dictionaries or on the network), store `EntityRef` (id + version) instead, or remove the
-   mapping when the entity is destroyed. `TryGetEntityById(id)` may return a newer entity reusing that id.
-2. **Stale `Entity` copies throw.** Calling `AddComponent`/`RemoveComponent` with an `Entity` value copied
-   before the entity was destroyed now throws `InvalidOperationException("Entity not found")` instead of
-   silently mutating whatever lives at that id.
-3. **Singletons are per context.** Code that added a singleton on one context and read it from another
-   (relying on the old process-wide static) must add it to each context. The public `Singleton<T>` class was
-   removed; use `context.GetSingletonComponent<T>()`.
-4. **Destroying an entity clears its component data.** `ComponentRef`s to a destroyed entity already threw;
-   now the storage is also reset so references inside components can be collected.
-5. **Do not call `CompactArchetypes()` while iterating** (`GroupOf` / `ForEach`). This was already unsafe.
+- **.NET 10 only** (`net10.0`). v4 uses .NET 10 / C# 14 features (`System.Threading.Lock`, generic attributes, ...).
+- The package ships a **source generator** (`analyzers/dotnet/cs/EasyEcs.Generator.dll`). Projects that reference
+  `EasyEcs.Core` by `ProjectReference` instead of the package must add it explicitly:
+  `<ProjectReference Include="...EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>`.
 
-New, optional: `Context.ForEach<T1..T6, TJob>(ref TJob job)` with `struct TJob : IForEach<T1..T6>` for the
-fastest zero-allocation iteration.
+## Behavioral changes
+
+1. **Entity ids are recycled.** `Entity.Id` is unique only among *live* entities. Store `EntityRef` (id + version)
+   rather than raw ids, or remove id mappings when the entity is destroyed. `TryGetEntityById(id)` may return a newer
+   entity reusing that id.
+2. **Stale `Entity` copies throw.** `AddComponent`/`RemoveComponent` on an `Entity` value copied before the entity
+   was destroyed now throw `InvalidOperationException("Entity not found")` instead of mutating the new occupant.
+3. **Singletons are per context.** The old process-wide static is gone (`Singleton<T>` removed): add the singleton to
+   every context that needs it.
+4. **Destroying an entity clears its component data** (managed references inside components can be collected).
+5. **Do not call `CompactArchetypes()` while iterating** (`GroupOf` / `ForEach` / `[Query]`).
+
+## API changes
+
+- `GroupResult<...>` / `GroupResultEnumerator<...>` constructors are internal (obtain them from `GroupOf`), and
+  `GroupResult` type parameters are now constrained to `struct, IComponent`. `GroupResult` gained `EntityId`.
+- `GroupOf`, `CountOf`, `AnyOf` and `ForEach` accept an optional `in QueryFilter filter` (`With<T>` / `Without<T>`).
+- `ForEach` supports 1..9 components (was 1..6). `IForEach<T1..T9>` is in namespace `EasyEcs.Core`.
+- New: `[Query]`, `[With<T>]`, `[Without<T>]` (namespace `EasyEcs.Core.Systems`) for generated query systems;
+  `HasSingletonComponent<T>()`, `RemoveSingletonComponent<T>()`.
 
 ---
+
 
 # Migration Guide: EasyECS v2.x → v3.0
 

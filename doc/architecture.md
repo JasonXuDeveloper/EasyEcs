@@ -8,9 +8,9 @@ zero allocation on hot paths, bounded memory under churn and safe structural cha
 ```
 Context
 ├── Entities[id]            Entity { Id, Version, Tag (component bitset), Context }
-├── EntityVersions[id]      bumped on destroy; EntityRef/ComponentRef carry (id, version) and validate on access
-├── EntityArchetypes[id]    archetype the entity currently belongs to
-├── EntitySlots[id]         slot of the entity inside that archetype's EntityIds
+├── Meta[id]                EntityMeta { Archetype, Version, Slot } = 16 bytes, 4 per 64-byte cache line;
+│                           Archetype == null means the id is free. Version is bumped on destroy and
+│                           EntityRef/ComponentRef validate it on access
 ├── Components[bit]         T[] per component type, indexed by entity id (length == Entities.Length)
 ├── Archetypes              Tag -> Archetype (one per distinct component set)
 └── _singletons[index]      SingletonBox<T> per singleton type (per context)
@@ -46,13 +46,27 @@ entities ever created.
 - `Archetype.EntityIds` uses **tombstones** (`-1`) plus a free-slot stack. Removal writes a tombstone in O(1);
   iteration skips tombstones. Slots are never shifted during normal operation, so an in-progress iteration stays
   valid.
-- The context tracks `entity -> (archetype, slot)`, so removing from an archetype is a plain array write with no
-  hashing.
+- The context tracks `entity -> (archetype, slot)` in `EntityMeta`, so removing from an archetype is a plain array
+  write with no hashing, and a structural change touches one cache line of bookkeeping.
 - Single-component add/remove follows **transition edges** cached on the archetype (`GetAddEdge(bit)` /
   `GetRemoveEdge(bit)`), so the hot path never hashes a 256-bit tag. Multi-component operations look up
   the target archetype by tag once per call.
 - `CompactArchetypes()` removes tombstones and rewrites slots. It is a maintenance operation; never call it
   while iterating.
+
+## Generated API surface
+
+Every T1..T9 API (`AddComponents`, `RemoveComponents`, `ForEach`, `GroupOf`, `CountOf`, `AnyOf`, `GroupResult`,
+enumerators, `Entity` wrappers) is emitted by `EasyEcs.Generator/ArityGenerator.cs` from one template per family,
+on top of a small shared core: `PrepareColumn<T>`, `AddBits`, `RemoveBits`, `GetMatchingArchetypes`,
+`ArchetypeCursor`. User `[Query]` methods are compiled by `QueryGenerator.cs` into a struct `IForEach` job (inlined
+by the JIT), a static `QueryFilter` and `Run{Method}(Context)`.
+
+## Query cache
+
+`GetMatchingArchetypes(bits, filter)` keys a `ConcurrentDictionary` by (required tag, excluded tag). Entries hold an
+immutable `Archetype[]`; when a new archetype is created (under the structural lock) every matching entry is replaced
+copy-on-write and published with `Volatile.Write`. Readers never lock and never observe a list being mutated.
 
 ## Iteration safety
 
