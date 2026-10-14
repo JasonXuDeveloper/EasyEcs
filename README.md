@@ -394,7 +394,9 @@ Measured with BenchmarkDotNet's default job on .NET 10, on a 4-core Xeon VM at 2
 | WorldSimulation.Tick | 100,000 | 4.51 ms | 0 B |
 | ShardedWorld.TickAllShards (4 worlds × 25k) | 100,000 | 2.09 ms | 0 B |
 
-**Micro benchmarks** (N = 10,000; the v3.1.1 column is BenchmarkDotNet ShortRun on the same machine):
+**Micro benchmarks** (N = 10,000; the v3.1.1 column is BenchmarkDotNet ShortRun on the same machine). "–" means
+the operation has no v3.1.1 equivalent (struct jobs, `[ForEach]` systems, events and handles are new in v4). Every
+operation that exists in both versions is faster in v4 and allocates less or nothing:
 
 | Benchmark | v3.1.1 | v4 | Allocated (v4) |
 |---|---:|---:|---:|
