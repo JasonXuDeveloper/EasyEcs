@@ -1,8 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
-using EasyEcs.Core.Components;
-
-namespace EasyEcs.Core;
+namespace EasyEcs;
 
 /// <summary>
 /// Archetype stores entities with the same component configuration.
@@ -14,7 +12,11 @@ namespace EasyEcs.Core;
 /// </summary>
 internal class Archetype
 {
-    public Tag ComponentMask;
+    public readonly Tag ComponentMask;
+
+    /// <summary>Component bits of this archetype, ascending (lets destroy/remove visit only its own columns).</summary>
+    public readonly ushort[] Components;
+
     public int[] EntityIds;
     public int Count; // Total slots (including tombstones)
     public int AliveCount; // Living entities only
@@ -33,6 +35,7 @@ internal class Archetype
     public Archetype(in Tag componentMask, int initialCapacity = 64)
     {
         ComponentMask = componentMask;
+        Components = componentMask.ToBitArray();
         EntityIds = new int[initialCapacity];
         _freeSlots = new int[16];
         Count = 0;
@@ -87,26 +90,21 @@ internal class Archetype
     }
 
     /// <summary>
-    /// Compact the array by removing all tombstones.
-    /// Rewrites the entity -> slot table for every moved entity.
+    /// Remove tombstones and sort the remaining ids ascending, rewriting each entity's slot. Columns are indexed by
+    /// entity id, so ascending ids turn iteration into a forward, prefetch-friendly walk over every column.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public void Compact(EntityMeta[] meta)
     {
-        int writeIdx = 0;
+        int alive = 0;
+        for (int i = 0; i < Count; i++)
+            if (EntityIds[i] != Tombstone)
+                EntityIds[alive++] = EntityIds[i];
 
-        for (int readIdx = 0; readIdx < Count; readIdx++)
-        {
-            int entityId = EntityIds[readIdx];
-            if (entityId != Tombstone)
-            {
-                EntityIds[writeIdx] = entityId;
-                meta[entityId].Slot = writeIdx;
-                writeIdx++;
-            }
-        }
+        Array.Sort(EntityIds, 0, alive);
+        for (int slot = 0; slot < alive; slot++)
+            meta[EntityIds[slot]].Slot = slot;
 
-        Count = writeIdx;
+        Count = alive;
         _freeCount = 0;
     }
 

@@ -18,7 +18,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\EasyEcs.Core\EasyEcs.Core.csproj"/>
-        <!-- as analyzer: generates [Each] systems in this assembly; as reference: driven directly by GeneratorTests -->
+        <!-- as analyzer: generates [ForEach] systems in this assembly; as reference: driven directly by GeneratorTests -->
         <ProjectReference Include="..\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="true"/>
     </ItemGroup>
 

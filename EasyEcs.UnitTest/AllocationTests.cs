@@ -1,54 +1,40 @@
 using System;
-using EasyEcs.Core;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
-/// <summary>
-/// Correctness guard for the zero-GC contract: steady-state hot paths must not allocate. (Performance numbers come
-/// from EasyEcs.Benchmark; this only asserts the allocation budget.)
-/// </summary>
+/// <summary>The steady-state hot paths allocate nothing (performance numbers come from EasyEcs.Benchmark).</summary>
 public class AllocationTests
 {
-    private struct Integrate : IForEach<Position, Velocity>
-    {
-        public void Execute(int entityId, ref Position p, ref Velocity v) => p.X += v.X;
-    }
-
-    private static readonly QueryFilter NotFrozen = QueryFilter.Create().Without<Frozen>();
-
     [Test]
-    public void SteadyStateHotPathsDoNotAllocate()
+    public void UpdatesQueriesAndEventsDoNotAllocate()
     {
-        using var world = new World(new WorldOptions { InitialEntityCapacity = 4096 });
-        world.AddSystem<MoveSystem>();
-        world.AddSingleton<Clock>();
-        for (int i = 0; i < 1000; i++) world.CreateEntity().Value.AddComponents<Position, Velocity>();
-
-        void Run()
+        using var world = new World();
+        for (int i = 0; i < 1_000; i++)
         {
-            var job = new Integrate();
-            world.ForEach<Position, Velocity, Integrate>(ref job, NotFrozen);
-            foreach (var item in world.Query<Position, Velocity>()) item.Component1.Y += 1;
-            _ = world.Count<Position>(NotFrozen);
-            foreach (var item in world.Query<Position>())
-            {
-                item.Entity.AddComponent<Frozen>();
-                item.Entity.RemoveComponent<Frozen>();
-            }
-
-            var churn = world.CreateEntity();
-            churn.Value.AddComponent<Health>();
-            world.DestroyEntity(churn);
-            world.GetSingleton<Clock>().Tick++;
-            world.Update();
+            var e = world.CreateEntity(new Position(i, i), new Velocity(1, 1), new Health(1_000_000));
+            if (i % 3 == 0) e.Set(new Frozen());
         }
 
-        for (int i = 0; i < 10; i++) Run(); // warm-up: caches, archetypes, edges, JIT
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 100; i++) Run();
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        world.AddSystem<Movement>();
+        world.AddSystem<Damage>();
+        world.AddSystem<Scoreboard>();
+        var probe = world.CreateEntity(new Health(1));
 
-        Assert.That(allocated, Is.EqualTo(0), $"{allocated} bytes allocated in steady state");
+        void Frame()
+        {
+            world.Update();
+            foreach (var item in world.Query<Position, Velocity>()) item.Component1.X += item.Component2.X;
+            _ = world.Count<Position, Velocity>(QueryFilter.Create());
+            world.Publish(new Died(probe.Id));
+            probe.Get<Health>().Value++;
+            probe.Remove<Frozen>();
+            probe.Set(new Frozen()); // archetype transitions on cached edges
+        }
+
+        for (int i = 0; i < 10; i++) Frame(); // warm-up: query caches, edges, JIT
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++) Frame();
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
 }

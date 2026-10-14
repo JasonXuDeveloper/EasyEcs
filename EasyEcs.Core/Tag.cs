@@ -5,7 +5,7 @@ using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 
-namespace EasyEcs.Core.Components;
+namespace EasyEcs;
 
 /// <summary>
 /// Component archetype tag using SIMD-optimized bitset.
@@ -136,11 +136,15 @@ internal struct Tag : IEquatable<Tag>
         return copy;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public static bool operator ==(in Tag a, in Tag b) => a.Equals(in b);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public static bool operator !=(in Tag a, in Tag b) => !a.Equals(in b);
+    /// <summary>Indices of the set bits in ascending order (cold path: archetype creation).</summary>
+    public readonly ushort[] ToBitArray()
+    {
+        int capacity = 256 * (1 + (_overflow?.Length ?? 0));
+        var bits = new System.Collections.Generic.List<ushort>();
+        for (int i = 0; i < capacity; i++)
+            if (HasBit(i)) bits.Add((ushort)i);
+        return bits.ToArray();
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public readonly bool Equals(in Tag other)
@@ -242,7 +246,6 @@ internal struct Tag : IEquatable<Tag>
             $"Tag {Unsafe.Add(ref bits, 0):x16} {Unsafe.Add(ref bits, 1):x16} {Unsafe.Add(ref bits, 2):x16} {Unsafe.Add(ref bits, 3):x16}";
     }
 
-    // IComparable<Tag> implementation for interface compatibility
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private void EnsureOverflow(int requiredCount)
     {

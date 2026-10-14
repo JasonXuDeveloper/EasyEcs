@@ -1,12 +1,14 @@
 using System.Text;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
 using static EasyEcs.Generator.Code;
 
 namespace EasyEcs.Generator;
 
 /// <summary>
 /// Expands the T1..T9 API families of EasyEcs.Core from one template each, so the hand-written runtime stays a
-/// single shared implementation. Only runs when compiling the EasyEcs.Core assembly itself.
+/// single shared implementation. Only runs when compiling EasyEcs.Core itself: the pipeline depends on nothing but
+/// the assembly name (an equatable bool), so it is computed once and cached for every later edit.
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class ArityGenerator : IIncrementalGenerator
@@ -15,116 +17,106 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var isCore = context.CompilationProvider.Select(static (c, _) => c.AssemblyName == "EasyEcs.Core");
+        var isCore = context.CompilationProvider
+            .Select(static (c, _) => c.AssemblyName == "EasyEcs.Core")
+            .WithTrackingName("IsEasyEcsCore");
+
         context.RegisterSourceOutput(isCore, static (spc, isCoreAssembly) =>
         {
             if (!isCoreAssembly) return;
-            spc.AddSource("World.Structural.g.cs", Structural());
-            spc.AddSource("Entity.Structural.g.cs", EntityWrappers());
-            spc.AddSource("World.Queries.g.cs", Queries());
-            spc.AddSource("QueryItems.g.cs", QueryItems());
+            spc.AddSource("Entity.Structural.g.cs", SourceText.From(Structural(), Encoding.UTF8));
+            spc.AddSource("World.Queries.g.cs", SourceText.From(Queries(), Encoding.UTF8));
+            spc.AddSource("QueryItems.g.cs", SourceText.From(QueryItems(), Encoding.UTF8));
         });
     }
 
-    // ---------------- AddComponent(s) / RemoveComponent(s) ----------------
+    // ---------------- Entity.Set / Entity.Remove / World.CreateEntity ----------------
 
     private static string Structural()
     {
-        var sb = new StringBuilder(Header).Append(
-            "using System;\nusing EasyEcs.Core.Components;\n\nnamespace EasyEcs.Core;\n\npublic sealed partial class World\n{\n");
+        var entity = new StringBuilder(Header).Append(
+            "using System;\n\nnamespace EasyEcs;\n\npublic readonly partial struct Entity\n{\n");
+        var world = new StringBuilder("public sealed partial class World\n{\n");
 
         for (int n = 1; n <= MaxArity; n++)
         {
             string tps = TypeParams(n);
-            string returns = n == 1 ? "ComponentRef<T1>" : $"({List(n, i => $"ComponentRef<T{i}>")})";
-            string refs = n == 1
-                ? "new ComponentRef<T1>(id, version, b1, this)"
-                : $"({List(n, i => $"new ComponentRef<T{i}>(id, version, b{i}, this)")})";
-            string add = n == 1 ? "AddComponent" : "AddComponents";
-            string remove = n == 1 ? "RemoveComponent" : "RemoveComponents";
+            string cons = Constraints(n, "        ");
+            string values = List(n, i => $"in T{i} c{i}");
+            string what = n == 1 ? "a component" : n + " components";
 
-            sb.Append($$"""
-                /// <summary>
-                /// Add {{(n == 1 ? "a component" : n + " components")}} to <paramref name="entity"/> with a single archetype
-                /// transition and return {{(n == 1 ? "a reference" : "references")}} to the (default-initialized) data. Thread-safe.
-                /// </summary>
-                public {{returns}} {{add}}<{{tps}}>(Entity entity)
-            {{Constraints(n, "        ")}}
-                {
-                    lock (_structuralLock)
+            entity.Append($$"""
+                    /// <summary>
+                    /// Add or overwrite {{what}} with the given value{{(n == 1 ? "" : "s")}} in one archetype transition. Returns the entity
+                    /// for chaining. O({{n}}) amortized. Thread-safe.
+                    /// </summary>
+                    public Entity Set<{{tps}}>({{values}})
+                {{cons}}
                     {
-                        ThrowIfStale(in entity);
-                        int id = entity.Id;
-            {{Lines(n, i => $"            ushort b{i} = PrepareColumn<T{i}>();")}}
-                        AddBits(id, stackalloc ushort[] { {{List(n, i => $"b{i}")}} });
-            {{Lines(n, i => $"            Column<T{i}>(b{i})[id] = default;")}}
-                        int version = Meta[id].Version;
-                        return {{refs}};
-                    }
-                }
+                        var world = _world;
+                        lock (world.StructuralLock)
+                        {
+                            world.ThrowIfStale(this);
+                {{Lines(n, i => $"            ushort b{i} = world.PrepareColumn<T{i}>();")}}
+                            world.AddBits(Id, [{{List(n, i => $"b{i}")}}]);
+                {{Lines(n, i => $"            world.ColumnRef<T{i}>(b{i}, Id) = c{i};")}}
+                        }
 
-                /// <summary>
-                /// Remove {{(n == 1 ? "a component" : n + " components")}} from <paramref name="entity"/> with a single archetype
-                /// transition; components the entity does not have are ignored. Thread-safe.
-                /// </summary>
-                public void {{remove}}<{{tps}}>(Entity entity)
-            {{Constraints(n, "        ")}}
-                {
-                    lock (_structuralLock)
+                        return this;
+                    }
+
+                    /// <summary>
+                    /// Remove {{what}} in one archetype transition; missing components are ignored. O({{n}}). Thread-safe.
+                    /// </summary>
+                    public void Remove<{{tps}}>()
+                {{cons}}
                     {
-                        ThrowIfStale(in entity);
-                        RemoveBits(entity.Id, stackalloc ushort[] { {{List(n, i => $"ComponentType<T{i}>.Bit")}} });
+                        var world = _world;
+                        lock (world.StructuralLock)
+                        {
+                            world.ThrowIfStale(this);
+                            world.RemoveBits(Id, [{{List(n, i => $"ComponentType<T{i}>.Bit")}}]);
+                        }
                     }
-                }
 
 
-            """);
+                """);
+
+            world.Append($$"""
+                    /// <summary>
+                    /// Create an entity with {{what}} placed directly in its final archetype (no intermediate moves).
+                    /// O({{n}}) amortized. Thread-safe.
+                    /// </summary>
+                    public Entity CreateEntity<{{tps}}>({{values}})
+                {{cons}}
+                    {
+                        lock (StructuralLock)
+                        {
+                            int id = AllocateId();
+                {{Lines(n, i => $"            ushort b{i} = PrepareColumn<T{i}>();")}}
+                            MoveToArchetype(id, _emptyArchetype);
+                            AddBits(id, [{{List(n, i => $"b{i}")}}]);
+                {{Lines(n, i => $"            ColumnRef<T{i}>(b{i}, id) = c{i};")}}
+                            return new Entity(this, id, Meta[id].Version);
+                        }
+                    }
+
+
+                """);
         }
 
-        return sb.Append("}\n").ToString();
+        return entity.Append("}\n\n").Append(world).Append("}\n").ToString();
     }
 
-    private static string EntityWrappers()
-    {
-        var sb = new StringBuilder(Header).Append(
-            "using System.Runtime.CompilerServices;\nusing EasyEcs.Core.Components;\n\nnamespace EasyEcs.Core;\n\npublic partial struct Entity\n{\n");
-
-        for (int n = 1; n <= MaxArity; n++)
-        {
-            string tps = TypeParams(n);
-            string returns = n == 1 ? "ComponentRef<T1>" : $"({List(n, i => $"ComponentRef<T{i}>")})";
-            string add = n == 1 ? "AddComponent" : "AddComponents";
-            string remove = n == 1 ? "RemoveComponent" : "RemoveComponents";
-            sb.Append($$"""
-                /// <inheritdoc cref="World.{{add}}{{"{"}}{{tps}}{{"}"}}(Entity)"/>
-                [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                public {{returns}} {{add}}<{{tps}}>()
-            {{Constraints(n, "        ")}}
-                    => World.{{add}}<{{tps}}>(this);
-
-                /// <inheritdoc cref="World.{{remove}}{{"{"}}{{tps}}{{"}"}}(Entity)"/>
-                [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                public void {{remove}}<{{tps}}>()
-            {{Constraints(n, "        ")}}
-                    => World.{{remove}}<{{tps}}>(this);
-
-
-            """);
-        }
-
-        return sb.Append("}\n").ToString();
-    }
-
-    // ---------------- ForEach / GroupOf / CountOf / AnyOf ----------------
+    // ---------------- IForEach / ForEach / Query / Count / Any ----------------
 
     private static string Queries()
     {
         var sb = new StringBuilder(Header).Append("""
             using System.Runtime.CompilerServices;
             using System.Runtime.InteropServices;
-            using EasyEcs.Core.Components;
 
-            namespace EasyEcs.Core;
+            namespace EasyEcs;
 
 
             """);
@@ -134,7 +126,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             sb.Append($$"""
                 /// <summary>
                 /// Struct callback for <c>World.ForEach</c>. Being a struct-constrained generic, calls are devirtualized and
-                /// usually inlined by the JIT: no delegate, no closure, no allocation.
+                /// usually inlined by the JIT: no delegate, no closure, no allocation. <c>[ForEach]</c> methods compile to this.
                 /// </summary>
                 public interface IForEach<{{TypeParams(n)}}>
                 {{Constraints(n, "    ")}}
@@ -159,20 +151,19 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 {{cons}}
                     {
                 {{Lines(n, i => $"        b{i} = ComponentType<T{i}>.Bit;")}}
-                        return GetMatchingArchetypes(stackalloc ushort[] { {{bits}} }, in filter);
+                        return GetMatchingArchetypes([{{bits}}], in filter);
                     }
 
                     /// <summary>
                     /// Run <paramref name="job"/> for every entity having all of <c>{{tps}}</c> (and matching <paramref name="filter"/>).
-                    /// Fastest, allocation-free iteration. Structural changes inside the job are allowed (entities added during the
-                    /// pass may or may not be visited, removed ones are skipped); do not call <see cref="CompactArchetypes"/> inside.
+                    /// The fastest iteration: O(matching archetypes + slots), allocation-free. Structural changes inside the job are
+                    /// allowed (entities added during the pass may or may not be visited, removed ones are skipped).
                     /// </summary>
                     public void ForEach<{{tps}}, TJob>(ref TJob job, in QueryFilter filter = default)
                 {{cons}}
                         where TJob : struct, IForEach<{{tps}}>
                     {
                         var archetypes = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
-                        if (archetypes.Length == 0) return;
 
                         // Columns are cached and refreshed only when the job reallocated storage (StorageVersion changed).
                         int version = StorageVersion;
@@ -203,7 +194,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         }
                     }
 
-                    /// <summary>Query entities having all of <c>{{tps}}</c> (and matching <paramref name="filter"/>). Allocation-free.</summary>
+                    /// <summary>Enumerate entities having all of <c>{{tps}}</c> (and matching <paramref name="filter"/>). Allocation-free.</summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public QueryEnumerator<{{tps}}> Query<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}
@@ -212,13 +203,13 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         return new QueryEnumerator<{{tps}}>(this, archetypes, {{bits}});
                     }
 
-                    /// <summary>Number of alive entities having all of <c>{{tps}}</c>, without iterating them.</summary>
+                    /// <summary>Number of alive entities having all of <c>{{tps}}</c>. O(matching archetypes).</summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public int Count<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}
                         => ArchetypeCursor.CountAlive(Match<{{tps}}>(in filter, {{List(n, i => "out _")}}));
 
-                    /// <summary>Whether any alive entity has all of <c>{{tps}}</c>, with early exit.</summary>
+                    /// <summary>Whether any alive entity has all of <c>{{tps}}</c>. O(matching archetypes), early exit.</summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public bool Any<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}
@@ -236,11 +227,9 @@ public sealed class ArityGenerator : IIncrementalGenerator
         var sb = new StringBuilder(Header).Append("""
             using System;
             using System.Runtime.CompilerServices;
-            using System.Runtime.InteropServices;
-            using EasyEcs.Core.Components;
 
-            namespace EasyEcs.Core
-            {
+            namespace EasyEcs;
+
 
             """);
 
@@ -248,92 +237,68 @@ public sealed class ArityGenerator : IIncrementalGenerator
         {
             string tps = TypeParams(n);
             sb.Append($$"""
-                    /// <summary>One query result: the entity and refs to its queried components.</summary>
-                    public readonly struct QueryItem<{{tps}}>
-                {{Constraints(n, "        ")}}
+                /// <summary>One query result: the entity and refs to its queried components.</summary>
+                public readonly struct QueryItem<{{tps}}>
+                {{Constraints(n, "    ")}}
+                {
+                    private readonly World _world;
+                    private readonly int _entityId;
+                {{Lines(n, i => $"    private readonly ushort _b{i};")}}
+
+                    internal QueryItem(World world, int entityId, {{List(n, i => $"ushort b{i}")}})
                     {
-                        private readonly World _world;
-                        private readonly int _entityId;
-                {{Lines(n, i => $"        private readonly ushort _b{i};")}}
+                        _world = world;
+                        _entityId = entityId;
+                {{Lines(n, i => $"        _b{i} = b{i};")}}
+                    }
 
-                        internal QueryItem(World world, int entityId, {{List(n, i => $"ushort b{i}")}})
-                        {
-                            _world = world;
-                            _entityId = entityId;
-                {{Lines(n, i => $"            _b{i} = b{i};")}}
-                        }
-
-                        public int EntityId => _entityId;
-
-                        public ref Entity Entity
-                        {
-                            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                            get => ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_world.Entities), _entityId);
-                        }
+                    /// <summary>Handle of the current entity.</summary>
+                    public Entity Entity => _world.EntityAt(_entityId);
 
                 {{Lines(n, i => $$"""
-                        public ref T{{i}} Component{{i}}
-                        {
-                            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                            get => ref _world.ColumnRef<T{{i}}>(_b{{i}}, _entityId);
-                        }
+                    public ref T{{i}} Component{{i}}
+                    {
+                        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                        get => ref _world.ColumnRef<T{{i}}>(_b{{i}}, _entityId);
+                    }
 
                 """)}}
-                    }
+                }
 
+                /// <summary>Allocation-free query enumerator; safe under structural changes during iteration.</summary>
+                public struct QueryEnumerator<{{tps}}>
+                {{Constraints(n, "    ")}}
+                {
+                    private readonly World _world;
+                    private ArchetypeCursor _cursor;
+                {{Lines(n, i => $"    private readonly ushort _b{i};")}}
+                    private int _current;
 
-                """);
-        }
-
-
-        for (int n = 1; n <= MaxArity; n++)
-        {
-            string tps = TypeParams(n);
-            sb.Append($$"""
-                    /// <summary>Allocation-free query enumerator; safe under structural changes during iteration.</summary>
-                    public struct QueryEnumerator<{{tps}}> : IDisposable
-                {{Constraints(n, "        ")}}
+                    internal QueryEnumerator(World world, Archetype[] archetypes, {{List(n, i => $"ushort b{i}")}})
                     {
-                        private readonly World _world;
-                        private ArchetypeCursor _cursor;
-                {{Lines(n, i => $"        private readonly ushort _b{i};")}}
-
-                        internal QueryEnumerator(World world, Archetype[] archetypes, {{List(n, i => $"ushort b{i}")}})
-                        {
-                            _world = world;
-                            _cursor = new ArchetypeCursor(archetypes);
-                {{Lines(n, i => $"            _b{i} = b{i};")}}
-                            Current = default;
-                        }
-
-                        public QueryItem<{{tps}}> Current { get; private set; }
-
-                        /// <summary>Number of alive matching entities (sums archetype counts, does not iterate).</summary>
-                        public readonly int Count => _cursor.AliveCount;
-
-                        public readonly bool IsEmpty => !_cursor.AnyAlive();
-
-                        public QueryEnumerator<{{tps}}> GetEnumerator() => this;
-
-                        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                        public bool MoveNext()
-                        {
-                            if (!_cursor.MoveNext(out int id))
-                                return false;
-
-                            Current = new QueryItem<{{tps}}>(_world, id, {{List(n, i => $"_b{i}")}});
-                            return true;
-                        }
-
-                        public void Dispose()
-                        {
-                        }
+                        _world = world;
+                        _cursor = new ArchetypeCursor(archetypes);
+                {{Lines(n, i => $"        _b{i} = b{i};")}}
+                        _current = -1;
                     }
+
+                    public readonly QueryItem<{{tps}}> Current => new(_world, _current, {{List(n, i => $"_b{i}")}});
+
+                    /// <summary>Number of alive matching entities. O(matching archetypes).</summary>
+                    public readonly int Count => _cursor.AliveCount;
+
+                    public readonly bool IsEmpty => !_cursor.AnyAlive();
+
+                    public readonly QueryEnumerator<{{tps}}> GetEnumerator() => this;
+
+                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                    public bool MoveNext() => _cursor.MoveNext(out _current);
+                }
 
 
                 """);
         }
 
-        return sb.Append("}\n").ToString();
+        return sb.ToString();
     }
 }

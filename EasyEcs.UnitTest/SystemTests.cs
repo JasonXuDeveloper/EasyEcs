@@ -1,136 +1,116 @@
 using System;
 using System.Collections.Generic;
-using System.Threading;
-using EasyEcs.Core;
-using EasyEcs.Core.Systems;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
 public class SystemTests
 {
-    private static readonly List<string> Log = new();
+    private static readonly List<string> Log = [];
 
-    private abstract class LoggingSystem : SystemBase
+    private class Logged(string name, int priority = 0, int interval = 1) : EcsSystem
     {
-        protected override void OnCreate() => Log.Add(GetType().Name + ".Create");
-        protected override void OnUpdate() => Log.Add(GetType().Name + ".Update");
-        protected override void OnDestroy() => Log.Add(GetType().Name + ".Destroy");
-    }
-
-    private sealed class Late : LoggingSystem
-    {
-        public override int Priority => 10;
-    }
-
-    private sealed class EarlyA : LoggingSystem
-    {
-        public override int Priority => -1;
-    }
-
-    private sealed class EarlyB : LoggingSystem
-    {
-        public override int Priority => -1;
-    }
-
-    private sealed class EveryThird : SystemBase
-    {
-        public int Runs;
-        public override int UpdateInterval => 3;
-        protected override void OnUpdate() => Runs++;
-    }
-
-    private sealed class Throwing : SystemBase
-    {
-        protected override void OnUpdate() => throw new InvalidOperationException("boom");
-    }
-
-    private sealed class Counting : SystemBase
-    {
-        public int Runs;
-        public int ThreadId;
-
-        protected override void OnUpdate()
-        {
-            Interlocked.Increment(ref Runs);
-            ThreadId = Environment.CurrentManagedThreadId;
-        }
+        public override int Priority => priority;
+        public override int UpdateInterval => interval;
+        protected override void OnCreate() => Log.Add($"{name}.create");
+        protected override void OnUpdate() => Log.Add($"{name}.update");
+        protected override void OnDestroy() => Log.Add($"{name}.destroy");
     }
 
     [SetUp]
-    public void Reset() => Log.Clear();
+    public void SetUp() => Log.Clear();
 
     [Test]
     public void LifecycleAndPriorityOrder()
     {
         var world = new World();
-        world.AddSystem<Late>();
-        world.AddSystem<EarlyA>();
-        world.AddSystem<EarlyB>();
-        Assert.That(Log, Is.EqualTo(new[] { "Late.Create", "EarlyA.Create", "EarlyB.Create" }), "OnCreate runs on add");
-
-        Log.Clear();
+        world.AddSystem(new Logged("late", priority: 10));
+        world.AddSystem(new Logged("early", priority: -1));
+        world.AddSystem(new Logged("mid"));
         world.Update();
-        Assert.That(Log, Is.EqualTo(new[] { "EarlyA.Update", "EarlyB.Update", "Late.Update" }),
-            "ascending priority, registration order within a priority");
-
-        Log.Clear();
         world.Dispose();
-        Assert.That(Log, Is.EqualTo(new[] { "Late.Destroy", "EarlyB.Destroy", "EarlyA.Destroy" }), "reverse order on dispose");
-        Assert.Throws<ObjectDisposedException>(() => world.Update());
+
+        Assert.That(Log, Is.EqualTo(new[]
+        {
+            "late.create", "early.create", "mid.create",
+            "early.update", "mid.update", "late.update",
+            "late.destroy", "mid.destroy", "early.destroy",
+        }));
     }
 
     [Test]
-    public void UpdateIntervalEnabledAndRemove()
+    public void IntervalEnabledAndRemoval()
     {
         using var world = new World();
-        var system = world.AddSystem<EveryThird>();
-        for (int i = 0; i < 9; i++) world.Update();
-        Assert.That(system.Runs, Is.EqualTo(3));
-
-        system.Enabled = false;
-        for (int i = 0; i < 9; i++) world.Update();
-        Assert.That(system.Runs, Is.EqualTo(3));
-
-        Assert.That(world.GetSystem<EveryThird>(), Is.SameAs(system));
-        Assert.That(world.RemoveSystem<EveryThird>(), Is.True);
-        Assert.That(world.GetSystem<EveryThird>(), Is.Null);
-        Assert.That(system.World, Is.Null);
-        Assert.That(world.RemoveSystem<EveryThird>(), Is.False);
-    }
-
-    [Test]
-    public void SystemCannotJoinTwoWorlds()
-    {
-        using var a = new World();
-        using var b = new World();
-        var system = a.AddSystem<Counting>();
-        Assert.Throws<InvalidOperationException>(() => b.AddSystem(system));
-    }
-
-    [Test]
-    public void ErrorsPropagateWithoutHandlerAndAreReportedWithOne()
-    {
-        using var world = new World();
-        var after = world.AddSystem<Counting>();
-        world.AddSystem<Throwing>();
-        Assert.Throws<InvalidOperationException>(() => world.Update());
-
-        SystemBase failed = null;
-        world.SystemError += (system, _) => failed = system;
+        var every3 = new Logged("every3", interval: 3);
+        world.AddSystem(every3);
+        for (int i = 0; i < 6; i++) world.Update();
+        every3.Enabled = false;
         world.Update();
-        Assert.That(failed, Is.InstanceOf<Throwing>());
-        Assert.That(after.Runs, Is.EqualTo(2), "other systems still run");
+        world.Update();
+        world.Update();
+
+        Assert.That(Log.FindAll(l => l == "every3.update"), Has.Count.EqualTo(2));
+        Assert.That(world.RemoveSystem<Logged>(), Is.True);
+        Assert.That(world.GetSystem<Logged>(), Is.Null);
+        Assert.That(Log[^1], Is.EqualTo("every3.destroy"));
+        Assert.That(world.UpdateCount, Is.EqualTo(9));
+    }
+
+    private sealed class Throwing : EcsSystem
+    {
+        protected override void OnUpdate() => throw new InvalidOperationException("boom");
     }
 
     [Test]
-    public void ParallelBucketRunsEverySystem()
+    public void ErrorsPropagateUnlessHandled()
+    {
+        using var world = new World();
+        world.AddSystem<Throwing>();
+        Assert.Throws<InvalidOperationException>(world.Update);
+
+        var errors = new List<Exception>();
+        world.SystemError += (_, e) => errors.Add(e);
+        world.Update();
+        Assert.That(errors, Has.Count.EqualTo(1));
+    }
+
+    [Test]
+    public void ParallelBucketsRunEverySystem()
     {
         using var world = new World(new WorldOptions { Parallel = true });
-        var systems = new[] { new Counting(), new Counting(), new Counting(), new Counting() };
-        foreach (var s in systems) world.AddSystem(s);
+        var updates = new int[3];
+        for (int i = 0; i < updates.Length; i++) world.AddSystem(new Counting(updates, i));
         for (int i = 0; i < 10; i++) world.Update();
-        foreach (var s in systems) Assert.That(s.Runs, Is.EqualTo(10));
-        Assert.That(world.UpdateCount, Is.EqualTo(10));
+        Assert.That(updates, Is.All.EqualTo(10));
+    }
+
+    /// <summary>Systems of one parallel bucket must write disjoint data: each owns one slot.</summary>
+    private sealed class Counting(int[] updates, int slot) : EcsSystem
+    {
+        protected override void OnUpdate() => updates[slot]++;
+    }
+
+    public struct InputGroup : ISystemGroup;
+
+    [UpdateInGroup<InputGroup>]
+    private class InInputGroup() : Logged("input");
+
+    [Test]
+    public void GroupsUpdateIndependently()
+    {
+        using var world = new World();
+        world.AddSystem(new Logged("tick"));
+        world.AddSystem(new InInputGroup());
+        world.Update<InputGroup>();
+        world.Update<InputGroup>();
+        world.Update();
+
+        Assert.That(Log.FindAll(l => l.EndsWith(".update")), Is.EqualTo(new[] { "input.update", "input.update", "tick.update" }));
+        Assert.That(world.UpdateCount, Is.EqualTo(1), "UpdateCount counts the default group");
+        Assert.That(world.GetSystem<InInputGroup>(), Is.Not.Null);
+        Assert.That(world.RemoveSystem<InInputGroup>(), Is.True);
+        world.Update<InputGroup>();
+        Assert.That(Log.FindAll(l => l == "input.update"), Has.Count.EqualTo(2));
     }
 }

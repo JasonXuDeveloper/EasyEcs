@@ -1,66 +1,107 @@
 using System.Collections.Immutable;
 using System.Linq;
-using EasyEcs.Core;
+using System.Threading.Tasks;
 using EasyEcs.Generator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Diagnostics;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
-/// <summary>Drives EachGenerator through Roslyn to check its diagnostics and that valid input compiles cleanly.</summary>
+/// <summary>Drives SystemGenerator and EasyEcsAnalyzer through Roslyn: output, diagnostics and incremental caching.</summary>
 public class GeneratorTests
 {
-    private const string Usings = """
-        using EasyEcs.Core;
-        using EasyEcs.Core.Components;
-        using EasyEcs.Core.Systems;
-        public struct P : IComponent { public int X; }
-        public struct T : IComponent { }
+    private static readonly CSharpParseOptions Parse = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
 
+    private static CSharpCompilation Compile(params string[] sources) => CSharpCompilation.Create("Test",
+        sources.Select(s => CSharpSyntaxTree.ParseText("using EasyEcs;\n" + s, Parse)),
+        Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
+        new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+    private static GeneratorDriver Driver() => CSharpGeneratorDriver.Create(
+        [new SystemGenerator().AsSourceGenerator()], parseOptions: Parse,
+        driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true));
+
+    private static async Task<string[]> Diagnose(params string[] sources)
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(sources), out var output, out _);
+        var analyzed = output.WithAnalyzers([new EasyEcsAnalyzer()]);
+        var all = await analyzed.GetAllDiagnosticsAsync();
+        return all.Where(d => d.Severity == DiagnosticSeverity.Error || d.Id.StartsWith("EECS")).Select(d => d.Id).Distinct().OrderBy(x => x).ToArray();
+    }
+
+    private const string Components = """
+        public struct P : IComponent { public int V; }
+        public struct Q : IComponent { public int V; }
+        public struct Tick : IEvent { }
         """;
 
-    private static readonly CSharpParseOptions ParseOptions = new(LanguageVersion.Latest);
-
-    private static (ImmutableArray<Diagnostic> Generator, ImmutableArray<Diagnostic> Compilation) Run(string source)
+    [Test]
+    public async Task ValidSystemsGenerateCompilingCode()
     {
-        var references = System.AppDomain.CurrentDomain.GetAssemblies()
-            .Where(a => !a.IsDynamic && !string.IsNullOrEmpty(a.Location))
-            .Select(a => MetadataReference.CreateFromFile(a.Location))
-            .Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location));
+        var errors = await Diagnose(Components, """
+            namespace Game;
+            public partial class Outer
+            {
+                public partial class S : EcsSystem, IEventHandler<Tick>
+                {
+                    [ForEach, With<Q>] static void A(ref P p) => p.V++;
+                    private readonly System.Collections.Generic.List<int> _scratch = []; // readonly: allowed
+                    public int Speed => 3;                                              // computed: allowed
+                    [ForEach, Without<Q>] void B(Entity e, in P p, World w) => _scratch.Clear();
+                    public void Handle(in Tick e) { }
+                }
+            }
+            """);
+        Assert.That(errors, Is.Empty);
+    }
 
-        var compilation = CSharpCompilation.Create("GeneratorTest",
-            [CSharpSyntaxTree.ParseText(Usings + source, ParseOptions)],
-            references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-
-        CSharpGeneratorDriver.Create([new EachGenerator().AsSourceGenerator()], parseOptions: ParseOptions)
-            .RunGeneratorsAndUpdateCompilation(compilation, out var output, out var generatorDiagnostics);
-        var errors = output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToImmutableArray();
-        return (generatorDiagnostics, errors);
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) { } }", "EECS001")]
+    [TestCase("public class S : EcsSystem, IEventHandler<Tick> { public void Handle(in Tick e) { } }", "EECS001")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, int x) { } }", "EECS002")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(P p) { } }", "EECS002")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(World w) { } }", "EECS003")]
+    [TestCase("public partial class S<T> : EcsSystem { [ForEach] static void A(ref P p) { } }", "EECS004")]
+    [TestCase("public partial class S { [ForEach] static void A(ref P p) { } }", "EECS005")]
+    [TestCase("public class Bad : IComponent { }", "EECS006")]
+    [TestCase("public record Bad : ISingletonComponent;", "EECS006")]
+    [TestCase("public class Bad : IEvent { }", "EECS006")]
+    [TestCase("public class S : EcsSystem { int _kills; void K() => _kills++; }", "EECS007")]
+    [TestCase("public class S : EcsSystem { public int Kills { get; set; } }", "EECS007")]
+    [TestCase("public class A : EcsSystem { } public class S : EcsSystem { private readonly A _a = new(); }", "EECS008")]
+    public async Task MisuseIsReported(string source, string id)
+    {
+        var errors = await Diagnose(Components, source);
+        Assert.That(errors, Does.Contain(id));
+        Assert.That(errors.Where(e => !e.StartsWith("CS")), Is.EqualTo(new[] { id }), "exactly one EasyEcs diagnostic");
     }
 
     [Test]
-    public void ValidSystemCompiles()
+    public void UnrelatedEditsHitTheCache()
     {
-        var (generator, compilation) = Run("""
-            public partial class S : SystemBase
-            {
-                [Each, Without<T>] static void A(ref P p) => p.X++;
-                [Each, With<T>] void B(int entityId, in P p, EntityRef e, World w) { }
-            }
-            """);
-        Assert.That(generator, Is.Empty);
-        Assert.That(compilation, Is.Empty, string.Join("\n", compilation));
+        var system = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components +
+            "public partial class S : EcsSystem, IEventHandler<Tick> { [ForEach] static void A(ref P p) { } public void Handle(in Tick e) { } }", Parse);
+        var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
+        var compilation = Compile().AddSyntaxTrees(system, other);
+
+        var driver = Driver().RunGenerators(compilation);
+        driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(other,
+            CSharpSyntaxTree.ParseText("public class Unrelated { int x; }", Parse)));
+
+        var steps = driver.GetRunResult().Results[0].TrackedSteps;
+        foreach (var name in new[] { "ForEachMethods", "SystemUpdates", "SystemEvents" })
+            Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
+                Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged), name);
     }
 
-    [TestCase("public class S : SystemBase { [Each] static void A(ref P p) { } }", "EECS001")]
-    [TestCase("public partial class S : SystemBase { [Each] static void A(ref P p, string s) { } }", "EECS002")]
-    [TestCase("public partial class S : SystemBase { [Each] static void A(int entityId) { } }", "EECS003")]
-    [TestCase("public partial class S<X> : SystemBase { [Each] static void A(ref P p) { } }", "EECS004")]
-    [TestCase("public partial class S { [Each] static void A(ref P p) { } }", "EECS005")]
-    public void InvalidInputReportsDiagnostic(string source, string id)
+    /// <summary>Framework references of the running test host (enough for the generated code to compile).</summary>
+    private static class Basic
     {
-        var (generator, _) = Run(source);
-        Assert.That(generator.Select(d => d.Id), Does.Contain(id));
+        public static readonly ImmutableArray<MetadataReference> References = ((string)System.AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+            .Split(System.IO.Path.PathSeparator)
+            .Where(p => System.IO.Path.GetFileName(p).StartsWith("System.") || System.IO.Path.GetFileName(p) is "netstandard.dll" or "mscorlib.dll")
+            .Select(p => (MetadataReference)MetadataReference.CreateFromFile(p))
+            .ToImmutableArray();
     }
 }

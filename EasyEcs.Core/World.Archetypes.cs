@@ -3,20 +3,18 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
-using EasyEcs.Core.Components;
-
-namespace EasyEcs.Core;
+namespace EasyEcs;
 
 // Archetype registry, entity membership and the query cache.
 //
 // Thread-safety contract:
-// - All mutation (archetype creation, membership changes, cache updates) happens under _structuralLock.
+// - All mutation (archetype creation, membership changes, cache updates) happens under StructuralLock.
 // - Lock-free readers (queries) only see immutable Archetype[] snapshots: _allArchetypes and every query cache entry
 //   are replaced copy-on-write and published with Volatile.Write, never mutated in place.
-public partial class World
+public sealed partial class World
 {
     // Lock for structural modifications (System.Threading.Lock: cheaper than Monitor, no object header sync block).
-    private readonly Lock _structuralLock = new();
+    internal readonly Lock StructuralLock = new();
 
     // Bumped whenever storage arrays may be reallocated (component columns, entity arrays, archetype id arrays,
     // compaction) so in-flight ForEach passes refresh their cached array references.
@@ -38,12 +36,12 @@ public partial class World
 
     /// <summary>
     /// Move an entity into <paramref name="target"/>, leaving its current archetype (if any).
-    /// Must be called inside _structuralLock.
+    /// Must be called inside StructuralLock.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void MoveToArchetype(int entityId, Archetype target)
     {
-        ref var meta = ref Meta[entityId];
+        ref var meta = ref MetaRef(entityId);
         var current = meta.Archetype;
         if (ReferenceEquals(current, target))
             return;
@@ -58,58 +56,30 @@ public partial class World
             StorageVersion++;
     }
 
-    /// <summary>
-    /// Remove an entity from its archetype, marking the id as not alive. Must be called inside _structuralLock.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void DetachFromArchetype(int entityId)
+    /// <summary>Archetype reached from <paramref name="from"/> by adding <paramref name="bit"/> (edge-cached). Inside the lock.</summary>
+    private Archetype ArchetypeAfterAdd(Archetype from, ushort bit) => from.GetAddEdge(bit) ?? CreateEdge(from, bit, add: true);
+
+    /// <summary>Archetype reached from <paramref name="from"/> by removing <paramref name="bit"/> (edge-cached). Inside the lock.</summary>
+    private Archetype ArchetypeAfterRemove(Archetype from, ushort bit) => from.GetRemoveEdge(bit) ?? CreateEdge(from, bit, add: false);
+
+    /// <summary>Resolve a transition once (mask hashing) and cache it in both directions.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private Archetype CreateEdge(Archetype from, ushort bit, bool add)
     {
-        ref var meta = ref Meta[entityId];
-        var current = meta.Archetype;
-        if (current == null)
-            return;
+        var mask = from.ComponentMask.Clone();
+        if (add) mask.SetBit(bit);
+        else mask.ClearBit(bit);
 
-        current.RemoveAt(meta.Slot);
-        meta.Archetype = null;
-    }
-
-    /// <summary>
-    /// Archetype reached from <paramref name="from"/> by adding one component bit (edge-cached, no Tag hashing).
-    /// <paramref name="newTag"/> already contains the bit. Must be called inside _structuralLock.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private Archetype ArchetypeAfterAdd(Archetype from, int bit, in Tag newTag)
-    {
-        var target = from.GetAddEdge(bit);
-        if (target != null)
-            return target;
-
-        target = GetOrCreateArchetype(in newTag);
-        from.SetAddEdge(bit, target);
-        target.SetRemoveEdge(bit, from);
-        return target;
-    }
-
-    /// <summary>
-    /// Archetype reached from <paramref name="from"/> by removing one component bit (edge-cached).
-    /// <paramref name="newTag"/> already has the bit cleared. Must be called inside _structuralLock.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private Archetype ArchetypeAfterRemove(Archetype from, int bit, in Tag newTag)
-    {
-        var target = from.GetRemoveEdge(bit);
-        if (target != null)
-            return target;
-
-        target = GetOrCreateArchetype(in newTag);
-        from.SetRemoveEdge(bit, target);
-        target.SetAddEdge(bit, from);
+        var target = GetOrCreateArchetype(in mask);
+        var (without, with) = add ? (from, target) : (target, from);
+        without.SetAddEdge(bit, with);
+        with.SetRemoveEdge(bit, without);
         return target;
     }
 
     /// <summary>
     /// Get or create the archetype for <paramref name="componentMask"/>. A new archetype is appended (copy-on-write)
-    /// to every cached query it matches. Must be called inside _structuralLock.
+    /// to every cached query it matches. Must be called inside StructuralLock.
     /// </summary>
     private Archetype GetOrCreateArchetype(in Tag componentMask)
     {
@@ -147,7 +117,7 @@ public partial class World
         if (_queryCache.TryGetValue(key, out var entry))
             return Volatile.Read(ref entry.Archetypes);
 
-        lock (_structuralLock)
+        lock (StructuralLock)
         {
             if (_queryCache.TryGetValue(key, out entry))
                 return entry.Archetypes;
@@ -167,23 +137,18 @@ public partial class World
     }
 
     /// <summary>
-    /// Compact all archetypes to remove tombstones.
-    /// Call between frames (e.g. when <see cref="GetFragmentationStats"/> reports high fragmentation),
-    /// never while a query is iterating.
+    /// Remove tombstones and sort every archetype's entities by id (O(n log n) over alive entities). Iteration then
+    /// reads each column front to back. Call between updates (after mass despawns, or when
+    /// <see cref="GetFragmentationStats"/> reports fragmentation), never while a query is iterating.
     /// </summary>
     public void CompactArchetypes()
     {
-        lock (_structuralLock)
+        lock (StructuralLock)
         {
             var all = _allArchetypes;
             for (int i = 0; i < all.Length; i++)
-            {
-                if (all[i].AliveCount < all[i].Count)
-                {
-                    all[i].Compact(Meta);
-                    StorageVersion++;
-                }
-            }
+                all[i].Compact(Meta);
+            StorageVersion++;
         }
     }
 

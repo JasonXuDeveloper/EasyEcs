@@ -1,6 +1,6 @@
 using System;
 
-namespace EasyEcs.Core;
+namespace EasyEcs;
 
 /// <summary>Configuration of a <see cref="World"/>.</summary>
 public sealed class WorldOptions

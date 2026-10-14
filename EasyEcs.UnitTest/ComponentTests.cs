@@ -1,113 +1,98 @@
 using System;
-using EasyEcs.Core;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
 public class ComponentTests
 {
+    private World _world;
+
+    [SetUp]
+    public void SetUp() => _world = new World();
+
+    [TearDown]
+    public void TearDown() => _world.Dispose();
+
     [Test]
-    public void AddGetHasRemove()
+    public void AddGetAndRefsWriteThrough()
     {
-        using var world = new World();
-        ref var entity = ref world.CreateEntity().Value;
+        var e = _world.CreateEntity();
+        e.Add<Health>().Value = 10;
+        e.Get<Health>().Value += 5;
 
-        Assert.That(entity.HasComponent<Health>(), Is.False);
-        Assert.That(entity.TryGetComponent<Health>(out _), Is.False);
-        Assert.Throws<InvalidOperationException>(() => world.GetEntityById(0).Value.GetComponent<Health>());
-
-        entity.AddComponent<Health>().Value.Value = 7;
-        Assert.That(entity.HasComponent<Health>(), Is.True);
-        Assert.That(entity.GetComponent<Health>().Value.Value, Is.EqualTo(7));
-        Assert.That(entity.TryGetComponent<Health>(out var h) && h.Value.Value == 7, Is.True);
-
-        entity.RemoveComponent<Health>();
-        Assert.That(entity.HasComponent<Health>(), Is.False);
-        entity.RemoveComponent<Health>(); // removing a missing component is a no-op
+        Assert.That(e.Has<Health>(), Is.True);
+        Assert.That(e.Get<Health>().Value, Is.EqualTo(15));
+        Assert.That(e.Add<Health>().Value, Is.Zero, "Add resets an existing component");
+        Assert.Throws<InvalidOperationException>(() => e.Get<Position>());
     }
 
     [Test]
-    public void ReAddResetsToDefault()
+    public void TryGetAndGetOrAdd()
     {
-        using var world = new World();
-        ref var entity = ref world.CreateEntity().Value;
-        entity.AddComponent<Health>().Value.Value = 7;
-        Assert.That(entity.AddComponent<Health>().Value.Value, Is.EqualTo(0));
+        var e = _world.CreateEntity();
+        Assert.That(e.TryGet<Health>(out _), Is.False);
+
+        e.GetOrAdd<Health>().Value = 3;
+        e.GetOrAdd<Health>().Value++;
+        Assert.That(e.TryGet<Health>(out var health), Is.True);
+        Assert.That(health.Value, Is.EqualTo(4));
     }
 
     [Test]
-    public void RefWritesGoToStorage()
+    public void SetAndRemoveUpToNineComponentsAtOnce()
     {
-        using var world = new World();
-        ref var entity = ref world.CreateEntity().Value;
-        entity.AddComponent<Position>();
+        var e = _world.CreateEntity(new C1(1), new C2(2), new C3(3), new C4(4), new C5(5), new C6(6), new C7(7), new C8(8), new C9(9));
+        Assert.That(e.Get<C1>().V + e.Get<C5>().V + e.Get<C9>().V, Is.EqualTo(15));
 
-        ref var p = ref entity.GetComponent<Position>().Value;
-        p.X = 3;
-        Assert.That(entity.GetComponent<Position>().Value.X, Is.EqualTo(3));
+        e.Remove<C1, C2, C3, C4, C5, C6, C7, C8>();
+        Assert.That(e.Has<C1>() || e.Has<C8>(), Is.False);
+        Assert.That(e.Get<C9>().V, Is.EqualTo(9));
 
-        var copy = entity.GetComponent<Position>().Value; // a copy: writes are lost
-        copy.X = 99;
-        Assert.That(entity.GetComponent<Position>().Value.X, Is.EqualTo(3));
+        e.Set(new C1(10), new C9(90));
+        Assert.That((e.Get<C1>().V, e.Get<C9>().V), Is.EqualTo((10, 90)), "Set overwrites existing components");
+        e.Remove<Position>(); // missing components are ignored
     }
 
     [Test]
-    public void AddComponentsReturnsAllRefsInOneTransition()
+    public void DataSurvivesArchetypeMovesOfOtherEntities()
     {
-        using var world = new World();
-        ref var entity = ref world.CreateEntity().Value;
-        var (c1, c2, c3) = entity.AddComponents<C1, C2, C3>();
-        c1.Value.V = 1;
-        c2.Value.V = 2;
-        c3.Value.V = 3;
+        var entities = new Entity[100];
+        for (int i = 0; i < entities.Length; i++)
+            entities[i] = _world.CreateEntity(new Position(i, -i));
 
-        Assert.That(entity.GetComponent<C2>().Value.V, Is.EqualTo(2));
-        Assert.That(world.Count<C1, C2, C3>(), Is.EqualTo(1));
+        for (int i = 0; i < entities.Length; i += 2) entities[i].Set(new Velocity(1, 1));
+        for (int i = 0; i < entities.Length; i += 3) entities[i].Remove<Velocity>();
+
+        for (int i = 0; i < entities.Length; i++)
+            Assert.That(entities[i].Get<Position>(), Is.EqualTo(new Position(i, -i)));
     }
 
     [Test]
-    public void NineComponentArity()
+    public void RemovedAndDestroyedComponentsReleaseManagedReferences()
     {
-        using var world = new World();
-        ref var entity = ref world.CreateEntity().Value;
-        var refs = entity.AddComponents<C1, C2, C3, C4, C5, C6, C7, C8, C9>();
-        refs.Item9.Value.V = 9;
-        Assert.That(world.Count<C1, C2, C3, C4, C5, C6, C7, C8, C9>(), Is.EqualTo(1));
+        var weak = Spawn(_world, out var removed, out var destroyed);
+        removed.Remove<Name>();
+        destroyed.Destroy();
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        Assert.That(weak.removed.IsAlive || weak.destroyed.IsAlive, Is.False);
 
-        entity.RemoveComponents<C1, C2, C3, C4, C5, C6, C7, C8, C9>();
-        Assert.That(world.Any<C1>(), Is.False);
-        Assert.That(world.EntityCount, Is.EqualTo(1));
+        static (WeakReference removed, WeakReference destroyed) Spawn(World world, out Entity a, out Entity b)
+        {
+            string x = new('x', 10), y = new('y', 10);
+            a = world.CreateEntity(new Name(x));
+            b = world.CreateEntity(new Name(y));
+            return (new WeakReference(x), new WeakReference(y));
+        }
     }
 
     [Test]
-    public void RemoveComponentsIgnoresMissingOnes()
+    public void StructuralChangesOnStaleHandlesThrow()
     {
-        using var world = new World();
-        ref var entity = ref world.CreateEntity().Value;
-        entity.AddComponents<C1, C3>();
-        entity.RemoveComponents<C1, C2>();
-        Assert.That(entity.HasComponent<C1>(), Is.False);
-        Assert.That(entity.HasComponent<C3>(), Is.True);
-    }
-
-    [Test]
-    public void RemoveReleasesManagedReferences()
-    {
-        using var world = new World();
-        ref var entity = ref world.CreateEntity().Value;
-        entity.AddComponent<Name>().Value.Value = "x";
-        entity.RemoveComponent<Name>();
-        Assert.That(entity.AddComponent<Name>().Value.Value, Is.Null);
-    }
-
-    [Test]
-    public void ComponentsAreIsolatedPerWorld()
-    {
-        using var a = new World();
-        using var b = new World();
-        a.CreateEntity().Value.AddComponent<Health>();
-        Assert.That(a.Count<Health>(), Is.EqualTo(1));
-        Assert.That(b.Count<Health>(), Is.EqualTo(0));
-        Assert.That(b.Any<Health>(), Is.False);
+        var e = _world.CreateEntity();
+        e.Destroy();
+        Assert.Throws<InvalidOperationException>(() => e.Add<Health>());
+        Assert.Throws<InvalidOperationException>(() => e.Set(new Health(1)));
+        Assert.Throws<InvalidOperationException>(() => e.Remove<Health>());
     }
 }

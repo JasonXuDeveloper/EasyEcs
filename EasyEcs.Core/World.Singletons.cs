@@ -1,9 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Threading;
-using EasyEcs.Core.Components;
-
-namespace EasyEcs.Core;
+namespace EasyEcs;
 
 // Singletons: one value of a struct type per world (clocks, configuration, shared state of a world).
 public sealed partial class World
@@ -14,7 +12,7 @@ public sealed partial class World
     /// <summary>Add (or reset) singleton <typeparamref name="T"/> and return a ref to it. O(1).</summary>
     public ref T AddSingleton<T>() where T : struct, ISingletonComponent
     {
-        lock (_structuralLock)
+        lock (StructuralLock)
         {
             int index = SingletonType<T>.Index;
             if (index >= _singletons.Length)
@@ -36,11 +34,18 @@ public sealed partial class World
         return ref box!.Value;
     }
 
-    /// <summary>Handle to singleton <typeparamref name="T"/> if present (keep it to avoid repeated lookups). O(1).</summary>
-    public bool TryGetSingleton<T>(out SingletonRef<T> singleton) where T : struct, ISingletonComponent
+    /// <summary>Ref to singleton <typeparamref name="T"/>, adding it (default) first if missing. O(1).</summary>
+    public ref T GetOrAddSingleton<T>() where T : struct, ISingletonComponent
     {
         var box = Box<T>();
-        singleton = new SingletonRef<T>(box);
+        return ref box != null ? ref box.Value : ref AddSingleton<T>();
+    }
+
+    /// <summary>Copy of singleton <typeparamref name="T"/> if present. O(1).</summary>
+    public bool TryGetSingleton<T>(out T value) where T : struct, ISingletonComponent
+    {
+        var box = Box<T>();
+        value = box != null ? box.Value : default;
         return box != null;
     }
 
@@ -50,7 +55,7 @@ public sealed partial class World
     /// <summary>Remove singleton <typeparamref name="T"/>. O(1).</summary>
     public void RemoveSingleton<T>() where T : struct, ISingletonComponent
     {
-        lock (_structuralLock)
+        lock (StructuralLock)
         {
             int index = SingletonType<T>.Index;
             if (index < _singletons.Length)

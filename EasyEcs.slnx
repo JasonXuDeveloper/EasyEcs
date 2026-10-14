@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="EasyEcs.Core/EasyEcs.Core.csproj" />
+  <Project Path="EasyEcs.Generator/EasyEcs.Generator.csproj" />
+  <Project Path="EasyEcs.UnitTest/EasyEcs.UnitTest.csproj" />
+  <Project Path="EasyEcs.Benchmark/EasyEcs.Benchmark.csproj" />
+</Solution>

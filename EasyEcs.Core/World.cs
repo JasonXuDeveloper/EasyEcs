@@ -1,30 +1,23 @@
 using System;
 using System.Runtime.CompilerServices;
-using EasyEcs.Core.Components;
-using EasyEcs.Core.Enumerators;
+using System.Runtime.InteropServices;
 
-namespace EasyEcs.Core;
+namespace EasyEcs;
 
 /// <summary>
-/// An ECS world: entities, their components, singletons and the systems that update them.
-/// Worlds are fully isolated from each other; the recommended server layout is one world per thread/shard.
+/// An ECS world: entities, their components, singletons, events and the systems that update them. Worlds are fully
+/// isolated; the recommended server layout is one world per thread (shard), which needs no synchronization at all.
 /// </summary>
 public sealed partial class World : IDisposable
 {
-    // Entity storage
-    private int _entityIdCounter;
+    // Never shrinks (handles index it without bounds checks); grows by doubling under the structural lock.
+    internal EntityMeta[] Meta;
 
-    // Recycled entity ids (LIFO). Reusing ids keeps every per-entity / per-component array bounded by the
-    // peak number of live entities instead of growing forever in long-running processes.
-    private int[] _freeEntityIds = new int[64];
-    private int _freeEntityIdCount;
-
-    internal Entity[] Entities;
-    internal EntityMeta[] Meta; // version + archetype membership per entity id (see EntityMeta)
-    private int _activeEntityCount;
-
-    // Component storage: one column (T[]) per component type, indexed by entity id
-    internal Array[] Components = [];
+    // Next never-used id, and recycled ids (LIFO, so hot ids stay hot and arrays stay bounded by peak population).
+    private int _nextId;
+    private int[] _freeIds = new int[64];
+    private int _freeIdCount;
+    private int _entityCount;
 
     private readonly WorldOptions _options;
     private bool _disposed;
@@ -32,188 +25,153 @@ public sealed partial class World : IDisposable
     public World(WorldOptions options = null)
     {
         _options = options ?? new WorldOptions();
-        int initialCapacity = Math.Max(1, _options.InitialEntityCapacity);
-        Entities = new Entity[initialCapacity];
-        Meta = new EntityMeta[initialCapacity];
+        Meta = new EntityMeta[Math.Max(1, _options.InitialEntityCapacity)];
+        _emptyArchetype = GetOrCreateArchetype(default);
     }
 
-    /// <summary>
-    /// Get count of active entities.
-    /// </summary>
-    public int EntityCount => _activeEntityCount;
+    /// <summary>Number of alive entities. O(1).</summary>
+    public int EntityCount => _entityCount;
 
-    /// <summary>
-    /// Ensure entity arrays can hold at least the specified capacity.
-    /// </summary>
+    /// <summary>All alive entities in id order (diagnostics: O(capacity)).</summary>
+    public EntityEnumerator Entities => new(this);
+
+    /// <summary>Pre-size entity storage (and existing columns) so spawning up to <paramref name="capacity"/> never grows arrays.</summary>
     public void EnsureEntityCapacity(int capacity)
     {
-        if (Entities.Length >= capacity)
-            return;
-
-        lock (_structuralLock)
+        lock (StructuralLock)
         {
-            if (Entities.Length >= capacity)
-                return;
-
-            ResizeEntityArrays(capacity);
+            if (Meta.Length < capacity)
+                Grow(capacity);
         }
     }
 
-    /// <summary>
-    /// Resize all entity and component arrays to the specified capacity.
-    /// Must be called inside _structuralLock.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private void ResizeEntityArrays(int newCapacity)
+    /// <summary>Create an entity without components. O(1) amortized. Thread-safe.</summary>
+    public Entity CreateEntity()
     {
-        Array.Resize(ref Entities, newCapacity);
-        Array.Resize(ref Meta, newCapacity);
-
-        StorageVersion++;
-
-        // Grow every component column to the new capacity (cold path)
-        for (int i = 0; i < Components.Length; i++)
+        lock (StructuralLock)
         {
-            var column = Components[i];
-            if (column == null || column.Length >= newCapacity) continue;
-            var grown = Array.CreateInstance(column.GetType().GetElementType()!, newCapacity);
-            Array.Copy(column, grown, column.Length);
-            Components[i] = grown;
+            int id = AllocateId();
+            MoveToArchetype(id, _emptyArchetype);
+            return new Entity(this, id, Meta[id].Version);
         }
     }
 
-    /// <summary>
-    /// Try to get an entity by ID.
-    /// </summary>
+    // CreateEntity(in T1..Tn) is generated (World.Structural.g.cs): one archetype placement, no intermediate moves.
+
+    /// <summary>Destroy <paramref name="entity"/>; a stale or foreign handle is ignored. O(components). Thread-safe.</summary>
+    public void DestroyEntity(Entity entity)
+    {
+        if (!ReferenceEquals(entity.World, this)) return;
+        lock (StructuralLock)
+        {
+            int id = entity.Id;
+            ref var meta = ref Meta[id];
+            var archetype = meta.Archetype;
+            if (archetype == null || meta.Version != entity.Version) return;
+
+            meta.Version++; // invalidates every outstanding handle
+            archetype.RemoveAt(meta.Slot);
+            meta.Archetype = null;
+            ReleaseComponents(id, archetype.Components);
+
+            _entityCount--;
+            if (_freeIdCount == _freeIds.Length) Array.Resize(ref _freeIds, _freeIds.Length * 2);
+            _freeIds[_freeIdCount++] = id;
+        }
+    }
+
+    /// <summary>Handle of the alive entity with <paramref name="id"/>. O(1).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool TryGetEntityById(int id, out EntityRef entityRef)
+    public bool TryGetEntity(int id, out Entity entity)
     {
         var meta = Meta;
         if ((uint)id < (uint)meta.Length && meta[id].Archetype != null)
         {
-            entityRef = new EntityRef(id, meta[id].Version, this);
+            entity = new Entity(this, id, meta[id].Version);
             return true;
         }
 
-        entityRef = default;
+        entity = default;
         return false;
     }
 
-    /// <summary>
-    /// Get an entity by ID (throws if not found).
-    /// </summary>
+    /// <summary>Handle of the alive entity with <paramref name="id"/>; throws if there is none. O(1).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public EntityRef GetEntityById(int id)
+    public Entity GetEntity(int id)
     {
-        if (!TryGetEntityById(id, out var entity))
-            ThrowEntityNotFound();
+        if (!TryGetEntity(id, out var entity)) Entity.ThrowStale();
         return entity;
     }
 
-    /// <summary>
-    /// Create a new entity immediately.
-    /// Thread-safe and returns entity directly (no callbacks).
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public EntityRef CreateEntity()
+    /// <summary>Handle of an id known to be alive (query iteration). No checks.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal Entity EntityAt(int id) => new(this, id, MetaRef(id).Version);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal ref EntityMeta MetaRef(int id) => ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Meta), id);
+
+    /// <summary>Throw unless <paramref name="entity"/> is alive. Must be called inside the structural lock.</summary>
+    internal void ThrowIfStale(in Entity entity)
     {
-        lock (_structuralLock)
+        if (!ReferenceEquals(entity.World, this)) Entity.ThrowStale();
+        ref var meta = ref MetaRef(entity.Id); // ids of this world's handles are always < Meta.Length
+        if (meta.Version != entity.Version || meta.Archetype == null) Entity.ThrowStale();
+    }
+
+    /// <summary>Take a recycled id or a new one (growing storage). Must be called inside the structural lock.</summary>
+    private int AllocateId()
+    {
+        _entityCount++;
+        if (_freeIdCount > 0) return _freeIds[--_freeIdCount];
+        int id = _nextId++;
+        if (id == Meta.Length) Grow(Meta.Length * 2);
+        return id;
+    }
+
+    /// <summary>Grow entity metadata and every column to <paramref name="capacity"/> (cold path).</summary>
+    private void Grow(int capacity)
+    {
+        Array.Resize(ref Meta, capacity);
+        var columns = Components;
+        for (int i = 0; i < columns.Length; i++)
         {
-            // Prefer a recycled id; versions were bumped on destroy so stale refs stay invalid.
-            int id;
-            if (_freeEntityIdCount > 0)
-            {
-                id = _freeEntityIds[--_freeEntityIdCount];
-            }
-            else
-            {
-                id = _entityIdCounter++;
-                if (id >= Entities.Length)
-                {
-                    int newCapacity = Math.Max(Entities.Length * 2, id + 1);
-                    ResizeEntityArrays(newCapacity);
-                }
-            }
+            var column = columns[i];
+            if (column == null || column.Length >= capacity) continue;
+            var grown = Array.CreateInstance(column.GetType().GetElementType()!, capacity);
+            Array.Copy(column, grown, column.Length);
+            columns[i] = grown;
+        }
 
-            Entities[id] = new Entity(this, id, Meta[id].Version);
-            _activeEntityCount++;
+        StorageVersion++;
+    }
 
-            // Add to empty archetype
-            _emptyArchetype ??= GetOrCreateArchetype(in Tag.Empty);
-            MoveToArchetype(id, _emptyArchetype);
+    private readonly Archetype _emptyArchetype;
 
-            return new EntityRef(id, Meta[id].Version, this);
+    /// <summary>Enumerates alive entities in id order; ids beyond the capacity captured at start are not visited.</summary>
+    public struct EntityEnumerator
+    {
+        private readonly World _world;
+        private readonly EntityMeta[] _meta;
+        private int _index;
+
+        internal EntityEnumerator(World world)
+        {
+            _world = world;
+            _meta = world.Meta;
+            _index = -1;
+        }
+
+        public readonly Entity Current => new(_world, _index, _meta[_index].Version);
+
+        public readonly EntityEnumerator GetEnumerator() => this;
+
+        public bool MoveNext()
+        {
+            var meta = _meta;
+            while (++_index < meta.Length)
+                if (meta[_index].Archetype != null)
+                    return true;
+            return false;
         }
     }
-
-    /// <summary>
-    /// Destroy an entity immediately.
-    /// Thread-safe.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public void DestroyEntity(Entity entity) => DestroyEntity(entity.Id, entity.Version);
-
-    /// <summary>Destroy the incarnation (id, version); a stale or unknown incarnation is ignored.</summary>
-    private void DestroyEntity(int id, int version)
-    {
-        lock (_structuralLock)
-        {
-            if ((uint)id >= (uint)Meta.Length) return;
-            ref var meta = ref Meta[id];
-            if (meta.Archetype == null || meta.Version != version)
-                return;
-
-            // Increment version to invalidate all existing references
-            meta.Version++;
-
-            DetachFromArchetype(id);
-
-            // Release component data so managed references inside components do not outlive the entity
-            ref var stored = ref Entities[id];
-            var components = Components;
-            for (int i = 0; i < components.Length; i++)
-            {
-                if (components[i] != null && stored.Tag.HasBit(i))
-                    Array.Clear(components[i], id, 1);
-            }
-
-            stored = default;
-
-            // Recycle the id (DetachFromArchetype already marked it inactive)
-            _activeEntityCount--;
-
-            if (_freeEntityIdCount >= _freeEntityIds.Length)
-                Array.Resize(ref _freeEntityIds, _freeEntityIds.Length * 2);
-            _freeEntityIds[_freeEntityIdCount++] = id;
-        }
-    }
-
-    private Archetype _emptyArchetype;
-
-    /// <summary>
-    /// Throw when <paramref name="entity"/> is not alive or refers to an earlier occupant of a recycled id.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ThrowIfStale(in Entity entity)
-    {
-        int id = entity.Id;
-        var meta = Meta;
-        if ((uint)id >= (uint)meta.Length || meta[id].Archetype == null || meta[id].Version != entity.Version)
-            ThrowEntityNotFound();
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void ThrowEntityNotFound() => throw new InvalidOperationException("Entity not found");
-
-    /// <summary>
-    /// Destroy an entity immediately (EntityRef overload).
-    /// Thread-safe.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void DestroyEntity(EntityRef entityRef) => DestroyEntity(entityRef.Id, entityRef.Version);
-
-    /// <summary>
-    /// Get all active entities (diagnostics: O(capacity)).
-    /// </summary>
-    public ActiveEntityEnumerator AllEntities => new ActiveEntityEnumerator(this);
 }

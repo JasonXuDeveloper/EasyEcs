@@ -1,143 +1,84 @@
 using System;
-using EasyEcs.Core;
+using System.Collections.Generic;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
 public class EntityTests
 {
-    [Test]
-    public void CreateAndDestroyTrackCount()
-    {
-        using var world = new World();
-        var a = world.CreateEntity();
-        var b = world.CreateEntity();
-        Assert.That(world.EntityCount, Is.EqualTo(2));
-        Assert.That(a.Value.Id, Is.Not.EqualTo(b.Value.Id));
+    private World _world;
 
-        world.DestroyEntity(a);
-        Assert.That(world.EntityCount, Is.EqualTo(1));
-        world.DestroyEntity(a); // second destroy of a stale ref is a no-op
-        Assert.That(world.EntityCount, Is.EqualTo(1));
+    [SetUp]
+    public void SetUp() => _world = new World(new WorldOptions { InitialEntityCapacity = 2 });
+
+    [TearDown]
+    public void TearDown() => _world.Dispose();
+
+    [Test]
+    public void CreateAndDestroyTrackTheCount()
+    {
+        var a = _world.CreateEntity();
+        var b = _world.CreateEntity();
+        Assert.That(a.Id, Is.Not.EqualTo(b.Id));
+        Assert.That(_world.EntityCount, Is.EqualTo(2));
+
+        a.Destroy();
+        a.Destroy(); // destroying a stale handle is a no-op
+        Assert.That(_world.EntityCount, Is.EqualTo(1));
+        Assert.That(a.IsAlive, Is.False);
+        Assert.That(b.IsAlive, Is.True);
     }
 
     [Test]
-    public void DestroyedIdIsRecycledWithNewVersion()
+    public void RecycledIdsGetANewVersionAndOldHandlesStayStale()
     {
-        using var world = new World();
-        var a = world.CreateEntity();
-        int id = a.Value.Id, version = a.Value.Version;
-        world.DestroyEntity(a);
+        var old = _world.CreateEntity().Set(new Health(1));
+        old.Destroy();
+        var reused = _world.CreateEntity().Set(new Health(2));
 
-        var b = world.CreateEntity();
-        Assert.That(b.Value.Id, Is.EqualTo(id));
-        Assert.That(b.Value.Version, Is.EqualTo(version + 1));
+        Assert.That(reused.Id, Is.EqualTo(old.Id));
+        Assert.That(reused.Version, Is.EqualTo(old.Version + 1));
+        Assert.That(reused, Is.Not.EqualTo(old));
+        Assert.Throws<InvalidOperationException>(() => old.Get<Health>());
+        Assert.Throws<InvalidOperationException>(() => old.Has<Health>());
+        Assert.That(reused.Get<Health>().Value, Is.EqualTo(2), "the stale handle never touches the new occupant");
     }
 
     [Test]
-    public void StaleReferencesAreRejected()
+    public void LookupByIdAndEnumeration()
     {
-        using var world = new World();
-        var a = world.CreateEntity();
-        Entity staleCopy = a.Value;
-        var staleComponent = a.Value.AddComponent<Health>();
-        world.DestroyEntity(a);
-        var b = world.CreateEntity(); // reuses the id
+        var entities = new List<Entity>();
+        for (int i = 0; i < 100; i++) entities.Add(_world.CreateEntity()); // grows past the initial capacity
+        entities[10].Destroy();
 
-        Assert.Throws<InvalidOperationException>(() => _ = a.Value);
-        Assert.Throws<InvalidOperationException>(() => _ = staleComponent.Value);
-        Assert.Throws<InvalidOperationException>(() => staleCopy.AddComponent<Position>());
-        Assert.That(b.Value.HasComponent<Position>(), Is.False, "the new occupant must be untouched");
+        Assert.That(_world.TryGetEntity(entities[5].Id, out var found), Is.True);
+        Assert.That(found, Is.EqualTo(entities[5]));
+        Assert.That(_world.TryGetEntity(entities[10].Id, out _), Is.False);
+        Assert.That(_world.TryGetEntity(-1, out _), Is.False);
+        Assert.Throws<InvalidOperationException>(() => _world.GetEntity(entities[10].Id));
+
+        var seen = new List<Entity>();
+        foreach (var e in _world.Entities) seen.Add(e);
+        entities.RemoveAt(10);
+        Assert.That(seen, Is.EqualTo(entities));
     }
 
     [Test]
-    public void LookupById()
+    public void HandlesFromAnotherWorldAreRejected()
     {
-        using var world = new World();
-        var a = world.CreateEntity();
-        int id = a.Value.Id;
-
-        Assert.That(world.TryGetEntityById(id, out var found), Is.True);
-        Assert.That(found, Is.EqualTo(a));
-        Assert.That(world.GetEntityById(id), Is.EqualTo(a));
-
-        world.DestroyEntity(a);
-        Assert.That(world.TryGetEntityById(id, out _), Is.False);
-        Assert.Throws<InvalidOperationException>(() => world.GetEntityById(id));
-        Assert.That(world.TryGetEntityById(-1, out _), Is.False);
-        Assert.That(world.TryGetEntityById(1 << 20, out _), Is.False);
+        using var other = new World();
+        var foreign = other.CreateEntity();
+        _world.DestroyEntity(foreign);
+        Assert.That(foreign.IsAlive, Is.True);
+        Assert.That(default(Entity).IsAlive, Is.False);
     }
 
     [Test]
-    public void EqualityIncludesVersion()
+    public void DisposeInvalidatesEveryHandle()
     {
-        using var world = new World();
-        var a = world.CreateEntity();
-        Entity first = a.Value;
-        world.DestroyEntity(a);
-        Entity second = world.CreateEntity().Value;
-
-        Assert.That(first.Id, Is.EqualTo(second.Id));
-        Assert.That(first, Is.Not.EqualTo(second));
-        Assert.That(first == second, Is.False);
-    }
-
-    [Test]
-    public void GrowthKeepsDataAndRefsStayValid()
-    {
-        using var world = new World(new WorldOptions { InitialEntityCapacity = 2 });
-        var first = world.CreateEntity();
-        var health = first.Value.AddComponent<Health>();
-        health.Value.Value = 42;
-
-        for (int i = 0; i < 1000; i++) world.CreateEntity().Value.AddComponent<Health>();
-
-        Assert.That(health.Value.Value, Is.EqualTo(42), "ComponentRef re-resolves storage after growth");
-        Assert.That(first.Value.GetComponent<Health>().Value.Value, Is.EqualTo(42));
-    }
-
-    [Test]
-    public void StorageStaysBoundedUnderChurn()
-    {
-        using var world = new World(new WorldOptions { InitialEntityCapacity = 16 });
-        var refs = new EntityRef[16];
-        for (int round = 0; round < 1000; round++)
-        {
-            for (int i = 0; i < refs.Length; i++) refs[i] = world.CreateEntity();
-            for (int i = 0; i < refs.Length; i++) world.DestroyEntity(refs[i]);
-        }
-
-        Assert.That(world.CreateEntity().Value.Id, Is.LessThan(16));
-    }
-
-    [Test]
-    public void DestroyReleasesComponentData()
-    {
-        using var world = new World();
-        var a = world.CreateEntity();
-        a.Value.AddComponent<Name>().Value.Value = "player";
-        world.DestroyEntity(a);
-
-        var b = world.CreateEntity();
-        Assert.That(b.Value.AddComponent<Name>().Value.Value, Is.Null);
-    }
-
-    [Test]
-    public void AllEntitiesEnumeratesAliveOnes()
-    {
-        using var world = new World();
-        var a = world.CreateEntity();
-        var b = world.CreateEntity();
-        var c = world.CreateEntity();
-        world.DestroyEntity(b);
-
-        int count = 0;
-        foreach (var e in world.AllEntities)
-        {
-            Assert.That(e == a || e == c, Is.True);
-            count++;
-        }
-
-        Assert.That(count, Is.EqualTo(2));
+        var e = _world.CreateEntity().Set(new Health(1));
+        _world.Dispose();
+        Assert.That(e.IsAlive, Is.False);
+        Assert.Throws<InvalidOperationException>(() => e.Get<Health>());
     }
 }

@@ -1,8 +1,6 @@
 using System;
 using System.Threading;
-using EasyEcs.Core.Components;
-
-namespace EasyEcs.Core;
+namespace EasyEcs;
 
 /// <summary>
 /// Process-wide dense index per type within a family (component types, singleton types). Assigned on first use,
@@ -31,6 +29,12 @@ internal static class ComponentType<T> where T : struct, IComponent
 internal static class SingletonType<T> where T : struct, ISingletonComponent
 {
     internal static readonly int Index = TypeIndex<ISingletonComponent, T>.Value;
+}
+
+/// <summary>Slot of event type <typeparamref name="T"/> in every world.</summary>
+internal static class EventType<T> where T : struct, IEvent
+{
+    internal static readonly int Index = TypeIndex<IEvent, T>.Value;
 }
 
 /// <summary>Heap box holding one world's singleton value; refs into it stay valid for the box lifetime.</summary>

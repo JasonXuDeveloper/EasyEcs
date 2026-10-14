@@ -1,9 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using EasyEcs.Core.Components;
-
-namespace EasyEcs.Core;
+namespace EasyEcs;
 
 /// <summary>
 /// Extra query constraints: components that must be present without being read (<see cref="With{T}"/>) or must be
