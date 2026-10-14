@@ -15,8 +15,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             // Get or register component type
             ushort componentIdx = TagRegistry.GetOrRegisterTag<T>();
@@ -26,17 +25,14 @@ public partial class Context
 
             var componentArray = (T[])Components[componentIdx];
 
-            // Update entity archetype
+            // Update entity archetype through the cached add-edge (no Tag hashing on the hot path)
             ref var entityRef = ref Entities[entity.Id];
-
-            // Remove from old archetype before modifying tag
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
-
-            // Modify tag and add to new archetype
-            entityRef.Tag.SetBit(componentIdx);
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            if (!entityRef.Tag.HasBit(componentIdx))
+            {
+                entityRef.Tag.SetBit(componentIdx);
+                MoveToArchetype(entity.Id,
+                    ArchetypeAfterAdd(EntityArchetypes[entity.Id], componentIdx, in entityRef.Tag));
+            }
 
             // Initialize component
             componentArray[entity.Id] = new T();
@@ -54,23 +50,19 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             if (!TagRegistry.TryGetTagBitIndex<T>(out var componentIdx))
                 return;
 
-            // Update entity archetype
+            // Update entity archetype through the cached remove-edge
             ref var entityRef = ref Entities[entity.Id];
+            if (!entityRef.Tag.HasBit(componentIdx))
+                return;
 
-            // Remove from old archetype before modifying tag
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
-
-            // Modify tag and add to new archetype
             entityRef.Tag.ClearBit(componentIdx);
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id,
+                ArchetypeAfterRemove(EntityArchetypes[entity.Id], componentIdx, in entityRef.Tag));
 
             // Clear component data
             if (Components[componentIdx] is T[] componentArray)
@@ -92,8 +84,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             // Get or register component types
             ushort componentIdx1 = TagRegistry.GetOrRegisterTag<T1>();
@@ -109,14 +100,11 @@ public partial class Context
 
             // Update entity archetype - single transition
             ref var entityRef = ref Entities[entity.Id];
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
 
             entityRef.Tag.SetBit(componentIdx1);
             entityRef.Tag.SetBit(componentIdx2);
 
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id, GetOrCreateArchetype(in entityRef.Tag));
 
             // Initialize components
             int entityId = entity.Id;
@@ -144,8 +132,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             ushort componentIdx1 = TagRegistry.GetOrRegisterTag<T1>();
             ushort componentIdx2 = TagRegistry.GetOrRegisterTag<T2>();
@@ -161,15 +148,12 @@ public partial class Context
             var componentArray3 = (T3[])Components[componentIdx3];
 
             ref var entityRef = ref Entities[entity.Id];
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
 
             entityRef.Tag.SetBit(componentIdx1);
             entityRef.Tag.SetBit(componentIdx2);
             entityRef.Tag.SetBit(componentIdx3);
 
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id, GetOrCreateArchetype(in entityRef.Tag));
 
             int entityId = entity.Id;
             componentArray1[entityId] = new T1();
@@ -200,8 +184,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             ushort componentIdx1 = TagRegistry.GetOrRegisterTag<T1>();
             ushort componentIdx2 = TagRegistry.GetOrRegisterTag<T2>();
@@ -219,16 +202,13 @@ public partial class Context
             var componentArray4 = (T4[])Components[componentIdx4];
 
             ref var entityRef = ref Entities[entity.Id];
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
 
             entityRef.Tag.SetBit(componentIdx1);
             entityRef.Tag.SetBit(componentIdx2);
             entityRef.Tag.SetBit(componentIdx3);
             entityRef.Tag.SetBit(componentIdx4);
 
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id, GetOrCreateArchetype(in entityRef.Tag));
 
             int entityId = entity.Id;
             componentArray1[entityId] = new T1();
@@ -262,8 +242,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             ushort componentIdx1 = TagRegistry.GetOrRegisterTag<T1>();
             ushort componentIdx2 = TagRegistry.GetOrRegisterTag<T2>();
@@ -284,8 +263,6 @@ public partial class Context
             var componentArray5 = (T5[])Components[componentIdx5];
 
             ref var entityRef = ref Entities[entity.Id];
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
 
             entityRef.Tag.SetBit(componentIdx1);
             entityRef.Tag.SetBit(componentIdx2);
@@ -293,8 +270,7 @@ public partial class Context
             entityRef.Tag.SetBit(componentIdx4);
             entityRef.Tag.SetBit(componentIdx5);
 
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id, GetOrCreateArchetype(in entityRef.Tag));
 
             int entityId = entity.Id;
             componentArray1[entityId] = new T1();
@@ -331,8 +307,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             ushort componentIdx1 = TagRegistry.GetOrRegisterTag<T1>();
             ushort componentIdx2 = TagRegistry.GetOrRegisterTag<T2>();
@@ -356,8 +331,6 @@ public partial class Context
             var componentArray6 = (T6[])Components[componentIdx6];
 
             ref var entityRef = ref Entities[entity.Id];
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
 
             entityRef.Tag.SetBit(componentIdx1);
             entityRef.Tag.SetBit(componentIdx2);
@@ -366,8 +339,7 @@ public partial class Context
             entityRef.Tag.SetBit(componentIdx5);
             entityRef.Tag.SetBit(componentIdx6);
 
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id, GetOrCreateArchetype(in entityRef.Tag));
 
             int entityId = entity.Id;
             componentArray1[entityId] = new T1();
@@ -407,8 +379,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             ushort componentIdx1 = TagRegistry.GetOrRegisterTag<T1>();
             ushort componentIdx2 = TagRegistry.GetOrRegisterTag<T2>();
@@ -435,8 +406,6 @@ public partial class Context
             var componentArray7 = (T7[])Components[componentIdx7];
 
             ref var entityRef = ref Entities[entity.Id];
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
 
             entityRef.Tag.SetBit(componentIdx1);
             entityRef.Tag.SetBit(componentIdx2);
@@ -446,8 +415,7 @@ public partial class Context
             entityRef.Tag.SetBit(componentIdx6);
             entityRef.Tag.SetBit(componentIdx7);
 
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id, GetOrCreateArchetype(in entityRef.Tag));
 
             int entityId = entity.Id;
             componentArray1[entityId] = new T1();
@@ -490,8 +458,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             ushort componentIdx1 = TagRegistry.GetOrRegisterTag<T1>();
             ushort componentIdx2 = TagRegistry.GetOrRegisterTag<T2>();
@@ -521,8 +488,6 @@ public partial class Context
             var componentArray8 = (T8[])Components[componentIdx8];
 
             ref var entityRef = ref Entities[entity.Id];
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
 
             entityRef.Tag.SetBit(componentIdx1);
             entityRef.Tag.SetBit(componentIdx2);
@@ -533,8 +498,7 @@ public partial class Context
             entityRef.Tag.SetBit(componentIdx7);
             entityRef.Tag.SetBit(componentIdx8);
 
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id, GetOrCreateArchetype(in entityRef.Tag));
 
             int entityId = entity.Id;
             componentArray1[entityId] = new T1();
@@ -581,8 +545,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             ushort componentIdx1 = TagRegistry.GetOrRegisterTag<T1>();
             ushort componentIdx2 = TagRegistry.GetOrRegisterTag<T2>();
@@ -615,8 +578,6 @@ public partial class Context
             var componentArray9 = (T9[])Components[componentIdx9];
 
             ref var entityRef = ref Entities[entity.Id];
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
 
             entityRef.Tag.SetBit(componentIdx1);
             entityRef.Tag.SetBit(componentIdx2);
@@ -628,8 +589,7 @@ public partial class Context
             entityRef.Tag.SetBit(componentIdx8);
             entityRef.Tag.SetBit(componentIdx9);
 
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id, GetOrCreateArchetype(in entityRef.Tag));
 
             int entityId = entity.Id;
             componentArray1[entityId] = new T1();
@@ -668,8 +628,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             bool found1 = TagRegistry.TryGetTagBitIndex<T1>(out var componentIdx1);
             bool found2 = TagRegistry.TryGetTagBitIndex<T2>(out var componentIdx2);
@@ -678,14 +637,11 @@ public partial class Context
                 return;
 
             ref var entityRef = ref Entities[entity.Id];
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
 
             if (found1) entityRef.Tag.ClearBit(componentIdx1);
             if (found2) entityRef.Tag.ClearBit(componentIdx2);
 
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id, GetOrCreateArchetype(in entityRef.Tag));
 
             // Clear component data - cache arrays
             int entityId = entity.Id;
@@ -708,8 +664,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             bool found1 = TagRegistry.TryGetTagBitIndex<T1>(out var componentIdx1);
             bool found2 = TagRegistry.TryGetTagBitIndex<T2>(out var componentIdx2);
@@ -719,15 +674,12 @@ public partial class Context
                 return;
 
             ref var entityRef = ref Entities[entity.Id];
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
 
             if (found1) entityRef.Tag.ClearBit(componentIdx1);
             if (found2) entityRef.Tag.ClearBit(componentIdx2);
             if (found3) entityRef.Tag.ClearBit(componentIdx3);
 
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id, GetOrCreateArchetype(in entityRef.Tag));
 
             // Clear component data - cache arrays
             int entityId = entity.Id;
@@ -753,8 +705,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             bool found1 = TagRegistry.TryGetTagBitIndex<T1>(out var componentIdx1);
             bool found2 = TagRegistry.TryGetTagBitIndex<T2>(out var componentIdx2);
@@ -765,16 +716,13 @@ public partial class Context
                 return;
 
             ref var entityRef = ref Entities[entity.Id];
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
 
             if (found1) entityRef.Tag.ClearBit(componentIdx1);
             if (found2) entityRef.Tag.ClearBit(componentIdx2);
             if (found3) entityRef.Tag.ClearBit(componentIdx3);
             if (found4) entityRef.Tag.ClearBit(componentIdx4);
 
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id, GetOrCreateArchetype(in entityRef.Tag));
 
             int entityId = entity.Id;
             if (found1 && Components[componentIdx1] is T1[] arr1)
@@ -802,8 +750,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             bool found1 = TagRegistry.TryGetTagBitIndex<T1>(out var componentIdx1);
             bool found2 = TagRegistry.TryGetTagBitIndex<T2>(out var componentIdx2);
@@ -815,8 +762,6 @@ public partial class Context
                 return;
 
             ref var entityRef = ref Entities[entity.Id];
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
 
             if (found1) entityRef.Tag.ClearBit(componentIdx1);
             if (found2) entityRef.Tag.ClearBit(componentIdx2);
@@ -824,8 +769,7 @@ public partial class Context
             if (found4) entityRef.Tag.ClearBit(componentIdx4);
             if (found5) entityRef.Tag.ClearBit(componentIdx5);
 
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id, GetOrCreateArchetype(in entityRef.Tag));
 
             int entityId = entity.Id;
             if (found1 && Components[componentIdx1] is T1[] arr1)
@@ -856,8 +800,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             bool found1 = TagRegistry.TryGetTagBitIndex<T1>(out var componentIdx1);
             bool found2 = TagRegistry.TryGetTagBitIndex<T2>(out var componentIdx2);
@@ -870,8 +813,6 @@ public partial class Context
                 return;
 
             ref var entityRef = ref Entities[entity.Id];
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
 
             if (found1) entityRef.Tag.ClearBit(componentIdx1);
             if (found2) entityRef.Tag.ClearBit(componentIdx2);
@@ -880,8 +821,7 @@ public partial class Context
             if (found5) entityRef.Tag.ClearBit(componentIdx5);
             if (found6) entityRef.Tag.ClearBit(componentIdx6);
 
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id, GetOrCreateArchetype(in entityRef.Tag));
 
             int entityId = entity.Id;
             if (found1 && Components[componentIdx1] is T1[] arr1)
@@ -915,8 +855,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             bool found1 = TagRegistry.TryGetTagBitIndex<T1>(out var componentIdx1);
             bool found2 = TagRegistry.TryGetTagBitIndex<T2>(out var componentIdx2);
@@ -930,8 +869,6 @@ public partial class Context
                 return;
 
             ref var entityRef = ref Entities[entity.Id];
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
 
             if (found1) entityRef.Tag.ClearBit(componentIdx1);
             if (found2) entityRef.Tag.ClearBit(componentIdx2);
@@ -941,8 +878,7 @@ public partial class Context
             if (found6) entityRef.Tag.ClearBit(componentIdx6);
             if (found7) entityRef.Tag.ClearBit(componentIdx7);
 
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id, GetOrCreateArchetype(in entityRef.Tag));
 
             int entityId = entity.Id;
             if (found1 && Components[componentIdx1] is T1[] arr1)
@@ -979,8 +915,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             bool found1 = TagRegistry.TryGetTagBitIndex<T1>(out var componentIdx1);
             bool found2 = TagRegistry.TryGetTagBitIndex<T2>(out var componentIdx2);
@@ -995,8 +930,6 @@ public partial class Context
                 return;
 
             ref var entityRef = ref Entities[entity.Id];
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
 
             if (found1) entityRef.Tag.ClearBit(componentIdx1);
             if (found2) entityRef.Tag.ClearBit(componentIdx2);
@@ -1007,8 +940,7 @@ public partial class Context
             if (found7) entityRef.Tag.ClearBit(componentIdx7);
             if (found8) entityRef.Tag.ClearBit(componentIdx8);
 
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id, GetOrCreateArchetype(in entityRef.Tag));
 
             int entityId = entity.Id;
             if (found1 && Components[componentIdx1] is T1[] arr1)
@@ -1048,8 +980,7 @@ public partial class Context
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
-                throw new InvalidOperationException("Entity not found");
+            ThrowIfStale(in entity);
 
             bool found1 = TagRegistry.TryGetTagBitIndex<T1>(out var componentIdx1);
             bool found2 = TagRegistry.TryGetTagBitIndex<T2>(out var componentIdx2);
@@ -1065,8 +996,6 @@ public partial class Context
                 return;
 
             ref var entityRef = ref Entities[entity.Id];
-            var oldArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            oldArchetype.Remove(entity.Id);
 
             if (found1) entityRef.Tag.ClearBit(componentIdx1);
             if (found2) entityRef.Tag.ClearBit(componentIdx2);
@@ -1078,8 +1007,7 @@ public partial class Context
             if (found8) entityRef.Tag.ClearBit(componentIdx8);
             if (found9) entityRef.Tag.ClearBit(componentIdx9);
 
-            var newArchetype = GetOrCreateArchetype(in entityRef.Tag);
-            newArchetype.Add(entity.Id);
+            MoveToArchetype(entity.Id, GetOrCreateArchetype(in entityRef.Tag));
 
             int entityId = entity.Id;
             if (found1 && Components[componentIdx1] is T1[] arr1)
@@ -1114,17 +1042,20 @@ public partial class Context
         {
             int newSize = Math.Max((Components?.Length ?? 0) * 2, componentIdx + 1);
             Array.Resize(ref Components, newSize);
+            StorageVersion++;
         }
 
         if (Components[componentIdx] == null)
         {
             Components[componentIdx] = new T[Entities.Length];
+            StorageVersion++;
         }
         else if (Components[componentIdx].Length < Entities.Length)
         {
             var tempArray = (T[])Components[componentIdx];
             Array.Resize(ref tempArray, Entities.Length);
             Components[componentIdx] = tempArray;
+            StorageVersion++;
         }
     }
 
@@ -1151,12 +1082,16 @@ public partial class Context
             {
                 int newSize = Math.Max((Components?.Length ?? 0) * 2, componentIdx + 1);
                 Array.Resize(ref Components, newSize);
+                StorageVersion++;
+            StorageVersion++;
             }
 
             // Create component array if it doesn't exist
             if (Components[componentIdx] == null)
             {
                 Components[componentIdx] = new T[Entities.Length];
+                StorageVersion++;
+            StorageVersion++;
             }
 
             return (T[])Components[componentIdx];

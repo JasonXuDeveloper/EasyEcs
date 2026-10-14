@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using EasyEcs.Core.Components;
 using EasyEcs.Core.Group;
 
@@ -82,15 +83,11 @@ public struct GroupResultEnumerator<T1, T2> : IDisposable
         {
             var archetype = _matchingArchetypes[_archetypeIndex];
 
-            while (true)
+            // Re-read the backing array and count on every step: entities may be added/removed mid-iteration.
+            while (archetype.AliveCount > 0 && _entityIndexInArchetype < archetype.Count)
             {
-                // Get fresh span on each iteration to handle concurrent modifications
-                var entitySpan = archetype.GetEntitySpan();
-
-                if (_entityIndexInArchetype >= entitySpan.Length)
-                    break;
-
-                int entityId = entitySpan[_entityIndexInArchetype++];
+                int entityId = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds),
+                    _entityIndexInArchetype++);
 
                 if (entityId == Tombstone)
                     continue;

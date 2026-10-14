@@ -55,6 +55,44 @@ things to do based on our properties (systems).
   systems (for those who are in the same priority) and well utilize the multi-core CPU.
 - We have a cool guy who is maintaining this library. (Just kidding)
 
+## What's New in v4.0.0
+
+v4 targets long-running servers: bounded memory under entity churn, cheaper structural changes and
+context-scoped state. Targets `net8.0` and `net10.0` (uses `System.Threading.Lock` on .NET 9+).
+
+### Changes
+
+- **Entity id recycling**: destroyed ids are reused (versions are bumped, so stale `EntityRef`/`Entity`
+  copies are rejected). Per-entity and per-component arrays now stay bounded by the peak live entity count
+  instead of growing forever.
+- **Destroy releases component data**: component slots of a destroyed entity are cleared, so managed references
+  inside components no longer leak until the id is reused.
+- **O(1) archetype membership without hashing**: the context tracks entity -> (archetype, slot); archetypes
+  no longer keep a `Dictionary<int,int>` reverse index. Single-component add/remove follows cached archetype
+  transition edges instead of hashing a 256-bit tag. New archetypes start small (64 slots instead of 1024 +
+  1024-entry dictionary).
+- **Per-context singletons**: `AddSingletonComponent<T>` is now scoped to the context (previously a process-wide
+  static shared by every context). Added `HasSingletonComponent<T>()` / `RemoveSingletonComponent<T>()`.
+- **`ForEach<T1..T6, TJob>(ref TJob job)`**: struct-job iteration (`IForEach<...>`), zero allocation and no
+  delegates; the JIT specializes and inlines the job. Faster than `GroupOf` enumeration.
+- Query enumerators / `GroupResult` accessors skip redundant bounds checks.
+
+### Benchmarks (`EasyEcs.Benchmark`, N = 10,000, .NET 10, ShortRun)
+
+| Benchmark | v3.1.1 | v4.0.0 | Change |
+|---|---:|---:|---:|
+| CreateAddDestroy | 5,358 μs | 3,501 μs | -35% |
+| Churn (10 rounds create/add/destroy in one context) | 5,247 μs / 3,190 KB | 1,794 μs / 156 KB | -66% time, -95% alloc |
+| ToggleComponent (remove + add) | 1,185 μs | 428 μs | -64% |
+| QueryIterate (`GroupOf<P,V>`) | 40.6 μs | 43.5 μs | noise |
+| ForEachIterate (new, same work as QueryIterate) | - | 32.2 μs | -21% vs GroupOf |
+| QueryIterate3 | 16.2 μs | 12.1 μs | -25% |
+| SingletonAccess (x1000) | 1.42 μs | 0.89 μs | -37% |
+
+Run them yourself: `dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*'`.
+
+See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md#migration-guide-easyecs-v3x--v40) for upgrade notes.
+
 ## What's New in v3.1.0
 
 ### New Features

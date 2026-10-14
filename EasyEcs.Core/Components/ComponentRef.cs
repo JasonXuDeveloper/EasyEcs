@@ -87,7 +87,15 @@ public readonly struct ComponentRef<T> where T : struct, IComponent
 
 public readonly struct SingletonComponentRef<T> where T : struct, ISingletonComponent
 {
-    public ref T Value => ref Singleton<T>.Instance.Value;
+    private readonly SingletonBox<T> _box;
+
+    internal SingletonComponentRef(SingletonBox<T> box) => _box = box;
+
+    public ref T Value
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => ref _box.Value;
+    }
 
     public static implicit operator T(SingletonComponentRef<T> componentRef)
     {

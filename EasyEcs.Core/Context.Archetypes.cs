@@ -18,8 +18,88 @@ public partial class Context
     // Using ConcurrentDictionary for lock-free reads on cache hits
     private readonly ConcurrentDictionary<Tag, List<Archetype>> _queryCache = new();
 
-    // Lock for structural modifications (simple object lock for .NET 8.0 compatibility)
+    // Lock for structural modifications. System.Threading.Lock is cheaper than Monitor on .NET 9+.
+#if NET9_0_OR_GREATER
+    private readonly System.Threading.Lock _structuralLock = new();
+#else
     private readonly object _structuralLock = new();
+#endif
+
+    // Per-entity archetype membership (indexed by entity id), replaces per-archetype hash lookups.
+    internal Archetype[] EntityArchetypes;
+    internal int[] EntitySlots;
+
+    /// <summary>
+    /// Move an entity into <paramref name="target"/>, leaving its current archetype (if any).
+    /// Must be called inside _structuralLock.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void MoveToArchetype(int entityId, Archetype target)
+    {
+        var current = EntityArchetypes[entityId];
+        if (ReferenceEquals(current, target))
+            return;
+
+        current?.RemoveAt(EntitySlots[entityId]);
+        var ids = target.EntityIds;
+        EntitySlots[entityId] = target.Add(entityId);
+        EntityArchetypes[entityId] = target;
+
+        // Archetype storage reallocated: invalidate snapshots held by in-flight ForEach passes
+        if (!ReferenceEquals(ids, target.EntityIds))
+            StorageVersion++;
+    }
+
+    /// <summary>
+    /// Remove an entity from its archetype (used on destroy).
+    /// Must be called inside _structuralLock.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void DetachFromArchetype(int entityId)
+    {
+        var current = EntityArchetypes[entityId];
+        if (current == null)
+            return;
+
+        current.RemoveAt(EntitySlots[entityId]);
+        EntityArchetypes[entityId] = null;
+    }
+
+    /// <summary>
+    /// Archetype reached from <paramref name="from"/> by adding a single component bit (edge-cached).
+    /// The entity's tag must already contain the new bit.
+    /// Must be called inside _structuralLock.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private Archetype ArchetypeAfterAdd(Archetype from, int bit, in Tag newTag)
+    {
+        var target = from.GetAddEdge(bit);
+        if (target != null)
+            return target;
+
+        target = GetOrCreateArchetype(in newTag);
+        from.SetAddEdge(bit, target);
+        target.SetRemoveEdge(bit, from);
+        return target;
+    }
+
+    /// <summary>
+    /// Archetype reached from <paramref name="from"/> by removing a single component bit (edge-cached).
+    /// The entity's tag must already have the bit cleared.
+    /// Must be called inside _structuralLock.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private Archetype ArchetypeAfterRemove(Archetype from, int bit, in Tag newTag)
+    {
+        var target = from.GetRemoveEdge(bit);
+        if (target != null)
+            return target;
+
+        target = GetOrCreateArchetype(in newTag);
+        from.SetRemoveEdge(bit, target);
+        target.SetAddEdge(bit, from);
+        return target;
+    }
 
     /// <summary>
     /// Get or create an archetype for the given component mask.
@@ -32,7 +112,7 @@ public partial class Context
         {
             if (!Archetypes.TryGetValue(componentMask, out var archetype))
             {
-                archetype = new Archetype(in componentMask, initialCapacity: 1024);
+                archetype = new Archetype(in componentMask);
                 Archetypes[componentMask] = archetype;
                 _allArchetypes.Add(archetype);
 
@@ -108,7 +188,8 @@ public partial class Context
                 var archetype = _allArchetypes[i];
                 if (archetype.AliveCount < archetype.Count)
                 {
-                    archetype.Compact();
+                    archetype.Compact(EntitySlots);
+                    StorageVersion++;
                 }
             }
         }

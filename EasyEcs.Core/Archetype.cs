@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using EasyEcs.Core.Components;
 
@@ -9,7 +8,9 @@ namespace EasyEcs.Core;
 /// Archetype stores entities with the same component configuration.
 /// Uses tombstone pattern (-1) for safe iteration during modifications.
 /// Uses free list for O(1) tombstone slot reuse.
-/// Uses reverse lookup dictionary for O(1) removal.
+/// <br/>
+/// The slot of each entity is tracked by the owning <see cref="Context"/> (entity id -> slot),
+/// so removal is a plain array write instead of a hash lookup.
 /// </summary>
 internal class Archetype
 {
@@ -22,82 +23,63 @@ internal class Archetype
     private int[] _freeSlots;
     private int _freeCount;
 
-    // Reverse lookup: entityId -> index in EntityIds array (O(1) removal)
-    private readonly Dictionary<int, int> _entityToIndex;
+    // Transition cache: component bit index -> archetype reached by adding / removing that component.
+    // Avoids hashing a 256-bit Tag on every single-component structural change.
+    private Archetype[] _addEdges = Array.Empty<Archetype>();
+    private Archetype[] _removeEdges = Array.Empty<Archetype>();
 
     private const int Tombstone = -1;
 
-    public Archetype(in Tag componentMask, int initialCapacity = 1024)
+    public Archetype(in Tag componentMask, int initialCapacity = 64)
     {
         ComponentMask = componentMask;
         EntityIds = new int[initialCapacity];
-        _freeSlots = new int[initialCapacity]; // Match capacity to avoid early resizing
-        _entityToIndex = new Dictionary<int, int>(initialCapacity);
+        _freeSlots = new int[16];
         Count = 0;
         AliveCount = 0;
         _freeCount = 0;
     }
 
     /// <summary>
-    /// Add an entity to this archetype.
+    /// Add an entity to this archetype and return the slot it occupies.
     /// Reuses tombstone slots (O(1) via free list), then appends.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public void Add(int entityId)
+    public int Add(int entityId)
     {
         int slot;
 
-        // Fast path: Reuse free slot from free list (O(1))
         if (_freeCount > 0)
         {
             slot = _freeSlots[--_freeCount];
-            EntityIds[slot] = entityId;
-            AliveCount++;
         }
         else
         {
-            // No free slots, append to end
             if (Count >= EntityIds.Length)
-            {
-                // Grow array (doubling strategy)
                 Array.Resize(ref EntityIds, EntityIds.Length * 2);
-            }
 
             slot = Count++;
-            EntityIds[slot] = entityId;
-            AliveCount++;
         }
 
-        // Update reverse lookup for O(1) removal
-        _entityToIndex[entityId] = slot;
+        EntityIds[slot] = entityId;
+        AliveCount++;
+        return slot;
     }
 
     /// <summary>
-    /// Remove an entity from this archetype.
-    /// O(1) removal using reverse lookup dictionary.
+    /// Remove the entity occupying <paramref name="slot"/>.
     /// Marks the slot as tombstone (-1) and adds to free list for O(1) reuse.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public void Remove(int entityId)
+    public void RemoveAt(int slot)
     {
-        // O(1) lookup using reverse index
-        if (!_entityToIndex.TryGetValue(entityId, out int idx))
-            return;
-
-        // Tombstone the slot
-        EntityIds[idx] = Tombstone;
+        EntityIds[slot] = Tombstone;
         AliveCount--;
 
-        // Remove from reverse lookup
-        _entityToIndex.Remove(entityId);
-
-        // Add to free list for O(1) reuse
         if (_freeCount >= _freeSlots.Length)
-        {
             Array.Resize(ref _freeSlots, _freeSlots.Length * 2);
-        }
 
-        _freeSlots[_freeCount++] = idx;
+        _freeSlots[_freeCount++] = slot;
 
         // Note: Auto-compaction is disabled to avoid unpredictable performance spikes mid-frame.
         // Call Context.CompactArchetypes() manually during loading screens or maintenance windows
@@ -106,33 +88,49 @@ internal class Archetype
 
     /// <summary>
     /// Compact the array by removing all tombstones.
-    /// Clears the free list and rebuilds reverse lookup since all gaps are removed.
+    /// Rewrites the entity -> slot table for every moved entity.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public void Compact()
+    public void Compact(int[] entitySlots)
     {
         int writeIdx = 0;
-        var span = EntityIds.AsSpan(0, Count);
-
-        // Clear and rebuild reverse lookup
-        _entityToIndex.Clear();
 
         for (int readIdx = 0; readIdx < Count; readIdx++)
         {
-            int entityId = span[readIdx];
+            int entityId = EntityIds[readIdx];
             if (entityId != Tombstone)
             {
                 EntityIds[writeIdx] = entityId;
-                _entityToIndex[entityId] = writeIdx; // Rebuild reverse lookup
+                entitySlots[entityId] = writeIdx;
                 writeIdx++;
             }
         }
 
         Count = writeIdx;
-        // AliveCount should already match Count after compaction
-
-        // Clear free list since there are no more tombstones
         _freeCount = 0;
+    }
+
+    /// <summary>
+    /// Cached archetype reached by adding component <paramref name="bit"/>; null when not cached yet.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Archetype GetAddEdge(int bit) => bit < _addEdges.Length ? _addEdges[bit] : null;
+
+    /// <summary>
+    /// Cached archetype reached by removing component <paramref name="bit"/>; null when not cached yet.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Archetype GetRemoveEdge(int bit) => bit < _removeEdges.Length ? _removeEdges[bit] : null;
+
+    public void SetAddEdge(int bit, Archetype target) => SetEdge(ref _addEdges, bit, target);
+
+    public void SetRemoveEdge(int bit, Archetype target) => SetEdge(ref _removeEdges, bit, target);
+
+    private static void SetEdge(ref Archetype[] edges, int bit, Archetype target)
+    {
+        if (bit >= edges.Length)
+            Array.Resize(ref edges, Math.Max(bit + 1, edges.Length * 2));
+        edges[bit] = target;
     }
 
     /// <summary>

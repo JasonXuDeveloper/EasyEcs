@@ -1,3 +1,25 @@
+# Migration Guide: EasyECS v3.x → v4.0
+
+v4.0 has no API removals for normal usage; the breaking changes are behavioral:
+
+1. **Entity ids are recycled.** `Entity.Id` is unique only among *live* entities. If you store ids outside
+   the ECS (e.g. in dictionaries or on the network), store `EntityRef` (id + version) instead, or remove the
+   mapping when the entity is destroyed. `TryGetEntityById(id)` may return a newer entity reusing that id.
+2. **Stale `Entity` copies throw.** Calling `AddComponent`/`RemoveComponent` with an `Entity` value copied
+   before the entity was destroyed now throws `InvalidOperationException("Entity not found")` instead of
+   silently mutating whatever lives at that id.
+3. **Singletons are per context.** Code that added a singleton on one context and read it from another
+   (relying on the old process-wide static) must add it to each context. The public `Singleton<T>` class was
+   removed; use `context.GetSingletonComponent<T>()`.
+4. **Destroying an entity clears its component data.** `ComponentRef`s to a destroyed entity already threw;
+   now the storage is also reset so references inside components can be collected.
+5. **Do not call `CompactArchetypes()` while iterating** (`GroupOf` / `ForEach`). This was already unsafe.
+
+New, optional: `Context.ForEach<T1..T6, TJob>(ref TJob job)` with `struct TJob : IForEach<T1..T6>` for the
+fastest zero-allocation iteration.
+
+---
+
 # Migration Guide: EasyECS v2.x → v3.0
 
 ## Overview

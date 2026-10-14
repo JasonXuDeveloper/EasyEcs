@@ -1,16 +1,25 @@
-using EasyEcs.Core.Components;
 using System.Threading;
+using EasyEcs.Core.Components;
 
 namespace EasyEcs.Core;
 
 /// <summary>
-/// Thread-safe singleton storage with volatile fields for cross-thread visibility.
-/// Write access should be synchronized (e.g., via Context._structuralLock).
+/// Process-wide dense index per singleton component type; the value lives per <see cref="Context"/>.
 /// </summary>
-public class Singleton<T> where T : struct, ISingletonComponent
+internal static class SingletonIndex
 {
-    // Volatile ensures visibility across threads
-    public volatile bool Initialized = false;
+    internal static int Count;
+}
+
+internal static class SingletonIndex<T> where T : struct, ISingletonComponent
+{
+    internal static readonly int Value = Interlocked.Increment(ref SingletonIndex.Count) - 1;
+}
+
+/// <summary>
+/// Heap box holding one context's singleton value; refs into it stay valid for the box lifetime.
+/// </summary>
+internal sealed class SingletonBox<T> where T : struct, ISingletonComponent
+{
     public T Value;
-    public static Singleton<T> Instance = new();
 }
