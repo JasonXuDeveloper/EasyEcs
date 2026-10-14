@@ -3,9 +3,8 @@ using System.Runtime.CompilerServices;
 namespace EasyEcs.Benchmark.Scenario;
 
 // A realistic MMO/battle-server world: players and NPCs move, fight, gain and lose status effects,
-// projectiles spawn and expire every tick, deaths are announced with a one-update notification component. Systems
-// are written as users should write them: one responsibility each, stateless (world state lives in the WorldStats
-// singleton), coupled only via data.
+// projectiles spawn and expire every tick, entities die and respawn. Systems are written as users should write them:
+// one responsibility each, stateless (world state lives in the WorldStats singleton), coupled only via data.
 
 public struct Position : IComponent { public float X, Y; }
 public struct Velocity : IComponent { public float X, Y; }
@@ -19,9 +18,6 @@ public struct Npc : IComponent { public int TemplateId; }
 public struct Projectile : IComponent { public int OwnerId; }
 public struct Stunned : IComponent { public int Ticks; }
 public struct Dead : IComponent;
-
-/// <summary>Notification: the entity died this update (read by RewardSystem, removed by NotificationCleanupSystem).</summary>
-public struct Died : IComponent;
 
 public struct WorldStats : ISingletonComponent
 {
@@ -121,7 +117,7 @@ public partial class StatusSystem : EcsSystem
     }
 }
 
-/// <summary>Turns depleted health into death: marks the entity and announces it (rewards, respawn react later).</summary>
+/// <summary>Turns depleted health into death: marks the entity (respawn reacts later) and counts it.</summary>
 public partial class DeathSystem : EcsSystem
 {
     public override int Priority => 4;
@@ -130,26 +126,17 @@ public partial class DeathSystem : EcsSystem
     private static void CheckDeath(Entity entity, in Health health, World world)
     {
         if (health.Value > 0) return;
-        entity.Set(new Dead(), new Died());
+        entity.Set(new Dead());
+        ref var stats = ref world.GetSingleton<WorldStats>();
+        stats.Deaths++;
+        if (entity.Has<Npc>()) stats.NpcKills++;
     }
-}
-
-/// <summary>Rewards and statistics react to deaths without combat knowing about them (reads the Died notification).</summary>
-public partial class RewardSystem : EcsSystem
-{
-    public override int Priority => 5;
-
-    [ForEach]
-    private static void CountDeath(in Died _, World world) => world.GetSingleton<WorldStats>().Deaths++;
-
-    [ForEach, With<Npc>]
-    private static void CountNpcKill(in Died _, World world) => world.GetSingleton<WorldStats>().NpcKills++;
 }
 
 /// <summary>Projectiles expire (entity churn every tick).</summary>
 public partial class LifetimeSystem : EcsSystem
 {
-    public override int Priority => 6;
+    public override int Priority => 5;
 
     [ForEach]
     private static void Expire(Entity entity, ref Lifetime lifetime)
@@ -162,7 +149,7 @@ public partial class LifetimeSystem : EcsSystem
 /// <summary>Dead NPCs are replaced by fresh ones; dead players respawn in place.</summary>
 public partial class RespawnSystem : EcsSystem
 {
-    public override int Priority => 7;
+    public override int Priority => 6;
 
     [ForEach, With<Npc>]
     private static void Despawn(Entity entity, in Dead _, World world)
@@ -182,7 +169,7 @@ public partial class RespawnSystem : EcsSystem
 /// <summary>About 5% of living players fire a projectile each tick.</summary>
 public partial class ShootingSystem : EcsSystem
 {
-    public override int Priority => 8;
+    public override int Priority => 7;
 
     [ForEach, With<Player>, Without<Dead>]
     private static void Shoot(Entity shooter, in Position p, in Velocity v, World world)
@@ -193,15 +180,6 @@ public partial class ShootingSystem : EcsSystem
         world.CreateEntity(p, new Velocity { X = v.X * 4, Y = v.Y * 4 }, new Lifetime { Ticks = 20 },
             new Projectile { OwnerId = shooter.Id });
     }
-}
-
-/// <summary>Removes notifications after every consumer ran, so each death is seen exactly once.</summary>
-public partial class NotificationCleanupSystem : EcsSystem
-{
-    public override int Priority => 99;
-
-    [ForEach]
-    private static void Clear(Entity entity, in Died _) => entity.Remove<Died>();
 }
 
 /// <summary>Ticks the world clock (last).</summary>
@@ -240,8 +218,6 @@ public static class Simulation
         world.AddSystem<LifetimeSystem>();
         world.AddSystem<RespawnSystem>();
         world.AddSystem<ShootingSystem>();
-        world.AddSystem<RewardSystem>();
-        world.AddSystem<NotificationCleanupSystem>();
         world.AddSystem<ClockSystem>();
 
         for (int i = 0; i < entities; i++)
