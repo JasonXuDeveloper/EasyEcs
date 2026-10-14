@@ -1,8 +1,10 @@
 name: Release
 
 # Run manually: Actions -> Release -> Run workflow (on master), enter the version (e.g. 4.0.0 or 4.1.0-preview.1).
-# Builds and tests, publishes the package to NuGet (secret MYTOKEN), then commits the version bump, tags it and creates
-# the GitHub release with notes generated from the commits since the previous tag.
+#   tag:     bump <Version> in Directory.Build.props, build and test it, commit "Bump to vX.Y.Z", tag vX.Y.Z, push.
+#   publish: from the tag, pack and push to NuGet (secret MYTOKEN), then create the GitHub release with notes generated
+#            from the commits since the previous tag. If it fails (e.g. an expired key), fix the secret and use
+#            "Re-run failed jobs": the tag stays, NuGet skips a version it already has, the release is created once.
 
 on:
   workflow_dispatch:
@@ -19,16 +21,17 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+env:
+  VERSION: ${{ inputs.version }}
+
 jobs:
-  release:
+  tag:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/master'
-    env:
-      VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # tags and history for the release notes
+          fetch-depth: 0
 
       - name: Validate version
         run: |
@@ -36,41 +39,58 @@ jobs:
             echo "::error::'$VERSION' is not a semantic version (x.y.z or x.y.z-suffix)"; exit 1
           fi
           if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
-            echo "::error::tag v$VERSION already exists"; exit 1
+            echo "::error::tag v$VERSION already exists (to retry publishing, re-run the failed job of its run)"; exit 1
           fi
+
+      - name: Bump version
+        run: |
+          sed -i "s|<Version>[^<]*</Version>|<Version>$VERSION</Version>|" Directory.Build.props
+          grep -q "<Version>$VERSION</Version>" Directory.Build.props
 
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
 
-      - name: Build and test
+      - name: Build and test the bumped version
         run: |
-          dotnet restore
-          dotnet build --no-restore --configuration Release -p:Version=$VERSION
+          dotnet build --configuration Release
           dotnet test --no-build --configuration Release
 
-      - name: Pack
-        run: dotnet pack EasyEcs.Core/EasyEcs.Core.csproj --no-build --configuration Release -p:Version=$VERSION --output artifacts
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain -- Directory.Build.props)" ]; then
+            git commit -m "Bump to v$VERSION" -- Directory.Build.props
+          fi
+          git tag "v$VERSION"
+          git push origin HEAD:master "v$VERSION"
 
-      # Before anything is tagged: an invalid or expired key fails the run without leaving a half-made release.
+  publish:
+    runs-on: ubuntu-latest
+    needs: tag
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
+          fetch-depth: 0 # previous tags and history for the release notes
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Pack
+        run: |
+          dotnet build EasyEcs.Core/EasyEcs.Core.csproj --configuration Release
+          dotnet pack EasyEcs.Core/EasyEcs.Core.csproj --no-build --configuration Release --output artifacts
+          ls artifacts/EasyEcs.$VERSION.nupkg
+
       - name: Push to NuGet
         env:
           NUGET_API_KEY: ${{ secrets.MYTOKEN }}
         run: |
           if [ -z "$NUGET_API_KEY" ]; then echo "::error::secret MYTOKEN is not set"; exit 1; fi
           dotnet nuget push "artifacts/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
-
-      - name: Commit version bump and tag
-        run: |
-          sed -i "s|<Version>[^<]*</Version>|<Version>$VERSION</Version>|" EasyEcs.Core/EasyEcs.Core.csproj
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [ -n "$(git status --porcelain)" ]; then
-            git commit -am "Bump to v$VERSION"
-            git push origin HEAD:master
-          fi
-          git tag "v$VERSION"
-          git push origin "v$VERSION"
 
       - name: Release notes
         run: |
@@ -97,6 +117,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then echo "release v$VERSION exists"; exit 0; fi
           PRERELEASE=""
           if [[ "$VERSION" == *-* ]]; then PRERELEASE="--prerelease"; fi
-          gh release create "v$VERSION" artifacts/*.nupkg --title "v$VERSION" --notes-file notes.md $PRERELEASE
+          gh release create "v$VERSION" artifacts/*.nupkg --verify-tag --title "v$VERSION" --notes-file notes.md $PRERELEASE
