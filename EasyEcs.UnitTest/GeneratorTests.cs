@@ -34,6 +34,7 @@ public class GeneratorTests
     private const string Components = """
         public struct P : IComponent { public int V; }
         public struct Q : IComponent { public int V; }
+        public struct Clock : ISingletonComponent { public int Ticks; }
         """;
 
     [Test]
@@ -49,6 +50,7 @@ public class GeneratorTests
                     private readonly System.Collections.Generic.List<int> _scratch = []; // readonly: allowed
                     public int Speed => 3;                                              // computed: allowed
                     [ForEach, Without<Q>] void B(Entity e, in P p, World w) => _scratch.Clear();
+                    [ForEach] static void C(in P p, ref Clock clock, in Clock read) => clock.Ticks += read.Ticks; // singletons
                 }
             }
             """);
@@ -59,6 +61,7 @@ public class GeneratorTests
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, int x) { } }", "EECS002")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(P p) { } }", "EECS002")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(World w) { } }", "EECS003")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref Clock c) { } }", "EECS003")]
     [TestCase("public partial class S<T> : EcsSystem { [ForEach] static void A(ref P p) { } }", "EECS004")]
     [TestCase("public partial class S { [ForEach] static void A(ref P p) { } }", "EECS005")]
     [TestCase("public class Bad : IComponent { }", "EECS006")]

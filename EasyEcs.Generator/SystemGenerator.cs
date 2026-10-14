@@ -51,7 +51,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
         {
             string filter = method.With.Length + method.Without.Length > 0 ? $", in __{method.Name}Filter" : "";
             string system = method.IsStatic ? "" : "System = this, ";
-            sb.Append($"        var __{method.Name} = new __{method.Name}Job {{ {system}World = world }};\n");
+            string singletons = string.Concat(method.Parameters.Select((p, i) => p.Kind == Symbols.ParamKind.Singleton
+                ? $", s{i} = world.SingletonRef<{p.Type}>()" : ""));
+            sb.Append($"        var __{method.Name} = new __{method.Name}Job {{ {system}World = world{singletons} }};\n");
             sb.Append($"        world.ForEach<{method.ComponentTypes}, __{method.Name}Job>(ref __{method.Name}{filter});\n");
         }
 
@@ -64,9 +66,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string job = $"__{method.Name}Job";
         var components = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Component).ToArray();
         int index = 0;
-        var args = string.Join(", ", method.Parameters.Select(p => p.Kind switch
+        var args = string.Join(", ", method.Parameters.Select((p, i) => p.Kind switch
         {
             Symbols.ParamKind.Component => $"{p.RefKind} c{++index}",
+            Symbols.ParamKind.Singleton => $"{p.RefKind} s{i}.Value",
             Symbols.ParamKind.Entity => "World.GetEntity(entityId)",
             _ => "World",
         }));
@@ -74,7 +77,11 @@ public sealed class SystemGenerator : IIncrementalGenerator
         // The JIT specializes World.ForEach on this struct and inlines Execute and the user's method into the loop.
         sb.Append($"    private struct {job} : global::EasyEcs.IForEach<{method.ComponentTypes}>\n    {{\n");
         if (!method.IsStatic) sb.Append($"        public {owner.Name} System;\n");
-        sb.Append("        public global::EasyEcs.World World;\n\n");
+        sb.Append("        public global::EasyEcs.World World;\n");
+        for (int i = 0; i < method.Parameters.Length; i++)
+            if (method.Parameters[i].Kind == Symbols.ParamKind.Singleton) // resolved once per pass, not per entity
+                sb.Append($"        public global::EasyEcs.SingletonRef<{method.Parameters[i].Type}> s{i};\n");
+        sb.Append('\n');
         sb.Append("        [MethodImpl(MethodImplOptions.AggressiveInlining)]\n");
         sb.Append($"        public void Execute(int entityId, {List(components.Length, i => $"ref {components[i - 1].Type} c{i}")})\n");
         sb.Append($"            => {(method.IsStatic ? owner.Name : "System")}.{method.Name}({args});\n    }}\n\n");

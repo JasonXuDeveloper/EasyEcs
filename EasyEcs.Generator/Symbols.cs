@@ -53,6 +53,7 @@ internal static class Symbols
     {
         Invalid,
         Component,
+        Singleton,
         Entity,
         World,
     }
@@ -60,7 +61,10 @@ internal static class Symbols
     public static ParamKind Classify(IParameterSymbol p)
     {
         if (p.RefKind is RefKind.Ref or RefKind.In or RefKind.RefReadOnlyParameter)
-            return p.Type.IsValueType && Implements(p.Type, Component) ? ParamKind.Component : ParamKind.Invalid;
+            return !p.Type.IsValueType ? ParamKind.Invalid
+                : Implements(p.Type, Component) ? ParamKind.Component
+                : Implements(p.Type, Singleton) ? ParamKind.Singleton
+                : ParamKind.Invalid;
         if (p.RefKind != RefKind.None) return ParamKind.Invalid;
         return p.Type.ToDisplayString() switch
         {

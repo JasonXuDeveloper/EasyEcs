@@ -41,6 +41,17 @@ public sealed partial class World
         return ref box != null ? ref box.Value : ref AddSingleton<T>();
     }
 
+    /// <summary>
+    /// Stable handle to singleton <typeparamref name="T"/> (added first if missing): resolve it once, then read and write
+    /// <see cref="SingletonRef{T}.Value"/> without a lookup. Generated <c>[ForEach]</c> jobs use it for singleton
+    /// parameters. O(1).
+    /// </summary>
+    public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent
+    {
+        if (Box<T>() == null) AddSingleton<T>();
+        return new SingletonRef<T>(Box<T>());
+    }
+
     /// <summary>Copy of singleton <typeparamref name="T"/> if present. O(1).</summary>
     public bool TryGetSingleton<T>(out T value) where T : struct, ISingletonComponent
     {
@@ -76,4 +87,22 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowSingletonMissing(Type type) =>
         throw new InvalidOperationException($"Singleton {type.Name} was not added to this world");
+}
+
+/// <summary>
+/// Handle to one world's singleton <typeparamref name="T"/>. The singleton's storage never moves, so the handle stays
+/// valid until the singleton is removed (a removed singleton is detached: writes no longer reach the world).
+/// </summary>
+public readonly struct SingletonRef<T> where T : struct, ISingletonComponent
+{
+    private readonly SingletonBox<T> _box;
+
+    internal SingletonRef(SingletonBox<T> box) => _box = box;
+
+    /// <summary>The singleton's value, by reference.</summary>
+    public ref T Value
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => ref _box.Value;
+    }
 }

@@ -13,18 +13,18 @@ public partial class Movement : EcsSystem
 }
 
 /// <summary>
-/// Instance method, Entity and World parameters, With filter, structural changes, declaration order. Stateless: the
+/// Instance method, Entity and singleton parameters, With filter, structural changes, declaration order. Stateless: the
 /// outcome is data only: the entity's state (Dead) and the world's statistics (Score singleton).
 /// </summary>
 public partial class Damage : EcsSystem
 {
     // Without<Dead>: an entity moved into another matching archetype mid-pass may be visited again; filters keep jobs idempotent.
     [ForEach, With<Velocity>, Without<Dead>]
-    private void Hurt(Entity entity, ref Health health, World world)
+    private void Hurt(Entity entity, ref Health health, ref Score score)
     {
         if (--health.Value > 0) return;
         entity.Set(new Dead());
-        world.GetOrAddSingleton<Score>().Deaths++;
+        score.Deaths++; // singleton parameter: resolved once per pass (added if missing)
     }
 
     [ForEach]
