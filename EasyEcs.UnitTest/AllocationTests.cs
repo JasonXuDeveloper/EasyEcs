@@ -18,8 +18,6 @@ public class AllocationTests
 
         world.AddSystem<Movement>();
         world.AddSystem<Damage>();
-        world.AddSystem<Scoreboard>();
-        world.AddSystem<Cleanup>();
         var probe = world.CreateEntity(new Health(1));
 
         void Frame()
@@ -27,7 +25,6 @@ public class AllocationTests
             world.Update();
             foreach (var item in world.Query<Position, Velocity>()) item.Component1.X += item.Component2.X;
             _ = world.Count<Position, Velocity>(QueryFilter.Create());
-            probe.Set(new Died()); // notification: consumed and removed by the next Update
             probe.Get<Health>().Value++;
             probe.Remove<Frozen>();
             probe.Set(new Frozen()); // archetype transitions on cached edges

@@ -47,7 +47,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "System '{0}' references system '{1}' through '{2}'; communicate through components or singletons",
         Category, DiagnosticSeverity.Warning, true,
         "Systems that call each other are coupled: neither can be removed, reordered or tested alone. Write the data " +
-        "another system reads (a component, a short-lived notification component, or a singleton).");
+        "another system reads (a component or a singleton).");
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference);
