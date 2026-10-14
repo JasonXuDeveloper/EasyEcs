@@ -93,5 +93,7 @@ doc/                           ecs-principles.md, architecture.md, performance.m
 - Behavioral/breaking changes need a `MIGRATION_GUIDE.md` entry and a README "What's new" entry.
 - Commits: logic, docs and CI in separate commits. The author is the repository owner; the committer is the
   environment's signing identity so the signature shows as Verified. No session links in commit messages.
-- Releases are cut by a commit titled `release vX.Y.Z` on `master` (CI bumps `<Version>`, tags, pushes NuGet).
-  Do not create such commits unless asked.
+- Releases are cut manually by the owner: GitHub Actions -> Release -> Run workflow on `master` with a version. It
+  builds, tests, pushes the package to NuGet (secret `MYTOKEN`), commits the `<Version>` bump, tags `vX.Y.Z` and
+  creates the GitHub release with notes grouped from the commit subjects (no prefix = change; `bench:`, `docs:`,
+  `ci:`/`chore:`). Keep subjects meaningful: they are the release notes. Do not trigger releases unless asked.

@@ -1,6 +1,6 @@
 # EasyEcs
 
-![build](https://img.shields.io/github/actions/workflow/status/JasonXuDeveloper/EasyEcs/.github/workflows/dotnet.yml?branch=master)
+![build](https://img.shields.io/github/actions/workflow/status/JasonXuDeveloper/EasyEcs/.github/workflows/ci.yml?branch=master)
 ![license](https://img.shields.io/github/license/JasonXuDeveloper/EasyEcs)
 ![nuget](https://img.shields.io/nuget/v/EasyEcs)
 
