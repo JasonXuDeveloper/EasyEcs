@@ -17,15 +17,16 @@ Notation:
 |---|---|---|
 | `World` | sealed class, `IDisposable` | Owns entities, components, singletons, systems. |
 | `World.EntityEnumerator` | struct | Result of `world.Entities`: enumerates alive entities in id order, allocation-free. |
-| `WorldOptions` | sealed class | `Parallel`, `MaxDegreeOfParallelism`, `InitialEntityCapacity` (init-only). |
+| `WorldOptions` | sealed class | `Parallel`, `MaxDegreeOfParallelism`, `InitialEntityCapacity`, `MeasureSystems` (init-only). |
 | `Entity` | readonly struct | Handle: `Id`, `Version`, `World`; equality includes the version. |
 | `IComponent` | marker interface | Implemented by component structs. |
 | `ISingletonComponent` | marker interface | Implemented by singleton structs. |
-| `EcsSystem` | abstract class | `World`, `Priority`, `UpdateInterval`, `Enabled`; `OnCreate` / `OnUpdate` / `OnDestroy`. |
+| `EcsSystem` | abstract class | `World`, `Priority`, `UpdateInterval`, `Enabled`, `Stats`; `OnCreate` / `OnUpdate` / `OnDestroy`. |
+| `SystemStats` | readonly struct | `Runs`, `Last`, `Total`, `Average` of a system's runs; recorded with `WorldOptions.MeasureSystems`. |
 | `SystemAccess` | struct | What a system reads and writes (`Read<T>`, `Write<T>`, `ReadSingleton<T>`, `WriteSingleton<T>`, `RunsAlone`); generated from `[ForEach]` parameters, used by `Parallel` batching. |
-| `ForEachAttribute`, `WithAttribute<T>`, `WithoutAttribute<T>` | attributes | `[ForEach]` methods and their filters. |
+| `ForEachAttribute`, `WithAttribute<T>`, `WithoutAttribute<T>`, `WithAnyAttribute<T>` | attributes | `[ForEach]` methods and their filters. |
 | `ISystemGroup`, `UpdateInGroupAttribute<TGroup>` | marker / attribute | System groups. |
-| `QueryFilter` | readonly struct | `Create().With<T>().Without<U>()`. |
+| `QueryFilter` | readonly struct | `Create().With<T>().Without<U>().WithAny<V>().WithAny<W>()`. |
 | `IForEach<T1..Tn>` | interface | Struct job: `void Execute(int entityId, ref T1 c1, …)`. Optional static overrides: `ReadsId` (false skips loading ids, `entityId` is 0) and `Writes` (bit k - 1 for component k: what to carry over when the job moves its entity; default all). |
 | `IForEachEntity<T1..Tn>` | interface | Struct job receiving the handle: `void Execute(Entity entity, ref T1 c1, …)`. Optional static `Writes`, as for `IForEach`. |
 | `IForEachBatch<T1..Tn>` | interface | Struct job receiving runs of rows: `void Execute(Span<T1> c1, …)`; no structural changes. |
@@ -39,7 +40,9 @@ Notation:
 |---|---|---|
 | `world.CreateEntity()` | O(1) amortized | reuses recycled ids |
 | `world.CreateEntity(in T1 … in Tn)` | O(n) amortized | placed directly in its final table |
+| `world.CreateEntities(Span<Entity> entities, in T1 … in Tn)` | O(count × n) amortized | one gate pass and at most one table growth for the batch; writes the handles |
 | `entity.Destroy()` / `world.DestroyEntity(entity)` | O(c) | the table's last row fills the hole (a tombstone during a pass); recycles the id; stale handles are ignored |
+| `world.DestroyEntities<T1..Tn>(filter)` → `int` | O(M + S) | destroys every match in one gate pass and returns how many; safe during a pass |
 | `entity.IsAlive` | O(1) | |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` | O(1) | `GetEntity` throws if no entity is alive with that id |
 | `world.EntityCount` | O(1) | |
@@ -67,7 +70,7 @@ Notation:
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | `item.Entity`, `item.Component1..n` (refs) |
 | `world.Count<T1..Tn>(filter)` | O(M), + S / 64 for tables with rows lacking a queried component | sums table counts, or counts presence bits |
 | `world.Any<T1..Tn>(filter)` | O(M + S / 64) worst | early exit; S / 64 only for tables with rows lacking a queried component |
-| `QueryFilter.Create().With<T>().Without<U>()` | O(1) | build once and keep it in a `static readonly` field |
+| `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1) | build once and keep it in a `static readonly` field; `WithAny` calls form one "at least one of" group |
 
 The first time a query shape is used, building its cache entry costs O(all archetypes) under the structural gate.
 After that, each lookup is one hash probe. In turn, creating a new archetype (the first entity with a new component

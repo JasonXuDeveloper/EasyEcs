@@ -81,8 +81,8 @@ scheduler only puts non-conflicting systems together.
 |---|---|
 | `ref T` component / singleton | writes `T` |
 | `in T` component / singleton | reads `T` |
-| `[With<T>]` / `[Without<T>]` | nothing (filters read the archetype and presence bits, which no parallel system changes) |
-| `Entity` or `World`, an instance method, an `OnUpdate` override, or no `[ForEach]` method | runs alone |
+| `[With<T>]` / `[Without<T>]` / `[WithAny<T>]` | nothing (filters read the archetype and presence bits, which no parallel system changes) |
+| `Entity` or `World`, an instance method, an `OnUpdate` override, no `[ForEach]` method, or a subclass that adds no `[ForEach]` method of its own | runs alone |
 
 Two systems conflict when one writes a component or singleton the other reads or writes, or when either runs alone.
 A system "runs alone" when it can reach the world beyond its parameters: through an `Entity` it can read any

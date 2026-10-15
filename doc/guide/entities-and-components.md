@@ -16,6 +16,14 @@ bool alive = u.IsAlive;
 u.Destroy();                       // or world.DestroyEntity(u); a stale handle is ignored
 ```
 
+Waves of spawns and clean-ups have batch forms. Each takes the structural gate once for the whole batch:
+
+```csharp
+var wave = new Entity[500];
+world.CreateEntities(wave, new Position(0, 0), new Health(100));  // the same values for each; handles written to wave
+int cleared = world.DestroyEntities<Health>(QueryFilter.Create().With<Dead>());  // every dead entity with Health
+```
+
 - **Ids are recycled** (LIFO, so recently freed slots are still warm in cache). `Entity.Id` is unique only among
   live entities.
 - **Every access validates the version.** When an entity is destroyed its version is bumped, so every outstanding

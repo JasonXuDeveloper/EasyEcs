@@ -41,6 +41,9 @@ behaviors:
 - **`CompactArchetypes()`** is rarely needed: tables stay dense automatically (a removed row is filled at once, or
   when the last pass ends). It remains for recovering from a pass interrupted by an exception, which `Update` also
   does on its own.
+- **`Parallel` keeps subclasses it cannot see alone.** A system class that derives from a generated system without
+  adding `[ForEach]` methods of its own (for example to override `OnUpdate`) now runs alone in its priority, as its
+  `OnUpdate` may touch anything. Give the subclass a `[ForEach]` method (it is then generated) to batch it again.
 
 New:
 
@@ -50,6 +53,12 @@ New:
 - `world.ForEachEntity` with an `IForEachEntity<T1..Tn>` job receives the `Entity` handle instead of the id.
 - `INoStructuralChanges` marks a job that makes no structural change; the generator adds it to `[ForEach]` methods
   that cannot change structure, which then iterate without per-entity bookkeeping.
+- `QueryFilter.WithAny<T>()` and `[WithAny<T>]`: the entity needs at least one of the named components.
+- `world.CreateEntities(span, components…)` and `world.DestroyEntities<T…>(filter)` spawn and clear batches with one
+  pass through the structural gate.
+- `WorldOptions.MeasureSystems` times every system run into `system.Stats` (`SystemStats`).
+- The library is marked `IsAotCompatible`: trimming and Native AOT analyzers run on every build, and it publishes
+  with Native AOT without warnings.
 
 ## v3.x → v4.0
 

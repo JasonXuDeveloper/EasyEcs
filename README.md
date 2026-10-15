@@ -33,7 +33,7 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
   a pass; no command buffer to flush. Removing a status effect and adding it back flips a presence bit, the entity
   never moves. State can be tags, not flags.
 - **Write the logic, not the plumbing.** A `[ForEach]` method is the whole system; filters are attributes
-  (`[With<T>]`, `[Without<T>]`), singletons are parameters.
+  (`[With<T>]`, `[Without<T>]`, `[WithAny<T>]`), singletons are parameters.
 - **Mistakes fail the build.** The bundled analyzer (EECS001-EECS009) reports invalid systems, class components,
   stateful systems and systems that reference each other.
 - **Decoupled by construction.** Systems cooperate only through data, in `Priority` order; system groups give you
@@ -184,7 +184,7 @@ flowchart LR
 | Component | `struct : IComponent` | Plain per-entity data. An empty struct is a tag. |
 | Singleton | `struct : ISingletonComponent` | One value per world: clock, configuration, counters, indexes. |
 | System | `EcsSystem` | One responsibility: `OnUpdate` plus `[ForEach]` methods, run in `Priority` order. |
-| Query | `[ForEach]`, `ForEach`, `Query`, `Count`, `Any` | Entities that have a set of components, filtered with `With` / `Without`. |
+| Query | `[ForEach]`, `ForEach`, `Query`, `Count`, `Any` | Entities that have a set of components, filtered with `With` / `Without` / `WithAny`. |
 
 ## When to use it
 
@@ -247,6 +247,8 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
   (`world.ForEachBatch` for ad-hoc jobs); `world.ForEachEntity` passes the handle to struct jobs.
 - **Jobs that cannot change structure** (detected by the generator, or `INoStructuralChanges`) iterate with no
   per-entity bookkeeping; structural bookkeeping uses a compare-and-swap gate instead of a lock.
+- **New APIs:** `WithAny<T>` filters (`[WithAny<T>]` on `[ForEach]`), batch `CreateEntities` / `DestroyEntities`,
+  per-system timing (`WorldOptions.MeasureSystems`, `system.Stats`); Native AOT compatible.
 - A realistic 100k-entity server tick takes 2.29 ms instead of 4.33 ms; toggling a status component on 10,000
   entities 192 μs instead of 338 μs. Reading a component through a handle is about 20% slower (4.31 vs 3.56 μs per
   1,000 random handles): the entity's record leads to a table row instead of a column indexed by id.

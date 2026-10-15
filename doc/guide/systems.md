@@ -57,6 +57,7 @@ method, and the generator compiles it to a struct job with a static filter.
 | `[ForEach]` | run the method for every matching entity |
 | `[With<T>]` | the entity must have `T`, which is not passed in; repeatable. With no component parameter, the first `[With<T>]` is the queried component (`[ForEach, With<Dead>] static void Remove(Entity e)`) |
 | `[Without<T>]` | the entity must not have `T`; repeatable |
+| `[WithAny<T>]` | the entity must have at least one of the components named by the method's `[WithAny<T>]` attributes |
 
 ```csharp
 public record struct Burning(int Ticks, int DamagePerTick) : IComponent;
@@ -128,6 +129,20 @@ world.Update();               // fixed tick
 
 `Priority`, `UpdateInterval` and `Enabled` apply within each group, and the attribute is inherited. Updating a group
 with no systems is a no-op.
+
+## Measuring systems
+
+With `WorldOptions.MeasureSystems`, every run of a system (its `OnUpdate` plus its `[ForEach]` methods) is timed, and
+`system.Stats` holds `Runs`, `Last`, `Total` and `Average`. It costs two timestamp reads per system run and nothing
+when off. Read it between updates, for example from a diagnostics endpoint:
+
+```csharp
+var world = new World(new WorldOptions { MeasureSystems = true });
+world.AddSystem<BurnSystem>();
+world.Update();
+var burn = world.GetSystem<BurnSystem>().Stats;
+Console.WriteLine($"burn: {burn.Last.TotalMicroseconds} μs (average {burn.Average.TotalMicroseconds} μs)");
+```
 
 ## Errors
 

@@ -32,8 +32,9 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
   World.Systems.cs             system groups, priority order, parallel batches, synchronous Update / Update<TGroup>
   World.Parallel.cs            allocation-free batch runner (caller + reusable thread-pool work items)
   SystemAccess.cs              a system's read/write sets (generated from [ForEach] parameters) and the conflict rule
+  SystemStats.cs               per-system run counts and times (WorldOptions.MeasureSystems)
   World.Singletons.cs          per-world singletons (ref returns)
-  WorldOptions.cs              configuration
+  WorldOptions.cs              configuration (Parallel, MeasureSystems, capacities)
   Query.cs                     QueryFilter (With/Without), QueryKey (required/excluded), RowFilter (per-table mode:
                                skip / all rows / test presence bits), ArchetypeCursor (shared iteration core)
   TypeIndex.cs                 dense per-type index families (ComponentType bit, SingletonType slot, SystemGroup

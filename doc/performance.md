@@ -31,6 +31,8 @@
   no per-entity bookkeeping.
 - Write arithmetic over many rows as a batch method (`Span<T>` / `ReadOnlySpan<T>` parameters) and vectorize it:
   a table whose rows all match is one call, and unmanaged columns start on a 64-byte boundary.
+- Spawn and clear waves with `world.CreateEntities(span, a, b)` / `world.DestroyEntities<T>(filter)`: one pass
+  through the structural gate for the batch (2.3x faster than one call per entity in `ChurnBatch`).
 - Pre-size with `WorldOptions.InitialEntityCapacity` to avoid growing the entity records at run time.
 - Use tag components (empty structs) for states (`Dead`, `Stunned`, `Burning`) and filter on them: removing a tag and
   adding it back flips a presence bit, the entity keeps its row.
@@ -110,6 +112,7 @@ the operation has no v3.1.1 equivalent (struct jobs, `[ForEach]` systems and han
 |---|---:|---:|---:|---:|
 | CreateAddDestroy (fresh world) | 5,358 μs | 1,795 μs | 1,396 μs | 1.52 MB (new world, its growth and the benchmark's handle array) |
 | Churn: 10 rounds of create (2 components) and destroy in one world | 5,247 μs / 3.19 MB | 1,023 μs | 445 μs | 82 KB (steady state reached in round 1) |
+| ChurnBatch: the same rounds with `CreateEntities` / `DestroyEntities` | – | – | 184 μs | 65 KB |
 | ToggleComponent: remove + add | 1,185 μs | 338 μs | 192 μs | 0 B |
 | QueryIterate (`Query<P,V>` + reduction) | 40.6 μs | 35.3 μs | 31.1 μs | 0 B |
 | ForEachIterate (`ForEach` struct job + reduction) | – | 30.6 μs | 30.0 μs | 0 B |

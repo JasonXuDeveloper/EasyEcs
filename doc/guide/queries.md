@@ -18,16 +18,18 @@ allocation-free.
 
 ## Filters
 
-`QueryFilter` adds required components that are not passed in (`With<T>`) and excluded components (`Without<T>`).
+`QueryFilter` adds required components that are not passed in (`With<T>`), excluded components (`Without<T>`), and
+a group of components of which the entity needs at least one (`WithAny<T>`, repeated for each member of the group).
 Build each filter once and keep it in a `static readonly` field (the generator does this for `[ForEach]`):
 
 ```csharp
 // A field of your class: build each filter once.
 private static readonly QueryFilter Active = QueryFilter.Create().Without<Frozen>().Without<Dead>();
+private static readonly QueryFilter Impaired = QueryFilter.Create().WithAny<Frozen>().WithAny<Stunned>();  // either one
 ```
 
-In a `[ForEach]` method the same filters are attributes: `[ForEach, With<Player>, Without<Dead>]`. Both can be
-repeated.
+In a `[ForEach]` method the same filters are attributes: `[ForEach, With<Player>, Without<Dead>]`,
+`[ForEach, WithAny<Frozen>, WithAny<Stunned>]`. All can be repeated.
 
 ## `Query`: a foreach loop
 
