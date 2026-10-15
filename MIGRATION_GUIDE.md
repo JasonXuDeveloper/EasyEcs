@@ -1,5 +1,12 @@
 # Migration Guide: EasyECS v3.x → v4.0
 
+## v4.0 → v4.1
+
+No API is removed. One behavioral change: with `WorldOptions.SortArchetypesOnUpdate` (default `true`), `Update`
+re-sorts archetypes whose id order degraded, so **do not call `Update` while a query of the same world is
+iterating** (it was never meaningful; now it can reorder the archetype under the iterator). Set the option to
+`false` to keep v4.0 ordering. Manual `CompactArchetypes()` calls after churn are no longer needed.
+
 **Contents**
 
 - v3.x → v4.0: [Namespaces](#namespaces) · [Entities and components](#entities-and-components) ·

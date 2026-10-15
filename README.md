@@ -198,11 +198,11 @@ not a toy loop ([what it simulates](https://github.com/JasonXuDeveloper/EasyEcs/
 
 | Benchmark | Entities | Mean | Allocated |
 |---|---:|---:|---:|
-| WorldSimulation.Tick | 10,000 | 322 μs | 0 B |
-| WorldSimulation.Tick | 100,000 | 4.33 ms | 0 B |
-| MultiWorld.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.85 ms | 0 B |
+| WorldSimulation.Tick | 10,000 | 252 μs | 0 B |
+| WorldSimulation.Tick | 100,000 | 3.01 ms | 0 B |
+| MultiWorld.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.27 ms | 0 B |
 
-A `[ForEach]` system writing two components over 10,000 entities takes 15.1 μs, against 11.0 μs for two plain arrays
+A `[ForEach]` system writing two components over 10,000 entities takes 15.2 μs, against 10.6 μs for two plain arrays
 with no ECS at all. Micro benchmarks and the v3 comparison are in [doc/performance.md](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md).
 
 ```bash
@@ -222,6 +222,15 @@ dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*'
 | [Migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md) | Upgrading from v3 (and from v2). |
 
 The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/README.md) suggests a reading order.
+
+## What's new in 4.1
+
+- Structural changes are cheaper: `CreateEntity(a, b, ...)`, `Set(a, b, ...)` and `Remove<A, B>()` follow cached
+  per-archetype edges (no mask clone or dictionary lookup), and `Destroy` clears only columns holding references.
+- Archetypes keep themselves sorted: `Update` re-sorts the archetypes that churn disordered (bitmap sort, 0 B), so
+  iteration walks columns forward without calling `CompactArchetypes()`. `WorldOptions.SortArchetypesOnUpdate`
+  (default on) turns it off.
+- A realistic 100k-entity server tick went from 4.21 ms to 3.01 ms on the same machine; churn from 986 μs to 617 μs.
 
 ## What's new in 4.0
 

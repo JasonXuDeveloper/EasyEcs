@@ -16,7 +16,7 @@ Notation:
 | Type | Kind | Purpose |
 |---|---|---|
 | `World` | sealed class, `IDisposable` | Owns entities, components, singletons, systems. |
-| `WorldOptions` | sealed class | `Parallel`, `MaxDegreeOfParallelism`, `InitialEntityCapacity` (init-only). |
+| `WorldOptions` | sealed class | `Parallel`, `MaxDegreeOfParallelism`, `InitialEntityCapacity`, `SortArchetypesOnUpdate` (init-only). |
 | `Entity` | readonly struct | Handle: `Id`, `Version`, `World`; equality includes the version. |
 | `IComponent` | marker interface | Implemented by component structs. |
 | `ISingletonComponent` | marker interface | Implemented by singleton structs. |
@@ -76,7 +76,7 @@ one hash probe.
 | `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` → `ref T` | O(1) |
 | `world.SingletonRef<T>()` → `SingletonRef<T>` (stable handle, `.Value` is `ref T`; adds if missing) | O(1) |
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) |
-| `world.CompactArchetypes()` | O(S log S) |
+| `world.CompactArchetypes()` | O(alive + id range / 64) per archetype (bitmap sort) |
 | `world.GetFragmentationStats()` → `(TotalSlots, AliveEntities, FragmentationRatio)` | O(archetypes) |
 
 Other `World` members:

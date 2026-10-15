@@ -41,8 +41,11 @@ flowchart TB
   is created (never on the iteration or add/remove path after warm-up).
 
 Trade-off: iteration reads archetype ids and then gathers from each column. That is not as dense as chunked SoA
-storage, but structural changes are much cheaper. `CompactArchetypes()` removes tombstones and **sorts ids
-ascending**, so after compaction the gathers walk each column forward, which hardware prefetchers handle well.
+storage, but structural changes are much cheaper. Ids are kept **ascending**: each archetype counts insertions that
+break the order, and `Update` re-sorts the archetypes where that count plus tombstones exceeds 1/8 of the alive
+entities (+64) with a bitmap sort (O(alive + id range / 64), scratch pre-allocated, 0 B). The gathers therefore walk
+each column forward, which hardware prefetchers handle well, without paying a full sort every tick.
+`CompactArchetypes()` does the same for every archetype at once.
 
 ## Memory layout at a glance
 
@@ -65,8 +68,10 @@ flowchart TB
   touches one 16-byte record and one shared, hot archetype.
 - Archetypes hold entity ids, not component data. Adding or removing a component moves an *id*; component data never
   moves.
-- Columns are indexed by entity id. `CompactArchetypes()` removes tombstones and sorts ids, which turns iteration
-  into a forward, prefetch-friendly walk. Call it between updates after heavy churn.
+- Columns are indexed by entity id. Archetypes whose order churn degraded are re-sorted at the start of `Update`,
+  which keeps iteration a forward, prefetch-friendly walk (`WorldOptions.SortArchetypesOnUpdate`).
+- `CreateEntity(a, b, ...)`, `Set(a, b, ...)` and `Remove<A, B>()` follow edges cached per archetype and keyed by the
+  generic signature, so a repeated multi-component change is one array lookup.
 - Columns whose type contains managed references are cleared on remove and destroy, so the GC can collect what they
   pointed to. Unmanaged columns are not cleared: `Add` and `Set` overwrite them anyway.
 
