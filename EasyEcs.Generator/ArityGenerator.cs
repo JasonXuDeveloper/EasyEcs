@@ -35,7 +35,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
     private static string Structural()
     {
         var entity = new StringBuilder(Header).Append(
-            "using System;\n\nnamespace EasyEcs;\n\npublic readonly partial struct Entity\n{\n");
+            "using System;\nusing System.Runtime.CompilerServices;\n\nnamespace EasyEcs;\n\npublic readonly partial struct Entity\n{\n");
         var world = new StringBuilder("public sealed partial class World\n{\n");
 
         for (int n = 1; n <= MaxArity; n++)
@@ -52,6 +52,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// Add or overwrite {{what}} with the given value{{(n == 1 ? "" : "s")}} in one archetype transition. Returns the entity
                     /// for chaining. O({{n}}) amortized. Thread-safe.
                     /// </summary>
+                    [MethodImpl(MethodImplOptions.NoInlining)] // keeps the loops that call it lean
                     public Entity Set<{{tps}}>({{values}})
                 {{cons}}
                     {
@@ -70,6 +71,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// <summary>
                     /// Remove {{what}} in one archetype transition; missing components are ignored. O({{n}}). Thread-safe.
                     /// </summary>
+                    [MethodImpl(MethodImplOptions.NoInlining)] // keeps the loops that call it lean
                     public void Remove<{{tps}}>()
                 {{cons}}
                     {
@@ -90,6 +92,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// Create an entity with {{what}} placed directly in its final archetype (no intermediate moves).
                     /// O({{n}}) amortized. Thread-safe.
                     /// </summary>
+                    [MethodImpl(MethodImplOptions.NoInlining)] // keeps the loops that call it lean
                     public Entity CreateEntity<{{tps}}>({{values}})
                 {{cons}}
                     {

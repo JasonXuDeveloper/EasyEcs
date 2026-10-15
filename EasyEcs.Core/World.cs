@@ -47,6 +47,7 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>Create an entity without components. O(1) amortized. Thread-safe.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
     public Entity CreateEntity()
     {
         lock (StructuralLock)
@@ -60,6 +61,7 @@ public sealed partial class World : IDisposable
     // CreateEntity(in T1..Tn) is generated (World.Structural.g.cs): one archetype placement, no intermediate moves.
 
     /// <summary>Destroy <paramref name="entity"/>; a stale or foreign handle is ignored. O(components). Thread-safe.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
     public void DestroyEntity(Entity entity)
     {
         if (!ReferenceEquals(entity.World, this)) return;

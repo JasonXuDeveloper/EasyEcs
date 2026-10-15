@@ -143,6 +143,7 @@ public sealed partial class World
     /// Archetypes containing all <paramref name="bits"/> and matching <paramref name="filter"/>.
     /// Lock-free on cache hits; the returned array is an immutable snapshot.
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)] // once per pass: keeps dictionary and lock code out of the iteration loops
     internal Archetype[] GetMatchingArchetypes(ReadOnlySpan<ushort> bits, in QueryFilter filter)
     {
         var key = QueryKey.ForLookup(bits, in filter);

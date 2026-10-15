@@ -65,6 +65,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     }
 
     /// <summary>Add component <typeparamref name="T"/> (reset to default if present) and return a ref to it. O(1) amortized.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
     public ref T Add<T>() where T : struct, IComponent
     {
         var world = _world;
