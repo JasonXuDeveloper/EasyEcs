@@ -9,7 +9,9 @@ counters, a spatial index. It is where world-level state goes, since systems are
 
 ```csharp
 public record struct Clock(long Tick) : ISingletonComponent;
+```
 
+```csharp
 world.AddSingleton<Clock>();                      // add (or reset), returns ref T
 world.GetSingleton<Clock>().Tick++;               // ref T; throws if it was not added
 ref var c = ref world.GetOrAddSingleton<Clock>(); // adds with default if missing
@@ -26,12 +28,15 @@ missing), not once per entity:
 ```csharp
 public record struct Score(int Deaths) : ISingletonComponent;
 
-[ForEach, Without<Dead>]
-static void Die(Entity e, in Health hp, ref Score score)
+public partial class DeathSystem : EcsSystem
 {
-    if (hp.Value > 0) return;
-    e.Set(new Dead());
-    score.Deaths++;
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health hp, ref Score score)   // resolved once per pass
+    {
+        if (hp.Value > 0) return;
+        unit.Set(new Dead());
+        score.Deaths++;
+    }
 }
 ```
 

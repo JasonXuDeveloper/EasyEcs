@@ -57,17 +57,17 @@ method, and the generator compiles it to a struct job with a static filter.
 | `[Without<T>]` | the entity must not have `T`; repeatable |
 
 ```csharp
-public record struct Burning(int DamagePerTick) : IComponent;
+public record struct Burning(int Ticks, int DamagePerTick) : IComponent;
 public struct Player : IComponent;      // tag
-public record struct Score(int Points) : ISingletonComponent;
+public record struct Stats(int BurnDamage) : ISingletonComponent;
 
 public partial class BurnSystem : EcsSystem
 {
-    [ForEach, With<Player>, Without<Dead>]
-    static void Burn(ref Health hp, in Burning burning, ref Score score)   // two components + a singleton
+    [ForEach, With<Player>, Without<Dead>]   // players only (Player is not passed in), living only
+    static void Burn(ref Health hp, in Burning burning, ref Stats stats)   // two components + a singleton
     {
         hp.Value -= burning.DamagePerTick;
-        score.Points += burning.DamagePerTick;
+        stats.BurnDamage += burning.DamagePerTick;
     }
 }
 ```
@@ -89,8 +89,10 @@ server can run input handling on every wake-up and the simulation at a fixed tic
 public struct InputGroup : ISystemGroup;
 
 [UpdateInGroup<InputGroup>]
-public partial class ApplyInputSystem : EcsSystem { /* ... */ }
+public partial class ApplyInputSystem : EcsSystem { /* [ForEach] methods */ }
+```
 
+```csharp
 world.Update<InputGroup>();   // whenever input arrives
 world.Update();               // fixed tick
 ```

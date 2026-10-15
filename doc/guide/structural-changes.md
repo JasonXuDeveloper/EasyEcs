@@ -19,8 +19,14 @@ Make such methods idempotent with a filter that excludes what the method produce
 immediate-mode ECS:
 
 ```csharp
-[ForEach, Without<Dead>]   // the job adds Dead, so it skips entities that already have it
-static void CheckDeath(Entity e, in Health h) { if (h.Value <= 0) e.Set(new Dead()); }
+public partial class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]   // the job adds Dead, so it skips entities that already have it
+    static void Die(Entity unit, in Health hp)
+    {
+        if (hp.Value <= 0) unit.Set(new Dead());
+    }
+}
 ```
 
 Other rules:

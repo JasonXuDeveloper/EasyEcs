@@ -7,8 +7,8 @@ Components are structs stored in arrays. Always mutate them through a `ref`; cha
 storage.
 
 ```csharp
-var hp = entity.Get<Health>();        // ❌ a copy: the change below is lost
-hp.Value -= 10;
+var copy = entity.Get<Health>();       // ❌ a copy: the change below is lost
+copy.Value -= 10;
 
 ref var hp = ref entity.Get<Health>(); // ✅ a ref into storage
 hp.Value -= 10;
@@ -27,12 +27,12 @@ old `ref` then silently points at the stale copy. That is why `ref` and `await` 
   if the entity was destroyed.
 
 ```csharp
-async ValueTask SaveAsync(Entity player)
+async ValueTask HealFromStoreAsync(Entity player, IShop shop)
 {
-    int hp = player.Get<Health>().Value;           // read what you need before awaiting
-    await database.SaveAsync(hp);                  // the world may change meanwhile
+    long id = player.Get<Account>().Id;            // read what you need before awaiting
+    int heal = await shop.RedeemPotionAsync(id);   // the world may change meanwhile
     if (player.IsAlive && player.Has<Health>())    // re-validate after the await
-        player.Get<Health>().Value = hp;           // a fresh ref into current storage
+        player.Get<Health>().Value += heal;        // a fresh ref into current storage
 }
 ```
 

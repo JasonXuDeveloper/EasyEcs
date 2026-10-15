@@ -34,52 +34,68 @@ the schedule, in the order `Priority` declares.
 
 | Element | Is | Is not |
 |---|---|---|
-| **Entity** | An identity (id + version). | A container of logic, a base class, a place for fields. |
+| **Entity** | An identity (id + version), held as a handle. | A container of logic, a base class, a place for fields. |
 | **Component** | A struct of fields for one aspect of one entity (`Health`, `Velocity`). Computed getters are fine. | A class, an object with behavior, a holder of references to systems or services. |
 | **Tag** | An empty component (`Dead`, `Frozen`) used as a query filter. | A boolean you flip every tick (use a field instead). |
 | **Singleton** | One struct per world: clock, configuration, counters, spatial indexes. | A static field (it would be shared by every world). |
-| **System** | Behavior with one responsibility. Reads and writes data. | A place to keep state, or a service other systems call. |
-
-## Summary
-
-| Element | Role | Rule |
-|---|---|---|
-| `Entity` | identity | An id. No data, no behavior. Hold it as a handle and never keep a `ref` into its storage. |
-| Component | per-entity data | A struct with fields only (computed getters are fine). No logic and no references to systems. |
-| Singleton | per-world data | Clock, configuration, counters, indexes: anything with one value per world. |
-| System | behavior, one responsibility | Stateless, reads and writes components and singletons, never references another system. |
-
-Splitting costs nothing (each `[ForEach]` is a separate inlined job either way), so when in doubt, split. Readonly
-fields for dependencies or reusable scratch buffers are fine on a system (EECS007 allows them).
+| **System** | Behavior with one responsibility. Reads and writes components and singletons. | A place to keep state, or a service other systems call. |
 
 ## Rules and how to follow them
+
+The examples share these components:
+
+```csharp
+public record struct Position(float X, float Y) : IComponent;
+public record struct Health(int Value) : IComponent;
+public record struct Burning(int Ticks, int DamagePerTick) : IComponent;   // a status effect
+public struct Dead : IComponent;                                           // a tag
+```
 
 ### 1. One system, one responsibility
 
 Name a system after the one thing it does. If its description needs "and", split it.
 
 ```csharp
-// Before: status effects AND death AND rewards in one system.
+// Before: burning AND death in one system. Death is only noticed for burning units:
+// a unit killed by anything else is never marked Dead.
 public partial class StatusSystem : EcsSystem
 {
-    [ForEach] static void Burn(Entity e, ref Burning b, ref Health h) { ... }
-    [ForEach] static void CheckDeath(Entity e, ref Health h, World w) { ... }
+    [ForEach, Without<Dead>]
+    static void Tick(Entity unit, ref Burning burning, ref Health hp)
+    {
+        hp.Value -= burning.DamagePerTick;
+        if (--burning.Ticks == 0) unit.Remove<Burning>();
+        if (hp.Value <= 0) unit.Set(new Dead());
+    }
 }
+```
 
-// After: each concern can be removed, reordered or tested on its own.
-public partial class StatusSystem : EcsSystem
+```csharp
+// After: each concern can be removed, reordered or tested on its own, and death covers every damage source.
+public partial class BurnSystem : EcsSystem
 {
-    [ForEach] static void Burn(Entity e, ref Burning b, ref Health h) { ... }
+    [ForEach, Without<Dead>]
+    static void Burn(Entity unit, ref Burning burning, ref Health hp)
+    {
+        hp.Value -= burning.DamagePerTick;
+        if (--burning.Ticks == 0) unit.Remove<Burning>();
+    }
 }
 
 public partial class DeathSystem : EcsSystem
 {
-    [ForEach, Without<Dead>] static void CheckDeath(Entity e, in Health h, World w) { ... }
+    public override int Priority => 10;   // after every system that deals damage
+
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health hp)   // `in`: it only reads Health
+    {
+        if (hp.Value <= 0) unit.Set(new Dead());
+    }
 }
 ```
 
 Splitting costs nothing at run time: every `[ForEach]` method is its own inlined struct job either way, and the
-per-system overhead of `Update` is a virtual call.
+per-system overhead of `Update` is a virtual call. When in doubt, split.
 
 ### 2. Systems are stateless
 
@@ -93,29 +109,38 @@ doubles when the system is removed or added twice. Put it in data:
 | Derived and rebuildable (scratch list reused every update) | a `readonly` field on the system is fine |
 
 ```csharp
-// Before (EECS007): the count lives in the system.
+// Before (EECS007): the count lives in the system, where no query, test or other system can see it.
 public partial class DeathSystem : EcsSystem
 {
     public int Deaths;
 
     [ForEach, Without<Dead>]
-    void Die(Entity e, in Health h) { if (h.Value <= 0) { e.Set(new Dead()); Deaths++; } }
+    void Die(Entity unit, in Health hp)
+    {
+        if (hp.Value > 0) return;
+        unit.Set(new Dead());
+        Deaths++;
+    }
 }
+```
 
-// After: the count is world state; anyone can read it.
+```csharp
+// After: the count is world state; anyone can read it (world.GetSingleton<Score>().Deaths).
 public record struct Score(int Deaths) : ISingletonComponent;
 
 public partial class DeathSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
-    static void Die(Entity e, in Health h, ref Score score)
+    static void Die(Entity unit, in Health hp, ref Score score)   // a singleton parameter
     {
-        if (h.Value > 0) return;
-        e.Set(new Dead());
+        if (hp.Value > 0) return;
+        unit.Set(new Dead());
         score.Deaths++;
     }
 }
 ```
+
+Readonly fields for dependencies or reusable scratch buffers are fine on a system (EECS007 allows them).
 
 ### 3. Systems never reference systems
 
@@ -123,8 +148,19 @@ A system that calls another system (EECS008), or reaches it through `World.GetSy
 removed, reordered or tested alone. Cooperate through data instead:
 
 - **Pipeline:** an earlier system writes a component, a later one reads it. Order them with `Priority`.
-- **Reacting to a state:** a system queries the state another one wrote (`[ForEach] ... in Dead _`); the writer does
-  not change when a reader is added (rule 4).
+- **Reacting to a state:** a system queries the state another one wrote; the writer does not change when a reader is
+  added (rule 4).
+
+```csharp
+// Reacts to Dead; DeathSystem does not know it exists.
+public partial class CorpseSystem : EcsSystem
+{
+    public override int Priority => 20;   // after DeathSystem
+
+    [ForEach]
+    static void Remove(Entity unit, in Dead _) => unit.Destroy();
+}
+```
 
 ```mermaid
 flowchart LR
@@ -138,7 +174,7 @@ flowchart LR
 
 When something happens to an entity, write its new state: set a tag (`Dead`) or a field. Systems that care query
 that state later in the update, in the order `Priority` declares: movement and combat skip `Dead` entities,
-`CorpseSystem` removes them, `RespawnSystem` revives players. None of them is known to `DeathSystem`.
+`CorpseSystem` removes them, a `RespawnSystem` could revive players. None of them is known to `DeathSystem`.
 
 ### 5. Choose the cheapest representation for frequent changes
 
@@ -147,8 +183,24 @@ components. That is fine for changes that happen every few ticks (a buff starts 
 every tick, a field is cheaper:
 
 - a countdown field (`Burning.Ticks`) instead of re-adding a component every tick;
-- change detection by comparison: keep the last sent value in a component (`NetSync`) and compare it to the
-  current value, instead of adding and removing a `Changed` tag.
+- change detection by comparison: keep the last sent value in a component and compare it to the current value,
+  instead of adding and removing a `Changed` tag.
+
+```csharp
+public record struct NetSync(Position Sent) : IComponent;          // what clients last heard
+public record struct Outbox(int Updates) : ISingletonComponent;
+
+public partial class SyncSystem : EcsSystem
+{
+    [ForEach]
+    static void Sync(in Position position, ref NetSync sync, ref Outbox outbox)
+    {
+        if (position == sync.Sent) return;   // unchanged: nothing to send, no structural change
+        sync = new NetSync(position);
+        outbox.Updates++;                    // a real server queues the update here
+    }
+}
+```
 
 ### 6. Keep jobs idempotent within an update
 
@@ -156,13 +208,19 @@ Changes are immediate. An entity that a `[ForEach]` job moves into another arche
 visited again in the same pass. Filter out what the job produces:
 
 ```csharp
-[ForEach, Without<Dead>]   // the job adds Dead, so it skips entities that already have it
-static void CheckDeath(Entity e, in Health h) { if (h.Value <= 0) e.Set(new Dead()); }
+public partial class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]   // the job adds Dead, so it skips entities that already have it
+    static void Die(Entity unit, in Health hp)
+    {
+        if (hp.Value <= 0) unit.Set(new Dead());
+    }
+}
 ```
 
 The full rules are in [Structural changes during iteration](guide/structural-changes.md).
 
-### 7. Never hold `ref`s or handles to storage across boundaries
+### 7. Keep entity handles, never `ref`s, across boundaries
 
 A `ref` from `Get<T>()` or a `[ForEach]` parameter is valid until the next structural change of that entity and
 never across `await`. Keep `Entity` handles (validated on every access) and re-read components when you need them.

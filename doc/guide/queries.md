@@ -22,6 +22,7 @@ allocation-free.
 Build each filter once and keep it in a `static readonly` field (the generator does this for `[ForEach]`):
 
 ```csharp
+// A field of your class: build each filter once.
 private static readonly QueryFilter Active = QueryFilter.Create().Without<Frozen>().Without<Dead>();
 ```
 
@@ -47,7 +48,7 @@ A struct implementing `IForEach<T1..Tn>` is specialized and inlined by the JIT: 
 `Execute` small and branch-light.
 
 ```csharp
-private struct Integrate : IForEach<Position, Velocity>
+public struct Integrate : IForEach<Position, Velocity>
 {
     public void Execute(int entityId, ref Position p, ref Velocity v)
     {
@@ -55,7 +56,9 @@ private struct Integrate : IForEach<Position, Velocity>
         p.Y += v.Y;
     }
 }
+```
 
+```csharp
 var job = new Integrate();
 world.ForEach<Position, Velocity, Integrate>(ref job, Active);
 ```

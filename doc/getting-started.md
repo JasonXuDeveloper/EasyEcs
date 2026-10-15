@@ -108,10 +108,11 @@ A `ref` is valid only until the next structural change and never across an `awai
 For ad-hoc code (tools, tests, one-off passes), iterate with `Query`, or ask `Count` / `Any`:
 
 ```csharp
-// A field: build each filter once.
+// A field of your class: build each filter once.
 private static readonly QueryFilter Alive = QueryFilter.Create().Without<Dead>();
+```
 
-// In a method:
+```csharp
 foreach (var item in world.Query<Position, Velocity>(Alive))
 {
     ref var p = ref item.Component1;
@@ -137,7 +138,9 @@ public partial class MovementSystem : EcsSystem
     [ForEach, Without<Dead>]
     static void Move(ref Position p, in Velocity v) => p = p with { X = p.X + v.X, Y = p.Y + v.Y };
 }
+```
 
+```csharp
 world.AddSystem<MovementSystem>();
 ```
 
@@ -234,8 +237,10 @@ otherwise they propagate.
 public struct InputGroup : ISystemGroup;
 
 [UpdateInGroup<InputGroup>]
-public partial class ApplyInputSystem : EcsSystem { /* ... */ }
+public partial class ApplyInputSystem : EcsSystem { /* [ForEach] methods */ }
+```
 
+```csharp
 world.Update<InputGroup>();   // whenever input arrives
 world.Update();               // fixed tick
 ```
