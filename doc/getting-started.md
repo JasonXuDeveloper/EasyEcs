@@ -39,7 +39,7 @@ Everything lives in one namespace: `using EasyEcs;`.
 ## 2. Create a world
 
 A `World` owns entities, component storage, singletons and systems. Worlds are fully isolated; on a server, the
-recommended layout is one world per shard (thread).
+recommended layout is one world per thread (for example one per map or zone).
 
 ```csharp
 using var world = new World(new WorldOptions { InitialEntityCapacity = 10_000 });

@@ -32,7 +32,7 @@
   cached transition edges.
 - Keep `QueryFilter`s in `static readonly` fields (the generator does this for `[ForEach]`).
 - Make `[ForEach]` methods that change the entity's archetype idempotent with filters (`Without<Dead>`).
-- One world per thread/shard on servers.
+- One world per thread on servers (for example one per map or zone).
 
 ## Don't
 
@@ -58,7 +58,7 @@ All numbers come from BenchmarkDotNet. The headline benchmarks simulate a real s
   - projectile spawn (about 5% of players per tick) and expiry
 
   Setup asserts that the world is busy: hits, deaths, spawns and AOI changes all happen.
-- **`ShardedWorldBenchmark.TickAllShards`** runs one world per core, each on its own long-lived thread. This is the
+- **`MultiWorldBenchmark.TickAllWorlds`** runs one world per core, each on its own long-lived thread. This is the
   recommended server layout.
 - **`MicroBenchmarks`** isolate single operations for diagnosis. `RawArrayWrite` is the no-ECS floor.
 
@@ -70,7 +70,7 @@ Measured with BenchmarkDotNet's default job on .NET 10, on a 4-core Xeon VM at 2
 |---|---:|---:|---:|
 | WorldSimulation.Tick | 10,000 | 322 μs | 0 B |
 | WorldSimulation.Tick | 100,000 | 4.33 ms | 0 B |
-| ShardedWorld.TickAllShards (4 worlds × 25k) | 100,000 | 1.85 ms | 0 B |
+| MultiWorld.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.85 ms | 0 B |
 
 **Micro benchmarks** (N = 10,000; the v3.1.1 column is BenchmarkDotNet ShortRun on the same machine). "–" means
 the operation has no v3.1.1 equivalent (struct jobs, `[ForEach]` systems and handles are new in v4). Every
@@ -101,6 +101,6 @@ dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*World*'         
 dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*' --job short   # everything, quick
 ```
 
-`WorldSimulationBenchmark` / `ShardedWorldBenchmark` model a busy MMO-style world and must stay at 0 B allocated per
+`WorldSimulationBenchmark` / `MultiWorldBenchmark` model a busy MMO-style world and must stay at 0 B allocated per
 tick. `MicroBenchmarks.RawArrayWrite` is the no-ECS floor. `AllocationTests` (unit tests) guard the zero-allocation
 contract on every test run.

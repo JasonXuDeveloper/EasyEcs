@@ -13,7 +13,7 @@ catches design mistakes at compile time, and a full server tick allocates 0 byte
 | One server tick, 9 systems: movement, AOI, combat, status effects, death, respawn, projectiles | Entities | Time | Allocated |
 |---|---:|---:|---:|
 | One world | 100,000 | **4.33 ms** | **0 B** |
-| Four worlds on four threads (one per shard) | 100,000 | **1.85 ms** | **0 B** |
+| Four worlds on four threads (one per thread) | 100,000 | **1.85 ms** | **0 B** |
 
 <sub>BenchmarkDotNet, .NET 10, 4-core Xeon VM at 2.1 GHz; entities spawn, die, gain and lose components every tick.
 A `[ForEach]` pass costs 1.5 ns per entity, within 1.4x of two plain arrays.
@@ -37,7 +37,7 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
 - **Decoupled by construction.** Systems cooperate only through data, in `Priority` order; system groups give you
   separate cadences (input on every wake, simulation on a fixed tick).
 - **Built for servers that run for months.** Ids are recycled behind version-checked handles, memory is bounded by
-  the peak entity count, structural changes are thread-safe, one world per shard scales across cores.
+  the peak entity count, structural changes are thread-safe, one world per thread scales across cores.
 
 ## Example: a battle server
 
@@ -186,7 +186,7 @@ flowchart LR
 
 | Good fit | Probably not |
 |---|---|
-| Game servers and simulations on .NET 10: shards, MMO maps, AOI, combat | Unity or other runtimes below .NET 10 (`net10.0` only) |
+| Game servers and simulations on .NET 10: MMO maps and zones, AOI, combat | Unity or other runtimes below .NET 10 (`net10.0` only) |
 | Worlds where state flips constantly (buffs, deaths, spawns): structural changes are O(1) | Pure number crunching that never changes structure and needs chunked SoA density |
 | Long-running processes where GC pauses and unbounded growth matter | Code that wants objects with behavior, or systems calling each other |
 | One world per thread, many worlds per process; `Parallel` for heavy independent systems | Many threads mutating one world's component values without coordination |
@@ -200,7 +200,7 @@ not a toy loop ([what it simulates](https://github.com/JasonXuDeveloper/EasyEcs/
 |---|---:|---:|---:|
 | WorldSimulation.Tick | 10,000 | 322 μs | 0 B |
 | WorldSimulation.Tick | 100,000 | 4.33 ms | 0 B |
-| ShardedWorld.TickAllShards (4 worlds × 25k) | 100,000 | 1.85 ms | 0 B |
+| MultiWorld.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.85 ms | 0 B |
 
 A `[ForEach]` system writing two components over 10,000 entities takes 15.1 μs, against 11.0 μs for two plain arrays
 with no ECS at all. Micro benchmarks and the v3 comparison are in [doc/performance.md](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md).

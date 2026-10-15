@@ -12,7 +12,7 @@
 
 ```mermaid
 flowchart TB
-    subgraph "World (one per shard/thread)"
+    subgraph "World (one per owner thread)"
         Meta["Meta[id] : EntityMeta (16 B)<br/>Archetype · Version · Slot"]
         Cols["Components[bit] : T[] per component type<br/>indexed by entity id"]
         Arch["Archetypes: mask → Archetype<br/>EntityIds (tombstones + free slots)<br/>add/remove edges"]
@@ -159,7 +159,7 @@ Every world uses the same indices, so masks are comparable across worlds.
 
 - Structural operations, system changes and singleton creation take the world's `System.Threading.Lock`.
 - Queries, `Get` and `Has` are lock-free.
-- Component values are unsynchronized by design. The recommended layout is **one world per shard, owned by one
+- Component values are unsynchronized by design. The recommended layout is **one world per owner
   thread**, where the lock is always uncontended. User-facing rules: [Threading](guide/threading.md).
 - `WorldOptions.Parallel`: every system carries a `SystemAccess` (component and singleton read/write bitsets, or
   "runs alone"), generated from its `[ForEach]` parameters and read once by `AddSystem`. The schedule splits each

@@ -29,7 +29,7 @@ One page per concept, in a sensible reading order:
 | [Singletons](guide/singletons.md) | Per-world state, singleton parameters, `SingletonRef<T>`. |
 | [Structural changes during iteration](guide/structural-changes.md) | What happens when you add, remove, create or destroy while iterating. |
 | [`ref` and `await`](guide/refs-and-await.md) | Mutating through refs, and why refs never cross an `await`. |
-| [Threading](guide/threading.md) | One world per shard, what is locked, `WorldOptions.Parallel`. |
+| [Threading](guide/threading.md) | Process, world and owner thread; system order; safe `WorldOptions.Parallel`; what is locked. |
 | [Analyzer rules](guide/analyzer.md) | EECS001-EECS008: meaning and fix. |
 
 ## Reference

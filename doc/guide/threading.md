@@ -3,53 +3,53 @@
 [Docs index](../README.md) · Related: [Architecture: threading](../architecture.md#threading) ·
 [Systems](systems.md#one-update)
 
-- [Terms: process, world, owner thread, shard](#terms-process-world-owner-thread-shard)
-- [Recommended: one world per shard](#recommended-one-world-per-shard)
+- [Terms: process, world, owner thread](#terms-process-world-owner-thread)
+- [Recommended: one world per thread](#recommended-one-world-per-thread)
 - [Order of systems](#order-of-systems)
 - [Parallel systems](#parallel-systems)
 - [What the world synchronizes](#what-the-world-synchronizes)
 - [Compared with other ECS libraries](#compared-with-other-ecs-libraries)
 
-## Terms: process, world, owner thread, shard
+## Terms: process, world, owner thread
 
 | Term | Meaning |
 |---|---|
 | **Process** | Your server. It can hold any number of worlds; nothing is shared between them except type indices. |
 | **World** | One isolated set of entities, components, singletons and systems (`new World()`). |
 | **Owner thread** | The thread that calls `world.Update()` and touches the world's data. One at a time per world. |
-| **Shard** | Not an EasyEcs type: the server pattern of one owner thread plus one world (DaServer's shards are exactly this). |
 | **`Parallel`** | Inside one `Update()` call, the world borrows thread-pool threads to run a batch of non-conflicting systems; the owner thread takes part and `Update()` returns only when the batch is done. Ownership does not change. |
 
-So it is not "one process per world": a process runs many worlds side by side (one per shard), and each world can
+So it is not "one process per world": a process runs many worlds side by side (typically one per thread), and each world can
 additionally spread one update over several cores with `Parallel`.
 
 ```mermaid
 flowchart TB
     subgraph P [process]
-        subgraph S1 [shard 1 = owner thread 1 + world 1]
-            U1["world1.Update()"]
+        subgraph S1 [owner thread 1]
+            U1["world 1: Update()"]
         end
-        subgraph S2 [shard 2 = owner thread 2 + world 2]
-            U2["world2.Update()"] -->|Parallel: a batch of non-conflicting systems| TP[thread-pool helpers]
+        subgraph S2 [owner thread 2]
+            U2["world 2: Update()"] -->|Parallel: a batch of non-conflicting systems| TP[thread-pool helpers]
         end
     end
 ```
 
-## Recommended: one world per shard
+## Recommended: one world per thread
 
-Worlds share nothing, so a server that gives each shard (thread) its own `World` needs no synchronization at all,
-and every lock inside the world stays uncontended. `ShardedWorldBenchmark` measures exactly this layout (one world per
+Worlds share nothing, so a server that splits its entities over several worlds, each owned by one thread (for example
+one world per map or zone), needs no synchronization at all,
+and every lock inside the world stays uncontended. `MultiWorldBenchmark` measures exactly this layout (one world per
 core, each on its own long-lived thread): see [Performance](../performance.md#benchmarks).
 
 ```mermaid
 flowchart LR
-    T1[Shard thread 1] --> W1[World 1]
-    T2[Shard thread 2] --> W2[World 2]
-    T3[Shard thread N] --> W3[World N]
+    T1[Thread 1] --> W1[World 1]
+    T2[Thread 2] --> W2[World 2]
+    T3[Thread N] --> W3[World N]
 ```
 
 Hand work to a world from another thread the way you would to any single-owner structure: post it to the owning
-thread (a queue the shard drains), which applies it before or between updates.
+thread (a queue the owner thread drains), which applies it before or between updates.
 
 ## Order of systems
 
@@ -135,8 +135,8 @@ reported instead, possibly from a thread-pool thread.
 
 When to turn it on: a world with several heavy, independent systems per priority and spare cores. Each batch costs a
 hand-off to the thread pool (microseconds), so it pays for systems that iterate thousands of entities, not for a
-handful. For a server, one world per shard usually uses the cores better: see
-[Performance](../performance.md#benchmarks) (`ParallelSystemsBenchmark`, `ShardedWorldBenchmark`).
+handful. For a server, one world per thread usually uses the cores better: see
+[Performance](../performance.md#benchmarks) (`ParallelSystemsBenchmark`, `MultiWorldBenchmark`).
 
 ## What the world synchronizes
 

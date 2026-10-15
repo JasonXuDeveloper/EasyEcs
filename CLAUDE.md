@@ -44,7 +44,7 @@ EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, req
   Symbols.cs                   symbol checks shared by generator and analyzer
 EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, Query, System, ForEachSystem,
                                Singleton, Concurrency, Parallel, Allocation (0 B budget), Generator (diagnostics + caching)
-EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / ShardedWorldBenchmark (headline, realistic
+EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / MultiWorldBenchmark (headline, realistic
                                server tick), ParallelSystemsBenchmark + MicroBenchmarks (diagnostics). Always measure with BenchmarkDotNet.
 doc/                           README.md (index), getting-started.md, guide/ (one page per concept, analyzer.md
                                lists EECS001-008), api.md (API + complexity), ecs-principles.md, architecture.md,
