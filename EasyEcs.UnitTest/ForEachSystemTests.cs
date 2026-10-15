@@ -74,6 +74,26 @@ public class ForEachSystemTests
     }
 
     [Test]
+    public void EntityParametersCarryTheCurrentVersionOfRecycledIds()
+    {
+        // Entity parameters are built from the archetype's id/version arrays: recycled ids, transitions and the
+        // update-time re-sort must keep the version in step, or the handle would be stale.
+        using var world = new World();
+        var old = new Entity[64];
+        for (int i = 0; i < old.Length; i++) old[i] = world.CreateEntity(new Health(1), new Velocity());
+        for (int i = old.Length - 1; i >= 0; i -= 2) old[i].Destroy();
+        var fresh = new Entity[32];
+        for (int i = 0; i < fresh.Length; i++) fresh[i] = world.CreateEntity(new Health(1), new Velocity());
+        world.AddSystem<Damage>();
+
+        world.Update(); // Hurt sets Dead through its Entity, Corpses removes Velocity through its Entity
+
+        Assert.That(world.GetSingleton<Score>().Deaths, Is.EqualTo(64));
+        for (int i = 0; i < fresh.Length; i++)
+            Assert.That((fresh[i].Has<Dead>(), fresh[i].Has<Velocity>()), Is.EqualTo((true, false)));
+    }
+
+    [Test]
     public void DerivedSystemsRunBaseMethodsFirst()
     {
         using var world = new World();

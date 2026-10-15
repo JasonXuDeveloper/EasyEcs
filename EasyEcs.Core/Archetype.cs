@@ -28,6 +28,7 @@ internal class Archetype
     public int Unordered;
 
     public int[] EntityIds;
+    public int[] Versions; // parallel to EntityIds (same length): version of the entity in each slot, for ForEachEntity
     public int Count; // Total slots (including tombstones)
     public int AliveCount; // Living entities only
 
@@ -52,6 +53,7 @@ internal class Archetype
         ComponentMask = componentMask;
         Components = componentMask.ToBitArray();
         EntityIds = new int[initialCapacity];
+        Versions = new int[initialCapacity];
         _freeSlots = new int[16];
         Count = 0;
         AliveCount = 0;
@@ -63,7 +65,7 @@ internal class Archetype
     /// Reuses tombstone slots (O(1) via free list), then appends.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public int Add(int entityId)
+    public int Add(int entityId, int version)
     {
         int slot;
 
@@ -75,13 +77,17 @@ internal class Archetype
         else
         {
             if (Count >= EntityIds.Length)
+            {
                 Array.Resize(ref EntityIds, EntityIds.Length * 2);
+                Array.Resize(ref Versions, EntityIds.Length);
+            }
 
             slot = Count++;
             if (slot > 0 && EntityIds[slot - 1] > entityId) Unordered++;
         }
 
         EntityIds[slot] = entityId;
+        Versions[slot] = version;
         AliveCount++;
         return slot;
     }
@@ -147,6 +153,7 @@ internal class Archetype
             {
                 int id = (w << 6) | BitOperations.TrailingZeroCount(word);
                 ids[slot] = id;
+                Versions[slot] = meta[id].Version;
                 meta[id].Slot = slot++;
                 word &= word - 1;
             } while (word != 0);

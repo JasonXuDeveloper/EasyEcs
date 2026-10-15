@@ -55,7 +55,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
             string singletons = string.Concat(method.Parameters.Select((p, i) => p.Kind == Symbols.ParamKind.Singleton
                 ? $", s{i} = world.SingletonRef<{p.Type}>()" : ""));
             sb.Append($"        var __{method.Name} = new __{method.Name}Job {{ {system}World = world{singletons} }};\n");
-            sb.Append($"        world.ForEach<{method.ComponentTypes}, __{method.Name}Job>(ref __{method.Name}{filter});\n");
+            string forEach = method.TakesEntity ? "ForEachEntity" : "ForEach";
+            sb.Append($"        world.{forEach}<{method.ComponentTypes}, __{method.Name}Job>(ref __{method.Name}{filter});\n");
         }
 
         sb.Append("    }\n\n");
@@ -98,12 +99,15 @@ public sealed class SystemGenerator : IIncrementalGenerator
         {
             Symbols.ParamKind.Component => $"{p.RefKind} c{++index}",
             Symbols.ParamKind.Singleton => $"{p.RefKind} s{i}.Value",
-            Symbols.ParamKind.Entity => "World.GetEntity(entityId)",
+            Symbols.ParamKind.Entity => "entity",
             _ => "World",
         }));
 
         // The JIT specializes World.ForEach on this struct and inlines Execute and the user's method into the loop.
-        sb.Append($"    private struct {job} : global::EasyEcs.IForEach<{method.ComponentTypes}>\n    {{\n");
+        string iface = method.TakesEntity ? "IForEachEntity" : "IForEach";
+        bool stable = method.IsStatic && !method.Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.World);
+        string marker = stable ? ", global::EasyEcs.INoStructuralChanges" : "";
+        sb.Append($"    private struct {job} : global::EasyEcs.{iface}<{method.ComponentTypes}>{marker}\n    {{\n");
         if (!method.IsStatic) sb.Append($"        public {owner.Name} System;\n");
         sb.Append("        public global::EasyEcs.World World;\n");
         for (int i = 0; i < method.Parameters.Length; i++)
@@ -111,7 +115,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 sb.Append($"        public global::EasyEcs.SingletonRef<{method.Parameters[i].Type}> s{i};\n");
         sb.Append('\n');
         sb.Append("        [MethodImpl(MethodImplOptions.AggressiveInlining)]\n");
-        sb.Append($"        public void Execute(int entityId, {List(components.Length, i => $"ref {components[i - 1]} c{i}")})\n");
+        string first = method.TakesEntity ? "global::EasyEcs.Entity entity" : "int entityId";
+        sb.Append($"        public void Execute({first}, {List(components.Length, i => $"ref {components[i - 1]} c{i}")})\n");
         sb.Append($"            => {(method.IsStatic ? owner.Name : "System")}.{method.Name}({args});\n    }}\n\n");
 
         if (method.With.Length + method.Without.Length == 0) return;
@@ -159,6 +164,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
     {
         /// <summary>The queried component types, as type arguments of World.ForEach / IForEach.</summary>
         public string ComponentTypes => string.Join(", ", Query);
+
+        public bool TakesEntity => Parameters.Any(p => p.Kind == Symbols.ParamKind.Entity);
 
         public static ForEachModel? Create(IMethodSymbol method, int order, System.Threading.CancellationToken ct)
         {

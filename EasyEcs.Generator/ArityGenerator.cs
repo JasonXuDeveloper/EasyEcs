@@ -141,6 +141,17 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     void Execute(int entityId, {{List(n, i => $"ref T{i} c{i}")}});
                 }
 
+                /// <summary>
+                /// Like <see cref="IForEach{{{TypeParams(n)}}}"/> but receives the <see cref="Entity"/> handle, built from the
+                /// archetype's id and version arrays without a per-entity lookup. <c>[ForEach]</c> methods taking an
+                /// <see cref="Entity"/> compile to this.
+                /// </summary>
+                public interface IForEachEntity<{{TypeParams(n)}}>
+                {{Constraints(n, "    ")}}
+                {
+                    void Execute(Entity entity, {{List(n, i => $"ref T{i} c{i}")}});
+                }
+
 
                 """);
         }
@@ -161,46 +172,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         return GetMatchingArchetypes([{{bits}}], in filter);
                     }
 
-                    /// <summary>
-                    /// Run <paramref name="job"/> for every entity having all of <c>{{tps}}</c> (and matching <paramref name="filter"/>).
-                    /// The fastest iteration: O(matching archetypes + slots), allocation-free. Structural changes inside the job are
-                    /// allowed (entities added during the pass may or may not be visited, removed ones are skipped).
-                    /// </summary>
-                    public void ForEach<{{tps}}, TJob>(ref TJob job, in QueryFilter filter = default)
-                {{cons}}
-                        where TJob : struct, IForEach<{{tps}}>
-                    {
-                        var archetypes = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
-
-                        // Columns are cached and refreshed only when the job reallocated storage (StorageVersion changed).
-                        int version = StorageVersion;
-                {{Lines(n, i => $"        var a{i} = Column<T{i}>(b{i});")}}
-
-                        for (int ai = 0; ai < archetypes.Length; ai++)
-                        {
-                            var archetype = archetypes[ai];
-                            if (archetype.AliveCount == 0) continue;
-
-                            int[] ids = archetype.EntityIds;
-                            int count = archetype.Count;
-                            for (int i = 0; i < count; i++)
-                            {
-                                int id = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(ids), i);
-                                if (id < 0) continue; // tombstone
-
-                                job.Execute(id, {{List(n, i => $"ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(a{i}), id)")}});
-
-                                if (version != StorageVersion)
-                                {
-                                    version = StorageVersion;
-                {{Lines(n, i => $"                    a{i} = Column<T{i}>(b{i});")}}
-                                    ids = archetype.EntityIds;
-                                    count = archetype.Count;
-                                }
-                            }
-                        }
-                    }
-
+                {{ForEach(n, "ForEach", "IForEach", "id", "the entity id")}}
+                {{ForEach(n, "ForEachEntity", "IForEachEntity", "new Entity(this, id, Unsafe.Add(ref versions, i))", "the entity handle")}}
                     /// <summary>Enumerate entities having all of <c>{{tps}}</c> (and matching <paramref name="filter"/>). Allocation-free.</summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public QueryEnumerator<{{tps}}> Query<{{tps}}>(in QueryFilter filter = default)
@@ -227,6 +200,75 @@ public sealed class ArityGenerator : IIncrementalGenerator
         }
 
         return sb.Append("}\n").ToString();
+    }
+
+    /// <summary>
+    /// One ForEach flavor: <paramref name="entityArg"/> is what the job receives first (the id, or an Entity built from
+    /// the archetype's parallel id/version arrays).
+    /// </summary>
+    private static string ForEach(int n, string name, string job, string entityArg, string receives)
+    {
+        string tps = TypeParams(n);
+        return $$"""
+                /// <summary>
+                /// Run <paramref name="job"/> with {{receives}} for every entity having all of <c>{{tps}}</c> (and matching
+                /// <paramref name="filter"/>). The fastest iteration: O(matching archetypes + slots), allocation-free.
+                /// Structural changes inside the job are allowed (entities added during the pass may or may not be visited,
+                /// removed ones are skipped). A job implementing <see cref="INoStructuralChanges"/> runs dense archetypes
+                /// without per-entity checks.
+                /// </summary>
+                public void {{name}}<{{tps}}, TJob>(ref TJob job, in QueryFilter filter = default)
+            {{Constraints(n, "        ")}}
+                    where TJob : struct, {{job}}<{{tps}}>
+                {
+                    var archetypes = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
+                    if (archetypes.Length == 0) return; // no archetype: columns may not exist yet
+
+                    // Base refs of the id-indexed columns, refreshed only when the job reallocated storage
+                    // (StorageVersion changed). Ids in an archetype are < the column length (columns cover every id).
+                    int version = StorageVersion;
+            {{Lines(n, i => $"        ref T{i} r{i} = ref MemoryMarshal.GetArrayDataReference(Column<T{i}>(b{i}));")}}
+                    for (int ai = 0; ai < archetypes.Length; ai++)
+                    {
+                        var archetype = archetypes[ai];
+                        if (archetype.AliveCount == 0) continue;
+
+                        ref int ids = ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds);
+                        ref int versions = ref MemoryMarshal.GetArrayDataReference(archetype.Versions);
+                        int count = archetype.Count;
+                        if (default(TJob) is INoStructuralChanges && count == archetype.AliveCount)
+                        {
+                            // No tombstones, and the job cannot add any or reallocate storage: no per-row checks
+                            // (the type test is a JIT-time constant for struct jobs).
+                            for (int i = 0; i < count; i++)
+                            {
+                                int id = Unsafe.Add(ref ids, i);
+                                job.Execute({{entityArg}}, {{List(n, i => $"ref Unsafe.Add(ref r{i}, id)")}});
+                            }
+
+                            continue;
+                        }
+
+                        for (int i = 0; i < count; i++)
+                        {
+                            int id = Unsafe.Add(ref ids, i);
+                            if (id < 0) continue; // tombstone
+
+                            job.Execute({{entityArg}}, {{List(n, i => $"ref Unsafe.Add(ref r{i}, id)")}});
+
+                            if (version != StorageVersion)
+                            {
+                                version = StorageVersion;
+            {{Lines(n, i => $"                r{i} = ref MemoryMarshal.GetArrayDataReference(Column<T{i}>(b{i}));")}}
+                                ids = ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds);
+                                versions = ref MemoryMarshal.GetArrayDataReference(archetype.Versions);
+                                count = archetype.Count;
+                            }
+                        }
+                    }
+                }
+
+            """;
     }
 
     private static string QueryItems()

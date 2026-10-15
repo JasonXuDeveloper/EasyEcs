@@ -48,7 +48,7 @@ public sealed partial class World
 
         current?.RemoveAt(meta.Slot);
         var ids = target.EntityIds;
-        meta.Slot = target.Add(entityId);
+        meta.Slot = target.Add(entityId, meta.Version);
         meta.Archetype = target;
 
         // Archetype storage reallocated: invalidate snapshots held by in-flight ForEach passes
