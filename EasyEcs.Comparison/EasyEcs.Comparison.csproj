@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>disable</ImplicitUsings>
+        <Nullable>disable</Nullable>
+        <IsPackable>false</IsPackable>
+        <Optimize>true</Optimize>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="BenchmarkDotNet" Version="0.15.2"/>
+        <PackageReference Include="Arch" Version="2.1.0"/>
+        <PackageReference Include="Friflo.Engine.ECS" Version="3.6.0"/>
+        <PackageReference Include="DefaultEcs" Version="0.17.2"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\EasyEcs.Core\EasyEcs.Core.csproj"/>
+        <ProjectReference Include="..\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+        <!-- the EasyEcs side is the headline scenario itself, compiled unchanged -->
+        <Compile Include="..\EasyEcs.Benchmark\WorldSimulation.cs" Link="Scenario\WorldSimulation.cs"/>
+    </ItemGroup>
+
+</Project>

@@ -3,4 +3,5 @@
   <Project Path="EasyEcs.Generator/EasyEcs.Generator.csproj" />
   <Project Path="EasyEcs.UnitTest/EasyEcs.UnitTest.csproj" />
   <Project Path="EasyEcs.Benchmark/EasyEcs.Benchmark.csproj" />
+  <Project Path="EasyEcs.Comparison/EasyEcs.Comparison.csproj" />
 </Solution>
