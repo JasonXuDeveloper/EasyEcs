@@ -37,9 +37,9 @@ flowchart TB
 - **Archetypes** hold entity ids, not data. Moving an entity between archetypes moves an id; component data never
   moves. This keeps structural changes O(1), which suits servers, where state flips constantly (buffs, combat, AOI).
 - **Masks** (`Tag`) are 256-bit SIMD bitsets with overflow. Up to 65,536 component types are supported (bits are
-  `ushort`): the first 256 are inline (one `Vector256` test per archetype match); beyond that a mask carries an
-  overflow array (at least 4 × 256 bits, doubled when needed). Overflow masks are allocated when an archetype or a
-  transition edge is first built, never on the iteration or add/remove path after warm-up.
+  `ushort`): the first 256 are inline (two `Vector256` tests, required and excluded, per archetype match); beyond
+  that a mask carries an overflow array (at least 4 × 256 bits, doubled when needed). Overflow masks are allocated
+  when an archetype or a transition edge is first built, never on the iteration or add/remove path after warm-up.
 
 Trade-off: iteration reads archetype ids and then gathers from each column. That is not as dense as chunked SoA
 storage, but structural changes are much cheaper. Ids are kept **ascending**: each archetype counts insertions that
@@ -104,8 +104,8 @@ stateDiagram-v2
   cached per archetype and keyed by the dense index of the generic signature
   (`TypeIndex<ComponentSignature, (T1, …, Tn)>`). The first call per (archetype, signature) builds the target mask and
   does one hash lookup; later calls are one array load. Set edges are cached on the source archetype only.
-- `CreateEntity(in T1 … in Tn)` places the entity in its final archetype directly (through a set edge of the empty
-  archetype), without intermediate moves.
+- `CreateEntity(in T1 … in Tn)` places the entity in its final archetype directly (through the empty archetype's add
+  edge for one component, or its set edge for several), without intermediate moves.
 
 ## Query cache
 
@@ -116,9 +116,10 @@ mutated.
 
 ## Iteration and structural changes
 
-- `ForEach` caches the column and id arrays and refreshes them whenever `StorageVersion` changes. Any code path that
-  reallocates storage must bump it: columns, `Meta`, archetype id arrays and compaction (including the re-sort at
-  the start of `Update`).
+- `ForEach` caches the column and id arrays and, after each entity, refreshes them whenever `StorageVersion` changed.
+  The refs already passed to the current body are not refreshed, so a body that reallocates storage (for example
+  `CreateEntity` past capacity) must not use them afterwards. Any code path that reallocates storage must bump the
+  version: columns, `Meta`, archetype id arrays and compaction (including the re-sort at the start of `Update`).
 - `Query` re-reads the archetype count and ids on every step.
 - Removed entities are skipped through their tombstones. Entities added during a pass may or may not be visited.
 - An entity moved into a *later* matching archetype during a pass may be visited again. Systems make their methods

@@ -92,7 +92,7 @@ public partial class S : EcsSystem
 - `ctx.Init()` is gone: `OnCreate` runs when the system is added. `await ctx.Update()` → `world.Update()`;
   `await ctx.DisposeAsync()` → `world.Dispose()` (`OnDestroy` in reverse order).
 - `IExecuteSystem.ExecuteFrequency` → `EcsSystem.UpdateInterval`; `AddSystem<T>()` returns the system;
-  `GetSystem<T>()`, `RemoveSystem<T>()`, `Enabled` were added.
+  `GetSystem<T>()` and `Enabled` were added; `RemoveSystem<T>()` now returns `bool` (whether a system was removed).
 - Exceptions: `world.SystemError` (system, exception); without a subscriber the exception propagates.
 
 ### Behavioral changes

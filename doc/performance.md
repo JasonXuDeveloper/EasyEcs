@@ -68,8 +68,10 @@ All numbers come from BenchmarkDotNet. The headline benchmarks simulate a real s
 - **`EcsComparisonBenchmark`** (project `EasyEcs.Comparison`) ports the headline world to Arch, Friflo.Engine.ECS and
   DefaultEcs: same rules, random rolls, spawn mix and entity counts, single-threaded, each library through its
   recommended fast path. Setup warms every world up and checks that its counters (hits, deaths, spawns, AOI changes,
-  entities) match an EasyEcs reference run of the same length within 5% (ids feed the random rolls and each library
-  recycles ids in its own order), so every library does the same work.
+  entities) match an EasyEcs reference run of the same length within 5%, so every library does the same work. They
+  cannot match exactly because of the peers' id recycling (ids feed the random rolls, and each library recycles them
+  in its own order) and deferred structural changes (libraries with command buffers apply them at the end of a system,
+  not immediately).
 
 Measured with BenchmarkDotNet's default job on .NET 10, on a 4-core Xeon VM at 2.1 GHz.
 
@@ -77,9 +79,9 @@ Measured with BenchmarkDotNet's default job on .NET 10, on a 4-core Xeon VM at 2
 
 | Benchmark | Entities | Mean | Allocated |
 |---|---:|---:|---:|
-| WorldSimulation.Tick | 10,000 | 252 μs | 0 B |
-| WorldSimulation.Tick | 100,000 | 3.01 ms | 0 B |
-| MultiWorld.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.27 ms | 0 B |
+| WorldSimulationBenchmark.Tick | 10,000 | 252 μs | 0 B |
+| WorldSimulationBenchmark.Tick | 100,000 | 3.01 ms | 0 B |
+| MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.27 ms | 0 B |
 
 **Micro benchmarks** (N = 10,000; the v3.1.1 column is BenchmarkDotNet ShortRun on the same machine). "–" means
 the operation has no v3.1.1 equivalent (struct jobs, `[ForEach]` systems and handles are new in v4). Every
@@ -87,13 +89,13 @@ operation that exists in both versions is faster in v4 and allocates less or not
 
 | Benchmark | v3.1.1 | v4.1 | Allocated (v4.1) |
 |---|---:|---:|---:|
-| CreateAddDestroy (fresh world) | 5,358 μs | 1,600 μs | 1.57 MB (array growth of the new world) |
+| CreateAddDestroy (fresh world) | 5,358 μs | 1,600 μs | 1.57 MB (new world, its growth and the benchmark's handle array) |
 | Churn: 10 rounds of create (2 components) and destroy in one world | 5,247 μs / 3.19 MB | 617 μs | 72 KB (steady state reached in round 1) |
 | ToggleComponent: remove + add | 1,185 μs | 332 μs | 0 B |
 | QueryIterate (`Query<P,V>` + reduction) | 40.6 μs | 33.6 μs | 0 B |
 | ForEachIterate (`ForEach` struct job + reduction) | – | 28.5 μs | 0 B |
 | QueryWrite (`Query`, pure write) | – | 27.4 μs | 0 B |
-| ForEachSystemWrite (`[ForEach]` system) | – | 15.2 μs | 0 B |
+| ForEachSystemWrite (`[ForEach]` system adding `Velocity` to `Position`) | – | 15.2 μs | 0 B |
 | ForEachWrite (`ForEach` struct job) | – | 22.9 μs | 0 B |
 | RawArrayWrite (two plain arrays, the floor) | – | 10.6 μs | 0 B |
 | QueryIterate3 (half the entities match) | 16.2 μs | 8.8 μs | 0 B |

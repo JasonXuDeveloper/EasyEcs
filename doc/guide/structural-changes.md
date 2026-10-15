@@ -13,7 +13,8 @@ rules:
 - **Removed entities are skipped.**
 - **Entities created during the pass may or may not be visited.**
 - **An entity that moves into another matching archetype during the pass may be visited again.** For example, a
-  method that adds `Dead` to an entity it still matches will see that entity again.
+  method that adds `Dead` to an entity it still matches may see that entity again (when the target archetype already
+  existed and comes later in the pass).
 
 Make such methods idempotent with a filter that excludes what the method produces. This is the usual rule for
 immediate-mode ECS:
@@ -31,8 +32,10 @@ public partial class DeathSystem : EcsSystem
 
 Other rules:
 
-- `ref` parameters and `item.ComponentN` refs are refreshed by the iterator after a structural change; a `ref` you
-  stored yourself is not (see [`ref` and `await`](refs-and-await.md)).
+- Each entity gets fresh refs: the iterator re-reads storage before the next entity. Inside one body, a `ref`
+  (including the method's `ref`/`in` parameters and `item.ComponentN`) is only guaranteed until that body makes a
+  structural change. Write through your refs before the change (for example before creating entities), or re-read
+  through `entity.Get<T>()` afterwards (see [`ref` and `await`](refs-and-await.md)).
 - Never call `world.CompactArchetypes()` or `Update()` / `Update<TGroup>()` while a query of the same world is
   iterating: they re-sort archetypes (`Update` does when `WorldOptions.SortArchetypesOnUpdate` is on, the default).
   Call `CompactArchetypes()` between updates, and `Update` only from outside any query of that world.

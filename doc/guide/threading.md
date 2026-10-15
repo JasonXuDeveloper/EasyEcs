@@ -129,9 +129,9 @@ first always finishes first, and the result is the same as a sequential update. 
 another order gets its own priority.
 
 Execution is allocation-free: the calling thread works through a batch together with up to
-`MaxDegreeOfParallelism - 1` reusable thread-pool work items (no `Parallel.For` closures, no tasks). An exception in
-any system of a batch is rethrown on the calling thread after the batch; with a `SystemError` subscriber it is
-reported instead, possibly from a thread-pool thread.
+`MaxDegreeOfParallelism - 1` reusable thread-pool work items (no `Parallel.For` closures, no tasks). The first
+exception thrown in a batch is rethrown on the calling thread after the batch (later ones are dropped); with a
+`SystemError` subscriber every exception is reported instead, possibly from a thread-pool thread.
 
 When to turn it on: a world with several heavy, independent systems per priority and spare cores. Each batch costs a
 hand-off to the thread pool (microseconds), so it pays for systems that iterate thousands of entities, not for a

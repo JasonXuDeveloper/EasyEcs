@@ -41,7 +41,7 @@ Notation:
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` | O(1) | `GetEntity` throws if no entity is alive with that id |
 | `world.EntityCount` | O(1) | |
 | `world.Entities` | O(capacity) | diagnostics |
-| `world.EnsureEntityCapacity(n)` | O(capacity) | pre-size to avoid growth at runtime |
+| `world.EnsureEntityCapacity(capacity)` | O(capacity × component types in use) | pre-size to avoid growth at runtime; no-op when already large enough |
 
 ## Components
 
@@ -66,19 +66,21 @@ Notation:
 
 The first time a query shape is used, building its cache entry costs O(all archetypes) under the structural lock.
 After that, each lookup is one hash probe. In turn, creating a new archetype (the first entity with a new component
-set) costs O(cached query shapes), since it is appended to every cached query it matches.
+set) costs O(archetypes + cached query shapes + Σ over the matching cached queries of their archetype count), since
+it is appended (copy-on-write) to the archetype list and to every cached query it matches. Both are cold paths.
 
 ## Systems, singletons, maintenance
 
 | API | Complexity |
 |---|---|
-| `world.AddSystem<T>()` / `AddSystem(system)` (calls `OnCreate`) | O(systems) |
-| `world.RemoveSystem<T>()` (calls `OnDestroy`) / `GetSystem<T>()` | O(systems) |
+| `world.AddSystem<T>()` / `AddSystem(system)` (calls `OnCreate`) | O(systems + b²), b = systems of the same priority (batch rebuild); cold path |
+| `world.RemoveSystem<T>()` (calls `OnDestroy`) | O(systems + b²), b = systems of the same priority (batch rebuild); cold path |
+| `world.GetSystem<T>()` | O(systems) |
 | `world.Update()` (default group) / `world.Update<TGroup>()` | O(archetypes) disorder check + re-sort of the archetypes that need it (`SortArchetypesOnUpdate`) + Σ systems of the group; allocation-free |
 | `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` → `ref T` | O(1) |
 | `world.SingletonRef<T>()` → `SingletonRef<T>` (stable handle, `.Value` is `ref T`; adds if missing) | O(1) |
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) |
-| `world.CompactArchetypes()` | O(S + id range / 64) per archetype, S = its slots including tombstones (bitmap sort) |
+| `world.CompactArchetypes()` | O(Sₐ + id range / 64) per archetype, Sₐ = that archetype's slots including tombstones (bitmap sort) |
 | `world.GetFragmentationStats()` → `(TotalSlots, AliveEntities, FragmentationRatio)` | O(archetypes) |
 
 Other `World` members:

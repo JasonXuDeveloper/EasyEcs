@@ -16,7 +16,8 @@ catches design mistakes at compile time, and a full server tick allocates 0 byte
 | Four worlds on four threads (one per thread) | 100,000 | **1.85 ms** | **0 B** |
 
 <sub>BenchmarkDotNet, .NET 10, 4-core Xeon VM at 2.1 GHz; entities spawn, die, gain and lose components every tick.
-A `[ForEach]` pass costs 1.5 ns per entity (one archetype), within 1.4x of two plain arrays.
+A `[ForEach]` system adding `Velocity` to `Position` costs 1.5 ns per entity (one archetype), within 1.4x of two
+plain arrays.
 [Details](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md#benchmarks).</sub>
 
 ```bash
@@ -37,7 +38,9 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
 - **Decoupled by construction.** Systems cooperate only through data, in `Priority` order; system groups give you
   separate cadences (input on every wake, simulation on a fixed tick).
 - **Built for servers that run for months.** Ids are recycled behind version-checked handles, memory is bounded by
-  the peak entity count, structural changes are thread-safe, one world per thread scales across cores.
+  the peak entity count, structural bookkeeping is lock-protected and never tears; the supported model is one owner
+  thread per world (see [Threading](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md)),
+  and one world per thread scales across cores.
 
 ## Example: a battle server
 
@@ -198,12 +201,12 @@ not a toy loop ([what it simulates](https://github.com/JasonXuDeveloper/EasyEcs/
 
 | Benchmark | Entities | Mean | Allocated |
 |---|---:|---:|---:|
-| WorldSimulation.Tick | 10,000 | 252 μs | 0 B |
-| WorldSimulation.Tick | 100,000 | 3.01 ms | 0 B |
-| MultiWorld.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.27 ms | 0 B |
+| WorldSimulationBenchmark.Tick | 10,000 | 252 μs | 0 B |
+| WorldSimulationBenchmark.Tick | 100,000 | 3.01 ms | 0 B |
+| MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.27 ms | 0 B |
 
-A `[ForEach]` system writing two components over 10,000 entities (one archetype) takes 15.2 μs, against 10.6 μs for
-two plain arrays with no ECS at all. Micro benchmarks (with v3.1.1 numbers for comparison) are in
+A `[ForEach]` system adding `Velocity` to `Position` over 10,000 entities (one archetype) takes 15.2 μs, against
+10.6 μs for two plain arrays with no ECS at all. Micro benchmarks (with v3.1.1 numbers for comparison) are in
 [doc/performance.md](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md); their `ForEach` and
 `Query` rows run on a world with two interleaved archetypes, so they are not directly comparable to the `[ForEach]` row.
 

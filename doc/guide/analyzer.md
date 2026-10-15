@@ -43,7 +43,7 @@ method.
 
 ## EECS004
 
-**Generic systems are not supported.** The `[ForEach]` method is generic, or is declared in a generic type.
+**Generic systems are not supported.** `[ForEach]` in a generic type, or a generic `[ForEach]` method.
 
 Fix: make the system and the method non-generic; share code through a non-generic base class (its `[ForEach]` methods
 run first in derived systems).

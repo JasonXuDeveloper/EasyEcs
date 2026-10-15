@@ -72,8 +72,9 @@ doc/                           README.md (index), getting-started.md, guide/ (on
    4 per line), keep hot structs power-of-two sized so they never straddle lines, pad contended fields apart,
    keep cold data out of hot structs. Bound memory: recycle ids/slots/buffers instead of growing.
 4. **Thread safety is explicit**: every shared structure documents its contract (single owner vs. lock vs.
-   lock-free). Lock-free readers only ever see immutable snapshots (copy-on-write arrays published with
-   `Volatile.Write`); mutation happens under `World.StructuralLock`.
+   lock-free). The archetype lists lock-free readers walk are immutable snapshots (copy-on-write arrays
+   published with `Volatile.Write`); per-archetype id arrays and columns are mutated under `World.StructuralLock`,
+   which is why component values need one owner thread.
 5. **Concise, elegant, no duplication**: write one implementation and generate arity variants (`EasyEcs.Generator`)
    instead of copy-pasting T1..T9 code by hand. Prefer small shared non-generic cores with thin typed wrappers.
 6. **Every change is proven**: unit tests for behavior (`EasyEcs.UnitTest`) and BenchmarkDotNet numbers for

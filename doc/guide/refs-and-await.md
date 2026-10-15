@@ -40,8 +40,10 @@ async ValueTask HealFromStoreAsync(Entity player, IShop shop)
 
 ## Rules
 
-- Use `ref` freely inside `[ForEach]`, `ForEach` and `Query` bodies. They are synchronous and refresh their view of
-  storage after structural changes.
+- Use `ref` freely inside `[ForEach]`, `ForEach` and `Query` bodies: each entity gets fresh refs. Inside one body, a
+  `ref` (including the method's `ref`/`in` parameters and `item.ComponentN`) is only guaranteed until that body makes a
+  structural change. Write through your refs before the change (for example before creating entities), or re-read
+  through `entity.Get<T>()` afterwards.
 - Never keep a `ref` in a field or across an `await`. Keep the `Entity` instead.
 - Read what you need before awaiting; after the await, write back through a newly acquired ref.
 - Don't store raw entity ids without their version: ids are recycled.
