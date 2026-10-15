@@ -1,5 +1,12 @@
 # Performance guide
 
+[Docs index](README.md) · Related: [API reference](api.md) · [Architecture](architecture.md)
+
+- [Choosing an iteration API](#choosing-an-iteration-api)
+- [Do](#do) / [Don't](#dont)
+- [Benchmarks](#benchmarks)
+- [Measuring](#measuring)
+
 ## Choosing an iteration API
 
 | Need | Use | Notes |
@@ -36,11 +43,60 @@
   even when the lambda's branch is not taken (this exact bug was caught in `World.Update` by `AllocationTests`).
 - Don't use LINQ, `params object[]` or string formatting in per-update code.
 
+## Benchmarks
+
+All numbers come from BenchmarkDotNet. The headline benchmarks simulate a real server tick, not a toy loop:
+
+- **`WorldSimulationBenchmark.Tick`** is one tick of a world with 30% players, 70% NPCs, and projectiles on top. The
+  tick runs:
+  - movement, skipping entities that are `Stunned` or `Dead`
+  - an AOI grid
+  - combat that randomly adds `Burning` / `Stunned`
+  - status expiry that removes those components
+  - death, which adds `Dead` and updates the world statistics singleton
+  - NPC despawn and respawn
+  - projectile spawn (about 5% of players per tick) and expiry
+
+  Setup asserts that the world is busy: hits, deaths, spawns and AOI changes all happen.
+- **`ShardedWorldBenchmark.TickAllShards`** runs one world per core, each on its own long-lived thread. This is the
+  recommended server layout.
+- **`MicroBenchmarks`** isolate single operations for diagnosis. `RawArrayWrite` is the no-ECS floor.
+
+Measured with BenchmarkDotNet's default job on .NET 10, on a 4-core Xeon VM at 2.1 GHz.
+
+**Realistic server tick** (the "Allocated" column is per tick):
+
+| Benchmark | Entities | Mean | Allocated |
+|---|---:|---:|---:|
+| WorldSimulation.Tick | 10,000 | 322 μs | 0 B |
+| WorldSimulation.Tick | 100,000 | 4.33 ms | 0 B |
+| ShardedWorld.TickAllShards (4 worlds × 25k) | 100,000 | 1.85 ms | 0 B |
+
+**Micro benchmarks** (N = 10,000; the v3.1.1 column is BenchmarkDotNet ShortRun on the same machine). "–" means
+the operation has no v3.1.1 equivalent (struct jobs, `[ForEach]` systems and handles are new in v4). Every
+operation that exists in both versions is faster in v4 and allocates less or nothing:
+
+| Benchmark | v3.1.1 | v4 | Allocated (v4) |
+|---|---:|---:|---:|
+| CreateAddDestroy (fresh world) | 5,358 μs | 1,795 μs | 1.57 MB (array growth of the new world) |
+| Churn: 10 rounds of create, add and destroy in one world | 5,247 μs / 3.19 MB | 1,023 μs | 72 KB (steady state reached in round 1) |
+| ToggleComponent: remove + add | 1,185 μs | 338 μs | 0 B |
+| QueryIterate (`Query<P,V>` + reduction) | 40.6 μs | 35.3 μs | 0 B |
+| ForEachIterate (`ForEach` struct job + reduction) | – | 30.6 μs | 0 B |
+| QueryWrite (`Query`, pure write) | – | 28.3 μs | 0 B |
+| ForEachSystemWrite (`[ForEach]` system) | – | 15.1 μs | 0 B |
+| ForEachWrite (`ForEach` struct job) | – | 24.3 μs | 0 B |
+| RawArrayWrite (two plain arrays, the floor) | – | 11.0 μs | 0 B |
+| QueryIterate3 (half the entities match) | 16.2 μs | 9.1 μs | 0 B |
+| HandleAccess (`Entity.Get`, ×1000) | – | 3.56 μs | 0 B |
+| SingletonAccess (×1000) | 1.42 μs | 0.90 μs | 0 B |
+
 ## Measuring
 
 Performance numbers come from BenchmarkDotNet only:
 
 ```bash
+dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*'               # everything (the numbers above)
 dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*World*'         # headline: realistic server tick
 dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*' --job short   # everything, quick
 ```

@@ -44,7 +44,9 @@ EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, Q
                                Singleton, Concurrency, Allocation (0 B budget), Generator (diagnostics + caching)
 EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / ShardedWorldBenchmark (headline, realistic
                                server tick) + MicroBenchmarks (diagnostics). Always measure with BenchmarkDotNet.
-doc/                           ecs-principles.md, architecture.md, performance.md (diagrams in mermaid)
+doc/                           README.md (index), getting-started.md, guide/ (one page per concept, analyzer.md
+                               lists EECS001-008), api.md (API + complexity), ecs-principles.md, architecture.md,
+                               performance.md (diagrams in mermaid)
 ```
 
 ## Engineering principles (apply to every change)
@@ -88,7 +90,7 @@ doc/                           ecs-principles.md, architecture.md, performance.m
   the component set is the archetype mask.
 - **Storage reallocation must bump `StorageVersion`** (columns, `Meta`, archetype id arrays, compaction) so in-flight
   `ForEach` passes refresh their cached arrays.
-- **Docs**: diagrams are mermaid; README lists the complexity of every public API.
+- **Docs**: diagrams are mermaid; `doc/api.md` lists the complexity of every public API (README is the landing page).
 - **Entity ids are recycled**: any id-keyed API must also validate the version (`ThrowIfStale`, `Entity.Archetype`).
 - Behavioral/breaking changes need a `MIGRATION_GUIDE.md` entry and a README "What's new" entry.
 - Commits: logic, docs and CI in separate commits. The author is the repository owner; the committer is the

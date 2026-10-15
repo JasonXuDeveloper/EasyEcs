@@ -1,5 +1,16 @@
 # Migration Guide: EasyECS v3.x → v4.0
 
+**Contents**
+
+- v3.x → v4.0: [Namespaces](#namespaces) · [Entities and components](#entities-and-components) ·
+  [Singletons](#singletons) · [Systems](#systems) · [Behavioral changes](#behavioral-changes) ·
+  [Source generator and analyzer](#source-generator-and-analyzer)
+- [v2.x → v3.0](#migration-guide-easyecs-v2x--v30): [Breaking changes](#breaking-changes-summary) ·
+  [Migration steps](#migration-steps) · [New features](#new-features-in-v30) ·
+  [Common patterns](#common-migration-patterns) · [Troubleshooting](#troubleshooting)
+
+For the current API, see the [documentation](doc/README.md).
+
 v4 targets **.NET 10 only**, moves the whole API into the `EasyEcs` namespace with standard ECS vocabulary, makes
 systems synchronous and generates the repetitive parts (arity overloads, per-entity jobs).
 

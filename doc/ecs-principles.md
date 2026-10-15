@@ -1,9 +1,11 @@
 # ECS principles
 
+[Docs index](README.md) · Related: [Getting started](getting-started.md) · [Analyzer rules](guide/analyzer.md)
+
 EasyEcs separates **data** (entities, components, singletons) from **behavior** (systems). That separation is
 what makes iteration fast (dense columns, no virtual calls per entity), and it is also what keeps a large code base
 decoupled: systems never know about each other, only about data. This page explains each role and how to design
-features with them. The analyzer enforces the mechanical parts (EECS006–008).
+features with them. The analyzer enforces the mechanical parts ([EECS006–008](guide/analyzer.md)).
 
 ## Roles
 
@@ -37,6 +39,18 @@ the schedule, in the order `Priority` declares.
 | **Tag** | An empty component (`Dead`, `Frozen`) used as a query filter. | A boolean you flip every tick (use a field instead). |
 | **Singleton** | One struct per world: clock, configuration, counters, spatial indexes. | A static field (it would be shared by every world). |
 | **System** | Behavior with one responsibility. Reads and writes data. | A place to keep state, or a service other systems call. |
+
+## Summary
+
+| Element | Role | Rule |
+|---|---|---|
+| `Entity` | identity | An id. No data, no behavior. Hold it as a handle and never keep a `ref` into its storage. |
+| Component | per-entity data | A struct with fields only (computed getters are fine). No logic and no references to systems. |
+| Singleton | per-world data | Clock, configuration, counters, indexes: anything with one value per world. |
+| System | behavior, one responsibility | Stateless, reads and writes components and singletons, never references another system. |
+
+Splitting costs nothing (each `[ForEach]` is a separate inlined job either way), so when in doubt, split. Readonly
+fields for dependencies or reusable scratch buffers are fine on a system (EECS007 allows them).
 
 ## Rules and how to follow them
 
@@ -146,11 +160,13 @@ visited again in the same pass. Filter out what the job produces:
 static void CheckDeath(Entity e, in Health h) { if (h.Value <= 0) e.Set(new Dead()); }
 ```
 
+The full rules are in [Structural changes during iteration](guide/structural-changes.md).
+
 ### 7. Never hold `ref`s or handles to storage across boundaries
 
 A `ref` from `Get<T>()` or a `[ForEach]` parameter is valid until the next structural change of that entity and
 never across `await`. Keep `Entity` handles (validated on every access) and re-read components when you need them.
-See the README section on `ref` across `await`.
+See [`ref` and `await`](guide/refs-and-await.md).
 
 ## Checklist for a new feature
 

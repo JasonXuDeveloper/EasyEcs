@@ -1,6 +1,7 @@
 # Architecture
 
-How EasyEcs stores data and why. Changes must keep these guarantees:
+[Docs index](README.md) · How EasyEcs stores data and why. For using the library, start with
+[Getting started](getting-started.md); this page is for contributors and the curious. Changes must keep these guarantees:
 
 - zero allocation on hot paths
 - bounded memory under churn
@@ -43,6 +44,32 @@ Trade-off: iteration reads archetype ids and then gathers from each column. That
 storage, but structural changes are much cheaper. `CompactArchetypes()` removes tombstones and **sorts ids
 ascending**, so after compaction the gathers walk each column forward, which hardware prefetchers handle well.
 
+## Memory layout at a glance
+
+```mermaid
+flowchart TB
+    subgraph World
+        M["Meta[id]: EntityMeta 16 B<br/>{Archetype, Version, Slot}<br/>4 per 64-byte line"]
+        C1["Position[] (indexed by id)"]
+        C2["Velocity[] (indexed by id)"]
+        A1["Archetype {Position, Velocity}<br/>mask + entity ids"]
+        A2["Archetype {Position}<br/>mask + entity ids"]
+    end
+    M -->|archetype + slot| A1
+    A1 -->|ids| C1
+    A1 -->|ids| C2
+    A2 -->|ids| C1
+```
+
+- An entity's component set is its archetype's mask, so it is not stored per entity. A version check plus a `Has`
+  touches one 16-byte record and one shared, hot archetype.
+- Archetypes hold entity ids, not component data. Adding or removing a component moves an *id*; component data never
+  moves.
+- Columns are indexed by entity id. `CompactArchetypes()` removes tombstones and sorts ids, which turns iteration
+  into a forward, prefetch-friendly walk. Call it between updates after heavy churn.
+- Columns whose type contains managed references are cleared on remove and destroy, so the GC can collect what they
+  pointed to. Unmanaged columns are not cleared: `Add` and `Set` overwrite them anyway.
+
 ## Entity lifecycle
 
 ```mermaid
@@ -84,7 +111,8 @@ mutated.
 - `Query` re-reads the archetype count and ids on every step.
 - Removed entities are skipped through their tombstones. Entities added during a pass may or may not be visited.
 - An entity moved into a *later* matching archetype during a pass may be visited again. Systems make their methods
-  idempotent with filters. This is documented in the README.
+  idempotent with filters. This is documented for users in
+  [Structural changes during iteration](guide/structural-changes.md).
 
 ## Systems
 
@@ -96,6 +124,8 @@ mutated.
 - Systems cooperate through data only, so all behavior runs in schedule order (see
   [ecs-principles.md](ecs-principles.md#4-state-changes-are-data)).
 - Errors go to `World.SystemError`. Without a subscriber they propagate.
+- System groups (`[UpdateInGroup<TGroup>]`) each have their own schedule; `Update()` runs group 0 (the default),
+  `Update<TGroup>()` runs that group. User-facing details: [Systems](guide/systems.md).
 
 ## Source generators and analyzer (`EasyEcs.Generator`)
 
@@ -103,7 +133,7 @@ mutated.
 |---|---|
 | `ArityGenerator` | Emits every T1..T9 family of `EasyEcs.Core` from one template each: `Entity.Set` / `Remove`, `World.CreateEntity`, `IForEach`, `ForEach`, `Query`, `Count`, `Any`, `QueryItem` / `QueryEnumerator`. Runs only for `EasyEcs.Core`. |
 | `SystemGenerator` | Turns `[ForEach]` methods into struct jobs, static filters and a `GeneratedUpdate` override. |
-| `EasyEcsAnalyzer` | Reports EECS001–EECS006 (errors) and EECS007–EECS008 (ECS-principle warnings, see [ecs-principles.md](ecs-principles.md)). |
+| `EasyEcsAnalyzer` | Reports EECS001–EECS006 (errors) and EECS007–EECS008 (ECS-principle warnings). Every rule with its fix: [Analyzer rules](guide/analyzer.md). |
 
 Following the incremental-generator guidelines:
 
@@ -130,4 +160,4 @@ Every world uses the same indices, so masks are comparable across worlds.
 - Structural operations, system changes and singleton creation take the world's `System.Threading.Lock`.
 - Queries, `Get` and `Has` are lock-free.
 - Component values are unsynchronized by design. The recommended layout is **one world per shard, owned by one
-  thread**, where the lock is always uncontended.
+  thread**, where the lock is always uncontended. User-facing rules: [Threading](guide/threading.md).
