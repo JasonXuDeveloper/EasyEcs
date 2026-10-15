@@ -29,7 +29,8 @@ private static readonly QueryFilter Impaired = QueryFilter.Create().WithAny<Froz
 ```
 
 In a `[ForEach]` method the same filters are attributes: `[ForEach, With<Player>, Without<Dead>]`,
-`[ForEach, WithAny<Frozen>, WithAny<Stunned>]`. All can be repeated.
+`[ForEach, WithAny<Frozen>, WithAny<Stunned>]`. All can be repeated. `Changed<T>().ChangedSince(tick)` (and
+`[Changed<T>]`) select rows whose tracked component was written since a tick: see [change tracking](change-tracking.md).
 
 ## `Query`: a foreach loop
 

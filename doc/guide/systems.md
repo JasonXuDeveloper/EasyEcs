@@ -58,6 +58,7 @@ method, and the generator compiles it to a struct job with a static filter.
 | `[With<T>]` | the entity must have `T`, which is not passed in; repeatable. With no component parameter, the first `[With<T>]` is the queried component (`[ForEach, With<Dead>] static void Remove(Entity e)`) |
 | `[Without<T>]` | the entity must not have `T`; repeatable |
 | `[WithAny<T>]` | the entity must have at least one of the components named by the method's `[WithAny<T>]` attributes |
+| `[Changed<T>]` | the entity's `T` (`ITrackChanges`) was written since the system last ran ([change tracking](change-tracking.md)); requires `T` like `[With<T>]` |
 
 ```csharp
 public record struct Burning(int Ticks, int DamagePerTick) : IComponent;

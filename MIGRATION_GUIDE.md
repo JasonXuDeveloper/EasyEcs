@@ -61,6 +61,11 @@ New:
   threads; [EECS010](doc/guide/analyzer.md#eecs010) reports methods that could race.
 - `world.Capture()` / `world.Restore(snapshot)`: in-memory snapshots of entities, components and singletons
   ([Snapshots](doc/guide/snapshots.md)).
+- `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>()` / `ChangedSince(tick)`, `world.ChangeTick`,
+  `system.LastRunTick`: change tracking ([Change tracking](doc/guide/change-tracking.md)). `IForEachBatch` gained an
+  optional static `Writes` like the other job interfaces (default: every span is written).
+- `IIndexed<TKey>`, `world.Index<T, TKey>()`, `ValueIndex<T, TKey>`: find entities by a component value; relations
+  are indexed `Entity` keys ([Indexes and relations](doc/guide/indexes-and-relations.md)).
 - The library is marked `IsAotCompatible`: trimming and Native AOT analyzers run on every build, and it publishes
   with Native AOT without warnings.
 

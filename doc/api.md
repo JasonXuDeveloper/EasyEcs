@@ -20,16 +20,19 @@ Notation:
 | `WorldOptions` | sealed class | `Parallel`, `MaxDegreeOfParallelism`, `InitialEntityCapacity`, `MeasureSystems` (init-only). |
 | `Entity` | readonly struct | Handle: `Id`, `Version`, `World`; equality includes the version. |
 | `IComponent` | marker interface | Implemented by component structs. |
+| `ITrackChanges` | marker interface | A component whose rows record the change tick of their last write (`[Changed<T>]`, `QueryFilter.Changed<T>()`). |
+| `IIndexed<TKey>` | interface | A component (`ITrackChanges`) the world indexes by its `Key`; an `Entity` key makes it a relation. |
+| `ValueIndex<T, TKey>` | sealed class | `world.Index<T, TKey>()`: `Find(key)` (enumerator of `Entity`), `TryFind`, `Count`. |
 | `ISingletonComponent` | marker interface | Implemented by singleton structs. |
-| `EcsSystem` | abstract class | `World`, `Priority`, `UpdateInterval`, `Enabled`, `Stats`; `OnCreate` / `OnUpdate` / `OnDestroy`. |
+| `EcsSystem` | abstract class | `World`, `Priority`, `UpdateInterval`, `Enabled`, `Stats`, `LastRunTick`; `OnCreate` / `OnUpdate` / `OnDestroy`. |
 | `SystemStats` | readonly struct | `Runs`, `Last`, `Total`, `Average` of a system's runs; recorded with `WorldOptions.MeasureSystems`. |
 | `SystemAccess` | struct | What a system reads and writes (`Read<T>`, `Write<T>`, `ReadSingleton<T>`, `WriteSingleton<T>`, `RunsAlone`); generated from `[ForEach]` parameters, used by `Parallel` batching. |
-| `ForEachAttribute`, `WithAttribute<T>`, `WithoutAttribute<T>`, `WithAnyAttribute<T>` | attributes | `[ForEach]` methods (`Parallel = true` runs chunks of rows on several threads) and their filters. |
+| `ForEachAttribute`, `WithAttribute<T>`, `WithoutAttribute<T>`, `WithAnyAttribute<T>`, `ChangedAttribute<T>` | attributes | `[ForEach]` methods (`Parallel = true` runs chunks of rows on several threads) and their filters. |
 | `ISystemGroup`, `UpdateInGroupAttribute<TGroup>` | marker / attribute | System groups. |
-| `QueryFilter` | readonly struct | `Create().With<T>().Without<U>().WithAny<V>().WithAny<W>()`. |
+| `QueryFilter` | readonly struct | `Create().With<T>().Without<U>().WithAny<V>().WithAny<W>().Changed<X>().ChangedSince(tick)`; `Since`. |
 | `IForEach<T1..Tn>` | interface | Struct job: `void Execute(int entityId, ref T1 c1, …)`. Optional static overrides: `ReadsId` (false skips loading ids, `entityId` is 0) and `Writes` (bit k - 1 for component k: what to carry over when the job moves its entity; default all). |
 | `IForEachEntity<T1..Tn>` | interface | Struct job receiving the handle: `void Execute(Entity entity, ref T1 c1, …)`. Optional static `Writes`, as for `IForEach`. |
-| `IForEachBatch<T1..Tn>` | interface | Struct job receiving runs of rows: `void Execute(Span<T1> c1, …)`; no structural changes. |
+| `IForEachBatch<T1..Tn>` | interface | Struct job receiving runs of rows: `void Execute(Span<T1> c1, …)`; no structural changes. Optional static `Writes` (which spans the job writes; default all). |
 | `INoStructuralChanges` | marker interface | A job that makes no structural change: its passes skip the bookkeeping (generated for `[ForEach]` methods that cannot change structure). |
 | `QueryEnumerator<T1..Tn>`, `QueryItem<T1..Tn>` | ref structs | Result of `Query`: `item.Entity`, `item.Component1..n` (refs into the row); enumerator `Count`, `IsEmpty`, `Dispose()` (ends the pass; `foreach` calls it). A loop over them cannot `await`. |
 | `SingletonRef<T>` | readonly struct | Stable singleton handle; `.Value` is `ref T`. |
@@ -73,11 +76,19 @@ Notation:
 | `world.Count<T1..Tn>(filter)` | O(M), + S / 64 for tables with rows lacking a queried component | sums table counts, or counts presence bits |
 | `world.Any<T1..Tn>(filter)` | O(M + S / 64) worst | early exit; S / 64 only for tables with rows lacking a queried component |
 | `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1) | build once and keep it in a `static readonly` field; `WithAny` calls form one "at least one of" group |
+| `filter.Changed<T>()` / `filter.ChangedSince(tick)` | O(1); passes test 64 rows per word (4 per SIMD compare) | rows whose `T` (`ITrackChanges`) was written at or after `tick`; `ChangedSince` returns a copy, so a cached filter takes a new tick per call |
 
 The first time a query shape is used, building its cache entry costs O(all archetypes) under the structural gate.
 After that, each lookup is one hash probe. In turn, creating a new archetype (the first entity with a new component
 set) costs O(archetypes + cached query shapes + Σ over the matching cached queries of their archetype count), since
 it is appended (copy-on-write) to the archetype list and to every cached query it matches. Both are cold paths.
+
+## Indexes
+
+| API | Complexity | Notes |
+|---|---|---|
+| `world.Index<T, TKey>()` → `ValueIndex<T, TKey>` | O(1); the first call creates it | one per world and indexed type |
+| `index.Find(key)` / `TryFind(key, out Entity)` / `Count(key)` | O(1) hash probe + O(entities of the key), + O(W / 64 + w) to catch up with the w rows written since the previous lookup (W rows of `T`) | allocation-free after warm-up; drops destroyed entities and removed components as it passes them ([indexes and relations](guide/indexes-and-relations.md)) |
 
 ## Systems, singletons, maintenance
 
@@ -87,6 +98,7 @@ it is appended (copy-on-write) to the archetype list and to every cached query i
 | `world.RemoveSystem<T>()` (calls `OnDestroy`) | O(systems + b²), b = systems of the same priority (batch rebuild); cold path |
 | `world.GetSystem<T>()` | O(systems) |
 | `world.Update()` (default group) / `world.Update<TGroup>()` | Σ systems of the group; allocation-free |
+| `world.ChangeTick` | O(1); grows by one per system batch, once after each update and once per index lookup ([change tracking](guide/change-tracking.md)) |
 | `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` → `ref T` | O(1) |
 | `world.SingletonRef<T>()` → `SingletonRef<T>` (stable handle, `.Value` is `ref T`; adds if missing) | O(1) |
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) |

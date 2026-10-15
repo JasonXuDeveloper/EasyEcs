@@ -18,10 +18,10 @@ dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*Iterate*' --job 
 
 ```
 EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written shared core only)
-  Contracts.cs                 IComponent, ISingletonComponent, INoStructuralChanges
+  Contracts.cs                 IComponent, ITrackChanges, ISingletonComponent, INoStructuralChanges
   Entity.cs                    the entity handle (id, version, world): Has/Get/TryGet/Add/GetOrAdd/Destroy
   EcsSystem.cs                 OnCreate/OnUpdate/OnDestroy + generated GeneratedUpdate / GeneratedAccess
-  ForEachAttributes.cs         [ForEach] (Parallel), [With<T>], [Without<T>], [WithAny<T>]
+  ForEachAttributes.cs         [ForEach] (Parallel), [With<T>], [Without<T>], [WithAny<T>], [Changed<T>]
   SystemGroups.cs              ISystemGroup, [UpdateInGroup<T>] (World.Update<T>() runs a group)
   World.cs                     entity lifecycle (create/destroy, id recycling, lookup, enumeration)
   World.Components.cs          AddBit/AddBits/RemoveBit/RemoveBits (shared core of every Add/Set/Remove), passes
@@ -33,14 +33,18 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
   World.Parallel.cs            allocation-free runner (caller + reusable thread-pool work items) for system batches
                                and the row chunks of parallel [ForEach]
   World.Snapshots.cs           Capture / Restore (WorldSnapshot.cs holds the copies)
+  World.Indexes.cs             world.Index<T, TKey>() (one ValueIndex per indexed component type)
+  ValueIndex.cs                IIndexed<TKey> + ValueIndex: key -> linked entity ids, caught up through change ticks
   SystemAccess.cs              a system's read/write sets (generated from [ForEach] parameters) and the conflict rule
   SystemStats.cs               per-system run counts and times (WorldOptions.MeasureSystems)
   World.Singletons.cs          per-world singletons (ref returns)
   WorldOptions.cs              configuration (Parallel, MeasureSystems, capacities)
-  Query.cs                     QueryFilter (With/Without), QueryKey (required/excluded), RowFilter (per-table mode:
-                               skip / all rows / test presence bits), ArchetypeCursor (shared iteration core)
+  Query.cs                     QueryFilter (With/Without/WithAny/Changed), QueryKey, RowPlan (cached per query and
+                               table), RowFilter (plan + the pass's change tick: skip / all rows / test presence bits
+                               and change ticks), ArchetypeCursor (shared iteration core)
   TypeIndex.cs                 dense per-type index families (ComponentType bit, SingletonType slot, SystemGroup
-                               index, ComponentSignature of multi-component calls) + SingletonBox
+                               index, ComponentSignature of multi-component calls) + SingletonBox + ChangeTicks<T>
+                               (the hidden change-tick column of an ITrackChanges component)
   EntityMeta.cs                16-byte per-entity record (archetype, version, slot)
   Archetype.cs                 a table: mask, entity ids + versions per row, one column per component (unmanaged
                                columns pinned and 64-byte aligned), presence bits + absent counts per column,
@@ -60,11 +64,12 @@ EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, req
   EquatableArray.cs            array with value equality (generator models cache between edits)
   Polyfills.cs                 IsExternalInit for netstandard2.0 (records); do not delete
 EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, Presence, Query, System, ForEachSystem,
-                               Singleton, Concurrency, Parallel, Allocation (0 B budget), Generator (diagnostics +
-                               caching); Fixtures.cs holds the shared test components
+                               Singleton, Concurrency, Parallel, Changed, Index, Snapshot, Allocation (0 B budget),
+                               Generator (diagnostics + caching); Fixtures.cs holds the shared test components
 EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / MultiWorldBenchmark (headline, realistic
-                               server tick; the world itself is WorldSimulation.cs), ParallelSystemsBenchmark +
-                               MicroBenchmarks (diagnostics). Always measure with BenchmarkDotNet.
+                               server tick; the world itself is WorldSimulation.cs), ParallelSystemsBenchmark,
+                               ParallelForEachBenchmark, ChangeTrackingBenchmark, IndexBenchmark + MicroBenchmarks.
+                               Always measure with BenchmarkDotNet.
 EasyEcs.Comparison/            BenchmarkDotNet: the headline world (WorldSimulation.cs, compiled unchanged) ported to
                                Arch, Friflo.Engine.ECS and DefaultEcs, counters checked against EasyEcs
 doc/                           README.md (index), getting-started.md, guide/ (one page per concept, analyzer.md

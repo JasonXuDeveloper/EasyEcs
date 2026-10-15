@@ -42,9 +42,26 @@ flowchart TB
   overflow array (at least 4 × 256 bits, doubled when needed). Overflow masks are allocated when an archetype or a
   transition edge is first built, never on the iteration or structural-change path after warm-up.
 
+- **Change ticks.** A component marked `ITrackChanges` brings a hidden companion column (`ChangeTicks<T>`, 8 bytes
+  per row) into every table that has it: the world's change tick of each row's last write. Writes stamp it (a run of
+  rows with one vectorized fill) and raise two summaries: the latest tick of the column and of each 64-row word (rows
+  copied to another row raise the target's summaries to the source's, so both stay upper bounds). A `Changed` filter
+  skips a table, then a word, older than the pass's tick with one load, and compares the rows of the remaining words
+  4 per SIMD instruction into the same 64-row words as the presence bits: it rides on the row-filter machinery.
+  Untracked components have no column and no stamping code (the checks are JIT-time constants).
+- **Value indexes** (`IIndexed<TKey>`, `world.Index<T, TKey>()`) are built on change ticks: a dictionary from key to
+  a doubly linked list of entity ids (nodes in an array indexed by id). A lookup first re-indexes the rows written
+  since the previous lookup (a `Changed` pass), then walks the key's list and unlinks entries whose entity was
+  destroyed or lost the component (neither leaves a tick). No hook on the write path.
+
 Trade-off: a table copies an entity's row when the entity gains a component its table has no column for, which is
 what makes iteration dense. States that come and go (stunned, burning, dead) only flip presence bits after the first
 time, so they cost no copy; a table with many rows lacking a queried component is walked 64 rows per bit word.
+
+Columns are contiguous arrays, not pages: measured over 100,000 rows, paged columns (1,024 or 16,384 rows per page)
+iterate at the same speed, make random handle access 6-35% slower (one more indirection), and only make growth
+cheaper (0.65 vs 1.17 ms and 1.6 vs 4.2 MB to grow a table from empty). Growth is a warm-up cost that
+`InitialEntityCapacity` removes; handle access and iteration are paid on every tick.
 
 ## Memory layout at a glance
 
@@ -118,7 +135,9 @@ every matching entry is replaced copy-on-write and published with `Volatile.Writ
 observe a list being mutated.
 
 Per pass and table, the row filter picks one of three modes from the column counts: skip the table (no row can
-pass), walk every row (no row lacks a required component or has an excluded one), or test presence bits.
+pass), walk every row (no row lacks a required component or has an excluded one), or test presence bits. A filter
+with `Changed<T>` always tests: its words also AND in the rows whose tick reaches the pass's tick (the cached plan is
+shared by every pass; the tick travels with the pass).
 
 ## Iteration and structural changes
 
