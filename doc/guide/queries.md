@@ -40,7 +40,8 @@ foreach (var item in world.Query<Position, Velocity>(Active))
 }
 ```
 
-The enumerator also exposes `Count` (alive matches) and `IsEmpty`.
+The enumerator and its items are ref structs holding refs into the current table: a loop over a query cannot
+`await`, and an item cannot be stored (keep `item.Entity` instead). The enumerator also exposes `Count` (alive matches) and `IsEmpty`.
 
 ## `ForEach`: a struct job
 
@@ -64,19 +65,28 @@ world.ForEach<Position, Velocity, Integrate>(ref job, Active);
 ```
 
 The job is passed by `ref`, so fields it accumulates (a sum, a counter) are visible after the call. `entityId` is the
-current entity's id; use `world.GetEntity(entityId)` if you need its handle.
+current entity's id. Two variants:
+
+- `IForEachEntity<T1..Tn>` with `world.ForEachEntity` receives the `Entity` handle instead of the id, built from the
+  table without a lookup.
+- `IForEachBatch<T1..Tn>` with `world.ForEachBatch` receives runs of consecutive rows as spans (`Execute(Span<T1>,
+  …)`), for SIMD. The job must not make structural changes.
+
+A job that makes no structural change can say so by implementing `INoStructuralChanges`: the pass then skips the
+bookkeeping that keeps changes safe. Only implement it when the job honors it.
 
 ## `Count` and `Any`
 
 ```csharp
-int burning = world.Count<Burning>();             // sums archetype counts: O(matching archetypes)
+int burning = world.Count<Burning>();             // sums table counts: O(matching archetypes), plus counting
+                                                  // presence bits in tables where some rows lack Burning
 bool anyActive = world.Any<Position>(Active);     // stops at the first match
 ```
 
 ## Cost
 
 The first time a query shape (components + filter) is used, building its cache entry visits every archetype. After
-that, each lookup is one hash probe, and iteration is O(matching archetypes + their slots). Complexities are listed
+that, each lookup is one hash probe, and iteration is O(matching archetypes + their rows). Complexities are listed
 in the [API reference](../api.md#queries).
 
 Changing entities while iterating is allowed; the rules are in [Structural changes](structural-changes.md).

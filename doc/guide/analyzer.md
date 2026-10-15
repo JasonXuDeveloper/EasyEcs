@@ -1,8 +1,8 @@
-# Analyzer rules (EECS001-EECS008)
+# Analyzer rules (EECS001-EECS009)
 
 [Docs index](../README.md) · Related: [Systems](systems.md) · [ECS principles](../ecs-principles.md)
 
-The EasyEcs analyzer ships in the package next to the source generator. EECS001-EECS006 are errors: the generator
+The EasyEcs analyzer ships in the package next to the source generator. EECS001-EECS006 and EECS009 are errors: the generator
 skips invalid input and the analyzer reports it, so "not generated" always means "reported". EECS007-EECS008 are
 warnings that enforce the [ECS principles](../ecs-principles.md).
 
@@ -16,6 +16,7 @@ warnings that enforce the [ECS principles](../ecs-principles.md).
 | [EECS006](#eecs006) | Error | Components and singletons must be structs |
 | [EECS007](#eecs007) | Warning | Systems should be stateless |
 | [EECS008](#eecs008) | Warning | Systems must not reference systems |
+| [EECS009](#eecs009) | Error | A batch `[ForEach]` method takes only spans and singletons |
 
 ## EECS001
 
@@ -27,7 +28,8 @@ Fix: add `partial` to the class (and to any containing types).
 ## EECS002
 
 **Invalid `[ForEach]` parameter.** Every parameter must be a `ref` / `in` / `ref readonly` struct implementing
-`IComponent` or `ISingletonComponent`, an `Entity`, or the `World`.
+`IComponent` or `ISingletonComponent`, a `Span<T>` / `ReadOnlySpan<T>` of an `IComponent` struct, an `Entity`, or
+the `World`.
 
 Fix: pass components and singletons by `ref` (write) or `in` / `ref readonly` (read); remove other parameters and get
 what you need from data instead.
@@ -77,3 +79,12 @@ each other are coupled: neither can be removed, reordered or tested alone.
 
 Fix: write the data the other system reads (a component or a singleton) and order the two with `Priority`. See
 [ECS principles, rule 3](../ecs-principles.md#3-systems-never-reference-systems).
+
+## EECS009
+
+**Batch `[ForEach]` mixes spans and per-entity parameters.** A method that takes component spans receives whole runs
+of rows, so a per-entity parameter (a `ref` / `in` component, an `Entity`) has no single value for the call, and the
+`World` could change rows while the spans point into them.
+
+Fix: take every component as a span (`Span<T>` to write, `ReadOnlySpan<T>` to read) and only singletons besides; or
+write a per-entity method instead.

@@ -45,19 +45,25 @@ public record struct Name(string Value) : IComponent;   // managed references ar
 | `bool TryGet<T>(out T value)` | A **copy** of `T` if present. |
 | `ref T Add<T>()` | Adds `T` (or resets it to `default` if present) and returns a ref. |
 | `ref T GetOrAdd<T>()` | Ref to `T`, adding it with `default` first if missing. |
-| `Entity Set(in T1 … in Tn)` | Adds or overwrites 1-9 values in one archetype transition; chainable. |
-| `void Remove<T1..Tn>()` | Removes 1-9 components in one transition; missing ones are ignored. |
+| `Entity Set(in T1 … in Tn)` | Adds or overwrites 1-9 values, with at most one row copy; chainable. |
+| `void Remove<T1..Tn>()` | Removes 1-9 components; the entity keeps its row. Missing ones are ignored. |
 
 Always mutate through a `ref`; see [`ref` and `await`](refs-and-await.md).
 
-When a component that contains managed references is removed (or its entity destroyed), its slot is cleared so the
+Components live in archetype tables, one row per entity. Removing a component keeps the entity in its table and only
+marks the component absent, so states that come and go never move data; adding back a component the table has a
+column for is just as cheap. Gaining a component the entity's table has no column for copies its row into another
+table, once per new combination of components.
+
+When a component that contains managed references is removed (or its entity destroyed), its value is cleared so the
 GC can collect what it pointed to. Unmanaged components are not cleared: `Add` and `Set` overwrite them anyway.
 
 ### Tags
 
 A tag is an empty component: `public struct Dead : IComponent;`. Tags exist only to be filtered on
-(`[Without<Dead>]`, `QueryFilter.Create().With<Stunned>()`). Use them for states that last (dead, stunned, dirty).
-For something that flips every tick, a field is cheaper than adding and removing a tag: see
+(`[Without<Dead>]`, `QueryFilter.Create().With<Stunned>()`). Use them for states (dead, stunned, burning): adding
+and removing a tag the entity had before flips a bit. For a value that changes every tick, a field is still cheaper:
+see
 [ECS principles, rule 5](../ecs-principles.md#5-choose-the-cheapest-representation-for-frequent-changes).
 
 ### Design tips
@@ -65,6 +71,6 @@ For something that flips every tick, a field is cheaper than adding and removing
 - Keep components small (a few fields, well under a 64-byte cache line) and split rarely-used data into its own
   component: iteration only loads the columns it reads.
 - Spawn with all components at once (`CreateEntity(a, b, c)`) and change several with `Set(a, b)` /
-  `Remove<A, B>()`: one archetype transition instead of several.
+  `Remove<A, B>()`: at most one row copy instead of several.
 - Up to 65,536 component types are supported. The first 256 fit in each archetype mask inline; beyond that a mask
   carries an overflow array (at least 4 × 256 bits, doubled when needed).

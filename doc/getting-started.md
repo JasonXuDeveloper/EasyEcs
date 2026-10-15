@@ -47,10 +47,9 @@ using var world = new World(new WorldOptions { InitialEntityCapacity = 10_000 })
 
 | `WorldOptions` | Default | Meaning |
 |---|---|---|
-| `InitialEntityCapacity` | 1024 | Pre-sized entity capacity, so storage does not grow at run time. |
+| `InitialEntityCapacity` | 1024 | Pre-sized entity array (one 16-byte record per id), so it does not grow at run time. Archetype tables grow on their own, doubling. |
 | `Parallel` | `false` | Run non-conflicting systems of equal priority at the same time (see [Threading](guide/threading.md#parallel-systems)). |
 | `MaxDegreeOfParallelism` | processor count | Limit for `Parallel`. |
-| `SortArchetypesOnUpdate` | `true` | At the start of every update, re-sort the archetypes whose entity order churn degraded, so iteration walks columns forward. |
 
 `Dispose()` calls every system's `OnDestroy` (in reverse order) and releases storage.
 
@@ -189,9 +188,9 @@ ref var stats = ref world.GetSingleton<Stats>();     // ref T, like components
 A `[ForEach]` method takes a singleton as a `ref` / `in` parameter (resolved once per pass, added if missing), and
 `OnUpdate` reaches it through the system's `World` property.
 
-Note the `Without<Dead>` filter on a job that adds `Dead`: an entity that moves into another matching archetype during
-a pass may be visited again, so jobs filter out what they produce. See
-[Structural changes during iteration](guide/structural-changes.md). More on singletons in
+The `Set(new Dead())` applies at once: later systems of the same update already see the corpse, and the
+`Without<Dead>` filter keeps the next updates from counting it again. Each entity is visited at most once per pass;
+see [Structural changes during iteration](guide/structural-changes.md). More on singletons in
 [Singletons](guide/singletons.md).
 
 ## 9. Order systems and react to state

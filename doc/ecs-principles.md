@@ -179,10 +179,10 @@ that state later in the update, in the order `Priority` declares: movement and c
 
 ### 5. Choose the cheapest representation for frequent changes
 
-Adding or removing a component moves the entity to another archetype: a cached edge lookup, then its id is
-tombstoned in the old archetype and appended to the new one (the component data stays where it is). That is fine
-for changes that happen every few ticks (a buff starts or ends). For something that flips every tick, a field is
-cheaper:
+Removing a component, or adding back one the entity had before, flips a presence bit: the entity keeps its row.
+Gaining a component its archetype has no column for copies the entity's row into another table, once. Tags for
+states that come and go (`Stunned`, `Burning`, `Dead`) are therefore cheap. For values that change every tick, a field
+is still cheaper than a structural change:
 
 - a countdown field (`Burning.Ticks`) instead of re-adding a component every tick;
 - change detection by comparison: keep the last sent value in a component and compare it to the current value,
@@ -204,18 +204,22 @@ public partial class SyncSystem : EcsSystem
 }
 ```
 
-### 6. Keep jobs idempotent within an update
+### 6. Let the schedule order effects
 
-Changes are immediate. An entity that a `[ForEach]` job moves into another archetype that the same job matches may be
-visited again in the same pass. Filter out what the job produces:
+Changes are immediate: a component a system adds is visible to every later system of the same update, and to the
+rest of the same pass. Within one pass each entity is visited at most once, and entities that join a matching table
+during the pass (created, or moved into a matching archetype) wait for the next pass. So the order of effects is the order of
+systems, never the order a system happens to visit entities in:
 
 ```csharp
 public partial class DeathSystem : EcsSystem
 {
-    [ForEach, Without<Dead>]   // the job adds Dead, so it skips entities that already have it
+    public override int Priority => 10;   // after combat, before respawn and loot
+
+    [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp)
     {
-        if (hp.Value <= 0) unit.Set(new Dead());
+        if (hp.Value <= 0) unit.Set(new Dead());   // systems after DeathSystem see Dead in this update
     }
 }
 ```
@@ -224,8 +228,8 @@ The full rules are in [Structural changes during iteration](guide/structural-cha
 
 ### 7. Keep entity handles, never `ref`s, across boundaries
 
-A `ref` from `Get<T>()` or a `[ForEach]` parameter is valid until the next structural change (any entity's) and
-never across `await`. Keep `Entity` handles (validated on every access) and re-read components when you need them.
+A `ref` from `Get<T>()` or a `Query` item is valid until the next structural change (any entity's); the `ref`
+parameters of a `[ForEach]` method stay valid through its own body's changes. None is valid across `await`. Keep `Entity` handles (validated on every access) and re-read components when you need them.
 See [`ref` and `await`](guide/refs-and-await.md).
 
 ## Checklist for a new feature

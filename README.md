@@ -12,11 +12,11 @@ catches design mistakes at compile time, and a full server tick allocates 0 byte
 
 | One server tick, 9 systems: movement, AOI, combat, status effects, death, respawn, projectiles | Entities | Time | Allocated |
 |---|---:|---:|---:|
-| One world | 100,000 | **4.33 ms** | **0 B** |
-| Four worlds on four threads (one per thread) | 100,000 | **1.85 ms** | **0 B** |
+| One world | 100,000 | **2.29 ms** | **0 B** |
+| Four worlds on four threads (one per thread) | 100,000 | **1.10 ms** | **0 B** |
 
 <sub>BenchmarkDotNet, .NET 10, 4-core Xeon VM at 2.1 GHz; entities spawn, die, gain and lose components every tick.
-A `[ForEach]` system adding `Velocity` to `Position` costs 1.5 ns per entity (one archetype), within 1.4x of two
+A `[ForEach]` system adding `Velocity` to `Position` costs 0.9 ns per entity (one archetype), faster than two
 plain arrays.
 [Details](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md#benchmarks).</sub>
 
@@ -26,19 +26,20 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
 
 ## Why EasyEcs
 
-- **Fast and garbage-free.** Dense columns per component type, 16-byte entity records (4 per cache line), JIT-inlined
-  struct jobs instead of delegates, lock-free queries. After warm-up nothing allocates: a unit test guards the 0 B
+- **Fast and garbage-free.** Archetype tables with 64-byte-aligned columns that iteration and SIMD walk front to back,
+  16-byte entity records (4 per cache line), JIT-inlined struct jobs instead of delegates, lock-free queries. After warm-up nothing allocates: a unit test guards the 0 B
   budget of updates, queries and structural changes on every run.
-- **Structural changes are cheap.** Adding a status effect, killing a unit or spawning a projectile moves one entity
-  through a cached archetype edge, even in the middle of a pass. State can be tags, not flags.
+- **Structural changes are immediate and cheap.** Add and remove components, spawn and destroy, even in the middle of
+  a pass; no command buffer to flush. Removing a status effect and adding it back flips a presence bit, the entity
+  never moves. State can be tags, not flags.
 - **Write the logic, not the plumbing.** A `[ForEach]` method is the whole system; filters are attributes
   (`[With<T>]`, `[Without<T>]`), singletons are parameters.
-- **Mistakes fail the build.** The bundled analyzer (EECS001-EECS008) reports invalid systems, class components,
+- **Mistakes fail the build.** The bundled analyzer (EECS001-EECS009) reports invalid systems, class components,
   stateful systems and systems that reference each other.
 - **Decoupled by construction.** Systems cooperate only through data, in `Priority` order; system groups give you
   separate cadences (input on every wake, simulation on a fixed tick).
 - **Built for servers that run for months.** Ids are recycled behind version-checked handles, memory is bounded by
-  the peak entity count, structural bookkeeping is lock-protected and never tears; the supported model is one owner
+  the peak entity count, structural bookkeeping is guarded and never tears; the supported model is one owner
   thread per world (see [Threading](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md)),
   and one world per thread scales across cores.
 
@@ -190,7 +191,7 @@ flowchart LR
 | Good fit | Probably not |
 |---|---|
 | Game servers and simulations on .NET 10: MMO maps and zones, AOI, combat | Unity or other runtimes below .NET 10 (`net10.0` only) |
-| Worlds where state flips constantly (buffs, deaths, spawns): structural changes are O(1) | Pure number crunching that never changes structure and needs chunked SoA density |
+| Worlds where state flips constantly (buffs, deaths, spawns): structural changes are immediate and cheap | One huge query that must be split across threads (systems run in parallel, a single query does not yet) |
 | Long-running processes where GC pauses and unbounded growth matter | Code that wants objects with behavior, or systems calling each other |
 | One world per thread, many worlds per process; `Parallel` for heavy independent systems | Many threads mutating one world's component values without coordination |
 
@@ -201,14 +202,19 @@ not a toy loop ([what it simulates](https://github.com/JasonXuDeveloper/EasyEcs/
 
 | Benchmark | Entities | Mean | Allocated |
 |---|---:|---:|---:|
-| WorldSimulationBenchmark.Tick | 10,000 | 252 μs | 0 B |
-| WorldSimulationBenchmark.Tick | 100,000 | 3.01 ms | 0 B |
-| MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.27 ms | 0 B |
+| WorldSimulationBenchmark.Tick | 10,000 | 198 μs | 0 B |
+| WorldSimulationBenchmark.Tick | 100,000 | 2.29 ms | 0 B |
+| MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.10 ms | 0 B |
 
-A `[ForEach]` system adding `Velocity` to `Position` over 10,000 entities (one archetype) takes 15.2 μs, against
-10.6 μs for two plain arrays with no ECS at all. Micro benchmarks (with v3.1.1 numbers for comparison) are in
+The same world ported to other ECS libraries (100,000 entities): Friflo.Engine.ECS 1.98 ms, EasyEcs 2.28 ms,
+DefaultEcs 5.32 ms, Arch 5.65 ms; only Friflo and EasyEcs allocate nothing per tick. Against v4.0.1 (4.33 ms) the
+tick is 1.9x faster, against v3.1.1 every shared operation is faster.
+
+A `[ForEach]` system adding `Velocity` to `Position` over 10,000 entities (one archetype) takes 9.1 μs, against
+10.9 μs for two plain arrays with no ECS at all (its columns are 64-byte aligned). Micro benchmarks (with v3.1.1 and
+v4.0.1 numbers for comparison) and the per-operation comparison are in
 [doc/performance.md](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md); their `ForEach` and
-`Query` rows run on a world with two interleaved archetypes, so they are not directly comparable to the `[ForEach]` row.
+`Query` rows run on a world with two archetypes, so they are not directly comparable to the `[ForEach]` row.
 
 ```bash
 dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*'
@@ -230,13 +236,20 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
 
 ## What's new in 4.1
 
-- Structural changes are cheaper: `CreateEntity(a, b, ...)`, `Set(a, b, ...)` and `Remove<A, B>()` follow cached
-  per-archetype edges (no mask clone or dictionary lookup after the first call per source archetype), and `Destroy`
-  visits only the archetype's precomputed list of columns holding references.
-- Archetypes keep themselves sorted: `Update` / `Update<TGroup>()` re-sort the archetypes that churn disordered
-  (bitmap sort, 0 B), so iteration walks columns forward without calling `CompactArchetypes()`. Don't call them while
-  a query of the same world is iterating. `WorldOptions.SortArchetypesOnUpdate` (default on) turns it off.
-- A realistic 100k-entity server tick went from 4.21 ms to 3.01 ms on the same machine; churn from 986 μs to 617 μs.
+- **Archetype tables.** Each archetype stores its components as columns of rows (structure of arrays); unmanaged
+  columns are pinned and start on a 64-byte boundary. Iteration walks columns front to back, and tables stay dense:
+  a removed row is filled by the last one at once, or when the pass that removed it ends.
+- **Removing a component keeps the row.** It only clears a presence bit, so states that come and go (stunned,
+  burning, dead) never move data; queries skip, walk or test 64 rows per bit word per table.
+- **Stricter iteration with immediate changes.** A pass visits each entity at most once, and `[ForEach]` writes
+  through `ref` parameters survive the body's own structural changes. No command buffer, no idempotency filters.
+- **Batch `[ForEach]` methods** take `Span<T>` / `ReadOnlySpan<T>` and receive whole runs of rows for SIMD
+  (`world.ForEachBatch` for ad-hoc jobs); `world.ForEachEntity` passes the handle to struct jobs.
+- **Jobs that cannot change structure** (detected by the generator, or `INoStructuralChanges`) iterate with no
+  per-entity bookkeeping; structural bookkeeping uses a compare-and-swap gate instead of a lock.
+- A realistic 100k-entity server tick takes 2.29 ms instead of 4.33 ms; toggling a status component on 10,000
+  entities 192 μs instead of 338 μs. Reading a component through a handle is about 20% slower (4.31 vs 3.56 μs per
+  1,000 random handles): the entity's record leads to a table row instead of a column indexed by id.
 
 ## What's new in 4.0
 

@@ -14,16 +14,42 @@ For the current API, see the [documentation](doc/README.md).
 
 ## v4.0 → v4.1
 
-No API is removed. `WorldOptions.SortArchetypesOnUpdate` (default `true`) is new: at the start of every update,
-`Update` / `Update<TGroup>()` re-sort the archetypes whose id order degraded. Two behavioral consequences:
+No public API is removed. Code written for 4.0 compiles unchanged unless it stores `Query` results in fields or
+uses them across `await` (they are ref structs now, see below). The storage moved from one column per component
+type (indexed by entity id) to archetype tables (one row per entity, columns 64-byte aligned), which changes a few
+behaviors:
 
-- **Do not call `Update` while a query of the same world is iterating** (it was never meaningful; now it can reorder
-  the archetype under the iterator).
-- **Iteration order within an archetype can change between updates**: ids are re-sorted ascending. Code that relied
-  on insertion order must not.
+- **Iteration semantics are stricter.** A pass visits each entity at most once: entities created or moved into a
+  matching archetype during the pass are not visited by it (one that only gets a queried component back keeps its
+  row and is visited if the pass has not reached it); entities destroyed or
+  losing a queried component before their turn are skipped. `Without<T>` filters that only existed to stop a job from
+  revisiting what it produced are no longer needed (they still work).
+- **Refs move more often.** A `ref` from `entity.Get<T>()` or a `Query` item can now be invalidated by a structural
+  change of *another* entity (a row filled by a table's last row, a table that grows), not only by entity-capacity
+  growth. The documented rule was already "a ref is valid until the next structural change"; code that relied on
+  refs surviving changes must re-read through `entity.Get<T>()`. The `ref` parameters of `[ForEach]` methods and
+  `ForEach` jobs stay writable when the body changes the visited entity's archetype.
+- **Removing a component keeps the entity's row.** `Has<T>()`, `Get<T>()` and every query treat the component as
+  absent; adding it back is a bit flip.
+- **`Query` results are ref structs.** `QueryEnumerator<…>` and `QueryItem<…>` hold refs into the current table, so
+  a `foreach` over a query cannot contain an `await` and an item cannot be stored. Read what you need, or keep
+  `item.Entity`, then await outside the loop.
+- **Iteration order** follows table rows, not entity ids, and can change when rows are moved or filled. Never rely
+  on it.
+- **`EnsureEntityCapacity` / `InitialEntityCapacity`** pre-size the entity records only; archetype tables grow on
+  their own.
+- **`CompactArchetypes()`** is rarely needed: tables stay dense automatically (a removed row is filled at once, or
+  when the last pass ends). It remains for recovering from a pass interrupted by an exception, which `Update` also
+  does on its own.
 
-Set the option to `false` to keep v4.0 ordering. Routine `CompactArchetypes()` calls after churn are no longer
-needed; it is still useful after a mass despawn, to drop the tombstones of every archetype at once.
+New:
+
+- `[ForEach]` methods can take `Span<T>` / `ReadOnlySpan<T>` components (plus singletons) and receive whole runs of
+  rows, for SIMD ([EECS009](doc/guide/analyzer.md#eecs009) reports mixed signatures). The ad-hoc form is
+  `world.ForEachBatch` with an `IForEachBatch<T1..Tn>` job.
+- `world.ForEachEntity` with an `IForEachEntity<T1..Tn>` job receives the `Entity` handle instead of the id.
+- `INoStructuralChanges` marks a job that makes no structural change; the generator adds it to `[ForEach]` methods
+  that cannot change structure, which then iterate without per-entity bookkeeping.
 
 ## v3.x → v4.0
 
@@ -102,7 +128,7 @@ public partial class S : EcsSystem
 2. **Stale handles are rejected**: access and structural changes throw; `Destroy` of a stale handle is ignored.
 3. **Removing a component / destroying an entity releases managed references** held by the component.
 4. **Components and singletons must be structs**: the analyzer reports `EECS006` for classes.
-5. Never call `CompactArchetypes()` while iterating (it now also sorts entity ids).
+5. Never call `CompactArchetypes()` while iterating (it rewrites rows).
 6. **Systems should be stateless and independent**: the analyzer warns about mutable fields on systems (`EECS007`,
    move the state into a component or singleton) and about systems referencing other systems (`EECS008`,
    communicate through data). See [doc/ecs-principles.md](doc/ecs-principles.md).

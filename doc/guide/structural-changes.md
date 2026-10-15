@@ -3,41 +3,43 @@
 [Docs index](../README.md) · Related: [Queries](queries.md) · [Systems](systems.md) ·
 [Architecture: iteration](../architecture.md#iteration-and-structural-changes)
 
-A structural change is anything that changes which archetype an entity lives in: creating or destroying entities,
-adding or removing components. EasyEcs is an **immediate-mode** ECS: changes apply at once, there is no command buffer
-to flush, and later systems in the same update see them.
+A structural change is anything that changes an entity's component set: creating or destroying entities, adding or
+removing components. EasyEcs is an **immediate-mode** ECS: changes apply at once, there is no command buffer to
+flush, and later code in the same pass and later systems in the same update see them.
 
 Inside `[ForEach]`, `ForEach` and `Query`, you can create and destroy entities and add or remove components. The
 rules:
 
-- **Removed entities are skipped.**
-- **Entities created during the pass may or may not be visited.**
-- **An entity that moves into another matching archetype during the pass may be visited again.** For example, a
-  method that adds `Dead` to an entity it still matches may see that entity again (when the target archetype already
-  existed and comes later in the pass).
-
-Make such methods idempotent with a filter that excludes what the method produces. This is the usual rule for
-immediate-mode ECS:
+- **A pass visits each entity at most once.**
+- **Entities that stop matching before their turn are skipped**: destroyed, or a queried component removed, or an
+  excluded one added.
+- **Entities that join a matching table during the pass are not visited by it**: created, or moved into a matching
+  archetype. The next pass sees them. An entity that gets a queried component back without moving (its row only
+  flips a presence bit) is visited if the pass has not reached its row yet.
 
 ```csharp
 public partial class DeathSystem : EcsSystem
 {
-    [ForEach, Without<Dead>]   // the job adds Dead, so it skips entities that already have it
-    static void Die(Entity unit, in Health hp)
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health hp, ref Score score)
     {
-        if (hp.Value <= 0) unit.Set(new Dead());
+        if (hp.Value > 0) return;
+        unit.Set(new Dead());   // applied now: later systems of this update already see the corpse
+        score.Deaths++;
     }
 }
 ```
 
 Other rules:
 
-- Each entity gets fresh refs: the iterator re-reads storage before the next entity. Inside one body, a `ref`
-  (including the method's `ref`/`in` parameters and `item.ComponentN`) is only guaranteed until that body makes a
-  structural change. Write through your refs before the change (for example before creating entities), or re-read
-  through `entity.Get<T>()` afterwards (see [`ref` and `await`](refs-and-await.md)).
-- Never call `world.CompactArchetypes()` or `Update()` / `Update<TGroup>()` while a query of the same world is
-  iterating: they re-sort archetypes (`Update` does when `WorldOptions.SortArchetypesOnUpdate` is on, the default).
-  Call `CompactArchetypes()` between updates, and `Update` only from outside any query of that world.
-- Prefer a field to adding and removing a component for state that flips every tick
+- Each entity gets fresh refs. The `ref` parameters of a `[ForEach]` method or `ForEach` job stay writable when the
+  body changes the visited entity's archetype (the writes are carried over to its new row). Any other `ref` (from
+  `entity.Get<T>()`, a `Query` item, or another entity) is only guaranteed until the next structural change: write
+  through it before the change, or re-read through `entity.Get<T>()` afterwards (see
+  [`ref` and `await`](refs-and-await.md)).
+- Batch `[ForEach]` methods (span parameters) and `ForEachBatch` jobs receive spans into the tables, so they must not
+  make structural changes.
+- Don't call `Update()` / `Update<TGroup>()` or `CompactArchetypes()` while a query of the same world is iterating.
+- Removing a component and adding it back is cheap: the entity keeps its row and only a presence bit flips. Gaining a
+  component the entity's archetype never had copies its row once
   ([ECS principles, rule 5](../ecs-principles.md#5-choose-the-cheapest-representation-for-frequent-changes)).

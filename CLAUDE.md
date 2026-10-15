@@ -18,37 +18,45 @@ dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*Iterate*' --job 
 
 ```
 EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written shared core only)
-  Contracts.cs                 IComponent, ISingletonComponent
+  Contracts.cs                 IComponent, ISingletonComponent, INoStructuralChanges
   Entity.cs                    the entity handle (id, version, world): Has/Get/TryGet/Add/GetOrAdd/Destroy
   EcsSystem.cs                 OnCreate/OnUpdate/OnDestroy + generated GeneratedUpdate / GeneratedAccess
   ForEachAttributes.cs         [ForEach], [With<T>], [Without<T>]
   SystemGroups.cs              ISystemGroup, [UpdateInGroup<T>] (World.Update<T>() runs a group)
   World.cs                     entity lifecycle (create/destroy, id recycling, lookup, enumeration)
-  World.Components.cs          columns + AddBit/AddBits/RemoveBit/RemoveBits (shared core of every Add/Set/Remove)
-  World.Archetypes.cs          archetype registry, transition edges, copy-on-write query cache, compaction +
-                               automatic re-sort of disordered archetypes at the start of Update
+  World.Components.cs          AddBit/AddBits/RemoveBit/RemoveBits (shared core of every Add/Set/Remove), passes
+                               (BeginPass/EndPass, tombstones closed by the last pass), CarryOver
+  World.Archetypes.cs          archetype registry, transition edges, copy-on-write query cache, CompactArchetypes,
+                               the structural gate (Structural())
+  StructuralGate.cs            CAS gate on its own cache line (not reentrant) + StructuralScope
   World.Systems.cs             system groups, priority order, parallel batches, synchronous Update / Update<TGroup>
   World.Parallel.cs            allocation-free batch runner (caller + reusable thread-pool work items)
   SystemAccess.cs              a system's read/write sets (generated from [ForEach] parameters) and the conflict rule
   World.Singletons.cs          per-world singletons (ref returns)
   WorldOptions.cs              configuration
-  Query.cs                     QueryFilter (With/Without), QueryKey, ArchetypeCursor (shared iteration core)
+  Query.cs                     QueryFilter (With/Without), QueryKey (required/excluded), RowFilter (per-table mode:
+                               skip / all rows / test presence bits), ArchetypeCursor (shared iteration core)
   TypeIndex.cs                 dense per-type index families (ComponentType bit, SingletonType slot, SystemGroup
                                index, ComponentSignature of multi-component calls) + SingletonBox
   EntityMeta.cs                16-byte per-entity record (archetype, version, slot)
-  Archetype.cs                 mask + component bits + entity ids (tombstones, free slots) + per-bit add/remove
-                               edges + per-signature set edges; Unordered/NeedsSort, bitmap-sort Compact
+  Archetype.cs                 a table: mask, entity ids + versions per row, one column per component (unmanaged
+                               columns pinned and 64-byte aligned), presence bits + absent counts per column,
+                               per-bit and per-signature add transitions (copy plans); swap-remove / tombstones,
+                               FillHoles
+  ComponentInfo.cs             per-type column operations (size, managed, create/grow/copy/clear) indexed by bit
   Tag.cs                       256-bit SIMD bitset with overflow
 EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, required by Roslyn hosts)
-  ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove, World.CreateEntity, IForEach,
-                               ForEach/Query/Count/Any, QueryItem/QueryEnumerator), one template each
-  SystemGenerator.cs           [ForEach] -> struct jobs + GeneratedUpdate + GeneratedAccess
-  EasyEcsAnalyzer.cs           EECS001-008 (generators never report diagnostics)
+  ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove, World.CreateEntity,
+                               IForEach/IForEachEntity/IForEachBatch, ForEach/ForEachEntity/ForEachBatch with their
+                               row loops, Query/Count/Any, QueryItem/QueryEnumerator), one template each
+  SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
+                               the method cannot change structure) + GeneratedUpdate + GeneratedAccess
+  EasyEcsAnalyzer.cs           EECS001-009 (generators never report diagnostics)
   Symbols.cs                   symbol checks shared by generator and analyzer
   Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
   EquatableArray.cs            array with value equality (generator models cache between edits)
   Polyfills.cs                 IsExternalInit for netstandard2.0 (records); do not delete
-EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, Query, System, ForEachSystem,
+EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, Presence, Query, System, ForEachSystem,
                                Singleton, Concurrency, Parallel, Allocation (0 B budget), Generator (diagnostics +
                                caching); Fixtures.cs holds the shared test components
 EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / MultiWorldBenchmark (headline, realistic
@@ -57,7 +65,7 @@ EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / Multi
 EasyEcs.Comparison/            BenchmarkDotNet: the headline world (WorldSimulation.cs, compiled unchanged) ported to
                                Arch, Friflo.Engine.ECS and DefaultEcs, counters checked against EasyEcs
 doc/                           README.md (index), getting-started.md, guide/ (one page per concept, analyzer.md
-                               lists EECS001-008), api.md (API + complexity), ecs-principles.md, architecture.md,
+                               lists EECS001-009), api.md (API + complexity), ecs-principles.md, architecture.md,
                                performance.md (diagrams in mermaid)
 ```
 
@@ -73,8 +81,8 @@ doc/                           README.md (index), getting-started.md, guide/ (on
    keep cold data out of hot structs. Bound memory: recycle ids/slots/buffers instead of growing.
 4. **Thread safety is explicit**: every shared structure documents its contract (single owner vs. lock vs.
    lock-free). The archetype lists lock-free readers walk are immutable snapshots (copy-on-write arrays
-   published with `Volatile.Write`); per-archetype id arrays and columns are mutated under `World.StructuralLock`,
-   which is why component values need one owner thread.
+   published with `Volatile.Write`); tables (id arrays, columns, presence bits) are mutated under the world's
+   structural gate (`World.Structural()`), which is why component values need one owner thread.
 5. **Concise, elegant, no duplication**: write one implementation and generate arity variants (`EasyEcs.Generator`)
    instead of copy-pasting T1..T9 code by hand. Prefer small shared non-generic cores with thin typed wrappers.
 6. **Every change is proven**: unit tests for behavior (`EasyEcs.UnitTest`) and BenchmarkDotNet numbers for
@@ -97,15 +105,15 @@ doc/                           README.md (index), getting-started.md, guide/ (on
 - **Generators follow the incremental rules**: `ForAttributeWithMetadataName` or syntax-only predicates first,
   equatable symbol-free models, no diagnostics from generators (add them to `EasyEcsAnalyzer` using `Symbols`), a
   tracking name per stage and a caching assertion in `GeneratorTests`.
-- **Structural changes go through the lock** (`StructuralLock`) and through `MoveToArchetype` / `AddBit(s)` /
-  `RemoveBit(s)` (and `Archetype.Compact`, which rewrites ids and slots); never mutate `Archetype.EntityIds` or
-  `EntityMeta` directly elsewhere.
-- **Per-entity state is `EntityMeta` only** (16 bytes). Do not add per-entity arrays or fields without measuring:
-  the component set is the archetype mask.
-- **Storage reallocation must bump `StorageVersion`** (columns, `Meta`, archetype id arrays, compaction and the
-  update-time re-sort) so in-flight `ForEach` passes refresh their cached arrays.
+- **Structural changes go through the gate** (`using (Structural())`, CAS, not reentrant) and through `AddBit(s)` /
+  `RemoveBit(s)` / `MoveTo` / `RemoveRow` (and `Archetype.FillHoles`, which rewrites rows and slots); never mutate
+  `Archetype.EntityIds`, presence bits or `EntityMeta` directly elsewhere.
+- **Per-entity state outside the tables is `EntityMeta` only** (16 bytes). Do not add per-entity arrays or fields
+  without measuring: the component set is the archetype mask (plus the row's presence bits).
+- **Every change a pass must notice bumps `StorageVersion`**: reallocation (columns, `Meta`, id arrays), row moves,
+  closing tombstones, and presence bits flipping, so in-flight passes refresh their refs and re-read row filters.
 - **Docs**: diagrams are mermaid; `doc/api.md` lists the complexity of every public API (README is the landing page).
-- **Entity ids are recycled**: any id-keyed API must also validate the version (`ThrowIfStale`, `Entity.Archetype`).
+- **Entity ids are recycled**: any id-keyed API must also validate the version (`World.Live`, `Entity.ThrowStale`).
 - Behavioral/breaking changes need a `MIGRATION_GUIDE.md` entry and a README "What's new" entry.
 - Commits: logic, docs and CI in separate commits. The author is the repository owner; the committer is the
   environment's signing identity so the signature shows as Verified. No session links in commit messages.

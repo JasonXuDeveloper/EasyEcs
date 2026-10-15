@@ -50,6 +50,7 @@ method, and the generator compiles it to a struct job with a static filter.
 | `ref T` / `in T` (`T : ISingletonComponent`) | the world's singleton, resolved once per pass (added if missing) |
 | `Entity entity` | handle of the current entity (structural changes, destroy) |
 | `World world` | the world (useful in static methods) |
+| `Span<T>` / `ReadOnlySpan<T>` (`T : IComponent`) | a batch method: whole runs of matching rows at once (see below) |
 
 | Attribute | Meaning |
 |---|---|
@@ -73,14 +74,39 @@ public partial class BurnSystem : EcsSystem
 }
 ```
 
+A static method that takes no `World` and uses its `Entity` (if any) only to read (`Id`, `Version`, `IsAlive`, `Has`,
+`Get`, `TryGet`) cannot change structure, so its job skips the bookkeeping that structural changes need and walks
+each table with no per-entity check.
+
+### Batch methods
+
+A method whose component parameters are spans receives runs of consecutive matching rows: element `i` of every span
+belongs to the same entity, and a table where every row matches is a single call. Spans let the method use SIMD.
+Its other parameters can only be singletons ([EECS009](analyzer.md#eecs009)), and it must not make structural changes.
+
+```csharp
+public partial class DriftSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Drift(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
+    {
+        for (int i = 0; i < positions.Length; i++)
+        {
+            positions[i].X += velocities[i].X;
+            positions[i].Y += velocities[i].Y;
+        }
+    }
+}
+```
+
 `[ForEach]` methods run in source order, and derived systems run the base class's `[ForEach]` methods first. Keep a
 system's `[ForEach]` methods in one file: across the files of a `partial` class, the order is by position within each
 file, which is rarely what you mean. Mistakes (missing `partial`, an invalid parameter, zero components without a
 `[With<T>]` or more than 9, generic systems, `[ForEach]` outside a system) are compile errors: see
 [Analyzer rules](analyzer.md).
 
-Make methods that change the entity's archetype idempotent with a filter: see
-[Structural changes during iteration](structural-changes.md).
+Methods may change structure (create, destroy, `Set`, `Remove`): changes apply at once and each entity is visited at
+most once per pass. See [Structural changes during iteration](structural-changes.md).
 
 ## System groups
 

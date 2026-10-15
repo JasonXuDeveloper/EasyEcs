@@ -38,7 +38,7 @@ flowchart TB
 
 Worlds share nothing, so a server that splits its entities over several worlds, each owned by one thread (for example
 one world per map or zone), needs no synchronization at all,
-and every lock inside the world stays uncontended. `MultiWorldBenchmark` measures exactly this layout (one world per
+and the world's structural gate stays uncontended. `MultiWorldBenchmark` measures exactly this layout (one world per
 core, each on its own long-lived thread): see [Performance](../performance.md#benchmarks).
 
 ```mermaid
@@ -81,7 +81,7 @@ scheduler only puts non-conflicting systems together.
 |---|---|
 | `ref T` component / singleton | writes `T` |
 | `in T` component / singleton | reads `T` |
-| `[With<T>]` / `[Without<T>]` | nothing (filters read the archetype, which no parallel system changes) |
+| `[With<T>]` / `[Without<T>]` | nothing (filters read the archetype and presence bits, which no parallel system changes) |
 | `Entity` or `World`, an instance method, an `OnUpdate` override, or no `[ForEach]` method | runs alone |
 
 Two systems conflict when one writes a component or singleton the other reads or writes, or when either runs alone.
@@ -142,13 +142,43 @@ handful. For a server, one world per thread usually uses the cores better: see
 
 | Operation | Safety |
 |---|---|
-| Structural changes (create/destroy, `Add`/`Set`/`Remove`), adding/removing systems and singletons | Take the world's `System.Threading.Lock`: the world's structure never tears. |
-| Query matching, `Has`, `Get` lookups | Lock-free over immutable, copy-on-write archetype snapshots (the first use of a query shape takes the lock once to build its cache entry). |
+| Structural changes (create/destroy, `Add`/`Set`/`Remove`), adding/removing systems and singletons | Enter the world's structural gate (a compare-and-swap flag): the world's structure never tears. |
+| Query matching, `Has`, `Get` lookups | Lock-free over immutable, copy-on-write archetype snapshots (the first use of a query shape enters the gate once to build its cache entry). |
 | Component and singleton **values** | Not synchronized, by design: the owner thread, or the parallel scheduler, decides who touches them. |
 
-The lock protects the world's bookkeeping, not your data: a `ref` or a running query on one thread does not survive a
+The gate protects the world's bookkeeping, not your data: a `ref` or a running query on one thread does not survive a
 structural change made by another thread. So use one owner thread per world, with `Parallel` for systems the
 scheduler checked; do not mutate one world from several threads of your own.
+
+## Input from other threads
+
+A world has one owner thread, and EasyEcs adds no cross-thread queue of its own: structural changes are immediate on
+that thread, so there is nothing to defer. Input from other threads (network, timers, a database) goes through a queue
+the caller owns, and a system on the owner thread drains it into data:
+
+```csharp
+using System.Collections.Concurrent;
+
+public record struct MoveRequest(int PlayerId, float X, float Y);           // a message, not a component
+public record struct MoveIntent(int PlayerId, float X, float Y) : IComponent;
+
+public sealed class ReceiveMoves(ConcurrentQueue<MoveRequest> inbox) : EcsSystem
+{
+    private readonly ConcurrentQueue<MoveRequest> _inbox = inbox;          // filled by the network threads
+
+    protected override void OnUpdate()
+    {
+        while (_inbox.TryDequeue(out var move))
+            World.CreateEntity(new MoveIntent(move.PlayerId, move.X, move.Y));   // input becomes data
+    }
+}
+```
+
+Register it with `world.AddSystem(new ReceiveMoves(inbox))`, before the systems that consume `MoveIntent` (and destroy
+it when handled). The queue's type, bound and back-pressure are the application's choice. Other libraries meet the
+same need with thread-safe command buffers (Arch, Friflo's synced buffer, DefaultEcs' recorder, Unity's parallel
+writer), which exist mainly so parallel jobs can record structural changes; Bevy uses this same pattern, a channel
+drained by a system.
 
 ## Compared with other ECS libraries
 
