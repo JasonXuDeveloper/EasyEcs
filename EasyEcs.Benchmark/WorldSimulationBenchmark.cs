@@ -33,11 +33,11 @@ public class WorldSimulationBenchmark
 }
 
 /// <summary>
-/// Sharded server: one world per core, each ticked by its own thread (the recommended layout).
+/// Many worlds per process: one world per core, each ticked by its own thread (the recommended layout).
 /// Measures scaling and contention on process-wide state (component registry, pools).
 /// </summary>
 [MemoryDiagnoser]
-public class ShardedWorldBenchmark
+public class MultiWorldBenchmark
 {
     [Params(100_000)] public int TotalEntities;
 
@@ -49,19 +49,19 @@ public class ShardedWorldBenchmark
     [GlobalSetup]
     public void Setup()
     {
-        int shards = Environment.ProcessorCount;
-        _worlds = new World[shards];
-        for (int i = 0; i < shards; i++)
+        int worlds = Environment.ProcessorCount;
+        _worlds = new World[worlds];
+        for (int i = 0; i < worlds; i++)
         {
-            _worlds[i] = Simulation.Create(TotalEntities / shards);
+            _worlds[i] = Simulation.Create(TotalEntities / worlds);
             Simulation.WarmUp(_worlds[i]);
         }
 
-        // Long-lived shard threads, like a real server (no thread pool hops per tick).
-        _start = new Barrier(shards + 1);
-        _done = new Barrier(shards + 1);
-        _threads = new Thread[shards];
-        for (int i = 0; i < shards; i++)
+        // Long-lived owner threads, like a real server (no thread pool hops per tick).
+        _start = new Barrier(worlds + 1);
+        _done = new Barrier(worlds + 1);
+        _threads = new Thread[worlds];
+        for (int i = 0; i < worlds; i++)
         {
             var world = _worlds[i];
             _threads[i] = new Thread(() =>
@@ -86,9 +86,9 @@ public class ShardedWorldBenchmark
         foreach (var w in _worlds) w.Dispose();
     }
 
-    /// <summary>One tick of every shard in parallel.</summary>
+    /// <summary>One tick of every world, each on its own thread.</summary>
     [Benchmark]
-    public void TickAllShards()
+    public void TickAllWorlds()
     {
         _start.SignalAndWait();
         _done.SignalAndWait();
