@@ -3,11 +3,37 @@
 [Docs index](../README.md) · Related: [Architecture: threading](../architecture.md#threading) ·
 [Systems](systems.md#one-update)
 
+- [Terms: process, world, owner thread, shard](#terms-process-world-owner-thread-shard)
 - [Recommended: one world per shard](#recommended-one-world-per-shard)
 - [Order of systems](#order-of-systems)
 - [Parallel systems](#parallel-systems)
 - [What the world synchronizes](#what-the-world-synchronizes)
 - [Compared with other ECS libraries](#compared-with-other-ecs-libraries)
+
+## Terms: process, world, owner thread, shard
+
+| Term | Meaning |
+|---|---|
+| **Process** | Your server. It can hold any number of worlds; nothing is shared between them except type indices. |
+| **World** | One isolated set of entities, components, singletons and systems (`new World()`). |
+| **Owner thread** | The thread that calls `world.Update()` and touches the world's data. One at a time per world. |
+| **Shard** | Not an EasyEcs type: the server pattern of one owner thread plus one world (DaServer's shards are exactly this). |
+| **`Parallel`** | Inside one `Update()` call, the world borrows thread-pool threads to run a batch of non-conflicting systems; the owner thread takes part and `Update()` returns only when the batch is done. Ownership does not change. |
+
+So it is not "one process per world": a process runs many worlds side by side (one per shard), and each world can
+additionally spread one update over several cores with `Parallel`.
+
+```mermaid
+flowchart TB
+    subgraph P [process]
+        subgraph S1 [shard 1 = owner thread 1 + world 1]
+            U1["world1.Update()"]
+        end
+        subgraph S2 [shard 2 = owner thread 2 + world 2]
+            U2["world2.Update()"] -->|Parallel: a batch of non-conflicting systems| TP[thread-pool helpers]
+        end
+    end
+```
 
 ## Recommended: one world per shard
 
@@ -33,6 +59,17 @@ higher priority ([ECS principles](../ecs-principles.md#3-systems-never-reference
 
 Structural changes apply immediately, so a later system in the same update already sees an entity that an earlier
 one created, destroyed or tagged. There are no command buffers to play back and no "end of frame" sync points.
+
+Dependencies are expressed through data and `Priority`, never through `before`/`after` links between systems:
+
+- **A produces, B consumes a component** (A writes `Velocity`, B reads it): give B a higher priority, or register it
+  after A. Even at the same priority with `Parallel`, they conflict on `Velocity`, so they are in different batches and
+  A finishes first.
+- **A changes structure, B reacts** (A adds `Dead`, B destroys dead entities): A needs an `Entity` parameter to add the
+  tag, so it runs alone; B runs after it.
+- **A and B touch disjoint data**: their order cannot change the result, so `Parallel` may run them together.
+
+In every case the result of an update equals running the systems one by one in `Priority` / registration order.
 
 ## Parallel systems
 

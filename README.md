@@ -105,11 +105,11 @@ public partial class RespawnSystem : EcsSystem              // reacts to Dead; D
 {
     public override int Priority => 4;
 
-    [ForEach, With<Player>]
-    static void Respawn(Entity unit, ref Health hp, in Dead _) { hp.Value = hp.Max; unit.Remove<Dead>(); }
+    [ForEach, With<Player>, With<Dead>]
+    static void Respawn(Entity unit, ref Health hp) { hp.Value = hp.Max; unit.Remove<Dead>(); }
 
-    [ForEach, Without<Player>]
-    static void Despawn(Entity unit, in Dead _) => unit.Destroy();
+    [ForEach, With<Dead>, Without<Player>]   // filters only: the method takes just the entity
+    static void Despawn(Entity unit) => unit.Destroy();
 }
 
 public partial class ProjectileSystem : EcsSystem
@@ -233,6 +233,8 @@ v4 is a rewrite for .NET 10 with standard ECS vocabulary in a single `EasyEcs` n
 - The analyzer enforces the ECS principles (EECS006-EECS008); events were replaced by state-as-data.
 - `WorldOptions.Parallel` runs systems of one priority together only when their generated read/write access does
   not conflict: parallel with the same result as sequential, allocation-free.
+- A `[ForEach]` method may take no component when a `[With<T>]` names what to query
+  (`[ForEach, With<Dead>] static void Remove(Entity e)`).
 
 See the [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md) for every rename and behavioral change.
 

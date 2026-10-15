@@ -157,8 +157,8 @@ public partial class CorpseSystem : EcsSystem
 {
     public override int Priority => 20;   // after DeathSystem
 
-    [ForEach]
-    static void Remove(Entity unit, in Dead _) => unit.Destroy();
+    [ForEach, With<Dead>]
+    static void Remove(Entity unit) => unit.Destroy();
 }
 ```
 

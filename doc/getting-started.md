@@ -146,7 +146,9 @@ world.AddSystem<MovementSystem>();
 
 - `ref` parameters are written, `in` parameters are read; 1 to 9 components. This is also the system's declared
   access, which lets `WorldOptions.Parallel` run non-conflicting systems at the same time.
-- `[With<T>]` requires a component that is not passed in; `[Without<T>]` excludes entities that have it.
+- `[With<T>]` requires a component that is not passed in; `[Without<T>]` excludes entities that have it. A method
+  can take no component at all when a `[With<T>]` names what to query: `[ForEach, With<Dead>] static void
+  Remove(Entity e)`.
 - An `Entity` parameter gives the current entity's handle; a `World` parameter gives the world (handy in static
   methods).
 
@@ -202,8 +204,8 @@ public partial class CorpseSystem : EcsSystem
 {
     public override int Priority => 10;      // after the default priority 0
 
-    [ForEach]
-    static void Remove(Entity entity, in Dead _) => entity.Destroy();
+    [ForEach, With<Dead>]
+    static void Remove(Entity entity) => entity.Destroy();
 }
 ```
 

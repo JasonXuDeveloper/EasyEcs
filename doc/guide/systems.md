@@ -54,7 +54,7 @@ method, and the generator compiles it to a struct job with a static filter.
 | Attribute | Meaning |
 |---|---|
 | `[ForEach]` | run the method for every matching entity |
-| `[With<T>]` | the entity must have `T`, which is not passed in; repeatable |
+| `[With<T>]` | the entity must have `T`, which is not passed in; repeatable. With no component parameter, the first `[With<T>]` is the queried component (`[ForEach, With<Dead>] static void Remove(Entity e)`) |
 | `[Without<T>]` | the entity must not have `T`; repeatable |
 
 ```csharp
