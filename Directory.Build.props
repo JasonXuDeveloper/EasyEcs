@@ -1,0 +1,7 @@
+<Project>
+    <!-- Single source of the version: the package, EasyEcs.Core and the bundled EasyEcs.Generator all carry it.
+         The Release workflow bumps it here. -->
+    <PropertyGroup>
+        <Version>3.1.1</Version>
+    </PropertyGroup>
+</Project>

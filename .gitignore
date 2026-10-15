@@ -6,3 +6,5 @@ riderModule.iml
 /.idea
 **/.DS_Store
 EasyEcs.sln.DotSettings.user
+BenchmarkDotNet.Artifacts/
+artifacts/
