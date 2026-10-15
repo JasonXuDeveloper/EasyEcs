@@ -24,7 +24,7 @@ Notation:
 | `EcsSystem` | abstract class | `World`, `Priority`, `UpdateInterval`, `Enabled`, `Stats`; `OnCreate` / `OnUpdate` / `OnDestroy`. |
 | `SystemStats` | readonly struct | `Runs`, `Last`, `Total`, `Average` of a system's runs; recorded with `WorldOptions.MeasureSystems`. |
 | `SystemAccess` | struct | What a system reads and writes (`Read<T>`, `Write<T>`, `ReadSingleton<T>`, `WriteSingleton<T>`, `RunsAlone`); generated from `[ForEach]` parameters, used by `Parallel` batching. |
-| `ForEachAttribute`, `WithAttribute<T>`, `WithoutAttribute<T>`, `WithAnyAttribute<T>` | attributes | `[ForEach]` methods and their filters. |
+| `ForEachAttribute`, `WithAttribute<T>`, `WithoutAttribute<T>`, `WithAnyAttribute<T>` | attributes | `[ForEach]` methods (`Parallel = true` runs chunks of rows on several threads) and their filters. |
 | `ISystemGroup`, `UpdateInGroupAttribute<TGroup>` | marker / attribute | System groups. |
 | `QueryFilter` | readonly struct | `Create().With<T>().Without<U>().WithAny<V>().WithAny<W>()`. |
 | `IForEach<T1..Tn>` | interface | Struct job: `void Execute(int entityId, ref T1 c1, …)`. Optional static overrides: `ReadsId` (false skips loading ids, `entityId` is 0) and `Writes` (bit k - 1 for component k: what to carry over when the job moves its entity; default all). |
@@ -33,6 +33,7 @@ Notation:
 | `INoStructuralChanges` | marker interface | A job that makes no structural change: its passes skip the bookkeeping (generated for `[ForEach]` methods that cannot change structure). |
 | `QueryEnumerator<T1..Tn>`, `QueryItem<T1..Tn>` | ref structs | Result of `Query`: `item.Entity`, `item.Component1..n` (refs into the row); enumerator `Count`, `IsEmpty`, `Dispose()` (ends the pass; `foreach` calls it). A loop over them cannot `await`. |
 | `SingletonRef<T>` | readonly struct | Stable singleton handle; `.Value` is `ref T`. |
+| `WorldSnapshot` | sealed class | Copies of a world's entities, components and singletons (`world.Capture()`); `EntityCount`. |
 
 ## Entities
 
@@ -66,6 +67,7 @@ Notation:
 |---|---|---|
 | `[ForEach]` method / `world.ForEach<T1..Tn, TJob>(ref job, filter)` | O(M + S) | fastest: struct job, no delegate |
 | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` | O(M + S) | like `ForEach`, the job receives the `Entity` |
+| `world.ForEachParallel<T1..Tn, TJob>(ref job, filter)` / `ForEachEntityParallel` | O(M + S), divided over up to `MaxDegreeOfParallelism` threads | `INoStructuralChanges` jobs; chunks of `World.ChunkRows` rows, one job copy per chunk (state is not merged); fewer than two chunks run on the calling thread |
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + runs) | spans of consecutive rows; one call for a table whose rows all match |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | `item.Entity`, `item.Component1..n` (refs) |
 | `world.Count<T1..Tn>(filter)` | O(M), + S / 64 for tables with rows lacking a queried component | sums table counts, or counts presence bits |
@@ -90,6 +92,8 @@ it is appended (copy-on-write) to the archetype list and to every cached query i
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) |
 | `world.CompactArchetypes()` | O(archetypes + tombstones × columns); tables are kept dense automatically, so this is only needed after a pass was interrupted by an exception (which `Update` also handles) |
 | `world.GetFragmentationStats()` → `(TotalSlots, AliveEntities, FragmentationRatio)` | O(archetypes) |
+| `world.Capture()` → `WorldSnapshot` | O(entities × components + archetypes + singletons); copies by value, not while a query iterates |
+| `world.Restore(snapshot)` | O(entities × components + archetypes + singletons); snapshot handles are valid again, later ones stale; not while a query iterates |
 
 Other `World` members:
 

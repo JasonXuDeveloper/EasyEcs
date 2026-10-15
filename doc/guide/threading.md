@@ -138,6 +138,13 @@ hand-off to the thread pool (microseconds), so it pays for systems that iterate 
 handful. For a server, one world per thread usually uses the cores better: see
 [Performance](../performance.md#benchmarks) (`ParallelSystemsBenchmark`, `MultiWorldBenchmark`).
 
+## Parallel `[ForEach]` methods
+
+`Parallel` runs several systems at once; `[ForEach(Parallel = true)]` splits one method's rows across threads (see
+[Systems](systems.md#parallel-methods)). The two compose: inside a parallel batch, a parallel method whose chunk
+runner is busy with another system's method runs on its own thread instead of waiting. Both use the same allocation-free
+runner, and the calling thread always takes part.
+
 ## What the world synchronizes
 
 | Operation | Safety |
@@ -184,7 +191,7 @@ drained by a system.
 
 | Library | Order of systems | Systems in parallel | How conflicts are avoided |
 |---|---|---|---|
-| **EasyEcs** | `Priority`, then registration order | Non-conflicting systems of one priority (`Parallel`) | Access generated from `ref`/`in` parameters; conflicting systems never share a batch |
+| **EasyEcs** | `Priority`, then registration order | Non-conflicting systems of one priority (`Parallel`); within one method (`[ForEach(Parallel = true)]`, chunks of rows) | Access generated from `ref`/`in` parameters; conflicting systems never share a batch; the analyzer rejects parallel methods that could race (EECS010) |
 | Entitas | Order added to `Feature`/`Systems` | No; a `JobSystem` splits one system's entities across threads | You keep job bodies independent |
 | Arch | Your own call order (Arch.System: group order) | Within one query (`ParallelQuery`, chunk jobs) | You keep parallel query bodies independent |
 | Friflo.Engine.ECS | `SystemRoot` / `SystemGroup` order | Within one query (`RunParallel`, chunk tasks) | You keep parallel query bodies independent |

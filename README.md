@@ -34,7 +34,7 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
   never moves. State can be tags, not flags.
 - **Write the logic, not the plumbing.** A `[ForEach]` method is the whole system; filters are attributes
   (`[With<T>]`, `[Without<T>]`, `[WithAny<T>]`), singletons are parameters.
-- **Mistakes fail the build.** The bundled analyzer (EECS001-EECS009) reports invalid systems, class components,
+- **Mistakes fail the build.** The bundled analyzer (EECS001-EECS010) reports invalid systems, class components,
   stateful systems and systems that reference each other.
 - **Decoupled by construction.** Systems cooperate only through data, in `Priority` order; system groups give you
   separate cadences (input on every wake, simulation on a fixed tick).
@@ -191,7 +191,7 @@ flowchart LR
 | Good fit | Probably not |
 |---|---|
 | Game servers and simulations on .NET 10: MMO maps and zones, AOI, combat | Unity or other runtimes below .NET 10 (`net10.0` only) |
-| Worlds where state flips constantly (buffs, deaths, spawns): structural changes are immediate and cheap | One huge query that must be split across threads (systems run in parallel, a single query does not yet) |
+| Worlds where state flips constantly (buffs, deaths, spawns): structural changes are immediate and cheap | Code that needs structural changes recorded from many threads at once (use one owner thread and a queue) |
 | Long-running processes where GC pauses and unbounded growth matter | Code that wants objects with behavior, or systems calling each other |
 | One world per thread, many worlds per process; `Parallel` for heavy independent systems | Many threads mutating one world's component values without coordination |
 
@@ -247,6 +247,9 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
   (`world.ForEachBatch` for ad-hoc jobs); `world.ForEachEntity` passes the handle to struct jobs.
 - **Jobs that cannot change structure** (detected by the generator, or `INoStructuralChanges`) iterate with no
   per-entity bookkeeping; structural bookkeeping uses a compare-and-swap gate instead of a lock.
+- **Parallel `[ForEach]`:** `[ForEach(Parallel = true)]` splits one method's rows across threads, allocation-free;
+  the analyzer rejects methods that could race (EECS010).
+- **Snapshots:** `world.Capture()` / `world.Restore(snapshot)` roll a world back in memory (undo, prediction, tests).
 - **New APIs:** `WithAny<T>` filters (`[WithAny<T>]` on `[ForEach]`), batch `CreateEntities` / `DestroyEntities`,
   per-system timing (`WorldOptions.MeasureSystems`, `system.Stats`); Native AOT compatible.
 - A realistic 100k-entity server tick takes 2.29 ms instead of 4.33 ms; toggling a status component on 10,000

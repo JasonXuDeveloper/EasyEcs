@@ -1,8 +1,8 @@
-# Analyzer rules (EECS001-EECS009)
+# Analyzer rules (EECS001-EECS010)
 
 [Docs index](../README.md) · Related: [Systems](systems.md) · [ECS principles](../ecs-principles.md)
 
-The EasyEcs analyzer ships in the package next to the source generator. EECS001-EECS006 and EECS009 are errors: the generator
+The EasyEcs analyzer ships in the package next to the source generator. EECS001-EECS006, EECS009 and EECS010 are errors: the generator
 skips invalid input and the analyzer reports it, so "not generated" always means "reported". EECS007-EECS008 are
 warnings that enforce the [ECS principles](../ecs-principles.md).
 
@@ -17,6 +17,7 @@ warnings that enforce the [ECS principles](../ecs-principles.md).
 | [EECS007](#eecs007) | Warning | Systems should be stateless |
 | [EECS008](#eecs008) | Warning | Systems must not reference systems |
 | [EECS009](#eecs009) | Error | A batch `[ForEach]` method takes only spans and singletons |
+| [EECS010](#eecs010) | Error | A `[ForEach(Parallel = true)]` method must be able to run on several threads |
 
 ## EECS001
 
@@ -88,3 +89,13 @@ of rows, so a per-entity parameter (a `ref` / `in` component, an `Entity`) has n
 
 Fix: take every component as a span (`Span<T>` to write, `ReadOnlySpan<T>` to read) and only singletons besides; or
 write a per-entity method instead.
+
+## EECS010
+
+**`[ForEach(Parallel = true)]` cannot run on several threads.** A parallel method runs chunks of rows on several
+threads at once, so it must make no structural change (static, no `World`, its `Entity` used only to read: `Id`,
+`Has`, `Get`, ...), be per entity (not a batch method), and write no singleton (`ref` singleton parameters would race
+between chunks).
+
+Fix: take singletons as `in`, move structural changes into a sequential system that reacts to data the parallel one
+writes, or drop `Parallel`.

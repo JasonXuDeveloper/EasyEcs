@@ -109,6 +109,30 @@ file, which is rarely what you mean. Mistakes (missing `partial`, an invalid par
 Methods may change structure (create, destroy, `Set`, `Remove`): changes apply at once and each entity is visited at
 most once per pass. See [Structural changes during iteration](structural-changes.md).
 
+### Parallel methods
+
+`[ForEach(Parallel = true)]` cuts the matching rows into chunks of `World.ChunkRows` (16,384) rows and runs them on the
+calling thread plus up to `WorldOptions.MaxDegreeOfParallelism - 1` thread-pool threads. It is for heavy per-entity
+work (path finding, steering, AI scoring) over tens of thousands of entities; for light work the hand-off costs more
+than it saves.
+
+```csharp
+public partial class SteeringSystem : EcsSystem
+{
+    [ForEach(Parallel = true), Without<Dead>]
+    static void Steer(ref Velocity velocity, in Position position, in Clock clock)
+    {
+        velocity = new Velocity(MathF.Cos(clock.Tick + position.X), MathF.Sin(clock.Tick + position.Y));
+    }
+}
+```
+
+The method must be able to run on several threads at once (the analyzer checks it, [EECS010](analyzer.md#eecs010)):
+no structural change, per entity (not a batch method), and singletons only as `in`. It also must not write what
+another row's run reads, such as another entity through `Get`. Fewer than two chunks of rows run on the calling
+thread. It allocates nothing after its first update. Ad-hoc code calls `world.ForEachParallel` /
+`world.ForEachEntityParallel` with an `INoStructuralChanges` job.
+
 ## System groups
 
 `world.Update()` runs the default group. A system marked `[UpdateInGroup<TGroup>]` (where `TGroup` is a

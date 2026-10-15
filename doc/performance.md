@@ -12,6 +12,7 @@
 | Need | Use | Notes |
 |---|---|---|
 | Per-entity logic of a system | `[ForEach]` method | Generated struct job; same speed as a hand-written `ForEach` (the micro rows below differ because they run on different worlds). `[With<T>]` / `[Without<T>]` filters. |
+| Heavy per-entity work over tens of thousands of entities | `[ForEach(Parallel = true)]` | Chunks of rows on several threads (2.1x on 4 cores in `ParallelForEachBenchmark`); no structural changes, singletons only `in`. |
 | Per-row arithmetic over many entities | a batch `[ForEach]` method (span parameters) or `world.ForEachBatch` | Runs of consecutive rows as spans: write SIMD with `Vector<T>` / `MemoryMarshal.Cast`. No structural changes. |
 | Ad-hoc iteration over 1–9 components | `world.ForEach<…, TJob>(ref job, filter)` | Struct job, specialized and inlined by the JIT. Keep `Execute` small and branch-light. `ForEachEntity` passes the `Entity`. |
 | Ad-hoc loop needing the `Entity` | `foreach (var item in world.Query<…>(filter))` | Zero allocation; `item.Entity`, `item.Component1..n` are refs. (`[ForEach]` methods can take an `Entity` parameter too.) |
@@ -69,6 +70,8 @@ All numbers come from BenchmarkDotNet. The headline benchmarks simulate a real s
   (movement, health and mana regeneration, cooldowns) over 100,000 entities, with `WorldOptions.Parallel` off and on.
   With it on, the four systems form one batch and run at the same time; it shows what a parallel batch costs and
   gains against a sequential update.
+- **`ParallelForEachBenchmark.Tick`** is one heavy `[ForEach]` method (steering towards the nearest of 16 waypoints)
+  over 100,000 entities, plain and with `Parallel = true`, whose chunks of rows run on all cores.
 - **`MicroBenchmarks`** isolate single operations for diagnosis. `RawArrayWrite` is the no-ECS floor.
 - **`EcsComparisonBenchmark`** (project `EasyEcs.Comparison`) ports the headline world to Arch, Friflo.Engine.ECS and
   DefaultEcs: same rules, random rolls, spawn mix and entity counts, single-threaded, each library through its
@@ -87,7 +90,8 @@ Measured with BenchmarkDotNet's default job on .NET 10, on a 4-core Xeon VM at 2
 | WorldSimulationBenchmark.Tick | 10,000 | 322 μs | 198 μs | 0 B |
 | WorldSimulationBenchmark.Tick | 100,000 | 4.33 ms | 2.29 ms | 0 B |
 | MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.85 ms | 1.10 ms | 0 B |
-| ParallelSystemsBenchmark.Tick, `Parallel` off / on | 100,000 | – | 458 / 333 μs | 0 B |
+| ParallelSystemsBenchmark.Tick, `Parallel` off / on | 100,000 | – | 432 / 331 μs | 0 B |
+| ParallelForEachBenchmark.Tick, `[ForEach]` / `[ForEach(Parallel = true)]` | 100,000 | – | 1,944 / 908 μs | 0 B |
 
 **Against other ECS libraries** (`EcsComparisonBenchmark`, the headline world ported to each library; ratio against
 EasyEcs):

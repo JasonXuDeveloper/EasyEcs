@@ -21,7 +21,7 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
   Contracts.cs                 IComponent, ISingletonComponent, INoStructuralChanges
   Entity.cs                    the entity handle (id, version, world): Has/Get/TryGet/Add/GetOrAdd/Destroy
   EcsSystem.cs                 OnCreate/OnUpdate/OnDestroy + generated GeneratedUpdate / GeneratedAccess
-  ForEachAttributes.cs         [ForEach], [With<T>], [Without<T>]
+  ForEachAttributes.cs         [ForEach] (Parallel), [With<T>], [Without<T>], [WithAny<T>]
   SystemGroups.cs              ISystemGroup, [UpdateInGroup<T>] (World.Update<T>() runs a group)
   World.cs                     entity lifecycle (create/destroy, id recycling, lookup, enumeration)
   World.Components.cs          AddBit/AddBits/RemoveBit/RemoveBits (shared core of every Add/Set/Remove), passes
@@ -30,7 +30,9 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
                                the structural gate (Structural())
   StructuralGate.cs            CAS gate on its own cache line (not reentrant) + StructuralScope
   World.Systems.cs             system groups, priority order, parallel batches, synchronous Update / Update<TGroup>
-  World.Parallel.cs            allocation-free batch runner (caller + reusable thread-pool work items)
+  World.Parallel.cs            allocation-free runner (caller + reusable thread-pool work items) for system batches
+                               and the row chunks of parallel [ForEach]
+  World.Snapshots.cs           Capture / Restore (WorldSnapshot.cs holds the copies)
   SystemAccess.cs              a system's read/write sets (generated from [ForEach] parameters) and the conflict rule
   SystemStats.cs               per-system run counts and times (WorldOptions.MeasureSystems)
   World.Singletons.cs          per-world singletons (ref returns)
@@ -52,7 +54,7 @@ EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, req
                                row loops, Query/Count/Any, QueryItem/QueryEnumerator), one template each
   SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
                                the method cannot change structure) + GeneratedUpdate + GeneratedAccess
-  EasyEcsAnalyzer.cs           EECS001-009 (generators never report diagnostics)
+  EasyEcsAnalyzer.cs           EECS001-010 (generators never report diagnostics)
   Symbols.cs                   symbol checks shared by generator and analyzer
   Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
   EquatableArray.cs            array with value equality (generator models cache between edits)
@@ -66,7 +68,7 @@ EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / Multi
 EasyEcs.Comparison/            BenchmarkDotNet: the headline world (WorldSimulation.cs, compiled unchanged) ported to
                                Arch, Friflo.Engine.ECS and DefaultEcs, counters checked against EasyEcs
 doc/                           README.md (index), getting-started.md, guide/ (one page per concept, analyzer.md
-                               lists EECS001-009), api.md (API + complexity), ecs-principles.md, architecture.md,
+                               lists EECS001-010), api.md (API + complexity), ecs-principles.md, architecture.md,
                                performance.md (diagrams in mermaid)
 ```
 

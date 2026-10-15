@@ -57,6 +57,10 @@ New:
 - `world.CreateEntities(span, components…)` and `world.DestroyEntities<T…>(filter)` spawn and clear batches with one
   pass through the structural gate.
 - `WorldOptions.MeasureSystems` times every system run into `system.Stats` (`SystemStats`).
+- `[ForEach(Parallel = true)]` (and `world.ForEachParallel` / `ForEachEntityParallel`) runs chunks of rows on several
+  threads; [EECS010](doc/guide/analyzer.md#eecs010) reports methods that could race.
+- `world.Capture()` / `world.Restore(snapshot)`: in-memory snapshots of entities, components and singletons
+  ([Snapshots](doc/guide/snapshots.md)).
 - The library is marked `IsAotCompatible`: trimming and Native AOT analyzers run on every build, and it publishes
   with Native AOT without warnings.
 

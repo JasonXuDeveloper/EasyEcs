@@ -29,8 +29,9 @@ One page per concept, in a sensible reading order:
 | [Singletons](guide/singletons.md) | Per-world state, singleton parameters, `SingletonRef<T>`. |
 | [Structural changes during iteration](guide/structural-changes.md) | What happens when you add, remove, create or destroy while iterating. |
 | [`ref` and `await`](guide/refs-and-await.md) | Mutating through refs, and why refs never cross an `await`. |
+| [Snapshots](guide/snapshots.md) | Capture and restore a world in memory: undo, prediction, replays, tests. |
 | [Threading](guide/threading.md) | Process, world and owner thread; system order; safe `WorldOptions.Parallel`; what the structural gate guards. |
-| [Analyzer rules](guide/analyzer.md) | EECS001-EECS009: meaning and fix. |
+| [Analyzer rules](guide/analyzer.md) | EECS001-EECS010: meaning and fix. |
 
 ## Reference
 
