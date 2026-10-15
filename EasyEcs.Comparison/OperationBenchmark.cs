@@ -1,3 +1,6 @@
+using System;
+using System.Numerics;
+using System.Runtime.InteropServices;
 using BenchmarkDotNet.Attributes;
 using EasyEcs;
 using EasyEcs.Benchmark.Scenario;
@@ -20,6 +23,7 @@ namespace EcsComparison.Operations;
 
 public struct Iterate1 : ISystemGroup;
 public struct Iterate2 : ISystemGroup;
+public struct Iterate2Simd : ISystemGroup;
 public struct Iterate3 : ISystemGroup;
 public struct IterateWith : ISystemGroup;
 public struct IterateEntity : ISystemGroup;
@@ -49,6 +53,42 @@ public partial class Integrate : EcsSystem
         p.Y += v.Y;
         if (p.X < 0 || p.X > 4096) v.X = -v.X;
         if (p.Y < 0 || p.Y > 4096) v.Y = -v.Y;
+    }
+}
+
+/// <summary>Iterate2 as a batch method: the same movement on whole runs of rows with SIMD (shared kernel).</summary>
+[UpdateInGroup<Iterate2Simd>]
+public partial class IntegrateSimd : EcsSystem
+{
+    [ForEach, Without<Stunned>, Without<Dead>]
+    private static void Move(Span<Position> p, Span<Velocity> v) =>
+        SimdMove.Run(MemoryMarshal.Cast<Position, float>(p), MemoryMarshal.Cast<Velocity, float>(v));
+}
+
+/// <summary>
+/// Movement with bounce on interleaved X/Y floats: every lane is one coordinate, and its bounce condition only depends
+/// on that coordinate, so the scalar code maps lane for lane onto Vector&lt;float&gt;. Used by both libraries.
+/// </summary>
+public static class SimdMove
+{
+    public static void Run(Span<float> p, Span<float> v)
+    {
+        var max = new Vector<float>(4096f);
+        int i = 0;
+        for (int width = Vector<float>.Count; i + width <= p.Length; i += width)
+        {
+            var position = new Vector<float>(p[i..]) + new Vector<float>(v[i..]);
+            var velocity = new Vector<float>(v[i..]);
+            var outside = Vector.LessThan(position, Vector<float>.Zero) | Vector.GreaterThan(position, max);
+            position.CopyTo(p[i..]);
+            Vector.ConditionalSelect(outside, -velocity, velocity).CopyTo(v[i..]);
+        }
+
+        for (; i < p.Length; i++)
+        {
+            p[i] += v[i];
+            if (p[i] < 0 || p[i] > 4096) v[i] = -v[i];
+        }
     }
 }
 
@@ -134,7 +174,7 @@ public class OperationBenchmark
 
     private const int Spawn = 5_000;
 
-    [GlobalSetup(Targets = [nameof(EasyEcs_Iterate1), nameof(EasyEcs_Iterate2), nameof(EasyEcs_Iterate3),
+    [GlobalSetup(Targets = [nameof(EasyEcs_Iterate1), nameof(EasyEcs_Iterate2), nameof(EasyEcs_Iterate2Simd), nameof(EasyEcs_Iterate3),
         nameof(EasyEcs_With), nameof(EasyEcs_Entity), nameof(EasyEcs_Singleton), nameof(EasyEcs_Toggle),
         nameof(EasyEcs_CreateDestroy)])]
     public void SetupEasyEcs()
@@ -143,6 +183,7 @@ public class OperationBenchmark
         _world.AddSingleton<Sink>();
         _world.AddSystem<SumHealth>();
         _world.AddSystem<Integrate>();
+        _world.AddSystem<IntegrateSimd>();
         _world.AddSystem<Read3>();
         _world.AddSystem<PlayersHealth>();
         _world.AddSystem<EntityIds>();
@@ -169,7 +210,7 @@ public class OperationBenchmark
         _world.CompactArchetypes();
     }
 
-    [GlobalSetup(Targets = [nameof(Friflo_Iterate1), nameof(Friflo_Iterate2), nameof(Friflo_Iterate3),
+    [GlobalSetup(Targets = [nameof(Friflo_Iterate1), nameof(Friflo_Iterate2), nameof(Friflo_Iterate2Simd), nameof(Friflo_Iterate3),
         nameof(Friflo_With), nameof(Friflo_Entity), nameof(Friflo_Singleton), nameof(Friflo_Toggle),
         nameof(Friflo_CreateDestroy)])]
     public void SetupFriflo()
@@ -214,6 +255,7 @@ public class OperationBenchmark
 
     [Benchmark] public void EasyEcs_Iterate1() => _world.Update<Iterate1>();
     [Benchmark] public void EasyEcs_Iterate2() => _world.Update<Iterate2>();
+    [Benchmark] public void EasyEcs_Iterate2Simd() => _world.Update<Iterate2Simd>();
     [Benchmark] public void EasyEcs_Iterate3() => _world.Update<Iterate3>();
     [Benchmark] public void EasyEcs_With() => _world.Update<IterateWith>();
     [Benchmark] public void EasyEcs_Entity() => _world.Update<IterateEntity>();
@@ -260,6 +302,13 @@ public class OperationBenchmark
                 if (p.Y < 0 || p.Y > 4096) v.Y = -v.Y;
             }
         }
+    }
+
+    [Benchmark]
+    public void Friflo_Iterate2Simd()
+    {
+        foreach (var (positions, velocities, _) in _moving.Chunks)
+            SimdMove.Run(MemoryMarshal.Cast<F.Position, float>(positions.Span), MemoryMarshal.Cast<F.Velocity, float>(velocities.Span));
     }
 
     [Benchmark]

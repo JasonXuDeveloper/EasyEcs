@@ -51,6 +51,8 @@ public class GeneratorTests
                     public int Speed => 3;                                              // computed: allowed
                     [ForEach, Without<Q>] void B(Entity e, in P p, World w) => _scratch.Clear();
                     [ForEach] static void C(in P p, ref Clock clock, in Clock read) => clock.Ticks += read.Ticks; // singletons
+                    [ForEach] static void D(System.Span<P> p, System.ReadOnlySpan<Q> q, ref Clock clock) => clock.Ticks += p.Length; // batch
+                    [ForEach] static void E(Entity e, in P p, ref Clock clock) { if (e.Has<Q>()) clock.Ticks += e.Id; } // read-only entity
                 }
             }
             """);
@@ -59,6 +61,7 @@ public class GeneratorTests
 
     [TestCase("[ForEach] static void A(ref P p, in Q q, in Clock c) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "access.ReadSingleton<global::Clock>();")]
     [TestCase("[ForEach] static void A(Entity e, in P p) { }", "access.RunsAlone();")]
+    [TestCase("[ForEach] static void A(System.Span<P> p, System.ReadOnlySpan<Q> q) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "IForEachBatch<global::P, global::Q>")]
     [TestCase("[ForEach] void A(in P p) { }", "access.RunsAlone();")]
     [TestCase("[ForEach] static void A(in P p) { } protected override void OnUpdate() { }", "access.RunsAlone();")]
     public void AccessIsDeclaredFromParameters(string members, params string[] expected)
@@ -68,6 +71,19 @@ public class GeneratorTests
         string generated = output.SyntaxTrees.Last().ToString();
         foreach (var line in expected) Assert.That(generated, Does.Contain(line));
         if (!expected.Contains("access.RunsAlone();")) Assert.That(generated, Does.Not.Contain("RunsAlone"));
+    }
+
+    [TestCase("[ForEach] static void A(Entity e, in P p) { if (e.Has<Q>()) _ = e.Id; }", true, "")]
+    [TestCase("[ForEach] static void A(Entity e, ref P p, in Q q) => e.Remove<Q>();", false, "Writes => 1;")]
+    [TestCase("[ForEach] static void A(Entity e, in P p) => Use(e); static void Use(Entity e) { }", false, "Writes => 0;")]
+    [TestCase("[ForEach] static void A(in P p, World w) { }", false, "Writes => 0;")]
+    public void StructuralChangesAreDetectedFromTheMethodBody(string members, bool noStructuralChanges, string writes)
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, $"public partial class S : EcsSystem {{ {members} }}"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Last().ToString();
+        Assert.That(generated.Contains("INoStructuralChanges"), Is.EqualTo(noStructuralChanges));
+        Assert.That(generated, Does.Contain(writes));
     }
 
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) { } }", "EECS001")]
@@ -80,6 +96,9 @@ public class GeneratorTests
     [TestCase("public partial class S { [ForEach] static void A(ref P p) { } }", "EECS005")]
     [TestCase("public class Bad : IComponent { }", "EECS006")]
     [TestCase("public record Bad : ISingletonComponent;", "EECS006")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(System.Span<P> p, ref Q q) { } }", "EECS009")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(System.Span<P> p, Entity e) { } }", "EECS009")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(System.Span<Clock> c) { } }", "EECS002")]
     [TestCase("public class S : EcsSystem { int _kills; void K() => _kills++; }", "EECS007")]
     [TestCase("public class S : EcsSystem { public int Kills { get; set; } }", "EECS007")]
     [TestCase("public class A : EcsSystem { } public class S : EcsSystem { private readonly A _a = new(); }", "EECS008")]

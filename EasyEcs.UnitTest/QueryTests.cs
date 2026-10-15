@@ -3,7 +3,7 @@ using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
-public class QueryTests
+public partial class QueryTests
 {
     private World _world;
 
@@ -84,7 +84,7 @@ public class QueryTests
             Visited++;
             var e = world.GetEntity(entityId);
             e.Set(new Dead());                                   // moves the entity out of the matching archetype
-            world.CreateEntity(new Position(), new Velocity());  // may or may not be visited
+            world.CreateEntity(new Position(), new Velocity());  // appended after the pass started: not visited
             if (Visited > 1000) Assert.Fail("iteration did not terminate");
         }
     }
@@ -95,50 +95,52 @@ public class QueryTests
         var job = new KillAndSpawn(_world);
         _world.ForEach<Velocity, KillAndSpawn>(ref job, Active);
 
-        Assert.That(job.Visited, Is.GreaterThanOrEqualTo(7));
+        Assert.That(job.Visited, Is.EqualTo(7)); // entities created during the pass are not visited
         Assert.That(_world.Count<Velocity>(QueryFilter.Create().With<Dead>()), Is.EqualTo(job.Visited + 1));
     }
 
     [Test]
-    public void CompactionRemovesTombstonesAndOrdersIds()
+    public void RemovalOutsidePassesKeepsTablesDense()
     {
         var spawned = new List<Entity>();
         for (int i = 0; i < 50; i++) spawned.Add(_world.CreateEntity(new Health(i)));
-        for (int i = 0; i < 50; i += 2) spawned[i].Destroy();
-        for (int i = 0; i < 10; i++) _world.CreateEntity(new Health(1000 + i)); // reuse ids LIFO: out of order
+        for (int i = 0; i < 50; i += 2) spawned[i].Destroy(); // the last row fills each hole at once
 
-        Assert.That(_world.GetFragmentationStats().FragmentationRatio, Is.GreaterThan(0));
-        _world.CompactArchetypes();
         Assert.That(_world.GetFragmentationStats().FragmentationRatio, Is.Zero);
-
-        var ids = new List<int>();
-        foreach (var item in _world.Query<Health>()) ids.Add(item.Entity.Id);
-        Assert.That(ids, Is.Ordered);
-        Assert.That(ids, Has.Count.EqualTo(35));
+        for (int i = 1; i < 50; i += 2) Assert.That(spawned[i].Get<Health>().Value, Is.EqualTo(i));
+        Assert.That(_world.Count<Health>(), Is.EqualTo(25));
     }
 
-    [TestCase(true)]
-    [TestCase(false)]
-    public void UpdateReSortsArchetypesWhoseOrderDegraded(bool sortOnUpdate)
+    [Test]
+    public void TombstonesLeftByAPassAreClosedWhenItEnds()
     {
-        using var world = new World(new WorldOptions { SortArchetypesOnUpdate = sortOnUpdate });
-        var entities = new List<Entity>();
-        for (int i = 0; i < 1_000; i++) entities.Add(world.CreateEntity(new Health(i)));
-        // Churn: every other entity leaves and comes back; freed slots are reused LIFO, so the order reverses.
-        for (int i = 0; i < entities.Count; i += 2) entities[i].Set(new Frozen());
-        for (int i = 0; i < entities.Count; i += 2) entities[i].Remove<Frozen>();
+        using var world = new World();
+        for (int i = 0; i < 1_000; i++) world.CreateEntity(new Health(i));
+        world.AddSystem<FreezeHalf>();
+        for (int i = 0; i < 20; i++)
+        {
+            world.Update(); // 500 entities change archetype inside the pass: tombstones until it ends
+            Assert.That(world.GetFragmentationStats(), Is.EqualTo((1_000, 1_000, 0f)));
+        }
 
-        world.Update();
-
-        var ids = new List<int>();
+        int visited = 0;
         foreach (var item in world.Query<Health>())
         {
-            ids.Add(item.Entity.Id);
+            visited++;
             Assert.That(item.Component1.Value, Is.EqualTo(item.Entity.Id), "data follows its entity");
         }
 
-        Assert.That(ids, Has.Count.EqualTo(1_000));
-        Assert.That(ids, sortOnUpdate ? Is.Ordered : Is.Not.Ordered);
-        Assert.That(world.GetFragmentationStats().FragmentationRatio, sortOnUpdate ? Is.Zero : Is.GreaterThan(0));
+        Assert.That(visited, Is.EqualTo(1_000));
+    }
+
+    private partial class FreezeHalf : EcsSystem
+    {
+        [ForEach]
+        private static void Toggle(Entity entity, in Health health)
+        {
+            if (health.Value % 2 != 0) return;
+            if (entity.Has<Frozen>()) entity.Remove<Frozen>();
+            else entity.Set(new Frozen());
+        }
     }
 }

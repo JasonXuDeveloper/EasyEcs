@@ -12,17 +12,21 @@ public sealed partial class World
     /// <summary>Add (or reset) singleton <typeparamref name="T"/> and return a ref to it. O(1).</summary>
     public ref T AddSingleton<T>() where T : struct, ISingletonComponent
     {
-        lock (StructuralLock)
-        {
-            int index = SingletonType<T>.Index;
-            if (index >= _singletons.Length)
-                Array.Resize(ref _singletons, Math.Max(index + 1, _singletons.Length * 2));
+        using (Structural())
+            return ref Publish<T>().Value;
+    }
 
-            var box = new SingletonBox<T>();
-            // Volatile publish so lock-free readers on other threads observe a fully constructed box.
-            Volatile.Write(ref _singletons[index], box);
-            return ref box.Value;
-        }
+    /// <summary>Publish a fresh box for <typeparamref name="T"/>. Inside the structural lock.</summary>
+    private SingletonBox<T> Publish<T>() where T : struct, ISingletonComponent
+    {
+        int index = SingletonType<T>.Index;
+        if (index >= _singletons.Length)
+            Array.Resize(ref _singletons, Math.Max(index + 1, _singletons.Length * 2));
+
+        var box = new SingletonBox<T>();
+        // Volatile publish so lock-free readers on other threads observe a fully constructed box.
+        Volatile.Write(ref _singletons[index], box);
+        return box;
     }
 
     /// <summary>Ref to singleton <typeparamref name="T"/>; throws if it was not added. O(1).</summary>
@@ -58,10 +62,9 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.NoInlining)]
     private SingletonBox<T> AddMissingSingleton<T>() where T : struct, ISingletonComponent
     {
-        lock (StructuralLock)
+        using (Structural())
         {
-            if (Box<T>() == null) AddSingleton<T>();
-            return Box<T>();
+            return Box<T>() ?? Publish<T>();
         }
     }
 
@@ -79,7 +82,7 @@ public sealed partial class World
     /// <summary>Remove singleton <typeparamref name="T"/>. O(1).</summary>
     public void RemoveSingleton<T>() where T : struct, ISingletonComponent
     {
-        lock (StructuralLock)
+        using (Structural())
         {
             int index = SingletonType<T>.Index;
             if (index < _singletons.Length)

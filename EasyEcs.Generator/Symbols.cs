@@ -56,6 +56,8 @@ internal static class Symbols
         Singleton,
         Entity,
         World,
+        /// <summary><c>Span&lt;T&gt;</c> (written) or <c>ReadOnlySpan&lt;T&gt;</c> (read) of a component: a batch method.</summary>
+        ComponentSpan,
     }
 
     public static ParamKind Classify(IParameterSymbol p)
@@ -66,6 +68,8 @@ internal static class Symbols
                 : Implements(p.Type, Singleton) ? ParamKind.Singleton
                 : ParamKind.Invalid;
         if (p.RefKind != RefKind.None) return ParamKind.Invalid;
+        if (SpanElement(p.Type) is { } element)
+            return element.IsValueType && Implements(element, Component) ? ParamKind.ComponentSpan : ParamKind.Invalid;
         return p.Type.ToDisplayString() switch
         {
             Entity => ParamKind.Entity,
@@ -73,6 +77,13 @@ internal static class Symbols
             _ => ParamKind.Invalid,
         };
     }
+
+    /// <summary>Element type of a <c>Span&lt;T&gt;</c> / <c>ReadOnlySpan&lt;T&gt;</c>, else null.</summary>
+    public static ITypeSymbol? SpanElement(ITypeSymbol type) =>
+        type is INamedTypeSymbol { IsGenericType: true } named &&
+        named.ConstructedFrom.ToDisplayString() is "System.Span<T>" or "System.ReadOnlySpan<T>"
+            ? named.TypeArguments[0]
+            : null;
 
     /// <summary>Whether a [ForEach] method can be generated (all errors are reported by the analyzer).</summary>
     public static bool IsValidForEach(IMethodSymbol method)
@@ -84,15 +95,32 @@ internal static class Symbols
         {
             var kind = Classify(p);
             if (kind == ParamKind.Invalid) return false;
-            if (kind == ParamKind.Component) components++;
+            if (kind is ParamKind.Component or ParamKind.ComponentSpan) components++;
         }
 
-        return ComponentCountValid(method, components);
+        return ComponentCountValid(method, components) && !MixesBatch(method);
     }
 
     /// <summary>
-    /// 1..9 component parameters, or none when a [With&lt;T&gt;] filter names the queried component (a method that only
-    /// needs the entity, e.g. [With&lt;Dead&gt;] static void Remove(Entity e)).
+    /// A batch method (component spans) takes only spans and singletons: per-entity parameters (ref/in components,
+    /// Entity, World) have no meaning for a run of rows, and the World could change rows under the spans.
+    /// </summary>
+    public static bool MixesBatch(IMethodSymbol method)
+    {
+        bool spans = false, perEntity = false;
+        foreach (var p in method.Parameters)
+        {
+            var kind = Classify(p);
+            spans |= kind == ParamKind.ComponentSpan;
+            perEntity |= kind is ParamKind.Component or ParamKind.Entity or ParamKind.World;
+        }
+
+        return spans && perEntity;
+    }
+
+    /// <summary>
+    /// 1..9 component (or component span) parameters, or none when a [With&lt;T&gt;] filter names the queried component (a
+    /// method that only needs the entity, e.g. [With&lt;Dead&gt;] static void Remove(Entity e)).
     /// </summary>
     public static bool ComponentCountValid(IMethodSymbol method, int components) =>
         components is >= 1 and <= MaxComponents || components == 0 && HasWith(method);

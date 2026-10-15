@@ -25,7 +25,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         var methods = context.SyntaxProvider
             .ForAttributeWithMetadataName(Symbols.ForEachAttribute,
                 static (node, _) => node is MethodDeclarationSyntax,
-                static (ctx, ct) => ForEachModel.Create((IMethodSymbol)ctx.TargetSymbol, ctx.TargetNode.SpanStart, ct))
+                static (ctx, ct) => ForEachModel.Create((IMethodSymbol)ctx.TargetSymbol, (MethodDeclarationSyntax)ctx.TargetNode, ct))
             .Where(static m => m is not null)
             .WithTrackingName("ForEachMethods");
 
@@ -55,7 +55,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             string singletons = string.Concat(method.Parameters.Select((p, i) => p.Kind == Symbols.ParamKind.Singleton
                 ? $", s{i} = world.SingletonRef<{p.Type}>()" : ""));
             sb.Append($"        var __{method.Name} = new __{method.Name}Job {{ {system}World = world{singletons} }};\n");
-            string forEach = method.TakesEntity ? "ForEachEntity" : "ForEach";
+            string forEach = method.IsBatch ? "ForEachBatch" : method.TakesEntity ? "ForEachEntity" : "ForEach";
             sb.Append($"        world.{forEach}<{method.ComponentTypes}, __{method.Name}Job>(ref __{method.Name}{filter});\n");
         }
 
@@ -98,14 +98,15 @@ public sealed class SystemGenerator : IIncrementalGenerator
         var args = string.Join(", ", method.Parameters.Select((p, i) => p.Kind switch
         {
             Symbols.ParamKind.Component => $"{p.RefKind} c{++index}",
+            Symbols.ParamKind.ComponentSpan => $"c{++index}", // Span<T> converts to ReadOnlySpan<T> for read-only parameters
             Symbols.ParamKind.Singleton => $"{p.RefKind} s{i}.Value",
             Symbols.ParamKind.Entity => "entity",
             _ => "World",
         }));
 
         // The JIT specializes World.ForEach on this struct and inlines Execute and the user's method into the loop.
-        string iface = method.TakesEntity ? "IForEachEntity" : "IForEach";
-        bool stable = method.IsStatic && !method.Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.World);
+        string iface = method.IsBatch ? "IForEachBatch" : method.TakesEntity ? "IForEachEntity" : "IForEach";
+        bool stable = method.Stable && !method.IsBatch; // a batch job has no structural path at all
         string marker = stable ? ", global::EasyEcs.INoStructuralChanges" : "";
         sb.Append($"    private struct {job} : global::EasyEcs.{iface}<{method.ComponentTypes}>{marker}\n    {{\n");
         if (!method.IsStatic) sb.Append($"        public {owner.Name} System;\n");
@@ -115,9 +116,23 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 sb.Append($"        public global::EasyEcs.SingletonRef<{method.Parameters[i].Type}> s{i};\n");
         sb.Append('\n');
         sb.Append("        [MethodImpl(MethodImplOptions.AggressiveInlining)]\n");
-        string first = method.TakesEntity ? "global::EasyEcs.Entity entity" : "int entityId";
-        sb.Append($"        public void Execute({first}, {List(components.Length, i => $"ref {components[i - 1]} c{i}")})\n");
-        sb.Append($"            => {(method.IsStatic ? owner.Name : "System")}.{method.Name}({args});\n    }}\n\n");
+        string first = method.TakesEntity ? "global::EasyEcs.Entity entity, " : method.IsBatch ? "" : "int entityId, ";
+        string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
+        sb.Append($"        public void Execute({first}{List(components.Length, i => string.Format(each, components[i - 1], i))})\n");
+        sb.Append($"            => {(method.IsStatic ? owner.Name : "System")}.{method.Name}({args});\n");
+        if (iface == "IForEach") // the id is not a parameter of the user's method: skip loading it
+            sb.Append($"\n        static bool global::EasyEcs.IForEach<{method.ComponentTypes}>.ReadsId => false;\n");
+        if (!stable && !method.IsBatch)
+        {
+            // Carried over when the method changes the archetype of the entity it visits: its ref parameters only.
+            var queried = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Component).ToArray();
+            int writes = 0;
+            for (int k = 0; k < components.Length; k++)
+                if (queried.Any(p => p.Type == components[k] && p.RefKind == "ref")) writes |= 1 << k;
+            sb.Append($"\n        static int global::EasyEcs.{iface}<{method.ComponentTypes}>.Writes => {writes};\n");
+        }
+
+        sb.Append("    }\n\n");
 
         if (method.With.Length + method.Without.Length == 0) return;
         var chain = method.With.Select(t => $".With<{t}>()").Concat(method.Without.Select(t => $".Without<{t}>()"));
@@ -159,21 +174,33 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
     private sealed record ParamModel(Symbols.ParamKind Kind, string Type, string RefKind);
 
-    private sealed record ForEachModel(OwnerModel Owner, string Name, bool IsStatic, int Order, EquatableArray<string> Query,
-        EquatableArray<ParamModel> Parameters, EquatableArray<string> With, EquatableArray<string> Without)
+    /// <param name="Stable">
+    /// The method cannot make structural changes: it is static, takes no <c>World</c>, and uses its <c>Entity</c>
+    /// parameter (if any) only to read (<see cref="ReadOnlyEntityMembers"/>). Its job gets INoStructuralChanges.
+    /// </param>
+    private sealed record ForEachModel(OwnerModel Owner, string Name, bool IsStatic, bool Stable, int Order,
+        EquatableArray<string> Query, EquatableArray<ParamModel> Parameters, EquatableArray<string> With,
+        EquatableArray<string> Without)
     {
         /// <summary>The queried component types, as type arguments of World.ForEach / IForEach.</summary>
         public string ComponentTypes => string.Join(", ", Query);
 
         public bool TakesEntity => Parameters.Any(p => p.Kind == Symbols.ParamKind.Entity);
 
-        public static ForEachModel? Create(IMethodSymbol method, int order, System.Threading.CancellationToken ct)
+        /// <summary>Takes component spans: runs over whole runs of rows (World.ForEachBatch).</summary>
+        public bool IsBatch => Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan);
+
+        public static ForEachModel? Create(IMethodSymbol method, MethodDeclarationSyntax syntax, System.Threading.CancellationToken ct)
         {
             if (!Symbols.IsValidForEach(method)) return null;
             ct.ThrowIfCancellationRequested();
 
-            var parameters = method.Parameters.Select(p => new ParamModel(Symbols.Classify(p), p.Type.ToDisplayString(Symbols.Fqn),
-                p.RefKind == RefKind.Ref ? "ref" : "in")).ToArray();
+            // Spans are modeled as their element type: Span<T> writes T, ReadOnlySpan<T> reads it.
+            var parameters = method.Parameters.Select(p => Symbols.SpanElement(p.Type) is { } element
+                ? new ParamModel(Symbols.ParamKind.ComponentSpan, element.ToDisplayString(Symbols.Fqn),
+                    ((INamedTypeSymbol)p.Type).ConstructedFrom.ToDisplayString() == "System.Span<T>" ? "ref" : "in")
+                : new ParamModel(Symbols.Classify(p), p.Type.ToDisplayString(Symbols.Fqn),
+                    p.RefKind == RefKind.Ref ? "ref" : "in")).ToArray();
             var with = new List<string>();
             var without = new List<string>();
             foreach (var attribute in method.GetAttributes())
@@ -184,18 +211,44 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 else if (name == Symbols.WithoutAttribute) without.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
             }
 
-            var query = parameters.Where(p => p.Kind == Symbols.ParamKind.Component).Select(p => p.Type).ToList();
+            var query = parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan)
+                .Select(p => p.Type).ToList();
             // No component parameter: the first [With<T>] becomes the queried component (passed to the job, not the method).
             if (query.Count == 0)
             {
                 query.Add(with[0]);
                 with.RemoveAt(0);
             }
-            return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, order,
+            bool stable = method.IsStatic && !method.Parameters.Any(p => Symbols.Classify(p) == Symbols.ParamKind.World)
+                && method.Parameters.Where(p => Symbols.Classify(p) == Symbols.ParamKind.Entity).All(p => OnlyReads(syntax, p.Name));
+            return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, stable, syntax.SpanStart,
                 new EquatableArray<string>(query.ToArray()),
                 new EquatableArray<ParamModel>(parameters), new EquatableArray<string>(with.ToArray()),
                 new EquatableArray<string>(without.ToArray()));
         }
+    }
+
+    /// <summary>Entity members that cannot change the world (no structural change, no access to the World).</summary>
+    private static readonly HashSet<string> ReadOnlyEntityMembers = ["Id", "Version", "IsAlive", "Has", "Get", "TryGet"];
+
+    /// <summary>
+    /// Whether every use of parameter <paramref name="name"/> in the method body is a read-only member access
+    /// (<c>entity.Id</c>, <c>entity.Has&lt;T&gt;()</c>, ...). Syntax only and conservative: any other use (passing the
+    /// entity on, <c>entity.World</c>, a structural change) answers false.
+    /// </summary>
+    private static bool OnlyReads(MethodDeclarationSyntax method, string name)
+    {
+        SyntaxNode? body = (SyntaxNode?)method.Body ?? method.ExpressionBody;
+        if (body == null) return false;
+        foreach (var identifier in body.DescendantNodes().OfType<IdentifierNameSyntax>())
+        {
+            if (identifier.Identifier.ValueText != name) continue;
+            if (identifier.Parent is not MemberAccessExpressionSyntax access || access.Expression != identifier) return false;
+            var member = access.Name is GenericNameSyntax generic ? generic.Identifier.ValueText : access.Name.Identifier.ValueText;
+            if (!ReadOnlyEntityMembers.Contains(member)) return false;
+        }
+
+        return true;
     }
 
     private sealed record UpdateModel(OwnerModel Owner, EquatableArray<ForEachModel> Methods);

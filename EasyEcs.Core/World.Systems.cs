@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 namespace EasyEcs;
 
 // System scheduling. Systems run synchronously, in ascending Priority (registration order breaks ties). Systems of one
@@ -51,7 +52,7 @@ public sealed partial class World
         system.World = this;
         system.Group = GroupOf(system.GetType());
         system.DeclareAccess();
-        lock (StructuralLock)
+        using (Structural())
         {
             if (system.Group >= _groups.Length) Array.Resize(ref _groups, system.Group + 1);
             (_groups[system.Group] ??= new SystemSchedule()).Insert(system);
@@ -64,7 +65,7 @@ public sealed partial class World
     public bool RemoveSystem<T>() where T : EcsSystem
     {
         EcsSystem removed;
-        lock (StructuralLock)
+        using (Structural())
         {
             removed = GetSystem<T>();
             if (removed == null) return false;
@@ -108,7 +109,8 @@ public sealed partial class World
     private void Run(SystemSchedule group)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(World));
-        if (_options.SortArchetypesOnUpdate) SortDisorderedArchetypes();
+        // No pass can run across an update: one still counted was interrupted by an exception. Close its tombstones.
+        if (Volatile.Read(ref Passes) != 0) CompactArchetypes();
 
         long update = ++group.Updates;
         var batches = group.Batches;
@@ -183,8 +185,6 @@ public sealed partial class World
         // Meta keeps its length (handles index it unchecked): cleared entries make every handle stale.
         Array.Clear(Meta);
         ClearArchetypes();
-        Components = [];
-        _columnHasReferences = [];
         ClearSingletons();
         _freeIdCount = 0;
         _entityCount = 0;
@@ -192,7 +192,7 @@ public sealed partial class World
 
     /// <summary>
     /// Systems of one group sorted by priority (stable), with their parallel batches. Mutated under
-    /// <see cref="StructuralLock"/> by publishing new arrays (copy-on-write), so a running update never sees a torn list.
+    /// the structural lock by publishing new arrays (copy-on-write), so a running update never sees a torn list.
     /// </summary>
     private sealed class SystemSchedule
     {

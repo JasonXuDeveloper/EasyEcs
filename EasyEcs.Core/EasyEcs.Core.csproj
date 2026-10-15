@@ -5,6 +5,8 @@
         <ImplicitUsings>disable</ImplicitUsings>
         <Nullable>disable</Nullable>
         <LangVersion>preview</LangVersion>
+        <!-- Archetype.Aligned: the address of a pinned column, to start its rows on a cache line -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <PackageId>EasyEcs</PackageId>
         <Title>EasyEcs</Title>
         <Authors>JasonXuDeveloper</Authors>

@@ -1,50 +1,78 @@
 using System;
-using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
+using System.Threading;
 namespace EasyEcs;
 
 /// <summary>
-/// Archetype stores entities with the same component configuration.
-/// Uses tombstone pattern (-1) for safe iteration during modifications.
-/// Uses free list for O(1) tombstone slot reuse.
+/// The entities with one component configuration and their data: a table with one column per component
+/// type, row = slot (structure of arrays). Iteration walks every column front to back; a structural change copies the
+/// entity's row into the table of its new archetype (<see cref="Transition"/>).
 /// <br/>
-/// The slot of each entity is tracked by the owning <see cref="World"/> (entity id -> slot),
-/// so removal is a plain array write instead of a hash lookup.
+/// Outside passes a row that loses its entity is filled by the last row at once (tables stay dense). While a pass
+/// iterates, it becomes a tombstone (id -1) instead, so the pass never sees rows shift under it; the world closes those
+/// tombstones (<see cref="FillHoles"/>) when the last pass ends. The slot of each entity is tracked by the owning
+/// <see cref="World"/> (entity id -> slot).
+/// <br/>
+/// Removing a component keeps the entity in its table: the row only clears the component's presence bit
+/// (<see cref="Present"/>), so a state that comes and goes (stunned, burning, dead) never moves rows. Only adding a
+/// component the table has no column for moves the entity.
 /// </summary>
-internal class Archetype
+internal sealed class Archetype
 {
     public readonly Tag ComponentMask;
 
-    /// <summary>Component bits of this archetype, ascending (lets destroy/remove visit only its own columns).</summary>
+    /// <summary>Component bits of this archetype, ascending.</summary>
     public readonly ushort[] Components;
 
-    /// <summary>The subset of <see cref="Components"/> whose type holds managed references (cleared on destroy).</summary>
-    public ushort[] ManagedComponents = [];
+    /// <summary>Component columns, parallel to <see cref="Components"/>; each has <see cref="EntityIds"/>.Length rows.</summary>
+    public readonly Array[] Columns;
+
+    /// <summary>Column descriptions, parallel to <see cref="Components"/>.</summary>
+    private readonly ComponentInfo[] _infos;
+
+    /// <summary>Component bit -> index into <see cref="Columns"/>, -1 when absent (covers bits up to the largest one).</summary>
+    private readonly short[] _columnOf;
 
     /// <summary>
-    /// Insertions that may have broken ascending id order since the last <see cref="Compact"/> (a reused tombstone
-    /// slot, or an append of an id smaller than the last one). Drives the automatic re-sort in World.Update.
+    /// Component bit -> its column and presence bits (null column when absent; covers bits up to the largest one). One
+    /// 16-byte entry per bit, so a handle lookup (<see cref="Entity.Get{T}"/>) reads both from one cache line. Kept in
+    /// sync with <see cref="Columns"/> and <see cref="Present"/>.
     /// </summary>
-    public int Unordered;
+    public readonly Lookup[] ByBit;
+
+    /// <summary>Whether any column holds managed references (cleared when a row dies, so they can be collected).</summary>
+    private readonly bool _hasManaged;
+
+    /// <summary>
+    /// Per column: one bit per row, set while the entity has the component (64 rows per word, so queries test 64 rows
+    /// with one load). Allocated when a row of the column first loses its component; null means every row has it.
+    /// Bits of tombstones and of rows at or above <see cref="Count"/> are meaningless (a new row sets its own).
+    /// </summary>
+    public readonly ulong[][] Present;
+
+    /// <summary>Per column: alive rows without the component (their <see cref="Present"/> bit is clear).</summary>
+    public readonly int[] Absent;
+
+    /// <summary>Columns with <see cref="Present"/> bits (indices into <see cref="Columns"/>), copy-on-write.</summary>
+    private short[] _bitColumns = [];
 
     public int[] EntityIds;
-    public int[] Versions; // parallel to EntityIds (same length): version of the entity in each slot, for ForEachEntity
-    public int Count; // Total slots (including tombstones)
-    public int AliveCount; // Living entities only
+    public int[] Versions; // parallel to EntityIds: version of the entity in each slot (handles without a meta lookup)
+    public int Count; // rows in use, tombstones included
+    public int AliveCount; // living entities only
 
-    // Free list for O(1) tombstone reuse (stack-based)
-    private int[] _freeSlots;
-    private int _freeCount;
+    /// <summary>Has tombstones that the world closes when the last pass ends (registered once, see World.Remove).</summary>
+    public bool Dirty;
 
-    // Transition cache: component bit index -> archetype reached by adding / removing that component.
+    // Transition cache: component bit -> transition reached by adding that component (removing never moves rows).
     // Avoids hashing a 256-bit Tag on every single-component structural change.
-    private Archetype[] _addEdges = Array.Empty<Archetype>();
-    private Archetype[] _removeEdges = Array.Empty<Archetype>();
+    private Transition[] _addEdges = [];
 
-    // Same for multi-component changes (Set(a, b), Remove<A, B>(), CreateEntity(a, b, ...)), indexed by the dense
-    // index of the generic signature (TypeIndex<ComponentSignature, (T1, ..., Tn)>): no mask cloning or hashing per call.
-    private Archetype[] _addSetEdges = Array.Empty<Archetype>();
-    private Archetype[] _removeSetEdges = Array.Empty<Archetype>();
+    // Same for multi-component adds (Set(a, b), CreateEntity(a, b, ...)), indexed by the dense index of the generic
+    // signature (TypeIndex<ComponentSignature, (T1, ..., Tn)>): no mask cloning or hashing per call.
+    private Transition[] _addSetEdges = [];
 
     private const int Tombstone = -1;
 
@@ -54,158 +82,414 @@ internal class Archetype
         Components = componentMask.ToBitArray();
         EntityIds = new int[initialCapacity];
         Versions = new int[initialCapacity];
-        _freeSlots = new int[16];
-        Count = 0;
-        AliveCount = 0;
-        _freeCount = 0;
+
+        Columns = new Array[Components.Length];
+        Present = new ulong[Components.Length][];
+        Absent = new int[Components.Length];
+        _infos = new ComponentInfo[Components.Length];
+        _columnOf = new short[Components.Length == 0 ? 0 : Components[^1] + 1];
+        _columnOf.AsSpan().Fill(-1);
+        ByBit = new Lookup[_columnOf.Length];
+        for (int i = 0; i < Components.Length; i++)
+        {
+            var info = ComponentInfo.Of(Components[i]);
+            _infos[i] = info;
+            _hasManaged |= info.Managed;
+            Columns[i] = info.Create(initialCapacity);
+            _columnOf[Components[i]] = (short)i;
+            ByBit[Components[i]].Column = Columns[i];
+        }
+    }
+
+    /// <summary>A column and its presence bits (<see cref="ByBit"/>).</summary>
+    public struct Lookup
+    {
+        public Array Column;
+        public ulong[] Bits;
+    }
+
+    /// <summary>Presence bits of column <paramref name="column"/> (a valid index), or null when every row has it.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ulong[] Bits(int column) => Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Present), column);
+
+    /// <summary>Whether any column has rows without its component.</summary>
+    public bool HasAbsent
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _bitColumns.Length != 0;
+    }
+
+    /// <summary>Whether row <paramref name="slot"/> has the component of column <paramref name="column"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Has(int column, int slot) => Bits(column) is not { } bits || (bits[slot >> 6] & (1UL << slot)) != 0; // shift is mod 64
+
+    /// <summary>
+    /// Give row <paramref name="slot"/> the component of column <paramref name="column"/> back (its column exists).
+    /// Returns true when the row lacked it. Inside the structural lock.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Restore(int column, int slot)
+    {
+        if (Bits(column) is not { } bits) return false;
+        ref ulong word = ref bits[slot >> 6];
+        ulong bit = 1UL << slot;
+        if ((word & bit) != 0) return false;
+        word |= bit;
+        Absent[column]--;
+        return true;
     }
 
     /// <summary>
-    /// Add an entity to this archetype and return the slot it occupies.
-    /// Reuses tombstone slots (O(1) via free list), then appends.
+    /// Take the component of column <paramref name="column"/> from row <paramref name="slot"/>: clear its presence bit
+    /// (and a managed value, so the GC can collect what it referenced). Returns true when the row had it. Inside the
+    /// structural lock.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public bool Take(int column, int slot)
+    {
+        var bits = Bits(column) ?? AllocateBits(column);
+        ref ulong word = ref bits[slot >> 6];
+        ulong bit = 1UL << slot;
+        if ((word & bit) == 0) return false;
+        word &= ~bit;
+        Absent[column]++;
+        if (_infos[column].Managed) _infos[column].Clear(Columns[column], slot, 1);
+        return true;
+    }
+
+    /// <summary>A row dies (destroyed or moved away): it no longer counts as lacking components.</summary>
+    private void ForgetAbsent(int slot)
+    {
+        foreach (short c in _bitColumns)
+            if ((Present[c][slot >> 6] & (1UL << slot)) == 0)
+                Absent[c]--;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private ulong[] AllocateBits(int column)
+    {
+        var bits = new ulong[(EntityIds.Length + 63) >> 6];
+        bits.AsSpan().Fill(ulong.MaxValue);
+        var columns = new short[_bitColumns.Length + 1];
+        _bitColumns.CopyTo(columns, 0);
+        columns[^1] = (short)column;
+        _bitColumns = columns;
+        Volatile.Write(ref Present[column], bits); // lock-free readers see a filled array
+        Volatile.Write(ref ByBit[Components[column]].Bits, bits);
+        return bits;
+    }
+
+    /// <summary>Copy the presence bits of row <paramref name="from"/> to row <paramref name="to"/>.</summary>
+    private void CopyBits(int from, int to)
+    {
+        foreach (short c in _bitColumns)
+        {
+            var bits = Present[c];
+            ulong bit = 1UL << to;
+            bits[to >> 6] = (bits[from >> 6] & (1UL << from)) != 0 ? bits[to >> 6] | bit : bits[to >> 6] & ~bit;
+        }
+    }
+
+    /// <summary>Set every presence bit of row <paramref name="slot"/> (a new row has all its components).</summary>
+    private void SetBits(int slot)
+    {
+        foreach (short c in _bitColumns) Present[c][slot >> 6] |= 1UL << slot;
+    }
+
+    /// <summary>Index of the column of component <paramref name="bit"/>, or -1 when the archetype does not have it.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public int ColumnIndex(int bit)
+    {
+        var map = _columnOf;
+        return (uint)bit < (uint)map.Length ? map[bit] : -1;
+    }
+
+    /// <summary>Bytes per cache line: unmanaged columns start their rows on one (<see cref="Aligned"/>).</summary>
+    public const int CacheLine = 64;
+
+    /// <summary>
+    /// Row 0 of an unmanaged column: the first 64-byte boundary of its pinned byte array. The array never moves (pinned
+    /// object heap) and has a line of slack (<see cref="ComponentInfo{T}.Create"/>), so the rows fit after it.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static unsafe ref byte Aligned(Array column)
+    {
+        ref byte data = ref MemoryMarshal.GetArrayDataReference(Unsafe.As<byte[]>(column));
+        return ref Unsafe.Add(ref data, (nint)(-(nint)Unsafe.AsPointer(ref data) & (CacheLine - 1)));
+    }
+
+    /// <summary>Row 0 of column <paramref name="index"/> (from <see cref="ColumnIndex"/>; must be valid).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ref T Data<T>(int index) where T : struct, IComponent =>
+        ref Row0<T>(Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Columns), index));
+
+    /// <summary>Row 0 of a column of <typeparamref name="T"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ref T Row0<T>(Array column) where T : struct, IComponent
+    {
+        // A JIT-time constant: each instantiation keeps one branch.
+        if (RuntimeHelpers.IsReferenceOrContainsReferences<T>())
+            return ref MemoryMarshal.GetArrayDataReference(Unsafe.As<T[]>(column));
+        return ref Unsafe.As<byte, T>(ref Aligned(column));
+    }
+
+    /// <summary>Row 0 of the column of <paramref name="bit"/>, which the archetype must have (iteration base).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ref T Base<T>(int bit) where T : struct, IComponent => ref Data<T>(ColumnIndex(bit));
+
+    /// <summary>
+    /// Ref to component <paramref name="bit"/> (which the archetype must have) in <paramref name="slot"/>; slots are
+    /// below the column length (columns have as many rows as <see cref="EntityIds"/>).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ref T Ref<T>(int bit, int slot) where T : struct, IComponent => ref Unsafe.Add(ref Base<T>(bit), slot);
+
+    /// <summary>Append an entity and return its row (a pass that started earlier does not visit it).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int Add(int entityId, int version)
     {
-        int slot;
-
-        if (_freeCount > 0)
-        {
-            slot = _freeSlots[--_freeCount];
-            Unordered++;
-        }
-        else
-        {
-            if (Count >= EntityIds.Length)
-            {
-                Array.Resize(ref EntityIds, EntityIds.Length * 2);
-                Array.Resize(ref Versions, EntityIds.Length);
-            }
-
-            slot = Count++;
-            if (slot > 0 && EntityIds[slot - 1] > entityId) Unordered++;
-        }
-
-        EntityIds[slot] = entityId;
-        Versions[slot] = version;
+        if (Count >= EntityIds.Length) Grow();
+        int slot = Count++;
+        // slot < EntityIds.Length == Versions.Length (grown above): no bounds checks.
+        Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(EntityIds), slot) = entityId;
+        Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Versions), slot) = version;
         AliveCount++;
+        if (_bitColumns.Length != 0) SetBits(slot); // a transition then clears what the entity lacks
         return slot;
     }
 
     /// <summary>
-    /// Remove the entity occupying <paramref name="slot"/>.
-    /// Marks the slot as tombstone (-1) and adds to free list for O(1) reuse.
+    /// Next run of alive rows at or after <paramref name="start"/> among the first <paramref name="count"/> rows:
+    /// returns false when there is none, else sets <paramref name="start"/> and <paramref name="length"/>. Both scans
+    /// are vectorized (<c>IndexOfAnyExcept</c> / <c>IndexOf</c> on the id array).
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public void RemoveAt(int slot)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool NextRun(ref int start, int count, out int length)
     {
-        EntityIds[slot] = Tombstone;
+        var ids = new ReadOnlySpan<int>(EntityIds, 0, count);
+        int skip = ids.Slice(start).IndexOfAnyExcept(Tombstone);
+        if (skip < 0)
+        {
+            length = 0;
+            return false;
+        }
+
+        start += skip;
+        length = ids.Slice(start).IndexOf(Tombstone);
+        if (length < 0) length = count - start;
+        return true;
+    }
+
+    /// <summary>Double the rows of the id arrays and of every column (cold path).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void Grow()
+    {
+        int capacity = EntityIds.Length * 2;
+        Array.Resize(ref EntityIds, capacity);
+        Array.Resize(ref Versions, capacity);
+        for (int i = 0; i < Columns.Length; i++)
+            ByBit[Components[i]].Column = Columns[i] = _infos[i].Grow(Columns[i], capacity);
+        foreach (short c in _bitColumns)
+        {
+            Array.Resize(ref Present[c], (capacity + 63) >> 6);
+            ByBit[Components[c]].Bits = Present[c];
+        }
+    }
+
+    /// <summary>
+    /// Remove the entity in row <paramref name="slot"/> (its data was copied away or is dead). Outside passes the last
+    /// row moves into the slot (one row copy, tables stay dense); during a pass, or when the table already has
+    /// tombstones, the row becomes a tombstone. Returns true when the table has just become <see cref="Dirty"/>.
+    /// </summary>
+    public bool Remove(int slot, EntityMeta[] meta, bool inPass)
+    {
         AliveCount--;
+        if (_bitColumns.Length != 0) ForgetAbsent(slot);
+        // slot < Count <= EntityIds.Length: no bounds checks.
+        ref int ids = ref MemoryMarshal.GetArrayDataReference(EntityIds);
+        if (inPass || Count != AliveCount + 1)
+        {
+            Unsafe.Add(ref ids, slot) = Tombstone;
+            if (Dirty) return false;
+            Dirty = true;
+            return true;
+        }
 
-        if (_freeCount >= _freeSlots.Length)
-            Array.Resize(ref _freeSlots, _freeSlots.Length * 2);
+        int last = --Count;
+        if (slot != last) MoveRow(last, slot, meta);
+        Unsafe.Add(ref ids, last) = Tombstone;
+        if (_hasManaged) ReleaseRows(last, 1);
+        return false;
+    }
 
-        _freeSlots[_freeCount++] = slot;
+    /// <summary>Move the entity of row <paramref name="from"/> (data, id, version, presence bits, meta slot) into row <paramref name="to"/>.</summary>
+    private void MoveRow(int from, int to, EntityMeta[] meta)
+    {
+        var columns = Columns;
+        var infos = _infos.AsSpan(0, columns.Length); // parallel arrays of equal length: no bounds checks below
+        for (int c = 0; c < infos.Length; c++)
+            CopyElement(infos[c], columns[c], from, columns[c], to);
+        if (_bitColumns.Length != 0) CopyBits(from, to);
+        // Rows below Count are within the id arrays, and ids of rows are valid meta indices.
+        ref int ids = ref MemoryMarshal.GetArrayDataReference(EntityIds);
+        ref int versions = ref MemoryMarshal.GetArrayDataReference(Versions);
+        int id = Unsafe.Add(ref ids, from);
+        Unsafe.Add(ref ids, to) = id;
+        Unsafe.Add(ref versions, to) = Unsafe.Add(ref versions, from);
+        Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(meta), id).Slot = to;
+    }
 
-        // Note: Auto-compaction is disabled to avoid unpredictable performance spikes mid-frame.
-        // Call World.CompactArchetypes() manually during loading screens or maintenance windows
-        // to remove tombstones and reduce fragmentation.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ReleaseRows(int start, int count)
+    {
+        for (int i = 0; i < _infos.Length; i++)
+            if (_infos[i].Managed)
+                _infos[i].Clear(Columns[i], start, count);
     }
 
     /// <summary>
-    /// Whether enough insertions broke id order (or enough tombstones piled up) that re-sorting pays for itself:
-    /// more than an eighth of the alive entities, plus a floor so small archetypes are left alone.
+    /// Close the tombstones by moving the last alive rows into them (O(tombstones x columns); row order does not
+    /// matter for a table), rewriting the moved entities' slots. Never while a pass iterates.
     /// </summary>
-    public bool NeedsSort
+    public void FillHoles(EntityMeta[] meta)
     {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Unordered + (Count - AliveCount) > (AliveCount >> 3) + 64;
-    }
-
-    /// <summary>
-    /// Remove tombstones and sort the remaining ids ascending, rewriting each entity's slot. Columns are indexed by
-    /// entity id, so ascending ids turn iteration into a forward, prefetch-friendly walk over every column.
-    /// A bitmap sort: O(alive + (max id - min id) / 64), and the slot rewrites walk <paramref name="meta"/> forward.
-    /// <paramref name="bits"/> must cover every entity id and be all zero; it is all zero again on return.
-    /// </summary>
-    public void Compact(EntityMeta[] meta, ulong[] bits)
-    {
-        int[] ids = EntityIds;
-        int count = Count;
-        int min = int.MaxValue, max = -1, alive = 0;
-        for (int i = 0; i < count; i++)
+        // Holes below AliveCount are exactly as many as alive rows at or above it: move those down, found with
+        // vectorized scans (IndexOf / LastIndexOfAnyExcept on the id array) instead of a test per row.
+        var ids = EntityIds.AsSpan(0, Count);
+        int alive = AliveCount;
+        int end = ids.Length; // alive rows still to move live in [alive, end)
+        for (int hole = 0; ; hole++)
         {
-            int id = ids[i];
-            if (id < 0) continue;
-            bits[id >> 6] |= 1UL << id; // the shift count is taken mod 64
-            min = Math.Min(min, id);
-            max = Math.Max(max, id);
-            alive++;
+            int found = ids.Slice(hole, alive - hole).IndexOf(Tombstone);
+            if (found < 0) break;
+            hole += found;
+            end = alive + ids.Slice(alive, end - alive).LastIndexOfAnyExcept(Tombstone);
+            MoveRow(end, hole, meta);
+            ids[end] = Tombstone;
         }
 
-        int slot = 0;
-        for (int w = min >> 6, last = max >> 6; alive > 0 && w <= last; w++)
-        {
-            ulong word = bits[w];
-            if (word == 0) continue;
-            bits[w] = 0;
-            do
-            {
-                int id = (w << 6) | BitOperations.TrailingZeroCount(word);
-                ids[slot] = id;
-                Versions[slot] = meta[id].Version;
-                meta[id].Slot = slot++;
-                word &= word - 1;
-            } while (word != 0);
-        }
-
+        if (_hasManaged && ids.Length > alive) ReleaseRows(alive, ids.Length - alive);
         Count = alive;
-        _freeCount = 0;
-        Unordered = 0;
+        Dirty = false;
     }
 
     /// <summary>
-    /// Cached archetype reached by adding component <paramref name="bit"/>; null when not cached yet.
+    /// Copy one element between two columns of the same component type. Unmanaged elements move as bytes with
+    /// fixed-width loads for the common sizes (no memmove call); managed ones through their typed copy.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Archetype GetAddEdge(int bit) => bit < _addEdges.Length ? _addEdges[bit] : null;
-
-    /// <summary>
-    /// Cached archetype reached by removing component <paramref name="bit"/>; null when not cached yet.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Archetype GetRemoveEdge(int bit) => bit < _removeEdges.Length ? _removeEdges[bit] : null;
-
-    public void SetAddEdge(int bit, Archetype target) => SetEdge(ref _addEdges, bit, target);
-
-    public void SetRemoveEdge(int bit, Archetype target) => SetEdge(ref _removeEdges, bit, target);
-
-    /// <summary>Cached archetype reached by adding the components of signature <paramref name="signature"/>; null when not cached yet.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Archetype GetAddSetEdge(int signature) =>
-        signature < _addSetEdges.Length ? _addSetEdges[signature] : null;
-
-    /// <summary>Cached archetype reached by removing the components of signature <paramref name="signature"/>; null when not cached yet.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Archetype GetRemoveSetEdge(int signature) =>
-        signature < _removeSetEdges.Length ? _removeSetEdges[signature] : null;
-
-    public void SetAddSetEdge(int signature, Archetype target) => SetEdge(ref _addSetEdges, signature, target);
-
-    public void SetRemoveSetEdge(int signature, Archetype target) => SetEdge(ref _removeSetEdges, signature, target);
-
-    private static void SetEdge(ref Archetype[] edges, int bit, Archetype target)
+    public static void CopyElement(ComponentInfo info, Array source, int sourceSlot, Array target, int targetSlot)
     {
-        if (bit >= edges.Length)
-            Array.Resize(ref edges, Math.Max(bit + 1, edges.Length * 2));
-        edges[bit] = target;
+        int size = info.Size;
+        if (size < 0)
+        {
+            info.CopyManaged(source, sourceSlot, target, targetSlot);
+            return;
+        }
+
+        ref byte from = ref Unsafe.Add(ref Aligned(source), (nint)sourceSlot * size);
+        ref byte to = ref Unsafe.Add(ref Aligned(target), (nint)targetSlot * size);
+        switch (size)
+        {
+            case 1:
+                to = from;
+                break;
+            case 2:
+                Unsafe.WriteUnaligned(ref to, Unsafe.ReadUnaligned<short>(ref from));
+                break;
+            case 4:
+                Unsafe.WriteUnaligned(ref to, Unsafe.ReadUnaligned<int>(ref from));
+                break;
+            case 8:
+                Unsafe.WriteUnaligned(ref to, Unsafe.ReadUnaligned<long>(ref from));
+                break;
+            case 12:
+                Unsafe.WriteUnaligned(ref to, Unsafe.ReadUnaligned<long>(ref from));
+                Unsafe.WriteUnaligned(ref Unsafe.Add(ref to, 8), Unsafe.ReadUnaligned<int>(ref Unsafe.Add(ref from, 8)));
+                break;
+            case 16:
+                Unsafe.WriteUnaligned(ref to, Unsafe.ReadUnaligned<Vector128<byte>>(ref from));
+                break;
+            default:
+                Unsafe.CopyBlockUnaligned(ref to, ref from, (uint)size);
+                break;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Transition GetAddEdge(int bit) => bit < _addEdges.Length ? _addEdges[bit] : null;
+
+    public void SetAddEdge(int bit, Transition target) => SetEdge(ref _addEdges, bit, target);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Transition GetAddSetEdge(int signature) => signature < _addSetEdges.Length ? _addSetEdges[signature] : null;
+
+    public void SetAddSetEdge(int signature, Transition target) => SetEdge(ref _addSetEdges, signature, target);
+
+    private static void SetEdge(ref Transition[] edges, int index, Transition target)
+    {
+        if (index >= edges.Length)
+            Array.Resize(ref edges, Math.Max(index + 1, edges.Length * 2));
+        edges[index] = target;
+    }
+
+    /// <summary>Description of column <paramref name="index"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ComponentInfo Info(int index) => _infos[index];
+}
+
+/// <summary>
+/// A cached move from one archetype to another: the target and the copy plan of the components both have (pairs of
+/// column indices), computed once per edge so a structural change copies the row without searching columns.
+/// </summary>
+internal sealed class Transition
+{
+    public readonly Archetype Source;
+    public readonly Archetype Target;
+
+    // One step per shared component (source column, target column, its description).
+    private readonly Step[] _plan;
+
+    private readonly struct Step(int from, int to, ComponentInfo info)
+    {
+        public readonly int From = from;
+        public readonly int To = to;
+        public readonly ComponentInfo Info = info;
+    }
+
+    public Transition(Archetype source, Archetype target)
+    {
+        Source = source;
+        Target = target;
+        var plan = new System.Collections.Generic.List<Step>();
+        for (int i = 0; i < source.Components.Length; i++)
+        {
+            int to = target.ColumnIndex(source.Components[i]);
+            if (to >= 0) plan.Add(new Step(i, to, source.Info(i)));
+        }
+
+        _plan = plan.ToArray();
     }
 
     /// <summary>
-    /// Get a read-only span of entity IDs for iteration.
-    /// Includes tombstones - iterator must skip -1 values.
+    /// Copy the shared components of row <paramref name="slot"/> into row <paramref name="targetSlot"/> of the target,
+    /// and which of them the row lacks (cleared presence bits).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ReadOnlySpan<int> GetEntitySpan() => new ReadOnlySpan<int>(EntityIds, 0, Count);
+    public void CopyRow(int slot, int targetSlot)
+    {
+        // Step columns are valid indices of both archetypes' Columns (built from them above): no bounds checks.
+        ref Array from = ref MemoryMarshal.GetArrayDataReference(Source.Columns);
+        ref Array to = ref MemoryMarshal.GetArrayDataReference(Target.Columns);
+        foreach (ref readonly var step in _plan.AsSpan())
+            Archetype.CopyElement(step.Info, Unsafe.Add(ref from, step.From), slot, Unsafe.Add(ref to, step.To), targetSlot);
+        if (Source.HasAbsent) CopyAbsent(slot, targetSlot);
+    }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void CopyAbsent(int slot, int targetSlot)
+    {
+        foreach (ref readonly var step in _plan.AsSpan())
+            if (!Source.Has(step.From, slot))
+                Target.Take(step.To, targetSlot);
+    }
 }

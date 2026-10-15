@@ -18,7 +18,6 @@ public partial class Movement : EcsSystem
 /// </summary>
 public partial class Damage : EcsSystem
 {
-    // Without<Dead>: an entity moved into another matching archetype mid-pass may be visited again; filters keep jobs idempotent.
     [ForEach, With<Velocity>, Without<Dead>]
     private void Hurt(Entity entity, ref Health health, ref Score score)
     {
@@ -38,8 +37,108 @@ public partial class MovementWithGravity : Movement
     private static void Fall(ref Velocity v) => v.Y -= 1;
 }
 
+/// <summary>Changes the archetype of the visited entity, then keeps writing through its refs.</summary>
+public partial class BurnThenHeal : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    private static void Tick(Entity entity, ref Health health, in Position position)
+    {
+        health = health with { Value = health.Value - 1 };
+        entity.Set(new Dead());                                  // moves the row: health now points at the old row
+        health = health with { Value = health.Value + 10 };      // carried over to the new row after the method returns
+        entity.Set(new Position(position.X + 1, position.Y));    // in parameter: the Set value is not overwritten
+    }
+}
+
+/// <summary>Moves every visited entity into another archetype that the same pass also matches.</summary>
+public partial class Promote : EcsSystem
+{
+    [ForEach]
+    private static void Visit(Entity entity, ref Health health)
+    {
+        health = health with { Value = health.Value + 1 };
+        if (!entity.Has<Frozen>()) entity.Set(new Frozen());
+        else entity.Remove<Frozen>();
+    }
+}
+
+/// <summary>Batch method: whole runs of rows as spans (vectorizable).</summary>
+public partial class BatchMovement : EcsSystem
+{
+    [ForEach, Without<Frozen>]
+    private static void Move(System.Span<Position> p, System.ReadOnlySpan<Velocity> v, ref Score score)
+    {
+        // Position and Velocity are two floats each: one float span per column, added with SIMD.
+        var positions = System.Runtime.InteropServices.MemoryMarshal.Cast<Position, float>(p);
+        var velocities = System.Runtime.InteropServices.MemoryMarshal.Cast<Velocity, float>(v);
+        int i = 0;
+        for (int width = System.Numerics.Vector<float>.Count; i + width <= positions.Length; i += width)
+            (new System.Numerics.Vector<float>(positions[i..]) + new System.Numerics.Vector<float>(velocities[i..])).CopyTo(positions[i..]);
+        for (; i < positions.Length; i++) positions[i] += velocities[i];
+        score.Deaths += p.Length; // counts visited rows
+    }
+}
+
 public class ForEachSystemTests
 {
+    [Test]
+    public void BatchMethodsReceiveEveryMatchingRowOnce()
+    {
+        using var world = new World();
+        var entities = new Entity[1000];
+        for (int i = 0; i < entities.Length; i++)
+            entities[i] = world.CreateEntity(new Position(i, 0), new Velocity(1, 2));
+        for (int i = 0; i < entities.Length; i += 3) entities[i].Destroy();   // tombstones: several runs per table
+        entities[1].Set(new Frozen());
+
+        world.AddSingleton<Score>();
+        world.AddSystem<BatchMovement>();
+        world.Update();
+
+        Assert.That(world.GetSingleton<Score>().Deaths, Is.EqualTo(666 - 1));
+        Assert.That(entities[1].Get<Position>(), Is.EqualTo(new Position(1, 0)));
+        Assert.That(entities[2].Get<Position>(), Is.EqualTo(new Position(3, 2)));
+        Assert.That(entities[999 - 1].Get<Position>(), Is.EqualTo(new Position(999, 2)));
+    }
+
+    [Test]
+    public void WritesThroughRefsFollowTheVisitedEntityAcrossItsStructuralChanges()
+    {
+        using var world = new World();
+        var e = world.CreateEntity(new Health(5), new Position(1, 1));
+        world.AddSystem<BurnThenHeal>();
+        world.Update();
+
+        Assert.That(e.Has<Dead>(), Is.True);
+        Assert.That(e.Get<Health>().Value, Is.EqualTo(14));
+        Assert.That(e.Get<Position>(), Is.EqualTo(new Position(2, 1)));
+    }
+
+    [Test]
+    public void APassVisitsEachEntityOnceEvenWhenItMovesToAMatchingArchetype()
+    {
+        using var world = new World();
+        var plain = new Entity[100];
+        var frozen = new Entity[100];
+        for (int i = 0; i < 100; i++)
+        {
+            plain[i] = world.CreateEntity(new Health(0));
+            frozen[i] = world.CreateEntity(new Health(0), new Frozen());
+        }
+
+        world.AddSystem<Promote>();
+        world.Update();
+        world.Update();
+
+        for (int i = 0; i < 100; i++)
+        {
+            Assert.That(plain[i].Get<Health>().Value, Is.EqualTo(2));
+            Assert.That(frozen[i].Get<Health>().Value, Is.EqualTo(2));
+            Assert.That(plain[i].Has<Frozen>(), Is.False);
+            Assert.That(frozen[i].Has<Frozen>(), Is.True);
+        }
+    }
+
     [Test]
     public void StaticForEachWithFilter()
     {

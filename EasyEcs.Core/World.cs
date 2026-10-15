@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace EasyEcs;
 
@@ -26,7 +27,6 @@ public sealed partial class World : IDisposable
     {
         _options = options ?? new WorldOptions();
         Meta = new EntityMeta[Math.Max(1, _options.InitialEntityCapacity)];
-        _sortBits = new ulong[(Meta.Length + 63) >> 6];
         _emptyArchetype = GetOrCreateArchetype(default);
     }
 
@@ -36,10 +36,10 @@ public sealed partial class World : IDisposable
     /// <summary>All alive entities in id order (diagnostics: O(capacity)).</summary>
     public EntityEnumerator Entities => new(this);
 
-    /// <summary>Pre-size entity storage (and existing columns) so spawning up to <paramref name="capacity"/> never grows arrays.</summary>
+    /// <summary>Pre-size entity storage so creating up to <paramref name="capacity"/> entities never grows it.</summary>
     public void EnsureEntityCapacity(int capacity)
     {
-        lock (StructuralLock)
+        using (Structural())
         {
             if (Meta.Length < capacity)
                 Grow(capacity);
@@ -50,10 +50,10 @@ public sealed partial class World : IDisposable
     [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
     public Entity CreateEntity()
     {
-        lock (StructuralLock)
+        using (Structural())
         {
             int id = AllocateId();
-            MoveToArchetype(id, _emptyArchetype);
+            Place(id, _emptyArchetype);
             return new Entity(this, id, Meta[id].Version);
         }
     }
@@ -65,17 +65,17 @@ public sealed partial class World : IDisposable
     public void DestroyEntity(Entity entity)
     {
         if (!ReferenceEquals(entity.World, this)) return;
-        lock (StructuralLock)
+        using (Structural())
         {
             int id = entity.Id;
-            ref var meta = ref Meta[id];
+            ref var meta = ref MetaRef(id); // ids of this world's handles are always < Meta.Length
             var archetype = meta.Archetype;
             if (archetype == null || meta.Version != entity.Version) return;
 
             meta.Version++; // invalidates every outstanding handle
-            archetype.RemoveAt(meta.Slot);
             meta.Archetype = null;
-            ReleaseComponents(id, archetype.ManagedComponents);
+            RemoveRow(archetype, meta.Slot);
+            StorageVersion++;
 
             _entityCount--;
             if (_freeIdCount == _freeIds.Length) Array.Resize(ref _freeIds, _freeIds.Length * 2);
@@ -113,12 +113,17 @@ public sealed partial class World : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal ref EntityMeta MetaRef(int id) => ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Meta), id);
 
-    /// <summary>Throw unless <paramref name="entity"/> is alive. Must be called inside the structural lock.</summary>
-    internal void ThrowIfStale(in Entity entity)
+    /// <summary>
+    /// The meta record of <paramref name="entity"/>, which must be alive (throws otherwise). Must be called inside the
+    /// structural lock; the ref stays valid for the rest of it (only entity creation reallocates <see cref="Meta"/>).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal ref EntityMeta Live(in Entity entity)
     {
         if (!ReferenceEquals(entity.World, this)) Entity.ThrowStale();
         ref var meta = ref MetaRef(entity.Id); // ids of this world's handles are always < Meta.Length
         if (meta.Version != entity.Version || meta.Archetype == null) Entity.ThrowStale();
+        return ref meta;
     }
 
     /// <summary>Take a recycled id or a new one (growing storage). Must be called inside the structural lock.</summary>
@@ -131,28 +136,15 @@ public sealed partial class World : IDisposable
         return id;
     }
 
-    /// <summary>Grow entity metadata and every column to <paramref name="capacity"/> (cold path).</summary>
+    /// <summary>Grow entity metadata to <paramref name="capacity"/> (cold path).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void Grow(int capacity)
     {
         Array.Resize(ref Meta, capacity);
-        _sortBits = new ulong[(capacity + 63) >> 6];
-        var columns = Components;
-        for (int i = 0; i < columns.Length; i++)
-        {
-            var column = columns[i];
-            if (column == null || column.Length >= capacity) continue;
-            var grown = Array.CreateInstance(column.GetType().GetElementType()!, capacity);
-            Array.Copy(column, grown, column.Length);
-            columns[i] = grown;
-        }
-
         StorageVersion++;
     }
 
     private readonly Archetype _emptyArchetype;
-
-    // Scratch bitmap of the archetype sort (one bit per entity id, all zero between sorts); grows with Meta.
-    private ulong[] _sortBits;
 
     /// <summary>Enumerates alive entities in id order; ids beyond the capacity captured at start are not visited.</summary>
     public struct EntityEnumerator

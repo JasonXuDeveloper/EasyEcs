@@ -16,12 +16,4 @@ public sealed class WorldOptions
 
     /// <summary>Pre-sized entity capacity (avoid growth reallocations at runtime).</summary>
     public int InitialEntityCapacity { get; init; } = 1024;
-
-    /// <summary>
-    /// At the start of every update, re-sort the archetypes whose entity order degraded through churn (as
-    /// <see cref="World.CompactArchetypes"/> does for all of them), so iteration keeps walking columns forward.
-    /// Costs O(archetypes) per update when nothing needs sorting. Default true. With it, do not call
-    /// <c>Update</c> while a query of the same world is iterating.
-    /// </summary>
-    public bool SortArchetypesOnUpdate { get; init; } = true;
 }

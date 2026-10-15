@@ -9,6 +9,8 @@ public record struct Health(int Value) : IComponent;
 public record struct Name(string Value) : IComponent;   // managed reference inside a component
 public struct Frozen : IComponent;                        // tag
 public struct Dead : IComponent;                          // tag
+public record struct Stun(int Ticks) : IComponent;        // gained and lost often
+public struct Marked : IComponent;                        // tag
 public record struct C1(int V) : IComponent;
 public record struct C2(int V) : IComponent;
 public record struct C3(int V) : IComponent;

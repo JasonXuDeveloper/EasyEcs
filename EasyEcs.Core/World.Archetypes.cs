@@ -8,16 +8,20 @@ namespace EasyEcs;
 // Archetype registry, entity membership and the query cache.
 //
 // Thread-safety contract:
-// - All mutation (archetype creation, membership changes, cache updates) happens under StructuralLock.
+// - All mutation (archetype creation, membership changes, cache updates) happens under the structural lock (Structural()).
 // - Lock-free readers (queries) only see immutable Archetype[] snapshots: _allArchetypes and every query cache entry
 //   are replaced copy-on-write and published with Volatile.Write, never mutated in place.
 public sealed partial class World
 {
-    // Lock for structural modifications (System.Threading.Lock: cheaper than Monitor, no object header sync block).
-    internal readonly Lock StructuralLock = new();
+    // Lock for structural modifications (see StructuralGate: one CAS in, one store out).
+    internal StructuralGate Gate;
 
-    // Bumped whenever storage arrays may be reallocated (component columns, entity arrays, archetype id arrays,
-    // compaction) so in-flight ForEach passes refresh their cached array references.
+    /// <summary>Hold the structural lock until the returned scope is disposed.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal StructuralScope Structural() => new(ref Gate);
+
+    // Bumped by every structural change (and every storage reallocation or compaction), so an in-flight ForEach pass
+    // knows when to refresh its cached array references and check whether its job moved the visited entity.
     internal int StorageVersion;
 
     // Tag -> archetype (only touched under the lock).
@@ -29,77 +33,53 @@ public sealed partial class World
     // Query -> matching archetypes. Entries are created once and their array is replaced copy-on-write.
     private readonly ConcurrentDictionary<QueryKey, QueryCacheEntry> _queryCache = new();
 
-    private sealed class QueryCacheEntry(Archetype[] archetypes)
+    private sealed class QueryCacheEntry(QueryMatch match)
     {
-        public Archetype[] Archetypes = archetypes;
+        public QueryMatch Match = match;
     }
 
     /// <summary>
-    /// Move an entity into <paramref name="target"/>, leaving its current archetype (if any).
-    /// Must be called inside StructuralLock.
+    /// Put a new entity (no archetype yet) into <paramref name="target"/> and return its row. Inside the structural lock.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void MoveToArchetype(int entityId, Archetype target)
+    private int Place(int id, Archetype target)
     {
-        ref var meta = ref MetaRef(entityId);
-        var current = meta.Archetype;
-        if (ReferenceEquals(current, target))
-            return;
-
-        current?.RemoveAt(meta.Slot);
-        var ids = target.EntityIds;
-        meta.Slot = target.Add(entityId, meta.Version);
+        ref var meta = ref MetaRef(id);
+        int slot = target.Add(id, meta.Version);
+        meta.Slot = slot;
         meta.Archetype = target;
-
-        // Archetype storage reallocated: invalidate snapshots held by in-flight ForEach passes
-        if (!ReferenceEquals(ids, target.EntityIds))
-            StorageVersion++;
+        StorageVersion++;
+        return slot;
     }
 
-    /// <summary>Archetype reached from <paramref name="from"/> by adding <paramref name="bit"/> (edge-cached). Inside the lock.</summary>
-    private Archetype ArchetypeAfterAdd(Archetype from, ushort bit) => from.GetAddEdge(bit) ?? CreateEdge(from, bit, add: true);
-
-    /// <summary>Archetype reached from <paramref name="from"/> by removing <paramref name="bit"/> (edge-cached). Inside the lock.</summary>
-    private Archetype ArchetypeAfterRemove(Archetype from, ushort bit) => from.GetRemoveEdge(bit) ?? CreateEdge(from, bit, add: false);
-
-    /// <summary>Resolve a transition once (mask hashing) and cache it in both directions.</summary>
+    /// <summary>Resolve an add transition once (mask hashing) and cache it.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private Archetype CreateEdge(Archetype from, ushort bit, bool add)
+    private Transition CreateEdge(Archetype from, ushort bit)
     {
         var mask = from.ComponentMask.Clone();
-        if (add) mask.SetBit(bit);
-        else mask.ClearBit(bit);
-
-        var target = GetOrCreateArchetype(in mask);
-        var (without, with) = add ? (from, target) : (target, from);
-        without.SetAddEdge(bit, with);
-        with.SetRemoveEdge(bit, without);
-        return target;
+        mask.SetBit(bit);
+        var transition = new Transition(from, GetOrCreateArchetype(in mask));
+        from.SetAddEdge(bit, transition);
+        return transition;
     }
 
     /// <summary>
-    /// Resolve a multi-component transition once (mask hashing) and cache it on <paramref name="from"/> under
-    /// <paramref name="signature"/>. The target may be <paramref name="from"/> itself (nothing to add or remove).
+    /// Resolve a multi-component add transition once (mask hashing) and cache it on <paramref name="from"/> under
+    /// <paramref name="signature"/>. The target is <paramref name="from"/> itself when it has every column already.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private Archetype CreateSetEdge(Archetype from, ReadOnlySpan<ushort> bits, int signature, bool add)
+    private Transition CreateSetEdge(Archetype from, ReadOnlySpan<ushort> bits, int signature)
     {
         var mask = from.ComponentMask.Clone();
-        for (int i = 0; i < bits.Length; i++)
-        {
-            if (add) mask.SetBit(bits[i]);
-            else mask.ClearBit(bits[i]);
-        }
-
-        var target = GetOrCreateArchetype(in mask);
-        if (add) from.SetAddSetEdge(signature, target);
-        else from.SetRemoveSetEdge(signature, target);
-        return target;
+        for (int i = 0; i < bits.Length; i++) mask.SetBit(bits[i]);
+        var transition = new Transition(from, GetOrCreateArchetype(in mask));
+        from.SetAddSetEdge(signature, transition);
+        return transition;
     }
 
     /// <summary>
     /// Get or create the archetype for <paramref name="componentMask"/>. A new archetype is appended (copy-on-write)
-    /// to every cached query it matches. Must be called inside StructuralLock.
+    /// to every cached query it matches. Must be called inside the structural lock.
     /// </summary>
     private Archetype GetOrCreateArchetype(in Tag componentMask)
     {
@@ -107,28 +87,16 @@ public sealed partial class World
             return archetype;
 
         archetype = new Archetype(in componentMask);
-        archetype.ManagedComponents = ManagedOf(archetype.Components);
         _archetypes[componentMask] = archetype;
         Volatile.Write(ref _allArchetypes, Append(_allArchetypes, archetype));
 
         foreach (var pair in _queryCache)
         {
             if (pair.Key.Matches(in archetype.ComponentMask))
-                Volatile.Write(ref pair.Value.Archetypes, Append(pair.Value.Archetypes, archetype));
+                Volatile.Write(ref pair.Value.Match, pair.Value.Match.Append(archetype, pair.Key.FilterFor(archetype)));
         }
 
         return archetype;
-    }
-
-    /// <summary>The bits of <paramref name="components"/> whose column holds managed references (cold path).</summary>
-    private ushort[] ManagedOf(ushort[] components)
-    {
-        var managed = new List<ushort>();
-        var hasReferences = _columnHasReferences;
-        foreach (ushort bit in components)
-            if (bit < hasReferences.Length && hasReferences[bit])
-                managed.Add(bit);
-        return managed.ToArray();
     }
 
     private static Archetype[] Append(Archetype[] source, Archetype item)
@@ -140,79 +108,55 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Archetypes containing all <paramref name="bits"/> and matching <paramref name="filter"/>.
-    /// Lock-free on cache hits; the returned array is an immutable snapshot.
+    /// Archetypes containing all <paramref name="bits"/> and matching <paramref name="filter"/>, with their per-row
+    /// presence tests. Lock-free on cache hits; the result is an immutable snapshot.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)] // once per pass: keeps dictionary and lock code out of the iteration loops
-    internal Archetype[] GetMatchingArchetypes(ReadOnlySpan<ushort> bits, in QueryFilter filter)
+    internal QueryMatch GetMatchingArchetypes(ReadOnlySpan<ushort> bits, in QueryFilter filter)
     {
         var key = QueryKey.ForLookup(bits, in filter);
         if (_queryCache.TryGetValue(key, out var entry))
-            return Volatile.Read(ref entry.Archetypes);
+            return Volatile.Read(ref entry.Match);
 
-        lock (StructuralLock)
+        using (Structural())
         {
             if (_queryCache.TryGetValue(key, out entry))
-                return entry.Archetypes;
+                return entry.Match;
 
             key = key.Detached();
 
             var all = _allArchetypes;
-            var matching = new List<Archetype>();
+            var archetypes = new List<Archetype>();
+            var filters = new List<RowFilter>();
             for (int i = 0; i < all.Length; i++)
             {
-                if (key.Matches(in all[i].ComponentMask))
-                    matching.Add(all[i]);
+                if (!key.Matches(in all[i].ComponentMask)) continue;
+                archetypes.Add(all[i]);
+                filters.Add(key.FilterFor(all[i]));
             }
 
-            var result = matching.ToArray();
+            var result = new QueryMatch(archetypes.ToArray(), filters.ToArray());
             _queryCache[key] = new QueryCacheEntry(result);
             return result;
         }
     }
 
     /// <summary>
-    /// Remove tombstones and sort every archetype's entities by id (bitmap sort: O(alive + id range / 64) per
-    /// archetype). Iteration then reads each column front to back. Call between updates (after mass despawns, or when
-    /// <see cref="GetFragmentationStats"/> reports fragmentation), never while a query is iterating.
-    /// <see cref="WorldOptions.SortArchetypesOnUpdate"/> does this automatically for archetypes that need it.
+    /// Close the tombstone rows of every archetype (moving the last rows into them: O(tombstones x columns)).
+    /// Structural changes already keep tables dense: outside passes a removed row is filled at once, and tombstones left
+    /// by changes during passes are closed when the last pass ends. This is only needed after a pass was interrupted by
+    /// an exception. Never call it while a query is iterating.
     /// </summary>
     public void CompactArchetypes()
     {
-        lock (StructuralLock)
+        using (Structural())
         {
+            Passes = 0;
             var all = _allArchetypes;
             for (int i = 0; i < all.Length; i++)
-                all[i].Compact(Meta, _sortBits);
-            StorageVersion++;
-        }
-    }
-
-    /// <summary>
-    /// Re-sort the archetypes whose id order degraded (<see cref="Archetype.NeedsSort"/>). Runs at the start of every
-    /// update, when no query is iterating: O(archetypes) when nothing needs sorting.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void SortDisorderedArchetypes()
-    {
-        var all = _allArchetypes;
-        for (int i = 0; i < all.Length; i++)
-        {
-            if (!all[i].NeedsSort) continue;
-            SortDisorderedArchetypesLocked();
-            return;
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private void SortDisorderedArchetypesLocked()
-    {
-        lock (StructuralLock)
-        {
-            var all = _allArchetypes;
-            for (int i = 0; i < all.Length; i++)
-                if (all[i].NeedsSort)
-                    all[i].Compact(Meta, _sortBits);
+                all[i].FillHoles(Meta);
+            Array.Clear(_dirty, 0, _dirtyCount);
+            _dirtyCount = 0;
             StorageVersion++;
         }
     }

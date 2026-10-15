@@ -19,7 +19,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         Category, DiagnosticSeverity.Error, true);
 
     public static readonly DiagnosticDescriptor BadParameter = new("EECS002", "Invalid [ForEach] parameter",
-        "Parameter '{0}' of [ForEach] method '{1}' must be a 'ref'/'in' IComponent or ISingletonComponent struct, an Entity or the World",
+        "Parameter '{0}' of [ForEach] method '{1}' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, an Entity or the World",
         Category, DiagnosticSeverity.Error, true);
 
     public static readonly DiagnosticDescriptor ComponentCount = new("EECS003", "Invalid component count",
@@ -49,8 +49,15 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "Systems that call each other are coupled: neither can be removed, reordered or tested alone. Write the data " +
         "another system reads (a component or a singleton).");
 
+    public static readonly DiagnosticDescriptor MixedBatch = new("EECS009", "Batch [ForEach] mixes spans and per-entity parameters",
+        "[ForEach] method '{0}' takes component spans, so its other parameters can only be singletons ('ref'/'in')",
+        Category, DiagnosticSeverity.Error, true,
+        "A batch method receives runs of rows as spans. A per-entity parameter (ref/in component, Entity) has no single " +
+        "value for a run, and the World could change rows while the spans point at them.");
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
-        NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference);
+        NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
+        MixedBatch);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -140,7 +147,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
                 valid = false;
                 context.ReportDiagnostic(Diagnostic.Create(BadParameter, p.Locations.FirstOrDefault(), p.Name, method.Name));
             }
-            else if (kind == Symbols.ParamKind.Component)
+            else if (kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan)
             {
                 components++;
             }
@@ -148,6 +155,8 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
 
         if (valid && !Symbols.ComponentCountValid(method, components))
             context.ReportDiagnostic(Diagnostic.Create(ComponentCount, location, method.Name));
+        if (valid && Symbols.MixesBatch(method))
+            context.ReportDiagnostic(Diagnostic.Create(MixedBatch, location, method.Name));
     }
 
     private static bool HasForEach(IMethodSymbol method) =>

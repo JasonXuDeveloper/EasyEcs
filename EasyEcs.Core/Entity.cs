@@ -9,8 +9,9 @@ namespace EasyEcs;
 /// destroyed entity throws instead of touching the entity that reused its id. Safe to store and to compare.
 /// </summary>
 /// <remarks>
-/// Refs returned by <see cref="Get{T}"/>/<see cref="Add{T}"/> point into component storage: use them immediately and
-/// never keep them across a structural change or an <c>await</c>.
+/// Refs returned by <see cref="Get{T}"/>/<see cref="Add{T}"/> point into the row of the entity's archetype table: use
+/// them immediately and never keep them across a structural change of that entity (it moves the row) or an
+/// <c>await</c>.
 /// </remarks>
 public readonly partial struct Entity : IEquatable<Entity>
 {
@@ -38,30 +39,46 @@ public readonly partial struct Entity : IEquatable<Entity>
 
     /// <summary>Whether the entity has component <typeparamref name="T"/>. O(1).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Has<T>() where T : struct, IComponent => Archetype.ComponentMask.HasBit(ComponentType<T>.Bit);
+    public bool Has<T>() where T : struct, IComponent => !Unsafe.IsNullRef(ref Find<T>());
 
     /// <summary>Ref to component <typeparamref name="T"/>; throws if the entity does not have it. O(1).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T Get<T>() where T : struct, IComponent
     {
-        ushort bit = ComponentType<T>.Bit;
-        if (!Archetype.ComponentMask.HasBit(bit)) ThrowMissing(typeof(T));
-        return ref _world.ColumnRef<T>(bit, Id);
+        ref T value = ref Find<T>();
+        if (Unsafe.IsNullRef(ref value)) ThrowMissing(typeof(T));
+        return ref value;
     }
 
     /// <summary>Copy of component <typeparamref name="T"/> if the entity has it. O(1).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGet<T>(out T value) where T : struct, IComponent
     {
-        ushort bit = ComponentType<T>.Bit;
-        if (Archetype.ComponentMask.HasBit(bit))
-        {
-            value = _world.ColumnRef<T>(bit, Id);
-            return true;
-        }
+        ref T found = ref Find<T>();
+        bool has = !Unsafe.IsNullRef(ref found);
+        value = has ? found : default;
+        return has;
+    }
 
-        value = default;
-        return false;
+    /// <summary>
+    /// Ref to <typeparamref name="T"/> in the entity's row, or a null ref when the entity does not have it (no column,
+    /// or the row lost the component). Throws for a stale handle. One meta line plus one line of the archetype's lookup.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ref T Find<T>() where T : struct, IComponent
+    {
+        ref var meta = ref _world.MetaRef(Id);
+        var archetype = meta.Archetype;
+        if (meta.Version != Version || archetype == null) ThrowStale();
+        var map = archetype.ByBit;
+        uint bit = ComponentType<T>.Bit;
+        if (bit >= (uint)map.Length) return ref Unsafe.NullRef<T>();
+        // bit < map.Length: no bounds check. Column and presence bits share the entry's cache line.
+        ref var lookup = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(map), bit);
+        int slot = meta.Slot;
+        if (lookup.Column == null || (lookup.Bits is { } bits && (bits[slot >> 6] & (1UL << slot)) == 0))
+            return ref Unsafe.NullRef<T>();
+        return ref Unsafe.Add(ref Archetype.Row0<T>(lookup.Column), slot);
     }
 
     /// <summary>Add component <typeparamref name="T"/> (reset to default if present) and return a ref to it. O(1) amortized.</summary>
@@ -69,12 +86,12 @@ public readonly partial struct Entity : IEquatable<Entity>
     public ref T Add<T>() where T : struct, IComponent
     {
         var world = _world;
-        lock (world.StructuralLock)
+        using (world.Structural())
         {
-            world.ThrowIfStale(this);
-            ushort bit = world.PrepareColumn<T>();
-            world.AddBit(Id, bit);
-            ref T value = ref world.ColumnRef<T>(bit, Id);
+            ref var meta = ref world.Live(this);
+            ushort bit = ComponentType<T>.Bit;
+            world.AddBit(ref meta, Id, bit);
+            ref T value = ref World.Row<T>(ref meta, bit);
             value = default;
             return ref value;
         }
@@ -84,26 +101,14 @@ public readonly partial struct Entity : IEquatable<Entity>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T GetOrAdd<T>() where T : struct, IComponent
     {
-        ushort bit = ComponentType<T>.Bit;
-        return ref Archetype.ComponentMask.HasBit(bit) ? ref _world.ColumnRef<T>(bit, Id) : ref Add<T>();
+        ref T value = ref Find<T>();
+        return ref Unsafe.IsNullRef(ref value) ? ref Add<T>() : ref value;
     }
 
     // Set(in T1..Tn) and Remove<T1..Tn>() are generated (Entity.Structural.g.cs).
 
     /// <summary>Destroy the entity; a destroyed handle is ignored. O(components).</summary>
     public void Destroy() => _world?.DestroyEntity(this);
-
-    /// <summary>Archetype of a live entity; throws for a stale handle (one cache line: id -> meta).</summary>
-    internal Archetype Archetype
-    {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get
-        {
-            ref var meta = ref _world.MetaRef(Id);
-            if (meta.Version != Version || meta.Archetype == null) ThrowStale();
-            return meta.Archetype;
-        }
-    }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     internal static void ThrowStale() => throw new InvalidOperationException("Entity has been destroyed");

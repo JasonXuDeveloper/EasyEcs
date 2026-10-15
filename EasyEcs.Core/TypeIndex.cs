@@ -18,17 +18,24 @@ internal static class TypeIndex<TFamily, T>
 }
 
 /// <summary>
-/// Family of the generic signatures (T1, ..., Tn) of multi-component Set / Remove / CreateEntity calls: their dense
-/// index keys the transition caches of each archetype (Archetype.GetAddSetEdge / GetRemoveSetEdge).
+/// Family of the generic signatures (T1, ..., Tn) of multi-component Set / CreateEntity calls: their dense
+/// index keys the transition caches of each archetype (Archetype.GetAddSetEdge).
 /// </summary>
 internal readonly struct ComponentSignature;
 
-/// <summary>Bit of component type <typeparamref name="T"/> in archetype tags and its column index in every world.</summary>
+/// <summary>Bit of component type <typeparamref name="T"/> in archetype masks (registers its <see cref="ComponentInfo"/>).</summary>
 internal static class ComponentType<T> where T : struct, IComponent
 {
-    internal static readonly ushort Bit = TypeIndex<IComponent, T>.Value <= ushort.MaxValue
-        ? (ushort)TypeIndex<IComponent, T>.Value
-        : throw new InvalidOperationException($"Too many component types (max {ushort.MaxValue + 1})");
+    internal static readonly ushort Bit = Register();
+
+    private static ushort Register()
+    {
+        int index = TypeIndex<IComponent, T>.Value;
+        if (index > ushort.MaxValue)
+            throw new InvalidOperationException($"Too many component types (max {ushort.MaxValue + 1})");
+        ComponentInfo.Register(index, new ComponentInfo<T>());
+        return (ushort)index;
+    }
 }
 
 /// <summary>Slot of singleton type <typeparamref name="T"/> in every world.</summary>
