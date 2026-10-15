@@ -2,9 +2,11 @@ name: Release
 
 # Run manually: Actions -> Release -> Run workflow (on master), enter the version (e.g. 4.0.0 or 4.1.0-preview.1).
 #   tag:     bump <Version> in Directory.Build.props, build and test it, commit "Bump to vX.Y.Z", tag vX.Y.Z, push.
-#   publish: from the tag, pack and push to NuGet (secret MYTOKEN), then create the GitHub release with GitHub's
-#            generated notes (What's Changed from the merged pull requests, New Contributors, Full Changelog). If it fails (e.g. an expired key), fix the secret and use
+#   publish: from the tag, pack and push to NuGet (Trusted Publishing: a short-lived key from this workflow's OIDC
+#            token, no stored secret), then create the GitHub release with GitHub's generated notes (What's Changed
+#            from the merged pull requests, New Contributors, Full Changelog). If it fails, fix the cause and use
 #            "Re-run failed jobs": the tag stays, NuGet skips a version it already has, the release is created once.
+# Trusted Publishing policy on nuget.org: owner JasonXuDeveloper, repository EasyEcs, workflow release.yml.
 
 on:
   workflow_dispatch:
@@ -69,6 +71,9 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     needs: tag
+    permissions:
+      contents: write # the GitHub release
+      id-token: write # the OIDC token NuGet exchanges for a temporary API key
     steps:
       - uses: actions/checkout@v4
         with:
@@ -84,12 +89,16 @@ jobs:
           dotnet pack EasyEcs.Core/EasyEcs.Core.csproj --no-build --configuration Release --output artifacts
           ls artifacts/EasyEcs.$VERSION.nupkg
 
+      - name: NuGet login (Trusted Publishing)
+        id: nuget
+        uses: NuGet/login@v1
+        with:
+          user: JasonXuDeveloper # the nuget.org account that owns the policy
+
       - name: Push to NuGet
         env:
-          NUGET_API_KEY: ${{ secrets.MYTOKEN }}
-        run: |
-          if [ -z "$NUGET_API_KEY" ]; then echo "::error::secret MYTOKEN is not set"; exit 1; fi
-          dotnet nuget push "artifacts/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+          NUGET_API_KEY: ${{ steps.nuget.outputs.NUGET_API_KEY }}
+        run: dotnet nuget push "artifacts/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
       - name: Create GitHub release
         env:
