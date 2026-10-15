@@ -35,8 +35,8 @@ public partial class ParallelTests
     /// <summary>An Entity parameter can reach any component (and make structural changes): it runs alone.</summary>
     public partial class WriteRightThroughEntity : EcsSystem
     {
-        [ForEach]
-        static void Meet(Entity entity, in Left _, in Rendezvous rendezvous) =>
+        [ForEach, With<Left>]
+        static void Meet(Entity entity, in Rendezvous rendezvous) =>
             entity.Get<Right>().Met = rendezvous.Barrier.SignalAndWait(rendezvous.TimeoutMs);
     }
 

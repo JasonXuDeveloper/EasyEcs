@@ -92,7 +92,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
     private static void EmitJob(StringBuilder sb, OwnerModel owner, ForEachModel method)
     {
         string job = $"__{method.Name}Job";
-        var components = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Component).ToArray();
+        var components = method.Query.ToArray();
         int index = 0;
         var args = string.Join(", ", method.Parameters.Select((p, i) => p.Kind switch
         {
@@ -111,7 +111,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 sb.Append($"        public global::EasyEcs.SingletonRef<{method.Parameters[i].Type}> s{i};\n");
         sb.Append('\n');
         sb.Append("        [MethodImpl(MethodImplOptions.AggressiveInlining)]\n");
-        sb.Append($"        public void Execute(int entityId, {List(components.Length, i => $"ref {components[i - 1].Type} c{i}")})\n");
+        sb.Append($"        public void Execute(int entityId, {List(components.Length, i => $"ref {components[i - 1]} c{i}")})\n");
         sb.Append($"            => {(method.IsStatic ? owner.Name : "System")}.{method.Name}({args});\n    }}\n\n");
 
         if (method.With.Length + method.Without.Length == 0) return;
@@ -154,9 +154,12 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
     private sealed record ParamModel(Symbols.ParamKind Kind, string Type, string RefKind);
 
-    private sealed record ForEachModel(OwnerModel Owner, string Name, bool IsStatic, int Order, string ComponentTypes,
+    private sealed record ForEachModel(OwnerModel Owner, string Name, bool IsStatic, int Order, EquatableArray<string> Query,
         EquatableArray<ParamModel> Parameters, EquatableArray<string> With, EquatableArray<string> Without)
     {
+        /// <summary>The queried component types, as type arguments of World.ForEach / IForEach.</summary>
+        public string ComponentTypes => string.Join(", ", Query);
+
         public static ForEachModel? Create(IMethodSymbol method, int order, System.Threading.CancellationToken ct)
         {
             if (!Symbols.IsValidForEach(method)) return null;
@@ -174,8 +177,15 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 else if (name == Symbols.WithoutAttribute) without.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
             }
 
-            string components = string.Join(", ", parameters.Where(p => p.Kind == Symbols.ParamKind.Component).Select(p => p.Type));
-            return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, order, components,
+            var query = parameters.Where(p => p.Kind == Symbols.ParamKind.Component).Select(p => p.Type).ToList();
+            // No component parameter: the first [With<T>] becomes the queried component (passed to the job, not the method).
+            if (query.Count == 0)
+            {
+                query.Add(with[0]);
+                with.RemoveAt(0);
+            }
+            return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, order,
+                new EquatableArray<string>(query.ToArray()),
                 new EquatableArray<ParamModel>(parameters), new EquatableArray<string>(with.ToArray()),
                 new EquatableArray<string>(without.ToArray()));
         }

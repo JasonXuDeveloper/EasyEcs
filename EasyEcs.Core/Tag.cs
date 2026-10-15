@@ -136,6 +136,9 @@ internal struct Tag : IEquatable<Tag>
         return copy;
     }
 
+    /// <summary>True when bits past 255 have storage.</summary>
+    public readonly bool HasOverflow => _overflow != null;
+
     /// <summary>
     /// Copy that can take bits up to <paramref name="maxBit"/> without allocating: its overflow (only when needed) is
     /// <paramref name="scratch"/>, cleared and grown on demand. Valid until the caller reuses the scratch buffer.

@@ -87,6 +87,16 @@ internal static class Symbols
             if (kind == ParamKind.Component) components++;
         }
 
-        return components is >= 1 and <= MaxComponents;
+        return ComponentCountValid(method, components);
     }
+
+    /// <summary>
+    /// 1..9 component parameters, or none when a [With&lt;T&gt;] filter names the queried component (a method that only
+    /// needs the entity, e.g. [With&lt;Dead&gt;] static void Remove(Entity e)).
+    /// </summary>
+    public static bool ComponentCountValid(IMethodSymbol method, int components) =>
+        components is >= 1 and <= MaxComponents || components == 0 && HasWith(method);
+
+    public static bool HasWith(IMethodSymbol method) => method.GetAttributes().Any(a =>
+        a.AttributeClass is { IsGenericType: true } cls && cls.ConstructedFrom.ToDisplayString() == WithAttribute);
 }

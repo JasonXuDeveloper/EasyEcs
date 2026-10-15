@@ -60,11 +60,30 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
     /// </summary>
     public static QueryKey ForLookup(ReadOnlySpan<ushort> bits, in QueryFilter filter)
     {
+        // Common case: every bit fits the inline 256 bits, so a plain copy allocates nothing.
+        if (!filter.All.HasOverflow)
+        {
+            bool inline = true;
+            for (int i = 0; i < bits.Length; i++) inline &= bits[i] < 256;
+            if (inline)
+            {
+                var all = filter.All;
+                for (int i = 0; i < bits.Length; i++) all.SetBit(bits[i]);
+                return new QueryKey(in all, in filter.None);
+            }
+        }
+
+        return ForLookupWithOverflow(bits, in filter);
+    }
+
+    // Cold path kept out of line: inlining the thread-static access into ForEach measurably slowed its entity loop.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static QueryKey ForLookupWithOverflow(ReadOnlySpan<ushort> bits, in QueryFilter filter)
+    {
         int maxBit = 0;
         for (int i = 0; i < bits.Length; i++) maxBit = Math.Max(maxBit, bits[i]);
         var all = filter.All.CopyWithScratch(maxBit, ref _scratch);
-        for (int i = 0; i < bits.Length; i++)
-            all.SetBit(bits[i]);
+        for (int i = 0; i < bits.Length; i++) all.SetBit(bits[i]);
         return new QueryKey(in all, in filter.None);
     }
 

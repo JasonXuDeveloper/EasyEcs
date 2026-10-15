@@ -148,15 +148,15 @@ public partial class RespawnSystem : EcsSystem
 {
     public override int Priority => 6;
 
-    [ForEach, With<Npc>]
-    private static void Despawn(Entity entity, in Dead _, World world)
+    [ForEach, With<Dead>, With<Npc>]
+    private static void Despawn(Entity entity, World world)
     {
         entity.Destroy();
         Simulation.SpawnNpc(world, entity.Id * 31 + 7);
     }
 
-    [ForEach, With<Player>]
-    private static void Respawn(Entity entity, in Dead _, ref Health health)
+    [ForEach, With<Dead>, With<Player>]
+    private static void Respawn(Entity entity, ref Health health)
     {
         health.Value = health.Max;
         entity.Remove<Dead>();

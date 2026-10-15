@@ -27,8 +27,8 @@ public partial class Damage : EcsSystem
         score.Deaths++; // singleton parameter: resolved once per pass (added if missing)
     }
 
-    [ForEach]
-    private static void Corpses(Entity entity, in Dead _) => entity.Remove<Velocity>();
+    [ForEach, With<Dead>]   // no component parameter: Dead is queried through the filter
+    private static void Corpses(Entity entity) => entity.Remove<Velocity>();
 }
 
 /// <summary>Derived partial systems compose: base [ForEach] methods run first.</summary>

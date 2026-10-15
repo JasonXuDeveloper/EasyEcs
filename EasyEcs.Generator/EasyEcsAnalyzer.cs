@@ -23,7 +23,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         Category, DiagnosticSeverity.Error, true);
 
     public static readonly DiagnosticDescriptor ComponentCount = new("EECS003", "Invalid component count",
-        "[ForEach] method '{0}' must take between 1 and 9 components", Category, DiagnosticSeverity.Error, true);
+        "[ForEach] method '{0}' must take between 1 and 9 components, or none with a [With<T>] filter", Category, DiagnosticSeverity.Error, true);
 
     public static readonly DiagnosticDescriptor Generic = new("EECS004", "Generic systems are not supported",
         "[ForEach] method '{0}' is declared in a generic type or is generic itself",
@@ -146,7 +146,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             }
         }
 
-        if (valid && components is < 1 or > Symbols.MaxComponents)
+        if (valid && !Symbols.ComponentCountValid(method, components))
             context.ReportDiagnostic(Diagnostic.Create(ComponentCount, location, method.Name));
     }
 

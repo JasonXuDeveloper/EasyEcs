@@ -74,6 +74,7 @@ public class GeneratorTests
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, int x) { } }", "EECS002")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(P p) { } }", "EECS002")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(World w) { } }", "EECS003")]
+    [TestCase("public partial class S : EcsSystem { [ForEach, Without<P>] static void A(Entity e) { } }", "EECS003")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref Clock c) { } }", "EECS003")]
     [TestCase("public partial class S<T> : EcsSystem { [ForEach] static void A(ref P p) { } }", "EECS004")]
     [TestCase("public partial class S { [ForEach] static void A(ref P p) { } }", "EECS005")]
