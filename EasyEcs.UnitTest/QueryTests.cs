@@ -116,4 +116,29 @@ public class QueryTests
         Assert.That(ids, Is.Ordered);
         Assert.That(ids, Has.Count.EqualTo(35));
     }
+
+    [TestCase(true)]
+    [TestCase(false)]
+    public void UpdateReSortsArchetypesWhoseOrderDegraded(bool sortOnUpdate)
+    {
+        using var world = new World(new WorldOptions { SortArchetypesOnUpdate = sortOnUpdate });
+        var entities = new List<Entity>();
+        for (int i = 0; i < 1_000; i++) entities.Add(world.CreateEntity(new Health(i)));
+        // Churn: every other entity leaves and comes back; freed slots are reused LIFO, so the order reverses.
+        for (int i = 0; i < entities.Count; i += 2) entities[i].Set(new Frozen());
+        for (int i = 0; i < entities.Count; i += 2) entities[i].Remove<Frozen>();
+
+        world.Update();
+
+        var ids = new List<int>();
+        foreach (var item in world.Query<Health>())
+        {
+            ids.Add(item.Entity.Id);
+            Assert.That(item.Component1.Value, Is.EqualTo(item.Entity.Id), "data follows its entity");
+        }
+
+        Assert.That(ids, Has.Count.EqualTo(1_000));
+        Assert.That(ids, sortOnUpdate ? Is.Ordered : Is.Not.Ordered);
+        Assert.That(world.GetFragmentationStats().FragmentationRatio, sortOnUpdate ? Is.Zero : Is.GreaterThan(0));
+    }
 }

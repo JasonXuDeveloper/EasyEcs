@@ -1,4 +1,5 @@
 using System;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 namespace EasyEcs;
 
@@ -17,6 +18,15 @@ internal class Archetype
     /// <summary>Component bits of this archetype, ascending (lets destroy/remove visit only its own columns).</summary>
     public readonly ushort[] Components;
 
+    /// <summary>The subset of <see cref="Components"/> whose type holds managed references (cleared on destroy).</summary>
+    public ushort[] ManagedComponents = [];
+
+    /// <summary>
+    /// Insertions that may have broken ascending id order since the last <see cref="Compact"/> (a reused tombstone
+    /// slot, or an append of an id smaller than the last one). Drives the automatic re-sort in World.Update.
+    /// </summary>
+    public int Unordered;
+
     public int[] EntityIds;
     public int Count; // Total slots (including tombstones)
     public int AliveCount; // Living entities only
@@ -29,6 +39,11 @@ internal class Archetype
     // Avoids hashing a 256-bit Tag on every single-component structural change.
     private Archetype[] _addEdges = Array.Empty<Archetype>();
     private Archetype[] _removeEdges = Array.Empty<Archetype>();
+
+    // Same for multi-component changes (Set(a, b), Remove<A, B>(), CreateEntity(a, b, ...)), indexed by the dense
+    // index of the generic signature (TypeIndex<ComponentSignature, (T1, ..., Tn)>): no mask cloning or hashing per call.
+    private Archetype[] _addSetEdges = Array.Empty<Archetype>();
+    private Archetype[] _removeSetEdges = Array.Empty<Archetype>();
 
     private const int Tombstone = -1;
 
@@ -55,6 +70,7 @@ internal class Archetype
         if (_freeCount > 0)
         {
             slot = _freeSlots[--_freeCount];
+            Unordered++;
         }
         else
         {
@@ -62,6 +78,7 @@ internal class Archetype
                 Array.Resize(ref EntityIds, EntityIds.Length * 2);
 
             slot = Count++;
+            if (slot > 0 && EntityIds[slot - 1] > entityId) Unordered++;
         }
 
         EntityIds[slot] = entityId;
@@ -90,22 +107,54 @@ internal class Archetype
     }
 
     /// <summary>
+    /// Whether enough insertions broke id order (or enough tombstones piled up) that re-sorting pays for itself:
+    /// more than an eighth of the alive entities, plus a floor so small archetypes are left alone.
+    /// </summary>
+    public bool NeedsSort
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Unordered + (Count - AliveCount) > (AliveCount >> 3) + 64;
+    }
+
+    /// <summary>
     /// Remove tombstones and sort the remaining ids ascending, rewriting each entity's slot. Columns are indexed by
     /// entity id, so ascending ids turn iteration into a forward, prefetch-friendly walk over every column.
+    /// A bitmap sort: O(alive + (max id - min id) / 64), and the slot rewrites walk <paramref name="meta"/> forward.
+    /// <paramref name="bits"/> must cover every entity id and be all zero; it is all zero again on return.
     /// </summary>
-    public void Compact(EntityMeta[] meta)
+    public void Compact(EntityMeta[] meta, ulong[] bits)
     {
-        int alive = 0;
-        for (int i = 0; i < Count; i++)
-            if (EntityIds[i] != Tombstone)
-                EntityIds[alive++] = EntityIds[i];
+        int[] ids = EntityIds;
+        int count = Count;
+        int min = int.MaxValue, max = -1, alive = 0;
+        for (int i = 0; i < count; i++)
+        {
+            int id = ids[i];
+            if (id < 0) continue;
+            bits[id >> 6] |= 1UL << id; // the shift count is taken mod 64
+            min = Math.Min(min, id);
+            max = Math.Max(max, id);
+            alive++;
+        }
 
-        Array.Sort(EntityIds, 0, alive);
-        for (int slot = 0; slot < alive; slot++)
-            meta[EntityIds[slot]].Slot = slot;
+        int slot = 0;
+        for (int w = min >> 6, last = max >> 6; alive > 0 && w <= last; w++)
+        {
+            ulong word = bits[w];
+            if (word == 0) continue;
+            bits[w] = 0;
+            do
+            {
+                int id = (w << 6) | BitOperations.TrailingZeroCount(word);
+                ids[slot] = id;
+                meta[id].Slot = slot++;
+                word &= word - 1;
+            } while (word != 0);
+        }
 
         Count = alive;
         _freeCount = 0;
+        Unordered = 0;
     }
 
     /// <summary>
@@ -123,6 +172,20 @@ internal class Archetype
     public void SetAddEdge(int bit, Archetype target) => SetEdge(ref _addEdges, bit, target);
 
     public void SetRemoveEdge(int bit, Archetype target) => SetEdge(ref _removeEdges, bit, target);
+
+    /// <summary>Cached archetype reached by adding the components of signature <paramref name="signature"/>; null when not cached yet.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Archetype GetAddSetEdge(int signature) =>
+        signature < _addSetEdges.Length ? _addSetEdges[signature] : null;
+
+    /// <summary>Cached archetype reached by removing the components of signature <paramref name="signature"/>; null when not cached yet.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Archetype GetRemoveSetEdge(int signature) =>
+        signature < _removeSetEdges.Length ? _removeSetEdges[signature] : null;
+
+    public void SetAddSetEdge(int signature, Archetype target) => SetEdge(ref _addSetEdges, signature, target);
+
+    public void SetRemoveSetEdge(int signature, Archetype target) => SetEdge(ref _removeSetEdges, signature, target);
 
     private static void SetEdge(ref Archetype[] edges, int bit, Archetype target)
     {

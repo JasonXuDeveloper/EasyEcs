@@ -39,6 +39,34 @@ public class ComponentTests
     }
 
     [Test]
+    public void MultiComponentTransitionsAreCachedPerSourceArchetype()
+    {
+        // The same Set / Remove signature from different archetypes reaches different targets.
+        var a = _world.CreateEntity(new Position(1, 1));
+        var b = _world.CreateEntity(new Velocity(2, 2));
+        var c = _world.CreateEntity(new Health(3), new Frozen()); // already has both: no transition
+        for (int round = 0; round < 2; round++)
+        {
+            a.Set(new Health(10), new Frozen());
+            b.Set(new Health(20), new Frozen());
+            c.Set(new Health(30), new Frozen());
+            Assert.That((a.Has<Position>(), a.Has<Velocity>(), a.Get<Health>().Value), Is.EqualTo((true, false, 10)));
+            Assert.That((b.Has<Position>(), b.Has<Velocity>(), b.Get<Health>().Value), Is.EqualTo((false, true, 20)));
+            Assert.That((c.Has<Frozen>(), c.Get<Health>().Value), Is.EqualTo((true, 30)));
+
+            a.Remove<Health, Frozen>();
+            b.Remove<Health, Frozen>();
+            b.Remove<Health, Frozen>(); // nothing left to remove
+            Assert.That(a.Has<Health>() || a.Has<Frozen>() || b.Has<Health>() || b.Has<Frozen>(), Is.False);
+            Assert.That((a.Get<Position>().X, b.Get<Velocity>().X), Is.EqualTo((1, 2)));
+        }
+
+        Assert.That(_world.Count<Health, Frozen>(), Is.EqualTo(1));
+        Assert.That(_world.CreateEntity(new Health(4), new Frozen()).Get<Health>().Value, Is.EqualTo(4));
+        Assert.That(_world.Count<Health, Frozen>(), Is.EqualTo(2));
+    }
+
+    [Test]
     public void SetAndRemoveUpToNineComponentsAtOnce()
     {
         var e = _world.CreateEntity(new C1(1), new C2(2), new C3(3), new C4(4), new C5(5), new C6(6), new C7(7), new C8(8), new C9(9));

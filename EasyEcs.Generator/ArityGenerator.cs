@@ -44,6 +44,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
             string cons = Constraints(n, "        ");
             string values = List(n, i => $"in T{i} c{i}");
             string what = n == 1 ? "a component" : n + " components";
+            // Dense index of the generic signature: keys the cached multi-component transitions of an archetype.
+            string signature = $"TypeIndex<ComponentSignature, ({tps})>.Value";
 
             entity.Append($$"""
                     /// <summary>
@@ -58,7 +60,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         {
                             world.ThrowIfStale(this);
                 {{Lines(n, i => $"            ushort b{i} = world.PrepareColumn<T{i}>();")}}
-                            world.AddBits(Id, [{{List(n, i => $"b{i}")}}]);
+                            {{(n == 1 ? "world.AddBit(Id, b1);" : $"world.AddBits(Id, [{List(n, i => $"b{i}")}], {signature});")}}
                 {{Lines(n, i => $"            world.ColumnRef<T{i}>(b{i}, Id) = c{i};")}}
                         }
 
@@ -75,7 +77,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         lock (world.StructuralLock)
                         {
                             world.ThrowIfStale(this);
-                            world.RemoveBits(Id, [{{List(n, i => $"ComponentType<T{i}>.Bit")}}]);
+                            {{(n == 1 ? "world.RemoveBit(Id, ComponentType<T1>.Bit);"
+                                : $"world.RemoveBits(Id, [{List(n, i => $"ComponentType<T{i}>.Bit")}], {signature});")}}
                         }
                     }
 
@@ -94,8 +97,9 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         {
                             int id = AllocateId();
                 {{Lines(n, i => $"            ushort b{i} = PrepareColumn<T{i}>();")}}
-                            MoveToArchetype(id, _emptyArchetype);
-                            AddBits(id, [{{List(n, i => $"b{i}")}}]);
+                            // Straight into the final archetype through an edge cached on the empty archetype (no mask hashing).
+                            MoveToArchetype(id, {{(n == 1 ? "ArchetypeAfterAdd(_emptyArchetype, b1)"
+                                : $"_emptyArchetype.GetAddSetEdge({signature}) ?? CreateSetEdge(_emptyArchetype, [{List(n, i => $"b{i}")}], {signature}, add: true)")}});
                 {{Lines(n, i => $"            ColumnRef<T{i}>(b{i}, id) = c{i};")}}
                             return new Entity(this, id, Meta[id].Version);
                         }

@@ -46,58 +46,38 @@ public sealed partial class World
             MoveToArchetype(id, ArchetypeAfterAdd(from, bit));
     }
 
-    /// <summary>Add several component bits in one archetype transition. Inside the structural lock.</summary>
-    internal void AddBits(int id, ReadOnlySpan<ushort> bits)
+    /// <summary>
+    /// Add several component bits in one archetype transition. The target archetype is cached per (source archetype,
+    /// <paramref name="signature"/>), so only the first call of a signature from an archetype builds a mask. Inside
+    /// the structural lock.
+    /// </summary>
+    internal void AddBits(int id, ReadOnlySpan<ushort> bits, int signature)
     {
-        if (bits.Length == 1)
-        {
-            AddBit(id, bits[0]);
-            return;
-        }
-
         var from = MetaRef(id).Archetype;
-        if (TryWithBits(from, bits, set: true, out var mask))
-            MoveToArchetype(id, GetOrCreateArchetype(in mask));
+        MoveToArchetype(id, from.GetAddSetEdge(signature) ?? CreateSetEdge(from, bits, signature, add: true));
+    }
+
+    /// <summary>Remove one component bit, releasing its managed data. A missing component is ignored. Inside the structural lock.</summary>
+    internal void RemoveBit(int id, ushort bit)
+    {
+        var from = MetaRef(id).Archetype;
+        if (!from.ComponentMask.HasBit(bit)) return;
+        MoveToArchetype(id, ArchetypeAfterRemove(from, bit));
+        ReleaseComponents(id, [bit]);
     }
 
     /// <summary>
-    /// Remove component bits in one archetype transition, releasing managed data of removed components. Missing
-    /// components are ignored. Inside the structural lock.
+    /// Remove component bits in one archetype transition (cached per source archetype and
+    /// <paramref name="signature"/>), releasing managed data of removed components. Missing components are ignored.
+    /// Inside the structural lock.
     /// </summary>
-    internal void RemoveBits(int id, ReadOnlySpan<ushort> bits)
+    internal void RemoveBits(int id, ReadOnlySpan<ushort> bits, int signature)
     {
         var from = MetaRef(id).Archetype;
-        Archetype target;
-        if (bits.Length == 1)
-        {
-            if (!from.ComponentMask.HasBit(bits[0])) return;
-            target = ArchetypeAfterRemove(from, bits[0]);
-        }
-        else
-        {
-            if (!TryWithBits(from, bits, set: false, out var mask)) return;
-            target = GetOrCreateArchetype(in mask);
-        }
-
+        var target = from.GetRemoveSetEdge(signature) ?? CreateSetEdge(from, bits, signature, add: false);
+        if (ReferenceEquals(target, from)) return;
         MoveToArchetype(id, target);
         ReleaseComponents(id, bits);
-    }
-
-    /// <summary>Mask of <paramref name="from"/> with <paramref name="bits"/> set or cleared; false when nothing changes.</summary>
-    private static bool TryWithBits(Archetype from, ReadOnlySpan<ushort> bits, bool set, out Tag mask)
-    {
-        mask = default;
-        bool changed = false;
-        for (int i = 0; i < bits.Length; i++)
-        {
-            if (from.ComponentMask.HasBit(bits[i]) == set) continue;
-            if (!changed) mask = from.ComponentMask.Clone();
-            changed = true;
-            if (set) mask.SetBit(bits[i]);
-            else mask.ClearBit(bits[i]);
-        }
-
-        return changed;
     }
 
     /// <summary>

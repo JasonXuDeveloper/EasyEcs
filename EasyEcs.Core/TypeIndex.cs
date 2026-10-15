@@ -17,6 +17,12 @@ internal static class TypeIndex<TFamily, T>
     internal static readonly int Value = Interlocked.Increment(ref TypeIndex<TFamily>.Count) - 1;
 }
 
+/// <summary>
+/// Family of the generic signatures (T1, ..., Tn) of multi-component Set / Remove / CreateEntity calls: their dense
+/// index keys the transition caches of each archetype (Archetype.GetAddSetEdge / GetRemoveSetEdge).
+/// </summary>
+internal readonly struct ComponentSignature;
+
 /// <summary>Bit of component type <typeparamref name="T"/> in archetype tags and its column index in every world.</summary>
 internal static class ComponentType<T> where T : struct, IComponent
 {

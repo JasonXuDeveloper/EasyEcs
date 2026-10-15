@@ -78,6 +78,26 @@ public sealed partial class World
     }
 
     /// <summary>
+    /// Resolve a multi-component transition once (mask hashing) and cache it on <paramref name="from"/> under
+    /// <paramref name="signature"/>. The target may be <paramref name="from"/> itself (nothing to add or remove).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private Archetype CreateSetEdge(Archetype from, ReadOnlySpan<ushort> bits, int signature, bool add)
+    {
+        var mask = from.ComponentMask.Clone();
+        for (int i = 0; i < bits.Length; i++)
+        {
+            if (add) mask.SetBit(bits[i]);
+            else mask.ClearBit(bits[i]);
+        }
+
+        var target = GetOrCreateArchetype(in mask);
+        if (add) from.SetAddSetEdge(signature, target);
+        else from.SetRemoveSetEdge(signature, target);
+        return target;
+    }
+
+    /// <summary>
     /// Get or create the archetype for <paramref name="componentMask"/>. A new archetype is appended (copy-on-write)
     /// to every cached query it matches. Must be called inside StructuralLock.
     /// </summary>
@@ -87,6 +107,7 @@ public sealed partial class World
             return archetype;
 
         archetype = new Archetype(in componentMask);
+        archetype.ManagedComponents = ManagedOf(archetype.Components);
         _archetypes[componentMask] = archetype;
         Volatile.Write(ref _allArchetypes, Append(_allArchetypes, archetype));
 
@@ -97,6 +118,17 @@ public sealed partial class World
         }
 
         return archetype;
+    }
+
+    /// <summary>The bits of <paramref name="components"/> whose column holds managed references (cold path).</summary>
+    private ushort[] ManagedOf(ushort[] components)
+    {
+        var managed = new List<ushort>();
+        var hasReferences = _columnHasReferences;
+        foreach (ushort bit in components)
+            if (bit < hasReferences.Length && hasReferences[bit])
+                managed.Add(bit);
+        return managed.ToArray();
     }
 
     private static Archetype[] Append(Archetype[] source, Archetype item)
@@ -139,9 +171,10 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Remove tombstones and sort every archetype's entities by id (O(n log n) over alive entities). Iteration then
-    /// reads each column front to back. Call between updates (after mass despawns, or when
+    /// Remove tombstones and sort every archetype's entities by id (bitmap sort: O(alive + id range / 64) per
+    /// archetype). Iteration then reads each column front to back. Call between updates (after mass despawns, or when
     /// <see cref="GetFragmentationStats"/> reports fragmentation), never while a query is iterating.
+    /// <see cref="WorldOptions.SortArchetypesOnUpdate"/> does this automatically for archetypes that need it.
     /// </summary>
     public void CompactArchetypes()
     {
@@ -149,7 +182,36 @@ public sealed partial class World
         {
             var all = _allArchetypes;
             for (int i = 0; i < all.Length; i++)
-                all[i].Compact(Meta);
+                all[i].Compact(Meta, _sortBits);
+            StorageVersion++;
+        }
+    }
+
+    /// <summary>
+    /// Re-sort the archetypes whose id order degraded (<see cref="Archetype.NeedsSort"/>). Runs at the start of every
+    /// update, when no query is iterating: O(archetypes) when nothing needs sorting.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void SortDisorderedArchetypes()
+    {
+        var all = _allArchetypes;
+        for (int i = 0; i < all.Length; i++)
+        {
+            if (!all[i].NeedsSort) continue;
+            SortDisorderedArchetypesLocked();
+            return;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void SortDisorderedArchetypesLocked()
+    {
+        lock (StructuralLock)
+        {
+            var all = _allArchetypes;
+            for (int i = 0; i < all.Length; i++)
+                if (all[i].NeedsSort)
+                    all[i].Compact(Meta, _sortBits);
             StorageVersion++;
         }
     }

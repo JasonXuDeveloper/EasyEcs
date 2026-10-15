@@ -108,6 +108,7 @@ public sealed partial class World
     private void Run(SystemSchedule group)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(World));
+        if (_options.SortArchetypesOnUpdate) SortDisorderedArchetypes();
 
         long update = ++group.Updates;
         var batches = group.Batches;

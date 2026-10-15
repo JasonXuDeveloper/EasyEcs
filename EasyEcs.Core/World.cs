@@ -26,6 +26,7 @@ public sealed partial class World : IDisposable
     {
         _options = options ?? new WorldOptions();
         Meta = new EntityMeta[Math.Max(1, _options.InitialEntityCapacity)];
+        _sortBits = new ulong[(Meta.Length + 63) >> 6];
         _emptyArchetype = GetOrCreateArchetype(default);
     }
 
@@ -72,7 +73,7 @@ public sealed partial class World : IDisposable
             meta.Version++; // invalidates every outstanding handle
             archetype.RemoveAt(meta.Slot);
             meta.Archetype = null;
-            ReleaseComponents(id, archetype.Components);
+            ReleaseComponents(id, archetype.ManagedComponents);
 
             _entityCount--;
             if (_freeIdCount == _freeIds.Length) Array.Resize(ref _freeIds, _freeIds.Length * 2);
@@ -132,6 +133,7 @@ public sealed partial class World : IDisposable
     private void Grow(int capacity)
     {
         Array.Resize(ref Meta, capacity);
+        _sortBits = new ulong[(capacity + 63) >> 6];
         var columns = Components;
         for (int i = 0; i < columns.Length; i++)
         {
@@ -146,6 +148,9 @@ public sealed partial class World : IDisposable
     }
 
     private readonly Archetype _emptyArchetype;
+
+    // Scratch bitmap of the archetype sort (one bit per entity id, all zero between sorts); grows with Meta.
+    private ulong[] _sortBits;
 
     /// <summary>Enumerates alive entities in id order; ids beyond the capacity captured at start are not visited.</summary>
     public struct EntityEnumerator
