@@ -33,6 +33,8 @@ Other rules:
 
 - `ref` parameters and `item.ComponentN` refs are refreshed by the iterator after a structural change; a `ref` you
   stored yourself is not (see [`ref` and `await`](refs-and-await.md)).
-- Never call `world.CompactArchetypes()` while a query is iterating; call it between updates.
+- Never call `world.CompactArchetypes()` or `Update()` / `Update<TGroup>()` while a query of the same world is
+  iterating: they re-sort archetypes (`Update` does when `WorldOptions.SortArchetypesOnUpdate` is on, the default).
+  Call `CompactArchetypes()` between updates, and `Update` only from outside any query of that world.
 - Prefer a field to adding and removing a component for state that flips every tick
   ([ECS principles, rule 5](../ecs-principles.md#5-choose-the-cheapest-representation-for-frequent-changes)).

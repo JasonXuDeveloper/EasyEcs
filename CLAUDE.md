@@ -20,21 +20,24 @@ dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*Iterate*' --job 
 EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written shared core only)
   Contracts.cs                 IComponent, ISingletonComponent
   Entity.cs                    the entity handle (id, version, world): Has/Get/TryGet/Add/GetOrAdd/Destroy
-  EcsSystem.cs                 OnCreate/OnUpdate/OnDestroy + generated GeneratedUpdate
+  EcsSystem.cs                 OnCreate/OnUpdate/OnDestroy + generated GeneratedUpdate / GeneratedAccess
   ForEachAttributes.cs         [ForEach], [With<T>], [Without<T>]
   SystemGroups.cs              ISystemGroup, [UpdateInGroup<T>] (World.Update<T>() runs a group)
   World.cs                     entity lifecycle (create/destroy, id recycling, lookup, enumeration)
-  World.Components.cs          columns + AddBit/AddBits/RemoveBits (shared core of every Add/Set/Remove)
-  World.Archetypes.cs          archetype registry, transition edges, copy-on-write query cache, compaction
+  World.Components.cs          columns + AddBit/AddBits/RemoveBit/RemoveBits (shared core of every Add/Set/Remove)
+  World.Archetypes.cs          archetype registry, transition edges, copy-on-write query cache, compaction +
+                               automatic re-sort of disordered archetypes at the start of Update
   World.Systems.cs             system groups, priority order, parallel batches, synchronous Update / Update<TGroup>
   World.Parallel.cs            allocation-free batch runner (caller + reusable thread-pool work items)
   SystemAccess.cs              a system's read/write sets (generated from [ForEach] parameters) and the conflict rule
   World.Singletons.cs          per-world singletons (ref returns)
   WorldOptions.cs              configuration
   Query.cs                     QueryFilter (With/Without), QueryKey, ArchetypeCursor (shared iteration core)
-  TypeIndex.cs                 dense per-type indices (component bit, singleton slot, system group)
+  TypeIndex.cs                 dense per-type index families (ComponentType bit, SingletonType slot, SystemGroup
+                               index, ComponentSignature of multi-component calls) + SingletonBox
   EntityMeta.cs                16-byte per-entity record (archetype, version, slot)
-  Archetype.cs                 mask + component bits + entity ids (tombstones, free slots) + edges; sorted Compact
+  Archetype.cs                 mask + component bits + entity ids (tombstones, free slots) + per-bit add/remove
+                               edges + per-signature set edges; Unordered/NeedsSort, bitmap-sort Compact
   Tag.cs                       256-bit SIMD bitset with overflow
 EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, required by Roslyn hosts)
   ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove, World.CreateEntity, IForEach,
@@ -42,10 +45,17 @@ EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, req
   SystemGenerator.cs           [ForEach] -> struct jobs + GeneratedUpdate + GeneratedAccess
   EasyEcsAnalyzer.cs           EECS001-008 (generators never report diagnostics)
   Symbols.cs                   symbol checks shared by generator and analyzer
+  Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
+  EquatableArray.cs            array with value equality (generator models cache between edits)
+  Polyfills.cs                 IsExternalInit for netstandard2.0 (records); do not delete
 EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, Query, System, ForEachSystem,
-                               Singleton, Concurrency, Parallel, Allocation (0 B budget), Generator (diagnostics + caching)
+                               Singleton, Concurrency, Parallel, Allocation (0 B budget), Generator (diagnostics +
+                               caching); Fixtures.cs holds the shared test components
 EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / MultiWorldBenchmark (headline, realistic
-                               server tick), ParallelSystemsBenchmark + MicroBenchmarks (diagnostics). Always measure with BenchmarkDotNet.
+                               server tick; the world itself is WorldSimulation.cs), ParallelSystemsBenchmark +
+                               MicroBenchmarks (diagnostics). Always measure with BenchmarkDotNet.
+EasyEcs.Comparison/            BenchmarkDotNet: the headline world (WorldSimulation.cs, compiled unchanged) ported to
+                               Arch, Friflo.Engine.ECS and DefaultEcs, counters checked against EasyEcs
 doc/                           README.md (index), getting-started.md, guide/ (one page per concept, analyzer.md
                                lists EECS001-008), api.md (API + complexity), ecs-principles.md, architecture.md,
                                performance.md (diagrams in mermaid)
@@ -86,12 +96,13 @@ doc/                           README.md (index), getting-started.md, guide/ (on
 - **Generators follow the incremental rules**: `ForAttributeWithMetadataName` or syntax-only predicates first,
   equatable symbol-free models, no diagnostics from generators (add them to `EasyEcsAnalyzer` using `Symbols`), a
   tracking name per stage and a caching assertion in `GeneratorTests`.
-- **Structural changes go through the lock** (`StructuralLock`) and through `MoveToArchetype` / `AddBits` /
-  `RemoveBits`; never mutate `Archetype.EntityIds` or `EntityMeta` directly elsewhere.
+- **Structural changes go through the lock** (`StructuralLock`) and through `MoveToArchetype` / `AddBit(s)` /
+  `RemoveBit(s)` (and `Archetype.Compact`, which rewrites ids and slots); never mutate `Archetype.EntityIds` or
+  `EntityMeta` directly elsewhere.
 - **Per-entity state is `EntityMeta` only** (16 bytes). Do not add per-entity arrays or fields without measuring:
   the component set is the archetype mask.
-- **Storage reallocation must bump `StorageVersion`** (columns, `Meta`, archetype id arrays, compaction) so in-flight
-  `ForEach` passes refresh their cached arrays.
+- **Storage reallocation must bump `StorageVersion`** (columns, `Meta`, archetype id arrays, compaction and the
+  update-time re-sort) so in-flight `ForEach` passes refresh their cached arrays.
 - **Docs**: diagrams are mermaid; `doc/api.md` lists the complexity of every public API (README is the landing page).
 - **Entity ids are recycled**: any id-keyed API must also validate the version (`ThrowIfStale`, `Entity.Archetype`).
 - Behavioral/breaking changes need a `MIGRATION_GUIDE.md` entry and a README "What's new" entry.

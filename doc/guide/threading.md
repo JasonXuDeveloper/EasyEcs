@@ -143,7 +143,7 @@ handful. For a server, one world per thread usually uses the cores better: see
 | Operation | Safety |
 |---|---|
 | Structural changes (create/destroy, `Add`/`Set`/`Remove`), adding/removing systems and singletons | Take the world's `System.Threading.Lock`: the world's structure never tears. |
-| Query matching, `Has`, `Get` lookups | Lock-free over immutable, copy-on-write archetype snapshots. |
+| Query matching, `Has`, `Get` lookups | Lock-free over immutable, copy-on-write archetype snapshots (the first use of a query shape takes the lock once to build its cache entry). |
 | Component and singleton **values** | Not synchronized, by design: the owner thread, or the parallel scheduler, decides who touches them. |
 
 The lock protects the world's bookkeeping, not your data: a `ref` or a running query on one thread does not survive a

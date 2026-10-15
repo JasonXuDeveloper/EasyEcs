@@ -5,8 +5,8 @@
 
 ## Entities
 
-An `Entity` is an identity, nothing more: a 16-byte handle holding the world, an id and a version. It has no fields
-and no behavior of its own.
+An `Entity` is an identity, nothing more: a 16-byte handle holding the world, an id and a version. It holds no game
+data and no behavior of its own.
 
 ```csharp
 Entity e = world.CreateEntity();                                   // empty
@@ -66,4 +66,5 @@ For something that flips every tick, a field is cheaper than adding and removing
   component: iteration only loads the columns it reads.
 - Spawn with all components at once (`CreateEntity(a, b, c)`) and change several with `Set(a, b)` /
   `Remove<A, B>()`: one archetype transition instead of several.
-- There is no limit on the number of component types.
+- Up to 65,536 component types are supported. The first 256 fit in each archetype mask inline; beyond that a mask
+  carries an overflow array (at least 4 × 256 bits, doubled when needed).

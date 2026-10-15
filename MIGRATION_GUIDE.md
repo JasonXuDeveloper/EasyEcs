@@ -1,15 +1,9 @@
-# Migration Guide: EasyECS v3.x → v4.0
-
-## v4.0 → v4.1
-
-No API is removed. One behavioral change: with `WorldOptions.SortArchetypesOnUpdate` (default `true`), `Update`
-re-sorts archetypes whose id order degraded, so **do not call `Update` while a query of the same world is
-iterating** (it was never meaningful; now it can reorder the archetype under the iterator). Set the option to
-`false` to keep v4.0 ordering. Manual `CompactArchetypes()` calls after churn are no longer needed.
+# Migration Guide: EasyEcs v3.x → v4.x
 
 **Contents**
 
-- v3.x → v4.0: [Namespaces](#namespaces) · [Entities and components](#entities-and-components) ·
+- [v4.0 → v4.1](#v40--v41)
+- [v3.x → v4.0](#v3x--v40): [Namespaces](#namespaces) · [Entities and components](#entities-and-components) ·
   [Singletons](#singletons) · [Systems](#systems) · [Behavioral changes](#behavioral-changes) ·
   [Source generator and analyzer](#source-generator-and-analyzer)
 - [v2.x → v3.0](#migration-guide-easyecs-v2x--v30): [Breaking changes](#breaking-changes-summary) ·
@@ -18,14 +12,29 @@ iterating** (it was never meaningful; now it can reorder the archetype under the
 
 For the current API, see the [documentation](doc/README.md).
 
+## v4.0 → v4.1
+
+No API is removed. `WorldOptions.SortArchetypesOnUpdate` (default `true`) is new: at the start of every update,
+`Update` / `Update<TGroup>()` re-sort the archetypes whose id order degraded. Two behavioral consequences:
+
+- **Do not call `Update` while a query of the same world is iterating** (it was never meaningful; now it can reorder
+  the archetype under the iterator).
+- **Iteration order within an archetype can change between updates**: ids are re-sorted ascending. Code that relied
+  on insertion order must not.
+
+Set the option to `false` to keep v4.0 ordering. Routine `CompactArchetypes()` calls after churn are no longer
+needed; it is still useful after a mass despawn, to drop the tombstones of every archetype at once.
+
+## v3.x → v4.0
+
 v4 targets **.NET 10 only**, moves the whole API into the `EasyEcs` namespace with standard ECS vocabulary, makes
 systems synchronous and generates the repetitive parts (arity overloads, per-entity jobs).
 
-## Namespaces
+### Namespaces
 
 `EasyEcs.Core`, `EasyEcs.Core.Components` and `EasyEcs.Core.Systems` → **`using EasyEcs;`**
 
-## Entities and components
+### Entities and components
 
 v3 had three handle types (`Entity` value, `EntityRef`, `ComponentRef<T>`). v4 has one: `Entity`, a version-checked
 16-byte handle. Component access returns `ref T` directly.
@@ -47,7 +56,7 @@ v3 had three handle types (`Entity` value, `EntityRef`, `ComponentRef<T>`). v4 h
 | `ctx.CountOf<T..>()` / `AnyOf<T..>()` | `world.Count<T..>(filter)` / `world.Any<T..>(filter)` |
 | `new Context(new Context.Options(parallel, levels, capacity))` | `new World(new WorldOptions { Parallel = .., MaxDegreeOfParallelism = .., InitialEntityCapacity = .. })` (parallel is **off** by default) |
 
-## Singletons
+### Singletons
 
 | v3 | v4 |
 |---|---|
@@ -57,7 +66,7 @@ v3 had three handle types (`Entity` value, `EntityRef`, `ComponentRef<T>`). v4 h
 Singletons are now **per world** (v3 shared them process-wide). A `[ForEach]` method takes a singleton as a
 `ref`/`in` parameter (resolved once per pass), so systems rarely call `GetSingleton` themselves.
 
-## Systems
+### Systems
 
 v3 systems implemented `IInitSystem` / `IExecuteSystem` / `IEndSystem` with `UniTask` methods. v4 systems derive from
 `EcsSystem` and override synchronous hooks (the UniTask dependency is gone):
@@ -86,7 +95,7 @@ public partial class S : EcsSystem
   `GetSystem<T>()`, `RemoveSystem<T>()`, `Enabled` were added.
 - Exceptions: `world.SystemError` (system, exception); without a subscriber the exception propagates.
 
-## Behavioral changes
+### Behavioral changes
 
 1. **Entity ids are recycled.** `Entity.Id` is unique only among live entities; keep the `Entity` handle (id +
    version). Equality includes the version.
@@ -105,7 +114,7 @@ public partial class S : EcsSystem
    no `[ForEach]` method run alone. The result equals a sequential update. See
    [Threading](doc/guide/threading.md#parallel-systems).
 
-## Source generator and analyzer
+### Source generator and analyzer
 
 Shipped in the package (`analyzers/dotnet/cs`). Projects referencing `EasyEcs.Core` by `ProjectReference` must also
 reference `EasyEcs.Generator.csproj` with `OutputItemType="Analyzer" ReferenceOutputAssembly="false"`.

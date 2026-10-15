@@ -16,7 +16,7 @@ catches design mistakes at compile time, and a full server tick allocates 0 byte
 | Four worlds on four threads (one per thread) | 100,000 | **1.85 ms** | **0 B** |
 
 <sub>BenchmarkDotNet, .NET 10, 4-core Xeon VM at 2.1 GHz; entities spawn, die, gain and lose components every tick.
-A `[ForEach]` pass costs 1.5 ns per entity, within 1.4x of two plain arrays.
+A `[ForEach]` pass costs 1.5 ns per entity (one archetype), within 1.4x of two plain arrays.
 [Details](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md#benchmarks).</sub>
 
 ```bash
@@ -27,7 +27,7 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
 
 - **Fast and garbage-free.** Dense columns per component type, 16-byte entity records (4 per cache line), JIT-inlined
   struct jobs instead of delegates, lock-free queries. After warm-up nothing allocates: a unit test guards the 0 B
-  budget of a full tick on every run.
+  budget of updates, queries and structural changes on every run.
 - **Structural changes are cheap.** Adding a status effect, killing a unit or spawning a projectile moves one entity
   through a cached archetype edge, even in the middle of a pass. State can be tags, not flags.
 - **Write the logic, not the plumbing.** A `[ForEach]` method is the whole system; filters are attributes
@@ -202,8 +202,10 @@ not a toy loop ([what it simulates](https://github.com/JasonXuDeveloper/EasyEcs/
 | WorldSimulation.Tick | 100,000 | 3.01 ms | 0 B |
 | MultiWorld.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.27 ms | 0 B |
 
-A `[ForEach]` system writing two components over 10,000 entities takes 15.2 μs, against 10.6 μs for two plain arrays
-with no ECS at all. Micro benchmarks and the v3 comparison are in [doc/performance.md](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md).
+A `[ForEach]` system writing two components over 10,000 entities (one archetype) takes 15.2 μs, against 10.6 μs for
+two plain arrays with no ECS at all. Micro benchmarks (with v3.1.1 numbers for comparison) are in
+[doc/performance.md](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md); their `ForEach` and
+`Query` rows run on a world with two interleaved archetypes, so they are not directly comparable to the `[ForEach]` row.
 
 ```bash
 dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*'
@@ -219,17 +221,18 @@ dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*'
 | [API reference](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/api.md) | Every public API with its complexity. |
 | [Performance guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md) | Which API to use when, do's and don'ts, benchmarks. |
 | [Architecture](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/architecture.md) | Storage, memory layout, archetypes, id recycling, iteration safety, generators. |
-| [Migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md) | Upgrading from v3 (and from v2). |
+| [Migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md) | Upgrading from 4.0 to 4.1, from v3 (and from v2). |
 
 The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/README.md) suggests a reading order.
 
 ## What's new in 4.1
 
 - Structural changes are cheaper: `CreateEntity(a, b, ...)`, `Set(a, b, ...)` and `Remove<A, B>()` follow cached
-  per-archetype edges (no mask clone or dictionary lookup), and `Destroy` clears only columns holding references.
-- Archetypes keep themselves sorted: `Update` re-sorts the archetypes that churn disordered (bitmap sort, 0 B), so
-  iteration walks columns forward without calling `CompactArchetypes()`. `WorldOptions.SortArchetypesOnUpdate`
-  (default on) turns it off.
+  per-archetype edges (no mask clone or dictionary lookup after the first call per source archetype), and `Destroy`
+  visits only the archetype's precomputed list of columns holding references.
+- Archetypes keep themselves sorted: `Update` / `Update<TGroup>()` re-sort the archetypes that churn disordered
+  (bitmap sort, 0 B), so iteration walks columns forward without calling `CompactArchetypes()`. Don't call them while
+  a query of the same world is iterating. `WorldOptions.SortArchetypesOnUpdate` (default on) turns it off.
 - A realistic 100k-entity server tick went from 4.21 ms to 3.01 ms on the same machine; churn from 986 μs to 617 μs.
 
 ## What's new in 4.0

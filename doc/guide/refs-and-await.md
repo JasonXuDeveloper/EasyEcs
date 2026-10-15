@@ -15,9 +15,11 @@ hp.Value -= 10;
 entity.Get<Health>().Value -= 10;      // ✅ same thing, inline
 ```
 
-**A `ref` into ECS storage is valid only until the next structural change.** Storage arrays grow, and are
-reallocated, when entities, component types or archetypes are added, whether by your code or by another system. An
-old `ref` then silently points at the stale copy. That is why `ref` and `await` must not mix:
+**A `ref` into ECS storage is valid only until the next structural change.** Component columns are reallocated
+when the entity capacity grows, and an old `ref` then silently points at the stale copy. (A new component type adds
+a column without moving the others; archetypes hold ids, not data.) Which change reallocates is an implementation
+detail, and it may come from your code or from another system, so treat every structural change, of any entity, as
+possibly invalidating your refs. That is why `ref` and `await` must not mix:
 
 - C# forbids `ref` locals that live across an `await`. Don't smuggle refs through `Unsafe`, pointers or `Span`
   fields either.

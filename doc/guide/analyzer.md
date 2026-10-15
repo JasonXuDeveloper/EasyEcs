@@ -26,11 +26,11 @@ Fix: add `partial` to the class (and to any containing types).
 
 ## EECS002
 
-**Invalid `[ForEach]` parameter.** Every parameter must be a `ref` / `in` struct implementing `IComponent` or
-`ISingletonComponent`, an `Entity`, or the `World`.
+**Invalid `[ForEach]` parameter.** Every parameter must be a `ref` / `in` / `ref readonly` struct implementing
+`IComponent` or `ISingletonComponent`, an `Entity`, or the `World`.
 
-Fix: pass components and singletons by `ref` (write) or `in` (read); remove other parameters and get what you need
-from data instead.
+Fix: pass components and singletons by `ref` (write) or `in` / `ref readonly` (read); remove other parameters and get
+what you need from data instead.
 
 ## EECS003
 

@@ -95,7 +95,8 @@ public partial class DeathSystem : EcsSystem
 ```
 
 Splitting costs nothing at run time: every `[ForEach]` method is its own inlined struct job either way, and the
-per-system overhead of `Update` is a virtual call. When in doubt, split.
+per-system overhead of `Update` is two virtual calls plus one query-cache lookup per `[ForEach]` method. When in
+doubt, split.
 
 ### 2. Systems are stateless
 
@@ -178,9 +179,10 @@ that state later in the update, in the order `Priority` declares: movement and c
 
 ### 5. Choose the cheapest representation for frequent changes
 
-Adding or removing a component moves the entity to another archetype: a cached edge lookup plus copying its
-components. That is fine for changes that happen every few ticks (a buff starts or ends). For something that flips
-every tick, a field is cheaper:
+Adding or removing a component moves the entity to another archetype: a cached edge lookup, then its id is
+tombstoned in the old archetype and appended to the new one (the component data stays where it is). That is fine
+for changes that happen every few ticks (a buff starts or ends). For something that flips every tick, a field is
+cheaper:
 
 - a countdown field (`Burning.Ticks`) instead of re-adding a component every tick;
 - change detection by comparison: keep the last sent value in a component and compare it to the current value,
@@ -222,7 +224,7 @@ The full rules are in [Structural changes during iteration](guide/structural-cha
 
 ### 7. Keep entity handles, never `ref`s, across boundaries
 
-A `ref` from `Get<T>()` or a `[ForEach]` parameter is valid until the next structural change of that entity and
+A `ref` from `Get<T>()` or a `[ForEach]` parameter is valid until the next structural change (any entity's) and
 never across `await`. Keep `Entity` handles (validated on every access) and re-read components when you need them.
 See [`ref` and `await`](guide/refs-and-await.md).
 

@@ -12,7 +12,7 @@ and singletons) and never references another system.
 |---|---|
 | `OnCreate()` | once, when the system is added (`world.AddSystem<T>()` / `AddSystem(system)`) |
 | `OnUpdate()` | every update of its group, before its `[ForEach]` methods |
-| `[ForEach]` methods | every update, after `OnUpdate`, in declaration order (base class first) |
+| `[ForEach]` methods | every update, after `OnUpdate`, in source order (base class first) |
 | `OnDestroy()` | once, on `world.RemoveSystem<T>()` or `world.Dispose()` (reverse order) |
 | `World` | the owning world, set before `OnCreate` |
 | `Priority` (override) | execution order: lower runs first; default 0 |
@@ -30,7 +30,7 @@ sequenceDiagram
     participant S as each system (ascending Priority)
     U->>S: skip if disabled or UpdateInterval not due
     S->>S: OnUpdate()
-    S->>S: [ForEach] methods, in declaration order (base class first)
+    S->>S: [ForEach] methods, in source order (base class first)
     S-->>S: structural changes apply immediately: later systems see them
 ```
 
@@ -73,8 +73,10 @@ public partial class BurnSystem : EcsSystem
 }
 ```
 
-Derived systems run the base class's `[ForEach]` methods first. Mistakes (missing `partial`, an invalid parameter,
-zero or more than 9 components, generic systems, `[ForEach]` outside a system) are compile errors: see
+`[ForEach]` methods run in source order, and derived systems run the base class's `[ForEach]` methods first. Keep a
+system's `[ForEach]` methods in one file: across the files of a `partial` class, the order is by position within each
+file, which is rarely what you mean. Mistakes (missing `partial`, an invalid parameter, zero components without a
+`[With<T>]` or more than 9, generic systems, `[ForEach]` outside a system) are compile errors: see
 [Analyzer rules](analyzer.md).
 
 Make methods that change the entity's archetype idempotent with a filter: see

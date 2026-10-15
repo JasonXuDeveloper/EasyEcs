@@ -16,6 +16,7 @@ Notation:
 | Type | Kind | Purpose |
 |---|---|---|
 | `World` | sealed class, `IDisposable` | Owns entities, components, singletons, systems. |
+| `World.EntityEnumerator` | struct | Result of `world.Entities`: enumerates alive entities in id order, allocation-free. |
 | `WorldOptions` | sealed class | `Parallel`, `MaxDegreeOfParallelism`, `InitialEntityCapacity`, `SortArchetypesOnUpdate` (init-only). |
 | `Entity` | readonly struct | Handle: `Id`, `Version`, `World`; equality includes the version. |
 | `IComponent` | marker interface | Implemented by component structs. |
@@ -63,8 +64,9 @@ Notation:
 | `world.Any<T1..Tn>(filter)` | O(M) worst | early exit |
 | `QueryFilter.Create().With<T>().Without<U>()` | O(1) | build once and keep it in a `static readonly` field |
 
-The first time a query shape is used, building its cache entry costs O(all archetypes). After that, each lookup is
-one hash probe.
+The first time a query shape is used, building its cache entry costs O(all archetypes) under the structural lock.
+After that, each lookup is one hash probe. In turn, creating a new archetype (the first entity with a new component
+set) costs O(cached query shapes), since it is appended to every cached query it matches.
 
 ## Systems, singletons, maintenance
 
@@ -72,18 +74,18 @@ one hash probe.
 |---|---|
 | `world.AddSystem<T>()` / `AddSystem(system)` (calls `OnCreate`) | O(systems) |
 | `world.RemoveSystem<T>()` (calls `OnDestroy`) / `GetSystem<T>()` | O(systems) |
-| `world.Update()` (default group) / `world.Update<TGroup>()` | Σ systems of the group, allocation-free |
+| `world.Update()` (default group) / `world.Update<TGroup>()` | O(archetypes) disorder check + re-sort of the archetypes that need it (`SortArchetypesOnUpdate`) + Σ systems of the group; allocation-free |
 | `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` → `ref T` | O(1) |
 | `world.SingletonRef<T>()` → `SingletonRef<T>` (stable handle, `.Value` is `ref T`; adds if missing) | O(1) |
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) |
-| `world.CompactArchetypes()` | O(alive + id range / 64) per archetype (bitmap sort) |
+| `world.CompactArchetypes()` | O(S + id range / 64) per archetype, S = its slots including tombstones (bitmap sort) |
 | `world.GetFragmentationStats()` → `(TotalSlots, AliveEntities, FragmentationRatio)` | O(archetypes) |
 
 Other `World` members:
 
 | Member | Meaning |
 |---|---|
-| `world.Systems` | the systems, as `IReadOnlyList<EcsSystem>` |
+| `world.Systems` | the systems of every group, as a new `IReadOnlyList<EcsSystem>` (allocates; for tooling) |
 | `world.UpdateCount` | number of default-group updates so far |
 | `world.SystemError` | `event Action<EcsSystem, Exception>`; without a subscriber, exceptions propagate |
 | `world.Dispose()` | `OnDestroy` on every system in reverse order, then releases storage; stale handles throw |

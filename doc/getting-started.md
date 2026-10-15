@@ -50,6 +50,7 @@ using var world = new World(new WorldOptions { InitialEntityCapacity = 10_000 })
 | `InitialEntityCapacity` | 1024 | Pre-sized entity capacity, so storage does not grow at run time. |
 | `Parallel` | `false` | Run non-conflicting systems of equal priority at the same time (see [Threading](guide/threading.md#parallel-systems)). |
 | `MaxDegreeOfParallelism` | processor count | Limit for `Parallel`. |
+| `SortArchetypesOnUpdate` | `true` | At the start of every update, re-sort the archetypes whose entity order churn degraded, so iteration walks columns forward. |
 
 `Dispose()` calls every system's `OnDestroy` (in reverse order) and releases storage.
 
