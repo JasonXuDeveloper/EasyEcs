@@ -96,6 +96,7 @@ doc/                           ecs-principles.md, architecture.md, performance.m
 - The version lives only in `Directory.Build.props` (package, EasyEcs.Core and the bundled generator carry it).
 - Releases are cut manually by the owner: GitHub Actions -> Release -> Run workflow on `master` with a version. Job
   `tag` bumps `Directory.Build.props`, builds and tests, commits `Bump to vX.Y.Z` and tags it; job `publish` packs that
-  tag, pushes to NuGet (secret `MYTOKEN`) and creates the GitHub release with notes grouped from the commit subjects
-  (no prefix = change; `bench:`, `docs:`, `ci:`/`chore:`), so keep subjects meaningful. A failed publish is retried
+  tag, pushes to NuGet (secret `MYTOKEN`) and creates the GitHub release with GitHub's generated notes (What's
+  Changed from merged pull requests, sectioned by label in `.github/release.yml`; New Contributors; Full Changelog),
+  so changes land through pull requests with meaningful titles and labels. A failed publish is retried
   with "Re-run failed jobs". Do not trigger releases unless asked.
