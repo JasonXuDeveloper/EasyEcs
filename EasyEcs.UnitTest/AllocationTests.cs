@@ -35,4 +35,16 @@ public class AllocationTests
         for (int i = 0; i < 100; i++) Frame();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
+
+    [Test]
+    public void ParallelForEachDoesNotAllocateAfterItsFirstCall()
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        world.CreateEntities(new Entity[World.ChunkRows * 4], new ParallelTests.Counter(0), new ParallelTests.Seen(1));
+        world.AddSystem<ParallelTests.ChunkedIncrement>();
+        for (int i = 0; i < 10; i++) world.Update();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 500; i++) world.Update();
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+    }
 }

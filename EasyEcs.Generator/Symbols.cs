@@ -128,4 +128,54 @@ internal static class Symbols
 
     public static bool HasWith(IMethodSymbol method) => method.GetAttributes().Any(a =>
         a.AttributeClass is { IsGenericType: true } cls && cls.ConstructedFrom.ToDisplayString() == WithAttribute);
+
+    /// <summary>
+    /// The method cannot make structural changes: it is static, takes no <c>World</c>, and uses its <c>Entity</c>
+    /// parameter (if any) only to read (<see cref="ReadOnlyEntityMembers"/>). Its job gets INoStructuralChanges.
+    /// </summary>
+    public static bool IsStable(IMethodSymbol method, MethodDeclarationSyntax syntax) =>
+        method.IsStatic && !method.Parameters.Any(p => Classify(p) == ParamKind.World)
+        && method.Parameters.Where(p => Classify(p) == ParamKind.Entity).All(p => OnlyReads(syntax, p.Name));
+
+    /// <summary>The <c>Parallel</c> named argument of the method's [ForEach] attribute.</summary>
+    public static bool IsParallel(IMethodSymbol method) => method.GetAttributes()
+        .Where(a => a.AttributeClass?.ToDisplayString() == ForEachAttribute)
+        .SelectMany(a => a.NamedArguments)
+        .Any(n => n.Key == "Parallel" && n.Value.Value is true);
+
+    /// <summary>
+    /// Why a [ForEach(Parallel = true)] method cannot run on several threads, or null: it must be stable (no structural
+    /// change), per entity (not a batch) and write no singleton (each row's run would race on it).
+    /// </summary>
+    public static string? ParallelProblem(IMethodSymbol method, MethodDeclarationSyntax syntax)
+    {
+        if (!IsStable(method, syntax)) return "it can change structure (make it static, without World, and use its Entity only to read)";
+        if (method.Parameters.Any(p => Classify(p) == ParamKind.ComponentSpan)) return "batch methods run on one thread";
+        if (method.Parameters.Any(p => Classify(p) == ParamKind.Singleton && p.RefKind == RefKind.Ref))
+            return "it writes a singleton, which every chunk would race on (take it as 'in')";
+        return null;
+    }
+
+    /// <summary>Entity members that cannot change the world (no structural change, no access to the World).</summary>
+    private static readonly HashSet<string> ReadOnlyEntityMembers = ["Id", "Version", "IsAlive", "Has", "Get", "TryGet"];
+
+    /// <summary>
+    /// Whether every use of parameter <paramref name="name"/> in the method body is a read-only member access
+    /// (<c>entity.Id</c>, <c>entity.Has&lt;T&gt;()</c>, ...). Syntax only and conservative: any other use (passing the
+    /// entity on, <c>entity.World</c>, a structural change) answers false.
+    /// </summary>
+    private static bool OnlyReads(MethodDeclarationSyntax method, string name)
+    {
+        SyntaxNode? body = (SyntaxNode?)method.Body ?? method.ExpressionBody;
+        if (body == null) return false;
+        foreach (var identifier in body.DescendantNodes().OfType<IdentifierNameSyntax>())
+        {
+            if (identifier.Identifier.ValueText != name) continue;
+            if (identifier.Parent is not MemberAccessExpressionSyntax access || access.Expression != identifier) return false;
+            var member = access.Name is GenericNameSyntax generic ? generic.Identifier.ValueText : access.Name.Identifier.ValueText;
+            if (!ReadOnlyEntityMembers.Contains(member)) return false;
+        }
+
+        return true;
+    }
 }

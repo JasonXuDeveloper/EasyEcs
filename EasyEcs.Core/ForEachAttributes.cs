@@ -18,7 +18,15 @@ namespace EasyEcs;
 /// EasyEcs.Generator compiles it to a struct <see cref="IForEach{T1}"/> job: no delegate, no allocation, inlined.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method)]
-public sealed class ForEachAttribute : Attribute;
+public sealed class ForEachAttribute : Attribute
+{
+    /// <summary>
+    /// Run chunks of the matching rows on several threads (<c>World.ForEachParallel</c>). The method must make no
+    /// structural change, run per entity and write no singleton (EECS010); it pays off for heavy per-row work over tens
+    /// of thousands of rows. Default false.
+    /// </summary>
+    public bool Parallel { get; init; }
+}
 
 /// <summary>The <see cref="ForEachAttribute"/> method also requires component <typeparamref name="T"/> (not passed in).</summary>
 [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]

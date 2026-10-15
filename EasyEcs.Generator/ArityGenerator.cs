@@ -358,7 +358,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             int mode = rows.Mode(archetype);
                             if (archetype.AliveCount == 0 || mode == RowFilter.None) continue;
                             if (mode == RowFilter.Test)
-                                {{name}}Filtered<{{tps}}, TJob>(ref job, archetype, rows, count, {{bits}});
+                                {{name}}Filtered<{{tps}}, TJob>(ref job, archetype, rows, 0, count, {{bits}});
                             else if (count == archetype.AliveCount)
                                 {{name}}Rows<{{tps}}, TJob>(ref job, archetype, 0, count, {{bits}}); // dense table
                             else // tombstones: runs of alive rows, found with vectorized scans
@@ -497,18 +497,19 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 }
 
                 /// <summary>
-                /// A stable pass over a table with rows lacking a queried component: the refs walk every row like a
-                /// dense table, 64 presence bits per load decide which rows run (a word with none skips 64 rows).
+                /// A stable pass over rows [<paramref name="start"/>, <paramref name="count"/>) of a table with rows lacking a
+                /// queried component (<paramref name="start"/> is a multiple of 64): the refs walk every row like a dense
+                /// table, 64 presence bits per load decide which rows run (a word with none skips 64 rows).
                 /// </summary>
-                private void {{name}}Filtered<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, int count, {{ushorts}})
+                private void {{name}}Filtered<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, int start, int count, {{ushorts}})
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>
                 {
-                    bool tombstones = count != archetype.AliveCount;
-                    ref int ids = ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds);
-                    ref int versions = ref MemoryMarshal.GetArrayDataReference(archetype.Versions);
-            {{bases}}
-                    for (int w = 0; w << 6 < count; w++)
+                    bool tombstones = archetype.Count != archetype.AliveCount;
+                    ref int ids = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds), start);
+                    ref int versions = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Versions), start);
+            {{startAt}}
+                    for (int w = start >> 6; w << 6 < count; w++)
                     {
                         int left = Math.Min(64, count - (w << 6));
                         ulong bits = rows.Word(archetype, w);
@@ -522,6 +523,100 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                         for (; left > 0; left--, ids = ref Unsafe.Add(ref ids, 1), versions = ref Unsafe.Add(ref versions, 1), {{advance}})
                             job.Execute({{rowArg}}, {{List(n, i => $"ref r{i}")}});
+                    }
+
+                }
+
+                /// <summary>
+                /// <see cref="{{name}}{TJob}"/> on several threads: the matching rows are cut into chunks of
+                /// <see cref="ChunkRows"/> rows that the calling thread and up to <see cref="WorldOptions.MaxDegreeOfParallelism"/>
+                /// - 1 thread-pool threads run at the same time, each with its own copy of <paramref name="job"/> (state
+                /// a job keeps in its fields is not merged back). The job must not change structure or write anything
+                /// that another row's run reads (a singleton, another entity); nothing else may change the world
+                /// during the call. Fewer than two chunks of rows, or a runner already busy, run on the calling thread.
+                /// Allocation-free after the first call per job type.
+                /// </summary>
+                public void {{name}}Parallel<{{tps}}, TJob>(ref TJob job, in QueryFilter filter = default)
+            {{Constraints(n, "        ")}}
+                    where TJob : struct, {{job}}<{{tps}}>, INoStructuralChanges
+                {
+                    var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
+                    var work = WorkOf<{{name}}Chunks<{{tps}}, TJob>>();
+                    int chunks = work.Cut(this, match, ref job, {{bits}});
+                    if (chunks < 2 || !TryRunChunks(work, chunks))
+                        for (int i = 0; i < chunks; i++) work.Run(i);
+                    work.Release();
+                }
+
+                /// <summary>One chunk: rows [<paramref name="start"/>, <paramref name="end"/>) of a table, stable pass.</summary>
+                private void {{name}}Chunk<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, int start, int end, {{ushorts}})
+            {{Constraints(n, "        ")}}
+                    where TJob : struct, {{job}}<{{tps}}>
+                {
+                    if (rows.Mode(archetype) == RowFilter.All && archetype.Count == archetype.AliveCount)
+                        {{name}}Rows<{{tps}}, TJob>(ref job, archetype, start, end, {{bits}});
+                    else
+                        {{name}}Filtered<{{tps}}, TJob>(ref job, archetype, rows, start, end, {{bits}});
+                }
+
+                /// <summary>The chunks of one <see cref="{{name}}Parallel{TJob}"/> call: (table, first row) pairs.</summary>
+                private sealed class {{name}}Chunks<{{tps}}, TJob> : ParallelWork
+            {{Constraints(n, "        ")}}
+                    where TJob : struct, {{job}}<{{tps}}>
+                {
+                    public TJob Job;
+                    private World _world;
+                    private Archetype[] _tables = [];
+                    private RowFilter[] _filters = [];
+                    private int[] _starts = [];
+            {{Lines(n, i => $"            private ushort _b{i};")}}
+
+                    /// <summary>Cut the matching rows into chunks; returns how many.</summary>
+                    public int Cut(World world, QueryMatch match, ref TJob job, {{ushorts}})
+                    {
+                        _world = world;
+                        Job = job;
+            {{Lines(n, i => $"            _b{i} = b{i};")}}
+                        int chunks = 0;
+                        var archetypes = match.Archetypes;
+                        for (int a = 0; a < archetypes.Length; a++)
+                        {
+                            var archetype = archetypes[a];
+                            if (archetype.AliveCount == 0 || match.Filters[a].Mode(archetype) == RowFilter.None) continue;
+                            for (int start = 0; start < archetype.Count; start += ChunkRows)
+                            {
+                                if (chunks == _starts.Length)
+                                {
+                                    int size = Math.Max(8, chunks * 2);
+                                    Array.Resize(ref _tables, size);
+                                    Array.Resize(ref _filters, size);
+                                    Array.Resize(ref _starts, size);
+                                }
+
+                                _tables[chunks] = archetype;
+                                _filters[chunks] = match.Filters[a];
+                                _starts[chunks++] = start;
+                            }
+                        }
+
+                        return chunks;
+                    }
+
+                    public override void Run(int index)
+                    {
+                        var archetype = _tables[index];
+                        int start = _starts[index];
+                        var job = Job;
+                        _world.{{name}}Chunk<{{tps}}, TJob>(ref job, archetype, _filters[index], start, Math.Min(start + ChunkRows, archetype.Count), {{List(n, i => $"_b{i}")}});
+                    }
+
+                    /// <summary>Drop the references of the last call (tables, filters, the job's own) until the next one.</summary>
+                    public void Release()
+                    {
+                        Array.Clear(_tables);
+                        Array.Clear(_filters);
+                        Job = default;
+                        _world = null;
                     }
                 }
 

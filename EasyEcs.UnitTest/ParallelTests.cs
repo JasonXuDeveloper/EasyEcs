@@ -10,6 +10,13 @@ namespace EasyEcs.UnitTest;
 /// </summary>
 public partial class ParallelTests
 {
+    /// <summary>Heavy per-row work cut into chunks of rows on several threads.</summary>
+    public partial class ChunkedIncrement : EcsSystem
+    {
+        [ForEach(Parallel = true), Without<Dead>]
+        static void Add(ref Counter counter, in Seen step, Entity entity) => counter.N += step.N + (entity.Id & 0);
+    }
+
     // Each system waits at the rendezvous: it reports Met only if another system arrived while it was running.
     public record struct Rendezvous(Barrier Barrier, int TimeoutMs) : ISingletonComponent;
     public record struct Left(bool Met) : IComponent;
@@ -73,6 +80,38 @@ public partial class ParallelTests
         world.AddSingleton<Rendezvous>() = new Rendezvous(new Barrier(2), timeoutMs);
         world.CreateEntity(new Left(), new Right());
         return world;
+    }
+
+    [Test]
+    public void ParallelForEachVisitsEveryMatchingRowOnceOnSeveralThreads()
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        int rows = World.ChunkRows * 3 + 100;
+        var entities = new Entity[rows];
+        world.CreateEntities(entities, new Counter(0), new Seen(2));
+        for (int i = 0; i < rows; i += 7) entities[i].Set(new Dead());      // a filtered table, two tables in all
+        for (int i = 1; i < rows; i += 11) entities[i].Remove<Seen>();     // presence bits: rows to test
+        world.AddSystem<ChunkedIncrement>();
+        world.Update();
+        world.Update();
+
+        for (int i = 0; i < rows; i++)
+        {
+            bool runs = i % 7 != 0 && (i - 1) % 11 != 0;
+            Assert.That(entities[i].Get<Counter>().N, Is.EqualTo(runs ? 4 : 0), $"row {i}");
+        }
+    }
+
+    [Test]
+    public void ParallelForEachRunsOnTheCallingThreadWhenTheWorldAllowsOneThread()
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 1 });
+        var entities = new Entity[World.ChunkRows * 2 + 1];
+        world.CreateEntities(entities, new Counter(0), new Seen(1));
+        world.AddSystem<ChunkedIncrement>();
+        world.Update();
+        Assert.That(world.Count<Counter>(), Is.EqualTo(entities.Length));
+        foreach (var e in entities) Assert.That(e.Get<Counter>().N, Is.EqualTo(1));
     }
 
     [Test]

@@ -56,6 +56,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 ? $", s{i} = world.SingletonRef<{p.Type}>()" : ""));
             sb.Append($"        var __{method.Name} = new __{method.Name}Job {{ {system}World = world{singletons} }};\n");
             string forEach = method.IsBatch ? "ForEachBatch" : method.TakesEntity ? "ForEachEntity" : "ForEach";
+            if (method.Parallel) forEach += "Parallel";
             sb.Append($"        world.{forEach}<{method.ComponentTypes}, __{method.Name}Job>(ref __{method.Name}{filter});\n");
         }
 
@@ -180,7 +181,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// The method cannot make structural changes: it is static, takes no <c>World</c>, and uses its <c>Entity</c>
     /// parameter (if any) only to read (<see cref="ReadOnlyEntityMembers"/>). Its job gets INoStructuralChanges.
     /// </param>
-    private sealed record ForEachModel(OwnerModel Owner, string Name, bool IsStatic, bool Stable, int Order,
+    /// <param name="Parallel">[ForEach(Parallel = true)] on a method that can run on several threads (ForEachParallel).</param>
+    private sealed record ForEachModel(OwnerModel Owner, string Name, bool IsStatic, bool Stable, bool Parallel, int Order,
         EquatableArray<string> Query, EquatableArray<ParamModel> Parameters, EquatableArray<string> With,
         EquatableArray<string> Without, EquatableArray<string> WithAny)
     {
@@ -225,37 +227,15 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 query.Add(with[0]);
                 with.RemoveAt(0);
             }
-            bool stable = method.IsStatic && !method.Parameters.Any(p => Symbols.Classify(p) == Symbols.ParamKind.World)
-                && method.Parameters.Where(p => Symbols.Classify(p) == Symbols.ParamKind.Entity).All(p => OnlyReads(syntax, p.Name));
-            return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, stable, syntax.SpanStart,
+            bool stable = Symbols.IsStable(method, syntax);
+            bool parallel = Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax) == null;
+            return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, stable, parallel, syntax.SpanStart,
                 new EquatableArray<string>(query.ToArray()),
                 new EquatableArray<ParamModel>(parameters), new EquatableArray<string>(with.ToArray()),
                 new EquatableArray<string>(without.ToArray()), new EquatableArray<string>(withAny.ToArray()));
         }
     }
 
-    /// <summary>Entity members that cannot change the world (no structural change, no access to the World).</summary>
-    private static readonly HashSet<string> ReadOnlyEntityMembers = ["Id", "Version", "IsAlive", "Has", "Get", "TryGet"];
-
-    /// <summary>
-    /// Whether every use of parameter <paramref name="name"/> in the method body is a read-only member access
-    /// (<c>entity.Id</c>, <c>entity.Has&lt;T&gt;()</c>, ...). Syntax only and conservative: any other use (passing the
-    /// entity on, <c>entity.World</c>, a structural change) answers false.
-    /// </summary>
-    private static bool OnlyReads(MethodDeclarationSyntax method, string name)
-    {
-        SyntaxNode? body = (SyntaxNode?)method.Body ?? method.ExpressionBody;
-        if (body == null) return false;
-        foreach (var identifier in body.DescendantNodes().OfType<IdentifierNameSyntax>())
-        {
-            if (identifier.Identifier.ValueText != name) continue;
-            if (identifier.Parent is not MemberAccessExpressionSyntax access || access.Expression != identifier) return false;
-            var member = access.Name is GenericNameSyntax generic ? generic.Identifier.ValueText : access.Name.Identifier.ValueText;
-            if (!ReadOnlyEntityMembers.Contains(member)) return false;
-        }
-
-        return true;
-    }
 
     private sealed record UpdateModel(OwnerModel Owner, EquatableArray<ForEachModel> Methods);
 }

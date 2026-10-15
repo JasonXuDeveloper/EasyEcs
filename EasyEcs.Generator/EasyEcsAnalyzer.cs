@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Linq;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace EasyEcs.Generator;
@@ -55,9 +56,15 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "A batch method receives runs of rows as spans. A per-entity parameter (ref/in component, Entity) has no single " +
         "value for a run, and the World could change rows while the spans point at them.");
 
+    public static readonly DiagnosticDescriptor NotParallel = new("EECS010", "[ForEach(Parallel = true)] cannot run on several threads",
+        "[ForEach] method '{0}' cannot run in parallel: {1}",
+        Category, DiagnosticSeverity.Error, true,
+        "A parallel [ForEach] runs chunks of rows on several threads at once. It must make no structural change, run per " +
+        "entity, and write nothing that another row's run reads, such as a singleton.");
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
-        MixedBatch);
+        MixedBatch, NotParallel);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -157,6 +164,9 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(ComponentCount, location, method.Name));
         if (valid && Symbols.MixesBatch(method))
             context.ReportDiagnostic(Diagnostic.Create(MixedBatch, location, method.Name));
+        if (Symbols.IsParallel(method) && method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken)
+                is MethodDeclarationSyntax syntax && Symbols.ParallelProblem(method, syntax) is { } problem)
+            context.ReportDiagnostic(Diagnostic.Create(NotParallel, location, method.Name, problem));
     }
 
     private static bool HasForEach(IMethodSymbol method) =>

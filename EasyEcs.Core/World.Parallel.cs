@@ -4,60 +4,143 @@ using System.Threading;
 
 namespace EasyEcs;
 
-// Parallel batches (WorldOptions.Parallel): the systems of one batch have non-conflicting SystemAccess, so they run at
-// the same time. Allocation-free, unlike Parallel.For (closure + state per call): the calling thread works through the
-// batch together with up to MaxDegreeOfParallelism - 1 reusable thread-pool work items.
+// Parallel work: the systems of one batch (WorldOptions.Parallel; non-conflicting SystemAccess) and the row chunks of a
+// parallel [ForEach] (ForEachParallel). Allocation-free, unlike Parallel.For (closure + state per call): the calling
+// thread works through the items together with up to MaxDegreeOfParallelism - 1 reusable thread-pool work items.
 public sealed partial class World
 {
-    private BatchRunner _batchRunner;
+    private Runner _systemRunner;
+    private Runner _chunkRunner;
+    private SystemBatch _systemBatch;
+
+    // Chunked jobs, one cached instance per job type (TypeIndex<ParallelWork, TWork>): allocated on first use only.
+    private ParallelWork[] _parallelWork = [];
+    private readonly Lock _parallelWorkLock = new();
+
+    /// <summary>Rows per chunk of a parallel [ForEach] (a multiple of 64, so presence-bit words never straddle chunks).</summary>
+    public const int ChunkRows = 16384;
 
     private void RunBatch(EcsSystem[] batch, long update)
     {
-        var runner = _batchRunner ??= new BatchRunner(this, Math.Max(1, _options.MaxDegreeOfParallelism) - 1);
-        runner.Run(batch, update);
+        var work = _systemBatch ??= new SystemBatch(this);
+        work.Batch = batch;
+        work.Update = update;
+        var runner = _systemRunner ??= new Runner(Math.Max(1, _options.MaxDegreeOfParallelism) - 1);
+        if (runner.TryRun(work, batch.Length)) return;
+        for (int i = 0; i < batch.Length; i++) RunSystem(batch[i], update); // an update from inside a running batch
     }
 
     /// <summary>
-    /// Runs one batch at a time; systems are claimed through <see cref="_cursor"/>: the batch's epoch in the high
-    /// 32 bits, the next system index in the low 32. A helper that starts late (after its batch finished) sees another
-    /// epoch and leaves without touching the next batch's state. The caller always takes part, so a batch completes even
+    /// Run <paramref name="work"/> items 0 .. <paramref name="count"/> - 1 on the chunk runner. False when it is busy (a
+    /// parallel pass inside another one's item, or two systems of a batch at once) or the world allows one thread
+    /// only: the caller then runs the items itself.
+    /// </summary>
+    internal bool TryRunChunks(ParallelWork work, int count)
+    {
+        int helpers = Math.Max(1, _options.MaxDegreeOfParallelism) - 1;
+        if (helpers == 0) return false;
+        var runner = _chunkRunner;
+        if (runner == null)
+        {
+            Interlocked.CompareExchange(ref _chunkRunner, new Runner(helpers), null);
+            runner = _chunkRunner;
+        }
+
+        return runner.TryRun(work, count);
+    }
+
+    /// <summary>The cached instance of <typeparamref name="TWork"/> for this world.</summary>
+    internal TWork WorkOf<TWork>() where TWork : ParallelWork, new()
+    {
+        int index = TypeIndex<ParallelWork, TWork>.Value;
+        var all = Volatile.Read(ref _parallelWork);
+        if (index < all.Length && all[index] is TWork work) return work;
+        return CreateWork<TWork>(index);
+    }
+
+    private TWork CreateWork<TWork>(int index) where TWork : ParallelWork, new()
+    {
+        lock (_parallelWorkLock)
+        {
+            var all = _parallelWork;
+            if (index < all.Length && all[index] is TWork existing) return existing;
+            var grown = new ParallelWork[Math.Max(index + 1, all.Length * 2)];
+            Array.Copy(all, grown, all.Length);
+            var work = new TWork();
+            grown[index] = work;
+            Volatile.Write(ref _parallelWork, grown);
+            return work;
+        }
+    }
+
+    /// <summary>Items that can run on any thread, in any order.</summary>
+    internal abstract class ParallelWork
+    {
+        public abstract void Run(int index);
+    }
+
+    private sealed class SystemBatch(World world) : ParallelWork
+    {
+        public EcsSystem[] Batch = [];
+        public long Update;
+
+        public override void Run(int index) => world.RunSystem(Batch[index], Update);
+    }
+
+    /// <summary>
+    /// Runs one piece of work at a time; items are claimed through <see cref="_cursor"/>: the run's epoch in the high
+    /// 32 bits, the next item index in the low 32. A helper that starts late (after its run finished) sees another
+    /// epoch and leaves without touching the next run's state. The caller always takes part, so a run completes even
     /// when the thread pool is busy and no helper starts.
     /// </summary>
-    private sealed class BatchRunner
+    private sealed class Runner
     {
-        private readonly World _world;
         private readonly Helper[] _helpers;
-        private readonly ManualResetEventSlim _done = new(false);
+        private int _busy;
 
         // Written by the caller before the epoch is published, read by participants after claiming in that epoch.
-        private EcsSystem[] _batch = [];
-        private long _update;
+        private ParallelWork _work;
+        private int _count;
         private long _cursor;
         private int _remaining;
         private Exception _error;
 
-        public BatchRunner(World world, int helpers)
+        public Runner(int helpers)
         {
-            _world = world;
             _helpers = new Helper[helpers];
             for (int i = 0; i < helpers; i++) _helpers[i] = new Helper(this);
         }
 
-        public void Run(EcsSystem[] batch, long update)
+        public bool TryRun(ParallelWork work, int count)
         {
-            _batch = batch;
-            _update = update;
+            if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) return false;
+            try
+            {
+                Run(work, count);
+            }
+            finally
+            {
+                _work = null;
+                Volatile.Write(ref _busy, 0);
+            }
+
+            return true;
+        }
+
+        private void Run(ParallelWork work, int count)
+        {
+            _work = work;
+            _count = count;
             _error = null;
-            _remaining = batch.Length;
-            _done.Reset();
+            _remaining = count;
             int epoch = (int)(_cursor >> 32) + 1;
             // Publishes the fields above: a participant reads them only after a successful claim in this epoch.
             Interlocked.Exchange(ref _cursor, (long)epoch << 32);
 
-            int wanted = Math.Min(_helpers.Length, batch.Length - 1);
+            int wanted = Math.Min(_helpers.Length, count - 1);
             for (int i = 0; i < _helpers.Length && wanted > 0; i++)
             {
-                // A helper still queued from an earlier batch is skipped (it will exit on its stale epoch).
+                // A helper still queued from an earlier run is skipped (it will exit on its stale epoch).
                 if (Interlocked.CompareExchange(ref _helpers[i].Queued, 1, 0) != 0) continue;
                 _helpers[i].Epoch = epoch;
                 ThreadPool.UnsafeQueueUserWorkItem(_helpers[i], preferLocal: false);
@@ -65,7 +148,10 @@ public sealed partial class World
             }
 
             Work(epoch);
-            if (Volatile.Read(ref _remaining) != 0) _done.Wait();
+            // Every item is claimed: at most one item per helper is still running. Spin and yield (never sleep, never
+            // block): a blocking event allocates its lock the first time it waits.
+            var spinner = new SpinWait();
+            while (Volatile.Read(ref _remaining) != 0) spinner.SpinOnce(sleep1Threshold: -1);
             if (_error != null) ExceptionDispatchInfo.Throw(_error);
         }
 
@@ -75,23 +161,23 @@ public sealed partial class World
             {
                 long cursor = Volatile.Read(ref _cursor);
                 int index = (int)cursor;
-                if ((int)(cursor >> 32) != epoch || index >= _batch.Length) return;
+                if ((int)(cursor >> 32) != epoch || index >= _count) return;
                 if (Interlocked.CompareExchange(ref _cursor, cursor + 1, cursor) != cursor) continue;
 
                 try
                 {
-                    _world.RunSystem(_batch[index], _update);
+                    _work.Run(index);
                 }
                 catch (Exception e)
                 {
                     Interlocked.CompareExchange(ref _error, e, null);
                 }
 
-                if (Interlocked.Decrement(ref _remaining) == 0) _done.Set();
+                Interlocked.Decrement(ref _remaining);
             }
         }
 
-        private sealed class Helper(BatchRunner runner) : IThreadPoolWorkItem
+        private sealed class Helper(Runner runner) : IThreadPoolWorkItem
         {
             public int Queued;
             public int Epoch;
