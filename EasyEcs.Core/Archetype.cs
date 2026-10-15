@@ -352,6 +352,81 @@ internal sealed class Archetype
                 _infos[i].Clear(Columns[i], start, count);
     }
 
+    /// <summary>The rows of a table at one moment (<see cref="Capture"/>): ids, versions, columns, presence bits.</summary>
+    internal sealed class Rows(int count, int[] ids, int[] versions, Array[] columns, ulong[][] present, int[] absent)
+    {
+        public readonly int Count = count;
+        public readonly int[] Ids = ids;
+        public readonly int[] Versions = versions;
+        public readonly Array[] Columns = columns;
+        public readonly ulong[][] Present = present;
+        public readonly int[] Absent = absent;
+    }
+
+    /// <summary>Copy the rows (a dense table: outside passes). O(rows × columns). Inside the structural gate.</summary>
+    public Rows Capture()
+    {
+        int count = Count;
+        var columns = new Array[Columns.Length];
+        var present = new ulong[Columns.Length][];
+        for (int c = 0; c < columns.Length; c++)
+        {
+            int size = _infos[c].Size;
+            if (size < 0)
+            {
+                columns[c] = _infos[c].Create(count);
+                Array.Copy(Columns[c], columns[c], count);
+            }
+            else
+            {
+                var bytes = new byte[count * size];
+                Unsafe.CopyBlockUnaligned(ref MemoryMarshal.GetArrayDataReference(bytes), ref Aligned(Columns[c]), (uint)bytes.Length);
+                columns[c] = bytes;
+            }
+
+            if (Present[c] is { } bits) present[c] = bits.AsSpan(0, (count + 63) >> 6).ToArray();
+        }
+
+        return new Rows(count, EntityIds.AsSpan(0, count).ToArray(), Versions.AsSpan(0, count).ToArray(), columns, present,
+            (int[])Absent.Clone());
+    }
+
+    /// <summary>
+    /// Put the rows of <paramref name="rows"/> back (null: empty the table). The entity records are restored by the
+    /// world. O(rows × columns). Inside the structural gate, outside passes.
+    /// </summary>
+    public void Restore(Rows rows)
+    {
+        int count = rows?.Count ?? 0;
+        if (_hasManaged && Count > count) ReleaseRows(count, Count - count);
+        Reserve(count);
+        if (rows != null)
+        {
+            rows.Ids.CopyTo(EntityIds, 0);
+            rows.Versions.CopyTo(Versions, 0);
+            for (int c = 0; c < Columns.Length; c++)
+            {
+                if (_infos[c].Size < 0) Array.Copy(rows.Columns[c], Columns[c], count);
+                else
+                    Unsafe.CopyBlockUnaligned(ref Aligned(Columns[c]), ref MemoryMarshal.GetArrayDataReference(Unsafe.As<byte[]>(rows.Columns[c])),
+                        (uint)Unsafe.As<byte[]>(rows.Columns[c]).Length);
+            }
+        }
+
+        EntityIds.AsSpan(count, Count > count ? Count - count : 0).Fill(Tombstone);
+        for (int c = 0; c < Columns.Length; c++)
+        {
+            // A column that gained presence bits after the capture keeps them, every row present.
+            var saved = rows?.Present[c];
+            if (saved != null) saved.CopyTo(Bits(c) ?? AllocateBits(c), 0);
+            else if (Bits(c) is { } bits) bits.AsSpan().Fill(ulong.MaxValue);
+            Absent[c] = rows?.Absent[c] ?? 0;
+        }
+
+        Count = AliveCount = count;
+        Dirty = false;
+    }
+
     /// <summary>
     /// Close the tombstones by moving the last alive rows into them (O(tombstones x columns); row order does not
     /// matter for a table), rewriting the moved entities' slots. Never while a pass iterates.

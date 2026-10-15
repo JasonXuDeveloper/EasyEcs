@@ -36,15 +36,22 @@ public sealed partial class World
         using (Structural())
         {
             if (Volatile.Read(ref Passes) != 0) return; // a pass started meanwhile: it will close them
-            for (int i = 0; i < _dirtyCount; i++)
-            {
-                _dirty[i].FillHoles(Meta);
-                _dirty[i] = null;
-            }
-
-            _dirtyCount = 0;
-            StorageVersion++;
+            FillDirtyTables();
         }
+    }
+
+    /// <summary>Close the tombstones of every dirty table. Inside the structural gate, outside passes.</summary>
+    private void FillDirtyTables()
+    {
+        if (_dirtyCount == 0) return;
+        for (int i = 0; i < _dirtyCount; i++)
+        {
+            _dirty[i].FillHoles(Meta);
+            _dirty[i] = null;
+        }
+
+        _dirtyCount = 0;
+        StorageVersion++;
     }
 
     /// <summary>Remove entity row <paramref name="slot"/> from <paramref name="archetype"/>. Inside the structural gate.</summary>

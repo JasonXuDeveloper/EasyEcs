@@ -44,8 +44,21 @@ internal static class SingletonType<T> where T : struct, ISingletonComponent
     internal static readonly int Index = TypeIndex<ISingletonComponent, T>.Value;
 }
 
+/// <summary>A singleton box without its type: copied by snapshots (<see cref="World.Capture"/>).</summary>
+internal abstract class SingletonBox
+{
+    public abstract SingletonBox Clone();
+
+    /// <summary>Copy the value of <paramref name="source"/>, a box of the same type.</summary>
+    public abstract void CopyFrom(SingletonBox source);
+}
+
 /// <summary>Heap box holding one world's singleton value; refs into it stay valid for the box lifetime.</summary>
-internal sealed class SingletonBox<T> where T : struct, ISingletonComponent
+internal sealed class SingletonBox<T> : SingletonBox where T : struct, ISingletonComponent
 {
     public T Value;
+
+    public override SingletonBox Clone() => new SingletonBox<T> { Value = Value };
+
+    public override void CopyFrom(SingletonBox source) => Value = ((SingletonBox<T>)source).Value;
 }
