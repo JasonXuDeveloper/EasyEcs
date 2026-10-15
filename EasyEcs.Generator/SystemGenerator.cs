@@ -11,7 +11,8 @@ namespace EasyEcs.Generator;
 
 /// <summary>
 /// Generates the plumbing of partial <c>EcsSystem</c>s: one struct job per <c>[ForEach]</c> method and a
-/// <c>GeneratedUpdate</c> override running them.
+/// <c>GeneratedUpdate</c> override running them, and a <c>GeneratedAccess</c> override declaring the data they read
+/// and write (the parallel scheduler batches systems by it).
 /// Incremental-generator rules followed: <c>ForAttributeWithMetadataName</c> / cheap syntax predicates as entry points,
 /// models are equatable records of strings (no symbols, syntax or locations survive the transform), invalid input is
 /// skipped silently (EasyEcsAnalyzer reports it), and every stage has a tracking name for cache tests.
@@ -57,8 +58,35 @@ public sealed class SystemGenerator : IIncrementalGenerator
             sb.Append($"        world.ForEach<{method.ComponentTypes}, __{method.Name}Job>(ref __{method.Name}{filter});\n");
         }
 
-        sb.Append("    }\n");
+        sb.Append("    }\n\n");
+        EmitAccess(sb, model);
         return Close(sb, model.Owner);
+    }
+
+    /// <summary>
+    /// <c>ref</c> parameters are writes, <c>in</c> parameters reads. Anything that can reach the world beyond its
+    /// parameters (Entity / World parameters, instance methods that see <c>World</c>, an OnUpdate override) runs alone.
+    /// </summary>
+    private static void EmitAccess(StringBuilder sb, UpdateModel model)
+    {
+        sb.Append("    /// <summary>Declares what the [ForEach] methods read and write (parallel batching).</summary>\n");
+        sb.Append("    protected override void GeneratedAccess(ref global::EasyEcs.SystemAccess access)\n    {\n");
+        if (!model.Owner.BaseIsEcsSystem) sb.Append("        base.GeneratedAccess(ref access);\n");
+        bool alone = model.Owner.OverridesOnUpdate || model.Methods.Any(m => !m.IsStatic
+            || m.Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.World));
+        if (alone)
+        {
+            sb.Append("        access.RunsAlone();\n    }\n");
+            return;
+        }
+
+        foreach (var p in model.Methods.SelectMany(m => m.Parameters).Distinct())
+        {
+            string kind = p.Kind == Symbols.ParamKind.Singleton ? "Singleton" : "";
+            sb.Append($"        access.{(p.RefKind == "ref" ? "Write" : "Read")}{kind}<{p.Type}>();\n");
+        }
+
+        sb.Append("    }\n");
     }
 
     private static void EmitJob(StringBuilder sb, OwnerModel owner, ForEachModel method)
@@ -108,7 +136,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
     // ---------------- models (equatable, symbol-free) ----------------
 
-    private sealed record OwnerModel(string Namespace, string Name, EquatableArray<string> Containers, string HintName)
+    private sealed record OwnerModel(string Namespace, string Name, EquatableArray<string> Containers, string HintName,
+        bool BaseIsEcsSystem, bool OverridesOnUpdate)
     {
         public static OwnerModel From(INamedTypeSymbol type)
         {
@@ -116,8 +145,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
             for (var outer = type.ContainingType; outer != null; outer = outer.ContainingType)
                 containers.Insert(0, $"{(outer.IsValueType ? "struct" : "class")} {outer.Name}");
             string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
+            bool overridesOnUpdate = type.GetMembers("OnUpdate").Any(m => m is IMethodSymbol { IsOverride: true, Parameters.Length: 0 });
             return new OwnerModel(ns, type.Name, new EquatableArray<string>(containers.ToArray()),
-                type.ToDisplayString().Replace('<', '_').Replace('>', '_').Replace(',', '_'));
+                type.ToDisplayString().Replace('<', '_').Replace('>', '_').Replace(',', '_'),
+                type.BaseType?.ToDisplayString() == Symbols.EcsSystem, overridesOnUpdate);
         }
     }
 

@@ -113,7 +113,7 @@ public sealed partial class World
     /// </summary>
     internal Archetype[] GetMatchingArchetypes(ReadOnlySpan<ushort> bits, in QueryFilter filter)
     {
-        var key = new QueryKey(bits, in filter);
+        var key = QueryKey.ForLookup(bits, in filter);
         if (_queryCache.TryGetValue(key, out var entry))
             return Volatile.Read(ref entry.Archetypes);
 
@@ -121,6 +121,8 @@ public sealed partial class World
         {
             if (_queryCache.TryGetValue(key, out entry))
                 return entry.Archetypes;
+
+            key = key.Detached();
 
             var all = _allArchetypes;
             var matching = new List<Archetype>();

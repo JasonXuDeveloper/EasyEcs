@@ -115,6 +115,11 @@ public class ComponentTests
         Assert.That(e.Has<Wide.Bit<Wide.D2, Wide.D9, Wide.D8>>(), Is.True);
         Assert.That(other.Get<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>().Value, Is.EqualTo(7));
         Assert.That(_world.Count<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>(), Is.EqualTo(1));
+
+        // Queries on bits past 255 look the cache up without allocating their key.
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++) _ = _world.Count<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>();
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
 }
 

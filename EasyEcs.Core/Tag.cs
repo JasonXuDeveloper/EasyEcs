@@ -136,6 +136,22 @@ internal struct Tag : IEquatable<Tag>
         return copy;
     }
 
+    /// <summary>
+    /// Copy that can take bits up to <paramref name="maxBit"/> without allocating: its overflow (only when needed) is
+    /// <paramref name="scratch"/>, cleared and grown on demand. Valid until the caller reuses the scratch buffer.
+    /// </summary>
+    public readonly Tag CopyWithScratch(int maxBit, ref Vector256<long>[] scratch)
+    {
+        var copy = this;
+        int needed = Math.Max(_overflow?.Length ?? 0, maxBit >> 8);
+        if (needed == 0) return copy;
+        if (scratch == null || scratch.Length < needed) scratch = new Vector256<long>[Math.Max(4, needed)];
+        Array.Clear(scratch);
+        _overflow?.CopyTo(scratch, 0);
+        copy._overflow = scratch;
+        return copy;
+    }
+
     /// <summary>Indices of the set bits in ascending order (cold path: archetype creation).</summary>
     public readonly ushort[] ToBitArray()
     {

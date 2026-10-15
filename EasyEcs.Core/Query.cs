@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 namespace EasyEcs;
 
 /// <summary>
@@ -44,14 +45,31 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
     private readonly Tag _all;
     private readonly Tag _none;
 
-    public QueryKey(ReadOnlySpan<ushort> bits, in QueryFilter filter)
+    // Lookup keys of queries on component bits >= 256 keep their overflow here instead of allocating it per query.
+    [ThreadStatic] private static Vector256<long>[] _scratch;
+
+    private QueryKey(in Tag all, in Tag none)
     {
-        var all = filter.All.Clone();
+        _all = all;
+        _none = none;
+    }
+
+    /// <summary>
+    /// Key to look a query up with: allocation-free, but it shares this thread's scratch buffer, so it is valid only
+    /// until the next lookup on the thread. Store <see cref="Detached"/> instead.
+    /// </summary>
+    public static QueryKey ForLookup(ReadOnlySpan<ushort> bits, in QueryFilter filter)
+    {
+        int maxBit = 0;
+        for (int i = 0; i < bits.Length; i++) maxBit = Math.Max(maxBit, bits[i]);
+        var all = filter.All.CopyWithScratch(maxBit, ref _scratch);
         for (int i = 0; i < bits.Length; i++)
             all.SetBit(bits[i]);
-        _all = all;
-        _none = filter.None;
+        return new QueryKey(in all, in filter.None);
     }
+
+    /// <summary>A copy that owns its storage (cache entries).</summary>
+    public QueryKey Detached() => new(_all.Clone(), _none);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Matches(in Tag archetypeMask) => archetypeMask.ContainsAll(in _all) && !archetypeMask.Intersects(in _none);

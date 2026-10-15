@@ -75,22 +75,6 @@ public class SystemTests
         Assert.That(errors, Has.Count.EqualTo(1));
     }
 
-    [Test]
-    public void ParallelBucketsRunEverySystem()
-    {
-        using var world = new World(new WorldOptions { Parallel = true });
-        var updates = new int[3];
-        for (int i = 0; i < updates.Length; i++) world.AddSystem(new Counting(updates, i));
-        for (int i = 0; i < 10; i++) world.Update();
-        Assert.That(updates, Is.All.EqualTo(10));
-    }
-
-    /// <summary>Systems of one parallel bucket must write disjoint data: each owns one slot.</summary>
-    private sealed class Counting(int[] updates, int slot) : EcsSystem
-    {
-        protected override void OnUpdate() => updates[slot]++;
-    }
-
     public struct InputGroup : ISystemGroup;
 
     [UpdateInGroup<InputGroup>]

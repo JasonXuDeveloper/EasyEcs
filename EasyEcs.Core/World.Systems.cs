@@ -1,15 +1,15 @@
 using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 namespace EasyEcs;
 
-// System scheduling. Systems run synchronously, in ascending Priority; systems sharing a priority form a bucket
-// (run in parallel only with WorldOptions.Parallel). Each update calls OnUpdate() then the generated [ForEach] methods.
+// System scheduling. Systems run synchronously, in ascending Priority (registration order breaks ties). Systems of one
+// priority are split into batches of consecutive systems whose SystemAccess does not conflict; with
+// WorldOptions.Parallel a batch runs at the same time (World.Parallel.cs). Each update calls OnUpdate() then the
+// generated [ForEach] methods.
 public sealed partial class World
 {
     // Group 0 is the default group (World.Update()); others are [UpdateInGroup<T>] groups (World.Update<T>()).
     private SystemSchedule[] _groups = [new()];
-    private ParallelOptions _parallelOptions;
 
     /// <summary>
     /// Raised when a system throws during an update. With no subscriber the exception propagates.
@@ -50,6 +50,7 @@ public sealed partial class World
 
         system.World = this;
         system.Group = GroupOf(system.GetType());
+        system.DeclareAccess();
         lock (StructuralLock)
         {
             if (system.Group >= _groups.Length) Array.Resize(ref _groups, system.Group + 1);
@@ -109,28 +110,20 @@ public sealed partial class World
         if (_disposed) throw new ObjectDisposedException(nameof(World));
 
         long update = ++group.Updates;
-        var systems = group.Systems;
-        var buckets = group.Buckets;
-        for (int b = 0; b < buckets.Length; b++)
+        var batches = group.Batches;
+        bool parallel = _options.Parallel;
+        for (int b = 0; b < batches.Length; b++)
         {
-            var (start, count) = buckets[b];
-            if (count > 1 && _options.Parallel)
+            var batch = batches[b];
+            if (parallel && batch.Length > 1)
             {
-                RunParallel(systems, start, count, update);
+                RunBatch(batch, update);
+                continue;
             }
-            else
-            {
-                for (int i = start; i < start + count; i++)
-                    RunSystem(systems[i], update);
-            }
-        }
-    }
 
-    // Separate method: the lambda's closure would otherwise be allocated on every update, parallel or not.
-    private void RunParallel(EcsSystem[] systems, int start, int count, long update)
-    {
-        _parallelOptions ??= new ParallelOptions { MaxDegreeOfParallelism = _options.MaxDegreeOfParallelism };
-        Parallel.For(start, start + count, _parallelOptions, i => RunSystem(systems[i], update));
+            for (int i = 0; i < batch.Length; i++)
+                RunSystem(batch[i], update);
+        }
     }
 
     private void RunSystem(EcsSystem system, long update)
@@ -197,13 +190,13 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Systems of one group sorted by priority (stable), with their equal-priority buckets. Mutated under
+    /// Systems of one group sorted by priority (stable), with their parallel batches. Mutated under
     /// <see cref="StructuralLock"/> by publishing new arrays (copy-on-write), so a running update never sees a torn list.
     /// </summary>
     private sealed class SystemSchedule
     {
         public EcsSystem[] Systems = [];
-        public (int Start, int Count)[] Buckets = [];
+        public EcsSystem[][] Batches = [];
         public long Updates;
 
         public void Insert(EcsSystem system)
@@ -228,20 +221,31 @@ public sealed partial class World
             Publish(next);
         }
 
+        /// <summary>
+        /// Batches are runs of consecutive systems of one priority with pairwise non-conflicting access. Consecutive
+        /// keeps the meaning of registration order: of two conflicting systems, the earlier one always finishes first.
+        /// </summary>
         private void Publish(EcsSystem[] systems)
         {
-            var buckets = new List<(int, int)>();
+            var batches = new List<EcsSystem[]>();
             for (int i = 0; i < systems.Length;)
             {
-                int start = i;
-                int priority = systems[i].Priority;
-                while (i < systems.Length && systems[i].Priority == priority) i++;
-                buckets.Add((start, i - start));
+                int start = i++;
+                while (i < systems.Length && systems[i].Priority == systems[start].Priority && Fits(systems, start, i)) i++;
+                batches.Add(systems[start..i]);
             }
 
-            // Buckets first: an update reads Systems then Buckets, and both are consistent with the new list's prefix.
-            Buckets = buckets.ToArray();
+            // An update reads only Batches: one reference, so it never mixes two versions of the list.
             Systems = systems;
+            Batches = batches.ToArray();
+        }
+
+        private static bool Fits(EcsSystem[] systems, int start, int next)
+        {
+            for (int i = start; i < next; i++)
+                if (systems[i].Access.ConflictsWith(systems[next].Access))
+                    return false;
+            return true;
         }
     }
 }

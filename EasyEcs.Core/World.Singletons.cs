@@ -37,8 +37,8 @@ public sealed partial class World
     /// <summary>Ref to singleton <typeparamref name="T"/>, adding it (default) first if missing. O(1).</summary>
     public ref T GetOrAddSingleton<T>() where T : struct, ISingletonComponent
     {
-        var box = Box<T>();
-        return ref box != null ? ref box.Value : ref AddSingleton<T>();
+        var box = Box<T>() ?? AddMissingSingleton<T>();
+        return ref box.Value;
     }
 
     /// <summary>
@@ -48,8 +48,21 @@ public sealed partial class World
     /// </summary>
     public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent
     {
-        if (Box<T>() == null) AddSingleton<T>();
-        return new SingletonRef<T>(Box<T>());
+        return new SingletonRef<T>(Box<T>() ?? AddMissingSingleton<T>());
+    }
+
+    /// <summary>
+    /// Add <typeparamref name="T"/> unless another thread did first (systems of one parallel batch may resolve the same
+    /// singleton concurrently; a plain add would reset the other's value). Cold path.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private SingletonBox<T> AddMissingSingleton<T>() where T : struct, ISingletonComponent
+    {
+        lock (StructuralLock)
+        {
+            if (Box<T>() == null) AddSingleton<T>();
+            return Box<T>();
+        }
     }
 
     /// <summary>Copy of singleton <typeparamref name="T"/> if present. O(1).</summary>

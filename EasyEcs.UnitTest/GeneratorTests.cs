@@ -57,6 +57,19 @@ public class GeneratorTests
         Assert.That(errors, Is.Empty);
     }
 
+    [TestCase("[ForEach] static void A(ref P p, in Q q, in Clock c) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "access.ReadSingleton<global::Clock>();")]
+    [TestCase("[ForEach] static void A(Entity e, in P p) { }", "access.RunsAlone();")]
+    [TestCase("[ForEach] void A(in P p) { }", "access.RunsAlone();")]
+    [TestCase("[ForEach] static void A(in P p) { } protected override void OnUpdate() { }", "access.RunsAlone();")]
+    public void AccessIsDeclaredFromParameters(string members, params string[] expected)
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, $"public partial class S : EcsSystem {{ {members} }}"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Last().ToString();
+        foreach (var line in expected) Assert.That(generated, Does.Contain(line));
+        if (!expected.Contains("access.RunsAlone();")) Assert.That(generated, Does.Not.Contain("RunsAlone"));
+    }
+
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) { } }", "EECS001")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, int x) { } }", "EECS002")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(P p) { } }", "EECS002")]
