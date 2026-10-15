@@ -189,7 +189,7 @@ flowchart LR
 | Game servers and simulations on .NET 10: shards, MMO maps, AOI, combat | Unity or other runtimes below .NET 10 (`net10.0` only) |
 | Worlds where state flips constantly (buffs, deaths, spawns): structural changes are O(1) | Pure number crunching that never changes structure and needs chunked SoA density |
 | Long-running processes where GC pauses and unbounded growth matter | Code that wants objects with behavior, or systems calling each other |
-| One world per thread, many worlds per process | Many threads mutating one world's component values without coordination |
+| One world per thread, many worlds per process; `Parallel` for heavy independent systems | Many threads mutating one world's component values without coordination |
 
 ## Performance
 
@@ -231,6 +231,8 @@ v4 is a rewrite for .NET 10 with standard ECS vocabulary in a single `EasyEcs` n
 - Systems are synchronous `EcsSystem`s with source-generated `[ForEach]` methods (no UniTask dependency).
 - Entity ids are recycled; singletons are per world; system groups with `[UpdateInGroup<T>]`.
 - The analyzer enforces the ECS principles (EECS006-EECS008); events were replaced by state-as-data.
+- `WorldOptions.Parallel` runs systems of one priority together only when their generated read/write access does
+  not conflict: parallel with the same result as sequential, allocation-free.
 
 See the [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md) for every rename and behavioral change.
 

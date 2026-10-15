@@ -26,7 +26,9 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
   World.cs                     entity lifecycle (create/destroy, id recycling, lookup, enumeration)
   World.Components.cs          columns + AddBit/AddBits/RemoveBits (shared core of every Add/Set/Remove)
   World.Archetypes.cs          archetype registry, transition edges, copy-on-write query cache, compaction
-  World.Systems.cs             system groups (priority buckets each), synchronous Update / Update<TGroup>, Dispose
+  World.Systems.cs             system groups, priority order, parallel batches, synchronous Update / Update<TGroup>
+  World.Parallel.cs            allocation-free batch runner (caller + reusable thread-pool work items)
+  SystemAccess.cs              a system's read/write sets (generated from [ForEach] parameters) and the conflict rule
   World.Singletons.cs          per-world singletons (ref returns)
   WorldOptions.cs              configuration
   Query.cs                     QueryFilter (With/Without), QueryKey, ArchetypeCursor (shared iteration core)
@@ -37,13 +39,13 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
 EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, required by Roslyn hosts)
   ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove, World.CreateEntity, IForEach,
                                ForEach/Query/Count/Any, QueryItem/QueryEnumerator), one template each
-  SystemGenerator.cs           [ForEach] -> struct jobs + GeneratedUpdate
+  SystemGenerator.cs           [ForEach] -> struct jobs + GeneratedUpdate + GeneratedAccess
   EasyEcsAnalyzer.cs           EECS001-008 (generators never report diagnostics)
   Symbols.cs                   symbol checks shared by generator and analyzer
 EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, Query, System, ForEachSystem,
-                               Singleton, Concurrency, Allocation (0 B budget), Generator (diagnostics + caching)
+                               Singleton, Concurrency, Parallel, Allocation (0 B budget), Generator (diagnostics + caching)
 EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / ShardedWorldBenchmark (headline, realistic
-                               server tick) + MicroBenchmarks (diagnostics). Always measure with BenchmarkDotNet.
+                               server tick), ParallelSystemsBenchmark + MicroBenchmarks (diagnostics). Always measure with BenchmarkDotNet.
 doc/                           README.md (index), getting-started.md, guide/ (one page per concept, analyzer.md
                                lists EECS001-008), api.md (API + complexity), ecs-principles.md, architecture.md,
                                performance.md (diagrams in mermaid)

@@ -34,9 +34,10 @@ sequenceDiagram
     S-->>S: structural changes apply immediately: later systems see them
 ```
 
-Systems are sorted by `Priority`, registration order breaking ties. Systems with equal priority form a bucket. By
-default everything runs on the thread that calls `Update()`. With `WorldOptions.Parallel`, the systems of a bucket
-run in parallel and must touch disjoint data (see [Threading](threading.md)).
+Systems are sorted by `Priority`, registration order breaking ties. By default everything runs on the thread that
+calls `Update()`. With `WorldOptions.Parallel`, systems of one priority whose generated access does not conflict
+(`ref` = write, `in` = read) run at the same time; the result is the same as running them in order (see
+[Threading](threading.md#parallel-systems)).
 
 ## `[ForEach]` methods
 

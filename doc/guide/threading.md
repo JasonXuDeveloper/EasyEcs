@@ -3,6 +3,12 @@
 [Docs index](../README.md) · Related: [Architecture: threading](../architecture.md#threading) ·
 [Systems](systems.md#one-update)
 
+- [Recommended: one world per shard](#recommended-one-world-per-shard)
+- [Order of systems](#order-of-systems)
+- [Parallel systems](#parallel-systems)
+- [What the world synchronizes](#what-the-world-synchronizes)
+- [Compared with other ECS libraries](#compared-with-other-ecs-libraries)
+
 ## Recommended: one world per shard
 
 Worlds share nothing, so a server that gives each shard (thread) its own `World` needs no synchronization at all,
@@ -16,17 +22,108 @@ flowchart LR
     T3[Shard thread N] --> W3[World N]
 ```
 
-## What is synchronized
+Hand work to a world from another thread the way you would to any single-owner structure: post it to the owning
+thread (a queue the shard drains), which applies it before or between updates.
+
+## Order of systems
+
+The order is explicit and deterministic: `Update()` runs systems in ascending `Priority`, and systems with the same
+priority in registration order. Systems never call each other; a system that consumes what another produces gets a
+higher priority ([ECS principles](../ecs-principles.md#3-systems-never-reference-systems)).
+
+Structural changes apply immediately, so a later system in the same update already sees an entity that an earlier
+one created, destroyed or tagged. There are no command buffers to play back and no "end of frame" sync points.
+
+## Parallel systems
+
+With `WorldOptions.Parallel = true`, systems of the same priority that do not conflict run at the same time. Nothing
+is left to discipline: the generator declares every `[ForEach]` system's access from its parameters, and the
+scheduler only puts non-conflicting systems together.
+
+| `[ForEach]` parameter | Declares |
+|---|---|
+| `ref T` component / singleton | writes `T` |
+| `in T` component / singleton | reads `T` |
+| `[With<T>]` / `[Without<T>]` | nothing (filters read the archetype, which no parallel system changes) |
+| `Entity` or `World`, an instance method, an `OnUpdate` override, or no `[ForEach]` method | runs alone |
+
+Two systems conflict when one writes a component or singleton the other reads or writes, or when either runs alone.
+A system "runs alone" when it can reach the world beyond its parameters: through an `Entity` it can read any
+component or make structural changes, so it never shares a batch.
+
+The systems of one priority are split into **batches of consecutive, pairwise non-conflicting systems**. Batches run
+one after another; the systems of a batch run at the same time.
+
+```csharp
+public record struct Body(float X, float Y, float Vx, float Vy) : IComponent;
+public record struct Vitals(int Health, int Max) : IComponent;
+public record struct Alarms(int Count) : ISingletonComponent;
+
+public partial class MoveBodies : EcsSystem        // writes Body
+{
+    [ForEach] static void Move(ref Body b) { b.X += b.Vx; b.Y += b.Vy; }
+}
+
+public partial class RegenerateHealth : EcsSystem  // writes Vitals
+{
+    [ForEach] static void Regenerate(ref Vitals v) => v.Health = Math.Min(v.Health + 1, v.Max);
+}
+
+public partial class LowHealthAlarm : EcsSystem    // reads Vitals: conflicts with RegenerateHealth
+{
+    [ForEach] static void Count(in Vitals v, ref Alarms alarms) { if (v.Health < 10) alarms.Count++; }
+}
+```
+
+```mermaid
+flowchart LR
+    subgraph B1 [batch 1: at the same time]
+        M[MoveBodies<br/>writes Body]
+        R[RegenerateHealth<br/>writes Vitals]
+    end
+    subgraph B2 [batch 2]
+        A[LowHealthAlarm<br/>reads Vitals, writes Alarms]
+    end
+    B1 --> B2
+```
+
+Because batches are consecutive, registration order keeps its meaning: of two conflicting systems, the one registered
+first always finishes first, and the result is the same as a sequential update. A system that should run alone or in
+another order gets its own priority.
+
+Execution is allocation-free: the calling thread works through a batch together with up to
+`MaxDegreeOfParallelism - 1` reusable thread-pool work items (no `Parallel.For` closures, no tasks). An exception in
+any system of a batch is rethrown on the calling thread after the batch; with a `SystemError` subscriber it is
+reported instead, possibly from a thread-pool thread.
+
+When to turn it on: a world with several heavy, independent systems per priority and spare cores. Each batch costs a
+hand-off to the thread pool (microseconds), so it pays for systems that iterate thousands of entities, not for a
+handful. For a server, one world per shard usually uses the cores better: see
+[Performance](../performance.md#benchmarks) (`ParallelSystemsBenchmark`, `ShardedWorldBenchmark`).
+
+## What the world synchronizes
 
 | Operation | Safety |
 |---|---|
-| Structural changes (create/destroy, `Add`/`Set`/`Remove`), system changes, singleton add/remove | Take a per-world `System.Threading.Lock`. Thread-safe. |
-| Queries, `Get`, `Has` | Lock-free over immutable, copy-on-write archetype snapshots. |
-| Component and singleton **values** | Not synchronized, by design. |
+| Structural changes (create/destroy, `Add`/`Set`/`Remove`), adding/removing systems and singletons | Take the world's `System.Threading.Lock`: the world's structure never tears. |
+| Query matching, `Has`, `Get` lookups | Lock-free over immutable, copy-on-write archetype snapshots. |
+| Component and singleton **values** | Not synchronized, by design: the owner thread, or the parallel scheduler, decides who touches them. |
 
-So either each world has one owner thread, or, with `WorldOptions.Parallel = true`, systems of the same priority
-(one bucket) run in parallel on the thread pool and must touch disjoint data. `MaxDegreeOfParallelism` limits that
-parallelism. `Parallel` is off by default.
+The lock protects the world's bookkeeping, not your data: a `ref` or a running query on one thread does not survive a
+structural change made by another thread. So use one owner thread per world, with `Parallel` for systems the
+scheduler checked; do not mutate one world from several threads of your own.
 
-Hand work to a world from another thread the same way you would to any single-owner structure: post it to the
-owning thread, which applies it before or between updates.
+## Compared with other ECS libraries
+
+| Library | Order of systems | Systems in parallel | How conflicts are avoided |
+|---|---|---|---|
+| **EasyEcs** | `Priority`, then registration order | Non-conflicting systems of one priority (`Parallel`) | Access generated from `ref`/`in` parameters; conflicting systems never share a batch |
+| Entitas | Order added to `Feature`/`Systems` | No; a `JobSystem` splits one system's entities across threads | You keep job bodies independent |
+| Arch | Your own call order (Arch.System: group order) | Within one query (`ParallelQuery`, chunk jobs) | You keep parallel query bodies independent |
+| Friflo.Engine.ECS | `SystemRoot` / `SystemGroup` order | Within one query (`RunParallel`, chunk tasks) | You keep parallel query bodies independent |
+| DefaultEcs | `SequentialSystem` order | `ParallelSystem` (all children at once) and per-set runners | You put only independent systems into a `ParallelSystem` |
+| Bevy (Rust) | Ambiguous unless ordered (`before`/`after`) | Any systems whose access does not conflict | Access read from parameter types by the scheduler |
+| Unity DOTS | `UpdateBefore`/`UpdateAfter` attributes in groups | Jobs | Read/write handles plus the job safety system (dependencies) |
+
+EasyEcs takes the access-based model of Bevy and Unity DOTS, but keeps the order total and deterministic: within a
+priority it only runs systems together when their access proves that the order cannot matter.

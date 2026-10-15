@@ -161,3 +161,9 @@ Every world uses the same indices, so masks are comparable across worlds.
 - Queries, `Get` and `Has` are lock-free.
 - Component values are unsynchronized by design. The recommended layout is **one world per shard, owned by one
   thread**, where the lock is always uncontended. User-facing rules: [Threading](guide/threading.md).
+- `WorldOptions.Parallel`: every system carries a `SystemAccess` (component and singleton read/write bitsets, or
+  "runs alone"), generated from its `[ForEach]` parameters and read once by `AddSystem`. The schedule splits each
+  priority into batches of consecutive, pairwise non-conflicting systems and publishes them as one copy-on-write
+  array. A batch runs on the calling thread plus reusable `IThreadPoolWorkItem` helpers that claim systems through
+  one `Interlocked` cursor (epoch in the high 32 bits, so a helper that starts late never touches the next batch);
+  nothing is allocated per update.

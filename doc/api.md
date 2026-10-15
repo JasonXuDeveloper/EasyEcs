@@ -21,6 +21,7 @@ Notation:
 | `IComponent` | marker interface | Implemented by component structs. |
 | `ISingletonComponent` | marker interface | Implemented by singleton structs. |
 | `EcsSystem` | abstract class | `World`, `Priority`, `UpdateInterval`, `Enabled`; `OnCreate` / `OnUpdate` / `OnDestroy`. |
+| `SystemAccess` | struct | What a system reads and writes (`Read<T>`, `Write<T>`, `ReadSingleton<T>`, `WriteSingleton<T>`, `RunsAlone`); generated from `[ForEach]` parameters, used by `Parallel` batching. |
 | `ForEachAttribute`, `WithAttribute<T>`, `WithoutAttribute<T>` | attributes | `[ForEach]` methods and their filters. |
 | `ISystemGroup`, `UpdateInGroupAttribute<TGroup>` | marker / attribute | System groups. |
 | `QueryFilter` | readonly struct | `Create().With<T>().Without<U>()`. |

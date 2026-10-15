@@ -48,7 +48,7 @@ using var world = new World(new WorldOptions { InitialEntityCapacity = 10_000 })
 | `WorldOptions` | Default | Meaning |
 |---|---|---|
 | `InitialEntityCapacity` | 1024 | Pre-sized entity capacity, so storage does not grow at run time. |
-| `Parallel` | `false` | Run systems of equal priority in parallel (see [Threading](guide/threading.md)). |
+| `Parallel` | `false` | Run non-conflicting systems of equal priority at the same time (see [Threading](guide/threading.md#parallel-systems)). |
 | `MaxDegreeOfParallelism` | processor count | Limit for `Parallel`. |
 
 `Dispose()` calls every system's `OnDestroy` (in reverse order) and releases storage.
@@ -144,7 +144,8 @@ public partial class MovementSystem : EcsSystem
 world.AddSystem<MovementSystem>();
 ```
 
-- `ref` parameters are written, `in` parameters are read; 1 to 9 components.
+- `ref` parameters are written, `in` parameters are read; 1 to 9 components. This is also the system's declared
+  access, which lets `WorldOptions.Parallel` run non-conflicting systems at the same time.
 - `[With<T>]` requires a component that is not passed in; `[Without<T>]` excludes entities that have it.
 - An `Entity` parameter gives the current entity's handle; a `World` parameter gives the world (handy in static
   methods).

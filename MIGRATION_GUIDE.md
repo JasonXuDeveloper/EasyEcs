@@ -92,6 +92,11 @@ public partial class S : EcsSystem
    communicate through data). See [doc/ecs-principles.md](doc/ecs-principles.md).
 7. **`IEvent`, `IEventHandler<T>` and `Publish` are removed.** Write state changes as data (a tag or a field) and
    let later systems query them.
+8. **`Parallel` is safe by construction.** v3 ran every system of one priority at once and left data races to
+   you. v4 runs systems of one priority together only when their generated access does not conflict (`ref` = write,
+   `in` = read); systems with an `Entity`/`World` parameter, instance `[ForEach]` methods, an `OnUpdate` override or
+   no `[ForEach]` method run alone. The result equals a sequential update. See
+   [Threading](doc/guide/threading.md#parallel-systems).
 
 ## Source generator and analyzer
 
