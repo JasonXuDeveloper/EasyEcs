@@ -10,6 +10,16 @@ public record struct Name(string Value) : IComponent;   // managed reference ins
 public struct Frozen : IComponent;                        // tag
 public struct Dead : IComponent;                          // tag
 public record struct Stun(int Ticks) : IComponent;        // gained and lost often
+public record struct Armor(int Value) : IComponent, ITrackChanges;   // tracked: rows record their last write
+public record struct Seen(int Count) : IComponent;       // how often a Changed<Armor> method visited the entity
+public record struct ChildOf(Entity Parent) : IComponent, IIndexed<Entity>  // a relation: indexed by its target
+{
+    public Entity Key => Parent;
+}
+public record struct Callsign(string Value) : IComponent, IIndexed<string> // a managed key
+{
+    public string Key => Value;
+}
 public struct Marked : IComponent;                        // tag
 public record struct C1(int V) : IComponent;
 public record struct C2(int V) : IComponent;

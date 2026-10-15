@@ -18,13 +18,21 @@ public class AllocationTests
 
         world.AddSystem<Movement>();
         world.AddSystem<Damage>();
+        world.AddSystem<ChangedTests.Wear>();
+        world.AddSystem<ChangedTests.ArmorWatch>();
+        world.CreateEntities(new Entity[100], new Armor(1_000_000), new Seen(), new Stun(1)); // tracked changes
         var probe = world.CreateEntity(new Health(1));
+        var callsigns = world.Index<Callsign, string>();
+        var named = world.CreateEntity(new Callsign("a"));
 
         void Frame()
         {
             world.Update();
             foreach (var item in world.Query<Position, Velocity>()) item.Component1.X += item.Component2.X;
             _ = world.Count<Position, Velocity>(QueryFilter.Create());
+            _ = world.Count<Armor>(QueryFilter.Create().Changed<Armor>().ChangedSince(world.ChangeTick));
+            named.Get<Callsign>() = new Callsign(named.Get<Callsign>().Value == "a" ? "b" : "a"); // re-keyed every frame
+            _ = callsigns.Count("a") + callsigns.Count("b");
             probe.Get<Health>().Value++;
             probe.Remove<Frozen>();
             probe.Set(new Frozen()); // archetype transitions on cached edges

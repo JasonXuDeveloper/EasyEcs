@@ -42,3 +42,12 @@ public sealed class WithoutAttribute<T> : Attribute where T : struct, IComponent
 /// </summary>
 [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
 public sealed class WithAnyAttribute<T> : Attribute where T : struct, IComponent;
+
+/// <summary>
+/// The <see cref="ForEachAttribute"/> method visits only entities whose <typeparamref name="T"/> was written since its
+/// system last ran (<see cref="EcsSystem.LastRunTick"/>; on the first run, every entity having it). Requires
+/// <typeparamref name="T"/> like <see cref="WithAttribute{T}"/>; <typeparamref name="T"/> tracks changes
+/// (<see cref="ITrackChanges"/>). Several attributes require all of the components to have changed.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
+public sealed class ChangedAttribute<T> : Attribute where T : struct, IComponent, ITrackChanges;

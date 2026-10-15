@@ -34,6 +34,7 @@ public class GeneratorTests
     private const string Components = """
         public struct P : IComponent { public int V; }
         public struct Q : IComponent { public int V; }
+        public struct T : IComponent, ITrackChanges { public int V; }
         public struct Clock : ISingletonComponent { public int Ticks; }
         """;
 
@@ -62,6 +63,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref P p, in Q q, in Clock c) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "access.ReadSingleton<global::Clock>();")]
     [TestCase("[ForEach] static void A(Entity e, in P p) { }", "access.RunsAlone();")]
     [TestCase("[ForEach] static void A(System.Span<P> p, System.ReadOnlySpan<Q> q) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "IForEachBatch<global::P, global::Q>")]
+    [TestCase("[ForEach, Changed<T>] static void A(ref P p) { }", "access.Read<global::T>();", ".Changed<global::T>()", "ChangedSince(LastRunTick + 1)", "Writes => 1;")]
     [TestCase("[ForEach] void A(in P p) { }", "access.RunsAlone();")]
     [TestCase("[ForEach] static void A(in P p) { } protected override void OnUpdate() { }", "access.RunsAlone();")]
     public void AccessIsDeclaredFromParameters(string members, params string[] expected)

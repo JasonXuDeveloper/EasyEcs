@@ -31,6 +31,12 @@ public abstract class EcsSystem
     /// <summary>Disabled systems are skipped by <see cref="World.Update()"/>.</summary>
     public bool Enabled { get; set; } = true;
 
+    /// <summary>
+    /// The world's <see cref="World.ChangeTick"/> when this system last ran (0 before its first run): its
+    /// <c>[Changed&lt;T&gt;]</c> methods select rows written after that tick, so not their own writes of that run.
+    /// </summary>
+    public ulong LastRunTick { get; internal set; }
+
     /// <summary>Run count and time of this system; recorded only with <see cref="WorldOptions.MeasureSystems"/>.</summary>
     public SystemStats Stats { get; internal set; }
 

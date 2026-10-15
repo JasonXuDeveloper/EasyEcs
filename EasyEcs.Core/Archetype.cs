@@ -56,6 +56,20 @@ internal sealed class Archetype
     /// <summary>Per column: alive rows without the component (their <see cref="Present"/> bit is clear).</summary>
     public readonly int[] Absent;
 
+    /// <summary>
+    /// Per column: the latest change tick stamped into it, for change-tick columns (an upper bound: rows that move in
+    /// raise it to their source table's). A <c>Changed</c> filter skips the table when it is older than the pass's tick.
+    /// </summary>
+    public readonly ulong[] LastWrite;
+
+    /// <summary>
+    /// Per change-tick column (null for others): the latest tick stamped into each 64-row word, an upper bound like
+    /// <see cref="LastWrite"/>. A <c>Changed</c> filter skips a word older than the pass's tick with one load.
+    /// </summary>
+    public readonly ulong[][] WordWrite;
+
+    private readonly bool _tracked; // has change-tick columns
+
     /// <summary>Columns with <see cref="Present"/> bits (indices into <see cref="Columns"/>), copy-on-write.</summary>
     private short[] _bitColumns = [];
 
@@ -87,6 +101,8 @@ internal sealed class Archetype
         Columns = new Array[Components.Length];
         Present = new ulong[Components.Length][];
         Absent = new int[Components.Length];
+        LastWrite = new ulong[Components.Length];
+        WordWrite = new ulong[Components.Length][];
         _infos = new ComponentInfo[Components.Length];
         _columnOf = new short[Components.Length == 0 ? 0 : Components[^1] + 1];
         _columnOf.AsSpan().Fill(-1);
@@ -97,6 +113,8 @@ internal sealed class Archetype
             _infos[i] = info;
             _hasManaged |= info.Managed;
             Columns[i] = info.Create(initialCapacity);
+            if (info.Owner >= 0) WordWrite[i] = new ulong[(initialCapacity + 63) >> 6];
+            _tracked |= info.Owner >= 0;
             _columnOf[Components[i]] = (short)i;
             ByBit[Components[i]].Column = Columns[i];
         }
@@ -244,6 +262,74 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T Ref<T>(int bit, int slot) where T : struct, IComponent => ref Unsafe.Add(ref Base<T>(bit), slot);
 
+    /// <summary>
+    /// Record a write of <typeparamref name="T"/> in row <paramref name="slot"/> at <paramref name="tick"/> when
+    /// <typeparamref name="T"/> tracks changes (a JIT-time constant: nothing for other components).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Stamp<T>(int slot, ulong tick) where T : struct, IComponent
+    {
+        if (default(T) is ITrackChanges) Ticks<T>(tick, slot).Tick = tick;
+    }
+
+    /// <summary>Row <paramref name="slot"/> of the change ticks of <typeparamref name="T"/>, noting a write at <paramref name="tick"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ref ChangeTicks<T> Ticks<T>(ulong tick, int slot) where T : struct, IComponent
+    {
+        int column = ColumnIndex(ComponentType<ChangeTicks<T>>.Bit);
+        LastWrite[column] = tick;
+        WordWrite[column][slot >> 6] = tick;
+        return ref Unsafe.Add(ref Data<ChangeTicks<T>>(column), slot);
+    }
+
+    /// <summary>Raise the word summaries of row <paramref name="to"/> of <paramref name="target"/> to those of row <paramref name="from"/> of <paramref name="source"/> (a row copy).</summary>
+    internal static void RaiseWords(Archetype source, int from, Archetype target, int to)
+    {
+        for (int c = 0; c < source.WordWrite.Length; c++)
+        {
+            if (source.WordWrite[c] is not { } words) continue;
+            int t = target.ColumnIndex(source.Components[c]);
+            if (t < 0) continue;
+            ref ulong word = ref target.WordWrite[t][to >> 6];
+            word = Math.Max(word, words[from >> 6]);
+            target.LastWrite[t] = Math.Max(target.LastWrite[t], source.LastWrite[c]);
+        }
+    }
+
+    /// <summary><see cref="Stamp{T}"/> for rows [<paramref name="start"/>, <paramref name="start"/> + <paramref name="count"/>).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void StampRows<T>(int start, int count, ulong tick) where T : struct, IComponent
+    {
+        if (default(T) is ITrackChanges && count > 0)
+        {
+            MemoryMarshal.CreateSpan(ref Unsafe.As<ChangeTicks<T>, ulong>(ref Ticks<T>(tick, start)), count).Fill(tick);
+            int column = ColumnIndex(ComponentType<ChangeTicks<T>>.Bit);
+            WordWrite[column].AsSpan(start >> 6, ((start + count - 1) >> 6) - (start >> 6) + 1).Fill(tick);
+        }
+    }
+
+    /// <summary>Stamp every row of every change-tick column at <paramref name="tick"/> (after a restore). Cold path.</summary>
+    public void StampTracked(ulong tick)
+    {
+        for (int c = 0; c < Components.Length; c++)
+            if (ComponentInfo.Of(Components[c]).Owner >= 0)
+            {
+                MemoryMarshal.CreateSpan(ref Unsafe.As<ChangeTick, ulong>(ref Data<ChangeTick>(c)), Count).Fill(tick);
+                WordWrite[c].AsSpan().Fill(tick);
+                LastWrite[c] = tick;
+            }
+    }
+
+    /// <summary><see cref="Stamp{T}"/> for the rows of word <paramref name="word"/> whose bit is set in <paramref name="rows"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void StampWord<T>(int word, ulong rows, ulong tick) where T : struct, IComponent
+    {
+        if (!(default(T) is ITrackChanges)) return;
+        if (rows == 0) return;
+        ref var ticks = ref Ticks<T>(tick, word << 6);
+        for (; rows != 0; rows &= rows - 1) Unsafe.Add(ref ticks, BitOperations.TrailingZeroCount(rows)).Tick = tick;
+    }
+
     /// <summary>Append an entity and return its row (a pass that started earlier does not visit it).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int Add(int entityId, int version)
@@ -299,6 +385,9 @@ internal sealed class Archetype
             Array.Resize(ref Present[c], (capacity + 63) >> 6);
             ByBit[Components[c]].Bits = Present[c];
         }
+
+        for (int c = 0; c < WordWrite.Length; c++)
+            if (WordWrite[c] != null) Array.Resize(ref WordWrite[c], (capacity + 63) >> 6);
     }
 
     /// <summary>
@@ -335,6 +424,7 @@ internal sealed class Archetype
         for (int c = 0; c < infos.Length; c++)
             CopyElement(infos[c], columns[c], from, columns[c], to);
         if (_bitColumns.Length != 0) CopyBits(from, to);
+        if (_tracked) RaiseWords(this, from, this, to);
         // Rows below Count are within the id arrays, and ids of rows are valid meta indices.
         ref int ids = ref MemoryMarshal.GetArrayDataReference(EntityIds);
         ref int versions = ref MemoryMarshal.GetArrayDataReference(Versions);
@@ -530,6 +620,9 @@ internal sealed class Transition
     // One step per shared component (source column, target column, its description).
     private readonly Step[] _plan;
 
+    // Whether the tables share change-tick columns: a moved row raises the target's summaries to the source's.
+    private readonly bool _ticks;
+
     private readonly struct Step(int from, int to, ComponentInfo info)
     {
         public readonly int From = from;
@@ -549,6 +642,7 @@ internal sealed class Transition
         }
 
         _plan = plan.ToArray();
+        foreach (var step in _plan) _ticks |= step.Info.Owner >= 0;
     }
 
     /// <summary>
@@ -564,6 +658,7 @@ internal sealed class Transition
         foreach (ref readonly var step in _plan.AsSpan())
             Archetype.CopyElement(step.Info, Unsafe.Add(ref from, step.From), slot, Unsafe.Add(ref to, step.To), targetSlot);
         if (Source.HasAbsent) CopyAbsent(slot, targetSlot);
+        if (_ticks) Archetype.RaiseWords(Source, slot, Target, targetSlot);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

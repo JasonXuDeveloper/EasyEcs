@@ -63,6 +63,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 {{Lines(n, i => $"            ushort b{i} = ComponentType<T{i}>.Bit;")}}
                             {{(n == 1 ? "world.AddBit(ref meta, Id, b1);" : $"world.AddBits(ref meta, Id, [{List(n, i => $"b{i}")}], {signature});")}}
                 {{Lines(n, i => $"            World.Row<T{i}>(ref meta, b{i}) = c{i};")}}
+                {{Lines(n, i => $"            meta.Archetype.Stamp<T{i}>(meta.Slot, world.ChangeTick);")}}
                         }
 
                         return this;
@@ -105,6 +106,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 : $"_emptyArchetype.GetAddSetEdge({signature}) ?? CreateSetEdge(_emptyArchetype, [{List(n, i => $"b{i}")}], {signature})")}}).Target;
                             int slot = Place(id, target);
                 {{Lines(n, i => $"            Unsafe.Add(ref target.Base<T{i}>(b{i}), slot) = c{i};")}}
+                {{Lines(n, i => $"            target.Stamp<T{i}>(slot, _changeTick);")}}
                             return new Entity(this, id, Meta[id].Version);
                         }
                     }
@@ -130,6 +132,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 int id = AllocateId();
                                 int slot = Place(id, target);
                 {{Lines(n, i => $"                Unsafe.Add(ref r{i}, slot) = c{i};")}}
+                {{Lines(n, i => $"                target.Stamp<T{i}>(slot, _changeTick);")}}
                                 entities[e] = new Entity(this, id, MetaRef(id).Version);
                             }
                         }
@@ -199,6 +202,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 {
                     /// <summary>One run of consecutive rows of one archetype: element i of every span belongs to the same entity.</summary>
                     void Execute({{List(n, i => $"Span<T{i}> c{i}")}});
+
+                {{Writes}}
                 }
 
                 /// <summary>
@@ -251,7 +256,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         for (int ai = 0; ai < archetypes.Length; ai++)
                         {
                             var archetype = archetypes[ai];
-                            var rows = match.Filters[ai];
+                            var rows = new RowFilter(match.Filters[ai], filter.Since);
                             int count = archetype.Count;
                             int mode = rows.Mode(archetype);
                             if (archetype.AliveCount == 0 || mode == RowFilter.None) continue;
@@ -260,18 +265,26 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             {
                                 // Rows without some component: runs of rows whose presence bits pass.
                                 for (int start = 0; rows.NextRun(archetype, ref start, count, out int length); start += length)
+                                {
+                {{StampRows(n, "                    ", "start", "length")}}
                                     job.Execute({{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), length)")}});
+                                }
+
                                 continue;
                             }
 
                             if (count == archetype.AliveCount)
                             {
+                {{StampRows(n, "                ", "0", "count")}}
                                 job.Execute({{List(n, i => $"MemoryMarshal.CreateSpan(ref r{i}, count)")}});
                                 continue;
                             }
 
                             for (int start = 0; archetype.NextRun(ref start, count, out int length); start += length)
+                            {
+                {{StampRows(n, "                ", "start", "length")}}
                                 job.Execute({{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), length)")}});
+                            }
                         }
                     }
 
@@ -281,20 +294,20 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 {{cons}}
                     {
                         var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
-                        return new QueryEnumerator<{{tps}}>(this, match, {{bits}});
+                        return new QueryEnumerator<{{tps}}>(this, match, filter.Since, {{bits}});
                     }
 
                     /// <summary>Number of alive entities having all of <c>{{tps}}</c>. O(matching archetypes), plus O(rows / 64) for tables with rows to test.</summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public int Count<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}
-                        => Match<{{tps}}>(in filter, {{List(n, i => "out _")}}).CountAlive();
+                        => Match<{{tps}}>(in filter, {{List(n, i => "out _")}}).CountAlive(filter.Since);
 
                     /// <summary>Whether any alive entity has all of <c>{{tps}}</c>. O(matching archetypes), plus O(rows / 64) for tables with rows to test; early exit.</summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public bool Any<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}
-                        => Match<{{tps}}>(in filter, {{List(n, i => "out _")}}).AnyAlive();
+                        => Match<{{tps}}>(in filter, {{List(n, i => "out _")}}).AnyAlive(filter.Since);
 
                     /// <summary>
                     /// Destroy every alive entity having all of <c>{{tps}}</c> (and matching <paramref name="filter"/>) and return
@@ -302,7 +315,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// </summary>
                     public int DestroyEntities<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}
-                        => DestroyMatching(Match<{{tps}}>(in filter, {{List(n, i => "out _")}}));
+                        => DestroyMatching(Match<{{tps}}>(in filter, {{List(n, i => "out _")}}), filter.Since);
 
 
                 """);
@@ -315,10 +328,20 @@ public sealed class ArityGenerator : IIncrementalGenerator
     /// One ForEach flavor: <paramref name="entityArg"/> is what the job receives first (the id, or an Entity built from
     /// the archetype's parallel id/version arrays).
     /// </summary>
+    /// <summary>Stamp row <paramref name="row"/> of every component the job writes (only tracked ones emit code).</summary>
+    private static string StampRow(int n, string indent, string row) =>
+        Lines(n, i => $"{indent}    if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.Stamp<T{i}>({row}, _changeTick);");
+
+    /// <summary>Stamp a run of rows of every component the job writes.</summary>
+    private static string StampRows(int n, string indent, string start, string count) =>
+        Lines(n, i => $"{indent}    if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.StampRows<T{i}>({start}, {count}, _changeTick);");
+
     private static string ForEach(int n, string name, string job, string entityArg, string rowArg, string receives)
     {
         string tps = TypeParams(n);
         string execute = $"job.Execute({entityArg}, {List(n, i => $"ref r{i}")});";
+        // The row argument for row k of the current word (ids and versions point at the word's first row).
+        string rowArgAt = System.Text.RegularExpressions.Regex.Replace(rowArg, @"\b(ids|versions)\b", "Unsafe.Add(ref $1, k)");
         // Row loops move one ref per column by one element per row (strength-reduced by hand): with an int index the
         // JIT sign-extends and rebuilds every address, which nearly doubles the cost of a tight loop.
         string advance = List(n, i => $"r{i} = ref Unsafe.Add(ref r{i}, 1)");
@@ -353,7 +376,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         for (int ai = 0; ai < archetypes.Length; ai++)
                         {
                             var archetype = archetypes[ai];
-                            var rows = match.Filters[ai];
+                            var rows = new RowFilter(match.Filters[ai], filter.Since);
                             int count = archetype.Count;
                             int mode = rows.Mode(archetype);
                             if (archetype.AliveCount == 0 || mode == RowFilter.None) continue;
@@ -371,6 +394,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                     // Row counts at the start of the pass: rows appended during the pass are not visited.
                     var filters = match.Filters;
+                    ulong since = filter.Since;
                     // Rented, not stackalloc'd: a localloc would keep this method out of tiered compilation (no OSR, no
                     // PGO), and with it the inlining of the job into the loop.
                     int[] counts = ArrayPool<int>.Shared.Rent(Math.Max(1, archetypes.Length));
@@ -380,7 +404,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     for (int ai = 0; ai < archetypes.Length; ai++)
                     {
                         var archetype = archetypes[ai];
-                        var rows = filters[ai];
+                        var rows = new RowFilter(filters[ai], since);
                         int count = counts[ai];
                         int mode = rows.Mode(archetype);
                         if (archetype.AliveCount == 0 || mode == RowFilter.None) continue;
@@ -411,6 +435,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         int id = Unsafe.Add(ref ids, i);
                         if (id < 0) continue; // tombstone
 
+            {{StampRow(n, "            ", "i")}}
                         {{execute}}
 
                         if (seen != StorageVersion)
@@ -465,6 +490,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             int id = Unsafe.Add(ref ids, i);
                             if (id < 0) continue; // tombstone
 
+            {{StampRow(n, "                ", "i")}}
                             {{execute}}
 
                             if (seen != StorageVersion)
@@ -492,6 +518,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     ref int ids = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds), start);
                     ref int versions = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Versions), start);
             {{startAt}}
+            {{StampRows(n, "        ", "start", "end - start")}}
                     for (int left = end - start; left > 0; left--, ids = ref Unsafe.Add(ref ids, 1), versions = ref Unsafe.Add(ref versions, 1), {{advance}})
                         job.Execute({{rowArg}}, {{List(n, i => $"ref r{i}")}});
                 }
@@ -515,12 +542,23 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         ulong bits = rows.Word(archetype, w);
                         if (tombstones || bits != ulong.MaxValue)
                         {
-                            for (; left > 0; left--, bits >>= 1, ids = ref Unsafe.Add(ref ids, 1), versions = ref Unsafe.Add(ref versions, 1), {{advance}})
-                                if ((bits & 1) != 0 && (!tombstones || ids >= 0))
-                                    job.Execute({{rowArg}}, {{List(n, i => $"ref r{i}")}});
+                            // Jump from passing row to passing row (sparse words cost one step per passing row, not 64).
+                            bits &= RowFilter.RowMask(w, count);
+            {{Lines(n, i => $"                    if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.StampWord<T{i}>(w, bits, _changeTick);")}}
+                            for (; bits != 0; bits &= bits - 1)
+                            {
+                                int k = BitOperations.TrailingZeroCount(bits);
+                                if (tombstones && Unsafe.Add(ref ids, k) < 0) continue;
+                                job.Execute({{rowArgAt}}, {{List(n, i => $"ref Unsafe.Add(ref r{i}, k)")}});
+                            }
+
+                            ids = ref Unsafe.Add(ref ids, left);
+                            versions = ref Unsafe.Add(ref versions, left);
+            {{Lines(n, i => $"                    r{i} = ref Unsafe.Add(ref r{i}, left);")}}
                             continue;
                         }
 
+            {{StampRows(n, "            ", "w << 6", "left")}}
                         for (; left > 0; left--, ids = ref Unsafe.Add(ref ids, 1), versions = ref Unsafe.Add(ref versions, 1), {{advance}})
                             job.Execute({{rowArg}}, {{List(n, i => $"ref r{i}")}});
                     }
@@ -542,7 +580,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 {
                     var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
                     var work = WorkOf<{{name}}Chunks<{{tps}}, TJob>>();
-                    int chunks = work.Cut(this, match, ref job, {{bits}});
+                    int chunks = work.Cut(this, match, filter.Since, ref job, {{bits}});
                     if (chunks < 2 || !TryRunChunks(work, chunks))
                         for (int i = 0; i < chunks; i++) work.Run(i);
                     work.Release();
@@ -572,7 +610,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{Lines(n, i => $"            private ushort _b{i};")}}
 
                     /// <summary>Cut the matching rows into chunks; returns how many.</summary>
-                    public int Cut(World world, QueryMatch match, ref TJob job, {{ushorts}})
+                    public int Cut(World world, QueryMatch match, ulong since, ref TJob job, {{ushorts}})
                     {
                         _world = world;
                         Job = job;
@@ -582,7 +620,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         for (int a = 0; a < archetypes.Length; a++)
                         {
                             var archetype = archetypes[a];
-                            if (archetype.AliveCount == 0 || match.Filters[a].Mode(archetype) == RowFilter.None) continue;
+                            var rows = new RowFilter(match.Filters[a], since);
+                            if (archetype.AliveCount == 0 || rows.Mode(archetype) == RowFilter.None) continue;
                             for (int start = 0; start < archetype.Count; start += ChunkRows)
                             {
                                 if (chunks == _starts.Length)
@@ -594,7 +633,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 }
 
                                 _tables[chunks] = archetype;
-                                _filters[chunks] = match.Filters[a];
+                                _filters[chunks] = rows;
                                 _starts[chunks++] = start;
                             }
                         }
@@ -689,10 +728,10 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     private ref int _versions;
                 {{Lines(n, i => $"    private ref T{i} _r{i};")}}
 
-                    internal QueryEnumerator(World world, QueryMatch match, {{List(n, i => $"ushort b{i}")}})
+                    internal QueryEnumerator(World world, QueryMatch match, ulong since, {{List(n, i => $"ushort b{i}")}})
                     {
                         _world = world;
-                        _cursor = new ArchetypeCursor(world, match);
+                        _cursor = new ArchetypeCursor(world, match, since);
                 {{Lines(n, i => $"        _b{i} = b{i};")}}
                     }
 
@@ -707,9 +746,9 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
 
                     /// <summary>Number of alive matching entities. O(matching archetypes), plus O(rows / 64) for tables with rows to test.</summary>
-                    public readonly int Count => _cursor.Match.CountAlive();
+                    public readonly int Count => _cursor.Match.CountAlive(_cursor.Since);
 
-                    public readonly bool IsEmpty => !_cursor.Match.AnyAlive();
+                    public readonly bool IsEmpty => !_cursor.Match.AnyAlive(_cursor.Since);
 
                     public readonly QueryEnumerator<{{tps}}> GetEnumerator() => this;
 
@@ -718,7 +757,16 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     {
                         int next = _cursor.MoveNext();
                         if (next == ArchetypeCursor.Moved) Refresh();
+                        // Items hand out refs: a visited row of a tracked component counts as written (a JIT-time
+                        // constant: no code for queries without tracked components).
+                        if (({{List(n, i => $"default(T{i}) is ITrackChanges", " || ")}}) && next != ArchetypeCursor.End) Stamp();
                         return next != ArchetypeCursor.End;
+                    }
+
+                    [MethodImpl(MethodImplOptions.NoInlining)]
+                    private readonly void Stamp()
+                    {
+                {{Lines(n, i => $"        _cursor.Current.Stamp<T{i}>(_cursor.Slot, _world.ChangeTick);")}}
                     }
 
                     // Another table, or its storage changed: re-read the column refs.

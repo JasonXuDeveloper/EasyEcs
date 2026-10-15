@@ -17,12 +17,18 @@ public readonly struct QueryFilter
     internal readonly Tag All;
     internal readonly Tag None;
     internal readonly Tag Any;
+    internal readonly Tag Tracked;
 
-    private QueryFilter(in Tag all, in Tag none, in Tag any)
+    /// <summary>The change tick <see cref="Changed{T}"/> rows must have been written at or after (<see cref="ChangedSince"/>).</summary>
+    public readonly ulong Since;
+
+    private QueryFilter(in Tag all, in Tag none, in Tag any, in Tag changed, ulong since)
     {
         All = all;
         None = none;
         Any = any;
+        Tracked = changed;
+        Since = since;
     }
 
     public static QueryFilter Create() => default;
@@ -32,7 +38,7 @@ public readonly struct QueryFilter
     {
         var all = All.Clone();
         all.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in all, in None, in Any);
+        return new QueryFilter(in all, in None, in Any, in Tracked, Since);
     }
 
     /// <summary>Require <typeparamref name="T"/> to be absent.</summary>
@@ -40,7 +46,7 @@ public readonly struct QueryFilter
     {
         var none = None.Clone();
         none.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in All, in none, in Any);
+        return new QueryFilter(in All, in none, in Any, in Tracked, Since);
     }
 
     /// <summary>
@@ -51,8 +57,25 @@ public readonly struct QueryFilter
     {
         var any = Any.Clone();
         any.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in All, in None, in any);
+        return new QueryFilter(in All, in None, in any, in Tracked, Since);
     }
+
+    /// <summary>
+    /// Require <typeparamref name="T"/> and only rows whose <typeparamref name="T"/> was written at or after the change
+    /// tick <see cref="Since"/> (set it with <see cref="ChangedSince"/>, e.g. to a <see cref="World.ChangeTick"/> read
+    /// earlier; <c>[Changed&lt;T&gt;]</c> methods select rows written since their system's last run).
+    /// </summary>
+    public QueryFilter Changed<T>() where T : struct, IComponent, ITrackChanges
+    {
+        var all = All.Clone();
+        all.SetBit(ComponentType<T>.Bit);
+        var changed = Tracked.Clone();
+        changed.SetBit(ComponentType<T>.Bit);
+        return new QueryFilter(in all, in None, in Any, in changed, Since);
+    }
+
+    /// <summary>The same filter, selecting rows written at or after <paramref name="tick"/> (<see cref="World.ChangeTick"/>).</summary>
+    public QueryFilter ChangedSince(ulong tick) => new(in All, in None, in Any, in Tracked, tick);
 }
 
 /// <summary>Cache key of a query: required bits, excluded bits and the bits of which one is required.</summary>
@@ -61,32 +84,38 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
     private readonly Tag _all;
     private readonly Tag _none;
     private readonly Tag _any;
+    private readonly Tag _changed;
 
     // Detached keys only (not part of equality): the required and excluded bits as arrays, for the per-archetype
     // presence tests (a table with a column can still have rows without the component).
     private readonly ushort[] _required;
     private readonly ushort[] _excluded;
     private readonly ushort[] _anyOf;
+    private readonly ushort[] _changedOf;
 
     // Lookup keys of queries on component bits >= 256 keep their overflow here instead of allocating it per query.
     [ThreadStatic] private static Vector256<long>[] _scratch;
 
-    private QueryKey(in Tag all, in Tag none, in Tag any)
+    private QueryKey(in Tag all, in Tag none, in Tag any, in Tag changed)
     {
         _all = all;
         _none = none;
         _any = any;
-        _required = _excluded = _anyOf = [];
+        _changed = changed;
+        _required = _excluded = _anyOf = _changedOf = [];
     }
 
-    private QueryKey(in Tag all, in Tag none, in Tag any, ushort[] required, ushort[] excluded, ushort[] anyOf)
+    private QueryKey(in Tag all, in Tag none, in Tag any, in Tag changed, ushort[] required, ushort[] excluded,
+        ushort[] anyOf, ushort[] changedOf)
     {
         _all = all;
         _none = none;
         _any = any;
+        _changed = changed;
         _required = required;
         _excluded = excluded;
         _anyOf = anyOf;
+        _changedOf = changedOf;
     }
 
     /// <summary>
@@ -104,7 +133,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
             {
                 var all = filter.All;
                 for (int i = 0; i < bits.Length; i++) all.SetBit(bits[i]);
-                return new QueryKey(in all, in filter.None, in filter.Any);
+                return new QueryKey(in all, in filter.None, in filter.Any, in filter.Tracked);
             }
         }
 
@@ -119,7 +148,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
         for (int i = 0; i < bits.Length; i++) maxBit = Math.Max(maxBit, bits[i]);
         var all = filter.All.CopyWithScratch(maxBit, ref _scratch);
         for (int i = 0; i < bits.Length; i++) all.SetBit(bits[i]);
-        return new QueryKey(in all, in filter.None, in filter.Any);
+        return new QueryKey(in all, in filter.None, in filter.Any, in filter.Tracked);
     }
 
     /// <summary>A copy that owns its storage (cache entries).</summary>
@@ -128,7 +157,9 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
         var all = _all.Clone();
         var none = _none.Clone();
         var any = _any.Clone();
-        return new QueryKey(in all, in none, in any, all.ToBitArray(), none.ToBitArray(), any.ToBitArray());
+        var changed = _changed.Clone();
+        return new QueryKey(in all, in none, in any, in changed, all.ToBitArray(), none.ToBitArray(), any.ToBitArray(),
+            changed.ToBitArray());
     }
 
     /// <summary>
@@ -140,7 +171,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
         archetypeMask.ContainsAll(in _all) && (_anyOf.Length == 0 || archetypeMask.Intersects(in _any));
 
     /// <summary>The presence tests of a matching <paramref name="archetype"/>: its required and excluded columns.</summary>
-    public RowFilter FilterFor(Archetype archetype)
+    public RowPlan FilterFor(Archetype archetype)
     {
         var require = new short[_required.Length];
         for (int i = 0; i < require.Length; i++) require[i] = (short)archetype.ColumnIndex(_required[i]);
@@ -158,30 +189,36 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
             if (column >= 0) any.Add((short)column);
         }
 
-        return new RowFilter(require, exclude.ToArray(), any.ToArray());
+        // A changed component's ticks live in its companion column, which every table having the component has.
+        var changed = new short[_changedOf.Length];
+        for (int i = 0; i < changed.Length; i++)
+            changed[i] = (short)archetype.ColumnIndex(ComponentInfo.Of(_changedOf[i]).Companion);
+        return new RowPlan(require, exclude.ToArray(), any.ToArray(), changed);
     }
 
     public bool Equals(QueryKey other) =>
-        _all.Equals(in other._all) && _none.Equals(in other._none) && _any.Equals(in other._any);
+        _all.Equals(in other._all) && _none.Equals(in other._none) && _any.Equals(in other._any) &&
+        _changed.Equals(in other._changed);
 
     public override bool Equals(object obj) => obj is QueryKey other && Equals(other);
 
-    public override int GetHashCode() => (_all.GetHashCode() * 31 + _none.GetHashCode()) * 31 + _any.GetHashCode();
+    public override int GetHashCode() =>
+        ((_all.GetHashCode() * 31 + _none.GetHashCode()) * 31 + _any.GetHashCode()) * 31 + _changed.GetHashCode();
 }
 
 /// <summary>
 /// The archetypes a query matches and, parallel to them, the presence tests of each. Immutable: the query cache
 /// publishes a new instance when an archetype is added.
 /// </summary>
-internal sealed class QueryMatch(Archetype[] archetypes, RowFilter[] filters)
+internal sealed class QueryMatch(Archetype[] archetypes, RowPlan[] filters)
 {
     public readonly Archetype[] Archetypes = archetypes;
-    public readonly RowFilter[] Filters = filters;
+    public readonly RowPlan[] Filters = filters;
 
-    public QueryMatch Append(Archetype archetype, RowFilter filter)
+    public QueryMatch Append(Archetype archetype, RowPlan filter)
     {
         var archetypes = new Archetype[Archetypes.Length + 1];
-        var filters = new RowFilter[Filters.Length + 1];
+        var filters = new RowPlan[Filters.Length + 1];
         Array.Copy(Archetypes, archetypes, Archetypes.Length);
         Array.Copy(Filters, filters, Filters.Length);
         archetypes[^1] = archetype;
@@ -190,32 +227,52 @@ internal sealed class QueryMatch(Archetype[] archetypes, RowFilter[] filters)
     }
 
     /// <summary>Alive matching entities: O(matching archetypes), plus O(rows / 64) for tables with rows to test.</summary>
-    public int CountAlive()
+    public int CountAlive(ulong since)
     {
         int count = 0;
-        for (int i = 0; i < Archetypes.Length; i++) count += Filters[i].CountAlive(Archetypes[i]);
+        for (int i = 0; i < Archetypes.Length; i++) count += new RowFilter(Filters[i], since).CountAlive(Archetypes[i]);
         return count;
     }
 
-    public bool AnyAlive()
+    public bool AnyAlive(ulong since)
     {
         for (int i = 0; i < Archetypes.Length; i++)
-            if (Filters[i].CountAlive(Archetypes[i]) > 0)
+            if (new RowFilter(Filters[i], since).CountAlive(Archetypes[i]) > 0)
                 return true;
         return false;
     }
 }
 
+/// <summary>Layout of a <c>ChangeTicks&lt;T&gt;</c> row, to read any of those columns (never registered).</summary>
+internal struct ChangeTick : IComponent
+{
+#pragma warning disable CS0649 // only read through refs into ChangeTicks<T> columns
+    public ulong Value;
+#pragma warning restore CS0649
+}
+
 /// <summary>
-/// Presence test of a query on one archetype: the presence bits of <see cref="Require"/> must be set, those of
-/// <see cref="Exclude"/> clear, and at least one of <see cref="AnyOf"/> set when it is not empty (column indices of the
-/// archetype; a column without presence bits is full).
+/// What a query tests on the rows of one archetype (cached with the query): the presence bits of <see cref="Require"/>
+/// must be set, those of <see cref="Exclude"/> clear, at least one of <see cref="AnyOf"/> set when it is not empty, and
+/// the change ticks in the <see cref="Changed"/> columns newer than the pass's tick (column indices of the archetype; a
+/// column without presence bits is full).
 /// </summary>
-internal sealed class RowFilter(short[] require, short[] exclude, short[] anyOf)
+internal sealed class RowPlan(short[] require, short[] exclude, short[] anyOf, short[] changed)
 {
     public readonly short[] Require = require;
     public readonly short[] Exclude = exclude;
     public readonly short[] AnyOf = anyOf;
+    public readonly short[] Changed = changed;
+}
+
+/// <summary>
+/// The row test of one pass: a table's <see cref="RowPlan"/> and the change tick its <see cref="RowPlan.Changed"/>
+/// columns must reach (a pass value: plans are shared by every pass of the query).
+/// </summary>
+internal readonly struct RowFilter(RowPlan plan, ulong since)
+{
+    private readonly RowPlan _plan = plan;
+    private readonly ulong _since = since;
 
     /// <summary>No row of the table passes: every alive row has an excluded component.</summary>
     public const int None = -1;
@@ -229,14 +286,20 @@ internal sealed class RowFilter(short[] require, short[] exclude, short[] anyOf)
     /// <summary>
     /// How the rows of <paramref name="archetype"/> pass right now: <see cref="None"/>, <see cref="All"/> or
     /// <see cref="Test"/>, from the per-column counts of rows lacking a component (O(columns)). Every change of those
-    /// bumps the world's storage version, so a pass re-checks this after a structural change.
+    /// bumps the world's storage version, so a pass re-checks this after a structural change. Change ticks always need
+    /// a test.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int Mode(Archetype archetype)
     {
         var absent = archetype.Absent;
-        bool test = false;
-        var exclude = Exclude;
+        var plan = _plan;
+        var changed = plan.Changed;
+        // A table not written since the pass's tick has no changed row.
+        for (int i = 0; i < changed.Length; i++)
+            if (archetype.LastWrite[changed[i]] < _since) return None;
+        bool test = changed.Length != 0;
+        var exclude = plan.Exclude;
         for (int i = 0; i < exclude.Length; i++)
         {
             int lacking = absent[exclude[i]];
@@ -244,10 +307,10 @@ internal sealed class RowFilter(short[] require, short[] exclude, short[] anyOf)
             test |= lacking != archetype.AliveCount;
         }
 
-        var require = Require;
+        var require = plan.Require;
         for (int i = 0; i < require.Length; i++) test |= absent[require[i]] != 0;
 
-        var anyOf = AnyOf;
+        var anyOf = plan.AnyOf;
         if (anyOf.Length != 0)
         {
             // Some column every row has: no test. No column any row has: no row passes. Else rows differ.
@@ -282,13 +345,14 @@ internal sealed class RowFilter(short[] require, short[] exclude, short[] anyOf)
     public ulong Word(Archetype archetype, int word)
     {
         ulong bits = ulong.MaxValue;
-        var require = Require;
+        var plan = _plan;
+        var require = plan.Require;
         for (int i = 0; i < require.Length; i++)
             if (archetype.Bits(require[i]) is { } present) bits &= present[word];
-        var exclude = Exclude;
+        var exclude = plan.Exclude;
         for (int i = 0; i < exclude.Length; i++)
             bits &= archetype.Bits(exclude[i]) is { } present ? ~present[word] : 0;
-        var anyOf = AnyOf;
+        var anyOf = plan.AnyOf;
         if (anyOf.Length != 0)
         {
             ulong any = 0;
@@ -297,6 +361,34 @@ internal sealed class RowFilter(short[] require, short[] exclude, short[] anyOf)
             bits &= any;
         }
 
+        var changed = plan.Changed;
+        for (int i = 0; i < changed.Length && bits != 0; i++) bits &= Newer(archetype, changed[i], word, _since);
+        return bits;
+    }
+
+    /// <summary>
+    /// Rows of word <paramref name="word"/> whose tick in column <paramref name="column"/> (a <c>ChangeTicks</c>
+    /// column: 8-byte unmanaged rows, 64-byte aligned) is at least <paramref name="since"/>: 4 rows per compare.
+    /// </summary>
+    private static ulong Newer(Archetype archetype, int column, int word, ulong since)
+    {
+        // Rows past the column's capacity do not exist (their bits are masked by the callers' row counts).
+        if (archetype.WordWrite[column][word] < since) return 0; // no row of the word written since
+        int first = word << 6;
+        int rows = Math.Min(64, archetype.EntityIds.Length - first);
+        ref ulong ticks = ref Unsafe.Add(ref Unsafe.As<ChangeTick, ulong>(ref archetype.Data<ChangeTick>(column)), first);
+        // tick >= since, as tick > since - 1: ticks stay below 2^63, so a signed compare is exact (since 0 gives -1).
+        var threshold = Vector256.Create((long)since - 1);
+        ulong bits = 0;
+        int row = 0;
+        for (; row + 4 <= rows; row += 4)
+        {
+            var newer = Vector256.GreaterThan(Vector256.LoadUnsafe(ref Unsafe.As<ulong, long>(ref ticks), (nuint)row), threshold);
+            bits |= (ulong)newer.ExtractMostSignificantBits() << row;
+        }
+
+        for (; row < rows; row++)
+            if (Unsafe.Add(ref ticks, row) >= since) bits |= 1UL << row;
         return bits;
     }
 
@@ -398,6 +490,7 @@ internal ref struct ArchetypeCursor
 
     private readonly World _world;
     public readonly QueryMatch Match;
+    public readonly ulong Since; // the filter's change tick
     private int[] _counts; // row counts at the start of the walk (rented), null before the first MoveNext
     private int _archetype;
     private RowFilter _filter;
@@ -413,10 +506,11 @@ internal ref struct ArchetypeCursor
     /// <summary>Row and entity id of the current row.</summary>
     public int Slot, Id;
 
-    public ArchetypeCursor(World world, QueryMatch match)
+    public ArchetypeCursor(World world, QueryMatch match, ulong since)
     {
         _world = world;
         Match = match;
+        Since = since;
         _archetype = -1;
     }
 
@@ -465,7 +559,7 @@ internal ref struct ArchetypeCursor
         while (++_archetype < archetypes.Length)
         {
             var archetype = archetypes[_archetype];
-            _filter = Match.Filters[_archetype];
+            _filter = new RowFilter(Match.Filters[_archetype], Since);
             _storage = _world.StorageVersion;
             _mode = _filter.Mode(archetype);
             if (_mode == RowFilter.None || archetype.AliveCount == 0) continue;

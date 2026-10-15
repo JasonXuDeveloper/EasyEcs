@@ -50,7 +50,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append("    protected override void GeneratedUpdate()\n    {\n        base.GeneratedUpdate();\n        var world = World;\n");
         foreach (var method in model.Methods)
         {
-            string filter = method.HasFilter ? $", in __{method.Name}Filter" : "";
+            // [Changed<T>]: rows written since this system last ran.
+            string filter = method.Changed.Length > 0 ? $", __{method.Name}Filter.ChangedSince(LastRunTick + 1)"
+                : method.HasFilter ? $", in __{method.Name}Filter" : "";
             string system = method.IsStatic ? "" : "System = this, ";
             string singletons = string.Concat(method.Parameters.Select((p, i) => p.Kind == Symbols.ParamKind.Singleton
                 ? $", s{i} = world.SingletonRef<{p.Type}>()" : ""));
@@ -89,6 +91,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
             sb.Append($"        access.{(p.RefKind == "ref" ? "Write" : "Read")}{kind}<{p.Type}>();\n");
         }
 
+        // [Changed<T>] reads T's change ticks, which writers of T stamp.
+        foreach (var type in model.Methods.SelectMany(m => m.Changed).Distinct())
+            sb.Append($"        access.Read<{type}>();\n");
+
         sb.Append("    }\n");
     }
 
@@ -124,21 +130,19 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append($"            => {(method.IsStatic ? owner.Name : "System")}.{method.Name}({args});\n");
         if (iface == "IForEach") // the id is not a parameter of the user's method: skip loading it
             sb.Append($"\n        static bool global::EasyEcs.IForEach<{method.ComponentTypes}>.ReadsId => false;\n");
-        if (!stable && !method.IsBatch)
-        {
-            // Carried over when the method changes the archetype of the entity it visits: its ref parameters only.
-            var queried = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Component).ToArray();
-            int writes = 0;
-            for (int k = 0; k < components.Length; k++)
-                if (queried.Any(p => p.Type == components[k] && p.RefKind == "ref")) writes |= 1 << k;
-            sb.Append($"\n        static int global::EasyEcs.{iface}<{method.ComponentTypes}>.Writes => {writes};\n");
-        }
+        // Its ref parameters (Span<T> for a batch): carried over when the method moves the entity it visits, and
+        // stamped when the component tracks changes. The queried [With<T>] component of a method without one is read.
+        var queried = method.Parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan).ToArray();
+        int writes = 0;
+        for (int k = 0; k < components.Length; k++)
+            if (queried.Any(p => p.Type == components[k] && p.RefKind == "ref")) writes |= 1 << k;
+        sb.Append($"\n        static int global::EasyEcs.{iface}<{method.ComponentTypes}>.Writes => {writes};\n");
 
         sb.Append("    }\n\n");
 
         if (!method.HasFilter) return;
         var chain = method.With.Select(t => $".With<{t}>()").Concat(method.Without.Select(t => $".Without<{t}>()"))
-            .Concat(method.WithAny.Select(t => $".WithAny<{t}>()"));
+            .Concat(method.WithAny.Select(t => $".WithAny<{t}>()")).Concat(method.Changed.Select(t => $".Changed<{t}>()"));
         sb.Append($"    private static readonly global::EasyEcs.QueryFilter __{method.Name}Filter = global::EasyEcs.QueryFilter.Create(){string.Concat(chain)};\n\n");
     }
 
@@ -184,9 +188,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// <param name="Parallel">[ForEach(Parallel = true)] on a method that can run on several threads (ForEachParallel).</param>
     private sealed record ForEachModel(OwnerModel Owner, string Name, bool IsStatic, bool Stable, bool Parallel, int Order,
         EquatableArray<string> Query, EquatableArray<ParamModel> Parameters, EquatableArray<string> With,
-        EquatableArray<string> Without, EquatableArray<string> WithAny)
+        EquatableArray<string> Without, EquatableArray<string> WithAny, EquatableArray<string> Changed)
     {
-        public bool HasFilter => With.Length + Without.Length + WithAny.Length > 0;
+        public bool HasFilter => With.Length + Without.Length + WithAny.Length + Changed.Length > 0;
 
         /// <summary>The queried component types, as type arguments of World.ForEach / IForEach.</summary>
         public string ComponentTypes => string.Join(", ", Query);
@@ -210,6 +214,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             var with = new List<string>();
             var without = new List<string>();
             var withAny = new List<string>();
+            var changed = new List<string>();
             foreach (var attribute in method.GetAttributes())
             {
                 if (attribute.AttributeClass is not { IsGenericType: true } cls) continue;
@@ -217,22 +222,26 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 if (name == Symbols.WithAttribute) with.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
                 else if (name == Symbols.WithoutAttribute) without.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
                 else if (name == Symbols.WithAnyAttribute) withAny.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
+                else if (name == Symbols.ChangedAttribute) changed.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
             }
 
             var query = parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan)
                 .Select(p => p.Type).ToList();
-            // No component parameter: the first [With<T>] becomes the queried component (passed to the job, not the method).
-            if (query.Count == 0)
+            // No component parameter: the first [With<T>] (else [Changed<T>]) becomes the queried component (passed to the
+            // job, not the method).
+            if (query.Count == 0 && with.Count > 0)
             {
                 query.Add(with[0]);
                 with.RemoveAt(0);
             }
+            else if (query.Count == 0) query.Add(changed[0]);
             bool stable = Symbols.IsStable(method, syntax);
             bool parallel = Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax) == null;
             return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, stable, parallel, syntax.SpanStart,
                 new EquatableArray<string>(query.ToArray()),
                 new EquatableArray<ParamModel>(parameters), new EquatableArray<string>(with.ToArray()),
-                new EquatableArray<string>(without.ToArray()), new EquatableArray<string>(withAny.ToArray()));
+                new EquatableArray<string>(without.ToArray()), new EquatableArray<string>(withAny.ToArray()),
+                new EquatableArray<string>(changed.ToArray()));
         }
     }
 

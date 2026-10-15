@@ -15,6 +15,7 @@ internal static class Symbols
     public const string WithAttribute = "EasyEcs.WithAttribute<T>";
     public const string WithoutAttribute = "EasyEcs.WithoutAttribute<T>";
     public const string WithAnyAttribute = "EasyEcs.WithAnyAttribute<T>";
+    public const string ChangedAttribute = "EasyEcs.ChangedAttribute<T>";
     public const string EcsSystem = "EasyEcs.EcsSystem";
     public const string Component = "EasyEcs.IComponent";
     public const string Singleton = "EasyEcs.ISingletonComponent";
@@ -120,14 +121,15 @@ internal static class Symbols
     }
 
     /// <summary>
-    /// 1..9 component (or component span) parameters, or none when a [With&lt;T&gt;] filter names the queried component (a
-    /// method that only needs the entity, e.g. [With&lt;Dead&gt;] static void Remove(Entity e)).
+    /// 1..9 component (or component span) parameters, or none when a [With&lt;T&gt;] or [Changed&lt;T&gt;] filter names the
+    /// queried component (a method that only needs the entity, e.g. [With&lt;Dead&gt;] static void Remove(Entity e)).
     /// </summary>
     public static bool ComponentCountValid(IMethodSymbol method, int components) =>
         components is >= 1 and <= MaxComponents || components == 0 && HasWith(method);
 
     public static bool HasWith(IMethodSymbol method) => method.GetAttributes().Any(a =>
-        a.AttributeClass is { IsGenericType: true } cls && cls.ConstructedFrom.ToDisplayString() == WithAttribute);
+        a.AttributeClass is { IsGenericType: true } cls &&
+        cls.ConstructedFrom.ToDisplayString() is WithAttribute or ChangedAttribute);
 
     /// <summary>
     /// The method cannot make structural changes: it is static, takes no <c>World</c>, and uses its <c>Entity</c>

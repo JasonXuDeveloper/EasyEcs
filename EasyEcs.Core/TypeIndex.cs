@@ -23,6 +23,15 @@ internal static class TypeIndex<TFamily, T>
 /// </summary>
 internal readonly struct ComponentSignature;
 
+/// <summary>
+/// The hidden column of a tracked component <typeparamref name="T"/> (<see cref="ITrackChanges"/>): the
+/// <see cref="World.ChangeTick"/> of each row's last write. Archetypes having <typeparamref name="T"/> always have it.
+/// </summary>
+internal struct ChangeTicks<T> : IComponent where T : struct, IComponent
+{
+    public ulong Tick;
+}
+
 /// <summary>Bit of component type <typeparamref name="T"/> in archetype masks (registers its <see cref="ComponentInfo"/>).</summary>
 internal static class ComponentType<T> where T : struct, IComponent
 {
@@ -33,7 +42,10 @@ internal static class ComponentType<T> where T : struct, IComponent
         int index = TypeIndex<IComponent, T>.Value;
         if (index > ushort.MaxValue)
             throw new InvalidOperationException($"Too many component types (max {ushort.MaxValue + 1})");
-        ComponentInfo.Register(index, new ComponentInfo<T>());
+        var info = new ComponentInfo<T>();
+        ComponentInfo.Register(index, info);
+        // A tracked component brings a hidden column of change ticks into every archetype that has it.
+        if (default(T) is ITrackChanges) ComponentInfo.Pair(index, ComponentType<ChangeTicks<T>>.Bit);
         return (ushort)index;
     }
 }

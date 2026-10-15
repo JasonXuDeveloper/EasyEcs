@@ -21,6 +21,18 @@ public sealed partial class World : IDisposable
     private int _freeIdCount;
     private int _entityCount;
 
+    // Change tick: stamped into the rows of tracked components (ITrackChanges) on every write. Grows by one per system
+    // batch, once after each update and once per index sync; 64 bits never wrap.
+    private ulong _changeTick = 1;
+
+    /// <summary>
+    /// The current change tick, stamped into tracked components' rows on every write (<see cref="ITrackChanges"/>).
+    /// </summary>
+    public ulong ChangeTick => _changeTick;
+
+    /// <summary>Start a new change tick and return it (index syncs: later writes are distinguishable). Owner thread.</summary>
+    internal ulong AdvanceChangeTick() => ++_changeTick;
+
     private readonly WorldOptions _options;
     private bool _disposed;
 
@@ -90,7 +102,7 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>Destroy every alive row of <paramref name="match"/> that passes its filter; returns how many.</summary>
-    private int DestroyMatching(QueryMatch match)
+    private int DestroyMatching(QueryMatch match, ulong since)
     {
         int destroyed = 0;
         using (Structural())
@@ -99,7 +111,7 @@ public sealed partial class World : IDisposable
             for (int a = 0; a < archetypes.Length; a++)
             {
                 var archetype = archetypes[a];
-                var rows = match.Filters[a];
+                var rows = new RowFilter(match.Filters[a], since);
                 if (archetype.AliveCount == 0 || rows.Mode(archetype) == RowFilter.None) continue;
                 // From the last row down: outside passes a removed row is filled by the last one, already visited.
                 for (int slot = archetype.Count - 1; slot >= 0; slot--)

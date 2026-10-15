@@ -22,6 +22,25 @@ internal abstract class ComponentInfo
         Size = size;
     }
 
+    /// <summary>Bit of the change-tick column of a tracked component (<see cref="ITrackChanges"/>), or -1.</summary>
+    public int Companion { get; private set; } = -1;
+
+    /// <summary>For a change-tick column: bit of the tracked component it belongs to, or -1.</summary>
+    public int Owner { get; private set; } = -1;
+
+    /// <summary>Pair tracked component <paramref name="owner"/> with its change-tick column <paramref name="companion"/>.</summary>
+    public static void Pair(int owner, int companion)
+    {
+        Of(owner).Companion = companion;
+        Of(companion).Owner = owner;
+        _anyTracked = true;
+    }
+
+    /// <summary>Whether any tracked component type was registered (archetype masks then get companion bits).</summary>
+    public static bool AnyTracked => _anyTracked;
+
+    private static volatile bool _anyTracked;
+
     /// <summary>Whether the type holds managed references (cleared when its row dies, copied by type).</summary>
     public bool Managed => Size < 0;
 

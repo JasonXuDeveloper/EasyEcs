@@ -41,12 +41,16 @@ public readonly partial struct Entity : IEquatable<Entity>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Has<T>() where T : struct, IComponent => !Unsafe.IsNullRef(ref Find<T>());
 
-    /// <summary>Ref to component <typeparamref name="T"/>; throws if the entity does not have it. O(1).</summary>
+    /// <summary>
+    /// Ref to component <typeparamref name="T"/>; throws if the entity does not have it. Counts as a write of a tracked
+    /// component (<see cref="ITrackChanges"/>). O(1).
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T Get<T>() where T : struct, IComponent
     {
         ref T value = ref Find<T>();
         if (Unsafe.IsNullRef(ref value)) ThrowMissing(typeof(T));
+        if (default(T) is ITrackChanges) Touch<T>();
         return ref value;
     }
 
@@ -93,6 +97,7 @@ public readonly partial struct Entity : IEquatable<Entity>
             world.AddBit(ref meta, Id, bit);
             ref T value = ref World.Row<T>(ref meta, bit);
             value = default;
+            meta.Archetype.Stamp<T>(meta.Slot, world.ChangeTick);
             return ref value;
         }
     }
@@ -102,7 +107,17 @@ public readonly partial struct Entity : IEquatable<Entity>
     public ref T GetOrAdd<T>() where T : struct, IComponent
     {
         ref T value = ref Find<T>();
-        return ref Unsafe.IsNullRef(ref value) ? ref Add<T>() : ref value;
+        if (Unsafe.IsNullRef(ref value)) return ref Add<T>();
+        if (default(T) is ITrackChanges) Touch<T>();
+        return ref value;
+    }
+
+    /// <summary>Stamp the entity's row of tracked component <typeparamref name="T"/>, which it has (cold path).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void Touch<T>() where T : struct, IComponent
+    {
+        ref var meta = ref _world.MetaRef(Id);
+        meta.Archetype.Stamp<T>(meta.Slot, _world.ChangeTick);
     }
 
     // Set(in T1..Tn) and Remove<T1..Tn>() are generated (Entity.Structural.g.cs).

@@ -81,8 +81,9 @@ public sealed partial class World
     /// Get or create the archetype for <paramref name="componentMask"/>. A new archetype is appended (copy-on-write)
     /// to every cached query it matches. Must be called inside the structural gate.
     /// </summary>
-    private Archetype GetOrCreateArchetype(in Tag componentMask)
+    private Archetype GetOrCreateArchetype(in Tag mask)
     {
+        var componentMask = ComponentInfo.AnyTracked ? WithCompanions(in mask) : mask;
         if (_archetypes.TryGetValue(componentMask, out var archetype))
             return archetype;
 
@@ -97,6 +98,34 @@ public sealed partial class World
         }
 
         return archetype;
+    }
+
+    /// <summary>
+    /// <paramref name="mask"/> with the change-tick column of every tracked component in it, and without those whose
+    /// component it lacks (a transition adds or removes the component alone). Cold path: new transitions only.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Tag WithCompanions(in Tag mask)
+    {
+        var result = mask;
+        bool cloned = false;
+        foreach (ushort bit in mask.ToBitArray())
+        {
+            var info = ComponentInfo.Of(bit);
+            int add = info.Companion >= 0 && !mask.HasBit(info.Companion) ? info.Companion : -1;
+            bool drop = info.Owner >= 0 && !mask.HasBit(info.Owner);
+            if (add < 0 && !drop) continue;
+            if (!cloned)
+            {
+                result = mask.Clone();
+                cloned = true;
+            }
+
+            if (add >= 0) result.SetBit(add);
+            if (drop) result.ClearBit(bit);
+        }
+
+        return result;
     }
 
     private static Archetype[] Append(Archetype[] source, Archetype item)
@@ -127,7 +156,7 @@ public sealed partial class World
 
             var all = _allArchetypes;
             var archetypes = new List<Archetype>();
-            var filters = new List<RowFilter>();
+            var filters = new List<RowPlan>();
             for (int i = 0; i < all.Length; i++)
             {
                 if (!key.Matches(in all[i].ComponentMask)) continue;

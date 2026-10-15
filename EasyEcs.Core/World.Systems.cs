@@ -119,6 +119,8 @@ public sealed partial class World
         for (int b = 0; b < batches.Length; b++)
         {
             var batch = batches[b];
+            // One change tick per batch: its systems never write what another one of them reads (Changed<T> reads T).
+            _changeTick++;
             if (parallel && batch.Length > 1)
             {
                 RunBatch(batch, update);
@@ -128,6 +130,8 @@ public sealed partial class World
             for (int i = 0; i < batch.Length; i++)
                 RunSystem(batch[i], update);
         }
+
+        _changeTick++; // writes between updates are newer than every system's last run
     }
 
     private void RunSystem(EcsSystem system, long update)
@@ -138,25 +142,34 @@ public sealed partial class World
 
         try
         {
-            if (!_options.MeasureSystems)
-            {
-                system.Update();
-                return;
-            }
-
-            long start = Stopwatch.GetTimestamp();
-            try
-            {
-                system.Update();
-            }
-            finally
-            {
-                system.Stats = system.Stats.Add(Stopwatch.GetTimestamp() - start);
-            }
+            RunMeasured(system);
         }
         catch (Exception e) when (SystemError != null)
         {
             SystemError(system, e);
+        }
+        finally
+        {
+            system.LastRunTick = _changeTick; // its own writes of this run are not changes for its next run
+        }
+    }
+
+    private void RunMeasured(EcsSystem system)
+    {
+        if (!_options.MeasureSystems)
+        {
+            system.Update();
+            return;
+        }
+
+        long start = Stopwatch.GetTimestamp();
+        try
+        {
+            system.Update();
+        }
+        finally
+        {
+            system.Stats = system.Stats.Add(Stopwatch.GetTimestamp() - start);
         }
     }
 

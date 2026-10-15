@@ -74,7 +74,12 @@ public sealed partial class World
 
             var tables = _allArchetypes;
             for (int i = 0; i < tables.Length; i++)
+            {
                 tables[i].Restore(i < snapshot.Tables.Length ? snapshot.Tables[i] : null);
+                tables[i].StampTracked(_changeTick); // every restored row is written: Changed<T> sees it
+            }
+
+            ResetIndexes();
             Array.Clear(_dirty, 0, _dirtyCount);
             _dirtyCount = 0;
 
