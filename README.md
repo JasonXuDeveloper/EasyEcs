@@ -1,8 +1,8 @@
 # EasyEcs
 
-**An allocation-free archetype ECS for long-running .NET 10 servers.**
-Write plain data and `[ForEach]` methods; the source generator writes the plumbing, the analyzer catches misuse at
-compile time, and a full server tick allocates 0 bytes.
+**A high-performance, allocation-free archetype ECS for .NET 10 servers.**
+Write plain data and `[ForEach]` methods; the source generator turns them into inlined struct jobs, the analyzer
+catches design mistakes at compile time, and a full server tick allocates 0 bytes.
 
 [![NuGet](https://img.shields.io/nuget/v/EasyEcs?logo=nuget&color=004880)](https://www.nuget.org/packages/EasyEcs)
 [![Downloads](https://img.shields.io/nuget/dt/EasyEcs?logo=nuget)](https://www.nuget.org/packages/EasyEcs)
@@ -10,85 +10,153 @@ compile time, and a full server tick allocates 0 bytes.
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/github/license/JasonXuDeveloper/EasyEcs)](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/LICENSE)
 
+| One server tick, 9 systems: movement, AOI, combat, status effects, death, respawn, projectiles | Entities | Time | Allocated |
+|---|---:|---:|---:|
+| One world | 100,000 | **4.33 ms** | **0 B** |
+| Four worlds on four threads (one per shard) | 100,000 | **1.85 ms** | **0 B** |
+
+<sub>BenchmarkDotNet, .NET 10, 4-core Xeon VM at 2.1 GHz; entities spawn, die, gain and lose components every tick.
+A `[ForEach]` pass costs 1.5 ns per entity, within 1.4x of two plain arrays.
+[Details](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md#benchmarks).</sub>
+
 ```bash
 dotnet add package EasyEcs        # net10.0 · source generator and analyzer included
 ```
 
 ## Why EasyEcs
 
-- **Zero GC in steady state.** One tick of a busy 100k-entity world (movement, AOI, combat, buffs, death, respawn,
-  projectiles) allocates **0 B**, and a unit test guards that budget on every run.
-- **Write the logic, not the plumbing.** A `[ForEach]` method becomes a generated struct job the JIT inlines: no
-  delegates, no virtual call per entity.
+- **Fast and garbage-free.** Dense columns per component type, 16-byte entity records (4 per cache line), JIT-inlined
+  struct jobs instead of delegates, lock-free queries. After warm-up nothing allocates: a unit test guards the 0 B
+  budget of a full tick on every run.
+- **Structural changes are cheap.** Adding a status effect, killing a unit or spawning a projectile moves one entity
+  through a cached archetype edge, even in the middle of a pass. State can be tags, not flags.
+- **Write the logic, not the plumbing.** A `[ForEach]` method is the whole system; filters are attributes
+  (`[With<T>]`, `[Without<T>]`), singletons are parameters.
 - **Mistakes fail the build.** The bundled analyzer (EECS001-EECS008) reports invalid systems, class components,
   stateful systems and systems that reference each other.
-- **Archetype storage, cheap structural changes.** One 16-byte record per entity (4 per cache line), one dense column
-  per component type, cached archetype transitions, and `CreateEntity(a, b, c)` lands in its final archetype directly.
-- **Decoupled by construction.** Systems cooperate only through data, in the order `Priority` declares. System
-  groups give you separate cadences (input vs. fixed tick).
-- **Built for servers that run for months.** Entity ids are recycled behind version-checked handles, memory is
-  bounded by the peak entity count, structural changes are thread-safe, and queries are lock-free.
+- **Decoupled by construction.** Systems cooperate only through data, in `Priority` order; system groups give you
+  separate cadences (input on every wake, simulation on a fixed tick).
+- **Built for servers that run for months.** Ids are recycled behind version-checked handles, memory is bounded by
+  the peak entity count, structural changes are thread-safe, one world per shard scales across cores.
 
-## Quick start
+## Example: a battle server
 
-Data is plain structs; behavior is stateless systems.
+Data is plain structs; behavior is one-job systems that never know about each other.
 
 ```csharp
 using EasyEcs;
 
 public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
-public record struct Health(int Value) : IComponent;
-public struct Dead : IComponent;                                         // tag: an empty component
-public record struct Stats(long Tick, int Deaths) : ISingletonComponent; // one value per world
+public record struct Health(int Value, int Max) : IComponent;
+public record struct Hits(int Damage, int Interval, int Cooldown) : IComponent;  // damage taken every Interval ticks
+public record struct Burning(int Ticks) : IComponent;      // a status effect: added and removed at run time
+public record struct Lifetime(int Ticks) : IComponent;
+public struct Player : IComponent;                         // tags: empty components used as filters
+public struct Dead : IComponent;
+public record struct Battle(long Tick, int Deaths) : ISingletonComponent;   // one value per world
 
 public partial class MovementSystem : EcsSystem
 {
-    [ForEach, Without<Dead>]                                             // runs once per matching entity
-    static void Move(ref Position p, in Velocity v) => p = p with { X = p.X + v.X, Y = p.Y + v.Y };
+    [ForEach, Without<Dead>]                               // runs once per matching entity, as an inlined struct job
+    static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
+}
+
+public partial class CombatSystem : EcsSystem
+{
+    public override int Priority => 1;                     // lower runs first
+
+    [ForEach, Without<Dead>]
+    static void TakeHits(Entity unit, ref Hits hits, ref Health hp, in Battle battle)   // singletons are parameters
+    {
+        if (--hits.Cooldown > 0) return;
+        hits.Cooldown = hits.Interval;
+        hp.Value -= hits.Damage;
+        if (battle.Tick % 20 == 0 && !unit.Has<Burning>()) unit.Add<Burning>() = new Burning(10);
+    }
+}
+
+public partial class BurnSystem : EcsSystem
+{
+    public override int Priority => 2;
+
+    [ForEach]
+    static void Burn(Entity unit, ref Burning burning, ref Health hp)
+    {
+        hp.Value -= 3;
+        if (--burning.Ticks == 0) unit.Remove<Burning>();   // structural changes are safe mid-pass
+    }
 }
 
 public partial class DeathSystem : EcsSystem
 {
+    public override int Priority => 3;
+
     [ForEach, Without<Dead>]
-    static void Die(Entity entity, in Health hp, ref Stats stats)        // singletons can be parameters too
+    static void Die(Entity unit, in Health hp, ref Battle battle)
     {
         if (hp.Value > 0) return;
-        entity.Set(new Dead());                                          // a state change is data
-        stats.Deaths++;
+        unit.Add<Dead>();                                  // a state change is data: whoever cares queries it
+        battle.Deaths++;
     }
 }
 
-public partial class CorpseSystem : EcsSystem
+public partial class RespawnSystem : EcsSystem              // reacts to Dead; DeathSystem does not know it exists
 {
-    public override int Priority => 10;                                  // lower runs first: this runs last
+    public override int Priority => 4;
+
+    [ForEach, With<Player>]
+    static void Respawn(Entity unit, ref Health hp, in Dead _) { hp.Value = hp.Max; unit.Remove<Dead>(); }
+
+    [ForEach, Without<Player>]
+    static void Despawn(Entity unit, in Dead _) => unit.Destroy();
+}
+
+public partial class ProjectileSystem : EcsSystem
+{
+    public override int Priority => 5;
+
+    [ForEach, With<Player>, Without<Dead>]
+    static void Shoot(in Position p, in Velocity v, in Battle battle, World world)
+    {
+        if (battle.Tick % 10 == 0) world.CreateEntity(p, new Velocity(v.X * 4, v.Y * 4), new Lifetime(20));
+    }
 
     [ForEach]
-    static void Remove(Entity entity, in Dead _) => entity.Destroy();
+    static void Expire(Entity projectile, ref Lifetime life) { if (--life.Ticks == 0) projectile.Destroy(); }
 }
 
 public sealed class ClockSystem : EcsSystem
 {
-    protected override void OnUpdate() => World.GetSingleton<Stats>().Tick++;   // once per update
+    public override int Priority => 100;
+    protected override void OnUpdate() => World.GetSingleton<Battle>().Tick++;
 }
 ```
 
 ```csharp
-using var world = new World(new WorldOptions { InitialEntityCapacity = 100_000 });
-world.AddSingleton<Stats>();
+using var world = new World(new WorldOptions { InitialEntityCapacity = 200_000 });
+world.AddSingleton<Battle>();
 world.AddSystem<MovementSystem>();
+world.AddSystem<CombatSystem>();
+world.AddSystem<BurnSystem>();
 world.AddSystem<DeathSystem>();
-world.AddSystem<CorpseSystem>();
+world.AddSystem<RespawnSystem>();
+world.AddSystem<ProjectileSystem>();
 world.AddSystem<ClockSystem>();
 
-var e = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Health(100));
-e.Get<Health>().Value -= 100;                    // Get<T>() returns ref T: the write goes to storage
+for (int i = 0; i < 100_000; i++)
+{
+    var unit = world.CreateEntity(new Position(i % 4096, i / 4096), new Velocity(1, 0),   // lands in its final
+        new Health(100, 100), new Hits(5, 8, i % 8));                                    // archetype directly
+    if (i % 3 == 0) unit.Add<Player>();
+}
 
-while (running) world.Update();                  // synchronous, allocation-free
+while (running) world.Update();   // synchronous; 0 B per tick once warmed up
 ```
 
-None of these systems knows the others exist: they share components and a singleton, so each can be removed,
-reordered or tested alone. The full walkthrough is in [Getting started](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/getting-started.md).
+Every system can be removed, reordered or tested alone: they share components and a singleton, nothing else. This
+is a trimmed version of the [benchmark world](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/EasyEcs.Benchmark/WorldSimulation.cs) measured above. The
+step-by-step tutorial is [Getting started](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/getting-started.md).
 
 ## The model in one picture
 
