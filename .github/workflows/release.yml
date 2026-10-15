@@ -2,8 +2,9 @@ name: Release
 
 # Run manually: Actions -> Release -> Run workflow (on master), enter the version (e.g. 4.0.0 or 4.1.0-preview.1).
 #   tag:     bump <Version> in Directory.Build.props, build and test it, commit "Bump to vX.Y.Z", tag vX.Y.Z, push.
-#   publish: from the tag, pack and push to NuGet (secret MYTOKEN), then create the GitHub release with notes generated
-#            from the commits since the previous tag. If it fails (e.g. an expired key), fix the secret and use
+#   publish: from the tag, pack and push to NuGet (secret MYTOKEN), then create the GitHub release with GitHub's
+#            generated notes (What's Changed from the merged pull requests, grouped by label as .github/release.yml
+#            says, New Contributors, Full Changelog). If it fails (e.g. an expired key), fix the secret and use
 #            "Re-run failed jobs": the tag stays, NuGet skips a version it already has, the release is created once.
 
 on:
@@ -73,7 +74,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: v${{ inputs.version }}
-          fetch-depth: 0 # previous tags and history for the release notes
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -92,27 +92,6 @@ jobs:
           if [ -z "$NUGET_API_KEY" ]; then echo "::error::secret MYTOKEN is not set"; exit 1; fi
           dotnet nuget push "artifacts/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
-      - name: Release notes
-        run: |
-          PREVIOUS=$(git describe --tags --abbrev=0 "v$VERSION^" 2>/dev/null || true)
-          RANGE=${PREVIOUS:+$PREVIOUS..}v$VERSION
-          section() { # title, grep pattern on the subject
-            local lines
-            lines=$(git log "$RANGE" --no-merges --format='- %s (%h)' | grep -E "$2" | grep -v '^- Bump to v' || true)
-            if [ -n "$lines" ]; then printf '### %s\n\n%s\n\n' "$1" "$lines"; fi
-          }
-          # Grouped by the subject prefix used in this repository (logic commits have none).
-          {
-            echo "Install: \`dotnet add package EasyEcs --version $VERSION\`"
-            echo
-            section "Changes" '^- [^:]+$|^- [A-Z]'
-            section "Performance" '^- (bench|perf):'
-            section "Documentation" '^- docs:'
-            section "Build and CI" '^- (ci|chore|build):'
-            if [ -n "$PREVIOUS" ]; then echo "**Full changelog**: https://github.com/${{ github.repository }}/compare/$PREVIOUS...v$VERSION"; fi
-          } > notes.md
-          cat notes.md
-
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -120,4 +99,6 @@ jobs:
           if gh release view "v$VERSION" >/dev/null 2>&1; then echo "release v$VERSION exists"; exit 0; fi
           PRERELEASE=""
           if [[ "$VERSION" == *-* ]]; then PRERELEASE="--prerelease"; fi
-          gh release create "v$VERSION" artifacts/*.nupkg --verify-tag --title "v$VERSION" --notes-file notes.md $PRERELEASE
+          # --notes goes first; the generated notes (pull requests since the previous tag) are appended.
+          gh release create "v$VERSION" artifacts/*.nupkg --verify-tag --title "v$VERSION" $PRERELEASE \
+            --notes "Install: \`dotnet add package EasyEcs --version $VERSION\`" --generate-notes
