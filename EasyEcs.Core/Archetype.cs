@@ -1,4 +1,5 @@
 using System;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
@@ -125,7 +126,7 @@ internal sealed class Archetype
 
     /// <summary>
     /// Give row <paramref name="slot"/> the component of column <paramref name="column"/> back (its column exists).
-    /// Returns true when the row lacked it. Inside the structural lock.
+    /// Returns true when the row lacked it. Inside the structural gate.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Restore(int column, int slot)
@@ -142,7 +143,7 @@ internal sealed class Archetype
     /// <summary>
     /// Take the component of column <paramref name="column"/> from row <paramref name="slot"/>: clear its presence bit
     /// (and a managed value, so the GC can collect what it referenced). Returns true when the row had it. Inside the
-    /// structural lock.
+    /// structural gate.
     /// </summary>
     public bool Take(int column, int slot)
     {
@@ -247,7 +248,7 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int Add(int entityId, int version)
     {
-        if (Count >= EntityIds.Length) Grow();
+        if (Count >= EntityIds.Length) Grow(EntityIds.Length * 2);
         int slot = Count++;
         // slot < EntityIds.Length == Versions.Length (grown above): no bounds checks.
         Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(EntityIds), slot) = entityId;
@@ -279,11 +280,16 @@ internal sealed class Archetype
         return true;
     }
 
-    /// <summary>Double the rows of the id arrays and of every column (cold path).</summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private void Grow()
+    /// <summary>Make room for <paramref name="rows"/> rows in one growth (bulk creation).</summary>
+    public void Reserve(int rows)
     {
-        int capacity = EntityIds.Length * 2;
+        if (rows > EntityIds.Length) Grow((int)BitOperations.RoundUpToPowerOf2((uint)rows));
+    }
+
+    /// <summary>Grow the id arrays and every column to <paramref name="capacity"/> rows (cold path).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void Grow(int capacity)
+    {
         Array.Resize(ref EntityIds, capacity);
         Array.Resize(ref Versions, capacity);
         for (int i = 0; i < Columns.Length; i++)

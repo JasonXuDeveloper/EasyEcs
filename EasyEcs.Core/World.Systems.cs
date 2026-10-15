@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Collections.Generic;
 using System.Threading;
 namespace EasyEcs;
@@ -137,7 +138,21 @@ public sealed partial class World
 
         try
         {
-            system.Update();
+            if (!_options.MeasureSystems)
+            {
+                system.Update();
+                return;
+            }
+
+            long start = Stopwatch.GetTimestamp();
+            try
+            {
+                system.Update();
+            }
+            finally
+            {
+                system.Stats = system.Stats.Add(Stopwatch.GetTimestamp() - start);
+            }
         }
         catch (Exception e) when (SystemError != null)
         {
@@ -192,7 +207,7 @@ public sealed partial class World
 
     /// <summary>
     /// Systems of one group sorted by priority (stable), with their parallel batches. Mutated under
-    /// the structural lock by publishing new arrays (copy-on-write), so a running update never sees a torn list.
+    /// the structural gate by publishing new arrays (copy-on-write), so a running update never sees a torn list.
     /// </summary>
     private sealed class SystemSchedule
     {

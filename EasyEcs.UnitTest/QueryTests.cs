@@ -29,6 +29,25 @@ public partial class QueryTests
     private static readonly QueryFilter Active = QueryFilter.Create().Without<Frozen>().Without<Dead>();
 
     [Test]
+    public void WithAnyNeedsOneOfTheComponents()
+    {
+        var halted = QueryFilter.Create().WithAny<Frozen>().WithAny<Dead>();
+        Assert.That(_world.Count<Position>(halted), Is.EqualTo(3));
+        Assert.That(_world.Count<Position>(QueryFilter.Create().WithAny<Health>()), Is.Zero);
+
+        // Removing the component keeps the row (a presence bit): the filter tests the bits.
+        int removed = 0;
+        foreach (var item in _world.Query<Position>(QueryFilter.Create().With<Frozen>()))
+            if (removed++ == 0) item.Entity.Remove<Frozen>();
+        Assert.That(_world.Count<Position>(halted), Is.EqualTo(2));
+        Assert.That(_world.Any<Position>(QueryFilter.Create().WithAny<Frozen>()), Is.True);
+
+        int visited = 0;
+        foreach (var _ in _world.Query<Position>(halted)) visited++;
+        Assert.That(visited, Is.EqualTo(2));
+    }
+
+    [Test]
     public void CountAndAnyMatchArchetypes()
     {
         Assert.That(_world.Count<Position>(), Is.EqualTo(15));

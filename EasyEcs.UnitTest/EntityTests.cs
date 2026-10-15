@@ -15,6 +15,45 @@ public class EntityTests
     public void TearDown() => _world.Dispose();
 
     [Test]
+    public void CreateEntitiesPlacesABatchAndDestroyEntitiesRemovesMatches()
+    {
+        var existing = _world.CreateEntity(new Position(9, 9));
+        var batch = new Entity[100];
+        _world.CreateEntities(batch, new Position(1, 2), new Velocity(3, 4));
+
+        Assert.That(_world.EntityCount, Is.EqualTo(101));
+        for (int i = 0; i < batch.Length; i++)
+        {
+            Assert.That(batch[i].Get<Position>(), Is.EqualTo(new Position(1, 2)));
+            Assert.That(batch[i].Get<Velocity>(), Is.EqualTo(new Velocity(3, 4)));
+        }
+
+        for (int i = 0; i < batch.Length; i += 2) batch[i].Set(new Frozen());
+        Assert.That(_world.DestroyEntities<Position>(QueryFilter.Create().With<Frozen>()), Is.EqualTo(50));
+        Assert.That(_world.EntityCount, Is.EqualTo(51));
+        Assert.That(batch[0].IsAlive, Is.False);
+        Assert.That(batch[1].IsAlive, Is.True);
+
+        Assert.That(_world.DestroyEntities<Position>(), Is.EqualTo(51));
+        Assert.That(existing.IsAlive, Is.False);
+        Assert.That(_world.EntityCount, Is.Zero);
+    }
+
+    [Test]
+    public void DestroyEntitiesDuringAPassSkipsTheDestroyed()
+    {
+        var batch = new Entity[10];
+        _world.CreateEntities(batch, new Health(1));
+        int visited = 0;
+        foreach (var item in _world.Query<Health>())
+        {
+            if (visited++ == 0) Assert.That(_world.DestroyEntities<Health>(), Is.EqualTo(10));
+        }
+        Assert.That(visited, Is.EqualTo(1));
+        Assert.That(_world.EntityCount, Is.Zero);
+    }
+
+    [Test]
     public void CreateAndDestroyTrackTheCount()
     {
         var a = _world.CreateEntity();

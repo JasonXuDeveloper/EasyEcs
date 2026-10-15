@@ -40,6 +40,12 @@ public partial class ParallelTests
             entity.Get<Right>().Met = rendezvous.Barrier.SignalAndWait(rendezvous.TimeoutMs);
     }
 
+    /// <summary>Inherits WriteRight's [ForEach] method and adds an OnUpdate the generator never saw: it runs alone.</summary>
+    public sealed class WriteRightWithUpdate : WriteRight
+    {
+        protected override void OnUpdate() { } // could reach any data: the scheduler cannot know
+    }
+
     public partial class Count : EcsSystem
     {
         [ForEach]
@@ -87,6 +93,18 @@ public partial class ParallelTests
         using var world = ParallelWorld(timeoutMs: 100);
         world.AddSystem<WriteLeft>();
         world.AddSystem<WriteRightThroughEntity>();
+        world.Update();
+
+        foreach (var item in world.Query<Left, Right>())
+            Assert.That((item.Component1.Met, item.Component2.Met), Is.EqualTo((false, false)), "never at the same time");
+    }
+
+    [Test]
+    public void SubclassesTheGeneratorDidNotSeeRunAlone()
+    {
+        using var world = ParallelWorld(timeoutMs: 100);
+        world.AddSystem<WriteLeft>();
+        world.AddSystem<WriteRightWithUpdate>();
         world.Update();
 
         foreach (var item in world.Query<Left, Right>())

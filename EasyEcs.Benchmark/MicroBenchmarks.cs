@@ -96,6 +96,21 @@ public class MicroBenchmarks
         return world.EntityCount;
     }
 
+    /// <summary>Churn through the batch API: CreateEntities and DestroyEntities, one gate pass each per round.</summary>
+    [Benchmark]
+    public int ChurnBatch()
+    {
+        var world = new World(new WorldOptions { InitialEntityCapacity = 1024 });
+        var entities = new Entity[N / 10];
+        for (int round = 0; round < 10; round++)
+        {
+            world.CreateEntities(entities, new Position(), new Health());
+            world.DestroyEntities<Position>();
+        }
+
+        return world.EntityCount;
+    }
+
     /// <summary>Remove + add a component (state toggles such as buffs or combat state).</summary>
     [Benchmark]
     public int ToggleComponent()

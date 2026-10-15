@@ -7,6 +7,8 @@
         <LangVersion>preview</LangVersion>
         <!-- Archetype.Aligned: the address of a pinned column, to start its rows on a cache line -->
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <!-- trimming and Native AOT analyzers run on every build: the library must stay reflection-free on hot paths -->
+        <IsAotCompatible>true</IsAotCompatible>
         <PackageId>EasyEcs</PackageId>
         <Title>EasyEcs</Title>
         <Authors>JasonXuDeveloper</Authors>
@@ -30,7 +32,7 @@
         <None Include="..\README.md" Pack="true" PackagePath="\"/>
     </ItemGroup>
 
-    <!-- EasyEcs.Generator: expands the T1..T9 API inside this assembly and ships to consumers for [Query] systems -->
+    <!-- EasyEcs.Generator: expands the T1..T9 API inside this assembly and ships to consumers for [ForEach] systems -->
     <ItemGroup>
         <ProjectReference Include="..\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
         <None Include="..\EasyEcs.Generator\bin\$(Configuration)\netstandard2.0\EasyEcs.Generator.dll"

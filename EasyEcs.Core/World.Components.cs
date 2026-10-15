@@ -47,7 +47,7 @@ public sealed partial class World
         }
     }
 
-    /// <summary>Remove entity row <paramref name="slot"/> from <paramref name="archetype"/>. Inside the structural lock.</summary>
+    /// <summary>Remove entity row <paramref name="slot"/> from <paramref name="archetype"/>. Inside the structural gate.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void RemoveRow(Archetype archetype, int slot)
     {
@@ -68,7 +68,7 @@ public sealed partial class World
     /// <summary>
     /// Add one component bit to entity <paramref name="id"/> (<paramref name="meta"/> is its record). When its table has
     /// the column the row only gets the component back; else the entity moves along the cached archetype edge (no
-    /// mask hashing). Inside the structural lock.
+    /// mask hashing). Inside the structural gate.
     /// </summary>
     internal void AddBit(ref EntityMeta meta, int id, ushort bit)
     {
@@ -84,7 +84,7 @@ public sealed partial class World
     /// <summary>
     /// Add several component bits in at most one archetype transition. The transition is cached per (source archetype,
     /// <paramref name="signature"/>), so only the first call of a signature from an archetype builds a mask. Inside the
-    /// structural lock.
+    /// structural gate.
     /// </summary>
     internal void AddBits(ref EntityMeta meta, int id, ReadOnlySpan<ushort> bits, int signature)
     {
@@ -99,7 +99,7 @@ public sealed partial class World
 
     /// <summary>
     /// Remove one component bit: the row keeps its column and only loses the component (no move). A missing component
-    /// is ignored. Inside the structural lock.
+    /// is ignored. Inside the structural gate.
     /// </summary>
     internal void RemoveBit(ref EntityMeta meta, ushort bit)
     {
@@ -108,7 +108,7 @@ public sealed partial class World
         if (column >= 0 && archetype.Take(column, meta.Slot)) StorageVersion++; // passes re-read presence bits
     }
 
-    /// <summary>Remove component bits (see <see cref="RemoveBit"/>). Inside the structural lock.</summary>
+    /// <summary>Remove component bits (see <see cref="RemoveBit"/>). Inside the structural gate.</summary>
     internal void RemoveBits(ref EntityMeta meta, ReadOnlySpan<ushort> bits)
     {
         for (int i = 0; i < bits.Length; i++) RemoveBit(ref meta, bits[i]);
@@ -117,7 +117,7 @@ public sealed partial class World
     /// <summary>
     /// Move entity <paramref name="id"/> along <paramref name="transition"/>: copy its shared components into a row of
     /// the target table and remove its old row. Components only the target has are left for the caller to write.
-    /// Inside the structural lock.
+    /// Inside the structural gate.
     /// </summary>
     private void MoveTo(ref EntityMeta meta, int id, Transition transition)
     {
@@ -134,10 +134,10 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Whether <paramref name="to"/> (the entity's archetype, read without the lock) still has a column the job writes.
+    /// Whether <paramref name="to"/> (the entity's archetype, read outside the gate) still has a column the job writes.
     /// When the job removed every component it writes (or destroyed the entity), there is nothing to carry over and
-    /// the lock is skipped. Reading without the lock is safe here: component values have one owner thread (the one
-    /// running the pass), so no other thread changes this entity's archetype meanwhile; the copy re-reads under the lock.
+    /// the gate is skipped. Reading outside the gate is safe here: component values have one owner thread (the one
+    /// running the pass), so no other thread changes this entity's archetype meanwhile; the copy re-reads under the gate.
     /// </summary>
     private static bool KeepsAnyWritten(Archetype to, int writes, ReadOnlySpan<ushort> bits)
     {

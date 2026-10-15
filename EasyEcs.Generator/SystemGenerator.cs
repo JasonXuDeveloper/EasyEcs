@@ -50,7 +50,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append("    protected override void GeneratedUpdate()\n    {\n        base.GeneratedUpdate();\n        var world = World;\n");
         foreach (var method in model.Methods)
         {
-            string filter = method.With.Length + method.Without.Length > 0 ? $", in __{method.Name}Filter" : "";
+            string filter = method.HasFilter ? $", in __{method.Name}Filter" : "";
             string system = method.IsStatic ? "" : "System = this, ";
             string singletons = string.Concat(method.Parameters.Select((p, i) => p.Kind == Symbols.ParamKind.Singleton
                 ? $", s{i} = world.SingletonRef<{p.Type}>()" : ""));
@@ -70,6 +70,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// </summary>
     private static void EmitAccess(StringBuilder sb, UpdateModel model)
     {
+        sb.Append($"    protected override global::System.Type GeneratedFor => typeof({model.Owner.Name});\n\n");
         sb.Append("    /// <summary>Declares what the [ForEach] methods read and write (parallel batching).</summary>\n");
         sb.Append("    protected override void GeneratedAccess(ref global::EasyEcs.SystemAccess access)\n    {\n");
         if (!model.Owner.BaseIsEcsSystem) sb.Append("        base.GeneratedAccess(ref access);\n");
@@ -134,8 +135,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
         sb.Append("    }\n\n");
 
-        if (method.With.Length + method.Without.Length == 0) return;
-        var chain = method.With.Select(t => $".With<{t}>()").Concat(method.Without.Select(t => $".Without<{t}>()"));
+        if (!method.HasFilter) return;
+        var chain = method.With.Select(t => $".With<{t}>()").Concat(method.Without.Select(t => $".Without<{t}>()"))
+            .Concat(method.WithAny.Select(t => $".WithAny<{t}>()"));
         sb.Append($"    private static readonly global::EasyEcs.QueryFilter __{method.Name}Filter = global::EasyEcs.QueryFilter.Create(){string.Concat(chain)};\n\n");
     }
 
@@ -180,8 +182,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// </param>
     private sealed record ForEachModel(OwnerModel Owner, string Name, bool IsStatic, bool Stable, int Order,
         EquatableArray<string> Query, EquatableArray<ParamModel> Parameters, EquatableArray<string> With,
-        EquatableArray<string> Without)
+        EquatableArray<string> Without, EquatableArray<string> WithAny)
     {
+        public bool HasFilter => With.Length + Without.Length + WithAny.Length > 0;
+
         /// <summary>The queried component types, as type arguments of World.ForEach / IForEach.</summary>
         public string ComponentTypes => string.Join(", ", Query);
 
@@ -203,12 +207,14 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     p.RefKind == RefKind.Ref ? "ref" : "in")).ToArray();
             var with = new List<string>();
             var without = new List<string>();
+            var withAny = new List<string>();
             foreach (var attribute in method.GetAttributes())
             {
                 if (attribute.AttributeClass is not { IsGenericType: true } cls) continue;
                 string name = cls.ConstructedFrom.ToDisplayString();
                 if (name == Symbols.WithAttribute) with.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
                 else if (name == Symbols.WithoutAttribute) without.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
+                else if (name == Symbols.WithAnyAttribute) withAny.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
             }
 
             var query = parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan)
@@ -224,7 +230,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, stable, syntax.SpanStart,
                 new EquatableArray<string>(query.ToArray()),
                 new EquatableArray<ParamModel>(parameters), new EquatableArray<string>(with.ToArray()),
-                new EquatableArray<string>(without.ToArray()));
+                new EquatableArray<string>(without.ToArray()), new EquatableArray<string>(withAny.ToArray()));
         }
     }
 

@@ -16,7 +16,7 @@ public sealed partial class World
             return ref Publish<T>().Value;
     }
 
-    /// <summary>Publish a fresh box for <typeparamref name="T"/>. Inside the structural lock.</summary>
+    /// <summary>Publish a fresh box for <typeparamref name="T"/>. Inside the structural gate.</summary>
     private SingletonBox<T> Publish<T>() where T : struct, ISingletonComponent
     {
         int index = SingletonType<T>.Index;

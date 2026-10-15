@@ -4,7 +4,7 @@ namespace EasyEcs;
 
 /// <summary>
 /// Runs a method of a <c>partial</c> <see cref="EcsSystem"/> for every entity matching its component parameters (and
-/// the <see cref="WithAttribute{T}"/> / <see cref="WithoutAttribute{T}"/> filters), each update, after
+/// the <see cref="WithAttribute{T}"/> / <see cref="WithoutAttribute{T}"/> / <see cref="WithAnyAttribute{T}"/> filters), each update, after
 /// <see cref="EcsSystem.OnUpdate"/>, in declaration order.
 /// <para>Parameters: 1..9 components (<c>ref</c> to write, <c>in</c> to read), and optionally <see cref="Entity"/> and
 /// <see cref="World"/>. Static and instance methods are supported.</para>
@@ -27,3 +27,10 @@ public sealed class WithAttribute<T> : Attribute where T : struct, IComponent;
 /// <summary>The <see cref="ForEachAttribute"/> method skips entities having component <typeparamref name="T"/>.</summary>
 [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
 public sealed class WithoutAttribute<T> : Attribute where T : struct, IComponent;
+
+/// <summary>
+/// The <see cref="ForEachAttribute"/> method requires at least one of the components named by its
+/// <c>[WithAny&lt;T&gt;]</c> attributes (not passed in): <c>[ForEach, WithAny&lt;Burning&gt;, WithAny&lt;Poisoned&gt;]</c>.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
+public sealed class WithAnyAttribute<T> : Attribute where T : struct, IComponent;

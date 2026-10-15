@@ -12,8 +12,8 @@ public interface ISingletonComponent;
 
 /// <summary>
 /// Marks a <c>ForEach</c> job that makes no structural change (no create/destroy/add/remove/set on any entity of the
-/// world it iterates). ForEach then walks archetypes without tombstones with no per-entity checks. The source generator
-/// adds it to <c>[ForEach]</c> methods that are static and take neither an <see cref="Entity"/> nor a
-/// <see cref="World"/>; implement it by hand only when the job honors the contract.
+/// world it iterates). ForEach then walks tables with no per-entity bookkeeping. The source generator adds it to
+/// <c>[ForEach]</c> methods that are static, take no <see cref="World"/> and use their <see cref="Entity"/> parameter
+/// (if any) only to read; implement it by hand only when the job honors the contract.
 /// </summary>
 public interface INoStructuralChanges;

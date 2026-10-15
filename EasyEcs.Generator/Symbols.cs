@@ -14,6 +14,7 @@ internal static class Symbols
     public const string ForEachAttribute = "EasyEcs.ForEachAttribute";
     public const string WithAttribute = "EasyEcs.WithAttribute<T>";
     public const string WithoutAttribute = "EasyEcs.WithoutAttribute<T>";
+    public const string WithAnyAttribute = "EasyEcs.WithAnyAttribute<T>";
     public const string EcsSystem = "EasyEcs.EcsSystem";
     public const string Component = "EasyEcs.IComponent";
     public const string Singleton = "EasyEcs.ISingletonComponent";

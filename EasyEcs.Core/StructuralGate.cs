@@ -6,7 +6,7 @@ using System.Threading;
 namespace EasyEcs;
 
 /// <summary>
-/// The world's structural lock: one compare-and-swap to enter, one release store to leave. It is not reentrant, and
+/// The world's structural gate: one compare-and-swap to enter, one release store to leave. It is not reentrant, and
 /// nothing taken under it calls back into user code (systems' OnCreate runs outside it), so it never needs to be; debug
 /// builds assert that. The flag sits alone on its own cache line, so threads spinning on it never share a line with the
 /// world's hot fields.

@@ -8,7 +8,7 @@ namespace EasyEcs;
 // Archetype registry, entity membership and the query cache.
 //
 // Thread-safety contract:
-// - All mutation (archetype creation, membership changes, cache updates) happens under the structural lock (Structural()).
+// - All mutation (archetype creation, membership changes, cache updates) happens under the structural gate (Structural()).
 // - Lock-free readers (queries) only see immutable Archetype[] snapshots: _allArchetypes and every query cache entry
 //   are replaced copy-on-write and published with Volatile.Write, never mutated in place.
 public sealed partial class World
@@ -16,7 +16,7 @@ public sealed partial class World
     // Lock for structural modifications (see StructuralGate: one CAS in, one store out).
     internal StructuralGate Gate;
 
-    /// <summary>Hold the structural lock until the returned scope is disposed.</summary>
+    /// <summary>Hold the structural gate until the returned scope is disposed.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal StructuralScope Structural() => new(ref Gate);
 
@@ -24,7 +24,7 @@ public sealed partial class World
     // knows when to refresh its cached array references and check whether its job moved the visited entity.
     internal int StorageVersion;
 
-    // Tag -> archetype (only touched under the lock).
+    // Tag -> archetype (only touched under the gate).
     private readonly Dictionary<Tag, Archetype> _archetypes = new();
 
     // Copy-on-write snapshot of all archetypes (archetype creation is rare, reads are frequent).
@@ -39,7 +39,7 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Put a new entity (no archetype yet) into <paramref name="target"/> and return its row. Inside the structural lock.
+    /// Put a new entity (no archetype yet) into <paramref name="target"/> and return its row. Inside the structural gate.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int Place(int id, Archetype target)
@@ -79,7 +79,7 @@ public sealed partial class World
 
     /// <summary>
     /// Get or create the archetype for <paramref name="componentMask"/>. A new archetype is appended (copy-on-write)
-    /// to every cached query it matches. Must be called inside the structural lock.
+    /// to every cached query it matches. Must be called inside the structural gate.
     /// </summary>
     private Archetype GetOrCreateArchetype(in Tag componentMask)
     {
@@ -111,7 +111,7 @@ public sealed partial class World
     /// Archetypes containing all <paramref name="bits"/> and matching <paramref name="filter"/>, with their per-row
     /// presence tests. Lock-free on cache hits; the result is an immutable snapshot.
     /// </summary>
-    [MethodImpl(MethodImplOptions.NoInlining)] // once per pass: keeps dictionary and lock code out of the iteration loops
+    [MethodImpl(MethodImplOptions.NoInlining)] // once per pass: keeps dictionary and gate code out of the iteration loops
     internal QueryMatch GetMatchingArchetypes(ReadOnlySpan<ushort> bits, in QueryFilter filter)
     {
         var key = QueryKey.ForLookup(bits, in filter);

@@ -16,11 +16,13 @@ public readonly struct QueryFilter
 {
     internal readonly Tag All;
     internal readonly Tag None;
+    internal readonly Tag Any;
 
-    private QueryFilter(in Tag all, in Tag none)
+    private QueryFilter(in Tag all, in Tag none, in Tag any)
     {
         All = all;
         None = none;
+        Any = any;
     }
 
     public static QueryFilter Create() => default;
@@ -30,7 +32,7 @@ public readonly struct QueryFilter
     {
         var all = All.Clone();
         all.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in all, in None);
+        return new QueryFilter(in all, in None, in Any);
     }
 
     /// <summary>Require <typeparamref name="T"/> to be absent.</summary>
@@ -38,37 +40,53 @@ public readonly struct QueryFilter
     {
         var none = None.Clone();
         none.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in All, in none);
+        return new QueryFilter(in All, in none, in Any);
+    }
+
+    /// <summary>
+    /// Require at least one of the components named by <c>WithAny</c> calls: <c>WithAny&lt;Burning&gt;().WithAny&lt;Poisoned&gt;()</c>
+    /// matches entities with Burning, Poisoned or both.
+    /// </summary>
+    public QueryFilter WithAny<T>() where T : struct, IComponent
+    {
+        var any = Any.Clone();
+        any.SetBit(ComponentType<T>.Bit);
+        return new QueryFilter(in All, in None, in any);
     }
 }
 
-/// <summary>Cache key of a query: required bits and excluded bits.</summary>
+/// <summary>Cache key of a query: required bits, excluded bits and the bits of which one is required.</summary>
 internal readonly struct QueryKey : IEquatable<QueryKey>
 {
     private readonly Tag _all;
     private readonly Tag _none;
+    private readonly Tag _any;
 
     // Detached keys only (not part of equality): the required and excluded bits as arrays, for the per-archetype
     // presence tests (a table with a column can still have rows without the component).
     private readonly ushort[] _required;
     private readonly ushort[] _excluded;
+    private readonly ushort[] _anyOf;
 
     // Lookup keys of queries on component bits >= 256 keep their overflow here instead of allocating it per query.
     [ThreadStatic] private static Vector256<long>[] _scratch;
 
-    private QueryKey(in Tag all, in Tag none)
+    private QueryKey(in Tag all, in Tag none, in Tag any)
     {
         _all = all;
         _none = none;
-        _required = _excluded = [];
+        _any = any;
+        _required = _excluded = _anyOf = [];
     }
 
-    private QueryKey(in Tag all, in Tag none, ushort[] required, ushort[] excluded)
+    private QueryKey(in Tag all, in Tag none, in Tag any, ushort[] required, ushort[] excluded, ushort[] anyOf)
     {
         _all = all;
         _none = none;
+        _any = any;
         _required = required;
         _excluded = excluded;
+        _anyOf = anyOf;
     }
 
     /// <summary>
@@ -86,7 +104,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
             {
                 var all = filter.All;
                 for (int i = 0; i < bits.Length; i++) all.SetBit(bits[i]);
-                return new QueryKey(in all, in filter.None);
+                return new QueryKey(in all, in filter.None, in filter.Any);
             }
         }
 
@@ -101,7 +119,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
         for (int i = 0; i < bits.Length; i++) maxBit = Math.Max(maxBit, bits[i]);
         var all = filter.All.CopyWithScratch(maxBit, ref _scratch);
         for (int i = 0; i < bits.Length; i++) all.SetBit(bits[i]);
-        return new QueryKey(in all, in filter.None);
+        return new QueryKey(in all, in filter.None, in filter.Any);
     }
 
     /// <summary>A copy that owns its storage (cache entries).</summary>
@@ -109,14 +127,17 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
     {
         var all = _all.Clone();
         var none = _none.Clone();
-        return new QueryKey(in all, in none, all.ToBitArray(), none.ToBitArray());
+        var any = _any.Clone();
+        return new QueryKey(in all, in none, in any, all.ToBitArray(), none.ToBitArray(), any.ToBitArray());
     }
 
     /// <summary>
     /// Whether archetypes with <paramref name="archetypeMask"/> can hold matching rows (detached keys only): they have
-    /// every required column. Excluded columns do not rule a table out, its rows may lack those components.
+    /// every required column and, with <c>WithAny</c>, at least one of those columns. Excluded columns do not rule a
+    /// table out, its rows may lack those components.
     /// </summary>
-    public bool Matches(in Tag archetypeMask) => archetypeMask.ContainsAll(in _all);
+    public bool Matches(in Tag archetypeMask) =>
+        archetypeMask.ContainsAll(in _all) && (_anyOf.Length == 0 || archetypeMask.Intersects(in _any));
 
     /// <summary>The presence tests of a matching <paramref name="archetype"/>: its required and excluded columns.</summary>
     public RowFilter FilterFor(Archetype archetype)
@@ -130,14 +151,22 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
             if (column >= 0) exclude.Add((short)column);
         }
 
-        return new RowFilter(require, exclude.ToArray());
+        var any = new System.Collections.Generic.List<short>();
+        foreach (ushort bit in _anyOf)
+        {
+            int column = archetype.ColumnIndex(bit);
+            if (column >= 0) any.Add((short)column);
+        }
+
+        return new RowFilter(require, exclude.ToArray(), any.ToArray());
     }
 
-    public bool Equals(QueryKey other) => _all.Equals(in other._all) && _none.Equals(in other._none);
+    public bool Equals(QueryKey other) =>
+        _all.Equals(in other._all) && _none.Equals(in other._none) && _any.Equals(in other._any);
 
     public override bool Equals(object obj) => obj is QueryKey other && Equals(other);
 
-    public override int GetHashCode() => _all.GetHashCode() * 31 + _none.GetHashCode();
+    public override int GetHashCode() => (_all.GetHashCode() * 31 + _none.GetHashCode()) * 31 + _any.GetHashCode();
 }
 
 /// <summary>
@@ -178,13 +207,15 @@ internal sealed class QueryMatch(Archetype[] archetypes, RowFilter[] filters)
 }
 
 /// <summary>
-/// Presence test of a query on one archetype: the presence bits of <see cref="Require"/> must be set and those of
-/// <see cref="Exclude"/> clear (column indices of the archetype; a column without presence bits is full).
+/// Presence test of a query on one archetype: the presence bits of <see cref="Require"/> must be set, those of
+/// <see cref="Exclude"/> clear, and at least one of <see cref="AnyOf"/> set when it is not empty (column indices of the
+/// archetype; a column without presence bits is full).
 /// </summary>
-internal sealed class RowFilter(short[] require, short[] exclude)
+internal sealed class RowFilter(short[] require, short[] exclude, short[] anyOf)
 {
     public readonly short[] Require = require;
     public readonly short[] Exclude = exclude;
+    public readonly short[] AnyOf = anyOf;
 
     /// <summary>No row of the table passes: every alive row has an excluded component.</summary>
     public const int None = -1;
@@ -215,6 +246,23 @@ internal sealed class RowFilter(short[] require, short[] exclude)
 
         var require = Require;
         for (int i = 0; i < require.Length; i++) test |= absent[require[i]] != 0;
+
+        var anyOf = AnyOf;
+        if (anyOf.Length != 0)
+        {
+            // Some column every row has: no test. No column any row has: no row passes. Else rows differ.
+            bool full = false, empty = true;
+            for (int i = 0; i < anyOf.Length; i++)
+            {
+                int lacking = absent[anyOf[i]];
+                full |= lacking == 0;
+                empty &= lacking == archetype.AliveCount;
+            }
+
+            if (empty) return None;
+            test |= !full;
+        }
+
         return test ? Test : All;
     }
 
@@ -240,6 +288,15 @@ internal sealed class RowFilter(short[] require, short[] exclude)
         var exclude = Exclude;
         for (int i = 0; i < exclude.Length; i++)
             bits &= archetype.Bits(exclude[i]) is { } present ? ~present[word] : 0;
+        var anyOf = AnyOf;
+        if (anyOf.Length != 0)
+        {
+            ulong any = 0;
+            for (int i = 0; i < anyOf.Length; i++)
+                any |= archetype.Bits(anyOf[i]) is { } present ? present[word] : ulong.MaxValue;
+            bits &= any;
+        }
+
         return bits;
     }
 

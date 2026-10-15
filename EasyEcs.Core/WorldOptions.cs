@@ -6,8 +6,8 @@ namespace EasyEcs;
 public sealed class WorldOptions
 {
     /// <summary>
-    /// Run the systems of one priority bucket in parallel (thread pool) when the bucket holds more than one system.
-    /// Such systems must touch disjoint data. Default false: one owner thread per world is the recommended model.
+    /// Run systems of one priority at the same time (thread pool) when their generated access does not conflict
+    /// (<see cref="SystemAccess"/>). Default false: one owner thread per world is the recommended model.
     /// </summary>
     public bool Parallel { get; init; }
 
@@ -16,4 +16,9 @@ public sealed class WorldOptions
 
     /// <summary>Pre-sized entity capacity (avoid growth reallocations at runtime).</summary>
     public int InitialEntityCapacity { get; init; } = 1024;
+
+    /// <summary>
+    /// Time every system run into <see cref="EcsSystem.Stats"/> (two timestamp reads per run). Default false.
+    /// </summary>
+    public bool MeasureSystems { get; init; }
 }

@@ -79,8 +79,31 @@ public partial class BatchMovement : EcsSystem
     }
 }
 
+/// <summary>Counts positioned entities that are frozen or dead (or both): [WithAny] filters.</summary>
+public partial class CountHalted : EcsSystem
+{
+    [ForEach, WithAny<Frozen>, WithAny<Dead>]
+    static void Count(in Position position, ref Score score) => score.Points++;
+}
+
 public class ForEachSystemTests
 {
+    [Test]
+    public void WithAnyVisitsEntitiesHavingAtLeastOneOfTheComponents()
+    {
+        using var world = new World();
+        world.CreateEntity(new Position());
+        world.CreateEntity(new Position(), new Frozen());
+        world.CreateEntity(new Position(), new Dead());
+        world.CreateEntity(new Position(), new Frozen(), new Dead());
+        world.CreateEntity(new Frozen());
+        world.AddSingleton<Score>();
+        world.AddSystem<CountHalted>();
+        world.Update();
+
+        Assert.That(world.GetSingleton<Score>().Points, Is.EqualTo(3));
+    }
+
     [Test]
     public void BatchMethodsReceiveEveryMatchingRowOnce()
     {
@@ -175,8 +198,8 @@ public class ForEachSystemTests
     [Test]
     public void EntityParametersCarryTheCurrentVersionOfRecycledIds()
     {
-        // Entity parameters are built from the archetype's id/version arrays: recycled ids, transitions and the
-        // update-time re-sort must keep the version in step, or the handle would be stale.
+        // Entity parameters are built from the archetype's id/version arrays: recycled ids, transitions and
+        // rows filled by the last row must keep the version in step, or the handle would be stale.
         using var world = new World();
         var old = new Entity[64];
         for (int i = 0; i < old.Length; i++) old[i] = world.CreateEntity(new Health(1), new Velocity());

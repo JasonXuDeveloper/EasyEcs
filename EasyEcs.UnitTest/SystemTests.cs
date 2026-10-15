@@ -21,6 +21,24 @@ public class SystemTests
     public void SetUp() => Log.Clear();
 
     [Test]
+    public void MeasureSystemsRecordsRunsOnlyWhenEnabled()
+    {
+        using var measured = new World(new WorldOptions { MeasureSystems = true });
+        var a = new Logged("a", interval: 2);
+        measured.AddSystem(a);
+        for (int i = 0; i < 4; i++) measured.Update();
+        Assert.That(a.Stats.Runs, Is.EqualTo(2));
+        Assert.That(a.Stats.Total, Is.GreaterThanOrEqualTo(a.Stats.Last));
+        Assert.That(a.Stats.Average, Is.GreaterThan(System.TimeSpan.Zero));
+
+        using var plain = new World();
+        var b = new Logged("b");
+        plain.AddSystem(b);
+        plain.Update();
+        Assert.That(b.Stats.Runs, Is.Zero);
+    }
+
+    [Test]
     public void LifecycleAndPriorityOrder()
     {
         var world = new World();

@@ -1,4 +1,5 @@
 using System;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -11,7 +12,7 @@ namespace EasyEcs;
 /// </summary>
 public sealed partial class World : IDisposable
 {
-    // Never shrinks (handles index it without bounds checks); grows by doubling under the structural lock.
+    // Never shrinks (handles index it without bounds checks); grows by doubling under the structural gate.
     internal EntityMeta[] Meta;
 
     // Next never-used id, and recycled ids (LIFO, so hot ids stay hot and arrays stay bounded by peak population).
@@ -69,18 +70,56 @@ public sealed partial class World : IDisposable
         {
             int id = entity.Id;
             ref var meta = ref MetaRef(id); // ids of this world's handles are always < Meta.Length
-            var archetype = meta.Archetype;
-            if (archetype == null || meta.Version != entity.Version) return;
-
-            meta.Version++; // invalidates every outstanding handle
-            meta.Archetype = null;
-            RemoveRow(archetype, meta.Slot);
-            StorageVersion++;
-
-            _entityCount--;
-            if (_freeIdCount == _freeIds.Length) Array.Resize(ref _freeIds, _freeIds.Length * 2);
-            _freeIds[_freeIdCount++] = id;
+            if (meta.Archetype == null || meta.Version != entity.Version) return;
+            Free(ref meta, id);
         }
+    }
+
+    /// <summary>Destroy alive entity <paramref name="id"/> (<paramref name="meta"/> is its record). Inside the structural gate.</summary>
+    private void Free(ref EntityMeta meta, int id)
+    {
+        var archetype = meta.Archetype;
+        meta.Version++; // invalidates every outstanding handle
+        meta.Archetype = null;
+        RemoveRow(archetype, meta.Slot);
+        StorageVersion++;
+
+        _entityCount--;
+        if (_freeIdCount == _freeIds.Length) Array.Resize(ref _freeIds, _freeIds.Length * 2);
+        _freeIds[_freeIdCount++] = id;
+    }
+
+    /// <summary>Destroy every alive row of <paramref name="match"/> that passes its filter; returns how many.</summary>
+    private int DestroyMatching(QueryMatch match)
+    {
+        int destroyed = 0;
+        using (Structural())
+        {
+            var archetypes = match.Archetypes;
+            for (int a = 0; a < archetypes.Length; a++)
+            {
+                var archetype = archetypes[a];
+                var rows = match.Filters[a];
+                if (archetype.AliveCount == 0 || rows.Mode(archetype) == RowFilter.None) continue;
+                // From the last row down: outside passes a removed row is filled by the last one, already visited.
+                for (int slot = archetype.Count - 1; slot >= 0; slot--)
+                {
+                    int id = archetype.EntityIds[slot];
+                    if (id < 0 || !rows.Passes(archetype, slot)) continue;
+                    Free(ref MetaRef(id), id);
+                    destroyed++;
+                }
+            }
+        }
+
+        return destroyed;
+    }
+
+    /// <summary>Make room for <paramref name="count"/> more entities (one growth). Inside the structural gate.</summary>
+    private void ReserveIds(int count)
+    {
+        int needed = _nextId + Math.Max(0, count - _freeIdCount);
+        if (needed > Meta.Length) Grow((int)BitOperations.RoundUpToPowerOf2((uint)needed));
     }
 
     /// <summary>Handle of the alive entity with <paramref name="id"/>. O(1).</summary>
@@ -106,16 +145,12 @@ public sealed partial class World : IDisposable
         return entity;
     }
 
-    /// <summary>Handle of an id known to be alive (query iteration). No checks.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal Entity EntityAt(int id) => new(this, id, MetaRef(id).Version);
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal ref EntityMeta MetaRef(int id) => ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Meta), id);
 
     /// <summary>
     /// The meta record of <paramref name="entity"/>, which must be alive (throws otherwise). Must be called inside the
-    /// structural lock; the ref stays valid for the rest of it (only entity creation reallocates <see cref="Meta"/>).
+    /// structural gate; the ref stays valid for the rest of it (only entity creation reallocates <see cref="Meta"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal ref EntityMeta Live(in Entity entity)
@@ -126,7 +161,7 @@ public sealed partial class World : IDisposable
         return ref meta;
     }
 
-    /// <summary>Take a recycled id or a new one (growing storage). Must be called inside the structural lock.</summary>
+    /// <summary>Take a recycled id or a new one (growing storage). Must be called inside the structural gate.</summary>
     private int AllocateId()
     {
         _entityCount++;

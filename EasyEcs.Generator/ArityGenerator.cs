@@ -49,7 +49,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
             entity.Append($$"""
                     /// <summary>
-                    /// Add or overwrite {{what}} with the given value{{(n == 1 ? "" : "s")}} in one archetype transition. Returns the entity
+                    /// Add or overwrite {{what}} with the given value{{(n == 1 ? "" : "s")}}, with at most one row copy. Returns the entity
                     /// for chaining. O({{n}}) amortized. Thread-safe.
                     /// </summary>
                     [MethodImpl(MethodImplOptions.NoInlining)] // keeps the loops that call it lean
@@ -106,6 +106,32 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             int slot = Place(id, target);
                 {{Lines(n, i => $"            Unsafe.Add(ref target.Base<T{i}>(b{i}), slot) = c{i};")}}
                             return new Entity(this, id, Meta[id].Version);
+                        }
+                    }
+
+                    /// <summary>
+                    /// Create <c>entities.Length</c> entities with {{what}} (the same value{{(n == 1 ? "" : "s")}} for each), placed directly in
+                    /// their final archetype, and write their handles to <paramref name="entities"/>. One pass through the
+                    /// structural gate and at most one table growth: O(count × {{n}}). Thread-safe.
+                    /// </summary>
+                    public void CreateEntities<{{tps}}>(Span<Entity> entities, {{values}})
+                {{cons}}
+                    {
+                        using (Structural())
+                        {
+                {{Lines(n, i => $"            ushort b{i} = ComponentType<T{i}>.Bit;")}}
+                            var target = ({{(n == 1 ? "_emptyArchetype.GetAddEdge(b1) ?? CreateEdge(_emptyArchetype, b1)"
+                                : $"_emptyArchetype.GetAddSetEdge({signature}) ?? CreateSetEdge(_emptyArchetype, [{List(n, i => $"b{i}")}], {signature})")}}).Target;
+                            ReserveIds(entities.Length);
+                            target.Reserve(target.Count + entities.Length); // no growth below: the column refs stay valid
+                {{Lines(n, i => $"            ref T{i} r{i} = ref target.Base<T{i}>(b{i});")}}
+                            for (int e = 0; e < entities.Length; e++)
+                            {
+                                int id = AllocateId();
+                                int slot = Place(id, target);
+                {{Lines(n, i => $"                Unsafe.Add(ref r{i}, slot) = c{i};")}}
+                                entities[e] = new Entity(this, id, MetaRef(id).Version);
+                            }
                         }
                     }
 
@@ -269,6 +295,14 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     public bool Any<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}
                         => Match<{{tps}}>(in filter, {{List(n, i => "out _")}}).AnyAlive();
+
+                    /// <summary>
+                    /// Destroy every alive entity having all of <c>{{tps}}</c> (and matching <paramref name="filter"/>) and return
+                    /// how many. One pass through the structural gate: O(matching archetypes + rows). Thread-safe.
+                    /// </summary>
+                    public int DestroyEntities<{{tps}}>(in QueryFilter filter = default)
+                {{cons}}
+                        => DestroyMatching(Match<{{tps}}>(in filter, {{List(n, i => "out _")}}));
 
 
                 """);
