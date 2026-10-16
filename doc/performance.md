@@ -12,7 +12,7 @@
 | Need | Use | Notes |
 |---|---|---|
 | Per-entity logic of a system | `[ForEach]` method | Generated struct job; same speed as a hand-written `ForEach` (the micro rows below differ because they run on different worlds). `[With<T>]` / `[Without<T>]` filters. |
-| Heavy per-entity work over tens of thousands of entities | `[ForEach(Parallel = true)]` | Chunks of rows on several threads (2.4x on 4 cores in `ParallelForEachBenchmark`); no structural changes, singletons only `in`. |
+| Heavy per-entity work over tens of thousands of entities | `[ForEach(Parallel = true)]` | Chunks of rows on several threads (2.1x on 4 cores in `ParallelForEachBenchmark`); no structural changes, singletons only `in`. |
 | Per-row arithmetic over many entities | a batch `[ForEach]` method (span parameters) or `world.ForEachBatch` | Runs of consecutive rows as spans: write SIMD with `Vector<T>` / `MemoryMarshal.Cast`. No structural changes. |
 | Ad-hoc iteration over 1–9 components | `world.ForEach<…, TJob>(ref job, filter)` | Struct job, specialized and inlined by the JIT. Keep `Execute` small and branch-light. `ForEachEntity` passes the `Entity`. |
 | Ad-hoc loop needing the `Entity` | `foreach (var item in world.Query<…>(filter))` | Zero allocation; `item.Entity`, `item.Component1..n` are refs. (`[ForEach]` methods can take an `Entity` parameter too.) |
@@ -35,7 +35,7 @@
 - Write arithmetic over many rows as a batch method (`Span<T>` / `ReadOnlySpan<T>` parameters) and vectorize it:
   a table whose rows all match is one call, and unmanaged columns start on a 64-byte boundary.
 - Spawn and clear waves with `world.CreateEntities(span, a, b)` / `world.DestroyEntities<T>(filter)`: one pass
-  through the structural gate for the batch (2.5x faster than one call per entity in `ChurnBatch`).
+  through the structural gate for the batch (2.4x faster than one call per entity in `ChurnBatch`).
 - Pre-size with `WorldOptions.InitialEntityCapacity` to avoid growing the entity records at run time.
 - Use tag components (empty structs) for states (`Dead`, `Stunned`, `Burning`) and filter on them: removing a tag and
   adding it back flips a presence bit, the entity keeps its row.
@@ -121,34 +121,35 @@ warmups, 8 iterations of 250 ms, call counting from the start) on .NET 10, on a 
 
 | Benchmark | Entities | v4.0.1 | v4.1 | Allocated |
 |---|---:|---:|---:|---:|
-| WorldSimulationBenchmark.Tick | 10,000 | 322 μs | 188 μs | 0 B |
-| WorldSimulationBenchmark.Tick | 100,000 | 4.33 ms | 1.95 ms | 0 B |
-| MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.85 ms | 0.98 ms | 0 B |
-| BattleServerBenchmark.Tick (every feature) | 100,000 | – | 2.53 ms | 0 B |
-| ParallelSystemsBenchmark.Tick, `Parallel` off / on | 100,000 | – | 415 / 298 μs | 0 B |
-| ParallelForEachBenchmark.Tick, `[ForEach]` / `[ForEach(Parallel = true)]` | 100,000 | – | 1,803 / 821 μs | 0 B |
-| ChangeTrackingBenchmark.Tick, 10 rows written: every row / `[Changed<Health>]` | 100,000 | – | 39.1 μs / 0.73 μs | 0 B |
-| ChangeTrackingBenchmark.QueryTick, 10 rows written: every row / `Changed<Health>()` | 100,000 | – | 481 μs / 0.96 μs | 0 B |
-| ChangeTrackingBenchmark.Tick, 1,000 rows written: every row / `[Changed<Health>]` | 100,000 | – | 64.0 μs / 35.4 μs | 0 B |
-| ChangeTrackingBenchmark.QueryTick, 1,000 rows written: every row / `Changed<Health>()` | 100,000 | – | 539 μs / 53.9 μs | 0 B |
-| IndexBenchmark.TradeAndCount (100 trades, 100 inventory counts) | 100,000 | – | 11.4 μs | 0 B |
-| SnapshotBenchmark.Capture (a new snapshot) / Restore | 100,000 | – | 849 / 445 μs | 2.7 MB / 0 B |
+| WorldSimulationBenchmark.Tick | 10,000 | 322 μs | 184 μs | 0 B |
+| WorldSimulationBenchmark.Tick | 100,000 | 4.33 ms | 2.01 ms | 0 B |
+| MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.85 ms | 1.08 ms | 0 B |
+| BattleServerBenchmark.Tick (every feature) | 100,000 | – | 2.36 ms | 0 B |
+| ParallelSystemsBenchmark.Tick, `Parallel` off / on | 100,000 | – | 394 / 243 μs | 0 B |
+| ParallelForEachBenchmark.Tick, `[ForEach]` / `[ForEach(Parallel = true)]` | 100,000 | – | 1,601 / 765 μs | 0 B |
+| ChangeTrackingBenchmark.Tick, 10 rows written: every row / `[Changed<Health>]` | 100,000 | – | 40-110 μs / 0.55 μs | 0 B |
+| ChangeTrackingBenchmark.QueryTick, 10 rows written: every row / `Changed<Health>()` | 100,000 | – | 470 μs / 0.79 μs | 0 B |
+| ChangeTrackingBenchmark.Tick, 1,000 rows written: every row / `[Changed<Health>]` | 100,000 | – | 60-110 μs / 36.1 μs | 0 B |
+| ChangeTrackingBenchmark.QueryTick, 1,000 rows written: every row / `Changed<Health>()` | 100,000 | – | 503 μs / 50.9 μs | 0 B |
+| IndexBenchmark.TradeAndCount (100 trades, 100 inventory counts) | 100,000 | – | 11.5 μs | 0 B |
+| SnapshotBenchmark.Capture (a new snapshot) / Restore | 100,000 | – | 724 / 426 μs | 2.8 MB / 0 B |
+| BufferBenchmark.Tick (1,000 of 100,000 bags written, then sent): `Buffer<int>` / `List<int>` in a tracked component | 100,000 | – | 55.1 / 61.5 μs | 0 B |
 
 **Against other ECS libraries** (`EcsComparisonBenchmark`, the headline world ported to each library; ratio against
 EasyEcs):
 
 | Library | 10,000 entities | 100,000 entities | Allocated per tick (100k) |
 |---|---:|---:|---:|
-| EasyEcs 4.1 | 175 μs (1.00) | 1.90 ms (1.00) | 0 B |
-| Friflo.Engine.ECS | 162 μs (0.93) | 1.91 ms (1.00) | 0 B |
-| DefaultEcs | 293 μs (1.67) | 5.71 ms (3.00) | 61 KB |
-| Arch | 471 μs (2.69) | 5.55 ms (2.92) | 538 KB |
+| EasyEcs 4.1 | 194 μs (1.00) | 2.00 ms (1.00) | 0 B |
+| Friflo.Engine.ECS | 159 μs (0.82) | 1.79 ms (0.89) | 0 B |
+| DefaultEcs | 289 μs (1.49) | 5.31 ms (2.66) | 62 KB |
+| Arch | 474 μs (2.45) | 5.45 ms (2.73) | 550 KB |
 
-Friflo is 7% faster at 10,000 entities; at 100,000 the two tie. The per-operation breakdown (`OperationBenchmark`,
-100,000 entities) shows where: EasyEcs is ahead on one-component iteration (40 vs 71 μs), SIMD batches (70 vs 85 μs),
-filtered iteration (12.1 vs 14.8 μs) and toggling a status component (481 vs 1,015 μs); Friflo is ahead on iteration
-that passes the entity (36 vs 77 μs) and three-component iteration (70 vs 76 μs); two-component iteration (258 vs
-251 μs), singletons and create/destroy (218 vs 214 μs) are even.
+Friflo is about 10% faster at both sizes (5-18% across runs on this VM; the table is one run). The per-operation
+breakdown (`OperationBenchmark`, 100,000 entities) shows where: EasyEcs is ahead on one-component iteration (38 vs
+67 μs), SIMD batches (71 vs 81 μs), filtered iteration (11.5 vs 17.0 μs) and toggling a status component (509 vs
+986 μs); Friflo is ahead on iteration that passes the entity (38 vs 54 μs), three-component iteration (68 vs 77 μs)
+and create/destroy (203 vs 226 μs); two-component iteration (245 vs 249 μs) and singletons (215 vs 224 μs) are even.
 Unlike Friflo, EasyEcs applies structural changes immediately, also inside a pass, with no command buffer. Change
 tracking and index results against each library are in [the comparison](comparison.md).
 
@@ -157,20 +158,22 @@ the operation has no v3.1.1 equivalent (struct jobs, `[ForEach]` systems and han
 
 | Benchmark | v3.1.1 | v4.0.1 | v4.1 | Allocated (v4.1) |
 |---|---:|---:|---:|---:|
-| CreateAddDestroy (fresh world) | 5,358 μs | 1,795 μs | 1,217 μs | 1.52 MB (new world, its growth and the benchmark's handle array) |
-| Churn: 10 rounds of create (2 components) and destroy in one warm world | 5,247 μs / 3.19 MB | 1,023 μs | 406 μs | 0 B |
-| ChurnBatch: the same rounds with `CreateEntities` / `DestroyEntities` | – | – | 175 μs | 0 B |
-| ToggleComponent: remove + add | 1,185 μs | 338 μs | 190 μs | 0 B |
-| QueryIterate (`Query<P,V>` + reduction) | 40.6 μs | 35.3 μs | 29.5 μs | 0 B |
-| ForEachIterate (`ForEach` struct job + reduction) | – | 30.6 μs | 29.8 μs | 0 B |
-| QueryWrite (`Query`, pure write) | – | 28.3 μs | 16.6 μs | 0 B |
-| ForEachSystemWrite (`[ForEach]` system adding `Velocity` to `Position`) | – | 15.1 μs | 8.8 μs | 0 B |
-| ForEachWrite (`ForEach` struct job) | – | 24.3 μs | 10.2 μs | 0 B |
-| RawArrayWrite (two plain arrays, the floor) | – | 11.0 μs | 11.2 μs | 0 B |
-| QueryIterate3 (half the entities match) | 16.2 μs | 9.1 μs | 7.8 μs | 0 B |
-| HandleAccess (`Entity.Get`, ×1000) | – | 3.56 μs | 4.12 μs | 0 B |
-| SingletonAccess (×1000) | 1.42 μs | 0.90 μs | 0.84 μs | 0 B |
-| CountAndAny (`Count` + `Any` with a filter, ×1000) | – | – | 460 μs | 0 B |
+| CreateAddDestroy (fresh world) | 5,358 μs | 1,795 μs | 1,156 μs | 1.52 MB (new world, its growth and the benchmark's handle array) |
+| Churn: 10 rounds of create (2 components) and destroy in one warm world | 5,247 μs / 3.19 MB | 1,023 μs | 381 μs | 0 B |
+| ChurnBatch: the same rounds with `CreateEntities` / `DestroyEntities` | – | – | 162 μs | 0 B |
+| ToggleComponent: remove + add | 1,185 μs | 338 μs | 194 μs | 0 B |
+| QueryIterate (`Query<P,V>` + reduction) | 40.6 μs | 35.3 μs | 28.7 μs | 0 B |
+| ForEachIterate (`ForEach` struct job + reduction) | – | 30.6 μs | 12.8 μs | 0 B |
+| QueryWrite (`Query`, pure write) | – | 28.3 μs | 18.3 μs | 0 B |
+| ForEachSystemWrite (`[ForEach]` system adding `Velocity` to `Position`) | – | 15.1 μs | 8.2 μs | 0 B |
+| ForEachWrite (`ForEach` struct job) | – | 24.3 μs | 9.7 μs | 0 B |
+| RawArrayWrite (two plain arrays, the floor) | – | 11.0 μs | 10.8 μs | 0 B |
+| QueryIterate3 (half the entities match) | 16.2 μs | 9.1 μs | 9.4 μs | 0 B |
+| HandleAccess (`Entity.Get`, ×1000) | – | 3.56 μs | 3.23 μs | 0 B |
+| TryGetEntity (`Entity.TryGet`, ×1000) | – | – | 3.45 μs | 0 B |
+| TrackedHandleWrite (`Entity.Get` of a tracked component, ×1000) | – | – | 8.66 μs | 0 B |
+| SingletonAccess (×1000) | 1.42 μs | 0.90 μs | 0.97 μs | 0 B |
+| CountAndAny (`Count` + `Any` with a filter, ×1000) | – | – | 49.9 μs | 0 B |
 
 `ForEachSystemWrite` runs on a world with a single archetype (`Position`, `Velocity`); its columns are 64-byte
 aligned, so the generated job beats two plain (unaligned) arrays. The other iteration rows (`QueryIterate`,
@@ -178,9 +181,8 @@ aligned, so the generated job beats two plain (unaligned) arrays. The other iter
 `Health`, so the entities are split over two tables. Compare `[ForEach]` and `ForEach` within one world, not across
 these rows.
 
-One row is slower in 4.1 than in 4.0.1, the price of tables. `HandleAccess` reads a component through a handle: the
-entity's record now leads to its table and row (one more dependent load than a column indexed by id), and
-swap-removes leave table order unrelated to id order, so random handles touch more cache lines.
+The "every row" rows of `ChangeTrackingBenchmark.Tick` are given as ranges: the same code measures anywhere in them
+from run to run on this VM (how the 100,000 rows land in physical memory), while the `[Changed]` rows are stable.
 
 ## Measuring
 

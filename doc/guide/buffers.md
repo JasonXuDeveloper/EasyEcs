@@ -14,7 +14,7 @@ tracked change: `[Changed<Buffer<T>>]` visits only the entities whose list chang
 |---|---|
 | **Use it for** | Lists that belong to one entity and are replicated or saved when they change: inventories, paths, recent events, pending orders. |
 | **Avoid** | Items with their own state that are queried on their own (one entity per item with a [relation](indexes-and-relations.md#relations)); small fixed sets (an `[InlineArray]` in an unmanaged component). |
-| **Cost** | One object and one array per entity, made by its first write; adding within the capacity allocates nothing; a write stamps the row once, like any tracked component. Measured in `BufferBenchmark`. |
+| **Cost** | One object and one array per entity, made by its first write; adding within the capacity allocates nothing; a write stamps the row once, like any tracked component. 1,000 of 100,000 bags written and sent: 55.1 μs, against 61.5 μs for a `List<T>` in a tracked component (`BufferBenchmark`). |
 
 ## Example
 

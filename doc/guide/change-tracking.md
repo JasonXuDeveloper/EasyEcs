@@ -86,7 +86,7 @@ system's last run, ad-hoc queries the mark the caller took. Tick 0 selects every
 
 A tracked component carries a hidden column of 8-byte ticks in every table that has it, and each write stores one
 tick and updates the summary of its 64-row word (a run of rows stores them with one vectorized fill; through a handle,
-keeping the summary of 1,000 scattered writes takes about 6 μs). Each table also keeps the latest tick of the column and of
+keeping the summary of 1,000 scattered writes takes about 5 μs). Each table also keeps the latest tick of the column and of
 each block of 4,096 rows, and per 64-row word the rows written at its latest tick, so a `Changed` pass skips a table
 nobody wrote with one load, then unwritten blocks and words (4 per SIMD compare), and takes the written rows of a word
 from its summary; only a word whose rows were written at different ticks since the mark, or row by row by a query
