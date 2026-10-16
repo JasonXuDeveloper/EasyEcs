@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Threading;
 namespace EasyEcs;
@@ -76,6 +77,7 @@ public sealed partial class World
         return box != null;
     }
 
+    /// <summary>Whether singleton <typeparamref name="T"/> exists. O(1).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool HasSingleton<T>() where T : struct, ISingletonComponent => Box<T>() != null;
 
@@ -100,7 +102,7 @@ public sealed partial class World
 
     private void ClearSingletons() => _singletons = [];
 
-    [MethodImpl(MethodImplOptions.NoInlining)]
+    [DoesNotReturn] // no NoInlining: the JIT sees it never returns (Entity.ThrowStale)
     private static void ThrowSingletonMissing(Type type) =>
         throw new InvalidOperationException($"Singleton {type.Name} was not added to this world");
 }

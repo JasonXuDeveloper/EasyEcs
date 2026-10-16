@@ -219,7 +219,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                 /// <summary>
                 /// Like <see cref="IForEach{{{TypeParams(n)}}}"/> but receives the <see cref="Entity"/> handle, built from the
-                /// archetype's id and version arrays without a per-entity lookup. <c>[ForEach]</c> methods taking an
+                /// archetype's entity rows (id and version side by side) without a per-entity lookup. <c>[ForEach]</c> methods taking an
                 /// <see cref="Entity"/> compile to this.
                 /// </summary>
                 public interface IForEachEntity<{{TypeParams(n)}}>
@@ -250,8 +250,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         return GetMatchingArchetypes([{{bits}}], in filter);
                     }
 
-                {{ForEach(n, "ForEach", "IForEach", "id", "TJob.ReadsId ? ids : 0", "the entity id")}}
-                {{ForEach(n, "ForEachEntity", "IForEachEntity", "new Entity(this, id, Unsafe.Add(ref versions, i))", "new Entity(this, ids, versions)", "the entity handle")}}
+                {{ForEach(n, "ForEach", "IForEach", "id", "TJob.ReadsId ? ids.Id : 0", "the entity id")}}
+                {{ForEach(n, "ForEachEntity", "IForEachEntity", "new Entity(this, id, idp.Version)", "new Entity(this, ids.Id, ids.Version)", "the entity handle")}}
                     /// <summary>
                     /// Run <paramref name="job"/> over every entity having all of <c>{{tps}}</c> (and matching
                     /// <paramref name="filter"/>), one run of consecutive rows at a time: a dense archetype is a single
@@ -347,19 +347,29 @@ public sealed class ArityGenerator : IIncrementalGenerator
     private static string StampRows(int n, string indent, string start, string count) =>
         Lines(n, i => $"{indent}    if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.StampRows<T{i}>({start}, {count}, _changeTick);");
 
+    /// <summary>
+    /// Drop the per-row advance of the entity rows when the job reads them only under <c>TJob.ReadsId</c> (the step
+    /// becomes a JIT-time 0): a ref a loop advances but never reads still takes a register, and the refs the job uses
+    /// then spill to the stack. A flavor that hands out entity handles always reads the rows.
+    /// </summary>
+    private static string Lean(string rowArg, string code) => rowArg.Contains("Version")
+        ? code
+        : System.Text.RegularExpressions.Regex.Replace(code, @"\b(ids|idk|idr) = ref Unsafe\.Add\(ref (ids|idk|idr), 1\)", "$1 = ref Unsafe.Add(ref $1, TJob.ReadsId ? 1 : 0)");
+
     private static string ForEach(int n, string name, string job, string entityArg, string rowArg, string receives)
     {
         string tps = TypeParams(n);
         string execute = $"job.Execute({entityArg}, {List(n, i => $"ref r{i}")});";
-        // The row argument inside a run of rows of a word (idk and vk walk the run).
-        string rowArgRun = System.Text.RegularExpressions.Regex.Replace(rowArg, @"\b(ids|versions)\b", m => m.Value == "ids" ? "idk" : "vk");
+        // The row argument inside a run of rows of a word (idk walks the run).
+        string rowArgRun = System.Text.RegularExpressions.Regex.Replace(rowArg, @"\bids\b", "idk");
+        string rowArgDense = System.Text.RegularExpressions.Regex.Replace(rowArg, @"\bids\b", "idr");
         // Row loops move one ref per column by one element per row (strength-reduced by hand): with an int index the
         // JIT sign-extends and rebuilds every address, which nearly doubles the cost of a tight loop.
         string advance = List(n, i => $"r{i} = ref Unsafe.Add(ref r{i}, 1)");
         string startAt = Lines(n, i => $"                ref T{i} r{i} = ref Unsafe.Add(ref archetype.Base<T{i}>(b{i}), start);");
         string bits = List(n, i => $"b{i}");
         string ushorts = List(n, i => $"ushort b{i}");
-        return $$"""
+        return Lean(rowArg, $$"""
                 /// <summary>
                 /// Run <paramref name="job"/> with {{receives}} for every entity having all of <c>{{tps}}</c> (and matching
                 /// <paramref name="filter"/>). The fastest iteration: walks each matching archetype's columns front to back,
@@ -405,9 +415,9 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     // Row counts at the start of the pass: rows appended during the pass are not visited.
                     var filters = match.Filters;
                     ulong since = filter.Since;
-                    // Rented, not stackalloc'd: a localloc would keep this method out of tiered compilation (no OSR, no
-                    // PGO), and with it the inlining of the job into the loop.
-                    int[] counts = ArrayPool<int>.Shared.Rent(Math.Max(1, archetypes.Length));
+                    // The world's array for this nesting depth, not stackalloc'd: a localloc would keep this method out
+                    // of tiered compilation (no OSR, no PGO), and with it the inlining of the job into the loop.
+                    int[] counts = PassCounts(archetypes.Length);
                     for (int ai = 0; ai < archetypes.Length; ai++) counts[ai] = archetypes[ai].Count;
                     BeginPass();
                     for (int ai = 0; ai < archetypes.Length; ai++)
@@ -426,40 +436,43 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 ? {{name}}Live<{{tps}}, TJob>(ref job, archetype, at, count, {{bits}})
                                 : {{name}}LiveTested<{{tps}}, TJob>(ref job, archetype, rows, at, count, {{bits}});
                             if (stop < 0) break; // the rows ran out without a structural change
-                            at = (int)stop;
+                            at = count - (int)stop;
                             int moved = (int)(stop >> 32);
-                            if (archetype.EntityIds[at - 1] < 0) CarryOver(archetype, at - 1, moved, TJob.Writes, [{{bits}}]);
+                            if (archetype.Slots[at - 1].Id < 0) CarryOver(archetype, at - 1, moved, TJob.Writes, [{{bits}}]);
                             mode = rows.Mode(archetype); // the change may have made rows fail (or pass)
                         }
                     }
 
-                    ArrayPool<int>.Shared.Return(counts);
                     EndPass();
                 }
 
                 /// <summary>
                 /// Rows [<paramref name="start"/>, <paramref name="count"/>) of a pass that may make structural changes,
                 /// while every row passes the query. Returns -1 when the rows ran out, or, after a structural change, the
-                /// next row (low 32 bits) and the visited entity (high 32 bits): the caller refreshes and carries over.
-                /// One return value, not an out parameter, keeps a register free for the loop.
+                /// rows left after the visited one (low 32 bits; the caller knows <paramref name="count"/>) and the visited
+                /// entity (high 32 bits): the caller refreshes and carries over. One return value, not an out parameter,
+                /// and no row index or count live across the job keep registers free for the loop.
                 /// </summary>
+                [MethodImpl(MethodImplOptions.NoInlining)] // per table or run: kept out of the caller, which profile-guided
+                // inlining would otherwise grow until the loop's refs spill to the stack
                 private long {{name}}Live<{{tps}}, TJob>(ref TJob job, Archetype archetype, int start, int count, {{ushorts}})
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>
                 {
+                    // The loop walks refs and counts down: no row index stays live across the job (the row is count - left,
+                    // computed only to stamp a tracked write), so the job's own values keep more registers.
                     int seen = StorageVersion;
-                    ref int ids = ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds);
-                    ref int versions = ref MemoryMarshal.GetArrayDataReference(archetype.Versions);
+                    ref EntitySlot idp = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Slots), start);
             {{startAt}}
-                    for (int i = start; i < count; i++, {{advance}})
+                    for (int left = count - start; left > 0; left--, idp = ref Unsafe.Add(ref idp, 1), {{advance}})
                     {
-                        int id = Unsafe.Add(ref ids, i);
+                        int id = idp.Id;
                         if (id < 0) continue; // tombstone
 
-            {{StampRow(n, "            ", "i")}}
+            {{StampRow(n, "            ", "count - left")}}
                         {{execute}}
 
-                        if (seen != StorageVersion) return (long)id << 32 | (uint)(i + 1);
+                        if (seen != StorageVersion) return (long)id << 32 | (uint)(left - 1);
                     }
 
                     return -1;
@@ -471,13 +484,16 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 /// failing rows are skipped by the run (a word of failing rows costs one load). Returns like
                 /// <c>{{name}}Live</c>.
                 /// </summary>
+                [MethodImpl(MethodImplOptions.NoInlining)] // per table or run: kept out of the caller, which profile-guided
+                // inlining would otherwise grow until the loop's refs spill to the stack
                 private long {{name}}LiveTested<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, int start, int count, {{ushorts}})
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>
                 {
+                    // Refs walk the rows as in the lean loop; i, the run's end, is fixed during the run (the row is
+                    // i - run), so no index changes across the job.
                     int seen = StorageVersion;
-                    ref int ids = ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds);
-                    ref int versions = ref MemoryMarshal.GetArrayDataReference(archetype.Versions);
+                    ref EntitySlot idp = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Slots), start);
             {{startAt}}
                     for (int i = start; i < count;)
                     {
@@ -487,20 +503,22 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         int first = pass == 0 ? end : Math.Min((w << 6) + BitOperations.TrailingZeroCount(pass), end);
                         int skip = first - i;
                         i = first;
+                        idp = ref Unsafe.Add(ref idp, skip);
             {{Lines(n, i => $"                    r{i} = ref Unsafe.Add(ref r{i}, skip);")}}
                         if (i == end) continue;
 
                         // The run of passing rows from i (the shift fills zeros, so ~ stops it at the word's end).
                         int run = Math.Min(BitOperations.TrailingZeroCount(~(pass >> i)), end - i);
-                        for (; run > 0; run--, i++, {{advance}})
+                        i += run;
+                        for (; run > 0; run--, idp = ref Unsafe.Add(ref idp, 1), {{advance}})
                         {
-                            int id = Unsafe.Add(ref ids, i);
+                            int id = idp.Id;
                             if (id < 0) continue; // tombstone
 
-            {{StampRow(n, "                ", "i")}}
+            {{StampRow(n, "                ", "i - run")}}
                             {{execute}}
 
-                            if (seen != StorageVersion) return (long)id << 32 | (uint)(i + 1);
+                            if (seen != StorageVersion) return (long)id << 32 | (uint)(count - (i - run + 1));
                         }
                     }
 
@@ -508,15 +526,16 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 }
 
                 /// <summary>Rows [<paramref name="start"/>, <paramref name="end"/>) of a stable pass: every row is alive.</summary>
+                [MethodImpl(MethodImplOptions.NoInlining)] // per table or run: kept out of the caller, which profile-guided
+                // inlining would otherwise grow until the loop's refs spill to the stack
                 private void {{name}}Rows<{{tps}}, TJob>(ref TJob job, Archetype archetype, int start, int end, {{ushorts}})
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>
                 {
-                    ref int ids = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds), start);
-                    ref int versions = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Versions), start);
+                    ref EntitySlot ids = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Slots), start);
             {{startAt}}
             {{StampRows(n, "        ", "start", "end - start")}}
-                    for (int left = end - start; left > 0; left--, ids = ref Unsafe.Add(ref ids, 1), versions = ref Unsafe.Add(ref versions, 1), {{advance}})
+                    for (int left = end - start; left > 0; left--, ids = ref Unsafe.Add(ref ids, 1), {{advance}})
                         job.Execute({{rowArg}}, {{List(n, i => $"ref r{i}")}});
                 }
 
@@ -525,13 +544,14 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 /// queried component (<paramref name="start"/> is a multiple of 64): the refs walk every row like a dense
                 /// table, 64 presence bits per load decide which rows run (a word with none skips 64 rows).
                 /// </summary>
+                [MethodImpl(MethodImplOptions.NoInlining)] // per table or run: kept out of the caller, which profile-guided
+                // inlining would otherwise grow until the loop's refs spill to the stack
                 private void {{name}}Filtered<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, int start, int count, {{ushorts}})
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>
                 {
                     bool tombstones = archetype.Count != archetype.AliveCount;
-                    ref int ids = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds), start);
-                    ref int versions = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Versions), start);
+                    ref EntitySlot ids = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Slots), start);
             {{startAt}}
                     int words = (count + 63) >> 6;
                     for (int w = start >> 6; w < words; w++)
@@ -544,7 +564,6 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             w = next;
                             if (w >= words) break;
                             ids = ref Unsafe.Add(ref ids, skip);
-                            versions = ref Unsafe.Add(ref versions, skip);
             {{Lines(n, i => $"                    r{i} = ref Unsafe.Add(ref r{i}, skip);")}}
                         }
 
@@ -555,6 +574,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             // Runs of passing rows (a few failing rows split a word into long runs; a sparse word costs
                             // one step per run), each walked like a dense table.
                             bits &= RowFilter.RowMask(w, count);
+                            if (tombstones) bits &= AliveRows(ref ids, left); // rare: the run loops then test nothing
             {{Lines(n, i => $"                    if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.StampWord<T{i}>(w, bits, _changeTick);")}}
                             while (bits != 0)
                             {
@@ -562,25 +582,22 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 // The shift fills zeros, so ~ stops the run at the word's end at the latest.
                                 int end = k + BitOperations.TrailingZeroCount(~(bits >> k));
                                 bits = end >= 64 ? 0 : bits & (ulong.MaxValue << end);
-                                ref int idk = ref Unsafe.Add(ref ids, k);
-                                ref int vk = ref Unsafe.Add(ref versions, k);
+                                ref EntitySlot idk = ref Unsafe.Add(ref ids, k);
             {{Lines(n, i => $"                    ref T{i} q{i} = ref Unsafe.Add(ref r{i}, k);")}}
-                                for (int run = end - k; run > 0; run--, idk = ref Unsafe.Add(ref idk, 1), vk = ref Unsafe.Add(ref vk, 1), {{List(n, i => $"q{i} = ref Unsafe.Add(ref q{i}, 1)")}})
-                                {
-                                    if (tombstones && idk < 0) continue;
+                                for (int run = end - k; run > 0; run--, idk = ref Unsafe.Add(ref idk, 1), {{List(n, i => $"q{i} = ref Unsafe.Add(ref q{i}, 1)")}})
                                     job.Execute({{rowArgRun}}, {{List(n, i => $"ref q{i}")}});
-                                }
                             }
 
                             ids = ref Unsafe.Add(ref ids, left);
-                            versions = ref Unsafe.Add(ref versions, left);
             {{Lines(n, i => $"                    r{i} = ref Unsafe.Add(ref r{i}, left);")}}
                             continue;
                         }
 
             {{StampRows(n, "            ", "w << 6", "left")}}
-                        for (; left > 0; left--, ids = ref Unsafe.Add(ref ids, 1), versions = ref Unsafe.Add(ref versions, 1), {{advance}})
-                            job.Execute({{rowArg}}, {{List(n, i => $"ref r{i}")}});
+                        ref EntitySlot idr = ref ids;
+                        for (int row = left; row > 0; row--, idr = ref Unsafe.Add(ref idr, 1), {{advance}})
+                            job.Execute({{rowArgDense}}, {{List(n, i => $"ref r{i}")}});
+                        ids = ref Unsafe.Add(ref ids, left);
                     }
 
                 }
@@ -679,7 +696,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
                 }
 
-            """;
+            """);
     }
 
     private static string QueryItems()
@@ -745,7 +762,6 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     private readonly World _world;
                     private ArchetypeCursor _cursor;
                 {{Lines(n, i => $"    private readonly ushort _b{i};")}}
-                    private ref int _versions;
                 {{Lines(n, i => $"    private ref T{i} _r{i};")}}
                     private int _word; // the word of the current table whose change-tick summaries were noted at _tick
                     private ulong _tick;
@@ -764,7 +780,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         get
                         {
                             int slot = _cursor.Slot;
-                            return new(_world, _cursor.Id, ref Unsafe.Add(ref _versions, slot), {{List(n, i => $"ref Unsafe.Add(ref _r{i}, slot)")}});
+                            return new(_world, _cursor.Id, ref _cursor.Version, {{List(n, i => $"ref Unsafe.Add(ref _r{i}, slot)")}});
                         }
                     }
 
@@ -809,7 +825,6 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     {
                         var archetype = _cursor.Current;
                         _word = -1;
-                        _versions = ref MemoryMarshal.GetArrayDataReference(archetype.Versions);
                 {{Lines(n, i => $"        _r{i} = ref archetype.Base<T{i}>(_b{i});")}}
                     }
 

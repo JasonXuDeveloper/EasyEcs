@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -39,7 +40,7 @@ public readonly partial struct Entity : IEquatable<Entity>
 
     /// <summary>Whether the entity has component <typeparamref name="T"/>. O(1).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Has<T>() where T : struct, IComponent => !Unsafe.IsNullRef(ref Find<T>());
+    public bool Has<T>() where T : struct, IComponent => !Unsafe.IsNullRef(ref Locate(ComponentType<T>.Bit, out _));
 
     /// <summary>
     /// Ref to component <typeparamref name="T"/>; throws if the entity does not have it. Counts as a write of a tracked
@@ -71,21 +72,38 @@ public readonly partial struct Entity : IEquatable<Entity>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ref T Find<T>() where T : struct, IComponent
     {
+        ref var lookup = ref Locate(ComponentType<T>.Bit, out int slot);
+        if (Unsafe.IsNullRef(ref lookup)) return ref Unsafe.NullRef<T>();
+        return ref Unsafe.Add(ref Archetype.Row0<T>(lookup.Column), slot);
+    }
+
+    /// <summary>
+    /// The column entry of <paramref name="bit"/> and the entity's <paramref name="slot"/>, or a null ref when the row
+    /// lacks the component (shared by <see cref="Has{T}"/>, which needs no row address, and <see cref="Find{T}"/>).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ref Archetype.Lookup Locate(uint bit, out int slot)
+    {
         ref var meta = ref _world.MetaRef(Id);
         var archetype = meta.Archetype;
         if (meta.Version != Version || archetype == null) ThrowStale();
         var map = archetype.ByBit;
-        uint bit = ComponentType<T>.Bit;
-        if (bit >= (uint)map.Length) return ref Unsafe.NullRef<T>();
+        slot = meta.Slot;
+        if (bit >= (uint)map.Length) return ref Unsafe.NullRef<Archetype.Lookup>();
         // bit < map.Length: no bounds check. Column and presence bits share the entry's cache line.
         ref var lookup = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(map), bit);
-        int slot = meta.Slot;
-        if (lookup.Column == null || (lookup.Bits is { } bits && (bits[slot >> 6] & (1UL << slot)) == 0))
-            return ref Unsafe.NullRef<T>();
-        return ref Unsafe.Add(ref Archetype.Row0<T>(lookup.Column), slot);
+        if (lookup.Column == null) return ref Unsafe.NullRef<Archetype.Lookup>();
+        // Presence bits cover the table's capacity and the slot is below it: no bounds check.
+        if (lookup.Bits is { } bits && (Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(bits), (uint)slot >> 6) & (1UL << slot)) == 0)
+            return ref Unsafe.NullRef<Archetype.Lookup>();
+        return ref lookup;
     }
 
-    /// <summary>Add component <typeparamref name="T"/> (reset to default if present) and return a ref to it. O(1) amortized.</summary>
+    /// <summary>
+    /// Add component <typeparamref name="T"/> (reset to default if present) and return a ref to it. O(1) when the
+    /// entity's table has a column for it (the row only gets its presence bit back), else O(c) amortized: the row moves
+    /// to the table with the column (c components copied).
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T Add<T>() where T : struct, IComponent => ref AddCore<T>(_world, Id, Version);
 
@@ -106,7 +124,7 @@ public readonly partial struct Entity : IEquatable<Entity>
         }
     }
 
-    /// <summary>Ref to component <typeparamref name="T"/>, adding it (default) first if missing. O(1) amortized.</summary>
+    /// <summary>Ref to component <typeparamref name="T"/>, adding it (default) first if missing. O(1), or as <see cref="Add{T}"/> when missing.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T GetOrAdd<T>() where T : struct, IComponent
     {
@@ -129,10 +147,12 @@ public readonly partial struct Entity : IEquatable<Entity>
     /// <summary>Destroy the entity; a destroyed handle is ignored. O(components).</summary>
     public void Destroy() => _world?.DestroyEntity(this);
 
-    [MethodImpl(MethodImplOptions.NoInlining)]
+    // Throw-only helpers without NoInlining: the JIT then sees they never return, keeps the throw out of the
+    // caller's register allocation and never inlines them anyway.
+    [DoesNotReturn]
     internal static void ThrowStale() => throw new InvalidOperationException("Entity has been destroyed");
 
-    [MethodImpl(MethodImplOptions.NoInlining)]
+    [DoesNotReturn]
     private static void ThrowMissing(Type type) => throw new InvalidOperationException($"Entity has no {type.Name} component");
 
     public bool Equals(Entity other) => Id == other.Id && Version == other.Version && ReferenceEquals(_world, other._world);

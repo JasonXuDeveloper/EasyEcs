@@ -149,6 +149,52 @@ public class ComponentTests
         for (int i = 0; i < 100; i++) _ = _world.Count<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
+
+    [Test]
+    public void ComponentsOfEverySizeKeepEveryByteWhenRowsMove()
+    {
+        MovedRowsKeepEveryByte<Bytes1>(1);
+        MovedRowsKeepEveryByte<Bytes2>(2);
+        MovedRowsKeepEveryByte<Bytes3>(3);
+        MovedRowsKeepEveryByte<Bytes5>(5);
+        MovedRowsKeepEveryByte<Bytes7>(7);
+        MovedRowsKeepEveryByte<Bytes9>(9);
+        MovedRowsKeepEveryByte<Bytes13>(13);
+        MovedRowsKeepEveryByte<Bytes16>(16);
+        MovedRowsKeepEveryByte<Bytes17>(17);
+        MovedRowsKeepEveryByte<Bytes31>(31);
+        MovedRowsKeepEveryByte<Bytes33>(33);
+        MovedRowsKeepEveryByte<Bytes100>(100);
+    }
+
+    // Rows move between tables (add / remove another component) and within one (a destroyed row is filled by the last).
+    private void MovedRowsKeepEveryByte<T>(int size) where T : unmanaged, IComponent
+    {
+        var entities = new Entity[8];
+        for (int i = 0; i < entities.Length; i++)
+        {
+            entities[i] = _world.CreateEntity();
+            Fill(ref entities[i].Add<T>(), size, i);
+        }
+
+        foreach (var e in entities) e.Add<Health>();
+        entities[0].Destroy();
+        foreach (var e in entities[1..]) e.Remove<Health>();
+        entities[1].Destroy();
+        for (int i = 2; i < entities.Length; i++)
+        {
+            var bytes = System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in entities[i].Get<T>()));
+            for (int b = 0; b < size; b++) Assert.That(bytes[b], Is.EqualTo((byte)(i * 31 + b + 1)), $"size {size}, byte {b}");
+        }
+
+        foreach (var e in entities[2..]) e.Destroy();
+    }
+
+    private static void Fill<T>(ref T value, int size, int seed) where T : unmanaged
+    {
+        var bytes = System.Runtime.InteropServices.MemoryMarshal.AsBytes(new Span<T>(ref value));
+        for (int b = 0; b < size; b++) bytes[b] = (byte)(seed * 31 + b + 1);
+    }
 }
 
 /// <summary>300 component types built from three decimal digits (Bit&lt;D0,D0,D0&gt; .. Bit&lt;D2,D9,D9&gt;).</summary>
@@ -176,4 +222,19 @@ internal static class Wide
         e.Add<Bit<TA, TB, D4>>(); e.Add<Bit<TA, TB, D5>>(); e.Add<Bit<TA, TB, D6>>(); e.Add<Bit<TA, TB, D7>>();
         e.Add<Bit<TA, TB, D8>>(); e.Add<Bit<TA, TB, D9>>();
     }
+
 }
+
+// Components of odd and block-crossing sizes (the byte copy of moved rows handles each size class).
+[System.Runtime.CompilerServices.InlineArray(1)] public struct Bytes1 : IComponent { private byte _first; }
+[System.Runtime.CompilerServices.InlineArray(2)] public struct Bytes2 : IComponent { private byte _first; }
+[System.Runtime.CompilerServices.InlineArray(3)] public struct Bytes3 : IComponent { private byte _first; }
+[System.Runtime.CompilerServices.InlineArray(5)] public struct Bytes5 : IComponent { private byte _first; }
+[System.Runtime.CompilerServices.InlineArray(7)] public struct Bytes7 : IComponent { private byte _first; }
+[System.Runtime.CompilerServices.InlineArray(9)] public struct Bytes9 : IComponent { private byte _first; }
+[System.Runtime.CompilerServices.InlineArray(13)] public struct Bytes13 : IComponent { private byte _first; }
+[System.Runtime.CompilerServices.InlineArray(16)] public struct Bytes16 : IComponent { private byte _first; }
+[System.Runtime.CompilerServices.InlineArray(17)] public struct Bytes17 : IComponent { private byte _first; }
+[System.Runtime.CompilerServices.InlineArray(31)] public struct Bytes31 : IComponent { private byte _first; }
+[System.Runtime.CompilerServices.InlineArray(33)] public struct Bytes33 : IComponent { private byte _first; }
+[System.Runtime.CompilerServices.InlineArray(100)] public struct Bytes100 : IComponent { private byte _first; }

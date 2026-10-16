@@ -209,14 +209,14 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex
             // CatchUp opens no pass of its own: it only reads keys, so no row moves while the written rows are walked
             // (inside a caller's pass, rows that lost their entity are tombstones, skipped below).
             int count = archetype.Count, words = (count + 63) >> 6;
-            var ids = archetype.EntityIds;
-            var versions = archetype.Versions;
+            var slots = archetype.Slots;
             ref T first = ref archetype.Base<T>(ComponentType<T>.Bit);
             for (int w = rows.NextWord(archetype, 0, words); w < words; w = rows.NextWord(archetype, w + 1, words))
                 for (ulong bits = rows.Word(archetype, w) & RowFilter.RowMask(w, count); bits != 0; bits &= bits - 1)
                 {
                     int slot = (w << 6) + BitOperations.TrailingZeroCount(bits);
-                    if (ids[slot] >= 0) Put(ids[slot], versions[slot], Unsafe.Add(ref first, slot).Key); // tombstones are skipped
+                    var entity = slots[slot];
+                    if (entity.Id >= 0) Put(entity.Id, entity.Version, Unsafe.Add(ref first, slot).Key); // tombstones are skipped
                 }
         }
     }
@@ -278,10 +278,13 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex
             Current = default;
         }
 
+        /// <summary>The current matching entity.</summary>
         public Entity Current { get; private set; }
 
+        /// <summary>The enumerator itself (<c>foreach</c> support, no allocation).</summary>
         public readonly Matches GetEnumerator() => this;
 
+        /// <summary>Move to the next entity with the key. O(1) per entity.</summary>
         public bool MoveNext()
         {
             // An entity destroyed during the loop (a cascade) leaves the list; the loop moves on past it.

@@ -20,6 +20,19 @@ namespace EasyEcs;
 /// (<see cref="Present"/>), so a state that comes and goes (stunned, burning, dead) never moves rows. Only adding a
 /// component the table has no column for moves the entity.
 /// </summary>
+/// <summary>
+/// The entity of one row: its id (negative for a tombstone) and version, side by side so a handle is one 8-byte load
+/// and one stream of rows. Version comes first: read as a little-endian <c>long</c>, a row's sign is its id's sign, so
+/// tombstone scans run as vectorized range searches over <c>long</c>s (<see cref="Archetype.Rows64"/>). A tombstone keeps
+/// its version (a pass checks it to tell whether the visited entity still lives).
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct EntitySlot
+{
+    public int Version;
+    public int Id;
+}
+
 internal sealed class Archetype
 {
     public readonly Tag ComponentMask;
@@ -27,7 +40,7 @@ internal sealed class Archetype
     /// <summary>Component bits of this archetype, ascending.</summary>
     public readonly ushort[] Components;
 
-    /// <summary>Component columns, parallel to <see cref="Components"/>; each has <see cref="EntityIds"/>.Length rows.</summary>
+    /// <summary>Component columns, parallel to <see cref="Components"/>; each has <see cref="Slots"/>.Length rows.</summary>
     public readonly Array[] Columns;
 
     /// <summary>Column descriptions, parallel to <see cref="Components"/>.</summary>
@@ -89,8 +102,7 @@ internal sealed class Archetype
     /// <summary>Columns with <see cref="Present"/> bits (indices into <see cref="Columns"/>), copy-on-write.</summary>
     private short[] _bitColumns = [];
 
-    public int[] EntityIds;
-    public int[] Versions; // parallel to EntityIds: version of the entity in each slot (handles without a meta lookup)
+    public EntitySlot[] Slots; // the entity of each row (id and version: handles without a meta lookup)
     public int Count; // rows in use, tombstones included
     public int AliveCount; // living entities only
 
@@ -111,8 +123,7 @@ internal sealed class Archetype
     {
         ComponentMask = componentMask;
         Components = componentMask.ToBitArray();
-        EntityIds = new int[initialCapacity];
-        Versions = new int[initialCapacity];
+        Slots = new EntitySlot[initialCapacity];
 
         Columns = new Array[Components.Length];
         Present = new ulong[Components.Length][];
@@ -157,6 +168,18 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ulong[] Bits(int column) => Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Present), column);
 
+    /// <summary>
+    /// The presence word of row <paramref name="slot"/> in <paramref name="bits"/> (a column's presence bits). No bounds
+    /// check: presence bits cover the table's capacity (allocated for Slots.Length rows, resized with it in Grow),
+    /// and a slot is a row of the table.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ref ulong Word(ulong[] bits, int slot) => ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(bits), slot >> 6);
+
+    /// <summary>Alive rows of column <paramref name="column"/> (a valid index: Absent has one entry per column) without it.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ref int AbsentOf(int column) => ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Absent), column);
+
     /// <summary>Whether any column has rows without its component.</summary>
     public bool HasAbsent
     {
@@ -166,7 +189,7 @@ internal sealed class Archetype
 
     /// <summary>Whether row <paramref name="slot"/> has the component of column <paramref name="column"/>.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Has(int column, int slot) => Bits(column) is not { } bits || (bits[slot >> 6] & (1UL << slot)) != 0; // shift is mod 64
+    public bool Has(int column, int slot) => Bits(column) is not { } bits || (Word(bits, slot) & (1UL << slot)) != 0; // shift is mod 64
 
     /// <summary>
     /// Give row <paramref name="slot"/> the component of column <paramref name="column"/> back (its column exists).
@@ -176,11 +199,11 @@ internal sealed class Archetype
     public bool Restore(int column, int slot)
     {
         if (Bits(column) is not { } bits) return false;
-        ref ulong word = ref bits[slot >> 6];
+        ref ulong word = ref Word(bits, slot);
         ulong bit = 1UL << slot;
         if ((word & bit) != 0) return false;
         word |= bit;
-        Absent[column]--;
+        AbsentOf(column)--;
         return true;
     }
 
@@ -191,13 +214,13 @@ internal sealed class Archetype
     /// </summary>
     public bool Take(int column, int slot)
     {
-        var bits = Bits(column) ?? AllocateBits(column);
-        ref ulong word = ref bits[slot >> 6];
+        ref ulong word = ref Word(Bits(column) ?? AllocateBits(column), slot);
         ulong bit = 1UL << slot;
         if ((word & bit) == 0) return false;
         word &= ~bit;
-        Absent[column]++;
-        if (_infos[column].Managed) _infos[column].Clear(Columns[column], slot, 1);
+        AbsentOf(column)++;
+        var info = Info(column);
+        if (info.Managed) info.Clear(Columns[column], slot, 1);
         return true;
     }
 
@@ -205,14 +228,14 @@ internal sealed class Archetype
     private void ForgetAbsent(int slot)
     {
         foreach (short c in _bitColumns)
-            if ((Present[c][slot >> 6] & (1UL << slot)) == 0)
-                Absent[c]--;
+            if ((Word(Bits(c), slot) & (1UL << slot)) == 0)
+                AbsentOf(c)--;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private ulong[] AllocateBits(int column)
     {
-        var bits = new ulong[(EntityIds.Length + 63) >> 6];
+        var bits = new ulong[(Slots.Length + 63) >> 6];
         bits.AsSpan().Fill(ulong.MaxValue);
         var columns = new short[_bitColumns.Length + 1];
         _bitColumns.CopyTo(columns, 0);
@@ -237,7 +260,7 @@ internal sealed class Archetype
     /// <summary>Set every presence bit of row <paramref name="slot"/> (a new row has all its components).</summary>
     private void SetBits(int slot)
     {
-        foreach (short c in _bitColumns) Present[c][slot >> 6] |= 1UL << slot;
+        foreach (short c in _bitColumns) Word(Bits(c), slot) |= 1UL << slot;
     }
 
     /// <summary>Index of the column of component <paramref name="bit"/>, or -1 when the archetype does not have it.</summary>
@@ -245,7 +268,8 @@ internal sealed class Archetype
     public int ColumnIndex(int bit)
     {
         var map = _columnOf;
-        return (uint)bit < (uint)map.Length ? map[bit] : -1;
+        // bit < map.Length: no bounds check.
+        return (uint)bit < (uint)map.Length ? Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(map), bit) : -1;
     }
 
     /// <summary>Bytes per cache line: unmanaged columns start their rows on one (<see cref="Aligned"/>).</summary>
@@ -283,7 +307,7 @@ internal sealed class Archetype
 
     /// <summary>
     /// Ref to component <paramref name="bit"/> (which the archetype must have) in <paramref name="slot"/>; slots are
-    /// below the column length (columns have as many rows as <see cref="EntityIds"/>).
+    /// below the column length (columns have as many rows as <see cref="Slots"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T Ref<T>(int bit, int slot) where T : struct, IComponent => ref Unsafe.Add(ref Base<T>(bit), slot);
@@ -305,8 +329,12 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void StampVisited<T>(int slot, ulong tick) where T : struct, IComponent
     {
-        NoteVisited<T>(slot, tick);
-        StampTick<T>(slot, tick);
+        if (default(T) is ITrackChanges)
+        {
+            int column = ColumnIndex(ComponentType<ChangeTicks<T>>.Bit);
+            NoteVisited(column, slot, tick);
+            Unsafe.Add(ref Data<ChangeTicks<T>>(column), slot).Tick = tick;
+        }
     }
 
     /// <summary>
@@ -316,16 +344,27 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void NoteVisited<T>(int slot, ulong tick) where T : struct, IComponent
     {
-        if (default(T) is ITrackChanges)
-        {
-            int column = ColumnIndex(ComponentType<ChangeTicks<T>>.Bit);
-            // WordRest == WordWrite: WordRows is not read until a later tick notes the word again (NoteWord).
-            WordWrite[column][slot >> 6] = tick;
-            WordRest[column][slot >> 6] = tick;
-            BlockWrite[column][slot >> 12] = tick;
-            LastWrite[column] = tick;
-        }
+        if (default(T) is ITrackChanges) NoteVisited(ColumnIndex(ComponentType<ChangeTicks<T>>.Bit), slot, tick);
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void NoteVisited(int column, int slot, ulong tick)
+    {
+        // WordRest == WordWrite: WordRows is not read until a later tick notes the word again (NoteWord).
+        Summary(WordWrite, column, slot >> 6) = tick;
+        Summary(WordRest, column, slot >> 6) = tick;
+        Summary(BlockWrite, column, slot >> 12) = tick;
+        Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(LastWrite), column) = tick;
+    }
+
+    /// <summary>
+    /// Entry <paramref name="index"/> of the summaries of change-tick column <paramref name="column"/>, without bounds
+    /// checks. Invariant: the column comes from <see cref="ColumnIndex"/> of a change-tick bit the table has (so its
+    /// summaries exist), and the index is of a row below the capacity (summaries grow with the rows, <c>Grow</c>).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ref ulong Summary(ulong[][] summaries, int column, int index) =>
+        ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(summaries), column)), index);
 
     /// <summary>The row's change tick alone; its word must have been noted at <paramref name="tick"/> (<see cref="NoteVisited{T}"/>).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -345,7 +384,7 @@ internal sealed class Archetype
         int column = ColumnIndex(ComponentType<ChangeTicks<T>>.Bit);
         // Summaries only grow (LastWrite >= BlockWrite >= WordWrite) and no row holds a later tick than the world's:
         // a word already at this tick has its block and column at it too, so only its rows change.
-        if (WordWrite[column][slot >> 6] == tick) WordRows[column][slot >> 6] |= rows;
+        if (Summary(WordWrite, column, slot >> 6) == tick) Summary(WordRows, column, slot >> 6) |= rows;
         else NoteWord(column, slot, rows, tick);
         return ref Unsafe.Add(ref Data<ChangeTicks<T>>(column), slot);
     }
@@ -358,18 +397,18 @@ internal sealed class Archetype
     private void NoteWord(int column, int slot, ulong rows, ulong tick)
     {
         int word = slot >> 6;
-        ref ulong latest = ref WordWrite[column][word];
-        ref ulong written = ref WordRows[column][word];
+        ref ulong latest = ref Summary(WordWrite, column, word);
+        ref ulong written = ref Summary(WordRows, column, word);
         if (latest == tick) written |= rows;
         else
         {
-            WordRest[column][word] = latest; // every row of the word held at most the previous latest tick
+            Summary(WordRest, column, word) = latest; // every row of the word held at most the previous latest tick
             latest = tick;
             written = rows;
         }
 
-        BlockWrite[column][slot >> 12] = tick;
-        LastWrite[column] = tick;
+        Summary(BlockWrite, column, slot >> 12) = tick;
+        Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(LastWrite), column) = tick;
     }
 
     /// <summary>
@@ -471,11 +510,12 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int Add(int entityId, int version)
     {
-        if (Count >= EntityIds.Length) Grow(EntityIds.Length * 2);
+        if (Count >= Slots.Length) Grow(Slots.Length * 2);
         int slot = Count++;
-        // slot < EntityIds.Length == Versions.Length (grown above): no bounds checks.
-        Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(EntityIds), slot) = entityId;
-        Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Versions), slot) = version;
+        // slot < Slots.Length (grown above): no bounds check.
+        ref var row = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Slots), slot);
+        row.Id = entityId;
+        row.Version = version;
         AliveCount++;
         if (_bitColumns.Length != 0) SetBits(slot); // a transition then clears what the entity lacks
         return slot;
@@ -484,13 +524,13 @@ internal sealed class Archetype
     /// <summary>
     /// Next run of alive rows at or after <paramref name="start"/> among the first <paramref name="count"/> rows:
     /// returns false when there is none, else sets <paramref name="start"/> and <paramref name="length"/>. Both scans
-    /// are vectorized (<c>IndexOfAnyExcept</c> / <c>IndexOf</c> on the id array).
+    /// are vectorized (range searches for negative rows in <see cref="Rows64"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool NextRun(ref int start, int count, out int length)
     {
-        var ids = new ReadOnlySpan<int>(EntityIds, 0, count);
-        int skip = ids.Slice(start).IndexOfAnyExcept(Tombstone);
+        var rows = Rows64(count);
+        int skip = rows.Slice(start).IndexOfAnyExceptInRange(long.MinValue, -1);
         if (skip < 0)
         {
             length = 0;
@@ -498,23 +538,29 @@ internal sealed class Archetype
         }
 
         start += skip;
-        length = ids.Slice(start).IndexOf(Tombstone);
+        length = rows.Slice(start).IndexOfAnyInRange(long.MinValue, -1);
         if (length < 0) length = count - start;
         return true;
     }
 
+    /// <summary>
+    /// The first <paramref name="count"/> rows (at most the capacity) as <c>long</c>s: negative exactly for the
+    /// tombstones (the id is the high half, see <see cref="EntitySlot"/>).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Span<long> Rows64(int count) => MemoryMarshal.Cast<EntitySlot, long>(Slots.AsSpan(0, count));
+
     /// <summary>Make room for <paramref name="rows"/> rows in one growth (bulk creation).</summary>
     public void Reserve(int rows)
     {
-        if (rows > EntityIds.Length) Grow((int)BitOperations.RoundUpToPowerOf2((uint)rows));
+        if (rows > Slots.Length) Grow((int)BitOperations.RoundUpToPowerOf2((uint)rows));
     }
 
     /// <summary>Grow the id arrays and every column to <paramref name="capacity"/> rows (cold path).</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void Grow(int capacity)
     {
-        Array.Resize(ref EntityIds, capacity);
-        Array.Resize(ref Versions, capacity);
+        Array.Resize(ref Slots, capacity);
         for (int i = 0; i < Columns.Length; i++)
             ByBit[Components[i]].Column = Columns[i] = _infos[i].Grow(Columns[i], capacity);
         foreach (short c in _bitColumns)
@@ -542,11 +588,11 @@ internal sealed class Archetype
     {
         AliveCount--;
         if (_bitColumns.Length != 0) ForgetAbsent(slot);
-        // slot < Count <= EntityIds.Length: no bounds checks.
-        ref int ids = ref MemoryMarshal.GetArrayDataReference(EntityIds);
+        // slot < Count <= Slots.Length: no bounds checks.
+        ref var rows = ref MemoryMarshal.GetArrayDataReference(Slots);
         if (inPass || Count != AliveCount + 1)
         {
-            Unsafe.Add(ref ids, slot) = Tombstone;
+            Unsafe.Add(ref rows, slot).Id = Tombstone; // the version stays: a pass compares it
             if (Dirty) return false;
             Dirty = true;
             return true;
@@ -554,7 +600,7 @@ internal sealed class Archetype
 
         int last = --Count;
         if (slot != last) MoveRow(last, slot, meta);
-        Unsafe.Add(ref ids, last) = Tombstone;
+        Unsafe.Add(ref rows, last).Id = Tombstone;
         if (_hasManaged) ReleaseRows(last, 1);
         return false;
     }
@@ -568,13 +614,11 @@ internal sealed class Archetype
             CopyElement(infos[c], columns[c], from, columns[c], to);
         if (_bitColumns.Length != 0) CopyBits(from, to);
         if (_tracked) RaiseWords(this, from, this, to);
-        // Rows below Count are within the id arrays, and ids of rows are valid meta indices.
-        ref int ids = ref MemoryMarshal.GetArrayDataReference(EntityIds);
-        ref int versions = ref MemoryMarshal.GetArrayDataReference(Versions);
-        int id = Unsafe.Add(ref ids, from);
-        Unsafe.Add(ref ids, to) = id;
-        Unsafe.Add(ref versions, to) = Unsafe.Add(ref versions, from);
-        Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(meta), id).Slot = to;
+        // Rows below Count are within Slots, and ids of rows are valid meta indices.
+        ref var rows = ref MemoryMarshal.GetArrayDataReference(Slots);
+        var entity = Unsafe.Add(ref rows, from);
+        Unsafe.Add(ref rows, to) = entity;
+        Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(meta), entity.Id).Slot = to;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -585,12 +629,11 @@ internal sealed class Archetype
                 _infos[i].Clear(Columns[i], start, count);
     }
 
-    /// <summary>The rows of a table at one moment (<see cref="Capture"/>): ids, versions, columns, presence bits.</summary>
-    internal sealed class Rows(int count, int[] ids, int[] versions, Array[] columns, ulong[][] present, int[] absent)
+    /// <summary>The rows of a table at one moment (<see cref="Capture"/>): entities, columns, presence bits.</summary>
+    internal sealed class Rows(int count, EntitySlot[] slots, Array[] columns, ulong[][] present, int[] absent)
     {
         public readonly int Count = count;
-        public readonly int[] Ids = ids;
-        public readonly int[] Versions = versions;
+        public readonly EntitySlot[] Slots = slots;
         public readonly Array[] Columns = columns;
         public readonly ulong[][] Present = present;
         public readonly int[] Absent = absent;
@@ -620,7 +663,7 @@ internal sealed class Archetype
             if (Present[c] is { } bits) present[c] = bits.AsSpan(0, (count + 63) >> 6).ToArray();
         }
 
-        return new Rows(count, EntityIds.AsSpan(0, count).ToArray(), Versions.AsSpan(0, count).ToArray(), columns, present,
+        return new Rows(count, Slots.AsSpan(0, count).ToArray(), columns, present,
             (int[])Absent.Clone());
     }
 
@@ -635,8 +678,7 @@ internal sealed class Archetype
         Reserve(count);
         if (rows != null)
         {
-            rows.Ids.CopyTo(EntityIds, 0);
-            rows.Versions.CopyTo(Versions, 0);
+            rows.Slots.CopyTo(Slots, 0);
             for (int c = 0; c < Columns.Length; c++)
             {
                 if (_infos[c].Size < 0) Array.Copy(rows.Columns[c], Columns[c], count);
@@ -646,7 +688,7 @@ internal sealed class Archetype
             }
         }
 
-        EntityIds.AsSpan(count, Count > count ? Count - count : 0).Fill(Tombstone);
+        foreach (ref var row in Slots.AsSpan(count, Count > count ? Count - count : 0)) row.Id = Tombstone;
         for (int c = 0; c < Columns.Length; c++)
         {
             // A column that gained presence bits after the capture keeps them, every row present.
@@ -667,21 +709,21 @@ internal sealed class Archetype
     public void FillHoles(EntityMeta[] meta)
     {
         // Holes below AliveCount are exactly as many as alive rows at or above it: move those down, found with
-        // vectorized scans (IndexOf / LastIndexOfAnyExcept on the id array) instead of a test per row.
-        var ids = EntityIds.AsSpan(0, Count);
+        // vectorized scans (range searches for negative rows in Rows64) instead of a test per row.
+        var rows = Rows64(Count);
         int alive = AliveCount;
-        int end = ids.Length; // alive rows still to move live in [alive, end)
+        int end = rows.Length; // alive rows still to move live in [alive, end)
         for (int hole = 0; ; hole++)
         {
-            int found = ids.Slice(hole, alive - hole).IndexOf(Tombstone);
+            int found = rows.Slice(hole, alive - hole).IndexOfAnyInRange(long.MinValue, -1);
             if (found < 0) break;
             hole += found;
-            end = alive + ids.Slice(alive, end - alive).LastIndexOfAnyExcept(Tombstone);
+            end = alive + rows.Slice(alive, end - alive).LastIndexOfAnyExceptInRange(long.MinValue, -1);
             MoveRow(end, hole, meta);
-            ids[end] = Tombstone;
+            Slots[end].Id = Tombstone;
         }
 
-        if (_hasManaged && ids.Length > alive) ReleaseRows(alive, ids.Length - alive);
+        if (_hasManaged && rows.Length > alive) ReleaseRows(alive, rows.Length - alive);
         Count = alive;
         Dirty = false;
     }
@@ -700,32 +742,47 @@ internal sealed class Archetype
             return;
         }
 
-        ref byte from = ref Unsafe.Add(ref Aligned(source), (nint)sourceSlot * size);
-        ref byte to = ref Unsafe.Add(ref Aligned(target), (nint)targetSlot * size);
-        switch (size)
+        CopyBytes(ref Unsafe.Add(ref Aligned(source), (nint)sourceSlot * size),
+            ref Unsafe.Add(ref Aligned(target), (nint)targetSlot * size), size);
+    }
+
+    /// <summary>
+    /// One unmanaged component of <paramref name="size"/> (at least 1) bytes, without calls: two overlapping loads and
+    /// stores cover any size up to 16, larger ones copy 16-byte blocks and finish with an overlapping last block. No call
+    /// keeps the loops that copy many components (CopyRow) free of spills around a memcpy. The ranges never overlap
+    /// (different tables, or different rows of one column), so every load may come before its store.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void CopyBytes(ref byte from, ref byte to, int size)
+    {
+        nint last = size;
+        if (size > 16)
         {
-            case 1:
-                to = from;
-                break;
-            case 2:
-                Unsafe.WriteUnaligned(ref to, Unsafe.ReadUnaligned<short>(ref from));
-                break;
-            case 4:
-                Unsafe.WriteUnaligned(ref to, Unsafe.ReadUnaligned<int>(ref from));
-                break;
-            case 8:
-                Unsafe.WriteUnaligned(ref to, Unsafe.ReadUnaligned<long>(ref from));
-                break;
-            case 12:
-                Unsafe.WriteUnaligned(ref to, Unsafe.ReadUnaligned<long>(ref from));
-                Unsafe.WriteUnaligned(ref Unsafe.Add(ref to, 8), Unsafe.ReadUnaligned<int>(ref Unsafe.Add(ref from, 8)));
-                break;
-            case 16:
-                Unsafe.WriteUnaligned(ref to, Unsafe.ReadUnaligned<Vector128<byte>>(ref from));
-                break;
-            default:
-                Unsafe.CopyBlockUnaligned(ref to, ref from, (uint)size);
-                break;
+            for (nint at = 0; at < last - 16; at += 16)
+                Unsafe.WriteUnaligned(ref Unsafe.Add(ref to, at), Unsafe.ReadUnaligned<Vector128<byte>>(ref Unsafe.Add(ref from, at)));
+            Unsafe.WriteUnaligned(ref Unsafe.Add(ref to, last - 16), Unsafe.ReadUnaligned<Vector128<byte>>(ref Unsafe.Add(ref from, last - 16)));
+        }
+        else if (size >= 8)
+        {
+            long head = Unsafe.ReadUnaligned<long>(ref from), tail = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref from, last - 8));
+            Unsafe.WriteUnaligned(ref to, head);
+            Unsafe.WriteUnaligned(ref Unsafe.Add(ref to, last - 8), tail);
+        }
+        else if (size >= 4)
+        {
+            int head = Unsafe.ReadUnaligned<int>(ref from), tail = Unsafe.ReadUnaligned<int>(ref Unsafe.Add(ref from, last - 4));
+            Unsafe.WriteUnaligned(ref to, head);
+            Unsafe.WriteUnaligned(ref Unsafe.Add(ref to, last - 4), tail);
+        }
+        else if (size >= 2)
+        {
+            short head = Unsafe.ReadUnaligned<short>(ref from), tail = Unsafe.ReadUnaligned<short>(ref Unsafe.Add(ref from, last - 2));
+            Unsafe.WriteUnaligned(ref to, head);
+            Unsafe.WriteUnaligned(ref Unsafe.Add(ref to, last - 2), tail);
+        }
+        else
+        {
+            to = from;
         }
     }
 
@@ -746,9 +803,9 @@ internal sealed class Archetype
         edges[index] = target;
     }
 
-    /// <summary>Description of column <paramref name="index"/>.</summary>
+    /// <summary>Description of column <paramref name="index"/> (a valid index: one description per column, no bounds check).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ComponentInfo Info(int index) => _infos[index];
+    public ComponentInfo Info(int index) => Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_infos), index);
 }
 
 /// <summary>
@@ -760,8 +817,11 @@ internal sealed class Transition
     public readonly Archetype Source;
     public readonly Archetype Target;
 
-    // One step per shared component (source column, target column, its description).
+    // One step per shared component (source column, target column, its description), and the same steps split by
+    // kind: the unmanaged ones copy bytes in a loop without calls, the managed ones call their typed copy.
     private readonly Step[] _plan;
+    private readonly Bytes[] _unmanaged;
+    private readonly Step[] _managed;
 
     // Whether the tables share change-tick columns: a moved row raises the target's summaries to the source's.
     private readonly bool _ticks;
@@ -771,6 +831,14 @@ internal sealed class Transition
         public readonly int From = from;
         public readonly int To = to;
         public readonly ComponentInfo Info = info;
+    }
+
+    // An unmanaged step: 12 bytes, five to a cache line, nothing the byte copy does not use.
+    private readonly struct Bytes(int from, int to, int size)
+    {
+        public readonly int From = from;
+        public readonly int To = to;
+        public readonly int Size = size;
     }
 
     public Transition(Archetype source, Archetype target)
@@ -785,6 +853,13 @@ internal sealed class Transition
         }
 
         _plan = plan.ToArray();
+        var unmanaged = new System.Collections.Generic.List<Bytes>();
+        var managed = new System.Collections.Generic.List<Step>();
+        foreach (var step in plan)
+            if (step.Info.Size >= 0) unmanaged.Add(new Bytes(step.From, step.To, step.Info.Size));
+            else managed.Add(step);
+        _unmanaged = unmanaged.ToArray();
+        _managed = managed.ToArray();
         foreach (var step in _plan) _ticks |= step.Info.Owner >= 0;
     }
 
@@ -798,8 +873,15 @@ internal sealed class Transition
         // Step columns are valid indices of both archetypes' Columns (built from them above): no bounds checks.
         ref Array from = ref MemoryMarshal.GetArrayDataReference(Source.Columns);
         ref Array to = ref MemoryMarshal.GetArrayDataReference(Target.Columns);
-        foreach (ref readonly var step in _plan.AsSpan())
-            Archetype.CopyElement(step.Info, Unsafe.Add(ref from, step.From), slot, Unsafe.Add(ref to, step.To), targetSlot);
+        foreach (ref readonly var step in _unmanaged.AsSpan())
+        {
+            int size = step.Size;
+            Archetype.CopyBytes(ref Unsafe.Add(ref Archetype.Aligned(Unsafe.Add(ref from, step.From)), (nint)slot * size),
+                ref Unsafe.Add(ref Archetype.Aligned(Unsafe.Add(ref to, step.To)), (nint)targetSlot * size), size);
+        }
+
+        foreach (ref readonly var step in _managed.AsSpan())
+            step.Info.CopyManaged(Unsafe.Add(ref from, step.From), slot, Unsafe.Add(ref to, step.To), targetSlot);
         if (Source.HasAbsent) CopyAbsent(slot, targetSlot);
         if (_ticks) Archetype.RaiseWords(Source, slot, Target, targetSlot);
     }

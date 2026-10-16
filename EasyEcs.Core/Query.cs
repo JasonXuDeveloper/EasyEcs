@@ -360,16 +360,16 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         var plan = _plan;
         var require = plan.Require;
         for (int i = 0; i < require.Length; i++)
-            if (archetype.Bits(require[i]) is { } present) bits &= present[word];
+            if (archetype.Bits(require[i]) is { } present) bits &= At(present, word);
         var exclude = plan.Exclude;
         for (int i = 0; i < exclude.Length; i++)
-            bits &= archetype.Bits(exclude[i]) is { } present ? ~present[word] : 0;
+            bits &= archetype.Bits(exclude[i]) is { } present ? ~At(present, word) : 0;
         var anyOf = plan.AnyOf;
         if (anyOf.Length != 0)
         {
             ulong any = 0;
             for (int i = 0; i < anyOf.Length; i++)
-                any |= archetype.Bits(anyOf[i]) is { } present ? present[word] : ulong.MaxValue;
+                any |= archetype.Bits(anyOf[i]) is { } present ? At(present, word) : ulong.MaxValue;
             bits &= any;
         }
 
@@ -377,6 +377,10 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         for (int i = 0; i < changed.Length && bits != 0; i++) bits &= Newer(archetype, changed[i], word, _since);
         return bits;
     }
+
+    /// <summary>Word <paramref name="word"/> of presence bits, which cover the table's capacity (words of rows are below it).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ulong At(ulong[] present, int word) => Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(present), word);
 
     /// <summary>
     /// The first word at or after <paramref name="word"/> (below <paramref name="words"/>) that may have passing rows:
@@ -432,7 +436,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         // The rows of the word's latest tick, when every other row is older than since: no tick is read.
         if (archetype.WordRest[column][word] < since) return archetype.WordRows[column][word];
         int first = word << 6;
-        int rows = Math.Min(64, archetype.EntityIds.Length - first);
+        int rows = Math.Min(64, archetype.Slots.Length - first);
         ref ulong ticks = ref Unsafe.Add(ref Unsafe.As<ChangeTick, ulong>(ref archetype.Data<ChangeTick>(column)), first);
         // tick >= since, as tick > since - 1: ticks stay below 2^63, so a signed compare is exact (since 0 gives -1).
         var threshold = Vector256.Create((long)since - 1);
@@ -454,14 +458,14 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     {
         int count = 0;
         int rows = archetype.Count;
-        var ids = archetype.EntityIds;
+        var slots = archetype.Slots;
         int words = (rows + 63) >> 6;
         for (int w = NextWord(archetype, 0, words); w < words; w = NextWord(archetype, w + 1, words))
         {
             ulong bits = Word(archetype, w) & RowMask(w, rows);
             while (bits != 0)
             {
-                if (ids[(w << 6) + BitOperations.TrailingZeroCount(bits)] >= 0) count++;
+                if (slots[(w << 6) + BitOperations.TrailingZeroCount(bits)].Id >= 0) count++;
                 bits &= bits - 1;
             }
         }
@@ -473,13 +477,13 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     public bool Any(Archetype archetype)
     {
         int rows = archetype.Count;
-        var ids = archetype.EntityIds;
+        var slots = archetype.Slots;
         int words = (rows + 63) >> 6;
         for (int w = NextWord(archetype, 0, words); w < words; w = NextWord(archetype, w + 1, words))
         {
             ulong bits = Word(archetype, w) & RowMask(w, rows);
             for (; bits != 0; bits &= bits - 1)
-                if (ids[(w << 6) + BitOperations.TrailingZeroCount(bits)] >= 0) return true;
+                if (slots[(w << 6) + BitOperations.TrailingZeroCount(bits)].Id >= 0) return true;
         }
 
         return false;
@@ -491,7 +495,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     /// </summary>
     public bool NextRun(Archetype archetype, ref int start, int count, out int length)
     {
-        var ids = archetype.EntityIds;
+        var slots = archetype.Slots;
         // First passing alive row: skip 64 rows per word that has none.
         while (true)
         {
@@ -517,7 +521,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
             }
 
             start = (w << 6) + BitOperations.TrailingZeroCount(bits);
-            if (ids[start] >= 0) break;
+            if (slots[start].Id >= 0) break;
             start++;
         }
 
@@ -537,7 +541,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         }
 
         end = Math.Min(end, count);
-        int tombstone = new ReadOnlySpan<int>(ids, start, end - start).IndexOf(-1);
+        int tombstone = archetype.Rows64(end).Slice(start).IndexOfAnyInRange(long.MinValue, -1);
         length = tombstone < 0 ? end - start : tombstone;
         return true;
     }
@@ -575,10 +579,10 @@ internal ref struct ArchetypeCursor
     private int[] _counts; // row counts at the start of the walk (rented), null before the first MoveNext
     private int _archetype;
     private RowFilter _filter;
-    private ref int _ids;  // the current table's id column
+    private ref EntitySlot _rows; // the current table's entities
     private int _count;    // rows of the current table to walk
     private int _mode;     // RowFilter mode of the current table
-    private int _storage;  // the world's storage version _ids and _mode were read at
+    private int _storage;  // the world's storage version _rows and _mode were read at
     private int _word;     // Test mode: the row word _bits holds (-1: none)
     private ulong _bits;   // Test mode: the passing rows of word _word (computed once per word, not per row)
     private bool _done;
@@ -588,6 +592,16 @@ internal ref struct ArchetypeCursor
 
     /// <summary>Row and entity id of the current row.</summary>
     public int Slot, Id;
+
+    /// <summary>
+    /// The current row's version by reference. <see cref="EntitySlot.Version"/> is the row's first field, so the ref is
+    /// the row's own address: no field access, hence no null check in the caller's loop.
+    /// </summary>
+    public readonly ref int Version
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => ref Unsafe.As<EntitySlot, int>(ref Unsafe.Add(ref _rows, Slot));
+    }
 
     public ArchetypeCursor(World world, QueryMatch match, ulong since)
     {
@@ -613,7 +627,7 @@ internal ref struct ArchetypeCursor
         {
             while (++Slot < _count)
             {
-                int id = Unsafe.Add(ref _ids, Slot);
+                int id = Unsafe.Add(ref _rows, Slot).Id;
                 if (id >= 0)
                 {
                     Id = id;
@@ -654,7 +668,7 @@ internal ref struct ArchetypeCursor
             }
 
             slot = (w << 6) + BitOperations.TrailingZeroCount(bits);
-            int id = Unsafe.Add(ref _ids, slot);
+            int id = Unsafe.Add(ref _rows, slot).Id;
             if (id >= 0)
             {
                 Slot = slot;
@@ -669,13 +683,13 @@ internal ref struct ArchetypeCursor
         return false;
     }
 
-    /// <summary>The caller made a structural change: re-read the id column and the presence counts.</summary>
+    /// <summary>The caller made a structural change: re-read the entity rows and the presence counts.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void Refresh()
     {
         _storage = _world.StorageVersion;
         if (Current == null) return;
-        _ids = ref MemoryMarshal.GetArrayDataReference(Current.EntityIds);
+        _rows = ref MemoryMarshal.GetArrayDataReference(Current.Slots);
         _mode = _filter.Mode(Current);
         _word = -1; // presence bits may have flipped
         if (_mode == RowFilter.None) _count = 0;
@@ -695,7 +709,7 @@ internal ref struct ArchetypeCursor
             _mode = _filter.Mode(archetype);
             if (_mode == RowFilter.None || archetype.AliveCount == 0) continue;
             Current = archetype;
-            _ids = ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds);
+            _rows = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
             _count = _counts[_archetype];
             Slot = -1;
             _word = -1;
@@ -707,7 +721,7 @@ internal ref struct ArchetypeCursor
 
             for (Slot = 0; Slot < _count; Slot++)
             {
-                int id = Unsafe.Add(ref _ids, Slot);
+                int id = Unsafe.Add(ref _rows, Slot).Id;
                 if (id >= 0)
                 {
                     Id = id;
@@ -722,6 +736,8 @@ internal ref struct ArchetypeCursor
         return End;
     }
 
+    // Once per walk: NoInlining keeps the pool's code (TLS buckets, trimming, events) out of the caller's loop.
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private bool Start()
     {
         if (_done) return false;
@@ -737,6 +753,12 @@ internal ref struct ArchetypeCursor
     public void Dispose()
     {
         if (_counts == null || _done) return;
+        Finish();
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void Finish()
+    {
         _done = true;
         ArrayPool<int>.Shared.Return(_counts);
         _counts = null;

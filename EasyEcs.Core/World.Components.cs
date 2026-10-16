@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
 using System.Threading;
 
 namespace EasyEcs;
@@ -18,6 +19,46 @@ public sealed partial class World
     // Archetypes with tombstones, closed when the last pass ends (each registered once: Archetype.Dirty).
     private Archetype[] _dirty = new Archetype[8];
     private int _dirtyCount;
+
+    // Row counts of the tables at the start of a structural pass (ForEach with a job that may change structure), one
+    // array per nesting depth: a pass takes the array of the passes running when it starts. Structural passes run on
+    // the owner thread only (their systems run alone), so nested ones get distinct depths; an interrupted pass leaves
+    // Passes raised until CompactArchetypes, and later passes then use deeper arrays.
+    private int[][] _passCounts = [];
+
+    /// <summary>An array of at least <paramref name="tables"/> ints for a structural pass about to begin.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal int[] PassCounts(int tables)
+    {
+        int depth = Passes;
+        var stack = _passCounts;
+        if ((uint)depth < (uint)stack.Length && stack[depth] is { } counts && counts.Length >= tables) return counts;
+        return GrowPassCounts(depth, tables);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private int[] GrowPassCounts(int depth, int tables)
+    {
+        if (depth >= _passCounts.Length) Array.Resize(ref _passCounts, Math.Max(depth + 1, _passCounts.Length * 2));
+        return _passCounts[depth] = new int[Math.Max(tables, 8)];
+    }
+
+    /// <summary>
+    /// One bit per row of the <paramref name="count"/> (at most 64) rows from <paramref name="rows"/>: set for an alive
+    /// row, clear for a tombstone (negative id: a negative row read as a <c>long</c>; 2 rows per 128-bit vector, which
+    /// x64 and arm64 both accelerate). Cold: only tables a pass left tombstones in.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal static ulong AliveRows(ref EntitySlot rows, int count)
+    {
+        ref long row = ref Unsafe.As<EntitySlot, long>(ref rows);
+        ulong tombstones = 0;
+        int i = 0;
+        for (; i + 2 <= count; i += 2)
+            tombstones |= (ulong)Vector128.LoadUnsafe(ref row, (nuint)i).ExtractMostSignificantBits() << i;
+        for (; i < count; i++) tombstones |= (ulong)Unsafe.Add(ref row, i) >> 63 << i;
+        return ~tombstones & (ulong.MaxValue >> (64 - count)); // count >= 1
+    }
 
     /// <summary>Start a pass (rows that lose their entity become tombstones until it ends).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -114,7 +155,7 @@ public sealed partial class World
         int column = archetype.ColumnIndex(bit);
         if (column < 0 || !archetype.Take(column, meta.Slot)) return;
         StorageVersion++; // passes re-read presence bits
-        if (_indexByBit != null) Unindex(bit, archetype.EntityIds[meta.Slot]);
+        if (_indexByBit != null) Unindex(bit, archetype.Slots[meta.Slot].Id);
     }
 
     /// <summary>Remove component bits (see <see cref="RemoveBit"/>). Inside the structural gate.</summary>
@@ -126,8 +167,10 @@ public sealed partial class World
     /// <summary>
     /// Move entity <paramref name="id"/> along <paramref name="transition"/>: copy its shared components into a row of
     /// the target table and remove its old row. Components only the target has are left for the caller to write.
-    /// Inside the structural gate.
+    /// Inside the structural gate. Not inlined: callers whose usual path needs no move (a component given back to its
+    /// row) keep a small frame instead of the copy loops' registers.
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void MoveTo(ref EntityMeta meta, int id, Transition transition)
     {
         var target = transition.Target;
@@ -135,9 +178,9 @@ public sealed partial class World
 
         int slot = target.Add(id, meta.Version);
         int oldSlot = meta.Slot;
-        transition.CopyRow(oldSlot, slot);
-        meta.Archetype = target;
+        meta.Archetype = target; // before the copy: meta is dead in its loop, which keeps the loop's registers free
         meta.Slot = slot;
+        transition.CopyRow(oldSlot, slot);
         RemoveRow(transition.Source, oldSlot); // may move another entity into oldSlot (outside passes)
         StorageVersion++;
     }
@@ -171,7 +214,7 @@ public sealed partial class World
         {
             ref var meta = ref MetaRef(id);
             var to = meta.Archetype;
-            if (to == null || meta.Version != from.Versions[slot]) return; // destroyed (the id may be reused already)
+            if (to == null || meta.Version != from.Slots[slot].Version) return; // destroyed (the id may be reused already)
             for (int k = 0; k < bits.Length; k++)
             {
                 if ((writes >> k & 1) == 0) continue;

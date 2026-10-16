@@ -16,6 +16,6 @@ internal struct EntityMeta
     /// <summary>Incremented on destroy; handles carry the version they were created with.</summary>
     public int Version;
 
-    /// <summary>Slot index inside <see cref="Archetype"/>.EntityIds.</summary>
+    /// <summary>Slot index inside <see cref="Archetype"/>.Slots.</summary>
     public int Slot;
 }

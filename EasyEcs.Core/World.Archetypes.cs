@@ -151,15 +151,22 @@ public sealed partial class World
     internal QueryCacheEntry GetQueryEntry(ReadOnlySpan<ushort> bits, in QueryFilter filter)
     {
         var key = QueryKey.ForLookup(bits, in filter);
-        if (_queryCache.TryGetValue(key, out var entry))
-            return entry;
+        return _queryCache.TryGetValue(key, out var entry) ? entry : CreateQueryEntry(in key);
+    }
 
+    /// <summary>
+    /// The miss path of <see cref="GetQueryEntry"/>: a method of its own, so a hit pays neither its frame (the lists,
+    /// the gate) nor the copies of the key it makes.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private QueryCacheEntry CreateQueryEntry(in QueryKey lookup)
+    {
         using (Structural())
         {
-            if (_queryCache.TryGetValue(key, out entry))
+            if (_queryCache.TryGetValue(lookup, out var entry))
                 return entry;
 
-            key = key.Detached();
+            var key = lookup.Detached();
 
             var all = _allArchetypes;
             var archetypes = new List<Archetype>();
@@ -219,7 +226,7 @@ public sealed partial class World
     {
         var all = _allArchetypes;
         for (int i = 0; i < all.Length; i++)
-            Array.Clear(all[i].EntityIds, 0, all[i].EntityIds.Length);
+            Array.Clear(all[i].Slots);
 
         _archetypes.Clear();
         _allArchetypes = Array.Empty<Archetype>();

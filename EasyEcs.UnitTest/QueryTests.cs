@@ -152,6 +152,42 @@ public partial class QueryTests
         Assert.That(visited, Is.EqualTo(1_000));
     }
 
+    [Test]
+    public void AStablePassInsideAStructuralOneSkipsItsTombstones()
+    {
+        using var world = new World();
+        var entities = new Entity[300];
+        world.CreateEntities(entities, new Health(1), new Frozen());
+        for (int i = 0; i < entities.Length; i += 2) entities[i].Remove<Frozen>(); // rows to test: every word mixed
+        var outer = new DestroyThenCount();
+        world.ForEachEntity<Health, DestroyThenCount>(ref outer);
+        // At the last row, every third row is a tombstone; of the rest, the even ones lack Frozen.
+        Assert.That(outer.Counted, Is.EqualTo(100));
+    }
+
+    private static readonly QueryFilter NotFrozen = QueryFilter.Create().Without<Frozen>();
+
+    private struct DestroyThenCount : IForEachEntity<Health>
+    {
+        public int Counted;
+
+        public void Execute(Entity entity, ref Health health)
+        {
+            if (entity.Id % 3 == 0) entity.Destroy();
+            if (entity.Id != 299) return;
+            var count = new CountRows();
+            entity.World.ForEach<Health, CountRows>(ref count, NotFrozen);
+            Counted = count.Rows;
+        }
+    }
+
+    private struct CountRows : IForEach<Health>, INoStructuralChanges
+    {
+        public int Rows;
+        public static int Writes => 0;
+        public void Execute(int entityId, ref Health health) => Rows += health.Value;
+    }
+
     private partial class FreezeHalf : EcsSystem
     {
         [ForEach]

@@ -124,7 +124,7 @@ public sealed partial class World : IDisposable
                     for (; bits != 0; bits &= ~(1UL << 63 >> BitOperations.LeadingZeroCount(bits)))
                     {
                         int slot = (w << 6) + 63 - BitOperations.LeadingZeroCount(bits);
-                        int id = archetype.EntityIds[slot];
+                        int id = archetype.Slots[slot].Id;
                         if (id < 0) continue;
                         Free(ref MetaRef(id), id);
                         destroyed++;
@@ -216,10 +216,13 @@ public sealed partial class World : IDisposable
             _index = -1;
         }
 
+        /// <summary>The current living entity.</summary>
         public readonly Entity Current => new(_world, _index, _meta[_index].Version);
 
+        /// <summary>The enumerator itself (<c>foreach</c> support, no allocation).</summary>
         public readonly EntityEnumerator GetEnumerator() => this;
 
+        /// <summary>Move to the next living entity (ids in ascending order). O(1) amortized per id.</summary>
         public bool MoveNext()
         {
             var meta = _meta;
