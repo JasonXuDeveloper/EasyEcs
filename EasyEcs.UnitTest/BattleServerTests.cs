@@ -152,6 +152,44 @@ public class BattleServerTests
     }
 
     [Test]
+    public void ANewRoundScattersTheNpcsTheSameWayOnEveryThread()
+    {
+        using var one = Run(50);
+        using var other = Run(50);
+        var before = Positions(one);
+        one.NewRound();
+        other.NewRound();
+        var after = Positions(one);
+        Assert.That(after, Is.EqualTo(Positions(other)));                    // chunks on any threads: one result
+        Assert.That(after, Is.Not.EqualTo(before));
+    }
+
+    [Test]
+    public void AHitByIdReachesOnlyALivingUnit()
+    {
+        using var server = Run(30);
+        var player = server.NearestPlayer(default);
+        int hp = player.Get<Health>().Value;
+        Assert.That(server.Hit(player.Id, 7), Is.True);
+        Assert.That(player.Get<Health>().Value, Is.EqualTo(hp - 7));
+        Assert.That(server.ShotsLeft(player), Is.EqualTo(player.Get<Mana>().Value / BattleServer.ShotCost));
+
+        player.Destroy();
+        Assert.That(server.ShotsLeft(player), Is.Zero);                       // a stale handle has no mana
+        Assert.That(server.Hit(player.Id, 7), Is.False);                     // its id names no living entity now
+        Assert.That(server.Hit(int.MaxValue, 7), Is.False);                  // no such entity
+    }
+
+    private static List<(int, float, float)> Positions(BattleServer server)
+    {
+        var positions = new List<(int, float, float)>();
+        foreach (var item in server.World.Query<Position>(QueryFilter.Create().With<Npc>()))
+            positions.Add((item.Entity.Id, item.Component1.X, item.Component1.Y));
+        positions.Sort();
+        return positions;
+    }
+
+    [Test]
     public void UnsavedCountsThePlayersWrittenSinceTheSave()
     {
         using var server = Run(30);
