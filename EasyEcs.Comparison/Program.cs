@@ -18,7 +18,7 @@ public static class Program
     {
         if (args.Length == 0 || args[0] != "--check")
         {
-            BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
+            BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, EasyEcs.Benchmark.BenchmarkConfig.Create());
             return 0;
         }
 

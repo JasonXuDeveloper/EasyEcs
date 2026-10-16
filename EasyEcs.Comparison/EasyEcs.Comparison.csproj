@@ -22,6 +22,7 @@
         <ProjectReference Include="..\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
         <!-- the EasyEcs side is the headline scenario itself, compiled unchanged -->
         <Compile Include="..\EasyEcs.Benchmark\WorldSimulation.cs" Link="Scenario\WorldSimulation.cs"/>
+        <Compile Include="..\EasyEcs.Benchmark\BenchmarkConfig.cs" Link="BenchmarkConfig.cs"/>
     </ItemGroup>
 
 </Project>
