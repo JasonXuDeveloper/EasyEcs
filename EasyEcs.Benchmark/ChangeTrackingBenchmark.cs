@@ -44,20 +44,54 @@ public partial class ChangeTrackingBenchmark
             _entities[_next].Get<Health>().Value--;
         }
 
+        _world.Update<Replication>();
+    }
+
+    private static readonly QueryFilter HealthChanged = QueryFilter.Create().Changed<Health>();
+
+    /// <summary>
+    /// The same job as an ad-hoc query: <c>Changed</c> filters by the tick taken after the previous update (writes between
+    /// two updates share one tick), so the default group's update (no systems) ends the tick.
+    /// </summary>
+    [Benchmark]
+    public void QueryTick()
+    {
+        ulong mark = _world.ChangeTick;
+        for (int i = 0; i < Written; i++)
+        {
+            _next = (_next + 97) % _entities.Length;
+            _entities[_next].Get<Health>().Value--;
+        }
+
+        if (Changed)
+        {
+            foreach (var item in _world.Query<Health, Replica>(HealthChanged.ChangedSince(mark)))
+                item.Component2 = new Replica(item.Component1.Value);
+        }
+        else
+        {
+            foreach (var item in _world.Query<Health, Replica>())
+                if (item.Component2.Value != item.Component1.Value) item.Component2 = new Replica(item.Component1.Value);
+        }
+
         _world.Update();
     }
+
+    public struct Replication : ISystemGroup;
 
     public record struct Health(int Value) : IComponent, ITrackChanges;
 
     /// <summary>The value last sent to clients.</summary>
     public record struct Replica(int Value) : IComponent;
 
+    [UpdateInGroup<Replication>]
     public partial class ReplicateChanged : EcsSystem
     {
         [ForEach, Changed<Health>]
         private static void Copy(in Health health, ref Replica replica) => replica = new Replica(health.Value);
     }
 
+    [UpdateInGroup<Replication>]
     public partial class ReplicateAll : EcsSystem
     {
         [ForEach]

@@ -63,8 +63,8 @@ public struct DReplica { public int Value; }
 public record struct DItemOf(D.Entity Owner);
 
 /// <summary>
-/// Replicating changed state: 100,000 entities, 1,000 of which get a new health per tick (through handles), then the
-/// changed healths are copied into the replicated copy.
+/// Replicating changed state: 100,000 entities, <see cref="Written"/> of which get a new health per tick (through
+/// handles; 10 is a quiet tick, 1,000 a busy one), then the changed healths are copied into the replicated copy.
 /// <list type="bullet">
 /// <item>EasyEcs: <c>[Changed&lt;Hp&gt;]</c> (per-row change ticks), and a full scan for reference.</item>
 /// <item>DefaultEcs: an entity set built with <c>WhenChanged&lt;T&gt;()</c>, fed by <c>NotifyChanged&lt;T&gt;()</c>.</item>
@@ -75,7 +75,9 @@ public record struct DItemOf(D.Entity Owner);
 [MemoryDiagnoser]
 public class ChangeTrackingComparison
 {
-    private const int Entities = 100_000, Written = 1_000;
+    private const int Entities = 100_000;
+
+    [Params(10, 1_000)] public int Written;
 
     private EasyEcs.World _world;
     private EasyEcs.Entity[] _entities;

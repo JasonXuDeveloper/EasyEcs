@@ -256,7 +256,7 @@ public partial class ChangedTests
         ulong mark = world.ChangeTick;
         var changed = QueryFilter.Create().Changed<Armor>().ChangedSince(mark);
 
-        // Reads: a copy, presence checks, a query over other components, an in-only system pass.
+        // Reads: a copy, a presence check, a query over another component.
         entities[0].TryGet<Armor>(out _);
         _ = entities[0].Has<Armor>();
         foreach (var _ in world.Query<Health>()) { }
@@ -313,10 +313,137 @@ public partial class ChangedTests
         entities[19_999].Get<Armor>().Value++; // the last row, in block 4
         Assert.That(world.Count<Armor>(changed), Is.EqualTo(2));
 
-        entities[0].Destroy(); // the last row moves into row 0 (block 0, never written): its summaries go with it
+        entities[0].Destroy(); // the last row moves into row 0 (block 0, not written since the mark): its summaries go with it
         var found = new System.Collections.Generic.List<Entity>();
         foreach (var item in world.Query<Armor>(changed)) found.Add(item.Entity);
         Assert.That(found, Is.EquivalentTo(new[] { entities[15_000], entities[19_999] }));
+    }
+
+    [Test]
+    public void ChangedFiltersMatchTheLastWriteOfEveryRowThroughMovesAndDestroys()
+    {
+        // Rows of different ticks share words, older rows move into words written later, rows leave and fill holes,
+        // a system writes runs of rows and single words: for every mark, the filter must select exactly the entities
+        // written at or after it.
+        using var world = new World(new WorldOptions { InitialEntityCapacity = 16 });
+        var random = new System.Random(7);
+        var written = new System.Collections.Generic.Dictionary<Entity, ulong>();
+        var live = new System.Collections.Generic.List<Entity>();
+        for (int i = 0; i < 600; i++)
+        {
+            // Half start stunned, in a table of their own: the writer covers it in long runs (whole words).
+            var e = i % 2 == 0 ? world.CreateEntity(new Armor(i), new Seen(), new Stun(1)) : world.CreateEntity(new Armor(i), new Seen());
+            live.Add(e);
+            written[e] = world.ChangeTick;
+        }
+
+        world.AddSystem<Wear>(); // writes the armor of stunned entities: runs of rows and words of tested rows
+
+        for (int round = 0; round < 40; round++)
+        {
+            ulong batch = world.ChangeTick + 1; // the tick of the update's one batch
+            world.Update();
+            foreach (var e in live)
+                if (e.Has<Stun>()) written[e] = batch;
+            for (int op = 0; op < 60; op++)
+            {
+                var e = live[random.Next(live.Count)];
+                switch (random.Next(6))
+                {
+                    case 0: e.Get<Armor>().Value++; written[e] = world.ChangeTick; break;
+                    case 1: if (e.Has<Frozen>()) e.Remove<Frozen>(); else e.Set(new Frozen()); break; // moves, keeps its tick
+                    case 2: e.Set(new Stun(1)); break;
+                    case 3:
+                        e.Destroy();
+                        live.Remove(e);
+                        written.Remove(e);
+                        var created = world.CreateEntity(new Armor(round), new Seen());
+                        live.Add(created);
+                        written[created] = world.ChangeTick;
+                        break;
+                    default: if (e.Has<Stun>()) e.Remove<Stun>(); break; // its row stays: a presence bit flips
+                }
+            }
+
+            for (ulong mark = 1; mark <= world.ChangeTick; mark += 1 + (ulong)random.Next(4))
+            {
+                var expected = new System.Collections.Generic.HashSet<Entity>();
+                foreach (var pair in written)
+                    if (pair.Value >= mark) expected.Add(pair.Key);
+                var found = new System.Collections.Generic.HashSet<Entity>();
+                // Through Seen: a query handing out ref Armor would stamp the rows it visits.
+                foreach (var item in world.Query<Seen>(QueryFilter.Create().Changed<Armor>().ChangedSince(mark)))
+                    found.Add(item.Entity);
+                Assert.That(found.SetEquals(expected), Is.True, $"round {round}, mark {mark}");
+                Assert.That(world.Count<Seen>(QueryFilter.Create().Changed<Armor>().ChangedSince(mark)), Is.EqualTo(expected.Count));
+            }
+        }
+    }
+
+    [Test]
+    public void RunsOfWrittenRowsAreSelectedExactly()
+    {
+        // A system writes a whole table (whole 64-row words and partial ones); later single writes split words again.
+        using var world = new World();
+        var entities = new Entity[1_000];
+        world.CreateEntities(entities, new Armor(1), new Seen(), new Stun(1));
+        world.AddSystem<Wear>();
+        ulong batch = world.ChangeTick + 1;
+        world.Update();
+        var sinceBatch = QueryFilter.Create().Changed<Armor>().ChangedSince(batch);
+        var afterBatch = QueryFilter.Create().Changed<Armor>().ChangedSince(batch + 1);
+        Assert.That(world.Count<Seen>(sinceBatch), Is.EqualTo(1_000));
+        Assert.That(world.Count<Seen>(afterBatch), Is.Zero);
+
+        entities[130].Get<Armor>().Value++;
+        entities[999].Get<Armor>().Value++;
+        Assert.That(world.Count<Seen>(sinceBatch), Is.EqualTo(1_000));
+        Assert.That(world.Count<Seen>(afterBatch), Is.EqualTo(2));
+    }
+
+    [Test]
+    public void QueryWritesAreFoundInEveryWordAndTick()
+    {
+        // A query hands out refs row after row, over several 64-row words, at two ticks; a single write splits a word.
+        using var world = new World();
+        var entities = new Entity[300];
+        world.CreateEntities(entities, new Armor(1), new Seen());
+        for (int round = 0; round < 2; round++)
+        {
+            ulong mark = world.ChangeTick;
+            int visited = 0;
+            foreach (var item in world.Query<Armor>())
+                if (++visited % 2 == 0) item.Component1.Value++;
+            var since = QueryFilter.Create().Changed<Armor>().ChangedSince(mark);
+            Assert.That(world.Count<Seen>(since), Is.EqualTo(300));
+            world.Update();
+            entities[200].Get<Armor>().Value++;
+            Assert.That(world.Count<Seen>(QueryFilter.Create().Changed<Armor>().ChangedSince(world.ChangeTick)), Is.EqualTo(1));
+            world.Update();
+        }
+    }
+
+    [Test]
+    public void QueryWritesAfterATickInsideTheLoopCarryTheNewTick()
+    {
+        using var world = new World();
+        var entities = new Entity[100];
+        world.CreateEntities(entities, new Armor(1), new Seen());
+        int visited = 0;
+        ulong tick = 0;
+        foreach (var item in world.Query<Armor>())
+        {
+            if (++visited == 10)
+            {
+                world.Update(); // a new tick in the middle of a word
+                tick = world.ChangeTick;
+            }
+
+            item.Component1.Value++;
+        }
+
+        // Moving to a row stamps it: rows 11-100 were reached after the tick.
+        Assert.That(world.Count<Seen>(QueryFilter.Create().Changed<Armor>().ChangedSince(tick)), Is.EqualTo(90));
     }
 
     [Test]

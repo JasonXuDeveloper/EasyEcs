@@ -52,34 +52,45 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// Add or overwrite {{what}} with the given value{{(n == 1 ? "" : "s")}}, with at most one row copy. Returns the entity
                     /// for chaining. O({{n}}) amortized. Thread-safe.
                     /// </summary>
-                    [MethodImpl(MethodImplOptions.NoInlining)] // keeps the loops that call it lean
+                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public Entity Set<{{tps}}>({{values}})
                 {{cons}}
                     {
-                        var world = _world;
+                        SetCore(_world, Id, Version, {{List(n, i => $"in c{i}")}});
+                        return this;
+                    }
+
+                    // The handle goes by value: a loop calling Set keeps its handle in registers (a call through `this`
+                    // would take its address and store it to memory on every row, even when the call is rare).
+                    [MethodImpl(MethodImplOptions.NoInlining)] // keeps the loops that call it lean
+                    private static void SetCore<{{tps}}>(World world, int id, int version, {{values}})
+                {{cons}}
+                    {
                         using (world.Structural())
                         {
-                            ref var meta = ref world.Live(this);
+                            ref var meta = ref world.Live(new Entity(world, id, version));
                 {{Lines(n, i => $"            ushort b{i} = ComponentType<T{i}>.Bit;")}}
-                            {{(n == 1 ? "world.AddBit(ref meta, Id, b1);" : $"world.AddBits(ref meta, Id, [{List(n, i => $"b{i}")}], {signature});")}}
+                            {{(n == 1 ? "world.AddBit(ref meta, id, b1);" : $"world.AddBits(ref meta, id, [{List(n, i => $"b{i}")}], {signature});")}}
                 {{Lines(n, i => $"            World.Row<T{i}>(ref meta, b{i}) = c{i};")}}
                 {{Lines(n, i => $"            meta.Archetype.Stamp<T{i}>(meta.Slot, world.ChangeTick);")}}
                         }
-
-                        return this;
                     }
 
                     /// <summary>
                     /// Remove {{what}}; missing components are ignored. The entity keeps its row (no move). O({{n}}). Thread-safe.
                     /// </summary>
-                    [MethodImpl(MethodImplOptions.NoInlining)] // keeps the loops that call it lean
+                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public void Remove<{{tps}}>()
                 {{cons}}
+                        => RemoveCore<{{tps}}>(_world, Id, Version);
+
+                    [MethodImpl(MethodImplOptions.NoInlining)] // keeps the loops that call it lean; the handle by value (see SetCore)
+                    private static void RemoveCore<{{tps}}>(World world, int id, int version)
+                {{cons}}
                     {
-                        var world = _world;
                         using (world.Structural())
                         {
-                            ref var meta = ref world.Live(this);
+                            ref var meta = ref world.Live(new Entity(world, id, version));
                             {{(n == 1 ? "world.RemoveBit(ref meta, ComponentType<T1>.Bit);"
                                 : $"world.RemoveBits(ref meta, [{List(n, i => $"ComponentType<T{i}>.Bit")}]);")}}
                         }
@@ -330,7 +341,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
     /// </summary>
     /// <summary>Stamp row <paramref name="row"/> of every component the job writes (only tracked ones emit code).</summary>
     private static string StampRow(int n, string indent, string row) =>
-        Lines(n, i => $"{indent}    if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.Stamp<T{i}>({row}, _changeTick);");
+        Lines(n, i => $"{indent}    if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.StampVisited<T{i}>({row}, _changeTick);");
 
     /// <summary>Stamp a run of rows of every component the job writes.</summary>
     private static string StampRows(int n, string indent, string start, string count) =>
@@ -340,15 +351,14 @@ public sealed class ArityGenerator : IIncrementalGenerator
     {
         string tps = TypeParams(n);
         string execute = $"job.Execute({entityArg}, {List(n, i => $"ref r{i}")});";
-        // The row argument for row k of the current word (ids and versions point at the word's first row).
-        string rowArgAt = System.Text.RegularExpressions.Regex.Replace(rowArg, @"\b(ids|versions)\b", "Unsafe.Add(ref $1, k)");
+        // The row argument inside a run of rows of a word (idk and vk walk the run).
+        string rowArgRun = System.Text.RegularExpressions.Regex.Replace(rowArg, @"\b(ids|versions)\b", m => m.Value == "ids" ? "idk" : "vk");
         // Row loops move one ref per column by one element per row (strength-reduced by hand): with an int index the
         // JIT sign-extends and rebuilds every address, which nearly doubles the cost of a tight loop.
         string advance = List(n, i => $"r{i} = ref Unsafe.Add(ref r{i}, 1)");
         string startAt = Lines(n, i => $"                ref T{i} r{i} = ref Unsafe.Add(ref archetype.Base<T{i}>(b{i}), start);");
         string bits = List(n, i => $"b{i}");
         string ushorts = List(n, i => $"ushort b{i}");
-        string bases = Lines(n, i => $"                ref T{i} r{i} = ref archetype.Base<T{i}>(b{i});");
         return $$"""
                 /// <summary>
                 /// Run <paramref name="job"/> with {{receives}} for every entity having all of <c>{{tps}}</c> (and matching
@@ -400,18 +410,27 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     int[] counts = ArrayPool<int>.Shared.Rent(Math.Max(1, archetypes.Length));
                     for (int ai = 0; ai < archetypes.Length; ai++) counts[ai] = archetypes[ai].Count;
                     BeginPass();
-                    int storage = StorageVersion;
                     for (int ai = 0; ai < archetypes.Length; ai++)
                     {
                         var archetype = archetypes[ai];
                         var rows = new RowFilter(filters[ai], since);
                         int count = counts[ai];
                         int mode = rows.Mode(archetype);
-                        if (archetype.AliveCount == 0 || mode == RowFilter.None) continue;
-                        // Rows of a table whose rows all pass take the lean loop; it hands over to the testing one when
-                        // a structural change makes some rows fail.
-                        int at = mode == RowFilter.All ? {{name}}Live<{{tps}}, TJob>(ref job, archetype, rows, count, ref storage, {{bits}}) : 0;
-                        if (at < count) {{name}}LiveTested<{{tps}}, TJob>(ref job, archetype, rows, at, count, ref storage, {{bits}});
+                        if (archetype.AliveCount == 0) continue;
+                        // The row loops return after a structural change (the next row and the visited entity): the
+                        // refs are re-read and the visited entity's writes carried over here, so the loops keep only
+                        // their row state live across the job. A table whose rows all pass takes the lean loop.
+                        for (int at = 0; at < count && mode != RowFilter.None;)
+                        {
+                            long stop = mode == RowFilter.All
+                                ? {{name}}Live<{{tps}}, TJob>(ref job, archetype, at, count, {{bits}})
+                                : {{name}}LiveTested<{{tps}}, TJob>(ref job, archetype, rows, at, count, {{bits}});
+                            if (stop < 0) break; // the rows ran out without a structural change
+                            at = (int)stop;
+                            int moved = (int)(stop >> 32);
+                            if (archetype.EntityIds[at - 1] < 0) CarryOver(archetype, at - 1, moved, TJob.Writes, [{{bits}}]);
+                            mode = rows.Mode(archetype); // the change may have made rows fail (or pass)
+                        }
                     }
 
                     ArrayPool<int>.Shared.Return(counts);
@@ -419,18 +438,20 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 }
 
                 /// <summary>
-                /// The rows of a pass that may make structural changes, while every row passes the query: returns
-                /// <paramref name="count"/>, or the next row when a change made some rows fail (the caller tests from there).
+                /// Rows [<paramref name="start"/>, <paramref name="count"/>) of a pass that may make structural changes,
+                /// while every row passes the query. Returns -1 when the rows ran out, or, after a structural change, the
+                /// next row (low 32 bits) and the visited entity (high 32 bits): the caller refreshes and carries over.
+                /// One return value, not an out parameter, keeps a register free for the loop.
                 /// </summary>
-                private int {{name}}Live<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, int count, ref int storage, {{ushorts}})
+                private long {{name}}Live<{{tps}}, TJob>(ref TJob job, Archetype archetype, int start, int count, {{ushorts}})
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>
                 {
-                    int seen = storage;
+                    int seen = StorageVersion;
                     ref int ids = ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds);
                     ref int versions = ref MemoryMarshal.GetArrayDataReference(archetype.Versions);
-            {{bases}}
-                    for (int i = 0; i < count; i++, {{advance}})
+            {{startAt}}
+                    for (int i = start; i < count; i++, {{advance}})
                     {
                         int id = Unsafe.Add(ref ids, i);
                         if (id < 0) continue; // tombstone
@@ -438,37 +459,23 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{StampRow(n, "            ", "i")}}
                         {{execute}}
 
-                        if (seen != StorageVersion)
-                        {
-                            // A structural change: refresh the refs (storage may have grown) and, if the job moved
-                            // the visited entity, carry its writes over to its new row.
-                            seen = StorageVersion;
-                            ids = ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds);
-                            versions = ref MemoryMarshal.GetArrayDataReference(archetype.Versions);
-            {{Lines(n, i => $"                r{i} = ref Unsafe.Add(ref archetype.Base<T{i}>(b{i}), i);")}}
-                            if (Unsafe.Add(ref ids, i) < 0) CarryOver(archetype, i, id, TJob.Writes, [{{bits}}]);
-                            if (rows.Mode(archetype) == RowFilter.Test)
-                            {
-                                storage = seen;
-                                return i + 1;
-                            }
-                        }
+                        if (seen != StorageVersion) return (long)id << 32 | (uint)(i + 1);
                     }
 
-                    storage = seen;
-                    return count;
+                    return -1;
                 }
 
                 /// <summary>
                 /// The rows from <paramref name="start"/> of a pass that may make structural changes, testing presence
                 /// bits once per run: each 64-row word yields runs of consecutive passing rows that take the lean loop,
-                /// failing rows are skipped by the run (a word of failing rows costs one load).
+                /// failing rows are skipped by the run (a word of failing rows costs one load). Returns like
+                /// <c>{{name}}Live</c>.
                 /// </summary>
-                private void {{name}}LiveTested<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, int start, int count, ref int storage, {{ushorts}})
+                private long {{name}}LiveTested<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, int start, int count, {{ushorts}})
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>
                 {
-                    int seen = storage;
+                    int seen = StorageVersion;
                     ref int ids = ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds);
                     ref int versions = ref MemoryMarshal.GetArrayDataReference(archetype.Versions);
             {{startAt}}
@@ -493,21 +500,11 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{StampRow(n, "                ", "i")}}
                             {{execute}}
 
-                            if (seen != StorageVersion)
-                            {
-                                // A structural change: refresh the refs, carry writes over, re-read the presence bits.
-                                seen = StorageVersion;
-                                ids = ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds);
-                                versions = ref MemoryMarshal.GetArrayDataReference(archetype.Versions);
-            {{Lines(n, i => $"                        r{i} = ref Unsafe.Add(ref archetype.Base<T{i}>(b{i}), i + 1);")}}
-                                if (Unsafe.Add(ref ids, i) < 0) CarryOver(archetype, i, id, TJob.Writes, [{{bits}}]);
-                                i++;
-                                break;
-                            }
+                            if (seen != StorageVersion) return (long)id << 32 | (uint)(i + 1);
                         }
                     }
 
-                    storage = seen;
+                    return -1;
                 }
 
                 /// <summary>Rows [<paramref name="start"/>, <paramref name="end"/>) of a stable pass: every row is alive.</summary>
@@ -555,14 +552,24 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         ulong bits = rows.Word(archetype, w);
                         if (tombstones || bits != ulong.MaxValue)
                         {
-                            // Jump from passing row to passing row (sparse words cost one step per passing row, not 64).
+                            // Runs of passing rows (a few failing rows split a word into long runs; a sparse word costs
+                            // one step per run), each walked like a dense table.
                             bits &= RowFilter.RowMask(w, count);
             {{Lines(n, i => $"                    if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.StampWord<T{i}>(w, bits, _changeTick);")}}
-                            for (; bits != 0; bits &= bits - 1)
+                            while (bits != 0)
                             {
                                 int k = BitOperations.TrailingZeroCount(bits);
-                                if (tombstones && Unsafe.Add(ref ids, k) < 0) continue;
-                                job.Execute({{rowArgAt}}, {{List(n, i => $"ref Unsafe.Add(ref r{i}, k)")}});
+                                // The shift fills zeros, so ~ stops the run at the word's end at the latest.
+                                int end = k + BitOperations.TrailingZeroCount(~(bits >> k));
+                                bits = end >= 64 ? 0 : bits & (ulong.MaxValue << end);
+                                ref int idk = ref Unsafe.Add(ref ids, k);
+                                ref int vk = ref Unsafe.Add(ref versions, k);
+            {{Lines(n, i => $"                    ref T{i} q{i} = ref Unsafe.Add(ref r{i}, k);")}}
+                                for (int run = end - k; run > 0; run--, idk = ref Unsafe.Add(ref idk, 1), vk = ref Unsafe.Add(ref vk, 1), {{List(n, i => $"q{i} = ref Unsafe.Add(ref q{i}, 1)")}})
+                                {
+                                    if (tombstones && idk < 0) continue;
+                                    job.Execute({{rowArgRun}}, {{List(n, i => $"ref q{i}")}});
+                                }
                             }
 
                             ids = ref Unsafe.Add(ref ids, left);
@@ -740,12 +747,15 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 {{Lines(n, i => $"    private readonly ushort _b{i};")}}
                     private ref int _versions;
                 {{Lines(n, i => $"    private ref T{i} _r{i};")}}
+                    private int _word; // the word of the current table whose change-tick summaries were noted at _tick
+                    private ulong _tick;
 
                     internal QueryEnumerator(World world, QueryMatch match, ulong since, {{List(n, i => $"ushort b{i}")}})
                     {
                         _world = world;
                         _cursor = new ArchetypeCursor(world, match, since);
                 {{Lines(n, i => $"        _b{i} = b{i};")}}
+                        _word = -1;
                     }
 
                     public readonly QueryItem<{{tps}}> Current
@@ -777,9 +787,20 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
 
                     [MethodImpl(MethodImplOptions.NoInlining)]
-                    private readonly void Stamp()
+                    private void Stamp()
                     {
-                {{Lines(n, i => $"        _cursor.Current.Stamp<T{i}>(_cursor.Slot, _world.ChangeTick);")}}
+                        var archetype = _cursor.Current;
+                        int slot = _cursor.Slot;
+                        ulong tick = _world.ChangeTick;
+                        // Rows come in order: the summaries of a word are noted once per word and tick.
+                        if (slot >> 6 != _word || tick != _tick)
+                        {
+                            _word = slot >> 6;
+                            _tick = tick;
+                {{Lines(n, i => $"            archetype.NoteVisited<T{i}>(slot, tick);")}}
+                        }
+
+                {{Lines(n, i => $"        archetype.StampTick<T{i}>(slot, tick);")}}
                     }
 
                     // Another table, or its storage changed: re-read the column refs.
@@ -787,6 +808,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     private void Refresh()
                     {
                         var archetype = _cursor.Current;
+                        _word = -1;
                         _versions = ref MemoryMarshal.GetArrayDataReference(archetype.Versions);
                 {{Lines(n, i => $"        _r{i} = ref archetype.Base<T{i}>(_b{i});")}}
                     }

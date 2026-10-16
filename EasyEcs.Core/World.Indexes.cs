@@ -23,7 +23,8 @@ public sealed partial class World
 
     /// <summary>
     /// The value index of <typeparamref name="T"/>: find entities by <typeparamref name="T"/>'s key, or by the entity a
-    /// relation component points at. Created on the first call (cold), O(1) after; keep it in a local or field.
+    /// relation component points at. Created on the first call (cold), O(1) after; keep it in a local or field. Throws
+    /// <see cref="InvalidOperationException"/> when <typeparamref name="T"/> is already indexed by another key type.
     /// </summary>
     public ValueIndex<T, TKey> Index<T, TKey>() where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>
     {
@@ -59,7 +60,7 @@ public sealed partial class World
         for (int i = 0; i < components.Length; i++) Unindex(components[i], id);
     }
 
-    /// <summary>Make every index re-index from scratch on its next lookup (rows were replaced wholesale).</summary>
+    /// <summary>Make every index re-index from scratch on its next lookup (rows replaced by Restore, or released by Dispose).</summary>
     private void ResetIndexes()
     {
         foreach (var index in _indexes) index?.Reset();

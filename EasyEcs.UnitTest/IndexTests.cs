@@ -5,7 +5,7 @@ namespace EasyEcs.UnitTest;
 
 public partial class IndexTests
 {
-    /// <summary>The cascade of the relations guide: children of dying parents are destroyed before the parents.</summary>
+    /// <summary>The cascade of the relations guide: children of dying (Dead) parents are destroyed.</summary>
     public partial class DestroyOrphans : EcsSystem
     {
         [ForEach, With<Dead>]
@@ -22,13 +22,18 @@ public partial class IndexTests
         private static void Apply(ref Callsign callsign) => callsign = new Callsign(callsign.Value + "!");
     }
 
-    /// <summary>Looks up the index it writes: a lookup in the middle of a pass over the indexed component.</summary>
+    /// <summary>
+    /// Looks up the index it writes, in the middle of a pass over the indexed component: before renaming each entity it
+    /// records how many renamed ones the index already finds.
+    /// </summary>
     public partial class RenameAfterLookup : EcsSystem
     {
         [ForEach]
         private void Apply(ref Callsign callsign)
         {
-            if (World.Index<Callsign, string>().Count(callsign.Value) > 0) callsign = new Callsign(callsign.Value + "!");
+            var index = World.Index<Callsign, string>();
+            World.GetOrAddSingleton<Score>().Points = index.Count(callsign.Value + "!");
+            callsign = new Callsign(callsign.Value + "!");
         }
     }
 
@@ -377,6 +382,7 @@ public partial class IndexTests
         var all = new Entity[200];
         world.CreateEntities(all, new Callsign("a"));
         world.Update(); // each lookup happens after earlier rows of the same pass were renamed
+        Assert.That(world.GetSingleton<Score>().Points, Is.EqualTo(199)); // the last lookup saw every earlier rename
         Assert.That(index.Count("a!"), Is.EqualTo(200));
         Assert.That(index.Count("a"), Is.Zero);
         world.Update();

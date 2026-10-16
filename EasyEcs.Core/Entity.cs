@@ -50,7 +50,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     {
         ref T value = ref Find<T>();
         if (Unsafe.IsNullRef(ref value)) ThrowMissing(typeof(T));
-        if (default(T) is ITrackChanges) Touch<T>();
+        if (default(T) is ITrackChanges) Touch<T>(_world, Id);
         return ref value;
     }
 
@@ -86,15 +86,19 @@ public readonly partial struct Entity : IEquatable<Entity>
     }
 
     /// <summary>Add component <typeparamref name="T"/> (reset to default if present) and return a ref to it. O(1) amortized.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ref T Add<T>() where T : struct, IComponent => ref AddCore<T>(_world, Id, Version);
+
+    // Structural changes and cold paths take the handle by value: a loop calling them keeps its handle in registers
+    // (a call through `this` would take its address and store it to memory on every row, even when the call is rare).
     [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
-    public ref T Add<T>() where T : struct, IComponent
+    private static ref T AddCore<T>(World world, int id, int version) where T : struct, IComponent
     {
-        var world = _world;
         using (world.Structural())
         {
-            ref var meta = ref world.Live(this);
+            ref var meta = ref world.Live(new Entity(world, id, version));
             ushort bit = ComponentType<T>.Bit;
-            world.AddBit(ref meta, Id, bit);
+            world.AddBit(ref meta, id, bit);
             ref T value = ref World.Row<T>(ref meta, bit);
             value = default;
             meta.Archetype.Stamp<T>(meta.Slot, world.ChangeTick);
@@ -108,16 +112,16 @@ public readonly partial struct Entity : IEquatable<Entity>
     {
         ref T value = ref Find<T>();
         if (Unsafe.IsNullRef(ref value)) return ref Add<T>();
-        if (default(T) is ITrackChanges) Touch<T>();
+        if (default(T) is ITrackChanges) Touch<T>(_world, Id);
         return ref value;
     }
 
     /// <summary>Stamp the entity's row of tracked component <typeparamref name="T"/>, which it has (cold path).</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void Touch<T>() where T : struct, IComponent
+    private static void Touch<T>(World world, int id) where T : struct, IComponent
     {
-        ref var meta = ref _world.MetaRef(Id);
-        meta.Archetype.Stamp<T>(meta.Slot, _world.ChangeTick);
+        ref var meta = ref world.MetaRef(id);
+        meta.Archetype.Stamp<T>(meta.Slot, world.ChangeTick);
     }
 
     // Set(in T1..Tn) and Remove<T1..Tn>() are generated (Entity.Structural.g.cs).

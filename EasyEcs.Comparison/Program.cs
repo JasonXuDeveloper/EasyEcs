@@ -52,7 +52,7 @@ public static class Program
     /// <summary>The feature comparisons check every library's result in their setups: run each of them once.</summary>
     private static bool CheckFeatures()
     {
-        var changes = new ChangeTrackingComparison();
+        var changes = new ChangeTrackingComparison { Written = 1_000 };
         var index = new IndexComparison { Trades = 100 };
         (string Name, Action Setup, Action Cleanup)[] setups =
         [

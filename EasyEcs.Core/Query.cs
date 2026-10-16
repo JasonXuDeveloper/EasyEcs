@@ -275,7 +275,10 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     private readonly RowPlan _plan = plan;
     private readonly ulong _since = since;
 
-    /// <summary>No row of the table passes: every alive row has an excluded component.</summary>
+    /// <summary>
+    /// No row of the table passes: every alive row has an excluded component or lacks every WithAny component, or no
+    /// Changed column was written since the pass's tick.
+    /// </summary>
     public const int None = -1;
 
     /// <summary>Every alive row passes: every row has the required components and lacks the excluded ones.</summary>
@@ -287,8 +290,8 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     /// <summary>
     /// How the rows of <paramref name="archetype"/> pass right now: <see cref="None"/>, <see cref="All"/> or
     /// <see cref="Test"/>, from the per-column counts of rows lacking a component (O(columns)). Every change of those
-    /// bumps the world's storage version, so a pass re-checks this after a structural change. Change ticks always need
-    /// a test.
+    /// bumps the world's storage version, so a pass re-checks this after a structural change. A Changed column not
+    /// written since the pass's tick gives <see cref="None"/>; otherwise change ticks always need a test.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int Mode(Archetype archetype)
@@ -338,6 +341,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         _ => Count(archetype),
     };
 
+    /// <summary>Whether any alive row of <paramref name="archetype"/> passes (stops at the first one).</summary>
     public bool AnyAlive(Archetype archetype) => Mode(archetype) switch
     {
         None => false,
@@ -425,6 +429,8 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     {
         // Rows past the column's capacity do not exist (their bits are masked by the callers' row counts).
         if (archetype.WordWrite[column][word] < since) return 0; // no row of the word written since
+        // The rows of the word's latest tick, when every other row is older than since: no tick is read.
+        if (archetype.WordRest[column][word] < since) return archetype.WordRows[column][word];
         int first = word << 6;
         int rows = Math.Min(64, archetype.EntityIds.Length - first);
         ref ulong ticks = ref Unsafe.Add(ref Unsafe.As<ChangeTick, ulong>(ref archetype.Data<ChangeTick>(column)), first);
@@ -496,6 +502,13 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
             }
 
             int w = start >> 6;
+            int next = NextWord(archetype, w, (count + 63) >> 6); // unwritten words of a Changed filter
+            if (next != w)
+            {
+                start = next << 6;
+                continue;
+            }
+
             ulong bits = Word(archetype, w) & RowMask(w, count) & (ulong.MaxValue << start); // shift is mod 64
             if (bits == 0)
             {
@@ -566,6 +579,8 @@ internal ref struct ArchetypeCursor
     private int _count;    // rows of the current table to walk
     private int _mode;     // RowFilter mode of the current table
     private int _storage;  // the world's storage version _ids and _mode were read at
+    private int _word;     // Test mode: the row word _bits holds (-1: none)
+    private ulong _bits;   // Test mode: the passing rows of word _word (computed once per word, not per row)
     private bool _done;
 
     /// <summary>Table of the current row.</summary>
@@ -594,17 +609,64 @@ internal ref struct ArchetypeCursor
             result = Moved;
         }
 
-        while (++Slot < _count)
+        if (_mode == RowFilter.All)
         {
-            int id = Unsafe.Add(ref _ids, Slot);
-            if (id >= 0 && (_mode == RowFilter.All || _filter.Passes(Current, Slot)))
+            while (++Slot < _count)
             {
-                Id = id;
-                return result;
+                int id = Unsafe.Add(ref _ids, Slot);
+                if (id >= 0)
+                {
+                    Id = id;
+                    return result;
+                }
             }
         }
+        else if (NextTested()) return result;
 
         return Advance();
+    }
+
+    /// <summary>
+    /// Test mode: move to the next alive passing row of the current table, one row-filter word per 64 rows (words with
+    /// no passing row, such as unwritten words of a Changed filter, are skipped through the summaries).
+    /// </summary>
+    private bool NextTested()
+    {
+        int words = (_count + 63) >> 6;
+        int slot = Slot + 1;
+        while (slot < _count)
+        {
+            int w = slot >> 6;
+            if (w != _word)
+            {
+                int next = _filter.NextWord(Current, w, words);
+                if (next >= words) break;
+                if (next != w) slot = (w = next) << 6;
+                _word = w;
+                _bits = _filter.Word(Current, w) & RowFilter.RowMask(w, _count);
+            }
+
+            ulong bits = _bits & (ulong.MaxValue << slot); // shift is mod 64: slot's position in its word
+            if (bits == 0)
+            {
+                slot = (w + 1) << 6;
+                continue;
+            }
+
+            slot = (w << 6) + BitOperations.TrailingZeroCount(bits);
+            int id = Unsafe.Add(ref _ids, slot);
+            if (id >= 0)
+            {
+                Slot = slot;
+                Id = id;
+                return true;
+            }
+
+            slot++;
+        }
+
+        Slot = _count;
+        return false;
     }
 
     /// <summary>The caller made a structural change: re-read the id column and the presence counts.</summary>
@@ -615,6 +677,7 @@ internal ref struct ArchetypeCursor
         if (Current == null) return;
         _ids = ref MemoryMarshal.GetArrayDataReference(Current.EntityIds);
         _mode = _filter.Mode(Current);
+        _word = -1; // presence bits may have flipped
         if (_mode == RowFilter.None) _count = 0;
     }
 
@@ -634,10 +697,18 @@ internal ref struct ArchetypeCursor
             Current = archetype;
             _ids = ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds);
             _count = _counts[_archetype];
+            Slot = -1;
+            _word = -1;
+            if (_mode != RowFilter.All)
+            {
+                if (NextTested()) return Moved;
+                continue;
+            }
+
             for (Slot = 0; Slot < _count; Slot++)
             {
                 int id = Unsafe.Add(ref _ids, Slot);
-                if (id >= 0 && (_mode == RowFilter.All || _filter.Passes(archetype, Slot)))
+                if (id >= 0)
                 {
                     Id = id;
                     return Moved;

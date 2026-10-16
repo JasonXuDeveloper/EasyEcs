@@ -22,7 +22,8 @@ public sealed partial class World : IDisposable
     private int _entityCount;
 
     // Change tick: stamped into the rows of tracked components (ITrackChanges) on every write. Grows by one per system
-    // batch, once after each update and once per index sync; 64 bits never wrap.
+    // batch, once after each update and once per index catch-up outside a pass that found written rows; 64 bits never
+    // wrap.
     private ulong _changeTick = 1;
 
     /// <summary>
@@ -114,13 +115,20 @@ public sealed partial class World : IDisposable
                 var archetype = archetypes[a];
                 var rows = new RowFilter(match.Filters[a], since);
                 if (archetype.AliveCount == 0 || rows.Mode(archetype) == RowFilter.None) continue;
-                // From the last row down: outside passes a removed row is filled by the last one, already visited.
-                for (int slot = archetype.Count - 1; slot >= 0; slot--)
+                // From the last row down: outside passes a removed row is filled by the last one, already visited, so
+                // the passing rows of each word (computed once per word) stay valid for the rows below.
+                int count = archetype.Count;
+                for (int w = (count - 1) >> 6; w >= 0; w--)
                 {
-                    int id = archetype.EntityIds[slot];
-                    if (id < 0 || !rows.Passes(archetype, slot)) continue;
-                    Free(ref MetaRef(id), id);
-                    destroyed++;
+                    ulong bits = rows.Word(archetype, w) & RowFilter.RowMask(w, count);
+                    for (; bits != 0; bits &= ~(1UL << 63 >> BitOperations.LeadingZeroCount(bits)))
+                    {
+                        int slot = (w << 6) + 63 - BitOperations.LeadingZeroCount(bits);
+                        int id = archetype.EntityIds[slot];
+                        if (id < 0) continue;
+                        Free(ref MetaRef(id), id);
+                        destroyed++;
+                    }
                 }
             }
         }

@@ -21,8 +21,8 @@ public interface IIndexed<TKey> : ITrackChanges where TKey : IEquatable<TKey>
 
 /// <summary>
 /// The value index of component <typeparamref name="T"/> in one world (<see cref="World.Index{T,TKey}"/>). A lookup
-/// first re-indexes the rows of <typeparamref name="T"/> written since the previous lookup (found through their change
-/// ticks, 64 rows per word); entities leave the index as soon as they are destroyed or lose the component. Lookups
+/// first re-indexes the rows of <typeparamref name="T"/> written since the previous lookup (found through the change-tick
+/// summaries per table, per 4,096-row block and per 64-row word); entities leave the index as soon as they are destroyed or lose the component. Lookups
 /// allocate nothing once every key has been seen; the index belongs to the world's owner thread, like component values
 /// (systems that look up from <c>OnUpdate</c> or instance methods run alone).
 /// </summary>
@@ -61,9 +61,10 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex
     internal ValueIndex(World world) => _world = world;
 
     /// <summary>
-    /// The entities whose <typeparamref name="T"/> has key <paramref name="key"/> (none for a null key). O(rows written
-    /// since the previous lookup / 64 + their count) to catch up, then O(1) per entity. Not while a query or structural
-    /// change runs.
+    /// The entities whose <typeparamref name="T"/> has key <paramref name="key"/> (none for a null key). Catching up with
+    /// the w rows written since the previous lookup costs O(tables) when w = 0, else O(rows of <typeparamref name="T"/> /
+    /// 4,096 + written 64-row words + w); then O(1) per entity. Owner thread only; inside a pass a lookup sees that
+    /// pass's writes so far. Destroying entities during the loop is allowed, changing <typeparamref name="T"/> is not.
     /// </summary>
     public Matches Find(TKey key)
     {
@@ -85,7 +86,10 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex
         return false;
     }
 
-    /// <summary>Number of entities with key <paramref name="key"/>: a hash lookup once caught up (see <see cref="Find"/>).</summary>
+    /// <summary>
+    /// Number of entities with key <paramref name="key"/>: O(1) once caught up (a hash probe, or an array access for a
+    /// relation to an entity of this world; see <see cref="Find"/>).
+    /// </summary>
     public int Count(TKey key)
     {
         Sync();
@@ -93,7 +97,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex
         return Unsafe.IsNullRef(ref head) ? 0 : head.Count;
     }
 
-    /// <summary>Forget everything: the next lookup re-indexes every row (after <see cref="World.Restore"/>).</summary>
+    /// <summary>Forget everything: the next lookup re-indexes every row (after <see cref="World.Restore"/> or <see cref="World.Dispose"/>).</summary>
     void World.IValueIndex.Reset()
     {
         _heads.Clear();
@@ -202,24 +206,26 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex
             // written after it; the next sync then re-reads the rows stamped by that pass (only those).
             if (_synced == since)
                 _synced = Volatile.Read(ref _world.Passes) == 0 ? _world.AdvanceChangeTick() : _world.ChangeTick;
-            // No pass: syncing only reads keys, so no row moves while the written rows are walked.
+            // CatchUp opens no pass of its own: it only reads keys, so no row moves while the written rows are walked
+            // (inside a caller's pass, rows that lost their entity are tombstones, skipped below).
             int count = archetype.Count, words = (count + 63) >> 6;
             var ids = archetype.EntityIds;
+            var versions = archetype.Versions;
             ref T first = ref archetype.Base<T>(ComponentType<T>.Bit);
             for (int w = rows.NextWord(archetype, 0, words); w < words; w = rows.NextWord(archetype, w + 1, words))
                 for (ulong bits = rows.Word(archetype, w) & RowFilter.RowMask(w, count); bits != 0; bits &= bits - 1)
                 {
                     int slot = (w << 6) + BitOperations.TrailingZeroCount(bits);
-                    if (ids[slot] >= 0) Put(ids[slot], Unsafe.Add(ref first, slot).Key); // tombstones are skipped
+                    if (ids[slot] >= 0) Put(ids[slot], versions[slot], Unsafe.Add(ref first, slot).Key); // tombstones are skipped
                 }
         }
     }
 
     /// <summary>
-    /// Index entity <paramref name="id"/> (its current incarnation) under <paramref name="key"/>; a null key (the
-    /// default of a reference-type key) indexes it nowhere.
+    /// Index entity <paramref name="id"/> (its current incarnation, <paramref name="version"/>: its row's, next to its id)
+    /// under <paramref name="key"/>; a null key (the default of a reference-type key) indexes it nowhere.
     /// </summary>
-    private void Put(int id, TKey key)
+    private void Put(int id, int version, TKey key)
     {
         if (id >= _nodes.Length) Array.Resize(ref _nodes, Math.Max(id + 1, _nodes.Length * 2));
         ref var node = ref _nodes[id];
@@ -232,7 +238,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex
         if (IsNull(key)) return;
         ref var head = ref AddHead(key);
         node.Key = key;
-        node.Version = _world.MetaRef(id).Version;
+        node.Version = version;
         node.Linked = true;
         node.Prev = -1;
         node.Next = head.Count != 0 ? head.First : -1;

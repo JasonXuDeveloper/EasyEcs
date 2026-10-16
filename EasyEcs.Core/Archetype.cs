@@ -63,10 +63,20 @@ internal sealed class Archetype
     public readonly ulong[] LastWrite;
 
     /// <summary>
-    /// Per change-tick column (null for others): the latest tick stamped into each 64-row word, an upper bound like
-    /// <see cref="LastWrite"/>. A <c>Changed</c> filter skips a word older than the pass's tick with one load.
+    /// Per change-tick column (null for others): the latest tick of each 64-row word (exact for the word's rows below
+    /// the table's capacity). A <c>Changed</c> filter skips a word older than the pass's tick with one load.
     /// </summary>
     public readonly ulong[][] WordWrite;
+
+    /// <summary>
+    /// Per change-tick column: for each word, the rows whose tick is <see cref="WordWrite"/>, valid while
+    /// <see cref="WordRest"/> is below it. Then it answers a <c>Changed</c> filter without reading the ticks (see
+    /// <see cref="NoteWord"/>).
+    /// </summary>
+    public readonly ulong[][] WordRows;
+
+    /// <summary>Per change-tick column: for each word, an upper bound of the ticks of the rows not in <see cref="WordRows"/>.</summary>
+    public readonly ulong[][] WordRest;
 
     /// <summary>
     /// Per change-tick column (null for others): the latest tick stamped into each block of 64 words (4,096 rows), an
@@ -109,6 +119,8 @@ internal sealed class Archetype
         Absent = new int[Components.Length];
         LastWrite = new ulong[Components.Length];
         WordWrite = new ulong[Components.Length][];
+        WordRows = new ulong[Components.Length][];
+        WordRest = new ulong[Components.Length][];
         BlockWrite = new ulong[Components.Length][];
         _infos = new ComponentInfo[Components.Length];
         _columnOf = new short[Components.Length == 0 ? 0 : Components[^1] + 1];
@@ -123,6 +135,8 @@ internal sealed class Archetype
             if (info.Owner >= 0)
             {
                 WordWrite[i] = new ulong[(initialCapacity + 63) >> 6];
+                WordRows[i] = new ulong[(initialCapacity + 63) >> 6];
+                WordRest[i] = new ulong[(initialCapacity + 63) >> 6];
                 BlockWrite[i] = new ulong[(initialCapacity + 4095) >> 12];
             }
 
@@ -281,33 +295,117 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Stamp<T>(int slot, ulong tick) where T : struct, IComponent
     {
-        if (default(T) is ITrackChanges) Ticks<T>(tick, slot).Tick = tick;
+        if (default(T) is ITrackChanges) Ticks<T>(tick, slot, 1UL << slot).Tick = tick; // shift is mod 64
     }
 
-    /// <summary>Row <paramref name="slot"/> of the change ticks of <typeparamref name="T"/>, noting a write at <paramref name="tick"/>.</summary>
+    /// <summary>
+    /// <see cref="Stamp{T}"/> for a pass that writes row after row (a query, a per-entity job): the row's word loses
+    /// its exact rows, which such a pass would rebuild bit by bit, so readers compare the word's ticks (stores only).
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ref ChangeTicks<T> Ticks<T>(ulong tick, int slot) where T : struct, IComponent
+    public void StampVisited<T>(int slot, ulong tick) where T : struct, IComponent
+    {
+        NoteVisited<T>(slot, tick);
+        StampTick<T>(slot, tick);
+    }
+
+    /// <summary>
+    /// The summaries of <see cref="StampVisited{T}"/> alone: they then cover any row of the word stamped at
+    /// <paramref name="tick"/> with <see cref="StampTick{T}"/> (a pass notes each word once).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void NoteVisited<T>(int slot, ulong tick) where T : struct, IComponent
+    {
+        if (default(T) is ITrackChanges)
+        {
+            int column = ColumnIndex(ComponentType<ChangeTicks<T>>.Bit);
+            // WordRest == WordWrite: WordRows is not read until a later tick notes the word again (NoteWord).
+            WordWrite[column][slot >> 6] = tick;
+            WordRest[column][slot >> 6] = tick;
+            BlockWrite[column][slot >> 12] = tick;
+            LastWrite[column] = tick;
+        }
+    }
+
+    /// <summary>The row's change tick alone; its word must have been noted at <paramref name="tick"/> (<see cref="NoteVisited{T}"/>).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void StampTick<T>(int slot, ulong tick) where T : struct, IComponent
+    {
+        if (default(T) is ITrackChanges)
+            Unsafe.Add(ref Data<ChangeTicks<T>>(ColumnIndex(ComponentType<ChangeTicks<T>>.Bit)), slot).Tick = tick;
+    }
+
+    /// <summary>
+    /// Row <paramref name="slot"/> of the change ticks of <typeparamref name="T"/>, noting a write at
+    /// <paramref name="tick"/> of rows <paramref name="rows"/> of the row's word.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ref ChangeTicks<T> Ticks<T>(ulong tick, int slot, ulong rows) where T : struct, IComponent
     {
         int column = ColumnIndex(ComponentType<ChangeTicks<T>>.Bit);
-        LastWrite[column] = tick;
-        WordWrite[column][slot >> 6] = tick;
-        BlockWrite[column][slot >> 12] = tick;
+        // Summaries only grow (LastWrite >= BlockWrite >= WordWrite) and no row holds a later tick than the world's:
+        // a word already at this tick has its block and column at it too, so only its rows change.
+        if (WordWrite[column][slot >> 6] == tick) WordRows[column][slot >> 6] |= rows;
+        else NoteWord(column, slot, rows, tick);
         return ref Unsafe.Add(ref Data<ChangeTicks<T>>(column), slot);
     }
 
-    /// <summary>Raise the word summaries of row <paramref name="to"/> of <paramref name="target"/> to those of row <paramref name="from"/> of <paramref name="source"/> (a row copy).</summary>
+    /// <summary>
+    /// Rows <paramref name="rows"/> of the word of <paramref name="slot"/> get tick <paramref name="tick"/>, the world's
+    /// current one (no row of the column holds a later tick). Keeps the word's summaries exact: the rows of
+    /// <see cref="WordRows"/> hold <see cref="WordWrite"/>, the others at most <see cref="WordRest"/>.
+    /// </summary>
+    private void NoteWord(int column, int slot, ulong rows, ulong tick)
+    {
+        int word = slot >> 6;
+        ref ulong latest = ref WordWrite[column][word];
+        ref ulong written = ref WordRows[column][word];
+        if (latest == tick) written |= rows;
+        else
+        {
+            WordRest[column][word] = latest; // every row of the word held at most the previous latest tick
+            latest = tick;
+            written = rows;
+        }
+
+        BlockWrite[column][slot >> 12] = tick;
+        LastWrite[column] = tick;
+    }
+
+    /// <summary>
+    /// Raise the change-tick summaries (word, block, column) of row <paramref name="to"/> of <paramref name="target"/> to
+    /// those of row <paramref name="from"/> of <paramref name="source"/> (a row copy).
+    /// </summary>
     internal static void RaiseWords(Archetype source, int from, Archetype target, int to)
     {
         for (int c = 0; c < source.WordWrite.Length; c++)
         {
-            if (source.WordWrite[c] is not { } words) continue;
+            if (source.WordWrite[c] is null) continue;
             int t = target.ColumnIndex(source.Components[c]);
             if (t < 0) continue;
-            ref ulong word = ref target.WordWrite[t][to >> 6];
-            word = Math.Max(word, words[from >> 6]);
+            // The copied tick (the row was copied first); it may be older than the target word's latest.
+            ulong tick = Unsafe.Add(ref Unsafe.As<ChangeTick, ulong>(ref target.Data<ChangeTick>(t)), to);
+            int w = to >> 6;
+            ulong bit = 1UL << to; // shift is mod 64
+            ref ulong latest = ref target.WordWrite[t][w];
+            ref ulong written = ref target.WordRows[t][w];
+            if (tick > latest)
+            {
+                target.WordRest[t][w] = latest;
+                latest = tick;
+                written = bit;
+            }
+            else if (tick == latest) written |= bit;
+            else
+            {
+                written &= ~bit;
+                ref ulong rest = ref target.WordRest[t][w];
+                rest = Math.Max(rest, tick);
+            }
+
             ref ulong block = ref target.BlockWrite[t][to >> 12];
-            block = Math.Max(block, word);
-            target.LastWrite[t] = Math.Max(target.LastWrite[t], source.LastWrite[c]);
+            block = Math.Max(block, tick);
+            target.LastWrite[t] = Math.Max(target.LastWrite[t], tick);
         }
     }
 
@@ -317,22 +415,44 @@ internal sealed class Archetype
     {
         if (default(T) is ITrackChanges && count > 0)
         {
-            MemoryMarshal.CreateSpan(ref Unsafe.As<ChangeTicks<T>, ulong>(ref Ticks<T>(tick, start)), count).Fill(tick);
+            int end = start + count;
+            MemoryMarshal.CreateSpan(ref Unsafe.As<ChangeTicks<T>, ulong>(ref Ticks<T>(tick, start, RunMask(start, end, start >> 6))), count).Fill(tick);
             int column = ColumnIndex(ComponentType<ChangeTicks<T>>.Bit);
-            WordWrite[column].AsSpan(start >> 6, ((start + count - 1) >> 6) - (start >> 6) + 1).Fill(tick);
-            BlockWrite[column].AsSpan(start >> 12, ((start + count - 1) >> 12) - (start >> 12) + 1).Fill(tick);
+            int first = (start >> 6) + 1, last = (end - 1) >> 6;
+            if (last >= first)
+            {
+                // Whole words between the first and the last: every row gets the tick, so the rest bound may be any
+                // tick up to it (the previous latest is one); the last word may be partial.
+                int whole = last - first;
+                WordWrite[column].AsSpan(first, whole).CopyTo(WordRest[column].AsSpan(first, whole));
+                WordWrite[column].AsSpan(first, whole).Fill(tick);
+                WordRows[column].AsSpan(first, whole).Fill(ulong.MaxValue);
+                NoteWord(column, last << 6, RunMask(start, end, last), tick);
+            }
+
+            BlockWrite[column].AsSpan(start >> 12, ((end - 1) >> 12) - (start >> 12) + 1).Fill(tick);
         }
+    }
+
+    /// <summary>The rows of [<paramref name="start"/>, <paramref name="end"/>) in word <paramref name="word"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ulong RunMask(int start, int end, int word)
+    {
+        int first = Math.Max(start - (word << 6), 0), last = Math.Min(end - (word << 6), 64); // rows [first, last)
+        ulong upTo = last == 64 ? ulong.MaxValue : (1UL << last) - 1;
+        return upTo & (ulong.MaxValue << first);
     }
 
     /// <summary>Stamp every row of every change-tick column at <paramref name="tick"/> (after a restore). Cold path.</summary>
     public void StampTracked(ulong tick)
     {
+        if (Count == 0) return;
         for (int c = 0; c < Components.Length; c++)
             if (ComponentInfo.Of(Components[c]).Owner >= 0)
             {
                 MemoryMarshal.CreateSpan(ref Unsafe.As<ChangeTick, ulong>(ref Data<ChangeTick>(c)), Count).Fill(tick);
-                WordWrite[c].AsSpan().Fill(tick);
-                BlockWrite[c].AsSpan().Fill(tick);
+                for (int w = 0; w <= (Count - 1) >> 6; w++) NoteWord(c, w << 6, RunMask(0, Count, w), tick);
+                BlockWrite[c].AsSpan(0, ((Count - 1) >> 12) + 1).Fill(tick);
                 LastWrite[c] = tick;
             }
     }
@@ -343,7 +463,7 @@ internal sealed class Archetype
     {
         if (!(default(T) is ITrackChanges)) return;
         if (rows == 0) return;
-        ref var ticks = ref Ticks<T>(tick, word << 6);
+        ref var ticks = ref Ticks<T>(tick, word << 6, rows);
         for (; rows != 0; rows &= rows - 1) Unsafe.Add(ref ticks, BitOperations.TrailingZeroCount(rows)).Tick = tick;
     }
 
@@ -407,6 +527,8 @@ internal sealed class Archetype
             if (WordWrite[c] != null)
             {
                 Array.Resize(ref WordWrite[c], (capacity + 63) >> 6);
+                Array.Resize(ref WordRows[c], (capacity + 63) >> 6);
+                Array.Resize(ref WordRest[c], (capacity + 63) >> 6);
                 Array.Resize(ref BlockWrite[c], (capacity + 4095) >> 12);
             }
     }
