@@ -10,6 +10,7 @@ public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
 public record struct Health(int Value, int Max) : IComponent, ITrackChanges;    // replicated: writes are tracked
 public record struct Replica(int Health) : IComponent;                        // what clients last received
+public record struct Mana(int Value, int Max) : IComponent;
 public record struct Attack(int Damage, int Interval, int Cooldown) : IComponent;
 public record struct Burning(int Ticks) : IComponent;                         // status effects come and go
 public record struct Frozen(int Ticks) : IComponent;
@@ -35,6 +36,14 @@ public struct Replication : ISystemGroup;                                     //
 
 public partial class SteeringSystem : EcsSystem                               // heavy per-entity math: on all cores
 {
+    protected override void OnCreate()                                        // the system sets up the data it steers by
+    {
+        ref var waypoints = ref World.GetOrAddSingleton<Waypoints>();
+        for (int i = 0; i < Waypoints.Count; i++) waypoints.Points[i] = new Position(512 + i * 400, 512 + i * 1777 % 3000);
+    }
+
+    protected override void OnDestroy() => World.RemoveSingleton<Waypoints>();
+
     [ForEach(Parallel = true), With<Npc>, Without<Dead>, Without<Frozen>]
     static void Steer(in Position p, ref Velocity v, in Waypoints waypoints)
     {
@@ -53,6 +62,17 @@ public partial class MovementSystem : EcsSystem
     {
         for (int i = 0; i < positions.Length; i++)
             positions[i] = new Position(positions[i].X + velocities[i].X, positions[i].Y + velocities[i].Y);
+    }
+}
+
+public partial class ManaSystem : EcsSystem                                   // same priority as MovementSystem, other
+{                                                                             // data: both run at once (Parallel)
+    public override int Priority => 1;
+
+    [ForEach]
+    static void Regenerate(Span<Mana> mana)
+    {
+        for (int i = 0; i < mana.Length; i++) mana[i].Value = Math.Min(mana[i].Max, mana[i].Value + 1);
     }
 }
 
@@ -80,8 +100,8 @@ public partial class CombatSystem : EcsSystem
         unit.Get<Health>().Value -= attack.Damage;                            // a hit is a change of Health
         battle.Hits++;
         uint roll = Dice.Roll(battle.Tick, unit.Id);
-        if (roll % 50 == 0 && !unit.Has<Burning>()) unit.Add<Burning>() = new Burning(10);   // applied at once
-        else if (roll % 70 == 1 && !unit.Has<Frozen>()) unit.Add<Frozen>() = new Frozen(4);
+        if (roll % 50 == 0) unit.GetOrAdd<Burning>() = new Burning(10);       // applied at once; a new fire restarts it
+        else if (roll % 70 == 1) unit.Add<Frozen>() = new Frozen(4);          // never frozen here: Without<Frozen>
     }
 }
 
@@ -128,6 +148,7 @@ public partial class RespawnSystem : EcsSystem                                //
     {
         foreach (var shot in world.Index<OwnedBy, Entity>().Find(player)) shot.Destroy();   // recall its projectiles
         hp.Value = hp.Max;
+        player.Set(new Position(2048, 2048), new Mana(0, 100));               // several components, one call
         player.Remove<Dead>();
     }
 
@@ -135,7 +156,10 @@ public partial class RespawnSystem : EcsSystem                                //
     static void Despawn(Entity npc, in Position p, World world)
     {
         npc.Destroy();
-        BattleServer.SpawnNpc(world, new Position(p.Y, p.X), npc.Id);
+        var at = new Position(p.Y, p.X);
+        if (world.Index<Zone, int>().TryFind(npc.Id & 3, out var player))     // hunt a player of some zone
+            at = player.Get<Position>();
+        BattleServer.SpawnNpc(world, at, npc.Id);
     }
 }
 
@@ -144,9 +168,10 @@ public partial class ProjectileSystem : EcsSystem
     public override int Priority => 7;
 
     [ForEach, With<Player>, Without<Dead>]
-    static void Shoot(Entity player, in Position p, in Velocity v, ref Battle battle, World world)
+    static void Shoot(Entity player, in Position p, in Velocity v, ref Mana mana, ref Battle battle, World world)
     {
-        if (Dice.Roll(battle.Tick, player.Id) % 20 != 0) return;
+        if (mana.Value < BattleServer.ShotCost || Dice.Roll(battle.Tick, player.Id) % 20 != 0) return;
+        mana.Value -= BattleServer.ShotCost;
         battle.Shots++;
         world.CreateEntity(p, new Velocity(v.X * 4, v.Y * 4), new Lifetime(20), new OwnedBy(player));
     }
@@ -173,6 +198,7 @@ public partial class RegenerationSystem : EcsSystem
 public sealed class ClockSystem : EcsSystem
 {
     public override int Priority => 100;
+    protected override void OnCreate() => World.GetOrAddSingleton<Battle>();
     protected override void OnUpdate() => World.GetSingleton<Battle>().Tick++;
 }
 
@@ -187,7 +213,7 @@ public partial class ReplicationSystem : EcsSystem                            //
     }
 }
 
-public static class Dice                                       // deterministic per tick and entity
+public static class Dice
 {
     public static uint Roll(long tick, int id)
     {
@@ -198,30 +224,53 @@ public static class Dice                                       // deterministic 
     }
 }
 
-public static class BattleServer
+/// <summary>What the server reports: computed by struct jobs over the world, outside the tick.</summary>
+public record struct Census(int Players, int Alive, long Health, long Mana, Entity Weakest, int ReadyToAttack);
+
+/// <summary>
+/// The host of one battle: owns its world on one thread, ticks it, and answers questions about it between ticks.
+/// </summary>
+public sealed class BattleServer : IDisposable
 {
-    /// <summary>A world of <paramref name="units"/> units, a third of them players.</summary>
-    public static World Create(int units)
+    public const int ShotCost = 30;
+
+    private static readonly QueryFilter Players = QueryFilter.Create().With<Player>();     // build filters once
+    private static readonly QueryFilter AlivePlayers = Players.Without<Dead>();
+    private static readonly QueryFilter ReadyToAttack = QueryFilter.Create().Without<Dead>().Without<Frozen>();
+
+    public readonly World World;
+    private readonly SingletonRef<Battle> _battle;                            // resolved once, no lookup per tick
+    private WorldSnapshot _save;
+    private ulong _savedAt;
+
+    /// <summary>A battle of <paramref name="units"/> units, a third of them players.</summary>
+    public BattleServer(int units)
     {
-        var world = new World(new WorldOptions { InitialEntityCapacity = units * 2 });
-        world.AddSingleton<Battle>();
-        ref var waypoints = ref world.AddSingleton<Waypoints>();
-        for (int i = 0; i < Waypoints.Count; i++) waypoints.Points[i] = new Position(512 + i * 400, 512 + (i * 1777) % 3000);
-        world.AddSystem<SteeringSystem>();
-        world.AddSystem<MovementSystem>();
-        world.AddSystem<ZoneSystem>();
-        world.AddSystem<CombatSystem>();
-        world.AddSystem<StatusSystem>();
-        world.AddSystem<DeathSystem>();
-        world.AddSystem<RespawnSystem>();
-        world.AddSystem<ProjectileSystem>();
-        world.AddSystem<RegenerationSystem>();
-        world.AddSystem<ClockSystem>();
-        world.AddSystem<ReplicationSystem>();
+        World = new World(new WorldOptions
+        {
+            InitialEntityCapacity = units * 2,
+            Parallel = true,                                                  // systems of one priority side by side
+            MeasureSystems = true,                                            // per-system timings in system.Stats
+        });
+        World.SystemError += OnSystemError;
+
+        World.AddSystem<ClockSystem>();                                       // OnCreate adds the Battle singleton
+        World.AddSystem<SteeringSystem>();
+        World.AddSystem<MovementSystem>();
+        World.AddSystem<ManaSystem>();
+        World.AddSystem<ZoneSystem>();
+        World.AddSystem<CombatSystem>();
+        World.AddSystem<StatusSystem>();
+        World.AddSystem<DeathSystem>();
+        World.AddSystem<RespawnSystem>();
+        World.AddSystem<ProjectileSystem>();
+        World.AddSystem<RegenerationSystem>();
+        World.AddSystem<ReplicationSystem>();
+        _battle = World.SingletonRef<Battle>();
 
         var players = new Entity[units / 3];                                  // one batch: one table growth
-        world.CreateEntities(players, new Position(), new Velocity(1, 0), new Health(500, 500), new Replica(500),
-            new Attack(8, 6, 0), new Zone(0), new Player());
+        World.CreateEntities(players, new Position(), new Velocity(1, 0), new Health(500, 500), new Replica(500),
+            new Mana(100, 100), new Attack(8, 6, 0), new Zone(0), new Player());
         for (int i = 0; i < players.Length; i++)
         {
             uint r = Dice.Roll(0, i);
@@ -233,10 +282,8 @@ public static class BattleServer
         for (int i = players.Length; i < units; i++)
         {
             uint r = Dice.Roll(0, i);
-            SpawnNpc(world, new Position(r % 4096, (r >> 12) % 4096), i);
+            SpawnNpc(World, new Position(r % 4096, (r >> 12) % 4096), i);
         }
-
-        return world;
     }
 
     public static void SpawnNpc(World world, Position at, int seed)
@@ -247,10 +294,121 @@ public static class BattleServer
             new Attack(5 + (int)(r % 5), 5 + (int)(r % 10), (int)(r % 10)), new Npc());
     }
 
+    public ref Battle Battle => ref _battle.Value;
+
+    /// <summary>The last system that threw; it was switched off and the battle went on.</summary>
+    public (EcsSystem System, Exception Error) Failure { get; private set; }
+
     /// <summary>One server tick: the simulation every tick, replication every third.</summary>
-    public static void Tick(World world)
+    public void Tick()
     {
-        world.Update();
-        if (world.GetSingleton<Battle>().Tick % 3 == 0) world.Update<Replication>();
+        World.Update();
+        if (Battle.Tick % 3 == 0) World.Update<Replication>();
+    }
+
+    /// <summary>Whether players may shoot: a disabled system is skipped by every update.</summary>
+    public bool Ceasefire
+    {
+        get => !World.GetSystem<ProjectileSystem>().Enabled;
+        set => World.GetSystem<ProjectileSystem>().Enabled = !value;
+    }
+
+    public int PlayersIn(int zone) => World.Index<Zone, int>().Count(zone);
+
+    public bool AnyoneBurning => World.Any<Burning>();
+
+    public int ShotsLeft(Entity player) => player.TryGet<Mana>(out var mana) ? mana.Value / ShotCost : 0;
+
+    /// <summary>The living player closest to <paramref name="at"/>: an ad-hoc query.</summary>
+    public Entity NearestPlayer(Position at)
+    {
+        Entity nearest = default;
+        float best = float.MaxValue;
+        foreach (var item in World.Query<Position>(AlivePlayers))            // Position is not tracked: reads are free
+        {
+            float dx = item.Component1.X - at.X, dy = item.Component1.Y - at.Y;
+            if (dx * dx + dy * dy < best) (best, nearest) = (dx * dx + dy * dy, item.Entity);
+        }
+
+        return nearest;
+    }
+
+    public Census Census()
+    {
+        var health = new SumHealth();
+        World.ForEachBatch<Health, SumHealth>(ref health, AlivePlayers);
+        var mana = new SumMana();
+        World.ForEach<Mana, SumMana>(ref mana);
+        var weakest = new FindWeakest { Lowest = int.MaxValue };
+        World.ForEachEntity<Health, FindWeakest>(ref weakest, AlivePlayers);
+        return new Census(World.Count<Player>(), World.Count<Player>(AlivePlayers), health.Total, mana.Total,
+            weakest.Entity, World.Count<Attack>(ReadyToAttack));
+    }
+
+    /// <summary>A new round: projectiles gone, everyone healed, the tables tidied.</summary>
+    public int NewRound()
+    {
+        int cleared = World.DestroyEntities<Lifetime>();                      // one pass, however many
+        var heal = new HealFully();
+        World.ForEachParallel<Health, HealFully>(ref heal);                   // a struct job on all cores
+        if (World.GetFragmentationStats().FragmentationRatio > 0.1f) World.CompactArchetypes();
+        return cleared;
+    }
+
+    /// <summary>Save to memory; <see cref="Unsaved"/> counts the players written since.</summary>
+    public void Save()
+    {
+        _save = World.Capture();
+        _savedAt = World.ChangeTick;
+    }
+
+    public void Load() => World.Restore(_save);
+
+    public int Unsaved => World.Count<Health>(Players.Changed<Health>().ChangedSince(_savedAt));
+
+    /// <summary>The system that took the most time per run so far (<see cref="WorldOptions.MeasureSystems"/>).</summary>
+    public EcsSystem Slowest()
+    {
+        EcsSystem slowest = null;
+        foreach (var system in World.Systems)
+            if (slowest == null || system.Stats.Average > slowest.Stats.Average) slowest = system;
+        return slowest;
+    }
+
+    private void OnSystemError(EcsSystem system, Exception error)
+    {
+        system.Enabled = false;                                               // isolate the failure, keep the battle
+        Failure = (system, error);
+    }
+
+    public void Dispose() => World.Dispose();                                 // OnDestroy of every system
+
+    private struct SumHealth : IForEachBatch<Health>, INoStructuralChanges
+    {
+        public long Total;
+        public static int Writes => 0;                                        // reads only: rows stay unchanged
+        public void Execute(Span<Health> hp) { for (int i = 0; i < hp.Length; i++) Total += hp[i].Value; }
+    }
+
+    private struct SumMana : IForEach<Mana>, INoStructuralChanges
+    {
+        public long Total;
+        public static bool ReadsId => false;                                  // the id column is not even loaded
+        public static int Writes => 0;
+        public void Execute(int entityId, ref Mana mana) => Total += mana.Value;
+    }
+
+    private struct FindWeakest : IForEachEntity<Health>, INoStructuralChanges
+    {
+        public Entity Entity;
+        public int Lowest;
+        public static int Writes => 0;
+        public void Execute(Entity entity, ref Health hp) { if (hp.Value < Lowest) (Lowest, Entity) = (hp.Value, entity); }
+    }
+
+    private struct HealFully : IForEach<Health>, INoStructuralChanges        // one copy per thread: no shared state
+    {
+        public static bool ReadsId => false;
+        public void Execute(int entityId, ref Health hp) => hp.Value = hp.Max;
     }
 }
