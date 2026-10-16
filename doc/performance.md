@@ -79,10 +79,11 @@ All numbers come from BenchmarkDotNet. The headline benchmarks simulate a real s
 
   Setup asserts that the world is busy: hits, deaths, spawns and AOI changes all happen.
 - **`BattleServerBenchmark.Tick`** is one tick of the README's battle server (`BattleServer.cs`), which uses every
-  feature: a parallel `[ForEach]` (NPC steering), a batch method (movement), statuses added and removed mid-pass,
-  `WithAny`, deaths, respawns and projectiles, a value index (players per zone) and a relation (projectiles of a
-  player), an update interval, and replication of changed health every third tick (`[Changed<Health>]` in its own
-  system group). `BattleServerTests` check the same world.
+  feature: a parallel `[ForEach]` (NPC steering), two parallel systems of one priority (movement and mana, batch
+  methods), statuses added and removed mid-pass, `WithAny`, deaths, respawns and projectiles, a value index (players
+  per zone) and a relation (projectiles of a player), an update interval, per-system timings, and replication of
+  changed health every third tick (`[Changed<Health>]` in its own system group). `BattleServerTests` check the same
+  world and the host's queries, struct jobs, snapshots and error handling.
 - **`MultiWorldBenchmark.TickAllWorlds`** runs one world per core, each on its own long-lived thread. This is the
   recommended server layout.
 - **`ParallelSystemsBenchmark.Tick`** is one update of four `[ForEach]` systems of one priority with disjoint access
@@ -120,7 +121,7 @@ Measured with BenchmarkDotNet's default job on .NET 10, on a 4-core Xeon VM at 2
 | WorldSimulationBenchmark.Tick | 10,000 | 322 μs | 175 μs | 0 B |
 | WorldSimulationBenchmark.Tick | 100,000 | 4.33 ms | 1.90 ms | 0 B |
 | MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.85 ms | 0.93 ms | 0 B |
-| BattleServerBenchmark.Tick (every feature) | 100,000 | – | 2.76 ms | 0 B |
+| BattleServerBenchmark.Tick (every feature) | 100,000 | – | 2.68 ms | 0 B |
 | ParallelSystemsBenchmark.Tick, `Parallel` off / on | 100,000 | – | 426 / 287 μs | 0 B |
 | ParallelForEachBenchmark.Tick, `[ForEach]` / `[ForEach(Parallel = true)]` | 100,000 | – | 1,826 / 760 μs | 0 B |
 | ChangeTrackingBenchmark.Tick, 10 rows written: every row / `[Changed<Health>]` | 100,000 | – | 36.9 μs / 0.69 μs | 0 B |

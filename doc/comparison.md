@@ -14,6 +14,7 @@ checks that every library computes the same result.
 - [Operations](#operations)
 - [Change tracking](#change-tracking)
 - [Indexes and relations](#indexes-and-relations)
+- [Their features in EasyEcs](#their-features-in-easyecs)
 - [Which one to pick](#which-one-to-pick)
 
 ## Features
@@ -140,6 +141,38 @@ hands, then 100 inventories are counted. EasyEcs uses a relation (`IIndexed<Enti
 All three answer "which items does this owner hold" without a scan. EasyEcs's index needs no change event: it
 catches up from the change ticks when it is read, so a trade is a plain write of the item's `Owner` component;
 the catch-up makes many trades cost about 40% more than with libraries that update the map on every set.
+
+## Their features in EasyEcs
+
+What the other libraries offer, how EasyEcs does the same job, and where the
+[battle server](../README.md#example-a-battle-server) of the README (`EasyEcs.Benchmark/BattleServer.cs`) shows it.
+Some are built in under another name; some are done with data instead of a mechanism (EasyEcs has no events or
+command buffers on purpose); a few are not offered.
+
+| Their feature | In | EasyEcs | In the battle server |
+|---|---|---|---|
+| Command buffer for changes during a query | Friflo, Arch, DefaultEcs | not needed: add, remove, create and destroy apply at once, also mid-pass | `CombatSystem` adds statuses, `DeathSystem` adds `Dead`, `ProjectileSystem` spawns and expires |
+| Thread-safe command buffer | Friflo | a queue you own, drained by a system on the world's thread ([threading](guide/threading.md)) | one world per thread in the usage code |
+| Component added / removed / set events | Friflo, Arch, DefaultEcs | state changes are data: the change is a component that the next system queries | `DeathSystem` adds `Dead`, `RespawnSystem` queries `With<Dead>`; neither knows the other |
+| Reactive sets (`WhenAdded`, `WhenChanged`) and `NotifyChanged` | DefaultEcs | `[Changed<T>]` and `QueryFilter.Changed<T>()`; a `ref` write is the change, nothing to notify | `ReplicationSystem`, `Unsaved` |
+| Publish / subscribe messages | DefaultEcs | data: a singleton or components that systems read | `Battle` counters |
+| Tags | Friflo | empty components; removing one flips a bit, the entity keeps its row | `Player`, `Npc`, `Dead`, `Frozen` |
+| Unique entity / world-level component | Friflo, DefaultEcs | singletons, as `[ForEach]` parameters or a `SingletonRef<T>` | `Battle`, `Waypoints`, the host's `SingletonRef<Battle>` |
+| Enable / disable an entity or component | Friflo, DefaultEcs | add or remove a tag (`Without<Frozen>` skips it); `system.Enabled` for systems | `Frozen`, `Ceasefire` |
+| Systems, groups, ordering | Friflo, DefaultEcs, Arch.Extended | `EcsSystem`, `Priority`, `ISystemGroup`, `UpdateInterval`, `OnCreate` / `OnDestroy` | every system; `Replication`; `SteeringSystem.OnCreate` |
+| Struct query jobs (`IForEach`, inline queries) | Arch, Friflo | `IForEach`, `IForEachEntity`, `IForEachBatch` (`[ForEach]` generates them) | `Census` |
+| Chunk iteration | Arch, Friflo | batch methods (`Span<T>` per run of rows) | `MovementSystem`, `ManaSystem`, `SumHealth` |
+| Parallel query | Friflo, Arch, DefaultEcs | `[ForEach(Parallel = true)]`, `ForEachParallel` | `SteeringSystem`, `NewRound` |
+| Parallel systems | DefaultEcs | `WorldOptions.Parallel`: systems of one priority whose generated access does not conflict | `MovementSystem` and `ManaSystem` |
+| Bulk create and destroy | Friflo, Arch | `CreateEntities`, `DestroyEntities(filter)` | the players in the constructor, the projectiles in `NewRound` |
+| Indexed components | Friflo, DefaultEcs | `IIndexed<TKey>`: `Find`, `TryFind`, `Count` (exact keys; no range queries) | `Zone`: `PlayersIn`, `Despawn` |
+| Links and relations | Friflo | `IIndexed<Entity>`: the reverse lookup comes from the index | `OwnedBy`: a respawn recalls its projectiles |
+| Parent / child hierarchy | Friflo | a relation to the parent (`Parent : IIndexed<Entity>`, children by `Find`); no built-in transform propagation | `OwnedBy` is such a link |
+| Serialization | Friflo (JSON), DefaultEcs (text, binary) | in-memory `Capture` / `Restore`; for storage, your serializer over a `Query` | `Save` / `Load` |
+| System performance monitor | Friflo | `WorldOptions.MeasureSystems`, `system.Stats` | `Slowest` |
+| Error handling per system | – | `World.SystemError`: report, switch the system off, keep running | `OnSystemError` |
+| Shared components (`SetSameAs`) | DefaultEcs | not built in: keep shared data in a singleton and an id into it in the component | – |
+| Unity, older runtimes | all three | not offered: net10.0 only | – |
 
 ## Which one to pick
 

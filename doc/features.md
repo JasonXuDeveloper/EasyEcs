@@ -7,28 +7,28 @@ Every feature of EasyEcs on one page: what it does, when to use it (and when not
 scenarios it is built for. Each section links to its guide page. Numbers are BenchmarkDotNet results on a 4-core
 Xeon VM at 2.1 GHz ([benchmarks](performance.md#benchmarks)).
 
-| Feature | In one line |
-|---|---|
-| [Worlds and entities](#worlds-and-entities) | Isolated worlds of version-checked, recycled entity handles. |
-| [Components and tags](#components-and-tags) | Plain structs in archetype tables; empty structs are tags. |
-| [Immediate structural changes](#immediate-structural-changes) | Add, remove, create, destroy anywhere, even mid-pass; no command buffer. |
-| [Systems and `[ForEach]`](#systems-and-foreach) | One-job systems; a method is the whole loop, compiled to an inlined struct job. |
-| [Filters](#filters) | `With`, `Without`, `WithAny`, `Changed` as attributes or a `QueryFilter`. |
-| [Ad-hoc queries](#ad-hoc-queries) | `Query`, struct jobs, `Count`, `Any` from any code. |
-| [Batch methods](#batch-methods) | Runs of rows as spans, for SIMD. |
-| [System groups and intervals](#system-groups-and-intervals) | Separate cadences: input on every wake, simulation on a fixed tick. |
-| [Singletons](#singletons) | One value per world, passed to systems as parameters. |
-| [Parallel systems](#parallel-systems) | Non-conflicting systems of one priority run at once, same result as sequential. |
-| [Parallel `[ForEach]`](#parallel-foreach) | One heavy method's rows split across cores. |
-| [Change tracking](#change-tracking) | Visit only the rows written since a system last ran. |
-| [Value indexes](#value-indexes) | Find entities by a component's value. |
-| [Relations](#relations) | Entity-to-entity links with reverse lookup. |
-| [Snapshots](#snapshots) | Copy a world and restore it in memory. |
-| [Bulk create and destroy](#bulk-create-and-destroy) | Spawn and clear waves in one pass through the structural gate. |
-| [Per-system timing](#per-system-timing) | Run counts and times of every system. |
-| [Analyzer](#analyzer) | ECS design mistakes fail the build. |
-| [Threading model](#threading-model) | One owner thread per world, many worlds per process. |
-| [Native AOT](#native-aot) | No reflection on hot paths, nothing to configure. |
+| Feature | In one line | In the [battle server](../README.md#example-a-battle-server) |
+|---|---|---|
+| [Worlds and entities](#worlds-and-entities) | Isolated worlds of version-checked, recycled entity handles. | `new World(options)` in the host; `Entity` handles everywhere |
+| [Components and tags](#components-and-tags) | Plain structs in archetype tables; empty structs are tags. | `Position`, `Health`, …; tags `Player`, `Npc`, `Dead` |
+| [Immediate structural changes](#immediate-structural-changes) | Add, remove, create, destroy anywhere, even mid-pass; no command buffer. | `CombatSystem` adds statuses, `DeathSystem` adds `Dead`, `ProjectileSystem` spawns and destroys |
+| [Systems and `[ForEach]`](#systems-and-foreach) | One-job systems; a method is the whole loop, compiled to an inlined struct job. | every system; `ClockSystem` overrides `OnUpdate` |
+| [Filters](#filters) | `With`, `Without`, `WithAny`, `Changed` as attributes or a `QueryFilter`. | `With<Npc>`, `Without<Dead>`, `StatusSystem.Count` (`WithAny`), the host's `static readonly` filters |
+| [Ad-hoc queries](#ad-hoc-queries) | `Query`, struct jobs, `Count`, `Any` from any code. | `NearestPlayer` (`Query`), `Census` (struct jobs, `Count`), `AnyoneBurning` (`Any`) |
+| [Batch methods](#batch-methods) | Runs of rows as spans, for SIMD. | `MovementSystem`, `ManaSystem`, `SumHealth` |
+| [System groups and intervals](#system-groups-and-intervals) | Separate cadences: input on every wake, simulation on a fixed tick. | `Replication` group, `RegenerationSystem.UpdateInterval`, `Ceasefire` (`Enabled`) |
+| [Singletons](#singletons) | One value per world, passed to systems as parameters. | `Battle`, `Waypoints` (added in `OnCreate`), `SingletonRef<Battle>` in the host |
+| [Parallel systems](#parallel-systems) | Non-conflicting systems of one priority run at once, same result as sequential. | `MovementSystem` and `ManaSystem` (`WorldOptions.Parallel`) |
+| [Parallel `[ForEach]`](#parallel-foreach) | One heavy method's rows split across cores. | `SteeringSystem`; `NewRound` (`ForEachParallel`) |
+| [Change tracking](#change-tracking) | Visit only the rows written since a system last ran. | `ReplicationSystem` (`[Changed<Health>]`), `Unsaved` (`ChangedSince`) |
+| [Value indexes](#value-indexes) | Find entities by a component's value. | `Zone`: `PlayersIn`, `Despawn` (`TryFind`) |
+| [Relations](#relations) | Entity-to-entity links with reverse lookup. | `OwnedBy`: `Respawn` recalls a player's projectiles |
+| [Snapshots](#snapshots) | Copy a world and restore it in memory. | `Save` / `Load` |
+| [Bulk create and destroy](#bulk-create-and-destroy) | Spawn and clear waves in one pass through the structural gate. | `CreateEntities` (players), `DestroyEntities` (`NewRound`) |
+| [Per-system timing](#per-system-timing) | Run counts and times of every system. | `MeasureSystems`, `Slowest` |
+| [Analyzer](#analyzer) | ECS design mistakes fail the build. | the whole file builds without a warning |
+| [Threading model](#threading-model) | One owner thread per world, many worlds per process. | one world per thread (`BattlesOnSeparateThreadsMatchOneRunAlone`); `SystemError` |
+| [Native AOT](#native-aot) | No reflection on hot paths, nothing to configure. | nothing to change |
 
 ## Worlds and entities
 
