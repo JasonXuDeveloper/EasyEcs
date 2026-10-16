@@ -14,6 +14,12 @@ step introduces one concept and links to the guide page that covers it in depth.
 - [9. Order systems and react to state](#9-order-systems-and-react-to-state)
 - [10. Run the update loop](#10-run-the-update-loop)
 - [11. Different cadences: system groups](#11-different-cadences-system-groups)
+- [12. States that come and go](#12-states-that-come-and-go)
+- [13. Whole runs of rows: batch methods](#13-whole-runs-of-rows-batch-methods)
+- [14. Heavy work on every core](#14-heavy-work-on-every-core)
+- [15. Only what changed](#15-only-what-changed)
+- [16. Find entities by value, follow relations](#16-find-entities-by-value-follow-relations)
+- [17. Batches, snapshots, timings](#17-batches-snapshots-timings)
 - [Next steps](#next-steps)
 
 ## 1. Install
@@ -62,7 +68,7 @@ as a filter.
 ```csharp
 public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
-public record struct Health(int Value) : IComponent;
+public record struct Health(int Value) : IComponent, ITrackChanges;   // writes are tracked (step 15)
 public struct Dead : IComponent;      // tag
 ```
 
@@ -162,7 +168,7 @@ Systems are stateless ([EECS007](guide/analyzer.md#eecs007)). State with one val
 configuration) is a singleton: a struct implementing `ISingletonComponent`.
 
 ```csharp
-public record struct Stats(long Tick, int Deaths) : ISingletonComponent;
+public record struct Stats(long Tick, int Deaths, int Afflicted) : ISingletonComponent;
 
 public partial class DeathSystem : EcsSystem
 {
@@ -248,6 +254,135 @@ public partial class ApplyInputSystem : EcsSystem { /* [ForEach] methods */ }
 world.Update<InputGroup>();   // whenever input arrives
 world.Update();               // fixed tick
 ```
+
+## 12. States that come and go
+
+A temporary state (burning, frozen, stunned) is a component that is added and later removed. Removing one only
+clears a presence bit, so the entity keeps its row and the next add is as cheap. `[WithAny<A>, WithAny<B>]` visits
+entities that have at least one of them:
+
+```csharp
+public record struct Burning(int Ticks) : IComponent;
+public record struct Frozen(int Ticks) : IComponent;
+
+public partial class StatusSystem : EcsSystem
+{
+    [ForEach]
+    static void Burn(Entity unit, ref Burning burning, ref Health hp)
+    {
+        hp = hp with { Value = hp.Value - 3 };
+        if (--burning.Ticks == 0) unit.Remove<Burning>();    // safe in the middle of the pass
+    }
+
+    [ForEach, WithAny<Burning>, WithAny<Frozen>]              // burning or frozen, or both
+    static void Count(in Health hp, ref Stats stats) => stats.Afflicted++;
+}
+```
+
+State is data: instead of a `bool IsBurning` field every system checks, the systems that care query `Burning`.
+See [Structural changes](guide/structural-changes.md).
+
+## 13. Whole runs of rows: batch methods
+
+A `[ForEach]` method that takes `Span<T>` / `ReadOnlySpan<T>` receives whole runs of matching rows, so the JIT can
+vectorize the loop. The filters apply as usual; it cannot change structure:
+
+```csharp
+public partial class FastMovementSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Move(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
+    {
+        for (int i = 0; i < positions.Length; i++)
+            positions[i] = new Position(positions[i].X + velocities[i].X, positions[i].Y + velocities[i].Y);
+    }
+}
+```
+
+## 14. Heavy work on every core
+
+`[ForEach(Parallel = true)]` splits one method's rows into chunks that run on several threads. The method may not
+change structure and takes singletons only `in`; the analyzer rejects anything that could race
+([EECS010](guide/analyzer.md#eecs010)):
+
+```csharp
+public record struct Target(float X, float Y) : ISingletonComponent;
+
+public partial class SteeringSystem : EcsSystem
+{
+    [ForEach(Parallel = true), Without<Dead>]
+    static void Steer(in Position p, ref Velocity v, in Target target)
+    {
+        float dx = target.X - p.X, dy = target.Y - p.Y, length = MathF.Sqrt(dx * dx + dy * dy) + 1;
+        v = new Velocity(dx / length, dy / length);
+    }
+}
+```
+
+It pays for heavy per-entity work over tens of thousands of entities. Independent *systems* of one priority can also
+run together with `WorldOptions.Parallel` ([Threading](guide/threading.md)).
+
+## 15. Only what changed
+
+A component marked `ITrackChanges` records the tick of each row's last write; any write counts, including through
+`ref`. A `[Changed<T>]` method visits only the rows written since its system last ran, which is what replication
+and persistence need:
+
+```csharp
+public record struct Replica(int Health) : IComponent;
+public struct Network : ISystemGroup;
+
+[UpdateInGroup<Network>]
+public partial class ReplicationSystem : EcsSystem
+{
+    [ForEach, Changed<Health>]
+    static void Send(in Health hp, ref Replica replica) => replica = new Replica(hp.Value);
+}
+```
+
+```csharp
+world.Update();                // simulation
+world.Update<Network>();       // when the server sends: only healths written since the last send
+```
+
+Take components `in` when you only read them: a `ref` parameter, `Get<T>()` or a query item counts as a write.
+See [Change tracking](guide/change-tracking.md).
+
+## 16. Find entities by value, follow relations
+
+A tracked component implementing `IIndexed<TKey>` is found by its key through `world.Index<T, TKey>()`, which
+follows every write. An `Entity` key makes a relation: the index lists the entities pointing at an entity.
+
+```csharp
+public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+public record struct OwnedBy(Entity Owner) : IComponent, IIndexed<Entity> { public Entity Key => Owner; }
+```
+
+```csharp
+var teams = world.Index<Team, int>();
+int red = teams.Count(1);                                     // units in team 1
+foreach (var shot in world.Index<OwnedBy, Entity>().Find(unit))
+    shot.Destroy();                                           // destroying while iterating is allowed
+```
+
+See [Indexes and relations](guide/indexes-and-relations.md).
+
+## 17. Batches, snapshots, timings
+
+```csharp
+var units = new Entity[10_000];
+world.CreateEntities(units, new Position(), new Velocity(1, 0), new Health(100));   // one table growth
+
+var save = world.Capture();     // copy the world in memory
+world.Update();
+world.Restore(save);            // and roll it back: handles from before stay valid
+```
+
+With `WorldOptions { MeasureSystems = true }`, every system records its runs and times in `system.Stats`. See
+[Snapshots](guide/snapshots.md).
+
+The [README](../README.md#example-a-battle-server) puts all of it together in one battle server, which is also a
+benchmark and a test of this repository.
 
 ## Next steps
 

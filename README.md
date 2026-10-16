@@ -14,6 +14,7 @@ catches design mistakes at compile time, and a full server tick allocates 0 byte
 |---|---:|---:|---:|
 | One world | 100,000 | **1.90 ms** | **0 B** |
 | Four worlds on four threads (one per thread) | 100,000 | **0.93 ms** | **0 B** |
+| The [battle server below](#example-a-battle-server), every feature on: parallel steering, replication, indexes, relations | 100,000 | **2.76 ms** | **0 B** |
 
 <sub>BenchmarkDotNet, .NET 10, 4-core Xeon VM at 2.1 GHz; entities spawn, die, gain and lose components every tick.
 A `[ForEach]` system adding `Velocity` to `Position` costs 0.8 ns per entity (one archetype), faster than two
@@ -48,89 +49,197 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
 
 ## Example: a battle server
 
-Data is plain structs; behavior is one-job systems that never know about each other.
+One zone of a battle server, using every feature: plain data, one job per system, systems that never know about each
+other. It is the [benchmark world](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/EasyEcs.Benchmark/BattleServer.cs)
+measured below and the world of the
+[scenario tests](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/EasyEcs.UnitTest/BattleServerTests.cs).
+
+| Feature | Where |
+|---|---|
+| Components, tags, singletons | `Position`, `Health`, `Player`, `Dead`; `Battle`, `Waypoints` |
+| `[ForEach]` systems, filters (`With`, `Without`, `WithAny`) | every system; `StatusSystem.Count` counts burning **or** frozen units |
+| `[ForEach(Parallel = true)]` | `SteeringSystem`: NPC steering on every core |
+| Batch methods (`Span<T>`) | `MovementSystem`: whole runs of rows, SIMD-friendly |
+| Immediate structural changes | statuses added and removed mid-pass, deaths, respawns, projectiles spawned and destroyed |
+| Change tracking (`ITrackChanges`, `[Changed<T>]`) | `ReplicationSystem` sends only the healths written since its last run |
+| Value index | `Zone : IIndexed<int>`: players per zone |
+| Relation | `OwnedBy : IIndexed<Entity>`: a respawning player recalls its projectiles |
+| System groups, `UpdateInterval` | `Replication` runs every third tick; `RegenerationSystem` every tenth update |
+| Bulk creation, snapshots | `CreateEntities` for the players; `Capture` / `Restore` below |
+
+**Data** is plain structs:
 
 ```csharp
+using System;
+using System.Runtime.CompilerServices;
 using EasyEcs;
 
 public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
-public record struct Health(int Value, int Max) : IComponent;
-public record struct Hits(int Damage, int Interval, int Cooldown) : IComponent;  // damage taken every Interval ticks
-public record struct Burning(int Ticks) : IComponent;      // a status effect: added and removed at run time
+public record struct Health(int Value, int Max) : IComponent, ITrackChanges;    // replicated: writes are tracked
+public record struct Replica(int Health) : IComponent;                        // what clients last received
+public record struct Attack(int Damage, int Interval, int Cooldown) : IComponent;
+public record struct Burning(int Ticks) : IComponent;                         // status effects come and go
+public record struct Frozen(int Ticks) : IComponent;
 public record struct Lifetime(int Ticks) : IComponent;
-public struct Player : IComponent;                         // tags: empty components used as filters
+public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }                  // players by zone
+public record struct OwnedBy(Entity Owner) : IComponent, IIndexed<Entity> { public Entity Key => Owner; } // a relation
+public struct Player : IComponent;                                            // tags: empty components
+public struct Npc : IComponent;
 public struct Dead : IComponent;
-public record struct Battle(long Tick, int Deaths) : ISingletonComponent;   // one value per world
+
+public record struct Battle(long Tick, int Hits, int Deaths, int Shots, int Replicated, int Afflicted) : ISingletonComponent;
+
+public struct Waypoints : ISingletonComponent
+{
+    public const int Count = 8;
+    public WaypointArray Points;
+}
+
+[InlineArray(Waypoints.Count)]
+public struct WaypointArray { private Position _first; }
+
+public struct Replication : ISystemGroup;                                     // runs when the server sends updates
+```
+
+**Systems** do one job each, in `Priority` order:
+
+```csharp
+public partial class SteeringSystem : EcsSystem                               // heavy per-entity math: on all cores
+{
+    [ForEach(Parallel = true), With<Npc>, Without<Dead>, Without<Frozen>]
+    static void Steer(in Position p, ref Velocity v, in Waypoints waypoints)
+    {
+        var target = waypoints.Points[(int)(p.X + p.Y) & (Waypoints.Count - 1)];
+        float dx = target.X - p.X, dy = target.Y - p.Y, length = MathF.Sqrt(dx * dx + dy * dy) + 1;
+        v = new Velocity(dx / length * 2, dy / length * 2);
+    }
+}
 
 public partial class MovementSystem : EcsSystem
 {
-    [ForEach, Without<Dead>]                               // runs once per matching entity, as an inlined struct job
-    static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
+    public override int Priority => 1;
+
+    [ForEach, Without<Dead>, Without<Frozen>]                                 // whole runs of rows: SIMD-friendly
+    static void Move(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
+    {
+        for (int i = 0; i < positions.Length; i++)
+            positions[i] = new Position(positions[i].X + velocities[i].X, positions[i].Y + velocities[i].Y);
+    }
+}
+
+public partial class ZoneSystem : EcsSystem                                   // the zone index follows these writes
+{
+    public override int Priority => 2;
+
+    [ForEach]
+    static void Enter(Entity player, in Position p, in Zone zone)              // `in`: reading is not a change
+    {
+        int id = Math.Clamp((int)(p.X / 1024), 0, 3);
+        if (zone.Id != id) player.Get<Zone>() = new Zone(id);                  // only real moves are writes
+    }
 }
 
 public partial class CombatSystem : EcsSystem
 {
-    public override int Priority => 1;                     // lower runs first
+    public override int Priority => 3;
 
-    [ForEach, Without<Dead>]
-    static void TakeHits(Entity unit, ref Hits hits, ref Health hp, in Battle battle)   // singletons are parameters
+    [ForEach, Without<Dead>, Without<Frozen>]
+    static void Fight(Entity unit, ref Attack attack, ref Battle battle)
     {
-        if (--hits.Cooldown > 0) return;
-        hits.Cooldown = hits.Interval;
-        hp.Value -= hits.Damage;
-        if (battle.Tick % 20 == 0 && !unit.Has<Burning>()) unit.Add<Burning>() = new Burning(10);
+        if (--attack.Cooldown > 0) return;
+        attack.Cooldown = attack.Interval;
+        unit.Get<Health>().Value -= attack.Damage;                            // a hit is a change of Health
+        battle.Hits++;
+        uint roll = Dice.Roll(battle.Tick, unit.Id);
+        if (roll % 50 == 0 && !unit.Has<Burning>()) unit.Add<Burning>() = new Burning(10);   // applied at once
+        else if (roll % 70 == 1 && !unit.Has<Frozen>()) unit.Add<Frozen>() = new Frozen(4);
     }
 }
 
-public partial class BurnSystem : EcsSystem
+public partial class StatusSystem : EcsSystem
 {
-    public override int Priority => 2;
+    public override int Priority => 4;
 
     [ForEach]
     static void Burn(Entity unit, ref Burning burning, ref Health hp)
     {
         hp.Value -= 3;
-        if (--burning.Ticks == 0) unit.Remove<Burning>();   // structural changes are safe mid-pass
+        if (--burning.Ticks == 0) unit.Remove<Burning>();                     // flips a bit: the row stays
     }
+
+    [ForEach]
+    static void Thaw(Entity unit, ref Frozen frozen)
+    {
+        if (--frozen.Ticks == 0) unit.Remove<Frozen>();
+    }
+
+    [ForEach, WithAny<Burning>, WithAny<Frozen>]                              // burning or frozen (or both)
+    static void Count(in Health hp, ref Battle battle) => battle.Afflicted++;
 }
 
 public partial class DeathSystem : EcsSystem
 {
-    public override int Priority => 3;
+    public override int Priority => 5;
 
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Battle battle)
     {
         if (hp.Value > 0) return;
-        unit.Add<Dead>();                                  // a state change is data: whoever cares queries it
+        unit.Add<Dead>();                                                     // whoever cares queries Dead
         battle.Deaths++;
     }
 }
 
-public partial class RespawnSystem : EcsSystem              // reacts to Dead; DeathSystem does not know it exists
+public partial class RespawnSystem : EcsSystem                                // DeathSystem does not know it exists
 {
-    public override int Priority => 4;
+    public override int Priority => 6;
 
     [ForEach, With<Player>, With<Dead>]
-    static void Respawn(Entity unit, ref Health hp) { hp.Value = hp.Max; unit.Remove<Dead>(); }
+    static void Respawn(Entity player, ref Health hp, World world)
+    {
+        foreach (var shot in world.Index<OwnedBy, Entity>().Find(player)) shot.Destroy();   // recall its projectiles
+        hp.Value = hp.Max;
+        player.Remove<Dead>();
+    }
 
-    [ForEach, With<Dead>, Without<Player>]   // filters only: the method takes just the entity
-    static void Despawn(Entity unit) => unit.Destroy();
+    [ForEach, With<Npc>, With<Dead>]
+    static void Despawn(Entity npc, in Position p, World world)
+    {
+        npc.Destroy();
+        BattleServer.SpawnNpc(world, new Position(p.Y, p.X), npc.Id);
+    }
 }
 
 public partial class ProjectileSystem : EcsSystem
 {
-    public override int Priority => 5;
+    public override int Priority => 7;
 
     [ForEach, With<Player>, Without<Dead>]
-    static void Shoot(in Position p, in Velocity v, in Battle battle, World world)
+    static void Shoot(Entity player, in Position p, in Velocity v, ref Battle battle, World world)
     {
-        if (battle.Tick % 10 == 0) world.CreateEntity(p, new Velocity(v.X * 4, v.Y * 4), new Lifetime(20));
+        if (Dice.Roll(battle.Tick, player.Id) % 20 != 0) return;
+        battle.Shots++;
+        world.CreateEntity(p, new Velocity(v.X * 4, v.Y * 4), new Lifetime(20), new OwnedBy(player));
     }
 
     [ForEach]
-    static void Expire(Entity projectile, ref Lifetime life) { if (--life.Ticks == 0) projectile.Destroy(); }
+    static void Expire(Entity shot, ref Lifetime life)
+    {
+        if (--life.Ticks == 0) shot.Destroy();
+    }
+}
+
+public partial class RegenerationSystem : EcsSystem
+{
+    public override int Priority => 8;
+    public override int UpdateInterval => 10;                                 // every 10th update
+
+    [ForEach, With<Player>, Without<Dead>]
+    static void Regenerate(Entity player, in Health hp)
+    {
+        if (hp.Value < hp.Max) player.Get<Health>().Value = Math.Min(hp.Max, hp.Value + 20);
+    }
 }
 
 public sealed class ClockSystem : EcsSystem
@@ -138,31 +247,106 @@ public sealed class ClockSystem : EcsSystem
     public override int Priority => 100;
     protected override void OnUpdate() => World.GetSingleton<Battle>().Tick++;
 }
+
+[UpdateInGroup<Replication>]
+public partial class ReplicationSystem : EcsSystem                            // only what changed since the last send
+{
+    [ForEach, Changed<Health>]
+    static void Send(in Health hp, ref Replica replica, ref Battle battle)
+    {
+        replica = new Replica(hp.Value);
+        battle.Replicated++;
+    }
+}
+```
+
+**Setup and the server loop:**
+
+```csharp
+public static class Dice                                       // deterministic per tick and entity
+{
+    public static uint Roll(long tick, int id)
+    {
+        ulong x = (ulong)tick * 0x9E3779B97F4A7C15UL ^ (uint)id * 0xBF58476D1CE4E5B9UL;
+        x ^= x >> 31;
+        x *= 0x94D049BB133111EBUL;
+        return (uint)(x ^ (x >> 29));
+    }
+}
+
+public static class BattleServer
+{
+    /// <summary>A world of <paramref name="units"/> units, a third of them players.</summary>
+    public static World Create(int units)
+    {
+        var world = new World(new WorldOptions { InitialEntityCapacity = units * 2 });
+        world.AddSingleton<Battle>();
+        ref var waypoints = ref world.AddSingleton<Waypoints>();
+        for (int i = 0; i < Waypoints.Count; i++) waypoints.Points[i] = new Position(512 + i * 400, 512 + (i * 1777) % 3000);
+        world.AddSystem<SteeringSystem>();
+        world.AddSystem<MovementSystem>();
+        world.AddSystem<ZoneSystem>();
+        world.AddSystem<CombatSystem>();
+        world.AddSystem<StatusSystem>();
+        world.AddSystem<DeathSystem>();
+        world.AddSystem<RespawnSystem>();
+        world.AddSystem<ProjectileSystem>();
+        world.AddSystem<RegenerationSystem>();
+        world.AddSystem<ClockSystem>();
+        world.AddSystem<ReplicationSystem>();
+
+        var players = new Entity[units / 3];                                  // one batch: one table growth
+        world.CreateEntities(players, new Position(), new Velocity(1, 0), new Health(500, 500), new Replica(500),
+            new Attack(8, 6, 0), new Zone(0), new Player());
+        for (int i = 0; i < players.Length; i++)
+        {
+            uint r = Dice.Roll(0, i);
+            players[i].Get<Position>() = new Position(r % 4096, (r >> 12) % 4096);
+            players[i].Get<Velocity>() = new Velocity((int)(r % 5) - 2, (int)((r >> 8) % 5) - 2);
+            players[i].Get<Attack>().Cooldown = (int)(r % 6);
+        }
+
+        for (int i = players.Length; i < units; i++)
+        {
+            uint r = Dice.Roll(0, i);
+            SpawnNpc(world, new Position(r % 4096, (r >> 12) % 4096), i);
+        }
+
+        return world;
+    }
+
+    public static void SpawnNpc(World world, Position at, int seed)
+    {
+        uint r = Dice.Roll(seed, seed);
+        int hp = 100 + (int)(r % 100);
+        world.CreateEntity(at, new Velocity(), new Health(hp, hp), new Replica(hp),
+            new Attack(5 + (int)(r % 5), 5 + (int)(r % 10), (int)(r % 10)), new Npc());
+    }
+
+    /// <summary>One server tick: the simulation every tick, replication every third.</summary>
+    public static void Tick(World world)
+    {
+        world.Update();
+        if (world.GetSingleton<Battle>().Tick % 3 == 0) world.Update<Replication>();
+    }
+}
 ```
 
 ```csharp
-using var world = new World(new WorldOptions { InitialEntityCapacity = 200_000 });
-world.AddSingleton<Battle>();
-world.AddSystem<MovementSystem>();
-world.AddSystem<CombatSystem>();
-world.AddSystem<BurnSystem>();
-world.AddSystem<DeathSystem>();
-world.AddSystem<RespawnSystem>();
-world.AddSystem<ProjectileSystem>();
-world.AddSystem<ClockSystem>();
+using var world = BattleServer.Create(100_000);
+var zones = world.Index<Zone, int>();
+var save = world.Capture();                       // e.g. before a risky admin command
 
-for (int i = 0; i < 100_000; i++)
+while (running)
 {
-    var unit = world.CreateEntity(new Position(i % 4096, i / 4096), new Velocity(1, 0),   // lands in its final
-        new Health(100, 100), new Hits(5, 8, i % 8));                                    // archetype directly
-    if (i % 3 == 0) unit.Add<Player>();
+    BattleServer.Tick(world);                     // 0 B per tick once warmed up
+    int crowded = zones.Count(0);                 // players in zone 0, kept current by the index
 }
 
-while (running) world.Update();   // synchronous; 0 B per tick once warmed up
+world.Restore(save);                              // roll the zone back in memory
 ```
 
-Every system can be removed, reordered or tested alone: they share components and a singleton, nothing else. This
-is a trimmed version of the [benchmark world](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/EasyEcs.Benchmark/WorldSimulation.cs) measured above. The
+Every system can be removed, reordered or tested alone: they share components and singletons, nothing else. The
 step-by-step tutorial is [Getting started](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/getting-started.md).
 
 ## The model in one picture
@@ -209,6 +393,7 @@ not a toy loop ([what it simulates](https://github.com/JasonXuDeveloper/EasyEcs/
 | WorldSimulationBenchmark.Tick | 10,000 | 175 μs | 0 B |
 | WorldSimulationBenchmark.Tick | 100,000 | 1.90 ms | 0 B |
 | MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 0.93 ms | 0 B |
+| BattleServerBenchmark.Tick (the example above, every feature) | 100,000 | 2.76 ms | 0 B |
 
 Against v4.0.1 (4.33 ms) the tick is 2.3x faster.
 

@@ -75,9 +75,11 @@ EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, req
   Polyfills.cs                 IsExternalInit for netstandard2.0 (records); do not delete
 EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, Presence, Query, System, ForEachSystem,
                                Singleton, Concurrency, Parallel, Changed, Index, Snapshot, Allocation (0 B budget),
-                               Generator (diagnostics + caching); Fixtures.cs holds the shared test components
+                               Generator (diagnostics + caching), BattleServer (the README world as a whole, linked
+                               from EasyEcs.Benchmark); Fixtures.cs holds the shared test components
 EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / MultiWorldBenchmark (headline, realistic
-                               server tick; the world itself is WorldSimulation.cs), ParallelSystemsBenchmark,
+                               server tick; the world itself is WorldSimulation.cs), BattleServerBenchmark (the
+                               README example, BattleServer.cs, every feature), ParallelSystemsBenchmark,
                                ParallelForEachBenchmark, ChangeTrackingBenchmark, IndexBenchmark + MicroBenchmarks.
                                Always measure with BenchmarkDotNet.
 EasyEcs.Comparison/            BenchmarkDotNet: the headline world (WorldSimulation.cs, compiled unchanged) ported to
@@ -113,7 +115,8 @@ doc/                           README.md (index), getting-started.md, guide/ (on
 - **Follow the ECS principles in `doc/ecs-principles.md`, including in tests, benchmarks and docs**: components and
   singletons are plain data structs; one system per responsibility; systems are stateless (state goes into
   components or singletons, EECS007) and never reference other systems (EECS008); state changes are data.
-  Examples are what users copy, so they must be exemplary.
+  Examples are what users copy, so they must be exemplary. The README example is `EasyEcs.Benchmark/BattleServer.cs`
+  verbatim: change both together, and give a new feature a place in it.
 - **Performance changes must be measured.** Run the relevant `EasyEcs.Benchmark` cases before and after; a change
   ships only if it is a net improvement (time and allocations) with no regression elsewhere. Add a benchmark
   when you optimize something not covered yet.
