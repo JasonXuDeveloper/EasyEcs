@@ -20,6 +20,8 @@
         <ProjectReference Include="..\EasyEcs.Core\EasyEcs.Core.csproj"/>
         <!-- as analyzer: generates [ForEach] systems in this assembly; as reference: driven directly by GeneratorTests -->
         <ProjectReference Include="..\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="true"/>
+        <!-- the README's battle server, compiled unchanged (BattleServerTests) -->
+        <Compile Include="..\EasyEcs.Benchmark\BattleServer.cs" Link="BattleServer.cs"/>
     </ItemGroup>
 
 </Project>
