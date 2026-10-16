@@ -276,5 +276,16 @@ public class MicroBenchmarks
 
         return s;
     }
-}
 
+    private static readonly QueryFilter NoHealth = QueryFilter.Create().Without<Health>();
+
+    /// <summary>Count and Any over the two tables (sums of table counts; Any stops at the first table), ×1000.</summary>
+    [Benchmark]
+    public int CountAndAny()
+    {
+        int s = 0;
+        for (int i = 0; i < 1000; i++)
+            s += _queryCtx.Count<Position, Velocity>() + _queryCtx.Count<Position>(NoHealth) + (_queryCtx.Any<Health>() ? 1 : 0);
+        return s;
+    }
+}

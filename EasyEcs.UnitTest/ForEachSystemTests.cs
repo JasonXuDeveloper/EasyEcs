@@ -198,7 +198,7 @@ public class ForEachSystemTests
     [Test]
     public void EntityParametersCarryTheCurrentVersionOfRecycledIds()
     {
-        // Entity parameters are built from the archetype's id/version arrays: recycled ids, transitions and
+        // Entity parameters are built from the archetype's entity rows: recycled ids, transitions and
         // rows filled by the last row must keep the version in step, or the handle would be stale.
         using var world = new World();
         var old = new Entity[64];

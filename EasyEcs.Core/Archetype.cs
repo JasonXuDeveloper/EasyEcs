@@ -556,7 +556,7 @@ internal sealed class Archetype
         if (rows > Slots.Length) Grow((int)BitOperations.RoundUpToPowerOf2((uint)rows));
     }
 
-    /// <summary>Grow the id arrays and every column to <paramref name="capacity"/> rows (cold path).</summary>
+    /// <summary>Grow the entity rows (<see cref="Slots"/>) and every column to <paramref name="capacity"/> rows (cold path).</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void Grow(int capacity)
     {

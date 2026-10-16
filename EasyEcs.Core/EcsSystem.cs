@@ -28,7 +28,7 @@ public abstract class EcsSystem
     /// <summary>Index of the system's group in its world (0 = default group).</summary>
     internal int Group;
 
-    /// <summary>Disabled systems are skipped by <see cref="World.Update()"/>.</summary>
+    /// <summary>Disabled systems are skipped by <see cref="World.Update()"/> and <see cref="World.Update{TGroup}()"/>.</summary>
     public bool Enabled { get; set; } = true;
 
     /// <summary>

@@ -1,5 +1,4 @@
 using System;
-using System.Buffers;
 using System.Numerics;
 using System.Threading;
 using System.Runtime.CompilerServices;
@@ -554,101 +553,188 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         return left >= 64 ? ulong.MaxValue : (1UL << left) - 1;
     }
 }
+/// <summary>
+/// Where a query walk stands after a <see cref="QueryWalk"/> call, returned by value: the enumerator copies it into its
+/// own fields and is never passed by reference, so the JIT keeps its fields in registers in the caller's loop.
+/// </summary>
+internal ref struct QueryStep
+{
+    /// <summary>The walk's ticket (<see cref="QueryWalk.Ticket"/>); <see cref="QueryWalk.Ended"/> once it ended.</summary>
+    public int Ticket;
+    public QueryWalk Walk;
+    public ref EntitySlot Rows; // the current table's entities
+    public Archetype Table;     // the current table; null: no more rows
+    public int Slot, Storage;
+    public int Count; // rows to walk; negative when they must be tested (the sign spares the loop a mode register)
+}
 
 /// <summary>
-/// Walks the alive matching rows of an archetype snapshot (the shared core of query enumerators). Each archetype is
-/// walked up to the row count it had when the walk started, so entities that enter (or move between) matching
-/// archetypes during the walk are not visited; rows that lose their entity or a queried component are skipped. While
-/// walking, the world does not reuse tombstone rows (see <see cref="World.Passes"/>); <see cref="Dispose"/> (called by
-/// <c>foreach</c>) or reaching the end ends the walk.
+/// The cold state of one walk over the alive matching rows of an archetype snapshot (the shared core of query
+/// enumerators). Each archetype is walked up to the row count it had when the walk started, so entities that enter (or
+/// move between) matching archetypes during the walk are not visited; rows that lose their entity or a queried
+/// component are skipped. While walking, the world does not reuse tombstone rows (see <see cref="World.Passes"/>);
+/// ending the walk (the enumerator's <c>Dispose</c>, or reaching the end) ends the pass. Walks are pooled per thread
+/// (one per nesting level once warmed up, so no allocation in steady state); a ticket tells a walk's current use from
+/// an enumerator copy of an earlier one.
 /// </summary>
-internal ref struct ArchetypeCursor
+internal sealed class QueryWalk
 {
-    /// <summary><see cref="MoveNext"/>: no more rows.</summary>
-    public const int End = 0;
+    /// <summary>The ticket of an ended walk (0 means not started).</summary>
+    public const int Ended = -1;
 
-    /// <summary><see cref="MoveNext"/>: a row of the same table, whose storage did not change.</summary>
-    public const int Same = 1;
+    [ThreadStatic] private static QueryWalk _free;
+    private QueryWalk _next;
+    private int _uses;
 
-    /// <summary><see cref="MoveNext"/>: a row of another table, or storage changed: refresh column refs.</summary>
-    public const int Moved = 2;
-
-    private readonly World _world;
-    public readonly QueryMatch Match;
-    public readonly ulong Since; // the filter's change tick
-    private int[] _counts; // row counts at the start of the walk (rented), null before the first MoveNext
+    private World _world;
+    private QueryMatch _match;
+    private ulong _since; // the filter's change tick
+    private int[] _counts = new int[8]; // row counts of the matching tables at the start of the walk
     private int _archetype;
     private RowFilter _filter;
-    private ref EntitySlot _rows; // the current table's entities
-    private int _count;    // rows of the current table to walk
-    private int _mode;     // RowFilter mode of the current table
-    private int _storage;  // the world's storage version _rows and _mode were read at
-    private int _word;     // Test mode: the row word _bits holds (-1: none)
-    private ulong _bits;   // Test mode: the passing rows of word _word (computed once per word, not per row)
-    private bool _done;
+    private int _count;  // rows of the current table to walk
+    private int _mode;   // RowFilter mode of the current table
+    private int _word;   // Test mode: the row word _bits holds (-1: none)
+    private ulong _bits; // Test mode: the passing rows of word _word (computed once per word, not per row)
+
+    /// <summary>The current use (positive while walking).</summary>
+    public int Ticket;
 
     /// <summary>Table of the current row.</summary>
     public Archetype Current;
 
-    /// <summary>Row and entity id of the current row.</summary>
-    public int Slot, Id;
+    /// <summary>The world walked.</summary>
+    public World World => _world;
 
     /// <summary>
-    /// The current row's version by reference. <see cref="EntitySlot.Version"/> is the row's first field, so the ref is
-    /// the row's own address: no field access, hence no null check in the caller's loop.
+    /// Enumerators with tracked components: the word of the current table whose change-tick summaries were noted at
+    /// <see cref="StampTick"/> (rows come in order, so once per word and tick).
     /// </summary>
-    public readonly ref int Version
+    public int StampWord;
+    public ulong StampTick;
+
+    /// <summary>
+    /// Move a walk on from the enumerator's last row <paramref name="slot"/> (or start it, ticket 0): to the first row
+    /// of the next tables, or, after a structural change (<paramref name="storage"/> is stale), to the next row of the
+    /// current table read afresh. Not inlined: once per table, per structural change and at the end.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static QueryStep Step(QueryWalk walk, int ticket, World world, QueryMatch match, ulong since, int slot,
+        int storage)
     {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => ref Unsafe.As<EntitySlot, int>(ref Unsafe.Add(ref _rows, Slot));
+        if (ticket == 0) return Rent(world, match, since).Advance();
+        if (ticket < 0 || walk.Ticket != ticket) return new QueryStep { Ticket = Ended }; // ended (or a stale copy)
+        return storage != world.StorageVersion ? walk.Refresh(slot) : walk.Advance();
     }
 
-    public ArchetypeCursor(World world, QueryMatch match, ulong since)
+    /// <summary>End the walk of <paramref name="ticket"/> early (idempotent: an ended walk or a stale copy is ignored).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static void End(QueryWalk walk, int ticket)
     {
-        _world = world;
-        Match = match;
-        Since = since;
-        _archetype = -1;
+        if (walk.Ticket == ticket) walk.Finish();
     }
 
-    /// <summary>Next alive matching row: <see cref="End"/>, <see cref="Same"/> or <see cref="Moved"/>.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public int MoveNext()
+    private static QueryWalk Rent(World world, QueryMatch match, ulong since)
     {
-        int result = Same;
-        if (_storage != _world.StorageVersion)
-        {
-            if (_counts == null) return Advance();
-            Refresh();
-            result = Moved;
-        }
+        var walk = _free ?? new QueryWalk();
+        _free = walk._next;
+        walk._next = null;
+        walk._uses = (walk._uses + 1) & int.MaxValue;
+        walk.Ticket = walk._uses == 0 ? walk._uses = 1 : walk._uses;
+        walk._world = world;
+        walk._match = match;
+        walk._since = since;
+        walk._archetype = -1;
+        var archetypes = match.Archetypes;
+        if (walk._counts.Length < archetypes.Length) walk._counts = new int[Math.Max(archetypes.Length, walk._counts.Length * 2)];
+        for (int i = 0; i < archetypes.Length; i++) walk._counts[i] = archetypes[i].Count;
+        world.BeginPass();
+        return walk;
+    }
 
-        if (_mode == RowFilter.All)
+    private void Finish()
+    {
+        var world = _world;
+        Ticket = 0;
+        Current = null;
+        _world = null;   // a pooled walk keeps no world or table alive
+        _match = null;
+        _filter = default;
+        _next = _free;
+        _free = this;
+        world.EndPass();
+    }
+
+    private QueryStep Found(int slot) => new()
+    {
+        Ticket = Ticket,
+        Walk = this,
+        Rows = ref MemoryMarshal.GetArrayDataReference(Current.Slots),
+        Table = Current,
+        Slot = slot,
+        Count = _mode == RowFilter.All ? _count : -1,
+        Storage = _world.StorageVersion,
+    };
+
+    // The caller made a structural change: re-read the presence counts, then go on after the last row it saw.
+    private QueryStep Refresh(int slot)
+    {
+        if (Current != null)
         {
-            while (++Slot < _count)
+            _mode = _filter.Mode(Current);
+            _word = -1; // presence bits may have flipped
+            StampWord = -1;
+            if (_mode != RowFilter.None)
             {
-                int id = Unsafe.Add(ref _rows, Slot).Id;
-                if (id >= 0)
-                {
-                    Id = id;
-                    return result;
-                }
+                int next = _mode == RowFilter.All ? NextAlive(slot + 1) : NextTested(slot);
+                if (next >= 0) return Found(next);
             }
         }
-        else if (NextTested()) return result;
 
         return Advance();
     }
 
-    /// <summary>
-    /// Test mode: move to the next alive passing row of the current table, one row-filter word per 64 rows (words with
-    /// no passing row, such as unwritten words of a Changed filter, are skipped through the summaries).
-    /// </summary>
-    private bool NextTested()
+    // The first matching row of the next tables, or the end of the walk.
+    private QueryStep Advance()
     {
-        int words = (_count + 63) >> 6;
-        int slot = Slot + 1;
-        while (slot < _count)
+        var archetypes = _match.Archetypes;
+        while (++_archetype < archetypes.Length)
+        {
+            var archetype = archetypes[_archetype];
+            _filter = new RowFilter(_match.Filters[_archetype], _since);
+            _mode = _filter.Mode(archetype);
+            if (_mode == RowFilter.None || archetype.AliveCount == 0) continue;
+            Current = archetype;
+            _count = _counts[_archetype];
+            _word = -1;
+            StampWord = -1;
+            int next = _mode == RowFilter.All ? NextAlive(0) : NextTested(-1);
+            if (next >= 0) return Found(next);
+        }
+
+        Finish();
+        return new QueryStep { Ticket = Ended };
+    }
+
+    // All mode: the first alive row from slot on, or -1.
+    private int NextAlive(int slot)
+    {
+        var rows = Current.Slots;
+        for (; slot < _count; slot++)
+            if (rows[slot].Id >= 0) return slot;
+        return -1;
+    }
+
+    /// <summary>
+    /// Test mode: the next alive passing row of the current table after <paramref name="slot"/>, or -1: one row-filter word per 64 rows (words with no passing row, such as unwritten words of a Changed
+    /// filter, are skipped through the summaries).
+    /// </summary>
+    public int NextTested(int slot)
+    {
+        int count = _count, words = (count + 63) >> 6;
+        ref EntitySlot rows = ref MemoryMarshal.GetArrayDataReference(Current.Slots); // slot < count <= rows
+        slot++;
+        while (slot < count)
         {
             int w = slot >> 6;
             if (w != _word)
@@ -657,7 +743,7 @@ internal ref struct ArchetypeCursor
                 if (next >= words) break;
                 if (next != w) slot = (w = next) << 6;
                 _word = w;
-                _bits = _filter.Word(Current, w) & RowFilter.RowMask(w, _count);
+                _bits = _filter.Word(Current, w) & RowFilter.RowMask(w, count);
             }
 
             ulong bits = _bits & (ulong.MaxValue << slot); // shift is mod 64: slot's position in its word
@@ -668,100 +754,10 @@ internal ref struct ArchetypeCursor
             }
 
             slot = (w << 6) + BitOperations.TrailingZeroCount(bits);
-            int id = Unsafe.Add(ref _rows, slot).Id;
-            if (id >= 0)
-            {
-                Slot = slot;
-                Id = id;
-                return true;
-            }
-
+            if (Unsafe.Add(ref rows, slot).Id >= 0) return slot;
             slot++;
         }
 
-        Slot = _count;
-        return false;
-    }
-
-    /// <summary>The caller made a structural change: re-read the entity rows and the presence counts.</summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private void Refresh()
-    {
-        _storage = _world.StorageVersion;
-        if (Current == null) return;
-        _rows = ref MemoryMarshal.GetArrayDataReference(Current.Slots);
-        _mode = _filter.Mode(Current);
-        _word = -1; // presence bits may have flipped
-        if (_mode == RowFilter.None) _count = 0;
-    }
-
-    /// <summary>The first matching row of the next tables (starting the walk on the first call).</summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private int Advance()
-    {
-        if (_counts == null && !Start()) return End;
-        var archetypes = Match.Archetypes;
-        while (++_archetype < archetypes.Length)
-        {
-            var archetype = archetypes[_archetype];
-            _filter = new RowFilter(Match.Filters[_archetype], Since);
-            _storage = _world.StorageVersion;
-            _mode = _filter.Mode(archetype);
-            if (_mode == RowFilter.None || archetype.AliveCount == 0) continue;
-            Current = archetype;
-            _rows = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
-            _count = _counts[_archetype];
-            Slot = -1;
-            _word = -1;
-            if (_mode != RowFilter.All)
-            {
-                if (NextTested()) return Moved;
-                continue;
-            }
-
-            for (Slot = 0; Slot < _count; Slot++)
-            {
-                int id = Unsafe.Add(ref _rows, Slot).Id;
-                if (id >= 0)
-                {
-                    Id = id;
-                    return Moved;
-                }
-            }
-        }
-
-        Current = null;
-        _count = 0;
-        Dispose();
-        return End;
-    }
-
-    // Once per walk: NoInlining keeps the pool's code (TLS buckets, trimming, events) out of the caller's loop.
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private bool Start()
-    {
-        if (_done) return false;
-        var archetypes = Match.Archetypes;
-        var counts = ArrayPool<int>.Shared.Rent(Math.Max(1, archetypes.Length));
-        for (int i = 0; i < archetypes.Length; i++) counts[i] = archetypes[i].Count;
-        _counts = counts;
-        _world.BeginPass();
-        return true;
-    }
-
-    /// <summary>End the walk (idempotent).</summary>
-    public void Dispose()
-    {
-        if (_counts == null || _done) return;
-        Finish();
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private void Finish()
-    {
-        _done = true;
-        ArrayPool<int>.Shared.Return(_counts);
-        _counts = null;
-        _world.EndPass();
+        return -1;
     }
 }

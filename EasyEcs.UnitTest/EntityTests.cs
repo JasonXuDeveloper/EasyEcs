@@ -120,4 +120,32 @@ public class EntityTests
         Assert.That(e.IsAlive, Is.False);
         Assert.Throws<InvalidOperationException>(() => e.Get<Health>());
     }
+
+    [Test]
+    public void EnsureEntityCapacityKeepsEveryHandle()
+    {
+        var before = new List<Entity>();
+        for (int i = 0; i < 5; i++) before.Add(_world.CreateEntity().Set(new Health(i)));
+        _world.EnsureEntityCapacity(10_000);
+        _world.EnsureEntityCapacity(10);                                      // smaller: no-op
+        for (int i = 0; i < 5; i++) Assert.That(before[i].Get<Health>().Value, Is.EqualTo(i));
+        for (int i = 0; i < 9_000; i++) _world.CreateEntity();
+        Assert.That(_world.EntityCount, Is.EqualTo(9_005));
+    }
+
+    [Test]
+    public void HandlesCompareByIdAndVersion()
+    {
+        var e = _world.CreateEntity();
+        var same = _world.GetEntity(e.Id);
+        Assert.That(same, Is.EqualTo(e));
+        Assert.That(same == e && !(same != e), Is.True);
+        Assert.That(same.GetHashCode(), Is.EqualTo(unchecked(e.Id * 397 ^ e.Version)));   // deterministic
+        Assert.That(e.ToString(), Is.EqualTo($"Entity {e.Id}v{e.Version}"));
+
+        e.Destroy();
+        var recycled = _world.CreateEntity();
+        Assert.That(recycled.Id, Is.EqualTo(e.Id));
+        Assert.That(recycled, Is.Not.EqualTo(e));                             // another incarnation
+    }
 }

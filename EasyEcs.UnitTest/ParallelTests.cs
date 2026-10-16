@@ -195,4 +195,37 @@ public partial class ParallelTests
         for (int i = 0; i < 100; i++) world.Update();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
+
+    private struct StampId : IForEach<Counter>, INoStructuralChanges
+    {
+        public void Execute(int entityId, ref Counter counter) => counter.N = entityId;
+    }
+
+    private struct StampHandle : IForEachEntity<Seen>, INoStructuralChanges
+    {
+        public void Execute(Entity entity, ref Seen seen) => seen.N = entity.Id + entity.Version;
+    }
+
+    [Test]
+    public void AdHocParallelJobsVisitEveryMatchingRowOnce()
+    {
+        using var world = new World();
+        var entities = new Entity[World.ChunkRows * 3 + 17];                // several chunks and a partial one
+        world.CreateEntities(entities, new Counter(-1), new Seen(-1));
+        for (int i = 0; i < entities.Length; i += 10) entities[i].Set(new Dead());
+        var filter = QueryFilter.Create().Without<Dead>();
+
+        var ids = new StampId();
+        world.ForEachParallel<Counter, StampId>(ref ids, filter);
+        var handles = new StampHandle();
+        world.ForEachEntityParallel<Seen, StampHandle>(ref handles, filter);
+
+        for (int i = 0; i < entities.Length; i++)
+        {
+            var e = entities[i];
+            bool dead = i % 10 == 0;
+            Assert.That(e.Get<Counter>().N, Is.EqualTo(dead ? -1 : e.Id));
+            Assert.That(e.Get<Seen>().N, Is.EqualTo(dead ? -1 : e.Id + e.Version));
+        }
+    }
 }

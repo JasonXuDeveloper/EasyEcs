@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using NUnit.Framework;
 
@@ -197,5 +198,109 @@ public partial class QueryTests
             if (entity.Has<Frozen>()) entity.Remove<Frozen>();
             else entity.Set(new Frozen());
         }
+    }
+
+    private struct DestroyThenFail : IForEachEntity<Health>
+    {
+        public int Visited;
+
+        public void Execute(Entity entity, ref Health hp)
+        {
+            entity.Destroy();                                    // a tombstone: the pass is still open
+            if (++Visited == 5) throw new InvalidOperationException("a bug in the job");
+        }
+    }
+
+    private static void InterruptAPass(World world)
+    {
+        for (int i = 0; i < 20; i++) world.CreateEntity(new Health(i));
+        var job = new DestroyThenFail();
+        Assert.Throws<InvalidOperationException>(() => world.ForEachEntity<Health, DestroyThenFail>(ref job));
+        Assert.That(world.GetFragmentationStats().FragmentationRatio, Is.Positive);   // the pass never ended
+    }
+
+    [Test]
+    public void CompactArchetypesRecoversFromAnInterruptedPass()
+    {
+        using var world = new World();
+        InterruptAPass(world);
+        world.CompactArchetypes();
+        Assert.That(world.GetFragmentationStats().FragmentationRatio, Is.Zero);
+        Assert.That(world.Count<Health>(), Is.EqualTo(15));
+        var values = new List<int>();
+        foreach (var item in world.Query<Health>()) values.Add(item.Component1.Value);
+        values.Sort();
+        Assert.That(values, Is.EqualTo(new[] { 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }));
+        world.CreateEntity(new Health(99)).Destroy();                            // rows are reused again
+        Assert.That(world.GetFragmentationStats().FragmentationRatio, Is.Zero);
+    }
+
+    [Test]
+    public void UpdateCompactsAfterAnInterruptedPass()
+    {
+        using var world = new World();
+        InterruptAPass(world);
+        world.Update();
+        Assert.That(world.GetFragmentationStats().FragmentationRatio, Is.Zero);
+        Assert.That(world.Count<Health>(), Is.EqualTo(15));
+    }
+
+    private struct NoIds : IForEach<Health>, INoStructuralChanges
+    {
+        public static bool ReadsId => false;
+        public int IdSum, Visited;
+
+        public void Execute(int entityId, ref Health hp)
+        {
+            IdSum += entityId;
+            Visited++;
+        }
+    }
+
+    private struct WithIds : IForEach<Health>                     // a structural pass: ids are always passed
+    {
+        public static bool ReadsId => false;
+        public int IdSum;
+
+        public void Execute(int entityId, ref Health hp) => IdSum += entityId;
+    }
+
+    [Test]
+    public void ReadsIdFalseSkipsTheIdsOfPassesThatMakeNoStructuralChange()
+    {
+        using var world = new World();
+        int expected = 0;
+        for (int i = 0; i < 100; i++) expected += world.CreateEntity(new Health(i)).Id;
+        var lean = new NoIds();
+        world.ForEach<Health, NoIds>(ref lean);
+        Assert.That((lean.Visited, lean.IdSum), Is.EqualTo((100, 0)));
+        var full = new WithIds();
+        world.ForEach<Health, WithIds>(ref full);
+        Assert.That(full.IdSum, Is.EqualTo(expected));
+    }
+
+    [Test]
+    public void RowsToTestAreVisitedOnceAcrossWordsWhileTheLoopDestroys()
+    {
+        using var world = new World();
+        var all = new Entity[1_000];                                            // 16 words of one table
+        world.CreateEntities(all, new Health(0), new Stun(1));
+        for (int i = 0; i < all.Length; i += 3) all[i].Remove<Stun>();          // rows without Stun: rows are tested
+        var visited = new HashSet<Entity>();
+        var destroyed = new HashSet<Entity>();
+        foreach (var item in world.Query<Health, Stun>())
+        {
+            var e = item.Entity;
+            Assert.That(e.IsAlive && e.Has<Stun>(), Is.True);
+            Assert.That(visited.Add(e), Is.True, "visited twice");
+            if (e.Id + 1 < all.Length && all[e.Id + 1].IsAlive && e.Id % 7 == 0)
+            {
+                destroyed.Add(all[e.Id + 1]);
+                all[e.Id + 1].Destroy();                                       // a later row becomes a tombstone
+            }
+        }
+
+        for (int i = 0; i < all.Length; i++)
+            Assert.That(visited.Contains(all[i]), Is.EqualTo(i % 3 != 0 && !destroyed.Contains(all[i])), $"row {i}");
     }
 }

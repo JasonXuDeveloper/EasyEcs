@@ -6,8 +6,9 @@ namespace EasyEcs;
 /// Runs a method of a <c>partial</c> <see cref="EcsSystem"/> for every entity matching its component parameters (and
 /// the <see cref="WithAttribute{T}"/> / <see cref="WithoutAttribute{T}"/> / <see cref="WithAnyAttribute{T}"/> filters), each update, after
 /// <see cref="EcsSystem.OnUpdate"/>, in declaration order.
-/// <para>Parameters: 1..9 components (<c>ref</c> to write, <c>in</c> to read), and optionally <see cref="Entity"/> and
-/// <see cref="World"/>. Static and instance methods are supported.</para>
+/// <para>Parameters: 1..9 components (<c>ref</c> to write, <c>in</c> to read; or <c>Span&lt;T&gt;</c> /
+/// <c>ReadOnlySpan&lt;T&gt;</c> for a batch method that receives runs of rows), singletons (<c>ref</c> / <c>in</c>), and
+/// optionally <see cref="Entity"/> and <see cref="World"/>. Static and instance methods are supported.</para>
 /// <code>
 /// public partial class MovementSystem : EcsSystem
 /// {
@@ -15,7 +16,8 @@ namespace EasyEcs;
 ///     static void Move(ref Position p, in Velocity v) { p.X += v.X; p.Y += v.Y; }
 /// }
 /// </code>
-/// EasyEcs.Generator compiles it to a struct <see cref="IForEach{T1}"/> job: no delegate, no allocation, inlined.
+/// EasyEcs.Generator compiles it to a struct job (<see cref="IForEach{T1}"/>, <see cref="IForEachEntity{T1}"/> or
+/// <see cref="IForEachBatch{T1}"/>): no delegate, no allocation, inlined.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method)]
 public sealed class ForEachAttribute : Attribute

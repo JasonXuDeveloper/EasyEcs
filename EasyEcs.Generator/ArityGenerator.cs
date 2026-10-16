@@ -335,10 +335,6 @@ public sealed class ArityGenerator : IIncrementalGenerator
         return sb.Append("}\n").ToString();
     }
 
-    /// <summary>
-    /// One ForEach flavor: <paramref name="entityArg"/> is what the job receives first (the id, or an Entity built from
-    /// the archetype's parallel id/version arrays).
-    /// </summary>
     /// <summary>Stamp row <paramref name="row"/> of every component the job writes (only tracked ones emit code).</summary>
     private static string StampRow(int n, string indent, string row) =>
         Lines(n, i => $"{indent}    if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.StampVisited<T{i}>({row}, _changeTick);");
@@ -356,6 +352,10 @@ public sealed class ArityGenerator : IIncrementalGenerator
         ? code
         : System.Text.RegularExpressions.Regex.Replace(code, @"\b(ids|idk|idr) = ref Unsafe\.Add\(ref (ids|idk|idr), 1\)", "$1 = ref Unsafe.Add(ref $1, TJob.ReadsId ? 1 : 0)");
 
+    /// <summary>
+    /// One ForEach flavor: <paramref name="entityArg"/> is what the job receives first (the id, or an Entity built from
+    /// the archetype's entity rows).
+    /// </summary>
     private static string ForEach(int n, string name, string job, string entityArg, string rowArg, string receives)
     {
         string tps = TypeParams(n);
@@ -756,22 +756,32 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 /// Allocation-free query enumerator; safe under structural changes during iteration (same visiting rules as
                 /// ForEach). A ref struct: it holds refs into the current table, so a loop over it cannot <c>await</c>.
                 /// </summary>
+                /// <remarks>
+                /// Every member the loop calls is inlined and the cold work is static (<see cref="QueryWalk"/>, by value
+                /// in and out): the enumerator is never passed by reference, so its fields live in registers.
+                /// </remarks>
                 public ref struct QueryEnumerator<{{tps}}>
                 {{Constraints(n, "    ")}}
                 {
                     private readonly World _world;
-                    private ArchetypeCursor _cursor;
+                    private readonly QueryMatch _match;
+                    private readonly ulong _since;
                 {{Lines(n, i => $"    private readonly ushort _b{i};")}}
+                    private QueryWalk _walk;
+                    private int _ticket; // 0: not started; QueryWalk.Ended: ended
+                    private ref EntitySlot _rows;
                 {{Lines(n, i => $"    private ref T{i} _r{i};")}}
-                    private int _word; // the word of the current table whose change-tick summaries were noted at _tick
-                    private ulong _tick;
+                    private int _id, _storage;
+                    // Native-sized: indexing needs no sign extension (movsxd on x64, sbfiz/sxtw on arm64) per row.
+                    private nint _slot;
+                    private nint _count; // rows of the current table to walk; negative: rows to test (QueryWalk.NextTested)
 
                     internal QueryEnumerator(World world, QueryMatch match, ulong since, {{List(n, i => $"ushort b{i}")}})
                     {
                         _world = world;
-                        _cursor = new ArchetypeCursor(world, match, since);
+                        _match = match;
+                        _since = since;
                 {{Lines(n, i => $"        _b{i} = b{i};")}}
-                        _word = -1;
                     }
 
                     public readonly QueryItem<{{tps}}> Current
@@ -779,57 +789,91 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         [MethodImpl(MethodImplOptions.AggressiveInlining)]
                         get
                         {
-                            int slot = _cursor.Slot;
-                            return new(_world, _cursor.Id, ref _cursor.Version, {{List(n, i => $"ref Unsafe.Add(ref _r{i}, slot)")}});
+                            nint slot = _slot;
+                            // Version is the row's first field: the row's address is the version's.
+                            return new(_world, _id, ref Unsafe.As<EntitySlot, int>(ref Unsafe.Add(ref _rows, slot)), {{List(n, i => $"ref Unsafe.Add(ref _r{i}, slot)")}});
                         }
                     }
 
                     /// <summary>Number of alive matching entities. O(matching archetypes), plus O(rows / 64) for tables with rows to test.</summary>
-                    public readonly int Count => _cursor.Match.CountAlive(_cursor.Since);
+                    public readonly int Count => _match.CountAlive(_since);
 
-                    public readonly bool IsEmpty => !_cursor.Match.AnyAlive(_cursor.Since);
+                    public readonly bool IsEmpty => !_match.AnyAlive(_since);
 
                     public readonly QueryEnumerator<{{tps}}> GetEnumerator() => this;
 
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public bool MoveNext()
                     {
-                        int next = _cursor.MoveNext();
-                        if (next == ArchetypeCursor.Moved) Refresh();
+                        if (_storage == _world.StorageVersion) // no structural change since the last row
+                        {
+                            if (_count >= 0)
+                            {
+                                while (++_slot < _count)
+                                {
+                                    int id = Unsafe.Add(ref _rows, _slot).Id; // _slot < _count <= rows
+                                    if (id >= 0)
+                                    {
+                                        _id = id;
+                                        goto Found;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                int slot = _walk.NextTested((int)_slot);
+                                if (slot >= 0)
+                                {
+                                    _slot = slot;
+                                    _id = Unsafe.Add(ref _rows, slot).Id;
+                                    goto Found;
+                                }
+                            }
+                        }
+
+                        // Another table, a structural change, the start or the end: the walk's cold path.
+                        var step = QueryWalk.Step(_walk, _ticket, _world, _match, _since, (int)_slot, _storage);
+                        _ticket = step.Ticket;
+                        _walk = step.Walk;
+                        _rows = ref step.Rows;
+                        _slot = step.Slot;
+                        _count = step.Count;
+                        _storage = step.Storage;
+                        var table = step.Table;
+                        if (table == null) return false;
+                        _id = Unsafe.Add(ref _rows, _slot).Id;
+                {{Lines(n, i => $"        _r{i} = ref table.Base<T{i}>(_b{i});")}}
+
+                    Found:
                         // Items hand out refs: a visited row of a tracked component counts as written (a JIT-time
                         // constant: no code for queries without tracked components).
-                        if (({{List(n, i => $"default(T{i}) is ITrackChanges", " || ")}}) && next != ArchetypeCursor.End) Stamp();
-                        return next != ArchetypeCursor.End;
+                        if ({{List(n, i => $"default(T{i}) is ITrackChanges", " || ")}}) Stamp(_walk, (int)_slot);
+                        return true;
                     }
 
                     [MethodImpl(MethodImplOptions.NoInlining)]
-                    private void Stamp()
+                    private static void Stamp(QueryWalk walk, int slot)
                     {
-                        var archetype = _cursor.Current;
-                        int slot = _cursor.Slot;
-                        ulong tick = _world.ChangeTick;
+                        var archetype = walk.Current;
+                        ulong tick = walk.World.ChangeTick;
                         // Rows come in order: the summaries of a word are noted once per word and tick.
-                        if (slot >> 6 != _word || tick != _tick)
+                        if (slot >> 6 != walk.StampWord || tick != walk.StampTick)
                         {
-                            _word = slot >> 6;
-                            _tick = tick;
+                            walk.StampWord = slot >> 6;
+                            walk.StampTick = tick;
                 {{Lines(n, i => $"            archetype.NoteVisited<T{i}>(slot, tick);")}}
                         }
 
                 {{Lines(n, i => $"        archetype.StampTick<T{i}>(slot, tick);")}}
                     }
 
-                    // Another table, or its storage changed: re-read the column refs.
-                    [MethodImpl(MethodImplOptions.NoInlining)]
-                    private void Refresh()
-                    {
-                        var archetype = _cursor.Current;
-                        _word = -1;
-                {{Lines(n, i => $"        _r{i} = ref archetype.Base<T{i}>(_b{i});")}}
-                    }
-
                     /// <summary>Ends the walk early (<c>foreach</c> calls it); a walk that reaches the end ends by itself.</summary>
-                    public void Dispose() => _cursor.Dispose();
+                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                    public void Dispose()
+                    {
+                        if (_ticket > 0) QueryWalk.End(_walk, _ticket);
+                        _ticket = QueryWalk.Ended;
+                    }
                 }
 
 

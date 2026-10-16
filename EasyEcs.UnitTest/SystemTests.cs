@@ -115,4 +115,56 @@ public class SystemTests
         world.Update<InputGroup>();
         Assert.That(Log.FindAll(l => l == "input.update"), Has.Count.EqualTo(2));
     }
+
+    [UpdateInGroup<InputGroup>]
+    private class InputBase() : Logged("base");
+
+    private class InheritsInput : InputBase;                                    // the group attribute is inherited
+
+    private struct EmptyGroup : ISystemGroup;
+
+    private sealed class FailsEverywhere(string name) : Logged(name)
+    {
+        protected override void OnUpdate() => throw new InvalidOperationException(name);
+        protected override void OnDestroy() => throw new InvalidOperationException(name + ".destroy");
+    }
+
+    [Test]
+    public void GroupMembershipIsInheritedAndAnUnusedGroupIsANoOp()
+    {
+        using var world = new World();
+        world.AddSystem(new InheritsInput());
+        world.Update();
+        Assert.That(Log, Has.No.Member("base.update"));
+        world.Update<InputGroup>();
+        Assert.That(Log, Has.Member("base.update"));
+        Assert.DoesNotThrow(() => world.Update<EmptyGroup>());
+    }
+
+    [Test]
+    public void ASystemBelongsToOneWorldAndADisposedWorldDoesNotUpdate()
+    {
+        var system = new Logged("once");
+        var world = new World();
+        world.AddSystem(system);
+        Assert.Throws<InvalidOperationException>(() => world.AddSystem(system));
+        using (var other = new World()) Assert.Throws<InvalidOperationException>(() => other.AddSystem(system));
+        world.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => world.Update());
+    }
+
+    [Test]
+    public void AFailedRunStillCountsAsRunAndDestroyErrorsReachTheHandler()
+    {
+        var errors = new List<string>();
+        var world = new World();
+        world.SystemError += (_, e) => errors.Add(e.Message);
+        var failing = new FailsEverywhere("bad");
+        world.AddSystem(failing);
+        world.Update();
+        Assert.That(errors, Is.EqualTo(new[] { "bad" }));
+        Assert.That(failing.LastRunTick, Is.Positive);                          // its changes are not delivered again
+        world.Dispose();
+        Assert.That(errors, Is.EqualTo(new[] { "bad", "bad.destroy" }));        // OnDestroy during Dispose
+    }
 }
