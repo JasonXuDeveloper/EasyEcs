@@ -50,7 +50,7 @@ public partial class DeathSystem : EcsSystem
   [`ref` and `await`](refs-and-await.md)).
 - Batch `[ForEach]` methods (span parameters) and `ForEachBatch` jobs receive spans into the tables, so they must not
   make structural changes.
-- Don't call `Update()` / `Update<TGroup>()` or `CompactArchetypes()` while a query of the same world is iterating.
+- Don't call `Update()` / `Update<TGroup>()` while a query of the same world is iterating.
 - Removing a component and adding it back is cheap: the entity keeps its row and only a presence bit flips. Gaining a
   component the entity's archetype never had copies its row once
   ([ECS principles, rule 5](../ecs-principles.md#5-choose-the-cheapest-representation-for-frequent-changes)).
@@ -58,16 +58,11 @@ public partial class DeathSystem : EcsSystem
 ## Keeping tables dense
 
 Tables stay dense by themselves: outside a pass the last row fills a destroyed entity's row at once, and the
-tombstones a pass leaves are closed when the last pass ends. Two calls remain for maintenance:
-
-- `world.GetFragmentationStats()` returns `(TotalSlots, AliveEntities, FragmentationRatio)`: rows in use (tombstones
-  included) against living entities, O(archetypes). A ratio above 0 between updates means a pass was interrupted.
-- `world.CompactArchetypes()` closes every tombstone, O(archetypes + tombstones × columns). It is only needed after a
-  pass was interrupted by an exception outside `Update` (which compacts by itself), and must not run while a query
-  of the world iterates.
+tombstones a pass leaves are closed when the last pass ends, also when a job throws. A query enumerator abandoned
+without `Dispose` (a `foreach` always disposes it) leaves its pass open until the next update, which closes it. There
+is nothing to call; `world.GetFragmentationStats()` checks it, O(archetypes):
 
 ```csharp
-var (slots, alive, ratio) = world.GetFragmentationStats();
-if (ratio > 0.1f) world.CompactArchetypes();        // between updates, after a pass was cut short
-long updates = world.UpdateCount;                   // default-group updates so far
+var (slots, alive, ratio) = world.GetFragmentationStats();   // rows in use, living entities, 0 between updates
+long updates = world.UpdateCount;                            // default-group updates so far
 ```

@@ -23,7 +23,7 @@ allocation-free.
 | Ad-hoc loop that needs the `Entity` | `foreach (var item in world.Query<T1..Tn>(filter))` |
 | "How many …?" | `world.Count<T1..Tn>(filter)` |
 | "Is there any …?" | `world.Any<T1..Tn>(filter)` (early exit) |
-| Only the rows written since a tick | `QueryFilter.Create().Changed<T>().ChangedSince(tick)`, or `[Changed<T>]` in a system ([change tracking](change-tracking.md)) |
+| Only the rows written since a tick | `QueryFilter.Create().Changed<T>(tick)`, or `[Changed<T>]` in a system ([change tracking](change-tracking.md)) |
 | Entities by a value, or pointing at an entity | `world.Index<T, TKey>().Find(key)` ([indexes and relations](indexes-and-relations.md)) |
 
 ## Filters
@@ -39,7 +39,7 @@ private static readonly QueryFilter Impaired = QueryFilter.Create().WithAny<Froz
 ```
 
 In a `[ForEach]` method the same filters are attributes: `[ForEach, With<Player>, Without<Dead>]`,
-`[ForEach, WithAny<Frozen>, WithAny<Stunned>]`. All can be repeated. `Changed<T>().ChangedSince(tick)` (and
+`[ForEach, WithAny<Frozen>, WithAny<Stunned>]`. All can be repeated. `Changed<T>(since)` (and
 `[Changed<T>]`) select rows whose tracked component was written since a tick: see [change tracking](change-tracking.md).
 
 ## `Query`: a foreach loop
@@ -54,7 +54,8 @@ foreach (var item in world.Query<Position, Velocity>(Active))
 ```
 
 The enumerator and its items are ref structs holding refs into the current table: a loop over a query cannot
-`await`, and an item cannot be stored (keep `item.Entity` instead). The enumerator also exposes `Count` (alive matches) and `IsEmpty`.
+`await`, and an item cannot be stored (keep `item.Entity` instead). To count or test for matches, use `world.Count` /
+`world.Any`.
 
 ## `ForEach`: a struct job
 
@@ -64,7 +65,7 @@ A struct implementing `IForEach<T1..Tn>` is specialized and inlined by the JIT: 
 ```csharp
 public struct Integrate : IForEach<Position, Velocity>
 {
-    public void Execute(int entityId, ref Position p, ref Velocity v)
+    public void Execute(ref Position p, ref Velocity v)
     {
         p.X += v.X;
         p.Y += v.Y;
@@ -77,11 +78,11 @@ var job = new Integrate();
 world.ForEach<Position, Velocity, Integrate>(ref job, Active);
 ```
 
-The job is passed by `ref`, so fields it accumulates (a sum, a counter) are visible after the call. `entityId` is the
-current entity's id. Two variants:
+The job is passed by `ref`, so fields it accumulates (a sum, a counter) are visible after the call. It receives the
+components only, so the pass never loads the entity rows. Two variants:
 
-- `IForEachEntity<T1..Tn>` with `world.ForEachEntity` receives the `Entity` handle instead of the id, built from the
-  table without a lookup.
+- `IForEachEntity<T1..Tn>` with `world.ForEachEntity` also receives the `Entity` handle (its `Id` and `Version`),
+  built from the table without a lookup: use it when the job needs the entity.
 - `IForEachBatch<T1..Tn>` with `world.ForEachBatch` receives runs of consecutive rows as spans (`Execute(Span<T1>,
   …)`), for SIMD. The job must not make structural changes.
 
@@ -113,17 +114,16 @@ world.ForEachBatch<Position, Velocity, Drift>(ref drift, Active);
 A job that makes no structural change can say so by implementing `INoStructuralChanges`: the pass then skips the
 bookkeeping that keeps changes safe. Only implement it when the job honors it.
 
-### What a job declares: `Writes` and `ReadsId`
+### What a job declares: `Writes`
 
-Two static members tell the pass what a hand-written job touches. `[ForEach]` methods get both from their parameters;
-a job you write keeps the safe defaults unless you override them:
+A static member tells the pass what a hand-written job writes. `[ForEach]` methods get it from their parameters; a job
+you write keeps the safe default unless you override it:
 
 | Member | Default | Meaning | When it is wrong |
 |---|---|---|---|
 | `static int Writes` | `-1` (all) | bit k - 1 set: the job writes component k through its ref. Those columns count as changed for `[Changed<T>]` (tracked components only), and when the job moves its entity to another archetype they are carried over to the new row | a write the mask leaves out is not stamped (watchers miss it) and is lost if the job also moved the entity |
-| `static bool ReadsId` (`IForEach` only) | `true` | the job reads `entityId`. When false, a pass of an `INoStructuralChanges` job passes 0 and skips loading the entity rows (other passes still pass the id) | the job reads 0 for every entity in such passes |
 
-A read-only job declares both, and a census of the world costs neither change stamps nor id loads:
+A read-only job declares it, and a census of the world stamps nothing:
 
 ```csharp
 public struct SumHealth : IForEach<Health>, INoStructuralChanges
@@ -131,9 +131,8 @@ public struct SumHealth : IForEach<Health>, INoStructuralChanges
     public long Total;
 
     public static int Writes => 0;          // reads only: nothing stamped, nothing carried over
-    public static bool ReadsId => false;    // with INoStructuralChanges: entityId is 0, the rows are not loaded
 
-    public void Execute(int entityId, ref Health health) => Total += health.Value;
+    public void Execute(ref Health health) => Total += health.Value;
 }
 ```
 

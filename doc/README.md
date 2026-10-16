@@ -33,11 +33,11 @@ One page per concept, in a sensible reading order:
 | [Singletons](guide/singletons.md) | Per-world state, singleton parameters, `SingletonRef<T>`. |
 | [Structural changes during iteration](guide/structural-changes.md) | What happens when you add, remove, create or destroy while iterating. |
 | [`ref` and `await`](guide/refs-and-await.md) | Mutating through refs, and why refs never cross an `await`. |
-| [Change tracking](guide/change-tracking.md) | `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>()`: visit only what was written since a system last ran. |
+| [Change tracking](guide/change-tracking.md) | `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>(since)`: visit only what was written since a system last ran. |
 | [Indexes and relations](guide/indexes-and-relations.md) | `IIndexed<TKey>`, `world.Index<T, TKey>()`: find entities by a value; relations (`ChildOf(Entity Parent)`) and their reverse lookup. |
 | [Snapshots](guide/snapshots.md) | Capture and restore a world in memory: undo, prediction, replays, tests. |
 | [Threading](guide/threading.md) | Process, world and owner thread; system order; safe `WorldOptions.Parallel`; what the structural gate guards. |
-| [Analyzer rules](guide/analyzer.md) | EECS001-EECS011: meaning and fix. |
+| [Analyzer rules](guide/analyzer.md) | EECS001-EECS012: meaning and fix. |
 
 ## Reference
 

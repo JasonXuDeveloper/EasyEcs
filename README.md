@@ -38,8 +38,8 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
 - **Built-in change tracking, indexes and relations.** `[Changed<T>]` visits only the rows written since a system last
   ran; `IIndexed<TKey>` components are found by value, and an `Entity` key makes a relation. Both follow every write,
   including writes through `ref`, with no events and nothing to keep in sync by hand.
-- **Mistakes fail the build.** The bundled analyzer (EECS001-EECS011) reports invalid systems, class components,
-  stateful systems and systems that reference each other.
+- **Mistakes fail the build.** The bundled analyzer (EECS001-EECS012) reports invalid systems, class components,
+  stateful systems, systems that reference each other and collections hidden in components.
 - **Decoupled by construction.** Systems cooperate only through data, in `Priority` order; system groups give you
   separate cadences (input on every wake, simulation on a fixed tick).
 - **Built for servers that run for months.** Ids are recycled behind version-checked handles, memory is bounded by
@@ -55,7 +55,7 @@ costs and when to use it).
 | Feature | API | What it does |
 |---|---|---|
 | [Worlds and entities](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md) | `new World(options)`, `CreateEntity`, `TryGetEntity`, `IsAlive`, `Destroy` | Isolated worlds of version-checked, recycled entity handles; lookup by id. |
-| [Components and tags](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md) | `struct : IComponent`, `Add`, `Set`, `Get`, `TryGet`, `GetOrAdd`, `Has`, `Remove` | Plain structs in archetype tables; an empty struct is a tag; up to 9 components per call. |
+| [Components and tags](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md) | `struct : IComponent`, `Add`, `Set`, `Get`, `Read`, `TryGet`, `TryGetRef`, `GetOrAdd`, `Has`, `Remove` | Plain structs in archetype tables; an empty struct is a tag; up to 9 components per call. |
 | [Immediate structural changes](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/structural-changes.md) | any `Add` / `Remove` / create / destroy | Applied at once, even in the middle of a pass; no command buffer to flush. |
 | [Systems and `[ForEach]`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md) | `EcsSystem`, `[ForEach]`, `Priority`, `OnCreate` / `OnUpdate` / `OnDestroy`, `AddSystem` / `RemoveSystem` / `GetSystem` | A method is the whole loop, compiled to an inlined struct job; `in` reads, `ref` writes, `Entity` and singletons as parameters. |
 | [Filters](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/queries.md) | `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `QueryFilter` | Narrow a system or query by presence, absence, any-of or recent writes. |
@@ -66,15 +66,14 @@ costs and when to use it).
 | [Singletons](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/singletons.md) | `ISingletonComponent`, `AddSingleton`, `GetSingleton`, `SingletonRef<T>` | One value per world, passed to systems as `ref` / `in` parameters. |
 | [Parallel systems](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md) | `WorldOptions.Parallel` | Systems of one priority that do not conflict run at once, with the sequential result. |
 | [Parallel `[ForEach]`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#parallel-methods) | `[ForEach(Parallel = true)]`, `ForEachParallel`, `ForEachEntityParallel`, `ChunkRows` | One heavy method's rows split across cores. |
-| [Change tracking](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/change-tracking.md) | `ITrackChanges`, `[Changed<T>]`, `ChangedSince` | Visit only the rows written since a system last ran; `ref` access counts as a write. |
+| [Change tracking](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/change-tracking.md) | `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>(since)` | Visit only the rows written since a system last ran; `ref` access counts as a write. |
 | [Value indexes](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/indexes-and-relations.md) | `IIndexed<TKey>`, `world.Index<T, TKey>()`, `Find`, `TryFind`, `Count` | Find entities by a component's value, kept in sync with every write. |
 | [Relations](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/indexes-and-relations.md) | an `IIndexed<Entity>` component | Entity-to-entity links with reverse lookup; a destroyed source leaves the index, a destroyed target matches no later entity (handles carry their version). |
 | [Snapshots](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/snapshots.md) | `world.Capture()`, `world.Restore(snapshot)` | Copy a world in memory and roll it back (replays, tests, rollback). |
 | [Bulk create and destroy](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md#entities) | `CreateEntities`, `DestroyEntities`, `EnsureEntityCapacity` | Spawn and clear waves in one pass through the structural gate. |
-| [Table maintenance](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/structural-changes.md) | `GetFragmentationStats`, `CompactArchetypes` | Measure and close the holes of passes cut short. |
 | [Per-system timing](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#measuring-systems) | `WorldOptions.MeasureSystems`, `system.Stats` | Run counts and times of every system. |
 | [Errors](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#errors) | `World.SystemError` | A failing system is reported, can be switched off, and the tick goes on. |
-| [Analyzer](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/analyzer.md) | EECS001-EECS011 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
+| [Analyzer](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/analyzer.md) | EECS001-EECS012 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
 | [Threading and Native AOT](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md) | one owner thread per world; no reflection on hot paths | Many worlds per process, one per thread; AOT works with nothing to configure. |
 
 ## Example
@@ -258,19 +257,22 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
   rejects methods that could race (EECS010).
 - **Snapshots:** `world.Capture()` / `world.Restore(snapshot)` roll a world back in memory (undo, prediction, tests).
 - **Change tracking:** components marked `ITrackChanges` record each row's last write; `[Changed<T>]` methods visit
-  only the rows written since their system last ran (replication, persistence), and `QueryFilter.Changed<T>()`
+  only the rows written since their system last ran (replication, persistence), and `QueryFilter.Changed<T>(since)`
   does the same for queries.
 - **Indexes and relations:** components implementing `IIndexed<TKey>` are found by value
   (`world.Index<T, TKey>().Find(key)`); an `Entity` key makes a relation (`ChildOf(Entity Parent)`) whose index
   lists the children of an entity.
 - **New APIs:** `WithAny<T>` filters (`[WithAny<T>]` on `[ForEach]`), batch `CreateEntities` / `DestroyEntities`,
   per-system timing (`WorldOptions.MeasureSystems`, `system.Stats`), `entity.Read<T>()` (read-only, never a write) and
-  `entity.TryGetRef<T>(out found)` (optional access by `ref`); Native AOT compatible.
-- **EECS011** warns when a `[ForEach]` method changes a collection held by an `in` component.
+  `entity.TryGetRef(out ComponentRef<T>)` (optional access by `ref`); Native AOT compatible.
+- **EECS011 / EECS012** warn about collections inside components (hold items as entities with a relation) and
+  about writes through `in` parameters.
 - `Entity.GetHashCode()` is deterministic (`Id * 397 ^ Version`) and cheaper (relation lookups hash handles).
 - **Behavior changes:** `Query` results are ref structs (no `await` in the loop, items cannot be stored); refs can be
   invalidated by structural changes of other entities; iteration order follows table rows; with `Parallel`, a
-  subclass the generator did not see runs alone; `AddSingleton` resets an existing singleton in place. See the
+  subclass the generator did not see runs alone; `AddSingleton` resets an existing singleton in place; `IForEach` jobs
+  receive only the components; stale handles answer `Has` / `TryGet` with false; `CompactArchetypes` is gone (tables
+  stay dense on their own). See the
   [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v40--v41).
 - A realistic 100k-entity server tick takes 1.95 ms instead of 4.33 ms; toggling a status component on 10,000
   entities 190 μs instead of 338 μs. Reading a component through a handle is about 16% slower (4.12 vs 3.56 μs per

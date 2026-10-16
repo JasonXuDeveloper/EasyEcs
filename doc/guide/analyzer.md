@@ -1,10 +1,10 @@
-# Analyzer rules (EECS001-EECS011)
+# Analyzer rules (EECS001-EECS012)
 
 [Docs index](../README.md) · Related: [Systems](systems.md) · [ECS principles](../ecs-principles.md)
 
 The EasyEcs analyzer ships in the package next to the source generator. EECS001-EECS006, EECS009 and EECS010 are errors: the generator
-skips invalid input and the analyzer reports it, so "not generated" always means "reported". EECS007, EECS008 and
-EECS011 are warnings that enforce the [ECS principles](../ecs-principles.md).
+skips invalid input and the analyzer reports it, so "not generated" always means "reported". EECS007, EECS008,
+EECS011 and EECS012 are warnings that enforce the [ECS principles](../ecs-principles.md).
 
 | Id | Severity | Rule |
 |---|---|---|
@@ -18,7 +18,8 @@ EECS011 are warnings that enforce the [ECS principles](../ecs-principles.md).
 | [EECS008](#eecs008) | Warning | Systems must not reference systems |
 | [EECS009](#eecs009) | Error | A batch `[ForEach]` method takes only spans and singletons |
 | [EECS010](#eecs010) | Error | A `[ForEach(Parallel = true)]` method must be able to run on several threads |
-| [EECS011](#eecs011) | Warning | A `[ForEach]` method must not change what a read-only component holds |
+| [EECS011](#eecs011) | Warning | Components must not hold collections |
+| [EECS012](#eecs012) | Warning | A `[ForEach]` method must not change what a read-only parameter holds |
 
 ## EECS001
 
@@ -264,33 +265,58 @@ public partial class RegenSystem : EcsSystem
 
 ## EECS011
 
-**Write through a read-only component.** A `[ForEach]` method takes a component as `in` (or a `ReadOnlySpan<T>` of
-it) and changes a collection or class the component holds: it calls a mutating method on it (`Add`, `Remove`,
-`Clear`, `Insert`, `Push`, `Enqueue`, `Sort`, ...), assigns an element (`bag.Items[i] = x`) or a member of a class it
-holds (`bag.Owner.Gold++`). The compiler allows it because only the reference is read-only, but the write is
-scheduled as a read (parallel systems that read the component race with it) and never stamped, so `[Changed<T>]`
-systems and value indexes miss it.
+**Components must not hold collections.** A component (directly, or through the fields of a struct or class it
+holds) has a field that is an array or a mutable collection (`List<T>`, `Dictionary<K, V>`, `HashSet<T>`, `Queue<T>`,
+any `IEnumerable` but `string`). Its row stores only the reference, so a change to the collection is not a write:
+`[Changed<T>]` systems and indexes miss it, parallel systems that take the component as `in` race with it, and
+snapshots share the collection instead of copying it.
 
-Fix: take the component by `ref`, or better, store the items as entities or by value
-([ECS principles, rule 8](../ecs-principles.md#8-hold-collections-as-entities-or-by-value-not-as-shared-references)).
-The rule sees changes made directly on the parameter's members; a reference copied into a local, or changed inside a
-method of your own class, is not followed.
+Fix: make each item an entity that points at its owner (a relation), or keep a small fixed number of values inline
+([ECS principles, rule 8](../ecs-principles.md#8-hold-collections-as-entities-not-in-components)). Immutable and frozen
+collections (`System.Collections.Immutable`, `System.Collections.Frozen`) are allowed: they cannot change, so replacing
+one through `ref` is a tracked write. Singletons may hold collections (a spatial grid, a lookup table): there is one per
+world, and [EECS012](#eecs012) still guards writes through `in`.
 
 ```cs
-public record struct Inventory(List<int> Items) : IComponent;
-
-[ForEach] static void Loot(in Inventory inv, in Health hp)   // EECS011: Add changes the list behind an 'in' component
-{
-    if (hp.Value <= 0) inv.Items.Add(1);
-}
+public record struct Inventory(List<Entity> Items) : IComponent;   // EECS011: the list changes behind the row's back
 ```
 
 ```csharp
-public record struct Inventory(System.Collections.Generic.List<int> Items) : IComponent;
-
-public partial class LootSystem : EcsSystem
+public record struct ItemOf(Entity Owner) : IComponent, IIndexed<Entity>   // each item points at its owner
 {
-    [ForEach, With<Dead>]
-    static void Loot(ref Inventory inventory) => inventory.Items.Add(1);   // ref: scheduled and stamped as a write
+    public Entity Key => Owner;
+}
+
+public static class Inventories
+{
+    public static int CountItems(World world, Entity player) => world.Index<ItemOf, Entity>().Count(player);
+}
+```
+
+## EECS012
+
+**Write through a read-only parameter.** A `[ForEach]` method takes a component or singleton as `in` (or a component
+as `ReadOnlySpan<T>`) and changes data it holds by reference: it calls a mutating method on a collection (`Add`,
+`Remove`, `Clear`, `Insert`, `Push`, `Enqueue`, `Sort`, ...), assigns an element (`grid.Cells[i] = x`) or a member of a
+class it holds (`holder.Owner.Gold++`). The compiler allows it because only the reference is read-only, but the write
+is scheduled as a read (parallel systems that read the same data race with it) and never stamped, so `[Changed<T>]`
+systems and value indexes miss it.
+
+Fix: take the parameter by `ref`. The rule sees changes made directly on the parameter's members; a reference copied
+into a local, or changed inside a method of your own class, is not followed.
+
+```cs
+public record struct Grid(List<int> Cells) : ISingletonComponent;
+
+[ForEach] static void Mark(in Position p, in Grid grid) => grid.Cells.Add((int)p.X);   // EECS012: 'in', but written
+```
+
+```csharp
+public record struct Grid(System.Collections.Generic.List<int> Cells) : ISingletonComponent;
+
+public partial class GridSystem : EcsSystem
+{
+    [ForEach]
+    static void Mark(in Position p, ref Grid grid) => grid.Cells.Add((int)p.X);   // ref: scheduled as a write
 }
 ```

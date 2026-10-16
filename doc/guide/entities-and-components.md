@@ -35,8 +35,9 @@ int cleared = world.DestroyEntities<Health>(QueryFilter.Create().With<Dead>()); 
 - **Ids are recycled** (LIFO, so recently freed slots are still warm in cache). `Entity.Id` is unique only among
   live entities.
 - **Every access validates the version.** When an entity is destroyed its version is bumped, so every outstanding
-  handle becomes stale: `Get`, `Has`, `Set`, `Remove` on it throw `InvalidOperationException` ("Entity has been
-  destroyed"), while `Destroy` on it is ignored.
+  handle becomes stale. A stale or `default` handle answers questions with false (`IsAlive`, `Has`, `TryGet`,
+  `TryGetRef`), throws `InvalidOperationException` on accesses and changes (`Get`, `Read`, `Add`, `Set`, `Remove`:
+  "Entity is not alive"), and ignores `Destroy`. It never reaches the entity that reuses its id.
 - Equality includes the version: two handles are equal only if they name the same incarnation.
 - **Keep the `Entity`, never a raw id.** To look an id up, use `world.TryGetEntity(id, out e)` /
   `world.GetEntity(id)`, which return the current incarnation.
@@ -75,13 +76,13 @@ public record struct Name(string Value) : IComponent;   // managed references ar
 |---|---|
 | `ref T Get<T>()` | Ref into storage; throws if the entity does not have `T`. |
 | `ref readonly T Read<T>()` | Read-only ref; throws if missing. Not a write, so tracked components stay unchanged. |
-| `ref T TryGetRef<T>(out bool found)` | Ref into storage if present; a null ref when not (check `found`). |
-| `bool Has<T>()` | Whether the entity has `T`. |
+| `bool TryGetRef<T>(out ComponentRef<T> c)` | Ref into storage if present (`c.Value` is `ref T`). |
+| `bool Has<T1..Tn>()` | Whether the entity has all of them. |
 | `bool TryGet<T>(out T value)` | A **copy** of `T` if present. |
 | `ref T Add<T>()` | Adds `T` (or resets it to `default` if present) and returns a ref. |
 | `ref T GetOrAdd<T>()` | Ref to `T`, adding it with `default` first if missing. |
 | `Entity Set(in T1 … in Tn)` | Adds or overwrites 1-9 values, with at most one row copy; chainable. |
-| `void Remove<T1..Tn>()` | Removes 1-9 components; the entity keeps its row. Missing ones are ignored. |
+| `Entity Remove<T1..Tn>()` | Removes 1-9 components; the entity keeps its row. Missing ones are ignored; chainable. |
 
 Always mutate through a `ref`; see [`ref` and `await`](refs-and-await.md). The `ref T` operations count as a write
 of a tracked component ([change tracking](change-tracking.md)) whether or not you store through them, so read with
@@ -90,8 +91,8 @@ of a tracked component ([change tracking](change-tracking.md)) whether or not yo
 ```csharp
 if (world.TryGetEntity(unit.Id, out var hit))          // e.g. an id a client sent
 {
-    ref var hp = ref hit.TryGetRef<Health>(out bool alive);
-    if (alive) hp.Value -= 10;                             // one lookup, written in place
+    if (hit.TryGetRef(out ComponentRef<Health> hp))
+        hp.Value.Value -= 10;                              // one lookup, written in place
     float x = hit.Read<Position>().X;                      // read-only: no change recorded
 }
 ```

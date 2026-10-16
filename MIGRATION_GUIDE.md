@@ -14,12 +14,25 @@ For the current API, see the [documentation](doc/README.md).
 
 ## v4.0 → v4.1
 
-No public API is removed. Code written for 4.0 compiles unchanged unless it stores `Query` results in fields,
-uses them across `await`, captures them in lambdas, uses them in iterators or LINQ, or passes them as generic
-arguments (they are ref structs now, see below). The storage moved from one column per component
+A few APIs changed (listed first below). Other code written for 4.0 compiles unchanged unless it stores `Query`
+results in fields, uses them across `await`, captures them in lambdas, uses them in iterators or LINQ, or passes them
+as generic arguments (they are ref structs now, see below). The storage moved from one column per component
 type (indexed by entity id) to archetype tables (one row per entity, columns 64-byte aligned), which changes a few
 behaviors:
 
+- **`IForEach` jobs receive only the components.** `Execute(int entityId, ref T1 c1, …)` became
+  `Execute(ref T1 c1, …)`, so a pass never loads the entity rows for them. A job that needs the entity implements
+  `IForEachEntity<…>` (`Execute(Entity entity, ref T1 c1, …)`, `entity.Id` for the id) and runs with
+  `world.ForEachEntity`.
+- **`CompactArchetypes()` is gone.** Tables stay dense on their own, and passes now end even when a job throws, so
+  there is nothing to compact. Delete the calls; `GetFragmentationStats()` remains as a check.
+- **Stale and `default` handles answer questions with false.** `Has<T>()` and `TryGet<T>()` used to throw for a
+  destroyed entity (and `default(Entity).Has<T>()` threw a `NullReferenceException`); they now return false, like
+  `IsAlive`. `Get`, `Add`, `Set` and `Remove` still throw, now `InvalidOperationException` for `default` handles too.
+- **`world.Systems` is a `SystemList`** (allocation-free `foreach` and `Count`) instead of a new `IReadOnlyList`;
+  `foreach` loops compile unchanged.
+- **`QueryEnumerator.Count` / `IsEmpty` are gone:** use `world.Count` / `world.Any` with the same filter.
+- **`entity.Remove<…>()` returns the entity** for chaining (calls that ignore it compile unchanged).
 - **Iteration semantics are stricter.** A pass visits each entity at most once: entities created or moved into a
   matching archetype during the pass are not visited by it (one that only gets a queried component back keeps its
   row and is visited if the pass has not reached it); entities destroyed or
@@ -39,9 +52,6 @@ behaviors:
   on it.
 - **`EnsureEntityCapacity` / `InitialEntityCapacity`** pre-size the entity records only; archetype tables grow on
   their own.
-- **`CompactArchetypes()`** is rarely needed: tables stay dense automatically (a removed row is filled at once, or
-  when the last pass ends). It remains for recovering from a pass interrupted by an exception, which `Update` also
-  does on its own.
 - **`Parallel` keeps subclasses it cannot see alone.** A system class that derives from a generated system without
   adding `[ForEach]` methods of its own (for example to override `OnUpdate`) now runs alone in its priority, as its
   `OnUpdate` may touch anything. Give the subclass a `[ForEach]` method (it is then generated) to batch it again.
@@ -68,16 +78,16 @@ New:
   `World.ChunkRows` rows on several threads; [EECS010](doc/guide/analyzer.md#eecs010) reports methods that could race.
 - `world.Capture()` / `world.Restore(snapshot)`: in-memory snapshots of entities, components and singletons
   ([Snapshots](doc/guide/snapshots.md)).
-- `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>()` / `ChangedSince(tick)`, `world.ChangeTick`,
-  `system.LastRunTick`: change tracking ([Change tracking](doc/guide/change-tracking.md)). `IForEach` gained optional
-  static `ReadsId` and `Writes` members (with defaults, so 4.0 jobs compile unchanged); `IForEachEntity` and
-  `IForEachBatch` (new) have `Writes`.
+- `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>(since)` / `ChangedSince(since)`, `world.ChangeTick`,
+  `system.LastRunTick`: change tracking ([Change tracking](doc/guide/change-tracking.md)). The job interfaces gained
+  an optional static `Writes` member (with a default).
 - `IIndexed<TKey>`, `world.Index<T, TKey>()`, `ValueIndex<T, TKey>`: find entities by a component value; relations
   are indexed `Entity` keys ([Indexes and relations](doc/guide/indexes-and-relations.md)).
 - `entity.Read<T>()` returns a `ref readonly T` that never counts as a write of a tracked component, and
-  `entity.TryGetRef<T>(out bool found)` returns a `ref T` (a null ref when missing): optional access without a copy.
-- [EECS011](doc/guide/analyzer.md#eecs011) warns when a `[ForEach]` method changes a collection or class held by a
-  component it takes as `in` (the change would be neither scheduled as a write nor tracked).
+  `entity.TryGetRef(out ComponentRef<T> c)` hands out a `ref` (`c.Value`) when the entity has the component:
+  optional access without a copy. `entity.Has<T1..Tn>()` tests several components with one lookup.
+- [EECS011](doc/guide/analyzer.md#eecs011) warns about collections inside components (hold the items as entities with a
+  relation), [EECS012](doc/guide/analyzer.md#eecs012) about writes through `in` parameters.
 - The library is marked `IsAotCompatible`: trimming and Native AOT analyzers run on every build, and it publishes
   with Native AOT without warnings.
 

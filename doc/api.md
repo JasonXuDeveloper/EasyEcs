@@ -18,9 +18,10 @@ Notation:
 | `World` | sealed class, `IDisposable` | Owns entities, components, singletons, systems. |
 | `World.EntityEnumerator` | struct | Result of `world.Entities`: enumerates alive entities in id order, allocation-free. |
 | `WorldOptions` | sealed class | `Parallel`, `MaxDegreeOfParallelism`, `InitialEntityCapacity`, `MeasureSystems` (init-only). |
-| `Entity` | readonly struct | Handle: `Id`, `Version`, `World`; equality includes the version. |
+| `Entity` | readonly struct | Handle: `Id`, `Version`, `World`; equality includes the version. A destroyed or default handle answers questions (`IsAlive`, `Has`, `TryGet`, `TryGetRef`) with false, throws on accesses and changes (`Get`, `Read`, `Add`, `Set`, `Remove`), and ignores `Destroy`. |
+| `ComponentRef<T>` | ref struct | From `entity.TryGetRef(out ComponentRef<T>)`: `.Value` is `ref T`; valid until the next structural change. |
 | `IComponent` | marker interface | Implemented by component structs. |
-| `ITrackChanges` | marker interface | A component whose rows record the change tick of their last write (`[Changed<T>]`, `QueryFilter.Changed<T>()`). |
+| `ITrackChanges` | marker interface | A component whose rows record the change tick of their last write (`[Changed<T>]`, `QueryFilter.Changed<T>(since)`). |
 | `IIndexed<TKey>` | interface | A component (`ITrackChanges`) the world indexes by its `Key`; an `Entity` key makes it a relation. |
 | `ValueIndex<T, TKey>` | sealed class | `world.Index<T, TKey>()`: `Find(key)` (enumerator of `Entity`), `TryFind`, `Count`. |
 | `ISingletonComponent` | marker interface | Implemented by singleton structs. |
@@ -29,13 +30,14 @@ Notation:
 | `SystemAccess` | struct | What a system reads and writes (`Read<T>`, `Write<T>`, `ReadSingleton<T>`, `WriteSingleton<T>`, `RunsAlone`), used by `Parallel` batching. Only the generated `GeneratedAccess` override of a system fills it (from its `[ForEach]` parameters); user code never calls it. |
 | `ForEachAttribute`, `WithAttribute<T>`, `WithoutAttribute<T>`, `WithAnyAttribute<T>`, `ChangedAttribute<T>` | attributes | `[ForEach]` methods (`Parallel = true` runs chunks of rows on several threads) and their filters. |
 | `ISystemGroup`, `UpdateInGroupAttribute<TGroup>` | marker / attribute | System groups. |
-| `QueryFilter` | readonly struct | `Create().With<T>().Without<U>().WithAny<V>().WithAny<W>().Changed<X>().ChangedSince(tick)`; `Since`. |
-| `IForEach<T1..Tn>` | interface | Struct job: `void Execute(int entityId, ref T1 c1, …)`. Optional static overrides: `ReadsId` (false: passes of an `INoStructuralChanges` job skip loading ids and pass 0) and `Writes` (bit k - 1 for component k: what to carry over when the job moves its entity; default all). |
-| `IForEachEntity<T1..Tn>` | interface | Struct job receiving the handle: `void Execute(Entity entity, ref T1 c1, …)`. Optional static `Writes`, as for `IForEach`. |
+| `QueryFilter` | readonly struct | `Create().With<T>().Without<U>().WithAny<V>().WithAny<W>().Changed<X>(since)`; `ChangedSince(since)` moves the tick of a kept filter. |
+| `IForEach<T1..Tn>` | interface | Struct job: `void Execute(ref T1 c1, …)`. Optional static `Writes` (bit k - 1 for component k: what to carry over when the job moves its entity, and which tracked components it stamps; default all). |
+| `IForEachEntity<T1..Tn>` | interface | Struct job that also receives the handle: `void Execute(Entity entity, ref T1 c1, …)` (for the id, `entity.Id`). Optional static `Writes`, as for `IForEach`. |
 | `IForEachBatch<T1..Tn>` | interface | Struct job receiving runs of rows: `void Execute(Span<T1> c1, …)`; no structural changes. Optional static `Writes` (which spans the job writes; default all). |
 | `INoStructuralChanges` | marker interface | A job that makes no structural change: its passes skip the bookkeeping (generated for `[ForEach]` methods that cannot change structure). |
-| `QueryEnumerator<T1..Tn>`, `QueryItem<T1..Tn>` | ref structs | Result of `Query`: `item.Entity`, `item.Component1..n` (refs into the row); enumerator `Count`, `IsEmpty`, `Dispose()` (ends the pass; `foreach` calls it). A loop over them cannot `await`. |
+| `QueryEnumerator<T1..Tn>`, `QueryItem<T1..Tn>` | ref structs | Result of `Query`: `item.Entity`, `item.Component1..n` (refs into the row); enumerator `Dispose()` (ends the pass; `foreach` calls it). A loop over them cannot `await`. |
 | `SingletonRef<T>` | readonly struct | Stable singleton handle; `.Value` is `ref T`. |
+| `SystemList` | readonly struct | `world.Systems`: `foreach` over every group's systems, `Count`; allocation-free. |
 | `WorldSnapshot` | sealed class | Copies of a world's entities, components and singletons (`world.Capture()`); `EntityCount`. |
 
 ## Entities
@@ -58,14 +60,15 @@ Notation:
 
 | API | Complexity | Notes |
 |---|---|---|
-| `entity.Get<T>()` → `ref T` | O(1) | version check + column lookup (+ one presence-bit test) + one indexed load; throws if missing; counts as a write of a tracked (`ITrackChanges`) component |
+| `entity.Get<T>()` → `ref T` | O(1) | version check + column lookup (+ one presence-bit test) + one indexed load; throws if missing or not alive; counts as a write of a tracked (`ITrackChanges`) component |
 | `entity.Read<T>()` → `ref readonly T` | O(1) | as `Get`, but read-only: never counts as a write |
-| `entity.TryGetRef<T>(out bool found)` → `ref T` | O(1) | a null ref when missing (check `found`); counts as a write of a tracked component when found |
-| `entity.Has<T>()` / `TryGet<T>(out T)` | O(1) | `TryGet` returns a copy (not a write) |
+| `entity.TryGetRef<T>(out ComponentRef<T>)` → `bool` | O(1) | `component.Value` is the ref; false when missing or not alive; counts as a write of a tracked component when found |
+| `entity.Has<T>()` / `TryGet<T>(out T)` | O(1) | false when missing or not alive; `TryGet` returns a copy (not a write) |
+| `entity.Has<T1..Tn>()` | O(n) | all of them; one meta lookup |
 | `entity.Add<T>()` → `ref T` | O(c) amortized | adds (or resets) and returns a ref; a component the table has a column for only sets its presence bit (O(1)), a new one copies the row |
 | `entity.GetOrAdd<T>()` → `ref T` | O(1), or as `Add` when missing | counts as a write of a tracked component |
 | `entity.Set(in T1 … in Tn)` → `Entity` | O(n), or O(c) amortized when it moves | add or overwrite, at most one row copy, chainable |
-| `entity.Remove<T1..Tn>()` | O(n) | clears presence bits, the entity keeps its row; missing components are ignored; a removed indexed component unlinks the entity (O(1)) |
+| `entity.Remove<T1..Tn>()` → `Entity` | O(n) | clears presence bits, the entity keeps its row; missing components are ignored; a removed indexed component unlinks the entity (O(1)); chainable |
 
 ## Queries
 
@@ -76,11 +79,10 @@ Notation:
 | `world.ForEachParallel<T1..Tn, TJob>(ref job, filter)` / `ForEachEntityParallel` | O(M + S), divided over up to `MaxDegreeOfParallelism` threads | `INoStructuralChanges` jobs; chunks of `World.ChunkRows` rows, one job copy per chunk (state is not merged); fewer than two chunks run on the calling thread |
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + runs) | spans of consecutive rows; one call for a table whose rows all match |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | `item.Entity`, `item.Component1..n` (refs) |
-| `query.Count` / `query.IsEmpty` (on the enumerator) | as `world.Count` / `world.Any` | without starting the walk |
 | `world.Count<T1..Tn>(filter)` | O(M), + S / 64 for tables whose rows must be tested (some rows lack a required component, have an excluded one or lack every `WithAny` component, or a `Changed` filter applies) | sums table counts, or counts presence bits (and change ticks) |
 | `world.Any<T1..Tn>(filter)` | O(M + S / 64) worst | stops at the first match; S / 64 only for tables whose rows must be tested (as for `Count`) |
 | `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1) | build once and keep it in a `static readonly` field; `WithAny` calls form one "at least one of" group |
-| `filter.Changed<T>()` / `filter.ChangedSince(tick)` | O(1); a pass skips tables, 4,096-row blocks and 64-row words written before `tick` (4 summaries per SIMD compare) and takes a word's written rows from its summary; only words written at several ticks since `tick`, or row by row by a query, test 4 rows per SIMD compare | rows whose `T` (`ITrackChanges`) was written at or after `tick`; `ChangedSince` returns a copy, so a cached filter takes a new tick per call |
+| `filter.Changed<T>(since)` / `filter.ChangedSince(since)` | O(1); a pass skips tables, 4,096-row blocks and 64-row words written before `since` (4 summaries per SIMD compare) and takes a word's written rows from its summary; only words written at several ticks after `since`, or row by row by a query, test 4 rows per SIMD compare | rows whose `T` (`ITrackChanges`) was written at or after `since`; one tick per filter (`Changed` filters naming different ticks throw `ArgumentException`); `ChangedSince` returns a copy with a new tick, so a kept filter takes a new tick per call without being rebuilt |
 
 The first time a query shape is used, building its cache entry costs O(all archetypes) under the structural gate.
 After that, each lookup is one hash probe. In turn, creating a new archetype (the first entity with a new component
@@ -107,8 +109,7 @@ it is appended (copy-on-write) to the archetype list and to every cached query i
 | `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` → `ref T` | O(1); `AddSingleton` resets an existing singleton in its storage, so `SingletonRef<T>` handles stay attached |
 | `world.SingletonRef<T>()` → `SingletonRef<T>` (stable handle; adds if missing) / `singletonRef.Value` → `ref T` | O(1) / O(1), one load |
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` → `bool` | O(1); `RemoveSingleton` returns false when it was not added |
-| `world.CompactArchetypes()` | O(archetypes + tombstones × columns); tables are kept dense automatically, so this is only needed after a pass was interrupted by an exception (which `Update` also handles) |
-| `world.GetFragmentationStats()` → `(TotalSlots, AliveEntities, FragmentationRatio)` | O(archetypes) |
+| `world.GetFragmentationStats()` → `(TotalSlots, AliveEntities, FragmentationRatio)` | O(archetypes); a diagnostic: tables stay dense on their own (passes end even when a job throws; an update closes the pass of a query enumerator abandoned without `Dispose`), so the ratio is 0 between updates |
 | `world.Capture()` → `WorldSnapshot` | O(entities × components + archetypes + singletons); copies by value, not while a query iterates |
 | `world.Restore(snapshot)` | O(entities × components + archetypes + singletons); snapshot handles are valid again, later ones stale; every tracked row counts as written; indexes re-index on their next lookup; not while a query iterates |
 
@@ -116,7 +117,7 @@ Other `World` members:
 
 | Member | Meaning |
 |---|---|
-| `world.Systems` | the systems of every group, as a new `IReadOnlyList<EcsSystem>` (allocates; for tooling) |
+| `world.Systems` → `SystemList` | the systems of every group in execution order; `foreach` and `Count`, allocation-free |
 | `world.UpdateCount` | number of default-group updates so far |
 | `world.SystemError` | `event Action<EcsSystem, Exception>`; without a subscriber, exceptions propagate; a failed run still moves `LastRunTick` on |
 | `world.Dispose()` | `OnDestroy` on every system in reverse order, then releases storage; stale handles throw; indexes still held find nothing |

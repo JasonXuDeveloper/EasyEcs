@@ -38,13 +38,13 @@ out a `ref`, whether or not the code stores through it:
 |---|---|
 | `ref T` parameters of `[ForEach]` methods (`Span<T>` for batch methods) and of struct jobs (`Writes`) | `in T` parameters, `ReadOnlySpan<T>` |
 | `Query` items (the enumerator stamps every row it visits) | `TryGet<T>(out T)` (a copy), `Read<T>()` (read-only) |
-| `entity.Get<T>()`, `TryGetRef<T>(out found)` when found, `GetOrAdd<T>()`, `Add<T>()`, `Set(...)` | `Has<T>()` |
+| `entity.Get<T>()`, `TryGetRef(out ComponentRef<T>)` when found, `GetOrAdd<T>()`, `Add<T>()`, `Set(...)` | `Has<T>()` |
 | `CreateEntity(...)`, `CreateEntities(...)` with the component | removing the component |
 | `world.Restore(snapshot)` (every restored row) | |
 
 So declare read-only access as `in`: a `ref` parameter that only reads marks every row it visits as changed. A
-component's row holds a collection or class only by reference: changing it counts as a write only through a `ref`
-access, so never change it through `in` (EECS011, and [ECS principles, rule 8](../ecs-principles.md#8-hold-collections-as-entities-or-by-value-not-as-shared-references)).
+collection inside a component changes without any `ref` access, so it is never tracked: hold the items as entities
+instead (EECS011, [ECS principles, rule 8](../ecs-principles.md#8-hold-collections-as-entities-not-in-components)).
 
 ## Ticks
 
@@ -59,15 +59,27 @@ Outside systems, filter by a tick you read earlier:
 ```csharp
 ulong mark = world.ChangeTick;
 // ... writes ...
-var changed = QueryFilter.Create().Changed<Health>().ChangedSince(mark);   // rows written at or after mark
+var changed = QueryFilter.Create().Changed<Health>(mark);   // rows written at or after mark
 int count = world.Count<Health>(changed);
 foreach (var item in world.Query<Health>(changed)) { /* ... */ }
 ```
 
 Writes between two updates share one tick, so a mark taken in the middle of them also selects the writes made before
 it since the last update: take the mark right after an update (or a group's update), and update again before the next
-mark. `Changed<T>()` without `ChangedSince` selects every row having `T`. Several `Changed` filters require all of
-them.
+mark. A filter has one tick: several `Changed` filters require all of them, and must name the same tick (else
+`ArgumentException`). A filter kept in a field takes a new tick per use with `ChangedSince`, without being rebuilt:
+
+```csharp
+public static class Replication
+{
+    private static readonly QueryFilter HealthChanged = QueryFilter.Create().Changed<Health>(0);
+
+    public static int ChangedSince(World world, ulong mark) => world.Count<Health>(HealthChanged.ChangedSince(mark));
+}
+```
+
+The tick is part of the call because a change is relative to someone's last look: `[Changed<T>]` methods use their
+system's last run, ad-hoc queries the mark the caller took. Tick 0 selects every row having `T`.
 
 ## Cost
 

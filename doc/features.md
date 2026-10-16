@@ -25,7 +25,6 @@ Xeon VM at 2.1 GHz ([benchmarks](performance.md#benchmarks)).
 | [Relations](#relations) | Entity-to-entity links with reverse lookup. | `OwnedBy`: `Respawn` recalls a player's projectiles |
 | [Snapshots](#snapshots) | Copy a world and restore it in memory. | `Save` / `Load` |
 | [Bulk create and destroy](#bulk-create-and-destroy) | Spawn and clear waves in one pass through the structural gate. | `CreateEntities` (players), `DestroyEntities` (`NewRound`) |
-| [Table maintenance](#table-maintenance) | Fragmentation stats and compaction, for passes cut short. | `NewRound` (`GetFragmentationStats` / `CompactArchetypes`) |
 | [Per-system timing](#per-system-timing) | Run counts and times of every system. | `MeasureSystems`, `Slowest` |
 | [Errors](#errors) | A failing system is reported and can be switched off; the tick goes on. | `SystemError` (`Failure`, `FaultySystem` in the tests) |
 | [Analyzer](#analyzer) | ECS design mistakes fail the build. | the whole file builds without a warning |
@@ -206,7 +205,7 @@ Guide: [Systems: parallel methods](guide/systems.md#parallel-methods),
 
 **What it does.** A component marked `ITrackChanges` records the world's change tick of each row's last write (any
 access that hands out a `ref`). A `[Changed<T>]` method visits only the entities whose `T` was written since its
-system last ran; `QueryFilter.Changed<T>().ChangedSince(tick)` does the same for queries.
+system last ran; `QueryFilter.Changed<T>(tick)` does the same for queries.
 
 **When to use it.** Work that follows the few entities that changed: replicating state to clients, saving dirty
 entities, updating a spatial structure for the units that moved.
@@ -279,19 +278,6 @@ structural gate; `world.DestroyEntities<T>(filter)` destroys every match.
 
 Guide: [Entities and components](guide/entities-and-components.md#entities).
 
-## Table maintenance
-
-**What it does.** `world.GetFragmentationStats()` reports rows in use against living entities;
-`world.CompactArchetypes()` closes every tombstone. Tables stay dense on their own (the last row fills a destroyed
-entity's row, and tombstones left by a pass are closed when it ends), so both are for a pass that an exception cut
-short outside `Update`.
-
-**When to use it.** A health check or a round boundary on a long-running server.
-
-**Cost.** O(archetypes) for the stats; O(archetypes + tombstones × columns) for compaction.
-
-Guide: [Structural changes: keeping tables dense](guide/structural-changes.md#keeping-tables-dense).
-
 ## Per-system timing
 
 **What it does.** With `WorldOptions.MeasureSystems`, every run of a system is timed: `system.Stats` holds `Runs`,
@@ -318,8 +304,9 @@ Guide: [Systems: errors](guide/systems.md#errors).
 
 ## Analyzer
 
-**What it does.** The package bundles an analyzer (EECS001-EECS011) next to the generator: invalid `[ForEach]`
-methods, class components, stateful systems, systems referencing systems, unsafe parallel methods, writes through `in` components fail the build or
+**What it does.** The package bundles an analyzer (EECS001-EECS012) next to the generator: invalid `[ForEach]`
+methods, class components, stateful systems, systems referencing systems, unsafe parallel methods, collections in
+components and writes through `in` parameters fail the build or
 warn.
 
 **When to use it.** Always on; it keeps a large code base decoupled.

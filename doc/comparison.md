@@ -28,7 +28,7 @@ checks that every library computes the same result.
 | Singletons | ✅ `ISingletonComponent`, `[ForEach]` parameters | ⚠️ `UniqueEntity` | ❌ | ✅ `World.Set<T>` / `Get<T>` |
 | Systems and scheduling | ✅ `EcsSystem`, `Priority`, groups, intervals | ✅ `SystemRoot`, `SystemGroup`, `QuerySystem` | ❌ (Arch.Extended) | ✅ `ISystem<T>`, `SequentialSystem`, `AEntitySetSystem` |
 | Source-generated systems | ✅ `[ForEach]` → inlined struct jobs | ❌ | ❌ in core (Arch.Extended) | ❌ |
-| Compile-time analyzer | ✅ EECS001-EECS011 | ❌ | ❌ | ❌ |
+| Compile-time analyzer | ✅ EECS001-EECS012 | ❌ | ❌ | ❌ |
 | Chunk / span iteration | ✅ batch `[ForEach]` methods, `ForEachBatch` | ✅ chunks | ✅ chunks | – |
 | Struct query jobs | ✅ `IForEach`, `IForEachEntity`, `IForEachBatch` | ✅ | ✅ `IForEach`, inline queries | – |
 | Bulk create and destroy | ✅ `CreateEntities`, `DestroyEntities(filter)` | ✅ | ✅ | – |
@@ -159,7 +159,7 @@ command buffers on purpose); a few are not offered.
 | Command buffer for changes during a query | Friflo, Arch, DefaultEcs | not needed: add, remove, create and destroy apply at once, also mid-pass | `CombatSystem` adds statuses, `DeathSystem` adds `Dead`, `ProjectileSystem` spawns and expires |
 | Thread-safe command buffer | Friflo | a queue you own, drained by a system on the world's thread ([threading](guide/threading.md)) | one world per thread in the usage code |
 | Component added / removed / set events | Friflo, Arch, DefaultEcs | state changes are data: the change is a component that the next system queries | `DeathSystem` adds `Dead`, `RespawnSystem` queries `With<Dead>`; neither knows the other |
-| Reactive sets (`WhenAdded`, `WhenChanged`) and `NotifyChanged` | DefaultEcs | `[Changed<T>]` and `QueryFilter.Changed<T>()`; a `ref` write is the change, nothing to notify | `ReplicationSystem`, `Unsaved` |
+| Reactive sets (`WhenAdded`, `WhenChanged`) and `NotifyChanged` | DefaultEcs | `[Changed<T>]` and `QueryFilter.Changed<T>(since)`; a `ref` write is the change, nothing to notify | `ReplicationSystem`, `Unsaved` |
 | Publish / subscribe messages | DefaultEcs | data: a singleton or components that systems read | `Battle` counters |
 | Tags | Friflo | empty components; removing one flips a bit, the entity keeps its row | `Player`, `Npc`, `Dead`, `Frozen` |
 | Unique entity / world-level component | Friflo, DefaultEcs | singletons, as `[ForEach]` parameters or a `SingletonRef<T>` | `Battle`, `Waypoints`, the host's `SingletonRef<Battle>` |

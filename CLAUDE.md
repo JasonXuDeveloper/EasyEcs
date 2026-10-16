@@ -31,7 +31,8 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
                                indexed component unlinks the entity), passes (BeginPass/EndPass, tombstones closed by
                                the last pass), CarryOver
   World.Archetypes.cs          archetype registry, transition edges, copy-on-write query cache (GetQueryEntry: the
-                               live entry a value index holds), CompactArchetypes, the structural gate (Structural())
+                               live entry a value index holds), CompactArchetypes (an update's recovery from an
+                               abandoned query), the structural gate (Structural())
   StructuralGate.cs            CAS gate on its own cache line (not reentrant) + StructuralScope
   World.Systems.cs             system groups, priority order, parallel batches, synchronous Update / Update<TGroup>,
                                Dispose (also resets value indexes)
@@ -71,7 +72,7 @@ EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, req
   SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
                                the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] ->
                                ChangedSince(LastRunTick + 1) and a read of T) + GeneratedUpdate + GeneratedAccess
-  EasyEcsAnalyzer.cs           EECS001-011 (generators never report diagnostics)
+  EasyEcsAnalyzer.cs           EECS001-012 (generators never report diagnostics)
   Symbols.cs                   symbol checks shared by generator and analyzer
   Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
   EquatableArray.cs            array with value equality (generator models cache between edits)
@@ -91,7 +92,7 @@ EasyEcs.Comparison/            BenchmarkDotNet: the headline world (WorldSimulat
                                OperationBenchmark (per operation, vs Friflo); FeatureBenchmark (change tracking and
                                indexes in each library's own way, results checked in setup)
 doc/                           README.md (index), getting-started.md, example.md (the battle server), guide/ (one page per concept, analyzer.md
-                               lists EECS001-011), api.md (API + complexity), ecs-principles.md, architecture.md,
+                               lists EECS001-012), api.md (API + complexity), ecs-principles.md, architecture.md,
                                performance.md (diagrams in mermaid)
 ```
 
