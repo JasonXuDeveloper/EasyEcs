@@ -3,6 +3,14 @@
 [Docs index](../README.md) · Related: [Architecture: threading](../architecture.md#threading) ·
 [Systems](systems.md#one-update)
 
+## At a glance
+
+| | |
+|---|---|
+| **Use it for** | One world per thread (one per map or zone); `Parallel` for heavy independent systems; parallel `[ForEach]` for one heavy method. |
+| **Avoid** | Several threads of your own mutating one world; component values touched outside the owner thread. |
+| **Cost** | No locks on the hot paths: queries match lock-free, structural bookkeeping takes a compare-and-swap gate; a parallel batch costs a thread-pool hand-off (microseconds). |
+
 - [Terms: process, world, owner thread](#terms-process-world-owner-thread)
 - [Recommended: one world per thread](#recommended-one-world-per-thread)
 - [Order of systems](#order-of-systems)
@@ -82,6 +90,7 @@ scheduler only puts non-conflicting systems together.
 | `ref T` component / singleton | writes `T` |
 | `in T` component / singleton | reads `T` |
 | `[With<T>]` / `[Without<T>]` / `[WithAny<T>]` | nothing (filters read the archetype and presence bits, which no parallel system changes) |
+| `[Changed<T>]` | reads `T` (its change ticks), so it never shares a batch with a writer of `T` |
 | `Entity` or `World`, an instance method, an `OnUpdate` override, no `[ForEach]` method, or a subclass that adds no `[ForEach]` method of its own | runs alone |
 
 Two systems conflict when one writes a component or singleton the other reads or writes, or when either runs alone.
@@ -152,6 +161,7 @@ runner, and the calling thread always takes part.
 | Structural changes (create/destroy, `Add`/`Set`/`Remove`), adding/removing systems and singletons | Enter the world's structural gate (a compare-and-swap flag): the world's structure never tears. |
 | Query matching, `Has`, `Get` lookups | Lock-free over immutable, copy-on-write archetype snapshots (the first use of a query shape enters the gate once to build its cache entry). |
 | Component and singleton **values** | Not synchronized, by design: the owner thread, or the parallel scheduler, decides who touches them. |
+| Value index lookups, and the unlinking done by destroying an entity or removing an indexed component | Not synchronized: owner thread only while the world has an index ([indexes and relations](indexes-and-relations.md)). |
 
 The gate protects the world's bookkeeping, not your data: a `ref` or a running query on one thread does not survive a
 structural change made by another thread. So use one owner thread per world, with `Parallel` for systems the

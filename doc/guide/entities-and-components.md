@@ -3,6 +3,14 @@
 [Docs index](../README.md) · Related: [Queries](queries.md) · [`ref` and `await`](refs-and-await.md) ·
 [API reference](../api.md#entities)
 
+## At a glance
+
+| | |
+|---|---|
+| **Use it for** | Per-entity data (`Position`, `Health`), states as tags (`Dead`, `Stunned`), handles that outlive their entity safely. |
+| **Avoid** | Classes or behavior in components; raw ids kept without their version. |
+| **Cost** | Create / destroy O(1) amortized; `Get` through a handle is one 16-byte record, one table lookup, one load; removing a component and adding it back flips a presence bit. |
+
 ## Entities
 
 An `Entity` is an identity, nothing more: a 16-byte handle holding the world, an id and a version. It holds no game

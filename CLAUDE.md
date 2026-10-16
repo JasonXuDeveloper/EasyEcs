@@ -23,25 +23,30 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
   EcsSystem.cs                 OnCreate/OnUpdate/OnDestroy + generated GeneratedUpdate / GeneratedAccess
   ForEachAttributes.cs         [ForEach] (Parallel), [With<T>], [Without<T>], [WithAny<T>], [Changed<T>]
   SystemGroups.cs              ISystemGroup, [UpdateInGroup<T>] (World.Update<T>() runs a group)
-  World.cs                     entity lifecycle (create/destroy, id recycling, lookup, enumeration)
-  World.Components.cs          AddBit/AddBits/RemoveBit/RemoveBits (shared core of every Add/Set/Remove), passes
-                               (BeginPass/EndPass, tombstones closed by the last pass), CarryOver
-  World.Archetypes.cs          archetype registry, transition edges, copy-on-write query cache, CompactArchetypes,
-                               the structural gate (Structural())
+  World.cs                     entity lifecycle (create/destroy, id recycling, lookup, enumeration); destroy unlinks
+                               the entity from value indexes
+  World.Components.cs          AddBit/AddBits/RemoveBit/RemoveBits (shared core of every Add/Set/Remove; a removed
+                               indexed component unlinks the entity), passes (BeginPass/EndPass, tombstones closed by
+                               the last pass), CarryOver
+  World.Archetypes.cs          archetype registry, transition edges, copy-on-write query cache (GetQueryEntry: the
+                               live entry a value index holds), CompactArchetypes, the structural gate (Structural())
   StructuralGate.cs            CAS gate on its own cache line (not reentrant) + StructuralScope
-  World.Systems.cs             system groups, priority order, parallel batches, synchronous Update / Update<TGroup>
+  World.Systems.cs             system groups, priority order, parallel batches, synchronous Update / Update<TGroup>,
+                               Dispose (also resets value indexes)
   World.Parallel.cs            allocation-free runner (caller + reusable thread-pool work items) for system batches
                                and the row chunks of parallel [ForEach]
   World.Snapshots.cs           Capture / Restore (WorldSnapshot.cs holds the copies)
   World.Indexes.cs             world.Index<T, TKey>() (one ValueIndex per indexed component type)
-  ValueIndex.cs                IIndexed<TKey> + ValueIndex: key -> linked entity ids, caught up through change ticks
+  ValueIndex.cs                IIndexed<TKey> + ValueIndex: key -> linked entity ids + count, caught up through change
+                               ticks; destroy / remove unlink at once (World.Indexes.cs hooks)
   SystemAccess.cs              a system's read/write sets (generated from [ForEach] parameters) and the conflict rule
   SystemStats.cs               per-system run counts and times (WorldOptions.MeasureSystems)
   World.Singletons.cs          per-world singletons (ref returns)
   WorldOptions.cs              configuration (Parallel, MeasureSystems, capacities)
-  Query.cs                     QueryFilter (With/Without/WithAny/Changed), QueryKey, RowPlan (cached per query and
-                               table), RowFilter (plan + the pass's change tick: skip / all rows / test presence bits
-                               and change ticks), ArchetypeCursor (shared iteration core)
+  Query.cs                     QueryFilter (With/Without/WithAny/Changed), QueryKey, QueryMatch, RowPlan (cached per
+                               query and table), RowFilter (plan + the pass's change tick: skip / all rows / test
+                               presence bits and change ticks; NextWord skips unwritten 4,096-row blocks and 64-row
+                               words), ArchetypeCursor (shared iteration core)
   TypeIndex.cs                 dense per-type index families (ComponentType bit, SingletonType slot, SystemGroup
                                index, ComponentSignature of multi-component calls) + SingletonBox + ChangeTicks<T>
                                (the hidden change-tick column of an ITrackChanges component)
@@ -49,15 +54,20 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
   Archetype.cs                 a table: mask, entity ids + versions per row, one column per component (unmanaged
                                columns pinned and 64-byte aligned), presence bits + absent counts per column,
                                per-bit and per-signature add transitions (copy plans); swap-remove / tombstones,
-                               FillHoles
-  ComponentInfo.cs             per-type column operations (size, managed, create/grow/copy/clear) indexed by bit
+                               FillHoles; change-tick columns with their summaries (LastWrite per column, BlockWrite
+                               per 4,096 rows, per 64 rows WordWrite + WordRows + WordRest: the rows at the word's
+                               latest tick) and Stamp/StampRows
+  ComponentInfo.cs             per-type column operations (size, managed, create/grow/copy/clear) indexed by bit;
+                               Pair links a tracked component with its change-tick column
   Tag.cs                       256-bit SIMD bitset with overflow
 EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, required by Roslyn hosts)
-  ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove, World.CreateEntity,
-                               IForEach/IForEachEntity/IForEachBatch, ForEach/ForEachEntity/ForEachBatch with their
+  ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove, World.CreateEntity/
+                               CreateEntities/DestroyEntities, IForEach/IForEachEntity/IForEachBatch,
+                               ForEach/ForEachEntity/ForEachBatch/ForEachParallel/ForEachEntityParallel with their
                                row loops, Query/Count/Any, QueryItem/QueryEnumerator), one template each
   SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
-                               the method cannot change structure) + GeneratedUpdate + GeneratedAccess
+                               the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] ->
+                               ChangedSince(LastRunTick + 1) and a read of T) + GeneratedUpdate + GeneratedAccess
   EasyEcsAnalyzer.cs           EECS001-010 (generators never report diagnostics)
   Symbols.cs                   symbol checks shared by generator and analyzer
   Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
@@ -71,7 +81,9 @@ EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                ParallelForEachBenchmark, ChangeTrackingBenchmark, IndexBenchmark + MicroBenchmarks.
                                Always measure with BenchmarkDotNet.
 EasyEcs.Comparison/            BenchmarkDotNet: the headline world (WorldSimulation.cs, compiled unchanged) ported to
-                               Arch, Friflo.Engine.ECS and DefaultEcs, counters checked against EasyEcs
+                               Arch, Friflo.Engine.ECS and DefaultEcs, counters checked against EasyEcs;
+                               OperationBenchmark (per operation, vs Friflo); FeatureBenchmark (change tracking and
+                               indexes in each library's own way, results checked in setup)
 doc/                           README.md (index), getting-started.md, guide/ (one page per concept, analyzer.md
                                lists EECS001-010), api.md (API + complexity), ecs-principles.md, architecture.md,
                                performance.md (diagrams in mermaid)
@@ -117,7 +129,9 @@ doc/                           README.md (index), getting-started.md, guide/ (on
   `RemoveBit(s)` / `MoveTo` / `RemoveRow` (and `Archetype.FillHoles`, which rewrites rows and slots); never mutate
   `Archetype.EntityIds`, presence bits or `EntityMeta` directly elsewhere.
 - **Per-entity state outside the tables is `EntityMeta` only** (16 bytes). Do not add per-entity arrays or fields
-  without measuring: the component set is the archetype mask (plus the row's presence bits).
+  without measuring: the component set is the archetype mask (plus the row's presence bits). The one exception is
+  opt-in: a value index keeps a node per entity id (`ValueIndex._nodes`, and `_byTarget` for relations), paid only by
+  worlds that create one.
 - **Every change a pass must notice bumps `StorageVersion`**: reallocation (columns, `Meta`, id arrays), row moves,
   closing tombstones, and presence bits flipping, so in-flight passes refresh their refs and re-read row filters.
 - **Docs**: diagrams are mermaid; `doc/api.md` lists the complexity of every public API (README is the landing page).

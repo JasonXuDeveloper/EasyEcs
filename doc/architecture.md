@@ -15,7 +15,7 @@ flowchart TB
     subgraph "World (one per owner thread)"
         Meta["Meta[id] : EntityMeta (16 B)<br/>Archetype · Version · Slot"]
         Arch["Archetype = table<br/>mask · EntityIds[row] · Versions[row]<br/>one column per component (rows = slots)<br/>presence bits per column · add edges"]
-        QC["Query cache: (required, excluded) →<br/>archetypes + row filters, copy-on-write"]
+        QC["Query cache: (required, excluded, any, changed) →<br/>archetypes + row filters, copy-on-write"]
         Single["Singletons[index] : SingletonBox&lt;T&gt;"]
         Sys["Systems: one schedule per group<br/>sorted by priority, split into batches"]
     end
@@ -24,7 +24,8 @@ flowchart TB
 ```
 
 - **Per entity**, the world stores exactly one `EntityMeta`: its archetype, version and row (16 bytes, so 4 fit in a
-  64-byte line). The component set is the archetype's mask, so it is not duplicated per entity.
+  64-byte line). The component set is the archetype's mask, so it is not duplicated per entity. (A value index, when
+  a world creates one, keeps its own node per entity id; see the value indexes below.)
 - **Archetypes are tables** (structure of arrays): one column per component type, a row per entity, plus the
   entity ids and versions of the rows. Iteration walks the columns of a table front to back, which hardware
   prefetchers and SIMD handle best.
@@ -44,15 +45,26 @@ flowchart TB
 
 - **Change ticks.** A component marked `ITrackChanges` brings a hidden companion column (`ChangeTicks<T>`, 8 bytes
   per row) into every table that has it: the world's change tick of each row's last write. Writes stamp it (a run of
-  rows with one vectorized fill) and raise two summaries: the latest tick of the column and of each 64-row word (rows
-  copied to another row raise the target's summaries to the source's, so both stay upper bounds). A `Changed` filter
-  skips a table, then a word, older than the pass's tick with one load, and compares the rows of the remaining words
-  4 per SIMD instruction into the same 64-row words as the presence bits: it rides on the row-filter machinery.
+  rows with one vectorized fill) and keep summaries: the latest tick of the column and of each block of 4,096 rows
+  (upper bounds), and per 64-row word its latest tick, the rows holding that tick and a bound for the ticks of its
+  other rows. Stamps carry the world's current tick, the latest of all, so a write through a handle to a word already
+  at it only sets its row's bit. A pass that writes row after row (a query, a per-entity job) notes each word once
+  and raises its bound to the tick instead, as rebuilding the rows bit by bit would cost every write a
+  read-modify-write; a run of rows sets whole words. A row copied to another row (a move, a filled hole) brings its own tick and updates the target
+  word by comparing. A `Changed` filter skips a table older than the pass's tick with one load, then unwritten blocks,
+  then unwritten words (4 summaries per SIMD compare); a word whose other rows are older than the tick yields its
+  written rows directly, and only words mixing older and newer ticks compare their rows (4 per SIMD instruction).
+  The result is 64 bits per word, like the presence bits: it rides on the row-filter machinery.
   Untracked components have no column and no stamping code (the checks are JIT-time constants).
 - **Value indexes** (`IIndexed<TKey>`, `world.Index<T, TKey>()`) are built on change ticks: a dictionary from key to
-  a doubly linked list of entity ids (nodes in an array indexed by id). A lookup first re-indexes the rows written
-  since the previous lookup (a `Changed` pass), then walks the key's list and unlinks entries whose entity was
-  destroyed or lost the component (neither leaves a tick). No hook on the write path.
+  the head and length of a doubly linked list of entity ids (nodes in an array indexed by id); relation heads (keys
+  that are entities of the world) sit in an array indexed by the target's id instead, so a relation lookup hashes
+  nothing. Writes cannot be seen when they happen (a `ref` is handed out before the value changes), so a lookup first
+  re-indexes the rows written since the previous lookup: an inlined check of one summary per table, and when a table
+  was written, a walk of its written rows (no pass: re-indexing changes no structure). Losing the component
+  is seen when it happens: destroying an entity or removing an indexed component unlinks it at once (one null check on
+  those paths while the world has no index), so counts are exact and enumeration needs no validation. Nothing is
+  added to the write path.
 
 Trade-off: a table copies an entity's row when the entity gains a component its table has no column for, which is
 what makes iteration dense. States that come and go (stunned, burning, dead) only flip presence bits after the first
@@ -127,12 +139,13 @@ stateDiagram-v2
 
 ## Query cache
 
-`GetMatchingArchetypes(bits, filter)` keys a `ConcurrentDictionary` by (required components, excluded components).
-Each entry holds an immutable snapshot: the archetypes whose mask contains every required component, and one row
-filter per archetype (the columns whose presence bits the query tests). An excluded component does not rule a table
-out, since its rows may lack it; the row filter does. When a new archetype is created, under the structural gate,
-every matching entry is replaced copy-on-write and published with `Volatile.Write`. Readers never lock and never
-observe a list being mutated.
+`GetMatchingArchetypes(bits, filter)` keys a `ConcurrentDictionary` by the query's components (required, excluded,
+`WithAny`, `Changed`). Each entry holds an immutable snapshot: the archetypes whose mask contains every required
+component (and, with `WithAny`, at least one of those columns), and one row filter per archetype (the columns whose
+presence bits and change ticks the query tests). A value index holds its entry (`GetQueryEntry`), so it sees new
+tables without a lookup. An excluded component does not rule a table out, since its rows may lack it; the row filter
+does. When a new archetype is created, under the structural gate, every matching entry is replaced copy-on-write and
+published with `Volatile.Write`. Readers never lock and never observe a list being mutated.
 
 Per pass and table, the row filter picks one of three modes from the column counts: skip the table (no row can
 pass), walk every row (no row lacks a required component or has an excluded one), or test presence bits. A filter
@@ -153,9 +166,10 @@ Every iteration API walks tables front to back. What differs is how much bookkee
   (entities created or moved into a matching table) are past that count and not visited. Each entity is therefore
   visited at most once, and an entity that loses a queried component or is destroyed before its turn is skipped.
 - After each entity, a pass compares `StorageVersion` with the value it last saw. Every change that can reallocate
-  storage, move rows or flip presence bits bumps it: the pass then refreshes its column refs and re-reads the
-  presence bits. A table whose rows all passed is walked by a lean loop until a change makes some rows fail, then by a
-  loop that tests bits once per run of passing rows.
+  storage, move rows or flip presence bits bumps it: the row loop then returns the next row to the pass, which
+  re-reads the column refs and presence bits and enters a row loop again from there (so the loop keeps only its row
+  state live across the job, in registers). A table whose rows all pass is walked by a lean loop; once a change makes
+  some rows fail, by a loop that tests bits once per run of passing rows.
 - When a job changes the archetype of the entity it is visiting, its writes through the refs land in the old row
   (now a tombstone). After the job returns, the pass copies the components the job writes (`Writes`, generated from
   its `ref` parameters) to the entity's new row, so the job's writes are never lost.
@@ -180,9 +194,9 @@ Every iteration API walks tables front to back. What differs is how much bookkee
 
 | Component | What it does |
 |---|---|
-| `ArityGenerator` | Emits every T1..T9 family of `EasyEcs.Core` from one template each: `Entity.Set` / `Remove`, `World.CreateEntity`, `IForEach` / `IForEachEntity` / `IForEachBatch`, `ForEach` / `ForEachEntity` / `ForEachBatch`, `Query`, `Count`, `Any`, `QueryItem` / `QueryEnumerator`. Runs only for `EasyEcs.Core`. |
-| `SystemGenerator` | Turns `[ForEach]` methods into struct jobs (per entity, or per run of rows for span parameters), static filters, a `GeneratedUpdate` override and a `GeneratedAccess` override (reads and writes, or `RunsAlone`) used for `Parallel` batching. Jobs that cannot change structure get `INoStructuralChanges`; jobs record which components they write (`Writes`) and whether they read the entity id. |
-| `EasyEcsAnalyzer` | Reports EECS001–EECS006 and EECS009 (errors) and EECS007–EECS008 (ECS-principle warnings). Every rule with its fix: [Analyzer rules](guide/analyzer.md). |
+| `ArityGenerator` | Emits every T1..T9 family of `EasyEcs.Core` from one template each: `Entity.Set` / `Remove`, `World.CreateEntity` / `CreateEntities` / `DestroyEntities`, `IForEach` / `IForEachEntity` / `IForEachBatch`, `ForEach` / `ForEachEntity` / `ForEachBatch` / `ForEachParallel` / `ForEachEntityParallel`, `Query`, `Count`, `Any`, `QueryItem` / `QueryEnumerator`. Runs only for `EasyEcs.Core`. |
+| `SystemGenerator` | Turns `[ForEach]` methods into struct jobs (per entity, or per run of rows for span parameters), static filters, a `GeneratedUpdate` override and a `GeneratedAccess` override (reads and writes, or `RunsAlone`) used for `Parallel` batching. `[Changed<T>]` becomes `ChangedSince(LastRunTick + 1)` on the method's filter and a declared read of `T`; `[ForEach(Parallel = true)]` runs the job over chunks of rows. Jobs that cannot change structure get `INoStructuralChanges`; jobs record which components they write (`Writes`) and whether they read the entity id. |
+| `EasyEcsAnalyzer` | Reports EECS001–EECS006, EECS009 and EECS010 (errors) and EECS007–EECS008 (ECS-principle warnings). Every rule with its fix: [Analyzer rules](guide/analyzer.md). |
 
 Following the incremental-generator guidelines:
 
@@ -205,6 +219,10 @@ readonly field, so the JIT folds it to a constant. The families:
 - `SystemGroup<T>.Index`: system group (0 is the default group, so group indices start at 1).
 - `ComponentSignature`: one index per generic signature `(T1, …, Tn)` of a multi-component `CreateEntity` or `Set`,
   keying the set edges of each archetype.
+- `ValueIndexFamily`: the slot of a component's value index in its world (`world.Index<T, TKey>()`).
+
+An `ITrackChanges` component also registers its hidden `ChangeTicks<T>` column, paired with the component's own
+column in `ComponentInfo`, so every copy, move and growth of a row carries its change tick.
 
 Every world uses the same indices, so masks are comparable across worlds.
 

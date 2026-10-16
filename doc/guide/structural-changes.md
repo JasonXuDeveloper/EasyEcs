@@ -7,6 +7,16 @@ A structural change is anything that changes an entity's component set: creating
 removing components. EasyEcs is an **immediate-mode** ECS: changes apply at once, there is no command buffer to
 flush, and later code in the same pass and later systems in the same update see them.
 
+## At a glance
+
+| | |
+|---|---|
+| **Use it for** | Changing entities where the decision is made: set `Dead` in the death system, destroy an expired projectile in its own loop. |
+| **Avoid** | Keeping a `ref` (other than the method's own `ref` parameters) across a structural change; changing structure in batch or parallel methods. |
+| **Cost** | A pass that may change structure checks one counter per entity; methods that cannot change structure skip it. |
+
+## During a pass
+
 Inside `[ForEach]`, `ForEach` and `Query`, you can create and destroy entities and add or remove components. The
 rules:
 
@@ -30,7 +40,8 @@ public partial class DeathSystem : EcsSystem
 }
 ```
 
-Other rules:
+## Other rules
+
 
 - Each entity gets fresh refs. The `ref` parameters of a `[ForEach]` method or `ForEach` job stay writable when the
   body changes the visited entity's archetype (the writes are carried over to its new row). Any other `ref` (from

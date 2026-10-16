@@ -1,0 +1,312 @@
+# Features
+
+[Docs index](README.md) · Related: [Getting started](getting-started.md) · [Comparison with other ECS libraries](comparison.md) ·
+[Performance guide](performance.md)
+
+Every feature of EasyEcs on one page: what it does, when to use it (and when not), what it costs, and the server
+scenarios it is built for. Each section links to its guide page. Numbers are BenchmarkDotNet results on a 4-core
+Xeon VM at 2.1 GHz ([benchmarks](performance.md#benchmarks)).
+
+| Feature | In one line |
+|---|---|
+| [Worlds and entities](#worlds-and-entities) | Isolated worlds of version-checked, recycled entity handles. |
+| [Components and tags](#components-and-tags) | Plain structs in archetype tables; empty structs are tags. |
+| [Immediate structural changes](#immediate-structural-changes) | Add, remove, create, destroy anywhere, even mid-pass; no command buffer. |
+| [Systems and `[ForEach]`](#systems-and-foreach) | One-job systems; a method is the whole loop, compiled to an inlined struct job. |
+| [Filters](#filters) | `With`, `Without`, `WithAny`, `Changed` as attributes or a `QueryFilter`. |
+| [Ad-hoc queries](#ad-hoc-queries) | `Query`, struct jobs, `Count`, `Any` from any code. |
+| [Batch methods](#batch-methods) | Runs of rows as spans, for SIMD. |
+| [System groups and intervals](#system-groups-and-intervals) | Separate cadences: input on every wake, simulation on a fixed tick. |
+| [Singletons](#singletons) | One value per world, passed to systems as parameters. |
+| [Parallel systems](#parallel-systems) | Non-conflicting systems of one priority run at once, same result as sequential. |
+| [Parallel `[ForEach]`](#parallel-foreach) | One heavy method's rows split across cores. |
+| [Change tracking](#change-tracking) | Visit only the rows written since a system last ran. |
+| [Value indexes](#value-indexes) | Find entities by a component's value. |
+| [Relations](#relations) | Entity-to-entity links with reverse lookup. |
+| [Snapshots](#snapshots) | Copy a world and restore it in memory. |
+| [Bulk create and destroy](#bulk-create-and-destroy) | Spawn and clear waves in one pass through the structural gate. |
+| [Per-system timing](#per-system-timing) | Run counts and times of every system. |
+| [Analyzer](#analyzer) | ECS design mistakes fail the build. |
+| [Threading model](#threading-model) | One owner thread per world, many worlds per process. |
+| [Native AOT](#native-aot) | No reflection on hot paths, nothing to configure. |
+
+## Worlds and entities
+
+**What it does.** A `World` owns entities, their components, singletons and systems; worlds share nothing. An
+`Entity` is a 16-byte handle (world, id, version). Ids are recycled; every access checks the version, so a handle to a
+destroyed entity throws instead of touching whatever reuses the id.
+
+**When to use it.** One world per independent simulation: a map, a zone, a match, a test. Keep `Entity` handles in
+components, singletons and outside code; never keep raw ids.
+
+**Cost.** Create and destroy are O(1) amortized (an entity with its components lands in its final table at once).
+Reading a component through a handle is one 16-byte record, one table lookup and one load: 4.0 μs per 1,000
+random handles. Memory is bounded by the peak entity count.
+
+**Scenarios.** Long-running servers where entities come and go for months: ids never run out, stale references are
+caught, nothing grows without bound.
+
+Guide: [Entities and components](guide/entities-and-components.md).
+
+## Components and tags
+
+**What it does.** A component is a struct (`IComponent`), stored in archetype tables: one table per component set,
+one column per component, one row per entity. Unmanaged columns are pinned and start on a 64-byte boundary. An empty
+struct is a tag (`Dead`, `Stunned`), used only to filter. Removing a component only clears a presence bit: the entity
+keeps its row, and adding the component back is just as cheap.
+
+**When to use it.** Data per entity, split by what systems read together (`Position`, `Velocity`, `Health`). Tags for
+states that come and go. A field, not a tag, for a value that changes every tick.
+
+**When not.** Behavior or references to services in components: components are data; systems hold the behavior.
+
+**Cost.** Iteration walks columns front to back and loads only the columns it reads. Toggling a status component on
+10,000 entities (remove and add back) takes 174 μs, 0 B. Gaining a component the entity's table has no column for
+copies its row once.
+
+**Scenarios.** Buffs, debuffs, deaths and status effects that flip every few ticks on thousands of units.
+
+Guide: [Entities and components](guide/entities-and-components.md).
+
+## Immediate structural changes
+
+**What it does.** Creating, destroying, adding and removing apply at once, also inside a pass over the same tables.
+A pass visits each entity at most once; entities that leave before their turn are skipped, entities that join wait
+for the next pass. The `ref` parameters of a `[ForEach]` method stay writable when the body moves its own entity.
+
+**When to use it.** Always: write the change where the decision is made. Later code in the same pass and later
+systems in the same update see it.
+
+**Compared with command buffers.** Libraries that forbid changes during iteration record them in a buffer and play it
+back later, so a system sees a state that is about to change, and the order of effects depends on when the buffer is
+flushed. EasyEcs has no buffer to flush and no deferred state.
+
+**Cost.** A pass that may change structure checks one counter after each entity; methods that cannot change
+structure (static, no `World`, the `Entity` only read) are detected by the generator and skip even that.
+
+Guide: [Structural changes during iteration](guide/structural-changes.md).
+
+## Systems and `[ForEach]`
+
+**What it does.** A system derives from `EcsSystem`, has one responsibility and no state. A `[ForEach]` method is the
+whole loop: its parameters are the components (`ref` to write, `in` to read), singletons, the `Entity` and the
+`World`. The source generator compiles each method into a struct job that the JIT inlines into the row loop: no
+delegate, no virtual call per entity. Systems run in `Priority` order, registration order breaking ties.
+
+**When to use it.** All per-entity logic of a server tick.
+
+**Cost.** A `[ForEach]` system adding `Velocity` to `Position` over 10,000 entities takes 8.3 μs
+(against 10.3 μs for two plain arrays with no ECS). Per system and update: three virtual calls plus one
+query-cache lookup per method.
+
+**Scenarios.** Movement, AOI, combat, status effects, death, respawn, projectiles: the
+[benchmark world](../EasyEcs.Benchmark/WorldSimulation.cs) is nine such systems.
+
+Guide: [Systems, `[ForEach]` and groups](guide/systems.md) · [ECS principles](ecs-principles.md).
+
+## Filters
+
+**What it does.** `With<T>` requires a component that is not passed in, `Without<T>` excludes one, `WithAny<T>`
+requires at least one of a group, `Changed<T>` selects rows written since a tick. As attributes on `[ForEach]`
+methods or as a `QueryFilter`. A table that cannot match is skipped once; a table where some rows lack a component
+is tested 64 rows per bit word.
+
+**When to use it.** For states (`[Without<Dead>]`), roles (`[With<Player>]`) and alternatives
+(`[WithAny<Frozen>, WithAny<Stunned>]`).
+
+**Cost.** Matching is cached per query shape (one hash probe after the first use). Rows are tested 64 at a time.
+
+Guide: [Queries and filters](guide/queries.md).
+
+## Ad-hoc queries
+
+**What it does.** Iteration outside systems: `foreach (var item in world.Query<T1..Tn>(filter))` (refs and the
+`Entity`), struct jobs (`world.ForEach`, `ForEachEntity`), `world.Count`, `world.Any`. All allocation-free.
+
+**When to use it.** Tools, tests, request handlers between updates, one-off logic. Prefer `[ForEach]` systems for
+per-tick logic.
+
+**Cost.** `Query` re-reads the row's id and presence bits on every step (28.5 μs over 10,000 entities in two
+tables, against 26.6 μs for a struct job). `Count` sums table counts; `Any` stops at the first match.
+
+Guide: [Queries and filters](guide/queries.md).
+
+## Batch methods
+
+**What it does.** A `[ForEach]` method whose component parameters are `Span<T>` / `ReadOnlySpan<T>` receives whole
+runs of consecutive matching rows; a table whose rows all match is a single call. `world.ForEachBatch` does the same
+for ad-hoc jobs.
+
+**When to use it.** Arithmetic over many rows that you vectorize (`Vector<T>`, `MemoryMarshal.Cast`).
+
+**When not.** Logic that changes structure or needs the entity (batch methods take only spans and singletons).
+
+Guide: [Systems: batch methods](guide/systems.md#batch-methods).
+
+## System groups and intervals
+
+**What it does.** `[UpdateInGroup<TGroup>]` puts a system in a group that runs only on `world.Update<TGroup>()`.
+`UpdateInterval` runs a system every N-th update of its group; `Enabled` switches it off.
+
+**When to use it.** Different cadences: input handling on every wake-up, simulation at a fixed tick, persistence every
+few seconds.
+
+**Cost.** None beyond the systems themselves; updating an empty group is a no-op.
+
+Guide: [Systems: groups](guide/systems.md#system-groups).
+
+## Singletons
+
+**What it does.** One struct per world (`ISingletonComponent`): clock, configuration, counters, a spatial grid. A
+`[ForEach]` method takes it as a `ref` / `in` parameter, resolved once per pass. `SingletonRef<T>` is a stable handle.
+
+**When to use it.** Every piece of world-level state; systems keep none.
+
+**Cost.** One lookup per pass for a parameter; 0.88 μs for 1,000 lookups.
+
+Guide: [Singletons](guide/singletons.md).
+
+## Parallel systems
+
+**What it does.** With `WorldOptions.Parallel`, systems of one priority whose access does not conflict run at the same
+time. The access is generated from the `[ForEach]` parameters (`ref` writes, `in` reads); a system that takes an
+`Entity` or `World` runs alone. The result always equals the sequential order.
+
+**When to use it.** Several heavy, independent systems per priority and spare cores.
+
+**When not.** Light systems over a few thousand entities: a batch costs a thread-pool hand-off (microseconds). For a
+server, one world per thread usually uses the cores better.
+
+**Cost.** Four disjoint systems over 100,000 entities: 426 μs sequential, 287 μs in parallel on 4 cores, 0 B.
+
+Guide: [Threading: parallel systems](guide/threading.md#parallel-systems).
+
+## Parallel `[ForEach]`
+
+**What it does.** `[ForEach(Parallel = true)]` cuts one method's matching rows into chunks of 16,384 rows that the
+calling thread and thread-pool threads run at once, allocation-free. The analyzer rejects methods that could race
+(EECS010): structural changes, batch methods, singletons taken by `ref`.
+
+**When to use it.** Heavy per-entity work over tens of thousands of entities: steering, path following, AI scoring.
+
+**Cost.** Steering 100,000 entities towards the nearest of 16 waypoints: 1.83 ms on one thread, 0.76 ms with
+`Parallel = true` on 4 cores.
+
+Guide: [Systems: parallel methods](guide/systems.md#parallel-methods).
+
+## Change tracking
+
+**What it does.** A component marked `ITrackChanges` records the world's change tick of each row's last write (any
+access that hands out a `ref`). A `[Changed<T>]` method visits only the entities whose `T` was written since its
+system last ran; `QueryFilter.Changed<T>().ChangedSince(tick)` does the same for queries.
+
+**When to use it.** Work that follows the few entities that changed: replicating state to clients, saving dirty
+entities, updating a spatial structure for the units that moved.
+
+**When not.** Components written on every row every tick (nothing to skip), or reads taken by `ref` (every visited
+row counts as written: take them `in`).
+
+**Cost.** 8 bytes per row. A write stores its tick and updates its word's summary: a few nanoseconds through a
+handle (about 6 μs for the summaries of 1,000 scattered writes), while a query or job writing row after row notes each word
+once and a run of rows fills its ticks at once. A pass skips unwritten tables, 4,096-row blocks and 64-row words
+from summaries and takes a word's written rows from its summary. Replicating 10 changed entities of 100,000 takes
+0.69 μs instead of 36.9 μs for a scan of every row; 1,000 scattered changes 38.4 μs instead of
+62.9 μs.
+
+Guide: [Change tracking](guide/change-tracking.md).
+
+## Value indexes
+
+**What it does.** A component implementing `IIndexed<TKey>` is indexed by its `Key`:
+`world.Index<T, TKey>().Find(key)`, `TryFind`, `Count`. The index follows every write (also through `ref`): a lookup
+first re-indexes the rows written since the previous one, found through change ticks. Destroying an entity or removing
+the component unlinks it at once.
+
+**When to use it.** Lookups by value: a player by name, the units of a guild, the entities in a grid cell you key by.
+
+**When not.** Values that change on most rows every tick and are looked up rarely (the catch-up re-reads every written
+row): a full scan may be simpler.
+
+**Cost.** `Count` is a hash probe, `Find` one step per match, plus the catch-up (one check per table when nothing was
+written). Nothing is added to the write path. One node per indexed entity.
+
+Guide: [Indexes and relations](guide/indexes-and-relations.md).
+
+## Relations
+
+**What it does.** An indexed component whose key is an `Entity` is a relation: `ChildOf(Entity Parent)` on each child,
+`index.Find(parent)` for the children. Relation heads are an array indexed by the target's id (no hashing), and
+handles carry their version, so a link to a destroyed entity never matches a later one that reuses its id.
+
+**When to use it.** Ownership and hierarchy: inventories (items point at their owner), turrets on a ship, members of a
+party, summoned units of a caster.
+
+**Cost.** 100 items changing hands among 100,000, then 100 inventories counted: 11.4 μs (catch-up included).
+
+Guide: [Indexes and relations](guide/indexes-and-relations.md#relations).
+
+## Snapshots
+
+**What it does.** `world.Capture()` copies entities, components and singletons into a `WorldSnapshot`;
+`world.Restore(snapshot)` puts them back, any number of times. Handles of the snapshot are valid again.
+
+**When to use it.** Undo a turn, rewind for client-side prediction or replays, reset a world between tests.
+
+**When not.** Persistence: a snapshot lives in memory and shares managed references; write components out with your
+own serializer.
+
+**Cost.** O(entities × components) both ways: fine every few ticks for tens of thousands of entities.
+
+Guide: [Snapshots](guide/snapshots.md).
+
+## Bulk create and destroy
+
+**What it does.** `world.CreateEntities(span, a, b)` spawns a wave with the same values in one pass through the
+structural gate; `world.DestroyEntities<T>(filter)` destroys every match.
+
+**When to use it.** Waves of monsters, projectiles, loot; clearing a zone.
+
+**Cost.** Ten rounds of creating and destroying 10,000 entities: 160 μs in batches against 398 μs one by one.
+
+Guide: [Entities and components](guide/entities-and-components.md#entities).
+
+## Per-system timing
+
+**What it does.** With `WorldOptions.MeasureSystems`, every run of a system is timed: `system.Stats` holds `Runs`,
+`Last`, `Total`, `Average`.
+
+**When to use it.** A diagnostics endpoint or log line on a live server, to see which system grows.
+
+**Cost.** Two timestamp reads per system run when on; nothing when off.
+
+Guide: [Systems: measuring systems](guide/systems.md#measuring-systems).
+
+## Analyzer
+
+**What it does.** The package bundles an analyzer (EECS001-EECS010) next to the generator: invalid `[ForEach]`
+methods, class components, stateful systems, systems referencing systems, unsafe parallel methods fail the build or
+warn.
+
+**When to use it.** Always on; it keeps a large code base decoupled.
+
+Guide: [Analyzer rules](guide/analyzer.md).
+
+## Threading model
+
+**What it does.** A world has one owner thread: the one calling `Update`. Structural bookkeeping enters a
+compare-and-swap gate and never tears; queries match lock-free over copy-on-write snapshots. `Parallel` borrows
+thread-pool threads inside one update without changing ownership.
+
+**When to use it.** One world per thread (one per map or zone): no synchronization at all. Input from other threads
+goes through a queue you own, drained by a system.
+
+**Cost.** Four worlds of 25,000 entities on four threads tick in 0.93 ms, against 1.90 ms for one world of 100,000.
+
+Guide: [Threading](guide/threading.md).
+
+## Native AOT
+
+**What it does.** Systems, jobs and filters are generated at compile time; nothing on the hot paths uses reflection.
+EasyEcs works under Native AOT and trimming with nothing to configure.
+
+**When to use it.** Small, fast-starting server containers.

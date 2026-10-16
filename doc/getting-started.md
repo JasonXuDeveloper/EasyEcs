@@ -50,6 +50,7 @@ using var world = new World(new WorldOptions { InitialEntityCapacity = 10_000 })
 | `InitialEntityCapacity` | 1024 | Pre-sized entity array (one 16-byte record per id), so it does not grow at run time. Archetype tables grow on their own, doubling. |
 | `Parallel` | `false` | Run non-conflicting systems of equal priority at the same time (see [Threading](guide/threading.md#parallel-systems)). |
 | `MaxDegreeOfParallelism` | processor count | Limit for `Parallel`. |
+| `MeasureSystems` | `false` | Record each system's run count and time (`system.Stats`). |
 
 `Dispose()` calls every system's `OnDestroy` (in reverse order) and releases storage.
 
@@ -147,8 +148,8 @@ world.AddSystem<MovementSystem>();
 - `ref` parameters are written, `in` parameters are read; 1 to 9 components. This is also the system's declared
   access, which lets `WorldOptions.Parallel` run non-conflicting systems at the same time.
 - `[With<T>]` requires a component that is not passed in; `[Without<T>]` excludes entities that have it. A method
-  can take no component at all when a `[With<T>]` names what to query: `[ForEach, With<Dead>] static void
-  Remove(Entity e)`.
+  can take no component at all when a `[With<T>]` (or a `[Changed<T>]`) names what to query: `[ForEach, With<Dead>]
+  static void Remove(Entity e)`.
 - An `Entity` parameter gives the current entity's handle; a `World` parameter gives the world (handy in static
   methods).
 
@@ -251,6 +252,7 @@ world.Update();               // fixed tick
 ## Next steps
 
 - [ECS principles](ecs-principles.md): design features as data plus one-job systems.
-- [Guide](README.md#guide): one page per concept.
+- [Guide](README.md#guide): one page per concept, including [change tracking](guide/change-tracking.md) (systems that
+  visit only what changed) and [indexes and relations](guide/indexes-and-relations.md) (find entities by value).
 - [Performance guide](performance.md): which API to use when.
 - [API reference](api.md): every public API and its complexity.

@@ -12,13 +12,15 @@
 | Need | Use | Notes |
 |---|---|---|
 | Per-entity logic of a system | `[ForEach]` method | Generated struct job; same speed as a hand-written `ForEach` (the micro rows below differ because they run on different worlds). `[With<T>]` / `[Without<T>]` filters. |
-| Heavy per-entity work over tens of thousands of entities | `[ForEach(Parallel = true)]` | Chunks of rows on several threads (2.6x on 4 cores in `ParallelForEachBenchmark`); no structural changes, singletons only `in`. |
+| Heavy per-entity work over tens of thousands of entities | `[ForEach(Parallel = true)]` | Chunks of rows on several threads (2.4x on 4 cores in `ParallelForEachBenchmark`); no structural changes, singletons only `in`. |
 | Per-row arithmetic over many entities | a batch `[ForEach]` method (span parameters) or `world.ForEachBatch` | Runs of consecutive rows as spans: write SIMD with `Vector<T>` / `MemoryMarshal.Cast`. No structural changes. |
 | Ad-hoc iteration over 1–9 components | `world.ForEach<…, TJob>(ref job, filter)` | Struct job, specialized and inlined by the JIT. Keep `Execute` small and branch-light. `ForEachEntity` passes the `Entity`. |
 | Ad-hoc loop needing the `Entity` | `foreach (var item in world.Query<…>(filter))` | Zero allocation; `item.Entity`, `item.Component1..n` are refs. (`[ForEach]` methods can take an `Entity` parameter too.) |
 | React to a state change (death, level up) | write the state (`Dead` tag or a field) and query it in later systems | One batched pass per consumer, in schedule order; keeps modules decoupled. |
 | "Is there any …?" | `world.Any<…>(filter)` | Early exit, no enumeration. |
 | "How many …?" | `world.Count<…>(filter)` | Sums table counts (counts presence bits in tables with rows lacking a component). |
+| Only the rows written since a system last ran | `[ForEach, Changed<T>]` (`T : ITrackChanges`) | Skips unwritten tables, 4,096-row blocks and 64-row words; the method runs for changed rows only. |
+| Find entities by a value or by the entity they point at | `world.Index<T, TKey>()` (`T : IIndexed<TKey>`) | `Count` O(1), `Find` one step per match; catches up with written rows on lookup. |
 
 ## Do
 
@@ -33,13 +35,17 @@
 - Write arithmetic over many rows as a batch method (`Span<T>` / `ReadOnlySpan<T>` parameters) and vectorize it:
   a table whose rows all match is one call, and unmanaged columns start on a 64-byte boundary.
 - Spawn and clear waves with `world.CreateEntities(span, a, b)` / `world.DestroyEntities<T>(filter)`: one pass
-  through the structural gate for the batch (2.3x faster than one call per entity in `ChurnBatch`).
+  through the structural gate for the batch (2.5x faster than one call per entity in `ChurnBatch`).
 - Pre-size with `WorldOptions.InitialEntityCapacity` to avoid growing the entity records at run time.
 - Use tag components (empty structs) for states (`Dead`, `Stunned`, `Burning`) and filter on them: removing a tag and
   adding it back flips a presence bit, the entity keeps its row.
 - Keep `QueryFilter`s in `static readonly` fields (the generator does this for `[ForEach]`).
 - Mark a component `ITrackChanges` when a system reacts to the few rows written since its last run (replication,
-  persistence, index updates) and give that method `[Changed<T>]` instead of scanning every row.
+  persistence) and give that method `[Changed<T>]` instead of scanning every row.
+- Look entities up by value with an indexed component (`IIndexed<TKey>`, `world.Index<T, TKey>()`) instead of a
+  dictionary you keep in sync by hand; keep the `ValueIndex` in a local or field.
+- Take an indexed component by `in` when you only read it: a `ref` counts as a write, so the row is re-indexed on
+  the next lookup.
 - One world per thread on servers (for example one per map or zone).
 
 ## Don't
@@ -50,6 +56,8 @@
 - Don't write lambdas that capture locals in methods that run every update: the closure is allocated at method entry
   even when the lambda's branch is not taken (this exact bug was caught in `World.Update` by `AllocationTests`).
 - Don't use LINQ, `params object[]` or string formatting in per-update code.
+- Don't use a value index, or destroy entities / remove indexed components, from a thread other than the world's
+  owner while the world has an index: the index is updated by those changes and is not synchronized.
 - Don't take an `Entity` or a singleton parameter a `[ForEach]` method does not need: the JIT computes either for every
   row, even when only a rare branch uses it, which doubles the cost of a light loop (about 0.4 ns per row).
 - Don't take a tracked component (`ITrackChanges`) by `ref` when the method only reads it: every visited row then
@@ -78,8 +86,9 @@ All numbers come from BenchmarkDotNet. The headline benchmarks simulate a real s
   gains against a sequential update.
 - **`ParallelForEachBenchmark.Tick`** is one heavy `[ForEach]` method (steering towards the nearest of 16 waypoints)
   over 100,000 entities, plain and with `Parallel = true`, whose chunks of rows run on all cores.
-- **`ChangeTrackingBenchmark.Tick`** replicates changed state: 1,000 of 100,000 entities get a new health per tick,
-  then one system copies health into a replica, with `[Changed<Health>]` or by visiting every row.
+- **`ChangeTrackingBenchmark.Tick`** replicates changed state: 10 (a quiet tick) or 1,000 of 100,000 entities get a
+  new health per tick, then one system copies health into a replica, with `[Changed<Health>]` or by visiting every
+  row.
 - **`IndexBenchmark.TradeAndCount`** uses a relation as an inventory: 100,000 items each point at one of 1,000 owners;
   100 items change hands, then 100 inventories are counted through the index.
 - **`MicroBenchmarks`** isolate single operations for diagnosis. `RawArrayWrite` is the no-ECS floor.
@@ -90,6 +99,12 @@ All numbers come from BenchmarkDotNet. The headline benchmarks simulate a real s
   cannot match exactly because of the peers' id recycling (ids feed the random rolls, and each library recycles them
   in its own order) and deferred structural changes (libraries with command buffers apply them at the end of a system,
   not immediately).
+- **`ChangeTrackingComparison`** and **`IndexComparison`** (project `EasyEcs.Comparison`, `FeatureBenchmark.cs`) run
+  the same jobs (1,000 of 100,000 entities written per tick; 1 or 100 trades, then 100 inventory counts) in each
+  library its own way: the built-in feature where it has one (DefaultEcs `WhenChanged<T>()` sets and
+  `EntityMultiMap<T>`, Friflo link components), else the usual workaround (a scan comparing values, or a dirty tag
+  added on write and removed after the copy). Setup checks every variant's result (replicas match the source; each
+  owner's count matches the items pointing at it), and `--check` runs those checks without measuring.
 
 Measured with BenchmarkDotNet's default job on .NET 10, on a 4-core Xeon VM at 2.1 GHz.
 
@@ -97,48 +112,50 @@ Measured with BenchmarkDotNet's default job on .NET 10, on a 4-core Xeon VM at 2
 
 | Benchmark | Entities | v4.0.1 | v4.1 | Allocated |
 |---|---:|---:|---:|---:|
-| WorldSimulationBenchmark.Tick | 10,000 | 322 μs | 195 μs | 0 B |
-| WorldSimulationBenchmark.Tick | 100,000 | 4.33 ms | 2.07 ms | 0 B |
-| MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.85 ms | 0.96 ms | 0 B |
-| ParallelSystemsBenchmark.Tick, `Parallel` off / on | 100,000 | – | 445 / 261 μs | 0 B |
-| ParallelForEachBenchmark.Tick, `[ForEach]` / `[ForEach(Parallel = true)]` | 100,000 | – | 1,906 / 730 μs | 0 B |
-| ChangeTrackingBenchmark.Tick, every row / `[Changed<Health>]` | 100,000 | – | 67.7 / 46.4 μs | 0 B |
-| IndexBenchmark.TradeAndCount (100 trades, 100 inventory counts) | 100,000 | – | 377 μs | 0 B |
+| WorldSimulationBenchmark.Tick | 10,000 | 322 μs | 175 μs | 0 B |
+| WorldSimulationBenchmark.Tick | 100,000 | 4.33 ms | 1.90 ms | 0 B |
+| MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.85 ms | 0.93 ms | 0 B |
+| ParallelSystemsBenchmark.Tick, `Parallel` off / on | 100,000 | – | 426 / 287 μs | 0 B |
+| ParallelForEachBenchmark.Tick, `[ForEach]` / `[ForEach(Parallel = true)]` | 100,000 | – | 1,826 / 760 μs | 0 B |
+| ChangeTrackingBenchmark.Tick, 10 rows written: every row / `[Changed<Health>]` | 100,000 | – | 36.9 μs / 0.69 μs | 0 B |
+| ChangeTrackingBenchmark.Tick, 1,000 rows written: every row / `[Changed<Health>]` | 100,000 | – | 62.9 μs / 38.4 μs | 0 B |
+| IndexBenchmark.TradeAndCount (100 trades, 100 inventory counts) | 100,000 | – | 11.4 μs | 0 B |
 
 **Against other ECS libraries** (`EcsComparisonBenchmark`, the headline world ported to each library; ratio against
 EasyEcs):
 
 | Library | 10,000 entities | 100,000 entities | Allocated per tick (100k) |
 |---|---:|---:|---:|
-| EasyEcs 4.1 | 186 μs (1.00) | 1.98 ms (1.00) | 0 B |
-| Friflo.Engine.ECS | 161 μs (0.87) | 1.71 ms (0.86) | 0 B |
-| DefaultEcs | 280 μs (1.50) | 4.68 ms (2.36) | 61 KB |
-| Arch | 446 μs (2.39) | 5.07 ms (2.56) | 581 KB |
+| EasyEcs 4.1 | 174 μs (1.00) | 1.95 ms (1.00) | 0 B |
+| Friflo.Engine.ECS | 168 μs (0.97) | 1.75 ms (0.90) | 0 B |
+| DefaultEcs | 292 μs (1.68) | 5.40 ms (2.78) | 63 KB |
+| Arch | 441 μs (2.54) | 5.20 ms (2.68) | 587 KB |
 
-Friflo is about 13-14% faster on this world. The per-operation breakdown (`OperationBenchmark`, 100,000 entities)
-shows where: EasyEcs is ahead on one-component iteration (38 vs 49 μs), SIMD batches (64 vs 80 μs), filtered
-iteration (12 vs 15 μs) and toggling a status component (492 vs 950 μs); Friflo is ahead on iteration that passes
-the entity (35 vs 72 μs), three-component iteration (65 vs 75 μs) and create/destroy (193 vs 213 μs). Unlike Friflo,
-EasyEcs applies structural changes immediately, also inside a pass, with no command buffer.
+Friflo is 3% faster at 10,000 entities and 10% at 100,000. The per-operation breakdown (`OperationBenchmark`,
+100,000 entities) shows where: EasyEcs is ahead on one-component iteration (42 vs 51 μs), SIMD batches (63 vs 86 μs),
+filtered iteration (12.5 vs 15.2 μs) and toggling a status component (507 vs 1,029 μs); Friflo is ahead on iteration
+that passes the entity (39 vs 76 μs), three-component iteration (68 vs 80 μs) and create/destroy (198 vs 213 μs).
+Unlike Friflo, EasyEcs applies structural changes immediately, also inside a pass, with no command buffer. Change
+tracking and index results against each library are in [the comparison](comparison.md).
 
 **Micro benchmarks** (N = 10,000; the v3.1.1 column is BenchmarkDotNet ShortRun on the same machine). "–" means
 the operation has no v3.1.1 equivalent (struct jobs, `[ForEach]` systems and handles are new in v4):
 
 | Benchmark | v3.1.1 | v4.0.1 | v4.1 | Allocated (v4.1) |
 |---|---:|---:|---:|---:|
-| CreateAddDestroy (fresh world) | 5,358 μs | 1,795 μs | 1,322 μs | 1.52 MB (new world, its growth and the benchmark's handle array) |
-| Churn: 10 rounds of create (2 components) and destroy in one world | 5,247 μs / 3.19 MB | 1,023 μs | 423 μs | 83 KB (steady state reached in round 1) |
-| ChurnBatch: the same rounds with `CreateEntities` / `DestroyEntities` | – | – | 187 μs | 65 KB |
-| ToggleComponent: remove + add | 1,185 μs | 338 μs | 192 μs | 0 B |
-| QueryIterate (`Query<P,V>` + reduction) | 40.6 μs | 35.3 μs | 30.4 μs | 0 B |
-| ForEachIterate (`ForEach` struct job + reduction) | – | 30.6 μs | 29.7 μs | 0 B |
-| QueryWrite (`Query`, pure write) | – | 28.3 μs | 22.3 μs | 0 B |
-| ForEachSystemWrite (`[ForEach]` system adding `Velocity` to `Position`) | – | 15.1 μs | 8.5 μs | 0 B |
-| ForEachWrite (`ForEach` struct job) | – | 24.3 μs | 12.2 μs | 0 B |
-| RawArrayWrite (two plain arrays, the floor) | – | 11.0 μs | 11.0 μs | 0 B |
-| QueryIterate3 (half the entities match) | 16.2 μs | 9.1 μs | 9.4 μs | 0 B |
-| HandleAccess (`Entity.Get`, ×1000) | – | 3.56 μs | 4.21 μs | 0 B |
-| SingletonAccess (×1000) | 1.42 μs | 0.90 μs | 1.02 μs | 0 B |
+| CreateAddDestroy (fresh world) | 5,358 μs | 1,795 μs | 1,224 μs | 1.52 MB (new world, its growth and the benchmark's handle array) |
+| Churn: 10 rounds of create (2 components) and destroy in one world | 5,247 μs / 3.19 MB | 1,023 μs | 398 μs | 83 KB (steady state reached in round 1) |
+| ChurnBatch: the same rounds with `CreateEntities` / `DestroyEntities` | – | – | 160 μs | 65 KB |
+| ToggleComponent: remove + add | 1,185 μs | 338 μs | 174 μs | 0 B |
+| QueryIterate (`Query<P,V>` + reduction) | 40.6 μs | 35.3 μs | 28.5 μs | 0 B |
+| ForEachIterate (`ForEach` struct job + reduction) | – | 30.6 μs | 26.6 μs | 0 B |
+| QueryWrite (`Query`, pure write) | – | 28.3 μs | 21.0 μs | 0 B |
+| ForEachSystemWrite (`[ForEach]` system adding `Velocity` to `Position`) | – | 15.1 μs | 8.3 μs | 0 B |
+| ForEachWrite (`ForEach` struct job) | – | 24.3 μs | 9.9 μs | 0 B |
+| RawArrayWrite (two plain arrays, the floor) | – | 11.0 μs | 10.3 μs | 0 B |
+| QueryIterate3 (half the entities match) | 16.2 μs | 9.1 μs | 9.3 μs | 0 B |
+| HandleAccess (`Entity.Get`, ×1000) | – | 3.56 μs | 4.05 μs | 0 B |
+| SingletonAccess (×1000) | 1.42 μs | 0.90 μs | 0.88 μs | 0 B |
 
 `ForEachSystemWrite` runs on a world with a single archetype (`Position`, `Velocity`); its columns are 64-byte
 aligned, so the generated job beats two plain (unaligned) arrays. The other iteration rows (`QueryIterate`,
@@ -146,10 +163,10 @@ aligned, so the generated job beats two plain (unaligned) arrays. The other iter
 `Health`, so the entities are split over two tables. Compare `[ForEach]` and `ForEach` within one world, not across
 these rows.
 
-Two rows are slower in 4.1, the price of tables. `HandleAccess` reads a component through a handle: the entity's
+Two rows are slower in 4.1 than in 4.0.1, the price of tables. `HandleAccess` reads a component through a handle: the entity's
 record now leads to its table and row (one more dependent load than a column indexed by id), and swap-removes leave
 table order unrelated to id order, so random handles touch more cache lines. `QueryIterate3` now checks two tables
-instead of one column. `SingletonAccess` reads singletons through the same code as in 4.0.1; the difference is not traced to a change.
+instead of one column.
 
 ## Measuring
 
@@ -159,7 +176,8 @@ Performance numbers come from BenchmarkDotNet only:
 dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*'               # everything (the numbers above)
 dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*World*'         # headline: realistic server tick
 dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*' --job short   # everything, quick
-dotnet run -c Release --project EasyEcs.Comparison -- --filter '*'              # the headline world in other ECS libraries
+dotnet run -c Release --project EasyEcs.Comparison -- --filter '*'              # other ECS libraries: headline world, operations, features
+dotnet run -c Release --project EasyEcs.Comparison -- --check                   # correctness only: counters and feature results match
 ```
 
 `WorldSimulationBenchmark` / `MultiWorldBenchmark` model a busy MMO-style world and must stay at 0 B allocated per

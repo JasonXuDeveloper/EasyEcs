@@ -1,11 +1,21 @@
 # Change tracking
 
 [Docs index](../README.md) · Related: [Systems, `[ForEach]` and groups](systems.md) · [Queries](queries.md) ·
-[API reference](../api.md#queries)
+[Indexes and relations](indexes-and-relations.md) · [API reference](../api.md#queries)
 
 Some systems only care about what changed: replicating state to clients, saving dirty entities, rebuilding a spatial
 index for entities that moved. Mark the component `ITrackChanges` and give the method `[Changed<T>]`: it visits only
 the entities whose `T` was written since the system last ran.
+
+## At a glance
+
+| | |
+|---|---|
+| **Use it for** | Following the few entities that changed: replication to clients, saving dirty entities, re-indexing moved units. |
+| **Avoid** | Components rewritten on every row every tick (nothing to skip); `ref` parameters that only read a tracked component (they count as writes). |
+| **Cost** | 8 bytes per row; a write stores its tick and updates its 64-row word's summary (a few ns through a handle); a pass skips unwritten tables, 4,096-row blocks and 64-row words and runs the method for changed rows only. |
+
+## Example
 
 ```csharp
 public record struct Health(int Value) : IComponent, ITrackChanges;
@@ -36,10 +46,10 @@ So declare read-only access as `in`: a `ref` parameter that only reads marks eve
 ## Ticks
 
 `world.ChangeTick` grows by one per batch of systems, once after each update and once per index lookup that catches
-up ([indexes](indexes-and-relations.md)), so writes between updates are newer than every system's last run.
-`system.LastRunTick` is the tick a system last ran at; a `[Changed<T>]` method selects rows written after it, so a
-system's own writes of one run are not changes for its next run. Systems that write `T` never run in the same parallel
-batch as a `[Changed<T>]` reader (the method declares a read of `T`).
+up outside a pass ([indexes](indexes-and-relations.md)), so writes between updates are newer than every system's last
+run. `system.LastRunTick` is the tick a system last ran at; a `[Changed<T>]` method selects rows written after it, so
+a system's own writes of one run are not changes for its next run. Systems that write `T` never run in the same
+parallel batch as a `[Changed<T>]` reader (the method declares a read of `T`).
 
 Outside systems, filter by a tick you read earlier:
 
@@ -51,12 +61,20 @@ int count = world.Count<Health>(changed);
 foreach (var item in world.Query<Health>(changed)) { /* ... */ }
 ```
 
-`Changed<T>()` without `ChangedSince` selects every row having `T`. Several `Changed` filters require all of them.
+Writes between two updates share one tick, so a mark taken in the middle of them also selects the writes made before
+it since the last update: take the mark right after an update (or a group's update), and update again before the next
+mark. `Changed<T>()` without `ChangedSince` selects every row having `T`. Several `Changed` filters require all of
+them.
 
 ## Cost
 
 A tracked component carries a hidden column of 8-byte ticks in every table that has it, and each write stores one
-tick (a run of rows stores them with one vectorized fill). A `Changed` filter tests 4 rows per SIMD compare, 64 rows
-per word, so a pass over 100,000 rows of which 1,000 changed costs far less than visiting every row (see the
-[performance guide](../performance.md#benchmarks)). Components without `ITrackChanges` pay nothing: the checks are
-JIT-time constants.
+tick and updates the summary of its 64-row word (a run of rows stores them with one vectorized fill; through a handle,
+keeping the summary of 1,000 scattered writes takes about 6 μs). Each table also keeps the latest tick of the column and of
+each block of 4,096 rows, and per 64-row word the rows written at its latest tick, so a `Changed` pass skips a table
+nobody wrote with one load, then unwritten blocks and words (4 per SIMD compare), and takes the written rows of a word
+from its summary; only a word whose rows were written at different ticks since the mark, or row by row by a query
+or a per-entity job, compares its rows (4 per SIMD compare). The method runs only for changed rows. How much of the walk is skipped depends on how the writes spread: a few writes, or writes to
+neighbouring rows, skip almost everything, while 1,000 writes scattered over 100,000 rows touch most words, and then
+the saving is the method calls (see the [performance guide](../performance.md#benchmarks)). Components without
+`ITrackChanges` pay nothing: the checks are JIT-time constants.

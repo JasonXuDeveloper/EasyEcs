@@ -6,6 +6,14 @@
 A system is behavior with one responsibility. It derives from `EcsSystem`, keeps no state (state is in components
 and singletons) and never references another system.
 
+## At a glance
+
+| | |
+|---|---|
+| **Use it for** | All per-tick behavior: one responsibility per system, one `[ForEach]` method per loop, groups for different cadences. |
+| **Avoid** | State in systems (EECS007), systems calling systems (EECS008), an `Entity` or singleton parameter the method does not need. |
+| **Cost** | A `[ForEach]` method compiles to a struct job the JIT inlines into the row loop; per system and update three virtual calls plus one query-cache lookup per method. |
+
 ## Lifecycle
 
 | Hook / member | When |
@@ -55,7 +63,7 @@ method, and the generator compiles it to a struct job with a static filter.
 | Attribute | Meaning |
 |---|---|
 | `[ForEach]` | run the method for every matching entity |
-| `[With<T>]` | the entity must have `T`, which is not passed in; repeatable. With no component parameter, the first `[With<T>]` is the queried component (`[ForEach, With<Dead>] static void Remove(Entity e)`) |
+| `[With<T>]` | the entity must have `T`, which is not passed in; repeatable. With no component parameter, the first `[With<T>]` (else the first `[Changed<T>]`) is the queried component (`[ForEach, With<Dead>] static void Remove(Entity e)`) |
 | `[Without<T>]` | the entity must not have `T`; repeatable |
 | `[WithAny<T>]` | the entity must have at least one of the components named by the method's `[WithAny<T>]` attributes |
 | `[Changed<T>]` | the entity's `T` (`ITrackChanges`) was written since the system last ran ([change tracking](change-tracking.md)); requires `T` like `[With<T>]` |
@@ -104,7 +112,7 @@ public partial class DriftSystem : EcsSystem
 `[ForEach]` methods run in source order, and derived systems run the base class's `[ForEach]` methods first. Keep a
 system's `[ForEach]` methods in one file: across the files of a `partial` class, the order is by position within each
 file, which is rarely what you mean. Mistakes (missing `partial`, an invalid parameter, zero components without a
-`[With<T>]` or more than 9, generic systems, `[ForEach]` outside a system) are compile errors: see
+`[With<T>]` or `[Changed<T>]` or more than 9, generic systems, `[ForEach]` outside a system) are compile errors: see
 [Analyzer rules](analyzer.md).
 
 Methods may change structure (create, destroy, `Set`, `Remove`): changes apply at once and each entity is visited at

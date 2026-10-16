@@ -6,6 +6,14 @@
 A query selects the entities that have a set of components (1 to 9), optionally filtered. Every query API is
 allocation-free.
 
+## At a glance
+
+| | |
+|---|---|
+| **Use it for** | Iteration outside systems (tools, tests, request handlers between updates), counts and existence checks. |
+| **Avoid** | Per-tick logic outside systems: write a `[ForEach]` method instead, it is generated, ordered and scheduled. |
+| **Cost** | Allocation-free; one hash probe per lookup after a query shape's first use, then O(matching tables + rows); filtered rows are tested 64 at a time. |
+
 ## Which API
 
 | Need | Use |
@@ -15,6 +23,8 @@ allocation-free.
 | Ad-hoc loop that needs the `Entity` | `foreach (var item in world.Query<T1..Tn>(filter))` |
 | "How many …?" | `world.Count<T1..Tn>(filter)` |
 | "Is there any …?" | `world.Any<T1..Tn>(filter)` (early exit) |
+| Only the rows written since a tick | `QueryFilter.Create().Changed<T>().ChangedSince(tick)`, or `[Changed<T>]` in a system ([change tracking](change-tracking.md)) |
+| Entities by a value, or pointing at an entity | `world.Index<T, TKey>().Find(key)` ([indexes and relations](indexes-and-relations.md)) |
 
 ## Filters
 

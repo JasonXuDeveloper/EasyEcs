@@ -44,6 +44,8 @@ behaviors:
 - **`Parallel` keeps subclasses it cannot see alone.** A system class that derives from a generated system without
   adding `[ForEach]` methods of its own (for example to override `OnUpdate`) now runs alone in its priority, as its
   `OnUpdate` may touch anything. Give the subclass a `[ForEach]` method (it is then generated) to batch it again.
+- **`Entity.GetHashCode()` is deterministic** (`Id * 397 ^ Version`) instead of `HashCode.Combine` (randomized per
+  process). Equality is unchanged; only code that persisted hash codes across processes could notice.
 
 New:
 

@@ -5,15 +5,18 @@ the headline numbers.
 
 ```mermaid
 flowchart LR
-    A[Getting started] --> B[ECS principles] --> C[Guide] --> D[Performance guide]
+    F0[Features] --> A[Getting started] --> B[ECS principles] --> C[Guide] --> D[Performance guide]
     C --> E[API reference]
     D --> F[Architecture]
+    F0 --> G[Comparison]
 ```
 
 ## Start here
 
 | Page | Read it to |
 |---|---|
+| [Features](features.md) | See every feature on one page: what it does, when to use it, what it costs, which scenarios it serves. |
+| [Comparison](comparison.md) | Compare EasyEcs with Friflo.Engine.ECS, Arch and DefaultEcs: features, the same server tick, operations, change tracking, indexes. |
 | [Getting started](getting-started.md) | Build a small simulation step by step: world, entities, components, tags, queries, systems, singletons, groups, update loop. |
 | [ECS principles](ecs-principles.md) | Learn how to design features as data plus one-job systems, and why the analyzer enforces it. |
 

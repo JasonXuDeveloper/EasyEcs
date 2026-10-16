@@ -10,7 +10,7 @@ warnings that enforce the [ECS principles](../ecs-principles.md).
 |---|---|---|
 | [EECS001](#eecs001) | Error | A system with `[ForEach]` methods must be `partial` |
 | [EECS002](#eecs002) | Error | Invalid `[ForEach]` parameter |
-| [EECS003](#eecs003) | Error | A `[ForEach]` method takes 1 to 9 components, or none with a `[With<T>]` |
+| [EECS003](#eecs003) | Error | A `[ForEach]` method takes 1 to 9 components, or none with a `[With<T>]` or `[Changed<T>]` |
 | [EECS004](#eecs004) | Error | Generic systems and methods are not supported |
 | [EECS005](#eecs005) | Error | `[ForEach]` outside an `EcsSystem` |
 | [EECS006](#eecs006) | Error | Components and singletons must be structs |
@@ -38,8 +38,8 @@ what you need from data instead.
 ## EECS003
 
 **Invalid component count.** A `[ForEach]` method must take between 1 and 9 components (singletons, `Entity` and
-`World` do not count), or none when a `[With<T>]` names the component to query (`[ForEach, With<Dead>] static void
-Remove(Entity e)`).
+`World` do not count), or none when a `[With<T>]` (else a `[Changed<T>]`) names the component to query
+(`[ForEach, With<Dead>] static void Remove(Entity e)`).
 
 Fix: with no component, use `OnUpdate`; with more than 9, move the extra requirements to `[With<T>]` or split the
 method.

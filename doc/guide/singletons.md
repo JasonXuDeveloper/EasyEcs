@@ -4,8 +4,18 @@
 [API reference](../api.md#systems-singletons-maintenance)
 
 A singleton is a struct implementing `ISingletonComponent` with exactly one value per world: a clock, configuration,
-counters, a spatial index. It is where world-level state goes, since systems are stateless
+counters, a spatial grid. It is where world-level state goes, since systems are stateless
 ([EECS007](analyzer.md#eecs007)). Singletons are per world, not static: two worlds never share them.
+
+## At a glance
+
+| | |
+|---|---|
+| **Use it for** | World-level state: clock, configuration, counters, a spatial grid, score. |
+| **Avoid** | Static fields (shared by every world) and state kept in systems. |
+| **Cost** | O(1) lookup; a `[ForEach]` parameter is resolved once per pass; `SingletonRef<T>` needs no lookup at all. |
+
+## Usage
 
 ```csharp
 public record struct Clock(long Tick) : ISingletonComponent;

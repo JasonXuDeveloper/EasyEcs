@@ -7,6 +7,16 @@ Queries find entities by the components they have. To find them by a value (the 
 entity owns, the children of a node), let the world index the component: implement `IIndexed<TKey>` and look up
 through `world.Index<T, TKey>()`.
 
+## At a glance
+
+| | |
+|---|---|
+| **Use it for** | Lookups by value (a player by name) and relations (an inventory: items point at their owner; children of a node). |
+| **Avoid** | Dictionaries kept in sync by hand; indexing a value rewritten on most rows every tick and looked up rarely. |
+| **Cost** | `Count` a hash probe (an array access for relations), `Find` one step per match, plus re-indexing the rows written since the previous lookup. Nothing on the write path. |
+
+## Value indexes
+
 ```csharp
 public record struct Callsign(string Value) : IComponent, IIndexed<string>
 {
@@ -60,12 +70,17 @@ public partial class DestroyOrphans : EcsSystem
 
 An indexed component tracks changes (`IIndexed<TKey>` extends `ITrackChanges`), so every write records a change tick
 (see [what counts as a write](change-tracking.md#what-counts-as-a-write)). A lookup first re-indexes only the rows
-written since the previous lookup, 64 rows per word, then walks the entities of one key and drops, on the way, those
-that were destroyed or lost the component. So writes through any `ref` (systems, queries, `Get`) and `Set` / `Add` /
-`CreateEntity` are all seen, without hooks on the write path, and `world.Restore` makes indexes start over.
+written since the previous lookup, skipping unwritten 4,096-row blocks and 64-row words. Entities leave the index the moment they are
+destroyed or lose the component. So writes through any `ref` (systems, queries, `Get`) and `Set` / `Add` /
+`CreateEntity` are all seen, with nothing added to the write path, and `world.Restore` makes indexes start over.
 
-Costs: a lookup is a hash probe plus the entities of the key, plus catching up with the rows written since the
-previous lookup (zero when nothing changed). The index holds one node per indexed entity; it allocates only when it
-sees a new key or a larger entity id, never per lookup. Like component values, an index belongs to the world's owner
-thread: use it from `OnUpdate`, instance `[ForEach]` methods or `World`-taking methods (which run alone), not from
-another thread, and not while modifying the component during a `Find` loop over the same index.
+Costs: `Count` is a hash probe (an array access for a relation to an entity of the same world) and `Find` adds one
+step per entity of the key, plus catching up with the rows written since the previous lookup (one check per table
+when nothing changed). A null key (the default of a `string` key) indexes the entity nowhere. The index holds one
+node per indexed entity; it allocates only when it sees a new key or a larger entity id, never per lookup.
+
+Like component values, an index belongs to the world's owner thread: use it from `OnUpdate`, instance `[ForEach]`
+methods or `World`-taking methods (which run alone), not from another thread. Destroying an entity or removing an
+indexed component updates the index too, so do those on the owner thread as well while the world has an index. A
+lookup inside a pass that writes the indexed component sees every write of that pass; changing the component while a
+`Find` loop over the same index runs is not supported (destroying entities is).

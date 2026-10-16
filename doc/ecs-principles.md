@@ -37,7 +37,7 @@ the schedule, in the order `Priority` declares.
 | **Entity** | An identity (id + version), held as a handle. | A container of logic, a base class, a place for fields. |
 | **Component** | A struct of fields for one aspect of one entity (`Health`, `Velocity`). Computed getters are fine. | A class, an object with behavior, a holder of references to systems or services. |
 | **Tag** | An empty component (`Dead`, `Frozen`) used as a query filter. | A boolean you flip every tick (use a field instead). |
-| **Singleton** | One struct per world: clock, configuration, counters, spatial indexes. | A static field (it would be shared by every world). |
+| **Singleton** | One struct per world: clock, configuration, counters, a spatial grid. | A static field (it would be shared by every world). |
 | **System** | Behavior with one responsibility. Reads and writes components and singletons. | A place to keep state, or a service other systems call. |
 
 ## Rules and how to follow them
@@ -107,6 +107,7 @@ doubles when the system is removed or added twice. Put it in data:
 |---|---|
 | Per entity (cooldown, target, path) | a component |
 | Per world (tick, score, configuration, spatial grid) | a singleton |
+| Lookups by value (a player by name, the items of an owner) | an indexed component ([indexes and relations](guide/indexes-and-relations.md)), not a dictionary kept in sync by hand |
 | Derived and rebuildable (scratch list reused every update) | a `readonly` field on the system is fine |
 
 ```csharp
@@ -185,21 +186,23 @@ states that come and go (`Stunned`, `Burning`, `Dead`) are therefore cheap. For 
 is still cheaper than a structural change:
 
 - a countdown field (`Burning.Ticks`) instead of re-adding a component every tick;
-- change detection by comparison: keep the last sent value in a component and compare it to the current value,
-  instead of adding and removing a `Changed` tag.
+- change detection by change ticks: mark the component `ITrackChanges` and give the consumer `[Changed<T>]`, instead
+  of adding and removing a `Changed` tag or scanning every row ([change tracking](guide/change-tracking.md)). A
+  write is any `ref` access, so compare values when a write may leave the value as it was.
 
 ```csharp
-public record struct NetSync(Position Sent) : IComponent;          // what clients last heard
+public record struct Facing(float Angle) : IComponent, ITrackChanges;  // tracked: rows record their last write
+public record struct NetSync(Facing Sent) : IComponent;               // what clients last heard
 public record struct Outbox(int Updates) : ISingletonComponent;
 
 public partial class SyncSystem : EcsSystem
 {
-    [ForEach]
-    static void Sync(in Position position, ref NetSync sync, ref Outbox outbox)
+    [ForEach, Changed<Facing>]   // only entities whose Facing was written since this system last ran
+    static void Sync(in Facing facing, ref NetSync sync, ref Outbox outbox)
     {
-        if (position == sync.Sent) return;   // unchanged: nothing to send, no structural change
-        sync = new NetSync(position);
-        outbox.Updates++;                    // a real server queues the update here
+        if (facing == sync.Sent) return;   // written but unchanged: nothing to send
+        sync = new NetSync(facing);
+        outbox.Updates++;                  // a real server queues the update here
     }
 }
 ```

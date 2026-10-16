@@ -6,6 +6,16 @@
 Components are structs stored in arrays. Always mutate them through a `ref`; changing a local copy changes nothing in
 storage.
 
+## At a glance
+
+| | |
+|---|---|
+| **Use it for** | Mutating components in place through `ref`. |
+| **Avoid** | Modifying copies, keeping `ref`s in fields or across `await`. |
+| **Cost** | A `ref` is a pointer into a column: no copy, no lookup. |
+
+## Copies and refs
+
 ```csharp
 var copy = entity.Get<Health>();       // ❌ a copy: the change below is lost
 copy.Value -= 10;
