@@ -12,12 +12,12 @@ catches design mistakes at compile time, and a full server tick allocates 0 byte
 
 | One server tick, 9 systems: movement, AOI, combat, status effects, death, respawn, projectiles | Entities | Time | Allocated |
 |---|---:|---:|---:|
-| One world | 100,000 | **1.90 ms** | **0 B** |
-| Four worlds on four threads (one per thread) | 100,000 | **0.93 ms** | **0 B** |
-| The [battle server below](#example-a-battle-server), every feature on: parallel steering and systems, replication, indexes, relations, timings | 100,000 | **2.68 ms** | **0 B** |
+| One world | 100,000 | **1.95 ms** | **0 B** |
+| Four worlds on four threads (one per thread) | 100,000 | **0.98 ms** | **0 B** |
+| The [battle server below](#example-a-battle-server), every feature on: parallel steering and systems, replication, indexes, relations, timings | 100,000 | **2.53 ms** | **0 B** |
 
 <sub>BenchmarkDotNet, .NET 10, 4-core Xeon VM at 2.1 GHz; entities spawn, die, gain and lose components every tick.
-A `[ForEach]` system adding `Velocity` to `Position` costs 0.8 ns per entity (one archetype), faster than two
+A `[ForEach]` system adding `Velocity` to `Position` costs 0.9 ns per entity (one archetype), faster than two
 plain arrays.
 [Details](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md#benchmarks).</sub>
 
@@ -47,6 +47,36 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
   thread per world (see [Threading](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md)),
   and one world per thread scales across cores.
 
+## Features
+
+Everything EasyEcs gives you; each row links to its guide page with examples ([all features](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/features.md): what each
+costs and when to use it).
+
+| Feature | API | What it does |
+|---|---|---|
+| [Worlds and entities](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md) | `new World(options)`, `CreateEntity`, `TryGetEntity`, `IsAlive`, `Destroy` | Isolated worlds of version-checked, recycled entity handles; lookup by id. |
+| [Components and tags](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md) | `struct : IComponent`, `Add`, `Set`, `Get`, `TryGet`, `GetOrAdd`, `Has`, `Remove` | Plain structs in archetype tables; an empty struct is a tag; up to 9 components per call. |
+| [Immediate structural changes](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/structural-changes.md) | any `Add` / `Remove` / create / destroy | Applied at once, even in the middle of a pass; no command buffer to flush. |
+| [Systems and `[ForEach]`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md) | `EcsSystem`, `[ForEach]`, `Priority`, `OnCreate` / `OnUpdate` / `OnDestroy`, `AddSystem` / `RemoveSystem` / `GetSystem` | A method is the whole loop, compiled to an inlined struct job; `in` reads, `ref` writes, `Entity` and singletons as parameters. |
+| [Filters](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/queries.md) | `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `QueryFilter` | Narrow a system or query by presence, absence, any-of or recent writes. |
+| [Ad-hoc queries](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/queries.md) | `world.Query`, `Count`, `Any` | Iterate from any code (tools, tests, request handlers), allocation-free. |
+| [Struct jobs](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/queries.md#foreach-a-struct-job) | `IForEach`, `IForEachEntity`, `IForEachBatch`, `world.ForEach` / `ForEachEntity` / `ForEachBatch`, `INoStructuralChanges` | Ad-hoc loops with no delegate, inlined like a system; a job declares `Writes` and `ReadsId`. |
+| [Batch methods](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#batch-methods) | `ForEachBatch`, span parameters | Contiguous runs of rows as spans, for SIMD. |
+| [System groups and intervals](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md) | `ISystemGroup`, `[UpdateInGroup<T>]`, `Update<TGroup>()`, `UpdateInterval`, `Enabled` | Separate cadences (input on every wake, simulation on a fixed tick), throttled and switchable systems. |
+| [Singletons](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/singletons.md) | `ISingletonComponent`, `AddSingleton`, `GetSingleton`, `SingletonRef<T>` | One value per world, passed to systems as `ref` / `in` parameters. |
+| [Parallel systems](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md) | `WorldOptions.Parallel` | Systems of one priority that do not conflict run at once, with the sequential result. |
+| [Parallel `[ForEach]`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#parallel-methods) | `[ForEach(Parallel = true)]`, `ForEachParallel`, `ForEachEntityParallel`, `ChunkRows` | One heavy method's rows split across cores. |
+| [Change tracking](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/change-tracking.md) | `ITrackChanges`, `[Changed<T>]`, `ChangedSince` | Visit only the rows written since a system last ran; `ref` access counts as a write. |
+| [Value indexes](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/indexes-and-relations.md) | `IIndexed<TKey>`, `world.Index<T, TKey>()`, `Find`, `TryFind`, `Count` | Find entities by a component's value, kept in sync with every write. |
+| [Relations](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/indexes-and-relations.md) | an `IIndexed<Entity>` component | Entity-to-entity links with reverse lookup; a destroyed source leaves the index, a destroyed target matches no later entity (handles carry their version). |
+| [Snapshots](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/snapshots.md) | `world.Capture()`, `world.Restore(snapshot)` | Copy a world in memory and roll it back (replays, tests, rollback). |
+| [Bulk create and destroy](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md#entities) | `CreateEntities`, `DestroyEntities`, `EnsureEntityCapacity` | Spawn and clear waves in one pass through the structural gate. |
+| [Table maintenance](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/structural-changes.md) | `GetFragmentationStats`, `CompactArchetypes` | Measure and close the holes of passes cut short. |
+| [Per-system timing](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#measuring-systems) | `WorldOptions.MeasureSystems`, `system.Stats` | Run counts and times of every system. |
+| [Errors](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#errors) | `World.SystemError` | A failing system is reported, can be switched off, and the tick goes on. |
+| [Analyzer](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/analyzer.md) | EECS001-EECS010 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
+| [Threading and Native AOT](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md) | one owner thread per world; no reflection on hot paths | Many worlds per process, one per thread; AOT works with nothing to configure. |
+
 ## Example: a battle server
 
 A battle server using every feature: plain data, one job per system, systems that never know about each other, and a
@@ -69,7 +99,7 @@ from another ECS? [Their features in EasyEcs](doc/comparison.md#their-features-i
 | Relation | `OwnedBy : IIndexed<Entity>`: a respawning player recalls its projectiles |
 | System groups, `UpdateInterval`, `Enabled` | `Replication` runs every third tick; `RegenerationSystem` every tenth update; `Ceasefire` |
 | System lifecycle (`OnCreate`, `OnDestroy`) | `SteeringSystem` sets up and removes its `Waypoints`; `ClockSystem` adds `Battle` |
-| Struct jobs (`ForEach`, `ForEachEntity`, `ForEachBatch`, `ForEachParallel`, `ForEachEntityParallel`) | `Census` (read-only: `Writes => 0`, `ReadsId => false`, `INoStructuralChanges`); `NewRound` heals and scatters the NPCs on every core |
+| Struct jobs (`ForEach`, `ForEachEntity`, `ForEachBatch`, `ForEachParallel`, `ForEachEntityParallel`) | `Census` (read-only: `Writes => 0`, `ReadsId => false`, `INoStructuralChanges`); `NewRound` heals everyone and scatters the NPCs, on every core |
 | Ad-hoc queries (`Query`, `Count`, `Any`, `TryGet`) | `NearestPlayer`, `Census`, `AnyoneBurning`, `ShotsLeft` with `static readonly` filters |
 | Entity handles (`TryGetEntity`, `IsAlive`, `Has`) | `Hit` turns a client's id back into the living unit; `ShotsLeft` of a stale handle is 0 |
 | Bulk operations | `CreateEntities` for the players; `DestroyEntities` clears the projectiles of a round |
@@ -542,9 +572,9 @@ server.NewRound();
 server.Load();                                    // roll the battle back in memory
 
 // One world per thread scales across cores: worlds share nothing.
-var shards = new Thread[4];
-for (int i = 0; i < shards.Length; i++)
-    (shards[i] = new Thread(() => { using var shard = new BattleServer(25_000); while (running) shard.Tick(); })).Start();
+var threads = new Thread[4];
+for (int i = 0; i < threads.Length; i++)
+    (threads[i] = new Thread(() => { using var battle = new BattleServer(25_000); while (running) battle.Tick(); })).Start();
 ```
 
 Every system can be removed, reordered or tested alone: they share components and singletons, nothing else. The
@@ -586,20 +616,20 @@ flowchart LR
 
 ## Performance
 
-BenchmarkDotNet, default job, .NET 10, 4-core Xeon VM at 2.1 GHz. The headline benchmark is a realistic server tick,
+BenchmarkDotNet with the repository's job (`BenchmarkConfig.cs`), .NET 10, 4-core Xeon VM at 2.1 GHz. The headline benchmark is a realistic server tick,
 not a toy loop ([what it simulates](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md#benchmarks)). "Allocated" is per tick.
 
 | Benchmark | Entities | Mean | Allocated |
 |---|---:|---:|---:|
-| WorldSimulationBenchmark.Tick | 10,000 | 175 μs | 0 B |
-| WorldSimulationBenchmark.Tick | 100,000 | 1.90 ms | 0 B |
-| MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 0.93 ms | 0 B |
-| BattleServerBenchmark.Tick (the example above, every feature) | 100,000 | 2.68 ms | 0 B |
+| WorldSimulationBenchmark.Tick | 10,000 | 188 μs | 0 B |
+| WorldSimulationBenchmark.Tick | 100,000 | 1.95 ms | 0 B |
+| MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 0.98 ms | 0 B |
+| BattleServerBenchmark.Tick (the example above, every feature) | 100,000 | 2.53 ms | 0 B |
 
-Against v4.0.1 (4.33 ms) the tick is 2.3x faster.
+Against v4.0.1 (4.33 ms) the tick is 2.2x faster.
 
-A `[ForEach]` system adding `Velocity` to `Position` over 10,000 entities (one archetype) takes 8.3 μs, against
-10.3 μs for two plain arrays with no ECS at all (its columns are 64-byte aligned). Micro benchmarks (with v3.1.1 and
+A `[ForEach]` system adding `Velocity` to `Position` over 10,000 entities (one archetype) takes 8.8 μs, against
+11.2 μs for two plain arrays with no ECS at all (its columns are 64-byte aligned). Micro benchmarks (with v3.1.1 and
 v4.0.1 numbers for comparison) and the per-operation comparison are in
 [doc/performance.md](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md); their `ForEach` and
 `Query` rows run on a world with two archetypes, so they are not directly comparable to the `[ForEach]` row.
@@ -615,14 +645,14 @@ The same 100,000-entity tick, ported to each library's fast path with identical 
 
 | Library | Tick (100,000 entities) | Allocated per tick |
 |---|---:|---:|
-| Friflo.Engine.ECS 3.6 | 1.75 ms (0.90) | 0 B |
-| **EasyEcs 4.1** | **1.95 ms (1.00)** | **0 B** |
-| Arch 2.1 | 5.20 ms (2.68) | 587 KB |
-| DefaultEcs 0.17 | 5.40 ms (2.78) | 63 KB |
+| **EasyEcs 4.1** | **1.90 ms (1.00)** | **0 B** |
+| Friflo.Engine.ECS 3.6 | 1.91 ms (1.00) | 0 B |
+| Arch 2.1 | 5.55 ms (2.92) | 538 KB |
+| DefaultEcs 0.17 | 5.71 ms (3.00) | 61 KB |
 
 EasyEcs leads on one-component and SIMD iteration, filters and toggling a status component (2x Friflo); Friflo on
 iteration that passes the entity. On change tracking (`[Changed<T>]`, 1,000 of 100,000 rows written per tick) EasyEcs
-is the fastest of all four (39 μs; a scan takes 53-119 μs, a dirty tag 80-121 μs).
+is the fastest of all four (36 μs; a scan takes 58-117 μs, a dirty tag 88-126 μs).
 
 | | EasyEcs | Friflo.Engine.ECS | Arch | DefaultEcs |
 |---|:-:|:-:|:-:|:-:|
@@ -671,8 +701,9 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
   (`world.ForEachBatch` for ad-hoc jobs); `world.ForEachEntity` passes the handle to struct jobs.
 - **Jobs that cannot change structure** (detected by the generator, or `INoStructuralChanges`) iterate with no
   per-entity bookkeeping; structural bookkeeping uses a compare-and-swap gate instead of a lock.
-- **Parallel `[ForEach]`:** `[ForEach(Parallel = true)]` splits one method's rows across threads, allocation-free;
-  the analyzer rejects methods that could race (EECS010).
+- **Parallel `[ForEach]`:** `[ForEach(Parallel = true)]` splits one method's rows across threads, allocation-free
+  (`world.ForEachParallel` / `ForEachEntityParallel` for ad-hoc jobs, `World.ChunkRows` rows per chunk); the analyzer
+  rejects methods that could race (EECS010).
 - **Snapshots:** `world.Capture()` / `world.Restore(snapshot)` roll a world back in memory (undo, prediction, tests).
 - **Change tracking:** components marked `ITrackChanges` record each row's last write; `[Changed<T>]` methods visit
   only the rows written since their system last ran (replication, persistence), and `QueryFilter.Changed<T>()`
@@ -683,8 +714,12 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
 - **New APIs:** `WithAny<T>` filters (`[WithAny<T>]` on `[ForEach]`), batch `CreateEntities` / `DestroyEntities`,
   per-system timing (`WorldOptions.MeasureSystems`, `system.Stats`); Native AOT compatible.
 - `Entity.GetHashCode()` is deterministic (`Id * 397 ^ Version`) and cheaper (relation lookups hash handles).
-- A realistic 100k-entity server tick takes 1.90 ms instead of 4.33 ms; toggling a status component on 10,000
-  entities 174 μs instead of 338 μs. Reading a component through a handle is about 14% slower (4.05 vs 3.56 μs per
+- **Behavior changes:** `Query` results are ref structs (no `await` in the loop, items cannot be stored); refs can be
+  invalidated by structural changes of other entities; iteration order follows table rows; with `Parallel`, a
+  subclass the generator did not see runs alone. See the
+  [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v40--v41).
+- A realistic 100k-entity server tick takes 1.95 ms instead of 4.33 ms; toggling a status component on 10,000
+  entities 190 μs instead of 338 μs. Reading a component through a handle is about 16% slower (4.12 vs 3.56 μs per
   1,000 random handles): the entity's record leads to a table row instead of a column indexed by id.
 
 ## What's new in 4.0

@@ -27,6 +27,7 @@ Xeon VM at 2.1 GHz ([benchmarks](performance.md#benchmarks)).
 | [Bulk create and destroy](#bulk-create-and-destroy) | Spawn and clear waves in one pass through the structural gate. | `CreateEntities` (players), `DestroyEntities` (`NewRound`) |
 | [Table maintenance](#table-maintenance) | Fragmentation stats and compaction, for passes cut short. | `NewRound` (`GetFragmentationStats` / `CompactArchetypes`) |
 | [Per-system timing](#per-system-timing) | Run counts and times of every system. | `MeasureSystems`, `Slowest` |
+| [Errors](#errors) | A failing system is reported and can be switched off; the tick goes on. | `SystemError` (`Failure`, `FaultySystem` in the tests) |
 | [Analyzer](#analyzer) | ECS design mistakes fail the build. | the whole file builds without a warning |
 | [Threading model](#threading-model) | One owner thread per world, many worlds per process. | one world per thread (`BattlesOnSeparateThreadsMatchOneRunAlone`); `SystemError` |
 | [Native AOT](#native-aot) | No reflection on hot paths, nothing to configure. | nothing to change |
@@ -40,9 +41,11 @@ destroyed entity throws instead of touching whatever reuses the id.
 **When to use it.** One world per independent simulation: a map, a zone, a match, a test. Keep `Entity` handles in
 components, singletons and outside code; never keep raw ids.
 
-**Cost.** Create and destroy are O(1) amortized (an entity with its components lands in its final table at once).
-Reading a component through a handle is one 16-byte record, one table lookup and one load: 4.0 μs per 1,000
-random handles. Memory is bounded by the peak entity count.
+**Cost.** Create is O(n) amortized for n components (an entity with its components lands in its final table at
+once); destroy is O(c) for c columns (the table's last row fills the hole).
+Reading a component through a handle is one 16-byte record, one table lookup and one load: 4.1 μs per 1,000
+random handles. Memory is bounded by the peak entity count; `WorldOptions.InitialEntityCapacity` and
+`world.EnsureEntityCapacity(n)` pre-size the entity records for a known peak.
 
 **Scenarios.** Long-running servers where entities come and go for months: ids never run out, stale references are
 caught, nothing grows without bound.
@@ -62,7 +65,7 @@ states that come and go. A field, not a tag, for a value that changes every tick
 **When not.** Behavior or references to services in components: components are data; systems hold the behavior.
 
 **Cost.** Iteration walks columns front to back and loads only the columns it reads. Toggling a status component on
-10,000 entities (remove and add back) takes 174 μs, 0 B. Gaining a component the entity's table has no column for
+10,000 entities (remove and add back) takes 190 μs, 0 B. Gaining a component the entity's table has no column for
 copies its row once.
 
 **Scenarios.** Buffs, debuffs, deaths and status effects that flip every few ticks on thousands of units.
@@ -93,11 +96,13 @@ Guide: [Structural changes during iteration](guide/structural-changes.md).
 whole loop: its parameters are the components (`ref` to write, `in` to read), singletons, the `Entity` and the
 `World`. The source generator compiles each method into a struct job that the JIT inlines into the row loop: no
 delegate, no virtual call per entity. Systems run in `Priority` order, registration order breaking ties.
+`OnCreate` / `OnDestroy` set up and tear down what a system owns (its singletons); `AddSystem<T>()` or
+`AddSystem(instance)` adds one, `RemoveSystem<T>()` removes it, `GetSystem<T>()` finds it for tooling and tests.
 
 **When to use it.** All per-entity logic of a server tick.
 
-**Cost.** A `[ForEach]` system adding `Velocity` to `Position` over 10,000 entities takes 8.3 μs
-(against 10.3 μs for two plain arrays with no ECS). Per system and update: three virtual calls plus one
+**Cost.** A `[ForEach]` system adding `Velocity` to `Position` over 10,000 entities takes 8.8 μs
+(against 11.2 μs for two plain arrays with no ECS). Per system and update: three virtual calls plus one
 query-cache lookup per method.
 
 **Scenarios.** Movement, AOI, combat, status effects, death, respawn, projectiles: the
@@ -127,8 +132,8 @@ Guide: [Queries and filters](guide/queries.md).
 **When to use it.** Tools, tests, request handlers between updates, one-off logic. Prefer `[ForEach]` systems for
 per-tick logic.
 
-**Cost.** `Query` re-reads the row's id and presence bits on every step (28.5 μs over 10,000 entities in two
-tables, against 26.6 μs for a struct job). `Count` sums table counts; `Any` stops at the first match.
+**Cost.** A `Query` step reads the row's id, plus its presence bits and change ticks only when the table needs
+testing (29.5 μs over 10,000 entities in two tables, against 29.8 μs for a struct job). `Count` sums table counts; `Any` stops at the first match.
 
 Guide: [Queries and filters](guide/queries.md).
 
@@ -163,7 +168,7 @@ Guide: [Systems: groups](guide/systems.md#system-groups).
 
 **When to use it.** Every piece of world-level state; systems keep none.
 
-**Cost.** One lookup per pass for a parameter; 0.88 μs for 1,000 lookups.
+**Cost.** One lookup per pass for a parameter; 0.84 μs for 1,000 lookups.
 
 Guide: [Singletons](guide/singletons.md).
 
@@ -178,7 +183,7 @@ time. The access is generated from the `[ForEach]` parameters (`ref` writes, `in
 **When not.** Light systems over a few thousand entities: a batch costs a thread-pool hand-off (microseconds). For a
 server, one world per thread usually uses the cores better.
 
-**Cost.** Four disjoint systems over 100,000 entities: 426 μs sequential, 287 μs in parallel on 4 cores, 0 B.
+**Cost.** Four disjoint systems over 100,000 entities: 415 μs sequential, 298 μs in parallel on 4 cores, 0 B.
 
 Guide: [Threading: parallel systems](guide/threading.md#parallel-systems).
 
@@ -191,7 +196,7 @@ and `world.ForEachEntityParallel` run a struct job the same way.
 
 **When to use it.** Heavy per-entity work over tens of thousands of entities: steering, path following, AI scoring.
 
-**Cost.** Steering 100,000 entities towards the nearest of 16 waypoints: 1.83 ms on one thread, 0.76 ms with
+**Cost.** Steering 100,000 entities towards the nearest of 16 waypoints: 1.80 ms on one thread, 0.82 ms with
 `Parallel = true` on 4 cores.
 
 Guide: [Systems: parallel methods](guide/systems.md#parallel-methods),
@@ -213,8 +218,8 @@ row counts as written: take them `in`).
 handle (about 6 μs for the summaries of 1,000 scattered writes), while a query or job writing row after row notes each word
 once and a run of rows fills its ticks at once. A pass skips unwritten tables, 4,096-row blocks and 64-row words
 from summaries and takes a word's written rows from its summary. Replicating 10 changed entities of 100,000 takes
-0.69 μs instead of 36.9 μs for a scan of every row; 1,000 scattered changes 38.4 μs instead of
-62.9 μs.
+0.73 μs instead of 39.1 μs for a scan of every row; 1,000 scattered changes 35.4 μs instead of
+64.0 μs.
 
 Guide: [Change tracking](guide/change-tracking.md).
 
@@ -258,7 +263,8 @@ Guide: [Indexes and relations](guide/indexes-and-relations.md#relations).
 **When not.** Persistence: a snapshot lives in memory and shares managed references; write components out with your
 own serializer.
 
-**Cost.** O(entities × components) both ways: fine every few ticks for tens of thousands of entities.
+**Cost.** O(entities × components) both ways: for 100,000 entities in two tables, a capture takes 0.85 ms (2.7 MB,
+the new snapshot) and a restore 0.45 ms (0 B); fine every few ticks for tens of thousands of entities.
 
 Guide: [Snapshots](guide/snapshots.md).
 
@@ -269,7 +275,7 @@ structural gate; `world.DestroyEntities<T>(filter)` destroys every match.
 
 **When to use it.** Waves of monsters, projectiles, loot; clearing a zone.
 
-**Cost.** Ten rounds of creating and destroying 10,000 entities: 160 μs in batches against 398 μs one by one.
+**Cost.** Ten rounds of creating and destroying 10,000 entities: 175 μs in batches against 406 μs one by one.
 
 Guide: [Entities and components](guide/entities-and-components.md#entities).
 
@@ -297,6 +303,19 @@ Guide: [Structural changes: keeping tables dense](guide/structural-changes.md#ke
 
 Guide: [Systems: measuring systems](guide/systems.md#measuring-systems).
 
+## Errors
+
+**What it does.** `world.SystemError` receives every exception a system throws (and `OnDestroy` errors during
+`Dispose`); the update goes on with the next system. Without a subscriber the exception propagates out of `Update()`.
+A failed run still counts as run, so `[Changed<T>]` does not deliver the same rows again.
+
+**When to use it.** Every live server: log the failure, switch the system off (`Enabled = false`), keep the world
+ticking.
+
+**Cost.** Nothing until a system throws.
+
+Guide: [Systems: errors](guide/systems.md#errors).
+
 ## Analyzer
 
 **What it does.** The package bundles an analyzer (EECS001-EECS010) next to the generator: invalid `[ForEach]`
@@ -316,7 +335,7 @@ thread-pool threads inside one update without changing ownership.
 **When to use it.** One world per thread (one per map or zone): no synchronization at all. Input from other threads
 goes through a queue you own, drained by a system.
 
-**Cost.** Four worlds of 25,000 entities on four threads tick in 0.93 ms, against 1.90 ms for one world of 100,000.
+**Cost.** Four worlds of 25,000 entities on four threads tick in 0.98 ms, against 1.95 ms for one world of 100,000.
 
 Guide: [Threading](guide/threading.md).
 
@@ -326,3 +345,9 @@ Guide: [Threading](guide/threading.md).
 EasyEcs works under Native AOT and trimming with nothing to configure.
 
 **When to use it.** Small, fast-starting server containers.
+
+```xml
+<PropertyGroup>
+  <PublishAot>true</PublishAot>   <!-- nothing else to configure for EasyEcs -->
+</PropertyGroup>
+```

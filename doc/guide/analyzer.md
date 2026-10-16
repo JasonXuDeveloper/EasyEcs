@@ -26,6 +26,20 @@ warnings that enforce the [ECS principles](../ecs-principles.md).
 
 Fix: add `partial` to the class (and to any containing types).
 
+```cs
+public class HealSystem : EcsSystem              // EECS001: the generator cannot add the job to it
+{
+    [ForEach] static void Heal(ref Health hp) => hp.Value++;
+}
+```
+
+```csharp
+public partial class HealSystem : EcsSystem
+{
+    [ForEach] static void Heal(ref Health hp) => hp.Value++;
+}
+```
+
 ## EECS002
 
 **Invalid `[ForEach]` parameter.** Every parameter must be a `ref` / `in` / `ref readonly` struct implementing
@@ -62,6 +76,18 @@ public partial class MoveSystem : EcsSystem
 Fix: with no component, use `OnUpdate`; with more than 9, move the extra requirements to `[With<T>]` or split the
 method.
 
+```cs
+[ForEach] static void Remove(Entity e) => e.Destroy();   // EECS003: which entities? no component names them
+```
+
+```csharp
+public partial class CorpseCleanupSystem : EcsSystem
+{
+    [ForEach, With<Dead>]                          // the filter names what to query
+    static void Remove(Entity e) => e.Destroy();
+}
+```
+
 ## EECS004
 
 **Generic systems are not supported.** `[ForEach]` in a generic type, or a generic `[ForEach]` method.
@@ -69,11 +95,41 @@ method.
 Fix: make the system and the method non-generic; share code through a non-generic base class (its `[ForEach]` methods
 run first in derived systems).
 
+```cs
+public partial class ClampSystem<T> : EcsSystem where T : struct, IComponent   // EECS004
+```
+
+```csharp
+public partial class ClampSystem : EcsSystem
+{
+    [ForEach] static void Clamp(ref Health hp) => hp.Value = Math.Max(hp.Value, 0);
+}
+
+public partial class PlayerClampSystem : ClampSystem          // Clamp runs first, then Floor
+{
+    [ForEach, With<Player>] static void Floor(ref Health hp) => hp.Value = Math.Max(hp.Value, 1);
+}
+```
+
 ## EECS005
 
 **`[ForEach]` outside a system.** The type declaring `[ForEach]` methods does not derive from `EcsSystem`.
 
 Fix: derive the type from `EcsSystem`, or use `world.ForEach` / `world.Query` for ad-hoc iteration.
+
+```cs
+public static class Physics                       // EECS005: nothing runs it
+{
+    [ForEach] static void Move(ref Position p, in Velocity v) { p.X += v.X; p.Y += v.Y; }
+}
+```
+
+```csharp
+public partial class PhysicsSystem : EcsSystem
+{
+    [ForEach] static void Move(ref Position p, in Velocity v) { p.X += v.X; p.Y += v.Y; }
+}
+```
 
 ## EECS006
 
@@ -81,6 +137,14 @@ Fix: derive the type from `EcsSystem`, or use `world.ForEach` / `world.Query` fo
 are stored by value. (Interfaces may extend the markers; classes may not implement them.)
 
 Fix: change the class to a struct (`record struct` works well).
+
+```cs
+public class Wallet : IComponent { public int Gold; }   // EECS006
+```
+
+```csharp
+public record struct Wallet(int Gold) : IComponent;
+```
 
 ## EECS007
 
@@ -91,6 +155,23 @@ removed or re-added.
 Fix: move per-entity state into a component and per-world state into a [singleton](singletons.md). `readonly`
 fields (dependencies, reusable scratch buffers), `init`-only properties and computed properties are allowed.
 
+```cs
+public partial class SpawnSystem : EcsSystem
+{
+    private int _spawned;                                  // EECS007: state no one else can see or save
+    protected override void OnUpdate() => _spawned++;
+}
+```
+
+```csharp
+public record struct Spawned(int Count) : ISingletonComponent;
+
+public partial class SpawnSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.GetOrAddSingleton<Spawned>().Count++;
+}
+```
+
 ## EECS008
 
 **Systems must not reference systems.** A field or auto-property of a system has a system type. Systems that call
@@ -98,6 +179,32 @@ each other are coupled: neither can be removed, reordered or tested alone.
 
 Fix: write the data the other system reads (a component or a singleton) and order the two with `Priority`. See
 [ECS principles, rule 3](../ecs-principles.md#3-systems-never-reference-systems).
+
+```cs
+public partial class ScoreSystem : EcsSystem
+{
+    private readonly KillSystem _kills;                    // EECS008: the two can no longer change apart
+}
+```
+
+```csharp
+public partial class KillSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Kill(Entity e, in Health hp) { if (hp.Value <= 0) e.Set(new Dead()); }
+}
+
+public partial class ScoreSystem : EcsSystem
+{
+    public override int Priority => 10;                    // after KillSystem: it reads the Dead it wrote
+    [ForEach, With<Dead>]
+    static void Count(Entity e, ref Score score)
+    {
+        score.Deaths++;
+        e.Destroy();                                       // counted once
+    }
+}
+```
 
 ## EECS009
 

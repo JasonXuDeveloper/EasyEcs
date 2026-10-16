@@ -188,8 +188,7 @@ public sealed class ClockSystem : EcsSystem
 ```
 
 ```csharp
-world.AddSingleton<Tally>();                         // add it once, at setup
-ref var tally = ref world.GetSingleton<Tally>();     // ref T, like components
+ref var tally = ref world.GetSingleton<Tally>();     // ref T, like components (added once at setup, step 10)
 ```
 
 A `[ForEach]` method takes a singleton as a `ref` / `in` parameter (resolved once per pass, added if missing), and
@@ -361,7 +360,9 @@ public record struct OwnedBy(Entity Owner) : IComponent, IIndexed<Entity> { publ
 ```csharp
 var teams = world.Index<Team, int>();
 int red = teams.Count(1);                                     // units in team 1
-foreach (var shot in world.Index<OwnedBy, Entity>().Find(unit))
+Entity archer = world.CreateEntity(new Team(1));
+world.CreateEntity(new OwnedBy(archer), new Position(0, 0));   // an arrow
+foreach (var shot in world.Index<OwnedBy, Entity>().Find(archer))
     shot.Destroy();                                           // destroying while iterating is allowed
 ```
 

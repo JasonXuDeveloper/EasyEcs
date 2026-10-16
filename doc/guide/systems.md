@@ -24,11 +24,20 @@ and singletons) and never references another system.
 | `OnDestroy()` | once, on `world.RemoveSystem<T>()` or `world.Dispose()` (reverse order) |
 | `World` | the owning world, set before `OnCreate` |
 | `Priority` (override) | execution order: lower runs first; default 0 |
-| `UpdateInterval` (override) | run every N-th update of its group; default 1 |
-| `Enabled` | disabled systems are skipped |
+| `UpdateInterval` (override) | run every N-th update of its group (when the group's update count is a multiple of N, so first on the N-th update; a system added later follows the group's count); default 1 |
+| `Enabled` | disabled systems are skipped by `Update()` and `Update<TGroup>()` |
 
 `AddSystem<T>()` returns the system; `GetSystem<T>()` finds one (for tooling and tests, not for other systems:
-see [EECS008](analyzer.md#eecs008)).
+see [EECS008](analyzer.md#eecs008)). `world.Systems` lists every system (a new list: for tooling), and
+`world.UpdateCount` counts the default group's updates so far.
+
+```csharp
+world.AddSystem(new BurnSystem());                    // an instance you built yourself
+var found = world.GetSystem<BurnSystem>();
+foreach (var system in world.Systems) Console.WriteLine($"{system.GetType().Name}: {system.Stats.Runs}");
+world.RemoveSystem<BurnSystem>();                     // OnDestroy runs
+long updates = world.UpdateCount;
+```
 
 ## One update
 
@@ -181,4 +190,16 @@ Console.WriteLine($"burn: {burn.Last.TotalMicroseconds} μs (average {burn.Avera
 
 Subscribe to `world.SystemError` (`Action<EcsSystem, Exception>`) to handle exceptions thrown by systems (including
 `OnDestroy` during `Dispose`); the update continues with the next system. Without a subscriber the exception
-propagates out of `Update()`.
+propagates out of `Update()`. A system that failed still counts as run: a `[Changed<T>]` method's `LastRunTick` moves on, so
+the rows written before the failed run are not delivered again.
+
+```csharp
+world.SystemError += static (system, error) =>
+{
+    Console.Error.WriteLine($"{system.GetType().Name} failed: {error.Message}");
+    system.Enabled = false;                           // switch it off; the rest of the tick goes on
+};
+```
+
+`AddSystem` throws `InvalidOperationException` for a system that already belongs to a world, and `Update()` after
+`Dispose()` throws `ObjectDisposedException`.

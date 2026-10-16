@@ -85,6 +85,31 @@ current entity's id. Two variants:
 - `IForEachBatch<T1..Tn>` with `world.ForEachBatch` receives runs of consecutive rows as spans (`Execute(Span<T1>,
   …)`), for SIMD. The job must not make structural changes.
 
+```csharp
+public struct KillTheWounded : IForEachEntity<Health>          // the handle, for structural changes
+{
+    public void Execute(Entity unit, ref Health hp)
+    {
+        if (hp.Value <= 0) unit.Set(new Dead());
+    }
+}
+
+public struct Drift : IForEachBatch<Position, Velocity>       // spans of consecutive rows
+{
+    public void Execute(Span<Position> p, Span<Velocity> v)
+    {
+        for (int i = 0; i < p.Length; i++) p[i].X += v[i].X;
+    }
+}
+```
+
+```csharp
+var kill = new KillTheWounded();
+world.ForEachEntity<Health, KillTheWounded>(ref kill, QueryFilter.Create().Without<Dead>());
+var drift = new Drift();
+world.ForEachBatch<Position, Velocity, Drift>(ref drift, Active);
+```
+
 A job that makes no structural change can say so by implementing `INoStructuralChanges`: the pass then skips the
 bookkeeping that keeps changes safe. Only implement it when the job honors it.
 
@@ -96,7 +121,7 @@ a job you write keeps the safe defaults unless you override them:
 | Member | Default | Meaning | When it is wrong |
 |---|---|---|---|
 | `static int Writes` | `-1` (all) | bit k - 1 set: the job writes component k through its ref. Those columns count as changed for `[Changed<T>]` (tracked components only), and when the job moves its entity to another archetype they are carried over to the new row | a write the mask leaves out is not stamped (watchers miss it) and is lost if the job also moved the entity |
-| `static bool ReadsId` (`IForEach` only) | `true` | the job reads `entityId`. When false, the pass passes 0 and never loads the entity rows | the job reads 0 for every entity |
+| `static bool ReadsId` (`IForEach` only) | `true` | the job reads `entityId`. When false, a pass of an `INoStructuralChanges` job passes 0 and skips loading the entity rows (other passes still pass the id) | the job reads 0 for every entity in such passes |
 
 A read-only job declares both, and a census of the world costs neither change stamps nor id loads:
 
@@ -106,7 +131,7 @@ public struct SumHealth : IForEach<Health>, INoStructuralChanges
     public long Total;
 
     public static int Writes => 0;          // reads only: nothing stamped, nothing carried over
-    public static bool ReadsId => false;    // entityId is 0, the entity rows are never loaded
+    public static bool ReadsId => false;    // with INoStructuralChanges: entityId is 0, the rows are not loaded
 
     public void Execute(int entityId, ref Health health) => Total += health.Value;
 }

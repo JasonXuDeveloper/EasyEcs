@@ -40,6 +40,7 @@ out a `ref`, whether or not the code stores through it:
 | `Query` items (the enumerator stamps every row it visits) | `TryGet<T>(out T)` (a copy) |
 | `entity.Get<T>()`, `GetOrAdd<T>()`, `Add<T>()`, `Set(...)` | `Has<T>()` |
 | `CreateEntity(...)`, `CreateEntities(...)` with the component | removing the component |
+| `world.Restore(snapshot)` (every restored row) | |
 
 So declare read-only access as `in`: a `ref` parameter that only reads marks every row it visits as changed.
 

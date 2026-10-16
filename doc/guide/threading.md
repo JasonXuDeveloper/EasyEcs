@@ -15,7 +15,9 @@
 - [Recommended: one world per thread](#recommended-one-world-per-thread)
 - [Order of systems](#order-of-systems)
 - [Parallel systems](#parallel-systems)
+- [Parallel `[ForEach]` methods](#parallel-foreach-methods)
 - [What the world synchronizes](#what-the-world-synchronizes)
+- [Input from other threads](#input-from-other-threads)
 - [Compared with other ECS libraries](#compared-with-other-ecs-libraries)
 
 ## Terms: process, world, owner thread

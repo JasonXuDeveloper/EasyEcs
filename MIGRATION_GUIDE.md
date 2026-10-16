@@ -14,8 +14,9 @@ For the current API, see the [documentation](doc/README.md).
 
 ## v4.0 → v4.1
 
-No public API is removed. Code written for 4.0 compiles unchanged unless it stores `Query` results in fields or
-uses them across `await` (they are ref structs now, see below). The storage moved from one column per component
+No public API is removed. Code written for 4.0 compiles unchanged unless it stores `Query` results in fields,
+uses them across `await`, captures them in lambdas, uses them in iterators or LINQ, or passes them as generic
+arguments (they are ref structs now, see below). The storage moved from one column per component
 type (indexed by entity id) to archetype tables (one row per entity, columns 64-byte aligned), which changes a few
 behaviors:
 
@@ -59,13 +60,14 @@ New:
 - `world.CreateEntities(span, components…)` and `world.DestroyEntities<T…>(filter)` spawn and clear batches with one
   pass through the structural gate.
 - `WorldOptions.MeasureSystems` times every system run into `system.Stats` (`SystemStats`).
-- `[ForEach(Parallel = true)]` (and `world.ForEachParallel` / `ForEachEntityParallel`) runs chunks of rows on several
-  threads; [EECS010](doc/guide/analyzer.md#eecs010) reports methods that could race.
+- `[ForEach(Parallel = true)]` (and `world.ForEachParallel` / `ForEachEntityParallel`) runs chunks of
+  `World.ChunkRows` rows on several threads; [EECS010](doc/guide/analyzer.md#eecs010) reports methods that could race.
 - `world.Capture()` / `world.Restore(snapshot)`: in-memory snapshots of entities, components and singletons
   ([Snapshots](doc/guide/snapshots.md)).
 - `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>()` / `ChangedSince(tick)`, `world.ChangeTick`,
-  `system.LastRunTick`: change tracking ([Change tracking](doc/guide/change-tracking.md)). `IForEachBatch` gained an
-  optional static `Writes` like the other job interfaces (default: every span is written).
+  `system.LastRunTick`: change tracking ([Change tracking](doc/guide/change-tracking.md)). `IForEach` gained optional
+  static `ReadsId` and `Writes` members (with defaults, so 4.0 jobs compile unchanged); `IForEachEntity` and
+  `IForEachBatch` (new) have `Writes`.
 - `IIndexed<TKey>`, `world.Index<T, TKey>()`, `ValueIndex<T, TKey>`: find entities by a component value; relations
   are indexed `Entity` keys ([Indexes and relations](doc/guide/indexes-and-relations.md)).
 - The library is marked `IsAotCompatible`: trimming and Native AOT analyzers run on every build, and it publishes

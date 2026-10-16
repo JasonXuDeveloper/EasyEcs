@@ -110,7 +110,7 @@ doubles when the system is removed or added twice. Put it in data:
 | Lookups by value (a player by name, the items of an owner) | an indexed component ([indexes and relations](guide/indexes-and-relations.md)), not a dictionary kept in sync by hand |
 | Derived and rebuildable (scratch list reused every update) | a `readonly` field on the system is fine |
 
-```csharp
+```cs
 // Before (EECS007): the count lives in the system, where no query, test or other system can see it.
 public partial class DeathSystem : EcsSystem
 {

@@ -30,7 +30,7 @@ Notation:
 | `ForEachAttribute`, `WithAttribute<T>`, `WithoutAttribute<T>`, `WithAnyAttribute<T>`, `ChangedAttribute<T>` | attributes | `[ForEach]` methods (`Parallel = true` runs chunks of rows on several threads) and their filters. |
 | `ISystemGroup`, `UpdateInGroupAttribute<TGroup>` | marker / attribute | System groups. |
 | `QueryFilter` | readonly struct | `Create().With<T>().Without<U>().WithAny<V>().WithAny<W>().Changed<X>().ChangedSince(tick)`; `Since`. |
-| `IForEach<T1..Tn>` | interface | Struct job: `void Execute(int entityId, ref T1 c1, …)`. Optional static overrides: `ReadsId` (false skips loading ids, `entityId` is 0) and `Writes` (bit k - 1 for component k: what to carry over when the job moves its entity; default all). |
+| `IForEach<T1..Tn>` | interface | Struct job: `void Execute(int entityId, ref T1 c1, …)`. Optional static overrides: `ReadsId` (false: passes of an `INoStructuralChanges` job skip loading ids and pass 0) and `Writes` (bit k - 1 for component k: what to carry over when the job moves its entity; default all). |
 | `IForEachEntity<T1..Tn>` | interface | Struct job receiving the handle: `void Execute(Entity entity, ref T1 c1, …)`. Optional static `Writes`, as for `IForEach`. |
 | `IForEachBatch<T1..Tn>` | interface | Struct job receiving runs of rows: `void Execute(Span<T1> c1, …)`; no structural changes. Optional static `Writes` (which spans the job writes; default all). |
 | `INoStructuralChanges` | marker interface | A job that makes no structural change: its passes skip the bookkeeping (generated for `[ForEach]` methods that cannot change structure). |
@@ -58,10 +58,10 @@ Notation:
 
 | API | Complexity | Notes |
 |---|---|---|
-| `entity.Get<T>()` → `ref T` | O(1) | version check + column lookup (+ one presence-bit test) + one indexed load; throws if missing |
+| `entity.Get<T>()` → `ref T` | O(1) | version check + column lookup (+ one presence-bit test) + one indexed load; throws if missing; counts as a write of a tracked (`ITrackChanges`) component |
 | `entity.Has<T>()` / `TryGet<T>(out T)` | O(1) | `TryGet` returns a copy |
 | `entity.Add<T>()` → `ref T` | O(c) amortized | adds (or resets) and returns a ref; a component the table has a column for only sets its presence bit (O(1)), a new one copies the row |
-| `entity.GetOrAdd<T>()` → `ref T` | O(1), or as `Add` when missing | |
+| `entity.GetOrAdd<T>()` → `ref T` | O(1), or as `Add` when missing | counts as a write of a tracked component |
 | `entity.Set(in T1 … in Tn)` → `Entity` | O(n), or O(c) amortized when it moves | add or overwrite, at most one row copy, chainable |
 | `entity.Remove<T1..Tn>()` | O(n) | clears presence bits, the entity keeps its row; missing components are ignored; a removed indexed component unlinks the entity (O(1)) |
 
@@ -75,8 +75,8 @@ Notation:
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + runs) | spans of consecutive rows; one call for a table whose rows all match |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | `item.Entity`, `item.Component1..n` (refs) |
 | `query.Count` / `query.IsEmpty` (on the enumerator) | as `world.Count` / `world.Any` | without starting the walk |
-| `world.Count<T1..Tn>(filter)` | O(M), + S / 64 for tables with rows lacking a queried component or tested by a `Changed` filter | sums table counts, or counts presence bits (and change ticks) |
-| `world.Any<T1..Tn>(filter)` | O(M + S / 64) worst | stops at the first match; S / 64 only for tables with rows lacking a queried component or tested by a `Changed` filter |
+| `world.Count<T1..Tn>(filter)` | O(M), + S / 64 for tables whose rows must be tested (some rows lack a required component, have an excluded one or lack every `WithAny` component, or a `Changed` filter applies) | sums table counts, or counts presence bits (and change ticks) |
+| `world.Any<T1..Tn>(filter)` | O(M + S / 64) worst | stops at the first match; S / 64 only for tables whose rows must be tested (as for `Count`) |
 | `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1) | build once and keep it in a `static readonly` field; `WithAny` calls form one "at least one of" group |
 | `filter.Changed<T>()` / `filter.ChangedSince(tick)` | O(1); a pass skips tables, 4,096-row blocks and 64-row words written before `tick` (4 summaries per SIMD compare) and takes a word's written rows from its summary; only words written at several ticks since `tick`, or row by row by a query, test 4 rows per SIMD compare | rows whose `T` (`ITrackChanges`) was written at or after `tick`; `ChangedSince` returns a copy, so a cached filter takes a new tick per call |
 
@@ -97,10 +97,10 @@ it is appended (copy-on-write) to the archetype list and to every cached query i
 
 | API | Complexity |
 |---|---|
-| `world.AddSystem<T>()` / `AddSystem(system)` (calls `OnCreate`) | O(systems + b²), b = systems of the same priority (batch rebuild); cold path |
+| `world.AddSystem<T>()` / `AddSystem(system)` (calls `OnCreate`) | O(systems + b²), b = systems of the same priority (batch rebuild); cold path; throws `InvalidOperationException` if the system already belongs to a world |
 | `world.RemoveSystem<T>()` (calls `OnDestroy`) | O(systems + b²), b = systems of the same priority (batch rebuild); cold path |
 | `world.GetSystem<T>()` | O(systems) |
-| `world.Update()` (default group) / `world.Update<TGroup>()` | Σ systems of the group; allocation-free |
+| `world.Update()` (default group) / `world.Update<TGroup>()` | Σ systems of the group; allocation-free; throws `ObjectDisposedException` after `Dispose()` |
 | `world.ChangeTick` | O(1); grows by one per system batch, once after each update and once per index lookup that catches up with written rows outside a pass ([change tracking](guide/change-tracking.md)) |
 | `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` → `ref T` | O(1) |
 | `world.SingletonRef<T>()` → `SingletonRef<T>` (stable handle; adds if missing) / `singletonRef.Value` → `ref T` | O(1) / O(1), one load |
@@ -116,7 +116,7 @@ Other `World` members:
 |---|---|
 | `world.Systems` | the systems of every group, as a new `IReadOnlyList<EcsSystem>` (allocates; for tooling) |
 | `world.UpdateCount` | number of default-group updates so far |
-| `world.SystemError` | `event Action<EcsSystem, Exception>`; without a subscriber, exceptions propagate |
+| `world.SystemError` | `event Action<EcsSystem, Exception>`; without a subscriber, exceptions propagate; a failed run still moves `LastRunTick` on |
 | `world.Dispose()` | `OnDestroy` on every system in reverse order, then releases storage; stale handles throw; indexes still held find nothing |
 | `World.ChunkRows` | rows per chunk of a parallel `[ForEach]` (16,384, a multiple of 64) |
 

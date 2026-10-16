@@ -58,3 +58,8 @@ In `OnUpdate`, use the system's `World` property: `World.GetSingleton<Clock>().T
 moves, so the handle stays valid and `handle.Value` is a `ref T` with no lookup. Generated `[ForEach]` jobs use it
 for singleton parameters. If the singleton is removed, or added again with `AddSingleton<T>()` (which replaces it
 with a fresh value), the handle is detached: writes through it no longer reach the world.
+
+```csharp
+var clock = world.SingletonRef<Clock>();     // once, at setup
+clock.Value.Tick++;                           // later: a ref, no lookup
+```

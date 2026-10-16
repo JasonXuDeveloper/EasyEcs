@@ -48,7 +48,8 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
   Query.cs                     QueryFilter (With/Without/WithAny/Changed), QueryKey, QueryMatch, RowPlan (cached per
                                query and table), RowFilter (plan + the pass's change tick: skip / all rows / test
                                presence bits and change ticks; NextWord skips unwritten 4,096-row blocks and 64-row
-                               words), ArchetypeCursor (shared iteration core)
+                               words), QueryWalk (the cold state of a query walk, pooled per thread; the enumerator keeps
+                               the hot state in registers)
   TypeIndex.cs                 dense per-type index families (ComponentType bit, SingletonType slot, SystemGroup
                                index, ComponentSignature of multi-component calls) + SingletonBox + ChangeTicks<T>
                                (the hidden change-tick column of an ITrackChanges component)
@@ -82,7 +83,8 @@ EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, P
 EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / MultiWorldBenchmark (headline, realistic
                                server tick; the world itself is WorldSimulation.cs), BattleServerBenchmark (the
                                README example, BattleServer.cs, every feature), ParallelSystemsBenchmark,
-                               ParallelForEachBenchmark, ChangeTrackingBenchmark, IndexBenchmark + MicroBenchmarks.
+                               ParallelForEachBenchmark, ChangeTrackingBenchmark, IndexBenchmark, SnapshotBenchmark +
+                               MicroBenchmarks.
                                Always measure with BenchmarkDotNet.
 EasyEcs.Comparison/            BenchmarkDotNet: the headline world (WorldSimulation.cs, compiled unchanged) ported to
                                Arch, Friflo.Engine.ECS and DefaultEcs, counters checked against EasyEcs;
@@ -105,7 +107,7 @@ doc/                           README.md (index), getting-started.md, guide/ (on
    keep cold data out of hot structs. Bound memory: recycle ids/slots/buffers instead of growing.
 4. **Thread safety is explicit**: every shared structure documents its contract (single owner vs. lock vs.
    lock-free). The archetype lists lock-free readers walk are immutable snapshots (copy-on-write arrays
-   published with `Volatile.Write`); tables (id arrays, columns, presence bits) are mutated under the world's
+   published with `Volatile.Write`); tables (entity rows, columns, presence bits) are mutated under the world's
    structural gate (`World.Structural()`), which is why component values need one owner thread.
 5. **Concise, elegant, no duplication**: write one implementation and generate arity variants (`EasyEcs.Generator`)
    instead of copy-pasting T1..T9 code by hand. Prefer small shared non-generic cores with thin typed wrappers.
@@ -137,7 +139,7 @@ doc/                           README.md (index), getting-started.md, guide/ (on
   without measuring: the component set is the archetype mask (plus the row's presence bits). The one exception is
   opt-in: a value index keeps a node per entity id (`ValueIndex._nodes`, and `_byTarget` for relations), paid only by
   worlds that create one.
-- **Every change a pass must notice bumps `StorageVersion`**: reallocation (columns, `Meta`, id arrays), row moves,
+- **Every change a pass must notice bumps `StorageVersion`**: reallocation (columns, `Meta`, entity rows), row moves,
   closing tombstones, and presence bits flipping, so in-flight passes refresh their refs and re-read row filters.
 - **Docs**: diagrams are mermaid; `doc/api.md` lists the complexity of every public API (README is the landing page).
 - **Entity ids are recycled**: any id-keyed API must also validate the version (`World.Live`, `Entity.ThrowStale`).

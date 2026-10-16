@@ -9,7 +9,7 @@
 |---|---|
 | **Use it for** | Per-entity data (`Position`, `Health`), states as tags (`Dead`, `Stunned`), handles that outlive their entity safely. |
 | **Avoid** | Classes or behavior in components; raw ids kept without their version. |
-| **Cost** | Create / destroy O(1) amortized; `Get` through a handle is one 16-byte record, one table lookup, one load; removing a component and adding it back flips a presence bit. |
+| **Cost** | Create O(n) amortized (n components), destroy O(c) (c columns); `Get` through a handle is one 16-byte record, one table lookup, one load; removing a component and adding it back flips a presence bit. |
 
 ## Entities
 
@@ -41,8 +41,8 @@ int cleared = world.DestroyEntities<Health>(QueryFilter.Create().With<Dead>()); 
 - **Keep the `Entity`, never a raw id.** To look an id up, use `world.TryGetEntity(id, out e)` /
   `world.GetEntity(id)`, which return the current incarnation.
 - `world.EntityCount` is the number of live entities; `world.Entities` enumerates them (diagnostics, O(capacity)).
-- `world.EnsureEntityCapacity(n)` or `WorldOptions.InitialEntityCapacity` pre-sizes storage so it never grows at
-  run time.
+- `world.EnsureEntityCapacity(n)` or `WorldOptions.InitialEntityCapacity` pre-sizes the entity records, so they
+  never grow at run time (tables grow on their own).
 
 An id that came from outside (a network message, a log line) turns back into a handle, and a handle tells whether it
 still names a living entity:

@@ -14,7 +14,7 @@
 flowchart TB
     subgraph "World (one per owner thread)"
         Meta["Meta[id] : EntityMeta (16 B)<br/>Archetype · Version · Slot"]
-        Arch["Archetype = table<br/>mask · EntityIds[row] · Versions[row]<br/>one column per component (rows = slots)<br/>presence bits per column · add edges"]
+        Arch["Archetype = table<br/>mask · Slots[row]: EntitySlot {Version, Id} (8 B)<br/>one column per component (rows = slots)<br/>presence bits per column · add edges"]
         QC["Query cache: (required, excluded, any, changed) →<br/>archetypes + row filters, copy-on-write"]
         Single["Singletons[index] : SingletonBox&lt;T&gt;"]
         Sys["Systems: one schedule per group<br/>sorted by priority, split into batches"]
@@ -26,8 +26,8 @@ flowchart TB
 - **Per entity**, the world stores exactly one `EntityMeta`: its archetype, version and row (16 bytes, so 4 fit in a
   64-byte line). The component set is the archetype's mask, so it is not duplicated per entity. (A value index, when
   a world creates one, keeps its own node per entity id; see the value indexes below.)
-- **Archetypes are tables** (structure of arrays): one column per component type, a row per entity, plus the
-  entity ids and versions of the rows. Iteration walks the columns of a table front to back, which hardware
+- **Archetypes are tables** (structure of arrays): one column per component type, a row per entity, plus one
+  8-byte `EntitySlot` per row (version and id side by side, so a handle is one load). Iteration walks the columns of a table front to back, which hardware
   prefetchers and SIMD handle best.
   - Unmanaged columns are pinned arrays on the pinned object heap whose row 0 starts on a 64-byte boundary, so a row
     of a power-of-two-sized component never straddles two cache lines and vector loads stay aligned.
@@ -82,13 +82,13 @@ flowchart TB
     subgraph World
         M["Meta[id]: EntityMeta 16 B<br/>{Archetype, Version, Slot}<br/>4 per 64-byte line"]
         subgraph A1["Archetype {Position, Velocity, Stunned}"]
-            I1["EntityIds[] · Versions[]"]
+            I1["Slots[]: EntitySlot {Version, Id}"]
             P1["Position[] (64-byte aligned)"]
             V1["Velocity[] (64-byte aligned)"]
             S1["Stunned[] + presence bits"]
         end
         subgraph A2["Archetype {Position}"]
-            I2["EntityIds[] · Versions[]"]
+            I2["Slots[]: EntitySlot {Version, Id}"]
             P2["Position[]"]
         end
     end
@@ -135,7 +135,7 @@ stateDiagram-v2
 - A row that loses its entity (destroyed or moved away) is filled at once by the table's last row when no pass is
   iterating the world, so tables stay dense. While a pass iterates, the row becomes a **tombstone** (id `-1`) instead,
   so rows never shift under the pass; the last pass to end closes the tombstones (moving the last rows into them,
-  found with vectorized scans of the id array).
+  found with vectorized scans of the rows read as `long`s: a tombstone's id, the high half, is negative).
 
 ## Query cache
 
@@ -173,7 +173,14 @@ Every iteration API walks tables front to back. What differs is how much bookkee
 - When a job changes the archetype of the entity it is visiting, its writes through the refs land in the old row
   (now a tombstone). After the job returns, the pass copies the components the job writes (`Writes`, generated from
   its `ref` parameters) to the entity's new row, so the job's writes are never lost.
-- `Query` re-reads the row's id and presence bits on every step; its refs follow the same rules for other entities.
+- `Query` follows the same visiting rules. Its enumerator keeps the hot state (row, row count, entity rows, column
+  refs) in its own fields and is never passed by reference: every member
+  a loop calls is inlined, so the JIT keeps those fields in registers. The cold state (each table's row count at the
+  start, the row filter, change-stamp bookkeeping) lives in a `QueryWalk`, pooled per thread (one per nesting level
+  once warmed up: no allocation in steady state), reached by value once per table and per structural change (and once per
+  passing row of a table whose rows must be tested). Keeping a word's passing bits in the enumerator as well was
+  measured and rejected: the two extra values pushed the column refs of every loop out of registers. The slot and the
+  row count are native ints, so row addressing needs no sign extension on x64 or arm64. A ticket tells a walk's current use from a copy of an enumerator that already ended.
 
 ## Systems
 

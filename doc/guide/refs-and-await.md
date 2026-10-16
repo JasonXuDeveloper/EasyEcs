@@ -39,6 +39,7 @@ or from another system, so treat every structural change, of any entity, as poss
   if the entity was destroyed.
 
 ```csharp
+// Account is a component (record struct Account(long Id) : IComponent); IShop is your service.
 async ValueTask HealFromStoreAsync(Entity player, IShop shop)
 {
     long id = player.Get<Account>().Id;            // read what you need before awaiting
