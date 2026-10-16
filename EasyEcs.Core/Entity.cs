@@ -86,18 +86,17 @@ public readonly partial struct Entity : IEquatable<Entity>
     }
 
     /// <summary>
-    /// Ref to component <typeparamref name="T"/> in <paramref name="component"/> if the entity has it; false (and an
-    /// empty <paramref name="component"/>) when it does not or is not alive. Counts as a write of a tracked component
-    /// when found. O(1).
+    /// Ref to component <typeparamref name="T"/> when the entity has it (<paramref name="found"/>), else a null ref:
+    /// check <paramref name="found"/> before using it. False when the entity is not alive. Counts as a write of a
+    /// tracked component when found. O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool TryGetRef<T>(out ComponentRef<T> component) where T : struct, IComponent
+    public ref T TryGetRef<T>(out bool found) where T : struct, IComponent
     {
         ref T value = ref Find<T>();
-        component = new ComponentRef<T>(ref value);
-        if (Unsafe.IsNullRef(ref value)) return false;
-        if (default(T) is ITrackChanges) Touch<T>(_world, Id);
-        return true;
+        found = !Unsafe.IsNullRef(ref value);
+        if (default(T) is ITrackChanges && found) Touch<T>(_world, Id);
+        return ref value;
     }
 
     /// <summary>
@@ -244,22 +243,4 @@ public readonly partial struct Entity : IEquatable<Entity>
     public static bool operator ==(Entity left, Entity right) => left.Equals(right);
 
     public static bool operator !=(Entity left, Entity right) => !left.Equals(right);
-}
-
-/// <summary>
-/// A ref to one entity's component, handed out by <see cref="Entity.TryGetRef{T}"/>. A ref struct: valid until the next
-/// structural change, never across an <c>await</c>.
-/// </summary>
-public readonly ref struct ComponentRef<T> where T : struct, IComponent
-{
-    private readonly ref T _value;
-
-    internal ComponentRef(ref T value) => _value = ref value;
-
-    /// <summary>The component, by reference.</summary>
-    public ref T Value
-    {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => ref _value;
-    }
 }

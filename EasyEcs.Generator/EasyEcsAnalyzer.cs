@@ -38,16 +38,16 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "'{0}' implements {1} and must be a struct: components and singletons are stored by value",
         Category, DiagnosticSeverity.Error, true);
 
-    public static readonly DiagnosticDescriptor StatefulSystem = new("EECS007", "Systems should be stateless",
+    public static readonly DiagnosticDescriptor StatefulSystem = new("EECS007", "Systems must be stateless",
         "System '{0}' keeps mutable state in '{1}'; store it in a component (per entity) or a singleton (per world)",
-        Category, DiagnosticSeverity.Warning, true,
+        Category, DiagnosticSeverity.Error, true,
         "A system is behavior only. State in a system is invisible to other systems, queries and persistence, and it is " +
         "lost or duplicated when the system is removed or re-added. Readonly fields (dependencies, reusable scratch " +
         "buffers) are allowed.");
 
     public static readonly DiagnosticDescriptor SystemReference = new("EECS008", "Systems must not reference systems",
         "System '{0}' references system '{1}' through '{2}'; communicate through components or singletons",
-        Category, DiagnosticSeverity.Warning, true,
+        Category, DiagnosticSeverity.Error, true,
         "Systems that call each other are coupled: neither can be removed, reordered or tested alone. Write the data " +
         "another system reads (a component or a singleton).");
 
@@ -63,24 +63,16 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "A parallel [ForEach] runs chunks of rows on several threads at once. It must make no structural change, run per " +
         "entity, and write nothing that another row's run reads, such as a singleton.");
 
-    public static readonly DiagnosticDescriptor CollectionInComponent = new("EECS011", "Components must not hold collections",
-        "Component '{0}' holds a collection in '{1}'; make each item an entity with a relation to its owner, or store a fixed number of values inline",
-        Category, DiagnosticSeverity.Warning, true,
-        "A component row stores only the reference to a collection, so changes to the collection are not tracked " +
-        "([Changed<T>], indexes), not scheduled (parallel systems), and shared by snapshots. The ECS way is one entity " +
-        "per item pointing at its owner (an IIndexed<Entity> relation), or an [InlineArray] buffer for a small fixed " +
-        "number of values. Immutable collections (System.Collections.Immutable, frozen collections) are allowed.");
-
-    public static readonly DiagnosticDescriptor ReadOnlyWrite = new("EECS012", "Write through a read-only parameter",
+    public static readonly DiagnosticDescriptor ReadOnlyWrite = new("EECS011", "Write through a read-only parameter",
         "[ForEach] method '{0}' changes data that '{1}' holds by reference, but takes '{1}' as read-only; take it by 'ref'",
-        Category, DiagnosticSeverity.Warning, true,
+        Category, DiagnosticSeverity.Error, true,
         "A read-only component or singleton ('in', ReadOnlySpan) is scheduled as a read and never stamped as changed. A " +
         "collection or class it holds is still writable: changing it would race with parallel systems that read it, " +
         "and [Changed<T>] systems would not see the change. Take it by 'ref' so the write is scheduled and stamped.");
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
-        MixedBatch, NotParallel, CollectionInComponent, ReadOnlyWrite);
+        MixedBatch, NotParallel, ReadOnlyWrite);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -92,7 +84,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             OperationKind.CoalesceAssignment, OperationKind.Increment, OperationKind.Decrement, OperationKind.Invocation);
     }
 
-    /// <summary>EECS012: a write or a mutating call that reaches a read-only [ForEach] parameter's reference.</summary>
+    /// <summary>EECS011: a write or a mutating call that reaches a read-only [ForEach] parameter's reference.</summary>
     private static void AnalyzeWrite(OperationAnalysisContext context)
     {
         var target = context.Operation switch
@@ -121,10 +113,6 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
                     context.ReportDiagnostic(Diagnostic.Create(NotStruct, location, type.Name, name.Substring("EasyEcs.".Length)));
             }
         }
-
-        if (type.TypeKind == TypeKind.Struct && Symbols.Implements(type, Symbols.Component)
-            && Symbols.CollectionPath(type) is { } path)
-            context.ReportDiagnostic(Diagnostic.Create(CollectionInComponent, location, type.Name, path));
 
         if (type.TypeKind != TypeKind.Class || !Symbols.IsSystem(type)) return;
         AnalyzeSystemFields(context, type);

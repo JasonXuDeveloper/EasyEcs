@@ -226,49 +226,6 @@ internal static class Symbols
     public static IOperation? MutatedReceiver(IInvocationOperation call) =>
         call.Instance is { Type.IsReferenceType: true } instance && Mutators.Contains(call.TargetMethod.Name) ? instance : null;
 
-    /// <summary>
-    /// The first field path (<c>Bag.Items</c>) by which a component's data reaches a mutable collection: an array, or a
-    /// type implementing <c>IEnumerable</c> (strings, immutable and frozen collections aside), through fields of the
-    /// component and of the structs and classes it holds (the framework's own types, such as <c>Entity</c>, aside);
-    /// null when none does.
-    /// </summary>
-    public static string? CollectionPath(INamedTypeSymbol component) =>
-        CollectionPath(component, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default));
-
-    private static string? CollectionPath(ITypeSymbol type, HashSet<ITypeSymbol> seen)
-    {
-        if (!seen.Add(type)) return null; // a type that holds itself (a linked node) is checked once
-        foreach (var member in type.GetMembers())
-        {
-            if (member is not IFieldSymbol { IsStatic: false, IsConst: false } field) continue;
-            string name = field.AssociatedSymbol?.Name ?? field.Name; // an auto-property by its own name
-            var fieldType = field.Type;
-            if (IsMutableCollection(fieldType)) return name;
-            if (fieldType is INamedTypeSymbol { TypeKind: TypeKind.Struct or TypeKind.Class } held && !IsFramework(held)
-                && CollectionPath(held, seen) is { } inner)
-                return name + "." + inner;
-        }
-
-        return null;
-    }
-
-    private static bool IsMutableCollection(ITypeSymbol type)
-    {
-        if (type is IArrayTypeSymbol) return true;
-        if (type.SpecialType == SpecialType.System_String) return false;
-        string ns = type.ContainingNamespace?.ToDisplayString() ?? "";
-        if (ns.StartsWith("System.Collections.Immutable") || ns == "System.Collections.Frozen") return false;
-        return type.SpecialType == SpecialType.System_Collections_IEnumerable
-            || type.AllInterfaces.Any(i => i.SpecialType == SpecialType.System_Collections_IEnumerable);
-    }
-
-    /// <summary>Types of the runtime and of EasyEcs: their fields are theirs to manage (an Entity holds its World).</summary>
-    private static bool IsFramework(INamedTypeSymbol type)
-    {
-        string ns = type.ContainingNamespace?.ToDisplayString() ?? "";
-        return ns == "EasyEcs" || ns == "System" || ns.StartsWith("System.") || ns.StartsWith("Microsoft.");
-    }
-
     public static bool IsForEach(IMethodSymbol method) =>
         method.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == ForEachAttribute);
 }

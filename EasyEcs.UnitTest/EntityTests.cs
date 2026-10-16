@@ -104,7 +104,8 @@ public class EntityTests
         {
             // Questions: false, never the new occupant's answer.
             Assert.That(handle.IsAlive || handle.Has<Health>() || handle.Has<Health, Position>(), Is.False);
-            Assert.That(handle.TryGet(out Health _) || handle.TryGetRef(out ComponentRef<Health> _), Is.False);
+            handle.TryGetRef<Health>(out bool found);
+            Assert.That(handle.TryGet(out Health _) || found, Is.False);
             // Accesses and changes: an InvalidOperationException naming the cause.
             Assert.Throws<InvalidOperationException>(() => handle.Get<Health>());
             Assert.Throws<InvalidOperationException>(() => handle.Read<Health>());
@@ -127,8 +128,9 @@ public class EntityTests
         Assert.That(same, Is.EqualTo(e));
         Assert.That(e.Has<Position, Velocity>() || e.Has<Health, Position>(), Is.False);   // rows without the bits
         Assert.That(e.Has<Position>(), Is.True);
-        Assert.That(e.TryGetRef(out ComponentRef<Position> p), Is.True);
-        p.Value.X = 5;
+        ref var p = ref e.TryGetRef<Position>(out bool has);
+        Assert.That(has, Is.True);
+        p.X = 5;
         Assert.That(e.Read<Position>().X, Is.EqualTo(5));
     }
 

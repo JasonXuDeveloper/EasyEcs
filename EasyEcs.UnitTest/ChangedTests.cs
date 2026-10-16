@@ -263,14 +263,15 @@ public partial class ChangedTests
         entities[0].TryGet<Armor>(out _);
         Assert.That(entities[0].Read<Armor>().Value, Is.EqualTo(1));
         _ = entities[0].Has<Armor>();
-        Assert.That(entities[0].TryGetRef(out ComponentRef<Position> _), Is.False);
+        entities[0].TryGetRef<Position>(out bool found);
+        Assert.That(found, Is.False);
         foreach (var _ in world.Query<Health>()) { }
         Assert.That(world.Count<Armor>(changed), Is.Zero);
 
         entities[1].GetOrAdd<Armor>();
         Assert.That(world.Count<Armor>(changed), Is.EqualTo(1));
-        Assert.That(entities[2].TryGetRef(out ComponentRef<Armor> armor), Is.True);
-        armor.Value.Value = 7;
+        entities[2].TryGetRef<Armor>(out found).Value = 7;
+        Assert.That(found, Is.True);
         Assert.That(entities[2].Read<Armor>().Value, Is.EqualTo(7));
         Assert.That(world.Count<Armor>(changed), Is.EqualTo(2));
         var spawned = world.CreateEntity(new Armor(2));

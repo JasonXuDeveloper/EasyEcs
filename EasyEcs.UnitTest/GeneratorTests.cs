@@ -46,10 +46,10 @@ public class GeneratorTests
     {
         var errors = await Diagnose(Components, """
             namespace Game;
-            public struct Allowed : IComponent                                   // values, strings, immutable collections, handles
+            public struct Quests : IComponent                                    // collections are allowed (written through ref)
             {
-                public string Name;
-                public System.Collections.Immutable.ImmutableArray<int> Ids;
+                public System.Collections.Generic.Dictionary<int, int> Progress;
+                public int[] Slots;
                 public Entity Owner;
             }
             public partial class Outer
@@ -119,16 +119,12 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { int _kills; void K() => _kills++; }", "EECS007")]
     [TestCase("public class S : EcsSystem { public int Kills { get; set; } }", "EECS007")]
     [TestCase("public class A : EcsSystem { } public class S : EcsSystem { private readonly A _a = new(); }", "EECS008")]
-    [TestCase("public struct Bag : IComponent { public System.Collections.Generic.List<int> Items; }", "EECS011")]
-    [TestCase("public struct Bag : IComponent { public int[] Slots { get; set; } }", "EECS011")]
-    [TestCase("public struct Inner { public System.Collections.Generic.Dictionary<int, int> Map; } public struct Bag : IComponent { public Inner Inner; }", "EECS011")]
-    [TestCase("public class Node { public Node Next; public System.Collections.Generic.Queue<int> Q; } public struct Bag : IComponent { public Node Head; }", "EECS011")]
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Cells.Add(1); }", "EECS012")]
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Cells.Clear(); }", "EECS012")]
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Slots[0] += 1; }", "EECS012")]
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Holder h) => h.Box.V++; }", "EECS012")]
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Holder h) => h.Box.V = 1; }", "EECS012")]
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(System.ReadOnlySpan<Holder> h) => h[0].Box.V++; }", "EECS012")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Cells.Add(1); }", "EECS011")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Cells.Clear(); }", "EECS011")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Slots[0] += 1; }", "EECS011")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Holder h) => h.Box.V++; }", "EECS011")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Holder h) => h.Box.V = 1; }", "EECS011")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(System.ReadOnlySpan<Holder> h) => h[0].Box.V++; }", "EECS011")]
     public async Task MisuseIsReported(string source, string id)
     {
         var errors = await Diagnose(Components, source);
