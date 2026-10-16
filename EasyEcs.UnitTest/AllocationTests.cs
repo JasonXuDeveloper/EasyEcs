@@ -24,6 +24,7 @@ public class AllocationTests
         var probe = world.CreateEntity(new Health(1));
         var callsigns = world.Index<Callsign, string>();
         var named = world.CreateEntity(new Callsign("a"));
+        var churned = new Entity[50];
 
         void Frame()
         {
@@ -36,6 +37,10 @@ public class AllocationTests
             probe.Get<Health>().Value++;
             probe.Remove<Frozen>();
             probe.Set(new Frozen()); // archetype transitions on cached edges
+            for (int i = 0; i < churned.Length; i++) churned[i] = world.CreateEntity(new Position(), new Health(1));
+            foreach (var e in churned) e.Destroy(); // recycled ids and rows
+            world.CreateEntities(churned, new Churned(), new Health(1));
+            world.DestroyEntities<Churned>();
         }
 
         for (int i = 0; i < 10; i++) Frame(); // warm-up: query caches, edges, JIT
@@ -99,4 +104,6 @@ public class AllocationTests
         for (int i = 0; i < 500; i++) world.Update();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
+
+    private struct Churned : IComponent;
 }

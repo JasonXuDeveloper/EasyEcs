@@ -44,6 +44,8 @@ public class MicroBenchmarks
     [Params(10_000)] public int N;
 
     private World _queryCtx;
+    private World _churn;
+    private Entity[] _churned;
 
     [GlobalSetup]
     public void Setup()
@@ -59,9 +61,14 @@ public class MicroBenchmarks
         _systemWorld = new World();
         for (int i = 0; i < N; i++) _systemWorld.CreateEntity(new Position(), new Velocity());
         _systemWorld.AddSystem<IntegrateSystem>();
+        _churn = new World(new WorldOptions { InitialEntityCapacity = 1024 });
+        _churned = new Entity[N / 10];
     }
 
-    /// <summary>Create N entities with 2 components, then destroy them all (one lifecycle round).</summary>
+    /// <summary>
+    /// Create N entities with 2 components, then destroy them all, in a new world (cold start: the world, its tables
+    /// and their growth are allocated by the call; the churn benchmarks measure a warm world, which allocates nothing).
+    /// </summary>
     [Benchmark]
     public int CreateAddDestroy()
     {
@@ -79,36 +86,35 @@ public class MicroBenchmarks
         return world.EntityCount;
     }
 
-    /// <summary>Long-running process: 10 rounds of create -> add -> destroy in the same world.</summary>
+    /// <summary>
+    /// Long-running process: 10 rounds of create -> destroy in one warm world (recycled ids and rows, no allocation).
+    /// </summary>
     [Benchmark]
     public int Churn()
     {
-        var world = new World(new WorldOptions { InitialEntityCapacity = 1024 });
-        var entities = new Entity[N / 10];
+        var entities = _churned;
         for (int round = 0; round < 10; round++)
         {
             for (int i = 0; i < entities.Length; i++)
-                entities[i] = world.CreateEntity(new Position(), new Health());
+                entities[i] = _churn.CreateEntity(new Position(), new Health());
 
             for (int i = 0; i < entities.Length; i++) entities[i].Destroy();
         }
 
-        return world.EntityCount;
+        return _churn.EntityCount;
     }
 
     /// <summary>Churn through the batch API: CreateEntities and DestroyEntities, one gate pass each per round.</summary>
     [Benchmark]
     public int ChurnBatch()
     {
-        var world = new World(new WorldOptions { InitialEntityCapacity = 1024 });
-        var entities = new Entity[N / 10];
         for (int round = 0; round < 10; round++)
         {
-            world.CreateEntities(entities, new Position(), new Health());
-            world.DestroyEntities<Position>();
+            _churn.CreateEntities(_churned, new Position(), new Health());
+            _churn.DestroyEntities<Position>();
         }
 
-        return world.EntityCount;
+        return _churn.EntityCount;
     }
 
     /// <summary>Remove + add a component (state toggles such as buffs or combat state).</summary>
