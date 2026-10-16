@@ -23,6 +23,7 @@ Notation:
 | `ITrackChanges` | marker interface | A component whose rows record the change tick of their last write (`[Changed<T>]`, `QueryFilter.Changed<T>(since)`). |
 | `IIndexed<TKey>` | interface | A component (`ITrackChanges`) the world indexes by its `Key`; an `Entity` key makes it a relation. |
 | `ValueIndex<T, TKey>` | sealed class | `world.Index<T, TKey>()`: `Find(key)` (enumerator of `Entity`), `TryFind`, `Count`. |
+| `Buffer<T>` | struct, `IComponent, ITrackChanges` | A list per entity: `Count`, `Capacity`, `this[i]` (read-only), `AsReadOnlySpan()`, `foreach`; writes through `BufferExtensions` (`ref this`): `Add`, `AddRange`, `Insert`, `RemoveAt`, `RemoveAtSwapBack`, `Clear`, `EnsureCapacity`, `AsSpan()`. |
 | `ISingletonComponent` | marker interface | Implemented by singleton structs. |
 | `EcsSystem` | abstract class | `World`, `Priority`, `UpdateInterval`, `Enabled`, `Stats`, `LastRunTick`; `OnCreate` / `OnUpdate` / `OnDestroy`. |
 | `SystemStats` | readonly struct | `Runs`, `Last`, `Total`, `Average` of a system's runs; recorded with `WorldOptions.MeasureSystems`. |
@@ -68,6 +69,21 @@ Notation:
 | `entity.GetOrAdd<T>()` → `ref T` | O(1), or as `Add` when missing | counts as a write of a tracked component |
 | `entity.Set(in T1 … in Tn)` → `Entity` | O(n), or O(c) amortized when it moves | add or overwrite, at most one row copy, chainable |
 | `entity.Remove<T1..Tn>()` → `Entity` | O(n) | clears presence bits, the entity keeps its row; missing components are ignored; a removed indexed component unlinks the entity (O(1)); chainable |
+
+## Buffers
+
+`Buffer<T>` is a component (`IComponent, ITrackChanges`); `new Buffer<T>()` holds no list until its first write.
+Reads work on any reference (`in`, `Read<T>()`); writes need a `ref` (a tracked write) ([Buffers](guide/buffers.md)).
+
+| API | Complexity | Notes |
+|---|---|---|
+| `bag.Count`, `bag.Capacity`, `bag[i]` (`ref readonly`), `AsReadOnlySpan()`, `foreach` | O(1) | read-only; out-of-range indexes throw |
+| `bag.Add(item)` / `AddRange(span)` | O(1) amortized / O(items) | allocates only when the list grows (doubling, at least 4) |
+| `bag.Insert(i, item)` / `RemoveAt(i)` | O(count) | keep the order |
+| `bag.RemoveAtSwapBack(i)` | O(1) | the last element moves into `i` |
+| `bag.Clear()` | O(1), O(count) for elements with references | keeps the capacity |
+| `bag.EnsureCapacity(n)` / `AsSpan()` | O(count) when it grows / O(1) | `AsSpan()` is writable |
+| `world.Capture()` / `Restore` of a buffer column | O(elements) | copies the elements (a new list per entity) |
 
 ## Queries
 

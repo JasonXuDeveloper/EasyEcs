@@ -61,6 +61,8 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
                                FillHoles; change-tick columns with their summaries (LastWrite per column, BlockWrite
                                per 4,096 rows, per 64 rows WordWrite + WordRows + WordRest: the rows at the word's
                                latest tick) and Stamp/StampRows
+  Buffer.cs                    Buffer<T> (a list per entity as a tracked component; writes are ref-this extensions)
+                               and its BufferStore (snapshots copy it through ComponentInfo.CopyRows)
   ComponentInfo.cs             per-type column operations (size, managed, create/grow/copy/clear) indexed by bit;
                                Pair links a tracked component with its change-tick column
   Tag.cs                       256-bit SIMD bitset with overflow
@@ -72,19 +74,19 @@ EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, req
   SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
                                the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] ->
                                ChangedSince(LastRunTick + 1) and a read of T) + GeneratedUpdate + GeneratedAccess
-  EasyEcsAnalyzer.cs           EECS001-011 (generators never report diagnostics)
+  EasyEcsAnalyzer.cs           EECS001-012 (generators never report diagnostics)
   Symbols.cs                   symbol checks shared by generator and analyzer
   Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
   EquatableArray.cs            array with value equality (generator models cache between edits)
   Polyfills.cs                 IsExternalInit for netstandard2.0 (records); do not delete
 EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, Presence, Query, System, ForEachSystem,
-                               Singleton, Concurrency, Parallel, Changed, Index, Snapshot, Allocation (0 B budget),
+                               Singleton, Concurrency, Parallel, Changed, Buffer, Index, Snapshot, Allocation (0 B budget),
                                Generator (diagnostics + caching), BattleServer (the README world as a whole, linked
                                from EasyEcs.Benchmark); Fixtures.cs holds the shared test components
 EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / MultiWorldBenchmark (headline, realistic
                                server tick; the world itself is WorldSimulation.cs), BattleServerBenchmark (the
                                doc/example.md, BattleServer.cs, every feature), ParallelSystemsBenchmark,
-                               ParallelForEachBenchmark, ChangeTrackingBenchmark, IndexBenchmark, SnapshotBenchmark +
+                               ParallelForEachBenchmark, ChangeTrackingBenchmark, BufferBenchmark, IndexBenchmark, SnapshotBenchmark +
                                MicroBenchmarks.
                                Always measure with BenchmarkDotNet.
 EasyEcs.Comparison/            BenchmarkDotNet: the headline world (WorldSimulation.cs, compiled unchanged) ported to
@@ -92,7 +94,7 @@ EasyEcs.Comparison/            BenchmarkDotNet: the headline world (WorldSimulat
                                OperationBenchmark (per operation, vs Friflo); FeatureBenchmark (change tracking and
                                indexes in each library's own way, results checked in setup)
 doc/                           README.md (index), getting-started.md, example.md (the battle server), guide/ (one page per concept, analyzer.md
-                               lists EECS001-011), api.md (API + complexity), ecs-principles.md, architecture.md,
+                               lists EECS001-012), api.md (API + complexity), ecs-principles.md, architecture.md,
                                performance.md (diagrams in mermaid)
 ```
 

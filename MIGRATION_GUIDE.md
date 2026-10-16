@@ -33,6 +33,9 @@ behaviors:
   `foreach` loops compile unchanged.
 - **`QueryEnumerator.Count` / `IsEmpty` are gone:** use `world.Count` / `world.Any` with the same filter.
 - **`entity.Remove<…>()` returns the entity** for chaining (calls that ignore it compile unchanged).
+- **Every analyzer rule is an error.** EECS007 (mutable state in a system) and EECS008 (a system referencing a
+  system) were warnings in 4.0; code that triggers them no longer builds. Move the state into a component or
+  singleton, and communicate through data.
 - **Iteration semantics are stricter.** A pass visits each entity at most once: entities created or moved into a
   matching archetype during the pass are not visited by it (one that only gets a queried component back keeps its
   row and is visited if the pass has not reached it); entities destroyed or
@@ -86,8 +89,11 @@ New:
 - `entity.Read<T>()` returns a `ref readonly T` that never counts as a write of a tracked component, and
   `entity.TryGetRef<T>(out bool found)` returns a `ref T` (a null ref when missing): optional access without a
   copy. `entity.Has<T1..Tn>()` tests several components with one lookup.
-- [EECS011](doc/guide/analyzer.md#eecs011) warns when a `[ForEach]` method changes a collection or class held by an
-  `in` parameter (the change would be neither scheduled as a write nor tracked).
+- `Buffer<T>`: a list per entity as a component, written only through `ref` (each write is a tracked change),
+  copied by snapshots ([Buffers](doc/guide/buffers.md)).
+- [EECS011](doc/guide/analyzer.md#eecs011) rejects a `[ForEach]` method that changes a collection or class held by an
+  `in` parameter (the change would be neither scheduled as a write nor tracked); [EECS012](doc/guide/analyzer.md#eecs012)
+  rejects a `Buffer<T>` copied by value.
 - The library is marked `IsAotCompatible`: trimming and Native AOT analyzers run on every build, and it publishes
   with Native AOT without warnings.
 

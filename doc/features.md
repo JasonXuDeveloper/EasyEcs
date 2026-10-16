@@ -21,6 +21,7 @@ Xeon VM at 2.1 GHz ([benchmarks](performance.md#benchmarks)).
 | [Parallel systems](#parallel-systems) | Non-conflicting systems of one priority run at once, same result as sequential. | `MovementSystem` and `ManaSystem` (`WorldOptions.Parallel`) |
 | [Parallel `[ForEach]`](#parallel-foreach) | One heavy method's rows split across cores. | `SteeringSystem`; `NewRound` (`ForEachParallel`, `ForEachEntityParallel`) |
 | [Change tracking](#change-tracking) | Visit only the rows written since a system last ran. | `ReplicationSystem` (`[Changed<Health>]`), `Unsaved` (`ChangedSince`) |
+| [Buffers](#buffers) | A list per entity as a component; every write tracked. | players' bags of `Loot`; `ReplicationSystem.SendBag` (`[Changed<Buffer<Loot>>]`) |
 | [Value indexes](#value-indexes) | Find entities by a component's value. | `Zone`: `PlayersIn`, `Despawn` (`TryFind`) |
 | [Relations](#relations) | Entity-to-entity links with reverse lookup. | `OwnedBy`: `Respawn` recalls a player's projectiles |
 | [Snapshots](#snapshots) | Copy a world and restore it in memory. | `Save` / `Load` |
@@ -222,6 +223,24 @@ from summaries and takes a word's written rows from its summary. Replicating 10 
 
 Guide: [Change tracking](guide/change-tracking.md).
 
+## Buffers
+
+**What it does.** `Buffer<T>` is a list per entity, held as a component. Its writes (`Add`, `RemoveAt`, `Clear`,
+`AsSpan`, …) take the buffer by `ref`, so a list changes only through a tracked write: `[Changed<Buffer<T>>]` visits
+the entities whose list changed, and a write through `in` does not compile. Snapshots copy the elements.
+
+**When to use it.** Lists that belong to one entity and are sent or saved when they change: inventories, paths,
+recent events, pending orders.
+
+**When not.** Items with their own state that are queried on their own (one entity per item with a relation), or a
+small fixed set (an `[InlineArray]` in an unmanaged component, no GC at all).
+
+**Cost.** One object and one array per entity, made by its first write; writes within the capacity allocate nothing.
+A write stamps the row once, like any tracked component (`BufferBenchmark` measures it against a `List<T>` in a
+tracked component).
+
+Guide: [Buffers](guide/buffers.md).
+
 ## Value indexes
 
 **What it does.** A component implementing `IIndexed<TKey>` is indexed by its `Key`:
@@ -304,7 +323,7 @@ Guide: [Systems: errors](guide/systems.md#errors).
 
 ## Analyzer
 
-**What it does.** The package bundles an analyzer (EECS001-EECS011) next to the generator: invalid `[ForEach]`
+**What it does.** The package bundles an analyzer (EECS001-EECS012) next to the generator: invalid `[ForEach]`
 methods, class components, stateful systems, systems referencing systems, unsafe parallel methods and writes
 through `in` parameters fail the build.
 
