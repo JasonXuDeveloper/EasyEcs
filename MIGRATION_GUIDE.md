@@ -84,10 +84,10 @@ New:
 - `IIndexed<TKey>`, `world.Index<T, TKey>()`, `ValueIndex<T, TKey>`: find entities by a component value; relations
   are indexed `Entity` keys ([Indexes and relations](doc/guide/indexes-and-relations.md)).
 - `entity.Read<T>()` returns a `ref readonly T` that never counts as a write of a tracked component, and
-  `entity.TryGetRef(out ComponentRef<T> c)` hands out a `ref` (`c.Value`) when the entity has the component:
-  optional access without a copy. `entity.Has<T1..Tn>()` tests several components with one lookup.
-- [EECS011](doc/guide/analyzer.md#eecs011) warns about collections inside components (hold the items as entities with a
-  relation), [EECS012](doc/guide/analyzer.md#eecs012) about writes through `in` parameters.
+  `entity.TryGetRef<T>(out bool found)` returns a `ref T` (a null ref when missing): optional access without a
+  copy. `entity.Has<T1..Tn>()` tests several components with one lookup.
+- [EECS011](doc/guide/analyzer.md#eecs011) warns when a `[ForEach]` method changes a collection or class held by an
+  `in` parameter (the change would be neither scheduled as a write nor tracked).
 - The library is marked `IsAotCompatible`: trimming and Native AOT analyzers run on every build, and it publishes
   with Native AOT without warnings.
 

@@ -28,7 +28,7 @@ and singletons) and never references another system.
 | `Enabled` | disabled systems are skipped by `Update()` and `Update<TGroup>()` |
 
 `AddSystem<T>()` returns the system; `GetSystem<T>()` finds one (for tooling and tests, not for other systems:
-see [EECS008](analyzer.md#eecs008)). `world.Systems` lists every system (a new list: for tooling), and
+see [EECS008](analyzer.md#eecs008)). `world.Systems` lists every system (allocation-free: for tooling), and
 `world.UpdateCount` counts the default group's updates so far.
 
 ```csharp

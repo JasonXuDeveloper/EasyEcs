@@ -30,8 +30,8 @@ world.Restore(before);
 What a snapshot holds, and what `Restore` does:
 
 - **Entities and components**, copied by value. A managed reference inside a component (a `string`, an array) is
-  shared with the world, not cloned: keep components plain data (collections as entities or values, [ECS principles,
-  rule 8](../ecs-principles.md#8-hold-collections-as-entities-not-in-components)).
+  shared with the world, not cloned: a collection in a component comes back as it is now, not as it was
+  ([ECS principles, rule 8](../ecs-principles.md#8-choose-how-to-hold-a-collection)).
 - **Singletons**, copied by value. After `Restore` every singleton has the snapshot's value in its existing storage,
   so a `SingletonRef<T>` taken before keeps working; singletons added after the capture are removed.
 - **Handles.** Handles to entities alive in the snapshot are valid again. Every other handle is stale, including

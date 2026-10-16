@@ -38,8 +38,8 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
 - **Built-in change tracking, indexes and relations.** `[Changed<T>]` visits only the rows written since a system last
   ran; `IIndexed<TKey>` components are found by value, and an `Entity` key makes a relation. Both follow every write,
   including writes through `ref`, with no events and nothing to keep in sync by hand.
-- **Mistakes fail the build.** The bundled analyzer (EECS001-EECS012) reports invalid systems, class components,
-  stateful systems, systems that reference each other and collections hidden in components.
+- **Mistakes fail the build.** The bundled analyzer (EECS001-EECS011) reports invalid systems, class components,
+  stateful systems, systems that reference each other and writes through read-only parameters.
 - **Decoupled by construction.** Systems cooperate only through data, in `Priority` order; system groups give you
   separate cadences (input on every wake, simulation on a fixed tick).
 - **Built for servers that run for months.** Ids are recycled behind version-checked handles, memory is bounded by
@@ -73,7 +73,7 @@ costs and when to use it).
 | [Bulk create and destroy](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md#entities) | `CreateEntities`, `DestroyEntities`, `EnsureEntityCapacity` | Spawn and clear waves in one pass through the structural gate. |
 | [Per-system timing](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#measuring-systems) | `WorldOptions.MeasureSystems`, `system.Stats` | Run counts and times of every system. |
 | [Errors](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#errors) | `World.SystemError` | A failing system is reported, can be switched off, and the tick goes on. |
-| [Analyzer](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/analyzer.md) | EECS001-EECS012 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
+| [Analyzer](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/analyzer.md) | EECS001-EECS011 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
 | [Threading and Native AOT](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md) | one owner thread per world; no reflection on hot paths | Many worlds per process, one per thread; AOT works with nothing to configure. |
 
 ## Example
@@ -264,9 +264,8 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
   lists the children of an entity.
 - **New APIs:** `WithAny<T>` filters (`[WithAny<T>]` on `[ForEach]`), batch `CreateEntities` / `DestroyEntities`,
   per-system timing (`WorldOptions.MeasureSystems`, `system.Stats`), `entity.Read<T>()` (read-only, never a write) and
-  `entity.TryGetRef(out ComponentRef<T>)` (optional access by `ref`); Native AOT compatible.
-- **EECS011 / EECS012** warn about collections inside components (hold items as entities with a relation) and
-  about writes through `in` parameters.
+  `entity.TryGetRef<T>(out found)` (optional access by `ref`); Native AOT compatible.
+- **EECS011** warns when a `[ForEach]` method changes a collection or class held by an `in` parameter.
 - `Entity.GetHashCode()` is deterministic (`Id * 397 ^ Version`) and cheaper (relation lookups hash handles).
 - **Behavior changes:** `Query` results are ref structs (no `await` in the loop, items cannot be stored); refs can be
   invalidated by structural changes of other entities; iteration order follows table rows; with `Parallel`, a

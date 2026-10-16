@@ -235,34 +235,36 @@ A `ref` from `Get<T>()` or a `Query` item is valid until the next structural cha
 parameters of a `[ForEach]` method stay valid through its own body's changes. None is valid across `await`. Keep `Entity` handles (validated on every access) and re-read components when you need them.
 See [`ref` and `await`](guide/refs-and-await.md).
 
-### 8. Hold collections as entities, not in components
+### 8. Choose how to hold a collection
 
-A component's row stores a `List<T>` or an array only as a reference. The world sees a write when code takes the
-component by `ref`, not when the list behind it changes, so nothing that relies on rows sees the change: `[Changed<T>]`
-systems and indexes miss it, parallel systems schedule a list changed through `in` as a read and race on it, and
-snapshots share the list instead of copying it. The analyzer therefore warns about a collection anywhere in a
-component's fields, nested structs and held classes included (EECS011), and about writes through `in` parameters
-(EECS012).
+A component may hold a `List<T>`, a `Dictionary<K, V>` or an array, but its row stores only the reference. The world
+sees a write when code takes the component by `ref`, not when the collection behind it changes. So:
 
-Hold the items the ECS way instead:
+- **Change it only through `ref`** (a `ref` parameter, `Get`, `TryGetRef`): the row is stamped for `[Changed<T>]` and
+  indexes, and parallel systems schedule the write. Changing it through an `in` parameter is a race and goes
+  unnoticed; the analyzer reports it (EECS011).
+- **Snapshots share it**: `Capture` copies the reference, not the collection, so restoring brings back the list as it
+  is now. Snapshots are for plain data; persistence serializes the collection anyway.
 
-1. **One entity per item**, pointing at its owner through a relation
-   ([indexes and relations](guide/indexes-and-relations.md#relations)). Each item is a row: its own components,
-   change ticks, queries and parallel schedule, copied by value in snapshots. This fits inventories, members, buffs
-   with their own state, and anything of unbounded size.
-2. **A fixed number of values inline** for small bounded sets (cooldown slots, the last few inputs): an
-   `[InlineArray]` struct keeps the component unmanaged, copied by value everywhere, every change a `ref` write.
-3. **An immutable collection** for read-mostly data replaced as a whole (a patrol route): `ImmutableArray<T>` is
-   allowed, and assigning a new one through `ref` is a tracked write; a snapshot keeps the old one.
+Then pick the representation by what the items are:
 
-Data that is one per world (a spatial grid, a lookup table) may hold collections in a singleton; take it by `ref` in
-the systems that change it.
+| Items | Hold them as | Why |
+|---|---|---|
+| Things with their own state, queried or changed on their own (inventory items, guild members, buffs) | **one entity per item** with a relation to its owner ([indexes and relations](guide/indexes-and-relations.md#relations)) | each item has its own components, change ticks, queries and parallel schedule, copied by value in snapshots |
+| A small, bounded set of values (cooldown slots, the last few inputs) | **an `[InlineArray]` buffer** in an unmanaged component | no GC, copied by value everywhere, every change a `ref` write |
+| Data read and written as a whole, usually with the save (quest progress, settings, unlocked achievements) | **a collection in a component**, changed through `ref` | one row per player instead of thousands of entities; loaded and saved with the player |
+| Read-mostly data replaced as a whole (a patrol route) | **an immutable collection** (`ImmutableArray<T>`) | assigning a new one through `ref` is a tracked write; a snapshot keeps the old one |
 
 ```csharp
 [System.Runtime.CompilerServices.InlineArray(4)]
 public struct Slots4 { private int _first; }                                 // 4 ints stored inline
 
 public struct Cooldowns : IComponent, ITrackChanges { public Slots4 Ticks; }  // unmanaged: nothing to share
+public struct Quests : IComponent, ITrackChanges                             // saved and loaded with the player
+{
+    public System.Collections.Generic.Dictionary<int, int> Progress;
+}
+
 public record struct ItemOf(Entity Owner) : IComponent, IIndexed<Entity>     // an inventory: items point at players
 {
     public Entity Key => Owner;
@@ -278,8 +280,14 @@ public partial class CooldownSystem : EcsSystem
     }
 }
 
-public static class Loot
+public static class PlayerRules
 {
+    public static void Advance(Entity player, int quest)
+    {
+        var progress = player.Get<Quests>().Progress;                         // Get: the row is stamped
+        progress[quest] = progress.TryGetValue(quest, out int step) ? step + 1 : 1;
+    }
+
     public static void Give(World world, Entity player, int item) =>
         world.CreateEntity(new ItemOf(player), new Health(item));             // a new row: tracked, indexed, snapshotted
 
@@ -294,6 +302,6 @@ public static class Loot
 3. Order systems by data flow (`Priority`): producers before consumers.
 4. Express cross-module reactions as systems querying the state another system wrote, never as calls between
    systems.
-5. Make sure the analyzer reports no EECS warnings.
-6. Hold collections as entities ([rule 8](#8-hold-collections-as-entities-not-in-components)).
+5. Build: the analyzer rejects what breaks these rules.
+6. Pick how each collection is held ([rule 8](#8-choose-how-to-hold-a-collection)).
 6. Test each system alone: create a world, add the system and the data it reads, `Update()`, assert on data.

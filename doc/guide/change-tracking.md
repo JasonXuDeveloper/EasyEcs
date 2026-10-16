@@ -38,13 +38,13 @@ out a `ref`, whether or not the code stores through it:
 |---|---|
 | `ref T` parameters of `[ForEach]` methods (`Span<T>` for batch methods) and of struct jobs (`Writes`) | `in T` parameters, `ReadOnlySpan<T>` |
 | `Query` items (the enumerator stamps every row it visits) | `TryGet<T>(out T)` (a copy), `Read<T>()` (read-only) |
-| `entity.Get<T>()`, `TryGetRef(out ComponentRef<T>)` when found, `GetOrAdd<T>()`, `Add<T>()`, `Set(...)` | `Has<T>()` |
+| `entity.Get<T>()`, `TryGetRef<T>(out found)` when found, `GetOrAdd<T>()`, `Add<T>()`, `Set(...)` | `Has<T>()` |
 | `CreateEntity(...)`, `CreateEntities(...)` with the component | removing the component |
 | `world.Restore(snapshot)` (every restored row) | |
 
 So declare read-only access as `in`: a `ref` parameter that only reads marks every row it visits as changed. A
-collection inside a component changes without any `ref` access, so it is never tracked: hold the items as entities
-instead (EECS011, [ECS principles, rule 8](../ecs-principles.md#8-hold-collections-as-entities-not-in-components)).
+collection inside a component changes without the row noticing: change it only through a `ref` access, which stamps
+the row (EECS011 reports changes through `in`; [ECS principles, rule 8](../ecs-principles.md#8-choose-how-to-hold-a-collection)).
 
 ## Ticks
 

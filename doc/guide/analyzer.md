@@ -1,10 +1,10 @@
-# Analyzer rules (EECS001-EECS012)
+# Analyzer rules (EECS001-EECS011)
 
 [Docs index](../README.md) · Related: [Systems](systems.md) · [ECS principles](../ecs-principles.md)
 
-The EasyEcs analyzer ships in the package next to the source generator. EECS001-EECS006, EECS009 and EECS010 are errors: the generator
-skips invalid input and the analyzer reports it, so "not generated" always means "reported". EECS007, EECS008,
-EECS011 and EECS012 are warnings that enforce the [ECS principles](../ecs-principles.md).
+The EasyEcs analyzer ships in the package next to the source generator. Every rule is an error: code that breaks the
+[ECS principles](../ecs-principles.md) does not build. The generator skips invalid input and the analyzer reports it, so
+"not generated" always means "reported".
 
 | Id | Severity | Rule |
 |---|---|---|
@@ -14,12 +14,11 @@ EECS011 and EECS012 are warnings that enforce the [ECS principles](../ecs-princi
 | [EECS004](#eecs004) | Error | Generic systems and methods are not supported |
 | [EECS005](#eecs005) | Error | `[ForEach]` outside an `EcsSystem` |
 | [EECS006](#eecs006) | Error | Components and singletons must be structs |
-| [EECS007](#eecs007) | Warning | Systems should be stateless |
-| [EECS008](#eecs008) | Warning | Systems must not reference systems |
+| [EECS007](#eecs007) | Error | Systems must be stateless |
+| [EECS008](#eecs008) | Error | Systems must not reference systems |
 | [EECS009](#eecs009) | Error | A batch `[ForEach]` method takes only spans and singletons |
 | [EECS010](#eecs010) | Error | A `[ForEach(Parallel = true)]` method must be able to run on several threads |
-| [EECS011](#eecs011) | Warning | Components must not hold collections |
-| [EECS012](#eecs012) | Warning | A `[ForEach]` method must not change what a read-only parameter holds |
+| [EECS011](#eecs011) | Error | A `[ForEach]` method must not change what a read-only parameter holds |
 
 ## EECS001
 
@@ -150,7 +149,7 @@ public record struct Wallet(int Gold) : IComponent;
 
 ## EECS007
 
-**Systems should be stateless.** A system has a mutable instance field or a settable auto-property. State in a
+**Systems must be stateless.** A system has a mutable instance field or a settable auto-property. State in a
 system is invisible to other systems, queries and persistence, and it is lost or duplicated when the system is
 removed or re-added.
 
@@ -265,36 +264,6 @@ public partial class RegenSystem : EcsSystem
 
 ## EECS011
 
-**Components must not hold collections.** A component (directly, or through the fields of a struct or class it
-holds) has a field that is an array or a mutable collection (`List<T>`, `Dictionary<K, V>`, `HashSet<T>`, `Queue<T>`,
-any `IEnumerable` but `string`). Its row stores only the reference, so a change to the collection is not a write:
-`[Changed<T>]` systems and indexes miss it, parallel systems that take the component as `in` race with it, and
-snapshots share the collection instead of copying it.
-
-Fix: make each item an entity that points at its owner (a relation), or keep a small fixed number of values inline
-([ECS principles, rule 8](../ecs-principles.md#8-hold-collections-as-entities-not-in-components)). Immutable and frozen
-collections (`System.Collections.Immutable`, `System.Collections.Frozen`) are allowed: they cannot change, so replacing
-one through `ref` is a tracked write. Singletons may hold collections (a spatial grid, a lookup table): there is one per
-world, and [EECS012](#eecs012) still guards writes through `in`.
-
-```cs
-public record struct Inventory(List<Entity> Items) : IComponent;   // EECS011: the list changes behind the row's back
-```
-
-```csharp
-public record struct ItemOf(Entity Owner) : IComponent, IIndexed<Entity>   // each item points at its owner
-{
-    public Entity Key => Owner;
-}
-
-public static class Inventories
-{
-    public static int CountItems(World world, Entity player) => world.Index<ItemOf, Entity>().Count(player);
-}
-```
-
-## EECS012
-
 **Write through a read-only parameter.** A `[ForEach]` method takes a component or singleton as `in` (or a component
 as `ReadOnlySpan<T>`) and changes data it holds by reference: it calls a mutating method on a collection (`Add`,
 `Remove`, `Clear`, `Insert`, `Push`, `Enqueue`, `Sort`, ...), assigns an element (`grid.Cells[i] = x`) or a member of a
@@ -303,12 +272,13 @@ is scheduled as a read (parallel systems that read the same data race with it) a
 systems and value indexes miss it.
 
 Fix: take the parameter by `ref`. The rule sees changes made directly on the parameter's members; a reference copied
-into a local, or changed inside a method of your own class, is not followed.
+into a local, or changed inside a method of your own class, is not followed. Collections in components are allowed;
+[ECS principles, rule 8](../ecs-principles.md#8-choose-how-to-hold-a-collection) says when to prefer entities.
 
 ```cs
 public record struct Grid(List<int> Cells) : ISingletonComponent;
 
-[ForEach] static void Mark(in Position p, in Grid grid) => grid.Cells.Add((int)p.X);   // EECS012: 'in', but written
+[ForEach] static void Mark(in Position p, in Grid grid) => grid.Cells.Add((int)p.X);   // EECS011: 'in', but written
 ```
 
 ```csharp

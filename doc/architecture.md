@@ -202,7 +202,7 @@ Every iteration API walks tables front to back. What differs is how much bookkee
 |---|---|
 | `ArityGenerator` | Emits every T1..T9 family of `EasyEcs.Core` from one template each: `Entity.Set` / `Remove`, `World.CreateEntity` / `CreateEntities` / `DestroyEntities`, `IForEach` / `IForEachEntity` / `IForEachBatch`, `ForEach` / `ForEachEntity` / `ForEachBatch` / `ForEachParallel` / `ForEachEntityParallel`, `Query`, `Count`, `Any`, `QueryItem` / `QueryEnumerator`. Runs only for `EasyEcs.Core`. |
 | `SystemGenerator` | Turns `[ForEach]` methods into struct jobs (per entity, or per run of rows for span parameters), static filters, a `GeneratedUpdate` override and a `GeneratedAccess` override (reads and writes, or `RunsAlone`) used for `Parallel` batching. `[Changed<T>]` becomes `ChangedSince(LastRunTick + 1)` on the method's filter and a declared read of `T`; `[ForEach(Parallel = true)]` runs the job over chunks of rows. Jobs that cannot change structure get `INoStructuralChanges`; jobs record which components they write (`Writes`) and whether they read the entity id. |
-| `EasyEcsAnalyzer` | Reports EECS001–EECS006, EECS009 and EECS010 (errors) and EECS007, EECS008 and EECS011 (ECS-principle warnings). Every rule with its fix: [Analyzer rules](guide/analyzer.md). |
+| `EasyEcsAnalyzer` | Reports EECS001–EECS011, all errors: invalid input the generator skips, and code that breaks the ECS principles. Every rule with its fix: [Analyzer rules](guide/analyzer.md). |
 
 Following the incremental-generator guidelines:
 

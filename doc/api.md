@@ -19,7 +19,6 @@ Notation:
 | `World.EntityEnumerator` | struct | Result of `world.Entities`: enumerates alive entities in id order, allocation-free. |
 | `WorldOptions` | sealed class | `Parallel`, `MaxDegreeOfParallelism`, `InitialEntityCapacity`, `MeasureSystems` (init-only). |
 | `Entity` | readonly struct | Handle: `Id`, `Version`, `World`; equality includes the version. A destroyed or default handle answers questions (`IsAlive`, `Has`, `TryGet`, `TryGetRef`) with false, throws on accesses and changes (`Get`, `Read`, `Add`, `Set`, `Remove`), and ignores `Destroy`. |
-| `ComponentRef<T>` | ref struct | From `entity.TryGetRef(out ComponentRef<T>)`: `.Value` is `ref T`; valid until the next structural change. |
 | `IComponent` | marker interface | Implemented by component structs. |
 | `ITrackChanges` | marker interface | A component whose rows record the change tick of their last write (`[Changed<T>]`, `QueryFilter.Changed<T>(since)`). |
 | `IIndexed<TKey>` | interface | A component (`ITrackChanges`) the world indexes by its `Key`; an `Entity` key makes it a relation. |
@@ -62,7 +61,7 @@ Notation:
 |---|---|---|
 | `entity.Get<T>()` → `ref T` | O(1) | version check + column lookup (+ one presence-bit test) + one indexed load; throws if missing or not alive; counts as a write of a tracked (`ITrackChanges`) component |
 | `entity.Read<T>()` → `ref readonly T` | O(1) | as `Get`, but read-only: never counts as a write |
-| `entity.TryGetRef<T>(out ComponentRef<T>)` → `bool` | O(1) | `component.Value` is the ref; false when missing or not alive; counts as a write of a tracked component when found |
+| `entity.TryGetRef<T>(out bool found)` → `ref T` | O(1) | a null ref when missing or not alive (check `found`); counts as a write of a tracked component when found |
 | `entity.Has<T>()` / `TryGet<T>(out T)` | O(1) | false when missing or not alive; `TryGet` returns a copy (not a write) |
 | `entity.Has<T1..Tn>()` | O(n) | all of them; one meta lookup |
 | `entity.Add<T>()` → `ref T` | O(c) amortized | adds (or resets) and returns a ref; a component the table has a column for only sets its presence bit (O(1)), a new one copies the row |

@@ -304,10 +304,9 @@ Guide: [Systems: errors](guide/systems.md#errors).
 
 ## Analyzer
 
-**What it does.** The package bundles an analyzer (EECS001-EECS012) next to the generator: invalid `[ForEach]`
-methods, class components, stateful systems, systems referencing systems, unsafe parallel methods, collections in
-components and writes through `in` parameters fail the build or
-warn.
+**What it does.** The package bundles an analyzer (EECS001-EECS011) next to the generator: invalid `[ForEach]`
+methods, class components, stateful systems, systems referencing systems, unsafe parallel methods and writes
+through `in` parameters fail the build.
 
 **When to use it.** Always on; it keeps a large code base decoupled.
 

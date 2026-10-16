@@ -76,7 +76,7 @@ public record struct Name(string Value) : IComponent;   // managed references ar
 |---|---|
 | `ref T Get<T>()` | Ref into storage; throws if the entity does not have `T`. |
 | `ref readonly T Read<T>()` | Read-only ref; throws if missing. Not a write, so tracked components stay unchanged. |
-| `bool TryGetRef<T>(out ComponentRef<T> c)` | Ref into storage if present (`c.Value` is `ref T`). |
+| `ref T TryGetRef<T>(out bool found)` | Ref into storage if present; a null ref when not (check `found`). |
 | `bool Has<T1..Tn>()` | Whether the entity has all of them. |
 | `bool TryGet<T>(out T value)` | A **copy** of `T` if present. |
 | `ref T Add<T>()` | Adds `T` (or resets it to `default` if present) and returns a ref. |
@@ -91,8 +91,8 @@ of a tracked component ([change tracking](change-tracking.md)) whether or not yo
 ```csharp
 if (world.TryGetEntity(unit.Id, out var hit))          // e.g. an id a client sent
 {
-    if (hit.TryGetRef(out ComponentRef<Health> hp))
-        hp.Value.Value -= 10;                              // one lookup, written in place
+    ref var hp = ref hit.TryGetRef<Health>(out bool alive);
+    if (alive) hp.Value -= 10;                             // one lookup, written in place
     float x = hit.Read<Position>().X;                      // read-only: no change recorded
 }
 ```
