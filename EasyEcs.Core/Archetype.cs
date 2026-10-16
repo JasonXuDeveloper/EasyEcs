@@ -670,7 +670,7 @@ internal sealed class Archetype
             if (size < 0)
             {
                 columns[c] = _infos[c].Create(count);
-                Array.Copy(Columns[c], columns[c], count);
+                _infos[c].CopyRows(Columns[c], columns[c], count);
             }
             else
             {
@@ -700,7 +700,7 @@ internal sealed class Archetype
             rows.Slots.CopyTo(Slots, 0);
             for (int c = 0; c < Columns.Length; c++)
             {
-                if (_infos[c].Size < 0) Array.Copy(rows.Columns[c], Columns[c], count);
+                if (_infos[c].Size < 0) _infos[c].CopyRows(rows.Columns[c], Columns[c], count);
                 else
                     Unsafe.CopyBlockUnaligned(ref Aligned(Columns[c]), ref MemoryMarshal.GetArrayDataReference(Unsafe.As<byte[]>(rows.Columns[c])),
                         (uint)Unsafe.As<byte[]>(rows.Columns[c]).Length);

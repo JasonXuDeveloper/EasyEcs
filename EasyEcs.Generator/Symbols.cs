@@ -22,9 +22,23 @@ internal static class Symbols
     public const string Singleton = "EasyEcs.ISingletonComponent";
     public const string Entity = "EasyEcs.Entity";
     public const string World = "EasyEcs.World";
+    public const string Buffer = "EasyEcs.Buffer<T>";
     public const int MaxComponents = 9;
 
     public static readonly SymbolDisplayFormat Fqn = SymbolDisplayFormat.FullyQualifiedFormat;
+
+    /// <summary>The element type when <paramref name="type"/> is a <c>Buffer&lt;T&gt;</c>, else null.</summary>
+    public static ITypeSymbol? BufferElement(ITypeSymbol type) =>
+        type is INamedTypeSymbol { IsGenericType: true } named && named.OriginalDefinition.ToDisplayString() == Buffer
+            ? named.TypeArguments[0]
+            : null;
+
+    /// <summary>Whether <paramref name="value"/> is <c>new Buffer&lt;T&gt;()</c> or <c>default</c>: a buffer without a list.</summary>
+    public static bool IsNewBuffer(IOperation? value)
+    {
+        while (value is IConversionOperation conversion) value = conversion.Operand;
+        return value is IDefaultValueOperation or IObjectCreationOperation { Arguments.Length: 0, Initializer: null };
+    }
 
     public static bool IsSystem(INamedTypeSymbol type)
     {

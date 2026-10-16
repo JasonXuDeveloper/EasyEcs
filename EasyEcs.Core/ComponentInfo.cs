@@ -71,6 +71,12 @@ internal abstract class ComponentInfo
     public abstract void CopyManaged(Array source, int sourceSlot, Array target, int targetSlot);
 
     public abstract void Clear(Array column, int start, int count);
+
+    /// <summary>
+    /// Copy rows [0, <paramref name="count"/>) of a managed column for a snapshot (capture or restore): values, and for
+    /// <see cref="Buffer{T}"/> columns copies of their lists, so the two sides never share one.
+    /// </summary>
+    public abstract void CopyRows(Array source, Array target, int count);
 }
 
 internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsReferenceOrContainsReferences<T>() ? -1 : Unsafe.SizeOf<T>())
@@ -101,4 +107,17 @@ internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsRefere
         Unsafe.As<T[]>(target)[targetSlot] = Unsafe.As<T[]>(source)[sourceSlot];
 
     public override void Clear(Array column, int start, int count) => Array.Clear(column, start, count);
+
+    public override void CopyRows(Array source, Array target, int count)
+    {
+        Array.Copy(source, target, count);
+        if (default(T) is not IBuffer) return; // a JIT-time constant
+        // A Buffer<TElement> has a single field, its BufferStore<TElement>: the value is that reference.
+        var rows = Unsafe.As<T[]>(target);
+        for (int i = 0; i < count; i++)
+        {
+            ref var store = ref Unsafe.As<T, BufferStore>(ref rows[i]);
+            store = store?.Clone();
+        }
+    }
 }

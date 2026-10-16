@@ -26,6 +26,22 @@ public class BattleServerTests
     }
 
     [Test]
+    public void PlayersCollectLootInBoundedBags()
+    {
+        using var server = Run(300);
+        int looted = 0;
+        foreach (var item in server.World.Query<Buffer<Loot>>())
+        {
+            Assert.That(item.Component1.Count, Is.InRange(0, BattleServer.BagSize));
+            foreach (var loot in item.Component1) Assert.That(loot.Item, Is.InRange(0, 15));
+            looted += item.Component1.Count;
+        }
+
+        Assert.That(looted, Is.Positive);
+        Assert.That(server.World.Count<Buffer<Loot>>(), Is.EqualTo(server.World.Count<Player>()));
+    }
+
+    [Test]
     public void ReplicationSendsEveryChangeAndOnlyChanges()
     {
         using var server = Run(30);

@@ -17,6 +17,7 @@ public record struct Frozen(int Ticks) : IComponent;
 public record struct Lifetime(int Ticks) : IComponent;
 public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }                  // players by zone
 public record struct OwnedBy(Entity Owner) : IComponent, IIndexed<Entity> { public Entity Key => Owner; } // a relation
+public record struct Loot(int Item);                                          // players carry a Buffer<Loot>: a list
 public struct Player : IComponent;                                            // tags: empty components
 public struct Npc : IComponent;
 public struct Dead : IComponent;
@@ -144,10 +145,11 @@ public partial class RespawnSystem : EcsSystem                                //
     public override int Priority => 6;
 
     [ForEach, With<Player>, With<Dead>]
-    static void Respawn(Entity player, ref Health hp, World world)
+    static void Respawn(Entity player, ref Health hp, ref Buffer<Loot> bag, World world)
     {
         foreach (var shot in world.Index<OwnedBy, Entity>().Find(player)) shot.Destroy();   // recall its projectiles
         hp.Value = hp.Max;
+        bag.Clear();                                                          // a death empties the bag
         player.Set(new Position(2048, 2048), new Mana(0, 100));               // several components, one call
         player.Remove<Dead>();
     }
@@ -158,7 +160,13 @@ public partial class RespawnSystem : EcsSystem                                //
         npc.Destroy();
         var at = new Position(p.Y, p.X);
         if (world.Index<Zone, int>().TryFind(npc.Id & 3, out var player))     // hunt a player of some zone
+        {
             at = player.Get<Position>();
+            ref var bag = ref player.Get<Buffer<Loot>>();                     // the hunted player gets the loot
+            if (bag.Count == BattleServer.BagSize) bag.RemoveAt(0);           // a full bag drops its oldest item
+            bag.Add(new Loot(npc.Id & 15));
+        }
+
         BattleServer.SpawnNpc(world, at, npc.Id);
     }
 }
@@ -211,6 +219,9 @@ public partial class ReplicationSystem : EcsSystem                            //
         replica = new Replica(hp.Value);
         battle.Replicated++;
     }
+
+    [ForEach, Changed<Buffer<Loot>>]                                          // bags changed by a ref write
+    static void SendBag(in Buffer<Loot> bag, ref Battle battle) => battle.Replicated += 1 + bag.Count;
 }
 
 public static class Dice
@@ -233,6 +244,7 @@ public record struct Census(int Players, int Alive, long Health, long Mana, Enti
 public sealed class BattleServer : IDisposable
 {
     public const int ShotCost = 30;
+    public const int BagSize = 8;
 
     private static readonly QueryFilter Players = QueryFilter.Create().With<Player>();     // build filters once
     private static readonly QueryFilter AlivePlayers = Players.Without<Dead>();
@@ -271,13 +283,14 @@ public sealed class BattleServer : IDisposable
 
         var players = new Entity[units / 3];                                  // one batch: one table growth
         World.CreateEntities(players, new Position(), new Velocity(1, 0), new Health(500, 500), new Replica(500),
-            new Mana(100, 100), new Attack(8, 6, 0), new Zone(0), new Player());
+            new Mana(100, 100), new Attack(8, 6, 0), new Zone(0), new Player(), new Buffer<Loot>());   // a bag each
         for (int i = 0; i < players.Length; i++)
         {
             uint r = Dice.Roll(0, i);
             players[i].Get<Position>() = new Position(r % 4096, (r >> 12) % 4096);
             players[i].Get<Velocity>() = new Velocity((int)(r % 5) - 2, (int)((r >> 8) % 5) - 2);
             players[i].Get<Attack>().Cooldown = (int)(r % 6);
+            players[i].Get<Buffer<Loot>>().EnsureCapacity(BagSize);           // room once: a full bag never grows
         }
 
         for (int i = players.Length; i < units; i++)

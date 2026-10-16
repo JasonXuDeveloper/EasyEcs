@@ -70,9 +70,17 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "collection or class it holds is still writable: changing it would race with parallel systems that read it, " +
         "and [Changed<T>] systems would not see the change. Take it by 'ref' so the write is scheduled and stamped.");
 
+    public static readonly DiagnosticDescriptor BufferCopy = new("EECS012", "Buffer<T> held by value",
+        "'{0}' copies a Buffer<{1}>; reach the buffer through its entity ('ref' or 'in')",
+        Category, DiagnosticSeverity.Error, true,
+        "A Buffer<T> is a component: its writes are tracked through the 'ref' that reaches it. A copy refers to the same " +
+        "list, so writes through the copy are never stamped as changed, and a snapshot or another entity would share " +
+        "the list. Use 'ref' (write) or 'in' (read) parameters, ref locals and Entity.Get / Read; a new component " +
+        "value is 'new Buffer<T>()' (no list until its first write).");
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
-        MixedBatch, NotParallel, ReadOnlyWrite);
+        MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -80,6 +88,9 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.EnableConcurrentExecution();
         context.RegisterSymbolAction(AnalyzeType, SymbolKind.NamedType);
         context.RegisterSymbolAction(AnalyzeMethod, SymbolKind.Method);
+        context.RegisterSymbolAction(AnalyzeBufferHolder, SymbolKind.Field, SymbolKind.Property, SymbolKind.Method);
+        context.RegisterOperationAction(AnalyzeBufferCopy, OperationKind.VariableDeclarator, OperationKind.SimpleAssignment,
+            OperationKind.Argument);
         context.RegisterOperationAction(AnalyzeWrite, OperationKind.SimpleAssignment, OperationKind.CompoundAssignment,
             OperationKind.CoalesceAssignment, OperationKind.Increment, OperationKind.Decrement, OperationKind.Invocation);
     }
@@ -97,6 +108,62 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (Symbols.ReadOnlyRoot(target) is { } parameter)
             context.ReportDiagnostic(Diagnostic.Create(ReadOnlyWrite, context.Operation.Syntax.GetLocation(),
                 parameter.ContainingSymbol.Name, parameter.Name));
+    }
+
+    /// <summary>EECS012: a field, property, by-value parameter or by-value return of a Buffer&lt;T&gt;.</summary>
+    private static void AnalyzeBufferHolder(SymbolAnalysisContext context)
+    {
+        var symbol = context.Symbol;
+        if (symbol.IsImplicitlyDeclared) return;
+        switch (symbol)
+        {
+            case IFieldSymbol field:
+                Report(field.Type, field, field.Locations.FirstOrDefault());
+                break;
+            case IPropertySymbol property when !property.ReturnsByRef && !property.ReturnsByRefReadonly:
+                Report(property.Type, property, property.Locations.FirstOrDefault());
+                break;
+            case IMethodSymbol method when method.AssociatedSymbol == null:
+                if (!method.ReturnsByRef && !method.ReturnsByRefReadonly) Report(method.ReturnType, method, method.Locations.FirstOrDefault());
+                foreach (var p in method.Parameters)
+                    if (p.RefKind == RefKind.None) Report(p.Type, p, p.Locations.FirstOrDefault());
+                break;
+        }
+
+        void Report(ITypeSymbol type, ISymbol holder, Location? location)
+        {
+            if (Symbols.BufferElement(type) is { } element)
+                context.ReportDiagnostic(Diagnostic.Create(BufferCopy, location, holder.Name, element.ToDisplayString()));
+        }
+    }
+
+    /// <summary>
+    /// EECS012: a Buffer&lt;T&gt; copied by a local (ref locals are fine), an assignment or an argument of a generic
+    /// method (Add, Set, CreateEntity: the value is stored), unless it is a new, empty buffer.
+    /// </summary>
+    private static void AnalyzeBufferCopy(OperationAnalysisContext context)
+    {
+        var (name, type, value) = context.Operation switch
+        {
+            IVariableDeclaratorOperation { Symbol.RefKind: RefKind.None } declarator =>
+                (declarator.Symbol.Name, declarator.Symbol.Type, declarator.Initializer?.Value),
+            ISimpleAssignmentOperation { IsRef: false } assignment => (Describe(assignment.Target), assignment.Target.Type, assignment.Value),
+            IArgumentOperation { Parameter.OriginalDefinition.Type: ITypeParameterSymbol } argument =>
+                (argument.Parameter!.Name, argument.Value.Type, argument.Value),
+            _ => (null, null, null),
+        };
+        if (type == null || Symbols.BufferElement(type) is not { } element) return;
+        if (context.Operation is not IVariableDeclaratorOperation && Symbols.IsNewBuffer(value)) return; // locals never hold one
+        context.ReportDiagnostic(Diagnostic.Create(BufferCopy, context.Operation.Syntax.GetLocation(), name,
+            element.ToDisplayString()));
+
+        static string Describe(IOperation target) => target switch
+        {
+            ILocalReferenceOperation local => local.Local.Name,
+            IParameterReferenceOperation parameter => parameter.Parameter.Name,
+            IFieldReferenceOperation field => field.Field.Name,
+            _ => target.Syntax.ToString(),
+        };
     }
 
     private static void AnalyzeType(SymbolAnalysisContext context)
