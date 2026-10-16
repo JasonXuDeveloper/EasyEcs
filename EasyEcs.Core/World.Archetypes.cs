@@ -38,6 +38,20 @@ public sealed partial class World
         public QueryMatch Match = match;
     }
 
+    // Per call signature (TypeIndex<ComponentSignature, (T1, ..., Tn)>): the first MemoWays filters queried with it and
+    // their cache entries. A hit compares the filter's masks instead of building a key, hashing it and probing the
+    // dictionary. Queries run on any thread, so the arrays are immutable snapshots replaced copy-on-write; once a
+    // signature's ways are full, other filters take the dictionary (no allocation in steady state).
+    private QueryMemo[][] _queryMemo = [];
+    private readonly object _memoLock = new();
+    private const int MemoWays = 4;
+
+    private sealed class QueryMemo(in QueryFilter filter, QueryCacheEntry entry)
+    {
+        public readonly QueryFilter Filter = filter;
+        public readonly QueryCacheEntry Entry = entry;
+    }
+
     /// <summary>
     /// Put a new entity (no archetype yet) into <paramref name="target"/> and return its row. Inside the structural gate.
     /// </summary>
@@ -141,8 +155,44 @@ public sealed partial class World
     /// presence tests. Lock-free on cache hits; the result is an immutable snapshot.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)] // once per pass: keeps dictionary and gate code out of the iteration loops
-    internal QueryMatch GetMatchingArchetypes(ReadOnlySpan<ushort> bits, in QueryFilter filter) =>
-        Volatile.Read(ref GetQueryEntry(bits, in filter).Match);
+    internal QueryMatch GetMatchingArchetypes(int signature, ReadOnlySpan<ushort> bits, in QueryFilter filter)
+    {
+        var memo = Volatile.Read(ref _queryMemo);
+        if ((uint)signature < (uint)memo.Length && memo[signature] is { } ways)
+        {
+            for (int i = 0; i < ways.Length; i++)
+                if (ways[i].Filter.SameQuery(in filter))
+                    return Volatile.Read(ref ways[i].Entry.Match);
+            if (ways.Length == MemoWays) return Volatile.Read(ref GetQueryEntry(bits, in filter).Match);
+        }
+
+        return MatchAndMemo(signature, bits, in filter);
+    }
+
+    /// <summary>A filter the signature's ways do not hold yet: look it up and give it a way (cold path).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private QueryMatch MatchAndMemo(int signature, ReadOnlySpan<ushort> bits, in QueryFilter filter)
+    {
+        var entry = GetQueryEntry(bits, in filter);
+        lock (_memoLock)
+        {
+            var memo = _queryMemo;
+            if (signature >= memo.Length) Array.Resize(ref memo, Math.Max(signature + 1, memo.Length * 2));
+            else memo = (QueryMemo[][])memo.Clone();
+            var ways = memo[signature] ?? [];
+            bool known = false;
+            for (int i = 0; i < ways.Length; i++) known |= ways[i].Filter.SameQuery(in filter);
+            if (!known && ways.Length < MemoWays)
+            {
+                Array.Resize(ref ways, ways.Length + 1);
+                ways[^1] = new QueryMemo(in filter, entry);
+                memo[signature] = ways;
+                Volatile.Write(ref _queryMemo, memo);
+            }
+        }
+
+        return Volatile.Read(ref entry.Match);
+    }
 
     /// <summary>
     /// The cache entry of a query: its <see cref="QueryCacheEntry.Match"/> is replaced (volatile) whenever a new
@@ -231,5 +281,6 @@ public sealed partial class World
         _archetypes.Clear();
         _allArchetypes = Array.Empty<Archetype>();
         _queryCache.Clear();
+        lock (_memoLock) _queryMemo = [];
     }
 }

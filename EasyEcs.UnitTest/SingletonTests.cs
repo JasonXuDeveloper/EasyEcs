@@ -17,10 +17,22 @@ public class SingletonTests
         Assert.That(world.TryGetSingleton<Clock>(out var clock), Is.True);
         Assert.That(clock.Tick, Is.EqualTo(6));
 
-        world.RemoveSingleton<Clock>();
+        Assert.That(world.RemoveSingleton<Clock>(), Is.True);
+        Assert.That(world.RemoveSingleton<Clock>(), Is.False);
         Assert.That(world.TryGetSingleton<Clock>(out _), Is.False);
         world.GetOrAddSingleton<Clock>().Tick = 1;
         Assert.That(world.GetOrAddSingleton<Clock>().Tick, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void AddingAgainResetsTheSameStorage()
+    {
+        using var world = new World();
+        var clock = world.SingletonRef<Clock>();
+        clock.Value.Tick = 5;
+        world.AddSingleton<Clock>().Tick += 2;   // reset to default, then written
+        Assert.That(clock.Value.Tick, Is.EqualTo(2), "the handle still reaches the singleton");
+        Assert.That(world.GetSingleton<Clock>().Tick, Is.EqualTo(2));
     }
 
     [Test]

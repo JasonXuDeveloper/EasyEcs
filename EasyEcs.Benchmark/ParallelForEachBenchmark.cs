@@ -5,8 +5,9 @@ namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// One heavy per-entity system over 100,000 entities (steering: the nearest of 16 waypoints, then a step towards it),
-/// as a plain [ForEach] and as [ForEach(Parallel = true)], whose rows run in chunks on several threads. Steady state
-/// must allocate 0 bytes per tick either way.
+/// as a plain [ForEach] and as [ForEach(Parallel = true)], whose rows run in chunks on several threads; and the same
+/// work as an ad-hoc job that receives each entity's handle (<c>ForEachEntity</c> / <c>ForEachEntityParallel</c>).
+/// Steady state must allocate 0 bytes per tick either way.
 /// </summary>
 [MemoryDiagnoser]
 public partial class ParallelForEachBenchmark
@@ -36,6 +37,15 @@ public partial class ParallelForEachBenchmark
 
     [Benchmark]
     public void Tick() => _world.Update();
+
+    /// <summary>The steering as a struct job with entity handles, outside systems (tools, request handlers).</summary>
+    [Benchmark]
+    public void EntityJob()
+    {
+        var job = new SteerEntities { Waypoints = _world.GetSingleton<Waypoints>() };
+        if (Parallel) _world.ForEachEntityParallel<Agent, SteerEntities>(ref job);
+        else _world.ForEachEntity<Agent, SteerEntities>(ref job);
+    }
 
     public record struct Agent(float X, float Y, float Vx, float Vy) : IComponent;
 
@@ -73,6 +83,20 @@ public partial class ParallelForEachBenchmark
         agent.X += agent.Vx;
         agent.Y += agent.Vy;
     }
+
+    private struct SteerEntities : IForEachEntity<Agent>, INoStructuralChanges
+    {
+        public Waypoints Waypoints;
+
+        public void Execute(Entity entity, ref Agent agent)
+        {
+            SteerAgent(ref agent, in Waypoints);
+            if (float.IsNaN(agent.X)) Diverged(entity); // the handle is built for every row, used on a rare branch
+        }
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static void Diverged(Entity entity) => throw new InvalidOperationException($"{entity} diverged");
 
     public partial class Steer : EcsSystem
     {

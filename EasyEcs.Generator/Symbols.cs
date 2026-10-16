@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 
 namespace EasyEcs.Generator;
 
@@ -180,4 +181,50 @@ internal static class Symbols
 
         return true;
     }
+
+    /// <summary>
+    /// Methods that change the collection they are called on (BCL lists, sets, maps, queues, stacks, linked lists,
+    /// arrays). A call to one of them through an 'in' component writes data the parameter promised to only read.
+    /// </summary>
+    private static readonly HashSet<string> Mutators =
+    [
+        "Add", "AddRange", "AddFirst", "AddLast", "AddOrUpdate", "GetOrAdd", "TryAdd", "Insert", "InsertRange",
+        "Remove", "RemoveAt", "RemoveAll", "RemoveRange", "RemoveFirst", "RemoveLast", "RemoveWhere", "TryRemove",
+        "Clear", "Push", "Pop", "TryPop", "Enqueue", "Dequeue", "TryDequeue", "Sort", "Reverse", "Fill", "SetValue",
+        "UnionWith", "IntersectWith", "ExceptWith", "SymmetricExceptWith", "EnsureCapacity", "TrimExcess",
+    ];
+
+    /// <summary>
+    /// The [ForEach] parameter a write reaches through a reference held by a read-only component: an 'in' component
+    /// or a <c>ReadOnlySpan&lt;T&gt;</c> of one. <paramref name="target"/> is the written location (an assignment
+    /// target) or the receiver of a mutating call; null when the write goes anywhere else.
+    /// </summary>
+    public static IParameterSymbol? ReadOnlyRoot(IOperation? target)
+    {
+        // The compiler rejects writes to the struct itself, so any write rooted at a read-only component that
+        // compiles goes through a reference (a class field, a collection) the component holds.
+        while (true)
+        {
+            switch (target)
+            {
+                case IFieldReferenceOperation f: target = f.Instance; break;
+                case IPropertyReferenceOperation pr: target = pr.Instance; break;
+                case IArrayElementReferenceOperation a: target = a.ArrayReference; break;
+                case IConversionOperation c: target = c.Operand; break;
+                case IParameterReferenceOperation { Parameter: var p }:
+                    return p.ContainingSymbol is IMethodSymbol m && IsForEach(m)
+                        && (p.RefKind is RefKind.In or RefKind.RefReadOnlyParameter && Classify(p) == ParamKind.Component
+                            || p.RefKind == RefKind.None && Classify(p) == ParamKind.ComponentSpan
+                            && p.Type.Name == "ReadOnlySpan") ? p : null;
+                default: return null;
+            }
+        }
+    }
+
+    /// <summary>The receiver of a call that changes a collection (see <see cref="Mutators"/>), else null.</summary>
+    public static IOperation? MutatedReceiver(IInvocationOperation call) =>
+        call.Instance is { Type.IsReferenceType: true } instance && Mutators.Contains(call.TargetMethod.Name) ? instance : null;
+
+    public static bool IsForEach(IMethodSymbol method) =>
+        method.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == ForEachAttribute);
 }

@@ -10,11 +10,18 @@ public sealed partial class World
     // Indexed by SingletonType<T>.Index; each slot is a SingletonBox<T> (stable address for refs).
     private object[] _singletons = [];
 
-    /// <summary>Add (or reset) singleton <typeparamref name="T"/> and return a ref to it. O(1).</summary>
+    /// <summary>
+    /// Add (or reset to default) singleton <typeparamref name="T"/> and return a ref to it. A reset keeps the storage, so
+    /// <see cref="SingletonRef{T}"/> handles taken before still reach the singleton. O(1).
+    /// </summary>
     public ref T AddSingleton<T>() where T : struct, ISingletonComponent
     {
         using (Structural())
-            return ref Publish<T>().Value;
+        {
+            var box = Box<T>() ?? Publish<T>();
+            box.Value = default;
+            return ref box.Value;
+        }
     }
 
     /// <summary>Publish a fresh box for <typeparamref name="T"/>. Inside the structural gate.</summary>
@@ -81,14 +88,15 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool HasSingleton<T>() where T : struct, ISingletonComponent => Box<T>() != null;
 
-    /// <summary>Remove singleton <typeparamref name="T"/>. O(1).</summary>
-    public void RemoveSingleton<T>() where T : struct, ISingletonComponent
+    /// <summary>Remove singleton <typeparamref name="T"/>; false if it was not added. O(1).</summary>
+    public bool RemoveSingleton<T>() where T : struct, ISingletonComponent
     {
         using (Structural())
         {
             int index = SingletonType<T>.Index;
-            if (index < _singletons.Length)
-                _singletons[index] = null;
+            if (index >= _singletons.Length || _singletons[index] == null) return false;
+            _singletons[index] = null;
+            return true;
         }
     }
 

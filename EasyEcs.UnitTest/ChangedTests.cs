@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
@@ -256,18 +257,23 @@ public partial class ChangedTests
         ulong mark = world.ChangeTick;
         var changed = QueryFilter.Create().Changed<Armor>().ChangedSince(mark);
 
-        // Reads: a copy, a presence check, a query over another component.
+        // Reads: a copy, a read-only ref, a presence check, a missing component, a query over another component.
         entities[0].TryGet<Armor>(out _);
+        Assert.That(entities[0].Read<Armor>().Value, Is.EqualTo(1));
         _ = entities[0].Has<Armor>();
+        Assert.That(Unsafe.IsNullRef(ref entities[0].TryGetRef<Position>(out bool found)) && !found, Is.True);
         foreach (var _ in world.Query<Health>()) { }
         Assert.That(world.Count<Armor>(changed), Is.Zero);
 
         entities[1].GetOrAdd<Armor>();
         Assert.That(world.Count<Armor>(changed), Is.EqualTo(1));
+        entities[2].TryGetRef<Armor>(out found).Value = 7;
+        Assert.That(found && entities[2].Read<Armor>().Value == 7, Is.True);
+        Assert.That(world.Count<Armor>(changed), Is.EqualTo(2));
         var spawned = world.CreateEntity(new Armor(2));
         var batch = new Entity[3];
         world.CreateEntities(batch, new Armor(3));
-        Assert.That(world.Count<Armor>(changed), Is.EqualTo(5));
+        Assert.That(world.Count<Armor>(changed), Is.EqualTo(6));
 
         var polish = new Polish();
         world.ForEach<Armor, Polish>(ref polish);

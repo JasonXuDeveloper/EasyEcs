@@ -15,6 +15,19 @@ public class EntityTests
     public void TearDown() => _world.Dispose();
 
     [Test]
+    public void HandlesReadTheirRowsAfterTheTableGrows()
+    {
+        // The table starts at two rows: every growth moves the pinned columns a handle reads through.
+        var first = _world.CreateEntity(new Position(1, 2), new Name("first"));
+        var all = new List<Entity> { first };
+        for (int i = 1; i < 1000; i++) all.Add(_world.CreateEntity(new Position(i, -i), new Name("n")));
+        first.Get<Position>().X = 7;
+        Assert.That(first.Get<Position>(), Is.EqualTo(new Position(7, 2)));
+        Assert.That(first.Get<Name>().Value, Is.EqualTo("first"));
+        for (int i = 1; i < all.Count; i++) Assert.That(all[i].Get<Position>(), Is.EqualTo(new Position(i, -i)));
+    }
+
+    [Test]
     public void CreateEntitiesPlacesABatchAndDestroyEntitiesRemovesMatches()
     {
         var existing = _world.CreateEntity(new Position(9, 9));

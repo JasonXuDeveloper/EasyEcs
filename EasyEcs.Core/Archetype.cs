@@ -153,15 +153,34 @@ internal sealed class Archetype
 
             _tracked |= info.Owner >= 0;
             _columnOf[Components[i]] = (short)i;
-            ByBit[Components[i]].Column = Columns[i];
+            ByBit[Components[i]].Set(Columns[i], info.Managed);
         }
     }
 
-    /// <summary>A column and its presence bits (<see cref="ByBit"/>).</summary>
+    /// <summary>
+    /// A column, its presence bits and the address of its row 0 (<see cref="ByBit"/>). 32 bytes: an entry never
+    /// straddles a cache line.
+    /// </summary>
     public struct Lookup
     {
         public Array Column;
         public ulong[] Bits;
+
+        /// <summary>
+        /// Row 0 of an unmanaged column (<see cref="Aligned"/>): the column is pinned, so the address stays valid while
+        /// <see cref="Column"/> holds it. A handle's access then needs no column header or alignment arithmetic. 0 for
+        /// a managed column.
+        /// </summary>
+        public nint Rows;
+
+        private nint _pad;
+
+        /// <summary>Point the entry at <paramref name="column"/> (inside the structural gate).</summary>
+        public unsafe void Set(Array column, bool managed)
+        {
+            Column = column;
+            Rows = managed ? 0 : (nint)Unsafe.AsPointer(ref Aligned(column));
+        }
     }
 
     /// <summary>Presence bits of column <paramref name="column"/> (a valid index), or null when every row has it.</summary>
@@ -562,7 +581,7 @@ internal sealed class Archetype
     {
         Array.Resize(ref Slots, capacity);
         for (int i = 0; i < Columns.Length; i++)
-            ByBit[Components[i]].Column = Columns[i] = _infos[i].Grow(Columns[i], capacity);
+            ByBit[Components[i]].Set(Columns[i] = _infos[i].Grow(Columns[i], capacity), _infos[i].Managed);
         foreach (short c in _bitColumns)
         {
             Array.Resize(ref Present[c], (capacity + 63) >> 6);

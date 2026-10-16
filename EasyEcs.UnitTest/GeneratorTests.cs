@@ -36,6 +36,8 @@ public class GeneratorTests
         public struct Q : IComponent { public int V; }
         public struct T : IComponent, ITrackChanges { public int V; }
         public struct Clock : ISingletonComponent { public int Ticks; }
+        public class Box { public int V; }
+        public struct Bag : IComponent { public System.Collections.Generic.List<int> Items; public Box Box; public int[] Slots; }
         """;
 
     [Test]
@@ -54,6 +56,8 @@ public class GeneratorTests
                     [ForEach] static void C(in P p, ref Clock clock, in Clock read) => clock.Ticks += read.Ticks; // singletons
                     [ForEach] static void D(System.Span<P> p, System.ReadOnlySpan<Q> q, ref Clock clock) => clock.Ticks += p.Length; // batch
                     [ForEach] static void E(Entity e, in P p, ref Clock clock) { if (e.Has<Q>()) clock.Ticks += e.Id; } // read-only entity
+                    [ForEach] static void F(ref Bag b, in Q q) { b.Items.Add(q.V); b.Box.V++; } // a held list written by ref
+                    [ForEach] static void G(in Bag b, ref P p) => p.V = b.Items.Contains(1) ? b.Items[0] : b.Slots.Length; // only read
                 }
             }
             """);
@@ -108,6 +112,12 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { int _kills; void K() => _kills++; }", "EECS007")]
     [TestCase("public class S : EcsSystem { public int Kills { get; set; } }", "EECS007")]
     [TestCase("public class A : EcsSystem { } public class S : EcsSystem { private readonly A _a = new(); }", "EECS008")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Bag b) => b.Items.Add(1); }", "EECS011")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Bag b) => b.Items.Clear(); }", "EECS011")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Bag b) => b.Items[0] = 1; }", "EECS011")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Bag b) => b.Box.V++; }", "EECS011")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Bag b) => b.Slots[0] += 1; }", "EECS011")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(System.ReadOnlySpan<Bag> b) => b[0].Items.Add(1); }", "EECS011")]
     public async Task MisuseIsReported(string source, string id)
     {
         var errors = await Diagnose(Components, source);

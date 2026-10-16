@@ -3,6 +3,7 @@ using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.Operations;
 
 namespace EasyEcs.Generator;
 
@@ -62,9 +63,16 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "A parallel [ForEach] runs chunks of rows on several threads at once. It must make no structural change, run per " +
         "entity, and write nothing that another row's run reads, such as a singleton.");
 
+    public static readonly DiagnosticDescriptor ReadOnlyWrite = new("EECS011", "Write through a read-only component",
+        "[ForEach] method '{0}' changes data that '{1}' holds by reference, but takes '{1}' as read-only; take it by 'ref' (or a Span)",
+        Category, DiagnosticSeverity.Warning, true,
+        "A read-only component ('in', ReadOnlySpan) is scheduled as a read and never stamped as changed. A collection or " +
+        "class it holds is still writable: changing it would race with parallel systems that read the component, and " +
+        "[Changed<T>] systems would not see the change. Take the component by 'ref' so the write is scheduled and stamped.");
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
-        MixedBatch, NotParallel);
+        MixedBatch, NotParallel, ReadOnlyWrite);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -72,6 +80,23 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.EnableConcurrentExecution();
         context.RegisterSymbolAction(AnalyzeType, SymbolKind.NamedType);
         context.RegisterSymbolAction(AnalyzeMethod, SymbolKind.Method);
+        context.RegisterOperationAction(AnalyzeWrite, OperationKind.SimpleAssignment, OperationKind.CompoundAssignment,
+            OperationKind.CoalesceAssignment, OperationKind.Increment, OperationKind.Decrement, OperationKind.Invocation);
+    }
+
+    /// <summary>EECS011: a write or a mutating call that reaches a read-only [ForEach] component's reference.</summary>
+    private static void AnalyzeWrite(OperationAnalysisContext context)
+    {
+        var target = context.Operation switch
+        {
+            IAssignmentOperation assignment => assignment.Target,
+            IIncrementOrDecrementOperation step => step.Target,
+            IInvocationOperation call => Symbols.MutatedReceiver(call),
+            _ => null,
+        };
+        if (Symbols.ReadOnlyRoot(target) is { } parameter)
+            context.ReportDiagnostic(Diagnostic.Create(ReadOnlyWrite, context.Operation.Syntax.GetLocation(),
+                parameter.ContainingSymbol.Name, parameter.Name));
     }
 
     private static void AnalyzeType(SymbolAnalysisContext context)
@@ -169,6 +194,5 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(NotParallel, location, method.Name, problem));
     }
 
-    private static bool HasForEach(IMethodSymbol method) =>
-        method.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == Symbols.ForEachAttribute);
+    private static bool HasForEach(IMethodSymbol method) => Symbols.IsForEach(method);
 }

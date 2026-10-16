@@ -32,6 +32,10 @@ public readonly struct QueryFilter
 
     public static QueryFilter Create() => default;
 
+    /// <summary>Whether <paramref name="other"/> selects the same rows (its <see cref="Since"/> aside): one query key.</summary>
+    internal bool SameQuery(in QueryFilter other) =>
+        All.Equals(in other.All) && None.Equals(in other.None) && Any.Equals(in other.Any) && Tracked.Equals(in other.Tracked);
+
     /// <summary>Require <typeparamref name="T"/> to be present (not passed to the query callback).</summary>
     public QueryFilter With<T>() where T : struct, IComponent
     {

@@ -55,7 +55,32 @@ public readonly partial struct Entity : IEquatable<Entity>
         return ref value;
     }
 
-    /// <summary>Copy of component <typeparamref name="T"/> if the entity has it. O(1).</summary>
+    /// <summary>
+    /// Read-only ref to component <typeparamref name="T"/>; throws if the entity does not have it. Not a write: a tracked
+    /// component (<see cref="ITrackChanges"/>) is not stamped. O(1).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ref readonly T Read<T>() where T : struct, IComponent
+    {
+        ref T value = ref Find<T>();
+        if (Unsafe.IsNullRef(ref value)) ThrowMissing(typeof(T));
+        return ref value;
+    }
+
+    /// <summary>
+    /// Ref to component <typeparamref name="T"/> if the entity has it (<paramref name="found"/>), else a null ref
+    /// (check <paramref name="found"/> before using it). Counts as a write of a tracked component when found. O(1).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ref T TryGetRef<T>(out bool found) where T : struct, IComponent
+    {
+        ref T value = ref Find<T>();
+        found = !Unsafe.IsNullRef(ref value);
+        if (default(T) is ITrackChanges && found) Touch<T>(_world, Id);
+        return ref value;
+    }
+
+    /// <summary>Copy of component <typeparamref name="T"/> if the entity has it. Not a write. O(1).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGet<T>(out T value) where T : struct, IComponent
     {
@@ -70,10 +95,13 @@ public readonly partial struct Entity : IEquatable<Entity>
     /// or the row lost the component). Throws for a stale handle. One meta line plus one line of the archetype's lookup.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ref T Find<T>() where T : struct, IComponent
+    private unsafe ref T Find<T>() where T : struct, IComponent
     {
         ref var lookup = ref Locate(ComponentType<T>.Bit, out int slot);
         if (Unsafe.IsNullRef(ref lookup)) return ref Unsafe.NullRef<T>();
+        // A JIT-time constant: an unmanaged column's row 0 is cached in the entry (pinned, see Lookup.Rows).
+        if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>())
+            return ref Unsafe.Add(ref Unsafe.AsRef<T>((void*)lookup.Rows), slot);
         return ref Unsafe.Add(ref Archetype.Row0<T>(lookup.Column), slot);
     }
 

@@ -30,6 +30,37 @@ public partial class QueryTests
     private static readonly QueryFilter Active = QueryFilter.Create().Without<Frozen>().Without<Dead>();
 
     [Test]
+    public void ManyFiltersOfOneSignatureEachMatchTheirRowsAndSeeNewTables()
+    {
+        // More filters than a signature remembers: the rest take the query cache, with the same results.
+        var world = new World();
+        var filters = new[]
+        {
+            QueryFilter.Create(), QueryFilter.Create().With<C1>(), QueryFilter.Create().With<C2>(),
+            QueryFilter.Create().With<C3>(), QueryFilter.Create().With<C4>(), QueryFilter.Create().With<C5>(),
+            QueryFilter.Create().Without<C1>(),
+        };
+        var tags = new Action<Entity>[] { e => e.Set(new C1()), e => e.Set(new C2()), e => e.Set(new C3()),
+            e => e.Set(new C4()), e => e.Set(new C5()) };
+        for (int round = 0; round < 2; round++)
+        {
+            // Second round: every table is new to filters that were remembered in the first one.
+            for (int i = 0; i < tags.Length; i++) tags[i](world.CreateEntity(new Position(round, i)));
+            int total = 5 * (round + 1);
+            for (int f = 0; f < filters.Length; f++)
+            {
+                int expected = f == 0 ? total : f == filters.Length - 1 ? total - (round + 1) : round + 1;
+                Assert.That(world.Count<Position>(filters[f]), Is.EqualTo(expected), $"filter {f}, round {round}");
+                int visited = 0;
+                foreach (var _ in world.Query<Position>(filters[f])) visited++;
+                Assert.That(visited, Is.EqualTo(expected));
+            }
+        }
+
+        world.Dispose();
+    }
+
+    [Test]
     public void WithAnyNeedsOneOfTheComponents()
     {
         var halted = QueryFilter.Create().WithAny<Frozen>().WithAny<Dead>();

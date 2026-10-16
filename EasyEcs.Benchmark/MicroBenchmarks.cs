@@ -18,6 +18,11 @@ public struct Health : IComponent
     public int Value;
 }
 
+public struct Energy : IComponent, ITrackChanges
+{
+    public int Value;
+}
+
 public struct Clock : ISingletonComponent
 {
     public long Tick;
@@ -61,6 +66,14 @@ public class MicroBenchmarks
         _systemWorld = new World();
         for (int i = 0; i < N; i++) _systemWorld.CreateEntity(new Position(), new Velocity());
         _systemWorld.AddSystem<IntegrateSystem>();
+        _tracked = new World();
+        _trackedHandles = new Entity[1000];
+        for (int i = 0; i < N; i++)
+        {
+            var e = _tracked.CreateEntity(new Position(), new Energy());
+            if (i % (N / 1000) == 0 && i / (N / 1000) < 1000) _trackedHandles[i / (N / 1000)] = e; // scattered rows
+        }
+
         _churn = new World(new WorldOptions { InitialEntityCapacity = 1024 });
         _churned = new Entity[N / 10];
     }
@@ -275,6 +288,35 @@ public class MicroBenchmarks
         }
 
         return s;
+    }
+
+    private World _tracked;
+    private Entity[] _trackedHandles;
+
+    /// <summary>Look 1,000 entities up by id (TryGetEntity: the id from a client message), then read through the handle.</summary>
+    [Benchmark]
+    public int TryGetEntity()
+    {
+        _handles ??= CollectHandles();
+        int sum = 0;
+        var handles = _handles;
+        for (int i = 0; i < handles.Length; i++)
+            if (_queryCtx.TryGetEntity(handles[i].Id, out var entity))
+                sum += (int)entity.Get<Position>().X;
+        return sum;
+    }
+
+    /// <summary>
+    /// 1,000 writes through handles to a tracked component, every 10th row: each write stamps its row's change tick
+    /// and the summary of its 64-row word (compare with <see cref="HandleAccess"/>, an untracked write).
+    /// </summary>
+    [Benchmark]
+    public int TrackedHandleWrite()
+    {
+        int sum = 0;
+        var handles = _trackedHandles;
+        for (int i = 0; i < handles.Length; i++) sum += ++handles[i].Get<Energy>().Value;
+        return sum;
     }
 
     private static readonly QueryFilter NoHealth = QueryFilter.Create().Without<Health>();
