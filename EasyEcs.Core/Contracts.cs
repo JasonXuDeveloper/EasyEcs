@@ -9,7 +9,7 @@ public interface IComponent;
 
 /// <summary>
 /// Marks a component whose changes are tracked: every row records the world's <see cref="World.ChangeTick"/> of its
-/// last write, and <c>[Changed&lt;T&gt;]</c> / <c>QueryFilter.Changed&lt;T&gt;()</c> select the rows written since a
+/// last write, and <c>[Changed&lt;T&gt;]</c> / <c>QueryFilter.Changed&lt;T&gt;(since)</c> select the rows written since a
 /// system last ran. A write is any <c>ref</c> access: <c>ref</c> parameters of <c>[ForEach]</c> methods and jobs,
 /// <c>Query</c> items, <c>Entity.Get</c> / <c>Add</c> / <c>GetOrAdd</c> / <c>Set</c>, and creating the entity or adding
 /// the component. Costs 8 bytes per row and one store per write; untracked components pay nothing.

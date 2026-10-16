@@ -201,8 +201,9 @@ public sealed partial class World
 
         _groups = [new()];
 
-        // Meta keeps its length (handles index it unchecked): cleared entries make every handle stale.
-        Array.Clear(Meta);
+        // Meta keeps its length (handles index it unchecked); every record moves past its version, so every handle
+        // is stale (a handle matching its record's version is alive: Entity.LocateArchetype).
+        foreach (ref var meta in Meta.AsSpan()) meta = new EntityMeta { Version = meta.Version + 1 };
         ClearArchetypes();
         ResetIndexes(); // an index still held finds nothing
         ClearSingletons();

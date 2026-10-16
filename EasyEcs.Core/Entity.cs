@@ -45,7 +45,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     /// Whether the entity has component <typeparamref name="T"/>; false for a destroyed or default handle. O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Has<T>() where T : struct, IComponent => !Unsafe.IsNullRef(ref Locate(ComponentType<T>.Bit, out _));
+    public bool Has<T>() where T : struct, IComponent => !Unsafe.IsNullRef(ref Locate(ComponentType<T>.Bit, out _, false));
 
     // Has<T1..Tn>() is generated (Entity.Structural.g.cs) on top of HasAll.
 
@@ -53,10 +53,10 @@ public readonly partial struct Entity : IEquatable<Entity>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool HasAll(ReadOnlySpan<ushort> bits)
     {
-        var archetype = LocateArchetype(out int slot);
+        var archetype = LocateArchetype(out int slot, false);
         if (archetype == null) return false;
         for (int i = 0; i < bits.Length; i++)
-            if (Unsafe.IsNullRef(ref Column(archetype, bits[i], slot))) return false;
+            if (Unsafe.IsNullRef(ref Column(archetype, bits[i], slot, false))) return false;
         return true;
     }
 
@@ -67,8 +67,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T Get<T>() where T : struct, IComponent
     {
-        ref T value = ref Find<T>();
-        if (Unsafe.IsNullRef(ref value)) ThrowMissing(this, typeof(T));
+        ref T value = ref Find<T>(true);
         if (default(T) is ITrackChanges) Touch<T>(_world, Id);
         return ref value;
     }
@@ -80,9 +79,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref readonly T Read<T>() where T : struct, IComponent
     {
-        ref T value = ref Find<T>();
-        if (Unsafe.IsNullRef(ref value)) ThrowMissing(this, typeof(T));
-        return ref value;
+        return ref Find<T>(true);
     }
 
     /// <summary>
@@ -93,7 +90,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T TryGetRef<T>(out bool found) where T : struct, IComponent
     {
-        ref T value = ref Find<T>();
+        ref T value = ref Find<T>(false);
         found = !Unsafe.IsNullRef(ref value);
         if (default(T) is ITrackChanges && found) Touch<T>(_world, Id);
         return ref value;
@@ -106,21 +103,23 @@ public readonly partial struct Entity : IEquatable<Entity>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGet<T>(out T value) where T : struct, IComponent
     {
-        ref T found = ref Find<T>();
+        ref T found = ref Find<T>(false);
         bool has = !Unsafe.IsNullRef(ref found);
         value = has ? found : default;
         return has;
     }
 
     /// <summary>
-    /// Ref to <typeparamref name="T"/> in the entity's row, or a null ref when the entity does not have it (no column,
-    /// or the row lost the component) or is not alive. One meta line plus one line of the archetype's lookup.
+    /// Ref to <typeparamref name="T"/> in the entity's row. When the entity does not have it (no column, or the row
+    /// lost the component) or is not alive: a null ref, or with <paramref name="strict"/> (an inlined constant) a throw
+    /// straight from the failing test, so an access has no null ref to test again. One meta line plus one line of the
+    /// archetype's lookup.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private unsafe ref T Find<T>() where T : struct, IComponent
+    private unsafe ref T Find<T>(bool strict) where T : struct, IComponent
     {
-        ref var lookup = ref Locate(ComponentType<T>.Bit, out int slot);
-        if (Unsafe.IsNullRef(ref lookup)) return ref Unsafe.NullRef<T>();
+        ref var lookup = ref Locate(ComponentType<T>.Bit, out int slot, strict);
+        if (!strict && Unsafe.IsNullRef(ref lookup)) return ref Unsafe.NullRef<T>();
         // A JIT-time constant: an unmanaged column's row 0 is cached in the entry (pinned, see Lookup.Rows).
         if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>())
             return ref Unsafe.Add(ref Unsafe.AsRef<T>((void*)lookup.Rows), slot);
@@ -133,42 +132,61 @@ public readonly partial struct Entity : IEquatable<Entity>
     /// <see cref="Find{T}"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ref Archetype.Lookup Locate(uint bit, out int slot)
+    private ref Archetype.Lookup Locate(uint bit, out int slot, bool strict)
     {
-        var archetype = LocateArchetype(out slot);
-        if (archetype == null) return ref Unsafe.NullRef<Archetype.Lookup>();
-        return ref Column(archetype, bit, slot);
+        var archetype = LocateArchetype(out slot, strict);
+        if (!strict && archetype == null) return ref Unsafe.NullRef<Archetype.Lookup>();
+        return ref Column(archetype, bit, slot, strict);
     }
 
-    /// <summary>The entity's table and row, or null when the handle is destroyed or default.</summary>
+    /// <summary>
+    /// The entity's table and row; when the handle is destroyed or default, null (or with <paramref name="strict"/>
+    /// a throw).
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private Archetype LocateArchetype(out int slot)
+    private Archetype LocateArchetype(out int slot, bool strict)
     {
         var world = _world;
         if (world == null)
         {
+            if (strict) ThrowStale();
             slot = 0;
             return null;
         }
 
         ref var meta = ref world.MetaRef(Id); // ids of this world's handles are always < Meta.Length
         slot = meta.Slot;
-        return meta.Version == Version ? meta.Archetype : null; // a destroyed entity's record has no archetype
+        if (meta.Version != Version)
+        {
+            if (strict) ThrowStale();
+            return null;
+        }
+
+        // Matching versions mean a live entity, which has a table: destroying an entity, restoring a snapshot and
+        // disposing the world all move the version of every record without one.
+        return meta.Archetype;
     }
 
     /// <summary>The column entry of <paramref name="bit"/> in <paramref name="archetype"/> when row <paramref name="slot"/> has it, else a null ref.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static ref Archetype.Lookup Column(Archetype archetype, uint bit, int slot)
+    private static ref Archetype.Lookup Column(Archetype archetype, uint bit, int slot, bool strict)
     {
         var map = archetype.ByBit;
-        if (bit >= (uint)map.Length) return ref Unsafe.NullRef<Archetype.Lookup>();
+        if (bit >= (uint)map.Length) return ref Missing(bit, strict);
         // bit < map.Length: no bounds check. Column and presence bits share the entry's cache line.
         ref var lookup = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(map), bit);
-        if (lookup.Column == null) return ref Unsafe.NullRef<Archetype.Lookup>();
+        if (lookup.Column == null) return ref Missing(bit, strict);
         // Presence bits cover the table's capacity and the slot is below it: no bounds check.
         if (lookup.Bits is { } bits && (Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(bits), (uint)slot >> 6) & (1UL << slot)) == 0)
-            return ref Unsafe.NullRef<Archetype.Lookup>();
+            return ref Missing(bit, strict);
         return ref lookup;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ref Archetype.Lookup Missing(uint bit, bool strict)
+    {
+        if (strict) ThrowMissing(bit);
+        return ref Unsafe.NullRef<Archetype.Lookup>();
     }
 
     /// <summary>
@@ -201,8 +219,8 @@ public readonly partial struct Entity : IEquatable<Entity>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T GetOrAdd<T>() where T : struct, IComponent
     {
-        ref T value = ref Find<T>();
-        if (Unsafe.IsNullRef(ref value)) return ref Add<T>();
+        ref T value = ref Find<T>(false);
+        if (Unsafe.IsNullRef(ref value)) return ref Add<T>(); // Add throws for a handle that is not alive
         if (default(T) is ITrackChanges) Touch<T>(_world, Id);
         return ref value;
     }
@@ -226,11 +244,8 @@ public readonly partial struct Entity : IEquatable<Entity>
     internal static void ThrowStale() => throw new InvalidOperationException("Entity is not alive (destroyed, or a default handle)");
 
     [DoesNotReturn]
-    private static void ThrowMissing(Entity entity, Type type)
-    {
-        if (!entity.IsAlive) ThrowStale();
-        throw new InvalidOperationException($"Entity has no {type.Name} component");
-    }
+    private static void ThrowMissing(uint bit) =>
+        throw new InvalidOperationException($"Entity has no {ComponentInfo.Of((int)bit).Type.Name} component");
 
     public bool Equals(Entity other) => Id == other.Id && Version == other.Version && ReferenceEquals(_world, other._world);
 

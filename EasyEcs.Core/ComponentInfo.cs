@@ -64,6 +64,9 @@ internal abstract class ComponentInfo
         }
     }
 
+    /// <summary>The component type (error messages).</summary>
+    public abstract Type Type { get; }
+
     public abstract Array Create(int capacity);
 
     public abstract Array Grow(Array column, int capacity);
@@ -85,6 +88,8 @@ internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsRefere
     // Unmanaged columns are pinned byte arrays (pinned object heap, never moved by the GC) with one cache line of
     // slack, so their rows can start on a 64-byte boundary (Archetype.Aligned): SIMD loads and power-of-two sized
     // components then never straddle two lines. Managed columns are plain T[] (the GC must see their references).
+    public override Type Type => typeof(T);
+
     public override Array Create(int capacity) =>
         Managed ? new T[capacity] : GC.AllocateArray<byte>(capacity * Size + Archetype.CacheLine, pinned: true);
 
