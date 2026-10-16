@@ -207,7 +207,6 @@ public class OperationBenchmark
         _spawned = new Entity[Spawn];
         EasyEcs_Toggle();
         EasyEcs_CreateDestroy();
-        _world.CompactArchetypes();
     }
 
     [GlobalSetup(Targets = [nameof(Friflo_Iterate1), nameof(Friflo_Iterate2), nameof(Friflo_Iterate2Simd), nameof(Friflo_Iterate3),

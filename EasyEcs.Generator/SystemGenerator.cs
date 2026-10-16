@@ -124,12 +124,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 sb.Append($"        public global::EasyEcs.SingletonRef<{method.Parameters[i].Type}> s{i};\n");
         sb.Append('\n');
         sb.Append("        [MethodImpl(MethodImplOptions.AggressiveInlining)]\n");
-        string first = method.TakesEntity ? "global::EasyEcs.Entity entity, " : method.IsBatch ? "" : "int entityId, ";
+        string first = method.TakesEntity ? "global::EasyEcs.Entity entity, " : "";
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
         sb.Append($"        public void Execute({first}{List(components.Length, i => string.Format(each, components[i - 1], i))})\n");
         sb.Append($"            => {(method.IsStatic ? owner.Name : "System")}.{method.Name}({args});\n");
-        if (iface == "IForEach") // the id is not a parameter of the user's method: skip loading it
-            sb.Append($"\n        static bool global::EasyEcs.IForEach<{method.ComponentTypes}>.ReadsId => false;\n");
         // Its ref parameters (Span<T> for a batch): carried over when the method moves the entity it visits, and
         // stamped when the component tracks changes. The queried [With<T>] component of a method without one is read.
         var queried = method.Parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan).ToArray();
@@ -142,7 +140,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
         if (!method.HasFilter) return;
         var chain = method.With.Select(t => $".With<{t}>()").Concat(method.Without.Select(t => $".Without<{t}>()"))
-            .Concat(method.WithAny.Select(t => $".WithAny<{t}>()")).Concat(method.Changed.Select(t => $".Changed<{t}>()"));
+            .Concat(method.WithAny.Select(t => $".WithAny<{t}>()")).Concat(method.Changed.Select(t => $".Changed<{t}>(0)"));
         sb.Append($"    private static readonly global::EasyEcs.QueryFilter __{method.Name}Filter = global::EasyEcs.QueryFilter.Create(){string.Concat(chain)};\n\n");
     }
 

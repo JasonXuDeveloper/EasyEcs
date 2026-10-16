@@ -236,11 +236,12 @@ public sealed partial class World
 
     /// <summary>
     /// Close the tombstone rows of every archetype (moving the last rows into them: O(tombstones x columns)).
-    /// Structural changes already keep tables dense: outside passes a removed row is filled at once, and tombstones left
-    /// by changes during passes are closed when the last pass ends. This is only needed after a pass was interrupted by
-    /// an exception. Never call it while a query is iterating.
+    /// Structural changes keep tables dense on their own: outside passes a removed row is filled at once, tombstones
+    /// left by changes during passes are closed when the last pass ends, and passes end even when a job throws. Only a
+    /// query enumerator abandoned without <c>Dispose</c> leaves a pass open; <see cref="Update()"/> then calls this, as
+    /// no pass runs across an update.
     /// </summary>
-    public void CompactArchetypes()
+    internal void CompactArchetypes()
     {
         using (Structural())
         {

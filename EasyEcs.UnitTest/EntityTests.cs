@@ -91,9 +91,45 @@ public class EntityTests
         Assert.That(reused.Id, Is.EqualTo(old.Id));
         Assert.That(reused.Version, Is.EqualTo(old.Version + 1));
         Assert.That(reused, Is.Not.EqualTo(old));
-        Assert.Throws<InvalidOperationException>(() => old.Get<Health>());
-        Assert.Throws<InvalidOperationException>(() => old.Has<Health>());
         Assert.That(reused.Get<Health>().Value, Is.EqualTo(2), "the stale handle never touches the new occupant");
+    }
+
+    [Test]
+    public void StaleAndDefaultHandlesAnswerQuestionsAndRejectAccess()
+    {
+        var old = _world.CreateEntity().Set(new Health(1), new Position(1, 1));
+        old.Destroy();
+        _world.CreateEntity().Set(new Health(2), new Position(2, 2));     // reuses the id
+        foreach (var handle in new[] { old, default })
+        {
+            // Questions: false, never the new occupant's answer.
+            Assert.That(handle.IsAlive || handle.Has<Health>() || handle.Has<Health, Position>(), Is.False);
+            Assert.That(handle.TryGet(out Health _) || handle.TryGetRef(out ComponentRef<Health> _), Is.False);
+            // Accesses and changes: an InvalidOperationException naming the cause.
+            Assert.Throws<InvalidOperationException>(() => handle.Get<Health>());
+            Assert.Throws<InvalidOperationException>(() => handle.Read<Health>());
+            Assert.Throws<InvalidOperationException>(() => handle.Add<Velocity>());
+            Assert.Throws<InvalidOperationException>(() => handle.Set(new Velocity()));
+            Assert.Throws<InvalidOperationException>(() => handle.Remove<Health>());
+            handle.Destroy();                                              // a no-op
+        }
+
+        Assert.That(_world.EntityCount, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void HasSeveralComponentsAndRemoveChains()
+    {
+        var e = _world.CreateEntity(new Health(1), new Position(1, 1), new Velocity(1, 1));
+        Assert.That(e.Has<Health, Position>() && e.Has<Health, Position, Velocity>(), Is.True);
+        Assert.That(e.Has<Health, Name>(), Is.False);                      // no column for Name
+        var same = e.Remove<Velocity>().Remove<Health>();
+        Assert.That(same, Is.EqualTo(e));
+        Assert.That(e.Has<Position, Velocity>() || e.Has<Health, Position>(), Is.False);   // rows without the bits
+        Assert.That(e.Has<Position>(), Is.True);
+        Assert.That(e.TryGetRef(out ComponentRef<Position> p), Is.True);
+        p.Value.X = 5;
+        Assert.That(e.Read<Position>().X, Is.EqualTo(5));
     }
 
     [Test]

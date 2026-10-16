@@ -195,8 +195,8 @@ internal static class Symbols
     ];
 
     /// <summary>
-    /// The [ForEach] parameter a write reaches through a reference held by a read-only component: an 'in' component
-    /// or a <c>ReadOnlySpan&lt;T&gt;</c> of one. <paramref name="target"/> is the written location (an assignment
+    /// The [ForEach] parameter a write reaches through a reference held by a read-only parameter: an 'in' component or
+    /// singleton, or a <c>ReadOnlySpan&lt;T&gt;</c> of a component. <paramref name="target"/> is the written location (an assignment
     /// target) or the receiver of a mutating call; null when the write goes anywhere else.
     /// </summary>
     public static IParameterSymbol? ReadOnlyRoot(IOperation? target)
@@ -213,7 +213,8 @@ internal static class Symbols
                 case IConversionOperation c: target = c.Operand; break;
                 case IParameterReferenceOperation { Parameter: var p }:
                     return p.ContainingSymbol is IMethodSymbol m && IsForEach(m)
-                        && (p.RefKind is RefKind.In or RefKind.RefReadOnlyParameter && Classify(p) == ParamKind.Component
+                        && (p.RefKind is RefKind.In or RefKind.RefReadOnlyParameter
+                            && Classify(p) is ParamKind.Component or ParamKind.Singleton
                             || p.RefKind == RefKind.None && Classify(p) == ParamKind.ComponentSpan
                             && p.Type.Name == "ReadOnlySpan") ? p : null;
                 default: return null;
@@ -224,6 +225,49 @@ internal static class Symbols
     /// <summary>The receiver of a call that changes a collection (see <see cref="Mutators"/>), else null.</summary>
     public static IOperation? MutatedReceiver(IInvocationOperation call) =>
         call.Instance is { Type.IsReferenceType: true } instance && Mutators.Contains(call.TargetMethod.Name) ? instance : null;
+
+    /// <summary>
+    /// The first field path (<c>Bag.Items</c>) by which a component's data reaches a mutable collection: an array, or a
+    /// type implementing <c>IEnumerable</c> (strings, immutable and frozen collections aside), through fields of the
+    /// component and of the structs and classes it holds (the framework's own types, such as <c>Entity</c>, aside);
+    /// null when none does.
+    /// </summary>
+    public static string? CollectionPath(INamedTypeSymbol component) =>
+        CollectionPath(component, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default));
+
+    private static string? CollectionPath(ITypeSymbol type, HashSet<ITypeSymbol> seen)
+    {
+        if (!seen.Add(type)) return null; // a type that holds itself (a linked node) is checked once
+        foreach (var member in type.GetMembers())
+        {
+            if (member is not IFieldSymbol { IsStatic: false, IsConst: false } field) continue;
+            string name = field.AssociatedSymbol?.Name ?? field.Name; // an auto-property by its own name
+            var fieldType = field.Type;
+            if (IsMutableCollection(fieldType)) return name;
+            if (fieldType is INamedTypeSymbol { TypeKind: TypeKind.Struct or TypeKind.Class } held && !IsFramework(held)
+                && CollectionPath(held, seen) is { } inner)
+                return name + "." + inner;
+        }
+
+        return null;
+    }
+
+    private static bool IsMutableCollection(ITypeSymbol type)
+    {
+        if (type is IArrayTypeSymbol) return true;
+        if (type.SpecialType == SpecialType.System_String) return false;
+        string ns = type.ContainingNamespace?.ToDisplayString() ?? "";
+        if (ns.StartsWith("System.Collections.Immutable") || ns == "System.Collections.Frozen") return false;
+        return type.SpecialType == SpecialType.System_Collections_IEnumerable
+            || type.AllInterfaces.Any(i => i.SpecialType == SpecialType.System_Collections_IEnumerable);
+    }
+
+    /// <summary>Types of the runtime and of EasyEcs: their fields are theirs to manage (an Entity holds its World).</summary>
+    private static bool IsFramework(INamedTypeSymbol type)
+    {
+        string ns = type.ContainingNamespace?.ToDisplayString() ?? "";
+        return ns == "EasyEcs" || ns == "System" || ns.StartsWith("System.") || ns.StartsWith("Microsoft.");
+    }
 
     public static bool IsForEach(IMethodSymbol method) =>
         method.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == ForEachAttribute);

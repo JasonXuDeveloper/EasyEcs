@@ -29,7 +29,7 @@ public interface IIndexed<TKey> : ITrackChanges where TKey : IEquatable<TKey>
 public sealed class ValueIndex<T, TKey> : World.IValueIndex
     where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>
 {
-    private static readonly QueryFilter Written = QueryFilter.Create().Changed<T>();
+    private static readonly QueryFilter Written = QueryFilter.Create().Changed<T>(0);   // the shape only: catch-up passes its own tick
 
     private readonly World _world;
 

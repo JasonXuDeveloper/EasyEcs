@@ -170,7 +170,7 @@ public class MicroBenchmarks
     {
         public float Sum;
 
-        public void Execute(int entityId, ref Position p, ref Velocity v)
+        public void Execute(ref Position p, ref Velocity v)
         {
             p.X += v.X + 1;
             p.Y += v.Y;
@@ -189,7 +189,7 @@ public class MicroBenchmarks
 
     private struct IntegrateJob : IForEach<Position, Velocity>
     {
-        public void Execute(int entityId, ref Position p, ref Velocity v)
+        public void Execute(ref Position p, ref Velocity v)
         {
             p.X += v.X;
             p.Y += v.Y;

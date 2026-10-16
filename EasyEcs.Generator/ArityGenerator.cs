@@ -47,6 +47,17 @@ public sealed class ArityGenerator : IIncrementalGenerator
             // Dense index of the generic signature: keys the cached multi-component transitions of an archetype.
             string signature = $"TypeIndex<ComponentSignature, ({tps})>.Value";
 
+            if (n > 1)
+                entity.Append($$"""
+                        /// <summary>Whether the entity has all of <c>{{tps}}</c>; false for a destroyed or default handle. O({{n}}).</summary>
+                        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                        public bool Has<{{tps}}>()
+                    {{cons}}
+                            => HasAll([{{List(n, i => $"ComponentType<T{i}>.Bit")}}]);
+
+
+                    """);
+
             entity.Append($$"""
                     /// <summary>
                     /// Add or overwrite {{what}} with the given value{{(n == 1 ? "" : "s")}}, with at most one row copy. Returns the entity
@@ -66,6 +77,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     private static void SetCore<{{tps}}>(World world, int id, int version, {{values}})
                 {{cons}}
                     {
+                        if (world == null) ThrowStale(); // a default handle
                         using (world.Structural())
                         {
                             ref var meta = ref world.Live(new Entity(world, id, version));
@@ -77,17 +89,23 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
 
                     /// <summary>
-                    /// Remove {{what}}; missing components are ignored. The entity keeps its row (no move). O({{n}}). Thread-safe.
+                    /// Remove {{what}}; missing components are ignored. The entity keeps its row (no move). Returns the entity
+                    /// for chaining. O({{n}}). Thread-safe.
                     /// </summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                    public void Remove<{{tps}}>()
+                    public Entity Remove<{{tps}}>()
                 {{cons}}
-                        => RemoveCore<{{tps}}>(_world, Id, Version);
+                    {
+                        RemoveCore<{{tps}}>(_world, Id, Version);
+                        return this;
+                    }
+
 
                     [MethodImpl(MethodImplOptions.NoInlining)] // keeps the loops that call it lean; the handle by value (see SetCore)
                     private static void RemoveCore<{{tps}}>(World world, int id, int version)
                 {{cons}}
                     {
+                        if (world == null) ThrowStale(); // a default handle
                         using (world.Structural())
                         {
                             ref var meta = ref world.Live(new Entity(world, id, version));
@@ -192,13 +210,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 public interface IForEach<{{TypeParams(n)}}>
                 {{Constraints(n, "    ")}}
                 {
-                    void Execute(int entityId, {{List(n, i => $"ref T{i} c{i}")}});
-
-                    /// <summary>
-                    /// Whether <see cref="Execute"/> reads its entity id (default: true). When false, ForEach passes 0 and
-                    /// skips loading the id column. Generated jobs set it: they never read the id.
-                    /// </summary>
-                    static virtual bool ReadsId => true;
+                    void Execute({{List(n, i => $"ref T{i} c{i}")}});
 
                 {{Writes}}
                 }
@@ -218,7 +230,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 }
 
                 /// <summary>
-                /// Like <see cref="IForEach{{{TypeParams(n)}}}"/> but receives the <see cref="Entity"/> handle, built from the
+                /// Like <see cref="IForEach{{{TypeParams(n)}}}"/> but also receives the <see cref="Entity"/> handle, built from the
                 /// archetype's entity rows (id and version side by side) without a per-entity lookup. <c>[ForEach]</c> methods taking an
                 /// <see cref="Entity"/> compile to this.
                 /// </summary>
@@ -250,7 +262,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         return GetMatchingArchetypes(TypeIndex<ComponentSignature, {{(n == 1 ? "T1" : $"({tps})")}}>.Value, [{{bits}}], in filter);
                     }
 
-                {{ForEach(n, "ForEach", "IForEach", "id", "TJob.ReadsId ? ids.Id : 0", "the entity id")}}
+                {{ForEach(n, "ForEach", "IForEach", "", "", "the components")}}
                 {{ForEach(n, "ForEachEntity", "IForEachEntity", "new Entity(this, id, idp.Version)", "new Entity(this, ids.Id, ids.Version)", "the entity handle")}}
                     /// <summary>
                     /// Run <paramref name="job"/> over every entity having all of <c>{{tps}}</c> (and matching
@@ -344,22 +356,24 @@ public sealed class ArityGenerator : IIncrementalGenerator
         Lines(n, i => $"{indent}    if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.StampRows<T{i}>({start}, {count}, _changeTick);");
 
     /// <summary>
-    /// Drop the per-row advance of the entity rows when the job reads them only under <c>TJob.ReadsId</c> (the step
-    /// becomes a JIT-time 0): a ref a loop advances but never reads still takes a register, and the refs the job uses
-    /// then spill to the stack. A flavor that hands out entity handles always reads the rows.
+    /// Drop the per-row advance of the entity rows when the job does not receive the entity (the step becomes 0): a
+    /// ref a loop advances but never reads still takes a register, and the refs the job uses then spill to the stack.
     /// </summary>
-    private static string Lean(string rowArg, string code) => rowArg.Contains("Version")
+    private static string Lean(string rowArg, string code) => rowArg.Length > 0
         ? code
-        : System.Text.RegularExpressions.Regex.Replace(code, @"\b(ids|idk|idr) = ref Unsafe\.Add\(ref (ids|idk|idr), 1\)", "$1 = ref Unsafe.Add(ref $1, TJob.ReadsId ? 1 : 0)");
+        : System.Text.RegularExpressions.Regex.Replace(code, @"\b(ids|idk|idr) = ref Unsafe\.Add\(ref (ids|idk|idr), 1\)", "$1 = ref Unsafe.Add(ref $1, 0)");
+
+    /// <summary>The arguments of a job call: the entity (none for <c>IForEach</c>), then the component refs.</summary>
+    private static string Args(string entity, string refs) => entity.Length == 0 ? refs : entity + ", " + refs;
 
     /// <summary>
-    /// One ForEach flavor: <paramref name="entityArg"/> is what the job receives first (the id, or an Entity built from
-    /// the archetype's entity rows).
+    /// One ForEach flavor: <paramref name="entityArg"/> is what the job receives before the components (nothing, or an
+    /// Entity built from the archetype's entity rows).
     /// </summary>
     private static string ForEach(int n, string name, string job, string entityArg, string rowArg, string receives)
     {
         string tps = TypeParams(n);
-        string execute = $"job.Execute({entityArg}, {List(n, i => $"ref r{i}")});";
+        string execute = $"job.Execute({Args(entityArg, List(n, i => $"ref r{i}"))});";
         // The row argument inside a run of rows of a word (idk walks the run).
         string rowArgRun = System.Text.RegularExpressions.Regex.Replace(rowArg, @"\bids\b", "idk");
         string rowArgDense = System.Text.RegularExpressions.Regex.Replace(rowArg, @"\bids\b", "idr");
@@ -420,30 +434,35 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     int[] counts = PassCounts(archetypes.Length);
                     for (int ai = 0; ai < archetypes.Length; ai++) counts[ai] = archetypes[ai].Count;
                     BeginPass();
-                    for (int ai = 0; ai < archetypes.Length; ai++)
+                    try // a job that throws still ends the pass, so its tombstones are closed
                     {
-                        var archetype = archetypes[ai];
-                        var rows = new RowFilter(filters[ai], since);
-                        int count = counts[ai];
-                        int mode = rows.Mode(archetype);
-                        if (archetype.AliveCount == 0) continue;
-                        // The row loops return after a structural change (the next row and the visited entity): the
-                        // refs are re-read and the visited entity's writes carried over here, so the loops keep only
-                        // their row state live across the job. A table whose rows all pass takes the lean loop.
-                        for (int at = 0; at < count && mode != RowFilter.None;)
+                        for (int ai = 0; ai < archetypes.Length; ai++)
                         {
-                            long stop = mode == RowFilter.All
-                                ? {{name}}Live<{{tps}}, TJob>(ref job, archetype, at, count, {{bits}})
-                                : {{name}}LiveTested<{{tps}}, TJob>(ref job, archetype, rows, at, count, {{bits}});
-                            if (stop < 0) break; // the rows ran out without a structural change
-                            at = count - (int)stop;
-                            int moved = (int)(stop >> 32);
-                            if (archetype.Slots[at - 1].Id < 0) CarryOver(archetype, at - 1, moved, TJob.Writes, [{{bits}}]);
-                            mode = rows.Mode(archetype); // the change may have made rows fail (or pass)
+                            var archetype = archetypes[ai];
+                            var rows = new RowFilter(filters[ai], since);
+                            int count = counts[ai];
+                            int mode = rows.Mode(archetype);
+                            if (archetype.AliveCount == 0) continue;
+                            // The row loops return after a structural change (the next row and the visited entity): the
+                            // refs are re-read and the visited entity's writes carried over here, so the loops keep only
+                            // their row state live across the job. A table whose rows all pass takes the lean loop.
+                            for (int at = 0; at < count && mode != RowFilter.None;)
+                            {
+                                long stop = mode == RowFilter.All
+                                    ? {{name}}Live<{{tps}}, TJob>(ref job, archetype, at, count, {{bits}})
+                                    : {{name}}LiveTested<{{tps}}, TJob>(ref job, archetype, rows, at, count, {{bits}});
+                                if (stop < 0) break; // the rows ran out without a structural change
+                                at = count - (int)stop;
+                                int moved = (int)(stop >> 32);
+                                if (archetype.Slots[at - 1].Id < 0) CarryOver(archetype, at - 1, moved, TJob.Writes, [{{bits}}]);
+                                mode = rows.Mode(archetype); // the change may have made rows fail (or pass)
+                            }
                         }
                     }
-
-                    EndPass();
+                    finally
+                    {
+                        EndPass();
+                    }
                 }
 
                 /// <summary>
@@ -557,7 +576,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     // The first column's end bounds the loop: no counter to step besides the refs.
                     ref T1 stop = ref Unsafe.Add(ref r1, end - start);
                     for (; Unsafe.IsAddressLessThan(ref r1, ref stop); ids = ref Unsafe.Add(ref ids, 1), {{advance}})
-                        job.Execute({{rowArg}}, {{List(n, i => $"ref r{i}")}});
+                        job.Execute({{Args(rowArg, List(n, i => $"ref r{i}"))}});
                     jobRef = job;
                 }
 
@@ -610,7 +629,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 ref EntitySlot idk = ref Unsafe.Add(ref ids, k);
             {{Lines(n, i => $"                    ref T{i} q{i} = ref Unsafe.Add(ref r{i}, k);")}}
                                 for (int run = end - k; run > 0; run--, idk = ref Unsafe.Add(ref idk, 1), {{List(n, i => $"q{i} = ref Unsafe.Add(ref q{i}, 1)")}})
-                                    job.Execute({{rowArgRun}}, {{List(n, i => $"ref q{i}")}});
+                                    job.Execute({{Args(rowArgRun, List(n, i => $"ref q{i}"))}});
                             }
 
                             ids = ref Unsafe.Add(ref ids, left);
@@ -621,7 +640,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{StampRows(n, "            ", "w << 6", "left")}}
                         ref EntitySlot idr = ref ids;
                         for (int row = left; row > 0; row--, idr = ref Unsafe.Add(ref idr, 1), {{advance}})
-                            job.Execute({{rowArgDense}}, {{List(n, i => $"ref r{i}")}});
+                            job.Execute({{Args(rowArgDense, List(n, i => $"ref r{i}"))}});
                         ids = ref Unsafe.Add(ref ids, left);
                     }
 
@@ -820,11 +839,6 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             return new(_world, _id, ref Unsafe.As<EntitySlot, int>(ref Unsafe.Add(ref _rows, slot)), {{List(n, i => $"ref Unsafe.Add(ref _r{i}, slot)")}});
                         }
                     }
-
-                    /// <summary>Number of alive matching entities. O(matching archetypes), plus O(rows / 64) for tables with rows to test.</summary>
-                    public readonly int Count => _match.CountAlive(_since);
-
-                    public readonly bool IsEmpty => !_match.AnyAlive(_since);
 
                     public readonly QueryEnumerator<{{tps}}> GetEnumerator() => this;
 

@@ -21,6 +21,25 @@ public class SystemTests
     public void SetUp() => Log.Clear();
 
     [Test]
+    public void SystemsListsEveryGroupWithoutAllocating()
+    {
+        using var world = new World();
+        world.AddSystem(new InInputGroup());
+        world.AddSystem(new Logged("tick"));
+        var names = new List<string>();
+        foreach (var system in world.Systems) names.Add(system.GetType().Name);
+        Assert.That(names, Is.EqualTo(new[] { nameof(Logged), nameof(InInputGroup) }));   // default group first
+        Assert.That(world.Systems.Count, Is.EqualTo(2));
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        int count = 0;
+        for (int i = 0; i < 100; i++)
+            foreach (var _ in world.Systems) count++;
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(count, Is.EqualTo(200));
+    }
+
+    [Test]
     public void MeasureSystemsRecordsRunsOnlyWhenEnabled()
     {
         using var measured = new World(new WorldOptions { MeasureSystems = true });

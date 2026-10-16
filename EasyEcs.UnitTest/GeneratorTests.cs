@@ -37,7 +37,8 @@ public class GeneratorTests
         public struct T : IComponent, ITrackChanges { public int V; }
         public struct Clock : ISingletonComponent { public int Ticks; }
         public class Box { public int V; }
-        public struct Bag : IComponent { public System.Collections.Generic.List<int> Items; public Box Box; public int[] Slots; }
+        public struct Holder : IComponent { public Box Box; }                                     // a class, no collection
+        public struct Grid : ISingletonComponent { public System.Collections.Generic.List<int> Cells; public int[] Slots; }
         """;
 
     [Test]
@@ -45,6 +46,12 @@ public class GeneratorTests
     {
         var errors = await Diagnose(Components, """
             namespace Game;
+            public struct Allowed : IComponent                                   // values, strings, immutable collections, handles
+            {
+                public string Name;
+                public System.Collections.Immutable.ImmutableArray<int> Ids;
+                public Entity Owner;
+            }
             public partial class Outer
             {
                 public partial class S : EcsSystem
@@ -56,8 +63,8 @@ public class GeneratorTests
                     [ForEach] static void C(in P p, ref Clock clock, in Clock read) => clock.Ticks += read.Ticks; // singletons
                     [ForEach] static void D(System.Span<P> p, System.ReadOnlySpan<Q> q, ref Clock clock) => clock.Ticks += p.Length; // batch
                     [ForEach] static void E(Entity e, in P p, ref Clock clock) { if (e.Has<Q>()) clock.Ticks += e.Id; } // read-only entity
-                    [ForEach] static void F(ref Bag b, in Q q) { b.Items.Add(q.V); b.Box.V++; } // a held list written by ref
-                    [ForEach] static void G(in Bag b, ref P p) => p.V = b.Items.Contains(1) ? b.Items[0] : b.Slots.Length; // only read
+                    [ForEach] static void F(ref Holder h, in Q q, ref Grid g) { g.Cells.Add(q.V); h.Box.V++; } // written by ref
+                    [ForEach] static void G(in Holder h, ref P p, in Grid g) => p.V = g.Cells.Contains(1) ? g.Cells[0] : h.Box.V; // only read
                 }
             }
             """);
@@ -67,7 +74,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref P p, in Q q, in Clock c) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "access.ReadSingleton<global::Clock>();")]
     [TestCase("[ForEach] static void A(Entity e, in P p) { }", "access.RunsAlone();")]
     [TestCase("[ForEach] static void A(System.Span<P> p, System.ReadOnlySpan<Q> q) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "IForEachBatch<global::P, global::Q>")]
-    [TestCase("[ForEach, Changed<T>] static void A(ref P p) { }", "access.Read<global::T>();", ".Changed<global::T>()", "ChangedSince(LastRunTick + 1)", "Writes => 1;")]
+    [TestCase("[ForEach, Changed<T>] static void A(ref P p) { }", "access.Read<global::T>();", ".Changed<global::T>(0)", "ChangedSince(LastRunTick + 1)", "Writes => 1;")]
     [TestCase("[ForEach] void A(in P p) { }", "access.RunsAlone();")]
     [TestCase("[ForEach] static void A(in P p) { } protected override void OnUpdate() { }", "access.RunsAlone();")]
     public void AccessIsDeclaredFromParameters(string members, params string[] expected)
@@ -112,12 +119,16 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { int _kills; void K() => _kills++; }", "EECS007")]
     [TestCase("public class S : EcsSystem { public int Kills { get; set; } }", "EECS007")]
     [TestCase("public class A : EcsSystem { } public class S : EcsSystem { private readonly A _a = new(); }", "EECS008")]
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Bag b) => b.Items.Add(1); }", "EECS011")]
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Bag b) => b.Items.Clear(); }", "EECS011")]
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Bag b) => b.Items[0] = 1; }", "EECS011")]
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Bag b) => b.Box.V++; }", "EECS011")]
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Bag b) => b.Slots[0] += 1; }", "EECS011")]
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(System.ReadOnlySpan<Bag> b) => b[0].Items.Add(1); }", "EECS011")]
+    [TestCase("public struct Bag : IComponent { public System.Collections.Generic.List<int> Items; }", "EECS011")]
+    [TestCase("public struct Bag : IComponent { public int[] Slots { get; set; } }", "EECS011")]
+    [TestCase("public struct Inner { public System.Collections.Generic.Dictionary<int, int> Map; } public struct Bag : IComponent { public Inner Inner; }", "EECS011")]
+    [TestCase("public class Node { public Node Next; public System.Collections.Generic.Queue<int> Q; } public struct Bag : IComponent { public Node Head; }", "EECS011")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Cells.Add(1); }", "EECS012")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Cells.Clear(); }", "EECS012")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Slots[0] += 1; }", "EECS012")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Holder h) => h.Box.V++; }", "EECS012")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Holder h) => h.Box.V = 1; }", "EECS012")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(System.ReadOnlySpan<Holder> h) => h[0].Box.V++; }", "EECS012")]
     public async Task MisuseIsReported(string source, string id)
     {
         var errors = await Diagnose(Components, source);

@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+using System;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
@@ -95,7 +95,7 @@ public partial class ChangedTests
     /// <summary>A struct job that writes armor through a ref.</summary>
     private struct Polish : IForEach<Armor>
     {
-        public void Execute(int entityId, ref Armor armor) { }
+        public void Execute(ref Armor armor) { }
     }
 
     /// <summary>A batch job that writes armor through a span.</summary>
@@ -155,7 +155,7 @@ public partial class ChangedTests
         world.Update();
 
         ulong mark = world.ChangeTick;
-        var changed = QueryFilter.Create().Changed<Armor>().ChangedSince(mark);
+        var changed = QueryFilter.Create().Changed<Armor>(mark);
         Assert.That(world.Count<Armor>(changed), Is.Zero);
 
         entities[3].Get<Armor>() = new Armor(2);
@@ -168,8 +168,10 @@ public partial class ChangedTests
         foreach (var item in world.Query<Armor>(changed)) visited += item.Component1.Value;
         Assert.That(visited, Is.EqualTo(4));
 
-        // Without a tick, Changed<T> selects every row having T.
-        Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>()), Is.EqualTo(100));
+        // Tick 0 selects every row having T; one filter has one tick; ChangedSince moves it.
+        Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(0)), Is.EqualTo(100));
+        Assert.Throws<ArgumentException>(() => QueryFilter.Create().Changed<Armor>(mark).Changed<Callsign>(mark + 1));
+        Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(0).ChangedSince(mark)), Is.EqualTo(world.Count<Armor>(changed)));
         Assert.That(world.DestroyEntities<Armor>(changed), Is.EqualTo(2));
     }
 
@@ -182,7 +184,7 @@ public partial class ChangedTests
         ulong mark = world.ChangeTick;
         e.Get<Armor>() = new Armor(2);
         e.Set(new Frozen()); // moves to another table: the tick goes with it
-        var changed = QueryFilter.Create().Changed<Armor>().ChangedSince(mark);
+        var changed = QueryFilter.Create().Changed<Armor>(mark);
         Assert.That(world.Count<Armor>(changed), Is.EqualTo(1));
 
         e.Remove<Armor>();
@@ -201,7 +203,7 @@ public partial class ChangedTests
         ulong mark = world.ChangeTick;
         entities[199].Get<Armor>() = new Armor(2); // the last row, in the last 64-row word
         entities[0].Destroy();                     // the last row moves into row 0, whose word was not written
-        var changed = QueryFilter.Create().Changed<Armor>().ChangedSince(mark);
+        var changed = QueryFilter.Create().Changed<Armor>(mark);
         Assert.That(world.Count<Armor>(changed), Is.EqualTo(1));
         foreach (var item in world.Query<Armor>(changed)) Assert.That(item.Entity, Is.EqualTo(entities[199]));
     }
@@ -255,20 +257,21 @@ public partial class ChangedTests
         world.CreateEntities(entities, new Armor(1), new Health(0));
         world.Update();
         ulong mark = world.ChangeTick;
-        var changed = QueryFilter.Create().Changed<Armor>().ChangedSince(mark);
+        var changed = QueryFilter.Create().Changed<Armor>(mark);
 
         // Reads: a copy, a read-only ref, a presence check, a missing component, a query over another component.
         entities[0].TryGet<Armor>(out _);
         Assert.That(entities[0].Read<Armor>().Value, Is.EqualTo(1));
         _ = entities[0].Has<Armor>();
-        Assert.That(Unsafe.IsNullRef(ref entities[0].TryGetRef<Position>(out bool found)) && !found, Is.True);
+        Assert.That(entities[0].TryGetRef(out ComponentRef<Position> _), Is.False);
         foreach (var _ in world.Query<Health>()) { }
         Assert.That(world.Count<Armor>(changed), Is.Zero);
 
         entities[1].GetOrAdd<Armor>();
         Assert.That(world.Count<Armor>(changed), Is.EqualTo(1));
-        entities[2].TryGetRef<Armor>(out found).Value = 7;
-        Assert.That(found && entities[2].Read<Armor>().Value == 7, Is.True);
+        Assert.That(entities[2].TryGetRef(out ComponentRef<Armor> armor), Is.True);
+        armor.Value.Value = 7;
+        Assert.That(entities[2].Read<Armor>().Value, Is.EqualTo(7));
         Assert.That(world.Count<Armor>(changed), Is.EqualTo(2));
         var spawned = world.CreateEntity(new Armor(2));
         var batch = new Entity[3];
@@ -281,7 +284,7 @@ public partial class ChangedTests
 
         world.Update();
         mark = world.ChangeTick;
-        changed = QueryFilter.Create().Changed<Armor>().ChangedSince(mark);
+        changed = QueryFilter.Create().Changed<Armor>(mark);
         var polishBatch = new PolishBatch();
         world.ForEachBatch<Armor, PolishBatch>(ref polishBatch);
         Assert.That(world.Count<Armor>(changed), Is.EqualTo(world.Count<Armor>()));
@@ -312,7 +315,7 @@ public partial class ChangedTests
         world.CreateEntities(entities, new Armor(1));
         world.Update();
         ulong mark = world.ChangeTick;
-        var changed = QueryFilter.Create().Changed<Armor>().ChangedSince(mark);
+        var changed = QueryFilter.Create().Changed<Armor>(mark);
         Assert.That(world.Count<Armor>(changed), Is.Zero);
 
         entities[15_000].Get<Armor>().Value++; // one row in block 3
@@ -378,10 +381,10 @@ public partial class ChangedTests
                     if (pair.Value >= mark) expected.Add(pair.Key);
                 var found = new System.Collections.Generic.HashSet<Entity>();
                 // Through Seen: a query handing out ref Armor would stamp the rows it visits.
-                foreach (var item in world.Query<Seen>(QueryFilter.Create().Changed<Armor>().ChangedSince(mark)))
+                foreach (var item in world.Query<Seen>(QueryFilter.Create().Changed<Armor>(mark)))
                     found.Add(item.Entity);
                 Assert.That(found.SetEquals(expected), Is.True, $"round {round}, mark {mark}");
-                Assert.That(world.Count<Seen>(QueryFilter.Create().Changed<Armor>().ChangedSince(mark)), Is.EqualTo(expected.Count));
+                Assert.That(world.Count<Seen>(QueryFilter.Create().Changed<Armor>(mark)), Is.EqualTo(expected.Count));
             }
         }
     }
@@ -396,8 +399,8 @@ public partial class ChangedTests
         world.AddSystem<Wear>();
         ulong batch = world.ChangeTick + 1;
         world.Update();
-        var sinceBatch = QueryFilter.Create().Changed<Armor>().ChangedSince(batch);
-        var afterBatch = QueryFilter.Create().Changed<Armor>().ChangedSince(batch + 1);
+        var sinceBatch = QueryFilter.Create().Changed<Armor>(batch);
+        var afterBatch = QueryFilter.Create().Changed<Armor>(batch + 1);
         Assert.That(world.Count<Seen>(sinceBatch), Is.EqualTo(1_000));
         Assert.That(world.Count<Seen>(afterBatch), Is.Zero);
 
@@ -420,11 +423,11 @@ public partial class ChangedTests
             int visited = 0;
             foreach (var item in world.Query<Armor>())
                 if (++visited % 2 == 0) item.Component1.Value++;
-            var since = QueryFilter.Create().Changed<Armor>().ChangedSince(mark);
+            var since = QueryFilter.Create().Changed<Armor>(mark);
             Assert.That(world.Count<Seen>(since), Is.EqualTo(300));
             world.Update();
             entities[200].Get<Armor>().Value++;
-            Assert.That(world.Count<Seen>(QueryFilter.Create().Changed<Armor>().ChangedSince(world.ChangeTick)), Is.EqualTo(1));
+            Assert.That(world.Count<Seen>(QueryFilter.Create().Changed<Armor>(world.ChangeTick)), Is.EqualTo(1));
             world.Update();
         }
     }
@@ -449,7 +452,7 @@ public partial class ChangedTests
         }
 
         // Moving to a row stamps it: rows 11-100 were reached after the tick.
-        Assert.That(world.Count<Seen>(QueryFilter.Create().Changed<Armor>().ChangedSince(tick)), Is.EqualTo(90));
+        Assert.That(world.Count<Seen>(QueryFilter.Create().Changed<Armor>(tick)), Is.EqualTo(90));
     }
 
     [Test]
@@ -474,7 +477,7 @@ public partial class ChangedTests
         var frozen = world.CreateEntity(new Armor(1), new Frozen());
         var plain = world.CreateEntity(new Armor(1));
         world.Update();
-        var filter = QueryFilter.Create().Changed<Armor>().ChangedSince(world.ChangeTick).WithAny<Stun>().WithAny<Frozen>();
+        var filter = QueryFilter.Create().Changed<Armor>(world.ChangeTick).WithAny<Stun>().WithAny<Frozen>();
         stunned.Get<Armor>().Value++;
         plain.Get<Armor>().Value++;
         Assert.That(world.Count<Armor>(filter), Is.EqualTo(1));

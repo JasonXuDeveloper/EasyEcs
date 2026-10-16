@@ -7,7 +7,10 @@ namespace EasyEcs;
 
 /// <summary>
 /// Handle to an entity: id + version + world (16 bytes). Every access validates the version, so a handle to a
-/// destroyed entity throws instead of touching the entity that reused its id. Safe to store and to compare.
+/// destroyed entity never touches the entity that reused its id: questions (<see cref="IsAlive"/>,
+/// <see cref="Has{T}"/>, <see cref="TryGet{T}"/>, <see cref="TryGetRef{T}"/>) answer false, accesses and changes
+/// (<see cref="Get{T}"/>, <see cref="Read{T}"/>, <c>Add</c>, <c>Set</c>, <c>Remove</c>) throw, and
+/// <see cref="Destroy"/> does nothing. Safe to store and to compare.
 /// </summary>
 /// <remarks>
 /// Refs returned by <see cref="Get{T}"/>/<see cref="Add{T}"/> point into the row of the entity's archetype table: use
@@ -38,49 +41,69 @@ public readonly partial struct Entity : IEquatable<Entity>
     public bool IsAlive => _world != null && (uint)Id < (uint)_world.Meta.Length && _world.Meta[Id].Version == Version &&
                            _world.Meta[Id].Archetype != null;
 
-    /// <summary>Whether the entity has component <typeparamref name="T"/>. O(1).</summary>
+    /// <summary>
+    /// Whether the entity has component <typeparamref name="T"/>; false for a destroyed or default handle. O(1).
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Has<T>() where T : struct, IComponent => !Unsafe.IsNullRef(ref Locate(ComponentType<T>.Bit, out _));
 
+    // Has<T1..Tn>() is generated (Entity.Structural.g.cs) on top of HasAll.
+
+    /// <summary>Whether the entity has every component of <paramref name="bits"/>: one meta lookup for all of them.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool HasAll(ReadOnlySpan<ushort> bits)
+    {
+        var archetype = LocateArchetype(out int slot);
+        if (archetype == null) return false;
+        for (int i = 0; i < bits.Length; i++)
+            if (Unsafe.IsNullRef(ref Column(archetype, bits[i], slot))) return false;
+        return true;
+    }
+
     /// <summary>
-    /// Ref to component <typeparamref name="T"/>; throws if the entity does not have it. Counts as a write of a tracked
-    /// component (<see cref="ITrackChanges"/>). O(1).
+    /// Ref to component <typeparamref name="T"/>; throws if the entity does not have it or is not alive. Counts as a
+    /// write of a tracked component (<see cref="ITrackChanges"/>). O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T Get<T>() where T : struct, IComponent
     {
         ref T value = ref Find<T>();
-        if (Unsafe.IsNullRef(ref value)) ThrowMissing(typeof(T));
+        if (Unsafe.IsNullRef(ref value)) ThrowMissing(this, typeof(T));
         if (default(T) is ITrackChanges) Touch<T>(_world, Id);
         return ref value;
     }
 
     /// <summary>
-    /// Read-only ref to component <typeparamref name="T"/>; throws if the entity does not have it. Not a write: a tracked
-    /// component (<see cref="ITrackChanges"/>) is not stamped. O(1).
+    /// Read-only ref to component <typeparamref name="T"/>; throws if the entity does not have it or is not alive. Not
+    /// a write: a tracked component (<see cref="ITrackChanges"/>) is not stamped. O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref readonly T Read<T>() where T : struct, IComponent
     {
         ref T value = ref Find<T>();
-        if (Unsafe.IsNullRef(ref value)) ThrowMissing(typeof(T));
+        if (Unsafe.IsNullRef(ref value)) ThrowMissing(this, typeof(T));
         return ref value;
     }
 
     /// <summary>
-    /// Ref to component <typeparamref name="T"/> if the entity has it (<paramref name="found"/>), else a null ref
-    /// (check <paramref name="found"/> before using it). Counts as a write of a tracked component when found. O(1).
+    /// Ref to component <typeparamref name="T"/> in <paramref name="component"/> if the entity has it; false (and an
+    /// empty <paramref name="component"/>) when it does not or is not alive. Counts as a write of a tracked component
+    /// when found. O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ref T TryGetRef<T>(out bool found) where T : struct, IComponent
+    public bool TryGetRef<T>(out ComponentRef<T> component) where T : struct, IComponent
     {
         ref T value = ref Find<T>();
-        found = !Unsafe.IsNullRef(ref value);
-        if (default(T) is ITrackChanges && found) Touch<T>(_world, Id);
-        return ref value;
+        component = new ComponentRef<T>(ref value);
+        if (Unsafe.IsNullRef(ref value)) return false;
+        if (default(T) is ITrackChanges) Touch<T>(_world, Id);
+        return true;
     }
 
-    /// <summary>Copy of component <typeparamref name="T"/> if the entity has it. Not a write. O(1).</summary>
+    /// <summary>
+    /// Copy of component <typeparamref name="T"/> if the entity has it; false when it does not or is not alive. Not a
+    /// write. O(1).
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGet<T>(out T value) where T : struct, IComponent
     {
@@ -92,7 +115,7 @@ public readonly partial struct Entity : IEquatable<Entity>
 
     /// <summary>
     /// Ref to <typeparamref name="T"/> in the entity's row, or a null ref when the entity does not have it (no column,
-    /// or the row lost the component). Throws for a stale handle. One meta line plus one line of the archetype's lookup.
+    /// or the row lost the component) or is not alive. One meta line plus one line of the archetype's lookup.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private unsafe ref T Find<T>() where T : struct, IComponent
@@ -107,16 +130,38 @@ public readonly partial struct Entity : IEquatable<Entity>
 
     /// <summary>
     /// The column entry of <paramref name="bit"/> and the entity's <paramref name="slot"/>, or a null ref when the row
-    /// lacks the component (shared by <see cref="Has{T}"/>, which needs no row address, and <see cref="Find{T}"/>).
+    /// lacks the component or the entity is not alive (shared by <see cref="Has{T}"/>, which needs no row address, and
+    /// <see cref="Find{T}"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ref Archetype.Lookup Locate(uint bit, out int slot)
     {
-        ref var meta = ref _world.MetaRef(Id);
-        var archetype = meta.Archetype;
-        if (meta.Version != Version || archetype == null) ThrowStale();
-        var map = archetype.ByBit;
+        var archetype = LocateArchetype(out slot);
+        if (archetype == null) return ref Unsafe.NullRef<Archetype.Lookup>();
+        return ref Column(archetype, bit, slot);
+    }
+
+    /// <summary>The entity's table and row, or null when the handle is destroyed or default.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private Archetype LocateArchetype(out int slot)
+    {
+        var world = _world;
+        if (world == null)
+        {
+            slot = 0;
+            return null;
+        }
+
+        ref var meta = ref world.MetaRef(Id); // ids of this world's handles are always < Meta.Length
         slot = meta.Slot;
+        return meta.Version == Version ? meta.Archetype : null; // a destroyed entity's record has no archetype
+    }
+
+    /// <summary>The column entry of <paramref name="bit"/> in <paramref name="archetype"/> when row <paramref name="slot"/> has it, else a null ref.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ref Archetype.Lookup Column(Archetype archetype, uint bit, int slot)
+    {
+        var map = archetype.ByBit;
         if (bit >= (uint)map.Length) return ref Unsafe.NullRef<Archetype.Lookup>();
         // bit < map.Length: no bounds check. Column and presence bits share the entry's cache line.
         ref var lookup = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(map), bit);
@@ -140,6 +185,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
     private static ref T AddCore<T>(World world, int id, int version) where T : struct, IComponent
     {
+        if (world == null) ThrowStale(); // a default handle
         using (world.Structural())
         {
             ref var meta = ref world.Live(new Entity(world, id, version));
@@ -178,10 +224,14 @@ public readonly partial struct Entity : IEquatable<Entity>
     // Throw-only helpers without NoInlining: the JIT then sees they never return, keeps the throw out of the
     // caller's register allocation and never inlines them anyway.
     [DoesNotReturn]
-    internal static void ThrowStale() => throw new InvalidOperationException("Entity has been destroyed");
+    internal static void ThrowStale() => throw new InvalidOperationException("Entity is not alive (destroyed, or a default handle)");
 
     [DoesNotReturn]
-    private static void ThrowMissing(Type type) => throw new InvalidOperationException($"Entity has no {type.Name} component");
+    private static void ThrowMissing(Entity entity, Type type)
+    {
+        if (!entity.IsAlive) ThrowStale();
+        throw new InvalidOperationException($"Entity has no {type.Name} component");
+    }
 
     public bool Equals(Entity other) => Id == other.Id && Version == other.Version && ReferenceEquals(_world, other._world);
 
@@ -194,4 +244,22 @@ public readonly partial struct Entity : IEquatable<Entity>
     public static bool operator ==(Entity left, Entity right) => left.Equals(right);
 
     public static bool operator !=(Entity left, Entity right) => !left.Equals(right);
+}
+
+/// <summary>
+/// A ref to one entity's component, handed out by <see cref="Entity.TryGetRef{T}"/>. A ref struct: valid until the next
+/// structural change, never across an <c>await</c>.
+/// </summary>
+public readonly ref struct ComponentRef<T> where T : struct, IComponent
+{
+    private readonly ref T _value;
+
+    internal ComponentRef(ref T value) => _value = ref value;
+
+    /// <summary>The component, by reference.</summary>
+    public ref T Value
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => ref _value;
+    }
 }

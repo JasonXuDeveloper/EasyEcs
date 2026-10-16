@@ -47,7 +47,7 @@ public partial class ChangeTrackingBenchmark
         _world.Update<Replication>();
     }
 
-    private static readonly QueryFilter HealthChanged = QueryFilter.Create().Changed<Health>();
+    private static readonly QueryFilter HealthChanged = QueryFilter.Create().Changed<Health>(0);   // re-ticked with ChangedSince
 
     /// <summary>
     /// The same job as an ad-hoc query: <c>Changed</c> filters by the tick taken after the previous update (writes between

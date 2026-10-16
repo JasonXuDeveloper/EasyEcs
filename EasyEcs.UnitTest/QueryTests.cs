@@ -102,15 +102,15 @@ public partial class QueryTests
 
         moved.Sort();
         Assert.That(moved, Is.EqualTo(new float[] { 0, 1, 3, 4, 5, 6, 7, 8, 9, 9 }));
-        Assert.That(_world.Query<Position, Velocity>(Active).Count, Is.EqualTo(7));
-        Assert.That(_world.Query<Health>().IsEmpty, Is.True);
+        Assert.That(_world.Count<Position, Velocity>(Active), Is.EqualTo(7));
+        Assert.That(_world.Any<Health>(), Is.False);
     }
 
     private struct Integrate : IForEach<Position, Velocity>
     {
         public int Visited;
 
-        public void Execute(int entityId, ref Position p, ref Velocity v)
+        public void Execute(ref Position p, ref Velocity v)
         {
             p.Y += v.Y;
             Visited++;
@@ -126,14 +126,13 @@ public partial class QueryTests
         Assert.That(_world.Count<Position>(), Is.EqualTo(15));
     }
 
-    private struct KillAndSpawn(World world) : IForEach<Velocity>
+    private struct KillAndSpawn(World world) : IForEachEntity<Velocity>
     {
         public int Visited;
 
-        public void Execute(int entityId, ref Velocity v)
+        public void Execute(Entity e, ref Velocity v)
         {
             Visited++;
-            var e = world.GetEntity(entityId);
             e.Set(new Dead());                                   // moves the entity out of the matching archetype
             world.CreateEntity(new Position(), new Velocity());  // appended after the pass started: not visited
             if (Visited > 1000) Assert.Fail("iteration did not terminate");
@@ -144,7 +143,7 @@ public partial class QueryTests
     public void StructuralChangesDuringIterationAreSafe()
     {
         var job = new KillAndSpawn(_world);
-        _world.ForEach<Velocity, KillAndSpawn>(ref job, Active);
+        _world.ForEachEntity<Velocity, KillAndSpawn>(ref job, Active);
 
         Assert.That(job.Visited, Is.EqualTo(7)); // entities created during the pass are not visited
         Assert.That(_world.Count<Velocity>(QueryFilter.Create().With<Dead>()), Is.EqualTo(job.Visited + 1));
@@ -217,7 +216,7 @@ public partial class QueryTests
     {
         public int Rows;
         public static int Writes => 0;
-        public void Execute(int entityId, ref Health health) => Rows += health.Value;
+        public void Execute(ref Health health) => Rows += health.Value;
     }
 
     private partial class FreezeHalf : EcsSystem
@@ -242,22 +241,14 @@ public partial class QueryTests
         }
     }
 
-    private static void InterruptAPass(World world)
+    [Test]
+    public void AJobThatThrowsStillEndsItsPass()
     {
+        using var world = new World();
         for (int i = 0; i < 20; i++) world.CreateEntity(new Health(i));
         var job = new DestroyThenFail();
         Assert.Throws<InvalidOperationException>(() => world.ForEachEntity<Health, DestroyThenFail>(ref job));
-        Assert.That(world.GetFragmentationStats().FragmentationRatio, Is.Positive);   // the pass never ended
-    }
-
-    [Test]
-    public void CompactArchetypesRecoversFromAnInterruptedPass()
-    {
-        using var world = new World();
-        InterruptAPass(world);
-        world.CompactArchetypes();
-        Assert.That(world.GetFragmentationStats().FragmentationRatio, Is.Zero);
-        Assert.That(world.Count<Health>(), Is.EqualTo(15));
+        Assert.That(world.GetFragmentationStats().FragmentationRatio, Is.Zero);   // the tombstones were closed
         var values = new List<int>();
         foreach (var item in world.Query<Health>()) values.Add(item.Component1.Value);
         values.Sort();
@@ -267,47 +258,17 @@ public partial class QueryTests
     }
 
     [Test]
-    public void UpdateCompactsAfterAnInterruptedPass()
+    public void UpdateClosesThePassOfAnAbandonedQuery()
     {
         using var world = new World();
-        InterruptAPass(world);
+        for (int i = 0; i < 20; i++) world.CreateEntity(new Health(i));
+        var walk = world.Query<Health>().GetEnumerator();                        // never disposed
+        Assert.That(walk.MoveNext(), Is.True);
+        walk.Current.Entity.Destroy();                                            // a tombstone: the pass is open
+        Assert.That(world.GetFragmentationStats().FragmentationRatio, Is.Positive);
         world.Update();
         Assert.That(world.GetFragmentationStats().FragmentationRatio, Is.Zero);
-        Assert.That(world.Count<Health>(), Is.EqualTo(15));
-    }
-
-    private struct NoIds : IForEach<Health>, INoStructuralChanges
-    {
-        public static bool ReadsId => false;
-        public int IdSum, Visited;
-
-        public void Execute(int entityId, ref Health hp)
-        {
-            IdSum += entityId;
-            Visited++;
-        }
-    }
-
-    private struct WithIds : IForEach<Health>                     // a structural pass: ids are always passed
-    {
-        public static bool ReadsId => false;
-        public int IdSum;
-
-        public void Execute(int entityId, ref Health hp) => IdSum += entityId;
-    }
-
-    [Test]
-    public void ReadsIdFalseSkipsTheIdsOfPassesThatMakeNoStructuralChange()
-    {
-        using var world = new World();
-        int expected = 0;
-        for (int i = 0; i < 100; i++) expected += world.CreateEntity(new Health(i)).Id;
-        var lean = new NoIds();
-        world.ForEach<Health, NoIds>(ref lean);
-        Assert.That((lean.Visited, lean.IdSum), Is.EqualTo((100, 0)));
-        var full = new WithIds();
-        world.ForEach<Health, WithIds>(ref full);
-        Assert.That(full.IdSum, Is.EqualTo(expected));
+        Assert.That(world.Count<Health>(), Is.EqualTo(19));
     }
 
     [Test]

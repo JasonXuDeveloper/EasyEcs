@@ -198,7 +198,7 @@ public partial class ParallelTests
 
     private struct StampId : IForEach<Counter>, INoStructuralChanges
     {
-        public void Execute(int entityId, ref Counter counter) => counter.N = entityId;
+        public void Execute(ref Counter counter) => counter.N++;   // from -1 to 0: visited once
     }
 
     private struct StampHandle : IForEachEntity<Seen>, INoStructuralChanges
@@ -224,7 +224,7 @@ public partial class ParallelTests
         {
             var e = entities[i];
             bool dead = i % 10 == 0;
-            Assert.That(e.Get<Counter>().N, Is.EqualTo(dead ? -1 : e.Id));
+            Assert.That(e.Get<Counter>().N, Is.EqualTo(dead ? -1 : 0));
             Assert.That(e.Get<Seen>().N, Is.EqualTo(dead ? -1 : e.Id + e.Version));
         }
     }

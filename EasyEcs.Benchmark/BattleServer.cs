@@ -354,7 +354,7 @@ public sealed class BattleServer : IDisposable
             weakest.Entity, World.Count<Attack>(ReadyToAttack));
     }
 
-    /// <summary>A new round: projectiles gone, everyone healed, the tables tidied.</summary>
+    /// <summary>A new round: projectiles gone, everyone healed, the NPCs scattered.</summary>
     public int NewRound()
     {
         int cleared = World.DestroyEntities<Lifetime>();                      // one pass, however many
@@ -362,7 +362,6 @@ public sealed class BattleServer : IDisposable
         World.ForEachParallel<Health, HealFully>(ref heal);                   // a struct job on all cores
         var scatter = new Scatter { Round = Battle.Tick };
         World.ForEachEntityParallel<Position, Scatter>(ref scatter, Npcs);    // the same, receiving each handle
-        if (World.GetFragmentationStats().FragmentationRatio > 0.1f) World.CompactArchetypes();
         return cleared;
     }
 
@@ -375,7 +374,7 @@ public sealed class BattleServer : IDisposable
 
     public void Load() => World.Restore(_save);
 
-    public int Unsaved => World.Count<Health>(Players.Changed<Health>().ChangedSince(_savedAt));
+    public int Unsaved => World.Count<Health>(Players.Changed<Health>(_savedAt));
 
     /// <summary>The system that took the most time per run so far (<see cref="WorldOptions.MeasureSystems"/>).</summary>
     public EcsSystem Slowest()
@@ -404,9 +403,8 @@ public sealed class BattleServer : IDisposable
     private struct SumMana : IForEach<Mana>, INoStructuralChanges
     {
         public long Total;
-        public static bool ReadsId => false;                                  // the id column is not even loaded
         public static int Writes => 0;
-        public void Execute(int entityId, ref Mana mana) => Total += mana.Value;
+        public void Execute(ref Mana mana) => Total += mana.Value;
     }
 
     private struct FindWeakest : IForEachEntity<Health>, INoStructuralChanges
@@ -419,8 +417,7 @@ public sealed class BattleServer : IDisposable
 
     private struct HealFully : IForEach<Health>, INoStructuralChanges        // one copy per thread: no shared state
     {
-        public static bool ReadsId => false;
-        public void Execute(int entityId, ref Health hp) => hp.Value = hp.Max;
+        public void Execute(ref Health hp) => hp.Value = hp.Max;
     }
 
     private struct Scatter : IForEachEntity<Position>, INoStructuralChanges   // NPCs start the round anywhere

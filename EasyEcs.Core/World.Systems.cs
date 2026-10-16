@@ -21,17 +21,8 @@ public sealed partial class World
     /// <summary>Number of completed <see cref="Update()"/> calls (default group).</summary>
     public long UpdateCount => _groups[0].Updates;
 
-    /// <summary>Systems of every group, each group in execution order (default group first).</summary>
-    public IReadOnlyList<EcsSystem> Systems
-    {
-        get
-        {
-            var all = new List<EcsSystem>();
-            foreach (var group in _groups)
-                if (group != null) all.AddRange(group.Systems);
-            return all;
-        }
-    }
+    /// <summary>Systems of every group, each group in execution order (default group first). Allocation-free.</summary>
+    public SystemList Systems => new(_groups);
 
     /// <summary>Create a system, attach it to this world and call its <see cref="EcsSystem.OnCreate"/>.</summary>
     public T AddSystem<T>() where T : EcsSystem, new()
@@ -223,7 +214,7 @@ public sealed partial class World
     /// Systems of one group sorted by priority (stable), with their parallel batches. Mutated under
     /// the structural gate by publishing new arrays (copy-on-write), so a running update never sees a torn list.
     /// </summary>
-    private sealed class SystemSchedule
+    internal sealed class SystemSchedule
     {
         public EcsSystem[] Systems = [];
         public EcsSystem[][] Batches = [];
@@ -275,6 +266,62 @@ public sealed partial class World
             for (int i = start; i < next; i++)
                 if (systems[i].Access.ConflictsWith(systems[next].Access))
                     return false;
+            return true;
+        }
+    }
+}
+
+/// <summary>
+/// The systems of a world, every group in execution order (default group first): <c>foreach</c> it, or read
+/// <see cref="Count"/>. A view, not a copy: allocation-free, it sees the systems registered when each group is reached.
+/// </summary>
+public readonly struct SystemList
+{
+    private readonly World.SystemSchedule[] _groups;
+
+    internal SystemList(World.SystemSchedule[] groups) => _groups = groups;
+
+    /// <summary>Number of systems in every group. O(groups).</summary>
+    public int Count
+    {
+        get
+        {
+            int count = 0;
+            foreach (var group in _groups)
+                if (group != null) count += group.Systems.Length;
+            return count;
+        }
+    }
+
+    public Enumerator GetEnumerator() => new(_groups);
+
+    /// <summary>Walks the groups and their systems.</summary>
+    public struct Enumerator
+    {
+        private readonly World.SystemSchedule[] _groups;
+        private EcsSystem[] _systems;
+        private int _group;
+        private int _index;
+
+        internal Enumerator(World.SystemSchedule[] groups)
+        {
+            _groups = groups;
+            _systems = [];
+            _group = -1;
+            _index = -1;
+        }
+
+        public readonly EcsSystem Current => _systems[_index];
+
+        public bool MoveNext()
+        {
+            while (++_index >= _systems.Length)
+            {
+                if (++_group >= _groups.Length) return false;
+                _systems = _groups[_group]?.Systems ?? [];
+                _index = -1;
+            }
+
             return true;
         }
     }

@@ -18,8 +18,8 @@ public readonly struct QueryFilter
     internal readonly Tag Any;
     internal readonly Tag Tracked;
 
-    /// <summary>The change tick <see cref="Changed{T}"/> rows must have been written at or after (<see cref="ChangedSince"/>).</summary>
-    public readonly ulong Since;
+    /// <summary>The change tick <see cref="Changed{T}"/> rows must have been written at or after.</summary>
+    internal readonly ulong Since;
 
     private QueryFilter(in Tag all, in Tag none, in Tag any, in Tag changed, ulong since)
     {
@@ -64,21 +64,31 @@ public readonly struct QueryFilter
     }
 
     /// <summary>
-    /// Require <typeparamref name="T"/> and only rows whose <typeparamref name="T"/> was written at or after the change
-    /// tick <see cref="Since"/> (set it with <see cref="ChangedSince"/>, e.g. to a <see cref="World.ChangeTick"/> read
-    /// earlier; <c>[Changed&lt;T&gt;]</c> methods select rows written since their system's last run).
+    /// Require <typeparamref name="T"/> and only rows whose <typeparamref name="T"/> was written at or after change tick
+    /// <paramref name="since"/>: a <see cref="World.ChangeTick"/> read earlier (<c>[Changed&lt;T&gt;]</c> methods select
+    /// the rows written since their system last ran on their own). A filter has one tick: several <c>Changed</c>
+    /// filters must name the same one.
     /// </summary>
-    public QueryFilter Changed<T>() where T : struct, IComponent, ITrackChanges
+    /// <exception cref="ArgumentException">An earlier <c>Changed</c> filter named another tick.</exception>
+    public QueryFilter Changed<T>(ulong since) where T : struct, IComponent, ITrackChanges
     {
+        if (since != Since && Tracked.Intersects(in Tracked)) ThrowTwoTicks(); // any Changed filter so far
         var all = All.Clone();
         all.SetBit(ComponentType<T>.Bit);
         var changed = Tracked.Clone();
         changed.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in all, in None, in Any, in changed, Since);
+        return new QueryFilter(in all, in None, in Any, in changed, since);
     }
 
-    /// <summary>The same filter, selecting rows written at or after <paramref name="tick"/> (<see cref="World.ChangeTick"/>).</summary>
-    public QueryFilter ChangedSince(ulong tick) => new(in All, in None, in Any, in Tracked, tick);
+    /// <summary>
+    /// The same filter with its <see cref="Changed{T}"/> filters moved to tick <paramref name="since"/>, without
+    /// rebuilding it: a filter kept in a field, used again after each update.
+    /// </summary>
+    public QueryFilter ChangedSince(ulong since) => new(in All, in None, in Any, in Tracked, since);
+
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    private static void ThrowTwoTicks() =>
+        throw new ArgumentException("Changed filters of one QueryFilter must name the same tick", "since");
 }
 
 /// <summary>Cache key of a query: required bits, excluded bits and the bits of which one is required.</summary>

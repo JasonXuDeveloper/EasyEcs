@@ -31,7 +31,7 @@ public class AllocationTests
             world.Update();
             foreach (var item in world.Query<Position, Velocity>()) item.Component1.X += item.Component2.X;
             _ = world.Count<Position, Velocity>(QueryFilter.Create());
-            _ = world.Count<Armor>(QueryFilter.Create().Changed<Armor>().ChangedSince(world.ChangeTick));
+            _ = world.Count<Armor>(QueryFilter.Create().Changed<Armor>(world.ChangeTick));
             named.Get<Callsign>() = new Callsign(named.Get<Callsign>().Value == "a" ? "b" : "a"); // re-keyed every frame
             _ = callsigns.Count("a") + callsigns.Count("b");
             probe.Get<Health>().Value++;
@@ -82,7 +82,7 @@ public class AllocationTests
 
             ulong mark = world.ChangeTick;
             armored[next % armored.Length].Get<Armor>().Value++;
-            var changed = QueryFilter.Create().Changed<Armor>().ChangedSince(mark);
+            var changed = QueryFilter.Create().Changed<Armor>(mark);
             foreach (var item in world.Query<Armor>(changed)) item.Component1.Value++;
             _ = world.Any<Armor>(changed);
         }
