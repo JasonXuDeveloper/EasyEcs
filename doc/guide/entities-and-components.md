@@ -44,6 +44,23 @@ int cleared = world.DestroyEntities<Health>(QueryFilter.Create().With<Dead>()); 
 - `world.EnsureEntityCapacity(n)` or `WorldOptions.InitialEntityCapacity` pre-sizes storage so it never grows at
   run time.
 
+An id that came from outside (a network message, a log line) turns back into a handle, and a handle tells whether it
+still names a living entity:
+
+```csharp
+world.EnsureEntityCapacity(10_000);                 // a server that knows its peak never grows the entity array
+var target = world.CreateEntity(new Health(100));
+int fromClient = target.Id;                         // what a client sends back
+
+if (world.TryGetEntity(fromClient, out var found) && found.Has<Health>())
+    found.Get<Health>().Value -= 10;                // the current incarnation of that id
+
+target.Destroy();
+bool stale = !target.IsAlive;                       // true: every handle of a destroyed entity is stale
+int alive = world.EntityCount;
+foreach (var e in world.Entities) _ = e.Id;         // diagnostics: walks the whole id range
+```
+
 ## Components
 
 A component is a struct implementing `IComponent`: per-entity data, fields only (computed getters are fine). The

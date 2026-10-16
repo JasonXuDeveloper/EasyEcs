@@ -35,6 +35,24 @@ the `World`.
 Fix: pass components and singletons by `ref` (write) or `in` / `ref readonly` (read); remove other parameters and get
 what you need from data instead.
 
+```cs
+[ForEach] static void Move(ref Position p, float dt)   // EECS002: a float is not ECS data
+```
+
+```csharp
+public record struct DeltaTime(float Seconds) : ISingletonComponent;   // the value becomes a singleton
+
+public partial class MoveSystem : EcsSystem
+{
+    [ForEach]
+    static void Move(ref Position p, in Velocity v, in DeltaTime dt)
+    {
+        p.X += v.X * dt.Seconds;
+        p.Y += v.Y * dt.Seconds;
+    }
+}
+```
+
 ## EECS003
 
 **Invalid component count.** A `[ForEach]` method must take between 1 and 9 components (singletons, `Entity` and
@@ -90,6 +108,25 @@ of rows, so a per-entity parameter (a `ref` / `in` component, an `Entity`) has n
 Fix: take every component as a span (`Span<T>` to write, `ReadOnlySpan<T>` to read) and only singletons besides; or
 write a per-entity method instead.
 
+```cs
+[ForEach] static void Drift(Span<Position> p, in Velocity v)   // EECS009: v has no single value for a run of rows
+```
+
+```csharp
+public partial class DriftAllSystem : EcsSystem
+{
+    [ForEach]
+    static void Drift(Span<Position> p, ReadOnlySpan<Velocity> v)   // element i of both spans is one entity
+    {
+        for (int i = 0; i < p.Length; i++)
+        {
+            p[i].X += v[i].X;
+            p[i].Y += v[i].Y;
+        }
+    }
+}
+```
+
 ## EECS010
 
 **`[ForEach(Parallel = true)]` cannot run on several threads.** A parallel method runs chunks of rows on several
@@ -99,3 +136,20 @@ between chunks).
 
 Fix: take singletons as `in`, move structural changes into a sequential system that reacts to data the parallel one
 writes, or drop `Parallel`.
+
+```cs
+[ForEach(Parallel = true)] static void Kill(Entity e, in Health hp)   // EECS010: e.Set changes structure
+{
+    if (hp.Value <= 0) e.Set(new Dead());
+}
+```
+
+```csharp
+public record struct Regen(int PerTick) : ISingletonComponent;
+
+public partial class RegenSystem : EcsSystem
+{
+    [ForEach(Parallel = true), Without<Dead>]
+    static void Regenerate(ref Health hp, in Regen regen) => hp.Value += regen.PerTick;   // reads the singleton only
+}
+```

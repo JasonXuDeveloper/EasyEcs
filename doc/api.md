@@ -26,7 +26,7 @@ Notation:
 | `ISingletonComponent` | marker interface | Implemented by singleton structs. |
 | `EcsSystem` | abstract class | `World`, `Priority`, `UpdateInterval`, `Enabled`, `Stats`, `LastRunTick`; `OnCreate` / `OnUpdate` / `OnDestroy`. |
 | `SystemStats` | readonly struct | `Runs`, `Last`, `Total`, `Average` of a system's runs; recorded with `WorldOptions.MeasureSystems`. |
-| `SystemAccess` | struct | What a system reads and writes (`Read<T>`, `Write<T>`, `ReadSingleton<T>`, `WriteSingleton<T>`, `RunsAlone`); generated from `[ForEach]` parameters, used by `Parallel` batching. |
+| `SystemAccess` | struct | What a system reads and writes (`Read<T>`, `Write<T>`, `ReadSingleton<T>`, `WriteSingleton<T>`, `RunsAlone`), used by `Parallel` batching. Only the generated `GeneratedAccess` override of a system fills it (from its `[ForEach]` parameters); user code never calls it. |
 | `ForEachAttribute`, `WithAttribute<T>`, `WithoutAttribute<T>`, `WithAnyAttribute<T>`, `ChangedAttribute<T>` | attributes | `[ForEach]` methods (`Parallel = true` runs chunks of rows on several threads) and their filters. |
 | `ISystemGroup`, `UpdateInGroupAttribute<TGroup>` | marker / attribute | System groups. |
 | `QueryFilter` | readonly struct | `Create().With<T>().Without<U>().WithAny<V>().WithAny<W>().Changed<X>().ChangedSince(tick)`; `Since`. |
@@ -42,6 +42,7 @@ Notation:
 
 | API | Complexity | Notes |
 |---|---|---|
+| `new World(options)` | O(`InitialEntityCapacity`) | `options` may be null (defaults); allocates the entity array and the empty table |
 | `world.CreateEntity()` | O(1) amortized | reuses recycled ids |
 | `world.CreateEntity(in T1 … in Tn)` | O(n) amortized | placed directly in its final table |
 | `world.CreateEntities(Span<Entity> entities, in T1 … in Tn)` | O(count × n) amortized | one gate pass and at most one table growth for the batch; writes the handles |
@@ -73,6 +74,7 @@ Notation:
 | `world.ForEachParallel<T1..Tn, TJob>(ref job, filter)` / `ForEachEntityParallel` | O(M + S), divided over up to `MaxDegreeOfParallelism` threads | `INoStructuralChanges` jobs; chunks of `World.ChunkRows` rows, one job copy per chunk (state is not merged); fewer than two chunks run on the calling thread |
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + runs) | spans of consecutive rows; one call for a table whose rows all match |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | `item.Entity`, `item.Component1..n` (refs) |
+| `query.Count` / `query.IsEmpty` (on the enumerator) | as `world.Count` / `world.Any` | without starting the walk |
 | `world.Count<T1..Tn>(filter)` | O(M), + S / 64 for tables with rows lacking a queried component or tested by a `Changed` filter | sums table counts, or counts presence bits (and change ticks) |
 | `world.Any<T1..Tn>(filter)` | O(M + S / 64) worst | stops at the first match; S / 64 only for tables with rows lacking a queried component or tested by a `Changed` filter |
 | `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1) | build once and keep it in a `static readonly` field; `WithAny` calls form one "at least one of" group |
@@ -101,7 +103,7 @@ it is appended (copy-on-write) to the archetype list and to every cached query i
 | `world.Update()` (default group) / `world.Update<TGroup>()` | Σ systems of the group; allocation-free |
 | `world.ChangeTick` | O(1); grows by one per system batch, once after each update and once per index lookup that catches up with written rows outside a pass ([change tracking](guide/change-tracking.md)) |
 | `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` → `ref T` | O(1) |
-| `world.SingletonRef<T>()` → `SingletonRef<T>` (stable handle, `.Value` is `ref T`; adds if missing) | O(1) |
+| `world.SingletonRef<T>()` → `SingletonRef<T>` (stable handle; adds if missing) / `singletonRef.Value` → `ref T` | O(1) / O(1), one load |
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) |
 | `world.CompactArchetypes()` | O(archetypes + tombstones × columns); tables are kept dense automatically, so this is only needed after a pass was interrupted by an exception (which `Update` also handles) |
 | `world.GetFragmentationStats()` → `(TotalSlots, AliveEntities, FragmentationRatio)` | O(archetypes) |
@@ -119,3 +121,7 @@ Other `World` members:
 | `World.ChunkRows` | rows per chunk of a parallel `[ForEach]` (16,384, a multiple of 64) |
 
 `RemoveSystem<T>()` returns whether a system was removed. `GetSingleton<T>()` throws if the singleton was not added.
+
+Values and handles, all O(1): `entity.Id` / `Version` / `World`, `==` / `Equals` / `GetHashCode` (id and version) /
+`ToString`; `filter.Since`; `snapshot.EntityCount`; `system.Stats.Runs` / `Last` / `Total` / `Average`;
+`system.LastRunTick`.

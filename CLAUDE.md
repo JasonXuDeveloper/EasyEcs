@@ -9,8 +9,10 @@ published to NuGet as `EasyEcs`. Public API and code comments are in English.
 dotnet build                                                   # whole solution
 dotnet test                                                    # NUnit
 dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*'            # all benchmarks
-dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*Iterate*' --job short   # quick subset
+dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*Iterate*'    # a subset
 ```
+
+Both benchmark projects use the job in `EasyEcs.Benchmark/BenchmarkConfig.cs` (no `--job` needed).
 
 `global.json` requires the .NET 10 SDK (`rollForward: latestFeature`).
 
@@ -51,7 +53,7 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
                                index, ComponentSignature of multi-component calls) + SingletonBox + ChangeTicks<T>
                                (the hidden change-tick column of an ITrackChanges component)
   EntityMeta.cs                16-byte per-entity record (archetype, version, slot)
-  Archetype.cs                 a table: mask, entity ids + versions per row, one column per component (unmanaged
+  Archetype.cs                 a table: mask, EntitySlot rows (version + id), one column per component (unmanaged
                                columns pinned and 64-byte aligned), presence bits + absent counts per column,
                                per-bit and per-signature add transitions (copy plans); swap-remove / tombstones,
                                FillHoles; change-tick columns with their summaries (LastWrite per column, BlockWrite
@@ -130,7 +132,7 @@ doc/                           README.md (index), getting-started.md, guide/ (on
   tracking name per stage and a caching assertion in `GeneratorTests`.
 - **Structural changes go through the gate** (`using (Structural())`, CAS, not reentrant) and through `AddBit(s)` /
   `RemoveBit(s)` / `MoveTo` / `RemoveRow` (and `Archetype.FillHoles`, which rewrites rows and slots); never mutate
-  `Archetype.EntityIds`, presence bits or `EntityMeta` directly elsewhere.
+  `Archetype.Slots`, presence bits or `EntityMeta` directly elsewhere.
 - **Per-entity state outside the tables is `EntityMeta` only** (16 bytes). Do not add per-entity arrays or fields
   without measuring: the component set is the archetype mask (plus the row's presence bits). The one exception is
   opt-in: a value index keeps a node per entity id (`ValueIndex._nodes`, and `_byTarget` for relations), paid only by

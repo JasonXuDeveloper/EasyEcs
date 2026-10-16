@@ -54,3 +54,20 @@ public partial class DeathSystem : EcsSystem
 - Removing a component and adding it back is cheap: the entity keeps its row and only a presence bit flips. Gaining a
   component the entity's archetype never had copies its row once
   ([ECS principles, rule 5](../ecs-principles.md#5-choose-the-cheapest-representation-for-frequent-changes)).
+
+## Keeping tables dense
+
+Tables stay dense by themselves: outside a pass the last row fills a destroyed entity's row at once, and the
+tombstones a pass leaves are closed when the last pass ends. Two calls remain for maintenance:
+
+- `world.GetFragmentationStats()` returns `(TotalSlots, AliveEntities, FragmentationRatio)`: rows in use (tombstones
+  included) against living entities, O(archetypes). A ratio above 0 between updates means a pass was interrupted.
+- `world.CompactArchetypes()` closes every tombstone, O(archetypes + tombstones × columns). It is only needed after a
+  pass was interrupted by an exception outside `Update` (which compacts by itself), and must not run while a query
+  of the world iterates.
+
+```csharp
+var (slots, alive, ratio) = world.GetFragmentationStats();
+if (ratio > 0.1f) world.CompactArchetypes();        // between updates, after a pass was cut short
+long updates = world.UpdateCount;                   // default-group updates so far
+```

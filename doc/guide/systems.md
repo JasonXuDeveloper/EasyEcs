@@ -54,8 +54,8 @@ method, and the generator compiles it to a struct job with a static filter.
 
 | Parameter | Meaning |
 |---|---|
-| `ref T` / `in T` (`T : IComponent`) | component data, 1-9 of them (`ref` to write, `in` to read) |
-| `ref T` / `in T` (`T : ISingletonComponent`) | the world's singleton, resolved once per pass (added if missing) |
+| `ref T` / `in T` / `ref readonly T` (`T : IComponent`) | component data, 1-9 of them (`ref` to write; `in` or `ref readonly` to read) |
+| `ref T` / `in T` / `ref readonly T` (`T : ISingletonComponent`) | the world's singleton, resolved once per pass (added if missing) |
 | `Entity entity` | handle of the current entity (structural changes, destroy) |
 | `World world` | the world (useful in static methods) |
 | `Span<T>` / `ReadOnlySpan<T>` (`T : IComponent`) | a batch method: whole runs of matching rows at once (see below) |
@@ -71,15 +71,15 @@ method, and the generator compiles it to a struct job with a static filter.
 ```csharp
 public record struct Burning(int Ticks, int DamagePerTick) : IComponent;
 public struct Player : IComponent;      // tag
-public record struct Stats(int BurnDamage) : ISingletonComponent;
+public record struct BurnTotals(int Damage) : ISingletonComponent;
 
 public partial class BurnSystem : EcsSystem
 {
     [ForEach, With<Player>, Without<Dead>]   // players only (Player is not passed in), living only
-    static void Burn(ref Health hp, in Burning burning, ref Stats stats)   // two components + a singleton
+    static void Burn(ref Health hp, in Burning burning, ref BurnTotals totals)   // two components + a singleton
     {
         hp.Value -= burning.DamagePerTick;
-        stats.BurnDamage += burning.DamagePerTick;
+        totals.Damage += burning.DamagePerTick;
     }
 }
 ```

@@ -69,8 +69,9 @@ from another ECS? [Their features in EasyEcs](doc/comparison.md#their-features-i
 | Relation | `OwnedBy : IIndexed<Entity>`: a respawning player recalls its projectiles |
 | System groups, `UpdateInterval`, `Enabled` | `Replication` runs every third tick; `RegenerationSystem` every tenth update; `Ceasefire` |
 | System lifecycle (`OnCreate`, `OnDestroy`) | `SteeringSystem` sets up and removes its `Waypoints`; `ClockSystem` adds `Battle` |
-| Struct jobs (`ForEach`, `ForEachEntity`, `ForEachBatch`, `ForEachParallel`) | `Census` (read-only: `Writes => 0`, `ReadsId => false`, `INoStructuralChanges`); `NewRound` heals on every core |
+| Struct jobs (`ForEach`, `ForEachEntity`, `ForEachBatch`, `ForEachParallel`, `ForEachEntityParallel`) | `Census` (read-only: `Writes => 0`, `ReadsId => false`, `INoStructuralChanges`); `NewRound` heals and scatters the NPCs on every core |
 | Ad-hoc queries (`Query`, `Count`, `Any`, `TryGet`) | `NearestPlayer`, `Census`, `AnyoneBurning`, `ShotsLeft` with `static readonly` filters |
+| Entity handles (`TryGetEntity`, `IsAlive`, `Has`) | `Hit` turns a client's id back into the living unit; `ShotsLeft` of a stale handle is 0 |
 | Bulk operations | `CreateEntities` for the players; `DestroyEntities` clears the projectiles of a round |
 | Snapshots | `Save` / `Load` (`Capture` / `Restore`) |
 | Diagnostics | `MeasureSystems` and `Slowest`; `SystemError` switches a failing system off; `GetFragmentationStats` / `CompactArchetypes` in `NewRound` |
@@ -323,6 +324,7 @@ public sealed class BattleServer : IDisposable
     private static readonly QueryFilter Players = QueryFilter.Create().With<Player>();     // build filters once
     private static readonly QueryFilter AlivePlayers = Players.Without<Dead>();
     private static readonly QueryFilter ReadyToAttack = QueryFilter.Create().Without<Dead>().Without<Frozen>();
+    private static readonly QueryFilter Npcs = QueryFilter.Create().With<Npc>();
 
     public readonly World World;
     private readonly SingletonRef<Battle> _battle;                            // resolved once, no lookup per tick
@@ -403,7 +405,15 @@ public sealed class BattleServer : IDisposable
 
     public bool AnyoneBurning => World.Any<Burning>();
 
-    public int ShotsLeft(Entity player) => player.TryGet<Mana>(out var mana) ? mana.Value / ShotCost : 0;
+    public int ShotsLeft(Entity player) => player.IsAlive && player.TryGet<Mana>(out var mana) ? mana.Value / ShotCost : 0;
+
+    /// <summary>A client's hit on the unit it names by id: the id turns back into a handle of the living entity.</summary>
+    public bool Hit(int targetId, int damage)
+    {
+        if (!World.TryGetEntity(targetId, out var target) || !target.Has<Health>() || target.Has<Dead>()) return false;
+        target.Get<Health>().Value -= damage;                                // a write: replicated with the next send
+        return true;
+    }
 
     /// <summary>The living player closest to <paramref name="at"/>: an ad-hoc query.</summary>
     public Entity NearestPlayer(Position at)
@@ -437,6 +447,8 @@ public sealed class BattleServer : IDisposable
         int cleared = World.DestroyEntities<Lifetime>();                      // one pass, however many
         var heal = new HealFully();
         World.ForEachParallel<Health, HealFully>(ref heal);                   // a struct job on all cores
+        var scatter = new Scatter { Round = Battle.Tick };
+        World.ForEachEntityParallel<Position, Scatter>(ref scatter, Npcs);    // the same, receiving each handle
         if (World.GetFragmentationStats().FragmentationRatio > 0.1f) World.CompactArchetypes();
         return cleared;
     }
@@ -496,6 +508,17 @@ public sealed class BattleServer : IDisposable
     {
         public static bool ReadsId => false;
         public void Execute(int entityId, ref Health hp) => hp.Value = hp.Max;
+    }
+
+    private struct Scatter : IForEachEntity<Position>, INoStructuralChanges   // NPCs start the round anywhere
+    {
+        public long Round;
+
+        public void Execute(Entity npc, ref Position p)
+        {
+            uint r = Dice.Roll(Round, npc.Id);                                // per entity, the same on any thread
+            p = new Position(r % 4096, (r >> 12) % 4096);
+        }
     }
 }
 ```

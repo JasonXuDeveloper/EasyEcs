@@ -9,7 +9,7 @@ Xeon VM at 2.1 GHz ([benchmarks](performance.md#benchmarks)).
 
 | Feature | In one line | In the [battle server](../README.md#example-a-battle-server) |
 |---|---|---|
-| [Worlds and entities](#worlds-and-entities) | Isolated worlds of version-checked, recycled entity handles. | `new World(options)` in the host; `Entity` handles everywhere |
+| [Worlds and entities](#worlds-and-entities) | Isolated worlds of version-checked, recycled entity handles. | `new World(options)` in the host; `Entity` handles everywhere; `Hit` (`TryGetEntity`) |
 | [Components and tags](#components-and-tags) | Plain structs in archetype tables; empty structs are tags. | `Position`, `Health`, …; tags `Player`, `Npc`, `Dead` |
 | [Immediate structural changes](#immediate-structural-changes) | Add, remove, create, destroy anywhere, even mid-pass; no command buffer. | `CombatSystem` adds statuses, `DeathSystem` adds `Dead`, `ProjectileSystem` spawns and destroys |
 | [Systems and `[ForEach]`](#systems-and-foreach) | One-job systems; a method is the whole loop, compiled to an inlined struct job. | every system; `ClockSystem` overrides `OnUpdate` |
@@ -19,12 +19,13 @@ Xeon VM at 2.1 GHz ([benchmarks](performance.md#benchmarks)).
 | [System groups and intervals](#system-groups-and-intervals) | Separate cadences: input on every wake, simulation on a fixed tick. | `Replication` group, `RegenerationSystem.UpdateInterval`, `Ceasefire` (`Enabled`) |
 | [Singletons](#singletons) | One value per world, passed to systems as parameters. | `Battle`, `Waypoints` (added in `OnCreate`), `SingletonRef<Battle>` in the host |
 | [Parallel systems](#parallel-systems) | Non-conflicting systems of one priority run at once, same result as sequential. | `MovementSystem` and `ManaSystem` (`WorldOptions.Parallel`) |
-| [Parallel `[ForEach]`](#parallel-foreach) | One heavy method's rows split across cores. | `SteeringSystem`; `NewRound` (`ForEachParallel`) |
+| [Parallel `[ForEach]`](#parallel-foreach) | One heavy method's rows split across cores. | `SteeringSystem`; `NewRound` (`ForEachParallel`, `ForEachEntityParallel`) |
 | [Change tracking](#change-tracking) | Visit only the rows written since a system last ran. | `ReplicationSystem` (`[Changed<Health>]`), `Unsaved` (`ChangedSince`) |
 | [Value indexes](#value-indexes) | Find entities by a component's value. | `Zone`: `PlayersIn`, `Despawn` (`TryFind`) |
 | [Relations](#relations) | Entity-to-entity links with reverse lookup. | `OwnedBy`: `Respawn` recalls a player's projectiles |
 | [Snapshots](#snapshots) | Copy a world and restore it in memory. | `Save` / `Load` |
 | [Bulk create and destroy](#bulk-create-and-destroy) | Spawn and clear waves in one pass through the structural gate. | `CreateEntities` (players), `DestroyEntities` (`NewRound`) |
+| [Table maintenance](#table-maintenance) | Fragmentation stats and compaction, for passes cut short. | `NewRound` (`GetFragmentationStats` / `CompactArchetypes`) |
 | [Per-system timing](#per-system-timing) | Run counts and times of every system. | `MeasureSystems`, `Slowest` |
 | [Analyzer](#analyzer) | ECS design mistakes fail the build. | the whole file builds without a warning |
 | [Threading model](#threading-model) | One owner thread per world, many worlds per process. | one world per thread (`BattlesOnSeparateThreadsMatchOneRunAlone`); `SystemError` |
@@ -185,14 +186,16 @@ Guide: [Threading: parallel systems](guide/threading.md#parallel-systems).
 
 **What it does.** `[ForEach(Parallel = true)]` cuts one method's matching rows into chunks of 16,384 rows that the
 calling thread and thread-pool threads run at once, allocation-free. The analyzer rejects methods that could race
-(EECS010): structural changes, batch methods, singletons taken by `ref`.
+(EECS010): structural changes, batch methods, singletons taken by `ref`. Outside systems, `world.ForEachParallel`
+and `world.ForEachEntityParallel` run a struct job the same way.
 
 **When to use it.** Heavy per-entity work over tens of thousands of entities: steering, path following, AI scoring.
 
 **Cost.** Steering 100,000 entities towards the nearest of 16 waypoints: 1.83 ms on one thread, 0.76 ms with
 `Parallel = true` on 4 cores.
 
-Guide: [Systems: parallel methods](guide/systems.md#parallel-methods).
+Guide: [Systems: parallel methods](guide/systems.md#parallel-methods),
+[Queries: on several threads](guide/queries.md#on-several-threads-foreachparallel-and-foreachentityparallel).
 
 ## Change tracking
 
@@ -269,6 +272,19 @@ structural gate; `world.DestroyEntities<T>(filter)` destroys every match.
 **Cost.** Ten rounds of creating and destroying 10,000 entities: 160 μs in batches against 398 μs one by one.
 
 Guide: [Entities and components](guide/entities-and-components.md#entities).
+
+## Table maintenance
+
+**What it does.** `world.GetFragmentationStats()` reports rows in use against living entities;
+`world.CompactArchetypes()` closes every tombstone. Tables stay dense on their own (the last row fills a destroyed
+entity's row, and tombstones left by a pass are closed when it ends), so both are for a pass that an exception cut
+short outside `Update`.
+
+**When to use it.** A health check or a round boundary on a long-running server.
+
+**Cost.** O(archetypes) for the stats; O(archetypes + tombstones × columns) for compaction.
+
+Guide: [Structural changes: keeping tables dense](guide/structural-changes.md#keeping-tables-dense).
 
 ## Per-system timing
 

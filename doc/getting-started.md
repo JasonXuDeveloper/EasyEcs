@@ -55,7 +55,7 @@ using var world = new World(new WorldOptions { InitialEntityCapacity = 10_000 })
 |---|---|---|
 | `InitialEntityCapacity` | 1024 | Pre-sized entity array (one 16-byte record per id), so it does not grow at run time. Archetype tables grow on their own, doubling. |
 | `Parallel` | `false` | Run non-conflicting systems of equal priority at the same time (see [Threading](guide/threading.md#parallel-systems)). |
-| `MaxDegreeOfParallelism` | processor count | Limit for `Parallel`. |
+| `MaxDegreeOfParallelism` | processor count | Threads one parallel run uses at most: systems run by `Parallel`, and the chunks of `[ForEach(Parallel = true)]`, `ForEachParallel` and `ForEachEntityParallel` (those run in chunks whether `Parallel` is on or not). |
 | `MeasureSystems` | `false` | Record each system's run count and time (`system.Stats`). |
 
 `Dispose()` calls every system's `OnDestroy` (in reverse order) and releases storage.
@@ -168,28 +168,28 @@ Systems are stateless ([EECS007](guide/analyzer.md#eecs007)). State with one val
 configuration) is a singleton: a struct implementing `ISingletonComponent`.
 
 ```csharp
-public record struct Stats(long Tick, int Deaths, int Afflicted) : ISingletonComponent;
+public record struct Tally(long Tick, int Deaths, int Afflicted) : ISingletonComponent;
 
 public partial class DeathSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
-    static void Die(Entity entity, in Health hp, ref Stats stats)   // resolved once per pass
+    static void Die(Entity entity, in Health hp, ref Tally tally)   // resolved once per pass
     {
         if (hp.Value > 0) return;
         entity.Set(new Dead());
-        stats.Deaths++;
+        tally.Deaths++;
     }
 }
 
 public sealed class ClockSystem : EcsSystem
 {
-    protected override void OnUpdate() => World.GetSingleton<Stats>().Tick++;
+    protected override void OnUpdate() => World.GetSingleton<Tally>().Tick++;
 }
 ```
 
 ```csharp
-world.AddSingleton<Stats>();                         // add it once, at setup
-ref var stats = ref world.GetSingleton<Stats>();     // ref T, like components
+world.AddSingleton<Tally>();                         // add it once, at setup
+ref var tally = ref world.GetSingleton<Tally>();     // ref T, like components
 ```
 
 A `[ForEach]` method takes a singleton as a `ref` / `in` parameter (resolved once per pass, added if missing), and
@@ -222,7 +222,7 @@ Structural changes apply immediately, so later systems in the same update see th
 ## 10. Run the update loop
 
 ```csharp
-world.AddSingleton<Stats>();
+world.AddSingleton<Tally>();
 world.AddSystem<MovementSystem>();
 world.AddSystem<DeathSystem>();
 world.AddSystem<CorpseSystem>();
@@ -275,7 +275,7 @@ public partial class StatusSystem : EcsSystem
     }
 
     [ForEach, WithAny<Burning>, WithAny<Frozen>]              // burning or frozen, or both
-    static void Count(in Health hp, ref Stats stats) => stats.Afflicted++;
+    static void Count(in Health hp, ref Tally tally) => tally.Afflicted++;
 }
 ```
 

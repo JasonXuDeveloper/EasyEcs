@@ -88,6 +88,62 @@ current entity's id. Two variants:
 A job that makes no structural change can say so by implementing `INoStructuralChanges`: the pass then skips the
 bookkeeping that keeps changes safe. Only implement it when the job honors it.
 
+### What a job declares: `Writes` and `ReadsId`
+
+Two static members tell the pass what a hand-written job touches. `[ForEach]` methods get both from their parameters;
+a job you write keeps the safe defaults unless you override them:
+
+| Member | Default | Meaning | When it is wrong |
+|---|---|---|---|
+| `static int Writes` | `-1` (all) | bit k - 1 set: the job writes component k through its ref. Those columns count as changed for `[Changed<T>]` (tracked components only), and when the job moves its entity to another archetype they are carried over to the new row | a write the mask leaves out is not stamped (watchers miss it) and is lost if the job also moved the entity |
+| `static bool ReadsId` (`IForEach` only) | `true` | the job reads `entityId`. When false, the pass passes 0 and never loads the entity rows | the job reads 0 for every entity |
+
+A read-only job declares both, and a census of the world costs neither change stamps nor id loads:
+
+```csharp
+public struct SumHealth : IForEach<Health>, INoStructuralChanges
+{
+    public long Total;
+
+    public static int Writes => 0;          // reads only: nothing stamped, nothing carried over
+    public static bool ReadsId => false;    // entityId is 0, the entity rows are never loaded
+
+    public void Execute(int entityId, ref Health health) => Total += health.Value;
+}
+```
+
+```csharp
+var census = new SumHealth();
+world.ForEach<Health, SumHealth>(ref census);
+long total = census.Total;
+```
+
+### On several threads: `ForEachParallel` and `ForEachEntityParallel`
+
+A job that implements `INoStructuralChanges` and writes only its own row can run on several threads.
+`ForEachParallel` (an `IForEach` job) and `ForEachEntityParallel` (an `IForEachEntity` job) cut the matching rows into
+chunks of `World.ChunkRows` rows. The calling thread and up to `WorldOptions.MaxDegreeOfParallelism - 1`
+thread-pool threads run them, each with its own copy of the job, so state a job accumulates in its fields is not
+merged back. Fewer than two chunks run on the calling thread. The call allocates nothing after the first call per job
+type.
+
+```csharp
+public struct Heal : IForEachEntity<Health>, INoStructuralChanges
+{
+    public static int Writes => 1;          // writes Health (component 1)
+
+    public void Execute(Entity entity, ref Health health) => health.Value = Math.Min(health.Value + 10, 100);
+}
+```
+
+```csharp
+var heal = new Heal();
+world.ForEachEntityParallel<Health, Heal>(ref heal, Active); // each row runs once, on one of the threads
+```
+
+The job must not read what another row's job writes (another entity, a singleton it also writes), and nothing else
+may change the world during the call. `[ForEach(Parallel = true)]` compiles a system method to the same chunked run.
+
 ## `Count` and `Any`
 
 ```csharp
