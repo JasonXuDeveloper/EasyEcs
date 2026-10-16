@@ -112,7 +112,9 @@ public sealed partial class World
     {
         var archetype = meta.Archetype;
         int column = archetype.ColumnIndex(bit);
-        if (column >= 0 && archetype.Take(column, meta.Slot)) StorageVersion++; // passes re-read presence bits
+        if (column < 0 || !archetype.Take(column, meta.Slot)) return;
+        StorageVersion++; // passes re-read presence bits
+        if (_indexByBit != null) Unindex(bit, archetype.EntityIds[meta.Slot]);
     }
 
     /// <summary>Remove component bits (see <see cref="RemoveBit"/>). Inside the structural gate.</summary>

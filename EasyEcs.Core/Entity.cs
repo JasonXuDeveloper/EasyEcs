@@ -135,7 +135,7 @@ public readonly partial struct Entity : IEquatable<Entity>
 
     public override bool Equals(object obj) => obj is Entity other && Equals(other);
 
-    public override int GetHashCode() => HashCode.Combine(Id, Version);
+    public override int GetHashCode() => unchecked(Id * 397 ^ Version); // cheap: hashed per dictionary lookup (relation indexes)
 
     public override string ToString() => $"Entity {Id}v{Version}";
 

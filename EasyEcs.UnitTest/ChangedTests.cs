@@ -25,6 +25,84 @@ public partial class ChangedTests
         private static void Read(in Armor armor, ref Health health) => health = new Health(armor.Value);
     }
 
+    /// <summary>The batch form: runs of changed rows as spans.</summary>
+    public partial class ArmorWatchBatch : EcsSystem
+    {
+        [ForEach, Changed<Armor>]
+        private static void Count(System.ReadOnlySpan<Armor> armor, System.Span<Seen> seen)
+        {
+            for (int i = 0; i < seen.Length; i++) seen[i].Count++;
+        }
+    }
+
+    /// <summary>The parallel form: chunks of rows on several threads, changed rows only.</summary>
+    public partial class ArmorWatchParallel : EcsSystem
+    {
+        [ForEach(Parallel = true), Changed<Armor>]
+        private static void Count(ref Seen seen) => seen.Count++;
+    }
+
+    /// <summary>Changed combined with other filters, and with a second tracked component (both must have changed).</summary>
+    public partial class LivingArmorAndShieldWatch : EcsSystem
+    {
+        [ForEach, Changed<Armor>, Changed<Shield>, Without<Dead>]
+        private static void Count(ref Seen seen) => seen.Count++;
+    }
+
+    /// <summary>No component parameter: the Changed component is the queried one.</summary>
+    public partial class ArmorEntityWatch : EcsSystem
+    {
+        [ForEach, Changed<Armor>]
+        private static void Count(Entity entity) => entity.Get<Seen>().Count++;
+    }
+
+    /// <summary>Destroys entities whose armor changed: structural changes inside a Changed pass.</summary>
+    public partial class BreakChanged : EcsSystem
+    {
+        [ForEach, Changed<Armor>]
+        private static void Break(Entity entity, in Armor armor)
+        {
+            if (armor.Value > 1) entity.Destroy();
+        }
+    }
+
+    /// <summary>A watch that also writes what it watches: its own writes are not changes for its next run.</summary>
+    public partial class Regen : EcsSystem
+    {
+        [ForEach, Changed<Armor>]
+        private static void Apply(ref Armor armor, ref Seen seen) => seen.Count++;
+    }
+
+    /// <summary>A writer ordered after the watch.</summary>
+    public partial class LateWear : EcsSystem
+    {
+        public override int Priority => 1;
+
+        [ForEach, With<Stun>]
+        private static void Apply(ref Armor armor) => armor = armor with { Value = armor.Value - 1 };
+    }
+
+    /// <summary>A watch that runs every other update.</summary>
+    public partial class SlowArmorWatch : EcsSystem
+    {
+        public override int UpdateInterval => 2;
+
+        [ForEach, Changed<Armor>]
+        private static void Count(ref Seen seen) => seen.Count++;
+    }
+
+    /// <summary>A struct job that writes armor through a ref.</summary>
+    private struct Polish : IForEach<Armor>
+    {
+        public void Execute(int entityId, ref Armor armor) { }
+    }
+
+    /// <summary>A batch job that writes armor through a span.</summary>
+    private struct PolishBatch : IForEachBatch<Armor>
+    {
+        public void Execute(System.Span<Armor> armor) { }
+    }
+
     private static int SeenCount(Entity e) => e.Get<Seen>().Count;
 
     [Test]
@@ -125,5 +203,234 @@ public partial class ChangedTests
         var changed = QueryFilter.Create().Changed<Armor>().ChangedSince(mark);
         Assert.That(world.Count<Armor>(changed), Is.EqualTo(1));
         foreach (var item in world.Query<Armor>(changed)) Assert.That(item.Entity, Is.EqualTo(entities[199]));
+    }
+
+    [Test]
+    public void BatchAndParallelMethodsSeeOnlyChangedRows()
+    {
+        using var world = new World();
+        world.AddSystem<ArmorWatchBatch>();
+        var entities = new Entity[10_000];
+        world.CreateEntities(entities, new Armor(1), new Seen());
+        world.Update();
+        for (int i = 0; i < entities.Length; i += 97) entities[i].Get<Armor>().Value++;
+        world.Update();
+        world.Update();
+        for (int i = 0; i < entities.Length; i++)
+            Assert.That(SeenCount(entities[i]), Is.EqualTo(i % 97 == 0 ? 2 : 1), $"entity {i}");
+
+        world.RemoveSystem<ArmorWatchBatch>();
+        world.AddSystem<ArmorWatchParallel>();
+        world.Update(); // its first run: every row
+        for (int i = 0; i < entities.Length; i += 89) entities[i].Get<Armor>().Value++;
+        world.Update();
+        for (int i = 0; i < entities.Length; i++)
+            Assert.That(SeenCount(entities[i]), Is.EqualTo((i % 97 == 0 ? 2 : 1) + 1 + (i % 89 == 0 ? 1 : 0)), $"entity {i}");
+    }
+
+    [Test]
+    public void ChangedCombinesWithOtherFiltersAndOtherChangedFilters()
+    {
+        using var world = new World();
+        world.AddSystem<LivingArmorAndShieldWatch>();
+        var both = world.CreateEntity(new Armor(1), new Shield(1), new Seen());
+        var armorOnly = world.CreateEntity(new Armor(1), new Shield(1), new Seen());
+        var dead = world.CreateEntity(new Armor(1), new Shield(1), new Seen(), new Dead());
+        world.Update();
+        Assert.That((SeenCount(both), SeenCount(armorOnly), SeenCount(dead)), Is.EqualTo((1, 1, 0)));
+
+        foreach (var e in new[] { both, armorOnly, dead }) e.Get<Armor>().Value++;
+        both.Get<Shield>().Value++;
+        dead.Get<Shield>().Value++;
+        world.Update();
+        Assert.That((SeenCount(both), SeenCount(armorOnly), SeenCount(dead)), Is.EqualTo((2, 1, 0)));
+    }
+
+    [Test]
+    public void EveryRefAccessIsAWriteAndCopiesAreNot()
+    {
+        using var world = new World();
+        var entities = new Entity[8];
+        world.CreateEntities(entities, new Armor(1), new Health(0));
+        world.Update();
+        ulong mark = world.ChangeTick;
+        var changed = QueryFilter.Create().Changed<Armor>().ChangedSince(mark);
+
+        // Reads: a copy, presence checks, a query over other components, an in-only system pass.
+        entities[0].TryGet<Armor>(out _);
+        _ = entities[0].Has<Armor>();
+        foreach (var _ in world.Query<Health>()) { }
+        Assert.That(world.Count<Armor>(changed), Is.Zero);
+
+        entities[1].GetOrAdd<Armor>();
+        Assert.That(world.Count<Armor>(changed), Is.EqualTo(1));
+        var spawned = world.CreateEntity(new Armor(2));
+        var batch = new Entity[3];
+        world.CreateEntities(batch, new Armor(3));
+        Assert.That(world.Count<Armor>(changed), Is.EqualTo(5));
+
+        var polish = new Polish();
+        world.ForEach<Armor, Polish>(ref polish);
+        Assert.That(world.Count<Armor>(changed), Is.EqualTo(world.Count<Armor>()));
+
+        world.Update();
+        mark = world.ChangeTick;
+        changed = QueryFilter.Create().Changed<Armor>().ChangedSince(mark);
+        var polishBatch = new PolishBatch();
+        world.ForEachBatch<Armor, PolishBatch>(ref polishBatch);
+        Assert.That(world.Count<Armor>(changed), Is.EqualTo(world.Count<Armor>()));
+        _ = spawned;
+    }
+
+    [Test]
+    public void RestoreCountsEveryRowAsChanged()
+    {
+        using var world = new World();
+        world.AddSystem<ArmorWatch>();
+        var e = world.CreateEntity(new Armor(1), new Seen());
+        world.Update();
+        var snapshot = world.Capture();
+        world.Update();
+        Assert.That(SeenCount(e), Is.EqualTo(1));
+
+        world.Restore(snapshot); // restored values may differ from what any system last saw
+        world.Update();
+        Assert.That(SeenCount(e), Is.EqualTo(2));
+    }
+
+    [Test]
+    public void SparseWritesAreFoundAcrossBlocksOfRows()
+    {
+        using var world = new World();
+        var entities = new Entity[20_000]; // five blocks of 4,096 rows
+        world.CreateEntities(entities, new Armor(1));
+        world.Update();
+        ulong mark = world.ChangeTick;
+        var changed = QueryFilter.Create().Changed<Armor>().ChangedSince(mark);
+        Assert.That(world.Count<Armor>(changed), Is.Zero);
+
+        entities[15_000].Get<Armor>().Value++; // one row in block 3
+        entities[19_999].Get<Armor>().Value++; // the last row, in block 4
+        Assert.That(world.Count<Armor>(changed), Is.EqualTo(2));
+
+        entities[0].Destroy(); // the last row moves into row 0 (block 0, never written): its summaries go with it
+        var found = new System.Collections.Generic.List<Entity>();
+        foreach (var item in world.Query<Armor>(changed)) found.Add(item.Entity);
+        Assert.That(found, Is.EquivalentTo(new[] { entities[15_000], entities[19_999] }));
+    }
+
+    [Test]
+    public void ChangedWithoutComponentParametersQueriesTheChangedComponent()
+    {
+        using var world = new World();
+        world.AddSystem<ArmorEntityWatch>();
+        var a = world.CreateEntity(new Armor(1), new Seen());
+        var b = world.CreateEntity(new Armor(1), new Seen());
+        world.CreateEntity(new Seen()); // no armor: never visited
+        world.Update();
+        a.Get<Armor>().Value++;
+        world.Update();
+        Assert.That((SeenCount(a), SeenCount(b)), Is.EqualTo((2, 1)));
+    }
+
+    [Test]
+    public void ChangedCombinesWithWithAny()
+    {
+        using var world = new World();
+        var stunned = world.CreateEntity(new Armor(1), new Stun(1));
+        var frozen = world.CreateEntity(new Armor(1), new Frozen());
+        var plain = world.CreateEntity(new Armor(1));
+        world.Update();
+        var filter = QueryFilter.Create().Changed<Armor>().ChangedSince(world.ChangeTick).WithAny<Stun>().WithAny<Frozen>();
+        stunned.Get<Armor>().Value++;
+        plain.Get<Armor>().Value++;
+        Assert.That(world.Count<Armor>(filter), Is.EqualTo(1));
+        frozen.Get<Armor>().Value++;
+        var found = new System.Collections.Generic.List<Entity>();
+        foreach (var item in world.Query<Armor>(filter)) found.Add(item.Entity);
+        Assert.That(found, Is.EquivalentTo(new[] { stunned, frozen }));
+    }
+
+    [Test]
+    public void DestroyingInsideAChangedPassKeepsTheOtherRows()
+    {
+        using var world = new World();
+        world.AddSystem<BreakChanged>();
+        var entities = new Entity[10_000];
+        world.CreateEntities(entities, new Armor(1));
+        world.Update(); // every row is new, none is broken
+        Assert.That(world.Count<Armor>(), Is.EqualTo(entities.Length));
+
+        // Every 97th row written: the pass destroys them (tombstones) and skips the words nobody wrote.
+        int written = 0;
+        for (int i = 0; i < entities.Length; i += 97, written++) entities[i].Get<Armor>().Value++;
+        world.Update();
+        Assert.That(world.Count<Armor>(), Is.EqualTo(entities.Length - written));
+        for (int i = 0; i < entities.Length; i++) Assert.That(entities[i].IsAlive, Is.EqualTo(i % 97 != 0));
+        world.Update();
+        Assert.That(world.Count<Armor>(), Is.EqualTo(entities.Length - written));
+    }
+
+    [Test]
+    public void ASystemsOwnWritesAreNotChangesForItsNextRun()
+    {
+        using var world = new World();
+        world.AddSystem<Regen>();
+        var e = world.CreateEntity(new Armor(1), new Seen());
+        world.Update();
+        world.Update();
+        Assert.That(SeenCount(e), Is.EqualTo(1));
+    }
+
+    [Test]
+    public void WritesOrderedAfterTheWatchAreSeenNextUpdate()
+    {
+        using var world = new World();
+        world.AddSystem<ArmorWatch>();
+        world.AddSystem<LateWear>();
+        var e = world.CreateEntity(new Armor(5), new Seen(), new Stun(1));
+        world.Update();               // new row: seen; then LateWear writes it
+        Assert.That(SeenCount(e), Is.EqualTo(1));
+        world.Update();               // LateWear's write of the previous update
+        Assert.That(SeenCount(e), Is.EqualTo(2));
+    }
+
+    [Test]
+    public void WritesBetweenRunsOfAnIntervalSystemAreSeenOnce()
+    {
+        using var world = new World();
+        world.AddSystem<SlowArmorWatch>();
+        var e = world.CreateEntity(new Armor(5), new Seen());
+        world.Update(); // update 1: skipped
+        world.Update(); // update 2: runs, the row is new
+        Assert.That(SeenCount(e), Is.EqualTo(1));
+        e.Get<Armor>().Value++;
+        world.Update(); // update 3: skipped
+        e.Get<Armor>().Value++;
+        world.Update(); // update 4: both writes, one change
+        world.Update();
+        world.Update(); // update 6: nothing new
+        Assert.That(SeenCount(e), Is.EqualTo(2));
+    }
+
+    [Test]
+    public void ParallelWritersAndWatchersAgreeWithSequentialRuns()
+    {
+        int[] Run(bool parallel)
+        {
+            using var world = new World(new WorldOptions { Parallel = parallel });
+            world.AddSystem<Wear>();
+            world.AddSystem<ArmorWatch>();
+            world.AddSystem<Inspect>();
+            var entities = new Entity[1_000];
+            world.CreateEntities(entities, new Armor(9), new Seen(), new Health(0));
+            for (int i = 0; i < entities.Length; i += 3) entities[i].Add<Stun>();
+            for (int u = 0; u < 4; u++) world.Update();
+            var seen = new int[entities.Length];
+            for (int i = 0; i < seen.Length; i++) seen[i] = SeenCount(entities[i]);
+            return seen;
+        }
+
+        Assert.That(Run(parallel: true), Is.EqualTo(Run(parallel: false)));
     }
 }

@@ -33,7 +33,7 @@ public sealed partial class World
     // Query -> matching archetypes. Entries are created once and their array is replaced copy-on-write.
     private readonly ConcurrentDictionary<QueryKey, QueryCacheEntry> _queryCache = new();
 
-    private sealed class QueryCacheEntry(QueryMatch match)
+    internal sealed class QueryCacheEntry(QueryMatch match)
     {
         public QueryMatch Match = match;
     }
@@ -141,16 +141,23 @@ public sealed partial class World
     /// presence tests. Lock-free on cache hits; the result is an immutable snapshot.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)] // once per pass: keeps dictionary and gate code out of the iteration loops
-    internal QueryMatch GetMatchingArchetypes(ReadOnlySpan<ushort> bits, in QueryFilter filter)
+    internal QueryMatch GetMatchingArchetypes(ReadOnlySpan<ushort> bits, in QueryFilter filter) =>
+        Volatile.Read(ref GetQueryEntry(bits, in filter).Match);
+
+    /// <summary>
+    /// The cache entry of a query: its <see cref="QueryCacheEntry.Match"/> is replaced (volatile) whenever a new
+    /// archetype matches, so holders of the entry always see every matching table without another lookup.
+    /// </summary>
+    internal QueryCacheEntry GetQueryEntry(ReadOnlySpan<ushort> bits, in QueryFilter filter)
     {
         var key = QueryKey.ForLookup(bits, in filter);
         if (_queryCache.TryGetValue(key, out var entry))
-            return Volatile.Read(ref entry.Match);
+            return entry;
 
         using (Structural())
         {
             if (_queryCache.TryGetValue(key, out entry))
-                return entry.Match;
+                return entry;
 
             key = key.Detached();
 
@@ -164,9 +171,9 @@ public sealed partial class World
                 filters.Add(key.FilterFor(all[i]));
             }
 
-            var result = new QueryMatch(archetypes.ToArray(), filters.ToArray());
-            _queryCache[key] = new QueryCacheEntry(result);
-            return result;
+            entry = new QueryCacheEntry(new QueryMatch(archetypes.ToArray(), filters.ToArray()));
+            _queryCache[key] = entry;
+            return entry;
         }
     }
 

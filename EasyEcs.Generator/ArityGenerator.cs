@@ -536,8 +536,21 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     ref int ids = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.EntityIds), start);
                     ref int versions = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Versions), start);
             {{startAt}}
-                    for (int w = start >> 6; w << 6 < count; w++)
+                    int words = (count + 63) >> 6;
+                    for (int w = start >> 6; w < words; w++)
                     {
+                        int next = rows.NextWord(archetype, w, words);
+                        if (next != w)
+                        {
+                            // Whole words without a passing row (unwritten rows of a Changed filter): skip them.
+                            int skip = (next - w) << 6;
+                            w = next;
+                            if (w >= words) break;
+                            ids = ref Unsafe.Add(ref ids, skip);
+                            versions = ref Unsafe.Add(ref versions, skip);
+            {{Lines(n, i => $"                    r{i} = ref Unsafe.Add(ref r{i}, skip);")}}
+                        }
+
                         int left = Math.Min(64, count - (w << 6));
                         ulong bits = rows.Word(archetype, w);
                         if (tombstones || bits != ulong.MaxValue)

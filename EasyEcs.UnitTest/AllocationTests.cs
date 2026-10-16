@@ -45,6 +45,50 @@ public class AllocationTests
     }
 
     [Test]
+    public void IndexLookupsChangedQueriesAndIndexedChurnDoNotAllocate()
+    {
+        using var world = new World();
+        var children = world.Index<ChildOf, Entity>();
+        var callsigns = world.Index<Callsign, string>();
+        var parents = new Entity[8];
+        world.CreateEntities(parents, new Health(1));
+        var kids = new Entity[64];
+        for (int i = 0; i < kids.Length; i++)
+            kids[i] = world.CreateEntity(new ChildOf(parents[i % parents.Length]), new Callsign(i % 2 == 0 ? "even" : "odd"));
+        var armored = new Entity[10_000];
+        world.CreateEntities(armored, new Armor(1));
+        int next = 0;
+
+        void Frame()
+        {
+            // Churn: the oldest kid dies, a new one takes its place (ids reused, lists unlinked and relinked).
+            int k = next++ % kids.Length;
+            kids[k].Destroy();
+            kids[k] = world.CreateEntity(new ChildOf(parents[k % parents.Length]), new Callsign(k % 2 == 0 ? "even" : "odd"));
+            kids[(k + 1) % kids.Length].Remove<Callsign>();
+            kids[(k + 1) % kids.Length].Set(new Callsign("odd"));
+            kids[(k + 2) % kids.Length].Get<ChildOf>() = new ChildOf(parents[next % parents.Length]); // re-parent
+
+            int found = 0;
+            foreach (var parent in parents)
+                foreach (var _ in children.Find(parent)) found++;
+            _ = callsigns.TryFind("even", out _) && found == kids.Length;
+            _ = callsigns.Count("odd");
+
+            ulong mark = world.ChangeTick;
+            armored[next % armored.Length].Get<Armor>().Value++;
+            var changed = QueryFilter.Create().Changed<Armor>().ChangedSince(mark);
+            foreach (var item in world.Query<Armor>(changed)) item.Component1.Value++;
+            _ = world.Any<Armor>(changed);
+        }
+
+        for (int i = 0; i < 200; i++) Frame(); // warm-up: every kid replaced, query caches, JIT
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 500; i++) Frame();
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+    }
+
+    [Test]
     public void ParallelForEachDoesNotAllocateAfterItsFirstCall()
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });

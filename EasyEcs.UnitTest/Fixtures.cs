@@ -12,6 +12,7 @@ public struct Dead : IComponent;                          // tag
 public record struct Stun(int Ticks) : IComponent;        // gained and lost often
 public record struct Armor(int Value) : IComponent, ITrackChanges;   // tracked: rows record their last write
 public record struct Seen(int Count) : IComponent;       // how often a Changed<Armor> method visited the entity
+public record struct Shield(int Value) : IComponent, ITrackChanges;  // a second tracked component
 public record struct ChildOf(Entity Parent) : IComponent, IIndexed<Entity>  // a relation: indexed by its target
 {
     public Entity Key => Parent;

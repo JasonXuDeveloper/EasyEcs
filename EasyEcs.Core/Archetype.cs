@@ -68,6 +68,12 @@ internal sealed class Archetype
     /// </summary>
     public readonly ulong[][] WordWrite;
 
+    /// <summary>
+    /// Per change-tick column (null for others): the latest tick stamped into each block of 64 words (4,096 rows), an
+    /// upper bound like <see cref="WordWrite"/>. A <c>Changed</c> filter skips a block older than the pass's tick.
+    /// </summary>
+    public readonly ulong[][] BlockWrite;
+
     private readonly bool _tracked; // has change-tick columns
 
     /// <summary>Columns with <see cref="Present"/> bits (indices into <see cref="Columns"/>), copy-on-write.</summary>
@@ -103,6 +109,7 @@ internal sealed class Archetype
         Absent = new int[Components.Length];
         LastWrite = new ulong[Components.Length];
         WordWrite = new ulong[Components.Length][];
+        BlockWrite = new ulong[Components.Length][];
         _infos = new ComponentInfo[Components.Length];
         _columnOf = new short[Components.Length == 0 ? 0 : Components[^1] + 1];
         _columnOf.AsSpan().Fill(-1);
@@ -113,7 +120,12 @@ internal sealed class Archetype
             _infos[i] = info;
             _hasManaged |= info.Managed;
             Columns[i] = info.Create(initialCapacity);
-            if (info.Owner >= 0) WordWrite[i] = new ulong[(initialCapacity + 63) >> 6];
+            if (info.Owner >= 0)
+            {
+                WordWrite[i] = new ulong[(initialCapacity + 63) >> 6];
+                BlockWrite[i] = new ulong[(initialCapacity + 4095) >> 12];
+            }
+
             _tracked |= info.Owner >= 0;
             _columnOf[Components[i]] = (short)i;
             ByBit[Components[i]].Column = Columns[i];
@@ -279,6 +291,7 @@ internal sealed class Archetype
         int column = ColumnIndex(ComponentType<ChangeTicks<T>>.Bit);
         LastWrite[column] = tick;
         WordWrite[column][slot >> 6] = tick;
+        BlockWrite[column][slot >> 12] = tick;
         return ref Unsafe.Add(ref Data<ChangeTicks<T>>(column), slot);
     }
 
@@ -292,6 +305,8 @@ internal sealed class Archetype
             if (t < 0) continue;
             ref ulong word = ref target.WordWrite[t][to >> 6];
             word = Math.Max(word, words[from >> 6]);
+            ref ulong block = ref target.BlockWrite[t][to >> 12];
+            block = Math.Max(block, word);
             target.LastWrite[t] = Math.Max(target.LastWrite[t], source.LastWrite[c]);
         }
     }
@@ -305,6 +320,7 @@ internal sealed class Archetype
             MemoryMarshal.CreateSpan(ref Unsafe.As<ChangeTicks<T>, ulong>(ref Ticks<T>(tick, start)), count).Fill(tick);
             int column = ColumnIndex(ComponentType<ChangeTicks<T>>.Bit);
             WordWrite[column].AsSpan(start >> 6, ((start + count - 1) >> 6) - (start >> 6) + 1).Fill(tick);
+            BlockWrite[column].AsSpan(start >> 12, ((start + count - 1) >> 12) - (start >> 12) + 1).Fill(tick);
         }
     }
 
@@ -316,6 +332,7 @@ internal sealed class Archetype
             {
                 MemoryMarshal.CreateSpan(ref Unsafe.As<ChangeTick, ulong>(ref Data<ChangeTick>(c)), Count).Fill(tick);
                 WordWrite[c].AsSpan().Fill(tick);
+                BlockWrite[c].AsSpan().Fill(tick);
                 LastWrite[c] = tick;
             }
     }
@@ -387,7 +404,11 @@ internal sealed class Archetype
         }
 
         for (int c = 0; c < WordWrite.Length; c++)
-            if (WordWrite[c] != null) Array.Resize(ref WordWrite[c], (capacity + 63) >> 6);
+            if (WordWrite[c] != null)
+            {
+                Array.Resize(ref WordWrite[c], (capacity + 63) >> 6);
+                Array.Resize(ref BlockWrite[c], (capacity + 4095) >> 12);
+            }
     }
 
     /// <summary>

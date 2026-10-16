@@ -213,6 +213,7 @@ public sealed partial class World
         // Meta keeps its length (handles index it unchecked): cleared entries make every handle stale.
         Array.Clear(Meta);
         ClearArchetypes();
+        ResetIndexes(); // an index still held finds nothing
         ClearSingletons();
         _freeIdCount = 0;
         _entityCount = 0;

@@ -91,6 +91,7 @@ public sealed partial class World : IDisposable
     private void Free(ref EntityMeta meta, int id)
     {
         var archetype = meta.Archetype;
+        if (_indexByBit != null) Unindex(archetype, id);
         meta.Version++; // invalidates every outstanding handle
         meta.Archetype = null;
         RemoveRow(archetype, meta.Slot);

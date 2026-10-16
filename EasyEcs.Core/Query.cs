@@ -234,10 +234,11 @@ internal sealed class QueryMatch(Archetype[] archetypes, RowPlan[] filters)
         return count;
     }
 
+    /// <summary>Whether any alive matching entity exists: stops at the first one.</summary>
     public bool AnyAlive(ulong since)
     {
         for (int i = 0; i < Archetypes.Length; i++)
-            if (new RowFilter(Filters[i], since).CountAlive(Archetypes[i]) > 0)
+            if (new RowFilter(Filters[i], since).AnyAlive(Archetypes[i]))
                 return true;
         return false;
     }
@@ -337,6 +338,13 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         _ => Count(archetype),
     };
 
+    public bool AnyAlive(Archetype archetype) => Mode(archetype) switch
+    {
+        None => false,
+        All => archetype.AliveCount > 0,
+        _ => Any(archetype),
+    };
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Passes(Archetype archetype, int slot) => (Word(archetype, slot >> 6) & (1UL << slot)) != 0;
 
@@ -364,6 +372,49 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         var changed = plan.Changed;
         for (int i = 0; i < changed.Length && bits != 0; i++) bits &= Newer(archetype, changed[i], word, _since);
         return bits;
+    }
+
+    /// <summary>
+    /// The first word at or after <paramref name="word"/> (below <paramref name="words"/>) that may have passing rows:
+    /// for a <c>Changed</c> filter, blocks of 64 words, then words, whose first changed column was not written since the
+    /// pass's tick are skipped (words 4 per compare); otherwise <paramref name="word"/>. Returns <paramref name="words"/>
+    /// when none is left.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public int NextWord(Archetype archetype, int word, int words)
+    {
+        if (_plan.Changed.Length == 0) return word;
+        int column = _plan.Changed[0];
+        return NextWritten(archetype.BlockWrite[column], archetype.WordWrite[column], word, words, _since);
+    }
+
+    private static int NextWritten(ulong[] blocks, ulong[] summary, int word, int words, ulong since)
+    {
+        // words <= summary.Length and (words + 63) / 64 <= blocks.Length: the summaries cover the column's capacity,
+        // words cover the table's rows.
+        ref ulong s = ref MemoryMarshal.GetArrayDataReference(summary);
+        var threshold = Vector256.Create((long)since - 1); // signed: ticks stay below 2^63 (see Newer)
+        while (word < words)
+        {
+            int block = word >> 6;
+            int end = Math.Min(words, (block + 1) << 6);
+            if (Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(blocks), block) >= since)
+            {
+                for (; word + 4 <= end; word += 4)
+                {
+                    uint newer = Vector256.GreaterThan(Vector256.LoadUnsafe(ref Unsafe.As<ulong, long>(ref s), (nuint)word), threshold)
+                        .ExtractMostSignificantBits();
+                    if (newer != 0) return word + BitOperations.TrailingZeroCount(newer);
+                }
+
+                for (; word < end; word++)
+                    if (Unsafe.Add(ref s, word) >= since) return word;
+            }
+
+            word = end;
+        }
+
+        return words;
     }
 
     /// <summary>
@@ -398,7 +449,8 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         int count = 0;
         int rows = archetype.Count;
         var ids = archetype.EntityIds;
-        for (int w = 0; w << 6 < rows; w++)
+        int words = (rows + 63) >> 6;
+        for (int w = NextWord(archetype, 0, words); w < words; w = NextWord(archetype, w + 1, words))
         {
             ulong bits = Word(archetype, w) & RowMask(w, rows);
             while (bits != 0)
@@ -409,6 +461,22 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         }
 
         return count;
+    }
+
+    /// <summary>Whether any alive row passes: <see cref="Count"/> stopping at the first.</summary>
+    public bool Any(Archetype archetype)
+    {
+        int rows = archetype.Count;
+        var ids = archetype.EntityIds;
+        int words = (rows + 63) >> 6;
+        for (int w = NextWord(archetype, 0, words); w < words; w = NextWord(archetype, w + 1, words))
+        {
+            ulong bits = Word(archetype, w) & RowMask(w, rows);
+            for (; bits != 0; bits &= bits - 1)
+                if (ids[(w << 6) + BitOperations.TrailingZeroCount(bits)] >= 0) return true;
+        }
+
+        return false;
     }
 
     /// <summary>
