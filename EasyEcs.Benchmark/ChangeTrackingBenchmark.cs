@@ -6,13 +6,14 @@ namespace EasyEcs.Benchmark;
 /// Replicating changed state, the job change tracking exists for: 100,000 entities, of which <see cref="Written"/> get
 /// a new health per tick (input applied through handles), then one system copies health into the replicated copy.
 /// <c>Changed</c> visits only the written rows ([Changed&lt;Health&gt;]); <c>All</c> visits every row, as a system
-/// without change tracking must. Steady state allocates 0 bytes either way.
+/// without change tracking must. 10 writes is a quiet tick (unwritten blocks of 4,096 rows are skipped whole); 1,000
+/// writes spread 97 rows apart touch most 64-row words. Steady state allocates 0 bytes either way.
 /// </summary>
 [MemoryDiagnoser]
 public partial class ChangeTrackingBenchmark
 {
     [Params(100_000)] public int Entities;
-    [Params(1_000)] public int Written;
+    [Params(10, 1_000)] public int Written;
     [Params(false, true)] public bool Changed;
 
     private World _world;

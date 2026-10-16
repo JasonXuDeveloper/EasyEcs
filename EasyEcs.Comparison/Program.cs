@@ -2,6 +2,7 @@ using System;
 using BenchmarkDotNet.Running;
 using EcsComparison.ArchPort;
 using EcsComparison.DefaultEcsPort;
+using EcsComparison.Features;
 using EcsComparison.FrifloPort;
 
 namespace EcsComparison;
@@ -10,7 +11,8 @@ public static class Program
 {
     /// <summary>
     /// BenchmarkDotNet by default; <c>--check [ticks]</c> runs every library for a few hundred ticks at both entity
-    /// counts, prints the counters and verifies they match EasyEcs (no measurement).
+    /// counts, prints the counters and verifies they match EasyEcs, then runs the setups of the feature comparisons,
+    /// which check each library's result (no measurement).
     /// </summary>
     public static int Main(string[] args)
     {
@@ -43,7 +45,45 @@ public static class Program
                 }
             }
         }
+        ok &= CheckFeatures();
         return ok ? 0 : 1;
+    }
+
+    /// <summary>The feature comparisons check every library's result in their setups: run each of them once.</summary>
+    private static bool CheckFeatures()
+    {
+        var changes = new ChangeTrackingComparison();
+        var index = new IndexComparison { Trades = 100 };
+        (string Name, Action Setup, Action Cleanup)[] setups =
+        [
+            ("ChangeTracking EasyEcs", changes.SetupEasyEcs, changes.Cleanup),
+            ("ChangeTracking Friflo", changes.SetupFriflo, changes.Cleanup),
+            ("ChangeTracking Arch", changes.SetupArch, changes.Cleanup),
+            ("ChangeTracking DefaultEcs", changes.SetupDefaultEcs, changes.Cleanup),
+            ("Index EasyEcs", index.SetupEasyEcs, index.Cleanup),
+            ("Index Friflo", index.SetupFriflo, index.Cleanup),
+            ("Index DefaultEcs", index.SetupDefaultEcs, index.Cleanup),
+        ];
+        bool ok = true;
+        foreach (var (name, setup, cleanup) in setups)
+        {
+            try
+            {
+                setup();
+                Console.WriteLine($"  {name,-26} ok");
+            }
+            catch (InvalidOperationException e)
+            {
+                ok = false;
+                Console.WriteLine($"  {name,-26} MISMATCH {e.Message}");
+            }
+            finally
+            {
+                cleanup();
+            }
+        }
+
+        return ok;
     }
 
     /// <summary>Bytes allocated per tick after warm-up (a sanity check only; BenchmarkDotNet reports the real figure).</summary>
