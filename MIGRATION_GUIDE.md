@@ -45,6 +45,10 @@ behaviors:
 - **`Parallel` keeps subclasses it cannot see alone.** A system class that derives from a generated system without
   adding `[ForEach]` methods of its own (for example to override `OnUpdate`) now runs alone in its priority, as its
   `OnUpdate` may touch anything. Give the subclass a `[ForEach]` method (it is then generated) to batch it again.
+- **`AddSingleton<T>()` on an existing singleton resets it in place.** It used to replace the storage, which left
+  `SingletonRef<T>` handles taken before pointing at a detached copy; they now see the reset value.
+- **`RemoveSingleton<T>()` returns `bool`** (false when the singleton was not added). Calls that ignore the result
+  compile unchanged.
 - **`Entity.GetHashCode()` is deterministic** (`Id * 397 ^ Version`) instead of `HashCode.Combine` (randomized per
   process). Equality is unchanged; only code that persisted hash codes across processes could notice.
 
@@ -70,6 +74,10 @@ New:
   `IForEachBatch` (new) have `Writes`.
 - `IIndexed<TKey>`, `world.Index<T, TKey>()`, `ValueIndex<T, TKey>`: find entities by a component value; relations
   are indexed `Entity` keys ([Indexes and relations](doc/guide/indexes-and-relations.md)).
+- `entity.Read<T>()` returns a `ref readonly T` that never counts as a write of a tracked component, and
+  `entity.TryGetRef<T>(out bool found)` returns a `ref T` (a null ref when missing): optional access without a copy.
+- [EECS011](doc/guide/analyzer.md#eecs011) warns when a `[ForEach]` method changes a collection or class held by a
+  component it takes as `in` (the change would be neither scheduled as a write nor tracked).
 - The library is marked `IsAotCompatible`: trimming and Native AOT analyzers run on every build, and it publishes
   with Native AOT without warnings.
 

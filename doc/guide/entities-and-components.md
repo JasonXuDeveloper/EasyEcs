@@ -74,6 +74,8 @@ public record struct Name(string Value) : IComponent;   // managed references ar
 | Operation | Effect |
 |---|---|
 | `ref T Get<T>()` | Ref into storage; throws if the entity does not have `T`. |
+| `ref readonly T Read<T>()` | Read-only ref; throws if missing. Not a write, so tracked components stay unchanged. |
+| `ref T TryGetRef<T>(out bool found)` | Ref into storage if present; a null ref when not (check `found`). |
 | `bool Has<T>()` | Whether the entity has `T`. |
 | `bool TryGet<T>(out T value)` | A **copy** of `T` if present. |
 | `ref T Add<T>()` | Adds `T` (or resets it to `default` if present) and returns a ref. |
@@ -81,7 +83,18 @@ public record struct Name(string Value) : IComponent;   // managed references ar
 | `Entity Set(in T1 … in Tn)` | Adds or overwrites 1-9 values, with at most one row copy; chainable. |
 | `void Remove<T1..Tn>()` | Removes 1-9 components; the entity keeps its row. Missing ones are ignored. |
 
-Always mutate through a `ref`; see [`ref` and `await`](refs-and-await.md).
+Always mutate through a `ref`; see [`ref` and `await`](refs-and-await.md). The `ref T` operations count as a write
+of a tracked component ([change tracking](change-tracking.md)) whether or not you store through them, so read with
+`Read` or `TryGet`, and write through `Get`, `TryGetRef` or `GetOrAdd`:
+
+```csharp
+if (world.TryGetEntity(unit.Id, out var hit))          // e.g. an id a client sent
+{
+    ref var hp = ref hit.TryGetRef<Health>(out bool alive);
+    if (alive) hp.Value -= 10;                             // one lookup, written in place
+    float x = hit.Read<Position>().X;                      // read-only: no change recorded
+}
+```
 
 Components live in archetype tables, one row per entity. Removing a component keeps the entity in its table and only
 marks the component absent, so states that come and go never move data; adding back a component the table has a

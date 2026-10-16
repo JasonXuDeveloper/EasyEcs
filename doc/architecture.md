@@ -70,10 +70,9 @@ Trade-off: a table copies an entity's row when the entity gains a component its 
 what makes iteration dense. States that come and go (stunned, burning, dead) only flip presence bits after the first
 time, so they cost no copy; a table with many rows lacking a queried component is walked 64 rows per bit word.
 
-Columns are contiguous arrays, not pages: measured over 100,000 rows, paged columns (1,024 or 16,384 rows per page)
-iterate at the same speed, make random handle access 6-35% slower (one more indirection), and only make growth
-cheaper (0.65 vs 1.17 ms and 1.6 vs 4.2 MB to grow a table from empty). Growth is a warm-up cost that
-`InitialEntityCapacity` removes; handle access and iteration are paid on every tick.
+Columns are contiguous arrays, not pages. Paged columns (a few thousand rows per page) iterate at the same speed but
+put one more indirection on every handle access; all they save is the copy when a table grows, a warm-up cost that
+`InitialEntityCapacity` removes, while handle access is paid on every tick.
 
 ## Memory layout at a glance
 
@@ -203,7 +202,7 @@ Every iteration API walks tables front to back. What differs is how much bookkee
 |---|---|
 | `ArityGenerator` | Emits every T1..T9 family of `EasyEcs.Core` from one template each: `Entity.Set` / `Remove`, `World.CreateEntity` / `CreateEntities` / `DestroyEntities`, `IForEach` / `IForEachEntity` / `IForEachBatch`, `ForEach` / `ForEachEntity` / `ForEachBatch` / `ForEachParallel` / `ForEachEntityParallel`, `Query`, `Count`, `Any`, `QueryItem` / `QueryEnumerator`. Runs only for `EasyEcs.Core`. |
 | `SystemGenerator` | Turns `[ForEach]` methods into struct jobs (per entity, or per run of rows for span parameters), static filters, a `GeneratedUpdate` override and a `GeneratedAccess` override (reads and writes, or `RunsAlone`) used for `Parallel` batching. `[Changed<T>]` becomes `ChangedSince(LastRunTick + 1)` on the method's filter and a declared read of `T`; `[ForEach(Parallel = true)]` runs the job over chunks of rows. Jobs that cannot change structure get `INoStructuralChanges`; jobs record which components they write (`Writes`) and whether they read the entity id. |
-| `EasyEcsAnalyzer` | Reports EECS001–EECS006, EECS009 and EECS010 (errors) and EECS007–EECS008 (ECS-principle warnings). Every rule with its fix: [Analyzer rules](guide/analyzer.md). |
+| `EasyEcsAnalyzer` | Reports EECS001–EECS006, EECS009 and EECS010 (errors) and EECS007, EECS008 and EECS011 (ECS-principle warnings). Every rule with its fix: [Analyzer rules](guide/analyzer.md). |
 
 Following the incremental-generator guidelines:
 

@@ -28,7 +28,7 @@ checks that every library computes the same result.
 | Singletons | ✅ `ISingletonComponent`, `[ForEach]` parameters | ⚠️ `UniqueEntity` | ❌ | ✅ `World.Set<T>` / `Get<T>` |
 | Systems and scheduling | ✅ `EcsSystem`, `Priority`, groups, intervals | ✅ `SystemRoot`, `SystemGroup`, `QuerySystem` | ❌ (Arch.Extended) | ✅ `ISystem<T>`, `SequentialSystem`, `AEntitySetSystem` |
 | Source-generated systems | ✅ `[ForEach]` → inlined struct jobs | ❌ | ❌ in core (Arch.Extended) | ❌ |
-| Compile-time analyzer | ✅ EECS001-EECS010 | ❌ | ❌ | ❌ |
+| Compile-time analyzer | ✅ EECS001-EECS011 | ❌ | ❌ | ❌ |
 | Chunk / span iteration | ✅ batch `[ForEach]` methods, `ForEachBatch` | ✅ chunks | ✅ chunks | – |
 | Struct query jobs | ✅ `IForEach`, `IForEachEntity`, `IForEachBatch` | ✅ | ✅ `IForEach`, inline queries | – |
 | Bulk create and destroy | ✅ `CreateEntities`, `DestroyEntities(filter)` | ✅ | ✅ | – |
@@ -150,7 +150,7 @@ the catch-up makes many trades cost about 25% more than with libraries that upda
 ## Their features in EasyEcs
 
 What the other libraries offer, how EasyEcs does the same job, and where the
-[battle server](../README.md#example-a-battle-server) of the README (`EasyEcs.Benchmark/BattleServer.cs`) shows it.
+[battle server example](example.md) (`EasyEcs.Benchmark/BattleServer.cs`) shows it.
 Some are built in under another name; some are done with data instead of a mechanism (EasyEcs has no events or
 command buffers on purpose); a few are not offered.
 

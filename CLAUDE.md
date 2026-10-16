@@ -71,7 +71,7 @@ EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, req
   SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
                                the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] ->
                                ChangedSince(LastRunTick + 1) and a read of T) + GeneratedUpdate + GeneratedAccess
-  EasyEcsAnalyzer.cs           EECS001-010 (generators never report diagnostics)
+  EasyEcsAnalyzer.cs           EECS001-011 (generators never report diagnostics)
   Symbols.cs                   symbol checks shared by generator and analyzer
   Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
   EquatableArray.cs            array with value equality (generator models cache between edits)
@@ -82,7 +82,7 @@ EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, P
                                from EasyEcs.Benchmark); Fixtures.cs holds the shared test components
 EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / MultiWorldBenchmark (headline, realistic
                                server tick; the world itself is WorldSimulation.cs), BattleServerBenchmark (the
-                               README example, BattleServer.cs, every feature), ParallelSystemsBenchmark,
+                               doc/example.md, BattleServer.cs, every feature), ParallelSystemsBenchmark,
                                ParallelForEachBenchmark, ChangeTrackingBenchmark, IndexBenchmark, SnapshotBenchmark +
                                MicroBenchmarks.
                                Always measure with BenchmarkDotNet.
@@ -90,8 +90,8 @@ EasyEcs.Comparison/            BenchmarkDotNet: the headline world (WorldSimulat
                                Arch, Friflo.Engine.ECS and DefaultEcs, counters checked against EasyEcs;
                                OperationBenchmark (per operation, vs Friflo); FeatureBenchmark (change tracking and
                                indexes in each library's own way, results checked in setup)
-doc/                           README.md (index), getting-started.md, guide/ (one page per concept, analyzer.md
-                               lists EECS001-010), api.md (API + complexity), ecs-principles.md, architecture.md,
+doc/                           README.md (index), getting-started.md, example.md (the battle server), guide/ (one page per concept, analyzer.md
+                               lists EECS001-011), api.md (API + complexity), ecs-principles.md, architecture.md,
                                performance.md (diagrams in mermaid)
 ```
 
@@ -119,7 +119,7 @@ doc/                           README.md (index), getting-started.md, guide/ (on
 - **Follow the ECS principles in `doc/ecs-principles.md`, including in tests, benchmarks and docs**: components and
   singletons are plain data structs; one system per responsibility; systems are stateless (state goes into
   components or singletons, EECS007) and never reference other systems (EECS008); state changes are data.
-  Examples are what users copy, so they must be exemplary. The README example is `EasyEcs.Benchmark/BattleServer.cs`
+  Examples are what users copy, so they must be exemplary. The battle server example (`doc/example.md`) is `EasyEcs.Benchmark/BattleServer.cs`
   verbatim: change both together, and give a new feature a place in it.
 - **Performance changes must be measured.** Run the relevant `EasyEcs.Benchmark` cases before and after; a change
   ships only if it is a net improvement (time and allocations) with no regression elsewhere. Add a benchmark

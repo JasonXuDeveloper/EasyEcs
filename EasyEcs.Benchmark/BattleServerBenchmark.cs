@@ -4,7 +4,7 @@ using EasyEcs.Benchmark.Showcase;
 namespace EasyEcs.Benchmark;
 
 /// <summary>
-/// The battle server of the README (<see cref="BattleServer"/>), which uses every feature; the tick runs a parallel
+/// The battle server example (doc/example.md) (<see cref="BattleServer"/>), which uses every feature; the tick runs a parallel
 /// [ForEach], parallel systems, batch methods, immediate structural changes, WithAny, change tracking (replication
 /// every third tick), a value index and a relation, system groups, an update interval, singletons,
 /// timings. One operation is one server tick. Steady state allocates 0 bytes.

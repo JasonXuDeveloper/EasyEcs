@@ -7,7 +7,7 @@ Every feature of EasyEcs on one page: what it does, when to use it (and when not
 scenarios it is built for. Each section links to its guide page. Numbers are BenchmarkDotNet results on a 4-core
 Xeon VM at 2.1 GHz ([benchmarks](performance.md#benchmarks)).
 
-| Feature | In one line | In the [battle server](../README.md#example-a-battle-server) |
+| Feature | In one line | In the [battle server](example.md) |
 |---|---|---|
 | [Worlds and entities](#worlds-and-entities) | Isolated worlds of version-checked, recycled entity handles. | `new World(options)` in the host; `Entity` handles everywhere; `Hit` (`TryGetEntity`) |
 | [Components and tags](#components-and-tags) | Plain structs in archetype tables; empty structs are tags. | `Position`, `Health`, …; tags `Player`, `Npc`, `Dead` |
@@ -318,8 +318,8 @@ Guide: [Systems: errors](guide/systems.md#errors).
 
 ## Analyzer
 
-**What it does.** The package bundles an analyzer (EECS001-EECS010) next to the generator: invalid `[ForEach]`
-methods, class components, stateful systems, systems referencing systems, unsafe parallel methods fail the build or
+**What it does.** The package bundles an analyzer (EECS001-EECS011) next to the generator: invalid `[ForEach]`
+methods, class components, stateful systems, systems referencing systems, unsafe parallel methods, writes through `in` components fail the build or
 warn.
 
 **When to use it.** Always on; it keeps a large code base decoupled.

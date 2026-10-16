@@ -59,7 +59,9 @@ Notation:
 | API | Complexity | Notes |
 |---|---|---|
 | `entity.Get<T>()` → `ref T` | O(1) | version check + column lookup (+ one presence-bit test) + one indexed load; throws if missing; counts as a write of a tracked (`ITrackChanges`) component |
-| `entity.Has<T>()` / `TryGet<T>(out T)` | O(1) | `TryGet` returns a copy |
+| `entity.Read<T>()` → `ref readonly T` | O(1) | as `Get`, but read-only: never counts as a write |
+| `entity.TryGetRef<T>(out bool found)` → `ref T` | O(1) | a null ref when missing (check `found`); counts as a write of a tracked component when found |
+| `entity.Has<T>()` / `TryGet<T>(out T)` | O(1) | `TryGet` returns a copy (not a write) |
 | `entity.Add<T>()` → `ref T` | O(c) amortized | adds (or resets) and returns a ref; a component the table has a column for only sets its presence bit (O(1)), a new one copies the row |
 | `entity.GetOrAdd<T>()` → `ref T` | O(1), or as `Add` when missing | counts as a write of a tracked component |
 | `entity.Set(in T1 … in Tn)` → `Entity` | O(n), or O(c) amortized when it moves | add or overwrite, at most one row copy, chainable |
@@ -102,9 +104,9 @@ it is appended (copy-on-write) to the archetype list and to every cached query i
 | `world.GetSystem<T>()` | O(systems) |
 | `world.Update()` (default group) / `world.Update<TGroup>()` | Σ systems of the group; allocation-free; throws `ObjectDisposedException` after `Dispose()` |
 | `world.ChangeTick` | O(1); grows by one per system batch, once after each update and once per index lookup that catches up with written rows outside a pass ([change tracking](guide/change-tracking.md)) |
-| `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` → `ref T` | O(1) |
+| `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` → `ref T` | O(1); `AddSingleton` resets an existing singleton in its storage, so `SingletonRef<T>` handles stay attached |
 | `world.SingletonRef<T>()` → `SingletonRef<T>` (stable handle; adds if missing) / `singletonRef.Value` → `ref T` | O(1) / O(1), one load |
-| `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) |
+| `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` → `bool` | O(1); `RemoveSingleton` returns false when it was not added |
 | `world.CompactArchetypes()` | O(archetypes + tombstones × columns); tables are kept dense automatically, so this is only needed after a pass was interrupted by an exception (which `Update` also handles) |
 | `world.GetFragmentationStats()` → `(TotalSlots, AliveEntities, FragmentationRatio)` | O(archetypes) |
 | `world.Capture()` → `WorldSnapshot` | O(entities × components + archetypes + singletons); copies by value, not while a query iterates |

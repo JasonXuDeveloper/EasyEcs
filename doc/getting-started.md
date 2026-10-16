@@ -382,7 +382,7 @@ world.Restore(save);            // and roll it back: handles from before stay va
 With `WorldOptions { MeasureSystems = true }`, every system records its runs and times in `system.Stats`. See
 [Snapshots](guide/snapshots.md).
 
-The [README](../README.md#example-a-battle-server) puts all of it together in one battle server, which is also a
+The [battle server example](example.md) puts all of it together in one battle server, which is also a
 benchmark and a test of this repository.
 
 ## Next steps

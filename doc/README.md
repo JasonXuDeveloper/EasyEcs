@@ -19,6 +19,7 @@ flowchart LR
 | [Comparison](comparison.md) | Compare EasyEcs with Friflo.Engine.ECS, Arch and DefaultEcs: features, the same server tick, operations, change tracking, indexes. |
 | [Getting started](getting-started.md) | Build a small simulation step by step: world, entities, components, tags, queries, systems, singletons, groups, update loop. |
 | [ECS principles](ecs-principles.md) | Learn how to design features as data plus one-job systems, and why the analyzer enforces it. |
+| [Example: a battle server](example.md) | See every feature in one world: the code of the battle server benchmark and scenario tests. |
 
 ## Guide
 
@@ -36,7 +37,7 @@ One page per concept, in a sensible reading order:
 | [Indexes and relations](guide/indexes-and-relations.md) | `IIndexed<TKey>`, `world.Index<T, TKey>()`: find entities by a value; relations (`ChildOf(Entity Parent)`) and their reverse lookup. |
 | [Snapshots](guide/snapshots.md) | Capture and restore a world in memory: undo, prediction, replays, tests. |
 | [Threading](guide/threading.md) | Process, world and owner thread; system order; safe `WorldOptions.Parallel`; what the structural gate guards. |
-| [Analyzer rules](guide/analyzer.md) | EECS001-EECS010: meaning and fix. |
+| [Analyzer rules](guide/analyzer.md) | EECS001-EECS011: meaning and fix. |
 
 ## Reference
 

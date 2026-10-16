@@ -37,12 +37,14 @@ out a `ref`, whether or not the code stores through it:
 | Write | Not a write |
 |---|---|
 | `ref T` parameters of `[ForEach]` methods (`Span<T>` for batch methods) and of struct jobs (`Writes`) | `in T` parameters, `ReadOnlySpan<T>` |
-| `Query` items (the enumerator stamps every row it visits) | `TryGet<T>(out T)` (a copy) |
-| `entity.Get<T>()`, `GetOrAdd<T>()`, `Add<T>()`, `Set(...)` | `Has<T>()` |
+| `Query` items (the enumerator stamps every row it visits) | `TryGet<T>(out T)` (a copy), `Read<T>()` (read-only) |
+| `entity.Get<T>()`, `TryGetRef<T>(out found)` when found, `GetOrAdd<T>()`, `Add<T>()`, `Set(...)` | `Has<T>()` |
 | `CreateEntity(...)`, `CreateEntities(...)` with the component | removing the component |
 | `world.Restore(snapshot)` (every restored row) | |
 
-So declare read-only access as `in`: a `ref` parameter that only reads marks every row it visits as changed.
+So declare read-only access as `in`: a `ref` parameter that only reads marks every row it visits as changed. A
+component's row holds a collection or class only by reference: changing it counts as a write only through a `ref`
+access, so never change it through `in` (EECS011, and [ECS principles, rule 8](../ecs-principles.md#8-hold-collections-as-entities-or-by-value-not-as-shared-references)).
 
 ## Ticks
 

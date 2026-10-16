@@ -235,6 +235,60 @@ A `ref` from `Get<T>()` or a `Query` item is valid until the next structural cha
 parameters of a `[ForEach]` method stay valid through its own body's changes. None is valid across `await`. Keep `Entity` handles (validated on every access) and re-read components when you need them.
 See [`ref` and `await`](guide/refs-and-await.md).
 
+### 8. Hold collections as entities or by value, not as shared references
+
+A component may hold a `List<T>`, an array or a class, but its row stores only the reference. The world sees a write
+when code takes the component by `ref`, not when the list behind it changes, so a list changed through an `in`
+parameter is invisible to everything that relies on the row:
+
+| | A list changed through `ref` (`Get`, `ref` parameter) | A list changed through `in` |
+|---|---|---|
+| `[Changed<T>]`, value indexes | sees the write (the row is stamped) | misses it |
+| Parallel systems | scheduled as a write | scheduled as a read: races with other readers |
+| Snapshots | the snapshot shares the list, so later changes reach it too | the same |
+
+EECS011 reports the `in` case when the method changes the collection directly (`bag.Items.Add(x)`,
+`bag.Items[i] = x`, `bag.Box.Count++`). It cannot follow the reference into a local or into a method of your own
+class, which is why the representation matters more than the rule. In order of preference:
+
+1. **One entity per item**, pointing at its owner through a relation ([indexes and relations](guide/indexes-and-relations.md#relations)).
+   Each item is a row: its own components, change ticks, queries and parallel schedule, copied by value in snapshots.
+   This is the ECS way for inventories, members, buffs with their own state.
+2. **A fixed-capacity buffer inside the component** for small bounded sets (cooldown slots, the last few inputs). The
+   component stays unmanaged: no GC, copied by value everywhere, every change is a `ref` write.
+3. **A list replaced, not mutated**, for rare changes of variable size: assign a new `ImmutableArray<T>` through
+   `ref`. The row is stamped, a snapshot keeps the old array, and `!=` on the reference tells whether it changed.
+
+```csharp
+[System.Runtime.CompilerServices.InlineArray(4)]
+public struct Slots4 { private int _first; }                               // 4 ints stored inline
+
+public struct Cooldowns : IComponent, ITrackChanges { public Slots4 Ticks; } // unmanaged: no list to share
+public record struct Perks(System.Collections.Immutable.ImmutableArray<int> Ids) : IComponent, ITrackChanges;
+
+public partial class CooldownSystem : EcsSystem
+{
+    [ForEach]
+    static void Tick(ref Cooldowns cooldowns)                              // ref: scheduled and stamped as a write
+    {
+        for (int i = 0; i < 4; i++)
+            if (cooldowns.Ticks[i] > 0) cooldowns.Ticks[i]--;
+    }
+}
+
+public static class PerkRules
+{
+    public static void Grant(Entity player, int perk)
+    {
+        ref var perks = ref player.Get<Perks>();                           // a write: stamped
+        perks = new Perks(perks.Ids.IsDefault ? [perk] : perks.Ids.Add(perk));   // a new array, the old one untouched
+    }
+}
+```
+
+A mutable list that stays in a component (a buffer only one system uses, say) is changed only through `ref`, and is
+not part of what snapshots restore.
+
 ## Checklist for a new feature
 
 1. List the data: which components (per entity) and singletons (per world) does it need?
@@ -243,4 +297,5 @@ See [`ref` and `await`](guide/refs-and-await.md).
 4. Express cross-module reactions as systems querying the state another system wrote, never as calls between
    systems.
 5. Make sure the analyzer reports no EECS warnings.
+6. Keep collections as entities or values ([rule 8](#8-hold-collections-as-entities-or-by-value-not-as-shared-references)).
 6. Test each system alone: create a world, add the system and the data it reads, `Update()`, assert on data.
