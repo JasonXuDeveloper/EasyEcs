@@ -17,6 +17,8 @@ namespace EasyEcs;
 /// them immediately and never keep them across a structural change of that entity (it moves the row) or an
 /// <c>await</c>.
 /// </remarks>
+[System.Diagnostics.DebuggerDisplay("{ToString(),nq}")]
+[System.Diagnostics.DebuggerTypeProxy(typeof(EntityDebugView))]
 public readonly partial struct Entity : IEquatable<Entity>
 {
     private readonly World _world;

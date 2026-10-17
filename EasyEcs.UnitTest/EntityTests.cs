@@ -279,4 +279,20 @@ public class EntityTests
         Assert.That(world.Count<Seen>(QueryFilter.Create().Removed<Armor>(mark)), Is.EqualTo(1));
         Assert.That(e.Has<Position>() && !e.Has<Armor>() && !e.Has<Callsign>(), Is.True);
     }
+
+    [Test]
+    public void TheDebuggerViewListsComponentValues()
+    {
+        using var world = new World();
+        var e = world.CreateEntity(new Health(5), new Armor(2), new Callsign("x"));
+        e.Disable<Armor>();
+        var proxy = typeof(Entity).GetCustomAttributes(typeof(System.Diagnostics.DebuggerTypeProxyAttribute), false);
+        var view = System.Activator.CreateInstance(System.Type.GetType(((System.Diagnostics.DebuggerTypeProxyAttribute)proxy[0]).ProxyTypeName)!, e)!;
+        var components = (object[])view.GetType().GetProperty("Components")!.GetValue(view)!;
+        Assert.That(components, Has.Length.EqualTo(3));
+        Assert.That(components, Does.Contain(new Health(5)).And.Contain(new Callsign("x")));
+        Assert.That(components[0].ToString() + components[1] + components[2], Does.Contain("Armor"));
+        e.Destroy();
+        Assert.That((object[])view.GetType().GetProperty("Components")!.GetValue(view)!, Is.Empty);
+    }
 }

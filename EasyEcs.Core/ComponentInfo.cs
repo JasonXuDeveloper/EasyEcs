@@ -111,6 +111,9 @@ internal abstract class ComponentInfo
     /// <see cref="DynamicBuffer{T}"/> columns copies of their lists, so the two sides never share one.
     /// </summary>
     public abstract void CopyRows(Array source, Array target, int count);
+
+    /// <summary>A boxed copy of row <paramref name="slot"/> of <paramref name="column"/> (the debugger view; cold, allocates).</summary>
+    public abstract object Box(Array column, int slot);
 }
 
 internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsReferenceOrContainsReferences<T>() ? -1 : Unsafe.SizeOf<T>(),
@@ -121,6 +124,9 @@ internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsRefere
     // slack, so their rows can start on a 64-byte boundary (Archetype.Aligned): SIMD loads and power-of-two sized
     // components then never straddle two lines. Managed columns are plain T[] (the GC must see their references).
     public override Type Type => typeof(T);
+
+    public override object Box(Array column, int slot) =>
+        Managed ? Unsafe.As<T[]>(column)[slot] : Unsafe.Add(ref Archetype.Row0<T>(column), slot);
 
     public override Array Create(int capacity) =>
         Managed ? new T[capacity] : GC.AllocateArray<byte>(capacity * Size + Archetype.CacheLine, pinned: true);

@@ -142,7 +142,7 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>The table and row of <paramref name="entity"/> (an alive entity of any world).</summary>
-    private static (Archetype Table, int Row) Source(Entity entity)
+    internal static (Archetype Table, int Row) Source(Entity entity)
     {
         var world = entity.World;
         if (world == null) Entity.ThrowStale();
