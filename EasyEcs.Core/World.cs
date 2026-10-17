@@ -252,35 +252,28 @@ public sealed partial class World : IDisposable
             for (int a = 0; a < archetypes.Length; a++)
             {
                 var archetype = archetypes[a];
-                var rows = new RowFilter(match.Filters[a], since);
-                int mode = archetype.AliveCount == 0 ? RowFilter.None : rows.Mode(archetype);
-                if (mode == RowFilter.None) continue;
-                if (mode == RowFilter.All && archetype.Count == archetype.AliveCount && !archetype.HasCleanup &&
-                    Volatile.Read(ref Passes) == 0)
-                {
+                if (archetype.AliveCount != 0 && archetype.Count == archetype.AliveCount && !archetype.HasCleanup &&
+                    Volatile.Read(ref Passes) == 0 && new RowFilter(match.Filters[a], since).Mode(archetype) == RowFilter.All)
                     destroyed += FreeTable(archetype); // every row goes: no row moves, one clear
-                    continue;
-                }
-
-                // From the last row down: outside passes a removed row is filled by the last one, already visited, so
-                // the passing rows of each word (computed once per word) stay valid for the rows below.
-                int count = archetype.Count;
-                for (int w = (count - 1) >> 6; w >= 0; w--)
-                {
-                    ulong bits = rows.Word(archetype, w) & RowFilter.RowMask(w, count);
-                    for (; bits != 0; bits &= ~(1UL << 63 >> BitOperations.LeadingZeroCount(bits)))
-                    {
-                        int slot = (w << 6) + 63 - BitOperations.LeadingZeroCount(bits);
-                        var entity = archetype.Slots[slot];
-                        if (entity.Index >= 0 && Destroy(ref MetaRef(entity.Index), entity)) destroyed++;
-                    }
-                }
             }
 
+            var op = new DestroyOp(); // the other tables row by row (the freed ones have no rows left)
+            WalkDown(match, since, ref op);
+            destroyed += op.Count;
             if (_parentCount != 0) DestroyChildren();
         }
 
         return destroyed;
+    }
+
+    private struct DestroyOp : IRowOp
+    {
+        public int Count;
+
+        public void Apply(World world, Archetype table, int slot, EntityId entity)
+        {
+            if (world.Destroy(ref world.MetaRef(entity.Index), entity)) Count++;
+        }
     }
 
     /// <summary>

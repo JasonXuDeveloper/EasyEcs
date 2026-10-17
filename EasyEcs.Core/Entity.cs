@@ -278,7 +278,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     }
 
     [DoesNotReturn, MethodImpl(MethodImplOptions.NoInlining)]
-    private static void ThrowNotDisabled<T>() =>
+    internal static void ThrowNotDisabled<T>() =>
         throw new InvalidOperationException($"{typeof(T).Name} cannot be disabled: remove it instead");
 
     /// <summary>

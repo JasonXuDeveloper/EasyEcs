@@ -146,6 +146,12 @@ public class AllocationTests
             walker.Set(new Zone((walker.Read<Zone>().Id + 1) % 4));
             foreach (var item in world.Query<Health>(QueryFilter.Create().InGroup<Zone>(next % 4))) seen += item.Component1.Value;
 
+            // Bulk changes: a zone is stunned, the stun lifted, a status disabled and given back.
+            world.SetAll(new Stun(2), QueryFilter.Create().InGroup<Zone>(next % 4));
+            world.RemoveAll<Stun>();
+            world.DisableAll<Health>(QueryFilter.Create().InGroup<Zone>(next % 4));
+            world.EnableAll<Health>();
+
             // A tree with a retiring leaf: destroy cascades, the cleanup component is released.
             var root = world.CreateEntity(new Health(1));
             var child = world.CreateEntity(new ChildOf(root));
