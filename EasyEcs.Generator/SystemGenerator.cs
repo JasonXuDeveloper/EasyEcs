@@ -391,16 +391,20 @@ public sealed class SystemGenerator : IIncrementalGenerator
             var withAny = new List<string>();
             var changed = new List<string>();
             var removed = new List<string>();
-            foreach (var attribute in method.GetAttributes())
+            void Filters(ISymbol symbol)
             {
-                if (attribute.AttributeClass is not { IsGenericType: true } cls) continue;
-                string name = cls.ConstructedFrom.ToDisplayString();
-                if (name == Symbols.WithAttribute) with.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
-                else if (name == Symbols.WithoutAttribute) without.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
-                else if (name == Symbols.WithAnyAttribute) withAny.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
-                else if (name == Symbols.ChangedAttribute) changed.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
-                else if (name == Symbols.RemovedAttribute) removed.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
+                foreach (var attribute in symbol.GetAttributes())
+                {
+                    if (attribute.AttributeClass is not { IsGenericType: true } cls) continue;
+                    string name = cls.ConstructedFrom.ToDisplayString(), type = cls.TypeArguments[0].ToDisplayString(Symbols.Fqn);
+                    var list = name == Symbols.WithAttribute ? with : name == Symbols.WithoutAttribute ? without
+                        : name == Symbols.WithAnyAttribute ? withAny : name == Symbols.ChangedAttribute ? changed
+                        : name == Symbols.RemovedAttribute ? removed : null;
+                    if (list != null && !list.Contains(type)) list.Add(type);
+                }
             }
+
+            Filters(method);
 
             var query = parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan)
                 .Select(p => p.Type).ToList();
@@ -415,6 +419,11 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     with.RemoveAt(0);
                 }
             }
+            // The system group's filters ([Without<Inactive>] public struct Gameplay : ISystemGroup) join every method's
+            // (after the queried component is chosen: a group's [With<T>] only filters).
+            if (!outside && Symbols.GroupOf(method.ContainingType) is { } group) Filters(group);
+            if (query.Count > 0) with.RemoveAll(query.Contains); // a group's [With<T>] the method already queries
+
             bool stable = Symbols.IsStable(method, syntax, model);
             bool parallel = Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax, model) == null;
             return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, stable, parallel, syntax.SpanStart,

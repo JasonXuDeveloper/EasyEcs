@@ -3,14 +3,14 @@ using System;
 namespace EasyEcs;
 
 /// <summary>
-/// Runs a method of a <c>partial</c> <see cref="EcsSystem"/> for every entity matching its component parameters (and
+/// Runs a method of an <see cref="EcsSystem"/> (or a static method of any other type, through a generated entry point) for every entity matching its component parameters (and
 /// the <see cref="WithAttribute{T}"/> / <see cref="WithoutAttribute{T}"/> / <see cref="WithAnyAttribute{T}"/> filters), each update, after
 /// <see cref="EcsSystem.OnUpdate"/>, in declaration order.
 /// <para>Parameters: 1..9 components (<c>ref</c> to write, <c>in</c> to read; or <c>Span&lt;T&gt;</c> /
 /// <c>ReadOnlySpan&lt;T&gt;</c> for a batch method that receives runs of rows), singletons (<c>ref</c> / <c>in</c>), and
 /// optionally <see cref="Entity"/> and <see cref="World"/>. Static and instance methods are supported.</para>
 /// <code>
-/// public partial class MovementSystem : EcsSystem
+/// public class MovementSystem : EcsSystem
 /// {
 ///     [ForEach, Without&lt;Frozen&gt;]
 ///     static void Move(ref Position p, in Velocity v) { p.X += v.X; p.Y += v.Y; }
@@ -30,19 +30,27 @@ public sealed class ForEachAttribute : Attribute
     public bool Parallel { get; init; }
 }
 
-/// <summary>The <see cref="ForEachAttribute"/> method also requires component <typeparamref name="T"/> (not passed in).</summary>
-[AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
+/// <summary>
+/// The <see cref="ForEachAttribute"/> method also requires component <typeparamref name="T"/> (not passed in). On a
+/// system group (an <see cref="ISystemGroup"/> struct), every [ForEach] method of the group's systems does.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method | AttributeTargets.Struct, AllowMultiple = true)]
 public sealed class WithAttribute<T> : Attribute where T : struct, IComponent;
 
-/// <summary>The <see cref="ForEachAttribute"/> method skips entities having component <typeparamref name="T"/>.</summary>
-[AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
+/// <summary>
+/// The <see cref="ForEachAttribute"/> method skips entities having component <typeparamref name="T"/>. On a system
+/// group (an <see cref="ISystemGroup"/> struct), every [ForEach] method of the group's systems does:
+/// <code>[Without&lt;Inactive&gt;] public struct Gameplay : ISystemGroup;</code>
+/// </summary>
+[AttributeUsage(AttributeTargets.Method | AttributeTargets.Struct, AllowMultiple = true)]
 public sealed class WithoutAttribute<T> : Attribute where T : struct, IComponent;
 
 /// <summary>
 /// The <see cref="ForEachAttribute"/> method requires at least one of the components named by its
 /// <c>[WithAny&lt;T&gt;]</c> attributes (not passed in): <c>[ForEach, WithAny&lt;Burning&gt;, WithAny&lt;Poisoned&gt;]</c>.
+/// On a system group, every [ForEach] method of the group's systems requires one of the group's.
 /// </summary>
-[AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
+[AttributeUsage(AttributeTargets.Method | AttributeTargets.Struct, AllowMultiple = true)]
 public sealed class WithAnyAttribute<T> : Attribute where T : struct, IComponent;
 
 /// <summary>

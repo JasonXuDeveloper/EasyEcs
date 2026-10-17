@@ -10,11 +10,15 @@ namespace EasyEcs;
 /// public struct NetworkGroup : ISystemGroup;
 ///
 /// [UpdateInGroup&lt;NetworkGroup&gt;]
-/// public partial class ReceiveSystem : EcsSystem { ... }
+/// public class ReceiveSystem : EcsSystem { ... }
 ///
 /// world.Update&lt;NetworkGroup&gt;();   // whenever packets arrive
 /// world.Update();                     // fixed tick: default group
 /// </code>
+/// A group may carry <see cref="WithAttribute{T}"/>, <see cref="WithoutAttribute{T}"/> and
+/// <see cref="WithAnyAttribute{T}"/> filters: the generator adds them to every [ForEach] method of its systems
+/// (<c>[Without&lt;Inactive&gt;] public struct Gameplay : ISystemGroup;</c> keeps inactive entities out of the whole
+/// group). Queries a system makes in OnUpdate are its own.
 /// </summary>
 public interface ISystemGroup;
 

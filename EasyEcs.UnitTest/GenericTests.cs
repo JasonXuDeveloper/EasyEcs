@@ -108,3 +108,36 @@ public class GenericTests
         Assert.That(x, Is.EqualTo(3));
     }
 }
+
+/// <summary>A group whose filter joins every [ForEach] method of its systems: frozen entities are out of it.</summary>
+[Without<Frozen>]
+public struct Thawed : ISystemGroup;
+
+[UpdateInGroup<Thawed>]
+public class CountThawed : EcsSystem
+{
+    [ForEach]
+    private static void Count(in Position position, ref Tally tally) => tally.Count++;
+
+    [ForEach, With<Health>]
+    private static void Score(in Position position, ref Score score) => score.Points++;
+}
+
+public class GroupFilterTests
+{
+    [Test]
+    public void AGroupsFilterJoinsEveryMethodOfItsSystems()
+    {
+        using var world = new World();
+        world.CreateEntity(new Position(0, 0), new Health(1));
+        world.CreateEntity(new Position(1, 0), new Health(1), new Frozen());
+        world.CreateEntity(new Position(2, 0));
+        world.AddSingleton<Tally>();
+        world.AddSingleton<Score>();
+        world.AddSystem<CountThawed>();
+
+        world.Update<Thawed>();
+        Assert.That(world.GetSingleton<Tally>().Count, Is.EqualTo(2), "the frozen entity is out");
+        Assert.That(world.GetSingleton<Score>().Points, Is.EqualTo(1), "with the method's own filter too");
+    }
+}

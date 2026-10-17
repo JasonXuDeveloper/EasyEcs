@@ -147,10 +147,16 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         Category, DiagnosticSeverity.Error, true,
         "The generator writes the jobs of [ForEach] methods outside the user's type (no partial needed) and calls the method through UnsafeAccessor, so private methods and systems are fine; the types of its parameters, and the type of a [ForEach] method outside a system, must be internal or public.");
 
+    public static readonly DiagnosticDescriptor FilterOutsideGroup = new("EECS023", "Filter on a struct that is no system group",
+        "'{0}' carries [{1}], which filters only on [ForEach] methods and on system groups (ISystemGroup structs)",
+        Category, DiagnosticSeverity.Error, true,
+        "[With<T>], [Without<T>] and [WithAny<T>] on an ISystemGroup struct join every [ForEach] method of the group's " +
+        "systems. On any other struct (a component) they do nothing.");
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
         MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
-        RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups, RunnerCollision, Unnameable);
+        RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups, RunnerCollision, Unnameable, FilterOutsideGroup);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -408,6 +414,14 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (type.TypeKind == TypeKind.Struct && (Symbols.Implements(type, Symbols.Component) || Symbols.Implements(type, Symbols.Singleton)))
             AnalyzeDataFields(context, type);
 
+        if (type.TypeKind == TypeKind.Struct && !Symbols.Implements(type, "EasyEcs.ISystemGroup"))
+            foreach (var attribute in type.GetAttributes())
+                if (attribute.AttributeClass is { IsGenericType: true } cls
+                    && cls.ConstructedFrom.ToDisplayString() is Symbols.WithAttribute or Symbols.WithoutAttribute or Symbols.WithAnyAttribute)
+                    context.ReportDiagnostic(Diagnostic.Create(FilterOutsideGroup,
+                        attribute.ApplicationSyntaxReference?.GetSyntax(context.CancellationToken).GetLocation() ?? location,
+                        type.Name, cls.Name.Replace("Attribute", "") + "<" + cls.TypeArguments[0].Name + ">"));
+
         if (type.TypeKind != TypeKind.Class) return;
         if (Symbols.IsSystem(type)) AnalyzeSystemFields(context, type);
     }
@@ -496,12 +510,18 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         foreach (var attribute in method.GetAttributes())
             if (attribute.AttributeClass is { IsGenericType: true } cls && cls.ConstructedFrom.ToDisplayString() == Symbols.RemovedAttribute)
                 removed.Add(cls.TypeArguments[0]);
-        foreach (var attribute in method.GetAttributes())
-            if (attribute.AttributeClass is { IsGenericType: true } cls
-                && cls.ConstructedFrom.ToDisplayString() is Symbols.WithAttribute or Symbols.ChangedAttribute
-                && removed.Any(r => SymbolEqualityComparer.Default.Equals(r, cls.TypeArguments[0])))
-                context.ReportDiagnostic(Diagnostic.Create(RemovedRequired, location, method.Name, cls.TypeArguments[0].Name,
-                    $"[{cls.Name.Replace("Attribute", "")}<{cls.TypeArguments[0].Name}>] requires it"));
+        void Required(ISymbol owner, string where)
+        {
+            foreach (var attribute in owner.GetAttributes())
+                if (attribute.AttributeClass is { IsGenericType: true } cls
+                    && cls.ConstructedFrom.ToDisplayString() is Symbols.WithAttribute or Symbols.ChangedAttribute
+                    && removed.Any(r => SymbolEqualityComparer.Default.Equals(r, cls.TypeArguments[0])))
+                    context.ReportDiagnostic(Diagnostic.Create(RemovedRequired, location, method.Name, cls.TypeArguments[0].Name,
+                        $"[{cls.Name.Replace("Attribute", "")}<{cls.TypeArguments[0].Name}>]{where} requires it"));
+        }
+
+        Required(method, "");
+        if (!outside && Symbols.GroupOf(method.ContainingType) is { } group) Required(group, " on its group " + group.Name); // its filters join the method's
 
         int components = 0;
         bool valid = true;

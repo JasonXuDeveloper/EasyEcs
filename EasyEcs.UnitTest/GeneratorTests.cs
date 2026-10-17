@@ -137,6 +137,9 @@ public class GeneratorTests
         "public static void A<T>(global::EasyEcs.World world, ref int n) where T : struct, global::EasyEcs.IComponent",
         "internal ref struct AJob<T> : global::EasyEcs.IForEach<T>, global::EasyEcs.INoStructuralChanges where T : struct, global::EasyEcs.IComponent",
         "internal static extern void A<T>([UnsafeAccessorType(\"R\")] object owner, in T t, ref int n) where T : struct, global::EasyEcs.IComponent;")]
+    [TestCase("[Without<Q>, WithAny<T>] public struct G : ISystemGroup; [UpdateInGroup<G>] public class S : EcsSystem { [ForEach, Without<Q>] static void A(ref P p) { } [ForEach, With<P>] static void B() { } }",
+        "AFilter = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T>();", // once, though both name it
+        "BFilter = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T>();", "world.ForEach<global::P, BJob>")]
     [TestCase("public static class R<T> where T : struct, IComponent { [ForEach] static void A(in T t, ref int n) { } }",
         "extension<T>(global::R<T>) where T : struct, global::EasyEcs.IComponent", "new __ForEach<T>.AJob { x1 = ref n }", "public static class R_1ForEach")]
     public void GenericSystemsAndRunnersAreGenerated(string source, params string[] expected)
@@ -218,6 +221,8 @@ public class GeneratorTests
     [TestCase("public class U { World _w = new(); void F() => new System.Threading.Thread(() => { _w.Update(); }).Start(); void G() => _w.Update(); }", "EECS014")]
     [TestCase("public static class U { public static void F(Entity e) { for (int i = 0; i < 4; i++) System.Threading.ThreadPool.QueueUserWorkItem(_ => e.Remove<P>()); } }", "EECS014")]
     [TestCase("public partial class S : EcsSystem { [ForEach, Removed<T>] static void A(in T t, ref P p) { } }", "EECS016")]
+    [TestCase("[With<T>] public struct G : ISystemGroup; [UpdateInGroup<G>] public class S : EcsSystem { [ForEach, Removed<T>] static void A(ref P p) { } }", "EECS016")] // the group's filter
+    [TestCase("[Without<Q>] public struct NotAGroup : IComponent;", "EECS023")]
     [TestCase("public partial class S : EcsSystem { [ForEach, Removed<T>, With<T>] static void A(ref P p) { } }", "EECS016")]
     [TestCase("public partial class S : EcsSystem { [ForEach, Removed<T>] static void A(Entity e) { } }", "EECS003")]       // T is no query anchor
     [TestCase("public record struct Target(Entity Of) : IComponent;", "EECS017")]                   // a handle in a component
