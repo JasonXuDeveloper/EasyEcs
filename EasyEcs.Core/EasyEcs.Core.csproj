@@ -12,12 +12,12 @@
         <PackageId>EasyEcs</PackageId>
         <Title>EasyEcs</Title>
         <Authors>JasonXuDeveloper</Authors>
-        <Description>An Entity-Component-System library</Description>
+        <Description>Allocation-free archetype ECS for long-running .NET servers: source-generated [ForEach] systems, safe parallel systems, change tracking, value indexes, dynamic buffers and snapshots. Zero GC on hot paths, Native AOT ready.</Description>
         <Copyright>JasonXuDeveloper</Copyright>
         <PackageProjectUrl>https://github.com/JasonXuDeveloper/EasyEcs</PackageProjectUrl>
         <RepositoryUrl>https://github.com/JasonXuDeveloper/EasyEcs</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
-        <PackageTags>ECS</PackageTags>
+        <PackageTags>ecs;entity-component-system;archetype;game-server;gamedev;high-performance;zero-allocation;source-generator;aot</PackageTags>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
         <PackageReadmeFile>README.md</PackageReadmeFile>
         <PublishRepositoryUrl>true</PublishRepositoryUrl>
