@@ -8,8 +8,8 @@
 | | |
 |---|---|
 | **Use it for** | One world per thread (one per map or zone); `ParallelSystems` for heavy independent systems; parallel `[ForEach]` for one heavy method. |
-| **Avoid** | Several threads of your own mutating one world; component values touched outside the owner thread. |
-| **Cost** | No locks on the hot paths: queries match lock-free, structural bookkeeping takes a compare-and-swap gate; a parallel batch costs a thread-pool hand-off (microseconds). |
+| **Avoid** | Several threads of your own mutating one world (EECS014 reports the ones it sees); component values touched outside the owner thread. |
+| **Cost** | No locks or atomics on the hot paths: queries match lock-free, a structural change checks and sets a plain owner flag; a parallel batch costs a thread-pool hand-off (microseconds). |
 
 - [Terms: process, world, owner thread](#terms-process-world-owner-thread)
 - [Recommended: one world per thread](#recommended-one-world-per-thread)
@@ -47,8 +47,7 @@ flowchart TB
 ## Recommended: one world per thread
 
 Worlds share nothing, so a server that splits its entities over several worlds, each owned by one thread (for example
-one world per map or zone), needs no synchronization at all,
-and the world's structural gate stays uncontended. `MultiWorldBenchmark` measures exactly this layout (one world per
+one world per map or zone), needs no synchronization at all: a world's thread is its owner. `MultiWorldBenchmark` measures exactly this layout (one world per
 core, each on its own long-lived thread): see [Performance](../performance.md#benchmarks).
 
 ```mermaid
@@ -161,14 +160,24 @@ runner, and the calling thread always takes part.
 
 | Operation | Safety |
 |---|---|
-| Structural changes (create/destroy, `Add`/`Set`/`Remove`), adding/removing systems and singletons | Enter the world's structural gate (a compare-and-swap flag): the world's structure never tears. |
-| Query matching, `Has`, `Get` lookups | Lock-free over immutable, copy-on-write archetype snapshots (the first use of a query shape enters the gate once to build its cache entry). |
+| Structural changes (create/destroy, `Add`/`Set`/`Remove`), adding/removing systems and singletons, `Capture`/`Restore` | Owner thread only, one at a time. They check and set the world's owner flag (no atomic instruction): one started while another runs, or while the world runs a parallel batch or a parallel `[ForEach]`, throws `InvalidOperationException` instead of tearing the tables. |
+| Query matching, `Has`, `Get` lookups | Lock-free over immutable, copy-on-write archetype snapshots (the first use of a query shape takes a compare-and-swap gate once to build its cache entry, so the threads of a parallel batch can race to it). |
+| A singleton a system resolves first (`[ForEach]` singleton parameters, `GetOrAddSingleton`, `SingletonRef`) | The same compare-and-swap gate: systems of one batch may add it at once. |
 | Component and singleton **values** | Not synchronized, by design: the owner thread, or the parallel scheduler, decides who touches them. |
 | Value index lookups, and the unlinking done by destroying an entity or removing an indexed component | Not synchronized: owner thread only while the world has an index ([indexes and relations](indexes-and-relations.md)). |
 
-The gate protects the world's bookkeeping, not your data: a `ref` or a running query on one thread does not survive a
-structural change made by another thread. So use one owner thread per world, with `ParallelSystems` for systems
+Structural changes are the owner thread's, like component values: a `ref` or a running query on one thread would not
+survive a change made by another thread anyway. So use one owner thread per world, with `ParallelSystems` for systems
 the scheduler checked; do not mutate one world from several threads of your own.
+
+What catches a change made off the owner thread:
+
+| Where the change comes from | Caught by |
+|---|---|
+| A `[ForEach]` method that takes no `Entity` or `World` (or only reads its `Entity`), changing structure through a handle a component holds or a world kept elsewhere | [EECS013](analyzer.md#eecs013) at compile time; the runtime throws if it runs in a parallel batch. |
+| A system of a parallel batch, or a parallel `[ForEach]` job, that changes structure through a helper method | The runtime: the world marks the batch and the chunks as a parallel region, and every structural change in one throws, deterministically. |
+| A lambda handed to `Task.Run`, `Parallel.*`, `ThreadPool`, `new Thread` or `new Timer` that changes a world (or an entity) the code around it also changes, or hands off several times | [EECS014](analyzer.md#eecs014) at compile time. A world handed to a thread that then owns it (a world per thread) is not reported. |
+| Your own threads in any other way | Nothing reliable: the owner flag may throw, but two threads can also pass it together. Hand the change to the owner as data ([below](#input-from-other-threads)). |
 
 ## Input from other threads
 

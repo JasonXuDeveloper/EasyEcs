@@ -38,6 +38,16 @@ behaviors:
   `foreach` loops compile unchanged.
 - **`QueryEnumerator.Count` / `IsEmpty` are gone:** use `world.Count` / `world.Any` with the same filter.
 - **`entity.Remove<…>()` returns the entity** for chaining (calls that ignore it compile unchanged).
+- **Structural changes belong to the world's owner thread.** 4.0 serialized creates, destroys, `Add`/`Set`/`Remove`
+  and singleton or system changes from any thread with a compare-and-swap lock. 4.1 checks a plain owner flag
+  instead: a change made while another runs, or inside a parallel batch of systems or a parallel `[ForEach]`, throws
+  `InvalidOperationException`; two threads of your own changing one world at once are not caught reliably. Make
+  structural changes on the thread that calls `Update` (other threads hand them over as data through a queue a
+  system drains: [input from other threads](doc/guide/threading.md#input-from-other-threads)), or give each thread
+  its own world. Two new analyzer errors point at such code: **EECS013** (a structural change in a `[ForEach]`
+  method that takes no `Entity` or `World`, e.g. through a handle a component holds: take the `Entity` as a
+  parameter) and **EECS014** (a structural change in a lambda handed to `Task.Run`, `Parallel.*`, `ThreadPool` or a
+  `Thread` that races with other changes of the same world).
 - **Every analyzer rule is an error.** EECS007 (mutable state in a system) and EECS008 (a system referencing a
   system) were warnings in 4.0; code that triggers them no longer builds. Move the state into a component or
   singleton, and communicate through data.

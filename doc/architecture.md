@@ -207,7 +207,7 @@ Every iteration API walks tables front to back. What differs is how much bookkee
 |---|---|
 | `ArityGenerator` | Emits every T1..T9 family of `EasyEcs.Core` from one template each: `Entity.Set` / `Remove`, `World.CreateEntity` / `CreateEntities` / `DestroyEntities`, `IForEach` / `IForEachEntity` / `IForEachBatch`, `ForEach` / `ForEachEntity` / `ForEachBatch` / `ForEachParallel` / `ForEachEntityParallel`, `Query`, `Count`, `Any`, `QueryItem` / `QueryEnumerator`. Runs only for `EasyEcs.Core`. |
 | `SystemGenerator` | Turns `[ForEach]` methods into struct jobs (per entity, or per run of rows for span parameters), static filters, a `GeneratedUpdate` override, a `GeneratedAccess` override (reads and writes, or `RunsAlone`) used for `ParallelSystems` batching, and a `GeneratedFor` override naming the class it was generated for (a subclass the generator did not see inherits it, so its access is unknown and it runs alone). `[Changed<T>]` becomes `ChangedSince(LastRunTick + 1)` on the method's filter and a declared read of `T`; `[ForEach(Parallel = true)]` runs the job over chunks of rows. Jobs that cannot change structure get `INoStructuralChanges`; jobs record which components they write (`Writes`) and whether they read the entity id. |
-| `EasyEcsAnalyzer` | Reports EECS001–EECS012, all errors: invalid input the generator skips, and code that breaks the ECS principles. Every rule with its fix: [Analyzer rules](guide/analyzer.md). |
+| `EasyEcsAnalyzer` | Reports EECS001–EECS014, all errors: invalid input the generator skips, and code that breaks the ECS principles. Every rule with its fix: [Analyzer rules](guide/analyzer.md). |
 
 Following the incremental-generator guidelines:
 
@@ -239,13 +239,18 @@ Every world uses the same indices, so masks are comparable across worlds.
 
 ## Threading
 
-- Structural operations, system changes and singleton creation enter the world's **structural gate**: a
-  compare-and-swap flag on its own cache line, with a spinning wait under contention. It is not reentrant (no
-  structural operation calls another one under the gate; debug builds assert it).
-- Queries, `Get` and `Has` are lock-free. The first use of a query shape enters the gate once to build its cache
-  entry.
-- Component values are unsynchronized by design. The recommended layout is **one world per owner thread**, where the
-  gate is always uncontended. User-facing rules: [Threading](guide/threading.md).
+- Structural operations, system changes, `Capture` and `Restore` enter the world's **structural gate**, which
+  belongs to the owner thread: a plain flag, checked and set on the way in, cleared on the way out (no atomic
+  instruction, so a create/destroy pair costs no `lock cmpxchg`). A parallel batch of systems and the chunks of a
+  parallel `[ForEach]` add a region count to the same flag while they run, so any structural change inside them throws
+  `InvalidOperationException`, deterministically; so does one reentered under the gate.
+- The cold paths the threads of a parallel batch reach on their own take a separate **shared gate** (a
+  compare-and-swap flag with a spinning wait): the first match of a query shape, a singleton a system resolves first,
+  and closing the tombstones when the last pass ends. Both flags sit on their own cache line.
+- Queries, `Get` and `Has` are lock-free. Component values are unsynchronized by design. The recommended layout is
+  **one world per owner thread**. The analyzer reports structural changes in `[ForEach]` methods that promise none
+  (EECS013) and in delegates handed to other threads that race (EECS014). User-facing rules:
+  [Threading](guide/threading.md).
 - `WorldOptions.ParallelSystems`: every system carries a `SystemAccess` (component and singleton read/write bitsets, or
   "runs alone"), generated from its `[ForEach]` parameters and read once by `AddSystem`. The schedule splits each
   priority into batches of consecutive, pairwise non-conflicting systems and publishes them as one copy-on-write

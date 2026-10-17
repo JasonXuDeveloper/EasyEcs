@@ -101,7 +101,7 @@ first write. Reads work on any reference (`in`, `Read<T>()`); writes need a `ref
 | `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1); allocates once a component's bit is 256 or more (worlds with more than 256 component types) | build once and keep it in a `static readonly` field; `WithAny` calls form one "at least one of" group |
 | `filter.Changed<T>(since)` / `filter.ChangedSince(since)` | O(1); a pass skips tables, 4,096-row blocks and 64-row words written before `since` (4 summaries per SIMD compare) and takes a word's written rows from its summary; only words written at several ticks after `since`, or row by row by a query, test 4 rows per SIMD compare | rows whose `T` (`ITrackChanges`) was written at or after `since`; one tick per filter (`Changed` filters naming different ticks throw `ArgumentException`); `ChangedSince` returns a copy with a new tick, so a kept filter takes a new tick per call without being rebuilt |
 
-The first time a query shape is used, building its cache entry costs O(all archetypes) under the structural gate.
+The first time a query shape is used, building its cache entry costs O(all archetypes) under the shared gate (a compare-and-swap).
 After that, each lookup is one hash probe. In turn, creating a new archetype (the first entity with a new component
 set) costs O(archetypes + cached query shapes + Σ over the matching cached queries of their archetype count), since
 it is appended (copy-on-write) to the archetype list and to every cached query it matches. Both are cold paths.

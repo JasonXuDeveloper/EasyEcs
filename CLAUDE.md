@@ -33,7 +33,8 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
   World.Archetypes.cs          archetype registry, transition edges, copy-on-write query cache (GetQueryEntry: the
                                live entry a value index holds), CompactArchetypes (an update's recovery from an
                                abandoned query), the structural gate (Structural())
-  StructuralGate.cs            CAS gate on its own cache line (not reentrant) + StructuralScope
+  StructuralGate.cs            owner flag (plain check-and-set, throws when reentered or inside a parallel region) +
+                               shared CAS gate for the cold paths parallel batches reach; StructuralScope / SharedScope
   World.Systems.cs             system groups, priority order, parallel batches, synchronous Update / Update<TGroup>,
                                Dispose (also resets value indexes)
   World.Parallel.cs            allocation-free runner (caller + reusable thread-pool work items) for system batches
@@ -74,7 +75,8 @@ EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, req
   SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
                                the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] ->
                                ChangedSince(LastRunTick + 1) and a read of T) + GeneratedUpdate + GeneratedAccess
-  EasyEcsAnalyzer.cs           EECS001-012 (generators never report diagnostics)
+  EasyEcsAnalyzer.cs           EECS001-014 (generators never report diagnostics)
+  Threads.cs                   EECS014's check: does a structural call in a delegate handed to another thread race
   Symbols.cs                   symbol checks shared by generator and analyzer
   Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
   EquatableArray.cs            array with value equality (generator models cache between edits)
@@ -94,7 +96,7 @@ EasyEcs.Comparison/            BenchmarkDotNet: the headline world (WorldSimulat
                                OperationBenchmark (per operation, vs Friflo); FeatureBenchmark (change tracking and
                                indexes in each library's own way, results checked in setup)
 doc/                           README.md (index), getting-started.md, example.md (the battle server), guide/ (one page per concept, analyzer.md
-                               lists EECS001-012), api.md (API + complexity), ecs-principles.md, architecture.md,
+                               lists EECS001-014), api.md (API + complexity), ecs-principles.md, architecture.md,
                                performance.md (diagrams in mermaid)
 ```
 
@@ -111,7 +113,7 @@ doc/                           README.md (index), getting-started.md, example.md
 4. **Thread safety is explicit**: every shared structure documents its contract (single owner vs. lock vs.
    lock-free). The archetype lists lock-free readers walk are immutable snapshots (copy-on-write arrays
    published with `Volatile.Write`); tables (entity rows, columns, presence bits) are mutated under the world's
-   structural gate (`World.Structural()`), which is why component values need one owner thread.
+   structural gate (`World.Structural()`), which belongs to the owner thread like component values do.
 5. **Concise, elegant, no duplication**: write one implementation and generate arity variants (`EasyEcs.Generator`)
    instead of copy-pasting T1..T9 code by hand. Prefer small shared non-generic cores with thin typed wrappers.
 6. **Every change is proven**: unit tests for behavior (`EasyEcs.UnitTest`) and BenchmarkDotNet numbers for
@@ -135,7 +137,8 @@ doc/                           README.md (index), getting-started.md, example.md
 - **Generators follow the incremental rules**: `ForAttributeWithMetadataName` or syntax-only predicates first,
   equatable symbol-free models, no diagnostics from generators (add them to `EasyEcsAnalyzer` using `Symbols`), a
   tracking name per stage and a caching assertion in `GeneratorTests`.
-- **Structural changes go through the gate** (`using (Structural())`, CAS, not reentrant) and through `AddBit(s)` /
+- **Structural changes go through the gate** (`using (Structural())`: owner thread, not reentrant; `Shared()` only for the cold paths a parallel batch's threads
+  reach on their own: query cache misses, missing singletons, closing tombstones) and through `AddBit(s)` /
   `RemoveBit(s)` / `MoveTo` / `RemoveRow` (and `Archetype.FillHoles`, which rewrites rows and slots); never mutate
   `Archetype.Slots`, presence bits or `EntityMeta` directly elsewhere.
 - **Per-entity state outside the tables is `EntityMeta` only** (16 bytes). Do not add per-entity arrays or fields

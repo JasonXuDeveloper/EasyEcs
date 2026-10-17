@@ -332,10 +332,11 @@ Guide: [Systems: errors](guide/systems.md#errors).
 
 ## Analyzer
 
-**What it does.** The package bundles an analyzer (EECS001-EECS012) next to the generator: invalid `[ForEach]`
+**What it does.** The package bundles an analyzer (EECS001-EECS014) next to the generator: invalid `[ForEach]`
 methods and systems (EECS001-005), class components (EECS006), stateful systems (EECS007), systems referencing
 systems (EECS008), batch methods mixing spans with per-entity parameters (EECS009), unsafe parallel methods (EECS010),
-writes through `in` parameters (EECS011) and copied dynamic buffers (EECS012) fail the build.
+writes through `in` parameters (EECS011), copied dynamic buffers (EECS012) and structural changes off the owner thread
+(EECS013, EECS014) fail the build.
 
 **When to use it.** Always on; it keeps a large code base decoupled.
 
@@ -343,9 +344,10 @@ Guide: [Analyzer rules](guide/analyzer.md).
 
 ## Threading model
 
-**What it does.** A world has one owner thread: the one calling `Update`. Structural bookkeeping enters a
-compare-and-swap gate and never tears; queries match lock-free over copy-on-write snapshots. `ParallelSystems` borrows
-thread-pool threads inside one update without changing ownership.
+**What it does.** A world has one owner thread: the one calling `Update`. Structural changes check a plain owner flag
+(no atomics): one made inside a parallel batch or a parallel `[ForEach]`, or reentered, throws instead of tearing the
+tables, and the analyzer reports the off-thread changes it can see (EECS013, EECS014). Queries match lock-free over
+copy-on-write snapshots. `ParallelSystems` borrows thread-pool threads inside one update without changing ownership.
 
 **When to use it.** One world per thread (one per map or zone): no synchronization at all. Input from other threads
 goes through a queue you own, drained by a system.

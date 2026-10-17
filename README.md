@@ -41,15 +41,15 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
 - **Built-in change tracking, indexes and relations.** `[Changed<T>]` visits only the rows written since a system last
   ran; `IIndexed<TKey>` components are found by value, and an `Entity` key makes a relation. Both follow every write,
   including writes through `ref`, with no events and nothing to keep in sync by hand.
-- **Mistakes fail the build.** The bundled analyzer (EECS001-EECS012) reports invalid `[ForEach]` methods and
+- **Mistakes fail the build.** The bundled analyzer (EECS001-EECS014) reports invalid `[ForEach]` methods and
   systems, class components, stateful systems, systems that reference each other, batch methods mixing spans with
-  per-entity parameters, parallel methods that would race, writes through read-only parameters and copied dynamic
-  buffers.
+  per-entity parameters, parallel methods that would race, writes through read-only parameters, copied dynamic
+  buffers and structural changes off the owner thread.
 - **Decoupled by construction.** Systems cooperate only through data, in `Priority` order; system groups give you
   separate cadences (input on every wake, simulation on a fixed tick).
 - **Built for servers that run for months.** Ids are recycled behind version-checked handles, memory is bounded by
-  the peak entity count, structural bookkeeping is guarded and never tears; the supported model is one owner
-  thread per world (see [Threading](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md)),
+  the peak entity count, a structural change off the owner thread throws or is reported at compile time instead of
+  tearing the tables; the supported model is one owner thread per world (see [Threading](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md)),
   and one world per thread scales across cores.
 
 ## Features
@@ -79,7 +79,7 @@ costs and when to use it).
 | [Bulk create and destroy](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md#entities) | `CreateEntities`, `DestroyEntities`, `EnsureEntityCapacity` | Spawn and clear waves in one pass through the structural gate. |
 | [Per-system timing](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#measuring-systems) | `WorldOptions.MeasureSystems`, `system.Stats` | Run counts and times of every system. |
 | [Errors](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#errors) | `World.SystemError` | A failing system is reported, can be switched off, and the tick goes on. |
-| [Analyzer](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/analyzer.md) | EECS001-EECS012 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
+| [Analyzer](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/analyzer.md) | EECS001-EECS014 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
 | [Threading and Native AOT](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md) | one owner thread per world; no reflection on hot paths | Many worlds per process, one per thread; AOT works with nothing to configure. |
 
 ## Example
@@ -258,7 +258,7 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
 - **Batch `[ForEach]` methods** take `Span<T>` / `ReadOnlySpan<T>` and receive whole runs of rows for SIMD
   (`world.ForEachBatch` for ad-hoc jobs); `world.ForEachEntity` passes the handle to struct jobs.
 - **Jobs that cannot change structure** (detected by the generator, or `INoStructuralChanges`) iterate with no
-  per-entity bookkeeping; structural bookkeeping uses a compare-and-swap gate instead of a lock.
+  per-entity bookkeeping; structural changes check a plain owner flag instead of a lock or an atomic.
 - **Parallel `[ForEach]`:** `[ForEach(Parallel = true)]` splits one method's rows across threads, allocation-free
   (`world.ForEachParallel` / `ForEachEntityParallel` for ad-hoc jobs, `World.ChunkRows` rows per chunk); the analyzer
   rejects methods that could race (EECS010).
@@ -275,14 +275,20 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
 - **`DynamicBuffer<T>`**: a list per entity, held as a component. Its writes take the buffer by `ref`, so each one is
   a tracked change (`[Changed<DynamicBuffer<T>>]` sends only the lists that changed) and a write through `in` does not
   compile; snapshots copy the elements; writes within the capacity allocate nothing.
-- **Every analyzer rule is an error**, with two new ones: **EECS011** rejects a `[ForEach]` method that changes a
-  collection or class held by an `in` parameter, **EECS012** a `DynamicBuffer<T>` copied by value.
+- **Every analyzer rule is an error**, with four new ones: **EECS011** rejects a `[ForEach]` method that changes a
+  collection or class held by an `in` parameter, **EECS012** a `DynamicBuffer<T>` copied by value, **EECS013** a
+  structural change in a `[ForEach]` method that takes no `Entity` or `World`, **EECS014** a structural change in a
+  delegate handed to another thread that races with other changes of the same world.
+- **Structural changes belong to the owner thread.** They check a plain owner flag instead of a compare-and-swap (a
+  create/destroy pair is about a quarter faster); one made inside a parallel batch or a parallel `[ForEach]`, or
+  reentered, throws `InvalidOperationException` instead of tearing the tables.
 - `Entity.GetHashCode()` is deterministic (`Id * 397 ^ Version`) and cheaper (relation lookups hash handles).
 - **Renamed:** `WorldOptions.Parallel` is `WorldOptions.ParallelSystems` (apart from `[ForEach(Parallel = true)]`).
 - **Removed:** `world.DestroyEntity(entity)`, a second spelling of `entity.Destroy()`.
 - **Behavior changes:** `Query` results are ref structs (no `await` in the loop, items cannot be stored); refs can be
   invalidated by structural changes of other entities; iteration order follows table rows; with `ParallelSystems`, a
-  subclass the generator did not see runs alone; `AddSingleton` resets an existing singleton in place; `IForEach` jobs
+  subclass the generator did not see runs alone; structural changes from several threads at once are no longer
+  serialized (owner thread only); `AddSingleton` resets an existing singleton in place; `IForEach` jobs
   receive only the components; stale handles answer `Has` / `TryGet` with false; `CompactArchetypes` is gone (tables
   stay dense on their own). See the
   [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v40--v41).

@@ -1,4 +1,4 @@
-# Analyzer rules (EECS001-EECS012)
+# Analyzer rules (EECS001-EECS014)
 
 [Docs index](../README.md) · Related: [Systems](systems.md) · [ECS principles](../ecs-principles.md)
 
@@ -20,6 +20,8 @@ The EasyEcs analyzer ships in the package next to the source generator. Every ru
 | [EECS010](#eecs010) | Error | A `[ForEach(Parallel = true)]` method must be able to run on several threads |
 | [EECS011](#eecs011) | Error | A `[ForEach]` method must not change what a read-only parameter holds |
 | [EECS012](#eecs012) | Error | A `DynamicBuffer<T>` is never copied |
+| [EECS013](#eecs013) | Error | A `[ForEach]` method that takes no `Entity` or `World` changes no structure |
+| [EECS014](#eecs014) | Error | Structural changes stay on the world's owner thread |
 
 ## EECS001
 
@@ -322,3 +324,85 @@ public static class Bags
     public static Entity Spawn(World world) => world.CreateEntity(new DynamicBuffer<Loot>());   // a new, empty buffer
 }
 ```
+
+## EECS013
+
+**Structural change in a `[ForEach]` method that promises none.** A `[ForEach]` method that is static and takes no
+`Entity` or `World` (or uses its `Entity` only to read) cannot change structure as far as the generator can see, so it
+walks the rows without re-checking storage after each call, and the system shares a [parallel batch](threading.md#parallel-systems)
+with other systems. A structural change made anyway, through an `Entity` a component holds (a relation) or a world kept
+elsewhere, breaks both: the pass keeps refs into rows that moved, and a change inside a parallel batch throws. The rule
+reports a call to a structural member of `Entity` (`Add`, `Set`, `Remove`, `Destroy`, `GetOrAdd`) or `World`
+(`CreateEntity`, `CreateEntities`, `DestroyEntities`, singletons, systems, `Update`, `Capture`, `Restore`, ...) in such a
+method.
+
+Fix: take the `Entity` as a parameter and make the change through it (the system then runs alone, with a pass that
+notices the change), or record the change as data for a system that makes it.
+
+```cs
+[ForEach] static void Kill(in Target target) => target.Entity.Destroy();   // EECS013: no Entity or World parameter
+```
+
+```csharp
+public record struct Target(Entity Entity) : IComponent;
+public record struct Doomed : IComponent;
+
+public partial class MarkTargets : EcsSystem
+{
+    [ForEach, With<Target>]
+    static void Mark(Entity hunter, in Target target)
+    {
+        hunter.Remove<Target>();             // a structural change through the parameter: this system runs alone
+        target.Entity.Add<Doomed>();         // and its pass notices this one too
+    }
+}
+```
+
+The rule sees the method's own body: a change made in a helper method it calls is not followed. Inside a parallel batch
+or a parallel `[ForEach]` the runtime still throws for it ([what the world synchronizes](threading.md#what-the-world-synchronizes)).
+
+## EECS014
+
+**Structural change on another thread.** A world's structure belongs to its owner thread. The rule reports a structural
+call in a lambda or anonymous method handed to `Task.Run`, `TaskFactory.StartNew`, `new Task`, `Parallel.*`,
+`ThreadPool.QueueUserWorkItem` (and its relatives), `new Thread` or `new Timer`, when the world or entity it changes can
+be changed by another thread at the same time:
+
+- `Parallel.*` runs the delegate on several threads at once, so any world or entity captured from outside it races
+  (`worlds[i]`, a world per item, does not);
+- the hand-off sits in a loop, so the delegate runs several times over the same captured world or entity;
+- the code around the hand-off (the method, or the type for a field) changes the same world's structure too.
+
+A world handed to a thread that then owns it (a world per thread, a world created inside the delegate) is not reported.
+
+Fix: hand the change to the owner thread as data, through a queue its system drains
+([input from other threads](threading.md#input-from-other-threads)), or give the other thread its own world.
+
+```cs
+Task.Run(() => world.CreateEntity(new Position(0, 0)));    // EECS014: the caller changes this world too
+world.CreateEntity(new Position(1, 1));
+
+Parallel.For(0, players.Length, i => players[i].Destroy()); // EECS014: entities of one world, several threads at once
+```
+
+```csharp
+public static class Shards
+{
+    // A world per thread: each thread owns its world, nothing is shared.
+    public static Thread[] Start(World[] worlds)
+    {
+        var threads = new Thread[worlds.Length];
+        for (int i = 0; i < worlds.Length; i++)
+        {
+            var world = worlds[i];                                      // one variable per iteration
+            threads[i] = new Thread(() => { for (int t = 0; t < 1_000; t++) world.Update(); });
+            threads[i].Start();
+        }
+
+        return threads;
+    }
+}
+```
+
+Like EECS013, the rule sees the delegate's own body, and a receiver it cannot follow (a method's result) is not
+reported.

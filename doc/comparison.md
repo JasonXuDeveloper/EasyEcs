@@ -28,7 +28,7 @@ checks that every library computes the same result.
 | Singletons | ✅ `ISingletonComponent`, `[ForEach]` parameters | ⚠️ `UniqueEntity` | ❌ | ✅ `World.Set<T>` / `Get<T>` |
 | Systems and scheduling | ✅ `EcsSystem`, `Priority`, groups, intervals | ✅ `SystemRoot`, `SystemGroup`, `QuerySystem` | ❌ (Arch.Extended) | ✅ `ISystem<T>`, `SequentialSystem`, `AEntitySetSystem` |
 | Source-generated systems | ✅ `[ForEach]` → inlined struct jobs | ❌ | ❌ in core (Arch.Extended) | ❌ |
-| Compile-time analyzer | ✅ EECS001-EECS012 | ❌ | ❌ | ❌ |
+| Compile-time analyzer | ✅ EECS001-EECS014 | ❌ | ❌ | ❌ |
 | Chunk / span iteration | ✅ batch `[ForEach]` methods, `ForEachBatch` | ✅ chunks | ✅ chunks | – |
 | Struct query jobs | ✅ `IForEach`, `IForEachEntity`, `IForEachBatch` | ✅ | ✅ `IForEach`, inline queries | – |
 | Bulk create and destroy | ✅ `CreateEntities`, `DestroyEntities(filter)` | ✅ | ✅ | – |

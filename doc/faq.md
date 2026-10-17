@@ -76,8 +76,9 @@ The rules are explicit, and the absence of callbacks is what keeps them simple:
 
 - **A world has one owner thread.** Its systems, queries and component reads and writes all run there. On a server,
   run one world per thread (one per map or zone).
-- **Structural changes go through a gate.** Adding or removing components and creating or destroying entities pass a
-  CAS gate that protects the world's bookkeeping. It does not protect your component values.
+- **Structural changes are the owner thread's too.** Adding or removing components and creating or destroying
+  entities check a plain owner flag: one made while another runs, or while the world runs work on several threads,
+  throws instead of tearing the tables. The analyzer reports the off-thread changes it can see (EECS013, EECS014).
 - **The parallelism the framework adds is checked.** `ParallelSystems` batches only systems whose generated access does
   not conflict; the analyzer makes sure a `[ForEach(Parallel = true)]` method changes no structure and reads singletons
   only.
