@@ -112,7 +112,7 @@ public partial class DeathSystem : EcsSystem
     [ForEach, Without<Dead>, Changed<Health>]                          // only healths written since its last run
     static void Die(Entity unit, in Health hp)
     {
-        if (hp.Value <= 0) unit.Add<Dead>();                           // immediate: later systems see it this tick
+        if (hp.Value <= 0) unit.SetDead();                           // immediate: later systems see it this tick
     }
 }
 ```

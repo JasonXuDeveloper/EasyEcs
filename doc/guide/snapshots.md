@@ -39,8 +39,9 @@ What a snapshot holds, and what `Restore` does:
 - **Handles.** Handles to entities alive in the snapshot are valid again. Every other handle is stale, including
   handles to entities created after the capture, even when a later entity reuses their id.
 - **Change ticks and indexes.** Every restored row of a tracked component counts as written, so `[Changed<T>]`
-  methods see all of them on their next run ([change tracking](change-tracking.md)), and value indexes re-index from
-  scratch on their next lookup ([indexes and relations](indexes-and-relations.md)).
+  methods see all of them on their next run, and every restored row lacking one counts as removed, so `[Removed<T>]`
+  methods see those ([change tracking](change-tracking.md)): replication re-sends the restored state. Value
+  indexes re-index from scratch on their next lookup ([indexes and relations](indexes-and-relations.md)).
 - **Not systems or options.** Systems keep running as registered; archetypes created after the capture stay, empty.
 
 Both calls take the world's structural gate and throw while a query iterates, so call them between updates (or from a

@@ -40,15 +40,20 @@ using System;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using EasyEcs;
+
+namespace EasyEcs.Benchmark.Showcase;
+
+// A battle server that uses every feature of EasyEcs the way users should: plain data, one job per system, state
+// changes as data. doc/example.md shows this file; BattleServerBenchmark measures it and BattleServerTests check it.
 
 public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
 public record struct Health(int Value, int Max) : IComponent, ITrackChanges;    // replicated: writes are tracked
-public record struct Replica(int Health) : IComponent;                        // what clients last received
+public record struct Replica(int Health, bool Burning) : IComponent;          // what clients last received
 public record struct Mana(int Value, int Max) : IComponent;
 public record struct Attack(int Damage, int Interval, int Cooldown) : IComponent;
-public record struct Burning(int Ticks) : IComponent;                         // status effects come and go
+public record struct Burning(int Ticks) : IComponent, ITrackChanges;          // status effects come and go; clients
+                                                                              // see fires start and go out
 public record struct Frozen(int Ticks) : IComponent;
 public record struct Lifetime(int Ticks) : IComponent;
 public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }                  // players by zone
@@ -266,7 +271,23 @@ public partial class ReplicationSystem : EcsSystem                            //
     [ForEach, Changed<Health>]
     static void Send(in Health hp, ref Replica replica, ref Battle battle)
     {
-        replica = new Replica(hp.Value);
+        replica.Health = hp.Value;
+        battle.Replicated++;
+    }
+
+    [ForEach, Changed<Burning>]                                               // set on fire, or burning on
+    static void SendFire(ref Replica replica, ref Battle battle)
+    {
+        if (replica.Burning) return;
+        replica.Burning = true;
+        battle.Replicated++;
+    }
+
+    [ForEach, Removed<Burning>]                                               // the fire went out: the row lacks it now
+    static void SendFireOut(ref Replica replica, ref Battle battle)
+    {
+        if (!replica.Burning) return;                                         // lit and out between two sends
+        replica.Burning = false;
         battle.Replicated++;
     }
 
@@ -307,6 +328,12 @@ public sealed class BattleServer : IDisposable
     internal static readonly QueryFilter Afflicted = QueryFilter.Create().WithAny<Burning>().WithAny<Frozen>();
     private static readonly QueryFilter UnsavedPlayers = Players.Changed<Health>(0);   // the tick is set per call
 
+    // NPC kinds: recipes that belong to no world (no query sees them), copied by Instantiate
+    private static readonly Prefab Grunt = new Prefab().Set(new Position()).Set(new Velocity())
+        .Set(new Health(120, 120)).Set(new Replica(120, false)).Set(new Attack(6, 8, 0)).Set(new Npc());
+    private static readonly Prefab Brute = new Prefab().Set(new Position()).Set(new Velocity())
+        .Set(new Health(200, 200)).Set(new Replica(200, false)).Set(new Attack(9, 12, 0)).Set(new Npc());
+
     public readonly World World;
     private readonly SingletonRef<Battle> _battle;                            // resolved once, no lookup per tick
     private WorldSnapshot _save;
@@ -338,8 +365,8 @@ public sealed class BattleServer : IDisposable
         World.AddSystem<ReplicationSystem>();
         _battle = World.SingletonRef<Battle>();
 
-        var players = new Entity[units / 3];                                  // one batch: one table growth
-        World.CreateEntities(players, new Position(), new Velocity(1, 0), new Health(500, 500), new Replica(500),
+        var players = new Entity[units / 3];                                  // in bulk: one table growth
+        World.CreateEntities(players, new Position(), new Velocity(1, 0), new Health(500, 500), new Replica(500, false),
             new Mana(100, 100), new Attack(8, 6, 0), new Zone(0), new Player(), new DynamicBuffer<Loot>()); // bags
         for (int i = 0; i < players.Length; i++)
         {
@@ -350,19 +377,23 @@ public sealed class BattleServer : IDisposable
             players[i].Get<DynamicBuffer<Loot>>().EnsureCapacity(BagSize);    // room once: a full bag never grows
         }
 
-        for (int i = players.Length; i < units; i++)
+        var npcs = new Entity[units - players.Length];
+        World.Instantiate(Grunt, npcs.AsSpan(0, npcs.Length / 2));              // copies of a recipe, in bulk
+        World.Instantiate(Brute, npcs.AsSpan(npcs.Length / 2));
+        for (int i = 0; i < npcs.Length; i++)
         {
-            uint r = Dice.Roll(0, i);
-            SpawnNpc(World, new Position(r % 4096, (r >> 12) % 4096), i);
+            uint r = Dice.Roll(0, players.Length + i);
+            npcs[i].Position = new Position(r % 4096, (r >> 12) % 4096);
+            npcs[i].Attack.Cooldown = (int)(r % 10);
         }
     }
 
     public static void SpawnNpc(World world, Position at, int seed)
     {
         uint r = Dice.Roll(seed, seed);
-        int hp = 100 + (int)(r % 100);
-        world.CreateEntity(at, new Velocity(), new Health(hp, hp), new Replica(hp),
-            new Attack(5 + (int)(r % 5), 5 + (int)(r % 10), (int)(r % 10)), new Npc());
+        var npc = world.Instantiate((r & 1) == 0 ? Grunt : Brute);            // then only what differs is written
+        npc.Position = at;
+        npc.Attack.Cooldown = (int)(r % 10);
     }
 
     public ref Battle Battle => ref _battle.Value;
@@ -401,6 +432,12 @@ public sealed class BattleServer : IDisposable
         hp.Value -= damage;                                                   // a write: replicated with the next send
         return true;
     }
+
+    /// <summary>
+    /// A mirror image of a living unit as it is now (health, statuses, bag, zone): a copy of the entity, which the
+    /// indexes and the next send learn about.
+    /// </summary>
+    public Entity Mirror(Entity unit) => unit.IsAlive ? unit.Clone() : default;
 
     /// <summary>The items in a player's bag, summed: a read (<c>Read</c>), never a change.</summary>
     public int LootValue(Entity player)
@@ -469,7 +506,7 @@ public sealed class BattleServer : IDisposable
 
     public void Load() => World.Restore(_save);
 
-    public int Unsaved => World.Count<Health>(UnsavedPlayers.ChangedSince(_savedAt));
+    public int Unsaved => World.Count<Health>(UnsavedPlayers.Since(_savedAt));
 
     /// <summary>The system that took the most time per run so far (<see cref="WorldOptions.MeasureSystems"/>).</summary>
     public EcsSystem Slowest()

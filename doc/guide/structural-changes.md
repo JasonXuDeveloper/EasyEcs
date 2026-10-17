@@ -3,8 +3,8 @@
 [Docs index](../README.md) · Related: [Queries](queries.md) · [Systems](systems.md) ·
 [Architecture: iteration](../architecture.md#iteration-and-structural-changes)
 
-A structural change is anything that changes an entity's component set: creating or destroying entities, adding or
-removing components. EasyEcs is an **immediate-mode** ECS: changes apply at once, there is no command buffer to
+A structural change is anything that changes an entity's component set: creating (`CreateEntity`, `Instantiate`,
+`Clone`) or destroying entities, adding or removing components (`Set`, `GetOrAdd` of a missing component, `Remove`). EasyEcs is an **immediate-mode** ECS: changes apply at once, there is no command buffer to
 flush, and later code in the same pass and later systems in the same update see them.
 
 ## At a glance
@@ -34,7 +34,7 @@ public partial class DeathSystem : EcsSystem
     static void Die(Entity unit, in Health hp, ref Score score)
     {
         if (hp.Value > 0) return;
-        unit.Add<Dead>();   // applied now: later systems of this update already see the corpse
+        unit.SetDead();   // applied now: later systems of this update already see the corpse
         score.Deaths++;
     }
 }
@@ -60,9 +60,4 @@ public partial class DeathSystem : EcsSystem
 Tables stay dense by themselves: outside a pass the last row fills a destroyed entity's row at once, and the
 tombstones a pass leaves are closed when the last pass ends, also when a job throws. A query enumerator abandoned
 without `Dispose` (a `foreach` always disposes it) leaves its pass open until the next update, which closes it. There
-is nothing to call; `world.GetFragmentationStats()` checks it, O(archetypes):
-
-```csharp
-var (slots, alive, ratio) = world.GetFragmentationStats();   // rows in use, living entities, 0 between updates
-long updates = world.UpdateCount;                            // default-group updates so far
-```
+is nothing to call and nothing to monitor.

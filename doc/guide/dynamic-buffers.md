@@ -99,9 +99,10 @@ ref var bag = ref player.Get<DynamicBuffer<Loot>>();    // a ref local: fine
 // var copy = player.Read<DynamicBuffer<Loot>>();       // EECS012: a copy
 ```
 
-## Moves, removal and snapshots
+## Moves, removal, copies and snapshots
 
-A row that moves to another table (a component added, a status removed) keeps its list. Removing the
+A row that moves to another table (a component added) keeps its list. Removing the
 `DynamicBuffer<T>` component or destroying the entity drops the list (the garbage collector frees it); adding the
 component back starts with no list. `world.Capture()` copies the elements, and `Restore` copies them back: a world and
-its snapshot never share a list, and a snapshot can be restored many times.
+its snapshot never share a list, and a snapshot can be restored many times. An entity made by `world.Instantiate(prefab)`
+or `entity.Clone()` gets a list of its own with the same elements ([prefabs and cloning](prefabs.md)).

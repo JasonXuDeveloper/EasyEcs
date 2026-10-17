@@ -44,7 +44,7 @@ public partial class DeathSystem : EcsSystem
     static void Die(Entity unit, in Health hp, ref Score score)   // resolved once per pass
     {
         if (hp.Value > 0) return;
-        unit.Add<Dead>();
+        unit.SetDead();
         score.Deaths++;
     }
 }

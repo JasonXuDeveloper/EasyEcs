@@ -21,24 +21,28 @@ Both benchmark projects use the job in `EasyEcs.Benchmark/BenchmarkConfig.cs` (n
 ```
 EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written shared core only)
   Contracts.cs                 IComponent, ITrackChanges, ISingletonComponent, INoStructuralChanges
-  Entity.cs                    the entity handle (id, version, world): Has/Get/TryGet/Add/GetOrAdd/Destroy
+  Entity.cs                    the entity handle (id, version, world): Has/Get/Read/TryGet/GetOrAdd/Clone/Destroy
   EcsSystem.cs                 OnCreate/OnUpdate/OnDestroy + generated GeneratedUpdate / GeneratedAccess
-  ForEachAttributes.cs         [ForEach] (Parallel), [With<T>], [Without<T>], [WithAny<T>], [Changed<T>]
+  ForEachAttributes.cs         [ForEach] (Parallel), [With<T>], [Without<T>], [WithAny<T>], [Changed<T>], [Removed<T>]
   SystemGroups.cs              ISystemGroup, [UpdateInGroup<T>] (World.Update<T>() runs a group)
-  World.cs                     entity lifecycle (create/destroy, id recycling, lookup, enumeration); destroy unlinks
-                               the entity from value indexes
-  World.Components.cs          AddBit/AddBits/RemoveBit/RemoveBits (shared core of every Add/Set/Remove; a removed
-                               indexed component unlinks the entity), passes (BeginPass/EndPass, tombstones closed by
+  World.cs                     entity lifecycle (create/destroy, id recycling, lookup, enumeration, Instantiate of a
+                               Prefab and Entity.Clone: one row copy, CloneRow); destroy unlinks the entity from value
+                               indexes
+  Prefab.cs                    a recipe of component values outside any world (one row of a private world)
+  World.Components.cs          AddBit/AddBits/RemoveBit/RemoveBits (shared core of every Set/GetOrAdd/Remove; a removed
+                               indexed component unlinks the entity, a removed tracked one stamps its tick for
+                               Removed<T>), passes (BeginPass/EndPass, tombstones closed by
                                the last pass), CarryOver
   World.Archetypes.cs          archetype registry, transition edges, copy-on-write query cache (GetQueryEntry: the
                                live entry a value index holds), CompactArchetypes (an update's recovery from an
                                abandoned query), the structural gate (Structural())
   StructuralGate.cs            owner flag (plain check-and-set, throws when reentered or while frozen: Freeze/Thaw around
                                parallel regions, batch jobs and INoStructuralChanges passes) +
-                               shared CAS gate for the cold paths parallel batches reach; StructuralScope / SharedScope
-  World.Systems.cs             system groups, priority order, parallel batches, synchronous Update / Update<TGroup>,
+                               shared CAS gate for the cold paths parallel stages reach; StructuralScope / SharedScope
+  World.Systems.cs             system groups, priority order, parallel stages (consecutive non-conflicting systems of
+                               one priority), synchronous Update / Update<TGroup>,
                                Dispose (also resets value indexes)
-  World.Parallel.cs            allocation-free runner (caller + reusable thread-pool work items) for system batches
+  World.Parallel.cs            allocation-free runner (caller + reusable thread-pool work items) for system stages
                                and the row chunks of parallel [ForEach]
   World.Snapshots.cs           Capture / Restore (WorldSnapshot.cs holds the copies)
   World.Indexes.cs             world.Index<T, TKey>() (one ValueIndex per indexed component type)
@@ -48,8 +52,8 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
   SystemAccess.cs              a system's read/write sets (generated from [ForEach] parameters) and the conflict rule
   SystemStats.cs               per-system run counts and times (WorldOptions.MeasureSystems)
   World.Singletons.cs          per-world singletons (ref returns)
-  WorldOptions.cs              configuration (Parallel, MeasureSystems, capacities)
-  Query.cs                     QueryFilter (With/Without/WithAny/Changed), QueryKey, QueryMatch, RowPlan (cached per
+  WorldOptions.cs              configuration (ParallelSystems, MaxDegreeOfParallelism, MeasureSystems, capacities)
+  Query.cs                     QueryFilter (With/Without/WithAny/Changed/Removed/Since), QueryKey, QueryMatch, RowPlan (cached per
                                query and table), RowFilter (plan + the pass's change tick: skip / all rows / test
                                presence bits and change ticks; NextWord skips unwritten 4,096-row blocks and 64-row
                                words), QueryWalk (the cold state of a query walk, pooled per thread; the enumerator keeps
@@ -64,33 +68,34 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
                                per-bit and per-signature add transitions (copy plans); swap-remove / tombstones,
                                FillHoles; change-tick columns with their summaries (LastWrite per column, BlockWrite
                                per 4,096 rows, per 64 rows WordWrite + WordRows + WordRest: the rows at the word's
-                               latest tick) and Stamp/StampRows
+                               latest tick), Stamp/StampRows/SetTick, MarkPresent/MarkAbsent (presence bits), CloneRow
   DynamicBuffer.cs             DynamicBuffer<T> (a list per entity as a tracked component; writes are ref-this extensions)
                                and its BufferStore (snapshots copy it through ComponentInfo.CopyRows)
-  ComponentInfo.cs             per-type column operations (size, managed, create/grow/copy/clear) indexed by bit;
+  ComponentInfo.cs             per-type column operations (size, managed, create/grow/copy/clone/clear) indexed by bit;
                                Pair links a tracked component with its change-tick column
-  Tag.cs                       256-bit SIMD bitset with overflow
+  BitMask.cs                   256-bit SIMD bitset with overflow (component masks, query sets)
 EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, required by Roslyn hosts)
   ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove, World.CreateEntity/
                                CreateEntities/DestroyEntities, IForEach/IForEachEntity/IForEachBatch,
                                ForEach/ForEachEntity/ForEachBatch/ForEachParallel/ForEachEntityParallel with their
                                row loops, Query/Count/Any, QueryItem/QueryEnumerator), one template each
   SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
-                               the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] ->
-                               ChangedSince(LastRunTick + 1) and a read of T) + GeneratedUpdate + GeneratedAccess
+                               the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] /
+                               [Removed<T>] -> Since(LastRunTick + 1) and a read of T) + GeneratedUpdate + GeneratedAccess
   ComponentGenerator.cs        C# 14 extension members per component / singleton: entity.X (ref T; ref readonly for
                                tracked or indexed), HasX, TryGetX, GetOrAddX, SetX(ctor args), RemoveX, tags IsX,
                                world.XIndex, singletons world.X / HasX / SetX / RemoveX; classes carry
                                [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated lets the analyzer and
                                SystemGenerator treat SetX / GetOrAddX / RemoveX as structural, the rest as reads
-  EasyEcsAnalyzer.cs           EECS001-015 (generators never report diagnostics)
+  EasyEcsAnalyzer.cs           EECS001-016 (generators never report diagnostics)
   Threads.cs                   EECS014's check: does a structural call in a delegate handed to another thread race
   Symbols.cs                   symbol checks shared by generator and analyzer
   Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
   EquatableArray.cs            array with value equality (generator models cache between edits)
   Polyfills.cs                 IsExternalInit for netstandard2.0 (records); do not delete
 EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, Presence, Query, System, ForEachSystem,
-                               Singleton, Concurrency, Parallel, Changed, DynamicBuffer, Index, Snapshot, Allocation (0 B budget),
+                               Singleton, Concurrency, Parallel, Changed, Removed, Instantiate, DynamicBuffer, Index,
+                               Snapshot, Allocation (0 B budget),
                                Generator (diagnostics + caching), BattleServer (the README world as a whole, linked
                                from EasyEcs.Benchmark); Fixtures.cs holds the shared test components
 EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / MultiWorldBenchmark (headline, realistic
@@ -101,10 +106,10 @@ EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                Always measure with BenchmarkDotNet.
 EasyEcs.Comparison/            BenchmarkDotNet: the headline world (WorldSimulation.cs, compiled unchanged) ported to
                                Arch, Friflo.Engine.ECS and DefaultEcs, counters checked against EasyEcs;
-                               OperationBenchmark (per operation, vs Friflo); FeatureBenchmark (change tracking and
-                               indexes in each library's own way, results checked in setup)
+                               OperationBenchmark (per operation, vs Friflo); FeatureBenchmark (change tracking,
+                               removal detection and indexes in each library's own way, results checked in setup)
 doc/                           README.md (index), getting-started.md, example.md (the battle server), guide/ (one page per concept, analyzer.md
-                               lists EECS001-015), api.md (API + complexity), ecs-principles.md, architecture.md,
+                               lists EECS001-016), api.md (API + complexity), ecs-principles.md, architecture.md,
                                performance.md (diagrams in mermaid)
 ```
 
@@ -145,7 +150,7 @@ doc/                           README.md (index), getting-started.md, example.md
 - **Generators follow the incremental rules**: `ForAttributeWithMetadataName` or syntax-only predicates first,
   equatable symbol-free models, no diagnostics from generators (add them to `EasyEcsAnalyzer` using `Symbols`), a
   tracking name per stage and a caching assertion in `GeneratorTests`.
-- **Structural changes go through the gate** (`using (Structural())`: owner thread, not reentrant; `Shared()` only for the cold paths a parallel batch's threads
+- **Structural changes go through the gate** (`using (Structural())`: owner thread, not reentrant; `Shared()` only for the cold paths a parallel stage's threads
   reach on their own: query cache misses, missing singletons, closing tombstones) and through `AddBit(s)` /
   `RemoveBit(s)` / `MoveTo` / `RemoveRow` (and `Archetype.FillHoles`, which rewrites rows and slots); never mutate
   `Archetype.Slots`, presence bits or `EntityMeta` directly elsewhere.

@@ -72,8 +72,8 @@ public partial class DestroyOrphans : EcsSystem
 
 ## How it stays correct
 
-The index follows the writes that can change a key: `Set`, `CreateEntity` and `CreateEntities` re-index the entity
-on the spot, and destroying an entity or removing the component unlinks it. A write through a `ref` would change the
+The index follows the writes that can change a key: `Set`, `CreateEntity`, `CreateEntities`, `Instantiate` and
+`Clone` index the entity on the spot, and destroying an entity or removing the component unlinks it. A write through a `ref` would change the
 key behind the index's back, so the analyzer rejects it (EECS015): `Get<T>()` of an indexed component, a `ref`
 local or `ref` / `Span<T>` `[ForEach]` parameter of it, and assignments to it through a query item. Read it with
 `in` parameters, `Read<T>()` or the generated property (`ref readonly`), and write it with `Set` (or the generated `SetX`). `Set` with the key

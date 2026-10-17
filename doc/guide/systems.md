@@ -76,6 +76,7 @@ method, and the generator compiles it to a struct job with a static filter.
 | `[Without<T>]` | the entity must not have `T`; repeatable |
 | `[WithAny<T>]` | the entity must have at least one of the components named by the method's `[WithAny<T>]` attributes |
 | `[Changed<T>]` | the entity's `T` (`ITrackChanges`) was written since the system last ran ([change tracking](change-tracking.md)); requires `T` like `[With<T>]` |
+| `[Removed<T>]` | the entity lost `T` (`ITrackChanges`) since the system last ran and still lacks it ([removal detection](change-tracking.md#removal-detection)); not a queried component, so the method needs a component parameter or a `[With<U>]` (EECS003), and must not require `T` (EECS016) |
 
 ```csharp
 public record struct Burning(int Ticks, int DamagePerTick) : IComponent;
@@ -136,12 +137,12 @@ file, which is rarely what you mean. Mistakes (missing `partial`, an invalid par
 `[With<T>]` or `[Changed<T>]` or more than 9, generic systems, `[ForEach]` outside a system) are compile errors: see
 [Analyzer rules](analyzer.md).
 
-Methods may change structure (create, destroy, `Set`, `Remove`): changes apply at once and each entity is visited at
+Methods may change structure (create, destroy, `Set`, `Remove`, `Instantiate`, `Clone`): changes apply at once and each entity is visited at
 most once per pass. See [Structural changes during iteration](structural-changes.md).
 
 ### Parallel methods
 
-`[ForEach(Parallel = true)]` cuts the matching rows into chunks of `World.ChunkRows` (16,384) rows and runs them on the
+`[ForEach(Parallel = true)]` cuts the matching rows into chunks of `World.ParallelChunkRows` (16,384) rows and runs them on the
 calling thread plus up to `WorldOptions.MaxDegreeOfParallelism - 1` thread-pool threads. It is for heavy per-entity
 work (path finding, steering, AI scoring) over tens of thousands of entities; for light work the hand-off costs more
 than it saves.

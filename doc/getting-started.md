@@ -182,7 +182,7 @@ public partial class DeathSystem : EcsSystem
     static void Die(Entity entity, in Health hp, ref Tally tally)   // resolved once per pass
     {
         if (hp.Value > 0) return;
-        entity.Add<Dead>();
+        entity.SetDead();
         tally.Deaths++;
     }
 }

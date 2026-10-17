@@ -31,6 +31,7 @@ allocation-free.
 | "How many …?" | `world.Count<T1..Tn>(filter)` |
 | "Is there any …?" | `world.Any<T1..Tn>(filter)` (early exit) |
 | Only the rows written since a tick | `QueryFilter.Create().Changed<T>(tick)`, or `[Changed<T>]` in a system ([change tracking](change-tracking.md)) |
+| Only the entities that lost a component since a tick | `QueryFilter.Create().Removed<T>(tick)`, or `[Removed<T>]` in a system ([removal detection](change-tracking.md#removal-detection)) |
 | Entities by a value, or pointing at an entity | `world.Index<T, TKey>().Find(key)` ([indexes and relations](indexes-and-relations.md)) |
 
 ## Filters
@@ -46,8 +47,9 @@ private static readonly QueryFilter Impaired = QueryFilter.Create().WithAny<Froz
 ```
 
 In a `[ForEach]` method the same filters are attributes: `[ForEach, With<Player>, Without<Dead>]`,
-`[ForEach, WithAny<Frozen>, WithAny<Stunned>]`. All can be repeated. `Changed<T>(since)` (and
-`[Changed<T>]`) select rows whose tracked component was written since a tick: see [change tracking](change-tracking.md).
+`[ForEach, WithAny<Frozen>, WithAny<Stunned>]`. All can be repeated. `Changed<T>(since)` (and `[Changed<T>]`) select
+rows whose tracked component was written since a tick, `Removed<T>(since)` (and `[Removed<T>]`) entities that lost it
+since a tick; a filter kept in a field takes a new tick with `Since(tick)`: see [change tracking](change-tracking.md).
 
 ## `Query`: a foreach loop
 
@@ -56,7 +58,7 @@ foreach (var item in world.Query<Position, Velocity>(Active))
 {
     ref var p = ref item.Component1;       // Component1..n are refs into storage
     p.X += item.Component2.X;
-    if (p.X > 100) item.Entity.Add<Dead>();
+    if (p.X > 100) item.Entity.SetDead();
 }
 ```
 
@@ -89,6 +91,15 @@ var job = new Integrate();
 world.ForEach<Position, Velocity, Integrate>(ref job, Active);
 ```
 
+### What a job declares: `Writes`
+
+Job parameters are all `ref`, so a job says which components it actually writes with an optional
+`static int Writes` (bit k - 1 for component k; the default, -1, is all of them). Only those count as written for
+[change tracking](change-tracking.md) (a job that only reads a tracked component declares 0 and leaves its rows
+unchanged), and only those are carried over to the entity's new row when the job changes the archetype of the entity
+it visits. For a batch job, `Writes` names the spans it writes. Generated `[ForEach]` jobs set it from their `ref`
+parameters, and `INoStructuralChanges` from what the method can reach.
+
 The job is passed by `ref`, so fields it accumulates (a sum, a counter) are visible after the call; a value field
 stays in a register during the pass. It receives the components only, so the pass never loads the entity rows. A job
 that must hold a `ref` or a `Span` (an output buffer) can be a `ref struct`, except in the `*Parallel` calls. Two
@@ -111,7 +122,7 @@ public struct KillTheWounded : IForEachEntity<Health>           // the handle, f
 
     public void Execute(Entity unit, ref Health hp)
     {
-        if (hp.Value <= 0) unit.Add<Dead>();
+        if (hp.Value <= 0) unit.SetDead();
     }
 }
 
@@ -147,7 +158,7 @@ anyway (in a helper the analyzer does not follow) throws instead of tearing rows
 
 A job that implements `INoStructuralChanges` and writes only its own row can run on several threads.
 `ForEachParallel` (an `IForEach` job) and `ForEachEntityParallel` (an `IForEachEntity` job) cut the matching rows into
-chunks of `World.ChunkRows` rows. The calling thread and up to `WorldOptions.MaxDegreeOfParallelism - 1`
+chunks of `World.ParallelChunkRows` rows. The calling thread and up to `WorldOptions.MaxDegreeOfParallelism - 1`
 thread-pool threads run them, each with its own copy of the job, so state a job accumulates in its fields is not
 merged back. Fewer than two chunks run on the calling thread. The call allocates nothing after the first call per job
 type.

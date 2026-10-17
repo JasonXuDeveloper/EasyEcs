@@ -1,6 +1,6 @@
 # Entities and components
 
-[Docs index](../README.md) · Related: [Queries](queries.md) · [`ref` and `await`](refs-and-await.md) ·
+[Docs index](../README.md) · Related: [Queries](queries.md) · [Prefabs and cloning](prefabs.md) · [`ref` and `await`](refs-and-await.md) ·
 [API reference](../api.md#entities)
 
 ## At a glance
@@ -24,7 +24,7 @@ bool alive = u.IsAlive;
 u.Destroy();                       // a stale handle is ignored
 ```
 
-Waves of spawns and clean-ups have batch forms. Each takes the structural gate once for the whole batch:
+Waves of spawns and clean-ups have bulk forms. Each takes the structural gate once for the whole wave:
 
 ```csharp
 var wave = new Entity[500];
@@ -32,11 +32,15 @@ world.CreateEntities(wave, new Position(0, 0), new Health(100));  // the same va
 int cleared = world.DestroyEntities<Health, Dead>();  // every dead entity with Health, one pass
 ```
 
+Kinds of entities spawned again and again (an NPC type, a projectile) are best defined once as a
+[prefab](prefabs.md), a recipe of component values that belongs to no world: `world.Instantiate(prefab)` creates
+one entity from it, `world.Instantiate(prefab, wave)` a whole wave, and `entity.Clone()` copies a living entity.
+
 - **Ids are recycled** (LIFO, so recently freed slots are still warm in cache). `Entity.Id` is unique only among
   live entities.
 - **Every access validates the version.** When an entity is destroyed its version is bumped, so every outstanding
   handle becomes stale. A stale or `default` handle answers questions with false (`IsAlive`, `Has`, `TryGet`,
-  `TryGetRef`), throws `InvalidOperationException` on accesses and changes (`Get`, `Read`, `Add`, `Set`, `Remove`:
+  `TryGetRef`), throws `InvalidOperationException` on accesses and changes (`Get`, `Read`, `GetOrAdd`, `Set`, `Remove`, `Clone`:
   "Entity is not alive"), and ignores `Destroy`. It never reaches the entity that reuses its id.
 - Equality includes the version: two handles are equal only if they name the same incarnation.
 - **Keep the `Entity`, never a raw id.** To look an id up, use `world.TryGetEntity(id, out e)` /
@@ -79,10 +83,14 @@ public record struct Name(string Value) : IComponent;   // managed references ar
 | `ref T TryGetRef<T>(out bool found)` | Ref into storage if present; a null ref when not (check `found`). |
 | `bool Has<T1..Tn>()` | Whether the entity has all of them. |
 | `bool TryGet<T>(out T value)` | A **copy** of `T` if present. |
-| `ref T Add<T>()` | Adds `T` (or resets it to `default` if present) and returns a ref. |
-| `ref T GetOrAdd<T>()` | Ref to `T`, adding it with `default` first if missing. |
 | `Entity Set(in T1 … in Tn)` | Adds or overwrites 1-9 values, with at most one row copy; chainable. |
+| `ref T GetOrAdd<T>()` | Ref to `T`, adding it with `default` first if missing (an existing value is kept). |
 | `Entity Remove<T1..Tn>()` | Removes 1-9 components; the entity keeps its row. Missing ones are ignored; chainable. |
+
+To add a component, set its value: `entity.Set(new Burning(10))`, or the generated `entity.SetBurning(10)`
+(`entity.SetDead()` for a tag). `Set` adds the component or replaces its value. `GetOrAdd<T>()` adds a default value
+only when the component is missing and returns a ref to fill it in place, so it never resets a value the entity
+already has.
 
 Always mutate through a `ref`; see [`ref` and `await`](refs-and-await.md). The `ref T` operations count as a write
 of a tracked component ([change tracking](change-tracking.md)) whether or not you store through them, so read with
@@ -134,7 +142,7 @@ column for is just as cheap. Gaining a component the entity's table has no colum
 table, once per new combination of components.
 
 When a component that contains managed references is removed (or its entity destroyed), its value is cleared so the
-GC can collect what it pointed to. Unmanaged components are not cleared: `Add` and `Set` overwrite them anyway.
+GC can collect what it pointed to. Unmanaged components are not cleared: `Set` and `GetOrAdd` overwrite them anyway.
 
 ### Tags
 
@@ -148,7 +156,9 @@ see
 
 - Keep components small (a few fields, well under a 64-byte cache line) and split rarely-used data into its own
   component: iteration only loads the columns it reads.
-- Spawn with all components at once (`CreateEntity(a, b, c)`) and change several with `Set(a, b)` /
-  `Remove<A, B>()`: at most one row copy instead of several.
+- Spawn with all components at once (`CreateEntity(a, b, c)`, or `Instantiate(prefab)` for a kind defined once) and
+  change several with `Set(a, b)` / `Remove<A, B>()`: at most one row copy instead of several.
+- Read with `Read<T>()`, `TryGet<T>()` or the generated property of a tracked component, write through `Get<T>()`:
+  a `ref` access counts as a write of a tracked component, so a read through `Get` would be replicated as a change.
 - Up to 65,536 component types are supported. The first 256 fit in each archetype mask inline; beyond that a mask
   carries an overflow array (at least 4 × 256 bits, doubled when needed).

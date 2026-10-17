@@ -1,4 +1,4 @@
-# Analyzer rules (EECS001-EECS015)
+# Analyzer rules (EECS001-EECS016)
 
 [Docs index](../README.md) · Related: [Systems](systems.md) · [ECS principles](../ecs-principles.md)
 
@@ -23,6 +23,7 @@ The EasyEcs analyzer ships in the package next to the source generator. Every ru
 | [EECS013](#eecs013) | Error | A `[ForEach]` method that takes no `Entity` or `World` changes no structure |
 | [EECS014](#eecs014) | Error | Structural changes stay on the world's owner thread |
 | [EECS015](#eecs015) | Error | An indexed component is written with `Set` |
+| [EECS016](#eecs016) | Error | A `[Removed<T>]` method does not require `T` |
 
 ## EECS001
 
@@ -76,7 +77,8 @@ public partial class MoveSystem : EcsSystem
 
 **Invalid component count.** A `[ForEach]` method must take between 1 and 9 components (singletons, `Entity` and
 `World` do not count), or none when a `[With<T>]` (else a `[Changed<T>]`) names the component to query
-(`[ForEach, With<Dead>] static void Remove(Entity e)`).
+(`[ForEach, With<Dead>] static void Remove(Entity e)`). `[Removed<T>]` does not name one: the entities it selects no
+longer have `T`, so the method also needs a component parameter or a `[With<U>]`.
 
 Fix: with no component, use `OnUpdate`; with more than 9, move the extra requirements to `[With<T>]` or split the
 method.
@@ -197,7 +199,7 @@ public partial class ScoreSystem : EcsSystem
 public partial class KillSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
-    static void Kill(Entity e, in Health hp) { if (hp.Value <= 0) e.Add<Dead>(); }
+    static void Kill(Entity e, in Health hp) { if (hp.Value <= 0) e.SetDead(); }
 }
 
 public sealed class ScoreSystem : EcsSystem
@@ -251,7 +253,7 @@ writes, or drop `Parallel = true`.
 ```cs
 [ForEach(Parallel = true)] static void Kill(Entity e, in Health hp)   // EECS010: e.Set changes structure
 {
-    if (hp.Value <= 0) e.Add<Dead>();
+    if (hp.Value <= 0) e.SetDead();
 }
 ```
 
@@ -332,12 +334,12 @@ public static class Bags
 
 **Structural change in a `[ForEach]` method that promises none.** A `[ForEach]` method that is static and takes no
 `Entity` or `World` (or uses its `Entity` only to read) cannot change structure as far as the generator can see, so it
-walks the rows without re-checking storage after each call, and the system shares a [parallel batch](threading.md#parallel-systems)
+walks the rows without re-checking storage after each call, and the system shares a [parallel stage](threading.md#parallel-systems)
 with other systems. A structural change made anyway, through an `Entity` a component holds (a relation) or a world kept
-elsewhere, breaks both: the pass keeps refs into rows that moved, and a change inside a parallel batch throws. The rule
-reports a call to a structural member of `Entity` (`Add`, `Set`, `Remove`, `Destroy`, `GetOrAdd`) or `World`
-(`CreateEntity`, `CreateEntities`, `DestroyEntities`, singletons, systems, `Update`, `Capture`, `Restore`, ...) in such a
-method.
+elsewhere, breaks both: the pass keeps refs into rows that moved, and a change inside a parallel stage throws. The rule
+reports a call to a structural member of `Entity` (`Set`, `Remove`, `Destroy`, `GetOrAdd`, `Clone`, and the
+generated `SetX`, `GetOrAddX`, `RemoveX`) or `World` (`CreateEntity`, `CreateEntities`, `Instantiate`,
+`DestroyEntities`, singletons, systems, `Update`, `Capture`, `Restore`, ...) in such a method.
 
 Fix: take the `Entity` as a parameter and make the change through it (the system then runs alone, with a pass that
 notices the change), or record the change as data for a system that makes it.
@@ -348,7 +350,7 @@ notices the change), or record the change as data for a system that makes it.
 
 ```csharp
 public record struct Target(Entity Entity) : IComponent;
-public record struct Doomed : IComponent;
+public struct Doomed : IComponent;                // a tag
 
 public partial class MarkTargets : EcsSystem
 {
@@ -356,18 +358,18 @@ public partial class MarkTargets : EcsSystem
     static void Mark(Entity hunter, in Target target)
     {
         hunter.Remove<Target>();             // a structural change through the parameter: this system runs alone
-        target.Entity.Add<Doomed>();         // and its pass notices this one too
+        target.Entity.SetDoomed();         // and its pass notices this one too
     }
 }
 ```
 
-The rule sees the method's own body: a change made in a helper method it calls is not followed. Inside a parallel batch
+The rule sees the method's own body: a change made in a helper method it calls is not followed. Inside a parallel stage
 or a parallel `[ForEach]` the runtime still throws for it ([what the world synchronizes](threading.md#what-the-world-synchronizes)).
 
 ## EECS014
 
 **Structural change on another thread.** A world's structure belongs to its owner thread. The rule reports a structural
-call in a lambda or anonymous method handed to `Task.Run`, `TaskFactory.StartNew`, `new Task`, `Parallel.*`,
+call (the members EECS013 lists, `Instantiate` and `Clone` included) in a lambda or anonymous method handed to `Task.Run`, `TaskFactory.StartNew`, `new Task`, `Parallel.*`,
 `ThreadPool.QueueUserWorkItem` (and its relatives), `new Thread` or `new Timer`, when the world or entity it changes can
 be changed by another thread at the same time:
 
@@ -389,7 +391,7 @@ Parallel.For(0, players.Length, i => players[i].Destroy()); // EECS014: entities
 ```
 
 ```csharp
-public static class Shards
+public static class WorldThreads
 {
     // A world per thread: each thread owns its world, nothing is shared.
     public static Thread[] Start(World[] worlds)
@@ -415,7 +417,7 @@ reported.
 **Indexed component written through a ref.** A value index follows `Set`, `CreateEntity` and `CreateEntities`; a
 write through a `ref` changes the key behind its back. The rule reports, for a component implementing `IIndexed<TKey>`:
 
-- `Get<T>()`, `GetOrAdd<T>()`, `Add<T>()` or `TryGetRef<T>()` on an entity;
+- `Get<T>()`, `GetOrAdd<T>()` or `TryGetRef<T>()` on an entity;
 - a `ref` local bound to it, or an assignment to it (or a field of it) through a query item;
 - a `ref` or `Span<T>` parameter of it in a `[ForEach]` method or an `IForEach*` job.
 
@@ -438,5 +440,33 @@ public partial class TakePortals : EcsSystem
     {
         if (zone.Id != portal.To) player.SetZone(portal.To);         // a Set: the index moves the player at once
     }
+}
+```
+
+## EECS016
+
+**`[Removed<T>]` method that requires `T`.** `[Removed<T>]` visits entities that lost `T` and still lack it. Taking `T`
+as a parameter, or requiring it with `[With<T>]` or `[Changed<T>]` on the same method, asks for entities that have
+`T`: no row passes both, so the method would never run.
+
+Fix: read the entity's other components (the row keeps them), and handle "added again" or "written" in another method
+with `[Changed<T>]`.
+
+```cs
+[ForEach, Removed<Burning>] static void Out(in Burning burning, ref Replica r)   // EECS016: the entity lacks Burning
+[ForEach, Removed<Burning>, With<Burning>] static void Out(ref Replica r)        // EECS016: no row passes both
+```
+
+```csharp
+public record struct Burning(int Ticks) : IComponent, ITrackChanges;
+public record struct Replica(int Health, bool Burning) : IComponent;
+
+public partial class ReplicateFire : EcsSystem
+{
+    [ForEach, Changed<Burning>]
+    static void Lit(ref Replica replica) => replica.Burning = true;
+
+    [ForEach, Removed<Burning>]                       // the other components of the row are still there
+    static void Out(ref Replica replica) => replica.Burning = false;
 }
 ```

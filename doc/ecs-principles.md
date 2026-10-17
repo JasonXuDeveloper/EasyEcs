@@ -65,7 +65,7 @@ public partial class StatusSystem : EcsSystem
     {
         hp.Value -= burning.DamagePerTick;
         if (--burning.Ticks == 0) unit.Remove<Burning>();
-        if (hp.Value <= 0) unit.Add<Dead>();
+        if (hp.Value <= 0) unit.SetDead();
     }
 }
 ```
@@ -89,7 +89,7 @@ public partial class DeathSystem : EcsSystem
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp)   // `in`: it only reads Health
     {
-        if (hp.Value <= 0) unit.Add<Dead>();
+        if (hp.Value <= 0) unit.SetDead();
     }
 }
 ```
@@ -120,7 +120,7 @@ public partial class DeathSystem : EcsSystem
     void Die(Entity unit, in Health hp)
     {
         if (hp.Value > 0) return;
-        unit.Add<Dead>();
+        unit.SetDead();
         Deaths++;
     }
 }
@@ -136,7 +136,7 @@ public partial class DeathSystem : EcsSystem
     static void Die(Entity unit, in Health hp, ref Score score)   // a singleton parameter
     {
         if (hp.Value > 0) return;
-        unit.Add<Dead>();
+        unit.SetDead();
         score.Deaths++;
     }
 }
@@ -221,7 +221,7 @@ public partial class DeathSystem : EcsSystem
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp)
     {
-        if (hp.Value <= 0) unit.Add<Dead>();   // systems after DeathSystem see Dead in this update
+        if (hp.Value <= 0) unit.SetDead();   // systems after DeathSystem see Dead in this update
     }
 }
 ```

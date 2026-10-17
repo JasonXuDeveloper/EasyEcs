@@ -9,7 +9,7 @@
 |---|---|
 | **Use it for** | One world per thread (one per map or zone); `ParallelSystems` for heavy independent systems; parallel `[ForEach]` for one heavy method. |
 | **Avoid** | Several threads of your own mutating one world (EECS014 reports the ones it sees); component values touched outside the owner thread. |
-| **Cost** | No locks or atomics on the hot paths: queries match lock-free, a structural change checks and sets a plain owner flag; a parallel batch costs a thread-pool hand-off (microseconds). |
+| **Cost** | No locks or atomics on the hot paths: queries match lock-free, a structural change checks and sets a plain owner flag; a parallel stage costs a thread-pool hand-off (microseconds). |
 
 - [Terms: process, world, owner thread](#terms-process-world-owner-thread)
 - [Recommended: one world per thread](#recommended-one-world-per-thread)
@@ -27,7 +27,7 @@
 | **Process** | Your server. It can hold any number of worlds; nothing is shared between them except type indices. |
 | **World** | One isolated set of entities, components, singletons and systems (`new World()`). |
 | **Owner thread** | The thread that calls `world.Update()` and touches the world's data. One at a time per world. |
-| **`ParallelSystems`** | Inside one `Update()` call, the world borrows thread-pool threads to run a batch of non-conflicting systems; the owner thread takes part and `Update()` returns only when the batch is done. Ownership does not change. |
+| **`ParallelSystems`** | Inside one `Update()` call, the world borrows thread-pool threads to run a stage of non-conflicting systems; the owner thread takes part and `Update()` returns only when the stage is done. Ownership does not change. |
 
 So it is not "one process per world": a process runs many worlds side by side (typically one per thread), and each world
 can additionally spread one update over several cores with `ParallelSystems`.
@@ -39,7 +39,7 @@ flowchart TB
             U1["world 1: Update()"]
         end
         subgraph S2 [owner thread 2]
-            U2["world 2: Update()"] -->|ParallelSystems: a batch of non-conflicting systems| TP[thread-pool helpers]
+            U2["world 2: Update()"] -->|ParallelSystems: a stage of non-conflicting systems| TP[thread-pool helpers]
         end
     end
 ```
@@ -73,7 +73,7 @@ Dependencies are expressed through data and `Priority`, never through `before`/`
 
 - **A produces, B consumes a component** (A writes `Velocity`, B reads it): give B a higher priority, or register it
   after A. Even at the same priority with `ParallelSystems`, they conflict on `Velocity`, so they are in different
-  batches and A finishes first.
+  stages and A finishes first.
 - **A changes structure, B reacts** (A adds `Dead`, B destroys dead entities): A needs an `Entity` parameter to add the
   tag, so it runs alone; B runs after it.
 - **A and B touch disjoint data**: their order cannot change the result, so `ParallelSystems` may run them together.
@@ -91,15 +91,15 @@ scheduler only puts non-conflicting systems together.
 | `ref T` component / singleton | writes `T` |
 | `in T` component / singleton | reads `T` |
 | `[With<T>]` / `[Without<T>]` / `[WithAny<T>]` | nothing (filters read the archetype and presence bits, which no parallel system changes) |
-| `[Changed<T>]` | reads `T` (its change ticks), so it never shares a batch with a writer of `T` |
+| `[Changed<T>]`, `[Removed<T>]` | reads `T` (its change ticks), so it never shares a stage with a writer of `T` |
 | `Entity` or `World`, an instance method, an `OnUpdate` override, no `[ForEach]` method, or a subclass that adds no `[ForEach]` method of its own | runs alone |
 
 Two systems conflict when one writes a component or singleton the other reads or writes, or when either runs alone.
 A system "runs alone" when it can reach the world beyond its parameters: through an `Entity` it can read any
-component or make structural changes, so it never shares a batch.
+component or make structural changes, so it never shares a stage.
 
-The systems of one priority are split into **batches of consecutive, pairwise non-conflicting systems**. Batches run
-one after another; the systems of a batch run at the same time.
+The systems of one priority are split into **stages of consecutive, pairwise non-conflicting systems**. Stages run
+one after another; the systems of a stage run at the same time.
 
 ```csharp
 public record struct Body(float X, float Y, float Vx, float Vy) : IComponent;
@@ -124,35 +124,35 @@ public partial class LowHealthAlarm : EcsSystem    // reads Vitals: conflicts wi
 
 ```mermaid
 flowchart LR
-    subgraph B1 [batch 1: at the same time]
+    subgraph B1 [stage 1: at the same time]
         M[MoveBodies<br/>writes Body]
         R[RegenerateHealth<br/>writes Vitals]
     end
-    subgraph B2 [batch 2]
+    subgraph B2 [stage 2]
         A[LowHealthAlarm<br/>reads Vitals, writes Alarms]
     end
     B1 --> B2
 ```
 
-Because batches are consecutive, registration order keeps its meaning: of two conflicting systems, the one registered
+Because stages are consecutive, registration order keeps its meaning: of two conflicting systems, the one registered
 first always finishes first, and the result is the same as a sequential update. A system that should run alone or in
 another order gets its own priority.
 
-Execution is allocation-free: the calling thread works through a batch together with up to
+Execution is allocation-free: the calling thread works through a stage together with up to
 `MaxDegreeOfParallelism - 1` reusable thread-pool work items (no `Parallel.For` closures, no tasks). Lower
-`MaxDegreeOfParallelism` when several worlds, or IO threads, share the cores: a batch then takes fewer of them. The first
-exception thrown in a batch is rethrown on the calling thread after the batch (later ones are dropped); with a
+`MaxDegreeOfParallelism` when several worlds, or IO threads, share the cores: a stage then takes fewer of them. The first
+exception thrown in a stage is rethrown on the calling thread after the stage (later ones are dropped); with a
 `SystemError` subscriber every exception is reported instead, possibly from a thread-pool thread.
 
-When to turn it on: a world with several heavy, independent systems per priority and spare cores. Each batch costs a
+When to turn it on: a world with several heavy, independent systems per priority and spare cores. Each stage of several systems costs a
 hand-off to the thread pool (microseconds), so it pays for systems that iterate thousands of entities, not for a
 handful. For a server, one world per thread usually uses the cores better: see
 [Performance](../performance.md#benchmarks) (`ParallelSystemsBenchmark`, `MultiWorldBenchmark`).
 
 ## Parallel `[ForEach]` methods
 
-`Parallel` runs several systems at once; `[ForEach(Parallel = true)]` splits one method's rows across threads (see
-[Systems](systems.md#parallel-methods)). The two compose: inside a parallel batch, a parallel method whose chunk
+`ParallelSystems` runs several systems at once; `[ForEach(Parallel = true)]` splits one method's rows across threads
+(see [Systems](systems.md#parallel-methods)). The two compose: inside a parallel stage, a parallel method whose chunk
 runner is busy with another system's method runs on its own thread instead of waiting. Both use the same allocation-free
 runner, and the calling thread always takes part.
 
@@ -160,9 +160,9 @@ runner, and the calling thread always takes part.
 
 | Operation | Safety |
 |---|---|
-| Structural changes (create/destroy, `Add`/`Set`/`Remove`), adding/removing systems and singletons, `Capture`/`Restore` | Owner thread only, one at a time. They check and set the world's owner flag (no atomic instruction): one started while another runs, or while the structure is frozen (a parallel batch, a parallel `[ForEach]`, a batch job holding spans into the tables, an `INoStructuralChanges` pass), throws `InvalidOperationException` instead of tearing the tables. |
-| Query matching, `Has`, `Get` lookups | Lock-free over immutable, copy-on-write archetype snapshots (the first use of a query shape takes a compare-and-swap gate once to build its cache entry, so the threads of a parallel batch can race to it). |
-| A singleton a system resolves first (`[ForEach]` singleton parameters, `GetOrAddSingleton`, `SingletonRef`) | The same compare-and-swap gate: systems of one batch may add it at once. |
+| Structural changes (create/destroy, `Instantiate`/`Clone`, `Set`/`GetOrAdd`/`Remove`), adding/removing systems and singletons, `Capture`/`Restore` | Owner thread only, one at a time. They check and set the world's owner flag (no atomic instruction): one started while another runs, or while the structure is frozen (a parallel stage, a parallel `[ForEach]`, a batch job holding spans into the tables, an `INoStructuralChanges` pass), throws `InvalidOperationException` instead of tearing the tables. |
+| Query matching, `Has`, `Get` lookups | Lock-free over immutable, copy-on-write archetype snapshots (the first use of a query shape takes a compare-and-swap gate once to build its cache entry, so the threads of a parallel stage can race to it). |
+| A singleton a system resolves first (`[ForEach]` singleton parameters, `GetOrAddSingleton`, `SingletonRef`) | The same compare-and-swap gate: systems of one stage may add it at once. |
 | Component and singleton **values** | Not synchronized, by design: the owner thread, or the parallel scheduler, decides who touches them. |
 | Value index lookups, and the unlinking done by destroying an entity or removing an indexed component | Not synchronized: owner thread only while the world has an index ([indexes and relations](indexes-and-relations.md)). |
 
@@ -174,8 +174,8 @@ What catches a change made off the owner thread:
 
 | Where the change comes from | Caught by |
 |---|---|
-| A `[ForEach]` method that takes no `Entity` or `World` (or only reads its `Entity`), changing structure through a handle a component holds or a world kept elsewhere | [EECS013](analyzer.md#eecs013) at compile time; the runtime throws if it runs in a parallel batch. |
-| A system of a parallel batch, or a parallel `[ForEach]` job, that changes structure through a helper method | The runtime: the world freezes its structure for the batch and the chunks, and every structural change then throws, deterministically. |
+| A `[ForEach]` method that takes no `Entity` or `World` (or only reads its `Entity`), changing structure through a handle a component holds or a world kept elsewhere | [EECS013](analyzer.md#eecs013) at compile time; the runtime throws if it runs in a parallel stage. |
+| A system of a parallel stage, or a parallel `[ForEach]` job, that changes structure through a helper method | The runtime: the world freezes its structure for the stage and the chunks, and every structural change then throws, deterministically. |
 | A lambda handed to `Task.Run`, `Parallel.*`, `ThreadPool`, `new Thread` or `new Timer` that changes a world (or an entity) the code around it also changes, or hands off several times | [EECS014](analyzer.md#eecs014) at compile time. A world handed to a thread that then owns it (a world per thread) is not reported. |
 | Your own threads in any other way | Nothing reliable: the owner flag may throw, but two threads can also pass it together. Hand the change to the owner as data ([below](#input-from-other-threads)). |
 
@@ -213,7 +213,7 @@ drained by a system.
 
 | Library | Order of systems | Systems in parallel | How conflicts are avoided |
 |---|---|---|---|
-| **EasyEcs** | `Priority`, then registration order | Non-conflicting systems of one priority (`Parallel`); within one method (`[ForEach(Parallel = true)]`, chunks of rows) | Access generated from `ref`/`in` parameters; conflicting systems never share a batch; the analyzer rejects parallel methods that could race (EECS010) and writes through `in` parameters (EECS011) |
+| **EasyEcs** | `Priority`, then registration order | Non-conflicting systems of one priority (`ParallelSystems`); within one method (`[ForEach(Parallel = true)]`, chunks of rows) | Access generated from `ref`/`in` parameters; conflicting systems never share a stage; the analyzer rejects parallel methods that could race (EECS010) and writes through `in` parameters (EECS011) |
 | Entitas | Order added to `Feature`/`Systems` | No; a `JobSystem` splits one system's entities across threads | You keep job bodies independent |
 | Arch | Your own call order (Arch.System: group order) | Within one query (`ParallelQuery`, chunk jobs) | You keep parallel query bodies independent |
 | Friflo.Engine.ECS | `SystemRoot` / `SystemGroup` order | Within one query (`RunParallel`, chunk tasks) | You keep parallel query bodies independent |

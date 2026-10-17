@@ -29,18 +29,23 @@ behaviors:
   `Execute(ref T1 c1, …)`, so a pass never loads the entity rows for them. A job that needs the entity implements
   `IForEachEntity<…>` (`Execute(Entity entity, ref T1 c1, …)`, `entity.Id` for the id) and runs with
   `world.ForEachEntity`.
-- **`CompactArchetypes()` is gone.** Tables stay dense on their own, and passes now end even when a job throws, so
-  there is nothing to compact. Delete the calls; `GetFragmentationStats()` remains as a check.
+- **`CompactArchetypes()` and `GetFragmentationStats()` are gone.** Tables stay dense on their own, and passes now
+  end even when a job throws, so there is nothing to compact and nothing to monitor (the ratio was always 0 between
+  updates). Delete the calls.
+- **`entity.Add<T>()` is gone.** It did what `Set` and `GetOrAdd` do, and reset a component the entity already had,
+  unlike adding in other ECS libraries. Write `entity.Set(new T(…))` (or the generated `entity.SetX(…)`, `SetDead()`
+  for a tag) to add or replace a value, and `ref var c = ref entity.GetOrAdd<T>()` to add a default value only when
+  it is missing and fill it through the ref.
 - **Stale and `default` handles answer questions with false.** `Has<T>()` and `TryGet<T>()` used to throw for a
   destroyed entity (and `default(Entity).Has<T>()` threw a `NullReferenceException`); they now return false, like
-  `IsAlive`. `Get`, `Add`, `Set` and `Remove` still throw, now `InvalidOperationException` for `default` handles too.
+  `IsAlive`. `Get`, `GetOrAdd`, `Set` and `Remove` still throw, now `InvalidOperationException` for `default` handles too.
 - **`world.Systems` is a `SystemList`** (allocation-free `foreach` and `Count`) instead of a new `IReadOnlyList`;
   `foreach` loops compile unchanged.
 - **`QueryEnumerator.Count` / `IsEmpty` are gone:** use `world.Count` / `world.Any` with the same filter.
 - **`entity.Remove<…>()` returns the entity** for chaining (calls that ignore it compile unchanged).
 - **Structural changes belong to the world's owner thread.** 4.0 serialized creates, destroys, `Add`/`Set`/`Remove`
   and singleton or system changes from any thread with a compare-and-swap lock. 4.1 checks a plain owner flag
-  instead: a change made while another runs, or inside a parallel batch of systems or a parallel `[ForEach]`, throws
+  instead: a change made while another runs, or inside a parallel stage of systems or a parallel `[ForEach]`, throws
   `InvalidOperationException`; two threads of your own changing one world at once are not caught reliably. Make
   structural changes on the thread that calls `Update` (other threads hand them over as data through a queue a
   system drains: [input from other threads](doc/guide/threading.md#input-from-other-threads)), or give each thread
@@ -72,7 +77,7 @@ behaviors:
   their own.
 - **`ParallelSystems` keeps subclasses it cannot see alone.** A system class that derives from a generated system
   without adding `[ForEach]` methods of its own (for example to override `OnUpdate`) now runs alone in its priority, as
-  its `OnUpdate` may touch anything. Give the subclass a `[ForEach]` method (it is then generated) to batch it again.
+  its `OnUpdate` may touch anything. Give the subclass a `[ForEach]` method (it is then generated) to run it beside others again.
 - **`AddSingleton<T>()` on an existing singleton resets it in place.** It used to replace the storage, which left
   `SingletonRef<T>` handles taken before pointing at a detached copy; they now see the reset value.
 - **`RemoveSingleton<T>()` returns `bool`** (false when the singleton was not added). Calls that ignore the result
@@ -93,12 +98,16 @@ New:
   pass through the structural gate.
 - `WorldOptions.MeasureSystems` times every system run into `system.Stats` (`SystemStats`).
 - `[ForEach(Parallel = true)]` (and `world.ForEachParallel` / `ForEachEntityParallel`) runs chunks of
-  `World.ChunkRows` rows on several threads; [EECS010](doc/guide/analyzer.md#eecs010) reports methods that could race.
+  `World.ParallelChunkRows` rows on several threads; [EECS010](doc/guide/analyzer.md#eecs010) reports methods that could race.
 - `world.Capture()` / `world.Restore(snapshot)`: in-memory snapshots of entities, components and singletons
   ([Snapshots](doc/guide/snapshots.md)).
-- `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>(since)` / `ChangedSince(since)`, `world.ChangeTick`,
+- `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>(since)` / `Since(since)`, `world.ChangeTick`,
   `system.LastRunTick`: change tracking ([Change tracking](doc/guide/change-tracking.md)). The job interfaces gained
   an optional static `Writes` member (with a default).
+- `[Removed<T>]` and `QueryFilter.Removed<T>(since)`: the entities that lost a tracked component since a tick
+  (replication of what went away), with [EECS016](doc/guide/analyzer.md#eecs016) for filters no row can pass.
+- `Prefab` and `world.Instantiate(prefab)` / `Instantiate(prefab, span)`: entities from a recipe of components that
+  belongs to no world; `entity.Clone()` copies a living entity.
 - `IIndexed<TKey>`, `world.Index<T, TKey>()`, `ValueIndex<T, TKey>`: find entities by a component value; relations
   are indexed `Entity` keys ([Indexes and relations](doc/guide/indexes-and-relations.md)).
 - `entity.Read<T>()` returns a `ref readonly T` that never counts as a write of a tracked component, and

@@ -64,7 +64,7 @@ public partial class DeathSystem : EcsSystem
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp)
     {
-        if (hp.Value <= 0) unit.Add<Dead>();   // applied now: later systems already see the corpse
+        if (hp.Value <= 0) unit.SetDead();   // applied now: later systems already see the corpse
     }
 }
 ```
