@@ -48,7 +48,7 @@ public static class SavedTypes
     /// component or a buffer's element) are, so a migration points them at the moved entities. Each accessor returns
     /// one field of the value it is given (generated with <c>UnsafeAccessor</c>, private fields too).
     /// </summary>
-    public static void EntityIds<T>(params EntityIdField<T>[] fields) where T : struct
+    public static void EntityIds<T>(params ReadOnlySpan<EntityIdField<T>> fields) where T : struct
     {
         T probe = default;
         ref byte start = ref Unsafe.As<T, byte>(ref probe);

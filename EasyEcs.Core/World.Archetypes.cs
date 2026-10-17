@@ -51,10 +51,11 @@ public sealed partial class World
     // dictionary. Queries run on any thread, so the arrays are immutable snapshots replaced copy-on-write; once a
     // signature's ways are full, other filters take the dictionary (no allocation in steady state).
     private QueryMemo[][] _queryMemo = [];
-    private readonly object _memoLock = new();
+    private readonly Lock _memoLock = new();
     private const int MemoWays = 4;
 
-    private sealed class QueryMemo(in QueryFilter filter, QueryCacheEntry entry)
+    // A struct: a hit reads the ways' filters in one array, without a hop to an object per way.
+    private readonly struct QueryMemo(in QueryFilter filter, QueryCacheEntry entry)
     {
         public readonly QueryFilter Filter = filter;
         public readonly QueryCacheEntry Entry = entry;

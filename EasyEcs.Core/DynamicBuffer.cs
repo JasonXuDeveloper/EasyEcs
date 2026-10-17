@@ -220,7 +220,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         if (reuse != null && RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(reuse.Items, 0, reuse.Count);
         if (count == 0)
         {
-            if (reuse != null) reuse.Count = 0;
+            reuse?.Count = 0;
             return reuse;
         }
 
