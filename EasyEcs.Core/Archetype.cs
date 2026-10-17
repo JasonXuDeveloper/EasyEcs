@@ -109,6 +109,11 @@ internal sealed class Archetype
     /// <summary>Has tombstones that the world closes when the last pass ends (registered once, see World.Remove).</summary>
     public bool Dirty;
 
+    // The rows made tombstones since the table was last dense, so FillHoles visits only them instead of scanning every
+    // row for holes. Reused (it grows to the most tombstones a table held at once, at most its rows).
+    private int[] _holes = [];
+    private int _holeCount;
+
     // Transition cache: component bit -> transition reached by adding that component (removing never moves rows).
     // Avoids hashing a 256-bit Tag on every single-component structural change.
     private Transition[] _addEdges = [];
@@ -612,6 +617,8 @@ internal sealed class Archetype
         if (inPass || Count != AliveCount + 1)
         {
             Unsafe.Add(ref rows, slot).Id = Tombstone; // the version stays: a pass compares it
+            if (_holeCount == _holes.Length) Array.Resize(ref _holes, Math.Max(16, _holes.Length * 2));
+            _holes[_holeCount++] = slot; // a tombstone stays one until FillHoles (new rows go to the end)
             if (Dirty) return false;
             Dirty = true;
             return true;
@@ -718,6 +725,7 @@ internal sealed class Archetype
         }
 
         Count = AliveCount = count;
+        _holeCount = 0;
         Dirty = false;
     }
 
@@ -727,16 +735,17 @@ internal sealed class Archetype
     /// </summary>
     public void FillHoles(EntityMeta[] meta)
     {
-        // Holes below AliveCount are exactly as many as alive rows at or above it: move those down, found with
-        // vectorized scans (range searches for negative rows in Rows64) instead of a test per row.
+        // Holes below AliveCount are exactly as many as alive rows at or above it: each takes the last of those, found
+        // from the end (a vectorized range search for a non-negative row in Rows64). Holes at or above AliveCount fall
+        // off with the end. The recorded holes are every tombstone below Count, each once.
         var rows = Rows64(Count);
         int alive = AliveCount;
         int end = rows.Length; // alive rows still to move live in [alive, end)
-        for (int hole = 0; ; hole++)
+        var holes = _holes.AsSpan(0, _holeCount);
+        for (int i = 0; i < holes.Length; i++)
         {
-            int found = rows.Slice(hole, alive - hole).IndexOfAnyInRange(long.MinValue, -1);
-            if (found < 0) break;
-            hole += found;
+            int hole = holes[i];
+            if (hole >= alive) continue;
             end = alive + rows.Slice(alive, end - alive).LastIndexOfAnyExceptInRange(long.MinValue, -1);
             MoveRow(end, hole, meta);
             Slots[end].Id = Tombstone;
@@ -744,6 +753,7 @@ internal sealed class Archetype
 
         if (_hasManaged && rows.Length > alive) ReleaseRows(alive, rows.Length - alive);
         Count = alive;
+        _holeCount = 0;
         Dirty = false;
     }
 
