@@ -53,7 +53,7 @@ public class SnapshotTests
         world.Restore(snapshot);
 
         var fresh = world.CreateEntity(new Health(2));   // reuses the id of `after`
-        Assert.That(fresh.Id, Is.EqualTo(after.Id));
+        Assert.That(fresh.Id.Index, Is.EqualTo(after.Id.Index));
         Assert.That(after.IsAlive, Is.False);
         Assert.Throws<InvalidOperationException>(() => after.Get<Health>());
         Assert.That(fresh.Get<Health>().Value, Is.EqualTo(2));

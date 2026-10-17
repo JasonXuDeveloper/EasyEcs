@@ -11,7 +11,7 @@ public partial class IndexTests
         [ForEach, With<Dead>]
         private void Cascade(Entity parent)
         {
-            foreach (Entity child in World.Index<ChildOf, Entity>().Find(parent)) child.Destroy();
+            foreach (Entity child in World.Index<ChildOf, EntityId>().Find(parent)) child.Destroy();
         }
     }
 
@@ -100,7 +100,7 @@ public partial class IndexTests
     public void RelationsFindTheEntitiesPointingAtAnEntity()
     {
         using var world = new World();
-        var children = world.Index<ChildOf, Entity>();
+        var children = world.Index<ChildOf, EntityId>();
         var parent = world.CreateEntity(new Health(1));
         var other = world.CreateEntity(new Health(1));
         var kids = new Entity[3];
@@ -145,7 +145,7 @@ public partial class IndexTests
         world.AddSystem<Rename>();
         world.AddSystem<DestroyOrphans>();
         var callsigns = world.Index<Callsign, string>();
-        var children = world.Index<ChildOf, Entity>();
+        var children = world.Index<ChildOf, EntityId>();
         var parent = world.CreateEntity(new Callsign("p"));
         var kids = new Entity[3];
         world.CreateEntities(kids, new ChildOf(parent), new Callsign("k"));
@@ -171,7 +171,7 @@ public partial class IndexTests
         Assert.That(index.Count("x"), Is.EqualTo(1));
         a.Destroy();
         var b = world.CreateEntity(new Callsign("x")); // reuses a's id before any lookup
-        Assert.That(b.Id, Is.EqualTo(a.Id));
+        Assert.That(b.Id.Index, Is.EqualTo(a.Id.Index));
         Assert.That(All(index.Find("x")), Is.EqualTo(new[] { b }));
     }
 
@@ -195,7 +195,7 @@ public partial class IndexTests
     public void TwoIncarnationsOfOneIdKeepSeparateRelations()
     {
         using var world = new World();
-        var children = world.Index<ChildOf, Entity>();
+        var children = world.Index<ChildOf, EntityId>();
         var old = world.CreateEntity(new Health(1));
         var oldKids = new Entity[2];
         world.CreateEntities(oldKids, new ChildOf(old));
@@ -203,7 +203,7 @@ public partial class IndexTests
 
         old.Destroy();                                     // the links stay: they keep the old version
         var next = world.CreateEntity(new Health(2));      // reuses the id
-        Assert.That(next.Id, Is.EqualTo(old.Id));
+        Assert.That(next.Id.Index, Is.EqualTo(old.Id.Index));
         var newKids = new Entity[3];
         world.CreateEntities(newKids, new ChildOf(next));
         Assert.That(All(children.Find(next)), Is.EquivalentTo(newKids));
@@ -234,7 +234,7 @@ public partial class IndexTests
     {
         using var world = new World();
         var callsigns = world.Index<Callsign, string>();
-        var children = world.Index<ChildOf, Entity>();
+        var children = world.Index<ChildOf, EntityId>();
         var parent = world.CreateEntity(new Health(1));
         var kids = new Entity[4];
         world.CreateEntities(kids, new ChildOf(parent), new Callsign("k"));
@@ -289,33 +289,26 @@ public partial class IndexTests
     }
 
     [Test]
-    public void RelationsToDefaultAndOtherWorldsAreHashed()
+    public void RelationsToTheNullIdAreHashed()
     {
         using var world = new World();
-        using var other = new World();
-        var children = world.Index<ChildOf, Entity>();
-        var local = world.CreateEntity(new Health(1));
-        var foreign = other.CreateEntity(new Health(1)); // same id and version as local, another world
-        Assert.That(foreign.Id, Is.EqualTo(local.Id));
-        var orphan = world.CreateEntity(new ChildOf(default));
-        var exile = world.CreateEntity(new ChildOf(foreign));
-        var kid = world.CreateEntity(new ChildOf(local));
+        var children = world.Index<ChildOf, EntityId>();
+        var parent = world.CreateEntity(new Health(1));
+        var orphan = world.CreateEntity(new ChildOf(EntityId.Null));
+        var kid = world.CreateEntity(new ChildOf(parent));
 
-        Assert.That(All(children.Find(default)), Is.EqualTo(new[] { orphan }));
-        Assert.That(All(children.Find(foreign)), Is.EqualTo(new[] { exile }));
-        Assert.That(All(children.Find(local)), Is.EqualTo(new[] { kid }));
-        exile.Destroy();
+        Assert.That(All(children.Find(EntityId.Null)), Is.EqualTo(new[] { orphan }));
+        Assert.That(All(children.Find(parent)), Is.EqualTo(new[] { kid }));
         orphan.Remove<ChildOf>();
-        Assert.That(children.Count(foreign), Is.Zero);
-        Assert.That(children.Count(default), Is.Zero);
-        Assert.That(children.Count(local), Is.EqualTo(1));
+        Assert.That(children.Count(EntityId.Null), Is.Zero);
+        Assert.That(children.Count(parent), Is.EqualTo(1));
     }
 
     [Test]
     public void RestoreReindexesRelations()
     {
         using var world = new World();
-        var children = world.Index<ChildOf, Entity>();
+        var children = world.Index<ChildOf, EntityId>();
         var parent = world.CreateEntity(new Health(1));
         var kid = world.CreateEntity(new ChildOf(parent));
         Assert.That(children.Count(parent), Is.EqualTo(1));
@@ -333,7 +326,7 @@ public partial class IndexTests
     public void AddingBackTheDefaultIndexesIt()
     {
         using var world = new World();
-        var children = world.Index<ChildOf, Entity>();
+        var children = world.Index<ChildOf, EntityId>();
         var parent = world.CreateEntity(new Health(1));
         var kid = world.CreateEntity(new ChildOf(parent));
         Assert.That(children.Count(parent), Is.EqualTo(1));

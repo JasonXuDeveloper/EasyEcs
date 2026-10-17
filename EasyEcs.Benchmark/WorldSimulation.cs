@@ -87,9 +87,9 @@ public partial class CombatSystem : EcsSystem
         stats.Hits++;
         health.Value -= attack.Damage;
 
-        if (Rng.Chance(stats.Tick, entity.Id, 1, 50) && !entity.Has<Burning>())
+        if (Rng.Chance(stats.Tick, entity.Id.Index, 1, 50) && !entity.Has<Burning>())
             entity.Set(new Burning { Ticks = 10, DamagePerTick = 3 });
-        else if (Rng.Chance(stats.Tick, entity.Id, 2, 20) && !entity.Has<Stunned>())
+        else if (Rng.Chance(stats.Tick, entity.Id.Index, 2, 20) && !entity.Has<Stunned>())
             entity.Set(new Stunned { Ticks = 5 });
     }
 }
@@ -152,7 +152,7 @@ public partial class RespawnSystem : EcsSystem
     private static void Despawn(Entity entity, World world)
     {
         entity.Destroy();
-        Simulation.SpawnNpc(world, entity.Id * 31 + 7);
+        Simulation.SpawnNpc(world, entity.Id.Index * 31 + 7);
     }
 
     [ForEach, With<Dead>, With<Player>]
@@ -171,10 +171,10 @@ public partial class ShootingSystem : EcsSystem
     [ForEach, With<Player>, Without<Dead>]
     private static void Shoot(Entity shooter, in Position p, in Velocity v, ref WorldStats stats, World world)
     {
-        if (!Rng.Chance(stats.Tick, shooter.Id, 3, 50)) return;
+        if (!Rng.Chance(stats.Tick, shooter.Id.Index, 3, 50)) return;
         stats.Spawns++;
         world.CreateEntity(p, new Velocity { X = v.X * 4, Y = v.Y * 4 }, new Lifetime { Ticks = 20 },
-            new Projectile { OwnerId = shooter.Id });
+            new Projectile { OwnerId = shooter.Id.Index });
     }
 }
 

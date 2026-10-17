@@ -88,7 +88,7 @@ public class EntityTests
         old.Destroy();
         var reused = _world.CreateEntity().Set(new Health(2));
 
-        Assert.That(reused.Id, Is.EqualTo(old.Id));
+        Assert.That(reused.Id.Index, Is.EqualTo(old.Id.Index));
         Assert.That(reused.Version, Is.EqualTo(old.Version + 1));
         Assert.That(reused, Is.Not.EqualTo(old));
         Assert.That(reused.Get<Health>().Value, Is.EqualTo(2), "the stale handle never touches the new occupant");
@@ -144,7 +144,7 @@ public class EntityTests
         Assert.That(_world.TryGetEntity(entities[5].Id, out var found), Is.True);
         Assert.That(found, Is.EqualTo(entities[5]));
         Assert.That(_world.TryGetEntity(entities[10].Id, out _), Is.False);
-        Assert.That(_world.TryGetEntity(-1, out _), Is.False);
+        Assert.That(_world.TryGetEntity(new EntityId(-1, 1), out _), Is.False);
         Assert.Throws<InvalidOperationException>(() => _world.GetEntity(entities[10].Id));
 
         var seen = new List<Entity>();
@@ -188,18 +188,42 @@ public class EntityTests
     }
 
     [Test]
+    public void AnIdNamesOneIncarnationAndNullNamesNone()
+    {
+        Assert.That(_world.TryGetEntity(EntityId.Null, out _), Is.False);  // versions start at 1
+        var first = _world.CreateEntity(new Health(1));
+        Assert.That((first.Id.IsNull, first.Id.Version), Is.EqualTo((false, 1)));
+        EntityId id = first;                                                  // a handle converts to its id
+        Assert.That(_world.GetEntity(id), Is.EqualTo(first));
+        first.Destroy();
+        var reused = _world.CreateEntity(new Health(2));
+        Assert.That(reused.Id.Index, Is.EqualTo(id.Index));
+        Assert.That((_world.IsAlive(id), _world.TryGetEntity(id, out _)), Is.EqualTo((false, false))); // not the new one
+        Assert.Throws<InvalidOperationException>(() => _world.GetEntity(id));
+    }
+
+    [Test]
+    public void ComponentsHoldingIdsKeepUnmanagedColumns()
+    {
+        var parent = _world.CreateEntity();
+        var child = _world.CreateEntity(new ChildOf(parent));
+        Assert.That(ComponentInfo.Of(ComponentType<ChildOf>.Bit).Managed, Is.False);
+        Assert.That(_world.GetEntity(child.Read<ChildOf>().Parent), Is.EqualTo(parent));
+    }
+
+    [Test]
     public void HandlesCompareByIdAndVersion()
     {
         var e = _world.CreateEntity();
         var same = _world.GetEntity(e.Id);
         Assert.That(same, Is.EqualTo(e));
         Assert.That(same == e && !(same != e), Is.True);
-        Assert.That(same.GetHashCode(), Is.EqualTo(unchecked(e.Id * 397 ^ e.Version)));   // deterministic
-        Assert.That(e.ToString(), Is.EqualTo($"Entity {e.Id}v{e.Version}"));
+        Assert.That(same.GetHashCode(), Is.EqualTo(e.Id.GetHashCode()));   // deterministic
+        Assert.That(e.ToString(), Is.EqualTo($"Entity {e.Id.Index}v{e.Id.Version}"));
 
         e.Destroy();
         var recycled = _world.CreateEntity();
-        Assert.That(recycled.Id, Is.EqualTo(e.Id));
+        Assert.That(recycled.Id.Index, Is.EqualTo(e.Id.Index));
         Assert.That(recycled, Is.Not.EqualTo(e));                             // another incarnation
     }
 
@@ -208,7 +232,7 @@ public class EntityTests
     {
         using var world = new World();
         var parent = world.CreateEntity();
-        var children = world.Index<ChildOf, Entity>();
+        var children = world.Index<ChildOf, EntityId>();
         var spawned = new Entity[300];
         world.CreateEntities(spawned, new ChildOf(parent), new Position(), new Callsign("x"));
         spawned[7].Remove<Position>();                                  // a row lacking a component still goes

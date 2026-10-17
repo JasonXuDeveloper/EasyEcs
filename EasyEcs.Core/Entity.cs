@@ -21,25 +21,49 @@ public readonly partial struct Entity : IEquatable<Entity>
 {
     private readonly World _world;
 
-    /// <summary>Entity id (dense, recycled after destruction).</summary>
-    public readonly int Id;
+    /// <summary>
+    /// The entity's identity (index and incarnation): what to store in a component or send elsewhere to refer to it
+    /// (<see cref="World.TryGetEntity(EntityId, out Entity)"/> turns it back into a handle).
+    /// </summary>
+    public readonly EntityId Id;
 
-    /// <summary>Incarnation of <see cref="Id"/>; bumped when the entity is destroyed.</summary>
-    public readonly int Version;
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal Entity(World world, int index, int version)
+    {
+        _world = world;
+        Id = new EntityId(index, version);
+    }
 
-    internal Entity(World world, int id, int version)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal Entity(World world, EntityId id)
     {
         _world = world;
         Id = id;
-        Version = version;
     }
+
+    /// <summary>Index of the entity (<see cref="EntityId.Index"/>).</summary>
+    internal int Index
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Id.Index;
+    }
+
+    /// <summary>Incarnation of <see cref="Index"/> (<see cref="EntityId.Version"/>).</summary>
+    internal int Version
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Id.Version;
+    }
+
+    /// <summary>The handle's <see cref="Id"/>: store ids, not handles, in components.</summary>
+    public static implicit operator EntityId(Entity entity) => entity.Id;
 
     /// <summary>The world owning the entity (null for <c>default</c>).</summary>
     public World World => _world;
 
     /// <summary>Whether this incarnation is alive. O(1).</summary>
-    public bool IsAlive => _world != null && (uint)Id < (uint)_world.Meta.Length && _world.Meta[Id].Version == Version &&
-                           _world.Meta[Id].Archetype != null;
+    public bool IsAlive => _world != null && (uint)Index < (uint)_world.Meta.Length && _world.Meta[Index].Version == Version &&
+                           _world.Meta[Index].Archetype != null;
 
     /// <summary>
     /// Whether the entity has component <typeparamref name="T"/>; false for a destroyed or default handle. O(1).
@@ -68,7 +92,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     public ref T Get<T>() where T : struct, IComponent
     {
         ref T value = ref Find<T>(true);
-        if (default(T) is ITrackChanges) Touch<T>(_world, Id);
+        if (default(T) is ITrackChanges) Touch<T>(_world, Index);
         return ref value;
     }
 
@@ -92,7 +116,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     {
         ref T value = ref Find<T>(false);
         found = !Unsafe.IsNullRef(ref value);
-        if (default(T) is ITrackChanges && found) Touch<T>(_world, Id);
+        if (default(T) is ITrackChanges && found) Touch<T>(_world, Index);
         return ref value;
     }
 
@@ -154,7 +178,7 @@ public readonly partial struct Entity : IEquatable<Entity>
             return null;
         }
 
-        ref var meta = ref world.MetaRef(Id); // ids of this world's handles are always < Meta.Length
+        ref var meta = ref world.MetaRef(Index); // ids of this world's handles are always < Meta.Length
         slot = meta.Slot;
         if (meta.Version != Version)
         {
@@ -216,8 +240,8 @@ public readonly partial struct Entity : IEquatable<Entity>
     public ref T GetOrAdd<T>() where T : struct, IComponent
     {
         ref T value = ref Find<T>(false);
-        if (Unsafe.IsNullRef(ref value)) return ref AddCore<T>(_world, Id, Version); // throws for a handle that is not alive
-        if (default(T) is ITrackChanges) Touch<T>(_world, Id);
+        if (Unsafe.IsNullRef(ref value)) return ref AddCore<T>(_world, Index, Version); // throws for a handle that is not alive
+        if (default(T) is ITrackChanges) Touch<T>(_world, Index);
         return ref value;
     }
 
@@ -254,13 +278,13 @@ public readonly partial struct Entity : IEquatable<Entity>
     private static void ThrowMissing(uint bit) =>
         throw new InvalidOperationException($"Entity has no {ComponentInfo.Of((int)bit).Type.Name} component");
 
-    public bool Equals(Entity other) => Id == other.Id && Version == other.Version && ReferenceEquals(_world, other._world);
+    public bool Equals(Entity other) => Id == other.Id && ReferenceEquals(_world, other._world);
 
     public override bool Equals(object obj) => obj is Entity other && Equals(other);
 
-    public override int GetHashCode() => unchecked(Id * 397 ^ Version); // cheap: hashed per dictionary lookup (relation indexes)
+    public override int GetHashCode() => Id.GetHashCode(); // cheap: hashed per dictionary lookup (relation indexes)
 
-    public override string ToString() => $"Entity {Id}v{Version}";
+    public override string ToString() => $"Entity {Id}";
 
     public static bool operator ==(Entity left, Entity right) => left.Equals(right);
 

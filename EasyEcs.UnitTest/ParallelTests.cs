@@ -14,7 +14,7 @@ public partial class ParallelTests
     public partial class ChunkedIncrement : EcsSystem
     {
         [ForEach(Parallel = true), Without<Dead>]
-        static void Add(ref Counter counter, in Seen step, Entity entity) => counter.N += step.N + (entity.Id & 0);
+        static void Add(ref Counter counter, in Seen step, Entity entity) => counter.N += step.N + (entity.Id.Index & 0);
     }
 
     // Each system waits at the rendezvous: it reports Met only if another system arrived while it was running.
@@ -203,7 +203,7 @@ public partial class ParallelTests
 
     private struct StampHandle : IForEachEntity<Seen>, INoStructuralChanges
     {
-        public void Execute(Entity entity, ref Seen seen) => seen.N = entity.Id + entity.Version;
+        public void Execute(Entity entity, ref Seen seen) => seen.N = entity.Id.Index + entity.Id.Version;
     }
 
     [Test]
@@ -225,7 +225,7 @@ public partial class ParallelTests
             var e = entities[i];
             bool dead = i % 10 == 0;
             Assert.That(e.Get<Counter>().N, Is.EqualTo(dead ? -1 : 0));
-            Assert.That(e.Get<Seen>().N, Is.EqualTo(dead ? -1 : e.Id + e.Version));
+            Assert.That(e.Get<Seen>().N, Is.EqualTo(dead ? -1 : e.Id.Index + e.Id.Version));
         }
     }
 }

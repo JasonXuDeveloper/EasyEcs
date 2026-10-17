@@ -11,7 +11,9 @@ namespace EasyEcs.UnitTest;
 /// </summary>
 public partial class ConcurrencyTests
 {
-    public record struct Spawner(Entity Owner) : IComponent;   // holds a handle: a way to reach the world
+#pragma warning disable EECS017 // the handle is the point: a way to reach the world from a parallel method
+    public record struct Spawner(Entity Owner) : IComponent;
+#pragma warning restore EECS017
 
     /// <summary>Changes structure through a handle a component holds: wrong in a system that shares a parallel stage.</summary>
     public partial class SpawnInStage : EcsSystem

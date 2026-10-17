@@ -38,8 +38,11 @@ public class GeneratorTests
         public struct Clock : ISingletonComponent { public int Ticks; }
         public class Box { public int V; }
         public struct Holder : IComponent { public Box Box; }                                     // a class, no collection
-        public struct Link : IComponent { public Entity Target; }                                 // a relation: a handle
-        public struct Owned : IComponent, IIndexed<Entity> { public Entity Owner; public Entity Key => Owner; } // indexed
+        public struct Link : IComponent { public EntityId Target; }                               // a relation: an id
+        public struct Owned : IComponent, IIndexed<EntityId> { public EntityId Owner; public EntityId Key => Owner; } // indexed
+        #pragma warning disable EECS017
+        public struct Handle : IComponent { public Entity Target; }                               // a handle reaches a world
+        #pragma warning restore EECS017
         public struct Grid : ISingletonComponent { public System.Collections.Generic.List<int> Cells; public int[] Slots; }
         """;
 
@@ -52,7 +55,7 @@ public class GeneratorTests
             {
                 public System.Collections.Generic.Dictionary<int, int> Progress;
                 public int[] Slots;
-                public Entity Owner;
+                public EntityId Owner;
             }
             public partial class Outer
             {
@@ -64,25 +67,25 @@ public class GeneratorTests
                     [ForEach, Without<Q>] void B(Entity e, in P p, World w) => _scratch.Clear();
                     [ForEach] static void C(in P p, ref Clock clock, in Clock read) => clock.Ticks += read.Ticks; // singletons
                     [ForEach] static void D(System.Span<P> p, System.ReadOnlySpan<Q> q, ref Clock clock) => clock.Ticks += p.Length; // batch
-                    [ForEach] static void E(Entity e, in P p, ref Clock clock) { if (e.Has<Q>()) clock.Ticks += e.Id; } // read-only entity
+                    [ForEach] static void E(Entity e, in P p, ref Clock clock) { if (e.Has<Q>()) clock.Ticks += e.Id.Index; } // read-only entity
                     [ForEach] static void F(ref Holder h, in Q q, ref Grid g) { g.Cells.Add(q.V); h.Box.V++; } // written by ref
                     [ForEach] static void G(in Holder h, ref P p, in Grid g) => p.V = g.Cells.Contains(1) ? g.Cells[0] : h.Box.V; // only read
                     [ForEach, Changed<DynamicBuffer<int>>] static void H(ref DynamicBuffer<int> items, in DynamicBuffer<long> read) => items.Add(read.Count); // buffers
                     [ForEach] static void I(Entity e, in DynamicBuffer<long> read) { ref var items = ref e.Get<DynamicBuffer<int>>(); items.Clear(); foreach (var x in read) items.Add((int)x); }
                     [ForEach, With<Q>] static void J(Entity e, World w) { e.Get<DynamicBuffer<int>>() = default; w.CreateEntity(new P(), new DynamicBuffer<int>()); }
-                    [ForEach] static void K(Entity e, in Link link) { e.Remove<Q>(); link.Target.Destroy(); } // changes structure: runs alone
+                    [ForEach] static void K(Entity e, in Handle link) { e.Remove<Q>(); link.Target.Destroy(); } // changes structure: runs alone
                 }
             }
             public static class Indexed
             {
                 public static int Read(World w, Entity e)                                               // reads by Read, in, ref readonly
                 {
-                    int n = e.Read<Owned>().Owner.Id + e.Owned.Owner.Id;
-                    foreach (var item in w.Query<Owned>()) { ref readonly var o = ref item.Component1; n += o.Owner.Id + item.Component1.Owner.Id; }
+                    int n = e.Read<Owned>().Owner.Index + e.Owned.Owner.Index;
+                    foreach (var item in w.Query<Owned>()) { ref readonly var o = ref item.Component1; n += o.Owner.Index + item.Component1.Owner.Index; }
                     e.Set(new Owned { Owner = e });                                                     // writes by Set
                     return n;
                 }
-                public struct Count : IForEach<Owned> { public int N; public void Execute(ref Owned o) => N += o.Owner.Id; } // a job that reads
+                public struct Count : IForEach<Owned> { public int N; public void Execute(ref Owned o) => N += o.Owner.Index; } // a job that reads
             }
             public partial class Reparent : EcsSystem
             {
@@ -156,12 +159,12 @@ public class GeneratorTests
     [TestCase("public class A : EcsSystem { } public class S : EcsSystem { private readonly A _a = new(); }", "EECS008")]
     [TestCase("public class S : EcsSystem { static int _kills; }", "EECS007")]
     [TestCase("public class A : EcsSystem { } public class S : EcsSystem { protected override void OnUpdate() => World.GetSystem<A>().Enabled = false; }", "EECS008")]
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Link l) => l.Target.Destroy(); }", "EECS013")]
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Link l) => l.Target.Clone(); }", "EECS013")]
-    [TestCase("public partial class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, in Link l) => l.Target.Set(new Q()); }", "EECS013")]
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(Entity e, in Link l) { if (e.Has<P>()) l.Target.Set(new Q()); } }", "EECS013")]
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Link l) => l.Target.RemoveP(); }", "EECS013")]   // generated members
-    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(Entity e, in Link l) { if (e.HasP && e.P.V > 0) l.Target.SetQ(1); } }", "EECS013")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Handle l) => l.Target.Destroy(); }", "EECS013")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Handle l) => l.Target.Clone(); }", "EECS013")]
+    [TestCase("public partial class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, in Handle l) => l.Target.Set(new Q()); }", "EECS013")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(Entity e, in Handle l) { if (e.Has<P>()) l.Target.Set(new Q()); } }", "EECS013")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Handle l) => l.Target.RemoveP(); }", "EECS013")]   // generated members
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(Entity e, in Handle l) { if (e.HasP && e.P.V > 0) l.Target.SetQ(1); } }", "EECS013")]
     [TestCase("public static class U { public static void F(Entity[] es) => System.Threading.Tasks.Parallel.For(0, es.Length, i => es[i].RemoveP()); }", "EECS014")]
     [TestCase("public static class U { public static void F(World w) { System.Threading.Tasks.Task.Run(() => w.SetClock(1)); w.RemoveClock(); } }", "EECS014")]
     [TestCase("public static class U { public static void F(World w) { System.Threading.Tasks.Task.Run(() => w.CreateEntity()); w.CreateEntity(); } }", "EECS014")]
@@ -172,6 +175,10 @@ public class GeneratorTests
     [TestCase("public partial class S : EcsSystem { [ForEach, Removed<T>] static void A(in T t, ref P p) { } }", "EECS016")]
     [TestCase("public partial class S : EcsSystem { [ForEach, Removed<T>, With<T>] static void A(ref P p) { } }", "EECS016")]
     [TestCase("public partial class S : EcsSystem { [ForEach, Removed<T>] static void A(Entity e) { } }", "EECS003")]       // T is no query anchor
+    [TestCase("public record struct Target(Entity Of) : IComponent;", "EECS017")]                   // a handle in a component
+    [TestCase("public struct Party : IComponent { public Entity[] Members; }", "EECS017")]
+    [TestCase("public struct Leader : ISingletonComponent { public Entity Player; }", "EECS017")]
+    [TestCase("public struct Pair { public Entity A; } public struct Duel : IComponent { public Pair Sides; }", "EECS017")]
     [TestCase("public static class U { public static void F(Entity e) => e.Get<Owned>() = default; }", "EECS015")]
     [TestCase("public static class U { public static void F(Entity e) => e.GetOrAdd<Owned>(); }", "EECS015")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref Owned o) { } }", "EECS015")]
@@ -247,7 +254,7 @@ public class GeneratorTests
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
             namespace Game { public record struct Speed(float V) : IComponent; internal struct Hidden : IComponent { public int V; } }
-            public struct Version : IComponent { public int V; }           // an Entity member takes the name
+            public struct World : IComponent { public int V; }           // an Entity member takes the name
             public struct Tagged : IComponent;                              // a tag
             public struct Fixed : IComponent { public readonly int V; }    // no public constructor, a read-only field: no setter
             public class Outer { private struct Secret : IComponent { public int V; } }
@@ -271,15 +278,15 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("public global::EasyEcs.Entity RemoveP()"));
         Assert.That(generated, Does.Contain("public ref readonly global::T T"));                            // tracked: read-only
         Assert.That(generated, Does.Contain("public ref readonly global::Owned Owned"));                    // indexed: read-only
-        Assert.That(generated, Does.Contain("ValueIndex<global::Owned, global::EasyEcs.Entity> OwnedIndex"));
+        Assert.That(generated, Does.Contain("ValueIndex<global::Owned, global::EasyEcs.EntityId> OwnedIndex"));
         Assert.That(generated, Does.Contain("public ref global::Clock Clock"));                             // a singleton
         Assert.That(generated, Does.Contain("public void SetClock(int ticks)"));
         Assert.That(generated, Does.Contain("SetSpeed(float V) => @this.Set(new global::Game.Speed(V))"));  // from the constructor
         Assert.That(generated, Does.Contain("public bool IsTagged"));
         Assert.That(generated, Does.Contain("SetTagged() => @this.Set(default(global::Tagged))"));
         Assert.That(generated, Does.Contain("internal ref global::Game.Hidden Hidden"));
-        Assert.That(generated, Does.Not.Contain("Version Version"));
-        Assert.That(generated, Does.Contain("public bool HasVersion"));
+        Assert.That(generated, Does.Not.Contain("World World"));
+        Assert.That(generated, Does.Contain("public bool HasWorld"));
         Assert.That(generated, Does.Not.Contain("SetFixed"));
         Assert.That(generated, Does.Not.Contain("Secret"));
     }

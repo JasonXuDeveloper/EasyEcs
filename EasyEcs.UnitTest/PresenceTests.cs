@@ -35,7 +35,7 @@ public partial class StunnedHealth : EcsSystem
 }
 
 /// <summary>The entity to take <see cref="Health"/> from during a pass.</summary>
-public record struct Victim(Entity Target) : ISingletonComponent;
+public record struct Victim(EntityId Target) : ISingletonComponent;
 
 /// <summary>Counts visits; the first visit takes Health from the victim, a later row of the same full table.</summary>
 public partial class Cull : EcsSystem
@@ -44,7 +44,8 @@ public partial class Cull : EcsSystem
     private static void Visit(Entity entity, in Health health, ref Score score, in Victim victim)
     {
         score.Points++;
-        if (victim.Target != entity && victim.Target.Has<Health>()) victim.Target.Remove<Health>();
+        if (victim.Target != entity.Id && entity.World.TryGetEntity(victim.Target, out var target) && target.Has<Health>())
+            target.Remove<Health>();
     }
 }
 
@@ -140,7 +141,7 @@ public class PresenceTests
         foreach (var item in world.Query<Stun>())
         {
             visited++;
-            Assert.That(item.Entity.Id % 4, Is.Zero);
+            Assert.That(item.Entity.Id.Index % 4, Is.Zero);
         }
 
         Assert.That(visited, Is.EqualTo(50));

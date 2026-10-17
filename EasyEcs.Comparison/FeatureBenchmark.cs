@@ -39,9 +39,9 @@ public partial class ReplicateScan : EcsSystem
 }
 
 /// <summary>EasyEcs relation: an item points at its owner, indexed by the owner.</summary>
-public record struct ItemOf(EasyEcs.Entity Owner) : EasyEcs.IComponent, IIndexed<EasyEcs.Entity>
+public record struct ItemOf(EasyEcs.EntityId Owner) : EasyEcs.IComponent, IIndexed<EasyEcs.EntityId>
 {
-    public EasyEcs.Entity Key => Owner;
+    public EasyEcs.EntityId Key => Owner;
 }
 
 public struct FHp : F.IComponent { public int Value; }
@@ -520,7 +520,7 @@ public class IndexComparison
 
     private EasyEcs.World _world;
     private EasyEcs.Entity[] _owners, _items;
-    private ValueIndex<ItemOf, EasyEcs.Entity> _index;
+    private ValueIndex<ItemOf, EasyEcs.EntityId> _index;
     private F.EntityStore _store;
     private F.Entity[] _fOwners, _fItems;
     private D.World _default;
@@ -536,7 +536,7 @@ public class IndexComparison
         for (int i = 0; i < Owners; i++) _owners[i] = _world.CreateEntity();
         _items = new EasyEcs.Entity[Items];
         for (int i = 0; i < Items; i++) _items[i] = _world.CreateEntity(new ItemOf(_owners[i % Owners]));
-        _index = _world.Index<ItemOf, EasyEcs.Entity>();
+        _index = _world.Index<ItemOf, EasyEcs.EntityId>();
         Check(EasyEcs_Index, o => _index.Count(_owners[o]), i => Array.IndexOf(_owners, _items[i].Read<ItemOf>().Owner));
     }
 

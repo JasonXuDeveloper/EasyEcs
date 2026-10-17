@@ -7,8 +7,8 @@ namespace EasyEcs;
 /// <summary>
 /// A component whose <see cref="Key"/> the world indexes: <c>world.Index&lt;T, TKey&gt;().Find(key)</c> enumerates the
 /// entities whose <typeparamref name="TKey"/> equals a value (an item's owner, a player's name, a cell of a grid). An
-/// <see cref="Entity"/> key makes the component a relation: <c>ChildOf(Entity Parent)</c> indexed by its parent finds
-/// the children of an entity. The index follows the values written with <c>Set</c> and <c>CreateEntity</c> as they are
+/// <see cref="EntityId"/> key makes the component a relation: <c>ChildOf(EntityId Parent)</c> indexed by its parent
+/// finds the children of an entity. The index follows the values written with <c>Set</c> and <c>CreateEntity</c> as they are
 /// written, so an indexed component is never written through a <c>ref</c> (<c>Get</c>, <c>ref</c> parameters, query
 /// items): the analyzer reports such writes (EECS015).
 /// </summary>
@@ -35,8 +35,8 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
     // moving an entity between keys and dropping it are O(1) without allocation.
     private readonly Dictionary<TKey, Head> _heads = new();
 
-    // Relations (Entity keys of this world): the lists by the target's id, no hashing. A target whose id is still held
-    // by links to an older incarnation, and other keys (default, another world's entities), use _heads.
+    // Relations (EntityId keys): the lists by the target's index, no hashing. A target whose index is still held by
+    // links to an older incarnation, and EntityId.Null, use _heads.
     private Head[] _byTarget = [];
     private Node[] _nodes = [];
     private bool _built; // every row is indexed (false until the first lookup, and again after a restore)
@@ -124,7 +124,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ref Head HeadOf(TKey key)
     {
-        if (typeof(TKey) == typeof(Entity)) // a JIT-time constant
+        if (typeof(TKey) == typeof(EntityId)) // a JIT-time constant
         {
             ref var head = ref SlotOf(key);
             if (!Unsafe.IsNullRef(ref head)) return ref head;
@@ -139,10 +139,10 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ref Head SlotOf(TKey key)
     {
-        var target = Unsafe.As<TKey, Entity>(ref key);
-        if (ReferenceEquals(target.World, _world) && (uint)target.Id < (uint)_byTarget.Length)
+        var target = Unsafe.As<TKey, EntityId>(ref key);
+        if ((uint)target.Index < (uint)_byTarget.Length)
         {
-            ref var head = ref _byTarget[target.Id];
+            ref var head = ref _byTarget[target.Index];
             if (head.Count != 0 && head.Version == target.Version) return ref head;
         }
 
@@ -156,13 +156,13 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
     /// <summary>The list of <paramref name="key"/> (not null), created empty when no entity has it.</summary>
     private ref Head AddHead(TKey key)
     {
-        if (typeof(TKey) == typeof(Entity))
+        if (typeof(TKey) == typeof(EntityId))
         {
-            var target = Unsafe.As<TKey, Entity>(ref key);
-            if (ReferenceEquals(target.World, _world))
+            var target = Unsafe.As<TKey, EntityId>(ref key);
+            if (!target.IsNull)
             {
-                if (target.Id >= _byTarget.Length) Array.Resize(ref _byTarget, Math.Max(target.Id + 1, _byTarget.Length * 2));
-                ref var head = ref _byTarget[target.Id];
+                if (target.Index >= _byTarget.Length) Array.Resize(ref _byTarget, Math.Max(target.Index + 1, _byTarget.Length * 2));
+                ref var head = ref _byTarget[target.Index];
                 if (head.Count != 0 && head.Version == target.Version) return ref head;
                 if (head.Count == 0 && (_heads.Count == 0 || !_heads.ContainsKey(key)))
                 {
@@ -181,7 +181,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
     private void Build()
     {
         _built = true;
-        foreach (var item in _world.Query<T>()) Put(item.Entity.Id, item.Entity.Version, item.Component1.Key);
+        foreach (var item in _world.Query<T>()) Put(item.Entity.Index, item.Entity.Version, item.Component1.Key);
     }
 
     /// <summary>
@@ -214,7 +214,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
     {
         ref var node = ref _nodes[id];
         // Decided by key, before the count changes: the same storage HeadOf picks.
-        bool inSlot = typeof(TKey) == typeof(Entity) && !Unsafe.IsNullRef(ref SlotOf(node.Key));
+        bool inSlot = typeof(TKey) == typeof(EntityId) && !Unsafe.IsNullRef(ref SlotOf(node.Key));
         ref var head = ref HeadOf(node.Key);
         if (--head.Count == 0)
         {

@@ -20,19 +20,6 @@ namespace EasyEcs;
 /// (<see cref="Present"/>), so a state that comes and goes (stunned, burning, dead) never moves rows. Only adding a
 /// component the table has no column for moves the entity.
 /// </summary>
-/// <summary>
-/// The entity of one row: its id (negative for a tombstone) and version, side by side so a handle is one 8-byte load
-/// and one stream of rows. Version comes first: read as a little-endian <c>long</c>, a row's sign is its id's sign, so
-/// tombstone scans run as vectorized range searches over <c>long</c>s (<see cref="Archetype.Rows64"/>). A tombstone keeps
-/// its version (a pass checks it to tell whether the visited entity still lives).
-/// </summary>
-[StructLayout(LayoutKind.Sequential)]
-internal struct EntitySlot
-{
-    public int Version;
-    public int Id;
-}
-
 internal sealed class Archetype
 {
     public readonly BitMask ComponentMask;
@@ -105,7 +92,7 @@ internal sealed class Archetype
     /// <summary>Columns with <see cref="Present"/> bits (indices into <see cref="Columns"/>), copy-on-write.</summary>
     private short[] _bitColumns = [];
 
-    public EntitySlot[] Slots; // the entity of each row (id and version: handles without a meta lookup)
+    public EntityId[] Slots; // the entity of each row (id and version: handles without a meta lookup)
     public int Count; // rows in use, tombstones included
     public int AliveCount; // living entities only
 
@@ -131,7 +118,7 @@ internal sealed class Archetype
     {
         ComponentMask = componentMask;
         Components = componentMask.ToBitArray();
-        Slots = new EntitySlot[initialCapacity];
+        Slots = new EntityId[initialCapacity];
 
         Columns = new Array[Components.Length];
         Present = new ulong[Components.Length][];
@@ -611,7 +598,7 @@ internal sealed class Archetype
     public void Clear()
     {
         if (_hasManaged) ReleaseRows(0, Count);
-        foreach (ref var row in Slots.AsSpan(0, Count)) row.Id = Tombstone; // versions stay, as Remove leaves them
+        foreach (ref var row in Slots.AsSpan(0, Count)) row = new EntityId(Tombstone, row.Version); // versions stay, as Remove leaves them
         Count = 0;
         AliveCount = 0;
         if (HasAbsent) Absent.AsSpan().Clear();
@@ -625,8 +612,7 @@ internal sealed class Archetype
         int slot = Count++;
         // slot < Slots.Length (grown above): no bounds check.
         ref var row = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Slots), slot);
-        row.Id = entityId;
-        row.Version = version;
+        row = new EntityId(entityId, version);
         AliveCount++;
         if (HasAbsent) SetBits(slot); // a transition then clears what the entity lacks
         return slot;
@@ -656,10 +642,10 @@ internal sealed class Archetype
 
     /// <summary>
     /// The first <paramref name="count"/> rows (at most the capacity) as <c>long</c>s: negative exactly for the
-    /// tombstones (the id is the high half, see <see cref="EntitySlot"/>).
+    /// tombstones (the id is the high half, see <see cref="EntityId"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Span<long> Rows64(int count) => MemoryMarshal.Cast<EntitySlot, long>(Slots.AsSpan(0, count));
+    public Span<long> Rows64(int count) => MemoryMarshal.Cast<EntityId, long>(Slots.AsSpan(0, count));
 
     /// <summary>Make room for <paramref name="rows"/> rows in one growth (bulk creation).</summary>
     public void Reserve(int rows)
@@ -703,7 +689,7 @@ internal sealed class Archetype
         ref var rows = ref MemoryMarshal.GetArrayDataReference(Slots);
         if (inPass || Count != AliveCount + 1)
         {
-            Unsafe.Add(ref rows, slot).Id = Tombstone; // the version stays: a pass compares it
+            Unsafe.Add(ref rows, slot) = new EntityId(Tombstone, Unsafe.Add(ref rows, slot).Version); // the version stays: a pass compares it
             if (_holeCount == _holes.Length) Array.Resize(ref _holes, Math.Max(16, _holes.Length * 2));
             _holes[_holeCount++] = slot; // a tombstone stays one until FillHoles (new rows go to the end)
             if (Dirty) return false;
@@ -713,7 +699,7 @@ internal sealed class Archetype
 
         int last = --Count;
         if (slot != last) MoveRow(last, slot, meta);
-        Unsafe.Add(ref rows, last).Id = Tombstone;
+        Unsafe.Add(ref rows, last) = new EntityId(Tombstone, Unsafe.Add(ref rows, last).Version);
         if (_hasManaged) ReleaseRows(last, 1);
         return false;
     }
@@ -731,7 +717,7 @@ internal sealed class Archetype
         ref var rows = ref MemoryMarshal.GetArrayDataReference(Slots);
         var entity = Unsafe.Add(ref rows, from);
         Unsafe.Add(ref rows, to) = entity;
-        Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(meta), entity.Id).Slot = to;
+        Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(meta), entity.Index).Slot = to;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -743,10 +729,10 @@ internal sealed class Archetype
     }
 
     /// <summary>The rows of a table at one moment (<see cref="Capture"/>): entities, columns, presence bits.</summary>
-    internal sealed class Rows(int count, EntitySlot[] slots, Array[] columns, ulong[][] present, int[] absent)
+    internal sealed class Rows(int count, EntityId[] slots, Array[] columns, ulong[][] present, int[] absent)
     {
         public readonly int Count = count;
-        public readonly EntitySlot[] Slots = slots;
+        public readonly EntityId[] Slots = slots;
         public readonly Array[] Columns = columns;
         public readonly ulong[][] Present = present;
         public readonly int[] Absent = absent;
@@ -801,7 +787,7 @@ internal sealed class Archetype
             }
         }
 
-        foreach (ref var row in Slots.AsSpan(count, Math.Max(Count - count, 0))) row.Id = Tombstone;
+        foreach (ref var row in Slots.AsSpan(count, Math.Max(Count - count, 0))) row = new EntityId(Tombstone, row.Version);
         for (int c = 0; c < Columns.Length; c++)
         {
             // A column that gained presence bits after the capture keeps them, every row present.
@@ -835,7 +821,7 @@ internal sealed class Archetype
             if (hole >= alive) continue;
             end = alive + rows.Slice(alive, end - alive).LastIndexOfAnyExceptInRange(long.MinValue, -1);
             MoveRow(end, hole, meta);
-            Slots[end].Id = Tombstone;
+            Slots[end] = new EntityId(Tombstone, Slots[end].Version);
         }
 
         if (_hasManaged && rows.Length > alive) ReleaseRows(alive, rows.Length - alive);

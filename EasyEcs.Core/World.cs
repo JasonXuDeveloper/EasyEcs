@@ -94,7 +94,7 @@ public sealed partial class World : IDisposable
             int first = PlaceRows(target, entities);
             target.CloneRows(source, from, first, entities.Length, _changeTick);
             if (_indexByBit != null)
-                for (int e = 0; e < entities.Length; e++) IndexRow(target, first + e, entities[e].Id, entities[e].Version);
+                for (int e = 0; e < entities.Length; e++) IndexRow(target, first + e, entities[e].Index, entities[e].Version);
         }
     }
 
@@ -168,7 +168,7 @@ public sealed partial class World : IDisposable
     {
         using (Structural())
         {
-            int id = entity.Id;
+            int id = entity.Index;
             ref var meta = ref MetaRef(id); // ids of this world's handles are always < Meta.Length
             if (meta.Archetype == null || meta.Version != entity.Version) return;
             Free(ref meta, id);
@@ -218,7 +218,7 @@ public sealed partial class World : IDisposable
                     for (; bits != 0; bits &= ~(1UL << 63 >> BitOperations.LeadingZeroCount(bits)))
                     {
                         int slot = (w << 6) + 63 - BitOperations.LeadingZeroCount(bits);
-                        int id = archetype.Slots[slot].Id;
+                        int id = archetype.Slots[slot].Index;
                         if (id < 0) continue;
                         Free(ref MetaRef(id), id);
                         destroyed++;
@@ -242,7 +242,7 @@ public sealed partial class World : IDisposable
         var rows = archetype.Slots.AsSpan(0, count);
         for (int slot = count - 1; slot >= 0; slot--) // the order Free would push them in
         {
-            int id = rows[slot].Id;
+            int id = rows[slot].Index;
             if (_indexByBit != null) Unindex(archetype, id);
             ref var meta = ref MetaRef(id);
             meta.Version++; // invalidates every outstanding handle
@@ -263,14 +263,17 @@ public sealed partial class World : IDisposable
         if (needed > Meta.Length) Grow((int)BitOperations.RoundUpToPowerOf2((uint)needed));
     }
 
-    /// <summary>Handle of the alive entity with <paramref name="id"/>. O(1).</summary>
+    /// <summary>
+    /// The handle of entity <paramref name="id"/> if that incarnation is alive; false for a destroyed entity (even when
+    /// its index was reused) and for <see cref="EntityId.Null"/>. O(1).
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool TryGetEntity(int id, out Entity entity)
+    public bool TryGetEntity(EntityId id, out Entity entity)
     {
         var meta = Meta;
-        if ((uint)id < (uint)meta.Length && meta[id].Archetype != null)
+        if ((uint)id.Index < (uint)meta.Length && meta[id.Index].Version == id.Version && meta[id.Index].Archetype != null)
         {
-            entity = new Entity(this, id, meta[id].Version);
+            entity = new Entity(this, id);
             return true;
         }
 
@@ -278,13 +281,16 @@ public sealed partial class World : IDisposable
         return false;
     }
 
-    /// <summary>Handle of the alive entity with <paramref name="id"/>; throws if there is none. O(1).</summary>
+    /// <summary>The handle of entity <paramref name="id"/>; throws if that incarnation is not alive. O(1).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Entity GetEntity(int id)
+    public Entity GetEntity(EntityId id)
     {
         if (!TryGetEntity(id, out var entity)) Entity.ThrowStale();
         return entity;
     }
+
+    /// <summary>Whether entity <paramref name="id"/> (that incarnation) is alive. O(1).</summary>
+    public bool IsAlive(EntityId id) => TryGetEntity(id, out _);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal ref EntityMeta MetaRef(int id) => ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Meta), id);
@@ -297,7 +303,7 @@ public sealed partial class World : IDisposable
     internal ref EntityMeta Live(in Entity entity)
     {
         if (!ReferenceEquals(entity.World, this)) Entity.ThrowStale();
-        ref var meta = ref MetaRef(entity.Id); // ids of this world's handles are always < Meta.Length
+        ref var meta = ref MetaRef(entity.Index); // ids of this world's handles are always < Meta.Length
         if (meta.Version != entity.Version || meta.Archetype == null) Entity.ThrowStale();
         return ref meta;
     }
@@ -309,6 +315,7 @@ public sealed partial class World : IDisposable
         if (_freeIdCount > 0) return _freeIds[--_freeIdCount];
         int id = _nextId++;
         if (id == Meta.Length) Grow(Meta.Length * 2);
+        MetaRef(id).Version = 1; // versions start at 1: EntityId.Null (version 0) never names an entity
         return id;
     }
 

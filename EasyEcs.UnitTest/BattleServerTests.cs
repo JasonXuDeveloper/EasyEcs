@@ -113,12 +113,12 @@ public class BattleServerTests
     public void ProjectilesBelongToLivingPlayersAndTheRelationListsThem()
     {
         using var server = Run(200);
-        var shots = server.World.Index<OwnedBy, Entity>();
+        var shots = server.World.Index<OwnedBy, EntityId>();
         var owned = new Dictionary<Entity, int>();
         foreach (var item in server.World.Query<OwnedBy>())
         {
-            var owner = item.Component1.Owner;
-            Assert.That(owner.IsAlive && owner.Has<Player>() && !owner.Has<Dead>(), Is.True);
+            Assert.That(server.World.TryGetEntity(item.Component1.Owner, out var owner), Is.True);
+            Assert.That(owner.Has<Player>() && !owner.Has<Dead>(), Is.True);
             owned[owner] = owned.GetValueOrDefault(owner) + 1;
         }
 
@@ -205,7 +205,7 @@ public class BattleServerTests
         Assert.That(server.NewRound(), Is.EqualTo(projectiles));
         Assert.That(server.World.Any<Lifetime>(), Is.False);
         foreach (var item in server.World.Query<Health>()) Assert.That(item.Component1.Value, Is.EqualTo(item.Component1.Max));
-        Assert.That(server.World.Index<OwnedBy, Entity>().Count(server.NearestPlayer(default)), Is.Zero);
+        Assert.That(server.World.Index<OwnedBy, EntityId>().Count(server.NearestPlayer(default)), Is.Zero);
         Assert.That(server.World.RowStats().HoleRatio, Is.LessThanOrEqualTo(0.1f));
     }
 
@@ -235,14 +235,14 @@ public class BattleServerTests
         player.Destroy();
         Assert.That(server.ShotsLeft(player), Is.Zero);                       // a stale handle has no mana
         Assert.That(server.Hit(player.Id, 7), Is.False);                     // its id names no living entity now
-        Assert.That(server.Hit(int.MaxValue, 7), Is.False);                  // no such entity
+        Assert.That(server.Hit(EntityId.Null, 7), Is.False);                // an empty reference
     }
 
     private static List<(int, float, float)> Positions(BattleServer server)
     {
         var positions = new List<(int, float, float)>();
         foreach (var item in server.World.Query<Position>(QueryFilter.Create().With<Npc>()))
-            positions.Add((item.Entity.Id, item.Component1.X, item.Component1.Y));
+            positions.Add((item.Entity.Id.Index, item.Component1.X, item.Component1.Y));
         positions.Sort();
         return positions;
     }

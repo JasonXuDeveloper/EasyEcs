@@ -113,7 +113,7 @@ public partial class EntityIds : EcsSystem
     [ForEach, Without<Dead>]
     private static void Sum(Entity entity, in Health h, ref Sink sink)
     {
-        if (h.Value <= 0) sink.Value += entity.Id; // never true: the handle is built, its use is rare (as in CheckDeath)
+        if (h.Value <= 0) sink.Value += entity.Id.Index; // never true: the handle is built, its use is rare (as in CheckDeath)
     }
 }
 
@@ -124,7 +124,7 @@ public partial class EntityIdsBatch : EcsSystem
     private static void Sum(EntitySpan entities, ReadOnlySpan<Health> h, ref Sink sink)
     {
         for (int i = 0; i < h.Length; i++)
-            if (h[i].Value <= 0) sink.Value += entities[i].Id; // never true: a handle is built only for the rows that need one
+            if (h[i].Value <= 0) sink.Value += entities[i].Id.Index; // never true: a handle is built only for the rows that need one
     }
 }
 
@@ -150,7 +150,7 @@ public partial class StunToggle : EcsSystem
     [ForEach, Without<Stunned>]
     private static void Stun(Entity entity, in Attack attack)
     {
-        if (Rng.Chance(0, entity.Id, 2, 50)) entity.Set(new Stunned { Ticks = 1 });
+        if (Rng.Chance(0, entity.Id.Index, 2, 50)) entity.Set(new Stunned { Ticks = 1 });
     }
 }
 

@@ -19,7 +19,7 @@ public record struct Burning(int Ticks) : IComponent, ITrackChanges;          //
 public record struct Frozen(int Ticks) : IComponent;
 public record struct Lifetime(int Ticks) : IComponent;
 public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }                  // players by zone
-public record struct OwnedBy(Entity Owner) : IComponent, IIndexed<Entity> { public Entity Key => Owner; } // a relation
+public record struct OwnedBy(EntityId Owner) : IComponent, IIndexed<EntityId> { public EntityId Key => Owner; } // a relation
 public record struct Loot(int Item);                                          // players carry a DynamicBuffer<Loot>
 public struct Player : IComponent;                                            // tags: empty components
 public struct Npc : IComponent;
@@ -107,7 +107,7 @@ public partial class CombatSystem : EcsSystem
         attack.Cooldown = attack.Interval;
         unit.Get<Health>().Value -= attack.Damage;                            // a hit is a change of Health
         battle.Hits++;
-        uint roll = Dice.Roll(battle.Tick, unit.Id);
+        uint roll = Dice.Roll(battle.Tick, unit.Id.Index);
         if (roll % 50 == 0) unit.GetOrAdd<Burning>() = new Burning(10);       // applied at once; a new fire restarts it
         else if (roll % 70 == 1) unit.SetFrozen(4);                           // never frozen here: Without<Frozen>
     }
@@ -172,15 +172,15 @@ public partial class RespawnSystem : EcsSystem                                //
     {
         npc.Destroy();
         var at = new Position(p.Y, p.X);
-        if (world.ZoneIndex.TryFind(npc.Id & 3, out var player))              // hunt a player of some zone
+        if (world.ZoneIndex.TryFind(npc.Id.Index & 3, out var player))              // hunt a player of some zone
         {
             at = player.Position;
             ref var bag = ref player.Get<DynamicBuffer<Loot>>();                     // the hunted player gets the loot
             if (bag.Count == BattleServer.BagSize) bag.RemoveAt(0);           // a full bag drops its oldest item
-            bag.Add(new Loot(npc.Id & 15));
+            bag.Add(new Loot(npc.Id.Index & 15));
         }
 
-        BattleServer.SpawnNpc(world, at, npc.Id);
+        BattleServer.SpawnNpc(world, at, npc.Id.Index);
     }
 }
 
@@ -191,7 +191,7 @@ public partial class ProjectileSystem : EcsSystem
     [ForEach, With<Player>, Without<Dead>]
     static void Shoot(Entity player, in Position p, in Velocity v, ref Mana mana, ref Battle battle, World world)
     {
-        if (battle.Ceasefire || mana.Value < BattleServer.ShotCost || Dice.Roll(battle.Tick, player.Id) % 20 != 0) return;
+        if (battle.Ceasefire || mana.Value < BattleServer.ShotCost || Dice.Roll(battle.Tick, player.Id.Index) % 20 != 0) return;
         mana.Value -= BattleServer.ShotCost;
         battle.Shots++;
         world.CreateEntity(p, new Velocity(v.X * 4, v.Y * 4), new Lifetime(20), new OwnedBy(player));
@@ -377,11 +377,11 @@ public sealed class BattleServer : IDisposable
 
     public int ShotsLeft(Entity player) => player.IsAlive && player.TryGetMana(out var mana) ? mana.Value / ShotCost : 0;
 
-    /// <summary>A client's hit on the unit it names by id: the id turns back into a handle of the living entity.</summary>
-    public bool Hit(int targetId, int damage)
+    /// <summary>A client's hit on the unit it names by id: the id turns back into a handle if that unit still lives.</summary>
+    public bool Hit(EntityId target, int damage)
     {
-        if (!World.TryGetEntity(targetId, out var target) || target.IsDead) return false;
-        ref var hp = ref target.TryGetRef<Health>(out bool found);           // optional access by ref
+        if (!World.TryGetEntity(target, out var unit) || unit.IsDead) return false;
+        ref var hp = ref unit.TryGetRef<Health>(out bool found);             // optional access by ref
         if (!found) return false;
         hp.Value -= damage;                                                   // a write: replicated with the next send
         return true;
@@ -520,7 +520,7 @@ public sealed class BattleServer : IDisposable
 
         public void Execute(Entity npc, ref Position p)
         {
-            uint r = Dice.Roll(Round, npc.Id);                                // per entity, the same on any thread
+            uint r = Dice.Roll(Round, npc.Id.Index);                                // per entity, the same on any thread
             p = new Position(r % 4096, (r >> 12) % 4096);
         }
     }

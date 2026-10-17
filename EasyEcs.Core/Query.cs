@@ -552,7 +552,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
             ulong bits = Word(archetype, w) & RowMask(w, rows);
             while (bits != 0)
             {
-                if (slots[(w << 6) + BitOperations.TrailingZeroCount(bits)].Id >= 0) count++;
+                if (slots[(w << 6) + BitOperations.TrailingZeroCount(bits)].Index >= 0) count++;
                 bits &= bits - 1;
             }
         }
@@ -570,7 +570,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         {
             ulong bits = Word(archetype, w) & RowMask(w, rows);
             for (; bits != 0; bits &= bits - 1)
-                if (slots[(w << 6) + BitOperations.TrailingZeroCount(bits)].Id >= 0) return true;
+                if (slots[(w << 6) + BitOperations.TrailingZeroCount(bits)].Index >= 0) return true;
         }
 
         return false;
@@ -608,7 +608,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
             }
 
             start = (w << 6) + BitOperations.TrailingZeroCount(bits);
-            if (slots[start].Id >= 0) break;
+            if (slots[start].Index >= 0) break;
             start++;
         }
 
@@ -650,7 +650,7 @@ internal ref struct QueryStep
     /// <summary>The walk's ticket (<see cref="QueryWalk.Ticket"/>); <see cref="QueryWalk.Ended"/> once it ended.</summary>
     public int Ticket;
     public QueryWalk Walk;
-    public ref EntitySlot Rows; // the current table's entities
+    public ref EntityId Rows; // the current table's entities
     public Archetype Table;     // the current table; null: no more rows
     public int Slot, Storage;
     public int Count; // rows to walk; negative when they must be tested (the sign spares the loop a mode register)
@@ -810,7 +810,7 @@ internal sealed class QueryWalk
     {
         var rows = Current.Slots;
         for (; slot < _count; slot++)
-            if (rows[slot].Id >= 0) return slot;
+            if (rows[slot].Index >= 0) return slot;
         return -1;
     }
 
@@ -821,7 +821,7 @@ internal sealed class QueryWalk
     public int NextTested(int slot)
     {
         int count = _count, words = (count + 63) >> 6;
-        ref EntitySlot rows = ref MemoryMarshal.GetArrayDataReference(Current.Slots); // slot < count <= rows
+        ref EntityId rows = ref MemoryMarshal.GetArrayDataReference(Current.Slots); // slot < count <= rows
         slot++;
         while (slot < count)
         {
@@ -843,7 +843,7 @@ internal sealed class QueryWalk
             }
 
             slot = (w << 6) + BitOperations.TrailingZeroCount(bits);
-            if (Unsafe.Add(ref rows, slot).Id >= 0) return slot;
+            if (Unsafe.Add(ref rows, slot).Index >= 0) return slot;
             slot++;
         }
 

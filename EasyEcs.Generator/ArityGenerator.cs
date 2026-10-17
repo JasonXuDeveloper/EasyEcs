@@ -69,7 +69,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     public Entity Set<{{tps}}>({{values}})
                 {{cons}}
                     {
-                        SetCore(_world, Id, Version, {{List(n, i => $"in c{i}")}});
+                        SetCore(_world, Index, Version, {{List(n, i => $"in c{i}")}});
                         return this;
                     }
 
@@ -99,7 +99,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     public Entity Remove<{{tps}}>()
                 {{cons}}
                     {
-                        RemoveCore<{{tps}}>(_world, Id, Version);
+                        RemoveCore<{{tps}}>(_world, Index, Version);
                         return this;
                     }
 
@@ -182,7 +182,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             int first = PlaceRows(target, entities); // consecutive rows: each column is filled at once
                 {{Lines(n, i => $"            MemoryMarshal.CreateSpan(ref Unsafe.Add(ref target.Base<T{i}>(b{i}), first), entities.Length).Fill(c{i});")}}
                 {{Lines(n, i => $"            target.StampRows<T{i}>(first, entities.Length, _changeTick);")}}
-                {{Lines(n, i => $"            if (ComponentType<T{i}>.Indexed) foreach (var e in entities) Indexed(e.Id, e.Version, in c{i});")}}
+                {{Lines(n, i => $"            if (ComponentType<T{i}>.Indexed) foreach (var e in entities) Indexed(e.Index, e.Version, in c{i});")}}
                         }
                     }
 
@@ -286,7 +286,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
 
                 {{ForEach(n, "ForEach", "IForEach", "", "", "the components")}}
-                {{ForEach(n, "ForEachEntity", "IForEachEntity", "new Entity(this, id, idp.Version)", "new Entity(this, ids.Id, ids.Version)", "the entity handle")}}
+                {{ForEach(n, "ForEachEntity", "IForEachEntity", "new Entity(this, id, idp.Version)", "new Entity(this, ids)", "the entity handle")}}
                     /// <summary>
                     /// Run <paramref name="job"/> over every entity having all of <c>{{tps}}</c> (and matching
                     /// <paramref name="filter"/>), one run of consecutive rows at a time: a dense archetype is a single
@@ -322,7 +322,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             int count = archetype.Count;
                             int mode = rows.Mode(archetype);
                             if (archetype.AliveCount == 0 || mode == RowFilter.None) continue;
-                            ref EntitySlot slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
+                            ref EntityId slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
                 {{Lines(n, i => $"            ref T{i} r{i} = ref archetype.Base<T{i}>(b{i});")}}
                             if (mode == RowFilter.Test)
                             {
@@ -507,7 +507,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 if (stop < 0) break; // the rows ran out without a structural change
                                 at = count - (int)stop;
                                 int moved = (int)(stop >> 32);
-                                if (archetype.Slots[at - 1].Id < 0) CarryOver(archetype, at - 1, moved, TJob.Writes, [{{bits}}]);
+                                if (archetype.Slots[at - 1].Index < 0) CarryOver(archetype, at - 1, moved, TJob.Writes, [{{bits}}]);
                                 mode = rows.Mode(archetype); // the change may have made rows fail (or pass)
                             }
                         }
@@ -533,21 +533,21 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     // The loop walks refs up to an end ref: no row index or count stays live across the job (the row
                     // is computed only to stamp a tracked write), so the job's own values keep more registers.
                     int seen = StorageVersion;
-                    ref EntitySlot slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
-                    ref EntitySlot idp = ref Unsafe.Add(ref slots, start);
-                    ref EntitySlot end = ref Unsafe.Add(ref slots, count);
+                    ref EntityId slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
+                    ref EntityId idp = ref Unsafe.Add(ref slots, start);
+                    ref EntityId end = ref Unsafe.Add(ref slots, count);
             {{startAt}}
                     for (; Unsafe.IsAddressLessThan(ref idp, ref end); idp = ref Unsafe.Add(ref idp, 1), {{advance}})
                     {
-                        int id = idp.Id;
+                        int id = idp.Index;
                         if (id < 0) continue; // tombstone
 
-            {{StampRow(n, "            ", "(int)(Unsafe.ByteOffset(ref slots, ref idp) / Unsafe.SizeOf<EntitySlot>())")}}
+            {{StampRow(n, "            ", "(int)(Unsafe.ByteOffset(ref slots, ref idp) / Unsafe.SizeOf<EntityId>())")}}
                         {{execute}}
 
                         if (seen != StorageVersion)
                         {
-                            _stop = (long)id << 32 | (uint)(Unsafe.ByteOffset(ref idp, ref end) / Unsafe.SizeOf<EntitySlot>() - 1);
+                            _stop = (long)id << 32 | (uint)(Unsafe.ByteOffset(ref idp, ref end) / Unsafe.SizeOf<EntityId>() - 1);
                             return job;
                         }
                     }
@@ -621,13 +621,13 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
                     int seen = StorageVersion;
-                    ref EntitySlot slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
+                    ref EntityId slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
             {{Lines(n, i => $"            ref T{i} c{i} = ref archetype.Base<T{i}>(b{i});")}}
                     for (; pass != 0; pass &= pass - 1)
                     {
                         int row = (w << 6) + BitOperations.TrailingZeroCount(pass);
-                        ref EntitySlot idp = ref Unsafe.Add(ref slots, row);
-                        int id = idp.Id;
+                        ref EntityId idp = ref Unsafe.Add(ref slots, row);
+                        int id = idp.Index;
                         if (id < 0) continue; // tombstone
             {{Lines(n, i => $"            ref T{i} r{i} = ref Unsafe.Add(ref c{i}, row);")}}
 
@@ -686,7 +686,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
-                    ref EntitySlot ids = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Slots), start);
+                    ref EntityId ids = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Slots), start);
             {{startAt}}
             {{StampRows(n, "        ", "start", "end - start")}}
             {{(n >= 3 ? IndexedRows(n, rowArgIndexed) : "")}}
@@ -712,7 +712,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
                     bool tombstones = archetype.Count != archetype.AliveCount;
-                    ref EntitySlot ids = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Slots), start);
+                    ref EntityId ids = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Slots), start);
             {{startAt}}
                     int words = (count + 63) >> 6;
                     for (int w = start >> 6; w < words; w++)
@@ -741,7 +741,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             // The shift fills zeros, so ~ stops the run at the word's end at the latest.
                             int end = k + BitOperations.TrailingZeroCount(~(bits >> k));
                             bits = end >= 64 ? 0 : bits & (ulong.MaxValue << end);
-                            ref EntitySlot idk = ref Unsafe.Add(ref ids, k);
+                            ref EntityId idk = ref Unsafe.Add(ref ids, k);
             {{Lines(n, i => $"                ref T{i} q{i} = ref Unsafe.Add(ref r{i}, k);")}}
                             for (int run = end - k; run > 0; run--, idk = ref Unsafe.Add(ref idk, 1), {{List(n, i => $"q{i} = ref Unsafe.Add(ref q{i}, 1)")}})
                                 job.Execute({{Args(rowArgRun, List(n, i => $"ref q{i}"))}});
@@ -930,7 +930,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 {{Lines(n, i => $"    private readonly ushort _b{i};")}}
                     private QueryWalk _walk;
                     private int _ticket; // 0: not started; QueryWalk.Ended: ended
-                    private ref EntitySlot _rows;
+                    private ref EntityId _rows;
                 {{Lines(n, i => $"    private ref T{i} _r{i};")}}
                     private int _id, _storage;
                     // Native-sized: indexing needs no sign extension (movsxd on x64, sbfiz/sxtw on arm64) per row.
@@ -952,7 +952,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         {
                             nint slot = _slot;
                             // Version is the row's first field: the row's address is the version's.
-                            return new(_world, _id, ref Unsafe.As<EntitySlot, int>(ref Unsafe.Add(ref _rows, slot)), {{List(n, i => $"ref Unsafe.Add(ref _r{i}, slot)")}});
+                            return new(_world, _id, ref Unsafe.As<EntityId, int>(ref Unsafe.Add(ref _rows, slot)), {{List(n, i => $"ref Unsafe.Add(ref _r{i}, slot)")}});
                         }
                     }
 
@@ -967,7 +967,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             {
                                 while (++_slot < _count)
                                 {
-                                    int id = Unsafe.Add(ref _rows, _slot).Id; // _slot < _count <= rows
+                                    int id = Unsafe.Add(ref _rows, _slot).Index; // _slot < _count <= rows
                                     if (id >= 0)
                                     {
                                         _id = id;
@@ -981,7 +981,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 if (slot >= 0)
                                 {
                                     _slot = slot;
-                                    _id = Unsafe.Add(ref _rows, slot).Id;
+                                    _id = Unsafe.Add(ref _rows, slot).Index;
                                     goto Found;
                                 }
                             }
@@ -997,7 +997,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         _storage = step.Storage;
                         var table = step.Table;
                         if (table == null) return false;
-                        _id = Unsafe.Add(ref _rows, _slot).Id;
+                        _id = Unsafe.Add(ref _rows, _slot).Index;
                 {{Lines(n, i => $"        _r{i} = ref table.Base<T{i}>(_b{i});")}}
 
                     Found:

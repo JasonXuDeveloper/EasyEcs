@@ -12,10 +12,10 @@ namespace EasyEcs;
 public readonly ref struct EntitySpan
 {
     private readonly World _world;
-    private readonly ReadOnlySpan<EntitySlot> _slots;
+    private readonly ReadOnlySpan<EntityId> _slots;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal EntitySpan(World world, ref EntitySlot first, int length)
+    internal EntitySpan(World world, ref EntityId first, int length)
     {
         _world = world;
         _slots = MemoryMarshal.CreateReadOnlySpan(ref first, length);
@@ -32,10 +32,13 @@ public readonly ref struct EntitySpan
     public Entity this[int index]
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get
-        {
-            var slot = _slots[index];
-            return new Entity(_world, slot.Id, slot.Version);
-        }
+        get => new Entity(_world, _slots[index]);
+    }
+
+    /// <summary>The ids of the run's entities, read straight from the table (no copy): to store or send them.</summary>
+    public ReadOnlySpan<EntityId> Ids
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _slots;
     }
 }

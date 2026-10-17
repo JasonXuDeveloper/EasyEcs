@@ -86,7 +86,7 @@ public partial class FindLowHealth : EcsSystem
     private static void Find(EntitySpan entities, System.ReadOnlySpan<Health> health, ref Score score)
     {
         for (int i = 0; i < health.Length; i++)
-            if (health[i].Value < 10) score.Points += entities[i].Id;
+            if (health[i].Value < 10) score.Points += entities[i].Id.Index;
     }
 }
 
@@ -158,7 +158,7 @@ public class ForEachSystemTests
         for (int i = 0; i < 300; i++)
         {
             var e = i % 3 == 0 ? world.CreateEntity(new Health(i % 20), new Frozen()) : world.CreateEntity(new Health(i % 20));
-            if (i % 3 != 0 && i % 20 < 10) expected += e.Id;
+            if (i % 3 != 0 && i % 20 < 10) expected += e.Id.Index;
         }
 
         world.AddSystem<FindLowHealth>();

@@ -76,7 +76,7 @@ public class InstantiateTests
     {
         using var world = new World();
         var parent = world.CreateEntity();
-        var children = world.Index<ChildOf, Entity>();
+        var children = world.Index<ChildOf, EntityId>();
         var callsigns = world.Index<Callsign, string>();
         Assert.That(children.Count(parent), Is.Zero);                 // builds the indexes
         var child = world.CreateEntity(new ChildOf(parent), new Callsign("x"));
@@ -126,7 +126,7 @@ public class InstantiateTests
     {
         using var world = new World();
         var parent = world.CreateEntity();
-        var children = world.Index<ChildOf, Entity>();
+        var children = world.Index<ChildOf, EntityId>();
         var callsigns = world.Index<Callsign, string>();
         Assert.That(children.Count(parent), Is.Zero);                     // builds the indexes
         world.CreateEntities(new Entity[100], new ChildOf(parent), new Callsign("a"));

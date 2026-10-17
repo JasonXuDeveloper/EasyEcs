@@ -60,7 +60,7 @@ public class AllocationTests
     public void IndexLookupsChangedQueriesAndIndexedChurnDoNotAllocate()
     {
         using var world = new World();
-        var children = world.Index<ChildOf, Entity>();
+        var children = world.Index<ChildOf, EntityId>();
         var callsigns = world.Index<Callsign, string>();
         var parents = new Entity[8];
         world.CreateEntities(parents, new Health(1));

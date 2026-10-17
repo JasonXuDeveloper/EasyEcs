@@ -111,10 +111,18 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "[Removed<T>] visits entities that no longer have T. Taking T as a parameter, or requiring it with [With<T>] or " +
         "[Changed<T>], asks for entities that have it: the method would never run. Read the entity's other components.");
 
+    public static readonly DiagnosticDescriptor EntityInData = new("EECS017", "A component stores an Entity handle",
+        "'{0}' stores an Entity in '{1}': store its EntityId instead",
+        Category, DiagnosticSeverity.Warning, true,
+        "An Entity is a handle: it holds a reference to its world. A component (or singleton) holding one is managed, " +
+        "so its column is scanned by the GC, every store pays a write barrier, rows are not copied as blocks, and it " +
+        "cannot be serialized. Store the EntityId (8 bytes, unmanaged; a handle converts to it implicitly) and turn it " +
+        "back into a handle with world.TryGetEntity(id, out var entity).");
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
         MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
-        RemovedRequired);
+        RemovedRequired, EntityInData);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -289,6 +297,9 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
                 if (Symbols.Implements(type, name))
                     context.ReportDiagnostic(Diagnostic.Create(NotStruct, location, type.Name, name.Substring("EasyEcs.".Length)));
 
+        if (type.TypeKind == TypeKind.Struct && (Symbols.Implements(type, Symbols.Component) || Symbols.Implements(type, Symbols.Singleton)))
+            AnalyzeDataFields(context, type);
+
         if (type.TypeKind != TypeKind.Class || !Symbols.IsSystem(type)) return;
         AnalyzeSystemFields(context, type);
 
@@ -297,6 +308,33 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(NotPartial, location, type.Name));
         if (Symbols.IsGenericChain(type))
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, type.Name));
+    }
+
+    /// <summary>EECS017: an instance field (or a record's positional property) of a component or singleton holding an Entity.</summary>
+    private static void AnalyzeDataFields(SymbolAnalysisContext context, INamedTypeSymbol data)
+    {
+        foreach (var field in data.GetMembers().OfType<IFieldSymbol>())
+        {
+            if (field.IsStatic || !HoldsEntity(field.Type, 0)) continue;
+            var member = (ISymbol?)field.AssociatedSymbol ?? field;
+            var location = member.Locations.FirstOrDefault(l => l.IsInSource) ?? data.Locations.FirstOrDefault();
+            context.ReportDiagnostic(Diagnostic.Create(EntityInData, location, data.Name, member.Name));
+        }
+    }
+
+    /// <summary>Whether <paramref name="type"/> is an Entity or holds one (an array, a type argument, a struct's field).</summary>
+    private static bool HoldsEntity(ITypeSymbol type, int depth)
+    {
+        if (depth > 4) return false;
+        if (type.ToDisplayString() == Symbols.Entity) return true;
+        if (type is IArrayTypeSymbol array) return HoldsEntity(array.ElementType, depth + 1);
+        if (type is not INamedTypeSymbol named) return false;
+        foreach (var argument in named.TypeArguments)
+            if (HoldsEntity(argument, depth + 1)) return true;
+        if (named.TypeKind != TypeKind.Struct || named.SpecialType != SpecialType.None || named.Locations.All(l => !l.IsInSource)) return false;
+        foreach (var field in named.GetMembers().OfType<IFieldSymbol>())
+            if (!field.IsStatic && HoldsEntity(field.Type, depth + 1)) return true;
+        return false;
     }
 
     /// <summary>

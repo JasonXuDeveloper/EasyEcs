@@ -63,9 +63,9 @@ public sealed partial class World
     /// x64 and arm64 both accelerate). Cold: only tables a pass left tombstones in.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    internal static ulong AliveRows(ref EntitySlot rows, int count)
+    internal static ulong AliveRows(ref EntityId rows, int count)
     {
-        ref long row = ref Unsafe.As<EntitySlot, long>(ref rows);
+        ref long row = ref Unsafe.As<EntityId, long>(ref rows);
         ulong tombstones = 0;
         int i = 0;
         for (; i + 2 <= count; i += 2)
@@ -192,7 +192,7 @@ public sealed partial class World
         // its new tick (Changed<T> filters require the component, so they skip the row).
         if (archetype.Tracked && archetype.Info(column).Companion is var ticks and >= 0)
             archetype.SetTick(archetype.ColumnIndex(ticks), slot, _changeTick);
-        if (_indexByBit != null) Unindex(bit, archetype.Slots[slot].Id);
+        if (_indexByBit != null) Unindex(bit, archetype.Slots[slot].Index);
         return true;
     }
 

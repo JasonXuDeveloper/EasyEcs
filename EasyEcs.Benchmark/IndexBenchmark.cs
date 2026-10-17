@@ -16,7 +16,7 @@ public class IndexBenchmark
     private World _world;
     private Entity[] _owners;
     private Entity[] _items;
-    private ValueIndex<ItemOf, Entity> _index;
+    private ValueIndex<ItemOf, EntityId> _index;
     private int _next;
 
     [GlobalSetup]
@@ -27,7 +27,7 @@ public class IndexBenchmark
         _world.CreateEntities(_owners, new Gold(0));
         _items = new Entity[Items];
         for (int i = 0; i < Items; i++) _items[i] = _world.CreateEntity(new ItemOf(_owners[i % Owners]));
-        _index = _world.Index<ItemOf, Entity>();
+        _index = _world.Index<ItemOf, EntityId>();
         for (int i = 0; i < 20; i++) TradeAndCount();
     }
 
@@ -48,9 +48,9 @@ public class IndexBenchmark
         return total;
     }
 
-    public record struct ItemOf(Entity Owner) : IComponent, IIndexed<Entity>
+    public record struct ItemOf(EntityId Owner) : IComponent, IIndexed<EntityId>
     {
-        public Entity Key => Owner;
+        public EntityId Key => Owner;
     }
 
     public record struct Gold(int Amount) : IComponent;

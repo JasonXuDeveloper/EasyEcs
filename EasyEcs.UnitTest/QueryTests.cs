@@ -177,7 +177,7 @@ public partial class QueryTests
         foreach (var item in world.Query<Health>())
         {
             visited++;
-            Assert.That(item.Component1.Value, Is.EqualTo(item.Entity.Id), "data follows its entity");
+            Assert.That(item.Component1.Value, Is.EqualTo(item.Entity.Id.Index), "data follows its entity");
         }
 
         Assert.That(visited, Is.EqualTo(1_000));
@@ -204,8 +204,8 @@ public partial class QueryTests
 
         public void Execute(Entity entity, ref Health health)
         {
-            if (entity.Id % 3 == 0) entity.Destroy();
-            if (entity.Id != 299) return;
+            if (entity.Id.Index % 3 == 0) entity.Destroy();
+            if (entity.Id.Index != 299) return;
             var count = new CountRows();
             entity.World.ForEach<Health, CountRows>(ref count, NotFrozen);
             Counted = count.Rows;
@@ -285,10 +285,10 @@ public partial class QueryTests
             var e = item.Entity;
             Assert.That(e.IsAlive && e.Has<Stun>(), Is.True);
             Assert.That(visited.Add(e), Is.True, "visited twice");
-            if (e.Id + 1 < all.Length && all[e.Id + 1].IsAlive && e.Id % 7 == 0)
+            if (e.Id.Index + 1 < all.Length && all[e.Id.Index + 1].IsAlive && e.Id.Index % 7 == 0)
             {
-                destroyed.Add(all[e.Id + 1]);
-                all[e.Id + 1].Destroy();                                       // a later row becomes a tombstone
+                destroyed.Add(all[e.Id.Index + 1]);
+                all[e.Id.Index + 1].Destroy();                                       // a later row becomes a tombstone
             }
         }
 
