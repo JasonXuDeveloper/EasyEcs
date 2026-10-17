@@ -158,8 +158,11 @@ public class EntityTests
     {
         using var other = new World();
         var foreign = other.CreateEntity();
-        _world.DestroyEntity(foreign);
-        Assert.That(foreign.IsAlive, Is.True);
+        _world.CreateEntity();                                       // the same id in this world
+        Assert.That(_world.TryGetEntity(foreign.Id, out var mine) && mine == foreign, Is.False);
+        foreign.Destroy();                                           // destroys it in its own world only
+        Assert.That(foreign.IsAlive, Is.False);
+        Assert.That(mine.IsAlive, Is.True);
         Assert.That(default(Entity).IsAlive, Is.False);
     }
 

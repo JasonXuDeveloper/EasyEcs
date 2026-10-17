@@ -75,7 +75,7 @@ public partial class MovementSystem : EcsSystem
 }
 
 public partial class ManaSystem : EcsSystem                                   // same priority as MovementSystem, other
-{                                                                             // data: both run at once (ParallelSystems)
+{                                                                             // data: both run at once
     public override int Priority => 1;
 
     [ForEach]
@@ -142,7 +142,7 @@ public partial class DeathSystem : EcsSystem
 {
     public override int Priority => 5;
 
-    [ForEach, Without<Dead>, Changed<Health>]                                 // only units whose health was written
+    [ForEach, Without<Dead>]                                                  // a plain scan: most healths change often
     static void Die(Entity unit, in Health hp, ref Battle battle)
     {
         if (hp.Value > 0) return;
@@ -372,7 +372,8 @@ public sealed class BattleServer : IDisposable
     {
         // Check with reads first: a ref access counts as a change, and an unchanged bag must not be replicated
         if (!from.Has<DynamicBuffer<Loot>>() || !to.Has<DynamicBuffer<Loot>>()) return false;
-        if (from.Read<DynamicBuffer<Loot>>().Count == 0 || to.Read<DynamicBuffer<Loot>>().Count == BagSize) return false;
+        if (from.Read<DynamicBuffer<Loot>>().Count == 0) return false;
+        if (to.Read<DynamicBuffer<Loot>>().Count == BagSize) return false;
         ref var source = ref from.Get<DynamicBuffer<Loot>>();
         to.Get<DynamicBuffer<Loot>>().Add(source[0]);
         source.RemoveAt(0);

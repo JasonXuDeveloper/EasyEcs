@@ -74,11 +74,13 @@ public sealed partial class World : IDisposable
 
     // CreateEntity(in T1..Tn) is generated (World.Structural.g.cs): one archetype placement, no intermediate moves.
 
-    /// <summary>Destroy <paramref name="entity"/>; a stale or foreign handle is ignored. O(components). Thread-safe.</summary>
+    /// <summary>
+    /// Destroy <paramref name="entity"/> (a handle of this world; <c>Entity.Destroy</c> is the public call); a stale
+    /// handle is ignored. O(components). Thread-safe.
+    /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
-    public void DestroyEntity(Entity entity)
+    internal void DestroyEntity(Entity entity)
     {
-        if (!ReferenceEquals(entity.World, this)) return;
         using (Structural())
         {
             int id = entity.Id;
