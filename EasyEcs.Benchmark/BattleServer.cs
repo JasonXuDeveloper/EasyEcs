@@ -39,7 +39,7 @@ public struct WaypointArray { private Position _first; }
 
 public struct Replication : ISystemGroup;                                     // runs when the server sends updates
 
-public class SteeringSystem : EcsSystem                               // heavy per-entity math: on all cores
+public class SteeringSystem : EcsSystem                                       // heavy per-entity math: on all cores
 {
     protected override void OnCreate()                                        // the system sets up the data it steers by
     {
@@ -58,7 +58,7 @@ public class SteeringSystem : EcsSystem                               // heavy p
     }
 }
 
-public partial class MovementSystem : EcsSystem
+public class MovementSystem : EcsSystem
 {
     [ForEach, Without<Dead>, Without<Frozen>]                                 // whole runs of rows, vectorized
     static void Move(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
@@ -74,13 +74,13 @@ public partial class MovementSystem : EcsSystem
     }
 }
 
-public class ManaSystem : EcsSystem                                   // other data than MovementSystem: both
+public class ManaSystem : EcsSystem                                           // other data than MovementSystem: both
 {                                                                             // run at once
     [ForEach]
     static void Regenerate(ref Mana mana) => mana.Value = Math.Min(mana.Max, mana.Value + 1);
 }
 
-public class ZoneSystem : EcsSystem                                   // the zone index follows these writes
+public class ZoneSystem : EcsSystem                                           // the zone index follows these writes
 {
     [ForEach]
     static void Enter(Entity player, in Position p, in Zone zone)              // `in`: reading is not a change
@@ -90,7 +90,7 @@ public class ZoneSystem : EcsSystem                                   // the zon
     }
 }
 
-public partial class CombatSystem : EcsSystem
+public class CombatSystem : EcsSystem
 {
     [ForEach, Without<Dead>, Without<Frozen>]
     static void Fight(Entity unit, ref Attack attack, ref Battle battle)
@@ -105,7 +105,7 @@ public partial class CombatSystem : EcsSystem
     }
 }
 
-public partial class StatusSystem : EcsSystem
+public class StatusSystem : EcsSystem
 {
     [ForEach]
     static void Burn(Entity unit, ref Burning burning, ref Health hp)
@@ -128,7 +128,7 @@ public sealed class AfflictionSystem : EcsSystem                              //
         World.Battle.Afflicted += World.Count<Health>(BattleServer.Afflicted);
 }
 
-public partial class DeathSystem : EcsSystem
+public class DeathSystem : EcsSystem
 {
     [ForEach, Without<Dead>]                                                  // a plain scan: most healths change often
     static void Die(Entity unit, in Health hp, ref Battle battle)
@@ -139,7 +139,7 @@ public partial class DeathSystem : EcsSystem
     }
 }
 
-public partial class RespawnSystem : EcsSystem                                // DeathSystem does not know it exists
+public class RespawnSystem : EcsSystem                                        // DeathSystem does not know it exists
 {
     [ForEach, With<Player>, With<Dead>]
     static void Respawn(Entity player, ref Health hp, ref DynamicBuffer<Loot> bag, World world)
@@ -205,7 +205,7 @@ public sealed class ClockSystem : EcsSystem
 }
 
 [UpdateInGroup<Replication>]
-public class ReplicationSystem : EcsSystem                            // only what changed since the last send
+public class ReplicationSystem : EcsSystem                                    // only what changed since the last send
 {
     [ForEach, Changed<Health>]
     static void Send(in Health hp, ref Replica replica, ref Battle battle)
