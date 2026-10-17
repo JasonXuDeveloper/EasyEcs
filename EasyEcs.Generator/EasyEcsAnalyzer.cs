@@ -70,13 +70,13 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "collection or class it holds is still writable: changing it would race with parallel systems that read it, " +
         "and [Changed<T>] systems would not see the change. Take it by 'ref' so the write is scheduled and stamped.");
 
-    public static readonly DiagnosticDescriptor BufferCopy = new("EECS012", "Buffer<T> held by value",
-        "'{0}' copies a Buffer<{1}>; reach the buffer through its entity ('ref' or 'in')",
+    public static readonly DiagnosticDescriptor BufferCopy = new("EECS012", "DynamicBuffer<T> held by value",
+        "'{0}' copies a DynamicBuffer<{1}>; reach the buffer through its entity ('ref' or 'in')",
         Category, DiagnosticSeverity.Error, true,
-        "A Buffer<T> is a component: its writes are tracked through the 'ref' that reaches it. A copy refers to the same " +
-        "list, so writes through the copy are never stamped as changed, and a snapshot or another entity would share " +
-        "the list. Use 'ref' (write) or 'in' (read) parameters, ref locals and Entity.Get / Read; a new component " +
-        "value is 'new Buffer<T>()' (no list until its first write).");
+        "A DynamicBuffer<T> is a component: its writes are tracked through the 'ref' that reaches it. A copy refers to " +
+        "the same list, so writes through the copy are never stamped as changed, and a snapshot or another entity " +
+        "would share the list. Use 'ref' (write) or 'in' (read) parameters, ref locals and Entity.Get / Read; a new " +
+        "component value is 'new DynamicBuffer<T>()' (no list until its first write).");
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
@@ -110,7 +110,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
                 parameter.ContainingSymbol.Name, parameter.Name));
     }
 
-    /// <summary>EECS012: a field, property, by-value parameter or by-value return of a Buffer&lt;T&gt;.</summary>
+    /// <summary>EECS012: a field, property, by-value parameter or by-value return of a dynamic buffer.</summary>
     private static void AnalyzeBufferHolder(SymbolAnalysisContext context)
     {
         var symbol = context.Symbol;
@@ -138,8 +138,8 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
     }
 
     /// <summary>
-    /// EECS012: a Buffer&lt;T&gt; copied by a local (ref locals are fine), an assignment or an argument of a generic
-    /// method (Add, Set, CreateEntity: the value is stored), unless it is a new, empty buffer.
+    /// EECS012: a DynamicBuffer&lt;T&gt; copied by a local (ref locals are fine), an assignment or an argument of a
+    /// generic method (Add, Set, CreateEntity: the value is stored), unless it is a new, empty buffer.
     /// </summary>
     private static void AnalyzeBufferCopy(OperationAnalysisContext context)
     {

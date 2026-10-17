@@ -5,7 +5,7 @@ using NUnit.Framework;
 namespace EasyEcs.UnitTest;
 
 /// <summary>
-/// <see cref="WorldOptions.Parallel"/>: systems of one priority run together exactly when their declared access
+/// <see cref="WorldOptions.ParallelSystems"/>: systems of one priority run together exactly when their declared access
 /// (generated from the [ForEach] parameters) does not conflict.
 /// </summary>
 public partial class ParallelTests
@@ -76,7 +76,7 @@ public partial class ParallelTests
 
     private static World ParallelWorld(int timeoutMs)
     {
-        var world = new World(new WorldOptions { Parallel = true, MaxDegreeOfParallelism = 2 });
+        var world = new World(new WorldOptions { ParallelSystems = true, MaxDegreeOfParallelism = 2 });
         world.AddSingleton<Rendezvous>() = new Rendezvous(new Barrier(2), timeoutMs);
         world.CreateEntity(new Left(), new Right());
         return world;
@@ -153,7 +153,7 @@ public partial class ParallelTests
     [Test]
     public void ConflictingSystemsKeepRegistrationOrder()
     {
-        using var world = new World(new WorldOptions { Parallel = true });
+        using var world = new World(new WorldOptions { ParallelSystems = true });
         for (int i = 0; i < 64; i++) world.CreateEntity(new Counter(), new Seen());
         world.AddSystem<Count>();
         world.AddSystem<Observe>(); // reads what Count writes: runs after it, every update
@@ -184,7 +184,7 @@ public partial class ParallelTests
     [Test]
     public void ParallelUpdatesDoNotAllocate()
     {
-        using var world = new World(new WorldOptions { Parallel = true });
+        using var world = new World(new WorldOptions { ParallelSystems = true });
         for (int i = 0; i < 1_000; i++) world.CreateEntity(new Position(i, i), new Velocity(1, 1), new Counter());
         world.AddSystem<Count>();
         world.AddSystem<Movement>();

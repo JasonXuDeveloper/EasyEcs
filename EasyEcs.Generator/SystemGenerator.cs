@@ -55,7 +55,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 : method.HasFilter ? $", in __{method.Name}Filter" : "";
             string system = method.IsStatic ? "" : "System = this, ";
             string singletons = string.Concat(method.Parameters.Select((p, i) => p.Kind == Symbols.ParamKind.Singleton
-                ? $", s{i} = world.SingletonRef<{p.Type}>()" : ""));
+                ? method.Parallel ? $", s{i} = world.SingletonRef<{p.Type}>()" : $", s{i} = ref world.SingletonRef<{p.Type}>().Value" : ""));
             sb.Append($"        var __{method.Name} = new __{method.Name}Job {{ {system}World = world{singletons} }};\n");
             string forEach = method.IsBatch ? "ForEachBatch" : method.TakesEntity ? "ForEachEntity" : "ForEach";
             if (method.Parallel) forEach += "Parallel";
@@ -107,7 +107,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         {
             Symbols.ParamKind.Component => $"{p.RefKind} c{++index}",
             Symbols.ParamKind.ComponentSpan => $"c{++index}", // Span<T> converts to ReadOnlySpan<T> for read-only parameters
-            Symbols.ParamKind.Singleton => $"{p.RefKind} s{i}.Value",
+            Symbols.ParamKind.Singleton => method.Parallel ? $"{p.RefKind} s{i}.Value" : $"{p.RefKind} s{i}",
             Symbols.ParamKind.Entity => "entity",
             _ => "World",
         }));
@@ -116,12 +116,17 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string iface = method.IsBatch ? "IForEachBatch" : method.TakesEntity ? "IForEachEntity" : "IForEach";
         bool stable = method.Stable && !method.IsBatch; // a batch job has no structural path at all
         string marker = stable ? ", global::EasyEcs.INoStructuralChanges" : "";
-        sb.Append($"    private struct {job} : global::EasyEcs.{iface}<{method.ComponentTypes}>{marker}\n    {{\n");
+        // A ref struct holds each singleton as a ref field, a register in the row loop: a SingletonRef's box would be
+        // null-checked on every row. Parallel jobs are copied into work items on the heap, so they hold SingletonRefs.
+        string kind = method.Parallel ? "struct" : "ref struct";
+        sb.Append($"    private {kind} {job} : global::EasyEcs.{iface}<{method.ComponentTypes}>{marker}\n    {{\n");
         if (!method.IsStatic) sb.Append($"        public {owner.Name} System;\n");
         sb.Append("        public global::EasyEcs.World World;\n");
         for (int i = 0; i < method.Parameters.Length; i++)
             if (method.Parameters[i].Kind == Symbols.ParamKind.Singleton) // resolved once per pass, not per entity
-                sb.Append($"        public global::EasyEcs.SingletonRef<{method.Parameters[i].Type}> s{i};\n");
+                sb.Append(method.Parallel
+                    ? $"        public global::EasyEcs.SingletonRef<{method.Parameters[i].Type}> s{i};\n"
+                    : $"        public ref {method.Parameters[i].Type} s{i};\n");
         sb.Append('\n');
         sb.Append("        [MethodImpl(MethodImplOptions.AggressiveInlining)]\n");
         string first = method.TakesEntity ? "global::EasyEcs.Entity entity, " : "";

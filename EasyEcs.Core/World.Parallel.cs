@@ -4,7 +4,7 @@ using System.Threading;
 
 namespace EasyEcs;
 
-// Parallel work: the systems of one batch (WorldOptions.Parallel; non-conflicting SystemAccess) and the row chunks of a
+// Parallel work: the systems of one batch (ParallelSystems; non-conflicting SystemAccess) and the row chunks of a
 // parallel [ForEach] (ForEachParallel). Allocation-free, unlike Parallel.For (closure + state per call): the calling
 // thread works through the items together with up to MaxDegreeOfParallelism - 1 reusable thread-pool work items.
 public sealed partial class World

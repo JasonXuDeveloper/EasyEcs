@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
@@ -272,7 +273,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     [MethodImpl(MethodImplOptions.NoInlining)] // like ForEach: the job inlines into this loop, not further up
                     public void ForEachBatch<{{tps}}, TJob>(ref TJob job, in QueryFilter filter = default)
                 {{cons}}
-                        where TJob : struct, IForEachBatch<{{tps}}>
+                        where TJob : struct, IForEachBatch<{{tps}}>, allows ref struct
                     {
                         var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
                         var archetypes = match.Archetypes;
@@ -363,6 +364,22 @@ public sealed class ArityGenerator : IIncrementalGenerator
         ? code
         : System.Text.RegularExpressions.Regex.Replace(code, @"\b(ids|idk|idr) = ref Unsafe\.Add\(ref (ids|idk|idr), 1\)", "$1 = ref Unsafe.Add(ref $1, 0)");
 
+    /// <summary>
+    /// The dense row loop stepping one index instead of one ref per column, for three or more columns whose element sizes
+    /// are all x64 address scales (1, 2, 4 or 8 bytes; a JIT-time constant), followed by <c>else</c> and the ref loop.
+    /// The JIT turns the index into a byte offset plus a counter, two steps per row, which pays only against three or
+    /// more refs; with fewer it is slower (and an offset inside the element is then not always folded into the address).
+    /// </summary>
+    private static string IndexedRows(int n, string rowArg) => $$"""
+        if ({{string.Join(" && ", Enumerable.Range(1, n).Select(i => $"Unsafe.SizeOf<T{i}>() is 1 or 2 or 4 or 8"))}})
+                {
+                    nint rowCount = end - start;
+                    for (nint i = 0; i < rowCount; i++)
+                        job.Execute({{Args(rowArg, List(n, k => $"ref Unsafe.Add(ref r{k}, i)"))}});
+                }
+                else
+        """;
+
     /// <summary>The arguments of a job call: the entity (none for <c>IForEach</c>), then the component refs.</summary>
     private static string Args(string entity, string refs) => entity.Length == 0 ? refs : entity + ", " + refs;
 
@@ -377,6 +394,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
         // The row argument inside a run of rows of a word (idk walks the run).
         string rowArgRun = System.Text.RegularExpressions.Regex.Replace(rowArg, @"\bids\b", "idk");
         string rowArgDense = System.Text.RegularExpressions.Regex.Replace(rowArg, @"\bids\b", "idr");
+        string rowArgIndexed = System.Text.RegularExpressions.Regex.Replace(rowArg, @"\bids\b", "Unsafe.Add(ref ids, i)");
         // Row loops move one ref per column by one element per row (strength-reduced by hand): with an int index the
         // JIT sign-extends and rebuilds every address, which nearly doubles the cost of a tight loop.
         string advance = List(n, i => $"r{i} = ref Unsafe.Add(ref r{i}, 1)");
@@ -399,11 +417,11 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 [MethodImpl(MethodImplOptions.NoInlining)]
                 public void {{name}}<{{tps}}, TJob>(ref TJob job, in QueryFilter filter = default)
             {{Constraints(n, "        ")}}
-                    where TJob : struct, {{job}}<{{tps}}>
+                    where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
                     var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
                     var archetypes = match.Archetypes;
-                    if (default(TJob) is INoStructuralChanges)
+                    if (typeof(INoStructuralChanges).IsAssignableFrom(typeof(TJob)))
                     {
                         // The job cannot change rows or reallocate storage (the type test is a JIT-time constant). The row
                         // loops live in small methods of their own, so the JIT keeps their refs in registers.
@@ -476,7 +494,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 // inlining would otherwise grow until the loop's refs spill to the stack
                 private long {{name}}Live<{{tps}}, TJob>(ref TJob jobRef, Archetype archetype, int start, int count, {{ushorts}})
             {{Constraints(n, "        ")}}
-                    where TJob : struct, {{job}}<{{tps}}>
+                    where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
                     // A local copy of the job: its fields stay in registers. Read through jobRef, they would be
                     // loaded again every row (a write through a ref the job hands out might alias the caller's job).
@@ -515,7 +533,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 // inlining would otherwise grow until the loop's refs spill to the stack
                 private long {{name}}LiveTested<{{tps}}, TJob>(ref TJob jobRef, Archetype archetype, RowFilter rows, int start, int count, {{ushorts}})
             {{Constraints(n, "        ")}}
-                    where TJob : struct, {{job}}<{{tps}}>
+                    where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
                     // A local copy of the job: its fields stay in registers. Read through jobRef, they would be
                     // loaded again every row (a write through a ref the job hands out might alias the caller's job).
@@ -565,7 +583,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 // inlining would otherwise grow until the loop's refs spill to the stack
                 private void {{name}}Rows<{{tps}}, TJob>(ref TJob jobRef, Archetype archetype, int start, int end, {{ushorts}})
             {{Constraints(n, "        ")}}
-                    where TJob : struct, {{job}}<{{tps}}>
+                    where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
                     // A local copy of the job: its fields stay in registers. Read through jobRef, they would be
                     // loaded again every row (a write through a ref the job hands out might alias the caller's job).
@@ -573,10 +591,14 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     ref EntitySlot ids = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Slots), start);
             {{startAt}}
             {{StampRows(n, "        ", "start", "end - start")}}
-                    // The first column's end bounds the loop: no counter to step besides the refs.
-                    ref T1 stop = ref Unsafe.Add(ref r1, end - start);
-                    for (; Unsafe.IsAddressLessThan(ref r1, ref stop); ids = ref Unsafe.Add(ref ids, 1), {{advance}})
-                        job.Execute({{Args(rowArg, List(n, i => $"ref r{i}"))}});
+            {{(n >= 3 ? IndexedRows(n, rowArgIndexed) : "")}}
+                    {
+                        // The first column's end bounds the loop: no counter to step besides the refs.
+                        ref T1 stop = ref Unsafe.Add(ref r1, end - start);
+                        for (; Unsafe.IsAddressLessThan(ref r1, ref stop); ids = ref Unsafe.Add(ref ids, 1), {{advance}})
+                            job.Execute({{Args(rowArg, List(n, i => $"ref r{i}"))}});
+                    }
+
                     jobRef = job;
                 }
 
@@ -589,7 +611,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 // inlining would otherwise grow until the loop's refs spill to the stack
                 private void {{name}}Filtered<{{tps}}, TJob>(ref TJob jobRef, Archetype archetype, RowFilter rows, int start, int count, {{ushorts}})
             {{Constraints(n, "        ")}}
-                    where TJob : struct, {{job}}<{{tps}}>
+                    where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
                     // A local copy of the job: its fields stay in registers. Read through jobRef, they would be
                     // loaded again every row (a write through a ref the job hands out might alias the caller's job).

@@ -9,7 +9,7 @@ public sealed class WorldOptions
     /// Run systems of one priority at the same time (thread pool) when their generated access does not conflict
     /// (<see cref="SystemAccess"/>). Default false: one owner thread per world is the recommended model.
     /// </summary>
-    public bool Parallel { get; init; }
+    public bool ParallelSystems { get; init; }
 
     /// <summary>
     /// Threads one parallel run uses at most (default: processor count): systems run by <see cref="Parallel"/>, and the

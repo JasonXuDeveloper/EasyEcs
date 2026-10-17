@@ -555,7 +555,7 @@ public partial class ChangedTests
     {
         int[] Run(bool parallel)
         {
-            using var world = new World(new WorldOptions { Parallel = parallel });
+            using var world = new World(new WorldOptions { ParallelSystems = parallel });
             world.AddSystem<Wear>();
             world.AddSystem<ArmorWatch>();
             world.AddSystem<Inspect>();

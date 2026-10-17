@@ -22,18 +22,19 @@ internal static class Symbols
     public const string Singleton = "EasyEcs.ISingletonComponent";
     public const string Entity = "EasyEcs.Entity";
     public const string World = "EasyEcs.World";
-    public const string Buffer = "EasyEcs.Buffer<T>";
+    public const string DynamicBuffer = "EasyEcs.DynamicBuffer<T>";
     public const int MaxComponents = 9;
 
     public static readonly SymbolDisplayFormat Fqn = SymbolDisplayFormat.FullyQualifiedFormat;
 
-    /// <summary>The element type when <paramref name="type"/> is a <c>Buffer&lt;T&gt;</c>, else null.</summary>
+    /// <summary>The element type when <paramref name="type"/> is a <c>DynamicBuffer&lt;T&gt;</c>, else null.</summary>
     public static ITypeSymbol? BufferElement(ITypeSymbol type) =>
-        type is INamedTypeSymbol { IsGenericType: true } named && named.OriginalDefinition.ToDisplayString() == Buffer
+        type is INamedTypeSymbol { IsGenericType: true } named &&
+        named.OriginalDefinition.ToDisplayString() == DynamicBuffer
             ? named.TypeArguments[0]
             : null;
 
-    /// <summary>Whether <paramref name="value"/> is <c>new Buffer&lt;T&gt;()</c> or <c>default</c>: a buffer without a list.</summary>
+    /// <summary>Whether <paramref name="value"/> is <c>new DynamicBuffer&lt;T&gt;()</c> or <c>default</c> (no list).</summary>
     public static bool IsNewBuffer(IOperation? value)
     {
         while (value is IConversionOperation conversion) value = conversion.Operand;
@@ -174,7 +175,8 @@ internal static class Symbols
     }
 
     /// <summary>Entity members that cannot change the world (no structural change, no access to the World).</summary>
-    private static readonly HashSet<string> ReadOnlyEntityMembers = ["Id", "Version", "IsAlive", "Has", "Get", "TryGet"];
+    private static readonly HashSet<string> ReadOnlyEntityMembers =
+        ["Id", "Version", "IsAlive", "Has", "Get", "Read", "TryGet", "TryGetRef"];
 
     /// <summary>
     /// Whether every use of parameter <paramref name="name"/> in the method body is a read-only member access

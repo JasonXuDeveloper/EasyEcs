@@ -8,7 +8,7 @@ namespace EasyEcs;
 /// followed by the <see cref="ForEachAttribute">[ForEach]</see> methods, and <see cref="OnDestroy"/> when removed or
 /// when the world is disposed. Everything runs synchronously within <see cref="World.Update()"/> (or
 /// <see cref="World.Update{TGroup}"/> for systems in a <see cref="UpdateInGroupAttribute{TGroup}">group</see>): on the
-/// calling thread, or with <see cref="WorldOptions.Parallel"/> on a thread-pool thread next to systems whose
+/// calling thread, or with <see cref="WorldOptions.ParallelSystems"/> on a thread-pool thread next to systems whose
 /// <see cref="SystemAccess">access</see> does not conflict.
 /// </summary>
 public abstract class EcsSystem
@@ -18,7 +18,7 @@ public abstract class EcsSystem
 
     /// <summary>
     /// Execution order: lower runs first; equal priorities run in registration order (or, with
-    /// <see cref="WorldOptions.Parallel"/>, at the same time when their <see cref="SystemAccess">access</see> allows it).
+    /// <see cref="WorldOptions.ParallelSystems"/>, at the same time when their <see cref="SystemAccess">access</see> allows it).
     /// </summary>
     public virtual int Priority => 0;
 

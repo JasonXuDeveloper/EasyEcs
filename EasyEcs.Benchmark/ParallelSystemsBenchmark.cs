@@ -4,8 +4,8 @@ namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// One tick of four independent per-entity systems of the same priority (movement, health and mana regeneration,
-/// cooldowns). Their access is disjoint, so with <see cref="WorldOptions.Parallel"/> they form one batch and run at
-/// the same time; sequential is the reference. Steady state must allocate 0 bytes per tick either way.
+/// cooldowns). Their access is disjoint, so with <see cref="WorldOptions.ParallelSystems"/> they form one batch and run
+/// at the same time; sequential is the reference. Steady state must allocate 0 bytes per tick either way.
 /// </summary>
 [MemoryDiagnoser]
 public partial class ParallelSystemsBenchmark
@@ -18,7 +18,7 @@ public partial class ParallelSystemsBenchmark
     [GlobalSetup]
     public void Setup()
     {
-        _world = new World(new WorldOptions { Parallel = Parallel, InitialEntityCapacity = Entities });
+        _world = new World(new WorldOptions { ParallelSystems = Parallel, InitialEntityCapacity = Entities });
         for (int i = 0; i < Entities; i++)
             _world.CreateEntity(new Body(i, i, 1, 1), new Vitals(i % 100, 100), new Mana(i % 50, 50), new Cooldown(i % 30));
         _world.AddSystem<MoveBodies>();

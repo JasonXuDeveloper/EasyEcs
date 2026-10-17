@@ -5,12 +5,12 @@ namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// A list per entity, replicated when it changes: 100,000 bags of 8 items, of which <see cref="Written"/> trade an item
-/// per tick (input applied through handles), then one [Changed] system sends the changed bags. <c>Buffer</c> holds the
-/// bag as a <see cref="Buffer{T}"/>; <c>List</c> as a <see cref="List{T}"/> in a tracked component, the way to hold a
-/// collection without buffers. Steady state allocates 0 bytes either way.
+/// per tick (input applied through handles), then one [Changed] system sends the changed bags. <c>DynamicBuffer</c>
+/// holds the bag as a <see cref="DynamicBuffer{T}"/>; <c>List</c> as a <see cref="List{T}"/> in a tracked component,
+/// the way to hold a collection without buffers. Steady state allocates 0 bytes either way.
 /// </summary>
 [MemoryDiagnoser]
-public partial class BufferBenchmark
+public partial class DynamicBufferBenchmark
 {
     public const int Items = 8;
 
@@ -28,7 +28,7 @@ public partial class BufferBenchmark
         _world = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _entities = new Entity[Entities];
         if (List) _world.CreateEntities(_entities, new ListBag(), new Sent());
-        else _world.CreateEntities(_entities, new Buffer<int>(), new Sent());
+        else _world.CreateEntities(_entities, new DynamicBuffer<int>(), new Sent());
         foreach (var entity in _entities)
         {
             if (List)
@@ -39,7 +39,7 @@ public partial class BufferBenchmark
             }
             else
             {
-                ref var bag = ref entity.Get<Buffer<int>>();
+                ref var bag = ref entity.Get<DynamicBuffer<int>>();
                 bag.EnsureCapacity(Items);
                 for (int i = 0; i < Items; i++) bag.Add(i);
             }
@@ -68,7 +68,7 @@ public partial class BufferBenchmark
             }
             else
             {
-                var items = _entities[_next].Get<Buffer<int>>().AsSpan();
+                var items = _entities[_next].Get<DynamicBuffer<int>>().AsSpan();
                 items[0] = items[^1];
                 items[^1] = _next;
             }
@@ -87,8 +87,8 @@ public partial class BufferBenchmark
     [UpdateInGroup<Replication>]
     public partial class SendBuffers : EcsSystem
     {
-        [ForEach, Changed<Buffer<int>>]
-        private static void Send(in Buffer<int> bag, ref Sent sent)
+        [ForEach, Changed<DynamicBuffer<int>>]
+        private static void Send(in DynamicBuffer<int> bag, ref Sent sent)
         {
             int sum = 0;
             foreach (int item in bag) sum += item;

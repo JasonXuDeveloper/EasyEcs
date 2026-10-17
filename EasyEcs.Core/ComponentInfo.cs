@@ -77,7 +77,7 @@ internal abstract class ComponentInfo
 
     /// <summary>
     /// Copy rows [0, <paramref name="count"/>) of a managed column for a snapshot (capture or restore): values, and for
-    /// <see cref="Buffer{T}"/> columns copies of their lists, so the two sides never share one.
+    /// <see cref="DynamicBuffer{T}"/> columns copies of their lists, so the two sides never share one.
     /// </summary>
     public abstract void CopyRows(Array source, Array target, int count);
 }
@@ -117,7 +117,7 @@ internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsRefere
     {
         Array.Copy(source, target, count);
         if (default(T) is not IBuffer) return; // a JIT-time constant
-        // A Buffer<TElement> has a single field, its BufferStore<TElement>: the value is that reference.
+        // A DynamicBuffer<TElement> has a single field, its BufferStore<TElement>: the value is that reference.
         var rows = Unsafe.As<T[]>(target);
         for (int i = 0; i < count; i++)
         {

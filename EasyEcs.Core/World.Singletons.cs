@@ -55,8 +55,8 @@ public sealed partial class World
 
     /// <summary>
     /// Stable handle to singleton <typeparamref name="T"/> (added first if missing): resolve it once, then read and write
-    /// <see cref="SingletonRef{T}.Value"/> without a lookup. Generated <c>[ForEach]</c> jobs use it for singleton
-    /// parameters. O(1).
+    /// <see cref="SingletonRef{T}.Value"/> without a lookup. Generated <c>[ForEach]</c> jobs resolve singleton
+    /// parameters through it once per pass. O(1).
     /// </summary>
     public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent
     {

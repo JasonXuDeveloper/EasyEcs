@@ -5,8 +5,8 @@ namespace EasyEcs;
 
 /// <summary>
 /// How often and how long a system ran (<see cref="WorldOptions.MeasureSystems"/>): <see cref="OnUpdate"/> plus its
-/// <c>[ForEach]</c> methods, per run. Read it between updates; with <see cref="WorldOptions.Parallel"/> each system
-/// records its own runs.
+/// <c>[ForEach]</c> methods, per run. Read it between updates; with <see cref="WorldOptions.ParallelSystems"/> each
+/// system records its own runs.
 /// </summary>
 public readonly struct SystemStats
 {

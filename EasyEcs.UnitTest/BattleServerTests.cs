@@ -30,7 +30,7 @@ public class BattleServerTests
     {
         using var server = Run(300);
         int looted = 0;
-        foreach (var item in server.World.Query<Buffer<Loot>>())
+        foreach (var item in server.World.Query<DynamicBuffer<Loot>>())
         {
             Assert.That(item.Component1.Count, Is.InRange(0, BattleServer.BagSize));
             foreach (var loot in item.Component1) Assert.That(loot.Item, Is.InRange(0, 15));
@@ -38,7 +38,29 @@ public class BattleServerTests
         }
 
         Assert.That(looted, Is.Positive);
-        Assert.That(server.World.Count<Buffer<Loot>>(), Is.EqualTo(server.World.Count<Player>()));
+        Assert.That(server.World.Count<DynamicBuffer<Loot>>(), Is.EqualTo(server.World.Count<Player>()));
+    }
+
+    [Test]
+    public void LootChangesHandsAndReadsChangeNothing()
+    {
+        using var server = Run(300);
+        Entity from = default, to = default;
+        foreach (var item in server.World.Query<DynamicBuffer<Loot>>())
+        {
+            if (from == default && item.Component1.Count > 0) from = item.Entity;
+            else if (to == default && item.Component1.Count < BattleServer.BagSize) to = item.Entity;
+        }
+
+        int value = server.LootValue(from) + server.LootValue(to), items = from.Read<DynamicBuffer<Loot>>().Count;
+        var oldest = from.Read<DynamicBuffer<Loot>>()[0];
+        Assert.That(server.Give(from, to), Is.True);
+        Assert.That(from.Read<DynamicBuffer<Loot>>().Count, Is.EqualTo(items - 1));
+        var bag = to.Read<DynamicBuffer<Loot>>().AsReadOnlySpan();
+        Assert.That(bag[^1], Is.EqualTo(oldest));
+        Assert.That(server.LootValue(from) + server.LootValue(to), Is.EqualTo(value));
+        Assert.That(server.Give(default, to), Is.False);                     // a stale handle has no bag
+        Assert.That(server.AnyoneAfflicted, Is.EqualTo(server.World.Any<Burning>() || server.World.Any<Frozen>()));
     }
 
     [Test]

@@ -151,6 +151,40 @@ public class PresenceTests
     }
 
     [Test]
+    public void CountsAndAnyMatchTheRowsQueriesVisit()
+    {
+        using var world = new World();
+        var entities = new Entity[300];
+        for (int i = 0; i < entities.Length; i++)
+        {
+            entities[i] = world.CreateEntity(new Health(0), new Stun(1), new Frozen());
+            if (i % 3 == 0) entities[i].Remove<Stun>();
+            if (i % 5 == 0) entities[i].Remove<Frozen>();
+        }
+
+        entities[1].Destroy();
+        QueryFilter[] filters =
+        [
+            default, QueryFilter.Create().With<Stun>(), QueryFilter.Create().Without<Stun>(),
+            QueryFilter.Create().With<Stun>().With<Frozen>(), QueryFilter.Create().Without<Stun>().Without<Frozen>(),
+            QueryFilter.Create().With<Stun>().Without<Frozen>(), QueryFilter.Create().Without<Frozen>().With<Health>(),
+            QueryFilter.Create().WithAny<Stun>().WithAny<Frozen>(),
+        ];
+        foreach (var filter in filters)
+        {
+            int visited = 0;
+            foreach (var _ in world.Query<Health>(filter)) visited++;
+            Assert.That(world.Count<Health>(filter), Is.EqualTo(visited));
+            Assert.That(world.Any<Health>(filter), Is.EqualTo(visited > 0));
+        }
+
+        Assert.That(world.Count<Health>(QueryFilter.Create().Without<Stun>()), Is.EqualTo(100));
+        foreach (var e in entities)
+            if (e.IsAlive && e.Has<Stun>()) e.Remove<Stun>();
+        Assert.That(world.Any<Health>(QueryFilter.Create().With<Stun>()), Is.False);
+    }
+
+    [Test]
     public void SystemsSeeRemovalsImmediatelyAndVisitEachEntityOnce()
     {
         using var world = new World();

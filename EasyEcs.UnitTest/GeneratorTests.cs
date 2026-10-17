@@ -65,9 +65,9 @@ public class GeneratorTests
                     [ForEach] static void E(Entity e, in P p, ref Clock clock) { if (e.Has<Q>()) clock.Ticks += e.Id; } // read-only entity
                     [ForEach] static void F(ref Holder h, in Q q, ref Grid g) { g.Cells.Add(q.V); h.Box.V++; } // written by ref
                     [ForEach] static void G(in Holder h, ref P p, in Grid g) => p.V = g.Cells.Contains(1) ? g.Cells[0] : h.Box.V; // only read
-                    [ForEach, Changed<Buffer<int>>] static void H(ref Buffer<int> items, in Buffer<long> read) => items.Add(read.Count); // buffers
-                    [ForEach] static void I(Entity e, in Buffer<long> read) { ref var items = ref e.Get<Buffer<int>>(); items.Clear(); foreach (var x in read) items.Add((int)x); }
-                    [ForEach, With<Q>] static void J(Entity e, World w) { e.Get<Buffer<int>>() = default; w.CreateEntity(new P(), new Buffer<int>()); }
+                    [ForEach, Changed<DynamicBuffer<int>>] static void H(ref DynamicBuffer<int> items, in DynamicBuffer<long> read) => items.Add(read.Count); // buffers
+                    [ForEach] static void I(Entity e, in DynamicBuffer<long> read) { ref var items = ref e.Get<DynamicBuffer<int>>(); items.Clear(); foreach (var x in read) items.Add((int)x); }
+                    [ForEach, With<Q>] static void J(Entity e, World w) { e.Get<DynamicBuffer<int>>() = default; w.CreateEntity(new P(), new DynamicBuffer<int>()); }
                 }
             }
             """);
@@ -77,7 +77,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref P p, in Q q, in Clock c) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "access.ReadSingleton<global::Clock>();")]
     [TestCase("[ForEach] static void A(Entity e, in P p) { }", "access.RunsAlone();")]
     [TestCase("[ForEach] static void A(System.Span<P> p, System.ReadOnlySpan<Q> q) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "IForEachBatch<global::P, global::Q>")]
-    [TestCase("[ForEach, Changed<Buffer<int>>] static void A(in Buffer<int> b, ref P p) { }", ".Changed<global::EasyEcs.Buffer<int>>(0)", "access.Read<global::EasyEcs.Buffer<int>>();")]
+    [TestCase("[ForEach, Changed<DynamicBuffer<int>>] static void A(in DynamicBuffer<int> b, ref P p) { }", ".Changed<global::EasyEcs.DynamicBuffer<int>>(0)", "access.Read<global::EasyEcs.DynamicBuffer<int>>();")]
     [TestCase("[ForEach, Changed<T>] static void A(ref P p) { }", "access.Read<global::T>();", ".Changed<global::T>(0)", "ChangedSince(LastRunTick + 1)", "Writes => 1;")]
     [TestCase("[ForEach] void A(in P p) { }", "access.RunsAlone();")]
     [TestCase("[ForEach] static void A(in P p) { } protected override void OnUpdate() { }", "access.RunsAlone();")]
@@ -129,13 +129,13 @@ public class GeneratorTests
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Holder h) => h.Box.V++; }", "EECS011")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Holder h) => h.Box.V = 1; }", "EECS011")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(System.ReadOnlySpan<Holder> h) => h[0].Box.V++; }", "EECS011")]
-    [TestCase("public struct Bag : IComponent { public Buffer<int> Items; }", "EECS012")]
-    [TestCase("public static class U { public static int F(Entity e) { var b = e.Read<Buffer<int>>(); return b.Count; } }", "EECS012")]
-    [TestCase("public static class U { public static int F(Buffer<int> b) => b.Count; }", "EECS012")]
-    [TestCase("public static class U { public static Buffer<int> F(Entity e) => e.Read<Buffer<int>>(); }", "EECS012")]
-    [TestCase("public static class U { public static void F(Entity a, Entity b) => b.Set(a.Read<Buffer<int>>()); }", "EECS012")]
-    [TestCase("public static class U { public static void F(Entity a, Entity b) => b.Get<Buffer<int>>() = a.Read<Buffer<int>>(); }", "EECS012")]
-    [TestCase("public static class U { public static void F(Entity a) { var b = new Buffer<int>(); a.Set(b); } }", "EECS012")]
+    [TestCase("public struct Bag : IComponent { public DynamicBuffer<int> Items; }", "EECS012")]
+    [TestCase("public static class U { public static int F(Entity e) { var b = e.Read<DynamicBuffer<int>>(); return b.Count; } }", "EECS012")]
+    [TestCase("public static class U { public static int F(DynamicBuffer<int> b) => b.Count; }", "EECS012")]
+    [TestCase("public static class U { public static DynamicBuffer<int> F(Entity e) => e.Read<DynamicBuffer<int>>(); }", "EECS012")]
+    [TestCase("public static class U { public static void F(Entity a, Entity b) => b.Set(a.Read<DynamicBuffer<int>>()); }", "EECS012")]
+    [TestCase("public static class U { public static void F(Entity a, Entity b) => b.Get<DynamicBuffer<int>>() = a.Read<DynamicBuffer<int>>(); }", "EECS012")]
+    [TestCase("public static class U { public static void F(Entity a) { var b = new DynamicBuffer<int>(); a.Set(b); } }", "EECS012")]
     public async Task MisuseIsReported(string source, string id)
     {
         var errors = await Diagnose(Components, source);
@@ -146,7 +146,7 @@ public class GeneratorTests
     [Test]
     public async Task ABufferReadThroughInCannotBeWritten()
     {
-        var errors = await Diagnose(Components, "public partial class S : EcsSystem { [ForEach] static void A(in Buffer<int> b) => b.Add(1); }");
+        var errors = await Diagnose(Components, "public partial class S : EcsSystem { [ForEach] static void A(in DynamicBuffer<int> b) => b.Add(1); }");
         Assert.That(errors.Any(e => e.StartsWith("CS")), Is.True, string.Join(", ", errors));
     }
 

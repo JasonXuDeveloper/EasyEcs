@@ -6,7 +6,7 @@ namespace EasyEcs;
 
 // System scheduling. Systems run synchronously, in ascending Priority (registration order breaks ties). Systems of one
 // priority are split into batches of consecutive systems whose SystemAccess does not conflict; with
-// WorldOptions.Parallel a batch runs at the same time (World.Parallel.cs). Each update calls OnUpdate() then the
+// WorldOptions.ParallelSystems a batch runs at the same time (World.Parallel.cs). Each update calls OnUpdate() then the
 // generated [ForEach] methods.
 public sealed partial class World
 {
@@ -106,7 +106,7 @@ public sealed partial class World
 
         long update = ++group.Updates;
         var batches = group.Batches;
-        bool parallel = _options.Parallel;
+        bool parallel = _options.ParallelSystems;
         for (int b = 0; b < batches.Length; b++)
         {
             var batch = batches[b];

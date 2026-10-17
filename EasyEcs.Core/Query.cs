@@ -351,7 +351,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     {
         None => 0,
         All => archetype.AliveCount,
-        _ => Count(archetype),
+        _ => Counted(archetype) is var counted and >= 0 ? counted : Count(archetype),
     };
 
     /// <summary>Whether any alive row of <paramref name="archetype"/> passes (stops at the first one).</summary>
@@ -359,8 +359,40 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     {
         None => false,
         All => archetype.AliveCount > 0,
-        _ => Any(archetype),
+        _ => Counted(archetype) is var counted and >= 0 ? counted > 0 : Any(archetype),
     };
+
+    /// <summary>
+    /// The passing alive rows from the counts of rows lacking a component, when one required or excluded column is
+    /// the only one whose rows differ (every other required column full, every other excluded column empty): its
+    /// count is the answer, no presence bits read. -1 when rows must be tested. O(columns).
+    /// </summary>
+    private int Counted(Archetype archetype)
+    {
+        var plan = _plan;
+        if (plan.Changed.Length != 0 || plan.AnyOf.Length != 0) return -1;
+        var absent = archetype.Absent;
+        int alive = archetype.AliveCount, counted = alive, varying = 0;
+        var require = plan.Require;
+        for (int i = 0; i < require.Length; i++)
+        {
+            int lacking = absent[require[i]];
+            if (lacking == 0) continue;
+            varying++;
+            counted = alive - lacking;
+        }
+
+        var exclude = plan.Exclude;
+        for (int i = 0; i < exclude.Length; i++)
+        {
+            int lacking = absent[exclude[i]];
+            if (lacking == alive) continue;
+            varying++;
+            counted = lacking;
+        }
+
+        return varying == 1 ? counted : -1;
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Passes(Archetype archetype, int slot) => (Word(archetype, slot >> 6) & (1UL << slot)) != 0;
