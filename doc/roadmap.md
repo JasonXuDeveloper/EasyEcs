@@ -23,6 +23,9 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
   (`ChildOf` is `Destroy`; cascade benchmark unchanged).
 - Introspection: `world.Describe()` (tables, columns, rows, capacity, bytes), `entity.Describe()`.
 - Nino 4.0.0-rc.4.
+- Static `[ForEach]` methods outside systems: the generator writes the job and an entry point taking the world and
+  the caller's values (`Reports.CountAlive(world, ref alive)`); EECS005 / EECS021 / EECS010 guard it. Counting
+  100,000 fighters: 38 μs, against 56 μs for the struct job written by hand and 138 μs for a `Query` loop.
 
 ### Dropped
 
@@ -33,9 +36,6 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
 
 ### Source generators
 
-- `[ForEach]` on static methods outside systems: the generator writes the struct job and an entry point
-  (`Reports.CountDead(world, ref dead)`), so code outside systems (tests, admin endpoints, one-off fixes) gets the
-  speed of a struct job without writing one.
 - A cached query entry per system (no lookup per update): measure the lookup first.
 - Code fixes for the analyzer's diagnostics.
 - A diagnostic that suggests hoisting a `QueryFilter` built per update into a `static readonly` field.
