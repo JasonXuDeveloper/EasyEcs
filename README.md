@@ -270,9 +270,11 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
   (`world.Index<T, TKey>().Find(key)`); an `Entity` key makes a relation (`ChildOf(Entity Parent)`) whose index
   lists the children of an entity. `Set` and `CreateEntity` re-index at once; writes through a `ref` are rejected
   (EECS015).
-- **Generated entity properties:** every component gets a C# 14 extension property on `Entity`
-  (`hero.Position.X += 1`); tracked and indexed components get read-only ones, so reading them never counts as a
-  write.
+- **Generated members:** every component gets named C# 14 extension members, in the spirit of Entitas but for
+  structs, tags, singletons and indexes: `hero.Position.X += 1`, `hero.HasVelocity`, `hero.SetVelocity(1, 0)`,
+  `hero.IsDead` / `hero.SetDead()`, `world.Battle.Tick++`, `world.ZoneIndex.Find(3)`. Tracked and indexed components
+  get a read-only property, so reading them never counts as a write; the analyzer treats `SetX` / `RemoveX` as the
+  structural changes they are.
 - **New APIs:** `WithAny<T>` filters (`[WithAny<T>]` on `[ForEach]`), batch `CreateEntities` / `DestroyEntities`,
   per-system timing (`WorldOptions.MeasureSystems`, `system.Stats`), `entity.Read<T>()` (read-only, never a write) and
   `entity.TryGetRef<T>(out found)` (optional access by `ref`); Native AOT compatible.

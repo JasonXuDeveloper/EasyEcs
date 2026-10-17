@@ -417,7 +417,8 @@ write through a `ref` changes the key behind its back. The rule reports, for a c
 - a `ref` local bound to it, or an assignment to it (or a field of it) through a query item;
 - a `ref` or `Span<T>` parameter of it in a `[ForEach]` method or an `IForEach*` job.
 
-Fix: read it with `in`, `ReadOnlySpan<T>`, `Read<T>()` or the generated property, and write it with `Set`.
+Fix: read it with `in`, `ReadOnlySpan<T>`, `Read<T>()` or the generated property, and write it with `Set` (or the
+generated `SetX`).
 
 ```cs
 player.Get<Zone>() = new Zone(2);                       // EECS015: the index keeps the old zone
@@ -433,7 +434,7 @@ public partial class TakePortals : EcsSystem
     [ForEach]
     static void Take(Entity player, in Zone zone, in Portal portal)
     {
-        if (zone.Id != portal.To) player.Set(new Zone(portal.To));   // the index moves the player at once
+        if (zone.Id != portal.To) player.SetZone(portal.To);         // a Set: the index moves the player at once
     }
 }
 ```

@@ -76,8 +76,10 @@ EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, req
   SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
                                the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] ->
                                ChangedSince(LastRunTick + 1) and a read of T) + GeneratedUpdate + GeneratedAccess
-  ComponentGenerator.cs        C# 14 extension properties on Entity per component (ref T; ref readonly T for tracked
-                               or indexed components)
+  ComponentGenerator.cs        C# 14 extension members per component / singleton: entity.X (ref T; ref readonly for
+                               tracked or indexed), HasX, TryGetX, SetX(ctor args), RemoveX, tags IsX, world.XIndex,
+                               singletons world.X / HasX / SetX / RemoveX; Symbols.IsGenerated lets the analyzer and
+                               SystemGenerator treat SetX / RemoveX as structural, the rest as reads
   EasyEcsAnalyzer.cs           EECS001-015 (generators never report diagnostics)
   Threads.cs                   EECS014's check: does a structural call in a delegate handed to another thread race
   Symbols.cs                   symbol checks shared by generator and analyzer

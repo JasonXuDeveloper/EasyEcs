@@ -62,7 +62,7 @@ Notation:
 |---|---|---|
 | `entity.Get<T>()` → `ref T` | O(1) | version check + column lookup (+ one presence-bit test) + one indexed load; throws if missing or not alive; counts as a write of a tracked (`ITrackChanges`) component |
 | `entity.Read<T>()` → `ref readonly T` | O(1) | as `Get`, but read-only: never counts as a write |
-| `entity.{Component}` (generated property) | O(1) | `Get<T>()` (`ref T`) for a plain component, `Read<T>()` (`ref readonly T`) for a tracked or indexed one; C# 14 extension property named after the type |
+| generated: `entity.X`, `HasX`, `TryGetX(out)`, `SetX(…)`, `RemoveX()`; tags `IsX`, `SetX()`, `RemoveX()`; `world.XIndex`; singletons `world.X`, `HasX`, `SetX(…)`, `RemoveX()` | as the generic call | C# 14 extension members per component `X` ([generated members](guide/entities-and-components.md#generated-members)); `entity.X` is `Get` (`ref T`), or `Read` (`ref readonly T`) for a tracked or indexed component |
 | `entity.TryGetRef<T>(out bool found)` → `ref T` | O(1) | a null ref when missing or not alive (check `found`); counts as a write of a tracked component when found |
 | `entity.Has<T>()` / `TryGet<T>(out T)` | O(1) | false when missing or not alive; `TryGet` returns a copy (not a write) |
 | `entity.Has<T1..Tn>()` | O(n) | all of them; one meta lookup |

@@ -28,8 +28,9 @@ if (callsigns.TryFind("alpha", out Entity alpha)) { /* ... */ }
 int named = callsigns.Count("bravo");
 foreach (Entity e in callsigns.Find("charlie")) { /* every entity with that key */ }
 
-alpha.Set(new Callsign("delta"));                     // a write: the index moves alpha at once
+alpha.SetCallsign("delta");                           // a write (Set): the index moves alpha at once
 string name = alpha.Callsign.Value;                   // the generated property reads it (ref readonly)
+int deltas = world.CallsignIndex.Count("delta");      // the generated index property
 ```
 
 ## Relations
@@ -75,7 +76,7 @@ The index follows the writes that can change a key: `Set`, `CreateEntity` and `C
 on the spot, and destroying an entity or removing the component unlinks it. A write through a `ref` would change the
 key behind the index's back, so the analyzer rejects it (EECS015): `Get<T>()` of an indexed component, a `ref`
 local or `ref` / `Span<T>` `[ForEach]` parameter of it, and assignments to it through a query item. Read it with
-`in` parameters, `Read<T>()` or the generated property (`ref readonly`), and write it with `Set`. `Set` with the key
+`in` parameters, `Read<T>()` or the generated property (`ref readonly`), and write it with `Set` (or the generated `SetX`). `Set` with the key
 the entity already has re-links nothing, and a write that keeps the key is still a `Set` (compare first to skip
 it: `if (zone.Id != id) player.Set(new Zone(id));`).
 

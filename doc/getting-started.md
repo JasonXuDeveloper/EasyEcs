@@ -108,9 +108,10 @@ ref var v = ref unit.GetOrAdd<Velocity>();   // add with default value if missin
 unit.Destroy();
 ```
 
-Every component also gets a generated property on `Entity`: `unit.Position.X += 1` is `unit.Get<Position>().X += 1`.
-Tracked and indexed components (steps 15 and 17) get read-only ones, so a read through them is never a write
-([generated properties](guide/entities-and-components.md#generated-properties)).
+The generator also gives every component named members: `unit.Position.X += 1`, `unit.HasVelocity`,
+`unit.SetHealth(50)`, `unit.SetDead()` / `unit.IsDead` for a tag, `world.Clock` for a singleton. Tracked and indexed
+components (steps 15 and 17) get a read-only property, so a read through it is never a write
+([generated members](guide/entities-and-components.md#generated-members)).
 
 A `ref` is valid only until the next structural change and never across an `await`: see
 [`ref` and `await`](guide/refs-and-await.md).

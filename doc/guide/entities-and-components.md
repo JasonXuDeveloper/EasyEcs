@@ -97,22 +97,36 @@ if (world.TryGetEntity(unit.Id, out var hit))          // e.g. an id a client se
 }
 ```
 
-### Generated properties
+### Generated members
 
-The source generator gives `Entity` a property per component (a C# 14 extension property named after the type), so
-the common access reads like a field:
+The source generator gives `Entity` and `World` named members for every component and singleton (C# 14 extension
+members), so the common calls read like fields and methods:
+
+| Declared | Generated | Same as |
+|---|---|---|
+| `record struct Position(float X, float Y) : IComponent` | `e.Position` (`ref`), `e.HasPosition`, `e.TryGetPosition(out p)`, `e.SetPosition(x, y)`, `e.RemovePosition()` | `Get`, `Has`, `TryGet`, `Set(new Position(x, y))`, `Remove` |
+| a tracked or indexed component (`Armor : ITrackChanges`) | `e.Armor` is `ref readonly`; the rest as above | `Read`: reading it is never a write |
+| a tag (`struct Dead : IComponent`) | `e.IsDead`, `e.SetDead()`, `e.RemoveDead()` | `Has`, `Set(new Dead())`, `Remove` |
+| an indexed component (`Zone : IIndexed<int>`) | `world.ZoneIndex` | `world.Index<Zone, int>()` |
+| a singleton (`Battle : ISingletonComponent`) | `world.Battle` (`ref`), `world.HasBattle`, `world.SetBattle(…)`, `world.RemoveBattle()` | `GetSingleton`, `HasSingleton`, `GetOrAddSingleton() = …`, `RemoveSingleton` |
 
 ```csharp
-hero.Position.X += 1;                                      // ref T: the same as hero.Get<Position>().X += 1
-int armor = hero.Armor.Value;                              // a tracked component: ref readonly, never a write
-hero.Set(new Armor(5));                                    // its writes are explicit: Set (or Get<Armor>())
+hero.Position.X += 1;                                      // ref: written in place
+if (hero.TryGetVelocity(out var v)) { /* a copy, or false when missing */ }
+hero.SetVelocity(1, 0).SetFrozen();                        // constructor arguments; a tag; chainable
+int armor = hero.Armor.Value;                              // tracked: ref readonly, never a write
+hero.SetArmor(5);                                          // its writes are explicit (or Get<Armor>())
 ```
 
-A plain component's property returns `ref T` (it is `Get<T>()`); a component that implements `ITrackChanges` or
-`IIndexed<TKey>` returns `ref readonly T` (it is `Read<T>()`), so reading one never records a change and every write
-is visible at the call site (`Set`, or `Get<T>()` for a tracked component; an indexed one only takes `Set`). Like `Get`, a property throws when the entity lacks the component. Tags (no fields), generic
-components, components nested in non-public types and names `Entity` already has (`Get`, `Id`, ...) get no property;
-the project needs C# 14 (the .NET 10 default).
+The property is `Get` (or `Read`), so it throws when the entity lacks the component, like `Get`: check `HasX` or use
+`TryGetX` when it is optional (`TryGetRef<T>(out found)` for optional access by `ref`). `SetX` has one overload per
+public constructor (record structs: the primary constructor), or takes every field when the struct has no constructor
+and only public, writable fields. Writes are methods, not property setters: C# rejects a setter on a handle that is
+not a variable, such as a `foreach` variable. Everything is an inlined call to the generic API, so generated and generic
+code cost the same; the generic API stays for generic code. The analyzer and the generator know the generated members:
+`SetX` / `RemoveX` count as structural changes, the others as reads. Generic components, components nested in types
+other code cannot see and names the receiver already has (`Entity.Id`, ...) get no member; the project needs C# 14
+(the .NET 10 default).
 
 Components live in archetype tables, one row per entity. Removing a component keeps the entity in its table and only
 marks the component absent, so states that come and go never move data; adding back a component the table has a

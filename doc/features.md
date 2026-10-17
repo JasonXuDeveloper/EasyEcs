@@ -11,6 +11,7 @@ Xeon VM at 2.1 GHz ([benchmarks](performance.md#benchmarks)).
 |---|---|---|
 | [Worlds and entities](#worlds-and-entities) | Isolated worlds of version-checked, recycled entity handles. | `new World(options)` in the host; `Entity` handles everywhere; `Hit` (`TryGetEntity`) |
 | [Components and tags](#components-and-tags) | Plain structs in archetype tables; empty structs are tags. | `Position`, `Health`, …; tags `Player`, `Npc`, `Dead` |
+| [Generated members](#generated-members) | `e.Position`, `e.SetZone(3)`, `e.IsDead`, `world.Battle`, `world.ZoneIndex` for every component. | `SetZone`, `SetFrozen`, `RemoveBurning`, `IsDead`, `World.Battle`, `ZoneIndex`, `OwnedByIndex` |
 | [Immediate structural changes](#immediate-structural-changes) | Add, remove, create, destroy anywhere, even mid-pass; no command buffer. | `CombatSystem` adds statuses, `DeathSystem` adds `Dead`, `ProjectileSystem` spawns and destroys |
 | [Systems and `[ForEach]`](#systems-and-foreach) | One-job systems; a method is the whole loop, compiled to an inlined struct job. | every system; `ClockSystem` overrides `OnUpdate` |
 | [Filters](#filters) | `With`, `Without`, `WithAny`, `Changed` as attributes or a `QueryFilter`. | `With<Npc>`, `Without<Dead>`, `StatusSystem.Count` (`WithAny`), the host's `static readonly` filters |
@@ -71,6 +72,24 @@ copies its row once.
 **Scenarios.** Buffs, debuffs, deaths and status effects that flip every few ticks on thousands of units.
 
 Guide: [Entities and components](guide/entities-and-components.md).
+
+## Generated members
+
+**What it does.** The source generator gives every component named C# 14 extension members, like Entitas does for
+its component classes: `e.Position` (`ref`), `HasPosition`, `TryGetPosition(out p)`, `SetPosition(x, y)` (from the
+constructor), `RemovePosition()`; tags get `IsDead`, `SetDead()`, `RemoveDead()`; indexed components `world.ZoneIndex`;
+singletons `world.Battle`, `HasBattle`, `SetBattle(…)`, `RemoveBattle()`. Tracked and indexed components get a
+`ref readonly` property, so a read never counts as a write.
+
+**When to use it.** Everywhere code names a concrete component: it reads like fields and methods and needs no type
+arguments. The generic API stays for generic code.
+
+**When not.** Nothing to opt out of; a name the entity or world already has (`Id`, `Version`, …) is skipped.
+
+**Cost.** None: every member is an inlined call to the generic API. The analyzer and the generator know them
+(`SetX` / `RemoveX` are structural changes, the rest reads), so a `[ForEach]` method keeps its fast path.
+
+Guide: [Entities and components](guide/entities-and-components.md#generated-members).
 
 ## Immediate structural changes
 
