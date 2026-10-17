@@ -20,13 +20,15 @@ namespace EasyEcs;
 public static class SavedTypes
 {
     private static readonly Lock Gate = new();
-    private static readonly Dictionary<string, (Type Type, Func<ushort> Bit)> Components = new(StringComparer.Ordinal);
-    private static readonly Dictionary<string, (Type Type, Func<SingletonBox> Box)> Singletons = new(StringComparer.Ordinal);
+    // By save name, the types registered under it: one loads, several are ambiguous (two assemblies, or two versions
+    // of a reloaded one until the old one unloads).
+    private static readonly Dictionary<string, List<(Type Type, Func<ushort> Bit)>> Components = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, List<(Type Type, Func<SingletonBox> Box)>> Singletons = new(StringComparer.Ordinal);
 
     // Loads look names up as they lie in the bytes (no string is made).
-    private static readonly Dictionary<string, (Type Type, Func<ushort> Bit)>.AlternateLookup<ReadOnlySpan<char>> ComponentsByName =
+    private static readonly Dictionary<string, List<(Type Type, Func<ushort> Bit)>>.AlternateLookup<ReadOnlySpan<char>> ComponentsByName =
         Components.GetAlternateLookup<ReadOnlySpan<char>>();
-    private static readonly Dictionary<string, (Type Type, Func<SingletonBox> Box)>.AlternateLookup<ReadOnlySpan<char>> SingletonsByName =
+    private static readonly Dictionary<string, List<(Type Type, Func<SingletonBox> Box)>>.AlternateLookup<ReadOnlySpan<char>> SingletonsByName =
         Singletons.GetAlternateLookup<ReadOnlySpan<char>>();
 
     /// <summary>Make component <typeparamref name="T"/> loadable by name (no bit is assigned yet).</summary>
@@ -104,13 +106,41 @@ public static class SavedTypes
 
     /// <summary>
     /// Register <paramref name="type"/> under its save name. Names leave out assemblies: when two types share one (in
-    /// two assemblies), neither may load the other's rows, so the name is marked ambiguous (no type) and a load of it
-    /// fails. Inside the lock.
+    /// two assemblies), neither may load the other's rows, so a load of the name fails until one of them is forgotten
+    /// (its context unloaded). Inside the lock.
     /// </summary>
-    private static void Add<TValue>(Dictionary<string, (Type Type, TValue Value)> types, Type type, TValue value)
+    private static void Add<TValue>(Dictionary<string, List<(Type Type, TValue Value)>> types, Type type, TValue value)
     {
         string name = type.ToString();
-        if (!types.TryAdd(name, (type, value)) && types[name].Type != type) types[name] = (null, value);
+        if (!types.TryGetValue(name, out var candidates)) types[name] = candidates = [];
+        foreach (var candidate in candidates)
+            if (candidate.Type == type)
+                return;
+        candidates.Add((type, value));
+    }
+
+    /// <summary>Forget the types <paramref name="unloading"/> matches: their collectible context is unloading.</summary>
+    internal static void Forget(Func<Type, bool> unloading)
+    {
+        lock (Gate)
+        {
+            Forget(Components, unloading);
+            Forget(Singletons, unloading);
+        }
+    }
+
+    private static void Forget<TValue>(Dictionary<string, List<(Type Type, TValue Value)>> types, Func<Type, bool> unloading)
+    {
+        List<string> empty = null;
+        foreach (var (name, candidates) in types)
+        {
+            candidates.RemoveAll(candidate => unloading(candidate.Type));
+            if (candidates.Count == 0) (empty ??= []).Add(name);
+        }
+
+        if (empty != null)
+            foreach (var name in empty)
+                types.Remove(name);
     }
 
     private static InvalidDataException Ambiguous(ReadOnlySpan<char> name) =>
@@ -122,9 +152,9 @@ public static class SavedTypes
         Func<ushort> bit;
         lock (Gate)
         {
-            if (!ComponentsByName.TryGetValue(name, out var entry)) return -1;
-            if (entry.Type == null) throw Ambiguous(name);
-            bit = entry.Bit;
+            if (!ComponentsByName.TryGetValue(name, out var candidates)) return -1;
+            if (candidates.Count > 1) throw Ambiguous(name);
+            bit = candidates[0].Bit;
         }
 
         return bit(); // outside the lock: registering the type takes others
@@ -136,9 +166,9 @@ public static class SavedTypes
         Func<SingletonBox> create;
         lock (Gate)
         {
-            if (!SingletonsByName.TryGetValue(name, out var entry)) return null;
-            if (entry.Type == null) throw Ambiguous(name);
-            create = entry.Box;
+            if (!SingletonsByName.TryGetValue(name, out var candidates)) return null;
+            if (candidates.Count > 1) throw Ambiguous(name);
+            create = candidates[0].Box;
         }
 
         return create();

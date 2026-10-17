@@ -1019,6 +1019,14 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Transition GetAddEdge(int bit) => bit < _addEdges.Length ? _addEdges[bit] : null;
 
+    /// <summary>Forget every cached transition (a table they lead to was dropped: World.RemoveTypes). Inside the gate.</summary>
+    public void ClearEdges()
+    {
+        _addEdges = [];
+        _addSetEdges = [];
+        _regroupEdges = null;
+    }
+
     public void SetAddEdge(int bit, Transition target) => SetEdge(ref _addEdges, bit, target);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -32,6 +32,7 @@ public sealed partial class World
             Fit(ref snapshot.Meta, _nextId);
             Meta.AsSpan(0, _nextId).CopyTo(snapshot.Meta);
             snapshot.NextId = _nextId;
+            snapshot.TypesRemoved = TypesRemoved;
             Fit(ref snapshot.FreeIds, _freeIdCount);
             _freeIds.AsSpan(0, _freeIdCount).CopyTo(snapshot.FreeIds);
             snapshot.FreeCount = _freeIdCount;
@@ -77,6 +78,8 @@ public sealed partial class World
         ArgumentNullException.ThrowIfNull(snapshot);
         if (!ReferenceEquals(snapshot.World, this))
             throw new ArgumentException("The snapshot was taken from another world", nameof(snapshot));
+        if (!swap && snapshot.TypesRemoved != TypesRemoved) // Load's own snapshot is built from the tables of now
+            throw new InvalidOperationException("The snapshot was taken before RemoveTypes dropped some of its tables");
 
         using (Structural())
         {

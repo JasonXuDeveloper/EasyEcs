@@ -18,6 +18,7 @@ public sealed class WorldSnapshot
     internal Archetype.Rows[] Tables = [];
     internal int TableCount;       // Tables[..TableCount], by the world's table order
     internal SingletonBox[] Singletons = [];
+    internal int TypesRemoved;     // the world's World.TypesRemoved at the capture: its tables still exist while equal
 
     /// <summary>Alive entities in the snapshot.</summary>
     public int EntityCount { get; internal set; }

@@ -54,11 +54,8 @@ internal static class ComponentType<T> where T : struct, IComponent
 
     private static ushort Register()
     {
-        int index = TypeIndex<IComponent, T>.Value;
-        if (index > ushort.MaxValue)
-            throw new InvalidOperationException($"Too many component types (max {ushort.MaxValue + 1})");
-        var info = new ComponentInfo<T>();
-        ComponentInfo.Register(index, info);
+        int index = ComponentInfo.Allocate(new ComponentInfo<T>());
+        Collectible.Watch(typeof(T)); // its bit is released when its context unloads
         SavedTypes.Component<T>(); // a type the process uses can be loaded
         // A tracked component brings a hidden column of change ticks into every archetype that has it.
         if (default(T) is ITrackChanges) ComponentInfo.Pair(index, ComponentType<ChangeTicks<T>>.Bit);
@@ -73,6 +70,7 @@ internal static class SingletonType<T> where T : struct, ISingletonComponent
 
     private static int Register()
     {
+        Collectible.Watch(typeof(T)); // its save name is forgotten when its context unloads
         SavedTypes.Singleton<T>(); // a type the process uses can be loaded
         return TypeIndex<ISingletonComponent, T>.Value;
     }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -10,11 +11,20 @@ namespace EasyEcs;
 /// Process-wide description of a component type, indexed by its bit: element size and the typed column operations
 /// archetypes need without knowing <c>T</c> (create, grow, copy a managed element, clear). Registered once when
 /// <see cref="ComponentType{T}"/> assigns the bit; read lock-free (copy-on-write array).
+/// <br/>
+/// Bits of types from a collectible AssemblyLoadContext are released when it unloads (<see cref="Release"/>) and reused
+/// once no live world mentions them any more (<see cref="Reclaim"/>): reloading game logic does not grow the masks.
 /// </summary>
 internal abstract class ComponentInfo
 {
     private static ComponentInfo[] _all = new ComponentInfo[64];
     private static readonly Lock RegisterLock = new();
+    private static int _next;                       // the next bit never assigned
+    private static readonly List<int> Free = [];    // reclaimed bits, reused lowest first
+    private static int _released;                   // released bits not reclaimed yet
+
+    /// <summary>The type's context is unloading: the bit is reused once no live world mentions it.</summary>
+    private bool _isReleased;
 
     /// <summary>Element size in bytes, or -1 when the type holds managed references (copied through the typed path).</summary>
     public readonly int Size;
@@ -77,21 +87,91 @@ internal abstract class ComponentInfo
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ComponentInfo Of(int bit) => Volatile.Read(ref _all)[bit];
 
-    internal static void Register(int bit, ComponentInfo info)
+    /// <summary>Bits assigned so far (reclaimed ones included).</summary>
+    public static int Count => Volatile.Read(ref _next);
+
+    /// <summary>The description of <paramref name="bit"/>, or null when it is unassigned or reclaimed (cold).</summary>
+    public static ComponentInfo TryOf(int bit)
+    {
+        var all = Volatile.Read(ref _all);
+        return bit < all.Length ? all[bit] : null;
+    }
+
+    /// <summary>Assign a bit to <paramref name="info"/>: a reclaimed one if any, else the next. Once per type.</summary>
+    internal static int Allocate(ComponentInfo info)
+    {
+        lock (RegisterLock)
+        {
+            if (Free.Count == 0 && _released != 0) ReclaimLocked();
+            int bit;
+            if (Free.Count > 0)
+            {
+                int lowest = 0;
+                for (int i = 1; i < Free.Count; i++)
+                    if (Free[i] < Free[lowest]) lowest = i;
+                bit = Free[lowest];
+                Free.RemoveAt(lowest);
+            }
+            else bit = _next++;
+
+            if (bit > ushort.MaxValue) throw new InvalidOperationException($"Too many component types (max {ushort.MaxValue + 1})");
+            Register(bit, info);
+            return bit;
+        }
+    }
+
+    /// <summary>
+    /// Release the bits of the types <paramref name="unloading"/> matches (their context is unloading); reclaim those
+    /// no live world mentions. Cold: once per unloading context.
+    /// </summary>
+    internal static void Release(Func<Type, bool> unloading)
     {
         lock (RegisterLock)
         {
             var all = _all;
-            if (bit >= all.Length)
-            {
-                var grown = new ComponentInfo[Math.Max(all.Length * 2, bit + 1)];
-                Array.Copy(all, grown, all.Length);
-                all = grown;
-            }
+            for (int bit = 0; bit < _next; bit++)
+                if (all[bit] is { _isReleased: false } info && unloading(info.Type))
+                {
+                    info._isReleased = true;
+                    _released++;
+                }
 
-            all[bit] = info;
-            Volatile.Write(ref _all, all);
+            ReclaimLocked();
         }
+    }
+
+    /// <summary>Reuse the released bits that no live world mentions (after a world dropped them or was disposed).</summary>
+    internal static void Reclaim()
+    {
+        if (Volatile.Read(ref _released) == 0) return;
+        lock (RegisterLock) ReclaimLocked();
+    }
+
+    private static void ReclaimLocked()
+    {
+        var all = _all;
+        for (int bit = 0; bit < _next && _released != 0; bit++)
+        {
+            if (all[bit] is not { _isReleased: true } || Collectible.InUse(bit)) continue;
+            all[bit] = null; // the type's last reference from EasyEcs: its context can be collected
+            Free.Add(bit);
+            _released--;
+        }
+    }
+
+    // Inside RegisterLock.
+    private static void Register(int bit, ComponentInfo info)
+    {
+        var all = _all;
+        if (bit >= all.Length)
+        {
+            var grown = new ComponentInfo[Math.Max(all.Length * 2, bit + 1)];
+            Array.Copy(all, grown, all.Length);
+            all = grown;
+        }
+
+        all[bit] = info;
+        Volatile.Write(ref _all, all);
     }
 
     /// <summary>The component type (error messages).</summary>

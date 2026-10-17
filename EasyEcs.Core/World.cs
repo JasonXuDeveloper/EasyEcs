@@ -39,6 +39,7 @@ public sealed partial class World : IDisposable
         _options = options ?? new WorldOptions();
         Meta = new EntityMeta[Math.Max(1, _options.InitialEntityCapacity)];
         _emptyArchetype = GetOrCreateArchetype(default);
+        Collectible.Track(this); // held weakly: a world nobody holds stops mentioning its bits
     }
 
     /// <summary>Number of alive entities. O(1).</summary>

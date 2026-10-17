@@ -154,6 +154,10 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
     // Lookup keys of queries on component bits >= 256 keep their overflow here instead of allocating it per query.
     [ThreadStatic] private static Vector256<long>[] _scratch;
 
+    /// <summary>Whether the query names component <paramref name="bit"/> (in any of its sets, or as its group's component).</summary>
+    public bool Mentions(int bit) => _all.HasBit(bit) || _none.HasBit(bit) || _any.HasBit(bit) || _changed.HasBit(bit)
+                                     || _removed.HasBit(bit) || _groupBit == bit;
+
     private QueryKey(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed, int groupBit, int group)
     {
         _all = all;
@@ -291,6 +295,21 @@ internal sealed class QueryMatch(Archetype[] archetypes, RowPlan[] filters)
 {
     public readonly Archetype[] Archetypes = archetypes;
     public readonly RowPlan[] Filters = filters;
+
+    /// <summary>This match without the tables of <paramref name="dropped"/> (itself when it has none of them; cold).</summary>
+    public QueryMatch Without(System.Collections.Generic.HashSet<Archetype> dropped)
+    {
+        var archetypes = new System.Collections.Generic.List<Archetype>();
+        var filters = new System.Collections.Generic.List<RowPlan>();
+        for (int i = 0; i < Archetypes.Length; i++)
+            if (!dropped.Contains(Archetypes[i]))
+            {
+                archetypes.Add(Archetypes[i]);
+                filters.Add(Filters[i]);
+            }
+
+        return archetypes.Count == Archetypes.Length ? this : new QueryMatch(archetypes.ToArray(), filters.ToArray());
+    }
 
     public QueryMatch Append(Archetype archetype, RowPlan filter)
     {

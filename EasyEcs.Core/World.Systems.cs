@@ -53,17 +53,17 @@ public sealed partial class World
     /// <summary>Remove the system of type <typeparamref name="T"/> (calls its <see cref="EcsSystem.OnDestroy"/>).</summary>
     public bool RemoveSystem<T>() where T : EcsSystem
     {
-        EcsSystem removed;
-        using (Structural())
-        {
-            removed = GetSystem<T>();
-            if (removed == null) return false;
-            _groups[removed.Group].Remove(removed);
-        }
-
-        removed.Destroy();
-        removed.World = null;
+        var removed = GetSystem<T>();
+        if (removed == null) return false;
+        RemoveSystem(removed);
         return true;
+    }
+
+    private void RemoveSystem(EcsSystem system)
+    {
+        using (Structural()) _groups[system.Group].Remove(system);
+        system.Destroy();
+        system.World = null;
     }
 
     /// <summary>Get the system of type <typeparamref name="T"/>, or null.</summary>
@@ -219,6 +219,8 @@ public sealed partial class World
         _saveBuffer = null;
         _freeIdCount = 0;
         _entityCount = 0;
+        Collectible.Untrack(this);
+        ComponentInfo.Reclaim(); // bits of unloaded contexts this world still mentioned
     }
 
     /// <summary>
