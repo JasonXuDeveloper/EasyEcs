@@ -314,6 +314,12 @@ public readonly partial struct Entity : IEquatable<Entity>
         return _world!.Copy(this, true);
     }
 
+    /// <summary>
+    /// Boxed copies of the entity's components, disabled ones marked; none when it is not alive. For diagnostics (the
+    /// debugger shows the same): cold, allocates. O(components). Owner thread only.
+    /// </summary>
+    public ComponentValue[] Describe() => World.Describe(this);
+
     /// <summary>Destroy the entity; a destroyed handle is ignored. O(components).</summary>
     public void Destroy() => _world?.DestroyEntity(this);
 

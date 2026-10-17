@@ -122,6 +122,9 @@ internal abstract class ComponentInfo
     /// <summary>A boxed copy of row <paramref name="slot"/> of <paramref name="column"/> (the debugger view; cold, allocates).</summary>
     public abstract object Box(Array column, int slot);
 
+    /// <summary>Bytes of one row of the column (an element of a managed column: its references, not what they point at).</summary>
+    public abstract int Stride { get; }
+
     /// <summary>The name a save records the type by (<see cref="SavedTypes.NameOf{T}"/>).</summary>
     public abstract string Name { get; }
 
@@ -163,6 +166,8 @@ internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsRefere
     public override Type Type => typeof(T);
 
     public override string Name => SavedTypes.NameOf<T>.Value;
+
+    public override int Stride => Unsafe.SizeOf<T>();
 
     public override ushort DisabledBit => DisabledType<T>.Bit;
 
