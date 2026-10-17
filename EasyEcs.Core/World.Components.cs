@@ -214,8 +214,11 @@ public sealed partial class World
     {
         var archetype = meta.Archetype;
         int slot = meta.Slot;
-        if (archetype.ColumnIndex(DestroyedBit) is var tag and >= 0 && archetype.Has(tag, slot) && !archetype.HoldsCleanup(slot))
-            Free(ref meta, archetype.Slots[slot].Index);
+        if (archetype.ColumnIndex(DestroyedBit) is not (var tag and >= 0) || !archetype.Has(tag, slot) || archetype.HoldsCleanup(slot)) return;
+        var entity = archetype.Slots[slot];
+        Free(ref meta, entity.Index);
+        Orphaned(entity); // children it gained while retired follow it now
+        if (_parentCount != 0) DestroyChildren();
     }
 
     /// <summary>Clear the presence bit of component <paramref name="bit"/> in row <paramref name="slot"/>; false when the row lacks it.</summary>

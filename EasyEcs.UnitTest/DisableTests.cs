@@ -56,14 +56,26 @@ public class DisableTests
     public void ADisabledIndexedComponentLeavesItsIndexUntilEnabled()
     {
         using var world = new World();
-        var parent = world.CreateEntity();
-        var children = world.Index<ChildOf, EntityId>();
-        var kid = world.CreateEntity(new ChildOf(parent));
-        Assert.That(children.Count(parent), Is.EqualTo(1));
-        kid.Disable<ChildOf>();
-        Assert.That(children.Count(parent), Is.Zero);
-        kid.Enable<ChildOf>();
-        Assert.That(children.Count(parent), Is.EqualTo(1));
+        var leader = world.CreateEntity();
+        var followers = world.Index<Follows, EntityId>();
+        var follower = world.CreateEntity(new Follows(leader));
+        Assert.That(followers.Count(leader), Is.EqualTo(1));
+        follower.Disable<Follows>();
+        Assert.That(followers.Count(leader), Is.Zero);
+        follower.Enable<Follows>();
+        Assert.That(followers.Count(leader), Is.EqualTo(1));
+    }
+
+    [Test]
+    public void CleanupComponentsAndChildOfCannotBeDisabled()
+    {
+        using var world = new World();
+        var parent = world.CreateEntity(new Health(1));
+        var entity = world.CreateEntity(new Lease(1), new ChildOf(parent));
+
+        Assert.Throws<System.InvalidOperationException>(() => entity.Disable<Lease>());  // it must stay to be released
+        Assert.Throws<System.InvalidOperationException>(() => entity.Disable<ChildOf>()); // the cascade must find it
+        Assert.That(entity.Has<Lease>() && entity.Has<ChildOf>(), Is.True);
     }
 
     [Test]

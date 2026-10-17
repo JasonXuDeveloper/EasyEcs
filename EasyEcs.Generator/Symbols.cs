@@ -28,6 +28,7 @@ internal static class Symbols
     public const string TrackChanges = "EasyEcs.ITrackChanges";
     public const string Indexed = "EasyEcs.IIndexed<TKey>";
     public const string Group = "EasyEcs.IGroup";
+    public const string Cleanup = "EasyEcs.ICleanupComponent";
     public const int MaxComponents = 9;
 
     public static readonly SymbolDisplayFormat Fqn = SymbolDisplayFormat.FullyQualifiedFormat;
@@ -322,6 +323,37 @@ internal static class Symbols
             if (identifier.Parent is not MemberAccessExpressionSyntax access || access.Expression != identifier) return false;
             var member = access.Name is GenericNameSyntax generic ? generic.Identifier.ValueText : access.Name.Identifier.ValueText;
             if (!ReadOnlyEntityMembers.Contains(member) && !GeneratedRead(model, access, member)) return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether the method only reads through <c>Maybe</c> parameter <paramref name="name"/>: every use is
+    /// <c>name.HasValue</c> or a read of <c>name.Value</c> (or of a field of it). Syntax only and conservative: an
+    /// assignment, increment, <c>ref</c>, a call on the value or passing the Maybe on counts as a write.
+    /// </summary>
+    public static bool OnlyReadsValue(MethodDeclarationSyntax method, string name)
+    {
+        SyntaxNode? body = (SyntaxNode?)method.Body ?? method.ExpressionBody;
+        if (body == null) return false;
+        foreach (var identifier in body.DescendantNodes().OfType<IdentifierNameSyntax>())
+        {
+            if (identifier.Identifier.ValueText != name) continue;
+            if (identifier.Parent is not MemberAccessExpressionSyntax access || access.Expression != identifier) return false;
+            if (access.Name.Identifier.ValueText == "HasValue") continue;
+            if (access.Name.Identifier.ValueText != "Value") return false;
+            SyntaxNode top = access; // name.Value.Field.Field: the outermost field read
+            while (top.Parent is MemberAccessExpressionSyntax outer && outer.Expression == top) top = outer;
+            switch (top.Parent)
+            {
+                case AssignmentExpressionSyntax assignment when assignment.Left == top:
+                case PrefixUnaryExpressionSyntax or PostfixUnaryExpressionSyntax: // ++, -- (and !, - on a read: conservative)
+                case RefExpressionSyntax:
+                case ArgumentSyntax { RefKindKeyword.ValueText: "ref" or "out" }:
+                case InvocationExpressionSyntax:
+                    return false;
+            }
         }
 
         return true;

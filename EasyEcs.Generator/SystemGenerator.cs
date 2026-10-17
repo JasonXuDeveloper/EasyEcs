@@ -115,7 +115,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Singleton => method.Parallel ? $"{p.RefKind} s{i}.Value" : $"{p.RefKind} s{i}",
             Symbols.ParamKind.Entity => "entity",
             Symbols.ParamKind.Entities => "entities",
-            Symbols.ParamKind.Optional => $"new global::EasyEcs.Maybe<{p.Type}>(ref entity.TryGetRef<{p.Type}>(out _))",
+            Symbols.ParamKind.Optional => $"global::EasyEcs.Maybe<{p.Type}>.{(p.RefKind == "ref" ? "ForWrite" : "ForRead")}(entity)",
             _ => "World",
         }));
 
@@ -228,8 +228,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
             var parameters = method.Parameters.Select(p => Symbols.SpanElement(p.Type) is { } element
                 ? new ParamModel(Symbols.ParamKind.ComponentSpan, element.ToDisplayString(Symbols.Fqn),
                     ((INamedTypeSymbol)p.Type).ConstructedFrom.ToDisplayString() == "System.Span<T>" ? "ref" : "in")
-                : Symbols.MaybeElement(p.Type) is { } optional // a write of T when present (a ref)
-                    ? new ParamModel(Symbols.ParamKind.Optional, optional.ToDisplayString(Symbols.Fqn), "ref")
+                : Symbols.MaybeElement(p.Type) is { } optional // a write of T unless the method only reads its Value
+                    ? new ParamModel(Symbols.ParamKind.Optional, optional.ToDisplayString(Symbols.Fqn),
+                        Symbols.OnlyReadsValue(syntax, p.Name) ? "in" : "ref")
                     : new ParamModel(Symbols.Classify(p), p.Type.ToDisplayString(Symbols.Fqn),
                         p.RefKind == RefKind.Ref ? "ref" : "in")).ToArray();
             var with = new List<string>();

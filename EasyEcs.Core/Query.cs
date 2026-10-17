@@ -511,24 +511,18 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     {
         // words <= summary.Length and (words + 63) / 64 <= blocks.Length: the summaries cover the column's capacity,
         // words cover the table's rows.
-        ref ulong s = ref MemoryMarshal.GetArrayDataReference(summary);
-        var threshold = Vector256.Create((long)since - 1); // signed: ticks stay below 2^63 (see Newer)
+        ref long s = ref Unsafe.As<ulong, long>(ref MemoryMarshal.GetArrayDataReference(summary));
+        long threshold = (long)since - 1; // signed: ticks stay below 2^63 (see Newer)
         while (word < words)
         {
             int block = word >> 6;
             int end = Math.Min(words, (block + 1) << 6);
             if (Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(blocks), block) >= since)
-            {
-                for (; word + 4 <= end; word += 4)
+                for (; word < end; word += 4) // one 256-bit compare (two 128-bit), then stop at the first
                 {
-                    uint newer = Vector256.GreaterThan(Vector256.LoadUnsafe(ref Unsafe.As<ulong, long>(ref s), (nuint)word), threshold)
-                        .ExtractMostSignificantBits();
+                    ulong newer = Above(ref Unsafe.Add(ref s, word), Math.Min(4, end - word), threshold);
                     if (newer != 0) return word + BitOperations.TrailingZeroCount(newer);
                 }
-
-                for (; word < end; word++)
-                    if (Unsafe.Add(ref s, word) >= since) return word;
-            }
 
             word = end;
         }
@@ -538,7 +532,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
 
     /// <summary>
     /// Rows of word <paramref name="word"/> whose tick in column <paramref name="column"/> (a <c>ChangeTicks</c>
-    /// column: 8-byte unmanaged rows, 64-byte aligned) is at least <paramref name="since"/>: 4 rows per compare.
+    /// column: 8-byte unmanaged rows, 64-byte aligned) is at least <paramref name="since"/>.
     /// </summary>
     private static ulong Newer(Archetype archetype, int column, int word, ulong since)
     {
@@ -550,17 +544,35 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         int rows = Math.Min(64, archetype.Slots.Length - first);
         ref ulong ticks = ref Unsafe.Add(ref Unsafe.As<ChangeTick, ulong>(ref archetype.Data<ChangeTick>(column)), first);
         // tick >= since, as tick > since - 1: ticks stay below 2^63, so a signed compare is exact (since 0 gives -1).
-        var threshold = Vector256.Create((long)since - 1);
+        return Above(ref Unsafe.As<ulong, long>(ref ticks), rows, (long)since - 1);
+    }
+
+    /// <summary>
+    /// Bit i set when tick i of the <paramref name="count"/> (at most 64) at <paramref name="ticks"/> is above
+    /// <paramref name="threshold"/>: 4 ticks per compare with AVX2, 2 where 256-bit vectors are emulated (Arm64); the
+    /// IsHardwareAccelerated tests are JIT-time constants, so one loop remains. The tail is scalar. Not 512-bit: 8 ticks
+    /// per compare measured slower than 4 on AVX-512 (ChangeTrackingBenchmark).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ulong Above(ref long ticks, int count, long threshold)
+    {
         ulong bits = 0;
         int row = 0;
-        for (; row + 4 <= rows; row += 4)
+        if (Vector256.IsHardwareAccelerated)
         {
-            var newer = Vector256.GreaterThan(Vector256.LoadUnsafe(ref Unsafe.As<ulong, long>(ref ticks), (nuint)row), threshold);
-            bits |= (ulong)newer.ExtractMostSignificantBits() << row;
+            var limit = Vector256.Create(threshold);
+            for (; row + 4 <= count; row += 4)
+                bits |= (ulong)Vector256.GreaterThan(Vector256.LoadUnsafe(ref ticks, (nuint)row), limit).ExtractMostSignificantBits() << row;
+        }
+        else if (Vector128.IsHardwareAccelerated)
+        {
+            var limit = Vector128.Create(threshold);
+            for (; row + 2 <= count; row += 2)
+                bits |= (ulong)Vector128.GreaterThan(Vector128.LoadUnsafe(ref ticks, (nuint)row), limit).ExtractMostSignificantBits() << row;
         }
 
-        for (; row < rows; row++)
-            if (Unsafe.Add(ref ticks, row) >= since) bits |= 1UL << row;
+        for (; row < count; row++)
+            if (Unsafe.Add(ref ticks, row) > threshold) bits |= 1UL << row;
         return bits;
     }
 

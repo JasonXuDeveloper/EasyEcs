@@ -142,7 +142,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     /// archetype's lookup.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private unsafe ref T Find<T>(bool strict) where T : struct, IComponent
+    internal unsafe ref T Find<T>(bool strict) where T : struct, IComponent
     {
         ref var lookup = ref Locate(ComponentType<T>.Bit, out int slot, strict);
         if (!strict && Unsafe.IsNullRef(ref lookup)) return ref Unsafe.NullRef<T>();
@@ -262,10 +262,13 @@ public readonly partial struct Entity : IEquatable<Entity>
     /// <c>Get</c>) until <see cref="Enable{T}"/>, and gets the tag <see cref="Disabled{T}"/>. Counts as a removal for
     /// <c>[Removed&lt;T&gt;]</c>; an indexed component leaves its index. Returns false when the entity lacks
     /// <typeparamref name="T"/> (or has it disabled already); throws if it is not alive. O(1); the first disable in a
-    /// table moves the row once (to the table with the tag's column). Owner thread only.
+    /// table moves the row once (to the table with the tag's column). Not for an <see cref="ICleanupComponent"/> (it must
+    /// stay to be released) or <see cref="ChildOf"/> (a parent's destruction must find its children): those throw.
+    /// Owner thread only.
     /// </summary>
     public bool Disable<T>() where T : struct, IComponent
     {
+        if (default(T) is ICleanupComponent || typeof(T) == typeof(ChildOf)) ThrowNotDisabled<T>(); // JIT-time constants
         if (_world == null) ThrowStale();
         using (_world!.Structural())
         {
@@ -273,6 +276,10 @@ public readonly partial struct Entity : IEquatable<Entity>
             return _world.DisableBit(ref meta, Index, ComponentType<T>.Bit, DisabledType<T>.Bit);
         }
     }
+
+    [DoesNotReturn, MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowNotDisabled<T>() =>
+        throw new InvalidOperationException($"{typeof(T).Name} cannot be disabled: remove it instead");
 
     /// <summary>
     /// Give back a component disabled by <see cref="Disable{T}"/>, with the value it kept (<c>Set</c> would replace it).

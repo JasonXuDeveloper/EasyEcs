@@ -109,6 +109,15 @@ public sealed partial class World
     {
         var componentMask = ComponentInfo.AnyTracked ? WithCompanions(in mask) : mask;
         int[] groups = like?.Groups != null || regroup >= 0 ? GroupsOf(in componentMask, like, regroup, group) : null;
+        return Table(in componentMask, groups);
+    }
+
+    /// <summary>
+    /// Get or create the table of <paramref name="componentMask"/> (companions included) in <paramref name="groups"/>
+    /// (by column; null when none is set). Inside the structural gate.
+    /// </summary>
+    private Archetype Table(in BitMask componentMask, int[] groups)
+    {
         Archetype archetype;
         if (groups == null)
         {
@@ -125,6 +134,7 @@ public sealed partial class World
         }
 
         Volatile.Write(ref _allArchetypes, Append(_allArchetypes, archetype));
+        _hierarchy |= componentMask.HasBit(ChildOfBit); // destroys look for children from now on
 
         foreach (var pair in _queryCache)
         {

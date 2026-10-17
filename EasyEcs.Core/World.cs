@@ -173,18 +173,25 @@ public sealed partial class World : IDisposable
         PrepareCascade();
         using (Structural())
         {
-            int id = entity.Index;
-            ref var meta = ref MetaRef(id); // ids of this world's handles are always < Meta.Length
+            ref var meta = ref MetaRef(entity.Index); // ids of this world's handles are always < Meta.Length
             if (meta.Archetype == null || meta.Version != entity.Version) return;
-            if (meta.Archetype.HasCleanup)
-            {
-                if (!Retire(ref meta, id)) return;
-            }
-            else Free(ref meta, id);
-
-            Orphaned(entity.Id);
+            Destroy(ref meta, entity.Id);
             if (_parentCount != 0) DestroyChildren();
         }
+    }
+
+    /// <summary>
+    /// Destroy alive <paramref name="entity"/> (<paramref name="meta"/> is its record): retire it when it holds cleanup
+    /// components (see <see cref="Retire"/>), else free it, then remember it as a parent whose children follow. False
+    /// when it was retired already (its children went then). Inside the structural gate.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool Destroy(ref EntityMeta meta, EntityId entity)
+    {
+        if (!meta.Archetype.HasCleanup) Free(ref meta, entity.Index);
+        else if (!Retire(ref meta, entity.Index)) return false;
+        Orphaned(entity);
+        return true;
     }
 
     /// <summary>
@@ -266,13 +273,8 @@ public sealed partial class World : IDisposable
                     for (; bits != 0; bits &= ~(1UL << 63 >> BitOperations.LeadingZeroCount(bits)))
                     {
                         int slot = (w << 6) + 63 - BitOperations.LeadingZeroCount(bits);
-                        int id = archetype.Slots[slot].Index;
-                        if (id < 0) continue;
                         var entity = archetype.Slots[slot];
-                        if (!archetype.HasCleanup) Free(ref MetaRef(id), id);
-                        else if (!Retire(ref MetaRef(id), id)) continue;
-                        Orphaned(entity);
-                        destroyed++;
+                        if (entity.Index >= 0 && Destroy(ref MetaRef(entity.Index), entity)) destroyed++;
                     }
                 }
             }

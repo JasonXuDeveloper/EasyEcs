@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
@@ -8,9 +9,11 @@ namespace EasyEcs;
 /// An optional component of the entity a <c>[ForEach]</c> method visits: <c>static void Regen(ref Health h,
 /// Maybe&lt;Buff&gt; buff)</c> visits every entity with Health, and <see cref="HasValue"/> tells whether this one also
 /// has a Buff. One method instead of a With and a Without variant when the optional part is small. It costs a lookup
-/// per entity (the method runs per entity, with its handle), and counts as a write of the component when present
-/// (it hands out a <c>ref</c>); split the method in two with <c>[With&lt;T&gt;]</c> / <c>[Without&lt;T&gt;]</c> in hot
-/// loops. Valid for the call it is passed to (a ref struct).
+/// per entity (the method runs per entity, with its handle); split the method in two with <c>[With&lt;T&gt;]</c> /
+/// <c>[Without&lt;T&gt;]</c> in hot loops. A method that only reads <see cref="Value"/> reads <typeparamref name="T"/>;
+/// one that writes through it (assigns, increments, passes it by <c>ref</c>, calls a method on it) writes
+/// <typeparamref name="T"/>, and a tracked component is stamped when present. Valid for the call it is passed to (a
+/// ref struct).
 /// </summary>
 public readonly ref struct Maybe<T> where T : struct, IComponent
 {
@@ -19,6 +22,14 @@ public readonly ref struct Maybe<T> where T : struct, IComponent
     /// <summary>Wraps <paramref name="value"/>, a null ref when the entity lacks the component.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Maybe(ref T value) => _value = ref value;
+
+    /// <summary>The component of <paramref name="entity"/> for a method that only reads it (not stamped). Generated code calls this.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Maybe<T> ForRead(Entity entity) => new(ref entity.Find<T>(false));
+
+    /// <summary>The component of <paramref name="entity"/> for a method that writes it (a tracked one is stamped). Generated code calls this.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Maybe<T> ForWrite(Entity entity) => new(ref entity.TryGetRef<T>(out _));
 
     /// <summary>Whether the entity has the component.</summary>
     public bool HasValue

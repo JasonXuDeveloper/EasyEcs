@@ -1,3 +1,7 @@
+// Locals are not zeroed in the prologue: every local is written before it is read (the compiler enforces it outside
+// stackalloc and Unsafe.SkipInit), so the zeroing of struct locals (filters, masks, row plans) is pure overhead.
+[module: System.Runtime.CompilerServices.SkipLocalsInit]
+
 namespace EasyEcs;
 
 /// <summary>

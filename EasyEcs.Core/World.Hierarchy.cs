@@ -6,11 +6,14 @@ namespace EasyEcs;
 // The hierarchy: ChildOf relations, children lookup, and the cascade of a parent's destruction to its children.
 public sealed partial class World
 {
+    /// <summary>Bit of <see cref="ChildOf"/>.</summary>
+    private static readonly ushort ChildOfBit = ComponentType<ChildOf>.Bit;
+
     /// <summary>
-    /// Whether <see cref="ChildOf"/> was registered in this process: until then destroying an entity has no children
-    /// to look for. Set once, by <see cref="ComponentType{T}"/>.
+    /// Whether this world has a table with <see cref="ChildOf"/>: until then destroying an entity has no children to
+    /// look for (other worlds of the process do not matter). Set when such a table is created.
     /// </summary>
-    internal static bool HierarchyUsed;
+    private bool _hierarchy;
 
     // The ChildOf index, once an entity is destroyed while the hierarchy is in use (or Children is called).
     private ValueIndex<ChildOf, EntityId> _children;
@@ -30,7 +33,7 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void PrepareCascade()
     {
-        if (HierarchyUsed) PrepareChildren();
+        if (_hierarchy) PrepareChildren();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -40,7 +43,7 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void Orphaned(EntityId id)
     {
-        if (HierarchyUsed && _children != null && _children.Count(id) != 0) PushParent(id);
+        if (_children != null && _children.Count(id) != 0) PushParent(id);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -61,17 +64,7 @@ public sealed partial class World
         {
             var parent = _parents[--_parentCount];
             foreach (var child in _children.Find(parent)) // destroying during the walk is allowed
-            {
-                int id = child.Index;
-                ref var meta = ref MetaRef(id);
-                if (meta.Archetype.HasCleanup)
-                {
-                    if (!Retire(ref meta, id)) continue; // retired already: its children went then
-                }
-                else Free(ref meta, id);
-
-                Orphaned(child.Id);
-            }
+                Destroy(ref MetaRef(child.Index), child.Id);
         }
     }
 }

@@ -71,7 +71,6 @@ internal static class ComponentType<T> where T : struct, IComponent
         ComponentInfo.Register(index, info);
         // A tracked component brings a hidden column of change ticks into every archetype that has it.
         if (default(T) is ITrackChanges) ComponentInfo.Pair(index, ComponentType<ChangeTicks<T>>.Bit);
-        if (typeof(T) == typeof(ChildOf)) World.HierarchyUsed = true;
         return (ushort)index;
     }
 }

@@ -5,6 +5,12 @@ using System.Runtime.InteropServices;
 namespace EasyEcs;
 
 /// <summary>
+/// What every <see cref="IIndexed{TKey}"/> is, so a component type is known to be indexed without reflection (a type
+/// test the JIT folds). Implement <see cref="IIndexed{TKey}"/>, not this.
+/// </summary>
+public interface IIndexed;
+
+/// <summary>
 /// A component whose <see cref="Key"/> the world indexes: <c>world.Index&lt;T, TKey&gt;().Find(key)</c> enumerates the
 /// entities whose <typeparamref name="TKey"/> equals a value (an item's owner, a player's name, a cell of a grid). An
 /// <see cref="EntityId"/> key makes the component a relation: <c>ChildOf(EntityId Parent)</c> indexed by its parent
@@ -12,7 +18,7 @@ namespace EasyEcs;
 /// written, so an indexed component is never written through a <c>ref</c> (<c>Get</c>, <c>ref</c> parameters, query
 /// items): the analyzer reports such writes (EECS015).
 /// </summary>
-public interface IIndexed<TKey> where TKey : IEquatable<TKey>
+public interface IIndexed<TKey> : IIndexed where TKey : IEquatable<TKey>
 {
     /// <summary>The value the entity is found by.</summary>
     TKey Key { get; }

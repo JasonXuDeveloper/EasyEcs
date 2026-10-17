@@ -41,6 +41,16 @@ public partial class Regenerate : EcsSystem
     }
 }
 
+/// <summary>Reads an optional tracked component: not a write, so its rows are not stamped.</summary>
+public partial class ArmorBonus : EcsSystem
+{
+    [ForEach]
+    private static void Add(ref Health health, Maybe<Armor> armor)
+    {
+        if (armor.HasValue) health = health with { Value = health.Value + armor.Value.Value };
+    }
+}
+
 /// <summary>Derived partial systems compose: base [ForEach] methods run first.</summary>
 public partial class MovementWithGravity : Movement
 {
@@ -158,6 +168,19 @@ public class ForEachSystemTests
         Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(mark + 1)), Is.EqualTo(1)); // a tracked write stamps the row
         Assert.That(disabled.Read<Health>().Value, Is.EqualTo(11));               // a disabled component is absent
         Assert.Throws<System.InvalidOperationException>(static () => new Maybe<Armor>(ref System.Runtime.CompilerServices.Unsafe.NullRef<Armor>()).Value.ToString());
+    }
+
+    [Test]
+    public void MaybeParametersThatOnlyReadDoNotStampTrackedComponents()
+    {
+        using var world = new World();
+        var armored = world.CreateEntity(new Health(10), new Armor(5));
+        world.AddSystem<ArmorBonus>();
+        ulong mark = world.ChangeTick;
+        world.Update();
+
+        Assert.That(armored.Read<Health>().Value, Is.EqualTo(15));
+        Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(mark + 1)), Is.Zero);
     }
 
     [Test]
