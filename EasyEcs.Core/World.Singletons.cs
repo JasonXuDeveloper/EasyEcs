@@ -58,10 +58,8 @@ public sealed partial class World
     /// <see cref="SingletonRef{T}.Value"/> without a lookup. Generated <c>[ForEach]</c> jobs resolve singleton
     /// parameters through it once per pass. O(1).
     /// </summary>
-    public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent
-    {
-        return new SingletonRef<T>(Box<T>() ?? AddMissingSingleton<T>());
-    }
+    public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent =>
+        new(Box<T>() ?? AddMissingSingleton<T>());
 
     /// <summary>
     /// Add <typeparamref name="T"/> unless another thread did first (systems of one parallel batch may resolve the same

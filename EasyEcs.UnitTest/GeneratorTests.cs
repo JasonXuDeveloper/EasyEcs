@@ -144,6 +144,8 @@ public class GeneratorTests
     [TestCase("public record Bad : ISingletonComponent;", "EECS006")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(System.Span<P> p, ref Q q) { } }", "EECS009")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(System.Span<P> p, Entity e) { } }", "EECS009")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(EntitySpan es, ref P p) { } }", "EECS009")]           // an EntitySpan needs spans
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(EntitySpan es, System.Span<P> p) => es[0].Destroy(); }", "EECS013")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(System.Span<Clock> c) { } }", "EECS002")]
     [TestCase("public partial class S : EcsSystem { [ForEach(Parallel = true)] void A(ref P p) { } }", "EECS010")]
     [TestCase("public partial class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, ref Clock c) { } }", "EECS010")]
@@ -152,6 +154,8 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { int _kills; void K() => _kills++; }", "EECS007")]
     [TestCase("public class S : EcsSystem { public int Kills { get; set; } }", "EECS007")]
     [TestCase("public class A : EcsSystem { } public class S : EcsSystem { private readonly A _a = new(); }", "EECS008")]
+    [TestCase("public class S : EcsSystem { static int _kills; }", "EECS007")]
+    [TestCase("public class A : EcsSystem { } public class S : EcsSystem { protected override void OnUpdate() => World.GetSystem<A>().Enabled = false; }", "EECS008")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Link l) => l.Target.Destroy(); }", "EECS013")]
     [TestCase("public partial class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, in Link l) => l.Target.Add<Q>(); }", "EECS013")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(Entity e, in Link l) { if (e.Has<P>()) l.Target.Set(new Q()); } }", "EECS013")]
@@ -224,11 +228,13 @@ public class GeneratorTests
             {
                 [ForEach] static void Read(Entity e, ref Q q) { if (e.HasP && e.TryGetT(out var t)) q.V = e.P.V + t.V; }
                 [ForEach] static void Write(Entity e, ref Q q) => e.RemoveP();
+                [ForEach] static void Grow(Entity e, ref Q q) => e.GetOrAddP().V = q.V;
             }
             """), out var output, out _);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")).Select(t => t.ToString()));
         Assert.That(generated, Does.Match(@"struct __ReadJob[^\n]*INoStructuralChanges"));
         Assert.That(generated, Does.Not.Match(@"struct __WriteJob[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Not.Match(@"struct __GrowJob[^\n]*INoStructuralChanges"));
     }
 
     [Test]
@@ -240,6 +246,10 @@ public class GeneratorTests
             public struct Tagged : IComponent;                              // a tag
             public struct Fixed : IComponent { public readonly int V; }    // no public constructor, a read-only field: no setter
             public class Outer { private struct Secret : IComponent { public int V; } }
+            public partial struct Split : IComponent { public int V; }      // two parts with a base list: one file
+            public partial struct Split : System.IEquatable<Split> { public bool Equals(Split other) => V == other.V; }
+            #nullable enable
+            public struct Named : IComponent { public string? Name; }
             """), out var output, out var diagnostics);
         Assert.That(diagnostics, Is.Empty);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
@@ -247,6 +257,11 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("public ref global::P P"));
         Assert.That(generated, Does.Contain("public bool HasP"));
         Assert.That(generated, Does.Contain("public bool TryGetP(out global::P value)"));
+        Assert.That(generated, Does.Contain("public ref global::P GetOrAddP()"));
+        Assert.That(generated, Does.Not.Contain("GetOrAddOwned"));                                         // indexed: Set only
+        Assert.That(generated, Does.Contain("[global::System.CodeDom.Compiler.GeneratedCode(\"EasyEcs.Generator\""));
+        Assert.That(generated, Does.Contain("SetNamed(string? name)"));
+        Assert.That(output.SyntaxTrees.Count(t => t.FilePath.EndsWith("Split.Component.g.cs")), Is.EqualTo(1));
         Assert.That(generated, Does.Contain("SetP(int v) => @this.Set(new global::P { V = v })"));          // from the fields
         Assert.That(generated, Does.Contain("public global::EasyEcs.Entity RemoveP()"));
         Assert.That(generated, Does.Contain("public ref readonly global::T T"));                            // tracked: read-only

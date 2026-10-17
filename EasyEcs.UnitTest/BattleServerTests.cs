@@ -171,6 +171,7 @@ public class BattleServerTests
         int shots = server.Battle.Shots;
         for (int i = 0; i < 50; i++) server.Tick();
         Assert.That(server.Battle.Shots, Is.EqualTo(shots));
+        Assert.That(server.World.Count<Lifetime>(), Is.Zero);                // shots in flight expired meanwhile
         server.Ceasefire = false;
         for (int i = 0; i < 50; i++) server.Tick();
         Assert.That(server.Battle.Shots, Is.GreaterThan(shots));

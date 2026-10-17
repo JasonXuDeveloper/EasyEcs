@@ -57,7 +57,7 @@ public sealed partial class World : IDisposable
         }
     }
 
-    /// <summary>Create an entity without components. O(1) amortized. Thread-safe.</summary>
+    /// <summary>Create an entity without components. O(1) amortized. Owner thread only (see doc/guide/threading.md).</summary>
     [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
     public Entity CreateEntity()
     {
@@ -73,7 +73,7 @@ public sealed partial class World : IDisposable
 
     /// <summary>
     /// Destroy <paramref name="entity"/> (a handle of this world; <c>Entity.Destroy</c> is the public call); a stale
-    /// handle is ignored. O(components). Thread-safe.
+    /// handle is ignored. O(components). Owner thread only (see doc/guide/threading.md).
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
     internal void DestroyEntity(Entity entity)

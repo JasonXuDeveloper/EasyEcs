@@ -21,6 +21,7 @@ internal static class Symbols
     public const string Component = "EasyEcs.IComponent";
     public const string Singleton = "EasyEcs.ISingletonComponent";
     public const string Entity = "EasyEcs.Entity";
+    public const string EntitySpan = "EasyEcs.EntitySpan";
     public const string World = "EasyEcs.World";
     public const string DynamicBuffer = "EasyEcs.DynamicBuffer<T>";
     public const string TrackChanges = "EasyEcs.ITrackChanges";
@@ -82,6 +83,8 @@ internal static class Symbols
         World,
         /// <summary><c>Span&lt;T&gt;</c> (written) or <c>ReadOnlySpan&lt;T&gt;</c> (read) of a component: a batch method.</summary>
         ComponentSpan,
+        /// <summary><c>EntitySpan</c>: the entities of a batch method's run of rows.</summary>
+        Entities,
     }
 
     public static ParamKind Classify(IParameterSymbol p)
@@ -97,6 +100,7 @@ internal static class Symbols
         return p.Type.ToDisplayString() switch
         {
             Entity => ParamKind.Entity,
+            EntitySpan => ParamKind.Entities,
             World => ParamKind.World,
             _ => ParamKind.Invalid,
         };
@@ -126,21 +130,26 @@ internal static class Symbols
     }
 
     /// <summary>
-    /// A batch method (component spans) takes only spans and singletons: per-entity parameters (ref/in components,
-    /// Entity, World) have no meaning for a run of rows, and the World could change rows under the spans.
+    /// A batch method (component spans) takes only spans, its <c>EntitySpan</c> and singletons: per-entity parameters
+    /// (ref/in components, Entity, World) have no meaning for a run of rows, and the World could change rows under the
+    /// spans. An <c>EntitySpan</c> belongs to a batch method only.
     /// </summary>
     public static bool MixesBatch(IMethodSymbol method)
     {
-        bool spans = false, perEntity = false;
+        bool spans = false, perEntity = false, entities = false;
         foreach (var p in method.Parameters)
         {
             var kind = Classify(p);
             spans |= kind == ParamKind.ComponentSpan;
+            entities |= kind == ParamKind.Entities;
             perEntity |= kind is ParamKind.Component or ParamKind.Entity or ParamKind.World;
         }
 
-        return spans && perEntity;
+        return spans ? perEntity : entities;
     }
+
+    /// <summary>A batch [ForEach] method: it takes component spans.</summary>
+    public static bool IsBatch(IMethodSymbol method) => method.Parameters.Any(p => Classify(p) == ParamKind.ComponentSpan);
 
     /// <summary>
     /// 1..9 component (or component span) parameters, or none when a [With&lt;T&gt;] or [Changed&lt;T&gt;] filter names the
@@ -174,7 +183,7 @@ internal static class Symbols
     public static string? ParallelProblem(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model)
     {
         if (!IsStable(method, syntax, model)) return "it can change structure (make it static, without World, and use its Entity only to read)";
-        if (method.Parameters.Any(p => Classify(p) == ParamKind.ComponentSpan)) return "batch methods run on one thread";
+        if (IsBatch(method)) return "batch methods run on one thread";
         if (method.Parameters.Any(p => Classify(p) == ParamKind.Singleton && p.RefKind == RefKind.Ref))
             return "it writes a singleton, which every chunk would race on (take it as 'in')";
         return null;
@@ -195,7 +204,7 @@ internal static class Symbols
 
     /// <summary>
     /// Whether <paramref name="method"/> is one of the structural members of Entity or World, or a generated
-    /// <c>Set…</c> / <c>Remove…</c> member (ComponentGenerator) built on them.
+    /// <c>Set…</c> / <c>GetOrAdd…</c> / <c>Remove…</c> member (ComponentGenerator) built on them.
     /// </summary>
     public static bool IsStructural(IMethodSymbol method)
     {
@@ -213,16 +222,24 @@ internal static class Symbols
     public static bool OnWorld(IInvocationOperation call) =>
         (Receiver(call)?.Type ?? call.TargetMethod.ContainingType)?.ToDisplayString() == World;
 
-    /// <summary>A member ComponentGenerator wrote (in a <c>…EcsExtensions</c> class of a <c>.Component.g.cs</c> file).</summary>
+    /// <summary>The tool name ComponentGenerator writes on its classes (<c>[GeneratedCode]</c>).</summary>
+    public const string GeneratorName = "EasyEcs.Generator";
+
+    /// <summary>
+    /// A member ComponentGenerator wrote: its class carries <c>[GeneratedCode("EasyEcs.Generator", …)]</c>, in source or
+    /// in a referenced assembly.
+    /// </summary>
     public static bool IsGenerated(ISymbol member)
     {
-        for (var t = member.ContainingType; t != null; t = t.ContainingType)
-            if (t.Name.EndsWith("EcsExtensions"))
-                return t.DeclaringSyntaxReferences.Any(r => r.SyntaxTree.FilePath.EndsWith(".Component.g.cs"));
-        return false;
+        var type = member.ContainingType;
+        while (type?.ContainingType != null) type = type.ContainingType; // an extension block's member: up to its class
+        return type != null && type.GetAttributes().Any(a =>
+            a.AttributeClass?.ToDisplayString() == "System.CodeDom.Compiler.GeneratedCodeAttribute"
+            && a.ConstructorArguments.Length > 0 && a.ConstructorArguments[0].Value as string == GeneratorName);
     }
 
-    private static bool IsGeneratedWriter(string name) => name.StartsWith("Set") || name.StartsWith("Remove");
+    private static bool IsGeneratedWriter(string name) =>
+        name.StartsWith("Set") || name.StartsWith("Remove") || name.StartsWith("GetOrAdd");
 
     /// <summary>
     /// Whether <paramref name="access"/> reads through a member ComponentGenerator wrote. The analyzer resolves it; the

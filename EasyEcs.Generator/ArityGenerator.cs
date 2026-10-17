@@ -62,7 +62,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             entity.Append($$"""
                     /// <summary>
                     /// Add or overwrite {{what}} with the given value{{(n == 1 ? "" : "s")}}, with at most one row copy. Returns the entity
-                    /// for chaining. O({{n}}) amortized. Thread-safe.
+                    /// for chaining. O({{n}}) amortized. Owner thread only (see doc/guide/threading.md).
                     /// </summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public Entity Set<{{tps}}>({{values}})
@@ -92,7 +92,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                     /// <summary>
                     /// Remove {{what}}; missing components are ignored. The entity keeps its row (no move). Returns the entity
-                    /// for chaining. O({{n}}). Thread-safe.
+                    /// for chaining. O({{n}}). Owner thread only (see doc/guide/threading.md).
                     /// </summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public Entity Remove<{{tps}}>()
@@ -122,7 +122,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             world.Append($$"""
                     /// <summary>
                     /// Create an entity with {{what}} placed directly in its final archetype (no intermediate moves).
-                    /// O({{n}}) amortized. Thread-safe.
+                    /// O({{n}}) amortized. Owner thread only (see doc/guide/threading.md).
                     /// </summary>
                     [MethodImpl(MethodImplOptions.NoInlining)] // keeps the loops that call it lean
                     public Entity CreateEntity<{{tps}}>({{values}})
@@ -147,7 +147,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// <summary>
                     /// Create <c>entities.Length</c> entities with {{what}} (the same value{{(n == 1 ? "" : "s")}} for each), placed directly in
                     /// their final archetype, and write their handles to <paramref name="entities"/>. One pass through the
-                    /// structural gate and at most one table growth: O(count × {{n}}). Thread-safe.
+                    /// structural gate and at most one table growth: O(count × {{n}}). Owner thread only (see doc/guide/threading.md).
                     /// </summary>
                     public void CreateEntities<{{tps}}>(Span<Entity> entities, {{values}})
                 {{cons}}
@@ -223,14 +223,18 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                 /// <summary>
                 /// Struct callback for <c>World.ForEachBatch</c>: receives whole runs of rows as spans, one per component, so
-                /// the job can process them with SIMD (<c>System.Numerics.Vector</c>, <c>MemoryMarshal.Cast</c>).
-                /// <c>[ForEach]</c> methods taking <c>Span&lt;T&gt;</c> / <c>ReadOnlySpan&lt;T&gt;</c> compile to this.
+                /// the job can process them with SIMD (<c>System.Numerics.Vector</c>, <c>MemoryMarshal.Cast</c>), and their
+                /// entities (built only when indexed). <c>[ForEach]</c> methods taking <c>Span&lt;T&gt;</c> /
+                /// <c>ReadOnlySpan&lt;T&gt;</c> compile to this.
                 /// </summary>
                 public interface IForEachBatch<{{TypeParams(n)}}>
                 {{Constraints(n, "    ")}}
                 {
-                    /// <summary>One run of consecutive rows of one archetype: element i of every span belongs to the same entity.</summary>
-                    void Execute({{List(n, i => $"Span<T{i}> c{i}")}});
+                    /// <summary>
+                    /// One run of consecutive rows of one archetype: element i of <paramref name="entities"/> and of every span
+                    /// belongs to the same entity.
+                    /// </summary>
+                    void Execute(EntitySpan entities, {{List(n, i => $"Span<T{i}> c{i}")}});
 
                 {{Writes}}
                 }
@@ -273,10 +277,26 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// <summary>
                     /// Run <paramref name="job"/> over every entity having all of <c>{{tps}}</c> (and matching
                     /// <paramref name="filter"/>), one run of consecutive rows at a time: a dense archetype is a single
-                    /// call. Allocation-free. The job sees spans into the tables, so it must not make structural changes.
+                    /// call. Allocation-free. The job sees spans into the tables, so structural changes throw while it runs
+                    /// (<see cref="InvalidOperationException"/>).
                     /// </summary>
-                    [MethodImpl(MethodImplOptions.NoInlining)] // like ForEach: the job inlines into this loop, not further up
                     public void ForEachBatch<{{tps}}, TJob>(ref TJob job, in QueryFilter filter = default)
+                {{cons}}
+                        where TJob : struct, IForEachBatch<{{tps}}>, allows ref struct
+                    {
+                        Gate.Freeze(); // the job holds spans into the tables: a structural change throws
+                        try
+                        {
+                            Batches<{{tps}}, TJob>(ref job, in filter);
+                        }
+                        finally
+                        {
+                            Gate.Thaw();
+                        }
+                    }
+
+                    [MethodImpl(MethodImplOptions.NoInlining)] // like ForEach: the job inlines into this loop, not further up
+                    private void Batches<{{tps}}, TJob>(ref TJob job, in QueryFilter filter)
                 {{cons}}
                         where TJob : struct, IForEachBatch<{{tps}}>, allows ref struct
                     {
@@ -289,6 +309,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             int count = archetype.Count;
                             int mode = rows.Mode(archetype);
                             if (archetype.AliveCount == 0 || mode == RowFilter.None) continue;
+                            ref EntitySlot slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
                 {{Lines(n, i => $"            ref T{i} r{i} = ref archetype.Base<T{i}>(b{i});")}}
                             if (mode == RowFilter.Test)
                             {
@@ -296,7 +317,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 for (int start = 0; rows.NextRun(archetype, ref start, count, out int length); start += length)
                                 {
                 {{StampRows(n, "                    ", "start", "length")}}
-                                    job.Execute({{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), length)")}});
+                                    job.Execute(new EntitySpan(this, ref Unsafe.Add(ref slots, start), length), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), length)")}});
                                 }
 
                                 continue;
@@ -305,14 +326,14 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             if (count == archetype.AliveCount)
                             {
                 {{StampRows(n, "                ", "0", "count")}}
-                                job.Execute({{List(n, i => $"MemoryMarshal.CreateSpan(ref r{i}, count)")}});
+                                job.Execute(new EntitySpan(this, ref slots, count), {{List(n, i => $"MemoryMarshal.CreateSpan(ref r{i}, count)")}});
                                 continue;
                             }
 
                             for (int start = 0; archetype.NextRun(ref start, count, out int length); start += length)
                             {
                 {{StampRows(n, "                ", "start", "length")}}
-                                job.Execute({{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), length)")}});
+                                job.Execute(new EntitySpan(this, ref Unsafe.Add(ref slots, start), length), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), length)")}});
                             }
                         }
                     }
@@ -340,7 +361,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                     /// <summary>
                     /// Destroy every alive entity having all of <c>{{tps}}</c> (and matching <paramref name="filter"/>) and return
-                    /// how many. One pass through the structural gate: O(matching archetypes + rows). Thread-safe.
+                    /// how many. One pass through the structural gate: O(matching archetypes + rows). Owner thread only (see doc/guide/threading.md).
                     /// </summary>
                     public int DestroyEntities<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}
@@ -423,35 +444,26 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
-                    var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
-                    var archetypes = match.Archetypes;
                     if (typeof(INoStructuralChanges).IsAssignableFrom(typeof(TJob)))
                     {
-                        // The job cannot change rows or reallocate storage (the type test is a JIT-time constant). The row
-                        // loops live in small methods of their own, so the JIT keeps their refs in registers. They take the
-                        // job by value and return it: its fields are locals there (registers, not reloaded every row), and
-                        // a job of up to 16 bytes travels in registers, so no pointer back to it stays live across the
-                        // loop. A job that calls out on some rows (a write barrier, a structural change) clobbers the
-                        // caller-saved registers, and with one more value held across the call a row ref would spill and
-                        // round-trip the stack every row.
-                        for (int ai = 0; ai < archetypes.Length; ai++)
+                        // The job promises no structural change (the type test is a JIT-time constant), so its pass keeps no
+                        // bookkeeping; the frozen gate turns a broken promise (a change made in a helper the analyzer does
+                        // not follow) into an exception instead of torn rows.
+                        Gate.Freeze();
+                        try
                         {
-                            var archetype = archetypes[ai];
-                            var rows = new RowFilter(match.Filters[ai], filter.Since);
-                            int count = archetype.Count;
-                            int mode = rows.Mode(archetype);
-                            if (archetype.AliveCount == 0 || mode == RowFilter.None) continue;
-                            if (mode == RowFilter.Test)
-                                job = {{name}}Filtered<{{tps}}, TJob>(job, archetype, rows, 0, count, {{bits}});
-                            else if (count == archetype.AliveCount)
-                                job = {{name}}Rows<{{tps}}, TJob>(job, archetype, 0, count, {{bits}}); // dense table
-                            else // tombstones: runs of alive rows, found with vectorized scans
-                                for (int start = 0; archetype.NextRun(ref start, count, out int length); start += length)
-                                    job = {{name}}Rows<{{tps}}, TJob>(job, archetype, start, start + length, {{bits}});
+                            job = {{name}}Stable<{{tps}}, TJob>(job, in filter);
+                        }
+                        finally
+                        {
+                            Gate.Thaw();
                         }
 
                         return;
                     }
+
+                    var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
+                    var archetypes = match.Archetypes;
 
                     // Row counts at the start of the pass: rows appended during the pass are not visited.
                     var filters = match.Filters;
@@ -469,7 +481,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             var rows = new RowFilter(filters[ai], since);
                             int count = counts[ai];
                             int mode = rows.Mode(archetype);
-                            if (archetype.AliveCount == 0) continue;
+                            if (archetype.AliveCount == 0 || mode == RowFilter.None) continue;
                             // The row loops return after a structural change (the next row and the visited entity): the
                             // refs are re-read and the visited entity's writes carried over here, so the loops keep only
                             // their row state live across the job. A table whose rows all pass takes the lean loop.
@@ -620,6 +632,40 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     return job;
                 }
 
+                /// <summary>The pass of a job that makes no structural change, inside the frozen gate.</summary>
+                [MethodImpl(MethodImplOptions.NoInlining)] // the pass's loop, apart from the gate's try/finally
+                private TJob {{name}}Stable<{{tps}}, TJob>(TJob job, scoped in QueryFilter filter)
+            {{Constraints(n, "        ")}}
+                    where TJob : struct, {{job}}<{{tps}}>, allows ref struct
+                {
+                    var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
+                    var archetypes = match.Archetypes;
+                    // The job cannot change rows or reallocate storage. The row
+                    // loops live in small methods of their own, so the JIT keeps their refs in registers. They take the
+                    // job by value and return it: its fields are locals there (registers, not reloaded every row), and
+                    // a job of up to 16 bytes travels in registers, so no pointer back to it stays live across the
+                    // loop. A job that calls out on some rows (a write barrier, a structural change) clobbers the
+                    // caller-saved registers, and with one more value held across the call a row ref would spill and
+                    // round-trip the stack every row.
+                    for (int ai = 0; ai < archetypes.Length; ai++)
+                    {
+                        var archetype = archetypes[ai];
+                        var rows = new RowFilter(match.Filters[ai], filter.Since);
+                        int count = archetype.Count;
+                        int mode = rows.Mode(archetype);
+                        if (archetype.AliveCount == 0 || mode == RowFilter.None) continue;
+                        if (mode == RowFilter.Test)
+                            job = {{name}}Filtered<{{tps}}, TJob>(job, archetype, rows, 0, count, {{bits}});
+                        else if (count == archetype.AliveCount)
+                            job = {{name}}Rows<{{tps}}, TJob>(job, archetype, 0, count, {{bits}}); // dense table
+                        else // tombstones: runs of alive rows, found with vectorized scans
+                            for (int start = 0; archetype.NextRun(ref start, count, out int length); start += length)
+                                job = {{name}}Rows<{{tps}}, TJob>(job, archetype, start, start + length, {{bits}});
+                    }
+
+                    return job;
+                }
+
                 /// <summary>Rows [<paramref name="start"/>, <paramref name="end"/>) of a stable pass: every row is alive.</summary>
                 [MethodImpl(MethodImplOptions.NoInlining)] // per table or run: kept out of the caller, which profile-guided
                 // inlining would otherwise grow until the loop's refs spill to the stack
@@ -711,21 +757,17 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
                     var work = WorkOf<{{name}}Chunks<{{tps}}, TJob>>();
                     int chunks = work.Cut(this, match, filter.Since, ref job, {{bits}});
-                    if (chunks < 2)
-                        for (int i = 0; i < chunks; i++) work.Run(i);
-                    else
+                    Gate.Freeze(); // the chunks may run on several threads: a structural change throws
+                    try
                     {
-                        Gate.BeginParallel(); // the chunks may run on several threads: a structural change throws
-                        try
-                        {
-                            if (!TryRunChunks(work, chunks))
-                                for (int i = 0; i < chunks; i++) work.Run(i);
-                        }
-                        finally
-                        {
-                            Gate.EndParallel();
-                        }
+                        if (chunks < 2 || !TryRunChunks(work, chunks))
+                            for (int i = 0; i < chunks; i++) work.Run(i);
                     }
+                    finally
+                    {
+                        Gate.Thaw();
+                    }
+
                     work.Release();
                 }
 

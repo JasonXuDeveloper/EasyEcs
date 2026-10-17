@@ -27,6 +27,7 @@ public struct Iterate2Simd : ISystemGroup;
 public struct Iterate3 : ISystemGroup;
 public struct IterateWith : ISystemGroup;
 public struct IterateEntity : ISystemGroup;
+public struct IterateEntityBatch : ISystemGroup;
 public struct IterateSingleton : ISystemGroup;
 public struct Toggle : ISystemGroup;
 
@@ -116,6 +117,17 @@ public partial class EntityIds : EcsSystem
     }
 }
 
+[UpdateInGroup<IterateEntityBatch>]
+public partial class EntityIdsBatch : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    private static void Sum(EntitySpan entities, ReadOnlySpan<Health> h, ref Sink sink)
+    {
+        for (int i = 0; i < h.Length; i++)
+            if (h[i].Value <= 0) sink.Value += entities[i].Id; // never true: a handle is built only for the rows that need one
+    }
+}
+
 [UpdateInGroup<IterateSingleton>]
 public partial class Cells : EcsSystem
 {
@@ -175,7 +187,7 @@ public class OperationBenchmark
     private const int Spawn = 5_000;
 
     [GlobalSetup(Targets = [nameof(EasyEcs_Iterate1), nameof(EasyEcs_Iterate2), nameof(EasyEcs_Iterate2Simd), nameof(EasyEcs_Iterate3),
-        nameof(EasyEcs_With), nameof(EasyEcs_Entity), nameof(EasyEcs_Singleton), nameof(EasyEcs_Toggle),
+        nameof(EasyEcs_With), nameof(EasyEcs_Entity), nameof(EasyEcs_EntityBatch), nameof(EasyEcs_Singleton), nameof(EasyEcs_Toggle),
         nameof(EasyEcs_CreateDestroy)])]
     public void SetupEasyEcs()
     {
@@ -187,6 +199,7 @@ public class OperationBenchmark
         _world.AddSystem<Read3>();
         _world.AddSystem<PlayersHealth>();
         _world.AddSystem<EntityIds>();
+        _world.AddSystem<EntityIdsBatch>();
         _world.AddSystem<Cells>();
         _world.AddSystem<StunToggle>();
         _world.AddSystem<StunRecover>();
@@ -210,7 +223,7 @@ public class OperationBenchmark
     }
 
     [GlobalSetup(Targets = [nameof(Friflo_Iterate1), nameof(Friflo_Iterate2), nameof(Friflo_Iterate2Simd), nameof(Friflo_Iterate3),
-        nameof(Friflo_With), nameof(Friflo_Entity), nameof(Friflo_Singleton), nameof(Friflo_Toggle),
+        nameof(Friflo_With), nameof(Friflo_Entity), nameof(Friflo_EntityBatch), nameof(Friflo_Singleton), nameof(Friflo_Toggle),
         nameof(Friflo_CreateDestroy)])]
     public void SetupFriflo()
     {
@@ -258,6 +271,7 @@ public class OperationBenchmark
     [Benchmark] public void EasyEcs_Iterate3() => _world.Update<Iterate3>();
     [Benchmark] public void EasyEcs_With() => _world.Update<IterateWith>();
     [Benchmark] public void EasyEcs_Entity() => _world.Update<IterateEntity>();
+    [Benchmark] public void EasyEcs_EntityBatch() => _world.Update<IterateEntityBatch>();
     [Benchmark] public void EasyEcs_Singleton() => _world.Update<IterateSingleton>();
     [Benchmark] public void EasyEcs_Toggle() => _world.Update<Toggle>();
 
@@ -332,8 +346,22 @@ public class OperationBenchmark
         }
     }
 
+    /// <summary>Per entity, the handle passed to a callback (EasyEcs_Entity's style).</summary>
     [Benchmark]
     public void Friflo_Entity()
+    {
+        _alive.ForEachEntity(static (ref F.Health h, Friflo.Engine.ECS.Entity entity) =>
+        {
+            if (h.Value <= 0) EntitySum += entity.Id; // never true
+        });
+        _sink += EntitySum;
+    }
+
+    private static long EntitySum;
+
+    /// <summary>Per chunk, the ids read only where needed (EasyEcs_EntityBatch's style).</summary>
+    [Benchmark]
+    public void Friflo_EntityBatch()
     {
         long sum = 0;
         foreach (var (healths, entities) in _alive.Chunks)

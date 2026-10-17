@@ -43,20 +43,21 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "System '{0}' keeps mutable state in '{1}'; store it in a component (per entity) or a singleton (per world)",
         Category, DiagnosticSeverity.Error, true,
         "A system is behavior only. State in a system is invisible to other systems, queries and persistence, and it is " +
-        "lost or duplicated when the system is removed or re-added. Readonly fields (dependencies, reusable scratch " +
-        "buffers) are allowed.");
+        "lost or duplicated when the system is removed or re-added; a static field is also shared by every world. " +
+        "Readonly fields (dependencies, reusable scratch buffers) are allowed.");
 
     public static readonly DiagnosticDescriptor SystemReference = new("EECS008", "Systems must not reference systems",
         "System '{0}' references system '{1}' through '{2}'; communicate through components or singletons",
         Category, DiagnosticSeverity.Error, true,
-        "Systems that call each other are coupled: neither can be removed, reordered or tested alone. Write the data " +
-        "another system reads (a component or a singleton).");
+        "Systems that call each other, through a field or World.GetSystem, are coupled: neither can be removed, reordered " +
+        "or tested alone. Write the data another system reads (a component or a singleton).");
 
     public static readonly DiagnosticDescriptor MixedBatch = new("EECS009", "Batch [ForEach] mixes spans and per-entity parameters",
-        "[ForEach] method '{0}' takes component spans, so its other parameters can only be singletons ('ref'/'in')",
+        "[ForEach] method '{0}' mixes batch and per-entity parameters: a batch method takes component spans, an EntitySpan and singletons ('ref'/'in'); an EntitySpan needs component spans",
         Category, DiagnosticSeverity.Error, true,
-        "A batch method receives runs of rows as spans. A per-entity parameter (ref/in component, Entity) has no single " +
-        "value for a run, and the World could change rows while the spans point at them.");
+        "A batch method receives runs of rows as spans, and their entities as an EntitySpan. A per-entity parameter " +
+        "(ref/in component, Entity) has no single value for a run, and the World could change rows while the spans point " +
+        "at them.");
 
     public static readonly DiagnosticDescriptor NotParallel = new("EECS010", "[ForEach(Parallel = true)] cannot run on several threads",
         "[ForEach] method '{0}' cannot run in parallel: {1}",
@@ -80,13 +81,14 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "component value is 'new DynamicBuffer<T>()' (no list until its first write).");
 
     public static readonly DiagnosticDescriptor HiddenStructuralChange = new("EECS013", "Structural change in a [ForEach] method that promises none",
-        "[ForEach] method '{0}' calls '{1}', a structural change, but takes no Entity or World to make it with; take the Entity as a parameter, or record the change as data",
+        "[ForEach] method '{0}' calls '{1}', a structural change, but {2}",
         Category, DiagnosticSeverity.Error, true,
         "A [ForEach] method that is static and takes no Entity or World (or uses its Entity only to read) cannot change " +
         "structure, so the generator walks its rows without re-checking storage, and the system shares a parallel batch " +
         "with others. A change made through a handle a component holds (a relation) or a world kept elsewhere breaks " +
         "both: refs into moved rows, and a change while other systems run (which throws). Taking the Entity as a " +
-        "parameter makes the system run alone with a pass that notices the change.");
+        "parameter makes the system run alone with a pass that notices the change. A batch method holds spans into the " +
+        "tables, so it changes no structure at all (the runtime throws).");
 
     public static readonly DiagnosticDescriptor OffThreadStructuralChange = new("EECS014", "Structural change on another thread",
         "'{0}' is a structural change, made in a delegate that '{1}' runs on another thread; structural changes belong to the world's owner thread",
@@ -96,12 +98,12 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "change to the owner as data (a queue the owner drains in a system), or give that thread its own world.");
 
     public static readonly DiagnosticDescriptor IndexedByRef = new("EECS015", "Indexed component written through a ref",
-        "'{0}' is indexed: {1}; write it with Set so its index follows",
+        "'{0}' is indexed: {1}; write it with Set (or the generated Set{0}) so its index follows",
         Category, DiagnosticSeverity.Error, true,
         "The index of an IIndexed<TKey> component follows the values written with Set and CreateEntity as they are " +
         "written; a write through a ref (Get, Add<T>(), GetOrAdd, TryGetRef, a 'ref' or Span [ForEach] parameter, a " +
         "query item, a job's 'ref' parameter) would leave it stale. Read it with Read, 'in' or ReadOnlySpan; write it " +
-        "with Set, or assign the property the generator adds to Entity.");
+        "with Set or the generated SetX.");
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
@@ -121,6 +123,22 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             OperationKind.CoalesceAssignment, OperationKind.Increment, OperationKind.Decrement, OperationKind.Invocation);
         context.RegisterOperationAction(AnalyzeStructuralCall, OperationKind.Invocation);
         context.RegisterOperationAction(AnalyzeIndexedRef, OperationKind.Invocation, OperationKind.VariableDeclarator);
+        context.RegisterOperationAction(AnalyzeSystemLookup, OperationKind.Invocation);
+    }
+
+    /// <summary>EECS008: a system that finds another system through <c>World.GetSystem&lt;T&gt;()</c>.</summary>
+    private static void AnalyzeSystemLookup(OperationAnalysisContext context)
+    {
+        var call = (IInvocationOperation)context.Operation;
+        if (call.TargetMethod is not { Name: "GetSystem", TypeArguments.Length: 1 } method
+            || method.ContainingType?.ToDisplayString() != Symbols.World) return;
+        for (var type = context.ContainingSymbol.ContainingType; type != null; type = type.ContainingType)
+            if (Symbols.IsSystem(type))
+            {
+                context.ReportDiagnostic(Diagnostic.Create(SystemReference, call.Syntax.GetLocation(), type.Name,
+                    method.TypeArguments[0].Name, "World.GetSystem"));
+                return;
+            }
     }
 
     /// <summary>
@@ -169,10 +187,14 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        if (context.ContainingSymbol is IMethodSymbol method && Symbols.IsForEach(method)
-            && method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is MethodDeclarationSyntax syntax
-            && Symbols.IsStable(method, syntax, context.Operation.SemanticModel!))
-            context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), method.Name, name));
+        if (context.ContainingSymbol is not IMethodSymbol method || !Symbols.IsForEach(method)) return;
+        if (Symbols.IsBatch(method))
+            context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), method.Name, name,
+                "it is a batch method, whose spans point into the tables; record the change as data for a method that runs per entity"));
+        else if (method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is MethodDeclarationSyntax syntax
+                 && Symbols.IsStable(method, syntax, context.Operation.SemanticModel!))
+            context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), method.Name, name,
+                "takes no Entity or World to make it with; take the Entity as a parameter, or record the change as data"));
     }
 
     /// <summary>EECS011: a write or a mutating call that reaches a read-only [ForEach] parameter's reference.</summary>
@@ -203,11 +225,11 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             case IFieldSymbol field:
                 Report(field.Type, field, field.Locations.FirstOrDefault());
                 break;
-            case IPropertySymbol property when !property.ReturnsByRef && !property.ReturnsByRefReadonly:
+            case IPropertySymbol property when property.RefKind == RefKind.None:
                 Report(property.Type, property, property.Locations.FirstOrDefault());
                 break;
             case IMethodSymbol method when method.AssociatedSymbol == null:
-                if (!method.ReturnsByRef && !method.ReturnsByRefReadonly) Report(method.ReturnType, method, method.Locations.FirstOrDefault());
+                if (method.RefKind == RefKind.None) Report(method.ReturnType, method, method.Locations.FirstOrDefault());
                 foreach (var p in method.Parameters)
                     if (p.RefKind == RefKind.None) Report(p.Type, p, p.Locations.FirstOrDefault());
                 break;
@@ -254,32 +276,31 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         var type = (INamedTypeSymbol)context.Symbol;
         var location = type.Locations.FirstOrDefault();
 
-        if (type.TypeKind is TypeKind.Class or TypeKind.Interface)
-        {
+        // Classes may not implement a marker; interfaces may extend it (e.g. a project-wide IStateComponent).
+        if (type.TypeKind == TypeKind.Class)
             foreach (var name in new[] { Symbols.Component, Symbols.Singleton })
-            {
-                // Interfaces may extend the marker (e.g. a project-wide IStateComponent); classes may not implement it.
-                if (type.TypeKind == TypeKind.Class && Symbols.Implements(type, name))
+                if (Symbols.Implements(type, name))
                     context.ReportDiagnostic(Diagnostic.Create(NotStruct, location, type.Name, name.Substring("EasyEcs.".Length)));
-            }
-        }
 
         if (type.TypeKind != TypeKind.Class || !Symbols.IsSystem(type)) return;
         AnalyzeSystemFields(context, type);
 
-        if (!type.GetMembers().OfType<IMethodSymbol>().Any(HasForEach)) return;
+        if (!type.GetMembers().OfType<IMethodSymbol>().Any(Symbols.IsForEach)) return;
         if (!Symbols.IsPartialChain(type))
             context.ReportDiagnostic(Diagnostic.Create(NotPartial, location, type.Name));
         if (Symbols.IsGenericChain(type))
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, type.Name));
     }
 
-    /// <summary>EECS007/008: a system's own fields and auto-properties (inherited ones are reported on their declaring type).</summary>
+    /// <summary>
+    /// EECS007/008: a system's own fields and auto-properties, static ones included (state shared by every world's
+    /// instance); inherited ones are reported on their declaring type.
+    /// </summary>
     private static void AnalyzeSystemFields(SymbolAnalysisContext context, INamedTypeSymbol system)
     {
         foreach (var member in system.GetMembers())
         {
-            if (member.IsStatic || member.IsImplicitlyDeclared) continue;
+            if (member.IsImplicitlyDeclared) continue;
             ITypeSymbol? type;
             bool mutable;
             switch (member)
@@ -311,7 +332,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
     private static void AnalyzeMethod(SymbolAnalysisContext context)
     {
         var method = (IMethodSymbol)context.Symbol;
-        if (!HasForEach(method)) return;
+        if (!Symbols.IsForEach(method)) return;
         var location = method.Locations.FirstOrDefault();
 
         if (!Symbols.IsSystem(method.ContainingType))
@@ -352,7 +373,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
     {
         var syntax = (MethodDeclarationSyntax)context.Node;
         if (context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method
-            || !HasForEach(method) || !Symbols.IsParallel(method)) return;
+            || !Symbols.IsForEach(method) || !Symbols.IsParallel(method)) return;
         if (Symbols.ParallelProblem(method, syntax, context.SemanticModel) is { } problem)
             context.ReportDiagnostic(Diagnostic.Create(NotParallel, method.Locations.FirstOrDefault(), method.Name, problem));
     }
@@ -364,5 +385,4 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         _ => null,
     };
 
-    private static bool HasForEach(IMethodSymbol method) => Symbols.IsForEach(method);
 }

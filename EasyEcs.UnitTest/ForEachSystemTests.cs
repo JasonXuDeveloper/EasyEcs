@@ -79,6 +79,31 @@ public partial class BatchMovement : EcsSystem
     }
 }
 
+/// <summary>Batch method with the run's entities: records the id of every row whose health is low.</summary>
+public partial class FindLowHealth : EcsSystem
+{
+    [ForEach, Without<Frozen>]
+    private static void Find(EntitySpan entities, System.ReadOnlySpan<Health> health, ref Score score)
+    {
+        for (int i = 0; i < health.Length; i++)
+            if (health[i].Value < 10) score.Points += entities[i].Id;
+    }
+}
+
+/// <summary>A batch job that tries a structural change (it must throw: the spans point into the tables).</summary>
+public struct DestroyInBatch : IForEachBatch<Health>
+{
+    public static int Writes => 0;
+    public void Execute(EntitySpan entities, System.Span<Health> health) => entities[0].Destroy();
+}
+
+/// <summary>Promises no structural change but destroys the entity it visits (a broken promise the gate catches).</summary>
+public struct DestroyDespitePromise : IForEachEntity<Health>, INoStructuralChanges
+{
+    public static int Writes => 0;
+    public void Execute(Entity entity, ref Health health) => entity.Destroy();
+}
+
 /// <summary>Counts positioned entities that are frozen or dead (or both): [WithAny] filters.</summary>
 public partial class CountHalted : EcsSystem
 {
@@ -122,6 +147,47 @@ public class ForEachSystemTests
         Assert.That(entities[1].Get<Position>(), Is.EqualTo(new Position(1, 0)));
         Assert.That(entities[2].Get<Position>(), Is.EqualTo(new Position(3, 2)));
         Assert.That(entities[999 - 1].Get<Position>(), Is.EqualTo(new Position(999, 2)));
+    }
+
+    [Test]
+    public void BatchMethodsGetTheEntitiesOfTheirRows()
+    {
+        using var world = new World();
+        world.AddSingleton<Score>();
+        int expected = 0;
+        for (int i = 0; i < 300; i++)
+        {
+            var e = i % 3 == 0 ? world.CreateEntity(new Health(i % 20), new Frozen()) : world.CreateEntity(new Health(i % 20));
+            if (i % 3 != 0 && i % 20 < 10) expected += e.Id;
+        }
+
+        world.AddSystem<FindLowHealth>();
+        world.Update();
+        Assert.That(world.GetSingleton<Score>().Points, Is.EqualTo(expected));
+    }
+
+    [Test]
+    public void StructuralChangesThrowInsideBatchJobs()
+    {
+        using var world = new World();
+        var e = world.CreateEntity(new Health(1));
+        var job = new DestroyInBatch();
+        Assert.Throws<System.InvalidOperationException>(() => world.ForEachBatch<Health, DestroyInBatch>(ref job));
+        Assert.That(e.IsAlive, Is.True);
+        e.Destroy();                                           // the gate is open again after the throw
+        Assert.That(e.IsAlive, Is.False);
+    }
+
+    [Test]
+    public void StructuralChangesThrowInsideJobsThatPromiseNone()
+    {
+        using var world = new World();
+        var e = world.CreateEntity(new Health(1));
+        var job = new DestroyDespitePromise();
+        Assert.Throws<System.InvalidOperationException>(() => world.ForEachEntity<Health, DestroyDespitePromise>(ref job));
+        Assert.That(e.IsAlive, Is.True);
+        e.Destroy();                                           // the gate is open again after the throw
+        Assert.That(e.IsAlive, Is.False);
     }
 
     [Test]

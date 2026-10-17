@@ -20,11 +20,6 @@ internal struct Tag : IEquatable<Tag>
     // Overflow for >256 components (allocated on demand)
     private Vector256<long>[] _overflow;
 
-    /// <summary>
-    /// Static empty tag to avoid allocations when creating entities with no components.
-    /// </summary>
-    internal static readonly Tag Empty = new();
-
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public void SetBit(int bitIndex)
     {
@@ -122,6 +117,20 @@ internal struct Tag : IEquatable<Tag>
         }
 
         return false;
+    }
+
+    /// <summary>True when no bit is set.</summary>
+    public readonly bool IsEmpty
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            if (!IsVectorZero(_bits)) return false;
+            if (_overflow != null)
+                for (int i = 0; i < _overflow.Length; i++)
+                    if (!IsVectorZero(_overflow[i])) return false;
+            return true;
+        }
     }
 
     /// <summary>

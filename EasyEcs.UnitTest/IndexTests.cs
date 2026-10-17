@@ -44,7 +44,8 @@ public partial class IndexTests
         readonly string IIndexed<string>.Key => Name;
     }
 
-    private static List<Entity> All(ValueIndex<ChildOf, Entity>.Matches matches)
+    private static List<Entity> All<T, TKey>(ValueIndex<T, TKey>.Matches matches)
+        where T : struct, IComponent, IIndexed<TKey> where TKey : System.IEquatable<TKey>
     {
         var list = new List<Entity>();
         foreach (var e in matches) list.Add(e);
@@ -188,13 +189,6 @@ public partial class IndexTests
         Assert.That(index.Count(null), Is.Zero);
         a.Set(new Callsign("x"));
         Assert.That(index.Count("x"), Is.EqualTo(1));
-    }
-
-    private static List<Entity> All(ValueIndex<Callsign, string>.Matches matches)
-    {
-        var list = new List<Entity>();
-        foreach (var e in matches) list.Add(e);
-        return list;
     }
 
     [Test]

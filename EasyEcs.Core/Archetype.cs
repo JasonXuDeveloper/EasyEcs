@@ -511,7 +511,7 @@ internal sealed class Archetype
     {
         if (Count == 0) return;
         for (int c = 0; c < Components.Length; c++)
-            if (ComponentInfo.Of(Components[c]).Owner >= 0)
+            if (_infos[c].Owner >= 0)
             {
                 MemoryMarshal.CreateSpan(ref Unsafe.As<ChangeTick, ulong>(ref Data<ChangeTick>(c)), Count).Fill(tick);
                 for (int w = 0; w <= (Count - 1) >> 6; w++) NoteWord(c, w << 6, RunMask(0, Count, w), tick);
@@ -524,8 +524,7 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void StampWord<T>(int word, ulong rows, ulong tick) where T : struct, IComponent
     {
-        if (!(default(T) is ITrackChanges)) return;
-        if (rows == 0) return;
+        if (default(T) is not ITrackChanges || rows == 0) return;
         ref var ticks = ref Ticks<T>(tick, word << 6, rows);
         for (; rows != 0; rows &= rows - 1) Unsafe.Add(ref ticks, BitOperations.TrailingZeroCount(rows)).Tick = tick;
     }
@@ -541,7 +540,7 @@ internal sealed class Archetype
         row.Id = entityId;
         row.Version = version;
         AliveCount++;
-        if (_bitColumns.Length != 0) SetBits(slot); // a transition then clears what the entity lacks
+        if (HasAbsent) SetBits(slot); // a transition then clears what the entity lacks
         return slot;
     }
 
@@ -611,7 +610,7 @@ internal sealed class Archetype
     public bool Remove(int slot, EntityMeta[] meta, bool inPass)
     {
         AliveCount--;
-        if (_bitColumns.Length != 0) ForgetAbsent(slot);
+        if (HasAbsent) ForgetAbsent(slot);
         // slot < Count <= Slots.Length: no bounds checks.
         ref var rows = ref MemoryMarshal.GetArrayDataReference(Slots);
         if (inPass || Count != AliveCount + 1)
@@ -638,7 +637,7 @@ internal sealed class Archetype
         var infos = _infos.AsSpan(0, columns.Length); // parallel arrays of equal length: no bounds checks below
         for (int c = 0; c < infos.Length; c++)
             CopyElement(infos[c], columns[c], from, columns[c], to);
-        if (_bitColumns.Length != 0) CopyBits(from, to);
+        if (HasAbsent) CopyBits(from, to);
         if (_tracked) RaiseWords(this, from, this, to);
         // Rows below Count are within Slots, and ids of rows are valid meta indices.
         ref var rows = ref MemoryMarshal.GetArrayDataReference(Slots);
@@ -714,7 +713,7 @@ internal sealed class Archetype
             }
         }
 
-        foreach (ref var row in Slots.AsSpan(count, Count > count ? Count - count : 0)) row.Id = Tombstone;
+        foreach (ref var row in Slots.AsSpan(count, Math.Max(Count - count, 0))) row.Id = Tombstone;
         for (int c = 0; c < Columns.Length; c++)
         {
             // A column that gained presence bits after the capture keeps them, every row present.

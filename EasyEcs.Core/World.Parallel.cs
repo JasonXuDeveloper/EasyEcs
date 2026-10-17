@@ -20,13 +20,16 @@ public sealed partial class World
     /// <summary>Rows per chunk of a parallel [ForEach] (a multiple of 64, so presence-bit words never straddle chunks).</summary>
     public const int ChunkRows = 16384;
 
+    /// <summary>Thread-pool work items a runner keeps: the calling thread is the other one.</summary>
+    private int Helpers => Math.Max(1, _options.MaxDegreeOfParallelism) - 1;
+
     private void RunBatch(EcsSystem[] batch, long update)
     {
         var work = _systemBatch ??= new SystemBatch(this);
         work.Batch = batch;
         work.Update = update;
-        var runner = _systemRunner ??= new Runner(Math.Max(1, _options.MaxDegreeOfParallelism) - 1);
-        Gate.BeginParallel(); // the batch's systems never change structure (they do not run alone): a change throws
+        var runner = _systemRunner ??= new Runner(Helpers);
+        Gate.Freeze(); // the batch's systems never change structure (they do not run alone): a change throws
         try
         {
             if (runner.TryRun(work, batch.Length)) return;
@@ -34,7 +37,7 @@ public sealed partial class World
         }
         finally
         {
-            Gate.EndParallel();
+            Gate.Thaw();
         }
     }
 
@@ -45,7 +48,7 @@ public sealed partial class World
     /// </summary>
     internal bool TryRunChunks(ParallelWork work, int count)
     {
-        int helpers = Math.Max(1, _options.MaxDegreeOfParallelism) - 1;
+        int helpers = Helpers;
         if (helpers == 0) return false;
         var runner = _chunkRunner;
         if (runner == null)

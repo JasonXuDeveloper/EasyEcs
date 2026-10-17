@@ -55,15 +55,14 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 : method.HasFilter ? $", in __{method.Name}Filter" : "";
             var fields = new List<string>();
             if (!method.IsStatic) fields.Add("System = this");
-            if (TakesWorld(method)) fields.Add("World = world");
+            if (method.TakesWorld) fields.Add("World = world");
             for (int i = 0; i < method.Parameters.Length; i++)
                 if (method.Parameters[i].Kind == Symbols.ParamKind.Singleton)
                     fields.Add(method.Parallel ? $"s{i} = world.SingletonRef<{method.Parameters[i].Type}>()"
                         : $"s{i} = ref world.SingletonRef<{method.Parameters[i].Type}>().Value");
             string init = fields.Count == 0 ? "" : $" {string.Join(", ", fields)} ";
             sb.Append($"        var __{method.Name} = new __{method.Name}Job {{{init}}};\n");
-            string forEach = method.IsBatch ? "ForEachBatch" : method.TakesEntity ? "ForEachEntity" : "ForEach";
-            if (method.Parallel) forEach += "Parallel";
+            string forEach = method.Loop + (method.Parallel ? "Parallel" : "");
             sb.Append($"        world.{forEach}<{method.ComponentTypes}, __{method.Name}Job>(ref __{method.Name}{filter});\n");
         }
 
@@ -74,7 +73,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
     /// <summary>
     /// <c>ref</c> parameters are writes, <c>in</c> parameters reads. Anything that can reach the world beyond its
-    /// parameters (Entity / World parameters, instance methods that see <c>World</c>, an OnUpdate override) runs alone.
+    /// parameters (Entity / EntitySpan / World parameters, instance methods that see <c>World</c>, an OnUpdate override)
+    /// runs alone.
     /// </summary>
     private static void EmitAccess(StringBuilder sb, UpdateModel model)
     {
@@ -83,7 +83,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append("    protected override void GeneratedAccess(ref global::EasyEcs.SystemAccess access)\n    {\n");
         if (!model.Owner.BaseIsEcsSystem) sb.Append("        base.GeneratedAccess(ref access);\n");
         bool alone = model.Owner.OverridesOnUpdate || model.Methods.Any(m => !m.IsStatic
-            || m.Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.World));
+            || m.Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.Entities or Symbols.ParamKind.World));
         if (alone)
         {
             sb.Append("        access.RunsAlone();\n    }\n");
@@ -103,9 +103,6 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append("    }\n");
     }
 
-    private static bool TakesWorld(ForEachModel method) =>
-        method.Parameters.Any(p => p.Kind == Symbols.ParamKind.World);
-
     private static void EmitJob(StringBuilder sb, OwnerModel owner, ForEachModel method)
     {
         string job = $"__{method.Name}Job";
@@ -117,11 +114,12 @@ public sealed class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.ComponentSpan => $"c{++index}", // Span<T> converts to ReadOnlySpan<T> for read-only parameters
             Symbols.ParamKind.Singleton => method.Parallel ? $"{p.RefKind} s{i}.Value" : $"{p.RefKind} s{i}",
             Symbols.ParamKind.Entity => "entity",
+            Symbols.ParamKind.Entities => "entities",
             _ => "World",
         }));
 
         // The JIT specializes World.ForEach on this struct and inlines Execute and the user's method into the loop.
-        string iface = method.IsBatch ? "IForEachBatch" : method.TakesEntity ? "IForEachEntity" : "IForEach";
+        string iface = "I" + method.Loop;
         bool stable = method.Stable && !method.IsBatch; // a batch job has no structural path at all
         string marker = stable ? ", global::EasyEcs.INoStructuralChanges" : "";
         // A ref struct holds each singleton as a ref field, a register in the row loop: a SingletonRef's box would be
@@ -131,7 +129,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         if (!method.IsStatic) sb.Append($"        public {owner.Name} System;\n");
         // Only when the method takes the World: an unused field would still be copied into the row loop, where it
         // holds a callee-saved register a job that calls out (a structural change) needs for its loop state.
-        if (TakesWorld(method)) sb.Append("        public global::EasyEcs.World World;\n");
+        if (method.TakesWorld) sb.Append("        public global::EasyEcs.World World;\n");
         for (int i = 0; i < method.Parameters.Length; i++)
             if (method.Parameters[i].Kind == Symbols.ParamKind.Singleton) // resolved once per pass, not per entity
                 sb.Append(method.Parallel
@@ -139,7 +137,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     : $"        public ref {method.Parameters[i].Type} s{i};\n");
         sb.Append('\n');
         sb.Append("        [MethodImpl(MethodImplOptions.AggressiveInlining)]\n");
-        string first = method.TakesEntity ? "global::EasyEcs.Entity entity, " : "";
+        string first = method.IsBatch ? "global::EasyEcs.EntitySpan entities, " : method.TakesEntity ? "global::EasyEcs.Entity entity, " : "";
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
         sb.Append($"        public void Execute({first}{List(components.Length, i => string.Format(each, components[i - 1], i))})\n");
         sb.Append($"            => {(method.IsStatic ? owner.Name : "System")}.{method.Name}({args});\n");
@@ -210,6 +208,11 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
         public bool TakesEntity => Parameters.Any(p => p.Kind == Symbols.ParamKind.Entity);
 
+        public bool TakesWorld => Parameters.Any(p => p.Kind == Symbols.ParamKind.World);
+
+        /// <summary>The World loop (and, with an I, the job interface) the method runs as.</summary>
+        public string Loop => IsBatch ? "ForEachBatch" : TakesEntity ? "ForEachEntity" : "ForEach";
+
         /// <summary>Takes component spans: runs over whole runs of rows (World.ForEachBatch).</summary>
         public bool IsBatch => Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan);
 
@@ -242,12 +245,15 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 .Select(p => p.Type).ToList();
             // No component parameter: the first [With<T>] (else [Changed<T>]) becomes the queried component (passed to the
             // job, not the method).
-            if (query.Count == 0 && with.Count > 0)
+            if (query.Count == 0)
             {
-                query.Add(with[0]);
-                with.RemoveAt(0);
+                if (with.Count == 0) query.Add(changed[0]); // the [Changed<T>] filter keeps its T: it also filters rows
+                else
+                {
+                    query.Add(with[0]);
+                    with.RemoveAt(0);
+                }
             }
-            else if (query.Count == 0) query.Add(changed[0]);
             bool stable = Symbols.IsStable(method, syntax, model);
             bool parallel = Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax, model) == null;
             return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, stable, parallel, syntax.SpanStart,

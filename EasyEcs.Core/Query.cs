@@ -72,7 +72,7 @@ public readonly struct QueryFilter
     /// <exception cref="ArgumentException">An earlier <c>Changed</c> filter named another tick.</exception>
     public QueryFilter Changed<T>(ulong since) where T : struct, IComponent, ITrackChanges
     {
-        if (since != Since && Tracked.Intersects(in Tracked)) ThrowTwoTicks(); // any Changed filter so far
+        if (since != Since && !Tracked.IsEmpty) ThrowTwoTicks(); // an earlier Changed filter named another tick
         var all = All.Clone();
         all.SetBit(ComponentType<T>.Bit);
         var changed = Tracked.Clone();
@@ -686,7 +686,8 @@ internal sealed class QueryWalk
         _free = walk._next;
         walk._next = null;
         walk._uses = (walk._uses + 1) & int.MaxValue;
-        walk.Ticket = walk._uses == 0 ? walk._uses = 1 : walk._uses;
+        if (walk._uses == 0) walk._uses = 1; // a live ticket is never 0 (Finish sets 0)
+        walk.Ticket = walk._uses;
         walk._world = world;
         walk._match = match;
         walk._since = since;

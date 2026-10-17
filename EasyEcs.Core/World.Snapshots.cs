@@ -58,9 +58,8 @@ public sealed partial class World
             for (int id = 0; id < used; id++)
             {
                 ref var meta = ref Meta[id];
-                int version = Math.Max(meta.Version, id < saved.Length ? saved[id].Version : 0) + 1;
                 if (id < saved.Length && saved[id].Archetype != null) meta = saved[id];
-                else meta = new EntityMeta { Version = version };
+                else meta = new EntityMeta { Version = Math.Max(meta.Version, id < saved.Length ? saved[id].Version : 0) + 1 };
             }
 
             _nextId = used;

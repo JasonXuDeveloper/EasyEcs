@@ -8,8 +8,9 @@ namespace EasyEcs;
 /// The world's structural gate. Structural changes belong to the world's owner thread (one thread at a time), so the
 /// owner's gate is a plain flag: entering checks it and sets it, leaving clears it, no atomic instruction. The check
 /// turns misuse into an exception instead of torn tables: a structural change reentered from code running under the
-/// gate, or made while the world runs systems or chunks of a parallel [ForEach] on several threads (each parallel region
-/// adds <see cref="ParallelRegion"/> to the flag while it runs). It cannot catch every change made from another thread
+/// gate, or made while the structure is frozen: while the world runs systems or chunks of a parallel [ForEach] on several
+/// threads, or a batch job that holds spans into the tables (each such region adds <see cref="FrozenRegion"/> to the flag
+/// while it runs). It cannot catch every change made from another thread
 /// at the same moment as the owner's; the analyzer (EECS013, EECS014) reports those it can see.
 /// <para>
 /// The cold paths the threads of a parallel batch reach on their own (adding a missing singleton, a query's first
@@ -20,8 +21,8 @@ namespace EasyEcs;
 [StructLayout(LayoutKind.Explicit, Size = 2 * Archetype.CacheLine)]
 internal struct StructuralGate
 {
-    /// <summary>What a running parallel region adds to the owner's flag (the owner itself holds 1).</summary>
-    private const int ParallelRegion = 2;
+    /// <summary>What a running frozen region adds to the owner's flag (the owner itself holds 1).</summary>
+    private const int FrozenRegion = 2;
 
     [FieldOffset(Archetype.CacheLine)] private int _held;
     [FieldOffset(Archetype.CacheLine + sizeof(int))] private int _shared;
@@ -36,10 +37,13 @@ internal struct StructuralGate
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Exit() => _held = 0;
 
-    /// <summary>A parallel region (a batch of systems, the chunks of a parallel [ForEach]) starts: structural changes throw until it ends.</summary>
-    public void BeginParallel() => Interlocked.Add(ref _held, ParallelRegion);
+    /// <summary>
+    /// A frozen region (a batch of systems, the chunks of a parallel [ForEach], a batch job) starts: structural changes
+    /// throw until it ends. Regions nest (a batch job inside a parallel system), hence the atomic add.
+    /// </summary>
+    public void Freeze() => Interlocked.Add(ref _held, FrozenRegion);
 
-    public void EndParallel() => Interlocked.Add(ref _held, -ParallelRegion);
+    public void Thaw() => Interlocked.Add(ref _held, -FrozenRegion);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void EnterShared()
@@ -62,7 +66,7 @@ internal struct StructuralGate
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowBusy(int held) => throw new InvalidOperationException(held == 1
         ? "A structural change started while another one was running on this world: structural changes are made by the world's owner thread, one at a time (see doc/guide/threading.md)."
-        : "A structural change was made while the world runs systems or a parallel [ForEach] on several threads: record the change as data and apply it in a system that runs alone (see doc/guide/threading.md).");
+        : "A structural change was made while the world's structure is frozen (systems or a parallel [ForEach] running on several threads, or a batch job holding spans into the tables): record the change as data and apply it in a system or [ForEach] method that runs alone (see doc/guide/threading.md).");
 }
 
 /// <summary>Holds the owner's <see cref="StructuralGate"/> for a <c>using</c> block (a ref struct: nothing is allocated).</summary>

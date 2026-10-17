@@ -101,7 +101,7 @@ public partial class ChangedTests
     /// <summary>A batch job that writes armor through a span.</summary>
     private struct PolishBatch : IForEachBatch<Armor>
     {
-        public void Execute(System.Span<Armor> armor) { }
+        public void Execute(EntitySpan entities, System.Span<Armor> armor) { }
     }
 
     private static int SeenCount(Entity e) => e.Get<Seen>().Count;
