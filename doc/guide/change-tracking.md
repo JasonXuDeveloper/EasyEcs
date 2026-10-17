@@ -45,7 +45,7 @@ out a `ref`, whether or not the code stores through it:
 So declare read-only access as `in`: a `ref` parameter that only reads marks every row it visits as changed. A
 collection inside a component changes without the row noticing: change it only through a `ref` access, which stamps
 the row (EECS011 reports changes through `in`; [ECS principles, rule 8](../ecs-principles.md#8-choose-how-to-hold-a-collection)).
-A [`Buffer<T>`](buffers.md) is a list that cannot change any other way: its writes need a `ref`.
+A [`DynamicBuffer<T>`](dynamic-buffers.md) is a list that cannot change any other way: its writes need a `ref`.
 
 ## Ticks
 

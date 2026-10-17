@@ -7,7 +7,7 @@
 
 | | |
 |---|---|
-| **Use it for** | One world per thread (one per map or zone); `Parallel` for heavy independent systems; parallel `[ForEach]` for one heavy method. |
+| **Use it for** | One world per thread (one per map or zone); `ParallelSystems` for heavy independent systems; parallel `[ForEach]` for one heavy method. |
 | **Avoid** | Several threads of your own mutating one world; component values touched outside the owner thread. |
 | **Cost** | No locks on the hot paths: queries match lock-free, structural bookkeeping takes a compare-and-swap gate; a parallel batch costs a thread-pool hand-off (microseconds). |
 
@@ -27,10 +27,10 @@
 | **Process** | Your server. It can hold any number of worlds; nothing is shared between them except type indices. |
 | **World** | One isolated set of entities, components, singletons and systems (`new World()`). |
 | **Owner thread** | The thread that calls `world.Update()` and touches the world's data. One at a time per world. |
-| **`Parallel`** | Inside one `Update()` call, the world borrows thread-pool threads to run a batch of non-conflicting systems; the owner thread takes part and `Update()` returns only when the batch is done. Ownership does not change. |
+| **`ParallelSystems`** | Inside one `Update()` call, the world borrows thread-pool threads to run a batch of non-conflicting systems; the owner thread takes part and `Update()` returns only when the batch is done. Ownership does not change. |
 
-So it is not "one process per world": a process runs many worlds side by side (typically one per thread), and each world can
-additionally spread one update over several cores with `Parallel`.
+So it is not "one process per world": a process runs many worlds side by side (typically one per thread), and each world
+can additionally spread one update over several cores with `ParallelSystems`.
 
 ```mermaid
 flowchart TB
@@ -83,8 +83,8 @@ In every case the result of an update equals running the systems one by one in `
 
 ## Parallel systems
 
-With `WorldOptions.Parallel = true`, systems of the same priority that do not conflict run at the same time. Nothing
-is left to discipline: the generator declares every `[ForEach]` system's access from its parameters, and the
+With `WorldOptions.ParallelSystems = true`, systems of the same priority that do not conflict run at the same time.
+Nothing is left to discipline: the generator declares every `[ForEach]` system's access from its parameters, and the
 scheduler only puts non-conflicting systems together.
 
 | `[ForEach]` parameter | Declares |

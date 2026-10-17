@@ -20,6 +20,9 @@ as generic arguments (they are ref structs now, see below). The storage moved fr
 type (indexed by entity id) to archetype tables (one row per entity, columns 64-byte aligned), which changes a few
 behaviors:
 
+- **`WorldOptions.Parallel` is `WorldOptions.ParallelSystems`.** The option runs systems side by side; the new name
+  keeps it apart from `[ForEach(Parallel = true)]`, which splits one method's rows over threads. Rename the
+  initializer: `new WorldOptions { ParallelSystems = true }`.
 - **`IForEach` jobs receive only the components.** `Execute(int entityId, ref T1 c1, …)` became
   `Execute(ref T1 c1, …)`, so a pass never loads the entity rows for them. A job that needs the entity implements
   `IForEachEntity<…>` (`Execute(Entity entity, ref T1 c1, …)`, `entity.Id` for the id) and runs with
@@ -55,9 +58,9 @@ behaviors:
   on it.
 - **`EnsureEntityCapacity` / `InitialEntityCapacity`** pre-size the entity records only; archetype tables grow on
   their own.
-- **`Parallel` keeps subclasses it cannot see alone.** A system class that derives from a generated system without
-  adding `[ForEach]` methods of its own (for example to override `OnUpdate`) now runs alone in its priority, as its
-  `OnUpdate` may touch anything. Give the subclass a `[ForEach]` method (it is then generated) to batch it again.
+- **`ParallelSystems` keeps subclasses it cannot see alone.** A system class that derives from a generated system
+  without adding `[ForEach]` methods of its own (for example to override `OnUpdate`) now runs alone in its priority, as
+  its `OnUpdate` may touch anything. Give the subclass a `[ForEach]` method (it is then generated) to batch it again.
 - **`AddSingleton<T>()` on an existing singleton resets it in place.** It used to replace the storage, which left
   `SingletonRef<T>` handles taken before pointing at a detached copy; they now see the reset value.
 - **`RemoveSingleton<T>()` returns `bool`** (false when the singleton was not added). Calls that ignore the result
@@ -89,11 +92,11 @@ New:
 - `entity.Read<T>()` returns a `ref readonly T` that never counts as a write of a tracked component, and
   `entity.TryGetRef<T>(out bool found)` returns a `ref T` (a null ref when missing): optional access without a
   copy. `entity.Has<T1..Tn>()` tests several components with one lookup.
-- `Buffer<T>`: a list per entity as a component, written only through `ref` (each write is a tracked change),
-  copied by snapshots ([Buffers](doc/guide/buffers.md)).
+- `DynamicBuffer<T>`: a list per entity as a component, written only through `ref` (each write is a tracked change),
+  copied by snapshots ([Dynamic buffers](doc/guide/dynamic-buffers.md)).
 - [EECS011](doc/guide/analyzer.md#eecs011) rejects a `[ForEach]` method that changes a collection or class held by an
-  `in` parameter (the change would be neither scheduled as a write nor tracked); [EECS012](doc/guide/analyzer.md#eecs012)
-  rejects a `Buffer<T>` copied by value.
+  `in` parameter (the change would be neither scheduled as a write nor tracked);
+  [EECS012](doc/guide/analyzer.md#eecs012) rejects a `DynamicBuffer<T>` copied by value.
 - The library is marked `IsAotCompatible`: trimming and Native AOT analyzers run on every build, and it publishes
   with Native AOT without warnings.
 
@@ -126,7 +129,7 @@ v3 had three handle types (`Entity` value, `EntityRef`, `ComponentRef<T>`). v4 h
 | `ctx.AllEntities` | `world.Entities` |
 | `ctx.GroupOf<T..>()` → `GroupResult` | `world.Query<T..>(filter)` → `QueryItem` (`item.Entity`, `item.Component1..n`) |
 | `ctx.CountOf<T..>()` / `AnyOf<T..>()` | `world.Count<T..>(filter)` / `world.Any<T..>(filter)` |
-| `new Context(new Context.Options(parallel, levels, capacity))` | `new World(new WorldOptions { Parallel = .., MaxDegreeOfParallelism = .., InitialEntityCapacity = .. })` (parallel is **off** by default) |
+| `new Context(new Context.Options(parallel, levels, capacity))` | `new World(new WorldOptions { ParallelSystems = .., MaxDegreeOfParallelism = .., InitialEntityCapacity = .. })` (parallel is **off** by default) |
 
 ### Singletons
 
@@ -180,7 +183,7 @@ public partial class S : EcsSystem
    communicate through data). See [doc/ecs-principles.md](doc/ecs-principles.md).
 7. **`IEvent`, `IEventHandler<T>` and `Publish` are removed.** Write state changes as data (a tag or a field) and
    let later systems query them.
-8. **`Parallel` is safe by construction.** v3 ran every system of one priority at once and left data races to
+8. **`ParallelSystems` is safe by construction.** v3 ran every system of one priority at once and left data races to
    you. v4 runs systems of one priority together only when their generated access does not conflict (`ref` = write,
    `in` = read); systems with an `Entity`/`World` parameter, instance `[ForEach]` methods, an `OnUpdate` override or
    no `[ForEach]` method run alone. The result equals a sequential update. See

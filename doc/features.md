@@ -1,7 +1,7 @@
 # Features
 
-[Docs index](README.md) · Related: [Getting started](getting-started.md) · [Comparison with other ECS libraries](comparison.md) ·
-[Performance guide](performance.md)
+[Docs index](README.md) · Related: [Getting started](getting-started.md) ·
+[Comparison with other ECS libraries](comparison.md) · [Performance guide](performance.md)
 
 Every feature of EasyEcs on one page: what it does, when to use it (and when not), what it costs, and the server
 scenarios it is built for. Each section links to its guide page. Numbers are BenchmarkDotNet results on a 4-core
@@ -18,10 +18,10 @@ Xeon VM at 2.1 GHz ([benchmarks](performance.md#benchmarks)).
 | [Batch methods](#batch-methods) | Runs of rows as spans, for SIMD. | `MovementSystem`, `ManaSystem`, `SumHealth` |
 | [System groups and intervals](#system-groups-and-intervals) | Separate cadences: input on every wake, simulation on a fixed tick. | `Replication` group, `RegenerationSystem.UpdateInterval`, `Ceasefire` (`Enabled`) |
 | [Singletons](#singletons) | One value per world, passed to systems as parameters. | `Battle`, `Waypoints` (added in `OnCreate`), `SingletonRef<Battle>` in the host |
-| [Parallel systems](#parallel-systems) | Non-conflicting systems of one priority run at once, same result as sequential. | `MovementSystem` and `ManaSystem` (`WorldOptions.Parallel`) |
+| [Parallel systems](#parallel-systems) | Non-conflicting systems of one priority run at once, same result as sequential. | `MovementSystem` and `ManaSystem` (`WorldOptions.ParallelSystems`) |
 | [Parallel `[ForEach]`](#parallel-foreach) | One heavy method's rows split across cores. | `SteeringSystem`; `NewRound` (`ForEachParallel`, `ForEachEntityParallel`) |
 | [Change tracking](#change-tracking) | Visit only the rows written since a system last ran. | `ReplicationSystem` (`[Changed<Health>]`), `Unsaved` (`ChangedSince`) |
-| [Buffers](#buffers) | A list per entity as a component; every write tracked. | players' bags of `Loot`; `ReplicationSystem.SendBag` (`[Changed<Buffer<Loot>>]`) |
+| [Dynamic buffers](#dynamic-buffers) | A list per entity as a component; every write tracked. | players' bags of `Loot`; `ReplicationSystem.SendBag` (`[Changed<DynamicBuffer<Loot>>]`) |
 | [Value indexes](#value-indexes) | Find entities by a component's value. | `Zone`: `PlayersIn`, `Despawn` (`TryFind`) |
 | [Relations](#relations) | Entity-to-entity links with reverse lookup. | `OwnedBy`: `Respawn` recalls a player's projectiles |
 | [Snapshots](#snapshots) | Copy a world and restore it in memory. | `Save` / `Load` |
@@ -132,8 +132,9 @@ Guide: [Queries and filters](guide/queries.md).
 **When to use it.** Tools, tests, request handlers between updates, one-off logic. Prefer `[ForEach]` systems for
 per-tick logic.
 
-**Cost.** A `Query` step reads the row's id, plus its presence bits and change ticks only when the table needs
-testing (28.7 μs over 10,000 entities in two tables, against 12.8 μs for a struct job). `Count` sums table counts; `Any` stops at the first match.
+**Cost.** A `Query` step reads the row's id, plus its presence bits and change ticks only when the table needs testing
+(28.7 μs over 10,000 entities in two tables, against 12.8 μs for a struct job). `Count` sums table counts; `Any` stops
+at the first match.
 
 Guide: [Queries and filters](guide/queries.md).
 
@@ -146,6 +147,9 @@ for ad-hoc jobs.
 **When to use it.** Arithmetic over many rows that you vectorize (`Vector<T>`, `MemoryMarshal.Cast`).
 
 **When not.** Logic that changes structure or needs the entity (batch methods take only spans and singletons).
+
+**Cost.** One call per run of rows instead of one per entity. Moving 100,000 entities with a bounce at the map's edge
+takes 71 μs as a vectorized batch method, against 245 μs per entity (`OperationBenchmark`), 0 B.
 
 Guide: [Systems: batch methods](guide/systems.md#batch-methods).
 
@@ -174,9 +178,10 @@ Guide: [Singletons](guide/singletons.md).
 
 ## Parallel systems
 
-**What it does.** With `WorldOptions.Parallel`, systems of one priority whose access does not conflict run at the same
-time. The access is generated from the `[ForEach]` parameters (`ref` writes, `in` reads); a system that takes an
-`Entity` or `World` runs alone. The result always equals the sequential order.
+**What it does.** With `WorldOptions.ParallelSystems`, systems of one priority whose access does not conflict run at the
+same time. The access is generated from the `[ForEach]` parameters (`ref` writes, `in` reads); a system runs alone
+when it can reach the world beyond its parameters: an `Entity` or `World` parameter, an instance `[ForEach]` method,
+an `OnUpdate` override, or a subclass the generator did not see. The result always equals the sequential order.
 
 **When to use it.** Several heavy, independent systems per priority and spare cores.
 
@@ -214,32 +219,31 @@ entities, updating a spatial structure for the units that moved.
 **When not.** Components written on every row every tick (nothing to skip), or reads taken by `ref` (every visited
 row counts as written: take them `in`).
 
-**Cost.** 8 bytes per row. A write stores its tick and updates its word's summary: a few nanoseconds through a
-handle (about 5 μs for the summaries of 1,000 scattered writes), while a query or job writing row after row notes each word
-once and a run of rows fills its ticks at once. A pass skips unwritten tables, 4,096-row blocks and 64-row words
-from summaries and takes a word's written rows from its summary. Replicating 10 changed entities of 100,000 takes
-0.55 μs instead of 40-110 μs for a scan of every row; 1,000 scattered changes 36 μs instead of
-60-110 μs.
+**Cost.** 8 bytes per row. A write stores its tick and updates its word's summary: a few nanoseconds through a handle
+(about 5 μs for the summaries of 1,000 scattered writes), while a query or job writing row after row notes each word
+once and a run of rows fills its ticks at once. A pass skips unwritten tables, 4,096-row blocks and 64-row words from
+summaries and takes a word's written rows from its summary. Replicating 10 changed entities of 100,000 takes 0.55 μs
+instead of 40-110 μs for a scan of every row; 1,000 scattered changes 36 μs instead of 60-110 μs.
 
 Guide: [Change tracking](guide/change-tracking.md).
 
-## Buffers
+## Dynamic buffers
 
-**What it does.** `Buffer<T>` is a list per entity, held as a component. Its writes (`Add`, `RemoveAt`, `Clear`,
-`AsSpan`, …) take the buffer by `ref`, so a list changes only through a tracked write: `[Changed<Buffer<T>>]` visits
-the entities whose list changed, and a write through `in` does not compile. Snapshots copy the elements.
+**What it does.** `DynamicBuffer<T>` is a list per entity, held as a component. Its writes (`Add`, `RemoveAt`, `Clear`,
+`AsSpan`, …) take the buffer by `ref`, so a list changes only through a tracked write: `[Changed<DynamicBuffer<T>>]`
+visits the entities whose list changed, and a write through `in` does not compile. Snapshots copy the elements.
 
-**When to use it.** Lists that belong to one entity and are sent or saved when they change: inventories, paths,
-recent events, pending orders.
+**When to use it.** Lists that belong to one entity and are sent or saved when they change: a bag of item ids or
+stacks, a path, recent events, pending orders.
 
 **When not.** Items with their own state that are queried on their own (one entity per item with a relation), or a
 small fixed set (an `[InlineArray]` in an unmanaged component, no GC at all).
 
 **Cost.** One object and one array per entity, made by its first write; writes within the capacity allocate nothing.
 A write stamps the row once, like any tracked component: 1,000 of 100,000 bags written and sent take 55.1 μs, against
-61.5 μs for a `List<T>` in a tracked component (`BufferBenchmark`).
+61.5 μs for a `List<T>` in a tracked component (`DynamicBufferBenchmark`).
 
-Guide: [Buffers](guide/buffers.md).
+Guide: [Dynamic buffers](guide/dynamic-buffers.md).
 
 ## Value indexes
 
@@ -264,8 +268,13 @@ Guide: [Indexes and relations](guide/indexes-and-relations.md).
 `index.Find(parent)` for the children. Relation heads are an array indexed by the target's id (no hashing), and
 handles carry their version, so a link to a destroyed entity never matches a later one that reuses its id.
 
-**When to use it.** Ownership and hierarchy: inventories (items point at their owner), turrets on a ship, members of a
-party, summoned units of a caster.
+**When to use it.** Ownership and hierarchy: inventories whose items have state of their own (durability,
+enchantments: each item an entity pointing at its owner), turrets on a ship, members of a party, summoned units of a
+caster.
+
+**When not.** A bag of plain values that only its owner reads (item ids, stack counts): a
+[dynamic buffer](#dynamic-buffers) is one component instead of an entity per item. Many-to-many links (one component
+holds one key: give each link its own entity), and transform hierarchies that need propagation (not built in).
 
 **Cost.** 100 items changing hands among 100,000, then 100 inventories counted: 11.5 μs (catch-up included).
 
@@ -324,8 +333,9 @@ Guide: [Systems: errors](guide/systems.md#errors).
 ## Analyzer
 
 **What it does.** The package bundles an analyzer (EECS001-EECS012) next to the generator: invalid `[ForEach]`
-methods, class components, stateful systems, systems referencing systems, unsafe parallel methods and writes
-through `in` parameters fail the build.
+methods and systems (EECS001-005), class components (EECS006), stateful systems (EECS007), systems referencing
+systems (EECS008), batch methods mixing spans with per-entity parameters (EECS009), unsafe parallel methods (EECS010),
+writes through `in` parameters (EECS011) and copied dynamic buffers (EECS012) fail the build.
 
 **When to use it.** Always on; it keeps a large code base decoupled.
 
@@ -334,7 +344,7 @@ Guide: [Analyzer rules](guide/analyzer.md).
 ## Threading model
 
 **What it does.** A world has one owner thread: the one calling `Update`. Structural bookkeeping enters a
-compare-and-swap gate and never tears; queries match lock-free over copy-on-write snapshots. `Parallel` borrows
+compare-and-swap gate and never tears; queries match lock-free over copy-on-write snapshots. `ParallelSystems` borrows
 thread-pool threads inside one update without changing ownership.
 
 **When to use it.** One world per thread (one per map or zone): no synchronization at all. Input from other threads

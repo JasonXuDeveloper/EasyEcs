@@ -87,9 +87,9 @@ All numbers come from BenchmarkDotNet. The headline benchmarks simulate a real s
 - **`MultiWorldBenchmark.TickAllWorlds`** runs one world per core, each on its own long-lived thread. This is the
   recommended server layout.
 - **`ParallelSystemsBenchmark.Tick`** is one update of four `[ForEach]` systems of one priority with disjoint access
-  (movement, health and mana regeneration, cooldowns) over 100,000 entities, with `WorldOptions.Parallel` off and on.
-  With it on, the four systems form one batch and run at the same time; it shows what a parallel batch costs and
-  gains against a sequential update.
+  (movement, health and mana regeneration, cooldowns) over 100,000 entities, with `WorldOptions.ParallelSystems` off
+  and on. With it on, the four systems form one batch and run at the same time; it shows what a parallel batch costs
+  and gains against a sequential update.
 - **`ParallelForEachBenchmark.Tick`** is one heavy `[ForEach]` method (steering towards the nearest of 16 waypoints)
   over 100,000 entities, plain and with `Parallel = true`, whose chunks of rows run on all cores.
 - **`ChangeTrackingBenchmark.Tick`** replicates changed state: 10 (a quiet tick) or 1,000 of 100,000 entities get a
@@ -133,7 +133,7 @@ warmups, 8 iterations of 250 ms, call counting from the start) on .NET 10, on a 
 | ChangeTrackingBenchmark.QueryTick, 1,000 rows written: every row / `Changed<Health>()` | 100,000 | – | 503 μs / 50.9 μs | 0 B |
 | IndexBenchmark.TradeAndCount (100 trades, 100 inventory counts) | 100,000 | – | 11.5 μs | 0 B |
 | SnapshotBenchmark.Capture (a new snapshot) / Restore | 100,000 | – | 724 / 426 μs | 2.8 MB / 0 B |
-| BufferBenchmark.Tick (1,000 of 100,000 bags written, then sent): `Buffer<int>` / `List<int>` in a tracked component | 100,000 | – | 55.1 / 61.5 μs | 0 B |
+| DynamicBufferBenchmark.Tick (1,000 of 100,000 bags written, then sent): `DynamicBuffer<int>` / `List<int>` in a tracked component | 100,000 | – | 55.1 / 61.5 μs | 0 B |
 
 **Against other ECS libraries** (`EcsComparisonBenchmark`, the headline world ported to each library; ratio against
 EasyEcs):

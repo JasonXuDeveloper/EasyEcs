@@ -38,8 +38,10 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
 - **Built-in change tracking, indexes and relations.** `[Changed<T>]` visits only the rows written since a system last
   ran; `IIndexed<TKey>` components are found by value, and an `Entity` key makes a relation. Both follow every write,
   including writes through `ref`, with no events and nothing to keep in sync by hand.
-- **Mistakes fail the build.** The bundled analyzer (EECS001-EECS012) reports invalid systems, class components,
-  stateful systems, systems that reference each other and writes through read-only parameters.
+- **Mistakes fail the build.** The bundled analyzer (EECS001-EECS012) reports invalid `[ForEach]` methods and
+  systems, class components, stateful systems, systems that reference each other, batch methods mixing spans with
+  per-entity parameters, parallel methods that would race, writes through read-only parameters and copied dynamic
+  buffers.
 - **Decoupled by construction.** Systems cooperate only through data, in `Priority` order; system groups give you
   separate cadences (input on every wake, simulation on a fixed tick).
 - **Built for servers that run for months.** Ids are recycled behind version-checked handles, memory is bounded by
@@ -64,10 +66,10 @@ costs and when to use it).
 | [Batch methods](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#batch-methods) | `ForEachBatch`, span parameters | Contiguous runs of rows as spans, for SIMD. |
 | [System groups and intervals](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md) | `ISystemGroup`, `[UpdateInGroup<T>]`, `Update<TGroup>()`, `UpdateInterval`, `Enabled` | Separate cadences (input on every wake, simulation on a fixed tick), throttled and switchable systems. |
 | [Singletons](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/singletons.md) | `ISingletonComponent`, `AddSingleton`, `GetSingleton`, `SingletonRef<T>` | One value per world, passed to systems as `ref` / `in` parameters. |
-| [Parallel systems](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md) | `WorldOptions.Parallel` | Systems of one priority that do not conflict run at once, with the sequential result. |
+| [Parallel systems](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md) | `WorldOptions.ParallelSystems` | Systems of one priority that do not conflict run at once, with the sequential result. |
 | [Parallel `[ForEach]`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#parallel-methods) | `[ForEach(Parallel = true)]`, `ForEachParallel`, `ForEachEntityParallel`, `ChunkRows` | One heavy method's rows split across cores. |
 | [Change tracking](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/change-tracking.md) | `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>(since)` | Visit only the rows written since a system last ran; `ref` access counts as a write. |
-| [Buffers](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/buffers.md) | `Buffer<T>`, `Add`, `RemoveAt`, `AsSpan`, `[Changed<Buffer<T>>]` | A list per entity as a component: written only through `ref`, so every change is tracked; copied by snapshots. |
+| [Dynamic buffers](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/dynamic-buffers.md) | `DynamicBuffer<T>`, `Add`, `RemoveAt`, `AsSpan`, `[Changed<DynamicBuffer<T>>]` | A list per entity as a component: written only through `ref`, so every change is tracked; copied by snapshots. |
 | [Value indexes](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/indexes-and-relations.md) | `IIndexed<TKey>`, `world.Index<T, TKey>()`, `Find`, `TryFind`, `Count` | Find entities by a component's value, kept in sync with every write. |
 | [Relations](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/indexes-and-relations.md) | an `IIndexed<Entity>` component | Entity-to-entity links with reverse lookup; a destroyed source leaves the index, a destroyed target matches no later entity (handles carry their version). |
 | [Snapshots](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/snapshots.md) | `world.Capture()`, `world.Restore(snapshot)` | Copy a world in memory and roll it back (replays, tests, rollback). |
@@ -128,8 +130,8 @@ System.Console.WriteLine(hero.Has<Dead>());                            // True
 ```
 
 [A full battle server](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/example.md) uses every feature
-(parallel steering, replication by change tracking, indexes, relations, snapshots, system groups, struct jobs) in one
-world; it is the battle server benchmark below and the world of the scenario tests. The step-by-step tutorial is
+(parallel steering, replication by change tracking, bags of loot in dynamic buffers, indexes, relations, snapshots,
+system groups, struct jobs) in one world; it is the battle server benchmark below and the world of the scenario tests. The step-by-step tutorial is
 [Getting started](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/getting-started.md).
 
 ## The model in one picture
@@ -164,7 +166,7 @@ flowchart LR
 | Game servers and simulations on .NET 10: MMO maps and zones, AOI, combat | Unity or other runtimes below .NET 10 (`net10.0` only) |
 | Worlds where state flips constantly (buffs, deaths, spawns): structural changes are immediate and cheap | Code that needs structural changes recorded from many threads at once (use one owner thread and a queue) |
 | Long-running processes where GC pauses and unbounded growth matter | Code that wants objects with behavior, or systems calling each other |
-| One world per thread, many worlds per process; `Parallel` for heavy independent systems | Many threads mutating one world's component values without coordination |
+| One world per thread, many worlds per process; `ParallelSystems` for heavy independent systems | Many threads mutating one world's component values without coordination |
 
 ## Performance
 
@@ -231,7 +233,7 @@ what it does, when to use it and what it costs is in
 | [Getting started](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/getting-started.md) | Step-by-step tutorial: entities, components, tags, queries, systems, singletons, groups, the update loop. |
 | [Features](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/features.md) | Every feature: what it does, when to use it, when not, what it costs, which scenarios it serves. |
 | [Comparison](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/comparison.md) | Features and benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs. |
-| [Guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/README.md#guide) | One page per concept: queries, systems, singletons, structural changes, change tracking, indexes and relations, snapshots, `ref` and `await`, threading, analyzer rules. |
+| [Guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/README.md#guide) | One page per concept: queries, systems, singletons, structural changes, change tracking, dynamic buffers, indexes and relations, snapshots, `ref` and `await`, threading, analyzer rules. |
 | [ECS principles](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/ecs-principles.md) | How to design features with entities, components, singletons and systems. |
 | [API reference](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/api.md) | Every public API with its complexity. |
 | [Performance guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md) | Which API to use when, do's and don'ts, benchmarks. |
@@ -266,14 +268,15 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
 - **New APIs:** `WithAny<T>` filters (`[WithAny<T>]` on `[ForEach]`), batch `CreateEntities` / `DestroyEntities`,
   per-system timing (`WorldOptions.MeasureSystems`, `system.Stats`), `entity.Read<T>()` (read-only, never a write) and
   `entity.TryGetRef<T>(out found)` (optional access by `ref`); Native AOT compatible.
-- **`Buffer<T>`**: a list per entity, held as a component. Its writes take the buffer by `ref`, so each one is a
-  tracked change (`[Changed<Buffer<T>>]` sends only the lists that changed) and a write through `in` does not compile;
-  snapshots copy the elements; writes within the capacity allocate nothing.
+- **`DynamicBuffer<T>`**: a list per entity, held as a component. Its writes take the buffer by `ref`, so each one is
+  a tracked change (`[Changed<DynamicBuffer<T>>]` sends only the lists that changed) and a write through `in` does not
+  compile; snapshots copy the elements; writes within the capacity allocate nothing.
 - **Every analyzer rule is an error**, with two new ones: **EECS011** rejects a `[ForEach]` method that changes a
-  collection or class held by an `in` parameter, **EECS012** a `Buffer<T>` copied by value.
+  collection or class held by an `in` parameter, **EECS012** a `DynamicBuffer<T>` copied by value.
 - `Entity.GetHashCode()` is deterministic (`Id * 397 ^ Version`) and cheaper (relation lookups hash handles).
+- **Renamed:** `WorldOptions.Parallel` is `WorldOptions.ParallelSystems` (apart from `[ForEach(Parallel = true)]`).
 - **Behavior changes:** `Query` results are ref structs (no `await` in the loop, items cannot be stored); refs can be
-  invalidated by structural changes of other entities; iteration order follows table rows; with `Parallel`, a
+  invalidated by structural changes of other entities; iteration order follows table rows; with `ParallelSystems`, a
   subclass the generator did not see runs alone; `AddSingleton` resets an existing singleton in place; `IForEach` jobs
   receive only the components; stale handles answer `Has` / `TryGet` with false; `CompactArchetypes` is gone (tables
   stay dense on their own). See the
@@ -289,7 +292,7 @@ v4 is a rewrite for .NET 10 with standard ECS vocabulary in a single `EasyEcs` n
 - Systems are synchronous `EcsSystem`s with source-generated `[ForEach]` methods (no UniTask dependency).
 - Entity ids are recycled; singletons are per world; system groups with `[UpdateInGroup<T>]`.
 - The analyzer enforces the ECS principles (EECS006-EECS008); events were replaced by state-as-data.
-- `WorldOptions.Parallel` runs systems of one priority together only when their generated read/write access does
+- `WorldOptions.ParallelSystems` runs systems of one priority together only when their generated read/write access does
   not conflict: parallel with the same result as sequential, allocation-free.
 - A `[ForEach]` method may take no component when a `[With<T>]` names what to query
   (`[ForEach, With<Dead>] static void Remove(Entity e)`).

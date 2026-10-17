@@ -19,7 +19,7 @@ The EasyEcs analyzer ships in the package next to the source generator. Every ru
 | [EECS009](#eecs009) | Error | A batch `[ForEach]` method takes only spans and singletons |
 | [EECS010](#eecs010) | Error | A `[ForEach(Parallel = true)]` method must be able to run on several threads |
 | [EECS011](#eecs011) | Error | A `[ForEach]` method must not change what a read-only parameter holds |
-| [EECS012](#eecs012) | Error | A `Buffer<T>` is never copied |
+| [EECS012](#eecs012) | Error | A `DynamicBuffer<T>` is never copied |
 
 ## EECS001
 
@@ -244,7 +244,7 @@ threads at once, so it must make no structural change (static, no `World`, its `
 between chunks).
 
 Fix: take singletons as `in`, move structural changes into a sequential system that reacts to data the parallel one
-writes, or drop `Parallel`.
+writes, or drop `Parallel = true`.
 
 ```cs
 [ForEach(Parallel = true)] static void Kill(Entity e, in Health hp)   // EECS010: e.Set changes structure
@@ -294,18 +294,19 @@ public partial class GridSystem : EcsSystem
 
 ## EECS012
 
-**`Buffer<T>` held by value.** A [`Buffer<T>`](buffers.md) refers to its list, so a copy of the value refers to the same
-list: writes through the copy are never stamped as changed, and storing the copy gives a second entity (or a snapshot)
-the same list. The rule reports a `Buffer<T>` field or property, a by-value parameter or return, a local that is not a
-`ref` local, an assignment of an existing buffer, and an existing buffer passed to `Set`, `CreateEntity` or another
-generic method that stores it.
+**`DynamicBuffer<T>` held by value.** A [`DynamicBuffer<T>`](dynamic-buffers.md) refers to its list, so a copy of the
+value refers to the same list: writes through the copy are never stamped as changed, and storing the copy gives a second
+entity (or a snapshot) the same list. The rule reports a `DynamicBuffer<T>` field or property, a by-value parameter or
+return, a local that is not a `ref` local, an assignment of an existing buffer, and an existing buffer passed to `Set`,
+`CreateEntity` or another generic method that stores it.
 
-Fix: reach the buffer through its entity: `ref` / `in` parameters, `ref var bag = ref entity.Get<Buffer<T>>()`,
-`entity.Read<Buffer<T>>()`. A new component value is `new Buffer<T>()` (or `default`), which holds no list.
+Fix: reach the buffer through its entity: `ref` / `in` parameters, `ref var bag = ref entity.Get<DynamicBuffer<T>>()`,
+`entity.Read<DynamicBuffer<T>>()`. A new component value is `new DynamicBuffer<T>()` (or `default`), which holds no
+list.
 
 ```cs
-var bag = player.Read<Buffer<Loot>>();                       // EECS012: a copy
-other.Set(player.Read<Buffer<Loot>>());                      // EECS012: two entities, one list
+var bag = player.Read<DynamicBuffer<Loot>>();                       // EECS012: a copy
+other.Set(player.Read<DynamicBuffer<Loot>>());                      // EECS012: two entities, one list
 ```
 
 ```csharp
@@ -313,14 +314,14 @@ public record struct Loot(int Item);
 
 public static class Bags
 {
-    public static int Items(Entity player) => player.Read<Buffer<Loot>>().Count;   // read through the entity
+    public static int Items(Entity player) => player.Read<DynamicBuffer<Loot>>().Count;   // read through the entity
 
     public static void Give(Entity player, Loot loot)
     {
-        ref var bag = ref player.Get<Buffer<Loot>>();                               // a ref local: a tracked write
+        ref var bag = ref player.Get<DynamicBuffer<Loot>>();                               // a ref local: a tracked write
         bag.Add(loot);
     }
 
-    public static Entity Spawn(World world) => world.CreateEntity(new Buffer<Loot>());   // a new, empty buffer
+    public static Entity Spawn(World world) => world.CreateEntity(new DynamicBuffer<Loot>());   // a new, empty buffer
 }
 ```

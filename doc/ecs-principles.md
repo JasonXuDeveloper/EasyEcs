@@ -244,7 +244,7 @@ sees a write when code takes the component by `ref`, not when the collection beh
   indexes, and parallel systems schedule the write. Changing it through an `in` parameter is a race and goes
   unnoticed; the analyzer reports it (EECS011).
 - **Snapshots share it**: `Capture` copies the reference, not the collection, so restoring brings back the list as it
-  is now. Snapshots are for plain data; persistence serializes the collection anyway. A `Buffer<T>` has neither
+  is now. Snapshots are for plain data; persistence serializes the collection anyway. A `DynamicBuffer<T>` has neither
   problem: its writes need a `ref`, and snapshots copy its elements.
 
 Then pick the representation by what the items are:
@@ -252,8 +252,8 @@ Then pick the representation by what the items are:
 | Items | Hold them as | Why |
 |---|---|---|
 | Things with their own state, queried or changed on their own (inventory items, guild members, buffs) | **one entity per item** with a relation to its owner ([indexes and relations](guide/indexes-and-relations.md#relations)) | each item has its own components, change ticks, queries and parallel schedule, copied by value in snapshots |
-| A list that belongs to one entity, sent or saved when it changes (a bag of loot, a path, recent hits) | **a [`Buffer<T>`](guide/buffers.md)** component | every write needs a `ref`, so each change is tracked; snapshots copy the elements; a write through `in` does not compile |
-| A small, bounded set of values (cooldown slots, the last few inputs) | **an `[InlineArray]` buffer** in an unmanaged component | no GC, copied by value everywhere, every change a `ref` write |
+| A list that belongs to one entity, sent or saved when it changes (a bag of loot, a path, recent hits) | **a [`DynamicBuffer<T>`](guide/dynamic-buffers.md)** component | every write needs a `ref`, so each change is tracked; snapshots copy the elements; a write through `in` does not compile |
+| A small, bounded set of values (cooldown slots, the last few inputs) | **a fixed `[InlineArray]` array** in an unmanaged component | no GC, copied by value everywhere, every change a `ref` write |
 | Data read and written as a whole, usually with the save (quest progress, settings, unlocked achievements) | **a collection in a component**, changed through `ref` | one row per player instead of thousands of entities; loaded and saved with the player |
 | Read-mostly data replaced as a whole (a patrol route) | **an immutable collection** (`ImmutableArray<T>`) | assigning a new one through `ref` is a tracked write; a snapshot keeps the old one |
 
@@ -306,4 +306,4 @@ public static class PlayerRules
    systems.
 5. Build: the analyzer rejects what breaks these rules.
 6. Pick how each collection is held ([rule 8](#8-choose-how-to-hold-a-collection)).
-6. Test each system alone: create a world, add the system and the data it reads, `Update()`, assert on data.
+7. Test each system alone: create a world, add the system and the data it reads, `Update()`, assert on data.

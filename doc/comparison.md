@@ -168,7 +168,7 @@ command buffers on purpose); a few are not offered.
 | Struct query jobs (`IForEach`, inline queries) | Arch, Friflo | `IForEach`, `IForEachEntity`, `IForEachBatch` (`[ForEach]` generates them) | `Census` |
 | Chunk iteration | Arch, Friflo | batch methods (`Span<T>` per run of rows) | `MovementSystem`, `ManaSystem`, `SumHealth` |
 | Parallel query | Friflo, Arch, DefaultEcs | `[ForEach(Parallel = true)]`, `ForEachParallel`, `ForEachEntityParallel` | `SteeringSystem`, `NewRound` |
-| Parallel systems | DefaultEcs | `WorldOptions.Parallel`: systems of one priority whose generated access does not conflict | `MovementSystem` and `ManaSystem` |
+| Parallel systems | DefaultEcs | `WorldOptions.ParallelSystems`: systems of one priority whose generated access does not conflict | `MovementSystem` and `ManaSystem` |
 | Bulk create and destroy | Friflo, Arch | `CreateEntities`, `DestroyEntities(filter)` | the players in the constructor, the projectiles in `NewRound` |
 | Indexed components | Friflo, DefaultEcs | `IIndexed<TKey>`: `Find`, `TryFind`, `Count` (exact keys; no range queries) | `Zone`: `PlayersIn`, `Despawn` |
 | Links and relations | Friflo | `IIndexed<Entity>`: the reverse lookup comes from the index | `OwnedBy`: a respawn recalls its projectiles |

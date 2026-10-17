@@ -11,7 +11,7 @@ through `world.Index<T, TKey>()`.
 
 | | |
 |---|---|
-| **Use it for** | Lookups by value (a player by name) and relations (an inventory: items point at their owner; children of a node). |
+| **Use it for** | Lookups by value (a player by name) and relations (an inventory of items with their own state: each item points at its owner; children of a node). A bag of plain item ids is a [dynamic buffer](dynamic-buffers.md). |
 | **Avoid** | Dictionaries kept in sync by hand; indexing a value rewritten on most rows every tick and looked up rarely. |
 | **Cost** | `Count` a hash probe (an array access for relations), `Find` one step per match, plus re-indexing the rows written since the previous lookup. Nothing on the write path. |
 

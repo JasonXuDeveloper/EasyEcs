@@ -55,9 +55,10 @@ In `OnUpdate`, use the system's `World` property: `World.GetSingleton<Clock>().T
 ## Stable handles
 
 `world.SingletonRef<T>()` returns a `SingletonRef<T>` (adding the singleton if missing). A singleton's storage never
-moves, so the handle stays valid and `handle.Value` is a `ref T` with no lookup. Generated `[ForEach]` jobs use it
-for singleton parameters. If the singleton is removed, or added again with `AddSingleton<T>()` (which replaces it
-with a fresh value), the handle is detached: writes through it no longer reach the world.
+moves, so the handle stays valid and `handle.Value` is a `ref T` with no lookup. `AddSingleton<T>()` on an existing
+singleton resets it in place, so the handle sees the reset value. Only `RemoveSingleton<T>()` detaches it: writes
+through it no longer reach the world, also after the singleton is added again. Generated `[ForEach]` jobs resolve each
+singleton parameter once per pass, as a `ref` (parallel jobs, which are copied to other threads, as a `SingletonRef<T>`).
 
 ```csharp
 var clock = world.SingletonRef<Clock>();     // once, at setup

@@ -15,18 +15,18 @@ from another ECS? [Their features in EasyEcs](comparison.md#their-features-in-ea
 | Components, tags, singletons | `Position`, `Health`, `Player`, `Dead`; `Battle`, `Waypoints` |
 | `[ForEach]` systems, filters (`With`, `Without`, `WithAny`) | every system; `StatusSystem.Count` counts burning **or** frozen units |
 | `[ForEach(Parallel = true)]` | `SteeringSystem`: NPC steering on every core |
-| Parallel systems (`WorldOptions.Parallel`) | `MovementSystem` and `ManaSystem`: same priority, disjoint data, run at once |
+| Parallel systems (`WorldOptions.ParallelSystems`) | `MovementSystem` and `ManaSystem`: same priority, disjoint data, run at once |
 | Batch methods (`Span<T>`) | `MovementSystem`, `ManaSystem`: whole runs of rows, SIMD-friendly |
 | Immediate structural changes | statuses added (`Add`, `GetOrAdd`) and removed mid-pass, deaths, respawns (`Set` of two components), projectiles spawned and destroyed |
 | Change tracking (`ITrackChanges`, `[Changed<T>]`, `ChangedSince`) | `ReplicationSystem` sends only the healths written since its last run; `Unsaved` counts players written since the save |
-| Lists per entity (`Buffer<T>`, `[Changed<Buffer<T>>]`) | every player's bag of `Loot`: filled in `Despawn`, emptied in `Respawn`, sent by `ReplicationSystem.SendBag` only when it changed |
+| Lists per entity (`DynamicBuffer<T>`, `[Changed<DynamicBuffer<T>>]`) | every player's bag of `Loot`: filled in `Despawn`, emptied in `Respawn`, sent by `ReplicationSystem.SendBag` only when it changed; `LootValue` reads it (`foreach`), `Give` moves an item between two bags |
 | Value index (`Find`, `TryFind`, `Count`) | `Zone : IIndexed<int>`: players per zone; `Despawn` hunts a player of a zone |
 | Relation | `OwnedBy : IIndexed<Entity>`: a respawning player recalls its projectiles |
 | System groups, `UpdateInterval`, `Enabled` | `Replication` runs every third tick; `RegenerationSystem` every tenth update; `Ceasefire` |
 | System lifecycle (`OnCreate`, `OnDestroy`) | `SteeringSystem` sets up and removes its `Waypoints`; `ClockSystem` adds `Battle` |
 | Struct jobs (`ForEach`, `ForEachEntity`, `ForEachBatch`, `ForEachParallel`, `ForEachEntityParallel`) | `Census` (read-only: `Writes => 0`, `INoStructuralChanges`); `NewRound` heals everyone and scatters the NPCs, on every core |
-| Ad-hoc queries (`Query`, `Count`, `Any`, `TryGet`) | `NearestPlayer`, `Census`, `AnyoneBurning`, `ShotsLeft` with `static readonly` filters |
-| Entity handles (`TryGetEntity`, `IsAlive`, `Has`) | `Hit` turns a client's id back into the living unit; `ShotsLeft` of a stale handle is 0 |
+| Ad-hoc queries (`Query`, `Count`, `Any`, `TryGet`) | `NearestPlayer`, `Census`, `AnyoneBurning`, `AnyoneAfflicted` (`QueryFilter.WithAny`), `ShotsLeft` with `static readonly` filters |
+| Entity handles (`TryGetEntity`, `IsAlive`, `Has`, `Read`, `TryGetRef`) | `Hit` turns a client's id back into the living unit; `ShotsLeft` of a stale handle is 0; `LootValue` reads a bag without a write; `Give` takes a bag by `ref` only if the handle has one |
 | Bulk operations | `CreateEntities` for the players; `DestroyEntities` clears the projectiles of a round |
 | Snapshots | `Save` / `Load` (`Capture` / `Restore`) |
 | Diagnostics | `MeasureSystems` and `Slowest`; `SystemError` switches a failing system off |
@@ -51,7 +51,7 @@ public record struct Frozen(int Ticks) : IComponent;
 public record struct Lifetime(int Ticks) : IComponent;
 public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }                  // players by zone
 public record struct OwnedBy(Entity Owner) : IComponent, IIndexed<Entity> { public Entity Key => Owner; } // a relation
-public record struct Loot(int Item);                                          // players carry a Buffer<Loot>: a list
+public record struct Loot(int Item);                                          // players carry a DynamicBuffer<Loot>
 public struct Player : IComponent;                                            // tags: empty components
 public struct Npc : IComponent;
 public struct Dead : IComponent;
@@ -183,7 +183,7 @@ public partial class RespawnSystem : EcsSystem                                //
     public override int Priority => 6;
 
     [ForEach, With<Player>, With<Dead>]
-    static void Respawn(Entity player, ref Health hp, ref Buffer<Loot> bag, World world)
+    static void Respawn(Entity player, ref Health hp, ref DynamicBuffer<Loot> bag, World world)
     {
         foreach (var shot in world.Index<OwnedBy, Entity>().Find(player)) shot.Destroy();   // recall its projectiles
         hp.Value = hp.Max;
@@ -200,7 +200,7 @@ public partial class RespawnSystem : EcsSystem                                //
         if (world.Index<Zone, int>().TryFind(npc.Id & 3, out var player))     // hunt a player of some zone
         {
             at = player.Get<Position>();
-            ref var bag = ref player.Get<Buffer<Loot>>();                     // the hunted player gets the loot
+            ref var bag = ref player.Get<DynamicBuffer<Loot>>();                     // the hunted player gets the loot
             if (bag.Count == BattleServer.BagSize) bag.RemoveAt(0);           // a full bag drops its oldest item
             bag.Add(new Loot(npc.Id & 15));
         }
@@ -258,8 +258,8 @@ public partial class ReplicationSystem : EcsSystem                            //
         battle.Replicated++;
     }
 
-    [ForEach, Changed<Buffer<Loot>>]                                          // bags changed by a ref write
-    static void SendBag(in Buffer<Loot> bag, ref Battle battle) => battle.Replicated += 1 + bag.Count;
+    [ForEach, Changed<DynamicBuffer<Loot>>]                                          // bags changed by a ref write
+    static void SendBag(in DynamicBuffer<Loot> bag, ref Battle battle) => battle.Replicated += 1 + bag.Count;
 }
 ```
 
@@ -292,6 +292,8 @@ public sealed class BattleServer : IDisposable
     private static readonly QueryFilter AlivePlayers = Players.Without<Dead>();
     private static readonly QueryFilter ReadyToAttack = QueryFilter.Create().Without<Dead>().Without<Frozen>();
     private static readonly QueryFilter Npcs = QueryFilter.Create().With<Npc>();
+    private static readonly QueryFilter Afflicted = QueryFilter.Create().WithAny<Burning>().WithAny<Frozen>();
+    private static readonly QueryFilter UnsavedPlayers = Players.Changed<Health>(0);   // the tick is set per call
 
     public readonly World World;
     private readonly SingletonRef<Battle> _battle;                            // resolved once, no lookup per tick
@@ -304,7 +306,7 @@ public sealed class BattleServer : IDisposable
         World = new World(new WorldOptions
         {
             InitialEntityCapacity = units * 2,
-            Parallel = true,                                                  // systems of one priority side by side
+            ParallelSystems = true,                                           // systems of one priority side by side
             MeasureSystems = true,                                            // per-system timings in system.Stats
         });
         World.SystemError += OnSystemError;
@@ -325,14 +327,14 @@ public sealed class BattleServer : IDisposable
 
         var players = new Entity[units / 3];                                  // one batch: one table growth
         World.CreateEntities(players, new Position(), new Velocity(1, 0), new Health(500, 500), new Replica(500),
-            new Mana(100, 100), new Attack(8, 6, 0), new Zone(0), new Player(), new Buffer<Loot>());   // a bag each
+            new Mana(100, 100), new Attack(8, 6, 0), new Zone(0), new Player(), new DynamicBuffer<Loot>()); // bags
         for (int i = 0; i < players.Length; i++)
         {
             uint r = Dice.Roll(0, i);
             players[i].Get<Position>() = new Position(r % 4096, (r >> 12) % 4096);
             players[i].Get<Velocity>() = new Velocity((int)(r % 5) - 2, (int)((r >> 8) % 5) - 2);
             players[i].Get<Attack>().Cooldown = (int)(r % 6);
-            players[i].Get<Buffer<Loot>>().EnsureCapacity(BagSize);           // room once: a full bag never grows
+            players[i].Get<DynamicBuffer<Loot>>().EnsureCapacity(BagSize);    // room once: a full bag never grows
         }
 
         for (int i = players.Length; i < units; i++)
@@ -373,6 +375,8 @@ public sealed class BattleServer : IDisposable
 
     public bool AnyoneBurning => World.Any<Burning>();
 
+    public bool AnyoneAfflicted => World.Any<Health>(Afflicted);              // burning or frozen
+
     public int ShotsLeft(Entity player) => player.IsAlive && player.TryGet<Mana>(out var mana) ? mana.Value / ShotCost : 0;
 
     /// <summary>A client's hit on the unit it names by id: the id turns back into a handle of the living entity.</summary>
@@ -380,6 +384,26 @@ public sealed class BattleServer : IDisposable
     {
         if (!World.TryGetEntity(targetId, out var target) || !target.Has<Health>() || target.Has<Dead>()) return false;
         target.Get<Health>().Value -= damage;                                // a write: replicated with the next send
+        return true;
+    }
+
+    /// <summary>The items in a player's bag, summed: a read (<c>Read</c>), never a change.</summary>
+    public int LootValue(Entity player)
+    {
+        int value = 0;
+        foreach (var loot in player.Read<DynamicBuffer<Loot>>()) value += loot.Item;
+        return value;
+    }
+
+    /// <summary>A client hands a player's oldest item to another player: two tracked writes, replicated next send.</summary>
+    public bool Give(Entity from, Entity to)
+    {
+        ref var source = ref from.TryGetRef<DynamicBuffer<Loot>>(out bool found);    // optional access by ref
+        if (!found || source.Count == 0 || !to.Has<DynamicBuffer<Loot>>()) return false;
+        ref var target = ref to.Get<DynamicBuffer<Loot>>();
+        if (target.Count == BagSize) return false;
+        target.Add(source[0]);
+        source.RemoveAt(0);
         return true;
     }
 
@@ -429,7 +453,7 @@ public sealed class BattleServer : IDisposable
 
     public void Load() => World.Restore(_save);
 
-    public int Unsaved => World.Count<Health>(Players.Changed<Health>(_savedAt));
+    public int Unsaved => World.Count<Health>(UnsavedPlayers.ChangedSince(_savedAt));
 
     /// <summary>The system that took the most time per run so far (<see cref="WorldOptions.MeasureSystems"/>).</summary>
     public EcsSystem Slowest()

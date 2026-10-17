@@ -61,7 +61,7 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
                                FillHoles; change-tick columns with their summaries (LastWrite per column, BlockWrite
                                per 4,096 rows, per 64 rows WordWrite + WordRows + WordRest: the rows at the word's
                                latest tick) and Stamp/StampRows
-  Buffer.cs                    Buffer<T> (a list per entity as a tracked component; writes are ref-this extensions)
+  DynamicBuffer.cs             DynamicBuffer<T> (a list per entity as a tracked component; writes are ref-this extensions)
                                and its BufferStore (snapshots copy it through ComponentInfo.CopyRows)
   ComponentInfo.cs             per-type column operations (size, managed, create/grow/copy/clear) indexed by bit;
                                Pair links a tracked component with its change-tick column
@@ -80,13 +80,13 @@ EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, req
   EquatableArray.cs            array with value equality (generator models cache between edits)
   Polyfills.cs                 IsExternalInit for netstandard2.0 (records); do not delete
 EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, Presence, Query, System, ForEachSystem,
-                               Singleton, Concurrency, Parallel, Changed, Buffer, Index, Snapshot, Allocation (0 B budget),
+                               Singleton, Concurrency, Parallel, Changed, DynamicBuffer, Index, Snapshot, Allocation (0 B budget),
                                Generator (diagnostics + caching), BattleServer (the README world as a whole, linked
                                from EasyEcs.Benchmark); Fixtures.cs holds the shared test components
 EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / MultiWorldBenchmark (headline, realistic
                                server tick; the world itself is WorldSimulation.cs), BattleServerBenchmark (the
                                doc/example.md, BattleServer.cs, every feature), ParallelSystemsBenchmark,
-                               ParallelForEachBenchmark, ChangeTrackingBenchmark, BufferBenchmark, IndexBenchmark, SnapshotBenchmark +
+                               ParallelForEachBenchmark, ChangeTrackingBenchmark, DynamicBufferBenchmark, IndexBenchmark, SnapshotBenchmark +
                                MicroBenchmarks.
                                Always measure with BenchmarkDotNet.
 EasyEcs.Comparison/            BenchmarkDotNet: the headline world (WorldSimulation.cs, compiled unchanged) ported to

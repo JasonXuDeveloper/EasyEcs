@@ -42,7 +42,6 @@ public partial class DeathSystem : EcsSystem
 
 ## Other rules
 
-
 - Each entity gets fresh refs. The `ref` parameters of a `[ForEach]` method or `ForEach` job stay writable when the
   body changes the visited entity's archetype (the writes are carried over to its new row). Any other `ref` (from
   `entity.Get<T>()`, a `Query` item, or another entity) is only guaranteed until the next structural change: write

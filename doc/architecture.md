@@ -33,11 +33,16 @@ flowchart TB
     of a power-of-two-sized component never straddles two cache lines and vector loads stay aligned.
   - Columns whose type holds managed references are plain `T[]`; a row's references are cleared when the row loses
     its entity or its component, so the GC can collect what they pointed to.
+  - A `DynamicBuffer<T>` column is such a column: each row holds one reference to its own list (a store object with
+    an array and a count, made by the row's first write). Moving the row moves the reference; snapshots copy the
+    elements into new stores (`ComponentInfo.CopyRows` reads the column as store references, valid because the
+    buffer's only field is that reference).
   - Tables double when full and never shrink: each is bounded by the peak number of entities it held.
 - **Presence bits.** Removing a component keeps the entity in its table and clears the row's bit for that component
   (one bit per row, 64 rows per `ulong`). A column gets its bits on the first removal; until then every row has the
   component and the column carries no bits at all. Each column also counts its alive rows lacking the component, so a
-  query knows per table whether it can skip the table, walk every row, or test the bits.
+  query knows per table whether it can skip the table, walk every row, or test the bits. `Count` and `Any` answer a
+  table where only one required or excluded column varies from that count, without reading bits.
 - **Masks** (`Tag`) are 256-bit SIMD bitsets with overflow. Up to 65,536 component types are supported (bits are
   `ushort`): the first 256 are inline (one `Vector256` test per archetype match); beyond that a mask carries an
   overflow array (at least 4 × 256 bits, doubled when needed). Overflow masks are allocated when an archetype or a
@@ -157,7 +162,7 @@ Every iteration API walks tables front to back. What differs is how much bookkee
 
 - **Jobs that make no structural change** (`INoStructuralChanges`, added by the generator to static `[ForEach]`
   methods that take no `World` and use their `Entity` parameter, if any, only to read: `Id`, `Version`, `IsAlive`,
-  `Has`, `Get`, `TryGet`) walk dense tables with no per-row check, and walk tables with presence bits 64 rows per bit
+  `Has`, `Get`, `Read`, `TryGet`, `TryGetRef`) walk dense tables with no per-row check, and walk tables with presence bits 64 rows per bit
   word. `ForEachBatch` and `[ForEach]` methods taking spans hand whole runs of consecutive passing rows to the job;
   such jobs must not make structural changes at all.
 - **Other passes** register with the world (`BeginPass` / `EndPass`), so removed rows become tombstones instead of
@@ -241,7 +246,7 @@ Every world uses the same indices, so masks are comparable across worlds.
   entry.
 - Component values are unsynchronized by design. The recommended layout is **one world per owner thread**, where the
   gate is always uncontended. User-facing rules: [Threading](guide/threading.md).
-- `WorldOptions.Parallel`: every system carries a `SystemAccess` (component and singleton read/write bitsets, or
+- `WorldOptions.ParallelSystems`: every system carries a `SystemAccess` (component and singleton read/write bitsets, or
   "runs alone"), generated from its `[ForEach]` parameters and read once by `AddSystem`. The schedule splits each
   priority into batches of consecutive, pairwise non-conflicting systems and publishes them as one copy-on-write
   array. A batch runs on the calling thread plus reusable `IThreadPoolWorkItem` helpers that claim systems through

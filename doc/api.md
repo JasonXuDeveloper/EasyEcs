@@ -17,17 +17,17 @@ Notation:
 |---|---|---|
 | `World` | sealed class, `IDisposable` | Owns entities, components, singletons, systems. |
 | `World.EntityEnumerator` | struct | Result of `world.Entities`: enumerates alive entities in id order, allocation-free. |
-| `WorldOptions` | sealed class | `Parallel`, `MaxDegreeOfParallelism`, `InitialEntityCapacity`, `MeasureSystems` (init-only). |
+| `WorldOptions` | sealed class | `ParallelSystems`, `MaxDegreeOfParallelism`, `InitialEntityCapacity`, `MeasureSystems` (init-only). |
 | `Entity` | readonly struct | Handle: `Id`, `Version`, `World`; equality includes the version. A destroyed or default handle answers questions (`IsAlive`, `Has`, `TryGet`, `TryGetRef`) with false, throws on accesses and changes (`Get`, `Read`, `Add`, `Set`, `Remove`), and ignores `Destroy`. |
 | `IComponent` | marker interface | Implemented by component structs. |
 | `ITrackChanges` | marker interface | A component whose rows record the change tick of their last write (`[Changed<T>]`, `QueryFilter.Changed<T>(since)`). |
 | `IIndexed<TKey>` | interface | A component (`ITrackChanges`) the world indexes by its `Key`; an `Entity` key makes it a relation. |
 | `ValueIndex<T, TKey>` | sealed class | `world.Index<T, TKey>()`: `Find(key)` (enumerator of `Entity`), `TryFind`, `Count`. |
-| `Buffer<T>` | struct, `IComponent, ITrackChanges` | A list per entity: `Count`, `Capacity`, `this[i]` (read-only), `AsReadOnlySpan()`, `foreach`; writes through `BufferExtensions` (`ref this`): `Add`, `AddRange`, `Insert`, `RemoveAt`, `RemoveAtSwapBack`, `Clear`, `EnsureCapacity`, `AsSpan()`. |
+| `DynamicBuffer<T>` | struct, `IComponent, ITrackChanges` | A list per entity: `Count`, `Capacity`, `this[i]` (read-only), `AsReadOnlySpan()`, `foreach`; writes through `DynamicBufferExtensions` (`ref this`): `Add`, `AddRange`, `Insert`, `RemoveAt`, `RemoveAtSwapBack`, `Clear`, `EnsureCapacity`, `TrimExcess`, `AsSpan()`. |
 | `ISingletonComponent` | marker interface | Implemented by singleton structs. |
 | `EcsSystem` | abstract class | `World`, `Priority`, `UpdateInterval`, `Enabled`, `Stats`, `LastRunTick`; `OnCreate` / `OnUpdate` / `OnDestroy`. |
 | `SystemStats` | readonly struct | `Runs`, `Last`, `Total`, `Average` of a system's runs; recorded with `WorldOptions.MeasureSystems`. |
-| `SystemAccess` | struct | What a system reads and writes (`Read<T>`, `Write<T>`, `ReadSingleton<T>`, `WriteSingleton<T>`, `RunsAlone`), used by `Parallel` batching. Only the generated `GeneratedAccess` override of a system fills it (from its `[ForEach]` parameters); user code never calls it. |
+| `SystemAccess` | struct | What a system reads and writes (`Read<T>`, `Write<T>`, `ReadSingleton<T>`, `WriteSingleton<T>`, `RunsAlone`), used by `ParallelSystems` batching. Only the generated `GeneratedAccess` override of a system fills it (from its `[ForEach]` parameters); user code never calls it. |
 | `ForEachAttribute`, `WithAttribute<T>`, `WithoutAttribute<T>`, `WithAnyAttribute<T>`, `ChangedAttribute<T>` | attributes | `[ForEach]` methods (`Parallel = true` runs chunks of rows on several threads) and their filters. |
 | `ISystemGroup`, `UpdateInGroupAttribute<TGroup>` | marker / attribute | System groups. |
 | `QueryFilter` | readonly struct | `Create().With<T>().Without<U>().WithAny<V>().WithAny<W>().Changed<X>(since)`; `ChangedSince(since)` moves the tick of a kept filter. |
@@ -70,10 +70,11 @@ Notation:
 | `entity.Set(in T1 … in Tn)` → `Entity` | O(n), or O(c) amortized when it moves | add or overwrite, at most one row copy, chainable |
 | `entity.Remove<T1..Tn>()` → `Entity` | O(n) | clears presence bits, the entity keeps its row; missing components are ignored; a removed indexed component unlinks the entity (O(1)); chainable |
 
-## Buffers
+## Dynamic buffers
 
-`Buffer<T>` is a component (`IComponent, ITrackChanges`); `new Buffer<T>()` holds no list until its first write.
-Reads work on any reference (`in`, `Read<T>()`); writes need a `ref` (a tracked write) ([Buffers](guide/buffers.md)).
+`DynamicBuffer<T>` is a component (`IComponent, ITrackChanges`); `new DynamicBuffer<T>()` holds no list until its
+first write. Reads work on any reference (`in`, `Read<T>()`); writes need a `ref` (a tracked write)
+([Dynamic buffers](guide/dynamic-buffers.md)).
 
 | API | Complexity | Notes |
 |---|---|---|
@@ -83,6 +84,7 @@ Reads work on any reference (`in`, `Read<T>()`); writes need a `ref` (a tracked 
 | `bag.RemoveAtSwapBack(i)` | O(1) | the last element moves into `i` |
 | `bag.Clear()` | O(1), O(count) for elements with references | keeps the capacity |
 | `bag.EnsureCapacity(n)` / `AsSpan()` | O(count) when it grows / O(1) | `AsSpan()` is writable |
+| `bag.TrimExcess()` | O(count) when the capacity exceeds the count | reallocates to the count; an empty list holds no array |
 | `world.Capture()` / `Restore` of a buffer column | O(elements) | copies the elements (a new list per entity) |
 
 ## Queries
@@ -132,14 +134,14 @@ Other `World` members:
 
 | Member | Meaning |
 |---|---|
-| `world.Systems` → `SystemList` | the systems of every group in execution order; `foreach` and `Count`, allocation-free |
-| `world.UpdateCount` | number of default-group updates so far |
-| `world.SystemError` | `event Action<EcsSystem, Exception>`; without a subscriber, exceptions propagate; a failed run still moves `LastRunTick` on |
-| `world.Dispose()` | `OnDestroy` on every system in reverse order, then releases storage; stale handles throw; indexes still held find nothing |
+| `world.Systems` → `SystemList` | the systems of every group in execution order; `foreach` allocation-free, O(systems); `Count` O(groups) |
+| `world.UpdateCount` | number of default-group updates so far; O(1) |
+| `world.SystemError` | `event Action<EcsSystem, Exception>`; without a subscriber, exceptions propagate; a failed run still moves `LastRunTick` on; raised O(1) per failure |
+| `world.Dispose()` | `OnDestroy` on every system in reverse order, then releases storage; stale handles throw; indexes still held find nothing; O(systems + entities + archetypes) |
 | `World.ChunkRows` | rows per chunk of a parallel `[ForEach]` (16,384, a multiple of 64) |
 
 `RemoveSystem<T>()` returns whether a system was removed. `GetSingleton<T>()` throws if the singleton was not added.
 
 Values and handles, all O(1): `entity.Id` / `Version` / `World`, `==` / `Equals` / `GetHashCode` (id and version) /
 `ToString`; `filter.Since`; `snapshot.EntityCount`; `system.Stats.Runs` / `Last` / `Total` / `Average`;
-`system.LastRunTick`.
+`system.LastRunTick`, `Priority`, `UpdateInterval`, `Enabled`, `World`.

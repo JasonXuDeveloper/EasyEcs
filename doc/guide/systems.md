@@ -52,7 +52,7 @@ sequenceDiagram
 ```
 
 Systems are sorted by `Priority`, registration order breaking ties. By default everything runs on the thread that
-calls `Update()`. With `WorldOptions.Parallel`, systems of one priority whose generated access does not conflict
+calls `Update()`. With `WorldOptions.ParallelSystems`, systems of one priority whose generated access does not conflict
 (`ref` = write, `in` = read) run at the same time; the result is the same as running them in order (see
 [Threading](threading.md#parallel-systems)).
 
@@ -94,7 +94,7 @@ public partial class BurnSystem : EcsSystem
 ```
 
 A static method that takes no `World` and uses its `Entity` (if any) only to read (`Id`, `Version`, `IsAlive`, `Has`,
-`Get`, `TryGet`) cannot change structure, so its job skips the bookkeeping that structural changes need and walks
+`Get`, `Read`, `TryGet`, `TryGetRef`) cannot change structure, so its job skips the bookkeeping that structural changes need and walks
 each table with no per-entity check.
 
 ### Batch methods

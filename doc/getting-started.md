@@ -18,8 +18,9 @@ step introduces one concept and links to the guide page that covers it in depth.
 - [13. Whole runs of rows: batch methods](#13-whole-runs-of-rows-batch-methods)
 - [14. Heavy work on every core](#14-heavy-work-on-every-core)
 - [15. Only what changed](#15-only-what-changed)
-- [16. Find entities by value, follow relations](#16-find-entities-by-value-follow-relations)
-- [17. Batches, snapshots, timings](#17-batches-snapshots-timings)
+- [16. A list per entity: dynamic buffers](#16-a-list-per-entity-dynamic-buffers)
+- [17. Find entities by value, follow relations](#17-find-entities-by-value-follow-relations)
+- [18. Batches, snapshots, timings](#18-batches-snapshots-timings)
 - [Next steps](#next-steps)
 
 ## 1. Install
@@ -54,7 +55,7 @@ using var world = new World(new WorldOptions { InitialEntityCapacity = 10_000 })
 | `WorldOptions` | Default | Meaning |
 |---|---|---|
 | `InitialEntityCapacity` | 1024 | Pre-sized entity array (one 16-byte record per id), so it does not grow at run time. Archetype tables grow on their own, doubling. |
-| `Parallel` | `false` | Run non-conflicting systems of equal priority at the same time (see [Threading](guide/threading.md#parallel-systems)). |
+| `ParallelSystems` | `false` | Run non-conflicting systems of equal priority at the same time (see [Threading](guide/threading.md#parallel-systems)). |
 | `MaxDegreeOfParallelism` | processor count | Threads one parallel run uses at most: systems run by `Parallel`, and the chunks of `[ForEach(Parallel = true)]`, `ForEachParallel` and `ForEachEntityParallel` (those run in chunks whether `Parallel` is on or not). |
 | `MeasureSystems` | `false` | Record each system's run count and time (`system.Stats`). |
 
@@ -152,7 +153,7 @@ world.AddSystem<MovementSystem>();
 ```
 
 - `ref` parameters are written, `in` parameters are read; 1 to 9 components. This is also the system's declared
-  access, which lets `WorldOptions.Parallel` run non-conflicting systems at the same time.
+  access, which lets `WorldOptions.ParallelSystems` run non-conflicting systems at the same time.
 - `[With<T>]` requires a component that is not passed in; `[Without<T>]` excludes entities that have it. A method
   can take no component at all when a `[With<T>]` (or a `[Changed<T>]`) names what to query: `[ForEach, With<Dead>]
   static void Remove(Entity e)`.
@@ -319,7 +320,7 @@ public partial class SteeringSystem : EcsSystem
 ```
 
 It pays for heavy per-entity work over tens of thousands of entities. Independent *systems* of one priority can also
-run together with `WorldOptions.Parallel` ([Threading](guide/threading.md)).
+run together with `WorldOptions.ParallelSystems` ([Threading](guide/threading.md)).
 
 ## 15. Only what changed
 
@@ -347,7 +348,35 @@ world.Update<Network>();       // when the server sends: only healths written si
 Take components `in` when you only read them: a `ref` parameter, `Get<T>()` or a query item counts as a write.
 See [Change tracking](guide/change-tracking.md).
 
-## 16. Find entities by value, follow relations
+## 16. A list per entity: dynamic buffers
+
+A `DynamicBuffer<T>` component is a list that belongs to one entity: a bag of loot ids, a path. Its writes take the
+buffer by `ref`, so every change is tracked and `[Changed<DynamicBuffer<T>>]` sends only the lists that changed:
+
+```csharp
+public record struct Loot(int Item);
+
+public partial class PickupSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Pick(ref DynamicBuffer<Loot> bag)                          // ref: a tracked write
+    {
+        if (bag.Count == 8) bag.RemoveAt(0);                               // a full bag drops its oldest item
+        bag.Add(new Loot(1));
+    }
+}
+```
+
+```csharp
+var hero = world.CreateEntity(new DynamicBuffer<Loot>(), new Health(100));  // no list until the first write
+hero.Get<DynamicBuffer<Loot>>().EnsureCapacity(8);                         // reserve room: no growth later
+foreach (var loot in hero.Read<DynamicBuffer<Loot>>()) { }                  // a read: not a change
+```
+
+Items with state of their own (durability, enchantments) are entities pointing at their owner instead (next step).
+See [Dynamic buffers](guide/dynamic-buffers.md).
+
+## 17. Find entities by value, follow relations
 
 A tracked component implementing `IIndexed<TKey>` is found by its key through `world.Index<T, TKey>()`, which
 follows every write. An `Entity` key makes a relation: the index lists the entities pointing at an entity.
@@ -368,7 +397,7 @@ foreach (var shot in world.Index<OwnedBy, Entity>().Find(archer))
 
 See [Indexes and relations](guide/indexes-and-relations.md).
 
-## 17. Batches, snapshots, timings
+## 18. Batches, snapshots, timings
 
 ```csharp
 var units = new Entity[10_000];
@@ -389,6 +418,7 @@ benchmark and a test of this repository.
 
 - [ECS principles](ecs-principles.md): design features as data plus one-job systems.
 - [Guide](README.md#guide): one page per concept, including [change tracking](guide/change-tracking.md) (systems that
-  visit only what changed) and [indexes and relations](guide/indexes-and-relations.md) (find entities by value).
+  visit only what changed), [dynamic buffers](guide/dynamic-buffers.md) (a list per entity) and
+  [indexes and relations](guide/indexes-and-relations.md) (find entities by value).
 - [Performance guide](performance.md): which API to use when.
 - [API reference](api.md): every public API and its complexity.
