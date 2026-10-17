@@ -24,6 +24,9 @@ feature stays here with its reason, so it is not proposed again without new fact
 | [D13](#d13-one-owner-thread-per-world) | One owner thread per world |
 | [D14](#d14-no-shared-components) | No shared components |
 | [D15](#d15-net100-only) | .NET 10 only |
+| [D16](#d16-no-partial-generated-code-lives-outside-the-users-type) | No `partial`: generated code lives outside the user's type |
+| [D17](#d17-unloading-removes-types-from-worlds-bits-are-reused) | Unloading removes types from worlds; bits are reused |
+| [D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references) | No interceptors for query calls; filters carry no references |
 
 ## D1. State changes are data: no events or callbacks
 
@@ -213,3 +216,49 @@ scheduler could not see.
 
 **Why.** It relies on C# 14 extension members, `Vector256`, pinned object heap columns and current JIT behavior that
 older runtimes lack.
+
+## D16. No `partial`: generated code lives outside the user's type
+
+**Decision.** The generator writes a `[ForEach]` method's job in a `file` class of its own and calls the method,
+private or not, through `[UnsafeAccessor]`. A system's update and access set are a `SystemCode` registered by a module
+initializer (held weakly, so a collectible assembly can unload); a runner's entry point is a C# 14 static extension
+member of its type. Types the generated code cannot name (a private component, a private runner type) are EECS022.
+
+**Why.** A system is an ordinary class: no `partial` on it or on its outer types, nothing generated in its body, so
+generated members cannot collide with the user's. `UnsafeAccessor` compiles to the direct call (the same machine
+code, inlined), and the ticks did not move (ForEachSystemWrite, ParallelSystems within noise).
+
+**Considered.** Partial classes (EECS001 when missing, members injected into the user's type); delegates or function
+pointers to the methods (an indirect call per row, no inlining); reflection at startup (no AOT).
+
+## D17. Unloading removes types from worlds; bits are reused
+
+**Decision.** `world.RemoveTypes(assembly or context)` takes an assembly's systems, singletons, indexes, groupings and
+components out of the world. Entities stay; tables that had one of its columns are dropped with every cache naming
+them. When a collectible context unloads, EasyEcs forgets its save names, and its component bits are reused once no
+live world mentions them. A reload keeps data through `Save` and `Load`, which map types by name.
+
+**Why.** Game logic reloaded in a long-running server must leave nothing rooting the old assembly (column arrays,
+transition edges, query cache keys, registries), and repeated reloads must not grow every mask. Dropping tables is
+the one place a table is deleted outside `Dispose`, so steady-state code pays nothing (CreateAddDestroy, Prefab and
+WorldSimulation within noise).
+
+**Considered.** Migrating rows from the old types to the new ones in memory (needs a type map for every field; `Save`
+/ `Load` already map by name and field hash); never reusing bits (the mask grows by every reloaded component).
+
+## D18. No interceptors for query calls; filters carry no references
+
+**Decision.** Query calls are not intercepted. `QueryFilter` holds its five sets' first 256 bits inline and its bits
+past 255 as an interned id, so it holds no object reference, and its builder copies it once per call.
+
+**Why.** An interceptor replaces the method a call binds to, but the call's arguments are still evaluated, so a
+filter built at the call is built either way; caching a query entry per call site would save only the memo lookup the
+call already makes. The cost was the filter itself: five masks with an overflow reference each made every builder
+call two copies through `BulkMoveWithWriteBarrier` and zeroed the caller's frame. Without references, counting 16
+entities with `QueryFilter.Create().With<Npc>().Without<Dead>().Without<Frozen>()` built at the call takes 76 ns
+against 124 ns, and with the filter in a static field 24 ns as before (`CallSiteBenchmark`). Hoisting stays the
+advice for hot calls.
+
+**Considered.** Interceptors with a static filter and a cached entry per site (the arguments make it moot); an
+analyzer warning for filters built at the call (most calls are cold; the docs teach the static field).
+

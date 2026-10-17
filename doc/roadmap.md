@@ -37,6 +37,11 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
   are reused once no live world mentions them. A reload keeps the data: `Save`, remove, unload, load the new version,
   `Load`. Steady state unchanged (CreateAddDestroy 1.02-1.03 ms against 1.06-1.08 ms, Prefab and WorldSimulation
   within noise, same allocations).
+- Generator and analyzer on Roslyn 5.0: the analyzer knows generated writers by their extension-block symbols (a
+  component named `Settings` is read through `entity.Settings`, which counted as a write and hid an EECS013); no build
+  warnings.
+- `QueryFilter` without object references (bits past 255 interned): a filter built at the call costs 76 ns instead of
+  124 ns (counting 16 entities; 24 ns from a static field) ([D18](decisions.md#d18-no-interceptors-for-query-calls-filters-carry-no-references)).
 
 ### Dropped
 
@@ -44,29 +49,20 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
   ([D4](decisions.md#d4-no-addedt-filter)).
 - Command buffers for parallel jobs: a parallel job writes data, a system after it changes structure
   ([D3](decisions.md#d3-no-command-buffer-for-parallel-jobs)).
+- Interceptors for query call sites: the call's arguments are still evaluated, so a filter built at the call is built
+  anyway ([D18](decisions.md#d18-no-interceptors-for-query-calls-filters-carry-no-references)). `AddEmbeddedAttributeDefinition`:
+  the generators write no attribute types (the attributes are EasyEcs.Core's).
 
 ### Source generators
 
-The toolchain floor is the .NET 10 SDK (C# 14, Roslyn 5.0; SDK 10.0.4xx ships Roslyn 5.9). The generator still builds
-against Roslyn 4.8, so the APIs below are unused. In order:
+The toolchain floor is the .NET 10 SDK (C# 14, Roslyn 5.0), which the generator builds against. In order:
 
-1. Roslyn 5.0 for the generator and the analyzer:
-   - C# 14 extension-block symbols for the members ComponentGenerator writes (exact instead of name-based).
-   - `AddEmbeddedAttributeDefinition` for generated attributes.
-   - The interceptor API (`GetInterceptableLocation`).
-2. Interceptors for query call sites. The generator replaces `world.Query<…>(QueryFilter.Create()…)`, `Count`, `Any`,
-   `SetAll` / `RemoveAll` and `ForEach` calls whose filter is built at the call with:
-   - a static filter built once;
-   - a cached query entry per call site, so the call does no filter construction and no memo lookup.
-   This covers the planned filter-hoisting diagnostic and the per-system cached query entry, for every call site.
-   The NuGet package sets `InterceptorsNamespaces` in its `build/` props. Measure the lookup first; ship only as a
-   net win.
-3. Settable tag properties (C# 14 extension properties): `entity.IsDead = true` adds the tag, `false` removes it. The
+1. Settable tag properties (C# 14 extension properties): `entity.IsDead = true` adds the tag, `false` removes it. The
    analyzer counts the setter as a structural change (EECS010 / EECS013).
-4. Generic systems and runners (`UnsafeAccessor` on generic types, .NET 9+), which lifts EECS004 where the generator can
+2. Generic systems and runners (`UnsafeAccessor` on generic types, .NET 9+), which lifts EECS004 where the generator can
    close the type.
-5. A filter declared once on a system group, applied by the generator to every `[ForEach]` of the group.
-6. Code fixes for the analyzer's diagnostics.
+3. A filter declared once on a system group, applied by the generator to every `[ForEach]` of the group.
+4. Code fixes for the analyzer's diagnostics.
 
 Runtime (.NET 10 / C# 14), each measured with BDN and kept only as a net win:
 
