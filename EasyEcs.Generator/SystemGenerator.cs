@@ -53,10 +53,15 @@ public sealed class SystemGenerator : IIncrementalGenerator
             // [Changed<T>]: rows written since this system last ran.
             string filter = method.Changed.Length > 0 ? $", __{method.Name}Filter.ChangedSince(LastRunTick + 1)"
                 : method.HasFilter ? $", in __{method.Name}Filter" : "";
-            string system = method.IsStatic ? "" : "System = this, ";
-            string singletons = string.Concat(method.Parameters.Select((p, i) => p.Kind == Symbols.ParamKind.Singleton
-                ? method.Parallel ? $", s{i} = world.SingletonRef<{p.Type}>()" : $", s{i} = ref world.SingletonRef<{p.Type}>().Value" : ""));
-            sb.Append($"        var __{method.Name} = new __{method.Name}Job {{ {system}World = world{singletons} }};\n");
+            var fields = new List<string>();
+            if (!method.IsStatic) fields.Add("System = this");
+            if (TakesWorld(method)) fields.Add("World = world");
+            for (int i = 0; i < method.Parameters.Length; i++)
+                if (method.Parameters[i].Kind == Symbols.ParamKind.Singleton)
+                    fields.Add(method.Parallel ? $"s{i} = world.SingletonRef<{method.Parameters[i].Type}>()"
+                        : $"s{i} = ref world.SingletonRef<{method.Parameters[i].Type}>().Value");
+            string init = fields.Count == 0 ? "" : $" {string.Join(", ", fields)} ";
+            sb.Append($"        var __{method.Name} = new __{method.Name}Job {{{init}}};\n");
             string forEach = method.IsBatch ? "ForEachBatch" : method.TakesEntity ? "ForEachEntity" : "ForEach";
             if (method.Parallel) forEach += "Parallel";
             sb.Append($"        world.{forEach}<{method.ComponentTypes}, __{method.Name}Job>(ref __{method.Name}{filter});\n");
@@ -98,6 +103,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append("    }\n");
     }
 
+    private static bool TakesWorld(ForEachModel method) =>
+        method.Parameters.Any(p => p.Kind == Symbols.ParamKind.World);
+
     private static void EmitJob(StringBuilder sb, OwnerModel owner, ForEachModel method)
     {
         string job = $"__{method.Name}Job";
@@ -121,7 +129,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string kind = method.Parallel ? "struct" : "ref struct";
         sb.Append($"    private {kind} {job} : global::EasyEcs.{iface}<{method.ComponentTypes}>{marker}\n    {{\n");
         if (!method.IsStatic) sb.Append($"        public {owner.Name} System;\n");
-        sb.Append("        public global::EasyEcs.World World;\n");
+        // Only when the method takes the World: an unused field would still be copied into the row loop, where it
+        // holds a callee-saved register a job that calls out (a structural change) needs for its loop state.
+        if (TakesWorld(method)) sb.Append("        public global::EasyEcs.World World;\n");
         for (int i = 0; i < method.Parameters.Length; i++)
             if (method.Parameters[i].Kind == Symbols.ParamKind.Singleton) // resolved once per pass, not per entity
                 sb.Append(method.Parallel

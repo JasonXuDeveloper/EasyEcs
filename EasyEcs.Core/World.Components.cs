@@ -15,6 +15,7 @@ public sealed partial class World
     /// instead of being filled by the last row; the last pass to end closes them (<see cref="EndPass"/>).
     /// </summary>
     internal int Passes;
+    internal long _stop; // where the last structural row loop stopped (see the generated ForEach loops)
 
     // Archetypes with tombstones, closed when the last pass ends (each registered once: Archetype.Dirty).
     private Archetype[] _dirty = new Archetype[8];

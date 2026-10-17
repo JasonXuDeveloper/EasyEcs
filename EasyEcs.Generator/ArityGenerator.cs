@@ -424,7 +424,12 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     if (typeof(INoStructuralChanges).IsAssignableFrom(typeof(TJob)))
                     {
                         // The job cannot change rows or reallocate storage (the type test is a JIT-time constant). The row
-                        // loops live in small methods of their own, so the JIT keeps their refs in registers.
+                        // loops live in small methods of their own, so the JIT keeps their refs in registers. They take the
+                        // job by value and return it: its fields are locals there (registers, not reloaded every row), and
+                        // a job of up to 16 bytes travels in registers, so no pointer back to it stays live across the
+                        // loop. A job that calls out on some rows (a write barrier, a structural change) clobbers the
+                        // caller-saved registers, and with one more value held across the call a row ref would spill and
+                        // round-trip the stack every row.
                         for (int ai = 0; ai < archetypes.Length; ai++)
                         {
                             var archetype = archetypes[ai];
@@ -433,12 +438,12 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             int mode = rows.Mode(archetype);
                             if (archetype.AliveCount == 0 || mode == RowFilter.None) continue;
                             if (mode == RowFilter.Test)
-                                {{name}}Filtered<{{tps}}, TJob>(ref job, archetype, rows, 0, count, {{bits}});
+                                job = {{name}}Filtered<{{tps}}, TJob>(job, archetype, rows, 0, count, {{bits}});
                             else if (count == archetype.AliveCount)
-                                {{name}}Rows<{{tps}}, TJob>(ref job, archetype, 0, count, {{bits}}); // dense table
+                                job = {{name}}Rows<{{tps}}, TJob>(job, archetype, 0, count, {{bits}}); // dense table
                             else // tombstones: runs of alive rows, found with vectorized scans
                                 for (int start = 0; archetype.NextRun(ref start, count, out int length); start += length)
-                                    {{name}}Rows<{{tps}}, TJob>(ref job, archetype, start, start + length, {{bits}});
+                                    job = {{name}}Rows<{{tps}}, TJob>(job, archetype, start, start + length, {{bits}});
                         }
 
                         return;
@@ -466,9 +471,10 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             // their row state live across the job. A table whose rows all pass takes the lean loop.
                             for (int at = 0; at < count && mode != RowFilter.None;)
                             {
-                                long stop = mode == RowFilter.All
-                                    ? {{name}}Live<{{tps}}, TJob>(ref job, archetype, at, count, {{bits}})
-                                    : {{name}}LiveTested<{{tps}}, TJob>(ref job, archetype, rows, at, count, {{bits}});
+                                job = mode == RowFilter.All
+                                    ? {{name}}Live<{{tps}}, TJob>(job, archetype, at, count, {{bits}})
+                                    : {{name}}LiveTested<{{tps}}, TJob>(job, archetype, rows, at, count, {{bits}});
+                                long stop = _stop;
                                 if (stop < 0) break; // the rows ran out without a structural change
                                 at = count - (int)stop;
                                 int moved = (int)(stop >> 32);
@@ -485,42 +491,40 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                 /// <summary>
                 /// Rows [<paramref name="start"/>, <paramref name="count"/>) of a pass that may make structural changes,
-                /// while every row passes the query. Returns -1 when the rows ran out, or, after a structural change, the
-                /// rows left after the visited one (low 32 bits; the caller knows <paramref name="count"/>) and the visited
-                /// entity (high 32 bits): the caller refreshes and carries over. One return value, not an out parameter,
-                /// and no row index or count live across the job keep registers free for the loop.
+                /// while every row passes the query. Returns the job; sets <c>_stop</c> to -1 when the rows ran out, or,
+                /// after a structural change, to the rows left after the visited one (low 32 bits; the caller knows
+                /// <paramref name="count"/>) and the visited entity (high 32 bits): the caller refreshes and carries over.
                 /// </summary>
                 [MethodImpl(MethodImplOptions.NoInlining)] // per table or run: kept out of the caller, which profile-guided
                 // inlining would otherwise grow until the loop's refs spill to the stack
-                private long {{name}}Live<{{tps}}, TJob>(ref TJob jobRef, Archetype archetype, int start, int count, {{ushorts}})
+                private TJob {{name}}Live<{{tps}}, TJob>(TJob job, Archetype archetype, int start, int count, {{ushorts}})
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
-                    // A local copy of the job: its fields stay in registers. Read through jobRef, they would be
-                    // loaded again every row (a write through a ref the job hands out might alias the caller's job).
-                    TJob job = jobRef;
-                    // The loop walks refs and counts down: no row index stays live across the job (the row is count - left,
-                    // computed only to stamp a tracked write), so the job's own values keep more registers.
+                    // The loop walks refs up to an end ref: no row index or count stays live across the job (the row
+                    // is computed only to stamp a tracked write), so the job's own values keep more registers.
                     int seen = StorageVersion;
-                    ref EntitySlot idp = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Slots), start);
+                    ref EntitySlot slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
+                    ref EntitySlot idp = ref Unsafe.Add(ref slots, start);
+                    ref EntitySlot end = ref Unsafe.Add(ref slots, count);
             {{startAt}}
-                    for (int left = count - start; left > 0; left--, idp = ref Unsafe.Add(ref idp, 1), {{advance}})
+                    for (; Unsafe.IsAddressLessThan(ref idp, ref end); idp = ref Unsafe.Add(ref idp, 1), {{advance}})
                     {
                         int id = idp.Id;
                         if (id < 0) continue; // tombstone
 
-            {{StampRow(n, "            ", "count - left")}}
+            {{StampRow(n, "            ", "(int)(Unsafe.ByteOffset(ref slots, ref idp) / Unsafe.SizeOf<EntitySlot>())")}}
                         {{execute}}
 
                         if (seen != StorageVersion)
                         {
-                            jobRef = job;
-                            return (long)id << 32 | (uint)(left - 1);
+                            _stop = (long)id << 32 | (uint)(Unsafe.ByteOffset(ref idp, ref end) / Unsafe.SizeOf<EntitySlot>() - 1);
+                            return job;
                         }
                     }
 
-                    jobRef = job;
-                    return -1;
+                    _stop = -1;
+                    return job;
                 }
 
                 /// <summary>
@@ -531,13 +535,10 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 /// </summary>
                 [MethodImpl(MethodImplOptions.NoInlining)] // per table or run: kept out of the caller, which profile-guided
                 // inlining would otherwise grow until the loop's refs spill to the stack
-                private long {{name}}LiveTested<{{tps}}, TJob>(ref TJob jobRef, Archetype archetype, RowFilter rows, int start, int count, {{ushorts}})
+                private TJob {{name}}LiveTested<{{tps}}, TJob>(TJob job, Archetype archetype, RowFilter rows, int start, int count, {{ushorts}})
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
-                    // A local copy of the job: its fields stay in registers. Read through jobRef, they would be
-                    // loaded again every row (a write through a ref the job hands out might alias the caller's job).
-                    TJob job = jobRef;
                     // Refs walk the rows as in the lean loop; i, the run's end, is fixed during the run (the row is
                     // i - run), so no index changes across the job.
                     int seen = StorageVersion;
@@ -568,26 +569,23 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                             if (seen != StorageVersion)
                             {
-                                jobRef = job;
-                                return (long)id << 32 | (uint)(count - (i - run + 1));
+                                _stop = (long)id << 32 | (uint)(count - (i - run + 1));
+                                return job;
                             }
                         }
                     }
 
-                    jobRef = job;
-                    return -1;
+                    _stop = -1;
+                    return job;
                 }
 
                 /// <summary>Rows [<paramref name="start"/>, <paramref name="end"/>) of a stable pass: every row is alive.</summary>
                 [MethodImpl(MethodImplOptions.NoInlining)] // per table or run: kept out of the caller, which profile-guided
                 // inlining would otherwise grow until the loop's refs spill to the stack
-                private void {{name}}Rows<{{tps}}, TJob>(ref TJob jobRef, Archetype archetype, int start, int end, {{ushorts}})
+                private TJob {{name}}Rows<{{tps}}, TJob>(TJob job, Archetype archetype, int start, int end, {{ushorts}})
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
-                    // A local copy of the job: its fields stay in registers. Read through jobRef, they would be
-                    // loaded again every row (a write through a ref the job hands out might alias the caller's job).
-                    TJob job = jobRef;
                     ref EntitySlot ids = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Slots), start);
             {{startAt}}
             {{StampRows(n, "        ", "start", "end - start")}}
@@ -599,7 +597,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             job.Execute({{Args(rowArg, List(n, i => $"ref r{i}"))}});
                     }
 
-                    jobRef = job;
+                    return job;
                 }
 
                 /// <summary>
@@ -609,13 +607,10 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 /// </summary>
                 [MethodImpl(MethodImplOptions.NoInlining)] // per table or run: kept out of the caller, which profile-guided
                 // inlining would otherwise grow until the loop's refs spill to the stack
-                private void {{name}}Filtered<{{tps}}, TJob>(ref TJob jobRef, Archetype archetype, RowFilter rows, int start, int count, {{ushorts}})
+                private TJob {{name}}Filtered<{{tps}}, TJob>(TJob job, Archetype archetype, RowFilter rows, int start, int count, {{ushorts}})
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
-                    // A local copy of the job: its fields stay in registers. Read through jobRef, they would be
-                    // loaded again every row (a write through a ref the job hands out might alias the caller's job).
-                    TJob job = jobRef;
                     bool tombstones = archetype.Count != archetype.AliveCount;
                     ref EntitySlot ids = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Slots), start);
             {{startAt}}
@@ -666,7 +661,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         ids = ref Unsafe.Add(ref ids, left);
                     }
 
-                    jobRef = job;
+                    return job;
                 }
 
                 /// <summary>
@@ -696,9 +691,9 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     where TJob : struct, {{job}}<{{tps}}>
                 {
                     if (rows.Mode(archetype) == RowFilter.All && archetype.Count == archetype.AliveCount)
-                        {{name}}Rows<{{tps}}, TJob>(ref job, archetype, start, end, {{bits}});
+                        job = {{name}}Rows<{{tps}}, TJob>(job, archetype, start, end, {{bits}});
                     else
-                        {{name}}Filtered<{{tps}}, TJob>(ref job, archetype, rows, start, end, {{bits}});
+                        job = {{name}}Filtered<{{tps}}, TJob>(job, archetype, rows, start, end, {{bits}});
                 }
 
                 /// <summary>The chunks of one <see cref="{{name}}Parallel{TJob}"/> call: (table, first row) pairs.</summary>
