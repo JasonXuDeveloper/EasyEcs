@@ -36,6 +36,19 @@ internal abstract class ComponentInfo
         _anyTracked = true;
     }
 
+    /// <summary>Bit of <see cref="Disabled{T}"/> of this component, once an entity disabled it; else -1.</summary>
+    public int Disabler { get; private set; } = -1;
+
+    /// <summary>For a <see cref="Disabled{T}"/> tag: bit of the component it disables, or -1.</summary>
+    public int DisabledOf { get; private set; } = -1;
+
+    /// <summary>Link component <paramref name="component"/> with its <see cref="Disabled{T}"/> tag <paramref name="tag"/>.</summary>
+    public static void LinkDisabled(int component, int tag)
+    {
+        Of(component).Disabler = tag;
+        Of(tag).DisabledOf = component;
+    }
+
     /// <summary>Whether any tracked component type was registered (archetype masks then get companion bits).</summary>
     public static bool AnyTracked => _anyTracked;
 

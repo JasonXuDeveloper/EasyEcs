@@ -138,7 +138,9 @@ public sealed partial class World
         int column = from.ColumnIndex(bit);
         if (column >= 0)
         {
-            if (from.MarkPresent(column, meta.Slot)) StorageVersion++; // passes re-read presence bits
+            if (!from.MarkPresent(column, meta.Slot)) return;
+            StorageVersion++; // passes re-read presence bits
+            if (from.HasDisabled) Undisable(from, column, meta.Slot);
         }
         else MoveTo(ref meta, id, from.GetAddEdge(bit) ?? CreateEdge(from, bit));
     }
@@ -156,8 +158,25 @@ public sealed partial class World
         if (!archetype.HasAbsent) return;
         bool restored = false;
         for (int i = 0; i < bits.Length; i++)
-            restored |= archetype.MarkPresent(archetype.ColumnIndex(bits[i]), meta.Slot);
+        {
+            int column = archetype.ColumnIndex(bits[i]);
+            if (!archetype.MarkPresent(column, meta.Slot)) continue;
+            restored = true;
+            if (archetype.HasDisabled) Undisable(archetype, column, meta.Slot);
+        }
+
         if (restored) StorageVersion++; // passes re-read presence bits
+    }
+
+    /// <summary>
+    /// The component of <paramref name="column"/> came back to row <paramref name="slot"/> through Set or GetOrAdd: a
+    /// <see cref="Disabled{T}"/> tag of it goes (the new value replaces the kept one). Cold: tables with such tags only.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void Undisable(Archetype archetype, int column, int slot)
+    {
+        if (archetype.Info(column).Disabler is var tag and >= 0 && archetype.ColumnIndex(tag) is var tagColumn and >= 0)
+            archetype.MarkAbsent(tagColumn, slot);
     }
 
     /// <summary>
@@ -187,12 +206,63 @@ public sealed partial class World
     private bool TakeBit(Archetype archetype, int slot, ushort bit)
     {
         int column = archetype.ColumnIndex(bit);
-        if (column < 0 || !archetype.MarkAbsent(column, slot)) return false;
+        if (column < 0) return false;
+        if (!archetype.MarkAbsent(column, slot)) return archetype.HasDisabled && DropDisabled(archetype, column, slot);
         // A tracked component's tick records the removal: Removed<T> filters find the row by its clear presence bit and
         // its new tick (Changed<T> filters require the component, so they skip the row).
         if (archetype.Tracked && archetype.Info(column).Companion is var ticks and >= 0)
             archetype.SetTick(archetype.ColumnIndex(ticks), slot, _changeTick);
         if (_indexByBit != null) Unindex(bit, archetype.Slots[slot].Index);
+        return true;
+    }
+
+    /// <summary>
+    /// Remove of a component the row keeps disabled: its <see cref="Disabled{T}"/> tag goes, and so does the kept value.
+    /// Cold: tables with such tags only.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool DropDisabled(Archetype archetype, int column, int slot)
+    {
+        var info = archetype.Info(column);
+        if (info.Disabler is not (var tag and >= 0) || archetype.ColumnIndex(tag) is not (var tagColumn and >= 0) ||
+            !archetype.MarkAbsent(tagColumn, slot)) return false;
+        if (info.Managed) info.Clear(archetype.Columns[column], slot, 1);
+        return true;
+    }
+
+    /// <summary>
+    /// Disable component <paramref name="bit"/> of entity <paramref name="id"/>: add its <see cref="Disabled{T}"/> tag
+    /// <paramref name="tag"/> and clear its presence bit, keeping the value. A tracked component's tick records it as a
+    /// removal; an indexed one leaves its index. False when the entity lacks the component. Inside the structural gate.
+    /// </summary>
+    internal bool DisableBit(ref EntityMeta meta, int id, ushort bit, ushort tag)
+    {
+        var archetype = meta.Archetype;
+        int column = archetype.ColumnIndex(bit);
+        if (column < 0 || !archetype.Has(column, meta.Slot)) return false;
+        AddBit(ref meta, id, tag); // may move the row: the value and its presence come along
+        archetype = meta.Archetype;
+        int slot = meta.Slot;
+        column = archetype.ColumnIndex(bit);
+        archetype.MarkAbsent(column, slot, keep: true);
+        if (archetype.Tracked && archetype.Info(column).Companion is var ticks and >= 0)
+            archetype.SetTick(archetype.ColumnIndex(ticks), slot, _changeTick);
+        if (_indexByBit != null) Unindex(bit, id);
+        StorageVersion++; // passes re-read presence bits
+        return true;
+    }
+
+    /// <summary>
+    /// Enable component <paramref name="bit"/> disabled by tag <paramref name="tag"/>: the row gets the kept value back.
+    /// The caller stamps and indexes it. False when the component is not disabled. Inside the structural gate.
+    /// </summary>
+    internal bool EnableBit(ref EntityMeta meta, ushort bit, ushort tag)
+    {
+        var archetype = meta.Archetype;
+        int tagColumn = archetype.ColumnIndex(tag);
+        if (tagColumn < 0 || !archetype.MarkAbsent(tagColumn, meta.Slot)) return false;
+        archetype.MarkPresent(archetype.ColumnIndex(bit), meta.Slot);
+        StorageVersion++; // passes re-read presence bits
         return true;
     }
 

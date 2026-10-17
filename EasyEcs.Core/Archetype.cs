@@ -89,6 +89,9 @@ internal sealed class Archetype
     /// <summary>Whether the table has change-tick columns (an <see cref="ITrackChanges"/> component).</summary>
     public bool Tracked => _tracked;
 
+    /// <summary>Whether the table has a <see cref="Disabled{T}"/> column (rows may keep a disabled component).</summary>
+    public readonly bool HasDisabled;
+
     /// <summary>Columns with <see cref="Present"/> bits (indices into <see cref="Columns"/>), copy-on-write.</summary>
     private short[] _bitColumns = [];
 
@@ -147,6 +150,7 @@ internal sealed class Archetype
             }
 
             _tracked |= info.Owner >= 0;
+            HasDisabled |= info.DisabledOf >= 0;
             _columnOf[Components[i]] = (short)i;
             ByBit[Components[i]].Set(Columns[i], info.Managed);
         }
@@ -223,17 +227,17 @@ internal sealed class Archetype
 
     /// <summary>
     /// Mark row <paramref name="slot"/> as lacking the component of column <paramref name="column"/>: clear its presence bit
-    /// (and a managed value, so the GC can collect what it referenced). Returns true when the row had it. Inside the
-    /// structural gate.
+    /// (and a managed value, so the GC can collect what it referenced, unless <paramref name="keep"/>: a disabled
+    /// component keeps its value). Returns true when the row had it. Inside the structural gate.
     /// </summary>
-    public bool MarkAbsent(int column, int slot)
+    public bool MarkAbsent(int column, int slot, bool keep = false)
     {
         ref ulong word = ref Word(Bits(column) ?? AllocateBits(column), slot);
         ulong bit = 1UL << slot;
         if ((word & bit) == 0) return false;
         word &= ~bit;
         AbsentOf(column)++;
-        if (_hasManaged && Info(column) is { Managed: true } info) info.Clear(Columns[column], slot, 1);
+        if (!keep && _hasManaged && Info(column) is { Managed: true } info) info.Clear(Columns[column], slot, 1);
         return true;
     }
 
@@ -571,25 +575,32 @@ internal sealed class Archetype
                 continue;
             }
 
-            if (!source.Has(c, from))
+            bool present = source.Has(c, from);
+            if (!present && !(source.HasDisabled && source.Keeps(c, from)))
             {
                 for (int row = to; row < to + count; row++) MarkAbsent(c, row);
                 continue;
             }
 
             if (info.Managed)
-            {
                 for (int row = to; row < to + count; row++) info.CloneManaged(source.Columns[c], from, Columns[c], row);
-                continue;
+            else
+            {
+                ref byte first = ref Unsafe.Add(ref Aligned(Columns[c]), (nint)to * info.Size);
+                CopyBytes(ref Unsafe.Add(ref Aligned(source.Columns[c]), (nint)from * info.Size), ref first, info.Size);
+                // Rows [to, to + done) hold the value: copy them after themselves until every row does
+                for (nint done = info.Size, total = (nint)count * info.Size; done < total; done *= 2)
+                    Unsafe.CopyBlockUnaligned(ref Unsafe.Add(ref first, done), ref first, (uint)Math.Min(done, total - done));
             }
 
-            ref byte first = ref Unsafe.Add(ref Aligned(Columns[c]), (nint)to * info.Size);
-            CopyBytes(ref Unsafe.Add(ref Aligned(source.Columns[c]), (nint)from * info.Size), ref first, info.Size);
-            // Rows [to, to + done) hold the value: copy them after themselves until every row does
-            for (nint done = info.Size, total = (nint)count * info.Size; done < total; done *= 2)
-                Unsafe.CopyBlockUnaligned(ref Unsafe.Add(ref first, done), ref first, (uint)Math.Min(done, total - done));
+            if (!present) // disabled: the copies keep the value too
+                for (int row = to; row < to + count; row++) MarkAbsent(c, row, keep: true);
         }
     }
+
+    /// <summary>Whether row <paramref name="slot"/> keeps the component of <paramref name="column"/> disabled (its <see cref="Disabled{T}"/> tag is present).</summary>
+    public bool Keeps(int column, int slot) =>
+        Info(column).Disabler is var tag and >= 0 && ColumnIndex(tag) is var tagColumn and >= 0 && Has(tagColumn, slot);
 
     /// <summary>
     /// Empty the table at once (every row is destroyed; no pass is in progress and it has no tombstones): the rows'
@@ -993,6 +1004,6 @@ internal sealed class Transition
     {
         foreach (ref readonly var step in _plan.AsSpan())
             if (!Source.Has(step.From, slot))
-                Target.MarkAbsent(step.To, targetSlot);
+                Target.MarkAbsent(step.To, targetSlot, keep: true); // a removed managed value was cleared already; a disabled one stays
     }
 }

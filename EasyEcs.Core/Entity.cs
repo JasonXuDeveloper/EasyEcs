@@ -256,6 +256,45 @@ public readonly partial struct Entity : IEquatable<Entity>
     // Set(in T1..Tn) and Remove<T1..Tn>() are generated (Entity.Structural.g.cs).
 
     /// <summary>
+    /// Disable component <typeparamref name="T"/>: the entity keeps its value but lacks it (queries, <c>Has</c>,
+    /// <c>Get</c>) until <see cref="Enable{T}"/>, and gets the tag <see cref="Disabled{T}"/>. Counts as a removal for
+    /// <c>[Removed&lt;T&gt;]</c>; an indexed component leaves its index. Returns false when the entity lacks
+    /// <typeparamref name="T"/> (or has it disabled already); throws if it is not alive. O(1); the first disable in a
+    /// table moves the row once (to the table with the tag's column). Owner thread only.
+    /// </summary>
+    public bool Disable<T>() where T : struct, IComponent
+    {
+        if (_world == null) ThrowStale();
+        using (_world!.Structural())
+        {
+            ref var meta = ref _world.Live(this);
+            return _world.DisableBit(ref meta, Index, ComponentType<T>.Bit, DisabledType<T>.Bit);
+        }
+    }
+
+    /// <summary>
+    /// Give back a component disabled by <see cref="Disable{T}"/>, with the value it kept (<c>Set</c> would replace it).
+    /// Counts as a write of a tracked component; an indexed one rejoins its index. Returns false when
+    /// <typeparamref name="T"/> is not disabled; throws if the entity is not alive. O(1). Owner thread only.
+    /// </summary>
+    public bool Enable<T>() where T : struct, IComponent
+    {
+        if (_world == null) ThrowStale();
+        using (_world!.Structural())
+        {
+            ref var meta = ref _world.Live(this);
+            ushort bit = ComponentType<T>.Bit;
+            if (!_world.EnableBit(ref meta, bit, DisabledType<T>.Bit)) return false;
+            meta.Archetype.Stamp<T>(meta.Slot, _world.ChangeTick);
+            if (ComponentType<T>.Indexed) _world.Indexed(Index, Version, in World.Row<T>(ref meta, bit));
+            return true;
+        }
+    }
+
+    /// <summary>Whether component <typeparamref name="T"/> is disabled (<see cref="Disable{T}"/>): the entity has <see cref="Disabled{T}"/>. O(1).</summary>
+    public bool IsDisabled<T>() where T : struct, IComponent => Has<Disabled<T>>();
+
+    /// <summary>
     /// A new entity of the same world with a copy of every component of this one (a <see cref="DynamicBuffer{T}"/> gets
     /// a list of its own, indexes learn the copy, tracked components count as written now); throws if this entity is
     /// not alive. To create entities from a template, use a <see cref="Prefab"/>. O(components). Owner thread only.
