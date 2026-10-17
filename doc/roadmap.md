@@ -47,6 +47,9 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
   ([D20](decisions.md#d20-generic-systems-register-the-closed-types-their-assembly-names)).
 - Filters on system groups: `[Without<Inactive>] public struct Gameplay : ISystemGroup;` joins every `[ForEach]` of
   the group's systems (EECS023 on any other struct).
+- Code fixes (EasyEcs.CodeFixes, in the package beside the generator): EECS002 / EECS012 take the parameter by `in`
+  or `ref`, EECS005 makes the method static, EECS006 makes the type a struct, EECS010 drops `Parallel = true`, EECS011
+  takes it by `ref` (or `Span`), EECS022 makes the type internal, EECS023 removes the filter.
 
 ### Dropped
 
@@ -61,11 +64,9 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
   `foreach` variable, an indexer result or a field of an `in` parameter, where ECS code holds its entities
   ([D19](decisions.md#d19-no-settable-tag-properties)).
 
-### Source generators
+### Toolchain and runtime
 
-The toolchain floor is the .NET 10 SDK (C# 14, Roslyn 5.0), which the generator builds against. In order:
-
-1. Code fixes for the analyzer's diagnostics.
+The toolchain floor is the .NET 10 SDK (C# 14, Roslyn 5.0), which the generator builds against.
 
 Runtime (.NET 10 / C# 14), each measured with BDN and kept only as a net win:
 
