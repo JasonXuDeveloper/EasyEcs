@@ -172,7 +172,51 @@ internal static class Symbols
         Entities,
         /// <summary><c>Maybe&lt;T&gt;</c>: a component the entity may lack (looked up per entity, a write when present).</summary>
         Optional,
+        /// <summary>
+        /// A value the caller passes to the entry point of a [ForEach] method outside a system (<c>ref int dead</c>, a
+        /// configuration): any type but a component, a singleton or the framework's own, by value, <c>ref</c> or <c>in</c>.
+        /// </summary>
+        Context,
     }
+
+    /// <summary>
+    /// <see cref="Classify(IParameterSymbol)"/> for a method of <paramref name="outside"/> a system: there, what is
+    /// not a component, a singleton or the framework's own is a <see cref="ParamKind.Context"/> the caller passes.
+    /// </summary>
+    public static ParamKind Classify(IParameterSymbol p, bool outside)
+    {
+        var kind = Classify(p);
+        if (kind != ParamKind.Invalid || !outside || p.RefKind is not (RefKind.None or RefKind.Ref or RefKind.In)) return kind;
+        var element = SpanElement(p.Type) ?? MaybeElement(p.Type) ?? p.Type;
+        if (Implements(element, Component) || Implements(element, Singleton)) return ParamKind.Invalid; // a component by value
+        return p.Type.ToDisplayString() is Entity or EntitySpan or World ? ParamKind.Invalid : ParamKind.Context;
+    }
+
+    /// <summary>
+    /// A [ForEach] method outside a system: static, in a partial type that is no system. The generator writes its job
+    /// and an entry point taking the world (and the caller's context parameters).
+    /// </summary>
+    public static bool IsRunner(IMethodSymbol method) => !IsSystem(method.ContainingType);
+
+    /// <summary>
+    /// The entry point of a [ForEach] method outside a system would have the signature of a method of its type with
+    /// the same name (the method itself or an overload): the World, the tick with [Changed&lt;T&gt;] / [Removed&lt;T&gt;],
+    /// then the context parameters.
+    /// </summary>
+    public static bool RunnerCollides(IMethodSymbol method)
+    {
+        var expected = new List<(string, RefKind)> { (World, RefKind.None) };
+        if (TracksSince(method)) expected.Add(("ulong", RefKind.None));
+        foreach (var p in method.Parameters)
+            if (Classify(p, true) == ParamKind.Context) expected.Add((p.Type.ToDisplayString(), p.RefKind));
+        return method.ContainingType.GetMembers(method.Name).OfType<IMethodSymbol>().Any(m =>
+            m.Parameters.Length == expected.Count && !m.GetAttributes().Any(IsGeneratorMark) && // not the entry point itself
+            m.Parameters.Select(p => (p.Type.ToDisplayString(), p.RefKind)).SequenceEqual(expected));
+    }
+
+    /// <summary>The method has [Changed&lt;T&gt;] or [Removed&lt;T&gt;] filters: outside a system its entry point takes the tick.</summary>
+    public static bool TracksSince(IMethodSymbol method) => method.GetAttributes().Any(a =>
+        a.AttributeClass is { IsGenericType: true } cls && cls.ConstructedFrom.ToDisplayString() is ChangedAttribute or RemovedAttribute);
 
     public static ParamKind Classify(IParameterSymbol p)
     {
@@ -212,11 +256,13 @@ internal static class Symbols
     public static bool IsValidForEach(IMethodSymbol method)
     {
         var type = method.ContainingType;
-        if (!IsSystem(type) || !IsPartialChain(type) || IsGenericChain(type) || method.IsGenericMethod) return false;
+        bool outside = IsRunner(method);
+        if (outside && (!method.IsStatic || RunnerCollides(method))) return false;
+        if (!IsPartialChain(type) || IsGenericChain(type) || method.IsGenericMethod) return false;
         int components = 0;
         foreach (var p in method.Parameters)
         {
-            var kind = Classify(p);
+            var kind = Classify(p, outside);
             if (kind == ParamKind.Invalid) return false;
             if (kind is ParamKind.Component or ParamKind.ComponentSpan) components++;
         }
@@ -281,6 +327,8 @@ internal static class Symbols
         if (IsBatch(method)) return "batch methods run on one thread";
         if (method.Parameters.Any(p => Classify(p) == ParamKind.Singleton && p.RefKind == RefKind.Ref))
             return "it writes a singleton, which every chunk would race on (take it as 'in')";
+        if (IsRunner(method) && method.Parameters.Any(p => Classify(p, true) == ParamKind.Context && p.RefKind == RefKind.Ref))
+            return "it takes a context parameter by 'ref', which every chunk would race on (pass it by value or 'in')";
         return null;
     }
 
@@ -328,10 +376,12 @@ internal static class Symbols
     {
         var type = member.ContainingType;
         while (type?.ContainingType != null) type = type.ContainingType; // an extension block's member: up to its class
-        return type != null && type.GetAttributes().Any(a =>
-            a.AttributeClass?.ToDisplayString() == "System.CodeDom.Compiler.GeneratedCodeAttribute"
-            && a.ConstructorArguments.Length > 0 && a.ConstructorArguments[0].Value as string == GeneratorName);
+        return type != null && type.GetAttributes().Any(IsGeneratorMark);
     }
+
+    private static bool IsGeneratorMark(AttributeData a) =>
+        a.AttributeClass?.ToDisplayString() == "System.CodeDom.Compiler.GeneratedCodeAttribute"
+        && a.ConstructorArguments.Length > 0 && a.ConstructorArguments[0].Value as string == GeneratorName;
 
     private static bool IsGeneratedWriter(string name) =>
         name.StartsWith("Set") || name.StartsWith("Remove") || name.StartsWith("GetOrAdd")

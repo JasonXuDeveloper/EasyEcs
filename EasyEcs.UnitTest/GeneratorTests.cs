@@ -127,6 +127,21 @@ public class GeneratorTests
         if (!expected.Contains("access.RunsAlone();")) Assert.That(generated, Does.Not.Contain("RunsAlone"));
     }
 
+    [TestCase("[ForEach] static void A(ref P p, ref int n, in int floor, int add) { }",
+        "public static void A(global::EasyEcs.World world, ref int n, in int floor, int add)", "x1 = ref n, x2 = ref floor, x3 = add")]
+    [TestCase("[ForEach, Changed<T>] static void A(ref P p, ref Clock c, int world) { }",
+        "public static void A(global::EasyEcs.World _world, ulong since, int world)", "__AFilter.Since(since)", "s1 = ref _world.SingletonRef")]
+    [TestCase("[ForEach(Parallel = true)] static void A(ref P p, in int k) { }", "public int x1;", "x1 = k }", "ForEachParallel<")]
+    public void RunnersGetAnEntryPoint(string members, params string[] expected)
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, $"public static partial class R {{ {members} }}"),
+            out var output, out _);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs")).ToString();
+        foreach (var line in expected) Assert.That(generated, Does.Contain(line), generated);
+        Assert.That(generated, Does.Not.Contain("GeneratedUpdate").And.Not.Contain("GeneratedAccess"));
+    }
+
     [TestCase("[ForEach] static void A(Entity e, in P p) { if (e.Has<Q>()) _ = e.Id; }", true, "")]
     [TestCase("[ForEach] static void A(Entity e, ref P p, in Q q) => e.Remove<Q>();", false, "Writes => 1;")]
     [TestCase("[ForEach] static void A(Entity e, in P p) => Use(e); static void Use(Entity e) { }", false, "Writes => 0;")]
@@ -147,7 +162,11 @@ public class GeneratorTests
     [TestCase("public partial class S : EcsSystem { [ForEach, Without<P>] static void A(Entity e) { } }", "EECS003")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref Clock c) { } }", "EECS003")]
     [TestCase("public partial class S<T> : EcsSystem { [ForEach] static void A(ref P p) { } }", "EECS004")]
-    [TestCase("public partial class S { [ForEach] static void A(ref P p) { } }", "EECS005")]
+    [TestCase("public partial class S { [ForEach] void A(ref P p) { } }", "EECS005")]                         // outside a system: static
+    [TestCase("public static class R { [ForEach] static void A(ref P p) { } }", "EECS001")]
+    [TestCase("public static partial class R { [ForEach] static void A(P p) { } }", "EECS002")]                   // a component by value
+    [TestCase("public static partial class R { [ForEach] static void A(in P p, ref int n) { } static void A(World w, ref int n) { } }", "EECS021")]
+    [TestCase("public static partial class R { [ForEach(Parallel = true)] static void A(ref P p, ref int n) { } }", "EECS010")]
     [TestCase("public class Bad : IComponent { }", "EECS006")]
     [TestCase("public record Bad : ISingletonComponent;", "EECS006")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(System.Span<P> p, ref Q q) { } }", "EECS009")]

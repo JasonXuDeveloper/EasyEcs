@@ -17,12 +17,12 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
 {
     private const string Category = "EasyEcs";
 
-    public static readonly DiagnosticDescriptor NotPartial = new("EECS001", "System must be partial",
-        "System '{0}' declares [ForEach] methods and must be partial (including containing types)",
+    public static readonly DiagnosticDescriptor NotPartial = new("EECS001", "A type with [ForEach] methods must be partial",
+        "'{0}' declares [ForEach] methods and must be partial (including containing types)",
         Category, DiagnosticSeverity.Error, true);
 
     public static readonly DiagnosticDescriptor BadParameter = new("EECS002", "Invalid [ForEach] parameter",
-        "Parameter '{0}' of [ForEach] method '{1}' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, an Entity or the World",
+        "Parameter '{0}' of [ForEach] method '{1}' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, a Maybe of one, an Entity or the World (outside a system, also a value the caller passes, of any other type)",
         Category, DiagnosticSeverity.Error, true);
 
     public static readonly DiagnosticDescriptor ComponentCount = new("EECS003", "Invalid component count",
@@ -32,8 +32,9 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "[ForEach] method '{0}' is declared in a generic type or is generic itself",
         Category, DiagnosticSeverity.Error, true);
 
-    public static readonly DiagnosticDescriptor NotASystem = new("EECS005", "[ForEach] outside a system",
-        "Type '{0}' declares [ForEach] methods but does not derive from EcsSystem", Category, DiagnosticSeverity.Error, true);
+    public static readonly DiagnosticDescriptor NotASystem = new("EECS005", "Instance [ForEach] method outside a system",
+        "[ForEach] method '{0}' is an instance method of '{1}', which is no EcsSystem: make it static (the generator writes an entry point that takes the world) or move it into a system",
+        Category, DiagnosticSeverity.Error, true);
 
     public static readonly DiagnosticDescriptor NotStruct = new("EECS006", "ECS data must be a struct",
         "'{0}' implements {1} and must be a struct: components and singletons are stored by value",
@@ -137,10 +138,15 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "Orderings apply within one group: World.Update() and World.Update<TGroup>() run their groups separately, in the " +
         "order the caller calls them. Order the systems of one group, or move the system into the other's group.");
 
+    public static readonly DiagnosticDescriptor RunnerCollision = new("EECS021", "[ForEach] entry point has the method's signature",
+        "The entry point of [ForEach] method '{0}' (the World, {1}the caller's values) would have the signature of a method '{0}' of its type: rename one of them",
+        Category, DiagnosticSeverity.Error, true,
+        "Outside a system, the generator writes an overload of a [ForEach] method that takes the World (and the change tick, for [Changed<T>] / [Removed<T>]) followed by the method's context parameters, and runs the method over every matching entity.");
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
         MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
-        RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups);
+        RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups, RunnerCollision);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -398,8 +404,8 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (type.TypeKind == TypeKind.Struct && (Symbols.Implements(type, Symbols.Component) || Symbols.Implements(type, Symbols.Singleton)))
             AnalyzeDataFields(context, type);
 
-        if (type.TypeKind != TypeKind.Class || !Symbols.IsSystem(type)) return;
-        AnalyzeSystemFields(context, type);
+        if (type.TypeKind != TypeKind.Class) return;
+        if (Symbols.IsSystem(type)) AnalyzeSystemFields(context, type);
 
         if (!type.GetMembers().OfType<IMethodSymbol>().Any(Symbols.IsForEach)) return;
         if (!Symbols.IsPartialChain(type))
@@ -478,8 +484,11 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (!Symbols.IsForEach(method)) return;
         var location = method.Locations.FirstOrDefault();
 
-        if (!Symbols.IsSystem(method.ContainingType))
-            context.ReportDiagnostic(Diagnostic.Create(NotASystem, location, method.ContainingType.Name));
+        bool outside = Symbols.IsRunner(method);
+        if (outside && !method.IsStatic)
+            context.ReportDiagnostic(Diagnostic.Create(NotASystem, location, method.Name, method.ContainingType.Name));
+        else if (outside && Symbols.RunnerCollides(method))
+            context.ReportDiagnostic(Diagnostic.Create(RunnerCollision, location, method.Name, Symbols.TracksSince(method) ? "the tick, " : ""));
         if (method.IsGenericMethod)
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, method.Name));
 
@@ -498,7 +507,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         bool valid = true;
         foreach (var p in method.Parameters)
         {
-            var kind = Symbols.Classify(p);
+            var kind = Symbols.Classify(p, outside);
             if (kind == Symbols.ParamKind.Invalid)
             {
                 valid = false;

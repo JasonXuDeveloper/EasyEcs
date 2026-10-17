@@ -148,7 +148,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         return sb.ToString();
     }
 
-    private static readonly string Version = typeof(ComponentGenerator).Assembly.GetName().Version?.ToString() ?? "";
+    internal static readonly string Version = typeof(ComponentGenerator).Assembly.GetName().Version?.ToString() ?? "";
 
     private const string Inline =
         "        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n";
