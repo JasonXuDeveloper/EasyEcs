@@ -175,8 +175,7 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void Undisable(Archetype archetype, int column, int slot)
     {
-        if (archetype.Info(column).Disabler is var tag and >= 0 && archetype.ColumnIndex(tag) is var tagColumn and >= 0)
-            archetype.MarkAbsent(tagColumn, slot);
+        if (archetype.DisablerColumn(column) is var tag and >= 0) archetype.MarkAbsent(tag, slot);
     }
 
     /// <summary>
@@ -228,12 +227,21 @@ public sealed partial class World
         int column = archetype.ColumnIndex(bit);
         if (column < 0) return false;
         if (!archetype.MarkAbsent(column, slot)) return archetype.HasDisabled && DropDisabled(archetype, column, slot);
-        // A tracked component's tick records the removal: Removed<T> filters find the row by its clear presence bit and
-        // its new tick (Changed<T> filters require the component, so they skip the row).
+        Gone(archetype, column, slot, bit);
+        return true;
+    }
+
+    /// <summary>
+    /// Component <paramref name="bit"/> (in <paramref name="column"/>) left row <paramref name="slot"/> (removed or
+    /// disabled): a tracked component's tick records it, so Removed&lt;T&gt; filters find the row by its clear presence
+    /// bit and new tick (Changed&lt;T&gt; filters require the component and skip it); an indexed one leaves its index.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void Gone(Archetype archetype, int column, int slot, ushort bit)
+    {
         if (archetype.Tracked && archetype.Info(column).Companion is var ticks and >= 0)
             archetype.SetTick(archetype.ColumnIndex(ticks), slot, _changeTick);
         if (_indexByBit != null) Unindex(bit, archetype.Slots[slot].Index);
-        return true;
     }
 
     /// <summary>
@@ -243,9 +251,8 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static bool DropDisabled(Archetype archetype, int column, int slot)
     {
+        if (archetype.DisablerColumn(column) is not (var tag and >= 0) || !archetype.MarkAbsent(tag, slot)) return false;
         var info = archetype.Info(column);
-        if (info.Disabler is not (var tag and >= 0) || archetype.ColumnIndex(tag) is not (var tagColumn and >= 0) ||
-            !archetype.MarkAbsent(tagColumn, slot)) return false;
         if (info.Managed) info.Clear(archetype.Columns[column], slot, 1);
         return true;
     }
@@ -265,9 +272,7 @@ public sealed partial class World
         int slot = meta.Slot;
         column = archetype.ColumnIndex(bit);
         archetype.MarkAbsent(column, slot, keep: true);
-        if (archetype.Tracked && archetype.Info(column).Companion is var ticks and >= 0)
-            archetype.SetTick(archetype.ColumnIndex(ticks), slot, _changeTick);
-        if (_indexByBit != null) Unindex(bit, id);
+        Gone(archetype, column, slot, bit);
         StorageVersion++; // passes re-read presence bits
         return true;
     }

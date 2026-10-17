@@ -128,6 +128,19 @@ public class AllocationTests
             players[(next + 128) % players.Length].RemoveRelation<MemberOf>(players[(next + 128) * 7 % players.Length]);
             foreach (var _ in parties.Find(party)) seen++;
 
+            // A party disbands while linked and a new one takes its id: both incarnations have links for a while.
+            var guild = world.CreateEntity(new Health(3));
+            var founder = players[next % players.Length];
+            founder.AddRelation(new MemberOf(guild));
+            var disbanded = guild.Id;
+            guild.Destroy();
+            var successor = world.CreateEntity(new Health(3));            // the recycled id
+            var joiner = players[(next + 1) % players.Length];
+            joiner.AddRelation(new MemberOf(successor));
+            founder.RemoveRelation<MemberOf>(disbanded);
+            joiner.RemoveRelation<MemberOf>(successor);
+            successor.Destroy();
+
             // Groups: an entity changes zone (a row move between group tables), a zone's rows are walked.
             var walker = walkers[next % walkers.Length];
             walker.Set(new Zone((walker.Read<Zone>().Id + 1) % 4));

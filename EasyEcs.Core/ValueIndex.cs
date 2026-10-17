@@ -24,6 +24,56 @@ public interface IIndexed<TKey> : IIndexed where TKey : IEquatable<TKey>
     TKey Key { get; }
 }
 
+/// <summary>The list of one key of an index: its first entity (or link), its length, and for a <see cref="TargetSlots"/> slot the target incarnation it belongs to.</summary>
+internal struct IndexHead
+{
+    public int First, Count, Version;
+}
+
+/// <summary>
+/// The lists of a relation index by the target's entity index, no hashing: slot i holds the list of one incarnation of
+/// entity i (Count 0: free). A target whose slot holds another incarnation's list lives in the index's dictionary, and
+/// stays there until its list empties.
+/// </summary>
+internal struct TargetSlots
+{
+    private IndexHead[] _slots;
+
+    /// <summary>The slot list of <paramref name="target"/>, or a null ref when its slot holds none of it.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public readonly ref IndexHead Find(EntityId target)
+    {
+        var slots = _slots;
+        if (slots != null && (uint)target.Index < (uint)slots.Length)
+        {
+            ref var head = ref slots[target.Index];
+            if (head.Count != 0 && head.Version == target.Version) return ref head;
+        }
+
+        return ref Unsafe.NullRef<IndexHead>();
+    }
+
+    /// <summary>
+    /// Claim the free slot of <paramref name="target"/>, which <see cref="Find"/> did not find, for its new list; a null
+    /// ref when the slot holds another incarnation's list or the target's list lives in the dictionary already
+    /// (<paramref name="elsewhere"/>).
+    /// </summary>
+    public ref IndexHead Claim(EntityId target, bool elsewhere)
+    {
+        var slots = _slots ??= [];
+        if (target.Index >= slots.Length) Array.Resize(ref _slots, Math.Max(target.Index + 1, slots.Length * 2));
+        ref var head = ref _slots[target.Index];
+        if (head.Count != 0 || elsewhere) return ref Unsafe.NullRef<IndexHead>();
+        head.Version = target.Version;
+        return ref head;
+    }
+
+    public readonly void Clear()
+    {
+        if (_slots != null) Array.Clear(_slots);
+    }
+}
+
 /// <summary>
 /// The value index of component <typeparamref name="T"/> in one world (<see cref="World.Index{T,TKey}"/>). It is kept
 /// current as values are written: <c>Set</c> and <c>CreateEntity</c> re-index the entity at once (O(1)), and entities
@@ -39,11 +89,11 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
 
     // Key -> its list (first entity id and length). Lists are doubly linked through _nodes (indexed by entity id), so
     // moving an entity between keys and dropping it are O(1) without allocation.
-    private readonly Dictionary<TKey, Head> _heads = new();
+    private readonly Dictionary<TKey, IndexHead> _heads = new();
 
     // Relations (EntityId keys): the lists by the target's index, no hashing. A target whose index is still held by
     // links to an older incarnation, and EntityId.Null, use _heads.
-    private Head[] _byTarget = [];
+    private TargetSlots _byTarget;
     private Node[] _nodes = [];
     private bool _built; // every row is indexed (false until the first lookup, and again after a restore)
 
@@ -53,12 +103,6 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
     private TKey[] _sorted;
     private int _sortedCount;
     private int _keysVersion;
-
-    private struct Head
-    {
-        public int First, Count;
-        public int Version; // _byTarget: the target incarnation the list belongs to
-    }
 
     private struct Node
     {
@@ -116,7 +160,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
     void World.IValueIndex.Reset(bool rebuild)
     {
         _heads.Clear();
-        Array.Clear(_byTarget);
+        _byTarget.Clear();
         Array.Clear(_nodes);
         _sorted = null; // sorted again by the next ordered walk (one sort instead of one insertion per key)
         _sortedCount = 0;
@@ -144,54 +188,39 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
 
     /// <summary>The list of <paramref name="key"/>, or a null ref when no entity has it.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ref Head HeadOf(TKey key)
+    private ref IndexHead HeadOf(TKey key)
     {
         if (typeof(TKey) == typeof(EntityId)) // a JIT-time constant
         {
             ref var head = ref SlotOf(key);
             if (!Unsafe.IsNullRef(ref head)) return ref head;
-            if (_heads.Count == 0) return ref Unsafe.NullRef<Head>(); // no relation outside _byTarget
+            if (_heads.Count == 0) return ref Unsafe.NullRef<IndexHead>(); // no relation outside _byTarget
         }
 
-        if (IsNull(key)) return ref Unsafe.NullRef<Head>();
+        if (IsNull(key)) return ref Unsafe.NullRef<IndexHead>();
         return ref CollectionsMarshal.GetValueRefOrNullRef(_heads, key);
     }
 
     /// <summary>The <see cref="_byTarget"/> list of relation key <paramref name="key"/>, or a null ref when it has none there.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ref Head SlotOf(TKey key)
-    {
-        var target = Unsafe.As<TKey, EntityId>(ref key);
-        if ((uint)target.Index < (uint)_byTarget.Length)
-        {
-            ref var head = ref _byTarget[target.Index];
-            if (head.Count != 0 && head.Version == target.Version) return ref head;
-        }
-
-        return ref Unsafe.NullRef<Head>();
-    }
+    private ref IndexHead SlotOf(TKey key) => ref _byTarget.Find(Unsafe.As<TKey, EntityId>(ref key));
 
     // A value-type key is never null; testing it would box it in unoptimized (tier-0) code.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsNull(TKey key) => !typeof(TKey).IsValueType && key is null;
 
     /// <summary>The list of <paramref name="key"/> (not null), created empty when no entity has it.</summary>
-    private ref Head AddHead(TKey key)
+    private ref IndexHead AddHead(TKey key)
     {
         if (typeof(TKey) == typeof(EntityId))
         {
             var target = Unsafe.As<TKey, EntityId>(ref key);
             if (!target.IsNull)
             {
-                if (target.Index >= _byTarget.Length) Array.Resize(ref _byTarget, Math.Max(target.Index + 1, _byTarget.Length * 2));
-                ref var head = ref _byTarget[target.Index];
-                if (head.Count != 0 && head.Version == target.Version) return ref head;
-                if (head.Count == 0 && (_heads.Count == 0 || !_heads.ContainsKey(key)))
-                {
-                    head.Version = target.Version;
-                    return ref head;
-                }
-                // The id's slot holds another incarnation's list (or this key already lives in _heads).
+                ref var head = ref _byTarget.Find(target);
+                if (!Unsafe.IsNullRef(ref head)) return ref head;
+                head = ref _byTarget.Claim(target, _heads.Count != 0 && _heads.ContainsKey(key));
+                if (!Unsafe.IsNullRef(ref head)) return ref head;
             }
         }
 

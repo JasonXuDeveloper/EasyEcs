@@ -38,8 +38,8 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
     private int[] _bySource = [];
 
     // Target lists by target index; a target whose index holds another incarnation's list, and only it, goes to _older.
-    private Head[] _byTarget = [];
-    private readonly Dictionary<EntityId, Head> _older = new();
+    private TargetSlots _byTarget;
+    private readonly Dictionary<EntityId, IndexHead> _older = new();
     private bool _built;
 
     private struct Link
@@ -48,11 +48,6 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
         public int Source, SourceVersion; // Source < 0: a free link
         public int Next, Prev;            // the target's list (Next stays valid after unlinking: walks step past it)
         public int NextOfSource;          // the source's list, or the free list
-    }
-
-    private struct Head
-    {
-        public int First, Count, Version;
     }
 
     internal RelationIndex(World world) => _world = world;
@@ -164,7 +159,7 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
         _linkCount = 0;
         _free = -1;
         Array.Clear(_bySource);
-        Array.Clear(_byTarget);
+        _byTarget.Clear();
         _older.Clear();
         _built = !rebuild;
     }
@@ -191,7 +186,7 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
     }
 
     /// <summary>The list of <paramref name="target"/>, or a null ref when nothing links to it.</summary>
-    private ref Head HeadOf(EntityId target)
+    private ref IndexHead HeadOf(EntityId target)
     {
         ref var head = ref SlotOf(target);
         if (!Unsafe.IsNullRef(ref head) || _older.Count == 0) return ref head;
@@ -199,29 +194,14 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ref Head SlotOf(EntityId target)
+    private ref IndexHead SlotOf(EntityId target) => ref _byTarget.Find(target);
+
+    private ref IndexHead AddHead(EntityId target)
     {
-        if ((uint)target.Index < (uint)_byTarget.Length)
-        {
-            ref var head = ref _byTarget[target.Index];
-            if (head.Count != 0 && head.Version == target.Version) return ref head;
-        }
-
-        return ref Unsafe.NullRef<Head>();
-    }
-
-    private ref Head AddHead(EntityId target)
-    {
-        if (target.Index >= _byTarget.Length) Array.Resize(ref _byTarget, Math.Max(target.Index + 1, _byTarget.Length * 2));
-        ref var head = ref _byTarget[target.Index];
-        if (head.Count != 0 && head.Version == target.Version) return ref head;
-        if (head.Count == 0 && (_older.Count == 0 || !_older.ContainsKey(target)))
-        {
-            head.Version = target.Version;
-            return ref head;
-        }
-
-        // The slot holds another incarnation's list (or this target already lives in _older).
+        ref var head = ref _byTarget.Find(target);
+        if (!Unsafe.IsNullRef(ref head)) return ref head;
+        head = ref _byTarget.Claim(target, _older.Count != 0 && _older.ContainsKey(target));
+        if (!Unsafe.IsNullRef(ref head)) return ref head;
         return ref System.Runtime.InteropServices.CollectionsMarshal.GetValueRefOrAddDefault(_older, target, out _);
     }
 

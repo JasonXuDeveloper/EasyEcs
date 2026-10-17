@@ -632,8 +632,10 @@ internal sealed class Archetype
     }
 
     /// <summary>Whether row <paramref name="slot"/> keeps the component of <paramref name="column"/> disabled (its <see cref="Disabled{T}"/> tag is present).</summary>
-    public bool Keeps(int column, int slot) =>
-        Info(column).Disabler is var tag and >= 0 && ColumnIndex(tag) is var tagColumn and >= 0 && Has(tagColumn, slot);
+    public bool Keeps(int column, int slot) => DisablerColumn(column) is var tag and >= 0 && Has(tag, slot);
+
+    /// <summary>The column of the <see cref="Disabled{T}"/> tag of the component of <paramref name="column"/>, or -1 when this table has none.</summary>
+    public int DisablerColumn(int column) => Info(column).Disabler is var tag and >= 0 ? ColumnIndex(tag) : -1;
 
     /// <summary>
     /// Empty the table at once (every row is destroyed; no pass is in progress and it has no tombstones): the rows'
