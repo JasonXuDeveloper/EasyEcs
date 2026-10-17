@@ -326,7 +326,9 @@ internal sealed class RowPlan(short[] require, short[] exclude, short[] anyOf, s
 internal readonly struct RowFilter(RowPlan plan, ulong since)
 {
     private readonly RowPlan _plan = plan;
-    private readonly ulong _since = since;
+    // At least 1: tick 0 marks rows never written nor removed (a copy's absent components), which no Removed<T> filter
+    // may select; every row holding a tracked component has a tick of at least 1, so Changed<T> filters see no difference.
+    private readonly ulong _since = Math.Max(since, 1);
 
     /// <summary>
     /// No row of the table passes: every alive row has an excluded component or lacks every WithAny component, or no

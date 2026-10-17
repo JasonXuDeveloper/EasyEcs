@@ -74,7 +74,7 @@ internal abstract class ComponentInfo
     public abstract void CopyManaged(Array source, int sourceSlot, Array target, int targetSlot);
 
     /// <summary>
-    /// Copy a managed element into another entity (<see cref="World.Instantiate(Entity)"/>): like
+    /// Copy a managed element into another entity (<see cref="World.Instantiate(Prefab)"/>, <see cref="Entity.Clone"/>): like
     /// <see cref="CopyManaged"/>, but a <see cref="DynamicBuffer{T}"/> gets a list of its own.
     /// </summary>
     public abstract void CloneManaged(Array source, int sourceSlot, Array target, int targetSlot);

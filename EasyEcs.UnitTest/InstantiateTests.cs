@@ -110,6 +110,10 @@ public class InstantiateTests
         var changed = QueryFilter.Create().Changed<Armor>(now);
         Assert.That(world.Count<Armor>(changed), Is.EqualTo(copies.Length));        // only the copies are new
         Assert.That(world.Count<Seen>(QueryFilter.Create().Removed<Armor>(1)), Is.Zero);
+        var lacking = world.Instantiate(new Prefab().Set(new Seen()).Set(new Armor()).Remove<Armor>());
+        Assert.That(world.Count<Seen>(QueryFilter.Create().Removed<Armor>(0)), Is.Zero); // tick 0: lacking, not lost
+        lacking.Set(new Armor(1)).Remove<Armor>();
+        Assert.That(world.Count<Seen>(QueryFilter.Create().Removed<Armor>(0)), Is.EqualTo(1));
         Assert.That(world.Count<Position>(), Is.Zero);                              // absent in every copy
         foreach (var e in copies)
             Assert.That((e.Read<Armor>(), e.Read<Seen>(), e.Has<Position>()), Is.EqualTo((new Armor(2), new Seen(3), false)));
