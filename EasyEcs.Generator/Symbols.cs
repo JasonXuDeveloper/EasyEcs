@@ -306,6 +306,10 @@ internal static class Symbols
         };
     }
 
+    /// <summary>A component or singleton struct taken by value: <c>in</c> (read) or <c>ref</c> (write) makes it a valid parameter.</summary>
+    public static bool ByValueData(IParameterSymbol p) =>
+        p.RefKind == RefKind.None && p.Type.IsValueType && (IsA(p.Type, Component) || IsA(p.Type, Singleton));
+
     /// <summary>Element type of a <c>Span&lt;T&gt;</c> / <c>ReadOnlySpan&lt;T&gt;</c>, else null.</summary>
     public static ITypeSymbol? SpanElement(ITypeSymbol type) =>
         type is INamedTypeSymbol { IsGenericType: true } named &&

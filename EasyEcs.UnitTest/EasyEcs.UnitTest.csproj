@@ -14,6 +14,8 @@
         <PackageReference Include="NUnit.Analyzers" Version="4.15.0"/>
         <!-- generator tests drive EasyEcs.Generator through Roslyn -->
         <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0"/>
+        <!-- code fix tests apply EasyEcs.CodeFixes in a workspace -->
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.0.0"/>
         <!-- [NinoType] components in SerializationTests -->
         <PackageReference Include="Nino.Generator" Version="4.0.0-rc.4"/>
     </ItemGroup>
@@ -22,6 +24,7 @@
         <ProjectReference Include="..\EasyEcs.Core\EasyEcs.Core.csproj"/>
         <!-- as analyzer: generates [ForEach] systems in this assembly; as reference: driven directly by GeneratorTests -->
         <ProjectReference Include="..\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="true"/>
+        <ProjectReference Include="..\EasyEcs.CodeFixes\EasyEcs.CodeFixes.csproj"/>
         <!-- the README's battle server, compiled unchanged (BattleServerTests) -->
         <Compile Include="..\EasyEcs.Benchmark\BattleServer.cs" Link="BattleServer.cs"/>
     </ItemGroup>

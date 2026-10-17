@@ -153,6 +153,9 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "[With<T>], [Without<T>] and [WithAny<T>] on an ISystemGroup struct join every [ForEach] method of the group's " +
         "systems. On any other struct (a component) they do nothing.");
 
+    // EECS002's property for its code fix (EasyEcs.CodeFixes): a component or singleton taken by value.
+    public const string ByValue = "ByValue";
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
         MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
@@ -338,7 +341,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         };
         if (Symbols.ReadOnlyRoot(target) is { } parameter)
             context.ReportDiagnostic(Diagnostic.Create(ReadOnlyWrite, context.Operation.Syntax.GetLocation(),
-                parameter.ContainingSymbol.Name, parameter.Name));
+                parameter.Locations, parameter.ContainingSymbol.Name, parameter.Name)); // the parameter: its code fix
         if (Symbols.IndexedRoot(target) is { } indexed)
             context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, context.Operation.Syntax.GetLocation(), indexed.Name,
                 "this writes it through a ref"));
@@ -504,7 +507,8 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (method.IsGenericMethod && !outside)
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, method.Name));
         if (Symbols.Unnameable(method) is { } unnameable)
-            context.ReportDiagnostic(Diagnostic.Create(Unnameable, location, method.Name, unnameable.Name));
+            context.ReportDiagnostic(Diagnostic.Create(Unnameable, location, unnameable.Locations.Where(l => l.IsInSource), // the type: its code fix
+                method.Name, unnameable.Name));
 
         var removed = new System.Collections.Generic.List<ITypeSymbol>();
         foreach (var attribute in method.GetAttributes())
@@ -531,7 +535,8 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             if (kind == Symbols.ParamKind.Invalid)
             {
                 valid = false;
-                context.ReportDiagnostic(Diagnostic.Create(BadParameter, p.Locations.FirstOrDefault(), p.Name, method.Name));
+                context.ReportDiagnostic(Diagnostic.Create(BadParameter, p.Locations.FirstOrDefault(),
+                    Symbols.ByValueData(p) ? ImmutableDictionary<string, string?>.Empty.Add(ByValue, "") : null, p.Name, method.Name));
             }
             else if (kind == Symbols.ParamKind.Optional && Symbols.MaybeElement(p.Type) is { } optional && Symbols.IsIndexed(optional))
                 context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, p.Locations.FirstOrDefault(), optional.Name,

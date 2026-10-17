@@ -393,7 +393,7 @@ public class GeneratorTests
     }
 
     /// <summary>Framework references of the running test host (enough for the generated code to compile).</summary>
-    private static class Basic
+    internal static class Basic
     {
         public static readonly ImmutableArray<MetadataReference> References = ((string)System.AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(System.IO.Path.PathSeparator)
