@@ -13,9 +13,9 @@ public record struct Stun(int Ticks) : IComponent;        // gained and lost oft
 public record struct Armor(int Value) : IComponent, ITrackChanges;   // tracked: rows record their last write
 public record struct Seen(int Count) : IComponent;       // how often a Changed<Armor> method visited the entity
 public record struct Shield(int Value) : IComponent, ITrackChanges;  // a second tracked component
-public record struct ChildOf(EntityId Parent) : IComponent, IIndexed<EntityId>  // a relation: indexed by its target
+public record struct Follows(EntityId Target) : IComponent, IIndexed<EntityId> // a relation: indexed by its target
 {
-    public EntityId Key => Parent;
+    public EntityId Key => Target;
 }
 public record struct Callsign(string Value) : IComponent, IIndexed<string> // a managed key
 {

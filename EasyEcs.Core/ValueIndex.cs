@@ -69,6 +69,12 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
         return new Matches(this, Unsafe.IsNullRef(ref head) ? -1 : head.First);
     }
 
+    /// <summary>Index every row now if the index is not built (before entering the structural gate).</summary>
+    internal void Prepare()
+    {
+        if (!_built) Build();
+    }
+
     /// <summary>The first entity found with key <paramref name="key"/> (any, when several have it).</summary>
     public bool TryFind(TKey key, out Entity entity)
     {

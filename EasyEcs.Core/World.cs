@@ -167,13 +167,20 @@ public sealed partial class World : IDisposable
     [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
     internal void DestroyEntity(Entity entity)
     {
+        PrepareCascade();
         using (Structural())
         {
             int id = entity.Index;
             ref var meta = ref MetaRef(id); // ids of this world's handles are always < Meta.Length
             if (meta.Archetype == null || meta.Version != entity.Version) return;
-            if (meta.Archetype.HasCleanup) Retire(ref meta, id);
+            if (meta.Archetype.HasCleanup)
+            {
+                if (!Retire(ref meta, id)) return;
+            }
             else Free(ref meta, id);
+
+            Orphaned(entity.Id);
+            if (_parentCount != 0) DestroyChildren();
         }
     }
 
@@ -230,6 +237,7 @@ public sealed partial class World : IDisposable
     private int DestroyMatching(QueryMatch match, ulong since)
     {
         int destroyed = 0;
+        PrepareCascade();
         using (Structural())
         {
             var archetypes = match.Archetypes;
@@ -257,12 +265,16 @@ public sealed partial class World : IDisposable
                         int slot = (w << 6) + 63 - BitOperations.LeadingZeroCount(bits);
                         int id = archetype.Slots[slot].Index;
                         if (id < 0) continue;
+                        var entity = archetype.Slots[slot];
                         if (!archetype.HasCleanup) Free(ref MetaRef(id), id);
                         else if (!Retire(ref MetaRef(id), id)) continue;
+                        Orphaned(entity);
                         destroyed++;
                     }
                 }
             }
+
+            if (_parentCount != 0) DestroyChildren();
         }
 
         return destroyed;
@@ -281,6 +293,7 @@ public sealed partial class World : IDisposable
         for (int slot = count - 1; slot >= 0; slot--) // the order Free would push them in
         {
             int id = rows[slot].Index;
+            Orphaned(rows[slot]);
             if (_indexByBit != null) Unindex(archetype, id);
             ref var meta = ref MetaRef(id);
             meta.Version++; // invalidates every outstanding handle
