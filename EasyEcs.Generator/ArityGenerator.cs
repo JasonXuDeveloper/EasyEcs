@@ -528,8 +528,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                 /// <summary>
                 /// The rows from <paramref name="start"/> of a pass that may make structural changes, testing presence
-                /// bits: the passing rows of a sparse word run one by one, runs of consecutive passing rows (through whole
-                /// words that pass) take the lean loop, a word of failing rows costs one load. Returns like
+                /// bits: words that pass whole join one run through the lean loop, the passing rows of any other word run
+                /// one by one (<c>{{name}}Bits</c>), a word of failing rows costs one load. Returns like
                 /// <c>{{name}}Live</c>.
                 /// </summary>
                 [MethodImpl(MethodImplOptions.NoInlining)] // per table: kept out of the caller like the lean loop
@@ -537,71 +537,78 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
-                    // A long run is its own call of the lean loop: the run's state stays out of the loop that runs the
-                    // job, whose registers then hold the same values as in a table where every row passes. A sparse word
-                    // (a rare status) would pay that call per row, so its rows run here, found bit by bit.
+                    // Only finds the rows: the job runs in the two row loops, each a small method of its own that the
+                    // JIT inlines the job into with registers to spare (a loop of whole words would pay a call per short
+                    // run of a word with failing rows, a loop by bit would walk a full word bit by bit).
+                    int words = (count + 63) >> 6;
+                    int run = -1; // the first row of the whole words not run yet
+                    ulong from = ulong.MaxValue << start; // the first word's rows before start fail (the shift is mod 64)
+                    for (int w = start >> 6; w < words; w++, from = ulong.MaxValue)
+                    {
+                        ulong pass = rows.Word(archetype, w) & from;
+                        if (pass == from && (w + 1) << 6 <= count)
+                        {
+                            if (run < 0) run = (w << 6) + BitOperations.TrailingZeroCount(from);
+                            // At most 4 words ahead: a structural change ends the run, and the pass then comes back here
+                            // and finds its words again (unbounded, a table of passing rows would be scanned per change).
+                            if ((w + 1) - (run >> 6) < 4) continue;
+                            job = {{name}}Live<{{tps}}, TJob>(job, archetype, run, (w + 1) << 6, {{bits}});
+                            if (Stopped((w + 1) << 6, count)) return job;
+                            run = -1;
+                            continue;
+                        }
+
+                        if (run >= 0)
+                        {
+                            job = {{name}}Live<{{tps}}, TJob>(job, archetype, run, w << 6, {{bits}});
+                            if (Stopped(w << 6, count)) return job;
+                            run = -1;
+                        }
+
+                        pass &= RowFilter.RowMask(w, count);
+                        if (pass == 0) continue;
+                        job = {{name}}Bits<{{tps}}, TJob>(job, archetype, w, pass, count, {{bits}});
+                        if (_stop >= 0) return job;
+                    }
+
+                    if (run >= 0)
+                    {
+                        job = {{name}}Live<{{tps}}, TJob>(job, archetype, run, words << 6, {{bits}}); // whole words: <= count
+                        if (Stopped(words << 6, count)) return job;
+                    }
+
+                    _stop = -1;
+                    return job;
+                }
+
+                /// <summary>
+                /// The rows of word <paramref name="w"/> set in <paramref name="pass"/>, one by one, in a pass that may make
+                /// structural changes. Returns like <c>{{name}}Live</c> (rows left counted to <paramref name="count"/>).
+                /// </summary>
+                [MethodImpl(MethodImplOptions.NoInlining)] // per word: the row comes from the bit, no ref per column stays live
+                private TJob {{name}}Bits<{{tps}}, TJob>(TJob job, Archetype archetype, int w, ulong pass, int count, {{ushorts}})
+            {{Constraints(n, "        ")}}
+                    where TJob : struct, {{job}}<{{tps}}>, allows ref struct
+                {
                     int seen = StorageVersion;
                     ref EntitySlot slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
             {{Lines(n, i => $"            ref T{i} c{i} = ref archetype.Base<T{i}>(b{i});")}}
-                    int words = (count + 63) >> 6;
-                    for (int i = start; i < count;)
+                    for (; pass != 0; pass &= pass - 1)
                     {
-                        int w = i >> 6;
-                        ulong pass = rows.Word(archetype, w) & (ulong.MaxValue << i); // shift is mod 64
-                        if (pass == 0)
+                        int row = (w << 6) + BitOperations.TrailingZeroCount(pass);
+                        ref EntitySlot idp = ref Unsafe.Add(ref slots, row);
+                        int id = idp.Id;
+                        if (id < 0) continue; // tombstone
+            {{Lines(n, i => $"            ref T{i} r{i} = ref Unsafe.Add(ref c{i}, row);")}}
+
+            {{StampRow(n, "        ", "row")}}
+                        {{execute}}
+
+                        if (seen != StorageVersion)
                         {
-                            i = (w + 1) << 6;
-                            continue;
-                        }
-
-                        int first = (w << 6) + BitOperations.TrailingZeroCount(pass);
-                        if (first >= count) break;
-                        if (BitOperations.PopCount(pass) <= 16)
-                        {
-                            for (pass &= RowFilter.RowMask(w, count); pass != 0; pass &= pass - 1)
-                            {
-                                int row = (w << 6) + BitOperations.TrailingZeroCount(pass);
-                                ref EntitySlot idp = ref Unsafe.Add(ref slots, row);
-                                int id = idp.Id;
-                                if (id < 0) continue; // tombstone
-            {{Lines(n, i => $"                    ref T{i} r{i} = ref Unsafe.Add(ref c{i}, row);")}}
-
-            {{StampRow(n, "                ", "row")}}
-                                {{execute}}
-
-                                if (seen != StorageVersion)
-                                {
-                                    _stop = (long)id << 32 | (uint)(count - 1 - row);
-                                    return job;
-                                }
-                            }
-
-                            i = (w + 1) << 6;
-                            continue;
-                        }
-
-                        // The shift fills zeros, so ~ stops the run at the word's end; a run to the end goes on through the
-                        // next words while they pass whole.
-                        int length = BitOperations.TrailingZeroCount(~(pass >> first));
-                        int end = first + length;
-                        if ((end & 63) == 0)
-                            for (ulong next; ++w < words && (next = rows.Word(archetype, w)) != 0;)
-                            {
-                                int more = BitOperations.TrailingZeroCount(~next);
-                                end += more;
-                                if (more < 64) break;
-                            }
-
-                        end = Math.Min(end, count);
-                        job = {{name}}Live<{{tps}}, TJob>(job, archetype, first, end, {{bits}});
-                        long stop = _stop;
-                        if (stop >= 0) // a structural change: the rows left are counted from the table's end
-                        {
-                            _stop = stop & unchecked((long)0xFFFF_FFFF_0000_0000) | (uint)(count - end + (int)stop);
+                            _stop = (long)id << 32 | (uint)(count - 1 - row);
                             return job;
                         }
-
-                        i = end;
                     }
 
                     _stop = -1;

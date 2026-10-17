@@ -17,6 +17,19 @@ public sealed partial class World
     internal int Passes;
     internal long _stop; // where the last structural row loop stopped (see the generated ForEach loops)
 
+    /// <summary>
+    /// Whether a lean structural row loop over rows up to <paramref name="end"/> stopped at a structural change; if so,
+    /// re-counts the rows left in <see cref="_stop"/> from <paramref name="count"/>, the end of the caller's rows.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool Stopped(int end, int count)
+    {
+        long stop = _stop;
+        if (stop < 0) return false;
+        _stop = stop & unchecked((long)0xFFFF_FFFF_0000_0000) | (uint)(count - end + (int)stop);
+        return true;
+    }
+
     // Archetypes with tombstones, closed when the last pass ends (each registered once: Archetype.Dirty).
     private Archetype[] _dirty = new Archetype[8];
     private int _dirtyCount;
