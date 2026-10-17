@@ -101,10 +101,11 @@ public class AllocationTests
     }
 
     [Test]
-    public void OrderedWalksCascadesAndCleanupDoNotAllocate()
+    public void OrderedWalksRelationsCascadesAndCleanupDoNotAllocate()
     {
         using var world = new World();
         var ratings = world.Index<Rating, int>();
+        var parties = world.Relations<MemberOf>();
         var players = new Entity[256];
         for (int i = 0; i < players.Length; i++) players[i] = world.CreateEntity(new Rating(i % 32));
         int next = 0;
@@ -118,6 +119,12 @@ public class AllocationTests
             foreach (var _ in ratings.Descending()) if (++seen == 10) break;
             foreach (var _ in ratings.Range(10, 20)) seen++;
 
+            // Multi-target links: a player joins a party and leaves another, a party lists its members.
+            var party = players[next * 7 % players.Length];
+            player.AddRelation(new MemberOf(party));
+            players[(next + 128) % players.Length].RemoveRelation<MemberOf>(players[(next + 128) * 7 % players.Length]);
+            foreach (var _ in parties.Find(party)) seen++;
+
             // A tree with a retiring leaf: destroy cascades, the cleanup component is released.
             var root = world.CreateEntity(new Health(1));
             var child = world.CreateEntity(new ChildOf(root));
@@ -126,7 +133,7 @@ public class AllocationTests
             leaf.Remove<Lease>();
         }
 
-        for (int i = 0; i < 300; i++) Frame(); // warm-up: keys sorted, stacks and tables grown, JIT
+        for (int i = 0; i < 3000; i++) Frame(); // warm-up: keys sorted, buffers, links, stacks and tables grown, JIT
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 500; i++) Frame();
         Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, world.EntityCount), Is.EqualTo((0L, players.Length)));

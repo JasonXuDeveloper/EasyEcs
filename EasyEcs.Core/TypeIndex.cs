@@ -48,6 +48,9 @@ internal static class ComponentType<T> where T : struct, IComponent
     [UnconditionalSuppressMessage("Trimming", "IL2090", Justification = "A trimmed IIndexed<> interface means no index of T exists.")]
     private static bool IsIndexed()
     {
+        // A buffer of relations (DynamicBuffer<T : IRelation>) is indexed by its targets.
+        if (typeof(T).IsGenericType && typeof(T).GetGenericTypeDefinition() == typeof(DynamicBuffer<>))
+            return typeof(IRelation).IsAssignableFrom(typeof(T).GetGenericArguments()[0]);
         foreach (var type in typeof(T).GetInterfaces())
             if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IIndexed<>)) return true;
         return false;

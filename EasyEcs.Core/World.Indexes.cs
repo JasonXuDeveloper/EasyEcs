@@ -35,10 +35,33 @@ public sealed partial class World
         int slot = TypeIndex<ValueIndexFamily, T>.Value;
         if (slot < _indexes.Length && _indexes[slot] is { } existing)
             return existing as ValueIndex<T, TKey> ?? throw OtherKey(typeof(T), existing);
+        return Register(slot, ComponentType<T>.Bit, new ValueIndex<T, TKey>(this));
+    }
+
+    /// <summary>
+    /// The relation index of <typeparamref name="T"/>: the entities whose <see cref="DynamicBuffer{T}"/> links to a
+    /// target. Created on the first call (cold), O(1) after; keep it in a local or field.
+    /// </summary>
+    public RelationIndex<T> Relations<T>() where T : struct, IRelation
+    {
+        int slot = TypeIndex<ValueIndexFamily, DynamicBuffer<T>>.Value;
+        if (slot < _indexes.Length && _indexes[slot] is { } existing) return (RelationIndex<T>)existing;
+        return Register(slot, ComponentType<DynamicBuffer<T>>.Bit, new RelationIndex<T>(this));
+    }
+
+    /// <summary>The relation index of <typeparamref name="T"/> if it is built (writes then update it), else null.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal RelationIndex<T> LiveRelations<T>() where T : struct, IRelation
+    {
+        int bit = ComponentType<DynamicBuffer<T>>.Bit;
+        var byBit = _indexByBit;
+        return byBit != null && bit < byBit.Length && byBit[bit] is RelationIndex<T> { Live: true } index ? index : null;
+    }
+
+    private TIndex Register<TIndex>(int slot, int bit, TIndex index) where TIndex : IValueIndex
+    {
         if (slot >= _indexes.Length) Array.Resize(ref _indexes, Math.Max(slot + 1, _indexes.Length * 2));
-        var index = new ValueIndex<T, TKey>(this);
         _indexes[slot] = index;
-        int bit = ComponentType<T>.Bit;
         _indexByBit ??= [];
         if (bit >= _indexByBit.Length) Array.Resize(ref _indexByBit, bit + 1);
         _indexByBit[bit] = index;

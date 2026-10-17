@@ -55,9 +55,14 @@ internal static class Symbols
     public static bool Implements(ITypeSymbol type, string interfaceName) =>
         type.AllInterfaces.Any(i => i.ToDisplayString() == interfaceName);
 
-    /// <summary>A component the world indexes (<c>IIndexed&lt;TKey&gt;</c>): written only with Set, so its index follows.</summary>
+    /// <summary>
+    /// A component the world indexes (<c>IIndexed&lt;TKey&gt;</c>, or a <c>DynamicBuffer</c> of <c>IRelation</c> links):
+    /// written only with Set (and AddRelation / RemoveRelation), so its index follows.
+    /// </summary>
     public static bool IsIndexed(ITypeSymbol type) =>
-        type.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == Indexed);
+        type.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == Indexed)
+        || type is INamedTypeSymbol { IsGenericType: true } buffer && buffer.OriginalDefinition.ToDisplayString() == "EasyEcs.DynamicBuffer<T>"
+        && Implements(buffer.TypeArguments[0], "EasyEcs.IRelation");
 
     /// <summary>The type and every containing type are declared partial.</summary>
     public static bool IsPartialChain(INamedTypeSymbol type)
