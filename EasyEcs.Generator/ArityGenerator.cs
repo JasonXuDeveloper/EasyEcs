@@ -529,50 +529,51 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                 /// <summary>
                 /// The rows from <paramref name="start"/> of a pass that may make structural changes, testing presence
-                /// bits once per run: each 64-row word yields runs of consecutive passing rows that take the lean loop,
-                /// failing rows are skipped by the run (a word of failing rows costs one load). Returns like
-                /// <c>{{name}}Live</c>.
+                /// bits: runs of consecutive passing rows (through whole words that pass) take the lean loop, failing
+                /// rows are skipped by the run (a word of failing rows costs one load). Returns like <c>{{name}}Live</c>.
                 /// </summary>
-                [MethodImpl(MethodImplOptions.NoInlining)] // per table or run: kept out of the caller, which profile-guided
-                // inlining would otherwise grow until the loop's refs spill to the stack
+                [MethodImpl(MethodImplOptions.NoInlining)] // per table: the job is inlined only into the lean loop
                 private TJob {{name}}LiveTested<{{tps}}, TJob>(TJob job, Archetype archetype, RowFilter rows, int start, int count, {{ushorts}})
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
-                    // Refs walk the rows as in the lean loop; i, the run's end, is fixed during the run (the row is
-                    // i - run), so no index changes across the job.
-                    int seen = StorageVersion;
-                    ref EntitySlot idp = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(archetype.Slots), start);
-            {{startAt}}
+                    // Each run is its own call of the lean loop: the run's state stays out of the loop that runs the job,
+                    // whose registers then hold the same values as in a table where every row passes.
+                    int words = (count + 63) >> 6;
                     for (int i = start; i < count;)
                     {
                         int w = i >> 6;
-                        int end = Math.Min((w + 1) << 6, count);
                         ulong pass = rows.Word(archetype, w) & (ulong.MaxValue << i); // shift is mod 64
-                        int first = pass == 0 ? end : Math.Min((w << 6) + BitOperations.TrailingZeroCount(pass), end);
-                        int skip = first - i;
-                        i = first;
-                        idp = ref Unsafe.Add(ref idp, skip);
-            {{Lines(n, i => $"                    r{i} = ref Unsafe.Add(ref r{i}, skip);")}}
-                        if (i == end) continue;
-
-                        // The run of passing rows from i (the shift fills zeros, so ~ stops it at the word's end).
-                        int run = Math.Min(BitOperations.TrailingZeroCount(~(pass >> i)), end - i);
-                        i += run;
-                        for (; run > 0; run--, idp = ref Unsafe.Add(ref idp, 1), {{advance}})
+                        if (pass == 0)
                         {
-                            int id = idp.Id;
-                            if (id < 0) continue; // tombstone
-
-            {{StampRow(n, "                ", "i - run")}}
-                            {{execute}}
-
-                            if (seen != StorageVersion)
-                            {
-                                _stop = (long)id << 32 | (uint)(count - (i - run + 1));
-                                return job;
-                            }
+                            i = (w + 1) << 6;
+                            continue;
                         }
+
+                        int first = (w << 6) + BitOperations.TrailingZeroCount(pass);
+                        if (first >= count) break;
+                        // The shift fills zeros, so ~ stops the run at the word's end; a run to the end goes on through the
+                        // next words while they pass whole.
+                        int length = BitOperations.TrailingZeroCount(~(pass >> first));
+                        int end = first + length;
+                        if ((end & 63) == 0)
+                            for (ulong next; ++w < words && (next = rows.Word(archetype, w)) != 0;)
+                            {
+                                int more = BitOperations.TrailingZeroCount(~next);
+                                end += more;
+                                if (more < 64) break;
+                            }
+
+                        end = Math.Min(end, count);
+                        job = {{name}}Live<{{tps}}, TJob>(job, archetype, first, end, {{bits}});
+                        long stop = _stop;
+                        if (stop >= 0) // a structural change: the rows left are counted from the table's end
+                        {
+                            _stop = stop & unchecked((long)0xFFFF_FFFF_0000_0000) | (uint)(count - end + (int)stop);
+                            return job;
+                        }
+
+                        i = end;
                     }
 
                     _stop = -1;
