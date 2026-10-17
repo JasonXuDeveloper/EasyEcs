@@ -378,7 +378,7 @@ internal static class Symbols
         string? type = method.ContainingType?.ToDisplayString();
         return type == Entity ? StructuralEntityMembers.Contains(method.Name)
             : type == World ? StructuralWorldMembers.Contains(method.Name)
-            : IsGenerated(method) && IsGeneratedWriter(method.Name);
+            : IsGenerated(method) && IsGeneratedWriter(method);
     }
 
     /// <summary>The handle or world a call works on: the instance, or the receiver of an extension member.</summary>
@@ -407,9 +407,15 @@ internal static class Symbols
         a.AttributeClass?.ToDisplayString() == "System.CodeDom.Compiler.GeneratedCodeAttribute"
         && a.ConstructorArguments.Length > 0 && a.ConstructorArguments[0].Value as string == GeneratorName;
 
-    private static bool IsGeneratedWriter(string name) =>
-        name.StartsWith("Set") || name.StartsWith("Remove") || name.StartsWith("GetOrAdd")
-        || name.StartsWith("Disable") || name.StartsWith("Enable");
+    /// <summary>
+    /// Whether a member ComponentGenerator wrote changes structure: its writers (<c>SetX</c>, <c>RemoveX</c>,
+    /// <c>GetOrAddX</c>, <c>DisableX</c>, <c>EnableX</c>) are the methods of its extension blocks, its reads the
+    /// properties and <c>TryGetX</c>. Decided by the symbol, not the name: a component named <c>Settings</c> is read
+    /// through the property <c>entity.Settings</c>.
+    /// </summary>
+    private static bool IsGeneratedWriter(ISymbol member) =>
+        member is IMethodSymbol { MethodKind: MethodKind.Ordinary, ContainingType.IsExtension: true } method
+        && !method.Name.StartsWith("TryGet");
 
     /// <summary>
     /// Whether <paramref name="access"/> reads through a member ComponentGenerator wrote. The analyzer resolves it; the
@@ -419,7 +425,7 @@ internal static class Symbols
     /// </summary>
     private static bool GeneratedRead(SemanticModel model, MemberAccessExpressionSyntax access, string member)
     {
-        if (model.GetSymbolInfo(access).Symbol is { } symbol) return IsGenerated(symbol) && !IsGeneratedWriter(symbol.Name);
+        if (model.GetSymbolInfo(access).Symbol is { } symbol) return IsGenerated(symbol) && !IsGeneratedWriter(symbol);
         if (member.Length > "IsDisabled".Length && member.StartsWith("Is") && member.EndsWith("Disabled"))
             member = member.Substring(2, member.Length - 2 - "Disabled".Length);
         foreach (var (prefix, tag) in new[] { ("", false), ("Has", false), ("TryGet", false), ("Is", true) })

@@ -13,6 +13,7 @@ public class SystemTests
     {
         public override int UpdateInterval => interval;
         public override int UpdatePhase => phase;
+        protected string Name => name;
         protected override void OnCreate() => Log.Add($"{name}.create");
         protected override void OnUpdate() => Log.Add($"{name}.update");
         protected override void OnDestroy() => Log.Add($"{name}.destroy");
@@ -200,8 +201,8 @@ public class SystemTests
 
     private sealed class FailsEverywhere(string name) : Logged(name)
     {
-        protected override void OnUpdate() => throw new InvalidOperationException(name);
-        protected override void OnDestroy() => throw new InvalidOperationException(name + ".destroy");
+        protected override void OnUpdate() => throw new InvalidOperationException(Name);
+        protected override void OnDestroy() => throw new InvalidOperationException(Name + ".destroy");
     }
 
     [Test]

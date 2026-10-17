@@ -35,6 +35,7 @@ public class GeneratorTests
         public struct P : IComponent { public int V; }
         public struct Q : IComponent { public int V; }
         public struct T : IComponent, ITrackChanges { public int V; }
+        public struct Settings : IComponent { public int V; }                                     // named like a writer
         public struct Clock : ISingletonComponent { public int Ticks; }
         public class Box { public int V; }
         public struct Holder : IComponent { public Box Box; }                                     // a class, no collection
@@ -189,6 +190,7 @@ public class GeneratorTests
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(Entity e, in Handle l) { if (e.Has<P>()) l.Target.Set(new Q()); } }", "EECS013")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Handle l) => l.Target.RemoveP(); }", "EECS013")]   // generated members
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(Entity e, in Handle l) { if (e.HasP && e.P.V > 0) l.Target.SetQ(1); } }", "EECS013")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, in Handle l) { if (e.Settings.V > 0) l.Target.SetQ(1); } }", "EECS013")] // a read named Set…
     [TestCase("public static class U { public static void F(Entity[] es) => System.Threading.Tasks.Parallel.For(0, es.Length, i => es[i].RemoveP()); }", "EECS014")]
     [TestCase("public static class U { public static void F(World w) { System.Threading.Tasks.Task.Run(() => w.SetClock(1)); w.RemoveClock(); } }", "EECS014")]
     [TestCase("public static class U { public static void F(World w) { System.Threading.Tasks.Task.Run(() => w.CreateEntity()); w.CreateEntity(); } }", "EECS014")]

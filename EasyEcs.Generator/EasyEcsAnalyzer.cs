@@ -126,7 +126,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "[UpdateBefore] / [UpdateAfter] order '{0}' in a cycle: {1}",
         Category, DiagnosticSeverity.Error, true,
         "Each ordering says which of two systems runs first; a cycle cannot hold, and AddSystem throws when the last " +
-        "system of the cycle is added. Remove one of the orderings.");
+        "system of the cycle is added. Remove one of the orderings.", customTags: WellKnownDiagnosticTags.CompilationEnd);
 
     public static readonly DiagnosticDescriptor OrderAcrossGroups = new("EECS020", "A system is ordered against another group",
         "'{0}' is ordered against '{1}', which runs in another group: the ordering never applies",
