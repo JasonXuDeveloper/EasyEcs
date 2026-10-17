@@ -1,5 +1,7 @@
 using System;
+using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace EasyEcs.Benchmark.Showcase;
 
@@ -58,11 +60,16 @@ public partial class MovementSystem : EcsSystem
 {
     public override int Priority => 1;
 
-    [ForEach, Without<Dead>, Without<Frozen>]                                 // whole runs of rows: SIMD-friendly
+    [ForEach, Without<Dead>, Without<Frozen>]                                 // whole runs of rows, vectorized
     static void Move(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
     {
-        for (int i = 0; i < positions.Length; i++)
-            positions[i] = new Position(positions[i].X + velocities[i].X, positions[i].Y + velocities[i].Y);
+        // Two floats each: as float spans, X and Y are lanes of one Vector<float> (the JIT does not vectorize loops)
+        var p = MemoryMarshal.Cast<Position, float>(positions);
+        var v = MemoryMarshal.Cast<Velocity, float>(velocities);
+        int i = 0;
+        for (; i <= p.Length - Vector<float>.Count; i += Vector<float>.Count)
+            (new Vector<float>(p[i..]) + new Vector<float>(v[i..])).CopyTo(p[i..]);
+        for (; i < p.Length; i++) p[i] += v[i];                               // the rows left over
     }
 }
 
