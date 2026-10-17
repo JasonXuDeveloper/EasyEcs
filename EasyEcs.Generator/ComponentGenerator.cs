@@ -18,6 +18,8 @@ namespace EasyEcs.Generator;
 /// <c>RemovePosition()</c>. A component the world watches (<c>ITrackChanges</c>, <c>IIndexed&lt;TKey&gt;</c>) gets a
 /// <c>ref readonly</c> property (<c>Read</c>): reading it never counts as a write, and writes are <c>Set…</c> calls.</item>
 /// <item>tag <c>Dead</c> (no fields): <c>entity.IsDead</c>, <c>SetDead()</c>, <c>RemoveDead()</c>.</item>
+/// <item>the same writers on a <c>Prefab</c>, returning it for chaining (<c>new Prefab().SetHealth(100).SetNpc()</c>),
+/// with <c>prefab.Health</c> (read-only), <c>HasHealth</c> and <c>IsDead</c>.</item>
 /// <item>indexed component <c>Zone : IIndexed&lt;int&gt;</c>: <c>world.ZoneIndex</c> (<c>Index&lt;Zone, int&gt;()</c>).</item>
 /// <item>singleton <c>Clock</c>: <c>world.Clock</c> (<c>ref</c>, <c>GetSingleton</c>), <c>HasClock</c>,
 /// <c>SetClock(…)</c> (adds it if missing), <c>RemoveClock()</c>.</item>
@@ -105,7 +107,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             {
                 if (Free(n))
                     Property(m.Watched
-                            ? $"The entity's <see cref=\"{t}\"/>, read-only (<c>Read</c>: never a write); write it with <c>Set{n}</c>, so the change is stamped and indexed. Throws if missing."
+                            ? $"The entity's <see cref=\"{t}\"/>, read-only (<c>Read</c>: never a write); write it with <c>Set</c>, so the change is stamped and indexed. Throws if missing."
                             : $"The entity's <see cref=\"{t}\"/> by <c>ref</c> (<c>Get</c>); throws if missing.",
                         $"ref {(m.Watched ? "readonly " : "")}{t} {n}", $"ref @this.{(m.Watched ? "Read" : "Get")}<{t}>()");
                 if (Free("Has" + n)) Property($"Whether the entity has a <see cref=\"{t}\"/>.", $"bool Has{n}", $"@this.Has<{t}>()");
@@ -133,6 +135,33 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                     $"global::EasyEcs.ValueIndex<{t}, {m.IndexKey}> {n}Index", $"@this.Index<{t}, {m.IndexKey}>()");
                 sb.Append("    }\n");
             }
+
+            // A prefab belongs to no world: its writers change no world's structure, so their class carries another
+            // tool name than the one Symbols.IsGenerated looks for.
+            sb.Append("}\n\n");
+            sb.Append($"[global::System.CodeDom.Compiler.GeneratedCode(\"{Symbols.GeneratorName}.Prefab\", \"{Version}\")]\n");
+            sb.Append($"{a} static class {m.Path}PrefabExtensions\n{{\n");
+            sb.Append("    extension(global::EasyEcs.Prefab @this)\n    {\n");
+            if (m.Tag)
+            {
+                if (Free("Is" + n)) Property($"Whether the prefab has the tag <see cref=\"{t}\"/>.", $"bool Is{n}", $"@this.Has<{t}>()");
+            }
+            else
+            {
+                if (Free(n))
+                    Property($"The prefab's <see cref=\"{t}\"/>, read-only (<c>Read</c>); change it with <c>Set</c>. Throws if missing.",
+                        $"ref readonly {t} {n}", $"ref @this.Read<{t}>()");
+                if (Free("Has" + n)) Property($"Whether the prefab has a <see cref=\"{t}\"/>.", $"bool Has{n}", $"@this.Has<{t}>()");
+            }
+
+            if (Free("Set" + n))
+                foreach (var s in m.Setters)
+                    Member($"Adds <see cref=\"{t}\"/> to the recipe or replaces its value; returns the prefab.",
+                        $"global::EasyEcs.Prefab Set{n}({s.Parameters}) => @this.Set({s.Value});");
+            if (Free("Remove" + n))
+                Member($"Drops <see cref=\"{t}\"/> from the recipe if it has it; returns the prefab.",
+                    $"global::EasyEcs.Prefab Remove{n}() => @this.Remove<{t}>();");
+            sb.Append("    }\n");
         }
 
         sb.Append("}\n");

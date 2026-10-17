@@ -134,4 +134,17 @@ public class InstantiateTests
         Assert.That(children.Count(parent), Is.EqualTo(150));
         Assert.That((callsigns.Count("a"), callsigns.Count("b")), Is.EqualTo((100, 50)));
     }
+
+    [Test]
+    public void PrefabsHaveTheNamedMembersOfEveryComponent()
+    {
+        var orc = new Prefab().Set(new Position(1, 2), new Armor(3))     // several at once
+            .SetHealth(30).SetFrozen().SetStun(2);                       // generated: one per component
+        Assert.That((orc.HasHealth, orc.IsFrozen, orc.Health.Value, orc.Armor.Value), Is.EqualTo((true, true, 30, 3)));
+        orc.RemoveFrozen().Remove<Stun, Position>();
+        Assert.That((orc.IsFrozen, orc.HasStun, orc.HasPosition), Is.EqualTo((false, false, false)));
+        using var world = new World();
+        var e = world.Instantiate(orc);
+        Assert.That((e.Health.Value, e.IsFrozen, e.HasPosition), Is.EqualTo((30, false, false)));
+    }
 }

@@ -38,6 +38,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
         var entity = new StringBuilder(Header).Append(
             "using System;\nusing System.Runtime.CompilerServices;\nusing System.Runtime.InteropServices;\n\nnamespace EasyEcs;\n\npublic readonly partial struct Entity\n{\n");
         var world = new StringBuilder("public sealed partial class World\n{\n");
+        var prefab = new StringBuilder("public sealed partial class Prefab\n{\n");
 
         for (int n = 1; n <= MaxArity; n++)
         {
@@ -119,6 +120,26 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                 """);
 
+            prefab.Append($$"""
+                    /// <summary>Add {{what}} to the recipe, or replace {{(n == 1 ? "its value" : "their values")}}. Returns this prefab (chain calls). O({{n}}).</summary>
+                    public Prefab Set<{{tps}}>({{values}})
+                {{cons}}
+                    {
+                        Row.Set({{List(n, i => $"in c{i}")}});
+                        return this;
+                    }
+
+                    /// <summary>Drop {{what}} from the recipe; missing components are ignored. Returns this prefab. O({{n}}).</summary>
+                    public Prefab Remove<{{tps}}>()
+                {{cons}}
+                    {
+                        Row.Remove<{{tps}}>();
+                        return this;
+                    }
+
+
+                """);
+
             world.Append($$"""
                     /// <summary>
                     /// Create an entity with {{what}} placed directly in its final archetype (no intermediate moves).
@@ -169,7 +190,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 """);
         }
 
-        return entity.Append("}\n\n").Append(world).Append("}\n").ToString();
+        return entity.Append("}\n\n").Append(world).Append("}\n\n").Append(prefab).Append("}\n").ToString();
     }
 
     // ---------------- IForEach / ForEach / Query / Count / Any ----------------

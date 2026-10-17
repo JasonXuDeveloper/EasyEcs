@@ -283,10 +283,10 @@ public sealed class BattleServer : IDisposable
     private static readonly QueryFilter UnsavedPlayers = Players.Changed<Health>(0);   // the tick is set per call
 
     // NPC kinds: recipes that belong to no world (no query sees them), copied by Instantiate
-    private static readonly Prefab Grunt = new Prefab().Set(new Position()).Set(new Velocity())
-        .Set(new Health(120, 120)).Set(new Replica(120, false)).Set(new Attack(6, 8, 0)).Set(new Npc());
-    private static readonly Prefab Brute = new Prefab().Set(new Position()).Set(new Velocity())
-        .Set(new Health(200, 200)).Set(new Replica(200, false)).Set(new Attack(9, 12, 0)).Set(new Npc());
+    private static readonly Prefab Grunt = new Prefab().Set(new Position(), new Velocity())   // several at once
+        .SetHealth(120, 120).SetReplica(120, false).SetAttack(6, 8, 0).SetNpc();       // or one by name
+    private static readonly Prefab Brute = new Prefab().Set(new Position(), new Velocity())
+        .SetHealth(200, 200).SetReplica(200, false).SetAttack(9, 12, 0).SetNpc();
 
     public readonly World World;
     private readonly SingletonRef<Battle> _battle;                            // resolved once, no lookup per tick
