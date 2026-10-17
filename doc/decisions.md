@@ -122,9 +122,39 @@ copy when a table grows, which `InitialEntityCapacity` and `EnsureCapacity` remo
 ## D8. No whole-entity disable
 
 **Decision.** There is no "disabled entity" that queries skip by default. A tag and `Without<T>` do it explicitly;
-`Disable<T>()` keeps one component's value while hiding it.
+`Disable<T>()` keeps one component's value while hiding it:
 
-**Why.** Excluding by default would make every query depend on a state it does not name.
+```csharp
+public struct Inactive : IComponent;                        // the whole entity is off
+
+bullet.SetInactive();                                       // back to the pool: a bit flip, no row moves
+bullet.SetPosition(x, y).RemoveInactive();                  // reused
+
+[ForEach, Without<Inactive>]                                // the systems that skip it say so
+static void Move(ref Position p, in Velocity v) { /* ... */ }
+
+int pooled = world.Count<Bullet>(QueryFilter.Create().With<Inactive>()); // saves, cleanup, stats see everything
+```
+
+Uses: object pools (bullets, effects), players kept in memory while they reconnect, zones without players whose NPCs
+sleep.
+
+**Why.** Excluding by default would make every query depend on a state it does not name: a save, a cleanup or a count
+that must see every entity has to remember to opt back in, and forgetting it fails silently. The tag is data the
+generator and the reader both see, as the ECS principles ask.
+
+**Considered.** Friflo (`entity.Enabled = false`: a hidden tag in the archetype, queries skip it unless
+`WithDisabled()`); DefaultEcs (`entity.Disable()`: the entity leaves every entity set). Performance by case:
+
+| | Friflo | DefaultEcs | EasyEcs |
+|---|---|---|---|
+| Switching an entity off or on | moves its row to another archetype | updates every set | flips a presence bit (after the first time) |
+| Iterating past disabled entities | skips their archetype | they are in no set | free while a table has none (counts, no bits read); 64 rows per test when mixed |
+
+Pools and effects switch often, where a bit flip beats a row move. Only many entities disabled for long, mixed with
+enabled ones in one table, cost EasyEcs a word test per 64 rows that Friflo skips; `GroupBy` on a sleeping state
+splits them into their own tables when that matters. The repetition of `Without<Inactive>` in every method is what
+the group-wide filter on the roadmap removes.
 
 ## D9. Saves are built in, with Nino
 

@@ -33,6 +33,9 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
 
 ### Source generators
 
+- `[ForEach]` on static methods outside systems: the generator writes the struct job and an entry point
+  (`Reports.CountDead(world, ref dead)`), so code outside systems (tests, admin endpoints, one-off fixes) gets the
+  speed of a struct job without writing one.
 - A cached query entry per system (no lookup per update): measure the lookup first.
 - Code fixes for the analyzer's diagnostics.
 - A diagnostic that suggests hoisting a `QueryFilter` built per update into a `static readonly` field.
@@ -44,8 +47,7 @@ What the generator can write so users write less, Entitas-style (it already writ
 API and the examples several times: every line users write twice is a candidate, every generated member that nobody
 needs goes. Each round's findings are listed here with what was generated, changed or rejected, and why.
 
-- Round 1: pending. Candidates so far: `[ForEach]` on static methods outside systems (weigh against `Query` and
-  struct jobs, which already run anywhere); a settable tag property, Entitas-style (`entity.IsDead = true` adds or
+- Round 1: pending. Candidates so far: a settable tag property, Entitas-style (`entity.IsDead = true` adds or
   removes the tag: weigh a structural change hidden in an assignment, and the analyzer must count it as one).
   A filter declared once on a system group (every `[ForEach]` of the group gets `Without<Inactive>`): the
   whole-entity disable pattern without one attribute per method, still explicit where the group is defined.
@@ -79,7 +81,8 @@ Each item: profile (asm on x64 and arm64 where it matters), optimize, BDN before
   - hierarchy with cascade;
   - multi-target relations;
   - structural changes during iteration vs. command buffers;
-  - component enable/disable;
+  - component enable/disable, and whole-entity disable against Friflo's `Enabled` and DefaultEcs' `Disable` (frequent
+    switching; many entities disabled for long);
   - ordered range queries;
   - groups vs. value indexes;
   - serialization and migration (formats labelled);
@@ -102,6 +105,7 @@ Each item: profile (asm on x64 and arm64 where it matters), optimize, BDN before
 - A saves guide: Nino versioning, `NinoArrayBufferWriter`, components in non-collectible assemblies.
 - `comparison.md` rewritten.
 - `faq.md`: stale answers (no serialization, `Priority`) replaced by links into `decisions.md`.
-- The whole-entity disable pattern (a tag and `Without<T>`, [D8](decisions.md#d8-no-whole-entity-disable)) and the
+- The whole-entity disable pattern (a tag and `Without<T>`, [D8](decisions.md#d8-no-whole-entity-disable): what it
+  does, where it is used, how Friflo and DefaultEcs do it and what each costs, with measured numbers), and the
   `Spawned` tag pattern ([D4](decisions.md#d4-no-addedt-filter)) as best-practice examples.
 - `CLAUDE.md` layout.
