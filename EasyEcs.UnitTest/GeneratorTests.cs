@@ -128,6 +128,25 @@ public class GeneratorTests
         if (!expected.Contains("access.RunsAlone();")) Assert.That(generated, Does.Not.Contain("RunsAlone"));
     }
 
+    [TestCase("public class G<T> : EcsSystem where T : struct, IComponent { [ForEach] static void A(ref T t, in P p) { } } public class H : G<Q>; "
+              + "public static class U { public static void F(World w) { w.AddSystem<G<P>>(); w.AddSystem(new G<Q>()); } }",
+        "file static class __ForEach<T> where T : struct, global::EasyEcs.IComponent", "UnsafeAccessorType(\"G`1[[!0]]\")",
+        "access.Write<T>();", "RegisterGeneric(typeof(global::G<>), typeof(__ForEach<>.Code));",
+        "Register(typeof(global::G<global::P>), new __ForEach<global::P>.Code());", "Register(typeof(global::G<global::Q>), new __ForEach<global::Q>.Code());")]
+    [TestCase("public static class R { [ForEach] static void A<T>(in T t, ref int n) where T : struct, IComponent { } }",
+        "public static void A<T>(global::EasyEcs.World world, ref int n) where T : struct, global::EasyEcs.IComponent",
+        "internal ref struct AJob<T> : global::EasyEcs.IForEach<T>, global::EasyEcs.INoStructuralChanges where T : struct, global::EasyEcs.IComponent",
+        "internal static extern void A<T>([UnsafeAccessorType(\"R\")] object owner, in T t, ref int n) where T : struct, global::EasyEcs.IComponent;")]
+    [TestCase("public static class R<T> where T : struct, IComponent { [ForEach] static void A(in T t, ref int n) { } }",
+        "extension<T>(global::R<T>) where T : struct, global::EasyEcs.IComponent", "new __ForEach<T>.AJob { x1 = ref n }", "public static class R_1ForEach")]
+    public void GenericSystemsAndRunnersAreGenerated(string source, params string[] expected)
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, source), out var output, out _);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+        string generated = string.Concat(output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")).Select(t => t.ToString()));
+        foreach (var line in expected) Assert.That(generated, Does.Contain(line), generated);
+    }
+
     [TestCase("[ForEach] static void A(ref P p, ref int n, in int floor, int add) { }",
         "public static void A(global::EasyEcs.World world, ref int n, in int floor, int add)", "x1 = ref n, x2 = ref floor, x3 = add")]
     [TestCase("[ForEach, Changed<T>] static void A(ref P p, ref Clock c, int world) { }",
@@ -162,7 +181,7 @@ public class GeneratorTests
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(World w) { } }", "EECS003")]
     [TestCase("public partial class S : EcsSystem { [ForEach, Without<P>] static void A(Entity e) { } }", "EECS003")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref Clock c) { } }", "EECS003")]
-    [TestCase("public partial class S<T> : EcsSystem { [ForEach] static void A(ref P p) { } }", "EECS004")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A<T>(ref T t) where T : struct, IComponent { } }", "EECS004")] // nothing gives T
     [TestCase("public partial class S { [ForEach] void A(ref P p) { } }", "EECS005")]                         // outside a system: static
     [TestCase("public class O { private static class R { [ForEach] static void A(ref P p) { } } }", "EECS022")]   // a runner's type is extended
     [TestCase("public static partial class R { [ForEach] static void A(P p) { } }", "EECS002")]                   // a component by value
@@ -288,7 +307,8 @@ public class GeneratorTests
     public void UnrelatedEditsHitTheCache()
     {
         var system = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components +
-            "public partial class S : EcsSystem { [ForEach] static void A(ref P p, in DynamicBuffer<int> b) { } }", Parse);
+            "public partial class S : EcsSystem { [ForEach] static void A(ref P p, in DynamicBuffer<int> b) { } }" +
+            "public class G<T> : EcsSystem where T : struct, IComponent { [ForEach] static void B(ref T t) { } } public class H : G<P>;", Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         var compilation = Compile().AddSyntaxTrees(system, other);
 
@@ -297,7 +317,7 @@ public class GeneratorTests
             CSharpSyntaxTree.ParseText("public class Unrelated { int x; }", Parse)));
 
         var steps = driver.GetRunResult().Results.SelectMany(r => r.TrackedSteps).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.SelectMany(p => p.Value));
-        foreach (var name in new[] { "ForEachMethods", "SystemUpdates", "Components", "SavedComponents", "SavedBuffers", "ModuleInitializers" })
+        foreach (var name in new[] { "ForEachMethods", "SystemUpdates", "ClosedSystems", "SystemCode", "Components", "SavedComponents", "SavedBuffers", "ModuleInitializers" })
             Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
                 Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged), name);
     }

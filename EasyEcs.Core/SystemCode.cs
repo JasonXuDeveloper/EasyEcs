@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
 namespace EasyEcs;
@@ -13,11 +14,16 @@ namespace EasyEcs;
 /// <br/>
 /// The registry holds types weakly: an assembly of systems loaded into a collectible AssemblyLoadContext unloads once
 /// its systems are removed from every world, and a newer version of it registers its own types.
+/// <br/>
+/// A generic system registers its code once per closed type its assembly names (<c>AddSystem&lt;Regen&lt;Health&gt;&gt;()</c>,
+/// <c>new Regen&lt;Health&gt;()</c>, <c>class X : Regen&lt;Health&gt;</c>), which needs no runtime code generation, and
+/// its code's generic definition for any other closed type, made on first use.
 /// </summary>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public abstract class SystemCode
 {
     private static readonly ConditionalWeakTable<Type, SystemCode> Registered = new();
+    private static readonly ConditionalWeakTable<Type, Type> Generic = new(); // system definition -> open code type
 
     /// <summary>Runs the type's [ForEach] methods in declaration order (after OnUpdate).</summary>
     protected abstract void Update(EcsSystem system);
@@ -34,6 +40,14 @@ public abstract class SystemCode
     public static void Register(Type system, SystemCode code) => Registered.AddOrUpdate(system, code);
 
     /// <summary>
+    /// Registers the generated code of generic system <paramref name="definition"/>: <paramref name="code"/> is the
+    /// code's type, open over the system's type parameters (called by the system's module initializer).
+    /// </summary>
+    public static void RegisterGeneric(Type definition,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.NonPublicConstructors | DynamicallyAccessedMemberTypes.PublicConstructors)] Type code) =>
+        Generic.AddOrUpdate(definition, code);
+
+    /// <summary>
     /// The code of <paramref name="type"/> and its base types, base first; <paramref name="own"/> is whether
     /// <paramref name="type"/> itself has generated code (a type without may override OnUpdate unseen). Cold: once per
     /// AddSystem.
@@ -41,11 +55,28 @@ public abstract class SystemCode
     internal static SystemCode[] For(Type type, out bool own)
     {
         var chain = new List<SystemCode>();
-        own = Registered.TryGetValue(type, out _);
+        own = TryGet(type, out _);
         for (var t = type; t != null && t != typeof(EcsSystem); t = t.BaseType)
-            if (Registered.TryGetValue(t, out var code)) chain.Add(code);
+            if (TryGet(t, out var code)) chain.Add(code);
 
         chain.Reverse();
         return chain.ToArray();
     }
+
+    private static bool TryGet(Type type, out SystemCode code)
+    {
+        if (Registered.TryGetValue(type, out code)) return true;
+        if (!type.IsConstructedGenericType || !Generic.TryGetValue(type.GetGenericTypeDefinition(), out var open)) return false;
+        code = Close(open, type);
+        Registered.AddOrUpdate(type, code);
+        return true;
+    }
+
+    // A closed type the system's assembly does not name (another assembly closes it): the code is made at run time.
+    // Native AOT then needs the instantiation kept, which naming the closed type in the system's assembly does.
+    [UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Closed types named in the system's assembly are registered without it")]
+    [UnconditionalSuppressMessage("Trimming", "IL2055", Justification = "The code type's constructors are kept by RegisterGeneric")]
+    [UnconditionalSuppressMessage("Trimming", "IL2067", Justification = "The code type's constructors are kept by RegisterGeneric")]
+    private static SystemCode Close(Type open, Type system) =>
+        (SystemCode)Activator.CreateInstance(open.MakeGenericType(system.GetGenericArguments()), nonPublic: true)!;
 }

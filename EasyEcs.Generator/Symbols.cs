@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
@@ -135,6 +136,14 @@ internal static class Symbols
         type.AllInterfaces.Any(i => i.ToDisplayString() == interfaceName);
 
     /// <summary>
+    /// <see cref="Implements"/>, or a type parameter constrained to the interface (<c>where T : struct, IComponent</c>):
+    /// what a [ForEach] parameter of a generic system or runner may be.
+    /// </summary>
+    private static bool IsA(ITypeSymbol type, string interfaceName) => type is ITypeParameterSymbol parameter
+        ? parameter.ConstraintTypes.Any(c => c.ToDisplayString() == interfaceName || IsA(c, interfaceName))
+        : Implements(type, interfaceName);
+
+    /// <summary>
     /// A component the world indexes (<c>IIndexed&lt;TKey&gt;</c>, or a <c>DynamicBuffer</c> of <c>IRelation</c> links) or
     /// groups by (<c>IGroup</c>): written only with Set (and AddRelation / RemoveRelation), so its index or table follows.
     /// </summary>
@@ -151,7 +160,8 @@ internal static class Symbols
     public static bool IsNameable(ITypeSymbol type) => type switch
     {
         IArrayTypeSymbol array => IsNameable(array.ElementType),
-        ITypeParameterSymbol or IPointerTypeSymbol or IFunctionPointerTypeSymbol => false,
+        ITypeParameterSymbol => true, // the generated code is generic over the same parameters
+        IPointerTypeSymbol or IFunctionPointerTypeSymbol => false,
         INamedTypeSymbol named => IsVisible(named) && named.TypeArguments.All(IsNameable),
         _ => true,
     };
@@ -176,11 +186,44 @@ internal static class Symbols
         return method.Parameters.Select(p => p.Type).FirstOrDefault(t => !IsNameable(t));
     }
 
-    public static bool IsGenericChain(INamedTypeSymbol type)
+    /// <summary>The type parameters of <paramref name="type"/> and its containing types, outermost first (the runtime's <c>!0</c>, <c>!1</c>, ...).</summary>
+    public static List<ITypeParameterSymbol> ChainTypeParameters(INamedTypeSymbol type)
     {
-        for (var t = type; t != null; t = t.ContainingType)
-            if (t.IsGenericType) return true;
-        return false;
+        var all = new List<ITypeParameterSymbol>();
+        for (var t = type; t != null; t = t.ContainingType) all.InsertRange(0, t.TypeParameters);
+        return all;
+    }
+
+    /// <summary>The type arguments of <paramref name="type"/> and its containing types, outermost first.</summary>
+    public static List<ITypeSymbol> ChainTypeArguments(INamedTypeSymbol type)
+    {
+        var all = new List<ITypeSymbol>();
+        for (var t = type; t != null; t = t.ContainingType) all.InsertRange(0, t.TypeArguments);
+        return all;
+    }
+
+    /// <summary><c>&lt;T, U&gt;</c>, or "" without type parameters.</summary>
+    public static string TypeParameterList(IReadOnlyCollection<ITypeParameterSymbol> parameters) =>
+        parameters.Count == 0 ? "" : "<" + string.Join(", ", parameters.Select(p => p.Name)) + ">";
+
+    /// <summary>The <c>where</c> clauses of <paramref name="parameters"/>, each with a leading space ("" without any).</summary>
+    public static string Constraints(IEnumerable<ITypeParameterSymbol> parameters)
+    {
+        var clauses = new StringBuilder();
+        foreach (var p in parameters)
+        {
+            var parts = new List<string>();
+            if (p.HasUnmanagedTypeConstraint) parts.Add("unmanaged");
+            else if (p.HasValueTypeConstraint) parts.Add("struct");
+            else if (p.HasReferenceTypeConstraint) parts.Add("class");
+            else if (p.HasNotNullConstraint) parts.Add("notnull");
+            parts.AddRange(p.ConstraintTypes.Select(t => t.ToDisplayString(Fqn)));
+            if (p.HasConstructorConstraint && !p.HasValueTypeConstraint) parts.Add("new()");
+            if (p.AllowsRefLikeType) parts.Add("allows ref struct");
+            if (parts.Count > 0) clauses.Append($" where {p.Name} : {string.Join(", ", parts)}");
+        }
+
+        return clauses.ToString();
     }
 
     public enum ParamKind
@@ -212,7 +255,7 @@ internal static class Symbols
         var kind = Classify(p);
         if (kind != ParamKind.Invalid || !outside || p.RefKind is not (RefKind.None or RefKind.Ref or RefKind.In)) return kind;
         var element = SpanElement(p.Type) ?? MaybeElement(p.Type) ?? p.Type;
-        if (Implements(element, Component) || Implements(element, Singleton)) return ParamKind.Invalid; // a component by value
+        if (IsA(element, Component) || IsA(element, Singleton)) return ParamKind.Invalid; // a component by value
         return p.Type.ToDisplayString() is Entity or EntitySpan or World ? ParamKind.Invalid : ParamKind.Context;
     }
 
@@ -246,14 +289,14 @@ internal static class Symbols
     {
         if (p.RefKind is RefKind.Ref or RefKind.In or RefKind.RefReadOnlyParameter)
             return !p.Type.IsValueType ? ParamKind.Invalid
-                : Implements(p.Type, Component) ? ParamKind.Component
-                : Implements(p.Type, Singleton) ? ParamKind.Singleton
+                : IsA(p.Type, Component) ? ParamKind.Component
+                : IsA(p.Type, Singleton) ? ParamKind.Singleton
                 : ParamKind.Invalid;
         if (p.RefKind != RefKind.None) return ParamKind.Invalid;
         if (SpanElement(p.Type) is { } element)
-            return element.IsValueType && Implements(element, Component) ? ParamKind.ComponentSpan : ParamKind.Invalid;
+            return element.IsValueType && IsA(element, Component) ? ParamKind.ComponentSpan : ParamKind.Invalid;
         if (MaybeElement(p.Type) is { } optional)
-            return optional.IsValueType && Implements(optional, Component) ? ParamKind.Optional : ParamKind.Invalid;
+            return optional.IsValueType && IsA(optional, Component) ? ParamKind.Optional : ParamKind.Invalid;
         return p.Type.ToDisplayString() switch
         {
             Entity => ParamKind.Entity,
@@ -282,7 +325,7 @@ internal static class Symbols
         var type = method.ContainingType;
         bool outside = IsRunner(method);
         if (outside && (!method.IsStatic || RunnerCollides(method))) return false;
-        if (IsGenericChain(type) || method.IsGenericMethod || Unnameable(method) != null) return false;
+        if (method.IsGenericMethod && !outside || Unnameable(method) != null) return false; // a system's method gets no type arguments
         int components = 0;
         foreach (var p in method.Parameters)
         {

@@ -24,9 +24,12 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
     public static readonly DiagnosticDescriptor ComponentCount = new("EECS003", "Invalid component count",
         "[ForEach] method '{0}' must take between 1 and 9 components, or none with a [With<T>] or [Changed<T>] filter", Category, DiagnosticSeverity.Error, true);
 
-    public static readonly DiagnosticDescriptor Generic = new("EECS004", "Generic systems are not supported",
-        "[ForEach] method '{0}' is declared in a generic type or is generic itself",
-        Category, DiagnosticSeverity.Error, true);
+    public static readonly DiagnosticDescriptor Generic = new("EECS004", "Generic [ForEach] method in a system",
+        "[ForEach] method '{0}' of a system is generic, and nothing gives it type arguments: make the system generic instead (class Regen<T> : EcsSystem)",
+        Category, DiagnosticSeverity.Error, true,
+        "A system runs its [ForEach] methods itself, once per update, so a generic method would have no type arguments. " +
+        "Generic systems are fine (each closed type is a system of its own), and so are generic [ForEach] methods outside " +
+        "systems, whose entry points take the type arguments.");
 
     public static readonly DiagnosticDescriptor NotASystem = new("EECS005", "Instance [ForEach] method outside a system",
         "[ForEach] method '{0}' is an instance method of '{1}', which is no EcsSystem: make it static (the generator writes an entry point that takes the world) or move it into a system",
@@ -407,10 +410,6 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
 
         if (type.TypeKind != TypeKind.Class) return;
         if (Symbols.IsSystem(type)) AnalyzeSystemFields(context, type);
-
-        if (!type.GetMembers().OfType<IMethodSymbol>().Any(Symbols.IsForEach)) return;
-        if (Symbols.IsGenericChain(type))
-            context.ReportDiagnostic(Diagnostic.Create(Generic, location, type.Name));
     }
 
     /// <summary>EECS017: an instance field (or a record's positional property) of a component or singleton holding an Entity.</summary>
@@ -488,7 +487,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(NotASystem, location, method.Name, method.ContainingType.Name));
         else if (outside && Symbols.RunnerCollides(method))
             context.ReportDiagnostic(Diagnostic.Create(RunnerCollision, location, method.Name, Symbols.TracksSince(method) ? "the tick, " : ""));
-        if (method.IsGenericMethod)
+        if (method.IsGenericMethod && !outside)
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, method.Name));
         if (Symbols.Unnameable(method) is { } unnameable)
             context.ReportDiagnostic(Diagnostic.Create(Unnameable, location, method.Name, unnameable.Name));
