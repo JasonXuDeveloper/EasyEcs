@@ -75,10 +75,9 @@ public partial class ChangedTests
     }
 
     /// <summary>A writer ordered after the watch.</summary>
+    [UpdateAfter<ArmorWatch>]
     public partial class LateWear : EcsSystem
     {
-        public override int Priority => 1;
-
         [ForEach, With<Stun>]
         private static void Apply(ref Armor armor) => armor = armor with { Value = armor.Value - 1 };
     }

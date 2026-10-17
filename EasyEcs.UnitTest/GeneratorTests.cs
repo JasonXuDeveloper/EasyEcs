@@ -74,7 +74,6 @@ public class GeneratorTests
                     [ForEach] static void I(Entity e, in DynamicBuffer<long> read) { ref var items = ref e.Get<DynamicBuffer<int>>(); items.Clear(); foreach (var x in read) items.Add((int)x); }
                     [ForEach, With<Q>] static void J(Entity e, World w) { e.Get<DynamicBuffer<int>>() = default; w.CreateEntity(new P(), new DynamicBuffer<int>()); }
                     [ForEach] static void K(Entity e, in Handle link) { e.Remove<Q>(); link.Target.Destroy(); } // changes structure: runs alone
-                    public override int Priority => 10 * 2;                                       // constants: schedules
                     public override int UpdateInterval { get { return 4; } }
                     public override int UpdatePhase => 1;
                 }
@@ -193,7 +192,9 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<Owned>()) item.Component1.Owner = default; } }", "EECS015")]
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<Owned>()) { ref var o = ref item.Component1; } } }", "EECS015")]
     [TestCase("public struct J : IForEach<Owned> { public void Execute(ref Owned o) => o = default; }", "EECS015")]
-    [TestCase("public class S : EcsSystem { public override int Priority => (int)World.UpdateCount; }", "EECS018")]
+    [TestCase("public class S : EcsSystem { public override int UpdatePhase => (int)World.UpdateCount; }", "EECS018")]
+    [TestCase("[UpdateBefore<B>, UpdateAfter<C>] public class A : EcsSystem { } public class B : EcsSystem { } [UpdateAfter<B>] public class C : EcsSystem { }", "EECS019")]
+    [TestCase("public struct G : ISystemGroup; [UpdateInGroup<G>] public class A : EcsSystem { } [UpdateAfter<A>] public class B : EcsSystem { }", "EECS020")]
     [TestCase("public class S : EcsSystem { public override int UpdateInterval { get { return World.EntityCount; } } }", "EECS018")]
     [TestCase("public struct Zone : IComponent, IGroup { public int Id; public int Group => Id; } public partial class S : EcsSystem { [ForEach] static void A(ref Zone z) { } }", "EECS015")]
     [TestCase("public struct Link : IRelation { public EntityId Target { get; set; } } public static class U { public static void F(Entity e, Link l) => e.Get<DynamicBuffer<Link>>().Add(l); }", "EECS015")]

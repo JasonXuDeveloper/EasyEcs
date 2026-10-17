@@ -9,9 +9,8 @@ public class SystemTests
     private static readonly List<string> Log = [];
 
 #pragma warning disable EECS018 // one test system, many schedules: each instance's values never change
-    private class Logged(string name, int priority = 0, int interval = 1, int phase = 0) : EcsSystem
+    private class Logged(string name, int interval = 1, int phase = 0) : EcsSystem
     {
-        public override int Priority => priority;
         public override int UpdateInterval => interval;
         public override int UpdatePhase => phase;
         protected override void OnCreate() => Log.Add($"{name}.create");
@@ -72,13 +71,49 @@ public class SystemTests
         Assert.That(b.Stats.Runs, Is.Zero);
     }
 
+    [UpdateAfter<Mid>] private sealed class Late() : Logged("late");
+    [UpdateBefore<Mid>] private sealed class Early() : Logged("early");
+    private sealed class Mid() : Logged("mid");
+
+#pragma warning disable EECS019 // the cycle under test
+    [UpdateBefore<CycleB>] private sealed class CycleA() : Logged("a");
+    [UpdateBefore<CycleA>] private sealed class CycleB() : Logged("b");
+#pragma warning restore EECS019
+
     [Test]
-    public void LifecycleAndPriorityOrder()
+    public void ACycleOfOrderingsIsRefusedAndTheSystemStaysOut()
+    {
+        using var world = new World();
+        world.AddSystem(new CycleA());
+        var b = new CycleB();
+        var error = Assert.Throws<InvalidOperationException>(() => world.AddSystem(b));
+        Assert.That(error!.Message, Does.Contain("CycleA").And.Contain("CycleB"));
+        Assert.That(b.World, Is.Null);
+        Assert.That(world.GetSystem<CycleB>(), Is.Null);
+        Assert.That(world.Systems.Count, Is.EqualTo(1));
+        Assert.That(Log, Is.EqualTo(new[] { "a.create" }));                   // OnCreate only for the system that joined
+    }
+
+    [Test]
+    public void AnOrderingMovesOnlyItsOwnSystem()
+    {
+        using var world = new World();
+        world.AddSystem(new Late());                                          // after Mid
+        world.AddSystem(new Logged("x"));
+        world.AddSystem(new Mid());
+        world.AddSystem(new Logged("y"));
+        Log.Clear();
+        world.Update();
+        Assert.That(Log, Is.EqualTo(new[] { "x.update", "mid.update", "late.update", "y.update" }));
+    }
+
+    [Test]
+    public void LifecycleAndDependencyOrder()
     {
         var world = new World();
-        world.AddSystem(new Logged("late", priority: 10));
-        world.AddSystem(new Logged("early", priority: -1));
-        world.AddSystem(new Logged("mid"));
+        world.AddSystem(new Late());
+        world.AddSystem(new Early());
+        world.AddSystem(new Mid());
         world.Update();
         world.Dispose();
 

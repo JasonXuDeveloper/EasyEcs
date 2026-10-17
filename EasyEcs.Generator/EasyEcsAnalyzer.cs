@@ -122,14 +122,25 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
     public static readonly DiagnosticDescriptor ScheduleNotConstant = new("EECS018", "A system's schedule is not a constant",
         "'{0}.{1}' is not a constant: {2}",
         Category, DiagnosticSeverity.Warning, true,
-        "Priority is read once, when the system is added (it orders the schedule), so a value computed later never " +
-        "takes effect; UpdateInterval and UpdatePhase are read every update, so a changing value makes the system skip " +
-        "or repeat runs. Return a constant; to stop and resume a system, set Enabled.");
+        "UpdateInterval and UpdatePhase are read every update, so a changing value makes the system skip or repeat " +
+        "runs. Return a constant; to stop and resume a system, set Enabled.");
+
+    public static readonly DiagnosticDescriptor OrderCycle = new("EECS019", "Systems are ordered in a cycle",
+        "[UpdateBefore] / [UpdateAfter] order '{0}' in a cycle: {1}",
+        Category, DiagnosticSeverity.Error, true,
+        "Each ordering says which of two systems runs first; a cycle cannot hold, and AddSystem throws when the last " +
+        "system of the cycle is added. Remove one of the orderings.");
+
+    public static readonly DiagnosticDescriptor OrderAcrossGroups = new("EECS020", "A system is ordered against another group",
+        "'{0}' is ordered against '{1}', which runs in another group: the ordering never applies",
+        Category, DiagnosticSeverity.Warning, true,
+        "Orderings apply within one group: World.Update() and World.Update<TGroup>() run their groups separately, in the " +
+        "order the caller calls them. Order the systems of one group, or move the system into the other's group.");
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
         MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
-        RemovedRequired, EntityInData, ScheduleNotConstant);
+        RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -147,6 +158,67 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterOperationAction(AnalyzeStructuralCall, OperationKind.Invocation);
         context.RegisterOperationAction(AnalyzeIndexedRef, OperationKind.Invocation, OperationKind.VariableDeclarator);
         context.RegisterOperationAction(AnalyzeSystemLookup, OperationKind.Invocation);
+        context.RegisterCompilationStartAction(AnalyzeOrderings);
+    }
+
+    /// <summary>
+    /// EECS020 for each ordering that names a system of another group, and EECS019 at the end of the compilation for
+    /// the orderings of its systems that form a cycle (edges from the system that runs first).
+    /// </summary>
+    private static void AnalyzeOrderings(CompilationStartAnalysisContext start)
+    {
+        var edges = new System.Collections.Concurrent.ConcurrentBag<(INamedTypeSymbol First, INamedTypeSymbol Second, Location Location)>();
+        start.RegisterSymbolAction(context =>
+        {
+            var type = (INamedTypeSymbol)context.Symbol;
+            if (type.TypeKind != TypeKind.Class || !Symbols.IsSystem(type)) return;
+            foreach (var attribute in type.GetAttributes())
+            {
+                bool before = Symbols.Is(attribute.AttributeClass, Symbols.UpdateBeforeAttribute);
+                if (!before && !Symbols.Is(attribute.AttributeClass, Symbols.UpdateAfterAttribute)) continue;
+                if (attribute.AttributeClass!.TypeArguments[0] is not INamedTypeSymbol other) continue;
+                var location = attribute.ApplicationSyntaxReference?.GetSyntax(context.CancellationToken).GetLocation() ?? type.Locations[0];
+                if (!SymbolEqualityComparer.Default.Equals(Symbols.GroupOf(type), Symbols.GroupOf(other)))
+                    context.ReportDiagnostic(Diagnostic.Create(OrderAcrossGroups, location, type.Name, other.Name));
+                edges.Add(before ? (type, other, location) : (other, type, location));
+            }
+        }, SymbolKind.NamedType);
+
+        start.RegisterCompilationEndAction(context =>
+        {
+            var next = new System.Collections.Generic.Dictionary<INamedTypeSymbol, System.Collections.Generic.List<(INamedTypeSymbol, Location)>>(SymbolEqualityComparer.Default);
+            foreach (var (first, second, location) in edges)
+            {
+                if (!next.TryGetValue(first, out var list)) next[first] = list = [];
+                list.Add((second, location));
+            }
+
+            // Depth-first: a system met again on the current path closes a cycle; each cycle is reported on its edges.
+            var state = new System.Collections.Generic.Dictionary<INamedTypeSymbol, int>(SymbolEqualityComparer.Default); // 1 on path, 2 done
+            var path = new System.Collections.Generic.List<(INamedTypeSymbol Type, Location Location)>();
+            void Visit(INamedTypeSymbol type)
+            {
+                state[type] = 1;
+                foreach (var (other, location) in next.TryGetValue(type, out var list) ? list : [])
+                {
+                    path.Add((type, location));
+                    if (state.TryGetValue(other, out int seen) && seen == 1)
+                    {
+                        int from = path.FindIndex(step => SymbolEqualityComparer.Default.Equals(step.Type, other));
+                        var names = string.Join(" -> ", path.Skip(from).Select(step => step.Type.Name).Concat([other.Name]));
+                        foreach (var step in path.Skip(from))
+                            context.ReportDiagnostic(Diagnostic.Create(OrderCycle, step.Location, step.Type.Name, names));
+                    }
+                    else if (!state.ContainsKey(other)) Visit(other);
+                    path.RemoveAt(path.Count - 1);
+                }
+
+                state[type] = 2;
+            }
+
+            foreach (var type in next.Keys.ToArray())
+                if (!state.ContainsKey(type)) Visit(type);
+        });
     }
 
     /// <summary>EECS008: a system that finds another system through <c>World.GetSystem&lt;T&gt;()</c>.</summary>
@@ -165,12 +237,12 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
     }
 
     /// <summary>
-    /// EECS018: an override of EcsSystem.Priority, UpdateInterval or UpdatePhase that is not a constant expression.
+    /// EECS018: an override of EcsSystem.UpdateInterval or UpdatePhase that is not a constant expression.
     /// </summary>
     private static void AnalyzeSchedule(SyntaxNodeAnalysisContext context)
     {
         var declaration = (PropertyDeclarationSyntax)context.Node;
-        if (declaration.Identifier.ValueText is not ("Priority" or "UpdateInterval" or "UpdatePhase")) return;
+        if (declaration.Identifier.ValueText is not ("UpdateInterval" or "UpdatePhase")) return;
         if (context.SemanticModel.GetDeclaredSymbol(declaration, context.CancellationToken) is not { IsOverride: true } property
             || property.OverriddenProperty?.ContainingType?.ToDisplayString() != Symbols.EcsSystem) return;
         var getter = declaration.AccessorList?.Accessors.FirstOrDefault();
@@ -179,8 +251,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
                 ? returned : null);
         if (body != null && context.SemanticModel.GetConstantValue(body, context.CancellationToken).HasValue) return;
         context.ReportDiagnostic(Diagnostic.Create(ScheduleNotConstant, declaration.Identifier.GetLocation(),
-            property.ContainingType.Name, property.Name,
-            property.Name == "Priority" ? "it is read once, when the system is added" : "it is read every update"));
+            property.ContainingType.Name, property.Name, "it is read every update"));
     }
 
     /// <summary>

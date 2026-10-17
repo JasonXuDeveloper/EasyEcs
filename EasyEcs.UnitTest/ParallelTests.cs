@@ -39,6 +39,15 @@ public partial class ParallelTests
             right.Met = rendezvous.Barrier.SignalAndWait(rendezvous.TimeoutMs);
     }
 
+    /// <summary>Disjoint data from WriteLeft, but ordered after it: never at the same time.</summary>
+    [UpdateAfter<WriteLeft>]
+    public partial class WriteRightAfterLeft : EcsSystem
+    {
+        [ForEach]
+        static void Meet(ref Right right, in Rendezvous rendezvous) =>
+            right.Met = rendezvous.Barrier.SignalAndWait(rendezvous.TimeoutMs);
+    }
+
     /// <summary>An Entity parameter can reach any component (and make structural changes): it runs alone.</summary>
     public partial class WriteRightThroughEntity : EcsSystem
     {
@@ -124,6 +133,21 @@ public partial class ParallelTests
 
         foreach (var item in world.Query<Left, Right>())
             Assert.That((item.Component1.Met, item.Component2.Met), Is.EqualTo((true, true)), "both were running at once");
+    }
+
+    [Test]
+    public void OrderedSystemsRunOneAfterTheOther()
+    {
+        using var world = ParallelWorld(timeoutMs: 50);
+        world.AddSystem<WriteRightAfterLeft>();                               // registered first, ordered after
+        world.AddSystem<WriteLeft>();
+        world.Update();
+
+        foreach (var item in world.Query<Left, Right>())
+            Assert.That((item.Component1.Met, item.Component2.Met), Is.EqualTo((false, false)));
+        var order = new System.Collections.Generic.List<EcsSystem>();
+        foreach (var system in world.Systems) order.Add(system);
+        Assert.That(order[0], Is.TypeOf<WriteLeft>());
     }
 
     [Test]

@@ -60,8 +60,6 @@ public partial class SteeringSystem : EcsSystem                               //
 
 public partial class MovementSystem : EcsSystem
 {
-    public override int Priority => 1;
-
     [ForEach, Without<Dead>, Without<Frozen>]                                 // whole runs of rows, vectorized
     static void Move(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
     {
@@ -76,18 +74,14 @@ public partial class MovementSystem : EcsSystem
     }
 }
 
-public partial class ManaSystem : EcsSystem                                   // same priority as MovementSystem, other
-{                                                                             // data: both run at once
-    public override int Priority => 1;
-
+public partial class ManaSystem : EcsSystem                                   // other data than MovementSystem: both
+{                                                                             // run at once
     [ForEach]
     static void Regenerate(ref Mana mana) => mana.Value = Math.Min(mana.Max, mana.Value + 1);
 }
 
 public partial class ZoneSystem : EcsSystem                                   // the zone index follows these writes
 {
-    public override int Priority => 2;
-
     [ForEach]
     static void Enter(Entity player, in Position p, in Zone zone)              // `in`: reading is not a change
     {
@@ -98,8 +92,6 @@ public partial class ZoneSystem : EcsSystem                                   //
 
 public partial class CombatSystem : EcsSystem
 {
-    public override int Priority => 3;
-
     [ForEach, Without<Dead>, Without<Frozen>]
     static void Fight(Entity unit, ref Attack attack, ref Battle battle)
     {
@@ -115,8 +107,6 @@ public partial class CombatSystem : EcsSystem
 
 public partial class StatusSystem : EcsSystem
 {
-    public override int Priority => 4;
-
     [ForEach]
     static void Burn(Entity unit, ref Burning burning, ref Health hp)
     {
@@ -133,8 +123,6 @@ public partial class StatusSystem : EcsSystem
 
 public sealed class AfflictionSystem : EcsSystem                              // registered after StatusSystem
 {
-    public override int Priority => 4;
-
     // A count, not a loop: Count reads presence bits, 64 rows per load
     protected override void OnUpdate() =>
         World.Battle.Afflicted += World.Count<Health>(BattleServer.Afflicted);
@@ -142,8 +130,6 @@ public sealed class AfflictionSystem : EcsSystem                              //
 
 public partial class DeathSystem : EcsSystem
 {
-    public override int Priority => 5;
-
     [ForEach, Without<Dead>]                                                  // a plain scan: most healths change often
     static void Die(Entity unit, in Health hp, ref Battle battle)
     {
@@ -155,8 +141,6 @@ public partial class DeathSystem : EcsSystem
 
 public partial class RespawnSystem : EcsSystem                                // DeathSystem does not know it exists
 {
-    public override int Priority => 6;
-
     [ForEach, With<Player>, With<Dead>]
     static void Respawn(Entity player, ref Health hp, ref DynamicBuffer<Loot> bag, World world)
     {
@@ -186,8 +170,6 @@ public partial class RespawnSystem : EcsSystem                                //
 
 public partial class ProjectileSystem : EcsSystem
 {
-    public override int Priority => 7;
-
     [ForEach, With<Player>, Without<Dead>]
     static void Shoot(Entity player, in Position p, in Velocity v, ref Mana mana, ref Battle battle, World world)
     {
@@ -206,7 +188,6 @@ public partial class ProjectileSystem : EcsSystem
 
 public partial class RegenerationSystem : EcsSystem
 {
-    public override int Priority => 8;
     public override int UpdateInterval => 10;                                 // every 10th update
 
     [ForEach, With<Player>, Without<Dead>]
@@ -216,9 +197,9 @@ public partial class RegenerationSystem : EcsSystem
     }
 }
 
+[UpdateAfter<RegenerationSystem>]                                             // registered first, runs last
 public sealed class ClockSystem : EcsSystem
 {
-    public override int Priority => 100;
     protected override void OnCreate() => World.GetOrAddSingleton<Battle>();
     protected override void OnUpdate() => World.Battle.Tick++;
 }
@@ -299,7 +280,7 @@ public sealed class BattleServer : IDisposable
         World = new World(new WorldOptions
         {
             InitialEntityCapacity = units * 2,
-            ParallelSystems = true,                                           // systems of one priority side by side
+            ParallelSystems = true,                                           // unordered systems with disjoint data side by side
             MeasureSystems = true,                                            // per-system timings in system.Stats
             SystemErrors = SystemErrorPolicy.Disable,                         // a failing system goes off, the battle goes on
         });

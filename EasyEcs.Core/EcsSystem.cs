@@ -16,11 +16,8 @@ public abstract class EcsSystem
     /// <summary>The world this system belongs to (set before <see cref="OnCreate"/>).</summary>
     public World World { get; internal set; }
 
-    /// <summary>
-    /// Execution order: lower runs first; equal priorities run in registration order (or, with
-    /// <see cref="WorldOptions.ParallelSystems"/>, at the same time when their <see cref="SystemAccess">access</see> allows it).
-    /// </summary>
-    public virtual int Priority => 0;
+    // The system types this one runs before and after ([UpdateBefore<T>] / [UpdateAfter<T>]), read when it is added.
+    internal Type[] RunsBefore = [], RunsAfter = [];
 
     /// <summary>Run every N-th world update (1 = every update); see <see cref="UpdatePhase"/>.</summary>
     public virtual int UpdateInterval => 1;

@@ -47,8 +47,6 @@ public static class Rng
 /// <summary>Integrates movement, bounces at the borders, skips stunned and dead entities.</summary>
 public partial class MovementSystem : EcsSystem
 {
-    public override int Priority => 0;
-
     [ForEach, Without<Stunned>, Without<Dead>]
     private static void Move(ref Position p, ref Velocity v)
     {
@@ -62,8 +60,6 @@ public partial class MovementSystem : EcsSystem
 /// <summary>Area-of-interest grid: recompute the cell, count cell changes (would trigger enter/leave sync).</summary>
 public partial class AoiSystem : EcsSystem
 {
-    public override int Priority => 1;
-
     [ForEach, Without<Dead>]
     private static void UpdateCell(in Position p, ref AoiCell aoi, ref WorldStats stats)
     {
@@ -77,8 +73,6 @@ public partial class AoiSystem : EcsSystem
 /// <summary>NPC/player attacks on cooldown; some hits set the target on fire or stun it (structural changes).</summary>
 public partial class CombatSystem : EcsSystem
 {
-    public override int Priority => 2;
-
     [ForEach, Without<Dead>, Without<Stunned>]
     private static void Fight(Entity entity, ref Attack attack, ref Health health, ref WorldStats stats)
     {
@@ -97,8 +91,6 @@ public partial class CombatSystem : EcsSystem
 /// <summary>Status effects tick and expire (component removal = archetype transition every few ticks per entity).</summary>
 public partial class StatusSystem : EcsSystem
 {
-    public override int Priority => 3;
-
     [ForEach]
     private static void Burn(Entity entity, ref Burning burning, ref Health health)
     {
@@ -118,8 +110,6 @@ public partial class StatusSystem : EcsSystem
 /// <summary>Turns depleted health into death: marks the entity (respawn reacts later) and counts it.</summary>
 public partial class DeathSystem : EcsSystem
 {
-    public override int Priority => 4;
-
     [ForEach, Without<Dead>]
     private static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
     {
@@ -133,8 +123,6 @@ public partial class DeathSystem : EcsSystem
 /// <summary>Projectiles expire (entity churn every tick).</summary>
 public partial class LifetimeSystem : EcsSystem
 {
-    public override int Priority => 5;
-
     [ForEach]
     private static void Expire(Entity entity, ref Lifetime lifetime)
     {
@@ -146,8 +134,6 @@ public partial class LifetimeSystem : EcsSystem
 /// <summary>Dead NPCs are replaced by fresh ones; dead players respawn in place.</summary>
 public partial class RespawnSystem : EcsSystem
 {
-    public override int Priority => 6;
-
     [ForEach, With<Dead>, With<Npc>]
     private static void Despawn(Entity entity, World world)
     {
@@ -166,8 +152,6 @@ public partial class RespawnSystem : EcsSystem
 /// <summary>About 5% of living players fire a projectile each tick.</summary>
 public partial class ShootingSystem : EcsSystem
 {
-    public override int Priority => 7;
-
     [ForEach, With<Player>, Without<Dead>]
     private static void Shoot(Entity shooter, in Position p, in Velocity v, ref WorldStats stats, World world)
     {
@@ -181,8 +165,6 @@ public partial class ShootingSystem : EcsSystem
 /// <summary>Ticks the world clock (last).</summary>
 public sealed class ClockSystem : EcsSystem
 {
-    public override int Priority => 100;
-
     protected override void OnUpdate() => World.GetSingleton<WorldStats>().Tick++;
 }
 

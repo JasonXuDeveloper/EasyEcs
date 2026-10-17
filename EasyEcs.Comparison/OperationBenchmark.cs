@@ -145,8 +145,6 @@ public partial class Cells : EcsSystem
 [UpdateInGroup<Toggle>]
 public partial class StunToggle : EcsSystem
 {
-    public override int Priority => 0;
-
     [ForEach, Without<Stunned>]
     private static void Stun(Entity entity, in Attack attack)
     {
@@ -157,8 +155,6 @@ public partial class StunToggle : EcsSystem
 [UpdateInGroup<Toggle>]
 public partial class StunRecover : EcsSystem
 {
-    public override int Priority => 1;
-
     [ForEach]
     private static void Recover(Entity entity, ref Stunned stunned) => entity.Remove<Stunned>();
 }

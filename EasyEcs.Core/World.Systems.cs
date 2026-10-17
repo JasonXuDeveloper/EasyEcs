@@ -4,8 +4,9 @@ using System.Collections.Generic;
 using System.Threading;
 namespace EasyEcs;
 
-// System scheduling. Systems run synchronously, in ascending Priority (registration order breaks ties). Systems of one
-// priority are split into stages of consecutive systems whose SystemAccess does not conflict; with
+// System scheduling. Systems run synchronously, in registration order as [UpdateBefore<T>] / [UpdateAfter<T>] reorder
+// it, in stages: a system's stage follows the stages of the systems it must run after and of the earlier systems whose
+// SystemAccess conflicts with its own, so a stage holds systems with no order and no conflict between them; with
 // WorldOptions.ParallelSystems a stage runs at the same time (World.Parallel.cs). Each update calls OnUpdate() then the
 // generated [ForEach] methods.
 public sealed partial class World
@@ -36,14 +37,15 @@ public sealed partial class World
         if (system.World != null)
             throw new InvalidOperationException($"{system.GetType().Name} already belongs to a world");
 
-        system.World = this;
-        system.Group = GroupOf(system.GetType());
+        system.Group = GroupOf(system.GetType(), out system.RunsBefore, out system.RunsAfter);
         system.DeclareAccess();
         using (Structural())
         {
             if (system.Group >= _groups.Length) Array.Resize(ref _groups, system.Group + 1);
-            (_groups[system.Group] ??= new SystemSchedule()).Insert(system);
+            (_groups[system.Group] ??= new SystemSchedule()).Insert(system); // throws on a cycle: the system stays out
         }
+
+        system.World = this;
 
         system.Create();
     }
@@ -159,14 +161,24 @@ public sealed partial class World
         }
     }
 
-    /// <summary>Group index of a system type: its (inherited) [UpdateInGroup] attribute, or the default group.</summary>
-    private static int GroupOf(Type type)
+    /// <summary>
+    /// Group index of a system type (its inherited [UpdateInGroup] attribute, or the default group) and the system types
+    /// it runs before and after.
+    /// </summary>
+    private static int GroupOf(Type type, out Type[] before, out Type[] after)
     {
         // Cold path (once per AddSystem); the attribute instance knows its group index, so no MakeGenericType.
+        int group = 0;
+        List<Type> runsBefore = null, runsAfter = null;
         foreach (var attribute in Attribute.GetCustomAttributes(type, typeof(Attribute), inherit: true))
-            if (attribute is ISystemGroupAttribute group)
-                return group.Index;
-        return 0;
+        {
+            if (attribute is ISystemGroupAttribute grouping) group = grouping.Index;
+            else if (attribute is ISystemOrder order) ((order.Before ? runsBefore ??= [] : runsAfter ??= [])).Add(order.Other);
+        }
+
+        before = runsBefore?.ToArray() ?? [];
+        after = runsAfter?.ToArray() ?? [];
+        return group;
     }
 
     /// <summary>Destroy all systems (OnDestroy in reverse order), then release all storage.</summary>
@@ -215,57 +227,139 @@ public sealed partial class World
     /// </summary>
     internal sealed class SystemSchedule
     {
-        public EcsSystem[] Systems = [];
+        public EcsSystem[] Systems = []; // execution order
         public EcsSystem[][] Stages = [];
         public long Updates;
+        private EcsSystem[] _registered = [];
 
-        public void Insert(EcsSystem system)
-        {
-            // Stable insertion by priority: systems with equal priority keep their registration order.
-            var systems = Systems;
-            int index = systems.Length;
-            while (index > 0 && systems[index - 1].Priority > system.Priority) index--;
-            var next = new EcsSystem[systems.Length + 1];
-            Array.Copy(systems, 0, next, 0, index);
-            next[index] = system;
-            Array.Copy(systems, index, next, index + 1, systems.Length - index);
-            Publish(next);
-        }
+        public void Insert(EcsSystem system) => Publish([.. _registered, system]);
 
         public void Remove(EcsSystem system)
         {
-            int index = Array.IndexOf(Systems, system);
-            var next = new EcsSystem[Systems.Length - 1];
-            Array.Copy(Systems, 0, next, 0, index);
-            Array.Copy(Systems, index + 1, next, index, Systems.Length - index - 1);
-            Publish(next);
+            int index = Array.IndexOf(_registered, system);
+            Publish([.. _registered.AsSpan(0, index), .. _registered.AsSpan(index + 1)]);
         }
 
         /// <summary>
-        /// Stages are runs of consecutive systems of one priority with pairwise non-conflicting access. Consecutive
-        /// keeps the meaning of registration order: of two conflicting systems, the earlier one always finishes first.
+        /// Order <paramref name="registered"/> (registration order, then [UpdateBefore] / [UpdateAfter]: a stable
+        /// topological sort) and split it into stages: each system goes to the stage after the latest stage of a
+        /// system it must follow, by an ordering or by an earlier system whose access conflicts with its own. Of two
+        /// conflicting systems the earlier one always finishes first; unordered, non-conflicting systems share a stage.
+        /// Throws on a cycle, before anything changes. O(systems²), once per AddSystem / RemoveSystem.
         /// </summary>
-        private void Publish(EcsSystem[] systems)
+        private void Publish(EcsSystem[] registered)
         {
-            var stages = new List<EcsSystem[]>();
-            for (int i = 0; i < systems.Length;)
+            var order = Sort(registered);
+            var levels = new int[order.Length];
+            int stageCount = 0;
+            for (int i = 0; i < order.Length; i++)
             {
-                int start = i++;
-                while (i < systems.Length && systems[i].Priority == systems[start].Priority && Fits(systems, start, i)) i++;
-                stages.Add(systems[start..i]);
+                for (int j = 0; j < i; j++)
+                    if (levels[j] >= levels[i] && (Precedes(order[j], order[i]) || order[j].Access.ConflictsWith(order[i].Access)))
+                        levels[i] = levels[j] + 1;
+                stageCount = Math.Max(stageCount, levels[i] + 1);
+            }
+
+            var stages = new EcsSystem[stageCount][];
+            var systems = new EcsSystem[order.Length];
+            for (int level = 0, next = 0; level < stageCount; level++)
+            {
+                int start = next;
+                for (int i = 0; i < order.Length; i++)
+                    if (levels[i] == level) systems[next++] = order[i];
+                stages[level] = systems[start..next];
             }
 
             // An update reads only Stages: one reference, so it never mixes two versions of the list.
+            _registered = registered;
             Systems = systems;
-            Stages = stages.ToArray();
+            Stages = stages;
         }
 
-        private static bool Fits(EcsSystem[] systems, int start, int next)
+        /// <summary>
+        /// Registration order, with each system that names others moved: an [UpdateBefore&lt;X&gt;] system goes just
+        /// before X, an [UpdateAfter&lt;X&gt;] one just after X, repeated until every ordering holds; the other systems
+        /// keep their relative order. Orderings that cannot all hold (a cycle) throw; orderings that hold only if
+        /// systems that name nobody move too (X before Y, Y registered first, and a system between them) take the
+        /// earliest-registered-first topological order instead.
+        /// </summary>
+        private static EcsSystem[] Sort(EcsSystem[] registered)
         {
-            for (int i = start; i < next; i++)
-                if (systems[i].Access.ConflictsWith(systems[next].Access))
-                    return false;
-            return true;
+            var sorted = TopologicalOrder(registered);
+            var order = new List<EcsSystem>(registered);
+            int rounds = registered.Length * registered.Length + 1; // a bound: moves that settle need far fewer rounds
+            for (bool moved = true; moved;)
+            {
+                if (--rounds < 0) return sorted; // the moves keep undoing each other
+                moved = false;
+                for (int b = 0; b < order.Count; b++)
+                for (int a = b + 1; a < order.Count; a++) // a runs after b, but must it run before?
+                {
+                    var first = order[a];
+                    var second = order[b];
+                    if (Names(first.RunsBefore, second)) // first moves: just before second
+                    {
+                        order.RemoveAt(a);
+                        order.Insert(b, first);
+                    }
+                    else if (Names(second.RunsAfter, first)) // second moves: just after first
+                    {
+                        order.RemoveAt(b);
+                        order.Insert(a, second);
+                    }
+                    else continue;
+
+                    moved = true;
+                }
+            }
+
+            return order.ToArray();
+        }
+
+        /// <summary>
+        /// Kahn's algorithm, the earliest registered free system first; throws when the orderings form a cycle (some
+        /// systems never become free of predecessors).
+        /// </summary>
+        private static EcsSystem[] TopologicalOrder(EcsSystem[] registered)
+        {
+            int n = registered.Length;
+            var placed = new bool[n];
+            var order = new EcsSystem[n];
+            for (int count = 0; count < n; count++)
+            {
+                int next = -1;
+                for (int i = 0; i < n && next < 0; i++)
+                {
+                    if (placed[i]) continue;
+                    bool ready = true;
+                    for (int j = 0; j < n && ready; j++) ready = placed[j] || j == i || !Precedes(registered[j], registered[i]);
+                    if (ready) next = i;
+                }
+
+                if (next < 0) throw Cycle(registered, placed);
+                placed[next] = true;
+                order[count] = registered[next];
+            }
+
+            return order;
+        }
+
+        /// <summary>Whether <paramref name="first"/> must run before <paramref name="second"/> by an ordering of either.</summary>
+        private static bool Precedes(EcsSystem first, EcsSystem second) => Names(first.RunsBefore, second) || Names(second.RunsAfter, first);
+
+        private static bool Names(Type[] types, EcsSystem system)
+        {
+            foreach (var type in types)
+                if (type.IsInstanceOfType(system)) return true;
+            return false;
+        }
+
+        private static InvalidOperationException Cycle(EcsSystem[] registered, bool[] placed)
+        {
+            var names = new List<string>();
+            for (int i = 0; i < registered.Length; i++)
+                if (!placed[i]) names.Add(registered[i].GetType().Name);
+            return new InvalidOperationException("[UpdateBefore] / [UpdateAfter] form a cycle among " + string.Join(", ", names));
         }
     }
 }

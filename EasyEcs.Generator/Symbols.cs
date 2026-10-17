@@ -30,6 +30,9 @@ internal static class Symbols
     public const string Group = "EasyEcs.IGroup";
     public const string Cleanup = "EasyEcs.ICleanupComponent";
     public const string EntityId = "EasyEcs.EntityId";
+    public const string UpdateBeforeAttribute = "EasyEcs.UpdateBeforeAttribute<TSystem>";
+    public const string UpdateAfterAttribute = "EasyEcs.UpdateAfterAttribute<TSystem>";
+    public const string UpdateInGroupAttribute = "EasyEcs.UpdateInGroupAttribute<TGroup>";
     public const int MaxComponents = 9;
 
     public static readonly SymbolDisplayFormat Fqn = SymbolDisplayFormat.FullyQualifiedFormat;
@@ -46,6 +49,18 @@ internal static class Symbols
     {
         while (value is IConversionOperation conversion) value = conversion.Operand;
         return value is IDefaultValueOperation or IObjectCreationOperation { Arguments.Length: 0, Initializer: null };
+    }
+
+    /// <summary>Whether <paramref name="type"/> is a construction of generic type <paramref name="definition"/> (its display name).</summary>
+    public static bool Is(INamedTypeSymbol? type, string definition) => type?.OriginalDefinition.ToDisplayString() == definition;
+
+    /// <summary>The group type of a system's (inherited) [UpdateInGroup&lt;T&gt;], or null for the default group.</summary>
+    public static ITypeSymbol? GroupOf(INamedTypeSymbol system)
+    {
+        for (var type = system; type != null; type = type.BaseType)
+            foreach (var attribute in type.GetAttributes())
+                if (Is(attribute.AttributeClass, UpdateInGroupAttribute)) return attribute.AttributeClass!.TypeArguments[0];
+        return null;
     }
 
     public static bool IsSystem(INamedTypeSymbol type)
