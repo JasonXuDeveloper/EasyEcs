@@ -4,7 +4,7 @@ using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
-public partial class QueryTests
+public class QueryTests
 {
     private World _world;
 
@@ -219,7 +219,7 @@ public partial class QueryTests
         public void Execute(ref Health health) => Rows += health.Value;
     }
 
-    private partial class FreezeHalf : EcsSystem
+    private class FreezeHalf : EcsSystem
     {
         [ForEach]
         private static void Toggle(Entity entity, in Health health)

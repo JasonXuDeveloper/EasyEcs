@@ -3,7 +3,7 @@ using NUnit.Framework;
 namespace EasyEcs.UnitTest;
 
 /// <summary>Counts stunned and free entities; stuns every free one and frees every stunned one (one bit flip each).</summary>
-public partial class StunCycle : EcsSystem
+public class StunCycle : EcsSystem
 {
     [ForEach, Without<Stun>]
     private static void Free(Entity entity, in Health health, ref Score score)
@@ -22,7 +22,7 @@ public partial class StunCycle : EcsSystem
 }
 
 /// <summary>Batch and no-structural-change iteration over presence bits.</summary>
-public partial class StunnedHealth : EcsSystem
+public class StunnedHealth : EcsSystem
 {
     [ForEach, With<Stun>]
     private static void Batch(System.Span<Health> health)
@@ -38,7 +38,7 @@ public partial class StunnedHealth : EcsSystem
 public record struct Victim(EntityId Target) : ISingletonComponent;
 
 /// <summary>Counts visits; the first visit takes Health from the victim, a later row of the same full table.</summary>
-public partial class Cull : EcsSystem
+public class Cull : EcsSystem
 {
     [ForEach]
     private static void Visit(Entity entity, in Health health, ref Score score, in Victim victim)

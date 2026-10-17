@@ -10,7 +10,7 @@ namespace EasyEcs.Benchmark;
 /// the way to hold a collection without buffers. Steady state allocates 0 bytes either way.
 /// </summary>
 [MemoryDiagnoser]
-public partial class DynamicBufferBenchmark
+public class DynamicBufferBenchmark
 {
     public const int Items = 8;
 
@@ -85,7 +85,7 @@ public partial class DynamicBufferBenchmark
     public record struct Sent(int Sum) : IComponent;
 
     [UpdateInGroup<Replication>]
-    public partial class SendBuffers : EcsSystem
+    public class SendBuffers : EcsSystem
     {
         [ForEach, Changed<DynamicBuffer<int>>]
         private static void Send(in DynamicBuffer<int> bag, ref Sent sent)
@@ -97,7 +97,7 @@ public partial class DynamicBufferBenchmark
     }
 
     [UpdateInGroup<Replication>]
-    public partial class SendLists : EcsSystem
+    public class SendLists : EcsSystem
     {
         [ForEach, Changed<ListBag>]
         private static void Send(in ListBag bag, ref Sent sent)

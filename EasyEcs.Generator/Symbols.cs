@@ -143,13 +143,37 @@ internal static class Symbols
         || type is INamedTypeSymbol { IsGenericType: true } buffer && buffer.OriginalDefinition.ToDisplayString() == "EasyEcs.DynamicBuffer<T>"
         && Implements(buffer.TypeArguments[0], "EasyEcs.IRelation");
 
-    /// <summary>The type and every containing type are declared partial.</summary>
-    public static bool IsPartialChain(INamedTypeSymbol type)
+    /// <summary>
+    /// Code outside the type's declaration, anywhere in its assembly, can name <paramref name="type"/>: it and every
+    /// containing type (and type argument) are public or internal. The generated jobs of [ForEach] methods live outside
+    /// the user's type.
+    /// </summary>
+    public static bool IsNameable(ITypeSymbol type) => type switch
+    {
+        IArrayTypeSymbol array => IsNameable(array.ElementType),
+        ITypeParameterSymbol or IPointerTypeSymbol or IFunctionPointerTypeSymbol => false,
+        INamedTypeSymbol named => IsVisible(named) && named.TypeArguments.All(IsNameable),
+        _ => true,
+    };
+
+    /// <summary>The type and its containing types are public or internal (accessible anywhere in their assembly).</summary>
+    public static bool IsVisible(INamedTypeSymbol type)
     {
         for (var t = type; t != null; t = t.ContainingType)
-            if (!t.DeclaringSyntaxReferences.Any(r => r.GetSyntax() is TypeDeclarationSyntax d && d.Modifiers.Any(m => m.Text == "partial")))
+            if (t.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal))
                 return false;
         return true;
+    }
+
+    /// <summary>
+    /// The first parameter or return type of a [ForEach] method that generated code outside its type cannot name (a
+    /// private nested component), or null. A runner's own type must be nameable too: its entry point extends it.
+    /// </summary>
+    public static ITypeSymbol? Unnameable(IMethodSymbol method)
+    {
+        if (IsRunner(method) && !IsVisible(method.ContainingType)) return method.ContainingType;
+        if (!method.ReturnsVoid && !IsNameable(method.ReturnType)) return method.ReturnType;
+        return method.Parameters.Select(p => p.Type).FirstOrDefault(t => !IsNameable(t));
     }
 
     public static bool IsGenericChain(INamedTypeSymbol type)
@@ -193,8 +217,8 @@ internal static class Symbols
     }
 
     /// <summary>
-    /// A [ForEach] method outside a system: static, in a partial type that is no system. The generator writes its job
-    /// and an entry point taking the world (and the caller's context parameters).
+    /// A [ForEach] method outside a system: static, in a type that is no system. The generator writes its job and an
+    /// entry point taking the world (and the caller's context parameters), a static extension member of the type.
     /// </summary>
     public static bool IsRunner(IMethodSymbol method) => !IsSystem(method.ContainingType);
 
@@ -258,7 +282,7 @@ internal static class Symbols
         var type = method.ContainingType;
         bool outside = IsRunner(method);
         if (outside && (!method.IsStatic || RunnerCollides(method))) return false;
-        if (!IsPartialChain(type) || IsGenericChain(type) || method.IsGenericMethod) return false;
+        if (IsGenericChain(type) || method.IsGenericMethod || Unnameable(method) != null) return false;
         int components = 0;
         foreach (var p in method.Parameters)
         {

@@ -10,7 +10,7 @@ namespace EasyEcs.Benchmark;
 /// Steady state must allocate 0 bytes per tick either way.
 /// </summary>
 [MemoryDiagnoser]
-public partial class ParallelForEachBenchmark
+public class ParallelForEachBenchmark
 {
     [Params(100_000)] public int Entities;
     [Params(false, true)] public bool Parallel;
@@ -98,13 +98,13 @@ public partial class ParallelForEachBenchmark
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private static void Diverged(Entity entity) => throw new InvalidOperationException($"{entity} diverged");
 
-    public partial class Steer : EcsSystem
+    public class Steer : EcsSystem
     {
         [ForEach]
         static void Run(ref Agent agent, in Waypoints waypoints) => SteerAgent(ref agent, in waypoints);
     }
 
-    public partial class SteerInParallel : EcsSystem
+    public class SteerInParallel : EcsSystem
     {
         [ForEach(Parallel = true)]
         static void Run(ref Agent agent, in Waypoints waypoints) => SteerAgent(ref agent, in waypoints);

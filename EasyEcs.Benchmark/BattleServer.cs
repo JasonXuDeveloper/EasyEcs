@@ -39,7 +39,7 @@ public struct WaypointArray { private Position _first; }
 
 public struct Replication : ISystemGroup;                                     // runs when the server sends updates
 
-public partial class SteeringSystem : EcsSystem                               // heavy per-entity math: on all cores
+public class SteeringSystem : EcsSystem                               // heavy per-entity math: on all cores
 {
     protected override void OnCreate()                                        // the system sets up the data it steers by
     {
@@ -74,13 +74,13 @@ public partial class MovementSystem : EcsSystem
     }
 }
 
-public partial class ManaSystem : EcsSystem                                   // other data than MovementSystem: both
+public class ManaSystem : EcsSystem                                   // other data than MovementSystem: both
 {                                                                             // run at once
     [ForEach]
     static void Regenerate(ref Mana mana) => mana.Value = Math.Min(mana.Max, mana.Value + 1);
 }
 
-public partial class ZoneSystem : EcsSystem                                   // the zone index follows these writes
+public class ZoneSystem : EcsSystem                                   // the zone index follows these writes
 {
     [ForEach]
     static void Enter(Entity player, in Position p, in Zone zone)              // `in`: reading is not a change
@@ -168,7 +168,7 @@ public partial class RespawnSystem : EcsSystem                                //
     }
 }
 
-public partial class ProjectileSystem : EcsSystem
+public class ProjectileSystem : EcsSystem
 {
     [ForEach, With<Player>, Without<Dead>]
     static void Shoot(Entity player, in Position p, in Velocity v, ref Mana mana, ref Battle battle, World world)
@@ -186,7 +186,7 @@ public partial class ProjectileSystem : EcsSystem
     }
 }
 
-public partial class RegenerationSystem : EcsSystem
+public class RegenerationSystem : EcsSystem
 {
     public override int UpdateInterval => 10;                                 // every 10th update
 
@@ -205,7 +205,7 @@ public sealed class ClockSystem : EcsSystem
 }
 
 [UpdateInGroup<Replication>]
-public partial class ReplicationSystem : EcsSystem                            // only what changed since the last send
+public class ReplicationSystem : EcsSystem                            // only what changed since the last send
 {
     [ForEach, Changed<Health>]
     static void Send(in Health hp, ref Replica replica, ref Battle battle)

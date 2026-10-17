@@ -8,7 +8,7 @@ namespace EasyEcs.Benchmark;
 /// loop. Steady state allocates 0 bytes.
 /// </summary>
 [MemoryDiagnoser]
-public partial class RunnerBenchmark
+public class RunnerBenchmark
 {
     [Params(100_000)] public int Entities;
 
@@ -42,7 +42,7 @@ public partial class RunnerBenchmark
     public int Runner()
     {
         int wounded = 0;
-        CountWounded(_world, ref wounded);
+        RunnerBenchmark.CountWounded(_world, ref wounded); // inside the type, the entry point is named with it
         return wounded;
     }
 

@@ -17,10 +17,6 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
 {
     private const string Category = "EasyEcs";
 
-    public static readonly DiagnosticDescriptor NotPartial = new("EECS001", "A type with [ForEach] methods must be partial",
-        "'{0}' declares [ForEach] methods and must be partial (including containing types)",
-        Category, DiagnosticSeverity.Error, true);
-
     public static readonly DiagnosticDescriptor BadParameter = new("EECS002", "Invalid [ForEach] parameter",
         "Parameter '{0}' of [ForEach] method '{1}' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, a Maybe of one, an Entity or the World (outside a system, also a value the caller passes, of any other type)",
         Category, DiagnosticSeverity.Error, true);
@@ -143,10 +139,15 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         Category, DiagnosticSeverity.Error, true,
         "Outside a system, the generator writes an overload of a [ForEach] method that takes the World (and the change tick, for [Changed<T>] / [Removed<T>]) followed by the method's context parameters, and runs the method over every matching entity.");
 
+    public static readonly DiagnosticDescriptor Unnameable = new("EECS022", "Type out of reach of the generated code",
+        "[ForEach] method '{0}' uses '{1}', which code outside its declaring type cannot name: make it internal or public",
+        Category, DiagnosticSeverity.Error, true,
+        "The generator writes the jobs of [ForEach] methods outside the user's type (no partial needed) and calls the method through UnsafeAccessor, so private methods and systems are fine; the types of its parameters, and the type of a [ForEach] method outside a system, must be internal or public.");
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
-        NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
+        BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
         MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
-        RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups, RunnerCollision);
+        RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups, RunnerCollision, Unnameable);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -408,8 +409,6 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (Symbols.IsSystem(type)) AnalyzeSystemFields(context, type);
 
         if (!type.GetMembers().OfType<IMethodSymbol>().Any(Symbols.IsForEach)) return;
-        if (!Symbols.IsPartialChain(type))
-            context.ReportDiagnostic(Diagnostic.Create(NotPartial, location, type.Name));
         if (Symbols.IsGenericChain(type))
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, type.Name));
     }
@@ -491,6 +490,8 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(RunnerCollision, location, method.Name, Symbols.TracksSince(method) ? "the tick, " : ""));
         if (method.IsGenericMethod)
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, method.Name));
+        if (Symbols.Unnameable(method) is { } unnameable)
+            context.ReportDiagnostic(Diagnostic.Create(Unnameable, location, method.Name, unnameable.Name));
 
         var removed = new System.Collections.Generic.List<ITypeSymbol>();
         foreach (var attribute in method.GetAttributes())

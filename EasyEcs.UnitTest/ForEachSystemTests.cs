@@ -2,7 +2,7 @@ using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
-public partial class Movement : EcsSystem
+public class Movement : EcsSystem
 {
     [ForEach, Without<Frozen>]
     private static void Move(ref Position p, in Velocity v)
@@ -16,7 +16,7 @@ public partial class Movement : EcsSystem
 /// Instance method, Entity and singleton parameters, With filter, structural changes, declaration order. Stateless: the
 /// outcome is data only: the entity's state (Dead) and the world's statistics (Score singleton).
 /// </summary>
-public partial class Damage : EcsSystem
+public class Damage : EcsSystem
 {
     [ForEach, With<Velocity>, Without<Dead>]
     private void Hurt(Entity entity, ref Health health, ref Score score)
@@ -31,7 +31,7 @@ public partial class Damage : EcsSystem
 }
 
 /// <summary>Optional component: one method for entities with and without Armor.</summary>
-public partial class Regenerate : EcsSystem
+public class Regenerate : EcsSystem
 {
     [ForEach]
     private static void Heal(ref Health health, Maybe<Armor> armor)
@@ -42,7 +42,7 @@ public partial class Regenerate : EcsSystem
 }
 
 /// <summary>Reads an optional tracked component: not a write, so its rows are not stamped.</summary>
-public partial class ArmorBonus : EcsSystem
+public class ArmorBonus : EcsSystem
 {
     [ForEach]
     private static void Add(ref Health health, Maybe<Armor> armor)
@@ -52,14 +52,14 @@ public partial class ArmorBonus : EcsSystem
 }
 
 /// <summary>Derived partial systems compose: base [ForEach] methods run first.</summary>
-public partial class MovementWithGravity : Movement
+public class MovementWithGravity : Movement
 {
     [ForEach]
     private static void Fall(ref Velocity v) => v.Y -= 1;
 }
 
 /// <summary>Changes the archetype of the visited entity, then keeps writing through its refs.</summary>
-public partial class BurnThenHeal : EcsSystem
+public class BurnThenHeal : EcsSystem
 {
     [ForEach, Without<Dead>]
     private static void Tick(Entity entity, ref Health health, in Position position)
@@ -72,7 +72,7 @@ public partial class BurnThenHeal : EcsSystem
 }
 
 /// <summary>Moves every visited entity into another archetype that the same pass also matches.</summary>
-public partial class Promote : EcsSystem
+public class Promote : EcsSystem
 {
     [ForEach]
     private static void Visit(Entity entity, ref Health health)
@@ -84,7 +84,7 @@ public partial class Promote : EcsSystem
 }
 
 /// <summary>Batch method: whole runs of rows as spans (vectorizable).</summary>
-public partial class BatchMovement : EcsSystem
+public class BatchMovement : EcsSystem
 {
     [ForEach, Without<Frozen>]
     private static void Move(System.Span<Position> p, System.ReadOnlySpan<Velocity> v, ref Score score)
@@ -101,7 +101,7 @@ public partial class BatchMovement : EcsSystem
 }
 
 /// <summary>Batch method with the run's entities: records the id of every row whose health is low.</summary>
-public partial class FindLowHealth : EcsSystem
+public class FindLowHealth : EcsSystem
 {
     [ForEach, Without<Frozen>]
     private static void Find(EntitySpan entities, System.ReadOnlySpan<Health> health, ref Score score)
@@ -126,7 +126,7 @@ public struct DestroyDespitePromise : IForEachEntity<Health>, INoStructuralChang
 }
 
 /// <summary>Counts positioned entities that are frozen or dead (or both): [WithAny] filters.</summary>
-public partial class CountHalted : EcsSystem
+public class CountHalted : EcsSystem
 {
     [ForEach, WithAny<Frozen>, WithAny<Dead>]
     static void Count(in Position position, ref Score score) => score.Points++;

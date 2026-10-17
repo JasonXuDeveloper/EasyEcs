@@ -29,7 +29,7 @@ public struct Clock : ISingletonComponent
 }
 
 /// <summary>[ForEach] system doing the same work as ForEachWrite (the only system of its world).</summary>
-public partial class IntegrateSystem : EcsSystem
+public class IntegrateSystem : EcsSystem
 {
     [ForEach]
     private static void Integrate(ref Position p, in Velocity v)

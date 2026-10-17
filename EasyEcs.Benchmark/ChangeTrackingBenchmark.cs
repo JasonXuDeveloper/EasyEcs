@@ -10,7 +10,7 @@ namespace EasyEcs.Benchmark;
 /// writes spread 97 rows apart touch most 64-row words. Steady state allocates 0 bytes either way.
 /// </summary>
 [MemoryDiagnoser]
-public partial class ChangeTrackingBenchmark
+public class ChangeTrackingBenchmark
 {
     [Params(100_000)] public int Entities;
     [Params(10, 1_000)] public int Written;
@@ -85,14 +85,14 @@ public partial class ChangeTrackingBenchmark
     public record struct Replica(int Value) : IComponent;
 
     [UpdateInGroup<Replication>]
-    public partial class ReplicateChanged : EcsSystem
+    public class ReplicateChanged : EcsSystem
     {
         [ForEach, Changed<Health>]
         private static void Copy(in Health health, ref Replica replica) => replica = new Replica(health.Value);
     }
 
     [UpdateInGroup<Replication>]
-    public partial class ReplicateAll : EcsSystem
+    public class ReplicateAll : EcsSystem
     {
         [ForEach]
         private static void Copy(in Health health, ref Replica replica)

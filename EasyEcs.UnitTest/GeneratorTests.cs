@@ -112,7 +112,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(Entity e, in P p) { }", "access.RunsAlone();")]
     [TestCase("[ForEach] static void A(System.Span<P> p, System.ReadOnlySpan<Q> q) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "IForEachBatch<global::P, global::Q>")]
     [TestCase("[ForEach, Changed<DynamicBuffer<int>>] static void A(in DynamicBuffer<int> b, ref P p) { }", ".Changed<global::EasyEcs.DynamicBuffer<int>>(0)", "access.Read<global::EasyEcs.DynamicBuffer<int>>();")]
-    [TestCase("[ForEach, Changed<T>] static void A(ref P p) { }", "access.Read<global::T>();", ".Changed<global::T>(0)", "Since(LastRunTick + 1)", "Writes => 1;")]
+    [TestCase("[ForEach, Changed<T>] static void A(ref P p) { }", "access.Read<global::T>();", ".Changed<global::T>(0)", "Since(system.LastRunTick + 1)", "Writes => 1;")]
     [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Read<global::Q>();", "IForEachEntity<global::P>", "INoStructuralChanges", "global::EasyEcs.Maybe<global::Q>.ForRead(entity)")]
     [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) q.Value.V++; }", "access.Write<global::Q>();", "global::EasyEcs.Maybe<global::Q>.ForWrite(entity)")]
     [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) q.Value = default; }", "access.Write<global::Q>();", "ForWrite(entity)")]
@@ -130,7 +130,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref P p, ref int n, in int floor, int add) { }",
         "public static void A(global::EasyEcs.World world, ref int n, in int floor, int add)", "x1 = ref n, x2 = ref floor, x3 = add")]
     [TestCase("[ForEach, Changed<T>] static void A(ref P p, ref Clock c, int world) { }",
-        "public static void A(global::EasyEcs.World _world, ulong since, int world)", "__AFilter.Since(since)", "s1 = ref _world.SingletonRef")]
+        "public static void A(global::EasyEcs.World _world, ulong since, int world)", "__ForEach.AFilter.Since(since)", "s1 = ref _world.SingletonRef")]
     [TestCase("[ForEach(Parallel = true)] static void A(ref P p, in int k) { }", "public int x1;", "x1 = k }", "ForEachParallel<")]
     public void RunnersGetAnEntryPoint(string members, params string[] expected)
     {
@@ -155,7 +155,7 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain(writes));
     }
 
-    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) { } }", "EECS001")]
+    [TestCase("public class S : EcsSystem { private struct H : IComponent; [ForEach] static void A(ref H h) { } }", "EECS022")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, int x) { } }", "EECS002")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(P p) { } }", "EECS002")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(World w) { } }", "EECS003")]
@@ -163,7 +163,7 @@ public class GeneratorTests
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref Clock c) { } }", "EECS003")]
     [TestCase("public partial class S<T> : EcsSystem { [ForEach] static void A(ref P p) { } }", "EECS004")]
     [TestCase("public partial class S { [ForEach] void A(ref P p) { } }", "EECS005")]                         // outside a system: static
-    [TestCase("public static class R { [ForEach] static void A(ref P p) { } }", "EECS001")]
+    [TestCase("public class O { private static class R { [ForEach] static void A(ref P p) { } } }", "EECS022")]   // a runner's type is extended
     [TestCase("public static partial class R { [ForEach] static void A(P p) { } }", "EECS002")]                   // a component by value
     [TestCase("public static partial class R { [ForEach] static void A(in P p, ref int n) { } static void A(World w, ref int n) { } }", "EECS021")]
     [TestCase("public static partial class R { [ForEach(Parallel = true)] static void A(ref P p, ref int n) { } }", "EECS010")]
@@ -315,12 +315,12 @@ public class GeneratorTests
             }
             """), out var output, out _);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")).Select(t => t.ToString()));
-        Assert.That(generated, Does.Match(@"struct __ReadJob[^\n]*INoStructuralChanges"));
-        Assert.That(generated, Does.Not.Match(@"struct __WriteJob[^\n]*INoStructuralChanges"));
-        Assert.That(generated, Does.Not.Match(@"struct __GrowJob[^\n]*INoStructuralChanges"));
-        Assert.That(generated, Does.Match(@"struct __CheckJob[^\n]*INoStructuralChanges"));
-        Assert.That(generated, Does.Not.Match(@"struct __OffJob[^\n]*INoStructuralChanges"));
-        Assert.That(generated, Does.Not.Match(@"struct __OnJob[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Match(@"struct ReadJob[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Not.Match(@"struct WriteJob[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Not.Match(@"struct GrowJob[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Match(@"struct CheckJob[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Not.Match(@"struct OffJob[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Not.Match(@"struct OnJob[^\n]*INoStructuralChanges"));
     }
 
     [Test]

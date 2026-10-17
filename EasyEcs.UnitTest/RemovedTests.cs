@@ -3,17 +3,17 @@ using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
-public partial class RemovedTests
+public class RemovedTests
 {
     /// <summary>Counts, per entity, the runs in which it had lost its Armor since the system's previous run.</summary>
-    public partial class ArmorLoss : EcsSystem
+    public class ArmorLoss : EcsSystem
     {
         [ForEach, Removed<Armor>]
         private static void Count(ref Seen seen) => seen.Count++;
     }
 
     /// <summary>The batch form, with the entities of each run.</summary>
-    public partial class ArmorLossBatch : EcsSystem
+    public class ArmorLossBatch : EcsSystem
     {
         [ForEach, Removed<Armor>]
         private static void Count(EntitySpan entities, Span<Seen> seen)
@@ -23,7 +23,7 @@ public partial class RemovedTests
     }
 
     /// <summary>Watches changes of the same component: removed rows are not changed rows.</summary>
-    public partial class ArmorChange : EcsSystem
+    public class ArmorChange : EcsSystem
     {
         [ForEach, Changed<Armor>]
         private static void Count(ref Health seen) => seen.Value++;

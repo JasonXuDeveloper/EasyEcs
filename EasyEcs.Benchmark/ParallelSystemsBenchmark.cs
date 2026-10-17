@@ -8,7 +8,7 @@ namespace EasyEcs.Benchmark;
 /// at the same time; sequential is the reference. Steady state must allocate 0 bytes per tick either way.
 /// </summary>
 [MemoryDiagnoser]
-public partial class ParallelSystemsBenchmark
+public class ParallelSystemsBenchmark
 {
     [Params(100_000)] public int Entities;
     [Params(false, true)] public bool Parallel;
@@ -39,7 +39,7 @@ public partial class ParallelSystemsBenchmark
     public record struct Mana(int Value, int Max) : IComponent;
     public record struct Cooldown(int Ticks) : IComponent;
 
-    public partial class MoveBodies : EcsSystem
+    public class MoveBodies : EcsSystem
     {
         [ForEach]
         static void Move(ref Body b)
@@ -51,19 +51,19 @@ public partial class ParallelSystemsBenchmark
         }
     }
 
-    public partial class RegenerateHealth : EcsSystem
+    public class RegenerateHealth : EcsSystem
     {
         [ForEach]
         static void Regenerate(ref Vitals v) => v.Health = v.Health < v.Max ? v.Health + 1 : 0;
     }
 
-    public partial class RegenerateMana : EcsSystem
+    public class RegenerateMana : EcsSystem
     {
         [ForEach]
         static void Regenerate(ref Mana m) => m.Value = m.Value < m.Max ? m.Value + 1 : 0;
     }
 
-    public partial class TickCooldowns : EcsSystem
+    public class TickCooldowns : EcsSystem
     {
         [ForEach]
         static void Tick(ref Cooldown c) => c.Ticks = c.Ticks > 0 ? c.Ticks - 1 : 30;

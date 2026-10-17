@@ -3,10 +3,10 @@ using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
-public partial class IndexTests
+public class IndexTests
 {
     /// <summary>The cascade of the relations guide: children of dying (Dead) parents are destroyed.</summary>
-    public partial class DestroyOrphans : EcsSystem
+    public class DestroyOrphans : EcsSystem
     {
         [ForEach, With<Dead>]
         private void Cascade(Entity parent)
@@ -16,7 +16,7 @@ public partial class IndexTests
     }
 
     /// <summary>Renames every callsign: a system writes keys with Set.</summary>
-    public partial class Rename : EcsSystem
+    public class Rename : EcsSystem
     {
         [ForEach]
         private static void Apply(Entity entity, in Callsign callsign) => entity.Set(new Callsign(callsign.Value + "!"));
@@ -26,7 +26,7 @@ public partial class IndexTests
     /// Looks up the index it writes, in the middle of a pass over the indexed component: before renaming each entity it
     /// records how many renamed ones the index already finds.
     /// </summary>
-    public partial class RenameAfterLookup : EcsSystem
+    public class RenameAfterLookup : EcsSystem
     {
         [ForEach]
         private void Apply(Entity entity, in Callsign callsign)

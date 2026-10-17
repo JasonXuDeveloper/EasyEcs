@@ -38,14 +38,14 @@ public struct Sink : ISingletonComponent
 }
 
 [UpdateInGroup<Iterate1>]
-public partial class SumHealth : EcsSystem
+public class SumHealth : EcsSystem
 {
     [ForEach]
     private static void Flip(ref Health h) => h.Max ^= 1;
 }
 
 [UpdateInGroup<Iterate2>]
-public partial class Integrate : EcsSystem
+public class Integrate : EcsSystem
 {
     [ForEach, Without<Stunned>, Without<Dead>]
     private static void Move(ref Position p, ref Velocity v)
@@ -59,7 +59,7 @@ public partial class Integrate : EcsSystem
 
 /// <summary>Iterate2 as a batch method: the same movement on whole runs of rows with SIMD (shared kernel).</summary>
 [UpdateInGroup<Iterate2Simd>]
-public partial class IntegrateSimd : EcsSystem
+public class IntegrateSimd : EcsSystem
 {
     [ForEach, Without<Stunned>, Without<Dead>]
     private static void Move(Span<Position> p, Span<Velocity> v) =>
@@ -94,21 +94,21 @@ public static class SimdMove
 }
 
 [UpdateInGroup<Iterate3>]
-public partial class Read3 : EcsSystem
+public class Read3 : EcsSystem
 {
     [ForEach]
     private static void Write(ref Position p, in Velocity v, in Health h) => p.X = v.X + h.Max;
 }
 
 [UpdateInGroup<IterateWith>]
-public partial class PlayersHealth : EcsSystem
+public class PlayersHealth : EcsSystem
 {
     [ForEach, With<Player>, Without<Dead>]
     private static void Flip(ref Health h) => h.Max ^= 1;
 }
 
 [UpdateInGroup<IterateEntity>]
-public partial class EntityIds : EcsSystem
+public class EntityIds : EcsSystem
 {
     [ForEach, Without<Dead>]
     private static void Sum(Entity entity, in Health h, ref Sink sink)
@@ -118,7 +118,7 @@ public partial class EntityIds : EcsSystem
 }
 
 [UpdateInGroup<IterateEntityBatch>]
-public partial class EntityIdsBatch : EcsSystem
+public class EntityIdsBatch : EcsSystem
 {
     [ForEach, Without<Dead>]
     private static void Sum(EntitySpan entities, ReadOnlySpan<Health> h, ref Sink sink)
@@ -129,7 +129,7 @@ public partial class EntityIdsBatch : EcsSystem
 }
 
 [UpdateInGroup<IterateSingleton>]
-public partial class Cells : EcsSystem
+public class Cells : EcsSystem
 {
     [ForEach, Without<Dead>]
     private static void UpdateCell(in Position p, ref AoiCell aoi, ref Sink sink)
@@ -143,7 +143,7 @@ public partial class Cells : EcsSystem
 
 /// <summary>Stun 5% of the fighters, then recover all of them: 2 structural changes per stunned entity.</summary>
 [UpdateInGroup<Toggle>]
-public partial class StunToggle : EcsSystem
+public class StunToggle : EcsSystem
 {
     [ForEach, Without<Stunned>]
     private static void Stun(Entity entity, in Attack attack)
@@ -153,7 +153,7 @@ public partial class StunToggle : EcsSystem
 }
 
 [UpdateInGroup<Toggle>]
-public partial class StunRecover : EcsSystem
+public class StunRecover : EcsSystem
 {
     [ForEach]
     private static void Recover(Entity entity, ref Stunned stunned) => entity.Remove<Stunned>();

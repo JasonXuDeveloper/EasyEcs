@@ -3,31 +3,31 @@ using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
-public partial class ChangedTests
+public class ChangedTests
 {
     /// <summary>Counts, per entity, the runs in which its Armor had changed since the system's previous run.</summary>
-    public partial class ArmorWatch : EcsSystem
+    public class ArmorWatch : EcsSystem
     {
         [ForEach, Changed<Armor>]
         private static void Count(ref Seen seen) => seen.Count++;
     }
 
     /// <summary>Wears down the armor of stunned entities: a writer the watch runs after.</summary>
-    public partial class Wear : EcsSystem
+    public class Wear : EcsSystem
     {
         [ForEach, With<Stun>]
         private static void Apply(ref Armor armor) => armor = armor with { Value = armor.Value - 1 };
     }
 
     /// <summary>Reads armor only: an <c>in</c> parameter is not a write.</summary>
-    public partial class Inspect : EcsSystem
+    public class Inspect : EcsSystem
     {
         [ForEach]
         private static void Read(in Armor armor, ref Health health) => health = new Health(armor.Value);
     }
 
     /// <summary>The batch form: runs of changed rows as spans.</summary>
-    public partial class ArmorWatchBatch : EcsSystem
+    public class ArmorWatchBatch : EcsSystem
     {
         [ForEach, Changed<Armor>]
         private static void Count(System.ReadOnlySpan<Armor> armor, System.Span<Seen> seen)
@@ -37,28 +37,28 @@ public partial class ChangedTests
     }
 
     /// <summary>The parallel form: chunks of rows on several threads, changed rows only.</summary>
-    public partial class ArmorWatchParallel : EcsSystem
+    public class ArmorWatchParallel : EcsSystem
     {
         [ForEach(Parallel = true), Changed<Armor>]
         private static void Count(ref Seen seen) => seen.Count++;
     }
 
     /// <summary>Changed combined with other filters, and with a second tracked component (both must have changed).</summary>
-    public partial class LivingArmorAndShieldWatch : EcsSystem
+    public class LivingArmorAndShieldWatch : EcsSystem
     {
         [ForEach, Changed<Armor>, Changed<Shield>, Without<Dead>]
         private static void Count(ref Seen seen) => seen.Count++;
     }
 
     /// <summary>No component parameter: the Changed component is the queried one.</summary>
-    public partial class ArmorEntityWatch : EcsSystem
+    public class ArmorEntityWatch : EcsSystem
     {
         [ForEach, Changed<Armor>]
         private static void Count(Entity entity) => entity.Get<Seen>().Count++;
     }
 
     /// <summary>Destroys entities whose armor changed: structural changes inside a Changed pass.</summary>
-    public partial class BreakChanged : EcsSystem
+    public class BreakChanged : EcsSystem
     {
         [ForEach, Changed<Armor>]
         private static void Break(Entity entity, in Armor armor)
@@ -68,7 +68,7 @@ public partial class ChangedTests
     }
 
     /// <summary>A watch that also writes what it watches: its own writes are not changes for its next run.</summary>
-    public partial class Regen : EcsSystem
+    public class Regen : EcsSystem
     {
         [ForEach, Changed<Armor>]
         private static void Apply(ref Armor armor, ref Seen seen) => seen.Count++;
@@ -76,14 +76,14 @@ public partial class ChangedTests
 
     /// <summary>A writer ordered after the watch.</summary>
     [UpdateAfter<ArmorWatch>]
-    public partial class LateWear : EcsSystem
+    public class LateWear : EcsSystem
     {
         [ForEach, With<Stun>]
         private static void Apply(ref Armor armor) => armor = armor with { Value = armor.Value - 1 };
     }
 
     /// <summary>A watch that runs every other update.</summary>
-    public partial class SlowArmorWatch : EcsSystem
+    public class SlowArmorWatch : EcsSystem
     {
         public override int UpdateInterval => 2;
 

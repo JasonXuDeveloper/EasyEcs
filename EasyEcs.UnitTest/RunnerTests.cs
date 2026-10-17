@@ -7,7 +7,7 @@ namespace EasyEcs.UnitTest;
 /// [ForEach] methods outside systems: the generator writes an entry point per method that takes the world and the
 /// caller's values, for tools, tests and one-off passes that need no system.
 /// </summary>
-public static partial class Reports
+public static class Reports
 {
     [ForEach, Without<Dead>]
     private static void CountAlive(in Health hp, ref int alive) => alive++;
@@ -43,7 +43,7 @@ public static partial class Reports
     }
 }
 
-public partial class Tools                  // an instance class may hold runners too
+public class Tools                  // an instance class may hold runners too
 {
     [ForEach]
     private static void Count(in Health hp, ref int count) => count++;

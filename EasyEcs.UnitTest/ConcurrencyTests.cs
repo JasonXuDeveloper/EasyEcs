@@ -9,14 +9,14 @@ namespace EasyEcs.UnitTest;
 /// instead of tearing the tables. The cold paths those threads reach on their own (a query's first match, a missing
 /// singleton) stay safe under contention.
 /// </summary>
-public partial class ConcurrencyTests
+public class ConcurrencyTests
 {
 #pragma warning disable EECS017 // the handle is the point: a way to reach the world from a parallel method
     public record struct Spawner(Entity Owner) : IComponent;
 #pragma warning restore EECS017
 
     /// <summary>Changes structure through a handle a component holds: wrong in a system that shares a parallel stage.</summary>
-    public partial class SpawnInStage : EcsSystem
+    public class SpawnInStage : EcsSystem
     {
 #pragma warning disable EECS013 // the misuse under test: the runtime must catch what the analyzer reports
         [ForEach]
@@ -24,7 +24,7 @@ public partial class ConcurrencyTests
 #pragma warning restore EECS013
     }
 
-    public partial class Heal : EcsSystem
+    public class Heal : EcsSystem
     {
         [ForEach]
         static void Run(ref Health health) => health.Value++;

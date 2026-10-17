@@ -8,10 +8,10 @@ namespace EasyEcs.UnitTest;
 /// <see cref="WorldOptions.ParallelSystems"/>: systems of one priority run together exactly when their declared access
 /// (generated from the [ForEach] parameters) does not conflict.
 /// </summary>
-public partial class ParallelTests
+public class ParallelTests
 {
     /// <summary>Heavy per-row work cut into chunks of rows on several threads.</summary>
-    public partial class ChunkedIncrement : EcsSystem
+    public class ChunkedIncrement : EcsSystem
     {
         [ForEach(Parallel = true), Without<Dead>]
         static void Add(ref Counter counter, in Seen step, Entity entity) => counter.N += step.N + (entity.Id.Index & 0);
@@ -25,14 +25,14 @@ public partial class ParallelTests
     public record struct Seen(int N) : IComponent;
     public record struct Fault(bool Throw) : IComponent;
 
-    public partial class WriteLeft : EcsSystem
+    public class WriteLeft : EcsSystem
     {
         [ForEach]
         static void Meet(ref Left left, in Rendezvous rendezvous) =>
             left.Met = rendezvous.Barrier.SignalAndWait(rendezvous.TimeoutMs);
     }
 
-    public partial class WriteRight : EcsSystem
+    public class WriteRight : EcsSystem
     {
         [ForEach]
         static void Meet(ref Right right, in Rendezvous rendezvous) =>
@@ -41,7 +41,7 @@ public partial class ParallelTests
 
     /// <summary>Disjoint data from WriteLeft, but ordered after it: never at the same time.</summary>
     [UpdateAfter<WriteLeft>]
-    public partial class WriteRightAfterLeft : EcsSystem
+    public class WriteRightAfterLeft : EcsSystem
     {
         [ForEach]
         static void Meet(ref Right right, in Rendezvous rendezvous) =>
@@ -49,7 +49,7 @@ public partial class ParallelTests
     }
 
     /// <summary>An Entity parameter can reach any component (and make structural changes): it runs alone.</summary>
-    public partial class WriteRightThroughEntity : EcsSystem
+    public class WriteRightThroughEntity : EcsSystem
     {
         [ForEach, With<Left>]
         static void Meet(Entity entity, in Rendezvous rendezvous) =>
@@ -62,19 +62,19 @@ public partial class ParallelTests
         protected override void OnUpdate() { } // could reach any data: the scheduler cannot know
     }
 
-    public partial class Count : EcsSystem
+    public class Count : EcsSystem
     {
         [ForEach]
         static void Increment(ref Counter counter) => counter.N++;
     }
 
-    public partial class Observe : EcsSystem
+    public class Observe : EcsSystem
     {
         [ForEach]
         static void Copy(in Counter counter, ref Seen seen) => seen.N = counter.N;
     }
 
-    public partial class Throwing : EcsSystem
+    public class Throwing : EcsSystem
     {
         [ForEach]
         static void Fail(in Fault fault)

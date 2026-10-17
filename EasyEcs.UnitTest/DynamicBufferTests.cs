@@ -3,19 +3,19 @@ using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
-public partial class DynamicBufferTests
+public class DynamicBufferTests
 {
     public record struct Loot(int Item, int Count);
 
     /// <summary>Counts, per entity, the runs in which its bag had changed since the system's previous run.</summary>
-    public partial class BagWatch : EcsSystem
+    public class BagWatch : EcsSystem
     {
         [ForEach, Changed<DynamicBuffer<Loot>>]
         private static void Count(ref Seen seen) => seen.Count++;
     }
 
     /// <summary>Stunned entities drop their first item: a write through a <c>ref</c> parameter.</summary>
-    public partial class Drop : EcsSystem
+    public class Drop : EcsSystem
     {
         [ForEach, With<Stun>]
         private static void Apply(ref DynamicBuffer<Loot> bag)
@@ -25,7 +25,7 @@ public partial class DynamicBufferTests
     }
 
     /// <summary>Reads every bag: an <c>in</c> parameter is not a write.</summary>
-    public partial class Weigh : EcsSystem
+    public class Weigh : EcsSystem
     {
         [ForEach]
         private static void Sum(in DynamicBuffer<Loot> bag, ref Health weight)
@@ -37,7 +37,7 @@ public partial class DynamicBufferTests
     }
 
     /// <summary>Refills every bag with one item, in place: no allocation once the capacity is reached.</summary>
-    public partial class Refill : EcsSystem
+    public class Refill : EcsSystem
     {
         [ForEach]
         private static void Apply(ref DynamicBuffer<Loot> bag)

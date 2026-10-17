@@ -38,45 +38,70 @@ public sealed class SystemGenerator : IIncrementalGenerator
             .WithTrackingName("SystemUpdates");
         context.RegisterSourceOutput(updates, static (spc, model) =>
             spc.AddSource($"{model.Owner.HintName}.ForEach.g.cs",
-                SourceText.From(model.Owner.IsSystem ? EmitUpdate(model) : EmitRunners(model), Encoding.UTF8)));
+                SourceText.From(Emit(model), Encoding.UTF8)));
+    }
+
+    // ---------------- emit ----------------
+
+    /// <summary>
+    /// One file per type with [ForEach] methods, outside the type (which needs no partial): a file-local class holds
+    /// an UnsafeAccessor per method (private methods of private types too), its struct job and its filter. A system
+    /// type gets a <c>SystemCode</c> that runs the jobs and declares their access, registered by a module initializer;
+    /// any other type gets entry points, static extension members of the type.
+    /// </summary>
+    private static string Emit(UpdateModel model)
+    {
+        var owner = model.Owner;
+        var sb = new StringBuilder(Header).Append("using System.Runtime.CompilerServices;\n\n");
+        if (owner.Namespace.Length > 0) sb.Append("namespace ").Append(owner.Namespace).Append(";\n\n");
+        if (!owner.IsSystem) EmitRunners(sb, model);
+
+        sb.Append("file static class __ForEach\n{\n");
+        foreach (var method in model.Methods)
+        {
+            EmitAccessor(sb, owner, method);
+            EmitJob(sb, method);
+        }
+
+        if (owner.IsSystem) EmitSystemCode(sb, model);
+        return sb.Append("}\n").ToString();
+    }
+
+    /// <summary>The method itself, reached from outside its type: compiled to a direct call, inlined like one.</summary>
+    private static void EmitAccessor(StringBuilder sb, OwnerModel owner, ForEachModel method)
+    {
+        string kind = method.IsStatic ? "StaticMethod" : "Method";
+        string parameters = string.Concat(method.Parameters.Select(p => $", {p.Declared} {Escape(p.Name)}"));
+        sb.Append($"    [UnsafeAccessor(UnsafeAccessorKind.{kind}, Name = \"{method.Name}\")]\n");
+        sb.Append($"    internal static extern {method.Returns} {method.Name}([UnsafeAccessorType(\"{owner.MetadataName}\")] object owner{parameters});\n\n");
     }
 
     /// <summary>
-    /// [ForEach] methods outside a system: each gets its job and an entry point, an overload taking the world (the change
-    /// tick for [Changed&lt;T&gt;] / [Removed&lt;T&gt;]) and the method's context parameters, which runs the job once.
+    /// [ForEach] methods outside a system: each gets an entry point, a static extension member of the type taking the
+    /// world (the change tick for [Changed&lt;T&gt;] / [Removed&lt;T&gt;]) and the method's context parameters, which
+    /// runs the job once.
     /// </summary>
-    private static string EmitRunners(UpdateModel model)
+    private static void EmitRunners(StringBuilder sb, UpdateModel model)
     {
-        var sb = Open(model.Owner, "using System.Runtime.CompilerServices;\n");
+        var owner = model.Owner;
+        sb.Append("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]\n");
+        sb.Append($"{(owner.IsPublic ? "public" : "internal")} static class {owner.FlatName}ForEach\n{{\n");
+        sb.Append($"    extension({owner.FullName})\n    {{\n");
         foreach (var method in model.Methods)
         {
-            EmitJob(sb, model.Owner, method);
-            var contexts = method.Parameters.Select((p, i) => (p, i)).Where(x => x.p.Kind == Symbols.ParamKind.Context).ToArray();
-            var names = new HashSet<string>(contexts.Select(x => x.p.Name));
+            var contexts = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Context).ToArray();
+            var names = new HashSet<string>(contexts.Select(p => p.Name));
             string world = Free("world"), since = Free("since");
             var signature = new List<string> { $"global::EasyEcs.World {world}" };
             if (method.Since) signature.Add($"ulong {since}");
-            signature.AddRange(contexts.Select(x => $"{(x.p.RefKind.Length == 0 ? "" : x.p.RefKind + " ")}{x.p.Type} {Escape(x.p.Name)}"));
+            signature.AddRange(contexts.Select(p => $"{p.Declared} {Escape(p.Name)}"));
 
-            var fields = new List<string>();
-            if (method.TakesWorld) fields.Add($"World = {world}");
-            for (int i = 0; i < method.Parameters.Length; i++)
-            {
-                var p = method.Parameters[i];
-                if (p.Kind == Symbols.ParamKind.Singleton)
-                    fields.Add(method.Parallel ? $"s{i} = {world}.SingletonRef<{p.Type}>()" : $"s{i} = ref {world}.SingletonRef<{p.Type}>().Value");
-                else if (p.Kind == Symbols.ParamKind.Context)
-                    fields.Add(p.RefKind.Length == 0 || method.Parallel ? $"x{i} = {Escape(p.Name)}" : $"x{i} = ref {Escape(p.Name)}");
-            }
-
-            string filter = method.Since ? $", __{method.Name}Filter.Since({since})" : method.HasFilter ? $", in __{method.Name}Filter" : "";
-            string forEach = method.Loop + (method.Parallel ? "Parallel" : "");
-            sb.Append($"    /// <summary>Runs <c>{method.Name}</c> for every matching entity of <paramref name=\"{world}\"/>{(method.Since ? $" whose filtered components changed (or went) at or after tick <paramref name=\"{since}\"/>" : "")}. Owner thread only.</summary>\n");
-            sb.Append($"    [global::System.CodeDom.Compiler.GeneratedCode(\"{Symbols.GeneratorName}\", \"{ComponentGenerator.Version}\")]\n");
-            sb.Append($"    public static void {method.Name}({string.Join(", ", signature)})\n    {{\n");
-            string init = fields.Count == 0 ? "" : $" {string.Join(", ", fields)} ";
-            sb.Append($"        var job = new __{method.Name}Job {{{init}}};\n");
-            sb.Append($"        {world}.{forEach}<{method.ComponentTypes}, __{method.Name}Job>(ref job{filter});\n    }}\n\n");
+            string filter = method.Since ? $", __ForEach.{method.Name}Filter.Since({since})" : method.HasFilter ? $", in __ForEach.{method.Name}Filter" : "";
+            sb.Append($"        /// <summary>Runs <c>{method.Name}</c> for every matching entity of <paramref name=\"{world}\"/>{(method.Since ? $" whose filtered components changed (or went) at or after tick <paramref name=\"{since}\"/>" : "")}. Owner thread only.</summary>\n");
+            sb.Append($"        [global::System.CodeDom.Compiler.GeneratedCode(\"{Symbols.GeneratorName}\", \"{ComponentGenerator.Version}\")]\n");
+            sb.Append($"        public static void {method.Name}({string.Join(", ", signature)})\n        {{\n");
+            sb.Append($"            var job = new __ForEach.{method.Name}Job {{{Fields(method, world, null)}}};\n");
+            sb.Append($"            {world}.{method.ForEach}<{method.ComponentTypes}, __ForEach.{method.Name}Job>(ref job{filter});\n        }}\n\n");
 
             string Free(string name)
             {
@@ -85,41 +110,55 @@ public sealed class SystemGenerator : IIncrementalGenerator
             }
         }
 
-        return Close(sb, model.Owner);
+        sb.Append("    }\n}\n\n");
+    }
+
+    /// <summary>
+    /// The job's initializer: the system (instance methods), the world, singletons resolved once per pass, and the
+    /// caller's values (by reference, unless a parallel job copies them for its threads).
+    /// </summary>
+    private static string Fields(ForEachModel method, string world, string? system)
+    {
+        var fields = new List<string>();
+        if (system != null && !method.IsStatic) fields.Add($"System = {system}");
+        if (method.TakesWorld) fields.Add($"World = {world}");
+        for (int i = 0; i < method.Parameters.Length; i++)
+        {
+            var p = method.Parameters[i];
+            if (p.Kind == Symbols.ParamKind.Singleton)
+                fields.Add(method.Parallel ? $"s{i} = {world}.SingletonRef<{p.Type}>()" : $"s{i} = ref {world}.SingletonRef<{p.Type}>().Value");
+            else if (p.Kind == Symbols.ParamKind.Context)
+                fields.Add(p.RefKind.Length == 0 || method.Parallel ? $"x{i} = {Escape(p.Name)}" : $"x{i} = ref {Escape(p.Name)}");
+        }
+
+        return fields.Count == 0 ? "" : $" {string.Join(", ", fields)} ";
     }
 
     private static string Escape(string name) => SyntaxFacts.IsKeywordKind(SyntaxFacts.GetKeywordKind(name)) ? "@" + name : name;
 
-    // ---------------- emit ----------------
-
-    private static string EmitUpdate(UpdateModel model)
+    /// <summary>
+    /// The system type's code: Update runs the [ForEach] methods in declaration order (after OnUpdate), Access declares
+    /// what they read and write. The runtime runs the code of base types first.
+    /// </summary>
+    private static void EmitSystemCode(StringBuilder sb, UpdateModel model)
     {
-        var sb = Open(model.Owner, "using System.Runtime.CompilerServices;\n");
-        foreach (var method in model.Methods) EmitJob(sb, model.Owner, method);
-
-        sb.Append("    /// <summary>Runs the [ForEach] methods in declaration order (after OnUpdate).</summary>\n");
-        sb.Append("    protected override void GeneratedUpdate()\n    {\n        base.GeneratedUpdate();\n        var world = World;\n");
+        var owner = model.Owner;
+        sb.Append("    private sealed class Code : global::EasyEcs.SystemCode\n    {\n");
+        sb.Append("        protected override void Update(global::EasyEcs.EcsSystem system)\n        {\n            var world = system.World;\n");
         foreach (var method in model.Methods)
         {
             // [Changed<T>] / [Removed<T>]: rows written (or that lost T) since this system last ran.
-            string filter = method.Changed.Length + method.Removed.Length > 0 ? $", __{method.Name}Filter.Since(LastRunTick + 1)"
-                : method.HasFilter ? $", in __{method.Name}Filter" : "";
-            var fields = new List<string>();
-            if (!method.IsStatic) fields.Add("System = this");
-            if (method.TakesWorld) fields.Add("World = world");
-            for (int i = 0; i < method.Parameters.Length; i++)
-                if (method.Parameters[i].Kind == Symbols.ParamKind.Singleton)
-                    fields.Add(method.Parallel ? $"s{i} = world.SingletonRef<{method.Parameters[i].Type}>()"
-                        : $"s{i} = ref world.SingletonRef<{method.Parameters[i].Type}>().Value");
-            string init = fields.Count == 0 ? "" : $" {string.Join(", ", fields)} ";
-            sb.Append($"        var __{method.Name} = new __{method.Name}Job {{{init}}};\n");
-            string forEach = method.Loop + (method.Parallel ? "Parallel" : "");
-            sb.Append($"        world.{forEach}<{method.ComponentTypes}, __{method.Name}Job>(ref __{method.Name}{filter});\n");
+            string filter = method.Since ? $", {method.Name}Filter.Since(system.LastRunTick + 1)" : method.HasFilter ? $", in {method.Name}Filter" : "";
+            sb.Append($"            var {method.Name} = new {method.Name}Job {{{Fields(method, "world", "system")}}};\n");
+            sb.Append($"            world.{method.ForEach}<{method.ComponentTypes}, {method.Name}Job>(ref {method.Name}{filter});\n");
         }
 
-        sb.Append("    }\n\n");
+        sb.Append("        }\n\n");
         EmitAccess(sb, model);
-        return Close(sb, model.Owner);
+        sb.Append("    }\n\n");
+        string type = owner.IsVisible ? $"typeof({owner.FullName})" : $"global::System.Type.GetType(\"{owner.MetadataName}\")";
+        sb.Append("    [ModuleInitializer]\n");
+        sb.Append($"    internal static void Register() => global::EasyEcs.SystemCode.Register({type}, new Code());\n");
     }
 
     /// <summary>
@@ -129,34 +168,31 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// </summary>
     private static void EmitAccess(StringBuilder sb, UpdateModel model)
     {
-        sb.Append($"    protected override global::System.Type GeneratedFor => typeof({model.Owner.Name});\n\n");
-        sb.Append("    /// <summary>Declares what the [ForEach] methods read and write (parallel stages).</summary>\n");
-        sb.Append("    protected override void GeneratedAccess(ref global::EasyEcs.SystemAccess access)\n    {\n");
-        if (!model.Owner.BaseIsEcsSystem) sb.Append("        base.GeneratedAccess(ref access);\n");
+        sb.Append("        protected override void Access(ref global::EasyEcs.SystemAccess access)\n        {\n");
         bool alone = model.Owner.OverridesOnUpdate || model.Methods.Any(m => !m.IsStatic
             || m.Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.Entities or Symbols.ParamKind.World));
         if (alone)
         {
-            sb.Append("        access.RunsAlone();\n    }\n");
+            sb.Append("            access.RunsAlone();\n        }\n");
             return;
         }
 
-        foreach (var p in model.Methods.SelectMany(m => m.Parameters).Distinct())
+        foreach (var p in model.Methods.SelectMany(m => m.Parameters).Select(p => (p.Kind, p.Type, p.RefKind)).Distinct())
         {
             string kind = p.Kind == Symbols.ParamKind.Singleton ? "Singleton" : "";
-            sb.Append($"        access.{(p.RefKind == "ref" ? "Write" : "Read")}{kind}<{p.Type}>();\n");
+            sb.Append($"            access.{(p.RefKind == "ref" ? "Write" : "Read")}{kind}<{p.Type}>();\n");
         }
 
         // [Changed<T>] and [Removed<T>] read T's change ticks, which writers and removers of T stamp.
         foreach (var type in model.Methods.SelectMany(m => m.Changed.Concat(m.Removed)).Distinct())
-            sb.Append($"        access.Read<{type}>();\n");
+            sb.Append($"            access.Read<{type}>();\n");
 
-        sb.Append("    }\n");
+        sb.Append("        }\n");
     }
 
-    private static void EmitJob(StringBuilder sb, OwnerModel owner, ForEachModel method)
+    private static void EmitJob(StringBuilder sb, ForEachModel method)
     {
-        string job = $"__{method.Name}Job";
+        string job = $"{method.Name}Job";
         var components = method.Query.ToArray();
         int index = 0;
         var args = string.Join(", ", method.Parameters.Select((p, i) => p.Kind switch
@@ -169,7 +205,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Optional => $"global::EasyEcs.Maybe<{p.Type}>.{(p.RefKind == "ref" ? "ForWrite" : "ForRead")}(entity)",
             Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
             _ => "World",
-        }));
+        }).Prepend(method.IsStatic ? "null" : "System"));
 
         // The JIT specializes World.ForEach on this struct and inlines Execute and the user's method into the loop.
         string iface = "I" + method.Loop;
@@ -178,8 +214,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
         // A ref struct holds each singleton as a ref field, a register in the row loop: a SingletonRef's box would be
         // null-checked on every row. Parallel jobs are copied into work items on the heap, so they hold SingletonRefs.
         string kind = method.Parallel ? "struct" : "ref struct";
-        sb.Append($"    private {kind} {job} : global::EasyEcs.{iface}<{method.ComponentTypes}>{marker}\n    {{\n");
-        if (!method.IsStatic) sb.Append($"        public {owner.Name} System;\n");
+        sb.Append($"    internal {kind} {job} : global::EasyEcs.{iface}<{method.ComponentTypes}>{marker}\n    {{\n");
+        if (!method.IsStatic) sb.Append("        public object System;\n");
         // Only when the method takes the World: an unused field would still be copied into the row loop, where it
         // holds a callee-saved register a job that calls out (a structural change) needs for its loop state.
         if (method.TakesWorld) sb.Append("        public global::EasyEcs.World World;\n");
@@ -199,7 +235,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string first = method.IsBatch ? "global::EasyEcs.EntitySpan entities, " : method.TakesEntity ? "global::EasyEcs.Entity entity, " : "";
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
         sb.Append($"        public void Execute({first}{List(components.Length, i => string.Format(each, components[i - 1], i))})\n");
-        sb.Append($"            => {(method.IsStatic ? owner.Name : "System")}.{method.Name}({args});\n");
+        sb.Append($"            => __ForEach.{method.Name}({args});\n");
         // Its ref parameters (Span<T> for a batch): carried over when the method moves the entity it visits, and
         // stamped when the component tracks changes. The queried [With<T>] component of a method without one is read.
         var queried = method.Parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan).ToArray();
@@ -213,44 +249,39 @@ public sealed class SystemGenerator : IIncrementalGenerator
         if (!method.HasFilter) return;
         var chain = method.With.Select(t => $".With<{t}>()").Concat(method.Without.Select(t => $".Without<{t}>()"))
             .Concat(method.WithAny.Select(t => $".WithAny<{t}>()")).Concat(method.Changed.Select(t => $".Changed<{t}>(0)")).Concat(method.Removed.Select(t => $".Removed<{t}>(0)"));
-        sb.Append($"    private static readonly global::EasyEcs.QueryFilter __{method.Name}Filter = global::EasyEcs.QueryFilter.Create(){string.Concat(chain)};\n\n");
-    }
-
-    private static StringBuilder Open(OwnerModel owner, string usings)
-    {
-        var sb = new StringBuilder(Header).Append(usings).Append('\n');
-        if (owner.Namespace.Length > 0) sb.Append("namespace ").Append(owner.Namespace).Append(";\n\n");
-        foreach (var outer in owner.Containers) sb.Append($"partial {outer}\n{{\n");
-        return sb.Append($"{(owner.IsStatic ? "static " : "")}partial class {owner.Name}\n{{\n");
-    }
-
-    private static string Close(StringBuilder sb, OwnerModel owner)
-    {
-        sb.Append("}\n");
-        foreach (var _ in owner.Containers) sb.Append("}\n");
-        return sb.ToString();
+        sb.Append($"    internal static readonly global::EasyEcs.QueryFilter {method.Name}Filter = global::EasyEcs.QueryFilter.Create(){string.Concat(chain)};\n\n");
     }
 
     // ---------------- models (equatable, symbol-free) ----------------
 
-    private sealed record OwnerModel(string Namespace, string Name, EquatableArray<string> Containers, string HintName,
-        bool BaseIsEcsSystem, bool OverridesOnUpdate, bool IsSystem, bool IsStatic)
+    /// <param name="FullName">The type as C# names it (<c>global::Ns.Outer.Inner</c>).</param>
+    /// <param name="MetadataName">The type as the runtime names it (<c>Ns.Outer+Inner</c>), for UnsafeAccessorType.</param>
+    /// <param name="IsVisible">Generated code can name the type (it and its containing types are internal or public).</param>
+    /// <param name="OverridesOnUpdate">The type or a base type below EcsSystem overrides OnUpdate.</param>
+    private sealed record OwnerModel(string Namespace, string FullName, string MetadataName, string FlatName, string HintName,
+        bool IsVisible, bool IsPublic, bool OverridesOnUpdate, bool IsSystem)
     {
         public static OwnerModel From(INamedTypeSymbol type)
         {
-            var containers = new List<string>();
-            for (var outer = type.ContainingType; outer != null; outer = outer.ContainingType)
-                containers.Insert(0, $"{(outer.IsValueType ? "struct" : "class")} {outer.Name}");
             string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
-            bool overridesOnUpdate = type.GetMembers("OnUpdate").Any(m => m is IMethodSymbol { IsOverride: true, Parameters.Length: 0 });
-            return new OwnerModel(ns, type.Name, new EquatableArray<string>(containers.ToArray()),
+            var names = new List<string>();
+            for (var t = type; t != null; t = t.ContainingType) names.Insert(0, t.Name);
+            bool overridesOnUpdate = false;
+            for (var t = type; t != null && t.ToDisplayString() != Symbols.EcsSystem; t = t.BaseType)
+                overridesOnUpdate |= t.GetMembers("OnUpdate").Any(m => m is IMethodSymbol { IsOverride: true, Parameters.Length: 0 });
+            bool isPublic = true;
+            for (var t = type; t != null; t = t.ContainingType) isPublic &= t.DeclaredAccessibility == Accessibility.Public;
+            return new OwnerModel(ns, type.ToDisplayString(Symbols.Fqn),
+                (ns.Length > 0 ? ns + "." : "") + string.Join("+", names), string.Join("_", names),
                 type.ToDisplayString().Replace('<', '_').Replace('>', '_').Replace(',', '_'),
-                type.BaseType?.ToDisplayString() == Symbols.EcsSystem, overridesOnUpdate, Symbols.IsSystem(type), type.IsStatic);
+                Symbols.IsVisible(type), isPublic, overridesOnUpdate, Symbols.IsSystem(type));
         }
     }
 
+    /// <param name="Type">The component, singleton or value type (a span's or Maybe's element).</param>
     /// <param name="RefKind">"ref" or "in" ("" for a context parameter passed by value).</param>
-    private sealed record ParamModel(Symbols.ParamKind Kind, string Type, string RefKind, string Name);
+    /// <param name="Declared">The parameter as declared, with its modifier (<c>in global::Health</c>), for the accessor.</param>
+    private sealed record ParamModel(Symbols.ParamKind Kind, string Type, string RefKind, string Name, string Declared);
 
     /// <param name="Stable">
     /// The method cannot make structural changes: it is static, takes no <c>World</c>, and uses its <c>Entity</c>
@@ -260,8 +291,11 @@ public sealed class SystemGenerator : IIncrementalGenerator
     private sealed record ForEachModel(OwnerModel Owner, string Name, bool IsStatic, bool Stable, bool Parallel, int Order,
         EquatableArray<string> Query, EquatableArray<ParamModel> Parameters, EquatableArray<string> With,
         EquatableArray<string> Without, EquatableArray<string> WithAny, EquatableArray<string> Changed,
-        EquatableArray<string> Removed)
+        EquatableArray<string> Removed, string Returns)
     {
+        /// <summary>The World method that runs the job.</summary>
+        public string ForEach => Loop + (Parallel ? "Parallel" : "");
+
         public bool HasFilter => With.Length + Without.Length + WithAny.Length + Changed.Length + Removed.Length > 0;
 
         /// <summary>Filters rows by change tick ([Changed&lt;T&gt;] / [Removed&lt;T&gt;]).</summary>
@@ -288,16 +322,21 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
             // Spans are modeled as their element type: Span<T> writes T, ReadOnlySpan<T> reads it.
             bool outside = Symbols.IsRunner(method);
-            var parameters = method.Parameters.Select(p => Symbols.Classify(p, outside) switch
+            var parameters = method.Parameters.Select(p =>
             {
-                Symbols.ParamKind.ComponentSpan => new ParamModel(Symbols.ParamKind.ComponentSpan,
-                    Symbols.SpanElement(p.Type)!.ToDisplayString(Symbols.Fqn),
-                    ((INamedTypeSymbol)p.Type).ConstructedFrom.ToDisplayString() == "System.Span<T>" ? "ref" : "in", p.Name),
-                Symbols.ParamKind.Optional => new ParamModel(Symbols.ParamKind.Optional, // a write unless it only reads Value
-                    Symbols.MaybeElement(p.Type)!.ToDisplayString(Symbols.Fqn), Symbols.OnlyReadsValue(syntax, p.Name) ? "in" : "ref", p.Name),
-                Symbols.ParamKind.Context => new ParamModel(Symbols.ParamKind.Context, p.Type.ToDisplayString(Symbols.Fqn),
-                    p.RefKind switch { RefKind.Ref => "ref", RefKind.In => "in", _ => "" }, p.Name),
-                var kind => new ParamModel(kind, p.Type.ToDisplayString(Symbols.Fqn), p.RefKind == RefKind.Ref ? "ref" : "in", p.Name),
+                string declared = (p.RefKind switch { RefKind.Ref => "ref ", RefKind.In => "in ", RefKind.RefReadOnlyParameter => "ref readonly ", _ => "" })
+                    + p.Type.ToDisplayString(Symbols.Fqn);
+                return Symbols.Classify(p, outside) switch
+                {
+                    Symbols.ParamKind.ComponentSpan => new ParamModel(Symbols.ParamKind.ComponentSpan,
+                        Symbols.SpanElement(p.Type)!.ToDisplayString(Symbols.Fqn),
+                        ((INamedTypeSymbol)p.Type).ConstructedFrom.ToDisplayString() == "System.Span<T>" ? "ref" : "in", p.Name, declared),
+                    Symbols.ParamKind.Optional => new ParamModel(Symbols.ParamKind.Optional, // a write unless it only reads Value
+                        Symbols.MaybeElement(p.Type)!.ToDisplayString(Symbols.Fqn), Symbols.OnlyReadsValue(syntax, p.Name) ? "in" : "ref", p.Name, declared),
+                    Symbols.ParamKind.Context => new ParamModel(Symbols.ParamKind.Context, p.Type.ToDisplayString(Symbols.Fqn),
+                        p.RefKind switch { RefKind.Ref => "ref", RefKind.In => "in", _ => "" }, p.Name, declared),
+                    var kind => new ParamModel(kind, p.Type.ToDisplayString(Symbols.Fqn), p.RefKind == RefKind.Ref ? "ref" : "in", p.Name, declared),
+                };
             }).ToArray();
             var with = new List<string>();
             var without = new List<string>();
@@ -334,7 +373,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 new EquatableArray<string>(query.ToArray()),
                 new EquatableArray<ParamModel>(parameters), new EquatableArray<string>(with.ToArray()),
                 new EquatableArray<string>(without.ToArray()), new EquatableArray<string>(withAny.ToArray()),
-                new EquatableArray<string>(changed.ToArray()), new EquatableArray<string>(removed.ToArray()));
+                new EquatableArray<string>(changed.ToArray()), new EquatableArray<string>(removed.ToArray()),
+                method.ReturnsVoid ? "void" : method.ReturnType.ToDisplayString(Symbols.Fqn));
         }
     }
 
