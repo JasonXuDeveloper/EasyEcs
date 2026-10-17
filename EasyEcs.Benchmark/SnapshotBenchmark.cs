@@ -1,10 +1,12 @@
 using BenchmarkDotNet.Attributes;
+using Nino.Core;
 
 namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// In-memory snapshots of a world of 100,000 created entities (a third destroyed: recycled ids) in two tables, with a
 /// singleton: <c>Capture</c> copies every table and singleton into a new snapshot; <c>Restore</c> puts a snapshot back in place.
+/// <c>Save</c> writes the world as bytes into a reused buffer; <c>Load</c> replaces the world with those bytes.
 /// </summary>
 [MemoryDiagnoser]
 public class SnapshotBenchmark
@@ -13,6 +15,8 @@ public class SnapshotBenchmark
 
     private World _world;
     private WorldSnapshot _snapshot;
+    private readonly NinoArrayBufferWriter _bytes = new();
+    private byte[] _save;
 
     [GlobalSetup]
     public void Setup()
@@ -27,6 +31,8 @@ public class SnapshotBenchmark
 
         _world.AddSingleton<Clock>();
         _snapshot = _world.Capture();
+        _world.Save(_bytes);
+        _save = _bytes.WrittenSpan.ToArray();
     }
 
     [GlobalCleanup]
@@ -37,4 +43,15 @@ public class SnapshotBenchmark
 
     [Benchmark]
     public void Restore() => _world.Restore(_snapshot);
+
+    [Benchmark]
+    public int Save()
+    {
+        _bytes.ResetWrittenCount();
+        _world.Save(_bytes);
+        return _bytes.WrittenCount;
+    }
+
+    [Benchmark]
+    public void Load() => _world.Load(_save);
 }

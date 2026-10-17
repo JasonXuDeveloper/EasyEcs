@@ -227,10 +227,23 @@ public class GeneratorTests
     }
 
     [Test]
+    public void TheModuleRegistersItsComponentsSingletonsAndBuffersForLoading()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components,
+            "public partial class S : EcsSystem { [ForEach] static void A(in DynamicBuffer<P> b) { } }"), out var output, out _);
+        var source = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.SavedTypes.g.cs")).ToString();
+        Assert.That(source, Does.Contain("[global::System.Runtime.CompilerServices.ModuleInitializer]"));
+        foreach (var call in new[] { "Component<global::P>()", "Component<global::T>()", "Singleton<global::Clock>()",
+                     "Component<global::EasyEcs.DynamicBuffer<global::P>>()" })
+            Assert.That(source, Does.Contain("global::EasyEcs.SavedTypes." + call), call);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+    }
+
+    [Test]
     public void UnrelatedEditsHitTheCache()
     {
         var system = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components +
-            "public partial class S : EcsSystem { [ForEach] static void A(ref P p) { } }", Parse);
+            "public partial class S : EcsSystem { [ForEach] static void A(ref P p, in DynamicBuffer<int> b) { } }", Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         var compilation = Compile().AddSyntaxTrees(system, other);
 
@@ -239,7 +252,7 @@ public class GeneratorTests
             CSharpSyntaxTree.ParseText("public class Unrelated { int x; }", Parse)));
 
         var steps = driver.GetRunResult().Results.SelectMany(r => r.TrackedSteps).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.SelectMany(p => p.Value));
-        foreach (var name in new[] { "ForEachMethods", "SystemUpdates", "Components" })
+        foreach (var name in new[] { "ForEachMethods", "SystemUpdates", "Components", "SavedComponents", "SavedBuffers", "ModuleInitializers" })
             Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
                 Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged), name);
     }

@@ -1,5 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using Nino.Core;
 
 namespace EasyEcs;
 
@@ -23,6 +25,12 @@ public struct DynamicBuffer<T> : IComponent, ITrackChanges, IBuffer
 {
     // The only field: snapshots read a column of buffers as a column of BufferStore references (ComponentInfo).
     internal BufferStore<T> Store;
+
+    readonly bool IBuffer.Relational => default(T) is IRelation;
+
+    readonly void IBuffer.Write(ref Writer writer, BufferStore store) => BufferStore<T>.Write(ref writer, Unsafe.As<BufferStore<T>>(store));
+
+    readonly BufferStore IBuffer.Read(ref Reader reader) => BufferStore<T>.Read(ref reader);
 
     /// <summary>The number of elements.</summary>
     public readonly int Count => Store?.Count ?? 0;
@@ -137,7 +145,17 @@ public static class DynamicBufferExtensions
 }
 
 /// <summary>Marks <see cref="DynamicBuffer{T}"/> for the column operations that copy its elements.</summary>
-internal interface IBuffer;
+internal interface IBuffer
+{
+    /// <summary>Its elements are <see cref="IRelation"/>s: the buffer is indexed by their targets.</summary>
+    bool Relational { get; }
+
+    /// <summary>Write the elements of <paramref name="store"/> (a buffer of this type's; null: none) for a save.</summary>
+    void Write(ref Writer writer, BufferStore store);
+
+    /// <summary>Read elements written by <see cref="Write"/> into a new store (null for none).</summary>
+    BufferStore Read(ref Reader reader);
+}
 
 /// <summary>The list of a <see cref="DynamicBuffer{T}"/>, typed away so a column can be copied without its <c>T</c>.</summary>
 internal abstract class BufferStore
@@ -164,4 +182,31 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     }
 
     public override BufferStore Clone() => new BufferStore<T>(0) { Items = Items.AsSpan(0, Count).ToArray(), Count = Count };
+
+    /// <summary>Write the count, then the elements: raw rows when <typeparamref name="T"/> is unmanaged, else Nino values.</summary>
+    public static void Write(ref Writer writer, BufferStore<T> store)
+    {
+        int count = store?.Count ?? 0;
+        writer.Write(count);
+        if (count == 0) return;
+        var items = store!.Items.AsSpan(0, count);
+        if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>()) writer.WriteRaw(Bytes(items));
+        else for (int i = 0; i < items.Length; i++) NinoSerializer.Serialize(items[i], ref writer);
+    }
+
+    /// <summary>The bytes of unmanaged <paramref name="items"/> (T has no constraint, so not MemoryMarshal.AsBytes).</summary>
+    private static Span<byte> Bytes(Span<T> items) =>
+        MemoryMarshal.CreateSpan(ref Unsafe.As<T, byte>(ref MemoryMarshal.GetReference(items)), items.Length * Unsafe.SizeOf<T>());
+
+    /// <summary>Read a store written by <see cref="Write"/> (null for an empty buffer).</summary>
+    public static BufferStore<T> Read(ref Reader reader)
+    {
+        int count = reader.Read<int>();
+        if (count == 0) return null;
+        var store = new BufferStore<T>(count) { Count = count };
+        var items = store.Items.AsSpan(0, count);
+        if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>()) reader.ReadRaw(count * Unsafe.SizeOf<T>()).CopyTo(Bytes(items));
+        else for (int i = 0; i < items.Length; i++) NinoDeserializer.Deserialize(ref items[i], ref reader);
+        return store;
+    }
 }

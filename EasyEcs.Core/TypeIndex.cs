@@ -1,6 +1,8 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Threading;
+using Nino.Core;
+
 namespace EasyEcs;
 
 /// <summary>
@@ -42,25 +44,13 @@ internal static class ComponentType<T> where T : struct, IComponent
     /// <typeparamref name="T"/> implements <see cref="IIndexed{TKey}"/>: writes of a value (Set, CreateEntity) tell its
     /// world's index. A static readonly bool, so Tier1 code folds the test away for every other component.
     /// </summary>
-    internal static readonly bool Indexed = IsIndexed();
+    internal static readonly bool Indexed = default(T) is IIndexed || default(T) is IBuffer buffer && buffer.Relational; // a buffer of relations: by its targets
 
     /// <summary><typeparamref name="T"/> implements <see cref="IGroup"/>: a written value may move its row (folded like <see cref="Indexed"/>).</summary>
-    internal static readonly bool Grouped = typeof(IGroup).IsAssignableFrom(typeof(T));
+    internal static readonly bool Grouped = default(T) is IGroup;
 
     /// <summary>Writes of a value (Set, CreateEntity) are told to the world (<see cref="World.Written{T}"/>).</summary>
     internal static readonly bool Watched = Indexed || Grouped;
-
-    // Trimming may drop IIndexed<> from a component no index uses: then false is right, as no world can index it.
-    [UnconditionalSuppressMessage("Trimming", "IL2090", Justification = "A trimmed IIndexed<> interface means no index of T exists.")]
-    private static bool IsIndexed()
-    {
-        // A buffer of relations (DynamicBuffer<T : IRelation>) is indexed by its targets.
-        if (typeof(T).IsGenericType && typeof(T).GetGenericTypeDefinition() == typeof(DynamicBuffer<>))
-            return typeof(IRelation).IsAssignableFrom(typeof(T).GetGenericArguments()[0]);
-        foreach (var type in typeof(T).GetInterfaces())
-            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IIndexed<>)) return true;
-        return false;
-    }
 
     private static ushort Register()
     {
@@ -69,6 +59,7 @@ internal static class ComponentType<T> where T : struct, IComponent
             throw new InvalidOperationException($"Too many component types (max {ushort.MaxValue + 1})");
         var info = new ComponentInfo<T>();
         ComponentInfo.Register(index, info);
+        SavedTypes.Component<T>(); // a type the process uses can be loaded
         // A tracked component brings a hidden column of change ticks into every archetype that has it.
         if (default(T) is ITrackChanges) ComponentInfo.Pair(index, ComponentType<ChangeTicks<T>>.Bit);
         return (ushort)index;
@@ -78,12 +69,30 @@ internal static class ComponentType<T> where T : struct, IComponent
 /// <summary>Slot of singleton type <typeparamref name="T"/> in every world.</summary>
 internal static class SingletonType<T> where T : struct, ISingletonComponent
 {
-    internal static readonly int Index = TypeIndex<ISingletonComponent, T>.Value;
+    internal static readonly int Index = Register();
+
+    private static int Register()
+    {
+        SavedTypes.Singleton<T>(); // a type the process uses can be loaded
+        return TypeIndex<ISingletonComponent, T>.Value;
+    }
 }
 
 /// <summary>A singleton box without its type: copied by snapshots (<see cref="World.Capture"/>).</summary>
 internal abstract class SingletonBox
 {
+    /// <summary>The singleton's slot in every world (<see cref="SingletonType{T}.Index"/>).</summary>
+    public abstract int Slot { get; }
+
+    /// <summary>The name a save records the type by (<see cref="SavedTypes.NameOf{T}"/>).</summary>
+    public abstract string Name { get; }
+
+    /// <summary>Write the value (Nino).</summary>
+    public abstract void Write(ref Writer writer);
+
+    /// <summary>Read the value written by <see cref="Write"/>.</summary>
+    public abstract void Read(ref Reader reader);
+
     public abstract SingletonBox Clone();
 
     /// <summary>Copy the value of <paramref name="source"/>, a box of the same type.</summary>
@@ -94,6 +103,14 @@ internal abstract class SingletonBox
 internal sealed class SingletonBox<T> : SingletonBox where T : struct, ISingletonComponent
 {
     public T Value;
+
+    public override int Slot => SingletonType<T>.Index;
+
+    public override string Name => SavedTypes.NameOf<T>.Value;
+
+    public override void Write(ref Writer writer) => NinoSerializer.Serialize(Value, ref writer);
+
+    public override void Read(ref Reader reader) => NinoDeserializer.Deserialize(ref Value, ref reader);
 
     public override SingletonBox Clone() => new SingletonBox<T> { Value = Value };
 

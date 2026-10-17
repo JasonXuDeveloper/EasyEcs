@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using Nino.Core;
 
 namespace EasyEcs;
 
@@ -114,16 +115,57 @@ internal abstract class ComponentInfo
 
     /// <summary>A boxed copy of row <paramref name="slot"/> of <paramref name="column"/> (the debugger view; cold, allocates).</summary>
     public abstract object Box(Array column, int slot);
+
+    /// <summary>The name a save records the type by (<see cref="SavedTypes.NameOf{T}"/>).</summary>
+    public abstract string Name { get; }
+
+    /// <summary>Bit of <see cref="Disabled{T}"/> of this component (registered on first use).</summary>
+    public abstract ushort DisabledBit { get; }
+
+    /// <summary>
+    /// Write rows [0, <paramref name="count"/>) of managed column <paramref name="column"/> with Nino (a
+    /// <see cref="DynamicBuffer{T}"/> as its elements). Unmanaged columns are written as raw rows by the table.
+    /// </summary>
+    public abstract void Write(ref Writer writer, Array column, int count);
+
+    /// <summary>Read <paramref name="count"/> rows written by <see cref="Write"/> into managed column <paramref name="column"/> from <paramref name="start"/>.</summary>
+    public abstract void Read(ref Reader reader, Array column, int start, int count);
 }
 
 internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsReferenceOrContainsReferences<T>() ? -1 : Unsafe.SizeOf<T>(),
-    typeof(ICleanupComponent).IsAssignableFrom(typeof(T)), typeof(IGroup).IsAssignableFrom(typeof(T)))
+    default(T) is ICleanupComponent, default(T) is IGroup)
     where T : struct, IComponent
 {
     // Unmanaged columns are pinned byte arrays (pinned object heap, never moved by the GC) with one cache line of
     // slack, so their rows can start on a 64-byte boundary (Archetype.Aligned): SIMD loads and power-of-two sized
     // components then never straddle two lines. Managed columns are plain T[] (the GC must see their references).
     public override Type Type => typeof(T);
+
+    public override string Name => SavedTypes.NameOf<T>.Value;
+
+    public override ushort DisabledBit => DisabledType<T>.Bit;
+
+    // A boxed default buffer (null for other types): reads and writes the elements of a DynamicBuffer<TElement> column
+    // without knowing TElement. Boxed once per type.
+    private static readonly IBuffer Buffer = default(T) is IBuffer ? (IBuffer)default(T) : null;
+
+    public override void Write(ref Writer writer, Array column, int count)
+    {
+        var rows = Unsafe.As<T[]>(column);
+        if (default(T) is IBuffer) // a JIT-time constant
+            for (int i = 0; i < count; i++) Buffer.Write(ref writer, Unsafe.As<T, BufferStore>(ref rows[i]));
+        else
+            for (int i = 0; i < count; i++) NinoSerializer.Serialize(rows[i], ref writer);
+    }
+
+    public override void Read(ref Reader reader, Array column, int start, int count)
+    {
+        var rows = Unsafe.As<T[]>(column);
+        if (default(T) is IBuffer)
+            for (int i = start; i < start + count; i++) Unsafe.As<T, BufferStore>(ref rows[i]) = Buffer.Read(ref reader);
+        else
+            for (int i = start; i < start + count; i++) NinoDeserializer.Deserialize(ref rows[i], ref reader);
+    }
 
     public override object Box(Array column, int slot) =>
         Managed ? Unsafe.As<T[]>(column)[slot] : Unsafe.Add(ref Archetype.Row0<T>(column), slot);

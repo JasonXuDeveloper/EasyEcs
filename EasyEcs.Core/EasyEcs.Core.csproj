@@ -37,6 +37,11 @@
         <None Include="..\README.md" Pack="true" PackagePath="\"/>
     </ItemGroup>
 
+    <!-- World.Save / Load: Nino writes managed components and singletons ([NinoType]); unmanaged columns are raw rows -->
+    <ItemGroup>
+        <PackageReference Include="Nino.Serialization" Version="4.0.0-rc.3" />
+    </ItemGroup>
+
     <!-- EasyEcs.Generator: expands the T1..T9 API inside this assembly and ships to consumers for [ForEach] systems -->
     <ItemGroup>
         <ProjectReference Include="..\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>

@@ -42,17 +42,22 @@ public sealed partial class World
             if (bit >= _groupByBit.Length) Array.Resize(ref _groupByBit, bit + 1);
             if (_groupByBit[bit] != null) return;
             _groupByBit[bit] = new Grouping<T>();
+            RegroupAll(bit);
+        }
+    }
 
-            var tables = _allArchetypes; // a snapshot: tables created by the moves start in their group
-            foreach (var table in tables)
+    /// <summary>Move every entity with grouped component <paramref name="bit"/> to its value's group. Inside the structural gate.</summary>
+    private void RegroupAll(int bit)
+    {
+        var tables = _allArchetypes; // a snapshot: tables created by the moves start in their group
+        foreach (var table in tables)
+        {
+            int column = table.ColumnIndex(bit);
+            if (column < 0) continue;
+            for (int slot = table.Count - 1; slot >= 0; slot--) // from the last row: a moved row is filled by a visited one
             {
-                int column = table.ColumnIndex(bit);
-                if (column < 0) continue;
-                for (int slot = table.Count - 1; slot >= 0; slot--) // from the last row: a moved row is filled by a visited one
-                {
-                    int id = table.Slots[slot].Index;
-                    if (id >= 0 && table.Has(column, slot)) RegroupRow(id);
-                }
+                int id = table.Slots[slot].Index;
+                if (id >= 0 && table.Has(column, slot)) RegroupRow(id);
             }
         }
     }

@@ -14,6 +14,8 @@
         <PackageReference Include="NUnit.Analyzers" Version="4.15.0"/>
         <!-- generator tests drive EasyEcs.Generator through Roslyn -->
         <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0"/>
+        <!-- [NinoType] components in SerializationTests -->
+        <PackageReference Include="Nino.Generator" Version="4.0.0-rc.3"/>
     </ItemGroup>
 
     <ItemGroup>
