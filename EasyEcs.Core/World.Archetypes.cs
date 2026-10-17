@@ -116,19 +116,23 @@ public sealed partial class World
     /// Get or create the table of <paramref name="componentMask"/> (companions included) in <paramref name="groups"/>
     /// (by column; null when none is set). Inside the structural gate.
     /// </summary>
-    private Archetype Table(in BitMask componentMask, int[] groups)
+    private Archetype Table(in BitMask mask, int[] groups)
     {
         Archetype archetype;
+        if (groups == null && _archetypes.TryGetValue(mask, out archetype)) return archetype;
+        string groupsKey = groups != null ? GroupsKey(groups) : null;
+        if (groups != null && _groupedTables.TryGetValue(new GroupedTable(mask, groupsKey), out archetype)) return archetype;
+
+        // A new table owns its mask: a caller's reused mask (Load) keeps changing its bits past 256.
+        var componentMask = mask.Clone();
         if (groups == null)
         {
-            if (_archetypes.TryGetValue(componentMask, out archetype)) return archetype;
             archetype = new Archetype(in componentMask);
             _archetypes[componentMask] = archetype;
         }
         else
         {
-            var key = new GroupedTable(componentMask, GroupsKey(groups));
-            if (_groupedTables.TryGetValue(key, out archetype)) return archetype;
+            var key = new GroupedTable(componentMask, groupsKey);
             archetype = new Archetype(in componentMask, groups);
             _groupedTables[key] = archetype;
         }
@@ -187,8 +191,9 @@ public sealed partial class World
     {
         var result = mask;
         bool cloned = false;
-        foreach (ushort bit in mask.ToBitArray())
+        for (int bit = 0; bit < mask.Capacity; bit++) // no bit array: a lookup of a known table allocates nothing
         {
+            if (!mask.HasBit(bit)) continue;
             var info = ComponentInfo.Of(bit);
             int add = info.Companion >= 0 && !mask.HasBit(info.Companion) ? info.Companion : -1;
             bool drop = info.Owner >= 0 && !mask.HasBit(info.Owner);
@@ -345,6 +350,8 @@ public sealed partial class World
             Array.Clear(all[i].Slots);
 
         _archetypes.Clear();
+        _groupedTables.Clear();
+        _prefabTables?.Clear();
         _allArchetypes = Array.Empty<Archetype>();
         _queryCache.Clear();
         lock (_memoLock) _queryMemo = [];

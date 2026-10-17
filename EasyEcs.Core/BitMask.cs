@@ -164,6 +164,9 @@ internal struct BitMask : IEquatable<BitMask>
         return copy;
     }
 
+    /// <summary>One past the highest bit the mask can hold (256 per vector).</summary>
+    public readonly int Capacity => 256 * (1 + (_overflow?.Length ?? 0));
+
     /// <summary>Indices of the set bits in ascending order (cold path: archetype creation).</summary>
     public readonly ushort[] ToBitArray()
     {

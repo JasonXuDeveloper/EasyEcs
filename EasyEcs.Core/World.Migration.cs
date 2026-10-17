@@ -45,36 +45,32 @@ public sealed partial class World
                 var target = TableFor(table);
                 var handles = Handles(count);
                 int first = PlaceRows(target, handles);
-                target.CloneRows(table, 0, first, count, _changeTick);
+                for (int r = 0; r < count; r++) target.CloneRows(table, r, first + r, 1, _changeTick); // CloneRows repeats one row
                 for (int r = 0; r < count; r++) _arrived[table.Slots[r].Index] = handles[r];
                 rows.Add((target, first, count));
                 created += count;
             }
 
-            // Every id is known now: point the copies' references at them, then let indexes and groups see the values.
+            // Every id is known now: point the copies' references at them; children whose parent did not come along
+            // are roots here.
             var map = new IdMap(source, _arrived);
-            foreach (var (target, first, count) in rows)
-            {
-                for (int c = 0; c < target.Columns.Length; c++) target.Info(c).Remap(target.Columns[c], first, count, map);
-                for (int r = first; r < first + count; r++)
-                {
-                    var id = target.Slots[r];
-                    if (_indexByBit != null) IndexRow(target, r, id.Index, id.Version);
-                    if (_groupByBit != null) RegroupRow(id.Index);
-                }
-            }
-
-            // Children whose parent did not come along are roots here.
             var roots = _roots ??= [];
             roots.Clear();
             foreach (var (target, first, count) in rows)
             {
+                for (int c = 0; c < target.Columns.Length; c++) target.Info(c).Remap(target.Columns[c], first, count, map);
                 int column = target.ColumnIndex(ChildOfBit);
                 if (column < 0) continue;
                 ref var parents = ref Archetype.Row0<ChildOf>(target.Columns[column]);
                 for (int r = first; r < first + count; r++)
-                    if (Unsafe.Add(ref parents, r).Parent.IsNull) roots.Add(new Entity(this, target.Slots[r].Index, target.Slots[r].Version));
+                    if (target.Has(column, r) && Unsafe.Add(ref parents, r).Parent.IsNull)
+                        roots.Add(new Entity(this, target.Slots[r].Index, target.Slots[r].Version));
             }
+
+            // Then indexes and groups see the values: every run is indexed before a move changes rows, and runs move
+            // last first, so rows of one table that later runs filled are visited before they fill a hole.
+            foreach (var (target, first, count) in rows) IndexRows(target, first, count);
+            for (int i = rows.Count - 1; i >= 0; i--) RegroupRows(rows[i].Table, rows[i].First, rows[i].Count);
         }
 
         foreach (var root in _roots) root.Remove<ChildOf>();

@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.CompilerServices;
 using Nino.Core;
 using NUnit.Framework;
 
@@ -10,6 +11,8 @@ public partial struct Title : IComponent   // managed: written by its Nino forma
 {
     public string Text;
 }
+
+public struct Padded : IComponent { public byte Flag; public long Value; } // 7 bytes of padding after Flag
 
 public struct Grip { private EntityId _holder; public Grip(EntityId holder) => _holder = holder; public EntityId Holder => _holder; }
 public struct Held : IComponent { public Grip Grip; }                 // an id two levels down, in a private field
@@ -110,6 +113,12 @@ public class SerializationTests
         using (var world = new World())
         {
             for (int i = 0; i < 1000; i++) world.CreateEntity(new Position(i, i), new Health(i));
+            for (int i = 0; i < 100; i++)                                // lists too: a load refills the last load's
+            {
+                var bag = world.CreateEntity(new DynamicBuffer<DynamicBufferTests.Loot>());
+                for (int k = 0; k <= i % 5; k++) bag.Get<DynamicBuffer<DynamicBufferTests.Loot>>().Add(new DynamicBufferTests.Loot(i, k));
+            }
+
             world.AddSingleton<Score>() = new Score(1, 2);
             full = Save(world);
         }
@@ -121,13 +130,16 @@ public class SerializationTests
         loaded.Load(empty);                                               // nothing of the first load stays
         Assert.That((loaded.EntityCount, loaded.HasSingleton<Score>()), Is.EqualTo((0, false)));
         loaded.Load(full);
+        loaded.Load(full);                                                // warm: first calls compile and cache
 
         long before = GC.GetAllocatedBytesForCurrentThread();
         loaded.Load(full);
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.LessThan(1024)); // names, not rows
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);  // names are looked up as they lie in the bytes
         int sum = 0;
         foreach (var item in loaded.Query<Health>()) sum += item.Component1.Value;
-        Assert.That((loaded.EntityCount, sum, loaded.GetSingleton<Score>()), Is.EqualTo((1000, 999 * 1000 / 2, new Score(1, 2))));
+        int loot = 0;
+        foreach (var item in loaded.Query<DynamicBuffer<DynamicBufferTests.Loot>>()) loot += item.Component1.Count;
+        Assert.That((loaded.EntityCount, sum, loot, loaded.GetSingleton<Score>()), Is.EqualTo((1100, 999 * 1000 / 2, 300, new Score(1, 2))));
     }
 
     [Test]
@@ -166,6 +178,31 @@ public class SerializationTests
     }
 
     [Test]
+    public void AMovedGroupLandsInItsZonesAndItsIndexes()
+    {
+        var output = new NinoArrayBufferWriter();
+        var group = new EntityId[300];
+        using (var world = new World())
+        {
+            for (int i = 0; i < group.Length; i++) group[i] = world.CreateEntity(new Zone(i % 3), new Health(i));
+            for (int i = 0; i < group.Length; i++) world.GetEntity(group[i]).Set(new Follows(group[i % 7]));
+            world.SaveEntities(output, group);
+        }
+
+        using var arrival = new World();
+        arrival.GroupBy<Zone>();
+        arrival.Index<Follows, EntityId>();
+        var moved = new Entity[group.Length];
+        Assert.That(arrival.LoadEntities(output.WrittenSpan, moved), Is.EqualTo(group.Length));
+        for (int zone = 0; zone < 3; zone++)
+            Assert.That(arrival.Count<Health>(QueryFilter.Create().InGroup<Zone>(zone)), Is.EqualTo(100)); // every row moved, none skipped
+        for (int i = 0; i < moved.Length; i++)
+            Assert.That((moved[i].Read<Zone>().Id, moved[i].Read<Health>().Value), Is.EqualTo((i % 3, i)));
+        Assert.That(arrival.Index<Follows, EntityId>().Count(moved[0].Id), Is.EqualTo(43)); // i = 0, 7, ..., 294
+        Assert.That(moved[294].Read<Follows>().Target, Is.EqualTo(moved[0].Id));
+    }
+
+    [Test]
     public void AChildWhoseParentStayedIsARootAfterTheMove()
     {
         var output = new NinoArrayBufferWriter();
@@ -176,6 +213,46 @@ public class SerializationTests
         var moved = new Entity[1];
         world.LoadEntities(output.WrittenSpan, moved);                    // a copy into the same world
         Assert.That((moved[0].Has<ChildOf>(), moved[0].Read<Health>().Value, world.EntityCount), Is.EqualTo((false, 2, 3)));
+    }
+
+    [Test]
+    public void EqualWorldsSaveEqualBytesWhateverTheirPadding()
+    {
+        byte[] Saved(byte garbage)
+        {
+            using var world = new World();
+            var e = world.CreateEntity(new Padded { Flag = 1, Value = 2 });
+            ref var value = ref e.Get<Padded>();
+            Unsafe.Add(ref Unsafe.As<Padded, byte>(ref value), 1) = garbage;   // a padding byte after Flag
+            return Save(world);
+        }
+
+        Assert.That(Saved(0xAB), Is.EqualTo(Saved(0)));                       // padding is not saved as it lies in memory
+    }
+
+    [Test]
+    public void ADamagedSaveIsRefusedAndTheWorldStaysAsItWas()
+    {
+        byte[] bytes;
+        using (var world = new World())
+        {
+            world.CreateEntity(new Position(1, 2), new Title { Text = "kept" });
+            world.CreateEntity(new Health(3)).Set(new DynamicBuffer<DynamicBufferTests.Loot>());
+            world.AddSingleton<Score>() = new Score(1, 1);
+            bytes = Save(world);
+        }
+
+        using var loaded = new World();
+        var mine = loaded.CreateEntity(new Velocity(5, 5));
+        for (int length = 0; length < bytes.Length; length++)          // cut anywhere
+            Assert.Throws<InvalidDataException>(() => loaded.Load(bytes.AsSpan(0, length)), $"cut at {length}");
+        Assert.That((loaded.EntityCount, mine.Read<Velocity>()), Is.EqualTo((1, new Velocity(5, 5))));
+
+        var count = bytes.AsSpan().ToArray();
+        BitConverter.TryWriteBytes(count.AsSpan(12), int.MaxValue);      // a type count no save could hold
+        Assert.Throws<InvalidDataException>(() => loaded.Load(count));
+        loaded.Load(bytes);
+        Assert.That(loaded.EntityCount, Is.EqualTo(2));
     }
 
     [Test]

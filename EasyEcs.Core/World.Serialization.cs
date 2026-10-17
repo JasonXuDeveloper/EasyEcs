@@ -135,6 +135,7 @@ public sealed partial class World
                 writer.Write(named.Name);
                 writer.Write(disabled);
                 writer.Write(disabled ? 0 : info.Size);
+                writer.Write(disabled ? 0 : info.Layout);
             }
         }
 
@@ -175,6 +176,7 @@ public sealed partial class World
                 if (all) WriteColumn(ref writer, table, c, count);
                 else WriteRows(ref writer, table, c, count);
                 writer.PatchLength(slice);
+                writer.ReleaseReferences(); // a value refers to nothing in another slice: see Ends
             }
         }
 
@@ -189,6 +191,7 @@ public sealed partial class World
             int slice = writer.ReserveInt32();
             box.Write(ref writer);
             writer.PatchLength(slice);
+            writer.ReleaseReferences();
         }
 
         // A group's entities in the order given (LoadEntities hands their new handles back in it).
@@ -203,7 +206,7 @@ public sealed partial class World
         if (bits != null) writer.WriteUnmanagedRaw<ulong>(bits.AsSpan(0, (count + 63) >> 6));
         var info = table.Info(c);
         if (info.Managed) info.Write(ref writer, table.Columns[c], 0, count);
-        else writer.WriteRaw(MemoryMarshal.CreateReadOnlySpan(ref Archetype.Aligned(table.Columns[c]), count * info.Size));
+        else info.WriteRows(ref writer, MemoryMarshal.CreateReadOnlySpan(ref Archetype.Aligned(table.Columns[c]), count * info.Size));
     }
 
     /// <summary><see cref="WriteColumn"/> for a group: the rows <see cref="_saveRows"/> names, in that order.</summary>
@@ -224,7 +227,7 @@ public sealed partial class World
         var info = table.Info(c);
         for (int r = 0; r < count; r++)
             if (info.Managed) info.Write(ref writer, table.Columns[c], _saveRows[r], 1);
-            else writer.WriteRaw(MemoryMarshal.CreateReadOnlySpan(ref Unsafe.Add(ref Archetype.Aligned(table.Columns[c]), _saveRows[r] * info.Size), info.Size));
+            else info.WriteRows(ref writer, MemoryMarshal.CreateReadOnlySpan(ref Unsafe.Add(ref Archetype.Aligned(table.Columns[c]), _saveRows[r] * info.Size), info.Size));
     }
 
     /// <summary>
@@ -236,21 +239,50 @@ public sealed partial class World
     /// this world's <see cref="GroupBy{T}"/>. Every loaded row counts as written (<c>[Changed&lt;T&gt;]</c>).
     /// O(entities × components). Not while a pass iterates.
     /// </summary>
-    /// <exception cref="InvalidDataException">The bytes are not a save, or an unmanaged component's size changed.</exception>
+    /// <exception cref="InvalidDataException">
+    /// The bytes are not a save or are damaged, or a component's fields changed since the save (an unmanaged one's
+    /// size or layout, a managed one's Nino layout). The world is then left as it was.
+    /// </exception>
     public void Load(ReadOnlySpan<byte> input)
     {
+        using (Structural()) ThrowIfIterating(); // before reading: a failure below is the bytes'
+        try
+        {
+            Read(input);
+        }
+        catch (InvalidOperationException e) when (e.Message.StartsWith("Nino:", StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("A damaged save: " + e.Message, e);
+        }
+
+        Restore(_loadSnapshot, true);
+        if (_groupByBit == null) return;
+        using (Structural())
+            for (int bit = 0; bit < _groupByBit.Length; bit++)
+                if (_groupByBit[bit] != null) RegroupAll(bit); // loaded rows start in group 0
+    }
+
+    // Reused by every Load: the bit each saved type maps to, and the mask of a saved table's components.
+    private int[] _loadBits = [];
+    private BitMask _loadMask;
+
+    /// <summary>Read a save into <see cref="_loadSnapshot"/> (the world itself is not touched).</summary>
+    private void Read(ReadOnlySpan<byte> input)
+    {
         var reader = new Reader(input);
-        if (reader.Read<int>() != SaveMagic || reader.Read<int>() != SaveFormat)
+        if (input.Length < 8 || reader.Read<int>() != SaveMagic || reader.Read<int>() != SaveFormat)
             throw new InvalidDataException("Not an EasyEcs save (or one of another format version)");
 
         // The types: resolved by name to this process's bits (-1: unknown, skipped).
-        int typeCount = reader.Read<int>();
-        var bits = new int[typeCount];
+        int typeCount = Count(ref reader, 13); // name length, disabled, size, layout
+        if (_loadBits.Length < typeCount) _loadBits = new int[typeCount];
+        var bits = _loadBits.AsSpan(0, typeCount);
         for (int t = 0; t < typeCount; t++)
         {
-            string name = reader.ReadString();
+            var name = Name(ref reader);
             bool disabled = reader.Read<bool>();
             int size = reader.Read<int>();
+            int layout = reader.Read<int>();
             int bit = SavedTypes.FindComponent(name);
             if (bit < 0) bits[t] = -1;
             else
@@ -258,26 +290,29 @@ public sealed partial class World
                 var info = ComponentInfo.Of(bit);
                 if (!disabled && size != info.Size)
                     throw new InvalidDataException($"The size of {name} changed ({size} bytes saved, {info.Size} now): its saves cannot be loaded");
+                if (!disabled && layout != 0 && info.Layout != 0 && layout != info.Layout)
+                    throw new InvalidDataException($"The fields of {name} changed since the save: its saves cannot be loaded (add a new component type instead)");
                 bits[t] = disabled ? info.DisabledBit : bit;
             }
         }
 
         var snapshot = _loadSnapshot ??= new WorldSnapshot(this);
-        int nextId = reader.Read<int>();
+        int nextId = Count(ref reader, sizeof(int));
         if (snapshot.Meta.Length < nextId) snapshot.Meta = new EntityMeta[nextId];
         else Array.Clear(snapshot.Meta, 0, nextId); // an id the bytes give no row is dead
         snapshot.NextId = nextId;
         for (int id = 0; id < nextId; id++) snapshot.Meta[id].Version = reader.Read<int>();
-        snapshot.FreeCount = reader.Read<int>();
+        snapshot.FreeCount = Count(ref reader, sizeof(int));
         if (snapshot.FreeIds.Length < snapshot.FreeCount) snapshot.FreeIds = new int[snapshot.FreeCount];
         reader.ReadUnmanagedRaw(snapshot.FreeIds.AsSpan(0, snapshot.FreeCount));
+        foreach (int id in snapshot.FreeIds.AsSpan(0, snapshot.FreeCount))
+            if ((uint)id >= (uint)nextId) throw Damaged();
         snapshot.EntityCount = 0;
 
         using (Structural())
         {
-            ThrowIfIterating();
             for (int i = 0; i < snapshot.TableCount; i++) Empty(snapshot.Tables[i], _allArchetypes[i]);
-            int tableCount = reader.Read<int>();
+            int tableCount = Count(ref reader, 2 * sizeof(int));
             for (int t = 0; t < tableCount; t++) LoadTable(ref reader, bits, snapshot);
 
             var tables = _allArchetypes; // with the tables the load created
@@ -285,19 +320,21 @@ public sealed partial class World
             snapshot.TableCount = tables.Length;
             for (int i = 0; i < tables.Length; i++) snapshot.EntityCount += snapshot.Tables[i]?.Count ?? 0;
 
-            // The singletons, into the boxes of the last load where it had them; the others are dropped.
-            int singletons = reader.Read<int>();
+            // The singletons, into the boxes of the last load where it had them; the others are dropped. A box is
+            // emptied before it is read: its old value's references may be the world's or a snapshot's (shallow copies).
+            int singletons = Count(ref reader, 2 * sizeof(int));
             var loaded = snapshot.Singletons;
             Span<int> read = singletons <= 64 ? stackalloc int[singletons] : new int[singletons];
             int found = 0;
             for (int i = 0; i < singletons; i++)
             {
-                string name = reader.ReadString();
+                var name = Name(ref reader);
                 var slice = reader.ReadSlice(); // skipped when this process has no such singleton
                 var box = Find(loaded, name) ?? SavedTypes.NewSingleton(name);
                 if (box == null) continue;
+                box.Clear();
                 box.Read(ref slice);
-                reader.EndSlice(in slice);
+                Ends(ref slice, box.Name);
                 if (loaded.Length <= box.Slot) Array.Resize(ref loaded, box.Slot + 1);
                 loaded[box.Slot] = box;
                 read[found++] = box.Slot;
@@ -308,37 +345,64 @@ public sealed partial class World
             snapshot.Singletons = loaded;
         }
 
-        _loadOrderCount = reader.Read<int>();
+        _loadOrderCount = Count(ref reader, Unsafe.SizeOf<EntityId>());
         if (_loadOrder.Length < _loadOrderCount) _loadOrder = new EntityId[_loadOrderCount];
         reader.ReadUnmanagedRaw(_loadOrder.AsSpan(0, _loadOrderCount));
-        Restore(snapshot);
-        if (_groupByBit == null) return;
-        using (Structural())
-            for (int bit = 0; bit < _groupByBit.Length; bit++)
-                if (_groupByBit[bit] != null) RegroupAll(bit); // loaded rows start in group 0
     }
+
+    /// <summary>A count the rest of the bytes can hold (<paramref name="size"/> bytes per item at least), else the save is damaged.</summary>
+    private static int Count(ref Reader reader, int size)
+    {
+        int count = reader.ReadLength(size);
+        return count >= 0 ? count : throw Damaged();
+    }
+
+    /// <summary>A type's name as saved (a length-prefixed UTF-16 string), read in place: no string is made.</summary>
+    private static ReadOnlySpan<char> Name(ref Reader reader)
+    {
+        int length = Count(ref reader, sizeof(char));
+        return MemoryMarshal.Cast<byte, char>(reader.ReadRaw(length * sizeof(char)));
+    }
+
+    /// <summary>
+    /// End a managed value's slice: Nino's reference tracking ends with it (a value never refers into another slice,
+    /// so a skipped slice cannot shift the references of the others), and every byte must have been read.
+    /// </summary>
+    private static void Ends(ref Reader slice, string type)
+    {
+        slice.ReleaseReferences();
+        if (!slice.Eof)
+            throw new InvalidDataException($"The fields of {type} changed since the save: its saves cannot be loaded");
+    }
+
+    private static InvalidDataException Damaged() => new("A damaged save: a count or an id is out of range");
 
     /// <summary>
     /// Read one saved table into the rows of the table of this world it maps to (several saved tables map to one when
     /// a component is skipped). Records each entity's table and row in the snapshot's entity records.
     /// </summary>
-    private void LoadTable(ref Reader reader, int[] bits, WorldSnapshot snapshot)
+    private void LoadTable(ref Reader reader, Span<int> bits, WorldSnapshot snapshot)
     {
-        int columns = reader.Read<int>();
+        int columns = Count(ref reader, sizeof(int));
         Span<int> columnBits = columns <= 32 ? stackalloc int[columns] : new int[columns];
-        var mask = new BitMask();
+        ref var mask = ref _loadMask; // reused: bits past 256 keep their overflow vectors
         for (int c = 0; c < columns; c++)
         {
-            columnBits[c] = bits[reader.Read<int>()];
-            if (columnBits[c] >= 0) mask.SetBit(columnBits[c]);
+            int type = reader.Read<int>();
+            if ((uint)type >= (uint)bits.Length) throw Damaged();
+            int bit = columnBits[c] = bits[type];
+            if (bit < 0) continue;
+            mask.SetBit(bit);
+            if (ComponentInfo.Of(bit).Companion is var ticks and >= 0) mask.SetBit(ticks); // saves leave tick columns out
         }
 
         var table = GetOrCreateArchetype(in mask);
+        foreach (var component in table.Components) mask.ClearBit(component);
         int index = Array.LastIndexOf(_allArchetypes, table); // few tables: a scan, no map
         if (snapshot.Tables.Length <= index) Array.Resize(ref snapshot.Tables, _allArchetypes.Length);
         var rows = snapshot.Tables[index] ??= new Archetype.Rows(table.Columns.Length);
 
-        int count = reader.Read<int>();
+        int count = Count(ref reader, Unsafe.SizeOf<EntityId>());
         int start = rows.Count;
         GrowRows(rows, table, start + count);
         var ids = rows.Slots.AsSpan(start, count);
@@ -346,8 +410,10 @@ public sealed partial class World
         for (int r = 0; r < count; r++)
         {
             int id = ids[r].Index;
+            if (id < 0 || ids[r].IsNull) throw Damaged();
             if (id >= snapshot.NextId) Extend(snapshot, id + 1); // a group's bytes record no ids of their own
             ref var meta = ref snapshot.Meta[id];
+            if (meta.Archetype != null) throw Damaged(); // one row per entity
             meta.Version = ids[r].Version;
             meta.Archetype = table;
             meta.Slot = start + r;
@@ -357,8 +423,9 @@ public sealed partial class World
         {
             var slice = reader.ReadSlice();
             int column = columnBits[c] < 0 ? -1 : table.ColumnIndex(columnBits[c]);
-            if (column >= 0) LoadColumn(ref slice, table.Info(column), rows, column, start, count);
-            reader.EndSlice(in slice);
+            if (column < 0) continue; // a component this process does not have
+            LoadColumn(ref slice, table.Info(column), rows, column, start, count);
+            Ends(ref slice, table.Info(column).Name);
         }
 
         rows.Count = start + count;
@@ -385,7 +452,7 @@ public sealed partial class World
             for (int r = start; r < start + count; r++) present[r >> 6] |= 1UL << r;
 
         if (info.Managed) info.Read(ref reader, rows.Columns[column], start, count);
-        else reader.ReadRaw(count * info.Size).CopyTo(Unsafe.As<byte[]>(rows.Columns[column]).AsSpan(start * info.Size));
+        else info.ReadRows(ref reader, Unsafe.As<byte[]>(rows.Columns[column]).AsSpan(start * info.Size, count * info.Size));
     }
 
     /// <summary>Make the entity records of <paramref name="snapshot"/> cover ids below <paramref name="count"/> (dead ones).</summary>
@@ -397,10 +464,10 @@ public sealed partial class World
     }
 
     /// <summary>The box in <paramref name="boxes"/> of the singleton saved as <paramref name="name"/>, or null.</summary>
-    private static SingletonBox Find(SingletonBox[] boxes, string name)
+    private static SingletonBox Find(SingletonBox[] boxes, ReadOnlySpan<char> name)
     {
         foreach (var box in boxes)
-            if (box != null && box.Name == name) return box;
+            if (box != null && name.SequenceEqual(box.Name)) return box;
         return null;
     }
 
@@ -414,7 +481,8 @@ public sealed partial class World
         for (int c = 0; c < rows.Columns.Length; c++)
         {
             var info = table.Info(c);
-            if (info.Managed && rows.Columns[c] != null) info.Clear(rows.Columns[c], 0, rows.Count);
+            // Buffer columns keep their lists: the next read refills them (ComponentInfo.Read).
+            if (info.Managed && !info.IsBuffer && rows.Columns[c] != null) info.Clear(rows.Columns[c], 0, rows.Count);
             rows.Present[c] = null;
             rows.Absent[c] = 0;
         }

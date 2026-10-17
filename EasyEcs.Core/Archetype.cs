@@ -830,9 +830,10 @@ internal sealed class Archetype
 
     /// <summary>
     /// Put the rows of <paramref name="rows"/> back (null: empty the table). The entity records are restored by the
-    /// world. O(rows × columns). Inside the structural gate, outside passes.
+    /// world. With <paramref name="swap"/> the lists of buffer columns change sides (see
+    /// <see cref="ComponentInfo.CopyRows"/>). O(rows × columns). Inside the structural gate, outside passes.
     /// </summary>
-    public void Restore(Rows rows)
+    public void Restore(Rows rows, bool swap = false)
     {
         int count = rows?.Count ?? 0;
         if (_hasManaged && Count > count) ReleaseRows(count, Count - count);
@@ -842,7 +843,7 @@ internal sealed class Archetype
             rows.Slots.AsSpan(0, count).CopyTo(Slots);
             for (int c = 0; c < Columns.Length; c++)
             {
-                if (_infos[c].Size < 0) _infos[c].CopyRows(rows.Columns[c], Columns[c], count);
+                if (_infos[c].Size < 0) _infos[c].CopyRows(rows.Columns[c], Columns[c], count, swap);
                 else
                     Unsafe.CopyBlockUnaligned(ref Aligned(Columns[c]), ref MemoryMarshal.GetArrayDataReference(Unsafe.As<byte[]>(rows.Columns[c])),
                         (uint)(count * _infos[c].Size));

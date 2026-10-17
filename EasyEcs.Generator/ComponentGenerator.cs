@@ -53,7 +53,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         // Saves name types: every component, singleton and DynamicBuffer<T> of the compilation is registered when the
         // module loads (World.Load resolves names through SavedTypes), from C# 9 (module initializers).
         var saved = components
-            .Select(static (m, _) => new SavedType((m!.Singleton ? "Singleton" : "Component") + "<" + m.Type + ">", m.Type, m.EntityIds))
+            .Select(static (m, _) => new SavedType((m!.Singleton ? "Singleton" : "Component") + "<" + m.Type + ">", m.Type, m.EntityIds, m.Singleton ? "" : m.Layout))
             .WithTrackingName("SavedComponents");
         var buffers = context.SyntaxProvider
             .CreateSyntaxProvider(
@@ -84,15 +84,19 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             || !model.Compilation.IsSymbolAccessibleWithin(element, model.Compilation.Assembly))
             return null;
         return new SavedType("Component<" + type.ToDisplayString(Symbols.Fqn) + ">", element.ToDisplayString(Symbols.Fqn),
-            new EquatableArray<string>(Symbols.EntityIdPaths(element, model.Compilation)));
+            new EquatableArray<string>(Symbols.EntityIdPaths(element, model.Compilation)),
+            // An element of another assembly: its private fields are invisible here, its own module records the hash.
+            Symbols.LayoutHash(element) is not { } layout ? ""
+            : SymbolEqualityComparer.Default.Equals(element.ContainingAssembly, model.Compilation.Assembly) ? layout : "0");
     }
 
     /// <summary>
     /// A registration of the module initializer: <paramref name="Call"/> (<c>Component&lt;T&gt;</c> or
     /// <c>Singleton&lt;T&gt;</c>), and the <c>EntityId</c> fields of <paramref name="Type"/> (the component, or a
-    /// buffer's element) a migration rewrites (<see cref="Symbols.EntityIdPaths"/>).
+    /// buffer's element) a migration rewrites (<see cref="Symbols.EntityIdPaths"/>), and its layout hash when it is
+    /// unmanaged (<see cref="Symbols.LayoutHash"/>: its rows are written canonically, empty otherwise).
     /// </summary>
-    private sealed record SavedType(string Call, string Type, EquatableArray<string> EntityIds);
+    private sealed record SavedType(string Call, string Type, EquatableArray<string> EntityIds, string Layout);
 
     private static bool ContainsTypeParameter(ITypeSymbol type) => type switch
     {
@@ -111,6 +115,8 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         sb.Append("    /// World.LoadEntities where their EntityId fields are.</summary>\n");
         sb.Append("    [global::System.Runtime.CompilerServices.ModuleInitializer]\n    internal static void Register()\n    {\n");
         foreach (var type in types) sb.Append($"        global::EasyEcs.SavedTypes.{type.Call}();\n");
+        foreach (var type in types.Where(static t => t.Layout.Length > 0).Select(static t => (t.Type, t.Layout)).Distinct())
+            sb.Append($"        global::EasyEcs.SavedTypes.Raw<{type.Type}>({type.Layout});\n");
 
         // A field accessor per (type, field) a path steps through: private fields and auto-property backing fields too.
         var accessors = new Dictionary<string, string>();
@@ -275,7 +281,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
     private sealed record ComponentModel(
         string Namespace, string Type, string Name, string Path, string HintName, bool IsPublic, bool Singleton, bool Tag,
         bool Watched, bool Grouped, bool Cleanup, string IndexKey, bool WorldTaken, EquatableArray<Setter> Setters, EquatableArray<string> Taken,
-        EquatableArray<string> EntityIds)
+        EquatableArray<string> EntityIds, string Layout)
     {
         private static readonly SymbolDisplayFormat TypeName = Symbols.Fqn
             .AddMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
@@ -326,7 +332,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 tag, Symbols.Implements(type, Symbols.TrackChanges) || key != null || grouped, grouped,
                 Symbols.Implements(type, Symbols.Cleanup), key?.ToDisplayString(Symbols.Fqn) ?? "",
                 world.GetMembers(name + "Index").Length > 0, new EquatableArray<Setter>(setters), new EquatableArray<string>(taken),
-                new EquatableArray<string>(singleton ? [] : Symbols.EntityIdPaths(type, compilation)));
+                new EquatableArray<string>(singleton ? [] : Symbols.EntityIdPaths(type, compilation)), Symbols.LayoutHash(type) ?? "");
         }
 
         /// <summary>

@@ -105,6 +105,13 @@ public sealed partial class World
         if (bit < _indexByBit.Length) _indexByBit[bit]?.Removed(id);
     }
 
+    /// <summary>Tell the indexes about the entities of copied rows [<paramref name="first"/>, +<paramref name="count"/>) of <paramref name="table"/>.</summary>
+    private void IndexRows(Archetype table, int first, int count)
+    {
+        if (_indexByBit == null) return;
+        for (int r = first; r < first + count; r++) IndexRow(table, r, table.Slots[r].Index, table.Slots[r].Version);
+    }
+
     /// <summary>Tell the indexes of the components new entity <paramref name="id"/> has in row <paramref name="slot"/> (cold).</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void IndexRow(Archetype archetype, int slot, int id, int version)

@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using Nino.Core;
 using System.Threading;
 
 namespace EasyEcs;
@@ -17,19 +20,25 @@ namespace EasyEcs;
 public static class SavedTypes
 {
     private static readonly Lock Gate = new();
-    private static readonly Dictionary<string, Func<ushort>> Components = new(StringComparer.Ordinal);
-    private static readonly Dictionary<string, Func<SingletonBox>> Singletons = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, (Type Type, Func<ushort> Bit)> Components = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, (Type Type, Func<SingletonBox> Box)> Singletons = new(StringComparer.Ordinal);
+
+    // Loads look names up as they lie in the bytes (no string is made).
+    private static readonly Dictionary<string, (Type Type, Func<ushort> Bit)>.AlternateLookup<ReadOnlySpan<char>> ComponentsByName =
+        Components.GetAlternateLookup<ReadOnlySpan<char>>();
+    private static readonly Dictionary<string, (Type Type, Func<SingletonBox> Box)>.AlternateLookup<ReadOnlySpan<char>> SingletonsByName =
+        Singletons.GetAlternateLookup<ReadOnlySpan<char>>();
 
     /// <summary>Make component <typeparamref name="T"/> loadable by name (no bit is assigned yet).</summary>
     public static void Component<T>() where T : struct, IComponent
     {
-        lock (Gate) Components.TryAdd(NameOf<T>.Value, static () => ComponentType<T>.Bit);
+        lock (Gate) Add(Components, typeof(T), static () => ComponentType<T>.Bit);
     }
 
     /// <summary>Make singleton <typeparamref name="T"/> loadable by name.</summary>
     public static void Singleton<T>() where T : struct, ISingletonComponent
     {
-        lock (Gate) Singletons.TryAdd(NameOf<T>.Value, static () => new SingletonBox<T>());
+        lock (Gate) Add(Singletons, typeof(T), static () => new SingletonBox<T>());
     }
 
     /// <summary>
@@ -47,21 +56,91 @@ public static class SavedTypes
         EntityIdOffsets<T>.Value = offsets;
     }
 
+    /// <summary>
+    /// Write unmanaged <typeparamref name="T"/> (a component or a buffer's element) in Nino's canonical layout: rows are
+    /// block copies with padding bytes cleared, so equal worlds save equal bytes. <paramref name="layout"/> is a hash of
+    /// its fields (names, types, layout attributes): a load refuses rows saved with another one.
+    /// </summary>
+    public static void Raw<T>(int layout) where T : unmanaged
+    {
+        RawLayout<T>.Rows ??= new RawRows<T>();
+        if (layout != 0) RawLayout<T>.Hash = layout; // 0: registered by a module that cannot see all of T's fields
+    }
+
+    /// <summary>Write unmanaged rows of <typeparamref name="T"/>: canonical when registered (<see cref="Raw{T}"/>), else as they are in memory.</summary>
+    internal static void WriteRows<T>(ref Writer writer, ReadOnlySpan<byte> rows)
+    {
+        if (RawLayout<T>.Rows is { } raw) raw.Write(ref writer, rows);
+        else writer.WriteRaw(rows);
+    }
+
+    /// <summary>Read rows written by <see cref="WriteRows{T}"/> into <paramref name="rows"/>.</summary>
+    internal static void ReadRows<T>(ref Reader reader, Span<byte> rows)
+    {
+        if (RawLayout<T>.Rows is { } raw) raw.Read(ref reader, rows);
+        else reader.ReadRaw(rows.Length).CopyTo(rows);
+    }
+
+    /// <summary>The canonical writer and the layout hash of unmanaged <typeparamref name="T"/> (null and 0 until registered).</summary>
+    internal static class RawLayout<T>
+    {
+        public static RawRows Rows;
+        public static int Hash;
+    }
+
+    internal abstract class RawRows
+    {
+        public abstract void Write(ref Writer writer, ReadOnlySpan<byte> rows);
+
+        public abstract void Read(ref Reader reader, Span<byte> rows);
+    }
+
+    private sealed class RawRows<T> : RawRows where T : unmanaged
+    {
+        public override void Write(ref Writer writer, ReadOnlySpan<byte> rows) => writer.WriteUnmanagedRaw(MemoryMarshal.Cast<byte, T>(rows));
+
+        public override void Read(ref Reader reader, Span<byte> rows) => reader.ReadUnmanagedRaw(MemoryMarshal.Cast<byte, T>(rows));
+    }
+
+    /// <summary>
+    /// Register <paramref name="type"/> under its save name. Names leave out assemblies: when two types share one (in
+    /// two assemblies), neither may load the other's rows, so the name is marked ambiguous (no type) and a load of it
+    /// fails. Inside the lock.
+    /// </summary>
+    private static void Add<TValue>(Dictionary<string, (Type Type, TValue Value)> types, Type type, TValue value)
+    {
+        string name = type.ToString();
+        if (!types.TryAdd(name, (type, value)) && types[name].Type != type) types[name] = (null, value);
+    }
+
+    private static InvalidDataException Ambiguous(ReadOnlySpan<char> name) =>
+        new($"Two types of this process are saved as {name}: rename one to load it");
+
     /// <summary>The bit of the component saved as <paramref name="name"/>, or -1 when this process has no such type.</summary>
-    internal static int FindComponent(string name)
+    internal static int FindComponent(ReadOnlySpan<char> name)
     {
         Func<ushort> bit;
         lock (Gate)
-            if (!Components.TryGetValue(name, out bit)) return -1;
+        {
+            if (!ComponentsByName.TryGetValue(name, out var entry)) return -1;
+            if (entry.Type == null) throw Ambiguous(name);
+            bit = entry.Bit;
+        }
+
         return bit(); // outside the lock: registering the type takes others
     }
 
     /// <summary>A new box of the singleton saved as <paramref name="name"/>, or null when this process has no such type.</summary>
-    internal static SingletonBox NewSingleton(string name)
+    internal static SingletonBox NewSingleton(ReadOnlySpan<char> name)
     {
         Func<SingletonBox> create;
         lock (Gate)
-            if (!Singletons.TryGetValue(name, out create)) return null;
+        {
+            if (!SingletonsByName.TryGetValue(name, out var entry)) return null;
+            if (entry.Type == null) throw Ambiguous(name);
+            create = entry.Box;
+        }
+
         return create();
     }
 

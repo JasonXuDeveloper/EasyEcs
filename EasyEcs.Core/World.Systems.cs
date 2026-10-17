@@ -202,6 +202,9 @@ public sealed partial class World
         ClearArchetypes();
         ResetIndexes(false); // an index still held finds nothing
         ClearSingletons();
+        _arrivals?.Dispose();
+        _arrivals = null;
+        _saveBuffer = null;
         _freeIdCount = 0;
         _entityCount = 0;
     }

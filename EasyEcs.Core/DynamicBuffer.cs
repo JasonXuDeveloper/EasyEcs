@@ -30,7 +30,7 @@ public struct DynamicBuffer<T> : IComponent, ITrackChanges, IBuffer
 
     readonly void IBuffer.Write(ref Writer writer, BufferStore store) => BufferStore<T>.Write(ref writer, Unsafe.As<BufferStore<T>>(store));
 
-    readonly BufferStore IBuffer.Read(ref Reader reader) => BufferStore<T>.Read(ref reader);
+    readonly BufferStore IBuffer.Read(ref Reader reader, BufferStore reuse) => BufferStore<T>.Read(ref reader, reuse as BufferStore<T>);
 
     readonly void IBuffer.Remap(BufferStore store, IdMap map)
     {
@@ -158,8 +158,11 @@ internal interface IBuffer
     /// <summary>Write the elements of <paramref name="store"/> (a buffer of this type's; null: none) for a save.</summary>
     void Write(ref Writer writer, BufferStore store);
 
-    /// <summary>Read elements written by <see cref="Write"/> into a new store (null for none).</summary>
-    BufferStore Read(ref Reader reader);
+    /// <summary>
+    /// Read elements written by <see cref="Write"/> into <paramref name="reuse"/> (a store of this type's from an
+    /// earlier Load, or null) when it has room, else into a new store; null for none and no store to reuse.
+    /// </summary>
+    BufferStore Read(ref Reader reader, BufferStore reuse);
 
     /// <summary>Point the <see cref="EntityId"/> fields of the elements of <paramref name="store"/> at a migration's entities.</summary>
     void Remap(BufferStore store, IdMap map);
@@ -198,7 +201,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         writer.Write(count);
         if (count == 0) return;
         var items = store!.Items.AsSpan(0, count);
-        if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>()) writer.WriteRaw(Bytes(items));
+        if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>()) SavedTypes.WriteRows<T>(ref writer, Bytes(items));
         else for (int i = 0; i < items.Length; i++) NinoSerializer.Serialize(items[i], ref writer);
     }
 
@@ -206,14 +209,25 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     private static Span<byte> Bytes(Span<T> items) =>
         MemoryMarshal.CreateSpan(ref Unsafe.As<T, byte>(ref MemoryMarshal.GetReference(items)), items.Length * Unsafe.SizeOf<T>());
 
-    /// <summary>Read a store written by <see cref="Write"/> (null for an empty buffer).</summary>
-    public static BufferStore<T> Read(ref Reader reader)
+    /// <summary>
+    /// Read a store written by <see cref="Write"/> into <paramref name="reuse"/> when it has room, else a new one
+    /// (null for an empty buffer without a store to reuse).
+    /// </summary>
+    public static BufferStore<T> Read(ref Reader reader, BufferStore<T> reuse)
     {
-        int count = reader.Read<int>();
-        if (count == 0) return null;
-        var store = new BufferStore<T>(count) { Count = count };
+        int count = reader.ReadLength(RuntimeHelpers.IsReferenceOrContainsReferences<T>() ? 1 : Unsafe.SizeOf<T>());
+        if (count < 0) throw new System.IO.InvalidDataException("A damaged save: a buffer longer than its bytes");
+        if (reuse != null && RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(reuse.Items, 0, reuse.Count);
+        if (count == 0)
+        {
+            if (reuse != null) reuse.Count = 0;
+            return reuse;
+        }
+
+        var store = reuse != null && reuse.Items.Length >= count ? reuse : new BufferStore<T>(count);
+        store.Count = count;
         var items = store.Items.AsSpan(0, count);
-        if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>()) reader.ReadRaw(count * Unsafe.SizeOf<T>()).CopyTo(Bytes(items));
+        if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>()) SavedTypes.ReadRows<T>(ref reader, Bytes(items));
         else for (int i = 0; i < items.Length; i++) NinoDeserializer.Deserialize(ref items[i], ref reader);
         return store;
     }

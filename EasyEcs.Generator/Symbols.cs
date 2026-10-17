@@ -83,6 +83,39 @@ internal static class Symbols
         }
     }
 
+    /// <summary>
+    /// For an unmanaged struct, a hash (FNV-1a) of what its raw rows depend on: its fields in order with their names
+    /// and types (nested structs field by field) and the layout attributes ([StructLayout], [FieldOffset]); else null.
+    /// A save records it so a load can refuse rows written with other fields of the same size.
+    /// </summary>
+    public static string? LayoutHash(ITypeSymbol type)
+    {
+        if (!type.IsUnmanagedType || type.TypeKind != TypeKind.Struct) return null;
+        var text = new System.Text.StringBuilder();
+        Describe(type, 0);
+        uint hash = 2166136261;
+        foreach (char c in text.ToString()) hash = (hash ^ c) * 16777619;
+        return "unchecked((int)0x" + hash.ToString("X8") + ")";
+
+        void Describe(ITypeSymbol declaring, int depth)
+        {
+            text.Append('{');
+            foreach (var attribute in declaring.GetAttributes()) text.Append(attribute).Append(';');
+            foreach (var field in declaring.GetMembers().OfType<IFieldSymbol>())
+            {
+                if (field.IsStatic || field.IsConst) continue;
+                text.Append(field.Name).Append(':').Append(field.Type.ToDisplayString());
+                foreach (var attribute in field.GetAttributes()) text.Append('[').Append(attribute).Append(']');
+                if (field.IsFixedSizeBuffer) text.Append('*').Append(field.FixedSize);
+                if (depth < 8 && field.Type is INamedTypeSymbol { TypeKind: TypeKind.Struct, SpecialType: SpecialType.None } inner)
+                    Describe(inner, depth + 1);
+                text.Append(';');
+            }
+
+            text.Append('}');
+        }
+    }
+
     public static bool Implements(ITypeSymbol type, string interfaceName) =>
         type.AllInterfaces.Any(i => i.ToDisplayString() == interfaceName);
 

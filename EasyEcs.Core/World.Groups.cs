@@ -90,6 +90,18 @@ public sealed partial class World
     }
 
     /// <summary>
+    /// Move copied rows [<paramref name="first"/>, +<paramref name="count"/>) of <paramref name="table"/> (Instantiate,
+    /// Clone, migrations) to the groups of their values. From the last row: a move fills its row with the table's last
+    /// one, which was visited. Their indexes first (<see cref="IndexRows"/>): a move changes rows. Inside the
+    /// structural gate.
+    /// </summary>
+    private void RegroupRows(Archetype table, int first, int count)
+    {
+        if (_groupByBit == null) return;
+        for (int r = first + count - 1; r >= first; r--) RegroupRow(table.Slots[r].Index);
+    }
+
+    /// <summary>
     /// The table a new entity with <paramref name="value"/> of grouped component <paramref name="bit"/> belongs in,
     /// starting from <paramref name="target"/> (CreateEntity / CreateEntities place it there, no move). Folded away for
     /// other components. Inside the structural gate.

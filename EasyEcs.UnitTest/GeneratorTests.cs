@@ -245,6 +245,24 @@ public class GeneratorTests
     }
 
     [Test]
+    public void UnmanagedComponentsAreWrittenCanonicallyWithAHashOfTheirFields()
+    {
+        string Registration(string fields)
+        {
+            Driver().RunGeneratorsAndUpdateCompilation(Compile("public struct R : IComponent { " + fields + " }"), out var output, out _);
+            var source = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.SavedTypes.g.cs")).ToString();
+            return source.Split('\n').Single(l => l.Contains("SavedTypes.Raw<global::R>")).Trim();
+        }
+
+        var original = Registration("public int A; public float B;");
+        Assert.That(Registration("public int A; public float B;"), Is.EqualTo(original));
+        Assert.That(Registration("public float A; public int B;"), Is.Not.EqualTo(original));   // same size, other fields
+        Assert.That(Registration("public int B; public float A;"), Is.Not.EqualTo(original));   // renamed
+        Driver().RunGeneratorsAndUpdateCompilation(Compile("public struct M : IComponent { public string S; }"), out var managed, out _);
+        Assert.That(managed.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.SavedTypes.g.cs")).ToString(), Does.Not.Contain("Raw<"));
+    }
+
+    [Test]
     public void UnrelatedEditsHitTheCache()
     {
         var system = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components +

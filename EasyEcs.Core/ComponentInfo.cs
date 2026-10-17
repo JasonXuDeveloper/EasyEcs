@@ -71,6 +71,9 @@ internal abstract class ComponentInfo
     /// <summary>Whether the type holds managed references (cleared when its row dies, copied by type).</summary>
     public bool Managed => Size < 0;
 
+    /// <summary>Whether the type is a <see cref="DynamicBuffer{T}"/> (its column holds lists).</summary>
+    public abstract bool IsBuffer { get; }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ComponentInfo Of(int bit) => Volatile.Read(ref _all)[bit];
 
@@ -110,9 +113,11 @@ internal abstract class ComponentInfo
 
     /// <summary>
     /// Copy rows [0, <paramref name="count"/>) of a managed column for a snapshot (capture or restore): values, and for
-    /// <see cref="DynamicBuffer{T}"/> columns copies of their lists, so the two sides never share one.
+    /// <see cref="DynamicBuffer{T}"/> columns copies of their lists, so the two sides never share one. With
+    /// <paramref name="swap"/> the lists change sides instead (a Load's private snapshot): the target's old lists go to
+    /// the source, for the next Load to refill.
     /// </summary>
-    public abstract void CopyRows(Array source, Array target, int count);
+    public abstract void CopyRows(Array source, Array target, int count, bool swap = false);
 
     /// <summary>A boxed copy of row <paramref name="slot"/> of <paramref name="column"/> (the debugger view; cold, allocates).</summary>
     public abstract object Box(Array column, int slot);
@@ -135,6 +140,15 @@ internal abstract class ComponentInfo
     /// </summary>
     public abstract void Remap(Array column, int start, int count, IdMap map);
 
+    /// <summary>Write unmanaged rows (<c>count × Size</c> bytes) for a save: canonical when the generator registered the type.</summary>
+    public abstract void WriteRows(ref Writer writer, ReadOnlySpan<byte> rows);
+
+    /// <summary>Read unmanaged rows written by <see cref="WriteRows"/>.</summary>
+    public abstract void ReadRows(ref Reader reader, Span<byte> rows);
+
+    /// <summary>The layout hash of an unmanaged type the generator registered (<see cref="SavedTypes.Raw{T}"/>), else 0.</summary>
+    public abstract int Layout { get; }
+
     /// <summary>Read <paramref name="count"/> rows written by <see cref="Write"/> into managed column <paramref name="column"/> from <paramref name="start"/>.</summary>
     public abstract void Read(ref Reader reader, Array column, int start, int count);
 }
@@ -156,6 +170,8 @@ internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsRefere
     // without knowing TElement. Boxed once per type.
     private static readonly IBuffer Buffer = default(T) is IBuffer ? (IBuffer)default(T) : null;
 
+    public override bool IsBuffer => default(T) is IBuffer;
+
     public override void Write(ref Writer writer, Array column, int start, int count)
     {
         var rows = Unsafe.As<T[]>(column);
@@ -164,6 +180,12 @@ internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsRefere
         else
             for (int i = start; i < start + count; i++) NinoSerializer.Serialize(rows[i], ref writer);
     }
+
+    public override void WriteRows(ref Writer writer, ReadOnlySpan<byte> rows) => SavedTypes.WriteRows<T>(ref writer, rows);
+
+    public override void ReadRows(ref Reader reader, Span<byte> rows) => SavedTypes.ReadRows<T>(ref reader, rows);
+
+    public override int Layout => SavedTypes.RawLayout<T>.Hash;
 
     public override void Remap(Array column, int start, int count, IdMap map)
     {
@@ -183,7 +205,11 @@ internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsRefere
     {
         var rows = Unsafe.As<T[]>(column);
         if (default(T) is IBuffer)
-            for (int i = start; i < start + count; i++) Unsafe.As<T, BufferStore>(ref rows[i]) = Buffer.Read(ref reader);
+            for (int i = start; i < start + count; i++)
+            {
+                ref var store = ref Unsafe.As<T, BufferStore>(ref rows[i]);
+                store = Buffer.Read(ref reader, store);
+            }
         else
             for (int i = start; i < start + count; i++) NinoDeserializer.Deserialize(ref rows[i], ref reader);
     }
@@ -223,16 +249,23 @@ internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsRefere
 
     public override void Clear(Array column, int start, int count) => Array.Clear(column, start, count);
 
-    public override void CopyRows(Array source, Array target, int count)
+    public override void CopyRows(Array source, Array target, int count, bool swap = false)
     {
-        Array.Copy(source, target, count);
-        if (default(T) is not IBuffer) return; // a JIT-time constant
+        if (default(T) is not IBuffer) // a JIT-time constant
+        {
+            Array.Copy(source, target, count);
+            return;
+        }
+
         // A DynamicBuffer<TElement> has a single field, its BufferStore<TElement>: the value is that reference.
+        var from = Unsafe.As<T[]>(source);
         var rows = Unsafe.As<T[]>(target);
         for (int i = 0; i < count; i++)
         {
             ref var store = ref Unsafe.As<T, BufferStore>(ref rows[i]);
-            store = store?.Clone();
+            ref var saved = ref Unsafe.As<T, BufferStore>(ref from[i]);
+            if (swap) (store, saved) = (saved, store);
+            else store = saved?.Clone();
         }
     }
 }
