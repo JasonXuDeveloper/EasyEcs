@@ -80,17 +80,17 @@ counters (hits, deaths, spawns, AOI changes, entities) match an EasyEcs referenc
 
 | Library | 10,000 entities | 100,000 entities | Allocated per tick (100k) |
 |---|---:|---:|---:|
-| **EasyEcs** | 167 μs (1.00) | 1.84 ms (1.00) | 0 B |
-| Friflo.Engine.ECS | 155 μs (0.93) | 1.75 ms (0.95) | 0 B |
-| Arch | 456 μs (2.74) | 5.46 ms (2.96) | 550 KB |
-| DefaultEcs | 289 μs (1.73) | 5.96 ms (3.24) | 62 KB |
+| **EasyEcs** | 153 μs (1.00) | 1.81 ms (1.00) | 0 B |
+| Friflo.Engine.ECS | 166 μs (1.08) | 1.84 ms (1.02) | 0 B |
+| Arch | 442 μs (2.88) | 5.12 ms (2.84) | 535 KB |
+| DefaultEcs | 291 μs (1.90) | 5.76 ms (3.19) | 61 KB |
 
 <sub>BenchmarkDotNet, the repository's job (`BenchmarkConfig.cs`), .NET 10, 4-core Xeon VM at 2.1 GHz; ratio against EasyEcs in parentheses.</sub>
 
-Friflo is 5-7% faster (5-8% across runs on this VM; the table is one run). Both allocate nothing
-per tick. Arch and DefaultEcs take 1.7-3.2x as long and allocate every tick. The gap to Friflo
-comes from the systems that pass the entity to the job (see `Entity` below); EasyEcs is ahead in the systems that
-spawn, expire and toggle components.
+EasyEcs and Friflo are within a few percent (EasyEcs 2-8% ahead in this run; Friflo was up to 5% ahead in earlier
+runs on this VM). Both allocate nothing per tick. Arch and DefaultEcs take 1.9-3.2x as long and allocate
+every tick. EasyEcs is ahead in the systems that spawn, expire and toggle components; Friflo in the systems that pass
+the entity to the job (see `Entity` below).
 
 ## Operations
 
@@ -98,15 +98,15 @@ spawn, expire and toggle components.
 
 | Operation | EasyEcs | Friflo | |
 |---|---:|---:|---|
-| Iterate one component | 38.8 μs | 49.8 μs | EasyEcs 1.28x faster |
-| Iterate two components | 251 μs | 246 μs | about even |
-| Two components, SIMD batches | 64.2 μs | 80.5 μs | EasyEcs 1.25x faster |
-| Iterate three components | 60.9 μs | 63.7 μs | about even |
-| Filtered (`With` a tag on a few entities) | 10.8 μs | 14.6 μs | EasyEcs 1.35x faster |
-| Iterate with the entity handle | 45.5 μs | 35.3 μs | Friflo 1.29x faster |
-| Iterate with a singleton | 200 μs | 221 μs | EasyEcs 1.11x faster |
-| Toggle a status component (remove + add) | 481 μs | 977 μs | EasyEcs 2.03x faster |
-| Create and destroy | 219 μs | 198 μs | Friflo 1.10x faster |
+| Iterate one component | 38.6 μs | 58.3 μs | EasyEcs 1.51x faster |
+| Iterate two components | 246 μs | 251 μs | about even |
+| Two components, SIMD batches | 62.8 μs | 85.0 μs | EasyEcs 1.35x faster |
+| Iterate three components | 66.4 μs | 68.3 μs | about even |
+| Filtered (`With` a tag on a few entities) | 11.3 μs | 15.1 μs | EasyEcs 1.33x faster |
+| Iterate with the entity handle | 47.5 μs | 35.9 μs | Friflo 1.32x faster |
+| Iterate with a singleton | 210 μs | 225 μs | EasyEcs 1.07x faster |
+| Toggle a status component (remove + add) | 548 μs | 980 μs | EasyEcs 1.79x faster |
+| Create and destroy | 181 μs | 202 μs | EasyEcs 1.12x faster |
 
 All rows allocate 0 B. Toggling is where tables with presence bits pay off: EasyEcs flips a bit and the entity stays
 in its row, Friflo moves the entity to another archetype and back. Passing the entity costs EasyEcs more: its job receives a
@@ -120,13 +120,13 @@ health into a replica. Each library runs it its own way: the built-in feature wh
 
 | Library, approach | 10 written | 1,000 written | Allocated |
 |---|---:|---:|---:|
-| **EasyEcs `[Changed<T>]`** | **0.55 μs** | **32.6 μs** | 0 B |
-| EasyEcs, scan comparing values | 36.4 μs | 54-79 μs | 0 B |
-| DefaultEcs `WhenChanged<T>()` | 37.3 μs | 74.5 μs | 0 B |
-| Friflo, scan | 37.6 μs | 54.0 μs | 0 B |
-| Friflo, dirty tag | 1.39 μs | 120 μs | 0 B |
-| Arch, scan | 85.3 μs | 110 μs | 0 B |
-| Arch, dirty tag | 0.95 μs | 83.3 μs | 0 B |
+| **EasyEcs `[Changed<T>]`** | **0.57 μs** | **33.8 μs** | 0 B |
+| EasyEcs, scan comparing values | 37.1 μs | 61.8 μs | 0 B |
+| DefaultEcs `WhenChanged<T>()` | 37.0 μs | 71.0 μs | 0 B |
+| Friflo, scan | 39.0 μs | 53.8 μs | 0 B |
+| Friflo, dirty tag | 1.24 μs | 128 μs | 0 B |
+| Arch, scan | 90.2 μs | 111 μs | 0 B |
+| Arch, dirty tag | 0.96 μs | 83.4 μs | 0 B |
 
 `[Changed<T>]` is the fastest at both rates and needs no code at the write site: a write through `ref` is the
 change. A dirty tag is cheap when few entities change but moves each written entity between archetypes twice, so it
@@ -140,9 +140,9 @@ hands, then 100 inventories are counted. EasyEcs uses a relation (`IIndexed<Enti
 
 | Library, approach | 1 trade | 100 trades | Allocated |
 |---|---:|---:|---:|
-| **EasyEcs** relation (`IIndexed<Entity>`) | 0.41 μs | 5.3 μs | 0 B |
-| Friflo link component | 1.27 μs | 8.3 μs | 0 B |
-| DefaultEcs `EntityMultiMap` | 0.73 μs | 8.3 μs | 0 B |
+| **EasyEcs** relation (`IIndexed<Entity>`) | 0.41 μs | 5.4 μs | 0 B |
+| Friflo link component | 1.22 μs | 8.2 μs | 0 B |
+| DefaultEcs `EntityMultiMap` | 0.79 μs | 9.6 μs | 0 B |
 
 All three answer "which items does this owner hold" without a scan, and all three update the map on every set. EasyEcs
 re-links the item inside `Set` (one inlined hook, gone at JIT time for components without an index) and keeps
