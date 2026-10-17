@@ -96,9 +96,10 @@ variants:
 
 - `IForEachEntity<T1..Tn>` with `world.ForEachEntity` also receives the `Entity` handle (its `Id` and `Version`),
   built from the table without a lookup: use it when the job needs the entity, since it reads the entity's row too.
-- `IForEachBatch<T1..Tn>` with `world.ForEachBatch` receives runs of consecutive rows as spans (`Execute(Span<T1>,
-  …)`), to vectorize with `Vector<T>` (the JIT does not vectorize loops by itself). The job must not make structural
-  changes.
+- `IForEachBatch<T1..Tn>` with `world.ForEachBatch` receives runs of consecutive rows as spans
+  (`Execute(EntitySpan entities, Span<T1>, …)`), to vectorize with `Vector<T>` (the JIT does not vectorize loops by
+  itself). `entities[i]` is the entity of row `i`, built only when indexed, so a batch that needs the entity of a few
+  rows reads only theirs. The spans point into the tables, so a structural change throws while the job runs.
 
 ```csharp
 using System.Numerics;
@@ -114,11 +115,11 @@ public struct KillTheWounded : IForEachEntity<Health>           // the handle, f
     }
 }
 
-public struct Drift : IForEachBatch<Position, Velocity>, INoStructuralChanges    // spans of consecutive rows
+public struct Drift : IForEachBatch<Position, Velocity>                          // spans of consecutive rows
 {
     public static int Writes => 1;
 
-    public void Execute(Span<Position> positions, Span<Velocity> velocities)
+    public void Execute(EntitySpan entities, Span<Position> positions, Span<Velocity> velocities)
     {
         // Two floats each: as Vector<float> spans, every lane is one coordinate
         var p = MemoryMarshal.Cast<Position, Vector<float>>(positions);
@@ -139,7 +140,8 @@ var drift = new Drift();
 world.ForEachBatch<Position, Velocity, Drift>(ref drift, Active);
 ```
 
-Only implement `INoStructuralChanges` when the job honors it.
+Only implement `INoStructuralChanges` when the job honors it: its pass freezes the world's structure, so a change made
+anyway (in a helper the analyzer does not follow) throws instead of tearing rows.
 
 ### On several threads: `ForEachParallel` and `ForEachEntityParallel`
 

@@ -82,7 +82,7 @@ public partial class BounceSimdSystem : EcsSystem
 ```
 
 The cast is valid because the components hold only floats (no padding, no references). Unmanaged columns start on a
-64-byte boundary. A batch method takes no `Entity` and makes no structural change; a scalar loop over spans gains
+64-byte boundary. A batch method makes no structural change and reads entities through its `EntitySpan` only where it needs them; a scalar loop over spans gains
 little over the per-entity method, so write one to vectorize it.
 
 ### Ad-hoc loops: a struct job

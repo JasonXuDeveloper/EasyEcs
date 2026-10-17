@@ -48,7 +48,8 @@ public partial class DeathSystem : EcsSystem
   through it before the change, or re-read through `entity.Get<T>()` afterwards (see
   [`ref` and `await`](refs-and-await.md)).
 - Batch `[ForEach]` methods (span parameters) and `ForEachBatch` jobs receive spans into the tables, so they must not
-  make structural changes.
+  make structural changes: the structure is frozen while they run, and a change throws. Jobs that implement
+  `INoStructuralChanges` run frozen too, so a broken promise throws instead of tearing rows.
 - Don't call `Update()` / `Update<TGroup>()` while a query of the same world is iterating.
 - Removing a component and adding it back is cheap: the entity keeps its row and only a presence bit flips. Gaining a
   component the entity's archetype never had copies its row once

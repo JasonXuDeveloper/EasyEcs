@@ -33,7 +33,8 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
   World.Archetypes.cs          archetype registry, transition edges, copy-on-write query cache (GetQueryEntry: the
                                live entry a value index holds), CompactArchetypes (an update's recovery from an
                                abandoned query), the structural gate (Structural())
-  StructuralGate.cs            owner flag (plain check-and-set, throws when reentered or inside a parallel region) +
+  StructuralGate.cs            owner flag (plain check-and-set, throws when reentered or while frozen: Freeze/Thaw around
+                               parallel regions, batch jobs and INoStructuralChanges passes) +
                                shared CAS gate for the cold paths parallel batches reach; StructuralScope / SharedScope
   World.Systems.cs             system groups, priority order, parallel batches, synchronous Update / Update<TGroup>,
                                Dispose (also resets value indexes)
@@ -57,6 +58,7 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
                                index, ComponentSignature of multi-component calls) + SingletonBox + ChangeTicks<T>
                                (the hidden change-tick column of an ITrackChanges component)
   EntityMeta.cs                16-byte per-entity record (archetype, version, slot)
+  EntitySpan.cs                the entities of a batch job's run of rows (lazy handles over the run's EntitySlots)
   Archetype.cs                 a table: mask, EntitySlot rows (version + id), one column per component (unmanaged
                                columns pinned and 64-byte aligned), presence bits + absent counts per column,
                                per-bit and per-signature add transitions (copy plans); swap-remove / tombstones,
@@ -77,9 +79,10 @@ EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, req
                                the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] ->
                                ChangedSince(LastRunTick + 1) and a read of T) + GeneratedUpdate + GeneratedAccess
   ComponentGenerator.cs        C# 14 extension members per component / singleton: entity.X (ref T; ref readonly for
-                               tracked or indexed), HasX, TryGetX, SetX(ctor args), RemoveX, tags IsX, world.XIndex,
-                               singletons world.X / HasX / SetX / RemoveX; Symbols.IsGenerated lets the analyzer and
-                               SystemGenerator treat SetX / RemoveX as structural, the rest as reads
+                               tracked or indexed), HasX, TryGetX, GetOrAddX, SetX(ctor args), RemoveX, tags IsX,
+                               world.XIndex, singletons world.X / HasX / SetX / RemoveX; classes carry
+                               [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated lets the analyzer and
+                               SystemGenerator treat SetX / GetOrAddX / RemoveX as structural, the rest as reads
   EasyEcsAnalyzer.cs           EECS001-015 (generators never report diagnostics)
   Threads.cs                   EECS014's check: does a structural call in a delegate handed to another thread race
   Symbols.cs                   symbol checks shared by generator and analyzer

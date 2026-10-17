@@ -22,7 +22,7 @@ from another ECS? [Their features in EasyEcs](comparison.md#their-features-in-ea
 | Lists per entity (`DynamicBuffer<T>`, `[Changed<DynamicBuffer<T>>]`) | every player's bag of `Loot`: filled in `Despawn`, emptied in `Respawn`, sent by `ReplicationSystem.SendBag` only when it changed; `LootValue` reads it (`foreach`), `Give` moves an item between two bags |
 | Value index (`Find`, `TryFind`, `Count`) | `Zone : IIndexed<int>`: players per zone; `Despawn` hunts a player of a zone |
 | Relation | `OwnedBy : IIndexed<Entity>`: a respawning player recalls its projectiles |
-| System groups, `UpdateInterval`, `Enabled` | `Replication` runs every third tick; `RegenerationSystem` every tenth update; `Ceasefire` |
+| System groups, `UpdateInterval`, `Enabled` | `Replication` runs every third tick; `RegenerationSystem` every tenth update; `OnSystemError` switches a failing system off |
 | System lifecycle (`OnCreate`, `OnDestroy`) | `SteeringSystem` sets up and removes its `Waypoints`; `ClockSystem` adds `Battle` |
 | Struct jobs (`ForEach`, `ForEachEntity`, `ForEachBatch`, `ForEachParallel`, `ForEachEntityParallel`) | `Census` (read-only: `Writes => 0`, `INoStructuralChanges`); `NewRound` heals everyone and scatters the NPCs, on every core |
 | Ad-hoc queries (`Query`, `Count`, `Any`, `TryGet`) | `NearestPlayer`, `Census`, `AnyoneBurning`, `AnyoneAfflicted` (`QueryFilter.WithAny`), `ShotsLeft` with `static readonly` filters |
@@ -58,7 +58,8 @@ public struct Player : IComponent;                                            //
 public struct Npc : IComponent;
 public struct Dead : IComponent;
 
-public record struct Battle(long Tick, int Hits, int Deaths, int Shots, int Replicated, int Afflicted) : ISingletonComponent;
+public record struct Battle(long Tick, int Hits, int Deaths, int Shots, int Replicated, int Afflicted, bool Ceasefire)
+    : ISingletonComponent;
 
 public struct Waypoints : ISingletonComponent
 {
@@ -227,7 +228,7 @@ public partial class ProjectileSystem : EcsSystem
     [ForEach, With<Player>, Without<Dead>]
     static void Shoot(Entity player, in Position p, in Velocity v, ref Mana mana, ref Battle battle, World world)
     {
-        if (mana.Value < BattleServer.ShotCost || Dice.Roll(battle.Tick, player.Id) % 20 != 0) return;
+        if (battle.Ceasefire || mana.Value < BattleServer.ShotCost || Dice.Roll(battle.Tick, player.Id) % 20 != 0) return;
         mana.Value -= BattleServer.ShotCost;
         battle.Shots++;
         world.CreateEntity(p, new Velocity(v.X * 4, v.Y * 4), new Lifetime(20), new OwnedBy(player));
@@ -376,11 +377,11 @@ public sealed class BattleServer : IDisposable
         if (Battle.Tick % 3 == 0) World.Update<Replication>();
     }
 
-    /// <summary>Whether players may shoot: a disabled system is skipped by every update.</summary>
+    /// <summary>Whether players hold fire: a rule of the battle is data, so shots in flight still expire.</summary>
     public bool Ceasefire
     {
-        get => !World.GetSystem<ProjectileSystem>().Enabled;
-        set => World.GetSystem<ProjectileSystem>().Enabled = !value;
+        get => Battle.Ceasefire;
+        set => Battle.Ceasefire = value;
     }
 
     public int PlayersIn(int zone) => World.ZoneIndex.Count(zone);
@@ -429,8 +430,8 @@ public sealed class BattleServer : IDisposable
         float best = float.MaxValue;
         foreach (var item in World.Query<Position>(AlivePlayers))            // Position is not tracked: reads are free
         {
-            float dx = item.Component1.X - at.X, dy = item.Component1.Y - at.Y;
-            if (dx * dx + dy * dy < best) (best, nearest) = (dx * dx + dy * dy, item.Entity);
+            float dx = item.Component1.X - at.X, dy = item.Component1.Y - at.Y, distance = dx * dx + dy * dy;
+            if (distance < best) (best, nearest) = (distance, item.Entity);
         }
 
         return nearest;
@@ -487,11 +488,11 @@ public sealed class BattleServer : IDisposable
 
     public void Dispose() => World.Dispose();                                 // OnDestroy of every system
 
-    private struct SumHealth : IForEachBatch<Health>, INoStructuralChanges
+    private struct SumHealth : IForEachBatch<Health>
     {
         public long Total;
         public static int Writes => 0;                                        // reads only: rows stay unchanged
-        public void Execute(Span<Health> hp)
+        public void Execute(EntitySpan entities, Span<Health> hp)
         {
             // Value, Max, Value, Max, ...: sum every lane, keep the even ones (an int lane holds 4M rows of 500)
             var lanes = MemoryMarshal.Cast<Health, Vector<int>>(hp);
@@ -549,7 +550,7 @@ while (running)
 
 var census = server.Census();                     // between ticks: struct jobs, Count, the index
 Console.WriteLine($"{census.Alive}/{census.Players} alive, {server.PlayersIn(0)} in zone 0, slowest {server.Slowest()}");
-server.Ceasefire = true;                          // switch a system off
+server.Ceasefire = true;                          // a rule as data: players hold fire, shots in flight still expire
 server.NewRound();
 server.Load();                                    // roll the battle back in memory
 

@@ -17,7 +17,7 @@ Xeon VM at 2.1 GHz ([benchmarks](performance.md#benchmarks)).
 | [Filters](#filters) | `With`, `Without`, `WithAny`, `Changed` as attributes or a `QueryFilter`. | `With<Npc>`, `Without<Dead>`, `StatusSystem.Count` (`WithAny`), the host's `static readonly` filters |
 | [Ad-hoc queries](#ad-hoc-queries) | `Query`, struct jobs, `Count`, `Any` from any code. | `NearestPlayer` (`Query`), `Census` (struct jobs, `Count`), `AnyoneBurning` (`Any`) |
 | [Batch methods](#batch-methods) | Runs of rows as spans, for SIMD. | `MovementSystem`, `ManaSystem`, `SumHealth` |
-| [System groups and intervals](#system-groups-and-intervals) | Separate cadences: input on every wake, simulation on a fixed tick. | `Replication` group, `RegenerationSystem.UpdateInterval`, `Ceasefire` (`Enabled`) |
+| [System groups and intervals](#system-groups-and-intervals) | Separate cadences: input on every wake, simulation on a fixed tick. | `Replication` group, `RegenerationSystem.UpdateInterval`, `Enabled` (a failing system switched off) |
 | [Singletons](#singletons) | One value per world, passed to systems as parameters. | `Battle`, `Waypoints` (added in `OnCreate`), `SingletonRef<Battle>` in the host |
 | [Parallel systems](#parallel-systems) | Non-conflicting systems of one priority run at once, same result as sequential. | `MovementSystem` and `ManaSystem` (`WorldOptions.ParallelSystems`) |
 | [Parallel `[ForEach]`](#parallel-foreach) | One heavy method's rows split across cores. | `SteeringSystem`; `NewRound` (`ForEachParallel`, `ForEachEntityParallel`) |
@@ -165,7 +165,8 @@ for ad-hoc jobs.
 
 **When to use it.** Arithmetic over many rows that you vectorize (`Vector<T>`, `MemoryMarshal.Cast`).
 
-**When not.** Logic that changes structure or needs the entity (batch methods take only spans and singletons).
+**When not.** Logic that changes structure. A batch method takes spans, singletons and an `EntitySpan` (the run's
+entities, read only for the rows that need them); the world's structure is frozen while it runs.
 
 **Cost.** One call per run of rows instead of one per entity. Moving 100,000 entities with a bounce at the map's edge
 takes 64 μs as a vectorized batch method, against 251 μs per entity (`OperationBenchmark`), 0 B.

@@ -164,7 +164,7 @@ command buffers on purpose); a few are not offered.
 | Publish / subscribe messages | DefaultEcs | data: a singleton or components that systems read | `Battle` counters |
 | Tags | Friflo | empty components; removing one flips a bit, the entity keeps its row | `Player`, `Npc`, `Dead`, `Frozen` |
 | Unique entity / world-level component | Friflo, DefaultEcs | singletons, as `[ForEach]` parameters or a `SingletonRef<T>` | `Battle`, `Waypoints`, the host's `SingletonRef<Battle>` |
-| Enable / disable an entity or component | Friflo, DefaultEcs | add or remove a tag (`Without<Frozen>` skips it); `system.Enabled` for systems | `Frozen`, `Ceasefire` |
+| Enable / disable an entity or component | Friflo, DefaultEcs | add or remove a tag (`Without<Frozen>` skips it); `system.Enabled` for systems | `Frozen`, a failing system switched off |
 | Systems, groups, ordering | Friflo, DefaultEcs, Arch.Extended | `EcsSystem`, `Priority`, `ISystemGroup`, `UpdateInterval`, `OnCreate` / `OnDestroy` | every system; `Replication`; `SteeringSystem.OnCreate` |
 | Struct query jobs (`IForEach`, inline queries) | Arch, Friflo | `IForEach`, `IForEachEntity`, `IForEachBatch` (`[ForEach]` generates them) | `Census` |
 | Chunk iteration | Arch, Friflo | batch methods (`Span<T>` per run of rows) | `MovementSystem`, `ManaSystem`, `SumHealth` |

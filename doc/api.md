@@ -33,8 +33,9 @@ Notation:
 | `QueryFilter` | readonly struct | `Create().With<T>().Without<U>().WithAny<V>().WithAny<W>().Changed<X>(since)`; `ChangedSince(since)` moves the tick of a kept filter. |
 | `IForEach<T1..Tn>` | interface | Struct job: `void Execute(ref T1 c1, …)`. Optional static `Writes` (bit k - 1 for component k: what to carry over when the job moves its entity, and which tracked components it stamps; default all). |
 | `IForEachEntity<T1..Tn>` | interface | Struct job that also receives the handle: `void Execute(Entity entity, ref T1 c1, …)` (for the id, `entity.Id`). Optional static `Writes`, as for `IForEach`. |
-| `IForEachBatch<T1..Tn>` | interface | Struct job receiving runs of rows: `void Execute(Span<T1> c1, …)`; no structural changes. Optional static `Writes` (which spans the job writes; default all). |
-| `INoStructuralChanges` | marker interface | A job that makes no structural change: its passes skip the bookkeeping (generated for `[ForEach]` methods that cannot change structure). |
+| `IForEachBatch<T1..Tn>` | interface | Struct job receiving runs of rows: `void Execute(EntitySpan entities, Span<T1> c1, …)`; no structural changes (the structure is frozen). Optional static `Writes` (which spans the job writes; default all). |
+| `EntitySpan` | ref struct | The entities of a run of rows: `Length`, `entities[i]` (O(1), one 8-byte load; built only when indexed). |
+| `INoStructuralChanges` | marker interface | A job that makes no structural change: its passes skip the bookkeeping and freeze the structure (a change throws); generated for `[ForEach]` methods that cannot change structure. |
 | `QueryEnumerator<T1..Tn>`, `QueryItem<T1..Tn>` | ref structs | Result of `Query`: `item.Entity`, `item.Component1..n` (refs into the row); enumerator `Dispose()` (ends the pass; `foreach` calls it). A loop over them cannot `await`. |
 | `SingletonRef<T>` | readonly struct | Stable singleton handle; `.Value` is `ref T`. |
 | `SystemList` | readonly struct | `world.Systems`: `foreach` over every group's systems, `Count`; allocation-free. |

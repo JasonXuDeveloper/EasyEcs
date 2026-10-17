@@ -101,7 +101,10 @@ each table with no per-entity check.
 
 A method whose component parameters are spans receives runs of consecutive matching rows: element `i` of every span
 belongs to the same entity, and a table where every row matches is a single call. Spans let the method use SIMD.
-Its other parameters can only be singletons ([EECS009](analyzer.md#eecs009)), and it must not make structural changes.
+Its other parameters can be singletons and an `EntitySpan`: `entities[i]` is the entity of row `i`, built only when
+indexed, so a method that needs the entity of a few rows pays for those rows only. Nothing else
+([EECS009](analyzer.md#eecs009)), and no structural change: the spans point into the tables, so the world's structure
+is frozen while the method runs (a change throws; [EECS013](analyzer.md#eecs013) reports it at compile time).
 
 ```csharp
 using System.Numerics;

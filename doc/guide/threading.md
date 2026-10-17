@@ -160,7 +160,7 @@ runner, and the calling thread always takes part.
 
 | Operation | Safety |
 |---|---|
-| Structural changes (create/destroy, `Add`/`Set`/`Remove`), adding/removing systems and singletons, `Capture`/`Restore` | Owner thread only, one at a time. They check and set the world's owner flag (no atomic instruction): one started while another runs, or while the world runs a parallel batch or a parallel `[ForEach]`, throws `InvalidOperationException` instead of tearing the tables. |
+| Structural changes (create/destroy, `Add`/`Set`/`Remove`), adding/removing systems and singletons, `Capture`/`Restore` | Owner thread only, one at a time. They check and set the world's owner flag (no atomic instruction): one started while another runs, or while the structure is frozen (a parallel batch, a parallel `[ForEach]`, a batch job holding spans into the tables, an `INoStructuralChanges` pass), throws `InvalidOperationException` instead of tearing the tables. |
 | Query matching, `Has`, `Get` lookups | Lock-free over immutable, copy-on-write archetype snapshots (the first use of a query shape takes a compare-and-swap gate once to build its cache entry, so the threads of a parallel batch can race to it). |
 | A singleton a system resolves first (`[ForEach]` singleton parameters, `GetOrAddSingleton`, `SingletonRef`) | The same compare-and-swap gate: systems of one batch may add it at once. |
 | Component and singleton **values** | Not synchronized, by design: the owner thread, or the parallel scheduler, decides who touches them. |
@@ -175,7 +175,7 @@ What catches a change made off the owner thread:
 | Where the change comes from | Caught by |
 |---|---|
 | A `[ForEach]` method that takes no `Entity` or `World` (or only reads its `Entity`), changing structure through a handle a component holds or a world kept elsewhere | [EECS013](analyzer.md#eecs013) at compile time; the runtime throws if it runs in a parallel batch. |
-| A system of a parallel batch, or a parallel `[ForEach]` job, that changes structure through a helper method | The runtime: the world marks the batch and the chunks as a parallel region, and every structural change in one throws, deterministically. |
+| A system of a parallel batch, or a parallel `[ForEach]` job, that changes structure through a helper method | The runtime: the world freezes its structure for the batch and the chunks, and every structural change then throws, deterministically. |
 | A lambda handed to `Task.Run`, `Parallel.*`, `ThreadPool`, `new Thread` or `new Timer` that changes a world (or an entity) the code around it also changes, or hands off several times | [EECS014](analyzer.md#eecs014) at compile time. A world handed to a thread that then owns it (a world per thread) is not reported. |
 | Your own threads in any other way | Nothing reliable: the owner flag may throw, but two threads can also pass it together. Hand the change to the owner as data ([below](#input-from-other-threads)). |
 
