@@ -12,21 +12,23 @@ Xeon VM at 2.1 GHz ([benchmarks](performance.md#benchmarks)).
 | [Worlds and entities](#worlds-and-entities) | Isolated worlds of version-checked, recycled entity handles. | `new World(options)` in the host; `Entity` handles everywhere; `Hit` (`TryGetEntity`) |
 | [Components and tags](#components-and-tags) | Plain structs in archetype tables; empty structs are tags. | `Position`, `Health`, …; tags `Player`, `Npc`, `Dead` |
 | [Generated members](#generated-members) | `e.Position`, `e.SetZone(3)`, `e.IsDead`, `world.Battle`, `world.ZoneIndex` for every component. | `SetZone`, `SetFrozen`, `RemoveBurning`, `IsDead`, `World.Battle`, `ZoneIndex`, `OwnedByIndex` |
-| [Immediate structural changes](#immediate-structural-changes) | Add, remove, create, destroy anywhere, even mid-pass; no command buffer. | `CombatSystem` adds statuses, `DeathSystem` adds `Dead`, `ProjectileSystem` spawns and destroys |
+| [Prefabs and cloning](#prefabs-and-cloning) | Kinds of entities defined once as data outside any world; copies of a living entity. | NPC kinds `Grunt` and `Brute` (`Instantiate`, in bulk and one by one); `Mirror` (`Clone`) |
+| [Immediate structural changes](#immediate-structural-changes) | Add, remove, create, destroy anywhere, even mid-pass; no command buffer. | `CombatSystem` adds statuses, `DeathSystem` sets `Dead`, `ProjectileSystem` spawns and destroys |
 | [Systems and `[ForEach]`](#systems-and-foreach) | One-job systems; a method is the whole loop, compiled to an inlined struct job. | every system; `ClockSystem` overrides `OnUpdate` |
-| [Filters](#filters) | `With`, `Without`, `WithAny`, `Changed` as attributes or a `QueryFilter`. | `With<Npc>`, `Without<Dead>`, `StatusSystem.Count` (`WithAny`), the host's `static readonly` filters |
+| [Filters](#filters) | `With`, `Without`, `WithAny`, `Changed`, `Removed` as attributes or a `QueryFilter`. | `With<Npc>`, `Without<Dead>`, `AfflictionSystem` (`WithAny`), the host's `static readonly` filters |
 | [Ad-hoc queries](#ad-hoc-queries) | `Query`, struct jobs, `Count`, `Any` from any code. | `NearestPlayer` (`Query`), `Census` (struct jobs, `Count`), `AnyoneBurning` (`Any`) |
-| [Batch methods](#batch-methods) | Runs of rows as spans, for SIMD. | `MovementSystem`, `ManaSystem`, `SumHealth` |
+| [Batch methods](#batch-methods) | Runs of rows as spans, for SIMD. | `MovementSystem`, `SumHealth` (`Census`) |
 | [System groups and intervals](#system-groups-and-intervals) | Separate cadences: input on every wake, simulation on a fixed tick. | `Replication` group, `RegenerationSystem.UpdateInterval`, `Enabled` (a failing system switched off) |
 | [Singletons](#singletons) | One value per world, passed to systems as parameters. | `Battle`, `Waypoints` (added in `OnCreate`), `SingletonRef<Battle>` in the host |
 | [Parallel systems](#parallel-systems) | Non-conflicting systems of one priority run at once, same result as sequential. | `MovementSystem` and `ManaSystem` (`WorldOptions.ParallelSystems`) |
 | [Parallel `[ForEach]`](#parallel-foreach) | One heavy method's rows split across cores. | `SteeringSystem`; `NewRound` (`ForEachParallel`, `ForEachEntityParallel`) |
-| [Change tracking](#change-tracking) | Visit only the rows written since a system last ran. | `ReplicationSystem` (`[Changed<Health>]`), `Unsaved` (`ChangedSince`) |
+| [Change tracking](#change-tracking) | Visit only the rows written since a system last ran. | `ReplicationSystem` (`[Changed<Health>]`, `[Changed<Burning>]`), `Unsaved` (`Since`) |
+| [Removal detection](#removal-detection) | Visit only the entities that lost a component since a system last ran. | `ReplicationSystem.SendFireOut` (`[Removed<Burning>]`) |
 | [Dynamic buffers](#dynamic-buffers) | A list per entity as a component; every write tracked. | players' bags of `Loot`; `ReplicationSystem.SendBag` (`[Changed<DynamicBuffer<Loot>>]`) |
 | [Value indexes](#value-indexes) | Find entities by a component's value. | `Zone`: `PlayersIn`, `Despawn` (`TryFind`) |
 | [Relations](#relations) | Entity-to-entity links with reverse lookup. | `OwnedBy`: `Respawn` recalls a player's projectiles |
 | [Snapshots](#snapshots) | Copy a world and restore it in memory. | `Save` / `Load` |
-| [Bulk create and destroy](#bulk-create-and-destroy) | Spawn and clear waves in one pass through the structural gate. | `CreateEntities` (players), `DestroyEntities` (`NewRound`) |
+| [Bulk create and destroy](#bulk-create-and-destroy) | Spawn and clear waves in one pass through the structural gate. | `CreateEntities` (players), `Instantiate(prefab, span)` (NPCs), `DestroyEntities` (`NewRound`) |
 | [Per-system timing](#per-system-timing) | Run counts and times of every system. | `MeasureSystems`, `Slowest` |
 | [Errors](#errors) | A failing system is reported and can be switched off; the tick goes on. | `SystemError` (`Failure`, `FaultySystem` in the tests) |
 | [Analyzer](#analyzer) | ECS design mistakes fail the build. | the whole file builds without a warning |
@@ -69,9 +71,38 @@ states that come and go. A field, not a tag, for a value that changes every tick
 10,000 entities (remove and add back) takes 149 μs, 0 B. Gaining a component the entity's table has no column for
 copies its row once.
 
+**How.** Add or replace with `entity.Set(new Burning(10))` (generated: `entity.SetBurning(10)`, `entity.SetDead()`
+for a tag), add a default only when missing with `ref var c = ref entity.GetOrAdd<T>()`, remove with `Remove<T>()`.
+Read with `Read<T>()` (or `in` parameters), write through `Get<T>()` (or `ref` parameters).
+
 **Scenarios.** Buffs, debuffs, deaths and status effects that flip every few ticks on thousands of units.
 
 Guide: [Entities and components](guide/entities-and-components.md).
+
+## Prefabs and cloning
+
+**What it does.** A `Prefab` is a recipe: a set of component values (`new Prefab().Set(a).Set(b)`) that belongs to no
+world, so no query sees it and no system has to filter it out. `world.Instantiate(prefab)` creates an entity with a
+copy of every value; `world.Instantiate(prefab, span)` creates a wave. `entity.Clone()` copies a living entity within
+its world. A copy gets its own list for each `DynamicBuffer<T>`, is indexed at once, and its tracked components count
+as written, so replication sends it like any new entity.
+
+**When to use it.** Kinds of entities spawned again and again (NPC types, projectiles, loot), defined once in code or
+loaded from configuration at startup: spawn from the prefab, then write only what differs (position, a seed). `Clone`
+for runtime copies of a live entity's current state: a mirror image, a unit that splits.
+
+**When not.** Entities whose values are all different (use `CreateEntity` with the values); relations in a prefab
+(an `Entity` field names no entity of the target world: set them after instantiating).
+
+**Design.** Unity DOTS and Flecs keep prefabs as tagged entities of the world, which every query has to exclude
+(they add the exclusion by default); Friflo clones an entity of the same store. A prefab here is data, not an entity: queries stay clean, and one prefab serves
+several worlds (on several threads, as long as nobody changes it meanwhile).
+
+**Cost.** One row copy, O(components); the target table is found once per prefab table and cached. A wave takes the
+structural gate once and grows the table at most once. Spawning 5,000 six-component NPCs from a prefab and destroying
+them: TBD (`OperationBenchmark.EasyEcs_Instantiate`; Friflo `CloneEntity`: TBD).
+
+Guide: [Prefabs and cloning](guide/prefabs.md).
 
 ## Generated members
 
@@ -93,7 +124,7 @@ Guide: [Entities and components](guide/entities-and-components.md#generated-memb
 
 ## Immediate structural changes
 
-**What it does.** Creating, destroying, adding and removing apply at once, also inside a pass over the same tables.
+**What it does.** Creating (`CreateEntity`, `Instantiate`, `Clone`), destroying, adding and removing apply at once, also inside a pass over the same tables.
 A pass visits each entity at most once; entities that leave before their turn are skipped, entities that join wait
 for the next pass. The `ref` parameters of a `[ForEach]` method stay writable when the body moves its own entity.
 
@@ -132,7 +163,8 @@ Guide: [Systems, `[ForEach]` and groups](guide/systems.md) · [ECS principles](e
 ## Filters
 
 **What it does.** `With<T>` requires a component that is not passed in, `Without<T>` excludes one, `WithAny<T>`
-requires at least one of a group, `Changed<T>` selects rows written since a tick. As attributes on `[ForEach]`
+requires at least one of a group, `Changed<T>` selects rows written since a tick, `Removed<T>` entities that lost a
+component since a tick. As attributes on `[ForEach]`
 methods or as a `QueryFilter`. A table that cannot match is skipped once; a table where some rows lack a component
 is tested 64 rows per bit word.
 
@@ -140,6 +172,8 @@ is tested 64 rows per bit word.
 (`[WithAny<Frozen>, WithAny<Stunned>]`).
 
 **Cost.** Matching is cached per query shape (one hash probe after the first use). Rows are tested 64 at a time.
+Build a `QueryFilter` once and keep it in a `static readonly` field (the generator does so for attributes); a kept
+filter with `Changed` or `Removed` takes a new tick per call with `Since(tick)`.
 
 Guide: [Queries and filters](guide/queries.md).
 
@@ -205,7 +239,8 @@ an `OnUpdate` override, or a subclass the generator did not see. The result alwa
 
 **When to use it.** Several heavy, independent systems per priority and spare cores.
 
-**When not.** Light systems over a few thousand entities: a batch costs a thread-pool hand-off (microseconds). For a
+**When not.** Light systems over a few thousand entities: a stage of several systems costs a thread-pool hand-off
+(microseconds). For a
 server, one world per thread usually uses the cores better.
 
 **Cost.** Four disjoint systems over 100,000 entities: 383 μs sequential, 264 μs in parallel on 4 cores, 0 B.
@@ -246,6 +281,27 @@ summaries and takes a word's written rows from its summary. Replicating 10 chang
 instead of 39-110 μs for a scan of every row; 1,000 scattered changes 36 μs instead of 62-110 μs.
 
 Guide: [Change tracking](guide/change-tracking.md).
+
+## Removal detection
+
+**What it does.** Removing a component keeps the entity's row and, for an `ITrackChanges` component, stamps the
+row's change tick. A `[Removed<T>]` method visits the entities that lost `T` since its system last ran and still
+lack it, once per removal, with their other components; `QueryFilter.Removed<T>(tick)` does the same for queries.
+Removed and added back before the system runs is not a removal (`[Changed<T>]` sees it instead); destroyed entities
+are not reported, nor are entities created or instantiated without `T`.
+
+**When to use it.** Replicating what went away (a fire went out, a shield broke, a buff expired), releasing what a
+component stood for (a reserved grid cell, a lock on a target).
+
+**When not.** Telling clients that an entity was destroyed: mark it with a tag that replication reads, and destroy it
+after the replication ran.
+
+**Cost.** Nothing extra in storage: a removal stamps the tick column the component already has. A pass skips tables,
+blocks and words with no recent stamp, like `[Changed<T>]`. Replicating 10 or 1,000 removals per tick among 100,000
+entities: TBD / TBD (`RemovalComparison`; the [comparison](comparison.md#removal-detection) has the other libraries'
+approaches).
+
+Guide: [Change tracking: removal detection](guide/change-tracking.md#removal-detection).
 
 ## Dynamic buffers
 
@@ -318,11 +374,12 @@ Guide: [Snapshots](guide/snapshots.md).
 ## Bulk create and destroy
 
 **What it does.** `world.CreateEntities(span, a, b)` spawns a wave with the same values in one pass through the
-structural gate; `world.DestroyEntities<T>(filter)` destroys every match.
+structural gate, `world.Instantiate(prefab, span)` a wave of a [prefab](#prefabs-and-cloning);
+`world.DestroyEntities<T>(filter)` destroys every match.
 
 **When to use it.** Waves of monsters, projectiles, loot; clearing a zone.
 
-**Cost.** Ten rounds of creating and destroying 10,000 entities: 158 μs in batches against 283 μs one by one.
+**Cost.** Ten rounds of creating and destroying 10,000 entities: 158 μs in bulk against 283 μs one by one.
 
 Guide: [Entities and components](guide/entities-and-components.md#entities).
 
@@ -352,11 +409,12 @@ Guide: [Systems: errors](guide/systems.md#errors).
 
 ## Analyzer
 
-**What it does.** The package bundles an analyzer (EECS001-EECS015) next to the generator: invalid `[ForEach]`
+**What it does.** The package bundles an analyzer (EECS001-EECS016) next to the generator: invalid `[ForEach]`
 methods and systems (EECS001-005), class components (EECS006), stateful systems (EECS007), systems referencing
 systems (EECS008), batch methods mixing spans with per-entity parameters (EECS009), unsafe parallel methods (EECS010),
-writes through `in` parameters (EECS011), copied dynamic buffers (EECS012) and structural changes off the owner thread
-(EECS013, EECS014) fail the build.
+writes through `in` parameters (EECS011), copied dynamic buffers (EECS012), structural changes off the owner thread
+(EECS013, EECS014), indexed components written through a `ref` (EECS015) and `[Removed<T>]` methods that require `T`
+(EECS016) fail the build.
 
 **When to use it.** Always on; it keeps a large code base decoupled.
 
@@ -365,7 +423,7 @@ Guide: [Analyzer rules](guide/analyzer.md).
 ## Threading model
 
 **What it does.** A world has one owner thread: the one calling `Update`. Structural changes check a plain owner flag
-(no atomics): one made inside a parallel batch or a parallel `[ForEach]`, or reentered, throws instead of tearing the
+(no atomics): one made inside a parallel stage or a parallel `[ForEach]`, or reentered, throws instead of tearing the
 tables, and the analyzer reports the off-thread changes it can see (EECS013, EECS014). Queries match lock-free over
 copy-on-write snapshots. `ParallelSystems` borrows thread-pool threads inside one update without changing ownership.
 

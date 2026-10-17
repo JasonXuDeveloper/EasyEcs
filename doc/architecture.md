@@ -15,9 +15,9 @@ flowchart TB
     subgraph "World (one per owner thread)"
         Meta["Meta[id] : EntityMeta (16 B)<br/>Archetype · Version · Slot"]
         Arch["Archetype = table<br/>mask · Slots[row]: EntitySlot {Version, Id} (8 B)<br/>one column per component (rows = slots)<br/>presence bits per column · add edges"]
-        QC["Query cache: (required, excluded, any, changed) →<br/>archetypes + row filters, copy-on-write"]
+        QC["Query cache: (required, excluded, any, changed, removed) →<br/>archetypes + row filters, copy-on-write"]
         Single["Singletons[index] : SingletonBox&lt;T&gt;"]
-        Sys["Systems: one schedule per group<br/>sorted by priority, split into batches"]
+        Sys["Systems: one schedule per group<br/>sorted by priority, split into stages"]
     end
     Meta -->|archetype + row| Arch
     QC --> Arch
@@ -43,7 +43,7 @@ flowchart TB
   component and the column carries no bits at all. Each column also counts its alive rows lacking the component, so a
   query knows per table whether it can skip the table, walk every row, or test the bits. `Count` and `Any` answer a
   table where only one required or excluded column varies from that count, without reading bits.
-- **Masks** (`Tag`) are 256-bit SIMD bitsets with overflow. Up to 65,536 component types are supported (bits are
+- **Masks** (`BitMask`) are 256-bit SIMD bitsets with overflow. Up to 65,536 component types are supported (bits are
   `ushort`): the first 256 are inline (one `Vector256` test per archetype match); beyond that a mask carries an
   overflow array (at least 4 × 256 bits, doubled when needed). Overflow masks are allocated when an archetype or a
   transition edge is first built, never on the iteration or structural-change path after warm-up.
@@ -60,6 +60,10 @@ flowchart TB
   then unwritten words (4 summaries per SIMD compare); a word whose other rows are older than the tick yields its
   written rows directly, and only words mixing older and newer ticks compare their rows (4 per SIMD instruction).
   The result is 64 bits per word, like the presence bits: it rides on the row-filter machinery.
+  Removing a tracked component stamps its row's tick too, while the row keeps its column and clears its presence bit:
+  a `Removed` filter is an excluded column (the presence bit clear) whose rows must also reach the pass's tick, so
+  removal detection needs no extra storage, and the `Changed` filters of the same component skip the row because they
+  require it.
   Untracked components have no column and no stamping code (the checks are JIT-time constants).
 - **Value indexes** (`IIndexed<TKey>`, `world.Index<T, TKey>()`): a dictionary from key to the head and length of a
   doubly linked list of entity ids (nodes in an array indexed by id); relation heads (keys that are entities of the
@@ -102,7 +106,7 @@ flowchart TB
 
 - `entity.Get<T>()` is a version check on the 16-byte record, a column lookup in the archetype (bit → column, a small
   array) and, when the column has presence bits, one bit test; then an indexed load from the column.
-- `CreateEntity(a, b, ...)`, `Set(a, b, ...)` and `Add<T>()` follow transitions cached per archetype (per component
+- `CreateEntity(a, b, ...)`, `Set(a, b, ...)` and `GetOrAdd<T>()` follow transitions cached per archetype (per component
   bit, and per generic signature for several components), so a repeated structural change is one array load plus
   the row copy.
 
@@ -112,7 +116,8 @@ flowchart TB
 stateDiagram-v2
     [*] --> Free
     Free --> Alive: CreateEntity (pop LIFO free list or next id)
-    Alive --> Alive: Add / Set a new component (row copied to the target table)
+    Free --> Alive: Instantiate(prefab) / Clone (one row copied from the source)
+    Alive --> Alive: Set / GetOrAdd a new component (row copied to the target table)
     Alive --> Alive: Remove, or re-add a removed one (presence bit, no move)
     Alive --> Free: Destroy (Version++, row removed, id pushed)
 ```
@@ -136,6 +141,13 @@ stateDiagram-v2
   generic signature (`TypeIndex<ComponentSignature, (T1, …, Tn)>`). The first call per (archetype, signature) builds
   the target mask and does one hash lookup; later calls are one array load.
 - `CreateEntity(in T1 … in Tn)` places the entity in its final table directly, without intermediate moves.
+- **Prefabs and clones.** A `Prefab` is one row of a private world of its own (capacity 1), so it belongs to no world
+  the user queries. `Instantiate` finds the target world's table with the prefab table's mask once and caches it per
+  prefab table (`_prefabTables`); `Clone` uses the original's table. Then `Archetype.CloneRow` copies the row: the
+  bytes of unmanaged columns, managed values through `ComponentInfo.CloneManaged` (a `DynamicBuffer<T>` gets a new
+  store with the same elements), presence bits for what the source lacks, and the change tick of each tracked
+  component the source has set to the current tick (0 for one it lacks: never removed here). The new entity is then
+  indexed like a created one. `Instantiate(prefab, span)` reserves ids and table rows once for the wave.
 - A row that loses its entity (destroyed or moved away) is filled at once by the table's last row when no pass is
   iterating the world, so tables stay dense. While a pass iterates, the row becomes a **tombstone** (id `-1`) instead,
   so rows never shift under the pass; the last pass to end closes the tombstones (moving the last rows into them,
@@ -144,8 +156,8 @@ stateDiagram-v2
 ## Query cache
 
 `GetMatchingArchetypes(bits, filter)` keys a `ConcurrentDictionary` by the query's components (required, excluded,
-`WithAny`, `Changed`). Each entry holds an immutable snapshot: the archetypes whose mask contains every required
-component (and, with `WithAny`, at least one of those columns), and one row filter per archetype (the columns whose
+`WithAny`, `Changed`, `Removed`). Each entry holds an immutable snapshot: the archetypes whose mask contains every
+required component and the column of every `Removed` component (and, with `WithAny`, at least one of those columns), and one row filter per archetype (the columns whose
 presence bits and change ticks the query tests). A value index holds its entry (`GetQueryEntry`), so it sees new
 tables without a lookup. An excluded component does not rule a table out, since its rows may lack it; the row filter
 does. When a new archetype is created, under the structural gate, every matching entry is replaced copy-on-write and
@@ -153,7 +165,7 @@ published with `Volatile.Write`. Readers never lock and never observe a list bei
 
 Per pass and table, the row filter picks one of three modes from the column counts: skip the table (no row can
 pass), walk every row (no row lacks a required component or has an excluded one), or test presence bits. A filter
-with `Changed<T>` always tests: its words also AND in the rows whose tick reaches the pass's tick (the cached plan is
+with `Changed<T>` or `Removed<T>` always tests: its words also AND in the rows whose tick reaches the pass's tick (the cached plan is
 shared by every pass; the tick travels with the pass).
 
 ## Iteration and structural changes
@@ -189,8 +201,8 @@ Every iteration API walks tables front to back. What differs is how much bookkee
 ## Systems
 
 - Each system group has one schedule: its systems sorted by `Priority`, with registration order breaking ties, split
-  into batches of consecutive, pairwise non-conflicting systems of one priority (`SystemAccess`). Both arrays are
-  copy-on-write.
+  into stages of consecutive, pairwise non-conflicting systems of one priority (`SystemAccess`). Both arrays are
+  copy-on-write. Each stage advances the change tick once, whether its systems run together or not.
 - `Update()` / `Update<TGroup>()` are synchronous. For each due, enabled system they call `OnUpdate()` and the
   generated `GeneratedUpdate()` (`[ForEach]` methods). If a pass was interrupted by an exception, the update first
   closes the tombstones it left.
@@ -206,8 +218,8 @@ Every iteration API walks tables front to back. What differs is how much bookkee
 | Component | What it does |
 |---|---|
 | `ArityGenerator` | Emits every T1..T9 family of `EasyEcs.Core` from one template each: `Entity.Set` / `Remove`, `World.CreateEntity` / `CreateEntities` / `DestroyEntities`, `IForEach` / `IForEachEntity` / `IForEachBatch`, `ForEach` / `ForEachEntity` / `ForEachBatch` / `ForEachParallel` / `ForEachEntityParallel`, `Query`, `Count`, `Any`, `QueryItem` / `QueryEnumerator`. Runs only for `EasyEcs.Core`. |
-| `SystemGenerator` | Turns `[ForEach]` methods into struct jobs (per entity, or per run of rows for span parameters), static filters, a `GeneratedUpdate` override, a `GeneratedAccess` override (reads and writes, or `RunsAlone`) used for `ParallelSystems` batching, and a `GeneratedFor` override naming the class it was generated for (a subclass the generator did not see inherits it, so its access is unknown and it runs alone). `[Changed<T>]` becomes `ChangedSince(LastRunTick + 1)` on the method's filter and a declared read of `T`; `[ForEach(Parallel = true)]` runs the job over chunks of rows. Jobs that cannot change structure get `INoStructuralChanges`; jobs record which components they write (`Writes`) and whether they read the entity id. |
-| `EasyEcsAnalyzer` | Reports EECS001–EECS015, all errors: invalid input the generator skips, and code that breaks the ECS principles. Every rule with its fix: [Analyzer rules](guide/analyzer.md). |
+| `SystemGenerator` | Turns `[ForEach]` methods into struct jobs (per entity, or per run of rows for span parameters), static filters, a `GeneratedUpdate` override, a `GeneratedAccess` override (reads and writes, or `RunsAlone`) used to split systems into `ParallelSystems` stages, and a `GeneratedFor` override naming the class it was generated for (a subclass the generator did not see inherits it, so its access is unknown and it runs alone). `[Changed<T>]` and `[Removed<T>]` become `Since(LastRunTick + 1)` on the method's filter and a declared read of `T`; `[ForEach(Parallel = true)]` runs the job over chunks of rows. Jobs that cannot change structure get `INoStructuralChanges`; jobs record which components they write (`Writes`) and whether they read the entity id. |
+| `EasyEcsAnalyzer` | Reports EECS001–EECS016, all errors: invalid input the generator skips, and code that breaks the ECS principles. Every rule with its fix: [Analyzer rules](guide/analyzer.md). |
 
 Following the incremental-generator guidelines:
 
@@ -241,10 +253,10 @@ Every world uses the same indices, so masks are comparable across worlds.
 
 - Structural operations, system changes, `Capture` and `Restore` enter the world's **structural gate**, which
   belongs to the owner thread: a plain flag, checked and set on the way in, cleared on the way out (no atomic
-  instruction, so a create/destroy pair costs no `lock cmpxchg`). A parallel batch of systems and the chunks of a
+  instruction, so a create/destroy pair costs no `lock cmpxchg`). A parallel stage of systems and the chunks of a
   parallel `[ForEach]` add a region count to the same flag while they run, so any structural change inside them throws
   `InvalidOperationException`, deterministically; so does one reentered under the gate.
-- The cold paths the threads of a parallel batch reach on their own take a separate **shared gate** (a
+- The cold paths the threads of a parallel stage reach on their own take a separate **shared gate** (a
   compare-and-swap flag with a spinning wait): the first match of a query shape, a singleton a system resolves first,
   and closing the tombstones when the last pass ends. Both flags sit on their own cache line.
 - Queries, `Get` and `Has` are lock-free. Component values are unsynchronized by design. The recommended layout is
@@ -253,7 +265,7 @@ Every world uses the same indices, so masks are comparable across worlds.
   [Threading](guide/threading.md).
 - `WorldOptions.ParallelSystems`: every system carries a `SystemAccess` (component and singleton read/write bitsets, or
   "runs alone"), generated from its `[ForEach]` parameters and read once by `AddSystem`. The schedule splits each
-  priority into batches of consecutive, pairwise non-conflicting systems and publishes them as one copy-on-write
-  array. A batch runs on the calling thread plus reusable `IThreadPoolWorkItem` helpers that claim systems through
-  one `Interlocked` cursor (epoch in the high 32 bits, so a helper that starts late never touches the next batch);
+  priority into stages of consecutive, pairwise non-conflicting systems and publishes them as one copy-on-write
+  array. A stage runs on the calling thread plus reusable `IThreadPoolWorkItem` helpers that claim systems through
+  one `Interlocked` cursor (epoch in the high 32 bits, so a helper that starts late never touches the next stage);
   nothing is allocated per update.

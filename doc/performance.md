@@ -12,7 +12,7 @@
 
 [Which API](guide/queries.md#which-api) in the queries guide maps each need to its call: `[ForEach]` methods for the
 logic of systems, struct jobs for hot loops outside them, `Query` for convenience, `Count` / `Any` instead of loops,
-`[Changed<T>]` and indexes instead of scans.
+`[Changed<T>]` / `[Removed<T>]` and indexes instead of scans.
 
 ## Regular code and the fastest code
 
@@ -25,7 +25,8 @@ struct job. When a system shows up in `MeasureSystems` timings, these rewrites a
 | `foreach (var item in world.Query<…>())` in a hot ad-hoc loop | A struct job with `world.ForEach` | 28.9 → 12.6 μs (10,000 entities, micro benchmarks) |
 | A `bool` flag tested in every row | A tag component with `[With<T>]` / `[Without<T>]` | flagged rows skipped 64 at a time; toggling flips a bit |
 | Scanning every row for the few that changed | `ITrackChanges` + `[Changed<T>]` | 39-110 → 0.58 μs (10 of 100,000 rows written) |
-| `CreateEntity` / `Destroy` in a loop | `CreateEntities` / `DestroyEntities` | 382 → 158 μs (10 rounds of 10,000) |
+| `CreateEntity` / `Destroy` in a loop | `CreateEntities` / `DestroyEntities` (`Instantiate(prefab, span)` for a kind defined as a [prefab](guide/prefabs.md)) | 382 → 158 μs (10 rounds of 10,000) |
+| A marker tag added next to each removal, or a scan comparing with what was sent | `ITrackChanges` + `[Removed<T>]` | TBD (`RemovalComparison`) |
 | Heavy per-entity work on one thread | `[ForEach(Parallel = true)]` | 1,601 → 765 μs (100,000 entities, 4 cores) |
 
 ### Arithmetic over many rows: vectorize a batch method
@@ -173,6 +174,20 @@ public partial class ShieldReplicationSystem : EcsSystem
 }
 ```
 
+### What went away: `[Removed<T>]`
+
+Replicating a removal (a fire that went out) with a marker tag costs a structural change per removal and a pass over
+the tags; comparing every row with what clients last received costs a scan. A tracked component's removal already
+stamps its row, so `[Removed<T>]` visits only the entities that lost it, with the same skipping as `[Changed<T>]`:
+
+```csharp
+public partial class ShieldLossSystem : EcsSystem
+{
+    [ForEach, Removed<Shield>]                       // Shield : ITrackChanges (above)
+    static void Send(ref ShieldReplica replica) => replica = new ShieldReplica(0);
+}
+```
+
 ### The entity only where the row needs it
 
 An `Entity` parameter reads the row's id for every row, even when only a rare branch uses it. When the entities a
@@ -180,21 +195,32 @@ system acts on can be told by a component, filter on it (`[With<Dead>]`) instead
 of a column that many rows write every tick (a death check on `Health`) is still fastest as a plain scan: see above
 for when `[Changed<T>]` pays.
 
-### Waves of entities: batch calls
+### Waves of entities: bulk calls
 
 ```csharp
 var wave = new Entity[1_000];
 world.CreateEntities(wave, new Position(0, 0), new Velocity(1, 0));   // one pass through the structural gate
+world.Instantiate(Kinds.Goblin, wave);                                // a wave of a prefab, the same way
 int removed = world.DestroyEntities<Dead>();                          // every dead entity, one pass
 ```
+
+A [prefab](guide/prefabs.md) built once (`static readonly`) costs one row copy per instance; the world finds its
+target table once and caches it.
 
 Several components at once also take one transition: `entity.Set(a, b)`, `entity.Remove<A, B>()`.
 
 ## Do
 
 - Mutate through refs: `ref var hp = ref item.Component1;`, `ref var hp = ref entity.Get<Health>();`.
-- Spawn with all components at once: `world.CreateEntity(a, b, c)` (placed directly in its archetype); change several
-  with `entity.Set(a, b)` / `entity.Remove<A, B>()` (one transition).
+- Spawn with all components at once: `world.CreateEntity(a, b, c)` (placed directly in its archetype), or
+  `world.Instantiate(prefab)` for a kind defined once; change several with `entity.Set(a, b)` /
+  `entity.Remove<A, B>()` (one transition).
+- Read components with `in` parameters, `entity.Read<T>()` or the generated property, write through `ref` parameters
+  or `entity.Get<T>()`: a `ref` access counts as a write of a tracked component.
+- Keep the handle of a singleton you touch outside systems in a `SingletonRef<T>` (no lookup per access); in systems,
+  take it as a parameter (resolved once per pass).
+- Give systems that need not run every update a cadence: `UpdateInterval`, or a system group updated when needed
+  (`Update<TGroup>()`), instead of a counter checked in the method.
 - Keep components small (a few fields, well under a 64-byte cache line) and split rarely-used data into its own
   component: iteration only loads the columns it reads.
 - Keep `[ForEach]` methods that make no structural change `static`, without a `World` parameter and with read-only use
@@ -243,14 +269,15 @@ All numbers come from BenchmarkDotNet. The headline benchmarks simulate a real s
 - **`BattleServerBenchmark.Tick`** is one tick of the README's battle server (`BattleServer.cs`), which uses every
   feature: a parallel `[ForEach]` (NPC steering), two parallel systems of one priority (movement, vectorized, and
   mana), statuses added and removed mid-pass, `WithAny`, deaths, respawns and projectiles, a value index (players
-  per zone) and a relation (projectiles of a player), an update interval, per-system timings, and replication of
-  changed health every third tick (`[Changed<Health>]` in its own system group). `BattleServerTests` check the same
+  per zone) and a relation (projectiles of a player), NPCs spawned from prefabs, an update interval, per-system timings,
+  and replication every third tick in its own system group (changed health, fires lit and gone out with
+  `[Changed<Burning>]` / `[Removed<Burning>]`, changed bags). `BattleServerTests` check the same
   world and the host's queries, struct jobs, snapshots and error handling.
 - **`MultiWorldBenchmark.TickAllWorlds`** runs one world per core, each on its own long-lived thread. This is the
   recommended server layout.
 - **`ParallelSystemsBenchmark.Tick`** is one update of four `[ForEach]` systems of one priority with disjoint access
   (movement, health and mana regeneration, cooldowns) over 100,000 entities, with `WorldOptions.ParallelSystems` off
-  and on. With it on, the four systems form one batch and run at the same time; it shows what a parallel batch costs
+  and on. With it on, the four systems form one stage and run at the same time; it shows what a parallel stage costs
   and gains against a sequential update.
 - **`ParallelForEachBenchmark.Tick`** is one heavy `[ForEach]` method (steering towards the nearest of 16 waypoints)
   over 100,000 entities, plain and with `Parallel = true`, whose chunks of rows run on all cores.
@@ -269,12 +296,16 @@ All numbers come from BenchmarkDotNet. The headline benchmarks simulate a real s
   cannot match exactly because of the peers' id recycling (ids feed the random rolls, and each library recycles them
   in its own order) and deferred structural changes (libraries with command buffers apply them at the end of a system,
   not immediately).
-- **`ChangeTrackingComparison`** and **`IndexComparison`** (project `EasyEcs.Comparison`, `FeatureBenchmark.cs`) run
-  the same jobs (1,000 of 100,000 entities written per tick; 1 or 100 trades, then 100 inventory counts) in each
-  library its own way: the built-in feature where it has one (DefaultEcs `WhenChanged<T>()` sets and
-  `EntityMultiMap<T>`, Friflo link components), else the usual workaround (a scan comparing values, or a dirty tag
-  added on write and removed after the copy). Setup checks every variant's result (replicas match the source; each
-  owner's count matches the items pointing at it), and `--check` runs those checks without measuring.
+- **`ChangeTrackingComparison`**, **`RemovalComparison`** and **`IndexComparison`** (project `EasyEcs.Comparison`,
+  `FeatureBenchmark.cs`) run the same jobs (10 or 1,000 of 100,000 entities written per tick; 10 or 1,000 buffs
+  removed per tick; 1 or 100 trades, then 100 inventory counts) in each library its own way: the built-in feature
+  where it has one (DefaultEcs `WhenChanged<T>()` / `WhenRemoved<T>()` sets and `EntityMultiMap<T>`, Friflo's
+  `OnComponentRemoved` event and link components), else the usual workaround (a scan comparing values, or a tag added
+  on write or removal and removed after the visit). Setup checks every variant's result (replicas match the source;
+  every removal is sent once; each owner's count matches the items pointing at it), and `--check` runs those checks
+  without measuring.
+- **`OperationBenchmark`** (project `EasyEcs.Comparison`) isolates single operations on the headline world, EasyEcs
+  against Friflo, including spawning NPCs from a prefab (`Instantiate`; Friflo `CloneEntity`).
 
 Measured with BenchmarkDotNet and the repository's job (`EasyEcs.Benchmark/BenchmarkConfig.cs`: 2 launches, 6
 warmups, 8 iterations of 250 ms, call counting from the start) on .NET 10, on a 4-core Xeon VM at 2.1 GHz.

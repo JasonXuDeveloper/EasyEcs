@@ -17,10 +17,10 @@ step introduces one concept and links to the guide page that covers it in depth.
 - [12. States that come and go](#12-states-that-come-and-go)
 - [13. Whole runs of rows: batch methods](#13-whole-runs-of-rows-batch-methods)
 - [14. Heavy work on every core](#14-heavy-work-on-every-core)
-- [15. Only what changed](#15-only-what-changed)
+- [15. Only what changed, or went away](#15-only-what-changed-or-went-away)
 - [16. A list per entity: dynamic buffers](#16-a-list-per-entity-dynamic-buffers)
 - [17. Find entities by value, follow relations](#17-find-entities-by-value-follow-relations)
-- [18. Batches, snapshots, timings](#18-batches-snapshots-timings)
+- [18. Prefabs, waves, snapshots, timings](#18-prefabs-waves-snapshots-timings)
 - [Next steps](#next-steps)
 
 ## 1. Install
@@ -200,7 +200,7 @@ ref var tally = ref world.GetSingleton<Tally>();     // ref T, like components (
 A `[ForEach]` method takes a singleton as a `ref` / `in` parameter (resolved once per pass, added if missing), and
 `OnUpdate` reaches it through the system's `World` property.
 
-The `Add<Dead>()` applies at once: later systems of the same update already see the corpse, and the
+The `SetDead()` (the generated `Set(new Dead())`) applies at once: later systems of the same update already see the corpse, and the
 `Without<Dead>` filter keeps the next updates from counting it again. Each entity is visited at most once per pass;
 see [Structural changes during iteration](guide/structural-changes.md). More on singletons in
 [Singletons](guide/singletons.md).
@@ -266,7 +266,7 @@ clears a presence bit, so the entity keeps its row and the next add is as cheap.
 entities that have at least one of them:
 
 ```csharp
-public record struct Burning(int Ticks) : IComponent;
+public record struct Burning(int Ticks) : IComponent, ITrackChanges;   // tracked: clients learn when it ends (step 15)
 public record struct Frozen(int Ticks) : IComponent;
 
 public partial class StatusSystem : EcsSystem
@@ -335,21 +335,27 @@ public partial class SteeringSystem : EcsSystem
 It pays for heavy per-entity work over tens of thousands of entities. Independent *systems* of one priority can also
 run together with `WorldOptions.ParallelSystems` ([Threading](guide/threading.md)).
 
-## 15. Only what changed
+## 15. Only what changed, or went away
 
 A component marked `ITrackChanges` records the tick of each row's last write; any write counts, including through
 `ref`. A `[Changed<T>]` method visits only the rows written since its system last ran, which is what replication
 and persistence need:
 
 ```csharp
-public record struct Replica(int Health) : IComponent;
+public record struct Replica(int Health, bool Burning) : IComponent;
 public struct Network : ISystemGroup;
 
 [UpdateInGroup<Network>]
 public partial class ReplicationSystem : EcsSystem
 {
     [ForEach, Changed<Health>]
-    static void Send(in Health hp, ref Replica replica) => replica = new Replica(hp.Value);
+    static void Send(in Health hp, ref Replica replica) => replica.Health = hp.Value;
+
+    [ForEach, Changed<Burning>]                          // set on fire since the last send
+    static void SendFire(ref Replica replica) => replica.Burning = true;
+
+    [ForEach, Removed<Burning>]                          // the fire went out: the entity lost Burning
+    static void SendFireOut(ref Replica replica) => replica.Burning = false;
 }
 ```
 
@@ -359,7 +365,8 @@ world.Update<Network>();       // when the server sends: only healths written si
 ```
 
 Take components `in` when you only read them: a `ref` parameter, `Get<T>()` or a query item counts as a write.
-See [Change tracking](guide/change-tracking.md).
+`[Removed<T>]` visits the entities that lost a tracked component since the last run, with their other components
+(removing keeps the row); destroyed entities are not reported. See [Change tracking](guide/change-tracking.md).
 
 ## 16. A list per entity: dynamic buffers
 
@@ -411,9 +418,22 @@ foreach (var shot in world.Index<OwnedBy, Entity>().Find(archer))
 
 See [Indexes and relations](guide/indexes-and-relations.md).
 
-## 18. Batches, snapshots, timings
+## 18. Prefabs, waves, snapshots, timings
+
+A kind of entity spawned again and again is a `Prefab`: a recipe of component values that belongs to no world, so no
+query sees it. Build it once and instantiate it, one entity or a whole wave at a time:
 
 ```csharp
+private static readonly Prefab Goblin = new Prefab().Set(new Position()).Set(new Velocity(1, 0)).Set(new Health(30));
+```
+
+```csharp
+var goblin = world.Instantiate(Goblin);              // a copy of every value
+goblin.Position = new Position(10, 20);              // then only what differs
+var wave = new Entity[500];
+world.Instantiate(Goblin, wave);                     // a wave: one pass through the structural gate
+var twin = goblin.Clone();                           // a copy of a living entity, as it is now
+
 var units = new Entity[10_000];
 world.CreateEntities(units, new Position(), new Velocity(1, 0), new Health(100));   // one table growth
 
@@ -423,7 +443,7 @@ world.Restore(save);            // and roll it back: handles from before stay va
 ```
 
 With `WorldOptions { MeasureSystems = true }`, every system records its runs and times in `system.Stats`. See
-[Snapshots](guide/snapshots.md).
+[Prefabs and cloning](guide/prefabs.md) and [Snapshots](guide/snapshots.md).
 
 The [battle server example](example.md) puts all of it together in one battle server, which is also a
 benchmark and a test of this repository.
@@ -432,7 +452,7 @@ benchmark and a test of this repository.
 
 - [ECS principles](ecs-principles.md): design features as data plus one-job systems.
 - [Guide](README.md#guide): one page per concept, including [change tracking](guide/change-tracking.md) (systems that
-  visit only what changed), [dynamic buffers](guide/dynamic-buffers.md) (a list per entity) and
+  visit only what changed or was removed), [prefabs and cloning](guide/prefabs.md), [dynamic buffers](guide/dynamic-buffers.md) (a list per entity) and
   [indexes and relations](guide/indexes-and-relations.md) (find entities by value).
 - [Performance guide](performance.md): which API to use when.
 - [API reference](api.md): every public API and its complexity.

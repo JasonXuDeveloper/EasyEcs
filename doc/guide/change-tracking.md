@@ -62,8 +62,11 @@ ulong mark = world.ChangeTick;
 // ... writes ...
 var changed = QueryFilter.Create().Changed<Health>(mark);   // rows written at or after mark
 int count = world.Count<Health>(changed);
-foreach (var item in world.Query<Health>(changed)) { /* ... */ }
+foreach (var item in world.Query<Health>(changed)) { /* ... */ }   // items hand out refs: rows count as written
 ```
+
+A reader that must not mark what it reads (a save, a send) uses a struct job with `Writes => 0`
+([FAQ](../faq.md#why-is-there-no-serialization)) or `entity.Read<T>()`.
 
 Writes between two updates share one tick, so a mark taken in the middle of them also selects the writes made before
 it since the last update: take the mark right after an update (or a group's update), and update again before the next

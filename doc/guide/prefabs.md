@@ -77,9 +77,10 @@ nobody changes it meanwhile.
 
 ### Why a prefab is not an entity
 
-Some ECS libraries keep prefabs as entities of the world, tagged so that queries skip them (Unity DOTS, Flecs), or as
-an entity to clone (Friflo). Then every query of the world must exclude the prefabs, or a system ends up moving,
-damaging or replicating a template. A `Prefab` in EasyEcs is data, not an entity: it lives outside every world, no
+Some ECS libraries keep prefabs as entities of the world: Unity DOTS and Flecs tag them, and every query has to
+exclude that tag (they add the exclusion to every query by default); Friflo clones an ordinary entity of the store,
+which its queries see like any other unless it is disabled. Either way the templates live among the entities that systems move, damage and
+replicate. A `Prefab` in EasyEcs is data, not an entity: it lives outside every world, no
 query can see it, systems need no filter for it, and one prefab can serve several worlds.
 
 ## Cloning a living entity

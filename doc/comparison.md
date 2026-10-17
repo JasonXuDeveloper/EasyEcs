@@ -13,6 +13,7 @@ checks that every library computes the same result.
 - [The same server tick](#the-same-server-tick)
 - [Operations](#operations)
 - [Change tracking](#change-tracking)
+- [Removal detection](#removal-detection)
 - [Indexes and relations](#indexes-and-relations)
 - [Their features in EasyEcs](#their-features-in-easyecs)
 - [Which one to pick](#which-one-to-pick)
@@ -29,13 +30,16 @@ checks that every library computes the same result.
 | Systems and scheduling | ✅ `EcsSystem`, `Priority`, groups, intervals | ✅ `SystemRoot`, `SystemGroup`, `QuerySystem` | ❌ (Arch.Extended) | ✅ `ISystem<T>`, `SequentialSystem`, `AEntitySetSystem` |
 | Source-generated systems | ✅ `[ForEach]` → inlined struct jobs | ❌ | ❌ in core (Arch.Extended) | ❌ |
 | Generated named API per component | ✅ `e.Position`, `HasX`, `SetX(…)`, `IsDead`, `world.Battle`, `world.ZoneIndex` (like Entitas) | ❌ | ❌ | ❌ |
-| Compile-time analyzer | ✅ EECS001-EECS015 | ❌ | ❌ | ❌ |
+| Compile-time analyzer | ✅ EECS001-EECS016 | ❌ | ❌ | ❌ |
 | Chunk / span iteration | ✅ batch `[ForEach]` methods, `ForEachBatch` | ✅ chunks | ✅ chunks | – |
 | Struct query jobs | ✅ `IForEach`, `IForEachEntity`, `IForEachBatch` | ✅ | ✅ `IForEach`, inline queries | – |
-| Bulk create and destroy | ✅ `CreateEntities`, `DestroyEntities(filter)` | ✅ | ✅ | – |
+| Bulk create and destroy | ✅ `CreateEntities`, `DestroyEntities(filter)`, `Instantiate(prefab, span)` | ✅ | ✅ | – |
+| Prefabs (templates to spawn from) | ✅ `Prefab`: data outside every world, `world.Instantiate` | ⚠️ an ordinary entity of the store, copied with `CloneEntity` | ❌ | ⚠️ an entity of some world, copied with `entity.CopyTo(world)` |
+| Clone a living entity | ✅ `entity.Clone()` | ✅ `entity.CloneEntity()`, `CopyEntity(target)` (also across stores) | ❌ | ✅ `entity.CopyTo(world)` (the same or another world) |
 | Parallel systems | ✅ non-conflicting systems of one priority, access generated | ❌ | ❌ | ✅ `ParallelSystem<T>` (you keep them independent) |
 | Parallel query | ✅ `[ForEach(Parallel = true)]`, analyzer-checked | ✅ `RunParallel`, `ParallelJobRunner` | ✅ `ParallelQuery`, `JobScheduler` | ✅ `DefaultParallelRunner` |
 | Change tracking (rows written since a tick) | ✅ `ITrackChanges`, `[Changed<T>]`, every `ref` write | ❌ (component add / remove events only) | ❌ (`OnComponentSet` events) | ✅ `WhenChanged<T>()` after `NotifyChanged<T>()` |
+| Removal detection (entities that lost a component since a tick) | ✅ `[Removed<T>]`, `QueryFilter.Removed<T>(since)` | ⚠️ `OnComponentRemoved` events (one callback per removal) | ⚠️ `SubscribeComponentRemoved<T>` events, or a marker tag added next to each removal | ✅ `WhenRemoved<T>()` sets, completed by hand |
 | Value index | ✅ `IIndexed<TKey>`, follows every `Set` (ref writes rejected at build time) | ✅ `IIndexedComponent<TKey>`, also range queries | ❌ | ✅ `EntityMap` / `EntityMultiMap` |
 | Relations with reverse lookup | ✅ an `Entity` key | ✅ `ILinkComponent`, `IRelation<TKey>`, hierarchy | ❌ | ❌ |
 | Per-system timing | ✅ `MeasureSystems`, `system.Stats` | ✅ system performance monitor | ❌ | – |
@@ -108,6 +112,7 @@ the entity to the job (see `Entity` below).
 | Iterate with a singleton | 210 μs | 225 μs | EasyEcs 1.07x faster |
 | Toggle a status component (remove + add) | 548 μs | 980 μs | EasyEcs 1.79x faster |
 | Create and destroy | 181 μs | 202 μs | EasyEcs 1.12x faster |
+| Spawn from a prefab and destroy (5,000 NPCs, 6 components): `Instantiate(prefab, span)` / `CloneEntity` | TBD | TBD | TBD |
 
 All rows allocate 0 B. Toggling is where tables with presence bits pay off: EasyEcs flips a bit and the entity stays
 in its row, Friflo moves the entity to another archetype and back. A per-entity job receives a version-checked handle built
@@ -133,6 +138,26 @@ health into a replica. Each library runs it its own way: the built-in feature wh
 `[Changed<T>]` is the fastest at both rates and needs no code at the write site: a write through `ref` is the
 change. A dirty tag is cheap when few entities change but moves each written entity between archetypes twice, so it
 falls behind a plain scan at 1,000 writes; a scan costs the whole table every tick.
+
+## Removal detection
+
+`RemovalComparison`: 100,000 entities with a buff; per tick 10 or 1,000 buffs expire (removed through handles) and
+the buffs that expired the tick before come back, then every entity that lost its buff since the last tick is
+visited once (the removal is sent: a counter on the entity). Each library runs it its own way: EasyEcs
+`[Removed<T>]` (a removal keeps the row and stamps its change tick), DefaultEcs a `WhenRemoved<T>()` set completed
+after each tick, Friflo its `OnComponentRemoved` event collecting the entities, Arch a `Lost` tag added next to each
+removal and removed after the visit. Setup checks that every removal is sent exactly once.
+
+| Library, approach | 10 removed | 1,000 removed | Allocated |
+|---|---:|---:|---:|
+| **EasyEcs `[Removed<T>]`** | TBD | TBD | TBD |
+| DefaultEcs `WhenRemoved<T>()` | TBD | TBD | TBD |
+| Friflo `OnComponentRemoved` event | TBD | TBD | TBD |
+| Arch, marker tag | TBD | TBD | TBD |
+
+`[Removed<T>]` needs no code at the removal site and no subscription: the removal is data that the next pass
+selects, skipping unwritten tables, blocks and words like `[Changed<T>]`. Destroyed entities have no row and are not
+reported.
 
 ## Indexes and relations
 
@@ -163,16 +188,18 @@ command buffers on purpose); a few are not offered.
 | Thread-safe command buffer | Friflo | a queue you own, drained by a system on the world's thread ([threading](guide/threading.md)) | one world per thread in the usage code |
 | Component added / removed / set events | Friflo, Arch, DefaultEcs | state changes are data: the change is a component that the next system queries | `DeathSystem` adds `Dead`, `RespawnSystem` queries `With<Dead>`; neither knows the other |
 | Reactive sets (`WhenAdded`, `WhenChanged`) and `NotifyChanged` | DefaultEcs | `[Changed<T>]` and `QueryFilter.Changed<T>(since)`; a `ref` write is the change, nothing to notify | `ReplicationSystem`, `Unsaved` |
+| `WhenRemoved` sets, component removed events | DefaultEcs, Friflo, Arch | `[Removed<T>]` and `QueryFilter.Removed<T>(since)`: the entities that lost a tracked component, visited by the next pass | `ReplicationSystem.SendFireOut` |
+| Prefab entities, cloning | Friflo, DefaultEcs | `Prefab` (data outside every world) and `world.Instantiate`; `entity.Clone()` for a living entity | `Grunt` / `Brute` (`Instantiate`), `Mirror` (`Clone`) |
 | Publish / subscribe messages | DefaultEcs | data: a singleton or components that systems read | `Battle` counters |
 | Tags | Friflo | empty components; removing one flips a bit, the entity keeps its row | `Player`, `Npc`, `Dead`, `Frozen` |
 | Unique entity / world-level component | Friflo, DefaultEcs | singletons, as `[ForEach]` parameters or a `SingletonRef<T>` | `Battle`, `Waypoints`, the host's `SingletonRef<Battle>` |
 | Enable / disable an entity or component | Friflo, DefaultEcs | add or remove a tag (`Without<Frozen>` skips it); `system.Enabled` for systems | `Frozen`, a failing system switched off |
 | Systems, groups, ordering | Friflo, DefaultEcs, Arch.Extended | `EcsSystem`, `Priority`, `ISystemGroup`, `UpdateInterval`, `OnCreate` / `OnDestroy` | every system; `Replication`; `SteeringSystem.OnCreate` |
 | Struct query jobs (`IForEach`, inline queries) | Arch, Friflo | `IForEach`, `IForEachEntity`, `IForEachBatch` (`[ForEach]` generates them) | `Census` |
-| Chunk iteration | Arch, Friflo | batch methods (`Span<T>` per run of rows) | `MovementSystem`, `ManaSystem`, `SumHealth` |
+| Chunk iteration | Arch, Friflo | batch methods (`Span<T>` per run of rows) | `MovementSystem`, `SumHealth` |
 | Parallel query | Friflo, Arch, DefaultEcs | `[ForEach(Parallel = true)]`, `ForEachParallel`, `ForEachEntityParallel` | `SteeringSystem`, `NewRound` |
 | Parallel systems | DefaultEcs | `WorldOptions.ParallelSystems`: systems of one priority whose generated access does not conflict | `MovementSystem` and `ManaSystem` |
-| Bulk create and destroy | Friflo, Arch | `CreateEntities`, `DestroyEntities(filter)` | the players in the constructor, the projectiles in `NewRound` |
+| Bulk create and destroy | Friflo, Arch | `CreateEntities`, `Instantiate(prefab, span)`, `DestroyEntities(filter)` | the players and NPCs in the constructor, the projectiles in `NewRound` |
 | Indexed components | Friflo, DefaultEcs | `IIndexed<TKey>`: `Find`, `TryFind`, `Count` (exact keys; no range queries) | `Zone`: `PlayersIn`, `Despawn` |
 | Links and relations | Friflo | `IIndexed<Entity>`: the reverse lookup comes from the index | `OwnedBy`: a respawn recalls its projectiles |
 | Parent / child hierarchy | Friflo | a relation to the parent (`Parent : IIndexed<Entity>`, children by `Find`); no built-in transform propagation | `OwnedBy` is such a link |
@@ -186,7 +213,7 @@ command buffers on purpose); a few are not offered.
 
 | Pick | When |
 |---|---|
-| **EasyEcs** | A .NET 10 server or simulation where state flips constantly and you want changes applied where they are decided, systems generated and checked at compile time, change tracking, indexes, relations and snapshots built in, and 0 B per tick. |
+| **EasyEcs** | A .NET 10 server or simulation where state flips constantly and you want changes applied where they are decided, systems generated and checked at compile time, change and removal tracking, prefabs, indexes, relations and snapshots built in, and 0 B per tick. |
 | **Friflo.Engine.ECS** | You need Unity or older runtimes, events, hierarchies or JSON serialization, and accept command buffers for changes during iteration. |
 | **Arch** | You need Unity or older runtimes and a small core with chunk-based storage, adding systems and generators from Arch.Extended. |
 | **DefaultEcs** | You need netstandard support down to 1.1, reactive sets (`WhenAdded`, `WhenChanged`) and built-in serializers, and the world is small enough that its per-tick allocations and slower iteration do not matter. |

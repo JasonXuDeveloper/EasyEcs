@@ -13,12 +13,16 @@ from another ECS? [Their features in EasyEcs](comparison.md#their-features-in-ea
 | Feature | Where |
 |---|---|
 | Components, tags, singletons | `Position`, `Health`, `Player`, `Dead`; `Battle`, `Waypoints` |
+| Generated members | `players[i].Position = …`, `SetZone`, `SetFrozen`, `RemoveBurning`, `SetDead`, `IsDead`, `TryGetMana`, `World.Battle`, `ZoneIndex`, `OwnedByIndex` |
 | `[ForEach]` systems, filters (`With`, `Without`, `WithAny`) | every system; `AfflictionSystem` counts burning **or** frozen units with `World.Count` (no loop) |
 | `[ForEach(Parallel = true)]` | `SteeringSystem`: NPC steering on every core |
 | Parallel systems (`WorldOptions.ParallelSystems`) | `MovementSystem` and `ManaSystem`: same priority, disjoint data, run at once |
 | Batch methods (`Span<T>`), SIMD | `MovementSystem`: whole runs of rows as `Vector<float>`; `Census` sums health with a vectorized `ForEachBatch` job |
-| Immediate structural changes | statuses added (`Add`, `GetOrAdd`) and removed mid-pass, deaths, respawns (`Set` of two components), projectiles spawned and destroyed |
-| Change tracking (`ITrackChanges`, `[Changed<T>]`, `ChangedSince`) | `ReplicationSystem` sends only the healths written since its last run; `Unsaved` counts players written since the save |
+| Immediate structural changes | statuses added (`GetOrAdd`, `SetFrozen`) and removed mid-pass (`RemoveBurning`, `RemoveFrozen`), deaths (`SetDead`), respawns (`Set` of two components, `Remove` of three), projectiles spawned and destroyed |
+| Prefabs (`Prefab`, `Instantiate`) | NPC kinds `Grunt` and `Brute`: recipes no query sees, instantiated in bulk by the constructor (`Instantiate(prefab, span)`) and one by one by `SpawnNpc` when an NPC respawns |
+| Cloning (`Clone`) | `Mirror` copies a living unit as it is now (health, statuses, bag, zone); the indexes and the next send learn about the copy |
+| Change tracking (`ITrackChanges`, `[Changed<T>]`, `Since`) | `ReplicationSystem` sends only the healths written since its last run (`Send`) and fires lit or burning (`SendFire`); `Unsaved` counts players written since the save |
+| Removal detection (`[Removed<T>]`) | `ReplicationSystem.SendFireOut` tells clients that a fire went out: the entities that lost `Burning` since the last send |
 | Lists per entity (`DynamicBuffer<T>`, `[Changed<DynamicBuffer<T>>]`) | every player's bag of `Loot`: filled in `Despawn`, emptied in `Respawn`, sent by `ReplicationSystem.SendBag` only when it changed; `LootValue` reads it (`foreach`), `Give` moves an item between two bags |
 | Value index (`Find`, `TryFind`, `Count`) | `Zone : IIndexed<int>`: players per zone; `Despawn` hunts a player of a zone |
 | Relation | `OwnedBy : IIndexed<Entity>`: a respawning player recalls its projectiles |
@@ -27,7 +31,7 @@ from another ECS? [Their features in EasyEcs](comparison.md#their-features-in-ea
 | Struct jobs (`ForEach`, `ForEachEntity`, `ForEachBatch`, `ForEachParallel`, `ForEachEntityParallel`) | `Census` (read-only: `Writes => 0`, `INoStructuralChanges`); `NewRound` heals everyone and scatters the NPCs, on every core |
 | Ad-hoc queries (`Query`, `Count`, `Any`, `TryGet`) | `NearestPlayer`, `Census`, `AnyoneBurning`, `AnyoneAfflicted` (`QueryFilter.WithAny`), `ShotsLeft` with `static readonly` filters |
 | Entity handles (`TryGetEntity`, `IsAlive`, `Has`, `Read`, `TryGetRef`) | `Hit` turns a client's id back into the living unit and takes its `Health` by `ref` only if it has one (`TryGetRef`); `ShotsLeft` of a stale handle is 0; `LootValue` reads a bag without a write; `Give` checks both bags with reads and writes only when an item moves |
-| Bulk operations | `CreateEntities` for the players; `DestroyEntities` clears the projectiles of a round |
+| Bulk operations | `CreateEntities` for the players, `Instantiate(prefab, span)` for the NPCs; `DestroyEntities` clears the projectiles of a round |
 | Snapshots | `Save` / `Load` (`Capture` / `Restore`) |
 | Diagnostics | `MeasureSystems` and `Slowest`; `SystemError` switches a failing system off |
 | Handles that stay valid | `SingletonRef<Battle>` in the host |

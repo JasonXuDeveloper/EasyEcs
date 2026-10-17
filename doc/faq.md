@@ -18,6 +18,7 @@ and writes, so it could not run systems in parallel safely. Everything an event 
 |---|---|
 | An entity died, others should react | add a `Dead` tag; systems that care filter `[With<Dead>]` |
 | A component was changed | mark it `ITrackChanges`; the consumer takes `[Changed<T>]` |
+| A component was removed (a buff expired) | mark it `ITrackChanges`; the consumer takes `[Removed<T>]` |
 | A one-off message (a hit landed, a player input) | an entity holding the message, destroyed after its readers ran, or a queue in a singleton |
 | Input from another thread (network, IO) | a mailbox of yours that one system drains on the world's thread ([threading](guide/threading.md#input-from-other-threads)) |
 
@@ -43,7 +44,7 @@ public sealed class ClearHitsSystem : EcsSystem
 
 What this buys:
 - The order of effects is the order of `Priority`, visible in one place.
-- The generator knows what every system reads and writes, so `ParallelSystems` batches them safely.
+- The generator knows what every system reads and writes, so `ParallelSystems` puts them in stages safely.
 - Tests and snapshots see the "events", because they are data.
 
 ## Why is there no serialization?
@@ -57,17 +58,24 @@ Two different needs hide behind the word:
   MessagePack, System.Text.Json, ...) writes them as they are. The save format, its versioning and which components to
   keep belong to your game; a built-in format would decide them for you.
 
-To save only what changed, ask for the rows written since the last save:
+To save only what changed, ask for the rows written since the last save. Read them with a job that declares no
+writes: a `Query` item hands out refs, so its rows would count as written again and be saved next time too.
 
 ```csharp
 private static readonly QueryFilter Saved = QueryFilter.Create().Changed<Health>(0);   // the tick is set per call
+
+private struct SaveHealth : IForEachEntity<Health>, INoStructuralChanges
+{
+    public static int Writes => 0;                                   // reading is not a change
+    public void Execute(Entity entity, ref Health hp) { /* write entity and hp with your serializer */ }
+}
+
 ulong savedAt = world.ChangeTick;   // remember it when you save
 // ... ticks ...
-int dirty = world.Count<Health>(Saved.ChangedSince(savedAt));
-foreach (var item in world.Query<Health>(Saved.ChangedSince(savedAt)))
-{
-    // write item.Entity and item.Component1 with your serializer
-}
+int dirty = world.Count<Health>(Saved.Since(savedAt));
+var save = new SaveHealth();
+world.ForEachEntity<Health, SaveHealth>(ref save, Saved.Since(savedAt));
+savedAt = world.ChangeTick;
 ```
 
 ## Is it thread-safe?
@@ -79,7 +87,7 @@ The rules are explicit, and the absence of callbacks is what keeps them simple:
 - **Structural changes are the owner thread's too.** Adding or removing components and creating or destroying
   entities check a plain owner flag: one made while another runs, or while the world runs work on several threads,
   throws instead of tearing the tables. The analyzer reports the off-thread changes it can see (EECS013, EECS014).
-- **The parallelism the framework adds is checked.** `ParallelSystems` batches only systems whose generated access does
+- **The parallelism the framework adds is checked.** `ParallelSystems` runs together only systems whose generated access does
   not conflict; the analyzer makes sure a `[ForEach(Parallel = true)]` method changes no structure and reads singletons
   only.
 

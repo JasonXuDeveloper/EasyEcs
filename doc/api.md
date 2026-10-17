@@ -49,7 +49,7 @@ Notation:
 | `new World(options)` | O(`InitialEntityCapacity`) | `options` may be null (defaults); allocates the entity array and the empty table |
 | `world.CreateEntity()` | O(1) amortized | reuses recycled ids |
 | `world.CreateEntity(in T1 … in Tn)` | O(n) amortized | placed directly in its final table |
-| `world.CreateEntities(Span<Entity> entities, in T1 … in Tn)` | O(count × n) amortized | one gate pass and at most one table growth for the batch; writes the handles |
+| `world.CreateEntities(Span<Entity> entities, in T1 … in Tn)` | O(count × n) amortized | one gate pass and at most one table growth for the wave; writes the handles |
 | `entity.Destroy()` | O(c) | the table's last row fills the hole (a tombstone during a pass); recycles the id; stale handles are ignored; once a world has an index, each indexed component unlinks the entity (O(1)) |
 | `world.DestroyEntities<T1..Tn>(filter)` → `int` | O(M + S) | destroys every match in one gate pass and returns how many; safe during a pass |
 | `entity.IsAlive` | O(1) | |

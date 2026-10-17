@@ -187,7 +187,11 @@ is still cheaper than a structural change:
 - a countdown field (`Burning.Ticks`) instead of re-adding a component every tick;
 - change detection by change ticks: mark the component `ITrackChanges` and give the consumer `[Changed<T>]`, instead
   of adding and removing a `Changed` tag or scanning every row ([change tracking](guide/change-tracking.md)). A
-  write is any `ref` access, so compare values when a write may leave the value as it was.
+  write is any `ref` access, so compare values when a write may leave the value as it was;
+- removal detection the same way: `[Removed<T>]` visits the entities that lost a tracked `T`, instead of a `Lost`
+  tag added next to every removal ([removal detection](guide/change-tracking.md#removal-detection));
+- kinds of entities as [prefabs](guide/prefabs.md): data that belongs to no world, instantiated where needed, instead
+  of template entities that every query must exclude.
 
 ```csharp
 public record struct Facing(float Angle) : IComponent, ITrackChanges;  // tracked: rows record their last write
