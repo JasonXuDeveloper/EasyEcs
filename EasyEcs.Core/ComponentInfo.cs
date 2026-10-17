@@ -54,6 +54,14 @@ internal abstract class ComponentInfo
 
     private static volatile bool _anyTracked;
 
+    /// <summary>Whether the type is an <see cref="ICleanupComponent"/> (kept when its entity is destroyed).</summary>
+    public readonly bool Cleanup;
+
+    protected ComponentInfo(int size, bool cleanup) : this(size)
+    {
+        Cleanup = cleanup;
+    }
+
     /// <summary>Whether the type holds managed references (cleared when its row dies, copied by type).</summary>
     public bool Managed => Size < 0;
 
@@ -101,7 +109,8 @@ internal abstract class ComponentInfo
     public abstract void CopyRows(Array source, Array target, int count);
 }
 
-internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsReferenceOrContainsReferences<T>() ? -1 : Unsafe.SizeOf<T>())
+internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsReferenceOrContainsReferences<T>() ? -1 : Unsafe.SizeOf<T>(),
+    typeof(ICleanupComponent).IsAssignableFrom(typeof(T)))
     where T : struct, IComponent
 {
     // Unmanaged columns are pinned byte arrays (pinned object heap, never moved by the GC) with one cache line of

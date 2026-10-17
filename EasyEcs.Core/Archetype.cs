@@ -92,6 +92,9 @@ internal sealed class Archetype
     /// <summary>Whether the table has a <see cref="Disabled{T}"/> column (rows may keep a disabled component).</summary>
     public readonly bool HasDisabled;
 
+    /// <summary>Whether the table has an <see cref="ICleanupComponent"/> column (destroying a row may keep it).</summary>
+    public readonly bool HasCleanup;
+
     /// <summary>Columns with <see cref="Present"/> bits (indices into <see cref="Columns"/>), copy-on-write.</summary>
     private short[] _bitColumns = [];
 
@@ -151,6 +154,7 @@ internal sealed class Archetype
 
             _tracked |= info.Owner >= 0;
             HasDisabled |= info.DisabledOf >= 0;
+            HasCleanup |= info.Cleanup;
             _columnOf[Components[i]] = (short)i;
             ByBit[Components[i]].Set(Columns[i], info.Managed);
         }
@@ -208,6 +212,15 @@ internal sealed class Archetype
     /// <summary>Whether row <paramref name="slot"/> has the component of column <paramref name="column"/>.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Has(int column, int slot) => Bits(column) is not { } bits || (Word(bits, slot) & (1UL << slot)) != 0; // shift is mod 64
+
+    /// <summary>Whether row <paramref name="slot"/> has a cleanup component (<see cref="ICleanupComponent"/>).</summary>
+    public bool HoldsCleanup(int slot)
+    {
+        for (int c = 0; c < _infos.Length; c++)
+            if (_infos[c].Cleanup && Has(c, slot))
+                return true;
+        return false;
+    }
 
     /// <summary>
     /// Give row <paramref name="slot"/> the component of column <paramref name="column"/> back (its column exists).

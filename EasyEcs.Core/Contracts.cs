@@ -16,6 +16,14 @@ public interface IComponent;
 /// </summary>
 public interface ITrackChanges;
 
+/// <summary>
+/// Marks a component that outlives the destruction of its entity: destroying an entity holding one removes its other
+/// components and adds the <see cref="Destroyed"/> tag instead of freeing it, so a system can release what the
+/// component stands for (a socket, a reservation, a slot in another service) and then remove it. Removing the entity's
+/// last cleanup component frees it. Use it for resources outside the world that must be released exactly once.
+/// </summary>
+public interface ICleanupComponent : IComponent;
+
 /// <summary>Marks a struct as a world singleton: exactly one value per world (clock, configuration, shared state).</summary>
 public interface ISingletonComponent;
 

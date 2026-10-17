@@ -161,7 +161,8 @@ public sealed partial class World : IDisposable
 
     /// <summary>
     /// Destroy <paramref name="entity"/> (a handle of this world; <c>Entity.Destroy</c> is the public call); a stale
-    /// handle is ignored. O(components). Owner thread only (see doc/guide/threading.md).
+    /// handle is ignored. An entity holding <see cref="ICleanupComponent"/>s is retired instead (see <see cref="Retire"/>).
+    /// O(components). Owner thread only (see doc/guide/threading.md).
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
     internal void DestroyEntity(Entity entity)
@@ -171,9 +172,44 @@ public sealed partial class World : IDisposable
             int id = entity.Index;
             ref var meta = ref MetaRef(id); // ids of this world's handles are always < Meta.Length
             if (meta.Archetype == null || meta.Version != entity.Version) return;
-            Free(ref meta, id);
+            if (meta.Archetype.HasCleanup) Retire(ref meta, id);
+            else Free(ref meta, id);
         }
     }
+
+    /// <summary>
+    /// Destroy an entity whose table has cleanup columns: when the row holds a cleanup component, remove its other
+    /// components (as Remove does) and tag it <see cref="Destroyed"/>, keeping it alive; else free it. Returns false
+    /// when the entity was retired already. Inside the structural gate. Cold: tables with cleanup columns only.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private bool Retire(ref EntityMeta meta, int id)
+    {
+        if (!meta.Archetype.HoldsCleanup(meta.Slot))
+        {
+            Free(ref meta, id);
+            return true;
+        }
+
+        bool retired = meta.Archetype.ColumnIndex(DestroyedBit) is var tag and >= 0 && meta.Archetype.Has(tag, meta.Slot);
+        AddBit(ref meta, id, DestroyedBit);
+        var archetype = meta.Archetype;
+        int slot = meta.Slot;
+        bool removed = false;
+        for (int c = 0; c < archetype.Components.Length; c++)
+        {
+            // Change-tick columns follow their component; a Disabled<T> tag goes with the removal of its component.
+            var info = archetype.Info(c);
+            if (info.Cleanup || info.Owner >= 0 || info.DisabledOf >= 0 || archetype.Components[c] == DestroyedBit) continue;
+            removed |= TakeBit(archetype, slot, archetype.Components[c]);
+        }
+
+        if (removed) StorageVersion++; // passes re-read presence bits
+        return !retired;
+    }
+
+    /// <summary>Bit of the <see cref="Destroyed"/> tag.</summary>
+    private static readonly ushort DestroyedBit = ComponentType<Destroyed>.Bit;
 
     /// <summary>Destroy alive entity <paramref name="id"/> (<paramref name="meta"/> is its record). Inside the structural gate.</summary>
     private void Free(ref EntityMeta meta, int id)
@@ -203,7 +239,8 @@ public sealed partial class World : IDisposable
                 var rows = new RowFilter(match.Filters[a], since);
                 int mode = archetype.AliveCount == 0 ? RowFilter.None : rows.Mode(archetype);
                 if (mode == RowFilter.None) continue;
-                if (mode == RowFilter.All && archetype.Count == archetype.AliveCount && Volatile.Read(ref Passes) == 0)
+                if (mode == RowFilter.All && archetype.Count == archetype.AliveCount && !archetype.HasCleanup &&
+                    Volatile.Read(ref Passes) == 0)
                 {
                     destroyed += FreeTable(archetype); // every row goes: no row moves, one clear
                     continue;
@@ -220,7 +257,8 @@ public sealed partial class World : IDisposable
                         int slot = (w << 6) + 63 - BitOperations.LeadingZeroCount(bits);
                         int id = archetype.Slots[slot].Index;
                         if (id < 0) continue;
-                        Free(ref MetaRef(id), id);
+                        if (!archetype.HasCleanup) Free(ref MetaRef(id), id);
+                        else if (!Retire(ref MetaRef(id), id)) continue;
                         destroyed++;
                     }
                 }

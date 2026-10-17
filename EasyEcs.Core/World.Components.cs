@@ -185,7 +185,9 @@ public sealed partial class World
     /// </summary>
     internal void RemoveBit(ref EntityMeta meta, ushort bit)
     {
-        if (TakeBit(meta.Archetype, meta.Slot, bit)) StorageVersion++; // passes re-read presence bits
+        if (!TakeBit(meta.Archetype, meta.Slot, bit)) return;
+        StorageVersion++; // passes re-read presence bits
+        if (meta.Archetype.HasCleanup) Released(ref meta);
     }
 
     /// <summary>
@@ -198,7 +200,22 @@ public sealed partial class World
         int slot = meta.Slot;
         bool removed = false;
         for (int i = 0; i < bits.Length; i++) removed |= TakeBit(archetype, slot, bits[i]);
-        if (removed) StorageVersion++; // passes re-read presence bits
+        if (!removed) return;
+        StorageVersion++; // passes re-read presence bits
+        if (archetype.HasCleanup) Released(ref meta);
+    }
+
+    /// <summary>
+    /// After a removal from a table with cleanup columns: a <see cref="Destroyed"/> entity whose last cleanup component
+    /// went is freed. Cold: tables with cleanup columns only.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void Released(ref EntityMeta meta)
+    {
+        var archetype = meta.Archetype;
+        int slot = meta.Slot;
+        if (archetype.ColumnIndex(DestroyedBit) is var tag and >= 0 && archetype.Has(tag, slot) && !archetype.HoldsCleanup(slot))
+            Free(ref meta, archetype.Slots[slot].Index);
     }
 
     /// <summary>Clear the presence bit of component <paramref name="bit"/> in row <paramref name="slot"/>; false when the row lacks it.</summary>
