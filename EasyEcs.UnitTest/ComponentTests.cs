@@ -177,6 +177,15 @@ public class ComponentTests
         Assert.That(other.Get<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>().Value, Is.EqualTo(7));
         Assert.That(_world.Count<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>(), Is.EqualTo(1));
 
+        // Filters naming bits past 255: built at the call, they still meet one cache entry; extending one leaves it as it was.
+        var without = QueryFilter.Create().Without<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>();
+        var both = without.Without<Wide.Bit<Wide.D2, Wide.D9, Wide.D8>>();
+        Assert.That(_world.Count<Wide.Bit<Wide.D0, Wide.D0, Wide.D0>>(without), Is.EqualTo(1));
+        Assert.That(_world.Count<Wide.Bit<Wide.D0, Wide.D0, Wide.D0>>(both), Is.Zero);
+        Assert.That(_world.Count<Wide.Bit<Wide.D0, Wide.D0, Wide.D0>>(QueryFilter.Create().Without<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>()), Is.EqualTo(1));
+        Assert.That(_world.Count<Wide.Bit<Wide.D2, Wide.D9, Wide.D8>>(QueryFilter.Create().With<Wide.Bit<Wide.D0, Wide.D0, Wide.D0>>()), Is.EqualTo(1));
+        Assert.That(_world.Count<Wide.Bit<Wide.D0, Wide.D0, Wide.D0>>(QueryFilter.Create().WithAny<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>()), Is.Zero);
+
         // Queries on bits past 255 look the cache up without allocating their key.
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 100; i++) _ = _world.Count<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>();

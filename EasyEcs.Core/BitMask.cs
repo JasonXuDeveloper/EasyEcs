@@ -20,6 +20,14 @@ internal struct BitMask : IEquatable<BitMask>
     // Overflow for >256 components (allocated on demand)
     private Vector256<long>[] _overflow;
 
+    /// <summary>A mask of <paramref name="bits"/> and <paramref name="overflow"/> (shared, not copied: the caller's
+    /// storage must not change while the mask is used, as with <see cref="FilterOverflow"/>'s interned sets).</summary>
+    public BitMask(Vector256<long> bits, Vector256<long>[] overflow)
+    {
+        _bits = bits;
+        _overflow = overflow;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public void SetBit(int bitIndex)
     {
@@ -147,6 +155,9 @@ internal struct BitMask : IEquatable<BitMask>
 
     /// <summary>True when bits past 255 have storage.</summary>
     public readonly bool HasOverflow => _overflow != null;
+
+    /// <summary>The storage of bits past 255 (null: none).</summary>
+    public readonly Vector256<long>[] Overflow => _overflow;
 
     /// <summary>
     /// Copy that can take bits up to <paramref name="maxBit"/> without allocating: its overflow (only when needed) is

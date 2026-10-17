@@ -11,13 +11,12 @@ namespace EasyEcs;
 /// absent (<see cref="Without{T}"/>). Build once and keep it (e.g. in a static readonly field):
 /// <code>static readonly QueryFilter Alive = QueryFilter.Create().Without&lt;Dead&gt;();</code>
 /// </summary>
+[StructLayout(LayoutKind.Sequential)] // Add steps from _all to the other sets: they must stay adjacent, in this order
 public readonly struct QueryFilter
 {
-    internal readonly BitMask All;
-    internal readonly BitMask None;
-    internal readonly BitMask Any;
-    internal readonly BitMask Tracked;
-    internal readonly BitMask Removals;
+    // The five sets' first 256 bits, inline. No object reference: a filter is copied by plain moves (no write barrier,
+    // no zeroed frame), so building one at the call costs little more than holding one in a field.
+    private readonly Vector256<long> _all, _none, _any, _tracked, _removals;
 
     /// <summary>The change tick <see cref="Changed{T}"/> and <see cref="Removed{T}"/> rows must have reached.</summary>
     internal readonly ulong Tick;
@@ -25,32 +24,31 @@ public readonly struct QueryFilter
     /// <summary><see cref="InGroup{T}"/>: bit + 1 of the grouped component (0: no group), and the group.</summary>
     internal readonly int GroupBit, Group;
 
-    private QueryFilter(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed, ulong since,
-        int groupBit, int group)
-    {
-        All = all;
-        None = none;
-        Any = any;
-        Tracked = changed;
-        Removals = removed;
-        Tick = since;
-        GroupBit = groupBit;
-        Group = group;
-    }
+    /// <summary>The sets' bits past 255: an interned <see cref="FilterOverflow"/> id (0: none).</summary>
+    private readonly int _overflow;
+
+    internal BitMask All => new(_all, FilterOverflow.Of(_overflow, 0));
+    internal BitMask None => new(_none, FilterOverflow.Of(_overflow, 1));
+    internal BitMask Any => new(_any, FilterOverflow.Of(_overflow, 2));
+    internal BitMask Tracked => new(_tracked, FilterOverflow.Of(_overflow, 3));
+    internal BitMask Removals => new(_removals, FilterOverflow.Of(_overflow, 4));
+
+    /// <summary>Whether any set names a component bit past 255.</summary>
+    internal bool HasOverflow => _overflow != 0;
 
     public static QueryFilter Create() => default;
 
     /// <summary>Whether <paramref name="other"/> selects the same rows (its tick aside): one query key.</summary>
     internal bool SameQuery(in QueryFilter other) =>
-        All.Equals(in other.All) && None.Equals(in other.None) && Any.Equals(in other.Any) && Tracked.Equals(in other.Tracked)
-        && Removals.Equals(in other.Removals) && GroupBit == other.GroupBit && Group == other.Group;
+        _all.Equals(other._all) && _none.Equals(other._none) && _any.Equals(other._any) && _tracked.Equals(other._tracked)
+        && _removals.Equals(other._removals) && _overflow == other._overflow && GroupBit == other.GroupBit && Group == other.Group;
 
     /// <summary>Require <typeparamref name="T"/> to be present (not passed to the query callback).</summary>
     public QueryFilter With<T>() where T : struct, IComponent
     {
-        var all = All.Clone();
-        all.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in all, in None, in Any, in Tracked, in Removals, Tick, GroupBit, Group);
+        var filter = this;
+        Add(ref filter, 0, ComponentType<T>.Bit);
+        return filter;
     }
 
     /// <summary>
@@ -60,17 +58,19 @@ public readonly struct QueryFilter
     /// </summary>
     public QueryFilter InGroup<T>(int group) where T : struct, IComponent, IGroup
     {
-        var all = All.Clone();
-        all.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in all, in None, in Any, in Tracked, in Removals, Tick, ComponentType<T>.Bit + 1, group);
+        var filter = this;
+        Add(ref filter, 0, ComponentType<T>.Bit);
+        Unsafe.AsRef(in filter.GroupBit) = ComponentType<T>.Bit + 1;
+        Unsafe.AsRef(in filter.Group) = group;
+        return filter;
     }
 
     /// <summary>Require <typeparamref name="T"/> to be absent.</summary>
     public QueryFilter Without<T>() where T : struct, IComponent
     {
-        var none = None.Clone();
-        none.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in All, in none, in Any, in Tracked, in Removals, Tick, GroupBit, Group);
+        var filter = this;
+        Add(ref filter, 1, ComponentType<T>.Bit);
+        return filter;
     }
 
     /// <summary>
@@ -79,9 +79,9 @@ public readonly struct QueryFilter
     /// </summary>
     public QueryFilter WithAny<T>() where T : struct, IComponent
     {
-        var any = Any.Clone();
-        any.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in All, in None, in any, in Tracked, in Removals, Tick, GroupBit, Group);
+        var filter = this;
+        Add(ref filter, 2, ComponentType<T>.Bit);
+        return filter;
     }
 
     /// <summary>
@@ -94,11 +94,11 @@ public readonly struct QueryFilter
     public QueryFilter Changed<T>(ulong since) where T : struct, IComponent, ITrackChanges
     {
         CheckTick(since);
-        var all = All.Clone();
-        all.SetBit(ComponentType<T>.Bit);
-        var changed = Tracked.Clone();
-        changed.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in all, in None, in Any, in changed, in Removals, since, GroupBit, Group);
+        var filter = this;
+        Add(ref filter, 0, ComponentType<T>.Bit);
+        Add(ref filter, 3, ComponentType<T>.Bit);
+        Unsafe.AsRef(in filter.Tick) = since;
+        return filter;
     }
 
     /// <summary>
@@ -112,16 +112,39 @@ public readonly struct QueryFilter
     public QueryFilter Removed<T>(ulong since) where T : struct, IComponent, ITrackChanges
     {
         CheckTick(since);
-        var removed = Removals.Clone();
-        removed.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in All, in None, in Any, in Tracked, in removed, since, GroupBit, Group);
+        var filter = this;
+        Add(ref filter, 4, ComponentType<T>.Bit);
+        Unsafe.AsRef(in filter.Tick) = since;
+        return filter;
     }
 
     /// <summary>
     /// The same filter with its <see cref="Changed{T}"/> and <see cref="Removed{T}"/> filters moved to tick
     /// <paramref name="since"/>, without rebuilding it: a filter kept in a field, used again after each update.
     /// </summary>
-    public QueryFilter Since(ulong since) => new(in All, in None, in Any, in Tracked, in Removals, since, GroupBit, Group);
+    public QueryFilter Since(ulong since)
+    {
+        var filter = this;
+        Unsafe.AsRef(in filter.Tick) = since;
+        return filter;
+    }
+
+    /// <summary>
+    /// Sets <paramref name="bit"/> in set <paramref name="set"/> (0 All, 1 None, 2 Any, 3 Tracked, 4 Removals) of a
+    /// filter copy being built: its fields are readonly to users, not to the builder, so each builder call copies the
+    /// filter once. A bit past 255 interns the new overflow sets (cold: worlds with more than 256 component types).
+    /// </summary>
+    private static void Add(ref QueryFilter filter, int set, int bit)
+    {
+        if (bit < 256)
+        {
+            // A vector OR, not a store into one of its longs: the filter is then read whole, and a narrow store read back
+            // wide stalls store forwarding. The bit is a JIT-time constant, so the vector is one too.
+            ref var bits = ref Unsafe.AsRef(in Unsafe.Add(ref Unsafe.AsRef(in filter._all), set));
+            bits |= Vector256<long>.Zero.WithElement(bit >> 6, 1L << (bit & 63));
+        }
+        else Unsafe.AsRef(in filter._overflow) = FilterOverflow.With(filter._overflow, set, bit);
+    }
 
     private void CheckTick(ulong since)
     {
@@ -194,7 +217,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
     public static QueryKey ForLookup(ReadOnlySpan<ushort> bits, in QueryFilter filter)
     {
         // Common case: every bit fits the inline 256 bits, so a plain copy allocates nothing.
-        if (!filter.All.HasOverflow)
+        if (!filter.HasOverflow)
         {
             bool inline = true;
             for (int i = 0; i < bits.Length; i++) inline &= bits[i] < 256;
@@ -202,7 +225,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
             {
                 var all = filter.All;
                 for (int i = 0; i < bits.Length; i++) all.SetBit(bits[i]);
-                return new QueryKey(in all, in filter.None, in filter.Any, in filter.Tracked, in filter.Removals, filter.GroupBit, filter.Group);
+                return new QueryKey(in all, filter.None, filter.Any, filter.Tracked, filter.Removals, filter.GroupBit, filter.Group);
             }
         }
 
@@ -217,7 +240,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
         for (int i = 0; i < bits.Length; i++) maxBit = Math.Max(maxBit, bits[i]);
         var all = filter.All.CopyWithScratch(maxBit, ref _scratch);
         for (int i = 0; i < bits.Length; i++) all.SetBit(bits[i]);
-        return new QueryKey(in all, in filter.None, in filter.Any, in filter.Tracked, in filter.Removals, filter.GroupBit, filter.Group);
+        return new QueryKey(in all, filter.None, filter.Any, filter.Tracked, filter.Removals, filter.GroupBit, filter.Group);
     }
 
     /// <summary>A copy that owns its storage (cache entries).</summary>
