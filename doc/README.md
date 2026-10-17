@@ -29,7 +29,7 @@ One page per concept, in a sensible reading order:
 | Page | Covers |
 |---|---|
 | [Entities and components](guide/entities-and-components.md) | Handles, id recycling and versions, component operations, tags, generated members. |
-| [Prefabs and cloning](guide/prefabs.md) | `Prefab`, `world.Instantiate`, `entity.Clone()`: spawn kinds of entities defined once, copy a living entity. |
+| [Prefabs and cloning](guide/prefabs.md) | `Prefab` and its generated writers (`SetHealth(…)`), `world.Instantiate`, `entity.Clone()`: spawn kinds of entities defined once, copy a living entity. |
 | [Queries and filters](guide/queries.md) | `Query`, `ForEach` struct jobs, `Count`, `Any`, `QueryFilter`. |
 | [Systems, `[ForEach]` and groups](guide/systems.md) | Lifecycle, `Priority`, `UpdateInterval`, `[ForEach]` parameters and filters, system groups, errors. |
 | [Singletons](guide/singletons.md) | Per-world state, singleton parameters, `SingletonRef<T>`. |

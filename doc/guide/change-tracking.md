@@ -79,7 +79,7 @@ public static class Replication
 {
     private static readonly QueryFilter HealthChanged = QueryFilter.Create().Changed<Health>(0);   // the tick is set per call
 
-    public static int ChangedSince(World world, ulong mark) => world.Count<Health>(HealthChanged.Since(mark));
+    public static int CountChanged(World world, ulong mark) => world.Count<Health>(HealthChanged.Since(mark));
 }
 ```
 
@@ -128,8 +128,11 @@ Outside systems, `QueryFilter.Removed<T>(since)` does the same from a tick you r
 tick with its `Changed` filters (`Since(tick)` moves both):
 
 ```csharp
-private static readonly QueryFilter FireOut = QueryFilter.Create().Removed<Burning>(0);   // the tick is set per call
+// A field of your class: the tick is set per call.
+private static readonly QueryFilter FireOut = QueryFilter.Create().Removed<Burning>(0);
+```
 
+```csharp
 ulong mark = world.ChangeTick;
 world.Update();
 int extinguished = world.Count<Replica>(FireOut.Since(mark));

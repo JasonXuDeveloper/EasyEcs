@@ -109,7 +109,7 @@ unit.Destroy();
 ```
 
 The generator also gives every component named members: `unit.Position.X += 1`, `unit.HasVelocity`,
-`unit.SetHealth(50)`, `unit.SetDead()` / `unit.IsDead` for a tag, `world.Clock` for a singleton. Tracked and indexed
+`unit.SetHealth(50)`, `unit.SetDead()` / `unit.IsDead` for a tag, `world.Tally` for the singleton of step 8. Tracked and indexed
 components (steps 15 and 17) get a read-only property, so a read through it is never a write
 ([generated members](guide/entities-and-components.md#generated-members)).
 
@@ -424,7 +424,8 @@ A kind of entity spawned again and again is a `Prefab`: a recipe of component va
 query sees it. Build it once and instantiate it, one entity or a whole wave at a time:
 
 ```csharp
-private static readonly Prefab Goblin = new Prefab().Set(new Position()).Set(new Velocity(1, 0)).Set(new Health(30));
+// A field of your class: generated writers return the prefab, so a recipe is one chain.
+private static readonly Prefab Goblin = new Prefab().SetPosition(0, 0).SetVelocity(1, 0).SetHealth(30);
 ```
 
 ```csharp
@@ -435,7 +436,7 @@ world.Instantiate(Goblin, wave);                     // a wave: one pass through
 var twin = goblin.Clone();                           // a copy of a living entity, as it is now
 
 var units = new Entity[10_000];
-world.CreateEntities(units, new Position(), new Velocity(1, 0), new Health(100));   // one table growth
+world.CreateEntities(units, new Position(), new Velocity(1, 0), new Health(100));   // at most one table growth
 
 var save = world.Capture();     // copy the world in memory
 world.Update();

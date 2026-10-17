@@ -113,10 +113,11 @@ members), so the common calls read like fields and methods:
 | Declared | Generated | Same as |
 |---|---|---|
 | `record struct Position(float X, float Y) : IComponent` | `e.Position` (`ref`), `e.HasPosition`, `e.TryGetPosition(out p)`, `e.GetOrAddPosition()`, `e.SetPosition(x, y)`, `e.RemovePosition()` | `Get`, `Has`, `TryGet`, `GetOrAdd`, `Set(new Position(x, y))`, `Remove` |
-| a tracked or indexed component (`Armor : ITrackChanges`) | `e.Armor` is `ref readonly`; the rest as above | `Read`: reading it is never a write |
+| a tracked or indexed component (`Armor : ITrackChanges`) | `e.Armor` is `ref readonly`; the rest as above, except that an indexed component gets no `GetOrAddX` | `Read`: reading it is never a write |
 | a tag (`struct Dead : IComponent`) | `e.IsDead`, `e.SetDead()`, `e.RemoveDead()` | `Has`, `Set(new Dead())`, `Remove` |
 | an indexed component (`Zone : IIndexed<int>`) | `world.ZoneIndex` | `world.Index<Zone, int>()` |
 | a singleton (`Battle : ISingletonComponent`) | `world.Battle` (`ref`), `world.HasBattle`, `world.SetBattle(…)`, `world.RemoveBattle()` | `GetSingleton`, `HasSingleton`, `GetOrAddSingleton() = …`, `RemoveSingleton` |
+| any component, on a [prefab](prefabs.md#generated-members) | `prefab.Position` (`ref readonly`), `HasPosition`, `SetPosition(x, y)`, `RemovePosition()`; tags `IsDead`, `SetDead()`, `RemoveDead()`; the writers return the prefab | `Read`, `Has`, `Set`, `Remove` |
 
 ```csharp
 hero.Position.X += 1;                                      // ref: written in place
@@ -132,9 +133,9 @@ public constructor (record structs: the primary constructor), or takes every fie
 and only public, writable fields. Writes are methods, not property setters: C# rejects a setter on a handle that is
 not a variable, such as a `foreach` variable. Everything is an inlined call to the generic API, so generated and generic
 code cost the same; the generic API stays for generic code. The analyzer and the generator know the generated members:
-`SetX` / `RemoveX` count as structural changes, the others as reads. Generic components, components nested in types
-other code cannot see and names the receiver already has (`Entity.Id`, ...) get no member; the project needs C# 14
-(the .NET 10 default).
+`SetX`, `GetOrAddX` and `RemoveX` of an entity count as structural changes, the others as reads (a prefab's writers
+change no world). Generic components, components nested in types other code cannot see and names the receiver
+already has (`Entity.Id`, ...) get no member; the project needs C# 14 (the .NET 10 default).
 
 Components live in archetype tables, one row per entity. Removing a component keeps the entity in its table and only
 marks the component absent, so states that come and go never move data; adding back a component the table has a

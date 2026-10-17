@@ -11,7 +11,7 @@ Xeon VM at 2.1 GHz ([benchmarks](performance.md#benchmarks)).
 |---|---|---|
 | [Worlds and entities](#worlds-and-entities) | Isolated worlds of version-checked, recycled entity handles. | `new World(options)` in the host; `Entity` handles everywhere; `Hit` (`TryGetEntity`) |
 | [Components and tags](#components-and-tags) | Plain structs in archetype tables; empty structs are tags. | `Position`, `Health`, …; tags `Player`, `Npc`, `Dead` |
-| [Generated members](#generated-members) | `e.Position`, `e.SetZone(3)`, `e.IsDead`, `world.Battle`, `world.ZoneIndex` for every component. | `SetZone`, `SetFrozen`, `RemoveBurning`, `IsDead`, `World.Battle`, `ZoneIndex`, `OwnedByIndex` |
+| [Generated members](#generated-members) | `e.Position`, `e.SetZone(3)`, `e.IsDead`, `world.Battle`, `world.ZoneIndex`, `prefab.SetHealth(…)` for every component. | `SetZone`, `SetFrozen`, `RemoveBurning`, `IsDead`, `World.Battle`, `ZoneIndex`, `OwnedByIndex`; `SetHealth`, `SetNpc` on the NPC prefabs |
 | [Prefabs and cloning](#prefabs-and-cloning) | Kinds of entities defined once as data outside any world; copies of a living entity. | NPC kinds `Grunt` and `Brute` (`Instantiate`, in bulk and one by one); `Mirror` (`Clone`) |
 | [Immediate structural changes](#immediate-structural-changes) | Add, remove, create, destroy anywhere, even mid-pass; no command buffer. | `CombatSystem` adds statuses, `DeathSystem` sets `Dead`, `ProjectileSystem` spawns and destroys |
 | [Systems and `[ForEach]`](#systems-and-foreach) | One-job systems; a method is the whole loop, compiled to an inlined struct job. | every system; `ClockSystem` overrides `OnUpdate` |
@@ -81,8 +81,8 @@ Guide: [Entities and components](guide/entities-and-components.md).
 
 ## Prefabs and cloning
 
-**What it does.** A `Prefab` is a recipe: a set of component values (`new Prefab().Set(a).Set(b)`) that belongs to no
-world, so no query sees it and no system has to filter it out. `world.Instantiate(prefab)` creates an entity with a
+**What it does.** A `Prefab` is a recipe: a set of component values (`new Prefab().SetHealth(60, 60).SetNpc()`, or
+`Set(a, b)`) that belongs to no world, so no query sees it and no system has to filter it out. `world.Instantiate(prefab)` creates an entity with a
 copy of every value; `world.Instantiate(prefab, span)` creates a wave. `entity.Clone()` copies a living entity within
 its world. A copy gets its own list for each `DynamicBuffer<T>`, is indexed at once, and its tracked components count
 as written, so replication sends it like any new entity.
@@ -110,7 +110,8 @@ Guide: [Prefabs and cloning](guide/prefabs.md).
 its component classes: `e.Position` (`ref`), `HasPosition`, `TryGetPosition(out p)`, `GetOrAddPosition()`, `SetPosition(x, y)` (from the
 constructor), `RemovePosition()`; tags get `IsDead`, `SetDead()`, `RemoveDead()`; indexed components `world.ZoneIndex`;
 singletons `world.Battle`, `HasBattle`, `SetBattle(…)`, `RemoveBattle()`. Tracked and indexed components get a
-`ref readonly` property, so a read never counts as a write.
+`ref readonly` property, so a read never counts as a write. A `Prefab` gets the same writers, returning the prefab for
+chaining (`new Prefab().SetHealth(60, 60).SetNpc()`), plus `prefab.Health` (read-only), `HasHealth` and `IsNpc`.
 
 **When to use it.** Everywhere code names a concrete component: it reads like fields and methods and needs no type
 arguments. The generic API stays for generic code.
@@ -118,7 +119,8 @@ arguments. The generic API stays for generic code.
 **When not.** Nothing to opt out of; a name the entity or world already has (`Id`, `Version`, …) is skipped.
 
 **Cost.** None: every member is an inlined call to the generic API. The analyzer and the generator know them
-(`SetX` / `RemoveX` are structural changes, the rest reads), so a `[ForEach]` method keeps its fast path.
+(an entity's `SetX` / `GetOrAddX` / `RemoveX` are structural changes, the rest reads), so a `[ForEach]` method keeps
+its fast path.
 
 Guide: [Entities and components](guide/entities-and-components.md#generated-members).
 

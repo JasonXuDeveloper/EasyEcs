@@ -66,7 +66,7 @@ costs and when to use it).
 |---|---|---|
 | [Worlds and entities](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md) | `new World(options)`, `CreateEntity`, `TryGetEntity`, `IsAlive`, `Destroy` | Isolated worlds of version-checked, recycled entity handles; lookup by id. |
 | [Components and tags](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md) | `struct : IComponent`, `Set`, `Get`, `Read`, `TryGet`, `TryGetRef`, `GetOrAdd`, `Has`, `Remove`; generated `e.Position`, `SetX`, `IsDead` | Plain structs in archetype tables; an empty struct is a tag; up to 9 components per call. |
-| [Prefabs and cloning](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/prefabs.md) | `Prefab`, `world.Instantiate(prefab)`, `Instantiate(prefab, span)`, `entity.Clone()` | Kinds of entities defined once as data that belongs to no world; copies of a living entity. |
+| [Prefabs and cloning](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/prefabs.md) | `Prefab`, generated `prefab.SetX(…)`, `world.Instantiate(prefab)`, `Instantiate(prefab, span)`, `entity.Clone()` | Kinds of entities defined once as data that belongs to no world; copies of a living entity. |
 | [Immediate structural changes](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/structural-changes.md) | any `Set` / `Remove` / create / `Instantiate` / destroy | Applied at once, even in the middle of a pass; no command buffer to flush. |
 | [Systems and `[ForEach]`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md) | `EcsSystem`, `[ForEach]`, `Priority`, `OnCreate` / `OnUpdate` / `OnDestroy`, `AddSystem` / `RemoveSystem` / `GetSystem` | A method is the whole loop, compiled to an inlined struct job; `in` reads, `ref` writes, `Entity` and singletons as parameters. |
 | [Filters](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/queries.md) | `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `QueryFilter` | Narrow a system or query by presence, absence, any-of, recent writes or recent removals. |
@@ -285,8 +285,8 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
   visit the entities that lost `T` since their system last ran, once per removal and with their other components
   (replicate a fire that went out), and `QueryFilter.Removed<T>(since)` does the same for queries. Destroyed entities
   are not reported; **EECS016** rejects a method that also requires `T`.
-- **Prefabs and cloning:** `new Prefab().Set(a).Set(b)` is a recipe of component values that belongs to no world, so
-  no query sees it; `world.Instantiate(prefab)` (or `Instantiate(prefab, span)` for a wave, one gate pass) creates
+- **Prefabs and cloning:** `new Prefab().SetHealth(60, 60).SetNpc()` (generated writers, or `Set(a, b)`) is a recipe
+  of component values that belongs to no world, so no query sees it; `world.Instantiate(prefab)` (or `Instantiate(prefab, span)` for a wave, one gate pass) creates
   entities from it with one row copy each, and `entity.Clone()` copies a living entity. Copies get their own dynamic
   buffers, are indexed at once and count as written for change tracking.
 - **Indexes and relations:** components implementing `IIndexed<TKey>` are found by value
@@ -295,8 +295,8 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
   (EECS015).
 - **Generated members:** every component gets named C# 14 extension members, in the spirit of Entitas but for
   structs, tags, singletons and indexes: `hero.Position.X += 1`, `hero.HasVelocity`, `hero.SetVelocity(1, 0)`,
-  `hero.IsDead` / `hero.SetDead()`, `world.Battle.Tick++`, `world.ZoneIndex.Find(3)`. Tracked and indexed components
-  get a read-only property, so reading them never counts as a write; the analyzer treats `SetX` / `RemoveX` as the
+  `hero.IsDead` / `hero.SetDead()`, `world.Battle.Tick++`, `world.ZoneIndex.Find(3)`, and on prefabs
+  `prefab.SetHealth(60, 60).SetNpc()`. Tracked and indexed components get a read-only property, so reading them never counts as a write; the analyzer treats `SetX` / `RemoveX` as the
   structural changes they are.
 - **New APIs:** `WithAny<T>` filters (`[WithAny<T>]` on `[ForEach]`), bulk `CreateEntities` / `DestroyEntities`,
   per-system timing (`WorldOptions.MeasureSystems`, `system.Stats`), `entity.Read<T>()` (read-only, never a write) and

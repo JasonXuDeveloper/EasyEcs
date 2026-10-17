@@ -148,6 +148,8 @@ work (path finding, steering, AI scoring) over tens of thousands of entities; fo
 than it saves.
 
 ```csharp
+public record struct Clock(float Tick) : ISingletonComponent;
+
 public partial class SteeringSystem : EcsSystem
 {
     [ForEach(Parallel = true), Without<Dead>]

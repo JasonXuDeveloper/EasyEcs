@@ -21,7 +21,7 @@ Notation:
 | `Entity` | readonly struct | Handle: `Id`, `Version`, `World`; equality includes the version. A destroyed or default handle answers questions (`IsAlive`, `Has`, `TryGet`, `TryGetRef`) with false, throws on accesses and changes (`Get`, `Read`, `GetOrAdd`, `Set`, `Remove`, `Clone`), and ignores `Destroy`. |
 | `IComponent` | marker interface | Implemented by component structs. |
 | `ITrackChanges` | marker interface | A component whose rows record the change tick of their last write or removal (`[Changed<T>]`, `[Removed<T>]`, `QueryFilter.Changed<T>(since)` / `Removed<T>(since)`). |
-| `Prefab` | sealed class | A recipe of component values that belongs to no world: `Set`, `Remove`, `Has`, `Read`; `world.Instantiate(prefab)` copies it into a world ([prefabs and cloning](guide/prefabs.md)). |
+| `Prefab` | sealed class | A recipe of component values that belongs to no world: `Set`, `Remove`, `Has`, `Read` and generated `SetX` / `RemoveX` / `HasX` / `IsX` / `X`; `world.Instantiate(prefab)` copies it into a world ([prefabs and cloning](guide/prefabs.md)). |
 | `IIndexed<TKey>` | interface | A component the world indexes by its `Key`, written with `Set` (EECS015); an `Entity` key makes it a relation. |
 | `ValueIndex<T, TKey>` | sealed class | `world.Index<T, TKey>()`: `Find(key)` (enumerator of `Entity`), `TryFind`, `Count`. |
 | `DynamicBuffer<T>` | struct, `IComponent, ITrackChanges` | A list per entity: `Count`, `Capacity`, `this[i]` (read-only), `AsReadOnlySpan()`, `foreach`; writes through `DynamicBufferExtensions` (`ref this`): `Add`, `AddRange`, `Insert`, `RemoveAt`, `RemoveAtSwapBack`, `Clear`, `EnsureCapacity`, `TrimExcess`, `AsSpan()`. |
@@ -64,7 +64,7 @@ Notation:
 |---|---|---|
 | `entity.Get<T>()` → `ref T` | O(1) | version check + column lookup (+ one presence-bit test) + one indexed load; throws if missing or not alive; counts as a write of a tracked (`ITrackChanges`) component |
 | `entity.Read<T>()` → `ref readonly T` | O(1) | as `Get`, but read-only: never counts as a write |
-| generated: `entity.X`, `HasX`, `TryGetX(out)`, `GetOrAddX()`, `SetX(…)`, `RemoveX()`; tags `IsX`, `SetX()`, `RemoveX()`; `world.XIndex`; singletons `world.X`, `HasX`, `SetX(…)`, `RemoveX()` | as the generic call | C# 14 extension members per component `X` ([generated members](guide/entities-and-components.md#generated-members)); `entity.X` is `Get` (`ref T`), or `Read` (`ref readonly T`) for a tracked or indexed component |
+| generated: `entity.X`, `HasX`, `TryGetX(out)`, `GetOrAddX()`, `SetX(…)`, `RemoveX()`; tags `IsX`, `SetX()`, `RemoveX()`; `world.XIndex`; singletons `world.X`, `HasX`, `SetX(…)`, `RemoveX()` | as the generic call | C# 14 extension members per component `X` ([generated members](guide/entities-and-components.md#generated-members)); `entity.X` is `Get` (`ref T`), or `Read` (`ref readonly T`) for a tracked or indexed component; an indexed component gets no `GetOrAddX` |
 | `entity.TryGetRef<T>(out bool found)` → `ref T` | O(1) | a null ref when missing or not alive (check `found`); counts as a write of a tracked component when found |
 | `entity.Has<T>()` / `TryGet<T>(out T)` | O(1) | false when missing or not alive; `TryGet` returns a copy (not a write) |
 | `entity.Has<T1..Tn>()` | O(n) | all of them; one meta lookup |
@@ -81,10 +81,11 @@ it has; components the source lacks stay absent and are not removals.
 | API | Complexity | Notes |
 |---|---|---|
 | `new Prefab()` | O(1) | an empty recipe (a small private store, allocated once) |
-| `prefab.Set<T>(in T value)` → `Prefab` | O(c) amortized | adds or replaces the value of `T`; chainable |
-| `prefab.Remove<T>()` → `Prefab` | O(1) | drops `T` if present; chainable |
+| `prefab.Set(in T1 … in Tn)` → `Prefab` | O(n), or O(c) amortized when it gains a component | adds or replaces 1-9 values; chainable |
+| `prefab.Remove<T1..Tn>()` → `Prefab` | O(n) | drops 1-9 components; missing ones are ignored; chainable |
 | `prefab.Has<T>()` | O(1) | |
 | `prefab.Read<T>()` → `ref readonly T` | O(1) | throws if the prefab has no `T` |
+| generated: `prefab.X` (`ref readonly`), `HasX`, `SetX(…)`, `RemoveX()`; tags `IsX`, `SetX()`, `RemoveX()` | as the generic call | the entity's [generated members](guide/prefabs.md#generated-members) on a prefab: writers return the prefab (chainable), the property is always read-only; no `TryGetX` / `GetOrAddX`; not structural changes of any world |
 | `world.Instantiate(prefab)` → `Entity` | O(c) | one row copy; the target table is looked up once per prefab table and cached; owner thread; safe during a pass (the pass does not visit the new entity) |
 | `world.Instantiate(prefab, Span<Entity> entities)` | O(count × c) | one gate pass and at most one table growth for the wave; writes the handles |
 | `entity.Clone()` → `Entity` | O(c) | a new entity of the same world (and table) with a copy of the entity's components; throws if not alive |

@@ -42,7 +42,7 @@ or from another system, so treat every structural change, of any entity, as poss
 // Account is a component (record struct Account(long Id) : IComponent); IShop is your service.
 async ValueTask HealFromStoreAsync(Entity player, IShop shop)
 {
-    long id = player.Get<Account>().Id;            // read what you need before awaiting
+    long id = player.Read<Account>().Id;           // read what you need before awaiting
     int heal = await shop.RedeemPotionAsync(id);   // the world may change meanwhile
     if (player.IsAlive && player.Has<Health>())    // re-validate after the await
         player.Get<Health>().Value += heal;        // a fresh ref into current storage

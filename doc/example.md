@@ -13,13 +13,13 @@ from another ECS? [Their features in EasyEcs](comparison.md#their-features-in-ea
 | Feature | Where |
 |---|---|
 | Components, tags, singletons | `Position`, `Health`, `Player`, `Dead`; `Battle`, `Waypoints` |
-| Generated members | `players[i].Position = …`, `SetZone`, `SetFrozen`, `RemoveBurning`, `SetDead`, `IsDead`, `TryGetMana`, `World.Battle`, `ZoneIndex`, `OwnedByIndex` |
+| Generated members | `players[i].Position = …`, `SetZone`, `SetFrozen`, `RemoveBurning`, `SetDead`, `IsDead`, `TryGetMana`, `World.Battle`, `ZoneIndex`, `OwnedByIndex`; on prefabs `SetHealth`, `SetReplica`, `SetAttack`, `SetNpc` |
 | `[ForEach]` systems, filters (`With`, `Without`, `WithAny`) | every system; `AfflictionSystem` counts burning **or** frozen units with `World.Count` (no loop) |
 | `[ForEach(Parallel = true)]` | `SteeringSystem`: NPC steering on every core |
 | Parallel systems (`WorldOptions.ParallelSystems`) | `MovementSystem` and `ManaSystem`: same priority, disjoint data, run at once |
 | Batch methods (`Span<T>`), SIMD | `MovementSystem`: whole runs of rows as `Vector<float>`; `Census` sums health with a vectorized `ForEachBatch` job |
 | Immediate structural changes | statuses added (`GetOrAdd`, `SetFrozen`) and removed mid-pass (`RemoveBurning`, `RemoveFrozen`), deaths (`SetDead`), respawns (`Set` of two components, `Remove` of three), projectiles spawned and destroyed |
-| Prefabs (`Prefab`, `Instantiate`) | NPC kinds `Grunt` and `Brute`: recipes no query sees, instantiated in bulk by the constructor (`Instantiate(prefab, span)`) and one by one by `SpawnNpc` when an NPC respawns |
+| Prefabs (`Prefab`, `Instantiate`) | NPC kinds `Grunt` and `Brute`: recipes no query sees, built with `Set` of two values and the generated `SetHealth(…)` / `SetNpc()`, instantiated in bulk by the constructor (`Instantiate(prefab, span)`) and one by one by `SpawnNpc` when an NPC respawns |
 | Cloning (`Clone`) | `Mirror` copies a living unit as it is now (health, statuses, bag, zone); the indexes and the next send learn about the copy |
 | Change tracking (`ITrackChanges`, `[Changed<T>]`, `Since`) | `ReplicationSystem` sends only the healths written since its last run (`Send`) and fires lit or burning (`SendFire`); `Unsaved` counts players written since the save |
 | Removal detection (`[Removed<T>]`) | `ReplicationSystem.SendFireOut` tells clients that a fire went out: the entities that lost `Burning` since the last send |
@@ -333,10 +333,10 @@ public sealed class BattleServer : IDisposable
     private static readonly QueryFilter UnsavedPlayers = Players.Changed<Health>(0);   // the tick is set per call
 
     // NPC kinds: recipes that belong to no world (no query sees them), copied by Instantiate
-    private static readonly Prefab Grunt = new Prefab().Set(new Position()).Set(new Velocity())
-        .Set(new Health(120, 120)).Set(new Replica(120, false)).Set(new Attack(6, 8, 0)).Set(new Npc());
-    private static readonly Prefab Brute = new Prefab().Set(new Position()).Set(new Velocity())
-        .Set(new Health(200, 200)).Set(new Replica(200, false)).Set(new Attack(9, 12, 0)).Set(new Npc());
+    private static readonly Prefab Grunt = new Prefab().Set(new Position(), new Velocity())   // several at once
+        .SetHealth(120, 120).SetReplica(120, false).SetAttack(6, 8, 0).SetNpc();       // or one by name
+    private static readonly Prefab Brute = new Prefab().Set(new Position(), new Velocity())
+        .SetHealth(200, 200).SetReplica(200, false).SetAttack(9, 12, 0).SetNpc();
 
     public readonly World World;
     private readonly SingletonRef<Battle> _battle;                            // resolved once, no lookup per tick

@@ -94,7 +94,7 @@ New:
 - `INoStructuralChanges` marks a job that makes no structural change; the generator adds it to `[ForEach]` methods
   that cannot change structure, which then iterate without per-entity bookkeeping.
 - `QueryFilter.WithAny<T>()` and `[WithAny<T>]`: the entity needs at least one of the named components.
-- `world.CreateEntities(span, components…)` and `world.DestroyEntities<T…>(filter)` spawn and clear batches with one
+- `world.CreateEntities(span, components…)` and `world.DestroyEntities<T…>(filter)` spawn and clear waves with one
   pass through the structural gate.
 - `WorldOptions.MeasureSystems` times every system run into `system.Stats` (`SystemStats`).
 - `[ForEach(Parallel = true)]` (and `world.ForEachParallel` / `ForEachEntityParallel`) runs chunks of
@@ -107,7 +107,8 @@ New:
 - `[Removed<T>]` and `QueryFilter.Removed<T>(since)`: the entities that lost a tracked component since a tick
   (replication of what went away), with [EECS016](doc/guide/analyzer.md#eecs016) for filters no row can pass.
 - `Prefab` and `world.Instantiate(prefab)` / `Instantiate(prefab, span)`: entities from a recipe of components that
-  belongs to no world; `entity.Clone()` copies a living entity.
+  belongs to no world, built with `Set` / `Remove` or the generated `prefab.SetX(…)` / `RemoveX()` (chainable);
+  `entity.Clone()` copies a living entity.
 - `IIndexed<TKey>`, `world.Index<T, TKey>()`, `ValueIndex<T, TKey>`: find entities by a component value; relations
   are indexed `Entity` keys ([Indexes and relations](doc/guide/indexes-and-relations.md)).
 - `entity.Read<T>()` returns a `ref readonly T` that never counts as a write of a tracked component, and
@@ -139,7 +140,7 @@ v3 had three handle types (`Entity` value, `EntityRef`, `ComponentRef<T>`). v4 h
 |---|---|
 | `Context` | `World` |
 | `EntityRef e = ctx.CreateEntity()` | `Entity e = world.CreateEntity()` or `world.CreateEntity(new Position(..), new Velocity(..))` |
-| `e.Value.AddComponent<T>().Value.X = 1` | `e.Add<T>().X = 1` (`ref T`) |
+| `e.Value.AddComponent<T>().Value.X = 1` | `e.GetOrAdd<T>().X = 1` (`ref T`), or `e.Set(new T(..))` |
 | `e.Value.AddComponents<A, B>()` | `e.Set(new A(..), new B(..))` (add or overwrite values, one transition) |
 | `e.Value.GetComponent<T>().Value` | `e.Get<T>()` (`ref T`) |
 | `e.Value.TryGetComponent<T>(out ComponentRef<T> r)` | `e.TryGet<T>(out T value)` / `ref var x = ref e.GetOrAdd<T>()` |

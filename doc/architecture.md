@@ -143,7 +143,7 @@ stateDiagram-v2
 - `CreateEntity(in T1 … in Tn)` places the entity in its final table directly, without intermediate moves.
 - **Prefabs and clones.** A `Prefab` is one row of a private world of its own (capacity 1), so it belongs to no world
   the user queries. `Instantiate` finds the target world's table with the prefab table's mask once and caches it per
-  prefab table (`_prefabTables`); `Clone` uses the original's table. Then `Archetype.CloneRow` copies the row: the
+  prefab table (`_prefabTables`); `Clone` uses the original's table. Then `Archetype.CloneRows` copies the row (into every row of a wave): the
   bytes of unmanaged columns, managed values through `ComponentInfo.CloneManaged` (a `DynamicBuffer<T>` gets a new
   store with the same elements), presence bits for what the source lacks, and the change tick of each tracked
   component the source has set to the current tick (0 for one it lacks: never removed here). The new entity is then

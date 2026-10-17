@@ -4,7 +4,7 @@
 
 - [Choosing an iteration API](#choosing-an-iteration-api)
 - [Regular code and the fastest code](#regular-code-and-the-fastest-code)
-- [Do](#do) / [Don't](#dont)
+- The checklist: [Do](#do) / [Don't](#dont)
 - [Benchmarks](#benchmarks)
 - [Measuring](#measuring)
 
@@ -200,7 +200,7 @@ for when `[Changed<T>]` pays.
 ```csharp
 var wave = new Entity[1_000];
 world.CreateEntities(wave, new Position(0, 0), new Velocity(1, 0));   // one pass through the structural gate
-world.Instantiate(Kinds.Goblin, wave);                                // a wave of a prefab, the same way
+world.Instantiate(Kinds.Goblin, wave);                                // a wave of a prefab (guide/prefabs.md), the same way
 int removed = world.DestroyEntities<Dead>();                          // every dead entity, one pass
 ```
 
@@ -211,12 +211,18 @@ Several components at once also take one transition: `entity.Set(a, b)`, `entity
 
 ## Do
 
+The checklist for code that runs every tick. Find the system worth the effort first: `WorldOptions.MeasureSystems`
+times every system run ([measuring systems](guide/systems.md#measuring-systems)).
+
 - Mutate through refs: `ref var hp = ref item.Component1;`, `ref var hp = ref entity.Get<Health>();`.
 - Spawn with all components at once: `world.CreateEntity(a, b, c)` (placed directly in its archetype), or
   `world.Instantiate(prefab)` for a kind defined once; change several with `entity.Set(a, b)` /
   `entity.Remove<A, B>()` (one transition).
 - Read components with `in` parameters, `entity.Read<T>()` or the generated property, write through `ref` parameters
-  or `entity.Get<T>()`: a `ref` access counts as a write of a tracked component.
+  or `entity.Get<T>()`: a `ref` access counts as a write of a tracked component. A `Query` loop counts every visited
+  row of a tracked component it queries as written; a struct job that only reads declares `static int Writes => 0`.
+- Mark struct jobs that never add, remove, create or destroy `INoStructuralChanges`: their passes skip the
+  bookkeeping that keeps structural changes safe.
 - Keep the handle of a singleton you touch outside systems in a `SingletonRef<T>` (no lookup per access); in systems,
   take it as a parameter (resolved once per pass).
 - Give systems that need not run every update a cadence: `UpdateInterval`, or a system group updated when needed
@@ -226,9 +232,15 @@ Several components at once also take one transition: `entity.Set(a, b)`, `entity
 - Keep `[ForEach]` methods that make no structural change `static`, without a `World` parameter and with read-only use
   of their `Entity` (`Id`, `Has`, `Get`, ...): the generator marks them `INoStructuralChanges`, and they iterate with
   no per-entity bookkeeping.
-- Vectorize arithmetic in batch methods, batch waves of entities, use tags for states and `[Changed<T>]` for the few
-  rows that changed: see [regular code and the fastest code](#regular-code-and-the-fastest-code).
-- Pre-size with `WorldOptions.InitialEntityCapacity` to avoid growing the entity records at run time.
+- Vectorize arithmetic in batch methods (span parameters, `Vector<T>`), create and destroy waves of entities in bulk
+  (`CreateEntities`, `Instantiate(prefab, span)`, `DestroyEntities`), use tags for states, `[Changed<T>]` for the few
+  rows that changed and `[Removed<T>]` for what went away: see
+  [regular code and the fastest code](#regular-code-and-the-fastest-code).
+- Ask `world.Count` / `world.Any` instead of looping to count or to find one match.
+- Reserve room in a `DynamicBuffer<T>` whose size is known (`EnsureCapacity`): writes within the capacity allocate
+  nothing.
+- Pre-size with `WorldOptions.InitialEntityCapacity` (or `world.EnsureEntityCapacity(n)`) to avoid growing the
+  entity records at run time.
 - Keep `QueryFilter`s in `static readonly` fields (the generator does this for `[ForEach]`).
 - Look entities up by value with an indexed component (`IIndexed<TKey>`, `world.Index<T, TKey>()`) instead of a
   dictionary you keep in sync by hand; keep the `ValueIndex` in a local or field.
@@ -364,7 +376,7 @@ the operation has no v3.1.1 equivalent (struct jobs, `[ForEach]` systems and han
 | RawArrayWrite (two plain arrays, the floor) | – | 11.0 μs | 10.9 μs | 0 B |
 | QueryIterate3 (half the entities match) | 16.2 μs | 9.1 μs | 7.3 μs | 0 B |
 | HandleAccess (`Entity.Get`, ×1000) | – | 3.56 μs | 3.22 μs | 0 B |
-| TryGetEntity (`Entity.TryGet`, ×1000) | – | – | 3.49 μs | 0 B |
+| TryGetEntity (`world.TryGetEntity`, then a read, ×1000) | – | – | 3.49 μs | 0 B |
 | TrackedHandleWrite (`Entity.Get` of a tracked component, ×1000) | – | – | 9.10 μs | 0 B |
 | SingletonAccess (×1000) | 1.42 μs | 0.90 μs | 0.89 μs | 0 B |
 | CountAndAny (`Count` + `Any` with a filter, ×1000) | – | – | 48.7 μs | 0 B |

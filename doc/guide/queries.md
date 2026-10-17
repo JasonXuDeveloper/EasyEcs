@@ -66,6 +66,11 @@ The enumerator and its items are ref structs holding refs into the current table
 `await`, and an item cannot be stored (keep `item.Entity` instead). To count or test for matches, use `world.Count` /
 `world.Any`.
 
+Items hand out refs, so the enumerator counts every row it visits as a write of each tracked (`ITrackChanges`)
+component it queries, whether or not the loop stores through it. To read tracked components without marking them
+changed (a save, a send), use a struct job that declares `Writes => 0` (below), a `[ForEach]` method with `in`
+parameters, or `entity.Read<T>()` ([what counts as a write](change-tracking.md#what-counts-as-a-write)).
+
 ## `ForEach`: a struct job
 
 A struct implementing `IForEach<T1..Tn>` is specialized and inlined by the JIT: no delegate, no allocation. Keep
@@ -144,7 +149,11 @@ public struct Drift : IForEachBatch<Position, Velocity>                         
 ```
 
 ```csharp
+// A field of your class, next to Active.
 private static readonly QueryFilter Alive = QueryFilter.Create().Without<Dead>();
+```
+
+```csharp
 var kill = new KillTheWounded();
 world.ForEachEntity<Health, KillTheWounded>(ref kill, Alive);
 var drift = new Drift();

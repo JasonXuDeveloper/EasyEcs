@@ -24,15 +24,15 @@ Build a prefab once, keep it, and instantiate it wherever an entity of that kind
 public record struct Position(float X, float Y) : IComponent;
 public record struct Health(int Value, int Max) : IComponent, ITrackChanges;
 public record struct Attack(int Damage, int Cooldown) : IComponent;
-public struct Npc : IComponent;
+public struct Npc : IComponent;                                         // a tag
 
 public static class Kinds
 {
-    // Recipes: no world holds them, so no query ever sees them
+    // Recipes: no world holds them, so no query ever sees them. The generated writers return the prefab, so they chain.
     public static readonly Prefab Goblin = new Prefab()
-        .Set(new Position()).Set(new Health(60, 60)).Set(new Attack(4, 0)).Set(new Npc());
+        .SetPosition(0, 0).SetHealth(60, 60).SetAttack(4, 0).SetNpc();
     public static readonly Prefab Troll = new Prefab()
-        .Set(new Position()).Set(new Health(300, 300)).Set(new Attack(12, 0)).Set(new Npc());
+        .Set(new Position(), new Health(300, 300), new Attack(12, 0)).SetNpc();   // or several values in one call
 }
 ```
 
@@ -48,10 +48,32 @@ for (int i = 0; i < wave.Length; i++) wave[i].Position = new Position(i * 8, 0);
 | `Prefab` member | Effect |
 |---|---|
 | `new Prefab()` | An empty recipe. |
-| `Set<T>(in T value)` → `Prefab` | Adds `value`, or replaces the value of its type; chainable. |
-| `Remove<T>()` → `Prefab` | Drops `T` if the prefab has it; chainable. |
+| `Set(in T1 … in Tn)` → `Prefab` | Adds 1-9 values, or replaces the values of their types; chainable. |
+| `Remove<T1..Tn>()` → `Prefab` | Drops 1-9 components the prefab has (missing ones are ignored); chainable. |
 | `Has<T>()` | Whether the prefab has `T`. |
 | `Read<T>()` → `ref readonly T` | The prefab's value of `T`; throws if it has none (change it with `Set`). |
+
+### Generated members
+
+Like an entity, a prefab gets [named members](entities-and-components.md#generated-members) for every component, so a
+recipe reads like the entities it makes. The writers return the prefab, so they chain:
+
+| Declared | Generated on `Prefab` | Same as |
+|---|---|---|
+| `record struct Health(int Value, int Max) : IComponent` | `prefab.Health` (`ref readonly`), `prefab.HasHealth`, `prefab.SetHealth(value, max)`, `prefab.RemoveHealth()` | `Read`, `Has`, `Set(new Health(value, max))`, `Remove` |
+| a tag (`struct Npc : IComponent`) | `prefab.IsNpc`, `prefab.SetNpc()`, `prefab.RemoveNpc()` | `Has`, `Set(new Npc())`, `Remove` |
+
+```csharp
+var elite = new Prefab().SetPosition(0, 0).SetHealth(500, 500).SetAttack(20, 0).SetNpc();
+int max = elite.Health.Max;                          // read-only: change it with SetHealth
+if (elite.HasAttack) elite.SetAttack(25, 0);         // replaces the value
+elite.RemoveNpc();                                   // the recipe drops the tag
+```
+
+The property is always read-only (`Read`): a prefab changes only through `Set` / `Remove` and their generated forms.
+There is no `TryGetX` or `GetOrAddX` on a prefab. `SetX` has the same overloads as on an entity (one per public
+constructor, or one taking the public fields). A prefab belongs to no world, so its writers are not structural changes of any world: the analyzer does
+not report them in `[ForEach]` methods or on other threads (still, build and change prefabs at startup, as below).
 
 A prefab is a plain object: build it from code, or from configuration at startup (one `Set` per configured component),
 and keep it in a `static readonly` field or a table of kinds. Changing a prefab changes the entities instantiated

@@ -30,6 +30,10 @@ if (world.TryGetSingleton<Clock>(out var copy)) { /* a copy */ }
 world.RemoveSingleton<Clock>();
 ```
 
+The generator also gives the world named members for every singleton: `world.Clock` (`ref`, `GetSingleton`),
+`world.HasClock`, `world.SetClock(tick)` (adds it if missing) and `world.RemoveClock()`
+([generated members](entities-and-components.md#generated-members)).
+
 ## In systems
 
 A `[ForEach]` method takes a singleton as a `ref` / `in` parameter. It is resolved once per pass (and added if
@@ -50,7 +54,7 @@ public partial class DeathSystem : EcsSystem
 }
 ```
 
-In `OnUpdate`, use the system's `World` property: `World.GetSingleton<Clock>().Tick++`.
+In `OnUpdate`, use the system's `World` property: `World.GetSingleton<Clock>().Tick++` (or `World.Clock.Tick++`).
 
 ## Stable handles
 
