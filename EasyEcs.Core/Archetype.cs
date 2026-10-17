@@ -656,6 +656,44 @@ internal sealed class Archetype
         }
     }
 
+    /// <summary>
+    /// Copy rows [<paramref name="from"/>, +<paramref name="count"/>) of <paramref name="source"/>, a table with the same
+    /// components (of any world: columns line up, bits are global), into the new rows from <paramref name="to"/>: as
+    /// <see cref="CloneRows"/> does for one row, with one block copy per unmanaged column. Inside the structural gate.
+    /// </summary>
+    public void CopyRun(Archetype source, int from, int to, int count, ulong tick)
+    {
+        for (int c = 0; c < Columns.Length; c++)
+        {
+            var info = Info(c);
+            if (info.Owner >= 0)
+            {
+                int owner = ColumnIndex(info.Owner);
+                if (source.Bits(owner) == null) StampRange(c, to, count, tick);
+                else
+                    for (int r = 0; r < count; r++)
+                        if (source.Has(owner, from + r)) StampRange(c, to + r, 1, tick);
+                        else ClearTicks(c, to + r, 1);
+                continue;
+            }
+
+            bool all = source.Bits(c) == null; // every source row has the component
+            if (info.Managed)
+                for (int r = 0; r < count; r++)
+                {
+                    if (all || source.Has(c, from + r) || (source.HasDisabled && source.Keeps(c, from + r)))
+                        info.CloneManaged(source.Columns[c], from + r, Columns[c], to + r);
+                }
+            else
+                Unsafe.CopyBlockUnaligned(ref Unsafe.Add(ref Aligned(Columns[c]), (nint)to * info.Size),
+                    ref Unsafe.Add(ref Aligned(source.Columns[c]), (nint)from * info.Size), (uint)(count * info.Size));
+
+            if (all) continue;
+            for (int r = 0; r < count; r++)
+                if (!source.Has(c, from + r)) MarkAbsent(c, to + r, keep: source.HasDisabled && source.Keeps(c, from + r));
+        }
+    }
+
     /// <summary>Whether row <paramref name="slot"/> keeps the component of <paramref name="column"/> disabled (its <see cref="Disabled{T}"/> tag is present).</summary>
     public bool Keeps(int column, int slot) => DisablerColumn(column) is var tag and >= 0 && Has(tag, slot);
 

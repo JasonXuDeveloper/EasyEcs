@@ -61,15 +61,21 @@ public sealed partial class World : IDisposable
     /// Pre-size the table <paramref name="prefab"/>'s instances go to, and the entity storage, so the next
     /// <paramref name="count"/> <see cref="Instantiate(Prefab)"/> calls never grow them: a wave of spawns pays its
     /// growth before the tick. Instances whose groups put them in another table (<see cref="GroupBy{T}"/>) grow that
-    /// one. O(components) plus one growth. Owner thread only.
+    /// one. For a prefab with members, every member's table. O(components) plus one growth. Owner thread only.
     /// </summary>
     public void EnsureCapacity(Prefab prefab, int count)
     {
         using (Structural())
         {
-            var target = TableFor(Source(prefab.Row).Table);
-            target.Reserve(target.Count + count);
-            ReserveIds(count);
+            var tables = prefab.Store._allArchetypes;
+            for (int i = 0; i < tables.Length; i++)
+            {
+                if (tables[i].Count == 0) continue;
+                var target = TableFor(tables[i]);
+                target.Reserve(target.Count + tables[i].Count * count);
+            }
+
+            ReserveIds(prefab.Store.EntityCount * count);
         }
     }
 
@@ -90,10 +96,18 @@ public sealed partial class World : IDisposable
     /// <summary>
     /// Create an entity with a copy of every component of <paramref name="prefab"/>. Values are copied as they are: a
     /// <see cref="DynamicBuffer{T}"/> gets a list of its own, indexes learn the new entity, tracked components count as
-    /// written now. O(components): one row copy, no table search after the first instance. Owner thread only (see
+    /// written now. O(components): one row copy, no table search after the first instance. A prefab with members
+    /// creates them all and returns the entity of the one passed (O(members × components)). Owner thread only (see
     /// doc/guide/threading.md).
     /// </summary>
-    public Entity Instantiate(Prefab prefab) => Copy(prefab.Row, false);
+    public Entity Instantiate(Prefab prefab) => prefab.IsGroup ? InstantiateGroup(prefab) : Copy(prefab.Row, false);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private Entity InstantiateGroup(Prefab prefab)
+    {
+        ArriveAll(prefab.Store);
+        return Arrived(prefab.Id);
+    }
 
     /// <summary>
     /// <see cref="Instantiate(Prefab)"/> for <c>entities.Length</c> copies of <paramref name="prefab"/>, whose handles
@@ -102,6 +116,12 @@ public sealed partial class World : IDisposable
     /// </summary>
     public void Instantiate(Prefab prefab, Span<Entity> entities)
     {
+        if (prefab.IsGroup)
+        {
+            for (int i = 0; i < entities.Length; i++) entities[i] = InstantiateGroup(prefab);
+            return;
+        }
+
         using (Structural())
         {
             if (entities.IsEmpty) return;
@@ -190,7 +210,7 @@ public sealed partial class World : IDisposable
             ref var meta = ref MetaRef(entity.Index); // ids of this world's handles are always < Meta.Length
             if (meta.Archetype == null || meta.Version != entity.Version) return;
             Destroy(ref meta, entity.Id);
-            if (_parentCount != 0) DestroyChildren();
+            if (_targetCount != 0) FollowLinks();
         }
     }
 
@@ -276,7 +296,7 @@ public sealed partial class World : IDisposable
             var op = new DestroyOp(); // the other tables row by row (the freed ones have no rows left)
             WalkDown(match, since, ref op);
             destroyed += op.Count;
-            if (_parentCount != 0) DestroyChildren();
+            if (_targetCount != 0) FollowLinks();
         }
 
         return destroyed;

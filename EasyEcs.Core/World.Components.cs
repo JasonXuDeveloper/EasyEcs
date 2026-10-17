@@ -217,7 +217,7 @@ public sealed partial class World
         var entity = archetype.Slots[slot];
         Free(ref meta, entity.Index);
         Orphaned(entity); // children it gained while retired follow it now
-        if (_parentCount != 0) DestroyChildren();
+        if (_targetCount != 0) FollowLinks();
     }
 
     /// <summary>Clear the presence bit of component <paramref name="bit"/> in row <paramref name="slot"/>; false when the row lacks it.</summary>

@@ -1,21 +1,25 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 
 namespace EasyEcs;
 
-// Migrations: a group of entities written by SaveEntities becomes new entities of this world. The bytes load into a
-// world of their own first (the same Load, so ids, versions and every component come back as saved); each of its
-// tables is then copied row by row into this world, like an instantiated prefab. EntityId fields that pointed into the
-// group point at the new entities, the others become EntityId.Null.
+// Arrivals: entities of another world become new entities of this one. Their rows are copied table by table, like an
+// instantiated prefab; EntityId fields that pointed at an entity that came along point at its new entity, the others
+// become EntityId.Null. Three callers share it: LoadEntities (the bytes load into a world of their own first),
+// MoveEntities (rows of a live world) and prefab groups (the prefab's own world).
 public sealed partial class World
 {
-    // The world the bytes load into, reused by every migration, and the new id of each of its ids.
+    // The world the bytes of a LoadEntities load into, reused by every migration.
     private World _arrivals;
+
+    // Per id of the source world: the entity it became, valid while its stamp is the current arrival's (so a source
+    // entity that stayed behind is never mistaken for one an earlier arrival copied, and nothing is cleared per arrival).
     private EntityId[] _arrived = [];
-    private List<(Archetype Table, int First, int Count)> _arrivedRows;
-    private List<Entity> _roots;
+    private int[] _arrivedStamp = [];
+    private int _arrival;
+    private readonly List<(Archetype Table, int First, int Count)> _arrivedRows = [];
+    private readonly List<Entity> _roots = [];
 
     /// <summary>
     /// Create the entities <see cref="SaveEntities"/> wrote (in this process or another), with new ids, and write their
@@ -31,76 +35,186 @@ public sealed partial class World
     {
         var source = _arrivals ??= new World(new WorldOptions { InitialEntityCapacity = 16 });
         source.Load(input);
-        var rows = _arrivedRows ??= [];
-        rows.Clear();
+        int created = ArriveAll(source);
+        int order = Math.Min(entities.Length, source._loadOrderCount);
+        for (int i = 0; i < order; i++) entities[i] = Arrived(source._loadOrder[i]);
+        return created;
+    }
+
+    /// <summary>
+    /// Move <paramref name="entities"/> (stale ids and repeats are skipped) into <paramref name="target"/>, another
+    /// world of this thread: the target gets new entities with their components, as <see cref="LoadEntities"/> makes
+    /// them from a save of the group, without encoding it; then they are destroyed here (their children with them, so
+    /// move a hierarchy together; cleanup components stay behind for their systems). The new handles are written in
+    /// order into <paramref name="moved"/> (as many as fit, <see cref="Entity"/> default for a skipped id); returns how
+    /// many moved. O(entities × components). Owner thread of both worlds; not while a pass iterates in either.
+    /// </summary>
+    public int MoveEntities(World target, ReadOnlySpan<EntityId> entities, Span<Entity> moved = default)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        if (ReferenceEquals(target, this)) throw new ArgumentException("The entities are in this world already", nameof(target));
+        int count = 0;
+        PrepareCascade();
+        using (Structural())
+        {
+            ThrowIfIterating();
+            FillDirtyTables();
+            using (target.Structural())
+            {
+                target.ThrowIfIterating();
+                target.BeginArrival(this);
+                Archetype run = null;
+                int first = 0, length = 0;
+                foreach (var id in entities)
+                {
+                    if ((uint)id.Index >= (uint)Meta.Length || Meta[id.Index] is not { Archetype: { } table } meta ||
+                        meta.Version != id.Version || target.HasArrived(id))
+                        continue;
+                    if (table != run || meta.Slot != first + length) // consecutive rows of one table go as one run
+                    {
+                        if (length != 0) target.ArriveRows(run, first, length);
+                        (run, first, length) = (table, meta.Slot, 0);
+                    }
+
+                    target.Stamp(id); // a repeat later in the list is skipped
+                    length++;
+                    count++;
+                }
+
+                if (length != 0) target.ArriveRows(run, first, length);
+                target.EndArrival(this);
+            }
+
+            for (int i = 0; i < Math.Min(entities.Length, moved.Length); i++)
+                moved[i] = IsAlive(entities[i]) && target.HasArrived(entities[i]) ? target.Arrived(entities[i]) : default;
+            // Then the originals go, in one pass through the gate and last first: a run's rows then leave from the end
+            // of their table (no row fills a hole), and children listed after their parent go before it (no cascade).
+            for (int i = entities.Length - 1; i >= 0; i--)
+            {
+                var id = entities[i];
+                if ((uint)id.Index < (uint)Meta.Length && MetaRef(id.Index) is { Archetype: not null } meta && meta.Version == id.Version)
+                    Destroy(ref MetaRef(id.Index), id);
+            }
+            if (_targetCount != 0) FollowLinks();
+        }
+
+        target.RootOrphans();
+        return count;
+    }
+
+    /// <summary>Copy every entity of <paramref name="source"/>, a world without tombstones, into this one; returns how many.</summary>
+    internal int ArriveAll(World source)
+    {
         int created = 0;
         using (Structural())
         {
             ThrowIfIterating();
-            if (_arrived.Length < source._nextId) _arrived = new EntityId[source._nextId];
+            BeginArrival(source);
             foreach (var table in source._allArchetypes)
             {
-                int count = table.Count; // a loaded world is dense
-                if (count == 0) continue;
-                var target = TableFor(table);
-                var handles = Handles(count);
-                int first = PlaceRows(target, handles);
-                for (int r = 0; r < count; r++) target.CloneRows(table, r, first + r, 1, _changeTick); // CloneRows repeats one row
-                for (int r = 0; r < count; r++) _arrived[table.Slots[r].Index] = handles[r];
-                rows.Add((target, first, count));
-                created += count;
+                if (table.Count == 0) continue;
+                ArriveRows(table, 0, table.Count);
+                created += table.Count;
             }
 
-            // Every id is known now: point the copies' references at them; children whose parent did not come along
-            // are roots here.
-            var map = new IdMap(source, _arrived);
-            var roots = _roots ??= [];
-            roots.Clear();
-            foreach (var (target, first, count) in rows)
-            {
-                for (int c = 0; c < target.Columns.Length; c++) target.Info(c).Remap(target.Columns[c], first, count, map);
-                int column = target.ColumnIndex(ChildOfBit);
-                if (column < 0) continue;
-                ref var parents = ref Archetype.Row0<ChildOf>(target.Columns[column]);
-                for (int r = first; r < first + count; r++)
-                    if (target.Has(column, r) && Unsafe.Add(ref parents, r).Parent.IsNull)
-                        roots.Add(new Entity(this, target.Slots[r].Index, target.Slots[r].Version));
-            }
-
-            // Then indexes and groups see the values: every run is indexed before a move changes rows, and runs move
-            // last first, so rows of one table that later runs filled are visited before they fill a hole.
-            foreach (var (target, first, count) in rows) IndexRows(target, first, count);
-            for (int i = rows.Count - 1; i >= 0; i--) RegroupRows(rows[i].Table, rows[i].First, rows[i].Count);
+            EndArrival(source);
         }
 
-        foreach (var root in _roots) root.Remove<ChildOf>();
-        int order = Math.Min(entities.Length, source._loadOrderCount);
-        for (int i = 0; i < order; i++)
-        {
-            var id = _arrived[source._loadOrder[i].Index];
-            entities[i] = new Entity(this, id.Index, id.Version);
-        }
-
+        RootOrphans();
         return created;
     }
 
-    // The handles PlaceRows writes for one table of a migration (reused).
-    private Entity[] _arrivedHandles = [];
-
-    private Span<Entity> Handles(int count)
+    /// <summary>The entity <paramref name="id"/> of the last arrival's source became (<see cref="HasArrived"/>).</summary>
+    internal Entity Arrived(EntityId id)
     {
-        if (_arrivedHandles.Length < count) _arrivedHandles = new Entity[Math.Max(count, _arrivedHandles.Length * 2)];
-        return _arrivedHandles.AsSpan(0, count);
+        var to = _arrived[id.Index];
+        return new Entity(this, to.Index, to.Version);
+    }
+
+    private bool HasArrived(EntityId id) =>
+        (uint)id.Index < (uint)_arrivedStamp.Length && _arrivedStamp[id.Index] == _arrival;
+
+    // Begin an arrival from source: a new stamp, room for its ids. Inside the structural gate.
+    private void BeginArrival(World source)
+    {
+        _arrivedRows.Clear();
+        _roots.Clear();
+        if (++_arrival == 0) // the stamps wrapped: forget them all once
+        {
+            Array.Clear(_arrivedStamp);
+            _arrival = 1;
+        }
+
+        if (_arrived.Length < source._nextId)
+        {
+            int length = Math.Max(source._nextId, _arrived.Length * 2);
+            Array.Resize(ref _arrived, length);
+            Array.Resize(ref _arrivedStamp, length);
+        }
+    }
+
+    // Mark source entity id as part of this arrival (its new id is written when its row is copied).
+    private void Stamp(EntityId id) => _arrivedStamp[id.Index] = _arrival;
+
+    // Rows [first, +count) of a source table, as one run of new rows.
+    private void ArriveRows(Archetype table, int first, int count)
+    {
+        var target = TableFor(table);
+        target.Reserve(target.Count + count);
+        ReserveIds(count);
+        int to = target.Count;
+        var slots = table.Slots;
+        for (int r = first; r < first + count; r++)
+        {
+            int id = AllocateId();
+            Place(id, target);
+            int source = slots[r].Index;
+            _arrived[source] = new EntityId(id, MetaRef(id).Version);
+            _arrivedStamp[source] = _arrival;
+        }
+
+        target.CopyRun(table, first, to, count, _changeTick);
+        _arrivedRows.Add((target, to, count));
+    }
+
+    // Every id is known now: point the copies' references at them, note children whose parent did not come along
+    // (roots here, RootOrphans), then let indexes and groups see the values: every run is indexed before a move
+    // changes rows, and runs move last first, so rows of one table that later runs filled are visited before they fill
+    // a hole. Inside the structural gate.
+    private void EndArrival(World source)
+    {
+        var map = new IdMap(source, _arrived, _arrivedStamp, _arrival);
+        foreach (var (target, first, count) in _arrivedRows)
+        {
+            for (int c = 0; c < target.Columns.Length; c++) target.Info(c).Remap(target.Columns[c], first, count, map);
+            int column = target.ColumnIndex(ChildOfBit);
+            if (column < 0) continue;
+            ref var parents = ref Archetype.Row0<ChildOf>(target.Columns[column]);
+            for (int r = first; r < first + count; r++)
+                if (target.Has(column, r) && Unsafe.Add(ref parents, r).Parent.IsNull)
+                    _roots.Add(new Entity(this, target.Slots[r].Index, target.Slots[r].Version));
+        }
+
+        foreach (var (target, first, count) in _arrivedRows) IndexRows(target, first, count);
+        for (int i = _arrivedRows.Count - 1; i >= 0; i--)
+            RegroupRows(_arrivedRows[i].Table, _arrivedRows[i].First, _arrivedRows[i].Count);
+    }
+
+    private void RootOrphans()
+    {
+        foreach (var root in _roots) root.Remove<ChildOf>();
+        _roots.Clear();
     }
 }
 
 /// <summary>
-/// The new id of each entity of a migration's source world: an id of a living source entity maps to the entity it
-/// became, any other id to <see cref="EntityId.Null"/>.
+/// The new id of each entity of an arrival's source world: an id of a living source entity that came along maps to
+/// the entity it became, any other id to <see cref="EntityId.Null"/>.
 /// </summary>
-internal readonly struct IdMap(World source, EntityId[] arrived)
+internal readonly struct IdMap(World source, EntityId[] arrived, int[] stamps, int stamp)
 {
-    public EntityId this[EntityId id] => source.IsAlive(id) ? arrived[id.Index] : EntityId.Null;
+    public EntityId this[EntityId id] =>
+        (uint)id.Index < (uint)stamps.Length && stamps[id.Index] == stamp && source.IsAlive(id) ? arrived[id.Index] : EntityId.Null;
 
     /// <summary>Rewrite the <see cref="EntityId"/> fields of <paramref name="values"/> (see <see cref="SavedTypes.EntityIds{T}"/>).</summary>
     public void Apply<T>(Span<T> values)

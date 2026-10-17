@@ -114,6 +114,9 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
 
     internal ValueIndex(World world) => _world = world;
 
+    /// <summary>The world the index belongs to.</summary>
+    internal World World => _world;
+
     /// <summary>
     /// The entities whose <typeparamref name="T"/> has key <paramref name="key"/> (none for a null key): O(1), then O(1)
     /// per entity (the first lookup indexes every row once). Owner thread only. Destroying entities during the loop is

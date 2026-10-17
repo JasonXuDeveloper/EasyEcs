@@ -35,7 +35,7 @@ public sealed partial class World
         using (Structural())
         {
             WalkDown(Bulk<T>(in filter), filter.Tick, ref op);
-            if (_parentCount != 0) DestroyChildren(); // a retired entity freed by losing its last cleanup component
+            if (_targetCount != 0) FollowLinks(); // a retired entity freed by losing its last cleanup component
         }
 
         return op.Count;

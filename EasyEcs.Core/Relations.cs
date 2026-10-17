@@ -68,6 +68,25 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
         return Unsafe.IsNullRef(ref head) ? 0 : head.Count;
     }
 
+    /// <summary>
+    /// Decide what destroying an entity does to the links to it: <see cref="TargetPolicy.Remove"/> drops them (a party
+    /// forgets a member that left the world), <see cref="TargetPolicy.Destroy"/> destroys the linking entities (the
+    /// buffs a caster applied end with the caster), <see cref="TargetPolicy.Keep"/> (the default) leaves them. Applied
+    /// inside every destroy (the index is kept built); O(1) per destroyed entity, O(links of each source) per link.
+    /// Owner thread only.
+    /// </summary>
+    public RelationIndex<T> WhenTargetDestroyed(TargetPolicy policy)
+    {
+        _world.SetRule(this, policy, static index => new World.RelationRule<T>(index));
+        return this;
+    }
+
+    /// <summary>Index every buffer now if the index is not built (before entering the structural gate).</summary>
+    internal void Prepare()
+    {
+        if (!_built) Build();
+    }
+
     /// <summary>Whether the index is built, so writes must update it (else the first lookup reads every buffer).</summary>
     internal bool Live => _built;
 

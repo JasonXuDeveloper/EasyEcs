@@ -171,4 +171,47 @@ public class InstantiateTests
         var e = world.Instantiate(orc);
         Assert.That((e.Health.Value, e.IsFrozen, e.HasPosition), Is.EqualTo((30, false, false)));
     }
+
+    [Test]
+    public void APrefabWithMembersCreatesTheWholeGroupLinked()
+    {
+        using var world = new World();
+        var boss = new Prefab().Set(new Health(500));
+        var mount = boss.AddMember().Set(new Health(80));
+        var minion = boss.AddMember().Set(new Health(20));
+        mount.Set(new ChildOf(boss.Id));
+        minion.Set(new ChildOf(boss.Id), new Follows(mount.Id));
+        boss.Set(new Follows(new EntityId(99, 1)));                     // not a member: no entity of the instance
+
+        var first = world.Instantiate(boss);
+        var second = world.Instantiate(minion);                         // any member creates the group
+        Assert.That(world.EntityCount, Is.EqualTo(6));
+        Assert.That((first.Read<Health>().Value, first.Read<Follows>().Target), Is.EqualTo((500, EntityId.Null)));
+        Assert.That(world.Index<ChildOf, EntityId>().Count(first), Is.EqualTo(2));
+        var parent = world.GetEntity(second.Read<ChildOf>().Parent);
+        Assert.That((second.Read<Health>().Value, parent.Read<Health>().Value), Is.EqualTo((20, 500)));
+        Assert.That(world.GetEntity(second.Read<Follows>().Target).Read<Health>().Value, Is.EqualTo(80));
+        Assert.That(parent, Is.Not.EqualTo(first));
+        first.Destroy();                                                // the cascade takes its own group only
+        Assert.That(world.EntityCount, Is.EqualTo(3));
+    }
+
+    [Test]
+    public void ADerivedGroupCopiesEveryMemberAndReservingCoversThem()
+    {
+        using var world = new World();
+        var squad = new Prefab().Set(new Health(1));
+        squad.AddMember().Set(new ChildOf(squad.Id), new Armor(3));
+        var elite = new Prefab(squad).Set(new Health(9));
+        world.EnsureCapacity(elite, 11);
+        var leaders = new Entity[10];
+        world.Instantiate(elite, leaders);                              // warms the copy's buffers
+        foreach (var leader in leaders) leader.Destroy();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        world.Instantiate(elite, leaders);
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That((world.EntityCount, world.Count<Armor>(), leaders[3].Read<Health>().Value), Is.EqualTo((20, 10, 9)));
+        Assert.That(world.Index<ChildOf, EntityId>().Count(leaders[3]), Is.EqualTo(1));
+        Assert.That(world.Instantiate(squad).Read<Health>().Value, Is.EqualTo(1)); // the base kept its values
+    }
 }
