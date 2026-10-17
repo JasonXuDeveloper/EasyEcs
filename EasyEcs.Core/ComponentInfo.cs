@@ -73,6 +73,12 @@ internal abstract class ComponentInfo
 
     public abstract void CopyManaged(Array source, int sourceSlot, Array target, int targetSlot);
 
+    /// <summary>
+    /// Copy a managed element into another entity (<see cref="World.Instantiate(Entity)"/>): like
+    /// <see cref="CopyManaged"/>, but a <see cref="DynamicBuffer{T}"/> gets a list of its own.
+    /// </summary>
+    public abstract void CloneManaged(Array source, int sourceSlot, Array target, int targetSlot);
+
     public abstract void Clear(Array column, int start, int count);
 
     /// <summary>
@@ -110,6 +116,15 @@ internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsRefere
 
     public override void CopyManaged(Array source, int sourceSlot, Array target, int targetSlot) =>
         Unsafe.As<T[]>(target)[targetSlot] = Unsafe.As<T[]>(source)[sourceSlot];
+
+    public override void CloneManaged(Array source, int sourceSlot, Array target, int targetSlot)
+    {
+        ref T value = ref Unsafe.As<T[]>(target)[targetSlot];
+        value = Unsafe.As<T[]>(source)[sourceSlot];
+        if (default(T) is not IBuffer) return; // a JIT-time constant
+        ref var store = ref Unsafe.As<T, BufferStore>(ref value); // a DynamicBuffer's single field (see CopyRows)
+        store = store?.Clone();
+    }
 
     public override void Clear(Array column, int start, int count) => Array.Clear(column, start, count);
 

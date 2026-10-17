@@ -20,6 +20,9 @@ public sealed partial class World
 
         /// <summary>Entity <paramref name="id"/> is destroyed or loses the indexed component. Inside the structural gate.</summary>
         void Removed(int id);
+
+        /// <summary>New entity <paramref name="id"/> holds the component in row <paramref name="slot"/> of <paramref name="archetype"/>. Inside the structural gate.</summary>
+        void Added(int id, int version, Archetype archetype, int slot);
     }
 
     /// <summary>
@@ -71,6 +74,16 @@ public sealed partial class World
     private void Unindex(ushort bit, int id)
     {
         if (bit < _indexByBit.Length) _indexByBit[bit]?.Removed(id);
+    }
+
+    /// <summary>Tell the indexes of the components new entity <paramref name="id"/> has in row <paramref name="slot"/> (cold).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void IndexRow(Archetype archetype, int slot, int id, int version)
+    {
+        var components = archetype.Components;
+        for (int c = 0; c < components.Length; c++)
+            if (components[c] < _indexByBit.Length && _indexByBit[components[c]] is { } index && archetype.Has(c, slot))
+                index.Added(id, version, archetype, slot);
     }
 
     /// <summary>Tell the indexes of <paramref name="archetype"/>'s components that entity <paramref name="id"/> is destroyed (cold).</summary>

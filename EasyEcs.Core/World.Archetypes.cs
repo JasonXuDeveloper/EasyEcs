@@ -20,15 +20,15 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal StructuralScope Structural() => new(ref Gate);
 
-    /// <summary>Hold the shared gate (cold paths the threads of a parallel batch reach) until the scope is disposed.</summary>
+    /// <summary>Hold the shared gate (cold paths the threads of a parallel stage reach) until the scope is disposed.</summary>
     internal SharedScope Shared() => new(ref Gate);
 
     // Bumped by every structural change (and every storage reallocation or compaction), so an in-flight ForEach pass
     // knows when to refresh its cached array references and check whether its job moved the visited entity.
     internal int StorageVersion;
 
-    // Tag -> archetype (only touched under the gate).
-    private readonly Dictionary<Tag, Archetype> _archetypes = new();
+    // BitMask -> archetype (only touched under the gate).
+    private readonly Dictionary<BitMask, Archetype> _archetypes = new();
 
     // Copy-on-write snapshot of all archetypes (archetype creation is rare, reads are frequent).
     private Archetype[] _allArchetypes = Array.Empty<Archetype>();
@@ -98,7 +98,7 @@ public sealed partial class World
     /// Get or create the archetype for <paramref name="componentMask"/>. A new archetype is appended (copy-on-write)
     /// to every cached query it matches. Must be called inside the structural gate.
     /// </summary>
-    private Archetype GetOrCreateArchetype(in Tag mask)
+    private Archetype GetOrCreateArchetype(in BitMask mask)
     {
         var componentMask = ComponentInfo.AnyTracked ? WithCompanions(in mask) : mask;
         if (_archetypes.TryGetValue(componentMask, out var archetype))
@@ -122,7 +122,7 @@ public sealed partial class World
     /// component it lacks (a transition adds or removes the component alone). Cold path: new transitions only.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static Tag WithCompanions(in Tag mask)
+    private static BitMask WithCompanions(in BitMask mask)
     {
         var result = mask;
         bool cloned = false;
@@ -259,9 +259,10 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Archetype fragmentation statistics for monitoring (lock-free, approximate under concurrent changes).
+    /// Rows in use, living entities and the share of rows that are holes (tombstones of a pass in progress), for tests:
+    /// tables are dense between passes.
     /// </summary>
-    public (int TotalSlots, int AliveEntities, float FragmentationRatio) GetFragmentationStats()
+    internal (int Rows, int Alive, float HoleRatio) RowStats()
     {
         var all = Volatile.Read(ref _allArchetypes);
         int totalSlots = 0;

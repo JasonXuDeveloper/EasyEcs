@@ -35,7 +35,7 @@ internal struct EntitySlot
 
 internal sealed class Archetype
 {
-    public readonly Tag ComponentMask;
+    public readonly BitMask ComponentMask;
 
     /// <summary>Component bits of this archetype, ascending.</summary>
     public readonly ushort[] Components;
@@ -115,7 +115,7 @@ internal sealed class Archetype
     private int _holeCount;
 
     // Transition cache: component bit -> transition reached by adding that component (removing never moves rows).
-    // Avoids hashing a 256-bit Tag on every single-component structural change.
+    // Avoids hashing a 256-bit BitMask on every single-component structural change.
     private Transition[] _addEdges = [];
 
     // Same for multi-component adds (Set(a, b), CreateEntity(a, b, ...)), indexed by the dense index of the generic
@@ -124,7 +124,7 @@ internal sealed class Archetype
 
     private const int Tombstone = -1;
 
-    public Archetype(in Tag componentMask, int initialCapacity = 64)
+    public Archetype(in BitMask componentMask, int initialCapacity = 64)
     {
         ComponentMask = componentMask;
         Components = componentMask.ToBitArray();
@@ -220,7 +220,7 @@ internal sealed class Archetype
     /// Returns true when the row lacked it. Inside the structural gate.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Restore(int column, int slot)
+    public bool MarkPresent(int column, int slot)
     {
         if (Bits(column) is not { } bits) return false;
         ref ulong word = ref Word(bits, slot);
@@ -232,11 +232,11 @@ internal sealed class Archetype
     }
 
     /// <summary>
-    /// Take the component of column <paramref name="column"/> from row <paramref name="slot"/>: clear its presence bit
+    /// Mark row <paramref name="slot"/> as lacking the component of column <paramref name="column"/>: clear its presence bit
     /// (and a managed value, so the GC can collect what it referenced). Returns true when the row had it. Inside the
     /// structural gate.
     /// </summary>
-    public bool Take(int column, int slot)
+    public bool MarkAbsent(int column, int slot)
     {
         ref ulong word = ref Word(Bits(column) ?? AllocateBits(column), slot);
         ulong bit = 1UL << slot;
@@ -447,54 +447,88 @@ internal sealed class Archetype
             int t = target.ColumnIndex(source.Components[c]);
             if (t < 0) continue;
             // The copied tick (the row was copied first); it may be older than the target word's latest.
-            ulong tick = Unsafe.Add(ref Unsafe.As<ChangeTick, ulong>(ref target.Data<ChangeTick>(t)), to);
-            int w = to >> 6;
-            ulong bit = 1UL << to; // shift is mod 64
-            ref ulong latest = ref target.WordWrite[t][w];
-            ref ulong written = ref target.WordRows[t][w];
-            if (tick > latest)
-            {
-                target.WordRest[t][w] = latest;
-                latest = tick;
-                written = bit;
-            }
-            else if (tick == latest) written |= bit;
-            else
-            {
-                written &= ~bit;
-                ref ulong rest = ref target.WordRest[t][w];
-                rest = Math.Max(rest, tick);
-            }
-
-            ref ulong block = ref target.BlockWrite[t][to >> 12];
-            block = Math.Max(block, tick);
-            target.LastWrite[t] = Math.Max(target.LastWrite[t], tick);
+            target.NoteTick(t, to, Unsafe.Add(ref Unsafe.As<ChangeTick, ulong>(ref target.Data<ChangeTick>(t)), to));
         }
+    }
+
+    /// <summary>
+    /// Set row <paramref name="slot"/> of change-tick column <paramref name="column"/> to <paramref name="tick"/>, which
+    /// may be older than its word's latest (a copied or cleared row), keeping the summaries exact.
+    /// </summary>
+    public void SetTick(int column, int slot, ulong tick)
+    {
+        Unsafe.Add(ref Unsafe.As<ChangeTick, ulong>(ref Data<ChangeTick>(column)), slot) = tick;
+        NoteTick(column, slot, tick);
+    }
+
+    /// <summary>The summaries of change-tick column <paramref name="column"/> after row <paramref name="slot"/> got <paramref name="tick"/>.</summary>
+    private void NoteTick(int column, int slot, ulong tick)
+    {
+        int w = slot >> 6;
+        ulong bit = 1UL << slot; // shift is mod 64
+        ref ulong latest = ref WordWrite[column][w];
+        ref ulong written = ref WordRows[column][w];
+        if (tick > latest)
+        {
+            WordRest[column][w] = latest;
+            latest = tick;
+            written = bit;
+        }
+        else if (tick == latest) written |= bit;
+        else
+        {
+            written &= ~bit;
+            ref ulong rest = ref WordRest[column][w];
+            rest = Math.Max(rest, tick);
+        }
+
+        ref ulong block = ref BlockWrite[column][slot >> 12];
+        block = Math.Max(block, tick);
+        LastWrite[column] = Math.Max(LastWrite[column], tick);
     }
 
     /// <summary><see cref="Stamp{T}"/> for rows [<paramref name="start"/>, <paramref name="start"/> + <paramref name="count"/>).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void StampRows<T>(int start, int count, ulong tick) where T : struct, IComponent
     {
-        if (default(T) is ITrackChanges && count > 0)
-        {
-            int end = start + count;
-            MemoryMarshal.CreateSpan(ref Unsafe.As<ChangeTicks<T>, ulong>(ref Ticks<T>(tick, start, RunMask(start, end, start >> 6))), count).Fill(tick);
-            int column = ColumnIndex(ComponentType<ChangeTicks<T>>.Bit);
-            int first = (start >> 6) + 1, last = (end - 1) >> 6;
-            if (last >= first)
-            {
-                // Whole words between the first and the last: every row gets the tick, so the rest bound may be any
-                // tick up to it (the previous latest is one); the last word may be partial.
-                int whole = last - first;
-                WordWrite[column].AsSpan(first, whole).CopyTo(WordRest[column].AsSpan(first, whole));
-                WordWrite[column].AsSpan(first, whole).Fill(tick);
-                WordRows[column].AsSpan(first, whole).Fill(ulong.MaxValue);
-                NoteWord(column, last << 6, RunMask(start, end, last), tick);
-            }
+        if (default(T) is ITrackChanges && count > 0) StampRange(ColumnIndex(ComponentType<ChangeTicks<T>>.Bit), start, count, tick);
+    }
 
-            BlockWrite[column].AsSpan(start >> 12, ((end - 1) >> 12) - (start >> 12) + 1).Fill(tick);
+    /// <summary>
+    /// Rows [<paramref name="start"/>, <paramref name="start"/> + <paramref name="count"/>) (at least one) of change-tick
+    /// column <paramref name="column"/> get <paramref name="tick"/>, the world's current one (no row holds a later tick).
+    /// </summary>
+    private void StampRange(int column, int start, int count, ulong tick)
+    {
+        int end = start + count;
+        MemoryMarshal.CreateSpan(ref Unsafe.Add(ref Unsafe.As<ChangeTick, ulong>(ref Data<ChangeTick>(column)), start), count).Fill(tick);
+        ulong rows = RunMask(start, end, start >> 6);
+        if (Summary(WordWrite, column, start >> 6) == tick) Summary(WordRows, column, start >> 6) |= rows;
+        else NoteWord(column, start, rows, tick);
+        int first = (start >> 6) + 1, last = (end - 1) >> 6;
+        if (last >= first)
+        {
+            // Whole words between the first and the last: every row gets the tick, so the rest bound may be any
+            // tick up to it (the previous latest is one); the last word may be partial.
+            int whole = last - first;
+            WordWrite[column].AsSpan(first, whole).CopyTo(WordRest[column].AsSpan(first, whole));
+            WordWrite[column].AsSpan(first, whole).Fill(tick);
+            WordRows[column].AsSpan(first, whole).Fill(ulong.MaxValue);
+            NoteWord(column, last << 6, RunMask(start, end, last), tick);
         }
+
+        BlockWrite[column].AsSpan(start >> 12, ((end - 1) >> 12) - (start >> 12) + 1).Fill(tick);
+    }
+
+    /// <summary>
+    /// Rows [<paramref name="start"/>, <paramref name="start"/> + <paramref name="count"/>) of change-tick column
+    /// <paramref name="column"/> were never written (tick 0): new rows whose component is absent, not removed.
+    /// </summary>
+    private void ClearTicks(int column, int start, int count)
+    {
+        int end = start + count;
+        MemoryMarshal.CreateSpan(ref Unsafe.Add(ref Unsafe.As<ChangeTick, ulong>(ref Data<ChangeTick>(column)), start), count).Clear();
+        for (int w = start >> 6; w <= (end - 1) >> 6; w++) WordRows[column][w] &= ~RunMask(start, end, w); // rest bounds stay
     }
 
     /// <summary>The rows of [<paramref name="start"/>, <paramref name="end"/>) in word <paramref name="word"/>.</summary>
@@ -527,6 +561,58 @@ internal sealed class Archetype
         if (default(T) is not ITrackChanges || rows == 0) return;
         ref var ticks = ref Ticks<T>(tick, word << 6, rows);
         for (; rows != 0; rows &= rows - 1) Unsafe.Add(ref ticks, BitOperations.TrailingZeroCount(rows)).Tick = tick;
+    }
+
+    /// <summary>
+    /// Copy row <paramref name="from"/> of <paramref name="source"/>, a table with the same components (of this world or
+    /// a prefab's), into the <paramref name="count"/> (at least one) new rows from <paramref name="to"/>: values (each
+    /// dynamic buffer gets a list of its own), the components the row lacks, and change ticks: a component the row has
+    /// counts as written at <paramref name="tick"/>, one it lacks was never removed here. Unmanaged values are copied
+    /// into the first row, then into the others by doubling copies. Inside the structural gate.
+    /// </summary>
+    public void CloneRows(Archetype source, int from, int to, int count, ulong tick)
+    {
+        for (int c = 0; c < Columns.Length; c++)
+        {
+            var info = Info(c);
+            if (info.Owner >= 0)
+            {
+                if (source.Has(ColumnIndex(info.Owner), from)) StampRange(c, to, count, tick);
+                else ClearTicks(c, to, count);
+                continue;
+            }
+
+            if (!source.Has(c, from))
+            {
+                for (int row = to; row < to + count; row++) MarkAbsent(c, row);
+                continue;
+            }
+
+            if (info.Managed)
+            {
+                for (int row = to; row < to + count; row++) info.CloneManaged(source.Columns[c], from, Columns[c], row);
+                continue;
+            }
+
+            ref byte first = ref Unsafe.Add(ref Aligned(Columns[c]), (nint)to * info.Size);
+            CopyBytes(ref Unsafe.Add(ref Aligned(source.Columns[c]), (nint)from * info.Size), ref first, info.Size);
+            // Rows [to, to + done) hold the value: copy them after themselves until every row does
+            for (nint done = info.Size, total = (nint)count * info.Size; done < total; done *= 2)
+                Unsafe.CopyBlockUnaligned(ref Unsafe.Add(ref first, done), ref first, (uint)Math.Min(done, total - done));
+        }
+    }
+
+    /// <summary>
+    /// Empty the table at once (every row is destroyed; no pass is in progress and it has no tombstones): the rows'
+    /// entities must be freed by the caller first. Managed values are cleared for the GC. Inside the structural gate.
+    /// </summary>
+    public void Clear()
+    {
+        if (_hasManaged) ReleaseRows(0, Count);
+        foreach (ref var row in Slots.AsSpan(0, Count)) row.Id = Tombstone; // versions stay, as Remove leaves them
+        Count = 0;
+        AliveCount = 0;
+        if (HasAbsent) Absent.AsSpan().Clear();
     }
 
     /// <summary>Append an entity and return its row (a pass that started earlier does not visit it).</summary>
@@ -919,6 +1005,6 @@ internal sealed class Transition
     {
         foreach (ref readonly var step in _plan.AsSpan())
             if (!Source.Has(step.From, slot))
-                Target.Take(step.To, targetSlot);
+                Target.MarkAbsent(step.To, targetSlot);
     }
 }

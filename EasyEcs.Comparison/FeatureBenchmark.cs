@@ -279,6 +279,225 @@ public class ChangeTrackingComparison
     }
 }
 
+/// <summary>EasyEcs removal detection: a buff is tracked, so its removal is a row the next pass can select.</summary>
+public record struct Buff(int Ticks) : EasyEcs.IComponent, ITrackChanges;
+
+public record struct Expired(int Count) : EasyEcs.IComponent;
+
+public struct RemovalsOnly : ISystemGroup;
+
+[UpdateInGroup<RemovalsOnly>]
+public partial class ReplicateRemovals : EcsSystem
+{
+    [ForEach, Removed<Buff>]
+    private static void Send(ref Expired expired) => expired.Count++;
+}
+
+public struct FBuff : F.IComponent { public int Ticks; }
+public struct FExpired : F.IComponent { public int Count; }
+public struct ABuff { public int Ticks; }
+public struct AExpired { public int Count; }
+public struct ALost;
+public struct DBuff { public int Ticks; }
+public struct DExpired { public int Count; }
+
+/// <summary>
+/// Replicating removals: 100,000 entities with a buff; per tick <see cref="Removed"/> buffs expire (removed through
+/// handles) and the buffs that expired the tick before are given back, then every entity that lost its buff since
+/// the last tick is visited once (the removal is sent: a counter on the entity).
+/// <list type="bullet">
+/// <item>EasyEcs: <c>[Removed&lt;Buff&gt;]</c> (a removal keeps the row and stamps its change tick).</item>
+/// <item>DefaultEcs: an entity set built with <c>WhenRemoved&lt;T&gt;()</c>, completed after each tick.</item>
+/// <item>Friflo: its <c>OnComponentRemoved</c> event, collecting the ids of the entities that lost the buff.</item>
+/// <item>Arch has neither: a <c>Lost</c> tag added next to each removal, visited and removed by query.</item>
+/// </list>
+/// </summary>
+[MemoryDiagnoser]
+public class RemovalComparison
+{
+    private const int Entities = 100_000;
+
+    [Params(10, 1_000)] public int Removed;
+
+    private EasyEcs.World _world;
+    private EasyEcs.Entity[] _entities;
+    private F.EntityStore _store;
+    private F.Entity[] _fEntities;
+    private int[] _fLost;
+    private int _fLostCount;
+    private A.World _arch;
+    private A.Entity[] _aEntities;
+    private D.World _default;
+    private D.Entity[] _dEntities;
+    private D.EntitySet _dRemoved;
+    private int[] _previous, _current;
+    private int _next;
+    private long _sent;
+
+    private static readonly A.QueryDescription ArchLost = new A.QueryDescription().WithAll<AExpired, ALost>();
+
+    [GlobalSetup(Target = nameof(EasyEcs_Removed))]
+    public void SetupEasyEcs()
+    {
+        Slices();
+        _world = new EasyEcs.World(new WorldOptions { InitialEntityCapacity = Entities });
+        _entities = new EasyEcs.Entity[Entities];
+        _world.CreateEntities(_entities, new Buff(10), new Expired());
+        _world.AddSystem<ReplicateRemovals>();
+        WarmUp(EasyEcs_Removed, () =>
+        {
+            long sent = 0;
+            foreach (var e in _entities) sent += e.Get<Expired>().Count;
+            return sent;
+        });
+    }
+
+    [GlobalSetup(Target = nameof(Friflo_Event))]
+    public void SetupFriflo()
+    {
+        Slices();
+        _store = new F.EntityStore();
+        _fEntities = new F.Entity[Entities];
+        _fLost = new int[Removed];
+        for (int i = 0; i < Entities; i++) _fEntities[i] = _store.CreateEntity(new FBuff { Ticks = 10 }, new FExpired());
+        _store.OnComponentRemoved += changed =>
+        {
+            if (changed.ComponentType.Type == typeof(FBuff)) _fLost[_fLostCount++] = changed.EntityId;
+        };
+        WarmUp(Friflo_Event, () =>
+        {
+            long sent = 0;
+            foreach (var e in _fEntities) sent += e.GetComponent<FExpired>().Count;
+            return sent;
+        });
+    }
+
+    [GlobalSetup(Target = nameof(Arch_LostTag))]
+    public void SetupArch()
+    {
+        Slices();
+        _arch = A.World.Create();
+        _aEntities = new A.Entity[Entities];
+        for (int i = 0; i < Entities; i++) _aEntities[i] = _arch.Create(new ABuff { Ticks = 10 }, new AExpired());
+        WarmUp(Arch_LostTag, () =>
+        {
+            long sent = 0;
+            foreach (var e in _aEntities) sent += _arch.Get<AExpired>(e).Count;
+            return sent;
+        });
+    }
+
+    [GlobalSetup(Target = nameof(DefaultEcs_WhenRemoved))]
+    public void SetupDefaultEcs()
+    {
+        Slices();
+        _default = new D.World(Entities);
+        _dEntities = new D.Entity[Entities];
+        for (int i = 0; i < Entities; i++)
+        {
+            var e = _dEntities[i] = _default.CreateEntity();
+            e.Set(new DBuff { Ticks = 10 });
+            e.Set(new DExpired());
+        }
+
+        _dRemoved = _default.GetEntities().With<DExpired>().WhenRemoved<DBuff>().AsSet();
+        _dRemoved.Complete();
+        WarmUp(DefaultEcs_WhenRemoved, () =>
+        {
+            long sent = 0;
+            foreach (var e in _dEntities) sent += e.Get<DExpired>().Count;
+            return sent;
+        });
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        _world?.Dispose();
+        if (_arch != null) A.World.Destroy(_arch);
+        _default?.Dispose();
+        (_world, _arch, _default) = (null, null, null);
+    }
+
+    private void Slices()
+    {
+        _previous = new int[Removed];
+        _current = new int[Removed];
+        _next = 0;
+        _sent = 0;
+        for (int i = 0; i < Removed; i++) _previous[i] = -1;
+    }
+
+    /// <summary>The buffs that expire this tick (a different slice every tick, the same order in every library).</summary>
+    private void NextSlice()
+    {
+        (_previous, _current) = (_current, _previous);
+        for (int i = 0; i < Removed; i++) _current[i] = _next = (_next + 97) % Entities;
+    }
+
+    [Benchmark(Baseline = true)]
+    public void EasyEcs_Removed()
+    {
+        NextSlice();
+        foreach (int i in _previous) if (i >= 0) _entities[i].Set(new Buff(10));
+        foreach (int i in _current) _entities[i].Remove<Buff>();
+        _world.Update<RemovalsOnly>();
+        _sent += Removed;
+    }
+
+    [Benchmark]
+    public void DefaultEcs_WhenRemoved()
+    {
+        NextSlice();
+        foreach (int i in _previous) if (i >= 0) _dEntities[i].Set(new DBuff { Ticks = 10 });
+        foreach (int i in _current) _dEntities[i].Remove<DBuff>();
+        var expired = _default.GetComponents<DExpired>();
+        foreach (ref readonly var e in _dRemoved.GetEntities()) expired[e].Count++;
+        _dRemoved.Complete();
+        _sent += Removed;
+    }
+
+    [Benchmark]
+    public void Friflo_Event()
+    {
+        NextSlice();
+        foreach (int i in _previous) if (i >= 0) _fEntities[i].AddComponent(new FBuff { Ticks = 10 });
+        foreach (int i in _current) _fEntities[i].RemoveComponent<FBuff>();
+        for (int i = 0; i < _fLostCount; i++) _store.GetEntityById(_fLost[i]).GetComponent<FExpired>().Count++;
+        _fLostCount = 0;
+        _sent += Removed;
+    }
+
+    [Benchmark]
+    public void Arch_LostTag()
+    {
+        NextSlice();
+        foreach (int i in _previous) if (i >= 0) _arch.Add(_aEntities[i], new ABuff { Ticks = 10 });
+        foreach (int i in _current)
+        {
+            _arch.Remove<ABuff>(_aEntities[i]);
+            _arch.Add<ALost>(_aEntities[i]);
+        }
+
+        var send = new Send();
+        _arch.InlineQuery<Send, AExpired>(in ArchLost, ref send);
+        _arch.Remove<ALost>(in ArchLost);
+        _sent += Removed;
+    }
+
+    private struct Send : A.IForEach<AExpired>
+    {
+        public void Update(ref AExpired expired) => expired.Count++;
+    }
+
+    /// <summary>Warm up, then check that every removal was sent exactly once.</summary>
+    private void WarmUp(Action tick, Func<long> sent)
+    {
+        for (int i = 0; i < 200; i++) tick();
+        if (sent() != _sent) throw new InvalidOperationException($"{sent()} removals sent, {_sent} made");
+    }
+}
+
 /// <summary>
 /// Inventories as a relation: 100,000 items, each pointing at one of 1,000 owners. Per operation <see cref="Trades"/>
 /// items change hands (1: lookups dominate, as on most ticks; 100: a burst of trades) and the inventories of 100 owners

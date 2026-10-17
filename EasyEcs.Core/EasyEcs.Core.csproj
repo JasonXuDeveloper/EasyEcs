@@ -29,6 +29,11 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <!-- World.RowStats: tests check that tables are dense between passes -->
+        <InternalsVisibleTo Include="EasyEcs.UnitTest" />
+    </ItemGroup>
+
+    <ItemGroup>
         <None Include="..\README.md" Pack="true" PackagePath="\"/>
     </ItemGroup>
 

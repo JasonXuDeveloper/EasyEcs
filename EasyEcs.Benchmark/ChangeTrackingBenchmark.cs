@@ -65,7 +65,7 @@ public partial class ChangeTrackingBenchmark
 
         if (Changed)
         {
-            foreach (var item in _world.Query<Health, Replica>(HealthChanged.ChangedSince(mark)))
+            foreach (var item in _world.Query<Health, Replica>(HealthChanged.Since(mark)))
                 item.Component2 = new Replica(item.Component1.Value);
         }
         else

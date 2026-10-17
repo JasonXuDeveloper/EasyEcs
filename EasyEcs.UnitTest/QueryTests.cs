@@ -156,7 +156,7 @@ public partial class QueryTests
         for (int i = 0; i < 50; i++) spawned.Add(_world.CreateEntity(new Health(i)));
         for (int i = 0; i < 50; i += 2) spawned[i].Destroy(); // the last row fills each hole at once
 
-        Assert.That(_world.GetFragmentationStats().FragmentationRatio, Is.Zero);
+        Assert.That(_world.RowStats().HoleRatio, Is.Zero);
         for (int i = 1; i < 50; i += 2) Assert.That(spawned[i].Get<Health>().Value, Is.EqualTo(i));
         Assert.That(_world.Count<Health>(), Is.EqualTo(25));
     }
@@ -170,7 +170,7 @@ public partial class QueryTests
         for (int i = 0; i < 20; i++)
         {
             world.Update(); // 500 entities change archetype inside the pass: tombstones until it ends
-            Assert.That(world.GetFragmentationStats(), Is.EqualTo((1_000, 1_000, 0f)));
+            Assert.That(world.RowStats(), Is.EqualTo((1_000, 1_000, 0f)));
         }
 
         int visited = 0;
@@ -248,13 +248,13 @@ public partial class QueryTests
         for (int i = 0; i < 20; i++) world.CreateEntity(new Health(i));
         var job = new DestroyThenFail();
         Assert.Throws<InvalidOperationException>(() => world.ForEachEntity<Health, DestroyThenFail>(ref job));
-        Assert.That(world.GetFragmentationStats().FragmentationRatio, Is.Zero);   // the tombstones were closed
+        Assert.That(world.RowStats().HoleRatio, Is.Zero);   // the tombstones were closed
         var values = new List<int>();
         foreach (var item in world.Query<Health>()) values.Add(item.Component1.Value);
         values.Sort();
         Assert.That(values, Is.EqualTo(new[] { 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 }));
         world.CreateEntity(new Health(99)).Destroy();                            // rows are reused again
-        Assert.That(world.GetFragmentationStats().FragmentationRatio, Is.Zero);
+        Assert.That(world.RowStats().HoleRatio, Is.Zero);
     }
 
     [Test]
@@ -265,9 +265,9 @@ public partial class QueryTests
         var walk = world.Query<Health>().GetEnumerator();                        // never disposed
         Assert.That(walk.MoveNext(), Is.True);
         walk.Current.Entity.Destroy();                                            // a tombstone: the pass is open
-        Assert.That(world.GetFragmentationStats().FragmentationRatio, Is.Positive);
+        Assert.That(world.RowStats().HoleRatio, Is.Positive);
         world.Update();
-        Assert.That(world.GetFragmentationStats().FragmentationRatio, Is.Zero);
+        Assert.That(world.RowStats().HoleRatio, Is.Zero);
         Assert.That(world.Count<Health>(), Is.EqualTo(19));
     }
 

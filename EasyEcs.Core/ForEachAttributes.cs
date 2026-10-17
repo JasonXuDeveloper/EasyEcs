@@ -53,3 +53,13 @@ public sealed class WithAnyAttribute<T> : Attribute where T : struct, IComponent
 /// </summary>
 [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
 public sealed class ChangedAttribute<T> : Attribute where T : struct, IComponent, ITrackChanges;
+
+/// <summary>
+/// The <see cref="ForEachAttribute"/> method visits only entities that lost <typeparamref name="T"/> since its system
+/// last ran (<see cref="EcsSystem.LastRunTick"/>) and have not got it back: replication sends the removal, a cleanup
+/// releases what the component stood for. Removing a component keeps the entity's row, so the method can read the
+/// entity's other components; destroyed entities are not visited. <typeparamref name="T"/> tracks changes
+/// (<see cref="ITrackChanges"/>) and is not a parameter (the entity no longer has it, EECS016).
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
+public sealed class RemovedAttribute<T> : Attribute where T : struct, IComponent, ITrackChanges;

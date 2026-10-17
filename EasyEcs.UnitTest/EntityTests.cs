@@ -109,7 +109,7 @@ public class EntityTests
             // Accesses and changes: an InvalidOperationException naming the cause.
             Assert.Throws<InvalidOperationException>(() => handle.Get<Health>());
             Assert.Throws<InvalidOperationException>(() => handle.Read<Health>());
-            Assert.Throws<InvalidOperationException>(() => handle.Add<Velocity>());
+            Assert.Throws<InvalidOperationException>(() => handle.GetOrAdd<Velocity>());
             Assert.Throws<InvalidOperationException>(() => handle.Set(new Velocity()));
             Assert.Throws<InvalidOperationException>(() => handle.Remove<Health>());
             handle.Destroy();                                              // a no-op
@@ -201,5 +201,58 @@ public class EntityTests
         var recycled = _world.CreateEntity();
         Assert.That(recycled.Id, Is.EqualTo(e.Id));
         Assert.That(recycled, Is.Not.EqualTo(e));                             // another incarnation
+    }
+
+    [Test]
+    public void DestroyingWholeTablesFreesEveryEntityAndItsIndexEntries()
+    {
+        using var world = new World();
+        var parent = world.CreateEntity();
+        var children = world.Index<ChildOf, Entity>();
+        var spawned = new Entity[300];
+        world.CreateEntities(spawned, new ChildOf(parent), new Position(), new Callsign("x"));
+        spawned[7].Remove<Position>();                                  // a row lacking a component still goes
+        Assert.That(children.Count(parent), Is.EqualTo(300));
+        Assert.That(world.DestroyEntities<ChildOf>(), Is.EqualTo(300));
+        Assert.That(spawned, Has.All.Matches<Entity>(e => !e.IsAlive));
+        Assert.That(children.Count(parent), Is.Zero);
+        Assert.That(world.EntityCount, Is.EqualTo(1));
+        var again = new Entity[300];
+        world.CreateEntities(again, new ChildOf(parent), new Position(), new Callsign("y")); // the ids come back
+        Assert.That(again[0].Has<Position>() && again[0].Read<Callsign>().Value == "y", Is.True);
+        Assert.That(spawned[0].IsAlive, Is.False);                     // old handles stay stale
+        Assert.That(children.Count(parent), Is.EqualTo(300));
+    }
+
+    [Test]
+    public void DestroyingAWholeTableDuringAPassLeavesTombstones()
+    {
+        using var world = new World();
+        world.CreateEntities(new Entity[100], new Position(), new Health(1));
+        int visited = 0;
+        foreach (var item in world.Query<Health>())
+        {
+            if (visited++ == 0) Assert.That(world.DestroyEntities<Position>(), Is.EqualTo(100));
+        }
+
+        Assert.That(visited, Is.EqualTo(1));                            // destroyed rows are skipped
+        Assert.That(world.EntityCount, Is.Zero);
+        world.CreateEntities(new Entity[10], new Position(), new Health(2));
+        Assert.That(world.Count<Health>(), Is.EqualTo(10));
+    }
+
+    [Test]
+    public void RemovingSeveralComponentsTellsIndexesAndTracksRemovals()
+    {
+        using var world = new World();
+        var e = world.CreateEntity(new Armor(1), new Callsign("x"), new Position(), new Seen());
+        var callsigns = world.Index<Callsign, string>();
+        Assert.That(callsigns.Count("x"), Is.EqualTo(1));
+        world.Update();
+        ulong mark = world.ChangeTick;
+        e.Remove<Armor, Callsign, Frozen>();                            // Frozen it lacks: ignored
+        Assert.That(callsigns.Count("x"), Is.Zero);
+        Assert.That(world.Count<Seen>(QueryFilter.Create().Removed<Armor>(mark)), Is.EqualTo(1));
+        Assert.That(e.Has<Position>() && !e.Has<Armor>() && !e.Has<Callsign>(), Is.True);
     }
 }

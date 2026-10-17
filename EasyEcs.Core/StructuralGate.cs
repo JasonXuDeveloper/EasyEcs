@@ -13,7 +13,7 @@ namespace EasyEcs;
 /// while it runs). It cannot catch every change made from another thread
 /// at the same moment as the owner's; the analyzer (EECS013, EECS014) reports those it can see.
 /// <para>
-/// The cold paths the threads of a parallel batch reach on their own (adding a missing singleton, a query's first
+/// The cold paths the threads of a parallel stage reach on their own (adding a missing singleton, a query's first
 /// match, closing the tombstones when the last pass ends) take the shared gate instead: one compare-and-swap, spinning
 /// under contention. Both flags sit on their own cache line, away from the world's hot fields.
 /// </para>
@@ -38,7 +38,7 @@ internal struct StructuralGate
     public void Exit() => _held = 0;
 
     /// <summary>
-    /// A frozen region (a batch of systems, the chunks of a parallel [ForEach], a batch job) starts: structural changes
+    /// A frozen region (a stage of systems, the chunks of a parallel [ForEach], a batch job) starts: structural changes
     /// throw until it ends. Regions nest (a batch job inside a parallel system), hence the atomic add.
     /// </summary>
     public void Freeze() => Interlocked.Add(ref _held, FrozenRegion);

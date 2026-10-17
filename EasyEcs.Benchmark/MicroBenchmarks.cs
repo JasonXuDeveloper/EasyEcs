@@ -59,7 +59,7 @@ public class MicroBenchmarks
         for (int i = 0; i < N; i++)
         {
             var e = _queryCtx.CreateEntity(new Position(), new Velocity());
-            if ((i & 1) == 0) e.Add<Health>();
+            if ((i & 1) == 0) e.Set(new Health());
         }
 
         _queryCtx.AddSingleton<Clock>();
@@ -76,7 +76,13 @@ public class MicroBenchmarks
 
         _churn = new World(new WorldOptions { InitialEntityCapacity = 1024 });
         _churned = new Entity[N / 10];
+        _states = new World();
+        _stateHandles = new Entity[N / 10];
+        _states.CreateEntities(_stateHandles, new Position(), new Velocity(), new Health(), new Energy());
     }
+
+    private World _states;
+    private Entity[] _stateHandles;
 
     /// <summary>
     /// Create N entities with 2 components, then destroy them all, in a new world (cold start: the world, its tables
@@ -90,8 +96,8 @@ public class MicroBenchmarks
         for (int i = 0; i < N; i++)
         {
             var e = world.CreateEntity();
-            e.Add<Position>();
-            e.Add<Velocity>();
+            e.Set(new Position());
+            e.Set(new Velocity());
             entities[i] = e;
         }
 
@@ -130,6 +136,20 @@ public class MicroBenchmarks
         return _churn.EntityCount;
     }
 
+    /// <summary>Remove three components in one call and give them back in one call (a status with several parts).</summary>
+    [Benchmark]
+    public int RemoveMany()
+    {
+        var entities = _stateHandles;
+        for (int i = 0; i < entities.Length; i++)
+        {
+            entities[i].Remove<Velocity, Health, Energy>();
+            entities[i].Set(new Velocity(), new Health(), new Energy());
+        }
+
+        return entities.Length;
+    }
+
     /// <summary>Remove + add a component (state toggles such as buffs or combat state).</summary>
     [Benchmark]
     public int ToggleComponent()
@@ -141,7 +161,7 @@ public class MicroBenchmarks
             if (e.Has<Health>())
             {
                 e.Remove<Health>();
-                e.Add<Health>();
+                e.Set(new Health());
                 c++;
             }
         }

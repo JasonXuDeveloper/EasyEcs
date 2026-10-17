@@ -5,8 +5,8 @@ using System.Threading;
 namespace EasyEcs;
 
 // System scheduling. Systems run synchronously, in ascending Priority (registration order breaks ties). Systems of one
-// priority are split into batches of consecutive systems whose SystemAccess does not conflict; with
-// WorldOptions.ParallelSystems a batch runs at the same time (World.Parallel.cs). Each update calls OnUpdate() then the
+// priority are split into stages of consecutive systems whose SystemAccess does not conflict; with
+// WorldOptions.ParallelSystems a stage runs at the same time (World.Parallel.cs). Each update calls OnUpdate() then the
 // generated [ForEach] methods.
 public sealed partial class World
 {
@@ -105,21 +105,21 @@ public sealed partial class World
         if (Volatile.Read(ref Passes) != 0) CompactArchetypes();
 
         long update = ++group.Updates;
-        var batches = group.Batches;
+        var stages = group.Stages;
         bool parallel = _options.ParallelSystems;
-        for (int b = 0; b < batches.Length; b++)
+        for (int b = 0; b < stages.Length; b++)
         {
-            var batch = batches[b];
-            // One change tick per batch: its systems never write what another one of them reads (Changed<T> reads T).
+            var stage = stages[b];
+            // One change tick per stage: its systems never write what another one of them reads (Changed<T> reads T).
             _changeTick++;
-            if (parallel && batch.Length > 1)
+            if (parallel && stage.Length > 1)
             {
-                RunBatch(batch, update);
+                RunStage(stage, update);
                 continue;
             }
 
-            for (int i = 0; i < batch.Length; i++)
-                RunSystem(batch[i], update);
+            for (int i = 0; i < stage.Length; i++)
+                RunSystem(stage[i], update);
         }
 
         _changeTick++; // writes between updates are newer than every system's last run
@@ -212,13 +212,13 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Systems of one group sorted by priority (stable), with their parallel batches. Mutated under
+    /// Systems of one group sorted by priority (stable), with their parallel stages. Mutated under
     /// the structural gate by publishing new arrays (copy-on-write), so a running update never sees a torn list.
     /// </summary>
     internal sealed class SystemSchedule
     {
         public EcsSystem[] Systems = [];
-        public EcsSystem[][] Batches = [];
+        public EcsSystem[][] Stages = [];
         public long Updates;
 
         public void Insert(EcsSystem system)
@@ -244,22 +244,22 @@ public sealed partial class World
         }
 
         /// <summary>
-        /// Batches are runs of consecutive systems of one priority with pairwise non-conflicting access. Consecutive
+        /// Stages are runs of consecutive systems of one priority with pairwise non-conflicting access. Consecutive
         /// keeps the meaning of registration order: of two conflicting systems, the earlier one always finishes first.
         /// </summary>
         private void Publish(EcsSystem[] systems)
         {
-            var batches = new List<EcsSystem[]>();
+            var stages = new List<EcsSystem[]>();
             for (int i = 0; i < systems.Length;)
             {
                 int start = i++;
                 while (i < systems.Length && systems[i].Priority == systems[start].Priority && Fits(systems, start, i)) i++;
-                batches.Add(systems[start..i]);
+                stages.Add(systems[start..i]);
             }
 
-            // An update reads only Batches: one reference, so it never mixes two versions of the list.
+            // An update reads only Stages: one reference, so it never mixes two versions of the list.
             Systems = systems;
-            Batches = batches.ToArray();
+            Stages = stages.ToArray();
         }
 
         private static bool Fits(EcsSystem[] systems, int start, int next)

@@ -48,15 +48,14 @@ public class ComponentTests
     }
 
     [Test]
-    public void AddGetAndRefsWriteThrough()
+    public void GetOrAddGetAndRefsWriteThrough()
     {
         var e = _world.CreateEntity();
-        e.Add<Health>().Value = 10;
-        e.Get<Health>().Value += 5;
+        e.GetOrAdd<Health>().Value = 10;
+        e.GetOrAdd<Health>().Value += 5;                               // present: the value is kept
 
         Assert.That(e.Has<Health>(), Is.True);
         Assert.That(e.Get<Health>().Value, Is.EqualTo(15));
-        Assert.That(e.Add<Health>().Value, Is.Zero, "Add resets an existing component");
         Assert.Throws<InvalidOperationException>(() => e.Get<Position>());
     }
 
@@ -153,7 +152,7 @@ public class ComponentTests
     {
         var e = _world.CreateEntity();
         e.Destroy();
-        Assert.Throws<InvalidOperationException>(() => e.Add<Health>());
+        Assert.Throws<InvalidOperationException>(() => e.GetOrAdd<Health>());
         Assert.Throws<InvalidOperationException>(() => e.Set(new Health(1)));
         Assert.Throws<InvalidOperationException>(() => e.Remove<Health>());
     }
@@ -165,7 +164,7 @@ public class ComponentTests
         var e = _world.CreateEntity();
         var other = _world.CreateEntity();
         Wide.AddAll(e);
-        other.Add<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>().Value = 7;
+        other.GetOrAdd<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>().Value = 7;
 
         Assert.That(e.Has<Wide.Bit<Wide.D0, Wide.D0, Wide.D0>>(), Is.True);
         Assert.That(e.Has<Wide.Bit<Wide.D2, Wide.D9, Wide.D9>>(), Is.True);
@@ -208,10 +207,10 @@ public class ComponentTests
         for (int i = 0; i < entities.Length; i++)
         {
             entities[i] = _world.CreateEntity();
-            Fill(ref entities[i].Add<T>(), size, i);
+            Fill(ref entities[i].GetOrAdd<T>(), size, i);
         }
 
-        foreach (var e in entities) e.Add<Health>();
+        foreach (var e in entities) e.Set(new Health());
         entities[0].Destroy();
         foreach (var e in entities[1..]) e.Remove<Health>();
         entities[1].Destroy();
@@ -252,9 +251,9 @@ internal static class Wide
 
     private static void Ones<TA, TB>(Entity e)
     {
-        e.Add<Bit<TA, TB, D0>>(); e.Add<Bit<TA, TB, D1>>(); e.Add<Bit<TA, TB, D2>>(); e.Add<Bit<TA, TB, D3>>();
-        e.Add<Bit<TA, TB, D4>>(); e.Add<Bit<TA, TB, D5>>(); e.Add<Bit<TA, TB, D6>>(); e.Add<Bit<TA, TB, D7>>();
-        e.Add<Bit<TA, TB, D8>>(); e.Add<Bit<TA, TB, D9>>();
+        e.GetOrAdd<Bit<TA, TB, D0>>(); e.GetOrAdd<Bit<TA, TB, D1>>(); e.GetOrAdd<Bit<TA, TB, D2>>(); e.GetOrAdd<Bit<TA, TB, D3>>();
+        e.GetOrAdd<Bit<TA, TB, D4>>(); e.GetOrAdd<Bit<TA, TB, D5>>(); e.GetOrAdd<Bit<TA, TB, D6>>(); e.GetOrAdd<Bit<TA, TB, D7>>();
+        e.GetOrAdd<Bit<TA, TB, D8>>(); e.GetOrAdd<Bit<TA, TB, D9>>();
     }
 
 }

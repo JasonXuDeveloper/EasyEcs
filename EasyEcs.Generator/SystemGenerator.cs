@@ -50,8 +50,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append("    protected override void GeneratedUpdate()\n    {\n        base.GeneratedUpdate();\n        var world = World;\n");
         foreach (var method in model.Methods)
         {
-            // [Changed<T>]: rows written since this system last ran.
-            string filter = method.Changed.Length > 0 ? $", __{method.Name}Filter.ChangedSince(LastRunTick + 1)"
+            // [Changed<T>] / [Removed<T>]: rows written (or that lost T) since this system last ran.
+            string filter = method.Changed.Length + method.Removed.Length > 0 ? $", __{method.Name}Filter.Since(LastRunTick + 1)"
                 : method.HasFilter ? $", in __{method.Name}Filter" : "";
             var fields = new List<string>();
             if (!method.IsStatic) fields.Add("System = this");
@@ -79,7 +79,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
     private static void EmitAccess(StringBuilder sb, UpdateModel model)
     {
         sb.Append($"    protected override global::System.Type GeneratedFor => typeof({model.Owner.Name});\n\n");
-        sb.Append("    /// <summary>Declares what the [ForEach] methods read and write (parallel batching).</summary>\n");
+        sb.Append("    /// <summary>Declares what the [ForEach] methods read and write (parallel stages).</summary>\n");
         sb.Append("    protected override void GeneratedAccess(ref global::EasyEcs.SystemAccess access)\n    {\n");
         if (!model.Owner.BaseIsEcsSystem) sb.Append("        base.GeneratedAccess(ref access);\n");
         bool alone = model.Owner.OverridesOnUpdate || model.Methods.Any(m => !m.IsStatic
@@ -96,8 +96,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
             sb.Append($"        access.{(p.RefKind == "ref" ? "Write" : "Read")}{kind}<{p.Type}>();\n");
         }
 
-        // [Changed<T>] reads T's change ticks, which writers of T stamp.
-        foreach (var type in model.Methods.SelectMany(m => m.Changed).Distinct())
+        // [Changed<T>] and [Removed<T>] read T's change ticks, which writers and removers of T stamp.
+        foreach (var type in model.Methods.SelectMany(m => m.Changed.Concat(m.Removed)).Distinct())
             sb.Append($"        access.Read<{type}>();\n");
 
         sb.Append("    }\n");
@@ -153,7 +153,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
         if (!method.HasFilter) return;
         var chain = method.With.Select(t => $".With<{t}>()").Concat(method.Without.Select(t => $".Without<{t}>()"))
-            .Concat(method.WithAny.Select(t => $".WithAny<{t}>()")).Concat(method.Changed.Select(t => $".Changed<{t}>(0)"));
+            .Concat(method.WithAny.Select(t => $".WithAny<{t}>()")).Concat(method.Changed.Select(t => $".Changed<{t}>(0)")).Concat(method.Removed.Select(t => $".Removed<{t}>(0)"));
         sb.Append($"    private static readonly global::EasyEcs.QueryFilter __{method.Name}Filter = global::EasyEcs.QueryFilter.Create(){string.Concat(chain)};\n\n");
     }
 
@@ -199,9 +199,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// <param name="Parallel">[ForEach(Parallel = true)] on a method that can run on several threads (ForEachParallel).</param>
     private sealed record ForEachModel(OwnerModel Owner, string Name, bool IsStatic, bool Stable, bool Parallel, int Order,
         EquatableArray<string> Query, EquatableArray<ParamModel> Parameters, EquatableArray<string> With,
-        EquatableArray<string> Without, EquatableArray<string> WithAny, EquatableArray<string> Changed)
+        EquatableArray<string> Without, EquatableArray<string> WithAny, EquatableArray<string> Changed,
+        EquatableArray<string> Removed)
     {
-        public bool HasFilter => With.Length + Without.Length + WithAny.Length + Changed.Length > 0;
+        public bool HasFilter => With.Length + Without.Length + WithAny.Length + Changed.Length + Removed.Length > 0;
 
         /// <summary>The queried component types, as type arguments of World.ForEach / IForEach.</summary>
         public string ComponentTypes => string.Join(", ", Query);
@@ -231,6 +232,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             var without = new List<string>();
             var withAny = new List<string>();
             var changed = new List<string>();
+            var removed = new List<string>();
             foreach (var attribute in method.GetAttributes())
             {
                 if (attribute.AttributeClass is not { IsGenericType: true } cls) continue;
@@ -239,6 +241,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 else if (name == Symbols.WithoutAttribute) without.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
                 else if (name == Symbols.WithAnyAttribute) withAny.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
                 else if (name == Symbols.ChangedAttribute) changed.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
+                else if (name == Symbols.RemovedAttribute) removed.Add(cls.TypeArguments[0].ToDisplayString(Symbols.Fqn));
             }
 
             var query = parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan)
@@ -260,7 +263,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 new EquatableArray<string>(query.ToArray()),
                 new EquatableArray<ParamModel>(parameters), new EquatableArray<string>(with.ToArray()),
                 new EquatableArray<string>(without.ToArray()), new EquatableArray<string>(withAny.ToArray()),
-                new EquatableArray<string>(changed.ToArray()));
+                new EquatableArray<string>(changed.ToArray()), new EquatableArray<string>(removed.ToArray()));
         }
     }
 

@@ -9,11 +9,11 @@ namespace EasyEcs;
 /// Handle to an entity: id + version + world (16 bytes). Every access validates the version, so a handle to a
 /// destroyed entity never touches the entity that reused its id: questions (<see cref="IsAlive"/>,
 /// <see cref="Has{T}"/>, <see cref="TryGet{T}"/>, <see cref="TryGetRef{T}"/>) answer false, accesses and changes
-/// (<see cref="Get{T}"/>, <see cref="Read{T}"/>, <c>Add</c>, <c>Set</c>, <c>Remove</c>) throw, and
+/// (<see cref="Get{T}"/>, <see cref="Read{T}"/>, <see cref="GetOrAdd{T}"/>, <c>Set</c>, <c>Remove</c>) throw, and
 /// <see cref="Destroy"/> does nothing. Safe to store and to compare.
 /// </summary>
 /// <remarks>
-/// Refs returned by <see cref="Get{T}"/>/<see cref="Add{T}"/> point into the row of the entity's archetype table: use
+/// Refs returned by <see cref="Get{T}"/>/<see cref="GetOrAdd{T}"/> point into the row of the entity's archetype table: use
 /// them immediately and never keep them across a structural change of that entity (it moves the row) or an
 /// <c>await</c>.
 /// </remarks>
@@ -189,14 +189,6 @@ public readonly partial struct Entity : IEquatable<Entity>
         return ref Unsafe.NullRef<Archetype.Lookup>();
     }
 
-    /// <summary>
-    /// Add component <typeparamref name="T"/> (reset to default if present) and return a ref to it. O(1) when the
-    /// entity's table has a column for it (the row only gets its presence bit back), else O(c) amortized: the row moves
-    /// to the table with the column (c components copied).
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ref T Add<T>() where T : struct, IComponent => ref AddCore<T>(_world, Id, Version);
-
     // Structural changes and cold paths take the handle by value: a loop calling them keeps its handle in registers
     // (a call through `this` would take its address and store it to memory on every row, even when the call is rare).
     [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
@@ -215,12 +207,16 @@ public readonly partial struct Entity : IEquatable<Entity>
         }
     }
 
-    /// <summary>Ref to component <typeparamref name="T"/>, adding it (default) first if missing. O(1), or as <see cref="Add{T}"/> when missing.</summary>
+    /// <summary>
+    /// Ref to component <typeparamref name="T"/>, adding it (default) first if missing. Counts as a write of a tracked
+    /// component. O(1); when missing, O(1) if the entity's table has a column for it (the row only gets its presence bit
+    /// back), else O(c) amortized: the row moves to the table with the column (c components copied).
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T GetOrAdd<T>() where T : struct, IComponent
     {
         ref T value = ref Find<T>(false);
-        if (Unsafe.IsNullRef(ref value)) return ref Add<T>(); // Add throws for a handle that is not alive
+        if (Unsafe.IsNullRef(ref value)) return ref AddCore<T>(_world, Id, Version); // throws for a handle that is not alive
         if (default(T) is ITrackChanges) Touch<T>(_world, Id);
         return ref value;
     }
@@ -234,6 +230,17 @@ public readonly partial struct Entity : IEquatable<Entity>
     }
 
     // Set(in T1..Tn) and Remove<T1..Tn>() are generated (Entity.Structural.g.cs).
+
+    /// <summary>
+    /// A new entity of the same world with a copy of every component of this one (a <see cref="DynamicBuffer{T}"/> gets
+    /// a list of its own, indexes learn the copy, tracked components count as written now); throws if this entity is
+    /// not alive. To create entities from a template, use a <see cref="Prefab"/>. O(components). Owner thread only.
+    /// </summary>
+    public Entity Clone()
+    {
+        if (_world == null) ThrowStale();
+        return _world!.Copy(this, true);
+    }
 
     /// <summary>Destroy the entity; a destroyed handle is ignored. O(components).</summary>
     public void Destroy() => _world?.DestroyEntity(this);

@@ -169,6 +169,7 @@ public class OperationBenchmark
     [Params(100_000)] public int Entities;
 
     private World _world;
+    private Prefab _npc;
     private Entity[] _spawned;
 
     private EntityStore _store;
@@ -182,13 +183,14 @@ public class OperationBenchmark
     private Friflo.Engine.ECS.ArchetypeQuery<F.Attack> _fighters;
     private Friflo.Engine.ECS.ArchetypeQuery<F.Stunned> _stunned;
     private Friflo.Engine.ECS.Entity[] _fSpawned;
+    private Friflo.Engine.ECS.Entity _fNpc;
     private long _sink;
 
     private const int Spawn = 5_000;
 
     [GlobalSetup(Targets = [nameof(EasyEcs_Iterate1), nameof(EasyEcs_Iterate2), nameof(EasyEcs_Iterate2Simd), nameof(EasyEcs_Iterate3),
         nameof(EasyEcs_With), nameof(EasyEcs_Entity), nameof(EasyEcs_EntityBatch), nameof(EasyEcs_Singleton), nameof(EasyEcs_Toggle),
-        nameof(EasyEcs_CreateDestroy)])]
+        nameof(EasyEcs_CreateDestroy), nameof(EasyEcs_Instantiate)])]
     public void SetupEasyEcs()
     {
         _world = new World(new WorldOptions { InitialEntityCapacity = Entities * 2 });
@@ -218,13 +220,16 @@ public class OperationBenchmark
         }
 
         _spawned = new Entity[Spawn];
+        _npc = new Prefab().Set(new Position()).Set(new Velocity()).Set(new Health { Value = 100, Max = 100 })
+            .Set(new Attack { Damage = 5, Cooldown = 0, Interval = 20 }).Set(new AoiCell { Cell = -1 }).Set(new Npc { TemplateId = 7 });
         EasyEcs_Toggle();
         EasyEcs_CreateDestroy();
+        EasyEcs_Instantiate();
     }
 
     [GlobalSetup(Targets = [nameof(Friflo_Iterate1), nameof(Friflo_Iterate2), nameof(Friflo_Iterate2Simd), nameof(Friflo_Iterate3),
         nameof(Friflo_With), nameof(Friflo_Entity), nameof(Friflo_EntityBatch), nameof(Friflo_Singleton), nameof(Friflo_Toggle),
-        nameof(Friflo_CreateDestroy)])]
+        nameof(Friflo_CreateDestroy), nameof(Friflo_Instantiate)])]
     public void SetupFriflo()
     {
         _store = new EntityStore();
@@ -257,7 +262,10 @@ public class OperationBenchmark
 
         _fSpawned = new Friflo.Engine.ECS.Entity[Spawn];
         Friflo_Toggle();
+        _fNpc = _store.CreateEntity(new F.Position(), new F.Velocity(), new F.Health { Value = 100, Max = 100 },
+            new F.Attack { Damage = 5, Cooldown = 0, Interval = 20 }, new F.AoiCell { Cell = -1 }, new F.Npc { TemplateId = 7 });
         Friflo_CreateDestroy();
+        Friflo_Instantiate();
     }
 
     [GlobalCleanup]
@@ -283,6 +291,15 @@ public class OperationBenchmark
         for (int i = 0; i < spawned.Length; i++)
             spawned[i] = _world.CreateEntity(new Position(), new Velocity(), new Lifetime { Ticks = 20 },
                 new Projectile { OwnerId = i });
+        for (int i = 0; i < spawned.Length; i++) spawned[i].Destroy();
+    }
+
+    /// <summary>Spawn 5,000 NPCs (6 components) from a prefab and destroy them: EasyEcs instantiates a Prefab (no world holds it).</summary>
+    [Benchmark]
+    public void EasyEcs_Instantiate()
+    {
+        var spawned = _spawned;
+        _world.Instantiate(_npc, spawned);
         for (int i = 0; i < spawned.Length; i++) spawned[i].Destroy();
     }
 
@@ -419,6 +436,15 @@ public class OperationBenchmark
         for (int i = 0; i < spawned.Length; i++)
             spawned[i] = _store.CreateEntity(new F.Position(), new F.Velocity(), new F.Lifetime { Ticks = 20 },
                 new F.Projectile { OwnerId = i });
+        for (int i = 0; i < spawned.Length; i++) spawned[i].DeleteEntity();
+    }
+
+    /// <summary>Spawn 5,000 NPCs (6 components) from a prefab and destroy them: Friflo clones an entity of the same store.</summary>
+    [Benchmark]
+    public void Friflo_Instantiate()
+    {
+        var spawned = _fSpawned;
+        for (int i = 0; i < spawned.Length; i++) spawned[i] = _store.CloneEntity(_fNpc);
         for (int i = 0; i < spawned.Length; i++) spawned[i].DeleteEntity();
     }
 }

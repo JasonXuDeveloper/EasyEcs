@@ -13,12 +13,12 @@ public partial class ConcurrencyTests
 {
     public record struct Spawner(Entity Owner) : IComponent;   // holds a handle: a way to reach the world
 
-    /// <summary>Changes structure through a handle a component holds: wrong in a system that shares a batch.</summary>
-    public partial class SpawnFromBatch : EcsSystem
+    /// <summary>Changes structure through a handle a component holds: wrong in a system that shares a parallel stage.</summary>
+    public partial class SpawnInStage : EcsSystem
     {
 #pragma warning disable EECS013 // the misuse under test: the runtime must catch what the analyzer reports
         [ForEach]
-        static void Spawn(in Spawner spawner) => spawner.Owner.Add<Marked>();
+        static void Spawn(in Spawner spawner) => spawner.Owner.Set(new Marked());
 #pragma warning restore EECS013
     }
 
@@ -34,21 +34,21 @@ public partial class ConcurrencyTests
     }
 
     [Test]
-    public void StructuralChangeInAParallelBatchThrowsAndLeavesTheWorldUsable()
+    public void StructuralChangeInAParallelStageThrowsAndLeavesTheWorldUsable()
     {
         using var world = new World(new WorldOptions { ParallelSystems = true });
         var owner = world.CreateEntity(new Health(0));
         world.CreateEntity(new Spawner(owner));
-        world.AddSystem<SpawnFromBatch>();
+        world.AddSystem<SpawnInStage>();
         world.AddSystem<Heal>();
 
         var error = Assert.Catch(() => world.Update());
         Assert.That(Flatten(error), Is.InstanceOf<InvalidOperationException>());
         Assert.That(owner.Has<Marked>(), Is.False);
 
-        world.RemoveSystem<SpawnFromBatch>();
+        world.RemoveSystem<SpawnInStage>();
         world.Update();
-        owner.Add<Marked>(); // the gate is open again
+        owner.Set(new Marked()); // the gate is open again
         Assert.That(owner.Get<Health>().Value, Is.EqualTo(2)); // Heal ran in both updates
     }
 
@@ -56,7 +56,7 @@ public partial class ConcurrencyTests
     public void StructuralChangeInAParallelForEachThrowsAndLeavesTheWorldUsable()
     {
         using var world = new World();
-        var entities = new Entity[World.ChunkRows * 2 + 1];
+        var entities = new Entity[World.ParallelChunkRows * 2 + 1];
         world.CreateEntities(entities, new Health(0));
         int count = world.EntityCount;
 

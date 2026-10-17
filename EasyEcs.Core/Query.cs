@@ -13,35 +13,38 @@ namespace EasyEcs;
 /// </summary>
 public readonly struct QueryFilter
 {
-    internal readonly Tag All;
-    internal readonly Tag None;
-    internal readonly Tag Any;
-    internal readonly Tag Tracked;
+    internal readonly BitMask All;
+    internal readonly BitMask None;
+    internal readonly BitMask Any;
+    internal readonly BitMask Tracked;
+    internal readonly BitMask Removals;
 
-    /// <summary>The change tick <see cref="Changed{T}"/> rows must have been written at or after.</summary>
-    internal readonly ulong Since;
+    /// <summary>The change tick <see cref="Changed{T}"/> and <see cref="Removed{T}"/> rows must have reached.</summary>
+    internal readonly ulong Tick;
 
-    private QueryFilter(in Tag all, in Tag none, in Tag any, in Tag changed, ulong since)
+    private QueryFilter(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed, ulong since)
     {
         All = all;
         None = none;
         Any = any;
         Tracked = changed;
-        Since = since;
+        Removals = removed;
+        Tick = since;
     }
 
     public static QueryFilter Create() => default;
 
-    /// <summary>Whether <paramref name="other"/> selects the same rows (its <see cref="Since"/> aside): one query key.</summary>
+    /// <summary>Whether <paramref name="other"/> selects the same rows (its tick aside): one query key.</summary>
     internal bool SameQuery(in QueryFilter other) =>
-        All.Equals(in other.All) && None.Equals(in other.None) && Any.Equals(in other.Any) && Tracked.Equals(in other.Tracked);
+        All.Equals(in other.All) && None.Equals(in other.None) && Any.Equals(in other.Any) && Tracked.Equals(in other.Tracked)
+        && Removals.Equals(in other.Removals);
 
     /// <summary>Require <typeparamref name="T"/> to be present (not passed to the query callback).</summary>
     public QueryFilter With<T>() where T : struct, IComponent
     {
         var all = All.Clone();
         all.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in all, in None, in Any, in Tracked, Since);
+        return new QueryFilter(in all, in None, in Any, in Tracked, in Removals, Tick);
     }
 
     /// <summary>Require <typeparamref name="T"/> to be absent.</summary>
@@ -49,7 +52,7 @@ public readonly struct QueryFilter
     {
         var none = None.Clone();
         none.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in All, in none, in Any, in Tracked, Since);
+        return new QueryFilter(in All, in none, in Any, in Tracked, in Removals, Tick);
     }
 
     /// <summary>
@@ -60,44 +63,66 @@ public readonly struct QueryFilter
     {
         var any = Any.Clone();
         any.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in All, in None, in any, in Tracked, Since);
+        return new QueryFilter(in All, in None, in any, in Tracked, in Removals, Tick);
     }
 
     /// <summary>
     /// Require <typeparamref name="T"/> and only rows whose <typeparamref name="T"/> was written at or after change tick
     /// <paramref name="since"/>: a <see cref="World.ChangeTick"/> read earlier (<c>[Changed&lt;T&gt;]</c> methods select
-    /// the rows written since their system last ran on their own). A filter has one tick: several <c>Changed</c>
-    /// filters must name the same one.
+    /// the rows written since their system last ran on their own). A filter has one tick: its <c>Changed</c> and
+    /// <c>Removed</c> filters must name the same one.
     /// </summary>
-    /// <exception cref="ArgumentException">An earlier <c>Changed</c> filter named another tick.</exception>
+    /// <exception cref="ArgumentException">An earlier <c>Changed</c> or <c>Removed</c> filter named another tick.</exception>
     public QueryFilter Changed<T>(ulong since) where T : struct, IComponent, ITrackChanges
     {
-        if (since != Since && !Tracked.IsEmpty) ThrowTwoTicks(); // an earlier Changed filter named another tick
+        CheckTick(since);
         var all = All.Clone();
         all.SetBit(ComponentType<T>.Bit);
         var changed = Tracked.Clone();
         changed.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in all, in None, in Any, in changed, since);
+        return new QueryFilter(in all, in None, in Any, in changed, in Removals, since);
     }
 
     /// <summary>
-    /// The same filter with its <see cref="Changed{T}"/> filters moved to tick <paramref name="since"/>, without
-    /// rebuilding it: a filter kept in a field, used again after each update.
+    /// Only entities that lost <typeparamref name="T"/> at or after change tick <paramref name="since"/> and have not
+    /// got it back (<c>[Removed&lt;T&gt;]</c> methods select the removals since their system last ran on their own).
+    /// Removing a component keeps the entity's row, so the removal is a row like any other: its presence bit is clear
+    /// and its change tick says when. Destroyed entities have no row and are not visited. A filter has one tick: its
+    /// <c>Changed</c> and <c>Removed</c> filters must name the same one.
     /// </summary>
-    public QueryFilter ChangedSince(ulong since) => new(in All, in None, in Any, in Tracked, since);
+    /// <exception cref="ArgumentException">An earlier <c>Changed</c> or <c>Removed</c> filter named another tick.</exception>
+    public QueryFilter Removed<T>(ulong since) where T : struct, IComponent, ITrackChanges
+    {
+        CheckTick(since);
+        var removed = Removals.Clone();
+        removed.SetBit(ComponentType<T>.Bit);
+        return new QueryFilter(in All, in None, in Any, in Tracked, in removed, since);
+    }
+
+    /// <summary>
+    /// The same filter with its <see cref="Changed{T}"/> and <see cref="Removed{T}"/> filters moved to tick
+    /// <paramref name="since"/>, without rebuilding it: a filter kept in a field, used again after each update.
+    /// </summary>
+    public QueryFilter Since(ulong since) => new(in All, in None, in Any, in Tracked, in Removals, since);
+
+    private void CheckTick(ulong since)
+    {
+        if (since != Tick && (!Tracked.IsEmpty || !Removals.IsEmpty)) ThrowTwoTicks();
+    }
 
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
     private static void ThrowTwoTicks() =>
-        throw new ArgumentException("Changed filters of one QueryFilter must name the same tick", "since");
+        throw new ArgumentException("Changed and Removed filters of one QueryFilter must name the same tick", "since");
 }
 
 /// <summary>Cache key of a query: required bits, excluded bits and the bits of which one is required.</summary>
 internal readonly struct QueryKey : IEquatable<QueryKey>
 {
-    private readonly Tag _all;
-    private readonly Tag _none;
-    private readonly Tag _any;
-    private readonly Tag _changed;
+    private readonly BitMask _all;
+    private readonly BitMask _none;
+    private readonly BitMask _any;
+    private readonly BitMask _changed;
+    private readonly BitMask _removed;
 
     // Detached keys only (not part of equality): the required and excluded bits as arrays, for the per-archetype
     // presence tests (a table with a column can still have rows without the component).
@@ -105,30 +130,34 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
     private readonly ushort[] _excluded;
     private readonly ushort[] _anyOf;
     private readonly ushort[] _changedOf;
+    private readonly ushort[] _removedOf;
 
     // Lookup keys of queries on component bits >= 256 keep their overflow here instead of allocating it per query.
     [ThreadStatic] private static Vector256<long>[] _scratch;
 
-    private QueryKey(in Tag all, in Tag none, in Tag any, in Tag changed)
+    private QueryKey(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed)
     {
         _all = all;
         _none = none;
         _any = any;
         _changed = changed;
-        _required = _excluded = _anyOf = _changedOf = [];
+        _removed = removed;
+        _required = _excluded = _anyOf = _changedOf = _removedOf = [];
     }
 
-    private QueryKey(in Tag all, in Tag none, in Tag any, in Tag changed, ushort[] required, ushort[] excluded,
-        ushort[] anyOf, ushort[] changedOf)
+    private QueryKey(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed, ushort[] required,
+        ushort[] excluded, ushort[] anyOf, ushort[] changedOf, ushort[] removedOf)
     {
         _all = all;
         _none = none;
         _any = any;
         _changed = changed;
+        _removed = removed;
         _required = required;
         _excluded = excluded;
         _anyOf = anyOf;
         _changedOf = changedOf;
+        _removedOf = removedOf;
     }
 
     /// <summary>
@@ -146,7 +175,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
             {
                 var all = filter.All;
                 for (int i = 0; i < bits.Length; i++) all.SetBit(bits[i]);
-                return new QueryKey(in all, in filter.None, in filter.Any, in filter.Tracked);
+                return new QueryKey(in all, in filter.None, in filter.Any, in filter.Tracked, in filter.Removals);
             }
         }
 
@@ -161,7 +190,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
         for (int i = 0; i < bits.Length; i++) maxBit = Math.Max(maxBit, bits[i]);
         var all = filter.All.CopyWithScratch(maxBit, ref _scratch);
         for (int i = 0; i < bits.Length; i++) all.SetBit(bits[i]);
-        return new QueryKey(in all, in filter.None, in filter.Any, in filter.Tracked);
+        return new QueryKey(in all, in filter.None, in filter.Any, in filter.Tracked, in filter.Removals);
     }
 
     /// <summary>A copy that owns its storage (cache entries).</summary>
@@ -171,17 +200,20 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
         var none = _none.Clone();
         var any = _any.Clone();
         var changed = _changed.Clone();
-        return new QueryKey(in all, in none, in any, in changed, all.ToBitArray(), none.ToBitArray(), any.ToBitArray(),
-            changed.ToBitArray());
+        var removed = _removed.Clone();
+        return new QueryKey(in all, in none, in any, in changed, in removed, all.ToBitArray(), none.ToBitArray(),
+            any.ToBitArray(), changed.ToBitArray(), removed.ToBitArray());
     }
 
     /// <summary>
     /// Whether archetypes with <paramref name="archetypeMask"/> can hold matching rows (detached keys only): they have
-    /// every required column and, with <c>WithAny</c>, at least one of those columns. Excluded columns do not rule a
-    /// table out, its rows may lack those components.
+    /// every required column, the column of every <c>Removed</c> component (a removal keeps the row) and, with
+    /// <c>WithAny</c>, at least one of those columns. Excluded columns do not rule a table out, its rows may lack those
+    /// components.
     /// </summary>
-    public bool Matches(in Tag archetypeMask) =>
-        archetypeMask.ContainsAll(in _all) && (_anyOf.Length == 0 || archetypeMask.Intersects(in _any));
+    public bool Matches(in BitMask archetypeMask) =>
+        archetypeMask.ContainsAll(in _all) && archetypeMask.ContainsAll(in _removed)
+        && (_anyOf.Length == 0 || archetypeMask.Intersects(in _any));
 
     /// <summary>The presence tests of a matching <paramref name="archetype"/>: its required and excluded columns.</summary>
     public RowPlan FilterFor(Archetype archetype)
@@ -202,21 +234,29 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
             if (column >= 0) any.Add((short)column);
         }
 
-        // A changed component's ticks live in its companion column, which every table having the component has.
-        var changed = new short[_changedOf.Length];
-        for (int i = 0; i < changed.Length; i++)
-            changed[i] = (short)archetype.ColumnIndex(ComponentInfo.Of(_changedOf[i]).Companion);
-        return new RowPlan(require, exclude.ToArray(), any.ToArray(), changed);
+        // A changed component's ticks live in its companion column, which every table having the component has. A
+        // removed one is a row whose presence bit is clear (an excluded column) and whose tick is new: the removal
+        // stamped it.
+        var changed = new System.Collections.Generic.List<short>();
+        foreach (ushort bit in _changedOf) changed.Add((short)archetype.ColumnIndex(ComponentInfo.Of(bit).Companion));
+        foreach (ushort bit in _removedOf)
+        {
+            exclude.Add((short)archetype.ColumnIndex(bit));
+            changed.Add((short)archetype.ColumnIndex(ComponentInfo.Of(bit).Companion));
+        }
+
+        return new RowPlan(require, exclude.ToArray(), any.ToArray(), changed.ToArray());
     }
 
     public bool Equals(QueryKey other) =>
         _all.Equals(in other._all) && _none.Equals(in other._none) && _any.Equals(in other._any) &&
-        _changed.Equals(in other._changed);
+        _changed.Equals(in other._changed) && _removed.Equals(in other._removed);
 
     public override bool Equals(object obj) => obj is QueryKey other && Equals(other);
 
     public override int GetHashCode() =>
-        ((_all.GetHashCode() * 31 + _none.GetHashCode()) * 31 + _any.GetHashCode()) * 31 + _changed.GetHashCode();
+        (((_all.GetHashCode() * 31 + _none.GetHashCode()) * 31 + _any.GetHashCode()) * 31 + _changed.GetHashCode()) * 31
+        + _removed.GetHashCode();
 }
 
 /// <summary>

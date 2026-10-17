@@ -86,7 +86,7 @@ public partial class ParallelTests
     public void ParallelForEachVisitsEveryMatchingRowOnceOnSeveralThreads()
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
-        int rows = World.ChunkRows * 3 + 100;
+        int rows = World.ParallelChunkRows * 3 + 100;
         var entities = new Entity[rows];
         world.CreateEntities(entities, new Counter(0), new Seen(2));
         for (int i = 0; i < rows; i += 7) entities[i].Set(new Dead());      // a filtered table, two tables in all
@@ -106,7 +106,7 @@ public partial class ParallelTests
     public void ParallelForEachRunsOnTheCallingThreadWhenTheWorldAllowsOneThread()
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 1 });
-        var entities = new Entity[World.ChunkRows * 2 + 1];
+        var entities = new Entity[World.ParallelChunkRows * 2 + 1];
         world.CreateEntities(entities, new Counter(0), new Seen(1));
         world.AddSystem<ChunkedIncrement>();
         world.Update();
@@ -210,7 +210,7 @@ public partial class ParallelTests
     public void AdHocParallelJobsVisitEveryMatchingRowOnce()
     {
         using var world = new World();
-        var entities = new Entity[World.ChunkRows * 3 + 17];                // several chunks and a partial one
+        var entities = new Entity[World.ParallelChunkRows * 3 + 17];                // several chunks and a partial one
         world.CreateEntities(entities, new Counter(-1), new Seen(-1));
         for (int i = 0; i < entities.Length; i += 10) entities[i].Set(new Dead());
         var filter = QueryFilter.Create().Without<Dead>();

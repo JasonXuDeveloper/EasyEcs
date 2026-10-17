@@ -108,6 +108,12 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
         if (_built) Put(id, version, value.Key); // else the first lookup indexes the row
     }
 
+    /// <summary>Entity <paramref name="id"/> was created with row <paramref name="slot"/> of <paramref name="archetype"/>, which has <typeparamref name="T"/> (Instantiate).</summary>
+    void World.IValueIndex.Added(int id, int version, Archetype archetype, int slot)
+    {
+        if (_built) Put(id, version, archetype.Ref<T>(ComponentType<T>.Bit, slot).Key);
+    }
+
     /// <summary>Entity <paramref name="id"/> is destroyed or loses <typeparamref name="T"/>. Inside the structural gate.</summary>
     void World.IValueIndex.Removed(int id)
     {

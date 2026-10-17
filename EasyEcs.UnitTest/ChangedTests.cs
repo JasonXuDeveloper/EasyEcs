@@ -171,7 +171,7 @@ public partial class ChangedTests
         // Tick 0 selects every row having T; one filter has one tick; ChangedSince moves it.
         Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(0)), Is.EqualTo(100));
         Assert.Throws<ArgumentException>(() => QueryFilter.Create().Changed<Armor>(mark).Changed<Shield>(mark + 1));
-        Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(0).ChangedSince(mark)), Is.EqualTo(world.Count<Armor>(changed)));
+        Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(0).Since(mark)), Is.EqualTo(world.Count<Armor>(changed)));
         Assert.That(world.DestroyEntities<Armor>(changed), Is.EqualTo(2));
     }
 
@@ -189,7 +189,7 @@ public partial class ChangedTests
 
         e.Remove<Armor>();
         Assert.That(world.Count<Armor>(changed), Is.Zero);
-        e.Add<Armor>(); // adding is a write
+        e.Set(new Armor()); // adding is a write
         Assert.That(world.Count<Armor>(changed), Is.EqualTo(1));
     }
 
@@ -561,7 +561,7 @@ public partial class ChangedTests
             world.AddSystem<Inspect>();
             var entities = new Entity[1_000];
             world.CreateEntities(entities, new Armor(9), new Seen(), new Health(0));
-            for (int i = 0; i < entities.Length; i += 3) entities[i].Add<Stun>();
+            for (int i = 0; i < entities.Length; i += 3) entities[i].Set(new Stun());
             for (int u = 0; u < 4; u++) world.Update();
             var seen = new int[entities.Length];
             for (int i = 0; i < seen.Length; i++) seen[i] = SeenCount(entities[i]);

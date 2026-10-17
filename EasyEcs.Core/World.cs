@@ -22,7 +22,7 @@ public sealed partial class World : IDisposable
     private int _entityCount;
 
     // Change tick: stamped into the rows of tracked components (ITrackChanges) on every write. Grows by one per system
-    // batch, once after each update and once per index catch-up outside a pass that found written rows; 64 bits never
+    // stage, once after each update and once per index catch-up outside a pass that found written rows; 64 bits never
     // wrap.
     private ulong _changeTick = 1;
 
@@ -72,6 +72,94 @@ public sealed partial class World : IDisposable
     // CreateEntity(in T1..Tn) is generated (World.Structural.g.cs): one archetype placement, no intermediate moves.
 
     /// <summary>
+    /// Create an entity with a copy of every component of <paramref name="prefab"/>. Values are copied as they are: a
+    /// <see cref="DynamicBuffer{T}"/> gets a list of its own, indexes learn the new entity, tracked components count as
+    /// written now. O(components): one row copy, no table search after the first instance. Owner thread only (see
+    /// doc/guide/threading.md).
+    /// </summary>
+    public Entity Instantiate(Prefab prefab) => Copy(prefab.Row, false);
+
+    /// <summary>
+    /// <see cref="Instantiate(Prefab)"/> for <c>entities.Length</c> copies of <paramref name="prefab"/>, whose handles
+    /// are written to <paramref name="entities"/>: one pass through the structural gate and at most one table growth.
+    /// O(count × components). Owner thread only.
+    /// </summary>
+    public void Instantiate(Prefab prefab, Span<Entity> entities)
+    {
+        using (Structural())
+        {
+            if (entities.IsEmpty) return;
+            var (source, from) = Source(prefab.Row);
+            var target = TableFor(source);
+            int first = PlaceRows(target, entities);
+            target.CloneRows(source, from, first, entities.Length, _changeTick);
+            if (_indexByBit != null)
+                for (int e = 0; e < entities.Length; e++) IndexRow(target, first + e, entities[e].Id, entities[e].Version);
+        }
+    }
+
+    /// <summary>
+    /// A new entity of this world with a copy of <paramref name="original"/>'s components (<c>Entity.Clone</c> is the
+    /// public call), or of a prefab's row (<paramref name="prefab"/>). Inside the structural gate it takes.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
+    internal Entity Copy(Entity original, bool sameWorld)
+    {
+        using (Structural())
+        {
+            var (source, from) = Source(original);
+            var target = sameWorld ? source : TableFor(source);
+            int id = AllocateId(); // may grow Meta: the original's row was read first
+            int slot = Place(id, target);
+            target.CloneRows(source, from, slot, 1, _changeTick);
+            int version = MetaRef(id).Version;
+            if (_indexByBit != null) IndexRow(target, slot, id, version);
+            return new Entity(this, id, version);
+        }
+    }
+
+    /// <summary>
+    /// Place <c>entities.Length</c> new entities in consecutive rows at the end of <paramref name="target"/> (one
+    /// growth of ids and rows) and write their handles; returns the first row. Their values are the caller's to write.
+    /// Inside the structural gate.
+    /// </summary>
+    private int PlaceRows(Archetype target, Span<Entity> entities)
+    {
+        ReserveIds(entities.Length);
+        target.Reserve(target.Count + entities.Length);
+        int first = target.Count; // new rows go to the end, one after another
+        for (int e = 0; e < entities.Length; e++)
+        {
+            int id = AllocateId();
+            Place(id, target);
+            entities[e] = new Entity(this, id, MetaRef(id).Version);
+        }
+
+        return first;
+    }
+
+    /// <summary>The table and row of <paramref name="entity"/> (an alive entity of any world).</summary>
+    private static (Archetype Table, int Row) Source(Entity entity)
+    {
+        var world = entity.World;
+        if (world == null) Entity.ThrowStale();
+        ref var meta = ref world!.Live(entity);
+        return (meta.Archetype, meta.Slot);
+    }
+
+    /// <summary>This world's table with the components of <paramref name="source"/>, a prefab's table (cached per table).</summary>
+    private Archetype TableFor(Archetype source)
+    {
+        _prefabTables ??= new();
+        if (!_prefabTables.TryGetValue(source, out var target))
+            _prefabTables[source] = target = GetOrCreateArchetype(source.ComponentMask.Clone());
+        return target;
+    }
+
+    // A prefab's table -> this world's table with its components, found once.
+    private System.Collections.Generic.Dictionary<Archetype, Archetype> _prefabTables;
+
+    /// <summary>
     /// Destroy <paramref name="entity"/> (a handle of this world; <c>Entity.Destroy</c> is the public call); a stale
     /// handle is ignored. O(components). Owner thread only (see doc/guide/threading.md).
     /// </summary>
@@ -113,7 +201,14 @@ public sealed partial class World : IDisposable
             {
                 var archetype = archetypes[a];
                 var rows = new RowFilter(match.Filters[a], since);
-                if (archetype.AliveCount == 0 || rows.Mode(archetype) == RowFilter.None) continue;
+                int mode = archetype.AliveCount == 0 ? RowFilter.None : rows.Mode(archetype);
+                if (mode == RowFilter.None) continue;
+                if (mode == RowFilter.All && archetype.Count == archetype.AliveCount && Volatile.Read(ref Passes) == 0)
+                {
+                    destroyed += FreeTable(archetype); // every row goes: no row moves, one clear
+                    continue;
+                }
+
                 // From the last row down: outside passes a removed row is filled by the last one, already visited, so
                 // the passing rows of each word (computed once per word) stay valid for the rows below.
                 int count = archetype.Count;
@@ -133,6 +228,32 @@ public sealed partial class World : IDisposable
         }
 
         return destroyed;
+    }
+
+    /// <summary>
+    /// Destroy every entity of <paramref name="archetype"/>, which has no tombstones, while no pass runs: free them
+    /// (as <see cref="Free"/> does), then empty the table at once. Returns how many. Inside the structural gate.
+    /// </summary>
+    private int FreeTable(Archetype archetype)
+    {
+        int count = archetype.Count;
+        if (_freeIds.Length < _freeIdCount + count)
+            Array.Resize(ref _freeIds, (int)BitOperations.RoundUpToPowerOf2((uint)(_freeIdCount + count)));
+        var rows = archetype.Slots.AsSpan(0, count);
+        for (int slot = count - 1; slot >= 0; slot--) // the order Free would push them in
+        {
+            int id = rows[slot].Id;
+            if (_indexByBit != null) Unindex(archetype, id);
+            ref var meta = ref MetaRef(id);
+            meta.Version++; // invalidates every outstanding handle
+            meta.Archetype = null;
+            _freeIds[_freeIdCount++] = id;
+        }
+
+        archetype.Clear();
+        _entityCount -= count;
+        StorageVersion++;
+        return count;
     }
 
     /// <summary>Make room for <paramref name="count"/> more entities (one growth). Inside the structural gate.</summary>

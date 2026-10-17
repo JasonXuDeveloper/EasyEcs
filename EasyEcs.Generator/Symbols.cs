@@ -17,6 +17,7 @@ internal static class Symbols
     public const string WithoutAttribute = "EasyEcs.WithoutAttribute<T>";
     public const string WithAnyAttribute = "EasyEcs.WithAnyAttribute<T>";
     public const string ChangedAttribute = "EasyEcs.ChangedAttribute<T>";
+    public const string RemovedAttribute = "EasyEcs.RemovedAttribute<T>";
     public const string EcsSystem = "EasyEcs.EcsSystem";
     public const string Component = "EasyEcs.IComponent";
     public const string Singleton = "EasyEcs.ISingletonComponent";
@@ -194,11 +195,11 @@ internal static class Symbols
     /// they enter the owner's structural gate, so they belong to the world's owner thread and to code that may change
     /// structure.
     /// </summary>
-    private static readonly HashSet<string> StructuralEntityMembers = ["Add", "Set", "Remove", "Destroy", "GetOrAdd"];
+    private static readonly HashSet<string> StructuralEntityMembers = ["Set", "Remove", "Destroy", "GetOrAdd", "Clone"];
 
     private static readonly HashSet<string> StructuralWorldMembers =
     [
-        "CreateEntity", "CreateEntities", "DestroyEntities", "EnsureEntityCapacity", "AddSingleton", "RemoveSingleton",
+        "CreateEntity", "CreateEntities", "Instantiate", "DestroyEntities", "EnsureEntityCapacity", "AddSingleton", "RemoveSingleton",
         "AddSystem", "RemoveSystem", "Update", "Capture", "Restore", "Dispose",
     ];
 

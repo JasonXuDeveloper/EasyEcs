@@ -54,12 +54,17 @@ public static class Program
     {
         var changes = new ChangeTrackingComparison { Written = 1_000 };
         var index = new IndexComparison { Trades = 100 };
+        var removals = new RemovalComparison { Removed = 1_000 };
         (string Name, Action Setup, Action Cleanup)[] setups =
         [
             ("ChangeTracking EasyEcs", changes.SetupEasyEcs, changes.Cleanup),
             ("ChangeTracking Friflo", changes.SetupFriflo, changes.Cleanup),
             ("ChangeTracking Arch", changes.SetupArch, changes.Cleanup),
             ("ChangeTracking DefaultEcs", changes.SetupDefaultEcs, changes.Cleanup),
+            ("Removal EasyEcs", removals.SetupEasyEcs, removals.Cleanup),
+            ("Removal Friflo", removals.SetupFriflo, removals.Cleanup),
+            ("Removal Arch", removals.SetupArch, removals.Cleanup),
+            ("Removal DefaultEcs", removals.SetupDefaultEcs, removals.Cleanup),
             ("Index EasyEcs", index.SetupEasyEcs, index.Cleanup),
             ("Index Friflo", index.SetupFriflo, index.Cleanup),
             ("Index DefaultEcs", index.SetupDefaultEcs, index.Cleanup),

@@ -14,10 +14,10 @@ namespace EasyEcs;
 /// </summary>
 public struct SystemAccess
 {
-    internal Tag ReadComponents;
-    internal Tag WriteComponents;
-    internal Tag ReadSingletons;
-    internal Tag WriteSingletons;
+    internal BitMask ReadComponents;
+    internal BitMask WriteComponents;
+    internal BitMask ReadSingletons;
+    internal BitMask WriteSingletons;
     internal bool Alone;
 
     /// <summary>The system reads component <typeparamref name="T"/>.</summary>
@@ -32,7 +32,7 @@ public struct SystemAccess
     /// <summary>The system writes singleton <typeparamref name="T"/>.</summary>
     public void WriteSingleton<T>() where T : struct, ISingletonComponent => WriteSingletons.SetBit(SingletonType<T>.Index);
 
-    /// <summary>The system may touch anything (structural changes, any component): it never shares a batch.</summary>
+    /// <summary>The system may touch anything (structural changes, any component): it never shares a stage.</summary>
     public void RunsAlone() => Alone = true;
 
     /// <summary>True when the two systems may not run at the same time.</summary>

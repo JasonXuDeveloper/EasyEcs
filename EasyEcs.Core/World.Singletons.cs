@@ -62,7 +62,7 @@ public sealed partial class World
         new(Box<T>() ?? AddMissingSingleton<T>());
 
     /// <summary>
-    /// Add <typeparamref name="T"/> unless another thread did first (systems of one parallel batch may resolve the same
+    /// Add <typeparamref name="T"/> unless another thread did first (systems of one parallel stage may resolve the same
     /// singleton concurrently; a plain add would reset the other's value). Cold path.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]

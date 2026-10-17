@@ -154,7 +154,7 @@ public partial class IndexTests
         Assert.That(callsigns.Count("k!"), Is.EqualTo(3));
         Assert.That(callsigns.Count("k"), Is.Zero);
 
-        parent.Add<Dead>();
+        parent.Set(new Dead());
         world.Update();
         foreach (var kid in kids) Assert.That(kid.IsAlive, Is.False);
         Assert.That(children.Count(parent), Is.Zero);
@@ -238,7 +238,7 @@ public partial class IndexTests
         var parent = world.CreateEntity(new Health(1));
         var kids = new Entity[4];
         world.CreateEntities(kids, new ChildOf(parent), new Callsign("k"));
-        kids[0].Add<Frozen>();
+        kids[0].Set(new Frozen());
         Assert.That(callsigns.Count("k"), Is.EqualTo(4));
 
         kids[1].Remove<ChildOf, Callsign>();                   // one structural change, two indexes
@@ -259,7 +259,7 @@ public partial class IndexTests
         var index = world.Index<Callsign, string>();
         var a = world.CreateEntity(new Callsign("x"));
         Assert.That(index.Count("x"), Is.EqualTo(1));
-        a.Add<Frozen>();                                       // copies the row, not a write
+        a.Set(new Frozen());                                       // copies the row, not a write
         a.Set(new Health(1));
         a.Remove<Frozen>();
         Assert.That(All(index.Find("x")), Is.EqualTo(new[] { a }));

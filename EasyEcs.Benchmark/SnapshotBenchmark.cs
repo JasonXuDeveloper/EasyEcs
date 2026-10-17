@@ -21,7 +21,7 @@ public class SnapshotBenchmark
         for (int i = 0; i < Entities; i++)
         {
             var e = _world.CreateEntity(new Position { X = i }, new Velocity { Y = i });
-            if (i % 3 == 0) e.Add<Health>().Value = i;
+            if (i % 3 == 0) e.GetOrAdd<Health>().Value = i;
             if (i % 3 == 1) e.Destroy();                                       // recycled ids, as in a running world
         }
 

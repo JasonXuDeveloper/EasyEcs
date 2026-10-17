@@ -25,6 +25,7 @@ public class AllocationTests
         var callsigns = world.Index<Callsign, string>();
         var named = world.CreateEntity(new Callsign("a"));
         var churned = new Entity[50];
+        var prefab = new Prefab().Set(new Churned()).Set(new Health(1)).Set(new Armor(2));
 
         void Frame()
         {
@@ -41,6 +42,12 @@ public class AllocationTests
             foreach (var e in churned) e.Destroy(); // recycled ids and rows
             world.CreateEntities(churned, new Churned(), new Health(1));
             world.DestroyEntities<Churned>();
+            world.Instantiate(prefab, churned);                               // prefab copies, cached table
+            world.DestroyEntities<Churned>();
+            probe.Clone().Destroy();                                          // a copy of a live entity
+            probe.Set(new Armor(1));
+            probe.Remove<Armor>();                                            // a tracked removal
+            _ = world.Count<Health>(QueryFilter.Create().Removed<Armor>(world.ChangeTick));
         }
 
         for (int i = 0; i < 10; i++) Frame(); // warm-up: query caches, edges, JIT
@@ -97,7 +104,7 @@ public class AllocationTests
     public void ParallelForEachDoesNotAllocateAfterItsFirstCall()
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
-        world.CreateEntities(new Entity[World.ChunkRows * 4], new ParallelTests.Counter(0), new ParallelTests.Seen(1));
+        world.CreateEntities(new Entity[World.ParallelChunkRows * 4], new ParallelTests.Counter(0), new ParallelTests.Seen(1));
         world.AddSystem<ParallelTests.ChunkedIncrement>();
         for (int i = 0; i < 10; i++) world.Update();
         long before = GC.GetAllocatedBytesForCurrentThread();

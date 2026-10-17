@@ -138,7 +138,7 @@ public sealed partial class World
         int column = from.ColumnIndex(bit);
         if (column >= 0)
         {
-            if (from.Restore(column, meta.Slot)) StorageVersion++; // passes re-read presence bits
+            if (from.MarkPresent(column, meta.Slot)) StorageVersion++; // passes re-read presence bits
         }
         else MoveTo(ref meta, id, from.GetAddEdge(bit) ?? CreateEdge(from, bit));
     }
@@ -154,28 +154,39 @@ public sealed partial class World
         MoveTo(ref meta, id, from.GetAddSetEdge(signature) ?? CreateSetEdge(from, bits, signature));
         var archetype = meta.Archetype;
         if (!archetype.HasAbsent) return;
+        bool restored = false;
         for (int i = 0; i < bits.Length; i++)
-            if (archetype.Restore(archetype.ColumnIndex(bits[i]), meta.Slot))
-                StorageVersion++;
+            restored |= archetype.MarkPresent(archetype.ColumnIndex(bits[i]), meta.Slot);
+        if (restored) StorageVersion++; // passes re-read presence bits
     }
 
     /// <summary>
     /// Remove one component bit: the row keeps its column and only loses the component (no move). A missing component
     /// is ignored. Inside the structural gate.
     /// </summary>
-    internal void RemoveBit(ref EntityMeta meta, ushort bit)
-    {
-        var archetype = meta.Archetype;
-        int column = archetype.ColumnIndex(bit);
-        if (column < 0 || !archetype.Take(column, meta.Slot)) return;
-        StorageVersion++; // passes re-read presence bits
-        if (_indexByBit != null) Unindex(bit, archetype.Slots[meta.Slot].Id);
-    }
+    internal void RemoveBit(ref EntityMeta meta, ushort bit) => RemoveBits(ref meta, new ReadOnlySpan<ushort>(in bit));
 
-    /// <summary>Remove component bits (see <see cref="RemoveBit"/>). Inside the structural gate.</summary>
+    /// <summary>
+    /// Remove component bits (see <see cref="RemoveBit"/>): the row is found once, and passes are told once that
+    /// presence bits changed. Inside the structural gate.
+    /// </summary>
     internal void RemoveBits(ref EntityMeta meta, ReadOnlySpan<ushort> bits)
     {
-        for (int i = 0; i < bits.Length; i++) RemoveBit(ref meta, bits[i]);
+        var archetype = meta.Archetype;
+        int slot = meta.Slot;
+        bool removed = false;
+        for (int i = 0; i < bits.Length; i++)
+        {
+            int column = archetype.ColumnIndex(bits[i]);
+            if (column < 0 || !archetype.MarkAbsent(column, slot)) continue;
+            removed = true;
+            // A tracked component's tick records the removal: Removed<T> filters find the row by its clear presence
+            // bit and its new tick (Changed<T> filters require the component, so they skip the row).
+            if (archetype.Info(column).Companion is var ticks and >= 0) archetype.SetTick(archetype.ColumnIndex(ticks), slot, _changeTick);
+            if (_indexByBit != null) Unindex(bits[i], archetype.Slots[slot].Id);
+        }
+
+        if (removed) StorageVersion++; // passes re-read presence bits
     }
 
     /// <summary>

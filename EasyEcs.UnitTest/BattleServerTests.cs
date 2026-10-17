@@ -76,8 +76,27 @@ public class BattleServerTests
             server.World.Update<Replication>();                               // nothing changed since the send
             Assert.That(server.Battle.Replicated, Is.EqualTo(sent));
             foreach (var item in server.World.Query<Health, Replica>())      // every client copy is current
+            {
                 Assert.That(item.Component2.Health, Is.EqualTo(item.Component1.Value));
+                Assert.That(item.Component2.Burning, Is.EqualTo(item.Entity.Has<Burning>()));  // fires lit and gone out
+            }
         }
+    }
+
+    [Test]
+    public void AMirrorIsACopyOfTheUnitAsItIsNow()
+    {
+        using var server = Run(30);
+        var player = server.NearestPlayer(new Position(2048, 2048));
+        int zone = player.Zone.Id, inZone = server.PlayersIn(zone);
+        var mirror = server.Mirror(player);
+        Assert.That(mirror, Is.Not.EqualTo(player));
+        Assert.That(mirror.Read<Health>(), Is.EqualTo(player.Read<Health>()));
+        Assert.That(server.LootValue(mirror), Is.EqualTo(server.LootValue(player)));
+        Assert.That(server.PlayersIn(zone), Is.EqualTo(inZone + 1));         // the zone index learned the copy
+        mirror.Get<DynamicBuffer<Loot>>().Add(new Loot(99));                 // a bag of its own
+        Assert.That(server.LootValue(mirror), Is.EqualTo(server.LootValue(player) + 99));
+        Assert.That(server.Mirror(default), Is.EqualTo(default(Entity)));
     }
 
     [Test]
@@ -187,7 +206,7 @@ public class BattleServerTests
         Assert.That(server.World.Any<Lifetime>(), Is.False);
         foreach (var item in server.World.Query<Health>()) Assert.That(item.Component1.Value, Is.EqualTo(item.Component1.Max));
         Assert.That(server.World.Index<OwnedBy, Entity>().Count(server.NearestPlayer(default)), Is.Zero);
-        Assert.That(server.World.GetFragmentationStats().FragmentationRatio, Is.LessThanOrEqualTo(0.1f));
+        Assert.That(server.World.RowStats().HoleRatio, Is.LessThanOrEqualTo(0.1f));
     }
 
     [Test]

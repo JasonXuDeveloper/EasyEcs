@@ -4,36 +4,36 @@ using System.Threading;
 
 namespace EasyEcs;
 
-// Parallel work: the systems of one batch (ParallelSystems; non-conflicting SystemAccess) and the row chunks of a
+// Parallel work: the systems of one stage (ParallelSystems; non-conflicting SystemAccess) and the row chunks of a
 // parallel [ForEach] (ForEachParallel). Allocation-free, unlike Parallel.For (closure + state per call): the calling
 // thread works through the items together with up to MaxDegreeOfParallelism - 1 reusable thread-pool work items.
 public sealed partial class World
 {
     private Runner _systemRunner;
     private Runner _chunkRunner;
-    private SystemBatch _systemBatch;
+    private SystemStage _systemStage;
 
     // Chunked jobs, one cached instance per job type (TypeIndex<ParallelWork, TWork>): allocated on first use only.
     private ParallelWork[] _parallelWork = [];
     private readonly Lock _parallelWorkLock = new();
 
     /// <summary>Rows per chunk of a parallel [ForEach] (a multiple of 64, so presence-bit words never straddle chunks).</summary>
-    public const int ChunkRows = 16384;
+    public const int ParallelChunkRows = 16384;
 
     /// <summary>Thread-pool work items a runner keeps: the calling thread is the other one.</summary>
     private int Helpers => Math.Max(1, _options.MaxDegreeOfParallelism) - 1;
 
-    private void RunBatch(EcsSystem[] batch, long update)
+    private void RunStage(EcsSystem[] stage, long update)
     {
-        var work = _systemBatch ??= new SystemBatch(this);
-        work.Batch = batch;
+        var work = _systemStage ??= new SystemStage(this);
+        work.Stage = stage;
         work.Update = update;
         var runner = _systemRunner ??= new Runner(Helpers);
-        Gate.Freeze(); // the batch's systems never change structure (they do not run alone): a change throws
+        Gate.Freeze(); // the stage's systems never change structure (they do not run alone): a change throws
         try
         {
-            if (runner.TryRun(work, batch.Length)) return;
-            for (int i = 0; i < batch.Length; i++) RunSystem(batch[i], update); // an update from inside a running batch
+            if (runner.TryRun(work, stage.Length)) return;
+            for (int i = 0; i < stage.Length; i++) RunSystem(stage[i], update); // an update from inside a running stage
         }
         finally
         {
@@ -43,7 +43,7 @@ public sealed partial class World
 
     /// <summary>
     /// Run <paramref name="work"/> items 0 .. <paramref name="count"/> - 1 on the chunk runner. False when it is busy (a
-    /// parallel pass inside another one's item, or two systems of a batch at once) or the world allows one thread
+    /// parallel pass inside another one's item, or two systems of a stage at once) or the world allows one thread
     /// only: the caller then runs the items itself.
     /// </summary>
     internal bool TryRunChunks(ParallelWork work, int count)
@@ -90,12 +90,12 @@ public sealed partial class World
         public abstract void Run(int index);
     }
 
-    private sealed class SystemBatch(World world) : ParallelWork
+    private sealed class SystemStage(World world) : ParallelWork
     {
-        public EcsSystem[] Batch = [];
+        public EcsSystem[] Stage = [];
         public long Update;
 
-        public override void Run(int index) => world.RunSystem(Batch[index], Update);
+        public override void Run(int index) => world.RunSystem(Stage[index], Update);
     }
 
     /// <summary>

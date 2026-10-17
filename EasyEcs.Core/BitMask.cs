@@ -12,7 +12,7 @@ namespace EasyEcs;
 /// Supports unlimited component types with inline 256-bit storage + overflow.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
-internal struct Tag : IEquatable<Tag>
+internal struct BitMask : IEquatable<BitMask>
 {
     // Inline 256 bits (covers first 256 component types)
     private Vector256<long> _bits;
@@ -81,7 +81,7 @@ internal struct Tag : IEquatable<Tag>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public readonly bool ContainsAll(in Tag query)
+    public readonly bool ContainsAll(in BitMask query)
     {
         // query & ~this == 0 means this contains all bits of query
         // Vector256.AndNot(a, b) = a & ~b → maps to x86 VPANDN, ARM BIC
@@ -104,7 +104,7 @@ internal struct Tag : IEquatable<Tag>
 
     /// <summary>True when this tag and <paramref name="other"/> share at least one bit.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public readonly bool Intersects(in Tag other)
+    public readonly bool Intersects(in BitMask other)
     {
         if (!IsVectorZero(Vector256.BitwiseAnd(_bits, other._bits)))
             return true;
@@ -137,7 +137,7 @@ internal struct Tag : IEquatable<Tag>
     /// Copy with its own overflow storage (a plain struct copy shares the overflow array, so mutating the copy
     /// beyond bit 255 would also mutate the original).
     /// </summary>
-    public readonly Tag Clone()
+    public readonly BitMask Clone()
     {
         var copy = this;
         if (_overflow != null)
@@ -152,7 +152,7 @@ internal struct Tag : IEquatable<Tag>
     /// Copy that can take bits up to <paramref name="maxBit"/> without allocating: its overflow (only when needed) is
     /// <paramref name="scratch"/>, cleared and grown on demand. Valid until the caller reuses the scratch buffer.
     /// </summary>
-    public readonly Tag CopyWithScratch(int maxBit, ref Vector256<long>[] scratch)
+    public readonly BitMask CopyWithScratch(int maxBit, ref Vector256<long>[] scratch)
     {
         var copy = this;
         int needed = Math.Max(_overflow?.Length ?? 0, maxBit >> 8);
@@ -175,7 +175,7 @@ internal struct Tag : IEquatable<Tag>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public readonly bool Equals(in Tag other)
+    public readonly bool Equals(in BitMask other)
     {
         // XOR-based equality: a == b iff (a ^ b) == 0
         var xor = Vector256.Xor(_bits, other._bits);
@@ -229,12 +229,12 @@ internal struct Tag : IEquatable<Tag>
                 Unsafe.Add(ref longRef, 2) | Unsafe.Add(ref longRef, 3)) == 0;
     }
 
-    // IEquatable<Tag> implementation for interface compatibility
-    bool IEquatable<Tag>.Equals(Tag other) => Equals(in other);
+    // IEquatable<BitMask> implementation for interface compatibility
+    bool IEquatable<BitMask>.Equals(BitMask other) => Equals(in other);
 
     public readonly override bool Equals(object obj)
     {
-        return obj is Tag tag && Equals(in tag);
+        return obj is BitMask tag && Equals(in tag);
     }
 
     public readonly override int GetHashCode()
@@ -271,7 +271,7 @@ internal struct Tag : IEquatable<Tag>
         ref long bits = ref Unsafe.As<Vector256<long>, long>(ref Unsafe.AsRef(in _bits));
 
         return
-            $"Tag {Unsafe.Add(ref bits, 0):x16} {Unsafe.Add(ref bits, 1):x16} {Unsafe.Add(ref bits, 2):x16} {Unsafe.Add(ref bits, 3):x16}";
+            $"BitMask {Unsafe.Add(ref bits, 0):x16} {Unsafe.Add(ref bits, 1):x16} {Unsafe.Add(ref bits, 2):x16} {Unsafe.Add(ref bits, 3):x16}";
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]

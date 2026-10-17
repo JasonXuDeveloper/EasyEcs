@@ -84,7 +84,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "[ForEach] method '{0}' calls '{1}', a structural change, but {2}",
         Category, DiagnosticSeverity.Error, true,
         "A [ForEach] method that is static and takes no Entity or World (or uses its Entity only to read) cannot change " +
-        "structure, so the generator walks its rows without re-checking storage, and the system shares a parallel batch " +
+        "structure, so the generator walks its rows without re-checking storage, and the system shares a parallel stage " +
         "with others. A change made through a handle a component holds (a relation) or a world kept elsewhere breaks " +
         "both: refs into moved rows, and a change while other systems run (which throws). Taking the Entity as a " +
         "parameter makes the system run alone with a pass that notices the change. A batch method holds spans into the " +
@@ -93,7 +93,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
     public static readonly DiagnosticDescriptor OffThreadStructuralChange = new("EECS014", "Structural change on another thread",
         "'{0}' is a structural change, made in a delegate that '{1}' runs on another thread; structural changes belong to the world's owner thread",
         Category, DiagnosticSeverity.Error, true,
-        "A world's structure (create/destroy, Add/Set/Remove, singletons, systems, Capture/Restore, Update) is changed by " +
+        "A world's structure (create/destroy, Set/Remove, singletons, systems, Capture/Restore, Update) is changed by " +
         "one owner thread. A change from another thread races with the owner's and can tear the tables. Hand the " +
         "change to the owner as data (a queue the owner drains in a system), or give that thread its own world.");
 
@@ -101,13 +101,20 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "'{0}' is indexed: {1}; write it with Set (or the generated Set{0}) so its index follows",
         Category, DiagnosticSeverity.Error, true,
         "The index of an IIndexed<TKey> component follows the values written with Set and CreateEntity as they are " +
-        "written; a write through a ref (Get, Add<T>(), GetOrAdd, TryGetRef, a 'ref' or Span [ForEach] parameter, a " +
+        "written; a write through a ref (Get, GetOrAdd, TryGetRef, a 'ref' or Span [ForEach] parameter, a " +
         "query item, a job's 'ref' parameter) would leave it stale. Read it with Read, 'in' or ReadOnlySpan; write it " +
         "with Set or the generated SetX.");
 
+    public static readonly DiagnosticDescriptor RemovedRequired = new("EECS016", "A [Removed<T>] method requires T",
+        "[ForEach] method '{0}' visits entities that lost '{1}' but {2}; no row passes both",
+        Category, DiagnosticSeverity.Error, true,
+        "[Removed<T>] visits entities that no longer have T. Taking T as a parameter, or requiring it with [With<T>] or " +
+        "[Changed<T>], asks for entities that have it: the method would never run. Read the entity's other components.");
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
-        MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef);
+        MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
+        RemovedRequired);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -142,7 +149,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
     }
 
     /// <summary>
-    /// EECS015: a ref to an indexed component handed out by Entity (Get, Add&lt;T&gt;(), GetOrAdd, TryGetRef), or a ref
+    /// EECS015: a ref to an indexed component handed out by Entity (Get, GetOrAdd, TryGetRef), or a ref
     /// local bound to a query item's or a job parameter's indexed component. Writes through those (and through
     /// [ForEach] parameters, see <see cref="AnalyzeMethod"/>) are reported by <see cref="AnalyzeWrite"/>.
     /// </summary>
@@ -244,7 +251,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
 
     /// <summary>
     /// EECS012: a DynamicBuffer&lt;T&gt; copied by a local (ref locals are fine), an assignment or an argument of a
-    /// generic method (Add, Set, CreateEntity: the value is stored), unless it is a new, empty buffer.
+    /// generic method (Set, CreateEntity: the value is stored), unless it is a new, empty buffer.
     /// </summary>
     private static void AnalyzeBufferCopy(OperationAnalysisContext context)
     {
@@ -340,6 +347,17 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (method.IsGenericMethod)
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, method.Name));
 
+        var removed = new System.Collections.Generic.List<ITypeSymbol>();
+        foreach (var attribute in method.GetAttributes())
+            if (attribute.AttributeClass is { IsGenericType: true } cls && cls.ConstructedFrom.ToDisplayString() == Symbols.RemovedAttribute)
+                removed.Add(cls.TypeArguments[0]);
+        foreach (var attribute in method.GetAttributes())
+            if (attribute.AttributeClass is { IsGenericType: true } cls
+                && cls.ConstructedFrom.ToDisplayString() is Symbols.WithAttribute or Symbols.ChangedAttribute
+                && removed.Any(r => SymbolEqualityComparer.Default.Equals(r, cls.TypeArguments[0])))
+                context.ReportDiagnostic(Diagnostic.Create(RemovedRequired, location, method.Name, cls.TypeArguments[0].Name,
+                    $"[{cls.Name.Replace("Attribute", "")}<{cls.TypeArguments[0].Name}>] requires it"));
+
         int components = 0;
         bool valid = true;
         foreach (var p in method.Parameters)
@@ -359,6 +377,9 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
                 if (writable && component != null && Symbols.IsIndexed(component))
                     context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, p.Locations.FirstOrDefault(), component.Name,
                         $"parameter '{p.Name}' can write it (take it as 'in' or ReadOnlySpan)"));
+                if (component != null && removed.Any(r => SymbolEqualityComparer.Default.Equals(r, component)))
+                    context.ReportDiagnostic(Diagnostic.Create(RemovedRequired, p.Locations.FirstOrDefault(), method.Name,
+                        component.Name, $"parameter '{p.Name}' requires it"));
             }
         }
 
