@@ -23,6 +23,8 @@ behaviors:
 - **`WorldOptions.Parallel` is `WorldOptions.ParallelSystems`.** The option runs systems side by side; the new name
   keeps it apart from `[ForEach(Parallel = true)]`, which splits one method's rows over threads. Rename the
   initializer: `new WorldOptions { ParallelSystems = true }`.
+- **`world.DestroyEntity(entity)` is gone:** it did what `entity.Destroy()` does. Call `entity.Destroy()`, or
+  `world.DestroyEntities<T…>(filter)` for every match at once.
 - **`IForEach` jobs receive only the components.** `Execute(int entityId, ref T1 c1, …)` became
   `Execute(ref T1 c1, …)`, so a pass never loads the entity rows for them. A job that needs the entity implements
   `IForEachEntity<…>` (`Execute(Entity entity, ref T1 c1, …)`, `entity.Id` for the id) and runs with
@@ -124,7 +126,7 @@ v3 had three handle types (`Entity` value, `EntityRef`, `ComponentRef<T>`). v4 h
 | `e.Value.TryGetComponent<T>(out ComponentRef<T> r)` | `e.TryGet<T>(out T value)` / `ref var x = ref e.GetOrAdd<T>()` |
 | `e.Value.HasComponent<T>()` | `e.Has<T>()` |
 | `e.Value.RemoveComponent(s)<..>()` | `e.Remove<..>()` |
-| `ctx.DestroyEntity(e)` | `e.Destroy()` or `world.DestroyEntity(e)` |
+| `ctx.DestroyEntity(e)` | `e.Destroy()` |
 | `ctx.GetEntityById(id)` / `TryGetEntityById` | `world.GetEntity(id)` / `TryGetEntity` |
 | `ctx.AllEntities` | `world.Entities` |
 | `ctx.GroupOf<T..>()` → `GroupResult` | `world.Query<T..>(filter)` → `QueryItem` (`item.Entity`, `item.Component1..n`) |

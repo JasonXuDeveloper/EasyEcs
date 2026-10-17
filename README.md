@@ -238,6 +238,7 @@ what it does, when to use it and what it costs is in
 | [Comparison](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/comparison.md) | Features and benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs. |
 | [Guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/README.md#guide) | One page per concept: queries, systems, singletons, structural changes, change tracking, dynamic buffers, indexes and relations, snapshots, `ref` and `await`, threading, analyzer rules. |
 | [ECS principles](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/ecs-principles.md) | How to design features with entities, components, singletons and systems. |
+| [Design questions](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/faq.md) | Why there are no events and no serialization, what is thread-safe, how to change a component. |
 | [API reference](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/api.md) | Every public API with its complexity. |
 | [Performance guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md) | Which API to use when, do's and don'ts, benchmarks. |
 | [Architecture](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/architecture.md) | Storage, memory layout, archetypes, id recycling, iteration safety, generators. |
@@ -278,6 +279,7 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
   collection or class held by an `in` parameter, **EECS012** a `DynamicBuffer<T>` copied by value.
 - `Entity.GetHashCode()` is deterministic (`Id * 397 ^ Version`) and cheaper (relation lookups hash handles).
 - **Renamed:** `WorldOptions.Parallel` is `WorldOptions.ParallelSystems` (apart from `[ForEach(Parallel = true)]`).
+- **Removed:** `world.DestroyEntity(entity)`, a second spelling of `entity.Destroy()`.
 - **Behavior changes:** `Query` results are ref structs (no `await` in the loop, items cannot be stored); refs can be
   invalidated by structural changes of other entities; iteration order follows table rows; with `ParallelSystems`, a
   subclass the generator did not see runs alone; `AddSingleton` resets an existing singleton in place; `IForEach` jobs

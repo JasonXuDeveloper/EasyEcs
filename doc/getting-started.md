@@ -173,7 +173,7 @@ public record struct Tally(long Tick, int Deaths, int Afflicted) : ISingletonCom
 
 public partial class DeathSystem : EcsSystem
 {
-    [ForEach, Without<Dead>, Changed<Health>]   // only units whose health was written (step 15)
+    [ForEach, Without<Dead>]
     static void Die(Entity entity, in Health hp, ref Tally tally)   // resolved once per pass
     {
         if (hp.Value > 0) return;

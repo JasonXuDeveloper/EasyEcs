@@ -18,7 +18,7 @@ from another ECS? [Their features in EasyEcs](comparison.md#their-features-in-ea
 | Parallel systems (`WorldOptions.ParallelSystems`) | `MovementSystem` and `ManaSystem`: same priority, disjoint data, run at once |
 | Batch methods (`Span<T>`), SIMD | `MovementSystem`: whole runs of rows as `Vector<float>`; `Census` sums health with a vectorized `ForEachBatch` job |
 | Immediate structural changes | statuses added (`Add`, `GetOrAdd`) and removed mid-pass, deaths, respawns (`Set` of two components), projectiles spawned and destroyed |
-| Change tracking (`ITrackChanges`, `[Changed<T>]`, `ChangedSince`) | `DeathSystem` checks only the units whose health was written; `ReplicationSystem` sends only the healths written since its last run; `Unsaved` counts players written since the save |
+| Change tracking (`ITrackChanges`, `[Changed<T>]`, `ChangedSince`) | `ReplicationSystem` sends only the healths written since its last run; `Unsaved` counts players written since the save |
 | Lists per entity (`DynamicBuffer<T>`, `[Changed<DynamicBuffer<T>>]`) | every player's bag of `Loot`: filled in `Despawn`, emptied in `Respawn`, sent by `ReplicationSystem.SendBag` only when it changed; `LootValue` reads it (`foreach`), `Give` moves an item between two bags |
 | Value index (`Find`, `TryFind`, `Count`) | `Zone : IIndexed<int>`: players per zone; `Despawn` hunts a player of a zone |
 | Relation | `OwnedBy : IIndexed<Entity>`: a respawning player recalls its projectiles |
@@ -113,7 +113,7 @@ public partial class MovementSystem : EcsSystem
 }
 
 public partial class ManaSystem : EcsSystem                                   // same priority as MovementSystem, other
-{                                                                             // data: both run at once (ParallelSystems)
+{                                                                             // data: both run at once
     public override int Priority => 1;
 
     [ForEach]
@@ -180,7 +180,7 @@ public partial class DeathSystem : EcsSystem
 {
     public override int Priority => 5;
 
-    [ForEach, Without<Dead>, Changed<Health>]                                 // only units whose health was written
+    [ForEach, Without<Dead>]                                                  // a plain scan: most healths change often
     static void Die(Entity unit, in Health hp, ref Battle battle)
     {
         if (hp.Value > 0) return;
@@ -414,7 +414,8 @@ public sealed class BattleServer : IDisposable
     {
         // Check with reads first: a ref access counts as a change, and an unchanged bag must not be replicated
         if (!from.Has<DynamicBuffer<Loot>>() || !to.Has<DynamicBuffer<Loot>>()) return false;
-        if (from.Read<DynamicBuffer<Loot>>().Count == 0 || to.Read<DynamicBuffer<Loot>>().Count == BagSize) return false;
+        if (from.Read<DynamicBuffer<Loot>>().Count == 0) return false;
+        if (to.Read<DynamicBuffer<Loot>>().Count == BagSize) return false;
         ref var source = ref from.Get<DynamicBuffer<Loot>>();
         to.Get<DynamicBuffer<Loot>>().Add(source[0]);
         source.RemoveAt(0);

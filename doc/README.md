@@ -20,6 +20,7 @@ flowchart LR
 | [Getting started](getting-started.md) | Build a small simulation step by step: world, entities, components, tags, queries, systems, singletons, groups, update loop. |
 | [ECS principles](ecs-principles.md) | Learn how to design features as data plus one-job systems, and why the analyzer enforces it. |
 | [Example: a battle server](example.md) | See every feature in one world: the code of the battle server benchmark and scenario tests. |
+| [Design questions](faq.md) | Why there are no events and no serialization, what is thread-safe, how to change a component. |
 
 ## Guide
 

@@ -46,7 +46,7 @@ The examples share these components:
 
 ```csharp
 public record struct Position(float X, float Y) : IComponent;
-public record struct Health(int Value) : IComponent, ITrackChanges;   // tracked: [Changed<Health>] finds the writes
+public record struct Health(int Value) : IComponent;
 public record struct Burning(int Ticks, int DamagePerTick) : IComponent;   // a status effect
 public struct Dead : IComponent;                                           // a tag
 ```
@@ -86,7 +86,7 @@ public partial class DeathSystem : EcsSystem
 {
     public override int Priority => 10;   // after every system that deals damage
 
-    [ForEach, Without<Dead>, Changed<Health>]   // only units whose health was written
+    [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp)   // `in`: it only reads Health
     {
         if (hp.Value <= 0) unit.Add<Dead>();
@@ -132,7 +132,7 @@ public record struct Score(int Deaths) : ISingletonComponent;
 
 public partial class DeathSystem : EcsSystem
 {
-    [ForEach, Without<Dead>, Changed<Health>]   // only units whose health was written
+    [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Score score)   // a singleton parameter
     {
         if (hp.Value > 0) return;
@@ -218,7 +218,7 @@ public partial class DeathSystem : EcsSystem
 {
     public override int Priority => 10;   // after combat, before respawn and loot
 
-    [ForEach, Without<Dead>, Changed<Health>]   // only units whose health was written
+    [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp)
     {
         if (hp.Value <= 0) unit.Add<Dead>();   // systems after DeathSystem see Dead in this update

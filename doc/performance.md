@@ -10,18 +10,9 @@
 
 ## Choosing an iteration API
 
-| Need | Use | Notes |
-|---|---|---|
-| Per-entity logic of a system | `[ForEach]` method | Generated struct job; same speed as a hand-written `ForEach` (the micro rows below differ because they run on different worlds). `[With<T>]` / `[Without<T>]` filters. |
-| Heavy per-entity work over tens of thousands of entities | `[ForEach(Parallel = true)]` | Chunks of rows on several threads (2.1x on 4 cores in `ParallelForEachBenchmark`); no structural changes, singletons only `in`. |
-| Per-row arithmetic over many entities | a batch `[ForEach]` method (span parameters) or `world.ForEachBatch` | Runs of consecutive rows as spans: write SIMD with `Vector<T>` / `MemoryMarshal.Cast`. No structural changes. |
-| Ad-hoc iteration over 1–9 components | `world.ForEach<…, TJob>(ref job, filter)` | Struct job, specialized and inlined by the JIT. Keep `Execute` small and branch-light. `ForEachEntity` passes the `Entity`. |
-| Ad-hoc loop needing the `Entity` | `foreach (var item in world.Query<…>(filter))` | Zero allocation; `item.Entity`, `item.Component1..n` are refs. (`[ForEach]` methods can take an `Entity` parameter too.) |
-| React to a state change (death, level up) | write the state (`Dead` tag or a field) and query it in later systems | One batched pass per consumer, in schedule order; keeps modules decoupled. |
-| "Is there any …?" | `world.Any<…>(filter)` | Early exit, no enumeration. |
-| "How many …?" | `world.Count<…>(filter)` | Sums table counts (counts presence bits in tables with rows lacking a component). |
-| Only the rows written since a system last ran | `[ForEach, Changed<T>]` (`T : ITrackChanges`) | Skips unwritten tables, 4,096-row blocks and 64-row words; the method runs for changed rows only. |
-| Find entities by a value or by the entity they point at | `world.Index<T, TKey>()` (`T : IIndexed<TKey>`) | `Count` O(1), `Find` one step per match; catches up with written rows on lookup. |
+[Which API](guide/queries.md#which-api) in the queries guide maps each need to its call: `[ForEach]` methods for the
+logic of systems, struct jobs for hot loops outside them, `Query` for convenience, `Count` / `Any` instead of loops,
+`[Changed<T>]` and indexes instead of scans.
 
 ## Regular code and the fastest code
 
@@ -165,6 +156,12 @@ A replication or persistence system that scans every row pays for the rows nobod
 `ITrackChanges` and filter with `[Changed<T>]`: unwritten tables, 4,096-row blocks and 64-row words are skipped.
 Take the component by `in` so the visit does not count as a write.
 
+It pays when few rows are written, or when the written rows are close together: at 1,000 of 100,000 rows
+written per tick, 36 μs against 60-110 μs for a scan. When writes are spread over most 64-row words (a tenth of the
+rows, scattered), nothing is skipped and testing the change ticks costs about what reading the column does: a cheap
+check over such a column is as fast as a plain scan, and simpler (the battle server's death check takes 256 μs
+either way, with a tenth of its 100,000 healths written per tick).
+
 ```csharp
 public record struct Shield(int Value) : IComponent, ITrackChanges;
 public record struct ShieldReplica(int Value) : IComponent;
@@ -178,10 +175,10 @@ public partial class ShieldReplicationSystem : EcsSystem
 
 ### The entity only where the row needs it
 
-An `Entity` parameter reads the row's id for every row, even when only a rare branch uses it. A system that acts on
-a few entities ("the ones that died") should find them with a filter, not a test in every row. Let the system that
-lowers health add a `Dead` tag, or track `Health` and visit `[Changed<T>]` rows, so the `Entity` loop runs only for
-the rows that matter.
+An `Entity` parameter reads the row's id for every row, even when only a rare branch uses it. When the entities a
+system acts on can be told by a component, filter on it (`[With<Dead>]`) instead of testing every row. A cheap test
+of a column that many rows write every tick (a death check on `Health`) is still fastest as a plain scan: see above
+for when `[Changed<T>]` pays.
 
 ### Waves of entities: batch calls
 
@@ -203,16 +200,10 @@ Several components at once also take one transition: `entity.Set(a, b)`, `entity
 - Keep `[ForEach]` methods that make no structural change `static`, without a `World` parameter and with read-only use
   of their `Entity` (`Id`, `Has`, `Get`, ...): the generator marks them `INoStructuralChanges`, and they iterate with
   no per-entity bookkeeping.
-- Write arithmetic over many rows as a batch method (`Span<T>` / `ReadOnlySpan<T>` parameters) and vectorize it:
-  a table whose rows all match is one call, and unmanaged columns start on a 64-byte boundary.
-- Spawn and clear waves with `world.CreateEntities(span, a, b)` / `world.DestroyEntities<T>(filter)`: one pass
-  through the structural gate for the batch (2.4x faster than one call per entity in `ChurnBatch`).
+- Vectorize arithmetic in batch methods, batch waves of entities, use tags for states and `[Changed<T>]` for the few
+  rows that changed: see [regular code and the fastest code](#regular-code-and-the-fastest-code).
 - Pre-size with `WorldOptions.InitialEntityCapacity` to avoid growing the entity records at run time.
-- Use tag components (empty structs) for states (`Dead`, `Stunned`, `Burning`) and filter on them: removing a tag and
-  adding it back flips a presence bit, the entity keeps its row.
 - Keep `QueryFilter`s in `static readonly` fields (the generator does this for `[ForEach]`).
-- Mark a component `ITrackChanges` when a system reacts to the few rows written since its last run (replication,
-  persistence) and give that method `[Changed<T>]` instead of scanning every row.
 - Look entities up by value with an indexed component (`IIndexed<TKey>`, `world.Index<T, TKey>()`) instead of a
   dictionary you keep in sync by hand; keep the `ValueIndex` in a local or field.
 - Take an indexed component by `in` when you only read it: a `ref` counts as a write, so the row is re-indexed on
@@ -229,8 +220,8 @@ Several components at once also take one transition: `entity.Set(a, b)`, `entity
 - Don't use LINQ, `params object[]` or string formatting in per-update code.
 - Don't use a value index, or destroy entities / remove indexed components, from a thread other than the world's
   owner while the world has an index: the index is updated by those changes and is not synchronized.
-- Don't take an `Entity` or a singleton parameter a `[ForEach]` method does not need: the JIT computes either for every
-  row, even when only a rare branch uses it, which doubles the cost of a light loop (about 0.4 ns per row).
+- Don't take an `Entity` or a singleton parameter a `[ForEach]` method does not need: the generated loop loads it
+  for every row, even when only a rare branch uses it (the JIT does not move a load into a branch).
 - Don't take a tracked component (`ITrackChanges`) by `ref` when the method only reads it: every visited row then
   counts as changed. Use `in`.
 
@@ -250,8 +241,8 @@ All numbers come from BenchmarkDotNet. The headline benchmarks simulate a real s
 
   Setup asserts that the world is busy: hits, deaths, spawns and AOI changes all happen.
 - **`BattleServerBenchmark.Tick`** is one tick of the README's battle server (`BattleServer.cs`), which uses every
-  feature: a parallel `[ForEach]` (NPC steering), two parallel systems of one priority (movement and mana, batch
-  methods), statuses added and removed mid-pass, `WithAny`, deaths, respawns and projectiles, a value index (players
+  feature: a parallel `[ForEach]` (NPC steering), two parallel systems of one priority (movement, vectorized, and
+  mana), statuses added and removed mid-pass, `WithAny`, deaths, respawns and projectiles, a value index (players
   per zone) and a relation (projectiles of a player), an update interval, per-system timings, and replication of
   changed health every third tick (`[Changed<Health>]` in its own system group). `BattleServerTests` check the same
   world and the host's queries, struct jobs, snapshots and error handling.

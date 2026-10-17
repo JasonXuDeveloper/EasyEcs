@@ -19,6 +19,9 @@ allocation-free.
 | Need | Use |
 |---|---|
 | Per-entity logic of a system | a [`[ForEach]` method](systems.md#foreach-methods) (generated struct job) |
+| Arithmetic of a system over many rows | a [batch `[ForEach]` method](systems.md#batch-methods) (spans), vectorized |
+| Heavy per-entity work of a system | [`[ForEach(Parallel = true)]`](systems.md#parallel-methods) |
+| React to a state change (death, level up) | write the state (a `Dead` tag) and query it in later systems |
 | Ad-hoc iteration, fastest | `world.ForEach<T1..Tn, TJob>(ref job, filter)` with a struct job ([how to write one](../performance.md#ad-hoc-loops-a-struct-job)) |
 | Ad-hoc fast loop that needs the `Entity` | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` |
 | Arithmetic over runs of rows (SIMD) | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)`, spans per run ([vectorized](../performance.md#arithmetic-over-many-rows-vectorize-a-batch-method)) |

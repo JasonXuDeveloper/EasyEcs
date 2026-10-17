@@ -21,7 +21,7 @@ Entity e = world.CreateEntity();                                   // empty
 Entity u = world.CreateEntity(new Position(0, 0), new Health(100)); // 1-9 components, placed in one step
 
 bool alive = u.IsAlive;
-u.Destroy();                       // or world.DestroyEntity(u); a stale handle is ignored
+u.Destroy();                       // a stale handle is ignored
 ```
 
 Waves of spawns and clean-ups have batch forms. Each takes the structural gate once for the whole batch:
