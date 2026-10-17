@@ -393,7 +393,6 @@ public sealed class ArityGenerator : IIncrementalGenerator
         string execute = $"job.Execute({Args(entityArg, List(n, i => $"ref r{i}"))});";
         // The row argument inside a run of rows of a word (idk walks the run).
         string rowArgRun = System.Text.RegularExpressions.Regex.Replace(rowArg, @"\bids\b", "idk");
-        string rowArgDense = System.Text.RegularExpressions.Regex.Replace(rowArg, @"\bids\b", "idr");
         string rowArgIndexed = System.Text.RegularExpressions.Regex.Replace(rowArg, @"\bids\b", "Unsafe.Add(ref ids, i)");
         // Row loops move one ref per column by one element per row (strength-reduced by hand): with an int index the
         // JIT sign-extends and rebuilds every address, which nearly doubles the cost of a tight loop.
@@ -529,16 +528,21 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                 /// <summary>
                 /// The rows from <paramref name="start"/> of a pass that may make structural changes, testing presence
-                /// bits: runs of consecutive passing rows (through whole words that pass) take the lean loop, failing
-                /// rows are skipped by the run (a word of failing rows costs one load). Returns like <c>{{name}}Live</c>.
+                /// bits: the passing rows of a sparse word run one by one, runs of consecutive passing rows (through whole
+                /// words that pass) take the lean loop, a word of failing rows costs one load. Returns like
+                /// <c>{{name}}Live</c>.
                 /// </summary>
-                [MethodImpl(MethodImplOptions.NoInlining)] // per table: the job is inlined only into the lean loop
+                [MethodImpl(MethodImplOptions.NoInlining)] // per table: kept out of the caller like the lean loop
                 private TJob {{name}}LiveTested<{{tps}}, TJob>(TJob job, Archetype archetype, RowFilter rows, int start, int count, {{ushorts}})
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
-                    // Each run is its own call of the lean loop: the run's state stays out of the loop that runs the job,
-                    // whose registers then hold the same values as in a table where every row passes.
+                    // A long run is its own call of the lean loop: the run's state stays out of the loop that runs the
+                    // job, whose registers then hold the same values as in a table where every row passes. A sparse word
+                    // (a rare status) would pay that call per row, so its rows run here, found bit by bit.
+                    int seen = StorageVersion;
+                    ref EntitySlot slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
+            {{Lines(n, i => $"            ref T{i} c{i} = ref archetype.Base<T{i}>(b{i});")}}
                     int words = (count + 63) >> 6;
                     for (int i = start; i < count;)
                     {
@@ -552,6 +556,30 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                         int first = (w << 6) + BitOperations.TrailingZeroCount(pass);
                         if (first >= count) break;
+                        if (BitOperations.PopCount(pass) <= 16)
+                        {
+                            for (pass &= RowFilter.RowMask(w, count); pass != 0; pass &= pass - 1)
+                            {
+                                int row = (w << 6) + BitOperations.TrailingZeroCount(pass);
+                                ref EntitySlot idp = ref Unsafe.Add(ref slots, row);
+                                int id = idp.Id;
+                                if (id < 0) continue; // tombstone
+            {{Lines(n, i => $"                    ref T{i} r{i} = ref Unsafe.Add(ref c{i}, row);")}}
+
+            {{StampRow(n, "                ", "row")}}
+                                {{execute}}
+
+                                if (seen != StorageVersion)
+                                {
+                                    _stop = (long)id << 32 | (uint)(count - 1 - row);
+                                    return job;
+                                }
+                            }
+
+                            i = (w + 1) << 6;
+                            continue;
+                        }
+
                         // The shift fills zeros, so ~ stops the run at the word's end; a run to the end goes on through the
                         // next words while they pass whole.
                         int length = BitOperations.TrailingZeroCount(~(pass >> first));
@@ -630,36 +658,26 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         }
 
                         int left = Math.Min(64, count - (w << 6));
-                        ulong bits = rows.Word(archetype, w);
-                        if (tombstones || bits != ulong.MaxValue)
+                        // Runs of passing rows (a word that passes whole is one run; a few failing rows split a word into
+                        // long runs, a sparse word costs one step per run), each walked like a dense table. The run's refs
+                        // are locals of the run, so they stay in registers while the word loop's state waits on the stack.
+                        ulong bits = rows.Word(archetype, w) & RowFilter.RowMask(w, count);
+                        if (tombstones) bits &= AliveRows(ref ids, left); // rare: the run loops then test nothing
+            {{Lines(n, i => $"                if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.StampWord<T{i}>(w, bits, _changeTick);")}}
+                        while (bits != 0)
                         {
-                            // Runs of passing rows (a few failing rows split a word into long runs; a sparse word costs
-                            // one step per run), each walked like a dense table.
-                            bits &= RowFilter.RowMask(w, count);
-                            if (tombstones) bits &= AliveRows(ref ids, left); // rare: the run loops then test nothing
-            {{Lines(n, i => $"                    if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.StampWord<T{i}>(w, bits, _changeTick);")}}
-                            while (bits != 0)
-                            {
-                                int k = BitOperations.TrailingZeroCount(bits);
-                                // The shift fills zeros, so ~ stops the run at the word's end at the latest.
-                                int end = k + BitOperations.TrailingZeroCount(~(bits >> k));
-                                bits = end >= 64 ? 0 : bits & (ulong.MaxValue << end);
-                                ref EntitySlot idk = ref Unsafe.Add(ref ids, k);
-            {{Lines(n, i => $"                    ref T{i} q{i} = ref Unsafe.Add(ref r{i}, k);")}}
-                                for (int run = end - k; run > 0; run--, idk = ref Unsafe.Add(ref idk, 1), {{List(n, i => $"q{i} = ref Unsafe.Add(ref q{i}, 1)")}})
-                                    job.Execute({{Args(rowArgRun, List(n, i => $"ref q{i}"))}});
-                            }
-
-                            ids = ref Unsafe.Add(ref ids, left);
-            {{Lines(n, i => $"                    r{i} = ref Unsafe.Add(ref r{i}, left);")}}
-                            continue;
+                            int k = BitOperations.TrailingZeroCount(bits);
+                            // The shift fills zeros, so ~ stops the run at the word's end at the latest.
+                            int end = k + BitOperations.TrailingZeroCount(~(bits >> k));
+                            bits = end >= 64 ? 0 : bits & (ulong.MaxValue << end);
+                            ref EntitySlot idk = ref Unsafe.Add(ref ids, k);
+            {{Lines(n, i => $"                ref T{i} q{i} = ref Unsafe.Add(ref r{i}, k);")}}
+                            for (int run = end - k; run > 0; run--, idk = ref Unsafe.Add(ref idk, 1), {{List(n, i => $"q{i} = ref Unsafe.Add(ref q{i}, 1)")}})
+                                job.Execute({{Args(rowArgRun, List(n, i => $"ref q{i}"))}});
                         }
 
-            {{StampRows(n, "            ", "w << 6", "left")}}
-                        ref EntitySlot idr = ref ids;
-                        for (int row = left; row > 0; row--, idr = ref Unsafe.Add(ref idr, 1), {{advance}})
-                            job.Execute({{Args(rowArgDense, List(n, i => $"ref r{i}"))}});
                         ids = ref Unsafe.Add(ref ids, left);
+            {{Lines(n, i => $"            r{i} = ref Unsafe.Add(ref r{i}, left);")}}
                     }
 
                     return job;
