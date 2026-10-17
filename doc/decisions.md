@@ -57,7 +57,7 @@ data; a system after it, on the owner thread, makes the structural change from t
 static void Burn(ref Health hp, in Burning burning) => hp.Value -= burning.DamagePerTick;   // data, in parallel
 
 [ForEach, Without<Dead>]
-static void Die(Entity entity, in Health hp) { if (hp.Value <= 0) entity.Set(new Dead()); }  // structure, after it
+static void Die(Entity entity, in Health hp) { if (hp.Value <= 0) entity.SetDead(); }        // structure, after it
 ```
 
 **Why.** Per-thread recorders would bring back D2's deferred second path, with an order between threads to define and
@@ -77,7 +77,7 @@ a tag that the reacting system removes:
 world.CreateEntity(new Health(100, 100), new Spawned());              // the creator says it is new
 
 [ForEach, With<Spawned>]
-static void Greet(Entity entity, in Health hp) { /* first-time work */ entity.Remove<Spawned>(); } // a bit flip
+static void Greet(Entity entity, in Health hp) { /* first-time work */ entity.RemoveSpawned(); } // a bit flip
 ```
 
 **Why.** A tag is explicit, queryable, saved with the world and costs one presence bit flip. A built-in filter would

@@ -45,7 +45,8 @@ API and the examples several times: every line users write twice is a candidate,
 needs goes. Each round's findings are listed here with what was generated, changed or rejected, and why.
 
 - Round 1: pending. Candidates so far: `[ForEach]` on static methods outside systems (weigh against `Query` and
-  struct jobs, which already run anywhere).
+  struct jobs, which already run anywhere); a settable tag property, Entitas-style (`entity.IsDead = true` adds or
+  removes the tag: weigh a structural change hidden in an assignment, and the analyzer must count it as one).
 
 ### Example
 
