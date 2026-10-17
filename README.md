@@ -292,7 +292,7 @@ v4 is a rewrite for .NET 10 with standard ECS vocabulary in a single `EasyEcs` n
 - Systems are synchronous `EcsSystem`s with source-generated `[ForEach]` methods (no UniTask dependency).
 - Entity ids are recycled; singletons are per world; system groups with `[UpdateInGroup<T>]`.
 - The analyzer enforces the ECS principles (EECS006-EECS008); events were replaced by state-as-data.
-- `WorldOptions.ParallelSystems` runs systems of one priority together only when their generated read/write access does
+- `WorldOptions.Parallel` (`ParallelSystems` since 4.1) runs systems of one priority together only when their generated read/write access does
   not conflict: parallel with the same result as sequential, allocation-free.
 - A `[ForEach]` method may take no component when a `[With<T>]` names what to query
   (`[ForEach, With<Dead>] static void Remove(Entity e)`).

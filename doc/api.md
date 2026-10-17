@@ -27,7 +27,7 @@ Notation:
 | `ISingletonComponent` | marker interface | Implemented by singleton structs. |
 | `EcsSystem` | abstract class | `World`, `Priority`, `UpdateInterval`, `Enabled`, `Stats`, `LastRunTick`; `OnCreate` / `OnUpdate` / `OnDestroy`. |
 | `SystemStats` | readonly struct | `Runs`, `Last`, `Total`, `Average` of a system's runs; recorded with `WorldOptions.MeasureSystems`. |
-| `SystemAccess` | struct | What a system reads and writes (`Read<T>`, `Write<T>`, `ReadSingleton<T>`, `WriteSingleton<T>`, `RunsAlone`), used by `ParallelSystems` batching. Only the generated `GeneratedAccess` override of a system fills it (from its `[ForEach]` parameters); user code never calls it. |
+| `SystemAccess` | struct | What a system reads and writes (`Read<T>`, `Write<T>`, `ReadSingleton<T>`, `WriteSingleton<T>`, `RunsAlone`), used by `ParallelSystems` batching. Only the generated `GeneratedAccess` override of a system fills it (from its `[ForEach]` parameters); user code never calls it. Each call O(1). |
 | `ForEachAttribute`, `WithAttribute<T>`, `WithoutAttribute<T>`, `WithAnyAttribute<T>`, `ChangedAttribute<T>` | attributes | `[ForEach]` methods (`Parallel = true` runs chunks of rows on several threads) and their filters. |
 | `ISystemGroup`, `UpdateInGroupAttribute<TGroup>` | marker / attribute | System groups. |
 | `QueryFilter` | readonly struct | `Create().With<T>().Without<U>().WithAny<V>().WithAny<W>().Changed<X>(since)`; `ChangedSince(since)` moves the tick of a kept filter. |
@@ -98,7 +98,7 @@ first write. Reads work on any reference (`in`, `Read<T>()`); writes need a `ref
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | `item.Entity`, `item.Component1..n` (refs) |
 | `world.Count<T1..Tn>(filter)` | O(M), + S / 64 for tables whose rows must be tested (some rows lack a required component, have an excluded one or lack every `WithAny` component, or a `Changed` filter applies) | sums table counts, or counts presence bits (and change ticks) |
 | `world.Any<T1..Tn>(filter)` | O(M + S / 64) worst | stops at the first match; S / 64 only for tables whose rows must be tested (as for `Count`) |
-| `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1) | build once and keep it in a `static readonly` field; `WithAny` calls form one "at least one of" group |
+| `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1); allocates once a component's bit is 256 or more (worlds with more than 256 component types) | build once and keep it in a `static readonly` field; `WithAny` calls form one "at least one of" group |
 | `filter.Changed<T>(since)` / `filter.ChangedSince(since)` | O(1); a pass skips tables, 4,096-row blocks and 64-row words written before `since` (4 summaries per SIMD compare) and takes a word's written rows from its summary; only words written at several ticks after `since`, or row by row by a query, test 4 rows per SIMD compare | rows whose `T` (`ITrackChanges`) was written at or after `since`; one tick per filter (`Changed` filters naming different ticks throw `ArgumentException`); `ChangedSince` returns a copy with a new tick, so a kept filter takes a new tick per call without being rebuilt |
 
 The first time a query shape is used, building its cache entry costs O(all archetypes) under the structural gate.
@@ -143,5 +143,5 @@ Other `World` members:
 `RemoveSystem<T>()` returns whether a system was removed. `GetSingleton<T>()` throws if the singleton was not added.
 
 Values and handles, all O(1): `entity.Id` / `Version` / `World`, `==` / `Equals` / `GetHashCode` (id and version) /
-`ToString`; `filter.Since`; `snapshot.EntityCount`; `system.Stats.Runs` / `Last` / `Total` / `Average`;
+`ToString`; `snapshot.EntityCount`; `system.Stats.Runs` / `Last` / `Total` / `Average`;
 `system.LastRunTick`, `Priority`, `UpdateInterval`, `Enabled`, `World`.

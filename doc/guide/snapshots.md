@@ -19,6 +19,7 @@ replays, or to reset a world between tests.
 
 ```csharp
 var before = world.Capture();          // O(entities × components)
+int saved = before.EntityCount;        // the entities it holds
 
 world.Update();                        // simulate a turn
 if (!running) world.Restore(before);   // undo it: same entities, same values, same singletons

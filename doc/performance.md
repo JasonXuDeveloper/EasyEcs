@@ -3,6 +3,7 @@
 [Docs index](README.md) · Related: [API reference](api.md) · [Architecture](architecture.md)
 
 - [Choosing an iteration API](#choosing-an-iteration-api)
+- [Regular code and the fastest code](#regular-code-and-the-fastest-code)
 - [Do](#do) / [Don't](#dont)
 - [Benchmarks](#benchmarks)
 - [Measuring](#measuring)
@@ -21,6 +22,171 @@
 | "How many …?" | `world.Count<…>(filter)` | Sums table counts (counts presence bits in tables with rows lacking a component). |
 | Only the rows written since a system last ran | `[ForEach, Changed<T>]` (`T : ITrackChanges`) | Skips unwritten tables, 4,096-row blocks and 64-row words; the method runs for changed rows only. |
 | Find entities by a value or by the entity they point at | `world.Index<T, TKey>()` (`T : IIndexed<TKey>`) | `Count` O(1), `Find` one step per match; catches up with written rows on lookup. |
+
+## Regular code and the fastest code
+
+The regular way is right for most systems: it is short, and a `[ForEach]` method is already a generated, inlined
+struct job. When a system shows up in `MeasureSystems` timings, these rewrites are what the benchmarks below measure.
+
+| Regular | Fastest | Measured |
+|---|---|---|
+| A per-entity `[ForEach]` doing arithmetic with branches | A batch method vectorized with `Vector<T>`, branches as masks | 251 → 64 μs (100,000 entities, `OperationBenchmark`) |
+| `foreach (var item in world.Query<…>())` in a hot ad-hoc loop | A struct job with `world.ForEach` | 28.9 → 12.6 μs (10,000 entities, micro benchmarks) |
+| A `bool` flag tested in every row | A tag component with `[With<T>]` / `[Without<T>]` | flagged rows skipped 64 at a time; toggling flips a bit |
+| Scanning every row for the few that changed | `ITrackChanges` + `[Changed<T>]` | 40-110 → 0.55 μs (10 of 100,000 rows written) |
+| `CreateEntity` / `Destroy` in a loop | `CreateEntities` / `DestroyEntities` | 382 → 158 μs (10 rounds of 10,000) |
+| Heavy per-entity work on one thread | `[ForEach(Parallel = true)]` | 1,601 → 765 μs (100,000 entities, 4 cores) |
+
+### Arithmetic over many rows: vectorize a batch method
+
+The JIT does not vectorize loops by itself, and data-dependent branches mispredict on every other row. The regular
+system:
+
+```csharp
+public partial class BounceSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Move(ref Position p, ref Velocity v)
+    {
+        p = new Position(p.X + v.X, p.Y + v.Y);
+        if (p.X < 0 || p.X > 4096) v = v with { X = -v.X };
+        if (p.Y < 0 || p.Y > 4096) v = v with { Y = -v.Y };
+    }
+}
+```
+
+The fastest one takes spans (runs of consecutive rows; a table whose rows all match is one call), reads two-float
+components as one float span (X, Y, X, Y, ...), so every lane of a `Vector<float>` is one coordinate, and turns the
+branches into a mask:
+
+```csharp
+using System.Numerics;
+using System.Runtime.InteropServices;
+
+public partial class BounceSimdSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Move(Span<Position> positions, Span<Velocity> velocities)
+    {
+        var p = MemoryMarshal.Cast<Position, float>(positions);
+        var v = MemoryMarshal.Cast<Velocity, float>(velocities);
+        var max = new Vector<float>(4096f);
+        int i = 0;
+        for (; i <= p.Length - Vector<float>.Count; i += Vector<float>.Count)
+        {
+            var position = new Vector<float>(p[i..]) + new Vector<float>(v[i..]);
+            var velocity = new Vector<float>(v[i..]);
+            var outside = Vector.LessThan(position, Vector<float>.Zero) | Vector.GreaterThan(position, max);
+            position.CopyTo(p[i..]);
+            Vector.ConditionalSelect(outside, -velocity, velocity).CopyTo(v[i..]);
+        }
+
+        for (; i < p.Length; i++) // the rows left over
+        {
+            p[i] += v[i];
+            if (p[i] < 0 || p[i] > 4096) v[i] = -v[i];
+        }
+    }
+}
+```
+
+The cast is valid because the components hold only floats (no padding, no references). Unmanaged columns start on a
+64-byte boundary. A batch method takes no `Entity` and makes no structural change; a scalar loop over spans gains
+little over the per-entity method, so write one to vectorize it.
+
+### Ad-hoc loops: a struct job
+
+`world.Query` is the convenient loop for tools and request handlers. For a loop that runs every tick outside a system,
+write a struct job: `world.ForEach` specializes and inlines it per table.
+
+```csharp
+public struct EnergyJob : IForEach<Velocity>
+{
+    public float Total;   // a value field stays in a register during the pass and is copied back once
+
+    public void Execute(ref Velocity v) => Total += v.X * v.X + v.Y * v.Y;
+}
+```
+
+```csharp
+var job = new EnergyJob();
+world.ForEach<Velocity, EnergyJob>(ref job);
+float energy = job.Total;
+```
+
+Declare the job a `ref struct` when it must hold a `ref` or a `Span` (an output buffer, a caller's array). Generated
+jobs do this for singleton parameters. `ForEach`, `ForEachEntity` and `ForEachBatch` accept ref struct jobs. The
+`*Parallel` calls do not, because each thread gets its own copy of the job. For a total, a value field is faster than
+a `ref` field: a write through a `ref` goes to memory on every row.
+
+```csharp
+public ref struct CollectJob : IForEach<Position>
+{
+    public Span<float> Xs;   // the caller's buffer, at least as long as the matching rows
+    public int Count;
+
+    public void Execute(ref Position p) => Xs[Count++] = p.X;
+}
+```
+
+### States: tags, not flags
+
+A flag costs a load and a branch in every row of every system that checks it. A tag component is a filter: rows
+without it are skipped 64 at a time, and adding or removing it flips a presence bit (the entity keeps its row).
+
+```csharp
+public record struct Unit(int Hp, bool Stunned) : IComponent;   // regular: every system tests the flag
+
+public partial class StunnedFlagSystem : EcsSystem
+{
+    [ForEach]
+    static void Act(ref Unit unit)
+    {
+        if (unit.Stunned) return;
+        unit.Hp++;
+    }
+}
+
+public partial class StunnedTagSystem : EcsSystem   // fastest: the filter does the test
+{
+    [ForEach, Without<Stunned>]
+    static void Act(ref Health hp) => hp = hp with { Value = hp.Value + 1 };
+}
+```
+
+### The few rows that changed: `[Changed<T>]`
+
+A replication or persistence system that scans every row pays for the rows nobody wrote. Mark the component
+`ITrackChanges` and filter with `[Changed<T>]`: unwritten tables, 4,096-row blocks and 64-row words are skipped.
+Take the component by `in` so the visit does not count as a write.
+
+```csharp
+public record struct Shield(int Value) : IComponent, ITrackChanges;
+public record struct ShieldReplica(int Value) : IComponent;
+
+public partial class ShieldReplicationSystem : EcsSystem
+{
+    [ForEach, Changed<Shield>]
+    static void Send(in Shield shield, ref ShieldReplica replica) => replica = new ShieldReplica(shield.Value);
+}
+```
+
+### The entity only where the row needs it
+
+An `Entity` parameter reads the row's id for every row, even when only a rare branch uses it. A system that acts on
+a few entities ("the ones that died") should find them with a filter, not a test in every row. Let the system that
+lowers health add a `Dead` tag, or track `Health` and visit `[Changed<T>]` rows, so the `Entity` loop runs only for
+the rows that matter.
+
+### Waves of entities: batch calls
+
+```csharp
+var wave = new Entity[1_000];
+world.CreateEntities(wave, new Position(0, 0), new Velocity(1, 0));   // one pass through the structural gate
+int removed = world.DestroyEntities<Position>(QueryFilter.Create().With<Dead>());
+```
+
+Several components at once also take one transition: `entity.Set(a, b)`, `entity.Remove<A, B>()`.
 
 ## Do
 
@@ -125,7 +291,7 @@ warmups, 8 iterations of 250 ms, call counting from the start) on .NET 10, on a 
 | WorldSimulationBenchmark.Tick | 100,000 | 4.33 ms | 1.89 ms | 0 B |
 | MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.85 ms | 1.08 ms | 0 B |
 | BattleServerBenchmark.Tick (every feature) | 100,000 | – | 2.36 ms | 0 B |
-| ParallelSystemsBenchmark.Tick, `Parallel` off / on | 100,000 | – | 394 / 243 μs | 0 B |
+| ParallelSystemsBenchmark.Tick, `ParallelSystems` off / on | 100,000 | – | 394 / 243 μs | 0 B |
 | ParallelForEachBenchmark.Tick, `[ForEach]` / `[ForEach(Parallel = true)]` | 100,000 | – | 1,601 / 765 μs | 0 B |
 | ChangeTrackingBenchmark.Tick, 10 rows written: every row / `[Changed<Health>]` | 100,000 | – | 40-110 μs / 0.55 μs | 0 B |
 | ChangeTrackingBenchmark.QueryTick, 10 rows written: every row / `Changed<Health>()` | 100,000 | – | 470 μs / 0.79 μs | 0 B |

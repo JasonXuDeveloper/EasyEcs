@@ -56,7 +56,7 @@ using var world = new World(new WorldOptions { InitialEntityCapacity = 10_000 })
 |---|---|---|
 | `InitialEntityCapacity` | 1024 | Pre-sized entity array (one 16-byte record per id), so it does not grow at run time. Archetype tables grow on their own, doubling. |
 | `ParallelSystems` | `false` | Run non-conflicting systems of equal priority at the same time (see [Threading](guide/threading.md#parallel-systems)). |
-| `MaxDegreeOfParallelism` | processor count | Threads one parallel run uses at most: systems run by `Parallel`, and the chunks of `[ForEach(Parallel = true)]`, `ForEachParallel` and `ForEachEntityParallel` (those run in chunks whether `Parallel` is on or not). |
+| `MaxDegreeOfParallelism` | processor count | Threads one parallel run uses at most: systems run by `ParallelSystems`, and the chunks of `[ForEach(Parallel = true)]`, `ForEachParallel` and `ForEachEntityParallel` (those run in chunks whether `ParallelSystems` is on or not). Lower it when several worlds or IO threads share the cores. |
 | `MeasureSystems` | `false` | Record each system's run count and time (`system.Stats`). |
 
 `Dispose()` calls every system's `OnDestroy` (in reverse order) and releases storage.

@@ -19,8 +19,12 @@ allocation-free.
 | Need | Use |
 |---|---|
 | Per-entity logic of a system | a [`[ForEach]` method](systems.md#foreach-methods) (generated struct job) |
-| Ad-hoc iteration, fastest | `world.ForEach<T1..Tn, TJob>(ref job, filter)` with a struct job |
-| Ad-hoc loop that needs the `Entity` | `foreach (var item in world.Query<T1..Tn>(filter))` |
+| Ad-hoc iteration, fastest | `world.ForEach<T1..Tn, TJob>(ref job, filter)` with a struct job ([how to write one](../performance.md#ad-hoc-loops-a-struct-job)) |
+| Ad-hoc fast loop that needs the `Entity` | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` |
+| Arithmetic over runs of rows (SIMD) | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)`, spans per run ([vectorized](../performance.md#arithmetic-over-many-rows-vectorize-a-batch-method)) |
+| Heavy work on several threads | `world.ForEachParallel` / `ForEachEntityParallel` with an `INoStructuralChanges` job |
+| Convenient loop (tools, tests, handlers) | `foreach (var item in world.Query<T1..Tn>(filter))` (`item.Entity`, refs to the components) |
+| Destroy every match | `world.DestroyEntities<T1..Tn>(filter)` (one gate pass) |
 | "How many …?" | `world.Count<T1..Tn>(filter)` |
 | "Is there any …?" | `world.Any<T1..Tn>(filter)` (early exit) |
 | Only the rows written since a tick | `QueryFilter.Create().Changed<T>(tick)`, or `[Changed<T>]` in a system ([change tracking](change-tracking.md)) |

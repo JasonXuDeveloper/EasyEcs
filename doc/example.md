@@ -16,7 +16,7 @@ from another ECS? [Their features in EasyEcs](comparison.md#their-features-in-ea
 | `[ForEach]` systems, filters (`With`, `Without`, `WithAny`) | every system; `StatusSystem.Count` counts burning **or** frozen units |
 | `[ForEach(Parallel = true)]` | `SteeringSystem`: NPC steering on every core |
 | Parallel systems (`WorldOptions.ParallelSystems`) | `MovementSystem` and `ManaSystem`: same priority, disjoint data, run at once |
-| Batch methods (`Span<T>`) | `MovementSystem`, `ManaSystem`: whole runs of rows, SIMD-friendly |
+| Batch methods (`Span<T>`) | `MovementSystem` (vectorized with `Vector<float>`), `ManaSystem`: whole runs of rows |
 | Immediate structural changes | statuses added (`Add`, `GetOrAdd`) and removed mid-pass, deaths, respawns (`Set` of two components), projectiles spawned and destroyed |
 | Change tracking (`ITrackChanges`, `[Changed<T>]`, `ChangedSince`) | `ReplicationSystem` sends only the healths written since its last run; `Unsaved` counts players written since the save |
 | Lists per entity (`DynamicBuffer<T>`, `[Changed<DynamicBuffer<T>>]`) | every player's bag of `Loot`: filled in `Despawn`, emptied in `Respawn`, sent by `ReplicationSystem.SendBag` only when it changed; `LootValue` reads it (`foreach`), `Give` moves an item between two bags |
@@ -37,7 +37,9 @@ from another ECS? [Their features in EasyEcs](comparison.md#their-features-in-ea
 
 ```csharp
 using System;
+using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using EasyEcs;
 
 public record struct Position(float X, float Y) : IComponent;
@@ -96,11 +98,16 @@ public partial class MovementSystem : EcsSystem
 {
     public override int Priority => 1;
 
-    [ForEach, Without<Dead>, Without<Frozen>]                                 // whole runs of rows: SIMD-friendly
+    [ForEach, Without<Dead>, Without<Frozen>]                                 // whole runs of rows, vectorized
     static void Move(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
     {
-        for (int i = 0; i < positions.Length; i++)
-            positions[i] = new Position(positions[i].X + velocities[i].X, positions[i].Y + velocities[i].Y);
+        // Two floats each: as float spans, X and Y are lanes of one Vector<float> (the JIT does not vectorize loops)
+        var p = MemoryMarshal.Cast<Position, float>(positions);
+        var v = MemoryMarshal.Cast<Velocity, float>(velocities);
+        int i = 0;
+        for (; i <= p.Length - Vector<float>.Count; i += Vector<float>.Count)
+            (new Vector<float>(p[i..]) + new Vector<float>(v[i..])).CopyTo(p[i..]);
+        for (; i < p.Length; i++) p[i] += v[i];                               // the rows left over
     }
 }
 

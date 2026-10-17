@@ -39,7 +39,7 @@ flowchart TB
             U1["world 1: Update()"]
         end
         subgraph S2 [owner thread 2]
-            U2["world 2: Update()"] -->|Parallel: a batch of non-conflicting systems| TP[thread-pool helpers]
+            U2["world 2: Update()"] -->|ParallelSystems: a batch of non-conflicting systems| TP[thread-pool helpers]
         end
     end
 ```
@@ -73,11 +73,11 @@ one created, destroyed or tagged. There are no command buffers to play back and 
 Dependencies are expressed through data and `Priority`, never through `before`/`after` links between systems:
 
 - **A produces, B consumes a component** (A writes `Velocity`, B reads it): give B a higher priority, or register it
-  after A. Even at the same priority with `Parallel`, they conflict on `Velocity`, so they are in different batches and
+  after A. Even at the same priority with `ParallelSystems`, they conflict on `Velocity`, so they are in different batches and
   A finishes first.
 - **A changes structure, B reacts** (A adds `Dead`, B destroys dead entities): A needs an `Entity` parameter to add the
   tag, so it runs alone; B runs after it.
-- **A and B touch disjoint data**: their order cannot change the result, so `Parallel` may run them together.
+- **A and B touch disjoint data**: their order cannot change the result, so `ParallelSystems` may run them together.
 
 In every case the result of an update equals running the systems one by one in `Priority` / registration order.
 
@@ -140,7 +140,8 @@ first always finishes first, and the result is the same as a sequential update. 
 another order gets its own priority.
 
 Execution is allocation-free: the calling thread works through a batch together with up to
-`MaxDegreeOfParallelism - 1` reusable thread-pool work items (no `Parallel.For` closures, no tasks). The first
+`MaxDegreeOfParallelism - 1` reusable thread-pool work items (no `Parallel.For` closures, no tasks). Lower
+`MaxDegreeOfParallelism` when several worlds, or IO threads, share the cores: a batch then takes fewer of them. The first
 exception thrown in a batch is rethrown on the calling thread after the batch (later ones are dropped); with a
 `SystemError` subscriber every exception is reported instead, possibly from a thread-pool thread.
 
@@ -166,8 +167,8 @@ runner, and the calling thread always takes part.
 | Value index lookups, and the unlinking done by destroying an entity or removing an indexed component | Not synchronized: owner thread only while the world has an index ([indexes and relations](indexes-and-relations.md)). |
 
 The gate protects the world's bookkeeping, not your data: a `ref` or a running query on one thread does not survive a
-structural change made by another thread. So use one owner thread per world, with `Parallel` for systems the
-scheduler checked; do not mutate one world from several threads of your own.
+structural change made by another thread. So use one owner thread per world, with `ParallelSystems` for systems
+the scheduler checked; do not mutate one world from several threads of your own.
 
 ## Input from other threads
 
