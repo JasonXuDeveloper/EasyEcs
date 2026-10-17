@@ -25,23 +25,39 @@ public sealed partial class World
     // Reused by every Load: the rows read from the bytes, put in place by Restore (arrays grow once, then stay).
     private WorldSnapshot _loadSnapshot;
 
+    // The order of a group the last Load read (SaveEntities' order): LoadEntities hands back handles in it.
+    private EntityId[] _loadOrder = [];
+    private int _loadOrderCount;
+
     /// <summary>
     /// Write the entities (ids and versions), their components and the singletons into <paramref name="output"/>, for
     /// <see cref="Load"/>. Unmanaged components are their raw rows (a layout change makes old saves unloadable: add
     /// a new component type instead); managed components and singletons need a Nino formatter (<c>[NinoType]</c>).
     /// Allocates nothing once its buffers are large enough. O(entities × components). Not while a pass iterates.
     /// </summary>
-    public void Save(IBufferWriter<byte> output)
+    public void Save(IBufferWriter<byte> output) => Save(output, default, true);
+
+    /// <summary>
+    /// Write <paramref name="entities"/> (stale ids and repeats are skipped) and their components into
+    /// <paramref name="output"/>, for <see cref="LoadEntities"/>: a group of entities that moves to another world (a
+    /// player and what it owns, to another server). Singletons and the other entities are not written; collect a
+    /// hierarchy with <see cref="Children"/>. Allocates nothing once its buffers are large enough.
+    /// O(entities given × components). Not while a pass iterates.
+    /// </summary>
+    public void SaveEntities(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities) => Save(output, entities, false);
+
+    private void Save(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, bool all)
     {
         ArgumentNullException.ThrowIfNull(output);
         using (Structural())
         {
             ThrowIfIterating();
             FillDirtyTables(); // tables are dense from here
+            if (!all) Select(entities);
             var buffer = output as NinoArrayBufferWriter ?? (_saveBuffer ??= new NinoArrayBufferWriter());
             if (!ReferenceEquals(buffer, output)) buffer.ResetWrittenCount();
             var writer = new Writer(buffer);
-            WriteSave(ref writer);
+            WriteSave(ref writer, all);
             writer.Flush();
             if (ReferenceEquals(buffer, output)) return;
             var bytes = buffer.WrittenSpan;
@@ -50,7 +66,47 @@ public sealed partial class World
         }
     }
 
-    private void WriteSave(ref Writer writer)
+    // A group save's entities: one bit per id (_saveSelected), the ids in the order given (_saveOrder), and per table
+    // the rows that hold them (_saveRows, filled table by table).
+    private ulong[] _saveSelected = [];
+    private EntityId[] _saveOrder = [];
+    private int _saveOrderCount;
+    private int[] _saveRows = [];
+    private ulong[] _saveBits = [];
+
+    /// <summary>Mark the living, distinct ids of <paramref name="entities"/> for a group save. Inside the gate.</summary>
+    private void Select(ReadOnlySpan<EntityId> entities)
+    {
+        int words = (_nextId + 63) >> 6;
+        if (_saveSelected.Length < words) _saveSelected = new ulong[words];
+        else Array.Clear(_saveSelected, 0, words);
+        if (_saveOrder.Length < entities.Length) _saveOrder = new EntityId[entities.Length];
+        _saveOrderCount = 0;
+        foreach (var id in entities)
+        {
+            if (!IsAlive(id) || (_saveSelected[id.Index >> 6] & (1UL << id.Index)) != 0) continue;
+            _saveSelected[id.Index >> 6] |= 1UL << id.Index;
+            _saveOrder[_saveOrderCount++] = id;
+        }
+    }
+
+    /// <summary>The rows of <paramref name="table"/> to write: all of them, or a group's (into <see cref="_saveRows"/>).</summary>
+    private int SavedRows(Archetype table, bool all)
+    {
+        if (all || table.Count == 0) return table.Count;
+        int rows = 0;
+        for (int slot = 0; slot < table.Count; slot++)
+        {
+            int id = table.Slots[slot].Index;
+            if ((_saveSelected[id >> 6] & (1UL << id)) == 0) continue;
+            if (_saveRows.Length == rows) Array.Resize(ref _saveRows, Math.Max(16, rows * 2));
+            _saveRows[rows++] = slot;
+        }
+
+        return rows;
+    }
+
+    private void WriteSave(ref Writer writer, bool all)
     {
         writer.Write(SaveMagic);
         writer.Write(SaveFormat);
@@ -60,14 +116,14 @@ public sealed partial class World
         var tables = _allArchetypes;
         int maxBit = 0;
         foreach (var table in tables)
-            if (table.Count != 0) foreach (var bit in table.Components) maxBit = Math.Max(maxBit, bit);
+            if (SavedRows(table, all) != 0) foreach (var bit in table.Components) maxBit = Math.Max(maxBit, bit);
         if (_saveTypes.Length <= maxBit) _saveTypes = new int[maxBit + 1];
         _saveTypes.AsSpan(0, maxBit + 1).Fill(-1);
         int types = 0;
         int countAt = writer.ReserveInt32();
         foreach (var table in tables)
         {
-            if (table.Count == 0) continue;
+            if (SavedRows(table, all) == 0) continue;
             foreach (var bit in table.Components)
             {
                 if (_saveTypes[bit] >= 0) continue;
@@ -84,19 +140,20 @@ public sealed partial class World
 
         writer.PatchInt32(countAt, types);
 
-        // The entity records: versions of every id used, and the free ids (LIFO order kept).
-        writer.Write(_nextId);
-        for (int id = 0; id < _nextId; id++) writer.Write(Meta[id].Version);
-        writer.Write<int>(_freeIds.AsSpan(0, _freeIdCount));
+        // The entity records: versions of every id used, and the free ids (LIFO order kept). A group has none: its
+        // rows name their ids.
+        writer.Write(all ? _nextId : 0);
+        for (int id = 0; all && id < _nextId; id++) writer.Write(Meta[id].Version);
+        writer.Write<int>(all ? _freeIds.AsSpan(0, _freeIdCount) : default);
 
         // The tables: their columns' types, their rows' entities, then one slice per column. Groups are not saved: they
         // follow the values and the loading world's GroupBy.
         int tableCount = 0;
-        foreach (var table in tables) if (table.Count != 0) tableCount++;
+        foreach (var table in tables) if (SavedRows(table, all) != 0) tableCount++;
         writer.Write(tableCount);
         foreach (var table in tables)
         {
-            int count = table.Count;
+            int count = SavedRows(table, all);
             if (count == 0) continue;
             int columns = 0;
             for (int c = 0; c < table.Components.Length; c++) if (_saveTypes[table.Components[c]] >= 0) columns++;
@@ -109,33 +166,65 @@ public sealed partial class World
             }
 
             writer.Write(count);
-            writer.WriteUnmanagedRaw<EntityId>(table.Slots.AsSpan(0, count));
+            if (all) writer.WriteUnmanagedRaw<EntityId>(table.Slots.AsSpan(0, count));
+            else for (int r = 0; r < count; r++) writer.Write(table.Slots[_saveRows[r]]);
             for (int c = 0; c < table.Components.Length; c++)
             {
                 if (_saveTypes[table.Components[c]] < 0) continue;
                 int slice = writer.ReserveInt32();
-                var bits = table.Bits(c);
-                writer.Write(bits != null);
-                if (bits != null) writer.WriteUnmanagedRaw<ulong>(bits.AsSpan(0, (count + 63) >> 6));
-                var info = table.Info(c);
-                if (info.Managed) info.Write(ref writer, table.Columns[c], count);
-                else writer.WriteRaw(MemoryMarshal.CreateReadOnlySpan(ref Archetype.Aligned(table.Columns[c]), count * info.Size));
+                if (all) WriteColumn(ref writer, table, c, count);
+                else WriteRows(ref writer, table, c, count);
                 writer.PatchLength(slice);
             }
         }
 
-        // The singletons, by name, each a slice.
+        // The singletons, by name, each a slice (a group has none).
         int singletons = 0;
-        foreach (var box in _singletons) if (box != null) singletons++;
+        foreach (var box in _singletons) if (all && box != null) singletons++;
         writer.Write(singletons);
         foreach (var value in _singletons)
         {
-            if (value is not SingletonBox box) continue;
+            if (!all || value is not SingletonBox box) continue;
             writer.Write(box.Name);
             int slice = writer.ReserveInt32();
             box.Write(ref writer);
             writer.PatchLength(slice);
         }
+
+        // A group's entities in the order given (LoadEntities hands their new handles back in it).
+        writer.Write<EntityId>(all ? default : _saveOrder.AsSpan(0, _saveOrderCount));
+    }
+
+    /// <summary>A column's slice: its presence bits when some rows lack the component, then its rows.</summary>
+    private static void WriteColumn(ref Writer writer, Archetype table, int c, int count)
+    {
+        var bits = table.Bits(c);
+        writer.Write(bits != null);
+        if (bits != null) writer.WriteUnmanagedRaw<ulong>(bits.AsSpan(0, (count + 63) >> 6));
+        var info = table.Info(c);
+        if (info.Managed) info.Write(ref writer, table.Columns[c], 0, count);
+        else writer.WriteRaw(MemoryMarshal.CreateReadOnlySpan(ref Archetype.Aligned(table.Columns[c]), count * info.Size));
+    }
+
+    /// <summary><see cref="WriteColumn"/> for a group: the rows <see cref="_saveRows"/> names, in that order.</summary>
+    private void WriteRows(ref Writer writer, Archetype table, int c, int count)
+    {
+        bool sparse = table.Bits(c) != null;
+        writer.Write(sparse);
+        if (sparse)
+        {
+            int words = (count + 63) >> 6;
+            if (_saveBits.Length < words) _saveBits = new ulong[words];
+            Array.Clear(_saveBits, 0, words);
+            for (int r = 0; r < count; r++)
+                if (table.Has(c, _saveRows[r])) _saveBits[r >> 6] |= 1UL << r;
+            writer.WriteUnmanagedRaw<ulong>(_saveBits.AsSpan(0, words));
+        }
+
+        var info = table.Info(c);
+        for (int r = 0; r < count; r++)
+            if (info.Managed) info.Write(ref writer, table.Columns[c], _saveRows[r], 1);
+            else writer.WriteRaw(MemoryMarshal.CreateReadOnlySpan(ref Unsafe.Add(ref Archetype.Aligned(table.Columns[c]), _saveRows[r] * info.Size), info.Size));
     }
 
     /// <summary>
@@ -219,6 +308,9 @@ public sealed partial class World
             snapshot.Singletons = loaded;
         }
 
+        _loadOrderCount = reader.Read<int>();
+        if (_loadOrder.Length < _loadOrderCount) _loadOrder = new EntityId[_loadOrderCount];
+        reader.ReadUnmanagedRaw(_loadOrder.AsSpan(0, _loadOrderCount));
         Restore(snapshot);
         if (_groupByBit == null) return;
         using (Structural())
@@ -253,7 +345,10 @@ public sealed partial class World
         reader.ReadUnmanagedRaw(ids);
         for (int r = 0; r < count; r++)
         {
-            ref var meta = ref snapshot.Meta[ids[r].Index];
+            int id = ids[r].Index;
+            if (id >= snapshot.NextId) Extend(snapshot, id + 1); // a group's bytes record no ids of their own
+            ref var meta = ref snapshot.Meta[id];
+            meta.Version = ids[r].Version;
             meta.Archetype = table;
             meta.Slot = start + r;
         }
@@ -291,6 +386,14 @@ public sealed partial class World
 
         if (info.Managed) info.Read(ref reader, rows.Columns[column], start, count);
         else reader.ReadRaw(count * info.Size).CopyTo(Unsafe.As<byte[]>(rows.Columns[column]).AsSpan(start * info.Size));
+    }
+
+    /// <summary>Make the entity records of <paramref name="snapshot"/> cover ids below <paramref name="count"/> (dead ones).</summary>
+    private static void Extend(WorldSnapshot snapshot, int count)
+    {
+        if (snapshot.Meta.Length < count) Array.Resize(ref snapshot.Meta, Math.Max(count, snapshot.Meta.Length * 2));
+        Array.Clear(snapshot.Meta, snapshot.NextId, count - snapshot.NextId);
+        snapshot.NextId = count;
     }
 
     /// <summary>The box in <paramref name="boxes"/> of the singleton saved as <paramref name="name"/>, or null.</summary>

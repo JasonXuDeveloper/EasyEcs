@@ -29,6 +29,7 @@ internal static class Symbols
     public const string Indexed = "EasyEcs.IIndexed<TKey>";
     public const string Group = "EasyEcs.IGroup";
     public const string Cleanup = "EasyEcs.ICleanupComponent";
+    public const string EntityId = "EasyEcs.EntityId";
     public const int MaxComponents = 9;
 
     public static readonly SymbolDisplayFormat Fqn = SymbolDisplayFormat.FullyQualifiedFormat;
@@ -52,6 +53,34 @@ internal static class Symbols
         for (var b = type.BaseType; b != null; b = b.BaseType)
             if (b.ToDisplayString() == EcsSystem) return true;
         return false;
+    }
+
+    /// <summary>
+    /// The <c>EntityId</c> fields of struct <paramref name="type"/>, directly or inside struct fields (up to four levels),
+    /// that code in <paramref name="compilation"/> can name: one path per field, its steps separated by '\n', each step
+    /// "declaring type\tfield name\tfield type" (fully qualified; backing fields of auto-properties included). Private
+    /// fields of types from other assemblies are not visible to the compiler and are left out.
+    /// </summary>
+    public static string[] EntityIdPaths(ITypeSymbol type, Compilation compilation)
+    {
+        var paths = new List<string>();
+        Collect(type, "", 0);
+        return paths.ToArray();
+
+        void Collect(ITypeSymbol declaring, string prefix, int depth)
+        {
+            string owner = declaring.ToDisplayString(Fqn);
+            foreach (var field in declaring.GetMembers().OfType<IFieldSymbol>())
+            {
+                if (field.IsStatic || field.IsConst || field.IsFixedSizeBuffer) continue;
+                string step = prefix + owner + "\t" + field.Name + "\t" + field.Type.ToDisplayString(Fqn);
+                if (field.Type.ToDisplayString() == EntityId) paths.Add(step);
+                else if (depth < 4 && field.Type is INamedTypeSymbol { TypeKind: TypeKind.Struct, IsGenericType: false, SpecialType: SpecialType.None } inner
+                         && inner.ToDisplayString() != Entity
+                         && compilation.IsSymbolAccessibleWithin(inner, compilation.Assembly))
+                    Collect(inner, step + "\n", depth + 1);
+            }
+        }
     }
 
     public static bool Implements(ITypeSymbol type, string interfaceName) =>

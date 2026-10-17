@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using Nino.Core;
 
@@ -123,10 +124,16 @@ internal abstract class ComponentInfo
     public abstract ushort DisabledBit { get; }
 
     /// <summary>
-    /// Write rows [0, <paramref name="count"/>) of managed column <paramref name="column"/> with Nino (a
-    /// <see cref="DynamicBuffer{T}"/> as its elements). Unmanaged columns are written as raw rows by the table.
+    /// Write rows [<paramref name="start"/>, +<paramref name="count"/>) of managed column <paramref name="column"/> with
+    /// Nino (a <see cref="DynamicBuffer{T}"/> as its elements). Unmanaged columns are written as raw rows by the table.
     /// </summary>
-    public abstract void Write(ref Writer writer, Array column, int count);
+    public abstract void Write(ref Writer writer, Array column, int start, int count);
+
+    /// <summary>
+    /// Point the <see cref="EntityId"/> fields of rows [<paramref name="start"/>, +<paramref name="count"/>) (and of a
+    /// buffer's elements) at the entities a migration created (<see cref="World.LoadEntities"/>).
+    /// </summary>
+    public abstract void Remap(Array column, int start, int count, IdMap map);
 
     /// <summary>Read <paramref name="count"/> rows written by <see cref="Write"/> into managed column <paramref name="column"/> from <paramref name="start"/>.</summary>
     public abstract void Read(ref Reader reader, Array column, int start, int count);
@@ -149,13 +156,27 @@ internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsRefere
     // without knowing TElement. Boxed once per type.
     private static readonly IBuffer Buffer = default(T) is IBuffer ? (IBuffer)default(T) : null;
 
-    public override void Write(ref Writer writer, Array column, int count)
+    public override void Write(ref Writer writer, Array column, int start, int count)
     {
         var rows = Unsafe.As<T[]>(column);
         if (default(T) is IBuffer) // a JIT-time constant
-            for (int i = 0; i < count; i++) Buffer.Write(ref writer, Unsafe.As<T, BufferStore>(ref rows[i]));
+            for (int i = start; i < start + count; i++) Buffer.Write(ref writer, Unsafe.As<T, BufferStore>(ref rows[i]));
         else
-            for (int i = 0; i < count; i++) NinoSerializer.Serialize(rows[i], ref writer);
+            for (int i = start; i < start + count; i++) NinoSerializer.Serialize(rows[i], ref writer);
+    }
+
+    public override void Remap(Array column, int start, int count, IdMap map)
+    {
+        if (default(T) is IBuffer) // a JIT-time constant
+        {
+            var stores = Unsafe.As<T[]>(column);
+            for (int i = start; i < start + count; i++) Buffer.Remap(Unsafe.As<T, BufferStore>(ref stores[i]), map);
+            return;
+        }
+
+        if (SavedTypes.EntityIdOffsets<T>.Value.Length == 0) return;
+        ref T row0 = ref Managed ? ref MemoryMarshal.GetArrayDataReference(Unsafe.As<T[]>(column)) : ref Archetype.Row0<T>(column);
+        map.Apply(MemoryMarshal.CreateSpan(ref Unsafe.Add(ref row0, start), count));
     }
 
     public override void Read(ref Reader reader, Array column, int start, int count)

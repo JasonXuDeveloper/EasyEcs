@@ -32,6 +32,11 @@ public struct DynamicBuffer<T> : IComponent, ITrackChanges, IBuffer
 
     readonly BufferStore IBuffer.Read(ref Reader reader) => BufferStore<T>.Read(ref reader);
 
+    readonly void IBuffer.Remap(BufferStore store, IdMap map)
+    {
+        if (store is BufferStore<T> typed) map.Apply(typed.Items.AsSpan(0, typed.Count));
+    }
+
     /// <summary>The number of elements.</summary>
     public readonly int Count => Store?.Count ?? 0;
 
@@ -155,6 +160,9 @@ internal interface IBuffer
 
     /// <summary>Read elements written by <see cref="Write"/> into a new store (null for none).</summary>
     BufferStore Read(ref Reader reader);
+
+    /// <summary>Point the <see cref="EntityId"/> fields of the elements of <paramref name="store"/> at a migration's entities.</summary>
+    void Remap(BufferStore store, IdMap map);
 }
 
 /// <summary>The list of a <see cref="DynamicBuffer{T}"/>, typed away so a column can be copied without its <c>T</c>.</summary>

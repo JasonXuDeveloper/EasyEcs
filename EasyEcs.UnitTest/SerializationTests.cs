@@ -11,6 +11,9 @@ public partial struct Title : IComponent   // managed: written by its Nino forma
     public string Text;
 }
 
+public struct Grip { private EntityId _holder; public Grip(EntityId holder) => _holder = holder; public EntityId Holder => _holder; }
+public struct Held : IComponent { public Grip Grip; }                 // an id two levels down, in a private field
+
 public class SerializationTests
 {
     private static byte[] Save(World world)
@@ -125,6 +128,54 @@ public class SerializationTests
         int sum = 0;
         foreach (var item in loaded.Query<Health>()) sum += item.Component1.Value;
         Assert.That((loaded.EntityCount, sum, loaded.GetSingleton<Score>()), Is.EqualTo((1000, 999 * 1000 / 2, new Score(1, 2))));
+    }
+
+    [Test]
+    public void AMovedGroupGetsNewIdsAndItsReferencesFollow()
+    {
+        byte[] bytes;
+        EntityId player, sword;
+        var output = new NinoArrayBufferWriter();
+        using (var world = new World())
+        {
+            var guild = world.CreateEntity(new Health(100));              // stays behind
+            player = world.CreateEntity(new Health(10), new Follows(guild));
+            sword = world.CreateEntity(new ChildOf(player), new Follows(player), new Held { Grip = new Grip(player) });
+            world.GetEntity(player).AddRelation(new MemberOf(sword));
+            world.GetEntity(player).AddRelation(new MemberOf(guild));
+            world.SaveEntities(output, [sword, player, EntityId.Null]);   // order kept, an empty id skipped
+            bytes = output.WrittenSpan.ToArray();
+        }
+
+        using var arrival = new World();
+        for (int i = 0; i < 5; i++) arrival.CreateEntity(new Position(i, i)); // ids taken here: the group gets others
+        var moved = new Entity[2];
+        Assert.That(arrival.LoadEntities(bytes, moved), Is.EqualTo(2));
+        var (s, p) = (moved[0], moved[1]);
+        Assert.That((s.Id, p.Id), Is.Not.EqualTo((sword, player)));
+        Assert.That(s.Read<ChildOf>().Parent, Is.EqualTo(p.Id));         // inside the group: the new entity
+        Assert.That(s.Read<Follows>().Target, Is.EqualTo(p.Id));
+        Assert.That(s.Get<Held>().Grip.Holder, Is.EqualTo(p.Id));
+        Assert.That(p.Read<Follows>().Target, Is.EqualTo(EntityId.Null)); // the guild did not come
+        ref readonly var parties = ref p.Read<DynamicBuffer<MemberOf>>();                // buffer elements too
+        Assert.That((parties[0], parties[1]), Is.EqualTo((new MemberOf(s), new MemberOf(EntityId.Null))));
+        Assert.That(arrival.Index<Follows, EntityId>().Count(p), Is.EqualTo(1)); // indexes learn the new values
+        Assert.That(arrival.Index<ChildOf, EntityId>().Count(p), Is.EqualTo(1));
+        p.Destroy();                                                      // the cascade reaches the moved child
+        Assert.That((s.IsAlive, arrival.EntityCount), Is.EqualTo((false, 5)));
+    }
+
+    [Test]
+    public void AChildWhoseParentStayedIsARootAfterTheMove()
+    {
+        var output = new NinoArrayBufferWriter();
+        using var world = new World();
+        var parent = world.CreateEntity(new Health(1));
+        var child = world.CreateEntity(new ChildOf(parent), new Health(2));
+        world.SaveEntities(output, [child]);
+        var moved = new Entity[1];
+        world.LoadEntities(output.WrittenSpan, moved);                    // a copy into the same world
+        Assert.That((moved[0].Has<ChildOf>(), moved[0].Read<Health>().Value, world.EntityCount), Is.EqualTo((false, 2, 3)));
     }
 
     [Test]
