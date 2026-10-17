@@ -70,7 +70,7 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.NoInlining)]
     private SingletonBox<T> AddMissingSingleton<T>() where T : struct, ISingletonComponent
     {
-        using (Structural())
+        using (Shared())
         {
             return Box<T>() ?? Publish<T>();
         }

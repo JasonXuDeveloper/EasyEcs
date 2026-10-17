@@ -706,8 +706,21 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
                     var work = WorkOf<{{name}}Chunks<{{tps}}, TJob>>();
                     int chunks = work.Cut(this, match, filter.Since, ref job, {{bits}});
-                    if (chunks < 2 || !TryRunChunks(work, chunks))
+                    if (chunks < 2)
                         for (int i = 0; i < chunks; i++) work.Run(i);
+                    else
+                    {
+                        Gate.BeginParallel(); // the chunks may run on several threads: a structural change throws
+                        try
+                        {
+                            if (!TryRunChunks(work, chunks))
+                                for (int i = 0; i < chunks; i++) work.Run(i);
+                        }
+                        finally
+                        {
+                            Gate.EndParallel();
+                        }
+                    }
                     work.Release();
                 }
 

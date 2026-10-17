@@ -174,6 +174,47 @@ internal static class Symbols
         return null;
     }
 
+    /// <summary>
+    /// The members of <c>Entity</c> and <c>World</c> that change the world's structure (or copy it, or run its systems):
+    /// they enter the owner's structural gate, so they belong to the world's owner thread and to code that may change
+    /// structure.
+    /// </summary>
+    private static readonly HashSet<string> StructuralEntityMembers = ["Add", "Set", "Remove", "Destroy", "GetOrAdd"];
+
+    private static readonly HashSet<string> StructuralWorldMembers =
+    [
+        "CreateEntity", "CreateEntities", "DestroyEntities", "EnsureEntityCapacity", "AddSingleton", "RemoveSingleton",
+        "AddSystem", "RemoveSystem", "Update", "Capture", "Restore", "Dispose",
+    ];
+
+    /// <summary>Whether <paramref name="method"/> is one of the structural members of Entity or World.</summary>
+    public static bool IsStructural(IMethodSymbol method)
+    {
+        string? type = method.ContainingType?.ToDisplayString();
+        return type == Entity ? StructuralEntityMembers.Contains(method.Name)
+            : type == World && StructuralWorldMembers.Contains(method.Name);
+    }
+
+    /// <summary>
+    /// The thread-starting calls (Task.Run, TaskFactory.StartNew, Parallel.*, ThreadPool.*, new Thread / Task / Timer)
+    /// that run a delegate argument on another thread.
+    /// </summary>
+    public static bool StartsThread(IMethodSymbol method)
+    {
+        string type = method.ContainingType?.ToDisplayString() ?? "";
+        return type switch
+        {
+            "System.Threading.Tasks.Task" => method.Name is "Run" || method.MethodKind == MethodKind.Constructor,
+            "System.Threading.Tasks.Task<TResult>" => method.MethodKind == MethodKind.Constructor,
+            "System.Threading.Tasks.TaskFactory" or "System.Threading.Tasks.TaskFactory<TResult>" => method.Name == "StartNew",
+            "System.Threading.Tasks.Parallel" => true,
+            "System.Threading.ThreadPool" => method.Name is "QueueUserWorkItem" or "UnsafeQueueUserWorkItem"
+                or "RegisterWaitForSingleObject" or "UnsafeRegisterWaitForSingleObject",
+            "System.Threading.Thread" or "System.Threading.Timer" => method.MethodKind == MethodKind.Constructor,
+            _ => false,
+        };
+    }
+
     /// <summary>Entity members that cannot change the world (no structural change, no access to the World).</summary>
     private static readonly HashSet<string> ReadOnlyEntityMembers =
         ["Id", "Version", "IsAlive", "Has", "Get", "Read", "TryGet", "TryGetRef"];

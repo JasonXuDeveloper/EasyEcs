@@ -13,12 +13,15 @@ namespace EasyEcs;
 //   are replaced copy-on-write and published with Volatile.Write, never mutated in place.
 public sealed partial class World
 {
-    // Lock for structural modifications (see StructuralGate: one CAS in, one store out).
+    // Guards structural modifications (see StructuralGate: the owner's flag, the shared compare-and-swap).
     internal StructuralGate Gate;
 
-    /// <summary>Hold the structural gate until the returned scope is disposed.</summary>
+    /// <summary>Hold the owner's structural gate until the returned scope is disposed.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal StructuralScope Structural() => new(ref Gate);
+
+    /// <summary>Hold the shared gate (cold paths the threads of a parallel batch reach) until the scope is disposed.</summary>
+    internal SharedScope Shared() => new(ref Gate);
 
     // Bumped by every structural change (and every storage reallocation or compaction), so an in-flight ForEach pass
     // knows when to refresh its cached array references and check whether its job moved the visited entity.
@@ -211,7 +214,7 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.NoInlining)]
     private QueryCacheEntry CreateQueryEntry(in QueryKey lookup)
     {
-        using (Structural())
+        using (Shared())
         {
             if (_queryCache.TryGetValue(lookup, out var entry))
                 return entry;

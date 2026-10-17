@@ -38,6 +38,7 @@ public class GeneratorTests
         public struct Clock : ISingletonComponent { public int Ticks; }
         public class Box { public int V; }
         public struct Holder : IComponent { public Box Box; }                                     // a class, no collection
+        public struct Link : IComponent { public Entity Target; }                                 // a relation: a handle
         public struct Grid : ISingletonComponent { public System.Collections.Generic.List<int> Cells; public int[] Slots; }
         """;
 
@@ -68,6 +69,18 @@ public class GeneratorTests
                     [ForEach, Changed<DynamicBuffer<int>>] static void H(ref DynamicBuffer<int> items, in DynamicBuffer<long> read) => items.Add(read.Count); // buffers
                     [ForEach] static void I(Entity e, in DynamicBuffer<long> read) { ref var items = ref e.Get<DynamicBuffer<int>>(); items.Clear(); foreach (var x in read) items.Add((int)x); }
                     [ForEach, With<Q>] static void J(Entity e, World w) { e.Get<DynamicBuffer<int>>() = default; w.CreateEntity(new P(), new DynamicBuffer<int>()); }
+                    [ForEach] static void K(Entity e, in Link link) { e.Remove<Q>(); link.Target.Destroy(); } // changes structure: runs alone
+                }
+            }
+            public static class Threads
+            {
+                public static System.Threading.Tasks.Task Count(World w) => System.Threading.Tasks.Task.Run(() => w.Count<P>()); // reads
+                public static void Owner(World w) { System.Action spawn = () => w.CreateEntity(); spawn(); } // the caller's thread
+                public static void Own(World[] worlds)                                                      // a thread per world
+                {
+                    foreach (var world in worlds) new System.Threading.Thread(() => { while (true) world.Update(); }).Start();
+                    System.Threading.Tasks.Parallel.For(0, worlds.Length, i => worlds[i].Update());
+                    System.Threading.Tasks.Task.Run(() => new World().CreateEntity());
                 }
             }
             """);
@@ -123,6 +136,13 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { int _kills; void K() => _kills++; }", "EECS007")]
     [TestCase("public class S : EcsSystem { public int Kills { get; set; } }", "EECS007")]
     [TestCase("public class A : EcsSystem { } public class S : EcsSystem { private readonly A _a = new(); }", "EECS008")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Link l) => l.Target.Destroy(); }", "EECS013")]
+    [TestCase("public partial class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, in Link l) => l.Target.Add<Q>(); }", "EECS013")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(Entity e, in Link l) { if (e.Has<P>()) l.Target.Set(new Q()); } }", "EECS013")]
+    [TestCase("public static class U { public static void F(World w) { System.Threading.Tasks.Task.Run(() => w.CreateEntity()); w.CreateEntity(); } }", "EECS014")]
+    [TestCase("public static class U { public static void F(Entity[] es) => System.Threading.Tasks.Parallel.For(0, es.Length, i => es[i].Destroy()); }", "EECS014")]
+    [TestCase("public class U { World _w = new(); void F() => new System.Threading.Thread(() => { _w.Update(); }).Start(); void G() => _w.Update(); }", "EECS014")]
+    [TestCase("public static class U { public static void F(Entity e) { for (int i = 0; i < 4; i++) System.Threading.ThreadPool.QueueUserWorkItem(_ => e.Remove<P>()); } }", "EECS014")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Cells.Add(1); }", "EECS011")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Cells.Clear(); }", "EECS011")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Slots[0] += 1; }", "EECS011")]

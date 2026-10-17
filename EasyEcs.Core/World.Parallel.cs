@@ -26,8 +26,16 @@ public sealed partial class World
         work.Batch = batch;
         work.Update = update;
         var runner = _systemRunner ??= new Runner(Math.Max(1, _options.MaxDegreeOfParallelism) - 1);
-        if (runner.TryRun(work, batch.Length)) return;
-        for (int i = 0; i < batch.Length; i++) RunSystem(batch[i], update); // an update from inside a running batch
+        Gate.BeginParallel(); // the batch's systems never change structure (they do not run alone): a change throws
+        try
+        {
+            if (runner.TryRun(work, batch.Length)) return;
+            for (int i = 0; i < batch.Length; i++) RunSystem(batch[i], update); // an update from inside a running batch
+        }
+        finally
+        {
+            Gate.EndParallel();
+        }
     }
 
     /// <summary>

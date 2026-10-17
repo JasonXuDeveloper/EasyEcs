@@ -88,7 +88,7 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void CloseTombstones()
     {
-        using (Structural())
+        using (Shared())
         {
             if (Volatile.Read(ref Passes) != 0) return; // a pass started meanwhile: it will close them
             FillDirtyTables();

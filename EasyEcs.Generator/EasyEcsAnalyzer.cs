@@ -78,9 +78,25 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "would share the list. Use 'ref' (write) or 'in' (read) parameters, ref locals and Entity.Get / Read; a new " +
         "component value is 'new DynamicBuffer<T>()' (no list until its first write).");
 
+    public static readonly DiagnosticDescriptor HiddenStructuralChange = new("EECS013", "Structural change in a [ForEach] method that promises none",
+        "[ForEach] method '{0}' calls '{1}', a structural change, but takes no Entity or World to make it with; take the Entity as a parameter, or record the change as data",
+        Category, DiagnosticSeverity.Error, true,
+        "A [ForEach] method that is static and takes no Entity or World (or uses its Entity only to read) cannot change " +
+        "structure, so the generator walks its rows without re-checking storage, and the system shares a parallel batch " +
+        "with others. A change made through a handle a component holds (a relation) or a world kept elsewhere breaks " +
+        "both: refs into moved rows, and a change while other systems run (which throws). Taking the Entity as a " +
+        "parameter makes the system run alone with a pass that notices the change.");
+
+    public static readonly DiagnosticDescriptor OffThreadStructuralChange = new("EECS014", "Structural change on another thread",
+        "'{0}' is a structural change, made in a delegate that '{1}' runs on another thread; structural changes belong to the world's owner thread",
+        Category, DiagnosticSeverity.Error, true,
+        "A world's structure (create/destroy, Add/Set/Remove, singletons, systems, Capture/Restore, Update) is changed by " +
+        "one owner thread. A change from another thread races with the owner's and can tear the tables. Hand the " +
+        "change to the owner as data (a queue the owner drains in a system), or give that thread its own world.");
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
-        MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy);
+        MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -93,6 +109,37 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             OperationKind.Argument);
         context.RegisterOperationAction(AnalyzeWrite, OperationKind.SimpleAssignment, OperationKind.CompoundAssignment,
             OperationKind.CoalesceAssignment, OperationKind.Increment, OperationKind.Decrement, OperationKind.Invocation);
+        context.RegisterOperationAction(AnalyzeStructuralCall, OperationKind.Invocation);
+    }
+
+    /// <summary>
+    /// EECS013: a structural call in a [ForEach] method the generator treats as stable. EECS014: a structural call in
+    /// a lambda or anonymous method handed to a thread-starting call. Both see the call itself only: a change made in
+    /// a helper method the delegate or [ForEach] method calls is not followed (the runtime still throws for one made
+    /// while the world runs work on several threads).
+    /// </summary>
+    private static void AnalyzeStructuralCall(OperationAnalysisContext context)
+    {
+        var call = (IInvocationOperation)context.Operation;
+        if (!Symbols.IsStructural(call.TargetMethod)) return;
+        string name = call.TargetMethod.ContainingType.Name + "." + call.TargetMethod.Name;
+
+        for (var node = call.Parent; node != null; node = node.Parent)
+        {
+            if (node is not IAnonymousFunctionOperation function) continue;
+            var start = node.Parent is IDelegateCreationOperation creation ? creation.Parent : node.Parent;
+            if (start is not IArgumentOperation { Parent: { } handoff } || Starter(handoff) is not { } starter
+                || !Symbols.StartsThread(starter)) continue;
+            if (!Threads.Concurrent(call, function, handoff, starter, context.CancellationToken)) return;
+            context.ReportDiagnostic(Diagnostic.Create(OffThreadStructuralChange, call.Syntax.GetLocation(), name,
+                starter.ContainingType.Name + (starter.MethodKind == MethodKind.Constructor ? "" : "." + starter.Name)));
+            return;
+        }
+
+        if (context.ContainingSymbol is IMethodSymbol method && Symbols.IsForEach(method)
+            && method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is MethodDeclarationSyntax syntax
+            && Symbols.IsStable(method, syntax))
+            context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), method.Name, name));
     }
 
     /// <summary>EECS011: a write or a mutating call that reaches a read-only [ForEach] parameter's reference.</summary>
@@ -260,6 +307,13 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
                 is MethodDeclarationSyntax syntax && Symbols.ParallelProblem(method, syntax) is { } problem)
             context.ReportDiagnostic(Diagnostic.Create(NotParallel, location, method.Name, problem));
     }
+
+    private static IMethodSymbol? Starter(IOperation handoff) => handoff switch
+    {
+        IInvocationOperation invocation => invocation.TargetMethod,
+        IObjectCreationOperation construction => construction.Constructor,
+        _ => null,
+    };
 
     private static bool HasForEach(IMethodSymbol method) => Symbols.IsForEach(method);
 }
