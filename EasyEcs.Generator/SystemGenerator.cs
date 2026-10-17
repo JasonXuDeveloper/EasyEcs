@@ -100,7 +100,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             sb.Append($"        /// <summary>Runs <c>{method.Name}</c> for every matching entity of <paramref name=\"{world}\"/>{(method.Since ? $" whose filtered components changed (or went) at or after tick <paramref name=\"{since}\"/>" : "")}. Owner thread only.</summary>\n");
             sb.Append($"        [global::System.CodeDom.Compiler.GeneratedCode(\"{Symbols.GeneratorName}\", \"{ComponentGenerator.Version}\")]\n");
             sb.Append($"        public static void {method.Name}({string.Join(", ", signature)})\n        {{\n");
-            sb.Append($"            var job = new __ForEach.{method.Name}Job {{{Fields(method, world, null)}}};\n");
+            sb.Append($"            var job = new __ForEach.{method.Name}Job{Fields(method, world, null)};\n");
             sb.Append($"            {world}.{method.ForEach}<{method.ComponentTypes}, __ForEach.{method.Name}Job>(ref job{filter});\n        }}\n\n");
 
             string Free(string name)
@@ -131,7 +131,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 fields.Add(p.RefKind.Length == 0 || method.Parallel ? $"x{i} = {Escape(p.Name)}" : $"x{i} = ref {Escape(p.Name)}");
         }
 
-        return fields.Count == 0 ? "" : $" {string.Join(", ", fields)} ";
+        return fields.Count == 0 ? "()" : $" {{ {string.Join(", ", fields)} }}";
     }
 
     private static string Escape(string name) => SyntaxFacts.IsKeywordKind(SyntaxFacts.GetKeywordKind(name)) ? "@" + name : name;
@@ -149,7 +149,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         {
             // [Changed<T>] / [Removed<T>]: rows written (or that lost T) since this system last ran.
             string filter = method.Since ? $", {method.Name}Filter.Since(system.LastRunTick + 1)" : method.HasFilter ? $", in {method.Name}Filter" : "";
-            sb.Append($"            var {method.Name} = new {method.Name}Job {{{Fields(method, "world", "system")}}};\n");
+            sb.Append($"            var {method.Name} = new {method.Name}Job{Fields(method, "world", "system")};\n");
             sb.Append($"            world.{method.ForEach}<{method.ComponentTypes}, {method.Name}Job>(ref {method.Name}{filter});\n");
         }
 
@@ -230,7 +230,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 sb.Append(p.RefKind.Length == 0 || method.Parallel ? $"        public {p.Type} x{i};\n"
                     : $"        public ref {(p.RefKind == "in" ? "readonly " : "")}{p.Type} x{i};\n");
         }
-        sb.Append('\n');
+        if (sb[sb.Length - 2] != '{') sb.Append('\n'); // a blank line after the fields, if any
         sb.Append("        [MethodImpl(MethodImplOptions.AggressiveInlining)]\n");
         string first = method.IsBatch ? "global::EasyEcs.EntitySpan entities, " : method.TakesEntity ? "global::EasyEcs.Entity entity, " : "";
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
