@@ -95,6 +95,8 @@ public sealed partial class World : IDisposable
             target.CloneRows(source, from, first, entities.Length, _changeTick);
             if (_indexByBit != null)
                 for (int e = 0; e < entities.Length; e++) IndexRow(target, first + e, entities[e].Index, entities[e].Version);
+            if (_groupByBit != null)
+                foreach (var entity in entities) RegroupRow(entity.Index); // the prefab's values, this world's groups
         }
     }
 
@@ -114,6 +116,7 @@ public sealed partial class World : IDisposable
             target.CloneRows(source, from, slot, 1, _changeTick);
             int version = MetaRef(id).Version;
             if (_indexByBit != null) IndexRow(target, slot, id, version);
+            if (!sameWorld && _groupByBit != null) RegroupRow(id);
             return new Entity(this, id, version);
         }
     }
@@ -152,7 +155,7 @@ public sealed partial class World : IDisposable
     {
         _prefabTables ??= new();
         if (!_prefabTables.TryGetValue(source, out var target))
-            _prefabTables[source] = target = GetOrCreateArchetype(source.ComponentMask.Clone());
+            _prefabTables[source] = target = GetOrCreateArchetype(source.ComponentMask.Clone(), source);
         return target;
     }
 

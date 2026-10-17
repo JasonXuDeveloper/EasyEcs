@@ -27,6 +27,7 @@ internal static class Symbols
     public const string DynamicBuffer = "EasyEcs.DynamicBuffer<T>";
     public const string TrackChanges = "EasyEcs.ITrackChanges";
     public const string Indexed = "EasyEcs.IIndexed<TKey>";
+    public const string Group = "EasyEcs.IGroup";
     public const int MaxComponents = 9;
 
     public static readonly SymbolDisplayFormat Fqn = SymbolDisplayFormat.FullyQualifiedFormat;
@@ -56,11 +57,11 @@ internal static class Symbols
         type.AllInterfaces.Any(i => i.ToDisplayString() == interfaceName);
 
     /// <summary>
-    /// A component the world indexes (<c>IIndexed&lt;TKey&gt;</c>, or a <c>DynamicBuffer</c> of <c>IRelation</c> links):
-    /// written only with Set (and AddRelation / RemoveRelation), so its index follows.
+    /// A component the world indexes (<c>IIndexed&lt;TKey&gt;</c>, or a <c>DynamicBuffer</c> of <c>IRelation</c> links) or
+    /// groups by (<c>IGroup</c>): written only with Set (and AddRelation / RemoveRelation), so its index or table follows.
     /// </summary>
     public static bool IsIndexed(ITypeSymbol type) =>
-        type.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == Indexed)
+        type.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() is Indexed or Group)
         || type is INamedTypeSymbol { IsGenericType: true } buffer && buffer.OriginalDefinition.ToDisplayString() == "EasyEcs.DynamicBuffer<T>"
         && Implements(buffer.TypeArguments[0], "EasyEcs.IRelation");
 

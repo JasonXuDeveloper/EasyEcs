@@ -27,8 +27,13 @@ public sealed partial class World
     // knows when to refresh its cached array references and check whether its job moved the visited entity.
     internal int StorageVersion;
 
-    // BitMask -> archetype (only touched under the gate).
+    // BitMask -> archetype in group 0 of every grouped column (only touched under the gate).
     private readonly Dictionary<BitMask, Archetype> _archetypes = new();
+
+    // The tables of other groups (World.GroupBy), by mask and groups. Empty until a group other than 0 is used.
+    private readonly Dictionary<GroupedTable, Archetype> _groupedTables = new();
+
+    private readonly record struct GroupedTable(BitMask Mask, string Groups); // groups as chars: value equality, cold
 
     // Copy-on-write snapshot of all archetypes (archetype creation is rare, reads are frequent).
     private Archetype[] _allArchetypes = Array.Empty<Archetype>();
@@ -75,7 +80,7 @@ public sealed partial class World
     {
         var mask = from.ComponentMask.Clone();
         mask.SetBit(bit);
-        var transition = new Transition(from, GetOrCreateArchetype(in mask));
+        var transition = new Transition(from, GetOrCreateArchetype(in mask, from));
         from.SetAddEdge(bit, transition);
         return transition;
     }
@@ -89,32 +94,78 @@ public sealed partial class World
     {
         var mask = from.ComponentMask.Clone();
         for (int i = 0; i < bits.Length; i++) mask.SetBit(bits[i]);
-        var transition = new Transition(from, GetOrCreateArchetype(in mask));
+        var transition = new Transition(from, GetOrCreateArchetype(in mask, from));
         from.SetAddSetEdge(signature, transition);
         return transition;
     }
 
     /// <summary>
-    /// Get or create the archetype for <paramref name="componentMask"/>. A new archetype is appended (copy-on-write)
-    /// to every cached query it matches. Must be called inside the structural gate.
+    /// Get or create the archetype for <paramref name="mask"/>, its grouped columns in the groups of
+    /// <paramref name="like"/> (0 where it has none), group <paramref name="group"/> for <paramref name="regroup"/>'s
+    /// column when it is one. A new archetype is appended (copy-on-write) to every cached query it matches. Must be
+    /// called inside the structural gate.
     /// </summary>
-    private Archetype GetOrCreateArchetype(in BitMask mask)
+    private Archetype GetOrCreateArchetype(in BitMask mask, Archetype like = null, int regroup = -1, int group = 0)
     {
         var componentMask = ComponentInfo.AnyTracked ? WithCompanions(in mask) : mask;
-        if (_archetypes.TryGetValue(componentMask, out var archetype))
-            return archetype;
+        int[] groups = like?.Groups != null || regroup >= 0 ? GroupsOf(in componentMask, like, regroup, group) : null;
+        Archetype archetype;
+        if (groups == null)
+        {
+            if (_archetypes.TryGetValue(componentMask, out archetype)) return archetype;
+            archetype = new Archetype(in componentMask);
+            _archetypes[componentMask] = archetype;
+        }
+        else
+        {
+            var key = new GroupedTable(componentMask, GroupsKey(groups));
+            if (_groupedTables.TryGetValue(key, out archetype)) return archetype;
+            archetype = new Archetype(in componentMask, groups);
+            _groupedTables[key] = archetype;
+        }
 
-        archetype = new Archetype(in componentMask);
-        _archetypes[componentMask] = archetype;
         Volatile.Write(ref _allArchetypes, Append(_allArchetypes, archetype));
 
         foreach (var pair in _queryCache)
         {
-            if (pair.Key.Matches(in archetype.ComponentMask))
+            if (pair.Key.Matches(archetype))
                 Volatile.Write(ref pair.Value.Match, pair.Value.Match.Append(archetype, pair.Key.FilterFor(archetype)));
         }
 
         return archetype;
+    }
+
+    /// <summary>
+    /// The groups of a table with <paramref name="mask"/> (by column): <paramref name="like"/>'s for the grouped
+    /// columns it has, <paramref name="group"/> for bit <paramref name="regroup"/>, 0 elsewhere. Null when all are 0
+    /// (the table of the plain registry). Cold path: new transitions only.
+    /// </summary>
+    private static int[] GroupsOf(in BitMask mask, Archetype like, int regroup, int group)
+    {
+        var bits = mask.ToBitArray();
+        int[] groups = null;
+        for (int c = 0; c < bits.Length; c++)
+        {
+            if (!ComponentInfo.Of(bits[c]).Grouped) continue;
+            int value = bits[c] == regroup ? group : like?.GroupOf(bits[c]) ?? 0;
+            if (value == 0) continue;
+            groups ??= new int[bits.Length];
+            groups[c] = value;
+        }
+
+        return groups;
+    }
+
+    private static string GroupsKey(int[] groups)
+    {
+        var chars = new char[groups.Length * 2];
+        for (int i = 0; i < groups.Length; i++)
+        {
+            chars[2 * i] = (char)(groups[i] >> 16);
+            chars[2 * i + 1] = (char)groups[i];
+        }
+
+        return new string(chars);
     }
 
     /// <summary>
@@ -226,7 +277,7 @@ public sealed partial class World
             var filters = new List<RowPlan>();
             for (int i = 0; i < all.Length; i++)
             {
-                if (!key.Matches(in all[i].ComponentMask)) continue;
+                if (!key.Matches(all[i])) continue;
                 archetypes.Add(all[i]);
                 filters.Add(key.FilterFor(all[i]));
             }

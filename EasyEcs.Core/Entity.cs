@@ -286,7 +286,7 @@ public readonly partial struct Entity : IEquatable<Entity>
             ushort bit = ComponentType<T>.Bit;
             if (!_world.EnableBit(ref meta, bit, DisabledType<T>.Bit)) return false;
             meta.Archetype.Stamp<T>(meta.Slot, _world.ChangeTick);
-            if (ComponentType<T>.Indexed) _world.Indexed(Index, Version, in World.Row<T>(ref meta, bit));
+            _world.Written(Index, Version, in World.Row<T>(ref meta, bit));
             return true;
         }
     }

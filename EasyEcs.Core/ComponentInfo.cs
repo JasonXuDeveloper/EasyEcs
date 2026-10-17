@@ -57,9 +57,13 @@ internal abstract class ComponentInfo
     /// <summary>Whether the type is an <see cref="ICleanupComponent"/> (kept when its entity is destroyed).</summary>
     public readonly bool Cleanup;
 
-    protected ComponentInfo(int size, bool cleanup) : this(size)
+    /// <summary>Whether the type is an <see cref="IGroup"/> (its value may split tables, see <see cref="World.GroupBy{T}"/>).</summary>
+    public readonly bool Grouped;
+
+    protected ComponentInfo(int size, bool cleanup, bool grouped) : this(size)
     {
         Cleanup = cleanup;
+        Grouped = grouped;
     }
 
     /// <summary>Whether the type holds managed references (cleared when its row dies, copied by type).</summary>
@@ -110,7 +114,7 @@ internal abstract class ComponentInfo
 }
 
 internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsReferenceOrContainsReferences<T>() ? -1 : Unsafe.SizeOf<T>(),
-    typeof(ICleanupComponent).IsAssignableFrom(typeof(T)))
+    typeof(ICleanupComponent).IsAssignableFrom(typeof(T)), typeof(IGroup).IsAssignableFrom(typeof(T)))
     where T : struct, IComponent
 {
     // Unmanaged columns are pinned byte arrays (pinned object heap, never moved by the GC) with one cache line of

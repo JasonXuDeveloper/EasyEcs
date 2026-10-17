@@ -114,7 +114,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 if (Free("TryGet" + n))
                     Member($"A copy of the entity's <see cref=\"{t}\"/> if it has one (not a write).",
                         $"bool TryGet{n}(out {t} value) => @this.TryGet(out value);");
-                if (m.IndexKey.Length == 0 && Free("GetOrAdd" + n))
+                if (m.IndexKey.Length == 0 && !m.Grouped && Free("GetOrAdd" + n))
                     Member($"The entity's <see cref=\"{t}\"/> by <c>ref</c>, added (default) first if missing (<c>GetOrAdd</c>).",
                         $"ref {t} GetOrAdd{n}() => ref @this.GetOrAdd<{t}>();");
                 if (Free("Disable" + n))
@@ -183,7 +183,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
     /// <summary>One component or singleton, symbol-free so the pipeline caches between edits.</summary>
     private sealed record ComponentModel(
         string Namespace, string Type, string Name, string Path, string HintName, bool IsPublic, bool Singleton, bool Tag,
-        bool Watched, string IndexKey, bool WorldTaken, EquatableArray<Setter> Setters, EquatableArray<string> Taken)
+        bool Watched, bool Grouped, string IndexKey, bool WorldTaken, EquatableArray<Setter> Setters, EquatableArray<string> Taken)
     {
         private static readonly SymbolDisplayFormat TypeName = Symbols.Fqn
             .AddMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
@@ -225,12 +225,13 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             var taken = new[] { name, "Has" + name, "Is" + name, "TryGet" + name, "GetOrAdd" + name, "Set" + name, "Remove" + name }
                 .Where(n => receiver.GetMembers(n).Length > 0).ToArray();
             var key = type.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.ToDisplayString() == Symbols.Indexed)?.TypeArguments[0];
+            bool grouped = Symbols.Implements(type, Symbols.Group);
 
             string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
             string path = name; // Outer_Inner for nested types: one extension class each
             for (var t = type.ContainingType; t != null; t = t.ContainingType) path = t.Name + "_" + path;
             return new ComponentModel(ns, fqn, name, path, fqn.Replace("global::", "").Replace('.', '_'), isPublic, singleton,
-                tag, Symbols.Implements(type, Symbols.TrackChanges) || key != null, key?.ToDisplayString(Symbols.Fqn) ?? "",
+                tag, Symbols.Implements(type, Symbols.TrackChanges) || key != null || grouped, grouped, key?.ToDisplayString(Symbols.Fqn) ?? "",
                 world.GetMembers(name + "Index").Length > 0, new EquatableArray<Setter>(setters), new EquatableArray<string>(taken));
         }
 

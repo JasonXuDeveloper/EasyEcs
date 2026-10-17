@@ -24,6 +24,19 @@ public interface ITrackChanges;
 /// </summary>
 public interface ICleanupComponent : IComponent;
 
+/// <summary>
+/// Marks a component whose value splits tables: in a world that called <see cref="World.GroupBy{T}"/>, entities with
+/// different <see cref="Group"/>s live in different tables, so a query of one group
+/// (<see cref="QueryFilter.InGroup{T}"/>) walks only its own rows, contiguous in memory (a zone, a map, a match, a
+/// team). Writing a new value with <c>Set</c> moves the entity to its group's table, so a grouped component is never
+/// written through a <c>ref</c> (EECS015), like an indexed one.
+/// </summary>
+public interface IGroup
+{
+    /// <summary>The group the entity belongs to.</summary>
+    int Group { get; }
+}
+
 /// <summary>Marks a struct as a world singleton: exactly one value per world (clock, configuration, shared state).</summary>
 public interface ISingletonComponent;
 

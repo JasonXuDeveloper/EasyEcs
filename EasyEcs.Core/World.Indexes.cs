@@ -79,17 +79,23 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Entity <paramref name="id"/> (<paramref name="version"/>) now holds <paramref name="value"/>: re-index it if
-    /// <typeparamref name="T"/> is indexed and this world has its index. Folded away for other components.
+    /// Entity <paramref name="id"/> (<paramref name="version"/>) now holds <paramref name="value"/> (Set, CreateEntity,
+    /// Enable): re-index it if <typeparamref name="T"/> is indexed and this world has its index, move it to its group's
+    /// table if <typeparamref name="T"/> is grouped here. Folded away for other components. Inside the structural gate.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void Indexed<T>(int id, int version, in T value) where T : struct, IComponent
+    internal void Written<T>(int id, int version, in T value) where T : struct, IComponent
     {
-        if (!ComponentType<T>.Indexed) return;
-        var byBit = _indexByBit;
+        if (!ComponentType<T>.Watched) return;
         int bit = ComponentType<T>.Bit;
-        if (byBit != null && bit < byBit.Length && byBit[bit] is { } index)
-            Unsafe.As<IIndexOf<T>>(index).Put(id, version, in value);
+        if (ComponentType<T>.Indexed)
+        {
+            var byBit = _indexByBit;
+            if (byBit != null && bit < byBit.Length && byBit[bit] is { } index)
+                Unsafe.As<IIndexOf<T>>(index).Put(id, version, in value);
+        }
+
+        if (ComponentType<T>.Grouped && _groupByBit != null) Regroup(id, bit, in value);
     }
 
     /// <summary>Tell the index of <paramref name="bit"/>, if any, that entity <paramref name="id"/> lost it (cold).</summary>

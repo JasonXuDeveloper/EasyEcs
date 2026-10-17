@@ -1,0 +1,110 @@
+using System;
+using System.Runtime.CompilerServices;
+
+namespace EasyEcs;
+
+// Groups: tables split by the value of an IGroup component (World.GroupBy), and the moves that keep rows in their group.
+public sealed partial class World
+{
+    // By component bit: the grouping of that component in this world. Null until the first GroupBy.
+    private IGrouping[] _groupByBit;
+
+    internal interface IGrouping
+    {
+        /// <summary>The group of the value in row <paramref name="slot"/> of <paramref name="table"/>, which has the component.</summary>
+        int GroupOf(Archetype table, int slot);
+    }
+
+    private interface IGroupOf<T>
+    {
+        int GroupOf(in T value);
+    }
+
+    private sealed class Grouping<T> : IGrouping, IGroupOf<T> where T : struct, IComponent, IGroup
+    {
+        public int GroupOf(Archetype table, int slot) => table.Ref<T>(ComponentType<T>.Bit, slot).Group;
+
+        public int GroupOf(in T value) => value.Group;
+    }
+
+    /// <summary>
+    /// Split this world's tables by <typeparamref name="T"/>'s <see cref="IGroup.Group"/>: entities of one group share
+    /// tables, so <see cref="QueryFilter.InGroup{T}"/> walks only that group's rows, contiguous in memory. Setting a
+    /// new value moves the entity to its group's tables (one row copy). Existing entities move now: call it at setup.
+    /// O(entities with <typeparamref name="T"/>) once; idempotent. Owner thread only, not during a pass.
+    /// </summary>
+    public void GroupBy<T>() where T : struct, IComponent, IGroup
+    {
+        int bit = ComponentType<T>.Bit;
+        using (Structural())
+        {
+            _groupByBit ??= [];
+            if (bit >= _groupByBit.Length) Array.Resize(ref _groupByBit, bit + 1);
+            if (_groupByBit[bit] != null) return;
+            _groupByBit[bit] = new Grouping<T>();
+
+            var tables = _allArchetypes; // a snapshot: tables created by the moves start in their group
+            foreach (var table in tables)
+            {
+                int column = table.ColumnIndex(bit);
+                if (column < 0) continue;
+                for (int slot = table.Count - 1; slot >= 0; slot--) // from the last row: a moved row is filled by a visited one
+                {
+                    int id = table.Slots[slot].Index;
+                    if (id >= 0 && table.Has(column, slot)) RegroupRow(id);
+                }
+            }
+        }
+    }
+
+    /// <summary>Entity <paramref name="id"/> holds <paramref name="value"/> of grouped component <paramref name="bit"/>: move it to the value's group if this world groups by it. Inside the structural gate.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void Regroup<T>(int id, int bit, in T value) where T : struct, IComponent
+    {
+        if (bit >= _groupByBit.Length || _groupByBit[bit] is not { } grouping) return;
+        int group = Unsafe.As<IGroupOf<T>>(grouping).GroupOf(in value);
+        ref var meta = ref MetaRef(id);
+        if (meta.Archetype.GroupOf(bit) != group) MoveTo(ref meta, id, RegroupEdge(meta.Archetype, bit, group));
+    }
+
+    /// <summary>Move entity <paramref name="id"/> to the groups of its grouped components' values (copied rows). Inside the structural gate.</summary>
+    private void RegroupRow(int id)
+    {
+        ref var meta = ref MetaRef(id);
+        var table = meta.Archetype;
+        var components = table.Components;
+        for (int c = 0; c < components.Length; c++)
+        {
+            ushort bit = components[c];
+            if (bit >= _groupByBit.Length || _groupByBit[bit] is not { } grouping || !table.Has(c, meta.Slot)) continue;
+            int group = grouping.GroupOf(table, meta.Slot);
+            if (table.GroupOf(bit) == group) continue;
+            MoveTo(ref meta, id, RegroupEdge(table, bit, group));
+            table = meta.Archetype;
+        }
+    }
+
+    /// <summary>
+    /// The table a new entity with <paramref name="value"/> of grouped component <paramref name="bit"/> belongs in,
+    /// starting from <paramref name="target"/> (CreateEntity / CreateEntities place it there, no move). Folded away for
+    /// other components. Inside the structural gate.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal Archetype GroupTarget<T>(Archetype target, ushort bit, in T value) where T : struct, IComponent
+    {
+        if (!ComponentType<T>.Grouped || _groupByBit == null || bit >= _groupByBit.Length || _groupByBit[bit] is not { } grouping)
+            return target;
+        int group = Unsafe.As<IGroupOf<T>>(grouping).GroupOf(in value);
+        return target.GroupOf(bit) == group ? target : RegroupEdge(target, bit, group).Target;
+    }
+
+    private Transition RegroupEdge(Archetype from, int bit, int group)
+    {
+        int column = from.ColumnIndex(bit);
+        var edge = from.GetRegroupEdge(column, group);
+        if (edge != null) return edge;
+        edge = new Transition(from, GetOrCreateArchetype(from.ComponentMask.Clone(), from, bit, group));
+        from.SetRegroupEdge(column, group, edge);
+        return edge;
+    }
+}

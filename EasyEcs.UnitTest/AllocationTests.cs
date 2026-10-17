@@ -106,6 +106,9 @@ public class AllocationTests
         using var world = new World();
         var ratings = world.Index<Rating, int>();
         var parties = world.Relations<MemberOf>();
+        world.GroupBy<Zone>();
+        var walkers = new Entity[64];
+        for (int i = 0; i < walkers.Length; i++) walkers[i] = world.CreateEntity(new Zone(i % 4), new Health(i));
         var players = new Entity[256];
         for (int i = 0; i < players.Length; i++) players[i] = world.CreateEntity(new Rating(i % 32));
         int next = 0;
@@ -125,6 +128,11 @@ public class AllocationTests
             players[(next + 128) % players.Length].RemoveRelation<MemberOf>(players[(next + 128) * 7 % players.Length]);
             foreach (var _ in parties.Find(party)) seen++;
 
+            // Groups: an entity changes zone (a row move between group tables), a zone's rows are walked.
+            var walker = walkers[next % walkers.Length];
+            walker.Set(new Zone((walker.Read<Zone>().Id + 1) % 4));
+            foreach (var item in world.Query<Health>(QueryFilter.Create().InGroup<Zone>(next % 4))) seen += item.Component1.Value;
+
             // A tree with a retiring leaf: destroy cascades, the cleanup component is released.
             var root = world.CreateEntity(new Health(1));
             var child = world.CreateEntity(new ChildOf(root));
@@ -136,7 +144,7 @@ public class AllocationTests
         for (int i = 0; i < 3000; i++) Frame(); // warm-up: keys sorted, buffers, links, stacks and tables grown, JIT
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 500; i++) Frame();
-        Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, world.EntityCount), Is.EqualTo((0L, players.Length)));
+        Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, world.EntityCount), Is.EqualTo((0L, players.Length + walkers.Length)));
     }
 
     [Test]

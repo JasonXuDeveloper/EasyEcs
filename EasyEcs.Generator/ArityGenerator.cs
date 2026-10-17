@@ -87,7 +87,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             {{(n == 1 ? "world.AddBit(ref meta, id, b1);" : $"world.AddBits(ref meta, id, [{List(n, i => $"b{i}")}], {signature});")}}
                 {{Lines(n, i => $"            World.Row<T{i}>(ref meta, b{i}) = c{i};")}}
                 {{Lines(n, i => $"            meta.Archetype.Stamp<T{i}>(meta.Slot, world.ChangeTick);")}}
-                {{Lines(n, i => $"            world.Indexed(id, version, in c{i});")}}
+                {{Lines(n, i => $"            world.Written(id, version, in c{i});")}}
                         }
                     }
 
@@ -156,11 +156,12 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             // Straight into the final archetype through an edge cached on the empty archetype (no mask hashing).
                             var target = ({{(n == 1 ? "_emptyArchetype.GetAddEdge(b1) ?? CreateEdge(_emptyArchetype, b1)"
                                 : $"_emptyArchetype.GetAddSetEdge({signature}) ?? CreateSetEdge(_emptyArchetype, [{List(n, i => $"b{i}")}], {signature})")}}).Target;
+                {{Lines(n, i => $"            target = GroupTarget(target, b{i}, in c{i});")}}
                             int slot = Place(id, target);
                 {{Lines(n, i => $"            Unsafe.Add(ref target.Base<T{i}>(b{i}), slot) = c{i};")}}
                 {{Lines(n, i => $"            target.Stamp<T{i}>(slot, _changeTick);")}}
                             int version = Meta[id].Version;
-                {{Lines(n, i => $"            Indexed(id, version, in c{i});")}}
+                {{Lines(n, i => $"            Written(id, version, in c{i});")}}
                             return new Entity(this, id, version);
                         }
                     }
@@ -179,10 +180,11 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             var target = ({{(n == 1 ? "_emptyArchetype.GetAddEdge(b1) ?? CreateEdge(_emptyArchetype, b1)"
                                 : $"_emptyArchetype.GetAddSetEdge({signature}) ?? CreateSetEdge(_emptyArchetype, [{List(n, i => $"b{i}")}], {signature})")}}).Target;
                             if (entities.IsEmpty) return;
+                {{Lines(n, i => $"            target = GroupTarget(target, b{i}, in c{i});")}}
                             int first = PlaceRows(target, entities); // consecutive rows: each column is filled at once
                 {{Lines(n, i => $"            MemoryMarshal.CreateSpan(ref Unsafe.Add(ref target.Base<T{i}>(b{i}), first), entities.Length).Fill(c{i});")}}
                 {{Lines(n, i => $"            target.StampRows<T{i}>(first, entities.Length, _changeTick);")}}
-                {{Lines(n, i => $"            if (ComponentType<T{i}>.Indexed) foreach (var e in entities) Indexed(e.Index, e.Version, in c{i});")}}
+                {{Lines(n, i => $"            if (ComponentType<T{i}>.Indexed) foreach (var e in entities) Written(e.Index, e.Version, in c{i});")}}
                         }
                     }
 

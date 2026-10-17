@@ -95,6 +95,15 @@ internal sealed class Archetype
     /// <summary>Whether the table has an <see cref="ICleanupComponent"/> column (destroying a row may keep it).</summary>
     public readonly bool HasCleanup;
 
+    /// <summary>
+    /// The group of each <see cref="IGroup"/> column (by column; 0 for other columns), or null when the table has none
+    /// set: every row's grouped component is in this group (<see cref="World.GroupBy{T}"/>).
+    /// </summary>
+    public readonly int[] Groups;
+
+    // Tables of the same components in another group, by (column, group): the moves of World.Regroup. Created on use.
+    private System.Collections.Generic.Dictionary<long, Transition> _regroupEdges;
+
     /// <summary>Columns with <see cref="Present"/> bits (indices into <see cref="Columns"/>), copy-on-write.</summary>
     private short[] _bitColumns = [];
 
@@ -120,9 +129,10 @@ internal sealed class Archetype
 
     private const int Tombstone = -1;
 
-    public Archetype(in BitMask componentMask, int initialCapacity = 64)
+    public Archetype(in BitMask componentMask, int[] groups = null, int initialCapacity = 64)
     {
         ComponentMask = componentMask;
+        Groups = groups;
         Components = componentMask.ToBitArray();
         Slots = new EntityId[initialCapacity];
 
@@ -212,6 +222,16 @@ internal sealed class Archetype
     /// <summary>Whether row <paramref name="slot"/> has the component of column <paramref name="column"/>.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Has(int column, int slot) => Bits(column) is not { } bits || (Word(bits, slot) & (1UL << slot)) != 0; // shift is mod 64
+
+    /// <summary>The group of grouped component <paramref name="bit"/> in this table (0 when it has no such column or no groups).</summary>
+    public int GroupOf(int bit) => Groups != null && ColumnIndex(bit) is var column and >= 0 ? Groups[column] : 0;
+
+    /// <summary>The cached move to this table's sibling with group <paramref name="group"/> in column <paramref name="column"/>.</summary>
+    public Transition GetRegroupEdge(int column, int group) =>
+        _regroupEdges != null && _regroupEdges.TryGetValue((long)column << 32 | (uint)group, out var edge) ? edge : null;
+
+    public void SetRegroupEdge(int column, int group, Transition edge) =>
+        (_regroupEdges ??= new())[(long)column << 32 | (uint)group] = edge;
 
     /// <summary>Whether row <paramref name="slot"/> has a cleanup component (<see cref="ICleanupComponent"/>).</summary>
     public bool HoldsCleanup(int slot)

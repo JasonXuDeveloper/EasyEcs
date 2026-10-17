@@ -22,7 +22,11 @@ public readonly struct QueryFilter
     /// <summary>The change tick <see cref="Changed{T}"/> and <see cref="Removed{T}"/> rows must have reached.</summary>
     internal readonly ulong Tick;
 
-    private QueryFilter(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed, ulong since)
+    /// <summary><see cref="InGroup{T}"/>: bit + 1 of the grouped component (0: no group), and the group.</summary>
+    internal readonly int GroupBit, Group;
+
+    private QueryFilter(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed, ulong since,
+        int groupBit, int group)
     {
         All = all;
         None = none;
@@ -30,6 +34,8 @@ public readonly struct QueryFilter
         Tracked = changed;
         Removals = removed;
         Tick = since;
+        GroupBit = groupBit;
+        Group = group;
     }
 
     public static QueryFilter Create() => default;
@@ -37,14 +43,26 @@ public readonly struct QueryFilter
     /// <summary>Whether <paramref name="other"/> selects the same rows (its tick aside): one query key.</summary>
     internal bool SameQuery(in QueryFilter other) =>
         All.Equals(in other.All) && None.Equals(in other.None) && Any.Equals(in other.Any) && Tracked.Equals(in other.Tracked)
-        && Removals.Equals(in other.Removals);
+        && Removals.Equals(in other.Removals) && GroupBit == other.GroupBit && Group == other.Group;
 
     /// <summary>Require <typeparamref name="T"/> to be present (not passed to the query callback).</summary>
     public QueryFilter With<T>() where T : struct, IComponent
     {
         var all = All.Clone();
         all.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in all, in None, in Any, in Tracked, in Removals, Tick);
+        return new QueryFilter(in all, in None, in Any, in Tracked, in Removals, Tick, GroupBit, Group);
+    }
+
+    /// <summary>
+    /// Require <typeparamref name="T"/> with group <paramref name="group"/>: only the tables of that group are walked
+    /// (<see cref="World.GroupBy{T}"/>; in a world that does not group by <typeparamref name="T"/>, every table holds
+    /// group 0). One group per filter.
+    /// </summary>
+    public QueryFilter InGroup<T>(int group) where T : struct, IComponent, IGroup
+    {
+        var all = All.Clone();
+        all.SetBit(ComponentType<T>.Bit);
+        return new QueryFilter(in all, in None, in Any, in Tracked, in Removals, Tick, ComponentType<T>.Bit + 1, group);
     }
 
     /// <summary>Require <typeparamref name="T"/> to be absent.</summary>
@@ -52,7 +70,7 @@ public readonly struct QueryFilter
     {
         var none = None.Clone();
         none.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in All, in none, in Any, in Tracked, in Removals, Tick);
+        return new QueryFilter(in All, in none, in Any, in Tracked, in Removals, Tick, GroupBit, Group);
     }
 
     /// <summary>
@@ -63,7 +81,7 @@ public readonly struct QueryFilter
     {
         var any = Any.Clone();
         any.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in All, in None, in any, in Tracked, in Removals, Tick);
+        return new QueryFilter(in All, in None, in any, in Tracked, in Removals, Tick, GroupBit, Group);
     }
 
     /// <summary>
@@ -80,7 +98,7 @@ public readonly struct QueryFilter
         all.SetBit(ComponentType<T>.Bit);
         var changed = Tracked.Clone();
         changed.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in all, in None, in Any, in changed, in Removals, since);
+        return new QueryFilter(in all, in None, in Any, in changed, in Removals, since, GroupBit, Group);
     }
 
     /// <summary>
@@ -96,14 +114,14 @@ public readonly struct QueryFilter
         CheckTick(since);
         var removed = Removals.Clone();
         removed.SetBit(ComponentType<T>.Bit);
-        return new QueryFilter(in All, in None, in Any, in Tracked, in removed, since);
+        return new QueryFilter(in All, in None, in Any, in Tracked, in removed, since, GroupBit, Group);
     }
 
     /// <summary>
     /// The same filter with its <see cref="Changed{T}"/> and <see cref="Removed{T}"/> filters moved to tick
     /// <paramref name="since"/>, without rebuilding it: a filter kept in a field, used again after each update.
     /// </summary>
-    public QueryFilter Since(ulong since) => new(in All, in None, in Any, in Tracked, in Removals, since);
+    public QueryFilter Since(ulong since) => new(in All, in None, in Any, in Tracked, in Removals, since, GroupBit, Group);
 
     private void CheckTick(ulong since)
     {
@@ -123,6 +141,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
     private readonly BitMask _any;
     private readonly BitMask _changed;
     private readonly BitMask _removed;
+    private readonly int _groupBit, _group; // QueryFilter.GroupBit / Group
 
     // Detached keys only (not part of equality): the required and excluded bits as arrays, for the per-archetype
     // presence tests (a table with a column can still have rows without the component).
@@ -135,19 +154,23 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
     // Lookup keys of queries on component bits >= 256 keep their overflow here instead of allocating it per query.
     [ThreadStatic] private static Vector256<long>[] _scratch;
 
-    private QueryKey(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed)
+    private QueryKey(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed, int groupBit, int group)
     {
         _all = all;
         _none = none;
         _any = any;
         _changed = changed;
         _removed = removed;
+        _groupBit = groupBit;
+        _group = group;
         _required = _excluded = _anyOf = _changedOf = _removedOf = [];
     }
 
-    private QueryKey(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed, ushort[] required,
-        ushort[] excluded, ushort[] anyOf, ushort[] changedOf, ushort[] removedOf)
+    private QueryKey(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed, int groupBit, int group,
+        ushort[] required, ushort[] excluded, ushort[] anyOf, ushort[] changedOf, ushort[] removedOf)
     {
+        _groupBit = groupBit;
+        _group = group;
         _all = all;
         _none = none;
         _any = any;
@@ -175,7 +198,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
             {
                 var all = filter.All;
                 for (int i = 0; i < bits.Length; i++) all.SetBit(bits[i]);
-                return new QueryKey(in all, in filter.None, in filter.Any, in filter.Tracked, in filter.Removals);
+                return new QueryKey(in all, in filter.None, in filter.Any, in filter.Tracked, in filter.Removals, filter.GroupBit, filter.Group);
             }
         }
 
@@ -190,7 +213,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
         for (int i = 0; i < bits.Length; i++) maxBit = Math.Max(maxBit, bits[i]);
         var all = filter.All.CopyWithScratch(maxBit, ref _scratch);
         for (int i = 0; i < bits.Length; i++) all.SetBit(bits[i]);
-        return new QueryKey(in all, in filter.None, in filter.Any, in filter.Tracked, in filter.Removals);
+        return new QueryKey(in all, in filter.None, in filter.Any, in filter.Tracked, in filter.Removals, filter.GroupBit, filter.Group);
     }
 
     /// <summary>A copy that owns its storage (cache entries).</summary>
@@ -201,19 +224,20 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
         var any = _any.Clone();
         var changed = _changed.Clone();
         var removed = _removed.Clone();
-        return new QueryKey(in all, in none, in any, in changed, in removed, all.ToBitArray(), none.ToBitArray(),
+        return new QueryKey(in all, in none, in any, in changed, in removed, _groupBit, _group, all.ToBitArray(), none.ToBitArray(),
             any.ToBitArray(), changed.ToBitArray(), removed.ToBitArray());
     }
 
     /// <summary>
-    /// Whether archetypes with <paramref name="archetypeMask"/> can hold matching rows (detached keys only): they have
+    /// Whether <paramref name="archetype"/> can hold matching rows (detached keys only): they have
     /// every required column, the column of every <c>Removed</c> component (a removal keeps the row) and, with
     /// <c>WithAny</c>, at least one of those columns. Excluded columns do not rule a table out, its rows may lack those
     /// components.
     /// </summary>
-    public bool Matches(in BitMask archetypeMask) =>
-        archetypeMask.ContainsAll(in _all) && archetypeMask.ContainsAll(in _removed)
-        && (_anyOf.Length == 0 || archetypeMask.Intersects(in _any));
+    public bool Matches(Archetype archetype) =>
+        archetype.ComponentMask.ContainsAll(in _all) && archetype.ComponentMask.ContainsAll(in _removed)
+        && (_anyOf.Length == 0 || archetype.ComponentMask.Intersects(in _any))
+        && (_groupBit == 0 || archetype.GroupOf(_groupBit - 1) == _group);
 
     /// <summary>The presence tests of a matching <paramref name="archetype"/>: its required and excluded columns.</summary>
     public RowPlan FilterFor(Archetype archetype)
@@ -250,13 +274,13 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
 
     public bool Equals(QueryKey other) =>
         _all.Equals(in other._all) && _none.Equals(in other._none) && _any.Equals(in other._any) &&
-        _changed.Equals(in other._changed) && _removed.Equals(in other._removed);
+        _changed.Equals(in other._changed) && _removed.Equals(in other._removed) && _groupBit == other._groupBit && _group == other._group;
 
     public override bool Equals(object obj) => obj is QueryKey other && Equals(other);
 
     public override int GetHashCode() =>
         (((_all.GetHashCode() * 31 + _none.GetHashCode()) * 31 + _any.GetHashCode()) * 31 + _changed.GetHashCode()) * 31
-        + _removed.GetHashCode();
+        + _removed.GetHashCode() + _groupBit * 397 + _group * 7919;
 }
 
 /// <summary>

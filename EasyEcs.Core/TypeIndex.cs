@@ -44,6 +44,12 @@ internal static class ComponentType<T> where T : struct, IComponent
     /// </summary>
     internal static readonly bool Indexed = IsIndexed();
 
+    /// <summary><typeparamref name="T"/> implements <see cref="IGroup"/>: a written value may move its row (folded like <see cref="Indexed"/>).</summary>
+    internal static readonly bool Grouped = typeof(IGroup).IsAssignableFrom(typeof(T));
+
+    /// <summary>Writes of a value (Set, CreateEntity) are told to the world (<see cref="World.Written{T}"/>).</summary>
+    internal static readonly bool Watched = Indexed || Grouped;
+
     // Trimming may drop IIndexed<> from a component no index uses: then false is right, as no world can index it.
     [UnconditionalSuppressMessage("Trimming", "IL2090", Justification = "A trimmed IIndexed<> interface means no index of T exists.")]
     private static bool IsIndexed()
