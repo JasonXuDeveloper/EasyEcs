@@ -25,7 +25,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         var methods = context.SyntaxProvider
             .ForAttributeWithMetadataName(Symbols.ForEachAttribute,
                 static (node, _) => node is MethodDeclarationSyntax,
-                static (ctx, ct) => ForEachModel.Create((IMethodSymbol)ctx.TargetSymbol, (MethodDeclarationSyntax)ctx.TargetNode, ct))
+                static (ctx, ct) => ForEachModel.Create((IMethodSymbol)ctx.TargetSymbol, (MethodDeclarationSyntax)ctx.TargetNode, ctx.SemanticModel, ct))
             .Where(static m => m is not null)
             .WithTrackingName("ForEachMethods");
 
@@ -213,7 +213,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         /// <summary>Takes component spans: runs over whole runs of rows (World.ForEachBatch).</summary>
         public bool IsBatch => Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan);
 
-        public static ForEachModel? Create(IMethodSymbol method, MethodDeclarationSyntax syntax, System.Threading.CancellationToken ct)
+        public static ForEachModel? Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
         {
             if (!Symbols.IsValidForEach(method)) return null;
             ct.ThrowIfCancellationRequested();
@@ -248,8 +248,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 with.RemoveAt(0);
             }
             else if (query.Count == 0) query.Add(changed[0]);
-            bool stable = Symbols.IsStable(method, syntax);
-            bool parallel = Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax) == null;
+            bool stable = Symbols.IsStable(method, syntax, model);
+            bool parallel = Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax, model) == null;
             return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, stable, parallel, syntax.SpanStart,
                 new EquatableArray<string>(query.ToArray()),
                 new EquatableArray<ParamModel>(parameters), new EquatableArray<string>(with.ToArray()),

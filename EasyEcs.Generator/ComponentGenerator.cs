@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -9,14 +10,21 @@ using Microsoft.CodeAnalysis.Text;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// Generates a property on <c>Entity</c> for every component declared in the compilation (C# 14 extension members):
-/// <c>player.Position.X += 1</c> instead of <c>player.Get&lt;Position&gt;().X += 1</c>. A component the world watches
-/// (<c>ITrackChanges</c>, <c>IIndexed&lt;TKey&gt;</c>) gets a <c>ref readonly</c> property instead (<c>Read</c>): reading
-/// it never counts as a write, and writes go through <c>Set</c>, which stamps the change and keeps the index current. (A
-/// property setter is not offered: C# rejects assigning one on a handle that is not a variable, such as a <c>foreach</c>
-/// variable.)
-/// Tags (no fields), generic components, components nested in types others cannot see, and names that an Entity member
-/// already takes get no property. Nothing is generated below C# 14.
+/// Generates named members for every component and singleton declared in the compilation (C# 14 extension members),
+/// so the common calls read like fields and methods of the entity or the world:
+/// <list type="bullet">
+/// <item>component <c>Position</c>: <c>entity.Position</c> (<c>ref</c>, <c>Get</c>), <c>HasPosition</c>,
+/// <c>TryGetPosition(out p)</c>, <c>SetPosition(x, y)</c> (one overload per public constructor, or the public fields),
+/// <c>RemovePosition()</c>. A component the world watches (<c>ITrackChanges</c>, <c>IIndexed&lt;TKey&gt;</c>) gets a
+/// <c>ref readonly</c> property (<c>Read</c>): reading it never counts as a write, and writes are <c>Set…</c> calls.</item>
+/// <item>tag <c>Dead</c> (no fields): <c>entity.IsDead</c>, <c>SetDead()</c>, <c>RemoveDead()</c>.</item>
+/// <item>indexed component <c>Zone : IIndexed&lt;int&gt;</c>: <c>world.ZoneIndex</c> (<c>Index&lt;Zone, int&gt;()</c>).</item>
+/// <item>singleton <c>Clock</c>: <c>world.Clock</c> (<c>ref</c>, <c>GetSingleton</c>), <c>HasClock</c>,
+/// <c>SetClock(…)</c> (adds it if missing), <c>RemoveClock()</c>.</item>
+/// </list>
+/// Writes are methods, not property setters: C# rejects a setter on a handle that is not a variable (a <c>foreach</c>
+/// variable, a call's result). Generic types, types nested in types others cannot see and member names the receiver
+/// already has are skipped. Nothing is generated below C# 14.
 /// </summary>
 [Generator(LanguageNames.CSharp)]
 public sealed class ComponentGenerator : IIncrementalGenerator
@@ -31,7 +39,6 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             .Where(static m => m is not null)
             .WithTrackingName("Components");
 
-        // C# 14 brings extension members; the property names of Entity are the names a component cannot take.
         var supported = context.CompilationProvider
             .Select(static (c, _) => c is CSharpCompilation { LanguageVersion: var version } && (int)version >= 1400)
             .WithTrackingName("ExtensionMembers");
@@ -42,38 +49,108 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         });
     }
 
-    private static string Emit(ComponentModel model)
+    private const string Inline =
+        "        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n";
+
+    private static string Emit(ComponentModel m)
     {
         var sb = new StringBuilder(Code.Header);
-        if (model.Namespace.Length > 0) sb.Append($"namespace {model.Namespace};\n\n");
-        string access = model.IsPublic ? "public" : "internal";
-        sb.Append($"{access} static class {model.Path}EntityExtensions\n{{\n");
-        sb.Append("    extension(global::EasyEcs.Entity entity)\n    {\n");
-        string inline = "            [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n";
-        if (model.Watched)
+        if (m.Namespace.Length > 0) sb.Append($"namespace {m.Namespace};\n\n");
+        string a = m.IsPublic ? "public" : "internal";
+        string t = m.Type, n = m.Name;
+        bool Free(string name) => !m.Taken.Contains(name);
+        void Member(string doc, string code)
         {
-            sb.Append($"        /// <summary>The entity's <see cref=\"{model.Type}\"/>, read-only (<c>Read</c>: never a write). Write it with <c>Set</c>, so the change is stamped and indexed.</summary>\n");
-            sb.Append($"        {access} ref readonly {model.Type} {model.Name}\n        {{\n{inline}            get => ref entity.Read<{model.Type}>();\n        }}\n");
+            sb.Append($"        /// <summary>{doc}</summary>\n");
+            sb.Append(Inline);
+            sb.Append($"        {a} {code}\n");
+        }
+
+        // A property: the attribute goes on its getter.
+        void Property(string doc, string declaration, string body)
+        {
+            sb.Append($"        /// <summary>{doc}</summary>\n");
+            sb.Append($"        {a} {declaration}\n        {{\n    {Inline}            get => {body};\n        }}\n");
+        }
+
+        sb.Append($"{a} static class {m.Path}EcsExtensions\n{{\n");
+        if (m.Singleton)
+        {
+            sb.Append("    extension(global::EasyEcs.World @this)\n    {\n");
+            if (!m.Tag && Free(n))
+                Property($"The world's <see cref=\"{t}\"/> by <c>ref</c> (<c>GetSingleton</c>); throws if it was not added.",
+                    $"ref {t} {n}", $"ref @this.GetSingleton<{t}>()");
+            if (Free("Has" + n))
+                Property($"Whether the world has a <see cref=\"{t}\"/> (<c>HasSingleton</c>).", $"bool Has{n}", $"@this.HasSingleton<{t}>()");
+            if (Free("Set" + n))
+                foreach (var s in m.Setters)
+                    Member($"Sets the world's <see cref=\"{t}\"/>, adding it if missing.",
+                        $"void Set{n}({s.Parameters}) => @this.GetOrAddSingleton<{t}>() = {s.Value};");
+            if (Free("Remove" + n))
+                Member($"Removes the world's <see cref=\"{t}\"/> (<c>RemoveSingleton</c>); false if it was not added.",
+                    $"bool Remove{n}() => @this.RemoveSingleton<{t}>();");
+            sb.Append("    }\n");
         }
         else
         {
-            sb.Append($"        /// <summary>The entity's <see cref=\"{model.Type}\"/> by <c>ref</c> (<c>Get</c>).</summary>\n");
-            sb.Append($"        {access} ref {model.Type} {model.Name}\n        {{\n{inline}            get => ref entity.Get<{model.Type}>();\n        }}\n");
+            sb.Append("    extension(global::EasyEcs.Entity @this)\n    {\n");
+            if (m.Tag)
+            {
+                if (Free("Is" + n)) Property($"Whether the entity has the tag <see cref=\"{t}\"/>.", $"bool Is{n}", $"@this.Has<{t}>()");
+            }
+            else
+            {
+                if (Free(n))
+                    Property(m.Watched
+                            ? $"The entity's <see cref=\"{t}\"/>, read-only (<c>Read</c>: never a write); write it with <c>Set{n}</c>, so the change is stamped and indexed. Throws if missing."
+                            : $"The entity's <see cref=\"{t}\"/> by <c>ref</c> (<c>Get</c>); throws if missing.",
+                        $"ref {(m.Watched ? "readonly " : "")}{t} {n}", $"ref @this.{(m.Watched ? "Read" : "Get")}<{t}>()");
+                if (Free("Has" + n)) Property($"Whether the entity has a <see cref=\"{t}\"/>.", $"bool Has{n}", $"@this.Has<{t}>()");
+                if (Free("TryGet" + n))
+                    Member($"A copy of the entity's <see cref=\"{t}\"/> if it has one (not a write).",
+                        $"bool TryGet{n}(out {t} value) => @this.TryGet(out value);");
+            }
+
+            if (Free("Set" + n))
+                foreach (var s in m.Setters)
+                    Member($"Adds or overwrites the entity's <see cref=\"{t}\"/> (<c>Set</c>); returns the entity.",
+                        $"global::EasyEcs.Entity Set{n}({s.Parameters}) => @this.Set({s.Value});");
+            if (Free("Remove" + n))
+                Member($"Removes the entity's <see cref=\"{t}\"/> if it has one; returns the entity.",
+                    $"global::EasyEcs.Entity Remove{n}() => @this.Remove<{t}>();");
+            sb.Append("    }\n");
+
+            if (m.IndexKey.Length > 0 && !m.WorldTaken)
+            {
+                sb.Append("\n    extension(global::EasyEcs.World @this)\n    {\n");
+                Property($"The world's index of <see cref=\"{t}\"/> (<c>Index&lt;{n}, …&gt;()</c>); keep it in a local or field in loops.",
+                    $"global::EasyEcs.ValueIndex<{t}, {m.IndexKey}> {n}Index", $"@this.Index<{t}, {m.IndexKey}>()");
+                sb.Append("    }\n");
+            }
         }
 
-        sb.Append("    }\n}\n");
+        sb.Append("}\n");
         return sb.ToString();
     }
 
-    /// <summary>One component: its namespace, fully qualified type, property name, class name, visibility, and whether the world watches it.</summary>
-    private sealed record ComponentModel(string Namespace, string Type, string Name, string Path, bool IsPublic, bool Watched, string HintName)
+    /// <summary>One way to build the value: the generated method's parameters and the expression it stores.</summary>
+    private sealed record Setter(string Parameters, string Value);
+
+    /// <summary>One component or singleton, symbol-free so the pipeline caches between edits.</summary>
+    private sealed record ComponentModel(
+        string Namespace, string Type, string Name, string Path, string HintName, bool IsPublic, bool Singleton, bool Tag,
+        bool Watched, string IndexKey, bool WorldTaken, EquatableArray<Setter> Setters, EquatableArray<string> Taken)
     {
+        private static readonly SymbolDisplayFormat Parameter = Symbols.Fqn
+            .WithParameterOptions(SymbolDisplayParameterOptions.IncludeType | SymbolDisplayParameterOptions.IncludeName |
+                                  SymbolDisplayParameterOptions.IncludeDefaultValue | SymbolDisplayParameterOptions.IncludeParamsRefOut)
+            .AddMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.EscapeKeywordIdentifiers);
+
         public static ComponentModel? Create(ISymbol? symbol, CancellationToken token)
         {
-            if (symbol is not INamedTypeSymbol { TypeKind: TypeKind.Struct, IsGenericType: false } type
-                || !Symbols.Implements(type, Symbols.Component)
-                || !type.GetMembers().Any(m => m is IFieldSymbol { IsStatic: false }))
-                return null;
+            if (symbol is not INamedTypeSymbol { TypeKind: TypeKind.Struct, IsGenericType: false } type) return null;
+            bool singleton = Symbols.Implements(type, Symbols.Singleton);
+            if (!singleton && !Symbols.Implements(type, Symbols.Component)) return null;
 
             bool isPublic = true;
             for (var t = type; t != null; t = t.ContainingType)
@@ -83,21 +160,60 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 else if (t.DeclaredAccessibility != Accessibility.Public) return null;
             }
 
-            var entity = type.ContainingAssembly is null ? null : FindEntity(type);
-            if (entity == null || entity.GetMembers(type.Name).Length > 0) return null; // an Entity member wins: no property
+            var entity = Core(type, "Entity");
+            var world = Core(type, "World");
+            if (entity == null || world == null || SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, entity.ContainingAssembly))
+                return null; // EasyEcs's own internal components get nothing
             token.ThrowIfCancellationRequested();
 
-            string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
             string fqn = type.ToDisplayString(Symbols.Fqn);
-            bool watched = Symbols.Implements(type, Symbols.TrackChanges) || Symbols.IsIndexed(type);
-            string hint = fqn.Replace("global::", "").Replace('.', '_');
-            string path = type.Name; // Outer_Inner for nested components: one extension class each
+            var fields = type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray();
+            bool tag = fields.Length == 0;
+            var setters = SettersOf(type, fqn, fields);
+            string name = type.Name;
+            var receiver = singleton ? world : entity;
+            var taken = new[] { name, "Has" + name, "Is" + name, "TryGet" + name, "Set" + name, "Remove" + name }
+                .Where(n => receiver.GetMembers(n).Length > 0).ToArray();
+            var key = type.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.ToDisplayString() == Symbols.Indexed)?.TypeArguments[0];
+
+            string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
+            string path = name; // Outer_Inner for nested types: one extension class each
             for (var t = type.ContainingType; t != null; t = t.ContainingType) path = t.Name + "_" + path;
-            return new ComponentModel(ns, fqn, type.Name, path, isPublic, watched, hint);
+            return new ComponentModel(ns, fqn, name, path, fqn.Replace("global::", "").Replace('.', '_'), isPublic, singleton,
+                tag, Symbols.Implements(type, Symbols.TrackChanges) || key != null, key?.ToDisplayString(Symbols.Fqn) ?? "",
+                world.GetMembers(name + "Index").Length > 0, new EquatableArray<Setter>(setters), new EquatableArray<string>(taken));
         }
 
-        private static INamedTypeSymbol? FindEntity(INamedTypeSymbol component) =>
-            component.AllInterfaces.FirstOrDefault(i => i.ToDisplayString() == Symbols.Component)?.ContainingNamespace
-                .GetTypeMembers("Entity").FirstOrDefault();
+        /// <summary>
+        /// One setter per public constructor with parameters (none taken by ref or out); without such a constructor, one
+        /// taking every field when all are public and writable (or none for a tag).
+        /// </summary>
+        private static Setter[] SettersOf(INamedTypeSymbol type, string fqn, IFieldSymbol[] fields)
+        {
+            var ctors = type.InstanceConstructors
+                .Where(c => c.DeclaredAccessibility == Accessibility.Public && c.Parameters.Length > 0)
+                .ToArray();
+            if (ctors.Length > 0)
+                return ctors.Where(c => c.Parameters.All(p => p.RefKind is RefKind.None or RefKind.In))
+                    .Select(c => new Setter(
+                        string.Join(", ", c.Parameters.Select(p => p.ToDisplayString(Parameter))),
+                        $"new {fqn}({string.Join(", ", c.Parameters.Select(p => Escape(p.Name)))})"))
+                    .ToArray();
+            if (fields.Length == 0) return [new Setter("", $"default({fqn})")];
+            if (fields.Any(f => f.DeclaredAccessibility != Accessibility.Public || f.IsReadOnly || f.IsImplicitlyDeclared)) return [];
+
+            var names = fields.Select(f => Escape(char.ToLowerInvariant(f.Name[0]) + f.Name.Substring(1))).ToArray();
+            return [new Setter(
+                string.Join(", ", fields.Select((f, i) => $"{f.Type.ToDisplayString(Symbols.Fqn)} {names[i]}")),
+                $"new {fqn} {{ {string.Join(", ", fields.Select((f, i) => $"{Escape(f.Name)} = {names[i]}"))} }}")];
+        }
+
+        private static string Escape(string name) =>
+            SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None || name == "this" ? "@" + name : name;
+
+        /// <summary>EasyEcs's <c>Entity</c> or <c>World</c>, found next to the interface the type implements.</summary>
+        private static INamedTypeSymbol? Core(INamedTypeSymbol type, string name) =>
+            type.AllInterfaces.FirstOrDefault(i => i.ToDisplayString() is Symbols.Component or Symbols.Singleton)?.ContainingNamespace
+                .GetTypeMembers(name).FirstOrDefault();
     }
 }

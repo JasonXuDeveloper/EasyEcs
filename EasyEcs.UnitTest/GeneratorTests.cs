@@ -155,6 +155,10 @@ public class GeneratorTests
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Link l) => l.Target.Destroy(); }", "EECS013")]
     [TestCase("public partial class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, in Link l) => l.Target.Add<Q>(); }", "EECS013")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(Entity e, in Link l) { if (e.Has<P>()) l.Target.Set(new Q()); } }", "EECS013")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Link l) => l.Target.RemoveP(); }", "EECS013")]   // generated members
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(Entity e, in Link l) { if (e.HasP && e.P.V > 0) l.Target.SetQ(1); } }", "EECS013")]
+    [TestCase("public static class U { public static void F(Entity[] es) => System.Threading.Tasks.Parallel.For(0, es.Length, i => es[i].RemoveP()); }", "EECS014")]
+    [TestCase("public static class U { public static void F(World w) { System.Threading.Tasks.Task.Run(() => w.SetClock(1)); w.RemoveClock(); } }", "EECS014")]
     [TestCase("public static class U { public static void F(World w) { System.Threading.Tasks.Task.Run(() => w.CreateEntity()); w.CreateEntity(); } }", "EECS014")]
     [TestCase("public static class U { public static void F(Entity[] es) => System.Threading.Tasks.Parallel.For(0, es.Length, i => es[i].Destroy()); }", "EECS014")]
     [TestCase("public class U { World _w = new(); void F() => new System.Threading.Thread(() => { _w.Update(); }).Start(); void G() => _w.Update(); }", "EECS014")]
@@ -213,22 +217,50 @@ public class GeneratorTests
     }
 
     [Test]
-    public void ComponentsGetEntityProperties()
+    public void GeneratedReadsKeepMethodsStable()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
-            namespace Game { public struct Speed : IComponent { public float V; } internal struct Hidden : IComponent { public int V; } }
-            public struct Version : IComponent { public int V; }           // an Entity member takes the name
-            public struct Tagged : IComponent;                              // a tag: nothing to read
-            public class Outer { private struct Secret : IComponent { public int V; } }
+            public partial class S : EcsSystem
+            {
+                [ForEach] static void Read(Entity e, ref Q q) { if (e.HasP && e.TryGetT(out var t)) q.V = e.P.V + t.V; }
+                [ForEach] static void Write(Entity e, ref Q q) => e.RemoveP();
+            }
             """), out var output, out _);
+        string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")).Select(t => t.ToString()));
+        Assert.That(generated, Does.Match(@"struct __ReadJob[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Not.Match(@"struct __WriteJob[^\n]*INoStructuralChanges"));
+    }
+
+    [Test]
+    public void ComponentsGetNamedMembers()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
+            namespace Game { public record struct Speed(float V) : IComponent; internal struct Hidden : IComponent { public int V; } }
+            public struct Version : IComponent { public int V; }           // an Entity member takes the name
+            public struct Tagged : IComponent;                              // a tag
+            public struct Fixed : IComponent { public readonly int V; }    // no public constructor, a read-only field: no setter
+            public class Outer { private struct Secret : IComponent { public int V; } }
+            """), out var output, out var diagnostics);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Component.g.cs")).Select(t => t.ToString()));
         Assert.That(generated, Does.Contain("public ref global::P P"));
-        Assert.That(generated, Does.Contain("public ref readonly global::T T"));             // tracked: read-only
-        Assert.That(generated, Does.Contain("public ref readonly global::Owned Owned"));     // indexed: read-only
-        Assert.That(generated, Does.Contain("namespace Game;"));
+        Assert.That(generated, Does.Contain("public bool HasP"));
+        Assert.That(generated, Does.Contain("public bool TryGetP(out global::P value)"));
+        Assert.That(generated, Does.Contain("SetP(int v) => @this.Set(new global::P { V = v })"));          // from the fields
+        Assert.That(generated, Does.Contain("public global::EasyEcs.Entity RemoveP()"));
+        Assert.That(generated, Does.Contain("public ref readonly global::T T"));                            // tracked: read-only
+        Assert.That(generated, Does.Contain("public ref readonly global::Owned Owned"));                    // indexed: read-only
+        Assert.That(generated, Does.Contain("ValueIndex<global::Owned, global::EasyEcs.Entity> OwnedIndex"));
+        Assert.That(generated, Does.Contain("public ref global::Clock Clock"));                             // a singleton
+        Assert.That(generated, Does.Contain("public void SetClock(int ticks)"));
+        Assert.That(generated, Does.Contain("SetSpeed(float V) => @this.Set(new global::Game.Speed(V))"));  // from the constructor
+        Assert.That(generated, Does.Contain("public bool IsTagged"));
+        Assert.That(generated, Does.Contain("SetTagged() => @this.Set(default(global::Tagged))"));
         Assert.That(generated, Does.Contain("internal ref global::Game.Hidden Hidden"));
         Assert.That(generated, Does.Not.Contain("Version Version"));
-        Assert.That(generated, Does.Not.Contain("Tagged"));
+        Assert.That(generated, Does.Contain("public bool HasVersion"));
+        Assert.That(generated, Does.Not.Contain("SetFixed"));
         Assert.That(generated, Does.Not.Contain("Secret"));
     }
 

@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Linq;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Operations;
@@ -112,6 +113,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.EnableConcurrentExecution();
         context.RegisterSymbolAction(AnalyzeType, SymbolKind.NamedType);
         context.RegisterSymbolAction(AnalyzeMethod, SymbolKind.Method);
+        context.RegisterSyntaxNodeAction(AnalyzeParallel, SyntaxKind.MethodDeclaration);
         context.RegisterSymbolAction(AnalyzeBufferHolder, SymbolKind.Field, SymbolKind.Property, SymbolKind.Method);
         context.RegisterOperationAction(AnalyzeBufferCopy, OperationKind.VariableDeclarator, OperationKind.SimpleAssignment,
             OperationKind.Argument);
@@ -169,7 +171,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
 
         if (context.ContainingSymbol is IMethodSymbol method && Symbols.IsForEach(method)
             && method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is MethodDeclarationSyntax syntax
-            && Symbols.IsStable(method, syntax))
+            && Symbols.IsStable(method, syntax, context.Operation.SemanticModel!))
             context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), method.Name, name));
     }
 
@@ -343,9 +345,16 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(ComponentCount, location, method.Name));
         if (valid && Symbols.MixesBatch(method))
             context.ReportDiagnostic(Diagnostic.Create(MixedBatch, location, method.Name));
-        if (Symbols.IsParallel(method) && method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken)
-                is MethodDeclarationSyntax syntax && Symbols.ParallelProblem(method, syntax) is { } problem)
-            context.ReportDiagnostic(Diagnostic.Create(NotParallel, location, method.Name, problem));
+    }
+
+    /// <summary>EECS010: a [ForEach(Parallel = true)] method that cannot run on several threads.</summary>
+    private static void AnalyzeParallel(SyntaxNodeAnalysisContext context)
+    {
+        var syntax = (MethodDeclarationSyntax)context.Node;
+        if (context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method
+            || !HasForEach(method) || !Symbols.IsParallel(method)) return;
+        if (Symbols.ParallelProblem(method, syntax, context.SemanticModel) is { } problem)
+            context.ReportDiagnostic(Diagnostic.Create(NotParallel, method.Locations.FirstOrDefault(), method.Name, problem));
     }
 
     private static IMethodSymbol? Starter(IOperation handoff) => handoff switch

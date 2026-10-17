@@ -128,7 +128,7 @@ public partial class ZoneSystem : EcsSystem                                   //
     static void Enter(Entity player, in Position p, in Zone zone)              // `in`: reading is not a change
     {
         int id = Math.Clamp((int)(p.X / 1024), 0, 3);
-        if (zone.Id != id) player.Set(new Zone(id));                           // only real moves are writes
+        if (zone.Id != id) player.SetZone(id);                                 // only real moves are writes
     }
 }
 
@@ -145,7 +145,7 @@ public partial class CombatSystem : EcsSystem
         battle.Hits++;
         uint roll = Dice.Roll(battle.Tick, unit.Id);
         if (roll % 50 == 0) unit.GetOrAdd<Burning>() = new Burning(10);       // applied at once; a new fire restarts it
-        else if (roll % 70 == 1) unit.Add<Frozen>() = new Frozen(4);          // never frozen here: Without<Frozen>
+        else if (roll % 70 == 1) unit.SetFrozen(4);                           // never frozen here: Without<Frozen>
     }
 }
 
@@ -157,13 +157,13 @@ public partial class StatusSystem : EcsSystem
     static void Burn(Entity unit, ref Burning burning, ref Health hp)
     {
         hp.Value -= 3;
-        if (--burning.Ticks == 0) unit.Remove<Burning>();                     // flips a bit: the row stays
+        if (--burning.Ticks == 0) unit.RemoveBurning();                       // flips a bit: the row stays
     }
 
     [ForEach]
     static void Thaw(Entity unit, ref Frozen frozen)
     {
-        if (--frozen.Ticks == 0) unit.Remove<Frozen>();
+        if (--frozen.Ticks == 0) unit.RemoveFrozen();
     }
 }
 
@@ -173,7 +173,7 @@ public sealed class AfflictionSystem : EcsSystem                              //
 
     // A count, not a loop: Count reads presence bits, 64 rows per load
     protected override void OnUpdate() =>
-        World.GetSingleton<Battle>().Afflicted += World.Count<Health>(BattleServer.Afflicted);
+        World.Battle.Afflicted += World.Count<Health>(BattleServer.Afflicted);
 }
 
 public partial class DeathSystem : EcsSystem
@@ -184,7 +184,7 @@ public partial class DeathSystem : EcsSystem
     static void Die(Entity unit, in Health hp, ref Battle battle)
     {
         if (hp.Value > 0) return;
-        unit.Add<Dead>();                                                     // whoever cares queries Dead
+        unit.SetDead();                                                       // whoever cares queries Dead
         battle.Deaths++;
     }
 }
@@ -196,7 +196,7 @@ public partial class RespawnSystem : EcsSystem                                //
     [ForEach, With<Player>, With<Dead>]
     static void Respawn(Entity player, ref Health hp, ref DynamicBuffer<Loot> bag, World world)
     {
-        foreach (var shot in world.Index<OwnedBy, Entity>().Find(player)) shot.Destroy();   // recall its projectiles
+        foreach (var shot in world.OwnedByIndex.Find(player)) shot.Destroy();  // recall its projectiles
         hp.Value = hp.Max;
         bag.Clear();                                                          // a death empties the bag
         player.Set(new Position(2048, 2048), new Mana(0, 100));               // several components, one call
@@ -208,9 +208,9 @@ public partial class RespawnSystem : EcsSystem                                //
     {
         npc.Destroy();
         var at = new Position(p.Y, p.X);
-        if (world.Index<Zone, int>().TryFind(npc.Id & 3, out var player))     // hunt a player of some zone
+        if (world.ZoneIndex.TryFind(npc.Id & 3, out var player))              // hunt a player of some zone
         {
-            at = player.Get<Position>();
+            at = player.Position;
             ref var bag = ref player.Get<DynamicBuffer<Loot>>();                     // the hunted player gets the loot
             if (bag.Count == BattleServer.BagSize) bag.RemoveAt(0);           // a full bag drops its oldest item
             bag.Add(new Loot(npc.Id & 15));
@@ -256,7 +256,7 @@ public sealed class ClockSystem : EcsSystem
 {
     public override int Priority => 100;
     protected override void OnCreate() => World.GetOrAddSingleton<Battle>();
-    protected override void OnUpdate() => World.GetSingleton<Battle>().Tick++;
+    protected override void OnUpdate() => World.Battle.Tick++;
 }
 
 [UpdateInGroup<Replication>]
@@ -343,9 +343,9 @@ public sealed class BattleServer : IDisposable
         for (int i = 0; i < players.Length; i++)
         {
             uint r = Dice.Roll(0, i);
-            players[i].Get<Position>() = new Position(r % 4096, (r >> 12) % 4096);
-            players[i].Get<Velocity>() = new Velocity((int)(r % 5) - 2, (int)((r >> 8) % 5) - 2);
-            players[i].Get<Attack>().Cooldown = (int)(r % 6);
+            players[i].Position = new Position(r % 4096, (r >> 12) % 4096);
+            players[i].Velocity = new Velocity((int)(r % 5) - 2, (int)((r >> 8) % 5) - 2);
+            players[i].Attack.Cooldown = (int)(r % 6);
             players[i].Get<DynamicBuffer<Loot>>().EnsureCapacity(BagSize);    // room once: a full bag never grows
         }
 
@@ -383,18 +383,18 @@ public sealed class BattleServer : IDisposable
         set => World.GetSystem<ProjectileSystem>().Enabled = !value;
     }
 
-    public int PlayersIn(int zone) => World.Index<Zone, int>().Count(zone);
+    public int PlayersIn(int zone) => World.ZoneIndex.Count(zone);
 
     public bool AnyoneBurning => World.Any<Burning>();
 
     public bool AnyoneAfflicted => World.Any<Health>(Afflicted);              // burning or frozen
 
-    public int ShotsLeft(Entity player) => player.IsAlive && player.TryGet<Mana>(out var mana) ? mana.Value / ShotCost : 0;
+    public int ShotsLeft(Entity player) => player.IsAlive && player.TryGetMana(out var mana) ? mana.Value / ShotCost : 0;
 
     /// <summary>A client's hit on the unit it names by id: the id turns back into a handle of the living entity.</summary>
     public bool Hit(int targetId, int damage)
     {
-        if (!World.TryGetEntity(targetId, out var target) || target.Has<Dead>()) return false;
+        if (!World.TryGetEntity(targetId, out var target) || target.IsDead) return false;
         ref var hp = ref target.TryGetRef<Health>(out bool found);           // optional access by ref
         if (!found) return false;
         hp.Value -= damage;                                                   // a write: replicated with the next send

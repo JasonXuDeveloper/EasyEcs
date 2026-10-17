@@ -157,9 +157,9 @@ internal static class Symbols
     /// The method cannot make structural changes: it is static, takes no <c>World</c>, and uses its <c>Entity</c>
     /// parameter (if any) only to read (<see cref="ReadOnlyEntityMembers"/>). Its job gets INoStructuralChanges.
     /// </summary>
-    public static bool IsStable(IMethodSymbol method, MethodDeclarationSyntax syntax) =>
+    public static bool IsStable(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model) =>
         method.IsStatic && !method.Parameters.Any(p => Classify(p) == ParamKind.World)
-        && method.Parameters.Where(p => Classify(p) == ParamKind.Entity).All(p => OnlyReads(syntax, p.Name));
+        && method.Parameters.Where(p => Classify(p) == ParamKind.Entity).All(p => OnlyReads(syntax, p.Name, model));
 
     /// <summary>The <c>Parallel</c> named argument of the method's [ForEach] attribute.</summary>
     public static bool IsParallel(IMethodSymbol method) => method.GetAttributes()
@@ -171,9 +171,9 @@ internal static class Symbols
     /// Why a [ForEach(Parallel = true)] method cannot run on several threads, or null: it must be stable (no structural
     /// change), per entity (not a batch) and write no singleton (each row's run would race on it).
     /// </summary>
-    public static string? ParallelProblem(IMethodSymbol method, MethodDeclarationSyntax syntax)
+    public static string? ParallelProblem(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model)
     {
-        if (!IsStable(method, syntax)) return "it can change structure (make it static, without World, and use its Entity only to read)";
+        if (!IsStable(method, syntax, model)) return "it can change structure (make it static, without World, and use its Entity only to read)";
         if (method.Parameters.Any(p => Classify(p) == ParamKind.ComponentSpan)) return "batch methods run on one thread";
         if (method.Parameters.Any(p => Classify(p) == ParamKind.Singleton && p.RefKind == RefKind.Ref))
             return "it writes a singleton, which every chunk would race on (take it as 'in')";
@@ -193,12 +193,56 @@ internal static class Symbols
         "AddSystem", "RemoveSystem", "Update", "Capture", "Restore", "Dispose",
     ];
 
-    /// <summary>Whether <paramref name="method"/> is one of the structural members of Entity or World.</summary>
+    /// <summary>
+    /// Whether <paramref name="method"/> is one of the structural members of Entity or World, or a generated
+    /// <c>Set…</c> / <c>Remove…</c> member (ComponentGenerator) built on them.
+    /// </summary>
     public static bool IsStructural(IMethodSymbol method)
     {
         string? type = method.ContainingType?.ToDisplayString();
         return type == Entity ? StructuralEntityMembers.Contains(method.Name)
-            : type == World && StructuralWorldMembers.Contains(method.Name);
+            : type == World ? StructuralWorldMembers.Contains(method.Name)
+            : IsGenerated(method) && IsGeneratedWriter(method.Name);
+    }
+
+    /// <summary>The handle or world a call works on: the instance, or the receiver of an extension member.</summary>
+    public static IOperation? Receiver(IInvocationOperation call) =>
+        call.Instance ?? (call.TargetMethod.IsExtensionMethod && call.Arguments.Length > 0 ? call.Arguments[0].Value : null);
+
+    /// <summary>Whether a call works on a World (its own member or a generated one), not on an entity.</summary>
+    public static bool OnWorld(IInvocationOperation call) =>
+        (Receiver(call)?.Type ?? call.TargetMethod.ContainingType)?.ToDisplayString() == World;
+
+    /// <summary>A member ComponentGenerator wrote (in a <c>…EcsExtensions</c> class of a <c>.Component.g.cs</c> file).</summary>
+    public static bool IsGenerated(ISymbol member)
+    {
+        for (var t = member.ContainingType; t != null; t = t.ContainingType)
+            if (t.Name.EndsWith("EcsExtensions"))
+                return t.DeclaringSyntaxReferences.Any(r => r.SyntaxTree.FilePath.EndsWith(".Component.g.cs"));
+        return false;
+    }
+
+    private static bool IsGeneratedWriter(string name) => name.StartsWith("Set") || name.StartsWith("Remove");
+
+    /// <summary>
+    /// Whether <paramref name="access"/> reads through a member ComponentGenerator wrote. The analyzer resolves it; the
+    /// generator cannot (another generator's output is not in its compilation), so there the name decides: a
+    /// component's name (<c>e.Position</c>), <c>Has</c> / <c>TryGet</c> + a component, or <c>Is</c> + a tag.
+    /// </summary>
+    private static bool GeneratedRead(SemanticModel model, MemberAccessExpressionSyntax access, string member)
+    {
+        if (model.GetSymbolInfo(access).Symbol is { } symbol) return IsGenerated(symbol) && !IsGeneratedWriter(symbol.Name);
+        foreach (var (prefix, tag) in new[] { ("", false), ("Has", false), ("TryGet", false), ("Is", true) })
+        {
+            if (member.Length <= prefix.Length || !member.StartsWith(prefix)) continue;
+            string type = member.Substring(prefix.Length);
+            if (model.LookupNamespacesAndTypes(access.SpanStart, name: type).OfType<INamedTypeSymbol>().Any(t =>
+                    t.TypeKind == TypeKind.Struct && Implements(t, Component)
+                    && t.GetMembers().Any(f => f is IFieldSymbol { IsStatic: false }) != tag))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -230,7 +274,7 @@ internal static class Symbols
     /// (<c>entity.Id</c>, <c>entity.Has&lt;T&gt;()</c>, ...). Syntax only and conservative: any other use (passing the
     /// entity on, <c>entity.World</c>, a structural change) answers false.
     /// </summary>
-    private static bool OnlyReads(MethodDeclarationSyntax method, string name)
+    private static bool OnlyReads(MethodDeclarationSyntax method, string name, SemanticModel model)
     {
         SyntaxNode? body = (SyntaxNode?)method.Body ?? method.ExpressionBody;
         if (body == null) return false;
@@ -239,7 +283,7 @@ internal static class Symbols
             if (identifier.Identifier.ValueText != name) continue;
             if (identifier.Parent is not MemberAccessExpressionSyntax access || access.Expression != identifier) return false;
             var member = access.Name is GenericNameSyntax generic ? generic.Identifier.ValueText : access.Name.Identifier.ValueText;
-            if (!ReadOnlyEntityMembers.Contains(member)) return false;
+            if (!ReadOnlyEntityMembers.Contains(member) && !GeneratedRead(model, access, member)) return false;
         }
 
         return true;

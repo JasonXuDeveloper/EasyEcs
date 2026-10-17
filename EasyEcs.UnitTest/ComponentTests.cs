@@ -14,19 +14,37 @@ public class ComponentTests
     public void TearDown() => _world.Dispose();
 
     [Test]
-    public void GeneratedPropertiesReachComponents()
+    public void GeneratedMembersReachComponents()
     {
         var e = _world.CreateEntity(new Position(1, 2), new Armor(5));
         e.Position.X += 10;                                    // a ref: written in place
         Assert.That(e.Get<Position>(), Is.EqualTo(new Position(11, 2)));
+        Assert.That(e.HasPosition && !e.HasVelocity, Is.True);
+        Assert.That(e.TryGetVelocity(out _), Is.False);
+        Assert.Throws<InvalidOperationException>(() => _ = e.Velocity.X);   // like Get: missing throws
+        e.SetVelocity(3, 4).SetFrozen();                       // constructor arguments; a tag; chainable
+        Assert.That(e.TryGetVelocity(out var v) && v == new Velocity(3, 4) && e.IsFrozen, Is.True);
+        e.RemoveFrozen().RemoveVelocity();
+        Assert.That(e.IsFrozen || e.HasVelocity, Is.False);
 
         ulong before = _world.ChangeTick;
         _world.Update();
         Assert.That(e.Armor.Value, Is.EqualTo(5));             // tracked: read-only, never a write
         Assert.That(_world.Count<Armor>(QueryFilter.Create().Changed<Armor>(before + 1)), Is.Zero);
-        e.Set(new Armor(6));
+        e.SetArmor(6);
         Assert.That(e.Armor.Value, Is.EqualTo(6));
         Assert.That(_world.Count<Armor>(QueryFilter.Create().Changed<Armor>(before + 1)), Is.EqualTo(1));
+
+        e.SetCallsign("alpha");                                // indexed: the index follows the generated setter
+        Assert.That(_world.CallsignIndex.TryFind("alpha", out var found) && found == e, Is.True);
+        e.SetCallsign("bravo");
+        Assert.That(_world.CallsignIndex.Count("alpha"), Is.Zero);
+
+        Assert.That(_world.HasScore, Is.False);
+        _world.SetScore(1, 10);                                // a singleton: added on first set
+        _world.Score.Points += 5;
+        Assert.That(_world.GetSingleton<Score>(), Is.EqualTo(new Score(1, 15)));
+        Assert.That(_world.RemoveScore() && !_world.HasScore, Is.True);
     }
 
     [Test]
