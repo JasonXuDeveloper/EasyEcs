@@ -91,4 +91,38 @@ public class SnapshotTests
         foreach (var _ in world.Query<Health>())
             Assert.Throws<InvalidOperationException>(() => world.Capture());
     }
+
+    [Test]
+    public void CapturingIntoASnapshotReusesItAndAllocatesNothing()
+    {
+        using var world = new World();
+        var entities = new Entity[100];
+        world.CreateEntities(entities, new Health(1), new Position(0, 0));
+        world.AddSingleton<Released>();
+        var snapshot = world.Capture();
+        for (int round = 0; round < 3; round++)                                // warm-up
+            Assert.That(world.Capture(snapshot), Is.SameAs(snapshot));
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int round = 0; round < 50; round++)
+        {
+            entities[round].Get<Health>().Value = round + 10;
+            world.Capture(snapshot);
+        }
+
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        entities[0].Destroy();
+        world.GetSingleton<Released>().Count = 5;
+        world.Restore(snapshot);                                                // the last capture
+        Assert.That((entities[0].IsAlive, entities[49].Get<Health>().Value, world.GetSingleton<Released>().Count),
+            Is.EqualTo((true, 59, 0)));
+
+        world.DestroyEntities<Health>();                                        // fewer rows: the copy shrinks to them
+        world.Capture(snapshot);
+        world.CreateEntity(new Health(3));
+        world.Restore(snapshot);
+        Assert.That(world.EntityCount, Is.Zero);
+        using var other = new World();
+        Assert.Throws<ArgumentException>(() => other.Capture(snapshot));
+    }
 }

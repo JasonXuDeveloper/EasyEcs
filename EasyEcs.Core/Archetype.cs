@@ -772,42 +772,60 @@ internal sealed class Archetype
                 _infos[i].Clear(Columns[i], start, count);
     }
 
-    /// <summary>The rows of a table at one moment (<see cref="Capture"/>): entities, columns, presence bits.</summary>
-    internal sealed class Rows(int count, EntityId[] slots, Array[] columns, ulong[][] present, int[] absent)
+    /// <summary>
+    /// The rows of a table at one moment (<see cref="Capture"/>): entities, columns (unmanaged ones as plain bytes),
+    /// presence bits. The arrays may be longer than <see cref="Count"/> rows: a capture into an older copy reuses them.
+    /// </summary>
+    internal sealed class Rows(int columns)
     {
-        public readonly int Count = count;
-        public readonly EntityId[] Slots = slots;
-        public readonly Array[] Columns = columns;
-        public readonly ulong[][] Present = present;
-        public readonly int[] Absent = absent;
+        public int Count;
+        public EntityId[] Slots = [];
+        public readonly Array[] Columns = new Array[columns];
+        public readonly ulong[][] Present = new ulong[columns][];
+        public readonly int[] Absent = new int[columns];
     }
 
-    /// <summary>Copy the rows (a dense table: outside passes). O(rows × columns). Inside the structural gate.</summary>
-    public Rows Capture()
+    /// <summary>
+    /// Copy the rows (a dense table: outside passes) into <paramref name="into"/> (an earlier copy of this table, its
+    /// arrays reused when large enough) or a new copy. O(rows × columns). Inside the structural gate.
+    /// </summary>
+    public Rows Capture(Rows into)
     {
         int count = Count;
-        var columns = new Array[Columns.Length];
-        var present = new ulong[Columns.Length][];
-        for (int c = 0; c < columns.Length; c++)
+        var rows = into ?? new Rows(Columns.Length);
+        if (rows.Slots.Length < count) rows.Slots = new EntityId[count];
+        Slots.AsSpan(0, count).CopyTo(rows.Slots);
+        for (int c = 0; c < Columns.Length; c++)
         {
-            int size = _infos[c].Size;
-            if (size < 0)
+            var info = _infos[c];
+            ref var column = ref rows.Columns[c];
+            if (info.Size < 0)
             {
-                columns[c] = _infos[c].Create(count);
-                _infos[c].CopyRows(Columns[c], columns[c], count);
+                int old = into?.Count ?? 0;
+                if (column == null || column.Length < count) column = info.Create(count);
+                else if (old > count) info.Clear(column, count, old - count); // no stale references kept alive
+                info.CopyRows(Columns[c], column, count);
             }
             else
             {
-                var bytes = new byte[count * size];
-                Unsafe.CopyBlockUnaligned(ref MemoryMarshal.GetArrayDataReference(bytes), ref Aligned(Columns[c]), (uint)bytes.Length);
-                columns[c] = bytes;
+                int bytes = count * info.Size;
+                if (column == null || column.Length < bytes) column = new byte[bytes];
+                Unsafe.CopyBlockUnaligned(ref MemoryMarshal.GetArrayDataReference(Unsafe.As<byte[]>(column)), ref Aligned(Columns[c]), (uint)bytes);
             }
 
-            if (Present[c] is { } bits) present[c] = bits.AsSpan(0, (count + 63) >> 6).ToArray();
+            int words = (count + 63) >> 6;
+            if (Present[c] is { } bits)
+            {
+                ref var saved = ref rows.Present[c];
+                if (saved == null || saved.Length < words) saved = new ulong[words];
+                bits.AsSpan(0, words).CopyTo(saved);
+            }
+            else rows.Present[c] = null;
         }
 
-        return new Rows(count, Slots.AsSpan(0, count).ToArray(), columns, present,
-            (int[])Absent.Clone());
+        Absent.CopyTo(rows.Absent, 0);
+        rows.Count = count;
+        return rows;
     }
 
     /// <summary>
@@ -821,13 +839,13 @@ internal sealed class Archetype
         Reserve(count);
         if (rows != null)
         {
-            rows.Slots.CopyTo(Slots, 0);
+            rows.Slots.AsSpan(0, count).CopyTo(Slots);
             for (int c = 0; c < Columns.Length; c++)
             {
                 if (_infos[c].Size < 0) _infos[c].CopyRows(rows.Columns[c], Columns[c], count);
                 else
                     Unsafe.CopyBlockUnaligned(ref Aligned(Columns[c]), ref MemoryMarshal.GetArrayDataReference(Unsafe.As<byte[]>(rows.Columns[c])),
-                        (uint)Unsafe.As<byte[]>(rows.Columns[c]).Length);
+                        (uint)(count * _infos[c].Size));
             }
         }
 
@@ -836,7 +854,7 @@ internal sealed class Archetype
         {
             // A column that gained presence bits after the capture keeps them, every row present.
             var saved = rows?.Present[c];
-            if (saved != null) saved.CopyTo(Bits(c) ?? AllocateBits(c), 0);
+            if (saved != null) saved.AsSpan(0, (count + 63) >> 6).CopyTo(Bits(c) ?? AllocateBits(c));
             else if (Bits(c) is { } bits) bits.AsSpan().Fill(ulong.MaxValue);
             Absent[c] = rows?.Absent[c] ?? 0;
         }

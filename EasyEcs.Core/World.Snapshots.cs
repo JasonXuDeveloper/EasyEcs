@@ -13,24 +13,53 @@ public sealed partial class World
     /// Components and singletons are copied by value: a managed reference inside one is shared, not cloned. Not
     /// while a pass iterates.
     /// </summary>
-    public WorldSnapshot Capture()
+    public WorldSnapshot Capture() => Capture(null);
+
+    /// <summary>
+    /// <see cref="Capture()"/> into <paramref name="into"/> (a snapshot of this world, or null for a new one),
+    /// overwriting it and reusing its arrays: capturing every tick (rollback, replays) allocates nothing once they are
+    /// large enough. Returns the snapshot.
+    /// </summary>
+    public WorldSnapshot Capture(WorldSnapshot into)
     {
+        if (into != null && !ReferenceEquals(into.World, this))
+            throw new ArgumentException("The snapshot was taken from another world", nameof(into));
         using (Structural())
         {
             ThrowIfIterating();
             FillDirtyTables(); // left by a pass an exception interrupted: tables are dense from here
+            var snapshot = into ?? new WorldSnapshot(this);
+            Fit(ref snapshot.Meta, _nextId);
+            Meta.AsSpan(0, _nextId).CopyTo(snapshot.Meta);
+            snapshot.NextId = _nextId;
+            Fit(ref snapshot.FreeIds, _freeIdCount);
+            _freeIds.AsSpan(0, _freeIdCount).CopyTo(snapshot.FreeIds);
+            snapshot.FreeCount = _freeIdCount;
+            snapshot.EntityCount = _entityCount;
+
             var tables = _allArchetypes;
-            var rows = new Archetype.Rows[tables.Length];
-            for (int i = 0; i < tables.Length; i++) rows[i] = tables[i].Capture();
+            if (snapshot.Tables.Length < tables.Length) Array.Resize(ref snapshot.Tables, tables.Length);
+            for (int i = 0; i < tables.Length; i++) snapshot.Tables[i] = tables[i].Capture(snapshot.Tables[i]);
+            snapshot.TableCount = tables.Length;
 
-            var singletons = new SingletonBox[_singletons.Length];
-            for (int i = 0; i < singletons.Length; i++)
-                if (_singletons[i] is SingletonBox box)
-                    singletons[i] = box.Clone();
+            if (snapshot.Singletons.Length < _singletons.Length) Array.Resize(ref snapshot.Singletons, _singletons.Length);
+            for (int i = 0; i < snapshot.Singletons.Length; i++)
+            {
+                var box = i < _singletons.Length ? _singletons[i] as SingletonBox : null;
+                ref var copy = ref snapshot.Singletons[i];
+                if (box == null) copy = null;
+                else if (copy != null && copy.GetType() == box.GetType()) copy.CopyFrom(box);
+                else copy = box.Clone();
+            }
 
-            return new WorldSnapshot(this, Meta.AsSpan(0, _nextId).ToArray(), _nextId,
-                _freeIds.AsSpan(0, _freeIdCount).ToArray(), _entityCount, rows, singletons);
+            return snapshot;
         }
+    }
+
+    /// <summary>Make <paramref name="array"/> hold at least <paramref name="length"/> elements (grown, never shrunk).</summary>
+    private static void Fit<T>(ref T[] array, int length)
+    {
+        if (array.Length < length) array = new T[Math.Max(length, array.Length * 2)];
     }
 
     /// <summary>
@@ -52,7 +81,7 @@ public sealed partial class World
             // Entity records. Versions only grow: a recorded id keeps the snapshot's version if its entity was alive
             // then (its old handles work again), else it moves past every version it ever had, so no handle made after
             // the capture can match a later incarnation.
-            var saved = snapshot.Meta;
+            var saved = snapshot.Meta.AsSpan(0, snapshot.NextId);
             if (Meta.Length < saved.Length) Grow(saved.Length);
             int used = Math.Max(_nextId, snapshot.NextId);
             for (int id = 0; id < used; id++)
@@ -64,17 +93,17 @@ public sealed partial class World
 
             _nextId = used;
             // Ids recorded free, then ids first used after the capture; LIFO takes the recorded ones first.
-            int free = snapshot.FreeIds.Length + (used - snapshot.NextId);
+            int free = snapshot.FreeCount + (used - snapshot.NextId);
             if (_freeIds.Length < free) _freeIds = new int[free];
             for (int id = used - 1, i = 0; id >= snapshot.NextId; id--, i++) _freeIds[i] = id;
-            snapshot.FreeIds.CopyTo(_freeIds, used - snapshot.NextId);
+            snapshot.FreeIds.AsSpan(0, snapshot.FreeCount).CopyTo(_freeIds.AsSpan(used - snapshot.NextId));
             _freeIdCount = free;
             _entityCount = snapshot.EntityCount;
 
             var tables = _allArchetypes;
             for (int i = 0; i < tables.Length; i++)
             {
-                tables[i].Restore(i < snapshot.Tables.Length ? snapshot.Tables[i] : null);
+                tables[i].Restore(i < snapshot.TableCount ? snapshot.Tables[i] : null);
                 tables[i].StampTracked(_changeTick); // every restored row is written: Changed<T> sees it
             }
 
