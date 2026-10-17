@@ -1,7 +1,7 @@
 # Roadmap
 
 What is planned, in order. An item leaves this page when it ships (the release notes and the guides describe it);
-an item dropped after measuring stays one line with the reason and the numbers. Every performance item is proven with
+a dropped item stays one line here, its reasons in [design decisions](decisions.md). Every performance item is proven with
 BenchmarkDotNet before and after, and ships only as a net win in time and allocations.
 
 ## 4.1
@@ -24,18 +24,16 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
 - Introspection: `world.Describe()` (tables, columns, rows, capacity, bytes), `entity.Describe()`.
 - Nino 4.0.0-rc.4.
 
-### Features
+### Dropped
 
-| Item | What | Why |
-|---|---|---|
-| `Added<T>` | Tell rows that gained a component since a tick from rows that changed it. | Measure the cost of the extra tick per row first. |
-| Command buffer for parallel jobs | Per-thread recorders inside parallel `[ForEach]` / parallel stages, played back when the stage ends. | Parallel jobs cannot change structure (EECS010). Check it does not overlap the immediate structural changes. |
-| Whole-entity disable | A documented pattern (a tag and `Without`), no API: excluding by default would be implicit. | |
+- `Added<T>`: `[Changed<T>]` selects added rows too; a tag the reacting system removes tells new from written
+  ([D4](decisions.md#d4-no-addedt-filter)).
+- Command buffers for parallel jobs: a parallel job writes data, a system after it changes structure
+  ([D3](decisions.md#d3-no-command-buffer-for-parallel-jobs)).
 
 ### Source generators
 
-- `[ForEach]` on static methods outside systems.
-- A cached query entry per system (no lookup per update).
+- A cached query entry per system (no lookup per update): measure the lookup first.
 - Code fixes for the analyzer's diagnostics.
 - A diagnostic that suggests hoisting a `QueryFilter` built per update into a `static readonly` field.
 
@@ -46,7 +44,8 @@ What the generator can write so users write less, Entitas-style (it already writ
 API and the examples several times: every line users write twice is a candidate, every generated member that nobody
 needs goes. Each round's findings are listed here with what was generated, changed or rejected, and why.
 
-- Round 1: pending.
+- Round 1: pending. Candidates so far: `[ForEach]` on static methods outside systems (weigh against `Query` and
+  struct jobs, which already run anywhere).
 
 ### Example
 
@@ -99,4 +98,7 @@ Each item: profile (asm on x64 and arm64 where it matters), optimize, BDN before
 - `api.md` complexities.
 - A saves guide: Nino versioning, `NinoArrayBufferWriter`, components in non-collectible assemblies.
 - `comparison.md` rewritten.
+- `faq.md`: stale answers (no serialization, `Priority`) replaced by links into `decisions.md`.
+- The whole-entity disable pattern (a tag and `Without<T>`, [D8](decisions.md#d8-no-whole-entity-disable)) and the
+  `Spawned` tag pattern ([D4](decisions.md#d4-no-addedt-filter)) as best-practice examples.
 - `CLAUDE.md` layout.

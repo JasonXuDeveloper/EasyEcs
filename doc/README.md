@@ -21,6 +21,8 @@ flowchart LR
 | [ECS principles](ecs-principles.md) | Learn how to design features as data plus one-job systems, and why the analyzer enforces it. |
 | [Example: a battle server](example.md) | See every feature in one world: the code of the battle server benchmark and scenario tests. |
 | [Design questions](faq.md) | Why there are no events and no serialization, what is thread-safe, how to change a component. |
+| [Design decisions](decisions.md) | Why EasyEcs is the way it is: each decision, its reasons, what was weighed against it and the numbers. |
+| [Roadmap](roadmap.md) | What is planned next and what was dropped. |
 
 ## Guide
 

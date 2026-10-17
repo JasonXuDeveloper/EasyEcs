@@ -160,6 +160,8 @@ doc/                           README.md (index), getting-started.md, example.md
   worlds that create one.
 - **Every change a pass must notice bumps `StorageVersion`**: reallocation (columns, `Meta`, entity rows), row moves,
   closing tombstones, and presence bits flipping, so in-flight passes refresh their refs and re-read row filters.
+- **Decisions**: every non-obvious choice, and every feature dropped after weighing it, gets a record in
+  `doc/decisions.md` (decision, why, what was considered, numbers); `doc/roadmap.md` lists what is planned.
 - **Docs**: diagrams are mermaid; `doc/api.md` lists the complexity of every public API (README is the landing page).
 - **Entity ids are recycled**: any id-keyed API must also validate the version (`World.Live`, `Entity.ThrowStale`).
 - Behavioral/breaking changes need a `MIGRATION_GUIDE.md` entry and a README "What's new" entry.
