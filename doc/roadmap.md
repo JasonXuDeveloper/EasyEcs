@@ -42,6 +42,9 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
   warnings.
 - `QueryFilter` without object references (bits past 255 interned): a filter built at the call costs 76 ns instead of
   124 ns (counting 16 entities; 24 ns from a static field) ([D18](decisions.md#d18-no-interceptors-for-query-calls-filters-carry-no-references)).
+- Generic systems (`class CountOf<T> : EcsSystem`) and generic runners (`Census.CountAlive<Health>(world, ref n)`,
+  `Census<Health>.Positions(world, ref x)`); EECS004 only for a generic method of a system
+  ([D20](decisions.md#d20-generic-systems-register-the-closed-types-their-assembly-names)).
 
 ### Dropped
 
@@ -60,10 +63,8 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
 
 The toolchain floor is the .NET 10 SDK (C# 14, Roslyn 5.0), which the generator builds against. In order:
 
-1. Generic systems and runners (`UnsafeAccessor` on generic types, .NET 9+), which lifts EECS004 where the generator can
-   close the type.
-2. A filter declared once on a system group, applied by the generator to every `[ForEach]` of the group.
-3. Code fixes for the analyzer's diagnostics.
+1. A filter declared once on a system group, applied by the generator to every `[ForEach]` of the group.
+2. Code fixes for the analyzer's diagnostics.
 
 Runtime (.NET 10 / C# 14), each measured with BDN and kept only as a net win:
 

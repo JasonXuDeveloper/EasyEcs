@@ -28,6 +28,7 @@ feature stays here with its reason, so it is not proposed again without new fact
 | [D17](#d17-unloading-removes-types-from-worlds-bits-are-reused) | Unloading removes types from worlds; bits are reused |
 | [D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references) | No interceptors for query calls; filters carry no references |
 | [D19](#d19-no-settable-tag-properties) | No settable tag properties |
+| [D20](#d20-generic-systems-register-the-closed-types-their-assembly-names) | Generic systems register the closed types their assembly names |
 
 ## D1. State changes are data: no events or callbacks
 
@@ -272,4 +273,21 @@ assigning an extension property of a struct on a `foreach` variable (CS1654), an
 an `in` parameter (CS8332), with a by-value or an `in` receiver alike. A member that compiles on a local but not in
 `foreach (var e in hits)` or on `link.Target` teaches the wrong thing; the methods work everywhere, and a structural
 change stays a call.
+
+## D20. Generic systems register the closed types their assembly names
+
+**Decision.** A generic system's code is a generic class over the system's type parameters. Its module initializer
+registers an instance for each closed type the assembly names (`AddSystem<CountOf<Health>>()`, `new CountOf<Health>()`,
+a base type `CountOf<Health>`, and their generic bases), and the code's definition for any other closed type, which
+`AddSystem` closes with `MakeGenericType` on first use. A generic `[ForEach]` method of a system stays EECS004.
+
+**Why.** A module initializer cannot know the type arguments a program will use, and the system class gets nothing
+generated in it (D16). Closed types named in the system's assembly need no runtime code generation, so Native AOT
+keeps them; a closed type only another assembly names still works under the JIT. Runners need neither: their entry
+points are generic, so the caller's type arguments close the job at compile time. A system's own generic method has
+no caller to give it type arguments.
+
+**Considered.** Reflection only (breaks Native AOT for every value-type argument, and components are structs); a
+virtual generic hook on the system (needs `partial` or a base class per arity); scanning referenced assemblies for
+closed uses (the generated code is file-local to the system's assembly).
 
