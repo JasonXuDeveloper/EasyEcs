@@ -29,6 +29,7 @@ feature stays here with its reason, so it is not proposed again without new fact
 | [D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references) | No interceptors for query calls; filters carry no references |
 | [D19](#d19-no-settable-tag-properties) | No settable tag properties |
 | [D20](#d20-generic-systems-register-the-closed-types-their-assembly-names) | Generic systems register the closed types their assembly names |
+| [D21](#d21-net-10-features-only-where-they-measure) | .NET 10 features only where they measure |
 
 ## D1. State changes are data: no events or callbacks
 
@@ -290,4 +291,26 @@ no caller to give it type arguments.
 **Considered.** Reflection only (breaks Native AOT for every value-type argument, and components are structs); a
 virtual generic hook on the system (needs `partial` or a base class per arity); scanning referenced assemblies for
 closed uses (the generated code is file-local to the system's assembly).
+
+## D21. .NET 10 features only where they measure
+
+**Decision.** Of the .NET 10 / C# 14 runtime features weighed for 4.1, the query memo holds its ways as structs in
+one array (a hit reads each way's filter without a hop to an object), every lock is a `System.Threading.Lock`,
+`SavedTypes.EntityIds` takes `params ReadOnlySpan`, and null-conditional assignment is used where it reads better.
+The others have no place in the code.
+
+**Why.** CallSiteBenchmark, two runs each: a filter in a static field 21.6-21.9 ns -> 19.0-19.8 ns, no filter
+36.8-39.1 ns -> 35.3-35.5 ns, a filter built at the call and one past the memo within noise, 0 bytes throughout.
+
+| Feature | Verdict |
+|---|---|
+| `[InlineArray]` | the memo's ways are one struct array now; access sets are bitmasks, built once per `AddSystem` |
+| `GetAlternateLookup` on the query cache | a filter past the memo costs 80 ns against 19 ns for a memo hit, but the hash and the comparison of five masks are most of it, and an alternate key pays them too; it saves only the key's copy, on a path taken from a call signature's fifth filter on |
+| `FrozenDictionary` for saved types | the registry changes while the process runs (modules load, collectible contexts unload); saves already look names up through an alternate `ReadOnlySpan<char>` key |
+| `OverloadResolutionPriority` | the public API has no array and span overloads of one method |
+| `field` | the candidates' backing fields are also written outside their properties (`EcsSystem.Enabled`) |
+| `Vector512` | a component mask holds 256 bits inline, so a mask operation is one 256-bit instruction already; presence scans skip by summary words, not by scanning lanes |
+
+**Considered.** Widening the inline mask to 512 bits for `Vector512` (every filter, key and table mask grows by 32
+bytes for components 256-511, which overflow already covers).
 

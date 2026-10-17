@@ -50,6 +50,9 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
 - Code fixes (EasyEcs.CodeFixes, in the package beside the generator): EECS002 / EECS012 take the parameter by `in`
   or `ref`, EECS005 makes the method static, EECS006 makes the type a struct, EECS010 drops `Parallel = true`, EECS011
   takes it by `ref` (or `Span`), EECS022 makes the type internal, EECS023 removes the filter.
+- .NET 10 features where they measure: the query memo's ways as structs in one array (a static filter 21.6-21.9 ns ->
+  19.0-19.8 ns, no filter 36.8-39.1 ns -> 35.3-35.5 ns), `Lock` everywhere, `params ReadOnlySpan` for
+  `SavedTypes.EntityIds` ([D21](decisions.md#d21-net-10-features-only-where-they-measure)).
 
 ### Dropped
 
@@ -63,23 +66,15 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
 - Settable tag properties (`entity.IsDead = true`): C# 14 rejects assigning an extension property of a struct on a
   `foreach` variable, an indexer result or a field of an `in` parameter, where ECS code holds its entities
   ([D19](decisions.md#d19-no-settable-tag-properties)).
+- `[InlineArray]`, `GetAlternateLookup` for the query cache, `FrozenDictionary` for saved types,
+  `OverloadResolutionPriority`, `field`, `Vector512`: no place where they pay
+  ([D21](decisions.md#d21-net-10-features-only-where-they-measure)).
 
 ### Toolchain and runtime
 
 The toolchain floor is the .NET 10 SDK (C# 14, Roslyn 5.0), which the generator builds against.
 
-Runtime (.NET 10 / C# 14), each measured with BDN and kept only as a net win:
-
-- `System.Threading.Lock` for the cold locks (query memo, component registration, saved types).
-- `[InlineArray]` for fixed-size data held in arrays today (memo ways, small access sets): one object less, and one
-  indirection less.
-- `Dictionary.GetAlternateLookup` for the query cache's span-keyed lookups (replacing `QueryKey.ForLookup`), and
-  `FrozenDictionary` for the saved-type registry, which is built once.
-- `params ReadOnlySpan<T>` for `SavedTypes.EntityIds`; `OverloadResolutionPriority` where a span overload should win.
-- C# 14 `field` and null-conditional assignment where they shorten our code.
-- `Vector512` paths for `BitMask` and the presence-word scans on AVX-512 hardware.
-
-### Less code through the generator (after the items above)
+### Less code through the generator
 
 What the generator can write so users write less, Entitas-style (it already writes `entity.Health`, `HasHealth`,
 `SetHealth(…)`, `IsDead`, singletons, `world.XIndex`, jobs and access sets). Once everything above has shipped, scan the
