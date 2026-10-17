@@ -32,7 +32,7 @@ public class AllocationTests
             foreach (var item in world.Query<Position, Velocity>()) item.Component1.X += item.Component2.X;
             _ = world.Count<Position, Velocity>(QueryFilter.Create());
             _ = world.Count<Armor>(QueryFilter.Create().Changed<Armor>(world.ChangeTick));
-            named.Get<Callsign>() = new Callsign(named.Get<Callsign>().Value == "a" ? "b" : "a"); // re-keyed every frame
+            named.Set(new Callsign(named.Callsign.Value == "a" ? "b" : "a")); // re-keyed every frame
             _ = callsigns.Count("a") + callsigns.Count("b");
             probe.Get<Health>().Value++;
             probe.Remove<Frozen>();
@@ -72,7 +72,7 @@ public class AllocationTests
             kids[k] = world.CreateEntity(new ChildOf(parents[k % parents.Length]), new Callsign(k % 2 == 0 ? "even" : "odd"));
             kids[(k + 1) % kids.Length].Remove<Callsign>();
             kids[(k + 1) % kids.Length].Set(new Callsign("odd"));
-            kids[(k + 2) % kids.Length].Get<ChildOf>() = new ChildOf(parents[next % parents.Length]); // re-parent
+            kids[(k + 2) % kids.Length].Set(new ChildOf(parents[next % parents.Length])); // re-parent
 
             int found = 0;
             foreach (var parent in parents)

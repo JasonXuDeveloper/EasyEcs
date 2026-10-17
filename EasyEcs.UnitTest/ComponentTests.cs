@@ -14,6 +14,22 @@ public class ComponentTests
     public void TearDown() => _world.Dispose();
 
     [Test]
+    public void GeneratedPropertiesReachComponents()
+    {
+        var e = _world.CreateEntity(new Position(1, 2), new Armor(5));
+        e.Position.X += 10;                                    // a ref: written in place
+        Assert.That(e.Get<Position>(), Is.EqualTo(new Position(11, 2)));
+
+        ulong before = _world.ChangeTick;
+        _world.Update();
+        Assert.That(e.Armor.Value, Is.EqualTo(5));             // tracked: read-only, never a write
+        Assert.That(_world.Count<Armor>(QueryFilter.Create().Changed<Armor>(before + 1)), Is.Zero);
+        e.Set(new Armor(6));
+        Assert.That(e.Armor.Value, Is.EqualTo(6));
+        Assert.That(_world.Count<Armor>(QueryFilter.Create().Changed<Armor>(before + 1)), Is.EqualTo(1));
+    }
+
+    [Test]
     public void AddGetAndRefsWriteThrough()
     {
         var e = _world.CreateEntity();

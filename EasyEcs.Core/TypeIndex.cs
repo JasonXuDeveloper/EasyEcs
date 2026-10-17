@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 namespace EasyEcs;
 
@@ -36,6 +37,21 @@ internal struct ChangeTicks<T> : IComponent where T : struct, IComponent
 internal static class ComponentType<T> where T : struct, IComponent
 {
     internal static readonly ushort Bit = Register();
+
+    /// <summary>
+    /// <typeparamref name="T"/> implements <see cref="IIndexed{TKey}"/>: writes of a value (Set, CreateEntity) tell its
+    /// world's index. A static readonly bool, so Tier1 code folds the test away for every other component.
+    /// </summary>
+    internal static readonly bool Indexed = IsIndexed();
+
+    // Trimming may drop IIndexed<> from a component no index uses: then false is right, as no world can index it.
+    [UnconditionalSuppressMessage("Trimming", "IL2090", Justification = "A trimmed IIndexed<> interface means no index of T exists.")]
+    private static bool IsIndexed()
+    {
+        foreach (var type in typeof(T).GetInterfaces())
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IIndexed<>)) return true;
+        return false;
+    }
 
     private static ushort Register()
     {

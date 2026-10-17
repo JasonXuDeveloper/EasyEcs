@@ -128,7 +128,7 @@ public partial class ZoneSystem : EcsSystem                                   //
     static void Enter(Entity player, in Position p, in Zone zone)              // `in`: reading is not a change
     {
         int id = Math.Clamp((int)(p.X / 1024), 0, 3);
-        if (zone.Id != id) player.Get<Zone>() = new Zone(id);                  // only real moves are writes
+        if (zone.Id != id) player.Set(new Zone(id));                           // only real moves are writes
     }
 }
 

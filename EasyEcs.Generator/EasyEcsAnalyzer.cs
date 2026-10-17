@@ -94,9 +94,17 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "one owner thread. A change from another thread races with the owner's and can tear the tables. Hand the " +
         "change to the owner as data (a queue the owner drains in a system), or give that thread its own world.");
 
+    public static readonly DiagnosticDescriptor IndexedByRef = new("EECS015", "Indexed component written through a ref",
+        "'{0}' is indexed: {1}; write it with Set so its index follows",
+        Category, DiagnosticSeverity.Error, true,
+        "The index of an IIndexed<TKey> component follows the values written with Set and CreateEntity as they are " +
+        "written; a write through a ref (Get, Add<T>(), GetOrAdd, TryGetRef, a 'ref' or Span [ForEach] parameter, a " +
+        "query item, a job's 'ref' parameter) would leave it stale. Read it with Read, 'in' or ReadOnlySpan; write it " +
+        "with Set, or assign the property the generator adds to Entity.");
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
-        MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange);
+        MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -110,6 +118,29 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterOperationAction(AnalyzeWrite, OperationKind.SimpleAssignment, OperationKind.CompoundAssignment,
             OperationKind.CoalesceAssignment, OperationKind.Increment, OperationKind.Decrement, OperationKind.Invocation);
         context.RegisterOperationAction(AnalyzeStructuralCall, OperationKind.Invocation);
+        context.RegisterOperationAction(AnalyzeIndexedRef, OperationKind.Invocation, OperationKind.VariableDeclarator);
+    }
+
+    /// <summary>
+    /// EECS015: a ref to an indexed component handed out by Entity (Get, Add&lt;T&gt;(), GetOrAdd, TryGetRef), or a ref
+    /// local bound to a query item's or a job parameter's indexed component. Writes through those (and through
+    /// [ForEach] parameters, see <see cref="AnalyzeMethod"/>) are reported by <see cref="AnalyzeWrite"/>.
+    /// </summary>
+    private static void AnalyzeIndexedRef(OperationAnalysisContext context)
+    {
+        switch (context.Operation)
+        {
+            case IInvocationOperation { TargetMethod: { ReturnsByRef: true, TypeArguments.Length: 1 } method } call
+                when method.ContainingType?.ToDisplayString() == Symbols.Entity && Symbols.IsIndexed(method.TypeArguments[0]):
+                context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, call.Syntax.GetLocation(), method.TypeArguments[0].Name,
+                    $"Entity.{method.Name} hands out a ref (read it with Read)"));
+                break;
+            case IVariableDeclaratorOperation { Symbol.RefKind: RefKind.Ref, Initializer.Value: var value }
+                when Symbols.IndexedRoot(value) is { } root:
+                context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, context.Operation.Syntax.GetLocation(), root.Name,
+                    "a ref local can write it (use 'ref readonly')"));
+                break;
+        }
     }
 
     /// <summary>
@@ -155,6 +186,9 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (Symbols.ReadOnlyRoot(target) is { } parameter)
             context.ReportDiagnostic(Diagnostic.Create(ReadOnlyWrite, context.Operation.Syntax.GetLocation(),
                 parameter.ContainingSymbol.Name, parameter.Name));
+        if (Symbols.IndexedRoot(target) is { } indexed)
+            context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, context.Operation.Syntax.GetLocation(), indexed.Name,
+                "this writes it through a ref"));
     }
 
     /// <summary>EECS012: a field, property, by-value parameter or by-value return of a dynamic buffer.</summary>
@@ -296,6 +330,12 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             else if (kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan)
             {
                 components++;
+                var component = kind == Symbols.ParamKind.Component ? p.Type : Symbols.SpanElement(p.Type);
+                bool writable = kind == Symbols.ParamKind.Component ? p.RefKind == RefKind.Ref
+                    : p.Type.OriginalDefinition.ToDisplayString() == "System.Span<T>";
+                if (writable && component != null && Symbols.IsIndexed(component))
+                    context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, p.Locations.FirstOrDefault(), component.Name,
+                        $"parameter '{p.Name}' can write it (take it as 'in' or ReadOnlySpan)"));
             }
         }
 

@@ -31,9 +31,6 @@ public sealed partial class World : IDisposable
     /// </summary>
     public ulong ChangeTick => _changeTick;
 
-    /// <summary>Start a new change tick and return it (index syncs: later writes are distinguishable). Owner thread.</summary>
-    internal ulong AdvanceChangeTick() => ++_changeTick;
-
     private readonly WorldOptions _options;
     private bool _disposed;
 

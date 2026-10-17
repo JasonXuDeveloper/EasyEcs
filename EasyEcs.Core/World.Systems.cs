@@ -205,7 +205,7 @@ public sealed partial class World
         // is stale (a handle matching its record's version is alive: Entity.LocateArchetype).
         foreach (ref var meta in Meta.AsSpan()) meta = new EntityMeta { Version = meta.Version + 1 };
         ClearArchetypes();
-        ResetIndexes(); // an index still held finds nothing
+        ResetIndexes(false); // an index still held finds nothing
         ClearSingletons();
         _freeIdCount = 0;
         _entityCount = 0;

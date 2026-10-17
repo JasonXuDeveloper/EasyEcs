@@ -23,6 +23,8 @@ internal static class Symbols
     public const string Entity = "EasyEcs.Entity";
     public const string World = "EasyEcs.World";
     public const string DynamicBuffer = "EasyEcs.DynamicBuffer<T>";
+    public const string TrackChanges = "EasyEcs.ITrackChanges";
+    public const string Indexed = "EasyEcs.IIndexed<TKey>";
     public const int MaxComponents = 9;
 
     public static readonly SymbolDisplayFormat Fqn = SymbolDisplayFormat.FullyQualifiedFormat;
@@ -50,6 +52,10 @@ internal static class Symbols
 
     public static bool Implements(ITypeSymbol type, string interfaceName) =>
         type.AllInterfaces.Any(i => i.ToDisplayString() == interfaceName);
+
+    /// <summary>A component the world indexes (<c>IIndexed&lt;TKey&gt;</c>): written only with Set, so its index follows.</summary>
+    public static bool IsIndexed(ITypeSymbol type) =>
+        type.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == Indexed);
 
     /// <summary>The type and every containing type are declared partial.</summary>
     public static bool IsPartialChain(INamedTypeSymbol type)
@@ -250,6 +256,38 @@ internal static class Symbols
         "Clear", "Push", "Pop", "TryPop", "Enqueue", "Dequeue", "TryDequeue", "Sort", "Reverse", "Fill", "SetValue",
         "UnionWith", "IntersectWith", "ExceptWith", "SymmetricExceptWith", "EnsureCapacity", "TrimExcess",
     ];
+
+    /// <summary>
+    /// The indexed component a write (or a ref local) reaches by ref: a query item's <c>ComponentN</c>, or a <c>ref</c>
+    /// / <c>Span</c> parameter of a job's <c>Execute</c> (IForEach, IForEachEntity, IForEachBatch); null otherwise. Refs
+    /// from Entity calls are reported at the call, [ForEach] parameters at the parameter.
+    /// </summary>
+    public static ITypeSymbol? IndexedRoot(IOperation? target)
+    {
+        while (true)
+        {
+            switch (target)
+            {
+                case IFieldReferenceOperation f: target = f.Instance; break;
+                case IConversionOperation c: target = c.Operand; break;
+                case IPropertyReferenceOperation { Property.IsIndexer: true } indexer: target = indexer.Instance; break; // span[i]
+                case IPropertyReferenceOperation { Property: { ReturnsByRef: true } property }
+                    when property.Name.StartsWith("Component") && property.ContainingType.Name == "QueryItem"
+                         && property.ContainingNamespace.ToDisplayString() == "EasyEcs":
+                    return IsIndexed(property.Type) ? property.Type : null;
+                case IParameterReferenceOperation { Parameter: var p } when IsJobParameter(p):
+                    var type = p.RefKind == RefKind.Ref ? p.Type : SpanElement(p.Type);
+                    return type != null && IsIndexed(type) ? type : null;
+                default: return null;
+            }
+        }
+    }
+
+    /// <summary>A writable parameter (<c>ref</c> or <c>Span</c>) of a job's Execute (a type implementing EasyEcs.IForEach*).</summary>
+    private static bool IsJobParameter(IParameterSymbol p) =>
+        (p.RefKind == RefKind.Ref || p.Type.OriginalDefinition.ToDisplayString() == "System.Span<T>")
+        && p.ContainingSymbol is IMethodSymbol { Name: "Execute", ContainingType: { } job }
+        && job.AllInterfaces.Any(i => i.Name.StartsWith("IForEach") && i.ContainingNamespace.ToDisplayString() == "EasyEcs");
 
     /// <summary>
     /// The [ForEach] parameter a write reaches through a reference held by a read-only parameter: an 'in' component or

@@ -20,7 +20,7 @@ public class GeneratorTests
         new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
     private static GeneratorDriver Driver() => CSharpGeneratorDriver.Create(
-        [new SystemGenerator().AsSourceGenerator()], parseOptions: Parse,
+        [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator()], parseOptions: Parse,
         driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true));
 
     private static async Task<string[]> Diagnose(params string[] sources)
@@ -39,6 +39,7 @@ public class GeneratorTests
         public class Box { public int V; }
         public struct Holder : IComponent { public Box Box; }                                     // a class, no collection
         public struct Link : IComponent { public Entity Target; }                                 // a relation: a handle
+        public struct Owned : IComponent, IIndexed<Entity> { public Entity Owner; public Entity Key => Owner; } // indexed
         public struct Grid : ISingletonComponent { public System.Collections.Generic.List<int> Cells; public int[] Slots; }
         """;
 
@@ -72,6 +73,21 @@ public class GeneratorTests
                     [ForEach] static void K(Entity e, in Link link) { e.Remove<Q>(); link.Target.Destroy(); } // changes structure: runs alone
                 }
             }
+            public static class Indexed
+            {
+                public static int Read(World w, Entity e)                                               // reads by Read, in, ref readonly
+                {
+                    int n = e.Read<Owned>().Owner.Id + e.Owned.Owner.Id;
+                    foreach (var item in w.Query<Owned>()) { ref readonly var o = ref item.Component1; n += o.Owner.Id + item.Component1.Owner.Id; }
+                    e.Set(new Owned { Owner = e });                                                     // writes by Set
+                    return n;
+                }
+                public struct Count : IForEach<Owned> { public int N; public void Execute(ref Owned o) => N += o.Owner.Id; } // a job that reads
+            }
+            public partial class Reparent : EcsSystem
+            {
+                [ForEach] static void B(Entity e, in Owned o) => e.Set(new Owned { Owner = o.Owner });
+            }
             public static class Threads
             {
                 public static System.Threading.Tasks.Task Count(World w) => System.Threading.Tasks.Task.Run(() => w.Count<P>()); // reads
@@ -98,7 +114,7 @@ public class GeneratorTests
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, $"public partial class S : EcsSystem {{ {members} }}"),
             out var output, out _);
-        string generated = output.SyntaxTrees.Last().ToString();
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs")).ToString();
         foreach (var line in expected) Assert.That(generated, Does.Contain(line));
         if (!expected.Contains("access.RunsAlone();")) Assert.That(generated, Does.Not.Contain("RunsAlone"));
     }
@@ -111,7 +127,7 @@ public class GeneratorTests
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, $"public partial class S : EcsSystem {{ {members} }}"),
             out var output, out _);
-        string generated = output.SyntaxTrees.Last().ToString();
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".ForEach.g.cs")).ToString();
         Assert.That(generated.Contains("INoStructuralChanges"), Is.EqualTo(noStructuralChanges));
         Assert.That(generated, Does.Contain(writes));
     }
@@ -143,6 +159,14 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(Entity[] es) => System.Threading.Tasks.Parallel.For(0, es.Length, i => es[i].Destroy()); }", "EECS014")]
     [TestCase("public class U { World _w = new(); void F() => new System.Threading.Thread(() => { _w.Update(); }).Start(); void G() => _w.Update(); }", "EECS014")]
     [TestCase("public static class U { public static void F(Entity e) { for (int i = 0; i < 4; i++) System.Threading.ThreadPool.QueueUserWorkItem(_ => e.Remove<P>()); } }", "EECS014")]
+    [TestCase("public static class U { public static void F(Entity e) => e.Get<Owned>() = default; }", "EECS015")]
+    [TestCase("public static class U { public static void F(Entity e) => e.Add<Owned>(); }", "EECS015")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref Owned o) { } }", "EECS015")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(System.Span<Owned> o) { } }", "EECS015")]
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<Owned>()) item.Component1 = default; } }", "EECS015")]
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<Owned>()) item.Component1.Owner = default; } }", "EECS015")]
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<Owned>()) { ref var o = ref item.Component1; } } }", "EECS015")]
+    [TestCase("public struct J : IForEach<Owned> { public void Execute(ref Owned o) => o = default; }", "EECS015")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Cells.Add(1); }", "EECS011")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Cells.Clear(); }", "EECS011")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Slots[0] += 1; }", "EECS011")]
@@ -182,10 +206,30 @@ public class GeneratorTests
         driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(other,
             CSharpSyntaxTree.ParseText("public class Unrelated { int x; }", Parse)));
 
-        var steps = driver.GetRunResult().Results[0].TrackedSteps;
-        foreach (var name in new[] { "ForEachMethods", "SystemUpdates" })
+        var steps = driver.GetRunResult().Results.SelectMany(r => r.TrackedSteps).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.SelectMany(p => p.Value));
+        foreach (var name in new[] { "ForEachMethods", "SystemUpdates", "Components" })
             Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
                 Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged), name);
+    }
+
+    [Test]
+    public void ComponentsGetEntityProperties()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
+            namespace Game { public struct Speed : IComponent { public float V; } internal struct Hidden : IComponent { public int V; } }
+            public struct Version : IComponent { public int V; }           // an Entity member takes the name
+            public struct Tagged : IComponent;                              // a tag: nothing to read
+            public class Outer { private struct Secret : IComponent { public int V; } }
+            """), out var output, out _);
+        string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Component.g.cs")).Select(t => t.ToString()));
+        Assert.That(generated, Does.Contain("public ref global::P P"));
+        Assert.That(generated, Does.Contain("public ref readonly global::T T"));             // tracked: read-only
+        Assert.That(generated, Does.Contain("public ref readonly global::Owned Owned"));     // indexed: read-only
+        Assert.That(generated, Does.Contain("namespace Game;"));
+        Assert.That(generated, Does.Contain("internal ref global::Game.Hidden Hidden"));
+        Assert.That(generated, Does.Not.Contain("Version Version"));
+        Assert.That(generated, Does.Not.Contain("Tagged"));
+        Assert.That(generated, Does.Not.Contain("Secret"));
     }
 
     /// <summary>Framework references of the running test host (enough for the generated code to compile).</summary>

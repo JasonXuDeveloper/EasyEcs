@@ -15,11 +15,11 @@ public partial class IndexTests
         }
     }
 
-    /// <summary>Renames every callsign: keys written by a system's ref parameter.</summary>
+    /// <summary>Renames every callsign: a system writes keys with Set.</summary>
     public partial class Rename : EcsSystem
     {
         [ForEach]
-        private static void Apply(ref Callsign callsign) => callsign = new Callsign(callsign.Value + "!");
+        private static void Apply(Entity entity, in Callsign callsign) => entity.Set(new Callsign(callsign.Value + "!"));
     }
 
     /// <summary>
@@ -29,11 +29,11 @@ public partial class IndexTests
     public partial class RenameAfterLookup : EcsSystem
     {
         [ForEach]
-        private void Apply(ref Callsign callsign)
+        private void Apply(Entity entity, in Callsign callsign)
         {
             var index = World.Index<Callsign, string>();
             World.GetOrAddSingleton<Score>().Points = index.Count(callsign.Value + "!");
-            callsign = new Callsign(callsign.Value + "!");
+            entity.Set(new Callsign(callsign.Value + "!"));
         }
     }
 
@@ -64,11 +64,11 @@ public partial class IndexTests
         Assert.That(index.Count("bravo"), Is.EqualTo(1));
         Assert.That(index.TryFind("charlie", out _), Is.False);
 
-        b.Get<Callsign>() = new Callsign("alpha");   // a ref write moves b to its new key
+        b.Set(new Callsign("alpha"));                // a write moves b to its new key
         Assert.That(index.Count("alpha"), Is.EqualTo(2));
         Assert.That(index.Count("bravo"), Is.Zero);
 
-        foreach (var item in world.Query<Callsign>()) item.Component1 = new Callsign("delta");
+        foreach (var item in world.Query<Callsign>()) item.Entity.Set(new Callsign("delta"));
         Assert.That(index.Count("alpha"), Is.Zero);
         Assert.That(index.Count("delta"), Is.EqualTo(2));
     }
@@ -181,9 +181,9 @@ public partial class IndexTests
         var index = world.Index<Callsign, string>();
         var a = world.CreateEntity(new Callsign("x"));
         var b = world.CreateEntity();
-        b.Add<Callsign>(); // default: a null key
+        b.Set(default(Callsign)); // a null key
         Assert.That(index.Count("x"), Is.EqualTo(1));
-        a.Get<Callsign>() = default; // moves a out of "x" and indexes it nowhere
+        a.Set(default(Callsign)); // moves a out of "x" and indexes it nowhere
         Assert.That(index.Count("x"), Is.Zero);
         Assert.That(index.Count(null), Is.Zero);
         a.Set(new Callsign("x"));
@@ -269,7 +269,7 @@ public partial class IndexTests
         a.Set(new Health(1));
         a.Remove<Frozen>();
         Assert.That(All(index.Find("x")), Is.EqualTo(new[] { a }));
-        a.Get<Callsign>() = new Callsign("y");                 // written in its new table
+        a.Set(new Callsign("y"));                              // written in its new table
         Assert.That(index.Count("x"), Is.Zero);
         Assert.That(index.TryFind("y", out var y) && y == a, Is.True);
     }
@@ -336,7 +336,7 @@ public partial class IndexTests
     }
 
     [Test]
-    public void AddingBackWithoutAValueIndexesTheDefault()
+    public void AddingBackTheDefaultIndexesIt()
     {
         using var world = new World();
         var children = world.Index<ChildOf, Entity>();
@@ -344,10 +344,10 @@ public partial class IndexTests
         var kid = world.CreateEntity(new ChildOf(parent));
         Assert.That(children.Count(parent), Is.EqualTo(1));
         kid.Remove<ChildOf>();
-        kid.Add<ChildOf>();                                    // default(Entity) key
+        kid.Set(default(ChildOf));                             // default(Entity) key
         Assert.That(children.Count(parent), Is.Zero);
         Assert.That(All(children.Find(default)), Is.EqualTo(new[] { kid }));
-        kid.Get<ChildOf>() = new ChildOf(parent);
+        kid.Set(new ChildOf(parent));
         Assert.That(children.Count(parent), Is.EqualTo(1));
         Assert.That(children.Count(default), Is.Zero);
     }

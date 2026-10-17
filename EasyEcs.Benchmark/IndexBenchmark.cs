@@ -4,8 +4,8 @@ namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// Inventories as a relation: 100,000 items, each pointing at one of 1,000 owners (<c>ItemOf(Entity Owner)</c>,
-/// indexed by its owner). Per operation, 100 items change hands (trades, through handles) and the inventories of 100
-/// owners are counted through the index, which first catches up with the trades. Steady state allocates 0 bytes.
+/// indexed by its owner). Per operation, 100 items change hands (trades: <c>Set</c>, which re-indexes the item at once)
+/// and the inventories of 100 owners are counted through the index. Steady state allocates 0 bytes.
 /// </summary>
 [MemoryDiagnoser]
 public class IndexBenchmark
@@ -40,7 +40,7 @@ public class IndexBenchmark
         for (int i = 0; i < 100; i++)
         {
             _next = (_next + 7919) % _items.Length;
-            _items[_next].Get<ItemOf>() = new ItemOf(_owners[(_next + i) % _owners.Length]);
+            _items[_next].Set(new ItemOf(_owners[(_next + i) % _owners.Length]));
         }
 
         int total = 0;

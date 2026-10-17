@@ -1,36 +1,34 @@
 using System;
 using System.Collections.Generic;
-using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Threading;
 namespace EasyEcs;
 
 /// <summary>
 /// A component whose <see cref="Key"/> the world indexes: <c>world.Index&lt;T, TKey&gt;().Find(key)</c> enumerates the
 /// entities whose <typeparamref name="TKey"/> equals a value (an item's owner, a player's name, a cell of a grid). An
 /// <see cref="Entity"/> key makes the component a relation: <c>ChildOf(Entity Parent)</c> indexed by its parent finds
-/// the children of an entity. Indexed components track changes (<see cref="ITrackChanges"/>): the index catches up
-/// with the rows written since its previous lookup.
+/// the children of an entity. The index follows the values written with <c>Set</c> and <c>CreateEntity</c> as they are
+/// written, so an indexed component is never written through a <c>ref</c> (<c>Get</c>, <c>ref</c> parameters, query
+/// items): the analyzer reports such writes (EECS015).
 /// </summary>
-public interface IIndexed<TKey> : ITrackChanges where TKey : IEquatable<TKey>
+public interface IIndexed<TKey> where TKey : IEquatable<TKey>
 {
     /// <summary>The value the entity is found by.</summary>
     TKey Key { get; }
 }
 
 /// <summary>
-/// The value index of component <typeparamref name="T"/> in one world (<see cref="World.Index{T,TKey}"/>). A lookup
-/// first re-indexes the rows of <typeparamref name="T"/> written since the previous lookup (found through the change-tick
-/// summaries per table, per 4,096-row block and per 64-row word); entities leave the index as soon as they are destroyed or lose the component. Lookups
-/// allocate nothing once every key has been seen; the index belongs to the world's owner thread, like component values
-/// (systems that look up from <c>OnUpdate</c> or instance methods run alone).
+/// The value index of component <typeparamref name="T"/> in one world (<see cref="World.Index{T,TKey}"/>). It is kept
+/// current as values are written: <c>Set</c> and <c>CreateEntity</c> re-index the entity at once (O(1)), and entities
+/// leave it as soon as they are destroyed or lose the component, so a lookup does no catching up. The first lookup
+/// (and the first after <see cref="World.Restore"/>) indexes every row once. Lookups allocate nothing once every key has
+/// been seen; the index belongs to the world's owner thread, like component values (systems that look up from
+/// <c>OnUpdate</c> or instance methods run alone).
 /// </summary>
-public sealed class ValueIndex<T, TKey> : World.IValueIndex
+public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
     where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>
 {
-    private static readonly QueryFilter Written = QueryFilter.Create().Changed<T>(0);   // the shape only: catch-up passes its own tick
-
     private readonly World _world;
 
     // Key -> its list (first entity id and length). Lists are doubly linked through _nodes (indexed by entity id), so
@@ -41,8 +39,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex
     // by links to an older incarnation, and other keys (default, another world's entities), use _heads.
     private Head[] _byTarget = [];
     private Node[] _nodes = [];
-    private ulong _synced; // rows written at or after this tick are not indexed yet
-    private World.QueryCacheEntry _tables; // the tables having T (kept current by the world's query cache)
+    private bool _built; // every row is indexed (false until the first lookup, and again after a restore)
 
     private struct Head
     {
@@ -61,14 +58,13 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex
     internal ValueIndex(World world) => _world = world;
 
     /// <summary>
-    /// The entities whose <typeparamref name="T"/> has key <paramref name="key"/> (none for a null key). Catching up with
-    /// the w rows written since the previous lookup costs O(tables) when w = 0, else O(rows of <typeparamref name="T"/> /
-    /// 4,096 + written 64-row words + w); then O(1) per entity. Owner thread only; inside a pass a lookup sees that
-    /// pass's writes so far. Destroying entities during the loop is allowed, changing <typeparamref name="T"/> is not.
+    /// The entities whose <typeparamref name="T"/> has key <paramref name="key"/> (none for a null key): O(1), then O(1)
+    /// per entity (the first lookup indexes every row once). Owner thread only. Destroying entities during the loop is
+    /// allowed, changing <typeparamref name="T"/> is not.
     /// </summary>
     public Matches Find(TKey key)
     {
-        Sync();
+        if (!_built) Build();
         ref var head = ref HeadOf(key);
         return new Matches(this, Unsafe.IsNullRef(ref head) ? -1 : head.First);
     }
@@ -87,24 +83,29 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex
     }
 
     /// <summary>
-    /// Number of entities with key <paramref name="key"/>: O(1) once caught up (a hash probe, or an array access for a
-    /// relation to an entity of this world; see <see cref="Find"/>).
+    /// Number of entities with key <paramref name="key"/>: O(1) (a hash probe, or an array access for a relation to an
+    /// entity of this world; the first lookup indexes every row once).
     /// </summary>
     public int Count(TKey key)
     {
-        Sync();
+        if (!_built) Build();
         ref var head = ref HeadOf(key);
         return Unsafe.IsNullRef(ref head) ? 0 : head.Count;
     }
 
-    /// <summary>Forget everything: the next lookup re-indexes every row (after <see cref="World.Restore"/> or <see cref="World.Dispose"/>).</summary>
-    void World.IValueIndex.Reset()
+    /// <summary>Forget everything; after <see cref="World.Restore"/> the next lookup re-indexes every row, after <see cref="World.Dispose"/> it finds nothing.</summary>
+    void World.IValueIndex.Reset(bool rebuild)
     {
         _heads.Clear();
         Array.Clear(_byTarget);
         Array.Clear(_nodes);
-        _synced = 0;
-        _tables = null; // restored tables may differ
+        _built = !rebuild;
+    }
+
+    /// <summary>Entity <paramref name="id"/> was given <paramref name="value"/> (Set, CreateEntity). Inside the structural gate.</summary>
+    void World.IIndexOf<T>.Put(int id, int version, in T value)
+    {
+        if (_built) Put(id, version, value.Key); // else the first lookup indexes the row
     }
 
     /// <summary>Entity <paramref name="id"/> is destroyed or loses <typeparamref name="T"/>. Inside the structural gate.</summary>
@@ -169,56 +170,12 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex
         return ref CollectionsMarshal.GetValueRefOrAddDefault(_heads, key, out _);
     }
 
-    /// <summary>Catch up with the rows of <typeparamref name="T"/> written since the previous sync.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void Sync()
-    {
-        // Lookups in a row find nothing written: one change-tick summary per table, inlined into the lookup.
-        if (_tables is { } entry)
-        {
-            var tables = Volatile.Read(ref entry.Match);
-            var archetypes = tables.Archetypes;
-            var plans = tables.Filters;
-            int i = 0;
-            while (i < archetypes.Length && archetypes[i].LastWrite[plans[i].Changed[0]] < _synced) i++;
-            if (i == archetypes.Length) return;
-        }
-
-        CatchUp();
-    }
-
-    /// <summary>Re-index the rows of <typeparamref name="T"/> written since the previous sync.</summary>
+    /// <summary>Index every row of <typeparamref name="T"/>: the first lookup, and the first after a restore.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void CatchUp()
+    private void Build()
     {
-        _tables ??= _world.GetQueryEntry([ComponentType<T>.Bit], in Written);
-        var tables = Volatile.Read(ref _tables.Match);
-        ulong since = _synced;
-        for (int i = 0; i < tables.Archetypes.Length; i++)
-        {
-            var archetype = tables.Archetypes[i];
-            var rows = new RowFilter(tables.Filters[i], since);
-            // A table not written since the previous sync costs one summary check (lookups in a row stop here).
-            if (rows.Mode(archetype) == RowFilter.None) continue;
-            // Advance the world's tick: rows written from now on are newer than every row this sync indexes, so the
-            // next sync visits only them (else writes between updates would share one tick and be re-indexed each time).
-            // Not inside a pass: it stamps its rows before running them, so a row stamped before this lookup may be
-            // written after it; the next sync then re-reads the rows stamped by that pass (only those).
-            if (_synced == since)
-                _synced = Volatile.Read(ref _world.Passes) == 0 ? _world.AdvanceChangeTick() : _world.ChangeTick;
-            // CatchUp opens no pass of its own: it only reads keys, so no row moves while the written rows are walked
-            // (inside a caller's pass, rows that lost their entity are tombstones, skipped below).
-            int count = archetype.Count, words = (count + 63) >> 6;
-            var slots = archetype.Slots;
-            ref T first = ref archetype.Base<T>(ComponentType<T>.Bit);
-            for (int w = rows.NextWord(archetype, 0, words); w < words; w = rows.NextWord(archetype, w + 1, words))
-                for (ulong bits = rows.Word(archetype, w) & RowFilter.RowMask(w, count); bits != 0; bits &= bits - 1)
-                {
-                    int slot = (w << 6) + BitOperations.TrailingZeroCount(bits);
-                    var entity = slots[slot];
-                    if (entity.Id >= 0) Put(entity.Id, entity.Version, Unsafe.Add(ref first, slot).Key); // tombstones are skipped
-                }
-        }
+        _built = true;
+        foreach (var item in _world.Query<T>()) Put(item.Entity.Id, item.Entity.Version, item.Component1.Key);
     }
 
     /// <summary>

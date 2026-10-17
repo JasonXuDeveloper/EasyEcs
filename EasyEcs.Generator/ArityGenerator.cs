@@ -86,6 +86,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             {{(n == 1 ? "world.AddBit(ref meta, id, b1);" : $"world.AddBits(ref meta, id, [{List(n, i => $"b{i}")}], {signature});")}}
                 {{Lines(n, i => $"            World.Row<T{i}>(ref meta, b{i}) = c{i};")}}
                 {{Lines(n, i => $"            meta.Archetype.Stamp<T{i}>(meta.Slot, world.ChangeTick);")}}
+                {{Lines(n, i => $"            world.Indexed(id, version, in c{i});")}}
                         }
                     }
 
@@ -137,7 +138,9 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             int slot = Place(id, target);
                 {{Lines(n, i => $"            Unsafe.Add(ref target.Base<T{i}>(b{i}), slot) = c{i};")}}
                 {{Lines(n, i => $"            target.Stamp<T{i}>(slot, _changeTick);")}}
-                            return new Entity(this, id, Meta[id].Version);
+                            int version = Meta[id].Version;
+                {{Lines(n, i => $"            Indexed(id, version, in c{i});")}}
+                            return new Entity(this, id, version);
                         }
                     }
 
@@ -163,7 +166,9 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 int slot = Place(id, target);
                 {{Lines(n, i => $"                Unsafe.Add(ref r{i}, slot) = c{i};")}}
                 {{Lines(n, i => $"                target.Stamp<T{i}>(slot, _changeTick);")}}
-                                entities[e] = new Entity(this, id, MetaRef(id).Version);
+                                int version = MetaRef(id).Version;
+                {{Lines(n, i => $"                Indexed(id, version, in c{i});")}}
+                                entities[e] = new Entity(this, id, version);
                             }
                         }
                     }

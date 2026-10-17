@@ -15,7 +15,8 @@ public sealed partial class World
 
     internal interface IValueIndex
     {
-        void Reset();
+        /// <summary>Forget every entry; <paramref name="rebuild"/>: index the rows again on the next lookup (after a restore).</summary>
+        void Reset(bool rebuild);
 
         /// <summary>Entity <paramref name="id"/> is destroyed or loses the indexed component. Inside the structural gate.</summary>
         void Removed(int id);
@@ -45,6 +46,26 @@ public sealed partial class World
     private static InvalidOperationException OtherKey(Type component, IValueIndex existing) =>
         new($"{component.Name} is already indexed by another key type ({existing.GetType().GenericTypeArguments[1].Name}): one index per component.");
 
+    /// <summary>The index of a component type, told of every value written with Set or CreateEntity.</summary>
+    internal interface IIndexOf<T> where T : struct, IComponent
+    {
+        void Put(int id, int version, in T value);
+    }
+
+    /// <summary>
+    /// Entity <paramref name="id"/> (<paramref name="version"/>) now holds <paramref name="value"/>: re-index it if
+    /// <typeparamref name="T"/> is indexed and this world has its index. Folded away for other components.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void Indexed<T>(int id, int version, in T value) where T : struct, IComponent
+    {
+        if (!ComponentType<T>.Indexed) return;
+        var byBit = _indexByBit;
+        int bit = ComponentType<T>.Bit;
+        if (byBit != null && bit < byBit.Length && byBit[bit] is { } index)
+            Unsafe.As<IIndexOf<T>>(index).Put(id, version, in value);
+    }
+
     /// <summary>Tell the index of <paramref name="bit"/>, if any, that entity <paramref name="id"/> lost it (cold).</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void Unindex(ushort bit, int id)
@@ -60,9 +81,9 @@ public sealed partial class World
         for (int i = 0; i < components.Length; i++) Unindex(components[i], id);
     }
 
-    /// <summary>Make every index re-index from scratch on its next lookup (rows replaced by Restore, or released by Dispose).</summary>
-    private void ResetIndexes()
+    /// <summary>Empty every index: <see cref="Restore"/> re-indexes on the next lookup, <see cref="Dispose"/> leaves them empty.</summary>
+    private void ResetIndexes(bool rebuild)
     {
-        foreach (var index in _indexes) index?.Reset();
+        foreach (var index in _indexes) index?.Reset(rebuild);
     }
 }

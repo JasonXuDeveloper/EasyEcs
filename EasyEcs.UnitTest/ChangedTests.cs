@@ -170,7 +170,7 @@ public partial class ChangedTests
 
         // Tick 0 selects every row having T; one filter has one tick; ChangedSince moves it.
         Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(0)), Is.EqualTo(100));
-        Assert.Throws<ArgumentException>(() => QueryFilter.Create().Changed<Armor>(mark).Changed<Callsign>(mark + 1));
+        Assert.Throws<ArgumentException>(() => QueryFilter.Create().Changed<Armor>(mark).Changed<Shield>(mark + 1));
         Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(0).ChangedSince(mark)), Is.EqualTo(world.Count<Armor>(changed)));
         Assert.That(world.DestroyEntities<Armor>(changed), Is.EqualTo(2));
     }

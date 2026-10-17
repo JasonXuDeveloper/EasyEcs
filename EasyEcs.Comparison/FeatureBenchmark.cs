@@ -284,7 +284,8 @@ public class ChangeTrackingComparison
 /// items change hands (1: lookups dominate, as on most ticks; 100: a burst of trades) and the inventories of 100 owners
 /// are counted, each library through its built-in index:
 /// <list type="bullet">
-/// <item>EasyEcs: <c>IIndexed&lt;Entity&gt;</c>, <c>world.Index&lt;ItemOf, Entity&gt;().Count(owner)</c>.</item>
+/// <item>EasyEcs: <c>IIndexed&lt;Entity&gt;</c>, <c>world.Index&lt;ItemOf, Entity&gt;().Count(owner)</c>; the index
+/// follows <c>Set</c>.</item>
 /// <item>Friflo: <c>ILinkComponent</c>, <c>owner.GetIncomingLinks&lt;T&gt;().Count</c>; the index follows
 /// <c>AddComponent</c>.</item>
 /// <item>DefaultEcs: <c>EntityMultiMap&lt;T&gt;</c> keyed by the component value; it follows <c>Set</c>.</item>
@@ -317,7 +318,7 @@ public class IndexComparison
         _items = new EasyEcs.Entity[Items];
         for (int i = 0; i < Items; i++) _items[i] = _world.CreateEntity(new ItemOf(_owners[i % Owners]));
         _index = _world.Index<ItemOf, EasyEcs.Entity>();
-        Check(EasyEcs_Index, o => _index.Count(_owners[o]), i => Array.IndexOf(_owners, _items[i].Get<ItemOf>().Owner));
+        Check(EasyEcs_Index, o => _index.Count(_owners[o]), i => Array.IndexOf(_owners, _items[i].Read<ItemOf>().Owner));
     }
 
     [GlobalSetup(Target = nameof(Friflo_Links))]
@@ -365,7 +366,7 @@ public class IndexComparison
         for (int i = 0; i < Trades; i++)
         {
             int item = NextItem();
-            _items[item].Get<ItemOf>() = new ItemOf(_owners[(item + i) % Owners]);
+            _items[item].Set(new ItemOf(_owners[(item + i) % Owners]));
         }
 
         int total = 0;

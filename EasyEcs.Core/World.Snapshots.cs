@@ -79,7 +79,7 @@ public sealed partial class World
                 tables[i].StampTracked(_changeTick); // every restored row is written: Changed<T> sees it
             }
 
-            ResetIndexes();
+            ResetIndexes(true);
             Array.Clear(_dirty, 0, _dirtyCount);
             _dirtyCount = 0;
 
