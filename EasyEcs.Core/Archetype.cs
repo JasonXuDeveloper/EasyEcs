@@ -99,6 +99,9 @@ internal sealed class Archetype
 
     private readonly bool _tracked; // has change-tick columns
 
+    /// <summary>Whether the table has change-tick columns (an <see cref="ITrackChanges"/> component).</summary>
+    public bool Tracked => _tracked;
+
     /// <summary>Columns with <see cref="Present"/> bits (indices into <see cref="Columns"/>), copy-on-write.</summary>
     private short[] _bitColumns = [];
 
@@ -243,8 +246,7 @@ internal sealed class Archetype
         if ((word & bit) == 0) return false;
         word &= ~bit;
         AbsentOf(column)++;
-        var info = Info(column);
-        if (info.Managed) info.Clear(Columns[column], slot, 1);
+        if (_hasManaged && Info(column) is { Managed: true } info) info.Clear(Columns[column], slot, 1);
         return true;
     }
 

@@ -12,9 +12,9 @@ public sealed class WorldOptions
     public bool ParallelSystems { get; init; }
 
     /// <summary>
-    /// Threads one parallel run uses at most (default: processor count): systems run by <see cref="Parallel"/>, and the
+    /// Threads one parallel run uses at most (default: processor count): systems run by <see cref="ParallelSystems"/>, and the
     /// row chunks of parallel <c>[ForEach]</c> methods, <c>ForEachParallel</c> and <c>ForEachEntityParallel</c> (which
-    /// run in chunks whether <see cref="Parallel"/> is on or not).
+    /// run in chunks whether <see cref="ParallelSystems"/> is on or not).
     /// </summary>
     public int MaxDegreeOfParallelism { get; init; } = Environment.ProcessorCount;
 

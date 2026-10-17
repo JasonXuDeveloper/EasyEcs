@@ -164,7 +164,10 @@ public sealed partial class World
     /// Remove one component bit: the row keeps its column and only loses the component (no move). A missing component
     /// is ignored. Inside the structural gate.
     /// </summary>
-    internal void RemoveBit(ref EntityMeta meta, ushort bit) => RemoveBits(ref meta, new ReadOnlySpan<ushort>(in bit));
+    internal void RemoveBit(ref EntityMeta meta, ushort bit)
+    {
+        if (TakeBit(meta.Archetype, meta.Slot, bit)) StorageVersion++; // passes re-read presence bits
+    }
 
     /// <summary>
     /// Remove component bits (see <see cref="RemoveBit"/>): the row is found once, and passes are told once that
@@ -175,18 +178,22 @@ public sealed partial class World
         var archetype = meta.Archetype;
         int slot = meta.Slot;
         bool removed = false;
-        for (int i = 0; i < bits.Length; i++)
-        {
-            int column = archetype.ColumnIndex(bits[i]);
-            if (column < 0 || !archetype.MarkAbsent(column, slot)) continue;
-            removed = true;
-            // A tracked component's tick records the removal: Removed<T> filters find the row by its clear presence
-            // bit and its new tick (Changed<T> filters require the component, so they skip the row).
-            if (archetype.Info(column).Companion is var ticks and >= 0) archetype.SetTick(archetype.ColumnIndex(ticks), slot, _changeTick);
-            if (_indexByBit != null) Unindex(bits[i], archetype.Slots[slot].Id);
-        }
-
+        for (int i = 0; i < bits.Length; i++) removed |= TakeBit(archetype, slot, bits[i]);
         if (removed) StorageVersion++; // passes re-read presence bits
+    }
+
+    /// <summary>Clear the presence bit of component <paramref name="bit"/> in row <paramref name="slot"/>; false when the row lacks it.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool TakeBit(Archetype archetype, int slot, ushort bit)
+    {
+        int column = archetype.ColumnIndex(bit);
+        if (column < 0 || !archetype.MarkAbsent(column, slot)) return false;
+        // A tracked component's tick records the removal: Removed<T> filters find the row by its clear presence bit and
+        // its new tick (Changed<T> filters require the component, so they skip the row).
+        if (archetype.Tracked && archetype.Info(column).Companion is var ticks and >= 0)
+            archetype.SetTick(archetype.ColumnIndex(ticks), slot, _changeTick);
+        if (_indexByBit != null) Unindex(bit, archetype.Slots[slot].Id);
+        return true;
     }
 
     /// <summary>
