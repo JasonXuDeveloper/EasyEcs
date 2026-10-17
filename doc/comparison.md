@@ -103,14 +103,16 @@ the entity to the job (see `Entity` below).
 | Two components, SIMD batches | 62.8 μs | 85.0 μs | EasyEcs 1.35x faster |
 | Iterate three components | 66.4 μs | 68.3 μs | about even |
 | Filtered (`With` a tag on a few entities) | 11.3 μs | 15.1 μs | EasyEcs 1.33x faster |
-| Iterate with the entity handle | 47.5 μs | 35.9 μs | Friflo 1.32x faster |
+| Iterate with the entity handle, per entity | 48.5 μs | 62.7 μs | EasyEcs 1.29x faster |
+| Iterate with the entity handle, in batches (`EntitySpan` / chunks) | 37.8 μs | 37.0 μs | about even |
 | Iterate with a singleton | 210 μs | 225 μs | EasyEcs 1.07x faster |
 | Toggle a status component (remove + add) | 548 μs | 980 μs | EasyEcs 1.79x faster |
 | Create and destroy | 181 μs | 202 μs | EasyEcs 1.12x faster |
 
 All rows allocate 0 B. Toggling is where tables with presence bits pay off: EasyEcs flips a bit and the entity stays
-in its row, Friflo moves the entity to another archetype and back. Passing the entity costs EasyEcs more: its job receives a
-version-checked handle built from the row's `EntitySlot` (id and version in one 8-byte load).
+in its row, Friflo moves the entity to another archetype and back. A per-entity job receives a version-checked handle built
+from the row's `EntitySlot` (id and version in one 8-byte load) on every row; a batch job's `EntitySpan` builds one only
+for the rows it indexes, like Friflo's chunk entities.
 
 ## Change tracking
 

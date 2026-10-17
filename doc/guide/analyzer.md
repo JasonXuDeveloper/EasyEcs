@@ -16,7 +16,7 @@ The EasyEcs analyzer ships in the package next to the source generator. Every ru
 | [EECS006](#eecs006) | Error | Components and singletons must be structs |
 | [EECS007](#eecs007) | Error | Systems must be stateless |
 | [EECS008](#eecs008) | Error | Systems must not reference systems |
-| [EECS009](#eecs009) | Error | A batch `[ForEach]` method takes only spans and singletons |
+| [EECS009](#eecs009) | Error | A batch `[ForEach]` method takes only spans, singletons and an `EntitySpan` |
 | [EECS010](#eecs010) | Error | A `[ForEach(Parallel = true)]` method must be able to run on several threads |
 | [EECS011](#eecs011) | Error | A `[ForEach]` method must not change what a read-only parameter holds |
 | [EECS012](#eecs012) | Error | A `DynamicBuffer<T>` is never copied |
@@ -153,9 +153,9 @@ public record struct Wallet(int Gold) : IComponent;
 
 ## EECS007
 
-**Systems must be stateless.** A system has a mutable instance field or a settable auto-property. State in a
-system is invisible to other systems, queries and persistence, and it is lost or duplicated when the system is
-removed or re-added.
+**Systems must be stateless.** A system has a mutable field or a settable auto-property, static ones included. State
+in a system is invisible to other systems, queries and persistence, and it is lost or duplicated when the system is
+removed or re-added; a static one is also shared by every world.
 
 Fix: move per-entity state into a component and per-world state into a [singleton](singletons.md). `readonly`
 fields (dependencies, reusable scratch buffers), `init`-only properties and computed properties are allowed.
@@ -179,8 +179,9 @@ public partial class SpawnSystem : EcsSystem
 
 ## EECS008
 
-**Systems must not reference systems.** A field or auto-property of a system has a system type. Systems that call
-each other are coupled: neither can be removed, reordered or tested alone.
+**Systems must not reference systems.** A field or auto-property of a system has a system type, or a system looks
+another one up with `World.GetSystem<T>()`. Systems that call each other are coupled: neither can be removed,
+reordered or tested alone. (`GetSystem` is for tooling, tests and the code that hosts the world.)
 
 Fix: write the data the other system reads (a component or a singleton) and order the two with `Priority`. See
 [ECS principles, rule 3](../ecs-principles.md#3-systems-never-reference-systems).
@@ -212,10 +213,11 @@ public sealed class ScoreSystem : EcsSystem
 
 **Batch `[ForEach]` mixes spans and per-entity parameters.** A method that takes component spans receives whole runs
 of rows, so a per-entity parameter (a `ref` / `in` component, an `Entity`) has no single value for the call, and the
-`World` could change rows while the spans point into them.
+`World` could change rows while the spans point into them. An `EntitySpan` without component spans has no run to
+describe.
 
-Fix: take every component as a span (`Span<T>` to write, `ReadOnlySpan<T>` to read) and only singletons besides; or
-write a per-entity method instead.
+Fix: take every component as a span (`Span<T>` to write, `ReadOnlySpan<T>` to read), singletons besides, and an
+`EntitySpan` for the run's entities; or write a per-entity method instead.
 
 ```cs
 [ForEach] static void Drift(Span<Position> p, in Velocity v)   // EECS009: v has no single value for a run of rows

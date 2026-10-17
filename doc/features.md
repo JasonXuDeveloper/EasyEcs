@@ -76,7 +76,7 @@ Guide: [Entities and components](guide/entities-and-components.md).
 ## Generated members
 
 **What it does.** The source generator gives every component named C# 14 extension members, like Entitas does for
-its component classes: `e.Position` (`ref`), `HasPosition`, `TryGetPosition(out p)`, `SetPosition(x, y)` (from the
+its component classes: `e.Position` (`ref`), `HasPosition`, `TryGetPosition(out p)`, `GetOrAddPosition()`, `SetPosition(x, y)` (from the
 constructor), `RemovePosition()`; tags get `IsDead`, `SetDead()`, `RemoveDead()`; indexed components `world.ZoneIndex`;
 singletons `world.Battle`, `HasBattle`, `SetBattle(…)`, `RemoveBattle()`. Tracked and indexed components get a
 `ref readonly` property, so a read never counts as a write.

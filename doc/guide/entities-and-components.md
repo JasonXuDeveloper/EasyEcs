@@ -104,7 +104,7 @@ members), so the common calls read like fields and methods:
 
 | Declared | Generated | Same as |
 |---|---|---|
-| `record struct Position(float X, float Y) : IComponent` | `e.Position` (`ref`), `e.HasPosition`, `e.TryGetPosition(out p)`, `e.SetPosition(x, y)`, `e.RemovePosition()` | `Get`, `Has`, `TryGet`, `Set(new Position(x, y))`, `Remove` |
+| `record struct Position(float X, float Y) : IComponent` | `e.Position` (`ref`), `e.HasPosition`, `e.TryGetPosition(out p)`, `e.GetOrAddPosition()`, `e.SetPosition(x, y)`, `e.RemovePosition()` | `Get`, `Has`, `TryGet`, `GetOrAdd`, `Set(new Position(x, y))`, `Remove` |
 | a tracked or indexed component (`Armor : ITrackChanges`) | `e.Armor` is `ref readonly`; the rest as above | `Read`: reading it is never a write |
 | a tag (`struct Dead : IComponent`) | `e.IsDead`, `e.SetDead()`, `e.RemoveDead()` | `Has`, `Set(new Dead())`, `Remove` |
 | an indexed component (`Zone : IIndexed<int>`) | `world.ZoneIndex` | `world.Index<Zone, int>()` |

@@ -259,9 +259,11 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
 - **Stricter iteration with immediate changes.** A pass visits each entity at most once, and `[ForEach]` writes
   through `ref` parameters survive the body's own structural changes. No command buffer, no idempotency filters.
 - **Batch `[ForEach]` methods** take `Span<T>` / `ReadOnlySpan<T>` and receive whole runs of rows for SIMD
-  (`world.ForEachBatch` for ad-hoc jobs); `world.ForEachEntity` passes the handle to struct jobs.
+  (`world.ForEachBatch` for ad-hoc jobs), with an `EntitySpan` of the run's entities built only where indexed;
+  `world.ForEachEntity` passes the handle to struct jobs.
 - **Jobs that cannot change structure** (detected by the generator, or `INoStructuralChanges`) iterate with no
-  per-entity bookkeeping; structural changes check a plain owner flag instead of a lock or an atomic.
+  per-entity bookkeeping and freeze the world's structure (a broken promise throws); structural changes check a plain
+  owner flag instead of a lock or an atomic.
 - **Parallel `[ForEach]`:** `[ForEach(Parallel = true)]` splits one method's rows across threads, allocation-free
   (`world.ForEachParallel` / `ForEachEntityParallel` for ad-hoc jobs, `World.ChunkRows` rows per chunk); the analyzer
   rejects methods that could race (EECS010).
