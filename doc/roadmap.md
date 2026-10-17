@@ -45,6 +45,8 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
 - Generic systems (`class CountOf<T> : EcsSystem`) and generic runners (`Census.CountAlive<Health>(world, ref n)`,
   `Census<Health>.Positions(world, ref x)`); EECS004 only for a generic method of a system
   ([D20](decisions.md#d20-generic-systems-register-the-closed-types-their-assembly-names)).
+- Filters on system groups: `[Without<Inactive>] public struct Gameplay : ISystemGroup;` joins every `[ForEach]` of
+  the group's systems (EECS023 on any other struct).
 
 ### Dropped
 
@@ -63,8 +65,7 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
 
 The toolchain floor is the .NET 10 SDK (C# 14, Roslyn 5.0), which the generator builds against. In order:
 
-1. A filter declared once on a system group, applied by the generator to every `[ForEach]` of the group.
-2. Code fixes for the analyzer's diagnostics.
+1. Code fixes for the analyzer's diagnostics.
 
 Runtime (.NET 10 / C# 14), each measured with BDN and kept only as a net win:
 
@@ -84,8 +85,7 @@ What the generator can write so users write less, Entitas-style (it already writ
 API and the examples several times: every line users write twice is a candidate, every generated member that nobody
 needs goes. Each round's findings are listed here with what was generated, changed or rejected, and why.
 
-- Round 1: pending. Candidates so far: a filter declared once on a system group (every `[ForEach]` of the group gets `Without<Inactive>`): the
-  whole-entity disable pattern without one attribute per method, still explicit where the group is defined.
+- Round 1: pending.
 
 ### Example
 
