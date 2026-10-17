@@ -199,7 +199,18 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
     private void Build()
     {
         _built = true;
-        foreach (var item in _world.Query<T>()) Put(item.Entity.Index, item.Entity.Version, item.Component1.Key);
+        var job = new BuildJob { Index = this };
+        _world.ForEachEntity<T, BuildJob>(ref job);
+    }
+
+    // Reads every row without stamping it (Writes = 0): building the index is not a change of a tracked T.
+    private struct BuildJob : IForEachEntity<T>, INoStructuralChanges
+    {
+        public ValueIndex<T, TKey> Index;
+
+        public void Execute(Entity entity, ref T value) => Index.Put(entity.Index, entity.Version, value.Key);
+
+        public static int Writes => 0;
     }
 
     /// <summary>
