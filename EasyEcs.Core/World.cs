@@ -57,6 +57,22 @@ public sealed partial class World : IDisposable
         }
     }
 
+    /// <summary>
+    /// Pre-size the table <paramref name="prefab"/>'s instances go to, and the entity storage, so the next
+    /// <paramref name="count"/> <see cref="Instantiate(Prefab)"/> calls never grow them: a wave of spawns pays its
+    /// growth before the tick. Instances whose groups put them in another table (<see cref="GroupBy{T}"/>) grow that
+    /// one. O(components) plus one growth. Owner thread only.
+    /// </summary>
+    public void EnsureCapacity(Prefab prefab, int count)
+    {
+        using (Structural())
+        {
+            var target = TableFor(Source(prefab.Row).Table);
+            target.Reserve(target.Count + count);
+            ReserveIds(count);
+        }
+    }
+
     /// <summary>Create an entity without components. O(1) amortized. Owner thread only (see doc/guide/threading.md).</summary>
     [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
     public Entity CreateEntity()
@@ -269,6 +285,10 @@ public sealed partial class World : IDisposable
     private struct DestroyOp : IRowOp
     {
         public int Count;
+
+        public readonly bool Words(World world, Archetype table) => false;
+
+        public readonly void ApplyWord(World world, Archetype table, int word, ulong rows) { }
 
         public void Apply(World world, Archetype table, int slot, EntityId entity)
         {

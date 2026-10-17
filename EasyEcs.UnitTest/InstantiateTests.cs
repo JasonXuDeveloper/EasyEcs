@@ -72,6 +72,30 @@ public class InstantiateTests
     }
 
     [Test]
+    public void ADerivedPrefabCopiesItsBaseAndChangesOnItsOwn()
+    {
+        using var world = new World();
+        var orc = new Prefab().Set(new Health(30)).Set(new Armor(5)).Set(new DynamicBuffer<Loot>());
+        var chief = new Prefab(orc).Set(new Health(90)).Remove<Armor>();
+        orc.Set(new Health(31));                                        // later changes of the base stay its own
+        var e = world.Instantiate(chief);
+        Assert.That((e.Get<Health>().Value, e.Has<Armor>(), e.Has<DynamicBuffer<Loot>>()), Is.EqualTo((90, false, true)));
+        Assert.That((orc.Read<Health>().Value, orc.Has<Armor>()), Is.EqualTo((31, true)));
+    }
+
+    [Test]
+    public void ReservingForAPrefabMakesItsInstancesGrowNothing()
+    {
+        var orc = new Prefab().Set(new Health(30)).Set(new Armor(5));
+        using (var warm = new World()) warm.Instantiate(orc).Destroy(); // JIT and caches
+        using var world = new World(new WorldOptions { InitialEntityCapacity = 16 });
+        world.EnsureCapacity(orc, 5000);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 5000; i++) world.Instantiate(orc);
+        Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, world.EntityCount), Is.EqualTo((0L, 5000)));
+    }
+
+    [Test]
     public void IndexesLearnTheNewEntities()
     {
         using var world = new World();

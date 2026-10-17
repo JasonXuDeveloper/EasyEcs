@@ -35,7 +35,6 @@ public sealed partial class World
         using (Structural())
         {
             WalkDown(Bulk<T>(in filter), filter.Tick, ref op);
-            if (op.Count != 0) StorageVersion++; // passes re-read presence bits
             if (_parentCount != 0) DestroyChildren(); // a retired entity freed by losing its last cleanup component
         }
 
@@ -70,16 +69,25 @@ public sealed partial class World
     private QueryMatch Bulk<T>(in QueryFilter filter) where T : struct, IComponent =>
         GetMatchingArchetypes(TypeIndex<ComponentSignature, T>.Value, [ComponentType<T>.Bit], in filter);
 
-    /// <summary>A change a bulk walk makes to one row (<see cref="WalkDown"/>); a struct, so the walk is specialized for it.</summary>
+    /// <summary>
+    /// A change a bulk walk makes (<see cref="WalkDown"/>), to one row or, where a table allows it, to the rows of one
+    /// presence word at once; a struct, so the walk is specialized for it.
+    /// </summary>
     private interface IRowOp
     {
+        /// <summary>Whether <see cref="ApplyWord"/> may change the rows of <paramref name="table"/> (no row moves).</summary>
+        bool Words(World world, Archetype table);
+
+        void ApplyWord(World world, Archetype table, int word, ulong rows);
+
         void Apply(World world, Archetype table, int slot, EntityId entity);
     }
 
     /// <summary>
-    /// Apply <paramref name="op"/> to every alive row of <paramref name="match"/> passing its filter, from the last row
-    /// of each table down: a row that moves away is filled by the table's last row, already visited, so the passing rows
-    /// of each word (read once per word) stay valid for the rows below it. Inside the structural gate.
+    /// Apply <paramref name="op"/> to every alive row of <paramref name="match"/> passing its filter. A table without
+    /// tombstones whose rows the op changes in place goes a presence word (64 rows) at a time; the others row by row,
+    /// from the last row down: a row that moves away is filled by the table's last row, already visited, so the passing
+    /// rows of each word (read once per word) stay valid for the rows below it. Inside the structural gate.
     /// </summary>
     private void WalkDown<TOp>(QueryMatch match, ulong since, ref TOp op) where TOp : struct, IRowOp
     {
@@ -90,6 +98,13 @@ public sealed partial class World
             var rows = new RowFilter(match.Filters[t], since);
             if (table.AliveCount == 0 || rows.Mode(table) == RowFilter.None) continue;
             int count = table.Count;
+            if (count == table.AliveCount && op.Words(this, table))
+            {
+                for (int w = 0; w <= (count - 1) >> 6; w++)
+                    if ((rows.Word(table, w) & RowFilter.RowMask(w, count)) is var passing and not 0) op.ApplyWord(this, table, w, passing);
+                continue;
+            }
+
             for (int w = (count - 1) >> 6; w >= 0; w--)
             {
                 ulong bits = rows.Word(table, w) & RowFilter.RowMask(w, count);
@@ -102,12 +117,39 @@ public sealed partial class World
                 }
             }
         }
+
+        StorageVersion++; // passes re-read presence bits
     }
+
+    /// <summary>Whether this world has a value index or relation index of component <paramref name="bit"/>.</summary>
+    private bool IndexedBit(int bit) => _indexByBit is { } byBit && (uint)bit < (uint)byBit.Length && byBit[bit] != null;
+
+    /// <summary>The tick column of the tracked component of <paramref name="column"/> in <paramref name="table"/>, or -1.</summary>
+    private static int TicksOf(Archetype table, int column) =>
+        table.Tracked && table.Info(column).Companion is var ticks and >= 0 ? table.ColumnIndex(ticks) : -1;
 
     private struct SetOp<T> : IRowOp where T : struct, IComponent
     {
         public T Value;
         public ushort Bit;
+
+        // In place: the table has the column, no group moves the rows, no Disabled<T> tag goes with a new value.
+        public readonly bool Words(World world, Archetype table) =>
+            table.ColumnIndex(Bit) is var column and >= 0 && (!ComponentType<T>.Grouped || world.GroupingOf(Bit) == null) &&
+            (!table.HasDisabled || table.DisablerColumn(column) < 0);
+
+        public void ApplyWord(World world, Archetype table, int word, ulong rows)
+        {
+            table.MarkPresentWord(table.ColumnIndex(Bit), word, rows);
+            ref T row0 = ref table.Ref<T>(Bit, 0);
+            for (ulong r = rows; r != 0; r &= r - 1)
+            {
+                int slot = (word << 6) + BitOperations.TrailingZeroCount(r);
+                Unsafe.Add(ref row0, slot) = Value;
+                if (default(T) is ITrackChanges) table.Stamp<T>(slot, world.ChangeTick);
+                if (ComponentType<T>.Watched) world.Written(table.Slots[slot].Index, table.Slots[slot].Version, in Value);
+            }
+        }
 
         public void Apply(World world, Archetype table, int slot, EntityId entity)
         {
@@ -124,6 +166,17 @@ public sealed partial class World
         public ushort Bit;
         public int Count;
 
+        // A retiring entity may be freed by losing a cleanup component: row by row.
+        public readonly bool Words(World world, Archetype table) => !table.HasCleanup;
+
+        public void ApplyWord(World world, Archetype table, int word, ulong rows)
+        {
+            int column = table.ColumnIndex(Bit);
+            rows = table.MarkAbsentWord(column, word, rows);
+            Count += BitOperations.PopCount(rows);
+            world.GoneWord(table, column, word, rows, Bit);
+        }
+
         public void Apply(World world, Archetype table, int slot, EntityId entity)
         {
             if (!world.TakeBit(table, slot, Bit)) return;
@@ -137,6 +190,18 @@ public sealed partial class World
         public ushort Bit, Tag;
         public int Count;
 
+        // In place once the table has the tag's column (after the first disable, which moves the rows).
+        public readonly bool Words(World world, Archetype table) => table.ColumnIndex(Tag) >= 0;
+
+        public void ApplyWord(World world, Archetype table, int word, ulong rows)
+        {
+            int column = table.ColumnIndex(Bit);
+            rows = table.MarkAbsentWord(column, word, rows, keep: true);
+            table.MarkPresentWord(table.ColumnIndex(Tag), word, rows);
+            Count += BitOperations.PopCount(rows);
+            world.GoneWord(table, column, word, rows, Bit);
+        }
+
         public void Apply(World world, Archetype table, int slot, EntityId entity)
         {
             if (world.DisableBit(ref world.MetaRef(entity.Index), entity.Index, Bit, Tag)) Count++;
@@ -148,6 +213,22 @@ public sealed partial class World
         public ushort Bit, Tag;
         public int Count;
 
+        public readonly bool Words(World world, Archetype table) => !ComponentType<T>.Grouped || world.GroupingOf(Bit) == null;
+
+        public void ApplyWord(World world, Archetype table, int word, ulong rows)
+        {
+            rows = table.MarkAbsentWord(table.ColumnIndex(Tag), word, rows);
+            table.MarkPresentWord(table.ColumnIndex(Bit), word, rows);
+            Count += BitOperations.PopCount(rows);
+            if (default(T) is not ITrackChanges && !ComponentType<T>.Watched) return;
+            for (ulong r = rows; r != 0; r &= r - 1)
+            {
+                int slot = (word << 6) + BitOperations.TrailingZeroCount(r);
+                if (default(T) is ITrackChanges) table.Stamp<T>(slot, world.ChangeTick);
+                if (ComponentType<T>.Watched) world.Written(table.Slots[slot].Index, table.Slots[slot].Version, in table.Ref<T>(Bit, slot));
+            }
+        }
+
         public void Apply(World world, Archetype table, int slot, EntityId entity)
         {
             ref var meta = ref world.MetaRef(entity.Index);
@@ -156,5 +237,13 @@ public sealed partial class World
             world.Written(entity.Index, entity.Version, in Row<T>(ref meta, Bit));
             Count++;
         }
+    }
+
+    /// <summary><see cref="Gone"/> for the rows of presence word <paramref name="word"/> set in <paramref name="rows"/>.</summary>
+    private void GoneWord(Archetype table, int column, int word, ulong rows, ushort bit)
+    {
+        int ticks = TicksOf(table, column);
+        if (ticks < 0 && !IndexedBit(bit)) return;
+        for (ulong r = rows; r != 0; r &= r - 1) Gone(table, column, (word << 6) + BitOperations.TrailingZeroCount(r), bit);
     }
 }

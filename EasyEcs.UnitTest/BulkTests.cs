@@ -33,6 +33,9 @@ public class BulkTests
         world.SetAll(new Zone(7), QueryFilter.Create().InGroup<Zone>(1));                  // half of them move to zone 7
         world.SetAll(new Armor(2), QueryFilter.Create().InGroup<Zone>(7));
         Assert.That(world.Index<Follows, EntityId>().Count(leader), Is.EqualTo(200));
+        var deputy = world.CreateEntity(new Health(0));
+        world.SetAll(new Follows(deputy.Id), QueryFilter.Create().With<Follows>()); // in place now: the index still follows
+        Assert.That((world.Index<Follows, EntityId>().Count(leader), world.Index<Follows, EntityId>().Count(deputy)), Is.EqualTo((0, 200)));
         Assert.That((world.Count<Health>(QueryFilter.Create().InGroup<Zone>(7)), world.Count<Health>(QueryFilter.Create().InGroup<Zone>(1))),
             Is.EqualTo((100, 0)));
         Assert.That(world.Count<Health>(QueryFilter.Create().Changed<Armor>(since)), Is.EqualTo(100));

@@ -274,6 +274,31 @@ internal sealed class Archetype
         return true;
     }
 
+    /// <summary>
+    /// <see cref="MarkAbsent"/> for the rows of presence word <paramref name="word"/> set in <paramref name="rows"/>
+    /// (rows of the table): a bulk change's 64 rows at once. Returns the rows that had the component. Inside the
+    /// structural gate.
+    /// </summary>
+    public ulong MarkAbsentWord(int column, int word, ulong rows, bool keep = false)
+    {
+        ref ulong present = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Bits(column) ?? AllocateBits(column)), word);
+        rows &= present;
+        present &= ~rows;
+        AbsentOf(column) += BitOperations.PopCount(rows);
+        if (!keep && _hasManaged && Info(column) is { Managed: true } info)
+            for (ulong r = rows; r != 0; r &= r - 1) info.Clear(Columns[column], (word << 6) + BitOperations.TrailingZeroCount(r), 1);
+        return rows;
+    }
+
+    /// <summary><see cref="MarkPresent"/> for the rows of presence word <paramref name="word"/> set in <paramref name="rows"/>. Inside the structural gate.</summary>
+    public void MarkPresentWord(int column, int word, ulong rows)
+    {
+        if (Bits(column) is not { } bits) return;
+        ref ulong present = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(bits), word);
+        AbsentOf(column) -= BitOperations.PopCount(rows & ~present);
+        present |= rows;
+    }
+
     /// <summary>A row dies (destroyed or moved away): it no longer counts as lacking components.</summary>
     private void ForgetAbsent(int slot)
     {

@@ -15,6 +15,12 @@ public sealed partial class Prefab
 
     public Prefab() => Row = _store.CreateEntity();
 
+    /// <summary>
+    /// A prefab with a copy of every value of <paramref name="basePrefab"/>, to change on its own: a variant of a
+    /// configured NPC. Later changes of either prefab do not reach the other (a copy, no inheritance). O(components).
+    /// </summary>
+    public Prefab(Prefab basePrefab) => Row = _store.Instantiate(basePrefab);
+
     // Set(in T1..Tn) and Remove<T1..Tn>() are generated (Entity.Structural.g.cs), and ComponentGenerator writes the
     // named members of each component: prefab.SetHealth(…), HasHealth, Health (read-only), RemoveHealth(), IsDead.
 
