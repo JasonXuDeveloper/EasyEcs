@@ -41,6 +41,13 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
     private Node[] _nodes = [];
     private bool _built; // every row is indexed (false until the first lookup, and again after a restore)
 
+    // Ordered walks (Range / Ascending / Descending, TKey : IComparable): the keys that have entities, sorted. Built by
+    // the first ordered walk, then kept by AddHead / Unlink (a binary search and a block move per new or emptied key).
+    // _keysVersion changes when a key enters or leaves, so a walk that outlives the change finds its place again.
+    private TKey[] _sorted;
+    private int _sortedCount;
+    private int _keysVersion;
+
     private struct Head
     {
         public int First, Count;
@@ -105,6 +112,9 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
         _heads.Clear();
         Array.Clear(_byTarget);
         Array.Clear(_nodes);
+        _sorted = null; // sorted again by the next ordered walk (one sort instead of one insertion per key)
+        _sortedCount = 0;
+        _keysVersion++;
         _built = !rebuild;
     }
 
@@ -179,7 +189,9 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
             }
         }
 
-        return ref CollectionsMarshal.GetValueRefOrAddDefault(_heads, key, out _);
+        ref var added = ref CollectionsMarshal.GetValueRefOrAddDefault(_heads, key, out bool exists);
+        if (!exists && _sorted != null) InsertSorted(key);
+        return ref added;
     }
 
     /// <summary>Index every row of <typeparamref name="T"/>: the first lookup, and the first after a restore.</summary>
@@ -225,13 +237,151 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
         if (--head.Count == 0)
         {
             // An emptied _byTarget slot just stays (Count 0 marks it free); a dictionary entry goes.
-            if (!inSlot) _heads.Remove(node.Key);
+            if (!inSlot)
+            {
+                _heads.Remove(node.Key);
+                if (_sorted != null) RemoveSorted(node.Key);
+            }
         }
         else if (node.Prev < 0) head.First = node.Next;
         if (node.Prev >= 0) _nodes[node.Prev].Next = node.Next;
         if (node.Next >= 0) _nodes[node.Next].Prev = node.Prev;
         node.Linked = false;
         node.Key = default!; // let the GC collect a managed key
+    }
+
+    /// <summary>
+    /// Entities by key order: keys from <paramref name="min"/> to <paramref name="max"/> (inclusive, when
+    /// <paramref name="bounded"/>), ascending or <paramref name="descending"/>. The first ordered walk sorts the keys
+    /// once. Comparable keys only (the public members are extensions constrained on <see cref="IComparable{T}"/>).
+    /// </summary>
+    internal Ordered Walk(TKey min, TKey max, bool bounded, bool descending)
+    {
+        if (!_built) Build();
+        if (_sorted == null) SortKeys();
+        return new Ordered(this, min, max, bounded, descending);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void SortKeys()
+    {
+        var sorted = new TKey[Math.Max(16, _heads.Count)];
+        _heads.Keys.CopyTo(sorted, 0);
+        _sortedCount = _heads.Count;
+        Array.Sort(sorted, 0, _sortedCount, Comparer<TKey>.Default);
+        _sorted = sorted;
+        _keysVersion++;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int Compare(TKey a, TKey b) => Comparer<TKey>.Default.Compare(a, b); // devirtualized for value types
+
+    /// <summary>Position of the first sorted key not below <paramref name="key"/> (<paramref name="above"/>: above it).</summary>
+    private int Bound(TKey key, bool above)
+    {
+        int lo = 0, hi = _sortedCount;
+        while (lo < hi)
+        {
+            int mid = (int)((uint)(lo + hi) >> 1);
+            int order = Compare(_sorted[mid], key);
+            if (order < 0 || (above && order == 0)) lo = mid + 1;
+            else hi = mid;
+        }
+
+        return lo;
+    }
+
+    private void InsertSorted(TKey key)
+    {
+        int at = Bound(key, above: false);
+        if (_sortedCount == _sorted.Length) Array.Resize(ref _sorted, _sorted.Length * 2);
+        Array.Copy(_sorted, at, _sorted, at + 1, _sortedCount - at);
+        _sorted[at] = key;
+        _sortedCount++;
+        _keysVersion++;
+    }
+
+    private void RemoveSorted(TKey key)
+    {
+        int at = Bound(key, above: false);
+        _sortedCount--;
+        Array.Copy(_sorted, at + 1, _sorted, at, _sortedCount - at);
+        _sorted[_sortedCount] = default!; // let the GC collect a managed key
+        _keysVersion++;
+    }
+
+    /// <summary>
+    /// Enumerates entities in key order (<c>foreach</c>): every entity of a key, then the next key. O(log keys) to
+    /// start, O(1) per entity and per key. Destroying entities during the loop is allowed, changing
+    /// <typeparamref name="T"/> is not.
+    /// </summary>
+    public ref struct Ordered
+    {
+        private readonly ValueIndex<T, TKey> _index;
+        private readonly TKey _min, _max;
+        private readonly bool _bounded, _descending;
+        private TKey _key;
+        private int _pos, _version, _next;
+        private bool _started;
+
+        internal Ordered(ValueIndex<T, TKey> index, TKey min, TKey max, bool bounded, bool descending)
+        {
+            _index = index;
+            _min = min;
+            _max = max;
+            _bounded = bounded;
+            _descending = descending;
+            _key = default!;
+            _pos = 0;
+            _version = 0;
+            _next = -1;
+            _started = false;
+            Current = default;
+        }
+
+        /// <summary>The current entity.</summary>
+        public Entity Current { get; private set; }
+
+        /// <summary>The key of <see cref="Current"/>.</summary>
+        public readonly TKey Key => _key;
+
+        /// <summary>The enumerator itself (<c>foreach</c> support, no allocation).</summary>
+        public readonly Ordered GetEnumerator() => this;
+
+        /// <summary>Move to the next entity, in key order.</summary>
+        public bool MoveNext()
+        {
+            var index = _index;
+            while (true)
+            {
+                while (_next >= 0)
+                {
+                    ref var node = ref index._nodes[_next];
+                    int id = _next;
+                    _next = node.Next;
+                    if (!node.Linked) continue;
+                    Current = new Entity(index._world, id, node.Version);
+                    return true;
+                }
+
+                if (!_started)
+                {
+                    _pos = _descending
+                        ? (_bounded ? index.Bound(_max, above: true) : index._sortedCount) - 1
+                        : _bounded ? index.Bound(_min, above: false) : 0;
+                    _started = true;
+                }
+                else if (_version != index._keysVersion) // keys came or went: find the key after the last one again
+                    _pos = _descending ? index.Bound(_key, above: false) - 1 : index.Bound(_key, above: true);
+                else _pos += _descending ? -1 : 1;
+
+                _version = index._keysVersion;
+                if ((uint)_pos >= (uint)index._sortedCount) return false;
+                _key = index._sorted[_pos];
+                if (_bounded && (_descending ? Compare(_key, _min) < 0 : Compare(_key, _max) > 0)) return false;
+                _next = index.HeadOf(_key).First; // a sorted key has entities
+            }
+        }
     }
 
     /// <summary>Enumerates the entities of one key (<c>foreach</c>).</summary>

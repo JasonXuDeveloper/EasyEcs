@@ -101,6 +101,38 @@ public class AllocationTests
     }
 
     [Test]
+    public void OrderedWalksCascadesAndCleanupDoNotAllocate()
+    {
+        using var world = new World();
+        var ratings = world.Index<Rating, int>();
+        var players = new Entity[256];
+        for (int i = 0; i < players.Length; i++) players[i] = world.CreateEntity(new Rating(i % 32));
+        int next = 0;
+
+        void Frame()
+        {
+            // Ratings move (keys appear and empty), a leaderboard reads the top, a bracket reads a range.
+            var player = players[next++ % players.Length];
+            player.Set(new Rating((player.Read<Rating>().Points + 37) % 64));
+            int seen = 0;
+            foreach (var _ in ratings.Descending()) if (++seen == 10) break;
+            foreach (var _ in ratings.Range(10, 20)) seen++;
+
+            // A tree with a retiring leaf: destroy cascades, the cleanup component is released.
+            var root = world.CreateEntity(new Health(1));
+            var child = world.CreateEntity(new ChildOf(root));
+            var leaf = world.CreateEntity(new ChildOf(child), new Lease(1));
+            root.Destroy();
+            leaf.Remove<Lease>();
+        }
+
+        for (int i = 0; i < 300; i++) Frame(); // warm-up: keys sorted, stacks and tables grown, JIT
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 500; i++) Frame();
+        Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, world.EntityCount), Is.EqualTo((0L, players.Length)));
+    }
+
+    [Test]
     public void ParallelForEachDoesNotAllocateAfterItsFirstCall()
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
