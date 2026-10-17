@@ -10,13 +10,16 @@ catches design mistakes at compile time, and a full server tick allocates 0 byte
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/github/license/JasonXuDeveloper/EasyEcs)](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/LICENSE)
 
-| One server tick, 9 systems: movement, AOI, combat, status effects, death, respawn, projectiles | Entities | Time | Allocated |
+One server tick of 9 systems (movement, AOI, combat, status effects, death, respawn, projectiles):
+
+| Tick | Entities | Time | Allocated |
 |---|---:|---:|---:|
-| One world | 100,000 | **1.89 ms** | **0 B** |
-| Four worlds on four threads (one per thread) | 100,000 | **1.08 ms** | **0 B** |
-| The [battle server example](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/example.md), every feature on: parallel steering and systems, replication, indexes, relations, timings | 100,000 | **2.36 ms** | **0 B** |
+| One world | 100,000 | **1.89&nbsp;ms** | **0 B** |
+| Four worlds, one per thread | 100,000 | **1.08&nbsp;ms** | **0 B** |
+| [Battle server](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/example.md), every feature | 100,000 | **2.36&nbsp;ms** | **0 B** |
 
 <sub>BenchmarkDotNet, .NET 10, 4-core Xeon VM at 2.1 GHz; entities spawn, die, gain and lose components every tick.
+The battle server turns every feature on: parallel steering and systems, replication, indexes, relations, timings.
 A `[ForEach]` system adding `Velocity` to `Position` costs 0.8 ns per entity (one archetype), faster than two
 plain arrays.
 [Details](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md#benchmarks).</sub>
