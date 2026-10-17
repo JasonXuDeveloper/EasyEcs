@@ -79,15 +79,15 @@ counters (hits, deaths, spawns, AOI changes, entities) match an EasyEcs referenc
 
 | Library | 10,000 entities | 100,000 entities | Allocated per tick (100k) |
 |---|---:|---:|---:|
-| **EasyEcs** | 194 μs (1.00) | 2.00 ms (1.00) | 0 B |
-| Friflo.Engine.ECS | 159 μs (0.82) | 1.79 ms (0.89) | 0 B |
-| Arch | 474 μs (2.45) | 5.45 ms (2.73) | 550 KB |
-| DefaultEcs | 289 μs (1.49) | 5.31 ms (2.66) | 62 KB |
+| **EasyEcs** | 167 μs (1.00) | 1.84 ms (1.00) | 0 B |
+| Friflo.Engine.ECS | 155 μs (0.93) | 1.75 ms (0.95) | 0 B |
+| Arch | 456 μs (2.74) | 5.46 ms (2.96) | 550 KB |
+| DefaultEcs | 289 μs (1.73) | 5.96 ms (3.24) | 62 KB |
 
 <sub>BenchmarkDotNet, the repository's job (`BenchmarkConfig.cs`), .NET 10, 4-core Xeon VM at 2.1 GHz; ratio against EasyEcs in parentheses.</sub>
 
-Friflo is about 10% faster at both sizes (5-18% across runs on this VM; the table is one run). Both allocate nothing
-per tick. Arch and DefaultEcs take 1.5-2.7x as long and allocate every tick. The gap to Friflo
+Friflo is 5-7% faster (5-8% across runs on this VM; the table is one run). Both allocate nothing
+per tick. Arch and DefaultEcs take 1.7-3.2x as long and allocate every tick. The gap to Friflo
 comes from the systems that pass the entity to the job (see `Entity` below); EasyEcs is ahead in the systems that
 spawn, expire and toggle components.
 
@@ -97,15 +97,15 @@ spawn, expire and toggle components.
 
 | Operation | EasyEcs | Friflo | |
 |---|---:|---:|---|
-| Iterate one component | 38.1 μs | 67.3 μs | EasyEcs 1.77x faster |
-| Iterate two components | 245 μs | 249 μs | about even |
-| Two components, SIMD batches | 71.0 μs | 81.3 μs | EasyEcs 1.14x faster |
-| Iterate three components | 76.7 μs | 68.4 μs | Friflo 1.12x faster |
-| Filtered (`With` a tag on a few entities) | 11.5 μs | 17.0 μs | EasyEcs 1.47x faster |
-| Iterate with the entity handle | 53.9 μs | 37.7 μs | Friflo 1.43x faster |
-| Iterate with a singleton | 215 μs | 224 μs | about even |
-| Toggle a status component (remove + add) | 509 μs | 986 μs | EasyEcs 1.94x faster |
-| Create and destroy | 226 μs | 203 μs | Friflo 1.11x faster |
+| Iterate one component | 38.8 μs | 49.8 μs | EasyEcs 1.28x faster |
+| Iterate two components | 251 μs | 246 μs | about even |
+| Two components, SIMD batches | 64.2 μs | 80.5 μs | EasyEcs 1.25x faster |
+| Iterate three components | 60.9 μs | 63.7 μs | about even |
+| Filtered (`With` a tag on a few entities) | 10.8 μs | 14.6 μs | EasyEcs 1.35x faster |
+| Iterate with the entity handle | 45.5 μs | 35.3 μs | Friflo 1.29x faster |
+| Iterate with a singleton | 200 μs | 221 μs | EasyEcs 1.11x faster |
+| Toggle a status component (remove + add) | 481 μs | 977 μs | EasyEcs 2.03x faster |
+| Create and destroy | 219 μs | 198 μs | Friflo 1.10x faster |
 
 All rows allocate 0 B. Toggling is where tables with presence bits pay off: EasyEcs flips a bit and the entity stays
 in its row, Friflo moves the entity to another archetype and back. Passing the entity costs EasyEcs more: its job receives a

@@ -121,8 +121,8 @@ warmups, 8 iterations of 250 ms, call counting from the start) on .NET 10, on a 
 
 | Benchmark | Entities | v4.0.1 | v4.1 | Allocated |
 |---|---:|---:|---:|---:|
-| WorldSimulationBenchmark.Tick | 10,000 | 322 μs | 184 μs | 0 B |
-| WorldSimulationBenchmark.Tick | 100,000 | 4.33 ms | 2.01 ms | 0 B |
+| WorldSimulationBenchmark.Tick | 10,000 | 322 μs | 169 μs | 0 B |
+| WorldSimulationBenchmark.Tick | 100,000 | 4.33 ms | 1.89 ms | 0 B |
 | MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.85 ms | 1.08 ms | 0 B |
 | BattleServerBenchmark.Tick (every feature) | 100,000 | – | 2.36 ms | 0 B |
 | ParallelSystemsBenchmark.Tick, `Parallel` off / on | 100,000 | – | 394 / 243 μs | 0 B |
@@ -140,16 +140,16 @@ EasyEcs):
 
 | Library | 10,000 entities | 100,000 entities | Allocated per tick (100k) |
 |---|---:|---:|---:|
-| EasyEcs 4.1 | 194 μs (1.00) | 2.00 ms (1.00) | 0 B |
-| Friflo.Engine.ECS | 159 μs (0.82) | 1.79 ms (0.89) | 0 B |
-| DefaultEcs | 289 μs (1.49) | 5.31 ms (2.66) | 62 KB |
-| Arch | 474 μs (2.45) | 5.45 ms (2.73) | 550 KB |
+| EasyEcs 4.1 | 167 μs (1.00) | 1.84 ms (1.00) | 0 B |
+| Friflo.Engine.ECS | 155 μs (0.93) | 1.75 ms (0.95) | 0 B |
+| Arch | 456 μs (2.74) | 5.46 ms (2.96) | 550 KB |
+| DefaultEcs | 289 μs (1.73) | 5.96 ms (3.24) | 62 KB |
 
-Friflo is about 10% faster at both sizes (5-18% across runs on this VM; the table is one run). The per-operation
-breakdown (`OperationBenchmark`, 100,000 entities) shows where: EasyEcs is ahead on one-component iteration (38 vs
-67 μs), SIMD batches (71 vs 81 μs), filtered iteration (11.5 vs 17.0 μs) and toggling a status component (509 vs
-986 μs); Friflo is ahead on iteration that passes the entity (38 vs 54 μs), three-component iteration (68 vs 77 μs)
-and create/destroy (203 vs 226 μs); two-component iteration (245 vs 249 μs) and singletons (215 vs 224 μs) are even.
+Friflo is 5-7% faster (5-8% across runs on this VM; the table is one run). The per-operation breakdown
+(`OperationBenchmark`, 100,000 entities) shows where: EasyEcs is ahead on one-component iteration (39 vs 50 μs),
+SIMD batches (64 vs 81 μs), filtered iteration (10.8 vs 14.6 μs), singletons (200 vs 221 μs) and toggling a status
+component (481 vs 977 μs); Friflo is ahead on iteration that passes the entity (35 vs 46 μs) and create/destroy (198
+vs 219 μs); two-component (251 vs 246 μs) and three-component iteration (61 vs 64 μs) are even.
 Unlike Friflo, EasyEcs applies structural changes immediately, also inside a pass, with no command buffer. Change
 tracking and index results against each library are in [the comparison](comparison.md).
 
@@ -158,22 +158,22 @@ the operation has no v3.1.1 equivalent (struct jobs, `[ForEach]` systems and han
 
 | Benchmark | v3.1.1 | v4.0.1 | v4.1 | Allocated (v4.1) |
 |---|---:|---:|---:|---:|
-| CreateAddDestroy (fresh world) | 5,358 μs | 1,795 μs | 1,156 μs | 1.52 MB (new world, its growth and the benchmark's handle array) |
-| Churn: 10 rounds of create (2 components) and destroy in one warm world | 5,247 μs / 3.19 MB | 1,023 μs | 381 μs | 0 B |
-| ChurnBatch: the same rounds with `CreateEntities` / `DestroyEntities` | – | – | 162 μs | 0 B |
-| ToggleComponent: remove + add | 1,185 μs | 338 μs | 194 μs | 0 B |
-| QueryIterate (`Query<P,V>` + reduction) | 40.6 μs | 35.3 μs | 28.7 μs | 0 B |
-| ForEachIterate (`ForEach` struct job + reduction) | – | 30.6 μs | 12.8 μs | 0 B |
-| QueryWrite (`Query`, pure write) | – | 28.3 μs | 18.3 μs | 0 B |
+| CreateAddDestroy (fresh world) | 5,358 μs | 1,795 μs | 1,092 μs | 1.52 MB (new world, its growth and the benchmark's handle array) |
+| Churn: 10 rounds of create (2 components) and destroy in one warm world | 5,247 μs / 3.19 MB | 1,023 μs | 382 μs | 0 B |
+| ChurnBatch: the same rounds with `CreateEntities` / `DestroyEntities` | – | – | 158 μs | 0 B |
+| ToggleComponent: remove + add | 1,185 μs | 338 μs | 183 μs | 0 B |
+| QueryIterate (`Query<P,V>` + reduction) | 40.6 μs | 35.3 μs | 28.9 μs | 0 B |
+| ForEachIterate (`ForEach` struct job + reduction) | – | 30.6 μs | 12.6 μs | 0 B |
+| QueryWrite (`Query`, pure write) | – | 28.3 μs | 15.7 μs | 0 B |
 | ForEachSystemWrite (`[ForEach]` system adding `Velocity` to `Position`) | – | 15.1 μs | 8.2 μs | 0 B |
-| ForEachWrite (`ForEach` struct job) | – | 24.3 μs | 9.7 μs | 0 B |
-| RawArrayWrite (two plain arrays, the floor) | – | 11.0 μs | 10.8 μs | 0 B |
-| QueryIterate3 (half the entities match) | 16.2 μs | 9.1 μs | 9.4 μs | 0 B |
-| HandleAccess (`Entity.Get`, ×1000) | – | 3.56 μs | 3.23 μs | 0 B |
-| TryGetEntity (`Entity.TryGet`, ×1000) | – | – | 3.45 μs | 0 B |
-| TrackedHandleWrite (`Entity.Get` of a tracked component, ×1000) | – | – | 8.66 μs | 0 B |
-| SingletonAccess (×1000) | 1.42 μs | 0.90 μs | 0.97 μs | 0 B |
-| CountAndAny (`Count` + `Any` with a filter, ×1000) | – | – | 49.9 μs | 0 B |
+| ForEachWrite (`ForEach` struct job) | – | 24.3 μs | 9.5 μs | 0 B |
+| RawArrayWrite (two plain arrays, the floor) | – | 11.0 μs | 10.7 μs | 0 B |
+| QueryIterate3 (half the entities match) | 16.2 μs | 9.1 μs | 6.7 μs | 0 B |
+| HandleAccess (`Entity.Get`, ×1000) | – | 3.56 μs | 3.41 μs | 0 B |
+| TryGetEntity (`Entity.TryGet`, ×1000) | – | – | 3.43 μs | 0 B |
+| TrackedHandleWrite (`Entity.Get` of a tracked component, ×1000) | – | – | 8.65 μs | 0 B |
+| SingletonAccess (×1000) | 1.42 μs | 0.90 μs | 0.80 μs | 0 B |
+| CountAndAny (`Count` + `Any` with a filter, ×1000) | – | – | 50.5 μs | 0 B |
 
 `ForEachSystemWrite` runs on a world with a single archetype (`Position`, `Velocity`); its columns are 64-byte
 aligned, so the generated job beats two plain (unaligned) arrays. The other iteration rows (`QueryIterate`,

@@ -43,7 +43,7 @@ components, singletons and outside code; never keep raw ids.
 
 **Cost.** Create is O(n) amortized for n components (an entity with its components lands in its final table at
 once); destroy is O(c) for c columns (the table's last row fills the hole).
-Reading a component through a handle is one 16-byte record, one table lookup and one load: 3.2 μs per 1,000
+Reading a component through a handle is one 16-byte record, one table lookup and one load: 3.4 μs per 1,000
 random handles. Memory is bounded by the peak entity count; `WorldOptions.InitialEntityCapacity` and
 `world.EnsureEntityCapacity(n)` pre-size the entity records for a known peak.
 
@@ -65,7 +65,7 @@ states that come and go. A field, not a tag, for a value that changes every tick
 **When not.** Behavior or references to services in components: components are data; systems hold the behavior.
 
 **Cost.** Iteration walks columns front to back and loads only the columns it reads. Toggling a status component on
-10,000 entities (remove and add back) takes 194 μs, 0 B. Gaining a component the entity's table has no column for
+10,000 entities (remove and add back) takes 183 μs, 0 B. Gaining a component the entity's table has no column for
 copies its row once.
 
 **Scenarios.** Buffs, debuffs, deaths and status effects that flip every few ticks on thousands of units.
@@ -102,7 +102,7 @@ delegate, no virtual call per entity. Systems run in `Priority` order, registrat
 **When to use it.** All per-entity logic of a server tick.
 
 **Cost.** A `[ForEach]` system adding `Velocity` to `Position` over 10,000 entities takes 8.2 μs
-(against 10.8 μs for two plain arrays with no ECS). Per system and update: three virtual calls plus one
+(against 10.7 μs for two plain arrays with no ECS). Per system and update: three virtual calls plus one
 query-cache lookup per method.
 
 **Scenarios.** Movement, AOI, combat, status effects, death, respawn, projectiles: the
@@ -133,7 +133,7 @@ Guide: [Queries and filters](guide/queries.md).
 per-tick logic.
 
 **Cost.** A `Query` step reads the row's id, plus its presence bits and change ticks only when the table needs testing
-(28.7 μs over 10,000 entities in two tables, against 12.8 μs for a struct job). `Count` sums table counts; `Any` stops
+(28.9 μs over 10,000 entities in two tables, against 12.6 μs for a struct job). `Count` sums table counts; `Any` stops
 at the first match.
 
 Guide: [Queries and filters](guide/queries.md).
@@ -149,7 +149,7 @@ for ad-hoc jobs.
 **When not.** Logic that changes structure or needs the entity (batch methods take only spans and singletons).
 
 **Cost.** One call per run of rows instead of one per entity. Moving 100,000 entities with a bounce at the map's edge
-takes 71 μs as a vectorized batch method, against 245 μs per entity (`OperationBenchmark`), 0 B.
+takes 64 μs as a vectorized batch method, against 251 μs per entity (`OperationBenchmark`), 0 B.
 
 Guide: [Systems: batch methods](guide/systems.md#batch-methods).
 
@@ -172,7 +172,7 @@ Guide: [Systems: groups](guide/systems.md#system-groups).
 
 **When to use it.** Every piece of world-level state; systems keep none.
 
-**Cost.** One lookup per pass for a parameter; 0.97 μs for 1,000 lookups.
+**Cost.** One lookup per pass for a parameter; 0.80 μs for 1,000 lookups.
 
 Guide: [Singletons](guide/singletons.md).
 
@@ -350,7 +350,7 @@ thread-pool threads inside one update without changing ownership.
 **When to use it.** One world per thread (one per map or zone): no synchronization at all. Input from other threads
 goes through a queue you own, drained by a system.
 
-**Cost.** Four worlds of 25,000 entities on four threads tick in 1.08 ms, against 2.01 ms for one world of 100,000.
+**Cost.** Four worlds of 25,000 entities on four threads tick in 1.08 ms, against 1.89 ms for one world of 100,000.
 
 Guide: [Threading](guide/threading.md).
 

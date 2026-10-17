@@ -12,7 +12,7 @@ catches design mistakes at compile time, and a full server tick allocates 0 byte
 
 | One server tick, 9 systems: movement, AOI, combat, status effects, death, respawn, projectiles | Entities | Time | Allocated |
 |---|---:|---:|---:|
-| One world | 100,000 | **2.01 ms** | **0 B** |
+| One world | 100,000 | **1.89 ms** | **0 B** |
 | Four worlds on four threads (one per thread) | 100,000 | **1.08 ms** | **0 B** |
 | The [battle server example](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/example.md), every feature on: parallel steering and systems, replication, indexes, relations, timings | 100,000 | **2.36 ms** | **0 B** |
 
@@ -175,15 +175,15 @@ not a toy loop ([what it simulates](https://github.com/JasonXuDeveloper/EasyEcs/
 
 | Benchmark | Entities | Mean | Allocated |
 |---|---:|---:|---:|
-| WorldSimulationBenchmark.Tick | 10,000 | 184 μs | 0 B |
-| WorldSimulationBenchmark.Tick | 100,000 | 2.01 ms | 0 B |
+| WorldSimulationBenchmark.Tick | 10,000 | 169 μs | 0 B |
+| WorldSimulationBenchmark.Tick | 100,000 | 1.89 ms | 0 B |
 | MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.08 ms | 0 B |
 | BattleServerBenchmark.Tick (the [battle server example](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/example.md), every feature) | 100,000 | 2.36 ms | 0 B |
 
-Against v4.0.1 (4.33 ms) the tick is 2.2x faster.
+Against v4.0.1 (4.33 ms) the tick is 2.3x faster.
 
 A `[ForEach]` system adding `Velocity` to `Position` over 10,000 entities (one archetype) takes 8.2 μs, against
-10.8 μs for two plain arrays with no ECS at all (its columns are 64-byte aligned). Micro benchmarks (with v3.1.1 and
+10.7 μs for two plain arrays with no ECS at all (its columns are 64-byte aligned). Micro benchmarks (with v3.1.1 and
 v4.0.1 numbers for comparison) and the per-operation comparison are in
 [doc/performance.md](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md); their `ForEach` and
 `Query` rows run on a world with two archetypes, so they are not directly comparable to the `[ForEach]` row.
@@ -199,12 +199,12 @@ The same 100,000-entity tick, ported to each library's fast path with identical 
 
 | Library | Tick (100,000 entities) | Allocated per tick |
 |---|---:|---:|
-| **EasyEcs 4.1** | **2.00 ms (1.00)** | **0 B** |
-| Friflo.Engine.ECS 3.6 | 1.79 ms (0.89) | 0 B |
-| DefaultEcs 0.17 | 5.31 ms (2.66) | 62 KB |
-| Arch 2.1 | 5.45 ms (2.73) | 550 KB |
+| **EasyEcs 4.1** | **1.84 ms (1.00)** | **0 B** |
+| Friflo.Engine.ECS 3.6 | 1.75 ms (0.95) | 0 B |
+| Arch 2.1 | 5.46 ms (2.96) | 550 KB |
+| DefaultEcs 0.17 | 5.96 ms (3.24) | 62 KB |
 
-Friflo is about 10% faster on this tick (5-18% across runs on this VM); EasyEcs leads on one-component and SIMD iteration, filters and toggling a status component (2x Friflo); Friflo on
+Friflo is about 5% faster on this tick (5-8% across runs on this VM); EasyEcs leads on one-component and SIMD iteration, filters and toggling a status component (2x Friflo); Friflo on
 iteration that passes the entity. On change tracking (`[Changed<T>]`, 1,000 of 100,000 rows written per tick) EasyEcs
 is the fastest of all four (33 μs; a scan takes 54-110 μs, a dirty tag 83-120 μs).
 
@@ -281,8 +281,8 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
   receive only the components; stale handles answer `Has` / `TryGet` with false; `CompactArchetypes` is gone (tables
   stay dense on their own). See the
   [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v40--v41).
-- A realistic 100k-entity server tick takes 2.01 ms instead of 4.33 ms; toggling a status component on 10,000
-  entities 194 μs instead of 338 μs; reading a component through 1,000 random handles 3.23 μs instead of 3.56 μs.
+- A realistic 100k-entity server tick takes 1.89 ms instead of 4.33 ms; toggling a status component on 10,000
+  entities 183 μs instead of 338 μs; reading a component through 1,000 random handles 3.41 μs instead of 3.56 μs.
 
 ## What's new in 4.0
 
