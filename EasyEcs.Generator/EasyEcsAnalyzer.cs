@@ -433,6 +433,9 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
                 valid = false;
                 context.ReportDiagnostic(Diagnostic.Create(BadParameter, p.Locations.FirstOrDefault(), p.Name, method.Name));
             }
+            else if (kind == Symbols.ParamKind.Optional && Symbols.MaybeElement(p.Type) is { } optional && Symbols.IsIndexed(optional))
+                context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, p.Locations.FirstOrDefault(), optional.Name,
+                    $"parameter '{p.Name}' hands out a ref to it (read it from the Entity instead)"));
             else if (kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan)
             {
                 components++;

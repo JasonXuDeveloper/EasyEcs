@@ -114,6 +114,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(System.Span<P> p, System.ReadOnlySpan<Q> q) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "IForEachBatch<global::P, global::Q>")]
     [TestCase("[ForEach, Changed<DynamicBuffer<int>>] static void A(in DynamicBuffer<int> b, ref P p) { }", ".Changed<global::EasyEcs.DynamicBuffer<int>>(0)", "access.Read<global::EasyEcs.DynamicBuffer<int>>();")]
     [TestCase("[ForEach, Changed<T>] static void A(ref P p) { }", "access.Read<global::T>();", ".Changed<global::T>(0)", "Since(LastRunTick + 1)", "Writes => 1;")]
+    [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { }", "access.Write<global::Q>();", "IForEachEntity<global::P>", "INoStructuralChanges", "new global::EasyEcs.Maybe<global::Q>(ref entity.TryGetRef<global::Q>(out _))")]
     [TestCase("[ForEach] void A(in P p) { }", "access.RunsAlone();")]
     [TestCase("[ForEach] static void A(in P p) { } protected override void OnUpdate() { }", "access.RunsAlone();")]
     public void AccessIsDeclaredFromParameters(string members, params string[] expected)
@@ -195,6 +196,7 @@ public class GeneratorTests
     [TestCase("public struct Zone : IComponent, IGroup { public int Id; public int Group => Id; } public partial class S : EcsSystem { [ForEach] static void A(ref Zone z) { } }", "EECS015")]
     [TestCase("public struct Link : IRelation { public EntityId Target { get; set; } } public static class U { public static void F(Entity e, Link l) => e.Get<DynamicBuffer<Link>>().Add(l); }", "EECS015")]
     [TestCase("public struct Link : IRelation { public EntityId Target { get; set; } } public partial class S : EcsSystem { [ForEach] static void A(ref DynamicBuffer<Link> links) { } }", "EECS015")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, Maybe<Owned> o) { } }", "EECS015")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Cells.Add(1); }", "EECS011")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Cells.Clear(); }", "EECS011")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Slots[0] += 1; }", "EECS011")]

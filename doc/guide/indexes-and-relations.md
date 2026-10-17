@@ -44,7 +44,7 @@ public record struct ChildOf(Entity Parent) : IComponent, IIndexed<Entity>
     public Entity Key => Parent;
 }
 
-var children = world.Index<ChildOf, Entity>();
+var children = world.Index<ChildOf, EntityId>();
 var ship = world.CreateEntity(new Health(500));
 world.CreateEntity(new ChildOf(ship), new Health(50));   // a turret
 world.CreateEntity(new ChildOf(ship), new Health(50));
@@ -65,7 +65,7 @@ public partial class DestroyOrphans : EcsSystem
     [ForEach, With<Dead>]
     private void Cascade(Entity ship)
     {
-        foreach (Entity child in World.Index<ChildOf, Entity>().Find(ship)) child.Destroy();
+        foreach (Entity child in World.Index<ChildOf, EntityId>().Find(ship)) child.Destroy();
     }
 }
 ```

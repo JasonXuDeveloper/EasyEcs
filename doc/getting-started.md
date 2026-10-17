@@ -412,7 +412,7 @@ var teams = world.Index<Team, int>();
 int red = teams.Count(1);                                     // units in team 1
 Entity archer = world.CreateEntity(new Team(1));
 world.CreateEntity(new OwnedBy(archer), new Position(0, 0));   // an arrow
-foreach (var shot in world.Index<OwnedBy, Entity>().Find(archer))
+foreach (var shot in world.Index<OwnedBy, EntityId>().Find(archer))
     shot.Destroy();                                           // destroying while iterating is allowed
 ```
 

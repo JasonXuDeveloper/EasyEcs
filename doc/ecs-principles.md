@@ -293,7 +293,7 @@ public static class PlayerRules
     public static void Give(World world, Entity player, int item) =>
         world.CreateEntity(new ItemOf(player), new Health(item));             // a new row: tracked, indexed, snapshotted
 
-    public static int Carried(World world, Entity player) => world.Index<ItemOf, Entity>().Count(player);
+    public static int Carried(World world, Entity player) => world.Index<ItemOf, EntityId>().Count(player);
 }
 ```
 

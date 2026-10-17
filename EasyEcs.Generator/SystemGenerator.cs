@@ -115,6 +115,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Singleton => method.Parallel ? $"{p.RefKind} s{i}.Value" : $"{p.RefKind} s{i}",
             Symbols.ParamKind.Entity => "entity",
             Symbols.ParamKind.Entities => "entities",
+            Symbols.ParamKind.Optional => $"new global::EasyEcs.Maybe<{p.Type}>(ref entity.TryGetRef<{p.Type}>(out _))",
             _ => "World",
         }));
 
@@ -207,7 +208,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
         /// <summary>The queried component types, as type arguments of World.ForEach / IForEach.</summary>
         public string ComponentTypes => string.Join(", ", Query);
 
-        public bool TakesEntity => Parameters.Any(p => p.Kind == Symbols.ParamKind.Entity);
+        /// <summary>Runs per entity with its handle: it takes the Entity, or a Maybe looked up through it.</summary>
+        public bool TakesEntity => Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.Optional);
 
         public bool TakesWorld => Parameters.Any(p => p.Kind == Symbols.ParamKind.World);
 
@@ -226,8 +228,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
             var parameters = method.Parameters.Select(p => Symbols.SpanElement(p.Type) is { } element
                 ? new ParamModel(Symbols.ParamKind.ComponentSpan, element.ToDisplayString(Symbols.Fqn),
                     ((INamedTypeSymbol)p.Type).ConstructedFrom.ToDisplayString() == "System.Span<T>" ? "ref" : "in")
-                : new ParamModel(Symbols.Classify(p), p.Type.ToDisplayString(Symbols.Fqn),
-                    p.RefKind == RefKind.Ref ? "ref" : "in")).ToArray();
+                : Symbols.MaybeElement(p.Type) is { } optional // a write of T when present (a ref)
+                    ? new ParamModel(Symbols.ParamKind.Optional, optional.ToDisplayString(Symbols.Fqn), "ref")
+                    : new ParamModel(Symbols.Classify(p), p.Type.ToDisplayString(Symbols.Fqn),
+                        p.RefKind == RefKind.Ref ? "ref" : "in")).ToArray();
             var with = new List<string>();
             var without = new List<string>();
             var withAny = new List<string>();

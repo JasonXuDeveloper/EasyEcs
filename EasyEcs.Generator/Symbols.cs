@@ -92,6 +92,8 @@ internal static class Symbols
         ComponentSpan,
         /// <summary><c>EntitySpan</c>: the entities of a batch method's run of rows.</summary>
         Entities,
+        /// <summary><c>Maybe&lt;T&gt;</c>: a component the entity may lack (looked up per entity, a write when present).</summary>
+        Optional,
     }
 
     public static ParamKind Classify(IParameterSymbol p)
@@ -104,6 +106,8 @@ internal static class Symbols
         if (p.RefKind != RefKind.None) return ParamKind.Invalid;
         if (SpanElement(p.Type) is { } element)
             return element.IsValueType && Implements(element, Component) ? ParamKind.ComponentSpan : ParamKind.Invalid;
+        if (MaybeElement(p.Type) is { } optional)
+            return optional.IsValueType && Implements(optional, Component) ? ParamKind.Optional : ParamKind.Invalid;
         return p.Type.ToDisplayString() switch
         {
             Entity => ParamKind.Entity,
@@ -117,6 +121,12 @@ internal static class Symbols
     public static ITypeSymbol? SpanElement(ITypeSymbol type) =>
         type is INamedTypeSymbol { IsGenericType: true } named &&
         named.ConstructedFrom.ToDisplayString() is "System.Span<T>" or "System.ReadOnlySpan<T>"
+            ? named.TypeArguments[0]
+            : null;
+
+    /// <summary>Component type of a <c>Maybe&lt;T&gt;</c>, else null.</summary>
+    public static ITypeSymbol? MaybeElement(ITypeSymbol type) =>
+        type is INamedTypeSymbol { IsGenericType: true } named && named.ConstructedFrom.ToDisplayString() == "EasyEcs.Maybe<T>"
             ? named.TypeArguments[0]
             : null;
 
@@ -138,7 +148,7 @@ internal static class Symbols
 
     /// <summary>
     /// A batch method (component spans) takes only spans, its <c>EntitySpan</c> and singletons: per-entity parameters
-    /// (ref/in components, Entity, World) have no meaning for a run of rows, and the World could change rows under the
+    /// (ref/in components, Maybe, Entity, World) have no meaning for a run of rows, and the World could change rows under the
     /// spans. An <c>EntitySpan</c> belongs to a batch method only.
     /// </summary>
     public static bool MixesBatch(IMethodSymbol method)
@@ -149,7 +159,7 @@ internal static class Symbols
             var kind = Classify(p);
             spans |= kind == ParamKind.ComponentSpan;
             entities |= kind == ParamKind.Entities;
-            perEntity |= kind is ParamKind.Component or ParamKind.Entity or ParamKind.World;
+            perEntity |= kind is ParamKind.Component or ParamKind.Entity or ParamKind.World or ParamKind.Optional;
         }
 
         return spans ? perEntity : entities;

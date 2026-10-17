@@ -25,7 +25,7 @@ from another ECS? [Their features in EasyEcs](comparison.md#their-features-in-ea
 | Removal detection (`[Removed<T>]`) | `ReplicationSystem.SendFireOut` tells clients that a fire went out: the entities that lost `Burning` since the last send |
 | Lists per entity (`DynamicBuffer<T>`, `[Changed<DynamicBuffer<T>>]`) | every player's bag of `Loot`: filled in `Despawn`, emptied in `Respawn`, sent by `ReplicationSystem.SendBag` only when it changed; `LootValue` reads it (`foreach`), `Give` moves an item between two bags |
 | Value index (`Find`, `TryFind`, `Count`) | `Zone : IIndexed<int>`: players per zone; `Despawn` hunts a player of a zone |
-| Relation | `OwnedBy : IIndexed<Entity>`: a respawning player recalls its projectiles |
+| Relation | `OwnedBy : IIndexed<EntityId>`: a respawning player recalls its projectiles |
 | System groups, `UpdateInterval`, `Enabled` | `Replication` runs every third tick; `RegenerationSystem` every tenth update; `OnSystemError` switches a failing system off |
 | System lifecycle (`OnCreate`, `OnDestroy`) | `SteeringSystem` sets up and removes its `Waypoints`; `ClockSystem` adds `Battle` |
 | Struct jobs (`ForEach`, `ForEachEntity`, `ForEachBatch`, `ForEachParallel`, `ForEachEntityParallel`) | `Census` (read-only: `Writes => 0`, `INoStructuralChanges`); `NewRound` heals everyone and scatters the NPCs, on every core |
@@ -61,7 +61,7 @@ public record struct Burning(int Ticks) : IComponent, ITrackChanges;          //
 public record struct Frozen(int Ticks) : IComponent;
 public record struct Lifetime(int Ticks) : IComponent;
 public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }                  // players by zone
-public record struct OwnedBy(Entity Owner) : IComponent, IIndexed<Entity> { public Entity Key => Owner; } // a relation
+public record struct OwnedBy(EntityId Owner) : IComponent, IIndexed<EntityId> { public EntityId Key => Owner; } // a relation
 public record struct Loot(int Item);                                          // players carry a DynamicBuffer<Loot>
 public struct Player : IComponent;                                            // tags: empty components
 public struct Npc : IComponent;
@@ -427,11 +427,11 @@ public sealed class BattleServer : IDisposable
 
     public int ShotsLeft(Entity player) => player.IsAlive && player.TryGetMana(out var mana) ? mana.Value / ShotCost : 0;
 
-    /// <summary>A client's hit on the unit it names by id: the id turns back into a handle of the living entity.</summary>
-    public bool Hit(int targetId, int damage)
+    /// <summary>A client's hit on the unit it names by id: the id turns back into a handle if that unit still lives.</summary>
+    public bool Hit(EntityId target, int damage)
     {
-        if (!World.TryGetEntity(targetId, out var target) || target.IsDead) return false;
-        ref var hp = ref target.TryGetRef<Health>(out bool found);           // optional access by ref
+        if (!World.TryGetEntity(target, out var unit) || unit.IsDead) return false;
+        ref var hp = ref unit.TryGetRef<Health>(out bool found);             // optional access by ref
         if (!found) return false;
         hp.Value -= damage;                                                   // a write: replicated with the next send
         return true;

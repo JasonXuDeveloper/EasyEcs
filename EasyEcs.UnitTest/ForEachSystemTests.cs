@@ -30,6 +30,17 @@ public partial class Damage : EcsSystem
     private static void Corpses(Entity entity) => entity.Remove<Velocity>();
 }
 
+/// <summary>Optional component: one method for entities with and without Armor.</summary>
+public partial class Regenerate : EcsSystem
+{
+    [ForEach]
+    private static void Heal(ref Health health, Maybe<Armor> armor)
+    {
+        health = health with { Value = health.Value + (armor.HasValue ? armor.Value.Value : 1) };
+        if (armor.HasValue) armor.Value = armor.Value with { Value = armor.Value.Value - 1 }; // worn by use
+    }
+}
+
 /// <summary>Derived partial systems compose: base [ForEach] methods run first.</summary>
 public partial class MovementWithGravity : Movement
 {
@@ -127,6 +138,26 @@ public class ForEachSystemTests
         world.Update();
 
         Assert.That(world.GetSingleton<Score>().Points, Is.EqualTo(3));
+    }
+
+    [Test]
+    public void MaybeParametersSeeTheOptionalComponentWhenPresent()
+    {
+        using var world = new World();
+        var bare = world.CreateEntity(new Health(10));
+        var armored = world.CreateEntity(new Health(10), new Armor(5));
+        var disabled = world.CreateEntity(new Health(10), new Armor(5));
+        disabled.Disable<Armor>();
+        world.AddSystem<Regenerate>();
+        ulong mark = world.ChangeTick;
+        world.Update();
+
+        Assert.That(bare.Read<Health>().Value, Is.EqualTo(11));
+        Assert.That(armored.Read<Health>().Value, Is.EqualTo(15));
+        Assert.That(armored.Read<Armor>().Value, Is.EqualTo(4));                   // written through the Maybe
+        Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(mark + 1)), Is.EqualTo(1)); // a tracked write stamps the row
+        Assert.That(disabled.Read<Health>().Value, Is.EqualTo(11));               // a disabled component is absent
+        Assert.Throws<System.InvalidOperationException>(static () => new Maybe<Armor>(ref System.Runtime.CompilerServices.Unsafe.NullRef<Armor>()).Value.ToString());
     }
 
     [Test]
