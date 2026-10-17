@@ -41,8 +41,9 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
                                and the row chunks of parallel [ForEach]
   World.Snapshots.cs           Capture / Restore (WorldSnapshot.cs holds the copies)
   World.Indexes.cs             world.Index<T, TKey>() (one ValueIndex per indexed component type)
-  ValueIndex.cs                IIndexed<TKey> + ValueIndex: key -> linked entity ids + count, caught up through change
-                               ticks; destroy / remove unlink at once (World.Indexes.cs hooks)
+  ValueIndex.cs                IIndexed<TKey> + ValueIndex: key -> linked entity ids + count, built by the first
+                               lookup, kept by Set / CreateEntity(ies) (World.Indexed, a JIT-time no-op for
+                               unindexed types); destroy / remove unlink at once (World.Indexes.cs hooks)
   SystemAccess.cs              a system's read/write sets (generated from [ForEach] parameters) and the conflict rule
   SystemStats.cs               per-system run counts and times (WorldOptions.MeasureSystems)
   World.Singletons.cs          per-world singletons (ref returns)
@@ -75,7 +76,9 @@ EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, req
   SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of rows; INoStructuralChanges when
                                the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] ->
                                ChangedSince(LastRunTick + 1) and a read of T) + GeneratedUpdate + GeneratedAccess
-  EasyEcsAnalyzer.cs           EECS001-014 (generators never report diagnostics)
+  ComponentGenerator.cs        C# 14 extension properties on Entity per component (ref T; ref readonly T for tracked
+                               or indexed components)
+  EasyEcsAnalyzer.cs           EECS001-015 (generators never report diagnostics)
   Threads.cs                   EECS014's check: does a structural call in a delegate handed to another thread race
   Symbols.cs                   symbol checks shared by generator and analyzer
   Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
@@ -96,7 +99,7 @@ EasyEcs.Comparison/            BenchmarkDotNet: the headline world (WorldSimulat
                                OperationBenchmark (per operation, vs Friflo); FeatureBenchmark (change tracking and
                                indexes in each library's own way, results checked in setup)
 doc/                           README.md (index), getting-started.md, example.md (the battle server), guide/ (one page per concept, analyzer.md
-                               lists EECS001-014), api.md (API + complexity), ecs-principles.md, architecture.md,
+                               lists EECS001-015), api.md (API + complexity), ecs-principles.md, architecture.md,
                                performance.md (diagrams in mermaid)
 ```
 

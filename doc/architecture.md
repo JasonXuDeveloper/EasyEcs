@@ -61,15 +61,15 @@ flowchart TB
   written rows directly, and only words mixing older and newer ticks compare their rows (4 per SIMD instruction).
   The result is 64 bits per word, like the presence bits: it rides on the row-filter machinery.
   Untracked components have no column and no stamping code (the checks are JIT-time constants).
-- **Value indexes** (`IIndexed<TKey>`, `world.Index<T, TKey>()`) are built on change ticks: a dictionary from key to
-  the head and length of a doubly linked list of entity ids (nodes in an array indexed by id); relation heads (keys
-  that are entities of the world) sit in an array indexed by the target's id instead, so a relation lookup hashes
-  nothing. Writes cannot be seen when they happen (a `ref` is handed out before the value changes), so a lookup first
-  re-indexes the rows written since the previous lookup: an inlined check of one summary per table, and when a table
-  was written, a walk of its written rows (no pass: re-indexing changes no structure). Losing the component
-  is seen when it happens: destroying an entity or removing an indexed component unlinks it at once (one null check on
-  those paths while the world has no index), so counts are exact and enumeration needs no validation. Nothing is
-  added to the write path.
+- **Value indexes** (`IIndexed<TKey>`, `world.Index<T, TKey>()`): a dictionary from key to the head and length of a
+  doubly linked list of entity ids (nodes in an array indexed by id); relation heads (keys that are entities of the
+  world) sit in an array indexed by the target's id instead, so a relation lookup hashes nothing. The index is kept on
+  write: `Set`, `CreateEntity` and `CreateEntities` call one inlined hook that the JIT removes for components without
+  an index (`ComponentType<T>.Indexed` is a static readonly constant), and the hook re-links the entity only when its
+  key changed. A write through a `ref` cannot be seen (the ref is handed out before the value changes), so the
+  analyzer rejects those (EECS015) instead of the index paying for every lookup. The first lookup builds the index with
+  one query; destroying an entity or removing an indexed component unlinks it at once (one null check on those paths
+  while the world has no index), so counts are exact and enumeration needs no validation.
 
 Trade-off: a table copies an entity's row when the entity gains a component its table has no column for, which is
 what makes iteration dense. States that come and go (stunned, burning, dead) only flip presence bits after the first
@@ -207,7 +207,7 @@ Every iteration API walks tables front to back. What differs is how much bookkee
 |---|---|
 | `ArityGenerator` | Emits every T1..T9 family of `EasyEcs.Core` from one template each: `Entity.Set` / `Remove`, `World.CreateEntity` / `CreateEntities` / `DestroyEntities`, `IForEach` / `IForEachEntity` / `IForEachBatch`, `ForEach` / `ForEachEntity` / `ForEachBatch` / `ForEachParallel` / `ForEachEntityParallel`, `Query`, `Count`, `Any`, `QueryItem` / `QueryEnumerator`. Runs only for `EasyEcs.Core`. |
 | `SystemGenerator` | Turns `[ForEach]` methods into struct jobs (per entity, or per run of rows for span parameters), static filters, a `GeneratedUpdate` override, a `GeneratedAccess` override (reads and writes, or `RunsAlone`) used for `ParallelSystems` batching, and a `GeneratedFor` override naming the class it was generated for (a subclass the generator did not see inherits it, so its access is unknown and it runs alone). `[Changed<T>]` becomes `ChangedSince(LastRunTick + 1)` on the method's filter and a declared read of `T`; `[ForEach(Parallel = true)]` runs the job over chunks of rows. Jobs that cannot change structure get `INoStructuralChanges`; jobs record which components they write (`Writes`) and whether they read the entity id. |
-| `EasyEcsAnalyzer` | Reports EECS001–EECS014, all errors: invalid input the generator skips, and code that breaks the ECS principles. Every rule with its fix: [Analyzer rules](guide/analyzer.md). |
+| `EasyEcsAnalyzer` | Reports EECS001–EECS015, all errors: invalid input the generator skips, and code that breaks the ECS principles. Every rule with its fix: [Analyzer rules](guide/analyzer.md). |
 
 Following the incremental-generator guidelines:
 

@@ -206,8 +206,8 @@ Several components at once also take one transition: `entity.Set(a, b)`, `entity
 - Keep `QueryFilter`s in `static readonly` fields (the generator does this for `[ForEach]`).
 - Look entities up by value with an indexed component (`IIndexed<TKey>`, `world.Index<T, TKey>()`) instead of a
   dictionary you keep in sync by hand; keep the `ValueIndex` in a local or field.
-- Take an indexed component by `in` when you only read it: a `ref` counts as a write, so the row is re-indexed on
-  the next lookup.
+- Write an indexed component with `Set` only when its key changes (`if (zone.Id != id) player.Set(new Zone(id))`):
+  an unchanged key re-links nothing, but the write still costs a lookup in the index's nodes.
 - One world per thread on servers (for example one per map or zone).
 
 ## Don't
@@ -293,7 +293,7 @@ warmups, 8 iterations of 250 ms, call counting from the start) on .NET 10, on a 
 | ChangeTrackingBenchmark.QueryTick, 10 rows written: every row / `Changed<Health>()` | 100,000 | – | 470 μs / 0.79 μs | 0 B |
 | ChangeTrackingBenchmark.Tick, 1,000 rows written: every row / `[Changed<Health>]` | 100,000 | – | 60-110 μs / 36.1 μs | 0 B |
 | ChangeTrackingBenchmark.QueryTick, 1,000 rows written: every row / `Changed<Health>()` | 100,000 | – | 503 μs / 50.9 μs | 0 B |
-| IndexBenchmark.TradeAndCount (100 trades, 100 inventory counts) | 100,000 | – | 11.5 μs | 0 B |
+| IndexBenchmark.TradeAndCount (100 trades, 100 inventory counts) | 100,000 | – | 5.3 μs | 0 B |
 | SnapshotBenchmark.Capture (a new snapshot) / Restore | 100,000 | – | 724 / 426 μs | 2.8 MB / 0 B |
 | DynamicBufferBenchmark.Tick (1,000 of 100,000 bags written, then sent): `DynamicBuffer<int>` / `List<int>` in a tracked component | 100,000 | – | 55.1 / 61.5 μs | 0 B |
 

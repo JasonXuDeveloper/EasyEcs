@@ -49,9 +49,8 @@ A [`DynamicBuffer<T>`](dynamic-buffers.md) is a list that cannot change any othe
 
 ## Ticks
 
-`world.ChangeTick` grows by one per batch of systems, once after each update and once per index lookup that catches
-up outside a pass ([indexes](indexes-and-relations.md)), so writes between updates are newer than every system's last
-run. `system.LastRunTick` is the tick a system last ran at; a `[Changed<T>]` method selects rows written after it, so
+`world.ChangeTick` grows by one per batch of systems and once after each update, so writes between updates are newer
+than every system's last run. `system.LastRunTick` is the tick a system last ran at; a `[Changed<T>]` method selects rows written after it, so
 a system's own writes of one run are not changes for its next run. Systems that write `T` never run in the same
 parallel batch as a `[Changed<T>]` reader (the method declares a read of `T`).
 

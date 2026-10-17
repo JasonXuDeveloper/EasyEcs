@@ -21,7 +21,7 @@ Notation:
 | `Entity` | readonly struct | Handle: `Id`, `Version`, `World`; equality includes the version. A destroyed or default handle answers questions (`IsAlive`, `Has`, `TryGet`, `TryGetRef`) with false, throws on accesses and changes (`Get`, `Read`, `Add`, `Set`, `Remove`), and ignores `Destroy`. |
 | `IComponent` | marker interface | Implemented by component structs. |
 | `ITrackChanges` | marker interface | A component whose rows record the change tick of their last write (`[Changed<T>]`, `QueryFilter.Changed<T>(since)`). |
-| `IIndexed<TKey>` | interface | A component (`ITrackChanges`) the world indexes by its `Key`; an `Entity` key makes it a relation. |
+| `IIndexed<TKey>` | interface | A component the world indexes by its `Key`, written with `Set` (EECS015); an `Entity` key makes it a relation. |
 | `ValueIndex<T, TKey>` | sealed class | `world.Index<T, TKey>()`: `Find(key)` (enumerator of `Entity`), `TryFind`, `Count`. |
 | `DynamicBuffer<T>` | struct, `IComponent, ITrackChanges` | A list per entity: `Count`, `Capacity`, `this[i]` (read-only), `AsReadOnlySpan()`, `foreach`; writes through `DynamicBufferExtensions` (`ref this`): `Add`, `AddRange`, `Insert`, `RemoveAt`, `RemoveAtSwapBack`, `Clear`, `EnsureCapacity`, `TrimExcess`, `AsSpan()`. |
 | `ISingletonComponent` | marker interface | Implemented by singleton structs. |
@@ -62,12 +62,13 @@ Notation:
 |---|---|---|
 | `entity.Get<T>()` → `ref T` | O(1) | version check + column lookup (+ one presence-bit test) + one indexed load; throws if missing or not alive; counts as a write of a tracked (`ITrackChanges`) component |
 | `entity.Read<T>()` → `ref readonly T` | O(1) | as `Get`, but read-only: never counts as a write |
+| `entity.{Component}` (generated property) | O(1) | `Get<T>()` (`ref T`) for a plain component, `Read<T>()` (`ref readonly T`) for a tracked or indexed one; C# 14 extension property named after the type |
 | `entity.TryGetRef<T>(out bool found)` → `ref T` | O(1) | a null ref when missing or not alive (check `found`); counts as a write of a tracked component when found |
 | `entity.Has<T>()` / `TryGet<T>(out T)` | O(1) | false when missing or not alive; `TryGet` returns a copy (not a write) |
 | `entity.Has<T1..Tn>()` | O(n) | all of them; one meta lookup |
 | `entity.Add<T>()` → `ref T` | O(c) amortized | adds (or resets) and returns a ref; a component the table has a column for only sets its presence bit (O(1)), a new one copies the row |
 | `entity.GetOrAdd<T>()` → `ref T` | O(1), or as `Add` when missing | counts as a write of a tracked component |
-| `entity.Set(in T1 … in Tn)` → `Entity` | O(n), or O(c) amortized when it moves | add or overwrite, at most one row copy, chainable |
+| `entity.Set(in T1 … in Tn)` → `Entity` | O(n), or O(c) amortized when it moves | add or overwrite, at most one row copy, chainable; re-indexes an indexed component whose key changed (O(1)) |
 | `entity.Remove<T1..Tn>()` → `Entity` | O(n) | clears presence bits, the entity keeps its row; missing components are ignored; a removed indexed component unlinks the entity (O(1)); chainable |
 
 ## Dynamic buffers
@@ -111,7 +112,7 @@ it is appended (copy-on-write) to the archetype list and to every cached query i
 | API | Complexity | Notes |
 |---|---|---|
 | `world.Index<T, TKey>()` → `ValueIndex<T, TKey>` | O(1); the first call creates it | one per world and indexed component (`T : IIndexed<TKey>`, `TKey : IEquatable<TKey>`); asking for a second key type of the same component throws |
-| `index.Count(key)` / `TryFind(key, out Entity)` | O(1) (a hash probe; an array access for relations), + catching up with the w rows written since the previous lookup: O(tables) when w = 0, else O(W / 4096 + written 64-row words + w) for W rows of `T` | allocation-free after warm-up; destroyed entities and removed components leave the index at once ([indexes and relations](guide/indexes-and-relations.md)) |
+| `index.Count(key)` / `TryFind(key, out Entity)` | O(1) (a hash probe; an array access for relations); the first lookup builds the index (O(entities with `T`)) | allocation-free after warm-up; `Set` / `CreateEntity` keep it current; destroyed entities and removed components leave the index at once ([indexes and relations](guide/indexes-and-relations.md)) |
 | `index.Find(key)` → `ValueIndex<T, TKey>.Matches` | as `Count`, + O(1) per entity of the key | a `ref struct` for `foreach` (`Current` is an `Entity`); destroying an entity during the loop is allowed, changing `T` is not |
 
 ## Systems, singletons, maintenance
@@ -122,7 +123,7 @@ it is appended (copy-on-write) to the archetype list and to every cached query i
 | `world.RemoveSystem<T>()` (calls `OnDestroy`) | O(systems + b²), b = systems of the same priority (batch rebuild); cold path |
 | `world.GetSystem<T>()` | O(systems) |
 | `world.Update()` (default group) / `world.Update<TGroup>()` | Σ systems of the group; allocation-free; throws `ObjectDisposedException` after `Dispose()` |
-| `world.ChangeTick` | O(1); grows by one per system batch, once after each update and once per index lookup that catches up with written rows outside a pass ([change tracking](guide/change-tracking.md)) |
+| `world.ChangeTick` | O(1); grows by one per system batch and once after each update ([change tracking](guide/change-tracking.md)) |
 | `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` → `ref T` | O(1); `AddSingleton` resets an existing singleton in its storage, so `SingletonRef<T>` handles stay attached |
 | `world.SingletonRef<T>()` → `SingletonRef<T>` (stable handle; adds if missing) / `singletonRef.Value` → `ref T` | O(1) / O(1), one load |
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` → `bool` | O(1); `RemoveSingleton` returns false when it was not added |

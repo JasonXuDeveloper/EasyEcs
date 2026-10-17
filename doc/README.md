@@ -39,7 +39,7 @@ One page per concept, in a sensible reading order:
 | [Indexes and relations](guide/indexes-and-relations.md) | `IIndexed<TKey>`, `world.Index<T, TKey>()`: find entities by a value; relations (`ChildOf(Entity Parent)`) and their reverse lookup. |
 | [Snapshots](guide/snapshots.md) | Capture and restore a world in memory: undo, prediction, replays, tests. |
 | [Threading](guide/threading.md) | Process, world and owner thread; system order; safe `WorldOptions.ParallelSystems`; what the structural gate guards. |
-| [Analyzer rules](guide/analyzer.md) | EECS001-EECS014: meaning and fix. |
+| [Analyzer rules](guide/analyzer.md) | EECS001-EECS015: meaning and fix. |
 
 ## Reference
 

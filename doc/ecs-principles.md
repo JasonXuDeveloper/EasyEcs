@@ -239,8 +239,7 @@ See [`ref` and `await`](guide/refs-and-await.md).
 A component may hold a `List<T>`, a `Dictionary<K, V>` or an array, but its row stores only the reference. The world
 sees a write when code takes the component by `ref`, not when the collection behind it changes. So:
 
-- **Change it only through `ref`** (a `ref` parameter, `Get`, `TryGetRef`): the row is stamped for `[Changed<T>]` and
-  indexes, and parallel systems schedule the write. Changing it through an `in` parameter is a race and goes
+- **Change it only through `ref`** (a `ref` parameter, `Get`, `TryGetRef`): the row is stamped for `[Changed<T>]`, and parallel systems schedule the write. Changing it through an `in` parameter is a race and goes
   unnoticed; the analyzer reports it (EECS011).
 - **Snapshots share it**: `Capture` copies the reference, not the collection, so restoring brings back the list as it
   is now. Snapshots are for plain data; persistence serializes the collection anyway. A `DynamicBuffer<T>` has neither

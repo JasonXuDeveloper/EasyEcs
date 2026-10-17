@@ -1,4 +1,4 @@
-# Analyzer rules (EECS001-EECS014)
+# Analyzer rules (EECS001-EECS015)
 
 [Docs index](../README.md) · Related: [Systems](systems.md) · [ECS principles](../ecs-principles.md)
 
@@ -22,6 +22,7 @@ The EasyEcs analyzer ships in the package next to the source generator. Every ru
 | [EECS012](#eecs012) | Error | A `DynamicBuffer<T>` is never copied |
 | [EECS013](#eecs013) | Error | A `[ForEach]` method that takes no `Entity` or `World` changes no structure |
 | [EECS014](#eecs014) | Error | Structural changes stay on the world's owner thread |
+| [EECS015](#eecs015) | Error | An indexed component is written with `Set` |
 
 ## EECS001
 
@@ -406,3 +407,33 @@ public static class Shards
 
 Like EECS013, the rule sees the delegate's own body, and a receiver it cannot follow (a method's result) is not
 reported.
+
+## EECS015
+
+**Indexed component written through a ref.** A value index follows `Set`, `CreateEntity` and `CreateEntities`; a
+write through a `ref` changes the key behind its back. The rule reports, for a component implementing `IIndexed<TKey>`:
+
+- `Get<T>()`, `GetOrAdd<T>()`, `Add<T>()` or `TryGetRef<T>()` on an entity;
+- a `ref` local bound to it, or an assignment to it (or a field of it) through a query item;
+- a `ref` or `Span<T>` parameter of it in a `[ForEach]` method or an `IForEach*` job.
+
+Fix: read it with `in`, `ReadOnlySpan<T>`, `Read<T>()` or the generated property, and write it with `Set`.
+
+```cs
+player.Get<Zone>() = new Zone(2);                       // EECS015: the index keeps the old zone
+[ForEach] static void Move(ref Zone zone) => zone = new Zone(2);   // EECS015
+```
+
+```csharp
+public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+public record struct Portal(int To) : IComponent;
+
+public partial class TakePortals : EcsSystem
+{
+    [ForEach]
+    static void Take(Entity player, in Zone zone, in Portal portal)
+    {
+        if (zone.Id != portal.To) player.Set(new Zone(portal.To));   // the index moves the player at once
+    }
+}
+```

@@ -248,17 +248,17 @@ Guide: [Dynamic buffers](guide/dynamic-buffers.md).
 ## Value indexes
 
 **What it does.** A component implementing `IIndexed<TKey>` is indexed by its `Key`:
-`world.Index<T, TKey>().Find(key)`, `TryFind`, `Count`. The index follows every write (also through `ref`): a lookup
-first re-indexes the rows written since the previous one, found through change ticks. Destroying an entity or removing
-the component unlinks it at once.
+`world.Index<T, TKey>().Find(key)`, `TryFind`, `Count`. `Set`, `CreateEntity` and `CreateEntities` re-index the
+entity at once; destroying it or removing the component unlinks it. Writes through a `ref`, which the index could not
+see, are rejected by the analyzer (EECS015).
 
 **When to use it.** Lookups by value: a player by name, the units of a guild, the entities in a grid cell you key by.
 
-**When not.** Values that change on most rows every tick and are looked up rarely (the catch-up re-reads every written
-row): a full scan may be simpler.
+**When not.** Values that change on most rows every tick and are looked up rarely: every change is a `Set` and a
+re-link, where a scan at lookup time may cost less.
 
-**Cost.** `Count` is a hash probe, `Find` one step per match, plus the catch-up (one check per table when nothing was
-written). Nothing is added to the write path. One node per indexed entity.
+**Cost.** `Count` is a hash probe, `Find` one step per match; a `Set` that changes the key unlinks and links the
+entity (a few array writes). One node per indexed entity.
 
 Guide: [Indexes and relations](guide/indexes-and-relations.md).
 
@@ -276,7 +276,7 @@ caster.
 [dynamic buffer](#dynamic-buffers) is one component instead of an entity per item. Many-to-many links (one component
 holds one key: give each link its own entity), and transform hierarchies that need propagation (not built in).
 
-**Cost.** 100 items changing hands among 100,000, then 100 inventories counted: 11.5 μs (catch-up included).
+**Cost.** 100 items changing hands among 100,000, then 100 inventories counted: 5.3 μs.
 
 Guide: [Indexes and relations](guide/indexes-and-relations.md#relations).
 
@@ -332,7 +332,7 @@ Guide: [Systems: errors](guide/systems.md#errors).
 
 ## Analyzer
 
-**What it does.** The package bundles an analyzer (EECS001-EECS014) next to the generator: invalid `[ForEach]`
+**What it does.** The package bundles an analyzer (EECS001-EECS015) next to the generator: invalid `[ForEach]`
 methods and systems (EECS001-005), class components (EECS006), stateful systems (EECS007), systems referencing
 systems (EECS008), batch methods mixing spans with per-entity parameters (EECS009), unsafe parallel methods (EECS010),
 writes through `in` parameters (EECS011), copied dynamic buffers (EECS012) and structural changes off the owner thread

@@ -108,6 +108,10 @@ ref var v = ref unit.GetOrAdd<Velocity>();   // add with default value if missin
 unit.Destroy();
 ```
 
+Every component also gets a generated property on `Entity`: `unit.Position.X += 1` is `unit.Get<Position>().X += 1`.
+Tracked and indexed components (steps 15 and 17) get read-only ones, so a read through them is never a write
+([generated properties](guide/entities-and-components.md#generated-properties)).
+
 A `ref` is valid only until the next structural change and never across an `await`: see
 [`ref` and `await`](guide/refs-and-await.md).
 
@@ -386,8 +390,9 @@ See [Dynamic buffers](guide/dynamic-buffers.md).
 
 ## 17. Find entities by value, follow relations
 
-A tracked component implementing `IIndexed<TKey>` is found by its key through `world.Index<T, TKey>()`, which
-follows every write. An `Entity` key makes a relation: the index lists the entities pointing at an entity.
+A component implementing `IIndexed<TKey>` is found by its key through `world.Index<T, TKey>()`. Write it with `Set`
+(the index moves the entity at once; a write through `ref` is rejected, EECS015). An `Entity` key makes a relation:
+the index lists the entities pointing at an entity.
 
 ```csharp
 public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }

@@ -39,12 +39,12 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
 - **Write the logic, not the plumbing.** A `[ForEach]` method is the whole system; filters are attributes
   (`[With<T>]`, `[Without<T>]`, `[WithAny<T>]`), singletons are parameters.
 - **Built-in change tracking, indexes and relations.** `[Changed<T>]` visits only the rows written since a system last
-  ran; `IIndexed<TKey>` components are found by value, and an `Entity` key makes a relation. Both follow every write,
-  including writes through `ref`, with no events and nothing to keep in sync by hand.
-- **Mistakes fail the build.** The bundled analyzer (EECS001-EECS014) reports invalid `[ForEach]` methods and
+  ran, including writes through `ref`; `IIndexed<TKey>` components are found by value, and an `Entity` key makes a
+  relation, kept current by every `Set`. No events and nothing to keep in sync by hand.
+- **Mistakes fail the build.** The bundled analyzer (EECS001-EECS015) reports invalid `[ForEach]` methods and
   systems, class components, stateful systems, systems that reference each other, batch methods mixing spans with
   per-entity parameters, parallel methods that would race, writes through read-only parameters, copied dynamic
-  buffers and structural changes off the owner thread.
+  buffers, structural changes off the owner thread and indexed components written behind their index's back.
 - **Decoupled by construction.** Systems cooperate only through data, in `Priority` order; system groups give you
   separate cadences (input on every wake, simulation on a fixed tick).
 - **Built for servers that run for months.** Ids are recycled behind version-checked handles, memory is bounded by
@@ -79,7 +79,7 @@ costs and when to use it).
 | [Bulk create and destroy](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md#entities) | `CreateEntities`, `DestroyEntities`, `EnsureEntityCapacity` | Spawn and clear waves in one pass through the structural gate. |
 | [Per-system timing](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#measuring-systems) | `WorldOptions.MeasureSystems`, `system.Stats` | Run counts and times of every system. |
 | [Errors](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#errors) | `World.SystemError` | A failing system is reported, can be switched off, and the tick goes on. |
-| [Analyzer](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/analyzer.md) | EECS001-EECS014 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
+| [Analyzer](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/analyzer.md) | EECS001-EECS015 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
 | [Threading and Native AOT](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md) | one owner thread per world; no reflection on hot paths | Many worlds per process, one per thread; AOT works with nothing to configure. |
 
 ## Example
@@ -268,17 +268,22 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
   does the same for queries.
 - **Indexes and relations:** components implementing `IIndexed<TKey>` are found by value
   (`world.Index<T, TKey>().Find(key)`); an `Entity` key makes a relation (`ChildOf(Entity Parent)`) whose index
-  lists the children of an entity.
+  lists the children of an entity. `Set` and `CreateEntity` re-index at once; writes through a `ref` are rejected
+  (EECS015).
+- **Generated entity properties:** every component gets a C# 14 extension property on `Entity`
+  (`hero.Position.X += 1`); tracked and indexed components get read-only ones, so reading them never counts as a
+  write.
 - **New APIs:** `WithAny<T>` filters (`[WithAny<T>]` on `[ForEach]`), batch `CreateEntities` / `DestroyEntities`,
   per-system timing (`WorldOptions.MeasureSystems`, `system.Stats`), `entity.Read<T>()` (read-only, never a write) and
   `entity.TryGetRef<T>(out found)` (optional access by `ref`); Native AOT compatible.
 - **`DynamicBuffer<T>`**: a list per entity, held as a component. Its writes take the buffer by `ref`, so each one is
   a tracked change (`[Changed<DynamicBuffer<T>>]` sends only the lists that changed) and a write through `in` does not
   compile; snapshots copy the elements; writes within the capacity allocate nothing.
-- **Every analyzer rule is an error**, with four new ones: **EECS011** rejects a `[ForEach]` method that changes a
+- **Every analyzer rule is an error**, with five new ones: **EECS011** rejects a `[ForEach]` method that changes a
   collection or class held by an `in` parameter, **EECS012** a `DynamicBuffer<T>` copied by value, **EECS013** a
   structural change in a `[ForEach]` method that takes no `Entity` or `World`, **EECS014** a structural change in a
-  delegate handed to another thread that races with other changes of the same world.
+  delegate handed to another thread that races with other changes of the same world, **EECS015** a write of an
+  indexed component through a `ref`.
 - **Structural changes belong to the owner thread.** They check a plain owner flag instead of a compare-and-swap (a
   create/destroy pair is about a quarter faster); one made inside a parallel batch or a parallel `[ForEach]`, or
   reentered, throws `InvalidOperationException` instead of tearing the tables.

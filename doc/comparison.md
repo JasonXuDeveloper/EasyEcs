@@ -28,14 +28,14 @@ checks that every library computes the same result.
 | Singletons | ✅ `ISingletonComponent`, `[ForEach]` parameters | ⚠️ `UniqueEntity` | ❌ | ✅ `World.Set<T>` / `Get<T>` |
 | Systems and scheduling | ✅ `EcsSystem`, `Priority`, groups, intervals | ✅ `SystemRoot`, `SystemGroup`, `QuerySystem` | ❌ (Arch.Extended) | ✅ `ISystem<T>`, `SequentialSystem`, `AEntitySetSystem` |
 | Source-generated systems | ✅ `[ForEach]` → inlined struct jobs | ❌ | ❌ in core (Arch.Extended) | ❌ |
-| Compile-time analyzer | ✅ EECS001-EECS014 | ❌ | ❌ | ❌ |
+| Compile-time analyzer | ✅ EECS001-EECS015 | ❌ | ❌ | ❌ |
 | Chunk / span iteration | ✅ batch `[ForEach]` methods, `ForEachBatch` | ✅ chunks | ✅ chunks | – |
 | Struct query jobs | ✅ `IForEach`, `IForEachEntity`, `IForEachBatch` | ✅ | ✅ `IForEach`, inline queries | – |
 | Bulk create and destroy | ✅ `CreateEntities`, `DestroyEntities(filter)` | ✅ | ✅ | – |
 | Parallel systems | ✅ non-conflicting systems of one priority, access generated | ❌ | ❌ | ✅ `ParallelSystem<T>` (you keep them independent) |
 | Parallel query | ✅ `[ForEach(Parallel = true)]`, analyzer-checked | ✅ `RunParallel`, `ParallelJobRunner` | ✅ `ParallelQuery`, `JobScheduler` | ✅ `DefaultParallelRunner` |
 | Change tracking (rows written since a tick) | ✅ `ITrackChanges`, `[Changed<T>]`, every `ref` write | ❌ (component add / remove events only) | ❌ (`OnComponentSet` events) | ✅ `WhenChanged<T>()` after `NotifyChanged<T>()` |
-| Value index | ✅ `IIndexed<TKey>`, follows every write | ✅ `IIndexedComponent<TKey>`, also range queries | ❌ | ✅ `EntityMap` / `EntityMultiMap` |
+| Value index | ✅ `IIndexed<TKey>`, follows every `Set` (ref writes rejected at build time) | ✅ `IIndexedComponent<TKey>`, also range queries | ❌ | ✅ `EntityMap` / `EntityMultiMap` |
 | Relations with reverse lookup | ✅ an `Entity` key | ✅ `ILinkComponent`, `IRelation<TKey>`, hierarchy | ❌ | ❌ |
 | Per-system timing | ✅ `MeasureSystems`, `system.Stats` | ✅ system performance monitor | ❌ | – |
 | Per-system error handling | ✅ `SystemError` | – | – | – |
@@ -139,13 +139,13 @@ hands, then 100 inventories are counted. EasyEcs uses a relation (`IIndexed<Enti
 
 | Library, approach | 1 trade | 100 trades | Allocated |
 |---|---:|---:|---:|
-| **EasyEcs** relation (`IIndexed<Entity>`) | 0.89 μs | 11.0 μs | 0 B |
-| Friflo link component | 1.22 μs | 8.5 μs | 0 B |
-| DefaultEcs `EntityMultiMap` | 0.73 μs | 8.1 μs | 0 B |
+| **EasyEcs** relation (`IIndexed<Entity>`) | 0.41 μs | 5.3 μs | 0 B |
+| Friflo link component | 1.27 μs | 8.3 μs | 0 B |
+| DefaultEcs `EntityMultiMap` | 0.73 μs | 8.3 μs | 0 B |
 
-All three answer "which items does this owner hold" without a scan. EasyEcs's index needs no change event: it
-catches up from the change ticks when it is read, so a trade is a plain write of the item's `Owner` component;
-the catch-up makes many trades cost about 25% more than with libraries that update the map on every set.
+All three answer "which items does this owner hold" without a scan, and all three update the map on every set. EasyEcs
+re-links the item inside `Set` (one inlined hook, gone at JIT time for components without an index) and keeps
+relation heads in an array indexed by the owner's id, so neither a trade nor a count hashes anything.
 
 ## Their features in EasyEcs
 

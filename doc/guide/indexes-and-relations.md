@@ -12,8 +12,8 @@ through `world.Index<T, TKey>()`.
 | | |
 |---|---|
 | **Use it for** | Lookups by value (a player by name) and relations (an inventory of items with their own state: each item points at its owner; children of a node). A bag of plain item ids is a [dynamic buffer](dynamic-buffers.md). |
-| **Avoid** | Dictionaries kept in sync by hand; indexing a value rewritten on most rows every tick and looked up rarely. |
-| **Cost** | `Count` a hash probe (an array access for relations), `Find` one step per match, plus re-indexing the rows written since the previous lookup. Nothing on the write path. |
+| **Avoid** | Dictionaries kept in sync by hand; writing an indexed component through a `ref` (EECS015: use `Set`). |
+| **Cost** | `Count` a hash probe (an array access for relations), `Find` one step per match; a `Set` that changes the key moves the entity between two lists. |
 
 ## Value indexes
 
@@ -27,6 +27,9 @@ var callsigns = world.Index<Callsign, string>();      // created on first use; k
 if (callsigns.TryFind("alpha", out Entity alpha)) { /* ... */ }
 int named = callsigns.Count("bravo");
 foreach (Entity e in callsigns.Find("charlie")) { /* every entity with that key */ }
+
+alpha.Set(new Callsign("delta"));                     // a write: the index moves alpha at once
+string name = alpha.Callsign.Value;                   // the generated property reads it (ref readonly)
 ```
 
 ## Relations
@@ -68,15 +71,20 @@ public partial class DestroyOrphans : EcsSystem
 
 ## How it stays correct
 
-An indexed component tracks changes (`IIndexed<TKey>` extends `ITrackChanges`), so every write records a change tick
-(see [what counts as a write](change-tracking.md#what-counts-as-a-write)). A lookup first re-indexes only the rows
-written since the previous lookup, skipping unwritten 4,096-row blocks and 64-row words. Entities leave the index the moment they are
-destroyed or lose the component. So writes through any `ref` (systems, queries, `Get`) and `Set` / `Add` /
-`CreateEntity` are all seen, with nothing added to the write path, and `world.Restore` makes indexes start over.
+The index follows the writes that can change a key: `Set`, `CreateEntity` and `CreateEntities` re-index the entity
+on the spot, and destroying an entity or removing the component unlinks it. A write through a `ref` would change the
+key behind the index's back, so the analyzer rejects it (EECS015): `Get<T>()` of an indexed component, a `ref`
+local or `ref` / `Span<T>` `[ForEach]` parameter of it, and assignments to it through a query item. Read it with
+`in` parameters, `Read<T>()` or the generated property (`ref readonly`), and write it with `Set`. `Set` with the key
+the entity already has re-links nothing, and a write that keeps the key is still a `Set` (compare first to skip
+it: `if (zone.Id != id) player.Set(new Zone(id));`).
+
+The index is built by its first lookup (one walk of the matching tables) and from then on costs nothing until a
+write; `world.Restore` rebuilds it from the restored world.
 
 Costs: `Count` is a hash probe (an array access for a relation to an entity of the same world) and `Find` adds one
-step per entity of the key, plus catching up with the rows written since the previous lookup (one check per table
-when nothing changed). A null key (the default of a `string` key) indexes the entity nowhere. The index holds one
+step per entity of the key. A `Set` of an indexed component is a plain write plus, when the key changed, an unlink
+and a link (a few array writes; a hash probe for non-entity keys). A null key (the default of a `string` key) indexes the entity nowhere. The index holds one
 node per indexed entity; it allocates only when it sees a new key or a larger entity id, never per lookup.
 
 Like component values, an index belongs to the world's owner thread: use it from `OnUpdate`, instance `[ForEach]`

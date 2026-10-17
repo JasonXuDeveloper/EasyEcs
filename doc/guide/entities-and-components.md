@@ -97,6 +97,23 @@ if (world.TryGetEntity(unit.Id, out var hit))          // e.g. an id a client se
 }
 ```
 
+### Generated properties
+
+The source generator gives `Entity` a property per component (a C# 14 extension property named after the type), so
+the common access reads like a field:
+
+```csharp
+hero.Position.X += 1;                                      // ref T: the same as hero.Get<Position>().X += 1
+int armor = hero.Armor.Value;                              // a tracked component: ref readonly, never a write
+hero.Set(new Armor(5));                                    // its writes are explicit: Set (or Get<Armor>())
+```
+
+A plain component's property returns `ref T` (it is `Get<T>()`); a component that implements `ITrackChanges` or
+`IIndexed<TKey>` returns `ref readonly T` (it is `Read<T>()`), so reading one never records a change and every write
+is visible at the call site (`Set`, or `Get<T>()` for a tracked component; an indexed one only takes `Set`). Like `Get`, a property throws when the entity lacks the component. Tags (no fields), generic
+components, components nested in non-public types and names `Entity` already has (`Get`, `Id`, ...) get no property;
+the project needs C# 14 (the .NET 10 default).
+
 Components live in archetype tables, one row per entity. Removing a component keeps the entity in its table and only
 marks the component absent, so states that come and go never move data; adding back a component the table has a
 column for is just as cheap. Gaining a component the entity's table has no column for copies its row into another
