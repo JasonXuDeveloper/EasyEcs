@@ -119,16 +119,24 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "cannot be serialized. Store the EntityId (8 bytes, unmanaged; a handle converts to it implicitly) and turn it " +
         "back into a handle with world.TryGetEntity(id, out var entity).");
 
+    public static readonly DiagnosticDescriptor ScheduleNotConstant = new("EECS018", "A system's schedule is not a constant",
+        "'{0}.{1}' is not a constant: {2}",
+        Category, DiagnosticSeverity.Warning, true,
+        "Priority is read once, when the system is added (it orders the schedule), so a value computed later never " +
+        "takes effect; UpdateInterval and UpdatePhase are read every update, so a changing value makes the system skip " +
+        "or repeat runs. Return a constant; to stop and resume a system, set Enabled.");
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         NotPartial, BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
         MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
-        RemovedRequired, EntityInData);
+        RemovedRequired, EntityInData, ScheduleNotConstant);
 
     public override void Initialize(AnalysisContext context)
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
         context.RegisterSymbolAction(AnalyzeType, SymbolKind.NamedType);
+        context.RegisterSyntaxNodeAction(AnalyzeSchedule, SyntaxKind.PropertyDeclaration);
         context.RegisterSymbolAction(AnalyzeMethod, SymbolKind.Method);
         context.RegisterSyntaxNodeAction(AnalyzeParallel, SyntaxKind.MethodDeclaration);
         context.RegisterSymbolAction(AnalyzeBufferHolder, SymbolKind.Field, SymbolKind.Property, SymbolKind.Method);
@@ -154,6 +162,25 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
                     method.TypeArguments[0].Name, "World.GetSystem"));
                 return;
             }
+    }
+
+    /// <summary>
+    /// EECS018: an override of EcsSystem.Priority, UpdateInterval or UpdatePhase that is not a constant expression.
+    /// </summary>
+    private static void AnalyzeSchedule(SyntaxNodeAnalysisContext context)
+    {
+        var declaration = (PropertyDeclarationSyntax)context.Node;
+        if (declaration.Identifier.ValueText is not ("Priority" or "UpdateInterval" or "UpdatePhase")) return;
+        if (context.SemanticModel.GetDeclaredSymbol(declaration, context.CancellationToken) is not { IsOverride: true } property
+            || property.OverriddenProperty?.ContainingType?.ToDisplayString() != Symbols.EcsSystem) return;
+        var getter = declaration.AccessorList?.Accessors.FirstOrDefault();
+        var body = declaration.ExpressionBody?.Expression ?? getter?.ExpressionBody?.Expression
+            ?? (getter?.Body?.Statements is { Count: 1 } statements && statements[0] is ReturnStatementSyntax { Expression: { } returned }
+                ? returned : null);
+        if (body != null && context.SemanticModel.GetConstantValue(body, context.CancellationToken).HasValue) return;
+        context.ReportDiagnostic(Diagnostic.Create(ScheduleNotConstant, declaration.Identifier.GetLocation(),
+            property.ContainingType.Name, property.Name,
+            property.Name == "Priority" ? "it is read once, when the system is added" : "it is read every update"));
     }
 
     /// <summary>

@@ -22,7 +22,7 @@ public class BattleServerTests
         using var server = Run(300);
         var battle = server.Battle;
         Assert.That(new[] { battle.Hits, battle.Deaths, battle.Shots, battle.Replicated, battle.Afflicted }, Is.All.Positive);
-        Assert.That(server.Failure.System, Is.Null);
+        Assert.That(server.Failure, Is.Null);
     }
 
     [Test]
@@ -284,8 +284,8 @@ public class BattleServerTests
         server.World.AddSystem<FaultySystem>();
         long tick = server.Battle.Tick;
         for (int i = 0; i < 10; i++) server.Tick();
-        Assert.That(server.Failure.System, Is.InstanceOf<FaultySystem>());
-        Assert.That(server.Failure.System.Enabled, Is.False);
+        Assert.That(server.Failure, Is.InstanceOf<FaultySystem>());
+        Assert.That(server.Failure.Enabled, Is.False);
         Assert.That(server.Battle.Tick, Is.EqualTo(tick + 10));
     }
 

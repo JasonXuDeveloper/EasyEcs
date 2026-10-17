@@ -22,14 +22,46 @@ public abstract class EcsSystem
     /// </summary>
     public virtual int Priority => 0;
 
-    /// <summary>Run every N-th world update (1 = every update).</summary>
+    /// <summary>Run every N-th world update (1 = every update); see <see cref="UpdatePhase"/>.</summary>
     public virtual int UpdateInterval => 1;
+
+    /// <summary>
+    /// Which of the <see cref="UpdateInterval"/> updates the system runs on (0 to interval - 1): systems with the same
+    /// interval and different phases spread their work over the updates instead of all running on the same one.
+    /// </summary>
+    public virtual int UpdatePhase => 0;
 
     /// <summary>Index of the system's group in its world (0 = default group).</summary>
     internal int Group;
 
-    /// <summary>Disabled systems are skipped by <see cref="World.Update()"/> and <see cref="World.Update{TGroup}()"/>.</summary>
-    public bool Enabled { get; set; } = true;
+    /// <summary>
+    /// Disabled systems are skipped by <see cref="World.Update()"/> and <see cref="World.Update{TGroup}()"/>. Enabling
+    /// a system clears its <see cref="Error"/>.
+    /// </summary>
+    public bool Enabled
+    {
+        get => _enabled;
+        set
+        {
+            _enabled = value;
+            if (value) Error = null;
+        }
+    }
+
+    private bool _enabled = true;
+
+    /// <summary>
+    /// The exception that switched this system off under <see cref="SystemErrorPolicy.Disable"/>, until it is enabled
+    /// again; null otherwise.
+    /// </summary>
+    public Exception Error { get; private set; }
+
+    /// <summary>Switch the system off for <paramref name="error"/> (<see cref="SystemErrorPolicy.Disable"/>).</summary>
+    internal void Fail(Exception error)
+    {
+        _enabled = false;
+        Error = error;
+    }
 
     /// <summary>
     /// The world's <see cref="World.ChangeTick"/> when this system last ran (0 before its first run): its

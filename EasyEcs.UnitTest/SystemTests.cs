@@ -8,13 +8,28 @@ public class SystemTests
 {
     private static readonly List<string> Log = [];
 
-    private class Logged(string name, int priority = 0, int interval = 1) : EcsSystem
+#pragma warning disable EECS018 // one test system, many schedules: each instance's values never change
+    private class Logged(string name, int priority = 0, int interval = 1, int phase = 0) : EcsSystem
     {
         public override int Priority => priority;
         public override int UpdateInterval => interval;
+        public override int UpdatePhase => phase;
         protected override void OnCreate() => Log.Add($"{name}.create");
         protected override void OnUpdate() => Log.Add($"{name}.update");
         protected override void OnDestroy() => Log.Add($"{name}.destroy");
+    }
+#pragma warning restore EECS018
+
+    [Test]
+    public void PhasesSpreadSystemsOfOneInterval()
+    {
+        using var world = new World();
+        world.AddSystem(new Logged("a", interval: 3));
+        world.AddSystem(new Logged("b", interval: 3, phase: 1));
+        world.AddSystem(new Logged("c", interval: 3, phase: 2));
+        Log.Clear();
+        for (int i = 0; i < 6; i++) world.Update();                           // updates 1..6
+        Assert.That(Log, Is.EqualTo(new[] { "b.update", "c.update", "a.update", "b.update", "c.update", "a.update" }));
     }
 
     [SetUp]
@@ -100,16 +115,22 @@ public class SystemTests
     }
 
     [Test]
-    public void ErrorsPropagateUnlessHandled()
+    public void ErrorsPropagateOrSwitchTheSystemOff()
     {
-        using var world = new World();
-        world.AddSystem<Throwing>();
-        Assert.Throws<InvalidOperationException>(world.Update);
+        using (var world = new World())
+        {
+            world.AddSystem<Throwing>();
+            Assert.Throws<InvalidOperationException>(world.Update);
+        }
 
-        var errors = new List<Exception>();
-        world.SystemError += (_, e) => errors.Add(e);
-        world.Update();
-        Assert.That(errors, Has.Count.EqualTo(1));
+        using var isolating = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
+        var throwing = isolating.AddSystem<Throwing>();
+        isolating.Update();
+        Assert.That(throwing.Enabled, Is.False);
+        Assert.That(throwing.Error, Is.InstanceOf<InvalidOperationException>());
+        isolating.Update();                                                    // off: not run again
+        throwing.Enabled = true;                                               // back on: the error is cleared
+        Assert.That(throwing.Error, Is.Null);
     }
 
     public struct InputGroup : ISystemGroup;
@@ -173,17 +194,15 @@ public class SystemTests
     }
 
     [Test]
-    public void AFailedRunStillCountsAsRunAndDestroyErrorsReachTheHandler()
+    public void AFailedRunStillCountsAsRunAndDestroyErrorsAreRecorded()
     {
-        var errors = new List<string>();
-        var world = new World();
-        world.SystemError += (_, e) => errors.Add(e.Message);
+        var world = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
         var failing = new FailsEverywhere("bad");
         world.AddSystem(failing);
         world.Update();
-        Assert.That(errors, Is.EqualTo(new[] { "bad" }));
+        Assert.That(failing.Error.Message, Is.EqualTo("bad"));
         Assert.That(failing.LastRunTick, Is.Positive);                          // its changes are not delivered again
         world.Dispose();
-        Assert.That(errors, Is.EqualTo(new[] { "bad", "bad.destroy" }));        // OnDestroy during Dispose
+        Assert.That(failing.Error.Message, Is.EqualTo("bad.destroy"));          // OnDestroy during Dispose
     }
 }

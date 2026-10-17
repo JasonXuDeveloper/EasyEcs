@@ -13,11 +13,6 @@ public sealed partial class World
     // Group 0 is the default group (World.Update()); others are [UpdateInGroup<T>] groups (World.Update<T>()).
     private SystemSchedule[] _groups = [new()];
 
-    /// <summary>
-    /// Raised when a system throws during an update. With no subscriber the exception propagates.
-    /// </summary>
-    public event Action<EcsSystem, Exception> SystemError;
-
     /// <summary>Number of completed <see cref="Update()"/> calls (default group).</summary>
     public long UpdateCount => _groups[0].Updates;
 
@@ -129,15 +124,15 @@ public sealed partial class World
     {
         if (!system.Enabled) return;
         int interval = system.UpdateInterval;
-        if (interval > 1 && update % interval != 0) return;
+        if (interval > 1 && update % interval != system.UpdatePhase % interval) return;
 
         try
         {
             RunMeasured(system);
         }
-        catch (Exception e) when (SystemError != null)
+        catch (Exception e) when (_options.SystemErrors == SystemErrorPolicy.Disable)
         {
-            SystemError(system, e);
+            system.Fail(e);
         }
         finally
         {
@@ -190,9 +185,9 @@ public sealed partial class World
                 {
                     systems[i].Destroy();
                 }
-                catch (Exception e) when (SystemError != null)
+                catch (Exception e) when (_options.SystemErrors == SystemErrorPolicy.Disable)
                 {
-                    SystemError(systems[i], e);
+                    systems[i].Fail(e);
                 }
 
                 systems[i].World = null;

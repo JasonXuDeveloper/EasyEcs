@@ -301,8 +301,8 @@ public sealed class BattleServer : IDisposable
             InitialEntityCapacity = units * 2,
             ParallelSystems = true,                                           // systems of one priority side by side
             MeasureSystems = true,                                            // per-system timings in system.Stats
+            SystemErrors = SystemErrorPolicy.Disable,                         // a failing system goes off, the battle goes on
         });
-        World.SystemError += OnSystemError;
 
         World.AddSystem<ClockSystem>();                                       // OnCreate adds the Battle singleton
         World.AddSystem<SteeringSystem>();
@@ -352,8 +352,16 @@ public sealed class BattleServer : IDisposable
 
     public ref Battle Battle => ref _battle.Value;
 
-    /// <summary>The last system that threw; it was switched off and the battle went on.</summary>
-    public (EcsSystem System, Exception Error) Failure { get; private set; }
+    /// <summary>A system that threw: it was switched off and the battle went on (its Error is the failure, as data).</summary>
+    public EcsSystem Failure
+    {
+        get
+        {
+            foreach (var system in World.Systems)
+                if (system.Error != null) return system;
+            return null;
+        }
+    }
 
     /// <summary>One server tick: the simulation every tick, replication every third.</summary>
     public void Tick()
@@ -469,12 +477,6 @@ public sealed class BattleServer : IDisposable
         foreach (var system in World.Systems)
             if (slowest == null || system.Stats.Average > slowest.Stats.Average) slowest = system;
         return slowest;
-    }
-
-    private void OnSystemError(EcsSystem system, Exception error)
-    {
-        system.Enabled = false;                                               // isolate the failure, keep the battle
-        Failure = (system, error);
     }
 
     public void Dispose() => World.Dispose();                                 // OnDestroy of every system
