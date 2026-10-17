@@ -52,17 +52,18 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
 - Interceptors for query call sites: the call's arguments are still evaluated, so a filter built at the call is built
   anyway ([D18](decisions.md#d18-no-interceptors-for-query-calls-filters-carry-no-references)). `AddEmbeddedAttributeDefinition`:
   the generators write no attribute types (the attributes are EasyEcs.Core's).
+- Settable tag properties (`entity.IsDead = true`): C# 14 rejects assigning an extension property of a struct on a
+  `foreach` variable, an indexer result or a field of an `in` parameter, where ECS code holds its entities
+  ([D19](decisions.md#d19-no-settable-tag-properties)).
 
 ### Source generators
 
 The toolchain floor is the .NET 10 SDK (C# 14, Roslyn 5.0), which the generator builds against. In order:
 
-1. Settable tag properties (C# 14 extension properties): `entity.IsDead = true` adds the tag, `false` removes it. The
-   analyzer counts the setter as a structural change (EECS010 / EECS013).
-2. Generic systems and runners (`UnsafeAccessor` on generic types, .NET 9+), which lifts EECS004 where the generator can
+1. Generic systems and runners (`UnsafeAccessor` on generic types, .NET 9+), which lifts EECS004 where the generator can
    close the type.
-3. A filter declared once on a system group, applied by the generator to every `[ForEach]` of the group.
-4. Code fixes for the analyzer's diagnostics.
+2. A filter declared once on a system group, applied by the generator to every `[ForEach]` of the group.
+3. Code fixes for the analyzer's diagnostics.
 
 Runtime (.NET 10 / C# 14), each measured with BDN and kept only as a net win:
 
@@ -82,9 +83,7 @@ What the generator can write so users write less, Entitas-style (it already writ
 API and the examples several times: every line users write twice is a candidate, every generated member that nobody
 needs goes. Each round's findings are listed here with what was generated, changed or rejected, and why.
 
-- Round 1: pending. Candidates so far: a settable tag property, Entitas-style (`entity.IsDead = true` adds or
-  removes the tag: weigh a structural change hidden in an assignment, and the analyzer must count it as one).
-  A filter declared once on a system group (every `[ForEach]` of the group gets `Without<Inactive>`): the
+- Round 1: pending. Candidates so far: a filter declared once on a system group (every `[ForEach]` of the group gets `Without<Inactive>`): the
   whole-entity disable pattern without one attribute per method, still explicit where the group is defined.
 
 ### Example

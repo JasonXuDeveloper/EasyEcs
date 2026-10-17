@@ -27,6 +27,7 @@ feature stays here with its reason, so it is not proposed again without new fact
 | [D16](#d16-no-partial-generated-code-lives-outside-the-users-type) | No `partial`: generated code lives outside the user's type |
 | [D17](#d17-unloading-removes-types-from-worlds-bits-are-reused) | Unloading removes types from worlds; bits are reused |
 | [D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references) | No interceptors for query calls; filters carry no references |
+| [D19](#d19-no-settable-tag-properties) | No settable tag properties |
 
 ## D1. State changes are data: no events or callbacks
 
@@ -261,4 +262,14 @@ advice for hot calls.
 
 **Considered.** Interceptors with a static filter and a cached entry per site (the arguments make it moot); an
 analyzer warning for filters built at the call (most calls are cold; the docs teach the static field).
+
+## D19. No settable tag properties
+
+**Decision.** A tag's generated `IsX` is read-only; `SetX()` adds the tag and `RemoveX()` removes it.
+
+**Why.** `entity.IsDead = true` (Entitas style) cannot be written where ECS code holds its entities: C# 14 rejects
+assigning an extension property of a struct on a `foreach` variable (CS1654), an indexer result (CS1612) or a field of
+an `in` parameter (CS8332), with a by-value or an `in` receiver alike. A member that compiles on a local but not in
+`foreach (var e in hits)` or on `link.Target` teaches the wrong thing; the methods work everywhere, and a structural
+change stays a call.
 
