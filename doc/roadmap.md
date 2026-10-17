@@ -49,23 +49,38 @@ against Roslyn 4.8, so the APIs below are unused. In order:
      `Reports.CountAlive(world, ref alive)`.
    - EECS001 goes away. A `[ForEach]` parameter type that the assembly cannot name (a private nested component) is
      reported instead.
-2. Roslyn 5.0 for the generator and the analyzer:
+2. Loading and unloading assemblies of systems and components (collectible `AssemblyLoadContext`, hot reload of game
+   logic). What roots such an assembly today:
+   - `ComponentInfo`'s table by bit and the `SavedTypes` registry hold its types, and bits are never reused;
+   - each world's tables (columns of its components), transition edges, query cache, singletons, value indexes and
+     groups.
+   The plan:
+   - `world.Remove(assembly)` removes the assembly's systems, singletons and indexes, and its components from every
+     entity. Tables left with a removed column are dropped, with their edges and cache entries; this is the first
+     time a table is deleted outside `Dispose`.
+   - A global release frees the type registrations and their bits for reuse once no world uses them.
+   - A reload keeps the data: `Save`, remove, unload, load the new version, then `Load`. Loading maps types by name,
+     so the new version's components take the old values.
+   - Tests: an assembly compiled in the test and loaded into a collectible context; after the reload a
+     `WeakReference` to the old context dies, and the entities keep their values. The steady state is unchanged
+     (BDN).
+3. Roslyn 5.0 for the generator and the analyzer:
    - C# 14 extension-block symbols for the members ComponentGenerator writes (exact instead of name-based).
    - `AddEmbeddedAttributeDefinition` for generated attributes.
    - The interceptor API (`GetInterceptableLocation`).
-3. Interceptors for query call sites. The generator replaces `world.Query<…>(QueryFilter.Create()…)`, `Count`, `Any`,
+4. Interceptors for query call sites. The generator replaces `world.Query<…>(QueryFilter.Create()…)`, `Count`, `Any`,
    `SetAll` / `RemoveAll` and `ForEach` calls whose filter is built at the call with:
    - a static filter built once;
    - a cached query entry per call site, so the call does no filter construction and no memo lookup.
    This covers the planned filter-hoisting diagnostic and the per-system cached query entry, for every call site.
    The NuGet package sets `InterceptorsNamespaces` in its `build/` props. Measure the lookup first; ship only as a
    net win.
-4. Settable tag properties (C# 14 extension properties): `entity.IsDead = true` adds the tag, `false` removes it. The
+5. Settable tag properties (C# 14 extension properties): `entity.IsDead = true` adds the tag, `false` removes it. The
    analyzer counts the setter as a structural change (EECS010 / EECS013).
-5. Generic systems and runners (`UnsafeAccessor` on generic types, .NET 9+), which lifts EECS004 where the generator can
+6. Generic systems and runners (`UnsafeAccessor` on generic types, .NET 9+), which lifts EECS004 where the generator can
    close the type.
-6. A filter declared once on a system group, applied by the generator to every `[ForEach]` of the group.
-7. Code fixes for the analyzer's diagnostics.
+7. A filter declared once on a system group, applied by the generator to every `[ForEach]` of the group.
+8. Code fixes for the analyzer's diagnostics.
 
 Runtime (.NET 10 / C# 14), each measured with BDN and kept only as a net win:
 
