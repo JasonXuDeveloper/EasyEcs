@@ -47,6 +47,8 @@ needs goes. Each round's findings are listed here with what was generated, chang
 - Round 1: pending. Candidates so far: `[ForEach]` on static methods outside systems (weigh against `Query` and
   struct jobs, which already run anywhere); a settable tag property, Entitas-style (`entity.IsDead = true` adds or
   removes the tag: weigh a structural change hidden in an assignment, and the analyzer must count it as one).
+  A filter declared once on a system group (every `[ForEach]` of the group gets `Without<Inactive>`): the
+  whole-entity disable pattern without one attribute per method, still explicit where the group is defined.
 
 ### Example
 
