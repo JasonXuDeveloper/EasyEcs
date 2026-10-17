@@ -117,6 +117,15 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 if (m.IndexKey.Length == 0 && Free("GetOrAdd" + n))
                     Member($"The entity's <see cref=\"{t}\"/> by <c>ref</c>, added (default) first if missing (<c>GetOrAdd</c>).",
                         $"ref {t} GetOrAdd{n}() => ref @this.GetOrAdd<{t}>();");
+                if (Free("Disable" + n))
+                    Member($"Switches the entity's <see cref=\"{t}\"/> off, keeping its value (<c>Disable</c>); false if it has none enabled.",
+                        $"bool Disable{n}() => @this.Disable<{t}>();");
+                if (Free("Enable" + n))
+                    Member($"Switches the entity's disabled <see cref=\"{t}\"/> back on with its kept value (<c>Enable</c>); false if none is disabled.",
+                        $"bool Enable{n}() => @this.Enable<{t}>();");
+                if (Free("Is" + n + "Disabled"))
+                    Property($"Whether the entity holds a disabled <see cref=\"{t}\"/> (<c>IsDisabled</c>); <c>Has{n}</c> is whether it is enabled.",
+                        $"bool Is{n}Disabled", $"@this.IsDisabled<{t}>()");
             }
 
             if (Free("Set" + n))

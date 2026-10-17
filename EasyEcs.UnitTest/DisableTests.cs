@@ -85,4 +85,13 @@ public class DisableTests
             Assert.That(x.Get<Name>().Value, Is.EqualTo("kept"));
         }
     }
+
+    [Test]
+    public void GeneratedMembersDisableAndEnable()
+    {
+        using var world = new World();
+        var e = world.CreateEntity(new Health(7));
+        Assert.That((e.DisableHealth(), e.HasHealth, e.IsHealthDisabled), Is.EqualTo((true, false, true)));
+        Assert.That((e.EnableHealth(), e.Health.Value, e.IsHealthDisabled), Is.EqualTo((true, 7, false)));
+    }
 }

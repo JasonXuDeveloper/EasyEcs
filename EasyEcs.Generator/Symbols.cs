@@ -195,7 +195,7 @@ internal static class Symbols
     /// they enter the owner's structural gate, so they belong to the world's owner thread and to code that may change
     /// structure.
     /// </summary>
-    private static readonly HashSet<string> StructuralEntityMembers = ["Set", "Remove", "Destroy", "GetOrAdd", "Clone"];
+    private static readonly HashSet<string> StructuralEntityMembers = ["Set", "Remove", "Destroy", "GetOrAdd", "Clone", "Disable", "Enable"];
 
     private static readonly HashSet<string> StructuralWorldMembers =
     [
@@ -240,16 +240,20 @@ internal static class Symbols
     }
 
     private static bool IsGeneratedWriter(string name) =>
-        name.StartsWith("Set") || name.StartsWith("Remove") || name.StartsWith("GetOrAdd");
+        name.StartsWith("Set") || name.StartsWith("Remove") || name.StartsWith("GetOrAdd")
+        || name.StartsWith("Disable") || name.StartsWith("Enable");
 
     /// <summary>
     /// Whether <paramref name="access"/> reads through a member ComponentGenerator wrote. The analyzer resolves it; the
     /// generator cannot (another generator's output is not in its compilation), so there the name decides: a
-    /// component's name (<c>e.Position</c>), <c>Has</c> / <c>TryGet</c> + a component, or <c>Is</c> + a tag.
+    /// component's name (<c>e.Position</c>), <c>Has</c> / <c>TryGet</c> + a component, <c>Is</c> + a tag, or
+    /// <c>Is</c> + a component + <c>Disabled</c>.
     /// </summary>
     private static bool GeneratedRead(SemanticModel model, MemberAccessExpressionSyntax access, string member)
     {
         if (model.GetSymbolInfo(access).Symbol is { } symbol) return IsGenerated(symbol) && !IsGeneratedWriter(symbol.Name);
+        if (member.Length > "IsDisabled".Length && member.StartsWith("Is") && member.EndsWith("Disabled"))
+            member = member.Substring(2, member.Length - 2 - "Disabled".Length);
         foreach (var (prefix, tag) in new[] { ("", false), ("Has", false), ("TryGet", false), ("Is", true) })
         {
             if (member.Length <= prefix.Length || !member.StartsWith(prefix)) continue;
@@ -285,7 +289,7 @@ internal static class Symbols
 
     /// <summary>Entity members that cannot change the world (no structural change, no access to the World).</summary>
     private static readonly HashSet<string> ReadOnlyEntityMembers =
-        ["Id", "Version", "IsAlive", "Has", "Get", "Read", "TryGet", "TryGetRef"];
+        ["Id", "Version", "IsAlive", "Has", "Get", "Read", "TryGet", "TryGetRef", "IsDisabled"];
 
     /// <summary>
     /// Whether every use of parameter <paramref name="name"/> in the method body is a read-only member access

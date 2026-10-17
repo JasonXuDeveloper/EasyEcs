@@ -241,12 +241,18 @@ public class GeneratorTests
                 [ForEach] static void Read(Entity e, ref Q q) { if (e.HasP && e.TryGetT(out var t)) q.V = e.P.V + t.V; }
                 [ForEach] static void Write(Entity e, ref Q q) => e.RemoveP();
                 [ForEach] static void Grow(Entity e, ref Q q) => e.GetOrAddP().V = q.V;
+                [ForEach] static void Check(Entity e, ref Q q) { if (e.IsPDisabled || e.IsDisabled<T>()) q.V = 0; }
+                [ForEach] static void Off(Entity e, ref Q q) => e.DisableP();
+                [ForEach] static void On(Entity e, ref Q q) => e.Enable<T>();
             }
             """), out var output, out _);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")).Select(t => t.ToString()));
         Assert.That(generated, Does.Match(@"struct __ReadJob[^\n]*INoStructuralChanges"));
         Assert.That(generated, Does.Not.Match(@"struct __WriteJob[^\n]*INoStructuralChanges"));
         Assert.That(generated, Does.Not.Match(@"struct __GrowJob[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Match(@"struct __CheckJob[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Not.Match(@"struct __OffJob[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Not.Match(@"struct __OnJob[^\n]*INoStructuralChanges"));
     }
 
     [Test]
