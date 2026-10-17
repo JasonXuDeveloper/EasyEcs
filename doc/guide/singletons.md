@@ -40,11 +40,11 @@ public record struct Score(int Deaths) : ISingletonComponent;
 
 public partial class DeathSystem : EcsSystem
 {
-    [ForEach, Without<Dead>]
+    [ForEach, Without<Dead>, Changed<Health>]   // only units whose health was written
     static void Die(Entity unit, in Health hp, ref Score score)   // resolved once per pass
     {
         if (hp.Value > 0) return;
-        unit.Set(new Dead());
+        unit.Add<Dead>();
         score.Deaths++;
     }
 }

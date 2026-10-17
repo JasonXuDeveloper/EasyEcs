@@ -173,11 +173,11 @@ public record struct Tally(long Tick, int Deaths, int Afflicted) : ISingletonCom
 
 public partial class DeathSystem : EcsSystem
 {
-    [ForEach, Without<Dead>]
+    [ForEach, Without<Dead>, Changed<Health>]   // only units whose health was written (step 15)
     static void Die(Entity entity, in Health hp, ref Tally tally)   // resolved once per pass
     {
         if (hp.Value > 0) return;
-        entity.Set(new Dead());
+        entity.Add<Dead>();
         tally.Deaths++;
     }
 }
@@ -195,7 +195,7 @@ ref var tally = ref world.GetSingleton<Tally>();     // ref T, like components (
 A `[ForEach]` method takes a singleton as a `ref` / `in` parameter (resolved once per pass, added if missing), and
 `OnUpdate` reaches it through the system's `World` property.
 
-The `Set(new Dead())` applies at once: later systems of the same update already see the corpse, and the
+The `Add<Dead>()` applies at once: later systems of the same update already see the corpse, and the
 `Without<Dead>` filter keeps the next updates from counting it again. Each entity is visited at most once per pass;
 see [Structural changes during iteration](guide/structural-changes.md). More on singletons in
 [Singletons](guide/singletons.md).
@@ -207,12 +207,11 @@ Systems run in ascending `Priority` (registration order breaks ties). They never
 reacts to that state without `DeathSystem` knowing it exists:
 
 ```csharp
-public partial class CorpseSystem : EcsSystem
+public sealed class CorpseSystem : EcsSystem
 {
     public override int Priority => 10;      // after the default priority 0
 
-    [ForEach, With<Dead>]
-    static void Remove(Entity entity) => entity.Destroy();
+    protected override void OnUpdate() => World.DestroyEntities<Dead>();   // every corpse in one pass
 }
 ```
 
@@ -284,17 +283,26 @@ See [Structural changes](guide/structural-changes.md).
 
 ## 13. Whole runs of rows: batch methods
 
-A `[ForEach]` method that takes `Span<T>` / `ReadOnlySpan<T>` receives whole runs of matching rows, so the JIT can
-vectorize the loop. The filters apply as usual; it cannot change structure:
+A `[ForEach]` method that takes `Span<T>` / `ReadOnlySpan<T>` receives whole runs of matching rows, which you vectorize
+with `Vector<T>` (the JIT does not vectorize loops by itself; a scalar loop over spans gains little). The filters apply
+as usual; it cannot change structure:
 
 ```csharp
+using System.Numerics;
+using System.Runtime.InteropServices;
+
 public partial class FastMovementSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
     static void Move(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
     {
-        for (int i = 0; i < positions.Length; i++)
-            positions[i] = new Position(positions[i].X + velocities[i].X, positions[i].Y + velocities[i].Y);
+        // Two floats each: as Vector<float> spans, every lane is one coordinate
+        var p = MemoryMarshal.Cast<Position, Vector<float>>(positions);
+        var v = MemoryMarshal.Cast<Velocity, Vector<float>>(velocities);
+        for (int i = 0; i < p.Length; i++) p[i] += v[i];
+        var pf = MemoryMarshal.Cast<Position, float>(positions);
+        var vf = MemoryMarshal.Cast<Velocity, float>(velocities);
+        for (int i = p.Length * Vector<float>.Count; i < pf.Length; i++) pf[i] += vf[i];   // the rows left over
     }
 }
 ```

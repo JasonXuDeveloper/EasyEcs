@@ -74,8 +74,8 @@ public partial class BounceSimdSystem : EcsSystem
         int i = 0;
         for (; i <= p.Length - Vector<float>.Count; i += Vector<float>.Count)
         {
-            var position = new Vector<float>(p[i..]) + new Vector<float>(v[i..]);
             var velocity = new Vector<float>(v[i..]);
+            var position = new Vector<float>(p[i..]) + velocity;
             var outside = Vector.LessThan(position, Vector<float>.Zero) | Vector.GreaterThan(position, max);
             position.CopyTo(p[i..]);
             Vector.ConditionalSelect(outside, -velocity, velocity).CopyTo(v[i..]);
@@ -97,12 +97,15 @@ little over the per-entity method, so write one to vectorize it.
 ### Ad-hoc loops: a struct job
 
 `world.Query` is the convenient loop for tools and request handlers. For a loop that runs every tick outside a system,
-write a struct job: `world.ForEach` specializes and inlines it per table.
+write a struct job: `world.ForEach` specializes and inlines it per table. Mark it `INoStructuralChanges` and declare
+its `Writes` ([what a job declares](guide/queries.md#what-a-job-declares-writes)).
 
 ```csharp
-public struct EnergyJob : IForEach<Velocity>
+public struct EnergyJob : IForEach<Velocity>, INoStructuralChanges   // no structural change: the lean loop
 {
     public float Total;   // a value field stays in a register during the pass and is copied back once
+
+    public static int Writes => 0;   // reads only: no row counts as changed
 
     public void Execute(ref Velocity v) => Total += v.X * v.X + v.Y * v.Y;
 }
@@ -120,10 +123,12 @@ jobs do this for singleton parameters. `ForEach`, `ForEachEntity` and `ForEachBa
 a `ref` field: a write through a `ref` goes to memory on every row.
 
 ```csharp
-public ref struct CollectJob : IForEach<Position>
+public ref struct CollectJob : IForEach<Position>, INoStructuralChanges
 {
     public Span<float> Xs;   // the caller's buffer, at least as long as the matching rows
     public int Count;
+
+    public static int Writes => 0;
 
     public void Execute(ref Position p) => Xs[Count++] = p.X;
 }
@@ -183,7 +188,7 @@ the rows that matter.
 ```csharp
 var wave = new Entity[1_000];
 world.CreateEntities(wave, new Position(0, 0), new Velocity(1, 0));   // one pass through the structural gate
-int removed = world.DestroyEntities<Position>(QueryFilter.Create().With<Dead>());
+int removed = world.DestroyEntities<Dead>();                          // every dead entity, one pass
 ```
 
 Several components at once also take one transition: `entity.Set(a, b)`, `entity.Remove<A, B>()`.

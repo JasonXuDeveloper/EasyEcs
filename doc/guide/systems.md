@@ -104,19 +104,28 @@ belongs to the same entity, and a table where every row matches is a single call
 Its other parameters can only be singletons ([EECS009](analyzer.md#eecs009)), and it must not make structural changes.
 
 ```csharp
+using System.Numerics;
+using System.Runtime.InteropServices;
+
 public partial class DriftSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
     static void Drift(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
     {
-        for (int i = 0; i < positions.Length; i++)
-        {
-            positions[i].X += velocities[i].X;
-            positions[i].Y += velocities[i].Y;
-        }
+        // The JIT does not vectorize loops by itself. Two floats each: as Vector<float> spans, every lane is one
+        // coordinate
+        var p = MemoryMarshal.Cast<Position, Vector<float>>(positions);
+        var v = MemoryMarshal.Cast<Velocity, Vector<float>>(velocities);
+        for (int i = 0; i < p.Length; i++) p[i] += v[i];
+        var pf = MemoryMarshal.Cast<Position, float>(positions);
+        var vf = MemoryMarshal.Cast<Velocity, float>(velocities);
+        for (int i = p.Length * Vector<float>.Count; i < pf.Length; i++) pf[i] += vf[i];   // the rows left over
     }
 }
 ```
+
+A scalar loop over spans gains little over a per-entity method: write a batch method to vectorize it
+([regular and fastest code](../performance.md#arithmetic-over-many-rows-vectorize-a-batch-method)).
 
 `[ForEach]` methods run in source order, and derived systems run the base class's `[ForEach]` methods first. Keep a
 system's `[ForEach]` methods in one file: across the files of a `partial` class, the order is by position within each

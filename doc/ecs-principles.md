@@ -46,7 +46,7 @@ The examples share these components:
 
 ```csharp
 public record struct Position(float X, float Y) : IComponent;
-public record struct Health(int Value) : IComponent;
+public record struct Health(int Value) : IComponent, ITrackChanges;   // tracked: [Changed<Health>] finds the writes
 public record struct Burning(int Ticks, int DamagePerTick) : IComponent;   // a status effect
 public struct Dead : IComponent;                                           // a tag
 ```
@@ -65,7 +65,7 @@ public partial class StatusSystem : EcsSystem
     {
         hp.Value -= burning.DamagePerTick;
         if (--burning.Ticks == 0) unit.Remove<Burning>();
-        if (hp.Value <= 0) unit.Set(new Dead());
+        if (hp.Value <= 0) unit.Add<Dead>();
     }
 }
 ```
@@ -86,10 +86,10 @@ public partial class DeathSystem : EcsSystem
 {
     public override int Priority => 10;   // after every system that deals damage
 
-    [ForEach, Without<Dead>]
+    [ForEach, Without<Dead>, Changed<Health>]   // only units whose health was written
     static void Die(Entity unit, in Health hp)   // `in`: it only reads Health
     {
-        if (hp.Value <= 0) unit.Set(new Dead());
+        if (hp.Value <= 0) unit.Add<Dead>();
     }
 }
 ```
@@ -120,7 +120,7 @@ public partial class DeathSystem : EcsSystem
     void Die(Entity unit, in Health hp)
     {
         if (hp.Value > 0) return;
-        unit.Set(new Dead());
+        unit.Add<Dead>();
         Deaths++;
     }
 }
@@ -132,11 +132,11 @@ public record struct Score(int Deaths) : ISingletonComponent;
 
 public partial class DeathSystem : EcsSystem
 {
-    [ForEach, Without<Dead>]
+    [ForEach, Without<Dead>, Changed<Health>]   // only units whose health was written
     static void Die(Entity unit, in Health hp, ref Score score)   // a singleton parameter
     {
         if (hp.Value > 0) return;
-        unit.Set(new Dead());
+        unit.Add<Dead>();
         score.Deaths++;
     }
 }
@@ -155,12 +155,11 @@ removed, reordered or tested alone. Cooperate through data instead:
 
 ```csharp
 // Reacts to Dead; DeathSystem does not know it exists.
-public partial class CorpseSystem : EcsSystem
+public sealed class CorpseSystem : EcsSystem
 {
     public override int Priority => 20;   // after DeathSystem
 
-    [ForEach, With<Dead>]
-    static void Remove(Entity unit) => unit.Destroy();
+    protected override void OnUpdate() => World.DestroyEntities<Dead>();   // every corpse in one pass
 }
 ```
 
@@ -219,10 +218,10 @@ public partial class DeathSystem : EcsSystem
 {
     public override int Priority => 10;   // after combat, before respawn and loot
 
-    [ForEach, Without<Dead>]
+    [ForEach, Without<Dead>, Changed<Health>]   // only units whose health was written
     static void Die(Entity unit, in Health hp)
     {
-        if (hp.Value <= 0) unit.Set(new Dead());   // systems after DeathSystem see Dead in this update
+        if (hp.Value <= 0) unit.Add<Dead>();   // systems after DeathSystem see Dead in this update
     }
 }
 ```
@@ -261,7 +260,7 @@ Then pick the representation by what the items are:
 [System.Runtime.CompilerServices.InlineArray(4)]
 public struct Slots4 { private int _first; }                                 // 4 ints stored inline
 
-public struct Cooldowns : IComponent, ITrackChanges { public Slots4 Ticks; }  // unmanaged: nothing to share
+public struct Cooldowns : IComponent, ITrackChanges { public Slots4 ReadyAt; }  // unmanaged: nothing to share
 public struct Quests : IComponent, ITrackChanges                             // saved and loaded with the player
 {
     public System.Collections.Generic.Dictionary<int, int> Progress;
@@ -272,18 +271,16 @@ public record struct ItemOf(Entity Owner) : IComponent, IIndexed<Entity>     // 
     public Entity Key => Owner;
 }
 
-public partial class CooldownSystem : EcsSystem
-{
-    [ForEach]
-    static void Tick(ref Cooldowns cooldowns)                                 // ref: scheduled and stamped as a write
-    {
-        for (int i = 0; i < 4; i++)
-            if (cooldowns.Ticks[i] > 0) cooldowns.Ticks[i]--;
-    }
-}
-
 public static class PlayerRules
 {
+    // The tick a slot is ready again, not a countdown: no system writes every row every tick, so only uses are changes
+    public static bool TryUse(Entity player, int slot, int tick, int cooldown)
+    {
+        if (player.Read<Cooldowns>().ReadyAt[slot] > tick) return false;     // Read: no stamp
+        player.Get<Cooldowns>().ReadyAt[slot] = tick + cooldown;              // Get: the row is stamped
+        return true;
+    }
+
     public static void Advance(Entity player, int quest)
     {
         var progress = player.Get<Quests>().Progress;                         // Get: the row is stamped

@@ -73,8 +73,8 @@ one created, destroyed or tagged. There are no command buffers to play back and 
 Dependencies are expressed through data and `Priority`, never through `before`/`after` links between systems:
 
 - **A produces, B consumes a component** (A writes `Velocity`, B reads it): give B a higher priority, or register it
-  after A. Even at the same priority with `ParallelSystems`, they conflict on `Velocity`, so they are in different batches and
-  A finishes first.
+  after A. Even at the same priority with `ParallelSystems`, they conflict on `Velocity`, so they are in different
+  batches and A finishes first.
 - **A changes structure, B reacts** (A adds `Dead`, B destroys dead entities): A needs an `Entity` parameter to add the
   tag, so it runs alone; B runs after it.
 - **A and B touch disjoint data**: their order cannot change the result, so `ParallelSystems` may run them together.

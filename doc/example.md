@@ -13,12 +13,12 @@ from another ECS? [Their features in EasyEcs](comparison.md#their-features-in-ea
 | Feature | Where |
 |---|---|
 | Components, tags, singletons | `Position`, `Health`, `Player`, `Dead`; `Battle`, `Waypoints` |
-| `[ForEach]` systems, filters (`With`, `Without`, `WithAny`) | every system; `StatusSystem.Count` counts burning **or** frozen units |
+| `[ForEach]` systems, filters (`With`, `Without`, `WithAny`) | every system; `AfflictionSystem` counts burning **or** frozen units with `World.Count` (no loop) |
 | `[ForEach(Parallel = true)]` | `SteeringSystem`: NPC steering on every core |
 | Parallel systems (`WorldOptions.ParallelSystems`) | `MovementSystem` and `ManaSystem`: same priority, disjoint data, run at once |
-| Batch methods (`Span<T>`) | `MovementSystem` (vectorized with `Vector<float>`), `ManaSystem`: whole runs of rows |
+| Batch methods (`Span<T>`), SIMD | `MovementSystem`: whole runs of rows as `Vector<float>`; `Census` sums health with a vectorized `ForEachBatch` job |
 | Immediate structural changes | statuses added (`Add`, `GetOrAdd`) and removed mid-pass, deaths, respawns (`Set` of two components), projectiles spawned and destroyed |
-| Change tracking (`ITrackChanges`, `[Changed<T>]`, `ChangedSince`) | `ReplicationSystem` sends only the healths written since its last run; `Unsaved` counts players written since the save |
+| Change tracking (`ITrackChanges`, `[Changed<T>]`, `ChangedSince`) | `DeathSystem` checks only the units whose health was written; `ReplicationSystem` sends only the healths written since its last run; `Unsaved` counts players written since the save |
 | Lists per entity (`DynamicBuffer<T>`, `[Changed<DynamicBuffer<T>>]`) | every player's bag of `Loot`: filled in `Despawn`, emptied in `Respawn`, sent by `ReplicationSystem.SendBag` only when it changed; `LootValue` reads it (`foreach`), `Give` moves an item between two bags |
 | Value index (`Find`, `TryFind`, `Count`) | `Zone : IIndexed<int>`: players per zone; `Despawn` hunts a player of a zone |
 | Relation | `OwnedBy : IIndexed<Entity>`: a respawning player recalls its projectiles |
@@ -26,7 +26,7 @@ from another ECS? [Their features in EasyEcs](comparison.md#their-features-in-ea
 | System lifecycle (`OnCreate`, `OnDestroy`) | `SteeringSystem` sets up and removes its `Waypoints`; `ClockSystem` adds `Battle` |
 | Struct jobs (`ForEach`, `ForEachEntity`, `ForEachBatch`, `ForEachParallel`, `ForEachEntityParallel`) | `Census` (read-only: `Writes => 0`, `INoStructuralChanges`); `NewRound` heals everyone and scatters the NPCs, on every core |
 | Ad-hoc queries (`Query`, `Count`, `Any`, `TryGet`) | `NearestPlayer`, `Census`, `AnyoneBurning`, `AnyoneAfflicted` (`QueryFilter.WithAny`), `ShotsLeft` with `static readonly` filters |
-| Entity handles (`TryGetEntity`, `IsAlive`, `Has`, `Read`, `TryGetRef`) | `Hit` turns a client's id back into the living unit; `ShotsLeft` of a stale handle is 0; `LootValue` reads a bag without a write; `Give` takes a bag by `ref` only if the handle has one |
+| Entity handles (`TryGetEntity`, `IsAlive`, `Has`, `Read`, `TryGetRef`) | `Hit` turns a client's id back into the living unit and takes its `Health` by `ref` only if it has one (`TryGetRef`); `ShotsLeft` of a stale handle is 0; `LootValue` reads a bag without a write; `Give` checks both bags with reads and writes only when an item moves |
 | Bulk operations | `CreateEntities` for the players; `DestroyEntities` clears the projectiles of a round |
 | Snapshots | `Save` / `Load` (`Capture` / `Restore`) |
 | Diagnostics | `MeasureSystems` and `Slowest`; `SystemError` switches a failing system off |
@@ -101,25 +101,23 @@ public partial class MovementSystem : EcsSystem
     [ForEach, Without<Dead>, Without<Frozen>]                                 // whole runs of rows, vectorized
     static void Move(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
     {
-        // Two floats each: as float spans, X and Y are lanes of one Vector<float> (the JIT does not vectorize loops)
-        var p = MemoryMarshal.Cast<Position, float>(positions);
-        var v = MemoryMarshal.Cast<Velocity, float>(velocities);
-        int i = 0;
-        for (; i <= p.Length - Vector<float>.Count; i += Vector<float>.Count)
-            (new Vector<float>(p[i..]) + new Vector<float>(v[i..])).CopyTo(p[i..]);
-        for (; i < p.Length; i++) p[i] += v[i];                               // the rows left over
+        // Two floats each, no padding: as Vector<float> spans, every lane is one coordinate (the JIT does not
+        // vectorize loops by itself)
+        var p = MemoryMarshal.Cast<Position, Vector<float>>(positions);
+        var v = MemoryMarshal.Cast<Velocity, Vector<float>>(velocities);
+        for (int i = 0; i < p.Length; i++) p[i] += v[i];
+        var pf = MemoryMarshal.Cast<Position, float>(positions);
+        var vf = MemoryMarshal.Cast<Velocity, float>(velocities);
+        for (int i = p.Length * Vector<float>.Count; i < pf.Length; i++) pf[i] += vf[i];  // the rows left over
     }
 }
 
 public partial class ManaSystem : EcsSystem                                   // same priority as MovementSystem, other
-{                                                                             // data: both run at once (Parallel)
+{                                                                             // data: both run at once (ParallelSystems)
     public override int Priority => 1;
 
     [ForEach]
-    static void Regenerate(Span<Mana> mana)
-    {
-        for (int i = 0; i < mana.Length; i++) mana[i].Value = Math.Min(mana[i].Max, mana[i].Value + 1);
-    }
+    static void Regenerate(ref Mana mana) => mana.Value = Math.Min(mana.Max, mana.Value + 1);
 }
 
 public partial class ZoneSystem : EcsSystem                                   // the zone index follows these writes
@@ -167,16 +165,22 @@ public partial class StatusSystem : EcsSystem
     {
         if (--frozen.Ticks == 0) unit.Remove<Frozen>();
     }
+}
 
-    [ForEach, WithAny<Burning>, WithAny<Frozen>]                              // burning or frozen (or both)
-    static void Count(in Health hp, ref Battle battle) => battle.Afflicted++;
+public sealed class AfflictionSystem : EcsSystem                              // registered after StatusSystem
+{
+    public override int Priority => 4;
+
+    // A count, not a loop: Count reads presence bits, 64 rows per load
+    protected override void OnUpdate() =>
+        World.GetSingleton<Battle>().Afflicted += World.Count<Health>(BattleServer.Afflicted);
 }
 
 public partial class DeathSystem : EcsSystem
 {
     public override int Priority => 5;
 
-    [ForEach, Without<Dead>]
+    [ForEach, Without<Dead>, Changed<Health>]                                 // only units whose health was written
     static void Die(Entity unit, in Health hp, ref Battle battle)
     {
         if (hp.Value > 0) return;
@@ -196,7 +200,7 @@ public partial class RespawnSystem : EcsSystem                                //
         hp.Value = hp.Max;
         bag.Clear();                                                          // a death empties the bag
         player.Set(new Position(2048, 2048), new Mana(0, 100));               // several components, one call
-        player.Remove<Dead>();
+        player.Remove<Dead, Burning, Frozen>();                               // back without statuses: one transition
     }
 
     [ForEach, With<Npc>, With<Dead>]
@@ -299,7 +303,7 @@ public sealed class BattleServer : IDisposable
     private static readonly QueryFilter AlivePlayers = Players.Without<Dead>();
     private static readonly QueryFilter ReadyToAttack = QueryFilter.Create().Without<Dead>().Without<Frozen>();
     private static readonly QueryFilter Npcs = QueryFilter.Create().With<Npc>();
-    private static readonly QueryFilter Afflicted = QueryFilter.Create().WithAny<Burning>().WithAny<Frozen>();
+    internal static readonly QueryFilter Afflicted = QueryFilter.Create().WithAny<Burning>().WithAny<Frozen>();
     private static readonly QueryFilter UnsavedPlayers = Players.Changed<Health>(0);   // the tick is set per call
 
     public readonly World World;
@@ -325,6 +329,7 @@ public sealed class BattleServer : IDisposable
         World.AddSystem<ZoneSystem>();
         World.AddSystem<CombatSystem>();
         World.AddSystem<StatusSystem>();
+        World.AddSystem<AfflictionSystem>();
         World.AddSystem<DeathSystem>();
         World.AddSystem<RespawnSystem>();
         World.AddSystem<ProjectileSystem>();
@@ -389,8 +394,10 @@ public sealed class BattleServer : IDisposable
     /// <summary>A client's hit on the unit it names by id: the id turns back into a handle of the living entity.</summary>
     public bool Hit(int targetId, int damage)
     {
-        if (!World.TryGetEntity(targetId, out var target) || !target.Has<Health>() || target.Has<Dead>()) return false;
-        target.Get<Health>().Value -= damage;                                // a write: replicated with the next send
+        if (!World.TryGetEntity(targetId, out var target) || target.Has<Dead>()) return false;
+        ref var hp = ref target.TryGetRef<Health>(out bool found);           // optional access by ref
+        if (!found) return false;
+        hp.Value -= damage;                                                   // a write: replicated with the next send
         return true;
     }
 
@@ -405,11 +412,11 @@ public sealed class BattleServer : IDisposable
     /// <summary>A client hands a player's oldest item to another player: two tracked writes, replicated next send.</summary>
     public bool Give(Entity from, Entity to)
     {
-        ref var source = ref from.TryGetRef<DynamicBuffer<Loot>>(out bool found);    // optional access by ref
-        if (!found || source.Count == 0 || !to.Has<DynamicBuffer<Loot>>()) return false;
-        ref var target = ref to.Get<DynamicBuffer<Loot>>();
-        if (target.Count == BagSize) return false;
-        target.Add(source[0]);
+        // Check with reads first: a ref access counts as a change, and an unchanged bag must not be replicated
+        if (!from.Has<DynamicBuffer<Loot>>() || !to.Has<DynamicBuffer<Loot>>()) return false;
+        if (from.Read<DynamicBuffer<Loot>>().Count == 0 || to.Read<DynamicBuffer<Loot>>().Count == BagSize) return false;
+        ref var source = ref from.Get<DynamicBuffer<Loot>>();
+        to.Get<DynamicBuffer<Loot>>().Add(source[0]);
         source.RemoveAt(0);
         return true;
     }
@@ -483,7 +490,15 @@ public sealed class BattleServer : IDisposable
     {
         public long Total;
         public static int Writes => 0;                                        // reads only: rows stay unchanged
-        public void Execute(Span<Health> hp) { for (int i = 0; i < hp.Length; i++) Total += hp[i].Value; }
+        public void Execute(Span<Health> hp)
+        {
+            // Value, Max, Value, Max, ...: sum every lane, keep the even ones (an int lane holds 4M rows of 500)
+            var lanes = MemoryMarshal.Cast<Health, Vector<int>>(hp);
+            var sum = Vector<int>.Zero;
+            for (int i = 0; i < lanes.Length; i++) sum += lanes[i];
+            Total += Vector.Sum(sum & Vector.Equals(Vector<int>.Indices & Vector<int>.One, Vector<int>.Zero));
+            for (int i = lanes.Length * Vector<int>.Count / 2; i < hp.Length; i++) Total += hp[i].Value;  // left over
+        }
     }
 
     private struct SumMana : IForEach<Mana>, INoStructuralChanges

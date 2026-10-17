@@ -53,7 +53,7 @@ foreach (var item in world.Query<Position, Velocity>(Active))
 {
     ref var p = ref item.Component1;       // Component1..n are refs into storage
     p.X += item.Component2.X;
-    if (p.X > 100) item.Entity.Set(new Dead());
+    if (p.X > 100) item.Entity.Add<Dead>();
 }
 ```
 
@@ -64,11 +64,15 @@ The enumerator and its items are ref structs holding refs into the current table
 ## `ForEach`: a struct job
 
 A struct implementing `IForEach<T1..Tn>` is specialized and inlined by the JIT: no delegate, no allocation. Keep
-`Execute` small and branch-light.
+`Execute` small and branch-light. Two members make it the fastest loop (see [What a job declares](#what-a-job-declares-writes)):
+`INoStructuralChanges`, when `Execute` never adds, removes, creates or destroys (the pass then skips the bookkeeping
+that keeps changes safe), and `Writes`, the components it writes (only those count as changed).
 
 ```csharp
-public struct Integrate : IForEach<Position, Velocity>
+public struct Integrate : IForEach<Position, Velocity>, INoStructuralChanges
 {
+    public static int Writes => 1;          // Position (component 1); Velocity is only read
+
     public void Execute(ref Position p, ref Velocity v)
     {
         p.X += v.X;
@@ -82,69 +86,57 @@ var job = new Integrate();
 world.ForEach<Position, Velocity, Integrate>(ref job, Active);
 ```
 
-The job is passed by `ref`, so fields it accumulates (a sum, a counter) are visible after the call. It receives the
-components only, so the pass never loads the entity rows. Two variants:
+The job is passed by `ref`, so fields it accumulates (a sum, a counter) are visible after the call; a value field
+stays in a register during the pass. It receives the components only, so the pass never loads the entity rows. A job
+that must hold a `ref` or a `Span` (an output buffer) can be a `ref struct`, except in the `*Parallel` calls. Two
+variants:
 
 - `IForEachEntity<T1..Tn>` with `world.ForEachEntity` also receives the `Entity` handle (its `Id` and `Version`),
-  built from the table without a lookup: use it when the job needs the entity.
+  built from the table without a lookup: use it when the job needs the entity, since it reads the entity's row too.
 - `IForEachBatch<T1..Tn>` with `world.ForEachBatch` receives runs of consecutive rows as spans (`Execute(Span<T1>,
-  …)`), for SIMD. The job must not make structural changes.
+  …)`), to vectorize with `Vector<T>` (the JIT does not vectorize loops by itself). The job must not make structural
+  changes.
 
 ```csharp
-public struct KillTheWounded : IForEachEntity<Health>          // the handle, for structural changes
+using System.Numerics;
+using System.Runtime.InteropServices;
+
+public struct KillTheWounded : IForEachEntity<Health>           // the handle, for structural changes
 {
+    public static int Writes => 0;          // reads Health; the change is structural (a tag)
+
     public void Execute(Entity unit, ref Health hp)
     {
-        if (hp.Value <= 0) unit.Set(new Dead());
+        if (hp.Value <= 0) unit.Add<Dead>();
     }
 }
 
-public struct Drift : IForEachBatch<Position, Velocity>       // spans of consecutive rows
+public struct Drift : IForEachBatch<Position, Velocity>, INoStructuralChanges    // spans of consecutive rows
 {
-    public void Execute(Span<Position> p, Span<Velocity> v)
+    public static int Writes => 1;
+
+    public void Execute(Span<Position> positions, Span<Velocity> velocities)
     {
-        for (int i = 0; i < p.Length; i++) p[i].X += v[i].X;
+        // Two floats each: as Vector<float> spans, every lane is one coordinate
+        var p = MemoryMarshal.Cast<Position, Vector<float>>(positions);
+        var v = MemoryMarshal.Cast<Velocity, Vector<float>>(velocities);
+        for (int i = 0; i < p.Length; i++) p[i] += v[i];
+        var pf = MemoryMarshal.Cast<Position, float>(positions);
+        var vf = MemoryMarshal.Cast<Velocity, float>(velocities);
+        for (int i = p.Length * Vector<float>.Count; i < pf.Length; i++) pf[i] += vf[i];   // the rows left over
     }
 }
 ```
 
 ```csharp
+private static readonly QueryFilter Alive = QueryFilter.Create().Without<Dead>();
 var kill = new KillTheWounded();
-world.ForEachEntity<Health, KillTheWounded>(ref kill, QueryFilter.Create().Without<Dead>());
+world.ForEachEntity<Health, KillTheWounded>(ref kill, Alive);
 var drift = new Drift();
 world.ForEachBatch<Position, Velocity, Drift>(ref drift, Active);
 ```
 
-A job that makes no structural change can say so by implementing `INoStructuralChanges`: the pass then skips the
-bookkeeping that keeps changes safe. Only implement it when the job honors it.
-
-### What a job declares: `Writes`
-
-A static member tells the pass what a hand-written job writes. `[ForEach]` methods get it from their parameters; a job
-you write keeps the safe default unless you override it:
-
-| Member | Default | Meaning | When it is wrong |
-|---|---|---|---|
-| `static int Writes` | `-1` (all) | bit k - 1 set: the job writes component k through its ref. Those columns count as changed for `[Changed<T>]` (tracked components only), and when the job moves its entity to another archetype they are carried over to the new row | a write the mask leaves out is not stamped (watchers miss it) and is lost if the job also moved the entity |
-
-A read-only job declares it, and a census of the world stamps nothing:
-
-```csharp
-public struct SumHealth : IForEach<Health>, INoStructuralChanges
-{
-    public long Total;
-
-    public static int Writes => 0;          // reads only: nothing stamped, nothing carried over
-
-    public void Execute(ref Health health) => Total += health.Value;
-}
-```
-
-```csharp
-var census = new SumHealth();
-world.ForEach<Health, SumHealth>(ref census);
-long total = census.Total;
-```
+Only implement `INoStructuralChanges` when the job honors it.
 
 ### On several threads: `ForEachParallel` and `ForEachEntityParallel`
 
@@ -156,18 +148,20 @@ merged back. Fewer than two chunks run on the calling thread. The call allocates
 type.
 
 ```csharp
-public struct Heal : IForEachEntity<Health>, INoStructuralChanges
+public struct Heal : IForEach<Health>, INoStructuralChanges
 {
     public static int Writes => 1;          // writes Health (component 1)
 
-    public void Execute(Entity entity, ref Health health) => health.Value = Math.Min(health.Value + 10, 100);
+    public void Execute(ref Health health) => health.Value = Math.Min(health.Value + 10, 100);
 }
 ```
 
 ```csharp
 var heal = new Heal();
-world.ForEachEntityParallel<Health, Heal>(ref heal, Active); // each row runs once, on one of the threads
+world.ForEachParallel<Health, Heal>(ref heal, Active);  // each row runs once, on one of the threads
 ```
+
+Use `ForEachEntityParallel` only when the job needs the handle (its id as a seed, a read of another component).
 
 The job must not read what another row's job writes (another entity, a singleton it also writes), and nothing else
 may change the world during the call. `[ForEach(Parallel = true)]` compiles a system method to the same chunked run.

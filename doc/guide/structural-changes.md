@@ -30,11 +30,11 @@ rules:
 ```csharp
 public partial class DeathSystem : EcsSystem
 {
-    [ForEach, Without<Dead>]
+    [ForEach, Without<Dead>, Changed<Health>]   // only units whose health was written
     static void Die(Entity unit, in Health hp, ref Score score)
     {
         if (hp.Value > 0) return;
-        unit.Set(new Dead());   // applied now: later systems of this update already see the corpse
+        unit.Add<Dead>();   // applied now: later systems of this update already see the corpse
         score.Deaths++;
     }
 }

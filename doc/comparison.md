@@ -60,10 +60,10 @@ visits each entity at most once:
 ```csharp
 public partial class DeathSystem : EcsSystem
 {
-    [ForEach, Without<Dead>]
+    [ForEach, Without<Dead>, Changed<Health>]   // only units whose health was written
     static void Die(Entity unit, in Health hp)
     {
-        if (hp.Value <= 0) unit.Set(new Dead());   // applied now: later systems already see the corpse
+        if (hp.Value <= 0) unit.Add<Dead>();   // applied now: later systems already see the corpse
     }
 }
 ```

@@ -193,18 +193,15 @@ public partial class ScoreSystem : EcsSystem
 public partial class KillSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
-    static void Kill(Entity e, in Health hp) { if (hp.Value <= 0) e.Set(new Dead()); }
+    static void Kill(Entity e, in Health hp) { if (hp.Value <= 0) e.Add<Dead>(); }
 }
 
-public partial class ScoreSystem : EcsSystem
+public sealed class ScoreSystem : EcsSystem
 {
     public override int Priority => 10;                    // after KillSystem: it reads the Dead it wrote
-    [ForEach, With<Dead>]
-    static void Count(Entity e, ref Score score)
-    {
-        score.Deaths++;
-        e.Destroy();                                       // counted once
-    }
+
+    // One pass destroys the corpses and says how many there were: each is counted once
+    protected override void OnUpdate() => World.GetSingleton<Score>().Deaths += World.DestroyEntities<Dead>();
 }
 ```
 
@@ -226,7 +223,7 @@ public partial class DriftAllSystem : EcsSystem
 {
     [ForEach]
     static void Drift(Span<Position> p, ReadOnlySpan<Velocity> v)   // element i of both spans is one entity
-    {
+    {                                                                   // (vectorize it: see performance.md)
         for (int i = 0; i < p.Length; i++)
         {
             p[i].X += v[i].X;
@@ -249,7 +246,7 @@ writes, or drop `Parallel = true`.
 ```cs
 [ForEach(Parallel = true)] static void Kill(Entity e, in Health hp)   // EECS010: e.Set changes structure
 {
-    if (hp.Value <= 0) e.Set(new Dead());
+    if (hp.Value <= 0) e.Add<Dead>();
 }
 ```
 

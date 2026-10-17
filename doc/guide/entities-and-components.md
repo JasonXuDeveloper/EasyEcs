@@ -29,7 +29,7 @@ Waves of spawns and clean-ups have batch forms. Each takes the structural gate o
 ```csharp
 var wave = new Entity[500];
 world.CreateEntities(wave, new Position(0, 0), new Health(100));  // the same values for each; handles written to wave
-int cleared = world.DestroyEntities<Health>(QueryFilter.Create().With<Dead>());  // every dead entity with Health
+int cleared = world.DestroyEntities<Health, Dead>();  // every dead entity with Health, one pass
 ```
 
 - **Ids are recycled** (LIFO, so recently freed slots are still warm in cache). `Entity.Id` is unique only among
