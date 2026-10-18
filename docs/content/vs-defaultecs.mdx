@@ -1,0 +1,178 @@
+---
+title: EasyEcs vs DefaultEcs
+seoTitle: "EasyEcs vs DefaultEcs: C# ECS comparison with benchmarks (DefaultEcs alternative)"
+description: EasyEcs and DefaultEcs side by side. Archetype tables against component pools and entity sets, the same system in both, the measured tick and features, and when DefaultEcs is the better choice.
+icon: GitCompare
+---
+
+[DefaultEcs](https://github.com/Doraku/DefaultEcs) stores each component type in its own pool and keeps reactive
+entity sets up to date as components come and go; systems iterate a set's entities and read components through the
+pools. EasyEcs stores entities with the same components together in archetype tables and generates a struct job per
+`[ForEach]` method that walks their columns. Both have change tracking, removal tracking, value indexes, parallel
+systems and saves built in; they differ in storage, in how a system is written and in what a tick costs.
+
+## At a glance [#at-a-glance]
+
+| | EasyEcs | DefaultEcs |
+| --- | --- | --- |
+| Storage | archetype tables, presence bits per column | a pool per component type, entity sets |
+| A system | an `EcsSystem` with generated `[ForEach]` jobs | `AEntitySetSystem<T>` / `AComponentSystem<T, TComponent>` with `[With]` / `[Without]` attributes |
+| Changes during a pass | applied at once | applied at once to sets; `useBuffer` copies the set first, or an `EntityCommandRecorder` |
+| Change tracking | every `ref` write, `[Changed<T>]` | `NotifyChanged<T>()` at each write, `WhenChanged<T>()` sets |
+| Removal tracking | `[Removed<T>]` | `WhenRemoved<T>()` sets, completed by hand |
+| Allocation per server tick | none | allocates |
+| Runtimes | net10.0 | netstandard1.1-2.1; Unity |
+
+## Concepts side by side [#concepts]
+
+| Concept | DefaultEcs | EasyEcs |
+| --- | --- | --- |
+| World | `new World(capacity)` | `new World(new WorldOptions { InitialEntityCapacity = n })` |
+| Component | any struct | a struct implementing `IComponent` |
+| Create with components | `var e = world.CreateEntity(); e.Set(a); e.Set(b);` | `world.CreateEntity(a, b)` (placed in its final table at once) |
+| Read, write | `e.Get<T>()` (ref), `world.GetComponents<T>()[e]` | `entity.Get<T>()` (ref), `entity.Read<T>()`; a `[ForEach]` parameter |
+| Tag | `e.Set<Dead>()` | `entity.Set(new Dead())` |
+| Destroy | `e.Dispose()` | `entity.Destroy()` |
+| Singleton | `world.Set<T>(value)`, `world.Get<T>()` | `ISingletonComponent`, `world.AddSingleton<T>()`, a `ref T` parameter |
+| System over a set | `[With(typeof(A)), Without(typeof(B))] class S : AEntitySetSystem<TState>` | `class S : EcsSystem` with `[ForEach, Without<B>] static void M(ref A a)` |
+| System over one component | `AComponentSystem<TState, A>` | a `[ForEach]` method taking `ref A` |
+| Sequence of systems | `new SequentialSystem<T>(systems)` | `world.AddSystem<S>()` in order, or `[UpdateBefore<T>]` / `[UpdateAfter<T>]` |
+| Parallel systems | `new ParallelSystem<T>(runner, systems)` | `WorldOptions.ParallelSystems` (conflicts from generated access) |
+| Parallel set system | `AEntitySetSystem` with a `DefaultParallelRunner` | `[ForEach(Parallel = true)]` |
+| Entity set | `world.GetEntities().With<A>().Without<B>().AsSet()` | a `QueryFilter`, `world.Query<A>(filter)`, `world.Count<A>(filter)` |
+| Changed since last look | `.WhenChanged<T>()` + `NotifyChanged<T>()` + `Complete()` | `ITrackChanges` + `[Changed<T>]` |
+| Removed since last look | `.WhenRemoved<T>()` + `Complete()` | `ITrackChanges` + `[Removed<T>]` |
+| Index by value | `AsMultiMap<T>()`, `AsMap<T>()` | `IIndexed<TKey>`, `world.Index<T, TKey>()` |
+| Deferred changes | `EntityCommandRecorder`, `Record(e).Set<T>()`, `Execute()` | not needed |
+| Disable | `e.Disable()`, `e.Disable<T>()` | a tag and `[Without<T>]`, or `entity.Disable<T>()` |
+| Copy to a world | `e.CopyTo(world)` | `entity.Clone()`, `world.MoveEntities(...)`, a `Prefab` |
+| Save | `BinarySerializer`, `TextSerializer` | `world.Save(writer)` / `world.Load(bytes)` |
+| Messages | `world.Subscribe<T>`, `world.Publish<T>` | data: a singleton or components later systems read |
+
+## The same task in both [#same-task]
+
+The status system of the headline tick: burning units lose health and the fire goes out after a few ticks. The
+DefaultEcs port removes the component while it iterates, so the system passes `useBuffer: true` and the set is copied
+before the update (`DefaultEcsSimulation.cs`).
+
+<Tabs items={['EasyEcs', 'DefaultEcs']}>
+<Tab value="EasyEcs">
+
+```csharp title="StatusSystem.cs"
+public struct Hp : IComponent { public int Value, Max; }
+public struct Fire : IComponent { public int Ticks, DamagePerTick; }
+
+public class StatusSystem : EcsSystem
+{
+    [ForEach]
+    static void Burn(Entity entity, ref Fire fire, ref Hp hp)
+    {
+        hp.Value -= fire.DamagePerTick;
+        if (--fire.Ticks <= 0) entity.Remove<Fire>();   // a bit flip: the row stays
+    }
+}
+```
+
+```csharp
+world.AddSystem<StatusSystem>();
+world.Update();
+```
+
+</Tab>
+<Tab value="DefaultEcs">
+
+```csharp title="DefaultEcsStatus.cs" doccheck=skip
+[With(typeof(Fire), typeof(Hp))]
+public sealed class BurnSystem(World world) : AEntitySetSystem<Counters>(world, true)   // useBuffer: true
+{
+    protected override void Update(Counters c, ReadOnlySpan<Entity> entities)
+    {
+        var fires = World.GetComponents<Fire>();
+        var hps = World.GetComponents<Hp>();
+        foreach (ref readonly var e in entities)
+        {
+            ref var fire = ref fires[e];
+            hps[e].Value -= fire.DamagePerTick;
+            if (--fire.Ticks <= 0) e.Remove<Fire>();
+        }
+    }
+}
+
+var systems = new SequentialSystem<Counters>(new BurnSystem(world) /* , ... */);
+systems.Update(counters);
+```
+
+</Tab>
+</Tabs>
+
+## The numbers [#numbers]
+
+The headline tick:
+
+<PeerChart />
+
+DefaultEcs takes <BenchValue k="peers.defaultecs.ratio" /> the time of EasyEcs on this tick and allocates
+<BenchValue k="peers.defaultecs.alloc" /> per tick. Its reads go through a pool per component type, indexed by the
+entity, where EasyEcs walks the columns of a table front to back.
+
+<Tabs items={['Changes', 'Removals', 'Indexes']}>
+<Tab value="Changes">
+
+<BenchChart
+  bench="ChangeTrackingComparison"
+  methods="EasyEcs_Changed,DefaultEcs_WhenChanged"
+  title="Replicate the entities written this tick: 10 or 1,000 of 100,000"
+/>
+
+</Tab>
+<Tab value="Removals">
+
+<BenchChart bench="RemovalComparison" methods="EasyEcs_Removed,DefaultEcs_WhenRemoved" title="Send the buffs that expired: 10 or 1,000 of 100,000" />
+
+</Tab>
+<Tab value="Indexes">
+
+<BenchChart bench="IndexComparison" methods="EasyEcs_Index,DefaultEcs_MultiMap" title="Trades, then 100 inventories counted" />
+
+</Tab>
+</Tabs>
+
+<BenchChart bench="ParallelSystemsComparison" title="Four independent systems over 100,000 entities, sequential and parallel" />
+<BenchChart bench="DisableComparison" methods="EasyEcs_Tag,DefaultEcs_Disable" title="Units fall asleep and wake up, then the awake are summed" />
+<BenchChart bench="StructuralChangeComparison" methods="EasyEcs_Direct,DefaultEcs_CommandRecorder" title="Mark the dead and revive them during two passes over 100,000 units" />
+<BenchChart bench="BulkSpawnComparison" methods="EasyEcs_CreateAndDestroyAll,DefaultEcs_PerEntity" title="Spawn 10,000 shots, then clear them" />
+<BenchChart bench="SaveComparison" methods="EasyEcs_SaveLoad,DefaultEcs_Binary" title="Save and load 10,000 units" />
+
+The DefaultEcs row of the structural-change benchmark at 1,000 kills carries an error as large as its mean in this
+run, and the parallel rows carry a large error too.
+
+## What DefaultEcs does better [#what-defaultecs-does-better]
+
+- **Reach.** netstandard1.1 to 2.1 and Unity; EasyEcs needs .NET 10.
+- **Shared components.** `SetSameAs` lets entities share one component value; EasyEcs has no shared components
+  ([D14](/en/docs/decisions)): keep the shared data in a singleton and an id into it.
+- **Messages.** A built-in publish / subscribe channel; EasyEcs models messages as data.
+- **A text serializer** next to the binary one.
+- **Sparse storage** suits worlds where entities change their component set constantly and are rarely iterated as
+  a whole: adding a component never copies the others.
+
+## When to choose DefaultEcs [#when-to-choose-defaultecs]
+
+Choose DefaultEcs when you need old runtimes or Unity, reactive sets or messaging as the way systems talk, and the
+world is small enough that per-tick allocations and pool lookups do not matter. Choose EasyEcs for a .NET 10 server
+that iterates many entities every tick, wants change tracking without a `NotifyChanged` at every write, and must not
+allocate per tick. Porting a DefaultEcs codebase: [Migrate from DefaultEcs](/en/docs/migrate-from-defaultecs).
+
+## Related [#related]
+
+<Cards>
+  <Card title="Migrate from DefaultEcs" href="/en/docs/migrate-from-defaultecs">
+    The API mapping and a whole simulation ported, step by step.
+  </Card>
+  <Card title="Comparison" href="/en/docs/comparison">
+    Every benchmark against DefaultEcs, Friflo.Engine.ECS and Arch.
+  </Card>
+  <Card title="Systems and [ForEach]" href="/en/docs/guide/systems">
+    How a system is written in EasyEcs.
+  </Card>
+</Cards>

@@ -1,0 +1,307 @@
+---
+title: 从 Arch 迁移
+seoTitle: "从 Arch ECS 迁移到 EasyEcs：API 对照与一个移植好的模拟（C#、.NET 10）"
+description: 一步步把 Arch ECS 项目移植到 EasyEcs。概念和 API 的新旧对照，一个从跑分源码移植过来的完整服务器模拟，以及要避开的坑。
+icon: ArrowRightLeft
+---
+
+Arch 和 EasyEcs 都是原型（archetype）模型，所以移植大多是机械活：`QueryDescription` 变成过滤特性，struct job 的
+`Update` 变成 `[ForEach]` 方法，实体上的 `world.Add` / `Remove` / `Destroy` 变成句柄上的调用。唯一要改的习惯是命令缓冲：
+EasyEcs 没有命令缓冲，因为结构变更当场生效，查询途中也一样。下面的示例就是仓库里真实的移植：
+[`ArchSimulation.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/benchmarks/EasyEcs.Comparison/ArchSimulation.cs)，
+以及它的原版 EasyEcs World
+[`WorldSimulation.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/benchmarks/EasyEcs.Benchmark/WorldSimulation.cs)，
+对比项目会校验两者产出的计数器一致。
+
+## 开始之前 [#before-you-start]
+
+<Callout type="warn" title="环境要求">
+  EasyEcs 只面向 net10.0。项目如果还要为 Unity、netstandard2.1 或 .NET 8 编译，ECS 代码就没法搬到 EasyEcs。
+</Callout>
+
+```bash
+dotnet add package EasyEcs
+```
+
+包里自带源生成器和分析器：`[ForEach]` 系统、生成的成员（`entity.Position`、`world.Clock`）和 EECS 规则，不用再装别的。
+
+## 概念 [#concepts]
+
+| Arch | EasyEcs | 变化 |
+| --- | --- | --- |
+| `World.Create()` | `new World(options)` | 每个 World 只属于一个线程；一个线程跑一个 World。 |
+| 任意 struct 都是组件 | 实现 `IComponent` 的 struct | 加上接口；class 会被分析器拒绝（[EECS006](/zh/docs/guide/analyzer#eecs006)）。 |
+| `QueryDescription` | `[ForEach]` 方法上的过滤特性，或 `QueryFilter` | 只在方法上写一次；生成器把过滤存进静态字段。 |
+| `IForEach<T...>` + `InlineQuery` | `EcsSystem` 里的 `[ForEach]` 方法 | struct job 和调用由生成器写。 |
+| `CommandBuffer` + `Playback` | 直接调用 | 变更当场生效，后面的系统能看到。 |
+| 传给 job 的计数器对象 | 单例（`ISingletonComponent`） | 作为 `ref` 参数，每一遍只解析一次。 |
+| Arch.Extended 的系统 | `EcsSystem`、`ISystemGroup`、`[UpdateBefore<T>]` / `[UpdateAfter<T>]` | 内置。 |
+| 事件 | `[Changed<T>]`、`[Removed<T>]`、之后再查询的标签 | 状态变化就是数据。 |
+
+## API 对照 [#api-mapping]
+
+### World 和实体 [#world-and-entities]
+
+| Arch | EasyEcs |
+| --- | --- |
+| `var world = World.Create();` | `var world = new World(new WorldOptions { InitialEntityCapacity = n });` |
+| `World.Destroy(world);` | `world.Dispose();` |
+| `world.Create(a, b, c)` | `world.CreateEntity(a, b, c)` |
+| `world.Destroy(entity)` | `entity.Destroy()` |
+| `world.Add(entity, c)` | `entity.Set(c)` |
+| `world.Add<Tag>(entity)` | `entity.Set(new Tag())` |
+| `world.Remove<T>(entity)` | `entity.Remove<T>()` |
+| `world.Has<T>(entity)` | `entity.Has<T>()` |
+| `ref var c = ref world.Get<T>(entity)` | `ref var c = ref entity.Get<T>()`；只读用 `entity.Read<T>()` |
+| `world.Size` | `world.EntityCount` |
+| `entity.Id` | `entity.Id.Index`；数据里存 `entity.Id`（`EntityId`） |
+| `world.EnsureCapacity(in signature, n)` | `world.EnsureEntityCapacity(n)`、`world.EnsureCapacity(prefab, n)` |
+
+### 查询和遍历 [#queries-and-iteration]
+
+| Arch | EasyEcs |
+| --- | --- |
+| `new QueryDescription().WithAll<A, B>()` | 方法的组件参数：`static void M(ref A a, in B b)` |
+| `.WithAll<Tag>()`（job 不读的标签） | `[With<Tag>]` |
+| `.WithNone<C>()` | `[Without<C>]` |
+| `.WithAny<C, D>()` | `[WithAny<C>, WithAny<D>]` |
+| `struct J : IForEach<A>` + `world.InlineQuery<J, A>(in q, ref job)` | `[ForEach]` 方法；系统之外用 `world.ForEach<A, J>(ref job, in filter)`，实现 `IForEach<A>.Execute` |
+| `IForEachWithEntity<A>` + `InlineEntityQuery` | 一个 `Entity` 参数：`static void M(Entity e, ref A a)` |
+| chunk 遍历（`GetChunkIterator`、`chunk.GetSpan<T>()`） | 批量方法：`static void M(Span<A> a, ReadOnlySpan<B> b)` |
+| `world.CountEntities(in q)` | `world.Count<A>(filter)` |
+| `world.InlineParallelQuery<J, A>(in q, ref job)` | `[ForEach(Parallel = true)]` |
+
+### 结构变更 [#structural-changes]
+
+| Arch | EasyEcs |
+| --- | --- |
+| `buffer.Add(e, c)` 再 `buffer.Playback(world)` | `e.Set(c)` |
+| `buffer.Remove<T>(e)` | `e.Remove<T>()` |
+| `buffer.Destroy(e)` | `e.Destroy()` |
+| `var n = buffer.Create(types); buffer.Set(n, c);` | `world.CreateEntity(a, b, c)`（`[ForEach]` 方法里拿一个 `World` 参数） |
+| `world.Add(in q, value)` | `world.SetAll(value, filter)` |
+| `world.Remove<T>(in q)` | `world.RemoveAll<T>(filter)` |
+| `world.Destroy(in q)` | `world.DestroyEntities<T>(filter)` |
+
+## 示例：主 tick 的模拟 [#worked-example]
+
+<Steps>
+<Step>
+
+### 组件 [#components]
+
+加上 `IComponent`。标签仍是空 struct。Arch 里放在对象中、传给每个 job 的计数器，改成单例。
+
+```csharp title="Components.cs"
+public struct Position : IComponent { public float X, Y; }
+public struct Velocity : IComponent { public float X, Y; }
+public struct Health : IComponent { public int Value, Max; }
+public struct Attack : IComponent { public int Damage, Cooldown, Interval; }
+public struct Lifetime : IComponent { public int Ticks; }
+public struct Burning : IComponent { public int Ticks, DamagePerTick; }
+public struct Player : IComponent { public long AccountId; }
+public struct Npc : IComponent { public int TemplateId; }
+public struct Projectile : IComponent { public int OwnerId; }
+public struct Stunned : IComponent { public int Ticks; }
+public struct Dead : IComponent;
+
+public struct WorldStats : ISingletonComponent
+{
+    public long Tick;
+    public int Hits, Deaths, NpcKills, Spawns;
+}
+```
+
+</Step>
+<Step>
+
+### 查询加 job 合成一个方法 [#query-and-job]
+
+Arch：
+
+```csharp doccheck=skip
+private static readonly QueryDescription Moving =
+    new QueryDescription().WithAll<Position, Velocity>().WithNone<Stunned, Dead>();
+
+private struct Move : IForEach<Position, Velocity>
+{
+    public void Update(ref Position p, ref Velocity v) { /* ... */ }
+}
+
+var move = new Move();
+world.InlineQuery<Move, Position, Velocity>(in Moving, ref move);
+```
+
+EasyEcs：过滤写在方法上，参数就是组件。
+
+```csharp title="MovementSystem.cs"
+public class MovementSystem : EcsSystem
+{
+    [ForEach, Without<Stunned>, Without<Dead>]
+    static void Move(ref Position p, ref Velocity v)
+    {
+        p.X += v.X;
+        p.Y += v.Y;
+        if (p.X < 0 || p.X > 4096) v.X = -v.X;
+        if (p.Y < 0 || p.Y > 4096) v.Y = -v.Y;
+    }
+}
+```
+
+</Step>
+<Step>
+
+### 去掉命令缓冲 [#command-buffer]
+
+Arch 先记下状态变更，查询结束后再回放：
+
+```csharp doccheck=skip
+public void Update(Entity e, ref Attack attack, ref Health health)
+{
+    if (--attack.Cooldown > 0) return;
+    attack.Cooldown = attack.Interval;
+    C.Hits++;
+    health.Value -= attack.Damage;
+    if (Rng.Chance(C.Tick, e.Id, 1, 50) && !W.Has<Burning>(e))
+        B.Add(e, new Burning { Ticks = 10, DamagePerTick = 3 });
+}
+// ...
+_buffer.Playback(_world);
+```
+
+EasyEcs 当场生效。计数器是一个 `ref` 单例参数。
+
+```csharp title="CombatSystem.cs"
+public class CombatSystem : EcsSystem
+{
+    [ForEach, Without<Dead>, Without<Stunned>]
+    static void Fight(Entity entity, ref Attack attack, ref Health health, ref WorldStats stats)
+    {
+        if (--attack.Cooldown > 0) return;
+        attack.Cooldown = attack.Interval;
+        stats.Hits++;
+        health.Value -= attack.Damage;
+        if (entity.Id.Index % 20 == 0 && !entity.Has<Burning>())
+            entity.Set(new Burning { Ticks = 10, DamagePerTick = 3 });
+    }
+}
+
+public class StatusSystem : EcsSystem
+{
+    [ForEach]
+    static void Burn(Entity entity, ref Burning burning, ref Health health)
+    {
+        health.Value -= burning.DamagePerTick;
+        if (--burning.Ticks <= 0) entity.Remove<Burning>();
+    }
+}
+
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
+    {
+        if (health.Value > 0) return;
+        entity.Set(new Dead());
+        stats.Deaths++;
+        if (entity.Has<Npc>()) stats.NpcKills++;
+    }
+}
+```
+
+</Step>
+<Step>
+
+### 创建和销毁 [#create-and-destroy]
+
+Arch 通过缓冲按签名创建子弹，再一个组件一次 `Set`。EasyEcs 一次调用就带齐组件创建实体，直接放进最终的表；要创建或
+销毁的方法拿 `World` 或 `Entity` 参数。
+
+```csharp title="ShootingSystem.cs"
+public class ShootingSystem : EcsSystem
+{
+    [ForEach, With<Player>, Without<Dead>]
+    static void Shoot(Entity shooter, in Position p, in Velocity v, ref WorldStats stats, World world)
+    {
+        if ((stats.Tick + shooter.Id.Index) % 20 != 0) return;
+        stats.Spawns++;
+        world.CreateEntity(p, new Velocity { X = v.X * 4, Y = v.Y * 4 }, new Lifetime { Ticks = 20 },
+            new Projectile { OwnerId = shooter.Id.Index });
+    }
+}
+
+public class LifetimeSystem : EcsSystem
+{
+    [ForEach]
+    static void Expire(Entity entity, ref Lifetime lifetime)
+    {
+        if (--lifetime.Ticks <= 0) entity.Destroy();
+    }
+}
+
+public sealed class ClockSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.GetSingleton<WorldStats>().Tick++;
+}
+```
+
+</Step>
+<Step>
+
+### tick [#the-tick]
+
+Arch 的 `Tick()` 依次调用每个查询和每次回放。EasyEcs 一次调用，按添加顺序（或 `[UpdateBefore<T>]` /
+`[UpdateAfter<T>]` 指定的顺序）跑完所有系统。
+
+```csharp title="Program.cs"
+using var sim = new World(new WorldOptions { InitialEntityCapacity = 200_000 });
+sim.AddSingleton<WorldStats>();
+sim.AddSystem<MovementSystem>();
+sim.AddSystem<CombatSystem>();
+sim.AddSystem<StatusSystem>();
+sim.AddSystem<DeathSystem>();
+sim.AddSystem<LifetimeSystem>();
+sim.AddSystem<ShootingSystem>();
+sim.AddSystem<ClockSystem>();
+
+for (int i = 0; i < 100_000; i++)
+    sim.CreateEntity(new Position { X = i % 4096, Y = i / 25 }, new Velocity { X = 1, Y = -1 },
+        new Health { Value = 150, Max = 150 }, new Attack { Damage = 5, Cooldown = i % 10, Interval = 8 },
+        new Player { AccountId = i });
+
+sim.Update();   // 一个 tick
+```
+
+</Step>
+</Steps>
+
+完整的移植，包括视野网格和复活，就是开头链接的那两个文件。同一台机器、100,000 个实体时，EasyEcs 版本一个 tick 用
+<BenchValue k="peers.easyecs" />，Arch 用 <BenchValue k="peers.arch" />：
+
+<PeerChart />
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁来发现 |
+| --- | --- | --- |
+| 组件还是没有 `IComponent` 的普通 struct | 不能当参数，也不能成为列 | 编译错误：`IComponent` 约束 |
+| 用 class 当组件 | 被拒绝 | [EECS006](/zh/docs/guide/analyzer#eecs006) |
+| 把计数器对象搬成系统的字段 | 系统必须无状态 | [EECS007](/zh/docs/guide/analyzer#eecs007)：改用单例 |
+| 组件里存 `Entity`（Arch 的 `Entity` 是普通 struct） | 列里存了引用 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告）：存 `EntityId` |
+| 不带 `Entity` 或 `World` 的静态方法里加组件 | 它承诺了不做结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013)：拿 `Entity` 参数 |
+| 保留一个“待处理变更”列表，循环后再应用 | 能跑，但多走一遍 | 代码审查：在决定的地方直接改 |
+| 并行方法里做结构变更或写单例 | 数据竞争 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="EasyEcs 与 Arch" href="/zh/docs/vs-arch">
+    两个库并排对比，附全部跑分。
+  </Card>
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+    参数、过滤、顺序、分组和并行方法。
+  </Card>
+  <Card title="结构变更" href="/zh/docs/guide/structural-changes">
+    遍历途中哪些变更当场生效，为什么安全。
+  </Card>
+</Cards>

@@ -1,0 +1,151 @@
+---
+title: EasyEcs for Unity Entities developers
+seoTitle: "Unity Entities (DOTS) vs EasyEcs: concepts mapped for a .NET 10 game server"
+description: Coming from Unity Entities (DOTS)? How IComponentData, ISystem, EntityQuery, EntityCommandBuffer, IEnableableComponent, DynamicBuffer, baking and change filters map to EasyEcs on a .NET 10 server.
+icon: Boxes
+---
+
+If you write Unity Entities (DOTS) on the client, EasyEcs will feel familiar on the server: components are structs,
+systems run over queries, entities live in archetype tables, and there are dynamic buffers, cleanup components,
+singletons and system groups. EasyEcs is not a Unity package. It is a .NET 10 library for servers and simulations,
+with no Burst, no baking and no editor, and it trades the job system's command buffers for structural changes that
+apply immediately. This page maps the concepts; it has no benchmarks against Unity, because none exist.
+
+## What carries over and what does not [#overview]
+
+<Callout type="idea" title="Carries over">
+  Struct components and tags, archetype storage, queries with all / none / any filters, singletons, dynamic buffers,
+  cleanup components, system groups with before / after ordering, prefabs instantiated in bulk, change filters.
+</Callout>
+
+<Callout type="warn" title="Does not">
+  Unity itself: EasyEcs targets net10.0 and does not run in the Unity player or editor. No Burst (the .NET JIT
+  compiles your systems), no authoring or baking, no transforms or rendering, no `EntityCommandBuffer`.
+</Callout>
+
+## Concepts side by side [#concepts]
+
+| Unity Entities | EasyEcs | Notes |
+| --- | --- | --- |
+| `World`, `EntityManager` | `World` | One object: entities, components, singletons and systems. One owner thread per world. |
+| `Entity` (index, version) | `Entity` handle; `EntityId` (index, version) to store in data | A component stores an `EntityId`, not an `Entity` ([EECS017](/en/docs/guide/analyzer#eecs017)). |
+| `IComponentData` struct | `IComponent` struct | Unmanaged columns are pinned and 64-byte aligned. |
+| Empty `IComponentData` (tag) | Empty `IComponent` struct | Adding or removing a tag flips a presence bit after the first time. |
+| `ISharedComponentData` (chunks split by value) | `IGroup` + `world.GroupBy<T>()` | A table per group value; `QueryFilter.InGroup<T>(value)` walks one. |
+| `IBufferElementData` + `DynamicBuffer<T>` | `DynamicBuffer<T>` | A list per entity, held as a component; writes are tracked. |
+| `IEnableableComponent`, `SetComponentEnabled` | `entity.Disable<T>()` / `Enable<T>()` | The value stays and queries skip it; no row moves after the first time. |
+| `ICleanupComponentData` | `ICleanupComponent` + the `Destroyed` tag | A destroyed entity keeps its cleanup components until a system removes them. |
+| `SystemAPI.GetSingleton<T>()` | `ISingletonComponent`, a `ref T` parameter of a `[ForEach]` method | Per-world singletons, no entity needed. |
+| `ISystem` / `SystemBase` with `OnCreate` / `OnUpdate` / `OnDestroy` | `EcsSystem` with `OnCreate` / `OnUpdate` / `OnDestroy` | Systems are stateless: state goes into components or singletons ([EECS007](/en/docs/guide/analyzer#eecs007)). |
+| `SystemAPI.Query<RefRW<A>, RefRO<B>>()` | a `[ForEach]` method taking `ref A`, `in B` | The generator writes the job; `ref` is a write, `in` a read. |
+| `IJobEntity` | a `[ForEach]` method (a generated struct job) | |
+| `ScheduleParallel` | `[ForEach(Parallel = true)]` | Chunks of rows on the thread pool; the analyzer rejects methods that would race ([EECS010](/en/docs/guide/analyzer#eecs010)). |
+| `EntityQuery` with `WithAll` / `WithNone` / `WithAny` | `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`; `QueryFilter` for ad-hoc calls | |
+| Change filter (`WithChangeFilter<T>`) | `ITrackChanges` + `[Changed<T>]` | Per row, not per chunk, and opt-in per component type. |
+| Structural change events | `[Removed<T>]` | The entities that lost a tracked component since the system last ran. |
+| `EntityCommandBuffer` | none | `entity.Set`, `Remove`, `Destroy` apply at once, also mid-pass. |
+| `ComponentSystemGroup`, `[UpdateInGroup]` | `ISystemGroup`, `[UpdateInGroup<T>]`, `world.Update<TGroup>()` | |
+| `[UpdateBefore]` / `[UpdateAfter]` | `[UpdateBefore<T>]` / `[UpdateAfter<T>]` | A cycle is a build error ([EECS019](/en/docs/guide/analyzer#eecs019)). |
+| `RateManager`, fixed-step groups | `UpdateInterval`, a group updated when you choose | |
+| Prefab entity, `EntityManager.Instantiate(prefab, array)` | `Prefab`, `world.Instantiate(prefab, span)` | A `Prefab` lives outside every world; no baking step builds it. |
+| Baking, authoring components | none | Build entities in code, from a prefab or from a save. |
+| `LinkedEntityGroup` (destroyed together) | `ChildOf(parent)`, cascading destroy | `world.Children(parent)` lists the children. |
+| Burst | the .NET JIT, Native AOT | Struct jobs are specialized and inlined per job type. |
+
+## The same system [#same-system]
+
+A movement system written both ways. Unity reads the frame time from `SystemAPI.Time`; on a server the tick length
+is data, a singleton.
+
+<Tabs items={['EasyEcs', 'Unity Entities']}>
+<Tab value="EasyEcs">
+
+```csharp title="MoveSystem.cs"
+public record struct Speed(float Value) : IComponent;
+public record struct TickLength(float Seconds) : ISingletonComponent;
+
+public class MoveSystem : EcsSystem
+{
+    [ForEach, Without<Stunned>]
+    static void Move(ref Position position, in Speed speed, in TickLength tick) =>
+        position = position with { Y = position.Y + speed.Value * tick.Seconds };
+}
+```
+
+```csharp
+world.AddSingleton<TickLength>() = new TickLength(0.05f);   // AddSingleton returns a ref
+world.AddSystem<MoveSystem>();
+world.CreateEntity(new Position(0, 0), new Speed(2));
+world.Update();
+```
+
+</Tab>
+<Tab value="Unity Entities">
+
+```csharp title="MoveSystem.cs" doccheck=skip
+public struct Speed : IComponentData { public float Value; }
+
+public partial struct MoveSystem : ISystem
+{
+    public void OnUpdate(ref SystemState state)
+    {
+        float dt = SystemAPI.Time.DeltaTime;
+        foreach (var (transform, speed) in
+                 SystemAPI.Query<RefRW<LocalTransform>, RefRO<Speed>>().WithNone<Stunned>())
+            transform.ValueRW.Position.y += speed.ValueRO.Value * dt;
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+## Structural changes without a command buffer [#structural-changes]
+
+In Unity, structural changes during iteration or inside a job go through an `EntityCommandBuffer` that plays back at
+a sync point. In EasyEcs a system changes structure where it decides to, and the change is visible to every later
+system in the same update:
+
+```csharp title="DeathSystem.cs"
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health health)
+    {
+        if (health.Value <= 0) unit.Set(new Dead());   // no command buffer, no sync point
+    }
+}
+```
+
+The pass stays safe: a row that loses its entity mid-pass becomes a tombstone until the pass ends, and every entity
+is visited at most once. What you give up is structural changes from parallel code: a `[ForEach(Parallel = true)]`
+method cannot change structure, and the analyzer says so.
+
+## Change filters are per row [#change-filters]
+
+Unity's change filter works per chunk: a chunk counts as changed when any system had write access to it, so a filter
+returns whole chunks, written or not. EasyEcs tracks per row, opt-in per component: mark the component
+`ITrackChanges` and `[Changed<T>]` visits only the rows written through a `ref` since the system last ran, skipping
+unwritten tables, 4,096-row blocks and 64-row words. `[Removed<T>]` does the same for the entities that lost the
+component. See [change tracking](/en/docs/guide/change-tracking).
+
+## Is EasyEcs a Unity ECS? [#unity]
+
+No. EasyEcs targets net10.0 only and does not run in Unity. A common setup is Unity Entities (or any engine) on the
+client and EasyEcs on the server, sharing plain message types: the concepts above transfer, the code does not. For an
+ECS that runs inside Unity, use Unity Entities, or one of the libraries in [the comparison](/en/docs/comparison) that
+target netstandard2.1.
+
+## Related [#related]
+
+<Cards>
+  <Card title="What is an ECS?" href="/en/docs/what-is-ecs">
+    Entities, components, systems and archetype storage.
+  </Card>
+  <Card title="Getting started" href="/en/docs/getting-started">
+    A first world, components and systems in a few minutes.
+  </Card>
+  <Card title="Systems and [ForEach]" href="/en/docs/guide/systems">
+    Methods, filters, ordering, groups and parallel methods.
+  </Card>
+</Cards>

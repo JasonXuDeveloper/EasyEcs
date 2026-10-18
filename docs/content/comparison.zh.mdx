@@ -1,0 +1,359 @@
+---
+title: 与其他 ECS 库对比
+seoTitle: "C# ECS 对比：EasyEcs、Friflo.Engine.ECS、Arch、DefaultEcs（跑分）"
+description: EasyEcs 对 Friflo.Engine.ECS、Arch 和 DefaultEcs。功能矩阵、同一个服务器 tick 在各库中的实现，以及全部正面对比跑分，包括 EasyEcs 没赢的那些。
+icon: Scale
+---
+
+EasyEcs 和 .NET 上最常用的三个 ECS 库做了对比：[Friflo.Engine.ECS](https://github.com/friflo/Friflo.Engine.ECS)、
+[Arch](https://github.com/genaray/Arch) 和 [DefaultEcs](https://github.com/Doraku/DefaultEcs)，版本固定在
+[`benchmarks/EasyEcs.Comparison`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/benchmarks/EasyEcs.Comparison)
+里（图表标签上写着）。每项对比都按各库文档推荐的方式移植同样的工作，并在 setup 里先校验所有库算出的结果一致，然后才开始
+测量。本页是总览；逐个对照 API 的页面见 [Arch](/zh/docs/vs-arch)、[Friflo](/zh/docs/vs-friflo)、
+[DefaultEcs](/zh/docs/vs-defaultecs)。
+
+## 功能 [#features]
+
+依据各包的公开 API 和对比移植代码，后者是对着真实的包编译的。
+
+| 功能 | EasyEcs | Friflo.Engine.ECS | Arch | DefaultEcs |
+| --- | --- | --- | --- | --- |
+| 存储 | 原型表，每列有存在位 | 原型 | 按 chunk 存放的原型 | 每种组件一个池 |
+| 查询循环里做结构变更 | ✅ 当场生效，每个实体只访问一次 | ❌ 抛 `StructuralChangeException`；`CommandBuffer` | ⚠️ 无保护；`CommandBuffer` | ⚠️ `useBuffer` 集合或 `EntityCommandRecorder` |
+| 标签 | ✅ 空组件；移除时只翻一个位 | ✅ `ITag`（属于原型的一部分） | ⚠️ 空 struct，和普通组件一样搬行 | ❌ |
+| 单例 | ✅ `ISingletonComponent`，可作 `[ForEach]` 参数 | ⚠️ `UniqueEntity` | ❌ | ✅ `World.Set<T>` / `Get<T>` |
+| 系统、顺序、分组 | ✅ `EcsSystem`、`[UpdateBefore<T>]` / `[UpdateAfter<T>]`、`ISystemGroup`、`UpdateInterval` | ✅ `SystemRoot`、`SystemGroup`、`QuerySystem` | ❌ 核心里没有（Arch.Extended） | ✅ `ISystem<T>`、`SequentialSystem`、`AEntitySetSystem` |
+| 源生成的系统 | ✅ `[ForEach]` → 内联的 struct job | ❌ | ❌ 核心里没有 | ❌ |
+| 每个组件生成具名 API | ✅ `e.Position`、`HasX`、`SetX(...)`、`IsDead`、`world.Battle` | ❌ | ❌ | ❌ |
+| 编译期分析器 | ✅ EECS002-EECS024，附代码修复 | ❌ | ❌ | ❌ |
+| chunk / span 遍历 | ✅ 批量 `[ForEach]` 方法、`ForEachBatch` | ✅ `Chunks` | ✅ chunk | ✅ 每个系统一个 `ReadOnlySpan<Entity>` |
+| struct 查询 job | ✅ `IForEach`、`IForEachEntity`、`IForEachBatch` | ✅ | ✅ `IForEach`、`InlineQuery` | – |
+| 批量变更 | ✅ `SetAll`、`RemoveAll`、`DisableAll`、`EnableAll` | ✅ `EntityBatch`、`ApplyBatch` | ✅ 按查询加 / 删 | ❌ |
+| 批量创建和销毁 | ✅ `CreateEntities`、`DestroyEntities(filter)`、`Instantiate(prefab, span)` | ⚠️ `CreateEntityBatch`；逐个删除 | ⚠️ 按查询销毁 | ❌ |
+| 预制体 | ✅ `Prefab`：不属于任何 World 的数据 | ⚠️ store 里的实体，用 `CloneEntity` 复制 | ❌ | ⚠️ 用 `CopyTo(world)` 复制的实体 |
+| 变更追踪（某 tick 之后写过的行） | ✅ `ITrackChanges`、`[Changed<T>]`，每次 `ref` 写入 | ❌ | ❌（事件） | ✅ `NotifyChanged<T>()` 之后的 `WhenChanged<T>()` |
+| 移除检测 | ✅ `[Removed<T>]` | ⚠️ `OnComponentRemoved` 事件 | ⚠️ `SubscribeComponentRemoved` 事件 | ✅ `WhenRemoved<T>()` 集合 |
+| 值索引 | ✅ `IIndexed<TKey>`，有序遍历和区间 | ✅ `IIndexedComponent<TKey>`，区间 | ❌ | ✅ `EntityMap`、`EntityMultiMap` |
+| 按值拆表 | ✅ `GroupBy<T>`（`IGroup`） | – | – | – |
+| 带反查的关系 | ✅ 索引的 `EntityId`、多目标 `IRelation` | ✅ `ILinkComponent`、`ILinkRelation` | ❌ 核心里没有 | ❌ |
+| 层级 | ✅ `ChildOf`、`Children`、级联销毁 | ✅ `AddChild`、`ChildEntities` | ❌ | ❌ |
+| 禁用组件并保留值 | ✅ `Disable<T>()` / `Enable<T>()` | ⚠️ 整个实体（`Enabled`） | ❌ | ⚠️ 整个实体，或单个组件（`Disable<T>()`） |
+| 并行系统 | ✅ 由生成的访问集组成无冲突阶段 | ❌ | ❌ | ✅ `ParallelSystem<T>`（是否独立由你保证） |
+| 并行查询 | ✅ `[ForEach(Parallel = true)]`，分析器检查 | ✅ `QueryJob`、`ParallelJobRunner` | ✅ `InlineParallelQuery`、`JobScheduler` | ✅ `DefaultParallelRunner` |
+| 内存快照 | ✅ `Capture` / `Restore` | ❌ | ❌ | ❌ |
+| 存档 | ✅ 二进制 `Save` / `Load`（Nino） | ✅ JSON | ❌ 核心里没有（Arch.Persistence） | ✅ 文本和二进制 |
+| 把实体搬到另一个 World | ✅ `MoveEntities`、`SaveEntities` / `LoadEntities` | ✅ `CopyEntity` | ❌ | ✅ `CopyTo(world)` |
+| 卸载插件的类型 | ✅ `RemoveTypes(assembly)` | – | – | – |
+| 按系统计时和错误策略 | ✅ `MeasureSystems`、`SystemErrorPolicy.Disable` | ✅ `SystemPerf` | ❌ | – |
+| 事件（添加、移除、创建） | –（状态变化就是数据） | ✅ | ✅ | ✅ |
+| 每个服务器 tick 零分配 | ✅ | ✅ | ❌ | ❌ |
+| Native AOT | ✅（`IsAotCompatible`） | – | – | – |
+| 目标框架 | net10.0 | netstandard2.1、net6.0-8.0 | netstandard2.1、net6.0、net8.0 | netstandard1.1-2.1 |
+| Unity | ❌ | ✅ | ✅ | ✅ |
+
+✅ 内置 · ⚠️ 部分支持或有限制 · ❌ 没有 · – 不适用或未核实
+
+## 变更怎么生效 [#how-changes-are-made]
+
+最大的区别不在速度，而在系统怎么改动 World。Friflo、Arch 和 DefaultEcs 在查询迭代时禁止（或不保护）结构变更，所以系统要
+把变更记进命令缓冲，之后再回放：在那之前实体还是旧的组件，效果的先后取决于缓冲何时刷新。EasyEcs 的每个变更都当场生效，
+遍历同一张表的途中也一样，并且每个实体仍然最多访问一次：
+
+```csharp title="DeathSystem.cs"
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health hp)
+    {
+        if (hp.Value <= 0) unit.Set(new Dead());   // 当场生效：后面的系统已经能看到尸体
+    }
+}
+```
+
+移植代码都按各库的模型来写（Friflo 和 Arch 在每个记录变更的系统之后回放命令缓冲），所以被测的 World 行为相同。EasyEcs
+怎样让即时变更变得便宜，见 [EasyEcs 为什么快](/zh/docs/why-fast#structural-changes)。
+
+## 同一个服务器 tick [#the-same-server-tick]
+
+`EcsComparisonBenchmark` 在每个库里单线程运行 EasyEcs 的主 World（30% 玩家、70% NPC，外加子弹；移动、视野、战斗、
+状态效果、死亡、复活、射击）。EasyEcs 一侧是原样编译的 `benchmarks/EasyEcs.Benchmark/WorldSimulation.cs`；其他库是
+`ArchSimulation.cs`、`FrifloSimulation.cs` 和 `DefaultEcsSimulation.cs`。setup 让每个 World 预热 200 个 tick，并校验其
+计数器（命中、死亡、生成、视野变化、实体数）与 EasyEcs 的参考运行相差不超过 5%：做不到完全一致，因为实体 id 参与随机
+判定，而各库回收 id 的顺序不同。
+
+<Tabs items={['100,000 个实体', '10,000 个实体']}>
+<Tab value="100,000 个实体">
+
+<PeerChart />
+
+</Tab>
+<Tab value="10,000 个实体">
+
+<PeerChart entities="10000" />
+
+</Tab>
+</Tabs>
+
+这个 tick 上 EasyEcs 和 Friflo 很接近（100,000 个实体时 Friflo 的耗时是 EasyEcs 的 <BenchValue k="peers.friflo.ratio" />，
+10,000 个时是 <BenchValue k="peers.friflo10k.ratio" />），两者每个 tick 都不分配。Arch 和 DefaultEcs 的耗时分别是
+<BenchValue k="peers.arch.ratio" /> 和 <BenchValue k="peers.defaultecs.ratio" />，每个 tick 都有分配
+（<BenchValue k="peers.arch.alloc" /> 和 <BenchValue k="peers.defaultecs.alloc" />），主要来自命令缓冲和实体集合。EasyEcs
+在添加、移除、销毁的系统里占优（存在位，没有命令缓冲），在把实体传给 job 的系统里也占优。
+
+## 单项操作 [#operations]
+
+`OperationBenchmark` 把那个 World（100,000 个实体）里的单项操作拆出来，EasyEcs 对 tick 上最接近的 Friflo。每个操作结束
+时都把 World 还原。
+
+<BenchChart bench="OperationBenchmark" title="单项操作，100,000 个实体：EasyEcs 与 Friflo.Engine.ECS" />
+
+- **Toggle**（眩晕 5% 的战斗单位，再恢复）是存在位见效的地方：EasyEcs 翻一个位，实体留在原行；Friflo 要通过命令缓冲把
+  它搬到另一个原型再搬回来。
+- **Instantiate** 生成 5,000 个六组件的 NPC：EasyEcs 一次把 `Prefab` 的行复制到连续的行里，Friflo 逐个克隆 store 里的
+  实体（`CloneEntity`）。
+- **Entity**：逐实体 job 拿到的句柄由行里 8 字节的 `EntityId` 构造；Friflo 的 `ForEachEntity` 每个实体调一次委托。
+- **打平**：两组件、三组件遍历（`Iterate2`、`Iterate3`）和批量实体访问（`EntityBatch`）不分上下。两个库在这里都是走
+  紧凑数组，循环受内存带宽限制，与库无关。
+
+## 变更追踪 [#change-tracking]
+
+`ChangeTrackingComparison`：100,000 个实体，每个 tick 有 10 个（安静的 tick）或 1,000 个拿到新的血量，一个系统把变了的
+血量复制到副本。有内置功能的库用内置功能（EasyEcs 的 `[Changed<T>]`，DefaultEcs 由 `NotifyChanged<T>()` 喂数据的
+`WhenChanged<T>()`），没有的就用比较值的扫描，或写入时加、复制后删的脏标签。
+
+<Tabs items={['写 10 个', '写 1,000 个']}>
+<Tab value="写 10 个">
+
+<BenchChart bench="ChangeTrackingComparison" param="Written=10" title="同步本 tick 写过的实体：100,000 个里的 10 个" />
+
+</Tab>
+<Tab value="写 1,000 个">
+
+<BenchChart bench="ChangeTrackingComparison" param="Written=1000" title="同步本 tick 写过的实体：100,000 个里的 1,000 个" />
+
+</Tab>
+</Tabs>
+
+两种写入量下 `[Changed<T>]` 都领先，而且写入处不需要任何代码：通过 `ref` 写就是变更。变化的实体少时脏标签很便宜，但每个
+写过的实体要在原型间搬两次，所以到 1,000 次写入时反而不如普通扫描。扫描每个 tick 都要走整张表；`WhenChanged<T>()` 则
+要求每次写入旁边都调 `NotifyChanged<T>()`。跳过是怎么做到的：[变更 tick 摘要](/zh/docs/why-fast#change-ticks)。
+
+## 移除检测 [#removal-detection]
+
+`RemovalComparison`：100,000 个带 buff 的实体；每个 tick 有 10 个或 1,000 个 buff 到期，上一个 tick 到期的那些再加回来，
+然后自上个 tick 以来失去 buff 的实体各访问一次。EasyEcs 用 `[Removed<T>]`，DefaultEcs 用每个 tick 后 Complete 的
+`WhenRemoved<T>()` 集合，Friflo 用收集 id 的 `OnComponentRemoved` 事件，Arch 在每次移除旁边加一个 `Lost` 标签。setup
+校验每次移除恰好发送一次。
+
+<Tabs items={['移除 10 个', '移除 1,000 个']}>
+<Tab value="移除 10 个">
+
+<BenchChart bench="RemovalComparison" param="Removed=10" title="发送到期的 buff：100,000 个里的 10 个" />
+
+</Tab>
+<Tab value="移除 1,000 个">
+
+<BenchChart bench="RemovalComparison" param="Removed=1000" title="发送到期的 buff：100,000 个里的 1,000 个" />
+
+</Tab>
+</Tabs>
+
+**10 次移除时 Friflo 的事件胜出**（<BenchValue k="removed.friflo.10" /> 对 <BenchValue k="removed.10" />）：它在移除发生
+时就在回调里收集 id，读取时不再有额外开销。EasyEcs 把移除当作数据：遍历要加载每个有移除的字的摘要和行。1,000 次移除时
+两者打平（<BenchValue k="removed.friflo.1000" /> 对 <BenchValue k="removed.1000" />）。EasyEcs 换来的是：不用订阅，不用
+手动维护列表，之后运行的任何系统都能看到这次移除，而不只是那一个回调。
+
+## 索引和关系 [#indexes-and-relations]
+
+`IndexComparison`：一个背包系统，100,000 件物品各指向 1,000 个主人中的一个；1 件或 100 件易手，然后统计 100 个背包。
+EasyEcs 用索引的 `EntityId`（`IIndexed<EntityId>`），Friflo 用链接组件（`GetIncomingLinks`），DefaultEcs 用
+`EntityMultiMap`。Arch 的核心包里没有索引。
+
+<Tabs items={['1 次交易', '100 次交易']}>
+<Tab value="1 次交易">
+
+<BenchChart bench="IndexComparison" param="Trades=1" title="1 次交易，然后统计 100 个背包" />
+
+</Tab>
+<Tab value="100 次交易">
+
+<BenchChart bench="IndexComparison" param="Trades=100" title="100 次交易，然后统计 100 个背包" />
+
+</Tab>
+</Tabs>
+
+三者都能不扫描就回答“这个主人有哪些物品”，并在每次 set 时更新。EasyEcs 把关系头放在按主人 id 下标的数组里，所以交易和
+统计都不用哈希；`Set` 里的钩子是一次内联调用，对没有索引的组件 JIT 会直接去掉。
+
+`ValueQueryComparison`：100,000 个玩家，各有一个分数和 16 个分区之一；1,000 个分数和 100 个分区发生变化，然后统计分数在
+2,000-2,010 的玩家，并对 4 个分区的金币求和。EasyEcs 用分组（每个分区一张表）或值索引回答分区，用有序索引（`Range`）
+回答分数；Friflo 用 `IIndexedComponent<int>` 和 `ValueInRange`。
+
+<BenchChart bench="ValueQueryComparison" title="在 100,000 个玩家上做分数区间和分区求和" />
+
+`RelationComparison`：好友列表，10,000 个玩家各关注 8 个人；100 个玩家取关一个、再关注另一个，然后统计并遍历 100 个
+玩家的关注者。EasyEcs 用 `IRelation`（每个实体一个链接缓冲，按目标建索引），Friflo 用 `ILinkRelation`。
+
+<BenchChart bench="RelationComparison" title="改写 10,000 个好友列表里的 100 个，遍历 100 个关注者集合" />
+
+**这一项打平，Friflo 略快**（<BenchValue k="relation.friflo" /> 对 <BenchValue k="relation.easyecs" />）：两个库的结构
+一样，每个实体一个链接列表，再按目标建索引，差距在这次运行的误差之内。
+
+## 层级 [#hierarchy]
+
+`HierarchyComparison`：在预热过的 World 里创建 1,000 个小队（一个队长加 10 个队员），然后连同队员一起销毁队长。EasyEcs
+批量创建 `ChildOf(leader)` 的队员，再用会级联的 `DestroyEntities` 销毁队长；Friflo 的 `DeleteEntity` 会把子实体解绑，所以
+移植版先删子实体。Arch 和 DefaultEcs 没有层级。
+
+<BenchChart bench="HierarchyComparison" title="创建并销毁 1,000 个 11 人小队" />
+
+## 禁用 [#disabling]
+
+`DisableComparison`：100,000 个单位；每次操作有 100 个或 10,000 个睡下，之前睡的醒来，然后对醒着的单位求活力之和。
+EasyEcs 用 `Asleep` 标签（一个存在位）或 `Disable<Vigor>()`，后者保留值但查询跳过；Friflo 用 `entity.Enabled`（一个
+`Disabled` 标签，要搬原型）；DefaultEcs 用 `entity.Disable()`；Arch 用标签加 `WithNone`。
+
+<Tabs items={['切换 100 个', '切换 10,000 个']}>
+<Tab value="切换 100 个">
+
+<BenchChart bench="DisableComparison" param="Switched=100" />
+
+</Tab>
+<Tab value="切换 10,000 个">
+
+<BenchChart bench="DisableComparison" param="Switched=10000" />
+
+</Tab>
+</Tabs>
+
+切换 100 个时，Friflo 的 `Enabled` 和 EasyEcs 的 `Disable<T>()` 打平：求和占了大头。切换频繁时，在原型间搬实体比翻位贵。
+
+## 结构变更 [#structural-changes]
+
+`StructuralChangeComparison`：100,000 个单位；10 个或 1,000 个血量清零，然后一遍遍历活着的单位，把血量为零的标记为倒下
+（加一个标签），第二遍再把他们复活（删掉标签）。EasyEcs 在遍历中直接改结构；其他库记进命令缓冲，每遍结束后回放。
+
+<Tabs items={['击杀 10 个', '击杀 1,000 个']}>
+<Tab value="击杀 10 个">
+
+<BenchChart bench="StructuralChangeComparison" param="Killed=10" />
+
+</Tab>
+<Tab value="击杀 1,000 个">
+
+<BenchChart bench="StructuralChangeComparison" param="Killed=1000" />
+
+</Tab>
+</Tabs>
+
+Friflo 的命令缓冲和直接修改相差不大：大部分开销在遍历本身。Arch 的缓冲在记录和回放时都会分配。这次运行里，DefaultEcs
+在 1,000 那一行的误差和均值一样大。
+
+## 批量变更和生成 [#bulk]
+
+`BulkChangeComparison`：100,000 个战斗单位全部眩晕，再全部解除。EasyEcs 用 `SetAll` / `RemoveAll`（第一轮之后眩晕保有
+自己的列，一轮只翻存在位）；Friflo 对查询应用一个 `EntityBatch`；Arch 按查询加删（整张表搬走）；DefaultEcs 没有批量变更，
+逐个实体 set。
+
+<BenchChart bench="BulkChangeComparison" title="眩晕 100,000 个战斗单位，再解除" />
+
+`BulkSpawnComparison`：在 100,000 个战斗单位旁边生成 10,000 发子弹，再全部清掉。EasyEcs 用 `CreateEntities`（一张表，
+行一次放好）和 `DestroyEntities<Fuse>()`；Friflo 和 DefaultEcs 逐个创建、逐个删除；Arch 在 `EnsureCapacity` 之后逐个
+创建，按查询销毁。
+
+<BenchChart bench="BulkSpawnComparison" title="生成 10,000 发子弹，再全部清掉" />
+
+## 并行工作 [#parallel]
+
+`ParallelQueryComparison`：100,000 个代理在所有核心上转向 16 个路点中最近的一个。EasyEcs 用
+`[ForEach(Parallel = true)]`，Friflo 用配 `ParallelJobRunner` 的 `QueryJob`，Arch 用 job 调度器上的 `InlineParallelQuery`，
+DefaultEcs 用配 `DefaultParallelRunner` 的 `AEntitySetSystem`。
+
+<BenchChart bench="ParallelQueryComparison" title="用所有核心驱动 100,000 个代理" />
+
+**这一项 EasyEcs 没赢**：Friflo（<BenchValue k="parallelQuery.friflo" />）和 Arch 都领先 EasyEcs
+（<BenchValue k="parallelQuery.easyecs" />）。它们的调度器有自己的工作线程；EasyEcs 在调用线程加线程池帮手上运行，帮手只在
+划算时唤醒。像 BenchmarkDotNet 这样连续测量时，专用工作线程占优；而在服务器 tick 里，两遍之间隔着几毫秒，一组专用的
+自旋线程测出来尾延迟更差、每 tick 的 CPU 更多（[D22](/zh/docs/decisions)），所以 EasyEcs 保留线程池。
+
+`ParallelSystemsComparison`：四个互不相关的系统跑 100,000 个实体，串行与并行。同类里只有 DefaultEcs 能把整个系统并行调度
+（`ParallelSystem<T>`）；EasyEcs 依据系统生成的访问集组成阶段，所以不会误把两个冲突的系统放进同一个阶段。
+
+<BenchChart bench="ParallelSystemsComparison" title="四个互不相关的系统跑 100,000 个实体" />
+
+<Callout type="warn" title="并行数字">
+  参考机器只有 4 核，而且这次运行的并行数字误差很大。只看数量级；之后可能会重新测量。
+</Callout>
+
+## 存档 [#saves]
+
+`SaveComparison`：10,000 个单位（各有一个位置和一份库存）写出再读回一个 World。格式不同：EasyEcs 写二进制（Nino；非托管
+行带字段哈希、按原始字节复制），Friflo 写 JSON，DefaultEcs 用它的二进制序列化器读进一个新 World。Arch 的存档在单独的包里。
+
+<BenchChart bench="SaveComparison" title="保存并加载 10,000 个单位" />
+
+## EasyEcs 没赢的地方 [#where-easyecs-does-not-win]
+
+| 对比 | 结果 | 原因 |
+| --- | --- | --- |
+| [并行查询](#parallel) | Friflo 和 Arch 领先 | 连续运行时，专用工作线程胜过被唤醒的线程池线程；EasyEcs 为服务器 tick 选了线程池 |
+| [关系](#indexes-and-relations) | Friflo 略快，在误差之内 | 两个库设计相同 |
+| [10 次移除](#removal-detection) | Friflo 的事件领先 | 回调在移除发生时就收集 id；EasyEcs 从摘要里读 |
+| [两组件、三组件遍历，批量实体](#operations) | 和 Friflo 打平 | 两边都是紧凑数组；循环受内存带宽限制 |
+| [100,000 个里禁用 100 个](#disabling) | 和 Friflo 打平 | 大头是求和，不是切换 |
+| Unity 和老运行时 | 不支持 | EasyEcs 只面向 net10.0 |
+
+## 它们的功能在 EasyEcs 里怎么做 [#their-features-in-easyecs]
+
+其他库提供的功能，以及 EasyEcs 怎么完成同样的事。有些以别的名字内置；有些用数据而不是机制来做（EasyEcs 刻意没有事件和
+命令缓冲）；少数不提供。[战斗服务器示例](/zh/docs/example) 用到了其中大部分。
+
+| 它们的功能 | 出自 | EasyEcs |
+| --- | --- | --- |
+| 查询期间变更用的命令缓冲 | Friflo、Arch、DefaultEcs | 不需要：变更当场生效，遍历途中也一样 |
+| 线程安全的命令缓冲 | Friflo | 自己持有的队列，由 World 线程上的系统消费（[线程](/zh/docs/guide/threading)） |
+| 组件添加 / 移除 / 设置事件 | Friflo、Arch、DefaultEcs | 状态变化就是数据：下一个系统去查询的组件 |
+| `WhenChanged` 集合和 `NotifyChanged` | DefaultEcs | `[Changed<T>]`、`QueryFilter.Changed<T>(since)`：`ref` 写入就是变更 |
+| `WhenRemoved` 集合、移除事件 | DefaultEcs、Friflo、Arch | `[Removed<T>]`、`QueryFilter.Removed<T>(since)` |
+| 预制体实体、克隆 | Friflo、DefaultEcs | `Prefab` 和 `world.Instantiate`；活着的实体用 `entity.Clone()` |
+| 标签 | Friflo | 空组件；移除时只翻一个位 |
+| 唯一实体、World 组件 | Friflo、DefaultEcs | 单例，作为 `[ForEach]` 参数或 `SingletonRef<T>` |
+| 启用 / 禁用实体 | Friflo、DefaultEcs | 一个标签（`[Without<Asleep>]`），或对单个组件用 `Disable<T>()` |
+| 系统、分组、顺序 | Friflo、DefaultEcs、Arch.Extended | `EcsSystem`、`[UpdateBefore<T>]` / `[UpdateAfter<T>]`、`ISystemGroup`、`UpdateInterval` |
+| struct 查询 job、chunk 遍历 | Arch、Friflo | `IForEach`、`IForEachEntity`、`IForEachBatch`；批量 `[ForEach]` 方法 |
+| 并行查询 | Friflo、Arch、DefaultEcs | `[ForEach(Parallel = true)]`、`ForEachParallel`、`ForEachEntityParallel` |
+| 并行系统 | DefaultEcs | `WorldOptions.ParallelSystems` |
+| 批量变更 | Friflo、Arch | `SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`、`CreateEntities`、`DestroyEntities` |
+| 索引组件 | Friflo、DefaultEcs | `IIndexed<TKey>`：`Find`、`TryFind`、`Count`、有序 `Range` |
+| 链接和关系 | Friflo | 索引的 `EntityId`，多目标用 `IRelation` |
+| 父子层级 | Friflo | `ChildOf`、`world.Children`、级联销毁；不做 transform 传递 |
+| 序列化 | Friflo（JSON）、DefaultEcs（文本、二进制） | 二进制 `Save` / `Load`，外加内存里的 `Capture` / `Restore` |
+| 系统性能监控 | Friflo | `WorldOptions.MeasureSystems`、`system.Stats` |
+| 共享组件（`SetSameAs`） | DefaultEcs | 没有内置：共享数据放进单例，组件里存一个 id |
+| Unity、老运行时 | 三者都有 | 不支持：只面向 net10.0 |
+
+## 该选哪个库 [#which-one-to-pick]
+
+| 选 | 什么时候 |
+| --- | --- |
+| **EasyEcs** | .NET 10 服务器或模拟，状态频繁翻转，想让变更在决定的地方就生效，系统由生成器生成并在编译期检查，内置变更与移除追踪、预制体、索引、关系、存档和快照，每个 tick 零分配。 |
+| **Friflo.Engine.ECS** | 需要 Unity 或老运行时、事件或 JSON 序列化，能接受遍历期间用命令缓冲改结构，想要一个快速的通用 ECS。 |
+| **Arch** | 需要 Unity 或老运行时，想要基于 chunk 存储的小核心，系统和生成器从 Arch.Extended 里加。 |
+| **DefaultEcs** | 需要低至 netstandard1.1，想要响应式集合和内置序列化器，而且 World 小到每 tick 的分配无所谓。 |
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="EasyEcs 与 Friflo.Engine.ECS" href="/zh/docs/vs-friflo">
+    最接近的同类，逐个概念、逐个数字对比。
+  </Card>
+  <Card title="EasyEcs 与 Arch" href="/zh/docs/vs-arch">
+    命令缓冲对即时变更，以及 tick。
+  </Card>
+  <Card title="EasyEcs 与 DefaultEcs" href="/zh/docs/vs-defaultecs">
+    稀疏池和实体集合对原型表。
+  </Card>
+  <Card title="EasyEcs 为什么快" href="/zh/docs/why-fast">
+    数字背后的机制。
+  </Card>
+</Cards>

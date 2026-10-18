@@ -1,0 +1,589 @@
+---
+title: Performance guide
+seoTitle: "EasyEcs performance: benchmarks, iteration APIs and a checklist for C# servers"
+description: How fast EasyEcs is and how to keep your code fast. Measured server ticks, the cost of each iteration API, a do and don't checklist, and every BenchmarkDotNet result.
+icon: Gauge
+---
+
+EasyEcs is built for a server tick that runs every few milliseconds for months: the regular way of writing a system
+is already a generated, inlined struct job, and a busy world allocates nothing per tick. This page shows what that
+costs on a real tick, which API to pick for each loop, the rewrites that pay when a system shows up in your timings,
+and every benchmark behind those numbers. How the library gets there is on [Why EasyEcs is fast](/en/docs/why-fast).
+
+## The headline ticks [#headline]
+
+`WorldSimulationBenchmark` is one tick of a busy MMO-style world, not a toy loop: 30% players, 70% NPCs and
+projectiles on top. One tick runs movement (skipping `Stunned` and `Dead`), an area-of-interest grid, combat that
+adds `Burning` and `Stunned` at random, status expiry that removes them, death (a `Dead` tag and a statistics
+singleton), respawn (dead NPCs replaced, dead players revived in place), and projectiles spawned by about 5% of the
+players and expired after 20 ticks. Setup checks that the world is busy: hits, deaths, spawns and grid changes all
+happen.
+
+<Tabs items={['100,000 entities', '10,000 entities']}>
+<Tab value="100,000 entities">
+
+| Benchmark | What it runs | Time per tick | Allocated per tick |
+| --- | --- | --- | --- |
+| `WorldSimulationBenchmark` | one world, 100,000 entities | <BenchValue k="tick.oneWorld" /> | <BenchValue k="tick.oneWorld.alloc" /> |
+| `MultiWorldBenchmark` | four worlds of 25,000, one thread each | <BenchValue k="tick.fourWorlds" /> | <BenchValue k="tick.fourWorlds.alloc" /> |
+| `BattleServerBenchmark` | the [battle server](/en/docs/example): every feature at once | <BenchValue k="tick.battle" /> | <BenchValue k="tick.battle.alloc" /> |
+
+<PeerChart />
+
+</Tab>
+<Tab value="10,000 entities">
+
+| Benchmark | What it runs | Time per tick | Allocated per tick |
+| --- | --- | --- | --- |
+| `WorldSimulationBenchmark` | one world, 10,000 entities | <BenchValue k="tick.oneWorld10k" /> | <BenchValue k="tick.oneWorld10k.alloc" /> |
+
+<PeerChart entities="10000" />
+
+</Tab>
+</Tabs>
+
+<BenchSource />
+
+The four worlds of `MultiWorldBenchmark` are the layout recommended for a server: one world per map or zone, each
+owned by one long-lived thread. The peer chart runs the same tick ported to Friflo.Engine.ECS, Arch and DefaultEcs;
+[the comparison](/en/docs/comparison#the-same-server-tick) explains the ports and every other result.
+
+## Choosing an iteration API [#choosing-an-iteration-api]
+
+Every API walks the same tables front to back. What differs is the bookkeeping around each row: a delegate call, an
+enumerator, a structural-change check. Pick the first row that fits:
+
+| Need | Use | Measured |
+| --- | --- | --- |
+| The per-entity logic of a system | a [`[ForEach]` method](/en/docs/guide/systems) | <BenchValue k="forEach.perEntity" /> per entity, against <BenchValue k="rawArray.perEntity" /> for two plain arrays |
+| Arithmetic over many rows | a batch `[ForEach]` method (spans), vectorized | <BenchValue k="ops.iterate2Simd" /> instead of <BenchValue k="ops.iterate2" /> per-entity (100,000 entities) |
+| Heavy per-entity work | `[ForEach(Parallel = true)]` | <BenchValue k="parallel.forEach.on" /> instead of <BenchValue k="parallel.forEach.off" /> (100,000 entities, 4 cores) |
+| A loop outside systems, every tick | a static `[ForEach]` method run through its entry point, or a struct job (`world.ForEach`) | <BenchValue k="runner.runner" />, against <BenchValue k="runner.query" /> for a `Query` loop |
+| A loop in a tool, a test or a request handler | `foreach (var item in world.Query<...>())` | <BenchValue k="micro.queryIterate" />, against <BenchValue k="micro.forEachIterate" /> for a struct job (10,000 entities) |
+| "How many?" / "Is there any?" | `world.Count` / `world.Any` | <BenchValue k="count.tested" /> for 100,000 rows whose bits must be tested |
+| The few rows written since the last run | `ITrackChanges` + `[Changed<T>]` | <BenchValue k="changed.10" /> instead of <BenchValue k="changed.10.scan" /> (10 of 100,000 written) |
+| The entities that lost a component | `ITrackChanges` + `[Removed<T>]` | <BenchValue k="removed.10" /> (10 of 100,000 removed) |
+| Entities by value | a [value index](/en/docs/guide/indexes-and-relations) | see `IndexBenchmark` [below](#benchmarks) |
+
+<BenchSource />
+
+`[ForEach]` beats two plain arrays because its columns start on a 64-byte boundary: a row of a power-of-two-sized
+component never straddles two cache lines. `MicroBenchmarks.ForEachSystemWrite` runs on a world with one table;
+the other iteration rows of `MicroBenchmarks` use a world where every other entity also has `Health` (two tables), so
+compare APIs within one world, not across them.
+
+## Regular code and the fastest code [#regular-code-and-the-fastest-code]
+
+The regular way is right for most systems: short, and already a generated struct job. When a system shows up in
+`WorldOptions.MeasureSystems` timings ([measuring systems](/en/docs/guide/systems)), these rewrites are what the
+benchmarks measure:
+
+| Regular | Fastest | Measured |
+| --- | --- | --- |
+| A per-entity `[ForEach]` doing arithmetic with branches | A batch method vectorized with `Vector<T>`, branches as masks | <BenchValue k="ops.iterate2" /> → <BenchValue k="ops.iterate2Simd" /> |
+| `foreach (var item in world.Query<...>())` in a hot ad-hoc loop | A struct job with `world.ForEach` | <BenchValue k="micro.queryIterate" /> → <BenchValue k="micro.forEachIterate" /> |
+| A `bool` flag tested in every row | A tag with `[With<T>]` / `[Without<T>]` | rows without the tag skipped 64 at a time; toggling flips a bit |
+| Scanning every row for the few that changed | `ITrackChanges` + `[Changed<T>]` | <BenchValue k="changed.10.scan" /> → <BenchValue k="changed.10" /> |
+| `CreateEntity` / `Destroy` in a loop | `CreateEntities` / `DestroyEntities`, `Instantiate(prefab, span)` | <BenchValue k="micro.churn" /> → <BenchValue k="micro.churnBatch" /> |
+| Setting a component on every entity one by one | `world.SetAll` / `RemoveAll` | <BenchValue k="bulk.each" /> → <BenchValue k="bulk.setAll" /> |
+| One method taking `Maybe<T>` | Two methods split by `[With<T>]` / `[Without<T>]` | <BenchValue k="maybe.one" /> → <BenchValue k="maybe.two" /> |
+| A `QueryFilter` built at the call | A `static readonly` filter | <BenchValue k="callsite.atCall" /> → <BenchValue k="callsite.once" /> per call |
+| Heavy per-entity work on one thread | `[ForEach(Parallel = true)]` | <BenchValue k="parallel.forEach.off" /> → <BenchValue k="parallel.forEach.on" /> |
+
+<BenchSource />
+
+### Arithmetic over many rows: vectorize a batch method [#arithmetic-over-many-rows-vectorize-a-batch-method]
+
+The JIT does not vectorize this loop, and the bounce branches mispredict on many rows. The regular system:
+
+```csharp title="BounceSystem.cs"
+public class BounceSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Move(ref Position p, ref Velocity v)
+    {
+        p = new Position(p.X + v.X, p.Y + v.Y);
+        if (p.X < 0 || p.X > 4096) v = v with { X = -v.X };
+        if (p.Y < 0 || p.Y > 4096) v = v with { Y = -v.Y };
+    }
+}
+```
+
+The fastest one takes spans (runs of consecutive rows; a table whose rows all match is one call), reads the
+two-float components as one float span (X, Y, X, Y, ...) so every lane of a `Vector<float>` is one coordinate, and
+turns the branches into a mask:
+
+```csharp title="BounceSimdSystem.cs"
+using System.Numerics;
+using System.Runtime.InteropServices;
+
+public class BounceSimdSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Move(Span<Position> positions, Span<Velocity> velocities)
+    {
+        var p = MemoryMarshal.Cast<Position, float>(positions);
+        var v = MemoryMarshal.Cast<Velocity, float>(velocities);
+        var max = new Vector<float>(4096f);
+        int i = 0;
+        for (; i <= p.Length - Vector<float>.Count; i += Vector<float>.Count)
+        {
+            var velocity = new Vector<float>(v[i..]);
+            var position = new Vector<float>(p[i..]) + velocity;
+            var outside = Vector.LessThan(position, Vector<float>.Zero) | Vector.GreaterThan(position, max);
+            position.CopyTo(p[i..]);
+            Vector.ConditionalSelect(outside, -velocity, velocity).CopyTo(v[i..]);
+        }
+
+        for (; i < p.Length; i++) // the rows left over
+        {
+            p[i] += v[i];
+            if (p[i] < 0 || p[i] > 4096) v[i] = -v[i];
+        }
+    }
+}
+```
+
+The cast is valid because the components hold only floats (no padding, no references), and unmanaged columns start
+on a 64-byte boundary, so vector loads stay aligned. A batch method makes no structural change and reads entities
+through an `EntitySpan` parameter only where it needs them. A scalar loop over spans gains little over the
+per-entity method: write one to vectorize it.
+
+<BenchChart
+  bench="OperationBenchmark"
+  methods="EasyEcs_Iterate2,Friflo_Iterate2,EasyEcs_Iterate2Simd,Friflo_Iterate2Simd"
+  title="Movement over 100,000 entities: per entity and vectorized"
+/>
+
+### Ad-hoc loops: a struct job [#ad-hoc-loops-a-struct-job]
+
+`world.Query` is the convenient loop for tools and request handlers. For a loop that runs every tick outside a
+system, write a struct job: `world.ForEach` specializes and inlines it per table. Mark it `INoStructuralChanges` and
+declare its `Writes` ([what a job declares](/en/docs/guide/queries)).
+
+```csharp title="EnergyJob.cs"
+public struct EnergyJob : IForEach<Velocity>, INoStructuralChanges   // no structural change: the lean loop
+{
+    public float Total;   // a value field stays in a register during the pass and is copied back once
+
+    public static int Writes => 0;   // reads only: no row counts as changed
+
+    public void Execute(ref Velocity v) => Total += v.X * v.X + v.Y * v.Y;
+}
+```
+
+```csharp
+var job = new EnergyJob();
+world.ForEach<Velocity, EnergyJob>(ref job);
+float energy = job.Total;
+```
+
+Declare the job a `ref struct` when it must hold a `ref` or a `Span` (an output buffer, a caller's array).
+`ForEach`, `ForEachEntity` and `ForEachBatch` accept ref struct jobs; the `*Parallel` calls do not, because each
+thread gets its own copy of the job. For a total, a value field is faster than a `ref` field: a write through a
+`ref` goes to memory on every row.
+
+```csharp title="CollectJob.cs"
+public ref struct CollectJob : IForEach<Position>, INoStructuralChanges
+{
+    public Span<float> Xs;   // the caller's buffer, at least as long as the matching rows
+    public int Count;
+
+    public static int Writes => 0;
+
+    public void Execute(ref Position p) => Xs[Count++] = p.X;
+}
+```
+
+A static `[ForEach]` method outside a system does the same with less code: the generator writes the job and an entry
+point that takes the world (`RunnerBenchmark` measures both).
+
+```csharp title="Census.cs"
+public static class Census
+{
+    [ForEach, Without<Dead>]
+    static void CountWounded(in Health health, ref int wounded)
+    {
+        if (health.Value < 50) wounded++;
+    }
+}
+```
+
+```csharp
+int wounded = 0;
+Census.CountWounded(world, ref wounded);   // generated entry point: the job runs once
+```
+
+### States: tags, not flags [#states-tags-not-flags]
+
+A flag costs a load and a branch in every row of every system that checks it. A tag is a filter: rows without it are
+skipped 64 at a time, and adding or removing it flips a presence bit while the entity keeps its row.
+
+```csharp title="Stun.cs"
+public record struct Unit(int Hp, bool Stunned) : IComponent;   // regular: every system tests the flag
+
+public class StunnedFlagSystem : EcsSystem
+{
+    [ForEach]
+    static void Act(ref Unit unit)
+    {
+        if (unit.Stunned) return;
+        unit.Hp++;
+    }
+}
+
+public class StunnedTagSystem : EcsSystem   // fastest: the filter does the test
+{
+    [ForEach, Without<Stunned>]
+    static void Act(ref Health hp) => hp = hp with { Value = hp.Value + 1 };
+}
+```
+
+Toggling a status is where this shows against other archetype libraries: EasyEcs flips a bit, Friflo moves the
+entity to another archetype and back.
+
+<BenchChart
+  bench="OperationBenchmark"
+  methods="EasyEcs_Toggle,Friflo_Toggle"
+  title="Stun 5% of 100,000 fighters, then recover them"
+/>
+
+### The few rows that changed: `[Changed<T>]` [#the-few-rows-that-changed-changedt]
+
+A replication or persistence system that scans every row pays for the rows nobody wrote. Mark the component
+`ITrackChanges` and filter with `[Changed<T>]`: unwritten tables, 4,096-row blocks and 64-row words are skipped.
+Take the component by `in`, so the visit does not count as a write.
+
+```csharp title="ShieldReplicationSystem.cs"
+public record struct Shield(int Value) : IComponent, ITrackChanges;
+public record struct ShieldReplica(int Value) : IComponent;
+
+public class ShieldReplicationSystem : EcsSystem
+{
+    [ForEach, Changed<Shield>]
+    static void Send(in Shield shield, ref ShieldReplica replica) => replica = new ShieldReplica(shield.Value);
+}
+```
+
+It pays when few rows are written, or when the written rows sit close together:
+
+| Rows written of 100,000 | `[Changed<T>]` | Every row |
+| --- | --- | --- |
+| 10 | <BenchValue k="changed.10" /> | <BenchValue k="changed.10.scan" /> |
+| 1,000, spread 97 rows apart | <BenchValue k="changed.1000" /> | <BenchValue k="changed.1000.scan" /> |
+
+<BenchSource />
+
+When writes land in most 64-row words, nothing is skipped and testing the change ticks costs about what reading the
+column does. For a cheap check over a column that most rows write every tick (a death check on `Health`), a plain
+scan is as fast and simpler.
+
+### What went away: `[Removed<T>]` [#what-went-away-removedt]
+
+Replicating a removal (a fire that went out) with a marker tag costs a structural change per removal and a pass over
+the tags; comparing every row with what clients last received costs a scan. A tracked component's removal already
+stamps its row, so `[Removed<T>]` visits only the entities that lost it, with the same skipping as `[Changed<T>]`:
+
+```csharp title="ShieldLossSystem.cs"
+public class ShieldLossSystem : EcsSystem
+{
+    [ForEach, Removed<Shield>]                       // Shield : ITrackChanges (above)
+    static void Send(ref ShieldReplica replica) => replica = new ShieldReplica(0);
+}
+```
+
+<BenchChart bench="RemovalComparison" param="Removed=10" title="Find the 10 of 100,000 entities that lost a buff" />
+
+### The entity only where the row needs it [#the-entity-only-where-the-row-needs-it]
+
+An `Entity` parameter builds a handle for every row, even when only a rare branch uses it, and it makes the system
+run alone in a parallel stage. When the entities a system acts on can be told by a component, filter on it
+(`[With<Dead>]`) instead of testing every row. A batch method that needs the entity of a few rows takes an
+`EntitySpan`, which builds a handle only for the rows it indexes.
+
+<BenchChart
+  bench="OperationBenchmark"
+  methods="EasyEcs_Entity,Friflo_Entity,EasyEcs_EntityBatch,Friflo_EntityBatch"
+  title="A pass over 100,000 entities that rarely needs the entity"
+/>
+
+### Waves of entities: bulk calls [#waves-of-entities-bulk-calls]
+
+```csharp
+private static readonly Prefab Goblin = new Prefab().Set(new Position(0, 0), new Health(30));
+```
+
+```csharp
+var wave = new Entity[1_000];
+world.CreateEntities(wave, new Position(0, 0), new Velocity(1, 0));   // one pass through the structural gate
+world.Instantiate(Goblin, wave);                                      // a wave of a prefab, the same way
+int removed = world.DestroyEntities<Dead>();                          // every dead entity, one pass
+int lifted = world.RemoveAll<Stunned>();                              // every stun lifted, whole words of rows
+```
+
+A [prefab](/en/docs/guide/prefabs) built once (`static readonly`) costs one row copy per instance; the world finds
+its target table once and caches it. Several components at once also take one transition: `entity.Set(a, b)`,
+`entity.Remove<A, B>()`.
+
+## Do [#do]
+
+The checklist for code that runs every tick. Find the system worth the effort first: `WorldOptions.MeasureSystems`
+times every system run.
+
+- **Mutate through refs**: `ref var hp = ref item.Component1;`, `ref var hp = ref entity.Get<Health>();`.
+- **Spawn with every component at once**: `world.CreateEntity(a, b, c)` places the entity in its final table;
+  `world.Instantiate(prefab)` for a kind defined once. Change several at once with `entity.Set(a, b)` /
+  `entity.Remove<A, B>()`.
+- **Read with `in`, write with `ref`**: `in` parameters, `entity.Read<T>()` or the generated property read; `ref`
+  parameters and `entity.Get<T>()` write. A `ref` access counts as a write of a tracked component, and a `Query`
+  loop counts every row it visits; a struct job that only reads declares `static int Writes => 0`.
+- **Keep `[ForEach]` methods that make no structural change `static`**, without a `World` parameter and with
+  read-only use of their `Entity`: the generator marks their job `INoStructuralChanges`, which skips the per-row
+  bookkeeping. Mark hand-written jobs the same way.
+- **Take singletons as `[ForEach]` parameters** (resolved once per pass), or keep a `SingletonRef<T>` outside
+  systems (no lookup per access).
+- **Give systems a cadence**: `UpdateInterval`, or a system group updated when needed (`Update<TGroup>()`), instead
+  of a counter checked in the method.
+- **Keep components small** (a few fields, well under 64 bytes) and split rarely used data into its own component:
+  iteration loads only the columns it reads.
+- **Vectorize arithmetic in batch methods**, use bulk calls for waves, tags for states, `[Changed<T>]` for what
+  changed and `[Removed<T>]` for what went away ([above](#regular-code-and-the-fastest-code)).
+- **Ask `world.Count` / `world.Any`** instead of looping to count or to find one match.
+- **Reserve room** in a `DynamicBuffer<T>` whose size is known (`EnsureCapacity`), and pre-size the world with
+  `WorldOptions.InitialEntityCapacity` or `world.EnsureEntityCapacity(n)`.
+- **Keep `QueryFilter`s in `static readonly` fields** (the generator does this for `[ForEach]`).
+- **Look entities up with a value index** (`IIndexed<TKey>`) instead of a dictionary kept in sync by hand, and write an
+  indexed component only when its key changes.
+- **Run one world per thread** on servers, for example one per map or zone.
+
+## Don't [#dont]
+
+- **Don't modify a copy** of a component and forget to write it back.
+- **Don't keep `ref`s across `await` or in fields**: keep the `Entity` handle.
+- **Don't store raw entity indexes**: ids are recycled; store an `EntityId` (index and version).
+- **Don't write lambdas that capture locals** in methods that run every update: the closure is allocated at method
+  entry even when its branch is not taken. `AllocationTests` caught exactly this in `World.Update`.
+- **Don't use LINQ, `params object[]` or string formatting** in per-update code.
+- **Don't take an `Entity` or a singleton parameter a method does not need**: the loop loads it for every row.
+- **Don't take a tracked component by `ref` when the method only reads it**: every visited row then counts as
+  changed.
+- **Don't use a value index, or destroy entities, from another thread**: the index follows those changes on the
+  owner thread and is not synchronized.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| A batch method that also takes a per-entity parameter | It cannot receive runs of rows | [EECS009](/en/docs/guide/analyzer#eecs009) |
+| A structural change in a static `[ForEach]` method without `Entity` or `World` | The method promises no structural change, and its lean loop relies on it | [EECS013](/en/docs/guide/analyzer#eecs013) |
+| A parallel method that writes a singleton or changes structure | Data races between the threads | [EECS010](/en/docs/guide/analyzer#eecs010) |
+| An `Entity` stored in a component | The column holds references: no longer pinned, scanned by the GC | [EECS017](/en/docs/guide/analyzer#eecs017) (warning) |
+| Writing an indexed component through a `ref` | The index cannot see the new key | [EECS015](/en/docs/guide/analyzer#eecs015) |
+| A computed `UpdateInterval` | Read every update | [EECS018](/en/docs/guide/analyzer#eecs018) (warning) |
+| A `ref` parameter that only reads a tracked component | Every visited row counts as changed | Code review: declare it `in` |
+| A closure or LINQ in per-update code | Garbage every tick | `AllocationTests`-style checks in your own tests |
+
+## What is covered [#coverage]
+
+Every feature has unit tests (`tests/EasyEcs.UnitTest`), a BenchmarkDotNet benchmark and, where a peer library has
+the feature, a head-to-head comparison that checks every library computes the same result before it measures.
+
+| Feature | Tests | Benchmark | Against other libraries |
+| --- | --- | --- | --- |
+| A whole server tick | `BattleServerTests` | `WorldSimulationBenchmark`, `MultiWorldBenchmark`, `BattleServerBenchmark` | [`EcsComparisonBenchmark`](/en/docs/comparison#the-same-server-tick) |
+| `[ForEach]`, struct jobs, `Query` | `ForEachSystemTests`, `QueryTests`, `RunnerTests` | `MicroBenchmarks`, `RunnerBenchmark`, `CallSiteBenchmark` | [`OperationBenchmark`](/en/docs/comparison#operations) |
+| Structural changes, presence bits | `EntityTests`, `ComponentTests`, `PresenceTests` | `MicroBenchmarks` (`Churn`, `ToggleComponent`), `SparseBenchmark`, `CountBenchmark` | [`StructuralChangeComparison`](/en/docs/comparison#structural-changes) |
+| Bulk changes and spawns | `BulkTests` | `BulkBenchmark`, `MicroBenchmarks.ChurnBatch` | [`BulkChangeComparison`, `BulkSpawnComparison`](/en/docs/comparison#bulk) |
+| Prefabs and clones | `InstantiateTests` | `PrefabBenchmark` | [`OperationBenchmark` (`Instantiate`)](/en/docs/comparison#operations) |
+| Change tracking | `ChangedTests` | `ChangeTrackingBenchmark` | [`ChangeTrackingComparison`](/en/docs/comparison#change-tracking) |
+| Removal detection | `RemovedTests` | `BattleServerBenchmark` | [`RemovalComparison`](/en/docs/comparison#removal-detection) |
+| Disabling | `DisableTests` | `BulkBenchmark` (`DisableAll`) | [`DisableComparison`](/en/docs/comparison#disabling) |
+| Value indexes, ordered indexes | `IndexTests`, `OrderedIndexTests` | `IndexBenchmark`, `OrderedIndexBenchmark` | [`IndexComparison`, `ValueQueryComparison`](/en/docs/comparison#indexes-and-relations) |
+| Relations | `RelationTests`, `TargetPolicyTests` | `RelationBenchmark` | [`RelationComparison`](/en/docs/comparison#indexes-and-relations) |
+| Hierarchy | `HierarchyTests` | `HierarchyBenchmark` | [`HierarchyComparison`](/en/docs/comparison#hierarchy) |
+| Groups | `GroupTests` | `GroupBenchmark` | [`ValueQueryComparison`](/en/docs/comparison#indexes-and-relations) |
+| Singletons | `SingletonTests` | `MicroBenchmarks.SingletonAccess` | [`OperationBenchmark` (`Singleton`)](/en/docs/comparison#operations) |
+| Optional components (`Maybe<T>`) | `ForEachSystemTests` | `MaybeBenchmark` | — |
+| Dynamic buffers | `DynamicBufferTests` | `DynamicBufferBenchmark` | — |
+| Cleanup components | `CleanupTests` | `CleanupBenchmark` | — |
+| System ordering and groups | `SystemTests` | `OrderingBenchmark` | — |
+| Parallel systems and `[ForEach(Parallel = true)]` | `ParallelTests`, `ConcurrencyTests` | `ParallelSystemsBenchmark`, `ParallelForEachBenchmark` | [`ParallelSystemsComparison`, `ParallelQueryComparison`](/en/docs/comparison#parallel) |
+| Snapshots | `SnapshotTests` | `SnapshotBenchmark` (`Capture`, `Restore`) | — |
+| Saves | `SerializationTests` | `SnapshotBenchmark` (`Save`, `Load`) | [`SaveComparison`](/en/docs/comparison#saves) |
+| Moving entities between worlds | `MoveTests` | `MigrationBenchmark` | — |
+| Unloading a plugin's types | `UnloadTests` | `UnloadBenchmark` | — |
+| Introspection | `IntrospectionTests` | `IntrospectionBenchmark` | — |
+| Generic systems | `GenericTests` | — | — |
+| Generator, analyzer, code fixes | `GeneratorTests`, `CodeFixTests` | — | — |
+| Zero allocation | `AllocationTests` (0 B budget on every test run) | the Allocated column of every benchmark | every comparison |
+
+## Benchmarks [#benchmarks]
+
+Every class of `benchmarks/EasyEcs.Benchmark`, from one full run. Bars are EasyEcs; the ratio is against the class's
+baseline, the first way of doing the job. The comparisons with other libraries are on
+[the comparison page](/en/docs/comparison).
+
+### Server ticks [#server-ticks]
+
+`WorldSimulationBenchmark` and `MultiWorldBenchmark` are the headline world above. `BattleServerBenchmark` is one tick
+of the [battle server](/en/docs/example) (`BattleServer.cs`), which uses every feature: a parallel `[ForEach]`, two
+systems that run at once, statuses added and removed mid-pass, `WithAny`, deaths, respawns and projectiles, a value
+index, a relation, prefabs, an update interval, per-system timings and replication every third tick with
+`[Changed<T>]` and `[Removed<T>]`. `BattleServerTests` checks the same world.
+
+<BenchTable bench="WorldSimulationBenchmark" />
+<BenchTable bench="MultiWorldBenchmark" />
+<BenchTable bench="BattleServerBenchmark" />
+
+### Single operations [#micro-benchmarks]
+
+`MicroBenchmarks` isolate one operation each, over 10,000 entities. `RawArrayWrite` is the floor without an ECS: two
+plain arrays. `HandleAccess`, `TryGetEntity`, `TrackedHandleWrite`, `SingletonAccess` and `CountAndAny` repeat their
+call 1,000 times. `CreateAddDestroy` builds a fresh world each time, so its allocations are the new world and its
+growth.
+
+<BenchChart bench="MicroBenchmarks" title="MicroBenchmarks: one operation each, 10,000 entities" />
+
+`CallSiteBenchmark` measures a query call itself: a filter built at the call, a filter built once, no filter, and a
+filter past the per-call memo (the query cache's dictionary). `RunnerBenchmark` runs one pass outside systems three
+ways: a static `[ForEach]` method's entry point, the struct job it replaces written by hand, and a `Query` loop.
+`OrderingBenchmark` shows that `[UpdateAfter<T>]` costs nothing per update: the order is resolved when systems are
+added.
+
+<BenchChart bench="CallSiteBenchmark" />
+<BenchChart bench="RunnerBenchmark" />
+<BenchChart bench="OrderingBenchmark" />
+
+### Presence bits and filters [#presence-bits]
+
+`SparseBenchmark` keeps 10 burning units among 100,000 in one table (only their presence bits differ): a pass over the
+few, a query over them, a count of them and a pass over the rest. `CountBenchmark` counts rows that must be tested one
+by one (two columns with disabled rows), which is vectorized: 8 bit words per step with AVX-512. `MaybeBenchmark`
+compares one method taking `Maybe<Shield>` with two methods split by `[With<Shield>]` / `[Without<Shield>]`.
+
+<BenchChart bench="SparseBenchmark" />
+<BenchTable bench="CountBenchmark" />
+<BenchChart bench="MaybeBenchmark" />
+
+### Structural changes in bulk [#bulk-benchmarks]
+
+`BulkBenchmark` stuns 100,000 fighters and lifts the stun, and disables a status for a zone and enables it, each in
+bulk (`SetAll` / `RemoveAll`, `DisableAll` / `EnableAll`) and entity by entity. `PrefabBenchmark` spawns 1,000
+entities from a prefab one by one and as a wave. `CleanupBenchmark` churns 1,000 of 10,000 sessions per operation with
+a cleanup component against a plain component released by hand.
+
+<BenchChart bench="BulkBenchmark" />
+<BenchChart bench="PrefabBenchmark" />
+<BenchChart bench="CleanupBenchmark" />
+
+### Change tracking [#change-tracking-benchmarks]
+
+`ChangeTrackingBenchmark` replicates health: 10 (a quiet tick) or 1,000 of 100,000 entities are written per tick,
+then one system copies health into a replica with `[Changed<Health>]` (`Changed=True`) or by visiting every row.
+`QueryTick` does the same with an ad-hoc `Query`. `DynamicBufferBenchmark` replicates 1,000 changed bags of 100,000,
+held as a `DynamicBuffer<int>` or as a `List<int>` in a tracked component.
+
+<Tabs items={['10 written', '1,000 written']}>
+<Tab value="10 written">
+
+<BenchChart bench="ChangeTrackingBenchmark" param="Written=10" />
+
+</Tab>
+<Tab value="1,000 written">
+
+<BenchChart bench="ChangeTrackingBenchmark" param="Written=1000" />
+
+</Tab>
+</Tabs>
+
+<BenchChart bench="DynamicBufferBenchmark" />
+
+The "every row" cases vary from run to run on the reference VM (they depend on how 100,000 rows land in physical
+memory); the `[Changed]` cases are stable.
+
+### Indexes, relations, groups and hierarchies [#index-benchmarks]
+
+`IndexBenchmark` uses a relation as an inventory: 100,000 items point at one of 1,000 owners; 100 trades, then 100
+inventories counted. `OrderedIndexBenchmark` keeps a leaderboard of 100,000 scores (1,000 change, then the top 10 and
+one bracket read) against a scan. `GroupBenchmark` sums the players of 4 of 16 zones as a group (a table per zone), a
+value index and a scan. `RelationBenchmark` rewires 100 of 10,000 friend lists and walks 100 follower sets.
+`HierarchyBenchmark` destroys 1,000 squad leaders with their members (`ChildOf`, cascade) against links that are only
+removed.
+
+<BenchTable bench="IndexBenchmark" />
+<BenchChart bench="OrderedIndexBenchmark" />
+<BenchChart bench="GroupBenchmark" />
+<BenchTable bench="RelationBenchmark" />
+<BenchChart bench="HierarchyBenchmark" />
+
+### Threads [#parallel-benchmarks]
+
+`ParallelSystemsBenchmark` runs four `[ForEach]` systems with disjoint access over 100,000 entities, with
+`WorldOptions.ParallelSystems` off and on: on, they form one stage and run at once. `ParallelForEachBenchmark` runs one
+heavy method (steering towards the nearest of 16 waypoints) plain and with `Parallel = true`, and the same work as an
+ad-hoc job with entity handles (`ForEachEntity` / `ForEachEntityParallel`).
+
+<BenchChart bench="ParallelSystemsBenchmark" />
+<BenchChart bench="ParallelForEachBenchmark" />
+
+The reference machine has 4 cores and the parallel rows carry a large error in this run: read them as "faster on
+several cores", not as a precise speed-up.
+
+### Snapshots, saves, migration and unloading [#state-benchmarks]
+
+`SnapshotBenchmark` captures a world of 100,000 entities (two tables, a third of the ids recycled, a singleton) into a
+new snapshot, restores one in place, saves it as bytes into a reused buffer and loads it back. `Capture` allocates
+the snapshot it returns; capture into an existing snapshot to reuse it. `MigrationBenchmark` moves 10 players with 99
+items each to another world and back, through bytes (`SaveEntities` / `LoadEntities`) and in memory
+(`MoveEntities`); `SaveAndLoadOne` is the fixed cost of a save. `UnloadBenchmark` removes a plugin's types from a world
+of 10,000 or 100,000 players (`RemoveTypes`), the step before reloading game logic.
+
+<BenchChart bench="SnapshotBenchmark" />
+<BenchChart bench="MigrationBenchmark" />
+<BenchChart bench="UnloadBenchmark" />
+
+### Introspection [#introspection-benchmarks]
+
+`IntrospectionBenchmark` describes the battle server's world for a dashboard (`world.Describe()`: every table with
+its columns, rows and bytes) and one entity for a debugger (`entity.Describe()`, values boxed). Both allocate the
+description they return: they are tools, not tick paths.
+
+<BenchTable bench="IntrospectionBenchmark" />
+
+## How to reproduce [#measuring]
+
+Numbers come from BenchmarkDotNet only, never from a stopwatch:
+
+```bash
+dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*'             # every class on this page
+dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*World*'       # the headline ticks
+dotnet run -c Release --project benchmarks/EasyEcs.Comparison -- --filter '*'            # other libraries
+dotnet run -c Release --project benchmarks/EasyEcs.Comparison -- --check                 # correctness of the ports only
+```
+
+Both projects use the job in `benchmarks/EasyEcs.Benchmark/BenchmarkConfig.cs`: 2 launches, 6 warmups, 8 iterations
+of 250 ms, and call counting from the start (`DOTNET_TC_CallCountingDelayMs=0`) so the warmups reach optimized code.
+Two processes are measured instead of many iterations of one, because run-to-run differences (code layout, tiering)
+are larger than the noise within a run. The machine of the numbers on this site:
+
+<BenchSource />
+
+`AllocationTests` guard the zero-allocation contract on every test run (`dotnet test`): the steady-state tick, queries,
+structural changes, indexes, relations, cascades and parallel passes must allocate 0 bytes after warm-up.
+
+## Related [#related]
+
+<Cards>
+  <Card title="Why EasyEcs is fast" href="/en/docs/why-fast">
+    The storage, generated jobs and caches behind these numbers.
+  </Card>
+  <Card title="Comparison with other ECS libraries" href="/en/docs/comparison">
+    The same work in Friflo.Engine.ECS, Arch and DefaultEcs, with every result.
+  </Card>
+  <Card title="Queries and filters" href="/en/docs/guide/queries">
+    `Query`, struct jobs, `Count` and `Any`, and what a job declares.
+  </Card>
+  <Card title="Systems and [ForEach]" href="/en/docs/guide/systems">
+    Batch methods, parallel methods, groups, intervals and timings.
+  </Card>
+</Cards>

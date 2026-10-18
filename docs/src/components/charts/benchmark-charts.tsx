@@ -108,10 +108,17 @@ export interface BenchChartProps extends ComparisonQuery {
   lang?: Locale;
 }
 
-/** "1.00×" for EasyEcs' own row, "2.54× the time of EasyEcs" for the others */
-function vsText(vs: number | null, ours: boolean, zh: boolean) {
+/**
+ * "baseline" for EasyEcs' own row, "2.54× the time of EasyEcs" for the others;
+ * "0.29× the time of the baseline" in EasyEcs' own benchmarks
+ */
+function vsText(vs: number | null, ours: boolean, zh: boolean, own = false) {
   if (vs === null) return undefined;
   if (ours && Math.abs(vs - 1) < 1e-9) return zh ? '基准' : 'baseline';
+  if (own)
+    return zh
+      ? `耗时为基准的 ${formatRatio(vs)}`
+      : `${formatRatio(vs)} the time of the baseline`;
   return zh
     ? `耗时为 EasyEcs 的 ${formatRatio(vs)}`
     : `${formatRatio(vs)} the time of EasyEcs`;
@@ -136,7 +143,7 @@ export function BenchChart({
   const zh = useLang(lang) === 'zh';
   const s = seriesFor(zh);
   const query = { bench, params: params ?? param, methods };
-  const { rows, varying, grouped } = comparison(query);
+  const { rows, varying, grouped, own } = comparison(query);
   const heading =
     title ??
     `${bench.split('.').pop()}${query.params ? ` (${query.params})` : ''}`;
@@ -144,7 +151,8 @@ export function BenchChart({
     `${formatBytes(bytes)}${zh ? ' 分配' : ' allocated'}`;
 
   const chartRows: ChartRow[] = [];
-  let series: ChartSeries[] = [s.ours, s.other];
+  // EasyEcs' own benchmarks have no other library: one series, no legend
+  let series: ChartSeries[] = own ? [s.ours] : [s.ours, s.other];
   if (grouped) {
     const libraries = [...new Set(rows.map((r) => r.library))];
     series = libraries.map((library, i) =>
@@ -206,7 +214,7 @@ export function BenchChart({
               : `${formatRatio(item.vsOurs)} · ${alloc(item.row.allocatedBytes)}`,
           tone: item.row.allocatedBytes === 0 ? 'win' : 'par',
         },
-        detail: vsText(item.vsOurs, item.ours, zh),
+        detail: vsText(item.vsOurs, item.ours, zh, item.own),
       });
     }
   }

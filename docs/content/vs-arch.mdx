@@ -1,0 +1,190 @@
+---
+title: EasyEcs vs Arch
+seoTitle: "EasyEcs vs Arch: a C# ECS comparison with benchmarks (Arch alternative for .NET 10)"
+description: EasyEcs and Arch side by side. How their concepts map, the same systems written in both, the measured server tick and features, and when Arch is the better choice.
+icon: GitCompare
+---
+
+[Arch](https://github.com/genaray/Arch) and EasyEcs are both archetype ECS libraries for C#: entities with the same
+components share a table, and queries walk its columns. They differ in what the core does for you. Arch is a small,
+fast core: queries, struct jobs, chunks and a command buffer, with systems and source generators in the separate
+Arch.Extended packages. EasyEcs puts systems, generated jobs, change tracking, indexes, relations, saves and
+snapshots in one package for .NET 10 servers, and applies structural changes immediately instead of through a
+command buffer.
+
+## At a glance [#at-a-glance]
+
+| | EasyEcs | Arch |
+| --- | --- | --- |
+| Storage | archetype tables, presence bits per column | archetypes in chunks |
+| Changes during a query | applied at once | recorded in a `CommandBuffer`, played back later |
+| Removing a component | flips a bit, the entity keeps its row | moves the entity to another archetype |
+| Systems | built in, generated from `[ForEach]` methods | Arch.Extended |
+| Change and removal tracking | `[Changed<T>]`, `[Removed<T>]` | events (`SubscribeComponentSet`, `SubscribeComponentRemoved`) |
+| Indexes, relations, hierarchy | built in | relations in a separate package |
+| Allocation per server tick | none | the command buffer allocates |
+| Runtimes | net10.0 | netstandard2.1, net6.0, net8.0; Unity |
+
+## Concepts side by side [#concepts]
+
+| Concept | Arch | EasyEcs |
+| --- | --- | --- |
+| World | `World.Create()`, `World.Destroy(world)` | `new World()`, `world.Dispose()` |
+| Component | any struct | a struct implementing `IComponent` |
+| Tag | an empty struct | an empty struct implementing `IComponent` |
+| Singleton | none (a component on one entity) | `ISingletonComponent`, `world.AddSingleton<T>()` |
+| Query | `new QueryDescription().WithAll<A, B>().WithNone<C>()` | `[ForEach, Without<C>]` on a method; `QueryFilter.Create().Without<C>()` for ad-hoc calls |
+| Struct job | `IForEach<A, B>` with `Update(ref A, ref B)`, run by `world.InlineQuery<Job, A, B>(in query, ref job)` | `IForEach<A, B>` with `Execute(ref A, ref B)`, run by `world.ForEach<A, B, Job>(ref job, in filter)` |
+| Job with the entity | `IForEachWithEntity<A>`, `InlineEntityQuery` | `IForEachEntity<A>`, `ForEachEntity`, or an `Entity` parameter of a `[ForEach]` method |
+| Chunks | `world.Query(in query).GetChunkIterator()`, then `chunk.GetSpan<T>()` | batch `[ForEach]` methods taking `Span<T>`, or `ForEachBatch` |
+| System | Arch.Extended `BaseSystem` | `EcsSystem` with `[ForEach]` methods |
+| Command buffer | `CommandBuffer`, `Playback(world)` | none: `entity.Set`, `Remove`, `Destroy` apply at once |
+| Bulk change | `world.Add(in query, value)`, `world.Remove<T>(in query)` | `world.SetAll(value, filter)`, `world.RemoveAll<T>(filter)` |
+| Parallel query | `World.SharedJobScheduler`, `InlineParallelQuery` | `[ForEach(Parallel = true)]` |
+| Events | `SubscribeComponentAdded` / `Removed` / `Set` | none: `[Changed<T>]`, `[Removed<T>]`, tags queried by later systems |
+
+## The same task in both [#same-task]
+
+The combat system of the headline tick: fighters attack on a cooldown and some hits set the target on fire. Arch
+cannot add `Burning` while its query iterates, so the port records the change and plays it back after the system
+(`ArchSimulation.cs`). EasyEcs adds it on the spot (`WorldSimulation.cs`).
+
+<Tabs items={['EasyEcs', 'Arch']}>
+<Tab value="EasyEcs">
+
+```csharp title="CombatSystem.cs"
+public struct Attack : IComponent { public int Damage, Cooldown, Interval; }
+public struct Hp : IComponent { public int Value, Max; }
+public struct Fire : IComponent { public int Ticks; }
+
+public class CombatSystem : EcsSystem
+{
+    [ForEach, Without<Dead>, Without<Stunned>]
+    static void Fight(Entity entity, ref Attack attack, ref Hp hp)
+    {
+        if (--attack.Cooldown > 0) return;
+        attack.Cooldown = attack.Interval;
+        hp.Value -= attack.Damage;
+        if (entity.Id.Index % 20 == 0 && !entity.Has<Fire>())
+            entity.Set(new Fire { Ticks = 10 });   // applied now, also mid-pass
+    }
+}
+```
+
+```csharp
+world.AddSystem<CombatSystem>();
+world.Update();
+```
+
+</Tab>
+<Tab value="Arch">
+
+```csharp title="ArchCombat.cs" doccheck=skip
+private static readonly QueryDescription Fighters =
+    new QueryDescription().WithAll<Attack, Hp>().WithNone<Dead, Stunned>();
+
+private struct Fight : IForEachWithEntity<Attack, Hp>
+{
+    public World W;
+    public CommandBuffer B;
+
+    public void Update(Entity e, ref Attack attack, ref Hp hp)
+    {
+        if (--attack.Cooldown > 0) return;
+        attack.Cooldown = attack.Interval;
+        hp.Value -= attack.Damage;
+        if (e.Id % 20 == 0 && !W.Has<Fire>(e))
+            B.Add(e, new Fire { Ticks = 10 });   // recorded
+    }
+}
+
+var fight = new Fight { W = world, B = buffer };
+world.InlineEntityQuery<Fight, Attack, Hp>(in Fighters, ref fight);
+buffer.Playback(world);                          // applied here
+```
+
+</Tab>
+</Tabs>
+
+In EasyEcs the filter, the job struct and the call are generated from the method; the system's access (writes
+`Attack` and `Hp`) is generated too, and the analyzer rejects a method that would break it.
+
+## The numbers [#numbers]
+
+The headline tick, the same rules in both libraries, checked to produce the same counters:
+
+<PeerChart />
+
+Arch takes <BenchValue k="peers.arch.ratio" /> the time of EasyEcs on this tick and allocates
+<BenchValue k="peers.arch.alloc" /> per tick, most of it in its command buffer, which pools and regrows lists while it
+records and plays back.
+
+<BenchChart
+  bench="StructuralChangeComparison"
+  param="Killed=1000"
+  methods="EasyEcs_Direct,Arch_CommandBuffer"
+  title="Mark 1,000 of 100,000 units dead and revive them during two passes"
+/>
+
+<BenchChart
+  bench="ChangeTrackingComparison"
+  param="Written=1000"
+  methods="EasyEcs_Changed,Arch_DirtyTag,Arch_Scan"
+  title="Replicate the 1,000 of 100,000 entities written this tick"
+  subtitle="Arch has no change filter: a dirty tag added on write, or a scan comparing values."
+/>
+
+<BenchChart
+  bench="DisableComparison"
+  param="Switched=10000"
+  methods="EasyEcs_Tag,Arch_Tag"
+  title="10,000 of 100,000 units fall asleep and wake up, then the awake are summed"
+/>
+
+<BenchChart
+  bench="BulkChangeComparison"
+  methods="EasyEcs_SetAllRemoveAll,Arch_AddRemoveByQuery"
+  title="Stun 100,000 fighters, then lift the stun"
+  subtitle="Arch moves whole tables; EasyEcs flips presence bits once the stun has its column."
+/>
+
+<BenchChart
+  bench="ParallelQueryComparison"
+  methods="EasyEcs_Parallel,Arch_InlineParallelQuery"
+  title="Steer 100,000 agents on all cores"
+/>
+
+Every other result, including the ones without Arch (Arch has no value index, hierarchy or save in its core), is on
+[the comparison page](/en/docs/comparison).
+
+## What Arch does better [#what-arch-does-better]
+
+- **The parallel query.** `InlineParallelQuery` on Arch's job scheduler is ahead of EasyEcs' parallel `[ForEach]`
+  in this run: the scheduler keeps worker threads of its own, which wins when passes run back to back. EasyEcs
+  chose thread-pool helpers woken only while they pay ([D22](/en/docs/decisions)); the parallel numbers of this run
+  carry a large error.
+- **Reach.** Arch runs on netstandard2.1, net6.0 and net8.0, and in Unity. EasyEcs needs .NET 10.
+- **A small core.** If you want queries and storage and nothing else, Arch's core is smaller; systems, relations and
+  persistence are packages you add when you need them.
+- **Events.** Arch raises component and entity events; EasyEcs has none by design ([D1](/en/docs/decisions)).
+
+## When to choose Arch [#when-to-choose-arch]
+
+Choose Arch when you need Unity or a runtime older than .NET 10, want a minimal core and are happy to assemble
+systems and tooling from Arch.Extended. Choose EasyEcs for a .NET 10 server whose state changes every tick: changes
+applied where they are decided, generated and analyzer-checked systems, change and removal tracking, and no
+allocation per tick. Porting an Arch codebase: [Migrate from Arch](/en/docs/migrate-from-arch).
+
+## Related [#related]
+
+<Cards>
+  <Card title="Migrate from Arch" href="/en/docs/migrate-from-arch">
+    The API mapping and a whole simulation ported, step by step.
+  </Card>
+  <Card title="Comparison" href="/en/docs/comparison">
+    Every benchmark against Arch, Friflo.Engine.ECS and DefaultEcs.
+  </Card>
+  <Card title="Why EasyEcs is fast" href="/en/docs/why-fast">
+    Presence bits, generated jobs and immediate structural changes.
+  </Card>
+</Cards>

@@ -1,0 +1,550 @@
+---
+title: 性能指南
+seoTitle: "EasyEcs 性能：跑分、遍历 API 的选择与 C# 服务器的检查清单"
+description: EasyEcs 有多快，以及怎样让你的代码保持快。实测的服务器 tick、每种遍历 API 的开销、该做与不该做的清单，以及全部 BenchmarkDotNet 结果。
+icon: Gauge
+---
+
+EasyEcs 是为每隔几毫秒跑一次、一跑就是几个月的服务器 tick 设计的：系统按常规写法写出来，就已经是生成、内联的 struct
+job；繁忙的 World 每个 tick 都不分配。本页给出一个真实 tick 的开销、每种循环该用哪个 API、当某个系统在计时里冒头时值得
+做的改写，以及这些数字背后的全部跑分。库本身是怎么做到的，见 [EasyEcs 为什么快](/zh/docs/why-fast)。
+
+## 主 tick [#headline]
+
+`WorldSimulationBenchmark` 是一个繁忙的 MMO 式 World 的一个 tick，不是玩具循环：30% 玩家、70% NPC，外加子弹。一个 tick
+里跑移动（跳过 `Stunned` 和 `Dead`）、视野网格、随机附加 `Burning` 和 `Stunned` 的战斗、移除它们的状态到期、死亡（一个
+`Dead` 标签和一个统计单例）、复活（死去的 NPC 被替换，死去的玩家原地复活），以及约 5% 的玩家发射、20 个 tick 后消失的
+子弹。setup 会检查 World 确实繁忙：命中、死亡、生成和网格变化都有发生。
+
+<Tabs items={['100,000 个实体', '10,000 个实体']}>
+<Tab value="100,000 个实体">
+
+| 跑分 | 跑的是什么 | 每 tick 耗时 | 每 tick 分配 |
+| --- | --- | --- | --- |
+| `WorldSimulationBenchmark` | 一个 World，100,000 个实体 | <BenchValue k="tick.oneWorld" /> | <BenchValue k="tick.oneWorld.alloc" /> |
+| `MultiWorldBenchmark` | 四个各 25,000 实体的 World，各占一个线程 | <BenchValue k="tick.fourWorlds" /> | <BenchValue k="tick.fourWorlds.alloc" /> |
+| `BattleServerBenchmark` | [战斗服务器](/zh/docs/example)：所有功能一起上 | <BenchValue k="tick.battle" /> | <BenchValue k="tick.battle.alloc" /> |
+
+<PeerChart />
+
+</Tab>
+<Tab value="10,000 个实体">
+
+| 跑分 | 跑的是什么 | 每 tick 耗时 | 每 tick 分配 |
+| --- | --- | --- | --- |
+| `WorldSimulationBenchmark` | 一个 World，10,000 个实体 | <BenchValue k="tick.oneWorld10k" /> | <BenchValue k="tick.oneWorld10k.alloc" /> |
+
+<PeerChart entities="10000" />
+
+</Tab>
+</Tabs>
+
+<BenchSource />
+
+`MultiWorldBenchmark` 的四个 World 就是服务器推荐的布局：每张地图或每个区一个 World，各由一个长期存在的线程持有。同类
+对比图把同一个 tick 移植到 Friflo.Engine.ECS、Arch 和 DefaultEcs 上跑；移植方式和其余结果见
+[对比](/zh/docs/comparison#the-same-server-tick)。
+
+## 选择遍历 API [#choosing-an-iteration-api]
+
+每个 API 都是从头到尾走同样的表。区别在每一行周围的簿记：一次委托调用、一个枚举器、一次结构变更检查。取第一个合适的：
+
+| 需求 | 用 | 实测 |
+| --- | --- | --- |
+| 系统的逐实体逻辑 | [`[ForEach]` 方法](/zh/docs/guide/systems) | 每个实体 <BenchValue k="forEach.perEntity" />，两个普通数组是 <BenchValue k="rawArray.perEntity" /> |
+| 多行上的算术 | 向量化的批量 `[ForEach]` 方法（span） | <BenchValue k="ops.iterate2Simd" />，逐实体是 <BenchValue k="ops.iterate2" />（100,000 个实体） |
+| 繁重的逐实体工作 | `[ForEach(Parallel = true)]` | <BenchValue k="parallel.forEach.on" />，单线程是 <BenchValue k="parallel.forEach.off" />（100,000 个实体，4 核） |
+| 系统之外、每个 tick 都跑的循环 | 通过入口运行的静态 `[ForEach]` 方法，或 struct job（`world.ForEach`） | <BenchValue k="runner.runner" />，`Query` 循环是 <BenchValue k="runner.query" /> |
+| 工具、测试或请求处理里的循环 | `foreach (var item in world.Query<...>())` | <BenchValue k="micro.queryIterate" />，struct job 是 <BenchValue k="micro.forEachIterate" />（10,000 个实体） |
+| “有多少？”/“有没有？” | `world.Count` / `world.Any` | 100,000 行需要逐位测试时 <BenchValue k="count.tested" /> |
+| 上次运行以来写过的少数行 | `ITrackChanges` + `[Changed<T>]` | <BenchValue k="changed.10" />，全扫描是 <BenchValue k="changed.10.scan" />（100,000 个里写了 10 个） |
+| 失去某个组件的实体 | `ITrackChanges` + `[Removed<T>]` | <BenchValue k="removed.10" />（100,000 个里移除了 10 个） |
+| 按值找实体 | [值索引](/zh/docs/guide/indexes-and-relations) | 见[下面](#benchmarks)的 `IndexBenchmark` |
+
+<BenchSource />
+
+`[ForEach]` 能跑赢两个普通数组，是因为它的列从 64 字节边界开始：大小为 2 的幂的组件，一行永远不会跨两个缓存行。
+`MicroBenchmarks.ForEachSystemWrite` 跑在只有一张表的 World 上；`MicroBenchmarks` 里其他遍历项用的 World 中每隔一个实体
+还有 `Health`（两张表），所以只在同一个 World 内比较 API，不要跨 World 比。
+
+## 常规写法与最快写法 [#regular-code-and-the-fastest-code]
+
+常规写法适合大多数系统：短，而且已经是生成的 struct job。当某个系统在 `WorldOptions.MeasureSystems` 的计时里冒头
+（[测量系统](/zh/docs/guide/systems)），跑分测的就是下面这些改写：
+
+| 常规 | 最快 | 实测 |
+| --- | --- | --- |
+| 逐实体 `[ForEach]` 里带分支的算术 | 用 `Vector<T>` 向量化的批量方法，分支改成掩码 | <BenchValue k="ops.iterate2" /> → <BenchValue k="ops.iterate2Simd" /> |
+| 热点临时循环里的 `foreach (var item in world.Query<...>())` | 配 `world.ForEach` 的 struct job | <BenchValue k="micro.queryIterate" /> → <BenchValue k="micro.forEachIterate" /> |
+| 每一行都要测的 `bool` 标志 | 配 `[With<T>]` / `[Without<T>]` 的标签 | 没有标签的行一次跳过 64 行；切换只翻一个位 |
+| 为了找少数变化的行扫描每一行 | `ITrackChanges` + `[Changed<T>]` | <BenchValue k="changed.10.scan" /> → <BenchValue k="changed.10" /> |
+| 循环里 `CreateEntity` / `Destroy` | `CreateEntities` / `DestroyEntities`、`Instantiate(prefab, span)` | <BenchValue k="micro.churn" /> → <BenchValue k="micro.churnBatch" /> |
+| 逐个给每个实体设组件 | `world.SetAll` / `RemoveAll` | <BenchValue k="bulk.each" /> → <BenchValue k="bulk.setAll" /> |
+| 一个接 `Maybe<T>` 的方法 | 用 `[With<T>]` / `[Without<T>]` 拆成两个方法 | <BenchValue k="maybe.one" /> → <BenchValue k="maybe.two" /> |
+| 在调用处构造 `QueryFilter` | `static readonly` 过滤 | 每次调用 <BenchValue k="callsite.atCall" /> → <BenchValue k="callsite.once" /> |
+| 单线程跑繁重的逐实体工作 | `[ForEach(Parallel = true)]` | <BenchValue k="parallel.forEach.off" /> → <BenchValue k="parallel.forEach.on" /> |
+
+<BenchSource />
+
+### 多行上的算术：向量化批量方法 [#arithmetic-over-many-rows-vectorize-a-batch-method]
+
+JIT 不会把这个循环向量化，而且行一多，反弹的分支就容易预测失败。常规写法：
+
+```csharp title="BounceSystem.cs"
+public class BounceSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Move(ref Position p, ref Velocity v)
+    {
+        p = new Position(p.X + v.X, p.Y + v.Y);
+        if (p.X < 0 || p.X > 4096) v = v with { X = -v.X };
+        if (p.Y < 0 || p.Y > 4096) v = v with { Y = -v.Y };
+    }
+}
+```
+
+最快的写法接 span（连续的一段行；一张所有行都匹配的表就是一次调用），把两个 float 的组件当作一个 float span 来读
+（X, Y, X, Y, ...），让 `Vector<float>` 的每个通道都是一个坐标，再把分支变成掩码：
+
+```csharp title="BounceSimdSystem.cs"
+using System.Numerics;
+using System.Runtime.InteropServices;
+
+public class BounceSimdSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Move(Span<Position> positions, Span<Velocity> velocities)
+    {
+        var p = MemoryMarshal.Cast<Position, float>(positions);
+        var v = MemoryMarshal.Cast<Velocity, float>(velocities);
+        var max = new Vector<float>(4096f);
+        int i = 0;
+        for (; i <= p.Length - Vector<float>.Count; i += Vector<float>.Count)
+        {
+            var velocity = new Vector<float>(v[i..]);
+            var position = new Vector<float>(p[i..]) + velocity;
+            var outside = Vector.LessThan(position, Vector<float>.Zero) | Vector.GreaterThan(position, max);
+            position.CopyTo(p[i..]);
+            Vector.ConditionalSelect(outside, -velocity, velocity).CopyTo(v[i..]);
+        }
+
+        for (; i < p.Length; i++) // 剩下的行
+        {
+            p[i] += v[i];
+            if (p[i] < 0 || p[i] > 4096) v[i] = -v[i];
+        }
+    }
+}
+```
+
+这个转换成立，是因为组件里只有 float（没有填充，没有引用），而且非托管列从 64 字节边界开始，向量加载保持对齐。批量方法
+不做结构变更，只在需要时通过 `EntitySpan` 参数读实体。在 span 上写标量循环，比逐实体方法快不了多少：要写就把它向量化。
+
+<BenchChart
+  bench="OperationBenchmark"
+  methods="EasyEcs_Iterate2,Friflo_Iterate2,EasyEcs_Iterate2Simd,Friflo_Iterate2Simd"
+  title="100,000 个实体的移动：逐实体与向量化"
+/>
+
+### 临时循环：struct job [#ad-hoc-loops-a-struct-job]
+
+`world.Query` 是工具和请求处理里方便的循环。系统之外每个 tick 都跑的循环，写成 struct job：`world.ForEach` 按表特化并
+内联它。标上 `INoStructuralChanges`，再声明它的 `Writes`（[job 要声明什么](/zh/docs/guide/queries)）。
+
+```csharp title="EnergyJob.cs"
+public struct EnergyJob : IForEach<Velocity>, INoStructuralChanges   // 不做结构变更：走精简循环
+{
+    public float Total;   // 值字段在遍历期间留在寄存器里，最后只写回一次
+
+    public static int Writes => 0;   // 只读：没有哪一行算被改过
+
+    public void Execute(ref Velocity v) => Total += v.X * v.X + v.Y * v.Y;
+}
+```
+
+```csharp
+var job = new EnergyJob();
+world.ForEach<Velocity, EnergyJob>(ref job);
+float energy = job.Total;
+```
+
+job 需要持有 `ref` 或 `Span`（输出缓冲、调用方的数组）时，把它声明成 `ref struct`。`ForEach`、`ForEachEntity` 和
+`ForEachBatch` 接受 ref struct job；`*Parallel` 系列不接受，因为每个线程拿到的是 job 的一份副本。求总和时值字段比 `ref`
+字段快：通过 `ref` 写，每一行都要写一次内存。
+
+```csharp title="CollectJob.cs"
+public ref struct CollectJob : IForEach<Position>, INoStructuralChanges
+{
+    public Span<float> Xs;   // 调用方的缓冲，长度不小于匹配的行数
+    public int Count;
+
+    public static int Writes => 0;
+
+    public void Execute(ref Position p) => Xs[Count++] = p.X;
+}
+```
+
+系统之外的静态 `[ForEach]` 方法用更少的代码做到同样的事：生成器写好 job，再加一个以 World 为参数的入口
+（`RunnerBenchmark` 两种都测了）。
+
+```csharp title="Census.cs"
+public static class Census
+{
+    [ForEach, Without<Dead>]
+    static void CountWounded(in Health health, ref int wounded)
+    {
+        if (health.Value < 50) wounded++;
+    }
+}
+```
+
+```csharp
+int wounded = 0;
+Census.CountWounded(world, ref wounded);   // 生成的入口：job 跑一遍
+```
+
+### 状态：用标签，不用标志 [#states-tags-not-flags]
+
+标志在每个检查它的系统的每一行上，都要花一次加载和一次分支。标签是过滤：没有标签的行一次跳过 64 行，加减标签只翻一个
+存在位，实体留在原行。
+
+```csharp title="Stun.cs"
+public record struct Unit(int Hp, bool Stunned) : IComponent;   // 常规：每个系统都要测这个标志
+
+public class StunnedFlagSystem : EcsSystem
+{
+    [ForEach]
+    static void Act(ref Unit unit)
+    {
+        if (unit.Stunned) return;
+        unit.Hp++;
+    }
+}
+
+public class StunnedTagSystem : EcsSystem   // 最快：让过滤来做判断
+{
+    [ForEach, Without<Stunned>]
+    static void Act(ref Health hp) => hp = hp with { Value = hp.Value + 1 };
+}
+```
+
+和其他原型库相比，差别出在切换状态上：EasyEcs 翻一个位，Friflo 要把实体搬到另一个原型再搬回来。
+
+<BenchChart
+  bench="OperationBenchmark"
+  methods="EasyEcs_Toggle,Friflo_Toggle"
+  title="眩晕 100,000 个战斗单位中的 5%，再让他们恢复"
+/>
+
+### 变了的少数行：`[Changed<T>]` [#the-few-rows-that-changed-changedt]
+
+同步或存盘系统如果扫描每一行，就要为没人写过的行买单。把组件标成 `ITrackChanges`，再用 `[Changed<T>]` 过滤：没写过的表、
+4,096 行的块和 64 行的字都会被跳过。用 `in` 接组件，访问才不会被算成写入。
+
+```csharp title="ShieldReplicationSystem.cs"
+public record struct Shield(int Value) : IComponent, ITrackChanges;
+public record struct ShieldReplica(int Value) : IComponent;
+
+public class ShieldReplicationSystem : EcsSystem
+{
+    [ForEach, Changed<Shield>]
+    static void Send(in Shield shield, ref ShieldReplica replica) => replica = new ShieldReplica(shield.Value);
+}
+```
+
+写入的行少，或写入的行挨得近时，它最划算：
+
+| 100,000 行里写了多少 | `[Changed<T>]` | 每一行 |
+| --- | --- | --- |
+| 10 | <BenchValue k="changed.10" /> | <BenchValue k="changed.10.scan" /> |
+| 1,000，每隔 97 行一个 | <BenchValue k="changed.1000" /> | <BenchValue k="changed.1000.scan" /> |
+
+<BenchSource />
+
+如果写入落在大多数 64 行的字里，就没什么可跳过的，测变更 tick 的开销和读这一列差不多。对于一个大多数行每个 tick 都写的
+列做廉价检查（比如对 `Health` 做死亡检查），普通扫描一样快，也更简单。
+
+### 没了的东西：`[Removed<T>]` [#what-went-away-removedt]
+
+用标记标签同步一次移除（一团火灭了），每次移除要做一次结构变更，还要遍历一遍标签；拿每一行和客户端上次收到的比，要扫描
+一遍。被追踪的组件被移除时已经在它的行上记了 tick，所以 `[Removed<T>]` 只访问失去它的实体，跳过的方式和 `[Changed<T>]`
+一样：
+
+```csharp title="ShieldLossSystem.cs"
+public class ShieldLossSystem : EcsSystem
+{
+    [ForEach, Removed<Shield>]                       // Shield : ITrackChanges（见上）
+    static void Send(ref ShieldReplica replica) => replica = new ShieldReplica(0);
+}
+```
+
+<BenchChart bench="RemovalComparison" param="Removed=10" title="找出 100,000 个实体里失去 buff 的 10 个" />
+
+### 只在需要的行上拿实体 [#the-entity-only-where-the-row-needs-it]
+
+`Entity` 参数会给每一行都构造一个句柄，哪怕只有一个少见的分支用到；它还会让系统在并行阶段里单独运行。如果系统要处理的
+实体能用某个组件区分出来，就按它过滤（`[With<Dead>]`），不要逐行测试。只需要少数几行实体的批量方法，接一个 `EntitySpan`，
+它只给你取下标的行构造句柄。
+
+<BenchChart
+  bench="OperationBenchmark"
+  methods="EasyEcs_Entity,Friflo_Entity,EasyEcs_EntityBatch,Friflo_EntityBatch"
+  title="遍历 100,000 个实体，偶尔才需要实体本身"
+/>
+
+### 成批的实体：批量调用 [#waves-of-entities-bulk-calls]
+
+```csharp
+private static readonly Prefab Goblin = new Prefab().Set(new Position(0, 0), new Health(30));
+```
+
+```csharp
+var wave = new Entity[1_000];
+world.CreateEntities(wave, new Position(0, 0), new Velocity(1, 0));   // 只过一次结构闸门
+world.Instantiate(Goblin, wave);                                      // 一波预制体，同样如此
+int removed = world.DestroyEntities<Dead>();                          // 所有死亡实体，一遍搞定
+int lifted = world.RemoveAll<Stunned>();                              // 解除所有眩晕，按整字处理行
+```
+
+只构造一次（`static readonly`）的[预制体](/zh/docs/guide/prefabs)，每个实例只复制一次行；World 只查一次它的目标表并缓存
+下来。一次改多个组件也只走一次转移：`entity.Set(a, b)`、`entity.Remove<A, B>()`。
+
+## 该做的 [#do]
+
+每个 tick 都跑的代码的检查清单。先找出值得花力气的系统：`WorldOptions.MeasureSystems` 会给每次系统运行计时。
+
+- **通过 ref 修改**：`ref var hp = ref item.Component1;`、`ref var hp = ref entity.Get<Health>();`。
+- **生成时一次带齐组件**：`world.CreateEntity(a, b, c)` 直接把实体放进最终的表；定义一次的类型用
+  `world.Instantiate(prefab)`。一次改多个用 `entity.Set(a, b)` / `entity.Remove<A, B>()`。
+- **用 `in` 读，用 `ref` 写**：`in` 参数、`entity.Read<T>()` 或生成的属性读取；`ref` 参数和 `entity.Get<T>()` 是写。对被
+  追踪的组件，`ref` 访问算一次写入；`Query` 循环访问的每一行都算；只读的 struct job 声明 `static int Writes => 0`。
+- **不做结构变更的 `[ForEach]` 方法保持 `static`**，不拿 `World` 参数，`Entity` 只读：生成器会给它的 job 标上
+  `INoStructuralChanges`，省掉每行的簿记。手写的 job 也照此标记。
+- **单例作为 `[ForEach]` 参数**（每一遍只解析一次），系统之外则持有一个 `SingletonRef<T>`（每次访问不用查找）。
+- **给系统定节奏**：用 `UpdateInterval`，或在需要时更新某个系统分组（`Update<TGroup>()`），不要在方法里数计数器。
+- **组件保持小**（几个字段，远小于 64 字节），很少用的数据拆成单独的组件：遍历只加载它读的列。
+- **在批量方法里向量化算术**，成批生成用批量调用，状态用标签，变了什么用 `[Changed<T>]`，没了什么用 `[Removed<T>]`
+  （[见上](#regular-code-and-the-fastest-code)）。
+- **用 `world.Count` / `world.Any` 来问**，不要为了计数或找一个匹配去写循环。
+- **预留空间**：大小已知的 `DynamicBuffer<T>` 用 `EnsureCapacity`；World 用 `WorldOptions.InitialEntityCapacity` 或
+  `world.EnsureEntityCapacity(n)` 预先定好大小。
+- **`QueryFilter` 放进 `static readonly` 字段**（`[ForEach]` 的过滤由生成器这样处理）。
+- **用值索引查实体**（`IIndexed<TKey>`），不要手动维护一个同步的字典；被索引的组件只在键变化时才写。
+- **服务器上每个线程一个 World**，比如每张地图或每个区一个。
+
+## 不该做的 [#dont]
+
+- **不要改了组件的副本** 却忘了写回去。
+- **不要跨 `await` 或在字段里保留 `ref`**：保留 `Entity` 句柄。
+- **不要存裸的实体下标**：id 会被回收；存 `EntityId`（下标加版本）。
+- **不要在每次更新都跑的方法里写捕获局部变量的 lambda**：哪怕那个分支没走，闭包在进入方法时就分配了。
+  `AllocationTests` 就在 `World.Update` 里抓到过这样一个。
+- **每次更新都跑的代码里不要用 LINQ、`params object[]` 或字符串格式化。**
+- **不要拿方法用不到的 `Entity` 或单例参数**：循环会为每一行加载它。
+- **被追踪的组件只读时不要按 `ref` 接**：否则访问过的每一行都算变了。
+- **不要在别的线程上使用值索引或销毁实体**：索引在所属线程上跟随这些变化，没有做同步。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁来发现 |
+| --- | --- | --- |
+| 批量方法里又接了逐实体参数 | 它没法接收一段连续的行 | [EECS009](/zh/docs/guide/analyzer#eecs009) |
+| 不带 `Entity` 或 `World` 的静态 `[ForEach]` 方法里做结构变更 | 方法承诺了不做结构变更，它的精简循环依赖这一点 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
+| 并行方法写单例或做结构变更 | 线程之间数据竞争 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
+| 组件里存 `Entity` | 列里有了引用：不再固定，GC 要扫描 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告） |
+| 通过 `ref` 写被索引的组件 | 索引看不到新键 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
+| 计算出来的 `UpdateInterval` | 每次更新都要读 | [EECS018](/zh/docs/guide/analyzer#eecs018)（警告） |
+| 只读被追踪组件的 `ref` 参数 | 访问过的每一行都算变了 | 代码审查：声明成 `in` |
+| 每次更新都跑的代码里有闭包或 LINQ | 每个 tick 都产生垃圾 | 在自己的测试里做 `AllocationTests` 式的检查 |
+
+## 覆盖了什么 [#coverage]
+
+每个功能都有单元测试（`tests/EasyEcs.UnitTest`）、一个 BenchmarkDotNet 跑分；同类库有这个功能的，还有一项正面对比，测量
+前先校验每个库算出的结果一致。
+
+| 功能 | 测试 | 跑分 | 与其他库对比 |
+| --- | --- | --- | --- |
+| 完整的服务器 tick | `BattleServerTests` | `WorldSimulationBenchmark`、`MultiWorldBenchmark`、`BattleServerBenchmark` | [`EcsComparisonBenchmark`](/zh/docs/comparison#the-same-server-tick) |
+| `[ForEach]`、struct job、`Query` | `ForEachSystemTests`、`QueryTests`、`RunnerTests` | `MicroBenchmarks`、`RunnerBenchmark`、`CallSiteBenchmark` | [`OperationBenchmark`](/zh/docs/comparison#operations) |
+| 结构变更、存在位 | `EntityTests`、`ComponentTests`、`PresenceTests` | `MicroBenchmarks`（`Churn`、`ToggleComponent`）、`SparseBenchmark`、`CountBenchmark` | [`StructuralChangeComparison`](/zh/docs/comparison#structural-changes) |
+| 批量变更和生成 | `BulkTests` | `BulkBenchmark`、`MicroBenchmarks.ChurnBatch` | [`BulkChangeComparison`、`BulkSpawnComparison`](/zh/docs/comparison#bulk) |
+| 预制体和克隆 | `InstantiateTests` | `PrefabBenchmark` | [`OperationBenchmark`（`Instantiate`）](/zh/docs/comparison#operations) |
+| 变更追踪 | `ChangedTests` | `ChangeTrackingBenchmark` | [`ChangeTrackingComparison`](/zh/docs/comparison#change-tracking) |
+| 移除检测 | `RemovedTests` | `BattleServerBenchmark` | [`RemovalComparison`](/zh/docs/comparison#removal-detection) |
+| 禁用 | `DisableTests` | `BulkBenchmark`（`DisableAll`） | [`DisableComparison`](/zh/docs/comparison#disabling) |
+| 值索引、有序索引 | `IndexTests`、`OrderedIndexTests` | `IndexBenchmark`、`OrderedIndexBenchmark` | [`IndexComparison`、`ValueQueryComparison`](/zh/docs/comparison#indexes-and-relations) |
+| 关系 | `RelationTests`、`TargetPolicyTests` | `RelationBenchmark` | [`RelationComparison`](/zh/docs/comparison#indexes-and-relations) |
+| 层级 | `HierarchyTests` | `HierarchyBenchmark` | [`HierarchyComparison`](/zh/docs/comparison#hierarchy) |
+| 分组 | `GroupTests` | `GroupBenchmark` | [`ValueQueryComparison`](/zh/docs/comparison#indexes-and-relations) |
+| 单例 | `SingletonTests` | `MicroBenchmarks.SingletonAccess` | [`OperationBenchmark`（`Singleton`）](/zh/docs/comparison#operations) |
+| 可选组件（`Maybe<T>`） | `ForEachSystemTests` | `MaybeBenchmark` | — |
+| 动态缓冲 | `DynamicBufferTests` | `DynamicBufferBenchmark` | — |
+| 清理组件 | `CleanupTests` | `CleanupBenchmark` | — |
+| 系统顺序和分组 | `SystemTests` | `OrderingBenchmark` | — |
+| 并行系统和 `[ForEach(Parallel = true)]` | `ParallelTests`、`ConcurrencyTests` | `ParallelSystemsBenchmark`、`ParallelForEachBenchmark` | [`ParallelSystemsComparison`、`ParallelQueryComparison`](/zh/docs/comparison#parallel) |
+| 快照 | `SnapshotTests` | `SnapshotBenchmark`（`Capture`、`Restore`） | — |
+| 存档 | `SerializationTests` | `SnapshotBenchmark`（`Save`、`Load`） | [`SaveComparison`](/zh/docs/comparison#saves) |
+| 在 World 之间搬实体 | `MoveTests` | `MigrationBenchmark` | — |
+| 卸载插件的类型 | `UnloadTests` | `UnloadBenchmark` | — |
+| 内省 | `IntrospectionTests` | `IntrospectionBenchmark` | — |
+| 泛型系统 | `GenericTests` | — | — |
+| 生成器、分析器、代码修复 | `GeneratorTests`、`CodeFixTests` | — | — |
+| 零分配 | `AllocationTests`（每次测试运行，预算 0 B） | 每个跑分的 Allocated 列 | 每项对比 |
+
+## 跑分 [#benchmarks]
+
+`benchmarks/EasyEcs.Benchmark` 的每一个类，取自同一次完整运行。柱子是 EasyEcs；比值相对于该类的基准，也就是完成这件事
+的第一种做法。和其他库的对比在[对比页](/zh/docs/comparison)。
+
+### 服务器 tick [#server-ticks]
+
+`WorldSimulationBenchmark` 和 `MultiWorldBenchmark` 就是上面的主 World。`BattleServerBenchmark` 是
+[战斗服务器](/zh/docs/example)（`BattleServer.cs`）的一个 tick，用到了所有功能：一个并行 `[ForEach]`、两个同时运行的系统、
+遍历途中增删的状态、`WithAny`、死亡、复活和子弹、一个值索引、一个关系、预制体、一个更新间隔、按系统计时，以及每三个
+tick 一次、用 `[Changed<T>]` 和 `[Removed<T>]` 做的同步。`BattleServerTests` 检查的是同一个 World。
+
+<BenchTable bench="WorldSimulationBenchmark" />
+<BenchTable bench="MultiWorldBenchmark" />
+<BenchTable bench="BattleServerBenchmark" />
+
+### 单项操作 [#micro-benchmarks]
+
+`MicroBenchmarks` 每项只测一个操作，10,000 个实体。`RawArrayWrite` 是没有 ECS 时的下限：两个普通数组。`HandleAccess`、
+`TryGetEntity`、`TrackedHandleWrite`、`SingletonAccess` 和 `CountAndAny` 把调用重复 1,000 次。`CreateAddDestroy` 每次都
+新建一个 World，所以它的分配是新 World 本身及其增长。
+
+<BenchChart bench="MicroBenchmarks" title="MicroBenchmarks：每项一个操作，10,000 个实体" />
+
+`CallSiteBenchmark` 测查询调用本身：在调用处构造的过滤、只构造一次的过滤、不带过滤，以及超出单次调用备忘的过滤（走查询
+缓存的字典）。`RunnerBenchmark` 用三种方式在系统之外跑一遍：静态 `[ForEach]` 方法的入口、它替代的手写 struct job，以及
+`Query` 循环。`OrderingBenchmark` 表明 `[UpdateAfter<T>]` 每次更新不花任何代价：顺序在添加系统时就定好了。
+
+<BenchChart bench="CallSiteBenchmark" />
+<BenchChart bench="RunnerBenchmark" />
+<BenchChart bench="OrderingBenchmark" />
+
+### 存在位和过滤 [#presence-bits]
+
+`SparseBenchmark` 在一张表的 100,000 个单位里放 10 个着火的（只有存在位不同）：遍历这几个、查询它们、统计它们，以及遍历
+其余的。`CountBenchmark` 统计必须逐个测试的行（两列都有被禁用的行），这是向量化的：AVX-512 下一步 8 个位字。
+`MaybeBenchmark` 比较一个接 `Maybe<Shield>` 的方法和用 `[With<Shield>]` / `[Without<Shield>]` 拆开的两个方法。
+
+<BenchChart bench="SparseBenchmark" />
+<BenchTable bench="CountBenchmark" />
+<BenchChart bench="MaybeBenchmark" />
+
+### 批量结构变更 [#bulk-benchmarks]
+
+`BulkBenchmark` 眩晕 100,000 个战斗单位再解除，以及对一个区禁用某个状态再启用，每种都分批量（`SetAll` / `RemoveAll`、
+`DisableAll` / `EnableAll`）和逐个实体两种做法。`PrefabBenchmark` 从预制体生成 1,000 个实体，逐个与成波各一次。
+`CleanupBenchmark` 每次操作轮换 10,000 个会话中的 1,000 个，对比清理组件和手动释放的普通组件。
+
+<BenchChart bench="BulkBenchmark" />
+<BenchChart bench="PrefabBenchmark" />
+<BenchChart bench="CleanupBenchmark" />
+
+### 变更追踪 [#change-tracking-benchmarks]
+
+`ChangeTrackingBenchmark` 同步血量：每个 tick 写 100,000 个实体里的 10 个（安静的 tick）或 1,000 个，然后一个系统用
+`[Changed<Health>]`（`Changed=True`）或访问每一行，把血量复制到副本。`QueryTick` 用临时 `Query` 做同样的事。
+`DynamicBufferBenchmark` 同步 100,000 个背包里变了的 1,000 个，背包分别存为 `DynamicBuffer<int>` 和被追踪组件里的
+`List<int>`。
+
+<Tabs items={['写 10 个', '写 1,000 个']}>
+<Tab value="写 10 个">
+
+<BenchChart bench="ChangeTrackingBenchmark" param="Written=10" />
+
+</Tab>
+<Tab value="写 1,000 个">
+
+<BenchChart bench="ChangeTrackingBenchmark" param="Written=1000" />
+
+</Tab>
+</Tabs>
+
+<BenchChart bench="DynamicBufferBenchmark" />
+
+“每一行”那几项在参考虚拟机上每次运行都有波动（取决于 100,000 行落在物理内存的哪里）；`[Changed]` 那几项是稳定的。
+
+### 索引、关系、分组和层级 [#index-benchmarks]
+
+`IndexBenchmark` 把关系当背包用：100,000 件物品指向 1,000 个主人之一；100 次交易，然后统计 100 个背包。
+`OrderedIndexBenchmark` 维护一个 100,000 个分数的排行榜（变 1,000 个，然后读前 10 名和一个分段），对比扫描。
+`GroupBenchmark` 对 16 个区中 4 个区的玩家求和，分别用分组（每区一张表）、值索引和扫描。`RelationBenchmark` 改写 10,000
+个好友列表里的 100 个，遍历 100 个关注者集合。`HierarchyBenchmark` 连同队员一起销毁 1,000 个小队队长（`ChildOf`，级联），
+对比只会被移除的链接。
+
+<BenchTable bench="IndexBenchmark" />
+<BenchChart bench="OrderedIndexBenchmark" />
+<BenchChart bench="GroupBenchmark" />
+<BenchTable bench="RelationBenchmark" />
+<BenchChart bench="HierarchyBenchmark" />
+
+### 线程 [#parallel-benchmarks]
+
+`ParallelSystemsBenchmark` 在 100,000 个实体上跑四个访问互不相交的 `[ForEach]` 系统，分别关闭和开启
+`WorldOptions.ParallelSystems`：开启时它们组成一个阶段同时运行。`ParallelForEachBenchmark` 跑一个繁重的方法（转向 16 个
+路点中最近的一个），普通的和 `Parallel = true` 的各一次，再用带实体句柄的临时 job（`ForEachEntity` /
+`ForEachEntityParallel`）做同样的工作。
+
+<BenchChart bench="ParallelSystemsBenchmark" />
+<BenchChart bench="ParallelForEachBenchmark" />
+
+参考机器只有 4 核，这次运行的并行数字误差很大：把它们理解为“多核下更快”，不要当成精确的加速比。
+
+### 快照、存档、迁移和卸载 [#state-benchmarks]
+
+`SnapshotBenchmark` 把一个 100,000 实体的 World（两张表，三分之一的 id 被回收过，一个单例）捕获成一个新快照，原地恢复
+一个快照，存成字节写进复用的缓冲，再加载回来。`Capture` 会分配它返回的快照；要复用，就捕获到已有的快照里。
+`MigrationBenchmark` 把 10 个各带 99 件物品的玩家搬到另一个 World 再搬回来，分别经过字节（`SaveEntities` /
+`LoadEntities`）和在内存里（`MoveEntities`）；`SaveAndLoadOne` 是一次存档的固定开销。`UnloadBenchmark` 从一个 10,000 或
+100,000 个玩家的 World 里移除一个插件的类型（`RemoveTypes`），这是重新加载游戏逻辑之前的一步。
+
+<BenchChart bench="SnapshotBenchmark" />
+<BenchChart bench="MigrationBenchmark" />
+<BenchChart bench="UnloadBenchmark" />
+
+### 内省 [#introspection-benchmarks]
+
+`IntrospectionBenchmark` 为仪表盘描述战斗服务器的 World（`world.Describe()`：每张表及其列、行数和字节），并为调试器描述
+一个实体（`entity.Describe()`，值会装箱）。两者都会分配它们返回的描述：它们是工具，不在 tick 路径上。
+
+<BenchTable bench="IntrospectionBenchmark" />
+
+## 如何复现 [#measuring]
+
+数字只来自 BenchmarkDotNet，从不用秒表：
+
+```bash
+dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*'             # 本页的所有类
+dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*World*'       # 主 tick
+dotnet run -c Release --project benchmarks/EasyEcs.Comparison -- --filter '*'            # 其他库
+dotnet run -c Release --project benchmarks/EasyEcs.Comparison -- --check                 # 只校验移植的正确性
+```
+
+两个项目都用 `benchmarks/EasyEcs.Benchmark/BenchmarkConfig.cs` 里的 job：2 次启动、6 次预热、8 次 250 ms 的迭代，并且
+从一开始就计调用次数（`DOTNET_TC_CallCountingDelayMs=0`），让预热能跑到优化后的代码。测两个进程而不是一个进程多次迭代，
+是因为不同运行之间的差异（代码布局、分层编译）比同一次运行里的噪声大。本站数字所用的机器：
+
+<BenchSource />
+
+`AllocationTests` 在每次测试运行（`dotnet test`）时守住零分配约定：稳态 tick、查询、结构变更、索引、关系、级联和并行
+遍历在预热后必须分配 0 字节。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="EasyEcs 为什么快" href="/zh/docs/why-fast">
+    这些数字背后的存储、生成的 job 和缓存。
+  </Card>
+  <Card title="与其他 ECS 库对比" href="/zh/docs/comparison">
+    同样的工作在 Friflo.Engine.ECS、Arch 和 DefaultEcs 里，附全部结果。
+  </Card>
+  <Card title="查询与过滤" href="/zh/docs/guide/queries">
+    `Query`、struct job、`Count` 和 `Any`，以及 job 要声明什么。
+  </Card>
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+    批量方法、并行方法、分组、间隔和计时。
+  </Card>
+</Cards>

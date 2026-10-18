@@ -1,0 +1,313 @@
+---
+title: Migrate from Arch
+seoTitle: "Migrate from Arch ECS to EasyEcs: API mapping and a ported simulation (C#, .NET 10)"
+description: Port an Arch ECS codebase to EasyEcs step by step. Concepts and API mapped old to new, a whole server simulation ported from the benchmark sources, and the pitfalls to avoid.
+icon: ArrowRightLeft
+---
+
+Arch and EasyEcs share the archetype model, so most of a port is mechanical: a `QueryDescription` becomes filter
+attributes, a struct job's `Update` becomes a `[ForEach]` method, and `world.Add` / `Remove` / `Destroy` on an
+entity become calls on its handle. The one change of habit is the command buffer: EasyEcs has none, because
+structural changes apply at once, also in the middle of a query. The worked example below is the real port in the
+repository: [`ArchSimulation.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/benchmarks/EasyEcs.Comparison/ArchSimulation.cs)
+and the EasyEcs world it was ported from,
+[`WorldSimulation.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/benchmarks/EasyEcs.Benchmark/WorldSimulation.cs),
+checked by the comparison project to produce the same counters.
+
+## Before you start [#before-you-start]
+
+<Callout type="warn" title="Requirements">
+  EasyEcs targets net10.0 only. A project that must also build for Unity, netstandard2.1 or .NET 8 cannot move its
+  ECS code to EasyEcs.
+</Callout>
+
+```bash
+dotnet add package EasyEcs
+```
+
+The package carries the source generator and the analyzer: `[ForEach]` systems, the generated members
+(`entity.Position`, `world.Clock`) and the EECS rules work with nothing else to install.
+
+## Concepts [#concepts]
+
+| Arch | EasyEcs | What changes |
+| --- | --- | --- |
+| `World.Create()` | `new World(options)` | A world has one owner thread; run one world per thread. |
+| Any struct is a component | A struct implementing `IComponent` | Add the interface; the analyzer rejects classes ([EECS006](/en/docs/guide/analyzer#eecs006)). |
+| `QueryDescription` | Filter attributes on a `[ForEach]` method, or a `QueryFilter` | Written once, on the method; the generator keeps the filter in a static field. |
+| `IForEach<T...>` + `InlineQuery` | A `[ForEach]` method in an `EcsSystem` | The generator writes the struct job and the call. |
+| `CommandBuffer` + `Playback` | Direct calls | Changes apply at once; later systems see them. |
+| A counters object passed to jobs | A singleton (`ISingletonComponent`) | Taken as a `ref` parameter, resolved once per pass. |
+| Arch.Extended systems | `EcsSystem`, `ISystemGroup`, `[UpdateBefore<T>]` / `[UpdateAfter<T>]` | Built in. |
+| Events | `[Changed<T>]`, `[Removed<T>]`, tags queried later | State changes are data. |
+
+## API mapping [#api-mapping]
+
+### World and entities [#world-and-entities]
+
+| Arch | EasyEcs |
+| --- | --- |
+| `var world = World.Create();` | `var world = new World(new WorldOptions { InitialEntityCapacity = n });` |
+| `World.Destroy(world);` | `world.Dispose();` |
+| `world.Create(a, b, c)` | `world.CreateEntity(a, b, c)` |
+| `world.Destroy(entity)` | `entity.Destroy()` |
+| `world.Add(entity, c)` | `entity.Set(c)` |
+| `world.Add<Tag>(entity)` | `entity.Set(new Tag())` |
+| `world.Remove<T>(entity)` | `entity.Remove<T>()` |
+| `world.Has<T>(entity)` | `entity.Has<T>()` |
+| `ref var c = ref world.Get<T>(entity)` | `ref var c = ref entity.Get<T>()`; `entity.Read<T>()` to read only |
+| `world.Size` | `world.EntityCount` |
+| `entity.Id` | `entity.Id.Index`; store `entity.Id` (an `EntityId`) in data |
+| `world.EnsureCapacity(in signature, n)` | `world.EnsureEntityCapacity(n)`, `world.EnsureCapacity(prefab, n)` |
+
+### Queries and iteration [#queries-and-iteration]
+
+| Arch | EasyEcs |
+| --- | --- |
+| `new QueryDescription().WithAll<A, B>()` | the method's component parameters: `static void M(ref A a, in B b)` |
+| `.WithAll<Tag>()` (a tag the job does not read) | `[With<Tag>]` |
+| `.WithNone<C>()` | `[Without<C>]` |
+| `.WithAny<C, D>()` | `[WithAny<C>, WithAny<D>]` |
+| `struct J : IForEach<A>` + `world.InlineQuery<J, A>(in q, ref job)` | `[ForEach]` method; outside systems `world.ForEach<A, J>(ref job, in filter)` with `IForEach<A>.Execute` |
+| `IForEachWithEntity<A>` + `InlineEntityQuery` | an `Entity` parameter: `static void M(Entity e, ref A a)` |
+| Chunk iteration (`GetChunkIterator`, `chunk.GetSpan<T>()`) | a batch method: `static void M(Span<A> a, ReadOnlySpan<B> b)` |
+| `world.CountEntities(in q)` | `world.Count<A>(filter)` |
+| `world.InlineParallelQuery<J, A>(in q, ref job)` | `[ForEach(Parallel = true)]` |
+
+### Structural changes [#structural-changes]
+
+| Arch | EasyEcs |
+| --- | --- |
+| `buffer.Add(e, c)` then `buffer.Playback(world)` | `e.Set(c)` |
+| `buffer.Remove<T>(e)` | `e.Remove<T>()` |
+| `buffer.Destroy(e)` | `e.Destroy()` |
+| `var n = buffer.Create(types); buffer.Set(n, c);` | `world.CreateEntity(a, b, c)` (a `World` parameter in a `[ForEach]` method) |
+| `world.Add(in q, value)` | `world.SetAll(value, filter)` |
+| `world.Remove<T>(in q)` | `world.RemoveAll<T>(filter)` |
+| `world.Destroy(in q)` | `world.DestroyEntities<T>(filter)` |
+
+## A worked example: the headline simulation [#worked-example]
+
+<Steps>
+<Step>
+
+### Components [#components]
+
+Add `IComponent`. A tag stays an empty struct. Counters that Arch kept in an object passed to every job become a
+singleton.
+
+```csharp title="Components.cs"
+public struct Position : IComponent { public float X, Y; }
+public struct Velocity : IComponent { public float X, Y; }
+public struct Health : IComponent { public int Value, Max; }
+public struct Attack : IComponent { public int Damage, Cooldown, Interval; }
+public struct Lifetime : IComponent { public int Ticks; }
+public struct Burning : IComponent { public int Ticks, DamagePerTick; }
+public struct Player : IComponent { public long AccountId; }
+public struct Npc : IComponent { public int TemplateId; }
+public struct Projectile : IComponent { public int OwnerId; }
+public struct Stunned : IComponent { public int Ticks; }
+public struct Dead : IComponent;
+
+public struct WorldStats : ISingletonComponent
+{
+    public long Tick;
+    public int Hits, Deaths, NpcKills, Spawns;
+}
+```
+
+</Step>
+<Step>
+
+### A query and its job become one method [#query-and-job]
+
+Arch:
+
+```csharp doccheck=skip
+private static readonly QueryDescription Moving =
+    new QueryDescription().WithAll<Position, Velocity>().WithNone<Stunned, Dead>();
+
+private struct Move : IForEach<Position, Velocity>
+{
+    public void Update(ref Position p, ref Velocity v) { /* ... */ }
+}
+
+var move = new Move();
+world.InlineQuery<Move, Position, Velocity>(in Moving, ref move);
+```
+
+EasyEcs: the filter goes on the method, the parameters are the components.
+
+```csharp title="MovementSystem.cs"
+public class MovementSystem : EcsSystem
+{
+    [ForEach, Without<Stunned>, Without<Dead>]
+    static void Move(ref Position p, ref Velocity v)
+    {
+        p.X += v.X;
+        p.Y += v.Y;
+        if (p.X < 0 || p.X > 4096) v.X = -v.X;
+        if (p.Y < 0 || p.Y > 4096) v.Y = -v.Y;
+    }
+}
+```
+
+</Step>
+<Step>
+
+### The command buffer goes [#command-buffer]
+
+Arch records the status change and plays it back after the query:
+
+```csharp doccheck=skip
+public void Update(Entity e, ref Attack attack, ref Health health)
+{
+    if (--attack.Cooldown > 0) return;
+    attack.Cooldown = attack.Interval;
+    C.Hits++;
+    health.Value -= attack.Damage;
+    if (Rng.Chance(C.Tick, e.Id, 1, 50) && !W.Has<Burning>(e))
+        B.Add(e, new Burning { Ticks = 10, DamagePerTick = 3 });
+}
+// ...
+_buffer.Playback(_world);
+```
+
+EasyEcs applies it on the spot. The counters are a `ref` singleton parameter.
+
+```csharp title="CombatSystem.cs"
+public class CombatSystem : EcsSystem
+{
+    [ForEach, Without<Dead>, Without<Stunned>]
+    static void Fight(Entity entity, ref Attack attack, ref Health health, ref WorldStats stats)
+    {
+        if (--attack.Cooldown > 0) return;
+        attack.Cooldown = attack.Interval;
+        stats.Hits++;
+        health.Value -= attack.Damage;
+        if (entity.Id.Index % 20 == 0 && !entity.Has<Burning>())
+            entity.Set(new Burning { Ticks = 10, DamagePerTick = 3 });
+    }
+}
+
+public class StatusSystem : EcsSystem
+{
+    [ForEach]
+    static void Burn(Entity entity, ref Burning burning, ref Health health)
+    {
+        health.Value -= burning.DamagePerTick;
+        if (--burning.Ticks <= 0) entity.Remove<Burning>();
+    }
+}
+
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
+    {
+        if (health.Value > 0) return;
+        entity.Set(new Dead());
+        stats.Deaths++;
+        if (entity.Has<Npc>()) stats.NpcKills++;
+    }
+}
+```
+
+</Step>
+<Step>
+
+### Creating and destroying [#create-and-destroy]
+
+Arch creates projectiles through the buffer with a signature and one `Set` per component. EasyEcs creates the entity
+with its components in one call, placed in its final table; a method that creates or destroys takes `World` or
+`Entity`.
+
+```csharp title="ShootingSystem.cs"
+public class ShootingSystem : EcsSystem
+{
+    [ForEach, With<Player>, Without<Dead>]
+    static void Shoot(Entity shooter, in Position p, in Velocity v, ref WorldStats stats, World world)
+    {
+        if ((stats.Tick + shooter.Id.Index) % 20 != 0) return;
+        stats.Spawns++;
+        world.CreateEntity(p, new Velocity { X = v.X * 4, Y = v.Y * 4 }, new Lifetime { Ticks = 20 },
+            new Projectile { OwnerId = shooter.Id.Index });
+    }
+}
+
+public class LifetimeSystem : EcsSystem
+{
+    [ForEach]
+    static void Expire(Entity entity, ref Lifetime lifetime)
+    {
+        if (--lifetime.Ticks <= 0) entity.Destroy();
+    }
+}
+
+public sealed class ClockSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.GetSingleton<WorldStats>().Tick++;
+}
+```
+
+</Step>
+<Step>
+
+### The tick [#the-tick]
+
+Arch's `Tick()` calls every query and every playback in order. EasyEcs runs the systems in the order they were added
+(or as `[UpdateBefore<T>]` / `[UpdateAfter<T>]` say) with one call.
+
+```csharp title="Program.cs"
+using var sim = new World(new WorldOptions { InitialEntityCapacity = 200_000 });
+sim.AddSingleton<WorldStats>();
+sim.AddSystem<MovementSystem>();
+sim.AddSystem<CombatSystem>();
+sim.AddSystem<StatusSystem>();
+sim.AddSystem<DeathSystem>();
+sim.AddSystem<LifetimeSystem>();
+sim.AddSystem<ShootingSystem>();
+sim.AddSystem<ClockSystem>();
+
+for (int i = 0; i < 100_000; i++)
+    sim.CreateEntity(new Position { X = i % 4096, Y = i / 25 }, new Velocity { X = 1, Y = -1 },
+        new Health { Value = 150, Max = 150 }, new Attack { Damage = 5, Cooldown = i % 10, Interval = 8 },
+        new Player { AccountId = i });
+
+sim.Update();   // one tick
+```
+
+</Step>
+</Steps>
+
+The whole port, with the area-of-interest grid and respawns, is the pair of files linked at the top. On the same
+machine the EasyEcs version runs the tick in <BenchValue k="peers.easyecs" /> against
+<BenchValue k="peers.arch" /> for Arch, at 100,000 entities:
+
+<PeerChart />
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| Keeping a component as a plain struct without `IComponent` | It cannot be a parameter or a column | Compiler error: the constraint `IComponent` |
+| A class as a component | Rejected | [EECS006](/en/docs/guide/analyzer#eecs006) |
+| Porting the counters object as a field of the system | Systems are stateless | [EECS007](/en/docs/guide/analyzer#eecs007): use a singleton |
+| Storing an `Entity` in a component (Arch's `Entity` was a plain struct) | The column holds references | [EECS017](/en/docs/guide/analyzer#eecs017) (warning): store `EntityId` |
+| A static method without `Entity` or `World` that adds a component | It promised no structural change | [EECS013](/en/docs/guide/analyzer#eecs013): take the `Entity` |
+| Keeping a "pending changes" list to apply after the loop | Works, but costs a second pass | Code review: apply the change where it is decided |
+| A parallel method that changes structure or writes a singleton | Data races | [EECS010](/en/docs/guide/analyzer#eecs010) |
+
+## Related [#related]
+
+<Cards>
+  <Card title="EasyEcs vs Arch" href="/en/docs/vs-arch">
+    The two libraries side by side, with every benchmark.
+  </Card>
+  <Card title="Systems and [ForEach]" href="/en/docs/guide/systems">
+    Parameters, filters, ordering, groups and parallel methods.
+  </Card>
+  <Card title="Structural changes" href="/en/docs/guide/structural-changes">
+    What applies at once during a pass, and why it is safe.
+  </Card>
+</Cards>

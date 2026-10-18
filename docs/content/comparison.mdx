@@ -1,0 +1,384 @@
+---
+title: Comparison with other ECS libraries
+seoTitle: "C# ECS comparison: EasyEcs vs Friflo.Engine.ECS vs Arch vs DefaultEcs (benchmarks)"
+description: EasyEcs against Friflo.Engine.ECS, Arch and DefaultEcs. A feature matrix, the same server tick in each library and every head-to-head benchmark, including the ones EasyEcs does not win.
+icon: Scale
+---
+
+EasyEcs is measured against the three most used .NET ECS libraries: [Friflo.Engine.ECS](https://github.com/friflo/Friflo.Engine.ECS),
+[Arch](https://github.com/genaray/Arch) and [DefaultEcs](https://github.com/Doraku/DefaultEcs), at the versions
+pinned in [`benchmarks/EasyEcs.Comparison`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/benchmarks/EasyEcs.Comparison)
+(the chart labels name them). Every comparison ports the same work to each library through the path its docs
+recommend, and checks in setup that every library computes the same result before anything is measured. This page
+is the overview; the head-to-head pages ([Arch](/en/docs/vs-arch), [Friflo](/en/docs/vs-friflo),
+[DefaultEcs](/en/docs/vs-defaultecs)) map the APIs side by side.
+
+## Features [#features]
+
+From each package's public API and the comparison ports, which compile against the real packages.
+
+| Feature | EasyEcs | Friflo.Engine.ECS | Arch | DefaultEcs |
+| --- | --- | --- | --- | --- |
+| Storage | archetype tables, presence bits per column | archetypes | archetypes in chunks | a pool per component type |
+| Structural changes inside a query loop | ✅ immediate, each entity visited once | ❌ throws `StructuralChangeException`; `CommandBuffer` | ⚠️ not guarded; `CommandBuffer` | ⚠️ `useBuffer` sets or `EntityCommandRecorder` |
+| Tags | ✅ empty components; removing one flips a bit | ✅ `ITag` (part of the archetype) | ⚠️ empty structs, moved like any component | ❌ |
+| Singletons | ✅ `ISingletonComponent`, `[ForEach]` parameters | ⚠️ `UniqueEntity` | ❌ | ✅ `World.Set<T>` / `Get<T>` |
+| Systems, ordering, groups | ✅ `EcsSystem`, `[UpdateBefore<T>]` / `[UpdateAfter<T>]`, `ISystemGroup`, `UpdateInterval` | ✅ `SystemRoot`, `SystemGroup`, `QuerySystem` | ❌ in core (Arch.Extended) | ✅ `ISystem<T>`, `SequentialSystem`, `AEntitySetSystem` |
+| Source-generated systems | ✅ `[ForEach]` → inlined struct jobs | ❌ | ❌ in core | ❌ |
+| Generated named API per component | ✅ `e.Position`, `HasX`, `SetX(...)`, `IsDead`, `world.Battle` | ❌ | ❌ | ❌ |
+| Compile-time analyzer | ✅ EECS002-EECS024, with code fixes | ❌ | ❌ | ❌ |
+| Chunk / span iteration | ✅ batch `[ForEach]` methods, `ForEachBatch` | ✅ `Chunks` | ✅ chunks | ✅ `ReadOnlySpan<Entity>` per system |
+| Struct query jobs | ✅ `IForEach`, `IForEachEntity`, `IForEachBatch` | ✅ | ✅ `IForEach`, `InlineQuery` | – |
+| Bulk changes | ✅ `SetAll`, `RemoveAll`, `DisableAll`, `EnableAll` | ✅ `EntityBatch`, `ApplyBatch` | ✅ add / remove by query | ❌ |
+| Bulk create and destroy | ✅ `CreateEntities`, `DestroyEntities(filter)`, `Instantiate(prefab, span)` | ⚠️ `CreateEntityBatch`; delete per entity | ⚠️ destroy by query | ❌ |
+| Prefabs | ✅ `Prefab`: data outside every world | ⚠️ an entity of the store, copied with `CloneEntity` | ❌ | ⚠️ an entity copied with `CopyTo(world)` |
+| Change tracking (rows written since a tick) | ✅ `ITrackChanges`, `[Changed<T>]`, every `ref` write | ❌ | ❌ (events) | ✅ `WhenChanged<T>()` after `NotifyChanged<T>()` |
+| Removal detection | ✅ `[Removed<T>]` | ⚠️ `OnComponentRemoved` events | ⚠️ `SubscribeComponentRemoved` events | ✅ `WhenRemoved<T>()` sets |
+| Value index | ✅ `IIndexed<TKey>`, ordered walks and ranges | ✅ `IIndexedComponent<TKey>`, ranges | ❌ | ✅ `EntityMap`, `EntityMultiMap` |
+| Tables split by a value | ✅ `GroupBy<T>` (`IGroup`) | – | – | – |
+| Relations with reverse lookup | ✅ indexed `EntityId`, multi-target `IRelation` | ✅ `ILinkComponent`, `ILinkRelation` | ❌ in core | ❌ |
+| Hierarchy | ✅ `ChildOf`, `Children`, cascading destroy | ✅ `AddChild`, `ChildEntities` | ❌ | ❌ |
+| Disable a component, keep its value | ✅ `Disable<T>()` / `Enable<T>()` | ⚠️ whole entity (`Enabled`) | ❌ | ⚠️ whole entity, or a component (`Disable<T>()`) |
+| Parallel systems | ✅ conflict-free stages from generated access | ❌ | ❌ | ✅ `ParallelSystem<T>` (you keep them independent) |
+| Parallel query | ✅ `[ForEach(Parallel = true)]`, analyzer-checked | ✅ `QueryJob`, `ParallelJobRunner` | ✅ `InlineParallelQuery`, `JobScheduler` | ✅ `DefaultParallelRunner` |
+| Snapshots in memory | ✅ `Capture` / `Restore` | ❌ | ❌ | ❌ |
+| Saves | ✅ binary `Save` / `Load` (Nino) | ✅ JSON | ❌ in core (Arch.Persistence) | ✅ text and binary |
+| Move entities to another world | ✅ `MoveEntities`, `SaveEntities` / `LoadEntities` | ✅ `CopyEntity` | ❌ | ✅ `CopyTo(world)` |
+| Unload a plugin's types | ✅ `RemoveTypes(assembly)` | – | – | – |
+| Per-system timing and error policy | ✅ `MeasureSystems`, `SystemErrorPolicy.Disable` | ✅ `SystemPerf` | ❌ | – |
+| Events (added, removed, created) | – (state changes are data) | ✅ | ✅ | ✅ |
+| Zero allocation per server tick | ✅ | ✅ | ❌ | ❌ |
+| Native AOT | ✅ (`IsAotCompatible`) | – | – | – |
+| Target frameworks | net10.0 | netstandard2.1, net6.0-8.0 | netstandard2.1, net6.0, net8.0 | netstandard1.1-2.1 |
+| Unity | ❌ | ✅ | ✅ | ✅ |
+
+✅ built in · ⚠️ partly or with caveats · ❌ not available · – not applicable or not checked
+
+## How changes are made [#how-changes-are-made]
+
+The biggest difference is not speed but how a system changes the world. Friflo, Arch and DefaultEcs forbid (or do
+not guard) structural changes while a query iterates, so a system records them in a command buffer that is played
+back later: until then the entity still has its old components, and the order of effects depends on when buffers are
+flushed. EasyEcs applies every change at once, also in the middle of a pass over the same table, and still visits
+each entity at most once:
+
+```csharp title="DeathSystem.cs"
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health hp)
+    {
+        if (hp.Value <= 0) unit.Set(new Dead());   // applied now: later systems already see the corpse
+    }
+}
+```
+
+The ports follow each library's model (Friflo and Arch play their command buffer back after every system that
+records changes), so the measured worlds behave the same. How EasyEcs makes immediate changes cheap is on
+[Why EasyEcs is fast](/en/docs/why-fast#structural-changes).
+
+## The same server tick [#the-same-server-tick]
+
+`EcsComparisonBenchmark` runs the headline world of EasyEcs (30% players, 70% NPCs, projectiles; movement, area of
+interest, combat, status effects, death, respawn, shooting) in each library, single-threaded. The EasyEcs side is
+`benchmarks/EasyEcs.Benchmark/WorldSimulation.cs` compiled unchanged; the others are `ArchSimulation.cs`,
+`FrifloSimulation.cs` and `DefaultEcsSimulation.cs`. Setup warms every world up for 200 ticks and checks that its
+counters (hits, deaths, spawns, area changes, entities) match an EasyEcs reference run within 5%: they cannot match
+exactly, because entity ids feed the random rolls and each library recycles ids in its own order.
+
+<Tabs items={['100,000 entities', '10,000 entities']}>
+<Tab value="100,000 entities">
+
+<PeerChart />
+
+</Tab>
+<Tab value="10,000 entities">
+
+<PeerChart entities="10000" />
+
+</Tab>
+</Tabs>
+
+EasyEcs and Friflo are close on this tick (Friflo takes <BenchValue k="peers.friflo.ratio" /> the time of EasyEcs at
+100,000 entities, <BenchValue k="peers.friflo10k.ratio" /> at 10,000), and both allocate nothing per tick. Arch and
+DefaultEcs take <BenchValue k="peers.arch.ratio" /> and <BenchValue k="peers.defaultecs.ratio" /> the time and
+allocate every tick (<BenchValue k="peers.arch.alloc" /> and <BenchValue k="peers.defaultecs.alloc" />), mostly in
+their command buffers and entity sets. EasyEcs gains in the systems that add, remove and destroy (presence bits,
+no command buffer) and in those that pass the entity to the job.
+
+## Operations [#operations]
+
+`OperationBenchmark` isolates single operations of that world (100,000 entities), EasyEcs against Friflo, the closest
+peer on the tick. Every operation leaves the world as it found it.
+
+<BenchChart bench="OperationBenchmark" title="Single operations, 100,000 entities: EasyEcs and Friflo.Engine.ECS" />
+
+- **Toggle** (stun 5% of the fighters, then recover them) is where presence bits pay: EasyEcs flips a bit and the
+  entity keeps its row; Friflo moves it to another archetype and back through its command buffer.
+- **Instantiate** spawns 5,000 NPCs of six components: EasyEcs copies a `Prefab`'s row into consecutive rows at once,
+  Friflo clones an entity of the store one by one (`CloneEntity`).
+- **Entity**: a per-entity job receives a handle built from the row's 8-byte `EntityId`; Friflo's `ForEachEntity`
+  calls a delegate per entity.
+- **Ties**: two- and three-component iteration (`Iterate2`, `Iterate3`) and batched entity access (`EntityBatch`)
+  come out even. Both libraries walk dense arrays there, and the loop is bound by memory, not by the library.
+
+## Change tracking [#change-tracking]
+
+`ChangeTrackingComparison`: 100,000 entities, 10 (a quiet tick) or 1,000 of them get a new health per tick, and a
+system copies the changed healths into a replica. Each library uses its built-in feature where it has one (EasyEcs
+`[Changed<T>]`, DefaultEcs `WhenChanged<T>()` fed by `NotifyChanged<T>()`), else a scan comparing values or a dirty
+tag added on write and removed after the copy.
+
+<Tabs items={['10 written', '1,000 written']}>
+<Tab value="10 written">
+
+<BenchChart bench="ChangeTrackingComparison" param="Written=10" title="Replicate the 10 of 100,000 entities written this tick" />
+
+</Tab>
+<Tab value="1,000 written">
+
+<BenchChart bench="ChangeTrackingComparison" param="Written=1000" title="Replicate the 1,000 of 100,000 entities written this tick" />
+
+</Tab>
+</Tabs>
+
+`[Changed<T>]` leads at both rates and needs no code at the write site: a write through `ref` is the change. A
+dirty tag is cheap when few entities change, but it moves each written entity between archetypes twice, so it falls
+behind a plain scan at 1,000 writes. A scan costs the whole table every tick, and `WhenChanged<T>()` needs a
+`NotifyChanged<T>()` next to every write. How the skipping works: [change-tick summaries](/en/docs/why-fast#change-ticks).
+
+## Removal detection [#removal-detection]
+
+`RemovalComparison`: 100,000 entities with a buff; per tick 10 or 1,000 buffs expire and the ones that expired the
+tick before come back, then every entity that lost its buff since the last tick is visited once. EasyEcs uses
+`[Removed<T>]`, DefaultEcs a `WhenRemoved<T>()` set completed after each tick, Friflo its `OnComponentRemoved` event
+collecting the ids, Arch a `Lost` tag added next to each removal. Setup checks that every removal is sent exactly
+once.
+
+<Tabs items={['10 removed', '1,000 removed']}>
+<Tab value="10 removed">
+
+<BenchChart bench="RemovalComparison" param="Removed=10" title="Send the 10 of 100,000 buffs that expired" />
+
+</Tab>
+<Tab value="1,000 removed">
+
+<BenchChart bench="RemovalComparison" param="Removed=1000" title="Send the 1,000 of 100,000 buffs that expired" />
+
+</Tab>
+</Tabs>
+
+**Friflo's event wins at 10 removals** (<BenchValue k="removed.friflo.10" /> against
+<BenchValue k="removed.10" />): it collects the ids in a callback as the removals happen, so reading them costs
+nothing extra. EasyEcs keeps removals as data: its pass loads the summaries and rows of each word with a removal.
+At 1,000 removals the two are even (<BenchValue k="removed.friflo.1000" /> against <BenchValue k="removed.1000" />).
+What EasyEcs gives in exchange: no subscription, no list kept by hand, and the removal is visible to any system that
+runs later, not only to the one callback.
+
+## Indexes and relations [#indexes-and-relations]
+
+`IndexComparison`: an inventory, 100,000 items each pointing at one of 1,000 owners; 1 or 100 items change hands,
+then 100 inventories are counted. EasyEcs uses an indexed `EntityId` (`IIndexed<EntityId>`), Friflo a link component
+(`GetIncomingLinks`), DefaultEcs an `EntityMultiMap`. Arch has no index in its core package.
+
+<Tabs items={['1 trade', '100 trades']}>
+<Tab value="1 trade">
+
+<BenchChart bench="IndexComparison" param="Trades=1" title="1 trade, then 100 inventories counted" />
+
+</Tab>
+<Tab value="100 trades">
+
+<BenchChart bench="IndexComparison" param="Trades=100" title="100 trades, then 100 inventories counted" />
+
+</Tab>
+</Tabs>
+
+All three answer "which items does this owner hold" without a scan and update on every set. EasyEcs keeps relation
+heads in an array indexed by the owner's id, so neither a trade nor a count hashes anything; the hook in `Set` is one
+inlined call that the JIT removes for components without an index.
+
+`ValueQueryComparison`: 100,000 players with a rating and one of 16 zones; 1,000 ratings and 100 zones change, then
+the players rated 2,000-2,010 are counted and the gold of 4 zones summed. EasyEcs answers the zone with a group (a
+table per zone) or a value index, and the rating with an ordered index (`Range`); Friflo with
+`IIndexedComponent<int>` and `ValueInRange`.
+
+<BenchChart bench="ValueQueryComparison" title="Rating ranges and zone sums over 100,000 players" />
+
+`RelationComparison`: friend lists, 10,000 players following 8 others each; 100 players unfollow one and follow
+another, then the followers of 100 players are counted and walked. EasyEcs uses `IRelation` (a buffer of links per
+entity, indexed by target), Friflo `ILinkRelation`.
+
+<BenchChart bench="RelationComparison" title="Rewire 100 of 10,000 friend lists, walk 100 follower sets" />
+
+**This one is a tie, with Friflo slightly ahead** (<BenchValue k="relation.friflo" /> against
+<BenchValue k="relation.easyecs" />): both libraries keep the same structure, a list of links per entity and an index
+by target, and the difference is within the run's error.
+
+## Hierarchy [#hierarchy]
+
+`HierarchyComparison`: 1,000 squads (a leader and 10 members) are created, then the leaders are destroyed with their
+members, in a warm world. EasyEcs creates the members in bulk as `ChildOf(leader)` and destroys the leaders with
+`DestroyEntities`, which cascades; Friflo's `DeleteEntity` detaches children, so the port deletes them first. Arch
+and DefaultEcs have no hierarchy.
+
+<BenchChart bench="HierarchyComparison" title="Create and destroy 1,000 squads of 11" />
+
+## Disabling [#disabling]
+
+`DisableComparison`: 100,000 units; 100 or 10,000 fall asleep per operation and the previous ones wake up, then the
+vitality of the awake units is summed. EasyEcs uses an `Asleep` tag (a presence bit) or `Disable<Vigor>()`, which
+keeps the value while queries skip it; Friflo `entity.Enabled` (a `Disabled` tag, an archetype move); DefaultEcs
+`entity.Disable()`; Arch a tag and `WithNone`.
+
+<Tabs items={['100 switched', '10,000 switched']}>
+<Tab value="100 switched">
+
+<BenchChart bench="DisableComparison" param="Switched=100" />
+
+</Tab>
+<Tab value="10,000 switched">
+
+<BenchChart bench="DisableComparison" param="Switched=10000" />
+
+</Tab>
+</Tabs>
+
+At 100 switched, Friflo's `Enabled` and EasyEcs' `Disable<T>()` are even: the sum dominates. With frequent switching,
+moving entities between archetypes costs more than flipping bits.
+
+## Structural changes [#structural-changes]
+
+`StructuralChangeComparison`: 100,000 units; 10 or 1,000 lose their health, then one pass over the living marks
+those at zero as fallen (adds a tag) and a second pass revives them (removes it). EasyEcs changes structure inside
+the passes; the others record into their command buffers and play them back after each pass.
+
+<Tabs items={['10 killed', '1,000 killed']}>
+<Tab value="10 killed">
+
+<BenchChart bench="StructuralChangeComparison" param="Killed=10" />
+
+</Tab>
+<Tab value="1,000 killed">
+
+<BenchChart bench="StructuralChangeComparison" param="Killed=1000" />
+
+</Tab>
+</Tabs>
+
+Friflo's command buffer is close to the direct changes: most of the cost is the passes themselves. Arch's buffer
+allocates while it records and plays back. The DefaultEcs row at 1,000 carries an error as large as its mean in this run.
+
+## Bulk changes and spawns [#bulk]
+
+`BulkChangeComparison`: 100,000 fighters are all stunned, then the stun is lifted from everyone. EasyEcs uses
+`SetAll` / `RemoveAll` (after the first round the stun keeps its column, so a round flips presence bits); Friflo an
+`EntityBatch` applied to a query; Arch add and remove by query (whole tables move); DefaultEcs has no bulk change
+and sets per entity.
+
+<BenchChart bench="BulkChangeComparison" title="Stun 100,000 fighters, then lift the stun" />
+
+`BulkSpawnComparison`: 10,000 shots are spawned beside 100,000 fighters, then all cleared. EasyEcs uses
+`CreateEntities` (one table, rows placed at once) and `DestroyEntities<Fuse>()`; Friflo and DefaultEcs create and
+delete per entity; Arch creates per entity after `EnsureCapacity` and destroys by query.
+
+<BenchChart bench="BulkSpawnComparison" title="Spawn 10,000 shots, then clear them" />
+
+## Parallel work [#parallel]
+
+`ParallelQueryComparison`: 100,000 agents steer towards the nearest of 16 waypoints on all cores. EasyEcs uses
+`[ForEach(Parallel = true)]`, Friflo a `QueryJob` with a `ParallelJobRunner`, Arch `InlineParallelQuery` on its job
+scheduler, DefaultEcs an `AEntitySetSystem` with a `DefaultParallelRunner`.
+
+<BenchChart bench="ParallelQueryComparison" title="Steer 100,000 agents on all cores" />
+
+**EasyEcs does not win this one**: Friflo (<BenchValue k="parallelQuery.friflo" />) and Arch are ahead of EasyEcs
+(<BenchValue k="parallelQuery.easyecs" />). Their runners keep worker threads of their own; EasyEcs runs on the
+calling thread plus thread-pool helpers that it wakes only while they pay. Measured back to back, as BenchmarkDotNet
+does, dedicated workers win; in a server tick where passes are milliseconds apart, a dedicated spinning crew measured
+worse in tail latency and CPU per tick ([D22](/en/docs/decisions)), so EasyEcs keeps the thread pool.
+
+`ParallelSystemsComparison`: four independent systems over 100,000 entities, sequential and in parallel. DefaultEcs
+is the only peer that schedules whole systems in parallel (`ParallelSystem<T>`); EasyEcs forms the stage from the
+systems' generated access, so you cannot put two conflicting systems in one by mistake.
+
+<BenchChart bench="ParallelSystemsComparison" title="Four independent systems over 100,000 entities" />
+
+<Callout type="warn" title="Parallel numbers">
+  The reference machine has 4 cores, and the parallel rows of this run carry a large error. Read them as an order of magnitude; they may be re-measured.
+</Callout>
+
+## Saves [#saves]
+
+`SaveComparison`: 10,000 units (a position and a stock each) are written and read back into a world. The formats
+differ: EasyEcs writes binary (Nino; unmanaged rows copied as raw bytes with a field hash), Friflo JSON, DefaultEcs
+its binary serializer into a new world. Arch saves through a separate package.
+
+<BenchChart bench="SaveComparison" title="Save and load 10,000 units" />
+
+## Where EasyEcs does not win [#where-easyecs-does-not-win]
+
+| Comparison | Result | Why |
+| --- | --- | --- |
+| [Parallel query](#parallel) | Friflo and Arch ahead | Dedicated worker threads beat woken pool threads when passes run back to back; EasyEcs chose the pool for server ticks |
+| [Relations](#indexes-and-relations) | Friflo slightly ahead, within the error | The same design in both libraries |
+| [10 removals](#removal-detection) | Friflo's event ahead | A callback collects the ids as they happen; EasyEcs reads them from the summaries |
+| [Two- and three-component iteration, batched entities](#operations) | Even with Friflo | Dense arrays in both; the loop is bound by memory |
+| [Disabling 100 of 100,000](#disabling) | Even with Friflo | The sum dominates, not the switch |
+| Unity and older runtimes | Not offered | EasyEcs targets net10.0 only |
+
+## Their features in EasyEcs [#their-features-in-easyecs]
+
+What the other libraries offer and how EasyEcs does the same job. Some are built in under another name; some are
+done with data instead of a mechanism (EasyEcs has no events or command buffers on purpose); a few are not offered.
+The [battle server example](/en/docs/example) shows most of them.
+
+| Their feature | In | EasyEcs |
+| --- | --- | --- |
+| Command buffer for changes during a query | Friflo, Arch, DefaultEcs | not needed: changes apply at once, also mid-pass |
+| Thread-safe command buffer | Friflo | a queue you own, drained by a system on the world's thread ([threading](/en/docs/guide/threading)) |
+| Component added / removed / set events | Friflo, Arch, DefaultEcs | state changes are data: a component the next system queries |
+| `WhenChanged` sets and `NotifyChanged` | DefaultEcs | `[Changed<T>]`, `QueryFilter.Changed<T>(since)`: a `ref` write is the change |
+| `WhenRemoved` sets, removal events | DefaultEcs, Friflo, Arch | `[Removed<T>]`, `QueryFilter.Removed<T>(since)` |
+| Prefab entities, cloning | Friflo, DefaultEcs | `Prefab` and `world.Instantiate`; `entity.Clone()` for a living entity |
+| Tags | Friflo | empty components; removing one flips a bit |
+| Unique entity, world components | Friflo, DefaultEcs | singletons, as `[ForEach]` parameters or a `SingletonRef<T>` |
+| Enable / disable an entity | Friflo, DefaultEcs | a tag (`[Without<Asleep>]`), or `Disable<T>()` for one component |
+| Systems, groups, ordering | Friflo, DefaultEcs, Arch.Extended | `EcsSystem`, `[UpdateBefore<T>]` / `[UpdateAfter<T>]`, `ISystemGroup`, `UpdateInterval` |
+| Struct query jobs, chunk iteration | Arch, Friflo | `IForEach`, `IForEachEntity`, `IForEachBatch`; batch `[ForEach]` methods |
+| Parallel query | Friflo, Arch, DefaultEcs | `[ForEach(Parallel = true)]`, `ForEachParallel`, `ForEachEntityParallel` |
+| Parallel systems | DefaultEcs | `WorldOptions.ParallelSystems` |
+| Bulk changes | Friflo, Arch | `SetAll`, `RemoveAll`, `DisableAll`, `EnableAll`, `CreateEntities`, `DestroyEntities` |
+| Indexed components | Friflo, DefaultEcs | `IIndexed<TKey>`: `Find`, `TryFind`, `Count`, ordered `Range` |
+| Links and relations | Friflo | an indexed `EntityId`, or `IRelation` for many targets |
+| Parent / child hierarchy | Friflo | `ChildOf`, `world.Children`, cascading destroy; no transform propagation |
+| Serialization | Friflo (JSON), DefaultEcs (text, binary) | binary `Save` / `Load`, plus in-memory `Capture` / `Restore` |
+| System performance monitor | Friflo | `WorldOptions.MeasureSystems`, `system.Stats` |
+| Shared components (`SetSameAs`) | DefaultEcs | not built in: keep shared data in a singleton and an id into it |
+| Unity, older runtimes | all three | not offered: net10.0 only |
+
+## When to pick which library [#which-one-to-pick]
+
+| Pick | When |
+| --- | --- |
+| **EasyEcs** | A .NET 10 server or simulation where state flips constantly and you want changes applied where they are decided, systems generated and checked at compile time, change and removal tracking, prefabs, indexes, relations, saves and snapshots built in, and nothing allocated per tick. |
+| **Friflo.Engine.ECS** | You need Unity or older runtimes, events, or JSON serialization, accept command buffers for changes during iteration, and want a fast general-purpose ECS. |
+| **Arch** | You need Unity or older runtimes and a small core with chunk-based storage, adding systems and generators from Arch.Extended. |
+| **DefaultEcs** | You need netstandard down to 1.1, reactive sets and built-in serializers, and the world is small enough that its per-tick allocations do not matter. |
+
+## Related [#related]
+
+<Cards>
+  <Card title="EasyEcs vs Friflo.Engine.ECS" href="/en/docs/vs-friflo">
+    The closest peer, concept by concept and number by number.
+  </Card>
+  <Card title="EasyEcs vs Arch" href="/en/docs/vs-arch">
+    Command buffers against immediate changes, and the tick.
+  </Card>
+  <Card title="EasyEcs vs DefaultEcs" href="/en/docs/vs-defaultecs">
+    Sparse pools and entity sets against archetype tables.
+  </Card>
+  <Card title="Why EasyEcs is fast" href="/en/docs/why-fast">
+    The mechanisms behind the numbers.
+  </Card>
+</Cards>

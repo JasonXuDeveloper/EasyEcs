@@ -51,20 +51,27 @@ export function comparisonTable(
   query: ComparisonQuery,
   zh: boolean,
 ): { head: string[]; rows: string[][] } {
-  const { rows, varying } = comparison(query);
+  const { rows, varying, own } = comparison(query);
   const withCase = rows.some((r) => r.case !== '');
+  // EasyEcs' own benchmarks: no library column, ratios against the baseline
   const head = [
-    zh ? '库' : 'Library',
+    ...(own ? [] : [zh ? '库' : 'Library']),
     ...(withCase ? [zh ? '用例' : 'Case'] : []),
     ...varying,
     zh ? '平均耗时' : 'Mean',
-    zh ? '对比 EasyEcs' : 'vs EasyEcs',
+    own
+      ? zh
+        ? '对比基准'
+        : 'vs baseline'
+      : zh
+        ? '对比 EasyEcs'
+        : 'vs EasyEcs',
     zh ? '分配' : 'Allocated',
   ];
   return {
     head,
     rows: rows.map((item) => [
-      libraryName(item.library),
+      ...(own ? [] : [libraryName(item.library)]),
       ...(withCase ? [item.case || '—'] : []),
       ...varying.map((k) => item.row.params[k]),
       formatTime(item.row.meanNs),

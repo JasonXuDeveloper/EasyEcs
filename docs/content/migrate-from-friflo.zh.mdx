@@ -1,0 +1,290 @@
+---
+title: 从 Friflo.Engine.ECS 迁移
+seoTitle: "从 Friflo.Engine.ECS 迁移到 EasyEcs：API 对照与一个移植好的模拟（C#）"
+description: 一步步把 Friflo.Engine.ECS 项目移植到 EasyEcs。概念和 API 的新旧对照，chunk 循环和命令缓冲改写成 [ForEach] 方法，以及要避开的坑。
+icon: ArrowRightLeft
+---
+
+Friflo.Engine.ECS 和 EasyEcs 都是每个 tick 零分配的原型（archetype）库，数据模型可以一对一搬过来：组件还是 struct，
+标签还是空 struct，`EntityStore` 换成 `World`。变的是系统的写法：缓存的 `ArchetypeQuery` 按 chunk 遍历，改成参数即组件
+的 `[ForEach]` 方法；记进 `CommandBuffer` 的变更改成直接调用；`OnComponentRemoved` 订阅改成 `[Removed<T>]` 方法。示例
+就是仓库里真实的移植：
+[`FrifloSimulation.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/benchmarks/EasyEcs.Comparison/FrifloSimulation.cs)，
+以及它的原版 EasyEcs World
+[`WorldSimulation.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/benchmarks/EasyEcs.Benchmark/WorldSimulation.cs)。
+
+## 开始之前 [#before-you-start]
+
+<Callout type="warn" title="环境要求">
+  EasyEcs 只面向 net10.0。还要跑在 Unity、netstandard2.1 或 .NET 6-8 上的代码，继续用 Friflo。
+</Callout>
+
+```bash
+dotnet add package EasyEcs
+```
+
+两个库的组件接口都叫 `IComponent`。移植期间给其中一个起别名（`using F = Friflo.Engine.ECS;`），对比项目就是这么做的。
+
+## 概念 [#concepts]
+
+| Friflo.Engine.ECS | EasyEcs | 变化 |
+| --- | --- | --- |
+| `EntityStore` | `World` | 每个 World 只属于一个线程。 |
+| `IComponent` struct | `IComponent` struct | 只换命名空间。 |
+| `ITag` | 空的 `IComponent` struct | 标签就是组件；移除时只翻一个位。 |
+| `ArchetypeQuery<A, B>` + `Chunks` 循环 | `EcsSystem` 里的 `[ForEach]` 方法 | 循环由生成器写。 |
+| `CommandBuffer` + `Playback()` | 直接调用 | 变更当场生效，遍历途中也一样。 |
+| `UniqueEntity` | `ISingletonComponent` | 每个 World 一份的数据，作为 `ref` 参数。 |
+| `SystemRoot`、`SystemGroup`、`QuerySystem` | `World.AddSystem<T>()`、`ISystemGroup`、`EcsSystem` | |
+| `OnComponentRemoved` / `OnComponentAdded` 事件 | `[Removed<T>]`、`[Changed<T>]` | 状态变化就是数据。 |
+| `entity.Enabled` | 标签加 `[Without<T>]`，或 `entity.Disable<T>()` | EasyEcs 禁用的是组件，不是整个实体（[D8](/zh/docs/decisions)）。 |
+
+## API 对照 [#api-mapping]
+
+### 实体和组件 [#entities-and-components]
+
+| Friflo.Engine.ECS | EasyEcs |
+| --- | --- |
+| `var store = new EntityStore();` | `var world = new World();` |
+| `store.EnsureCapacity(n)` | `world.EnsureEntityCapacity(n)` |
+| `store.CreateEntity(a, b, c)` | `world.CreateEntity(a, b, c)` |
+| `store.Count` | `world.EntityCount` |
+| `entity.AddComponent(c)` | `entity.Set(c)` |
+| `entity.RemoveComponent<T>()` | `entity.Remove<T>()` |
+| `ref var c = ref entity.GetComponent<T>()` | `ref var c = ref entity.Get<T>()`；只读用 `entity.Read<T>()` |
+| `entity.HasComponent<T>()` | `entity.Has<T>()` |
+| `entity.AddTag<Dead>()` / `RemoveTag<Dead>()` | `entity.Set(new Dead())` / `entity.Remove<Dead>()` |
+| `entity.Tags.Has<Dead>()` | `entity.Has<Dead>()` |
+| `entity.DeleteEntity()` | `entity.Destroy()` |
+| `store.GetEntityById(id)` | `world.TryGetEntity(entityId, out var entity)` |
+| `store.CloneEntity(template)` | `world.Instantiate(prefab)`、`entity.Clone()` |
+
+### 查询和遍历 [#queries-and-iteration]
+
+| Friflo.Engine.ECS | EasyEcs |
+| --- | --- |
+| `store.Query<A, B>()` | 方法参数：`static void M(ref A a, in B b)` |
+| `.AllComponents(ComponentTypes.Get<C>())` | `[With<C>]` |
+| `.WithoutAnyComponents(ComponentTypes.Get<C>())` | `[Without<C>]` |
+| `.AllTags(Tags.Get<Dead>())` / `.WithoutAnyTags(...)` | `[With<Dead>]` / `[Without<Dead>]` |
+| `foreach (var (as, bs, entities) in query.Chunks)` | 批量方法 `static void M(Span<A> a, ReadOnlySpan<B> b)`，或逐实体方法 |
+| `entities.Ids[i]`、`entities.EntityAt(i)` | 一个 `Entity` 参数，批量方法里用 `EntitySpan` |
+| `query.ForEachEntity((ref A a, Entity e) => ...)` | `static void M(Entity e, ref A a)` |
+| `query.Count` | `world.Count<A>(filter)` |
+| `query.ForEach(...)` + `RunParallel()` | `[ForEach(Parallel = true)]` |
+
+### 变更、事件和其他功能 [#changes-and-features]
+
+| Friflo.Engine.ECS | EasyEcs |
+| --- | --- |
+| `buffer.AddComponent(id, c)` + `Playback()` | `entity.Set(c)` |
+| `buffer.RemoveComponent<T>(id)`、`RemoveTag<T>(id)` | `entity.Remove<T>()` |
+| `buffer.DeleteEntity(id)` | `entity.Destroy()` |
+| `buffer.CreateEntity()` 再逐个 `AddComponent` | `world.CreateEntity(a, b, c)` |
+| `EntityBatch` + `query.Entities.ApplyBatch(batch)` | `world.SetAll(value, filter)`、`world.RemoveAll<T>(filter)` |
+| `store.OnComponentRemoved += ...` | `[ForEach, Removed<T>]`（`T : ITrackChanges`） |
+| 写入时加脏标签 | `T : ITrackChanges` + `[ForEach, Changed<T>]` |
+| `IIndexedComponent<K>`、`store.ComponentIndex<T, K>()[key]` | `IIndexed<K>`、`world.Index<T, K>().Find(key)` |
+| `query.ValueInRange<T, K>(min, max)` | `world.Index<T, K>().Range(min, max)` |
+| `ILinkComponent`、`GetIncomingLinks<T>()` | `EntityId` 作键：`IIndexed<EntityId>`、`index.Find(target)` |
+| `ILinkRelation`、`AddRelation`、`GetRelations<T>()` | `IRelation`、`entity.AddRelation(...)`、`world.Relations<T>()` |
+| `AddChild`、`ChildEntities` | `ChildOf(parent)`、`world.Children(parent)` |
+| `EntitySerializer`（JSON） | `world.Save(writer)` / `world.Load(bytes)`（二进制） |
+
+## 示例：主 tick 的模拟 [#worked-example]
+
+<Steps>
+<Step>
+
+### 组件和标签 [#components]
+
+struct 的字段不变。`Dead : ITag` 改成空组件；计数器改成单例。
+
+```csharp title="Components.cs"
+public struct Position : IComponent { public float X, Y; }
+public struct Velocity : IComponent { public float X, Y; }
+public struct Health : IComponent { public int Value, Max; }
+public struct AoiCell : IComponent { public int Cell; }
+public struct Player : IComponent { public long AccountId; }
+public struct Npc : IComponent { public int TemplateId; }
+public struct Dead : IComponent;
+
+public struct WorldStats : ISingletonComponent
+{
+    public int CellChanges, Deaths, NpcKills;
+}
+```
+
+</Step>
+<Step>
+
+### chunk 循环变成一个方法 [#chunk-loop]
+
+Friflo：
+
+```csharp doccheck=skip
+_cells = _store.Query<Position, AoiCell>().WithoutAnyTags(Tags.Get<Dead>());
+
+foreach (var (positions, cells, _) in _cells.Chunks)
+{
+    var ps = positions.Span;
+    var cs = cells.Span;
+    for (int i = 0; i < ps.Length; i++)
+    {
+        int cell = Rules.Cell(ps[i].X, ps[i].Y);
+        if (cell == cs[i].Cell) continue;
+        cs[i].Cell = cell;
+        _c.CellChanges++;
+    }
+}
+```
+
+EasyEcs：每行调一次方法；计数器是 `ref` 单例参数，每一遍只解析一次。
+
+```csharp title="AoiSystem.cs"
+public class AoiSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void UpdateCell(in Position p, ref AoiCell aoi, ref WorldStats stats)
+    {
+        int cell = (int)(p.Y * (1f / 64f)) * 64 + (int)(p.X * (1f / 64f));
+        if (cell == aoi.Cell) return;
+        aoi.Cell = cell;
+        stats.CellChanges++;
+    }
+}
+```
+
+</Step>
+<Step>
+
+### 去掉命令缓冲 [#command-buffer]
+
+Friflo 先记下标签，循环结束后回放缓冲：
+
+```csharp doccheck=skip
+foreach (var (healths, entities) in _alive.Chunks)
+{
+    var health = healths.Span;
+    for (int i = 0; i < health.Length; i++)
+    {
+        if (health[i].Value > 0) continue;
+        _buffer.AddTag<Dead>(entities.Ids[i]);
+        _c.Deaths++;
+        if (entities.EntityAt(i).HasComponent<Npc>()) _c.NpcKills++;
+    }
+}
+_buffer.Playback();
+```
+
+EasyEcs 在决定的地方直接加上，紧随其后的复活系统已经能看到死者：
+
+```csharp title="DeathSystem.cs"
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
+    {
+        if (health.Value > 0) return;
+        entity.Set(new Dead());
+        stats.Deaths++;
+        if (entity.Has<Npc>()) stats.NpcKills++;
+    }
+}
+
+public class RespawnSystem : EcsSystem
+{
+    [ForEach, With<Dead>, With<Player>]
+    static void Respawn(Entity entity, ref Health health)
+    {
+        health.Value = health.Max;
+        entity.Remove<Dead>();
+    }
+}
+```
+
+</Step>
+<Step>
+
+### 克隆变成预制体 [#prefabs]
+
+Friflo 靠克隆 store 里的模板实体来生成 NPC，这个模板对查询来说和别的实体没区别。`Prefab` 不属于任何 World，一波怪
+一次调用：
+
+```csharp
+private static readonly Prefab Grunt = new Prefab()
+    .Set(new Position(), new Velocity(), new Health { Value = 100, Max = 100 })
+    .Set(new AoiCell { Cell = -1 }, new Npc { TemplateId = 7 });
+```
+
+```csharp
+var wave = new Entity[5_000];
+world.Instantiate(Grunt, wave);
+```
+
+</Step>
+<Step>
+
+### 事件变成 `[Removed<T>]` 方法 [#events]
+
+收集失去某个组件的实体、每个 tick 读一次的订阅，改成一个方法。这个组件必须被追踪：
+
+```csharp title="BuffReplication.cs"
+public record struct Buff(int Ticks) : IComponent, ITrackChanges;
+public record struct Expired(int Count) : IComponent;
+
+public class BuffReplication : EcsSystem
+{
+    [ForEach, Removed<Buff>]
+    static void Send(ref Expired expired) => expired.Count++;
+}
+```
+
+</Step>
+<Step>
+
+### tick [#the-tick]
+
+Friflo 的 `Tick()` 依次调用每个循环和每次回放。EasyEcs 按添加顺序跑完所有系统：
+
+```csharp title="Program.cs"
+world.AddSingleton<WorldStats>();
+world.AddSystem<AoiSystem>();
+world.AddSystem<DeathSystem>();
+world.AddSystem<RespawnSystem>();
+world.AddSystem<BuffReplication>();
+world.Update();
+```
+
+</Step>
+</Steps>
+
+两个版本的完整 tick，在同一台机器上：
+
+<PeerChart />
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁来发现 |
+| --- | --- | --- |
+| 两个 `IComponent` 都导入了 | 引用不明确 | 编译错误：给一个命名空间起别名 |
+| `[Removed<T>]` 用的组件没加追踪 | 移除不会被记录 | 给 `T` 加上 `ITrackChanges` |
+| `[Removed<T>]` 方法把 `T` 当参数 | 没有哪一行既有 `T` 又没有 `T` | [EECS016](/zh/docs/guide/analyzer#eecs016) |
+| 组件里存 `Entity`（Friflo 的链接组件就这么做） | 列里存了引用 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告）：存 `EntityId` |
+| 通过 `ref` 写索引组件（Friflo 在 `AddComponent` 时重建索引） | 索引看不到新键 | [EECS015](/zh/docs/guide/analyzer#eecs015)：用 `Set` |
+| 指望整个实体 `Enabled = false` | 没有这个开关 | 用标签加 `[Without<T>]` |
+| 不带 `Entity` 或 `World` 的静态方法里加标签 | 它承诺了不做结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="EasyEcs 与 Friflo.Engine.ECS" href="/zh/docs/vs-friflo">
+    两个库并排对比，附全部跑分。
+  </Card>
+  <Card title="变更追踪" href="/zh/docs/guide/change-tracking">
+    用 `[Changed<T>]` 和 `[Removed<T>]` 代替脏标签和事件。
+  </Card>
+  <Card title="预制体" href="/zh/docs/guide/prefabs">
+    不属于任何 World 的模板，可以一个个实例化，也可以一波生成。
+  </Card>
+</Cards>

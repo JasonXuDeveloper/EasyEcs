@@ -1,0 +1,145 @@
+---
+title: 写给 Unity Entities 开发者的 EasyEcs
+seoTitle: "Unity Entities（DOTS）与 EasyEcs：概念对照，面向 .NET 10 游戏服务器"
+description: 从 Unity Entities（DOTS）转过来？IComponentData、ISystem、EntityQuery、EntityCommandBuffer、IEnableableComponent、DynamicBuffer、烘焙和变更过滤在 .NET 10 服务器上的 EasyEcs 里分别对应什么。
+icon: Boxes
+---
+
+客户端写 Unity Entities（DOTS）的人，在服务器上用 EasyEcs 会觉得很眼熟：组件是 struct，系统跑在查询上，实体存在原型
+（archetype）表里，也有动态缓冲、清理组件、单例和系统分组。但 EasyEcs 不是 Unity 包，而是面向服务器和模拟的 .NET 10
+库：没有 Burst，没有烘焙，没有编辑器；它也不用 job system 的命令缓冲，结构变更当场生效。本页只对照概念，不放和
+Unity 的跑分，因为没有这样的测试。
+
+## 哪些能沿用，哪些不能 [#overview]
+
+<Callout type="idea" title="能沿用">
+  struct 组件和标签、原型存储、带 all / none / any 过滤的查询、单例、动态缓冲、清理组件、带前后顺序的系统分组、
+  批量实例化预制体、变更过滤。
+</Callout>
+
+<Callout type="warn" title="不能">
+  Unity 本身：EasyEcs 只面向 net10.0，跑不进 Unity 的 player 或编辑器。没有 Burst（系统由 .NET JIT 编译），没有
+  authoring 和烘焙，没有 transform 和渲染，也没有 `EntityCommandBuffer`。
+</Callout>
+
+## 概念对照 [#concepts]
+
+| Unity Entities | EasyEcs | 说明 |
+| --- | --- | --- |
+| `World`、`EntityManager` | `World` | 一个对象管实体、组件、单例和系统。每个 World 只属于一个线程。 |
+| `Entity`（index、version） | `Entity` 句柄；数据里存 `EntityId`（index、version） | 组件里存 `EntityId`，不存 `Entity`（[EECS017](/zh/docs/guide/analyzer#eecs017)）。 |
+| `IComponentData` struct | `IComponent` struct | 非托管列固定在内存里，按 64 字节对齐。 |
+| 空的 `IComponentData`（标签） | 空的 `IComponent` struct | 第一次之后，加减标签只翻一个存在位。 |
+| `ISharedComponentData`（按值拆 chunk） | `IGroup` + `world.GroupBy<T>()` | 每个分组值一张表；`QueryFilter.InGroup<T>(value)` 只走其中一张。 |
+| `IBufferElementData` + `DynamicBuffer<T>` | `DynamicBuffer<T>` | 每个实体一个列表，作为组件存放；写入会被追踪。 |
+| `IEnableableComponent`、`SetComponentEnabled` | `entity.Disable<T>()` / `Enable<T>()` | 值保留，查询跳过它；第一次之后不再挪行。 |
+| `ICleanupComponentData` | `ICleanupComponent` + `Destroyed` 标签 | 被销毁的实体留着清理组件，直到某个系统把它们移除。 |
+| `SystemAPI.GetSingleton<T>()` | `ISingletonComponent`，`[ForEach]` 方法的 `ref T` 参数 | 每个 World 一份，不需要实体。 |
+| `ISystem` / `SystemBase` 的 `OnCreate` / `OnUpdate` / `OnDestroy` | `EcsSystem` 的 `OnCreate` / `OnUpdate` / `OnDestroy` | 系统无状态：状态放进组件或单例（[EECS007](/zh/docs/guide/analyzer#eecs007)）。 |
+| `SystemAPI.Query<RefRW<A>, RefRO<B>>()` | 参数为 `ref A`、`in B` 的 `[ForEach]` 方法 | job 由生成器写；`ref` 是写，`in` 是读。 |
+| `IJobEntity` | `[ForEach]` 方法（生成的 struct job） | |
+| `ScheduleParallel` | `[ForEach(Parallel = true)]` | 按行分块交给线程池；会产生竞争的方法由分析器拦下（[EECS010](/zh/docs/guide/analyzer#eecs010)）。 |
+| `EntityQuery` 的 `WithAll` / `WithNone` / `WithAny` | `[With<T>]`、`[Without<T>]`、`[WithAny<T>]`；临时调用用 `QueryFilter` | |
+| 变更过滤（`WithChangeFilter<T>`） | `ITrackChanges` + `[Changed<T>]` | 按行而不是按 chunk，按组件类型自愿开启。 |
+| 结构变更事件 | `[Removed<T>]` | 系统上次运行以来失去了某个被追踪组件的实体。 |
+| `EntityCommandBuffer` | 不需要 | `entity.Set`、`Remove`、`Destroy` 当场生效，遍历途中也一样。 |
+| `ComponentSystemGroup`、`[UpdateInGroup]` | `ISystemGroup`、`[UpdateInGroup<T>]`、`world.Update<TGroup>()` | |
+| `[UpdateBefore]` / `[UpdateAfter]` | `[UpdateBefore<T>]` / `[UpdateAfter<T>]` | 出现环会编译报错（[EECS019](/zh/docs/guide/analyzer#eecs019)）。 |
+| `RateManager`、固定步长分组 | `UpdateInterval`，或者自己决定何时更新某个分组 | |
+| 预制体实体、`EntityManager.Instantiate(prefab, array)` | `Prefab`、`world.Instantiate(prefab, span)` | `Prefab` 不属于任何 World，也不需要烘焙。 |
+| 烘焙、authoring 组件 | 没有 | 用代码、预制体或存档来建实体。 |
+| `LinkedEntityGroup`（一起销毁） | `ChildOf(parent)`，级联销毁 | `world.Children(parent)` 列出子实体。 |
+| Burst | .NET JIT、Native AOT | struct job 按类型特化并内联。 |
+
+## 同一个系统 [#same-system]
+
+同一个移动系统的两种写法。Unity 从 `SystemAPI.Time` 读帧时间；在服务器上，tick 长度是数据，放在单例里。
+
+<Tabs items={['EasyEcs', 'Unity Entities']}>
+<Tab value="EasyEcs">
+
+```csharp title="MoveSystem.cs"
+public record struct Speed(float Value) : IComponent;
+public record struct TickLength(float Seconds) : ISingletonComponent;
+
+public class MoveSystem : EcsSystem
+{
+    [ForEach, Without<Stunned>]
+    static void Move(ref Position position, in Speed speed, in TickLength tick) =>
+        position = position with { Y = position.Y + speed.Value * tick.Seconds };
+}
+```
+
+```csharp
+world.AddSingleton<TickLength>() = new TickLength(0.05f);   // AddSingleton 返回 ref
+world.AddSystem<MoveSystem>();
+world.CreateEntity(new Position(0, 0), new Speed(2));
+world.Update();
+```
+
+</Tab>
+<Tab value="Unity Entities">
+
+```csharp title="MoveSystem.cs" doccheck=skip
+public struct Speed : IComponentData { public float Value; }
+
+public partial struct MoveSystem : ISystem
+{
+    public void OnUpdate(ref SystemState state)
+    {
+        float dt = SystemAPI.Time.DeltaTime;
+        foreach (var (transform, speed) in
+                 SystemAPI.Query<RefRW<LocalTransform>, RefRO<Speed>>().WithNone<Stunned>())
+            transform.ValueRW.Position.y += speed.ValueRO.Value * dt;
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+## 结构变更不需要命令缓冲 [#structural-changes]
+
+在 Unity 里，遍历途中或 job 里的结构变更要写进 `EntityCommandBuffer`，等到同步点再回放。EasyEcs 的系统在哪里决定就在
+哪里改，同一次更新里后面的系统都能看到：
+
+```csharp title="DeathSystem.cs"
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health health)
+    {
+        if (health.Value <= 0) unit.Set(new Dead());   // 没有命令缓冲，也没有同步点
+    }
+}
+```
+
+遍历依然安全：途中失去实体的行会变成墓碑，直到这一遍结束；每个实体最多访问一次。代价是并行代码不能做结构变更：
+`[ForEach(Parallel = true)]` 方法里不能改结构，分析器会指出来。
+
+## 变更过滤按行生效 [#change-filters]
+
+Unity 的变更过滤按 chunk 算：只要有系统对某个 chunk 拿过写权限，它就算变了，所以过滤返回的是整个 chunk，不管写没写。
+EasyEcs 按行追踪，按组件自愿开启：把组件标成 `ITrackChanges`，`[Changed<T>]` 就只访问系统上次运行以来通过 `ref`
+写过的行，没写过的表、4,096 行的块和 64 行的字都直接跳过。`[Removed<T>]` 对失去该组件的实体做同样的事。见
+[变更追踪](/zh/docs/guide/change-tracking)。
+
+## EasyEcs 是 Unity 的 ECS 吗？ [#unity]
+
+不是。EasyEcs 只面向 net10.0，跑不进 Unity。常见的组合是客户端用 Unity Entities（或别的引擎），服务器用 EasyEcs，两边
+共用普通的消息类型：上面这些概念可以照搬，代码不能。要在 Unity 里用 ECS，就用 Unity Entities，或者
+[对比](/zh/docs/comparison) 里面向 netstandard2.1 的那几个库。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="什么是 ECS？" href="/zh/docs/what-is-ecs">
+    实体、组件、系统和原型存储。
+  </Card>
+  <Card title="快速上手" href="/zh/docs/getting-started">
+    几分钟写出第一个 World、组件和系统。
+  </Card>
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+    方法、过滤、顺序、分组和并行方法。
+  </Card>
+</Cards>

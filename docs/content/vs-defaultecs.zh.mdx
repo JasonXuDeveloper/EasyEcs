@@ -1,0 +1,172 @@
+---
+title: EasyEcs 与 DefaultEcs
+seoTitle: "EasyEcs 与 DefaultEcs：C# ECS 对比与跑分（DefaultEcs 替代方案）"
+description: EasyEcs 和 DefaultEcs 并排对比。原型表对组件池加实体集合，两边写同一个系统，实测的 tick 和各项功能，以及什么时候 DefaultEcs 更合适。
+icon: GitCompare
+---
+
+[DefaultEcs](https://github.com/Doraku/DefaultEcs) 给每种组件类型一个池，并在组件增减时实时维护响应式的实体集合；系统
+遍历集合里的实体，再从池里取组件。EasyEcs 把组件相同的实体放进同一张原型表，为每个 `[ForEach]` 方法生成一个 struct
+job，顺着表的列往下走。两者都内置了变更追踪、移除追踪、值索引、并行系统和存档；区别在存储方式、系统的写法和一个
+tick 的开销。
+
+## 一览 [#at-a-glance]
+
+| | EasyEcs | DefaultEcs |
+| --- | --- | --- |
+| 存储 | 原型表，每列有存在位 | 每种组件一个池，加实体集合 |
+| 系统 | `EcsSystem`，`[ForEach]` 生成 job | `AEntitySetSystem<T>` / `AComponentSystem<T, TComponent>`，配 `[With]` / `[Without]` 特性 |
+| 遍历途中的变更 | 当场生效 | 当场作用于集合；`useBuffer` 先复制一份集合，或者用 `EntityCommandRecorder` |
+| 变更追踪 | 每次 `ref` 写入，`[Changed<T>]` | 每次写入后调 `NotifyChanged<T>()`，`WhenChanged<T>()` 集合 |
+| 移除追踪 | `[Removed<T>]` | `WhenRemoved<T>()` 集合，手动 Complete |
+| 每个服务器 tick 的分配 | 无 | 有 |
+| 运行时 | net10.0 | netstandard1.1-2.1；Unity |
+
+## 概念对照 [#concepts]
+
+| 概念 | DefaultEcs | EasyEcs |
+| --- | --- | --- |
+| World | `new World(capacity)` | `new World(new WorldOptions { InitialEntityCapacity = n })` |
+| 组件 | 任意 struct | 实现 `IComponent` 的 struct |
+| 带组件创建 | `var e = world.CreateEntity(); e.Set(a); e.Set(b);` | `world.CreateEntity(a, b)`（一次放进最终的表） |
+| 读、写 | `e.Get<T>()`（ref）、`world.GetComponents<T>()[e]` | `entity.Get<T>()`（ref）、`entity.Read<T>()`；`[ForEach]` 参数 |
+| 标签 | `e.Set<Dead>()` | `entity.Set(new Dead())` |
+| 销毁 | `e.Dispose()` | `entity.Destroy()` |
+| 单例 | `world.Set<T>(value)`、`world.Get<T>()` | `ISingletonComponent`、`world.AddSingleton<T>()`、`ref T` 参数 |
+| 遍历集合的系统 | `[With(typeof(A)), Without(typeof(B))] class S : AEntitySetSystem<TState>` | `class S : EcsSystem`，内含 `[ForEach, Without<B>] static void M(ref A a)` |
+| 遍历单个组件的系统 | `AComponentSystem<TState, A>` | 参数为 `ref A` 的 `[ForEach]` 方法 |
+| 系统序列 | `new SequentialSystem<T>(systems)` | 按顺序 `world.AddSystem<S>()`，或用 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` |
+| 并行系统 | `new ParallelSystem<T>(runner, systems)` | `WorldOptions.ParallelSystems`（冲突由生成的访问集判断） |
+| 并行遍历集合 | 配 `DefaultParallelRunner` 的 `AEntitySetSystem` | `[ForEach(Parallel = true)]` |
+| 实体集合 | `world.GetEntities().With<A>().Without<B>().AsSet()` | `QueryFilter`、`world.Query<A>(filter)`、`world.Count<A>(filter)` |
+| 上次之后变过的 | `.WhenChanged<T>()` + `NotifyChanged<T>()` + `Complete()` | `ITrackChanges` + `[Changed<T>]` |
+| 上次之后被移除的 | `.WhenRemoved<T>()` + `Complete()` | `ITrackChanges` + `[Removed<T>]` |
+| 按值索引 | `AsMultiMap<T>()`、`AsMap<T>()` | `IIndexed<TKey>`、`world.Index<T, TKey>()` |
+| 延迟变更 | `EntityCommandRecorder`、`Record(e).Set<T>()`、`Execute()` | 不需要 |
+| 禁用 | `e.Disable()`、`e.Disable<T>()` | 标签加 `[Without<T>]`，或 `entity.Disable<T>()` |
+| 复制到 World | `e.CopyTo(world)` | `entity.Clone()`、`world.MoveEntities(...)`、`Prefab` |
+| 存档 | `BinarySerializer`、`TextSerializer` | `world.Save(writer)` / `world.Load(bytes)` |
+| 消息 | `world.Subscribe<T>`、`world.Publish<T>` | 数据：后面的系统去读的单例或组件 |
+
+## 同一个任务的两种写法 [#same-task]
+
+取主 tick 里的状态系统：着火的单位掉血，几个 tick 后火灭。DefaultEcs 的移植版在遍历时移除组件，所以系统传了
+`useBuffer: true`，更新前先把集合复制一份（`DefaultEcsSimulation.cs`）。
+
+<Tabs items={['EasyEcs', 'DefaultEcs']}>
+<Tab value="EasyEcs">
+
+```csharp title="StatusSystem.cs"
+public struct Hp : IComponent { public int Value, Max; }
+public struct Fire : IComponent { public int Ticks, DamagePerTick; }
+
+public class StatusSystem : EcsSystem
+{
+    [ForEach]
+    static void Burn(Entity entity, ref Fire fire, ref Hp hp)
+    {
+        hp.Value -= fire.DamagePerTick;
+        if (--fire.Ticks <= 0) entity.Remove<Fire>();   // 只翻一个位，行不动
+    }
+}
+```
+
+```csharp
+world.AddSystem<StatusSystem>();
+world.Update();
+```
+
+</Tab>
+<Tab value="DefaultEcs">
+
+```csharp title="DefaultEcsStatus.cs" doccheck=skip
+[With(typeof(Fire), typeof(Hp))]
+public sealed class BurnSystem(World world) : AEntitySetSystem<Counters>(world, true)   // useBuffer: true
+{
+    protected override void Update(Counters c, ReadOnlySpan<Entity> entities)
+    {
+        var fires = World.GetComponents<Fire>();
+        var hps = World.GetComponents<Hp>();
+        foreach (ref readonly var e in entities)
+        {
+            ref var fire = ref fires[e];
+            hps[e].Value -= fire.DamagePerTick;
+            if (--fire.Ticks <= 0) e.Remove<Fire>();
+        }
+    }
+}
+
+var systems = new SequentialSystem<Counters>(new BurnSystem(world) /* , ... */);
+systems.Update(counters);
+```
+
+</Tab>
+</Tabs>
+
+## 数字 [#numbers]
+
+主 tick：
+
+<PeerChart />
+
+在这个 tick 上，DefaultEcs 的耗时是 EasyEcs 的 <BenchValue k="peers.defaultecs.ratio" />，每个 tick 分配
+<BenchValue k="peers.defaultecs.alloc" />。它的读取要经过每种组件一个、按实体下标查的池；EasyEcs 则是从头到尾顺着表的列走。
+
+<Tabs items={['变更', '移除', '索引']}>
+<Tab value="变更">
+
+<BenchChart
+  bench="ChangeTrackingComparison"
+  methods="EasyEcs_Changed,DefaultEcs_WhenChanged"
+  title="同步本 tick 写过的实体：100,000 个里的 10 个或 1,000 个"
+/>
+
+</Tab>
+<Tab value="移除">
+
+<BenchChart bench="RemovalComparison" methods="EasyEcs_Removed,DefaultEcs_WhenRemoved" title="发送到期的 buff：100,000 个里的 10 个或 1,000 个" />
+
+</Tab>
+<Tab value="索引">
+
+<BenchChart bench="IndexComparison" methods="EasyEcs_Index,DefaultEcs_MultiMap" title="交易，然后统计 100 个背包" />
+
+</Tab>
+</Tabs>
+
+<BenchChart bench="ParallelSystemsComparison" title="四个互不相关的系统跑 100,000 个实体，串行与并行" />
+<BenchChart bench="DisableComparison" methods="EasyEcs_Tag,DefaultEcs_Disable" title="单位睡下又醒来，然后汇总醒着的" />
+<BenchChart bench="StructuralChangeComparison" methods="EasyEcs_Direct,DefaultEcs_CommandRecorder" title="两遍遍历 100,000 个单位时标记死亡再复活" />
+<BenchChart bench="BulkSpawnComparison" methods="EasyEcs_CreateAndDestroyAll,DefaultEcs_PerEntity" title="生成 10,000 发子弹，再全部清掉" />
+<BenchChart bench="SaveComparison" methods="EasyEcs_SaveLoad,DefaultEcs_Binary" title="保存并加载 10,000 个单位" />
+
+这次运行里，结构变更测试在 1,000 次击杀时 DefaultEcs 那一行的误差和均值一样大，并行那几行的误差也很大。
+
+## DefaultEcs 做得更好的地方 [#what-defaultecs-does-better]
+
+- **覆盖面。** 支持 netstandard1.1 到 2.1 和 Unity；EasyEcs 需要 .NET 10。
+- **共享组件。** `SetSameAs` 让多个实体共用一个组件值；EasyEcs 没有共享组件（[D14](/zh/docs/decisions)）：把共享数据放进
+  单例，组件里存一个 id。
+- **消息。** 内置发布 / 订阅；EasyEcs 把消息建模成数据。
+- **文本序列化器**，和二进制的并存。
+- **稀疏存储** 适合实体频繁改变组件组合、却很少整体遍历的 World：加组件从不复制其他组件。
+
+## 什么时候选 DefaultEcs [#when-to-choose-defaultecs]
+
+需要老运行时或 Unity，想让系统之间用响应式集合或消息沟通，而且 World 小到每 tick 的分配和池查找都无所谓，就选
+DefaultEcs。.NET 10 服务器、每个 tick 要遍历大量实体、不想每次写入都调 `NotifyChanged` 也能追踪变更、每个 tick 不能
+有分配，就选 EasyEcs。要移植 DefaultEcs 项目：[从 DefaultEcs 迁移](/zh/docs/migrate-from-defaultecs)。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="从 DefaultEcs 迁移" href="/zh/docs/migrate-from-defaultecs">
+    API 对照表，外加一整个模拟的逐步移植。
+  </Card>
+  <Card title="对比" href="/zh/docs/comparison">
+    和 DefaultEcs、Friflo.Engine.ECS、Arch 的全部跑分。
+  </Card>
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+    EasyEcs 里系统怎么写。
+  </Card>
+</Cards>

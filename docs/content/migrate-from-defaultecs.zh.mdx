@@ -1,0 +1,253 @@
+---
+title: 从 DefaultEcs 迁移
+seoTitle: "从 DefaultEcs 迁移到 EasyEcs：API 对照与一个移植好的模拟（C#、.NET 10）"
+description: 一步步把 DefaultEcs 项目移植到 EasyEcs。实体集合、AEntitySetSystem、WhenChanged 和 EntityMultiMap 的新旧对照，一个移植好的模拟，以及要避开的坑。
+icon: ArrowRightLeft
+---
+
+DefaultEcs 把每种组件放在各自的池里，系统遍历实体集合；EasyEcs 把组件相同的实体放进同一张表，在上面跑生成好的 job。
+移植主要是换个形状：带 `[With]` / `[Without]` 特性、靠 `World.GetComponents<T>()` 循环的 `AEntitySetSystem`，变成只有
+一个 `[ForEach]` 方法的 `EcsSystem`，方法参数就是组件；一个组件一次 `Set` 拼起来的实体，改成一次带齐所有组件创建；
+靠 `NotifyChanged<T>()` 喂数据的 `WhenChanged<T>()` 集合，变成 `[Changed<T>]` 方法，什么都不用通知。示例就是仓库里真实的
+移植：[`DefaultEcsSimulation.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/benchmarks/EasyEcs.Comparison/DefaultEcsSimulation.cs)，
+以及它的原版 EasyEcs World
+[`WorldSimulation.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/benchmarks/EasyEcs.Benchmark/WorldSimulation.cs)。
+
+## 开始之前 [#before-you-start]
+
+<Callout type="warn" title="环境要求">
+  EasyEcs 只面向 net10.0。必须跑在 Unity 或 netstandard 上的代码，继续用 DefaultEcs。
+</Callout>
+
+```bash
+dotnet add package EasyEcs
+```
+
+## 概念 [#concepts]
+
+| DefaultEcs | EasyEcs | 变化 |
+| --- | --- | --- |
+| `World` | `World` | 每个 World 只属于一个线程。 |
+| 任意 struct 都是组件 | 实现 `IComponent` 的 struct | 加上接口。 |
+| 每种组件一个池 | 原型表 | 一个实体的组件在同一行；多一个新组件要复制整行。 |
+| `EntitySet`（`GetEntities().With<A>().AsSet()`） | `[ForEach]` 方法上的过滤，或 `QueryFilter` | 没有集合要保存或释放。 |
+| `AEntitySetSystem<T>`、`AComponentSystem<T, C>` | 带 `[ForEach]` 方法的 `EcsSystem` | 循环和组件访问由生成器写。 |
+| `SequentialSystem<T>`、`ParallelSystem<T>` | `world.AddSystem<T>()`、`WorldOptions.ParallelSystems` | 按注册顺序，或用 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 排。 |
+| `World.Set<T>()` / `Get<T>()` | `ISingletonComponent` | 作为 `[ForEach]` 方法的 `ref` 参数。 |
+| `NotifyChanged<T>()` + `WhenChanged<T>()` | `ITrackChanges` + `[Changed<T>]` | 每次 `ref` 写入就是变更。 |
+| `WhenRemoved<T>()` | `ITrackChanges` + `[Removed<T>]` | 不用调 `Complete()`。 |
+| `EntityCommandRecorder` | 直接调用 | 变更当场生效。 |
+| `Publish` / `Subscribe` | 数据：后面的系统去读的组件或单例 | 没有消息。 |
+
+## API 对照 [#api-mapping]
+
+### 实体和组件 [#entities-and-components]
+
+| DefaultEcs | EasyEcs |
+| --- | --- |
+| `new World(maxCapacity)`（硬上限） | `new World(new WorldOptions { InitialEntityCapacity = n })`（初始大小，World 会增长） |
+| `var e = world.CreateEntity(); e.Set(a); e.Set(b);` | `var e = world.CreateEntity(a, b);` |
+| `e.Set(c)`（添加或替换） | `e.Set(c)` |
+| `e.Set<Dead>()` | `e.Set(new Dead())` |
+| `ref var c = ref e.Get<T>()` | `ref var c = ref e.Get<T>()`；只读用 `e.Read<T>()` |
+| `e.Has<T>()` | `e.Has<T>()` |
+| `e.Remove<T>()` | `e.Remove<T>()` |
+| `e.Dispose()` | `e.Destroy()` |
+| `e.Disable()` / `Enable()` | 一个标签（`Asleep`）加 `[Without<Asleep>]` |
+| `e.Disable<T>()` / `Enable<T>()` | `e.Disable<T>()` / `Enable<T>()` |
+| `e.CopyTo(world)` | `e.Clone()`；跨 World 用 `world.MoveEntities(...)`；模板用 `Prefab` |
+| 拿 `e.GetHashCode()` 当 id | `e.Id`（`EntityId`：下标加版本） |
+| `world.Set(value)` / `world.Get<T>()` | `world.AddSingleton<T>() = value`、`world.GetSingleton<T>()` |
+
+### 系统和集合 [#systems-and-sets]
+
+| DefaultEcs | EasyEcs |
+| --- | --- |
+| `AEntitySetSystem` 上的 `[With(typeof(A), typeof(B))]` | 方法参数 `(ref A a, in B b)`；不读的组件用 `[With<A>]` |
+| `[Without(typeof(C))]` | `[Without<C>]` |
+| `Update(T state, ReadOnlySpan<Entity> entities)` + `World.GetComponents<A>()[e]` | `static void M(ref A a)`，或参数为 `Span<A>` 的批量方法 |
+| 构造参数 `useBuffer: true` | 不需要：任何遍历里做结构变更都安全 |
+| `AComponentSystem<T, A>.Update(T state, ref A a)` | `[ForEach] static void M(ref A a)` |
+| `new SequentialSystem<T>(a, b, c)` + `Update(state)` | `world.AddSystem<A>(); ...; world.Update();` |
+| `new ParallelSystem<T>(runner, systems)` | `new WorldOptions { ParallelSystems = true }` |
+| 配 `DefaultParallelRunner` 的 `AEntitySetSystem` | `[ForEach(Parallel = true)]` |
+| `GetEntities().With<A>().AsSet().Count` | `world.Count<A>(filter)` |
+| `GetEntities().AsMultiMap<K>()`、`map.Count(key)` | `IIndexed<K>`、`world.Index<T, K>().Count(key)` |
+| `recorder.Record(e).Set<T>()` + `recorder.Execute()` | `e.Set(new T())` |
+| `BinarySerializer.Serialize(stream, world)` | `world.Save(writer)` |
+| `BinarySerializer.Deserialize(stream)` | `world.Load(bytes)` |
+
+## 示例：主 tick 的模拟 [#worked-example]
+
+<Steps>
+<Step>
+
+### 组件 [#components]
+
+加上 `IComponent`。DefaultEcs 当作系统状态传进去的计数器，改成单例。
+
+```csharp title="Components.cs"
+public struct Position : IComponent { public float X, Y; }
+public struct Velocity : IComponent { public float X, Y; }
+public struct Health : IComponent { public int Value, Max; }
+public struct Lifetime : IComponent { public int Ticks; }
+public struct Player : IComponent { public long AccountId; }
+public struct Projectile : IComponent { public int OwnerId; }
+public struct Dead : IComponent;
+
+public struct WorldStats : ISingletonComponent
+{
+    public long Tick;
+    public int Spawns;
+}
+```
+
+</Step>
+<Step>
+
+### 集合系统变成一个方法 [#set-system]
+
+DefaultEcs：
+
+```csharp doccheck=skip
+[With(typeof(Position), typeof(Velocity)), Without(typeof(Stunned), typeof(Dead))]
+public sealed class MovementSystem(World world) : AEntitySetSystem<Counters>(world, false)
+{
+    protected override void Update(Counters c, ReadOnlySpan<Entity> entities)
+    {
+        var positions = World.GetComponents<Position>();
+        var velocities = World.GetComponents<Velocity>();
+        foreach (ref readonly var e in entities)
+        {
+            ref var p = ref positions[e];
+            ref var v = ref velocities[e];
+            p.X += v.X;
+            p.Y += v.Y;
+        }
+    }
+}
+```
+
+EasyEcs：特性变成过滤，取组件变成参数。
+
+```csharp title="MovementSystem.cs"
+public class MovementSystem : EcsSystem
+{
+    [ForEach, Without<Stunned>, Without<Dead>]
+    static void Move(ref Position p, in Velocity v)
+    {
+        p.X += v.X;
+        p.Y += v.Y;
+    }
+}
+```
+
+</Step>
+<Step>
+
+### 结构变更不需要缓冲 [#no-buffer]
+
+DefaultEcs 里，遍历时要销毁或创建实体的系统得传 `useBuffer: true`。EasyEcs 的遍历本身就安全：要销毁就拿 `Entity`，
+要创建就拿 `World`，而且实体一次带齐所有组件创建。
+
+```csharp title="ProjectileSystems.cs"
+public class LifetimeSystem : EcsSystem
+{
+    [ForEach]
+    static void Expire(Entity entity, ref Lifetime lifetime)
+    {
+        if (--lifetime.Ticks <= 0) entity.Destroy();
+    }
+}
+
+public class ShootingSystem : EcsSystem
+{
+    [ForEach, With<Player>, Without<Dead>]
+    static void Shoot(Entity shooter, in Position p, in Velocity v, ref WorldStats stats, World world)
+    {
+        if ((stats.Tick + shooter.Id.Index) % 20 != 0) return;
+        stats.Spawns++;
+        world.CreateEntity(p, new Velocity { X = v.X * 4, Y = v.Y * 4 }, new Lifetime { Ticks = 20 },
+            new Projectile { OwnerId = shooter.Id.Index });
+    }
+}
+```
+
+</Step>
+<Step>
+
+### `WhenChanged` 变成 `[Changed<T>]` [#when-changed]
+
+DefaultEcs 每次写入后都要调 `NotifyChanged<T>()`，读完集合还要 `Complete()`：
+
+```csharp doccheck=skip
+var changed = world.GetEntities().With<Replica>().WhenChanged<Hp>().AsSet();
+
+entity.Get<Hp>().Value--;
+entity.NotifyChanged<Hp>();
+
+foreach (ref readonly var e in changed.GetEntities()) replicas[e].Value = hps[e].Value;
+changed.Complete();
+```
+
+EasyEcs：把组件标成被追踪，每次通过 `ref` 写入就是变更。
+
+```csharp title="Replication.cs"
+public record struct Hp(int Value) : IComponent, ITrackChanges;
+public record struct Replica(int Value) : IComponent;
+
+public class Replication : EcsSystem
+{
+    [ForEach, Changed<Hp>]
+    static void Copy(in Hp hp, ref Replica replica) => replica = new Replica(hp.Value);
+}
+```
+
+</Step>
+<Step>
+
+### tick [#the-tick]
+
+`SequentialSystem` 变成 World 的系统列表；状态参数变成单例。
+
+```csharp title="Program.cs"
+world.AddSingleton<WorldStats>();
+world.AddSystem<MovementSystem>();
+world.AddSystem<LifetimeSystem>();
+world.AddSystem<ShootingSystem>();
+world.AddSystem<Replication>();
+world.Update();
+```
+
+</Step>
+</Steps>
+
+两个版本的完整 tick，在同一台机器上：
+
+<PeerChart />
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁来发现 |
+| --- | --- | --- |
+| 把状态对象搬成系统的字段 | 系统必须无状态 | [EECS007](/zh/docs/guide/analyzer#eecs007)：改用单例 |
+| `[ForEach]` 方法按值接组件 | 拿到的是副本，写入丢失 | [EECS002](/zh/docs/guide/analyzer#eecs002)，代码修复改成 `ref` / `in` |
+| 创建时一个一个 `Set` 组件 | 每加一个组件复制一次行 | 代码审查：`world.CreateEntity(a, b, c)` |
+| 不带 `Entity` 或 `World` 的静态方法里做销毁 | 它承诺了不做结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
+| 留着 `NotifyChanged` 调用 | 没有这个方法 | 编译错误 |
+| 被追踪的组件只读却按 `ref` 接 | 访问过的每一行都算变了 | 代码审查：声明成 `in` |
+| 拿 `GetHashCode()` 当实体 id | id 会被回收复用 | 存 `entity.Id`（带版本的 `EntityId`） |
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="EasyEcs 与 DefaultEcs" href="/zh/docs/vs-defaultecs">
+    两个库并排对比，附全部跑分。
+  </Card>
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+    参数、过滤、顺序、分组和并行方法。
+  </Card>
+  <Card title="变更追踪" href="/zh/docs/guide/change-tracking">
+    用 `[Changed<T>]` 和 `[Removed<T>]` 代替响应式集合。
+  </Card>
+</Cards>

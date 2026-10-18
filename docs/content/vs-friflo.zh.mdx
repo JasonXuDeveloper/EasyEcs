@@ -1,0 +1,205 @@
+---
+title: EasyEcs 与 Friflo.Engine.ECS
+seoTitle: "EasyEcs 与 Friflo.Engine.ECS：C# ECS 对比与跑分（Friflo 替代方案）"
+description: EasyEcs 和 Friflo.Engine.ECS 并排对比。概念如何对应，两边写同一个系统，两者之间的全部跑分，以及什么时候 Friflo 更合适。
+icon: GitCompare
+---
+
+[Friflo.Engine.ECS](https://github.com/friflo/Friflo.Engine.ECS) 是和 EasyEcs 最接近的同类：都是原型（archetype）ECS，
+每个服务器 tick 都不分配，都有标签、索引组件、关系和层级，主 tick 上的成绩也很接近。区别在模型。Friflo 遍历缓存查询的
+chunk，把结构变更记进命令缓冲；EasyEcs 从 `[ForEach]` 方法生成 struct job，变更当场生效，组件被移除后用存在位保留原行，
+变更和移除都作为数据追踪，而不是事件。
+
+## 一览 [#at-a-glance]
+
+| | EasyEcs | Friflo.Engine.ECS |
+| --- | --- | --- |
+| 存储 | 原型表，每列有存在位 | 原型 |
+| 查询途中的变更 | 当场生效 | 抛 `StructuralChangeException`；记进 `CommandBuffer` |
+| 移除组件或标签 | 翻一个位，实体留在原行 | 把实体搬到另一个原型 |
+| 系统 | 带生成的 `[ForEach]` job 的 `EcsSystem` | `SystemRoot`、`SystemGroup`、`QuerySystem` |
+| 变更追踪 | `[Changed<T>]`：上次运行以来写过的行 | 没有（组件事件） |
+| 移除追踪 | `[Removed<T>]` | `OnComponentRemoved` 事件 |
+| 存档 | 二进制 `Save` / `Load`，内存快照 | JSON（`EntitySerializer`） |
+| 编译期检查 | 分析器 EECS002-EECS024，附代码修复 | 没有 |
+| 运行时 | net10.0 | netstandard2.1、net6.0-8.0；Unity |
+
+## 概念对照 [#concepts]
+
+| 概念 | Friflo.Engine.ECS | EasyEcs |
+| --- | --- | --- |
+| World | `new EntityStore()` | `new World()` |
+| 组件 | `struct X : IComponent` | `struct X : IComponent`（命名空间 `EasyEcs`） |
+| 标签 | `struct Dead : ITag`、`AddTag<Dead>()` | `struct Dead : IComponent`（空的）、`entity.Set(new Dead())` |
+| 单例 | `UniqueEntity` | `ISingletonComponent`、`world.AddSingleton<T>()` |
+| 创建 | `store.CreateEntity(a, b)` | `world.CreateEntity(a, b)` |
+| 读、写 | `entity.GetComponent<T>()`（ref） | `entity.Get<T>()`（ref）、`entity.Read<T>()`（只读） |
+| 加、删 | `entity.AddComponent(c)`、`RemoveComponent<T>()` | `entity.Set(c)`、`entity.Remove<T>()` |
+| 销毁 | `entity.DeleteEntity()` | `entity.Destroy()`、`world.DestroyEntities<T>(filter)` |
+| 查询 | `store.Query<A, B>().WithoutAnyTags(Tags.Get<Dead>())` | `[ForEach, Without<Dead>]`；`QueryFilter.Create().Without<Dead>()` |
+| 遍历 | `foreach (var (as, bs, entities) in query.Chunks)` 加 `Span` 循环 | `[ForEach]` 方法，或参数为 `Span<T>` 的批量方法 |
+| 每行带实体 | `query.ForEachEntity((ref A a, Entity e) => ...)` | `[ForEach]` 方法的 `Entity` 参数 |
+| 命令缓冲 | `store.GetCommandBuffer()`、`Playback()` | 没有：变更当场生效 |
+| 批量变更 | `EntityBatch`、`query.Entities.ApplyBatch(batch)` | `world.SetAll(value, filter)`、`RemoveAll<T>(filter)` |
+| 预制体 | store 里的一个实体，`store.CloneEntity(e)` | `Prefab`、`world.Instantiate(prefab, span)` |
+| 禁用 | `entity.Enabled = false` | 标签加 `[Without<T>]`，或 `entity.Disable<T>()` |
+| 索引组件 | `IIndexedComponent<TKey>`、`store.ComponentIndex<T, TKey>()[key]`、`ValueInRange` | `IIndexed<TKey>`、`world.Index<T, TKey>().Find(key)`、有序的 `Range` |
+| 指向实体 | `ILinkComponent`、`GetIncomingLinks<T>()` | `EntityId` 作键（`IIndexed<EntityId>`）、`index.Find(target)` |
+| 多条链接 | `ILinkRelation`、`AddRelation`、`GetRelations<T>()` | `IRelation`、`entity.AddRelation`、`world.Relations<T>()` |
+| 层级 | `AddChild`、`ChildEntities` | `ChildOf(parent)`、`world.Children(parent)`、级联销毁 |
+| 移除回调 | `store.OnComponentRemoved += ...` | `[Removed<T>]`（没有回调） |
+| 并行查询 | `store.JobRunner = new ParallelJobRunner(n)`、`QueryJob.RunParallel()` | `[ForEach(Parallel = true)]` |
+| 存档 | `EntitySerializer.WriteStore` / `ReadIntoStore`（JSON） | `world.Save(writer)` / `world.Load(bytes)`（二进制） |
+
+## 同一个任务的两种写法 [#same-task]
+
+取主 tick 里的死亡检查：血量见底的单位打上 `Dead` 标签并计数。Friflo 的查询迭代时不能加标签，所以移植版先记下来，
+系统跑完再回放缓冲（`FrifloSimulation.cs`）。
+
+<Tabs items={['EasyEcs', 'Friflo.Engine.ECS']}>
+<Tab value="EasyEcs">
+
+```csharp title="DeathSystem.cs"
+public struct Hp : IComponent { public int Value, Max; }
+public struct Npc : IComponent { public int TemplateId; }
+public struct Deaths : ISingletonComponent { public int Count, NpcKills; }
+
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void CheckDeath(Entity entity, in Hp hp, ref Deaths deaths)
+    {
+        if (hp.Value > 0) return;
+        entity.Set(new Dead());                       // 当场生效
+        deaths.Count++;
+        if (entity.Has<Npc>()) deaths.NpcKills++;
+    }
+}
+```
+
+```csharp
+world.AddSingleton<Deaths>();
+world.AddSystem<DeathSystem>();
+world.Update();
+```
+
+</Tab>
+<Tab value="Friflo.Engine.ECS">
+
+```csharp title="FrifloDeath.cs" doccheck=skip
+var alive = store.Query<Hp>().WithoutAnyTags(Tags.Get<Dead>());
+var buffer = store.GetCommandBuffer();
+buffer.ReuseBuffer = true;
+
+foreach (var (hps, entities) in alive.Chunks)
+{
+    var hp = hps.Span;
+    for (int i = 0; i < hp.Length; i++)
+    {
+        if (hp[i].Value > 0) continue;
+        buffer.AddTag<Dead>(entities.Ids[i]);         // 先记下
+        counters.Deaths++;
+        if (entities.EntityAt(i).HasComponent<Npc>()) counters.NpcKills++;
+    }
+}
+
+buffer.Playback();                                    // 在这里才生效
+```
+
+</Tab>
+</Tabs>
+
+计数器放在单例里，生成的 job 每一遍只解析一次。`Dead` 标签当场生效，所以同一次更新里后面的系统已经会跳过这具尸体。
+
+## 数字 [#numbers]
+
+主 tick：
+
+<Tabs items={['100,000 个实体', '10,000 个实体']}>
+<Tab value="100,000 个实体">
+
+<PeerChart />
+
+</Tab>
+<Tab value="10,000 个实体">
+
+<PeerChart entities="10000" />
+
+</Tab>
+</Tabs>
+
+100,000 个实体时，Friflo 的耗时是 EasyEcs 的 <BenchValue k="peers.friflo.ratio" />，10,000 个时是
+<BenchValue k="peers.friflo10k.ratio" />。同一台机器上，两者在不同的运行里互有领先，所以按“打平”来看；各自在哪里占优，
+看逐项操作的拆分：
+
+<BenchChart bench="OperationBenchmark" title="主 tick World 里的单项操作，100,000 个实体" />
+
+切换状态和从预制体生成是 EasyEcs 领先的地方（存在位；每个实例只复制一次行）；普通的两三个组件遍历和批量访问实体则打平。
+
+两个库都有的功能：
+
+<Tabs items={['移除', '变更', '关系', '索引']}>
+<Tab value="移除">
+
+<BenchChart bench="RemovalComparison" methods="EasyEcs_Removed,Friflo_Event" title="发送到期的 buff：100,000 个里的 10 个或 1,000 个" />
+
+</Tab>
+<Tab value="变更">
+
+<BenchChart
+  bench="ChangeTrackingComparison"
+  methods="EasyEcs_Changed,Friflo_DirtyTag,Friflo_Scan"
+  title="同步本 tick 写过的实体：100,000 个里的 10 个或 1,000 个"
+  subtitle="Friflo 没有变更过滤：要么写入时加脏标签，要么扫描比较值。"
+/>
+
+</Tab>
+<Tab value="关系">
+
+<BenchChart bench="RelationComparison" title="改写 10,000 个好友列表里的 100 个，遍历 100 个关注者集合" />
+<BenchChart bench="HierarchyComparison" title="创建并销毁 1,000 个 11 人小队" />
+
+</Tab>
+<Tab value="索引">
+
+<BenchChart bench="IndexComparison" methods="EasyEcs_Index,Friflo_Links" title="交易，然后统计 100 个背包" />
+<BenchChart bench="ValueQueryComparison" title="在 100,000 个玩家上做分数区间和分区求和" />
+
+</Tab>
+</Tabs>
+
+<BenchChart bench="DisableComparison" methods="EasyEcs_Tag,EasyEcs_DisableComponent,Friflo_Enabled" title="单位睡下又醒来，然后汇总醒着的" />
+<BenchChart bench="BulkChangeComparison" methods="EasyEcs_SetAllRemoveAll,Friflo_ApplyBatch" title="眩晕 100,000 个战斗单位，再解除" />
+<BenchChart bench="StructuralChangeComparison" methods="EasyEcs_Direct,Friflo_CommandBuffer" title="两遍遍历 100,000 个单位时标记死亡再复活" />
+<BenchChart bench="SaveComparison" methods="EasyEcs_SaveLoad,Friflo_Json" title="保存并加载 10,000 个单位" subtitle="EasyEcs 写二进制，Friflo 写 JSON：格式不同。" />
+
+## Friflo 做得更好的地方 [#what-friflo-does-better]
+
+- **少量移除时的回调。** Friflo 的 `OnComponentRemoved` 报告 10 次移除用 <BenchValue k="removed.friflo.10" />，
+  `[Removed<T>]` 用 <BenchValue k="removed.10" />：回调在移除发生时就把 id 收集好了。到 1,000 次移除时两者打平。
+- **关系。** 好友列表测试里 Friflo 略快（<BenchValue k="relation.friflo" /> 对 <BenchValue k="relation.easyecs" />），
+  在误差之内：两者都给每个实体存一个链接列表，再按目标建索引。
+- **并行查询。** 这次运行里，Friflo 的 `ParallelJobRunner`（<BenchValue k="parallelQuery.friflo" />）领先并行
+  `[ForEach]`（<BenchValue k="parallelQuery.easyecs" />），而并行那几行误差很大。Friflo 有自己的工作线程；EasyEcs 只在
+  划算时唤醒线程池帮手（[D22](/zh/docs/decisions)）。
+- **覆盖面和工具。** Unity、netstandard2.1 和 net6.0-8.0，事件，线程安全的 `CommandBufferSynced`，以及 JSON 序列化。
+
+## 什么时候选 Friflo [#when-to-choose-friflo]
+
+需要 Unity 或比 .NET 10 老的运行时、想要事件或 JSON、或者更喜欢显式的 chunk 循环加命令缓冲，就选 Friflo。.NET 10
+服务器，想让变更在决定的地方就生效、每个系统只写一个方法并在编译期检查、不靠脏标签就能追踪变更、内置二进制存档和
+快照，就选 EasyEcs。要移植 Friflo 项目：[从 Friflo.Engine.ECS 迁移](/zh/docs/migrate-from-friflo)。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="从 Friflo.Engine.ECS 迁移" href="/zh/docs/migrate-from-friflo">
+    API 对照表，外加一整个模拟的逐步移植。
+  </Card>
+  <Card title="对比" href="/zh/docs/comparison">
+    和 Friflo.Engine.ECS、Arch、DefaultEcs 的全部跑分。
+  </Card>
+  <Card title="变更追踪" href="/zh/docs/guide/change-tracking">
+    深入 `[Changed<T>]` 和 `[Removed<T>]`。
+  </Card>
+</Cards>

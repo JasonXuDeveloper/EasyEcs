@@ -1,0 +1,256 @@
+---
+title: Migrate from DefaultEcs
+seoTitle: "Migrate from DefaultEcs to EasyEcs: API mapping and a ported simulation (C#, .NET 10)"
+description: Port a DefaultEcs codebase to EasyEcs step by step. Entity sets, AEntitySetSystem, WhenChanged and EntityMultiMap mapped old to new, a ported simulation and the pitfalls to avoid.
+icon: ArrowRightLeft
+---
+
+DefaultEcs keeps each component in its own pool and lets systems iterate entity sets; EasyEcs keeps entities with
+the same components together in tables and runs generated jobs over them. The port is mostly a change of shape: an
+`AEntitySetSystem` with `[With]` / `[Without]` attributes and a `World.GetComponents<T>()` loop becomes an `EcsSystem`
+with one `[ForEach]` method whose parameters are the components; an entity built with one `Set` per component is
+created with all of them at once; `WhenChanged<T>()` sets fed by `NotifyChanged<T>()` become `[Changed<T>]` methods
+with nothing to notify. The worked example is the real port in the repository:
+[`DefaultEcsSimulation.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/benchmarks/EasyEcs.Comparison/DefaultEcsSimulation.cs)
+and the EasyEcs world it was ported from,
+[`WorldSimulation.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/benchmarks/EasyEcs.Benchmark/WorldSimulation.cs).
+
+## Before you start [#before-you-start]
+
+<Callout type="warn" title="Requirements">
+  EasyEcs targets net10.0 only. Code that must run in Unity or on netstandard stays on DefaultEcs.
+</Callout>
+
+```bash
+dotnet add package EasyEcs
+```
+
+## Concepts [#concepts]
+
+| DefaultEcs | EasyEcs | What changes |
+| --- | --- | --- |
+| `World` | `World` | One owner thread per world. |
+| Any struct is a component | A struct implementing `IComponent` | Add the interface. |
+| A pool per component type | Archetype tables | An entity's components sit in one row; gaining a new one copies the row. |
+| `EntitySet` (`GetEntities().With<A>().AsSet()`) | Filters on a `[ForEach]` method, or a `QueryFilter` | No set to keep or dispose. |
+| `AEntitySetSystem<T>`, `AComponentSystem<T, C>` | `EcsSystem` with `[ForEach]` methods | The generator writes the loop and the component access. |
+| `SequentialSystem<T>`, `ParallelSystem<T>` | `world.AddSystem<T>()`, `WorldOptions.ParallelSystems` | Order by registration or `[UpdateBefore<T>]` / `[UpdateAfter<T>]`. |
+| `World.Set<T>()` / `Get<T>()` | `ISingletonComponent` | A `ref` parameter of a `[ForEach]` method. |
+| `NotifyChanged<T>()` + `WhenChanged<T>()` | `ITrackChanges` + `[Changed<T>]` | Every `ref` write is the change. |
+| `WhenRemoved<T>()` | `ITrackChanges` + `[Removed<T>]` | No `Complete()` to call. |
+| `EntityCommandRecorder` | Direct calls | Changes apply at once. |
+| `Publish` / `Subscribe` | Data: components or singletons later systems read | No messages. |
+
+## API mapping [#api-mapping]
+
+### Entities and components [#entities-and-components]
+
+| DefaultEcs | EasyEcs |
+| --- | --- |
+| `new World(maxCapacity)` (a hard limit) | `new World(new WorldOptions { InitialEntityCapacity = n })` (a starting size; the world grows) |
+| `var e = world.CreateEntity(); e.Set(a); e.Set(b);` | `var e = world.CreateEntity(a, b);` |
+| `e.Set(c)` (add or replace) | `e.Set(c)` |
+| `e.Set<Dead>()` | `e.Set(new Dead())` |
+| `ref var c = ref e.Get<T>()` | `ref var c = ref e.Get<T>()`; `e.Read<T>()` to read |
+| `e.Has<T>()` | `e.Has<T>()` |
+| `e.Remove<T>()` | `e.Remove<T>()` |
+| `e.Dispose()` | `e.Destroy()` |
+| `e.Disable()` / `Enable()` | a tag (`Asleep`) and `[Without<Asleep>]` |
+| `e.Disable<T>()` / `Enable<T>()` | `e.Disable<T>()` / `Enable<T>()` |
+| `e.CopyTo(world)` | `e.Clone()`; `world.MoveEntities(...)` for another world; a `Prefab` for templates |
+| `e.GetHashCode()` as an id | `e.Id` (an `EntityId`: index and version) |
+| `world.Set(value)` / `world.Get<T>()` | `world.AddSingleton<T>() = value`, `world.GetSingleton<T>()` |
+
+### Systems and sets [#systems-and-sets]
+
+| DefaultEcs | EasyEcs |
+| --- | --- |
+| `[With(typeof(A), typeof(B))]` on an `AEntitySetSystem` | the method's parameters `(ref A a, in B b)`; `[With<A>]` for one it does not read |
+| `[Without(typeof(C))]` | `[Without<C>]` |
+| `Update(T state, ReadOnlySpan<Entity> entities)` + `World.GetComponents<A>()[e]` | `static void M(ref A a)`, or a batch method taking `Span<A>` |
+| the `useBuffer: true` constructor argument | nothing: structural changes are safe in any pass |
+| `AComponentSystem<T, A>.Update(T state, ref A a)` | `[ForEach] static void M(ref A a)` |
+| `new SequentialSystem<T>(a, b, c)` + `Update(state)` | `world.AddSystem<A>(); ...; world.Update();` |
+| `new ParallelSystem<T>(runner, systems)` | `new WorldOptions { ParallelSystems = true }` |
+| `AEntitySetSystem` with a `DefaultParallelRunner` | `[ForEach(Parallel = true)]` |
+| `GetEntities().With<A>().AsSet().Count` | `world.Count<A>(filter)` |
+| `GetEntities().AsMultiMap<K>()`, `map.Count(key)` | `IIndexed<K>`, `world.Index<T, K>().Count(key)` |
+| `recorder.Record(e).Set<T>()` + `recorder.Execute()` | `e.Set(new T())` |
+| `BinarySerializer.Serialize(stream, world)` | `world.Save(writer)` |
+| `BinarySerializer.Deserialize(stream)` | `world.Load(bytes)` |
+
+## A worked example: the headline simulation [#worked-example]
+
+<Steps>
+<Step>
+
+### Components [#components]
+
+Add `IComponent`. The counters that DefaultEcs passed as the systems' state become a singleton.
+
+```csharp title="Components.cs"
+public struct Position : IComponent { public float X, Y; }
+public struct Velocity : IComponent { public float X, Y; }
+public struct Health : IComponent { public int Value, Max; }
+public struct Lifetime : IComponent { public int Ticks; }
+public struct Player : IComponent { public long AccountId; }
+public struct Projectile : IComponent { public int OwnerId; }
+public struct Dead : IComponent;
+
+public struct WorldStats : ISingletonComponent
+{
+    public long Tick;
+    public int Spawns;
+}
+```
+
+</Step>
+<Step>
+
+### A set system becomes a method [#set-system]
+
+DefaultEcs:
+
+```csharp doccheck=skip
+[With(typeof(Position), typeof(Velocity)), Without(typeof(Stunned), typeof(Dead))]
+public sealed class MovementSystem(World world) : AEntitySetSystem<Counters>(world, false)
+{
+    protected override void Update(Counters c, ReadOnlySpan<Entity> entities)
+    {
+        var positions = World.GetComponents<Position>();
+        var velocities = World.GetComponents<Velocity>();
+        foreach (ref readonly var e in entities)
+        {
+            ref var p = ref positions[e];
+            ref var v = ref velocities[e];
+            p.X += v.X;
+            p.Y += v.Y;
+        }
+    }
+}
+```
+
+EasyEcs: the attributes become filters, the component lookups become parameters.
+
+```csharp title="MovementSystem.cs"
+public class MovementSystem : EcsSystem
+{
+    [ForEach, Without<Stunned>, Without<Dead>]
+    static void Move(ref Position p, in Velocity v)
+    {
+        p.X += v.X;
+        p.Y += v.Y;
+    }
+}
+```
+
+</Step>
+<Step>
+
+### Structural changes need no buffer [#no-buffer]
+
+DefaultEcs passes `useBuffer: true` to systems that destroy or create while they iterate. EasyEcs passes are safe as
+they are: a method that destroys takes the `Entity`, one that creates takes the `World`, and an entity is created
+with all its components at once.
+
+```csharp title="ProjectileSystems.cs"
+public class LifetimeSystem : EcsSystem
+{
+    [ForEach]
+    static void Expire(Entity entity, ref Lifetime lifetime)
+    {
+        if (--lifetime.Ticks <= 0) entity.Destroy();
+    }
+}
+
+public class ShootingSystem : EcsSystem
+{
+    [ForEach, With<Player>, Without<Dead>]
+    static void Shoot(Entity shooter, in Position p, in Velocity v, ref WorldStats stats, World world)
+    {
+        if ((stats.Tick + shooter.Id.Index) % 20 != 0) return;
+        stats.Spawns++;
+        world.CreateEntity(p, new Velocity { X = v.X * 4, Y = v.Y * 4 }, new Lifetime { Ticks = 20 },
+            new Projectile { OwnerId = shooter.Id.Index });
+    }
+}
+```
+
+</Step>
+<Step>
+
+### `WhenChanged` becomes `[Changed<T>]` [#when-changed]
+
+DefaultEcs needs a `NotifyChanged<T>()` next to every write and a `Complete()` after reading the set:
+
+```csharp doccheck=skip
+var changed = world.GetEntities().With<Replica>().WhenChanged<Hp>().AsSet();
+
+entity.Get<Hp>().Value--;
+entity.NotifyChanged<Hp>();
+
+foreach (ref readonly var e in changed.GetEntities()) replicas[e].Value = hps[e].Value;
+changed.Complete();
+```
+
+EasyEcs: mark the component tracked; every write through a `ref` is the change.
+
+```csharp title="Replication.cs"
+public record struct Hp(int Value) : IComponent, ITrackChanges;
+public record struct Replica(int Value) : IComponent;
+
+public class Replication : EcsSystem
+{
+    [ForEach, Changed<Hp>]
+    static void Copy(in Hp hp, ref Replica replica) => replica = new Replica(hp.Value);
+}
+```
+
+</Step>
+<Step>
+
+### The tick [#the-tick]
+
+A `SequentialSystem` becomes the world's system list; the state argument becomes the singleton.
+
+```csharp title="Program.cs"
+world.AddSingleton<WorldStats>();
+world.AddSystem<MovementSystem>();
+world.AddSystem<LifetimeSystem>();
+world.AddSystem<ShootingSystem>();
+world.AddSystem<Replication>();
+world.Update();
+```
+
+</Step>
+</Steps>
+
+The two versions of the whole tick, on the same machine:
+
+<PeerChart />
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| Porting the state object as a field of the system | Systems are stateless | [EECS007](/en/docs/guide/analyzer#eecs007): use a singleton |
+| Taking a component by value in a `[ForEach]` method | A copy: writes are lost | [EECS002](/en/docs/guide/analyzer#eecs002), with a code fix to `ref` / `in` |
+| Adding components one `Set` at a time on creation | One row copy per component | Code review: `world.CreateEntity(a, b, c)` |
+| A static method without `Entity` or `World` that destroys | It promised no structural change | [EECS013](/en/docs/guide/analyzer#eecs013) |
+| Keeping `NotifyChanged` calls | Nothing to call: there is no such method | Compiler error |
+| Taking a tracked component by `ref` only to read it | Every visited row counts as changed | Code review: declare it `in` |
+| Using `GetHashCode()` as an entity id | Ids are recycled | Store `entity.Id` (`EntityId`, with its version) |
+
+## Related [#related]
+
+<Cards>
+  <Card title="EasyEcs vs DefaultEcs" href="/en/docs/vs-defaultecs">
+    The two libraries side by side, with every benchmark.
+  </Card>
+  <Card title="Systems and [ForEach]" href="/en/docs/guide/systems">
+    Parameters, filters, ordering, groups and parallel methods.
+  </Card>
+  <Card title="Change tracking" href="/en/docs/guide/change-tracking">
+    `[Changed<T>]` and `[Removed<T>]` instead of reactive sets.
+  </Card>
+</Cards>

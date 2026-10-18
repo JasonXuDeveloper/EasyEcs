@@ -1,0 +1,216 @@
+---
+title: EasyEcs vs Friflo.Engine.ECS
+seoTitle: "EasyEcs vs Friflo.Engine.ECS: C# ECS comparison with benchmarks (Friflo alternative)"
+description: EasyEcs and Friflo.Engine.ECS side by side. How their concepts map, the same system written in both, every benchmark between them, and when Friflo is the better choice.
+icon: GitCompare
+---
+
+[Friflo.Engine.ECS](https://github.com/friflo/Friflo.Engine.ECS) is the closest peer of EasyEcs: both are archetype
+ECS libraries that allocate nothing per server tick, both have tags, indexed components, relations and a hierarchy,
+and on the headline tick they are close. The differences are in the model. Friflo
+iterates chunks of a cached query and records structural changes in a command buffer; EasyEcs generates struct jobs
+from `[ForEach]` methods, applies changes immediately, keeps removed components' rows with presence bits, and tracks
+changes and removals as data instead of events.
+
+## At a glance [#at-a-glance]
+
+| | EasyEcs | Friflo.Engine.ECS |
+| --- | --- | --- |
+| Storage | archetype tables, presence bits per column | archetypes |
+| Changes during a query | applied at once | `StructuralChangeException`; recorded in a `CommandBuffer` |
+| Removing a component or a tag | flips a bit, the entity keeps its row | moves the entity to another archetype |
+| Systems | `EcsSystem` with generated `[ForEach]` jobs | `SystemRoot`, `SystemGroup`, `QuerySystem` |
+| Change tracking | `[Changed<T>]`: rows written since the last run | none (component events) |
+| Removal tracking | `[Removed<T>]` | `OnComponentRemoved` events |
+| Saves | binary `Save` / `Load`, in-memory snapshots | JSON (`EntitySerializer`) |
+| Compile-time checks | analyzer EECS002-EECS024 with code fixes | none |
+| Runtimes | net10.0 | netstandard2.1, net6.0-8.0; Unity |
+
+## Concepts side by side [#concepts]
+
+| Concept | Friflo.Engine.ECS | EasyEcs |
+| --- | --- | --- |
+| World | `new EntityStore()` | `new World()` |
+| Component | `struct X : IComponent` | `struct X : IComponent` (namespace `EasyEcs`) |
+| Tag | `struct Dead : ITag`, `AddTag<Dead>()` | `struct Dead : IComponent` (empty), `entity.Set(new Dead())` |
+| Singleton | `UniqueEntity` | `ISingletonComponent`, `world.AddSingleton<T>()` |
+| Create | `store.CreateEntity(a, b)` | `world.CreateEntity(a, b)` |
+| Read, write | `entity.GetComponent<T>()` (ref) | `entity.Get<T>()` (ref), `entity.Read<T>()` (read-only) |
+| Add, remove | `entity.AddComponent(c)`, `RemoveComponent<T>()` | `entity.Set(c)`, `entity.Remove<T>()` |
+| Destroy | `entity.DeleteEntity()` | `entity.Destroy()`, `world.DestroyEntities<T>(filter)` |
+| Query | `store.Query<A, B>().WithoutAnyTags(Tags.Get<Dead>())` | `[ForEach, Without<Dead>]`; `QueryFilter.Create().Without<Dead>()` |
+| Iterate | `foreach (var (as, bs, entities) in query.Chunks)` + `Span` loops | a `[ForEach]` method, or a batch method taking `Span<T>` |
+| Entity per row | `query.ForEachEntity((ref A a, Entity e) => ...)` | an `Entity` parameter of a `[ForEach]` method |
+| Command buffer | `store.GetCommandBuffer()`, `Playback()` | none: changes apply at once |
+| Bulk change | `EntityBatch`, `query.Entities.ApplyBatch(batch)` | `world.SetAll(value, filter)`, `RemoveAll<T>(filter)` |
+| Prefab | an entity of the store, `store.CloneEntity(e)` | `Prefab`, `world.Instantiate(prefab, span)` |
+| Disable | `entity.Enabled = false` | a tag and `[Without<T>]`, or `entity.Disable<T>()` |
+| Indexed component | `IIndexedComponent<TKey>`, `store.ComponentIndex<T, TKey>()[key]`, `ValueInRange` | `IIndexed<TKey>`, `world.Index<T, TKey>().Find(key)`, ordered `Range` |
+| Link to an entity | `ILinkComponent`, `GetIncomingLinks<T>()` | an `EntityId` key (`IIndexed<EntityId>`), `index.Find(target)` |
+| Many links | `ILinkRelation`, `AddRelation`, `GetRelations<T>()` | `IRelation`, `entity.AddRelation`, `world.Relations<T>()` |
+| Hierarchy | `AddChild`, `ChildEntities` | `ChildOf(parent)`, `world.Children(parent)`, cascading destroy |
+| Removal callback | `store.OnComponentRemoved += ...` | `[Removed<T>]` (no callback) |
+| Parallel query | `store.JobRunner = new ParallelJobRunner(n)`, `QueryJob.RunParallel()` | `[ForEach(Parallel = true)]` |
+| Save | `EntitySerializer.WriteStore` / `ReadIntoStore` (JSON) | `world.Save(writer)` / `world.Load(bytes)` (binary) |
+
+## The same task in both [#same-task]
+
+The death check of the headline tick: units whose health ran out get a `Dead` tag and are counted. Friflo cannot add
+the tag while its query iterates, so the port records it and plays the buffer back after the system
+(`FrifloSimulation.cs`).
+
+<Tabs items={['EasyEcs', 'Friflo.Engine.ECS']}>
+<Tab value="EasyEcs">
+
+```csharp title="DeathSystem.cs"
+public struct Hp : IComponent { public int Value, Max; }
+public struct Npc : IComponent { public int TemplateId; }
+public struct Deaths : ISingletonComponent { public int Count, NpcKills; }
+
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void CheckDeath(Entity entity, in Hp hp, ref Deaths deaths)
+    {
+        if (hp.Value > 0) return;
+        entity.Set(new Dead());                       // applied now
+        deaths.Count++;
+        if (entity.Has<Npc>()) deaths.NpcKills++;
+    }
+}
+```
+
+```csharp
+world.AddSingleton<Deaths>();
+world.AddSystem<DeathSystem>();
+world.Update();
+```
+
+</Tab>
+<Tab value="Friflo.Engine.ECS">
+
+```csharp title="FrifloDeath.cs" doccheck=skip
+var alive = store.Query<Hp>().WithoutAnyTags(Tags.Get<Dead>());
+var buffer = store.GetCommandBuffer();
+buffer.ReuseBuffer = true;
+
+foreach (var (hps, entities) in alive.Chunks)
+{
+    var hp = hps.Span;
+    for (int i = 0; i < hp.Length; i++)
+    {
+        if (hp[i].Value > 0) continue;
+        buffer.AddTag<Dead>(entities.Ids[i]);         // recorded
+        counters.Deaths++;
+        if (entities.EntityAt(i).HasComponent<Npc>()) counters.NpcKills++;
+    }
+}
+
+buffer.Playback();                                    // applied here
+```
+
+</Tab>
+</Tabs>
+
+The counters live in a singleton that the generated job resolves once per pass. Because the `Dead` tag is applied at
+once, a later system in the same update already skips the corpse.
+
+## The numbers [#numbers]
+
+The headline tick:
+
+<Tabs items={['100,000 entities', '10,000 entities']}>
+<Tab value="100,000 entities">
+
+<PeerChart />
+
+</Tab>
+<Tab value="10,000 entities">
+
+<PeerChart entities="10000" />
+
+</Tab>
+</Tabs>
+
+Friflo takes <BenchValue k="peers.friflo.ratio" /> the time of EasyEcs at 100,000 entities and
+<BenchValue k="peers.friflo10k.ratio" /> at 10,000. The two have traded the lead between runs on the same machine,
+so read this as "even", with the per-operation breakdown showing where each one gains:
+
+<BenchChart bench="OperationBenchmark" title="Single operations of the headline world, 100,000 entities" />
+
+Toggling a status and spawning from a prefab are where EasyEcs gains (presence bits, one row copy per instance);
+plain two- and three-component iteration and batched entity access are even.
+
+Features both libraries have:
+
+<Tabs items={['Removals', 'Changes', 'Relations', 'Indexes']}>
+<Tab value="Removals">
+
+<BenchChart bench="RemovalComparison" methods="EasyEcs_Removed,Friflo_Event" title="Send the buffs that expired: 10 or 1,000 of 100,000" />
+
+</Tab>
+<Tab value="Changes">
+
+<BenchChart
+  bench="ChangeTrackingComparison"
+  methods="EasyEcs_Changed,Friflo_DirtyTag,Friflo_Scan"
+  title="Replicate the entities written this tick: 10 or 1,000 of 100,000"
+  subtitle="Friflo has no change filter: a dirty tag added on write, or a scan comparing values."
+/>
+
+</Tab>
+<Tab value="Relations">
+
+<BenchChart bench="RelationComparison" title="Rewire 100 of 10,000 friend lists, walk 100 follower sets" />
+<BenchChart bench="HierarchyComparison" title="Create and destroy 1,000 squads of 11" />
+
+</Tab>
+<Tab value="Indexes">
+
+<BenchChart bench="IndexComparison" methods="EasyEcs_Index,Friflo_Links" title="Trades, then 100 inventories counted" />
+<BenchChart bench="ValueQueryComparison" title="Rating ranges and zone sums over 100,000 players" />
+
+</Tab>
+</Tabs>
+
+<BenchChart bench="DisableComparison" methods="EasyEcs_Tag,EasyEcs_DisableComponent,Friflo_Enabled" title="Units fall asleep and wake up, then the awake are summed" />
+<BenchChart bench="BulkChangeComparison" methods="EasyEcs_SetAllRemoveAll,Friflo_ApplyBatch" title="Stun 100,000 fighters, then lift the stun" />
+<BenchChart bench="StructuralChangeComparison" methods="EasyEcs_Direct,Friflo_CommandBuffer" title="Mark the dead and revive them during two passes over 100,000 units" />
+<BenchChart bench="SaveComparison" methods="EasyEcs_SaveLoad,Friflo_Json" title="Save and load 10,000 units" subtitle="EasyEcs writes binary, Friflo JSON: the formats differ." />
+
+## What Friflo does better [#what-friflo-does-better]
+
+- **Removal callbacks at small counts.** Friflo's `OnComponentRemoved` reports 10 removals in
+  <BenchValue k="removed.friflo.10" /> against <BenchValue k="removed.10" /> for `[Removed<T>]`: the callback collects
+  the ids as removals happen. At 1,000 removals they are even.
+- **Relations.** On the friend-list benchmark Friflo is slightly ahead (<BenchValue k="relation.friflo" /> against
+  <BenchValue k="relation.easyecs" />), within the error: both keep a list of links per entity and an index by
+  target.
+- **The parallel query.** Friflo's `ParallelJobRunner` (<BenchValue k="parallelQuery.friflo" />) is ahead of a
+  parallel `[ForEach]` (<BenchValue k="parallelQuery.easyecs" />) in this run, whose parallel rows carry a large
+  error. Friflo keeps worker threads of its own; EasyEcs wakes thread-pool helpers only while they pay
+  ([D22](/en/docs/decisions)).
+- **Reach and tooling.** Unity, netstandard2.1 and net6.0-8.0, events, a thread-safe `CommandBufferSynced` and JSON
+  serialization.
+
+## When to choose Friflo [#when-to-choose-friflo]
+
+Choose Friflo when you need Unity or a runtime older than .NET 10, want events or JSON, or prefer explicit chunk
+loops and a command buffer. Choose EasyEcs for a .NET 10 server where you want changes applied where they are
+decided, systems written as one method each and checked at compile time, change tracking without dirty tags, and
+binary saves and snapshots built in. Porting a Friflo codebase:
+[Migrate from Friflo.Engine.ECS](/en/docs/migrate-from-friflo).
+
+## Related [#related]
+
+<Cards>
+  <Card title="Migrate from Friflo.Engine.ECS" href="/en/docs/migrate-from-friflo">
+    The API mapping and a whole simulation ported, step by step.
+  </Card>
+  <Card title="Comparison" href="/en/docs/comparison">
+    Every benchmark against Friflo.Engine.ECS, Arch and DefaultEcs.
+  </Card>
+  <Card title="Change tracking" href="/en/docs/guide/change-tracking">
+    `[Changed<T>]` and `[Removed<T>]` in depth.
+  </Card>
+</Cards>

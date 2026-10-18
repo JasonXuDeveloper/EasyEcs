@@ -1,0 +1,293 @@
+---
+title: Migrate from Friflo.Engine.ECS
+seoTitle: "Migrate from Friflo.Engine.ECS to EasyEcs: API mapping and a ported simulation (C#)"
+description: Port a Friflo.Engine.ECS codebase to EasyEcs step by step. Concepts and API mapped old to new, chunk loops and command buffers turned into [ForEach] methods, and the pitfalls to avoid.
+icon: ArrowRightLeft
+---
+
+Friflo.Engine.ECS and EasyEcs are both archetype libraries that allocate nothing per tick, so the data model ports
+one to one: components stay structs, tags stay empty structs, an `EntityStore` becomes a `World`. What changes is how
+a system is written. A cached `ArchetypeQuery` iterated chunk by chunk becomes a `[ForEach]` method whose parameters
+are the components; changes recorded in a `CommandBuffer` become direct calls; `OnComponentRemoved` subscriptions
+become `[Removed<T>]` methods. The worked example is the real port in the repository:
+[`FrifloSimulation.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/benchmarks/EasyEcs.Comparison/FrifloSimulation.cs)
+and the EasyEcs world it was ported from,
+[`WorldSimulation.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/benchmarks/EasyEcs.Benchmark/WorldSimulation.cs).
+
+## Before you start [#before-you-start]
+
+<Callout type="warn" title="Requirements">
+  EasyEcs targets net10.0 only. Code that must also run in Unity or on netstandard2.1 / .NET 6-8 stays on Friflo.
+</Callout>
+
+```bash
+dotnet add package EasyEcs
+```
+
+Both libraries name their component interface `IComponent`. During a port, alias one of them
+(`using F = Friflo.Engine.ECS;`), as the comparison project does.
+
+## Concepts [#concepts]
+
+| Friflo.Engine.ECS | EasyEcs | What changes |
+| --- | --- | --- |
+| `EntityStore` | `World` | One owner thread per world. |
+| `IComponent` struct | `IComponent` struct | Nothing but the namespace. |
+| `ITag` | An empty `IComponent` struct | Tags are components; removing one flips a bit. |
+| `ArchetypeQuery<A, B>` + `Chunks` loops | A `[ForEach]` method in an `EcsSystem` | The generator writes the loop. |
+| `CommandBuffer` + `Playback()` | Direct calls | Changes apply at once, also mid-pass. |
+| `UniqueEntity` | `ISingletonComponent` | Per-world data, a `ref` parameter. |
+| `SystemRoot`, `SystemGroup`, `QuerySystem` | `World.AddSystem<T>()`, `ISystemGroup`, `EcsSystem` | |
+| `OnComponentRemoved` / `OnComponentAdded` events | `[Removed<T>]`, `[Changed<T>]` | State changes are data. |
+| `entity.Enabled` | A tag and `[Without<T>]`, or `entity.Disable<T>()` | EasyEcs disables components, not whole entities ([D8](/en/docs/decisions)). |
+
+## API mapping [#api-mapping]
+
+### Entities and components [#entities-and-components]
+
+| Friflo.Engine.ECS | EasyEcs |
+| --- | --- |
+| `var store = new EntityStore();` | `var world = new World();` |
+| `store.EnsureCapacity(n)` | `world.EnsureEntityCapacity(n)` |
+| `store.CreateEntity(a, b, c)` | `world.CreateEntity(a, b, c)` |
+| `store.Count` | `world.EntityCount` |
+| `entity.AddComponent(c)` | `entity.Set(c)` |
+| `entity.RemoveComponent<T>()` | `entity.Remove<T>()` |
+| `ref var c = ref entity.GetComponent<T>()` | `ref var c = ref entity.Get<T>()`; `entity.Read<T>()` to read |
+| `entity.HasComponent<T>()` | `entity.Has<T>()` |
+| `entity.AddTag<Dead>()` / `RemoveTag<Dead>()` | `entity.Set(new Dead())` / `entity.Remove<Dead>()` |
+| `entity.Tags.Has<Dead>()` | `entity.Has<Dead>()` |
+| `entity.DeleteEntity()` | `entity.Destroy()` |
+| `store.GetEntityById(id)` | `world.TryGetEntity(entityId, out var entity)` |
+| `store.CloneEntity(template)` | `world.Instantiate(prefab)`, `entity.Clone()` |
+
+### Queries and iteration [#queries-and-iteration]
+
+| Friflo.Engine.ECS | EasyEcs |
+| --- | --- |
+| `store.Query<A, B>()` | the method's parameters: `static void M(ref A a, in B b)` |
+| `.AllComponents(ComponentTypes.Get<C>())` | `[With<C>]` |
+| `.WithoutAnyComponents(ComponentTypes.Get<C>())` | `[Without<C>]` |
+| `.AllTags(Tags.Get<Dead>())` / `.WithoutAnyTags(...)` | `[With<Dead>]` / `[Without<Dead>]` |
+| `foreach (var (as, bs, entities) in query.Chunks)` | a batch method `static void M(Span<A> a, ReadOnlySpan<B> b)`, or a per-entity method |
+| `entities.Ids[i]`, `entities.EntityAt(i)` | an `Entity` parameter, or an `EntitySpan` in a batch method |
+| `query.ForEachEntity((ref A a, Entity e) => ...)` | `static void M(Entity e, ref A a)` |
+| `query.Count` | `world.Count<A>(filter)` |
+| `query.ForEach(...)` + `RunParallel()` | `[ForEach(Parallel = true)]` |
+
+### Changes, events and features [#changes-and-features]
+
+| Friflo.Engine.ECS | EasyEcs |
+| --- | --- |
+| `buffer.AddComponent(id, c)` + `Playback()` | `entity.Set(c)` |
+| `buffer.RemoveComponent<T>(id)`, `RemoveTag<T>(id)` | `entity.Remove<T>()` |
+| `buffer.DeleteEntity(id)` | `entity.Destroy()` |
+| `buffer.CreateEntity()` + `AddComponent` per component | `world.CreateEntity(a, b, c)` |
+| `EntityBatch` + `query.Entities.ApplyBatch(batch)` | `world.SetAll(value, filter)`, `world.RemoveAll<T>(filter)` |
+| `store.OnComponentRemoved += ...` | `[ForEach, Removed<T>]` (with `T : ITrackChanges`) |
+| A dirty tag added on write | `T : ITrackChanges` + `[ForEach, Changed<T>]` |
+| `IIndexedComponent<K>`, `store.ComponentIndex<T, K>()[key]` | `IIndexed<K>`, `world.Index<T, K>().Find(key)` |
+| `query.ValueInRange<T, K>(min, max)` | `world.Index<T, K>().Range(min, max)` |
+| `ILinkComponent`, `GetIncomingLinks<T>()` | an `EntityId` key: `IIndexed<EntityId>`, `index.Find(target)` |
+| `ILinkRelation`, `AddRelation`, `GetRelations<T>()` | `IRelation`, `entity.AddRelation(...)`, `world.Relations<T>()` |
+| `AddChild`, `ChildEntities` | `ChildOf(parent)`, `world.Children(parent)` |
+| `EntitySerializer` (JSON) | `world.Save(writer)` / `world.Load(bytes)` (binary) |
+
+## A worked example: the headline simulation [#worked-example]
+
+<Steps>
+<Step>
+
+### Components and tags [#components]
+
+The structs keep their fields. `Dead : ITag` becomes an empty component; the counters become a singleton.
+
+```csharp title="Components.cs"
+public struct Position : IComponent { public float X, Y; }
+public struct Velocity : IComponent { public float X, Y; }
+public struct Health : IComponent { public int Value, Max; }
+public struct AoiCell : IComponent { public int Cell; }
+public struct Player : IComponent { public long AccountId; }
+public struct Npc : IComponent { public int TemplateId; }
+public struct Dead : IComponent;
+
+public struct WorldStats : ISingletonComponent
+{
+    public int CellChanges, Deaths, NpcKills;
+}
+```
+
+</Step>
+<Step>
+
+### A chunk loop becomes a method [#chunk-loop]
+
+Friflo:
+
+```csharp doccheck=skip
+_cells = _store.Query<Position, AoiCell>().WithoutAnyTags(Tags.Get<Dead>());
+
+foreach (var (positions, cells, _) in _cells.Chunks)
+{
+    var ps = positions.Span;
+    var cs = cells.Span;
+    for (int i = 0; i < ps.Length; i++)
+    {
+        int cell = Rules.Cell(ps[i].X, ps[i].Y);
+        if (cell == cs[i].Cell) continue;
+        cs[i].Cell = cell;
+        _c.CellChanges++;
+    }
+}
+```
+
+EasyEcs: one method per row; the counters are a `ref` singleton parameter, resolved once per pass.
+
+```csharp title="AoiSystem.cs"
+public class AoiSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void UpdateCell(in Position p, ref AoiCell aoi, ref WorldStats stats)
+    {
+        int cell = (int)(p.Y * (1f / 64f)) * 64 + (int)(p.X * (1f / 64f));
+        if (cell == aoi.Cell) return;
+        aoi.Cell = cell;
+        stats.CellChanges++;
+    }
+}
+```
+
+</Step>
+<Step>
+
+### The command buffer goes [#command-buffer]
+
+Friflo records the tag and plays the buffer back after the loop:
+
+```csharp doccheck=skip
+foreach (var (healths, entities) in _alive.Chunks)
+{
+    var health = healths.Span;
+    for (int i = 0; i < health.Length; i++)
+    {
+        if (health[i].Value > 0) continue;
+        _buffer.AddTag<Dead>(entities.Ids[i]);
+        _c.Deaths++;
+        if (entities.EntityAt(i).HasComponent<Npc>()) _c.NpcKills++;
+    }
+}
+_buffer.Playback();
+```
+
+EasyEcs adds it where it is decided, and the respawn system after it already sees the dead:
+
+```csharp title="DeathSystem.cs"
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
+    {
+        if (health.Value > 0) return;
+        entity.Set(new Dead());
+        stats.Deaths++;
+        if (entity.Has<Npc>()) stats.NpcKills++;
+    }
+}
+
+public class RespawnSystem : EcsSystem
+{
+    [ForEach, With<Dead>, With<Player>]
+    static void Respawn(Entity entity, ref Health health)
+    {
+        health.Value = health.Max;
+        entity.Remove<Dead>();
+    }
+}
+```
+
+</Step>
+<Step>
+
+### Clones become prefabs [#prefabs]
+
+Friflo spawns NPCs by cloning a template entity of the store, which queries see like any other. A `Prefab` lives
+outside every world, and a wave is one call:
+
+```csharp
+private static readonly Prefab Grunt = new Prefab()
+    .Set(new Position(), new Velocity(), new Health { Value = 100, Max = 100 })
+    .Set(new AoiCell { Cell = -1 }, new Npc { TemplateId = 7 });
+```
+
+```csharp
+var wave = new Entity[5_000];
+world.Instantiate(Grunt, wave);
+```
+
+</Step>
+<Step>
+
+### An event becomes a `[Removed<T>]` method [#events]
+
+A subscription that collects the entities which lost a component, read once per tick, becomes a method. The component
+must be tracked:
+
+```csharp title="BuffReplication.cs"
+public record struct Buff(int Ticks) : IComponent, ITrackChanges;
+public record struct Expired(int Count) : IComponent;
+
+public class BuffReplication : EcsSystem
+{
+    [ForEach, Removed<Buff>]
+    static void Send(ref Expired expired) => expired.Count++;
+}
+```
+
+</Step>
+<Step>
+
+### The tick [#the-tick]
+
+Friflo's `Tick()` calls every loop and every playback in order. EasyEcs runs the systems in the order they were added:
+
+```csharp title="Program.cs"
+world.AddSingleton<WorldStats>();
+world.AddSystem<AoiSystem>();
+world.AddSystem<DeathSystem>();
+world.AddSystem<RespawnSystem>();
+world.AddSystem<BuffReplication>();
+world.Update();
+```
+
+</Step>
+</Steps>
+
+The two versions of the whole tick, on the same machine:
+
+<PeerChart />
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| Both `IComponent`s imported | Ambiguous references | Compiler error: alias one namespace |
+| Keeping a `[Removed<T>]` component untracked | Removals are not recorded | Add `ITrackChanges` to `T` |
+| Taking `T` as a parameter of a `[Removed<T>]` method | No row can both have and lack `T` | [EECS016](/en/docs/guide/analyzer#eecs016) |
+| Storing an `Entity` in a component (Friflo's link components do) | The column holds references | [EECS017](/en/docs/guide/analyzer#eecs017) (warning): store `EntityId` |
+| Writing an indexed component through `ref` (Friflo re-indexes on `AddComponent`) | The index cannot see the new key | [EECS015](/en/docs/guide/analyzer#eecs015): use `Set` |
+| Expecting `Enabled = false` on a whole entity | No such switch | Use a tag and `[Without<T>]` |
+| A static method without `Entity` or `World` that adds a tag | It promised no structural change | [EECS013](/en/docs/guide/analyzer#eecs013) |
+
+## Related [#related]
+
+<Cards>
+  <Card title="EasyEcs vs Friflo.Engine.ECS" href="/en/docs/vs-friflo">
+    The two libraries side by side, with every benchmark.
+  </Card>
+  <Card title="Change tracking" href="/en/docs/guide/change-tracking">
+    `[Changed<T>]` and `[Removed<T>]` instead of dirty tags and events.
+  </Card>
+  <Card title="Prefabs" href="/en/docs/guide/prefabs">
+    Templates outside every world, instantiated one at a time or as a wave.
+  </Card>
+</Cards>

@@ -1,0 +1,182 @@
+---
+title: EasyEcs 与 Arch
+seoTitle: "EasyEcs 与 Arch：C# ECS 对比与跑分（.NET 10 上的 Arch 替代方案）"
+description: EasyEcs 和 Arch 并排对比。概念如何对应，两边写同一个系统，实测的服务器 tick 和各项功能，以及什么时候 Arch 更合适。
+icon: GitCompare
+---
+
+[Arch](https://github.com/genaray/Arch) 和 EasyEcs 都是 C# 的原型（archetype）ECS：组件相同的实体共用一张表，查询顺着
+表的列走。区别在于核心库替你做了多少。Arch 是一个小而快的核心：查询、struct job、chunk 和命令缓冲，系统和源生成器在
+单独的 Arch.Extended 包里。EasyEcs 把系统、生成的 job、变更追踪、索引、关系、存档和快照都放进一个包，面向 .NET 10
+服务器，结构变更当场生效，不走命令缓冲。
+
+## 一览 [#at-a-glance]
+
+| | EasyEcs | Arch |
+| --- | --- | --- |
+| 存储 | 原型表，每列有存在位 | 按 chunk 存放的原型 |
+| 查询途中的变更 | 当场生效 | 记进 `CommandBuffer`，之后回放 |
+| 移除组件 | 翻一个位，实体留在原行 | 把实体搬到另一个原型 |
+| 系统 | 内置，由 `[ForEach]` 方法生成 | Arch.Extended |
+| 变更与移除追踪 | `[Changed<T>]`、`[Removed<T>]` | 事件（`SubscribeComponentSet`、`SubscribeComponentRemoved`） |
+| 索引、关系、层级 | 内置 | 关系在单独的包里 |
+| 每个服务器 tick 的分配 | 无 | 命令缓冲会分配 |
+| 运行时 | net10.0 | netstandard2.1、net6.0、net8.0；Unity |
+
+## 概念对照 [#concepts]
+
+| 概念 | Arch | EasyEcs |
+| --- | --- | --- |
+| World | `World.Create()`、`World.Destroy(world)` | `new World()`、`world.Dispose()` |
+| 组件 | 任意 struct | 实现 `IComponent` 的 struct |
+| 标签 | 空 struct | 实现 `IComponent` 的空 struct |
+| 单例 | 没有（挂在某个实体上的组件） | `ISingletonComponent`、`world.AddSingleton<T>()` |
+| 查询 | `new QueryDescription().WithAll<A, B>().WithNone<C>()` | 方法上的 `[ForEach, Without<C>]`；临时调用用 `QueryFilter.Create().Without<C>()` |
+| struct job | `IForEach<A, B>` 的 `Update(ref A, ref B)`，由 `world.InlineQuery<Job, A, B>(in query, ref job)` 运行 | `IForEach<A, B>` 的 `Execute(ref A, ref B)`，由 `world.ForEach<A, B, Job>(ref job, in filter)` 运行 |
+| 带实体的 job | `IForEachWithEntity<A>`、`InlineEntityQuery` | `IForEachEntity<A>`、`ForEachEntity`，或 `[ForEach]` 方法的 `Entity` 参数 |
+| chunk | `world.Query(in query).GetChunkIterator()`，再 `chunk.GetSpan<T>()` | 参数为 `Span<T>` 的批量 `[ForEach]` 方法，或 `ForEachBatch` |
+| 系统 | Arch.Extended 的 `BaseSystem` | 带 `[ForEach]` 方法的 `EcsSystem` |
+| 命令缓冲 | `CommandBuffer`、`Playback(world)` | 没有：`entity.Set`、`Remove`、`Destroy` 当场生效 |
+| 批量变更 | `world.Add(in query, value)`、`world.Remove<T>(in query)` | `world.SetAll(value, filter)`、`world.RemoveAll<T>(filter)` |
+| 并行查询 | `World.SharedJobScheduler`、`InlineParallelQuery` | `[ForEach(Parallel = true)]` |
+| 事件 | `SubscribeComponentAdded` / `Removed` / `Set` | 没有：`[Changed<T>]`、`[Removed<T>]`，或由后面的系统查询标签 |
+
+## 同一个任务的两种写法 [#same-task]
+
+取主 tick 里的战斗系统：战斗单位按冷却攻击，部分命中会点燃目标。Arch 的查询迭代时不能加 `Burning`，所以移植版先记下
+变更，系统跑完再回放（`ArchSimulation.cs`）。EasyEcs 当场加上（`WorldSimulation.cs`）。
+
+<Tabs items={['EasyEcs', 'Arch']}>
+<Tab value="EasyEcs">
+
+```csharp title="CombatSystem.cs"
+public struct Attack : IComponent { public int Damage, Cooldown, Interval; }
+public struct Hp : IComponent { public int Value, Max; }
+public struct Fire : IComponent { public int Ticks; }
+
+public class CombatSystem : EcsSystem
+{
+    [ForEach, Without<Dead>, Without<Stunned>]
+    static void Fight(Entity entity, ref Attack attack, ref Hp hp)
+    {
+        if (--attack.Cooldown > 0) return;
+        attack.Cooldown = attack.Interval;
+        hp.Value -= attack.Damage;
+        if (entity.Id.Index % 20 == 0 && !entity.Has<Fire>())
+            entity.Set(new Fire { Ticks = 10 });   // 当场生效，遍历途中也一样
+    }
+}
+```
+
+```csharp
+world.AddSystem<CombatSystem>();
+world.Update();
+```
+
+</Tab>
+<Tab value="Arch">
+
+```csharp title="ArchCombat.cs" doccheck=skip
+private static readonly QueryDescription Fighters =
+    new QueryDescription().WithAll<Attack, Hp>().WithNone<Dead, Stunned>();
+
+private struct Fight : IForEachWithEntity<Attack, Hp>
+{
+    public World W;
+    public CommandBuffer B;
+
+    public void Update(Entity e, ref Attack attack, ref Hp hp)
+    {
+        if (--attack.Cooldown > 0) return;
+        attack.Cooldown = attack.Interval;
+        hp.Value -= attack.Damage;
+        if (e.Id % 20 == 0 && !W.Has<Fire>(e))
+            B.Add(e, new Fire { Ticks = 10 });   // 先记下
+    }
+}
+
+var fight = new Fight { W = world, B = buffer };
+world.InlineEntityQuery<Fight, Attack, Hp>(in Fighters, ref fight);
+buffer.Playback(world);                          // 在这里才生效
+```
+
+</Tab>
+</Tabs>
+
+在 EasyEcs 里，过滤、job struct 和调用都由方法生成；系统的访问集（写 `Attack` 和 `Hp`）也是生成的，违反它的方法会被
+分析器拦下。
+
+## 数字 [#numbers]
+
+主 tick，两个库用同一套规则，并校验过产出的计数器一致：
+
+<PeerChart />
+
+在这个 tick 上，Arch 的耗时是 EasyEcs 的 <BenchValue k="peers.arch.ratio" />，每个 tick 分配
+<BenchValue k="peers.arch.alloc" />，大部分来自命令缓冲：它在记录和回放时会从池里取列表并扩容。
+
+<BenchChart
+  bench="StructuralChangeComparison"
+  param="Killed=1000"
+  methods="EasyEcs_Direct,Arch_CommandBuffer"
+  title="两遍遍历时把 100,000 个单位里的 1,000 个标记死亡再复活"
+/>
+
+<BenchChart
+  bench="ChangeTrackingComparison"
+  param="Written=1000"
+  methods="EasyEcs_Changed,Arch_DirtyTag,Arch_Scan"
+  title="同步本 tick 写过的实体：100,000 个里的 1,000 个"
+  subtitle="Arch 没有变更过滤：要么写入时加脏标签，要么扫描比较值。"
+/>
+
+<BenchChart
+  bench="DisableComparison"
+  param="Switched=10000"
+  methods="EasyEcs_Tag,Arch_Tag"
+  title="100,000 个单位里 10,000 个睡下又醒来，然后汇总醒着的"
+/>
+
+<BenchChart
+  bench="BulkChangeComparison"
+  methods="EasyEcs_SetAllRemoveAll,Arch_AddRemoveByQuery"
+  title="眩晕 100,000 个战斗单位，再解除"
+  subtitle="Arch 搬整张表；眩晕组件有了列以后，EasyEcs 只翻存在位。"
+/>
+
+<BenchChart
+  bench="ParallelQueryComparison"
+  methods="EasyEcs_Parallel,Arch_InlineParallelQuery"
+  title="用所有核心驱动 100,000 个代理"
+/>
+
+其余结果，包括没有 Arch 参与的（Arch 核心里没有值索引、层级和存档），都在[对比页](/zh/docs/comparison)。
+
+## Arch 做得更好的地方 [#what-arch-does-better]
+
+- **并行查询。** 这次运行里，Arch 的 job 调度器上的 `InlineParallelQuery` 领先 EasyEcs 的并行 `[ForEach]`：调度器有
+  自己的工作线程，连续跑多遍时占优。EasyEcs 选的是线程池帮手，只在划算时唤醒（[D22](/zh/docs/decisions)）；这次的并行
+  数字误差很大。
+- **覆盖面。** Arch 支持 netstandard2.1、net6.0、net8.0 和 Unity。EasyEcs 需要 .NET 10。
+- **核心小。** 只要查询和存储的话，Arch 的核心更小；系统、关系和持久化是用到时再加的包。
+- **事件。** Arch 会发组件和实体事件；EasyEcs 刻意没有（[D1](/zh/docs/decisions)）。
+
+## 什么时候选 Arch [#when-to-choose-arch]
+
+需要 Unity 或比 .NET 10 老的运行时、想要最小的核心、也愿意从 Arch.Extended 拼出系统和工具，就选 Arch。.NET 10 服务器、
+状态每个 tick 都在变，想要在决定的地方就生效的变更、生成且经过分析器检查的系统、变更与移除追踪、每个 tick 零分配，
+就选 EasyEcs。要移植 Arch 项目：[从 Arch 迁移](/zh/docs/migrate-from-arch)。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="从 Arch 迁移" href="/zh/docs/migrate-from-arch">
+    API 对照表，外加一整个模拟的逐步移植。
+  </Card>
+  <Card title="对比" href="/zh/docs/comparison">
+    和 Arch、Friflo.Engine.ECS、DefaultEcs 的全部跑分。
+  </Card>
+  <Card title="EasyEcs 为什么快" href="/zh/docs/why-fast">
+    存在位、生成的 job 和当场生效的结构变更。
+  </Card>
+</Cards>

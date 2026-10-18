@@ -238,6 +238,174 @@ export const keys: Record<string, KeyDef> = {
     method: 'EasyEcs_Removed',
     params: { Removed: '1000' },
   },
+  // Performance, why-fast and the comparison pages
+  'tick.oneWorld10k.alloc': {
+    bench: 'WorldSimulationBenchmark',
+    method: 'Tick',
+    params: { Entities: '10000' },
+    field: 'allocated',
+  },
+  'tick.fourWorlds.alloc': {
+    bench: 'MultiWorldBenchmark',
+    method: 'TickAllWorlds',
+    params: { TotalEntities: '100000' },
+    field: 'allocated',
+  },
+  'tick.battle.alloc': {
+    bench: 'BattleServerBenchmark',
+    method: 'Tick',
+    params: { Units: '100000' },
+    field: 'allocated',
+  },
+  'peers.friflo.ratio': {
+    bench: 'EcsComparisonBenchmark',
+    method: 'Friflo',
+    params: { Entities: '100000' },
+    field: 'ratio',
+  },
+  'peers.arch.alloc': {
+    bench: 'EcsComparisonBenchmark',
+    method: 'Arch',
+    params: { Entities: '100000' },
+    field: 'allocated',
+  },
+  'peers.defaultecs.alloc': {
+    bench: 'EcsComparisonBenchmark',
+    method: 'DefaultEcs',
+    params: { Entities: '100000' },
+    field: 'allocated',
+  },
+  'peers.easyecs10k': {
+    bench: 'EcsComparisonBenchmark',
+    method: 'EasyEcs',
+    params: { Entities: '10000' },
+  },
+  'peers.friflo10k.ratio': {
+    bench: 'EcsComparisonBenchmark',
+    method: 'Friflo',
+    params: { Entities: '10000' },
+    field: 'ratio',
+  },
+  'ops.iterate1': { bench: 'OperationBenchmark', method: 'EasyEcs_Iterate1' },
+  'ops.iterate1.friflo': {
+    bench: 'OperationBenchmark',
+    method: 'Friflo_Iterate1',
+  },
+  'ops.iterate2': { bench: 'OperationBenchmark', method: 'EasyEcs_Iterate2' },
+  'ops.iterate2Simd': {
+    bench: 'OperationBenchmark',
+    method: 'EasyEcs_Iterate2Simd',
+  },
+  'ops.toggle': { bench: 'OperationBenchmark', method: 'EasyEcs_Toggle' },
+  'ops.toggle.friflo': { bench: 'OperationBenchmark', method: 'Friflo_Toggle' },
+  'ops.instantiate': {
+    bench: 'OperationBenchmark',
+    method: 'EasyEcs_Instantiate',
+  },
+  'ops.instantiate.friflo': {
+    bench: 'OperationBenchmark',
+    method: 'Friflo_Instantiate',
+  },
+  'micro.queryIterate': {
+    bench: 'MicroBenchmarks',
+    method: 'QueryIterate',
+    params: { N: '10000' },
+  },
+  'micro.forEachIterate': {
+    bench: 'MicroBenchmarks',
+    method: 'ForEachIterate',
+    params: { N: '10000' },
+  },
+  'micro.churn': {
+    bench: 'MicroBenchmarks',
+    method: 'Churn',
+    params: { N: '10000' },
+  },
+  'micro.churnBatch': {
+    bench: 'MicroBenchmarks',
+    method: 'ChurnBatch',
+    params: { N: '10000' },
+  },
+  'micro.toggle': {
+    bench: 'MicroBenchmarks',
+    method: 'ToggleComponent',
+    params: { N: '10000' },
+  },
+  'micro.forEachSystemWrite': {
+    bench: 'MicroBenchmarks',
+    method: 'ForEachSystemWrite',
+    params: { N: '10000' },
+  },
+  'micro.rawArrayWrite': {
+    bench: 'MicroBenchmarks',
+    method: 'RawArrayWrite',
+    params: { N: '10000' },
+  },
+  'parallel.forEach.off': {
+    bench: 'ParallelForEachBenchmark',
+    method: 'Tick',
+    params: { Parallel: 'False' },
+  },
+  'parallel.forEach.on': {
+    bench: 'ParallelForEachBenchmark',
+    method: 'Tick',
+    params: { Parallel: 'True' },
+  },
+  'parallel.systems.off': {
+    bench: 'ParallelSystemsBenchmark',
+    method: 'Tick',
+    params: { Parallel: 'False' },
+  },
+  'parallel.systems.on': {
+    bench: 'ParallelSystemsBenchmark',
+    method: 'Tick',
+    params: { Parallel: 'True' },
+  },
+  'count.tested': { bench: 'CountBenchmark', method: 'Count' },
+  'sparse.passFew': { bench: 'SparseBenchmark', method: 'PassOverTheFew' },
+  'sparse.countFew': { bench: 'SparseBenchmark', method: 'CountTheFew' },
+  'sparse.passRest': { bench: 'SparseBenchmark', method: 'PassOverTheRest' },
+  'bulk.setAll': { bench: 'BulkBenchmark', method: 'StunAndLift' },
+  'bulk.each': { bench: 'BulkBenchmark', method: 'StunAndLiftEach' },
+  'callsite.once': { bench: 'CallSiteBenchmark', method: 'FilterOnce' },
+  'callsite.atCall': { bench: 'CallSiteBenchmark', method: 'FilterAtCall' },
+  'removed.friflo.10': {
+    bench: 'RemovalComparison',
+    method: 'Friflo_Event',
+    params: { Removed: '10' },
+  },
+  'removed.friflo.1000': {
+    bench: 'RemovalComparison',
+    method: 'Friflo_Event',
+    params: { Removed: '1000' },
+  },
+  'relation.easyecs': {
+    bench: 'RelationComparison',
+    method: 'EasyEcs_Relations',
+  },
+  'relation.friflo': {
+    bench: 'RelationComparison',
+    method: 'Friflo_LinkRelations',
+  },
+  'parallelQuery.easyecs': {
+    bench: 'ParallelQueryComparison',
+    method: 'EasyEcs_Parallel',
+  },
+  'parallelQuery.friflo': {
+    bench: 'ParallelQueryComparison',
+    method: 'Friflo_QueryJob',
+  },
+  'maybe.one': { bench: 'MaybeBenchmark', method: 'OneMethod' },
+  'maybe.two': { bench: 'MaybeBenchmark', method: 'TwoMethods' },
+  'runner.runner': { bench: 'RunnerBenchmark', method: 'Runner' },
+  'runner.query': { bench: 'RunnerBenchmark', method: 'Query' },
+  'prefab.each': { bench: 'PrefabBenchmark', method: 'InstantiateEach' },
+  'prefab.batch': { bench: 'PrefabBenchmark', method: 'InstantiateBatch' },
+  'snapshot.capture.alloc': {
+    bench: 'SnapshotBenchmark',
+    method: 'Capture',
+    field: 'allocated',
+  },
 };
 
 export interface BenchNumber {
@@ -336,6 +504,12 @@ export interface ComparisonRow {
   /** "DirtyTag" of "Friflo_DirtyTag"; "" when the method is the library */
   case: string;
   ours: boolean;
+  /**
+   * A row of EasyEcs' own benchmarks (EasyEcs.Benchmark): every row is EasyEcs,
+   * the case is the method and `vsOurs` is BenchmarkDotNet's ratio against the
+   * class's baseline (null when the class has none)
+   */
+  own: boolean;
   /** This row's time over EasyEcs' time for the same work (1 for that row) */
   vsOurs: number | null;
 }
@@ -349,6 +523,8 @@ export interface Comparison {
    * and Friflo_Iterate1): the rows are grouped by case, one bar per library.
    */
   grouped: boolean;
+  /** A class of EasyEcs.Benchmark: EasyEcs against itself, ratios against the baseline */
+  own: boolean;
 }
 
 export interface ComparisonQuery {
@@ -399,9 +575,13 @@ export function comparison({
       .flatMap((m) => all.filter((row) => row.method === m));
   }
   const keyOf = (row: BenchRow) => JSON.stringify(row.params);
+  // EasyEcs' own benchmarks compare ways of doing one job in EasyEcs, not libraries
+  const own = benchClass(bench)?.namespace === 'EasyEcs.Benchmark';
   const items = rows.map((row) => {
-    const { library, case: name } = splitMethod(row.method);
-    return { row, library, case: name, ours: library === 'EasyEcs' };
+    const { library, case: name } = own
+      ? { library: 'EasyEcs', case: row.method }
+      : splitMethod(row.method);
+    return { row, library, case: name, ours: library === 'EasyEcs', own };
   });
   const cases = new Set(items.map((r) => r.case));
   const grouped =
@@ -420,7 +600,11 @@ export function comparison({
     const base = grouped ? same.find((o) => o.case === item.case) : same[0];
     return {
       ...item,
-      vsOurs: base ? item.row.meanNs / base.row.meanNs : null,
+      vsOurs: own
+        ? item.row.ratio
+        : base
+          ? item.row.meanNs / base.row.meanNs
+          : null,
     };
   });
   const varying = Object.keys(rows[0]?.params ?? {}).filter(
@@ -434,7 +618,7 @@ export function comparison({
         Number(b.ours) - Number(a.ours),
     );
   }
-  return { rows: result, varying, grouped };
+  return { rows: result, varying, grouped, own };
 }
 
 /** "Friflo.Engine.ECS" for "Friflo" */
@@ -449,7 +633,7 @@ export function comparisonLabel(
   withLibrary = true,
 ) {
   const parts = [
-    withLibrary ? libraryName(item.library) : '',
+    withLibrary && !item.own ? libraryName(item.library) : '',
     item.case,
   ].filter(Boolean);
   const params = varying.map((k) => `${k}=${item.row.params[k]}`).join(', ');
