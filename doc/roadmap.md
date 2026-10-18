@@ -130,6 +130,15 @@ needs goes. Each round's findings are listed here with what was generated, chang
     named `TryGetXRef` (one call site); one enumerator for value and relation indexes (two public types renamed for
     about 20 lines); one copy core for `CloneRows` and `CopyRun` (`Instantiate` would test presence per row); one scan
     for `Count` and `Any` (a query hot path for about 15 lines).
+- Round 3 (a review of the generator, analyzer and code fixes for correctness, caching and missed members):
+  - generated: named query items (`item.Position` per `Query<…>` shape; 2 in the battle server, 6 in tests and guides)
+    and prefab buffer writers (`prefab.SetLoot(…)` on the new `Prefab.SetBuffer`: a prefab could only hold an empty
+    buffer before);
+  - changed: generated names unique per method and type, each buffer element and query shape cached on its own, code
+    that compiles for every valid input; analyzer reports on structural calls it missed and none on valid code;
+    EECS024 for `[ForEach]` on a local function; code fixes only where the result compiles;
+  - rejected ([D26](decisions.md#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call)):
+    multi-type `Disable` / `Enable` and bulk calls, and a "use the generated member" diagnostic.
 
 ### Documentation (last, all at once)
 

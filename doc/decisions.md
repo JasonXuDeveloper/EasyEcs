@@ -380,3 +380,27 @@ command buffer 77 μs); 1,000 killed and BattleServer unchanged.
 **Considered.** Holding the storage version seen in a register instead of re-reading it per row: 82 -> 108 μs (the
 job's call leaves too few callee-saved registers, a column ref spills and round-trips the stack every row).
 
+
+## D26. Generated members where code would repeat a type; not for every call
+
+**Decision.** The generator names three more things. A query item's components get names: `item.Position` for
+`item.Component1`, generated per `Query<…>` shape the code calls. A buffer element gets writers on prefabs:
+`prefab.SetLoot(…)`, on `Prefab.SetBuffer<T>(params ReadOnlySpan<T>)`. Code fixes are offered only when their result
+compiles. Two proposals were dropped: multi-type `Disable` / `Enable` and bulk calls, and a hidden "use the generated
+member" diagnostic.
+
+**Why.**
+- **Query items.** `Component1..n` makes the reader count the type arguments. The named member is an inlined getter
+  over the same ref, so it costs nothing. One file per shape keeps an assembly's output to the shapes it uses; one
+  extension block per component and position would mean 45 blocks per component.
+- **Prefab buffers.** Before `SetBuffer`, a prefab could hold only an empty buffer: filling one meant copying a
+  buffer value, which EECS012 rejects. A relation gets no prefab writer, because a recipe's links would name the
+  prefab's own rows.
+
+**Considered.**
+- **`Disable<T1..Tn>()`, `RemoveAll<T1..Tn>()` and the other bulk calls.** After a table's first disable, each call
+  flips presence bits in place. n calls cost n gate entries of a few nanoseconds, and a bulk call over several types
+  needs a meaning for "has any of them" that one-type calls do not. Not built.
+- **A hidden diagnostic with a fix from `entity.Get<Position>()` to `entity.Position`.** It is style, not
+  correctness: the two compile to the same call. It would add an operation callback to every invocation in every
+  user project. The docs teach the generated members; generic code needs the generic API.
