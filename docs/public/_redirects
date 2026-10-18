@@ -1,0 +1,4 @@
+# Short links. Paths without a language (/docs/..., the URLs the library's
+# comments and README use) are redirected to /en or /zh by functions/[[path]].ts.
+/en/start          /en/docs/getting-started      301
+/zh/start          /zh/docs/getting-started      301

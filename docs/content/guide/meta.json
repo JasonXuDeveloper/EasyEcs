@@ -1,5 +1,6 @@
 {
   "title": "Guide",
+  "icon": "BookOpen",
   "pages": [
     "entities-and-components",
     "prefabs",

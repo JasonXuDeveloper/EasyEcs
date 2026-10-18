@@ -1,0 +1,139 @@
+# Writing the EasyEcs docs
+
+How a page of https://ecs.xgamedev.net is written. `content/guide/change-tracking.mdx` (and its `.zh.mdx`) is the
+reference page: when in doubt, do what it does.
+
+## Files
+
+- A page is `content/<path>.mdx` (English) plus `content/<path>.zh.mdx` (Chinese). A page without a Chinese file is
+  served under `/zh/` in English with a notice, `noindex` and a canonical link to the English page, so write the
+  English page first and the Chinese one when it is ready.
+- The legacy pages (`content/**/*.md` without frontmatter) are plain GitHub markdown and stay readable on GitHub.
+  The site takes their title from the H1 and their description from the first paragraph, drops the H1 and the
+  "[Docs index](README.md) ·" line, and turns relative links into site URLs (or GitHub URLs for files outside
+  `content/`). Rewriting one as MDX: create `<page>.mdx` + `<page>.zh.mdx` with this guide, then `git rm` the `.md`.
+- `content/README.md` is the index for readers on GitHub and is not a site page; the site's index is `index.mdx`.
+- The sidebar is `meta.json` / `meta.zh.json` per folder: `---Section---` separators, then page names. List only pages
+  that exist; `...guide` pulls in a folder.
+
+## Frontmatter
+
+```yaml
+---
+title: Change tracking                     # the page heading and the sidebar entry
+seoTitle: "Change tracking in C#: [Changed<T>] and [Removed<T>]"   # optional <title> for search results
+description: "Visit only the entities whose component was written…"         # 120-160 characters, says what the page answers
+icon: Radar                                # optional, a name from lucide's `icons` table, not an alias (lint:links checks it)
+faq: true                                  # optional: the page's "## …?" headings become FAQPage structured data
+---
+```
+
+Quote any value containing `: `. `description` is the meta description, the social card subtitle and the line in
+`llms.txt`: write it as a sentence a search result can show on its own.
+
+## Page anatomy
+
+Each feature page has these parts, in this order, with these headings (Chinese in brackets):
+
+1. **What it is**: no heading, two to four sentences under the title. What the feature does and the problem it solves,
+   in terms of a server (replication, saving, spawning), not of the API.
+2. **When to use it** [什么时候用]: a `<Callout type="idea" title="Use it for">` and a `<Callout type="warn"
+   title="Skip it for">`. Say when *not* to use it as concretely as when to use it.
+3. **How to use it** [怎么用]: `<Steps>` or `###` subsections, each with a complete example that compiles: the
+   components, the system, the call that runs it. No `...` in the middle of code a reader will copy.
+4. **How to use it fast** [怎么用得快]: the choices that change the cost, each with its benchmark number through a
+   component (see below), e.g. a table "Instead of / Do / Cost".
+5. **What it costs** [开销]: memory per entity or row, time per operation, what is free when the feature is unused.
+6. **Pitfalls** [常见陷阱]: a table "Mistake | What happens | Caught by", naming the analyzer rule (EECS0xx) when
+   there is one.
+7. **Related** [相关页面]: `<Cards>` with two to four pages.
+
+Overview pages (index, what-is-ecs) and reference pages do not follow the anatomy; they answer the questions their
+readers search for, one `##` per question.
+
+## Headings and links
+
+- Headings say what the section answers ("When to use it", "Is an ECS only for games?"), sentence case.
+- Every heading of a Chinese page carries the English id, so anchors are the same in both languages and links from
+  one language to the other keep working: `## 变更追踪 [#change-tracking]`. Give English headings an explicit id
+  too when the text is long or likely to change: `## Compared with other libraries [#compared]`.
+- Internal links are absolute and name the language: `/en/docs/guide/queries#filters` on English pages,
+  `/zh/docs/guide/queries#filters` on Chinese pages. `bun run lint:links` checks every target and every `#anchor`.
+- Links to the repository (README, MIGRATION_GUIDE.md, a source file) are full GitHub URLs on `master`.
+
+## Code
+
+- C# blocks have a title when they are a file: ` ```csharp title="Program.cs" `.
+- Mark what the reader should look at with Shiki notation comments: `// [!code highlight]`, `// [!code ++]` /
+  `// [!code --]` for a change, `// [!code focus]`. Do not use them in more than a few lines per block.
+- Examples follow the ECS principles (`content/ecs-principles.md`): components are plain data, systems are stateless
+  `[ForEach]` methods with one job, state changes are data. Readers copy examples; they must be exemplary.
+
+## Numbers
+
+Never type a benchmark number into a page. Every number comes from `src/data/bench.json` (written by
+`scripts/sync-benchmarks.ts` from BenchmarkDotNet's reports) through a component, so regenerating the data updates
+every page:
+
+| Component | Shows |
+| --- | --- |
+| `<BenchValue k="tick.oneWorld" />` | One named number; keys are in `src/lib/benchmarks.ts` (`keys`). Add a key there for a new number. |
+| `<BenchSource />` | The machine and tool line. Put it under prose that quotes `BenchValue`s. |
+| `<BenchChart bench="Features.RemovalComparison" param="Removed=1000" />` | A benchmark class as bars: EasyEcs in the accent, other libraries in grey, each with its time relative to EasyEcs and its allocations, plus the source line and a data table. `methods="A,B"` picks and orders rows; `title` and `subtitle` are optional. |
+| `<BenchTable bench="Operations.OperationBenchmark" />` | The same rows as a table: library, case, [Params], mean, vs EasyEcs, allocated. |
+| `<PeerChart />` | The headline server tick against Friflo.Engine.ECS, Arch and DefaultEcs (`entities="10000"` for the small world). |
+
+`bench` is a class name, optionally with the end of its namespace: `WorldSimulationBenchmark`,
+`Features.ChangeTrackingComparison`, `Operations.OperationBenchmark`. Ratios are against the EasyEcs row with the
+same [Params] (the class's baseline; the same case in OperationBenchmark). Words around a number stay true when it
+changes: "about twice as fast" is a claim the data must keep supporting, so prefer letting the component speak.
+
+## Diagrams
+
+Mermaid fences (` ```mermaid `), rendered on the client in the site's theme. Keep them small: `flowchart LR` or
+`TB`, at most about ten nodes, short labels (Chinese labels on Chinese pages), no colours or styles (the theme sets
+them). A diagram explains a flow or a structure; a list of things is a list, not a diagram.
+
+## Components
+
+Fumadocs' `Callout` (`type="info" | "idea" | "warn" | "error"`), `Cards` / `Card`, `Steps` / `Step`, `Tabs` / `Tab`,
+`Accordions` / `Accordion`, `TypeTable` and `Files` are available without imports; icons for `Card` come from
+`lucide-react` (`import { Rocket } from 'lucide-react'`). A new MDX component needs a Markdown form in
+`src/lib/markdown.tsx`, used by the `.md` copies and `llms-full.txt`.
+
+## Tone: English
+
+- Concise and concrete. Second person ("you"), present tense, active voice.
+- Lead with what the reader gets, then how. One idea per paragraph, short paragraphs.
+- Name things exactly: `[Changed<T>]`, `World.Update()`, "a row", "a table", "a tick". No marketing adjectives
+  ("blazing", "powerful", "seamless").
+- Say what something costs and when not to use it. Honest limits ("net10.0 only, no Unity") build more trust than
+  claims.
+
+## Tone: Chinese
+
+Write the Chinese page for Chinese .NET and game server developers, as one of them would write it. It is not a
+translation of the English page: keep its content and structure, but write each sentence natively.
+
+- Terms: 实体、组件、系统、单例、标签、查询、原型（archetype，第一次出现时括注）、结构变更、变更追踪、预制体、动态缓冲、
+  索引、关系、快照、tick、World。API、类型名、特性名保持英文：`[ForEach]`、`ITrackChanges`、`World.Update()`。
+- Short sentences, one point each. Use 你 sparingly; many sentences need no subject.
+- Full-width punctuation（，。：；（）、“”）in prose; half-width inside code. A space is not needed between Chinese and
+  English or numbers.
+- No 翻译腔: drop the 被 passives, 进行 / 通过……的方式 / 对于……来说 padding, and long noun chains built with 的.
+
+| 别这样写 | 这样写 |
+| --- | --- |
+| 该方法被用于对实体进行遍历。 | 这个方法遍历实体。 |
+| 通过使用 `[Changed<T>]` 的方式，你可以实现只访问被修改过的实体。 | 加上 `[Changed<T>]`，系统只访问被写过的实体。 |
+| 对于大量实体的场景来说，这是一个非常强大的功能。 | 实体很多时，这能省下大部分遍历。 |
+| 它允许你在迭代的过程中进行结构性的更改。 | 遍历途中也可以增删组件。 |
+
+## Before you commit
+
+```bash
+bun run check    # types, Biome, links, anchors and icons
+bun run build    # prerender, static files, sitemap, llms.txt, social cards
+```
+
+Docs and logic go in separate commits.

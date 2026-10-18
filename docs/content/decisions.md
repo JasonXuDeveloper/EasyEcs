@@ -9,11 +9,11 @@ feature stays here with its reason, so it is not proposed again without new fact
 
 | # | Decision |
 |---|---|
-| [D1](#d1-state-changes-are-data-no-events) | State changes are data: no events or callbacks |
+| [D1](#d1-state-changes-are-data-no-events-or-callbacks) | State changes are data: no events or callbacks |
 | [D2](#d2-structural-changes-apply-at-once-no-command-buffers) | Structural changes apply at once: no command buffers |
 | [D3](#d3-no-command-buffer-for-parallel-jobs) | No command buffer for parallel jobs |
 | [D4](#d4-no-addedt-filter) | No `Added<T>` filter |
-| [D5](#d5-order-by-dependencies-not-priorities) | Order systems by dependencies, not priorities |
+| [D5](#d5-order-systems-by-dependencies-not-priorities) | Order systems by dependencies, not priorities |
 | [D6](#d6-removing-a-component-keeps-the-row) | Removing a component keeps the row |
 | [D7](#d7-contiguous-columns-not-pages) | Contiguous columns, not pages |
 | [D8](#d8-no-whole-entity-disable) | No whole-entity disable |
@@ -23,7 +23,7 @@ feature stays here with its reason, so it is not proposed again without new fact
 | [D12](#d12-target-policies-are-opt-in-per-index) | Target policies are opt-in, per index |
 | [D13](#d13-one-owner-thread-per-world) | One owner thread per world |
 | [D14](#d14-no-shared-components) | No shared components |
-| [D15](#d15-net100-only) | .NET 10 only |
+| [D15](#d15-net-10-only) | .NET 10 only |
 | [D16](#d16-no-partial-generated-code-lives-outside-the-users-type) | No `partial`: generated code lives outside the user's type |
 | [D17](#d17-unloading-removes-types-from-worlds-bits-are-reused) | Unloading removes types from worlds; bits are reused |
 | [D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references) | No interceptors for query calls; filters carry no references |

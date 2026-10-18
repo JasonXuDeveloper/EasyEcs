@@ -1,0 +1,16 @@
+# deps
+/node_modules
+
+# generated
+.source
+.react-router
+/build
+*.tsbuildinfo
+
+# cloudflare
+.wrangler/
+.dev.vars
+
+# misc
+.DS_Store
+.env*.local

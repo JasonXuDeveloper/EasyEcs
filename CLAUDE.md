@@ -14,9 +14,12 @@ dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*Itera
 
 Both benchmark projects use the job in `benchmarks/EasyEcs.Benchmark/BenchmarkConfig.cs` (no `--job` needed).
 
-The pages in `docs/content` are plain GitHub markdown without frontmatter, readable on GitHub as they are; the website
-(https://ecs.xgamedev.net) is built from them and takes a page's title from its H1 and its description from its first
-paragraph.
+The website (https://ecs.xgamedev.net) is built from `docs/content`: `docs/` is its project (`bun run check`,
+`bun run build`; `docs/CLAUDE.md`), and `docs/WRITING.md` is how a page is written. Rewritten pages are
+`<page>.mdx` + `<page>.zh.mdx` (English and Chinese); the rest are still plain GitHub markdown without frontmatter,
+readable on GitHub as they are, from which the site takes a page's title from its H1 and its description from its
+first paragraph. Benchmark numbers on the site come only from `docs/src/data/bench.json`
+(`docs/scripts/sync-benchmarks.ts` over the BenchmarkDotNet reports); pages never type a number.
 
 `global.json` requires the .NET 10 SDK (`rollForward: latestFeature`).
 
@@ -133,11 +136,15 @@ benchmarks/EasyEcs.Comparison/ BenchmarkDotNet against Arch, Friflo.Engine.ECS a
                                indexes); QueryComparisons (value queries, parallel queries, saves); StructureComparisons
                                (hierarchy, relations, disable, structural changes); BulkComparisons (bulk changes,
                                spawns); SystemComparisons (parallel systems)
-docs/content/                  the docs (source of https://ecs.xgamedev.net) as plain GitHub markdown: README.md (index),
+docs/content/                  the docs (source of https://ecs.xgamedev.net): index.mdx, what-is-ecs.mdx, changelog.mdx,
+                               guide/change-tracking.mdx (each + .zh.mdx); plain GitHub markdown: README.md (GitHub index),
                                features.md, getting-started.md, example.md (the battle server), guide/ (one page per
                                concept, analyzer.md lists EECS002-024), api.md (API + complexity), ecs-principles.md,
                                architecture.md, performance.md, comparison.md, faq.md, decisions.md, roadmap.md
                                (diagrams in mermaid); meta.json files order the site's sidebar
+docs/                          the docs site: React Router 7 + Fumadocs, prerendered, Bun (docs/CLAUDE.md);
+                               app/ routes, src/ components and libs, src/data/bench.json, scripts/, functions/
+                               (Cloudflare Pages Functions), WRITING.md (page anatomy, tone, numbers)
 ```
 
 ## Engineering principles (apply to every change)

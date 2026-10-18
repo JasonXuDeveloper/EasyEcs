@@ -1,0 +1,85 @@
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+
+/*
+ * Stock Fumadocs neutral theme; the one override is the accent, a calm blue.
+ * No custom palettes, gradients, glows or decorative animation.
+ */
+@theme {
+  --color-fd-primary: hsl(221 58% 46%);
+  --color-fd-primary-foreground: hsl(0 0% 100%);
+}
+
+.dark {
+  --color-fd-primary: hsl(218 85% 74%);
+  --color-fd-primary-foreground: hsl(222 47% 11%);
+}
+
+/*
+ * Benchmark charts (src/components/charts): EasyEcs in the accent,
+ * every other library in neutral grey.
+ */
+:root {
+  --ecs-chart-ours: var(--color-fd-primary);
+  --ecs-chart-other: hsl(0, 0%, 64%);
+}
+
+.dark {
+  --ecs-chart-other: hsl(0, 0%, 45%);
+}
+
+.ecs-chart-bar {
+  transform-box: fill-box;
+  transform-origin: left center;
+  transition: transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.ecs-chart-value {
+  transition: opacity 0.4s ease;
+}
+
+.ecs-chart[data-hidden] .ecs-chart-bar {
+  transform: scaleX(0);
+}
+
+.ecs-chart[data-hidden] .ecs-chart-value {
+  opacity: 0;
+}
+
+.ecs-chart-row {
+  transition: opacity 0.15s ease;
+  outline: none;
+}
+
+.ecs-chart-row:focus-visible .ecs-chart-hit {
+  stroke: var(--color-fd-ring);
+  stroke-width: 2px;
+}
+
+/* Code on the home page: Shiki's dual themes, switched by the dark class */
+.home-code span {
+  color: var(--shiki-light);
+}
+
+.dark .home-code span {
+  color: var(--shiki-dark);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ecs-chart-bar,
+  .ecs-chart-value,
+  .ecs-chart-row {
+    transition: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  * {
+    transition-property:
+      color, background-color, border-color, box-shadow, outline-color,
+      text-decoration-color, fill, stroke;
+    transition-duration: 0.2s;
+    transition-timing-function: ease-out;
+  }
+}

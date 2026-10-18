@@ -1,0 +1,24 @@
+{
+  "title": "EasyEcs",
+  "pages": [
+    "index",
+    "what-is-ecs",
+    "features",
+    "changelog",
+    "getting-started",
+    "---学习---",
+    "ecs-principles",
+    "example",
+    "---指南---",
+    "...guide",
+    "---对比---",
+    "comparison",
+    "---参考---",
+    "api",
+    "performance",
+    "architecture",
+    "faq",
+    "decisions",
+    "roadmap"
+  ]
+}

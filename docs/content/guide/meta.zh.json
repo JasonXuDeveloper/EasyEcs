@@ -1,0 +1,19 @@
+{
+  "title": "指南",
+  "icon": "BookOpen",
+  "pages": [
+    "entities-and-components",
+    "prefabs",
+    "queries",
+    "systems",
+    "singletons",
+    "structural-changes",
+    "refs-and-await",
+    "change-tracking",
+    "dynamic-buffers",
+    "indexes-and-relations",
+    "snapshots",
+    "threading",
+    "analyzer"
+  ]
+}

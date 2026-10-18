@@ -1,0 +1,68 @@
+{
+  "name": "easyecs.docs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "react-router dev",
+    "build": "bun scripts/git-history.ts && bun scripts/sync-benchmarks.ts && react-router build && bun run generate:static",
+    "sync:benchmarks": "bun scripts/sync-benchmarks.ts",
+    "git:history": "bun scripts/git-history.ts",
+    "preview": "bun run build && wrangler pages dev build/client",
+    "deploy": "bun run build && wrangler pages deploy build/client --project-name easyecs",
+    "og:default": "vite-node --mode scripts scripts/og.ts --default",
+    "postinstall": "fumadocs-mdx",
+    "types:check": "react-router typegen && fumadocs-mdx && tsc --noEmit",
+    "lint": "biome check",
+    "lint:links": "vite-node --mode scripts ./scripts/lint-links.ts",
+    "check": "bun run types:check && bun run lint && bun run lint:links",
+    "format": "biome format --write",
+    "generate:static": "vite-node --mode scripts ./scripts/generate-static.ts",
+    "favicons": "bun run ./scripts/generate-favicons.ts"
+  },
+  "dependencies": {
+    "@octokit/auth-app": "8.3.1",
+    "@react-router/node": "7.18.4",
+    "@visx/axis": "4.0.0",
+    "@visx/grid": "4.0.0",
+    "@visx/group": "4.0.0",
+    "@visx/scale": "4.0.0",
+    "@visx/shape": "4.0.0",
+    "fumadocs-core": "16.17.3",
+    "fumadocs-mdx": "15.4.7",
+    "fumadocs-ui": "16.17.3",
+    "lucide-react": "1.57.0",
+    "mermaid": "12.1.0",
+    "octokit": "5.0.5",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-router": "7.18.4",
+    "tailwind-merge": "3.7.0",
+    "unist-util-visit": "5.1.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@cloudflare/workers-types": "5.20261015.1",
+    "@react-router/dev": "7.18.4",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/mdast": "4.0.4",
+    "@types/mdx": "2.0.14",
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "sharp": "0.35.5",
+    "sharp-ico": "0.1.5",
+    "tailwindcss": "4.3.3",
+    "typescript": "6.0.3",
+    "vite": "8.3.4",
+    "vite-node": "6.0.0",
+    "wrangler": "4.151.0"
+  },
+  "overrides": {
+    "lightningcss": "1.33.0"
+  },
+  "patchedDependencies": {
+    "@react-router/dev@7.18.4": "patches/@react-router%2Fdev@7.18.4.patch"
+  }
+}
