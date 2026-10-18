@@ -21,6 +21,7 @@ import { Link } from 'react-router';
 import { PeerChart } from '@/components/charts';
 import {
   type BenchNumber,
+  bench,
   benchNumber,
   benchRows,
   formatRatio,
@@ -74,6 +75,55 @@ const changeTrackingLeads = ['10', '1000'].every((written) => {
   );
 });
 
+/**
+ * The speed-ups behind the numbers, each as "how much faster than the alternative": a ratio of two rows of one
+ * benchmark class, computed from the data so the copy never carries a number.
+ */
+const N100k = { Entities: '100000' };
+
+function speedup(
+  name: string,
+  fast: string,
+  slow: string,
+  params: Record<string, string> = {},
+) {
+  const a = bench(name, fast, params);
+  const b = bench(name, slow, params);
+  return a && b && a.meanNs > 0 ? formatRatio(b.meanNs / a.meanNs) : '—';
+}
+
+const speed = {
+  simd: speedup(
+    'OperationBenchmark',
+    'EasyEcs_Iterate2Simd',
+    'EasyEcs_Iterate2',
+    N100k,
+  ),
+  jobs: speedup('MicroBenchmarks', 'ForEachIterate', 'QueryIterate'),
+  columns: speedup('MicroBenchmarks', 'ForEachSystemWrite', 'RawArrayWrite'),
+  presence: speedup(
+    'OperationBenchmark',
+    'EasyEcs_Toggle',
+    'Friflo_Toggle',
+    N100k,
+  ),
+  ticks: speedup(
+    'ChangeTrackingComparison',
+    'EasyEcs_Changed',
+    'EasyEcs_Scan',
+    { Written: '10' },
+  ),
+  bulk: speedup(
+    'BulkChangeComparison',
+    'EasyEcs_SetAllRemoveAll',
+    'Arch_AddRemoveByQuery',
+  ),
+  worlds:
+    oneWorld && fourWorlds && fourWorlds.value > 0
+      ? formatRatio(oneWorld.value / fourWorlds.value)
+      : '—',
+};
+
 /* ------------------------------------------------------------------ */
 /* Copy                                                                */
 /* ------------------------------------------------------------------ */
@@ -111,6 +161,10 @@ interface Copy {
   peersTitle: string;
   peersText: string;
   peersLink: string;
+  speedTitle: string;
+  speedText: string;
+  speedLink: string;
+  speed: { title: string; text: string; metric: string; note: string }[];
   featuresTitle: string;
   featuresText: string;
   features: Feature[];
@@ -290,6 +344,60 @@ const copy: Record<Locale, Copy> = {
         title: 'Mistakes fail the build',
         text: '23 analyzer rules with code fixes catch stateful systems, systems that call each other, writes through in, and structural changes off the owner thread.',
         href: 'guide/analyzer',
+      },
+    ],
+    speedTitle: 'Why it is fast',
+    speedText:
+      'No single trick: every layer, from the memory layout to the generated loop, is built so the CPU does only the work the simulation needs. Each claim below is a measured ratio.',
+    speedLink: 'How each one works',
+    speed: [
+      {
+        title: 'SIMD over whole columns',
+        text: 'A batch [ForEach] hands you spans of a column, so Vector<T> math runs over contiguous rows.',
+        metric: speed.simd,
+        note: 'two-component update, SIMD batch vs per entity',
+      },
+      {
+        title: 'Generated struct jobs',
+        text: 'The generator turns a [ForEach] method into a struct the JIT inlines: no delegates, no enumerator, no virtual calls per entity.',
+        metric: speed.jobs,
+        note: '[ForEach] job vs a foreach over Query',
+      },
+      {
+        title: '64-byte aligned columns',
+        text: 'Each component is a column aligned to the cache line, walked front to back, with bounds checks proven away.',
+        metric: speed.columns,
+        note: 'faster than two plain arrays',
+      },
+      {
+        title: 'Presence bits',
+        text: 'Adding a status back that an entity lost flips a bit in its row; the entity never moves between tables.',
+        metric: speed.presence,
+        note: 'toggling a status vs Friflo',
+      },
+      {
+        title: 'Change-tick summaries',
+        text: 'Write ticks are summarized per 64 rows and per 4,096 rows, so [Changed<T>] skips everything nobody wrote.',
+        metric: speed.ticks,
+        note: '10 of 100,000 written, vs a scan',
+      },
+      {
+        title: 'Whole words of rows',
+        text: 'SetAll and RemoveAll change 64 rows per step through presence bits instead of moving each entity.',
+        metric: speed.bulk,
+        note: 'stun 100,000 and lift it, vs Arch',
+      },
+      {
+        title: 'One world per core',
+        text: 'Worlds share nothing, so one world per thread scales without locks; parallel systems and [ForEach] use the cores of one world.',
+        metric: speed.worlds,
+        note: 'four worlds vs one, same 100,000 entities',
+      },
+      {
+        title: 'Zero allocation',
+        text: 'Pooled, pinned, recycled: after warm-up a tick allocates nothing, and a unit test fails the build if it ever does.',
+        metric: zeroAlloc ? '0 B' : text(tickAlloc),
+        note: 'per tick, enforced in CI',
       },
     ],
     serversTitle: 'Made for processes that run for months',
@@ -472,6 +580,60 @@ const copy: Record<Locale, Copy> = {
         title: '写错了就编译不过',
         text: '23 条带代码修复的分析器规则，拦下有状态的系统、系统互相调用、经 in 写入、在非所属线程做结构变更等问题。',
         href: 'guide/analyzer',
+      },
+    ],
+    speedTitle: '为什么这么快',
+    speedText:
+      '没有单一的秘诀：从内存布局到生成的循环，每一层都只让 CPU 做模拟真正需要的事。下面每一条都是实测的倍数。',
+    speedLink: '逐项看原理',
+    speed: [
+      {
+        title: '整列 SIMD',
+        text: '批量 [ForEach] 直接拿到一列组件的 Span，Vector<T> 运算在连续的行上跑。',
+        metric: speed.simd,
+        note: '双组件更新，SIMD 批量对比逐实体',
+      },
+      {
+        title: '生成的 struct job',
+        text: '生成器把 [ForEach] 方法变成 JIT 能内联的结构体：每个实体不经过委托、枚举器或虚调用。',
+        metric: speed.jobs,
+        note: '[ForEach] job 对比 foreach 遍历 Query',
+      },
+      {
+        title: '64 字节对齐的列',
+        text: '每个组件一列，按缓存行对齐，从头到尾顺序扫描，边界检查在证明安全后省掉。',
+        metric: speed.columns,
+        note: '比两个普通数组还快',
+      },
+      {
+        title: 'presence bit',
+        text: '实体失去又重新获得某个状态时，只翻转所在行的一个位，实体不会在表之间搬家。',
+        metric: speed.presence,
+        note: '切换状态，对比 Friflo',
+      },
+      {
+        title: '变更 tick 摘要',
+        text: '写入 tick 按每 64 行、每 4,096 行汇总，[Changed<T>] 直接跳过没人写过的部分。',
+        metric: speed.ticks,
+        note: '10 万中写了 10 个，对比全表扫描',
+      },
+      {
+        title: '按字批量处理行',
+        text: 'SetAll、RemoveAll 通过 presence bit 一步处理 64 行，而不是逐个搬动实体。',
+        metric: speed.bulk,
+        note: '给 10 万个单位上眩晕再解除，对比 Arch',
+      },
+      {
+        title: '一核一个 World',
+        text: 'World 之间不共享任何东西，一个线程一个 World 就能无锁扩展；单个 World 内也有并行系统和并行 [ForEach]。',
+        metric: speed.worlds,
+        note: '同样 10 万实体，4 个 World 对比 1 个',
+      },
+      {
+        title: '零分配',
+        text: '池化、固定、复用：预热之后每个 tick 不分配任何内存，一旦分配，单元测试就会让构建失败。',
+        metric: zeroAlloc ? '0 B' : text(tickAlloc),
+        note: '每个 tick，CI 强制检查',
       },
     ],
     serversTitle: '为一跑就是几个月的进程而生',
@@ -716,23 +878,25 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
 
         {/* How it works */}
         <Section title={t.howTitle} text={t.howText}>
-          <ol className="grid gap-4 lg:grid-cols-3">
+          <ol className="divide-y overflow-hidden rounded-xl border bg-fd-card">
             {t.steps.map((s, i) => (
               <li
                 key={s.title}
-                className="flex min-w-0 flex-col overflow-hidden rounded-xl border bg-fd-card"
+                className="grid min-w-0 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]"
               >
-                <div className="p-5">
-                  <span className="flex size-7 items-center justify-center rounded-full border font-mono text-xs text-fd-muted-foreground">
+                <div className="flex gap-4 p-5 md:p-6">
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-full border font-mono text-xs text-fd-muted-foreground">
                     {i + 1}
                   </span>
-                  <h3 className="mt-3 font-semibold">{s.title}</h3>
-                  <p className="mt-1.5 text-sm text-fd-muted-foreground">
-                    {s.text}
-                  </p>
+                  <div>
+                    <h3 className="font-semibold">{s.title}</h3>
+                    <p className="mt-1.5 text-sm leading-relaxed text-fd-muted-foreground">
+                      {s.text}
+                    </p>
+                  </div>
                 </div>
-                <div className="mt-auto border-t">
-                  <Code html={loaderData.steps[i]} />
+                <div className="flex min-w-0 items-center border-t bg-fd-secondary/30 md:border-t-0 md:border-l">
+                  <Code html={loaderData.steps[i]} className="w-full" />
                 </div>
               </li>
             ))}
@@ -748,6 +912,36 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
               className="font-medium underline underline-offset-4"
             >
               {t.peersLink}
+            </Link>
+          </p>
+        </Section>
+
+        {/* Why it is fast: each mechanism with its measured ratio */}
+        <Section title={t.speedTitle} text={t.speedText}>
+          <dl className="grid gap-px overflow-hidden rounded-xl border bg-fd-border sm:grid-cols-2 lg:grid-cols-4">
+            {t.speed.map((item) => (
+              <div key={item.title} className="flex flex-col bg-fd-card p-5">
+                <dt className="text-sm font-semibold">{item.title}</dt>
+                <dd className="mt-1.5 text-sm leading-relaxed text-fd-muted-foreground">
+                  {item.text}
+                </dd>
+                <dd className="mt-auto pt-4">
+                  <span className="text-2xl font-semibold tracking-tight tabular-nums">
+                    {item.metric}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-fd-muted-foreground">
+                    {item.note}
+                  </span>
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <p className="mt-5 text-sm">
+            <Link
+              to={`${docs}/why-fast`}
+              className="font-medium underline underline-offset-4"
+            >
+              {t.speedLink}
             </Link>
           </p>
         </Section>
