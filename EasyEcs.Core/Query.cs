@@ -814,6 +814,12 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         }
 
         end = Math.Min(end, count);
+        if (archetype.Count == archetype.AliveCount) // no tombstone: the scan would read every row's slot again
+        {
+            length = end - start;
+            return true;
+        }
+
         int tombstone = archetype.Rows64(end).Slice(start).IndexOfAnyInRange(long.MinValue, -1);
         length = tombstone < 0 ? end - start : tombstone;
         return true;
