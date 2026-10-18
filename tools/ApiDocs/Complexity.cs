@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace ApiDocs;
 
 /// <summary>
-/// The complexity column of the API table (docs/content/api.md): for each row, the calls of its first cell
+/// The complexity column of the API table (docs/content/api.mdx): for each row, the calls of its first cell
 /// (<c>world.CreateEntity(in T1 … in Tn)</c>) by type and member, with the row's complexity.
 /// </summary>
 public static partial class Complexity
@@ -14,7 +14,8 @@ public static partial class Complexity
         ["world"] = ["World"], ["World"] = ["World"], ["entity"] = ["Entity"], ["prefab"] = ["Prefab"],
         ["bag"] = ["DynamicBuffer", "DynamicBufferExtensions"], ["index"] = ["ValueIndex", "OrderedIndexExtensions"],
         ["filter"] = ["QueryFilter"], ["QueryFilter"] = ["QueryFilter"], ["system"] = ["EcsSystem"],
-        ["snapshot"] = ["WorldSnapshot"], ["singletonRef"] = ["SingletonRef"],
+        ["snapshot"] = ["WorldSnapshot"], ["singletonRef"] = ["SingletonRef"], ["relations"] = ["RelationIndex"],
+        ["id"] = ["EntityId"],
     };
 
     /// <summary>(type name, member name) to the table's rows for it: (the call as the table writes it, complexity).</summary>

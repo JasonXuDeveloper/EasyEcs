@@ -7,7 +7,7 @@ using Microsoft.CodeAnalysis.CSharp;
 // dotnet run --project tools/ApiDocs [-- output-dir]
 // Writes one MDX page per public type of EasyEcs.Core (a T1..T9 family is one page) into docs/content/reference/,
 // with an index and meta.json, from the built assembly and its XML documentation. Complexity comes from the API
-// table (docs/content/api.md). Deterministic: CI regenerates the pages and fails if they differ from the commit.
+// table (docs/content/api.mdx). Deterministic: CI regenerates the pages and fails if they differ from the commit.
 var root = Root();
 var output = args.Length != 0 ? Path.GetFullPath(args[0]) : Path.Combine(root, "docs", "content", "reference");
 var core = typeof(EasyEcs.World).Assembly.Location;
