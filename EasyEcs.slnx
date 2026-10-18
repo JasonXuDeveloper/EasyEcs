@@ -4,5 +4,6 @@
   <Project Path="EasyEcs.CodeFixes/EasyEcs.CodeFixes.csproj" />
   <Project Path="EasyEcs.UnitTest/EasyEcs.UnitTest.csproj" />
   <Project Path="EasyEcs.Benchmark/EasyEcs.Benchmark.csproj" />
+  <Project Path="EasyEcs.Benchmark.Plugin/EasyEcs.Benchmark.Plugin.csproj" />
   <Project Path="EasyEcs.Comparison/EasyEcs.Comparison.csproj" />
 </Solution>

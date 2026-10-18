@@ -15,6 +15,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\EasyEcs.Core\EasyEcs.Core.csproj"/>
+        <ProjectReference Include="..\EasyEcs.Benchmark.Plugin\EasyEcs.Benchmark.Plugin.csproj"/>
         <!-- consumers of the NuGet package get the generator automatically; project references must add it -->
         <ProjectReference Include="..\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
     </ItemGroup>
