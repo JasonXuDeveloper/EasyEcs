@@ -3,3 +3,12 @@
 
 /og/*
   Cache-Control: public, max-age=86400
+
+# The demo's .NET runtime (public/demo/_framework, scripts/build-demo.sh). Every file but the dotnet.js entry point
+# carries a content hash in its name. dotnet.js keeps the default (revalidated).
+/demo/_framework/*.wasm
+  Content-Type: application/wasm
+  Cache-Control: public, max-age=31536000, immutable
+
+/demo/_framework/dotnet.*.js
+  Cache-Control: public, max-age=31536000, immutable

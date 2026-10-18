@@ -18,7 +18,8 @@
     "check": "bun run types:check && bun run lint && bun run lint:links",
     "format": "biome format --write",
     "generate:static": "vite-node --mode scripts ./scripts/generate-static.ts",
-    "favicons": "bun run ./scripts/generate-favicons.ts"
+    "favicons": "bun run ./scripts/generate-favicons.ts",
+    "demo:build": "bash ./scripts/build-demo.sh"
   },
   "dependencies": {
     "@octokit/auth-app": "8.3.1",

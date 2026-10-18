@@ -149,6 +149,7 @@ interface Copy {
   definition: string;
   start: string;
   github: string;
+  demo: string;
   numbersTitle: string;
   numbers: { label: string; value: string; note: string }[];
   numbersNote: string;
@@ -232,6 +233,7 @@ const copy: Record<Locale, Copy> = {
       'EasyEcs is an open-source, allocation-free archetype Entity Component System (ECS) for C# and .NET 10 servers. Write plain data and [ForEach] methods; a source generator turns them into inlined struct jobs, an analyzer catches design mistakes at compile time, and a full server tick allocates nothing.',
     start: 'Get started',
     github: 'GitHub',
+    demo: 'Try it in the browser',
     numbersTitle: 'One server tick, measured',
     numbers: [
       {
@@ -469,6 +471,7 @@ const copy: Record<Locale, Copy> = {
       'EasyEcs 是开源、零 GC 分配的 archetype（原型）实体组件系统（ECS），面向 C# 与 .NET 10 服务端。你只写普通数据和 [ForEach] 方法：源生成器把它们编译成内联的结构体 job，分析器在编译期拦下设计错误，一整个服务器 tick 不分配任何内存。',
     start: '快速开始',
     github: 'GitHub',
+    demo: '在浏览器里试试',
     numbersTitle: '一个服务器 tick 的实测耗时',
     numbers: [
       {
@@ -832,6 +835,13 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
             <code className="mt-5 max-w-full overflow-x-auto rounded-md border bg-fd-secondary/50 px-3 py-1.5 font-mono text-sm whitespace-nowrap text-fd-muted-foreground">
               {installCommand}
             </code>
+            <Link
+              to={`${docs}/demo`}
+              className="mt-3 inline-flex items-center gap-1 text-sm text-fd-muted-foreground underline-offset-4 transition-colors hover:text-fd-foreground hover:underline"
+            >
+              {t.demo}
+              <ArrowRight className="size-3.5" />
+            </Link>
           </div>
         </section>
 

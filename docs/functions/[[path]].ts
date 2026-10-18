@@ -87,6 +87,8 @@ function shouldBypass(pathname: string) {
   if (
     pathname.startsWith('/assets/') ||
     pathname.startsWith('/images/') ||
+    // the demo's .NET runtime (public/demo): served as is, never localized
+    pathname.startsWith('/demo/') ||
     pathname === '/robots.txt' ||
     pathname === '/sitemap.xml' ||
     pathname === '/easyecs-rules.md' ||

@@ -195,6 +195,14 @@ function markdownComponents(lang: Locale, pageUrl: string) {
       asMarkdown();
       return sourceLine(zh);
     },
+    // The live demo runs only in a browser: a link to the page instead.
+    EcsDemo() {
+      asMarkdown();
+      const url = `${siteUrl}/${lang}/docs/demo`;
+      return zh
+        ? `\n> **在线演示**：在浏览器中打开 ${url} 运行。\n\n`
+        : `\n> **Live demo**: open ${url} in a browser to run it.\n\n`;
+    },
     BenchTable(props: Parameters<typeof benchTable>[0]) {
       asMarkdown();
       return benchTable(props, zh, true);
