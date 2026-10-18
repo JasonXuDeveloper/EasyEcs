@@ -18,9 +18,9 @@ One server tick of 9 systems (movement, AOI, combat, status effects, death, resp
 
 | Tick | Entities | Time | Allocated |
 |---|---:|---:|---:|
-| One world | 100,000 | **1.75&nbsp;ms** | **0 B** |
-| Four worlds, one per thread | 100,000 | **1.08&nbsp;ms** | **0 B** |
-| [Battle server](https://ecs.xgamedev.net/docs/example), every feature | 100,000 | **3.39&nbsp;ms** | **0 B** |
+| One world | 100,000 | **1.72&nbsp;ms** | **0 B** |
+| Four worlds, one per thread | 100,000 | **0.92&nbsp;ms** | **0 B** |
+| [Battle server](https://ecs.xgamedev.net/docs/example), every feature | 100,000 | **3.17&nbsp;ms** | **0 B** |
 
 <sub>BenchmarkDotNet 0.15.2 (`EasyEcs.Benchmark`), 4-core Intel Xeon VM at 2.1 GHz (Ubuntu 24.04), .NET 10.0.13; entities spawn, die, gain and lose components every tick.
 The battle server turns every feature on: parallel steering and systems, replication, indexes, relations, timings.
@@ -190,16 +190,16 @@ not a toy loop ([what it simulates](https://ecs.xgamedev.net/docs/performance#be
 
 | Benchmark | Entities | Mean | Allocated |
 |---|---:|---:|---:|
-| WorldSimulationBenchmark.Tick | 10,000 | 154 μs | 0 B |
-| WorldSimulationBenchmark.Tick | 100,000 | 1.75 ms | 0 B |
-| MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 1.08 ms | 0 B |
-| BattleServerBenchmark.Tick (the [battle server example](https://ecs.xgamedev.net/docs/example), every feature) | 100,000 | 3.39 ms | 0 B |
+| WorldSimulationBenchmark.Tick | 10,000 | 158 μs | 0 B |
+| WorldSimulationBenchmark.Tick | 100,000 | 1.72 ms | 0 B |
+| MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 0.92 ms | 0 B |
+| BattleServerBenchmark.Tick (the [battle server example](https://ecs.xgamedev.net/docs/example), every feature) | 100,000 | 3.17 ms | 0 B |
 
 Against v4.0.1 (4.33 ms, measured in an earlier run on the same VM; v4.0.1 is not part of this run) the tick is
 2.5x faster.
 
-A `[ForEach]` system adding `Velocity` to `Position` over 10,000 entities (one archetype) takes 8.8 μs, against
-11.3 μs for two plain arrays with no ECS at all (its columns are 64-byte aligned). Micro benchmarks (with v3.1.1 and
+A `[ForEach]` system adding `Velocity` to `Position` over 10,000 entities (one archetype) takes 9.1 μs, against
+12.8 μs for two plain arrays with no ECS at all (its columns are 64-byte aligned). Micro benchmarks (with v3.1.1 and
 v4.0.1 numbers for comparison) and the per-operation comparison are in
 [Performance](https://ecs.xgamedev.net/docs/performance); their `ForEach` and
 `Query` rows run on a world with two archetypes, so they are not directly comparable to the `[ForEach]` row.
@@ -216,18 +216,18 @@ project on the same VM, so its EasyEcs row differs a little from the table above
 
 | Library | Tick (100,000 entities) | Allocated per tick |
 |---|---:|---:|
-| **EasyEcs 4.1** | **1.79 ms (1.00)** | **0 B** |
-| Friflo.Engine.ECS 3.6 | 1.96 ms (1.10) | 0 B |
-| Arch 2.1 | 5.74 ms (3.21) | 538 KB |
-| DefaultEcs 0.17 | 6.80 ms (3.81) | 61 KB |
+| **EasyEcs 4.1** | **1.68 ms (1.00)** | **0 B** |
+| Friflo.Engine.ECS 3.6 | 1.83 ms (1.08) | 0 B |
+| Arch 2.1 | 5.76 ms (3.42) | 535 KB |
+| DefaultEcs 0.17 | 6.24 ms (3.71) | 61 KB |
 
-EasyEcs and Friflo are within 10% on this tick (EasyEcs ahead in this run: ratio 1.02 at 10,000 entities, 1.10 at
+EasyEcs and Friflo are within 10% on this tick (EasyEcs ahead in this run: ratio 1.06 at 10,000 entities, 1.08 at
 100,000; Friflo was up to 5% ahead in earlier runs); EasyEcs leads on one-component and SIMD iteration, filters,
 iteration that passes the entity, singletons, create/destroy, spawning from a prefab and toggling a status component
 (1.9x Friflo); two- and three-component iteration and batched entity iteration are even. On change tracking
-(`[Changed<T>]`, 1,000 of 100,000 rows written per tick) EasyEcs is the fastest of all four (37 μs; a scan takes
-56-121 μs, DefaultEcs's `WhenChanged` 80 μs, a dirty tag 91-125 μs), and its relation index is the fastest too
-(5.0 μs for 100 trades and 100 counts; 9.7 μs for the others).
+(`[Changed<T>]`, 1,000 of 100,000 rows written per tick) EasyEcs is the fastest of all four (39 μs; a scan takes
+54-109 μs, DefaultEcs's `WhenChanged` 77 μs, a dirty tag 84-123 μs), and its relation index is the fastest too
+(5.1 μs for 100 trades and 100 counts; 7.9-8.3 μs for the others).
 
 | | EasyEcs | Friflo.Engine.ECS | Arch | DefaultEcs |
 |---|:-:|:-:|:-:|:-:|
@@ -351,8 +351,8 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   serialized (owner thread only); `AddSingleton` resets an existing singleton in place; `IForEach` jobs
   receive only the components; stale handles answer `Has` / `TryGet` with false. See the
   [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v40--v41).
-- A realistic 100k-entity server tick takes 1.75 ms instead of 4.33 ms; toggling a status component on 10,000
-  entities 150 μs instead of 338 μs; reading a component through 1,000 random handles 3.50 μs instead of 3.56 μs
+- A realistic 100k-entity server tick takes 1.72 ms instead of 4.33 ms; toggling a status component on 10,000
+  entities 158 μs instead of 338 μs; reading a component through 1,000 random handles 3.33 μs instead of 3.56 μs
   (the v4.0.1 numbers are from an earlier run on the same VM).
 
 ## What's new in 4.0

@@ -1,6 +1,6 @@
 {
   "source": "BenchmarkDotNet *-report.csv (scripts/sync-benchmarks.ts)",
-  "generatedAt": "2026-10-18T14:11:53.110Z",
+  "generatedAt": "2026-10-18T17:50:56.779Z",
   "environment": {
     "benchmarkDotNet": "0.15.2",
     "os": "Linux Ubuntu 24.04.5 LTS (Noble Numbat)",
@@ -25,9 +25,9 @@
           "params": {
             "Units": "100000"
           },
-          "meanNs": 3388000,
-          "errorNs": 276000,
-          "stdDevNs": 271100,
+          "meanNs": 3167000,
+          "errorNs": 306800,
+          "stdDevNs": 301300,
           "ratio": null,
           "allocatedBytes": 0
         }
@@ -42,10 +42,10 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 86820,
-          "errorNs": 8208,
-          "stdDevNs": 8061,
-          "ratio": 1.01,
+          "meanNs": 87890,
+          "errorNs": 4129,
+          "stdDevNs": 3660,
+          "ratio": 1,
           "allocatedBytes": 0
         },
         {
@@ -53,10 +53,10 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 1694500,
-          "errorNs": 132043,
-          "stdDevNs": 123513,
-          "ratio": 19.68,
+          "meanNs": 1676460,
+          "errorNs": 111538,
+          "stdDevNs": 104332,
+          "ratio": 19.1,
           "allocatedBytes": 0
         },
         {
@@ -64,10 +64,10 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 22890,
-          "errorNs": 1742,
-          "stdDevNs": 1711,
-          "ratio": 0.27,
+          "meanNs": 22940,
+          "errorNs": 766,
+          "stdDevNs": 679,
+          "ratio": 0.26,
           "allocatedBytes": 0
         },
         {
@@ -75,10 +75,10 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 2287470,
-          "errorNs": 137793,
-          "stdDevNs": 135331,
-          "ratio": 26.56,
+          "meanNs": 2265660,
+          "errorNs": 151870,
+          "stdDevNs": 142060,
+          "ratio": 25.82,
           "allocatedBytes": 0
         }
       ]
@@ -90,37 +90,37 @@
         {
           "method": "FilterAtCall",
           "params": {},
-          "meanNs": 78.08,
-          "errorNs": 4.358,
-          "stdDevNs": 4.077,
+          "meanNs": 74.84,
+          "errorNs": 4.257,
+          "stdDevNs": 3.982,
           "ratio": 1,
           "allocatedBytes": 0
         },
         {
           "method": "FilterOnce",
           "params": {},
-          "meanNs": 22.22,
-          "errorNs": 1.347,
-          "stdDevNs": 1.323,
+          "meanNs": 21.65,
+          "errorNs": 0.818,
+          "stdDevNs": 0.765,
           "ratio": 0.29,
           "allocatedBytes": 0
         },
         {
           "method": "NoFilter",
           "params": {},
-          "meanNs": 44.1,
-          "errorNs": 3.49,
-          "stdDevNs": 3.265,
+          "meanNs": 42.89,
+          "errorNs": 4.066,
+          "stdDevNs": 3.804,
           "ratio": 0.57,
           "allocatedBytes": 0
         },
         {
           "method": "PastTheMemo",
           "params": {},
-          "meanNs": 83.25,
-          "errorNs": 1.537,
-          "stdDevNs": 1.363,
-          "ratio": 1.07,
+          "meanNs": 88,
+          "errorNs": 3.872,
+          "stdDevNs": 3.622,
+          "ratio": 1.18,
           "allocatedBytes": 0
         }
       ]
@@ -136,9 +136,9 @@
             "Written": "10",
             "Changed": "False"
           },
-          "meanNs": 39209.9,
-          "errorNs": 2421.15,
-          "stdDevNs": 2377.89,
+          "meanNs": 38572.5,
+          "errorNs": 1599.54,
+          "stdDevNs": 1417.95,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -149,9 +149,9 @@
             "Written": "10",
             "Changed": "False"
           },
-          "meanNs": 472115.8,
-          "errorNs": 20370.08,
-          "stdDevNs": 19054.18,
+          "meanNs": 475551,
+          "errorNs": 20771.03,
+          "stdDevNs": 19429.24,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -162,9 +162,9 @@
             "Written": "10",
             "Changed": "True"
           },
-          "meanNs": 534.5,
-          "errorNs": 29.54,
-          "stdDevNs": 29.01,
+          "meanNs": 525.4,
+          "errorNs": 30,
+          "stdDevNs": 29.47,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -175,9 +175,9 @@
             "Written": "10",
             "Changed": "True"
           },
-          "meanNs": 690,
-          "errorNs": 38.04,
-          "stdDevNs": 33.72,
+          "meanNs": 719.6,
+          "errorNs": 64.16,
+          "stdDevNs": 56.87,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -188,9 +188,9 @@
             "Written": "1000",
             "Changed": "False"
           },
-          "meanNs": 62419.5,
-          "errorNs": 1477.55,
-          "stdDevNs": 1451.16,
+          "meanNs": 67197.1,
+          "errorNs": 3709.68,
+          "stdDevNs": 3470.03,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -201,9 +201,9 @@
             "Written": "1000",
             "Changed": "False"
           },
-          "meanNs": 544934.5,
-          "errorNs": 33216.36,
-          "stdDevNs": 27737.16,
+          "meanNs": 513974,
+          "errorNs": 9638.55,
+          "stdDevNs": 9015.91,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -214,9 +214,9 @@
             "Written": "1000",
             "Changed": "True"
           },
-          "meanNs": 38605.9,
-          "errorNs": 2117.7,
-          "stdDevNs": 1980.9,
+          "meanNs": 38896.7,
+          "errorNs": 2118.24,
+          "stdDevNs": 2080.4,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -227,9 +227,9 @@
             "Written": "1000",
             "Changed": "True"
           },
-          "meanNs": 51540.5,
-          "errorNs": 2777.09,
-          "stdDevNs": 2597.69,
+          "meanNs": 51035,
+          "errorNs": 1985.75,
+          "stdDevNs": 1760.32,
           "ratio": null,
           "allocatedBytes": 0
         }
@@ -244,9 +244,9 @@
           "params": {
             "Sessions": "10000"
           },
-          "meanNs": 100740,
-          "errorNs": 2243,
-          "stdDevNs": 1873,
+          "meanNs": 102450,
+          "errorNs": 3779,
+          "stdDevNs": 3535,
           "ratio": 1,
           "allocatedBytes": 0
         },
@@ -255,9 +255,9 @@
           "params": {
             "Sessions": "10000"
           },
-          "meanNs": 43230,
-          "errorNs": 2535,
-          "stdDevNs": 2117,
+          "meanNs": 43850,
+          "errorNs": 2030,
+          "stdDevNs": 1899,
           "ratio": 0.43,
           "allocatedBytes": 0
         }
@@ -272,9 +272,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 1227,
-          "errorNs": 49.2,
-          "stdDevNs": 46,
+          "meanNs": 1198,
+          "errorNs": 32.8,
+          "stdDevNs": 30.7,
           "ratio": null,
           "allocatedBytes": 0
         }
@@ -291,9 +291,9 @@
             "Written": "1000",
             "List": "False"
           },
-          "meanNs": 58750,
-          "errorNs": 5288,
-          "stdDevNs": 4688,
+          "meanNs": 60950,
+          "errorNs": 5483,
+          "stdDevNs": 4860,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -304,9 +304,9 @@
             "Written": "1000",
             "List": "True"
           },
-          "meanNs": 62700,
-          "errorNs": 3839,
-          "stdDevNs": 3403,
+          "meanNs": 61840,
+          "errorNs": 1105,
+          "stdDevNs": 1085,
           "ratio": null,
           "allocatedBytes": 0
         }
@@ -321,10 +321,10 @@
           "params": {
             "Players": "100000"
           },
-          "meanNs": 47500,
-          "errorNs": 3089,
-          "stdDevNs": 2738,
-          "ratio": 1,
+          "meanNs": 47370,
+          "errorNs": 3980,
+          "stdDevNs": 3528,
+          "ratio": 1.01,
           "allocatedBytes": 0
         },
         {
@@ -332,10 +332,10 @@
           "params": {
             "Players": "100000"
           },
-          "meanNs": 156960,
-          "errorNs": 10393,
-          "stdDevNs": 9722,
-          "ratio": 3.31,
+          "meanNs": 138230,
+          "errorNs": 3256,
+          "stdDevNs": 3045,
+          "ratio": 2.93,
           "allocatedBytes": 0
         },
         {
@@ -343,10 +343,10 @@
           "params": {
             "Players": "100000"
           },
-          "meanNs": 751370,
-          "errorNs": 57253,
-          "stdDevNs": 56230,
-          "ratio": 15.87,
+          "meanNs": 742160,
+          "errorNs": 59456,
+          "stdDevNs": 55615,
+          "ratio": 15.75,
           "allocatedBytes": 0
         }
       ]
@@ -360,9 +360,9 @@
           "params": {
             "Squads": "1000"
           },
-          "meanNs": 631700,
-          "errorNs": 45540,
-          "stdDevNs": 44730,
+          "meanNs": 589800,
+          "errorNs": 36840,
+          "stdDevNs": 36180,
           "ratio": 1,
           "allocatedBytes": 0
         },
@@ -371,10 +371,10 @@
           "params": {
             "Squads": "1000"
           },
-          "meanNs": 528700,
-          "errorNs": 22160,
-          "stdDevNs": 21760,
-          "ratio": 0.84,
+          "meanNs": 516400,
+          "errorNs": 19580,
+          "stdDevNs": 17360,
+          "ratio": 0.88,
           "allocatedBytes": 0
         }
       ]
@@ -389,9 +389,9 @@
             "Items": "100000",
             "Owners": "1000"
           },
-          "meanNs": 5261,
-          "errorNs": 254.7,
-          "stdDevNs": 250.1,
+          "meanNs": 5277,
+          "errorNs": 114.1,
+          "stdDevNs": 112.1,
           "ratio": null,
           "allocatedBytes": 0
         }
@@ -404,18 +404,18 @@
         {
           "method": "Tables",
           "params": {},
-          "meanNs": 11046.4,
-          "errorNs": 446.95,
-          "stdDevNs": 418.08,
+          "meanNs": 10576.7,
+          "errorNs": 432.12,
+          "stdDevNs": 404.21,
           "ratio": null,
           "allocatedBytes": 25576
         },
         {
           "method": "Entity",
           "params": {},
-          "meanNs": 267.5,
-          "errorNs": 20.54,
-          "stdDevNs": 20.17,
+          "meanNs": 243.8,
+          "errorNs": 10.42,
+          "stdDevNs": 10.24,
           "ratio": null,
           "allocatedBytes": 832
         }
@@ -430,10 +430,10 @@
           "params": {
             "Units": "100000"
           },
-          "meanNs": 121960,
-          "errorNs": 4110,
-          "stdDevNs": 4036,
-          "ratio": 1,
+          "meanNs": 130490,
+          "errorNs": 12892,
+          "stdDevNs": 12661,
+          "ratio": 1.01,
           "allocatedBytes": 0
         },
         {
@@ -441,10 +441,10 @@
           "params": {
             "Units": "100000"
           },
-          "meanNs": 40180,
-          "errorNs": 1260,
-          "stdDevNs": 1178,
-          "ratio": 0.33,
+          "meanNs": 41810,
+          "errorNs": 2291,
+          "stdDevNs": 2143,
+          "ratio": 0.32,
           "allocatedBytes": 0
         }
       ]
@@ -458,21 +458,21 @@
           "params": {
             "N": "10000"
           },
-          "meanNs": 1058847,
-          "errorNs": 62938.9,
-          "stdDevNs": 61814.5,
-          "ratio": 94.04,
-          "allocatedBytes": 1592807
+          "meanNs": 1033161,
+          "errorNs": 54711.7,
+          "stdDevNs": 53734.2,
+          "ratio": 81.67,
+          "allocatedBytes": 1592801
         },
         {
           "method": "Churn",
           "params": {
             "N": "10000"
           },
-          "meanNs": 301389,
-          "errorNs": 6422.7,
-          "stdDevNs": 6007.8,
-          "ratio": 26.77,
+          "meanNs": 334214,
+          "errorNs": 41610.6,
+          "stdDevNs": 38922.6,
+          "ratio": 26.42,
           "allocatedBytes": 0
         },
         {
@@ -480,10 +480,10 @@
           "params": {
             "N": "10000"
           },
-          "meanNs": 143834,
-          "errorNs": 8019.4,
-          "stdDevNs": 7501.4,
-          "ratio": 12.77,
+          "meanNs": 156510,
+          "errorNs": 21365.3,
+          "stdDevNs": 20983.6,
+          "ratio": 12.37,
           "allocatedBytes": 0
         },
         {
@@ -491,10 +491,10 @@
           "params": {
             "N": "10000"
           },
-          "meanNs": 46082,
-          "errorNs": 1984.1,
-          "stdDevNs": 1758.9,
-          "ratio": 4.09,
+          "meanNs": 51030,
+          "errorNs": 3510.5,
+          "stdDevNs": 3447.8,
+          "ratio": 4.03,
           "allocatedBytes": 0
         },
         {
@@ -502,10 +502,10 @@
           "params": {
             "N": "10000"
           },
-          "meanNs": 149908,
-          "errorNs": 3518.9,
-          "stdDevNs": 3291.6,
-          "ratio": 13.31,
+          "meanNs": 158296,
+          "errorNs": 15959.7,
+          "stdDevNs": 14147.9,
+          "ratio": 12.51,
           "allocatedBytes": 0
         },
         {
@@ -513,10 +513,10 @@
           "params": {
             "N": "10000"
           },
-          "meanNs": 30823,
-          "errorNs": 1954,
-          "stdDevNs": 1919.1,
-          "ratio": 2.74,
+          "meanNs": 30539,
+          "errorNs": 2174.7,
+          "stdDevNs": 2034.3,
+          "ratio": 2.41,
           "allocatedBytes": 0
         },
         {
@@ -524,10 +524,10 @@
           "params": {
             "N": "10000"
           },
-          "meanNs": 11616,
-          "errorNs": 524.4,
-          "stdDevNs": 464.9,
-          "ratio": 1.03,
+          "meanNs": 12878,
+          "errorNs": 1550.2,
+          "stdDevNs": 1450.1,
+          "ratio": 1.02,
           "allocatedBytes": 0
         },
         {
@@ -535,10 +535,10 @@
           "params": {
             "N": "10000"
           },
-          "meanNs": 18811,
-          "errorNs": 3472.8,
-          "stdDevNs": 3410.8,
-          "ratio": 1.67,
+          "meanNs": 18908,
+          "errorNs": 2676.6,
+          "stdDevNs": 2628.8,
+          "ratio": 1.49,
           "allocatedBytes": 0
         },
         {
@@ -546,10 +546,10 @@
           "params": {
             "N": "10000"
           },
-          "meanNs": 11314,
-          "errorNs": 858.5,
-          "stdDevNs": 843.2,
-          "ratio": 1,
+          "meanNs": 12787,
+          "errorNs": 1452.6,
+          "stdDevNs": 1358.8,
+          "ratio": 1.01,
           "allocatedBytes": 0
         },
         {
@@ -557,10 +557,10 @@
           "params": {
             "N": "10000"
           },
-          "meanNs": 8751,
-          "errorNs": 306.9,
-          "stdDevNs": 301.4,
-          "ratio": 0.78,
+          "meanNs": 9134,
+          "errorNs": 1400.5,
+          "stdDevNs": 1241.5,
+          "ratio": 0.72,
           "allocatedBytes": 0
         },
         {
@@ -568,10 +568,10 @@
           "params": {
             "N": "10000"
           },
-          "meanNs": 9180,
-          "errorNs": 349.3,
-          "stdDevNs": 326.7,
-          "ratio": 0.82,
+          "meanNs": 9550,
+          "errorNs": 643.5,
+          "stdDevNs": 632,
+          "ratio": 0.75,
           "allocatedBytes": 0
         },
         {
@@ -579,10 +579,10 @@
           "params": {
             "N": "10000"
           },
-          "meanNs": 7920,
-          "errorNs": 2260.7,
-          "stdDevNs": 2114.6,
-          "ratio": 0.7,
+          "meanNs": 9710,
+          "errorNs": 669.9,
+          "stdDevNs": 658,
+          "ratio": 0.77,
           "allocatedBytes": 0
         },
         {
@@ -590,10 +590,10 @@
           "params": {
             "N": "10000"
           },
-          "meanNs": 3497,
-          "errorNs": 291.1,
-          "stdDevNs": 272.3,
-          "ratio": 0.31,
+          "meanNs": 3329,
+          "errorNs": 89.5,
+          "stdDevNs": 74.8,
+          "ratio": 0.26,
           "allocatedBytes": 0
         },
         {
@@ -601,10 +601,10 @@
           "params": {
             "N": "10000"
           },
-          "meanNs": 1313,
-          "errorNs": 418.8,
-          "stdDevNs": 411.3,
-          "ratio": 0.12,
+          "meanNs": 1009,
+          "errorNs": 73.4,
+          "stdDevNs": 72.1,
+          "ratio": 0.08,
           "allocatedBytes": 0
         },
         {
@@ -612,10 +612,10 @@
           "params": {
             "N": "10000"
           },
-          "meanNs": 3943,
-          "errorNs": 269.7,
-          "stdDevNs": 252.3,
-          "ratio": 0.35,
+          "meanNs": 3605,
+          "errorNs": 103,
+          "stdDevNs": 96.3,
+          "ratio": 0.28,
           "allocatedBytes": 0
         },
         {
@@ -623,10 +623,10 @@
           "params": {
             "N": "10000"
           },
-          "meanNs": 8466,
-          "errorNs": 392.9,
-          "stdDevNs": 385.9,
-          "ratio": 0.75,
+          "meanNs": 8366,
+          "errorNs": 263.8,
+          "stdDevNs": 233.9,
+          "ratio": 0.66,
           "allocatedBytes": 0
         },
         {
@@ -634,10 +634,10 @@
           "params": {
             "N": "10000"
           },
-          "meanNs": 42399,
-          "errorNs": 2315.3,
-          "stdDevNs": 2273.9,
-          "ratio": 3.77,
+          "meanNs": 41062,
+          "errorNs": 689.5,
+          "stdDevNs": 645,
+          "ratio": 3.25,
           "allocatedBytes": 0
         }
       ]
@@ -651,10 +651,10 @@
           "params": {
             "Entities": "1000"
           },
-          "meanNs": 222057,
-          "errorNs": 22067.4,
-          "stdDevNs": 20641.8,
-          "ratio": 1.01,
+          "meanNs": 223787,
+          "errorNs": 13991.6,
+          "stdDevNs": 13741.6,
+          "ratio": 1,
           "allocatedBytes": 0
         },
         {
@@ -662,10 +662,10 @@
           "params": {
             "Entities": "1000"
           },
-          "meanNs": 173267,
-          "errorNs": 19065,
-          "stdDevNs": 18724.4,
-          "ratio": 0.79,
+          "meanNs": 164338,
+          "errorNs": 11784.7,
+          "stdDevNs": 11574.1,
+          "ratio": 0.74,
           "allocatedBytes": 0
         },
         {
@@ -673,9 +673,9 @@
           "params": {
             "Entities": "1000"
           },
-          "meanNs": 2624,
-          "errorNs": 510.1,
-          "stdDevNs": 501,
+          "meanNs": 2323,
+          "errorNs": 99.7,
+          "stdDevNs": 97.9,
           "ratio": 0.01,
           "allocatedBytes": 0
         }
@@ -690,9 +690,9 @@
           "params": {
             "TotalEntities": "100000"
           },
-          "meanNs": 1077000,
-          "errorNs": 255800,
-          "stdDevNs": 251200,
+          "meanNs": 924300,
+          "errorNs": 100300,
+          "stdDevNs": 98460,
           "ratio": null,
           "allocatedBytes": 0
         }
@@ -707,9 +707,9 @@
           "params": {
             "Players": "100000"
           },
-          "meanNs": 71840,
-          "errorNs": 1853,
-          "stdDevNs": 1733,
+          "meanNs": 75790,
+          "errorNs": 3560,
+          "stdDevNs": 3156,
           "ratio": 1,
           "allocatedBytes": 0
         },
@@ -718,10 +718,10 @@
           "params": {
             "Players": "100000"
           },
-          "meanNs": 359030,
-          "errorNs": 33281,
-          "stdDevNs": 32686,
-          "ratio": 5,
+          "meanNs": 306940,
+          "errorNs": 18040,
+          "stdDevNs": 17718,
+          "ratio": 4.06,
           "allocatedBytes": 0
         }
       ]
@@ -735,9 +735,9 @@
           "params": {
             "Entities": "10000"
           },
-          "meanNs": 20200,
-          "errorNs": 2132,
-          "stdDevNs": 1994,
+          "meanNs": 20850,
+          "errorNs": 2675,
+          "stdDevNs": 2372,
           "ratio": 1.01,
           "allocatedBytes": 0
         },
@@ -746,10 +746,10 @@
           "params": {
             "Entities": "10000"
           },
-          "meanNs": 21720,
-          "errorNs": 1466,
-          "stdDevNs": 1371,
-          "ratio": 1.08,
+          "meanNs": 20760,
+          "errorNs": 1454,
+          "stdDevNs": 1360,
+          "ratio": 1.01,
           "allocatedBytes": 0
         }
       ]
@@ -764,9 +764,9 @@
             "Entities": "100000",
             "Parallel": "False"
           },
-          "meanNs": 2071800,
-          "errorNs": 136600,
-          "stdDevNs": 134200,
+          "meanNs": 1681600,
+          "errorNs": 141610,
+          "stdDevNs": 139080,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -776,11 +776,11 @@
             "Entities": "100000",
             "Parallel": "False"
           },
-          "meanNs": 1936400,
-          "errorNs": 248000,
-          "stdDevNs": 232000,
+          "meanNs": 1923900,
+          "errorNs": 277880,
+          "stdDevNs": 259930,
           "ratio": null,
-          "allocatedBytes": 6
+          "allocatedBytes": 0
         },
         {
           "method": "Tick",
@@ -788,9 +788,9 @@
             "Entities": "100000",
             "Parallel": "True"
           },
-          "meanNs": 1173300,
-          "errorNs": 233600,
-          "stdDevNs": 229400,
+          "meanNs": 883700,
+          "errorNs": 65940,
+          "stdDevNs": 64760,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -800,9 +800,9 @@
             "Entities": "100000",
             "Parallel": "True"
           },
-          "meanNs": 991300,
-          "errorNs": 176800,
-          "stdDevNs": 173600,
+          "meanNs": 895900,
+          "errorNs": 115230,
+          "stdDevNs": 102140,
           "ratio": null,
           "allocatedBytes": 0
         }
@@ -818,9 +818,9 @@
             "Entities": "100000",
             "Parallel": "False"
           },
-          "meanNs": 394400,
-          "errorNs": 53150,
-          "stdDevNs": 47110,
+          "meanNs": 420000,
+          "errorNs": 45120,
+          "stdDevNs": 42210,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -830,9 +830,9 @@
             "Entities": "100000",
             "Parallel": "True"
           },
-          "meanNs": 319900,
-          "errorNs": 38560,
-          "stdDevNs": 37870,
+          "meanNs": 295100,
+          "errorNs": 45440,
+          "stdDevNs": 42500,
           "ratio": null,
           "allocatedBytes": 0
         }
@@ -847,9 +847,9 @@
           "params": {
             "N": "1000"
           },
-          "meanNs": 50370,
-          "errorNs": 4025,
-          "stdDevNs": 3765,
+          "meanNs": 49690,
+          "errorNs": 3588,
+          "stdDevNs": 3356,
           "ratio": 1,
           "allocatedBytes": 0
         },
@@ -858,10 +858,10 @@
           "params": {
             "N": "1000"
           },
-          "meanNs": 14420,
-          "errorNs": 593,
-          "stdDevNs": 555,
-          "ratio": 0.29,
+          "meanNs": 15330,
+          "errorNs": 1251,
+          "stdDevNs": 1228,
+          "ratio": 0.31,
           "allocatedBytes": 0
         }
       ]
@@ -875,9 +875,9 @@
           "params": {
             "Players": "10000"
           },
-          "meanNs": 24850,
-          "errorNs": 2685,
-          "stdDevNs": 2511,
+          "meanNs": 22730,
+          "errorNs": 808,
+          "stdDevNs": 756,
           "ratio": null,
           "allocatedBytes": 0
         }
@@ -892,10 +892,10 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 38090,
-          "errorNs": 7675,
-          "stdDevNs": 7180,
-          "ratio": 1.03,
+          "meanNs": 33680,
+          "errorNs": 2517,
+          "stdDevNs": 2355,
+          "ratio": 1,
           "allocatedBytes": 0
         },
         {
@@ -903,10 +903,10 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 45270,
-          "errorNs": 2938,
-          "stdDevNs": 2749,
-          "ratio": 1.23,
+          "meanNs": 56700,
+          "errorNs": 2831,
+          "stdDevNs": 2510,
+          "ratio": 1.69,
           "allocatedBytes": 0
         },
         {
@@ -914,10 +914,10 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 144650,
-          "errorNs": 8632,
-          "stdDevNs": 8074,
-          "ratio": 3.92,
+          "meanNs": 145400,
+          "errorNs": 10203,
+          "stdDevNs": 10020,
+          "ratio": 4.34,
           "allocatedBytes": 0
         }
       ]
@@ -931,20 +931,20 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 929500,
-          "errorNs": 108020,
-          "stdDevNs": 95760,
+          "meanNs": 976600,
+          "errorNs": 133890,
+          "stdDevNs": 125240,
           "ratio": null,
-          "allocatedBytes": 2801992
+          "allocatedBytes": 2801793
         },
         {
           "method": "Restore",
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 406800,
-          "errorNs": 14350,
-          "stdDevNs": 13420,
+          "meanNs": 423500,
+          "errorNs": 30350,
+          "stdDevNs": 28390,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -953,9 +953,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 239700,
-          "errorNs": 19420,
-          "stdDevNs": 18170,
+          "meanNs": 258700,
+          "errorNs": 20160,
+          "stdDevNs": 19800,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -964,9 +964,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 1085600,
-          "errorNs": 88650,
-          "stdDevNs": 82930,
+          "meanNs": 1049700,
+          "errorNs": 48760,
+          "stdDevNs": 45610,
           "ratio": null,
           "allocatedBytes": 0
         }
@@ -981,9 +981,9 @@
           "params": {
             "Units": "100000"
           },
-          "meanNs": 362.64,
-          "errorNs": 21.08,
-          "stdDevNs": 20.704,
+          "meanNs": 385.7,
+          "errorNs": 33.797,
+          "stdDevNs": 33.193,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -992,9 +992,9 @@
           "params": {
             "Units": "100000"
           },
-          "meanNs": 365.42,
-          "errorNs": 22.021,
-          "stdDevNs": 19.521,
+          "meanNs": 364.75,
+          "errorNs": 16.246,
+          "stdDevNs": 15.197,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -1003,9 +1003,9 @@
           "params": {
             "Units": "100000"
           },
-          "meanNs": 14.48,
-          "errorNs": 1.204,
-          "stdDevNs": 1.126,
+          "meanNs": 13.62,
+          "errorNs": 0.344,
+          "stdDevNs": 0.305,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -1014,9 +1014,9 @@
           "params": {
             "Units": "100000"
           },
-          "meanNs": 52041.52,
-          "errorNs": 4408.881,
-          "stdDevNs": 4330.111,
+          "meanNs": 52289.73,
+          "errorNs": 3494.884,
+          "stdDevNs": 3432.444,
           "ratio": null,
           "allocatedBytes": 0
         }
@@ -1031,9 +1031,9 @@
           "params": {
             "Players": "10000"
           },
-          "meanNs": 275200,
-          "errorNs": 68850,
-          "stdDevNs": 64400,
+          "meanNs": 246600,
+          "errorNs": 24970,
+          "stdDevNs": 23350,
           "ratio": null,
           "allocatedBytes": 3021
         },
@@ -1042,9 +1042,9 @@
           "params": {
             "Players": "100000"
           },
-          "meanNs": 2102800,
-          "errorNs": 422880,
-          "stdDevNs": 395570,
+          "meanNs": 2383700,
+          "errorNs": 490660,
+          "stdDevNs": 458960,
           "ratio": null,
           "allocatedBytes": 3021
         }
@@ -1059,9 +1059,9 @@
           "params": {
             "Entities": "10000"
           },
-          "meanNs": 154300,
-          "errorNs": 5330,
-          "stdDevNs": 4980,
+          "meanNs": 158400,
+          "errorNs": 10120,
+          "stdDevNs": 9460,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -1070,9 +1070,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 1753900,
-          "errorNs": 96400,
-          "stdDevNs": 94670,
+          "meanNs": 1720700,
+          "errorNs": 49870,
+          "stdDevNs": 46650,
           "ratio": null,
           "allocatedBytes": 0
         }
@@ -1087,10 +1087,10 @@
           "params": {
             "Entities": "10000"
           },
-          "meanNs": 161000,
-          "errorNs": 11340,
-          "stdDevNs": 10610,
-          "ratio": 1,
+          "meanNs": 174600,
+          "errorNs": 16430,
+          "stdDevNs": 16140,
+          "ratio": 1.01,
           "allocatedBytes": 0
         },
         {
@@ -1098,21 +1098,21 @@
           "params": {
             "Entities": "10000"
           },
-          "meanNs": 478100,
-          "errorNs": 23260,
-          "stdDevNs": 22840,
-          "ratio": 2.98,
-          "allocatedBytes": 67224
+          "meanNs": 482300,
+          "errorNs": 40580,
+          "stdDevNs": 37960,
+          "ratio": 2.78,
+          "allocatedBytes": 67477
         },
         {
           "method": "Friflo",
           "params": {
             "Entities": "10000"
           },
-          "meanNs": 163200,
-          "errorNs": 5350,
-          "stdDevNs": 5000,
-          "ratio": 1.02,
+          "meanNs": 183100,
+          "errorNs": 12400,
+          "stdDevNs": 12180,
+          "ratio": 1.06,
           "allocatedBytes": 0
         },
         {
@@ -1120,20 +1120,20 @@
           "params": {
             "Entities": "10000"
           },
-          "meanNs": 286000,
-          "errorNs": 17350,
-          "stdDevNs": 15380,
-          "ratio": 1.78,
-          "allocatedBytes": 6297
+          "meanNs": 306600,
+          "errorNs": 28550,
+          "stdDevNs": 28040,
+          "ratio": 1.77,
+          "allocatedBytes": 6298
         },
         {
           "method": "EasyEcs",
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 1790800,
-          "errorNs": 111480,
-          "stdDevNs": 98830,
+          "meanNs": 1684200,
+          "errorNs": 30670,
+          "stdDevNs": 25610,
           "ratio": 1,
           "allocatedBytes": 0
         },
@@ -1142,21 +1142,21 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 5740300,
-          "errorNs": 407280,
-          "stdDevNs": 380970,
-          "ratio": 3.21,
-          "allocatedBytes": 550526
+          "meanNs": 5755600,
+          "errorNs": 347900,
+          "stdDevNs": 325430,
+          "ratio": 3.42,
+          "allocatedBytes": 548127
         },
         {
           "method": "Friflo",
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 1955900,
-          "errorNs": 156870,
-          "stdDevNs": 154070,
-          "ratio": 1.1,
+          "meanNs": 1826800,
+          "errorNs": 37360,
+          "stdDevNs": 33120,
+          "ratio": 1.08,
           "allocatedBytes": 0
         },
         {
@@ -1164,11 +1164,11 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 6799400,
-          "errorNs": 1187090,
-          "stdDevNs": 1110410,
-          "ratio": 3.81,
-          "allocatedBytes": 62792
+          "meanNs": 6240700,
+          "errorNs": 985080,
+          "stdDevNs": 967480,
+          "ratio": 3.71,
+          "allocatedBytes": 62350
         }
       ]
     },
@@ -1179,37 +1179,37 @@
         {
           "method": "EasyEcs_SetAllRemoveAll",
           "params": {},
-          "meanNs": 88690,
-          "errorNs": 6689,
-          "stdDevNs": 6257,
-          "ratio": 1,
+          "meanNs": 78720,
+          "errorNs": 6733,
+          "stdDevNs": 5969,
+          "ratio": 1.01,
           "allocatedBytes": 0
         },
         {
           "method": "Friflo_ApplyBatch",
           "params": {},
-          "meanNs": 12737720,
-          "errorNs": 1629836,
-          "stdDevNs": 1600717,
-          "ratio": 144.22,
-          "allocatedBytes": 4195242
+          "meanNs": 12103750,
+          "errorNs": 813892,
+          "stdDevNs": 799351,
+          "ratio": 154.58,
+          "allocatedBytes": 4195280
         },
         {
           "method": "Arch_AddRemoveByQuery",
           "params": {},
-          "meanNs": 1129820,
-          "errorNs": 27809,
-          "stdDevNs": 26013,
-          "ratio": 12.79,
+          "meanNs": 1209430,
+          "errorNs": 67005,
+          "stdDevNs": 62676,
+          "ratio": 15.45,
           "allocatedBytes": 0
         },
         {
           "method": "DefaultEcs_PerEntity",
           "params": {},
-          "meanNs": 8551870,
-          "errorNs": 747727,
-          "stdDevNs": 699424,
-          "ratio": 96.83,
+          "meanNs": 8124470,
+          "errorNs": 235348,
+          "stdDevNs": 220145,
+          "ratio": 103.76,
           "allocatedBytes": 0
         }
       ]
@@ -1221,37 +1221,37 @@
         {
           "method": "EasyEcs_CreateAndDestroyAll",
           "params": {},
-          "meanNs": 139500,
-          "errorNs": 4650,
-          "stdDevNs": 4350,
+          "meanNs": 138200,
+          "errorNs": 7400,
+          "stdDevNs": 6560,
           "ratio": 1,
           "allocatedBytes": 0
         },
         {
           "method": "Friflo_PerEntity",
           "params": {},
-          "meanNs": 384700,
-          "errorNs": 24870,
-          "stdDevNs": 24420,
-          "ratio": 2.76,
+          "meanNs": 379900,
+          "errorNs": 20020,
+          "stdDevNs": 19660,
+          "ratio": 2.75,
           "allocatedBytes": 0
         },
         {
           "method": "Arch_CreateAndDestroyByQuery",
           "params": {},
-          "meanNs": 465500,
-          "errorNs": 49690,
-          "stdDevNs": 48800,
-          "ratio": 3.34,
+          "meanNs": 408600,
+          "errorNs": 25080,
+          "stdDevNs": 24630,
+          "ratio": 2.96,
           "allocatedBytes": 0
         },
         {
           "method": "DefaultEcs_PerEntity",
           "params": {},
-          "meanNs": 1378900,
-          "errorNs": 131780,
-          "stdDevNs": 123270,
-          "ratio": 9.89,
+          "meanNs": 1334900,
+          "errorNs": 73210,
+          "stdDevNs": 68480,
+          "ratio": 9.68,
           "allocatedBytes": 320000
         }
       ]
@@ -1265,9 +1265,9 @@
           "params": {
             "Written": "10"
           },
-          "meanNs": 535.7,
-          "errorNs": 39.67,
-          "stdDevNs": 37.11,
+          "meanNs": 506.9,
+          "errorNs": 29.78,
+          "stdDevNs": 29.24,
           "ratio": 1,
           "allocatedBytes": 0
         },
@@ -1276,10 +1276,10 @@
           "params": {
             "Written": "10"
           },
-          "meanNs": 40450.5,
-          "errorNs": 2635.81,
-          "stdDevNs": 2465.54,
-          "ratio": 75.84,
+          "meanNs": 38240.4,
+          "errorNs": 1166.04,
+          "stdDevNs": 1090.71,
+          "ratio": 75.66,
           "allocatedBytes": 0
         },
         {
@@ -1287,10 +1287,10 @@
           "params": {
             "Written": "10"
           },
-          "meanNs": 41369.4,
-          "errorNs": 3083.76,
-          "stdDevNs": 3028.67,
-          "ratio": 77.57,
+          "meanNs": 37087,
+          "errorNs": 142.15,
+          "stdDevNs": 139.61,
+          "ratio": 73.38,
           "allocatedBytes": 0
         },
         {
@@ -1298,10 +1298,10 @@
           "params": {
             "Written": "10"
           },
-          "meanNs": 40396.7,
-          "errorNs": 3667.64,
-          "stdDevNs": 3602.12,
-          "ratio": 75.74,
+          "meanNs": 39862.6,
+          "errorNs": 1588.64,
+          "stdDevNs": 1486.02,
+          "ratio": 78.87,
           "allocatedBytes": 0
         },
         {
@@ -1309,10 +1309,10 @@
           "params": {
             "Written": "10"
           },
-          "meanNs": 1356.9,
-          "errorNs": 70.52,
-          "stdDevNs": 65.97,
-          "ratio": 2.54,
+          "meanNs": 1442.8,
+          "errorNs": 75.27,
+          "stdDevNs": 73.93,
+          "ratio": 2.85,
           "allocatedBytes": 0
         },
         {
@@ -1320,10 +1320,10 @@
           "params": {
             "Written": "10"
           },
-          "meanNs": 89600.3,
-          "errorNs": 4159.96,
-          "stdDevNs": 3687.7,
-          "ratio": 168,
+          "meanNs": 91893.5,
+          "errorNs": 4044.6,
+          "stdDevNs": 3972.33,
+          "ratio": 181.82,
           "allocatedBytes": 0
         },
         {
@@ -1331,10 +1331,10 @@
           "params": {
             "Written": "10"
           },
-          "meanNs": 1093.5,
-          "errorNs": 66.17,
-          "stdDevNs": 61.9,
-          "ratio": 2.05,
+          "meanNs": 965.9,
+          "errorNs": 60.27,
+          "stdDevNs": 56.37,
+          "ratio": 1.91,
           "allocatedBytes": 0
         },
         {
@@ -1342,9 +1342,9 @@
           "params": {
             "Written": "1000"
           },
-          "meanNs": 36920.4,
-          "errorNs": 3200.09,
-          "stdDevNs": 2993.37,
+          "meanNs": 38519.2,
+          "errorNs": 3157.56,
+          "stdDevNs": 3101.15,
           "ratio": 1.01,
           "allocatedBytes": 0
         },
@@ -1353,10 +1353,10 @@
           "params": {
             "Written": "1000"
           },
-          "meanNs": 67619.6,
-          "errorNs": 7093.33,
-          "stdDevNs": 6635.11,
-          "ratio": 1.84,
+          "meanNs": 61372.5,
+          "errorNs": 1781.02,
+          "stdDevNs": 1665.97,
+          "ratio": 1.6,
           "allocatedBytes": 0
         },
         {
@@ -1364,10 +1364,10 @@
           "params": {
             "Written": "1000"
           },
-          "meanNs": 80215,
-          "errorNs": 4688.5,
-          "stdDevNs": 4604.74,
-          "ratio": 2.19,
+          "meanNs": 77279.1,
+          "errorNs": 3504.39,
+          "stdDevNs": 3441.78,
+          "ratio": 2.02,
           "allocatedBytes": 0
         },
         {
@@ -1375,10 +1375,10 @@
           "params": {
             "Written": "1000"
           },
-          "meanNs": 56472.6,
-          "errorNs": 2884.45,
-          "stdDevNs": 2832.91,
-          "ratio": 1.54,
+          "meanNs": 53746.4,
+          "errorNs": 2664.94,
+          "stdDevNs": 2492.78,
+          "ratio": 1.4,
           "allocatedBytes": 0
         },
         {
@@ -1386,10 +1386,10 @@
           "params": {
             "Written": "1000"
           },
-          "meanNs": 125471.4,
-          "errorNs": 7579.51,
-          "stdDevNs": 7089.88,
-          "ratio": 3.42,
+          "meanNs": 123245.2,
+          "errorNs": 7459.78,
+          "stdDevNs": 7326.5,
+          "ratio": 3.22,
           "allocatedBytes": 0
         },
         {
@@ -1397,10 +1397,10 @@
           "params": {
             "Written": "1000"
           },
-          "meanNs": 120978.7,
-          "errorNs": 13001.24,
-          "stdDevNs": 12768.95,
-          "ratio": 3.3,
+          "meanNs": 108830,
+          "errorNs": 3307.19,
+          "stdDevNs": 3248.1,
+          "ratio": 2.84,
           "allocatedBytes": 0
         },
         {
@@ -1408,10 +1408,10 @@
           "params": {
             "Written": "1000"
           },
-          "meanNs": 90794.1,
-          "errorNs": 8069.49,
-          "stdDevNs": 7548.21,
-          "ratio": 2.47,
+          "meanNs": 83995.7,
+          "errorNs": 4814.21,
+          "stdDevNs": 4728.2,
+          "ratio": 2.19,
           "allocatedBytes": 0
         }
       ]
@@ -1425,9 +1425,9 @@
           "params": {
             "Switched": "100"
           },
-          "meanNs": 42670,
-          "errorNs": 3376,
-          "stdDevNs": 2993,
+          "meanNs": 42370,
+          "errorNs": 2800,
+          "stdDevNs": 2619,
           "ratio": 1,
           "allocatedBytes": 0
         },
@@ -1436,10 +1436,10 @@
           "params": {
             "Switched": "100"
           },
-          "meanNs": 45640,
-          "errorNs": 2272,
-          "stdDevNs": 2125,
-          "ratio": 1.07,
+          "meanNs": 41400,
+          "errorNs": 688,
+          "stdDevNs": 643,
+          "ratio": 0.98,
           "allocatedBytes": 0
         },
         {
@@ -1447,10 +1447,10 @@
           "params": {
             "Switched": "100"
           },
-          "meanNs": 45630,
-          "errorNs": 2658,
-          "stdDevNs": 2486,
-          "ratio": 1.07,
+          "meanNs": 45870,
+          "errorNs": 2798,
+          "stdDevNs": 2617,
+          "ratio": 1.09,
           "allocatedBytes": 0
         },
         {
@@ -1458,10 +1458,10 @@
           "params": {
             "Switched": "100"
           },
-          "meanNs": 89860,
-          "errorNs": 5435,
-          "stdDevNs": 5084,
-          "ratio": 2.11,
+          "meanNs": 82810,
+          "errorNs": 3723,
+          "stdDevNs": 3482,
+          "ratio": 1.96,
           "allocatedBytes": 0
         },
         {
@@ -1469,10 +1469,10 @@
           "params": {
             "Switched": "100"
           },
-          "meanNs": 106490,
-          "errorNs": 9304,
-          "stdDevNs": 8703,
-          "ratio": 2.51,
+          "meanNs": 102700,
+          "errorNs": 5624,
+          "stdDevNs": 5261,
+          "ratio": 2.43,
           "allocatedBytes": 0
         },
         {
@@ -1480,10 +1480,10 @@
           "params": {
             "Switched": "10000"
           },
-          "meanNs": 458210,
-          "errorNs": 43051,
-          "stdDevNs": 40270,
-          "ratio": 1.01,
+          "meanNs": 477500,
+          "errorNs": 34787,
+          "stdDevNs": 34165,
+          "ratio": 1,
           "allocatedBytes": 0
         },
         {
@@ -1491,10 +1491,10 @@
           "params": {
             "Switched": "10000"
           },
-          "meanNs": 569750,
-          "errorNs": 35697,
-          "stdDevNs": 35059,
-          "ratio": 1.25,
+          "meanNs": 562580,
+          "errorNs": 17796,
+          "stdDevNs": 16647,
+          "ratio": 1.18,
           "allocatedBytes": 0
         },
         {
@@ -1502,10 +1502,10 @@
           "params": {
             "Switched": "10000"
           },
-          "meanNs": 865100,
-          "errorNs": 28170,
-          "stdDevNs": 27667,
-          "ratio": 1.9,
+          "meanNs": 796690,
+          "errorNs": 22367,
+          "stdDevNs": 21968,
+          "ratio": 1.68,
           "allocatedBytes": 0
         },
         {
@@ -1513,10 +1513,10 @@
           "params": {
             "Switched": "10000"
           },
-          "meanNs": 1288060,
-          "errorNs": 63554,
-          "stdDevNs": 62418,
-          "ratio": 2.83,
+          "meanNs": 1256170,
+          "errorNs": 80137,
+          "stdDevNs": 78705,
+          "ratio": 2.64,
           "allocatedBytes": 0
         },
         {
@@ -1524,10 +1524,10 @@
           "params": {
             "Switched": "10000"
           },
-          "meanNs": 722680,
-          "errorNs": 15813,
-          "stdDevNs": 14791,
-          "ratio": 1.59,
+          "meanNs": 744700,
+          "errorNs": 23054,
+          "stdDevNs": 20436,
+          "ratio": 1.57,
           "allocatedBytes": 0
         }
       ]
@@ -1539,19 +1539,19 @@
         {
           "method": "EasyEcs_ChildOf",
           "params": {},
-          "meanNs": 459200,
-          "errorNs": 29540,
-          "stdDevNs": 27630,
-          "ratio": 1,
+          "meanNs": 451800,
+          "errorNs": 38300,
+          "stdDevNs": 37610,
+          "ratio": 1.01,
           "allocatedBytes": 0
         },
         {
           "method": "Friflo_AddChild",
           "params": {},
-          "meanNs": 1093100,
-          "errorNs": 33630,
-          "stdDevNs": 33030,
-          "ratio": 2.39,
+          "meanNs": 1059600,
+          "errorNs": 36490,
+          "stdDevNs": 34130,
+          "ratio": 2.36,
           "allocatedBytes": 0
         }
       ]
@@ -1565,9 +1565,9 @@
           "params": {
             "Trades": "1"
           },
-          "meanNs": 452.2,
-          "errorNs": 34.5,
-          "stdDevNs": 32.27,
+          "meanNs": 425.4,
+          "errorNs": 26.67,
+          "stdDevNs": 24.94,
           "ratio": 1,
           "allocatedBytes": 0
         },
@@ -1576,10 +1576,10 @@
           "params": {
             "Trades": "1"
           },
-          "meanNs": 1297.6,
-          "errorNs": 97.3,
-          "stdDevNs": 95.56,
-          "ratio": 2.88,
+          "meanNs": 1373,
+          "errorNs": 157.15,
+          "stdDevNs": 147,
+          "ratio": 3.24,
           "allocatedBytes": 0
         },
         {
@@ -1587,10 +1587,10 @@
           "params": {
             "Trades": "1"
           },
-          "meanNs": 796.1,
-          "errorNs": 62.61,
-          "stdDevNs": 58.57,
-          "ratio": 1.77,
+          "meanNs": 838.3,
+          "errorNs": 73.57,
+          "stdDevNs": 68.82,
+          "ratio": 1.98,
           "allocatedBytes": 0
         },
         {
@@ -1598,9 +1598,9 @@
           "params": {
             "Trades": "100"
           },
-          "meanNs": 4984.5,
-          "errorNs": 160.09,
-          "stdDevNs": 157.23,
+          "meanNs": 5114.3,
+          "errorNs": 353.61,
+          "stdDevNs": 330.77,
           "ratio": 1,
           "allocatedBytes": 0
         },
@@ -1609,10 +1609,10 @@
           "params": {
             "Trades": "100"
           },
-          "meanNs": 9669.9,
-          "errorNs": 656.39,
-          "stdDevNs": 644.66,
-          "ratio": 1.94,
+          "meanNs": 8325.1,
+          "errorNs": 331.52,
+          "stdDevNs": 310.1,
+          "ratio": 1.63,
           "allocatedBytes": 0
         },
         {
@@ -1620,10 +1620,10 @@
           "params": {
             "Trades": "100"
           },
-          "meanNs": 9664.6,
-          "errorNs": 1727.4,
-          "stdDevNs": 1615.81,
-          "ratio": 1.94,
+          "meanNs": 7872.6,
+          "errorNs": 456.96,
+          "stdDevNs": 448.79,
+          "ratio": 1.55,
           "allocatedBytes": 0
         }
       ]
@@ -1635,37 +1635,37 @@
         {
           "method": "EasyEcs_Parallel",
           "params": {},
-          "meanNs": 862400,
-          "errorNs": 160400,
-          "stdDevNs": 157500,
-          "ratio": 1.03,
+          "meanNs": 765800,
+          "errorNs": 62400,
+          "stdDevNs": 61280,
+          "ratio": 1.01,
           "allocatedBytes": 0
         },
         {
           "method": "Friflo_QueryJob",
           "params": {},
-          "meanNs": 714500,
-          "errorNs": 129800,
-          "stdDevNs": 127500,
-          "ratio": 0.85,
+          "meanNs": 753700,
+          "errorNs": 183080,
+          "stdDevNs": 179810,
+          "ratio": 0.99,
           "allocatedBytes": 0
         },
         {
           "method": "Arch_InlineParallelQuery",
           "params": {},
-          "meanNs": 803000,
-          "errorNs": 123900,
-          "stdDevNs": 121700,
-          "ratio": 0.96,
+          "meanNs": 684800,
+          "errorNs": 150690,
+          "stdDevNs": 140950,
+          "ratio": 0.9,
           "allocatedBytes": 0
         },
         {
           "method": "DefaultEcs_ParallelRunner",
           "params": {},
-          "meanNs": 898200,
-          "errorNs": 108400,
-          "stdDevNs": 101400,
-          "ratio": 1.07,
+          "meanNs": 853500,
+          "errorNs": 91560,
+          "stdDevNs": 89920,
+          "ratio": 1.12,
           "allocatedBytes": 0
         }
       ]
@@ -1679,10 +1679,10 @@
           "params": {
             "Parallel": "False"
           },
-          "meanNs": 380500,
-          "errorNs": 25520,
-          "stdDevNs": 25060,
-          "ratio": 1,
+          "meanNs": 395000,
+          "errorNs": 39500,
+          "stdDevNs": 35020,
+          "ratio": 1.01,
           "allocatedBytes": 0
         },
         {
@@ -1690,10 +1690,10 @@
           "params": {
             "Parallel": "False"
           },
-          "meanNs": 501800,
-          "errorNs": 40870,
-          "stdDevNs": 38230,
-          "ratio": 1.32,
+          "meanNs": 470600,
+          "errorNs": 23510,
+          "stdDevNs": 21990,
+          "ratio": 1.2,
           "allocatedBytes": 0
         },
         {
@@ -1701,9 +1701,9 @@
           "params": {
             "Parallel": "True"
           },
-          "meanNs": 355600,
-          "errorNs": 40740,
-          "stdDevNs": 40010,
+          "meanNs": 369800,
+          "errorNs": 45220,
+          "stdDevNs": 44410,
           "ratio": 1.01,
           "allocatedBytes": 0
         },
@@ -1712,10 +1712,10 @@
           "params": {
             "Parallel": "True"
           },
-          "meanNs": 430100,
-          "errorNs": 22170,
-          "stdDevNs": 21770,
-          "ratio": 1.22,
+          "meanNs": 404800,
+          "errorNs": 33270,
+          "stdDevNs": 31120,
+          "ratio": 1.11,
           "allocatedBytes": 0
         }
       ]
@@ -1727,19 +1727,19 @@
         {
           "method": "EasyEcs_Relations",
           "params": {},
-          "meanNs": 27290,
-          "errorNs": 2084,
-          "stdDevNs": 2047,
-          "ratio": 1.01,
+          "meanNs": 21960,
+          "errorNs": 592,
+          "stdDevNs": 581,
+          "ratio": 1,
           "allocatedBytes": 0
         },
         {
           "method": "Friflo_LinkRelations",
           "params": {},
-          "meanNs": 26010,
-          "errorNs": 955,
-          "stdDevNs": 893,
-          "ratio": 0.96,
+          "meanNs": 26110,
+          "errorNs": 1363,
+          "stdDevNs": 1275,
+          "ratio": 1.19,
           "allocatedBytes": 0
         }
       ]
@@ -1753,10 +1753,10 @@
           "params": {
             "Removed": "10"
           },
-          "meanNs": 797,
-          "errorNs": 15.34,
-          "stdDevNs": 15.07,
-          "ratio": 1,
+          "meanNs": 829.5,
+          "errorNs": 77.42,
+          "stdDevNs": 72.42,
+          "ratio": 1.01,
           "allocatedBytes": 0
         },
         {
@@ -1764,10 +1764,10 @@
           "params": {
             "Removed": "10"
           },
-          "meanNs": 38734.6,
-          "errorNs": 1453.2,
-          "stdDevNs": 1427.23,
-          "ratio": 48.62,
+          "meanNs": 39591.1,
+          "errorNs": 2573.83,
+          "stdDevNs": 2407.56,
+          "ratio": 48.06,
           "allocatedBytes": 0
         },
         {
@@ -1775,10 +1775,10 @@
           "params": {
             "Removed": "10"
           },
-          "meanNs": 699.9,
-          "errorNs": 44.61,
-          "stdDevNs": 43.82,
-          "ratio": 0.88,
+          "meanNs": 697,
+          "errorNs": 63.12,
+          "stdDevNs": 55.95,
+          "ratio": 0.85,
           "allocatedBytes": 0
         },
         {
@@ -1786,10 +1786,10 @@
           "params": {
             "Removed": "10"
           },
-          "meanNs": 1809.4,
-          "errorNs": 116.05,
-          "stdDevNs": 113.97,
-          "ratio": 2.27,
+          "meanNs": 1810.1,
+          "errorNs": 120.97,
+          "stdDevNs": 118.81,
+          "ratio": 2.2,
           "allocatedBytes": 0
         },
         {
@@ -1797,9 +1797,9 @@
           "params": {
             "Removed": "1000"
           },
-          "meanNs": 71330.7,
-          "errorNs": 5193.03,
-          "stdDevNs": 4857.56,
+          "meanNs": 66656.7,
+          "errorNs": 5373.32,
+          "stdDevNs": 4763.3,
           "ratio": 1,
           "allocatedBytes": 0
         },
@@ -1808,10 +1808,10 @@
           "params": {
             "Removed": "1000"
           },
-          "meanNs": 109132.8,
-          "errorNs": 9934.79,
-          "stdDevNs": 9757.29,
-          "ratio": 1.54,
+          "meanNs": 107096.1,
+          "errorNs": 4686.74,
+          "stdDevNs": 4154.67,
+          "ratio": 1.61,
           "allocatedBytes": 0
         },
         {
@@ -1819,10 +1819,10 @@
           "params": {
             "Removed": "1000"
           },
-          "meanNs": 72967.8,
-          "errorNs": 5827.58,
-          "stdDevNs": 5451.12,
-          "ratio": 1.03,
+          "meanNs": 71664.2,
+          "errorNs": 2982.88,
+          "stdDevNs": 2644.25,
+          "ratio": 1.08,
           "allocatedBytes": 0
         },
         {
@@ -1830,10 +1830,10 @@
           "params": {
             "Removed": "1000"
           },
-          "meanNs": 161682.8,
-          "errorNs": 8449.89,
-          "stdDevNs": 7904.04,
-          "ratio": 2.28,
+          "meanNs": 172182.9,
+          "errorNs": 10066.79,
+          "stdDevNs": 9416.48,
+          "ratio": 2.59,
           "allocatedBytes": 0
         }
       ]
@@ -1845,29 +1845,29 @@
         {
           "method": "EasyEcs_SaveLoad",
           "params": {},
-          "meanNs": 150800,
-          "errorNs": 4980,
-          "stdDevNs": 4410,
+          "meanNs": 145900,
+          "errorNs": 2450,
+          "stdDevNs": 2170,
           "ratio": 1,
           "allocatedBytes": 0
         },
         {
           "method": "Friflo_Json",
           "params": {},
-          "meanNs": 21856500,
-          "errorNs": 1439560,
-          "stdDevNs": 1346560,
-          "ratio": 145.03,
+          "meanNs": 20826700,
+          "errorNs": 833800,
+          "stdDevNs": 818900,
+          "ratio": 142.8,
           "allocatedBytes": 6837120
         },
         {
           "method": "DefaultEcs_Binary",
           "params": {},
-          "meanNs": 4379600,
-          "errorNs": 250470,
-          "stdDevNs": 222040,
-          "ratio": 29.06,
-          "allocatedBytes": 4584604
+          "meanNs": 4326500,
+          "errorNs": 235350,
+          "stdDevNs": 231140,
+          "ratio": 29.66,
+          "allocatedBytes": 4584060
         }
       ]
     },
@@ -1880,9 +1880,9 @@
           "params": {
             "Killed": "10"
           },
-          "meanNs": 78360,
-          "errorNs": 4986,
-          "stdDevNs": 4664,
+          "meanNs": 78210,
+          "errorNs": 1914,
+          "stdDevNs": 1697,
           "ratio": 1,
           "allocatedBytes": 0
         },
@@ -1891,10 +1891,10 @@
           "params": {
             "Killed": "10"
           },
-          "meanNs": 80570,
-          "errorNs": 5908,
-          "stdDevNs": 5803,
-          "ratio": 1.03,
+          "meanNs": 75360,
+          "errorNs": 2257,
+          "stdDevNs": 2111,
+          "ratio": 0.96,
           "allocatedBytes": 0
         },
         {
@@ -1902,10 +1902,10 @@
           "params": {
             "Killed": "10"
           },
-          "meanNs": 189360,
-          "errorNs": 12772,
-          "stdDevNs": 11322,
-          "ratio": 2.42,
+          "meanNs": 184240,
+          "errorNs": 8442,
+          "stdDevNs": 7897,
+          "ratio": 2.36,
           "allocatedBytes": 5424
         },
         {
@@ -1913,10 +1913,10 @@
           "params": {
             "Killed": "10"
           },
-          "meanNs": 547030,
-          "errorNs": 87165,
-          "stdDevNs": 85607,
-          "ratio": 7,
+          "meanNs": 495690,
+          "errorNs": 56444,
+          "stdDevNs": 52798,
+          "ratio": 6.34,
           "allocatedBytes": 0
         },
         {
@@ -1924,9 +1924,9 @@
           "params": {
             "Killed": "1000"
           },
-          "meanNs": 178950,
-          "errorNs": 8358,
-          "stdDevNs": 7818,
+          "meanNs": 163460,
+          "errorNs": 6713,
+          "stdDevNs": 6280,
           "ratio": 1,
           "allocatedBytes": 0
         },
@@ -1935,9 +1935,9 @@
           "params": {
             "Killed": "1000"
           },
-          "meanNs": 200160,
-          "errorNs": 21414,
-          "stdDevNs": 21032,
+          "meanNs": 183280,
+          "errorNs": 4934,
+          "stdDevNs": 4616,
           "ratio": 1.12,
           "allocatedBytes": 0
         },
@@ -1946,10 +1946,10 @@
           "params": {
             "Killed": "1000"
           },
-          "meanNs": 1236170,
-          "errorNs": 123705,
-          "stdDevNs": 121495,
-          "ratio": 6.92,
+          "meanNs": 1122910,
+          "errorNs": 32859,
+          "stdDevNs": 32272,
+          "ratio": 6.88,
           "allocatedBytes": 459168
         },
         {
@@ -1957,10 +1957,10 @@
           "params": {
             "Killed": "1000"
           },
-          "meanNs": 14596720,
-          "errorNs": 14984612,
-          "stdDevNs": 14716892,
-          "ratio": 81.71,
+          "meanNs": 12858630,
+          "errorNs": 13577110,
+          "stdDevNs": 13334538,
+          "ratio": 78.77,
           "allocatedBytes": 0
         }
       ]
@@ -1972,28 +1972,28 @@
         {
           "method": "EasyEcs_Group",
           "params": {},
-          "meanNs": 140000,
-          "errorNs": 12620,
-          "stdDevNs": 11810,
-          "ratio": 1.01,
+          "meanNs": 127200,
+          "errorNs": 6690,
+          "stdDevNs": 6250,
+          "ratio": 1,
           "allocatedBytes": 0
         },
         {
           "method": "EasyEcs_Index",
           "params": {},
-          "meanNs": 234300,
-          "errorNs": 14960,
-          "stdDevNs": 14690,
-          "ratio": 1.68,
+          "meanNs": 232800,
+          "errorNs": 22560,
+          "stdDevNs": 21110,
+          "ratio": 1.83,
           "allocatedBytes": 0
         },
         {
           "method": "Friflo_IndexedComponent",
           "params": {},
-          "meanNs": 387700,
-          "errorNs": 35600,
-          "stdDevNs": 33300,
-          "ratio": 2.79,
+          "meanNs": 316700,
+          "errorNs": 19800,
+          "stdDevNs": 18520,
+          "ratio": 2.5,
           "allocatedBytes": 0
         }
       ]
@@ -2007,9 +2007,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 38270,
-          "errorNs": 2318,
-          "stdDevNs": 2168,
+          "meanNs": 37700,
+          "errorNs": 1102,
+          "stdDevNs": 1031,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2018,9 +2018,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 264340,
-          "errorNs": 10899,
-          "stdDevNs": 10704,
+          "meanNs": 252870,
+          "errorNs": 11327,
+          "stdDevNs": 10595,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2029,9 +2029,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 73870,
-          "errorNs": 5558,
-          "stdDevNs": 5199,
+          "meanNs": 69470,
+          "errorNs": 1551,
+          "stdDevNs": 1450,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2040,9 +2040,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 68180,
-          "errorNs": 3839,
-          "stdDevNs": 3591,
+          "meanNs": 71040,
+          "errorNs": 6052,
+          "stdDevNs": 5944,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2051,9 +2051,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 12110,
-          "errorNs": 1255,
-          "stdDevNs": 1233,
+          "meanNs": 11330,
+          "errorNs": 444,
+          "stdDevNs": 436,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2062,9 +2062,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 56310,
-          "errorNs": 3717,
-          "stdDevNs": 3295,
+          "meanNs": 49050,
+          "errorNs": 1017,
+          "stdDevNs": 902,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2073,9 +2073,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 38350,
-          "errorNs": 2368,
-          "stdDevNs": 2326,
+          "meanNs": 38460,
+          "errorNs": 1901,
+          "stdDevNs": 1778,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2084,9 +2084,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 208510,
-          "errorNs": 7068,
-          "stdDevNs": 6941,
+          "meanNs": 212220,
+          "errorNs": 18106,
+          "stdDevNs": 17783,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2095,9 +2095,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 550400,
-          "errorNs": 55658,
-          "stdDevNs": 52063,
+          "meanNs": 517150,
+          "errorNs": 43997,
+          "stdDevNs": 41155,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2106,9 +2106,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 180250,
-          "errorNs": 6686,
-          "stdDevNs": 5927,
+          "meanNs": 190480,
+          "errorNs": 8613,
+          "stdDevNs": 8459,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2117,9 +2117,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 162730,
-          "errorNs": 8087,
-          "stdDevNs": 7565,
+          "meanNs": 163800,
+          "errorNs": 8495,
+          "stdDevNs": 7094,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2128,9 +2128,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 59570,
-          "errorNs": 11084,
-          "stdDevNs": 9826,
+          "meanNs": 59920,
+          "errorNs": 8087,
+          "stdDevNs": 7943,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2139,9 +2139,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 262880,
-          "errorNs": 13555,
-          "stdDevNs": 12016,
+          "meanNs": 257260,
+          "errorNs": 13289,
+          "stdDevNs": 13051,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2150,9 +2150,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 89530,
-          "errorNs": 5958,
-          "stdDevNs": 5573,
+          "meanNs": 80740,
+          "errorNs": 1782,
+          "stdDevNs": 1751,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2161,9 +2161,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 69260,
-          "errorNs": 5053,
-          "stdDevNs": 4727,
+          "meanNs": 70650,
+          "errorNs": 4540,
+          "stdDevNs": 4247,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2172,9 +2172,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 18060,
-          "errorNs": 1748,
-          "stdDevNs": 1635,
+          "meanNs": 16590,
+          "errorNs": 1769,
+          "stdDevNs": 1655,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2183,9 +2183,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 80010,
-          "errorNs": 2522,
-          "stdDevNs": 2359,
+          "meanNs": 67240,
+          "errorNs": 11442,
+          "stdDevNs": 10703,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2194,9 +2194,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 37110,
-          "errorNs": 1264,
-          "stdDevNs": 1182,
+          "meanNs": 37020,
+          "errorNs": 1188,
+          "stdDevNs": 992,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2205,9 +2205,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 230040,
-          "errorNs": 10530,
-          "stdDevNs": 9335,
+          "meanNs": 222080,
+          "errorNs": 7966,
+          "stdDevNs": 7452,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2216,9 +2216,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 1027880,
-          "errorNs": 46324,
-          "stdDevNs": 43332,
+          "meanNs": 1001580,
+          "errorNs": 39414,
+          "stdDevNs": 36868,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2227,9 +2227,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 198660,
-          "errorNs": 2827,
-          "stdDevNs": 2645,
+          "meanNs": 215240,
+          "errorNs": 12164,
+          "stdDevNs": 11947,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -2238,9 +2238,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 266910,
-          "errorNs": 10579,
-          "stdDevNs": 9896,
+          "meanNs": 275570,
+          "errorNs": 19309,
+          "stdDevNs": 18964,
           "ratio": null,
           "allocatedBytes": 0
         }
