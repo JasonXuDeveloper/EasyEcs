@@ -129,6 +129,23 @@ public class ChangedTests
     }
 
     [Test]
+    public void WriteXStampsAndTheReadPropertyDoesNot()
+    {
+        using var world = new World();
+        world.AddSystem<ArmorWatch>();
+        var e = world.CreateEntity(new Armor(5), new Seen());
+        world.Update();
+
+        Assert.That(e.Armor.Value, Is.EqualTo(5));   // ref readonly: no stamp
+        world.Update();
+        Assert.That(SeenCount(e), Is.EqualTo(1));
+
+        e.WriteArmor().Value = 3;
+        world.Update();
+        Assert.That((SeenCount(e), e.Armor.Value), Is.EqualTo((2, 3)));
+    }
+
+    [Test]
     public void RefParametersStampAndInParametersDoNot()
     {
         using var world = new World();

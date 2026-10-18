@@ -14,6 +14,9 @@ public readonly ref struct EntitySpan
     private readonly World _world;
     private readonly ReadOnlySpan<EntityId> _slots;
 
+    internal World World => _world;
+    internal ReadOnlySpan<EntityId> Slots => _slots;
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal EntitySpan(World world, ref EntityId first, int length)
     {

@@ -165,4 +165,31 @@ public class DynamicBufferTests
         for (int i = 0; i < 100; i++) world.Update();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
+
+    [Test]
+    public void NamedMembersReadWriteAddAndRemoveTheBuffer()
+    {
+        using var world = new World();
+        world.AddSystem<BagWatch>();
+        var e = world.CreateEntity(new Seen());
+        Assert.That(e.HasLoot, Is.False);
+
+        e.GetOrAddLoot().Add(new Loot(1, 2));                   // added on first use
+        Assert.That(e.HasLoot, Is.True);
+        Assert.That(e.Loot[0], Is.EqualTo(new Loot(1, 2)));     // a read: not stamped
+        world.Update();
+        Assert.That(e.Read<Seen>().Count, Is.EqualTo(1));
+
+        _ = e.Loot.Count;
+        world.Update();
+        Assert.That(e.Read<Seen>().Count, Is.EqualTo(1));
+
+        e.WriteLoot().Add(new Loot(3, 4));                      // a write: stamped
+        world.Update();
+        Assert.That(e.Read<Seen>().Count, Is.EqualTo(2));
+        Assert.That(e.Loot.Count, Is.EqualTo(2));
+
+        e.RemoveLoot();
+        Assert.That(e.HasLoot, Is.False);
+    }
 }

@@ -233,8 +233,12 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string job = $"{method.Name}Job{method.TypeParameters}";
         var components = method.Query.ToArray();
         int index = 0;
+        bool runs = method.OptionalRuns; // per row of a run: components and handles at the row's offset
         var args = string.Join(", ", method.Parameters.Select((p, i) => p.Kind switch
         {
+            Symbols.ParamKind.Component when runs => $"{p.RefKind} Unsafe.Add(ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(c{++index}), i)",
+            Symbols.ParamKind.Entity when runs => "entities[i]",
+            Symbols.ParamKind.Optional when runs => $"m{i}[i]",
             Symbols.ParamKind.Component => $"{p.RefKind} c{++index}",
             Symbols.ParamKind.ComponentSpan => $"c{++index}", // Span<T> converts to ReadOnlySpan<T> for read-only parameters
             Symbols.ParamKind.Singleton => method.Parallel ? $"{p.RefKind} s{i}.Value" : $"{p.RefKind} s{i}",
@@ -273,7 +277,16 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string first = method.IsBatch ? "global::EasyEcs.EntitySpan entities, " : method.TakesEntity ? "global::EasyEcs.Entity entity, " : "";
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
         sb.Append($"        public void Execute({first}{List(components.Length, i => string.Format(each, components[i - 1], i))})\n");
-        sb.Append($"            => __ForEach{owner.TypeParameters}.{method.Name}{method.TypeParameters}({args});\n");
+        if (runs)
+        {
+            sb.Append("        {\n");
+            for (int i = 0; i < method.Parameters.Length; i++)
+                if (method.Parameters[i] is { Kind: Symbols.ParamKind.Optional } p)
+                    sb.Append($"            var m{i} = new global::EasyEcs.MaybeColumn<{p.Type}>(in entities, {(p.RefKind == "ref" && p.Tracked ? "true" : "false")});\n");
+            sb.Append("            for (int i = 0; i < entities.Length; i++)\n");
+            sb.Append($"                __ForEach{owner.TypeParameters}.{method.Name}{method.TypeParameters}({args});\n        }}\n");
+        }
+        else sb.Append($"            => __ForEach{owner.TypeParameters}.{method.Name}{method.TypeParameters}({args});\n");
         // Its ref parameters (Span<T> for a batch): carried over when the method moves the entity it visits, and
         // stamped when the component tracks changes. The queried [With<T>] component of a method without one is read.
         var queried = method.Parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan).ToArray();
@@ -331,7 +344,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// <param name="Type">The component, singleton or value type (a span's or Maybe's element).</param>
     /// <param name="RefKind">"ref" or "in" ("" for a context parameter passed by value).</param>
     /// <param name="Declared">The parameter as declared, with its modifier (<c>in global::Health</c>), for the accessor.</param>
-    private sealed record ParamModel(Symbols.ParamKind Kind, string Type, string RefKind, string Name, string Declared);
+    /// <param name="Tracked">A Maybe's element tracks changes (a write through it is stamped).</param>
+    private sealed record ParamModel(Symbols.ParamKind Kind, string Type, string RefKind, string Name, string Declared, bool Tracked = false);
 
     /// <param name="Stable">
     /// The method cannot make structural changes: it is static, takes no <c>World</c>, and uses its <c>Entity</c>
@@ -364,8 +378,15 @@ public sealed class SystemGenerator : IIncrementalGenerator
         /// <summary>The World loop (and, with an I, the job interface) the method runs as.</summary>
         public string Loop => IsBatch ? "ForEachBatch" : TakesEntity ? "ForEachEntity" : "ForEach";
 
-        /// <summary>Takes component spans: runs over whole runs of rows (World.ForEachBatch).</summary>
-        public bool IsBatch => Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan);
+        /// <summary>Takes component spans, or runs per row inside runs of rows: World.ForEachBatch.</summary>
+        public bool IsBatch => Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) || OptionalRuns;
+
+        /// <summary>
+        /// Takes a Maybe and changes no structure (on one thread): its job walks runs of rows and finds the optional
+        /// component through the run's column (MaybeColumn), a presence bit per row instead of a lookup per entity.
+        /// </summary>
+        public bool OptionalRuns => Stable && !Parallel && Parameters.Any(p => p.Kind == Symbols.ParamKind.Optional)
+            && !Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan);
 
         public static ForEachModel? Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
         {
@@ -384,7 +405,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
                         Symbols.SpanElement(p.Type)!.ToDisplayString(Symbols.Fqn),
                         ((INamedTypeSymbol)p.Type).ConstructedFrom.ToDisplayString() == "System.Span<T>" ? "ref" : "in", p.Name, declared),
                     Symbols.ParamKind.Optional => new ParamModel(Symbols.ParamKind.Optional, // a write unless it only reads Value
-                        Symbols.MaybeElement(p.Type)!.ToDisplayString(Symbols.Fqn), Symbols.OnlyReadsValue(syntax, p.Name) ? "in" : "ref", p.Name, declared),
+                        Symbols.MaybeElement(p.Type)!.ToDisplayString(Symbols.Fqn), Symbols.OnlyReadsValue(syntax, p.Name) ? "in" : "ref", p.Name, declared,
+                        Symbols.Implements(Symbols.MaybeElement(p.Type)!, Symbols.TrackChanges)),
                     Symbols.ParamKind.Context => new ParamModel(Symbols.ParamKind.Context, p.Type.ToDisplayString(Symbols.Fqn),
                         p.RefKind switch { RefKind.Ref => "ref", RefKind.In => "in", _ => "" }, p.Name, declared),
                     var kind => new ParamModel(kind, p.Type.ToDisplayString(Symbols.Fqn), p.RefKind == RefKind.Ref ? "ref" : "in", p.Name, declared),

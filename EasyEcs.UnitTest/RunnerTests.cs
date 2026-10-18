@@ -28,6 +28,12 @@ public static class Reports
     private static void Total(in Health hp, Maybe<Armor> armor, ref int total) => total += hp.Value + (armor.HasValue ? armor.Value.Value : 0);
 
     [ForEach]
+    private static void Harden(in Health hp, Maybe<Armor> armor)            // a write through Maybe: stamped
+    {
+        if (armor.HasValue) armor.Value.Value += hp.Value;
+    }
+
+    [ForEach]
     private static void Sum(ReadOnlySpan<Health> hp, ref int total)
     {
         for (int i = 0; i < hp.Length; i++) total += hp[i].Value;
@@ -83,6 +89,26 @@ public class RunnerTests
         int count = 0;
         Tools.Count(_world, ref count);
         Assert.That(count, Is.EqualTo(3));
+    }
+
+    [Test]
+    public void AMaybeFollowsPresenceAndStampsWrites()
+    {
+        var armored = _world.CreateEntity(new Health(1), new Armor(10));
+        var stripped = _world.CreateEntity(new Health(1), new Armor(10));
+        var paused = _world.CreateEntity(new Health(1), new Armor(10));
+        var bare = _world.CreateEntity(new Health(1));
+        stripped.RemoveArmor();                                             // the row stays, its presence bit goes
+        paused.DisableArmor();
+        _world.Update();
+        ulong since = _world.ChangeTick;
+
+        Reports.Harden(_world);                                              // runs of rows: the column per run
+        Assert.That(armored.Armor.Value, Is.EqualTo(11));
+        Assert.That(stripped.HasArmor || bare.HasArmor, Is.False);
+        paused.EnableArmor();
+        Assert.That(paused.Armor.Value, Is.EqualTo(10), "a disabled component is not reached");
+        Assert.That(_world.Count<Armor>(QueryFilter.Create().Changed<Armor>(since)), Is.EqualTo(2), "the write and the enable");
     }
 
     [Test]

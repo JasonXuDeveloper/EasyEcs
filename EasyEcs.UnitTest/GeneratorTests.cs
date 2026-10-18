@@ -114,9 +114,9 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(System.Span<P> p, System.ReadOnlySpan<Q> q) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "IForEachBatch<global::P, global::Q>")]
     [TestCase("[ForEach, Changed<DynamicBuffer<int>>] static void A(in DynamicBuffer<int> b, ref P p) { }", ".Changed<global::EasyEcs.DynamicBuffer<int>>(0)", "access.Read<global::EasyEcs.DynamicBuffer<int>>();")]
     [TestCase("[ForEach, Changed<T>] static void A(ref P p) { }", "access.Read<global::T>();", ".Changed<global::T>(0)", "Since(system.LastRunTick + 1)", "Writes => 1;")]
-    [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Read<global::Q>();", "IForEachEntity<global::P>", "INoStructuralChanges", "global::EasyEcs.Maybe<global::Q>.ForRead(entity)")]
-    [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) q.Value.V++; }", "access.Write<global::Q>();", "global::EasyEcs.Maybe<global::Q>.ForWrite(entity)")]
-    [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) q.Value = default; }", "access.Write<global::Q>();", "ForWrite(entity)")]
+    [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Read<global::Q>();", "IForEachBatch<global::P>", "new global::EasyEcs.MaybeColumn<global::Q>(in entities, false)", "ref Unsafe.Add(")]
+    [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) q.Value.V++; }", "access.Write<global::Q>();", "MaybeColumn<global::Q>(in entities, false)")]  // untracked: no stamp
+    [TestCase("[ForEach] static void A(ref P p, Maybe<T> t) { if (t.HasValue) t.Value = default; }", "access.Write<global::T>();", "MaybeColumn<global::T>(in entities, true)")]  // tracked: stamped
     [TestCase("[ForEach] void A(in P p) { }", "access.RunsAlone();")]
     [TestCase("[ForEach] static void A(in P p) { } protected override void OnUpdate() { }", "access.RunsAlone();")]
     public void AccessIsDeclaredFromParameters(string members, params string[] expected)
@@ -338,6 +338,16 @@ public class GeneratorTests
         foreach (var name in new[] { "ForEachMethods", "SystemUpdates", "ClosedSystems", "SystemCode", "Components", "BufferElements", "SavedComponents", "SavedBuffers", "ModuleInitializers" })
             Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
                 Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged), name);
+    }
+
+    [Test]
+    public void AMaybeOfAStructuralMethodIsLookedUpPerEntity()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components,
+            "public partial class S : EcsSystem { [ForEach] static void A(Entity e, ref P p, Maybe<Q> q) { if (q.HasValue) e.Destroy(); } }"),
+            out var output, out _);
+        string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")).Select(t => t.ToString()));
+        Assert.That(generated, Does.Contain("IForEachEntity<global::P>").And.Contain("global::EasyEcs.Maybe<global::Q>.ForRead(entity)"));
     }
 
     [Test]
