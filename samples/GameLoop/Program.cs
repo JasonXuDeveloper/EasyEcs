@@ -1,81 +1,90 @@
 using System.Buffers;
-using System.Diagnostics;
 using EasyEcs;
 using GameLoop;
+using GameLoop.Host;
 
-// A fixed-tick server host: input is drained on every wake-up, the simulation runs at TickRate, replication at
-// SendRate. Runs --ticks simulation ticks (default 3 seconds' worth), or until Ctrl+C, then shuts down cleanly.
-const int TickRate = 30, SendEvery = 3;                              // 30 Hz simulation, 10 Hz replication
-int ticks = args.Length == 2 && args[0] == "--ticks" ? int.Parse(args[1]) : 3 * TickRate;
+// The simulation runs 30 ticks a second. Positions are replicated every third tick.
+const int TicksPerSecond = 30;
+const int ReplicateEvery = 3;
 
+// Run 3 seconds by default; `--ticks N` runs N ticks instead.
+int ticksToRun = 3 * TicksPerSecond;
+if (args.Length == 2 && args[0] == "--ticks")
+{
+    ticksToRun = int.Parse(args[1]);
+}
+
+// Ctrl+C stops the loop cleanly instead of killing the process.
 using var stop = new CancellationTokenSource();
-Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Cancel(); };
+Console.CancelKeyPress += (_, e) =>
+{
+    e.Cancel = true;
+    stop.Cancel();
+};
 
 var mailbox = new Mailbox<ClientMessage>(capacity: 4096);
 var world = new World(new WorldOptions { InitialEntityCapacity = 4096, MeasureSystems = true });
 
-// Setup: singletons first, then systems in their order.
-world.SetSimulation(1f / TickRate, 0);
-// The prefabs live in a singleton, so systems read them as a parameter (in Prefabs prefabs) and instantiate
-// prefabs.Player or prefabs.Bullet; the named arguments are the fields of Prefabs.
+// Singletons first: the systems read them.
+world.SetSimulation(DeltaTime: 1f / TicksPerSecond, Tick: 0);
+world.SetInbox(Messages: mailbox);
 world.SetPrefabs(
-    Player: new Prefab().SetPosition(0, 0).SetVelocity(0, 0),        // JoinSystem adds the client id and spawn point
-    Bullet: new Prefab().SetPosition(0, 0).SetVelocity(0, 0).SetLifetime(TickRate));   // FireSystem aims it; lives 1 s
-world.SetOutbox(new ArrayBufferWriter<byte>(64 * 1024), 0);
+    Player: new Prefab().SetPosition(0, 0).SetVelocity(0, 0),
+    Bullet: new Prefab().SetPosition(0, 0).SetVelocity(0, 0).SetLifetime(TicksPerSecond));
+world.SetOutbox(Bytes: new ArrayBufferWriter<byte>(64 * 1024), Updates: 0);
 world.AddSingleton<Stats>();
-world.AddSystem(new ReceiveInput(mailbox));
-world.AddSystem<LeaveSystem>();                                     // leave before join: a client may rejoin in one tick
+
+// Input group: runs whenever the host wakes up.
+world.AddSystem<ReceiveInputSystem>();
+
+// Default group: the fixed simulation tick, in this order.
+world.AddSystem<LeaveSystem>();
 world.AddSystem<JoinSystem>();
-world.AddSystem<MoveIntentSystem>();
+world.AddSystem<MoveSystem>();
 world.AddSystem<FireSystem>();
 world.AddSystem<MovementSystem>();
 world.AddSystem<LifetimeSystem>();
 world.AddSystem<ClockSystem>();
+
+// Replication group: runs every third tick.
 world.AddSystem<ReplicationSystem>();
 
-var clients = new Clients(mailbox, count: 16);
-var network = clients.Start(stop.Token);
+var clients = new FakeClients(mailbox, count: 16);
+Thread network = clients.Start(stop.Token);
 
-long sentBytes = 0, sentUpdates = 0;
-var tickLength = TimeSpan.FromSeconds(1.0 / TickRate);
-var clock = Stopwatch.StartNew();
-var nextTick = TimeSpan.Zero;
+var fixedTick = new FixedTick(TicksPerSecond);
 int tick = 0;
-while (tick < ticks && !stop.IsCancellationRequested)
+while (tick < ticksToRun && !stop.IsCancellationRequested)
 {
-    world.Update<InputGroup>();                                      // every wake-up: input becomes data
-    var now = clock.Elapsed;
-    if (now < nextTick)
+    // Turn the messages that arrived into data, even between ticks.
+    world.Update<InputGroup>();
+
+    if (!fixedTick.IsDue(out TimeSpan wait))
     {
-        mailbox.Wait(nextTick - now);                                // sleep until input arrives or the tick is due
+        // Sleep until a message arrives or the next tick is due.
+        mailbox.Wait(wait);
         continue;
     }
 
-    nextTick += tickLength;
-    world.Update();                                                  // the fixed tick
-    if (++tick % SendEvery == 0)
+    world.Update();
+    tick++;
+
+    if (tick % ReplicateEvery == 0)
     {
         world.Update<ReplicationGroup>();
-        ref var outbox = ref world.Outbox;
-        sentBytes += outbox.Bytes.WrittenCount;                      // a real server writes them to its sockets here
-        sentUpdates += outbox.Updates;
-        outbox.Bytes.ResetWrittenCount();
-        outbox.Updates = 0;
+        Network.SendOutbox(world);
     }
 
-    if (tick % TickRate == 0)
-        Console.WriteLine($"t={tick / TickRate}s players={world.Count<Client>()} bullets={world.Count<Lifetime>()} entities={world.EntityCount}");
+    if (tick % TicksPerSecond == 0)
+    {
+        Report.Status(world, tick / TicksPerSecond);
+    }
 }
 
-// Shutdown: stop the producers first (messages still queued are dropped), then dispose the world (OnDestroy of every
-// system, in reverse order).
+// Stop the clients first (messages still queued are dropped), then dispose the world:
+// every system's OnDestroy runs, in reverse order.
 stop.Cancel();
 network.Join();
-var elapsed = clock.Elapsed;
-ref readonly var stats = ref world.Stats;
-Console.WriteLine($"{tick} ticks in {elapsed.TotalSeconds:F1} s: {stats.Received} messages ({mailbox.Refused} refused), " +
-                  $"{stats.Joined} joins, {stats.Left} leaves, {stats.Fired} bullets, {sentUpdates} position updates ({sentBytes / 1024.0:F1} KB) replicated");
-foreach (var system in world.Systems)
-    Console.WriteLine($"  {system.GetType().Name,-18} {system.Stats.Runs,5} runs, {system.Stats.Last.TotalMicroseconds,8:F1} us last run");
+Report.Summary(world, tick, fixedTick.Elapsed, mailbox.Refused);
 world.Dispose();
 Console.WriteLine("stopped");

@@ -18,7 +18,7 @@ public sealed record Failure(string Page, int Line, string Message);
 /// into a method of that class. A later fence that declares a type again replaces the earlier declaration. A local an
 /// earlier fence declared, or a name of <see cref="Ambient"/>, is a field when a later fence uses it undeclared.
 /// Fences with <c>doccheck=expect-ID</c> or <c>doccheck=alone</c> compile on their own (with the page's declarations,
-/// or with none).
+/// or with none); the <c>doccheck=example</c> fences compile together, as one program apart from the others.
 /// </summary>
 public sealed class PageCompiler
 {
@@ -64,9 +64,17 @@ public sealed class PageCompiler
     {
         var snippets = fences.Where(f => Markdown.CSharp.Contains(f.Language) && !f.Skip).Select(f => new Snippet(f)).ToList();
         var failures = new List<Failure>();
-        var main = snippets.Where(s => !s.Fence.Alone && !s.Fence.Expected.Any()).ToList();
+        var main = snippets.Where(s => !s.Fence.Alone && !s.Fence.Example && !s.Fence.Expected.Any()).ToList();
         if (main.Count != 0) failures.AddRange(await CompileAsync(page, [Shared, .. main], main));
-        foreach (var snippet in snippets.Except(main))
+        // The full example: its files compile as one program of their own, so its types never replace the page's.
+        var example = snippets.Where(s => s.Fence.Example).ToList();
+        if (example.Count != 0)
+        {
+            var names = example.SelectMany(s => s.TypeNames).ToHashSet();
+            failures.AddRange(await CompileAsync(page, [Shared.Without(names), .. example], example));
+        }
+
+        foreach (var snippet in snippets.Except(main).Except(example))
         {
             var context = snippet.Fence.Alone ? [] : main.Select(m => m.Without(snippet.TypeNames)).ToList();
             failures.AddRange(await CompileAsync(page, [Shared.Without(snippet.TypeNames), .. context, snippet], [snippet]));

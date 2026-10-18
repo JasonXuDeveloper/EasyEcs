@@ -11,6 +11,12 @@ public sealed record Fence(string Page, int Line, string Language, string Meta, 
     /// <summary>Compiled on its own, without the page's other fences.</summary>
     public bool Alone => Options.Contains("alone");
 
+    /// <summary>
+    /// Part of the page's full example: the <c>example</c> fences of a page (its Components.cs, Systems.cs and
+    /// Program.cs) compile together, apart from the page's other fences.
+    /// </summary>
+    public bool Example => Options.Contains("example");
+
     /// <summary>A fragment of a system's body (<c>[ForEach]</c> methods, overrides): compiled inside an <c>EcsSystem</c>.</summary>
     public bool InSystem => Options.Contains("system");
 

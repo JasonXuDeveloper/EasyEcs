@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test of the dotnet new templates against this repository's EasyEcs, never nuget.org's:
 # packs EasyEcs and EasyEcs.Templates with a CI version into a local feed, installs the templates from that nupkg
-# into a private template hive, creates `easyecs --tests` and `easyecs-system`, builds, runs and tests the result.
+# into a private template hive, creates `easyecs --tests` and an `easyecs-system` in its Systems/ folder, builds,
+# runs and tests the result.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d)"
@@ -32,7 +33,10 @@ XML
 
 cd "$work"
 dotnet new easyecs -n SmokeServer --tests "${hive[@]}"
-dotnet new easyecs-system -n RegenSystem -o SmokeServer --namespace SmokeServer "${hive[@]}"
+# The item template goes into Systems/ and takes the project's root namespace without --namespace.
+(cd SmokeServer && dotnet new easyecs-system -n RegenSystem -o Systems "${hive[@]}")
+grep -q "^namespace SmokeServer;" SmokeServer/Systems/RegenSystem.cs
+grep -q "public class RegenSystem : EcsSystem" SmokeServer/Systems/RegenSystem.cs
 grep -q "Version=\"$version\"" SmokeServer/SmokeServer.csproj
 dotnet build SmokeServer/SmokeServer.Tests/SmokeServer.Tests.csproj -c Release -warnaserror -nologo -v q
 dotnet run --project SmokeServer/SmokeServer.csproj -c Release --no-build -- --ticks 60 | tee run.txt

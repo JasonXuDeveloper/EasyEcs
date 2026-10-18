@@ -47,8 +47,10 @@
         </Task>
     </UsingTask>
 
-    <!-- The content with the version written in, packed from obj/ -->
+    <!-- The content with the version written in, packed from obj/. The stamped folder starts empty, so a file
+         deleted or renamed in content/ is not packed again from an earlier build. -->
     <Target Name="StampTemplates" BeforeTargets="_GetPackageFiles">
+        <RemoveDir Directories="$(IntermediateOutputPath)content"/>
         <ItemGroup>
             <_TemplateFile Include="@(TemplateSource)" StampedPath="$(MSBuildProjectDirectory)/$(IntermediateOutputPath)content/%(RecursiveDir)%(Filename)%(Extension)"/>
         </ItemGroup>
