@@ -757,9 +757,9 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 }
 
                 /// <summary>
-                /// <see cref="{{name}}{TJob}"/> on several threads: the matching rows are cut into chunks of
-                /// <see cref="ParallelChunkRows"/> rows that the calling thread and up to <see cref="WorldOptions.MaxDegreeOfParallelism"/>
-                /// - 1 thread-pool threads run at the same time, each with its own copy of <paramref name="job"/> (state
+                /// <see cref="{{name}}{TJob}"/> on several threads: the matching rows are cut into chunks (about four per
+                /// thread, a multiple of 64 rows, at most <see cref="ParallelChunkRows"/>) that the calling thread and up to
+                /// <see cref="WorldOptions.MaxDegreeOfParallelism"/> - 1 thread-pool threads run at the same time, each with its own copy of <paramref name="job"/> (state
                 /// a job keeps in its fields is not merged back). The job must not change structure or write anything
                 /// that another row's run reads (a singleton, another entity); nothing else may change the world
                 /// during the call. Fewer than two chunks of rows, or a runner already busy, run on the calling thread.
@@ -806,7 +806,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     private World _world;
                     private Archetype[] _tables = [];
                     private RowFilter[] _filters = [];
-                    private int[] _starts = [];
+                    private int[] _starts = [], _ends = [];
             {{Lines(n, i => $"            private ushort _b{i};")}}
 
                     /// <summary>Cut the matching rows into chunks; returns how many.</summary>
@@ -817,23 +817,26 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{Lines(n, i => $"            _b{i} = b{i};")}}
                         int chunks = 0;
                         var archetypes = match.Archetypes;
+                        int size = world.ChunkRows(archetypes);
                         for (int a = 0; a < archetypes.Length; a++)
                         {
                             var archetype = archetypes[a];
                             var rows = new RowFilter(match.Filters[a], since);
                             if (archetype.AliveCount == 0 || rows.Mode(archetype) == RowFilter.None) continue;
-                            for (int start = 0; start < archetype.Count; start += ParallelChunkRows)
+                            for (int start = 0; start < archetype.Count; start += size)
                             {
                                 if (chunks == _starts.Length)
                                 {
-                                    int size = Math.Max(8, chunks * 2);
-                                    Array.Resize(ref _tables, size);
-                                    Array.Resize(ref _filters, size);
-                                    Array.Resize(ref _starts, size);
+                                    int grown = Math.Max(8, chunks * 2);
+                                    Array.Resize(ref _tables, grown);
+                                    Array.Resize(ref _filters, grown);
+                                    Array.Resize(ref _starts, grown);
+                                    Array.Resize(ref _ends, grown);
                                 }
 
                                 _tables[chunks] = archetype;
                                 _filters[chunks] = rows;
+                                _ends[chunks] = Math.Min(start + size, archetype.Count);
                                 _starts[chunks++] = start;
                             }
                         }
@@ -844,9 +847,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     public override void Run(int index)
                     {
                         var archetype = _tables[index];
-                        int start = _starts[index];
                         var job = Job;
-                        _world.{{name}}Chunk<{{tps}}, TJob>(ref job, archetype, _filters[index], start, Math.Min(start + ParallelChunkRows, archetype.Count), {{List(n, i => $"_b{i}")}});
+                        _world.{{name}}Chunk<{{tps}}, TJob>(ref job, archetype, _filters[index], _starts[index], _ends[index], {{List(n, i => $"_b{i}")}});
                     }
 
                     /// <summary>Drop the references of the last call (tables, filters, the job's own) until the next one.</summary>
