@@ -83,11 +83,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         using (world.Structural())
                         {
                             ref var meta = ref world.Live(new Entity(world, id, version));
-                {{Lines(n, i => $"            ushort b{i} = ComponentType<T{i}>.Bit;")}}
-                            {{(n == 1 ? "world.AddBit(ref meta, id, b1);" : $"world.AddBits(ref meta, id, [{List(n, i => $"b{i}")}], {signature});")}}
-                {{Lines(n, i => $"            World.Row<T{i}>(ref meta, b{i}) = c{i};")}}
-                {{Lines(n, i => $"            meta.Archetype.Stamp<T{i}>(meta.Slot, world.ChangeTick);")}}
-                {{Lines(n, i => $"            world.Written(id, version, in c{i});")}}
+                {{(n == 1 ? "            world.SetRow(ref meta, id, version, in c1);" : SetRows(n, signature))}}
                         }
                     }
 
@@ -390,6 +386,14 @@ public sealed class ArityGenerator : IIncrementalGenerator
     }
 
     /// <summary>Stamp row <paramref name="row"/> of every component the job writes (only tracked ones emit code).</summary>
+    /// <summary>The body of SetCore for several components: one move adds every bit, then each value is written.</summary>
+    private static string SetRows(int n, string signature) =>
+        Lines(n, i => $"            ushort b{i} = ComponentType<T{i}>.Bit;") + "\n" +
+        $"            world.AddBits(ref meta, id, [{List(n, i => $"b{i}")}], {signature});\n" +
+        Lines(n, i => $"            World.Row<T{i}>(ref meta, b{i}) = c{i};") + "\n" +
+        Lines(n, i => $"            meta.Archetype.Stamp<T{i}>(meta.Slot, world.ChangeTick);") + "\n" +
+        Lines(n, i => $"            world.Written(id, version, in c{i});");
+
     private static string StampRow(int n, string indent, string row) =>
         Lines(n, i => $"{indent}    if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.StampVisited<T{i}>({row}, _changeTick);");
 

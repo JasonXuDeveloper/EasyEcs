@@ -268,7 +268,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     /// </summary>
     public bool Disable<T>() where T : struct, IComponent
     {
-        if (default(T) is ICleanupComponent || typeof(T) == typeof(ChildOf)) ThrowNotDisabled<T>(); // JIT-time constants
+        ThrowIfNotDisableable<T>();
         if (_world == null) ThrowStale();
         using (_world!.Structural())
         {
@@ -277,8 +277,15 @@ public readonly partial struct Entity : IEquatable<Entity>
         }
     }
 
+    /// <summary>Throws for a component <c>Disable</c> refuses (a cleanup component, <see cref="ChildOf"/>).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static void ThrowIfNotDisableable<T>() where T : struct, IComponent
+    {
+        if (default(T) is ICleanupComponent || typeof(T) == typeof(ChildOf)) ThrowNotDisabled<T>(); // JIT-time constants
+    }
+
     [DoesNotReturn, MethodImpl(MethodImplOptions.NoInlining)]
-    internal static void ThrowNotDisabled<T>() =>
+    private static void ThrowNotDisabled<T>() =>
         throw new InvalidOperationException($"{typeof(T).Name} cannot be disabled: remove it instead");
 
     /// <summary>
@@ -291,12 +298,7 @@ public readonly partial struct Entity : IEquatable<Entity>
         if (_world == null) ThrowStale();
         using (_world!.Structural())
         {
-            ref var meta = ref _world.Live(this);
-            ushort bit = ComponentType<T>.Bit;
-            if (!_world.EnableBit(ref meta, bit, DisabledType<T>.Bit)) return false;
-            meta.Archetype.Stamp<T>(meta.Slot, _world.ChangeTick);
-            _world.Written(Index, Version, in World.Row<T>(ref meta, bit));
-            return true;
+            return _world.EnableRow<T>(ref _world.Live(this), Index, Version);
         }
     }
 

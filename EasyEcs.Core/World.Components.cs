@@ -313,6 +313,33 @@ public sealed partial class World
     }
 
     /// <summary>
+    /// <c>Set</c> of one component on entity <paramref name="id"/> (<paramref name="meta"/> is its record): its bit added
+    /// (a move when the table lacks the column), the value written, stamped and indexed. Inside the structural gate.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void SetRow<T>(ref EntityMeta meta, int id, int version, in T value) where T : struct, IComponent
+    {
+        ushort bit = ComponentType<T>.Bit;
+        AddBit(ref meta, id, bit);
+        Row<T>(ref meta, bit) = value;
+        meta.Archetype.Stamp<T>(meta.Slot, ChangeTick);
+        Written(id, version, in value);
+    }
+
+    /// <summary>
+    /// <c>Enable</c> of <typeparamref name="T"/> on entity <paramref name="id"/>: the kept value back, stamped and
+    /// indexed. False when it is not disabled. Inside the structural gate.
+    /// </summary>
+    internal bool EnableRow<T>(ref EntityMeta meta, int id, int version) where T : struct, IComponent
+    {
+        ushort bit = ComponentType<T>.Bit;
+        if (!EnableBit(ref meta, bit, DisabledType<T>.Bit)) return false;
+        meta.Archetype.Stamp<T>(meta.Slot, ChangeTick);
+        Written(id, version, in Row<T>(ref meta, bit));
+        return true;
+    }
+
+    /// <summary>
     /// Move entity <paramref name="id"/> along <paramref name="transition"/>: copy its shared components into a row of
     /// the target table and remove its old row. Components only the target has are left for the caller to write.
     /// Inside the structural gate. Not inlined: callers whose usual path needs no move (a component given back to its

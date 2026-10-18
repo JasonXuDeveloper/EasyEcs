@@ -85,4 +85,21 @@ public class BulkTests
         for (int i = 0; i < entities.Length; i++) Assert.That(entities[i].Get<Stun>().Ticks, Is.EqualTo(i));
         Assert.Throws<System.InvalidOperationException>(() => world.DisableAll<ChildOf>());
     }
+
+    [Test]
+    public void EnableAllOfATrackedComponentCountsAsAWriteOfEachRow()
+    {
+        using var world = new World();
+        var entities = new Entity[200];
+        for (int i = 0; i < entities.Length; i++) entities[i] = world.CreateEntity(new Armor(i), new Health(i));
+        world.DisableAll<Armor>();
+        world.EnableAll<Armor>();
+        world.DisableAll<Armor>(QueryFilter.Create().With<Health>());    // in place now: words of rows at once
+        world.Update();
+        ulong since = world.ChangeTick;
+        Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(since)), Is.Zero);
+        Assert.That(world.EnableAll<Armor>(), Is.EqualTo(200));
+        Assert.That(world.Count<Health>(QueryFilter.Create().Changed<Armor>(since)), Is.EqualTo(200));
+        for (int i = 0; i < entities.Length; i++) Assert.That(entities[i].Read<Armor>().Value, Is.EqualTo(i));
+    }
 }

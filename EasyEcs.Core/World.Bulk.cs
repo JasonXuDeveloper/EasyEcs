@@ -48,7 +48,7 @@ public sealed partial class World
     /// </summary>
     public int DisableAll<T>(in QueryFilter filter = default) where T : struct, IComponent
     {
-        if (default(T) is ICleanupComponent || typeof(T) == typeof(ChildOf)) Entity.ThrowNotDisabled<T>(); // JIT-time constants
+        Entity.ThrowIfNotDisableable<T>();
         var op = new DisableOp { Bit = ComponentType<T>.Bit, Tag = DisabledType<T>.Bit };
         using (Structural()) WalkDown(Bulk<T>(in filter), filter.Tick, ref op);
         return op.Count;
@@ -150,19 +150,14 @@ public sealed partial class World
             {
                 int slot = (word << 6) + BitOperations.TrailingZeroCount(r);
                 Unsafe.Add(ref row0, slot) = Value;
-                if (default(T) is ITrackChanges) table.Stamp<T>(slot, world.ChangeTick);
                 if (ComponentType<T>.Watched) world.Written(table.Slots[slot].Index, table.Slots[slot].Version, in Value);
             }
+
+            table.StampWord<T>(word, rows, world.ChangeTick); // the word's summary once, not per row
         }
 
-        public void Apply(World world, Archetype table, int slot, EntityId entity)
-        {
-            ref var meta = ref world.MetaRef(entity.Index);
-            world.AddBit(ref meta, entity.Index, Bit);
-            Row<T>(ref meta, Bit) = Value;
-            meta.Archetype.Stamp<T>(meta.Slot, world.ChangeTick);
-            world.Written(entity.Index, entity.Version, in Value);
-        }
+        public void Apply(World world, Archetype table, int slot, EntityId entity) =>
+            world.SetRow(ref world.MetaRef(entity.Index), entity.Index, entity.Version, in Value);
     }
 
     private struct RemoveOp : IRowOp
@@ -224,22 +219,18 @@ public sealed partial class World
             rows = table.MarkAbsentWord(table.ColumnIndex(Tag), word, rows);
             table.MarkPresentWord(table.ColumnIndex(Bit), word, rows);
             Count += BitOperations.PopCount(rows);
-            if (default(T) is not ITrackChanges && !ComponentType<T>.Watched) return;
+            table.StampWord<T>(word, rows, world.ChangeTick); // the word's summary once, not per row
+            if (!ComponentType<T>.Watched) return;
             for (ulong r = rows; r != 0; r &= r - 1)
             {
                 int slot = (word << 6) + BitOperations.TrailingZeroCount(r);
-                if (default(T) is ITrackChanges) table.Stamp<T>(slot, world.ChangeTick);
-                if (ComponentType<T>.Watched) world.Written(table.Slots[slot].Index, table.Slots[slot].Version, in table.Ref<T>(Bit, slot));
+                world.Written(table.Slots[slot].Index, table.Slots[slot].Version, in table.Ref<T>(Bit, slot));
             }
         }
 
         public void Apply(World world, Archetype table, int slot, EntityId entity)
         {
-            ref var meta = ref world.MetaRef(entity.Index);
-            if (!world.EnableBit(ref meta, Bit, Tag)) return;
-            meta.Archetype.Stamp<T>(meta.Slot, world.ChangeTick);
-            world.Written(entity.Index, entity.Version, in Row<T>(ref meta, Bit));
-            Count++;
+            if (world.EnableRow<T>(ref world.MetaRef(entity.Index), entity.Index, entity.Version)) Count++;
         }
     }
 
