@@ -1,0 +1,32 @@
+using EasyEcs;
+
+namespace EasyEcs.Demo;
+
+// Turns sparks back at the walls and makes them glow: the bounce is written as data (Flash), FadeSystem takes it
+// from there.
+public class BounceSystem : EcsSystem
+{
+    [ForEach]
+    static void Bounce(Entity spark, ref Position p, ref Velocity v, in Arena arena)
+    {
+        bool hit = false;
+        if (p.X < 0 || p.X > arena.Width)
+        {
+            p.X = Math.Clamp(p.X, 0, arena.Width);
+            v.X = -v.X;
+            hit = true;
+        }
+
+        if (p.Y < 0 || p.Y > arena.Height)
+        {
+            p.Y = Math.Clamp(p.Y, 0, arena.Height);
+            v.Y = -v.Y;
+            hit = true;
+        }
+
+        if (hit)
+        {
+            spark.SetFlash(Units.FlashTime);
+        }
+    }
+}

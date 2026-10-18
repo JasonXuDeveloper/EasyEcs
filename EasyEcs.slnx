@@ -15,6 +15,9 @@
     <Project Path="samples/HotReload/HotReload.Plugin/HotReload.Plugin.csproj" />
     <Project Path="samples/HotReload/HotReload.Host/HotReload.Host.csproj" />
   </Folder>
+  <Folder Name="/demo/">
+    <Project Path="demo/EasyEcs.Demo/EasyEcs.Demo.csproj" />
+  </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/DocCheck/DocCheck.csproj" />
     <Project Path="tools/ApiDocs/ApiDocs.csproj" />

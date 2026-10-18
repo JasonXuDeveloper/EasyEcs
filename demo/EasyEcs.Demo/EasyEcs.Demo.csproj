@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+
+    <!-- The live demo of the docs site (https://ecs.xgamedev.net/en/docs/demo): a world that runs in the browser on
+         .NET's WebAssembly runtime. docs/scripts/build-demo.sh publishes it into docs/public/demo. -->
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <!-- As small as the runtime gets without the wasm-tools workload: trimmed IL, no ICU, no globalization data,
+             no debugger, no timezone data. -->
+        <PublishTrimmed>true</PublishTrimmed>
+        <TrimMode>full</TrimMode>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <BlazorWebAssemblyLoadAllGlobalizationData>false</BlazorWebAssemblyLoadAllGlobalizationData>
+        <DebuggerSupport>false</DebuggerSupport>
+        <EventSourceSupport>false</EventSourceSupport>
+        <UseSystemResourceKeys>true</UseSystemResourceKeys>
+        <WasmEmitSymbolMap>false</WasmEmitSymbolMap>
+        <!-- Cloudflare compresses on the fly; precompressed copies would only double the committed bundle. -->
+        <CompressionEnabled>false</CompressionEnabled>
+    </PropertyGroup>
+
+    <!-- With the NuGet package this is one line: <PackageReference Include="EasyEcs" Version="..."/> (the package
+         carries the generator). A reference to the sources adds the generator as an analyzer itself. -->
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\EasyEcs.Core\EasyEcs.Core.csproj"/>
+        <ProjectReference Include="..\..\src\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+    </ItemGroup>
+
+</Project>
