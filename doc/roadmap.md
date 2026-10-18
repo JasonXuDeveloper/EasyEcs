@@ -71,6 +71,19 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
   -> 86-90 ns), the memo's ways as structs in one array, `Lock` everywhere, `params ReadOnlySpan`, generators on
   implementation output and C# 14 ([D21](decisions.md#d21-net-10-features-only-where-they-measure)).
 
+- Performance with BDN proof: parallel runs on the thread pool, helpers woken only when they pay
+  ([D22](decisions.md#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)); change summaries per
+  block and removals summarized apart (10 removals 1.09 -> 0.87 μs, 10 changed rows 609 -> 514 ns,
+  [D23](decisions.md#d23-change-summaries-per-block-removals-summarized-apart)); index keys as id arrays (an index lookup
+  710 -> 156 μs, [D24](decisions.md#d24-an-indexs-key-holds-its-entities-in-one-array)); structural row loops without
+  the tombstone test for tables without tombstones (10 kills per tick 85.7 -> 80.9 μs,
+  [D25](decisions.md#d25-structural-row-loops-are-compiled-for-tables-without-tombstones)); `SetAll` / `EnableAll` note a
+  word of rows once.
+- Peer comparisons for bulk changes (a stun on 100,000 fighters and lifted: 91 μs against Arch 1,169 μs, DefaultEcs
+  9,412 μs, Friflo 11,051 μs), bulk create and destroy (10,000 shots: 142 μs against Friflo 378 μs, Arch 392 μs,
+  DefaultEcs 1,279 μs) and parallel systems (DefaultEcs' `ParallelSystem`: 373 against 419 μs); a benchmark of
+  `RemoveTypes` (EasyEcs.Benchmark.Plugin).
+
 ### Dropped
 
 - `Added<T>`: `[Changed<T>]` selects added rows too; a tag the reacting system removes tells new from written
@@ -108,39 +121,21 @@ needs goes. Each round's findings are listed here with what was generated, chang
     forgotten setup, and its default is rarely right: a clock with no step), cached filters from attributes (saves no
     lines);
   - kept: every generated member is used by an example or a test.
-
-### Tests and benchmarks for every feature
-
-- `EasyEcs.UnitTest`: every public feature has its own test file (behavior, edge cases, stale handles, the 0 B
-  budget in `AllocationTests`), and the battle server tests check it inside the whole world.
-- `EasyEcs.Benchmark`: every feature has a BDN case modelling real use (see Performance below for the missing ones),
-  and the headline worlds (`WorldSimulation`, `BattleServer`) run the features they use.
-- A coverage table (feature → test file → benchmark) kept in `doc/performance.md`, checked whenever a feature lands.
-
-### Performance
-
-Each item: profile (asm on x64 and arm64 where it matters), optimize, BDN before and after.
-
-- New-feature benchmarks: groups, cascades, relations, ordered walks, `Disable`, `Maybe<T>`, bulk changes, saves,
-  migrations, prefabs, introspection, ordering.
-- `EasyEcs.Comparison`, against Friflo, Arch and DefaultEcs where they have the feature:
-  - hierarchy with cascade;
-  - multi-target relations;
-  - structural changes during iteration vs. command buffers;
-  - component enable/disable, and whole-entity disable against Friflo's `Enabled` and DefaultEcs' `Disable` (frequent
-    switching; many entities disabled for long);
-  - ordered range queries;
-  - groups vs. value indexes;
-  - serialization and migration (formats labelled);
-  - clone / instantiate;
-  - bulk create / destroy / add / remove;
-  - parallel queries;
-  - parallel systems;
-  - the Removal rows still marked TBD.
-- Every comparison row is won, or the gap is explained with numbers.
+- Round 2 (the battle server, tests, guides; EasyEcs.Core for code written twice):
+  - generated: `world.GetOrAddClock()` for a singleton (`ref`, adds it if missing; 2 generic calls in the battle server,
+    4 in the guides);
+  - changed in EasyEcs.Core: single-component `Set`, `Enable` and the bulk ops share `SetRow` / `EnableRow`, the
+    `QueryFilter` builders one copy step, the stamps one tick-column lookup;
+  - rejected: counting and testing members per component (`world.CountPlayer()`: no line saved, twice the surface); a
+    named `TryGetXRef` (one call site); one enumerator for value and relation indexes (two public types renamed for
+    about 20 lines); one copy core for `CloneRows` and `CopyRun` (`Instantiate` would test presence per row); one scan
+    for `Count` and `Any` (a query hot path for about 15 lines).
 
 ### Documentation (last, all at once)
 
+- `doc/performance.md`: a coverage table (feature → test file → benchmark → peer comparison) and current numbers; the
+  peer rows not won (10 removals, [D23](decisions.md#d23-change-summaries-per-block-removals-summarized-apart)) with
+  their reasons.
 - Every page checked against the code:
   - every feature with its usage and a best-practice example;
   - current numbers;

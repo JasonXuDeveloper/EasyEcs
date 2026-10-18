@@ -30,6 +30,10 @@ feature stays here with its reason, so it is not proposed again without new fact
 | [D19](#d19-no-settable-tag-properties) | No settable tag properties |
 | [D20](#d20-generic-systems-register-the-closed-types-their-assembly-names) | Generic systems register the closed types their assembly names |
 | [D21](#d21-net-10-features-only-where-they-measure) | .NET 10 features only where they measure |
+| [D22](#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay) | Parallel runs use the thread pool and wake helpers only when they pay |
+| [D23](#d23-change-summaries-per-block-removals-summarized-apart) | Change summaries per block; removals summarized apart |
+| [D24](#d24-an-indexs-key-holds-its-entities-in-one-array) | An index's key holds its entities in one array |
+| [D25](#d25-structural-row-loops-are-compiled-for-tables-without-tombstones) | Structural row loops are compiled for tables without tombstones |
 
 ## D1. State changes are data: no events or callbacks
 
@@ -313,3 +317,66 @@ net win:
 
 **Considered.** Widening the inline component mask to 512 bits (every filter, key and table mask grows by 32 bytes
 for components 256-511, which the overflow already covers).
+
+## D22. Parallel runs use the thread pool and wake helpers only when they pay
+
+**Decision.** A parallel `[ForEach]` and a stage of parallel systems run on the calling thread plus reusable
+`IThreadPoolWorkItem` helpers, in chunks sized by the matching rows. Each job and each stage measures its runs: a run
+with helpers yields its time and its items' summed thread time, and helpers stay while they make a run a fifth faster
+than its work. Once it runs alone, a probe of four runs with helpers comes after a period that doubles from 16 to
+1,024 runs, or at once when runs alone turn 1.5x slower. No spinning, no dedicated threads, no allocation.
+
+**Why.** Waking a parked pool thread takes from a few to a few hundred microseconds and burns about as much CPU, so a
+small pass between server ticks ran no faster with helpers and cost twice the CPU. A 60 Hz tick of one 100,000-row
+pass on a 4-core VM: median pass 123 -> 111 μs, CPU per tick 436 -> 290 μs (serial: 108 μs, 229 μs). BDN:
+ParallelSystems 804-808 -> 746-768 μs, ParallelForEach 294-308 -> 267-271 μs, BattleServer and Runner unchanged.
+
+**Considered.**
+- A crew of dedicated helper threads that spin about 50 μs after a run: it won only when passes ran back to back
+  (BenchmarkDotNet's loop). In a server tick it lost: median 130 against 135 μs, but p90 170 against 190 μs and CPU
+  per tick 990 against 760 μs.
+- `ThreadPool.UnfairSemaphoreSpinLimit`: closes the back-to-back gap, but it is process-wide and keeps pool threads
+  spinning between ticks (49 ms CPU per 16 ms tick), so it stays the application's choice.
+
+## D23. Change summaries per block; removals summarized apart
+
+**Decision.** A tracked column keeps, per 64-row word, one 32-byte entry (latest tick, the rows at it, a bound of the
+others, and a bound of the ticks of rows lacking the component), and per 4,096-row block the words at the block's
+latest tick as a bit mask with a bound for the rest. A `Changed<T>` pass finds the next written word with one bit
+scan; a `Removed<T>` pass skips words by their removal bound and blocks by their own removal summaries, so writes of
+`T` do not make it visit their words.
+
+**Why.** BDN against the per-word summaries: RemovalComparison with 10 removals 1.07-1.09 -> 0.87 μs; ChangeTracking
+`Changed`, 10 written, 609-650 -> 514 ns; ChangeTrackingComparison 612-636 -> 497-573 ns. BattleServer,
+WorldSimulation and the 1,000-written cases are unchanged.
+
+**What remains.** Friflo reports 10 removals in 0.67 μs: it collects the removed ids in a callback as they happen, so
+reading them costs nothing extra. EasyEcs keeps removals as data (D1): its pass costs about 90 ns plus about 30 ns
+per word with a removal, the loads of the summaries and rows. At 1,000 removals EasyEcs is ahead (66 against 73 μs).
+
+**Considered.** Interleaving a word's summaries with its block's (no gain: the summaries of 100,000 rows fit in L2);
+noting the word in a separate helper called per row (slower: 600 μs per query tick); finding the column and word of a
+removal once for its stamp and its removal note (no measurable gain, reverted).
+
+## D24. An index's key holds its entities in one array
+
+**Decision.** A value index and a relation index keep each key's entities in one id array (`IndexHead`). A leaving
+entity leaves a hole the key's next entity fills, so entities never move and a loop finds each entity once, whatever
+is destroyed during it; arrays of emptied keys are reused. `CreateEntities` indexes its entities with one key lookup.
+
+**Why.** The lists linked through per-entity nodes cost one dependent load per entity. BDN: IndexBenchmark 710 ->
+156 μs; ValueQueryComparison 648 -> 225 μs (Friflo 323 μs); RelationComparison 26.8 -> 23.4 μs (Friflo 26.5 μs);
+cascades unchanged, 0 bytes.
+
+## D25. Structural row loops are compiled for tables without tombstones
+
+**Decision.** A `[ForEach]` that may change structure runs each table through a row loop compiled twice: for a table
+with tombstones (each row tests its id) and for one without (no test). A table without tombstones at the call gains
+one only through a structural change, which bumps the storage version and ends the loop.
+
+**Why.** StructuralChangeComparison, 10 of 100,000 units killed per tick: 85.7 -> 80.9 μs (three rounds; Friflo's
+command buffer 77 μs); 1,000 killed and BattleServer unchanged.
+
+**Considered.** Holding the storage version seen in a register instead of re-reading it per row: 82 -> 108 μs (the
+job's call leaves too few callee-saved registers, a column ref spills and round-trips the stack every row).
+
