@@ -155,6 +155,113 @@ using var other = new World();
 world.MoveEntities(other, group.ToArray());   // bob 和他的剑，链接保持不变
 ```
 
+## 完整例子 [#full-example]
+
+一艘船，上面有炮塔，炮塔上有炮：世界坐标跟着父实体走；然后把炮挂到别的父实体上，把炮塔摘下来，最后销毁船和还挂在它上面的
+东西。把这几个文件放进一个引用了 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Name(string Value) : IComponent;
+
+// 相对父实体的位置（根实体就是相对世界）。
+public record struct LocalPosition(float X, float Y) : IComponent;
+
+// 世界坐标，由 PropagateTransforms 计算。
+public record struct WorldPosition(float X, float Y) : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// 从根往下计算每个世界坐标，
+// 每个子实体都跟着父实体的新位置走。
+public class PropagateTransforms : EcsSystem
+{
+    // 根实体没有 ChildOf：世界坐标就是本地坐标。
+    [ForEach, Without<ChildOf>]
+    static void FromRoot(Entity root, in LocalPosition local, ref WorldPosition position)
+    {
+        position = new WorldPosition(local.X, local.Y);
+        Follow(root, position);
+    }
+
+    static void Follow(Entity parent, WorldPosition parentPosition)
+    {
+        foreach (var child in parent.World.Children(parent))
+        {
+            LocalPosition local = child.Read<LocalPosition>();
+            float x = parentPosition.X + local.X;
+            float y = parentPosition.Y + local.Y;
+            var position = new WorldPosition(x, y);
+            child.Get<WorldPosition>() = position;
+            Follow(child, position);
+        }
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSystem<PropagateTransforms>();
+
+// 子实体用 ChildOf 指向父实体。
+Entity ship = world.CreateEntity(new Name("ship"), new LocalPosition(10, 0), new WorldPosition());
+Entity turret = world.CreateEntity(
+    new Name("turret"), new LocalPosition(0, 2), new WorldPosition(), new ChildOf(ship));
+Entity gun = world.CreateEntity(
+    new Name("gun"), new LocalPosition(1, 0), new WorldPosition(), new ChildOf(turret));
+
+world.Update();
+Console.WriteLine($"gun at {gun.WorldPosition}");
+
+foreach (var child in world.Children(ship))
+{
+    Console.WriteLine($"ship > {child.Read<Name>().Value}");
+}
+
+// 换父实体：设一个新的 ChildOf。摘下来：移除它，实体就成了根。
+gun.Set(new ChildOf(ship));
+turret.Remove<ChildOf>();
+
+// ChildOf 是带索引的组件：用它的索引数一个父实体有几个子实体。
+var children = world.Index<ChildOf, EntityId>();
+Console.WriteLine($"ship: {children.Count(ship)} child, turret: {children.Count(turret)} children");
+
+// 销毁父实体会连带销毁子实体：炮跟着船一起没了。
+ship.Destroy();
+Console.WriteLine($"turret alive: {turret.IsAlive}, gun alive: {gun.IsAlive}");
+Console.WriteLine($"{world.EntityCount} entity left");
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+gun at WorldPosition { X = 11, Y = 2 }
+ship > turret
+ship: 1 child, turret: 0 children
+turret alive: True, gun alive: False
+1 entity left
+```
+
+炮的世界坐标是它和各级父实体偏移的和：10 + 0 + 1 和 0 + 2 + 0。炮塔被摘下来以后，船销毁了它还在；炮被挂到了船上，就跟着船
+一起销毁了。
+
 ## 怎么用得快 [#how-to-use-it-fast]
 
 - **销毁根。** 一次 `Destroy` 在结构闸门内顺着整棵子树走完，不递归（用一个目标栈）。先一个个销毁子实体再销毁父实体，
@@ -203,7 +310,7 @@ Friflo 有内置层级（`AddChild`），但删除父实体会先把子实体摘
   <Card title="迁移与卸载" href="/zh/docs/guide/migration-and-unload">
     把玩家和他拥有的一切迁移到另一个 World。
   </Card>
-  <Card title="示例程序" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/hierarchy.cs">
-    `examples/hierarchy.cs`，用 `dotnet run` 直接运行。
+  <Card title="示例：SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">
+    玩家和作为子实体的剑，一起存档、加载、迁移到另一个 World。
   </Card>
 </Cards>

@@ -237,6 +237,88 @@ Either way the templates live among the entities that systems move, damage and r
 data outside every world: no query can see it, systems need no filter for it, and one prefab serves every world
 (several threads may instantiate it at once as long as nobody changes it meanwhile).
 
+## Full example [#full-example]
+
+Two kinds of enemy, the second derived from the first, spawned one at a time, as a wave and by cloning. Put the
+files in a console project that references EasyEcs (`dotnet add package EasyEcs`) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Position(float X, float Y) : IComponent;
+
+public record struct Health(int Value) : IComponent;
+
+// A tag: every enemy has it, whatever its kind.
+public struct Enemy : IComponent;
+```
+
+</Accordion>
+<Accordion title="Kinds.cs">
+
+```csharp title="Kinds.cs" doccheck=example
+using EasyEcs;
+
+// The kinds of enemy, built once.
+// The generated writers return the prefab, so a recipe is one chain.
+public static class Kinds
+{
+    public static readonly Prefab Goblin = new Prefab().SetPosition(0, 0).SetHealth(30).SetEnemy();
+
+    // A variant: a copy of the goblin with more health.
+    public static readonly Prefab Chief = new Prefab(Goblin).SetHealth(80);
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+
+// One entity: a copy of every value of the recipe, then only what differs.
+Entity first = world.Instantiate(Kinds.Goblin);
+first.Position = new Position(10, 20);
+
+// A wave: a hundred copies in one pass.
+var wave = new Entity[100];
+world.Instantiate(Kinds.Goblin, wave);
+
+Entity boss = world.Instantiate(Kinds.Chief);
+
+// Clone copies a living entity as it is now, not the recipe it came from.
+boss.Health = new Health(50);
+Entity twin = boss.Clone();
+
+var enemies = QueryFilter.Create().With<Enemy>();
+Console.WriteLine($"{world.Count<Health>(enemies)} enemies");
+Console.WriteLine($"first at {first.Position}");
+Console.WriteLine($"boss {boss.Health.Value} hp, twin {twin.Health.Value} hp");
+
+// A prefab lives outside the world: the world counts only the entities made from it.
+Console.WriteLine($"{world.EntityCount} entities in the world");
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+103 enemies
+first at Position { X = 10, Y = 20 }
+boss 50 hp, twin 50 hp
+103 entities in the world
+```
+
+The twin has the boss's 50 health, not the chief's 80: a clone copies the entity, not its prefab. The two prefabs
+are not among the 103 entities.
+
 ## How to use it fast [#how-to-use-it-fast]
 
 | Instead of | Do | Why |

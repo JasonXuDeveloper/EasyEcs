@@ -28,12 +28,13 @@ The package brings the source generator, the analyzer and its code fixes with it
 no `partial` to write: everything lives in the `EasyEcs` namespace.
 
 <Callout type="info" title="Other ways to start">
-  - `dotnet new install EasyEcs.Templates`, then `dotnet new easyecs -n Arena` (add `--tests` for an NUnit project):
-    a fixed-tick server with components, systems and a prefab, ready to run
+  - `dotnet new install EasyEcs.Templates`, then `dotnet new easyecs -n Arena` (add `--tests` for an NUnit project
+    with a test file per system): a fixed-tick server, ready to run, laid out the way this tutorial ends up:
+    `Components/`, `Systems/` with one system per file, and a `Program.cs` that only hosts the world. Inside the
+    project, `dotnet new easyecs-system -n RegenSystem -o Systems` adds a system
     ([templates](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/templates)).
-  - One file, no project: every program in
-    [`examples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/examples) runs with
-    `dotnet run hello.cs`.
+  - Complete programs to read, from the smallest up:
+    [`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples), starting with HelloWorld.
 </Callout>
 
 </Step>

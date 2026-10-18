@@ -168,6 +168,118 @@ var opened = world.Instantiate(chest);                        // its own list: L
 
 - [`Save`](/en/docs/guide/saves) writes the elements: unmanaged ones as raw rows, managed ones through Nino.
 
+## Full example [#full-example]
+
+A hero picks up a numbered item every tick into a bag that holds four, and a sync system counts the bags that
+changed. A chest has a bag too, but nothing writes it. Put the files in a console project that references EasyEcs
+(`dotnet add package EasyEcs`) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+// An element of a bag: any struct. DynamicBuffer<Loot> is the component.
+public record struct Loot(int Item);
+
+// A tag: the entities that pick up loot.
+public struct Collector : IComponent;
+
+// The number of the next item to drop.
+public record struct Drops(int Next) : ISingletonComponent;
+
+// How many bags were sent since the start.
+public record struct Synced(int Bags) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// Every collector picks up the next item. A full bag drops its oldest item first.
+public class PickupSystem : EcsSystem
+{
+    const int BagSize = 4;
+
+    // The bag is taken by `ref`: writing it is a tracked change.
+    [ForEach, With<Collector>]
+    static void Pick(ref DynamicBuffer<Loot> bag, ref Drops drops)
+    {
+        if (bag.Count == BagSize)
+        {
+            bag.RemoveAt(0);
+        }
+
+        drops.Next++;
+        bag.Add(new Loot(drops.Next));
+    }
+}
+
+// Sends only the bags written since this system last ran.
+[UpdateAfter<PickupSystem>]
+public class SyncBagsSystem : EcsSystem
+{
+    [ForEach, Changed<DynamicBuffer<Loot>>]
+    static void Sync(in DynamicBuffer<Loot> bag, ref Synced synced)
+    {
+        synced.Bags++;
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSingleton<Drops>();
+world.AddSingleton<Synced>();
+world.AddSystem<PickupSystem>();
+world.AddSystem<SyncBagsSystem>();
+
+// An empty buffer holds no list: each entity gets its own on its first write.
+Entity hero = world.CreateEntity(new DynamicBuffer<Loot>(), new Collector());
+Entity chest = world.CreateEntity(new DynamicBuffer<Loot>());
+
+// Make room for a full bag now, so the list never grows later.
+hero.Get<DynamicBuffer<Loot>>().EnsureCapacity(4);
+
+for (int i = 0; i < 6; i++)
+{
+    world.Update();
+}
+
+// Read<T> is a read, not a change.
+Console.Write("hero's bag:");
+foreach (var loot in hero.Read<DynamicBuffer<Loot>>())
+{
+    Console.Write($" {loot.Item}");
+}
+
+Console.WriteLine();
+Console.WriteLine($"the chest holds {chest.Read<DynamicBuffer<Loot>>().Count} items");
+Console.WriteLine($"bags synced: {world.Synced.Bags}");
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+hero's bag: 3 4 5 6
+the chest holds 0 items
+bags synced: 7
+```
+
+The bag holds the last four items. Seven syncs: the first run sees both bags as new, then only the hero's bag is
+written, once in each of the five updates that follow.
+
 ## How to use it fast [#how-to-use-it-fast]
 
 | Instead of | Do | Why |
@@ -216,7 +328,7 @@ The buffer is at least as fast as the list it replaces, and the bag cannot chang
   <Card title="Saves" href="/en/docs/guide/saves">
     Buffers are saved with their elements.
   </Card>
-  <Card title="Example program" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/dynamic-buffers.cs">
-    `examples/dynamic-buffers.cs`: run it with `dotnet run`.
+  <Card title="Sample: SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">
+    Bags that are saved, loaded and moved with their players.
   </Card>
 </Cards>

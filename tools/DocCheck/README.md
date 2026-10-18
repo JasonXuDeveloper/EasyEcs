@@ -52,6 +52,7 @@ Flags go after the language, as `doccheck=` with comma-separated values. MDX and
 |---|---|
 | `skip` | not compiled (pseudo-code, a fragment that cannot be made to compile, another language in a `csharp` fence) |
 | `alone` | compiled on its own, without the page's other fences (a self-contained example that would clash with them) |
+| `example` | part of the page's full example: every `example` fence of the page (its `Components.cs`, `Systems.cs`, `Program.cs`) compiles together, as one program apart from the other fences, so its types never replace theirs |
 | `system` | the fence is a fragment of a system (`[ForEach]` methods, an `OnUpdate` override): compiled inside an `EcsSystem` |
 | `expect-ID` | a bad example: the fence must report diagnostic `ID` (`expect-EECS007`, `expect-CS0029`) and nothing else; it compiles on its own with the page's declarations |
 

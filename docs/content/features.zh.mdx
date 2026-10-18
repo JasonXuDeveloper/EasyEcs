@@ -25,7 +25,7 @@ EasyEcs 的全部功能都在这一页，按它在服务器上承担的工作分
 | [组织](#structure) | [关系](#relations)、[层级](#hierarchy)、[动态缓冲](#dynamic-buffers)、[预制体与克隆](#prefabs-and-cloning) |
 | [持久化](#persist) | [快照](#snapshots)、[存档](#saves)、[迁移](#migration)、[卸载插件类型](#unloading) |
 | [扩展](#scale) | [每个线程一个 World](#threading-model)、[并行系统](#parallel-systems)、[并行 `[ForEach]`](#parallel-foreach)、[批量操作](#bulk-operations) |
-| [构建与运维](#operate) | [分析器与代码修复](#analyzer)、[系统耗时统计](#per-system-timing)、[异常处理](#errors)、[运行时自省](#introspection)、[Native AOT](#native-aot)、[模板与示例](#templates) |
+| [构建与运维](#operate) | [分析器与代码修复](#analyzer)、[系统耗时统计](#per-system-timing)、[异常处理](#errors)、[运行时自省](#introspection)、[Native AOT](#native-aot)、[模板与示例程序](#templates) |
 
 ## 模拟 [#simulate]
 
@@ -462,12 +462,13 @@ restarted.Load(bytes.WrittenSpan);
 
 - **适合：** 体积小、启动快的服务器容器。
 
-### 模板与示例 [#templates]
+### 模板与示例程序 [#templates]
 
-`dotnet new easyecs` 创建一个按固定 tick 运行的控制台服务器，带组件、系统和预制体（加 `--tests` 多一个 NUnit 项目）；
-`dotnet new easyecs-system` 添加一个系统。[`examples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/examples)
-里每个文件演示一个功能，用 `dotnet run` 直接运行；[`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples)
-是完整的程序（游戏循环、存档与加载、每线程一个 World、热重载）。
+`dotnet new easyecs` 创建一个按固定 tick 运行的控制台服务器：`Components/`、每个系统一个文件的 `Systems/`（其中有一个
+用预制体刷怪的系统），`Program.cs` 只负责托管 World（加 `--tests` 多一个 NUnit 项目，每个系统一个测试文件）；
+`dotnet new easyecs-system` 添加一个系统。[`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples)
+按学习顺序收录完整程序（Hello World、游戏循环、存档与加载、每线程一个 World、热重载）；指南里
+[变更追踪](/zh/docs/guide/change-tracking#full-example)等功能页的“怎么用”部分最后都有一个完整例子。
 
 - **指南：** [快速开始](/zh/docs/getting-started)
 

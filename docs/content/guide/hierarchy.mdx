@@ -160,6 +160,114 @@ using var other = new World();
 world.MoveEntities(other, group.ToArray());   // bob and his sword, still linked
 ```
 
+## Full example [#full-example]
+
+A ship with a turret and a gun: world positions follow the parents, then the gun is re-parented, the turret
+detached, and the ship destroyed with what still hangs on it. Put the files in a console project that references
+EasyEcs (`dotnet add package EasyEcs`) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Name(string Value) : IComponent;
+
+// The position relative to the parent (or to the world, for a root).
+public record struct LocalPosition(float X, float Y) : IComponent;
+
+// The position in the world, computed by PropagateTransforms.
+public record struct WorldPosition(float X, float Y) : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// Computes every world position from the roots down,
+// so each child follows its parent's new position.
+public class PropagateTransforms : EcsSystem
+{
+    // Roots have no ChildOf: their world position is their local one.
+    [ForEach, Without<ChildOf>]
+    static void FromRoot(Entity root, in LocalPosition local, ref WorldPosition position)
+    {
+        position = new WorldPosition(local.X, local.Y);
+        Follow(root, position);
+    }
+
+    static void Follow(Entity parent, WorldPosition parentPosition)
+    {
+        foreach (var child in parent.World.Children(parent))
+        {
+            LocalPosition local = child.Read<LocalPosition>();
+            float x = parentPosition.X + local.X;
+            float y = parentPosition.Y + local.Y;
+            var position = new WorldPosition(x, y);
+            child.Get<WorldPosition>() = position;
+            Follow(child, position);
+        }
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSystem<PropagateTransforms>();
+
+// A child points at its parent with ChildOf.
+Entity ship = world.CreateEntity(new Name("ship"), new LocalPosition(10, 0), new WorldPosition());
+Entity turret = world.CreateEntity(
+    new Name("turret"), new LocalPosition(0, 2), new WorldPosition(), new ChildOf(ship));
+Entity gun = world.CreateEntity(
+    new Name("gun"), new LocalPosition(1, 0), new WorldPosition(), new ChildOf(turret));
+
+world.Update();
+Console.WriteLine($"gun at {gun.WorldPosition}");
+
+foreach (var child in world.Children(ship))
+{
+    Console.WriteLine($"ship > {child.Read<Name>().Value}");
+}
+
+// Re-parent: set a new ChildOf. Detach: remove it, and the entity is a root.
+gun.Set(new ChildOf(ship));
+turret.Remove<ChildOf>();
+
+// ChildOf is an indexed component: its index counts the children of a parent.
+var children = world.Index<ChildOf, EntityId>();
+Console.WriteLine($"ship: {children.Count(ship)} child, turret: {children.Count(turret)} children");
+
+// Destroying a parent destroys its children: the gun goes with the ship.
+ship.Destroy();
+Console.WriteLine($"turret alive: {turret.IsAlive}, gun alive: {gun.IsAlive}");
+Console.WriteLine($"{world.EntityCount} entity left");
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+gun at WorldPosition { X = 11, Y = 2 }
+ship > turret
+ship: 1 child, turret: 0 children
+turret alive: True, gun alive: False
+1 entity left
+```
+
+The gun's world position adds its parents' offsets: 10 + 0 + 1 and 0 + 2 + 0. After the turret is detached it
+survives the ship; the gun, re-parented to the ship, does not.
+
 ## How to use it fast [#how-to-use-it-fast]
 
 - **Destroy the root.** One `Destroy` follows the whole subtree inside the structural gate, with no recursion (a stack
@@ -210,7 +318,7 @@ Arch and DefaultEcs have none. The same squads, created and destroyed with their
   <Card title="Migration and unload" href="/en/docs/guide/migration-and-unload">
     Moving a player and what it owns to another world.
   </Card>
-  <Card title="Example program" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/hierarchy.cs">
-    `examples/hierarchy.cs`, runnable with `dotnet run`.
+  <Card title="Sample: SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">
+    A player and the swords that are its children, saved, loaded and moved to another world.
   </Card>
 </Cards>

@@ -209,6 +209,110 @@ What catches a change made off the owner thread:
 | A lambda handed to `Task.Run`, `Parallel.*`, `ThreadPool`, `new Thread` or `new Timer` changing a world the code around it also changes | [EECS014](/en/docs/guide/analyzer#eecs014) at compile time |
 | Your own threads in any other way | Nothing reliable: hand the change to the owner as data |
 
+## Full example [#full-example]
+
+A hundred thousand units steer towards a target, move and regenerate: the steering method splits its rows over
+several threads, and the regeneration system shares a stage with it because the two touch different components.
+Put the files in a console project that references EasyEcs (`dotnet add package EasyEcs`) and run it with
+`dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Position(float X, float Y) : IComponent;
+
+public record struct Velocity(float X, float Y) : IComponent;
+
+public record struct Health(int Value) : IComponent;
+
+// Where every unit heads.
+public record struct Target(float X, float Y) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// Points every velocity at the target.
+// Parallel = true splits the rows into chunks on several threads: each call reads
+// its own row and the singleton, and writes only its own row.
+public class SteeringSystem : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Steer(in Position position, ref Velocity velocity, in Target target)
+    {
+        float dx = target.X - position.X;
+        float dy = target.Y - position.Y;
+        // The + 1 keeps the length above zero when a unit stands on the target.
+        float length = MathF.Sqrt(dx * dx + dy * dy) + 1;
+        velocity = new Velocity(dx / length, dy / length);
+    }
+}
+
+// Writes only Health, which SteeringSystem does not touch: the two can run in the same stage.
+public class RegenerateSystem : EcsSystem
+{
+    [ForEach]
+    static void Regenerate(ref Health health)
+    {
+        health.Value = Math.Min(health.Value + 1, 100);
+    }
+}
+
+// Writes Position, which SteeringSystem reads: it waits for SteeringSystem to finish.
+public class MoveSystem : EcsSystem
+{
+    [ForEach]
+    static void Move(ref Position position, in Velocity velocity)
+    {
+        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+// ParallelSystems lets systems with no conflict between them share a stage.
+using var world = new World(new WorldOptions { ParallelSystems = true });
+world.SetTarget(X: 500, Y: 500);
+world.AddSystem<SteeringSystem>();
+world.AddSystem<RegenerateSystem>();
+world.AddSystem<MoveSystem>();
+
+var units = new Entity[100_000];
+world.CreateEntities(units, new Position(0, 0), new Velocity(0, 0), new Health(50));
+
+// Update is still one call on this thread: the threads it uses are done when it returns.
+for (int i = 0; i < 10; i++)
+{
+    world.Update();
+}
+
+Position at = units[0].Position;
+Console.WriteLine($"unit 0 at ({at.X:F2}, {at.Y:F2}) with {units[0].Health.Value} hp");
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+unit 0 at (7.06, 7.06) with 60 hp
+```
+
+The result is the same as running the three systems one by one in registration order: a parallel stage never
+changes what an update computes, only how many threads compute it.
+
 ## How to use it fast [#how-to-use-it-fast]
 
 - **Prefer worlds to parallel stages.** Worlds on their own threads scale with no hand-off at all; a stage pays a

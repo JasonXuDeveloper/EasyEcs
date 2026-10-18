@@ -177,6 +177,106 @@ world.Update();
 
 The tag is explicit, queryable, saved with the world and costs one presence bit flip.
 
+## Full example [#full-example]
+
+A player holds a seat at a table, a resource outside the world, and a cooldown that is paused while it is stunned.
+When the player leaves, a system gives the seat back before the entity is freed. Put the files in a console
+project that references EasyEcs (`dotnet add package EasyEcs`) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+// A cleanup component: an entity destroyed while holding it stays until a system removes it.
+public record struct Seat(int Number) : ICleanupComponent;
+
+public record struct Cooldown(int Ticks) : IComponent;
+
+// How many seats were given back.
+public record struct Seats(int Released) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// Counts every cooldown down. A disabled cooldown is hidden from this method, so it is paused.
+public class CooldownSystem : EcsSystem
+{
+    [ForEach]
+    static void Tick(ref Cooldown cooldown)
+    {
+        if (cooldown.Ticks > 0)
+        {
+            cooldown.Ticks--;
+        }
+    }
+}
+
+// Gives back the seats of destroyed players. Removing the last cleanup component frees the entity.
+public class ReleaseSeatsSystem : EcsSystem
+{
+    [ForEach, With<Destroyed>]
+    static void Release(Entity player, in Seat seat, ref Seats seats)
+    {
+        seats.Released++;
+        player.RemoveSeat();
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSingleton<Seats>();
+world.AddSystem<CooldownSystem>();
+world.AddSystem<ReleaseSeatsSystem>();
+
+Entity player = world.CreateEntity(new Seat(7), new Cooldown(3));
+
+// Stunned: the cooldown is hidden from queries and keeps its value.
+player.Disable<Cooldown>();
+world.Update();
+int stunned = world.Count<Disabled<Cooldown>>();
+Console.WriteLine($"stunned: has cooldown {player.HasCooldown}, stunned players {stunned}");
+
+// Back: the kept value returns, and the paused update did not count.
+player.Enable<Cooldown>();
+world.Update();
+Console.WriteLine($"resumed: {player.Cooldown.Ticks} ticks left");
+
+// The player leaves. It keeps its seat and gets the Destroyed tag; everything else goes.
+player.Destroy();
+Console.WriteLine($"destroyed: alive {player.IsAlive}, tagged {player.Has<Destroyed>()}");
+
+world.Update();
+int released = world.Seats.Released;
+Console.WriteLine($"after the update: alive {player.IsAlive}, seats released {released}");
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+stunned: has cooldown False, stunned players 1
+resumed: 2 ticks left
+destroyed: alive True, tagged True
+after the update: alive False, seats released 1
+```
+
+The cooldown went from 3 to 2: the update during the stun skipped it. Between `Destroy` and the next update the
+player is still alive, but only `ReleaseSeatsSystem` sees it, because it asks for `Destroyed`.
+
 ## How to use it fast [#how-to-use-it-fast]
 
 | Instead of | Do | Why |
@@ -225,8 +325,5 @@ and enabled in bulk and one by one (`BulkBenchmark`):
   </Card>
   <Card title="Hierarchy" href="/en/docs/guide/hierarchy">
     Cascades retire children that hold cleanup components.
-  </Card>
-  <Card title="Example programs" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/cleanup.cs">
-    `examples/cleanup.cs` and `examples/disable.cs`, runnable with `dotnet run`.
   </Card>
 </Cards>

@@ -28,7 +28,7 @@ after warm-up, and is covered by the unit tests and a BenchmarkDotNet benchmark.
 | [Structure](#structure) | [relations](#relations), [hierarchy](#hierarchy), [dynamic buffers](#dynamic-buffers), [prefabs and cloning](#prefabs-and-cloning) |
 | [Persist](#persist) | [snapshots](#snapshots), [saves](#saves), [migration](#migration), [unloading plugin types](#unloading) |
 | [Scale](#scale) | [one world per thread](#threading-model), [parallel systems](#parallel-systems), [parallel `[ForEach]`](#parallel-foreach), [bulk operations](#bulk-operations) |
-| [Build and operate](#operate) | [analyzer and code fixes](#analyzer), [per-system timing](#per-system-timing), [errors](#errors), [introspection](#introspection), [Native AOT](#native-aot), [templates and examples](#templates) |
+| [Build and operate](#operate) | [analyzer and code fixes](#analyzer), [per-system timing](#per-system-timing), [errors](#errors), [introspection](#introspection), [Native AOT](#native-aot), [templates and samples](#templates) |
 
 ## Simulate [#simulate]
 
@@ -524,13 +524,15 @@ built with the trimming and AOT analyzers on, so `<PublishAot>true</PublishAot>`
 
 - **Use it for:** small, fast-starting server containers.
 
-### Templates and examples [#templates]
+### Templates and samples [#templates]
 
-`dotnet new easyecs` creates a console server with a fixed tick, components, systems and a prefab (`--tests` adds
-an NUnit project); `dotnet new easyecs-system` adds a system. Each file in
-[`examples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/examples) shows one feature and runs with
-`dotnet run`; [`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples) has complete programs
-(a game loop, saving and loading, one world per thread, hot reload).
+`dotnet new easyecs` creates a console server with a fixed tick: `Components/`, `Systems/` with one system per file
+(a prefab spawner among them) and a `Program.cs` that only hosts the world (`--tests` adds an NUnit project with a
+test file per system); `dotnet new easyecs-system` adds a system.
+[`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples) has complete programs in learning
+order (hello world, a game loop, saving and loading, one world per thread, hot reload), and the guide pages of
+features such as [change tracking](/en/docs/guide/change-tracking#full-example) end their "How to use it" part with a
+full example.
 
 - **Guide:** [Getting started](/en/docs/getting-started)
 

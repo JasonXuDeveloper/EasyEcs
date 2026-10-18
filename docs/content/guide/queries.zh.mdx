@@ -237,6 +237,127 @@ job 不能读别的行的 job 会写的东西（别的实体、单例组件）�
 
 `Count` 把匹配表的行数加起来，只有在某些行缺少被查询组件的表里才去数存在位。`Any` 找到第一个匹配就停。两者都不碰组件的值。
 
+## 完整例子 [#full-example]
+
+系统里用过滤条件，系统外用查询、计数和 struct job。三个单位在移动，其中一个被冻住，第四个没有速度。把这几个文件放进一个
+引用了 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Position(float X, float Y) : IComponent;
+
+public record struct Velocity(float X, float Y) : IComponent;
+
+// 两个状态，都是标签。冻住的单位不移动；冻住或着火的单位会减速。
+public struct Frozen : IComponent;
+
+public struct Burning : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// 冻住、着火或两者都有的单位，速度减半。
+public class SlowSystem : EcsSystem
+{
+    [ForEach, WithAny<Frozen>, WithAny<Burning>]
+    static void Slow(ref Velocity velocity)
+    {
+        velocity = new Velocity(velocity.X / 2, velocity.Y / 2);
+    }
+}
+
+// 移动所有没被冻住的单位。
+[UpdateAfter<SlowSystem>]
+public class MoveSystem : EcsSystem
+{
+    [ForEach, Without<Frozen>]
+    static void Move(ref Position position, in Velocity velocity)
+    {
+        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Queries.cs">
+
+```csharp title="Queries.cs" doccheck=example
+using EasyEcs;
+
+// 过滤条件是一个值：只构建一次，存在 static readonly 字段里。
+public static class Filters
+{
+    public static readonly QueryFilter Moving = QueryFilter.Create().Without<Frozen>();
+}
+
+// struct job：系统外最快的遍历方式，没有委托。
+public struct SumX : IForEach<Position>
+{
+    public float Sum;
+
+    public void Execute(ref Position position)
+    {
+        Sum += position.X;
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSystem<SlowSystem>();
+world.AddSystem<MoveSystem>();
+
+world.CreateEntity(new Position(0, 0), new Velocity(1, 0));
+world.CreateEntity(new Position(0, 0), new Velocity(0, 1), new Frozen());
+world.CreateEntity(new Position(0, 0), new Velocity(2, 2), new Burning());
+world.CreateEntity(new Position(9, 9));
+
+world.Update();
+
+// 系统外：遍历匹配的实体。每个 item 给出指向表里数据的 ref。
+foreach (var item in world.Query<Position, Velocity>(Filters.Moving))
+{
+    Console.WriteLine($"{item.Entity}: {item.Position}");
+}
+
+// 计数和判断存在，不读任何组件的值。
+int moving = world.Count<Position, Velocity>(Filters.Moving);
+bool anyFrozen = world.Any<Frozen>();
+Console.WriteLine($"moving: {moving}, any frozen: {anyFrozen}");
+
+// 对所有 Position 跑一遍 struct job，没有速度的单位也算在内。
+var sumX = new SumX();
+world.ForEach<Position, SumX>(ref sumX);
+Console.WriteLine($"sum of X: {sumX.Sum}");
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+Entity 0v1: Position { X = 1, Y = 0 }
+Entity 2v1: Position { X = 1, Y = 1 }
+moving: 2, any frozen: True
+sum of X: 11
+```
+
+冻住的单位留在原地，着火的单位以一半速度移动。没有速度的单位不算移动者，但只要求 `Position` 的 job 会把它算进去。
+
 ## 怎么用得快 [#how-to-use-it-fast]
 
 | 别这样 | 这样做 | 原因 |

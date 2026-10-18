@@ -148,14 +148,21 @@ docs/                          the docs site: React Router 7 + Fumadocs, prerend
                                app/ routes, src/ components and libs, src/data/bench.json, scripts/, functions/
                                (Cloudflare Pages Functions), WRITING.md (page anatomy, tone, numbers); public/
                                easyecs-rules.md (the rules file for AI assistants, docs/content/ai.mdx)
-samples/                       runnable projects (HelloWorld, GameLoop, MultiWorld, SaveLoad, HotReload), run by CI
-examples/                      file-based C# programs (`dotnet run examples/hello.cs`), one per feature; run.sh runs them all
-templates/                     `dotnet new easyecs` templates (EasyEcs.Templates package); smoke.sh builds them
+samples/                       runnable projects in learning order (README.md): HelloWorld, GameLoop, SaveLoad,
+                               MultiWorld, HotReload (Contracts / Plugin / Host); built and run by CI. Each reads
+                               top-down: Components.cs, Systems.cs (or Systems/ per responsibility), a short
+                               Program.cs, plumbing that is not the lesson in Host/ or Support.cs, a README with the
+                               file map and the real output. The per-feature examples are the "Full example" sections
+                               of the guide pages (doccheck=example fences)
+templates/                     `dotnet new easyecs` (Components/, Systems/ one file per system, Program.cs = host,
+                               --tests: one test file per system) and `easyecs-system` (EasyEcs.Templates package);
+                               smoke.sh packs, creates, builds, runs and tests them
 demo/EasyEcs.Demo/             the docs site's live demo (docs/content/demo.mdx): a .NET 10 WebAssembly app (no Blazor,
                                [JSExport] host in Demo.cs, Components.cs, Systems/ one file per system); the page
                                includes its files. docs/scripts/build-demo.sh publishes it into docs/public/demo
                                (committed: Cloudflare has no .NET); rerun it after changing the demo or EasyEcs.Core
-tools/DocCheck/                compiles the C# fences of the docs pages (`doccheck=` flags on a fence)
+tools/DocCheck/                compiles the C# fences of the docs pages (`doccheck=` flags on a fence; `example`
+                               fences of a page compile together as its full example)
 tools/ApiDocs/                 writes docs/content/reference/ from the XML docs and the complexity tables of api.mdx
                                (Complexity.cs)
 ```

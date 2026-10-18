@@ -220,6 +220,87 @@ public static class Mirrors
 普通实体，除非禁用它，查询照样能看到。无论哪种，模板都混在系统要移动、要扣血、要同步的实体中间。EasyEcs 的 `Prefab` 是
 所有 World 之外的数据：查询看不到，系统不用为它加过滤，一个预制体能服务所有 World（只要没人修改它，多个线程可以同时用它实例化）。
 
+## 完整例子 [#full-example]
+
+两种敌人，第二种由第一种派生，分别逐个生成、成批生成和克隆生成。把这几个文件放进一个引用了 EasyEcs 的控制台项目
+（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Position(float X, float Y) : IComponent;
+
+public record struct Health(int Value) : IComponent;
+
+// 标签：不管哪种敌人都带着它。
+public struct Enemy : IComponent;
+```
+
+</Accordion>
+<Accordion title="Kinds.cs">
+
+```csharp title="Kinds.cs" doccheck=example
+using EasyEcs;
+
+// 各种敌人，只构建一次。
+// 生成的写入方法返回预制体本身，所以一个配方就是一条链式调用。
+public static class Kinds
+{
+    public static readonly Prefab Goblin = new Prefab().SetPosition(0, 0).SetHealth(30).SetEnemy();
+
+    // 派生：复制哥布林，血量更多。
+    public static readonly Prefab Chief = new Prefab(Goblin).SetHealth(80);
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+
+// 一个实体：复制配方里的所有值，再只改不一样的部分。
+Entity first = world.Instantiate(Kinds.Goblin);
+first.Position = new Position(10, 20);
+
+// 一波：一次生成一百个。
+var wave = new Entity[100];
+world.Instantiate(Kinds.Goblin, wave);
+
+Entity boss = world.Instantiate(Kinds.Chief);
+
+// Clone 复制的是活着的实体当前的样子，不是它来自的配方。
+boss.Health = new Health(50);
+Entity twin = boss.Clone();
+
+var enemies = QueryFilter.Create().With<Enemy>();
+Console.WriteLine($"{world.Count<Health>(enemies)} enemies");
+Console.WriteLine($"first at {first.Position}");
+Console.WriteLine($"boss {boss.Health.Value} hp, twin {twin.Health.Value} hp");
+
+// 预制体在 World 之外：World 只数由它生成的实体。
+Console.WriteLine($"{world.EntityCount} entities in the world");
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+103 enemies
+first at Position { X = 10, Y = 20 }
+boss 50 hp, twin 50 hp
+103 entities in the world
+```
+
+复制体的血量是首领当时的 50，而不是配方里的 80：克隆复制的是实体，不是预制体。两个预制体不在这 103 个实体里。
+
 ## 怎么用得快 [#how-to-use-it-fast]
 
 | 别这样 | 这样做 | 原因 |

@@ -155,6 +155,135 @@ int extinguished = world.Count<Replica>(FireOut.Since(mark));
 foreach (var item in world.Query<Replica>(FireOut.Since(mark))) item.Replica.Burning = false;
 ```
 
+## 完整例子 [#full-example]
+
+一千个单位，复制它们的血量和熄灭的火：第一次更新发送所有行，之后只发送被写过的行，`Burning` 被移除时只报告一次。把这几个
+文件放进一个引用了 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+// 被追踪：每次写入都记下 tick，[Changed<Health>] 据此找到被写过的行。
+public record struct Health(int Value) : IComponent, ITrackChanges;
+
+// 被追踪：移除也会记下 tick，[Removed<Burning>] 据此找到失去它的单位。
+public record struct Burning(int Ticks) : IComponent, ITrackChanges;
+
+// 上一次告诉客户端的单位状态。
+public record struct Replica(int Health) : IComponent;
+
+// 上一次更新里复制发送了多少行。
+public record struct Sent(int Rows) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// 着火的单位每个 tick 掉 10 点血，直到火熄灭。
+public class BurnSystem : EcsSystem
+{
+    [ForEach]
+    static void Burn(Entity unit, ref Burning burning, ref Health health)
+    {
+        health.Value -= 10;
+        burning.Ticks--;
+        if (burning.Ticks == 0)
+        {
+            unit.RemoveBurning();
+        }
+    }
+}
+
+// 发送自本系统上次运行以来血量被写过的单位。
+[UpdateAfter<BurnSystem>]
+public class ReplicateHealthSystem : EcsSystem
+{
+    // OnUpdate 在 [ForEach] 方法之前运行：每次更新从零开始计数。
+    protected override void OnUpdate()
+    {
+        World.Sent.Rows = 0;
+    }
+
+    // Health 用 `in` 读：用 `ref` 会算作一次写入。
+    [ForEach, Changed<Health>]
+    static void Send(in Health health, ref Replica replica, ref Sent sent)
+    {
+        replica.Health = health.Value;
+        sent.Rows++;
+    }
+}
+
+// 告诉客户端火熄灭了：访问自上次运行以来失去 Burning 的单位。
+[UpdateAfter<BurnSystem>]
+public class ReplicateFireOutSystem : EcsSystem
+{
+    [ForEach, Removed<Burning>]
+    static void FireOut(Entity unit, in Health health)
+    {
+        Console.WriteLine($"  {unit}: the fire went out at {health.Value} hp");
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSingleton<Sent>();
+world.AddSystem<BurnSystem>();
+world.AddSystem<ReplicateHealthSystem>();
+world.AddSystem<ReplicateFireOutSystem>();
+
+var units = new Entity[1000];
+world.CreateEntities(units, new Health(100), new Replica(100));
+units[0].SetBurning(2);
+
+for (int tick = 1; tick <= 4; tick++)
+{
+    // 系统外的写入同样算数。
+    if (tick == 3)
+    {
+        units[42].SetHealth(75);
+    }
+
+    world.Update();
+    Console.WriteLine($"tick {tick}: sent {world.Sent.Rows} of {units.Length} rows");
+}
+
+// 在系统外，按之前记下的 tick 过滤。
+ulong mark = world.ChangeTick;
+units[7].SetHealth(1);
+units[8].SetHealth(1);
+var writtenSinceMark = QueryFilter.Create().Changed<Health>(mark);
+Console.WriteLine($"written since the mark: {world.Count<Health>(writtenSinceMark)}");
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+tick 1: sent 1000 of 1000 rows
+  Entity 0v1: the fire went out at 80 hp
+tick 2: sent 1 of 1000 rows
+tick 3: sent 1 of 1000 rows
+tick 4: sent 0 of 1000 rows
+written since the mark: 2
+```
+
+第一次运行访问所有行：对它来说每一行都是新的。第 2 个 tick，着火的单位被写入并失去 `Burning`，所以它既被发送，也被报告
+一次；第 3 个 tick 只发送了在系统外被写过的那个单位；第 4 个 tick 没有任何写入，也就什么都不访问。
+
 ## 怎么用得快 [#how-to-use-it-fast]
 
 - **只读就用 `in`。** 只读不写的 `ref` 参数会把访问到的每一行都标记成已变化，下游所有 `[Changed<T>]` 读取方都得把它们全部过一遍。

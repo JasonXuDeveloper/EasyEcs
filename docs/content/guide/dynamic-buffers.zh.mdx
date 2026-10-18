@@ -158,6 +158,116 @@ var opened = world.Instantiate(chest);                        // 自己的列表
 
 - [`Save`](/zh/docs/guide/saves) 会写出元素：非托管元素按原始行写，托管元素走 Nino。
 
+## 完整例子 [#full-example]
+
+英雄每个 tick 往能装四件东西的背包里捡一件带编号的物品，同步系统统计有变化的背包。宝箱也有背包，但没有谁写它。把这几个文件
+放进一个引用了 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+// 背包里的一个元素：任意 struct 都行。DynamicBuffer<Loot> 才是组件。
+public record struct Loot(int Item);
+
+// 标签：会捡东西的实体。
+public struct Collector : IComponent;
+
+// 下一件掉落物品的编号。
+public record struct Drops(int Next) : ISingletonComponent;
+
+// 从开始到现在发送过多少次背包。
+public record struct Synced(int Bags) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// 每个拾取者捡起下一件物品。背包满了就先扔掉最旧的一件。
+public class PickupSystem : EcsSystem
+{
+    const int BagSize = 4;
+
+    // 背包按 `ref` 传入：写它就是一次被追踪的变更。
+    [ForEach, With<Collector>]
+    static void Pick(ref DynamicBuffer<Loot> bag, ref Drops drops)
+    {
+        if (bag.Count == BagSize)
+        {
+            bag.RemoveAt(0);
+        }
+
+        drops.Next++;
+        bag.Add(new Loot(drops.Next));
+    }
+}
+
+// 只发送自本系统上次运行以来被写过的背包。
+[UpdateAfter<PickupSystem>]
+public class SyncBagsSystem : EcsSystem
+{
+    [ForEach, Changed<DynamicBuffer<Loot>>]
+    static void Sync(in DynamicBuffer<Loot> bag, ref Synced synced)
+    {
+        synced.Bags++;
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSingleton<Drops>();
+world.AddSingleton<Synced>();
+world.AddSystem<PickupSystem>();
+world.AddSystem<SyncBagsSystem>();
+
+// 空的缓冲还没有列表：每个实体在第一次写入时才得到自己的列表。
+Entity hero = world.CreateEntity(new DynamicBuffer<Loot>(), new Collector());
+Entity chest = world.CreateEntity(new DynamicBuffer<Loot>());
+
+// 现在就留够一整包的容量，之后列表不会再扩容。
+hero.Get<DynamicBuffer<Loot>>().EnsureCapacity(4);
+
+for (int i = 0; i < 6; i++)
+{
+    world.Update();
+}
+
+// Read<T> 是读取，不算变更。
+Console.Write("hero's bag:");
+foreach (var loot in hero.Read<DynamicBuffer<Loot>>())
+{
+    Console.Write($" {loot.Item}");
+}
+
+Console.WriteLine();
+Console.WriteLine($"the chest holds {chest.Read<DynamicBuffer<Loot>>().Count} items");
+Console.WriteLine($"bags synced: {world.Synced.Bags}");
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+hero's bag: 3 4 5 6
+the chest holds 0 items
+bags synced: 7
+```
+
+背包里是最后捡的四件。同步了七次：第一次运行时两个背包都是新的，之后只有英雄的背包被写，后面五次更新各一次。
+
 ## 怎么用得快 [#how-to-use-it-fast]
 
 | 别这样 | 这样做 | 原因 |
@@ -205,7 +315,7 @@ var opened = world.Instantiate(chest);                        // 自己的列表
   <Card title="存档" href="/zh/docs/guide/saves">
     缓冲连同元素一起存盘。
   </Card>
-  <Card title="示例程序" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/dynamic-buffers.cs">
-    `examples/dynamic-buffers.cs`：用 `dotnet run` 直接运行。
+  <Card title="示例：SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">
+    跟着玩家一起存档、加载和迁移的背包。
   </Card>
 </Cards>

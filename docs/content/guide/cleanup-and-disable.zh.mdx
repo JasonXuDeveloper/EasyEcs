@@ -170,6 +170,105 @@ world.Update();
 
 标签是显式的，能查询，随 World 一起存盘，开销只是翻转一个存在位。
 
+## 完整例子 [#full-example]
+
+玩家占着一张桌子的座位（World 之外的资源），还有一个技能冷却，眩晕期间冷却暂停。玩家离开时，一个系统先把座位还回去，然后实体
+才被释放。把这几个文件放进一个引用了 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+// 清理组件：带着它被销毁的实体会留下来，直到某个系统把它移除。
+public record struct Seat(int Number) : ICleanupComponent;
+
+public record struct Cooldown(int Ticks) : IComponent;
+
+// 已经还回去的座位数。
+public record struct Seats(int Released) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// 所有冷却倒数。被禁用的冷却对这个方法不可见，所以会暂停。
+public class CooldownSystem : EcsSystem
+{
+    [ForEach]
+    static void Tick(ref Cooldown cooldown)
+    {
+        if (cooldown.Ticks > 0)
+        {
+            cooldown.Ticks--;
+        }
+    }
+}
+
+// 归还已销毁玩家的座位。最后一个清理组件被移除后，实体才被释放。
+public class ReleaseSeatsSystem : EcsSystem
+{
+    [ForEach, With<Destroyed>]
+    static void Release(Entity player, in Seat seat, ref Seats seats)
+    {
+        seats.Released++;
+        player.RemoveSeat();
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSingleton<Seats>();
+world.AddSystem<CooldownSystem>();
+world.AddSystem<ReleaseSeatsSystem>();
+
+Entity player = world.CreateEntity(new Seat(7), new Cooldown(3));
+
+// 眩晕：冷却对查询不可见，但值保留着。
+player.Disable<Cooldown>();
+world.Update();
+int stunned = world.Count<Disabled<Cooldown>>();
+Console.WriteLine($"stunned: has cooldown {player.HasCooldown}, stunned players {stunned}");
+
+// 恢复：保留的值回来了，暂停期间那次更新不算数。
+player.Enable<Cooldown>();
+world.Update();
+Console.WriteLine($"resumed: {player.Cooldown.Ticks} ticks left");
+
+// 玩家离开。它留着座位并带上 Destroyed 标签，其他组件全部移除。
+player.Destroy();
+Console.WriteLine($"destroyed: alive {player.IsAlive}, tagged {player.Has<Destroyed>()}");
+
+world.Update();
+int released = world.Seats.Released;
+Console.WriteLine($"after the update: alive {player.IsAlive}, seats released {released}");
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+stunned: has cooldown False, stunned players 1
+resumed: 2 ticks left
+destroyed: alive True, tagged True
+after the update: alive False, seats released 1
+```
+
+冷却从 3 变成 2：眩晕期间的那次更新跳过了它。从 `Destroy` 到下一次更新之间，玩家还活着，但只有 `ReleaseSeatsSystem` 看得到
+它，因为只有它要求了 `Destroyed`。
+
 ## 怎么用得快 [#how-to-use-it-fast]
 
 | 别这样 | 这样做 | 原因 |
@@ -215,8 +314,5 @@ world.Update();
   </Card>
   <Card title="层级" href="/zh/docs/guide/hierarchy">
     级联销毁会让持有清理组件的子实体退休。
-  </Card>
-  <Card title="示例程序" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/cleanup.cs">
-    `examples/cleanup.cs` 和 `examples/disable.cs`，用 `dotnet run` 直接运行。
   </Card>
 </Cards>

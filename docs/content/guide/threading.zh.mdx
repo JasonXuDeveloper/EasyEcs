@@ -195,6 +195,107 @@ public sealed class ReceiveMoves(ConcurrentQueue<MoveRequest> inbox) : EcsSystem
 | 交给 `Task.Run`、`Parallel.*`、`ThreadPool`、`new Thread` 或 `new Timer` 的 lambda，改的 World 外层代码也在改 | 编译期 [EECS014](/zh/docs/guide/analyzer#eecs014) |
 | 你自己的线程，用其他任何方式 | 没有可靠的办法：把变更当作数据交给拥有者线程 |
 
+## 完整例子 [#full-example]
+
+十万个单位朝目标转向、移动、回血：转向方法把它的行分给多个线程处理；回血系统和它碰的是不同的组件，所以两者在同一个阶段里
+并行。把这几个文件放进一个引用了 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Position(float X, float Y) : IComponent;
+
+public record struct Velocity(float X, float Y) : IComponent;
+
+public record struct Health(int Value) : IComponent;
+
+// 所有单位前往的目标点。
+public record struct Target(float X, float Y) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// 让每个速度都指向目标。
+// Parallel = true 把行切成块，分给多个线程：每次调用只读
+// 自己这一行和单例，也只写自己这一行。
+public class SteeringSystem : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Steer(in Position position, ref Velocity velocity, in Target target)
+    {
+        float dx = target.X - position.X;
+        float dy = target.Y - position.Y;
+        // + 1 保证单位站在目标点上时长度也大于零。
+        float length = MathF.Sqrt(dx * dx + dy * dy) + 1;
+        velocity = new Velocity(dx / length, dy / length);
+    }
+}
+
+// 只写 Health，SteeringSystem 不碰它：两个系统可以在同一个阶段运行。
+public class RegenerateSystem : EcsSystem
+{
+    [ForEach]
+    static void Regenerate(ref Health health)
+    {
+        health.Value = Math.Min(health.Value + 1, 100);
+    }
+}
+
+// 写 Position，而 SteeringSystem 要读它：所以要等 SteeringSystem 跑完。
+public class MoveSystem : EcsSystem
+{
+    [ForEach]
+    static void Move(ref Position position, in Velocity velocity)
+    {
+        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+// 开启 ParallelSystems 后，互不冲突的系统可以共享一个阶段。
+using var world = new World(new WorldOptions { ParallelSystems = true });
+world.SetTarget(X: 500, Y: 500);
+world.AddSystem<SteeringSystem>();
+world.AddSystem<RegenerateSystem>();
+world.AddSystem<MoveSystem>();
+
+var units = new Entity[100_000];
+world.CreateEntities(units, new Position(0, 0), new Velocity(0, 0), new Health(50));
+
+// Update 仍然是本线程上的一次调用：它返回时，用到的线程都已经干完了。
+for (int i = 0; i < 10; i++)
+{
+    world.Update();
+}
+
+Position at = units[0].Position;
+Console.WriteLine($"unit 0 at ({at.X:F2}, {at.Y:F2}) with {units[0].Health.Value} hp");
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+unit 0 at (7.06, 7.06) with 60 hp
+```
+
+结果和按注册顺序逐个运行这三个系统完全一样：并行阶段不改变一次更新算出的结果，只改变用几个线程来算。
+
 ## 怎么用得快 [#how-to-use-it-fast]
 
 - **优先多开 World，而不是并行阶段。** 各自线程上的 World 扩展时完全不用交接；并行阶段每次更新都要交给线程池一次。

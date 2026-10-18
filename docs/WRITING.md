@@ -29,7 +29,10 @@ faq: true                                  # optional: the page's "## …?" head
 ```
 
 Quote any value containing `: `. `description` is the meta description, the social card subtitle and the line in
-`llms.txt`: write it as a sentence a search result can show on its own.
+`llms.txt`: write it as a sentence a search result can show on its own. The build (`scripts/lint-seo.ts`) fails on a
+`<title>` (`seoTitle`, or the title plus " – EasyEcs Docs") over 60 characters, a Chinese character counting as two,
+and on a description outside 70-160 characters in English or 40-90 in Chinese. Use the words people search for where
+they are true: C# ECS, .NET ECS, entity component system, game server; 高性能、C# ECS 框架、游戏服务器.
 
 ## Page anatomy
 
@@ -41,12 +44,20 @@ Each feature page has these parts, in this order, with these headings (Chinese i
    title="Skip it for">`. Say when *not* to use it as concretely as when to use it.
 3. **How to use it** [怎么用]: `<Steps>` or `###` subsections, each with a complete example that compiles: the
    components, the system, the call that runs it. No `...` in the middle of code a reader will copy.
-4. **How to use it fast** [怎么用得快]: the choices that change the cost, each with its benchmark number through a
+4. **Full example** [完整例子], on the page of a feature a short program can show alone:
+   `## Full example [#full-example]`, one program that uses the feature on its own, as
+   `<Accordions>` with an `<Accordion>` per file (`Components.cs`, `Systems.cs`, `Program.cs`, ...), then the output
+   it prints (a `text` fence, pasted from a real run) and a sentence on what to notice in it. Each file's fence is
+   ` ```csharp title="Components.cs" doccheck=example `: DocCheck compiles the `example` fences of a page together, as
+   one program apart from the page's other fences. The files read top-down: comments on their own line above the
+   code they explain, one statement per line, lines of at most 100 characters, plumbing that is not the lesson in a
+   file of its own.
+5. **How to use it fast** [怎么用得快]: the choices that change the cost, each with its benchmark number through a
    component (see below), e.g. a table "Instead of / Do / Cost".
-5. **What it costs** [开销]: memory per entity or row, time per operation, what is free when the feature is unused.
-6. **Pitfalls** [常见陷阱]: a table "Mistake | What happens | Caught by", naming the analyzer rule (EECS0xx) when
+6. **What it costs** [开销]: memory per entity or row, time per operation, what is free when the feature is unused.
+7. **Pitfalls** [常见陷阱]: a table "Mistake | What happens | Caught by", naming the analyzer rule (EECS0xx) when
    there is one.
-7. **Related** [相关页面]: `<Cards>` with two to four pages.
+8. **Related** [相关页面]: `<Cards>` with two to four pages.
 
 Overview pages (index, what-is-ecs) and reference pages do not follow the anatomy; they answer the questions their
 readers search for, one `##` per question.

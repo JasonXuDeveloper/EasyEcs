@@ -165,6 +165,137 @@ int extinguished = world.Count<Replica>(FireOut.Since(mark));
 foreach (var item in world.Query<Replica>(FireOut.Since(mark))) item.Replica.Burning = false;
 ```
 
+## Full example [#full-example]
+
+Replication of health and of fires that went out, over a thousand units: the first update sends every row, later
+ones only what was written, and the removal of `Burning` is reported once. Put the files in a console project that
+references EasyEcs (`dotnet add package EasyEcs`) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+// Tracked: every write records its tick, so [Changed<Health>] finds the rows written.
+public record struct Health(int Value) : IComponent, ITrackChanges;
+
+// Tracked: a removal records its tick too, so [Removed<Burning>] finds the units that lost it.
+public record struct Burning(int Ticks) : IComponent, ITrackChanges;
+
+// What the clients were last told about a unit.
+public record struct Replica(int Health) : IComponent;
+
+// How many rows replication sent in the last update.
+public record struct Sent(int Rows) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// Burning units lose 10 health a tick until the fire goes out.
+public class BurnSystem : EcsSystem
+{
+    [ForEach]
+    static void Burn(Entity unit, ref Burning burning, ref Health health)
+    {
+        health.Value -= 10;
+        burning.Ticks--;
+        if (burning.Ticks == 0)
+        {
+            unit.RemoveBurning();
+        }
+    }
+}
+
+// Sends the health of every unit whose health was written since this system last ran.
+[UpdateAfter<BurnSystem>]
+public class ReplicateHealthSystem : EcsSystem
+{
+    // OnUpdate runs before the [ForEach] method: each update counts from zero.
+    protected override void OnUpdate()
+    {
+        World.Sent.Rows = 0;
+    }
+
+    // Health is read with `in`: a `ref` would count as a write.
+    [ForEach, Changed<Health>]
+    static void Send(in Health health, ref Replica replica, ref Sent sent)
+    {
+        replica.Health = health.Value;
+        sent.Rows++;
+    }
+}
+
+// Tells the clients that a fire went out: visits each unit that lost Burning since the last run.
+[UpdateAfter<BurnSystem>]
+public class ReplicateFireOutSystem : EcsSystem
+{
+    [ForEach, Removed<Burning>]
+    static void FireOut(Entity unit, in Health health)
+    {
+        Console.WriteLine($"  {unit}: the fire went out at {health.Value} hp");
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSingleton<Sent>();
+world.AddSystem<BurnSystem>();
+world.AddSystem<ReplicateHealthSystem>();
+world.AddSystem<ReplicateFireOutSystem>();
+
+var units = new Entity[1000];
+world.CreateEntities(units, new Health(100), new Replica(100));
+units[0].SetBurning(2);
+
+for (int tick = 1; tick <= 4; tick++)
+{
+    // A write from outside the systems counts too.
+    if (tick == 3)
+    {
+        units[42].SetHealth(75);
+    }
+
+    world.Update();
+    Console.WriteLine($"tick {tick}: sent {world.Sent.Rows} of {units.Length} rows");
+}
+
+// Outside systems, filter by a tick taken earlier.
+ulong mark = world.ChangeTick;
+units[7].SetHealth(1);
+units[8].SetHealth(1);
+var writtenSinceMark = QueryFilter.Create().Changed<Health>(mark);
+Console.WriteLine($"written since the mark: {world.Count<Health>(writtenSinceMark)}");
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+tick 1: sent 1000 of 1000 rows
+  Entity 0v1: the fire went out at 80 hp
+tick 2: sent 1 of 1000 rows
+tick 3: sent 1 of 1000 rows
+tick 4: sent 0 of 1000 rows
+written since the mark: 2
+```
+
+The first run visits every row: all of them are new to it. On tick 2 the burning unit is written and loses
+`Burning`, so it is both sent and reported once; on tick 3 only the unit written from outside is sent; on tick 4
+nothing was written and nothing is visited.
+
 ## How to use it fast [#how-to-use-it-fast]
 
 - **Read with `in`.** A `ref` parameter that only reads marks every row it visits as changed, and every

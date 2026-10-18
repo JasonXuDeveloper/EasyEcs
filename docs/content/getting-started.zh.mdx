@@ -26,11 +26,13 @@ dotnet add package EasyEcs
 包里自带源生成器、分析器和代码修复。不用注册任何东西，也不用写 `partial`，所有类型都在 `EasyEcs` 命名空间里。
 
 <Callout type="info" title="其他起步方式">
-  - `dotnet new install EasyEcs.Templates`，再 `dotnet new easyecs -n Arena`（加 `--tests` 会多一个 NUnit 项目）：
-    一个按固定 tick 运行的服务器，组件、系统和预制体都已写好，直接就能跑
+  - `dotnet new install EasyEcs.Templates`，再 `dotnet new easyecs -n Arena`（加 `--tests` 会多一个 NUnit 项目，
+    每个系统一个测试文件）：一个按固定 tick 运行的服务器，直接就能跑。目录结构和本教程最后的样子一致：`Components/`、
+    每个系统一个文件的 `Systems/`，`Program.cs` 只负责托管 World。在项目目录里运行
+    `dotnet new easyecs-system -n RegenSystem -o Systems` 可以再加一个系统
     （[模板](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/templates)）。
-  - 单个文件、不建项目：[`examples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/examples)
-    里的每个程序都能用 `dotnet run hello.cs` 直接运行。
+  - 想读完整程序：[`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples)，从最小的 HelloWorld
+    开始，一个比一个深入。
 </Callout>
 
 </Step>

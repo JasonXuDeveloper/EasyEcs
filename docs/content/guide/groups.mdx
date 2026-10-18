@@ -144,6 +144,143 @@ object reference.
 
 In a world that never called `GroupBy<T>()`, every table holds group 0: `InGroup<T>(0)` matches every entity with `T`.
 
+## Full example [#full-example]
+
+Nine units in three zones. A system heals only the units of the active zone, a struct job sums the health of one
+zone, and three units walk from zone 2 into zone 1. Put the files in a console project that references EasyEcs
+(`dotnet add package EasyEcs`) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+// IGroup: the world keeps the entities of each zone in tables of their own.
+public record struct Zone(int Id) : IComponent, IGroup
+{
+    public int Group => Id;
+}
+
+public record struct Health(int Value) : IComponent;
+
+// The zone players are in: the only one that is simulated.
+public record struct ActiveZone(int Id) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Jobs.cs">
+
+```csharp title="Jobs.cs" doccheck=example
+using EasyEcs;
+
+// Struct jobs: a pass over the rows a filter selects, with no delegate.
+public struct Regenerate : IForEach<Health>
+{
+    public void Execute(ref Health health)
+    {
+        health.Value += 1;
+    }
+}
+
+public struct SumHealth : IForEach<Health>
+{
+    public int Total;
+
+    public void Execute(ref Health health)
+    {
+        Total += health.Value;
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// Heals the units of the active zone only. [ForEach] attributes cannot name a group value,
+// so the system runs a struct job with an InGroup filter from OnUpdate.
+public class RegenerateActiveZone : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        int zone = World.ActiveZone.Id;
+        var inZone = QueryFilter.Create().InGroup<Zone>(zone);
+        var job = new Regenerate();
+        World.ForEach<Health, Regenerate>(ref job, inZone);
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Zones.cs">
+
+```csharp title="Zones.cs" doccheck=example
+using EasyEcs;
+
+public static class Zones
+{
+    // Filters are values: build them once and keep them in fields. A filter holds one group.
+    public static readonly QueryFilter One = QueryFilter.Create().InGroup<Zone>(1);
+    public static readonly QueryFilter Two = QueryFilter.Create().InGroup<Zone>(2);
+
+    // The units and total health of one zone. Walks the tables of that zone only.
+    public static string Describe(World world, QueryFilter zone)
+    {
+        var sum = new SumHealth();
+        world.ForEach<Health, SumHealth>(ref sum, zone);
+        return $"{world.Count<Health>(zone)} units, {sum.Total} hp";
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+
+// Group the world before it fills: every entity then lands in its zone's tables directly.
+world.GroupBy<Zone>();
+world.SetActiveZone(Id: 1);
+world.AddSystem<RegenerateActiveZone>();
+
+for (int i = 0; i < 9; i++)
+{
+    world.CreateEntity(new Zone(i % 3), new Health(10 * i));
+}
+
+world.Update();
+Console.WriteLine($"zone 1: {Zones.Describe(world, Zones.One)}");
+
+// A new value moves the entity to the tables of its new zone. Set is allowed while a query walks.
+foreach (var item in world.Query<Health>(Zones.Two))
+{
+    item.Entity.SetZone(1);
+}
+
+Console.WriteLine($"zone 1: {Zones.Describe(world, Zones.One)}");
+Console.WriteLine($"zone 2: {Zones.Describe(world, Zones.Two)}");
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+zone 1: 3 units, 123 hp
+zone 1: 6 units, 273 hp
+zone 2: 0 units, 0 hp
+```
+
+Only the three units of zone 1 were healed (120 + 3). The three from zone 2 arrive with their 150 health; zone 2
+is empty after they leave.
+
 ## How to use it fast [#how-to-use-it-fast]
 
 - **Group at setup.** `GroupBy<T>()` on a full world moves every entity once; on an empty one it costs nothing.
@@ -193,7 +330,7 @@ indexed component, counting a rating range and summing the gold of four zones:
   <Card title="Threading" href="/en/docs/guide/threading">
     One world per thread: partitions that never meet.
   </Card>
-  <Card title="Example program" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/groups.cs">
-    `examples/groups.cs`, runnable with `dotnet run`.
+  <Card title="Sample: GameLoop" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop">
+    System groups, the other kind of group: input, the tick and replication, each at its own cadence.
   </Card>
 </Cards>

@@ -92,6 +92,82 @@ Both calls take the structural gate and throw while a query iterates: call them 
 otherwise), and one taken before [`RemoveTypes`](/en/docs/guide/migration-and-unload#remove-types) cannot be restored
 after it (`InvalidOperationException`).
 
+## Full example [#full-example]
+
+A turn of poison undone: the world is captured before the turn, five updates and a new entity happen, and the
+restore brings back the hero's health and the entity count. Put the files in a console project that references
+EasyEcs (`dotnet add package EasyEcs`) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Health(int Value) : IComponent;
+
+// A tag: poisoned units lose health every tick.
+public struct Poisoned : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// Poisoned units lose 10 health a tick.
+public class PoisonSystem : EcsSystem
+{
+    [ForEach, With<Poisoned>]
+    static void Hurt(ref Health health)
+    {
+        health.Value -= 10;
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSystem<PoisonSystem>();
+Entity hero = world.CreateEntity(new Health(100), new Poisoned());
+
+// Before the turn: a copy of every entity, component and singleton.
+WorldSnapshot beforeTurn = world.Capture();
+
+for (int i = 0; i < 5; i++)
+{
+    world.Update();
+}
+
+Entity minion = world.CreateEntity(new Health(5));
+Console.WriteLine($"after the turn: hero {hero.Health.Value} hp, entities: {world.EntityCount}");
+
+// Undo the turn. Handles from before the capture are valid again; the minion's is stale.
+world.Restore(beforeTurn);
+Console.WriteLine($"restored: hero {hero.Health.Value} hp, entities: {world.EntityCount}");
+Console.WriteLine($"minion alive: {minion.IsAlive}");
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+after the turn: hero 50 hp, entities: 2
+restored: hero 100 hp, entities: 1
+minion alive: False
+```
+
+The minion was created after the capture, so the restore removes it and its handle stays stale even if a later
+entity reuses its id.
+
 ## How to use it fast [#how-to-use-it-fast]
 
 | Instead of | Do | Why |
@@ -137,8 +213,5 @@ The capture's allocation is the new snapshot itself; `Capture(into)` reuses one.
   </Card>
   <Card title="Dynamic buffers" href="/en/docs/guide/dynamic-buffers">
     Lists whose elements a snapshot copies.
-  </Card>
-  <Card title="Example program" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/snapshots.cs">
-    `examples/snapshots.cs`, runnable with `dotnet run`.
   </Card>
 </Cards>

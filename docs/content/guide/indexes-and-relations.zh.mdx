@@ -176,6 +176,138 @@ public class BurnZones : EcsSystem
 
 无论 World 里有多少单位，遍历只碰这个区域里的那些。`Find` 循环里可以销毁实体，但不能修改这个索引对应的组件。
 
+## 完整例子 [#full-example]
+
+按队伍、按名字、按等级查找单位，属于某个弓箭手的箭，以及同时加入多个队伍的英雄。把这几个文件放进一个引用了 EasyEcs 的
+控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+// 值索引：Key 是用来查找实体的值。
+public record struct Team(int Id) : IComponent, IIndexed<int>
+{
+    public int Key => Id;
+}
+
+public record struct PlayerName(string Value) : IComponent, IIndexed<string>
+{
+    public string Key => Value;
+}
+
+// int 键可以比较大小，所以这个索引还能按顺序遍历一段等级。
+public record struct Level(int Value) : IComponent, IIndexed<int>
+{
+    public int Key => Value;
+}
+
+// 链接：每支箭有一个主人，索引列出某个主人的所有箭。
+public record struct OwnedBy(EntityId Owner) : IComponent, IIndexed<EntityId>
+{
+    public EntityId Key => Owner;
+}
+
+public struct Arrow : IComponent;
+
+// 关系：一个实体可以有多个，所在的每个队伍一个。
+public record struct MemberOf(EntityId Target) : IRelation;
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+
+// ---- 值索引 ----
+for (int i = 0; i < 9; i++)
+{
+    world.CreateEntity(new Team(i % 3), new Level(i + 1));
+}
+
+world.CreateEntity(new PlayerName("alice"), new Level(42));
+
+// 生成的属性就是 world.Index<Team, int>()：存进局部变量或字段里用。
+var teams = world.TeamIndex;
+Console.WriteLine($"team 0: {teams.Count(0)} units");
+
+// 把实体换到另一个键上要用 Set：索引立刻跟着更新。
+foreach (var unit in teams.Find(1))
+{
+    unit.SetTeam(2);
+}
+
+Console.WriteLine($"team 1: {teams.Count(1)} units, team 2: {teams.Count(2)} units");
+
+// 唯一的键找到一个实体。
+if (world.PlayerNameIndex.TryFind("alice", out var alice))
+{
+    Console.WriteLine($"alice is level {alice.Level.Value}");
+}
+
+Console.Write("levels 3 to 6:");
+foreach (var unit in world.LevelIndex.Range(3, 6))
+{
+    Console.Write($" {unit.Level.Value}");
+}
+
+Console.WriteLine();
+
+// ---- 每个实体一条链接：箭和它的主人 ----
+Entity archer = world.CreateEntity(new Team(0));
+for (int i = 0; i < 3; i++)
+{
+    world.CreateEntity(new OwnedBy(archer), new Arrow());
+}
+
+var arrows = world.OwnedByIndex;
+Console.WriteLine($"the archer owns {arrows.Count(archer)} arrows");
+
+// 弓箭手被销毁时，它的箭也一起销毁。
+arrows.WhenTargetDestroyed(TargetPolicy.Destroy);
+
+// ---- 每个实体多条链接：队伍 ----
+Entity red = world.CreateEntity();
+Entity blue = world.CreateEntity();
+Entity hero = world.CreateEntity();
+hero.AddRelation(new MemberOf(red));
+hero.AddRelation(new MemberOf(blue));
+world.CreateEntity().AddRelation(new MemberOf(red));
+
+var parties = world.Relations<MemberOf>();
+Console.WriteLine($"red has {parties.Count(red)} members, blue has {parties.Count(blue)}");
+
+hero.RemoveRelation<MemberOf>(blue);
+Console.WriteLine($"after the hero left: blue has {parties.Count(blue)}");
+
+archer.Destroy();
+Console.WriteLine($"arrows left after the archer died: {world.Count<Arrow>()}");
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+team 0: 3 units
+team 1: 0 units, team 2: 6 units
+alice is level 42
+levels 3 to 6: 3 4 5 6
+the archer owns 3 arrows
+red has 2 members, blue has 1
+after the hero left: blue has 0
+arrows left after the archer died: 0
+```
+
+在 `Find` 循环里改队伍是安全的：实体离开这个键时，遍历会跟着索引走。箭跟着弓箭手一起销毁，是因为设了
+`TargetPolicy.Destroy`；不设的话，它们会留着一条指向已销毁实体的链接。
+
 ## 怎么用得快 [#how-to-use-it-fast]
 
 | 别这样 | 这样做 | 原因 |
@@ -242,7 +374,7 @@ Arch 的关系在单独的包里。下面每个库用的都是自己的内置索
   <Card title="动态缓冲" href="/zh/docs/guide/dynamic-buffers">
     存放关系链接的缓冲。
   </Card>
-  <Card title="示例程序" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/relations.cs">
-    `examples/indexes.cs` 和 `examples/relations.cs`，用 `dotnet run` 直接运行。
+  <Card title="示例：GameLoop" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop">
+    一个用值索引按客户端 id 查找玩家的服务器。
   </Card>
 </Cards>

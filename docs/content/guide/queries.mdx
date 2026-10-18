@@ -256,6 +256,129 @@ to the same chunked run.
 `Count` sums the row counts of the matching tables, and counts presence bits only in tables where some rows lack a
 queried component. `Any` stops at the first match. Neither touches a component value.
 
+## Full example [#full-example]
+
+Filters in a system, then a query, a count and a struct job outside it. Three units move, one of them frozen, and
+a fourth has no velocity at all. Put the files in a console project that references EasyEcs
+(`dotnet add package EasyEcs`) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Position(float X, float Y) : IComponent;
+
+public record struct Velocity(float X, float Y) : IComponent;
+
+// Two states as tags. A frozen unit does not move; a frozen or burning unit is slowed.
+public struct Frozen : IComponent;
+
+public struct Burning : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// Halves the velocity of every unit that is frozen, burning, or both.
+public class SlowSystem : EcsSystem
+{
+    [ForEach, WithAny<Frozen>, WithAny<Burning>]
+    static void Slow(ref Velocity velocity)
+    {
+        velocity = new Velocity(velocity.X / 2, velocity.Y / 2);
+    }
+}
+
+// Moves every unit that is not frozen.
+[UpdateAfter<SlowSystem>]
+public class MoveSystem : EcsSystem
+{
+    [ForEach, Without<Frozen>]
+    static void Move(ref Position position, in Velocity velocity)
+    {
+        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Queries.cs">
+
+```csharp title="Queries.cs" doccheck=example
+using EasyEcs;
+
+// A filter is a value: build it once and keep it in a static readonly field.
+public static class Filters
+{
+    public static readonly QueryFilter Moving = QueryFilter.Create().Without<Frozen>();
+}
+
+// A struct job: the fastest pass outside systems, with no delegate.
+public struct SumX : IForEach<Position>
+{
+    public float Sum;
+
+    public void Execute(ref Position position)
+    {
+        Sum += position.X;
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSystem<SlowSystem>();
+world.AddSystem<MoveSystem>();
+
+world.CreateEntity(new Position(0, 0), new Velocity(1, 0));
+world.CreateEntity(new Position(0, 0), new Velocity(0, 1), new Frozen());
+world.CreateEntity(new Position(0, 0), new Velocity(2, 2), new Burning());
+world.CreateEntity(new Position(9, 9));
+
+world.Update();
+
+// Outside systems: loop over the matches. Each item hands out refs into the table.
+foreach (var item in world.Query<Position, Velocity>(Filters.Moving))
+{
+    Console.WriteLine($"{item.Entity}: {item.Position}");
+}
+
+// Count and test without reading any component value.
+int moving = world.Count<Position, Velocity>(Filters.Moving);
+bool anyFrozen = world.Any<Frozen>();
+Console.WriteLine($"moving: {moving}, any frozen: {anyFrozen}");
+
+// Run the struct job over every position, the unit without a velocity too.
+var sumX = new SumX();
+world.ForEach<Position, SumX>(ref sumX);
+Console.WriteLine($"sum of X: {sumX.Sum}");
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+Entity 0v1: Position { X = 1, Y = 0 }
+Entity 2v1: Position { X = 1, Y = 1 }
+moving: 2, any frozen: True
+sum of X: 11
+```
+
+The frozen unit stays where it was, and the burning one moves at half its speed. The unit without a velocity is
+not a mover, but the job over `Position` alone counts it.
+
 ## How to use it fast [#how-to-use-it-fast]
 
 | Instead of | Do | Why |

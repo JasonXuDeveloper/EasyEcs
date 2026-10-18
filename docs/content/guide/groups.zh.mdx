@@ -138,6 +138,141 @@ public class RegenerateActiveZone : EcsSystem
 
 在从未调用过 `GroupBy<T>()` 的 World 里，所有表都属于 0 组：`InGroup<T>(0)` 匹配所有带 `T` 的实体。
 
+## 完整例子 [#full-example]
+
+九个单位分在三个区域里。一个系统只给当前活跃区域的单位回血，一个 struct job 统计某个区域的总血量，然后三个单位从区域 2 走进
+区域 1。把这几个文件放进一个引用了 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+// IGroup：World 把每个区域的实体放在各自的表里。
+public record struct Zone(int Id) : IComponent, IGroup
+{
+    public int Group => Id;
+}
+
+public record struct Health(int Value) : IComponent;
+
+// 玩家所在的区域：只有它会被模拟。
+public record struct ActiveZone(int Id) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Jobs.cs">
+
+```csharp title="Jobs.cs" doccheck=example
+using EasyEcs;
+
+// struct job：遍历过滤条件选出的行，没有委托。
+public struct Regenerate : IForEach<Health>
+{
+    public void Execute(ref Health health)
+    {
+        health.Value += 1;
+    }
+}
+
+public struct SumHealth : IForEach<Health>
+{
+    public int Total;
+
+    public void Execute(ref Health health)
+    {
+        Total += health.Value;
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// 只给活跃区域的单位回血。[ForEach] 的特性没法写出分组的值，
+// 所以系统在 OnUpdate 里用带 InGroup 过滤条件的 struct job 来跑。
+public class RegenerateActiveZone : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        int zone = World.ActiveZone.Id;
+        var inZone = QueryFilter.Create().InGroup<Zone>(zone);
+        var job = new Regenerate();
+        World.ForEach<Health, Regenerate>(ref job, inZone);
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Zones.cs">
+
+```csharp title="Zones.cs" doccheck=example
+using EasyEcs;
+
+public static class Zones
+{
+    // 过滤条件是值：只构建一次，存在字段里。一个过滤条件只对应一个分组。
+    public static readonly QueryFilter One = QueryFilter.Create().InGroup<Zone>(1);
+    public static readonly QueryFilter Two = QueryFilter.Create().InGroup<Zone>(2);
+
+    // 一个区域的单位数和总血量。只遍历这个区域的表。
+    public static string Describe(World world, QueryFilter zone)
+    {
+        var sum = new SumHealth();
+        world.ForEach<Health, SumHealth>(ref sum, zone);
+        return $"{world.Count<Health>(zone)} units, {sum.Total} hp";
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+
+// 在 World 装满之前分组：之后每个实体都直接落进所在区域的表。
+world.GroupBy<Zone>();
+world.SetActiveZone(Id: 1);
+world.AddSystem<RegenerateActiveZone>();
+
+for (int i = 0; i < 9; i++)
+{
+    world.CreateEntity(new Zone(i % 3), new Health(10 * i));
+}
+
+world.Update();
+Console.WriteLine($"zone 1: {Zones.Describe(world, Zones.One)}");
+
+// 写入新值会把实体搬到新区域的表里。查询遍历途中也可以 Set。
+foreach (var item in world.Query<Health>(Zones.Two))
+{
+    item.Entity.SetZone(1);
+}
+
+Console.WriteLine($"zone 1: {Zones.Describe(world, Zones.One)}");
+Console.WriteLine($"zone 2: {Zones.Describe(world, Zones.Two)}");
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+zone 1: 3 units, 123 hp
+zone 1: 6 units, 273 hp
+zone 2: 0 units, 0 hp
+```
+
+只有区域 1 的三个单位回了血（120 + 3）。从区域 2 过来的三个单位带着它们的 150 点血；它们走后区域 2 就空了。
+
 ## 怎么用得快 [#how-to-use-it-fast]
 
 - **初始化时分组。** 在满的 World 上调用 `GroupBy<T>()` 要把每个实体挪一次；在空 World 上没有开销。
@@ -185,7 +320,7 @@ Friflo、Arch 和 DefaultEcs 都没有按值分组，最接近的是值索引。
   <Card title="线程" href="/zh/docs/guide/threading">
     每个线程一个 World：互不往来的分区。
   </Card>
-  <Card title="示例程序" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/groups.cs">
-    `examples/groups.cs`，用 `dotnet run` 直接运行。
+  <Card title="示例：GameLoop" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop">
+    另一种分组，系统组：输入、tick 和复制各按自己的节奏运行。
   </Card>
 </Cards>

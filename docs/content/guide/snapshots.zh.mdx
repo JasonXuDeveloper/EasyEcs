@@ -86,6 +86,80 @@ world.Restore(history[(100 - 3) % Rollback.Ticks]);                             
 快照只属于拍它的那个 World（否则抛 `ArgumentException`）；[`RemoveTypes`](/zh/docs/guide/migration-and-unload#remove-types) 之前拍的
 快照，之后不能再恢复（抛 `InvalidOperationException`）。
 
+## 完整例子 [#full-example]
+
+撤销一个回合的中毒：回合开始前拍下 World 的快照，接着跑了五次更新、新建了一个实体，恢复后英雄的血量和实体数都回到原样。把这几个
+文件放进一个引用了 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Health(int Value) : IComponent;
+
+// 标签：中毒的单位每个 tick 掉血。
+public struct Poisoned : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// 中毒的单位每个 tick 掉 10 点血。
+public class PoisonSystem : EcsSystem
+{
+    [ForEach, With<Poisoned>]
+    static void Hurt(ref Health health)
+    {
+        health.Value -= 10;
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSystem<PoisonSystem>();
+Entity hero = world.CreateEntity(new Health(100), new Poisoned());
+
+// 回合开始前：复制所有实体、组件和单例。
+WorldSnapshot beforeTurn = world.Capture();
+
+for (int i = 0; i < 5; i++)
+{
+    world.Update();
+}
+
+Entity minion = world.CreateEntity(new Health(5));
+Console.WriteLine($"after the turn: hero {hero.Health.Value} hp, entities: {world.EntityCount}");
+
+// 撤销这个回合。快照之前的句柄重新有效；小兵的句柄已经失效。
+world.Restore(beforeTurn);
+Console.WriteLine($"restored: hero {hero.Health.Value} hp, entities: {world.EntityCount}");
+Console.WriteLine($"minion alive: {minion.IsAlive}");
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+after the turn: hero 50 hp, entities: 2
+restored: hero 100 hp, entities: 1
+minion alive: False
+```
+
+小兵是快照之后才建的，所以恢复时它被移除；即使之后有实体复用了它的 id，它的句柄也一直是失效的。
+
 ## 怎么用得快 [#how-to-use-it-fast]
 
 | 别这样 | 这样做 | 原因 |
@@ -130,8 +204,5 @@ capture 的分配就是新建的那个快照本身；`Capture(into)` 会复用�
   </Card>
   <Card title="动态缓冲" href="/zh/docs/guide/dynamic-buffers">
     快照会复制元素的列表。
-  </Card>
-  <Card title="示例程序" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/snapshots.cs">
-    `examples/snapshots.cs`，用 `dotnet run` 直接运行。
   </Card>
 </Cards>
