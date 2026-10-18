@@ -358,7 +358,8 @@ public class GeneratorTests
     {
         var system = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components +
             "public struct L; public partial class S : EcsSystem { [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { } }" +
-            "public class G<T> : EcsSystem where T : struct, IComponent { [ForEach] static void B(ref T t) { } } public class H : G<P>;", Parse);
+            "public class G<T> : EcsSystem where T : struct, IComponent { [ForEach] static void B(ref T t) { } } public class H : G<P>;" +
+            "public static class U { static void C(World w) { foreach (var i in w.Query<P>()) i.P.V++; } }", Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         var compilation = Compile().AddSyntaxTrees(system, other);
 
@@ -367,7 +368,7 @@ public class GeneratorTests
             CSharpSyntaxTree.ParseText("public class Unrelated { int x; }", Parse)));
 
         var steps = driver.GetRunResult().Results.SelectMany(r => r.TrackedSteps).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.SelectMany(p => p.Value));
-        foreach (var name in new[] { "ForEachMethods", "SystemUpdates", "ClosedSystems", "SystemCode", "Components", "ExtensionMembers", "BufferUses", "BufferElements", "SavedComponents", "SavedBuffers", "ModuleInitializers" })
+        foreach (var name in new[] { "ForEachMethods", "SystemUpdates", "ClosedSystems", "SystemCode", "Components", "ExtensionMembers", "BufferUses", "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers" })
             Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
                 Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged), name);
     }
@@ -695,6 +696,49 @@ public class GeneratorTests
         Assert.That(output.SyntaxTrees.Count(t => t.FilePath.EndsWith(".Buffer.g.cs")), Is.EqualTo(3)); // not int, not a component
         Assert.That(generated, Does.Not.Contain("WriteFriend").And.Not.Contain("GetOrAddFriend"));    // links: AddRelation only
         Assert.That(await Diagnose(Components, source), Is.Empty);                                    // no EECS012 on the members
+    }
+
+    [Test]
+    public async Task QueryItemsGetNamedMembers()
+    {
+        const string source = """
+            namespace Game { public struct P : IComponent { public int V; } }
+            public static class U
+            {
+                public static int Sum(World w)
+                {
+                    int sum = 0;
+                    foreach (var item in w.Query<P, Q>()) { item.P.V += item.Q.V; sum += item.P.V; }        // refs
+                    foreach (var item in w.Query<Owned>()) sum += item.Owned.Owner.Index;                     // read-only
+                    foreach (var item in w.Query<P, Game.P>()) sum += item.Component1.V + item.Component2.V;  // one name, two types
+                    foreach (var item in w.Query<P, Q>(QueryFilter.Create().With<T>())) sum += item.Q.V;       // the same shape
+                    return sum;
+                }
+            }
+            """;
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, source), out var output, out var diagnostics);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+        var files = output.SyntaxTrees.Where(t => t.FilePath.Contains("EasyEcs.QueryItem.")).Select(t => t.ToString()).ToArray();
+        Assert.That(files, Has.Length.EqualTo(2), "one file per shape; P with Game.P has no names to give");
+        string generated = string.Join("\n", files);
+        Assert.That(generated, Does.Contain("public ref global::P P").And.Contain("get => ref @this.Component2;")
+            .And.Contain("public ref readonly global::Owned Owned"));
+        Assert.That(await Diagnose(Components, source), Is.Empty);
+    }
+
+    [Test]
+    public void ANewQueryShapeLeavesTheOthersCached()
+    {
+        var first = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic static class U { static void A(World w) { foreach (var i in w.Query<P>()) i.P.V++; foreach (var i in w.Query<Q>()) i.Q.V++; } }", Parse);
+        var compilation = Compile(Components).AddSyntaxTrees(first);
+        var driver = Driver().RunGenerators(compilation);
+        driver = driver.RunGenerators(compilation.AddSyntaxTrees(
+            CSharpSyntaxTree.ParseText("using EasyEcs;\npublic static class V { static void B(World w) { foreach (var i in w.Query<P, Q>()) i.P.V++; } }", Parse)));
+
+        var reasons = Steps(driver)["QueryShapes"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(2));
+        Assert.That(reasons.Count(r => r == IncrementalStepRunReason.New), Is.EqualTo(1));
     }
 
     /// <summary>Framework references of the running test host (enough for the generated code to compile).</summary>

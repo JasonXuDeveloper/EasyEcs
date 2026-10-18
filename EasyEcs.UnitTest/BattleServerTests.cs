@@ -78,7 +78,7 @@ public class BattleServerTests
             Assert.That(server.Battle.Replicated, Is.EqualTo(sent));
             foreach (var item in server.World.Query<Health, Replica>())      // every client copy is current
             {
-                Assert.That(item.Component2.Health, Is.EqualTo(item.Component1.Value));
+                Assert.That(item.Replica.Health, Is.EqualTo(item.Health.Value));
                 Assert.That(item.Component2.Burning, Is.EqualTo(item.Entity.Has<Burning>()));  // fires lit and gone out
             }
         }

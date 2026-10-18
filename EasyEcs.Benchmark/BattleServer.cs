@@ -193,7 +193,7 @@ public class RespawnSystem : EcsSystem                                        //
         foreach (var item in world.Query<Position>(BattleServer.Zones[npc.Id.Index & 3]))  // a player of some zone:
         {                                                                     // one table to look at
             hunter = item.Entity;
-            spawn.At = item.Component1;
+            spawn.At = item.Position;
             break;
         }
 
@@ -544,7 +544,7 @@ public sealed class BattleServer : IDisposable
         float best = float.MaxValue;
         foreach (var item in World.Query<Position>(AlivePlayers))            // Position is not tracked: reads are free
         {
-            float dx = item.Component1.X - at.X, dy = item.Component1.Y - at.Y, distance = dx * dx + dy * dy;
+            float dx = item.Position.X - at.X, dy = item.Position.Y - at.Y, distance = dx * dx + dy * dy;
             if (distance < best) (best, nearest) = (distance, item.Entity);
         }
 

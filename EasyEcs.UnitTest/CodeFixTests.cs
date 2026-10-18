@@ -125,7 +125,7 @@ public class CodeFixTests
     [TestCase("EECS012", "public static class Use { public static int Count(DynamicBuffer<int> items) => items.Count;\n"
                          + "  public static int Call(Entity e) => Count(e.Read<DynamicBuffer<int>>()); }", "Take it by 'in' (read)")]
     [TestCase("EECS022", "file struct C : IComponent { public int V; } public class S : EcsSystem { [ForEach] static void A(ref C c) => c.V++; }")]
-    public async Task OffersNoFixThatBreaksTheCode(string id, string source, string? only = null)
+    public async Task OffersNoFixThatBreaksTheCode(string id, string source, string only = null)
     {
         var document = Document(Data + source);
         var actions = new List<CodeAction>();

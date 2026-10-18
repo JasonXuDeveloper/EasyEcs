@@ -27,6 +27,8 @@ namespace EasyEcs.Generator;
 /// <item>the same writers on a <c>Prefab</c>, returning it for chaining (<c>new Prefab().SetHealth(100).SetNpc()</c>),
 /// with <c>prefab.Health</c> (read-only), <c>HasHealth</c> and <c>IsDead</c>.</item>
 /// <item>indexed component <c>Zone : IIndexed&lt;int&gt;</c>: <c>world.ZoneIndex</c> (<c>Index&lt;Zone, int&gt;()</c>).</item>
+/// <item>each <c>world.Query&lt;Position, Velocity&gt;()</c> the code calls: <c>item.Position</c>, <c>item.Velocity</c> on its
+/// items (<c>Component1</c>, <c>Component2</c> by name; <c>ref readonly</c> for an indexed component).</item>
 /// <item>singleton <c>Clock</c>: <c>world.Clock</c> (<c>ref</c>, <c>GetSingleton</c>), <c>HasClock</c>,
 /// <c>GetOrAddClock()</c> (<c>ref</c>, not for tags), <c>SetClock(…)</c> (adds it if missing), <c>RemoveClock()</c>.</item>
 /// </list>
@@ -74,6 +76,22 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         context.RegisterSourceOutput(elements.Combine(supported), static (spc, pair) =>
         {
             if (pair.Right) spc.AddSource($"{pair.Left.HintName}.Buffer.g.cs", SourceText.From(EmitBuffer(pair.Left), Encoding.UTF8));
+        });
+
+        // Query<T1..Tn> calls: each shape's items get named refs (item.Position for item.Component1), one file per shape
+        // however many loops use it, each cached on its own.
+        var shapes = context.SyntaxProvider
+            .CreateSyntaxProvider(
+                static (node, _) => node is GenericNameSyntax { Identifier.ValueText: "Query", TypeArgumentList.Arguments.Count: > 0 and <= 9 },
+                static (ctx, ct) => QueryShape.Create(ctx.SemanticModel, (GenericNameSyntax)ctx.Node, ct))
+            .Where(static q => q is not null)
+            .Select(static (q, _) => q!)
+            .Collect()
+            .SelectMany(static (all, _) => all.Distinct())
+            .WithTrackingName("QueryShapes");
+        context.RegisterSourceOutput(shapes.Combine(supported), static (spc, pair) =>
+        {
+            if (pair.Right) spc.AddSource($"EasyEcs.QueryItem.{pair.Left.Hash}.g.cs", SourceText.From(EmitQueryItem(pair.Left), Encoding.UTF8));
         });
 
         // Saves name types: every component, singleton and DynamicBuffer<T> of the compilation is registered when the
@@ -413,6 +431,59 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             return new BufferModel(ns, fqn, name, Symbols.FlatName(type), Symbols.HintName(type), isPublic,
                 relation, new EquatableArray<Setter>(setters), world.GetMembers(name + "Index").Length > 0, new EquatableArray<string>(taken));
         }
+    }
+
+    /// <summary>
+    /// The components of a <c>world.Query&lt;T1..Tn&gt;()</c> call (closed, nameable from a generated file of this
+    /// assembly): what its items' named members return. <paramref name="Hash"/> names the file and the class.
+    /// </summary>
+    private sealed record QueryShape(string Hash, string Item, EquatableArray<QueryMember> Members)
+    {
+        public static QueryShape? Create(SemanticModel model, GenericNameSyntax name, CancellationToken token)
+        {
+            if (model.GetSymbolInfo(name, token).Symbol is not IMethodSymbol { ContainingType: { } world } query
+                || world.ToDisplayString() != "EasyEcs.World" || query.ReturnType is not INamedTypeSymbol enumerator)
+                return null;
+            var types = query.TypeArguments;
+            foreach (var t in types)
+                if (t is not INamedTypeSymbol named || ContainsTypeParameter(named) || !Symbols.IsNameable(named)
+                    || !model.Compilation.IsSymbolAccessibleWithin(named, model.Compilation.Assembly))
+                    return null;
+            // A name two components share, one the item already has (Entity, Component1..n) or a generic type's
+            // (DynamicBuffer<Loot>) stays unnamed.
+            var members = new List<QueryMember>();
+            for (int i = 0; i < types.Length; i++)
+            {
+                string member = types[i].Name;
+                if (types[i] is INamedTypeSymbol { IsGenericType: true } || types.Count(t => t.Name == member) > 1 || member == "Entity"
+                    || member.StartsWith("Component", System.StringComparison.Ordinal))
+                    continue;
+                members.Add(new QueryMember(ComponentModel.Escape(member), types[i].ToDisplayString(Symbols.Fqn), i + 1, Symbols.IsIndexed(types[i])));
+            }
+
+            if (members.Count == 0) return null;
+            string item = "global::EasyEcs.QueryItem<" + string.Join(", ", types.Select(t => t.ToDisplayString(Symbols.Fqn))) + ">";
+            uint hash = 2166136261;
+            foreach (char c in item) hash = (hash ^ c) * 16777619;
+            return new QueryShape(hash.ToString("x8"), item, new EquatableArray<QueryMember>(members.ToArray()));
+        }
+    }
+
+    /// <summary>A named member of a query item: <c>item.{Name}</c> is <c>item.Component{Position}</c>.</summary>
+    private sealed record QueryMember(string Name, string Type, int Position, bool ReadOnly);
+
+    private static string EmitQueryItem(QueryShape q)
+    {
+        var sb = new StringBuilder("// <auto-generated/>\n#nullable enable\nnamespace EasyEcs;\n\n");
+        sb.Append($"[global::System.CodeDom.Compiler.GeneratedCode(\"{Symbols.GeneratorName}\", \"{Version}\")]\n");
+        sb.Append($"internal static class QueryItemExtensions_{q.Hash}\n{{\n    extension({q.Item} @this)\n    {{\n");
+        foreach (var m in q.Members)
+            sb.Append(m.ReadOnly
+                    ? $"        /// <summary>The row's <see cref=\"{m.Type}\"/> (<c>Component{m.Position}</c>), read-only: it is indexed, so it is written with <c>Set</c>.</summary>\n" +
+                      $"        public ref readonly {m.Type} {m.Name}\n        {{\n    {Inline}            get => ref @this.Component{m.Position};\n        }}\n"
+                    : $"        /// <summary>The row's <see cref=\"{m.Type}\"/> (<c>Component{m.Position}</c>), by <c>ref</c>.</summary>\n" +
+                      $"        public ref {m.Type} {m.Name}\n        {{\n    {Inline}            get => ref @this.Component{m.Position};\n        }}\n");
+        return sb.Append("    }\n}\n").ToString();
     }
 
     /// <summary>One way to build the value: the generated method's parameters and the expression it stores.</summary>
