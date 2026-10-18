@@ -11,7 +11,7 @@ using static EasyEcs.Generator.Code;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// Generates the plumbing of partial <c>EcsSystem</c>s: one struct job per <c>[ForEach]</c> method and a
+/// Generates the plumbing of <c>EcsSystem</c>s (no partial needed): one struct job per <c>[ForEach]</c> method and a
 /// <c>GeneratedUpdate</c> override running them, and a <c>GeneratedAccess</c> override declaring the data they read
 /// and write (the parallel scheduler batches systems by it).
 /// Incremental-generator rules followed: <c>ForAttributeWithMetadataName</c> / cheap syntax predicates as entry points,
