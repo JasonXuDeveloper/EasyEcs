@@ -105,11 +105,11 @@ public class SteeringSystem : EcsSystem                                       //
 {
     protected override void OnCreate()                                        // the system sets up the data it steers by
     {
-        ref var waypoints = ref World.GetOrAddSingleton<Waypoints>();
+        ref var waypoints = ref World.GetOrAddWaypoints();
         for (int i = 0; i < Waypoints.Count; i++) waypoints.Points[i] = new Position(512 + i * 400, 512 + i * 1777 % 3000);
     }
 
-    protected override void OnDestroy() => World.RemoveSingleton<Waypoints>();
+    protected override void OnDestroy() => World.RemoveWaypoints();
 
     [ForEach(Parallel = true), With<Npc>, Without<Dead>, Without<Frozen>]
     static void Steer(in Position p, ref Velocity v, in Waypoints waypoints)
@@ -304,7 +304,7 @@ public class RegenerationSystem : EcsSystem
 [UpdateAfter<RegenerationSystem>]                                             // registered first, runs last
 public sealed class ClockSystem : EcsSystem
 {
-    protected override void OnCreate() => World.GetOrAddSingleton<Battle>();
+    protected override void OnCreate() => World.GetOrAddBattle();
     protected override void OnUpdate() => World.Battle.Tick++;
 }
 
