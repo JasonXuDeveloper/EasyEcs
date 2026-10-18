@@ -16,9 +16,11 @@ var world = new World(new WorldOptions { InitialEntityCapacity = 4096, MeasureSy
 
 // Setup: singletons first, then systems in their order.
 world.SetSimulation(1f / TickRate, 0);
+// The prefabs live in a singleton, so systems read them as a parameter (in Prefabs prefabs) and instantiate
+// prefabs.Player or prefabs.Bullet; the named arguments are the fields of Prefabs.
 world.SetPrefabs(
-    new Prefab().SetPosition(0, 0).SetVelocity(0, 0),                // a player, before its client id and spawn point
-    new Prefab().SetPosition(0, 0).SetVelocity(0, 0).SetLifetime(TickRate));   // a bullet lives one second
+    Player: new Prefab().SetPosition(0, 0).SetVelocity(0, 0),        // JoinSystem adds the client id and spawn point
+    Bullet: new Prefab().SetPosition(0, 0).SetVelocity(0, 0).SetLifetime(TickRate));   // FireSystem aims it; lives 1 s
 world.SetOutbox(new ArrayBufferWriter<byte>(64 * 1024), 0);
 world.AddSingleton<Stats>();
 world.AddSystem(new ReceiveInput(mailbox));
