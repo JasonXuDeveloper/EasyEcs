@@ -1,7 +1,7 @@
 name: Release
 
 # Run manually: Actions -> Release -> Run workflow (on master), enter the version (e.g. 4.0.0 or 4.1.0-preview.1).
-#   tag:     bump <Version> in Directory.Build.props and the examples' `#:package` lines, build and test it, commit
+#   tag:     bump <Version> in Directory.Build.props, build and test it, commit
 #            "Bump to vX.Y.Z", tag vX.Y.Z, push.
 #   publish: from the tag, pack EasyEcs and EasyEcs.Templates and push them to NuGet (Trusted Publishing: a short-lived
 #            key from this workflow's OIDC token, no stored secret), then create the GitHub release: install line, the
@@ -51,7 +51,6 @@ jobs:
         run: |
           sed -i "s|<Version>[^<]*</Version>|<Version>$VERSION</Version>|" Directory.Build.props
           grep -q "<Version>$VERSION</Version>" Directory.Build.props
-          sed -i "1s|^#:package EasyEcs@.*|#:package EasyEcs@$VERSION|" examples/*.cs   # the version users copy
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -66,8 +65,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [ -n "$(git status --porcelain -- Directory.Build.props examples)" ]; then
-            git commit -m "Bump to v$VERSION" -- Directory.Build.props examples
+          if [ -n "$(git status --porcelain -- Directory.Build.props)" ]; then
+            git commit -m "Bump to v$VERSION" -- Directory.Build.props
           fi
           git tag "v$VERSION"
           git push origin HEAD:master "v$VERSION"
