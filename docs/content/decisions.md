@@ -350,9 +350,9 @@ scan; a `Removed<T>` pass skips words by their removal bound and blocks by their
 `Changed`, 10 written, 609-650 -> 514 ns; ChangeTrackingComparison 612-636 -> 497-573 ns. BattleServer,
 WorldSimulation and the 1,000-written cases are unchanged.
 
-**What remains.** Friflo reports 10 removals in 0.67 μs: it collects the removed ids in a callback as they happen, so
+**What remains.** Friflo reports 10 removals in 0.70 μs: it collects the removed ids in a callback as they happen, so
 reading them costs nothing extra. EasyEcs keeps removals as data (D1): its pass costs about 90 ns plus about 30 ns
-per word with a removal, the loads of the summaries and rows. At 1,000 removals EasyEcs is ahead (66 against 73 μs).
+per word with a removal, the loads of the summaries and rows. At 1,000 removals the two are even (71 against 73 μs).
 
 **Considered.** Interleaving a word's summaries with its block's (no gain: the summaries of 100,000 rows fit in L2);
 noting the word in a separate helper called per row (slower: 600 μs per query tick); finding the column and word of a
