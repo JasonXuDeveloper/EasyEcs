@@ -6,7 +6,7 @@ namespace EasyEcs;
 public sealed class WorldOptions
 {
     /// <summary>
-    /// Run systems of one priority at the same time (thread pool) when their generated access does not conflict
+    /// Run systems with no order between them at the same time (thread pool) when their generated access does not conflict
     /// (<see cref="SystemAccess"/>). Default false: one owner thread per world is the recommended model.
     /// </summary>
     public bool ParallelSystems { get; init; }

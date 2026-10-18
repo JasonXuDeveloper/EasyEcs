@@ -2,7 +2,7 @@ namespace EasyEcs;
 
 /// <summary>
 /// The data a system reads and writes, declared once when the system is added. With
-/// <see cref="WorldOptions.ParallelSystems"/>, systems of one priority whose access does not conflict run at once:
+/// <see cref="WorldOptions.ParallelSystems"/>, systems with no order between them whose access does not conflict run at once:
 /// two systems conflict when one writes a component or singleton the other reads or writes, or when either
 /// <see cref="RunsAlone">runs alone</see>.
 /// <para>

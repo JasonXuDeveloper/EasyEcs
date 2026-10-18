@@ -225,7 +225,8 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Systems of one group sorted by priority (stable), with their parallel stages. Mutated under
+    /// Systems of one group in execution order (registration order as [UpdateBefore] / [UpdateAfter] reorder it), with
+    /// their parallel stages. Mutated under
     /// the structural gate by publishing new arrays (copy-on-write), so a running update never sees a torn list.
     /// </summary>
     internal sealed class SystemSchedule
