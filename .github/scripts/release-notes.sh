@@ -15,7 +15,7 @@ section=$(awk -v v="$version" '
   $0 ~ "^## " v "( |$)" { on = 1; next }
   on && /^## /          { exit }
   on                    { print }
-' docs/content/changelog.mdx | sed -E "s#\]\(/#](${site}/#g")
+' docs/content/changelog.mdx | sed -E -e "s#\]\(/#](${site}/#g" -e 's/ \[#[a-z0-9-]+\]$//')
 if [ -n "$(tr -d '[:space:]' <<<"$section")" ]; then
   echo "## Highlights"
   echo "$section"
