@@ -161,6 +161,9 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
     // EECS002's property for its code fix (EasyEcs.CodeFixes): a component or singleton taken by value.
     public const string ByValue = "ByValue";
 
+    // EECS012's property for its code fix: the parameter's method shares its signature (override, interface).
+    public const string SharedSignature = "SharedSignature";
+
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
         MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
@@ -353,7 +356,10 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         };
         if (Symbols.ReadOnlyRoot(target) is { } parameter)
             context.ReportDiagnostic(Diagnostic.Create(ReadOnlyWrite, context.Operation.Syntax.GetLocation(),
-                parameter.Locations, parameter.ContainingSymbol.Name, parameter.Name)); // the parameter: its code fix
+                // the parameter: its code fix, unless 'ref' would write a singleton from several threads (EECS010)
+                Symbols.IsParallel((IMethodSymbol)parameter.ContainingSymbol) && Symbols.Classify(parameter) == Symbols.ParamKind.Singleton
+                    ? [] : parameter.Locations,
+                parameter.ContainingSymbol.Name, parameter.Name));
         if (Symbols.IndexedRoot(target) is { } indexed)
             context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, context.Operation.Syntax.GetLocation(), indexed.Name,
                 "this writes it through a ref"));
@@ -374,15 +380,17 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
                 break;
             case IMethodSymbol method when method.AssociatedSymbol == null:
                 if (method.RefKind == RefKind.None) Report(method.ReturnType, method, method.Locations.FirstOrDefault());
+                // an override or an interface's method shares its signature: changing one parameter breaks the others
+                var properties = Symbols.SharesSignature(method) ? ImmutableDictionary<string, string?>.Empty.Add(SharedSignature, "") : null;
                 foreach (var p in method.Parameters)
-                    if (p.RefKind == RefKind.None) Report(p.Type, p, p.Locations.FirstOrDefault());
+                    if (p.RefKind == RefKind.None) Report(p.Type, p, p.Locations.FirstOrDefault(), properties);
                 break;
         }
 
-        void Report(ITypeSymbol type, ISymbol holder, Location? location)
+        void Report(ITypeSymbol type, ISymbol holder, Location? location, ImmutableDictionary<string, string?>? properties = null)
         {
             if (Symbols.BufferElement(type) is { } element)
-                context.ReportDiagnostic(Diagnostic.Create(BufferCopy, location, holder.Name, element.ToDisplayString()));
+                context.ReportDiagnostic(Diagnostic.Create(BufferCopy, location, properties, holder.Name, element.ToDisplayString()));
         }
     }
 
@@ -550,7 +558,8 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (method.IsGenericMethod && !outside)
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, method.Name));
         if (Symbols.Unnameable(method) is { } unnameable)
-            context.ReportDiagnostic(Diagnostic.Create(Unnameable, location, unnameable.Locations.Where(l => l.IsInSource), // the type: its code fix
+            context.ReportDiagnostic(Diagnostic.Create(Unnameable, location, // the type its code fix makes internal, with its containers
+                Symbols.Hidden(unnameable)?.Locations.Where(l => l.IsInSource) ?? [],
                 method.Name, unnameable.ToDisplayString()));
 
         var removed = new System.Collections.Generic.List<ITypeSymbol>();

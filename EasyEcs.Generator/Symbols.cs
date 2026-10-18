@@ -196,6 +196,39 @@ internal static class Symbols
     }
 
     /// <summary>
+    /// The innermost type in <paramref name="type"/> (itself, an element, a type argument) that a private or protected
+    /// declaration hides, or null: what EECS022's code fix makes internal, with every hidden type that contains it. A
+    /// file-local type has no such fix.
+    /// </summary>
+    public static INamedTypeSymbol? Hidden(ITypeSymbol type)
+    {
+        switch (type)
+        {
+            case IArrayTypeSymbol array: return Hidden(array.ElementType);
+            case INamedTypeSymbol named:
+                for (var t = named; t != null; t = t.ContainingType)
+                    if (t.IsFileLocal) return null;
+                if (!IsVisible(named)) return named;
+                foreach (var argument in named.TypeArguments)
+                    if (Hidden(argument) is { } hidden) return hidden;
+                return null;
+            default: return null;
+        }
+    }
+
+    /// <summary>An override, a virtual or abstract method, or a member or implementation of an interface: its signature is shared.</summary>
+    public static bool SharesSignature(IMethodSymbol method)
+    {
+        if (method.IsOverride || method.IsVirtual || method.IsAbstract || method.ExplicitInterfaceImplementations.Length > 0
+            || method.ContainingType.TypeKind == TypeKind.Interface) return true;
+        foreach (var contract in method.ContainingType.AllInterfaces)
+            foreach (var member in contract.GetMembers(method.Name))
+                if (SymbolEqualityComparer.Default.Equals(method.ContainingType.FindImplementationForInterfaceMember(member), method))
+                    return true;
+        return false;
+    }
+
+    /// <summary>
     /// The first parameter or return type of a [ForEach] method that generated code outside its type cannot name (a
     /// private nested component), or null. A runner's own type must be nameable too: its entry point extends it.
     /// </summary>
