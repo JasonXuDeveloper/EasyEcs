@@ -593,6 +593,57 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     private static ulong At(ulong[] present, int word) => Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(present), word);
 
     /// <summary>
+    /// The first word at or after <paramref name="word"/> (below <paramref name="words"/>) that may have a passing row,
+    /// skipping words with none 4 per compare when one presence column decides (see <see cref="Decider"/>); otherwise
+    /// <paramref name="word"/>. Returns <paramref name="words"/> when none is left.
+    /// </summary>
+    public int NextPassing(Archetype archetype, int word, int words)
+    {
+        if (word >= words || Decider(archetype, out bool excluded) is not { } bits) return word;
+        int found = bits.AsSpan(word, words - word).IndexOfAnyExcept(excluded ? ulong.MaxValue : 0);
+        return found < 0 ? words : word + found;
+    }
+
+    /// <summary>
+    /// The first word at or after <paramref name="word"/> (below <paramref name="words"/>, whole words of rows) whose
+    /// rows do not all pass, 4 words per compare when one presence column decides (see <see cref="Decider"/>);
+    /// otherwise <paramref name="word"/>. Returns <paramref name="words"/> when all pass.
+    /// </summary>
+    public int WholeEnd(Archetype archetype, int word, int words)
+    {
+        if (word >= words || Decider(archetype, out bool excluded) is not { } bits) return word;
+        int found = bits.AsSpan(word, words - word).IndexOfAnyExcept(excluded ? 0 : ulong.MaxValue);
+        return found < 0 ? words : word + found;
+    }
+
+    /// <summary>
+    /// The presence bits that alone decide which rows pass: the plan has no WithAny or Changed column and exactly one of
+    /// its required or excluded columns has bits (the others are held by every row); null otherwise (cold: per run).
+    /// </summary>
+    private ulong[] Decider(Archetype archetype, out bool excluded)
+    {
+        excluded = false;
+        var plan = _plan;
+        if (plan.AnyOf.Length != 0 || plan.Changed.Length != 0) return null;
+        ulong[] decider = null;
+        foreach (short column in plan.Require)
+        {
+            if (archetype.Bits(column) is not { } bits) continue;
+            if (decider != null) return null;
+            decider = bits;
+        }
+
+        foreach (short column in plan.Exclude)
+        {
+            // Without bits every row has it and none passes (the caller's mode is None then).
+            if (decider != null || archetype.Bits(column) is not { } bits) return null;
+            (decider, excluded) = (bits, true);
+        }
+
+        return decider;
+    }
+
+    /// <summary>
     /// The first word at or after <paramref name="word"/> (below <paramref name="words"/>) that may have passing rows:
     /// for a <c>Changed</c> filter, blocks of 64 words, then words, whose first changed column was not written since the
     /// pass's tick are skipped (words 4 per compare); otherwise <paramref name="word"/>. Returns <paramref name="words"/>
@@ -789,7 +840,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
             ulong bits = Word(archetype, w) & RowMask(w, count) & (ulong.MaxValue << start); // shift is mod 64
             if (bits == 0)
             {
-                start = (w + 1) << 6;
+                start = NextPassing(archetype, w + 1, (count + 63) >> 6) << 6;
                 continue;
             }
 
@@ -810,7 +861,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
                 break;
             }
 
-            end = (w + 1) << 6;
+            end = WholeEnd(archetype, w + 1, count >> 6) << 6; // the whole words that follow
         }
 
         end = Math.Min(end, count);

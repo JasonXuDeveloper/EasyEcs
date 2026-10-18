@@ -12,7 +12,7 @@ namespace EasyEcs;
 /// entity's row into the table of its new archetype (<see cref="Transition"/>).
 /// <br/>
 /// Outside passes a row that loses its entity is filled by the last row at once (tables stay dense). While a pass
-/// iterates, it becomes a tombstone (id -1) instead, so the pass never sees rows shift under it; the world closes those
+/// iterates, it becomes a tombstone (a negative id, the complement of the entity's) instead, so the pass never sees rows shift under it; the world closes those
 /// tombstones (<see cref="FillHoles"/>) when the last pass ends. The slot of each entity is tracked by the owning
 /// <see cref="World"/> (entity id -> slot).
 /// <br/>
@@ -798,7 +798,10 @@ internal sealed class Archetype
         ref var rows = ref MemoryMarshal.GetArrayDataReference(Slots);
         if (inPass || Count != AliveCount + 1)
         {
-            Unsafe.Add(ref rows, slot) = new EntityId(Tombstone, Unsafe.Add(ref rows, slot).Version); // the version stays: a pass compares it
+            // ~id: the pass that removed it reads the id back (its loops keep no id across the job); the version stays:
+            // a pass compares it.
+            ref var row = ref Unsafe.Add(ref rows, slot);
+            row = new EntityId(~row.Index, row.Version);
             if (_holeCount == _holes.Length) Array.Resize(ref _holes, Math.Max(16, _holes.Length * 2));
             _holes[_holeCount++] = slot; // a tombstone stays one until FillHoles (new rows go to the end)
             if (Dirty) return false;

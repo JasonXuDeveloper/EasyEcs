@@ -288,7 +288,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
 
                 {{ForEach(n, "ForEach", "IForEach", "", "", "the components")}}
-                {{ForEach(n, "ForEachEntity", "IForEachEntity", "new Entity(this, id, idp.Version)", "new Entity(this, ids)", "the entity handle")}}
+                {{ForEach(n, "ForEachEntity", "IForEachEntity", "new Entity(this, idp)", "new Entity(this, ids)", "the entity handle")}}
                     /// <summary>
                     /// Run <paramref name="job"/> over every entity having all of <c>{{tps}}</c> (and matching
                     /// <paramref name="filter"/>), one run of consecutive rows at a time: a dense archetype is a single
@@ -533,7 +533,10 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     where TJob : struct, {{job}}<{{tps}}>, allows ref struct
                 {
                     // The loop walks refs up to an end ref: no row index or count stays live across the job (the row
-                    // is computed only to stamp a tracked write), so the job's own values keep more registers.
+                    // is computed only to stamp a tracked write), so the job's own values keep more registers. The
+                    // version seen stays in memory (Volatile.Read takes its address): one load per row, while held in
+                    // a register it pushes a column ref out, which is then stored and reloaded every row, a dependency
+                    // chain through memory (a structural job's call leaves too few callee-saved registers for all).
                     int seen = StorageVersion;
                     ref EntityId slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
                     ref EntityId idp = ref Unsafe.Add(ref slots, start);
@@ -541,15 +544,14 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{startAt}}
                     for (; Unsafe.IsAddressLessThan(ref idp, ref end); idp = ref Unsafe.Add(ref idp, 1), {{advance}})
                     {
-                        int id = idp.Index;
-                        if (id < 0) continue; // tombstone
+                        if (idp.Index < 0) continue; // tombstone
 
             {{StampRow(n, "            ", "(int)(Unsafe.ByteOffset(ref slots, ref idp) / Unsafe.SizeOf<EntityId>())")}}
                         {{execute}}
 
-                        if (seen != StorageVersion)
+                        if (Volatile.Read(ref seen) != StorageVersion)
                         {
-                            _stop = (long)id << 32 | (uint)(Unsafe.ByteOffset(ref idp, ref end) / Unsafe.SizeOf<EntityId>() - 1);
+                            _stop = (long)VisitedId(idp) << 32 | (uint)(Unsafe.ByteOffset(ref idp, ref end) / Unsafe.SizeOf<EntityId>() - 1);
                             return job;
                         }
                     }
@@ -574,6 +576,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     // run of a word with failing rows, a loop by bit would walk a full word bit by bit).
                     int words = (count + 63) >> 6;
                     int run = -1; // the first row of the whole words not run yet
+                    int ahead = 4; // whole words a run may span, doubled after each run without a structural change
                     ulong from = ulong.MaxValue << start; // the first word's rows before start fail (the shift is mod 64)
                     for (int w = start >> 6; w < words; w++, from = ulong.MaxValue)
                     {
@@ -581,12 +584,17 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         if (pass == from && (w + 1) << 6 <= count)
                         {
                             if (run < 0) run = (w << 6) + BitOperations.TrailingZeroCount(from);
-                            // At most 4 words ahead: a structural change ends the run, and the pass then comes back here
+                            // The whole words that follow, at once when one presence column decides (else none).
+                            w = rows.WholeEnd(archetype, w + 1, Math.Min(count >> 6, (run >> 6) + ahead)) - 1;
+                            // A bounded lookahead: a structural change ends the run, and the pass then comes back here
                             // and finds its words again (unbounded, a table of passing rows would be scanned per change).
-                            if ((w + 1) - (run >> 6) < 4) continue;
+                            // Doubling from 4 words keeps the words scanned again within twice the rows run since the
+                            // last change, while a long stretch without changes takes few runs.
+                            if ((w + 1) - (run >> 6) < ahead) continue;
                             job = {{name}}Live<{{tps}}, TJob>(job, archetype, run, (w + 1) << 6, {{bits}});
                             if (Stopped((w + 1) << 6, count)) return job;
                             run = -1;
+                            ahead = Math.Min(ahead * 2, 1024);
                             continue;
                         }
 
@@ -598,7 +606,12 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         }
 
                         pass &= RowFilter.RowMask(w, count);
-                        if (pass == 0) continue;
+                        if (pass == 0)
+                        {
+                            w = rows.NextPassing(archetype, w + 1, words) - 1; // words without passing rows
+                            continue;
+                        }
+
                         job = {{name}}Bits<{{tps}}, TJob>(job, archetype, w, pass, count, {{bits}});
                         if (_stop >= 0) return job;
                     }
@@ -629,16 +642,15 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     {
                         int row = (w << 6) + BitOperations.TrailingZeroCount(pass);
                         ref EntityId idp = ref Unsafe.Add(ref slots, row);
-                        int id = idp.Index;
-                        if (id < 0) continue; // tombstone
+                        if (idp.Index < 0) continue; // tombstone
             {{Lines(n, i => $"            ref T{i} r{i} = ref Unsafe.Add(ref c{i}, row);")}}
 
             {{StampRow(n, "        ", "row")}}
                         {{execute}}
 
-                        if (seen != StorageVersion)
+                        if (Volatile.Read(ref seen) != StorageVersion)
                         {
-                            _stop = (long)id << 32 | (uint)(count - 1 - row);
+                            _stop = (long)VisitedId(idp) << 32 | (uint)(count - 1 - row);
                             return job;
                         }
                     }

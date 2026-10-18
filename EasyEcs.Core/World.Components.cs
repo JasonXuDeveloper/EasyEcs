@@ -18,6 +18,14 @@ public sealed partial class World
     internal long _stop; // where the last structural row loop stopped (see the generated ForEach loops)
 
     /// <summary>
+    /// The id of the entity a structural row loop just visited at <paramref name="row"/>, read back after its job: the
+    /// row is its own, or the tombstone it left (the id's complement, see <see cref="Archetype.Remove"/>), since rows do
+    /// not shift during a pass. The loops keep no id across the job, so the job's values keep more registers.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int VisitedId(in EntityId row) => row.Index ^ (row.Index >> 31);
+
+    /// <summary>
     /// Whether a lean structural row loop over rows up to <paramref name="end"/> stopped at a structural change; if so,
     /// re-counts the rows left in <see cref="_stop"/> from <paramref name="count"/>, the end of the caller's rows.
     /// </summary>
