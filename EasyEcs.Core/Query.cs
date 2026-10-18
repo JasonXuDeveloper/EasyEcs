@@ -451,6 +451,12 @@ internal sealed class RowPlan(short[] require, short[] exclude, short[] anyOf, s
     public readonly bool LeadRemoved = removed < changed.Length;
 }
 
+/// <summary>The row loops of a pass that may change structure are compiled for a table that may have tombstones...</summary>
+internal struct Tombstones;
+
+/// <summary>...and for one that has none (its rows test no id): the typeof tests on them are JIT-time constants.</summary>
+internal struct NoTombstones;
+
 /// <summary>
 /// The row test of one pass: a table's <see cref="RowPlan"/> and the change tick its <see cref="RowPlan.Changed"/>
 /// columns must reach (a pass value: plans are shared by every pass of the query).

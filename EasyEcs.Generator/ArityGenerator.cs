@@ -503,7 +503,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             for (int at = 0; at < count && mode != RowFilter.None;)
                             {
                                 job = mode == RowFilter.All
-                                    ? {{name}}Live<{{tps}}, TJob>(job, archetype, at, count, {{bits}})
+                                    ? (archetype.Count == archetype.AliveCount ? {{name}}Live<{{tps}}, TJob, NoTombstones>(job, archetype, at, count, {{bits}}) : {{name}}Live<{{tps}}, TJob, Tombstones>(job, archetype, at, count, {{bits}}))
                                     : {{name}}LiveTested<{{tps}}, TJob>(job, archetype, rows, at, count, {{bits}});
                                 long stop = _stop;
                                 if (stop < 0) break; // the rows ran out without a structural change
@@ -528,10 +528,13 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 /// </summary>
                 [MethodImpl(MethodImplOptions.NoInlining)] // per table or run: kept out of the caller, which profile-guided
                 // inlining would otherwise grow until the loop's refs spill to the stack
-                private TJob {{name}}Live<{{tps}}, TJob>(TJob job, Archetype archetype, int start, int count, {{ushorts}})
+                private TJob {{name}}Live<{{tps}}, TJob, TRows>(TJob job, Archetype archetype, int start, int count, {{ushorts}})
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>, allows ref struct
+                    where TRows : struct
                 {
+                    // TRows is NoTombstones when the table had none at the call: one appears only with a structural
+                    // change (a destroy or a move bumps StorageVersion), which ends the loop, so it tests no row.
                     // The loop walks refs up to an end ref: no row index or count stays live across the job (the row
                     // is computed only to stamp a tracked write), so the job's own values keep more registers. The
                     // version seen stays in memory (Volatile.Read takes its address): one load per row, while held in
@@ -544,7 +547,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{startAt}}
                     for (; Unsafe.IsAddressLessThan(ref idp, ref end); idp = ref Unsafe.Add(ref idp, 1), {{advance}})
                     {
-                        if (idp.Index < 0) continue; // tombstone
+                        if (typeof(TRows) == typeof(Tombstones) && idp.Index < 0) continue; // a JIT-time test
 
             {{StampRow(n, "            ", "(int)(Unsafe.ByteOffset(ref slots, ref idp) / Unsafe.SizeOf<EntityId>())")}}
                         {{execute}}
@@ -591,7 +594,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             // Doubling from 4 words keeps the words scanned again within twice the rows run since the
                             // last change, while a long stretch without changes takes few runs.
                             if ((w + 1) - (run >> 6) < ahead) continue;
-                            job = {{name}}Live<{{tps}}, TJob>(job, archetype, run, (w + 1) << 6, {{bits}});
+                            job = (archetype.Count == archetype.AliveCount ? {{name}}Live<{{tps}}, TJob, NoTombstones>(job, archetype, run, (w + 1) << 6, {{bits}}) : {{name}}Live<{{tps}}, TJob, Tombstones>(job, archetype, run, (w + 1) << 6, {{bits}}));
                             if (Stopped((w + 1) << 6, count)) return job;
                             run = -1;
                             ahead = Math.Min(ahead * 2, 1024);
@@ -600,7 +603,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                         if (run >= 0)
                         {
-                            job = {{name}}Live<{{tps}}, TJob>(job, archetype, run, w << 6, {{bits}});
+                            job = (archetype.Count == archetype.AliveCount ? {{name}}Live<{{tps}}, TJob, NoTombstones>(job, archetype, run, w << 6, {{bits}}) : {{name}}Live<{{tps}}, TJob, Tombstones>(job, archetype, run, w << 6, {{bits}}));
                             if (Stopped(w << 6, count)) return job;
                             run = -1;
                         }
@@ -618,7 +621,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                     if (run >= 0)
                     {
-                        job = {{name}}Live<{{tps}}, TJob>(job, archetype, run, words << 6, {{bits}}); // whole words: <= count
+                        job = (archetype.Count == archetype.AliveCount ? {{name}}Live<{{tps}}, TJob, NoTombstones>(job, archetype, run, words << 6, {{bits}}) : {{name}}Live<{{tps}}, TJob, Tombstones>(job, archetype, run, words << 6, {{bits}})); // whole words: <= count
                         if (Stopped(words << 6, count)) return job;
                     }
 
