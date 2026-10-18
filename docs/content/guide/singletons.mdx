@@ -1,0 +1,185 @@
+---
+title: Singletons
+seoTitle: "ECS singletons in C#: per-world state for clocks, configuration and grids"
+description: "World-level state in EasyEcs: one struct value per world for the clock, configuration, counters or a grid, with [ForEach] parameters and SingletonRef handles."
+icon: Globe
+---
+
+Some state belongs to the whole world, not to an entity: the tick clock, the match configuration, a score, a spatial
+grid. A singleton is a struct that implements `ISingletonComponent`, with exactly one value per world. It is where
+world-level state goes, since systems keep none ([EECS007](/en/docs/guide/analyzer#eecs007)), and because it lives in
+the world, two worlds on two threads never share it.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  World-level state that systems read or write: the clock and delta time, configuration loaded at startup, counters
+  and totals, a spatial grid or a lookup table, the queue of input a system drains each tick.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  Static fields: every world in the process would share them. Per-entity data: that is a component. A list of things
+  that each have their own state (players in a match): those are entities with a tag, which queries and indexes can
+  select.
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### Declare it [#declare]
+
+```csharp
+public record struct Clock(long Tick, float DeltaTime) : ISingletonComponent;
+public record struct Score(int Deaths) : ISingletonComponent;
+```
+
+</Step>
+<Step>
+
+### Add, read and write [#add-read-write]
+
+```csharp
+var world = new World();
+world.AddSingleton<Clock>() = new Clock(0, 1f / 30);     // add (or reset to default); returns a ref
+world.Clock.Tick++;                                       // generated: a ref, throws if not added
+ref var score = ref world.GetOrAddScore();                // adds a default value if missing
+score.Deaths++;
+```
+
+</Step>
+<Step>
+
+### Take it in a system [#in-systems]
+
+A `[ForEach]` method takes a singleton as a `ref` or `in` parameter. It is resolved once per pass (and added if
+missing), not once per entity.
+
+```csharp
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health hp, ref Score score)
+    {
+        if (hp.Value > 0) return;
+        unit.SetDead();
+        score.Deaths++;
+    }
+}
+
+public class ClockSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.Clock.Tick++;   // in OnUpdate: through the system's World
+}
+```
+
+</Step>
+</Steps>
+
+### The API [#api]
+
+| Call | Generated member | Effect |
+| --- | --- | --- |
+| `ref T AddSingleton<T>()` | | Adds it, or resets an existing one to `default` in place |
+| `ref T GetSingleton<T>()` | `world.Clock` | A ref; throws if it was not added |
+| `ref T GetOrAddSingleton<T>()` | `world.GetOrAddClock()` | A ref, adding `default` first if missing |
+| `GetOrAddSingleton<T>() = value` | `world.SetClock(tick, deltaTime)` | Sets the value, adding it if missing |
+| `bool HasSingleton<T>()` | `world.HasClock` | Whether it exists |
+| `bool TryGetSingleton<T>(out T)` | | A copy, if present |
+| `bool RemoveSingleton<T>()` | `world.RemoveClock()` | Removes it; false if it was not added |
+| `SingletonRef<T> SingletonRef<T>()` | | A [stable handle](#stable-handles), adding it if missing |
+
+```csharp
+world.SetScore(0);                                        // generated from the record's constructor
+bool has = world.HasClock;
+if (world.TryGetSingleton<Clock>(out var copy)) Console.WriteLine(copy.Tick);
+world.RemoveScore();
+```
+
+The generated members follow the rules of [generated members](/en/docs/guide/entities-and-components#generated-members):
+`SetX` has one overload per public constructor, and a singleton without fields gets no `GetOrAddX`.
+
+### Stable handles [#stable-handles]
+
+A singleton's storage never moves, unlike component rows. `world.SingletonRef<T>()` returns a `SingletonRef<T>`
+(adding the singleton if missing) whose `Value` is a `ref T` with no lookup at all, valid for as long as the singleton
+exists. Take it once at setup and keep it, in a field of your host or a local of a loop.
+
+```csharp
+var clock = world.SingletonRef<Clock>();     // once, at setup
+clock.Value.Tick++;                          // later: a ref, no lookup
+```
+
+- `AddSingleton<T>()` on an existing singleton resets it in place, so the handle sees the reset value.
+- `RemoveSingleton<T>()` detaches it: writes through the old handle no longer reach the world, also after the
+  singleton is added again. Take a new handle then.
+- [Snapshots](/en/docs/guide/snapshots) restore singletons into the same storage, so handles keep working after a
+  `Restore`.
+- Generated `[ForEach]` jobs resolve each singleton parameter once per pass; parallel jobs, which are copied to
+  other threads, carry a `SingletonRef<T>`.
+
+### Singletons and threads [#threads]
+
+- A singleton belongs to its world, so one world per thread shares nothing.
+- With `WorldOptions.ParallelSystems`, a system that takes a singleton by `ref` writes it: it never shares a stage
+  with another system that reads or writes the same singleton. Take it by `in` when the system only reads it.
+- A `[ForEach(Parallel = true)]` method takes singletons only by `in`: every chunk would race on a `ref`
+  ([EECS010](/en/docs/guide/analyzer#eecs010)).
+- A singleton that holds a collection (a grid of cells, a queue) and is changed through an `in` parameter is scheduled
+  as a read: [EECS011](/en/docs/guide/analyzer#eecs011) asks for `ref`.
+
+## How to use it fast [#how-to-use-it-fast]
+
+| Instead of | Do | Why |
+| --- | --- | --- |
+| `GetSingleton<T>()` per entity inside a loop | A singleton parameter of the `[ForEach]` method | Resolved once per pass |
+| A lookup on every call from host code | A `SingletonRef<T>` kept from setup | No lookup |
+| `ref` for a singleton the system only reads | `in` | Lets the system share a parallel stage |
+| A static field | A singleton | Per world, saved and snapshotted with it |
+
+1,000 singleton reads and writes through `GetSingleton<T>()`, next to 1,000 component writes through entity handles
+(`MicroBenchmarks`):
+
+<BenchTable bench="MicroBenchmarks" methods="SingletonAccess,HandleAccess" />
+
+A pass that writes a singleton for each of 100,000 entities, against Friflo.Engine.ECS:
+
+<BenchChart bench="OperationBenchmark" methods="EasyEcs_Singleton,Friflo_Singleton" title="A pass that writes a singleton, 100,000 entities" />
+
+## What it costs [#what-it-costs]
+
+- **Storage:** one small box per singleton type in each world that has it; nothing per entity.
+- **`GetSingleton`, `HasSingleton`:** one array load and a type check; O(1).
+- **`SingletonRef<T>.Value`:** one field load.
+- **A `[ForEach]` parameter:** resolved once per pass.
+- **Adding or removing** a singleton goes through the world's structural gate, like any structural change.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| State kept in a system field instead | Invisible to other systems, lost on remove, shared by worlds if static | [EECS007](/en/docs/guide/analyzer#eecs007) |
+| A class implementing `ISingletonComponent` | Does not compile | [EECS006](/en/docs/guide/analyzer#eecs006) |
+| `GetSingleton<T>()` before it was added | `InvalidOperationException` | Add it at setup, or use `GetOrAddSingleton` |
+| A `ref` singleton in a parallel method | Races between chunks | [EECS010](/en/docs/guide/analyzer#eecs010) |
+| Changing a collection in a singleton through `in` | Scheduled as a read | [EECS011](/en/docs/guide/analyzer#eecs011) |
+| Writing through a `SingletonRef<T>` after `RemoveSingleton` | The write reaches nothing | Take a new handle after re-adding |
+| A list of players in a singleton | Duplicates what entities and queries give | Make them entities with a tag |
+
+## Related [#related]
+
+<Cards>
+  <Card title="Systems and [ForEach]" href="/en/docs/guide/systems">
+    Singleton parameters, resolved once per pass.
+  </Card>
+  <Card title="ECS principles" href="/en/docs/ecs-principles">
+    Why systems are stateless and state is data.
+  </Card>
+  <Card title="Threading" href="/en/docs/guide/threading">
+    One world per thread and parallel stages.
+  </Card>
+  <Card title="Snapshots" href="/en/docs/guide/snapshots">
+    Singletons are captured and restored with the world.
+  </Card>
+</Cards>

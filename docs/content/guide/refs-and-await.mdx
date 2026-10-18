@@ -1,0 +1,190 @@
+---
+title: ref and await
+seoTitle: "ref returns and async in a C# ECS: when a component ref stays valid"
+description: Change components through a ref. Which refs survive a structural change, why none may cross an await, and how async code reaches the world safely.
+icon: Link
+---
+
+Components are structs stored in the columns of tables. `entity.Get<T>()` returns a `ref` into that column: changing
+it changes the entity, with no copy and no second lookup. A copy changes nothing. And because rows move when entities
+change, a `ref` is valid only until the next structural change, so it never crosses an `await`: after one, you
+re-acquire the data through the `Entity` handle, which tells you whether the entity is still there.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  Every write of a component: `ref var hp = ref unit.Get<Health>()`, the generated `unit.Health.Value -= 10`, `ref`
+  parameters of `[ForEach]` methods. Short-lived refs inside one method, used before the next structural change.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  Keeping data across time: a `ref` in a field, across an `await`, or across a structural change. Keep the `Entity`
+  (or its `EntityId`) instead and look the data up again. Reading a tracked component: use `Read<T>()` or the
+  generated property, so the read is not stamped as a write.
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+### Copies and refs [#copies-and-refs]
+
+```csharp
+var copy = entity.Get<Health>();       // a copy: the change below is lost
+copy.Value -= 10;
+
+ref var hp = ref entity.Get<Health>(); // a ref into the table
+hp.Value -= 10;
+entity.Get<Health>().Value -= 10;      // the same, inline
+entity.Health.Value -= 10;             // the same, through the generated member
+```
+
+### Why a `ref` expires [#why-a-ref-expires]
+
+A `ref` into a table is valid only until the next structural change, of any entity:
+
+- an entity's row is copied to another table when it gains a component its table has no column for;
+- the last row of a table fills the row of an entity that left it;
+- a full table is reallocated when it grows.
+
+An old `ref` then silently points at a stale copy or at another entity's data. Which change moves which row is an
+implementation detail, and the change may come from your code or from another system, so treat every structural
+change as one that may invalidate your refs.
+
+### Inside passes [#inside-passes]
+
+Use `ref` freely inside `[ForEach]` methods, `ForEach` jobs and `Query` loops: each entity gets fresh refs.
+
+- The **`ref` parameters of a `[ForEach]` method** (or a `ForEach` job) stay writable even when the body changes
+  the archetype of the entity it visits: the pass copies those writes to the entity's new row after the body returns.
+  `in` parameters keep showing the values from before the change.
+- **Any other `ref`** (from `entity.Get<T>()`, an item of a `Query` loop, or into another entity) is guaranteed only
+  until the next structural change. Write through it before the change, or get it again afterwards.
+
+```csharp
+public record struct Target(EntityId Id) : IComponent;
+
+public class StrikeSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Strike(Entity attacker, in Target target, World world)
+    {
+        if (!world.TryGetEntity(target.Id, out var victim) || !victim.HasHealth) return;
+        ref var hp = ref victim.Get<Health>();
+        hp.Value -= 10;                                   // write first...
+        if (hp.Value <= 0) victim.SetDead();              // ...then change structure: hp may now be stale
+        attacker.Remove<Target>();                        // structural too; refs from Get are not used after it
+    }
+}
+```
+
+### Across `await` [#across-await]
+
+C# forbids a `ref` local that lives across an `await`; do not smuggle one through `Unsafe`, pointers or `Span` fields
+either. While you `await`, other code runs: it may add entities or components (moving and reallocating storage), or
+destroy your entity and recycle its index. So:
+
+1. read what you need before awaiting;
+2. after the await, re-validate through the `Entity` handle, which is version-checked;
+3. write back through a newly acquired `ref`.
+
+```csharp
+public record struct Account(long Id) : IComponent;
+
+public interface IShop
+{
+    ValueTask<int> RedeemPotionAsync(long accountId);
+}
+
+public static class Potions
+{
+    // Runs on the world's owner thread, and resumes there (a single-threaded server loop).
+    public static async ValueTask HealFromStoreAsync(Entity player, IShop shop)
+    {
+        long id = player.Read<Account>().Id;              // read what you need before awaiting
+        int heal = await shop.RedeemPotionAsync(id);      // the world may change meanwhile
+        if (player.IsAlive && player.HasHealth)           // re-validate after the await
+            player.Get<Health>().Value += heal;           // a fresh ref into current storage
+    }
+}
+```
+
+This is only correct when the code after the `await` runs on the world's owner thread, for example a server loop
+with its own single-threaded `SynchronizationContext`. If the continuation may resume on the thread pool, it must not
+touch the world at all: hand the result to the owner thread as data, and let a system apply it.
+
+```csharp
+using System.Collections.Concurrent;
+
+public record struct PotionRedeemed(EntityId Player, int Heal);   // a message, not a component
+
+public sealed class ApplyRedemptions(ConcurrentQueue<PotionRedeemed> inbox) : EcsSystem
+{
+    private readonly ConcurrentQueue<PotionRedeemed> _inbox = inbox;   // filled by async code on any thread
+
+    protected override void OnUpdate()
+    {
+        while (_inbox.TryDequeue(out var done))
+            if (World.TryGetEntity(done.Player, out var player) && player.HasHealth)
+                player.Get<Health>().Value += done.Heal;              // on the owner thread, during the update
+    }
+}
+```
+
+More on owner threads and input from other threads: [Threading](/en/docs/guide/threading#input-from-other-threads).
+
+### The exception: singletons [#singletons]
+
+A singleton's storage never moves, so `world.SingletonRef<T>()` returns a handle you can keep, in a field of your
+host or across ticks ([Singletons](/en/docs/guide/singletons#stable-handles)). It is still owner-thread data: keep it,
+but only touch it on the owner thread.
+
+## How to use it fast [#how-to-use-it-fast]
+
+| Instead of | Do | Why |
+| --- | --- | --- |
+| `Has<T>()` then `Get<T>()` | `ref var x = ref e.TryGetRef<T>(out bool found)` | One lookup |
+| `Get<T>()` several times in a method | One `ref` local, used before any structural change | One lookup |
+| `Get<T>()` to read a tracked component | `Read<T>()` or the generated property | Not stamped as a write |
+| Looking an id up on every access | Look it up once per method with `TryGetEntity` | The handle then needs no lookup |
+| A singleton lookup per call from host code | A `SingletonRef<T>` kept from setup | No lookup at all |
+
+1,000 component writes through entity handles, the same after looking each id up with `TryGetEntity`, and 1,000
+singleton accesses (`MicroBenchmarks`):
+
+<BenchTable bench="MicroBenchmarks" methods="HandleAccess,TryGetEntity,SingletonAccess" />
+
+## What it costs [#what-it-costs]
+
+- **A `ref`** is a pointer into a column: no copy, no lookup after the one that produced it.
+- **Getting it through a handle:** the entity's 16-byte record, then one cache line of the table's lookup.
+- **Re-validating after an `await`:** `IsAlive` is one record load and a version compare.
+- **Carrying `[ForEach]` writes across a structural change** costs one copy of the written components, only for the
+  entities whose table changed.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| Changing a copy (`var hp = e.Get<Health>()`) | The table is unchanged | Code review: `ref var` |
+| A `ref` local across an `await` | Does not compile | The C# compiler |
+| A `ref` kept after a structural change | Points at a stale copy or another entity's row | Code review: get it again |
+| A raw index stored instead of the `EntityId` | Names whichever entity reuses the index | Store the `EntityId`; `TryGetEntity` checks the version |
+| An `Entity` stored in a component | A managed column | [EECS017](/en/docs/guide/analyzer#eecs017) (warning) |
+| A `DynamicBuffer<T>` taken by value | Writes go to a shared list, unstamped | [EECS012](/en/docs/guide/analyzer#eecs012) |
+| Touching the world after an `await` that resumed on the thread pool | Races with the owner thread | Hand the result over as data; [EECS014](/en/docs/guide/analyzer#eecs014) catches `Task.Run` lambdas |
+
+## Related [#related]
+
+<Cards>
+  <Card title="Structural changes" href="/en/docs/guide/structural-changes">
+    What moves rows, and what a pass sees.
+  </Card>
+  <Card title="Entities and components" href="/en/docs/guide/entities-and-components">
+    Handles, `EntityId` and the `Get` / `Read` / `TryGetRef` family.
+  </Card>
+  <Card title="Threading" href="/en/docs/guide/threading">
+    Owner threads, and input from other threads.
+  </Card>
+  <Card title="Singletons" href="/en/docs/guide/singletons">
+    The one kind of storage whose handle you can keep.
+  </Card>
+</Cards>

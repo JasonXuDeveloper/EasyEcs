@@ -1,0 +1,314 @@
+---
+title: Entities and components
+seoTitle: "Entities and components in C#: handles, EntityId, tags and generated members"
+description: How EasyEcs stores game objects as entities with struct components. Version-checked handles, EntityId references, tags, Set/Get/Read and generated members.
+icon: Box
+---
+
+Every object of a server is an entity: a player, an NPC, a projectile, a loot chest. An entity is only an identity;
+its data lives in components, plain structs stored in tables with one row per entity. A handle to an entity checks
+its version on every access, so a player who logged out, or a monster that died and whose id went to a new
+monster, can never be written through an old handle.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  Everything that exists many times and changes over time: units, items, sessions, timers. Put each piece of data in
+  its own small component (`Position`, `Health`) and each state in a tag (`Dead`, `Stunned`), so systems select
+  exactly the entities they work on.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  Data of the whole world (a clock, configuration, a spatial grid): that is a [singleton](/en/docs/guide/singletons).
+  Behavior inside components: components are data, logic goes into [systems](/en/docs/guide/systems). Classes as
+  components: they do not compile ([EECS006](/en/docs/guide/analyzer#eecs006)).
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### Declare components [#declare-components]
+
+A component is a struct that implements `IComponent`. A `record struct` gives you a constructor, equality and
+`ToString` for free. A struct without fields is a tag.
+
+```csharp
+public record struct Position(float X, float Y) : IComponent;
+public record struct Health(int Value) : IComponent;
+public record struct Armor(int Value) : IComponent, ITrackChanges;   // writes are tracked
+public record struct Name(string Value) : IComponent;                // managed fields are allowed
+public struct Dead : IComponent;                                     // a tag: no fields
+```
+
+</Step>
+<Step>
+
+### Create entities [#create-entities]
+
+`CreateEntity` takes 0 to 9 component values and places the entity in its final table in one step.
+
+```csharp
+var world = new World();
+Entity goblin = world.CreateEntity(new Position(10, 0), new Health(30), new Armor(2));
+Entity marker = world.CreateEntity();                          // no components yet
+```
+
+</Step>
+<Step>
+
+### Read, write, add and remove [#read-write-add-remove]
+
+The generator gives every component named members, so the common calls read like fields. Write through a `ref`,
+add or replace with `SetX`, remove with `RemoveX`.
+
+```csharp
+goblin.Position.X += 1;                     // a ref into the table: written in place
+goblin.SetHealth(25);                       // adds or replaces the value
+int armor = goblin.Armor.Value;             // a tracked component: ref readonly, a read is not a write
+goblin.SetDead();                           // adds the tag
+if (goblin.IsDead) goblin.RemoveHealth();   // removes a component; the entity keeps its row
+goblin.Destroy();
+```
+
+</Step>
+</Steps>
+
+### Entities [#entities]
+
+An `Entity` is a 16-byte handle: the world, and an [`EntityId`](#entityid) (index and version). It holds no data and
+no behavior. Every member validates the version first:
+
+| Call on a destroyed or `default` handle | Result |
+| --- | --- |
+| `IsAlive`, `Has<T>()`, `TryGet<T>()`, `TryGetRef<T>()` | `false` (no exception) |
+| `Get<T>()`, `Read<T>()`, `GetOrAdd<T>()`, `Set(...)`, `Remove<T>()`, `Clone()` | `InvalidOperationException`: "Entity is not alive" |
+| `Destroy()` | ignored |
+
+Two handles are equal when they name the same incarnation in the same world. Destroying an entity bumps its
+version, so every handle to it becomes stale at once, and it never reaches the entity that later reuses the index.
+
+Waves of spawns and clean-ups have bulk forms, each one pass through the structural gate:
+
+```csharp
+var wave = new Entity[500];
+world.CreateEntities(wave, new Position(0, 0), new Health(100));   // the same values for each; handles written to wave
+int cleared = world.DestroyEntities<Health, Dead>();                 // every dead entity with Health
+```
+
+Kinds of entities spawned again and again (an NPC type, a projectile) are best defined once as a
+[prefab](/en/docs/guide/prefabs): `world.Instantiate(prefab)` creates one, `entity.Clone()` copies a living one.
+
+The world counts and lists its entities:
+
+```csharp
+world.EnsureEntityCapacity(10_000);       // a server that knows its peak never grows the entity records
+int alive = world.EntityCount;            // O(1)
+foreach (var e in world.Entities)         // diagnostics: walks the whole id range
+    Console.WriteLine(e);
+```
+
+`WorldOptions.InitialEntityCapacity` does the same at construction. Tables grow on their own; to size the table of
+a prefab's instances too, use [`EnsureCapacity(prefab, count)`](/en/docs/guide/prefabs#ensure-capacity).
+
+### Ids, versions and recycling [#entityid]
+
+`entity.Id` is an `EntityId`: 8 bytes, an `Index` and a `Version`, unmanaged. It is what you store in a component,
+send to a client or write to a log. `world.TryGetEntity(id, out var e)` turns it back into a handle when that
+incarnation is still alive, and a handle converts to its id implicitly.
+
+```csharp
+var target = world.CreateEntity(new Health(100));
+EntityId fromClient = target.Id;                       // what a client sends back
+
+if (world.TryGetEntity(fromClient, out var found) && found.HasHealth)
+    found.Health.Value -= 10;                          // the current incarnation of that id
+
+target.Destroy();
+bool gone = !world.IsAlive(fromClient);                // true: the id names the destroyed incarnation
+var reused = world.CreateEntity();                     // may take the same index, with a new version
+bool same = reused.Id == fromClient;                   // false
+```
+
+- **Indexes are recycled** last in, first out, so recently freed slots are still warm in cache and the entity
+  records stay bounded by the peak population.
+- **Versions start at 1.** `EntityId.Null` (`default`) has version 0 and names no entity; `id.IsNull` tests it.
+- `world.GetEntity(id)` throws instead of returning false.
+
+#### Refer to entities with `EntityId` [#entityid-in-components]
+
+A component that points at another entity (an owner, a target, a parent) stores the `EntityId`, not the `Entity`.
+An `Entity` holds a reference to its world, so a component with an `Entity` field becomes a managed column: the GC
+scans it, every store pays a write barrier, rows are no longer copied as blocks and saves cannot write it. The
+analyzer warns ([EECS017](/en/docs/guide/analyzer#eecs017)).
+
+```csharp
+public record struct Target(EntityId Id) : IComponent;   // 8 bytes, unmanaged
+
+public class Chase : EcsSystem
+{
+    [ForEach]
+    static void Follow(ref Position p, in Target target, World world)
+    {
+        if (world.TryGetEntity(target.Id, out var prey)) p = prey.Read<Position>();   // gone: the id finds nothing
+    }
+}
+```
+
+To find every entity that points at a target, make the link an indexed component or a relation:
+[Indexes and relations](/en/docs/guide/indexes-and-relations).
+
+### Components [#components]
+
+The generic API works for any component type; the [generated members](#generated-members) are shorthands for it.
+
+| Operation | Effect |
+| --- | --- |
+| `ref T Get<T>()` | A ref into the table; throws if the entity lacks `T`. A write of a tracked component. |
+| `ref readonly T Read<T>()` | A read-only ref; throws if missing. Never a write. |
+| `ref T TryGetRef<T>(out bool found)` | A ref if present, else a null ref (check `found`). A write when found. |
+| `bool TryGet<T>(out T value)` | A **copy** if present. Never a write. |
+| `bool Has<T1..Tn>()` | Whether the entity has all of them. |
+| `Entity Set(in T1 … in Tn)` | Adds or replaces 1 to 9 values, with at most one row move; chainable. |
+| `ref T GetOrAdd<T>()` | A ref, adding `default` first if missing; an existing value is kept. |
+| `Entity Remove<T1..Tn>()` | Removes 1 to 9 components; missing ones are ignored; chainable. |
+
+```csharp
+var hero = world.CreateEntity(new Position(0, 0), new Health(100), new Name("Ayla"));
+hero.Set(new Armor(3), new Position(5, 5));        // one call, at most one row move
+ref var hp = ref hero.TryGetRef<Health>(out bool has);
+if (has) hp.Value -= 10;                           // one lookup, written in place
+ref var shield = ref hero.GetOrAdd<Armor>();       // kept: Armor(3)
+hero.Remove<Armor, Name>();
+bool both = hero.Has<Position, Health>();
+```
+
+Always change components through a `ref`: `var hp = hero.Get<Health>()` is a copy, and changing it changes nothing in
+the table ([`ref` and `await`](/en/docs/guide/refs-and-await)).
+
+### Generated members [#generated-members]
+
+The source generator gives `Entity`, `World` and `Prefab` named members for every component and singleton of your
+project (C# 14 extension members, the .NET 10 default). Each one is an inlined call to the generic API, so both cost
+the same.
+
+| Declared | Generated | Same as |
+| --- | --- | --- |
+| `record struct Position(float X, float Y) : IComponent` | `e.Position` (`ref`), `e.HasPosition`, `e.TryGetPosition(out p)`, `e.GetOrAddPosition()`, `e.SetPosition(x, y)`, `e.RemovePosition()` | `Get`, `Has`, `TryGet`, `GetOrAdd`, `Set(new Position(x, y))`, `Remove` |
+| a tracked component (`Armor : ITrackChanges`) | `e.Armor` is `ref readonly`; `e.WriteArmor()` returns the `ref` | `Read`; `Get` (stamped as written) |
+| an indexed component (`Zone : IIndexed<int>`) | `e.Zone` is `ref readonly`, no `GetOrAddZone` or `WriteZone`; `world.ZoneIndex` | `Read`; `world.Index<Zone, int>()` |
+| a tag (`struct Dead : IComponent`) | `e.IsDead`, `e.SetDead()`, `e.RemoveDead()` | `Has`, `Set(new Dead())`, `Remove` |
+| any component with fields, except a cleanup component | `e.DisableHealth()`, `e.EnableHealth()`, `e.IsHealthDisabled` | [`Disable` / `Enable`](/en/docs/guide/cleanup-and-disable) |
+| a singleton (`Clock : ISingletonComponent`) | `world.Clock` (`ref`), `world.HasClock`, `world.GetOrAddClock()`, `world.SetClock(…)`, `world.RemoveClock()` | [`GetSingleton`](/en/docs/guide/singletons), `HasSingleton`, `GetOrAddSingleton`, `GetOrAddSingleton() = …`, `RemoveSingleton` |
+| each `world.Query<Position, Velocity>()` the code calls | `item.Position`, `item.Velocity` | `item.Component1`, `item.Component2` |
+| any component, on a [prefab](/en/docs/guide/prefabs#generated-members) | `prefab.Position` (`ref readonly`), `HasPosition`, `SetPosition(x, y)`, `RemovePosition()`, `IsDead`, `SetDead()` | `Read`, `Has`, `Set`, `Remove` |
+
+```csharp
+hero.Position.X += 1;                                      // ref: written in place
+if (hero.TryGetHealth(out var copy)) Console.WriteLine(copy.Value);
+hero.SetArmor(5).SetDead();                                // constructor arguments; a tag; chainable
+int value = hero.Armor.Value;                              // tracked: a read, never stamped
+hero.WriteArmor().Value += 1;                              // an explicit write: stamped
+```
+
+- The property is `Get` (or `Read`), so it throws when the component is missing: check `HasX`, or use `TryGetX` /
+  `TryGetRef<T>(out found)` when it is optional.
+- `SetX` has one overload per public constructor (a record struct's primary constructor), or one that takes every
+  field when the struct has no constructor and only public, writable fields.
+- Writes are methods, not property setters: C# rejects a setter on a handle that is not a variable, such as a
+  `foreach` variable.
+- The analyzer knows these members: `SetX`, `GetOrAddX` and `RemoveX` are structural changes, the rest are reads or
+  writes of a value.
+- No members are generated for generic components, components nested in types other code cannot see, and names the
+  receiver already has (`Entity.Id`, `World.Update`); the generic API still works for them.
+
+### Tags [#tags]
+
+A tag is a component without fields: `public struct Dead : IComponent;`. It costs no column and exists to be
+filtered on (`[Without<Dead>]`, `QueryFilter.Create().With<Stunned>()`). Use tags for states that come and go (dead,
+stunned, burning). Removing a tag and adding it back flips one presence bit in the entity's row, so a state that
+toggles every few ticks moves no data. For a value that changes every tick, a field is still cheaper:
+[ECS principles, rule 5](/en/docs/ecs-principles#5-choose-the-cheapest-representation-for-frequent-changes).
+
+### Where components live [#storage]
+
+Components live in archetype tables, one row per entity and one column per component type.
+
+- **Removing a component keeps the row.** The column's presence bit for that row is cleared; adding the component
+  back sets it again. Nothing moves.
+- **Gaining a component the table has no column for moves the row** to the table with that column, once per new
+  combination. The move plan is cached per source table.
+- **Managed values are cleared on removal** (and when the entity is destroyed), so the GC can collect what they
+  referenced. Unmanaged values are left in place: the next `Set` or `GetOrAdd` overwrites them.
+- Up to 65,536 component types per process. The first 256 fit in each table's mask inline; past that, a mask carries
+  an overflow array.
+
+## How to use it fast [#how-to-use-it-fast]
+
+| Instead of | Do | Why |
+| --- | --- | --- |
+| `CreateEntity()` then `Set` per component | `CreateEntity(a, b, c)`, or `Instantiate(prefab)` | One placement instead of one row move per component |
+| `Set(a)` then `Set(b)` | `Set(a, b)`, `Remove<A, B>()` | At most one row move |
+| A loop of `CreateEntity` / `Destroy` | `CreateEntities(span, …)`, `DestroyEntities<T>(filter)` | One pass through the structural gate per wave |
+| `Get<T>()` to read a tracked component | `Read<T>()`, the generated property, `TryGet<T>()` | A `ref` access stamps the row as written |
+| `Has<T>()` then `Get<T>()` | `TryGetRef<T>(out found)` | One lookup |
+| An `Entity` field in a component | An `EntityId` field | Unmanaged column: no GC scan, block copies |
+
+Per-entity access through handles, 1,000 handles each (`MicroBenchmarks`: `HandleAccess` writes `Position` through
+the handle, `TryGetEntity` looks the id up first, `TrackedHandleWrite` writes a tracked component):
+
+<BenchTable bench="MicroBenchmarks" methods="HandleAccess,TryGetEntity,TrackedHandleWrite" />
+
+Creating and destroying in a warm world, 1,000 entities ten times over: one call per entity (`Churn`) against
+`CreateEntities` and `DestroyEntities` (`ChurnBatch`); and moving three components out and back in one call each
+(`RemoveMany`, 1,000 entities):
+
+<BenchTable bench="MicroBenchmarks" methods="Churn,ChurnBatch,RemoveMany" />
+
+Against Friflo.Engine.ECS on the same mixed world: spawning and destroying 5,000 projectiles, and stunning 5% of the
+fighters then lifting it (two structural changes each):
+
+<BenchChart bench="OperationBenchmark" methods="EasyEcs_CreateDestroy,Friflo_CreateDestroy,EasyEcs_Toggle,Friflo_Toggle" title="Structural changes per operation, 100,000 entities" />
+
+## What it costs [#what-it-costs]
+
+- **Per entity:** a 16-byte record (table, row, version) outside the tables, plus its row.
+- **A handle** is 16 bytes; an `EntityId` 8 bytes.
+- **`Get`, `Read`, `Has` through a handle:** the entity's record, then one cache line of the table's lookup. O(1).
+- **Create:** O(components), amortized; a new combination of components creates its table once.
+- **Destroy:** O(components); outside a pass the table's last row fills the hole at once.
+- **Remove a component, add it back:** one presence bit. Gaining a new column: one row copy.
+- **Writes of untracked components** cost nothing extra; tracked ones store one tick
+  ([change tracking](/en/docs/guide/change-tracking#what-it-costs)).
+- After warm-up, none of this allocates.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| A class implementing `IComponent` | Does not compile | [EECS006](/en/docs/guide/analyzer#eecs006) |
+| An `Entity` field in a component | A managed column, scanned by the GC, not saved | [EECS017](/en/docs/guide/analyzer#eecs017) (warning) |
+| Changing a copy: `var hp = e.Get<Health>(); hp.Value--;` | The table is unchanged | Code review: `ref var hp = ref …` |
+| Storing `id.Index` alone | Names whichever entity reuses the index | Store the `EntityId`; `TryGetEntity` checks the version |
+| Reading a tracked component with `Get<T>()` | The row counts as written, every `[Changed<T>]` reader visits it | The generated property is `ref readonly` |
+| Writing an indexed component through `Get<T>()` | The index keeps the old key | [EECS015](/en/docs/guide/analyzer#eecs015) |
+| A `DynamicBuffer<T>` copied out of an entity | Two entities share one list | [EECS012](/en/docs/guide/analyzer#eecs012) |
+| `Get<T>()` on a component the entity may lack | `InvalidOperationException` | Use `HasX`, `TryGetX` or `TryGetRef` |
+
+## Related [#related]
+
+<Cards>
+  <Card title="Prefabs and cloning" href="/en/docs/guide/prefabs">
+    Define a kind of entity once, spawn it one at a time or in waves.
+  </Card>
+  <Card title="Queries and filters" href="/en/docs/guide/queries">
+    Select the entities that have a set of components.
+  </Card>
+  <Card title="Structural changes" href="/en/docs/guide/structural-changes">
+    Adding, removing, creating and destroying in the middle of a pass.
+  </Card>
+  <Card title="ref and await" href="/en/docs/guide/refs-and-await">
+    Why refs into the tables never cross an `await`.
+  </Card>
+</Cards>

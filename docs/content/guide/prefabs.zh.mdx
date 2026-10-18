@@ -1,0 +1,277 @@
+---
+title: 预制体与克隆
+seoTitle: "C# ECS 预制体：实体模板、成批生成与编组"
+description: 把一种实体定义成 Prefab，单个生成、成批生成，或者整组带链接一起生成。派生预制体、预制体里的动态缓冲、EnsureCapacity 和 Entity.Clone。
+icon: Copy
+---
+
+服务器会一遍又一遍地生成同几类实体：哥布林、火球、宝箱、带着护卫的首领。`Prefab` 就是这类实体的配方：一组组件值，
+不属于任何 World，所以任何查询和系统都看不到它。`world.Instantiate(prefab)` 生成一个实体，带上每个值的副本；
+`entity.Clone()` 则从一个活着的实体复制。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  定义一次、生成很多次的实体种类：NPC 类型、子弹、物品，启动时从代码或配置读进来。成批生成（`Instantiate(prefab, span)`）。
+  总是一起出现的一组实体（首领、坐骑和护卫）。`Clone` 用来在运行时复制一个活着的实体：镜像分身、分裂的史莱姆。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  每次值都不一样的一次性实体：`CreateEntity(a, b, c)` 一样快，意图也更清楚。别的线程正在用它实例化时还要修改的预制体。
+  想指向目标 World 里某个实体的 `Entity` 字段：实例化之后再给每个实例建立链接。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### 写配方 [#build-the-recipe]
+
+生成的写入方法（`SetHealth`、`SetNpc` 等）在 `Prefab` 上也有，而且返回预制体本身，一条链就能写完配方。预制体放在
+`static readonly` 字段或者一张种类表里。
+
+```csharp title="Kinds.cs"
+public record struct Position(float X, float Y) : IComponent;
+public record struct Health(int Value, int Max) : IComponent, ITrackChanges;
+public record struct Attack(int Damage, int Cooldown) : IComponent;
+public struct Npc : IComponent;                                         // 标签
+
+public static class Kinds
+{
+    public static readonly Prefab Goblin = new Prefab()
+        .SetPosition(0, 0).SetHealth(60, 60).SetAttack(4, 0).SetNpc();
+    public static readonly Prefab Troll = new Prefab()
+        .Set(new Position(), new Health(300, 300), new Attack(12, 0)).SetNpc();   // 也可以一次设置多个值
+}
+```
+
+</Step>
+<Step>
+
+### 生成一个 [#instantiate]
+
+新实体拿到每个值的副本，只需要改不一样的部分。
+
+```csharp
+var world = new World();
+var goblin = world.Instantiate(Kinds.Goblin);
+goblin.Position = new Position(100, 40);
+```
+
+</Step>
+<Step>
+
+### 成批生成 [#instantiate-a-wave]
+
+`Instantiate(prefab, span)` 用新实体填满整个 span：只过一次结构闸门，预制体的那一行一次性复制到连续的行里，表最多扩容一次。
+
+```csharp
+var wave = new Entity[500];
+world.Instantiate(Kinds.Troll, wave);
+for (int i = 0; i < wave.Length; i++) wave[i].Position = new Position(i * 8, 0);
+```
+
+</Step>
+</Steps>
+
+### `Prefab` API [#prefab-api]
+
+| 成员 | 效果 |
+| --- | --- |
+| `new Prefab()` | 空配方。 |
+| `new Prefab(basePrefab)` | 复制 `basePrefab`（连同它的成员），之后各改各的。 |
+| `Set(in T1 … in Tn)` → `Prefab` | 添加 1 到 9 个值，已有同类型的就替换。 |
+| `Remove<T1..Tn>()` → `Prefab` | 去掉 1 到 9 个组件，没有的忽略。 |
+| `Has<T>()` | 预制体是否有 `T`。 |
+| `Read<T>()` → `ref readonly T` | 预制体里的值；没有时抛异常。 |
+| `SetBuffer<T>(params ReadOnlySpan<T>)` → `Prefab` | 带这些元素的 [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers)。 |
+| `AddMember()` → `Prefab` | 给预制体的编组加一个新[成员](#prefab-groups)。 |
+| `Id` | 在编组的组件里指代这个成员的 `EntityId`。 |
+
+### 生成成员 [#generated-members]
+
+和实体一样，项目里的每个组件都会在预制体上生成[命名成员](/zh/docs/guide/entities-and-components#generated-members)：
+
+| 声明 | `Prefab` 上生成的成员 | 等价于 |
+| --- | --- | --- |
+| `record struct Health(int Value, int Max) : IComponent` | `prefab.Health`（`ref readonly`）、`prefab.HasHealth`、`prefab.SetHealth(value, max)`、`prefab.RemoveHealth()` | `Read`、`Has`、`Set(new Health(value, max))`、`Remove` |
+| 标签（`struct Npc : IComponent`） | `prefab.IsNpc`、`prefab.SetNpc()`、`prefab.RemoveNpc()` | `Has`、`Set(new Npc())`、`Remove` |
+| 缓冲元素（`record struct Loot(int Item)`） | `prefab.SetLoot(new Loot(1), new Loot(2))`、`prefab.HasLoot`、`prefab.Loot`（`ref readonly`）、`prefab.RemoveLoot()` | `DynamicBuffer<Loot>` 的 `SetBuffer(…)`、`Has`、`Read`、`Remove` |
+
+```csharp
+var elite = new Prefab().SetPosition(0, 0).SetHealth(500, 500).SetAttack(20, 0).SetNpc();
+int max = elite.Health.Max;                          // 只读：要改就用 SetHealth
+if (elite.HasAttack) elite.SetAttack(25, 0);         // 替换原值
+elite.RemoveNpc();                                   // 配方去掉这个标签
+```
+
+预制体上的属性永远是只读的：预制体只能通过 `Set`、`Remove` 和它们的生成版本修改，所以没有 `TryGetX`、`GetOrAddX`、`WriteX`。
+预制体不属于任何 World，它的写入方法不算任何 World 的结构变更，分析器在 `[ForEach]` 方法里、在其他线程上都不会报它。
+
+### 派生预制体 [#derived-prefabs]
+
+`new Prefab(basePrefab)` 把一个预制体（连同成员）复制成一个新的，之后可以单独修改：比如配置好的 NPC 的一个变种。
+这是复制，不是继承：之后改其中任何一个，都不会影响另一个。
+
+```csharp
+var chief = new Prefab(Kinds.Goblin).SetHealth(200, 200).SetAttack(9, 0);   // 更强的哥布林
+var boss = world.Instantiate(chief);
+```
+
+### 预制体里的缓冲 [#prefab-buffers]
+
+预制体可以带一个 [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers)：生成的 `SetLoot(...)`（或 `SetBuffer<T>(...)`）
+给它这些元素，每个实例都会拿到自己的列表和元素副本。只要项目里有代码写到了 `DynamicBuffer<Loot>`，元素的成员
+（`SetLoot`、`entity.Loot`、`WriteLoot`）就会生成。
+
+```csharp
+public record struct Loot(int Item, int Count);
+
+public static class Chests
+{
+    public static readonly Prefab Common = new Prefab().SetPosition(0, 0).SetLoot(new Loot(1, 3), new Loot(7, 1));
+
+    public static int Items(Entity chest) => chest.Read<DynamicBuffer<Loot>>().Count;   // 写到了缓冲类型
+}
+```
+
+```csharp
+var chest = world.Instantiate(Chests.Common);
+ref var items = ref chest.WriteLoot();               // 这个宝箱自己的列表
+items.Add(new Loot(9, 1));
+int inRecipe = Chests.Common.Loot.Count;             // 仍然是 2
+```
+
+不要先在外面填好一个 `DynamicBuffer<T>` 再 `Set` 进预制体：缓冲值被复制后会共用同一个列表（[EECS012](/zh/docs/guide/analyzer#eecs012)）。
+
+### 预制体编组 [#prefab-groups]
+
+有些实体总是成组出现：首领带着坐骑和护卫、一支小队、一辆车和它的座位。用 `AddMember()` 给预制体添加成员，每个成员本身也是
+一个预制体。实例化这个预制体或其中任何一个成员，都会生成整组，并返回你传入的那个成员对应的实体。
+
+在编组内部，指向某个成员（它的 `Id`）的 `EntityId` 字段，在每个实例里都会被改写成那个成员的新实体，链接因此能跟着复制过来。
+其他 id 一律变成 `EntityId.Null`：预制体里的 id 只能指向成员。
+
+```csharp
+public record struct Follows(EntityId Target) : IComponent;
+
+public static class Bosses
+{
+    public static readonly Prefab Warlord = Build();
+
+    static Prefab Build()
+    {
+        var warlord = new Prefab().SetHealth(5_000, 5_000).SetNpc();
+        var mount = warlord.AddMember().SetHealth(800, 800).Set(new ChildOf(warlord.Id));
+        warlord.AddMember().SetHealth(300, 300).Set(new ChildOf(warlord.Id), new Follows(mount.Id));
+        return warlord;
+    }
+}
+```
+
+```csharp
+var warlord = world.Instantiate(Bosses.Warlord);     // 三个实体，彼此链接
+int guards = world.Index<ChildOf, EntityId>().Count(warlord);   // 2
+warlord.Destroy();                                   // ChildOf：销毁父实体会连带销毁子实体
+```
+
+`ChildOf` 是 EasyEcs 的层级链接，见[层级](/zh/docs/guide/hierarchy)。`Instantiate(group, span)` 会为每个元素实例化一整组。
+
+### 生成前先预留 [#ensure-capacity]
+
+`world.EnsureCapacity(prefab, count)` 先扩好预制体实例要进的表和实体记录，接下来 `count` 个实例都不再扩容。编组会预留每个成员的表。
+在生成的那个 tick 之前调用，这波生成就不用在 tick 里付扩容的代价。
+
+```csharp
+world.EnsureCapacity(Kinds.Troll, 5_000);
+var army = new Entity[5_000];
+world.Instantiate(Kinds.Troll, army);                // 不扩容，不分配
+```
+
+### 副本里有什么 [#what-a-copy-gets]
+
+`Instantiate` 和 `Clone` 原样复制每个组件值：
+
+- **值**按普通结构体复制。组件里的托管引用（`string`、数组、`List<T>`）复制的是引用，副本之间共享它指向的对象。
+- **`DynamicBuffer<T>`** 是例外：每个副本都有自己的列表，元素相同。
+- **[值索引](/zh/docs/guide/indexes-and-relations)**立即收录新实体。
+- **[被追踪的组件](/zh/docs/guide/change-tracking)**算作此刻写入：`[Changed<T>]` 方法能看到每个新实例。副本没有的组件不算移除，`[Removed<T>]` 不会报告。
+- **不存在的组件仍然不存在。** 一个 `Burning` 已被移除的实体，克隆出来也没有 `Burning`。
+- **`Entity` 字段**按它保存的句柄原样复制。预制体里的句柄不指向目标 World 的任何实体，所以要在实例化之后给每个实例建立链接，
+  或者用指向[成员](#prefab-groups)的 `EntityId`。
+
+### 克隆活着的实体 [#clone]
+
+`entity.Clone()` 在同一个 World 里生成一个新实体，带着原实体当前的全部组件，规则同上。适合在运行时复制某个实体此刻的状态：
+镜像分身、一分为二的史莱姆、为决斗回放保存的玩家状态。要生成某一类实体，还是用预制体：它不依赖某个随时可能变化或死亡的实体。
+对已经失效的句柄调用 `Clone` 会抛异常。
+
+```csharp
+public static class Mirrors
+{
+    public static Entity Mirror(Entity unit) => unit.IsAlive ? unit.Clone() : default;   // 血量、状态、背包
+}
+```
+
+### 为什么预制体不是实体 [#why-not-an-entity]
+
+有些库把模板当成 World 里的实体：Unity Entities 和 Flecs 给它们打标签，每个查询都要排除这个标签；Friflo 克隆的是存储里一个
+普通实体，除非禁用它，查询照样能看到。无论哪种，模板都混在系统要移动、要扣血、要同步的实体中间。EasyEcs 的 `Prefab` 是
+所有 World 之外的数据：查询看不到，系统不用为它加过滤，一个预制体能服务所有 World（只要没人修改它，多个线程可以同时用它实例化）。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+| 别这样 | 这样做 | 原因 |
+| --- | --- | --- |
+| 循环调用 `Instantiate` 生成一波 | `Instantiate(prefab, span)` | 只过一次闸门，连续的行一次复制 |
+| 在生成的那个 tick 里扩容 | 提前 `EnsureCapacity(prefab, count)` | 这波生成不分配内存 |
+| 先 `CreateEntity`，再逐个 `Set` 同一类实体的组件 | 用预制体 | 一次行复制，目标表按预制体缓存 |
+| 每次生成都 new 一个 `Prefab` | 每类一个预制体，放在字段里 | 第一次实例化后，表查找就缓存了 |
+| 把模板做成隐藏实体 | 用 `Prefab` | 查询不用付跳过它们的代价 |
+
+生成并销毁 1,000 个有四个组件（其中一个被追踪）的实体，逐个 `Instantiate` 对比一次 `Instantiate(prefab, span)`（`PrefabBenchmark`）：
+
+<BenchTable bench="PrefabBenchmark" />
+
+和 Friflo.Engine.ECS 对比（它克隆存储里的一个模板实体）：生成并销毁 5,000 个有六个组件的 NPC：
+
+<BenchChart bench="OperationBenchmark" methods="EasyEcs_Instantiate,Friflo_Instantiate" title="从模板生成 5,000 个 NPC 再销毁" />
+
+## 开销 [#what-it-costs]
+
+- **一个预制体**是一个很小的私有 World，每个成员一行，构建时分配一次。
+- **`Instantiate`：** 一次行复制，O(组件数)。第一个实例负责找到目标表，World 按预制体的表缓存结果，之后的实例直接进表。
+- **`Instantiate(prefab, span)`：** O(数量 × 组件数)，只过一次闸门，表最多扩容一次。
+- **编组：** 每个实例 O(成员数 × 组件数)，外加改写成员 id。
+- **`Clone`：** 在实体自己的表里复制一次行。
+- **内存分配：** 预热之后没有，唯一的例外是每个 `DynamicBuffer<T>` 副本拿到的列表。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 预制体的组件里放 `Entity` 字段 | 每个实例都指向同一个不属于任何 World 的句柄 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告）；改用指向成员的 `EntityId` |
+| 预制体里放 World 中某个实体的 `EntityId` | 在每个实例里都变成 `EntityId.Null` | 实例化之后再建立链接 |
+| 先填好 `DynamicBuffer<T>` 值再 `Set` | 所有实例共用这个列表 | [EECS012](/zh/docs/guide/analyzer#eecs012)；改用 `SetLoot(...)` |
+| 在不拥有 World 的线程上 `Instantiate` | 和拥有者线程发生竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+| 在不带 `Entity` 或 `World` 参数的 `[ForEach]` 方法里 `Instantiate` | 遍历以为不会有结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
+| 其他线程正在实例化时修改预制体 | 复制出残缺的数据 | 启动时建好预制体，之后只读 |
+| 对已销毁的实体调用 `Clone()` | 抛 `InvalidOperationException` | 先查 `IsAlive` |
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="实体与组件" href="/zh/docs/guide/entities-and-components">
+    句柄、id、`Set` / `Get`，以及预制体共用的生成成员。
+  </Card>
+  <Card title="动态缓冲" href="/zh/docs/guide/dynamic-buffers">
+    每个实体一个列表，每个实例都拿到一份副本。
+  </Card>
+  <Card title="层级" href="/zh/docs/guide/hierarchy">
+    预制体编组用的 `ChildOf` 链接和级联销毁。
+  </Card>
+  <Card title="变更追踪" href="/zh/docs/guide/change-tracking">
+    新实例算作已写入，同步会把它们发出去。
+  </Card>
+</Cards>

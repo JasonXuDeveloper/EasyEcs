@@ -1,0 +1,288 @@
+---
+title: 实体与组件
+seoTitle: "C# 实体与组件：句柄、EntityId、标签和生成成员"
+description: EasyEcs 用实体加结构体组件来表示游戏对象：带版本校验的句柄、用 EntityId 引用实体、标签、Set/Get/Read，以及源生成器生成的命名成员。
+icon: Box
+---
+
+服务器里的每个对象都是一个实体：玩家、NPC、子弹、宝箱。实体本身只是一个身份，数据都放在组件里。组件是普通的结构体，
+存在表里，一个实体占一行。每次通过句柄访问实体都会先校验版本：玩家下线了，或者怪物死了、它的 id 被新怪物复用了，
+旧句柄都写不到别人身上。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  所有会大量存在、会随时间变化的东西：单位、物品、会话、计时器。每份数据拆成一个小组件（`Position`、`Health`），
+  每种状态用一个标签（`Dead`、`Stunned`），系统就能精确选出它要处理的实体。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  整个 World 只有一份的数据（时钟、配置、空间网格）：这些是[单例组件](/zh/docs/guide/singletons)。组件里写行为：组件只是数据，
+  逻辑放进[系统](/zh/docs/guide/systems)。用 class 做组件：编译不过（[EECS006](/zh/docs/guide/analyzer#eecs006)）。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### 声明组件 [#declare-components]
+
+组件就是实现了 `IComponent` 的结构体。用 `record struct` 能顺手拿到构造函数、相等比较和 `ToString`。没有字段的结构体就是标签。
+
+```csharp
+public record struct Position(float X, float Y) : IComponent;
+public record struct Health(int Value) : IComponent;
+public record struct Armor(int Value) : IComponent, ITrackChanges;   // 写入会被追踪
+public record struct Name(string Value) : IComponent;                // 可以有托管字段
+public struct Dead : IComponent;                                     // 标签：没有字段
+```
+
+</Step>
+<Step>
+
+### 创建实体 [#create-entities]
+
+`CreateEntity` 接受 0 到 9 个组件值，一步就把实体放进它最终所在的表。
+
+```csharp
+var world = new World();
+Entity goblin = world.CreateEntity(new Position(10, 0), new Health(30), new Armor(2));
+Entity marker = world.CreateEntity();                          // 暂时没有组件
+```
+
+</Step>
+<Step>
+
+### 读、写、添加、移除 [#read-write-add-remove]
+
+源生成器给每个组件都生成了命名成员，常用调用写起来就像访问字段。通过 `ref` 写入，用 `SetX` 添加或替换，用 `RemoveX` 移除。
+
+```csharp
+goblin.Position.X += 1;                     // 表里的 ref：原地写入
+goblin.SetHealth(25);                       // 添加或替换
+int armor = goblin.Armor.Value;             // 被追踪的组件：ref readonly，读不算写
+goblin.SetDead();                           // 加上标签
+if (goblin.IsDead) goblin.RemoveHealth();   // 移除组件，实体仍留在原来那一行
+goblin.Destroy();
+```
+
+</Step>
+</Steps>
+
+### 实体 [#entities]
+
+`Entity` 是一个 16 字节的句柄：World 加一个 [`EntityId`](#entityid)（索引和版本）。它不存数据，也没有行为。每个成员都会先校验版本：
+
+| 在已销毁或 `default` 句柄上调用 | 结果 |
+| --- | --- |
+| `IsAlive`、`Has<T>()`、`TryGet<T>()`、`TryGetRef<T>()` | 返回 `false`，不抛异常 |
+| `Get<T>()`、`Read<T>()`、`GetOrAdd<T>()`、`Set(...)`、`Remove<T>()`、`Clone()` | 抛 `InvalidOperationException`："Entity is not alive" |
+| `Destroy()` | 忽略 |
+
+两个句柄指向同一个 World 里的同一代实体时才相等。销毁实体会让版本加一，指向它的所有句柄立刻失效，之后复用这个索引的新实体也不会被旧句柄碰到。
+
+批量生成和清理都有对应的批量接口，每次只过一次结构闸门：
+
+```csharp
+var wave = new Entity[500];
+world.CreateEntities(wave, new Position(0, 0), new Health(100));   // 每个实体同样的值，句柄写进 wave
+int cleared = world.DestroyEntities<Health, Dead>();                 // 所有带 Health 的死亡实体
+```
+
+反复生成的同类实体（某种 NPC、某种子弹）最好定义成[预制体](/zh/docs/guide/prefabs)：`world.Instantiate(prefab)` 生成一个，
+`entity.Clone()` 复制一个活着的实体。
+
+World 能统计和列出它的实体：
+
+```csharp
+world.EnsureEntityCapacity(10_000);       // 知道峰值的服务器，实体记录永远不用扩容
+int alive = world.EntityCount;            // O(1)
+foreach (var e in world.Entities)         // 诊断用：会走完整个 id 范围
+    Console.WriteLine(e);
+```
+
+`WorldOptions.InitialEntityCapacity` 在构造时做同样的事。表会自己扩容；要连预制体实例所在的表一起预留，用
+[`EnsureCapacity(prefab, count)`](/zh/docs/guide/prefabs#ensure-capacity)。
+
+### Id、版本与复用 [#entityid]
+
+`entity.Id` 是 `EntityId`：8 字节，包含 `Index` 和 `Version`，非托管。组件里存的、发给客户端的、写进日志的都应该是它。
+`world.TryGetEntity(id, out var e)` 在这一代实体还活着时把它变回句柄；句柄也能隐式转换成 id。
+
+```csharp
+var target = world.CreateEntity(new Health(100));
+EntityId fromClient = target.Id;                       // 客户端发回来的就是它
+
+if (world.TryGetEntity(fromClient, out var found) && found.HasHealth)
+    found.Health.Value -= 10;                          // 这个 id 对应的当前这一代实体
+
+target.Destroy();
+bool gone = !world.IsAlive(fromClient);                // true：id 指向的是已销毁的那一代
+var reused = world.CreateEntity();                     // 可能拿到同一个索引，但版本是新的
+bool same = reused.Id == fromClient;                   // false
+```
+
+- **索引会被复用**，后进先出：刚释放的槽位还热在缓存里，实体记录的数量也不会超过人口峰值。
+- **版本从 1 开始。** `EntityId.Null`（即 `default`）版本为 0，不指向任何实体，用 `id.IsNull` 判断。
+- `world.GetEntity(id)` 找不到时直接抛异常，而不是返回 false。
+
+#### 用 `EntityId` 引用实体 [#entityid-in-components]
+
+组件要指向另一个实体（主人、目标、父节点）时，存 `EntityId`，不要存 `Entity`。`Entity` 里有一个指向 World 的引用，
+组件一旦带上 `Entity` 字段，整列就变成托管列：GC 要扫描它，每次写入都有写屏障，行不能再整块复制，存档也写不了它。
+分析器会给出警告（[EECS017](/zh/docs/guide/analyzer#eecs017)）。
+
+```csharp
+public record struct Target(EntityId Id) : IComponent;   // 8 字节，非托管
+
+public class Chase : EcsSystem
+{
+    [ForEach]
+    static void Follow(ref Position p, in Target target, World world)
+    {
+        if (world.TryGetEntity(target.Id, out var prey)) p = prey.Read<Position>();   // 目标没了：id 找不到实体
+    }
+}
+```
+
+要找出所有指向某个目标的实体，把这个链接做成索引组件或关系：[索引与关系](/zh/docs/guide/indexes-and-relations)。
+
+### 组件 [#components]
+
+泛型 API 适用于任何组件类型，[生成成员](#generated-members)只是它的简写。
+
+| 操作 | 效果 |
+| --- | --- |
+| `ref T Get<T>()` | 表里的 ref；没有 `T` 时抛异常。对被追踪组件算一次写入。 |
+| `ref readonly T Read<T>()` | 只读 ref；没有时抛异常。永远不算写入。 |
+| `ref T TryGetRef<T>(out bool found)` | 有就返回 ref，没有返回空 ref（先看 `found`）。找到时算写入。 |
+| `bool TryGet<T>(out T value)` | 有就拿到一份**副本**。不算写入。 |
+| `bool Has<T1..Tn>()` | 是否全都有。 |
+| `Entity Set(in T1 … in Tn)` | 添加或替换 1 到 9 个值，最多搬一次行；可链式调用。 |
+| `ref T GetOrAdd<T>()` | 返回 ref，没有就先加一个 `default`；已有的值保持不变。 |
+| `Entity Remove<T1..Tn>()` | 移除 1 到 9 个组件，没有的忽略；可链式调用。 |
+
+```csharp
+var hero = world.CreateEntity(new Position(0, 0), new Health(100), new Name("Ayla"));
+hero.Set(new Armor(3), new Position(5, 5));        // 一次调用，最多搬一次行
+ref var hp = ref hero.TryGetRef<Health>(out bool has);
+if (has) hp.Value -= 10;                           // 一次查找，原地写入
+ref var shield = ref hero.GetOrAdd<Armor>();       // 保留原值：Armor(3)
+hero.Remove<Armor, Name>();
+bool both = hero.Has<Position, Health>();
+```
+
+改组件一定要通过 `ref`：`var hp = hero.Get<Health>()` 拿到的是副本，改它不会改到表里（见 [`ref` 与 `await`](/zh/docs/guide/refs-and-await)）。
+
+### 生成成员 [#generated-members]
+
+源生成器会给项目里的每个组件和单例组件，在 `Entity`、`World`、`Prefab` 上生成命名成员（C# 14 扩展成员，.NET 10 默认开启）。
+每个成员都是对泛型 API 的内联调用，开销完全一样。
+
+| 声明 | 生成 | 等价于 |
+| --- | --- | --- |
+| `record struct Position(float X, float Y) : IComponent` | `e.Position`（`ref`）、`e.HasPosition`、`e.TryGetPosition(out p)`、`e.GetOrAddPosition()`、`e.SetPosition(x, y)`、`e.RemovePosition()` | `Get`、`Has`、`TryGet`、`GetOrAdd`、`Set(new Position(x, y))`、`Remove` |
+| 被追踪的组件（`Armor : ITrackChanges`） | `e.Armor` 是 `ref readonly`；`e.WriteArmor()` 返回 `ref` | `Read`；`Get`（记为写入） |
+| 索引组件（`Zone : IIndexed<int>`） | `e.Zone` 是 `ref readonly`，没有 `GetOrAddZone` 和 `WriteZone`；`world.ZoneIndex` | `Read`；`world.Index<Zone, int>()` |
+| 标签（`struct Dead : IComponent`） | `e.IsDead`、`e.SetDead()`、`e.RemoveDead()` | `Has`、`Set(new Dead())`、`Remove` |
+| 任何带字段的组件（清理组件除外） | `e.DisableHealth()`、`e.EnableHealth()`、`e.IsHealthDisabled` | [`Disable` / `Enable`](/zh/docs/guide/cleanup-and-disable) |
+| 单例组件（`Clock : ISingletonComponent`） | `world.Clock`（`ref`）、`world.HasClock`、`world.GetOrAddClock()`、`world.SetClock(…)`、`world.RemoveClock()` | [`GetSingleton`](/zh/docs/guide/singletons)、`HasSingleton`、`GetOrAddSingleton`、`GetOrAddSingleton() = …`、`RemoveSingleton` |
+| 代码里调用过的每个 `world.Query<Position, Velocity>()` | `item.Position`、`item.Velocity` | `item.Component1`、`item.Component2` |
+| [预制体](/zh/docs/guide/prefabs#generated-members)上的任何组件 | `prefab.Position`（`ref readonly`）、`HasPosition`、`SetPosition(x, y)`、`RemovePosition()`、`IsDead`、`SetDead()` | `Read`、`Has`、`Set`、`Remove` |
+
+```csharp
+hero.Position.X += 1;                                      // ref：原地写入
+if (hero.TryGetHealth(out var copy)) Console.WriteLine(copy.Value);
+hero.SetArmor(5).SetDead();                                // 构造参数；标签；可链式调用
+int value = hero.Armor.Value;                              // 被追踪：只是读，不会记 tick
+hero.WriteArmor().Value += 1;                              // 显式写入：会记 tick
+```
+
+- 属性就是 `Get`（或 `Read`），组件不存在时会抛异常：可选的组件先用 `HasX` 判断，或者用 `TryGetX` / `TryGetRef<T>(out found)`。
+- `SetX` 每个公开构造函数生成一个重载（record struct 就是主构造函数）；没有构造函数、且字段全是公开可写时，生成一个接收全部字段的重载。
+- 写入是方法而不是属性 setter：句柄不是变量时（比如 `foreach` 变量），C# 不允许调用 setter。
+- 分析器认识这些成员：`SetX`、`GetOrAddX`、`RemoveX` 算结构变更，其余算对值的读写。
+- 泛型组件、嵌套在别处看不见的类型里的组件，以及和接收者已有成员重名的（`Entity.Id`、`World.Update`），不生成成员；泛型 API 照样能用。
+
+### 标签 [#tags]
+
+标签是没有字段的组件：`public struct Dead : IComponent;`。它不占列，只用来过滤（`[Without<Dead>]`、
+`QueryFilter.Create().With<Stunned>()`）。来来去去的状态（死亡、眩晕、燃烧）都适合用标签。移除标签再加回来，只是翻转实体
+那一行的一个存在位，每隔几个 tick 就切换一次的状态也不会搬动数据。每个 tick 都在变的值，用字段还是更便宜：
+见 [ECS 原则第 5 条](/zh/docs/ecs-principles#5-choose-the-cheapest-representation-for-frequent-changes)。
+
+### 组件存在哪里 [#storage]
+
+组件存放在原型（archetype）表里：每个实体一行，每种组件一列。
+
+- **移除组件不挪行。** 只清掉这一行在该列上的存在位，加回来时再置上，什么都不用搬。
+- **获得表里没有对应列的组件才会搬行**，搬到有这一列的表；每种新组合只发生一次，搬运方案按源表缓存。
+- **托管值在移除时清空**（实体销毁时也一样），GC 才能回收它引用的对象。非托管值原地保留，下次 `Set` 或 `GetOrAdd` 会覆盖。
+- 每个进程最多 65,536 种组件类型。前 256 种直接放在每张表的掩码里，超出部分由掩码附带的溢出数组记录。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+| 别这样 | 这样做 | 原因 |
+| --- | --- | --- |
+| 先 `CreateEntity()`，再逐个 `Set` | `CreateEntity(a, b, c)`，或 `Instantiate(prefab)` | 一次放置，而不是每个组件搬一次行 |
+| `Set(a)` 后再 `Set(b)` | `Set(a, b)`、`Remove<A, B>()` | 最多搬一次行 |
+| 循环调用 `CreateEntity` / `Destroy` | `CreateEntities(span, …)`、`DestroyEntities<T>(filter)` | 每波只过一次结构闸门 |
+| 用 `Get<T>()` 读被追踪的组件 | `Read<T>()`、生成的属性、`TryGet<T>()` | `ref` 访问会把这一行记成已写入 |
+| 先 `Has<T>()` 再 `Get<T>()` | `TryGetRef<T>(out found)` | 只查一次 |
+| 组件里放 `Entity` 字段 | 放 `EntityId` 字段 | 非托管列：GC 不扫描，可整块复制 |
+
+通过句柄逐个访问，每项 1,000 个句柄（`MicroBenchmarks`：`HandleAccess` 通过句柄写 `Position`，`TryGetEntity` 先按 id 查找，
+`TrackedHandleWrite` 写一个被追踪的组件）：
+
+<BenchTable bench="MicroBenchmarks" methods="HandleAccess,TryGetEntity,TrackedHandleWrite" />
+
+在已预热的 World 里创建、销毁 1,000 个实体，重复十轮：逐个调用（`Churn`）对比 `CreateEntities` 加 `DestroyEntities`
+（`ChurnBatch`）；以及一次调用移出三个组件、再一次调用加回（`RemoveMany`，1,000 个实体）：
+
+<BenchTable bench="MicroBenchmarks" methods="Churn,ChurnBatch,RemoveMany" />
+
+和 Friflo.Engine.ECS 在同一个混合 World 上对比：生成并销毁 5,000 个子弹；让 5% 的战斗单位眩晕再解除（每个两次结构变更）：
+
+<BenchChart bench="OperationBenchmark" methods="EasyEcs_CreateDestroy,Friflo_CreateDestroy,EasyEcs_Toggle,Friflo_Toggle" title="每次操作的结构变更耗时，10 万实体" />
+
+## 开销 [#what-it-costs]
+
+- **每个实体：** 表外一条 16 字节的记录（表、行号、版本），加上它在表里的一行。
+- **句柄** 16 字节，`EntityId` 8 字节。
+- **通过句柄 `Get`、`Read`、`Has`：** 先读实体记录，再读表查找结构的一条缓存行。O(1)。
+- **创建：** 均摊 O(组件数)；新的组件组合第一次出现时建一张表。
+- **销毁：** O(组件数)；不在遍历中时，表的最后一行立刻补上空位。
+- **移除组件再加回：** 一个存在位。获得新列：复制一次行。
+- **未追踪组件的写入**没有额外开销；被追踪的多记一个 tick（见[变更追踪](/zh/docs/guide/change-tracking#what-it-costs)）。
+- 预热之后，以上操作都不分配内存。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 用 class 实现 `IComponent` | 编译不过 | [EECS006](/zh/docs/guide/analyzer#eecs006) |
+| 组件里放 `Entity` 字段 | 变成托管列，GC 要扫描，存档写不了 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告） |
+| 改副本：`var hp = e.Get<Health>(); hp.Value--;` | 表里的值没变 | 代码审查：写成 `ref var hp = ref …` |
+| 只存 `id.Index` | 会指向之后复用这个索引的实体 | 存 `EntityId`，`TryGetEntity` 会校验版本 |
+| 用 `Get<T>()` 读被追踪的组件 | 这一行被记成已写入，所有 `[Changed<T>]` 读取方都会访问它 | 生成的属性是 `ref readonly` |
+| 通过 `Get<T>()` 写索引组件 | 索引里还是旧键 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
+| 把 `DynamicBuffer<T>` 从实体里复制出来 | 两个实体共用一个列表 | [EECS012](/zh/docs/guide/analyzer#eecs012) |
+| 对可能没有的组件调用 `Get<T>()` | 抛 `InvalidOperationException` | 用 `HasX`、`TryGetX` 或 `TryGetRef` |
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="预制体与克隆" href="/zh/docs/guide/prefabs">
+    一种实体只定义一次，单个生成或成批生成。
+  </Card>
+  <Card title="查询与过滤" href="/zh/docs/guide/queries">
+    选出拥有一组组件的实体。
+  </Card>
+  <Card title="结构变更" href="/zh/docs/guide/structural-changes">
+    在遍历途中增删组件、创建和销毁实体。
+  </Card>
+  <Card title="ref 与 await" href="/zh/docs/guide/refs-and-await">
+    为什么指向表的 ref 不能跨过 `await`。
+  </Card>
+</Cards>

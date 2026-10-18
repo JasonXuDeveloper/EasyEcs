@@ -1,0 +1,297 @@
+---
+title: Prefabs and cloning
+seoTitle: "Prefabs in C# ECS: spawn entity templates, waves and groups"
+description: "Define a kind of entity once as a Prefab and spawn it alone, in waves or as a linked group: derived prefabs, prefab buffers, EnsureCapacity and Entity.Clone."
+icon: Copy
+---
+
+A server spawns the same kinds of entities again and again: a goblin, a fireball, a loot chest, a boss with its
+guards. A `Prefab` is the recipe of such a kind, a set of component values that belongs to no world, so no query or
+system ever sees it. `world.Instantiate(prefab)` creates an entity with a copy of every value, and
+`entity.Clone()` does the same from a living entity.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  Kinds of entities defined once and spawned many times: NPC types, projectiles, items, read from code or from
+  configuration at startup. Waves of spawns (`Instantiate(prefab, span)`). Groups that always come together (a boss,
+  its mount and its guards). `Clone` for a runtime copy of a living entity: a mirror image, a slime that splits.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  One-off entities whose values differ every time: `CreateEntity(a, b, c)` is as fast and says more. A prefab
+  someone changes while another thread instantiates it. An `Entity` field meant to point at an entity of the target
+  world: give each instance its links after instantiating.
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### Build the recipe [#build-the-recipe]
+
+The generated writers (`SetHealth`, `SetNpc`, ...) exist on `Prefab` too, and return the prefab, so a recipe is one
+chain. Keep prefabs in `static readonly` fields or a table of kinds.
+
+```csharp title="Kinds.cs"
+public record struct Position(float X, float Y) : IComponent;
+public record struct Health(int Value, int Max) : IComponent, ITrackChanges;
+public record struct Attack(int Damage, int Cooldown) : IComponent;
+public struct Npc : IComponent;                                         // a tag
+
+public static class Kinds
+{
+    public static readonly Prefab Goblin = new Prefab()
+        .SetPosition(0, 0).SetHealth(60, 60).SetAttack(4, 0).SetNpc();
+    public static readonly Prefab Troll = new Prefab()
+        .Set(new Position(), new Health(300, 300), new Attack(12, 0)).SetNpc();   // or several values in one call
+}
+```
+
+</Step>
+<Step>
+
+### Instantiate one [#instantiate]
+
+The new entity gets a copy of every value. Write only what differs.
+
+```csharp
+var world = new World();
+var goblin = world.Instantiate(Kinds.Goblin);
+goblin.Position = new Position(100, 40);
+```
+
+</Step>
+<Step>
+
+### Instantiate a wave [#instantiate-a-wave]
+
+`Instantiate(prefab, span)` fills the span with new entities: one pass through the structural gate, the prefab's row
+copied into consecutive rows at once, at most one table growth.
+
+```csharp
+var wave = new Entity[500];
+world.Instantiate(Kinds.Troll, wave);
+for (int i = 0; i < wave.Length; i++) wave[i].Position = new Position(i * 8, 0);
+```
+
+</Step>
+</Steps>
+
+### The `Prefab` API [#prefab-api]
+
+| Member | Effect |
+| --- | --- |
+| `new Prefab()` | An empty recipe. |
+| `new Prefab(basePrefab)` | A copy of `basePrefab` (and its members) to change on its own. |
+| `Set(in T1 … in Tn)` → `Prefab` | Adds 1 to 9 values, or replaces the values of their types. |
+| `Remove<T1..Tn>()` → `Prefab` | Drops 1 to 9 components; missing ones are ignored. |
+| `Has<T>()` | Whether the prefab has `T`. |
+| `Read<T>()` → `ref readonly T` | The prefab's value; throws if it has none. |
+| `SetBuffer<T>(params ReadOnlySpan<T>)` → `Prefab` | A [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) with these elements. |
+| `AddMember()` → `Prefab` | A new [member](#prefab-groups) of the prefab's group. |
+| `Id` | The `EntityId` that names this member inside the group's components. |
+
+### Generated members [#generated-members]
+
+Like an entity, a prefab gets [named members](/en/docs/guide/entities-and-components#generated-members) for every
+component of your project:
+
+| Declared | Generated on `Prefab` | Same as |
+| --- | --- | --- |
+| `record struct Health(int Value, int Max) : IComponent` | `prefab.Health` (`ref readonly`), `prefab.HasHealth`, `prefab.SetHealth(value, max)`, `prefab.RemoveHealth()` | `Read`, `Has`, `Set(new Health(value, max))`, `Remove` |
+| a tag (`struct Npc : IComponent`) | `prefab.IsNpc`, `prefab.SetNpc()`, `prefab.RemoveNpc()` | `Has`, `Set(new Npc())`, `Remove` |
+| a buffer element (`record struct Loot(int Item)`) | `prefab.SetLoot(new Loot(1), new Loot(2))`, `prefab.HasLoot`, `prefab.Loot` (`ref readonly`), `prefab.RemoveLoot()` | `SetBuffer(…)`, `Has`, `Read`, `Remove` of `DynamicBuffer<Loot>` |
+
+```csharp
+var elite = new Prefab().SetPosition(0, 0).SetHealth(500, 500).SetAttack(20, 0).SetNpc();
+int max = elite.Health.Max;                          // read-only: change it with SetHealth
+if (elite.HasAttack) elite.SetAttack(25, 0);         // replaces the value
+elite.RemoveNpc();                                   // the recipe drops the tag
+```
+
+The property is always read-only: a prefab changes only through `Set`, `Remove` and their generated forms, so there
+is no `TryGetX`, `GetOrAddX` or `WriteX` on a prefab. A prefab belongs to no world, so its writers are not
+structural changes of any world, and the analyzer does not report them inside `[ForEach]` methods or on other
+threads.
+
+### Derived prefabs [#derived-prefabs]
+
+`new Prefab(basePrefab)` copies a prefab, members included, into a new one that changes on its own: a variant of a
+configured NPC. It is a copy, not inheritance: later changes of either prefab do not reach the other.
+
+```csharp
+var chief = new Prefab(Kinds.Goblin).SetHealth(200, 200).SetAttack(9, 0);   // a goblin, stronger
+var boss = world.Instantiate(chief);
+```
+
+### Buffers in a prefab [#prefab-buffers]
+
+A prefab can carry a [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers): the generated `SetLoot(...)` (or
+`SetBuffer<T>(...)`) gives it these elements, and every instance gets a list of its own with a copy of them. The
+element's members (`SetLoot`, `entity.Loot`, `WriteLoot`) are generated once some code of the project names
+`DynamicBuffer<Loot>`.
+
+```csharp
+public record struct Loot(int Item, int Count);
+
+public static class Chests
+{
+    public static readonly Prefab Common = new Prefab().SetPosition(0, 0).SetLoot(new Loot(1, 3), new Loot(7, 1));
+
+    public static int Items(Entity chest) => chest.Read<DynamicBuffer<Loot>>().Count;   // names the buffer type
+}
+```
+
+```csharp
+var chest = world.Instantiate(Chests.Common);
+ref var items = ref chest.WriteLoot();               // this chest's own list
+items.Add(new Loot(9, 1));
+int inRecipe = Chests.Common.Loot.Count;             // still 2
+```
+
+Do not `Set(new DynamicBuffer<T>())` and fill it outside the prefab: a buffer value copied around shares its list
+([EECS012](/en/docs/guide/analyzer#eecs012)).
+
+### Prefab groups [#prefab-groups]
+
+Some kinds always come together: a boss with its mount and its guards, a squad, a vehicle and its seats. Give the
+prefab members with `AddMember()`; each member is a prefab of its own. Instantiating the prefab, or any member,
+creates the whole group and returns the entity of the one you passed.
+
+Inside a group, an `EntityId` field that names a member (its `Id`) is rewritten to that member's new entity in
+every instance, so links survive the copy. Any other id becomes `EntityId.Null`: ids in a prefab name members only.
+
+```csharp
+public record struct Follows(EntityId Target) : IComponent;
+
+public static class Bosses
+{
+    public static readonly Prefab Warlord = Build();
+
+    static Prefab Build()
+    {
+        var warlord = new Prefab().SetHealth(5_000, 5_000).SetNpc();
+        var mount = warlord.AddMember().SetHealth(800, 800).Set(new ChildOf(warlord.Id));
+        warlord.AddMember().SetHealth(300, 300).Set(new ChildOf(warlord.Id), new Follows(mount.Id));
+        return warlord;
+    }
+}
+```
+
+```csharp
+var warlord = world.Instantiate(Bosses.Warlord);     // three entities, linked to each other
+int guards = world.Index<ChildOf, EntityId>().Count(warlord);   // 2
+warlord.Destroy();                                   // ChildOf: destroying the parent destroys its children
+```
+
+`ChildOf` is EasyEcs's hierarchy link: see [Hierarchy](/en/docs/guide/hierarchy). `Instantiate(group, span)`
+instantiates the group once per element.
+
+### Reserve before the wave [#ensure-capacity]
+
+`world.EnsureCapacity(prefab, count)` grows the table the prefab's instances go to, and the entity records, so the
+next `count` instances grow nothing. For a group, it reserves every member's table. Call it before the tick that
+spawns, so the wave pays no growth inside it.
+
+```csharp
+world.EnsureCapacity(Kinds.Troll, 5_000);
+var army = new Entity[5_000];
+world.Instantiate(Kinds.Troll, army);                // no growth, no allocation
+```
+
+### What a copy gets [#what-a-copy-gets]
+
+`Instantiate` and `Clone` copy every component value as it is:
+
+- **Values** are copied like any struct. A managed reference inside a component (a `string`, an array, a `List<T>`)
+  is copied as a reference, so the copies share what it points to.
+- **A `DynamicBuffer<T>`** is the exception: every copy gets a list of its own with the same elements.
+- **[Value indexes](/en/docs/guide/indexes-and-relations)** learn the new entity at once.
+- **[Tracked components](/en/docs/guide/change-tracking)** count as written now: `[Changed<T>]` methods see every new
+  instance. A component the copy lacks is not a removal: `[Removed<T>]` does not report it.
+- **Absent components stay absent.** A clone of an entity whose `Burning` was removed has no `Burning`.
+- **An `Entity` field** is copied as the handle it holds. In a prefab it names no entity of the target world, so give
+  each instance its links after instantiating, or use an `EntityId` to a [member](#prefab-groups).
+
+### Cloning a living entity [#clone]
+
+`entity.Clone()` creates a new entity of the same world with the entity's current components, under the same rules.
+Use it for runtime copies of a live entity's state: a mirror image, a slime that splits in two, a player's state
+taken for a duel replay. For kinds of entities, use a prefab: it does not depend on some entity that may change or
+die. `Clone` throws for a handle that is not alive.
+
+```csharp
+public static class Mirrors
+{
+    public static Entity Mirror(Entity unit) => unit.IsAlive ? unit.Clone() : default;   // health, statuses, bag
+}
+```
+
+### Why a prefab is not an entity [#why-not-an-entity]
+
+Some libraries keep templates as entities of the world: Unity Entities and Flecs tag them, and every query excludes
+that tag; Friflo clones an ordinary entity of the store, which its queries see like any other unless it is disabled.
+Either way the templates live among the entities that systems move, damage and replicate. In EasyEcs a `Prefab` is
+data outside every world: no query can see it, systems need no filter for it, and one prefab serves every world
+(several threads may instantiate it at once as long as nobody changes it meanwhile).
+
+## How to use it fast [#how-to-use-it-fast]
+
+| Instead of | Do | Why |
+| --- | --- | --- |
+| `Instantiate` in a loop for a wave | `Instantiate(prefab, span)` | One gate pass, consecutive rows copied at once |
+| Growing tables during the spawning tick | `EnsureCapacity(prefab, count)` before it | The wave allocates nothing |
+| `CreateEntity` then `Set` per component of a kind | A prefab | One row copy, the target table cached per prefab |
+| A new `Prefab` per spawn | One prefab per kind, kept in a field | Its table lookup is cached after the first instance |
+| Templates as hidden entities | A `Prefab` | No query pays to skip them |
+
+Spawning 1,000 entities of four components (one tracked) and destroying them, one `Instantiate` per entity against
+one `Instantiate(prefab, span)` (`PrefabBenchmark`):
+
+<BenchTable bench="PrefabBenchmark" />
+
+Against Friflo.Engine.ECS, which clones a template entity of its store: 5,000 NPCs of six components spawned and
+destroyed:
+
+<BenchChart bench="OperationBenchmark" methods="EasyEcs_Instantiate,Friflo_Instantiate" title="Spawn 5,000 NPCs from a template and destroy them" />
+
+## What it costs [#what-it-costs]
+
+- **A prefab** is a small private world with one row per member, allocated once when you build it.
+- **`Instantiate`:** one row copy, O(components). The first instance finds the target table; the world caches it
+  per prefab table, so later instances go straight to it.
+- **`Instantiate(prefab, span)`:** O(count × components) with one gate pass and at most one table growth.
+- **A group:** O(members × components) per instance, plus the rewriting of member ids.
+- **`Clone`:** one row copy within the entity's own table.
+- **Allocations:** none after warm-up, except the list each `DynamicBuffer<T>` copy gets.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| An `Entity` field in a prefab's component | Every instance points at the same handle, of no world | [EECS017](/en/docs/guide/analyzer#eecs017) (warning); use an `EntityId` to a member |
+| An `EntityId` of a world's entity in a prefab | Becomes `EntityId.Null` in every instance | Set links after instantiating |
+| Filling a `DynamicBuffer<T>` value before `Set` | Every instance shares that list | [EECS012](/en/docs/guide/analyzer#eecs012); use `SetLoot(...)` |
+| `Instantiate` on a thread that does not own the world | Races with the owner | [EECS014](/en/docs/guide/analyzer#eecs014) |
+| `Instantiate` in a `[ForEach]` method without `Entity` or `World` | The pass assumes no structural change | [EECS013](/en/docs/guide/analyzer#eecs013) |
+| Changing a prefab while other threads instantiate it | Torn copies | Build prefabs at startup, then only read them |
+| `Clone()` on a destroyed entity | `InvalidOperationException` | Check `IsAlive` |
+
+## Related [#related]
+
+<Cards>
+  <Card title="Entities and components" href="/en/docs/guide/entities-and-components">
+    Handles, ids, `Set` / `Get` and the generated members prefabs share.
+  </Card>
+  <Card title="Dynamic buffers" href="/en/docs/guide/dynamic-buffers">
+    Lists per entity, which every instance gets a copy of.
+  </Card>
+  <Card title="Hierarchy" href="/en/docs/guide/hierarchy">
+    `ChildOf` links and cascading destroy for prefab groups.
+  </Card>
+  <Card title="Change tracking" href="/en/docs/guide/change-tracking">
+    New instances count as written: replication sends them.
+  </Card>
+</Cards>

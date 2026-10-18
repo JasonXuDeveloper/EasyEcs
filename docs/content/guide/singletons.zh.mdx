@@ -1,0 +1,173 @@
+---
+title: 单例组件
+seoTitle: "C# ECS 单例组件：时钟、配置、空间网格等 World 级状态"
+description: EasyEcs 里 World 级别的状态：每个 World 一份结构体值，用来放时钟、配置、计数器或空间网格。ISingletonComponent、[ForEach] 参数和 SingletonRef 句柄。
+icon: Globe
+---
+
+有些状态属于整个 World，而不属于某个实体：tick 时钟、对局配置、比分、空间网格。单例组件是实现了 `ISingletonComponent`
+的结构体，每个 World 恰好一份。系统自己不存状态（[EECS007](/zh/docs/guide/analyzer#eecs007)），World 级的状态就放在这里；
+它存在 World 里，两个线程上的两个 World 永远不会共享它。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  系统要读写的 World 级状态：时钟和帧间隔、启动时加载的配置、计数和合计、空间网格或查找表、系统每个 tick 要消费的输入队列。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  静态字段：进程里所有 World 都会共享它。每个实体自己的数据：那是组件。一组各自有状态的东西（对局里的玩家）：
+  它们应该是带标签的实体，查询和索引才能选中它们。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### 声明 [#declare]
+
+```csharp
+public record struct Clock(long Tick, float DeltaTime) : ISingletonComponent;
+public record struct Score(int Deaths) : ISingletonComponent;
+```
+
+</Step>
+<Step>
+
+### 添加、读、写 [#add-read-write]
+
+```csharp
+var world = new World();
+world.AddSingleton<Clock>() = new Clock(0, 1f / 30);     // 添加（已存在则重置为 default），返回 ref
+world.Clock.Tick++;                                       // 生成的成员：ref，没添加时抛异常
+ref var score = ref world.GetOrAddScore();                // 不存在就先加一个默认值
+score.Deaths++;
+```
+
+</Step>
+<Step>
+
+### 在系统里使用 [#in-systems]
+
+`[ForEach]` 方法用 `ref` 或 `in` 参数接收单例组件。每次遍历只解析一次（不存在就添加），而不是每个实体一次。
+
+```csharp
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health hp, ref Score score)
+    {
+        if (hp.Value > 0) return;
+        unit.SetDead();
+        score.Deaths++;
+    }
+}
+
+public class ClockSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.Clock.Tick++;   // 在 OnUpdate 里：通过系统的 World 访问
+}
+```
+
+</Step>
+</Steps>
+
+### API [#api]
+
+| 调用 | 生成成员 | 效果 |
+| --- | --- | --- |
+| `ref T AddSingleton<T>()` | | 添加；已存在时原地重置为 `default` |
+| `ref T GetSingleton<T>()` | `world.Clock` | 返回 ref；没添加时抛异常 |
+| `ref T GetOrAddSingleton<T>()` | `world.GetOrAddClock()` | 返回 ref，不存在就先加一个 `default` |
+| `GetOrAddSingleton<T>() = value` | `world.SetClock(tick, deltaTime)` | 设置值，不存在就添加 |
+| `bool HasSingleton<T>()` | `world.HasClock` | 是否存在 |
+| `bool TryGetSingleton<T>(out T)` | | 存在时拿到一份副本 |
+| `bool RemoveSingleton<T>()` | `world.RemoveClock()` | 移除；没添加过返回 false |
+| `SingletonRef<T> SingletonRef<T>()` | | [稳定句柄](#stable-handles)，不存在就添加 |
+
+```csharp
+world.SetScore(0);                                        // 按 record 的构造函数生成
+bool has = world.HasClock;
+if (world.TryGetSingleton<Clock>(out var copy)) Console.WriteLine(copy.Tick);
+world.RemoveScore();
+```
+
+生成成员遵循[生成成员](/zh/docs/guide/entities-and-components#generated-members)的规则：`SetX` 每个公开构造函数一个重载，没有字段的单例组件不生成 `GetOrAddX`。
+
+### 稳定句柄 [#stable-handles]
+
+和组件行不同，单例组件的存储永远不会移动。`world.SingletonRef<T>()` 返回一个 `SingletonRef<T>`（不存在就先添加），它的 `Value`
+是一个 `ref T`，完全不需要查找，只要单例组件还在就一直有效。在初始化时取一次保存下来，放在宿主的字段里或循环外的局部变量里。
+
+```csharp
+var clock = world.SingletonRef<Clock>();     // 初始化时取一次
+clock.Value.Tick++;                          // 之后：直接是 ref，不用查找
+```
+
+- 对已存在的单例组件调用 `AddSingleton<T>()` 会原地重置，句柄看到的就是重置后的值。
+- `RemoveSingleton<T>()` 会让句柄脱钩：通过旧句柄的写入再也到不了 World，即使之后又把它加回来也一样。这时要重新取句柄。
+- [快照](/zh/docs/guide/snapshots)把单例组件恢复到原来的存储里，`Restore` 之后句柄照样能用。
+- 生成的 `[ForEach]` job 每次遍历只解析一次单例参数；并行 job 会被复制到其他线程，它们持有的是 `SingletonRef<T>`。
+
+### 单例组件与线程 [#threads]
+
+- 单例组件属于自己的 World，每个线程一个 World 时彼此什么都不共享。
+- 开启 `WorldOptions.ParallelSystems` 时，用 `ref` 接收单例组件的系统算作写它：不会和读写同一个单例组件的其他系统排进同一个阶段。
+  只读时用 `in`。
+- `[ForEach(Parallel = true)]` 方法只能用 `in` 接收单例组件：用 `ref` 的话每个块都会抢着写（[EECS010](/zh/docs/guide/analyzer#eecs010)）。
+- 单例组件里有集合（格子网格、队列），又通过 `in` 参数修改它，会被当成读来调度：[EECS011](/zh/docs/guide/analyzer#eecs011) 要求改成 `ref`。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+| 别这样 | 这样做 | 原因 |
+| --- | --- | --- |
+| 循环里每个实体都调用 `GetSingleton<T>()` | 把它作为 `[ForEach]` 方法的参数 | 每次遍历只解析一次 |
+| 宿主代码每次调用都查找 | 初始化时保存一个 `SingletonRef<T>` | 不用查找 |
+| 系统只读单例组件却写成 `ref` | 改成 `in` | 系统可以共享并行阶段 |
+| 静态字段 | 单例组件 | 按 World 隔离，跟着 World 一起存档和快照 |
+
+通过 `GetSingleton<T>()` 读写单例组件 1,000 次，旁边是通过实体句柄写组件 1,000 次（`MicroBenchmarks`）：
+
+<BenchTable bench="MicroBenchmarks" methods="SingletonAccess,HandleAccess" />
+
+对 10 万个实体逐个写单例组件的一次遍历，对比 Friflo.Engine.ECS：
+
+<BenchChart bench="OperationBenchmark" methods="EasyEcs_Singleton,Friflo_Singleton" title="写单例组件的一次遍历，10 万实体" />
+
+## 开销 [#what-it-costs]
+
+- **存储：** 每个拥有该单例的 World 里，每种单例类型一个小盒子；和实体数量无关。
+- **`GetSingleton`、`HasSingleton`：** 一次数组读取加一次类型检查，O(1)。
+- **`SingletonRef<T>.Value`：** 读一个字段。
+- **`[ForEach]` 参数：** 每次遍历解析一次。
+- **添加或移除**单例组件和其他结构变更一样，要经过 World 的结构闸门。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 把状态放在系统字段里 | 其他系统看不到，移除系统就丢了，静态字段还会被所有 World 共享 | [EECS007](/zh/docs/guide/analyzer#eecs007) |
+| 用 class 实现 `ISingletonComponent` | 编译不过 | [EECS006](/zh/docs/guide/analyzer#eecs006) |
+| 还没添加就 `GetSingleton<T>()` | 抛 `InvalidOperationException` | 初始化时添加，或者用 `GetOrAddSingleton` |
+| 并行方法里用 `ref` 接收单例组件 | 块之间发生竞争 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
+| 通过 `in` 修改单例组件里的集合 | 被当成读来调度 | [EECS011](/zh/docs/guide/analyzer#eecs011) |
+| `RemoveSingleton` 之后还通过旧的 `SingletonRef<T>` 写入 | 写入不会到达任何地方 | 重新添加后取新句柄 |
+| 在单例组件里放一个玩家列表 | 和实体、查询能做的事重复 | 把玩家做成带标签的实体 |
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+    单例组件参数，每次遍历解析一次。
+  </Card>
+  <Card title="ECS 原则" href="/zh/docs/ecs-principles">
+    为什么系统无状态，状态都是数据。
+  </Card>
+  <Card title="线程" href="/zh/docs/guide/threading">
+    每线程一个 World，以及并行阶段。
+  </Card>
+  <Card title="快照" href="/zh/docs/guide/snapshots">
+    单例组件随 World 一起捕获和恢复。
+  </Card>
+</Cards>

@@ -1,0 +1,180 @@
+---
+title: ref 与 await
+seoTitle: "C# ECS 里的 ref 与 async：组件 ref 什么时候有效"
+description: 组件是存在表里的结构体，要通过 ref 修改。哪些 ref 能跨过结构变更，为什么任何 ref 都不能跨过 await，异步代码怎样安全地访问 World。
+icon: Link
+---
+
+组件是存放在表的列里的结构体。`entity.Get<T>()` 返回指向这一列的 `ref`：改它就是改实体，不复制，也不用再查一次。改副本则什么都不会变。
+而实体变化时行会移动，所以 `ref` 只在下一次结构变更之前有效，也就永远不能跨过 `await`：`await` 之后要通过 `Entity` 句柄重新获取数据，
+句柄还会告诉你实体是否还在。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  组件的每一次写入：`ref var hp = ref unit.Get<Health>()`、生成的 `unit.Health.Value -= 10`、`[ForEach]` 方法的 `ref` 参数。
+  在一个方法内短暂持有、在下一次结构变更之前用完的 ref。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  跨时间保存数据：把 `ref` 放进字段、跨过 `await`、跨过结构变更。改为保存 `Entity`（或它的 `EntityId`），用的时候再查。
+  读被追踪的组件：用 `Read<T>()` 或生成的属性，读才不会被记成写。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+### 副本与 ref [#copies-and-refs]
+
+```csharp
+var copy = entity.Get<Health>();       // 副本：下面的修改会丢失
+copy.Value -= 10;
+
+ref var hp = ref entity.Get<Health>(); // 指向表的 ref
+hp.Value -= 10;
+entity.Get<Health>().Value -= 10;      // 同上，写在一行
+entity.Health.Value -= 10;             // 同上，用生成的成员
+```
+
+### ref 为什么会失效 [#why-a-ref-expires]
+
+指向表的 `ref` 只在下一次结构变更之前有效，不管是哪个实体的变更：
+
+- 实体获得一个所在表里没有列的组件时，它的行会被复制到另一张表；
+- 实体离开一张表时，表的最后一行会补到它的位置；
+- 表满了扩容时会重新分配。
+
+这时旧的 `ref` 会悄悄指向一份过期的副本，或者别的实体的数据。哪次变更会挪哪一行属于实现细节，变更也可能来自你的代码或别的系统，
+所以要把每一次结构变更都当作可能让你的 ref 失效。
+
+### 遍历内部 [#inside-passes]
+
+在 `[ForEach]` 方法、`ForEach` job 和 `Query` 循环里可以放心用 `ref`：每个实体拿到的都是新的 ref。
+
+- **`[ForEach]` 方法（或 `ForEach` job）的 `ref` 参数**，即使方法体改变了当前实体的原型，也仍然可写：遍历会在方法返回后把这些写入复制到实体的新行。
+  `in` 参数看到的仍是变更前的值。
+- **其他任何 `ref`**（来自 `entity.Get<T>()`、`Query` 循环的元素，或者指向别的实体）只保证在下一次结构变更之前有效。要么在变更前写完，要么变更后重新获取。
+
+```csharp
+public record struct Target(EntityId Id) : IComponent;
+
+public class StrikeSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Strike(Entity attacker, in Target target, World world)
+    {
+        if (!world.TryGetEntity(target.Id, out var victim) || !victim.HasHealth) return;
+        ref var hp = ref victim.Get<Health>();
+        hp.Value -= 10;                                   // 先写……
+        if (hp.Value <= 0) victim.SetDead();              // ……再改结构：hp 此后可能已经过期
+        attacker.Remove<Target>();                        // 也是结构变更；之后不再使用 Get 拿到的 ref
+    }
+}
+```
+
+### 跨过 `await` [#across-await]
+
+C# 不允许 `ref` 局部变量跨过 `await` 存活；也不要借助 `Unsafe`、指针或 `Span` 字段偷偷带过去。`await` 期间别的代码在运行：
+它可能添加实体或组件（移动、重新分配存储），也可能销毁你的实体并复用它的索引。所以：
+
+1. `await` 之前先读出需要的数据；
+2. `await` 之后通过 `Entity` 句柄重新校验，句柄带版本检查；
+3. 通过重新获取的 `ref` 写回。
+
+```csharp
+public record struct Account(long Id) : IComponent;
+
+public interface IShop
+{
+    ValueTask<int> RedeemPotionAsync(long accountId);
+}
+
+public static class Potions
+{
+    // 在 World 的所属线程上运行，并在该线程上恢复（单线程的服务器主循环）
+    public static async ValueTask HealFromStoreAsync(Entity player, IShop shop)
+    {
+        long id = player.Read<Account>().Id;              // await 之前先读出需要的数据
+        int heal = await shop.RedeemPotionAsync(id);      // 这期间 World 可能已经变了
+        if (player.IsAlive && player.HasHealth)           // await 之后重新校验
+            player.Get<Health>().Value += heal;           // 指向当前存储的新 ref
+    }
+}
+```
+
+只有当 `await` 之后的代码仍在 World 的所属线程上运行时，这样写才正确，比如带有单线程 `SynchronizationContext` 的服务器主循环。
+如果续体可能在线程池上恢复，它就完全不能碰 World：把结果当作数据交给所属线程，由一个系统来应用。
+
+```csharp
+using System.Collections.Concurrent;
+
+public record struct PotionRedeemed(EntityId Player, int Heal);   // 消息，不是组件
+
+public sealed class ApplyRedemptions(ConcurrentQueue<PotionRedeemed> inbox) : EcsSystem
+{
+    private readonly ConcurrentQueue<PotionRedeemed> _inbox = inbox;   // 任何线程上的异步代码都可以往里放
+
+    protected override void OnUpdate()
+    {
+        while (_inbox.TryDequeue(out var done))
+            if (World.TryGetEntity(done.Player, out var player) && player.HasHealth)
+                player.Get<Health>().Value += done.Heal;              // 在所属线程上、更新过程中执行
+    }
+}
+```
+
+所属线程和来自其他线程的输入，详见[线程](/zh/docs/guide/threading#input-from-other-threads)。
+
+### 例外：单例组件 [#singletons]
+
+单例组件的存储永远不会移动，所以 `world.SingletonRef<T>()` 返回的句柄可以保存下来，放在宿主的字段里，或者跨 tick 使用
+（见[单例组件](/zh/docs/guide/singletons#stable-handles)）。它依然是所属线程的数据：可以保存，但只能在所属线程上访问。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+| 别这样 | 这样做 | 原因 |
+| --- | --- | --- |
+| 先 `Has<T>()` 再 `Get<T>()` | `ref var x = ref e.TryGetRef<T>(out bool found)` | 只查一次 |
+| 一个方法里多次 `Get<T>()` | 一个 `ref` 局部变量，在结构变更之前用完 | 只查一次 |
+| 用 `Get<T>()` 读被追踪的组件 | `Read<T>()` 或生成的属性 | 不会被记成写入 |
+| 每次访问都按 id 查找 | 每个方法里用 `TryGetEntity` 查一次 | 之后句柄访问不用再查 |
+| 宿主代码每次调用都查单例组件 | 初始化时保存一个 `SingletonRef<T>` | 完全不用查找 |
+
+通过实体句柄写组件 1,000 次、每次先用 `TryGetEntity` 按 id 查找再写 1,000 次、访问单例组件 1,000 次（`MicroBenchmarks`）：
+
+<BenchTable bench="MicroBenchmarks" methods="HandleAccess,TryGetEntity,SingletonAccess" />
+
+## 开销 [#what-it-costs]
+
+- **一个 `ref`** 就是指向列的指针：不复制，拿到之后也不再查找。
+- **通过句柄获取：** 实体那条 16 字节的记录，再加表查找结构的一条缓存行。
+- **`await` 之后重新校验：** `IsAlive` 就是读一条记录、比较一次版本。
+- **把 `[ForEach]` 的写入带过结构变更：** 只对表发生变化的实体，复制一次被写的组件。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 改副本（`var hp = e.Get<Health>()`） | 表里的值没变 | 代码审查：写成 `ref var` |
+| `ref` 局部变量跨过 `await` | 编译不过 | C# 编译器 |
+| 结构变更之后还在用之前的 `ref` | 指向过期副本或别的实体的行 | 代码审查：重新获取 |
+| 只存原始索引，不存 `EntityId` | 会指向之后复用该索引的实体 | 存 `EntityId`，`TryGetEntity` 会校验版本 |
+| 组件里存 `Entity` | 变成托管列 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告） |
+| 按值拿 `DynamicBuffer<T>` | 写进共享的列表，也不记 tick | [EECS012](/zh/docs/guide/analyzer#eecs012) |
+| `await` 在线程池上恢复后还去访问 World | 和所属线程发生竞争 | 把结果当数据交回去；`Task.Run` 里的 lambda 由 [EECS014](/zh/docs/guide/analyzer#eecs014) 检查 |
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="结构变更" href="/zh/docs/guide/structural-changes">
+    什么会让行移动，遍历能看到什么。
+  </Card>
+  <Card title="实体与组件" href="/zh/docs/guide/entities-and-components">
+    句柄、`EntityId`，以及 `Get` / `Read` / `TryGetRef` 这一族 API。
+  </Card>
+  <Card title="线程" href="/zh/docs/guide/threading">
+    所属线程，以及来自其他线程的输入。
+  </Card>
+  <Card title="单例组件" href="/zh/docs/guide/singletons">
+    唯一一种句柄可以保存下来的存储。
+  </Card>
+</Cards>
