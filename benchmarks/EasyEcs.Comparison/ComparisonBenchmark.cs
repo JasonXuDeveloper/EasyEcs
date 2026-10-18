@@ -7,7 +7,7 @@ using EcsComparison.FrifloPort;
 namespace EcsComparison;
 
 /// <summary>
-/// One server tick of the headline world (EasyEcs.Benchmark/WorldSimulation.cs) in each library: same rules,
+/// One server tick of the headline world (benchmarks/EasyEcs.Benchmark/WorldSimulation.cs) in each library: same rules,
 /// Rng, spawn mix and entity counts, single-threaded, each library used through its recommended fast path.
 /// Each case builds only its own world; setup warms it up for 200 ticks, requires a busy world and requires the
 /// counters to match an EasyEcs reference run of the same length (see Check.Matches).

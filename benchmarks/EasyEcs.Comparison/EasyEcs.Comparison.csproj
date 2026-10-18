@@ -18,8 +18,8 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\EasyEcs.Core\EasyEcs.Core.csproj"/>
-        <ProjectReference Include="..\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+        <ProjectReference Include="..\..\src\EasyEcs.Core\EasyEcs.Core.csproj"/>
+        <ProjectReference Include="..\..\src\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
         <!-- the EasyEcs side is the headline scenario itself, compiled unchanged -->
         <Compile Include="..\EasyEcs.Benchmark\WorldSimulation.cs" Link="Scenario\WorldSimulation.cs"/>
         <Compile Include="..\EasyEcs.Benchmark\BenchmarkConfig.cs" Link="BenchmarkConfig.cs"/>

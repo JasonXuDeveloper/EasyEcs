@@ -3,7 +3,7 @@ using Rng = EasyEcs.Benchmark.Scenario.Rng;
 
 namespace EcsComparison;
 
-// The rules of EasyEcs.Benchmark/WorldSimulation.cs, written once so every port uses the same constants.
+// The rules of benchmarks/EasyEcs.Benchmark/WorldSimulation.cs, written once so every port uses the same constants.
 // The EasyEcs side runs that file unchanged; Rng is shared with it.
 
 /// <summary>Constants and spawn rolls of the headline scenario (mirrors WorldSimulation.cs).</summary>

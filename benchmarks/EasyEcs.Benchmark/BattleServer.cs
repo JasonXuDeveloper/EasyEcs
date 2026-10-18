@@ -8,7 +8,7 @@ using System.Runtime.InteropServices;
 namespace EasyEcs.Benchmark.Showcase;
 
 // A battle server that uses every feature of EasyEcs the way users should: plain data, one job per system, state
-// changes as data. doc/example.md shows this file; BattleServerBenchmark measures it and BattleServerTests check it.
+// changes as data. docs/content/example.md shows this file; BattleServerBenchmark measures it and BattleServerTests check it.
 
 public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;

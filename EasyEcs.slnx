@@ -1,9 +1,9 @@
 <Solution>
-  <Project Path="EasyEcs.Core/EasyEcs.Core.csproj" />
-  <Project Path="EasyEcs.Generator/EasyEcs.Generator.csproj" />
-  <Project Path="EasyEcs.CodeFixes/EasyEcs.CodeFixes.csproj" />
-  <Project Path="EasyEcs.UnitTest/EasyEcs.UnitTest.csproj" />
-  <Project Path="EasyEcs.Benchmark/EasyEcs.Benchmark.csproj" />
-  <Project Path="EasyEcs.Benchmark.Plugin/EasyEcs.Benchmark.Plugin.csproj" />
-  <Project Path="EasyEcs.Comparison/EasyEcs.Comparison.csproj" />
+  <Project Path="src/EasyEcs.Core/EasyEcs.Core.csproj" />
+  <Project Path="src/EasyEcs.Generator/EasyEcs.Generator.csproj" />
+  <Project Path="src/EasyEcs.CodeFixes/EasyEcs.CodeFixes.csproj" />
+  <Project Path="tests/EasyEcs.UnitTest/EasyEcs.UnitTest.csproj" />
+  <Project Path="benchmarks/EasyEcs.Benchmark/EasyEcs.Benchmark.csproj" />
+  <Project Path="benchmarks/EasyEcs.Benchmark.Plugin/EasyEcs.Benchmark.Plugin.csproj" />
+  <Project Path="benchmarks/EasyEcs.Comparison/EasyEcs.Comparison.csproj" />
 </Solution>

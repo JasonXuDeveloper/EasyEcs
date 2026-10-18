@@ -63,7 +63,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             entity.Append($$"""
                     /// <summary>
                     /// Add or overwrite {{what}} with the given value{{(n == 1 ? "" : "s")}}, with at most one row copy. Returns the entity
-                    /// for chaining. O({{n}}) amortized. Owner thread only (see doc/guide/threading.md).
+                    /// for chaining. O({{n}}) amortized. Owner thread only (see docs/content/guide/threading.md).
                     /// </summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public Entity Set<{{tps}}>({{values}})
@@ -89,7 +89,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                     /// <summary>
                     /// Remove {{what}}; missing components are ignored. The entity keeps its row (no move). Returns the entity
-                    /// for chaining. O({{n}}). Owner thread only (see doc/guide/threading.md).
+                    /// for chaining. O({{n}}). Owner thread only (see docs/content/guide/threading.md).
                     /// </summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public Entity Remove<{{tps}}>()
@@ -139,7 +139,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             world.Append($$"""
                     /// <summary>
                     /// Create an entity with {{what}} placed directly in its final archetype (no intermediate moves).
-                    /// O({{n}}) amortized. Owner thread only (see doc/guide/threading.md).
+                    /// O({{n}}) amortized. Owner thread only (see docs/content/guide/threading.md).
                     /// </summary>
                     [MethodImpl(MethodImplOptions.NoInlining)] // keeps the loops that call it lean
                     public Entity CreateEntity<{{tps}}>({{values}})
@@ -165,7 +165,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// <summary>
                     /// Create <c>entities.Length</c> entities with {{what}} (the same value{{(n == 1 ? "" : "s")}} for each), placed directly in
                     /// their final archetype, and write their handles to <paramref name="entities"/>. One pass through the
-                    /// structural gate and at most one table growth: O(count × {{n}}). Owner thread only (see doc/guide/threading.md).
+                    /// structural gate and at most one table growth: O(count × {{n}}). Owner thread only (see docs/content/guide/threading.md).
                     /// </summary>
                     public void CreateEntities<{{tps}}>(Span<Entity> entities, {{values}})
                 {{cons}}
@@ -372,7 +372,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                     /// <summary>
                     /// Destroy every alive entity having all of <c>{{tps}}</c> (and matching <paramref name="filter"/>) and return
-                    /// how many. One pass through the structural gate: O(matching archetypes + rows). Owner thread only (see doc/guide/threading.md).
+                    /// how many. One pass through the structural gate: O(matching archetypes + rows). Owner thread only (see docs/content/guide/threading.md).
                     /// </summary>
                     public int DestroyEntities<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}

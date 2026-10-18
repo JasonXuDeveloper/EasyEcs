@@ -4,7 +4,7 @@ using EasyEcs.Benchmark.Scenario;
 namespace EcsComparison;
 
 /// <summary>
-/// EasyEcs: the headline scenario (EasyEcs.Benchmark/WorldSimulation.cs, compiled in unchanged): [ForEach] systems,
+/// EasyEcs: the headline scenario (benchmarks/EasyEcs.Benchmark/WorldSimulation.cs, compiled in unchanged): [ForEach] systems,
 /// immediate structural changes during iteration, counters in a singleton.
 /// </summary>
 public sealed class EasyEcsSimulation(int entities) : ISimulation

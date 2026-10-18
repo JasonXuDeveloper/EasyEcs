@@ -4,7 +4,7 @@ using EasyEcs.Benchmark.Showcase;
 namespace EasyEcs.Benchmark;
 
 /// <summary>
-/// The battle server example (doc/example.md) (<see cref="BattleServer"/>), which uses every feature; the tick runs a
+/// The battle server example (docs/content/example.md) (<see cref="BattleServer"/>), which uses every feature; the tick runs a
 /// parallel [ForEach], parallel systems, batch methods, immediate structural changes, disabled components, cleanup
 /// components, a hierarchy, WithAny, change tracking (replication every third tick), groups, an ordered index, a
 /// relation, Maybe, system groups, update intervals and phases, ordering, singletons, timings. One operation is one
