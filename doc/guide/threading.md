@@ -62,27 +62,28 @@ thread (a queue the owner thread drains), which applies it before or between upd
 
 ## Order of systems
 
-The order is explicit and deterministic: `Update()` runs systems in ascending `Priority`, and systems with the same
-priority in registration order. Systems never call each other; a system that consumes what another produces gets a
-higher priority ([ECS principles](../ecs-principles.md#3-systems-never-reference-systems)).
+The order is explicit and deterministic: `Update()` runs systems in registration order, with each system that
+carries `[UpdateBefore<T>]` / `[UpdateAfter<T>]` moved just before or after `T`. Systems never call each other; a
+system that consumes what another produces is registered after it or says `[UpdateAfter<Producer>]`
+([ECS principles](../ecs-principles.md#3-systems-never-reference-systems)).
 
 Structural changes apply immediately, so a later system in the same update already sees an entity that an earlier
 one created, destroyed or tagged. There are no command buffers to play back and no "end of frame" sync points.
 
-Dependencies are expressed through data and `Priority`, never through `before`/`after` links between systems:
+Dependencies are expressed through data and the order of systems, never through calls between systems:
 
-- **A produces, B consumes a component** (A writes `Velocity`, B reads it): give B a higher priority, or register it
-  after A. Even at the same priority with `ParallelSystems`, they conflict on `Velocity`, so they are in different
-  stages and A finishes first.
+- **A produces, B consumes a component** (A writes `Velocity`, B reads it): register B after A, or give B
+  `[UpdateAfter<A>]`. With `ParallelSystems` they conflict on `Velocity` anyway, so they are in different stages and
+  A finishes first.
 - **A changes structure, B reacts** (A adds `Dead`, B destroys dead entities): A needs an `Entity` parameter to add the
   tag, so it runs alone; B runs after it.
 - **A and B touch disjoint data**: their order cannot change the result, so `ParallelSystems` may run them together.
 
-In every case the result of an update equals running the systems one by one in `Priority` / registration order.
+In every case the result of an update equals running the systems one by one in that order.
 
 ## Parallel systems
 
-With `WorldOptions.ParallelSystems = true`, systems of the same priority that do not conflict run at the same time.
+With `WorldOptions.ParallelSystems = true`, systems with no order and no conflict between them run at the same time.
 Nothing is left to discipline: the generator declares every `[ForEach]` system's access from its parameters, and the
 scheduler only puts non-conflicting systems together.
 
@@ -98,25 +99,26 @@ Two systems conflict when one writes a component or singleton the other reads or
 A system "runs alone" when it can reach the world beyond its parameters: through an `Entity` it can read any
 component or make structural changes, so it never shares a stage.
 
-The systems of one priority are split into **stages of consecutive, pairwise non-conflicting systems**. Stages run
-one after another; the systems of a stage run at the same time.
+The systems are split into **stages**: a system goes to the stage after the latest one holding a system it must
+follow, by an `[UpdateBefore<T>]` / `[UpdateAfter<T>]` or by an earlier system it conflicts with. Stages run one after
+another; the systems of a stage run at the same time.
 
 ```csharp
 public record struct Body(float X, float Y, float Vx, float Vy) : IComponent;
 public record struct Vitals(int Health, int Max) : IComponent;
 public record struct Alarms(int Count) : ISingletonComponent;
 
-public partial class MoveBodies : EcsSystem        // writes Body
+public class MoveBodies : EcsSystem        // writes Body
 {
     [ForEach] static void Move(ref Body b) { b.X += b.Vx; b.Y += b.Vy; }
 }
 
-public partial class RegenerateHealth : EcsSystem  // writes Vitals
+public class RegenerateHealth : EcsSystem  // writes Vitals
 {
     [ForEach] static void Regenerate(ref Vitals v) => v.Health = Math.Min(v.Health + 1, v.Max);
 }
 
-public partial class LowHealthAlarm : EcsSystem    // reads Vitals: conflicts with RegenerateHealth
+public class LowHealthAlarm : EcsSystem    // reads Vitals: conflicts with RegenerateHealth
 {
     [ForEach] static void Count(in Vitals v, ref Alarms alarms) { if (v.Health < 10) alarms.Count++; }
 }
@@ -134,17 +136,18 @@ flowchart LR
     B1 --> B2
 ```
 
-Because stages are consecutive, registration order keeps its meaning: of two conflicting systems, the one registered
-first always finishes first, and the result is the same as a sequential update. A system that should run alone or in
-another order gets its own priority.
+The order keeps its meaning: of two conflicting or ordered systems, the earlier one always finishes first, and the
+result is the same as a sequential update. A system that must run after another whatever their access says
+`[UpdateAfter<T>]`.
 
 Execution is allocation-free: the calling thread works through a stage together with up to
 `MaxDegreeOfParallelism - 1` reusable thread-pool work items (no `Parallel.For` closures, no tasks). Lower
 `MaxDegreeOfParallelism` when several worlds, or IO threads, share the cores: a stage then takes fewer of them. The first
-exception thrown in a stage is rethrown on the calling thread after the stage (later ones are dropped); with a
-`SystemError` subscriber every exception is reported instead, possibly from a thread-pool thread.
+exception thrown in a stage is rethrown on the calling thread after the stage (later ones are dropped); with
+`WorldOptions.SystemErrors = SystemErrorPolicy.Disable` each failing system is switched off with its exception in
+`system.Error` instead.
 
-When to turn it on: a world with several heavy, independent systems per priority and spare cores. Each stage of several systems costs a
+When to turn it on: a world with several heavy, independent systems and spare cores. Each stage of several systems costs a
 hand-off to the thread pool (microseconds), so it pays for systems that iterate thousands of entities, not for a
 handful. For a server, one world per thread usually uses the cores better: see
 [Performance](../performance.md#benchmarks) (`ParallelSystemsBenchmark`, `MultiWorldBenchmark`).
@@ -213,7 +216,7 @@ drained by a system.
 
 | Library | Order of systems | Systems in parallel | How conflicts are avoided |
 |---|---|---|---|
-| **EasyEcs** | `Priority`, then registration order | Non-conflicting systems of one priority (`ParallelSystems`); within one method (`[ForEach(Parallel = true)]`, chunks of rows) | Access generated from `ref`/`in` parameters; conflicting systems never share a stage; the analyzer rejects parallel methods that could race (EECS010) and writes through `in` parameters (EECS011) |
+| **EasyEcs** | Registration order, `[UpdateBefore<T>]` / `[UpdateAfter<T>]` | Systems with no order and no conflict (`ParallelSystems`); within one method (`[ForEach(Parallel = true)]`, chunks of rows) | Access generated from `ref`/`in` parameters; conflicting systems never share a stage; the analyzer rejects parallel methods that could race (EECS010) and writes through `in` parameters (EECS011) |
 | Entitas | Order added to `Feature`/`Systems` | No; a `JobSystem` splits one system's entities across threads | You keep job bodies independent |
 | Arch | Your own call order (Arch.System: group order) | Within one query (`ParallelQuery`, chunk jobs) | You keep parallel query bodies independent |
 | Friflo.Engine.ECS | `SystemRoot` / `SystemGroup` order | Within one query (`RunParallel`, chunk tasks) | You keep parallel query bodies independent |
@@ -221,5 +224,5 @@ drained by a system.
 | Bevy (Rust) | Ambiguous unless ordered (`before`/`after`) | Any systems whose access does not conflict | Access read from parameter types by the scheduler |
 | Unity DOTS | `UpdateBefore`/`UpdateAfter` attributes in groups | Jobs | Read/write handles plus the job safety system (dependencies) |
 
-EasyEcs takes the access-based model of Bevy and Unity DOTS, but keeps the order total and deterministic: within a
-priority it only runs systems together when their access proves that the order cannot matter.
+EasyEcs takes the access-based model of Bevy and Unity DOTS, but keeps the order total and deterministic: it only runs
+systems together when no ordering names them and their access proves that the order cannot matter.

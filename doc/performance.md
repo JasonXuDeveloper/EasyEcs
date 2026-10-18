@@ -35,7 +35,7 @@ The JIT does not vectorize loops by itself, and data-dependent branches mispredi
 system:
 
 ```csharp
-public partial class BounceSystem : EcsSystem
+public class BounceSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
     static void Move(ref Position p, ref Velocity v)
@@ -55,7 +55,7 @@ branches into a mask:
 using System.Numerics;
 using System.Runtime.InteropServices;
 
-public partial class BounceSimdSystem : EcsSystem
+public class BounceSimdSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
     static void Move(Span<Position> positions, Span<Velocity> velocities)
@@ -134,7 +134,7 @@ without it are skipped 64 at a time, and adding or removing it flips a presence 
 ```csharp
 public record struct Unit(int Hp, bool Stunned) : IComponent;   // regular: every system tests the flag
 
-public partial class StunnedFlagSystem : EcsSystem
+public class StunnedFlagSystem : EcsSystem
 {
     [ForEach]
     static void Act(ref Unit unit)
@@ -144,7 +144,7 @@ public partial class StunnedFlagSystem : EcsSystem
     }
 }
 
-public partial class StunnedTagSystem : EcsSystem   // fastest: the filter does the test
+public class StunnedTagSystem : EcsSystem   // fastest: the filter does the test
 {
     [ForEach, Without<Stunned>]
     static void Act(ref Health hp) => hp = hp with { Value = hp.Value + 1 };
@@ -167,7 +167,7 @@ either way, with a tenth of its 100,000 healths written per tick).
 public record struct Shield(int Value) : IComponent, ITrackChanges;
 public record struct ShieldReplica(int Value) : IComponent;
 
-public partial class ShieldReplicationSystem : EcsSystem
+public class ShieldReplicationSystem : EcsSystem
 {
     [ForEach, Changed<Shield>]
     static void Send(in Shield shield, ref ShieldReplica replica) => replica = new ShieldReplica(shield.Value);
@@ -181,7 +181,7 @@ the tags; comparing every row with what clients last received costs a scan. A tr
 stamps its row, so `[Removed<T>]` visits only the entities that lost it, with the same skipping as `[Changed<T>]`:
 
 ```csharp
-public partial class ShieldLossSystem : EcsSystem
+public class ShieldLossSystem : EcsSystem
 {
     [ForEach, Removed<Shield>]                       // Shield : ITrackChanges (above)
     static void Send(ref ShieldReplica replica) => replica = new ShieldReplica(0);
@@ -279,15 +279,14 @@ All numbers come from BenchmarkDotNet. The headline benchmarks simulate a real s
 
   Setup asserts that the world is busy: hits, deaths, spawns and AOI changes all happen.
 - **`BattleServerBenchmark.Tick`** is one tick of the README's battle server (`BattleServer.cs`), which uses every
-  feature: a parallel `[ForEach]` (NPC steering), two parallel systems of one priority (movement, vectorized, and
-  mana), statuses added and removed mid-pass, `WithAny`, deaths, respawns and projectiles, a value index (players
+  feature: a parallel `[ForEach]` (NPC steering), two systems that run at once (movement, vectorized, and mana), statuses added and removed mid-pass, `WithAny`, deaths, respawns and projectiles, a value index (players
   per zone) and a relation (projectiles of a player), NPCs spawned from prefabs, an update interval, per-system timings,
   and replication every third tick in its own system group (changed health, fires lit and gone out with
   `[Changed<Burning>]` / `[Removed<Burning>]`, changed bags). `BattleServerTests` check the same
   world and the host's queries, struct jobs, snapshots and error handling.
 - **`MultiWorldBenchmark.TickAllWorlds`** runs one world per core, each on its own long-lived thread. This is the
   recommended server layout.
-- **`ParallelSystemsBenchmark.Tick`** is one update of four `[ForEach]` systems of one priority with disjoint access
+- **`ParallelSystemsBenchmark.Tick`** is one update of four `[ForEach]` systems with no order and disjoint access
   (movement, health and mana regeneration, cooldowns) over 100,000 entities, with `WorldOptions.ParallelSystems` off
   and on. With it on, the four systems form one stage and run at the same time; it shows what a parallel stage costs
   and gains against a sequential update.

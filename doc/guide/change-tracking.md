@@ -22,7 +22,7 @@ it visits the entities that lost `T` since then ([removal detection](#removal-de
 public record struct Health(int Value) : IComponent, ITrackChanges;
 public record struct Replica(int Value) : IComponent;
 
-public partial class Replicate : EcsSystem
+public class Replicate : EcsSystem
 {
     // Only entities whose Health was written since this system's previous run (all of them on its first run).
     [ForEach, Changed<Health>]
@@ -50,8 +50,8 @@ A [`DynamicBuffer<T>`](dynamic-buffers.md) is a list that cannot change any othe
 
 ## Ticks
 
-`world.ChangeTick` grows by one per stage of systems (the systems of one priority that may run at once, or a single
-system) and once after each update, so writes between updates are newer than every system's last run. `system.LastRunTick` is the tick a system last ran at; a `[Changed<T>]` method selects rows written after it, so
+`world.ChangeTick` grows by one per stage of systems (the systems with no order and no conflict between them that may run
+at once, or a single system) and once after each update, so writes between updates are newer than every system's last run. `system.LastRunTick` is the tick a system last ran at; a `[Changed<T>]` method selects rows written after it, so
 a system's own writes of one run are not changes for its next run. Systems that write `T` never run in the same
 parallel stage as a `[Changed<T>]` or `[Removed<T>]` reader (the method declares a read of `T`).
 
@@ -95,7 +95,7 @@ Replication has to tell clients when something goes away too: a fire went out, a
 public record struct Burning(int Ticks) : IComponent, ITrackChanges;   // tracked: removals are recorded too
 public record struct Replica(int Health, bool Burning) : IComponent;
 
-public partial class ReplicateFire : EcsSystem
+public class ReplicateFire : EcsSystem
 {
     [ForEach, Changed<Burning>]                     // set on fire (or the fire written) since the last run
     static void Lit(ref Replica replica) => replica.Burning = true;

@@ -28,7 +28,7 @@ rules:
   flips a presence bit) is visited if the pass has not reached its row yet.
 
 ```csharp
-public partial class DeathSystem : EcsSystem
+public class DeathSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Score score)

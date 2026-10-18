@@ -59,7 +59,7 @@ happens to the children of a destroyed parent is a rule of your game, so write i
 change:
 
 ```csharp
-public partial class DestroyOrphans : EcsSystem
+public class DestroyOrphans : EcsSystem
 {
     // Destroy the children of dying ships before the ships go (instance method: it runs alone).
     [ForEach, With<Dead>]

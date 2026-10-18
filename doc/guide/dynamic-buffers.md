@@ -22,7 +22,7 @@ tracked change: `[Changed<DynamicBuffer<T>>]` visits only the entities whose lis
 public record struct Loot(int Item);
 public record struct Sent(int Items) : IComponent;
 
-public partial class Pickup : EcsSystem
+public class Pickup : EcsSystem
 {
     [ForEach, With<Player>]
     private static void Collect(ref DynamicBuffer<Loot> bag)           // ref: a tracked write
@@ -32,7 +32,7 @@ public partial class Pickup : EcsSystem
     }
 }
 
-public partial class SendBags : EcsSystem
+public class SendBags : EcsSystem
 {
     [ForEach, Changed<DynamicBuffer<Loot>>]                             // only bags written since the last run
     private static void Send(in DynamicBuffer<Loot> bag, ref Sent sent)

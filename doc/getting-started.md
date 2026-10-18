@@ -55,7 +55,7 @@ using var world = new World(new WorldOptions { InitialEntityCapacity = 10_000 })
 | `WorldOptions` | Default | Meaning |
 |---|---|---|
 | `InitialEntityCapacity` | 1024 | Pre-sized entity array (one 16-byte record per id), so it does not grow at run time. Archetype tables grow on their own, doubling. |
-| `ParallelSystems` | `false` | Run non-conflicting systems of equal priority at the same time (see [Threading](guide/threading.md#parallel-systems)). |
+| `ParallelSystems` | `false` | Run systems with no order and no conflict between them at the same time (see [Threading](guide/threading.md#parallel-systems)). |
 | `MaxDegreeOfParallelism` | processor count | Threads one parallel run uses at most: systems run by `ParallelSystems`, and the chunks of `[ForEach(Parallel = true)]`, `ForEachParallel` and `ForEachEntityParallel` (those run in chunks whether `ParallelSystems` is on or not). Lower it when several worlds or IO threads share the cores. |
 | `MeasureSystems` | `false` | Record each system's run count and time (`system.Stats`). |
 
@@ -143,10 +143,10 @@ Queries allocate nothing. Build filters once and keep them in `static readonly` 
 ## 7. Write a system with `[ForEach]`
 
 A system is a class deriving from `EcsSystem` with one responsibility. Mark a method `[ForEach]` and it runs once
-per entity that has its component parameters. The class must be `partial` (the generator adds the job).
+per entity that has its component parameters. The generator writes the job beside the class: no `partial` needed.
 
 ```csharp
-public partial class MovementSystem : EcsSystem
+public class MovementSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
     static void Move(ref Position p, in Velocity v) => p = p with { X = p.X + v.X, Y = p.Y + v.Y };
@@ -176,7 +176,7 @@ configuration) is a singleton: a struct implementing `ISingletonComponent`.
 ```csharp
 public record struct Tally(long Tick, int Deaths, int Afflicted) : ISingletonComponent;
 
-public partial class DeathSystem : EcsSystem
+public class DeathSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity entity, in Health hp, ref Tally tally)   // resolved once per pass
@@ -207,15 +207,14 @@ see [Structural changes during iteration](guide/structural-changes.md). More on 
 
 ## 9. Order systems and react to state
 
-Systems run in ascending `Priority` (registration order breaks ties). They never call each other
+Systems run in registration order; `[UpdateBefore<T>]` / `[UpdateAfter<T>]` move a system before or after another. They never call each other
 ([EECS008](guide/analyzer.md#eecs008)); they cooperate through data. `DeathSystem` marks `Dead`; a later system
 reacts to that state without `DeathSystem` knowing it exists:
 
 ```csharp
+[UpdateAfter<DeathSystem>]                   // whatever the registration order
 public sealed class CorpseSystem : EcsSystem
 {
-    public override int Priority => 10;      // after the default priority 0
-
     protected override void OnUpdate() => World.DestroyEntities<Dead>();   // every corpse in one pass
 }
 ```
@@ -239,8 +238,9 @@ while (running)
 ```
 
 `Update()` is synchronous and allocation-free. Per system you can also set `Enabled = false` to skip it, or override
-`UpdateInterval` to run every N-th update. Exceptions thrown by systems go to `world.SystemError` if you subscribe;
-otherwise they propagate.
+`UpdateInterval` to run every N-th update. Exceptions thrown by systems propagate, or, with
+`WorldOptions.SystemErrors = SystemErrorPolicy.Disable`, switch the failing system off and stay in `system.Error`
+while the update goes on.
 
 ## 11. Different cadences: system groups
 
@@ -251,7 +251,7 @@ otherwise they propagate.
 public struct InputGroup : ISystemGroup;
 
 [UpdateInGroup<InputGroup>]
-public partial class ApplyInputSystem : EcsSystem { /* [ForEach] methods */ }
+public class ApplyInputSystem : EcsSystem { /* [ForEach] methods */ }
 ```
 
 ```csharp
@@ -269,7 +269,7 @@ entities that have at least one of them:
 public record struct Burning(int Ticks) : IComponent, ITrackChanges;   // tracked: clients learn when it ends (step 15)
 public record struct Frozen(int Ticks) : IComponent;
 
-public partial class StatusSystem : EcsSystem
+public class StatusSystem : EcsSystem
 {
     [ForEach]
     static void Burn(Entity unit, ref Burning burning, ref Health hp)
@@ -296,7 +296,7 @@ as usual; it cannot change structure:
 using System.Numerics;
 using System.Runtime.InteropServices;
 
-public partial class FastMovementSystem : EcsSystem
+public class FastMovementSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
     static void Move(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
@@ -321,7 +321,7 @@ change structure and takes singletons only `in`; the analyzer rejects anything t
 ```csharp
 public record struct Target(float X, float Y) : ISingletonComponent;
 
-public partial class SteeringSystem : EcsSystem
+public class SteeringSystem : EcsSystem
 {
     [ForEach(Parallel = true), Without<Dead>]
     static void Steer(in Position p, ref Velocity v, in Target target)
@@ -332,7 +332,7 @@ public partial class SteeringSystem : EcsSystem
 }
 ```
 
-It pays for heavy per-entity work over tens of thousands of entities. Independent *systems* of one priority can also
+It pays for heavy per-entity work over tens of thousands of entities. Independent *systems* (no order and no conflict between them) can also
 run together with `WorldOptions.ParallelSystems` ([Threading](guide/threading.md)).
 
 ## 15. Only what changed, or went away
@@ -346,7 +346,7 @@ public record struct Replica(int Health, bool Burning) : IComponent;
 public struct Network : ISystemGroup;
 
 [UpdateInGroup<Network>]
-public partial class ReplicationSystem : EcsSystem
+public class ReplicationSystem : EcsSystem
 {
     [ForEach, Changed<Health>]
     static void Send(in Health hp, ref Replica replica) => replica.Health = hp.Value;
@@ -376,7 +376,7 @@ buffer by `ref`, so every change is tracked and `[Changed<DynamicBuffer<T>>]` se
 ```csharp
 public record struct Loot(int Item);
 
-public partial class PickupSystem : EcsSystem
+public class PickupSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
     static void Pick(ref DynamicBuffer<Loot> bag)                          // ref: a tracked write

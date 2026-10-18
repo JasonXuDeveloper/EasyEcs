@@ -23,27 +23,28 @@ and writes, so it could not run systems in parallel safely. Everything an event 
 | Input from another thread (network, IO) | a mailbox of yours that one system drains on the world's thread ([threading](guide/threading.md#input-from-other-threads)) |
 
 ```csharp
-public record struct Hit(Entity Target, int Damage) : IComponent;   // a message is an entity
+public record struct Hit(EntityId Target, int Damage) : IComponent;   // a message is an entity
 
-public partial class ApplyHitsSystem : EcsSystem
+public class ApplyHitsSystem : EcsSystem
 {
     [ForEach]
-    static void Apply(in Hit hit)
+    static void Apply(in Hit hit, World world)
     {
-        ref var hp = ref hit.Target.TryGetRef<Health>(out bool found);
+        if (!world.TryGetEntity(hit.Target, out var target)) return;      // the target is gone
+        ref var hp = ref target.TryGetRef<Health>(out bool found);
         if (found) hp = hp with { Value = hp.Value - hit.Damage };
     }
 }
 
+[UpdateAfter<ApplyHitsSystem>]                                          // after every reader
 public sealed class ClearHitsSystem : EcsSystem
 {
-    public override int Priority => 100;                                // after every reader
     protected override void OnUpdate() => World.DestroyEntities<Hit>();  // all messages, one pass
 }
 ```
 
 What this buys:
-- The order of effects is the order of `Priority`, visible in one place.
+- The order of effects is the order of the systems, visible in one place.
 - The generator knows what every system reads and writes, so `ParallelSystems` puts them in stages safely.
 - Tests and snapshots see the "events", because they are data.
 
@@ -102,7 +103,7 @@ What to watch for:
 Through a `ref`. In a system, a `ref` parameter is a write and `in` is a read:
 
 ```csharp
-public partial class BurnSystem : EcsSystem
+public class BurnSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
     static void Burn(ref Health hp, in Burning burning) => hp = hp with { Value = hp.Value - burning.DamagePerTick };

@@ -30,7 +30,7 @@ flowchart LR
 ```
 
 There are no arrows between systems. Every dependency goes through data, and every piece of behavior runs inside
-the schedule, in the order `Priority` declares.
+the schedule, in registration order or the order `[UpdateBefore<T>]` / `[UpdateAfter<T>]` declare.
 
 | Element | Is | Is not |
 |---|---|---|
@@ -58,7 +58,7 @@ Name a system after the one thing it does. If its description needs "and", split
 ```csharp
 // Before: burning AND death in one system. Death is only noticed for burning units:
 // a unit killed by anything else is never marked Dead.
-public partial class StatusSystem : EcsSystem
+public class StatusSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
     static void Tick(Entity unit, ref Burning burning, ref Health hp)
@@ -72,7 +72,7 @@ public partial class StatusSystem : EcsSystem
 
 ```csharp
 // After: each concern can be removed, reordered or tested on its own, and death covers every damage source.
-public partial class BurnSystem : EcsSystem
+public class BurnSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
     static void Burn(Entity unit, ref Burning burning, ref Health hp)
@@ -82,10 +82,9 @@ public partial class BurnSystem : EcsSystem
     }
 }
 
-public partial class DeathSystem : EcsSystem
+[UpdateAfter<BurnSystem>]   // after the systems that deal damage
+public class DeathSystem : EcsSystem
 {
-    public override int Priority => 10;   // after every system that deals damage
-
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp)   // `in`: it only reads Health
     {
@@ -112,7 +111,7 @@ doubles when the system is removed or added twice. Put it in data:
 
 ```cs
 // Before (EECS007): the count lives in the system, where no query, test or other system can see it.
-public partial class DeathSystem : EcsSystem
+public class DeathSystem : EcsSystem
 {
     public int Deaths;
 
@@ -130,7 +129,7 @@ public partial class DeathSystem : EcsSystem
 // After: the count is world state; anyone can read it (world.GetSingleton<Score>().Deaths).
 public record struct Score(int Deaths) : ISingletonComponent;
 
-public partial class DeathSystem : EcsSystem
+public class DeathSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Score score)   // a singleton parameter
@@ -149,16 +148,15 @@ Readonly fields for dependencies or reusable scratch buffers are fine on a syste
 A system that calls another system (EECS008), or reaches it through `World.GetSystem<T>()`, can no longer be
 removed, reordered or tested alone. Cooperate through data instead:
 
-- **Pipeline:** an earlier system writes a component, a later one reads it. Order them with `Priority`.
+- **Pipeline:** an earlier system writes a component, a later one reads it. Register the writer first, or order them with `[UpdateAfter<T>]`.
 - **Reacting to a state:** a system queries the state another one wrote; the writer does not change when a reader is
   added (rule 4).
 
 ```csharp
 // Reacts to Dead; DeathSystem does not know it exists.
+[UpdateAfter<DeathSystem>]
 public sealed class CorpseSystem : EcsSystem
 {
-    public override int Priority => 20;   // after DeathSystem
-
     protected override void OnUpdate() => World.DestroyEntities<Dead>();   // every corpse in one pass
 }
 ```
@@ -174,7 +172,7 @@ flowchart LR
 ### 4. State changes are data
 
 When something happens to an entity, write its new state: set a tag (`Dead`) or a field. Systems that care query
-that state later in the update, in the order `Priority` declares: movement and combat skip `Dead` entities,
+that state later in the update, in the order of the schedule: movement and combat skip `Dead` entities,
 `CorpseSystem` removes them, a `RespawnSystem` could revive players. None of them is known to `DeathSystem`.
 
 ### 5. Choose the cheapest representation for frequent changes
@@ -198,7 +196,7 @@ public record struct Facing(float Angle) : IComponent, ITrackChanges;  // tracke
 public record struct NetSync(Facing Sent) : IComponent;               // what clients last heard
 public record struct Outbox(int Updates) : ISingletonComponent;
 
-public partial class SyncSystem : EcsSystem
+public class SyncSystem : EcsSystem
 {
     [ForEach, Changed<Facing>]   // only entities whose Facing was written since this system last ran
     static void Sync(in Facing facing, ref NetSync sync, ref Outbox outbox)
@@ -218,10 +216,9 @@ during the pass (created, or moved into a matching archetype) wait for the next 
 systems, never the order a system happens to visit entities in:
 
 ```csharp
-public partial class DeathSystem : EcsSystem
+[UpdateAfter<BurnSystem>]   // after the damage; respawn and loot are ordered after it
+public class DeathSystem : EcsSystem
 {
-    public override int Priority => 10;   // after combat, before respawn and loot
-
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp)
     {
@@ -301,7 +298,8 @@ public static class PlayerRules
 
 1. List the data: which components (per entity) and singletons (per world) does it need?
 2. List the behaviors, one system each, named by what it does.
-3. Order systems by data flow (`Priority`): producers before consumers.
+3. Order systems by data flow (registration order, `[UpdateBefore<T>]` / `[UpdateAfter<T>]`): producers before
+   consumers.
 4. Express cross-module reactions as systems querying the state another system wrote, never as calls between
    systems.
 5. Build: the analyzer rejects what breaks these rules.

@@ -17,7 +17,7 @@ flowchart TB
         Arch["Archetype = table<br/>mask · Slots[row]: EntitySlot {Version, Id} (8 B)<br/>one column per component (rows = slots)<br/>presence bits per column · add edges"]
         QC["Query cache: (required, excluded, any, changed, removed) →<br/>archetypes + row filters, copy-on-write"]
         Single["Singletons[index] : SingletonBox&lt;T&gt;"]
-        Sys["Systems: one schedule per group<br/>sorted by priority, split into stages"]
+        Sys["Systems: one schedule per group<br/>ordered, split into stages"]
     end
     Meta -->|archetype + row| Arch
     QC --> Arch
@@ -200,8 +200,10 @@ Every iteration API walks tables front to back. What differs is how much bookkee
 
 ## Systems
 
-- Each system group has one schedule: its systems sorted by `Priority`, with registration order breaking ties, split
-  into stages of consecutive, pairwise non-conflicting systems of one priority (`SystemAccess`). Both arrays are
+- Each system group has one schedule: its systems in registration order, moved as `[UpdateBefore<T>]` /
+  `[UpdateAfter<T>]` require (a stable topological sort; a cycle throws in `AddSystem`), split into stages: a system
+  goes to the stage after the latest one holding a system it must follow, by an ordering or by an earlier conflicting
+  access (`SystemAccess`), so a stage holds systems with no order and no conflict between them. Both arrays are
   copy-on-write. Each stage advances the change tick once, whether its systems run together or not.
 - `Update()` / `Update<TGroup>()` are synchronous. For each due, enabled system they call `OnUpdate()` and the
   generated `GeneratedUpdate()` (`[ForEach]` methods). If a pass was interrupted by an exception, the update first
@@ -209,7 +211,7 @@ Every iteration API walks tables front to back. What differs is how much bookkee
 - `AddSystem` calls `OnCreate()`; `RemoveSystem` and `Dispose` call `OnDestroy()`, `Dispose` in reverse order.
 - Systems cooperate through data only, so all behavior runs in schedule order (see
   [ecs-principles.md](ecs-principles.md#4-state-changes-are-data)).
-- Errors go to `World.SystemError`. Without a subscriber they propagate.
+- An exception propagates out of the update, or, with `SystemErrorPolicy.Disable`, switches its system off and stays in `system.Error`.
 - System groups (`[UpdateInGroup<TGroup>]`) each have their own schedule; `Update()` runs group 0 (the default),
   `Update<TGroup>()` runs that group. User-facing details: [Systems](guide/systems.md).
 
@@ -219,7 +221,7 @@ Every iteration API walks tables front to back. What differs is how much bookkee
 |---|---|
 | `ArityGenerator` | Emits every T1..T9 family of `EasyEcs.Core` from one template each: `Entity.Set` / `Remove`, `World.CreateEntity` / `CreateEntities` / `DestroyEntities`, `IForEach` / `IForEachEntity` / `IForEachBatch`, `ForEach` / `ForEachEntity` / `ForEachBatch` / `ForEachParallel` / `ForEachEntityParallel`, `Query`, `Count`, `Any`, `QueryItem` / `QueryEnumerator`. Runs only for `EasyEcs.Core`. |
 | `SystemGenerator` | Turns `[ForEach]` methods into struct jobs (per entity, or per run of rows for span parameters), static filters, a `GeneratedUpdate` override, a `GeneratedAccess` override (reads and writes, or `RunsAlone`) used to split systems into `ParallelSystems` stages, and a `GeneratedFor` override naming the class it was generated for (a subclass the generator did not see inherits it, so its access is unknown and it runs alone). `[Changed<T>]` and `[Removed<T>]` become `Since(LastRunTick + 1)` on the method's filter and a declared read of `T`; `[ForEach(Parallel = true)]` runs the job over chunks of rows. Jobs that cannot change structure get `INoStructuralChanges`; jobs record which components they write (`Writes`) and whether they read the entity id. |
-| `EasyEcsAnalyzer` | Reports EECS001–EECS016, all errors: invalid input the generator skips, and code that breaks the ECS principles. Every rule with its fix: [Analyzer rules](guide/analyzer.md). |
+| `EasyEcsAnalyzer` | Reports EECS002–EECS024 (errors, and warnings for code that works but costs): invalid input the generator skips, and code that breaks the ECS principles; EasyEcs.CodeFixes offers the mechanical fixes. Every rule with its fix: [Analyzer rules](guide/analyzer.md). |
 
 Following the incremental-generator guidelines:
 
@@ -264,8 +266,8 @@ Every world uses the same indices, so masks are comparable across worlds.
   (EECS013) and in delegates handed to other threads that race (EECS014). User-facing rules:
   [Threading](guide/threading.md).
 - `WorldOptions.ParallelSystems`: every system carries a `SystemAccess` (component and singleton read/write bitsets, or
-  "runs alone"), generated from its `[ForEach]` parameters and read once by `AddSystem`. The schedule splits each
-  priority into stages of consecutive, pairwise non-conflicting systems and publishes them as one copy-on-write
+  "runs alone"), generated from its `[ForEach]` parameters and read once by `AddSystem`. The schedule splits its
+  systems into stages of systems with no order and no conflict between them and publishes them as one copy-on-write
   array. A stage runs on the calling thread plus reusable `IThreadPoolWorkItem` helpers that claim systems through
   one `Interlocked` cursor (epoch in the high 32 bits, so a helper that starts late never touches the next stage);
   nothing is allocated per update.

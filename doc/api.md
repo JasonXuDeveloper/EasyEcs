@@ -26,7 +26,7 @@ Notation:
 | `ValueIndex<T, TKey>` | sealed class | `world.Index<T, TKey>()`: `Find(key)` (enumerator of `Entity`), `TryFind`, `Count`. |
 | `DynamicBuffer<T>` | struct, `IComponent, ITrackChanges` | A list per entity: `Count`, `Capacity`, `this[i]` (read-only), `AsReadOnlySpan()`, `foreach`; writes through `DynamicBufferExtensions` (`ref this`): `Add`, `AddRange`, `Insert`, `RemoveAt`, `RemoveAtSwapBack`, `Clear`, `EnsureCapacity`, `TrimExcess`, `AsSpan()`. |
 | `ISingletonComponent` | marker interface | Implemented by singleton structs. |
-| `EcsSystem` | abstract class | `World`, `Priority`, `UpdateInterval`, `Enabled`, `Stats`, `LastRunTick`; `OnCreate` / `OnUpdate` / `OnDestroy`. |
+| `EcsSystem` | abstract class | `World`, `UpdateInterval`, `UpdatePhase`, `Enabled`, `Error`, `Stats`, `LastRunTick`; ordered by `[UpdateBefore<T>]` / `[UpdateAfter<T>]`; `OnCreate` / `OnUpdate` / `OnDestroy`. |
 | `SystemStats` | readonly struct | `Runs`, `Last`, `Total`, `Average` of a system's runs; recorded with `WorldOptions.MeasureSystems`. |
 | `SystemAccess` | struct | What a system reads and writes (`Read<T>`, `Write<T>`, `ReadSingleton<T>`, `WriteSingleton<T>`, `RunsAlone`), used to split systems into `ParallelSystems` stages. Only the generated `GeneratedAccess` override of a system fills it (from its `[ForEach]` parameters); user code never calls it. Each call O(1). |
 | `ForEachAttribute`, `WithAttribute<T>`, `WithoutAttribute<T>`, `WithAnyAttribute<T>`, `ChangedAttribute<T>`, `RemovedAttribute<T>` | attributes | `[ForEach]` methods (`Parallel = true` runs chunks of rows on several threads) and their filters. |
@@ -141,8 +141,8 @@ it is appended (copy-on-write) to the archetype list and to every cached query i
 
 | API | Complexity |
 |---|---|
-| `world.AddSystem<T>()` / `AddSystem(system)` (calls `OnCreate`) | O(systems + b²), b = systems of the same priority (stage rebuild); cold path; throws `InvalidOperationException` if the system already belongs to a world |
-| `world.RemoveSystem<T>()` (calls `OnDestroy`) | O(systems + b²), b = systems of the same priority (stage rebuild); cold path |
+| `world.AddSystem<T>()` / `AddSystem(system)` (calls `OnCreate`) | O(s²), s = systems of its group (order and stage rebuild); cold path; throws `InvalidOperationException` if the system already belongs to a world, or on an ordering cycle |
+| `world.RemoveSystem<T>()` (calls `OnDestroy`) | O(s²), s = systems of its group (order and stage rebuild); cold path |
 | `world.GetSystem<T>()` | O(systems) |
 | `world.Update()` (default group) / `world.Update<TGroup>()` | Σ systems of the group; allocation-free; throws `ObjectDisposedException` after `Dispose()` |
 | `world.ChangeTick` | O(1); grows by one per stage of systems and once after each update ([change tracking](guide/change-tracking.md)) |
@@ -158,7 +158,8 @@ Other `World` members:
 |---|---|
 | `world.Systems` → `SystemList` | the systems of every group in execution order; `foreach` allocation-free, O(systems); `Count` O(groups) |
 | `world.UpdateCount` | number of default-group updates so far; O(1) |
-| `world.SystemError` | `event Action<EcsSystem, Exception>`; without a subscriber, exceptions propagate; a failed run still moves `LastRunTick` on; raised O(1) per failure |
+| `WorldOptions.SystemErrors` | `SystemErrorPolicy.Throw` (default: the exception propagates out of `Update()`, and of `Dispose` for `OnDestroy`) or `Disable` (the system is switched off, the update goes on); a failed run still moves `LastRunTick` on |
+| `system.Error` | the exception that switched the system off under `Disable`, null otherwise; cleared when `Enabled` is set to true again |
 | `world.Dispose()` | `OnDestroy` on every system in reverse order, then releases storage; stale handles throw; indexes still held find nothing; O(systems + entities + archetypes) |
 | `World.ParallelChunkRows` | rows per chunk of a parallel `[ForEach]`, `ForEachParallel` and `ForEachEntityParallel` (16,384, a multiple of 64) |
 
@@ -166,4 +167,4 @@ Other `World` members:
 
 Values and handles, all O(1): `entity.Id` / `Version` / `World`, `==` / `Equals` / `GetHashCode` (id and version) /
 `ToString`; `snapshot.EntityCount`; `system.Stats.Runs` / `Last` / `Total` / `Average`;
-`system.LastRunTick`, `Priority`, `UpdateInterval`, `Enabled`, `World`.
+`system.LastRunTick`, `UpdateInterval`, `UpdatePhase`, `Enabled`, `Error`, `World`.

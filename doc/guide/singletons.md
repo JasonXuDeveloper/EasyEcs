@@ -42,7 +42,7 @@ missing), not once per entity:
 ```csharp
 public record struct Score(int Deaths) : ISingletonComponent;
 
-public partial class DeathSystem : EcsSystem
+public class DeathSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp, ref Score score)   // resolved once per pass

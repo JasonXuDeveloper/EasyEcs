@@ -45,12 +45,13 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
 - **Prefabs that stay out of your queries.** A `Prefab` is a recipe of component values that belongs to no world:
   `world.Instantiate(prefab)` spawns from it (a whole wave in one pass), and no system ever has to filter templates
   out. `entity.Clone()` copies a living entity.
-- **Mistakes fail the build.** The bundled analyzer (EECS001-EECS016) reports invalid `[ForEach]` methods and
-  systems, class components, stateful systems, systems that reference each other, batch methods mixing spans with
-  per-entity parameters, parallel methods that would race, writes through read-only parameters, copied dynamic
-  buffers, structural changes off the owner thread, indexed components written behind their index's back and
-  removal filters no entity can pass.
-- **Decoupled by construction.** Systems cooperate only through data, in `Priority` order; system groups give you
+- **Mistakes fail the build.** The bundled analyzer (EECS002-EECS024, with code fixes) reports invalid `[ForEach]`
+  methods and systems, class components, stateful systems, systems that reference each other, batch methods mixing
+  spans with per-entity parameters, parallel methods that would race, writes through read-only parameters, copied
+  dynamic buffers, structural changes off the owner thread, indexed components written behind their index's back,
+  removal filters no entity can pass and ordering cycles; it warns about `Entity` handles stored in components.
+- **Decoupled by construction.** Systems cooperate only through data, in registration order unless `[UpdateBefore<T>]` /
+  `[UpdateAfter<T>]` say otherwise; system groups give you
   separate cadences (input on every wake, simulation on a fixed tick).
 - **Built for servers that run for months.** Ids are recycled behind version-checked handles, memory is bounded by
   the peak entity count, a structural change off the owner thread throws or is reported at compile time instead of
@@ -68,14 +69,14 @@ costs and when to use it).
 | [Components and tags](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md) | `struct : IComponent`, `Set`, `Get`, `Read`, `TryGet`, `TryGetRef`, `GetOrAdd`, `Has`, `Remove`; generated `e.Position`, `SetX`, `IsDead` | Plain structs in archetype tables; an empty struct is a tag; up to 9 components per call. |
 | [Prefabs and cloning](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/prefabs.md) | `Prefab`, generated `prefab.SetX(…)`, `world.Instantiate(prefab)`, `Instantiate(prefab, span)`, `entity.Clone()` | Kinds of entities defined once as data that belongs to no world; copies of a living entity. |
 | [Immediate structural changes](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/structural-changes.md) | any `Set` / `Remove` / create / `Instantiate` / destroy | Applied at once, even in the middle of a pass; no command buffer to flush. |
-| [Systems and `[ForEach]`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md) | `EcsSystem`, `[ForEach]`, `Priority`, `OnCreate` / `OnUpdate` / `OnDestroy`, `AddSystem` / `RemoveSystem` / `GetSystem` | A method is the whole loop, compiled to an inlined struct job; `in` reads, `ref` writes, `Entity` and singletons as parameters. |
+| [Systems and `[ForEach]`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md) | `EcsSystem`, `[ForEach]`, `[UpdateBefore<T>]` / `[UpdateAfter<T>]`, `OnCreate` / `OnUpdate` / `OnDestroy`, `AddSystem` / `RemoveSystem` / `GetSystem` | A method is the whole loop, compiled to an inlined struct job; `in` reads, `ref` writes, `Entity` and singletons as parameters. |
 | [Filters](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/queries.md) | `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `QueryFilter` | Narrow a system or query by presence, absence, any-of, recent writes or recent removals. |
 | [Ad-hoc queries](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/queries.md) | `world.Query`, `Count`, `Any` | Iterate from any code (tools, tests, request handlers), allocation-free. |
 | [Struct jobs](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/queries.md#foreach-a-struct-job) | `IForEach`, `IForEachEntity`, `IForEachBatch`, `world.ForEach` / `ForEachEntity` / `ForEachBatch`, `INoStructuralChanges` | Ad-hoc loops with no delegate, inlined like a system; a job declares `Writes`. |
 | [Batch methods](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#batch-methods) | `ForEachBatch`, span parameters | Contiguous runs of rows as spans, for SIMD. |
 | [System groups and intervals](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md) | `ISystemGroup`, `[UpdateInGroup<T>]`, `Update<TGroup>()`, `UpdateInterval`, `Enabled` | Separate cadences (input on every wake, simulation on a fixed tick), throttled and switchable systems. |
 | [Singletons](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/singletons.md) | `ISingletonComponent`, `AddSingleton`, `GetSingleton`, `SingletonRef<T>` | One value per world, passed to systems as `ref` / `in` parameters. |
-| [Parallel systems](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md) | `WorldOptions.ParallelSystems` | Systems of one priority that do not conflict run at once, with the sequential result. |
+| [Parallel systems](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md) | `WorldOptions.ParallelSystems` | Systems with no order and no conflict between them run at once, with the sequential result. |
 | [Parallel `[ForEach]`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#parallel-methods) | `[ForEach(Parallel = true)]`, `ForEachParallel`, `ForEachEntityParallel`, `ParallelChunkRows` | One heavy method's rows split across cores. |
 | [Change tracking](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/change-tracking.md) | `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>(since)`, `Since(tick)` | Visit only the rows written since a system last ran; `ref` access counts as a write. |
 | [Removal detection](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/change-tracking.md#removal-detection) | `[Removed<T>]`, `QueryFilter.Removed<T>(since)` | Visit only the entities that lost a tracked component since a system last ran (replicate what went away). |
@@ -85,8 +86,8 @@ costs and when to use it).
 | [Snapshots](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/snapshots.md) | `world.Capture()`, `world.Restore(snapshot)` | Copy a world in memory and roll it back (replays, tests, rollback). |
 | [Bulk create and destroy](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md#entities) | `CreateEntities`, `Instantiate(prefab, span)`, `DestroyEntities`, `EnsureEntityCapacity` | Spawn and clear waves in one pass through the structural gate. |
 | [Per-system timing](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#measuring-systems) | `WorldOptions.MeasureSystems`, `system.Stats` | Run counts and times of every system. |
-| [Errors](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#errors) | `World.SystemError` | A failing system is reported, can be switched off, and the tick goes on. |
-| [Analyzer](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/analyzer.md) | EECS001-EECS016 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
+| [Errors](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#errors) | `WorldOptions.SystemErrors`, `system.Error` | A failing system throws out of the update, or is switched off with its exception kept while the tick goes on. |
+| [Analyzer](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/analyzer.md) | EECS002-EECS024 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
 | [Threading and Native AOT](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md) | one owner thread per world; no reflection on hot paths | Many worlds per process, one per thread; AOT works with nothing to configure. |
 
 ## Example
@@ -102,7 +103,7 @@ public record struct Health(int Value) : IComponent, ITrackChanges;   // tracked
 public struct Dead : IComponent;                                       // a tag
 public record struct Clock(float Dt) : ISingletonComponent;           // one value per world
 
-public partial class MovementSystem : EcsSystem
+public class MovementSystem : EcsSystem
 {
     [ForEach, Without<Dead>]                                           // in reads, ref writes
     static void Move(ref Position p, in Velocity v, in Clock clock)
@@ -112,10 +113,9 @@ public partial class MovementSystem : EcsSystem
     }
 }
 
-public partial class DeathSystem : EcsSystem
+[UpdateAfter<MovementSystem>]                                          // registration order otherwise
+public class DeathSystem : EcsSystem
 {
-    public override int Priority => 10;                                // after movement
-
     [ForEach, Without<Dead>, Changed<Health>]                          // only healths written since its last run
     static void Die(Entity unit, in Health hp)
     {
@@ -155,7 +155,7 @@ flowchart LR
     end
     Y[Systems<br/>EcsSystem: OnUpdate + ForEach]
     E -.->|has| C
-    Y -->|read / write, in Priority order| C
+    Y -->|read / write, in order| C
     Y -->|read / write| S
 ```
 
@@ -165,7 +165,7 @@ flowchart LR
 | Entity | `Entity` | A 16-byte, version-checked handle. Stale handles throw instead of touching a recycled id. |
 | Component | `struct : IComponent` | Plain per-entity data. An empty struct is a tag. |
 | Singleton | `struct : ISingletonComponent` | One value per world: clock, configuration, counters, a spatial grid. |
-| System | `EcsSystem` | One responsibility: `OnUpdate` plus `[ForEach]` methods, run in `Priority` order. |
+| System | `EcsSystem` | One responsibility: `OnUpdate` plus `[ForEach]` methods, run in registration order or as `[UpdateBefore<T>]` / `[UpdateAfter<T>]` say. |
 | Query | `[ForEach]`, `ForEach`, `Query`, `Count`, `Any` | Entities that have a set of components, filtered with `With` / `Without` / `WithAny` / `Changed` / `Removed`. |
 | Prefab | `Prefab`, `world.Instantiate` | A recipe of component values outside every world, copied into entities. |
 | Index | `IIndexed<TKey>`, `world.Index<T, TKey>()` | Entities by a component's value, or by the entity a relation component points at. |
@@ -318,7 +318,8 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
   (`SystemErrorPolicy.Disable`, `system.Error`), `Maybe<T>` parameters, static `[ForEach]` methods outside systems,
   generic systems, filters on system groups, and no `partial` needed.
 - **Tools:** `world.Describe()`, a debugger view of entities, and code fixes for the analyzer's diagnostics.
-- **Every analyzer rule is an error**, with six new ones: **EECS011** rejects a `[ForEach]` method that changes a
+- **Analyzer rules up to EECS024**, errors except three warnings (EECS017 `Entity` handles in components, EECS018
+  schedules that are not constants, EECS020 orderings across groups); among the new errors: **EECS011** rejects a `[ForEach]` method that changes a
   collection or class held by an `in` parameter, **EECS012** a `DynamicBuffer<T>` copied by value, **EECS013** a
   structural change in a `[ForEach]` method that takes no `Entity` or `World`, **EECS014** a structural change in a
   delegate handed to another thread that races with other changes of the same world, **EECS015** a write of an

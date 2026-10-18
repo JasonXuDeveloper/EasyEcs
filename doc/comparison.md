@@ -27,23 +27,23 @@ checks that every library computes the same result.
 | Thread-safe command buffer | – (not needed: one owner thread, a queue you own) | ✅ `CommandBufferSynced` | ❌ | ❌ (not documented) |
 | Tags | ✅ empty components; removing one flips a bit | ✅ `ITag` (part of the archetype) | ❌ | ❌ (enable / disable instead) |
 | Singletons | ✅ `ISingletonComponent`, `[ForEach]` parameters | ⚠️ `UniqueEntity` | ❌ | ✅ `World.Set<T>` / `Get<T>` |
-| Systems and scheduling | ✅ `EcsSystem`, `Priority`, groups, intervals | ✅ `SystemRoot`, `SystemGroup`, `QuerySystem` | ❌ (Arch.Extended) | ✅ `ISystem<T>`, `SequentialSystem`, `AEntitySetSystem` |
+| Systems and scheduling | ✅ `EcsSystem`, `[UpdateBefore<T>]` / `[UpdateAfter<T>]`, groups, intervals | ✅ `SystemRoot`, `SystemGroup`, `QuerySystem` | ❌ (Arch.Extended) | ✅ `ISystem<T>`, `SequentialSystem`, `AEntitySetSystem` |
 | Source-generated systems | ✅ `[ForEach]` → inlined struct jobs | ❌ | ❌ in core (Arch.Extended) | ❌ |
 | Generated named API per component | ✅ `e.Position`, `HasX`, `SetX(…)`, `IsDead`, `world.Battle`, `world.ZoneIndex` (like Entitas) | ❌ | ❌ | ❌ |
-| Compile-time analyzer | ✅ EECS001-EECS016 | ❌ | ❌ | ❌ |
+| Compile-time analyzer | ✅ EECS002-EECS024, with code fixes | ❌ | ❌ | ❌ |
 | Chunk / span iteration | ✅ batch `[ForEach]` methods, `ForEachBatch` | ✅ chunks | ✅ chunks | – |
 | Struct query jobs | ✅ `IForEach`, `IForEachEntity`, `IForEachBatch` | ✅ | ✅ `IForEach`, inline queries | – |
 | Bulk create and destroy | ✅ `CreateEntities`, `DestroyEntities(filter)`, `Instantiate(prefab, span)` | ✅ | ✅ | – |
 | Prefabs (templates to spawn from) | ✅ `Prefab`: data outside every world, `world.Instantiate` | ⚠️ an ordinary entity of the store, copied with `CloneEntity` | ❌ | ⚠️ an entity of some world, copied with `entity.CopyTo(world)` |
 | Clone a living entity | ✅ `entity.Clone()` | ✅ `entity.CloneEntity()`, `CopyEntity(target)` (also across stores) | ❌ | ✅ `entity.CopyTo(world)` (the same or another world) |
-| Parallel systems | ✅ non-conflicting systems of one priority, access generated | ❌ | ❌ | ✅ `ParallelSystem<T>` (you keep them independent) |
+| Parallel systems | ✅ systems with no order and no conflict, access generated | ❌ | ❌ | ✅ `ParallelSystem<T>` (you keep them independent) |
 | Parallel query | ✅ `[ForEach(Parallel = true)]`, analyzer-checked | ✅ `RunParallel`, `ParallelJobRunner` | ✅ `ParallelQuery`, `JobScheduler` | ✅ `DefaultParallelRunner` |
 | Change tracking (rows written since a tick) | ✅ `ITrackChanges`, `[Changed<T>]`, every `ref` write | ❌ (component add / remove events only) | ❌ (`OnComponentSet` events) | ✅ `WhenChanged<T>()` after `NotifyChanged<T>()` |
 | Removal detection (entities that lost a component since a tick) | ✅ `[Removed<T>]`, `QueryFilter.Removed<T>(since)` | ⚠️ `OnComponentRemoved` events (one callback per removal) | ⚠️ `SubscribeComponentRemoved<T>` events, or a marker tag added next to each removal | ✅ `WhenRemoved<T>()` sets, completed by hand |
 | Value index | ✅ `IIndexed<TKey>`, follows every `Set` (ref writes rejected at build time) | ✅ `IIndexedComponent<TKey>`, also range queries | ❌ | ✅ `EntityMap` / `EntityMultiMap` |
 | Relations with reverse lookup | ✅ an `Entity` key | ✅ `ILinkComponent`, `IRelation<TKey>`, hierarchy | ❌ | ❌ |
 | Per-system timing | ✅ `MeasureSystems`, `system.Stats` | ✅ system performance monitor | ❌ | – |
-| Per-system error handling | ✅ `SystemError` | – | – | – |
+| Per-system error handling | ✅ `SystemErrorPolicy.Disable`, `system.Error` | – | – | – |
 | Events (added, removed, created) | – (state changes are data) | ✅ | ✅ | ✅ |
 | In-memory snapshot of a world | ✅ `Capture` / `Restore` | ❌ (JSON serializer) | ❌ | ❌ (text and binary serializers) |
 | Serialization | ❌ (your serializer) | ✅ JSON | ❌ | ✅ text, binary |
@@ -63,7 +63,7 @@ are flushed. EasyEcs applies every change immediately, also in the middle of a p
 visits each entity at most once:
 
 ```csharp
-public partial class DeathSystem : EcsSystem
+public class DeathSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp)
@@ -194,18 +194,18 @@ command buffers on purpose); a few are not offered.
 | Tags | Friflo | empty components; removing one flips a bit, the entity keeps its row | `Player`, `Npc`, `Dead`, `Frozen` |
 | Unique entity / world-level component | Friflo, DefaultEcs | singletons, as `[ForEach]` parameters or a `SingletonRef<T>` | `Battle`, `Waypoints`, the host's `SingletonRef<Battle>` |
 | Enable / disable an entity or component | Friflo, DefaultEcs | add or remove a tag (`Without<Frozen>` skips it); `system.Enabled` for systems | `Frozen`, a failing system switched off |
-| Systems, groups, ordering | Friflo, DefaultEcs, Arch.Extended | `EcsSystem`, `Priority`, `ISystemGroup`, `UpdateInterval`, `OnCreate` / `OnDestroy` | every system; `Replication`; `SteeringSystem.OnCreate` |
+| Systems, groups, ordering | Friflo, DefaultEcs, Arch.Extended | `EcsSystem`, `[UpdateBefore<T>]` / `[UpdateAfter<T>]`, `ISystemGroup`, `UpdateInterval`, `OnCreate` / `OnDestroy` | every system; `Replication`; `SteeringSystem.OnCreate` |
 | Struct query jobs (`IForEach`, inline queries) | Arch, Friflo | `IForEach`, `IForEachEntity`, `IForEachBatch` (`[ForEach]` generates them) | `Census` |
 | Chunk iteration | Arch, Friflo | batch methods (`Span<T>` per run of rows) | `MovementSystem`, `SumHealth` |
 | Parallel query | Friflo, Arch, DefaultEcs | `[ForEach(Parallel = true)]`, `ForEachParallel`, `ForEachEntityParallel` | `SteeringSystem`, `NewRound` |
-| Parallel systems | DefaultEcs | `WorldOptions.ParallelSystems`: systems of one priority whose generated access does not conflict | `MovementSystem` and `ManaSystem` |
+| Parallel systems | DefaultEcs | `WorldOptions.ParallelSystems`: systems with no order between them whose generated access does not conflict | `MovementSystem` and `ManaSystem` |
 | Bulk create and destroy | Friflo, Arch | `CreateEntities`, `Instantiate(prefab, span)`, `DestroyEntities(filter)` | the players and NPCs in the constructor, the projectiles in `NewRound` |
 | Indexed components | Friflo, DefaultEcs | `IIndexed<TKey>`: `Find`, `TryFind`, `Count` (exact keys; no range queries) | `Zone`: `PlayersIn`, `Despawn` |
 | Links and relations | Friflo | `IIndexed<Entity>`: the reverse lookup comes from the index | `OwnedBy`: a respawn recalls its projectiles |
 | Parent / child hierarchy | Friflo | a relation to the parent (`Parent : IIndexed<Entity>`, children by `Find`); no built-in transform propagation | `OwnedBy` is such a link |
 | Serialization | Friflo (JSON), DefaultEcs (text, binary) | in-memory `Capture` / `Restore`; for storage, your serializer over a `Query` | `Save` / `Load` |
 | System performance monitor | Friflo | `WorldOptions.MeasureSystems`, `system.Stats` | `Slowest` |
-| Error handling per system | – | `World.SystemError`: report, switch the system off, keep running | `OnSystemError` |
+| Error handling per system | – | `SystemErrorPolicy.Disable`: switch the system off, keep its exception, keep running | `OnSystemError` |
 | Shared components (`SetSameAs`) | DefaultEcs | not built in: keep shared data in a singleton and an id into it in the component | – |
 | Unity, older runtimes | all three | not offered: net10.0 only | – |
 

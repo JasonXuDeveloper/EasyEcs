@@ -23,8 +23,9 @@ and singletons) and never references another system.
 | `[ForEach]` methods | every update, after `OnUpdate`, in source order (base class first) |
 | `OnDestroy()` | once, on `world.RemoveSystem<T>()` or `world.Dispose()` (reverse order) |
 | `World` | the owning world, set before `OnCreate` |
-| `Priority` (override) | execution order: lower runs first; default 0 |
+| `[UpdateBefore<T>]` / `[UpdateAfter<T>]` | execution order: before or after system `T` (and systems derived from it) of the same group; registration order otherwise |
 | `UpdateInterval` (override) | run every N-th update of its group (when the group's update count is a multiple of N, so first on the N-th update; a system added later follows the group's count); default 1 |
+| `UpdatePhase` (override) | which of the N updates it runs on (0 to N - 1): systems with the same interval and different phases spread their work; default 0 |
 | `Enabled` | disabled systems are skipped by `Update()` and `Update<TGroup>()` |
 
 `AddSystem<T>()` returns the system; `GetSystem<T>()` finds one (for tooling and tests, not for other systems:
@@ -44,22 +45,32 @@ long updates = world.UpdateCount;
 ```mermaid
 sequenceDiagram
     participant U as world.Update()
-    participant S as each system (ascending Priority)
+    participant S as each system (in order)
     U->>S: skip if disabled or UpdateInterval not due
     S->>S: OnUpdate()
     S->>S: [ForEach] methods, in source order (base class first)
     S-->>S: structural changes apply immediately: later systems see them
 ```
 
-Systems are sorted by `Priority`, registration order breaking ties. By default everything runs on the thread that
-calls `Update()`. With `WorldOptions.ParallelSystems`, systems of one priority whose generated access does not conflict
-(`ref` = write, `in` = read) run at the same time; the result is the same as running them in order (see
-[Threading](threading.md#parallel-systems)).
+Systems run in registration order. `[UpdateBefore<T>]` / `[UpdateAfter<T>]` move a system just before or after
+system `T` (and its subclasses) of the same group, whatever the order they were added in; the other systems keep
+their relative order. The order is resolved when a system is added: a cycle throws there, and the analyzer reports the
+cycles and cross-group orderings it can see (EECS019 / EECS020).
+
+```csharp
+[UpdateAfter<BurnSystem>]                             // damage first, then death
+public class DeathSystem : EcsSystem { /* [ForEach] methods */ }
+```
+
+By default everything runs on the thread that calls `Update()`. With `WorldOptions.ParallelSystems`, systems with no
+order and no conflict between them (in their generated access: `ref` = write, `in` = read) run at the same time; the
+result is the same as running them in order (see [Threading](threading.md#parallel-systems)).
 
 ## `[ForEach]` methods
 
-A `[ForEach]` method is declared in a `partial` class that derives from `EcsSystem`. It can be static or an instance
-method, and the generator compiles it to a struct job with a static filter.
+A `[ForEach]` method is declared in a class that derives from `EcsSystem` (no `partial` needed: the generated code
+lives beside it). It can be static or an instance method, and the generator compiles it to a struct job with a static
+filter.
 
 | Parameter | Meaning |
 |---|---|
@@ -83,7 +94,7 @@ public record struct Burning(int Ticks, int DamagePerTick) : IComponent;
 public struct Player : IComponent;      // tag
 public record struct BurnTotals(int Damage) : ISingletonComponent;
 
-public partial class BurnSystem : EcsSystem
+public class BurnSystem : EcsSystem
 {
     [ForEach, With<Player>, Without<Dead>]   // players only (Player is not passed in), living only
     static void Burn(ref Health hp, in Burning burning, ref BurnTotals totals)   // two components + a singleton
@@ -111,7 +122,7 @@ is frozen while the method runs (a change throws; [EECS013](analyzer.md#eecs013)
 using System.Numerics;
 using System.Runtime.InteropServices;
 
-public partial class DriftSystem : EcsSystem
+public class DriftSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
     static void Drift(Span<Position> positions, ReadOnlySpan<Velocity> velocities)
@@ -132,10 +143,10 @@ A scalar loop over spans gains little over a per-entity method: write a batch me
 ([regular and fastest code](../performance.md#arithmetic-over-many-rows-vectorize-a-batch-method)).
 
 `[ForEach]` methods run in source order, and derived systems run the base class's `[ForEach]` methods first. Keep a
-system's `[ForEach]` methods in one file: across the files of a `partial` class, the order is by position within each
-file, which is rarely what you mean. Mistakes (missing `partial`, an invalid parameter, zero components without a
-`[With<T>]` or `[Changed<T>]` or more than 9, generic systems, `[ForEach]` outside a system) are compile errors: see
-[Analyzer rules](analyzer.md).
+system's `[ForEach]` methods in one file: across the files of a partial class, the order is by position within each
+file, which is rarely what you mean. Mistakes (an invalid parameter, zero components without a `[With<T>]` or
+`[Changed<T>]` or more than 9, a generic `[ForEach]` method of a system, an instance `[ForEach]` method outside a
+system) are compile errors: see [Analyzer rules](analyzer.md).
 
 Methods may change structure (create, destroy, `Set`, `Remove`, `Instantiate`, `Clone`): changes apply at once and each entity is visited at
 most once per pass. See [Structural changes during iteration](structural-changes.md).
@@ -150,7 +161,7 @@ than it saves.
 ```csharp
 public record struct Clock(float Tick) : ISingletonComponent;
 
-public partial class SteeringSystem : EcsSystem
+public class SteeringSystem : EcsSystem
 {
     [ForEach(Parallel = true), Without<Dead>]
     static void Steer(ref Velocity velocity, in Position position, in Clock clock)
@@ -176,7 +187,7 @@ server can run input handling on every wake-up and the simulation at a fixed tic
 public struct InputGroup : ISystemGroup;
 
 [UpdateInGroup<InputGroup>]
-public partial class ApplyInputSystem : EcsSystem { /* [ForEach] methods */ }
+public class ApplyInputSystem : EcsSystem { /* [ForEach] methods */ }
 ```
 
 ```csharp
@@ -184,7 +195,7 @@ world.Update<InputGroup>();   // whenever input arrives
 world.Update();               // fixed tick
 ```
 
-`Priority`, `UpdateInterval` and `Enabled` apply within each group, and the attribute is inherited. Updating a group
+Ordering, `UpdateInterval`, `UpdatePhase` and `Enabled` apply within each group, and the attribute is inherited. Updating a group
 with no systems is a no-op.
 
 ## Measuring systems
@@ -203,17 +214,18 @@ Console.WriteLine($"burn: {burn.Last.TotalMicroseconds} μs (average {burn.Avera
 
 ## Errors
 
-Subscribe to `world.SystemError` (`Action<EcsSystem, Exception>`) to handle exceptions thrown by systems (including
-`OnDestroy` during `Dispose`); the update continues with the next system. Without a subscriber the exception
-propagates out of `Update()`. A system that failed still counts as run: a `[Changed<T>]` method's `LastRunTick` moves on, so
-the rows written before the failed run are not delivered again.
+An exception thrown by a system propagates out of `Update()` (and out of `Dispose` for `OnDestroy`), unless the world
+is created with `SystemErrors = SystemErrorPolicy.Disable`: then the failing system is switched off, its exception is
+kept in `system.Error`, and the update goes on with the next system. A failure is data: read it between updates.
+Setting `Enabled = true` clears `Error` and retries the system. A system that failed still counts as run: a
+`[Changed<T>]` method's `LastRunTick` moves on, so the rows written before the failed run are not delivered again.
 
 ```csharp
-world.SystemError += static (system, error) =>
-{
-    Console.Error.WriteLine($"{system.GetType().Name} failed: {error.Message}");
-    system.Enabled = false;                           // switch it off; the rest of the tick goes on
-};
+var world = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
+world.AddSystem<BurnSystem>();
+world.Update();
+foreach (var system in world.Systems)                 // a health check, between updates
+    if (system.Error is { } error) Console.Error.WriteLine($"{system.GetType().Name} is off: {error.Message}");
 ```
 
 `AddSystem` throws `InvalidOperationException` for a system that already belongs to a world, and `Update()` after

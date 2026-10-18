@@ -33,7 +33,7 @@ One page per concept, in a sensible reading order:
 | [Entities and components](guide/entities-and-components.md) | Handles, id recycling and versions, component operations, tags, generated members. |
 | [Prefabs and cloning](guide/prefabs.md) | `Prefab` and its generated writers (`SetHealth(…)`), `world.Instantiate`, `entity.Clone()`: spawn kinds of entities defined once, copy a living entity. |
 | [Queries and filters](guide/queries.md) | `Query`, `ForEach` struct jobs, `Count`, `Any`, `QueryFilter`. |
-| [Systems, `[ForEach]` and groups](guide/systems.md) | Lifecycle, `Priority`, `UpdateInterval`, `[ForEach]` parameters and filters, system groups, errors. |
+| [Systems, `[ForEach]` and groups](guide/systems.md) | Lifecycle, ordering (`[UpdateBefore<T>]` / `[UpdateAfter<T>]`), `UpdateInterval`, `[ForEach]` parameters and filters, system groups, errors. |
 | [Singletons](guide/singletons.md) | Per-world state, singleton parameters, `SingletonRef<T>`. |
 | [Structural changes during iteration](guide/structural-changes.md) | What happens when you add, remove, create or destroy while iterating. |
 | [`ref` and `await`](guide/refs-and-await.md) | Mutating through refs, and why refs never cross an `await`. |
@@ -42,7 +42,7 @@ One page per concept, in a sensible reading order:
 | [Indexes and relations](guide/indexes-and-relations.md) | `IIndexed<TKey>`, `world.Index<T, TKey>()`: find entities by a value; relations (`ChildOf(Entity Parent)`) and their reverse lookup. |
 | [Snapshots](guide/snapshots.md) | Capture and restore a world in memory: undo, prediction, replays, tests. |
 | [Threading](guide/threading.md) | Process, world and owner thread; system order; safe `WorldOptions.ParallelSystems`; what the structural gate guards. |
-| [Analyzer rules](guide/analyzer.md) | EECS001-EECS016: meaning and fix. |
+| [Analyzer rules](guide/analyzer.md) | EECS002-EECS024: meaning, fix and code fix. |
 
 ## Reference
 

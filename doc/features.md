@@ -20,7 +20,7 @@ Xeon VM at 2.1 GHz ([benchmarks](performance.md#benchmarks)).
 | [Batch methods](#batch-methods) | Runs of rows as spans, for SIMD. | `MovementSystem`, `SumHealth` (`Census`) |
 | [System groups and intervals](#system-groups-and-intervals) | Separate cadences: input on every wake, simulation on a fixed tick. | `Replication` group, `RegenerationSystem.UpdateInterval`, `Enabled` (a failing system switched off) |
 | [Singletons](#singletons) | One value per world, passed to systems as parameters. | `Battle`, `Waypoints` (added in `OnCreate`), `SingletonRef<Battle>` in the host |
-| [Parallel systems](#parallel-systems) | Non-conflicting systems of one priority run at once, same result as sequential. | `MovementSystem` and `ManaSystem` (`WorldOptions.ParallelSystems`) |
+| [Parallel systems](#parallel-systems) | Systems with no order and no conflict between them run at once, same result as sequential. | `MovementSystem` and `ManaSystem` (`WorldOptions.ParallelSystems`) |
 | [Parallel `[ForEach]`](#parallel-foreach) | One heavy method's rows split across cores. | `SteeringSystem`; `NewRound` (`ForEachParallel`, `ForEachEntityParallel`) |
 | [Change tracking](#change-tracking) | Visit only the rows written since a system last ran. | `ReplicationSystem` (`[Changed<Health>]`, `[Changed<Burning>]`), `Unsaved` (`Since`) |
 | [Removal detection](#removal-detection) | Visit only the entities that lost a component since a system last ran. | `ReplicationSystem.SendFireOut` (`[Removed<Burning>]`) |
@@ -30,9 +30,9 @@ Xeon VM at 2.1 GHz ([benchmarks](performance.md#benchmarks)).
 | [Snapshots](#snapshots) | Copy a world and restore it in memory. | `Save` / `Load` |
 | [Bulk create and destroy](#bulk-create-and-destroy) | Spawn and clear waves in one pass through the structural gate. | `CreateEntities` (players), `Instantiate(prefab, span)` (NPCs), `DestroyEntities` (`NewRound`) |
 | [Per-system timing](#per-system-timing) | Run counts and times of every system. | `MeasureSystems`, `Slowest` |
-| [Errors](#errors) | A failing system is reported and can be switched off; the tick goes on. | `SystemError` (`Failure`, `FaultySystem` in the tests) |
+| [Errors](#errors) | A failing system throws, or is switched off with its exception kept while the tick goes on. | `SystemErrorPolicy.Disable`, `system.Error` |
 | [Analyzer](#analyzer) | ECS design mistakes fail the build. | the whole file builds without a warning |
-| [Threading model](#threading-model) | One owner thread per world, many worlds per process. | one world per thread (`BattlesOnSeparateThreadsMatchOneRunAlone`); `SystemError` |
+| [Threading model](#threading-model) | One owner thread per world, many worlds per process. | one world per thread (`BattlesOnSeparateThreadsMatchOneRunAlone`) |
 | [Native AOT](#native-aot) | No reflection on hot paths, nothing to configure. | nothing to change |
 
 ## Worlds and entities
@@ -147,7 +147,8 @@ Guide: [Structural changes during iteration](guide/structural-changes.md).
 **What it does.** A system derives from `EcsSystem`, has one responsibility and no state. A `[ForEach]` method is the
 whole loop: its parameters are the components (`ref` to write, `in` to read), singletons, the `Entity` and the
 `World`. The source generator compiles each method into a struct job that the JIT inlines into the row loop: no
-delegate, no virtual call per entity. Systems run in `Priority` order, registration order breaking ties.
+delegate, no virtual call per entity. Systems run in registration order, moved where
+`[UpdateBefore<T>]` / `[UpdateAfter<T>]` say.
 `OnCreate` / `OnDestroy` set up and tear down what a system owns (its singletons); `AddSystem<T>()` or
 `AddSystem(instance)` adds one, `RemoveSystem<T>()` removes it, `GetSystem<T>()` finds it for tooling and tests.
 
@@ -234,12 +235,12 @@ Guide: [Singletons](guide/singletons.md).
 
 ## Parallel systems
 
-**What it does.** With `WorldOptions.ParallelSystems`, systems of one priority whose access does not conflict run at the
-same time. The access is generated from the `[ForEach]` parameters (`ref` writes, `in` reads); a system runs alone
+**What it does.** With `WorldOptions.ParallelSystems`, systems with no order between them whose access does not conflict run
+at the same time. The access is generated from the `[ForEach]` parameters (`ref` writes, `in` reads); a system runs alone
 when it can reach the world beyond its parameters: an `Entity` or `World` parameter, an instance `[ForEach]` method,
 an `OnUpdate` override, or a subclass the generator did not see. The result always equals the sequential order.
 
-**When to use it.** Several heavy, independent systems per priority and spare cores.
+**When to use it.** Several heavy, independent systems and spare cores.
 
 **When not.** Light systems over a few thousand entities: a stage of several systems costs a thread-pool hand-off
 (microseconds). For a
@@ -398,12 +399,13 @@ Guide: [Systems: measuring systems](guide/systems.md#measuring-systems).
 
 ## Errors
 
-**What it does.** `world.SystemError` receives every exception a system throws (and `OnDestroy` errors during
-`Dispose`); the update goes on with the next system. Without a subscriber the exception propagates out of `Update()`.
-A failed run still counts as run, so `[Changed<T>]` does not deliver the same rows again.
+**What it does.** By default an exception a system throws propagates out of `Update()` (and out of `Dispose` for
+`OnDestroy`). With `WorldOptions.SystemErrors = SystemErrorPolicy.Disable` the failing system is switched off, its
+exception stays in `system.Error`, and the update goes on with the next system. A failed run still counts as run, so
+`[Changed<T>]` does not deliver the same rows again.
 
-**When to use it.** Every live server: log the failure, switch the system off (`Enabled = false`), keep the world
-ticking.
+**When to use it.** `Disable` on a live server: a failure is data that a health check or a log reads from
+`world.Systems`, and the world keeps ticking; setting `Enabled = true` retries the system. `Throw` in tests and tools.
 
 **Cost.** Nothing until a system throws.
 
@@ -411,12 +413,14 @@ Guide: [Systems: errors](guide/systems.md#errors).
 
 ## Analyzer
 
-**What it does.** The package bundles an analyzer (EECS001-EECS016) next to the generator: invalid `[ForEach]`
-methods and systems (EECS001-005), class components (EECS006), stateful systems (EECS007), systems referencing
-systems (EECS008), batch methods mixing spans with per-entity parameters (EECS009), unsafe parallel methods (EECS010),
-writes through `in` parameters (EECS011), copied dynamic buffers (EECS012), structural changes off the owner thread
-(EECS013, EECS014), indexed components written through a `ref` (EECS015) and `[Removed<T>]` methods that require `T`
-(EECS016) fail the build.
+**What it does.** The package bundles an analyzer (EECS002-EECS024) and code fixes next to the generator: invalid
+`[ForEach]` methods and systems (EECS002-005, EECS021, EECS022, EECS024), class components (EECS006), stateful
+systems (EECS007), systems referencing systems (EECS008), batch methods mixing spans with per-entity parameters
+(EECS009), unsafe parallel methods (EECS010), writes through `in` parameters (EECS011), copied dynamic buffers
+(EECS012), structural changes off the owner thread (EECS013, EECS014), indexed components written through a `ref`
+(EECS015), `[Removed<T>]` methods that require `T` (EECS016), ordering cycles (EECS019) and filters on structs that
+are no group (EECS023) fail the build. Three warnings flag code that works but costs: `Entity` handles in components
+(EECS017), schedules that are not constants (EECS018) and orderings across groups (EECS020).
 
 **When to use it.** Always on; it keeps a large code base decoupled.
 
