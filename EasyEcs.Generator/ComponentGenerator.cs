@@ -51,7 +51,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         });
 
         // Saves name types: every component, singleton and DynamicBuffer<T> of the compilation is registered when the
-        // module loads (World.Load resolves names through SavedTypes), from C# 9 (module initializers).
+        // module loads (World.Load resolves names through SavedTypes). C# 14, like the extension members.
         var saved = components
             .Select(static (m, _) => new SavedType((m!.Singleton ? "Singleton" : "Component") + "<" + m.Type + ">", m.Type, m.EntityIds, m.Singleton ? "" : m.Layout))
             .WithTrackingName("SavedComponents");
@@ -63,11 +63,12 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             .Select(static (b, _) => b!)
             .WithTrackingName("SavedBuffers");
         var initializers = context.CompilationProvider
-            .Select(static (c, _) => c is CSharpCompilation { LanguageVersion: var version } && (int)version >= 900
+            .Select(static (c, _) => c is CSharpCompilation { LanguageVersion: var version } && (int)version >= 1400
                 && c.GetTypeByMetadataName("EasyEcs.SavedTypes") is { } savedTypes
                 && !SymbolEqualityComparer.Default.Equals(savedTypes.ContainingAssembly, c.Assembly))
             .WithTrackingName("ModuleInitializers");
-        context.RegisterSourceOutput(saved.Collect().Combine(buffers.Collect()).Combine(initializers), static (spc, pair) =>
+        // Only the module initializer reaches it: implementation output.
+        context.RegisterImplementationSourceOutput(saved.Collect().Combine(buffers.Collect()).Combine(initializers), static (spc, pair) =>
         {
             var types = pair.Left.Left.Concat(pair.Left.Right).Distinct().OrderBy(static t => t.Call, System.StringComparer.Ordinal).ToArray();
             if (pair.Right && types.Length > 0) spc.AddSource("EasyEcs.SavedTypes.g.cs", SourceText.From(EmitSavedTypes(types), Encoding.UTF8));
@@ -137,7 +138,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             {
                 string reference = "ref value";
                 foreach (var step in path.Split('\n')) reference = $"ref {Accessor(step)}({reference})";
-                return $"static (ref {type.Type} value) => {reference}";
+                return $"static (ref value) => {reference}";
             });
             sb.Append($"        global::EasyEcs.SavedTypes.EntityIds<{type.Type}>({string.Join(", ", lambdas)});\n");
         }

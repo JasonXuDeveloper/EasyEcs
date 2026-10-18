@@ -19,7 +19,7 @@ public record struct ChildOf(EntityId Parent) : IComponent, IIndexed<EntityId>
     internal static void Register()
     {
         SavedTypes.Component<ChildOf>();
-        SavedTypes.EntityIds<ChildOf>(static (ref ChildOf value) => ref ParentField(ref value));
+        SavedTypes.EntityIds<ChildOf>(static (ref value) => ref ParentField(ref value));
     }
 
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "<Parent>k__BackingField")]

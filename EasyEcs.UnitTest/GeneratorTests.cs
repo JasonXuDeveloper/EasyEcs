@@ -283,7 +283,7 @@ public class GeneratorTests
                      "Component<global::EasyEcs.DynamicBuffer<global::P>>()" })
             Assert.That(source, Does.Contain("global::EasyEcs.SavedTypes." + call), call);
         // Link's id is a public field, Owned's an auto-property's backing field: both are reached through UnsafeAccessor.
-        Assert.That(source, Does.Contain("global::EasyEcs.SavedTypes.EntityIds<global::Link>(static (ref global::Link value) => ref Field"));
+        Assert.That(source, Does.Contain("global::EasyEcs.SavedTypes.EntityIds<global::Link>(static (ref value) => ref Field"));
         Assert.That(source, Does.Contain("Name = \"Target\""));
         Assert.That(source, Does.Contain("Name = \"<Owner>k__BackingField\"").Or.Contain("Name = \"Owner\""));
         Assert.That(source, Does.Not.Contain("EntityIds<global::Handle>"));  // an Entity handle is not an id

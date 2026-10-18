@@ -49,10 +49,14 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     .Distinct().OrderBy(c => c.Closed, System.StringComparer.Ordinal).ToArray()),
             })
             .WithTrackingName("SystemCode");
-        context.RegisterSourceOutput(updates, static (spc, model) =>
-            spc.AddSource($"{model.Owner.HintName}.ForEach.g.cs",
-                SourceText.From(Emit(model), Encoding.UTF8)));
+        // A system's code is reached only through its module initializer: implementation output, which IDEs skip while
+        // typing. Entry points of other types are API the user's code calls.
+        context.RegisterImplementationSourceOutput(updates.Where(static m => m.Owner.IsSystem), static (spc, model) => Add(spc, model));
+        context.RegisterSourceOutput(updates.Where(static m => !m.Owner.IsSystem), static (spc, model) => Add(spc, model));
     }
+
+    private static void Add(SourceProductionContext context, UpdateModel model) =>
+        context.AddSource($"{model.Owner.HintName}.ForEach.g.cs", SourceText.From(Emit(model), Encoding.UTF8));
 
     // ---------------- emit ----------------
 
