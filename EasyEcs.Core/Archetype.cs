@@ -333,6 +333,10 @@ internal sealed class Archetype
         foreach (short c in _bitColumns) Word(Bits(c), slot) |= 1UL << slot;
     }
 
+    /// <summary>The change-tick column of tracked component <typeparamref name="T"/>, or -1.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int TicksColumn<T>() where T : struct, IComponent => ColumnIndex(ComponentType<ChangeTicks<T>>.Bit);
+
     /// <summary>Index of the column of component <paramref name="bit"/>, or -1 when the archetype does not have it.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int ColumnIndex(int bit)
@@ -401,7 +405,7 @@ internal sealed class Archetype
     {
         if (default(T) is ITrackChanges)
         {
-            int column = ColumnIndex(ComponentType<ChangeTicks<T>>.Bit);
+            int column = TicksColumn<T>();
             NoteVisited(column, slot, tick);
             Unsafe.Add(ref Data<ChangeTicks<T>>(column), slot).Tick = tick;
         }
@@ -414,7 +418,7 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void NoteVisited<T>(int slot, ulong tick) where T : struct, IComponent
     {
-        if (default(T) is ITrackChanges) NoteVisited(ColumnIndex(ComponentType<ChangeTicks<T>>.Bit), slot, tick);
+        if (default(T) is ITrackChanges) NoteVisited(TicksColumn<T>(), slot, tick);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -449,7 +453,7 @@ internal sealed class Archetype
     public void StampTick<T>(int slot, ulong tick) where T : struct, IComponent
     {
         if (default(T) is ITrackChanges)
-            Unsafe.Add(ref Data<ChangeTicks<T>>(ColumnIndex(ComponentType<ChangeTicks<T>>.Bit)), slot).Tick = tick;
+            Unsafe.Add(ref Data<ChangeTicks<T>>(TicksColumn<T>()), slot).Tick = tick;
     }
 
     /// <summary>
@@ -459,7 +463,7 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ref ChangeTicks<T> Ticks<T>(ulong tick, int slot, ulong rows) where T : struct, IComponent
     {
-        int column = ColumnIndex(ComponentType<ChangeTicks<T>>.Bit);
+        int column = TicksColumn<T>();
         // Summaries only grow (LastWrite >= the block's Latest >= Write) and no row holds a later tick than the world's: a
         // word already at this tick has its block and column at it too, so only its rows change.
         ref var word = ref Summary(Words, column, slot >> 6);
@@ -542,7 +546,7 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void StampRows<T>(int start, int count, ulong tick) where T : struct, IComponent
     {
-        if (default(T) is ITrackChanges && count > 0) StampRange(ColumnIndex(ComponentType<ChangeTicks<T>>.Bit), start, count, tick);
+        if (default(T) is ITrackChanges && count > 0) StampRange(TicksColumn<T>(), start, count, tick);
     }
 
     /// <summary>
@@ -600,7 +604,7 @@ internal sealed class Archetype
     {
         if (default(T) is not ITrackChanges) return;
         Stamp<T>(slot, tick);
-        NoteRemoved(ColumnIndex(ComponentType<ChangeTicks<T>>.Bit), slot, tick);
+        NoteRemoved(TicksColumn<T>(), slot, tick);
     }
 
     /// <summary>

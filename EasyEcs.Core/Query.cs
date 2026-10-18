@@ -44,12 +44,7 @@ public readonly struct QueryFilter
         && _removals.Equals(other._removals) && _overflow == other._overflow && GroupBit == other.GroupBit && Group == other.Group;
 
     /// <summary>Require <typeparamref name="T"/> to be present (not passed to the query callback).</summary>
-    public QueryFilter With<T>() where T : struct, IComponent
-    {
-        var filter = this;
-        Add(ref filter, 0, ComponentType<T>.Bit);
-        return filter;
-    }
+    public QueryFilter With<T>() where T : struct, IComponent => Adding(0, ComponentType<T>.Bit);
 
     /// <summary>
     /// Require <typeparamref name="T"/> with group <paramref name="group"/>: only the tables of that group are walked
@@ -58,31 +53,20 @@ public readonly struct QueryFilter
     /// </summary>
     public QueryFilter InGroup<T>(int group) where T : struct, IComponent, IGroup
     {
-        var filter = this;
-        Add(ref filter, 0, ComponentType<T>.Bit);
+        var filter = Adding(0, ComponentType<T>.Bit);
         Unsafe.AsRef(in filter.GroupBit) = ComponentType<T>.Bit + 1;
         Unsafe.AsRef(in filter.Group) = group;
         return filter;
     }
 
     /// <summary>Require <typeparamref name="T"/> to be absent.</summary>
-    public QueryFilter Without<T>() where T : struct, IComponent
-    {
-        var filter = this;
-        Add(ref filter, 1, ComponentType<T>.Bit);
-        return filter;
-    }
+    public QueryFilter Without<T>() where T : struct, IComponent => Adding(1, ComponentType<T>.Bit);
 
     /// <summary>
     /// Require at least one of the components named by <c>WithAny</c> calls: <c>WithAny&lt;Burning&gt;().WithAny&lt;Poisoned&gt;()</c>
     /// matches entities with Burning, Poisoned or both.
     /// </summary>
-    public QueryFilter WithAny<T>() where T : struct, IComponent
-    {
-        var filter = this;
-        Add(ref filter, 2, ComponentType<T>.Bit);
-        return filter;
-    }
+    public QueryFilter WithAny<T>() where T : struct, IComponent => Adding(2, ComponentType<T>.Bit);
 
     /// <summary>
     /// Require <typeparamref name="T"/> and only rows whose <typeparamref name="T"/> was written at or after change tick
@@ -112,8 +96,7 @@ public readonly struct QueryFilter
     public QueryFilter Removed<T>(ulong since) where T : struct, IComponent, ITrackChanges
     {
         CheckTick(since);
-        var filter = this;
-        Add(ref filter, 4, ComponentType<T>.Bit);
+        var filter = Adding(4, ComponentType<T>.Bit);
         Unsafe.AsRef(in filter.Tick) = since;
         return filter;
     }
@@ -134,6 +117,15 @@ public readonly struct QueryFilter
     /// filter copy being built: its fields are readonly to users, not to the builder, so each builder call copies the
     /// filter once. A bit past 255 interns the new overflow sets (cold: worlds with more than 256 component types).
     /// </summary>
+    /// <summary>This filter with <paramref name="bit"/> added to set <paramref name="set"/> (a builder's copy).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private readonly QueryFilter Adding(int set, int bit)
+    {
+        var filter = this;
+        Add(ref filter, set, bit);
+        return filter;
+    }
+
     private static void Add(ref QueryFilter filter, int set, int bit)
     {
         if (bit < 256)
