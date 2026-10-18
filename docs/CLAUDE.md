@@ -31,13 +31,13 @@ app/                     routes: home.tsx (landing page, copy for both languages
 src/lib/                 site.ts (domain, links, product summary), seo.ts (meta, hreflang, JSON-LD), source.ts,
                          i18n.ts / i18n-ui.ts, legacy.ts, benchmarks.ts, markdown.tsx (the .md copies)
 src/components/          bench-data.tsx (BenchValue, BenchTable, BenchSource), charts/ (visx BarChart, PeerChart,
-                         BenchChart), mermaid.tsx, search.tsx, feedback, page actions
+                         BenchChart), demo/ (EcsDemo, the live demo), mermaid.tsx, search.tsx, feedback, page actions
 src/data/bench.json      every benchmark number the site shows (generated, committed)
 functions/               Cloudflare Pages Functions: [[path]].ts (locale redirect, markdown negotiation),
                          api/feedback.ts (GitHub Discussions)
-public/                  _redirects, _headers, _routes.json, icons, manifest
+public/                  _redirects, _headers, _routes.json, icons, manifest, demo/ (the live demo's .NET runtime)
 scripts/                 generate-static.ts, og.ts, lint-links.ts, sync-benchmarks.ts, git-history.ts,
-                         generate-favicons.ts
+                         generate-favicons.ts, build-demo.sh
 ```
 
 ## Conventions
@@ -92,6 +92,18 @@ scripts/                 generate-static.ts, og.ts, lint-links.ts, sync-benchmar
   `Accept: text/markdown` by `functions/[[path]].ts`) and the social cards (`scripts/og.ts`).
 - Search console verification: `VITE_GOOGLE_SITE_VERIFICATION`, `VITE_BING_SITE_VERIFICATION`,
   `VITE_BAIDU_SITE_VERIFICATION` at build time.
+
+## Live demo
+
+- `content/demo.mdx` runs `demo/EasyEcs.Demo` (.NET in WebAssembly) through `<EcsDemo />`
+  (`src/components/demo/`): the runtime loads only on that page, every frame calls `Step(dt)` once and draws the
+  frame array straight from the WebAssembly memory. The page includes the demo's C# files, so they are what runs.
+- Cloudflare builds with Bun only, so the published runtime is committed in `public/demo/_framework`. After changing
+  the demo or EasyEcs.Core: `bun run demo:build` (`scripts/build-demo.sh`: `dotnet publish`, trimmed, invariant
+  globalization, interpreter without the wasm-tools workload), check the page, commit `public/demo`.
+- `/demo/*` bypasses the Pages Function (`public/_routes.json`, `functions/[[path]].ts`); `public/_headers` serves
+  `.wasm` as `application/wasm` and caches the fingerprinted files forever (`dotnet.js`, the entry, is revalidated).
+  Biome skips `public/demo`.
 
 ## Redirects
 

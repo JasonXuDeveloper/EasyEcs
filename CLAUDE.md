@@ -151,6 +151,10 @@ docs/                          the docs site: React Router 7 + Fumadocs, prerend
 samples/                       runnable projects (HelloWorld, GameLoop, MultiWorld, SaveLoad, HotReload), run by CI
 examples/                      file-based C# programs (`dotnet run examples/hello.cs`), one per feature; run.sh runs them all
 templates/                     `dotnet new easyecs` templates (EasyEcs.Templates package); smoke.sh builds them
+demo/EasyEcs.Demo/             the docs site's live demo (docs/content/demo.mdx): a .NET 10 WebAssembly app (no Blazor,
+                               [JSExport] host in Demo.cs, Components.cs, Systems/ one file per system); the page
+                               includes its files. docs/scripts/build-demo.sh publishes it into docs/public/demo
+                               (committed: Cloudflare has no .NET); rerun it after changing the demo or EasyEcs.Core
 tools/DocCheck/                compiles the C# fences of the docs pages (`doccheck=` flags on a fence)
 tools/ApiDocs/                 writes docs/content/reference/ from the XML docs and the complexity tables of api.mdx
                                (Complexity.cs)
