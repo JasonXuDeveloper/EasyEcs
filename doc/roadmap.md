@@ -84,7 +84,17 @@ What the generator can write so users write less, Entitas-style (it already writ
 API and the examples several times: every line users write twice is a candidate, every generated member that nobody
 needs goes. Each round's findings are listed here with what was generated, changed or rejected, and why.
 
-- Round 1: pending.
+- Round 1 (BattleServer, WorldSimulation, README and guide samples):
+  - generated: buffer members (`entity.Loot`, `HasLoot`, `WriteLoot()`, `GetOrAddLoot()`, `RemoveLoot()` for a struct
+    the compilation names in `DynamicBuffer<Loot>`; 10 generic calls in the battle server) and `WriteHealth()` for a
+    tracked component (its ref write, read by the analyzer like `Get`);
+  - changed in the examples: 21 hand-written jobs (17 with `Writes => 0`) become static `[ForEach]` runners, which
+    the generator already writes (with the battle server and the docs below);
+  - rejected: a generated `world.AddSystems()` (systems run in registration order: the list is the tick's order and
+    should be read where the world is built), singletons added when a `[ForEach]` names them (a missing singleton is a
+    forgotten setup, and its default is rarely right: a clock with no step), cached filters from attributes (saves no
+    lines);
+  - kept: every generated member is used by an example or a test.
 
 ### Example
 
