@@ -85,7 +85,8 @@ it has; components the source lacks stay absent and are not removals.
 | `prefab.Remove<T1..Tn>()` → `Prefab` | O(n) | drops 1-9 components; missing ones are ignored; chainable |
 | `prefab.Has<T>()` | O(1) | |
 | `prefab.Read<T>()` → `ref readonly T` | O(1) | throws if the prefab has no `T` |
-| generated: `prefab.X` (`ref readonly`), `HasX`, `SetX(…)`, `RemoveX()`; tags `IsX`, `SetX()`, `RemoveX()` | as the generic call | the entity's [generated members](guide/prefabs.md#generated-members) on a prefab: writers return the prefab (chainable), the property is always read-only; no `TryGetX` / `GetOrAddX`; not structural changes of any world |
+| `prefab.SetBuffer<T>(params ReadOnlySpan<T>)` → `Prefab` | O(n) | a `DynamicBuffer<T>` of these elements, replacing the prefab's; every instance gets a list of its own; chainable |
+| generated: `prefab.X` (`ref readonly`), `HasX`, `SetX(…)`, `RemoveX()`; tags `IsX`, `SetX()`, `RemoveX()`; buffer elements `SetLoot(items…)` (`SetBuffer`), `HasLoot`, `Loot`, `RemoveLoot()` | as the generic call | the entity's [generated members](guide/prefabs.md#generated-members) on a prefab: writers return the prefab (chainable), the property is always read-only; no `TryGetX` / `GetOrAddX`; not structural changes of any world |
 | `world.Instantiate(prefab)` → `Entity` | O(c) | one row copy; the target table is looked up once per prefab table and cached; owner thread; safe during a pass (the pass does not visit the new entity) |
 | `world.Instantiate(prefab, Span<Entity> entities)` | O(count × c) | one gate pass and at most one table growth for the wave; writes the handles |
 | `entity.Clone()` → `Entity` | O(c) | a new entity of the same world (and table) with a copy of the entity's components; throws if not alive |

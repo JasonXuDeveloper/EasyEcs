@@ -52,6 +52,7 @@ for (int i = 0; i < wave.Length; i++) wave[i].Position = new Position(i * 8, 0);
 | `Remove<T1..Tn>()` → `Prefab` | Drops 1-9 components the prefab has (missing ones are ignored); chainable. |
 | `Has<T>()` | Whether the prefab has `T`. |
 | `Read<T>()` → `ref readonly T` | The prefab's value of `T`; throws if it has none (change it with `Set`). |
+| `SetBuffer<T>(params ReadOnlySpan<T>)` → `Prefab` | A [`DynamicBuffer<T>`](dynamic-buffers.md) of these elements, replacing the prefab's; chainable. |
 
 ### Generated members
 
@@ -62,6 +63,7 @@ recipe reads like the entities it makes. The writers return the prefab, so they 
 |---|---|---|
 | `record struct Health(int Value, int Max) : IComponent` | `prefab.Health` (`ref readonly`), `prefab.HasHealth`, `prefab.SetHealth(value, max)`, `prefab.RemoveHealth()` | `Read`, `Has`, `Set(new Health(value, max))`, `Remove` |
 | a tag (`struct Npc : IComponent`) | `prefab.IsNpc`, `prefab.SetNpc()`, `prefab.RemoveNpc()` | `Has`, `Set(new Npc())`, `Remove` |
+| a buffer element (`record struct Loot(int Item)`, not a relation) | `prefab.SetLoot(new Loot(1), new Loot(2))`, `prefab.HasLoot`, `prefab.Loot` (`ref readonly`), `prefab.RemoveLoot()` | `SetBuffer(…)`, `Has`, `Read`, `Remove` of `DynamicBuffer<Loot>` |
 
 ```csharp
 var elite = new Prefab().SetPosition(0, 0).SetHealth(500, 500).SetAttack(20, 0).SetNpc();
@@ -87,7 +89,7 @@ nobody changes it meanwhile.
 - **Values** are copied like any struct. A managed reference inside a component (a `string`, an array, a `List<T>`)
   is copied as a reference, so the copies share what it points to.
 - **A [`DynamicBuffer<T>`](dynamic-buffers.md)** is the exception: every copy gets a list of its own with the same
-  elements.
+  elements (a prefab's come from `SetBuffer` / `SetLoot(…)`: a copied buffer value would share its list, EECS012).
 - **[Value indexes](indexes-and-relations.md)** learn the new entity at once, like after `CreateEntity`.
 - **[Tracked components](change-tracking.md)** count as written now: `[Changed<T>]` methods see every new instance,
   so replication sends it like any other new entity. A component the copy lacks is not a removal: `[Removed<T>]` does

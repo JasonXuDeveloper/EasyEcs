@@ -105,4 +105,5 @@ A row that moves to another table (a component added) keeps its list. Removing t
 `DynamicBuffer<T>` component or destroying the entity drops the list (the garbage collector frees it); adding the
 component back starts with no list. `world.Capture()` copies the elements, and `Restore` copies them back: a world and
 its snapshot never share a list, and a snapshot can be restored many times. An entity made by `world.Instantiate(prefab)`
-or `entity.Clone()` gets a list of its own with the same elements ([prefabs and cloning](prefabs.md)).
+or `entity.Clone()` gets a list of its own with the same elements ([prefabs and cloning](prefabs.md)); a prefab is given
+its elements with `prefab.SetBuffer(…)`, or the generated `prefab.SetLoot(new Loot(1), …)`.

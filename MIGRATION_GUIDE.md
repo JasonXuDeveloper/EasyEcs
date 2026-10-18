@@ -125,8 +125,9 @@ New:
 - `[Removed<T>]` and `QueryFilter.Removed<T>(since)`: the entities that lost a tracked component since a tick
   (replication of what went away), with [EECS016](doc/guide/analyzer.md#eecs016) for filters no row can pass.
 - `Prefab` and `world.Instantiate(prefab)` / `Instantiate(prefab, span)`: entities from a recipe of components that
-  belongs to no world, built with `Set` / `Remove` or the generated `prefab.SetX(…)` / `RemoveX()` (chainable);
-  `entity.Clone()` copies a living entity.
+  belongs to no world, built with `Set` / `Remove` or the generated `prefab.SetX(…)` / `RemoveX()` (chainable),
+  and `SetBuffer(…)` / `SetLoot(…)` for the elements of a `DynamicBuffer<T>`; `entity.Clone()` copies a living
+  entity.
 - `IIndexed<TKey>`, `world.Index<T, TKey>()`, `ValueIndex<T, TKey>`: find entities by a component value; relations
   are indexed `Entity` keys ([Indexes and relations](doc/guide/indexes-and-relations.md)).
 - `entity.Read<T>()` returns a `ref readonly T` that never counts as a write of a tracked component, and
@@ -159,8 +160,9 @@ New:
 - Static `[ForEach]` methods outside systems (a generated entry point takes the `World` and the method's other
   arguments: one pass for tools and tests), generic systems, filters on
   system groups (`[With<T>]` on a group struct applies to all its systems), `UpdatePhase` to spread systems with the
-  same `UpdateInterval` over updates, `world.GetOrAddX()` for singletons, and code fixes for the analyzer's
-  diagnostics.
+  same `UpdateInterval` over updates, `world.GetOrAddX()` for singletons, named query items (`item.Position` for
+  `item.Component1`), code fixes for the analyzer's diagnostics, and [EECS024](doc/guide/analyzer.md#eecs024) for
+  `[ForEach]` on a local function.
 
 ## v3.x → v4.0
 
