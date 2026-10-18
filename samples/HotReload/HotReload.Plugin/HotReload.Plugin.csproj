@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- Game logic in an assembly of its own: the host loads it into a collectible AssemblyLoadContext. -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <!-- Private=false: the host provides these assemblies; the plugin's folder holds only the plugin -->
+    <ItemGroup>
+        <ProjectReference Include="..\HotReload.Contracts\HotReload.Contracts.csproj" Private="false"/>
+        <ProjectReference Include="..\..\..\src\EasyEcs.Core\EasyEcs.Core.csproj" Private="false"/>
+        <ProjectReference Include="..\..\..\src\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+    </ItemGroup>
+
+</Project>

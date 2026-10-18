@@ -76,7 +76,7 @@ internal static class SingletonType<T> where T : struct, ISingletonComponent
     }
 }
 
-/// <summary>A singleton box without its type: copied by snapshots (<see cref="World.Capture"/>).</summary>
+/// <summary>A singleton box without its type: copied by snapshots (<see cref="World.Capture()"/>).</summary>
 internal abstract class SingletonBox
 {
     /// <summary>The singleton's slot in every world (<see cref="SingletonType{T}.Index"/>).</summary>

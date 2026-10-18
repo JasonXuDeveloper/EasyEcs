@@ -227,6 +227,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 public interface IForEach<{{TypeParams(n)}}>
                 {{Constraints(n, "    ")}}
                 {
+                    /// <summary>One matching entity: its components, by reference (<c>ref</c> writes them in place).</summary>
                     void Execute({{List(n, i => $"ref T{i} c{i}")}});
 
                 {{Writes}}
@@ -258,6 +259,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 public interface IForEachEntity<{{TypeParams(n)}}>
                 {{Constraints(n, "    ")}}
                 {
+                    /// <summary>One matching entity: its handle and its components, by reference.</summary>
                     void Execute(Entity entity, {{List(n, i => $"ref T{i} c{i}")}});
 
                 {{Writes}}
@@ -785,7 +787,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 }
 
                 /// <summary>
-                /// <see cref="{{name}}{TJob}"/> on several threads: the matching rows are cut into chunks (about four per
+                /// <see cref="{{name}}{{{tps}}, TJob}"/> on several threads: the matching rows are cut into chunks (about four per
                 /// thread, a multiple of 64 rows, at most <see cref="ParallelChunkRows"/>) that the calling thread and up to
                 /// <see cref="WorldOptions.MaxDegreeOfParallelism"/> - 1 thread-pool threads run at the same time, each with its own copy of <paramref name="job"/> (state
                 /// a job keeps in its fields is not merged back). The job must not change structure or write anything
@@ -825,7 +827,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         job = {{name}}Filtered<{{tps}}, TJob>(job, archetype, rows, start, end, {{bits}});
                 }
 
-                /// <summary>The chunks of one <see cref="{{name}}Parallel{TJob}"/> call: (table, first row) pairs.</summary>
+                /// <summary>The chunks of one <see cref="{{name}}Parallel{{{tps}}, TJob}"/> call: (table, first row) pairs.</summary>
                 private sealed class {{name}}Chunks<{{tps}}, TJob> : ParallelWork
             {{Constraints(n, "        ")}}
                     where TJob : struct, {{job}}<{{tps}}>
@@ -936,6 +938,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
 
                 {{Lines(n, i => $$"""
+                    /// <summary>The current entity's T{{i}}, a reference into its row (the generator names it after the component: <c>item.Position</c>).</summary>
                     public ref T{{i}} Component{{i}}
                     {
                         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -977,6 +980,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 {{Lines(n, i => $"        _b{i} = b{i};")}}
                     }
 
+                    /// <summary>The current entity and its components.</summary>
                     public readonly QueryItem<{{tps}}> Current
                     {
                         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -988,8 +992,10 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         }
                     }
 
+                    /// <summary>The enumerator itself (<c>foreach</c> support, no allocation).</summary>
                     public readonly QueryEnumerator<{{tps}}> GetEnumerator() => this;
 
+                    /// <summary>Move to the next matching entity. O(1) per row, plus the tables it steps over.</summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public bool MoveNext()
                     {

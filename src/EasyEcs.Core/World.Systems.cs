@@ -390,6 +390,7 @@ public readonly struct SystemList
         }
     }
 
+    /// <summary>The enumerator of <c>foreach</c>: every group's systems in execution order, allocation-free.</summary>
     public Enumerator GetEnumerator() => new(_groups);
 
     /// <summary>Walks the groups and their systems.</summary>
@@ -408,8 +409,10 @@ public readonly struct SystemList
             _index = -1;
         }
 
+        /// <summary>The current system.</summary>
         public readonly EcsSystem Current => _systems[_index];
 
+        /// <summary>Move to the next system. O(1) amortized.</summary>
         public bool MoveNext()
         {
             while (++_index >= _systems.Length)

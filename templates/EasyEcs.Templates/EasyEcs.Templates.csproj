@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- dotnet new templates: `easyecs` (a server tick loop, optional NUnit tests) and `easyecs-system` (one system).
+         The templates reference the EasyEcs package of this repository's version: EASYECS_VERSION in content/ is
+         replaced by $(Version) (Directory.Build.props) when packing. -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <PackageType>Template</PackageType>
+        <PackageId>EasyEcs.Templates</PackageId>
+        <Title>EasyEcs templates</Title>
+        <Authors>JasonXuDeveloper</Authors>
+        <Description>dotnet new templates for EasyEcs: `easyecs` creates a server tick-loop console project (`--tests` adds an NUnit test project), `easyecs-system` adds one system.</Description>
+        <Copyright>JasonXuDeveloper</Copyright>
+        <PackageProjectUrl>https://ecs.xgamedev.net</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/JasonXuDeveloper/EasyEcs</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageTags>ecs;entity-component-system;game-server;dotnet-new;templates</PackageTags>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <IncludeBuildOutput>false</IncludeBuildOutput>
+        <IncludeSymbols>false</IncludeSymbols>
+        <NoDefaultExcludes>true</NoDefaultExcludes>
+        <EnableDefaultItems>false</EnableDefaultItems>
+        <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+        <NoWarn>$(NoWarn);NU5128</NoWarn>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <TemplateSource Include="content\**\*" Exclude="content\**\bin\**;content\**\obj\**"/>
+    </ItemGroup>
+
+    <UsingTask TaskName="StampVersion" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+        <ParameterGroup>
+            <Files ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true"/>
+            <Version Required="true"/>
+        </ParameterGroup>
+        <Task>
+            <Code Type="Fragment" Language="cs"><![CDATA[
+                foreach (var file in Files)
+                {
+                    var source = file.GetMetadata("FullPath");
+                    var target = file.GetMetadata("StampedPath");
+                    System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(target));
+                    var text = System.IO.File.ReadAllText(source).Replace("EASYECS_VERSION", Version);
+                    if (!System.IO.File.Exists(target) || System.IO.File.ReadAllText(target) != text) System.IO.File.WriteAllText(target, text);
+                }
+            ]]></Code>
+        </Task>
+    </UsingTask>
+
+    <!-- The content with the version written in, packed from obj/ -->
+    <Target Name="StampTemplates" BeforeTargets="_GetPackageFiles">
+        <ItemGroup>
+            <_TemplateFile Include="@(TemplateSource)" StampedPath="$(MSBuildProjectDirectory)/$(IntermediateOutputPath)content/%(RecursiveDir)%(Filename)%(Extension)"/>
+        </ItemGroup>
+        <StampVersion Files="@(_TemplateFile)" Version="$(Version)"/>
+        <ItemGroup>
+            <_StampedTemplate Include="$(IntermediateOutputPath)content\**\*"/>
+            <None Include="@(_StampedTemplate)" Pack="true" PackagePath="content\%(RecursiveDir)%(Filename)%(Extension)"/>
+        </ItemGroup>
+    </Target>
+
+</Project>

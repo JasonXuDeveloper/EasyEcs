@@ -115,7 +115,7 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Get or create the table of <paramref name="componentMask"/> (companions included) in <paramref name="groups"/>
+    /// Get or create the table of <paramref name="mask"/> (companions included) in <paramref name="groups"/>
     /// (by column; null when none is set). Inside the structural gate.
     /// </summary>
     private Archetype Table(in BitMask mask, int[] groups)

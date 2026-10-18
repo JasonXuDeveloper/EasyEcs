@@ -9,6 +9,8 @@
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <!-- trimming and Native AOT analyzers run on every build: the library must stay reflection-free on hot paths -->
         <IsAotCompatible>true</IsAotCompatible>
+        <!-- XML docs: IntelliSense in the package and the API reference (tools/ApiDocs); every public member has one -->
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <PackageId>EasyEcs</PackageId>
         <Title>EasyEcs</Title>
         <Authors>JasonXuDeveloper</Authors>

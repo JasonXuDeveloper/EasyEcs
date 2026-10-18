@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "JasonXuDeveloper",
+  "classifications": [ "Code", "ECS" ],
+  "identity": "EasyEcs.Templates.System",
+  "name": "EasyEcs system",
+  "description": "An EasyEcs system: one responsibility, a [ForEach] method.",
+  "shortName": "easyecs-system",
+  "sourceName": "MySystem",
+  "defaultName": "MySystem",
+  "tags": { "language": "C#", "type": "item" },
+  "symbols": {
+    "RootNamespace": {
+      "type": "bind",
+      "binding": "msbuild:RootNamespace",
+      "defaultValue": "Game"
+    },
+    "namespace": {
+      "type": "parameter",
+      "datatype": "text",
+      "description": "Namespace of the system (default: the project's root namespace)."
+    },
+    "resolvedNamespace": {
+      "type": "generated",
+      "generator": "coalesce",
+      "parameters": { "sourceVariableName": "namespace", "fallbackVariableName": "RootNamespace" },
+      "replaces": "MyNamespace"
+    }
+  }
+}

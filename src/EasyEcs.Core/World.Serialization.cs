@@ -231,7 +231,7 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Replace this world's entities, components and singletons with those <see cref="Save"/> wrote (in this process
+    /// Replace this world's entities, components and singletons with those <see cref="Save(System.Buffers.IBufferWriter{byte})"/> wrote (in this process
     /// or another). Entities keep their ids and versions, so <see cref="EntityId"/>s stored in components still point
     /// at the same entities, and handles made before the save work again. Components and singletons this process
     /// has no type for are skipped (their slices); a type is found by name when the process used it or the generator

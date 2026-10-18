@@ -17,7 +17,7 @@ public readonly record struct ComponentValue(object Value, bool Enabled);
 /// <param name="Group">The group every row of the table is in, for an <see cref="IGroup"/> component; else 0.</param>
 public readonly record struct ColumnInfo(Type Type, int Without, int Group);
 
-/// <summary>A table: the entities with one set of component columns (<see cref="World.Describe"/>).</summary>
+/// <summary>A table: the entities with one set of component columns (<see cref="World.Describe()"/>).</summary>
 /// <param name="Columns">The component columns, in bit order (change-tick and <see cref="Disabled{T}"/> columns not listed).</param>
 /// <param name="Entities">Living entities.</param>
 /// <param name="Rows">Rows in use: the entities and the holes a query in progress left (closed when it ends).</param>

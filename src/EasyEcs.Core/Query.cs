@@ -36,6 +36,7 @@ public readonly struct QueryFilter
     /// <summary>Whether any set names a component bit past 255.</summary>
     internal bool HasOverflow => _overflow != 0;
 
+    /// <summary>A filter that matches every entity with the queried components: the start of a chain (<c>Create().Without&lt;Dead&gt;()</c>). O(1).</summary>
     public static QueryFilter Create() => default;
 
     /// <summary>Whether <paramref name="other"/> selects the same rows (its tick aside): one query key.</summary>

@@ -196,7 +196,7 @@ internal struct TargetSlots
 /// The value index of component <typeparamref name="T"/> in one world (<see cref="World.Index{T,TKey}"/>). It is kept
 /// current as values are written: <c>Set</c> and <c>CreateEntity</c> re-index the entity at once (O(1)), and entities
 /// leave it as soon as they are destroyed or lose the component, so a lookup does no catching up. The first lookup
-/// (and the first after <see cref="World.Restore"/>) indexes every row once. Lookups allocate nothing once every key has
+/// (and the first after <see cref="World.Restore(WorldSnapshot)"/>) indexes every row once. Lookups allocate nothing once every key has
 /// been seen; the index belongs to the world's owner thread, like component values (systems that look up from
 /// <c>OnUpdate</c> or instance methods run alone).
 /// </summary>
@@ -277,7 +277,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
         return Unsafe.IsNullRef(ref head) ? 0 : head.Count;
     }
 
-    /// <summary>Forget everything; after <see cref="World.Restore"/> the next lookup re-indexes every row, after <see cref="World.Dispose"/> it finds nothing.</summary>
+    /// <summary>Forget everything; after <see cref="World.Restore(WorldSnapshot)"/> the next lookup re-indexes every row, after <see cref="World.Dispose"/> it finds nothing.</summary>
     void World.IValueIndex.Reset(bool rebuild)
     {
         _heads.Clear();

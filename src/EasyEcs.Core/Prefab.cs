@@ -18,6 +18,7 @@ public sealed partial class Prefab
     private readonly World _store;
     internal readonly Entity Row;
 
+    /// <summary>An empty recipe. O(1); allocates its private store once.</summary>
     public Prefab()
     {
         _store = new World(new WorldOptions { InitialEntityCapacity = 1 });

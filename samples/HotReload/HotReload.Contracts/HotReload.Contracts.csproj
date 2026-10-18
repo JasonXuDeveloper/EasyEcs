@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- What the host and every version of the plugin share: the host's components and the plugin interface. It loads
+         into the default context once; a plugin context resolves it from there, so its types are the host's. -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\..\src\EasyEcs.Core\EasyEcs.Core.csproj"/>
+        <ProjectReference Include="..\..\..\src\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+    </ItemGroup>
+
+</Project>

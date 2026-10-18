@@ -34,6 +34,10 @@ public sealed partial class World : IDisposable
     private readonly WorldOptions _options;
     private bool _disposed;
 
+    /// <summary>
+    /// A new, empty world configured by <paramref name="options"/> (null: the defaults). O(<see cref="WorldOptions.InitialEntityCapacity"/>):
+    /// allocates the entity array and the empty table.
+    /// </summary>
     public World(WorldOptions options = null)
     {
         _options = options ?? new WorldOptions();
@@ -137,8 +141,9 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>
-    /// A new entity of this world with a copy of <paramref name="original"/>'s components (<c>Entity.Clone</c> is the
-    /// public call), or of a prefab's row (<paramref name="prefab"/>). Inside the structural gate it takes.
+    /// A new entity of this world with a copy of <paramref name="original"/>'s components: an entity of this world
+    /// (<paramref name="sameWorld"/>, <c>Entity.Clone</c> is the public call) or a prefab's row. Inside the structural
+    /// gate it takes.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
     internal Entity Copy(Entity original, bool sameWorld)

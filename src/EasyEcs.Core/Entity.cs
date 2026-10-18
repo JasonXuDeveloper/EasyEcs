@@ -334,15 +334,21 @@ public readonly partial struct Entity : IEquatable<Entity>
     private static void ThrowMissing(uint bit) =>
         throw new InvalidOperationException($"Entity has no {ComponentInfo.Of((int)bit).Type.Name} component");
 
+    /// <summary>Whether both handles name the same entity of the same world: id and version. O(1).</summary>
     public bool Equals(Entity other) => Id == other.Id && ReferenceEquals(_world, other._world);
 
+    /// <inheritdoc cref="Equals(Entity)"/>
     public override bool Equals(object obj) => obj is Entity other && Equals(other);
 
+    /// <summary>A hash of the id and version. O(1).</summary>
     public override int GetHashCode() => Id.GetHashCode(); // cheap: hashed per dictionary lookup (relation indexes)
 
+    /// <summary><c>Entity 3v1</c>: the id's index and version.</summary>
     public override string ToString() => $"Entity {Id}";
 
+    /// <inheritdoc cref="Equals(Entity)"/>
     public static bool operator ==(Entity left, Entity right) => left.Equals(right);
 
+    /// <summary>Whether the handles name different entities (or worlds). O(1).</summary>
     public static bool operator !=(Entity left, Entity right) => !left.Equals(right);
 }

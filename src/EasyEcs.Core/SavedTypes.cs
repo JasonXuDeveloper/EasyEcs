@@ -10,7 +10,7 @@ using System.Threading;
 namespace EasyEcs;
 
 /// <summary>
-/// The component and singleton types a save can name (<see cref="World.Save"/>, <see cref="World.Load"/>): a save
+/// The component and singleton types a save can name (<see cref="World.Save(System.Buffers.IBufferWriter{byte})"/>, <see cref="World.Load"/>): a save
 /// records types by name, and loading resolves each name to a type of this process. The generator registers every
 /// component and singleton of a compilation (and every <c>DynamicBuffer&lt;T&gt;</c> it mentions) when the module
 /// loads; a type gets no bit until a load or the world uses it. Types the world used are known anyway. Generated code

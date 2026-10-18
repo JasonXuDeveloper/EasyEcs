@@ -142,7 +142,7 @@ public sealed partial class World
         for (int i = 0; i < components.Length; i++) Unindex(components[i], id);
     }
 
-    /// <summary>Empty every index: <see cref="Restore"/> re-indexes on the next lookup, <see cref="Dispose"/> leaves them empty.</summary>
+    /// <summary>Empty every index: <see cref="Restore(WorldSnapshot)"/> re-indexes on the next lookup, <see cref="Dispose"/> leaves them empty.</summary>
     private void ResetIndexes(bool rebuild)
     {
         foreach (var index in _indexes) index?.Reset(rebuild);

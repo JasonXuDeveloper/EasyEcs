@@ -21,7 +21,7 @@ public interface IRelation
 /// <summary>
 /// The links of relation <typeparamref name="T"/> in one world, by target (<see cref="World.Relations{T}"/>): which
 /// entities link to an entity, O(1) to start and O(1) per link. Kept current as links are written and as their entities
-/// are destroyed or lose the buffer; the first lookup (and the first after <see cref="World.Restore"/>) indexes every
+/// are destroyed or lose the buffer; the first lookup (and the first after <see cref="World.Restore(WorldSnapshot)"/>) indexes every
 /// buffer once. Links to a destroyed target stay findable by its id, which no later entity has. Owner thread only.
 /// Memory: one 20-byte link per element, recycled, and 8 bytes in its target's list.
 /// </summary>

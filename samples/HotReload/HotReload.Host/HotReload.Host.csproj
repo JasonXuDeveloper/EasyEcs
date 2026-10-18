@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\HotReload.Contracts\HotReload.Contracts.csproj"/>
+        <ProjectReference Include="..\..\..\src\EasyEcs.Core\EasyEcs.Core.csproj"/>
+        <ProjectReference Include="..\..\..\src\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+        <!-- built first, never referenced: its assembly must not load into the default context -->
+        <ProjectReference Include="..\HotReload.Plugin\HotReload.Plugin.csproj" ReferenceOutputAssembly="false"/>
+    </ItemGroup>
+
+    <!-- The plugin goes to plugins/ next to the host, where the host loads it from -->
+    <Target Name="CopyPlugin" AfterTargets="Build">
+        <MSBuild Projects="..\HotReload.Plugin\HotReload.Plugin.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+            <Output TaskParameter="TargetOutputs" ItemName="PluginAssembly"/>
+        </MSBuild>
+        <Copy SourceFiles="@(PluginAssembly)" DestinationFolder="$(OutDir)plugins" SkipUnchangedFiles="true"/>
+    </Target>
+
+</Project>

@@ -12,7 +12,7 @@ namespace EasyEcs;
 /// <c>[Changed&lt;DynamicBuffer&lt;T&gt;&gt;]</c> selects the entities whose list changed. Through <c>in</c> or
 /// <see cref="Entity.Read{T}"/> the list is read-only: the mutating methods
 /// (<see cref="DynamicBufferExtensions"/>) take <c>ref this</c>, so a write through a read-only reference does not
-/// compile. Snapshots copy the elements (<see cref="World.Capture"/>); a moved row keeps its list. Adding within the
+/// compile. Snapshots copy the elements (<see cref="World.Capture()"/>); a moved row keeps its list. Adding within the
 /// capacity allocates nothing.
 /// </summary>
 /// <remarks>

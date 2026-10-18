@@ -2,7 +2,7 @@ namespace EasyEcs;
 
 /// <summary>
 /// A copy of a world's entities, components and singletons, taken by <see cref="World.Capture()"/> and put back by
-/// <see cref="World.Restore"/> (systems and options are not part of it). Holds the copies only; it can be restored any
+/// <see cref="World.Restore(WorldSnapshot)"/> (systems and options are not part of it). Holds the copies only; it can be restored any
 /// number of times, into the world it was taken from. <see cref="World.Capture(WorldSnapshot)"/> overwrites it,
 /// reusing its arrays (no allocation once they are large enough).
 /// </summary>
