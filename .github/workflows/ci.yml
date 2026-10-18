@@ -32,6 +32,8 @@ jobs:
           dotnet run --no-build -c Release --project samples/SaveLoad
           dotnet run --no-build -c Release --project samples/MultiWorld -- --updates 50
           dotnet run --no-build -c Release --project samples/HotReload/HotReload.Host
+      - name: Publish the docs site's live demo (demo/EasyEcs.Demo, WebAssembly)
+        run: dotnet publish demo/EasyEcs.Demo/EasyEcs.Demo.csproj -c Release -o artifacts/demo
       - name: API reference is up to date (tools/ApiDocs)
         run: |
           dotnet run --no-build -c Release --project tools/ApiDocs
