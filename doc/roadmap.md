@@ -150,3 +150,4 @@ needs goes. Each round's findings are listed here with what was generated, chang
   does, where it is used, how Friflo and DefaultEcs do it and what each costs, with measured numbers), and the
   `Spawned` tag pattern ([D4](decisions.md#d4-no-addedt-filter)) as best-practice examples.
 - `CLAUDE.md` layout.
+- Last: every mermaid diagram (architecture.md, performance.md, the guides, README) redrawn to match the code.
