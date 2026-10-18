@@ -135,13 +135,13 @@ public class GeneratorTests
         "Register(typeof(global::G<global::P>), new __ForEach<global::P>.Code());", "Register(typeof(global::G<global::Q>), new __ForEach<global::Q>.Code());")]
     [TestCase("public static class R { [ForEach] static void A<T>(in T t, ref int n) where T : struct, IComponent { } }",
         "public static void A<T>(global::EasyEcs.World world, ref int n) where T : struct, global::EasyEcs.IComponent",
-        "internal ref struct AJob<T> : global::EasyEcs.IForEachBatch<T> where T : struct, global::EasyEcs.IComponent",
-        "internal static extern void A<T>([UnsafeAccessorType(\"R\")] object owner, in T t, ref int n) where T : struct, global::EasyEcs.IComponent;")]
+        "internal ref struct AJob0<T> : global::EasyEcs.IForEachBatch<T> where T : struct, global::EasyEcs.IComponent",
+        "internal static extern void A_0<T>([UnsafeAccessorType(\"R\")] object owner, in T t, ref int n) where T : struct, global::EasyEcs.IComponent;")]
     [TestCase("[Without<Q>, WithAny<T>] public struct G : ISystemGroup; [UpdateInGroup<G>] public class S : EcsSystem { [ForEach, Without<Q>] static void A(ref P p) { } [ForEach, With<P>] static void B() { } }",
-        "AFilter = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T>();", // once, though both name it
-        "BFilter = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T>();", "world.ForEach<global::P, BJob>")]
+        "AFilter0 = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T>();", // once, though both name it
+        "BFilter1 = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T>();", "world.ForEach<global::P, BJob1>")]
     [TestCase("public static class R<T> where T : struct, IComponent { [ForEach] static void A(in T t, ref int n) { } }",
-        "extension<T>(global::R<T>) where T : struct, global::EasyEcs.IComponent", "new __ForEach<T>.AJob { x1 = ref n }", "public static class R_1ForEach")]
+        "extension<T>(global::R<T>) where T : struct, global::EasyEcs.IComponent", "new __ForEach<T>.AJob0 { x1 = ref n }", "public static class R_1ForEach")]
     public void GenericSystemsAndRunnersAreGenerated(string source, params string[] expected)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, source), out var output, out _);
@@ -153,7 +153,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref P p, ref int n, in int floor, int add) { }",
         "public static void A(global::EasyEcs.World world, ref int n, in int floor, int add)", "x1 = ref n, x2 = ref floor, x3 = add")]
     [TestCase("[ForEach, Changed<T>] static void A(ref P p, ref Clock c, int world) { }",
-        "public static void A(global::EasyEcs.World _world, ulong since, int world)", "__ForEach.AFilter.Since(since)", "s1 = ref _world.SingletonRef")]
+        "public static void A(global::EasyEcs.World _world, ulong since, int world)", "__ForEach.AFilter0.Since(since)", "s1 = ref _world.SingletonRef")]
     [TestCase("[ForEach(Parallel = true)] static void A(ref P p, in int k) { }", "public int x1;", "x1 = k }", "ForEachParallel<")]
     public void RunnersGetAnEntryPoint(string members, params string[] expected)
     {
@@ -325,7 +325,7 @@ public class GeneratorTests
     public void UnrelatedEditsHitTheCache()
     {
         var system = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components +
-            "public partial class S : EcsSystem { [ForEach] static void A(ref P p, in DynamicBuffer<int> b) { } }" +
+            "public struct L; public partial class S : EcsSystem { [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { } }" +
             "public class G<T> : EcsSystem where T : struct, IComponent { [ForEach] static void B(ref T t) { } } public class H : G<P>;", Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         var compilation = Compile().AddSyntaxTrees(system, other);
@@ -335,10 +335,84 @@ public class GeneratorTests
             CSharpSyntaxTree.ParseText("public class Unrelated { int x; }", Parse)));
 
         var steps = driver.GetRunResult().Results.SelectMany(r => r.TrackedSteps).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.SelectMany(p => p.Value));
-        foreach (var name in new[] { "ForEachMethods", "SystemUpdates", "ClosedSystems", "SystemCode", "Components", "BufferElements", "SavedComponents", "SavedBuffers", "ModuleInitializers" })
+        foreach (var name in new[] { "ForEachMethods", "SystemUpdates", "ClosedSystems", "SystemCode", "Components", "ExtensionMembers", "BufferUses", "BufferElements", "SavedComponents", "SavedBuffers", "ModuleInitializers" })
             Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
                 Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged), name);
     }
+
+    [Test]
+    public void GeneratedNamesNeverCollide()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
+            public class S : EcsSystem
+            {
+                [ForEach] static void A(ref P p) { }
+                [ForEach] static void A(ref Q q) { }      // an overload
+                [ForEach] static void Code(ref P p) { }   // the generated class's name
+                [ForEach] static void world(ref P p) { }  // the generated local's name
+            }
+            public static class R { [ForEach] static void Count(in P p, ref int job) => job++; }
+            namespace N { public struct A_B : IComponent { public int V; } public static class A { public struct B : IComponent { public int V; } } }
+            public struct HP : IComponent { public int V; }
+            public struct Hp : IComponent { public int V; }                           // file names ignore case
+            """), out var output, out var problems);
+        Assert.That(problems, Is.Empty);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+    }
+
+    [Test]
+    public void OverloadedRunnersWithOneEntryPointAreReported()
+    {
+        var diagnostics = Diagnose(Components, "public static class R { [ForEach] static void A(ref P p) { } [ForEach] static void A(ref Q q) { } }").Result;
+        Assert.That(diagnostics, Does.Contain("EECS021"));
+    }
+
+    [Test]
+    public void AnEditAboveAMethodKeepsItsCode()
+    {
+        const string system = "public class S : EcsSystem { [ForEach] static void A(ref P p) { } [ForEach] static void B(in P p) { } }";
+        var tree = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components + system, Parse);
+        var compilation = Compile().AddSyntaxTrees(tree);
+        var driver = Driver().RunGenerators(compilation);
+        driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(tree,
+            CSharpSyntaxTree.ParseText("using EasyEcs;\n// a comment moves every method\n" + Components + system, Parse)));
+
+        var steps = Steps(driver);
+        foreach (var name in new[] { "SystemUpdates", "SystemCode" })
+            Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
+                Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged), name);
+    }
+
+    [Test]
+    public void ANewBufferElementLeavesTheOthersCached()
+    {
+        var first = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic struct L1; public struct L2; public static class U { static DynamicBuffer<L1> a; static DynamicBuffer<L2> b; }", Parse);
+        var compilation = Compile().AddSyntaxTrees(first);
+        var driver = Driver().RunGenerators(compilation);
+        driver = driver.RunGenerators(compilation.AddSyntaxTrees(
+            CSharpSyntaxTree.ParseText("using EasyEcs;\npublic struct L3; public static class V { static DynamicBuffer<L3> c; }", Parse)));
+
+        var reasons = Steps(driver)["BufferElements"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(2));
+        Assert.That(reasons.Count(r => r == IncrementalStepRunReason.New), Is.EqualTo(1));
+    }
+
+    [Test]
+    public void TheArityGeneratorIsCachedBetweenEdits()
+    {
+        var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
+        var compilation = CSharpCompilation.Create("EasyEcs.Core", [other], Basic.References, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        GeneratorDriver driver = CSharpGeneratorDriver.Create([new ArityGenerator().AsSourceGenerator()], parseOptions: Parse,
+            driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true));
+        driver = driver.RunGenerators(compilation);
+        driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(other, CSharpSyntaxTree.ParseText("public class Unrelated { int x; }", Parse)));
+
+        Assert.That(Steps(driver)["IsEasyEcsCore"].SelectMany(s => s.Outputs).Select(o => o.Reason),
+            Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged));
+    }
+
+    private static System.Collections.Generic.Dictionary<string, System.Collections.Generic.IEnumerable<IncrementalGeneratorRunStep>> Steps(GeneratorDriver driver) =>
+        driver.GetRunResult().Results.SelectMany(r => r.TrackedSteps).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.SelectMany(p => p.Value));
 
     [Test]
     public void AMaybeOfAStructuralMethodIsLookedUpPerEntity()
@@ -361,10 +435,10 @@ public class GeneratorTests
             }
             """), out var output, out _);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")).Select(t => t.ToString()));
-        Assert.That(generated, Does.Contain("SumJob : global::EasyEcs.IForEachBatch<global::P>")
+        Assert.That(generated, Does.Contain("SumJob0 : global::EasyEcs.IForEachBatch<global::P>")
             .And.Contain("var l1 = x1;").And.Contain("var l2 = x2;").And.Contain("ref l1, ref l2")
             .And.Contain("x1 = l1;").And.Contain("x2 = l2;"));
-        Assert.That(generated, Does.Contain("KillJob : global::EasyEcs.IForEachEntity<global::P>"));   // a structural method keeps the ref
+        Assert.That(generated, Does.Contain("KillJob1 : global::EasyEcs.IForEachEntity<global::P>"));   // a structural method keeps the ref
     }
 
     [Test]
@@ -386,14 +460,14 @@ public class GeneratorTests
             public static class U { public static void Use(Entity e) => e.GetOrAdd<DynamicBuffer<Item>>(); }
             """), out var output, out _);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")).Select(t => t.ToString()));
-        Assert.That(generated, Does.Match(@"struct ReadJob[^\n]*INoStructuralChanges"));
-        Assert.That(generated, Does.Not.Match(@"struct WriteJob[^\n]*INoStructuralChanges"));
-        Assert.That(generated, Does.Not.Match(@"struct GrowJob[^\n]*INoStructuralChanges"));
-        Assert.That(generated, Does.Match(@"struct CheckJob[^\n]*INoStructuralChanges"));
-        Assert.That(generated, Does.Not.Match(@"struct OffJob[^\n]*INoStructuralChanges"));
-        Assert.That(generated, Does.Not.Match(@"struct OnJob[^\n]*INoStructuralChanges"));
-        Assert.That(generated, Does.Match(@"struct FillJob[^\n]*INoStructuralChanges"));                // buffer and tracked writes
-        Assert.That(generated, Does.Not.Match(@"struct DropJob[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Match(@"struct ReadJob\d+[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Not.Match(@"struct WriteJob\d+[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Not.Match(@"struct GrowJob\d+[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Match(@"struct CheckJob\d+[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Not.Match(@"struct OffJob\d+[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Not.Match(@"struct OnJob\d+[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Match(@"struct FillJob\d+[^\n]*INoStructuralChanges"));                // buffer and tracked writes
+        Assert.That(generated, Does.Not.Match(@"struct DropJob\d+[^\n]*INoStructuralChanges"));
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
     }
 
@@ -421,7 +495,7 @@ public class GeneratorTests
         Assert.That(generated, Does.Not.Contain("GetOrAddOwned"));                                         // indexed: Set only
         Assert.That(generated, Does.Contain("[global::System.CodeDom.Compiler.GeneratedCode(\"EasyEcs.Generator\""));
         Assert.That(generated, Does.Contain("SetNamed(string? name)"));
-        Assert.That(output.SyntaxTrees.Count(t => t.FilePath.EndsWith("Split.Component.g.cs")), Is.EqualTo(1));
+        Assert.That(output.SyntaxTrees.Count(t => t.FilePath.Contains("Split.") && t.FilePath.EndsWith(".Component.g.cs")), Is.EqualTo(1));
         Assert.That(generated, Does.Contain("SetP(int v) => @this.Set(new global::P { V = v })"));          // from the fields
         Assert.That(generated, Does.Contain("public global::EasyEcs.Entity RemoveP()"));
         Assert.That(generated, Does.Contain("public ref readonly global::T T"));                            // tracked: read-only

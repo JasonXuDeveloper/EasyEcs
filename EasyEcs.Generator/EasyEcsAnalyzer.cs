@@ -138,7 +138,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "order the caller calls them. Order the systems of one group, or move the system into the other's group.");
 
     public static readonly DiagnosticDescriptor RunnerCollision = new("EECS021", "[ForEach] entry point has the method's signature",
-        "The entry point of [ForEach] method '{0}' (the World, {1}the caller's values) would have the signature of a method '{0}' of its type: rename one of them",
+        "The entry point of [ForEach] method '{0}' (the World, {1}the caller's values) would have the signature of a method '{0}' of its type, or of another [ForEach] overload's entry point: rename one of them",
         Category, DiagnosticSeverity.Error, true,
         "Outside a system, the generator writes an overload of a [ForEach] method that takes the World (and the change tick, for [Changed<T>] / [Removed<T>]) followed by the method's context parameters, and runs the method over every matching entity.");
 

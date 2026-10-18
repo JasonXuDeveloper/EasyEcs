@@ -202,6 +202,33 @@ internal static class Symbols
         return all;
     }
 
+    /// <summary>
+    /// A generated file's name for a type: its metadata name (<c>Ns.Outer+Inner`1</c>, unique per type of a compilation,
+    /// where a dotted display name is not: <c>N.A.B</c> is a namespace's B or A's nested B) and the name's hash.
+    /// </summary>
+    public static string HintName(INamedTypeSymbol type)
+    {
+        string name = type.MetadataName;
+        for (var t = type.ContainingType; t != null; t = t.ContainingType) name = t.MetadataName + "+" + name;
+        if (!type.ContainingNamespace.IsGlobalNamespace) name = type.ContainingNamespace.ToDisplayString() + "." + name;
+        // Roslyn compares hint names ignoring case (Hp and HP would be one file): the exact name's hash tells them apart.
+        uint hash = 2166136261;
+        foreach (char c in name) hash = (hash ^ c) * 16777619;
+        return name.Replace("@", "") + "." + hash.ToString("x8");
+    }
+
+    /// <summary>
+    /// A generated class's name stem for a type of its namespace: <c>Outer__Inner</c> for nested types, <c>Regen_1</c>
+    /// for generic ones (a single underscore would make <c>A.B</c> and <c>A_B</c> one name).
+    /// </summary>
+    public static string FlatName(INamedTypeSymbol type)
+    {
+        string Level(INamedTypeSymbol t) => t.Arity == 0 ? t.Name : $"{t.Name}_{t.Arity}";
+        string name = Level(type);
+        for (var t = type.ContainingType; t != null; t = t.ContainingType) name = Level(t) + "__" + name;
+        return name;
+    }
+
     /// <summary><c>&lt;T, U&gt;</c>, or "" without type parameters.</summary>
     public static string TypeParameterList(IReadOnlyCollection<ITypeParameterSymbol> parameters) =>
         parameters.Count == 0 ? "" : "<" + string.Join(", ", parameters.Select(p => p.Name)) + ">";
@@ -267,18 +294,25 @@ internal static class Symbols
 
     /// <summary>
     /// The entry point of a [ForEach] method outside a system would have the signature of a method of its type with
-    /// the same name (the method itself or an overload): the World, the tick with [Changed&lt;T&gt;] / [Removed&lt;T&gt;],
-    /// then the context parameters.
+    /// the same name (the method itself or an overload), or of the entry point of a [ForEach] overload: the World,
+    /// the tick with [Changed&lt;T&gt;] / [Removed&lt;T&gt;], then the context parameters.
     /// </summary>
     public static bool RunnerCollides(IMethodSymbol method)
     {
-        var expected = new List<(string, RefKind)> { (World, RefKind.None) };
-        if (TracksSince(method)) expected.Add(("ulong", RefKind.None));
-        foreach (var p in method.Parameters)
-            if (Classify(p, true) == ParamKind.Context) expected.Add((p.Type.ToDisplayString(), p.RefKind));
+        var expected = EntryPoint(method);
         return method.ContainingType.GetMembers(method.Name).OfType<IMethodSymbol>().Any(m =>
-            m.Parameters.Length == expected.Count && !m.GetAttributes().Any(IsGeneratorMark) && // not the entry point itself
-            m.Parameters.Select(p => (p.Type.ToDisplayString(), p.RefKind)).SequenceEqual(expected));
+            !m.GetAttributes().Any(IsGeneratorMark) // not the entry point itself
+            && (m.Parameters.Select(p => (p.Type.ToDisplayString(), p.RefKind)).SequenceEqual(expected)
+                || !SymbolEqualityComparer.Default.Equals(m, method) && IsForEach(m) && EntryPoint(m).SequenceEqual(expected)));
+    }
+
+    private static List<(string, RefKind)> EntryPoint(IMethodSymbol method)
+    {
+        var parameters = new List<(string, RefKind)> { (World, RefKind.None) };
+        if (TracksSince(method)) parameters.Add(("ulong", RefKind.None));
+        foreach (var p in method.Parameters)
+            if (Classify(p, true) == ParamKind.Context) parameters.Add((p.Type.ToDisplayString(), p.RefKind));
+        return parameters;
     }
 
     /// <summary>The method has [Changed&lt;T&gt;] or [Removed&lt;T&gt;] filters: outside a system its entry point takes the tick.</summary>

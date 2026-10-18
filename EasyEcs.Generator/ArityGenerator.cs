@@ -385,7 +385,6 @@ public sealed class ArityGenerator : IIncrementalGenerator
         return sb.Append("}\n").ToString();
     }
 
-    /// <summary>Stamp row <paramref name="row"/> of every component the job writes (only tracked ones emit code).</summary>
     /// <summary>The body of SetCore for several components: one move adds every bit, then each value is written.</summary>
     private static string SetRows(int n, string signature) =>
         Lines(n, i => $"            ushort b{i} = ComponentType<T{i}>.Bit;") + "\n" +
@@ -394,6 +393,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
         Lines(n, i => $"            meta.Archetype.Stamp<T{i}>(meta.Slot, world.ChangeTick);") + "\n" +
         Lines(n, i => $"            world.Written(id, version, in c{i});");
 
+    /// <summary>Stamp row <paramref name="row"/> of every component the job writes (only tracked ones emit code).</summary>
     private static string StampRow(int n, string indent, string row) =>
         Lines(n, i => $"{indent}    if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.StampVisited<T{i}>({row}, _changeTick);");
 

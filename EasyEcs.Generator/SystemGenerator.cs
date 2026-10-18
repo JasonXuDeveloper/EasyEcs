@@ -75,10 +75,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
         // Generic over the owner's type parameters (a generic system or runner type): one instantiation per closed type.
         sb.Append($"file static class __ForEach{owner.TypeParameters}{owner.Constraints}\n{{\n");
-        foreach (var method in model.Methods)
+        for (int i = 0; i < model.Methods.Length; i++)
         {
-            EmitAccessor(sb, owner, method);
-            EmitJob(sb, owner, method);
+            EmitAccessor(sb, owner, model.Methods[i], i);
+            EmitJob(sb, owner, model.Methods[i], i);
         }
 
         if (owner.IsSystem) EmitSystemCode(sb, model);
@@ -87,13 +87,17 @@ public sealed class SystemGenerator : IIncrementalGenerator
         return sb.ToString();
     }
 
-    /// <summary>The method itself, reached from outside its type: compiled to a direct call, inlined like one.</summary>
-    private static void EmitAccessor(StringBuilder sb, OwnerModel owner, ForEachModel method)
+    /// <summary>
+    /// The method itself, reached from outside its type: compiled to a direct call, inlined like one. Generated names
+    /// end in the method's index (<c>Heal_0</c>, <c>HealJob0</c>, <c>HealFilter0</c>): overloads and methods named like a
+    /// generated member (<c>Code</c>) cannot collide, and profilers still show the method's name.
+    /// </summary>
+    private static void EmitAccessor(StringBuilder sb, OwnerModel owner, ForEachModel method, int index)
     {
         string kind = method.IsStatic ? "StaticMethod" : "Method";
         string parameters = string.Concat(method.Parameters.Select(p => $", {p.Declared} {Escape(p.Name)}"));
         sb.Append($"    [UnsafeAccessor(UnsafeAccessorKind.{kind}, Name = \"{method.Name}\")]\n");
-        sb.Append($"    internal static extern {method.Returns} {method.Name}{method.TypeParameters}([UnsafeAccessorType(\"{owner.AccessorType}\")] object owner{parameters}){method.Constraints};\n\n");
+        sb.Append($"    internal static extern {method.Returns} {method.Name}_{index}{method.TypeParameters}([UnsafeAccessorType(\"{owner.AccessorType}\")] object owner{parameters}){method.Constraints};\n\n");
     }
 
     /// <summary>
@@ -107,22 +111,23 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]\n");
         sb.Append($"{(owner.IsPublic ? "public" : "internal")} static class {owner.FlatName}ForEach\n{{\n");
         sb.Append($"    extension{owner.TypeParameters}({owner.FullName}){owner.Constraints}\n    {{\n");
-        foreach (var method in model.Methods)
+        for (int m = 0; m < model.Methods.Length; m++)
         {
+            var method = model.Methods[m];
             var contexts = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Context).ToArray();
             var names = new HashSet<string>(contexts.Select(p => p.Name));
-            string world = Free("world"), since = Free("since");
+            string world = Free("world"), since = Free("since"), local = Free("job");
             var signature = new List<string> { $"global::EasyEcs.World {world}" };
             if (method.Since) signature.Add($"ulong {since}");
             signature.AddRange(contexts.Select(p => $"{p.Declared} {Escape(p.Name)}"));
 
-            string forEach = "__ForEach" + owner.TypeParameters, job = $"{forEach}.{method.Name}Job{method.TypeParameters}";
-            string filter = method.Since ? $", {forEach}.{method.FilterName}.Since({since})" : method.HasFilter ? $", in {forEach}.{method.FilterName}" : "";
+            string forEach = "__ForEach" + owner.TypeParameters, job = $"{forEach}.{method.Name}Job{m}{method.TypeParameters}";
+            string filter = method.Since ? $", {forEach}.{method.Name}Filter{m}.Since({since})" : method.HasFilter ? $", in {forEach}.{method.Name}Filter{m}" : "";
             sb.Append($"        /// <summary>Runs <c>{method.Name}</c> for every matching entity of <paramref name=\"{world}\"/>{(method.Since ? $" whose filtered components changed (or went) at or after tick <paramref name=\"{since}\"/>" : "")}. Owner thread only.</summary>\n");
             sb.Append($"        [global::System.CodeDom.Compiler.GeneratedCode(\"{Symbols.GeneratorName}\", \"{ComponentGenerator.Version}\")]\n");
             sb.Append($"        public static void {method.Name}{method.TypeParameters}({string.Join(", ", signature)}){method.Constraints}\n        {{\n");
-            sb.Append($"            var job = new {job}{Fields(method, world, null)};\n");
-            sb.Append($"            {world}.{method.ForEach}<{method.ComponentTypes}, {job}>(ref job{filter});\n        }}\n\n");
+            sb.Append($"            var {local} = new {job}{Fields(method, world, null)};\n");
+            sb.Append($"            {world}.{method.ForEach}<{method.ComponentTypes}, {job}>(ref {local}{filter});\n        }}\n\n");
 
             string Free(string name)
             {
@@ -166,12 +171,13 @@ public sealed class SystemGenerator : IIncrementalGenerator
         var owner = model.Owner;
         sb.Append("    internal sealed class Code : global::EasyEcs.SystemCode\n    {\n");
         sb.Append("        protected override void Update(global::EasyEcs.EcsSystem system)\n        {\n            var world = system.World;\n");
-        foreach (var method in model.Methods)
+        for (int i = 0; i < model.Methods.Length; i++)
         {
+            var method = model.Methods[i];
             // [Changed<T>] / [Removed<T>]: rows written (or that lost T) since this system last ran.
-            string filter = method.Since ? $", {method.FilterName}.Since(system.LastRunTick + 1)" : method.HasFilter ? $", in {method.FilterName}" : "";
-            sb.Append($"            var {method.Name} = new {method.Name}Job{Fields(method, "world", "system")};\n");
-            sb.Append($"            world.{method.ForEach}<{method.ComponentTypes}, {method.Name}Job>(ref {method.Name}{filter});\n");
+            string filter = method.Since ? $", {method.Name}Filter{i}.Since(system.LastRunTick + 1)" : method.HasFilter ? $", in {method.Name}Filter{i}" : "";
+            sb.Append($"            var job{i} = new {method.Name}Job{i}{Fields(method, "world", "system")};\n");
+            sb.Append($"            world.{method.ForEach}<{method.ComponentTypes}, {method.Name}Job{i}>(ref job{i}{filter});\n");
         }
 
         sb.Append("        }\n\n");
@@ -228,9 +234,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append("        }\n");
     }
 
-    private static void EmitJob(StringBuilder sb, OwnerModel owner, ForEachModel method)
+    private static void EmitJob(StringBuilder sb, OwnerModel owner, ForEachModel method, int number)
     {
-        string job = $"{method.Name}Job{method.TypeParameters}";
+        string job = $"{method.Name}Job{number}{method.TypeParameters}";
         var components = method.Query.ToArray();
         int index = 0;
         bool runs = method.Runs; // per row of a run: components and handles at the row's offset
@@ -282,7 +288,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string first = method.IsBatch ? "global::EasyEcs.EntitySpan entities, " : method.TakesEntity ? "global::EasyEcs.Entity entity, " : "";
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
         sb.Append($"        public void Execute({first}{List(components.Length, i => string.Format(each, components[i - 1], i))})\n");
-        string call = $"__ForEach{owner.TypeParameters}.{method.Name}{method.TypeParameters}({args});";
+        string call = $"__ForEach{owner.TypeParameters}.{method.Name}_{number}{method.TypeParameters}({args});";
         if (!runs && !local.Contains(true))
             sb.Append($"            => {call}\n");
         else
@@ -322,7 +328,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         var chain = method.With.Select(t => $".With<{t}>()").Concat(method.Without.Select(t => $".Without<{t}>()"))
             .Concat(method.WithAny.Select(t => $".WithAny<{t}>()")).Concat(method.Changed.Select(t => $".Changed<{t}>(0)")).Concat(method.Removed.Select(t => $".Removed<{t}>(0)"));
         // Attribute type arguments cannot name type parameters (CS8968): the filter is one field, even for a generic method.
-        sb.Append($"    internal static readonly global::EasyEcs.QueryFilter {method.FilterName} = global::EasyEcs.QueryFilter.Create(){string.Concat(chain)};\n\n");
+        sb.Append($"    internal static readonly global::EasyEcs.QueryFilter {method.Name}Filter{number} = global::EasyEcs.QueryFilter.Create(){string.Concat(chain)};\n\n");
     }
 
     // ---------------- models (equatable, symbol-free) ----------------
@@ -349,14 +355,12 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 : metadata + "[" + string.Join(",", typeParameters.Select((_, i) => $"[!{i}]")) + "]";
             string definition = typeParameters.Count == 0 ? ""
                 : "global::" + (ns.Length > 0 ? ns + "." : "") + string.Join(".", levels.Select(t => t.Arity == 0 ? t.Name : $"{t.Name}<{new string(',', t.Arity - 1)}>"));
-            var names = levels.Select(t => t.Arity == 0 ? t.Name : $"{t.Name}_{t.Arity}").ToList();
             bool overridesOnUpdate = false;
             for (var t = type; t != null && t.ToDisplayString() != Symbols.EcsSystem; t = t.BaseType)
                 overridesOnUpdate |= t.GetMembers("OnUpdate").Any(m => m is IMethodSymbol { IsOverride: true, Parameters.Length: 0 });
             bool isPublic = true;
             for (var t = type; t != null; t = t.ContainingType) isPublic &= t.DeclaredAccessibility == Accessibility.Public;
-            return new OwnerModel(ns, type.ToDisplayString(Symbols.Fqn), metadata, string.Join("_", names),
-                type.ToDisplayString().Replace('<', '_').Replace('>', '_').Replace(',', '_').Replace(' ', '_'),
+            return new OwnerModel(ns, type.ToDisplayString(Symbols.Fqn), metadata, Symbols.FlatName(type), Symbols.HintName(type),
                 Symbols.IsVisible(type), isPublic, overridesOnUpdate, Symbols.IsSystem(type), accessor,
                 Symbols.TypeParameterList(typeParameters), Symbols.Constraints(typeParameters), definition, typeParameters.Count);
         }
@@ -378,8 +382,6 @@ public sealed class SystemGenerator : IIncrementalGenerator
         EquatableArray<string> Without, EquatableArray<string> WithAny, EquatableArray<string> Changed,
         EquatableArray<string> Removed, string Returns, string TypeParameters, string Constraints)
     {
-        public string FilterName => Name + "Filter";
-
         /// <summary>The World method that runs the job.</summary>
         public string ForEach => Loop + (Parallel ? "Parallel" : "");
 
@@ -474,7 +476,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
             bool stable = Symbols.IsStable(method, syntax, model);
             bool parallel = Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax, model) == null;
-            return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, stable, parallel, syntax.SpanStart,
+                        // Declaration order by member index: a text position would change (and re-emit the file) on any edit above it.
+            int order = method.ContainingType.GetMembers().IndexOf(method);
+            return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, stable, parallel, order,
                 new EquatableArray<string>(query.ToArray()),
                 new EquatableArray<ParamModel>(parameters), new EquatableArray<string>(with.ToArray()),
                 new EquatableArray<string>(without.ToArray()), new EquatableArray<string>(withAny.ToArray()),

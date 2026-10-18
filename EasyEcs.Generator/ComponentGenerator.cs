@@ -56,20 +56,24 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             if (pair.Right) spc.AddSource($"{pair.Left!.HintName}.Component.g.cs", SourceText.From(Emit(pair.Left!), Encoding.UTF8));
         });
 
-        // Named members of buffers: one file per element type of this compilation, however many places name it.
-        var elements = context.SyntaxProvider
+        // DynamicBuffer<T> names, bound once: the buffer's named members (one file per element type of this compilation,
+        // however many places name it, each cached on its own) and its registration for saves.
+        var bufferUses = context.SyntaxProvider
             .CreateSyntaxProvider(
                 static (node, _) => node is GenericNameSyntax { Identifier.ValueText: "DynamicBuffer", TypeArgumentList.Arguments.Count: 1 },
-                static (ctx, ct) => BufferModel.Create(ctx.SemanticModel, (GenericNameSyntax)ctx.Node, ct))
+                static (ctx, ct) => BufferUse.Create(ctx.SemanticModel, (GenericNameSyntax)ctx.Node, ct))
             .Where(static b => b is not null)
+            .Select(static (b, _) => b!)
+            .WithTrackingName("BufferUses");
+        var elements = bufferUses
+            .Where(static b => b.Members is not null)
+            .Select(static (b, _) => b.Members!)
             .Collect()
-            .Select(static (all, _) => new EquatableArray<BufferModel>(all.Distinct().ToArray()!))
+            .SelectMany(static (all, _) => all.Distinct())
             .WithTrackingName("BufferElements");
         context.RegisterSourceOutput(elements.Combine(supported), static (spc, pair) =>
         {
-            if (!pair.Right) return;
-            foreach (var element in pair.Left)
-                spc.AddSource($"{element.HintName}.Buffer.g.cs", SourceText.From(EmitBuffer(element), Encoding.UTF8));
+            if (pair.Right) spc.AddSource($"{pair.Left.HintName}.Buffer.g.cs", SourceText.From(EmitBuffer(pair.Left), Encoding.UTF8));
         });
 
         // Saves name types: every component, singleton and DynamicBuffer<T> of the compilation is registered when the
@@ -77,12 +81,9 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         var saved = components
             .Select(static (m, _) => new SavedType((m!.Singleton ? "Singleton" : "Component") + "<" + m.Type + ">", m.Type, m.EntityIds, m.Singleton ? "" : m.Layout))
             .WithTrackingName("SavedComponents");
-        var buffers = context.SyntaxProvider
-            .CreateSyntaxProvider(
-                static (node, _) => node is GenericNameSyntax { Identifier.ValueText: "DynamicBuffer", TypeArgumentList.Arguments.Count: 1 },
-                static (ctx, ct) => SavedBuffer(ctx.SemanticModel, (GenericNameSyntax)ctx.Node, ct))
-            .Where(static b => b is not null)
-            .Select(static (b, _) => b!)
+        var buffers = bufferUses
+            .Where(static b => b.Saved is not null)
+            .Select(static (b, _) => b.Saved!)
             .WithTrackingName("SavedBuffers");
         var initializers = context.CompilationProvider
             .Select(static (c, _) => c is CSharpCompilation { LanguageVersion: var version } && (int)version >= 1400
@@ -97,20 +98,32 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         });
     }
 
-    /// <summary>The <c>DynamicBuffer&lt;T&gt;</c> a generic name denotes when it is EasyEcs's, closed and accessible here (else null).</summary>
-    private static SavedType? SavedBuffer(SemanticModel model, GenericNameSyntax name, CancellationToken token)
+    /// <summary>
+    /// A <c>DynamicBuffer&lt;T&gt;</c> the code names: its element's named members (<see cref="BufferModel"/>, null when
+    /// none are generated) and its registration for saves (null unless closed and accessible here).
+    /// </summary>
+    private sealed record BufferUse(BufferModel? Members, SavedType? Saved)
     {
-        if (model.GetSymbolInfo(name, token).Symbol is not INamedTypeSymbol { IsGenericType: true } type
-            || type.OriginalDefinition.ToDisplayString() != Symbols.DynamicBuffer
-            || type.TypeArguments[0] is not INamedTypeSymbol element
-            || ContainsTypeParameter(element)
-            || !model.Compilation.IsSymbolAccessibleWithin(element, model.Compilation.Assembly))
-            return null;
-        return new SavedType("Component<" + type.ToDisplayString(Symbols.Fqn) + ">", element.ToDisplayString(Symbols.Fqn),
-            new EquatableArray<string>(Symbols.EntityIdPaths(element, model.Compilation)),
-            // An element of another assembly: its private fields are invisible here, its own module records the hash.
-            Symbols.LayoutHash(element) is not { } layout ? ""
-            : SymbolEqualityComparer.Default.Equals(element.ContainingAssembly, model.Compilation.Assembly) ? layout : "0");
+        public static BufferUse? Create(SemanticModel model, GenericNameSyntax name, CancellationToken token)
+        {
+            if (model.GetSymbolInfo(name, token).Symbol is not INamedTypeSymbol { IsGenericType: true } buffer
+                || buffer.OriginalDefinition.ToDisplayString() != Symbols.DynamicBuffer)
+                return null;
+            var use = new BufferUse(BufferModel.Create(model, buffer), Registration(model, buffer));
+            return use.Members is null && use.Saved is null ? null : use;
+        }
+
+        private static SavedType? Registration(SemanticModel model, INamedTypeSymbol buffer)
+        {
+            if (buffer.TypeArguments[0] is not INamedTypeSymbol element || ContainsTypeParameter(element)
+                || !model.Compilation.IsSymbolAccessibleWithin(element, model.Compilation.Assembly))
+                return null;
+            return new SavedType("Component<" + buffer.ToDisplayString(Symbols.Fqn) + ">", element.ToDisplayString(Symbols.Fqn),
+                new EquatableArray<string>(Symbols.EntityIdPaths(element, model.Compilation)),
+                // An element of another assembly: its private fields are invisible here, its own module records the hash.
+                Symbols.LayoutHash(element) is not { } layout ? ""
+                : SymbolEqualityComparer.Default.Equals(element.ContainingAssembly, model.Compilation.Assembly) ? layout : "0");
+        }
     }
 
     /// <summary>
@@ -372,11 +385,9 @@ public sealed class ComponentGenerator : IIncrementalGenerator
     private sealed record BufferModel(string Namespace, string Element, string Name, string Path, string HintName, bool IsPublic,
         bool Relation, EquatableArray<Setter> Setters, bool WorldTaken, EquatableArray<string> Taken)
     {
-        public static BufferModel? Create(SemanticModel model, GenericNameSyntax syntax, CancellationToken token)
+        public static BufferModel? Create(SemanticModel model, INamedTypeSymbol buffer)
         {
-            if (model.GetSymbolInfo(syntax, token).Symbol is not INamedTypeSymbol { IsGenericType: true } buffer
-                || buffer.OriginalDefinition.ToDisplayString() != Symbols.DynamicBuffer
-                || buffer.TypeArguments[0] is not INamedTypeSymbol { TypeKind: TypeKind.Struct } type
+            if (buffer.TypeArguments[0] is not INamedTypeSymbol { TypeKind: TypeKind.Struct } type
                 || !SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, model.Compilation.Assembly)
                 || Symbols.Implements(type, Symbols.Component) || Symbols.Implements(type, Symbols.Singleton))
                 return null;
@@ -399,9 +410,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 ? ComponentModel.SettersOf(type, fqn, type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray())
                 : [];
             string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
-            string path = name;
-            for (var t = type.ContainingType; t != null; t = t.ContainingType) path = t.Name + "_" + path;
-            return new BufferModel(ns, fqn, name, path, fqn.Replace("global::", "").Replace('.', '_'), isPublic,
+            return new BufferModel(ns, fqn, name, Symbols.FlatName(type), Symbols.HintName(type), isPublic,
                 relation, new EquatableArray<Setter>(setters), world.GetMembers(name + "Index").Length > 0, new EquatableArray<string>(taken));
         }
     }
@@ -459,9 +468,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             bool tracked = Symbols.Implements(type, Symbols.TrackChanges);
 
             string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
-            string path = name; // Outer_Inner for nested types: one extension class each
-            for (var t = type.ContainingType; t != null; t = t.ContainingType) path = t.Name + "_" + path;
-            return new ComponentModel(ns, fqn, name, path, fqn.Replace("global::", "").Replace('.', '_'), isPublic, singleton,
+            return new ComponentModel(ns, fqn, name, Symbols.FlatName(type), Symbols.HintName(type), isPublic, singleton,
                 tag, tracked || key != null || grouped, tracked && key == null && !grouped, grouped,
                 Symbols.Implements(type, Symbols.Cleanup), key?.ToDisplayString(Symbols.Fqn) ?? "",
                 world.GetMembers(name + "Index").Length > 0, new EquatableArray<Setter>(setters), new EquatableArray<string>(taken),
