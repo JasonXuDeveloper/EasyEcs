@@ -21,6 +21,9 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
   207 μs through `SaveEntities` + `LoadEntities`; without a hierarchy one way 32 μs against 71 μs).
 - Target policies: `WhenTargetDestroyed(TargetPolicy.Remove / Destroy)` on `EntityId` indexes and relations
   (`ChildOf` is `Destroy`; cascade benchmark unchanged).
+- Added rows are indexed per column (a value index reuses the key's list head across rows of one parent): 1,000
+  entities with a hierarchy there and back, `SaveEntities` + `LoadEntities` 205 → 195 μs, `MoveEntities` 146 →
+  139 μs; what remains is linking each child, which the index needs.
 - Introspection: `world.Describe()` (tables, columns, rows, capacity, bytes), `entity.Describe()`.
 - Nino 4.0.0-rc.4.
 - Static `[ForEach]` methods outside systems: the generator writes the job and an entry point taking the world and
@@ -104,8 +107,6 @@ needs goes. Each round's findings are listed here with what was generated, chang
 
 Each item: profile (asm on x64 and arm64 where it matters), optimize, BDN before and after.
 
-- Moves and loads with a hierarchy: keeping the `ChildOf` index doubles their cost (1,000 entities one way: 66 μs
-  against 32 μs without); index runs of rows at once instead of row by row.
 - New-feature benchmarks: groups, cascades, relations, ordered walks, `Disable`, `Maybe<T>`, bulk changes, saves,
   migrations, prefabs, introspection, ordering.
 - `EasyEcs.Comparison`, against Friflo, Arch and DefaultEcs where they have the feature:
