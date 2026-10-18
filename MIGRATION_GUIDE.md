@@ -100,7 +100,7 @@ behaviors:
   `SingletonRef<T>` handles taken before pointing at a detached copy; they now see the reset value.
 - **`RemoveSingleton<T>()` returns `bool`** (false when the singleton was not added). Calls that ignore the result
   compile unchanged.
-- **`Entity.GetHashCode()` is deterministic** (`Id * 397 ^ Version`) instead of `HashCode.Combine` (randomized per
+- **`Entity.GetHashCode()` is deterministic** (`Index ^ (Version << 20)`) instead of `HashCode.Combine` (randomized per
   process). Equality is unchanged; only code that persisted hash codes across processes could notice.
 
 New:
@@ -139,7 +139,7 @@ New:
   `in` parameter (the change would be neither scheduled as a write nor tracked);
   [EECS012](docs/content/guide/analyzer.md#eecs012) rejects a `DynamicBuffer<T>` copied by value.
 - The library is marked `IsAotCompatible`: trimming and Native AOT analyzers run on every build, and it publishes
-  with Native AOT without warnings.
+  and runs with Native AOT.
 - `entity.Disable<T>()` / `Enable<T>()` (generated `DisableX()` / `EnableX()` / `IsXDisabled`): switch a component
   off and keep its value; queries see `Disabled<T>`. `world.SetAll` / `RemoveAll` / `DisableAll` / `EnableAll`
   change every entity a filter matches, 64 rows at a time.

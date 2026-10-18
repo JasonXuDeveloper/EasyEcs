@@ -299,7 +299,7 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   entities from it with one row copy each, and `entity.Clone()` copies a living entity. Copies get their own dynamic
   buffers, are indexed at once and count as written for change tracking.
 - **Indexes and relations:** components implementing `IIndexed<TKey>` are found by value
-  (`world.Index<T, TKey>().Find(key)`); an `Entity` key makes a relation (`ChildOf(Entity Parent)`) whose index
+  (`world.Index<T, TKey>().Find(key)`); an `EntityId` key makes a relation (`ChildOf(EntityId Parent)`) whose index
   lists the children of an entity. `Set` and `CreateEntity` re-index at once; writes through a `ref` are rejected
   (EECS015).
 - **Generated members:** every component gets named C# 14 extension members, in the spirit of Entitas but for
@@ -336,7 +336,7 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
 - **Structural changes belong to the owner thread.** They check a plain owner flag instead of a compare-and-swap (a
   create/destroy pair is about a quarter faster); one made inside a parallel stage of systems or a parallel `[ForEach]`, or
   reentered, throws `InvalidOperationException` instead of tearing the tables.
-- `Entity.GetHashCode()` is deterministic (`Id * 397 ^ Version`) and cheaper (relation lookups hash handles).
+- `Entity.GetHashCode()` is deterministic (`Index ^ (Version << 20)`) and cheaper (relation lookups hash handles).
 - **Renamed:** `WorldOptions.Parallel` is `WorldOptions.ParallelSystems` (apart from `[ForEach(Parallel = true)]`);
   `Entity.Id` is an `EntityId` (`Id.Index`, `Id.Version`), the id to store in components.
 - **Removed:** `EcsSystem.Priority` (order by dependency instead), the `World.SystemError` event (errors are data),
