@@ -422,6 +422,7 @@ public class GeneratorTests
             public struct Q2 : IComponent, ITrackChanges { public int V; }
             public record struct Loot(int Item);
             internal struct Note { public int V; }
+            public record struct Friend(EntityId Target) : IRelation;
             public static class U
             {
                 public static int Use(Entity e)
@@ -434,6 +435,8 @@ public class GeneratorTests
                     return e.HasLoot && e.RemoveLoot().IsAlive ? sum : 0;
                 }
                 public static Entity Spawn(World w) => w.CreateEntity(new DynamicBuffer<Loot>());   // names the buffer
+                public static bool Friends(Entity e) => e.HasFriend && e.Friend.Count > 0 && e.RemoveFriend().IsAlive;
+                static void Links(in DynamicBuffer<Friend> friends) { }
                 static void Notes(ref DynamicBuffer<Note> notes, in DynamicBuffer<int> ints, in DynamicBuffer<P> components) { }
             }
             """;
@@ -443,7 +446,8 @@ public class GeneratorTests
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Buffer.g.cs")).Select(t => t.ToString()));
         Assert.That(generated, Does.Contain("public ref readonly global::EasyEcs.DynamicBuffer<global::Game.Loot> Loot"));
         Assert.That(generated, Does.Contain("internal ref global::EasyEcs.DynamicBuffer<global::Game.Note> WriteNote()"));
-        Assert.That(output.SyntaxTrees.Count(t => t.FilePath.EndsWith(".Buffer.g.cs")), Is.EqualTo(2)); // not int, not a component
+        Assert.That(output.SyntaxTrees.Count(t => t.FilePath.EndsWith(".Buffer.g.cs")), Is.EqualTo(3)); // not int, not a component
+        Assert.That(generated, Does.Not.Contain("WriteFriend").And.Not.Contain("GetOrAddFriend"));    // links: AddRelation only
         Assert.That(await Diagnose(Components, source), Is.Empty);                                    // no EECS012 on the members
     }
 

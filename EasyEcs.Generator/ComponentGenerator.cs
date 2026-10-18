@@ -21,7 +21,8 @@ namespace EasyEcs.Generator;
 /// changed).</item>
 /// <item>buffer element <c>Loot</c> (a struct of this compilation some code names in <c>DynamicBuffer&lt;Loot&gt;</c>):
 /// <c>entity.Loot</c> (<c>ref readonly DynamicBuffer&lt;Loot&gt;</c>), <c>HasLoot</c>, <c>WriteLoot()</c>,
-/// <c>GetOrAddLoot()</c>, <c>RemoveLoot()</c>.</item>
+/// <c>GetOrAddLoot()</c>, <c>RemoveLoot()</c> (a relation's links, indexed, get no <c>ref</c> members: they are
+/// written with <c>AddRelation</c> / <c>RemoveRelation</c>).</item>
 /// <item>tag <c>Dead</c> (no fields): <c>entity.IsDead</c>, <c>SetDead()</c>, <c>RemoveDead()</c>.</item>
 /// <item>the same writers on a <c>Prefab</c>, returning it for chaining (<c>new Prefab().SetHealth(100).SetNpc()</c>),
 /// with <c>prefab.Health</c> (read-only), <c>HasHealth</c> and <c>IsDead</c>.</item>
@@ -312,15 +313,15 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         sb.Append($"{a} static class {m.Path}BufferExtensions\n{{\n");
         sb.Append("    extension(global::EasyEcs.Entity @this)\n    {\n");
         if (Free(n))
-            sb.Append($"        /// <summary>The entity's buffer of <see cref=\"{e}\"/>, read-only (<c>Read</c>: never a write); write it through <c>Write{n}()</c>. Throws if missing.</summary>\n" +
+            sb.Append($"        /// <summary>The entity's buffer of <see cref=\"{e}\"/>, read-only (<c>Read</c>: never a write); write it through <c>{(m.Relation ? "AddRelation / RemoveRelation" : $"Write{n}()")}</c>. Throws if missing.</summary>\n" +
                       $"        {a} ref readonly {t} {n}\n        {{\n    {Inline}            get => ref @this.Read<{t}>();\n        }}\n");
         if (Free("Has" + n))
             sb.Append($"        /// <summary>Whether the entity has a buffer of <see cref=\"{e}\"/>.</summary>\n" +
                       $"        {a} bool Has{n}\n        {{\n    {Inline}            get => @this.Has<{t}>();\n        }}\n");
-        if (Free("Write" + n))
+        if (!m.Relation && Free("Write" + n)) // links are indexed: written with AddRelation / RemoveRelation
             Member($"The entity's buffer of <see cref=\"{e}\"/> by <c>ref</c> for writing (<c>Get</c>): stamped as changed. Throws if missing.",
                 $"ref {t} Write{n}() => ref @this.Get<{t}>();");
-        if (Free("GetOrAdd" + n))
+        if (!m.Relation && Free("GetOrAdd" + n))
             Member($"The entity's buffer of <see cref=\"{e}\"/> by <c>ref</c>, added (empty) first if missing (<c>GetOrAdd</c>).",
                 $"ref {t} GetOrAdd{n}() => ref @this.GetOrAdd<{t}>();");
         if (Free("Remove" + n))
@@ -335,7 +336,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
     /// it and not itself a component or singleton (those have members of their own). Symbol-free.
     /// </summary>
     private sealed record BufferModel(string Namespace, string Element, string Name, string Path, string HintName, bool IsPublic,
-        EquatableArray<string> Taken)
+        bool Relation, EquatableArray<string> Taken)
     {
         public static BufferModel? Create(SemanticModel model, GenericNameSyntax syntax, CancellationToken token)
         {
@@ -361,7 +362,8 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
             string path = name;
             for (var t = type.ContainingType; t != null; t = t.ContainingType) path = t.Name + "_" + path;
-            return new BufferModel(ns, fqn, name, path, fqn.Replace("global::", "").Replace('.', '_'), isPublic, new EquatableArray<string>(taken));
+            return new BufferModel(ns, fqn, name, path, fqn.Replace("global::", "").Replace('.', '_'), isPublic,
+                Symbols.Implements(type, "EasyEcs.IRelation"), new EquatableArray<string>(taken));
         }
     }
 
