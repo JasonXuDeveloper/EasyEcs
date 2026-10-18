@@ -4,8 +4,9 @@ name: Release
 #   tag:     bump <Version> in Directory.Build.props and the examples' `#:package` lines, build and test it, commit
 #            "Bump to vX.Y.Z", tag vX.Y.Z, push.
 #   publish: from the tag, pack EasyEcs and EasyEcs.Templates and push them to NuGet (Trusted Publishing: a short-lived
-#            key from this workflow's OIDC token, no stored secret), then create the GitHub release with GitHub's
-#            generated notes (What's Changed from the merged pull requests, New Contributors, Full Changelog). If it
+#            key from this workflow's OIDC token, no stored secret), then create the GitHub release: install line, the
+#            version's changelog section, every commit since the previous tag (.github/scripts/release-notes.sh), then
+#            GitHub's generated notes (What's Changed from the merged pull requests, New Contributors, Full Changelog). If it
 #            fails, fix the cause and use "Re-run failed jobs": the tag stays, NuGet skips a version it already has,
 #            the release is created once.
 # Trusted Publishing policy on nuget.org: owner JasonXuDeveloper, repository EasyEcs, workflow release.yml.
@@ -81,6 +82,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: v${{ inputs.version }}
+          fetch-depth: 0 # the release notes list the commits since the previous tag
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -111,6 +113,8 @@ jobs:
           if gh release view "v$VERSION" >/dev/null 2>&1; then echo "release v$VERSION exists"; exit 0; fi
           PRERELEASE=""
           if [[ "$VERSION" == *-* ]]; then PRERELEASE="--prerelease"; fi
-          # --notes goes first; the generated notes (pull requests since the previous tag) are appended.
+          # Our notes go first (install, the changelog's highlights, every commit since the previous tag); the
+          # generated notes (pull requests, Full Changelog) are appended.
+          .github/scripts/release-notes.sh "$VERSION" > notes.md
           gh release create "v$VERSION" artifacts/*.nupkg --verify-tag --title "v$VERSION" $PRERELEASE \
-            --notes "Install: \`dotnet add package EasyEcs --version $VERSION\`" --generate-notes
+            --notes-file notes.md --generate-notes
