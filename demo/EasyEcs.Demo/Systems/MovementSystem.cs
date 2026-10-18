@@ -2,7 +2,8 @@ using EasyEcs;
 
 namespace EasyEcs.Demo;
 
-// Moves every spark by its velocity over the step.
+// Moves every spark by its velocity over the step. One call per spark.
+[UpdateInGroup<PerEntity>]
 public class MovementSystem : EcsSystem
 {
     [ForEach]

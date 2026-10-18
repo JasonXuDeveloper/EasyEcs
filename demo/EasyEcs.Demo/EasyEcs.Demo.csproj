@@ -10,8 +10,10 @@
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-        <!-- As small as the runtime gets without the wasm-tools workload: trimmed IL, no ICU, no globalization data,
-             no debugger, no timezone data. -->
+        <WasmEnableSIMD>true</WasmEnableSIMD>
+        <WasmEnableExceptionHandling>true</WasmEnableExceptionHandling>
+        <!-- As small as the runtime gets: trimmed IL, no ICU, no globalization data, no debugger, no timezone
+             data. -->
         <PublishTrimmed>true</PublishTrimmed>
         <TrimMode>full</TrimMode>
         <InvariantGlobalization>true</InvariantGlobalization>
@@ -22,6 +24,15 @@
         <WasmEmitSymbolMap>false</WasmEmitSymbolMap>
         <!-- Cloudflare compresses on the fly; precompressed copies would only double the committed bundle. -->
         <CompressionEnabled>false</CompressionEnabled>
+    </PropertyGroup>
+
+    <!-- Published with Mono AOT, which needs the wasm-tools workload (docs/scripts/build-demo.sh installs it): the
+         IL is compiled ahead of time to WebAssembly with 128-bit SIMD and native exception handling, and the
+         compiled method bodies are stripped from the shipped assemblies. Only on publish, so building the solution
+         needs no workload. -->
+    <PropertyGroup Condition="'$(_IsPublishing)' == 'true' or '$(WasmBuildingForNestedPublish)' == 'true'">
+        <RunAOTCompilation>true</RunAOTCompilation>
+        <WasmStripILAfterAOT>true</WasmStripILAfterAOT>
     </PropertyGroup>
 
     <!-- With the NuGet package this is one line: <PackageReference Include="EasyEcs" Version="..."/> (the package

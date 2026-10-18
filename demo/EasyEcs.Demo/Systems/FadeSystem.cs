@@ -2,7 +2,7 @@ using EasyEcs;
 
 namespace EasyEcs.Demo;
 
-// Dims the glow of the sparks that bounced and removes it when it is gone.
+// Dims the flash of the sparks that hit a wall and removes it when it is gone.
 public class FadeSystem : EcsSystem
 {
     [ForEach]
