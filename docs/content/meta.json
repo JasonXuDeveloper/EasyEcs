@@ -1,0 +1,20 @@
+{
+  "title": "EasyEcs",
+  "pages": [
+    "README",
+    "features",
+    "getting-started",
+    "ecs-principles",
+    "example",
+    "---Guide---",
+    "...guide",
+    "---Reference---",
+    "api",
+    "performance",
+    "architecture",
+    "comparison",
+    "faq",
+    "decisions",
+    "roadmap"
+  ]
+}

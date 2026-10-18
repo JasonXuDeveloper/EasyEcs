@@ -318,7 +318,7 @@ All numbers come from BenchmarkDotNet. The headline benchmarks simulate a real s
 - **`OperationBenchmark`** (project `EasyEcs.Comparison`) isolates single operations on the headline world, EasyEcs
   against Friflo, including spawning NPCs from a prefab (`Instantiate`; Friflo `CloneEntity`).
 
-Measured with BenchmarkDotNet and the repository's job (`EasyEcs.Benchmark/BenchmarkConfig.cs`: 2 launches, 6
+Measured with BenchmarkDotNet and the repository's job (`benchmarks/EasyEcs.Benchmark/BenchmarkConfig.cs`: 2 launches, 6
 warmups, 8 iterations of 250 ms, call counting from the start) on .NET 10, on a 4-core Xeon VM at 2.1 GHz.
 
 **Realistic server tick** (the "Allocated" column is per tick):
@@ -394,10 +394,10 @@ from run to run on this VM (how the 100,000 rows land in physical memory), while
 Performance numbers come from BenchmarkDotNet only:
 
 ```bash
-dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*'               # everything (the numbers above)
-dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*World*'         # headline: realistic server tick
-dotnet run -c Release --project EasyEcs.Comparison -- --filter '*'              # other ECS libraries: headline world, operations, features
-dotnet run -c Release --project EasyEcs.Comparison -- --check                   # correctness only: counters and feature results match
+dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*'               # everything (the numbers above)
+dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*World*'         # headline: realistic server tick
+dotnet run -c Release --project benchmarks/EasyEcs.Comparison -- --filter '*'              # other ECS libraries: headline world, operations, features
+dotnet run -c Release --project benchmarks/EasyEcs.Comparison -- --check                   # correctness only: counters and feature results match
 ```
 
 `WorldSimulationBenchmark` / `MultiWorldBenchmark` model a busy MMO-style world and must stay at 0 B allocated per

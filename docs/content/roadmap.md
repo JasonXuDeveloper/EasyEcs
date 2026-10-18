@@ -53,7 +53,7 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
 - Code fixes (EasyEcs.CodeFixes, in the package beside the generator): EECS002 / EECS012 take the parameter by `in`
   or `ref`, EECS005 makes the method static, EECS006 makes the type a struct, EECS010 drops `Parallel = true`, EECS011
   takes it by `ref` (or `Span`), EECS022 makes the type internal, EECS023 removes the filter.
-- The battle server uses every feature (`EasyEcs.Benchmark/BattleServer.cs` = `doc/example.md`): a `Rules`
+- The battle server uses every feature (`benchmarks/EasyEcs.Benchmark/BattleServer.cs` = `docs/content/example.md`): a `Rules`
   singleton, combat split into damage and statuses, freezing through `Disable`, NPC respawn through a `Spawn` cleanup
   component, projectiles as `ChildOf` children, zones as groups, a kill-streak leaderboard (ordered index), `Friend`
   relations with a target policy, `Maybe<T>`, update phases, `[ForEach]` runners, bulk changes, saves, migrations and
@@ -142,7 +142,7 @@ needs goes. Each round's findings are listed here with what was generated, chang
 
 ### Documentation (last, all at once)
 
-- `doc/performance.md`: a coverage table (feature → test file → benchmark → peer comparison) and current numbers; the
+- `docs/content/performance.md`: a coverage table (feature → test file → benchmark → peer comparison) and current numbers; the
   peer rows not won (10 removals, [D23](decisions.md#d23-change-summaries-per-block-removals-summarized-apart)) with
   their reasons.
 - Every page checked against the code:

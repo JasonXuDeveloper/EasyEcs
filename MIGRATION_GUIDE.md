@@ -10,7 +10,7 @@
   [Migration steps](#migration-steps) · [New features](#new-features-in-v30) ·
   [Common patterns](#common-migration-patterns) · [Troubleshooting](#troubleshooting)
 
-For the current API, see the [documentation](doc/README.md).
+For the current API, see the [documentation](docs/content/README.md).
 
 ## v4.0 → v4.1
 
@@ -28,18 +28,18 @@ behaviors:
   `TryGetEntity` and `IsAlive` take an `EntityId`; a handle converts to one implicitly, so `world.GetEntity(entity)`
   compiles. Store `EntityId`s, not `Entity` handles, in components: a handle holds its world, which makes the column
   managed (scanned by the GC, not copied as a block, not serializable), and the new warning
-  [EECS017](doc/guide/analyzer.md#eecs017) points at such fields.
+  [EECS017](docs/content/guide/analyzer.md#eecs017) points at such fields.
 - **`EcsSystem.Priority` is gone.** Systems run in registration order; order them by what they depend on with
   `[UpdateBefore<TSystem>]` / `[UpdateAfter<TSystem>]` on the class (a cycle is
-  [EECS019](doc/guide/analyzer.md#eecs019), an order against a system of another group
-  [EECS020](doc/guide/analyzer.md#eecs020)).
+  [EECS019](docs/content/guide/analyzer.md#eecs019), an order against a system of another group
+  [EECS020](docs/content/guide/analyzer.md#eecs020)).
 - **The `World.SystemError` event is gone.** A system's exception propagates out of `Update` (the default), or, with
   `new WorldOptions { SystemErrors = SystemErrorPolicy.Disable }`, switches the system off and stays in
   `system.Error` for the application to read from `world.Systems` (enable the system again to retry).
 - **Systems need no `partial`.** The generated code lives outside the system's type, so EECS001 is gone; `partial`
   still compiles.
 - **`UpdateInterval` and the new `UpdatePhase` should be constants**: they are read every update, and the warning
-  [EECS018](doc/guide/analyzer.md#eecs018) points at overrides that compute them. To stop and resume a system, set
+  [EECS018](docs/content/guide/analyzer.md#eecs018) points at overrides that compute them. To stop and resume a system, set
   `Enabled`.
 - **`world.DestroyEntity(entity)` is gone:** it did what `entity.Destroy()` does. Call `entity.Destroy()`, or
   `world.DestroyEntities<T…>(filter)` for every match at once.
@@ -66,7 +66,7 @@ behaviors:
   instead: a change made while another runs, or inside a parallel stage of systems or a parallel `[ForEach]`, throws
   `InvalidOperationException`; two threads of your own changing one world at once are not caught reliably. Make
   structural changes on the thread that calls `Update` (other threads hand them over as data through a queue a
-  system drains: [input from other threads](doc/guide/threading.md#input-from-other-threads)), or give each thread
+  system drains: [input from other threads](docs/content/guide/threading.md#input-from-other-threads)), or give each thread
   its own world. Two new analyzer errors point at such code: **EECS013** (a structural change in a `[ForEach]`
   method that takes no `Entity` or `World`, e.g. through a handle a component holds: take the `Entity` as a
   parameter) and **EECS014** (a structural change in a lambda handed to `Task.Run`, `Parallel.*`, `ThreadPool` or a
@@ -106,7 +106,7 @@ behaviors:
 New:
 
 - `[ForEach]` methods can take `Span<T>` / `ReadOnlySpan<T>` components (plus singletons) and receive whole runs of
-  rows, for SIMD ([EECS009](doc/guide/analyzer.md#eecs009) reports mixed signatures). The ad-hoc form is
+  rows, for SIMD ([EECS009](docs/content/guide/analyzer.md#eecs009) reports mixed signatures). The ad-hoc form is
   `world.ForEachBatch` with an `IForEachBatch<T1..Tn>` job.
 - `world.ForEachEntity` with an `IForEachEntity<T1..Tn>` job receives the `Entity` handle instead of the id.
 - `INoStructuralChanges` marks a job that makes no structural change; the generator adds it to `[ForEach]` methods
@@ -116,28 +116,28 @@ New:
   pass through the structural gate.
 - `WorldOptions.MeasureSystems` times every system run into `system.Stats` (`SystemStats`).
 - `[ForEach(Parallel = true)]` (and `world.ForEachParallel` / `ForEachEntityParallel`) runs chunks of
-  `World.ParallelChunkRows` rows on several threads; [EECS010](doc/guide/analyzer.md#eecs010) reports methods that could race.
+  `World.ParallelChunkRows` rows on several threads; [EECS010](docs/content/guide/analyzer.md#eecs010) reports methods that could race.
 - `world.Capture()` / `world.Restore(snapshot)`: in-memory snapshots of entities, components and singletons
-  ([Snapshots](doc/guide/snapshots.md)).
+  ([Snapshots](docs/content/guide/snapshots.md)).
 - `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>(since)` / `Since(since)`, `world.ChangeTick`,
-  `system.LastRunTick`: change tracking ([Change tracking](doc/guide/change-tracking.md)). The job interfaces gained
+  `system.LastRunTick`: change tracking ([Change tracking](docs/content/guide/change-tracking.md)). The job interfaces gained
   an optional static `Writes` member (with a default).
 - `[Removed<T>]` and `QueryFilter.Removed<T>(since)`: the entities that lost a tracked component since a tick
-  (replication of what went away), with [EECS016](doc/guide/analyzer.md#eecs016) for filters no row can pass.
+  (replication of what went away), with [EECS016](docs/content/guide/analyzer.md#eecs016) for filters no row can pass.
 - `Prefab` and `world.Instantiate(prefab)` / `Instantiate(prefab, span)`: entities from a recipe of components that
   belongs to no world, built with `Set` / `Remove` or the generated `prefab.SetX(…)` / `RemoveX()` (chainable),
   and `SetBuffer(…)` / `SetLoot(…)` for the elements of a `DynamicBuffer<T>`; `entity.Clone()` copies a living
   entity.
 - `IIndexed<TKey>`, `world.Index<T, TKey>()`, `ValueIndex<T, TKey>`: find entities by a component value; relations
-  are indexed `Entity` keys ([Indexes and relations](doc/guide/indexes-and-relations.md)).
+  are indexed `Entity` keys ([Indexes and relations](docs/content/guide/indexes-and-relations.md)).
 - `entity.Read<T>()` returns a `ref readonly T` that never counts as a write of a tracked component, and
   `entity.TryGetRef<T>(out bool found)` returns a `ref T` (a null ref when missing): optional access without a
   copy. `entity.Has<T1..Tn>()` tests several components with one lookup.
 - `DynamicBuffer<T>`: a list per entity as a component, written only through `ref` (each write is a tracked change),
-  copied by snapshots ([Dynamic buffers](doc/guide/dynamic-buffers.md)).
-- [EECS011](doc/guide/analyzer.md#eecs011) rejects a `[ForEach]` method that changes a collection or class held by an
+  copied by snapshots ([Dynamic buffers](docs/content/guide/dynamic-buffers.md)).
+- [EECS011](docs/content/guide/analyzer.md#eecs011) rejects a `[ForEach]` method that changes a collection or class held by an
   `in` parameter (the change would be neither scheduled as a write nor tracked);
-  [EECS012](doc/guide/analyzer.md#eecs012) rejects a `DynamicBuffer<T>` copied by value.
+  [EECS012](docs/content/guide/analyzer.md#eecs012) rejects a `DynamicBuffer<T>` copied by value.
 - The library is marked `IsAotCompatible`: trimming and Native AOT analyzers run on every build, and it publishes
   with Native AOT without warnings.
 - `entity.Disable<T>()` / `Enable<T>()` (generated `DisableX()` / `EnableX()` / `IsXDisabled`): switch a component
@@ -161,7 +161,7 @@ New:
   arguments: one pass for tools and tests), generic systems, filters on
   system groups (`[With<T>]` on a group struct applies to all its systems), `UpdatePhase` to spread systems with the
   same `UpdateInterval` over updates, `world.GetOrAddX()` for singletons, named query items (`item.Position` for
-  `item.Component1`), code fixes for the analyzer's diagnostics, and [EECS024](doc/guide/analyzer.md#eecs024) for
+  `item.Component1`), code fixes for the analyzer's diagnostics, and [EECS024](docs/content/guide/analyzer.md#eecs024) for
   `[ForEach]` on a local function.
 
 ## v3.x → v4.0
@@ -244,14 +244,14 @@ public partial class S : EcsSystem
 5. Never call `CompactArchetypes()` while iterating (it rewrites rows).
 6. **Systems should be stateless and independent**: the analyzer warns about mutable fields on systems (`EECS007`,
    move the state into a component or singleton) and about systems referencing other systems (`EECS008`,
-   communicate through data). See [doc/ecs-principles.md](doc/ecs-principles.md).
+   communicate through data). See [ECS principles](https://ecs.xgamedev.net/docs/ecs-principles).
 7. **`IEvent`, `IEventHandler<T>` and `Publish` are removed.** Write state changes as data (a tag or a field) and
    let later systems query them.
 8. **`ParallelSystems` is safe by construction.** v3 ran every system of one priority at once and left data races to
    you. v4 runs systems of one priority together only when their generated access does not conflict (`ref` = write,
    `in` = read); systems with an `Entity`/`World` parameter, instance `[ForEach]` methods, an `OnUpdate` override or
    no `[ForEach]` method run alone. The result equals a sequential update. See
-   [Threading](doc/guide/threading.md#parallel-systems).
+   [Threading](docs/content/guide/threading.md#parallel-systems).
 
 ### Source generator and analyzer
 

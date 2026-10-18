@@ -8,18 +8,22 @@ published to NuGet as `EasyEcs`. Public API and code comments are in English.
 ```bash
 dotnet build                                                   # whole solution
 dotnet test                                                    # NUnit
-dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*'            # all benchmarks
-dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*Iterate*'    # a subset
+dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*'            # all benchmarks
+dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*Iterate*'    # a subset
 ```
 
-Both benchmark projects use the job in `EasyEcs.Benchmark/BenchmarkConfig.cs` (no `--job` needed).
+Both benchmark projects use the job in `benchmarks/EasyEcs.Benchmark/BenchmarkConfig.cs` (no `--job` needed).
+
+The pages in `docs/content` are plain GitHub markdown without frontmatter, readable on GitHub as they are; the website
+(https://ecs.xgamedev.net) is built from them and takes a page's title from its H1 and its description from its first
+paragraph.
 
 `global.json` requires the .NET 10 SDK (`rollForward: latestFeature`).
 
 ## Layout
 
 ```
-EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written shared core only)
+src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written shared core only)
   Contracts.cs                 IComponent, ITrackChanges, ISingletonComponent, INoStructuralChanges and the other markers
   Entity.cs                    the entity handle (id, version, world): Has/Get/Read/TryGet/GetOrAdd/Disable/Enable/
                                Clone/Destroy
@@ -89,7 +93,7 @@ EasyEcs.Core/                  net10.0 library, namespace EasyEcs (hand-written 
   ComponentInfo.cs             per-type column operations (size, managed, create/grow/copy/clone/clear) indexed by bit;
                                Pair links a tracked component with its change-tick column
   BitMask.cs                   256-bit SIMD bitset with overflow (component masks, query sets)
-EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, required by Roslyn hosts)
+src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, required by Roslyn hosts)
   ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove, World.CreateEntity/CreateEntities/
                                DestroyEntities, IForEach/IForEachEntity/IForEachBatch, ForEach/ForEachEntity/
                                ForEachBatch/ForEachParallel/ForEachEntityParallel with their row loops, Query/Count/Any,
@@ -108,30 +112,32 @@ EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, req
   Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
   EquatableArray.cs            array with value equality (generator models cache between edits)
   Polyfills.cs                 IsExternalInit for netstandard2.0 (records); do not delete
-EasyEcs.CodeFixes/             EasyEcsCodeFixes.cs: fixes for the analyzer's diagnostics (bundled in the package)
-EasyEcs.UnitTest/              NUnit, one file per feature: Entity, Component, Presence, Query, System, ForEachSystem,
+src/EasyEcs.CodeFixes/         EasyEcsCodeFixes.cs: fixes for the analyzer's diagnostics (bundled in the package)
+tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, Presence, Query, System, ForEachSystem,
                                Singleton, Concurrency, Parallel, Runner, Changed, Removed, Instantiate, DynamicBuffer,
                                Index, OrderedIndex, Relation, Hierarchy, TargetPolicy, Group, Cleanup, Disable, Bulk,
                                Move, Snapshot, Serialization, Unload, Introspection, Generic, Allocation (0 B budget),
-                               Generator (diagnostics + caching), CodeFix, BattleServer (the doc/example.md world as a
+                               Generator (diagnostics + caching), CodeFix, BattleServer (the docs/content/example.md world as a
                                whole, linked from EasyEcs.Benchmark); Fixtures.cs holds the shared test components
-EasyEcs.Benchmark/             BenchmarkDotNet: WorldSimulationBenchmark / MultiWorldBenchmark (headline, realistic
+benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / MultiWorldBenchmark (headline, realistic
                                server tick; the world itself is WorldSimulation.cs), BattleServerBenchmark (the
-                               doc/example.md, BattleServer.cs, every feature), one benchmark per feature (Bulk,
+                               docs/content/example.md, BattleServer.cs, every feature), one benchmark per feature (Bulk,
                                CallSite, ChangeTracking, Cleanup, Count, DynamicBuffer, Group, Hierarchy, Index,
                                Introspection, Maybe, Migration, OrderedIndex, Ordering, ParallelForEach,
                                ParallelSystems, Prefab, Relation, Runner, Snapshot, Sparse, Unload) + MicroBenchmarks.
                                Always measure with BenchmarkDotNet.
-EasyEcs.Benchmark.Plugin/      a collectible plugin (Scoring.cs) the Unload benchmark loads and unloads
-EasyEcs.Comparison/            BenchmarkDotNet against Arch, Friflo.Engine.ECS and DefaultEcs, every result checked in
+benchmarks/EasyEcs.Benchmark.Plugin/  a collectible plugin (Scoring.cs) the Unload benchmark loads and unloads
+benchmarks/EasyEcs.Comparison/ BenchmarkDotNet against Arch, Friflo.Engine.ECS and DefaultEcs, every result checked in
                                setup: the headline world (WorldSimulation.cs, compiled unchanged, *Simulation.cs ports);
                                OperationBenchmark (per operation); FeatureBenchmark (change tracking, removal detection,
                                indexes); QueryComparisons (value queries, parallel queries, saves); StructureComparisons
                                (hierarchy, relations, disable, structural changes); BulkComparisons (bulk changes,
                                spawns); SystemComparisons (parallel systems)
-doc/                           README.md (index), getting-started.md, example.md (the battle server), guide/ (one page
-                               per concept, analyzer.md lists EECS002-023), api.md (API + complexity), ecs-principles.md,
-                               architecture.md, performance.md, comparison.md, faq.md (diagrams in mermaid)
+docs/content/                  the docs (source of https://ecs.xgamedev.net) as plain GitHub markdown: README.md (index),
+                               features.md, getting-started.md, example.md (the battle server), guide/ (one page per
+                               concept, analyzer.md lists EECS002-024), api.md (API + complexity), ecs-principles.md,
+                               architecture.md, performance.md, comparison.md, faq.md, decisions.md, roadmap.md
+                               (diagrams in mermaid); meta.json files order the site's sidebar
 ```
 
 ## Engineering principles (apply to every change)
@@ -155,10 +161,10 @@ doc/                           README.md (index), getting-started.md, example.md
 
 ## Rules
 
-- **Follow the ECS principles in `doc/ecs-principles.md`, including in tests, benchmarks and docs**: components and
+- **Follow the ECS principles in `docs/content/ecs-principles.md`, including in tests, benchmarks and docs**: components and
   singletons are plain data structs; one system per responsibility; systems are stateless (state goes into
   components or singletons, EECS007) and never reference other systems (EECS008); state changes are data.
-  Examples are what users copy, so they must be exemplary. The battle server example (`doc/example.md`) is `EasyEcs.Benchmark/BattleServer.cs`
+  Examples are what users copy, so they must be exemplary. The battle server example (`docs/content/example.md`) is `benchmarks/EasyEcs.Benchmark/BattleServer.cs`
   verbatim: change both together, and give a new feature a place in it.
 - **Performance changes must be measured.** Run the relevant `EasyEcs.Benchmark` cases before and after; a change
   ships only if it is a net improvement (time and allocations) with no regression elsewhere. Add a benchmark
@@ -182,8 +188,8 @@ doc/                           README.md (index), getting-started.md, example.md
 - **Every change a pass must notice bumps `StorageVersion`**: reallocation (columns, `Meta`, entity rows), row moves,
   closing tombstones, and presence bits flipping, so in-flight passes refresh their refs and re-read row filters.
 - **Decisions**: every non-obvious choice, and every feature dropped after weighing it, gets a record in
-  `doc/decisions.md` (decision, why, what was considered, numbers); `doc/roadmap.md` lists what is planned.
-- **Docs**: diagrams are mermaid; `doc/api.md` lists the complexity of every public API (README is the landing page).
+  `docs/content/decisions.md` (decision, why, what was considered, numbers); `docs/content/roadmap.md` lists what is planned.
+- **Docs**: diagrams are mermaid; `docs/content/api.md` lists the complexity of every public API (README is the landing page).
 - **Entity ids are recycled**: any id-keyed API must also validate the version (`World.Live`, `Entity.ThrowStale`).
 - Behavioral/breaking changes need a `MIGRATION_GUIDE.md` entry and a README "What's new" entry.
 - Commits: logic, docs and CI in separate commits. The author is the repository owner; the committer is the

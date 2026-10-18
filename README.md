@@ -1,8 +1,11 @@
 # EasyEcs
 
-**A high-performance, allocation-free archetype ECS for .NET 10 servers.**
+**EasyEcs is an open-source, allocation-free archetype Entity Component System (ECS) for C# and .NET 10 servers.**
 Write plain data and `[ForEach]` methods; the source generator turns them into inlined struct jobs, the analyzer
-catches design mistakes at compile time, and a full server tick allocates 0 bytes.
+catches design mistakes at compile time, and a full server tick allocates 0 bytes. It is built for game servers,
+simulations and other long-running real-time backends.
+
+**Documentation: [ecs.xgamedev.net](https://ecs.xgamedev.net)**
 
 [![NuGet](https://img.shields.io/nuget/v/EasyEcs?logo=nuget&color=004880)](https://www.nuget.org/packages/EasyEcs)
 [![Downloads](https://img.shields.io/nuget/dt/EasyEcs?logo=nuget)](https://www.nuget.org/packages/EasyEcs)
@@ -16,13 +19,13 @@ One server tick of 9 systems (movement, AOI, combat, status effects, death, resp
 |---|---:|---:|---:|
 | One world | 100,000 | **1.89&nbsp;ms** | **0 B** |
 | Four worlds, one per thread | 100,000 | **1.08&nbsp;ms** | **0 B** |
-| [Battle server](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/example.md), every feature | 100,000 | **2.36&nbsp;ms** | **0 B** |
+| [Battle server](https://ecs.xgamedev.net/docs/example), every feature | 100,000 | **2.36&nbsp;ms** | **0 B** |
 
 <sub>BenchmarkDotNet, .NET 10, 4-core Xeon VM at 2.1 GHz; entities spawn, die, gain and lose components every tick.
 The battle server turns every feature on: parallel steering and systems, replication, indexes, relations, timings.
 A `[ForEach]` system adding `Velocity` to `Position` costs 0.8 ns per entity (one archetype), faster than two
 plain arrays.
-[Details](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md#benchmarks).</sub>
+[Details](https://ecs.xgamedev.net/docs/performance#benchmarks).</sub>
 
 ```bash
 dotnet add package EasyEcs        # net10.0 · source generator and analyzer included
@@ -55,40 +58,40 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
   separate cadences (input on every wake, simulation on a fixed tick).
 - **Built for servers that run for months.** Ids are recycled behind version-checked handles, memory is bounded by
   the peak entity count, a structural change off the owner thread throws or is reported at compile time instead of
-  tearing the tables; the supported model is one owner thread per world (see [Threading](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md)),
+  tearing the tables; the supported model is one owner thread per world (see [Threading](https://ecs.xgamedev.net/docs/guide/threading)),
   and one world per thread scales across cores.
 
 ## Features
 
-Everything EasyEcs gives you; each row links to its guide page with examples ([all features](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/features.md): what each
+Everything EasyEcs gives you; each row links to its guide page with examples ([all features](https://ecs.xgamedev.net/docs/features): what each
 costs and when to use it).
 
 | Feature | API | What it does |
 |---|---|---|
-| [Worlds and entities](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md) | `new World(options)`, `CreateEntity`, `TryGetEntity`, `IsAlive`, `Destroy` | Isolated worlds of version-checked, recycled entity handles; lookup by id. |
-| [Components and tags](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md) | `struct : IComponent`, `Set`, `Get`, `Read`, `TryGet`, `TryGetRef`, `GetOrAdd`, `Has`, `Remove`; generated `e.Position`, `SetX`, `IsDead` | Plain structs in archetype tables; an empty struct is a tag; up to 9 components per call. |
-| [Prefabs and cloning](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/prefabs.md) | `Prefab`, generated `prefab.SetX(…)`, `world.Instantiate(prefab)`, `Instantiate(prefab, span)`, `entity.Clone()` | Kinds of entities defined once as data that belongs to no world; copies of a living entity. |
-| [Immediate structural changes](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/structural-changes.md) | any `Set` / `Remove` / create / `Instantiate` / destroy | Applied at once, even in the middle of a pass; no command buffer to flush. |
-| [Systems and `[ForEach]`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md) | `EcsSystem`, `[ForEach]`, `[UpdateBefore<T>]` / `[UpdateAfter<T>]`, `OnCreate` / `OnUpdate` / `OnDestroy`, `AddSystem` / `RemoveSystem` / `GetSystem` | A method is the whole loop, compiled to an inlined struct job; `in` reads, `ref` writes, `Entity` and singletons as parameters. |
-| [Filters](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/queries.md) | `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `QueryFilter` | Narrow a system or query by presence, absence, any-of, recent writes or recent removals. |
-| [Ad-hoc queries](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/queries.md) | `world.Query`, `Count`, `Any` | Iterate from any code (tools, tests, request handlers), allocation-free. |
-| [Struct jobs](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/queries.md#foreach-a-struct-job) | `IForEach`, `IForEachEntity`, `IForEachBatch`, `world.ForEach` / `ForEachEntity` / `ForEachBatch`, `INoStructuralChanges` | Ad-hoc loops with no delegate, inlined like a system; a job declares `Writes`. |
-| [Batch methods](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#batch-methods) | `ForEachBatch`, span parameters | Contiguous runs of rows as spans, for SIMD. |
-| [System groups and intervals](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md) | `ISystemGroup`, `[UpdateInGroup<T>]`, `Update<TGroup>()`, `UpdateInterval`, `Enabled` | Separate cadences (input on every wake, simulation on a fixed tick), throttled and switchable systems. |
-| [Singletons](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/singletons.md) | `ISingletonComponent`, `AddSingleton`, `GetSingleton`, `SingletonRef<T>` | One value per world, passed to systems as `ref` / `in` parameters. |
-| [Parallel systems](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md) | `WorldOptions.ParallelSystems` | Systems with no order and no conflict between them run at once, with the sequential result. |
-| [Parallel `[ForEach]`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#parallel-methods) | `[ForEach(Parallel = true)]`, `ForEachParallel`, `ForEachEntityParallel`, `ParallelChunkRows` | One heavy method's rows split across cores. |
-| [Change tracking](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/change-tracking.md) | `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>(since)`, `Since(tick)` | Visit only the rows written since a system last ran; `ref` access counts as a write. |
-| [Removal detection](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/change-tracking.md#removal-detection) | `[Removed<T>]`, `QueryFilter.Removed<T>(since)` | Visit only the entities that lost a tracked component since a system last ran (replicate what went away). |
-| [Dynamic buffers](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/dynamic-buffers.md) | `DynamicBuffer<T>`, `Add`, `RemoveAt`, `AsSpan`, `[Changed<DynamicBuffer<T>>]` | A list per entity as a component: written only through `ref`, so every change is tracked; copied by snapshots. |
-| [Value indexes](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/indexes-and-relations.md) | `IIndexed<TKey>`, `world.Index<T, TKey>()`, `Find`, `TryFind`, `Count` | Find entities by a component's value, kept in sync with every write. |
-| [Relations](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/indexes-and-relations.md) | an `IIndexed<Entity>` component | Entity-to-entity links with reverse lookup; a destroyed source leaves the index, a destroyed target matches no later entity (handles carry their version). |
-| [Snapshots](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/snapshots.md) | `world.Capture()`, `world.Restore(snapshot)` | Copy a world in memory and roll it back (replays, tests, rollback). |
-| [Bulk create and destroy](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/entities-and-components.md#entities) | `CreateEntities`, `Instantiate(prefab, span)`, `DestroyEntities`, `EnsureEntityCapacity` | Spawn and clear waves in one pass through the structural gate. |
-| [Per-system timing](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#measuring-systems) | `WorldOptions.MeasureSystems`, `system.Stats` | Run counts and times of every system. |
-| [Errors](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/systems.md#errors) | `WorldOptions.SystemErrors`, `system.Error` | A failing system throws out of the update, or is switched off with its exception kept while the tick goes on. |
-| [Analyzer](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/analyzer.md) | EECS002-EECS024 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
-| [Threading and Native AOT](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/guide/threading.md) | one owner thread per world; no reflection on hot paths | Many worlds per process, one per thread; AOT works with nothing to configure. |
+| [Worlds and entities](https://ecs.xgamedev.net/docs/guide/entities-and-components) | `new World(options)`, `CreateEntity`, `TryGetEntity`, `IsAlive`, `Destroy` | Isolated worlds of version-checked, recycled entity handles; lookup by id. |
+| [Components and tags](https://ecs.xgamedev.net/docs/guide/entities-and-components) | `struct : IComponent`, `Set`, `Get`, `Read`, `TryGet`, `TryGetRef`, `GetOrAdd`, `Has`, `Remove`; generated `e.Position`, `SetX`, `IsDead` | Plain structs in archetype tables; an empty struct is a tag; up to 9 components per call. |
+| [Prefabs and cloning](https://ecs.xgamedev.net/docs/guide/prefabs) | `Prefab`, generated `prefab.SetX(…)`, `world.Instantiate(prefab)`, `Instantiate(prefab, span)`, `entity.Clone()` | Kinds of entities defined once as data that belongs to no world; copies of a living entity. |
+| [Immediate structural changes](https://ecs.xgamedev.net/docs/guide/structural-changes) | any `Set` / `Remove` / create / `Instantiate` / destroy | Applied at once, even in the middle of a pass; no command buffer to flush. |
+| [Systems and `[ForEach]`](https://ecs.xgamedev.net/docs/guide/systems) | `EcsSystem`, `[ForEach]`, `[UpdateBefore<T>]` / `[UpdateAfter<T>]`, `OnCreate` / `OnUpdate` / `OnDestroy`, `AddSystem` / `RemoveSystem` / `GetSystem` | A method is the whole loop, compiled to an inlined struct job; `in` reads, `ref` writes, `Entity` and singletons as parameters. |
+| [Filters](https://ecs.xgamedev.net/docs/guide/queries) | `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `QueryFilter` | Narrow a system or query by presence, absence, any-of, recent writes or recent removals. |
+| [Ad-hoc queries](https://ecs.xgamedev.net/docs/guide/queries) | `world.Query`, `Count`, `Any` | Iterate from any code (tools, tests, request handlers), allocation-free. |
+| [Struct jobs](https://ecs.xgamedev.net/docs/guide/queries#foreach-a-struct-job) | `IForEach`, `IForEachEntity`, `IForEachBatch`, `world.ForEach` / `ForEachEntity` / `ForEachBatch`, `INoStructuralChanges` | Ad-hoc loops with no delegate, inlined like a system; a job declares `Writes`. |
+| [Batch methods](https://ecs.xgamedev.net/docs/guide/systems#batch-methods) | `ForEachBatch`, span parameters | Contiguous runs of rows as spans, for SIMD. |
+| [System groups and intervals](https://ecs.xgamedev.net/docs/guide/systems) | `ISystemGroup`, `[UpdateInGroup<T>]`, `Update<TGroup>()`, `UpdateInterval`, `Enabled` | Separate cadences (input on every wake, simulation on a fixed tick), throttled and switchable systems. |
+| [Singletons](https://ecs.xgamedev.net/docs/guide/singletons) | `ISingletonComponent`, `AddSingleton`, `GetSingleton`, `SingletonRef<T>` | One value per world, passed to systems as `ref` / `in` parameters. |
+| [Parallel systems](https://ecs.xgamedev.net/docs/guide/threading) | `WorldOptions.ParallelSystems` | Systems with no order and no conflict between them run at once, with the sequential result. |
+| [Parallel `[ForEach]`](https://ecs.xgamedev.net/docs/guide/systems#parallel-methods) | `[ForEach(Parallel = true)]`, `ForEachParallel`, `ForEachEntityParallel`, `ParallelChunkRows` | One heavy method's rows split across cores. |
+| [Change tracking](https://ecs.xgamedev.net/docs/guide/change-tracking) | `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>(since)`, `Since(tick)` | Visit only the rows written since a system last ran; `ref` access counts as a write. |
+| [Removal detection](https://ecs.xgamedev.net/docs/guide/change-tracking#removal-detection) | `[Removed<T>]`, `QueryFilter.Removed<T>(since)` | Visit only the entities that lost a tracked component since a system last ran (replicate what went away). |
+| [Dynamic buffers](https://ecs.xgamedev.net/docs/guide/dynamic-buffers) | `DynamicBuffer<T>`, `Add`, `RemoveAt`, `AsSpan`, `[Changed<DynamicBuffer<T>>]` | A list per entity as a component: written only through `ref`, so every change is tracked; copied by snapshots. |
+| [Value indexes](https://ecs.xgamedev.net/docs/guide/indexes-and-relations) | `IIndexed<TKey>`, `world.Index<T, TKey>()`, `Find`, `TryFind`, `Count` | Find entities by a component's value, kept in sync with every write. |
+| [Relations](https://ecs.xgamedev.net/docs/guide/indexes-and-relations) | an `IIndexed<Entity>` component | Entity-to-entity links with reverse lookup; a destroyed source leaves the index, a destroyed target matches no later entity (handles carry their version). |
+| [Snapshots](https://ecs.xgamedev.net/docs/guide/snapshots) | `world.Capture()`, `world.Restore(snapshot)` | Copy a world in memory and roll it back (replays, tests, rollback). |
+| [Bulk create and destroy](https://ecs.xgamedev.net/docs/guide/entities-and-components#entities) | `CreateEntities`, `Instantiate(prefab, span)`, `DestroyEntities`, `EnsureEntityCapacity` | Spawn and clear waves in one pass through the structural gate. |
+| [Per-system timing](https://ecs.xgamedev.net/docs/guide/systems#measuring-systems) | `WorldOptions.MeasureSystems`, `system.Stats` | Run counts and times of every system. |
+| [Errors](https://ecs.xgamedev.net/docs/guide/systems#errors) | `WorldOptions.SystemErrors`, `system.Error` | A failing system throws out of the update, or is switched off with its exception kept while the tick goes on. |
+| [Analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) | EECS002-EECS024 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
+| [Threading and Native AOT](https://ecs.xgamedev.net/docs/guide/threading) | one owner thread per world; no reflection on hot paths | Many worlds per process, one per thread; AOT works with nothing to configure. |
 
 ## Example
 
@@ -139,10 +142,10 @@ world.Update();
 System.Console.WriteLine(hero.Has<Dead>());                            // True
 ```
 
-[A full battle server](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/example.md) uses every feature
+[A full battle server](https://ecs.xgamedev.net/docs/example) uses every feature
 (parallel steering, replication by change tracking and removal detection, NPC kinds as prefabs, bags of loot in
 dynamic buffers, indexes, relations, snapshots, system groups, struct jobs) in one world; it is the battle server benchmark below and the world of the scenario tests. The step-by-step tutorial is
-[Getting started](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/getting-started.md).
+[Getting started](https://ecs.xgamedev.net/docs/getting-started).
 
 ## The model in one picture
 
@@ -182,31 +185,31 @@ flowchart LR
 ## Performance
 
 BenchmarkDotNet with the repository's job (`BenchmarkConfig.cs`), .NET 10, 4-core Xeon VM at 2.1 GHz. The headline benchmark is a realistic server tick,
-not a toy loop ([what it simulates](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md#benchmarks)). "Allocated" is per tick.
+not a toy loop ([what it simulates](https://ecs.xgamedev.net/docs/performance#benchmarks)). "Allocated" is per tick.
 
 | Benchmark | Entities | Mean | Allocated |
 |---|---:|---:|---:|
 | WorldSimulationBenchmark.Tick | 10,000 | 163 μs | 0 B |
 | WorldSimulationBenchmark.Tick | 100,000 | 1.63 ms | 0 B |
 | MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 0.93 ms | 0 B |
-| BattleServerBenchmark.Tick (the [battle server example](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/example.md), every feature) | 100,000 | 2.21 ms | 0 B |
+| BattleServerBenchmark.Tick (the [battle server example](https://ecs.xgamedev.net/docs/example), every feature) | 100,000 | 2.21 ms | 0 B |
 
 Against v4.0.1 (4.33 ms) the tick is 2.7x faster.
 
 A `[ForEach]` system adding `Velocity` to `Position` over 10,000 entities (one archetype) takes 8.1 μs, against
 10.9 μs for two plain arrays with no ECS at all (its columns are 64-byte aligned). Micro benchmarks (with v3.1.1 and
 v4.0.1 numbers for comparison) and the per-operation comparison are in
-[doc/performance.md](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md); their `ForEach` and
+[Performance](https://ecs.xgamedev.net/docs/performance); their `ForEach` and
 `Query` rows run on a world with two archetypes, so they are not directly comparable to the `[ForEach]` row.
 
 ```bash
-dotnet run -c Release --project EasyEcs.Benchmark -- --filter '*'
+dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*'
 ```
 
 ## Compared with other ECS libraries
 
 The same 100,000-entity tick, ported to each library's fast path with identical results checked in setup
-([details](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/comparison.md)):
+([details](https://ecs.xgamedev.net/docs/comparison)):
 
 | Library | Tick (100,000 entities) | Allocated per tick |
 |---|---:|---:|
@@ -238,26 +241,29 @@ others).
 | Unity / netstandard | ❌ net10.0 | ✅ | ✅ | ✅ |
 
 The full matrix, the per-operation numbers and when to pick which library are in
-[doc/comparison.md](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/comparison.md); every feature with
+[Comparison](https://ecs.xgamedev.net/docs/comparison); every feature with
 what it does, when to use it and what it costs is in
-[doc/features.md](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/features.md).
+[Features](https://ecs.xgamedev.net/docs/features).
 
 ## Documentation
 
+The documentation lives at **[ecs.xgamedev.net](https://ecs.xgamedev.net)**; its sources are the markdown files in
+[`docs/content`](docs/content).
+
 | | |
 |---|---|
-| [Getting started](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/getting-started.md) | Step-by-step tutorial: entities, components, tags, queries, systems, singletons, groups, the update loop. |
-| [Features](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/features.md) | Every feature: what it does, when to use it, when not, what it costs, which scenarios it serves. |
-| [Comparison](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/comparison.md) | Features and benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs. |
-| [Guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/README.md#guide) | One page per concept: entities and components, prefabs and cloning, queries, systems, singletons, structural changes, change tracking and removal detection, dynamic buffers, indexes and relations, snapshots, `ref` and `await`, threading, analyzer rules. |
-| [ECS principles](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/ecs-principles.md) | How to design features with entities, components, singletons and systems. |
-| [Design questions](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/faq.md) | Why there are no events and no serialization, what is thread-safe, how to change a component. |
-| [API reference](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/api.md) | Every public API with its complexity. |
-| [Performance guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/performance.md) | Which API to use when, do's and don'ts, benchmarks. |
-| [Architecture](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/architecture.md) | Storage, memory layout, archetypes, id recycling, iteration safety, generators. |
+| [Getting started](https://ecs.xgamedev.net/docs/getting-started) | Step-by-step tutorial: entities, components, tags, queries, systems, singletons, groups, the update loop. |
+| [Features](https://ecs.xgamedev.net/docs/features) | Every feature: what it does, when to use it, when not, what it costs, which scenarios it serves. |
+| [Comparison](https://ecs.xgamedev.net/docs/comparison) | Features and benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs. |
+| [Guide](https://ecs.xgamedev.net/docs#guide) | One page per concept: entities and components, prefabs and cloning, queries, systems, singletons, structural changes, change tracking and removal detection, dynamic buffers, indexes and relations, snapshots, `ref` and `await`, threading, analyzer rules. |
+| [ECS principles](https://ecs.xgamedev.net/docs/ecs-principles) | How to design features with entities, components, singletons and systems. |
+| [Design questions](https://ecs.xgamedev.net/docs/faq) | Why there are no events and no serialization, what is thread-safe, how to change a component. |
+| [API reference](https://ecs.xgamedev.net/docs/api) | Every public API with its complexity. |
+| [Performance guide](https://ecs.xgamedev.net/docs/performance) | Which API to use when, do's and don'ts, benchmarks. |
+| [Architecture](https://ecs.xgamedev.net/docs/architecture) | Storage, memory layout, archetypes, id recycling, iteration safety, generators. |
 | [Migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md) | Upgrading from 4.0 to 4.1, from v3 (and from v2). |
 
-The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/doc/README.md) suggests a reading order.
+The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading order.
 
 ## What's new in 4.1
 

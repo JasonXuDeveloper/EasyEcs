@@ -159,7 +159,7 @@ delegate, no virtual call per entity. Systems run in registration order, moved w
 query-cache lookup per method.
 
 **Scenarios.** Movement, AOI, combat, status effects, death, respawn, projectiles: the
-[benchmark world](../EasyEcs.Benchmark/WorldSimulation.cs) is nine such systems.
+[benchmark world](../../benchmarks/EasyEcs.Benchmark/WorldSimulation.cs) is nine such systems.
 
 Guide: [Systems, `[ForEach]` and groups](guide/systems.md) · [ECS principles](ecs-principles.md).
 

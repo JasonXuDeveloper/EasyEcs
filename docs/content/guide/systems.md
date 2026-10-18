@@ -177,6 +177,58 @@ another row's run reads, such as another entity through `Get`. Fewer than two ch
 thread. It allocates nothing after its first update. Ad-hoc code calls `world.ForEachParallel` /
 `world.ForEachEntityParallel` with an `INoStructuralChanges` job.
 
+### Generic systems
+
+A system can be generic. Each closed type is a system of its own, with its own generated job and access set, so
+`CountOf<Position>` and `CountOf<Health>` are added, ordered and scheduled independently. A closed generic system can
+also be a base class: its `[ForEach]` methods run before the subclass's own. A closed type the code never names (built
+by reflection) has its code closed on first use.
+
+```csharp
+public record struct Tally(int Count) : ISingletonComponent;
+
+public class CountOf<T> : EcsSystem where T : struct, IComponent   // world.AddSystem<CountOf<Position>>()
+{
+    [ForEach] static void Count(in T component, ref Tally tally) => tally.Count++;
+}
+```
+
+A system's `[ForEach]` method itself cannot be generic: the system runs it, so nothing would supply the type arguments
+([EECS004](analyzer.md#eecs004)). Make the system generic instead. Attribute type arguments cannot name type
+parameters (C# rule CS8968), so filters such as `[With<T>]` name concrete types.
+
+### `[ForEach]` outside systems
+
+A `[ForEach]` method in a type that is not an `EcsSystem` (a runner) is a pass the host runs itself, for example
+between ticks to answer a request. The generator writes an entry point for it: a static extension member of the type
+with the same name, taking the `World` and then the method's other parameters, which runs the job once over the world.
+
+Besides components, singletons, `Entity` and `World`, a runner may take values of any other type ("context"
+parameters, [EECS002](analyzer.md#eecs002)); the entry point takes them from the caller, `ref` ones included, so a
+runner can return results through them.
+
+```csharp
+public static class Reports
+{
+    [ForEach, Without<Dead>]
+    static void SumHealth(in Health hp, ref long total) => total += hp.Value;
+}
+
+long total = 0;
+Reports.SumHealth(world, ref total);              // the generated entry point
+```
+
+- The method must be static: the entry point has no instance to call it on ([EECS005](analyzer.md#eecs005)).
+- With `[Changed<T>]` or `[Removed<T>]` the entry point takes the change tick to look back from after the world
+  (`Reports.Written(world, since)`), since a runner has no last run of its own.
+- Runners may be generic, or members of a generic type: the entry point takes the type arguments
+  (`Census.CountAlive<Health>(world, ref count)`, `Census<Velocity>.Positions(world, ref x)`).
+- Batch and parallel runners follow the rules of [batch methods](#batch-methods) and
+  [parallel methods](#parallel-methods).
+- The entry point must not collide with another method of the type ([EECS021](analyzer.md#eecs021)). It is public
+  when the types it names are public, internal otherwise; the method itself may be private.
+- Call it on the world's owner thread, like any structural code.
+
 ## System groups
 
 `world.Update()` runs the default group. A system marked `[UpdateInGroup<TGroup>]` (where `TGroup` is a

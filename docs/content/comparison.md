@@ -178,7 +178,7 @@ relation heads in an array indexed by the owner's id, so neither a trade nor a c
 ## Their features in EasyEcs
 
 What the other libraries offer, how EasyEcs does the same job, and where the
-[battle server example](example.md) (`EasyEcs.Benchmark/BattleServer.cs`) shows it.
+[battle server example](example.md) (`benchmarks/EasyEcs.Benchmark/BattleServer.cs`) shows it.
 Some are built in under another name; some are done with data instead of a mechanism (EasyEcs has no events or
 command buffers on purpose); a few are not offered.
 

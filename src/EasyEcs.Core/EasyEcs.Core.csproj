@@ -14,7 +14,7 @@
         <Authors>JasonXuDeveloper</Authors>
         <Description>Allocation-free archetype ECS for long-running .NET servers: source-generated [ForEach] systems, safe parallel systems, change tracking, value indexes, dynamic buffers and snapshots. Zero GC on hot paths, Native AOT ready.</Description>
         <Copyright>JasonXuDeveloper</Copyright>
-        <PackageProjectUrl>https://github.com/JasonXuDeveloper/EasyEcs</PackageProjectUrl>
+        <PackageProjectUrl>https://ecs.xgamedev.net</PackageProjectUrl>
         <RepositoryUrl>https://github.com/JasonXuDeveloper/EasyEcs</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
         <PackageTags>ecs;entity-component-system;archetype;game-server;gamedev;high-performance;zero-allocation;source-generator;aot</PackageTags>

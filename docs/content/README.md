@@ -1,6 +1,6 @@
 # EasyEcs documentation
 
-New to EasyEcs? Read the pages in this order. The [project README](../README.md) has the pitch, the quick start and
+New to EasyEcs? Read the pages in this order. The [project README](../../README.md) has the pitch, the quick start and
 the headline numbers.
 
 ```mermaid
@@ -51,4 +51,4 @@ One page per concept, in a sensible reading order:
 | [API reference](api.md) | Every public API with its complexity. |
 | [Performance guide](performance.md) | Choosing an iteration API, do's and don'ts, benchmarks and how to measure. |
 | [Architecture](architecture.md) | Storage and memory layout, entity lifecycle, archetype transitions, query cache, systems, generators. |
-| [Migration guide](../MIGRATION_GUIDE.md) | Upgrading from 4.0 to 4.1, from v3 to v4 (and from v2 to v3). |
+| [Migration guide](../../MIGRATION_GUIDE.md) | Upgrading from 4.0 to 4.1, from v3 to v4 (and from v2 to v3). |

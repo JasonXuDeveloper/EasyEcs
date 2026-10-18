@@ -5,9 +5,9 @@
 
 A battle server using every feature: plain data, one job per system, systems that never know about each other, and a
 host that ticks the world and answers questions between ticks. It is the
-[benchmark world](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/EasyEcs.Benchmark/BattleServer.cs) measured
+[benchmark world](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/benchmarks/EasyEcs.Benchmark/BattleServer.cs) measured
 below and the world of the
-[scenario tests](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/EasyEcs.UnitTest/BattleServerTests.cs). Coming
+[scenario tests](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/tests/EasyEcs.UnitTest/BattleServerTests.cs). Coming
 from another ECS? [Their features in EasyEcs](comparison.md#their-features-in-easyecs) maps each one to its place here.
 
 | Feature | Where |
@@ -60,7 +60,7 @@ using System.Runtime.InteropServices;
 namespace EasyEcs.Benchmark.Showcase;
 
 // A battle server that uses every feature of EasyEcs the way users should: plain data, one job per system, state
-// changes as data. doc/example.md shows this file; BattleServerBenchmark measures it and BattleServerTests check it.
+// changes as data. docs/content/example.md shows this file; BattleServerBenchmark measures it and BattleServerTests check it.
 
 public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
