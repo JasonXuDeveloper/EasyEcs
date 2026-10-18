@@ -165,10 +165,6 @@ public sealed partial class World
             Interlocked.Exchange(ref _cursor, (long)epoch << 32);
 
             int wanted = Math.Min(_helpers.Length, count - 1);
-            // The shared crew starts at once; while another runner holds it, thread-pool work items help instead
-            // (they start late: the pool wakes its threads one after another).
-            bool crew = Crew.TryLease(this, epoch, wanted);
-            if (crew) wanted = 0;
             for (int i = 0; i < _helpers.Length && wanted > 0; i++)
             {
                 // A helper still queued from an earlier run is skipped (it will exit on its stale epoch).
@@ -183,11 +179,10 @@ public sealed partial class World
             // block): a blocking event allocates its lock the first time it waits.
             var spinner = new SpinWait();
             while (Volatile.Read(ref _remaining) != 0) spinner.SpinOnce(sleep1Threshold: -1);
-            if (crew) Crew.Return();
             if (_error != null) ExceptionDispatchInfo.Throw(_error);
         }
 
-        internal void Work(int epoch)
+        private void Work(int epoch)
         {
             while (true)
             {
@@ -219,111 +214,6 @@ public sealed partial class World
                 int epoch = Epoch;
                 Volatile.Write(ref Queued, 0);
                 runner.Work(epoch);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Helper threads shared by every runner of every world (the processor count less one, started on first use,
-    /// background threads), leased by one run at a time. After a run a thread spins for a moment, so back-to-back
-    /// runs (the stages of a tick, consecutive parallel passes) start it at once, then parks on its own semaphore,
-    /// which the next lease releases. Thread-pool work items start late instead: the pool wakes its threads one after
-    /// another (about 300 μs for three on 4 cores, against a pass of 700 μs).
-    /// </summary>
-    private static class Crew
-    {
-        private static readonly Lock Start = new();
-        private static Mate[] _mates;
-        private static int _leased;
-
-        // The lease: written before _ticket is bumped; a thread re-reads _ticket after reading them (a seqlock), so it
-        // never pairs a runner with another lease's epoch.
-        private static Runner _runner;
-        private static int _epoch;
-        private static int _slots;     // threads the lease still takes (the runner's wanted helpers)
-        private static long _ticket;
-
-        /// <summary>Spin this long for the next lease before parking (a timestamp delta, about 50 μs).</summary>
-        private static readonly long SpinTicks = System.Diagnostics.Stopwatch.Frequency / 20_000;
-
-        public static bool TryLease(Runner runner, int epoch, int wanted)
-        {
-            if (wanted <= 0 || Interlocked.CompareExchange(ref _leased, 1, 0) != 0) return false;
-            var mates = _mates ?? Hire();
-            _runner = runner;
-            _epoch = epoch;
-            Volatile.Write(ref _slots, wanted);
-            Interlocked.Increment(ref _ticket); // publishes the lease
-            for (int i = 0; i < mates.Length && wanted > 0; i++, wanted--)
-                if (Interlocked.CompareExchange(ref mates[i].Parked, 0, 1) == 1) mates[i].Wake.Release();
-            return true;
-        }
-
-        /// <summary>End the lease (every item of the run is done; a thread still leaving sees the epoch spent).</summary>
-        public static void Return()
-        {
-            _runner = null;
-            Volatile.Write(ref _leased, 0);
-        }
-
-        private static Mate[] Hire()
-        {
-            lock (Start)
-            {
-                if (_mates != null) return _mates;
-                var mates = new Mate[Math.Max(1, Environment.ProcessorCount - 1)];
-                for (int i = 0; i < mates.Length; i++)
-                {
-                    mates[i] = new Mate();
-                    new Thread(mates[i].Loop) { IsBackground = true, Name = "EasyEcs helper" }.Start();
-                }
-
-                Volatile.Write(ref _mates, mates);
-                return mates;
-            }
-        }
-
-        private sealed class Mate
-        {
-            public readonly SemaphoreSlim Wake = new(0);
-            public int Parked; // 1 while parked or about to: the lease that sets it back to 0 releases Wake
-
-            public void Loop()
-            {
-                long seen = Volatile.Read(ref _ticket);
-                while (true)
-                {
-                    long ticket = Next(seen);
-                    seen = ticket;
-                    var runner = _runner;
-                    int epoch = _epoch;
-                    if (Volatile.Read(ref _ticket) != ticket || runner == null) continue; // a newer lease: read it
-                    if (Interlocked.Decrement(ref _slots) < 0) continue;                // the run wants no more threads
-                    runner.Work(epoch);
-                }
-            }
-
-            /// <summary>The next lease after <paramref name="seen"/>: spin a moment, then park until a lease wakes us.</summary>
-            private long Next(long seen)
-            {
-                long until = System.Diagnostics.Stopwatch.GetTimestamp() + SpinTicks;
-                var spinner = new SpinWait();
-                while (true)
-                {
-                    long ticket = Volatile.Read(ref _ticket);
-                    if (ticket != seen) return ticket;
-                    if (System.Diagnostics.Stopwatch.GetTimestamp() < until)
-                    {
-                        spinner.SpinOnce(sleep1Threshold: -1);
-                        continue;
-                    }
-
-                    Volatile.Write(ref Parked, 1);
-                    if (Volatile.Read(ref _ticket) != seen && Interlocked.CompareExchange(ref Parked, 0, 1) == 1)
-                        continue; // a lease came meanwhile and did not wake us: take it
-                    Wake.Wait(); // released by the lease that cleared Parked
-                    until = System.Diagnostics.Stopwatch.GetTimestamp() + SpinTicks;
-                }
             }
         }
     }

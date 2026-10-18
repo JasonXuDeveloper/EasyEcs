@@ -112,9 +112,9 @@ public class ParallelTests
     }
 
     [Test]
-    public void WorldsRunningParallelPassesAtOnceShareTheHelpers()
+    public void WorldsRunningParallelPassesAtOnceStayCorrect()
     {
-        // One run at a time holds the shared helper threads; a run that finds them leased takes thread-pool helpers.
+        // Worlds on their own threads run parallel passes at once, their helpers side by side on the thread pool.
         const int rows = 40_000, passes = 200;
         var worlds = new World[3];
         for (int w = 0; w < worlds.Length; w++)
