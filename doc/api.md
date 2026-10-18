@@ -37,7 +37,7 @@ Notation:
 | `IForEachBatch<T1..Tn>` | interface | Struct job receiving runs of rows: `void Execute(EntitySpan entities, Span<T1> c1, …)`; no structural changes (the structure is frozen). Optional static `Writes` (which spans the job writes; default all). |
 | `EntitySpan` | ref struct | The entities of a run of rows: `Length`, `entities[i]` (O(1), one 8-byte load; built only when indexed). |
 | `INoStructuralChanges` | marker interface | A job that makes no structural change: its passes skip the bookkeeping and freeze the structure (a change throws); generated for `[ForEach]` methods that cannot change structure. |
-| `QueryEnumerator<T1..Tn>`, `QueryItem<T1..Tn>` | ref structs | Result of `Query`: `item.Entity`, `item.Component1..n` (refs into the row); enumerator `Dispose()` (ends the pass; `foreach` calls it). A loop over them cannot `await`. |
+| `QueryEnumerator<T1..Tn>`, `QueryItem<T1..Tn>` | ref structs | Result of `Query`: `item.Entity`, `item.Component1..n` (refs into the row; the generator names them after the components: `item.Position`, `ref readonly` for an indexed one); enumerator `Dispose()` (ends the pass; `foreach` calls it). A loop over them cannot `await`. |
 | `SingletonRef<T>` | readonly struct | Stable singleton handle; `.Value` is `ref T`. |
 | `SystemList` | readonly struct | `world.Systems`: `foreach` over every group's systems, `Count`; allocation-free. |
 | `WorldSnapshot` | sealed class | Copies of a world's entities, components and singletons (`world.Capture()`); `EntityCount`. |
@@ -115,7 +115,7 @@ first write. Reads work on any reference (`in`, `Read<T>()`); writes need a `ref
 | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` | O(M + S) | like `ForEach`, the job receives the `Entity` |
 | `world.ForEachParallel<T1..Tn, TJob>(ref job, filter)` / `ForEachEntityParallel` | O(M + S), divided over up to `MaxDegreeOfParallelism` threads | `INoStructuralChanges` jobs; chunks of `World.ParallelChunkRows` rows, one job copy per chunk (state is not merged); fewer than two chunks run on the calling thread |
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + runs) | spans of consecutive rows; one call for a table whose rows all match |
-| `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | `item.Entity`, `item.Component1..n` (refs) |
+| `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | `item.Entity`, `item.Component1..n` or `item.Position` (refs) |
 | `world.Count<T1..Tn>(filter)` | O(M), + S / 64 for tables whose rows must be tested (some rows lack a required component, have an excluded one or lack every `WithAny` component, or a `Changed` or `Removed` filter applies) | sums table counts, or counts presence bits (and change ticks) |
 | `world.Any<T1..Tn>(filter)` | O(M + S / 64) worst | stops at the first match; S / 64 only for tables whose rows must be tested (as for `Count`) |
 | `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1); allocates once a component's bit is 256 or more (worlds with more than 256 component types) | build once and keep it in a `static readonly` field; `WithAny` calls form one "at least one of" group |

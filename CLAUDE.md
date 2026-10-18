@@ -99,10 +99,10 @@ EasyEcs.Generator/             Roslyn generators + analyzer (netstandard2.0, req
                                [Removed<T>] -> Since(LastRunTick + 1) and a read of T), registered as SystemCode
   ComponentGenerator.cs        C# 14 extension members per component / singleton: entity.X (ref T; ref readonly for
                                tracked or indexed), HasX, TryGetX, GetOrAddX, SetX(ctor args), RemoveX, tags IsX,
-                               world.XIndex, singletons world.X / HasX / GetOrAddX / SetX / RemoveX, SavedTypes
-                               registration; classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
+                               world.XIndex, singletons world.X / HasX / GetOrAddX / SetX / RemoveX, query items
+                               item.X per Query<T1..Tn> shape the code calls, SavedTypes registration; classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
                                lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
-  EasyEcsAnalyzer.cs           EECS002-023 (generators never report diagnostics)
+  EasyEcsAnalyzer.cs           EECS002-024 (generators never report diagnostics)
   Threads.cs                   EECS014's check: does a structural call in a delegate handed to another thread race
   Symbols.cs                   symbol checks shared by generator and analyzer
   Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)

@@ -56,8 +56,8 @@ since a tick; a filter kept in a field takes a new tick with `Since(tick)`: see 
 ```csharp
 foreach (var item in world.Query<Position, Velocity>(Active))
 {
-    ref var p = ref item.Component1;       // Component1..n are refs into storage
-    p.X += item.Component2.X;
+    ref var p = ref item.Position;         // refs into storage, named after the components
+    p.X += item.Velocity.X;
     if (p.X > 100) item.Entity.SetDead();
 }
 ```

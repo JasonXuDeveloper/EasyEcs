@@ -295,8 +295,8 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
   (EECS015).
 - **Generated members:** every component gets named C# 14 extension members, in the spirit of Entitas but for
   structs, tags, singletons and indexes: `hero.Position.X += 1`, `hero.HasVelocity`, `hero.SetVelocity(1, 0)`,
-  `hero.IsDead` / `hero.SetDead()`, `world.Battle.Tick++`, `world.ZoneIndex.Find(3)`, and on prefabs
-  `prefab.SetHealth(60, 60).SetNpc()`. Tracked and indexed components get a read-only property, so reading them never counts as a write; the analyzer treats `SetX` / `RemoveX` as the
+  `hero.IsDead` / `hero.SetDead()`, `world.Battle.Tick++`, `world.ZoneIndex.Find(3)`, `item.Position` on the items of each
+  `Query<Position, …>` the code calls, and on prefabs `prefab.SetHealth(60, 60).SetNpc()`. Tracked and indexed components get a read-only property, so reading them never counts as a write; the analyzer treats `SetX` / `RemoveX` as the
   structural changes they are.
 - **New APIs:** `WithAny<T>` filters (`[WithAny<T>]` on `[ForEach]`), bulk `CreateEntities` / `DestroyEntities`,
   per-system timing (`WorldOptions.MeasureSystems`, `system.Stats`), `entity.Read<T>()` (read-only, never a write) and

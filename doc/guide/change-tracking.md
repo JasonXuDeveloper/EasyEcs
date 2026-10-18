@@ -136,7 +136,7 @@ private static readonly QueryFilter FireOut = QueryFilter.Create().Removed<Burni
 ulong mark = world.ChangeTick;
 world.Update();
 int extinguished = world.Count<Replica>(FireOut.Since(mark));
-foreach (var item in world.Query<Replica>(FireOut.Since(mark))) item.Component1.Burning = false;
+foreach (var item in world.Query<Replica>(FireOut.Since(mark))) item.Replica.Burning = false;
 ```
 
 Other libraries detect removals with events (one callback per removal, Friflo's `OnComponentRemoved`) or with a

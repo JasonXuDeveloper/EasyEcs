@@ -119,7 +119,7 @@ ref var mana = ref entity.TryGetRef<Mana>(out bool found);   // when the entity 
 if (found) mana.Value += 5;
 entity.Set(new Position(0, 0), new Velocity(1, 0));          // replace or add several at once: one transition
 foreach (var item in world.Query<Position, Velocity>())
-    item.Component1.X += item.Component2.X;                  // Component1..n are refs
+    item.Position.X += item.Velocity.X;                      // refs into the row (generated names of Component1..n)
 ```
 
 ```csharp

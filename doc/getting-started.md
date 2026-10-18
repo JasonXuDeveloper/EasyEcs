@@ -128,8 +128,8 @@ private static readonly QueryFilter Alive = QueryFilter.Create().Without<Dead>()
 ```csharp
 foreach (var item in world.Query<Position, Velocity>(Alive))
 {
-    ref var p = ref item.Component1;
-    p.X += item.Component2.X;
+    ref var p = ref item.Position;
+    p.X += item.Velocity.X;
     // item.Entity is the entity's handle
 }
 
