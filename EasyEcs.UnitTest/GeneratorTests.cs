@@ -431,6 +431,7 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("ValueIndex<global::Owned, global::EasyEcs.EntityId> OwnedIndex"));
         Assert.That(generated, Does.Contain("public ref global::Clock Clock"));                             // a singleton
         Assert.That(generated, Does.Contain("public void SetClock(int ticks)"));
+        Assert.That(generated, Does.Contain("public ref global::Clock GetOrAddClock()"));
         Assert.That(generated, Does.Contain("SetSpeed(float V) => @this.Set(new global::Game.Speed(V))"));  // from the constructor
         Assert.That(generated, Does.Contain("public bool IsTagged"));
         Assert.That(generated, Does.Contain("SetTagged() => @this.Set(default(global::Tagged))"));

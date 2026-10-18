@@ -32,7 +32,7 @@ public class IndexTests
         private void Apply(Entity entity, in Callsign callsign)
         {
             var index = World.Index<Callsign, string>();
-            World.GetOrAddSingleton<Score>().Points = index.Count(callsign.Value + "!");
+            World.GetOrAddScore().Points = index.Count(callsign.Value + "!");
             entity.Set(new Callsign(callsign.Value + "!"));
         }
     }

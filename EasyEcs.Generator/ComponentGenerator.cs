@@ -28,7 +28,7 @@ namespace EasyEcs.Generator;
 /// with <c>prefab.Health</c> (read-only), <c>HasHealth</c> and <c>IsDead</c>.</item>
 /// <item>indexed component <c>Zone : IIndexed&lt;int&gt;</c>: <c>world.ZoneIndex</c> (<c>Index&lt;Zone, int&gt;()</c>).</item>
 /// <item>singleton <c>Clock</c>: <c>world.Clock</c> (<c>ref</c>, <c>GetSingleton</c>), <c>HasClock</c>,
-/// <c>SetClock(…)</c> (adds it if missing), <c>RemoveClock()</c>.</item>
+/// <c>GetOrAddClock()</c> (<c>ref</c>, not for tags), <c>SetClock(…)</c> (adds it if missing), <c>RemoveClock()</c>.</item>
 /// </list>
 /// Writes are methods, not property setters: C# rejects a setter on a handle that is not a variable (a <c>foreach</c>
 /// variable, a call's result). Generic types, types nested in types others cannot see and member names the receiver
@@ -207,6 +207,9 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                     $"ref {t} {n}", $"ref @this.GetSingleton<{t}>()");
             if (Free("Has" + n))
                 Property($"Whether the world has a <see cref=\"{t}\"/> (<c>HasSingleton</c>).", $"bool Has{n}", $"@this.HasSingleton<{t}>()");
+            if (!m.Tag && Free("GetOrAdd" + n))
+                Member($"The world's <see cref=\"{t}\"/> by <c>ref</c>, added (default) first if missing (<c>GetOrAddSingleton</c>).",
+                    $"ref {t} GetOrAdd{n}() => ref @this.GetOrAddSingleton<{t}>();");
             if (Free("Set" + n))
                 foreach (var s in m.Setters)
                     Member($"Sets the world's <see cref=\"{t}\"/>, adding it if missing.",
