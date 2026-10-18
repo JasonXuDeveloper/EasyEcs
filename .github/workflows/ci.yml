@@ -3,10 +3,10 @@ name: CI
 on:
   push:
     branches: [ "master" ]
-    paths-ignore: [ "docs/**" ]   # the docs site: Cloudflare Pages builds it
+    paths: [ "**", "!docs/**", "docs/content/**" ]   # the docs site itself: Cloudflare Pages builds it
   pull_request:
     branches: [ "master" ]
-    paths-ignore: [ "docs/**" ]
+    paths: [ "**", "!docs/**", "docs/content/**" ]
   workflow_dispatch:
 
 jobs:
@@ -25,3 +25,48 @@ jobs:
         run: dotnet test --no-build --configuration Release --verbosity normal
       - name: Pack (verify the package builds)
         run: dotnet pack src/EasyEcs.Core/EasyEcs.Core.csproj --no-build --configuration Release --output artifacts
+      - name: Run the samples
+        run: |
+          dotnet run --no-build -c Release --project samples/HelloWorld
+          dotnet run --no-build -c Release --project samples/GameLoop -- --ticks 30
+          dotnet run --no-build -c Release --project samples/SaveLoad
+          dotnet run --no-build -c Release --project samples/MultiWorld -- --updates 50
+          dotnet run --no-build -c Release --project samples/HotReload/HotReload.Host
+      - name: API reference is up to date (tools/ApiDocs)
+        run: |
+          dotnet run --no-build -c Release --project tools/ApiDocs
+          if [ -n "$(git status --porcelain -- docs/content/reference)" ]; then
+            git status --porcelain -- docs/content/reference
+            echo "::error::docs/content/reference is stale: run 'dotnet run --project tools/ApiDocs' and commit the pages"
+            exit 1
+          fi
+
+  examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Run the file-based examples against this commit's EasyEcs
+        run: examples/run.sh
+
+  doc-snippets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Compile the C# snippets of the docs (tools/DocCheck)
+        run: dotnet run -c Release --project tools/DocCheck
+
+  templates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: dotnet new easyecs from the packed templates, against the packed EasyEcs
+        run: templates/smoke.sh
