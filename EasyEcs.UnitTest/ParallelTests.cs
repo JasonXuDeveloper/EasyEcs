@@ -112,6 +112,40 @@ public class ParallelTests
     }
 
     [Test]
+    public void WorldsRunningParallelPassesAtOnceShareTheHelpers()
+    {
+        // One run at a time holds the shared helper threads; a run that finds them leased takes thread-pool helpers.
+        const int rows = 40_000, passes = 200;
+        var worlds = new World[3];
+        for (int w = 0; w < worlds.Length; w++)
+        {
+            worlds[w] = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+            worlds[w].CreateEntities(new Entity[rows], new Counter(0), new Seen(w + 1));
+            worlds[w].AddSystem<ChunkedIncrement>();
+        }
+
+        var threads = new Thread[worlds.Length];
+        for (int w = 0; w < worlds.Length; w++)
+        {
+            var world = worlds[w];
+            threads[w] = new Thread(() =>
+            {
+                for (int i = 0; i < passes; i++) world.Update();
+            });
+            threads[w].Start();
+        }
+
+        foreach (var thread in threads) thread.Join();
+        for (int w = 0; w < worlds.Length; w++)
+        {
+            int expected = (w + 1) * passes, wrong = 0;
+            foreach (var item in worlds[w].Query<Counter>()) wrong += item.Component1.N == expected ? 0 : 1;
+            Assert.That(wrong, Is.Zero, $"world {w}");
+            worlds[w].Dispose();
+        }
+    }
+
+    [Test]
     public void ParallelForEachRunsOnTheCallingThreadWhenTheWorldAllowsOneThread()
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 1 });
