@@ -23,11 +23,29 @@ behaviors:
 - **`WorldOptions.Parallel` is `WorldOptions.ParallelSystems`.** The option runs systems side by side; the new name
   keeps it apart from `[ForEach(Parallel = true)]`, which splits one method's rows over threads. Rename the
   initializer: `new WorldOptions { ParallelSystems = true }`.
+- **`Entity.Id` is an `EntityId`** (index + incarnation, 8 bytes, unmanaged) instead of an `int`, and the
+  `Entity.Version` field is gone: read `entity.Id.Index` and `entity.Id.Version`. `world.GetEntity`,
+  `TryGetEntity` and `IsAlive` take an `EntityId`; a handle converts to one implicitly, so `world.GetEntity(entity)`
+  compiles. Store `EntityId`s, not `Entity` handles, in components: a handle holds its world, which makes the column
+  managed (scanned by the GC, not copied as a block, not serializable), and the new warning
+  [EECS017](doc/guide/analyzer.md#eecs017) points at such fields.
+- **`EcsSystem.Priority` is gone.** Systems run in registration order; order them by what they depend on with
+  `[UpdateBefore<TSystem>]` / `[UpdateAfter<TSystem>]` on the class (a cycle is
+  [EECS019](doc/guide/analyzer.md#eecs019), an order against a system of another group
+  [EECS020](doc/guide/analyzer.md#eecs020)).
+- **The `World.SystemError` event is gone.** A system's exception propagates out of `Update` (the default), or, with
+  `new WorldOptions { SystemErrors = SystemErrorPolicy.Disable }`, switches the system off and stays in
+  `system.Error` for the application to read from `world.Systems` (enable the system again to retry).
+- **Systems need no `partial`.** The generated code lives outside the system's type, so EECS001 is gone; `partial`
+  still compiles.
+- **`UpdateInterval` and the new `UpdatePhase` should be constants**: they are read every update, and the warning
+  [EECS018](doc/guide/analyzer.md#eecs018) points at overrides that compute them. To stop and resume a system, set
+  `Enabled`.
 - **`world.DestroyEntity(entity)` is gone:** it did what `entity.Destroy()` does. Call `entity.Destroy()`, or
   `world.DestroyEntities<T…>(filter)` for every match at once.
 - **`IForEach` jobs receive only the components.** `Execute(int entityId, ref T1 c1, …)` became
   `Execute(ref T1 c1, …)`, so a pass never loads the entity rows for them. A job that needs the entity implements
-  `IForEachEntity<…>` (`Execute(Entity entity, ref T1 c1, …)`, `entity.Id` for the id) and runs with
+  `IForEachEntity<…>` (`Execute(Entity entity, ref T1 c1, …)`) and runs with
   `world.ForEachEntity`.
 - **`CompactArchetypes()` and `GetFragmentationStats()` are gone.** Tables stay dense on their own, and passes now
   end even when a job throws, so there is nothing to compact and nothing to monitor (the ratio was always 0 between
@@ -121,6 +139,28 @@ New:
   [EECS012](doc/guide/analyzer.md#eecs012) rejects a `DynamicBuffer<T>` copied by value.
 - The library is marked `IsAotCompatible`: trimming and Native AOT analyzers run on every build, and it publishes
   with Native AOT without warnings.
+- `entity.Disable<T>()` / `Enable<T>()` (generated `DisableX()` / `EnableX()` / `IsXDisabled`): switch a component
+  off and keep its value; queries see `Disabled<T>`. `world.SetAll` / `RemoveAll` / `DisableAll` / `EnableAll`
+  change every entity a filter matches, 64 rows at a time.
+- `ICleanupComponent`: destroying an entity that holds one keeps it, tagged `Destroyed`, until a system releases what
+  it holds and removes the last cleanup component.
+- `ChildOf(EntityId Parent)` and `world.Children(parent)`: a hierarchy whose parents destroy their children;
+  `IRelation` elements of a `DynamicBuffer<T>` (`entity.AddRelation`, `world.Relations<T>()`) link an entity to any
+  number of targets, and `TargetRules` say what happens to links when a target is destroyed.
+- Ordered walks of a value index with a comparable key (`Range`, `RangeDescending`, `Ascending`, `Descending`), and
+  `world.GroupBy<T>()`, which splits tables by the value of an `IGroup` component.
+- `Maybe<T>` parameters of `[ForEach]` methods: an optional component without a second method.
+- `world.Save` / `world.Load` (a world as bytes, through Nino), `SaveEntities` / `LoadEntities` / `MoveEntities` (a
+  group of entities to another world or process, `EntityId` fields rewritten), `world.Capture(into)` (reuses an
+  earlier snapshot's arrays).
+- `world.RemoveTypes(assembly)`: unload game logic loaded into a collectible `AssemblyLoadContext`; its systems,
+  singletons, indexes and components leave the world, and the process forgets its types once it unloads.
+- `world.Describe()` (tables, columns, sizes), `entity.Describe()` and a debugger view of entities.
+- Static `[ForEach]` methods outside systems (a generated entry point takes the `World` and the method's other
+  arguments: one pass for tools and tests), generic systems, filters on
+  system groups (`[With<T>]` on a group struct applies to all its systems), `UpdatePhase` to spread systems with the
+  same `UpdateInterval` over updates, `world.GetOrAddX()` for singletons, and code fixes for the analyzer's
+  diagnostics.
 
 ## v3.x → v4.0
 
