@@ -85,8 +85,8 @@ jobs:
 
       - name: Pack
         run: |
-          dotnet build EasyEcs.Core/EasyEcs.Core.csproj --configuration Release
-          dotnet pack EasyEcs.Core/EasyEcs.Core.csproj --no-build --configuration Release --output artifacts
+          dotnet build src/EasyEcs.Core/EasyEcs.Core.csproj --configuration Release
+          dotnet pack src/EasyEcs.Core/EasyEcs.Core.csproj --no-build --configuration Release --output artifacts
           ls artifacts/EasyEcs.$VERSION.nupkg
 
       - name: NuGet login (Trusted Publishing)

@@ -3,8 +3,10 @@ name: CI
 on:
   push:
     branches: [ "master" ]
+    paths-ignore: [ "docs/**" ]   # the docs site: Cloudflare Pages builds it
   pull_request:
     branches: [ "master" ]
+    paths-ignore: [ "docs/**" ]
   workflow_dispatch:
 
 jobs:
@@ -22,4 +24,4 @@ jobs:
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal
       - name: Pack (verify the package builds)
-        run: dotnet pack EasyEcs.Core/EasyEcs.Core.csproj --no-build --configuration Release --output artifacts
+        run: dotnet pack src/EasyEcs.Core/EasyEcs.Core.csproj --no-build --configuration Release --output artifacts
