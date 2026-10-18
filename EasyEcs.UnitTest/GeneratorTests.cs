@@ -135,7 +135,7 @@ public class GeneratorTests
         "Register(typeof(global::G<global::P>), new __ForEach<global::P>.Code());", "Register(typeof(global::G<global::Q>), new __ForEach<global::Q>.Code());")]
     [TestCase("public static class R { [ForEach] static void A<T>(in T t, ref int n) where T : struct, IComponent { } }",
         "public static void A<T>(global::EasyEcs.World world, ref int n) where T : struct, global::EasyEcs.IComponent",
-        "internal ref struct AJob<T> : global::EasyEcs.IForEach<T>, global::EasyEcs.INoStructuralChanges where T : struct, global::EasyEcs.IComponent",
+        "internal ref struct AJob<T> : global::EasyEcs.IForEachBatch<T> where T : struct, global::EasyEcs.IComponent",
         "internal static extern void A<T>([UnsafeAccessorType(\"R\")] object owner, in T t, ref int n) where T : struct, global::EasyEcs.IComponent;")]
     [TestCase("[Without<Q>, WithAny<T>] public struct G : ISystemGroup; [UpdateInGroup<G>] public class S : EcsSystem { [ForEach, Without<Q>] static void A(ref P p) { } [ForEach, With<P>] static void B() { } }",
         "AFilter = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T>();", // once, though both name it
@@ -348,6 +348,23 @@ public class GeneratorTests
             out var output, out _);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")).Select(t => t.ToString()));
         Assert.That(generated, Does.Contain("IForEachEntity<global::P>").And.Contain("global::EasyEcs.Maybe<global::Q>.ForRead(entity)"));
+    }
+
+    [Test]
+    public void ARunnerKeepsTheCallersRefValuesInLocalsPerRun()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
+            public static class R
+            {
+                [ForEach] static void Sum(in P p, ref int total, ref int last) => last = total += p.V;
+                [ForEach] static void Kill(Entity e, in P p, ref int killed) { killed++; e.Destroy(); }
+            }
+            """), out var output, out _);
+        string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")).Select(t => t.ToString()));
+        Assert.That(generated, Does.Contain("SumJob : global::EasyEcs.IForEachBatch<global::P>")
+            .And.Contain("var l1 = x1;").And.Contain("var l2 = x2;").And.Contain("ref l1, ref l2")
+            .And.Contain("x1 = l1;").And.Contain("x2 = l2;"));
+        Assert.That(generated, Does.Contain("KillJob : global::EasyEcs.IForEachEntity<global::P>"));   // a structural method keeps the ref
     }
 
     [Test]

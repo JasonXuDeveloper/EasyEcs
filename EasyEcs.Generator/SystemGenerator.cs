@@ -233,7 +233,10 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string job = $"{method.Name}Job{method.TypeParameters}";
         var components = method.Query.ToArray();
         int index = 0;
-        bool runs = method.OptionalRuns; // per row of a run: components and handles at the row's offset
+        bool runs = method.Runs; // per row of a run: components and handles at the row's offset
+        // A batch job copies the caller's ref values into locals for its run (written back in a finally): through the
+        // ref field, every row would load and store memory, a dependency chain of ~2.5 ns per row.
+        bool[] local = method.Parameters.Select(p => method.IsBatch && p.Kind == Symbols.ParamKind.Context && p.RefKind == "ref").ToArray();
         var args = string.Join(", ", method.Parameters.Select((p, i) => p.Kind switch
         {
             Symbols.ParamKind.Component when runs => $"{p.RefKind} Unsafe.Add(ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(c{++index}), i)",
@@ -245,6 +248,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Entity => "entity",
             Symbols.ParamKind.Entities => "entities",
             Symbols.ParamKind.Optional => $"global::EasyEcs.Maybe<{p.Type}>.{(p.RefKind == "ref" ? "ForWrite" : "ForRead")}(entity)",
+            Symbols.ParamKind.Context when local[i] => $"ref l{i}",
             Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
             _ => "World",
         }).Prepend(method.IsStatic ? "null" : "System"));
@@ -277,16 +281,36 @@ public sealed class SystemGenerator : IIncrementalGenerator
         string first = method.IsBatch ? "global::EasyEcs.EntitySpan entities, " : method.TakesEntity ? "global::EasyEcs.Entity entity, " : "";
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
         sb.Append($"        public void Execute({first}{List(components.Length, i => string.Format(each, components[i - 1], i))})\n");
-        if (runs)
+        string call = $"__ForEach{owner.TypeParameters}.{method.Name}{method.TypeParameters}({args});";
+        if (!runs && !local.Contains(true))
+            sb.Append($"            => {call}\n");
+        else
         {
             sb.Append("        {\n");
+            string indent = "            ";
             for (int i = 0; i < method.Parameters.Length; i++)
-                if (method.Parameters[i] is { Kind: Symbols.ParamKind.Optional } p)
-                    sb.Append($"            var m{i} = new global::EasyEcs.MaybeColumn<{p.Type}>(in entities, {(p.RefKind == "ref" && p.Tracked ? "true" : "false")});\n");
-            sb.Append("            for (int i = 0; i < entities.Length; i++)\n");
-            sb.Append($"                __ForEach{owner.TypeParameters}.{method.Name}{method.TypeParameters}({args});\n        }}\n");
+                if (local[i]) sb.Append($"            var l{i} = x{i};\n");
+            if (local.Contains(true))
+            {
+                sb.Append("            try\n            {\n");
+                indent += "    ";
+            }
+            for (int i = 0; i < method.Parameters.Length; i++)
+                if (runs && method.Parameters[i] is { Kind: Symbols.ParamKind.Optional } p)
+                    sb.Append($"{indent}var m{i} = new global::EasyEcs.MaybeColumn<{p.Type}>(in entities, {(p.RefKind == "ref" && p.Tracked ? "true" : "false")});\n");
+            // The first span's length bounds the loop (a register; the EntitySpan is passed by reference)
+            string length = components.Length > 0 ? "c1.Length" : "entities.Length";
+            if (runs) sb.Append($"{indent}for (int i = 0; i < {length}; i++)\n{indent}    {call}\n");
+            else sb.Append($"{indent}{call}\n");
+            if (local.Contains(true))
+            {
+                sb.Append("            }\n            finally\n            {\n");
+                for (int i = 0; i < method.Parameters.Length; i++)
+                    if (local[i]) sb.Append($"                x{i} = l{i};\n");
+                sb.Append("            }\n");
+            }
+            sb.Append("        }\n");
         }
-        else sb.Append($"            => __ForEach{owner.TypeParameters}.{method.Name}{method.TypeParameters}({args});\n");
         // Its ref parameters (Span<T> for a batch): carried over when the method moves the entity it visits, and
         // stamped when the component tracks changes. The queried [With<T>] component of a method without one is read.
         var queried = method.Parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan).ToArray();
@@ -379,14 +403,15 @@ public sealed class SystemGenerator : IIncrementalGenerator
         public string Loop => IsBatch ? "ForEachBatch" : TakesEntity ? "ForEachEntity" : "ForEach";
 
         /// <summary>Takes component spans, or runs per row inside runs of rows: World.ForEachBatch.</summary>
-        public bool IsBatch => Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) || OptionalRuns;
+        public bool IsBatch => Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) || Runs;
 
         /// <summary>
-        /// Takes a Maybe and changes no structure (on one thread): its job walks runs of rows and finds the optional
-        /// component through the run's column (MaybeColumn), a presence bit per row instead of a lookup per entity.
+        /// Changes no structure (on one thread) and takes a Maybe or a caller's value by ref: its job walks runs of rows,
+        /// finding each optional column once per run (a presence bit per row) and keeping the caller's values in locals
+        /// for the run.
         /// </summary>
-        public bool OptionalRuns => Stable && !Parallel && Parameters.Any(p => p.Kind == Symbols.ParamKind.Optional)
-            && !Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan);
+        public bool Runs => Stable && !Parallel && !Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan)
+            && Parameters.Any(p => p.Kind == Symbols.ParamKind.Optional || p is { Kind: Symbols.ParamKind.Context, RefKind: "ref" });
 
         public static ForEachModel? Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
         {

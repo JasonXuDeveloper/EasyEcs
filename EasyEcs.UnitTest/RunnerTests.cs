@@ -39,6 +39,13 @@ public static class Reports
         for (int i = 0; i < hp.Length; i++) total += hp[i].Value;
     }
 
+    [ForEach]
+    private static void Count(in Health hp, ref int counted, int stop)
+    {
+        if (counted == stop) throw new InvalidOperationException("stop");
+        counted++;
+    }
+
     [ForEach(Parallel = true)]
     private static void Scale(ref Health hp, int factor) => hp.Value *= factor;
 
@@ -89,6 +96,21 @@ public class RunnerTests
         int count = 0;
         Tools.Count(_world, ref count);
         Assert.That(count, Is.EqualTo(3));
+    }
+
+    [Test]
+    public void RefValuesAreWrittenBackPerRunEvenWhenTheMethodThrows()
+    {
+        for (int i = 0; i < 4; i++) _world.CreateEntity(new Health(i));
+        for (int i = 0; i < 4; i++) _world.CreateEntity(new Health(i), new Armor(1));   // a second table: a second run
+
+        int counted = 0;
+        Reports.Count(_world, ref counted, -1);
+        Assert.That(counted, Is.EqualTo(8), "kept in a local per run, written back after each");
+
+        counted = 0;
+        Assert.Throws<InvalidOperationException>(() => Reports.Count(_world, ref counted, 6));
+        Assert.That(counted, Is.EqualTo(6), "the rows counted before the throw reach the caller");
     }
 
     [Test]
