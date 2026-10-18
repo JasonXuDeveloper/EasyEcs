@@ -32,37 +32,7 @@ type Page = ReturnType<typeof source.getPages>[number];
  * as warnings until the rewrite lands. A listed page that passes is an error,
  * so the list only shrinks.
  */
-const pending = new Set<string>([
-  '/en',
-  '/zh',
-  '/en/docs/guide/analyzer',
-  '/en/docs/guide/bulk',
-  '/en/docs/guide/change-tracking',
-  '/en/docs/guide/cleanup-and-disable',
-  '/en/docs/guide/common-mistakes',
-  '/en/docs/guide/dynamic-buffers',
-  '/en/docs/guide/entities-and-components',
-  '/en/docs/guide/groups',
-  '/en/docs/guide/hierarchy',
-  '/en/docs/guide/indexes-and-relations',
-  '/en/docs/guide/migration-and-unload',
-  '/en/docs/guide/queries',
-  '/en/docs/guide/refs-and-await',
-  '/en/docs/guide/saves',
-  '/en/docs/guide/singletons',
-  '/en/docs/guide/snapshots',
-  '/en/docs/guide/structural-changes',
-  '/en/docs/guide/systems',
-  '/en/docs/guide/threading',
-  '/zh/docs/guide/bulk',
-  '/zh/docs/guide/change-tracking',
-  '/zh/docs/guide/common-mistakes',
-  '/zh/docs/guide/migration-and-unload',
-  '/zh/docs/guide/queries',
-  '/zh/docs/guide/singletons',
-  '/zh/docs/guide/systems',
-  '/zh/docs/guide/threading',
-]);
+const pending = new Set<string>();
 
 const errors: string[] = [];
 const warnings: string[] = [];

@@ -53,6 +53,8 @@ const zeroAlloc = tickAlloc?.value === 0;
 
 /** The peers of the headline tick, fastest first */
 const peerList = peers();
+/** True when EasyEcs runs the headline tick faster than every peer (the meta description says so) */
+const tickLeads = peerList[0]?.ours === true;
 const slowerPeers = peerList.filter((p) => !p.ours && (p.row.ratio ?? 0) >= 2);
 const slowRange = slowerPeers.length
   ? `${formatRatio(Math.min(...slowerPeers.map((p) => p.row.ratio ?? 0)))}–${formatRatio(Math.max(...slowerPeers.map((p) => p.row.ratio ?? 0)))}`
@@ -226,7 +228,9 @@ world.Update();                                // 0 B once warmed up`,
 
 const copy: Record<Locale, Copy> = {
   en: {
-    description: `EasyEcs is an open-source, allocation-free archetype Entity Component System (ECS) for C# and .NET 10 servers: source-generated [ForEach] systems, change tracking, indexes, relations, snapshots and saves, ${zeroAlloc ? '0 B' : text(tickAlloc)} per tick.`,
+    description: tickLeads
+      ? `High-performance, allocation-free ECS for C# and .NET 10: fastest on a full server tick against Friflo, Arch and DefaultEcs, ${zeroAlloc ? '0 B' : text(tickAlloc)} per tick.`
+      : `High-performance, allocation-free ECS for C# and .NET 10 servers: source-generated systems, change tracking, indexes and saves, ${zeroAlloc ? '0 B' : text(tickAlloc)} per tick.`,
     pill: `EasyEcs ${docsVersion} · .NET 10 · MIT`,
     headline: 'The allocation-free ECS for .NET 10 servers',
     definition:
@@ -464,7 +468,9 @@ const copy: Record<Locale, Copy> = {
     ctaLlms: 'Docs for AI assistants',
   },
   zh: {
-    description: `EasyEcs 是开源、零 GC 分配的 archetype 实体组件系统（ECS），面向 C# 与 .NET 10 服务端：源生成的 [ForEach] 系统、变更追踪、索引、关系、快照与存档，每个 tick ${zeroAlloc ? '0 B' : text(tickAlloc)} 分配。`,
+    description: tickLeads
+      ? `高性能、零分配的 C# / .NET 10 ECS 框架：完整服务器 tick 快过 Friflo、Arch 和 DefaultEcs，每个 tick ${zeroAlloc ? '0 B' : text(tickAlloc)} 分配。`
+      : `高性能、零分配的 C# / .NET 10 ECS 框架：源生成系统、变更追踪、索引与存档，每个 tick ${zeroAlloc ? '0 B' : text(tickAlloc)} 分配。`,
     pill: `EasyEcs ${docsVersion} · .NET 10 · MIT`,
     headline: '为 .NET 10 服务端打造的零分配 ECS',
     definition:
