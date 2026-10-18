@@ -99,7 +99,7 @@ public class RunnerTests
     }
 
     [Test]
-    public void RefValuesAreWrittenBackPerRunEvenWhenTheMethodThrows()
+    public void RefValuesAreWrittenBackAfterEachRun()
     {
         for (int i = 0; i < 4; i++) _world.CreateEntity(new Health(i));
         for (int i = 0; i < 4; i++) _world.CreateEntity(new Health(i), new Armor(1));   // a second table: a second run
@@ -110,7 +110,7 @@ public class RunnerTests
 
         counted = 0;
         Assert.Throws<InvalidOperationException>(() => Reports.Count(_world, ref counted, 6));
-        Assert.That(counted, Is.EqualTo(6), "the rows counted before the throw reach the caller");
+        Assert.That(counted, Is.EqualTo(4), "the finished run reaches the caller, the run that threw does not");
     }
 
     [Test]

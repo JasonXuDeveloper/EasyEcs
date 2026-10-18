@@ -234,14 +234,15 @@ public sealed class SystemGenerator : IIncrementalGenerator
         var components = method.Query.ToArray();
         int index = 0;
         bool runs = method.Runs; // per row of a run: components and handles at the row's offset
-        // A batch job copies the caller's ref values into locals for its run (written back in a finally): through the
-        // ref field, every row would load and store memory, a dependency chain of ~2.5 ns per row.
+        // A batch job copies the caller's ref values into locals for its run (written back after it): through the
+        // ref field, every row would load and store memory, a dependency chain of ~2.5 ns per row. No finally: Execute
+        // would no longer inline, so a method that throws loses its changes of the run in progress.
         bool[] local = method.Parameters.Select(p => method.IsBatch && p.Kind == Symbols.ParamKind.Context && p.RefKind == "ref").ToArray();
         var args = string.Join(", ", method.Parameters.Select((p, i) => p.Kind switch
         {
-            Symbols.ParamKind.Component when runs => $"{p.RefKind} Unsafe.Add(ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(c{++index}), i)",
-            Symbols.ParamKind.Entity when runs => "entities[i]",
-            Symbols.ParamKind.Optional when runs => $"m{i}[i]",
+            Symbols.ParamKind.Component when runs => $"{p.RefKind} Unsafe.Add(ref r{++index}, i)",
+            Symbols.ParamKind.Entity when runs => "entities[(int)i]",
+            Symbols.ParamKind.Optional when runs => $"m{i}[(int)i]",
             Symbols.ParamKind.Component => $"{p.RefKind} c{++index}",
             Symbols.ParamKind.ComponentSpan => $"c{++index}", // Span<T> converts to ReadOnlySpan<T> for read-only parameters
             Symbols.ParamKind.Singleton => method.Parallel ? $"{p.RefKind} s{i}.Value" : $"{p.RefKind} s{i}",
@@ -287,28 +288,24 @@ public sealed class SystemGenerator : IIncrementalGenerator
         else
         {
             sb.Append("        {\n");
-            string indent = "            ";
+            const string indent = "            ";
             for (int i = 0; i < method.Parameters.Length; i++)
                 if (local[i]) sb.Append($"            var l{i} = x{i};\n");
-            if (local.Contains(true))
-            {
-                sb.Append("            try\n            {\n");
-                indent += "    ";
-            }
             for (int i = 0; i < method.Parameters.Length; i++)
                 if (runs && method.Parameters[i] is { Kind: Symbols.ParamKind.Optional } p)
                     sb.Append($"{indent}var m{i} = new global::EasyEcs.MaybeColumn<{p.Type}>(in entities, {(p.RefKind == "ref" && p.Tracked ? "true" : "false")});\n");
-            // The first span's length bounds the loop (a register; the EntitySpan is passed by reference)
-            string length = components.Length > 0 ? "c1.Length" : "entities.Length";
-            if (runs) sb.Append($"{indent}for (int i = 0; i < {length}; i++)\n{indent}    {call}\n");
-            else sb.Append($"{indent}{call}\n");
-            if (local.Contains(true))
+            if (runs)
             {
-                sb.Append("            }\n            finally\n            {\n");
-                for (int i = 0; i < method.Parameters.Length; i++)
-                    if (local[i]) sb.Append($"                x{i} = l{i};\n");
-                sb.Append("            }\n");
+                // The columns' refs and the row count in locals: the spans are passed in memory, and a caller's value
+                // passed by ref is a store the JIT cannot prove misses them, so it would reload them on every row.
+                for (int k = 1; k <= components.Length; k++)
+                    sb.Append($"{indent}ref {components[k - 1]} r{k} = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(c{k});\n");
+                sb.Append($"{indent}nint rows = {(components.Length > 0 ? "c1.Length" : "entities.Length")};\n");
+                sb.Append($"{indent}for (nint i = 0; i < rows; i++) // nint: no sign extension per row\n{indent}    {call}\n");
             }
+            else sb.Append($"{indent}{call}\n");
+            for (int i = 0; i < method.Parameters.Length; i++)
+                if (local[i]) sb.Append($"            x{i} = l{i};\n");
             sb.Append("        }\n");
         }
         // Its ref parameters (Span<T> for a batch): carried over when the method moves the entity it visits, and
