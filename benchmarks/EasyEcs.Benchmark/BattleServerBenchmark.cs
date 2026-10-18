@@ -4,11 +4,11 @@ using EasyEcs.Benchmark.Showcase;
 namespace EasyEcs.Benchmark;
 
 /// <summary>
-/// The battle server example (docs/content/example.md) (<see cref="BattleServer"/>), which uses every feature; the tick runs a
-/// parallel [ForEach], parallel systems, batch methods, immediate structural changes, disabled components, cleanup
-/// components, a hierarchy, WithAny, change tracking (replication every third tick), groups, an ordered index, a
-/// relation, Maybe, system groups, update intervals and phases, ordering, singletons, timings. One operation is one
-/// server tick. Steady state allocates 0 bytes.
+/// The battle server example (<see cref="BattleServer"/>, shown region by region on the docs page example.mdx), which
+/// uses every feature; the tick runs a parallel [ForEach], parallel systems, batch methods, immediate structural
+/// changes, disabled components, cleanup components, a hierarchy, WithAny, change tracking (replication every third
+/// tick), groups, an ordered index, a relation, Maybe, system groups, update intervals and phases, ordering,
+/// singletons, timings. One operation is one server tick. Steady state allocates 0 bytes.
 /// </summary>
 [MemoryDiagnoser]
 public class BattleServerBenchmark

@@ -8,8 +8,10 @@ using System.Runtime.InteropServices;
 namespace EasyEcs.Benchmark.Showcase;
 
 // A battle server that uses every feature of EasyEcs the way users should: plain data, one job per system, state
-// changes as data. docs/content/example.md shows this file; BattleServerBenchmark measures it and BattleServerTests check it.
+// changes as data. The docs page example.mdx (https://ecs.xgamedev.net/en/docs/example) includes its regions, so the
+// page always shows this code; BattleServerBenchmark measures it and BattleServerTests check it.
 
+// #region components
 public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
 public record struct Health(int Value, int Max) : IComponent, ITrackChanges;    // replicated: writes are tracked
@@ -29,7 +31,9 @@ public record struct Friend(EntityId Target) : IRelation;                     //
 public struct Player : IComponent;                                            // tags: empty components
 public struct Npc : IComponent;
 public struct Dead : IComponent;
+// #endregion components
 
+// #region singletons
 public record struct Battle(long Tick, int Hits, int Deaths, int Shots, int Replicated, int Afflicted) : ISingletonComponent;
 
 public record struct Rules(int ShotCost, int BagSize, bool Ceasefire) : ISingletonComponent;   // the battle's rules: data
@@ -44,7 +48,9 @@ public struct Waypoints : ISingletonComponent
 public struct WaypointArray { private Position _first; }
 
 public struct Replication : ISystemGroup;                                     // runs when the server sends updates
+// #endregion singletons
 
+// #region movement
 public class SteeringSystem : EcsSystem                                       // heavy per-entity math: on all cores
 {
     protected override void OnCreate()                                        // the system sets up the data it steers by
@@ -98,7 +104,9 @@ public class ZoneSystem : EcsSystem                                           //
         if (zone.Id != id) player.SetZone(id);                                 // only real moves are writes
     }
 }
+// #endregion movement
 
+// #region combat
 public class CombatSystem : EcsSystem                                         // damage only: statuses are StatusSystem's
 {
     [ForEach, Without<Dead>]                                                  // a frozen unit's Attack is disabled
@@ -161,7 +169,9 @@ public class DeathSystem : EcsSystem
         battle.Deaths++;
     }
 }
+// #endregion combat
 
+// #region respawn
 public class RespawnSystem : EcsSystem                                        // DeathSystem does not know it exists
 {
     [ForEach, With<Player>, With<Dead>]
@@ -215,7 +225,9 @@ public class RespawnSystem : EcsSystem                                        //
         old.RemoveSpawn();                                                    // its last cleanup component: freed
     }
 }
+// #endregion respawn
 
+// #region projectiles
 public class ProjectileSystem : EcsSystem
 {
     [ForEach, With<Player>, Without<Dead>]                                    // a frozen player's Velocity is disabled
@@ -251,7 +263,9 @@ public sealed class ClockSystem : EcsSystem
     protected override void OnCreate() => World.GetOrAddBattle();
     protected override void OnUpdate() => World.Battle.Tick++;
 }
+// #endregion projectiles
 
+// #region replication
 [UpdateInGroup<Replication>]
 public class ReplicationSystem : EcsSystem                                    // only what changed since the last send
 {
@@ -281,7 +295,9 @@ public class ReplicationSystem : EcsSystem                                    //
     [ForEach, Changed<DynamicBuffer<Loot>>]                                          // bags changed by a ref write
     static void SendBag(in DynamicBuffer<Loot> bag, ref Battle battle) => battle.Replicated += 1 + bag.Count;
 }
+// #endregion replication
 
+// #region reports
 public static class Dice
 {
     public static uint Roll(long tick, int id)
@@ -332,12 +348,14 @@ public static class Reports
 
 /// <summary>What the server reports: computed by the runners of <see cref="Reports"/>, outside the tick.</summary>
 public record struct Census(int Players, int Alive, long Health, long Mana, Entity Weakest, int ReadyToAttack);
+// #endregion reports
 
 /// <summary>
 /// The host of one battle: owns its world on one thread, ticks it, and answers questions about it between ticks.
 /// </summary>
 public sealed class BattleServer : IDisposable
 {
+    // #region prefabs
     public const int ShotCost = 30;
     public const int BagSize = 8;
 
@@ -358,7 +376,9 @@ public sealed class BattleServer : IDisposable
         .SetHealth(120, 120).SetReplica(120, false).SetAttack(6, 8, 0).SetSpawn(default, 0).SetNpc();
     private static readonly Prefab Brute = new Prefab(Grunt)                                    // a variant: a copy
         .SetHealth(200, 200).SetReplica(200, false).SetAttack(9, 12, 0);
+    // #endregion prefabs
 
+    // #region setup
     public readonly World World;
     private readonly SingletonRef<Battle> _battle;                            // resolved once, no lookup per tick
     private readonly List<EntityId> _group = [];                              // reused by Transfer
@@ -428,7 +448,9 @@ public sealed class BattleServer : IDisposable
         npc.Position = at;
         npc.Attack.Cooldown = (int)(r % 10);
     }
+    // #endregion setup
 
+    // #region tick
     public ref Battle Battle => ref _battle.Value;
 
     /// <summary>A system that threw: it was switched off and the battle went on (its Error is the failure, as data).</summary>
@@ -455,7 +477,9 @@ public sealed class BattleServer : IDisposable
         get => World.Rules.Ceasefire;
         set => World.Rules.Ceasefire = value;
     }
+    // #endregion tick
 
+    // #region queries
     public int PlayersIn(int zone) => World.Count<Player>(Zones[zone]);    // one table: its rows, not a scan
 
     public bool AnyoneBurning => World.Any<Burning>();
@@ -473,7 +497,9 @@ public sealed class BattleServer : IDisposable
         hp.Value -= damage;                                                   // a write: replicated with the next send
         return true;
     }
+    // #endregion queries
 
+    // #region buffers-and-indexes
     /// <summary>
     /// A mirror image of a living unit as it is now (health, statuses, bag, zone): a copy of the entity, which the
     /// indexes, groups and the next send learn about.
@@ -514,7 +540,9 @@ public sealed class BattleServer : IDisposable
 
     /// <summary>How many players list <paramref name="player"/> as a friend: the relation's index, by target.</summary>
     public int FriendsOf(Entity player) => World.FriendIndex.Count(player);
+    // #endregion buffers-and-indexes
 
+    // #region leave-and-transfer
     /// <summary>A player leaves: its projectiles go with it (children), and it drops out of friend lists (the policy).</summary>
     public bool Leave(Entity player)
     {
@@ -537,7 +565,9 @@ public sealed class BattleServer : IDisposable
         World.MoveEntities(to.World, CollectionsMarshal.AsSpan(_group), new Span<Entity>(ref arrived));
         return arrived;
     }
+    // #endregion leave-and-transfer
 
+    // #region census
     /// <summary>The living player closest to <paramref name="at"/>: an ad-hoc query.</summary>
     public Entity NearestPlayer(Position at)
     {
@@ -564,7 +594,9 @@ public sealed class BattleServer : IDisposable
         return new Census(World.Count<Player>(), World.Count<Player>(AlivePlayers), health, mana, handle,
             World.Count<Attack>(Alive));                                      // a frozen unit's Attack is not counted
     }
+    // #endregion census
 
+    // #region new-round
     /// <summary>A new round: projectiles gone, statuses lifted, everyone healed, the NPCs scattered.</summary>
     public int NewRound()
     {
@@ -577,7 +609,9 @@ public sealed class BattleServer : IDisposable
         Reports.Scatter(World, Battle.Tick);
         return cleared;
     }
+    // #endregion new-round
 
+    // #region snapshots-and-saves
     /// <summary>Keep the battle in memory; <see cref="WrittenSinceCheckpoint"/> counts the players written since.</summary>
     public void Checkpoint()
     {
@@ -595,7 +629,9 @@ public sealed class BattleServer : IDisposable
 
     /// <summary>Replace the battle with a saved one: entities keep their ids, so links still point right.</summary>
     public void Load(ReadOnlySpan<byte> save) => World.Load(save);
+    // #endregion snapshots-and-saves
 
+    // #region diagnostics
     /// <summary>The world's tables: their components, rows and bytes, for a dashboard.</summary>
     public TableInfo[] Tables() => World.Describe();
 
@@ -609,4 +645,5 @@ public sealed class BattleServer : IDisposable
     }
 
     public void Dispose() => World.Dispose();                                 // OnDestroy of every system
+    // #endregion diagnostics
 }

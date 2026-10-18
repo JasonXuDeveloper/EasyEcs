@@ -9,9 +9,10 @@ namespace EasyEcs.UnitTest.Showcase;
 using EasyEcs.Benchmark.Showcase;   // inside the namespace: wins over the shared test fixtures
 
 /// <summary>
-/// The battle server example (docs/content/example.md) and BattleServerBenchmark, run as a whole: every feature it uses must keep its
-/// promise while the others churn the world (changes replicated, indexes and groups in sync, links cleaned up,
-/// runners and queries agreeing with scans, snapshots replaying, saves loading, failures isolated, nothing allocated).
+/// The battle server example (BattleServer.cs, shown on the docs page example.mdx) and BattleServerBenchmark, run as a
+/// whole: every feature it uses must keep its promise while the others churn the world (changes replicated, indexes
+/// and groups in sync, links cleaned up, runners and queries agreeing with scans, snapshots replaying, saves loading,
+/// failures isolated, nothing allocated).
 /// </summary>
 public class BattleServerTests
 {
