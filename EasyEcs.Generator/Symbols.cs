@@ -457,31 +457,34 @@ internal static class Symbols
     /// <summary>
     /// Whether a member ComponentGenerator wrote changes structure: its writers (<c>SetX</c>, <c>RemoveX</c>,
     /// <c>GetOrAddX</c>, <c>DisableX</c>, <c>EnableX</c>) are the methods of its extension blocks, its reads the
-    /// properties and <c>TryGetX</c>. Decided by the symbol, not the name: a component named <c>Settings</c> is read
+    /// properties, <c>TryGetX</c> and <c>WriteX</c> (a value write, like <c>Get</c>). Decided by the symbol, not the name: a component named <c>Settings</c> is read
     /// through the property <c>entity.Settings</c>.
     /// </summary>
     private static bool IsGeneratedWriter(ISymbol member) =>
         member is IMethodSymbol { MethodKind: MethodKind.Ordinary, ContainingType.IsExtension: true } method
-        && !method.Name.StartsWith("TryGet");
+        && !method.Name.StartsWith("TryGet") && !method.Name.StartsWith("Write");
 
     /// <summary>
     /// Whether <paramref name="access"/> reads through a member ComponentGenerator wrote. The analyzer resolves it; the
     /// generator cannot (another generator's output is not in its compilation), so there the name decides: a
-    /// component's name (<c>e.Position</c>), <c>Has</c> / <c>TryGet</c> + a component, <c>Is</c> + a tag, or
-    /// <c>Is</c> + a component + <c>Disabled</c>.
+    /// component's name (<c>e.Position</c>), <c>Has</c> / <c>TryGet</c> / <c>Write</c> + a component, <c>Is</c> + a
+    /// tag, <c>Is</c> + a component + <c>Disabled</c>, or a buffer element's name, <c>Has</c> / <c>Write</c> + it.
     /// </summary>
     private static bool GeneratedRead(SemanticModel model, MemberAccessExpressionSyntax access, string member)
     {
         if (model.GetSymbolInfo(access).Symbol is { } symbol) return IsGenerated(symbol) && !IsGeneratedWriter(symbol);
         if (member.Length > "IsDisabled".Length && member.StartsWith("Is") && member.EndsWith("Disabled"))
             member = member.Substring(2, member.Length - 2 - "Disabled".Length);
-        foreach (var (prefix, tag) in new[] { ("", false), ("Has", false), ("TryGet", false), ("Is", true) })
+        foreach (var (prefix, tag) in new[] { ("", false), ("Has", false), ("TryGet", false), ("Write", false), ("Is", true) })
         {
             if (member.Length <= prefix.Length || !member.StartsWith(prefix)) continue;
             string type = member.Substring(prefix.Length);
+            // A component (with fields, or a tag for Is), or for the name, Has and Write a buffer's element (a struct
+            // that is neither component nor singleton).
             if (model.LookupNamespacesAndTypes(access.SpanStart, name: type).OfType<INamedTypeSymbol>().Any(t =>
-                    t.TypeKind == TypeKind.Struct && Implements(t, Component)
-                    && t.GetMembers().Any(f => f is IFieldSymbol { IsStatic: false }) != tag))
+                    t.TypeKind == TypeKind.Struct && (Implements(t, Component)
+                        ? t.GetMembers().Any(f => f is IFieldSymbol { IsStatic: false }) != tag
+                        : !tag && prefix != "TryGet" && !Implements(t, Singleton))))
                 return true;
         }
 

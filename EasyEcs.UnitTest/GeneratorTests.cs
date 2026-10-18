@@ -335,7 +335,7 @@ public class GeneratorTests
             CSharpSyntaxTree.ParseText("public class Unrelated { int x; }", Parse)));
 
         var steps = driver.GetRunResult().Results.SelectMany(r => r.TrackedSteps).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.SelectMany(p => p.Value));
-        foreach (var name in new[] { "ForEachMethods", "SystemUpdates", "ClosedSystems", "SystemCode", "Components", "SavedComponents", "SavedBuffers", "ModuleInitializers" })
+        foreach (var name in new[] { "ForEachMethods", "SystemUpdates", "ClosedSystems", "SystemCode", "Components", "BufferElements", "SavedComponents", "SavedBuffers", "ModuleInitializers" })
             Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
                 Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged), name);
     }
@@ -352,7 +352,11 @@ public class GeneratorTests
                 [ForEach] static void Check(Entity e, ref Q q) { if (e.IsPDisabled || e.IsDisabled<T>()) q.V = 0; }
                 [ForEach] static void Off(Entity e, ref Q q) => e.DisableP();
                 [ForEach] static void On(Entity e, ref Q q) => e.Enable<T>();
+                [ForEach] static void Fill(Entity e, ref Q q) { if (e.HasItem && e.Item.Count < 4) e.WriteItem().Add(new Item(q.V)); e.WriteT().V++; }
+                [ForEach] static void Drop(Entity e, ref Q q) => e.RemoveItem();
             }
+            public record struct Item(int V);
+            public static class U { public static void Use(Entity e) => e.GetOrAdd<DynamicBuffer<Item>>(); }
             """), out var output, out _);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")).Select(t => t.ToString()));
         Assert.That(generated, Does.Match(@"struct ReadJob[^\n]*INoStructuralChanges"));
@@ -361,6 +365,9 @@ public class GeneratorTests
         Assert.That(generated, Does.Match(@"struct CheckJob[^\n]*INoStructuralChanges"));
         Assert.That(generated, Does.Not.Match(@"struct OffJob[^\n]*INoStructuralChanges"));
         Assert.That(generated, Does.Not.Match(@"struct OnJob[^\n]*INoStructuralChanges"));
+        Assert.That(generated, Does.Match(@"struct FillJob[^\n]*INoStructuralChanges"));                // buffer and tracked writes
+        Assert.That(generated, Does.Not.Match(@"struct DropJob[^\n]*INoStructuralChanges"));
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
     }
 
     [Test]
@@ -391,6 +398,8 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("SetP(int v) => @this.Set(new global::P { V = v })"));          // from the fields
         Assert.That(generated, Does.Contain("public global::EasyEcs.Entity RemoveP()"));
         Assert.That(generated, Does.Contain("public ref readonly global::T T"));                            // tracked: read-only
+        Assert.That(generated, Does.Contain("public ref global::T WriteT()"));                              // and a ref write
+        Assert.That(generated, Does.Not.Contain("WriteOwned"));                                            // indexed: Set only
         Assert.That(generated, Does.Contain("public ref readonly global::Owned Owned"));                    // indexed: read-only
         Assert.That(generated, Does.Contain("ValueIndex<global::Owned, global::EasyEcs.EntityId> OwnedIndex"));
         Assert.That(generated, Does.Contain("public ref global::Clock Clock"));                             // a singleton
@@ -403,6 +412,39 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("public bool HasWorld"));
         Assert.That(generated, Does.Not.Contain("SetFixed"));
         Assert.That(generated, Does.Not.Contain("Secret"));
+    }
+
+    [Test]
+    public async Task BufferElementsGetNamedMembers()
+    {
+        const string source = """
+            namespace Game;                                                  // members live beside the element
+            public struct Q2 : IComponent, ITrackChanges { public int V; }
+            public record struct Loot(int Item);
+            internal struct Note { public int V; }
+            public static class U
+            {
+                public static int Use(Entity e)
+                {
+                    e.GetOrAddLoot().Add(new Game.Loot(1));
+                    e.WriteLoot().Add(new Game.Loot(2));
+                    e.WriteQ2().V = e.Loot.Count;
+                    int sum = 0;
+                    foreach (var loot in e.Loot) sum += loot.Item;
+                    return e.HasLoot && e.RemoveLoot().IsAlive ? sum : 0;
+                }
+                public static Entity Spawn(World w) => w.CreateEntity(new DynamicBuffer<Loot>());   // names the buffer
+                static void Notes(ref DynamicBuffer<Note> notes, in DynamicBuffer<int> ints, in DynamicBuffer<P> components) { }
+            }
+            """;
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, source), out var output, out var diagnostics);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+        string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Buffer.g.cs")).Select(t => t.ToString()));
+        Assert.That(generated, Does.Contain("public ref readonly global::EasyEcs.DynamicBuffer<global::Game.Loot> Loot"));
+        Assert.That(generated, Does.Contain("internal ref global::EasyEcs.DynamicBuffer<global::Game.Note> WriteNote()"));
+        Assert.That(output.SyntaxTrees.Count(t => t.FilePath.EndsWith(".Buffer.g.cs")), Is.EqualTo(2)); // not int, not a component
+        Assert.That(await Diagnose(Components, source), Is.Empty);                                    // no EECS012 on the members
     }
 
     /// <summary>Framework references of the running test host (enough for the generated code to compile).</summary>
