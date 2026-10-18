@@ -53,6 +53,12 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
 - Code fixes (EasyEcs.CodeFixes, in the package beside the generator): EECS002 / EECS012 take the parameter by `in`
   or `ref`, EECS005 makes the method static, EECS006 makes the type a struct, EECS010 drops `Parallel = true`, EECS011
   takes it by `ref` (or `Span`), EECS022 makes the type internal, EECS023 removes the filter.
+- The battle server uses every feature (`EasyEcs.Benchmark/BattleServer.cs` = `doc/example.md`): a `Rules`
+  singleton, combat split into damage and statuses, freezing through `Disable`, NPC respawn through a `Spawn` cleanup
+  component, projectiles as `ChildOf` children, zones as groups, a kill-streak leaderboard (ordered index), `Friend`
+  relations with a target policy, `Maybe<T>`, update phases, `[ForEach]` runners, bulk changes, saves, migrations and
+  introspection; a test per feature. Its ticks allocate nothing once its tables reach their peak populations (1,200
+  ticks).
 - .NET 10 features where they measure: counting tested rows by their set bits, 8 words per step with AVX-512
   (100,000 rows 48.9-54.5 μs -> 1.21-1.27 μs), the query cache's alternate lookup (a filter past the memo 92-106 ns
   -> 86-90 ns), the memo's ways as structs in one array, `Lock` everywhere, `params ReadOnlySpan`, generators on
@@ -96,22 +102,13 @@ needs goes. Each round's findings are listed here with what was generated, chang
     lines);
   - kept: every generated member is used by an example or a test.
 
-### Example
+### Tests and benchmarks for every feature
 
-- The battle server (`EasyEcs.Benchmark/BattleServer.cs` = `doc/example.md`) uses every feature:
-  - a rules singleton;
-  - `Fight` split into damage and status systems;
-  - `Frozen` through `Disable`;
-  - respawn through cleanup components;
-  - `ChildOf`;
-  - an ordered index of kills;
-  - a friend relation;
-  - zones as groups;
-  - `Maybe<T>`;
-  - update phases;
-  - saves;
-  - bulk changes;
-  - ordering by dependencies.
+- `EasyEcs.UnitTest`: every public feature has its own test file (behavior, edge cases, stale handles, the 0 B
+  budget in `AllocationTests`), and the battle server tests check it inside the whole world.
+- `EasyEcs.Benchmark`: every feature has a BDN case modelling real use (see Performance below for the missing ones),
+  and the headline worlds (`WorldSimulation`, `BattleServer`) run the features they use.
+- A coverage table (feature → test file → benchmark) kept in `doc/performance.md`, checked whenever a feature lands.
 
 ### Performance
 
