@@ -537,7 +537,7 @@ public class IndexComparison
         _items = new EasyEcs.Entity[Items];
         for (int i = 0; i < Items; i++) _items[i] = _world.CreateEntity(new ItemOf(_owners[i % Owners]));
         _index = _world.Index<ItemOf, EasyEcs.EntityId>();
-        Check(EasyEcs_Index, o => _index.Count(_owners[o]), i => Array.IndexOf(_owners, _items[i].Read<ItemOf>().Owner));
+        Check(EasyEcs_Index, o => _index.Count(_owners[o]), i => _items[i].Read<ItemOf>().Owner.Index - _owners[0].Id.Index);
     }
 
     [GlobalSetup(Target = nameof(Friflo_Links))]
