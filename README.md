@@ -304,6 +304,20 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
 - **`DynamicBuffer<T>`**: a list per entity, held as a component. Its writes take the buffer by `ref`, so each one is
   a tracked change (`[Changed<DynamicBuffer<T>>]` sends only the lists that changed) and a write through `in` does not
   compile; snapshots copy the elements; writes within the capacity allocate nothing.
+- **Disable, cleanup, hierarchy:** `entity.Disable<T>()` keeps a component's value while queries see it as gone;
+  cleanup components keep a destroyed entity until its resources are released; `ChildOf` parents destroy their
+  children. Bulk `SetAll` / `RemoveAll` / `DisableAll` / `EnableAll` change every match 64 rows at a time.
+- **Relations, ordered indexes, groups:** `IRelation` buffers link an entity to many targets, found back by target;
+  value indexes walk keys in order (`Range`, `Ascending`) for leaderboards and timers; `GroupBy<T>()` splits tables by
+  a value, so a query for one zone or team walks only its own tables.
+- **Saves and moves:** `world.Save` / `Load` (through Nino), and `SaveEntities` / `LoadEntities` / `MoveEntities` hand a
+  group of entities to another world or process with their `EntityId`s rewritten.
+- **Hot-reloaded game logic:** `world.RemoveTypes(assembly)` takes a plugin's systems and components out of a world so
+  its collectible `AssemblyLoadContext` can unload.
+- **Systems:** ordering by dependency (`[UpdateBefore<T>]` / `[UpdateAfter<T>]`), `UpdatePhase`, errors as data
+  (`SystemErrorPolicy.Disable`, `system.Error`), `Maybe<T>` parameters, static `[ForEach]` methods outside systems,
+  generic systems, filters on system groups, and no `partial` needed.
+- **Tools:** `world.Describe()`, a debugger view of entities, and code fixes for the analyzer's diagnostics.
 - **Every analyzer rule is an error**, with six new ones: **EECS011** rejects a `[ForEach]` method that changes a
   collection or class held by an `in` parameter, **EECS012** a `DynamicBuffer<T>` copied by value, **EECS013** a
   structural change in a `[ForEach]` method that takes no `Entity` or `World`, **EECS014** a structural change in a
@@ -313,8 +327,10 @@ The [documentation index](https://github.com/JasonXuDeveloper/EasyEcs/blob/maste
   create/destroy pair is about a quarter faster); one made inside a parallel stage of systems or a parallel `[ForEach]`, or
   reentered, throws `InvalidOperationException` instead of tearing the tables.
 - `Entity.GetHashCode()` is deterministic (`Id * 397 ^ Version`) and cheaper (relation lookups hash handles).
-- **Renamed:** `WorldOptions.Parallel` is `WorldOptions.ParallelSystems` (apart from `[ForEach(Parallel = true)]`).
-- **Removed:** `world.DestroyEntity(entity)`, a second spelling of `entity.Destroy()`; `entity.Add<T>()`, which reset
+- **Renamed:** `WorldOptions.Parallel` is `WorldOptions.ParallelSystems` (apart from `[ForEach(Parallel = true)]`);
+  `Entity.Id` is an `EntityId` (`Id.Index`, `Id.Version`), the id to store in components.
+- **Removed:** `EcsSystem.Priority` (order by dependency instead), the `World.SystemError` event (errors are data),
+  `world.DestroyEntity(entity)`, a second spelling of `entity.Destroy()`; `entity.Add<T>()`, which reset
   a component the entity already had (write `Set(new T(…))` / the generated `SetX(…)` to add or replace, `GetOrAdd<T>()`
   to add a default only when missing); `world.CompactArchetypes()` and `world.GetFragmentationStats()` (tables stay
   dense on their own).
