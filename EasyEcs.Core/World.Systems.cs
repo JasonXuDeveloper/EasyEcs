@@ -107,16 +107,17 @@ public sealed partial class World
         for (int b = 0; b < stages.Length; b++)
         {
             var stage = stages[b];
+            var systems = stage.Systems;
             // One change tick per stage: its systems never write what another one of them reads (Changed<T> reads T).
             _changeTick++;
-            if (parallel && stage.Length > 1)
+            if (parallel && systems.Length > 1)
             {
                 RunStage(stage, update);
                 continue;
             }
 
-            for (int i = 0; i < stage.Length; i++)
-                RunSystem(stage[i], update);
+            for (int i = 0; i < systems.Length; i++)
+                RunSystem(systems[i], update);
         }
 
         _changeTick++; // writes between updates are newer than every system's last run
@@ -230,7 +231,7 @@ public sealed partial class World
     internal sealed class SystemSchedule
     {
         public EcsSystem[] Systems = []; // execution order
-        public EcsSystem[][] Stages = [];
+        public SystemStage[] Stages = [];
         public long Updates;
         private EcsSystem[] _registered = [];
 
@@ -262,14 +263,14 @@ public sealed partial class World
                 stageCount = Math.Max(stageCount, levels[i] + 1);
             }
 
-            var stages = new EcsSystem[stageCount][];
+            var stages = new SystemStage[stageCount];
             var systems = new EcsSystem[order.Length];
             for (int level = 0, next = 0; level < stageCount; level++)
             {
                 int start = next;
                 for (int i = 0; i < order.Length; i++)
                     if (levels[i] == level) systems[next++] = order[i];
-                stages[level] = systems[start..next];
+                stages[level] = new SystemStage(systems[start..next]);
             }
 
             // An update reads only Stages: one reference, so it never mixes two versions of the list.

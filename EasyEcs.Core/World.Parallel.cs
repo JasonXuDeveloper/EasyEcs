@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 
@@ -11,7 +12,6 @@ public sealed partial class World
 {
     private Runner _systemRunner;
     private Runner _chunkRunner;
-    private SystemStage _systemStage;
 
     // Chunked jobs, one cached instance per job type (TypeIndex<ParallelWork, TWork>): allocated on first use only.
     private ParallelWork[] _parallelWork = [];
@@ -39,17 +39,17 @@ public sealed partial class World
     /// <summary>Thread-pool work items a runner keeps: the calling thread is the other one.</summary>
     private int Helpers => Math.Max(1, _options.MaxDegreeOfParallelism) - 1;
 
-    private void RunStage(EcsSystem[] stage, long update)
+    private void RunStage(SystemStage stage, long update)
     {
-        var work = _systemStage ??= new SystemStage(this);
-        work.Stage = stage;
-        work.Update = update;
+        var systems = stage.Systems;
+        stage.World = this;
+        stage.Update = update;
         var runner = _systemRunner ??= new Runner(Helpers);
         Gate.Freeze(); // the stage's systems never change structure (they do not run alone): a change throws
         try
         {
-            if (runner.TryRun(work, stage.Length)) return;
-            for (int i = 0; i < stage.Length; i++) RunSystem(stage[i], update); // an update from inside a running stage
+            if (runner.TryRun(stage, systems.Length)) return;
+            for (int i = 0; i < systems.Length; i++) RunSystem(systems[i], update); // an update from inside a running stage
         }
         finally
         {
@@ -100,18 +100,100 @@ public sealed partial class World
         }
     }
 
-    /// <summary>Items that can run on any thread, in any order.</summary>
+    /// <summary>
+    /// Items that can run on any thread, in any order, and how long a run takes on the caller alone and with helpers
+    /// (see <see cref="Wide"/>).
+    /// </summary>
     internal abstract class ParallelWork
     {
         public abstract void Run(int index);
+
+        // Moving averages (timestamp ticks) of a run with helpers, of its items' summed thread time (what the caller
+        // alone would take), and of a run alone.
+        private long _wide, _work, _alone;
+        private long _settled;           // the average alone a few runs after the choice (0 until then)
+        private int _run;                // runs alone since the last probe (or into the probe)
+        private int _period = MinPeriod; // runs alone between probes
+        private bool _single;            // the choice: run alone
+
+        private const int Burst = 4, Settle = 8, MinPeriod = 16, MaxPeriod = 1024;
+
+        /// <summary>
+        /// Whether the next run wakes helpers, and whether its time counts (<see cref="Took"/>). Helpers pay only when
+        /// the work outlasts their start: a parked pool thread takes from a few to a few hundred microseconds to start
+        /// (bare metal vs. a small VM) and burns about as much CPU on the way, so a small pass between server ticks is as
+        /// fast on the caller alone, while back-to-back passes find the threads awake. Measured time decides: a run with
+        /// helpers yields both its time and its items' summed thread time, so helpers are kept while they make a run at
+        /// least a fifth faster than its work, with no run alone to compare. Once alone, the caller probes again after a
+        /// period: four runs with helpers (the first only wakes them, and does not count: back-to-back runs find them
+        /// awake). A probe that confirms running alone doubles the period (16 to 1,024 runs), and runs alone turning
+        /// half as slow again as they settled at (the work grew) probe at once: the choice follows the work and
+        /// the machine as they change, and a settled one costs little.
+        /// </summary>
+        public bool Wide(out bool sample)
+        {
+            sample = true;
+            if (!_single) return true;
+            int run = ++_run;
+            if (run < _period)
+            {
+                if (run == Settle) _settled = _alone;
+                if (run <= Settle || _alone * 2 <= _settled * 3) return false;
+                run = _run = _period; // the work grew: probe now
+            }
+
+            if (run == _period) sample = false; // wakes the helpers
+            else if (run == _period + Burst)
+            {
+                _run = 0;
+                if (Beats(_wide, _work)) _single = false;
+                else _period = Math.Min(_period * 2, MaxPeriod);
+                return !_single;
+            }
+
+            return true;
+        }
+
+        /// <summary>Helpers pay when they make a run at least a fifth faster than its work.</summary>
+        private static bool Beats(long wide, long work) => wide < work - work / 5;
+
+        /// <summary>
+        /// Record a run: its time and, with helpers, its items' summed thread time. The first sample of a probe restarts
+        /// the averages; a later one counts at most 1.5 times the average (a preempted run says little). Helpers that no
+        /// longer pay switch to running alone.
+        /// </summary>
+        public void Took(bool wide, long ticks, long work)
+        {
+            if (!wide)
+            {
+                _alone = Blend(_alone, ticks);
+                return;
+            }
+
+            bool first = _single && _run == _period + 1;
+            _wide = first ? ticks : Blend(_wide, ticks);
+            _work = first ? work : Blend(_work, work);
+            if (!_single && !Beats(_wide, _work))
+            {
+                _single = true;
+                _alone = _work;
+                _run = 0;
+                _period = MinPeriod;
+            }
+        }
+
+        private static long Blend(long average, long ticks) =>
+            average == 0 ? ticks : (average * 3 + Math.Min(ticks, average * 3 / 2)) / 4;
     }
 
-    private sealed class SystemStage(World world) : ParallelWork
+    /// <summary>One stage of a schedule: systems that run at once (a schedule rebuilds its stages when it changes).</summary>
+    internal sealed class SystemStage(EcsSystem[] systems) : ParallelWork
     {
-        public EcsSystem[] Stage = [];
+        public readonly EcsSystem[] Systems = systems;
+        public World World;
         public long Update;
 
-        public override void Run(int index) => world.RunSystem(Stage[index], Update);
+        public override void Run(int index) => World.RunSystem(Systems[index], Update);
     }
 
     /// <summary>
@@ -130,6 +212,7 @@ public sealed partial class World
         private int _count;
         private long _cursor;
         private int _remaining;
+        private long _spent; // the items' summed thread time
         private Exception _error;
 
         public Runner(int helpers)
@@ -160,11 +243,14 @@ public sealed partial class World
             _count = count;
             _error = null;
             _remaining = count;
+            _spent = 0;
             int epoch = (int)(_cursor >> 32) + 1;
             // Publishes the fields above: a participant reads them only after a successful claim in this epoch.
             Interlocked.Exchange(ref _cursor, (long)epoch << 32);
 
-            int wanted = Math.Min(_helpers.Length, count - 1);
+            bool wide = work.Wide(out bool sample);
+            long start = Stopwatch.GetTimestamp();
+            int wanted = wide ? Math.Min(_helpers.Length, count - 1) : 0;
             for (int i = 0; i < _helpers.Length && wanted > 0; i++)
             {
                 // A helper still queued from an earlier run is skipped (it will exit on its stale epoch).
@@ -179,6 +265,7 @@ public sealed partial class World
             // block): a blocking event allocates its lock the first time it waits.
             var spinner = new SpinWait();
             while (Volatile.Read(ref _remaining) != 0) spinner.SpinOnce(sleep1Threshold: -1);
+            if (sample) work.Took(wide, Stopwatch.GetTimestamp() - start, Volatile.Read(ref _spent));
             if (_error != null) ExceptionDispatchInfo.Throw(_error);
         }
 
@@ -191,6 +278,7 @@ public sealed partial class World
                 if ((int)(cursor >> 32) != epoch || index >= _count) return;
                 if (Interlocked.CompareExchange(ref _cursor, cursor + 1, cursor) != cursor) continue;
 
+                long start = Stopwatch.GetTimestamp();
                 try
                 {
                     _work.Run(index);
@@ -200,6 +288,8 @@ public sealed partial class World
                     Interlocked.CompareExchange(ref _error, e, null);
                 }
 
+                // Added before the item counts as done: the caller reads the sum once the last one is.
+                Interlocked.Add(ref _spent, Stopwatch.GetTimestamp() - start);
                 Interlocked.Decrement(ref _remaining);
             }
         }
