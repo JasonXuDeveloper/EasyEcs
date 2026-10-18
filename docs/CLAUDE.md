@@ -108,8 +108,14 @@ scripts/                 generate-static.ts, og.ts, lint-links.ts, sync-benchmar
   (`src/components/demo/`): the runtime loads only on that page, every frame calls `Step(dt)` once and draws the
   frame array straight from the WebAssembly memory. The page includes the demo's C# files, so they are what runs.
 - Cloudflare builds with Bun only, so the published runtime is committed in `public/demo/_framework`. After changing
-  the demo or EasyEcs.Core: `bun run demo:build` (`scripts/build-demo.sh`: `dotnet publish`, trimmed, invariant
-  globalization, interpreter without the wasm-tools workload), check the page, commit `public/demo`.
+  the demo or EasyEcs.Core: `bun run demo:build` (`scripts/build-demo.sh`: installs the `wasm-tools` workload when
+  missing, then `dotnet publish` with Mono AOT, the IL compiled ahead of time to WebAssembly with 128-bit SIMD,
+  trimmed, invariant globalization), check the page, commit `public/demo`. Browsers do not run CoreCLR yet (CoreCLR
+  on WebAssembly is a preview in .NET 11, interpreter only), so Mono AOT is the fastest .NET runtime there.
+- The page draws with WebGL 2 (`src/components/demo/renderer.ts`): one `bufferSubData` of the frame array per frame,
+  additive soft points into a half-float light buffer that fades instead of clearing (the trails), tone-mapped over
+  the theme's card color. The host alternates the `Batched` and `PerEntity` motion groups each step and times both,
+  so the page shows their live cost side by side.
 - `/demo/*` bypasses the Pages Function (`public/_routes.json`, `functions/[[path]].ts`); `public/_headers` serves
   `.wasm` as `application/wasm` and caches the fingerprinted files forever (`dotnet.js`, the entry, is revalidated).
   Biome skips `public/demo`.
