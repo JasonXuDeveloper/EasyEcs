@@ -38,6 +38,7 @@ public sealed partial class World : IDisposable
     {
         _options = options ?? new WorldOptions();
         Meta = new EntityMeta[Math.Max(1, _options.InitialEntityCapacity)];
+        _queryLookup = _queryCache.GetAlternateLookup<QueryLookup>();
         _emptyArchetype = GetOrCreateArchetype(default);
         Collectible.Track(this); // held weakly: a world nobody holds stops mentioning its bits
     }

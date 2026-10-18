@@ -39,7 +39,8 @@ public sealed partial class World
     private Archetype[] _allArchetypes = Array.Empty<Archetype>();
 
     // Query -> matching archetypes. Entries are created once and their array is replaced copy-on-write.
-    private readonly ConcurrentDictionary<QueryKey, QueryCacheEntry> _queryCache = new();
+    private readonly ConcurrentDictionary<QueryKey, QueryCacheEntry> _queryCache = new(QueryKeyComparer.Instance);
+    private readonly ConcurrentDictionary<QueryKey, QueryCacheEntry>.AlternateLookup<QueryLookup> _queryLookup;
 
     internal sealed class QueryCacheEntry(QueryMatch match)
     {
@@ -270,8 +271,7 @@ public sealed partial class World
     /// </summary>
     internal QueryCacheEntry GetQueryEntry(ReadOnlySpan<ushort> bits, in QueryFilter filter)
     {
-        var key = QueryKey.ForLookup(bits, in filter);
-        return _queryCache.TryGetValue(key, out var entry) ? entry : CreateQueryEntry(in key);
+        return _queryLookup.TryGetValue(new QueryLookup(bits, in filter), out var entry) ? entry : CreateQueryEntry(bits, in filter);
     }
 
     /// <summary>
@@ -279,8 +279,9 @@ public sealed partial class World
     /// the gate) nor the copies of the key it makes.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private QueryCacheEntry CreateQueryEntry(in QueryKey lookup)
+    private QueryCacheEntry CreateQueryEntry(ReadOnlySpan<ushort> bits, in QueryFilter filter)
     {
+        var lookup = QueryKey.ForLookup(bits, in filter);
         using (Shared())
         {
             if (_queryCache.TryGetValue(lookup, out var entry))

@@ -181,7 +181,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
     public bool Mentions(int bit) => _all.HasBit(bit) || _none.HasBit(bit) || _any.HasBit(bit) || _changed.HasBit(bit)
                                      || _removed.HasBit(bit) || _groupBit == bit;
 
-    private QueryKey(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed, int groupBit, int group)
+    public QueryKey(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed, int groupBit, int group)
     {
         _all = all;
         _none = none;
@@ -216,6 +216,16 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
     /// </summary>
     public static QueryKey ForLookup(ReadOnlySpan<ushort> bits, in QueryFilter filter)
     {
+        var all = Required(bits, in filter);
+        return new QueryKey(in all, filter.None, filter.Any, filter.Tracked, filter.Removals, filter.GroupBit, filter.Group);
+    }
+
+    /// <summary>
+    /// The required set of a query: the filter's and the call's <paramref name="bits"/>. Allocation-free; past 255 it
+    /// shares this thread's scratch buffer (valid until the next lookup on the thread).
+    /// </summary>
+    public static BitMask Required(ReadOnlySpan<ushort> bits, in QueryFilter filter)
+    {
         // Common case: every bit fits the inline 256 bits, so a plain copy allocates nothing.
         if (!filter.HasOverflow)
         {
@@ -225,22 +235,22 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
             {
                 var all = filter.All;
                 for (int i = 0; i < bits.Length; i++) all.SetBit(bits[i]);
-                return new QueryKey(in all, filter.None, filter.Any, filter.Tracked, filter.Removals, filter.GroupBit, filter.Group);
+                return all;
             }
         }
 
-        return ForLookupWithOverflow(bits, in filter);
+        return RequiredWithOverflow(bits, in filter);
     }
 
     // Cold path kept out of line: inlining the thread-static access into ForEach measurably slowed its entity loop.
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static QueryKey ForLookupWithOverflow(ReadOnlySpan<ushort> bits, in QueryFilter filter)
+    private static BitMask RequiredWithOverflow(ReadOnlySpan<ushort> bits, in QueryFilter filter)
     {
         int maxBit = 0;
         for (int i = 0; i < bits.Length; i++) maxBit = Math.Max(maxBit, bits[i]);
         var all = filter.All.CopyWithScratch(maxBit, ref _scratch);
         for (int i = 0; i < bits.Length; i++) all.SetBit(bits[i]);
-        return new QueryKey(in all, filter.None, filter.Any, filter.Tracked, filter.Removals, filter.GroupBit, filter.Group);
+        return all;
     }
 
     /// <summary>A copy that owns its storage (cache entries).</summary>
@@ -305,9 +315,56 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
 
     public override bool Equals(object obj) => obj is QueryKey other && Equals(other);
 
-    public override int GetHashCode() =>
-        (((_all.GetHashCode() * 31 + _none.GetHashCode()) * 31 + _any.GetHashCode()) * 31 + _changed.GetHashCode()) * 31
-        + _removed.GetHashCode() + _groupBit * 397 + _group * 7919;
+    public override int GetHashCode() => Hash(in _all, in _none, in _any, in _changed, in _removed, _groupBit, _group);
+
+    /// <summary>Whether this is the key of <paramref name="lookup"/> (no key is built).</summary>
+    public bool Is(in QueryLookup lookup)
+    {
+        ref readonly var filter = ref lookup.Filter;
+        return _all.Equals(in lookup.All) && _groupBit == filter.GroupBit && _group == filter.Group && _none.Equals(filter.None)
+               && _any.Equals(filter.Any) && _changed.Equals(filter.Tracked) && _removed.Equals(filter.Removals);
+    }
+
+    public static int Hash(in QueryLookup lookup)
+    {
+        ref readonly var filter = ref lookup.Filter;
+        return Hash(in lookup.All, filter.None, filter.Any, filter.Tracked, filter.Removals, filter.GroupBit, filter.Group);
+    }
+
+    private static int Hash(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed, int groupBit, int group) =>
+        (((all.GetHashCode() * 31 + none.GetHashCode()) * 31 + any.GetHashCode()) * 31 + changed.GetHashCode()) * 31
+        + removed.GetHashCode() + groupBit * 397 + group * 7919;
+}
+
+/// <summary>
+/// A query's cache key as its call holds it (the call's bits joined into the required set, the rest read from the
+/// filter): the query cache is probed with it, so a hit builds and copies no <see cref="QueryKey"/>.
+/// </summary>
+internal readonly ref struct QueryLookup(ReadOnlySpan<ushort> bits, ref readonly QueryFilter filter)
+{
+    public readonly BitMask All = QueryKey.Required(bits, in filter);
+    public readonly ref readonly QueryFilter Filter = ref filter;
+}
+
+/// <summary>Equality of query keys, and of a key and a <see cref="QueryLookup"/> (the cache's alternate lookup).</summary>
+internal sealed class QueryKeyComparer : System.Collections.Generic.IEqualityComparer<QueryKey>,
+    System.Collections.Generic.IAlternateEqualityComparer<QueryLookup, QueryKey>
+{
+    public static readonly QueryKeyComparer Instance = new();
+
+    public bool Equals(QueryKey x, QueryKey y) => x.Equals(y);
+
+    public int GetHashCode(QueryKey key) => key.GetHashCode();
+
+    public bool Equals(QueryLookup lookup, QueryKey key) => key.Is(in lookup);
+
+    public int GetHashCode(QueryLookup lookup) => QueryKey.Hash(in lookup);
+
+    public QueryKey Create(QueryLookup lookup)
+    {
+        ref readonly var filter = ref lookup.Filter;
+        return new QueryKey(in lookup.All, filter.None, filter.Any, filter.Tracked, filter.Removals, filter.GroupBit, filter.Group).Detached();
+    }
 }
 
 /// <summary>
@@ -621,8 +678,9 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     /// <summary>Alive rows of <paramref name="archetype"/> that pass (O(rows / 64) plus one id check per passing row).</summary>
     public int Count(Archetype archetype)
     {
-        int count = 0;
         int rows = archetype.Count;
+        if (rows == archetype.AliveCount && _plan.Changed.Length == 0 && _plan.AnyOf.Length == 0) return CountDense(archetype, rows);
+        int count = 0;
         var slots = archetype.Slots;
         int words = (rows + 63) >> 6;
         for (int w = NextWord(archetype, 0, words); w < words; w = NextWord(archetype, w + 1, words))
@@ -636,6 +694,56 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         }
 
         return count;
+    }
+
+    /// <summary>
+    /// <see cref="Count"/> of a table without tombstones (every row alive, as outside a pass) and without change ticks:
+    /// the passing rows are the set bits of the words, no row id is read. 8 words per step with AVX-512, else
+    /// <see cref="Vector{T}"/> (4 on AVX2, 2 on Arm64); 100,000 rows: 1.25 μs, 2.4 μs, 5.2 μs one word at a time.
+    /// </summary>
+    private int CountDense(Archetype archetype, int rows)
+    {
+        var plan = _plan;
+        var require = plan.Require;
+        var exclude = plan.Exclude;
+        int full = rows >> 6, count = 0, w = 0;
+        // w + lanes <= full below: presence bits cover the table's capacity, so the words exist in every column.
+        if (Vector512.IsHardwareAccelerated)
+            for (; w + 8 <= full; w += 8)
+            {
+                var bits = Vector512<ulong>.AllBitsSet;
+                for (int i = 0; i < require.Length; i++)
+                    if (archetype.Bits(require[i]) is { } present) bits &= Vector512.LoadUnsafe(ref At(present), (nuint)w);
+                for (int i = 0; i < exclude.Length; i++)
+                    bits = archetype.Bits(exclude[i]) is { } present ? Vector512.AndNot(bits, Vector512.LoadUnsafe(ref At(present), (nuint)w)) : default;
+                count += PopCount(bits);
+            }
+        else if (Vector.IsHardwareAccelerated)
+            for (int lanes = Vector<ulong>.Count; w + lanes <= full; w += lanes)
+            {
+                var bits = Vector<ulong>.AllBitsSet;
+                for (int i = 0; i < require.Length; i++)
+                    if (archetype.Bits(require[i]) is { } present) bits &= Vector.LoadUnsafe(ref At(present), (nuint)w);
+                for (int i = 0; i < exclude.Length; i++)
+                    bits = archetype.Bits(exclude[i]) is { } present ? Vector.AndNot(bits, Vector.LoadUnsafe(ref At(present), (nuint)w)) : default;
+                for (int lane = 0; lane < lanes; lane++) count += BitOperations.PopCount(bits[lane]);
+            }
+
+        for (; w < full; w++) count += BitOperations.PopCount(Word(archetype, w));
+        if (full << 6 < rows) count += BitOperations.PopCount(Word(archetype, full) & RowMask(full, rows));
+        return count;
+
+        static ref ulong At(ulong[] present) => ref MemoryMarshal.GetArrayDataReference(present);
+    }
+
+    // Lane by lane, unrolled: an indexed loop over a Vector512 goes through memory (7.6 μs instead of 1.25 μs above).
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int PopCount(Vector512<ulong> bits)
+    {
+        var (low, high) = (bits.GetLower(), bits.GetUpper());
+        return BitOperations.PopCount(low.GetElement(0)) + BitOperations.PopCount(low.GetElement(1)) + BitOperations.PopCount(low.GetElement(2))
+               + BitOperations.PopCount(low.GetElement(3)) + BitOperations.PopCount(high.GetElement(0)) + BitOperations.PopCount(high.GetElement(1))
+               + BitOperations.PopCount(high.GetElement(2)) + BitOperations.PopCount(high.GetElement(3));
     }
 
     /// <summary>Whether any alive row passes: <see cref="Count"/> stopping at the first.</summary>

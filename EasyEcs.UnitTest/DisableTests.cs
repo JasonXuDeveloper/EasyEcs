@@ -21,6 +21,26 @@ public class DisableTests
         Assert.That(world.Count<Health>(), Is.EqualTo(1));
     }
 
+    // Rows that must be tested one by one, in tables of every size around the word and 8-word boundaries the count
+    // reads its presence bits by.
+    [TestCase(1), TestCase(63), TestCase(64), TestCase(511), TestCase(512), TestCase(513), TestCase(1537)]
+    public void CountsTestedRowsOfAnySize(int entities)
+    {
+        using var world = new World();
+        int expected = 0;
+        for (int i = 0; i < entities; i++)
+        {
+            var e = world.CreateEntity(new Health(i), new Position(i, 0), new Velocity(0, i));
+            if (i % 2 == 0) e.Disable<Position>();
+            if (i % 3 != 0) e.Disable<Velocity>();
+            if (i % 2 != 0 && i % 3 != 0) expected++;
+        }
+
+        var filter = QueryFilter.Create().With<Position>().Without<Velocity>();
+        Assert.That(world.Count<Health>(filter), Is.EqualTo(expected));
+        Assert.That(world.Any<Health>(filter), Is.EqualTo(expected > 0));
+    }
+
     [Test]
     public void SetReplacesAndRemoveDropsADisabledComponent()
     {
