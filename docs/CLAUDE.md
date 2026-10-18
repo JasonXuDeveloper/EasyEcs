@@ -54,8 +54,9 @@ scripts/                 generate-static.ts, og.ts, lint-links.ts, sync-benchmar
 - **Changelog** (`content/changelog.mdx` / `changelog.zh.mdx`): one section per release, newest first, headed with
   the version only: `## 4.1.0 [#v4-1-0]` in both languages (`.github/scripts/release-notes.sh` extracts the English
   section into the GitHub release). Under it the subsections `### New`, `### Performance`,
-  `### Changes that need code changes` and `### Fixes` (Chinese: `### 新功能 [#new]`, `### 性能 [#performance]`,
-  `### 需要修改代码的变更 [#breaking]`, `### 修复 [#fixes]`), an empty one left out. A section is plain Markdown
+  `### Changes that need code changes` and `### Fixes` (Chinese: `### 新功能`, `### 性能`, `### 需要修改代码的变更`,
+  `### 修复`), an empty one left out, each with the id of its version in both languages (`[#v4-1-0-new]`,
+  `-performance`, `-breaking`, `-fixes`; the release notes drop the ids). A section is plain Markdown
   (lists, links, inline code; no JSX components, no typed benchmark numbers: link the performance page or a decision)
   with absolute `/en/docs/...` links. Entries are user-facing only (no CI, tests, benchmarks, docs or refactors); each
   is checked against the EasyEcs source and links the page that documents it, and a change that needs code changes

@@ -8,12 +8,19 @@
     "systems",
     "singletons",
     "structural-changes",
+    "bulk",
+    "cleanup-and-disable",
     "refs-and-await",
     "change-tracking",
     "dynamic-buffers",
     "indexes-and-relations",
+    "hierarchy",
+    "groups",
     "snapshots",
+    "saves",
+    "migration-and-unload",
     "threading",
-    "analyzer"
+    "analyzer",
+    "common-mistakes"
   ]
 }

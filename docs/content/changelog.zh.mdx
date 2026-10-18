@@ -11,7 +11,7 @@ icon: RotateCcwClock
 
 ## 4.1.0 [#v4-1-0]
 
-### 新功能 [#new]
+### 新功能 [#v4-1-0-new]
 
 - 原型表：每张表把组件存成按行排列的列，非托管列固定在内存中并按 64 字节对齐。移除组件不搬行，只清一个存在位，
   来来去去的状态不会移动数据。见[架构](/zh/docs/architecture)。
@@ -46,7 +46,7 @@ icon: RotateCcwClock
 - 分析器规则扩展到 EECS024，并随包附带对应的代码修复。见[分析器](/zh/docs/guide/analyzer)。
 - 项目模板：`dotnet new install EasyEcs.Templates`。见[快速开始](/zh/docs/getting-started)。
 
-### 性能 [#performance]
+### 性能 [#v4-1-0-performance]
 
 - 10 万实体的真实服务器 tick 比 4.0.1 快得多，而且零分配。见[性能](/zh/docs/performance)。
 - 结构变更检查一个普通的所属线程标志，不再用比较并交换，创建和销毁实体更快。
@@ -60,7 +60,7 @@ icon: RotateCcwClock
   （[D18](/zh/docs/decisions#d18-no-interceptors-for-query-calls-filters-carry-no-references)）。
 - 用 `Vector512` / `Vector<T>` 按置位数统计行（[D21](/zh/docs/decisions#d21-net-10-features-only-where-they-measure)）。
 
-### 需要修改代码的变更 [#breaking]
+### 需要修改代码的变更 [#v4-1-0-breaking]
 
 完整步骤见[迁移指南](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v40--v41)（英文）。
 
@@ -80,14 +80,14 @@ icon: RotateCcwClock
 - 指向表的 ref 可能因为其他实体的结构变更而失效；遍历顺序按表的行；`AddSingleton` 原地重置已有的单例组件；失效的句柄
   `Has` / `TryGet` 返回 false。见[ref 与 await](/zh/docs/guide/refs-and-await)。
 
-### 修复 [#fixes]
+### 修复 [#v4-1-0-fixes]
 
 - `Entity.GetHashCode()` 每次运行结果相同，由实体的下标和版本算出。
 - 分析器按符号识别生成的写方法：名为 `Settings` 的组件通过 `entity.Settings` 读取时，不会再掩盖 EECS013。
 
 ## 4.0.1 [#v4-0-1]
 
-### 新功能 [#new]
+### 新功能 [#v4-0-1-new]
 
 - 系统生成的读写集不冲突时，`WorldOptions.Parallel` 让它们并排运行，结果与按顺序运行相同。见[线程模型](/zh/docs/guide/threading)。
 - `[With<T>]` 已经写明要查询什么时，`[ForEach]` 方法可以不接收任何组件：`[ForEach, With<Dead>] static void Remove(Entity e)`。
@@ -95,13 +95,13 @@ icon: RotateCcwClock
 
 ## 4.0.0 [#v4-0-0]
 
-### 新功能 [#new]
+### 新功能 [#v4-0-0-new]
 
 - 面向 .NET 10 重写，统一在 `EasyEcs` 命名空间下：`World`、`Query`，以及一个带版本校验、访问器返回 `ref T` 的 `Entity` 句柄。
 - 同步的 `EcsSystem` 和源生成的 `[ForEach]` 方法、`[UpdateInGroup<T>]` 系统分组、实体 id 复用、每个 World 自己的单例组件。
 - 强制执行 ECS 原则的分析器（EECS006-EECS008）。见 [ECS 设计原则](/zh/docs/ecs-principles)。
 
-### 需要修改代码的变更 [#breaking]
+### 需要修改代码的变更 [#v4-0-0-breaking]
 
 所有改名见[迁移指南](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v3x--v40)（英文）。
 
@@ -111,230 +111,230 @@ icon: RotateCcwClock
 
 ## 3.1.1 [#v3-1-1]
 
-### 修复 [#fixes]
+### 修复 [#v3-1-1-fixes]
 
 - 发布构建改用 .NET 8 SDK（C# 13），库本身没有变化。
 
 ## 3.1.0 [#v3-1-0]
 
-### 新功能 [#new]
+### 新功能 [#v3-1-0-new]
 
 - `GroupResultEnumerator` 上的 `Count` 和 `IsEmpty`，`Context` 上的 `CountOf<T>()` / `AnyOf<T>()`。
 - `Tag.SetBits` / `ClearBits` 接收 `params ReadOnlySpan<int>`。
 
-### 性能 [#performance]
+### 性能 [#v3-1-0-performance]
 
 - `Tag.ContainsAll` 用 SIMD 匹配原型。
 - `GetFragmentationStats` 不再加锁，`Update()` 复用任务缓冲。
 - 按下标遍历原型，不再枚举字典。
 
-### 修复 [#fixes]
+### 修复 [#v3-1-0-fixes]
 
 - `Avx2.TestZ` 改为 `Avx.TestZ`。
 
 ## 3.0.5 [#v3-0-5]
 
-### 性能 [#performance]
+### 性能 [#v3-0-5-performance]
 
 - 已完成的任务不再付状态机的开销。
 
 ## 3.0.4 [#v3-0-4]
 
-### 性能 [#performance]
+### 性能 [#v3-0-4-performance]
 
 - 很小的任务直接执行，不进线程池。
 
 ## 3.0.3 [#v3-0-3]
 
-### 性能 [#performance]
+### 性能 [#v3-0-3-performance]
 
 - 并行工作改用数组池，不再物化 UniTask。
 
 ## 3.0.2 [#v3-0-2]
 
-### 性能 [#performance]
+### 性能 [#v3-0-2-performance]
 
 - `GetMatchingArchetypes` 更快。
 
 ## 3.0.1 [#v3-0-1]
 
-### 修复 [#fixes]
+### 修复 [#v3-0-1-fixes]
 
 - 重新发布 3.0.0，内容相同。
 
 ## 3.0.0 [#v3-0-0]
 
-### 新功能 [#new]
+### 新功能 [#v3-0-0-new]
 
 - 原型，以及一次调用添加或移除多个组件。
 
-### 性能 [#performance]
+### 性能 [#v3-0-0-performance]
 
 - 创建、销毁实体和修改组件立即生效。
 - `GroupOf` 和标签更快，局部性更好。
 
-### 需要修改代码的变更 [#breaking]
+### 需要修改代码的变更 [#v3-0-0-breaking]
 
 - 回调已删除，变更立即执行。见[迁移指南](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#migration-guide-easyecs-v2x--v30)（英文）。
 
 ## 2.1.6 [#v2-1-6]
 
-### 性能 [#performance]
+### 性能 [#v2-1-6-performance]
 
 - 遍历系统零分配。
 
 ## 2.1.5 [#v2-1-5]
 
-### 性能 [#performance]
+### 性能 [#v2-1-5-performance]
 
 - 获取分组零分配（不再用红黑树）。
 
 ## 2.1.4 [#v2-1-4]
 
-### 性能 [#performance]
+### 性能 [#v2-1-4-performance]
 
 - `Update` 更快。
 
 ## 2.1.3 [#v2-1-3]
 
-### 性能 [#performance]
+### 性能 [#v2-1-3-performance]
 
 - `GroupOf` 的所有重载零分配。
 
 ## 2.1.2 [#v2-1-2]
 
-### 性能 [#performance]
+### 性能 [#v2-1-2-performance]
 
 - 任务调度更快。
 
 ## 2.1.1 [#v2-1-1]
 
-### 性能 [#performance]
+### 性能 [#v2-1-1-performance]
 
 - 任务分发更快。
 
 ## 2.1.0 [#v2-1-0]
 
-### 性能 [#performance]
+### 性能 [#v2-1-0-performance]
 
 - 单例组件分配更少。
 
 ## 2.0.10 [#v2-0-10]
 
-### 性能 [#performance]
+### 性能 [#v2-0-10-performance]
 
 - 更好的扩容策略。
 
 ## 2.0.9 [#v2-0-9]
 
-### 性能 [#performance]
+### 性能 [#v2-0-9-performance]
 
 - 组件查找更快。
 
 ## 2.0.8 [#v2-0-8]
 
-### 性能 [#performance]
+### 性能 [#v2-0-8-performance]
 
 - 实体和组件查找更快。
 
 ## 2.0.7 [#v2-0-7]
 
-### 性能 [#performance]
+### 性能 [#v2-0-7-performance]
 
 - 不再需要 `SortedList`。
 
 ## 2.0.6 [#v2-0-6]
 
-### 性能 [#performance]
+### 性能 [#v2-0-6-performance]
 
 - 改用 `ValueTask`，分配更少。
 
 ## 2.0.5 [#v2-0-5]
 
-### 修复 [#fixes]
+### 修复 [#v2-0-5-fixes]
 
 - 修复了几个 bug。
 
 ## 2.0.4 [#v2-0-4]
 
-### 修复 [#fixes]
+### 修复 [#v2-0-4-fixes]
 
 - 标签类型第一次使用时自动注册。
 
 ## 2.0.3 [#v2-0-3]
 
-### 修复 [#fixes]
+### 修复 [#v2-0-3-fixes]
 
 - `AddSingletonComponent` 的回调按 `ref` 传参。
 
 ## 2.0.2 [#v2-0-2]
 
-### 性能 [#performance]
+### 性能 [#v2-0-2-performance]
 
 - 内存利用更好。
 
 ## 2.0.1 [#v2-0-1]
 
-### 性能 [#performance]
+### 性能 [#v2-0-1-performance]
 
 - 遍历、ref 访问、创建实体和添加组件更快。
 
 ## 2.0.0 [#v2-0-0]
 
-### 新功能 [#new]
+### 新功能 [#v2-0-0-new]
 
 - 支持并行系统的无锁 Context、零分配的组件、更快的组件查找。
 
 ## 1.0.8 [#v1-0-8]
 
-### 需要修改代码的变更 [#breaking]
+### 需要修改代码的变更 [#v1-0-8-breaking]
 
 - 初始化 Context 时不再吞掉异常。
 
 ## 1.0.7 [#v1-0-7]
 
-### 需要修改代码的变更 [#breaking]
+### 需要修改代码的变更 [#v1-0-7-breaking]
 
 - 组件改为类，持有所属实体的引用。
 
 ## 1.0.6 [#v1-0-6]
 
-### 新功能 [#new]
+### 新功能 [#v1-0-6-new]
 
 - 可以从实体访问它的 Context。
 
 ## 1.0.5 [#v1-0-5]
 
-### 新功能 [#new]
+### 新功能 [#v1-0-5-new]
 
 - `SingletonComponent`：一个 Context 可以持有任意多个。
 
 ## 1.0.4 [#v1-0-4]
 
-### 新功能 [#new]
+### 新功能 [#v1-0-4-new]
 
 - 系统可以并行运行。
 
 ## 1.0.3 [#v1-0-3]
 
-### 修复 [#fixes]
+### 修复 [#v1-0-3-fixes]
 
 - 优先级相同的多个系统都会运行。
 
 ## 1.0.2 [#v1-0-2]
 
-### 新功能 [#new]
+### 新功能 [#v1-0-2-new]
 
 - 按 id 从 Context 获取实体。
 
 ## 1.0.1 [#v1-0-1]
 
-### 新功能 [#new]
+### 新功能 [#v1-0-1-new]
 
 - Context 初始化之后仍可添加系统。
 
 ## 1.0.0 [#v1-0-0]
 
-### 新功能 [#new]
+### 新功能 [#v1-0-0-new]
 
 - 首个版本：带异步、并行系统的 ECS。
