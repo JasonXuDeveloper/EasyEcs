@@ -1,0 +1,182 @@
+---
+title: Glossary
+seoTitle: "ECS glossary: entity, component, archetype, system and more"
+description: Every Entity Component System term the EasyEcs docs use, from entity and archetype to change tick, structural gate and collectible AssemblyLoadContext.
+icon: BookA
+faq: false
+---
+
+The terms of the EasyEcs docs, each in a few sentences with a link to the page that explains it. General ECS terms
+come first, then the ones specific to EasyEcs. For the pattern itself, start with
+[What is an ECS?](/en/docs/what-is-ecs).
+
+## Entity [#entity]
+
+An identity and nothing else: no fields, no methods. In EasyEcs an `Entity` is a 16-byte handle (world, index,
+version); every access checks the version, so a handle to a destroyed entity throws instead of reaching whatever
+reuses its index. See [Entities and components](/en/docs/guide/entities-and-components).
+
+## EntityId [#entityid]
+
+The 8-byte, unmanaged form of an entity: index plus version, without the world. Components store `EntityId`s to
+point at other entities; `world.TryGetEntity(id, out entity)` turns one back into a checked handle. See
+[Indexes and relations](/en/docs/guide/indexes-and-relations).
+
+## Component [#component]
+
+A struct implementing `IComponent`: plain data for one aspect of an entity (`Position`, `Health`). Components hold
+no behaviour and no references to systems or services. See [ECS principles](/en/docs/ecs-principles).
+
+## Tag [#tag]
+
+A component with no fields (`Dead`, `Stunned`). It only says yes or no, so systems use it in filters
+(`[Without<Dead>]`), and adding or removing it never copies data after the first time. See
+[Entities and components](/en/docs/guide/entities-and-components).
+
+## Singleton [#singleton]
+
+A struct implementing `ISingletonComponent`: one value per world, such as a clock, configuration or a spatial grid.
+A `[ForEach]` method takes it as a `ref` or `in` parameter. See [Singletons](/en/docs/guide/singletons).
+
+## Archetype [#archetype]
+
+One combination of component types, and the table that holds every entity with that combination. EasyEcs is an
+archetype ECS: a query walks the tables whose combination it matches, column by column. See
+[What is an ECS?](/en/docs/what-is-ecs#archetypes).
+
+## Table, column, row [#table-column-row]
+
+An archetype's storage. A table has one column per component type (an array, 64-byte aligned for unmanaged types)
+and one row per entity. Iteration reads the columns a system touches, front to back. See
+[Architecture](/en/docs/architecture).
+
+## Presence bit [#presence-bit]
+
+One bit per row and column that says whether the row has that component. Removing a component clears the bit and
+keeps the row, so toggling a state such as `Stunned` costs a bit flip, not a row move. Filters test the bits 64 rows
+at a time. See [Architecture](/en/docs/architecture).
+
+## Query [#query]
+
+The question "which entities have these components and pass this filter?". A `[ForEach]` method is a query; outside
+systems, `world.Query<T…>()`, `Count`, `Any` and struct jobs ask it. See [Queries and filters](/en/docs/guide/queries).
+
+## Filter [#filter]
+
+The conditions of a query beyond its components: `With`, `Without`, `WithAny`, `Changed`, `Removed` and `InGroup`.
+They are attributes on `[ForEach]` methods, or a `QueryFilter` kept in a `static readonly` field. See
+[Queries and filters](/en/docs/guide/queries).
+
+## System [#system]
+
+A class deriving from `EcsSystem` with one job. Its `[ForEach]` methods run over every matching entity on each
+update; it keeps no state of its own and never calls another system. See [Systems](/en/docs/guide/systems).
+
+## System group [#system-group]
+
+A struct implementing `ISystemGroup`. Systems marked `[UpdateInGroup<G>]` run only on `world.Update<G>()`, so input,
+simulation and persistence can run at their own cadence. See [Systems](/en/docs/guide/systems).
+
+## Stage [#stage]
+
+A run of consecutive systems with no order and no conflicting access between them. With
+`WorldOptions.ParallelSystems`, a stage's systems run at the same time; without it, every system is its own stage.
+See [Threading](/en/docs/guide/threading).
+
+## Struct job [#struct-job]
+
+A struct implementing `IForEach<T…>`, `IForEachEntity<T…>` or `IForEachBatch<T…>` whose `Execute` method the row
+loop calls. The JIT inlines it, so there is no delegate and no virtual call per entity. The generator writes one for
+every `[ForEach]` method. See [Queries and filters](/en/docs/guide/queries).
+
+## Change tick [#change-tick]
+
+A counter of the world (`world.ChangeTick`) that grows once per stage and once after each update. Tracked rows record
+the tick of their last write, and each system records the tick it last ran at (`LastRunTick`). See
+[Change tracking](/en/docs/guide/change-tracking#ticks).
+
+## Tracked component [#tracked-component]
+
+A component that also implements `ITrackChanges`. Its rows record when they were written or removed, so
+`[Changed<T>]` and `[Removed<T>]` visit only those rows. It costs 8 bytes per row; untracked components pay nothing.
+See [Change tracking](/en/docs/guide/change-tracking).
+
+## Structural change [#structural-change]
+
+Anything that changes which components an entity has, or which entities exist: create, destroy, `Set` of a new
+component, `Remove`, `Disable`. In EasyEcs it applies at once, even in the middle of a pass, with no command buffer.
+See [Structural changes](/en/docs/guide/structural-changes).
+
+## Structural gate [#structural-gate]
+
+The check every structural change passes through. It belongs to the world's owner thread and throws when a change is
+reentered, or made inside a parallel region or a batch method, instead of corrupting the tables. See
+[Threading](/en/docs/guide/threading).
+
+## Owner thread [#owner-thread]
+
+The thread that calls a world's `Update` and makes its structural changes. A world has one at a time; a server runs
+one world per thread and hands input to it through a queue it owns. See [Threading](/en/docs/guide/threading).
+
+## Prefab [#prefab]
+
+A recipe of component values that belongs to no world (`new Prefab().SetHealth(30)`), so no query ever sees it.
+`world.Instantiate(prefab)` creates an entity, or a wave, with a copy of every value. See
+[Prefabs](/en/docs/guide/prefabs).
+
+## Dynamic buffer [#dynamic-buffer]
+
+A `DynamicBuffer<T>` component: a list that belongs to one entity, such as a bag of loot or a path. Its writes need
+a `ref`, so every change is tracked, and snapshots copy its elements. See
+[Dynamic buffers](/en/docs/guide/dynamic-buffers).
+
+## Value index [#value-index]
+
+A lookup from a key to the entities whose component has that key: `IIndexed<TKey>` on the component,
+`world.Index<T, TKey>()` to query it. The index follows every `Set`; a comparable key also gives sorted ranges. See
+[Indexes and relations](/en/docs/guide/indexes-and-relations).
+
+## Relation [#relation]
+
+A link from one entity to another. One link per entity is a component indexed by an `EntityId`; many links of one
+kind per entity are `IRelation` elements of a buffer. Both answer "who links to this entity?". See
+[Indexes and relations](/en/docs/guide/indexes-and-relations).
+
+## Hierarchy [#hierarchy]
+
+Parent and child entities linked by the built-in `ChildOf` component. `world.Children(parent)` lists the children,
+and destroying a parent destroys its descendants. See [Hierarchy](/en/docs/guide/hierarchy).
+
+## Group (IGroup) [#group]
+
+A component implementing `IGroup` whose value splits tables after `world.GroupBy<T>()`: the entities of one zone,
+map or match share tables, so a query of that group walks only its rows. Not to be confused with a
+[system group](#system-group). See [Groups](/en/docs/guide/groups).
+
+## Cleanup component [#cleanup-component]
+
+A component implementing `ICleanupComponent`. Destroying its entity removes the other components and adds the
+`Destroyed` tag; the entity stays until a system releases the resource (a socket, a seat) and removes the component.
+See [Cleanup and disable](/en/docs/guide/cleanup-and-disable).
+
+## Snapshot [#snapshot]
+
+An in-memory copy of a world: `world.Capture()` takes one, `world.Restore(snapshot)` rolls back to it. Used for
+undo, rollback and resetting a world between tests. See [Snapshots](/en/docs/guide/snapshots).
+
+## Save [#save]
+
+A world, or some of its entities, written as bytes: `world.Save` and `world.Load`. Unmanaged components are written
+as raw rows, managed ones through Nino (`[NinoType]`). See [Saves](/en/docs/guide/saves).
+
+## Migration [#migration]
+
+Moving a group of entities, such as a player and what it owns, to another world: `SaveEntities` and `LoadEntities`
+through bytes (another process), or `MoveEntities` directly (another world of the thread). Links inside the group
+follow the new ids. See [Migration and unloading](/en/docs/guide/migration-and-unload).
+
+## Collectible ALC [#collectible-alc]
+
+A collectible `AssemblyLoadContext`: .NET's way to load a plugin and unload it later. `world.RemoveTypes(context)`
+removes the plugin's systems, components and singletons from a world, so the context can unload while the world
+keeps running. See [Migration and unloading](/en/docs/guide/migration-and-unload).

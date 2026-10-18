@@ -1,0 +1,343 @@
+---
+title: Cheat sheet
+seoTitle: "EasyEcs cheat sheet: the everyday C# ECS API on one page"
+description: "The everyday EasyEcs API on one page: entities, generated members, queries, [ForEach] parameters, attributes, singletons, indexes, prefabs, saves, options."
+icon: ClipboardList
+---
+
+The whole everyday API of EasyEcs on one page, as tables and short code. Each section links to the guide page that
+explains it. Everything is in one namespace: `using EasyEcs;`.
+
+The examples on this page share these declarations:
+
+```csharp
+public record struct Position(float X, float Y) : IComponent;
+public record struct Velocity(float X, float Y) : IComponent;
+public record struct Health(int Value) : IComponent, ITrackChanges;          // tracked: writes are recorded
+public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }
+public record struct OwnedBy(EntityId Owner) : IComponent, IIndexed<EntityId> { public EntityId Key => Owner; }
+public record struct MemberOf(EntityId Target) : IRelation;                   // many links per entity
+public record struct Loot(int Item);                                          // a DynamicBuffer element
+public record struct Seat(int Number) : ICleanupComponent;                    // released after destroy
+public struct Dead : IComponent;                                              // a tag
+public record struct Clock(long Tick) : ISingletonComponent;                  // one per world
+```
+
+## Declare data [#declare-data]
+
+| Declare | Means | Guide |
+| --- | --- | --- |
+| `struct X : IComponent` | Per-entity data, one column per type | [Entities and components](/en/docs/guide/entities-and-components) |
+| `struct X : IComponent` with no fields | A tag: a yes-or-no state used in filters | [Entities and components](/en/docs/guide/entities-and-components) |
+| `struct X : ISingletonComponent` | One value per world | [Singletons](/en/docs/guide/singletons) |
+| `: ITrackChanges` | Rows record the tick of their last write and removal | [Change tracking](/en/docs/guide/change-tracking) |
+| `: IIndexed<TKey>` with `Key` | Found by value through `world.Index<T, TKey>()` | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
+| `: IIndexed<EntityId>` | A link to one entity, found from the target | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
+| `: IRelation` with `Target` | Many links per entity, kept in a buffer | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
+| `: IGroup` with `Group` | Splits tables by value after `world.GroupBy<T>()` | [Groups](/en/docs/guide/groups) |
+| `: ICleanupComponent` | Outlives `Destroy` until a system removes it | [Cleanup and disable](/en/docs/guide/cleanup-and-disable) |
+| `DynamicBuffer<T>` | A list per entity, every write tracked | [Dynamic buffers](/en/docs/guide/dynamic-buffers) |
+| `ChildOf(EntityId Parent)` | The built-in hierarchy link | [Hierarchy](/en/docs/guide/hierarchy) |
+| `struct G : ISystemGroup` | A group of systems with its own cadence | [Systems](/en/docs/guide/systems) |
+
+Components are structs ([EECS006](/en/docs/guide/analyzer#eecs006)). Keep an entity link as an `EntityId`, not an
+`Entity` ([EECS017](/en/docs/guide/analyzer#eecs017)).
+
+## World [#world]
+
+| Call | Does |
+| --- | --- |
+| `new World(options)` | An isolated world; `Dispose()` runs every `OnDestroy` |
+| `world.Update()` | Runs the default group's systems once |
+| `world.Update<TGroup>()` | Runs one system group |
+| `world.AddSystem<T>()` / `AddSystem(instance)` | Adds a system (runs `OnCreate`) |
+| `world.RemoveSystem<T>()` / `GetSystem<T>()` / `Systems` | Removes, finds, lists systems |
+| `world.EntityCount` / `Entities` | Live entities and an allocation-free walk over them |
+| `world.ChangeTick` | The current change tick |
+| `world.EnsureEntityCapacity(n)` / `EnsureCapacity(prefab, n)` | Pre-size before a known peak or a wave |
+| `world.TryGetEntity(id, out e)` / `GetEntity(id)` / `IsAlive(id)` | From an `EntityId` back to a checked handle |
+| `world.Describe()` | Tables, columns, rows and bytes, for tools |
+
+## Entities [#entities]
+
+```csharp
+using var world = new World();
+Entity unit = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Health(100));
+```
+
+| Call | Does | Structural |
+| --- | --- | --- |
+| `world.CreateEntity(a, b, …)` | Creates with up to 9 components, straight into the final table | yes |
+| `entity.Set(a, b, …)` | Adds or overwrites up to 9 components in one move; returns the entity | yes |
+| `entity.Remove<A, B>()` | Removes components it has; returns the entity | yes |
+| `entity.GetOrAdd<T>()` | `ref T`, added with the default value if missing | when added |
+| `entity.Get<T>()` | `ref T` for writing (a write for change tracking) | no |
+| `entity.Read<T>()` | `ref readonly T` (never a write) | no |
+| `entity.TryGet<T>(out T copy)` | A copy, if present | no |
+| `entity.TryGetRef<T>(out bool found)` | `ref T` or a null ref | no |
+| `entity.Has<T>()` / `Has<A, B>()` | Presence of one or all | no |
+| `entity.Disable<T>()` / `Enable<T>()` / `IsDisabled<T>()` | Hides a component, keeping its value | yes |
+| `entity.Clone()` | A copy of the entity in its world | yes |
+| `entity.Destroy()` | Destroys it; its id is recycled with a new version | yes |
+| `entity.IsAlive` / `Id` / `World` | Handle state; every access checks the version | no |
+| `entity.Describe()` | Its component values, for debuggers and logs | no |
+
+```csharp
+unit.Get<Velocity>().X = 2;                         // write in place through the ref
+float x = unit.Read<Position>().X;                  // read only
+unit.Set(new Health(50), new Dead());               // one move for both
+unit.Remove<Dead>();                                // flips a presence bit: the row stays
+if (unit.TryGet<Health>(out var hp)) { /* hp is a copy */ }
+```
+
+A `ref` stays valid until the next structural change and never across `await`
+([`ref` and `await`](/en/docs/guide/refs-and-await)).
+
+## Generated members [#generated-members]
+
+The source generator gives every component, tag and singleton named members (C# 14 extension members). Each one is an
+inlined call to the generic API above.
+
+| Declared | Generated |
+| --- | --- |
+| Component `Position` | `e.Position` (`ref`), `HasPosition`, `TryGetPosition(out p)`, `GetOrAddPosition()`, `SetPosition(x, y)`, `RemovePosition()`, `DisablePosition()`, `EnablePosition()`, `IsPositionDisabled` |
+| Tracked or indexed `Health` | `e.Health` is `ref readonly`; write with `SetHealth(…)` or `WriteHealth()` (`ref`, tracked only) |
+| Tag `Dead` | `e.IsDead`, `SetDead()`, `RemoveDead()` |
+| Indexed `Team` | `world.TeamIndex` (`world.Index<Team, int>()`) |
+| Grouped `Zone` | `filter.InZone(id)` (`InGroup<Zone>(id)`) |
+| Buffer element `Loot` | `e.Loot` (`ref readonly DynamicBuffer<Loot>`), `HasLoot`, `WriteLoot()`, `GetOrAddLoot()`, `RemoveLoot()` |
+| Relation `MemberOf` | `e.AddMemberOf(target)`, `RemoveMemberOf(target)`, `LinksMemberOf(target)`, `world.MemberOfIndex` |
+| Singleton `Clock` | `world.Clock` (`ref`), `HasClock`, `GetOrAddClock()`, `SetClock(…)`, `RemoveClock()` |
+| On a `Prefab` | `SetPosition(…)`, `RemovePosition()` return the prefab; `prefab.Position` (read-only), `HasPosition`, `IsDead` |
+| `world.Query<Position, Velocity>()` items | `item.Position`, `item.Velocity` |
+
+```csharp
+unit.SetPosition(3, 4).SetDead();                   // setters return the entity
+unit.Position.X += 1;                               // untracked: a ref
+unit.SetHealth(80);                                 // tracked: written with Set, stamped
+bool dead = unit.IsDead;
+```
+
+Guide: [Entities and components](/en/docs/guide/entities-and-components).
+
+## Systems and [ForEach] [#systems]
+
+```csharp title="MovementSystem.cs"
+public class MovementSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]                         // once per entity with Position and Velocity, without Dead
+    static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
+}
+```
+
+### [ForEach] parameters [#foreach-parameters]
+
+| Parameter | Is | Notes |
+| --- | --- | --- |
+| `ref T` | A component the method writes | 1 to 9 components; a write for change tracking |
+| `in T` | A component the method reads | Not a write ([EECS011](/en/docs/guide/analyzer#eecs011) catches writes through `in`) |
+| `Span<T>` / `ReadOnlySpan<T>` | A run of rows of `T` (a batch method) | Cannot mix with per-entity parameters ([EECS009](/en/docs/guide/analyzer#eecs009)) |
+| `ref S` / `in S` | A singleton | Resolved once per pass, added if missing |
+| `Entity` | The current entity | Use it for structural changes |
+| `World` | The world | For creating entities from a static method |
+| `EntitySpan` | The entities of a batch method's run | Batch methods only |
+| `Maybe<T>` | A component the entity may lack | `HasValue`, `Value` |
+| Any other type (outside a system) | A value the caller passes to the entry point | `ref int count`, `in Settings s` |
+
+### Attributes [#attributes]
+
+| Attribute | On | Does |
+| --- | --- | --- |
+| `[ForEach]` / `[ForEach(Parallel = true)]` | Method | The method is the loop; `Parallel` splits rows across threads ([EECS010](/en/docs/guide/analyzer#eecs010)) |
+| `[With<T>]` | Method, system group | Requires `T` without passing it |
+| `[Without<T>]` | Method, system group | Excludes entities with `T` |
+| `[WithAny<A>, WithAny<B>]` | Method, system group | Requires at least one of them |
+| `[Changed<T>]` | Method | Rows whose tracked `T` was written since the system last ran |
+| `[Removed<T>]` | Method | Entities that lost tracked `T` since the system last ran |
+| `[UpdateBefore<S>]` / `[UpdateAfter<S>]` | System | Ordering ([EECS019](/en/docs/guide/analyzer#eecs019) rejects cycles) |
+| `[UpdateInGroup<G>]` | System | Runs on `world.Update<G>()` only |
+
+### System members [#system-members]
+
+| Member | Does |
+| --- | --- |
+| `OnCreate()` / `OnUpdate()` / `OnDestroy()` | Lifecycle; `OnUpdate` runs before the `[ForEach]` methods |
+| `World` | The system's world |
+| `UpdateInterval` / `UpdatePhase` | Run every N-th update, on phase 0 to N-1 |
+| `Enabled` | Skip the system; setting `true` clears `Error` |
+| `Error` | The exception that disabled it under `SystemErrorPolicy.Disable` |
+| `LastRunTick` | The change tick of its last run |
+| `Stats` | `Runs`, `Last`, `Total`, `Average` with `MeasureSystems` |
+
+Systems keep no state ([EECS007](/en/docs/guide/analyzer#eecs007)) and never reference each other
+([EECS008](/en/docs/guide/analyzer#eecs008)). Guide: [Systems](/en/docs/guide/systems).
+
+## Queries and filters [#queries]
+
+```csharp
+// A field: build each filter once.
+private static readonly QueryFilter Alive = QueryFilter.Create().Without<Dead>();
+```
+
+```csharp
+foreach (var item in world.Query<Position, Velocity>(Alive))
+    item.Position.X += item.Velocity.X;             // items hand out refs; item.Entity is the handle
+
+int movers = world.Count<Position, Velocity>(Alive);
+bool anyDead = world.Any<Dead>();
+```
+
+| Call | Does |
+| --- | --- |
+| `world.Query<T1..T9>(filter)` | `foreach` over items: `ref` components and `Entity` |
+| `world.Count<T1..T9>(filter)` / `Any<…>(filter)` | Counts, or stops at the first match |
+| `world.ForEach<T1..T9, TJob>(ref job, filter)` | A struct job `IForEach<T…>`: `Execute(ref T1 …)` |
+| `world.ForEachEntity<…>(ref job, filter)` | `IForEachEntity<T…>`: `Execute(Entity e, ref T1 …)` |
+| `world.ForEachBatch<…>(ref job, filter)` | `IForEachBatch<T…>`: runs of rows as spans |
+| `world.ForEachParallel` / `ForEachEntityParallel` | A struct job in chunks on several threads |
+| `Runner.Method(world, …)` | The entry point of a static `[ForEach]` method outside a system |
+
+| `QueryFilter` | Selects |
+| --- | --- |
+| `.With<T>()` / `.Without<T>()` / `.WithAny<T>()` | Presence, as the attributes |
+| `.Changed<T>(since)` / `.Removed<T>(since)` | Written, or lost, at or after tick `since` |
+| `.Since(tick)` | The same filter with a new tick |
+| `.InGroup<T>(group)` | One group of a grouped component |
+
+Guide: [Queries and filters](/en/docs/guide/queries).
+
+## Singletons [#singletons]
+
+| Call | Does |
+| --- | --- |
+| `world.AddSingleton<T>()` | Adds (or resets to default), returns `ref T` |
+| `world.GetSingleton<T>()` / `GetOrAddSingleton<T>()` | `ref T`; the first throws when missing |
+| `world.TryGetSingleton<T>(out copy)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | Copy, presence, removal |
+| `world.SingletonRef<T>()` | A stable handle: `.Value` is `ref T` |
+
+```csharp
+world.SetClock(0);                                  // generated: adds it if missing
+world.Clock.Tick++;
+```
+
+Guide: [Singletons](/en/docs/guide/singletons).
+
+## Change tracking [#change-tracking]
+
+| Is a write | Is not a write |
+| --- | --- |
+| `ref` parameters, `Span<T>`, `Query` items | `in` parameters, `ReadOnlySpan<T>` |
+| `Get<T>()`, `TryGetRef<T>` when found, `GetOrAdd<T>()`, `Set(…)`, `WriteX()` | `Read<T>()`, `TryGet<T>(out copy)`, `Has<T>()`, `e.X` of a tracked `X` |
+| Creating, instantiating, cloning, `Restore` | Removing (that is a removal, for `[Removed<T>]`) |
+
+```csharp
+ulong mark = world.ChangeTick;
+world.Update();
+int changed = world.Count<Health>(QueryFilter.Create().Changed<Health>(mark));
+```
+
+Guide: [Change tracking](/en/docs/guide/change-tracking).
+
+## Indexes, relations, hierarchy, groups [#indexes]
+
+| Call | Does |
+| --- | --- |
+| `world.Index<T, TKey>()` (`world.TIndex`) | The value index of `T` |
+| `index.Find(key)` / `TryFind(key, out e)` / `Count(key)` | Matching entities, one, how many |
+| `index.Range(min, max)` / `RangeDescending` / `Ascending()` / `Descending()` | Sorted walks, for a comparable key |
+| `index.WhenTargetDestroyed(TargetPolicy.Keep / Remove / Destroy)` | What an `EntityId` link does when its target dies |
+| `entity.AddRelation(r)` / `RemoveRelation<T>(target)` / `HasRelation<T>(target)` | Many-to-many links |
+| `world.Relations<T>()` then `Find(target)` / `Count(target)` | Who links to a target |
+| `world.Children(parent)` | Entities whose `ChildOf` names the parent; destroying a parent destroys them |
+| `world.GroupBy<T>()` | Splits tables by an `IGroup` value |
+
+```csharp
+var teams = world.TeamIndex;
+foreach (var member in teams.Find(1)) member.SetTeam(2);   // write indexed components with Set
+var ship = world.CreateEntity();
+world.CreateEntity(new ChildOf(ship));
+foreach (var child in world.Children(ship)) { }
+```
+
+Indexed and grouped components are written with `Set`, never through a `ref`
+([EECS015](/en/docs/guide/analyzer#eecs015)). Guides: [Indexes and relations](/en/docs/guide/indexes-and-relations),
+[Hierarchy](/en/docs/guide/hierarchy), [Groups](/en/docs/guide/groups).
+
+## Prefabs and bulk operations [#prefabs-and-bulk]
+
+| Call | Does |
+| --- | --- |
+| `new Prefab().SetX(…)…` / `new Prefab(basePrefab)` | A recipe outside every world, or a variant of one |
+| `prefab.AddMember()` / `prefab.Id` | A group of entities instantiated together; `Id` names a member in links |
+| `prefab.SetBuffer(items)` | A `DynamicBuffer<T>` each instance gets a copy of |
+| `world.Instantiate(prefab)` / `Instantiate(prefab, span)` | One entity, or a wave in one pass |
+| `world.CreateEntities(span, a, b, …)` | A wave with the same values |
+| `world.DestroyEntities<T…>(filter)` | Destroys every match; returns how many |
+| `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | One component set or removed on every match |
+| `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | One component disabled or enabled on every match |
+
+```csharp
+var goblin = new Prefab().SetPosition(0, 0).SetHealth(30);
+var wave = new Entity[100];
+world.Instantiate(goblin, wave);
+world.SetAll(new Velocity(0, 0), QueryFilter.Create().With<Health>());
+world.DestroyEntities<Dead>();
+```
+
+Guides: [Prefabs](/en/docs/guide/prefabs), [Bulk operations](/en/docs/guide/bulk).
+
+## Snapshots, saves, migration [#persistence]
+
+| Call | Does |
+| --- | --- |
+| `world.Capture()` / `Capture(into)` | An in-memory copy; `into` reuses a snapshot's arrays |
+| `world.Restore(snapshot)` | Back to the copy; handles from then are valid again |
+| `world.Save(writer)` / `Load(bytes)` | A whole world as bytes (managed components need `[NinoType]`) |
+| `world.SaveEntities(writer, ids)` / `LoadEntities(bytes, handles)` | A group of entities to another world or process |
+| `world.MoveEntities(target, ids, moved)` | A group to another world of the thread, no encoding |
+| `world.RemoveTypes(assembly or context)` | Drops a plugin's types before its context unloads |
+
+```csharp
+var save = world.Capture();
+world.Update();
+world.Restore(save);
+
+var bytes = new System.Buffers.ArrayBufferWriter<byte>();
+world.Save(bytes);
+using var copy = new World();
+copy.Load(bytes.WrittenSpan);
+```
+
+Guides: [Snapshots](/en/docs/guide/snapshots), [Saves](/en/docs/guide/saves),
+[Migration and unloading](/en/docs/guide/migration-and-unload).
+
+## World options [#world-options]
+
+| `WorldOptions` | Default | Does |
+| --- | --- | --- |
+| `InitialEntityCapacity` | 1024 | Entity records allocated up front |
+| `ParallelSystems` | `false` | Runs systems with no order and no conflict at the same time |
+| `MaxDegreeOfParallelism` | processor count | Threads one parallel run uses at most |
+| `MeasureSystems` | `false` | Records `system.Stats` |
+| `SystemErrors` | `SystemErrorPolicy.Throw` | `Disable` switches a failing system off and goes on |
+
+```csharp
+using var server = new World(new WorldOptions { ParallelSystems = true, SystemErrors = SystemErrorPolicy.Disable });
+```
+
+Guide: [Threading](/en/docs/guide/threading).
+
+## Related [#related]
+
+<Cards>
+  <Card title="Getting started" href="/en/docs/getting-started">
+    The same API, step by step, in a running simulation.
+  </Card>
+  <Card title="Glossary" href="/en/docs/glossary">
+    Every term on this page in one or two sentences.
+  </Card>
+  <Card title="API reference" href="/en/docs/api">
+    Every public API with its complexity.
+  </Card>
+</Cards>

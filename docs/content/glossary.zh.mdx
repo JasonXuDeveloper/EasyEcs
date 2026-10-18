@@ -1,0 +1,160 @@
+---
+title: 术语表
+seoTitle: ECS 术语表：实体、组件、原型、系统等概念速查
+description: EasyEcs 文档用到的所有实体组件系统术语，从实体、原型到变更 tick、结构闸门和可回收的 AssemblyLoadContext，每个几句话讲清并附链接。
+icon: BookA
+faq: false
+---
+
+EasyEcs 文档里的术语，每个用几句话讲清，并链接到详细讲解的页面。先是通用的 ECS 术语，再是 EasyEcs 特有的。还不熟悉这个模式，
+先读[什么是 ECS？](/zh/docs/what-is-ecs)。
+
+## 实体（Entity） [#entity]
+
+只是一个身份，没有字段，也没有方法。EasyEcs 里的 `Entity` 是一个 16 字节的句柄（World、下标、版本号）；每次访问都会校验版本号，
+所以指向已销毁实体的句柄会直接抛异常，不会碰到复用这个下标的新实体。见[实体与组件](/zh/docs/guide/entities-and-components)。
+
+## EntityId [#entityid]
+
+实体的 8 字节非托管形式：下标加版本号，不含 World。组件里要指向别的实体时存 `EntityId`；用
+`world.TryGetEntity(id, out entity)` 换回一个经过校验的句柄。见[索引与关系](/zh/docs/guide/indexes-and-relations)。
+
+## 组件（Component） [#component]
+
+实现 `IComponent` 的结构体：描述实体某一方面的纯数据，比如 `Position`、`Health`。组件不带行为，也不引用系统或服务。
+见 [ECS 设计原则](/zh/docs/ecs-principles)。
+
+## 标签（Tag） [#tag]
+
+没有字段的组件，比如 `Dead`、`Stunned`。它只表达“是或否”，系统拿它做过滤（`[Without<Dead>]`）；除了第一次，增删标签都不会搬数据。
+见[实体与组件](/zh/docs/guide/entities-and-components)。
+
+## 单例（Singleton） [#singleton]
+
+实现 `ISingletonComponent` 的结构体：每个 World 只有一份，比如时钟、配置、空间网格。`[ForEach]` 方法以 `ref` 或 `in`
+参数接收它。见[单例](/zh/docs/guide/singletons)。
+
+## 原型（Archetype） [#archetype]
+
+一种组件类型的组合，以及存放所有恰好拥有这种组合的实体的那张表。EasyEcs 是 archetype ECS：查询找出组合匹配的表，再逐列扫描。
+见[什么是 ECS？](/zh/docs/what-is-ecs#archetypes)。
+
+## 表、列、行 [#table-column-row]
+
+原型的存储形式。一张表每种组件一列（一个数组，非托管类型按 64 字节对齐），每个实体一行。遍历时只从头到尾读系统用到的那几列。
+见[架构](/zh/docs/architecture)。
+
+## 存在位（Presence bit） [#presence-bit]
+
+每行每列一个位，表示这一行有没有这个组件。移除组件只清掉这个位、保留这一行，所以 `Stunned` 这类反复开关的状态只是翻一个位，
+不用搬行。过滤条件一次检测 64 行的位。见[架构](/zh/docs/architecture)。
+
+## 查询（Query） [#query]
+
+“哪些实体拥有这些组件、并且满足这个过滤条件？”这个问题本身。`[ForEach]` 方法就是一个查询；系统之外用 `world.Query<T…>()`、
+`Count`、`Any` 和结构体 job 提问。见[查询与过滤](/zh/docs/guide/queries)。
+
+## 过滤条件（Filter） [#filter]
+
+组件之外的查询条件：`With`、`Without`、`WithAny`、`Changed`、`Removed` 和 `InGroup`。写在 `[ForEach]` 方法上就是特性，
+在其他代码里就是存放在 `static readonly` 字段里的 `QueryFilter`。见[查询与过滤](/zh/docs/guide/queries)。
+
+## 系统（System） [#system]
+
+继承 `EcsSystem`、只做一件事的类。每次更新，它的 `[ForEach]` 方法会处理所有匹配的实体；系统自身不保存状态，也从不调用别的系统。
+见[系统](/zh/docs/guide/systems)。
+
+## 系统分组（System group） [#system-group]
+
+实现 `ISystemGroup` 的结构体。标了 `[UpdateInGroup<G>]` 的系统只在 `world.Update<G>()` 时执行，所以输入、模拟和存盘可以各按各的节奏跑。
+见[系统](/zh/docs/guide/systems)。
+
+## 阶段（Stage） [#stage]
+
+一串相邻、彼此没有顺序约束、读写也不冲突的系统。打开 `WorldOptions.ParallelSystems` 后，同一阶段的系统同时执行；不打开时，
+每个系统各自是一个阶段。见[线程模型](/zh/docs/guide/threading)。
+
+## 结构体 job（Struct job） [#struct-job]
+
+实现 `IForEach<T…>`、`IForEachEntity<T…>` 或 `IForEachBatch<T…>` 的结构体，行循环调用它的 `Execute` 方法。JIT 会把它内联，
+所以每个实体既没有委托调用，也没有虚调用。生成器为每个 `[ForEach]` 方法写一个。见[查询与过滤](/zh/docs/guide/queries)。
+
+## 变更 tick（Change tick） [#change-tick]
+
+World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每次更新结束再加一。被追踪的行记下最后一次写入时的 tick，
+每个系统记下自己上次执行时的 tick（`LastRunTick`）。见[变更追踪](/zh/docs/guide/change-tracking#ticks)。
+
+## 被追踪的组件（Tracked component） [#tracked-component]
+
+同时实现了 `ITrackChanges` 的组件。它的行会记录何时被写入或移除，所以 `[Changed<T>]` 和 `[Removed<T>]` 只访问这些行。
+每行多 8 字节；不追踪的组件没有任何开销。见[变更追踪](/zh/docs/guide/change-tracking)。
+
+## 结构变更（Structural change） [#structural-change]
+
+改变实体有哪些组件、或者 World 里有哪些实体的操作：创建、销毁、`Set` 一个新组件、`Remove`、`Disable`。在 EasyEcs 里它立即生效，
+遍历途中也一样，不需要命令缓冲。见[结构变更](/zh/docs/guide/structural-changes)。
+
+## 结构闸门（Structural gate） [#structural-gate]
+
+每次结构变更都要经过的检查。它属于 World 的所有者线程；变更重入、或者发生在并行区域和批量方法里时，它直接抛异常，
+而不是把表写坏。见[线程模型](/zh/docs/guide/threading)。
+
+## 所有者线程（Owner thread） [#owner-thread]
+
+调用 World 的 `Update`、执行其结构变更的那个线程。一个 World 同一时间只有一个所有者线程；服务器通常每个线程一个 World，
+其他线程的输入通过它自己的队列交给它。见[线程模型](/zh/docs/guide/threading)。
+
+## 预制体（Prefab） [#prefab]
+
+一份不属于任何 World 的组件值配方（`new Prefab().SetHealth(30)`），所以任何查询都看不到它。`world.Instantiate(prefab)`
+按配方复制出一个实体，或者一整波。见[预制体](/zh/docs/guide/prefabs)。
+
+## 动态缓冲（Dynamic buffer） [#dynamic-buffer]
+
+`DynamicBuffer<T>` 组件：属于某个实体的列表，比如背包里的战利品、一条路径。写它必须拿 `ref`，所以每次修改都会被追踪，
+快照也会复制其中的元素。见[动态缓冲](/zh/docs/guide/dynamic-buffers)。
+
+## 值索引（Value index） [#value-index]
+
+从键到实体的查找表：组件实现 `IIndexed<TKey>`，用 `world.Index<T, TKey>()` 查询。每次 `Set` 索引都会跟着更新；
+键可比较时还能按区间有序遍历。见[索引与关系](/zh/docs/guide/indexes-and-relations)。
+
+## 关系（Relation） [#relation]
+
+一个实体指向另一个实体的链接。每个实体一条链接时，用以 `EntityId` 为键的索引组件；同一种链接有多条时，用缓冲里的 `IRelation`
+元素。两种都能回答“谁链接到了这个实体？”。见[索引与关系](/zh/docs/guide/indexes-and-relations)。
+
+## 层级（Hierarchy） [#hierarchy]
+
+用内置的 `ChildOf` 组件把父子实体连起来。`world.Children(parent)` 列出子实体，销毁父实体会连带销毁它的所有后代。
+见[层级](/zh/docs/guide/hierarchy)。
+
+## 分组（IGroup） [#group]
+
+实现 `IGroup` 的组件；调用 `world.GroupBy<T>()` 后，它的值会把表拆开：同一个场景、地图或对局的实体共用一批表，
+查询这一组时只遍历它自己的行。不要和[系统分组](#system-group)混淆。见[分组](/zh/docs/guide/groups)。
+
+## 清理组件（Cleanup component） [#cleanup-component]
+
+实现 `ICleanupComponent` 的组件。销毁它所在的实体时，其他组件被移除，并加上 `Destroyed` 标签；实体会一直保留，
+直到某个系统释放了对应的资源（一个连接、一个座位）并移除这个组件。见[清理与禁用](/zh/docs/guide/cleanup-and-disable)。
+
+## 快照（Snapshot） [#snapshot]
+
+World 在内存里的一份拷贝：`world.Capture()` 拍下，`world.Restore(snapshot)` 回滚。用于撤销、回滚预测，以及测试之间重置 World。
+见[快照](/zh/docs/guide/snapshots)。
+
+## 存档（Save） [#save]
+
+把一个 World 或其中部分实体写成字节：`world.Save` 和 `world.Load`。非托管组件按原始行写出，托管组件经 Nino 序列化（`[NinoType]`）。
+见[存档](/zh/docs/guide/saves)。
+
+## 迁移（Migration） [#migration]
+
+把一组实体（比如一个玩家和他拥有的东西）搬到另一个 World：经由字节用 `SaveEntities` 和 `LoadEntities`（可以跨进程），
+或者在同一线程的两个 World 之间直接用 `MoveEntities`。组内的链接会改成新的 id。见[迁移与卸载](/zh/docs/guide/migration-and-unload)。
+
+## 可回收的 ALC（Collectible ALC） [#collectible-alc]
+
+可回收的 `AssemblyLoadContext`：.NET 用来加载插件、之后再卸载的机制。`world.RemoveTypes(context)` 从 World 里移除插件的系统、
+组件和单例，于是这个上下文可以卸载，而 World 照常运行。见[迁移与卸载](/zh/docs/guide/migration-and-unload)。

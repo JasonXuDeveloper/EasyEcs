@@ -1,7 +1,7 @@
 ---
 title: What is an ECS?
 seoTitle: What Is an Entity Component System (ECS)? Archetypes, Sparse Sets, ECS vs OOP
-description: An Entity Component System splits a program into entities (ids), components (plain data) and systems (logic over every entity with a given set of components). How ECS storage works, archetype vs sparse set, ECS vs OOP, and when an ECS fits.
+description: "An Entity Component System splits a program into entities, components and systems. How ECS storage works, archetypes vs sparse sets, ECS vs OOP, when to use one."
 icon: Shapes
 faq: true
 ---
@@ -145,6 +145,31 @@ EasyEcs is an archetype ECS that removes the usual cost of the archetype design 
 removing a component keeps the row and clears a presence bit, so toggling a status such as `Stunned` never moves
 data after the first time. The details are in [Architecture](/en/docs/architecture#storage-model).
 
+## How does an entity change what it does? [#structural-changes]
+
+By gaining and losing components. Adding, removing, creating and destroying are **structural changes**: they change
+which tables an entity lives in, or which entities exist. The hard case is a change made while a system is iterating
+over the very tables it changes, such as a death system that marks units `Dead` as it walks them.
+
+Most ECS libraries forbid that and give you a **command buffer**: the system records "add `Dead` to entity 42", and
+the buffer plays the changes back after the loop. It works, but systems then see a state that is about to change,
+and the order of effects depends on when buffers are played back.
+
+EasyEcs applies every structural change at once, even in the middle of a pass. A pass still visits each entity at
+most once, entities that join a table during the pass wait for the next one, and the systems that run later in the
+same update see the change. See [Structural changes](/en/docs/guide/structural-changes).
+
+## Can an ECS run systems in parallel? [#parallel]
+
+Yes, and this is one of its strengths. A system declares what it reads and what it writes; two systems that write
+nothing the other touches can run at the same time without locks. In EasyEcs the declaration is the method itself:
+`ref Position` is a write, `in Velocity` a read, and the generator turns those into the access the scheduler uses
+(`WorldOptions.ParallelSystems`). One heavy system can also split its rows across cores with
+`[ForEach(Parallel = true)]`.
+
+For a server, the simplest parallelism is often one world per thread, such as one per map or zone: worlds share
+nothing, so they need no synchronization at all. See [Threading](/en/docs/guide/threading).
+
 ## Is an ECS faster than object-oriented code? [#ecs-vs-oop]
 
 For the work an ECS is built for, usually yes, for two reasons: memory layout and the absence of virtual dispatch.
@@ -196,6 +221,26 @@ No. Games made the pattern popular because their worlds are large, uniform and u
 it is specific to games. Any program that simulates many similar things over time, such as a traffic model, an
 epidemic simulation, a market simulation or a fleet of IoT devices, has the same shape and benefits the same way.
 
+## Isn't this just composition over inheritance? [#composition]
+
+It starts there. "Composition over inheritance" builds an object from parts instead of a class hierarchy, and an ECS
+does the same with components. The difference is where the behaviour lives: composed objects still carry their
+methods and call each other, while an ECS moves all behaviour into systems that run over every entity with the right
+parts. That is what makes the data contiguous and each system independent.
+
+## Which ECS libraries are there for C# and .NET? [#csharp-libraries]
+
+| Library | Storage | Runs on |
+| --- | --- | --- |
+| EasyEcs | Archetypes, presence bits per column | .NET 10 (servers, tools, tests) |
+| Friflo.Engine.ECS | Archetypes | .NET and Unity |
+| Arch | Archetypes in chunks | .NET and Unity |
+| DefaultEcs | A pool per component type | .NET and Unity |
+| Unity Entities (DOTS) | Archetypes in chunks | Unity only |
+
+How EasyEcs measures against the other .NET libraries on the same server tick, feature by feature, is in
+[Comparison](/en/docs/comparison).
+
 ## What does EasyEcs add? [#easyecs]
 
 EasyEcs is an archetype ECS for C# and .NET 10 servers. On top of the pattern above it gives you:
@@ -207,7 +252,10 @@ EasyEcs is an archetype ECS for C# and .NET 10 servers. On top of the pattern ab
   tick of 100,000 entities takes <BenchValue k="tick.oneWorld" />.
 - **Design rules checked at compile time.** The analyzer rejects stateful systems, systems that call each other and
   writes through `in`.
-- **Built-in change tracking, indexes, relations, prefabs and snapshots.**
+- **The rest of a server's needs built in:** change and removal tracking, value indexes, relations and a hierarchy,
+  prefabs, dynamic buffers, snapshots, saves and moving entities between worlds ([Features](/en/docs/features)).
+
+The words used on this page and the rest of the docs are defined in the [Glossary](/en/docs/glossary).
 
 <Cards>
   <Card title="Getting started" href="/en/docs/getting-started">

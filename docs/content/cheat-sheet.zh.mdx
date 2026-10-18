@@ -1,0 +1,339 @@
+---
+title: 速查表
+seoTitle: EasyEcs 速查表：一页看完日常用到的 C# ECS API
+description: 一页看完 EasyEcs 日常 API：实体操作、生成成员、查询与过滤、[ForEach] 参数、特性、单例、变更追踪、索引、预制体、存档和 World 选项。
+icon: ClipboardList
+---
+
+EasyEcs 日常用到的全部 API，用表格加短代码排在一页里，每节都链接到详细讲解的指南页面。所有类型都在同一个命名空间：
+`using EasyEcs;`。
+
+本页的示例共用下面这些声明：
+
+```csharp
+public record struct Position(float X, float Y) : IComponent;
+public record struct Velocity(float X, float Y) : IComponent;
+public record struct Health(int Value) : IComponent, ITrackChanges;          // 被追踪：写入会被记录
+public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }
+public record struct OwnedBy(EntityId Owner) : IComponent, IIndexed<EntityId> { public EntityId Key => Owner; }
+public record struct MemberOf(EntityId Target) : IRelation;                   // 每个实体可以有多条
+public record struct Loot(int Item);                                          // DynamicBuffer 的元素
+public record struct Seat(int Number) : ICleanupComponent;                    // 销毁后再释放
+public struct Dead : IComponent;                                              // 标签
+public record struct Clock(long Tick) : ISingletonComponent;                  // 每个 World 一份
+```
+
+## 声明数据 [#declare-data]
+
+| 声明 | 含义 | 指南 |
+| --- | --- | --- |
+| `struct X : IComponent` | 每个实体一份的数据，每种类型一列 | [实体与组件](/zh/docs/guide/entities-and-components) |
+| 没有字段的 `struct X : IComponent` | 标签：用于过滤的“是或否”状态 | [实体与组件](/zh/docs/guide/entities-and-components) |
+| `struct X : ISingletonComponent` | 每个 World 一份 | [单例](/zh/docs/guide/singletons) |
+| `: ITrackChanges` | 每行记录最后一次写入和移除的 tick | [变更追踪](/zh/docs/guide/change-tracking) |
+| `: IIndexed<TKey>` 加 `Key` | 通过 `world.Index<T, TKey>()` 按值查找 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
+| `: IIndexed<EntityId>` | 指向一个实体的链接，可以从目标反查 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
+| `: IRelation` 加 `Target` | 每个实体多条链接，存放在缓冲里 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
+| `: IGroup` 加 `Group` | 调用 `world.GroupBy<T>()` 后按值拆表 | [分组](/zh/docs/guide/groups) |
+| `: ICleanupComponent` | `Destroy` 之后仍保留，直到系统移除它 | [清理与禁用](/zh/docs/guide/cleanup-and-disable) |
+| `DynamicBuffer<T>` | 每个实体一个列表，每次写入都被追踪 | [动态缓冲](/zh/docs/guide/dynamic-buffers) |
+| `ChildOf(EntityId Parent)` | 内置的层级链接 | [层级](/zh/docs/guide/hierarchy) |
+| `struct G : ISystemGroup` | 有自己节奏的一组系统 | [系统](/zh/docs/guide/systems) |
+
+组件必须是结构体（[EECS006](/zh/docs/guide/analyzer#eecs006)）。指向实体的链接存 `EntityId`，不要存 `Entity`
+（[EECS017](/zh/docs/guide/analyzer#eecs017)）。
+
+## World [#world]
+
+| 调用 | 作用 |
+| --- | --- |
+| `new World(options)` | 一个独立的 World；`Dispose()` 会调用每个系统的 `OnDestroy` |
+| `world.Update()` | 把默认分组的系统执行一遍 |
+| `world.Update<TGroup>()` | 执行一个系统分组 |
+| `world.AddSystem<T>()` / `AddSystem(instance)` | 添加系统（调用 `OnCreate`） |
+| `world.RemoveSystem<T>()` / `GetSystem<T>()` / `Systems` | 移除、查找、列出系统 |
+| `world.EntityCount` / `Entities` | 存活实体数，以及零分配的遍历 |
+| `world.ChangeTick` | 当前的变更 tick |
+| `world.EnsureEntityCapacity(n)` / `EnsureCapacity(prefab, n)` | 在已知峰值或一波刷怪之前预分配 |
+| `world.TryGetEntity(id, out e)` / `GetEntity(id)` / `IsAlive(id)` | 从 `EntityId` 换回经过校验的句柄 |
+| `world.Describe()` | 表、列、行数和字节数，供工具使用 |
+
+## 实体 [#entities]
+
+```csharp
+using var world = new World();
+Entity unit = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Health(100));
+```
+
+| 调用 | 作用 | 结构变更 |
+| --- | --- | --- |
+| `world.CreateEntity(a, b, …)` | 带最多 9 个组件创建，直接放进最终的表 | 是 |
+| `entity.Set(a, b, …)` | 一次搬迁里添加或覆盖最多 9 个组件；返回实体 | 是 |
+| `entity.Remove<A, B>()` | 移除已有的组件；返回实体 | 是 |
+| `entity.GetOrAdd<T>()` | `ref T`，没有时先以默认值添加 | 添加时是 |
+| `entity.Get<T>()` | 用于写入的 `ref T`（对变更追踪算一次写入） | 否 |
+| `entity.Read<T>()` | `ref readonly T`（永远不算写入） | 否 |
+| `entity.TryGet<T>(out T copy)` | 有就拿一份拷贝 | 否 |
+| `entity.TryGetRef<T>(out bool found)` | `ref T`，没有时是空引用 | 否 |
+| `entity.Has<T>()` / `Has<A, B>()` | 有没有这个，或这几个全有 | 否 |
+| `entity.Disable<T>()` / `Enable<T>()` / `IsDisabled<T>()` | 隐藏一个组件，保留它的值 | 是 |
+| `entity.Clone()` | 在同一个 World 里复制这个实体 | 是 |
+| `entity.Destroy()` | 销毁；id 换一个版本号后回收复用 | 是 |
+| `entity.IsAlive` / `Id` / `World` | 句柄状态；每次访问都校验版本号 | 否 |
+| `entity.Describe()` | 实体的组件值，给调试器和日志用 | 否 |
+
+```csharp
+unit.Get<Velocity>().X = 2;                         // 通过 ref 原地写入
+float x = unit.Read<Position>().X;                  // 只读
+unit.Set(new Health(50), new Dead());               // 两个组件一次搬迁
+unit.Remove<Dead>();                                // 只翻一个存在位，行保留
+if (unit.TryGet<Health>(out var hp)) { /* hp 是拷贝 */ }
+```
+
+`ref` 在下一次结构变更之前有效，跨 `await` 一律无效（[`ref` 与 `await`](/zh/docs/guide/refs-and-await)）。
+
+## 生成成员 [#generated-members]
+
+源生成器为每个组件、标签和单例生成具名成员（C# 14 扩展成员），每个都是对上面泛型 API 的内联调用。
+
+| 声明 | 生成 |
+| --- | --- |
+| 组件 `Position` | `e.Position`（`ref`）、`HasPosition`、`TryGetPosition(out p)`、`GetOrAddPosition()`、`SetPosition(x, y)`、`RemovePosition()`、`DisablePosition()`、`EnablePosition()`、`IsPositionDisabled` |
+| 被追踪或被索引的 `Health` | `e.Health` 是 `ref readonly`；用 `SetHealth(…)` 写，或者用 `WriteHealth()`（`ref`，仅被追踪的组件） |
+| 标签 `Dead` | `e.IsDead`、`SetDead()`、`RemoveDead()` |
+| 被索引的 `Team` | `world.TeamIndex`（即 `world.Index<Team, int>()`） |
+| 分组组件 `Zone` | `filter.InZone(id)`（即 `InGroup<Zone>(id)`） |
+| 缓冲元素 `Loot` | `e.Loot`（`ref readonly DynamicBuffer<Loot>`）、`HasLoot`、`WriteLoot()`、`GetOrAddLoot()`、`RemoveLoot()` |
+| 关系 `MemberOf` | `e.AddMemberOf(target)`、`RemoveMemberOf(target)`、`LinksMemberOf(target)`、`world.MemberOfIndex` |
+| 单例 `Clock` | `world.Clock`（`ref`）、`HasClock`、`GetOrAddClock()`、`SetClock(…)`、`RemoveClock()` |
+| `Prefab` 上 | `SetPosition(…)`、`RemovePosition()` 返回预制体本身；`prefab.Position`（只读）、`HasPosition`、`IsDead` |
+| `world.Query<Position, Velocity>()` 的元素 | `item.Position`、`item.Velocity` |
+
+```csharp
+unit.SetPosition(3, 4).SetDead();                   // setter 返回实体，可以链式调用
+unit.Position.X += 1;                               // 不追踪的组件：ref
+unit.SetHealth(80);                                 // 被追踪的组件：用 Set 写，会打上 tick
+bool dead = unit.IsDead;
+```
+
+指南：[实体与组件](/zh/docs/guide/entities-and-components)。
+
+## 系统与 [ForEach] [#systems]
+
+```csharp title="MovementSystem.cs"
+public class MovementSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]                         // 每个有 Position 和 Velocity、没有 Dead 的实体执行一次
+    static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
+}
+```
+
+### [ForEach] 参数 [#foreach-parameters]
+
+| 参数 | 含义 | 说明 |
+| --- | --- | --- |
+| `ref T` | 方法要写的组件 | 1 到 9 个组件；对变更追踪算写入 |
+| `in T` | 方法只读的组件 | 不算写入（经 `in` 写入由 [EECS011](/zh/docs/guide/analyzer#eecs011) 拦下） |
+| `Span<T>` / `ReadOnlySpan<T>` | 一段连续的 `T` 行（批量方法） | 不能和逐实体参数混用（[EECS009](/zh/docs/guide/analyzer#eecs009)） |
+| `ref S` / `in S` | 单例 | 每次遍历解析一次，没有就添加 |
+| `Entity` | 当前实体 | 做结构变更时用 |
+| `World` | 当前 World | 在静态方法里创建实体时用 |
+| `EntitySpan` | 批量方法这一段行对应的实体 | 仅批量方法 |
+| `Maybe<T>` | 实体可能没有的组件 | `HasValue`、`Value` |
+| 其他任意类型（系统之外） | 调用方传给入口方法的值 | `ref int count`、`in Settings s` |
+
+### 特性 [#attributes]
+
+| 特性 | 用在 | 作用 |
+| --- | --- | --- |
+| `[ForEach]` / `[ForEach(Parallel = true)]` | 方法 | 方法就是循环；`Parallel` 把行分给多个线程（[EECS010](/zh/docs/guide/analyzer#eecs010)） |
+| `[With<T>]` | 方法、系统分组 | 要求有 `T`，但不作为参数传入 |
+| `[Without<T>]` | 方法、系统分组 | 排除有 `T` 的实体 |
+| `[WithAny<A>, WithAny<B>]` | 方法、系统分组 | 至少有其中一个 |
+| `[Changed<T>]` | 方法 | 系统上次执行后、被追踪的 `T` 被写过的行 |
+| `[Removed<T>]` | 方法 | 系统上次执行后失去了被追踪 `T` 的实体 |
+| `[UpdateBefore<S>]` / `[UpdateAfter<S>]` | 系统 | 排序（成环由 [EECS019](/zh/docs/guide/analyzer#eecs019) 拒绝） |
+| `[UpdateInGroup<G>]` | 系统 | 只在 `world.Update<G>()` 时执行 |
+
+### 系统成员 [#system-members]
+
+| 成员 | 作用 |
+| --- | --- |
+| `OnCreate()` / `OnUpdate()` / `OnDestroy()` | 生命周期；`OnUpdate` 在 `[ForEach]` 方法之前执行 |
+| `World` | 系统所属的 World |
+| `UpdateInterval` / `UpdatePhase` | 每 N 次更新执行一次，落在第 0 到 N-1 个相位 |
+| `Enabled` | 跳过这个系统；设回 `true` 会清掉 `Error` |
+| `Error` | 在 `SystemErrorPolicy.Disable` 下让它停用的那个异常 |
+| `LastRunTick` | 上次执行时的变更 tick |
+| `Stats` | 打开 `MeasureSystems` 后的 `Runs`、`Last`、`Total`、`Average` |
+
+系统不保存状态（[EECS007](/zh/docs/guide/analyzer#eecs007)），也从不引用别的系统
+（[EECS008](/zh/docs/guide/analyzer#eecs008)）。指南：[系统](/zh/docs/guide/systems)。
+
+## 查询与过滤 [#queries]
+
+```csharp
+// 字段：每个过滤条件只构建一次。
+private static readonly QueryFilter Alive = QueryFilter.Create().Without<Dead>();
+```
+
+```csharp
+foreach (var item in world.Query<Position, Velocity>(Alive))
+    item.Position.X += item.Velocity.X;             // 元素给出 ref；item.Entity 是句柄
+
+int movers = world.Count<Position, Velocity>(Alive);
+bool anyDead = world.Any<Dead>();
+```
+
+| 调用 | 作用 |
+| --- | --- |
+| `world.Query<T1..T9>(filter)` | 用 `foreach` 遍历：组件的 `ref` 和 `Entity` |
+| `world.Count<T1..T9>(filter)` / `Any<…>(filter)` | 计数，或者找到第一个就停 |
+| `world.ForEach<T1..T9, TJob>(ref job, filter)` | 结构体 job `IForEach<T…>`：`Execute(ref T1 …)` |
+| `world.ForEachEntity<…>(ref job, filter)` | `IForEachEntity<T…>`：`Execute(Entity e, ref T1 …)` |
+| `world.ForEachBatch<…>(ref job, filter)` | `IForEachBatch<T…>`：以 span 接收一段段行 |
+| `world.ForEachParallel` / `ForEachEntityParallel` | 结构体 job 分块在多个线程上执行 |
+| `Runner.Method(world, …)` | 系统之外的静态 `[ForEach]` 方法生成的入口 |
+
+| `QueryFilter` | 选出 |
+| --- | --- |
+| `.With<T>()` / `.Without<T>()` / `.WithAny<T>()` | 按有无组件，和特性相同 |
+| `.Changed<T>(since)` / `.Removed<T>(since)` | 在 tick `since` 及之后被写过、或失去了 `T` |
+| `.Since(tick)` | 同一个过滤条件换一个 tick |
+| `.InGroup<T>(group)` | 分组组件的某一组 |
+
+指南：[查询与过滤](/zh/docs/guide/queries)。
+
+## 单例 [#singletons]
+
+| 调用 | 作用 |
+| --- | --- |
+| `world.AddSingleton<T>()` | 添加（或重置为默认值），返回 `ref T` |
+| `world.GetSingleton<T>()` / `GetOrAddSingleton<T>()` | `ref T`；前者在不存在时抛异常 |
+| `world.TryGetSingleton<T>(out copy)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | 拷贝、是否存在、移除 |
+| `world.SingletonRef<T>()` | 稳定的句柄：`.Value` 是 `ref T` |
+
+```csharp
+world.SetClock(0);                                  // 生成成员：没有就添加
+world.Clock.Tick++;
+```
+
+指南：[单例](/zh/docs/guide/singletons)。
+
+## 变更追踪 [#change-tracking]
+
+| 算写入 | 不算写入 |
+| --- | --- |
+| `ref` 参数、`Span<T>`、`Query` 元素 | `in` 参数、`ReadOnlySpan<T>` |
+| `Get<T>()`、找到时的 `TryGetRef<T>`、`GetOrAdd<T>()`、`Set(…)`、`WriteX()` | `Read<T>()`、`TryGet<T>(out copy)`、`Has<T>()`、被追踪组件的 `e.X` |
+| 创建、实例化、克隆、`Restore` | 移除（那是一次移除，供 `[Removed<T>]` 使用） |
+
+```csharp
+ulong mark = world.ChangeTick;
+world.Update();
+int changed = world.Count<Health>(QueryFilter.Create().Changed<Health>(mark));
+```
+
+指南：[变更追踪](/zh/docs/guide/change-tracking)。
+
+## 索引、关系、层级、分组 [#indexes]
+
+| 调用 | 作用 |
+| --- | --- |
+| `world.Index<T, TKey>()`（`world.TIndex`） | `T` 的值索引 |
+| `index.Find(key)` / `TryFind(key, out e)` / `Count(key)` | 所有匹配、唯一一个、数量 |
+| `index.Range(min, max)` / `RangeDescending` / `Ascending()` / `Descending()` | 键可比较时的有序遍历 |
+| `index.WhenTargetDestroyed(TargetPolicy.Keep / Remove / Destroy)` | 目标销毁时 `EntityId` 链接怎么处理 |
+| `entity.AddRelation(r)` / `RemoveRelation<T>(target)` / `HasRelation<T>(target)` | 多对多链接 |
+| `world.Relations<T>()` 再 `Find(target)` / `Count(target)` | 谁链接到了某个目标 |
+| `world.Children(parent)` | `ChildOf` 指向这个父实体的所有实体；销毁父实体会连带销毁它们 |
+| `world.GroupBy<T>()` | 按 `IGroup` 的值拆表 |
+
+```csharp
+var teams = world.TeamIndex;
+foreach (var member in teams.Find(1)) member.SetTeam(2);   // 被索引的组件用 Set 写
+var ship = world.CreateEntity();
+world.CreateEntity(new ChildOf(ship));
+foreach (var child in world.Children(ship)) { }
+```
+
+被索引和分组的组件只能用 `Set` 写，不能经 `ref` 写（[EECS015](/zh/docs/guide/analyzer#eecs015)）。指南：
+[索引与关系](/zh/docs/guide/indexes-and-relations)、[层级](/zh/docs/guide/hierarchy)、[分组](/zh/docs/guide/groups)。
+
+## 预制体与批量操作 [#prefabs-and-bulk]
+
+| 调用 | 作用 |
+| --- | --- |
+| `new Prefab().SetX(…)…` / `new Prefab(basePrefab)` | 不属于任何 World 的配方，或者某个配方的变体 |
+| `prefab.AddMember()` / `prefab.Id` | 一起实例化的一组实体；`Id` 在链接里代表某个成员 |
+| `prefab.SetBuffer(items)` | 每个实例各拿一份拷贝的 `DynamicBuffer<T>` |
+| `world.Instantiate(prefab)` / `Instantiate(prefab, span)` | 一个实体，或者一次遍历刷出一整波 |
+| `world.CreateEntities(span, a, b, …)` | 一波取值相同的实体 |
+| `world.DestroyEntities<T…>(filter)` | 销毁所有匹配的实体，返回数量 |
+| `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | 给所有匹配的实体设置或移除一个组件 |
+| `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | 给所有匹配的实体禁用或启用一个组件 |
+
+```csharp
+var goblin = new Prefab().SetPosition(0, 0).SetHealth(30);
+var wave = new Entity[100];
+world.Instantiate(goblin, wave);
+world.SetAll(new Velocity(0, 0), QueryFilter.Create().With<Health>());
+world.DestroyEntities<Dead>();
+```
+
+指南：[预制体](/zh/docs/guide/prefabs)、[批量操作](/zh/docs/guide/bulk)。
+
+## 快照、存档、迁移 [#persistence]
+
+| 调用 | 作用 |
+| --- | --- |
+| `world.Capture()` / `Capture(into)` | 内存里的一份拷贝；`into` 复用已有快照的数组 |
+| `world.Restore(snapshot)` | 回到拷贝时的状态，那时的句柄重新有效 |
+| `world.Save(writer)` / `Load(bytes)` | 把整个 World 写成字节（托管组件需要 `[NinoType]`） |
+| `world.SaveEntities(writer, ids)` / `LoadEntities(bytes, handles)` | 把一组实体搬到另一个 World 或进程 |
+| `world.MoveEntities(target, ids, moved)` | 在同一线程的两个 World 之间直接搬，不编码 |
+| `world.RemoveTypes(assembly or context)` | 插件的上下文卸载之前，先移除它的类型 |
+
+```csharp
+var save = world.Capture();
+world.Update();
+world.Restore(save);
+
+var bytes = new System.Buffers.ArrayBufferWriter<byte>();
+world.Save(bytes);
+using var copy = new World();
+copy.Load(bytes.WrittenSpan);
+```
+
+指南：[快照](/zh/docs/guide/snapshots)、[存档](/zh/docs/guide/saves)、[迁移与卸载](/zh/docs/guide/migration-and-unload)。
+
+## World 选项 [#world-options]
+
+| `WorldOptions` | 默认值 | 作用 |
+| --- | --- | --- |
+| `InitialEntityCapacity` | 1024 | 预先分配的实体记录数 |
+| `ParallelSystems` | `false` | 没有顺序约束、读写不冲突的系统同时执行 |
+| `MaxDegreeOfParallelism` | 处理器数量 | 一次并行最多使用的线程数 |
+| `MeasureSystems` | `false` | 记录 `system.Stats` |
+| `SystemErrors` | `SystemErrorPolicy.Throw` | 设为 `Disable` 时，出错的系统被停用，更新继续 |
+
+```csharp
+using var server = new World(new WorldOptions { ParallelSystems = true, SystemErrors = SystemErrorPolicy.Disable });
+```
+
+指南：[线程模型](/zh/docs/guide/threading)。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="快速开始" href="/zh/docs/getting-started">
+    同样的 API，在一个能跑起来的模拟里一步一步用一遍。
+  </Card>
+  <Card title="术语表" href="/zh/docs/glossary">
+    本页出现的每个术语，一两句话讲清。
+  </Card>
+  <Card title="API 参考" href="/zh/docs/api">
+    每个公共 API 及其复杂度。
+  </Card>
+</Cards>

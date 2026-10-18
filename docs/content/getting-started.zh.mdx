@@ -1,0 +1,433 @@
+---
+title: 快速开始
+seoTitle: EasyEcs 快速开始：.NET 10 下的 C# ECS 入门教程
+description: 从 dotnet new console 开始，一步一步用 C# 搭一个小型 ECS 模拟：组件、标签、查询、系统、单例、系统分组和更新循环，每一步都能编译。
+icon: Rocket
+---
+
+这篇教程从一个空的控制台项目开始，搭一个小型模拟：一千个单位向东走，其中一部分着了火，着火的会死，尸体被清理掉，每秒打印一次战报。
+每一步只引入一个概念，都能编译，并链接到深入讲解它的指南页面。整个过程大约十五分钟。
+
+需要先装好 [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)。EasyEcs 只支持 `net10.0`。
+
+## 一步一步搭起来 [#steps]
+
+<Steps>
+<Step>
+
+### 创建项目 [#create-a-project]
+
+```bash
+dotnet new console -n Arena
+cd Arena
+dotnet add package EasyEcs
+```
+
+包里自带源生成器、分析器和代码修复。不用注册任何东西，也不用写 `partial`，所有类型都在 `EasyEcs` 命名空间里。
+
+<Callout type="info" title="其他起步方式">
+  - `dotnet new install EasyEcs.Templates`，再 `dotnet new easyecs -n Arena`（加 `--tests` 会多一个 NUnit 项目）：
+    一个按固定 tick 运行的服务器，组件、系统和预制体都已写好，直接就能跑
+    （[模板](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/templates)）。
+  - 单个文件、不建项目：[`examples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/examples)
+    里的每个程序都能用 `dotnet run hello.cs` 直接运行。
+</Callout>
+
+</Step>
+<Step>
+
+### 定义组件和标签 [#define-components]
+
+组件是实现了 `IComponent` 的普通结构体：只有字段，没有逻辑。没有字段的结构体就是**标签**，表示一个“是或否”的状态，
+供系统过滤。新建 `Components.cs`：
+
+```csharp title="Components.cs"
+using EasyEcs;
+
+public record struct Position(float X, float Y) : IComponent;
+public record struct Velocity(float X, float Y) : IComponent;
+public record struct Health(int Value) : IComponent;
+public record struct Burning(int Ticks) : IComponent;   // 一个会来也会走的状态
+public struct Dead : IComponent;                        // 标签：没有字段
+```
+
+组件必须是结构体，写成类会在编译时报 [EECS006](/zh/docs/guide/analyzer#eecs006)。组件要小，系统分开读的数据就拆开放：
+一次遍历只加载它用到的列。
+
+</Step>
+<Step>
+
+### 创建 World 和实体 [#create-entities]
+
+`World` 装着实体、组件、单例和系统。World 之间什么都不共享，服务器通常每张地图或每个场景一个。把 `Program.cs` 换成：
+
+```csharp title="Program.cs"
+using EasyEcs;
+
+using var world = new World();
+
+var units = new Entity[1_000];
+world.CreateEntities(units, new Position(0, 0), new Velocity(1, 0), new Health(100));
+for (int i = 0; i < units.Length; i += 10) units[i].SetBurning(40);   // 每十个单位里有一个着火
+```
+
+`CreateEntities` 把一整波实体一次放进最终的表；`world.CreateEntity(a, b, …)` 用同样的方式创建单个实体。`Entity` 是一个句柄。
+`Destroy()` 之后 id 会回收复用，句柄上的版本号保证旧句柄永远碰不到复用这个 id 的新实体。详见
+[实体与组件](/zh/docs/guide/entities-and-components)。
+
+</Step>
+<Step>
+
+### 读写组件 [#read-and-write]
+
+生成器为每个组件写好具名成员：`scout.Velocity` 是指向存储的 `ref`，`SetBurning(…)` 添加或覆盖，`HasBurning`、`RemoveBurning()`
+顾名思义。底下的泛型 API 是 `Get<T>()`（拿 `ref` 来写）、`Read<T>()`（只读）、`Set(…)`、`Has<T>()` 和 `Remove<T>()`。
+在 `Program.cs` 里接着写：
+
+```csharp
+Entity scout = units[1];
+scout.Velocity = new Velocity(2, 0);         // 经 ref 原地写入
+float speed = scout.Read<Velocity>().X;      // 泛型 API：2
+scout.SetBurning(5);                         // 添加组件
+bool burning = scout.HasBurning;             // true
+scout.RemoveBurning();                       // 移除：实体的行保留
+```
+
+增删组件属于**结构变更**。它立即生效，在哪里调用都行，系统遍历到一半也可以。`ref` 在下一次结构变更之前有效，跨 `await` 一律无效
+（[`ref` 与 `await`](/zh/docs/guide/refs-and-await)）。
+
+</Step>
+<Step>
+
+### 查询实体 [#query-entities]
+
+在系统之外（工具、测试、请求处理），直接问 World。`QueryFilter` 在组件之外再加条件：
+
+```csharp
+var alive = QueryFilter.Create().Without<Dead>();       // 正式代码里放进 static readonly 字段
+int movers = world.Count<Position, Velocity>(alive);
+int onFire = world.Count<Burning>();
+Console.WriteLine($"{movers} movers, {onFire} on fire");
+
+float front = 0;
+foreach (var item in world.Query<Position>(alive))
+    front = MathF.Max(front, item.Position.X);          // 元素给出 ref；item.Entity 是句柄
+```
+
+查询不分配内存。详见[查询与过滤](/zh/docs/guide/queries)，里面还有最快的临时遍历方式：结构体 job。
+
+</Step>
+<Step>
+
+### 写一个系统 [#write-a-system]
+
+系统继承 `EcsSystem`，只做一件事。`[ForEach]` 方法就是它的整个循环：凡是拥有这些组件参数的实体，都会执行一次；`ref` 表示要写，
+`in` 表示只读，过滤条件写成特性。新建 `Systems.cs`：
+
+```csharp title="Systems.cs"
+using EasyEcs;
+
+public class MovementSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]                                  // 没死的、会动的单位
+    static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
+}
+
+public class BurnSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Burn(Entity unit, ref Burning burning, ref Health hp)
+    {
+        hp.Value -= 3;
+        if (--burning.Ticks == 0) unit.RemoveBurning();       // 遍历途中移除也安全
+    }
+}
+```
+
+生成器把每个方法编译成结构体 job，JIT 把它内联进行循环：每个实体既没有委托调用，也没有虚调用。`ref` 和 `in` 同时告诉调度器
+系统碰了哪些数据，[并行系统](/zh/docs/guide/threading)靠的就是这个。详见[系统](/zh/docs/guide/systems)。
+
+</Step>
+<Step>
+
+### 用单例保存 World 级状态 [#singletons]
+
+系统自己不保存状态（[EECS007](/zh/docs/guide/analyzer#eecs007)）。整个 World 只有一份的数据，比如时钟、比分，放进**单例**：
+一个实现 `ISingletonComponent` 的结构体。加到 `Components.cs`：
+
+```csharp title="Components.cs"
+public record struct Arena(long Tick, int Deaths) : ISingletonComponent;
+```
+
+`[ForEach]` 方法把单例当参数接收，每次遍历解析一次。`[ForEach]` 之外的代码用生成的 `World.Arena`，或者
+`World.GetSingleton<Arena>()`。加到 `Systems.cs`：
+
+```csharp title="Systems.cs"
+public class ClockSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.Arena.Tick++;
+}
+```
+
+详见[单例](/zh/docs/guide/singletons)。
+
+</Step>
+<Step>
+
+### 响应状态、给系统排序 [#order-systems]
+
+系统之间从不互相调用（[EECS008](/zh/docs/guide/analyzer#eecs008)），只通过数据协作。死亡系统写下一个状态，也就是 `Dead` 标签；
+尸体系统响应这个状态，死亡系统根本不知道它存在。`[UpdateAfter<T>]` 按数据流给它们排序。加到 `Systems.cs`：
+
+```csharp title="Systems.cs"
+[UpdateAfter<BurnSystem>]                                     // 伤害结算之后
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health hp, ref Arena arena)
+    {
+        if (hp.Value > 0) return;
+        unit.SetDead();                                       // 状态变化就是数据
+        arena.Deaths++;
+    }
+}
+
+[UpdateAfter<DeathSystem>]
+public class CorpseSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.DestroyEntities<Dead>();   // 一次遍历清掉所有尸体
+}
+```
+
+标签立即生效：尸体系统在同一次更新里就能看到它，`[Without<Dead>]` 让其他系统都碰不到死去的单位。这种设计为什么扩展性好，见
+[ECS 设计原则](/zh/docs/ecs-principles)。
+
+</Step>
+<Step>
+
+### 跑起更新循环 [#update-loop]
+
+添加单例和系统，然后按固定 tick 调用 `world.Update()`。加到 `Program.cs` 末尾：
+
+```csharp
+world.AddSingleton<Arena>();
+world.AddSystem<MovementSystem>();
+world.AddSystem<BurnSystem>();
+world.AddSystem<DeathSystem>();
+world.AddSystem<CorpseSystem>();
+world.AddSystem<ClockSystem>();
+
+using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50));   // 每秒 20 个 tick
+for (int tick = 1; tick <= 100; tick++)
+{
+    await timer.WaitForNextTickAsync();
+    world.Update();                                                    // 同步执行每个系统
+}
+
+Console.WriteLine($"{world.Arena.Deaths} dead, the scout is at {scout.Position.X}");
+```
+
+`Update()` 把每个启用的系统执行一次，顺序是注册顺序再按 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 调整，整个过程不分配内存。
+想让系统跑得少一些，重写 `UpdateInterval`；想关掉它，设 `Enabled = false`。
+
+</Step>
+<Step>
+
+### 用系统分组加一个节奏 [#system-groups]
+
+不是所有逻辑都要每个 tick 跑。**系统分组**是一个实现 `ISystemGroup` 的结构体；标了 `[UpdateInGroup<G>]` 的系统只在调用
+`world.Update<G>()` 时执行。加一个每秒打印一次的战报：
+
+```csharp title="Components.cs"
+public struct Report : ISystemGroup;
+```
+
+```csharp title="Systems.cs"
+[UpdateInGroup<Report>]
+public class ReportSystem : EcsSystem
+{
+    protected override void OnUpdate() =>
+        Console.WriteLine($"tick {World.Arena.Tick}: {World.EntityCount} units, " +
+                          $"{World.Count<Burning>()} burning, {World.Arena.Deaths} dead");
+}
+```
+
+和其他系统一起注册（`world.AddSystem<ReportSystem>();`），每 20 个 tick 调一次它的分组：
+
+```csharp
+world.AddSystem<ReportSystem>();
+for (int tick = 1; tick <= 100; tick++)
+{
+    world.Update();
+    if (tick % 20 == 0) world.Update<Report>();                        // 20 Hz 下每秒一次
+}
+```
+
+真实的服务器里，一个分组在输入到达时处理输入，另一个按固定 tick 跑模拟。
+
+</Step>
+</Steps>
+
+## 运行 [#run-it]
+
+```bash
+dotnet run
+```
+
+用下面的[完整程序](#whole-program)，输出是：
+
+```text
+1000 movers, 100 on fire
+tick 20: 1000 units, 100 burning, 0 dead
+tick 40: 900 units, 0 burning, 100 dead
+tick 60: 900 units, 0 burning, 100 dead
+tick 80: 900 units, 0 burning, 100 dead
+tick 100: 900 units, 0 burning, 100 dead
+the scout is at 200, the others at 100
+```
+
+着火的一百个单位每个 tick 掉 3 点血，第 34 个 tick 死亡，尸体在同一次更新里被销毁。侦察兵的速度是其他单位的两倍。
+
+## 完整程序 [#whole-program]
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs"
+using EasyEcs;
+
+public record struct Position(float X, float Y) : IComponent;
+public record struct Velocity(float X, float Y) : IComponent;
+public record struct Health(int Value) : IComponent;
+public record struct Burning(int Ticks) : IComponent;   // 一个会来也会走的状态
+public struct Dead : IComponent;                        // 标签：没有字段
+public record struct Arena(long Tick, int Deaths) : ISingletonComponent;
+public struct Report : ISystemGroup;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs"
+using EasyEcs;
+
+public class MovementSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
+}
+
+public class BurnSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Burn(Entity unit, ref Burning burning, ref Health hp)
+    {
+        hp.Value -= 3;
+        if (--burning.Ticks == 0) unit.RemoveBurning();
+    }
+}
+
+[UpdateAfter<BurnSystem>]
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health hp, ref Arena arena)
+    {
+        if (hp.Value > 0) return;
+        unit.SetDead();
+        arena.Deaths++;
+    }
+}
+
+[UpdateAfter<DeathSystem>]
+public class CorpseSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.DestroyEntities<Dead>();
+}
+
+public class ClockSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.Arena.Tick++;
+}
+
+[UpdateInGroup<Report>]
+public class ReportSystem : EcsSystem
+{
+    protected override void OnUpdate() =>
+        Console.WriteLine($"tick {World.Arena.Tick}: {World.EntityCount} units, " +
+                          $"{World.Count<Burning>()} burning, {World.Arena.Deaths} dead");
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs"
+using EasyEcs;
+
+using var world = new World();
+
+var units = new Entity[1_000];
+world.CreateEntities(units, new Position(0, 0), new Velocity(1, 0), new Health(100));
+for (int i = 0; i < units.Length; i += 10) units[i].SetBurning(40);   // 每十个单位里有一个着火
+
+Entity scout = units[1];
+scout.Velocity = new Velocity(2, 0);
+float speed = scout.Read<Velocity>().X;
+scout.SetBurning(5);
+bool burning = scout.HasBurning;
+scout.RemoveBurning();
+
+var alive = QueryFilter.Create().Without<Dead>();
+int movers = world.Count<Position, Velocity>(alive);
+int onFire = world.Count<Burning>();
+Console.WriteLine($"{movers} movers, {onFire} on fire");
+
+world.AddSingleton<Arena>();
+world.AddSystem<MovementSystem>();
+world.AddSystem<BurnSystem>();
+world.AddSystem<DeathSystem>();
+world.AddSystem<CorpseSystem>();
+world.AddSystem<ClockSystem>();
+world.AddSystem<ReportSystem>();
+
+using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50));   // 每秒 20 个 tick
+for (int tick = 1; tick <= 100; tick++)
+{
+    await timer.WaitForNextTickAsync();
+    world.Update();                                                    // 默认分组：模拟
+    if (tick % 20 == 0) world.Update<Report>();                        // 每秒一次：战报
+}
+
+Console.WriteLine($"the scout is at {scout.Position.X}, the others at {units[2].Position.X}");
+```
+
+</Accordion>
+</Accordions>
+
+## 接下来读什么 [#next-steps]
+
+这个模拟用到的是 EasyEcs 的核心。下面每一项都在它的基础上加一种能力：
+
+| 想要 | 读这篇 |
+| --- | --- |
+| 把功能设计成数据加上各司其职的系统 | [ECS 设计原则](/zh/docs/ecs-principles) |
+| 只把变了的、没了的东西发给客户端 | [变更追踪](/zh/docs/guide/change-tracking) |
+| 按配方刷出各种单位 | [预制体](/zh/docs/guide/prefabs) |
+| 按名字找玩家、找某人拥有的物品 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
+| 给每个单位一个列表（背包、路径） | [动态缓冲](/zh/docs/guide/dynamic-buffers) |
+| 用满每个核 | [线程模型](/zh/docs/guide/threading) |
+| 存下 World，重启后再加载 | [存档](/zh/docs/guide/saves) |
+| 一页看完所有 API | [速查表](/zh/docs/cheat-sheet) |
+
+<Cards>
+  <Card title="功能一览" href="/zh/docs/features">
+    每个功能的用途和开销。
+  </Card>
+  <Card title="战斗服务器示例" href="/zh/docs/example">
+    一个用上所有功能的服务器，同时也是基准测试和单元测试。
+  </Card>
+  <Card title="术语表" href="/zh/docs/glossary">
+    文档里的术语，每个几句话讲清。
+  </Card>
+</Cards>

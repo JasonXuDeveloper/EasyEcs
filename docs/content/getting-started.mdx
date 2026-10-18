@@ -1,0 +1,448 @@
+---
+title: Getting started
+seoTitle: "Getting started with EasyEcs: a C# ECS tutorial for .NET 10"
+description: Build a small ECS simulation in C# step by step, from dotnet new console to components, tags, queries, systems, singletons, system groups and the update loop.
+icon: Rocket
+---
+
+This tutorial builds a small simulation from an empty console project: a thousand units walk east, some of them are
+on fire, the burning ones die and their corpses are removed, and a report prints once a second. Each step adds one
+concept, compiles and links to the guide page that covers it in depth. It takes about fifteen minutes.
+
+You need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0). EasyEcs targets `net10.0` only.
+
+## Build it step by step [#steps]
+
+<Steps>
+<Step>
+
+### Create a project [#create-a-project]
+
+```bash
+dotnet new console -n Arena
+cd Arena
+dotnet add package EasyEcs
+```
+
+The package brings the source generator, the analyzer and its code fixes with it. There is nothing to register and
+no `partial` to write: everything lives in the `EasyEcs` namespace.
+
+<Callout type="info" title="Other ways to start">
+  - `dotnet new install EasyEcs.Templates`, then `dotnet new easyecs -n Arena` (add `--tests` for an NUnit project):
+    a fixed-tick server with components, systems and a prefab, ready to run
+    ([templates](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/templates)).
+  - One file, no project: every program in
+    [`examples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/examples) runs with
+    `dotnet run hello.cs`.
+</Callout>
+
+</Step>
+<Step>
+
+### Define components and tags [#define-components]
+
+A component is a plain struct implementing `IComponent`: fields, no logic. A struct with no fields is a **tag**, a
+yes-or-no state that systems filter on. Create `Components.cs`:
+
+```csharp title="Components.cs"
+using EasyEcs;
+
+public record struct Position(float X, float Y) : IComponent;
+public record struct Velocity(float X, float Y) : IComponent;
+public record struct Health(int Value) : IComponent;
+public record struct Burning(int Ticks) : IComponent;   // a status that comes and goes
+public struct Dead : IComponent;                        // a tag: no fields
+```
+
+Components must be structs: a class fails the build with [EECS006](/en/docs/guide/analyzer#eecs006). Keep them
+small and split what systems read separately, because a pass loads only the columns it uses.
+
+</Step>
+<Step>
+
+### Create a world and entities [#create-entities]
+
+A `World` holds entities, their components, singletons and systems. Worlds share nothing; a server typically runs
+one per map or zone. Replace `Program.cs` with:
+
+```csharp title="Program.cs"
+using EasyEcs;
+
+using var world = new World();
+
+var units = new Entity[1_000];
+world.CreateEntities(units, new Position(0, 0), new Velocity(1, 0), new Health(100));
+for (int i = 0; i < units.Length; i += 10) units[i].SetBurning(40);   // every tenth unit is on fire
+```
+
+`CreateEntities` places a whole wave in its final table at once; `world.CreateEntity(a, b, …)` creates one entity
+the same way. An `Entity` is a handle. Ids are recycled after `Destroy()`, and the handle's version makes sure an
+old handle never reaches the entity that reuses its id. More in
+[Entities and components](/en/docs/guide/entities-and-components).
+
+</Step>
+<Step>
+
+### Read and write components [#read-and-write]
+
+For every component the generator writes named members: `scout.Velocity` is a `ref` into storage, `SetBurning(…)`
+adds or overwrites, `HasBurning` and `RemoveBurning()` do what they say. The generic API underneath is
+`Get<T>()` (a `ref` to write), `Read<T>()` (read only), `Set(…)`, `Has<T>()` and `Remove<T>()`. Add to
+`Program.cs`:
+
+```csharp
+Entity scout = units[1];
+scout.Velocity = new Velocity(2, 0);         // writes in place, through the ref
+float speed = scout.Read<Velocity>().X;      // the generic API: 2
+scout.SetBurning(5);                         // adds the component
+bool burning = scout.HasBurning;             // true
+scout.RemoveBurning();                       // removes it: the entity keeps its row
+```
+
+Adding and removing a component are **structural changes**. They apply at once, anywhere, even in the middle of a
+system's pass. A `ref` stays valid until the next structural change and never across `await`
+([`ref` and `await`](/en/docs/guide/refs-and-await)).
+
+</Step>
+<Step>
+
+### Query entities [#query-entities]
+
+Outside systems (tools, tests, request handlers), ask the world directly. A `QueryFilter` adds conditions beyond
+the components:
+
+```csharp
+var alive = QueryFilter.Create().Without<Dead>();       // in real code: a static readonly field
+int movers = world.Count<Position, Velocity>(alive);
+int onFire = world.Count<Burning>();
+Console.WriteLine($"{movers} movers, {onFire} on fire");
+
+float front = 0;
+foreach (var item in world.Query<Position>(alive))
+    front = MathF.Max(front, item.Position.X);          // items hand out refs; item.Entity is the handle
+```
+
+Queries allocate nothing. More in [Queries and filters](/en/docs/guide/queries), including struct jobs, the fastest
+ad-hoc pass.
+
+</Step>
+<Step>
+
+### Write a system [#write-a-system]
+
+A system derives from `EcsSystem` and has one job. A `[ForEach]` method is its whole loop: it runs once per entity
+that has its component parameters, `ref` for what it writes and `in` for what it reads. Filters are attributes.
+Create `Systems.cs`:
+
+```csharp title="Systems.cs"
+using EasyEcs;
+
+public class MovementSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]                                  // movers that are not dead
+    static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
+}
+
+public class BurnSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Burn(Entity unit, ref Burning burning, ref Health hp)
+    {
+        hp.Value -= 3;
+        if (--burning.Ticks == 0) unit.RemoveBurning();       // safe in the middle of the pass
+    }
+}
+```
+
+The generator compiles each method into a struct job that the JIT inlines into the row loop: no delegate, no
+virtual call per entity. The `ref` and `in` keywords also tell the scheduler what the system touches, which is how
+[parallel systems](/en/docs/guide/threading) stay safe. More in [Systems](/en/docs/guide/systems).
+
+</Step>
+<Step>
+
+### Keep world state in a singleton [#singletons]
+
+Systems keep no state of their own ([EECS007](/en/docs/guide/analyzer#eecs007)). Data with one value per world,
+such as a clock or a score, is a **singleton**: a struct implementing `ISingletonComponent`. Add it to
+`Components.cs`:
+
+```csharp title="Components.cs"
+public record struct Arena(long Tick, int Deaths) : ISingletonComponent;
+```
+
+A `[ForEach]` method takes a singleton as a parameter, resolved once per pass. Code outside a `[ForEach]` reaches it
+as `World.Arena` (generated) or `World.GetSingleton<Arena>()`. Add to `Systems.cs`:
+
+```csharp title="Systems.cs"
+public class ClockSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.Arena.Tick++;
+}
+```
+
+More in [Singletons](/en/docs/guide/singletons).
+
+</Step>
+<Step>
+
+### React to state and order systems [#order-systems]
+
+Systems never call each other ([EECS008](/en/docs/guide/analyzer#eecs008)); they cooperate through data. The
+death system writes a state, the `Dead` tag, and the corpse system reacts to it without the death system knowing it
+exists. `[UpdateAfter<T>]` orders them by data flow. Add to `Systems.cs`:
+
+```csharp title="Systems.cs"
+[UpdateAfter<BurnSystem>]                                     // after the damage is dealt
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health hp, ref Arena arena)
+    {
+        if (hp.Value > 0) return;
+        unit.SetDead();                                       // a state change is data
+        arena.Deaths++;
+    }
+}
+
+[UpdateAfter<DeathSystem>]
+public class CorpseSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.DestroyEntities<Dead>();   // every corpse in one pass
+}
+```
+
+The tag applies at once: the corpse system sees it in the same update, and `[Without<Dead>]` keeps every other
+system away from the dead. Why this design scales is in [ECS principles](/en/docs/ecs-principles).
+
+</Step>
+<Step>
+
+### Run the update loop [#update-loop]
+
+Add the singleton and the systems, then call `world.Update()` on a fixed tick. Add to the end of `Program.cs`:
+
+```csharp
+world.AddSingleton<Arena>();
+world.AddSystem<MovementSystem>();
+world.AddSystem<BurnSystem>();
+world.AddSystem<DeathSystem>();
+world.AddSystem<CorpseSystem>();
+world.AddSystem<ClockSystem>();
+
+using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50));   // 20 ticks per second
+for (int tick = 1; tick <= 100; tick++)
+{
+    await timer.WaitForNextTickAsync();
+    world.Update();                                                    // every system, synchronously
+}
+
+Console.WriteLine($"{world.Arena.Deaths} dead, the scout is at {scout.Position.X}");
+```
+
+`Update()` runs every enabled system once, in registration order adjusted by `[UpdateBefore<T>]` /
+`[UpdateAfter<T>]`, and allocates nothing. A system can run less often by overriding `UpdateInterval`, or be
+switched off with `Enabled = false`.
+
+</Step>
+<Step>
+
+### Add a second cadence with a system group [#system-groups]
+
+Not everything runs every tick. A **system group** is a struct implementing `ISystemGroup`; systems marked
+`[UpdateInGroup<G>]` run only when you call `world.Update<G>()`. Add a report that prints once a second:
+
+```csharp title="Components.cs"
+public struct Report : ISystemGroup;
+```
+
+```csharp title="Systems.cs"
+[UpdateInGroup<Report>]
+public class ReportSystem : EcsSystem
+{
+    protected override void OnUpdate() =>
+        Console.WriteLine($"tick {World.Arena.Tick}: {World.EntityCount} units, " +
+                          $"{World.Count<Burning>()} burning, {World.Arena.Deaths} dead");
+}
+```
+
+Register it with the others (`world.AddSystem<ReportSystem>();`) and call its group every twentieth tick:
+
+```csharp
+world.AddSystem<ReportSystem>();
+for (int tick = 1; tick <= 100; tick++)
+{
+    world.Update();
+    if (tick % 20 == 0) world.Update<Report>();                        // once a second at 20 Hz
+}
+```
+
+On a real server, one group handles input whenever it arrives and another runs the simulation on its fixed tick.
+
+</Step>
+</Steps>
+
+## Run it [#run-it]
+
+```bash
+dotnet run
+```
+
+With the [whole program](#whole-program) below, it prints:
+
+```text
+1000 movers, 100 on fire
+tick 20: 1000 units, 100 burning, 0 dead
+tick 40: 900 units, 0 burning, 100 dead
+tick 60: 900 units, 0 burning, 100 dead
+tick 80: 900 units, 0 burning, 100 dead
+tick 100: 900 units, 0 burning, 100 dead
+the scout is at 200, the others at 100
+```
+
+The hundred burning units lose 3 health per tick and die on the 34th tick; their corpses are destroyed in the same
+update. The scout moves twice as fast as the others.
+
+## The whole program [#whole-program]
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs"
+using EasyEcs;
+
+public record struct Position(float X, float Y) : IComponent;
+public record struct Velocity(float X, float Y) : IComponent;
+public record struct Health(int Value) : IComponent;
+public record struct Burning(int Ticks) : IComponent;   // a status that comes and goes
+public struct Dead : IComponent;                        // a tag: no fields
+public record struct Arena(long Tick, int Deaths) : ISingletonComponent;
+public struct Report : ISystemGroup;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs"
+using EasyEcs;
+
+public class MovementSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
+}
+
+public class BurnSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Burn(Entity unit, ref Burning burning, ref Health hp)
+    {
+        hp.Value -= 3;
+        if (--burning.Ticks == 0) unit.RemoveBurning();
+    }
+}
+
+[UpdateAfter<BurnSystem>]
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health hp, ref Arena arena)
+    {
+        if (hp.Value > 0) return;
+        unit.SetDead();
+        arena.Deaths++;
+    }
+}
+
+[UpdateAfter<DeathSystem>]
+public class CorpseSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.DestroyEntities<Dead>();
+}
+
+public class ClockSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.Arena.Tick++;
+}
+
+[UpdateInGroup<Report>]
+public class ReportSystem : EcsSystem
+{
+    protected override void OnUpdate() =>
+        Console.WriteLine($"tick {World.Arena.Tick}: {World.EntityCount} units, " +
+                          $"{World.Count<Burning>()} burning, {World.Arena.Deaths} dead");
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs"
+using EasyEcs;
+
+using var world = new World();
+
+var units = new Entity[1_000];
+world.CreateEntities(units, new Position(0, 0), new Velocity(1, 0), new Health(100));
+for (int i = 0; i < units.Length; i += 10) units[i].SetBurning(40);   // every tenth unit is on fire
+
+Entity scout = units[1];
+scout.Velocity = new Velocity(2, 0);
+float speed = scout.Read<Velocity>().X;
+scout.SetBurning(5);
+bool burning = scout.HasBurning;
+scout.RemoveBurning();
+
+var alive = QueryFilter.Create().Without<Dead>();
+int movers = world.Count<Position, Velocity>(alive);
+int onFire = world.Count<Burning>();
+Console.WriteLine($"{movers} movers, {onFire} on fire");
+
+world.AddSingleton<Arena>();
+world.AddSystem<MovementSystem>();
+world.AddSystem<BurnSystem>();
+world.AddSystem<DeathSystem>();
+world.AddSystem<CorpseSystem>();
+world.AddSystem<ClockSystem>();
+world.AddSystem<ReportSystem>();
+
+using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50));   // 20 ticks per second
+for (int tick = 1; tick <= 100; tick++)
+{
+    await timer.WaitForNextTickAsync();
+    world.Update();                                                    // the default group: the simulation
+    if (tick % 20 == 0) world.Update<Report>();                        // once a second: the report
+}
+
+Console.WriteLine($"the scout is at {scout.Position.X}, the others at {units[2].Position.X}");
+```
+
+</Accordion>
+</Accordions>
+
+## Where to go next [#next-steps]
+
+The simulation uses the core of EasyEcs. Each of these adds one capability to it:
+
+| To | Read |
+| --- | --- |
+| Design features as data plus one-job systems | [ECS principles](/en/docs/ecs-principles) |
+| Send clients only what changed, or went away | [Change tracking](/en/docs/guide/change-tracking) |
+| Spawn kinds of units from a recipe | [Prefabs](/en/docs/guide/prefabs) |
+| Find a player by name, the items of an owner | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
+| Give each unit a list (a bag, a path) | [Dynamic buffers](/en/docs/guide/dynamic-buffers) |
+| Use every core | [Threading](/en/docs/guide/threading) |
+| Save the world and load it after a restart | [Saves](/en/docs/guide/saves) |
+| See every API on one page | [Cheat sheet](/en/docs/cheat-sheet) |
+
+<Cards>
+  <Card title="Features" href="/en/docs/features">
+    Every feature, what it is for and what it costs.
+  </Card>
+  <Card title="The battle server" href="/en/docs/example">
+    One server that uses every feature, also a benchmark and a test.
+  </Card>
+  <Card title="Glossary" href="/en/docs/glossary">
+    The terms of these docs in a few sentences each.
+  </Card>
+</Cards>

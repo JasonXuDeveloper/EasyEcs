@@ -1,0 +1,513 @@
+---
+title: 功能一览
+seoTitle: EasyEcs 功能一览：面向 .NET 10 服务端的完整 C# ECS
+description: 一页看完 EasyEcs 的全部功能，按用途分组：每个功能做什么、什么时候用、开销多大，以及和 Arch、Friflo、DefaultEcs 的对比。
+icon: ListChecks
+---
+
+import { Gauge, Rocket, Scale, Swords } from 'lucide-react';
+
+EasyEcs 的全部功能都在这一页，按它在服务器上承担的工作分组：模拟世界、响应变化、查找实体、组织实体、持久化，以及多核扩展。
+每一项都说明它做什么、什么时候用、什么时候别用、开销多大，并链接到对应的指南页面。
+
+下面每个功能都在同一个 `EasyEcs` 包里，作用于同一个 World，预热后热路径零分配，都有单元测试和 BenchmarkDotNet 基准测试覆盖。
+[战斗服务器示例](/zh/docs/example)在一个程序里用上了所有功能，10 万单位的完整 tick 耗时 <BenchValue k="tick.battle" />。
+
+<BenchSource />
+
+## 速览 [#at-a-glance]
+
+| 用途 | 功能 |
+| --- | --- |
+| [模拟](#simulate) | [World 与实体](#worlds-and-entities)、[组件与标签](#components-and-tags)、[生成成员](#generated-members)、[系统与 `[ForEach]`](#systems-and-foreach)、[过滤条件](#filters)、[可选组件](#optional-components)、[批量方法](#batch-methods)、[单例](#singletons)、[排序、分组与间隔](#system-groups-and-intervals)、[立即生效的结构变更](#immediate-structural-changes)、[临时查询](#ad-hoc-queries) |
+| [响应变化](#react) | [变更追踪](#change-tracking)、[移除检测](#removal-detection)、[清理组件](#cleanup-components)、[禁用与启用](#disable-and-enable) |
+| [查找](#find) | [值索引](#value-indexes)、[有序区间](#ordered-ranges)、[按值分表](#table-groups) |
+| [组织](#structure) | [关系](#relations)、[层级](#hierarchy)、[动态缓冲](#dynamic-buffers)、[预制体与克隆](#prefabs-and-cloning) |
+| [持久化](#persist) | [快照](#snapshots)、[存档](#saves)、[迁移](#migration)、[卸载插件类型](#unloading) |
+| [扩展](#scale) | [每个线程一个 World](#threading-model)、[并行系统](#parallel-systems)、[并行 `[ForEach]`](#parallel-foreach)、[批量操作](#bulk-operations) |
+| [构建与运维](#operate) | [分析器与代码修复](#analyzer)、[系统耗时统计](#per-system-timing)、[异常处理](#errors)、[运行时自省](#introspection)、[Native AOT](#native-aot)、[模板与示例](#templates) |
+
+## 模拟 [#simulate]
+
+每个 tick 的核心：数据放在表里，逻辑放在系统里，再加上驱动它们的循环。
+
+```csharp
+public record struct Position(float X, float Y) : IComponent;
+public record struct Velocity(float X, float Y) : IComponent;
+public record struct Health(int Value) : IComponent, ITrackChanges;
+public record struct Armor(int Value) : IComponent;
+public struct Dead : IComponent;
+public record struct Clock(float Dt) : ISingletonComponent;
+
+public class MovementSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Move(ref Position p, in Velocity v, in Clock clock) =>
+        p = new Position(p.X + v.X * clock.Dt, p.Y + v.Y * clock.Dt);
+}
+```
+
+### World 与实体 [#worlds-and-entities]
+
+`World` 拥有实体、组件、单例和系统，World 之间什么都不共享。`Entity` 是一个 16 字节的句柄（World、下标、版本号）：id 会回收复用，
+每次访问都校验版本号，所以指向已销毁实体的句柄会抛异常，不会碰到复用这个 id 的新实体。
+
+- **适合：** 每个独立的模拟一个 World（一张地图、一个场景、一局对战、一个测试）。代码里存 `Entity` 句柄，组件里存 `EntityId`。
+- **开销：** 每个实体 id 一条 16 字节的记录。带组件创建时一次放进最终的表；销毁时用表的最后一行填洞。
+  `WorldOptions.InitialEntityCapacity` 和 `EnsureEntityCapacity(n)` 按已知峰值预分配，长期运行的服务器运行时不会再扩容。
+- **指南：** [实体与组件](/zh/docs/guide/entities-and-components)
+
+### 组件与标签 [#components-and-tags]
+
+组件是结构体（`IComponent`），存放在原型（archetype）表里：每种组件组合一张表，每种组件一列，每个实体一行。非托管列被固定在内存里，
+并从 64 字节边界开始。空结构体就是标签。移除组件只清一个存在位、保留这一行，再加回来同样便宜。
+
+- **适合：** 每个实体的数据，按系统会一起读的内容拆分；来来去去的状态用标签。
+- **别用于：** 大多数实体每个 tick 都在变的值，不要做成标签，用字段。
+- **开销：** 一次遍历只加载它读的列。获得一个表里没有对应列的组件，这一行拷贝一次；之后再开关只是翻一个位。
+- **指南：** [实体与组件](/zh/docs/guide/entities-and-components)
+
+### 生成成员 [#generated-members]
+
+源生成器给每个组件生成具名的 C# 14 扩展成员：`e.Position`、`HasPosition`、`SetPosition(x, y)`、`RemovePosition()`，
+标签有 `IsDead`，单例有 `world.Clock`，被索引的组件有 `world.TeamIndex`，`Prefab` 上也有同样的写入方法。被追踪和被索引的组件
+生成只读属性，所以读永远不算写。
+
+- **适合：** 所有写明具体组件的代码。泛型 API（`Get<T>()`、`Set(…)`）留给泛型代码。
+- **开销：** 没有。每个成员都是对泛型 API 的内联调用，生成器也知道哪些是结构变更。
+- **指南：** [实体与组件](/zh/docs/guide/entities-and-components)、[速查表](/zh/docs/cheat-sheet#generated-members)
+
+### 系统与 [ForEach] [#systems-and-foreach]
+
+系统继承 `EcsSystem`，只做一件事。`[ForEach]` 方法就是它的整个循环，参数可以是组件（`ref` 写、`in` 读）、单例、`Entity` 和 `World`。
+生成器把每个方法编译成结构体 job，JIT 把它内联进行循环。`OnCreate`、`OnUpdate` 和 `OnDestroy` 负责初始化和每次更新的额外工作。
+
+- **适合：** 一个 tick 里所有逐实体的逻辑。
+- **开销：** 把 `Velocity` 加到 `Position` 的 `[ForEach]` 系统，每个实体 <BenchValue k="forEach.perEntity" />；同样的循环手写在两个普通数组上是
+  <BenchValue k="rawArray.perEntity" />。每个系统每次更新：三次虚调用，加每个方法一次查询缓存查找。
+- **指南：** [系统](/zh/docs/guide/systems)、[ECS 设计原则](/zh/docs/ecs-principles)
+
+### 过滤条件 [#filters]
+
+`[With<T>]` 要求有某个不作为参数传入的组件，`[Without<T>]` 排除一个组件，`[WithAny<T>]` 要求几个里至少有一个，
+`[Changed<T>]` 和 `[Removed<T>]` 按变更 tick 选择。临时代码里有同样的 `QueryFilter`，写在系统分组上则对分组里的所有系统生效。
+
+- **适合：** 状态（`[Without<Dead>]`）、角色（`[With<Player>]`）、多选一（`[WithAny<Frozen>, WithAny<Stunned>]`）。
+- **开销：** 匹配结果按查询形状缓存；不可能匹配的表只跳过一次，部分行缺组件的表按位字一次检测 64 行。
+- **指南：** [查询与过滤](/zh/docs/guide/queries)
+
+### 可选组件 [#optional-components]
+
+`Maybe<T>` 参数不管实体有没有 `T` 都会访问：`HasValue` 说明有没有，`Value` 是 `ref`。可选部分不大时，一个方法就能代替
+`[With<T>]` 和 `[Without<T>]` 两个版本。
+
+- **适合：** 只有部分实体才有的加成（伤害计算时的护甲、回血时的增益）。
+- **别用于：** 最热的循环：用 `[With<T>]` / `[Without<T>]` 拆成两个方法，每行都不用检测。
+- **开销：** 不做结构变更的方法每行检测一个存在位；做结构变更的方法每个实体查找一次。
+- **指南：** [系统](/zh/docs/guide/systems)
+
+### 批量方法 [#batch-methods]
+
+参数是 `Span<T>` / `ReadOnlySpan<T>` 的 `[ForEach]` 方法，一次接收一整段连续的匹配行，每段调用一次，方便用 `Vector<T>` 做向量化。
+`world.ForEachBatch` 在临时 job 里做同样的事。
+
+- **适合：** 对大量行做算术（移动、衰减、求和）。
+- **别用于：** 需要结构变更的逻辑：批量方法执行期间 World 的结构是冻结的。
+- **开销：** 每段行调用一次，而不是每个实体一次。
+- **指南：** [系统](/zh/docs/guide/systems)
+
+### 单例 [#singletons]
+
+每个 World 一份的结构体（`ISingletonComponent`）：时钟、配置、计数器、空间网格。`[ForEach]` 方法以 `ref` 或 `in` 参数接收；
+系统之外的代码用稳定句柄 `SingletonRef<T>`。
+
+- **适合：** 所有 World 级状态。系统自身不存状态。
+- **别用于：** 用静态字段代替它：静态字段会被所有 World 共享。
+- **开销：** 作为参数时每次遍历查找一次。
+- **指南：** [单例](/zh/docs/guide/singletons)
+
+### 排序、分组与间隔 [#system-groups-and-intervals]
+
+系统按注册顺序执行，可以用 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 调整。`[UpdateInGroup<G>]` 把系统放进一个分组，只在
+`world.Update<G>()` 时执行。`UpdateInterval` 和 `UpdatePhase` 让系统每 N 次更新执行一次，并分散到不同相位；`Enabled` 关掉它。
+
+- **适合：** 不同的节奏：输入每次唤醒都处理，模拟按固定 tick 跑，存盘每隔几秒一次。
+- **开销：** 除了系统本身没有额外开销；空分组的更新什么都不做。排序成环会编译失败（[EECS019](/zh/docs/guide/analyzer#eecs019)）。
+- **指南：** [系统](/zh/docs/guide/systems)
+
+### 立即生效的结构变更 [#immediate-structural-changes]
+
+创建、销毁、添加、移除都立即生效，在遍历同一批表的过程中也一样。一次遍历里每个实体最多访问一次：轮到之前就离开的实体被跳过，
+中途加入的实体留到下一次遍历；方法体搬动了自己的实体，`[ForEach]` 方法的 `ref` 参数依然有效。
+
+- **适合：** 任何时候。在做出决定的地方直接写变更，同一次更新里后面的代码和系统都能看到。
+- **和命令缓冲相比：** 把变更推迟到缓冲里的库，会让系统看到一个马上就要变的状态，效果的先后还取决于缓冲何时回放。
+  EasyEcs 没有需要回放的缓冲。
+- **开销：** 可能做结构变更的遍历，每个实体之后检查一个计数器；不可能做结构变更的方法连这一步都省了。
+- **指南：** [结构变更](/zh/docs/guide/structural-changes)
+
+### 临时查询 [#ad-hoc-queries]
+
+在任何代码里遍历：`foreach (var item in world.Query<T…>(filter))`、结构体 job（`world.ForEach`、`ForEachEntity`）、
+`world.Count` 和 `world.Any`。系统之外的静态 `[ForEach]` 方法会生成一个入口（`Reports.CountAlive(world, ref alive)`），
+带着调用方传入的值，以结构体 job 的方式执行。
+
+- **适合：** 工具、测试、两次更新之间的请求处理、一次性的遍历。
+- **别用于：** 每个 tick 都要跑的逻辑：系统有排序、有调度、有耗时统计。
+- **开销：** 零分配。`Count` 只是把表的行数加起来；`Any` 找到第一个就停；结构体 job 是最快的临时遍历。
+- **指南：** [查询与过滤](/zh/docs/guide/queries)
+
+## 响应变化 [#react]
+
+服务器很多时间花在“上个 tick 以来变了什么”上：同步、存盘、重建索引。EasyEcs 把变化记录成数据，系统只访问那些行。
+
+```csharp
+public record struct Replica(int Health) : IComponent;
+
+public class ReplicationSystem : EcsSystem
+{
+    [ForEach, Changed<Health>]                       // 只访问本系统上次执行后被写过的行
+    static void Send(in Health hp, ref Replica replica) => replica = new Replica(hp.Value);
+}
+```
+
+### 变更追踪 [#change-tracking]
+
+标了 `ITrackChanges` 的组件，每行记录最后一次写入时的变更 tick（任何给出 `ref` 的访问都算写入）。`[Changed<T>]` 方法只访问本系统上次执行后
+被写过的行；`QueryFilter.Changed<T>(since)` 在查询里做同样的事。
+
+- **适合：** 向客户端同步、保存脏数据、为移动过的单位更新空间结构。
+- **别用于：** 每个 tick 每行都会写的组件（没有可跳过的）。
+- **开销：** 每行 8 字节，每次写入一次存储；不追踪的组件没有任何开销。10 万实体里同步 10 个变化的实体耗时 <BenchValue k="changed.10" />，
+  扫描全部行是 <BenchValue k="changed.10.scan" />。
+- **指南：** [变更追踪](/zh/docs/guide/change-tracking)
+
+### 移除检测 [#removal-detection]
+
+`[Removed<T>]` 方法访问本系统上次执行后失去了被追踪 `T` 的实体，每次移除访问一次，还能读写它们的其他组件：移除时行被保留，并打上 tick。
+
+- **适合：** 告诉客户端什么没了（火灭了、护盾碎了），释放组件代表的东西（预留的格子）。
+- **别用于：** 已销毁的实体，它们没有行：用一个同步系统会读的标签标记，同步之后再销毁。
+- **开销：** 除了组件本来就有的 tick 列，不占额外存储。10 万实体里找出 10 次移除耗时 <BenchValue k="removed.10" />。
+- **指南：** [变更追踪](/zh/docs/guide/change-tracking#removal-detection)
+
+### 清理组件 [#cleanup-components]
+
+实现 `ICleanupComponent` 的组件比它的实体活得久：销毁实体时，其他组件被移除，并加上 `Destroyed` 标签；实体一直保留，
+直到某个系统释放资源、移除最后一个清理组件。
+
+- **适合：** World 之外、必须恰好释放一次的资源：一个连接、一个预留的座位、另一个服务里的槽位。
+- **别用于：** 纯数据：已销毁实体的组件不需要释放。
+- **开销：** 没有清理组件的表，每次销毁多检查一个标志。
+- **指南：** [清理与禁用](/zh/docs/guide/cleanup-and-disable)
+
+### 禁用与启用 [#disable-and-enable]
+
+`entity.Disable<T>()` 让组件对查询、`Has` 和 `Get` 不可见，同时保留它的值；`Enable<T>()` 再把它还回来。期间实体带着 `Disabled<T>` 标签，
+所以被暂停的实体一个查询就能找到。
+
+- **适合：** 暂停：眩晕期间冻结冷却，玩家接管单位时关掉 AI。
+- **别用于：** 以后不再需要的值：直接移除组件。
+- **开销：** O(1)；一张表里第一次禁用时，这一行搬到带标签列的表，只搬一次。
+- **指南：** [清理与禁用](/zh/docs/guide/cleanup-and-disable)
+
+## 查找 [#find]
+
+按值查找，不用手工维护一个同步的字典。
+
+```csharp
+public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }
+```
+
+```csharp
+using var world = new World();
+world.GroupBy<Zone>();                                          // 初始化时调用
+world.CreateEntity(new Team(1), new Zone(3), new Position(0, 0));
+
+int red = world.TeamIndex.Count(1);                             // 一次哈希查找
+int inZone = world.Count<Position>(QueryFilter.Create().InGroup<Zone>(3));   // 只遍历 3 号场景的行
+```
+
+### 值索引 [#value-indexes]
+
+实现 `IIndexed<TKey>` 的组件可以按 `Key` 查找：`world.Index<T, TKey>()`（或 `world.TeamIndex`）的 `Find`、`TryFind` 和 `Count`。
+每次 `Set`、创建和销毁都会更新索引；经 `ref` 写入时索引看不到，所以编译期直接报错（[EECS015](/zh/docs/guide/analyzer#eecs015)）。
+
+- **适合：** 按名字找玩家、找公会里的单位、找某个网格格子里的实体。
+- **别用于：** 大多数行每个 tick 都在变、又很少查找的值：每次变化都要重新挂链。
+- **开销：** 每个被索引的实体一个节点，只有用到索引的 World 才付出。`Count` 是一次哈希查找，`Find` 每个匹配一步。
+- **指南：** [索引与关系](/zh/docs/guide/indexes-and-relations)
+
+### 有序区间 [#ordered-ranges]
+
+键可比较的值索引还能按键的顺序遍历：`Range(min, max)`、`RangeDescending`、`Ascending()` 和 `Descending()`。
+
+- **适合：** 排行榜、按分数匹配、某个等级区间的玩家。
+- **开销：** 键出现和消失时维护有序的键列表：每次 O(log 键数)，再加一次块移动。
+- **指南：** [索引与关系](/zh/docs/guide/indexes-and-relations)
+
+### 按值分表 [#table-groups]
+
+调用 `world.GroupBy<T>()` 后，`IGroup` 组件的值会把表拆开：同一个场景、地图或对局的实体共用一批表，`QueryFilter.InGroup<T>(group)`
+只遍历它们的行，在内存里是连续的。设置新值会把实体搬到新分组的表里。
+
+- **适合：** 一个 World 里有很多场景或对局，各自单独更新、单独查询。
+- **别用于：** 经常变化的值（每次变化一次行拷贝），或者每组只有寥寥几个实体。
+- **开销：** `GroupBy` 时一次 O(实体数)；每次换组一次行拷贝。
+- **指南：** [分组](/zh/docs/guide/groups)
+
+## 组织 [#structure]
+
+实体之间的链接、实体内部的列表，以及用来刷出实体的配方。
+
+```csharp
+public record struct OwnedBy(EntityId Owner) : IComponent, IIndexed<EntityId> { public EntityId Key => Owner; }
+public record struct Loot(int Item);
+```
+
+```csharp
+var archer = world.CreateEntity(new Health(10));
+world.CreateEntity(new OwnedBy(archer), new Position(0, 0));        // 箭指向它的主人
+int arrows = world.OwnedByIndex.Count(archer);
+
+var turret = world.CreateEntity(new ChildOf(archer));               // 随父实体一起销毁
+archer.Set(new DynamicBuffer<Loot>());
+archer.WriteLoot().Add(new Loot(7));                                // 一次被追踪的写入
+
+var goblin = new Prefab().SetPosition(0, 0).SetHealth(30);
+var wave = new Entity[100];
+world.Instantiate(goblin, wave);
+```
+
+### 关系 [#relations]
+
+以 `EntityId` 为键的索引组件，把每个实体链接到一个目标（箭指向弓箭手），索引能列出所有指向某个目标的实体。`IRelation` 元素把一个实体
+链接到多个目标（英雄同时在几个队伍里），用 `AddRelation` / `RemoveRelation` 维护，用 `world.Relations<T>()` 反查。
+`WhenTargetDestroyed(TargetPolicy…)` 决定目标销毁时链接怎么处理：保留、移除，或者连带销毁。
+
+- **适合：** 归属关系、队伍成员、增益作用的单位、有自己状态的物品。
+- **别用于：** 只有主人自己读的一袋普通值：[动态缓冲](#dynamic-buffers)只是一个组件，不用每个元素一个实体。
+- **开销：** 反查 O(1) 起步，每条链接 O(1)；一条 `IRelation` 链接占 20 字节，再加目标列表里的 8 字节，可回收复用。
+- **指南：** [索引与关系](/zh/docs/guide/indexes-and-relations)
+
+### 层级 [#hierarchy]
+
+内置的 `ChildOf(EntityId Parent)` 组件把子实体链接到父实体。`world.Children(parent)` 列出子实体，`Set(new ChildOf(other))` 换父节点，
+销毁父实体会连带销毁所有后代。
+
+- **适合：** 一艘船和它的炮塔、一个玩家和挂在身上的物品、一个小队和它的成员。
+- **别用于：** 变换传播：没有内置的世界坐标变换，需要的话自己写系统。
+- **开销：** 第一次调用为所有 `ChildOf` 建一次索引之后，`Children` O(1) 起步、每个子实体 O(1)；级联销毁每条链接 O(1)。
+- **指南：** [层级](/zh/docs/guide/hierarchy)
+
+### 动态缓冲 [#dynamic-buffers]
+
+`DynamicBuffer<T>` 是每个实体一个的列表，以被追踪组件的形式存放。它的写操作（`Add`、`RemoveAt`、`Clear`、`AsSpan`）都要以 `ref`
+拿缓冲，所以 `[Changed<DynamicBuffer<T>>]` 能找出列表变了的实体，经 `in` 写入则编译不过。快照会拷贝其中的元素。
+
+- **适合：** 属于某个实体、变了就要发送或保存的列表：背包、路径、最近的命中记录。
+- **别用于：** 有自己状态的元素（每个元素一个实体，加一条关系），或者数量固定的一小组值（非托管组件里的 `[InlineArray]`）。
+- **开销：** 每个实体一个对象加一个数组，第一次写入时创建；容量之内的写入不分配内存。
+- **指南：** [动态缓冲](/zh/docs/guide/dynamic-buffers)、[ECS 设计原则第 8 条](/zh/docs/ecs-principles#8-choose-how-to-hold-a-collection)
+
+### 预制体与克隆 [#prefabs-and-cloning]
+
+`Prefab` 是一份不属于任何 World 的组件值配方，所以没有查询能看到它，也没有系统需要过滤它。`world.Instantiate(prefab)` 创建一个实体，
+`Instantiate(prefab, span)` 创建一整波；`new Prefab(base)` 生成变体，`AddMember()` 组成一组（首领带着小怪和坐骑）。
+`entity.Clone()` 复制一个活着的实体。
+
+- **适合：** 反复刷出的实体种类：NPC 类型、投射物、掉落物，写在代码里或启动时从配置加载。
+- **别用于：** 每个值都不一样的实体：直接带值创建。
+- **开销：** 每个实例一次行拷贝；一整波只过一次结构闸门，表最多扩容一次。
+- **指南：** [预制体](/zh/docs/guide/prefabs)
+
+## 持久化 [#persist]
+
+World 就是数据，所以能拷贝、能写出去、能搬走、能重新加载。
+
+```csharp
+var before = world.Capture();                       // 内存里
+world.Update();
+world.Restore(before);                              // 回滚；之前的句柄重新有效
+
+var bytes = new System.Buffers.ArrayBufferWriter<byte>();
+world.Save(bytes);                                  // 写成字节：文件、数据库、另一个进程
+using var restarted = new World();
+restarted.Load(bytes.WrittenSpan);
+```
+
+### 快照 [#snapshots]
+
+`world.Capture()` 把实体、组件和单例拷进一个 `WorldSnapshot`；`world.Restore(snapshot)` 把它们放回去，可以恢复任意多次。
+`Capture(into)` 复用已有快照的数组。
+
+- **适合：** 撤销一回合、客户端预测的回滚、回放、测试之间重置 World。
+- **别用于：** 跨重启的持久化（用[存档](#saves)）；组件里的托管引用是共享的，不会深拷贝。
+- **开销：** 两个方向都是 O(实体数 × 组件数)；拍进复用的快照不分配内存。
+- **指南：** [快照](/zh/docs/guide/snapshots)
+
+### 存档 [#saves]
+
+`world.Save(writer)` 把整个 World 写成字节，`world.Load(bytes)` 在本进程或另一个进程的 World 里读回来：id、组件和单例都一样。
+非托管组件按原始行写出；托管组件和单例由 Nino 写出（`[NinoType]`）。类型按名字记录，所以加载时会跳过进程里已经不存在的组件。
+
+- **适合：** 跨重启持久化、落盘的回放、把一个 World 发到另一台机器。
+- **别用于：** 原地修改非托管组件的内存布局：请新增一个组件类型，否则旧存档加载不了。
+- **开销：** 每个非托管列一次块拷贝；缓冲足够大之后不再分配内存。
+- **指南：** [存档](/zh/docs/guide/saves)
+
+### 迁移 [#migration]
+
+`SaveEntities` 和 `LoadEntities` 经由字节把一组实体（一个玩家和他拥有的东西）搬到另一个 World，换上新 id，组内的链接随之改写。
+`MoveEntities` 在同一线程的两个 World 之间直接搬，不经过编码。
+
+- **适合：** 玩家换场景或换服，对局结束把幸存者交给大厅。
+- **开销：** O(给出的实体数 × 组件数)；`MoveEntities` 直接拷贝行。
+- **指南：** [迁移与卸载](/zh/docs/guide/migration-and-unload)
+
+### 卸载插件类型 [#unloading]
+
+`world.RemoveTypes(assembly)` 或 `RemoveTypes(context)` 从 World 里移除插件的系统、单例、索引和组件，于是可回收的
+`AssemblyLoadContext` 可以卸载、加载新版本，数据靠存档带过去。
+
+- **适合：** 在线服务器热重载游戏逻辑。
+- **开销：** O(持有这些组件的实体数 + 表数 + 缓存的查询数)，走冷路径，会分配内存。
+- **指南：** [迁移与卸载](/zh/docs/guide/migration-and-unload)
+
+## 扩展 [#scale]
+
+更多的实体，更多的核，更大的刷怪波次。
+
+### 每个线程一个 World [#threading-model]
+
+一个 World 有一个所有者线程，就是调用 `Update` 的那个。结构变更检查一个普通的所有者标志（没有原子操作），在并行区域里发生时直接抛异常，
+而不是把表写坏；分析器能看到的跨线程变更会在编译期报出（[EECS013](/zh/docs/guide/analyzer#eecs013)、[EECS014](/zh/docs/guide/analyzer#eecs014)）。
+
+- **适合：** 每张地图或每个场景一个 World，各占一个线程，完全不需要同步。其他线程的输入通过你自己的队列交给它，由一个系统取出处理。
+- **开销：** 4 个各 2.5 万实体的 World 在 4 个线程上一个 tick 耗时 <BenchValue k="tick.fourWorlds" />，一个 10 万实体的 World 是
+  <BenchValue k="tick.oneWorld" />。
+- **指南：** [线程模型](/zh/docs/guide/threading)
+
+### 并行系统 [#parallel-systems]
+
+打开 `WorldOptions.ParallelSystems` 后，相邻的、没有顺序约束、读写不冲突的系统同时执行。读写集合由 `ref` 和 `in` 参数生成，
+结果始终和顺序执行一致。
+
+- **适合：** 几个互相独立的重系统，加上空闲的核。
+- **别用于：** 只处理几千个实体的轻系统：每个阶段都有一次线程池交接的开销。
+- **开销：** 零分配；`MaxDegreeOfParallelism` 限制线程数。
+- **指南：** [线程模型](/zh/docs/guide/threading)
+
+### 并行 [ForEach] [#parallel-foreach]
+
+`[ForEach(Parallel = true)]` 把一个方法要处理的行切成块，由调用线程和线程池线程同时执行。可能产生竞争的方法会被分析器拒绝
+（[EECS010](/zh/docs/guide/analyzer#eecs010)）：结构变更、批量方法、以 `ref` 接收单例。`world.ForEachParallel` 和
+`ForEachEntityParallel` 对结构体 job 做同样的事。
+
+- **适合：** 几万个实体以上、每个实体计算量大的工作：转向、寻路跟随、AI 打分。
+- **开销：** 每块 1,024 到 16,384 行，大约每个线程四块，零分配。
+- **指南：** [线程模型](/zh/docs/guide/threading)
+
+### 批量操作 [#bulk-operations]
+
+`world.CreateEntities(span, a, b)` 刷出一波取值相同的实体，`Instantiate(prefab, span)` 按预制体刷一波，`DestroyEntities<T>(filter)`
+销毁所有匹配的实体。`SetAll`、`RemoveAll`、`DisableAll` 和 `EnableAll` 对所有匹配的实体改同一个组件，每次处理整个 64 行位字。
+
+- **适合：** 一波怪物、清空一个场景、回合重置、给所有人解除一个状态。
+- **开销：** 每次调用只过一次结构闸门，表最多扩容一次。
+- **指南：** [批量操作](/zh/docs/guide/bulk)
+
+## 构建与运维 [#operate]
+
+让代码库在增长中保持正确、让运行中的服务器可观测的那部分功能。
+
+### 分析器与代码修复 [#analyzer]
+
+包里在生成器旁边附带了分析器（EECS002 到 EECS024）和代码修复。不合法的 `[ForEach]` 方法、类组件、有状态的系统、引用系统的系统、
+经 `in` 的写入、可能竞争的并行方法、跨线程的结构变更、经 `ref` 写入的被索引组件、成环的排序，都会编译失败；还有几条警告标出能跑但有代价的写法。
+
+- **适合：** 一直开着；默认就是开的，它让系统保持解耦。
+- **指南：** [分析器规则](/zh/docs/guide/analyzer)
+
+### 系统耗时统计 [#per-system-timing]
+
+打开 `WorldOptions.MeasureSystems` 后，系统的每次执行都会计时：`system.Stats` 里有 `Runs`、`Last`、`Total` 和 `Average`。
+
+- **适合：** 在线服务器上的诊断接口或日志，看哪个系统越来越慢。
+- **开销：** 打开时每次执行读两次时间戳；关闭时没有开销。
+- **指南：** [系统](/zh/docs/guide/systems)
+
+### 异常处理 [#errors]
+
+默认情况下，系统抛出的异常会传出 `Update()`。设置 `WorldOptions.SystemErrors = SystemErrorPolicy.Disable` 后，出错的系统被停用，
+异常保存在 `system.Error` 里，更新继续执行；把 `Enabled` 设回 `true` 就会重试。
+
+- **适合：** 在线服务器用 `Disable`，故障变成健康检查能读到的数据；测试里用 `Throw`。
+- **开销：** 系统不抛异常就没有开销。
+- **指南：** [系统](/zh/docs/guide/systems)
+
+### 运行时自省 [#introspection]
+
+`world.Describe()` 列出所有表及其列、行数、容量和字节数；`entity.Describe()` 列出一个实体的组件值。调试器里能直接看到实体的组件。
+
+- **适合：** 管理后台、内存报告、调试。
+- **开销：** 生成描述时分配内存（冷路径），不碰热路径。
+- **指南：** [架构](/zh/docs/architecture)
+
+### Native AOT [#native-aot]
+
+系统、job 和过滤条件都在编译期生成，热路径上没有反射。库本身开着裁剪和 AOT 分析器构建，所以 `<PublishAot>true</PublishAot>`
+之外，EasyEcs 不需要任何额外配置。
+
+- **适合：** 体积小、启动快的服务器容器。
+
+### 模板与示例 [#templates]
+
+`dotnet new easyecs` 创建一个按固定 tick 运行的控制台服务器，带组件、系统和预制体（加 `--tests` 多一个 NUnit 项目）；
+`dotnet new easyecs-system` 添加一个系统。[`examples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/examples)
+里每个文件演示一个功能，用 `dotnet run` 直接运行；[`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples)
+是完整的程序（游戏循环、存档与加载、每线程一个 World、热重载）。
+
+- **指南：** [快速开始](/zh/docs/getting-started)
+
+## 和其他库的对比 [#compared]
+
+同一个服务器 tick 移植到各个库上（10 万实体）：
+
+<PeerChart />
+
+| | EasyEcs | Friflo.Engine.ECS | Arch | DefaultEcs |
+| --- | --- | --- | --- | --- |
+| 存储 | 原型，带存在位 | 原型 | 分块的原型 | 每种组件一个池 |
+| 遍历中的结构变更 | 立即生效，每个实体只访问一次 | 抛异常；改用命令缓冲 | 不做保护；命令缓冲 | 不安全；命令记录器 |
+| 源生成的系统 | 有 | 无 | 核心库里没有 | 无 |
+| 编译期分析器 | 有 | 无 | 无 | 无 |
+| 按 tick 的变更追踪 | 有 | 无 | 无 | `WhenChanged<T>()` |
+| 移除检测 | `[Removed<T>]` | 事件 | 事件 | `WhenRemoved<T>()` |
+| 值索引 | 有 | 有 | 无 | `EntityMap` |
+| 关系与层级 | 有 | 有 | 无 | 无 |
+| 并行系统 | 读写集合自动生成 | 无 | 无 | `ParallelSystem<T>` |
+| 快照 / 存档 | 都有 | JSON | 无 | 文本、二进制 |
+| Unity | 不支持（net10.0） | 支持 | 支持 | 支持 |
+
+<BenchSource />
+
+完整的对比，包括每个库各自擅长的场景，见[横向对比](/zh/docs/comparison)。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card icon={<Rocket />} title="快速开始" href="/zh/docs/getting-started">
+    一步一步搭一个小型模拟。
+  </Card>
+  <Card icon={<Swords />} title="战斗服务器示例" href="/zh/docs/example">
+    一个服务器用上所有功能，同时也是基准测试和单元测试。
+  </Card>
+  <Card icon={<Gauge />} title="性能指南" href="/zh/docs/performance">
+    什么场景用哪个 API，附实测数据。
+  </Card>
+  <Card icon={<Scale />} title="横向对比" href="/zh/docs/comparison">
+    EasyEcs 与 Friflo.Engine.ECS、Arch、DefaultEcs 的对比。
+  </Card>
+</Cards>

@@ -1,0 +1,576 @@
+---
+title: Features
+seoTitle: "EasyEcs features: a complete C# ECS for .NET 10 servers"
+description: Every EasyEcs feature on one page, grouped by job. What each does, when to use it, what it costs, how it compares with Arch, Friflo and DefaultEcs.
+icon: ListChecks
+---
+
+import { Gauge, Rocket, Scale, Swords } from 'lucide-react';
+
+Every feature of EasyEcs on one page, grouped by the job it does on a server: simulate a world, react to what
+changed, find entities, structure them, persist them, and scale across cores. Each entry says what the feature
+does, when to use it and when not, what it costs, and links to its guide page.
+
+Every feature below ships in the one `EasyEcs` package, works on the same world, allocates nothing on its hot path
+after warm-up, and is covered by the unit tests and a BenchmarkDotNet benchmark. The
+[battle server](/en/docs/example) uses all of them in one program; its full tick of 100,000 units takes
+<BenchValue k="tick.battle" />.
+
+<BenchSource />
+
+## At a glance [#at-a-glance]
+
+| Job | Features |
+| --- | --- |
+| [Simulate](#simulate) | [worlds and entities](#worlds-and-entities), [components and tags](#components-and-tags), [generated members](#generated-members), [systems and `[ForEach]`](#systems-and-foreach), [filters](#filters), [optional components](#optional-components), [batch methods](#batch-methods), [singletons](#singletons), [ordering, groups and intervals](#system-groups-and-intervals), [immediate structural changes](#immediate-structural-changes), [ad-hoc queries](#ad-hoc-queries) |
+| [React to changes](#react) | [change tracking](#change-tracking), [removal detection](#removal-detection), [cleanup components](#cleanup-components), [disable and enable](#disable-and-enable) |
+| [Find](#find) | [value indexes](#value-indexes), [ordered ranges](#ordered-ranges), [table groups](#table-groups) |
+| [Structure](#structure) | [relations](#relations), [hierarchy](#hierarchy), [dynamic buffers](#dynamic-buffers), [prefabs and cloning](#prefabs-and-cloning) |
+| [Persist](#persist) | [snapshots](#snapshots), [saves](#saves), [migration](#migration), [unloading plugin types](#unloading) |
+| [Scale](#scale) | [one world per thread](#threading-model), [parallel systems](#parallel-systems), [parallel `[ForEach]`](#parallel-foreach), [bulk operations](#bulk-operations) |
+| [Build and operate](#operate) | [analyzer and code fixes](#analyzer), [per-system timing](#per-system-timing), [errors](#errors), [introspection](#introspection), [Native AOT](#native-aot), [templates and examples](#templates) |
+
+## Simulate [#simulate]
+
+The core of every tick: data in tables, logic in systems, and the loop that runs them.
+
+```csharp
+public record struct Position(float X, float Y) : IComponent;
+public record struct Velocity(float X, float Y) : IComponent;
+public record struct Health(int Value) : IComponent, ITrackChanges;
+public record struct Armor(int Value) : IComponent;
+public struct Dead : IComponent;
+public record struct Clock(float Dt) : ISingletonComponent;
+
+public class MovementSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Move(ref Position p, in Velocity v, in Clock clock) =>
+        p = new Position(p.X + v.X * clock.Dt, p.Y + v.Y * clock.Dt);
+}
+```
+
+### Worlds and entities [#worlds-and-entities]
+
+A `World` owns entities, components, singletons and systems; worlds share nothing. An `Entity` is a 16-byte handle
+(world, index, version): ids are recycled, and every access checks the version, so a handle to a destroyed entity
+throws instead of reaching the entity that reuses its id.
+
+- **Use it for:** one world per independent simulation (a map, a zone, a match, a test). Keep `Entity` handles in
+  code and `EntityId`s in components.
+- **Cost:** a 16-byte record per entity id. Creating with its components is one placement in the final table;
+  destroying fills the hole with the table's last row. `WorldOptions.InitialEntityCapacity` and
+  `EnsureEntityCapacity(n)` pre-size for a known peak, so a long-running server never grows at run time.
+- **Guide:** [Entities and components](/en/docs/guide/entities-and-components)
+
+### Components and tags [#components-and-tags]
+
+A component is a struct (`IComponent`) in archetype tables: one table per component set, one column per component,
+one row per entity. Unmanaged columns are pinned and start on a 64-byte boundary. An empty struct is a tag.
+Removing a component clears a presence bit and keeps the row, so adding it back is just as cheap.
+
+- **Use it for:** per-entity data split by what systems read together; tags for states that come and go.
+- **Skip it for:** values that change every tick on most entities as a tag: use a field.
+- **Cost:** a pass loads only the columns it reads. Gaining a component the table has no column for copies the row
+  once; after that, toggling it flips a bit.
+- **Guide:** [Entities and components](/en/docs/guide/entities-and-components)
+
+### Generated members [#generated-members]
+
+The source generator gives each component named C# 14 extension members: `e.Position`, `HasPosition`,
+`SetPosition(x, y)`, `RemovePosition()`, `IsDead` for a tag, `world.Clock` for a singleton, `world.TeamIndex` for an
+indexed component, and the same writers on a `Prefab`. Tracked and indexed components get a read-only property, so
+a read is never a write.
+
+- **Use it for:** all code that names a concrete component. The generic API (`Get<T>()`, `Set(…)`) stays for
+  generic code.
+- **Cost:** none. Each member is an inlined call to the generic API, and the generator knows which ones are
+  structural.
+- **Guide:** [Entities and components](/en/docs/guide/entities-and-components), [Cheat sheet](/en/docs/cheat-sheet#generated-members)
+
+### Systems and [ForEach] [#systems-and-foreach]
+
+A system derives from `EcsSystem` and has one job. A `[ForEach]` method is its whole loop: components (`ref` to
+write, `in` to read), singletons, the `Entity`, the `World`. The generator compiles each method into a struct job
+that the JIT inlines into the row loop. `OnCreate`, `OnUpdate` and `OnDestroy` cover setup and per-update work.
+
+- **Use it for:** all per-entity logic of a tick.
+- **Cost:** a `[ForEach]` system that adds `Velocity` to `Position` costs <BenchValue k="forEach.perEntity" /> per
+  entity, against <BenchValue k="rawArray.perEntity" /> for the same loop over two plain arrays. Per system and
+  update: three virtual calls plus one query-cache lookup per method.
+- **Guide:** [Systems](/en/docs/guide/systems), [ECS principles](/en/docs/ecs-principles)
+
+### Filters [#filters]
+
+`[With<T>]` requires a component that is not passed in, `[Without<T>]` excludes one, `[WithAny<T>]` requires one of
+several, `[Changed<T>]` and `[Removed<T>]` select by change tick. The same filters exist as a `QueryFilter` for
+ad-hoc code, and on a system group for all its systems.
+
+- **Use it for:** states (`[Without<Dead>]`), roles (`[With<Player>]`), alternatives
+  (`[WithAny<Frozen>, WithAny<Stunned>]`).
+- **Cost:** matching is cached per query shape; a table that cannot match is skipped once, a table where some rows
+  lack a component is tested 64 rows per bit word.
+- **Guide:** [Queries and filters](/en/docs/guide/queries)
+
+### Optional components [#optional-components]
+
+A `Maybe<T>` parameter visits every entity whether or not it has `T`: `HasValue` says which, `Value` is the `ref`.
+One method replaces a `[With<T>]` and a `[Without<T>]` variant when the optional part is small.
+
+- **Use it for:** a bonus that only some entities have (armor on a damage roll, a buff on regeneration).
+- **Skip it for:** the hottest loops: two methods with `[With<T>]` / `[Without<T>]` test nothing per row.
+- **Cost:** one presence-bit test per row in a method that makes no structural change; a lookup per entity in one
+  that does.
+- **Guide:** [Systems](/en/docs/guide/systems)
+
+### Batch methods [#batch-methods]
+
+A `[ForEach]` method that takes `Span<T>` / `ReadOnlySpan<T>` receives whole runs of matching rows, one call per run,
+for code you vectorize with `Vector<T>`. `world.ForEachBatch` does the same for ad-hoc jobs.
+
+- **Use it for:** arithmetic over many rows (movement, decay, sums).
+- **Skip it for:** logic that changes structure: the world's structure is frozen during a batch method.
+- **Cost:** one call per run of rows instead of one per entity.
+- **Guide:** [Systems](/en/docs/guide/systems)
+
+### Singletons [#singletons]
+
+One struct per world (`ISingletonComponent`): clock, configuration, counters, a spatial grid. A `[ForEach]` method
+takes it as a `ref` or `in` parameter; `SingletonRef<T>` is a stable handle for code outside systems.
+
+- **Use it for:** all world-level state. Systems keep none.
+- **Skip it for:** a static field instead of one: it would be shared by every world.
+- **Cost:** one lookup per pass for a parameter.
+- **Guide:** [Singletons](/en/docs/guide/singletons)
+
+### Ordering, groups and intervals [#system-groups-and-intervals]
+
+Systems run in registration order, moved by `[UpdateBefore<T>]` / `[UpdateAfter<T>]`. `[UpdateInGroup<G>]` puts a
+system in a group that runs on `world.Update<G>()` only. `UpdateInterval` and `UpdatePhase` run a system every N-th
+update, spread over phases; `Enabled` switches it off.
+
+- **Use it for:** different cadences: input on every wake-up, simulation on a fixed tick, saving every few seconds.
+- **Cost:** none beyond the systems; an empty group is a no-op. Cycles fail the build
+  ([EECS019](/en/docs/guide/analyzer#eecs019)).
+- **Guide:** [Systems](/en/docs/guide/systems)
+
+### Immediate structural changes [#immediate-structural-changes]
+
+Create, destroy, add and remove apply at once, also inside a pass over the same tables. A pass visits each entity at
+most once: entities that leave before their turn are skipped, entities that join wait for the next pass, and the
+`ref` parameters of a `[ForEach]` method stay valid when the body moves its own entity.
+
+- **Use it for:** always. Write the change where the decision is made; later code and later systems of the same
+  update see it.
+- **Compared with command buffers:** libraries that defer changes to a buffer show systems a state that is about to
+  change, and the order of effects depends on when the buffer is played back. EasyEcs has no buffer to flush.
+- **Cost:** a pass that may change structure checks one counter after each entity; methods that cannot change
+  structure skip even that.
+- **Guide:** [Structural changes](/en/docs/guide/structural-changes)
+
+### Ad-hoc queries [#ad-hoc-queries]
+
+Iteration from any code: `foreach (var item in world.Query<T…>(filter))`, struct jobs (`world.ForEach`,
+`ForEachEntity`), `world.Count` and `world.Any`. A static `[ForEach]` method outside a system gets a generated entry
+point (`Reports.CountAlive(world, ref alive)`) that runs it as a struct job with the caller's values.
+
+- **Use it for:** tools, tests, request handlers between updates, one-off passes.
+- **Skip it for:** per-tick logic: a system is ordered, scheduled and measured.
+- **Cost:** allocation-free. `Count` sums table counts; `Any` stops at the first match; a struct job is the fastest
+  ad-hoc pass.
+- **Guide:** [Queries and filters](/en/docs/guide/queries)
+
+## React to changes [#react]
+
+Servers spend much of their time on what changed since the last tick: replication, saving, re-indexing. EasyEcs
+records changes as data, so a system visits only those rows.
+
+```csharp
+public record struct Replica(int Health) : IComponent;
+
+public class ReplicationSystem : EcsSystem
+{
+    [ForEach, Changed<Health>]                       // only rows written since this system last ran
+    static void Send(in Health hp, ref Replica replica) => replica = new Replica(hp.Value);
+}
+```
+
+### Change tracking [#change-tracking]
+
+A component marked `ITrackChanges` records the change tick of each row's last write (any access that hands out a
+`ref`). A `[Changed<T>]` method visits only the rows written since its system last ran;
+`QueryFilter.Changed<T>(since)` does the same for queries.
+
+- **Use it for:** replication to clients, saving dirty entities, updating a spatial structure for the units that
+  moved.
+- **Skip it for:** components written on every row every tick (there is nothing to skip).
+- **Cost:** 8 bytes per row and one store per write; untracked components pay nothing. Replicating 10 changed
+  entities of 100,000 takes <BenchValue k="changed.10" />, against <BenchValue k="changed.10.scan" /> for a scan of
+  every row.
+- **Guide:** [Change tracking](/en/docs/guide/change-tracking)
+
+### Removal detection [#removal-detection]
+
+A `[Removed<T>]` method visits the entities that lost a tracked `T` since its system last ran, once per removal,
+with their other components: removing keeps the row and stamps its tick.
+
+- **Use it for:** telling clients what went away (a fire went out, a shield broke), releasing what a component stood
+  for (a reserved cell).
+- **Skip it for:** destroyed entities, which have no row: mark them with a tag that replication reads, and destroy
+  them after it ran.
+- **Cost:** no storage beyond the tick column the component already has. Finding 10 removals among 100,000 entities
+  takes <BenchValue k="removed.10" />.
+- **Guide:** [Change tracking](/en/docs/guide/change-tracking#removal-detection)
+
+### Cleanup components [#cleanup-components]
+
+A component implementing `ICleanupComponent` outlives the destruction of its entity: destroying it removes the other
+components and adds the `Destroyed` tag, and the entity stays until a system releases the resource and removes the
+last cleanup component.
+
+- **Use it for:** resources outside the world that must be released exactly once: a socket, a reserved seat, a
+  slot in another service.
+- **Skip it for:** plain data: a destroyed entity's components need no release.
+- **Cost:** tables without a cleanup component pay one flag check per destroy.
+- **Guide:** [Cleanup and disable](/en/docs/guide/cleanup-and-disable)
+
+### Disable and enable [#disable-and-enable]
+
+`entity.Disable<T>()` hides a component from queries, `Has` and `Get` and keeps its value; `Enable<T>()` gives it
+back. The entity carries the tag `Disabled<T>` meanwhile, so the paused entities are one query away.
+
+- **Use it for:** pausing: a cooldown frozen while stunned, an AI switched off while a player controls the unit.
+- **Skip it for:** values you will not need again: remove the component.
+- **Cost:** O(1); the first disable in a table moves the row once to the table with the tag's column.
+- **Guide:** [Cleanup and disable](/en/docs/guide/cleanup-and-disable)
+
+## Find [#find]
+
+Lookups by value without a dictionary kept in sync by hand.
+
+```csharp
+public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }
+```
+
+```csharp
+using var world = new World();
+world.GroupBy<Zone>();                                          // at setup
+world.CreateEntity(new Team(1), new Zone(3), new Position(0, 0));
+
+int red = world.TeamIndex.Count(1);                             // a hash probe
+int inZone = world.Count<Position>(QueryFilter.Create().InGroup<Zone>(3));   // walks zone 3's rows only
+```
+
+### Value indexes [#value-indexes]
+
+A component implementing `IIndexed<TKey>` is found by its `Key`: `world.Index<T, TKey>()` (or `world.TeamIndex`)
+with `Find`, `TryFind` and `Count`. Every `Set`, create and destroy keeps the index current; writes through a `ref`,
+which the index could not see, fail the build ([EECS015](/en/docs/guide/analyzer#eecs015)).
+
+- **Use it for:** a player by name, the units of a guild, the entities in a grid cell.
+- **Skip it for:** values that change on most rows every tick and are looked up rarely: every change is a re-link.
+- **Cost:** one node per indexed entity, paid only by worlds that use the index. `Count` is a hash probe, `Find` one
+  step per match.
+- **Guide:** [Indexes and relations](/en/docs/guide/indexes-and-relations)
+
+### Ordered ranges [#ordered-ranges]
+
+A value index whose key is comparable also walks in key order: `Range(min, max)`, `RangeDescending`, `Ascending()`
+and `Descending()`.
+
+- **Use it for:** leaderboards, matchmaking by rating, the players of a level range.
+- **Cost:** the sorted key list is kept as keys appear and disappear: O(log keys) plus a block move each.
+- **Guide:** [Indexes and relations](/en/docs/guide/indexes-and-relations)
+
+### Table groups [#table-groups]
+
+After `world.GroupBy<T>()`, the value of an `IGroup` component splits tables: the entities of one zone, map or match
+share tables, and `QueryFilter.InGroup<T>(group)` walks only their rows, contiguous in memory. Setting a new value
+moves the entity to its group's tables.
+
+- **Use it for:** many zones or matches in one world, each updated or queried on its own.
+- **Skip it for:** values that change often (each change is a row copy) or a handful of entities per group.
+- **Cost:** O(entities) once at `GroupBy`; one row copy per change of group.
+- **Guide:** [Groups](/en/docs/guide/groups)
+
+## Structure [#structure]
+
+Links between entities, lists inside entities, and kinds of entities to spawn from.
+
+```csharp
+public record struct OwnedBy(EntityId Owner) : IComponent, IIndexed<EntityId> { public EntityId Key => Owner; }
+public record struct Loot(int Item);
+```
+
+```csharp
+var archer = world.CreateEntity(new Health(10));
+world.CreateEntity(new OwnedBy(archer), new Position(0, 0));        // an arrow points at its owner
+int arrows = world.OwnedByIndex.Count(archer);
+
+var turret = world.CreateEntity(new ChildOf(archer));               // destroyed with its parent
+archer.Set(new DynamicBuffer<Loot>());
+archer.WriteLoot().Add(new Loot(7));                                // a tracked write
+
+var goblin = new Prefab().SetPosition(0, 0).SetHealth(30);
+var wave = new Entity[100];
+world.Instantiate(goblin, wave);
+```
+
+### Relations [#relations]
+
+A component indexed by an `EntityId` links each entity to one target (an arrow to its archer), and the index lists
+the entities pointing at a target. An `IRelation` element links an entity to many targets (a hero in several
+parties) through `AddRelation` / `RemoveRelation`, with `world.Relations<T>()` for the reverse lookup.
+`WhenTargetDestroyed(TargetPolicy…)` decides what a link does when its target dies: keep, remove or destroy.
+
+- **Use it for:** ownership, party membership, the units a buff applies to, items with state of their own.
+- **Skip it for:** a bag of plain values only its owner reads: a [dynamic buffer](#dynamic-buffers) is one component
+  instead of an entity per item.
+- **Cost:** reverse lookups are O(1) to start and O(1) per link; an `IRelation` link costs 20 bytes plus 8 in its
+  target's list, recycled.
+- **Guide:** [Indexes and relations](/en/docs/guide/indexes-and-relations)
+
+### Hierarchy [#hierarchy]
+
+The built-in `ChildOf(EntityId Parent)` component links a child to its parent. `world.Children(parent)` lists the
+children, `Set(new ChildOf(other))` re-parents, and destroying a parent destroys its descendants.
+
+- **Use it for:** a ship and its turrets, a player and the items attached to them, a squad and its members.
+- **Skip it for:** transform propagation: there is no built-in world transform; write the system that needs it.
+- **Cost:** `Children` is O(1) to start and O(1) per child, after the first call indexes every `ChildOf`; a cascade
+  is O(1) per link.
+- **Guide:** [Hierarchy](/en/docs/guide/hierarchy)
+
+### Dynamic buffers [#dynamic-buffers]
+
+`DynamicBuffer<T>` is a list per entity, held as a tracked component. Its writes (`Add`, `RemoveAt`, `Clear`,
+`AsSpan`) take the buffer by `ref`, so `[Changed<DynamicBuffer<T>>]` visits the entities whose list changed and a
+write through `in` does not compile. Snapshots copy the elements.
+
+- **Use it for:** lists that belong to one entity and are sent or saved when they change: a bag, a path, recent
+  hits.
+- **Skip it for:** items with their own state (one entity per item with a relation) or a small fixed set (an
+  `[InlineArray]` in an unmanaged component).
+- **Cost:** one object and one array per entity, made by the first write; writes within the capacity allocate
+  nothing.
+- **Guide:** [Dynamic buffers](/en/docs/guide/dynamic-buffers), [ECS principles, rule 8](/en/docs/ecs-principles#8-choose-how-to-hold-a-collection)
+
+### Prefabs and cloning [#prefabs-and-cloning]
+
+A `Prefab` is a recipe of component values that belongs to no world, so no query sees it and no system filters it
+out. `world.Instantiate(prefab)` creates an entity, `Instantiate(prefab, span)` a wave; `new Prefab(base)` makes a
+variant, `AddMember()` a group (a boss with its minions). `entity.Clone()` copies a living entity.
+
+- **Use it for:** kinds of entities spawned again and again: NPC types, projectiles, loot, defined in code or
+  loaded from configuration.
+- **Skip it for:** entities whose values all differ: create them with their values.
+- **Cost:** one row copy per instance; a wave passes the structural gate once and grows its table at most once.
+- **Guide:** [Prefabs](/en/docs/guide/prefabs)
+
+## Persist [#persist]
+
+A world is data, so it can be copied, written out, moved and reloaded.
+
+```csharp
+var before = world.Capture();                       // in memory
+world.Update();
+world.Restore(before);                              // rolled back; handles from before are valid again
+
+var bytes = new System.Buffers.ArrayBufferWriter<byte>();
+world.Save(bytes);                                  // to bytes: a file, a database, another process
+using var restarted = new World();
+restarted.Load(bytes.WrittenSpan);
+```
+
+### Snapshots [#snapshots]
+
+`world.Capture()` copies entities, components and singletons into a `WorldSnapshot`; `world.Restore(snapshot)` puts
+them back, any number of times. `Capture(into)` reuses a snapshot's arrays.
+
+- **Use it for:** undoing a turn, rollback for client prediction, replays, resetting a world between tests.
+- **Skip it for:** persistence across restarts (use [saves](#saves)); managed references inside components are
+  shared, not cloned.
+- **Cost:** O(entities × components) both ways; capturing into a reused snapshot allocates nothing.
+- **Guide:** [Snapshots](/en/docs/guide/snapshots)
+
+### Saves [#saves]
+
+`world.Save(writer)` writes a whole world as bytes and `world.Load(bytes)` reads it into a world of this or another
+process: same ids, components and singletons. Unmanaged components are their raw rows; managed components and
+singletons are written by Nino (`[NinoType]`). Types are recorded by name, so a load skips components the process
+no longer has.
+
+- **Use it for:** persistence across restarts, replays on disk, shipping a world to another machine.
+- **Skip it for:** changing an unmanaged component's layout in place: add a new component type, or old saves will
+  not load.
+- **Cost:** one block copy per unmanaged column; allocates nothing once its buffers are large enough.
+- **Guide:** [Saves](/en/docs/guide/saves)
+
+### Migration [#migration]
+
+`SaveEntities` and `LoadEntities` move a group of entities (a player and what they own) to another world through
+bytes, with new ids and the links inside the group rewritten. `MoveEntities` does it between two worlds of the same
+thread without encoding.
+
+- **Use it for:** a player changing zone or server, a match handing its survivors to a lobby.
+- **Cost:** O(entities given × components); `MoveEntities` copies rows directly.
+- **Guide:** [Migration and unloading](/en/docs/guide/migration-and-unload)
+
+### Unloading plugin types [#unloading]
+
+`world.RemoveTypes(assembly)` or `RemoveTypes(context)` removes a plugin's systems, singletons, indexes and
+components from a world, so a collectible `AssemblyLoadContext` can unload and a new version can load, with the data
+carried over by a save.
+
+- **Use it for:** hot-reloading game logic on a live server.
+- **Cost:** O(entities with such components + tables + cached queries), on a cold path that allocates.
+- **Guide:** [Migration and unloading](/en/docs/guide/migration-and-unload)
+
+## Scale [#scale]
+
+More entities, more cores, bigger waves.
+
+### One world per thread [#threading-model]
+
+A world has one owner thread, the one calling `Update`. Structural changes check a plain owner flag (no atomics) and
+throw instead of corrupting the tables when made from a parallel region; the analyzer reports the off-thread changes
+it can see ([EECS013](/en/docs/guide/analyzer#eecs013), [EECS014](/en/docs/guide/analyzer#eecs014)).
+
+- **Use it for:** one world per map or zone, each on its own thread, with no synchronization. Input from other
+  threads goes through a queue you own, drained by a system.
+- **Cost:** four worlds of 25,000 entities on four threads tick in <BenchValue k="tick.fourWorlds" />, against
+  <BenchValue k="tick.oneWorld" /> for one world of 100,000.
+- **Guide:** [Threading](/en/docs/guide/threading)
+
+### Parallel systems [#parallel-systems]
+
+With `WorldOptions.ParallelSystems`, consecutive systems with no order and no conflicting access run at the same
+time. The access is generated from the `ref` and `in` parameters, and the result always equals the sequential
+order.
+
+- **Use it for:** several heavy, independent systems and spare cores.
+- **Skip it for:** light systems over a few thousand entities: a stage costs a thread-pool hand-off.
+- **Cost:** allocation-free; `MaxDegreeOfParallelism` bounds the threads.
+- **Guide:** [Threading](/en/docs/guide/threading)
+
+### Parallel [ForEach] [#parallel-foreach]
+
+`[ForEach(Parallel = true)]` cuts one method's rows into chunks that the calling thread and thread-pool threads run
+at once. The analyzer rejects methods that could race ([EECS010](/en/docs/guide/analyzer#eecs010)): structural
+changes, batch methods, singletons taken by `ref`. `world.ForEachParallel` and `ForEachEntityParallel` do the same
+for struct jobs.
+
+- **Use it for:** heavy per-entity work over tens of thousands of entities: steering, path following, AI scoring.
+- **Cost:** chunks of 1,024 to 16,384 rows, about four per thread, allocation-free.
+- **Guide:** [Threading](/en/docs/guide/threading)
+
+### Bulk operations [#bulk-operations]
+
+`world.CreateEntities(span, a, b)` spawns a wave with the same values, `Instantiate(prefab, span)` a wave of a
+prefab, `DestroyEntities<T>(filter)` destroys every match. `SetAll`, `RemoveAll`, `DisableAll` and `EnableAll`
+change one component on every match, whole 64-row words at a time.
+
+- **Use it for:** waves of monsters, clearing a zone, a round reset, a status lifted from everyone.
+- **Cost:** one pass through the structural gate per call and at most one table growth.
+- **Guide:** [Bulk operations](/en/docs/guide/bulk)
+
+## Build and operate [#operate]
+
+What keeps a code base correct as it grows, and a server observable while it runs.
+
+### Analyzer and code fixes [#analyzer]
+
+The package bundles an analyzer (EECS002 to EECS024) and code fixes next to the generator. Invalid `[ForEach]`
+methods, class components, stateful systems, systems that reference systems, writes through `in`, unsafe parallel
+methods, off-thread structural changes, indexed components written through a `ref` and ordering cycles fail the
+build; a few warnings flag code that works but costs.
+
+- **Use it for:** always; it is on by default and keeps systems decoupled.
+- **Guide:** [Analyzer rules](/en/docs/guide/analyzer)
+
+### Per-system timing [#per-system-timing]
+
+With `WorldOptions.MeasureSystems`, every run of a system is timed: `system.Stats` holds `Runs`, `Last`, `Total` and
+`Average`.
+
+- **Use it for:** a diagnostics endpoint or a log line on a live server, to see which system grows.
+- **Cost:** two timestamp reads per system run when on; nothing when off.
+- **Guide:** [Systems](/en/docs/guide/systems)
+
+### Errors [#errors]
+
+By default an exception a system throws propagates out of `Update()`. With
+`WorldOptions.SystemErrors = SystemErrorPolicy.Disable`, the failing system is switched off, its exception stays in
+`system.Error`, and the update goes on; setting `Enabled = true` retries it.
+
+- **Use it for:** `Disable` on a live server, where a failure becomes data a health check reads; `Throw` in tests.
+- **Cost:** nothing until a system throws.
+- **Guide:** [Systems](/en/docs/guide/systems)
+
+### Introspection [#introspection]
+
+`world.Describe()` lists tables with their columns, rows, capacity and bytes; `entity.Describe()` lists an entity's
+component values. A debugger shows an entity's components directly.
+
+- **Use it for:** admin tools, memory reports, debugging.
+- **Cost:** allocates the description (a cold path), never touches the hot paths.
+- **Guide:** [Architecture](/en/docs/architecture)
+
+### Native AOT [#native-aot]
+
+Systems, jobs and filters are generated at compile time; nothing on the hot paths uses reflection. The library is
+built with the trimming and AOT analyzers on, so `<PublishAot>true</PublishAot>` needs nothing else for EasyEcs.
+
+- **Use it for:** small, fast-starting server containers.
+
+### Templates and examples [#templates]
+
+`dotnet new easyecs` creates a console server with a fixed tick, components, systems and a prefab (`--tests` adds
+an NUnit project); `dotnet new easyecs-system` adds a system. Each file in
+[`examples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/examples) shows one feature and runs with
+`dotnet run`; [`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples) has complete programs
+(a game loop, saving and loading, one world per thread, hot reload).
+
+- **Guide:** [Getting started](/en/docs/getting-started)
+
+## Compared with other libraries [#compared]
+
+The same server tick, ported to each library (100,000 entities):
+
+<PeerChart />
+
+| | EasyEcs | Friflo.Engine.ECS | Arch | DefaultEcs |
+| --- | --- | --- | --- | --- |
+| Storage | Archetypes, presence bits | Archetypes | Archetypes in chunks | A pool per component |
+| Structural changes inside a loop | Immediate, each entity visited once | Throw; a command buffer instead | Not guarded; a command buffer | Unsafe; a command recorder |
+| Source-generated systems | Yes | No | No (in core) | No |
+| Compile-time analyzer | Yes | No | No | No |
+| Change tracking by tick | Yes | No | No | `WhenChanged<T>()` |
+| Removal detection | `[Removed<T>]` | Events | Events | `WhenRemoved<T>()` |
+| Value index | Yes | Yes | No | `EntityMap` |
+| Relations and hierarchy | Yes | Yes | No | No |
+| Parallel systems | Generated access | No | No | `ParallelSystem<T>` |
+| Snapshots / saves | Both | JSON | No | Text, binary |
+| Unity | No (net10.0) | Yes | Yes | Yes |
+
+<BenchSource />
+
+The full comparison, with the cases each library is best at: [Comparison](/en/docs/comparison).
+
+## Related [#related]
+
+<Cards>
+  <Card icon={<Rocket />} title="Getting started" href="/en/docs/getting-started">
+    Build a small simulation step by step.
+  </Card>
+  <Card icon={<Swords />} title="The battle server" href="/en/docs/example">
+    Every feature in one server, also a benchmark and a test.
+  </Card>
+  <Card icon={<Gauge />} title="Performance" href="/en/docs/performance">
+    Which API to use when, with the numbers.
+  </Card>
+  <Card icon={<Scale />} title="Comparison" href="/en/docs/comparison">
+    EasyEcs next to Friflo.Engine.ECS, Arch and DefaultEcs.
+  </Card>
+</Cards>
