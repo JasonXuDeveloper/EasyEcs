@@ -17,24 +17,8 @@ public sealed partial class World
     private ParallelWork[] _parallelWork = [];
     private readonly Lock _parallelWorkLock = new();
 
-    /// <summary>
-    /// The most rows per chunk of a parallel [ForEach]. Chunks hold about a quarter of each thread's share of the
-    /// matching rows (at least 1,024): equal chunks finish together, and four per thread even out uneven rows.
-    /// </summary>
+    /// <summary>Rows per chunk of a parallel [ForEach] (a multiple of 64, so presence-bit words never straddle chunks).</summary>
     public const int ParallelChunkRows = 16384;
-
-    /// <summary>
-    /// Rows per chunk for a pass over <paramref name="tables"/>: a multiple of 64 (presence-bit words never straddle
-    /// chunks), about four chunks per thread, between 1,024 and <see cref="ParallelChunkRows"/>. With fixed 16,384-row
-    /// chunks, 100,000 rows made 7 chunks for 4 threads: the second round ran 3 of them and left a thread idle.
-    /// </summary>
-    internal int ChunkRows(Archetype[] tables)
-    {
-        long rows = 0;
-        for (int i = 0; i < tables.Length; i++) rows += tables[i].Count;
-        long share = rows / ((Helpers + 1) * 4L);
-        return (int)Math.Clamp((share + 63) & ~63L, 1024, ParallelChunkRows);
-    }
 
     /// <summary>Thread-pool work items a runner keeps: the calling thread is the other one.</summary>
     private int Helpers => Math.Max(1, _options.MaxDegreeOfParallelism) - 1;
