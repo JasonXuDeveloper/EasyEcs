@@ -51,17 +51,21 @@ scripts/                 generate-static.ts, og.ts, lint-links.ts, sync-benchmar
 - A new MDX component needs a Markdown form in `src/lib/markdown.tsx`.
 - Page and folder icons are names from lucide's `icons` table, not alias exports; `bun run lint:links` fails on an
   unknown one.
-- **Changelog** (`content/changelog.mdx` / `changelog.zh.mdx`): one section per release (`## 4.1.0`), newest first.
-  Each section lists user-facing changes only (no CI, tests, benchmarks, docs or refactors): "Breaking changes"
-  first (each with the code change it needs, linking the matching section of MIGRATION_GUIDE.md), then "New",
-  "Performance" (with BenchValue numbers) and "Fixes". Each entry is checked against the EasyEcs source and links the
-  page that documents it. EasyEcs has no commit trailers; the sources are the GitHub releases (their notes list the
-  merged pull requests: `gh release list -R JasonXuDeveloper/EasyEcs`, `gh release view <tag>`), `MIGRATION_GUIDE.md`
-  and the README's "What's new". At the start of any work here:
-  1. A released version without a section: add one from its release and its pull requests.
-  2. A section whose first line is "Not released yet." / "尚未发布。" and whose tag now exists: remove that line.
-  3. User-facing pull requests merged to `master` after the newest tag: describe them in a section for the next
-     version, under "Not released yet." / "尚未发布。". Ask for the version number if it is not known.
+- **Changelog** (`content/changelog.mdx` / `changelog.zh.mdx`): one section per release, newest first, headed with
+  the version only: `## 4.1.0 [#v4-1-0]` in both languages (`.github/scripts/release-notes.sh` extracts the English
+  section into the GitHub release). Under it the subsections `### New`, `### Performance`,
+  `### Changes that need code changes` and `### Fixes` (Chinese: `### 新功能 [#new]`, `### 性能 [#performance]`,
+  `### 需要修改代码的变更 [#breaking]`, `### 修复 [#fixes]`), an empty one left out. A section is plain Markdown
+  (lists, links, inline code; no JSX components, no typed benchmark numbers: link the performance page or a decision)
+  with absolute `/en/docs/...` links. Entries are user-facing only (no CI, tests, benchmarks, docs or refactors); each
+  is checked against the EasyEcs source and links the page that documents it, and a change that needs code changes
+  says what to write and links the matching section of MIGRATION_GUIDE.md. The sources are the GitHub releases
+  (`gh release list -R JasonXuDeveloper/EasyEcs`, `gh release view <tag>`), the commits between tags,
+  `MIGRATION_GUIDE.md` and the README's "What's new". At the start of any work here:
+  1. A released version without a section: add one from its release and its commits.
+  2. User-facing changes merged to `master` after the newest tag: describe them in the section of the coming version,
+     written as released (the owner cuts the release right after the merge). Ask for the version number if it is not
+     known.
 
 ## Benchmarks
 

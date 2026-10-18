@@ -5,7 +5,26 @@ description: 从这里开始：EasyEcs 是什么、怎么安装、十几行代�
 icon: House
 ---
 
-import { BookText, Cpu, Gauge, ListChecks, Rocket, Scale, Shapes, Swords } from 'lucide-react';
+import {
+  Bot,
+  BookText,
+  Boxes,
+  CircleQuestionMark,
+  Cpu,
+  Gauge,
+  Library,
+  ListChecks,
+  Network,
+  RotateCcwClock,
+  Rocket,
+  Scale,
+  Search,
+  Shapes,
+  Swords,
+  TriangleAlert,
+  Workflow,
+  Zap,
+} from 'lucide-react';
 
 **EasyEcs 是开源、零 GC 分配的 archetype（原型）实体组件系统（ECS），面向 C# 与 .NET 10 服务端。**
 你只写普通数据和 `[ForEach]` 方法：源生成器把它们编译成内联的结构体 job，分析器在编译期拦下设计错误。
@@ -65,33 +84,78 @@ public class MovementSystem : EcsSystem
 
 ```mermaid
 flowchart LR
-    W[什么是 ECS？] --> F[功能一览] --> G[快速开始] --> P[ECS 设计原则] --> U[指南]
-    U --> R[API 参考]
-    U --> Perf[性能指南] --> A[架构]
-    F --> C[横向对比]
+    W[什么是 ECS？] --> F[功能一览] --> G[快速开始] --> P[ECS 设计原则] --> X[示例]
+    X --> U[指南] --> R[参考]
+    U --> Perf[性能] --> A[架构]
+    F --> C[对比]
 ```
 
 ## 指南 [#guide]
 
-[指南](/zh/docs/guide/entities-and-components)每页讲一个概念，按用到的先后排列：实体与组件、预制体、查询、系统、单例、
-结构变更、`ref` 与 `await`、变更追踪、动态缓冲、索引与关系、快照、线程模型，以及分析器规则。
-
-## 参考 [#reference]
+指南每页讲一个概念，按用到的先后排列。
 
 <Cards>
-  <Card icon={<BookText />} title="API 参考" href="/zh/docs/api">
-    每个公开 API 及其复杂度。
+  <Card icon={<Boxes />} title="实体与组件" href="/zh/docs/guide/entities-and-components">
+    句柄、id、标签和生成的成员。
   </Card>
-  <Card icon={<Gauge />} title="性能指南" href="/zh/docs/performance">
+  <Card icon={<Search />} title="查询与过滤" href="/zh/docs/guide/queries">
+    `Query`、`Count`、`Any` 和 `QueryFilter`。
+  </Card>
+  <Card icon={<Workflow />} title="系统" href="/zh/docs/guide/systems">
+    `[ForEach]` 方法、排序、分组、执行频率和错误处理。
+  </Card>
+  <Card icon={<Zap />} title="变更追踪" href="/zh/docs/guide/change-tracking">
+    只访问系统上次运行以来被写过或被移除的行。
+  </Card>
+  <Card icon={<Network />} title="线程模型" href="/zh/docs/guide/threading">
+    每个 World 一个所属线程，并行系统与并行 `[ForEach]`。
+  </Card>
+  <Card icon={<TriangleAlert />} title="常见错误" href="/zh/docs/guide/common-mistakes">
+    最先出错的地方，以及拦下它的规则或分析器错误。
+  </Card>
+</Cards>
+
+指南的其余页面讲单例组件、结构变更、`ref` 与 `await`、动态缓冲、索引与关系、层级、分组、清理与禁用、批量变更、快照、存档、
+迁移与卸载，以及每条[分析器规则](/zh/docs/guide/analyzer)。
+
+## 对比 [#compare]
+
+<Cards>
+  <Card icon={<Gauge />} title="性能" href="/zh/docs/performance">
     什么时候用哪个 API、该做与不该做的事、基准测试和测量方法。
   </Card>
   <Card icon={<Scale />} title="横向对比" href="/zh/docs/comparison">
     EasyEcs 与 Friflo.Engine.ECS、Arch、DefaultEcs 的逐项功能对比和实测数据。
   </Card>
+</Cards>
+
+从别的 ECS 迁过来？可以看 EasyEcs 与 [Arch](/zh/docs/vs-arch)、[Friflo](/zh/docs/vs-friflo)、
+[DefaultEcs](/zh/docs/vs-defaultecs)、[Unity Entities](/zh/docs/vs-unity-entities) 的对比，以及从
+[Arch](/zh/docs/migrate-from-arch)、[Friflo](/zh/docs/migrate-from-friflo)、[DefaultEcs](/zh/docs/migrate-from-defaultecs)
+迁移的步骤。
+
+## 参考 [#reference]
+
+<Cards>
+  <Card icon={<Library />} title="API 参考（英文）" href="/en/docs/reference">
+    每个公开类型和成员，由源码生成。
+  </Card>
+  <Card icon={<BookText />} title="API 与复杂度" href="/zh/docs/api">
+    每个公开 API 及其复杂度。
+  </Card>
   <Card icon={<Cpu />} title="架构" href="/zh/docs/architecture">
-    存储与内存布局、原型迁移、查询缓存、源生成器。
+    存储、实体生命周期、查询缓存、系统、源生成器和线程。
+  </Card>
+  <Card icon={<CircleQuestionMark />} title="常见问题" href="/zh/docs/faq">
+    生产可用性、分配、线程、Unity、存档、热重载、Native AOT。
+  </Card>
+  <Card icon={<Bot />} title="AI 助手" href="/zh/docs/ai">
+    `llms.txt`、Markdown 版本，以及放进项目的规则文件。
+  </Card>
+  <Card icon={<RotateCcwClock />} title="更新日志" href="/zh/docs/changelog">
+    每个版本改了什么。
   </Card>
 </Cards>
 
-从旧的大版本升级？[迁移指南](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md)（英文）
-涵盖 4.0 到 4.1、v3 到 v4 以及 v2 到 v3。
+为什么这样设计，见[设计决策](/zh/docs/decisions)；接下来做什么，见[路线图](/zh/docs/roadmap)。从旧的大版本升级？
+[迁移指南](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md)（英文）涵盖 4.0 到 4.1、v3 到 v4 以及 v2 到 v3。

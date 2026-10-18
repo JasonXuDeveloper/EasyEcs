@@ -51,6 +51,8 @@ public Prefab AddMember();
 
 A new member of this prefab's group, without components: instantiating the prefab or any member creates every member. O(1).
 
+**Complexity** ([API table](/en/docs/api)): O(1)
+
 ### `Has` [#has]
 
 ```csharp
@@ -119,7 +121,4 @@ public Prefab SetBuffer<T>(params ReadOnlySpan<T> elements) where T : struct;
 
 Gives the prefab a [`DynamicBuffer`](/en/docs/reference/dynamicbuffer) of `elements`, replacing the one it has: every instance gets a list of its own with these elements. Returns the prefab. O(n).
 
-**Complexity** ([API table](/en/docs/api)):
-
-- `prefab.SetBuffer<T>(params ReadOnlySpan<T>)`: O(n)
-- `SetBuffer`: as the generic call
+**Complexity** ([API table](/en/docs/api)): O(n)

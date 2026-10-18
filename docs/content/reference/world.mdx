@@ -43,7 +43,7 @@ public ulong ChangeTick { get; }
 
 The current change tick, stamped into tracked components' rows on every write ([`ITrackChanges`](/en/docs/reference/itrackchanges)).
 
-**Complexity** ([API table](/en/docs/api)): O(1); grows by one per stage of systems and once after each update ([change tracking](/en/docs/guide/change-tracking))
+**Complexity** ([API table](/en/docs/api)): O(1)
 
 ### `Entities` [#entities]
 
@@ -73,6 +73,8 @@ public SystemList Systems { get; }
 
 Systems of every group, each group in execution order (default group first). Allocation-free.
 
+**Complexity** ([API table](/en/docs/api)): O(systems) to walk, `Count` O(groups)
+
 ### `UpdateCount` [#updatecount]
 
 ```csharp
@@ -80,6 +82,8 @@ public long UpdateCount { get; }
 ```
 
 Number of completed [`World.Update`](/en/docs/reference/world#update) calls (default group).
+
+**Complexity** ([API table](/en/docs/api)): O(1)
 
 ## Methods
 
@@ -91,7 +95,7 @@ public ref T AddSingleton<T>() where T : struct, ISingletonComponent;
 
 Add (or reset to default) singleton `T` and return a ref to it. A reset keeps the storage, so [`World.SingletonRef`](/en/docs/reference/world#singletonref) handles taken before still reach the singleton. O(1).
 
-**Complexity** ([API table](/en/docs/api)): O(1); `AddSingleton` resets an existing singleton in its storage, so `SingletonRef<T>` handles stay attached
+**Complexity** ([API table](/en/docs/api)): O(1)
 
 ### `AddSystem` [#addsystem]
 
@@ -103,8 +107,8 @@ Attach `system` to its group ([`UpdateInGroupAttribute`](/en/docs/reference/upda
 
 **Complexity** ([API table](/en/docs/api)):
 
-- `world.AddSystem<T>()`: O(s²), s = systems of its group (order and stage rebuild); cold path; throws `InvalidOperationException` if the system already belongs to a world, or on an ordering cycle
-- `AddSystem(system)`: O(s²), s = systems of its group (order and stage rebuild); cold path; throws `InvalidOperationException` if the system already belongs to a world, or on an ordering cycle
+- `world.AddSystem<T>()`: O(s²), s = systems of its group
+- `AddSystem(system)`: O(s²), s = systems of its group
 
 ### `AddSystem` [#addsystem-2]
 
@@ -116,8 +120,8 @@ Create a system, attach it to this world and call its [`EcsSystem.OnCreate`](/en
 
 **Complexity** ([API table](/en/docs/api)):
 
-- `world.AddSystem<T>()`: O(s²), s = systems of its group (order and stage rebuild); cold path; throws `InvalidOperationException` if the system already belongs to a world, or on an ordering cycle
-- `AddSystem(system)`: O(s²), s = systems of its group (order and stage rebuild); cold path; throws `InvalidOperationException` if the system already belongs to a world, or on an ordering cycle
+- `world.AddSystem<T>()`: O(s²), s = systems of its group
+- `AddSystem(system)`: O(s²), s = systems of its group
 
 ### `Any` [#any]
 
@@ -149,8 +153,8 @@ Copy the entities, their components and the singletons. O(entities × components
 
 **Complexity** ([API table](/en/docs/api)):
 
-- `world.Capture()`: O(elements)
-- `world.Capture()`: O(entities × components + archetypes + singletons); copies by value, not while a query iterates
+- `world.Capture()`: O(entities × components + tables + singletons)
+- `Capture(into)`: O(entities × components + tables + singletons)
 
 ### `Capture` [#capture-2]
 
@@ -162,8 +166,8 @@ public WorldSnapshot Capture(WorldSnapshot into);
 
 **Complexity** ([API table](/en/docs/api)):
 
-- `world.Capture()`: O(elements)
-- `world.Capture()`: O(entities × components + archetypes + singletons); copies by value, not while a query iterates
+- `world.Capture()`: O(entities × components + tables + singletons)
+- `Capture(into)`: O(entities × components + tables + singletons)
 
 ### `Children` [#children]
 
@@ -172,6 +176,8 @@ public ValueIndex<ChildOf, EntityId>.Matches Children(EntityId parent);
 ```
 
 The children of `parent`: the entities whose [`ChildOf`](/en/docs/reference/childof) points at it. O(1), then O(1) per child; the first call indexes every [`ChildOf`](/en/docs/reference/childof) once. Owner thread only.
+
+**Complexity** ([API table](/en/docs/api)): O(1), then O(1) per child
 
 ### `Count` [#count]
 
@@ -191,7 +197,7 @@ One overload per number of components, 1 to 9 (generated from one template); thi
 
 Number of alive entities having all of `T1, T2`. O(matching archetypes), plus O(rows / 64) for tables with rows to test.
 
-**Complexity** ([API table](/en/docs/api)): O(M), + S / 64 for tables whose rows must be tested (some rows lack a required component, have an excluded one or lack every `WithAny` component, or a `Changed` or `Removed` filter applies)
+**Complexity** ([API table](/en/docs/api)): O(M), + S / 64 for tables whose rows must be tested
 
 ### `CreateEntities` [#createentities]
 
@@ -257,6 +263,8 @@ public TableInfo[] Describe();
 
 The world's tables, for diagnostics (an admin endpoint, a dashboard): what each holds, how full it is and what it costs. Cold: allocates the result; any thread (a table being changed at the same time may be read half-way).
 
+**Complexity** ([API table](/en/docs/api)): O(tables + columns)
+
 ### `DestroyEntities` [#destroyentities]
 
 ```csharp
@@ -285,6 +293,8 @@ public int DisableAll<T>(in QueryFilter filter = default) where T : struct, ICom
 
 [`Entity.Disable`](/en/docs/reference/entity#disable) on every alive entity having `T` and matching `filter`: each keeps its value and gets [`Disabled`](/en/docs/reference/disabled). Returns how many. O(matching tables + rows); a table's rows move once, to the table with the tag. Owner thread only.
 
+**Complexity** ([API table](/en/docs/api)): O(M + S)
+
 ### `Dispose` [#dispose]
 
 ```csharp
@@ -292,6 +302,8 @@ public void Dispose();
 ```
 
 Destroy all systems (OnDestroy in reverse order), then release all storage.
+
+**Complexity** ([API table](/en/docs/api)): O(systems + entities + tables)
 
 ### `EnableAll` [#enableall]
 
@@ -301,6 +313,8 @@ public int EnableAll<T>(in QueryFilter filter = default) where T : struct, IComp
 
 [`Entity.Enable`](/en/docs/reference/entity#enable) on every alive entity with `T` disabled and matching `filter`: each gets its kept value back (a write of a tracked component; indexes follow). Returns how many. O(matching tables + rows). Owner thread only.
 
+**Complexity** ([API table](/en/docs/api)): O(M + S)
+
 ### `EnsureCapacity` [#ensurecapacity]
 
 ```csharp
@@ -308,6 +322,8 @@ public void EnsureCapacity(Prefab prefab, int count);
 ```
 
 Pre-size the table `prefab`'s instances go to, and the entity storage, so the next `count` [`World.Instantiate`](/en/docs/reference/world#instantiate) calls never grow them: a wave of spawns pays its growth before the tick. Instances whose groups put them in another table ([`World.GroupBy`](/en/docs/reference/world#groupby)) grow that one. For a prefab with members, every member's table. O(components) plus one growth. Owner thread only.
+
+**Complexity** ([API table](/en/docs/api)): O(c), plus one growth
 
 ### `EnsureEntityCapacity` [#ensureentitycapacity]
 
@@ -437,7 +453,7 @@ public ref T GetOrAddSingleton<T>() where T : struct, ISingletonComponent;
 
 Ref to singleton `T`, adding it (default) first if missing. O(1).
 
-**Complexity** ([API table](/en/docs/api)): O(1); `AddSingleton` resets an existing singleton in its storage, so `SingletonRef<T>` handles stay attached
+**Complexity** ([API table](/en/docs/api)): O(1)
 
 ### `GetSingleton` [#getsingleton]
 
@@ -447,7 +463,7 @@ public ref T GetSingleton<T>() where T : struct, ISingletonComponent;
 
 Ref to singleton `T`; throws if it was not added. O(1).
 
-**Complexity** ([API table](/en/docs/api)): O(1); `AddSingleton` resets an existing singleton in its storage, so `SingletonRef<T>` handles stay attached
+**Complexity** ([API table](/en/docs/api)): O(1)
 
 ### `GetSystem` [#getsystem]
 
@@ -467,6 +483,8 @@ public void GroupBy<T>() where T : struct, IComponent, IGroup;
 
 Split this world's tables by `T`'s [`IGroup.Group`](/en/docs/reference/igroup#group): entities of one group share tables, so [`QueryFilter.InGroup`](/en/docs/reference/queryfilter#ingroup) walks only that group's rows, contiguous in memory. Setting a new value moves the entity to its group's tables (one row copy). Existing entities move now: call it at setup. O(entities with `T`) once; idempotent. Owner thread only, not during a pass.
 
+**Complexity** ([API table](/en/docs/api)): O(entities with `T`), once
+
 ### `HasSingleton` [#hassingleton]
 
 ```csharp
@@ -475,7 +493,7 @@ public bool HasSingleton<T>() where T : struct, ISingletonComponent;
 
 Whether singleton `T` exists. O(1).
 
-**Complexity** ([API table](/en/docs/api)): O(1); `RemoveSingleton` returns false when it was not added
+**Complexity** ([API table](/en/docs/api)): O(1)
 
 ### `Index` [#index]
 
@@ -521,6 +539,8 @@ public bool IsAlive(EntityId id);
 
 Whether entity `id` (that incarnation) is alive. O(1).
 
+**Complexity** ([API table](/en/docs/api)): O(1)
+
 ### `Load` [#load]
 
 ```csharp
@@ -532,6 +552,8 @@ Replace this world's entities, components and singletons with those [`World.Save
 **Exceptions**
 
 - `InvalidDataException`: The bytes are not a save or are damaged, or a component's fields changed since the save (an unmanaged one's size or layout, a managed one's Nino layout). The world is then left as it was.
+
+**Complexity** ([API table](/en/docs/api)): O(entities × components)
 
 ### `LoadEntities` [#loadentities]
 
@@ -545,6 +567,8 @@ Create the entities [`World.SaveEntities`](/en/docs/reference/world#saveentities
 
 - `InvalidDataException`: The bytes are not a save.
 
+**Complexity** ([API table](/en/docs/api)): O(entities × components)
+
 ### `MoveEntities` [#moveentities]
 
 ```csharp
@@ -552,6 +576,8 @@ public int MoveEntities(World target, ReadOnlySpan<EntityId> entities, Span<Enti
 ```
 
 Move `entities` (stale ids and repeats are skipped) into `target`, another world of this thread: the target gets new entities with their components, as [`World.LoadEntities`](/en/docs/reference/world#loadentities) makes them from a save of the group, without encoding it; then they are destroyed here (their children with them, so move a hierarchy together; cleanup components stay behind for their systems). The new handles are written in order into `moved` (as many as fit, [`Entity`](/en/docs/reference/entity) default for a skipped id); returns how many moved. O(entities × components). Owner thread of both worlds; not while a pass iterates in either.
+
+**Complexity** ([API table](/en/docs/api)): O(entities × components)
 
 ### `Query` [#query]
 
@@ -579,6 +605,8 @@ public RelationIndex<T> Relations<T>() where T : struct, IRelation;
 
 The relation index of `T`: the entities whose [`DynamicBuffer`](/en/docs/reference/dynamicbuffer) links to a target. Created on the first call (cold), O(1) after; keep it in a local or field.
 
+**Complexity** ([API table](/en/docs/api)): O(1); the first call creates it
+
 ### `RemoveAll` [#removeall]
 
 ```csharp
@@ -586,6 +614,8 @@ public int RemoveAll<T>(in QueryFilter filter = default) where T : struct, IComp
 ```
 
 Remove component `T` from every alive entity having it and matching `filter`, as `Remove` would one by one (rows stay, presence bits clear). Returns how many. O(matching tables + rows). Owner thread only.
+
+**Complexity** ([API table](/en/docs/api)): O(M + S)
 
 ### `RemoveSingleton` [#removesingleton]
 
@@ -595,7 +625,7 @@ public bool RemoveSingleton<T>() where T : struct, ISingletonComponent;
 
 Remove singleton `T`; false if it was not added. O(1).
 
-**Complexity** ([API table](/en/docs/api)): O(1); `RemoveSingleton` returns false when it was not added
+**Complexity** ([API table](/en/docs/api)): O(1)
 
 ### `RemoveSystem` [#removesystem]
 
@@ -605,7 +635,7 @@ public bool RemoveSystem<T>() where T : EcsSystem;
 
 Remove the system of type `T` (calls its [`EcsSystem.OnDestroy`](/en/docs/reference/ecssystem#ondestroy)).
 
-**Complexity** ([API table](/en/docs/api)): O(s²), s = systems of its group (order and stage rebuild); cold path
+**Complexity** ([API table](/en/docs/api)): O(s²)
 
 ### `RemoveTypes` [#removetypes]
 
@@ -617,6 +647,11 @@ Remove from this world everything of the types of `assembly`: its systems (OnDes
 
 To reload game logic and keep its data: [`World.Save`](/en/docs/reference/world#save), remove the types, unload the old context, load the new version, then [`World.Load`](/en/docs/reference/world#load) (types are saved by name, so the new version's components take the values). Owner thread only, not during a pass or an update. O(entities with such components + tables + cached queries); allocates (cold).
 
+**Complexity** ([API table](/en/docs/api)):
+
+- `world.RemoveTypes(assembly)`: O(entities with such components + tables + cached queries)
+- `RemoveTypes(context)`: O(entities with such components + tables + cached queries)
+
 ### `RemoveTypes` [#removetypes-2]
 
 ```csharp
@@ -624,6 +659,11 @@ public void RemoveTypes(AssemblyLoadContext context);
 ```
 
 [`World.RemoveTypes`](/en/docs/reference/world#removetypes) for every assembly loaded into `context` (a plugin and the libraries it brought).
+
+**Complexity** ([API table](/en/docs/api)):
+
+- `world.RemoveTypes(assembly)`: O(entities with such components + tables + cached queries)
+- `RemoveTypes(context)`: O(entities with such components + tables + cached queries)
 
 ### `Restore` [#restore]
 
@@ -633,10 +673,7 @@ public void Restore(WorldSnapshot snapshot);
 
 Put the world back to `snapshot` (taken from this world). Handles of entities alive in the snapshot are valid again; every other handle is stale, also handles of entities created after the capture. Archetypes created after the capture stay, empty. Singletons keep their boxes (a [`World.SingletonRef`](/en/docs/reference/world#singletonref) still works) and get the snapshot's values; singletons added after the capture are removed. O(entities × components + archetypes + singletons). Not while a pass iterates.
 
-**Complexity** ([API table](/en/docs/api)):
-
-- `Restore`: O(elements)
-- `world.Restore(snapshot)`: O(entities × components + archetypes + singletons); snapshot handles are valid again, later ones stale; every tracked row counts as written (and every row lacking a tracked component as removed); indexes re-index on their next lookup; not while a query iterates
+**Complexity** ([API table](/en/docs/api)): O(entities × components + tables + singletons)
 
 ### `Save` [#save]
 
@@ -646,6 +683,8 @@ public void Save(IBufferWriter<byte> output);
 
 Write the entities (ids and versions), their components and the singletons into `output`, for [`World.Load`](/en/docs/reference/world#load). Unmanaged components are their raw rows (a layout change makes old saves unloadable: add a new component type instead); managed components and singletons need a Nino formatter (`[NinoType]`). Allocates nothing once its buffers are large enough. O(entities × components). Not while a pass iterates.
 
+**Complexity** ([API table](/en/docs/api)): O(entities × components)
+
 ### `SaveEntities` [#saveentities]
 
 ```csharp
@@ -653,6 +692,8 @@ public void SaveEntities(IBufferWriter<byte> output, ReadOnlySpan<EntityId> enti
 ```
 
 Write `entities` (stale ids and repeats are skipped) and their components into `output`, for [`World.LoadEntities`](/en/docs/reference/world#loadentities): a group of entities that moves to another world (a player and what it owns, to another server). Singletons and the other entities are not written; collect a hierarchy with [`World.Children`](/en/docs/reference/world#children). Allocates nothing once its buffers are large enough. O(entities given × components). Not while a pass iterates.
+
+**Complexity** ([API table](/en/docs/api)): O(entities given × components)
 
 ### `SetAll` [#setall]
 
@@ -662,6 +703,8 @@ public int SetAll<T>(in T value, in QueryFilter filter = default) where T : stru
 
 Give every alive entity matching `filter` component `T` = `value` (added, or replaced), as `Set` would one by one: tracked components count as written, indexes and groups follow. Returns how many entities. O(matching tables + rows); an entity that lacks `T` moves once. Owner thread only.
 
+**Complexity** ([API table](/en/docs/api)): O(M + S)
+
 ### `SingletonRef` [#singletonref]
 
 ```csharp
@@ -670,10 +713,7 @@ public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent;
 
 Stable handle to singleton `T` (added first if missing): resolve it once, then read and write [`SingletonRef.Value`](/en/docs/reference/singletonref#value) without a lookup. Generated `[ForEach]` jobs resolve singleton parameters through it once per pass. O(1).
 
-**Complexity** ([API table](/en/docs/api)):
-
-- `world.SingletonRef<T>()`: O(1) / O(1), one load
-- `SingletonRef<T>`: O(1) / O(1), one load
+**Complexity** ([API table](/en/docs/api)): O(1)
 
 ### `TryGetEntity` [#trygetentity]
 
@@ -693,7 +733,7 @@ public bool TryGetSingleton<T>(out T value) where T : struct, ISingletonComponen
 
 Copy of singleton `T` if present. O(1).
 
-**Complexity** ([API table](/en/docs/api)): O(1); `RemoveSingleton` returns false when it was not added
+**Complexity** ([API table](/en/docs/api)): O(1)
 
 ### `Update` [#update]
 
@@ -705,8 +745,8 @@ Run one update of every enabled system of the default group (synchronous). Alloc
 
 **Complexity** ([API table](/en/docs/api)):
 
-- `world.Update()`: Σ systems of the group; allocation-free; throws `ObjectDisposedException` after `Dispose()`
-- `world.Update<TGroup>()`: Σ systems of the group; allocation-free; throws `ObjectDisposedException` after `Dispose()`
+- `world.Update()`: Σ systems of the group
+- `world.Update<TGroup>()`: Σ systems of the group
 
 ### `Update` [#update-2]
 
@@ -718,5 +758,5 @@ Run one update of every enabled system in group `TGroup` (synchronous, allocatio
 
 **Complexity** ([API table](/en/docs/api)):
 
-- `world.Update()`: Σ systems of the group; allocation-free; throws `ObjectDisposedException` after `Dispose()`
-- `world.Update<TGroup>()`: Σ systems of the group; allocation-free; throws `ObjectDisposedException` after `Dispose()`
+- `world.Update()`: Σ systems of the group
+- `world.Update<TGroup>()`: Σ systems of the group

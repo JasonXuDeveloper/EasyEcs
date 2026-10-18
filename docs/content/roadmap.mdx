@@ -1,0 +1,63 @@
+---
+title: Roadmap
+seoTitle: "EasyEcs Roadmap: Planned and Dropped"
+description: "What is planned for EasyEcs, how each change is proven, and the features that were weighed and dropped, with links to the decisions."
+icon: Milestone
+---
+
+import { RotateCcwClock, Lightbulb } from 'lucide-react';
+
+What is planned, in order. An item leaves this page when it ships: the [changelog](/en/docs/changelog) and the guides
+describe it from then on. A dropped item stays here as one line, its reasons in the
+[design decisions](/en/docs/decisions). Every performance item is proven with BenchmarkDotNet before and after, and
+ships only as a net win in time and allocations.
+
+## Planned [#planned]
+
+### Less code through the generator [#less-code-through-the-generator]
+
+The generator already writes `entity.Health`, `HasHealth`, `SetHealth(…)`, `IsDead`, singleton members,
+`world.XIndex`, buffer members, named query items, prefab buffer writers, jobs and access sets. Before each release
+the API, the [battle server](/en/docs/example) and the guides are scanned again: every line users write twice is a
+candidate for a generated member, and every generated member nobody uses goes. A candidate ships when it saves lines
+in real code at no cost per call; one that only changes style is rejected
+([D26](/en/docs/decisions#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call)).
+
+### Toolchain and runtime [#toolchain-and-runtime]
+
+The floor is the .NET 10 SDK (C# 14, Roslyn 5.0), which the generator builds against. EasyEcs moves to a newer runtime
+feature only where it measures ([D21](/en/docs/decisions#d21-net-10-features-only-where-they-measure)).
+
+## Dropped [#dropped]
+
+- `Added<T>`: `[Changed<T>]` selects added rows too; a tag the reacting system removes tells new from written
+  ([D4](/en/docs/decisions#d4-no-addedt-filter)).
+- Command buffers for parallel jobs: a parallel job writes data, a system after it changes structure
+  ([D3](/en/docs/decisions#d3-no-command-buffer-for-parallel-jobs)).
+- Interceptors for query call sites: the call's arguments are still evaluated, so a filter built at the call is built
+  anyway ([D18](/en/docs/decisions#d18-no-interceptors-for-query-calls-filters-carry-no-references)).
+  `AddEmbeddedAttributeDefinition`: the generators write no attribute types (the attributes are EasyEcs.Core's).
+- Settable tag properties (`entity.IsDead = true`): C# 14 rejects assigning an extension property of a struct on a
+  `foreach` variable, an indexer result or a field of an `in` parameter, where ECS code holds its entities
+  ([D19](/en/docs/decisions#d19-no-settable-tag-properties)).
+- A flat `[InlineArray]` memo, `FrozenDictionary` for saved types, `OverloadResolutionPriority`, `field`: measured or
+  weighed, no net win ([D21](/en/docs/decisions#d21-net-10-features-only-where-they-measure)).
+- Multi-type `Disable` / `Enable` and bulk calls, and a "use the generated member" diagnostic
+  ([D26](/en/docs/decisions#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call)).
+- A generated `world.AddSystems()`: systems run in registration order, so the list is the tick's order and is read
+  where the world is built.
+- Singletons added when a `[ForEach]` names them: a missing singleton is a forgotten setup, and its default is rarely
+  right (a clock with no step).
+- Cached filters from attributes, counting members per component (`world.CountPlayer()`) and a named `TryGetXRef`:
+  no line saved, more surface.
+
+## Related [#related]
+
+<Cards>
+  <Card icon={<Lightbulb />} title="Design decisions" href="/en/docs/decisions">
+    Why each choice was made, and why the dropped items were dropped.
+  </Card>
+  <Card icon={<RotateCcwClock />} title="Changelog" href="/en/docs/changelog">
+    What shipped, release by release.
+  </Card>
+</Cards>

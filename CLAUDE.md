@@ -15,11 +15,10 @@ dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*Itera
 Both benchmark projects use the job in `benchmarks/EasyEcs.Benchmark/BenchmarkConfig.cs` (no `--job` needed).
 
 The website (https://ecs.xgamedev.net) is built from `docs/content`: `docs/` is its project (`bun run check`,
-`bun run build`; `docs/CLAUDE.md`), and `docs/WRITING.md` is how a page is written. Rewritten pages are
-`<page>.mdx` + `<page>.zh.mdx` (English and Chinese); the rest are still plain GitHub markdown without frontmatter,
-readable on GitHub as they are, from which the site takes a page's title from its H1 and its description from its
-first paragraph. Benchmark numbers on the site come only from `docs/src/data/bench.json`
-(`docs/scripts/sync-benchmarks.ts` over the BenchmarkDotNet reports); pages never type a number.
+`bun run build`; `docs/CLAUDE.md`), and `docs/WRITING.md` is how a page is written. Each page is
+`<page>.mdx` + `<page>.zh.mdx` (English and Chinese), and its C# fences compile (`tools/DocCheck`). Benchmark
+numbers on the site come only from `docs/src/data/bench.json` (`docs/scripts/sync-benchmarks.ts` over the
+BenchmarkDotNet reports); pages never type a number.
 
 `global.json` requires the .NET 10 SDK (`rollForward: latestFeature`).
 
@@ -120,13 +119,14 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                Singleton, Concurrency, Parallel, Runner, Changed, Removed, Instantiate, DynamicBuffer,
                                Index, OrderedIndex, Relation, Hierarchy, TargetPolicy, Group, Cleanup, Disable, Bulk,
                                Move, Snapshot, Serialization, Unload, Introspection, Generic, Allocation (0 B budget),
-                               Generator (diagnostics + caching), CodeFix, BattleServer (the docs/content/example.md world as a
-                               whole, linked from EasyEcs.Benchmark); Fixtures.cs holds the shared test components
+                               Generator (diagnostics + caching), CodeFix, BattleServer (the world of
+                               docs/content/example.mdx as a whole, linked from EasyEcs.Benchmark); Fixtures.cs holds
+                               the shared test components
 benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / MultiWorldBenchmark (headline, realistic
-                               server tick; the world itself is WorldSimulation.cs), BattleServerBenchmark (the
-                               docs/content/example.md, BattleServer.cs, every feature), one benchmark per feature (Bulk,
-                               CallSite, ChangeTracking, Cleanup, Count, DynamicBuffer, Group, Hierarchy, Index,
-                               Introspection, Maybe, Migration, OrderedIndex, Ordering, ParallelForEach,
+                               server tick; the world itself is WorldSimulation.cs), BattleServerBenchmark
+                               (BattleServer.cs, every feature; docs/content/example.mdx includes its regions), one
+                               benchmark per feature (Bulk, CallSite, ChangeTracking, Cleanup, Count, DynamicBuffer,
+                               Group, Hierarchy, Index, Introspection, Maybe, Migration, OrderedIndex, Ordering, ParallelForEach,
                                ParallelSystems, Prefab, Relation, Runner, Snapshot, Sparse, Unload) + MicroBenchmarks.
                                Always measure with BenchmarkDotNet.
 benchmarks/EasyEcs.Benchmark.Plugin/  a collectible plugin (Scoring.cs) the Unload benchmark loads and unloads
@@ -136,15 +136,24 @@ benchmarks/EasyEcs.Comparison/ BenchmarkDotNet against Arch, Friflo.Engine.ECS a
                                indexes); QueryComparisons (value queries, parallel queries, saves); StructureComparisons
                                (hierarchy, relations, disable, structural changes); BulkComparisons (bulk changes,
                                spawns); SystemComparisons (parallel systems)
-docs/content/                  the docs (source of https://ecs.xgamedev.net): index.mdx, what-is-ecs.mdx, changelog.mdx,
-                               guide/change-tracking.mdx (each + .zh.mdx); plain GitHub markdown: README.md (GitHub index),
-                               features.md, getting-started.md, example.md (the battle server), guide/ (one page per
-                               concept, analyzer.md lists EECS002-024), api.md (API + complexity), ecs-principles.md,
-                               architecture.md, performance.md, comparison.md, faq.md, decisions.md, roadmap.md
-                               (diagrams in mermaid); meta.json files order the site's sidebar
+docs/content/                  the docs (source of https://ecs.xgamedev.net), each page <page>.mdx + <page>.zh.mdx:
+                               index, learn pages (what-is-ecs, features, getting-started, ecs-principles, example: the
+                               battle server through regions of BattleServer.cs, cheat-sheet, glossary), guide/ (one
+                               page per concept, analyzer lists EECS002-024), compare pages (performance, why-fast,
+                               comparison, vs-*, migrate-from-*), reference pages (api: API + complexity, read by
+                               tools/ApiDocs; architecture, faq, ai, decisions, roadmap, changelog); reference/ (API
+                               reference generated by tools/ApiDocs, English only); README.md (GitHub index);
+                               diagrams in mermaid; meta.json files order the site's sidebar
 docs/                          the docs site: React Router 7 + Fumadocs, prerendered, Bun (docs/CLAUDE.md);
                                app/ routes, src/ components and libs, src/data/bench.json, scripts/, functions/
-                               (Cloudflare Pages Functions), WRITING.md (page anatomy, tone, numbers)
+                               (Cloudflare Pages Functions), WRITING.md (page anatomy, tone, numbers); public/
+                               easyecs-rules.md (the rules file for AI assistants, docs/content/ai.mdx)
+samples/                       runnable projects (HelloWorld, GameLoop, MultiWorld, SaveLoad, HotReload), run by CI
+examples/                      file-based C# programs (`dotnet run examples/hello.cs`), one per feature; run.sh runs them all
+templates/                     `dotnet new easyecs` templates (EasyEcs.Templates package); smoke.sh builds them
+tools/DocCheck/                compiles the C# fences of the docs pages (`doccheck=` flags on a fence)
+tools/ApiDocs/                 writes docs/content/reference/ from the XML docs and the complexity tables of api.mdx
+                               (Complexity.cs)
 ```
 
 ## Engineering principles (apply to every change)
@@ -168,11 +177,12 @@ docs/                          the docs site: React Router 7 + Fumadocs, prerend
 
 ## Rules
 
-- **Follow the ECS principles in `docs/content/ecs-principles.md`, including in tests, benchmarks and docs**: components and
+- **Follow the ECS principles in `docs/content/ecs-principles.mdx`, including in tests, benchmarks and docs**: components and
   singletons are plain data structs; one system per responsibility; systems are stateless (state goes into
   components or singletons, EECS007) and never reference other systems (EECS008); state changes are data.
-  Examples are what users copy, so they must be exemplary. The battle server example (`docs/content/example.md`) is `benchmarks/EasyEcs.Benchmark/BattleServer.cs`
-  verbatim: change both together, and give a new feature a place in it.
+  Examples are what users copy, so they must be exemplary. The battle server example
+  (`docs/content/example.mdx`) includes the `// #region` blocks of `benchmarks/EasyEcs.Benchmark/BattleServer.cs`:
+  keep the regions when changing the file, update the page's walkthrough with it, and give a new feature a place in it.
 - **Performance changes must be measured.** Run the relevant `EasyEcs.Benchmark` cases before and after; a change
   ships only if it is a net improvement (time and allocations) with no regression elsewhere. Add a benchmark
   when you optimize something not covered yet.
@@ -195,8 +205,10 @@ docs/                          the docs site: React Router 7 + Fumadocs, prerend
 - **Every change a pass must notice bumps `StorageVersion`**: reallocation (columns, `Meta`, entity rows), row moves,
   closing tombstones, and presence bits flipping, so in-flight passes refresh their refs and re-read row filters.
 - **Decisions**: every non-obvious choice, and every feature dropped after weighing it, gets a record in
-  `docs/content/decisions.md` (decision, why, what was considered, numbers); `docs/content/roadmap.md` lists what is planned.
-- **Docs**: diagrams are mermaid; `docs/content/api.md` lists the complexity of every public API (README is the landing page).
+  `docs/content/decisions.mdx` + `.zh.mdx` (decision, why, what was considered, numbers); `docs/content/roadmap.mdx` lists
+  what is planned and what was dropped.
+- **Docs**: diagrams are mermaid; `docs/content/api.mdx` lists the complexity of every public API (rerun
+  `dotnet run --project tools/ApiDocs` after changing it); README is the landing page.
 - **Entity ids are recycled**: any id-keyed API must also validate the version (`World.Live`, `Entity.ThrowStale`).
 - Behavioral/breaking changes need a `MIGRATION_GUIDE.md` entry and a README "What's new" entry.
 - Commits: logic, docs and CI in separate commits. The author is the repository owner; the committer is the

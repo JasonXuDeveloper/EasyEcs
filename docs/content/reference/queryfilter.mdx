@@ -29,7 +29,7 @@ Require `T` and only rows whose `T` was written at or after change tick `since`:
 
 - `ArgumentException`: An earlier `Changed` or `Removed` filter named another tick.
 
-**Complexity** ([API table](/en/docs/api)): O(1); a pass skips tables, 4,096-row blocks and 64-row words written before `since` (4 summaries per SIMD compare) and takes a word's written rows from its summary; only words written at several ticks after `since`, or row by row by a query, test 4 rows per SIMD compare
+**Complexity** ([API table](/en/docs/api)): O(1); a pass skips tables, 4,096-row blocks and 64-row words written before `since`
 
 ### `Create` [#create]
 
@@ -39,7 +39,7 @@ public static QueryFilter Create();
 
 A filter that matches every entity with the queried components: the start of a chain (`Create().Without<Dead>()`). O(1).
 
-**Complexity** ([API table](/en/docs/api)): O(1); allocates once a component's bit is 256 or more (worlds with more than 256 component types)
+**Complexity** ([API table](/en/docs/api)): O(1)
 
 ### `InGroup` [#ingroup]
 
@@ -48,6 +48,8 @@ public QueryFilter InGroup<T>(int group) where T : struct, IComponent, IGroup;
 ```
 
 Require `T` with group `group`: only the tables of that group are walked ([`World.GroupBy`](/en/docs/reference/world#groupby); in a world that does not group by `T`, every table holds group 0). One group per filter.
+
+**Complexity** ([API table](/en/docs/api)): O(1); a pass walks only that group's tables
 
 ### `Removed` [#removed]
 
@@ -61,7 +63,7 @@ Only entities that lost `T` at or after change tick `since` and have not got it 
 
 - `ArgumentException`: An earlier `Changed` or `Removed` filter named another tick.
 
-**Complexity** ([API table](/en/docs/api)): as `Changed`: the removal stamped the row's tick
+**Complexity** ([API table](/en/docs/api)): as `Changed`
 
 ### `Since` [#since]
 

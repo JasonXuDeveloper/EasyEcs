@@ -21,6 +21,8 @@ public static ValueIndex<T, TKey>.Ordered Ascending<T, TKey>(this ValueIndex<T, 
 
 Every indexed entity by ascending key.
 
+**Complexity** ([API table](/en/docs/api)): O(keys log keys) for the first walk, then O(1) per entity
+
 ### `Descending` [#descending]
 
 ```csharp
@@ -28,6 +30,8 @@ public static ValueIndex<T, TKey>.Ordered Descending<T, TKey>(this ValueIndex<T,
 ```
 
 Every indexed entity by descending key (the top of a leaderboard first).
+
+**Complexity** ([API table](/en/docs/api)): O(keys log keys) for the first walk, then O(1) per entity
 
 ### `Range` [#range]
 
@@ -37,6 +41,8 @@ public static ValueIndex<T, TKey>.Ordered Range<T, TKey>(this ValueIndex<T, TKey
 
 The entities whose key is between `min` and `max` (inclusive), by ascending key.
 
+**Complexity** ([API table](/en/docs/api)): O(keys log keys) for the first walk, then O(log keys) to find `min` and O(1) per entity
+
 ### `RangeDescending` [#rangedescending]
 
 ```csharp
@@ -44,6 +50,8 @@ public static ValueIndex<T, TKey>.Ordered RangeDescending<T, TKey>(this ValueInd
 ```
 
 The entities whose key is between `min` and `max` (inclusive), by descending key.
+
+**Complexity** ([API table](/en/docs/api)): O(keys log keys) for the first walk, then O(log keys) to find `min` and O(1) per entity
 
 ## Extension members
 
@@ -55,6 +63,8 @@ extension<T, TKey>(ValueIndex<T, TKey> index) public ValueIndex<T, TKey>.Ordered
 
 Every indexed entity by ascending key.
 
+**Complexity** ([API table](/en/docs/api)): O(keys log keys) for the first walk, then O(1) per entity
+
 ### `Descending` [#descending-2]
 
 ```csharp
@@ -62,6 +72,8 @@ extension<T, TKey>(ValueIndex<T, TKey> index) public ValueIndex<T, TKey>.Ordered
 ```
 
 Every indexed entity by descending key (the top of a leaderboard first).
+
+**Complexity** ([API table](/en/docs/api)): O(keys log keys) for the first walk, then O(1) per entity
 
 ### `Range` [#range-2]
 
@@ -71,6 +83,8 @@ extension<T, TKey>(ValueIndex<T, TKey> index) public ValueIndex<T, TKey>.Ordered
 
 The entities whose key is between `min` and `max` (inclusive), by ascending key.
 
+**Complexity** ([API table](/en/docs/api)): O(keys log keys) for the first walk, then O(log keys) to find `min` and O(1) per entity
+
 ### `RangeDescending` [#rangedescending-2]
 
 ```csharp
@@ -78,3 +92,5 @@ extension<T, TKey>(ValueIndex<T, TKey> index) public ValueIndex<T, TKey>.Ordered
 ```
 
 The entities whose key is between `min` and `max` (inclusive), by descending key.
+
+**Complexity** ([API table](/en/docs/api)): O(keys log keys) for the first walk, then O(log keys) to find `min` and O(1) per entity

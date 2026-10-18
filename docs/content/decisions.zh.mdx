@@ -1,0 +1,397 @@
+---
+title: 设计决策
+seoTitle: "EasyEcs 设计决策：为什么是现在这个样子"
+description: "EasyEcs 每个不显然的设计选择：决定了什么、为什么、和哪些方案比较过，以及最终拍板的 BenchmarkDotNet 数据。"
+icon: Lightbulb
+---
+
+import { Cpu, Milestone, Shapes } from 'lucide-react';
+
+EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为什么，以及和哪些方案比较过（由测量拍板的，附上 BenchmarkDotNet 数据）。
+决定改了，记录就重写；放弃的功能连同理由留在这里，没有新的事实就不必再提。本页是英文版的忠实摘要，完整论证与全部数据见
+[英文原文](/en/docs/decisions)。
+
+记录里的数字是当时做决定所依据的测量：在当时的机器上用 BenchmarkDotNet 测改动前后，属于历史数据，不是当前结果。
+当前数据见[性能指南](/zh/docs/performance)和[横向对比](/zh/docs/comparison)；接下来的计划见[路线图](/zh/docs/roadmap)。
+
+| # | 决策 |
+| --- | --- |
+| [D1](#d1-state-changes-are-data-no-events-or-callbacks) | 状态变化即数据：没有事件和回调 |
+| [D2](#d2-structural-changes-apply-at-once-no-command-buffers) | 结构变更立即生效：没有命令缓冲 |
+| [D3](#d3-no-command-buffer-for-parallel-jobs) | 并行 job 也没有命令缓冲 |
+| [D4](#d4-no-addedt-filter) | 没有 `Added<T>` 过滤 |
+| [D5](#d5-order-systems-by-dependencies-not-priorities) | 按依赖而不是优先级给系统排序 |
+| [D6](#d6-removing-a-component-keeps-the-row) | 移除组件不搬行 |
+| [D7](#d7-contiguous-columns-not-pages) | 连续的列，而不是分页 |
+| [D8](#d8-no-whole-entity-disable) | 没有整实体禁用 |
+| [D9](#d9-saves-are-built-in-with-nino) | 内置存档，基于 Nino |
+| [D10](#d10-moveentities-copies-rows-without-encoding) | `MoveEntities` 直接复制行，不经过编码 |
+| [D11](#d11-ids-in-a-prefab-name-its-members) | 预制体里的 id 指向它的成员 |
+| [D12](#d12-target-policies-are-opt-in-per-index) | 目标策略按索引选择开启 |
+| [D13](#d13-one-owner-thread-per-world) | 每个 World 一个所属线程 |
+| [D14](#d14-no-shared-components) | 没有共享组件 |
+| [D15](#d15-net-10-only) | 只支持 .NET 10 |
+| [D16](#d16-no-partial-generated-code-lives-outside-the-users-type) | 不需要 `partial`：生成的代码不放进用户的类型 |
+| [D17](#d17-unloading-removes-types-from-worlds-bits-are-reused) | 卸载时把类型移出 World，组件位复用 |
+| [D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references) | 查询调用不用拦截器；过滤器不持有引用 |
+| [D19](#d19-no-settable-tag-properties) | 标签属性不可赋值 |
+| [D20](#d20-generic-systems-register-the-closed-types-their-assembly-names) | 泛型系统注册所在程序集用到的封闭类型 |
+| [D21](#d21-net-10-features-only-where-they-measure) | .NET 10 新特性，测得出收益才用 |
+| [D22](#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay) | 并行运行用线程池，划算时才唤醒助手线程 |
+| [D23](#d23-change-summaries-per-block-removals-summarized-apart) | 按块维护变更摘要；移除单独汇总 |
+| [D24](#d24-an-indexs-key-holds-its-entities-in-one-array) | 索引的每个键用一个数组存它的实体 |
+| [D25](#d25-structural-row-loops-are-compiled-for-tables-without-tombstones) | 为没有墓碑的表单独编译结构性行循环 |
+| [D26](#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call) | 在代码会重复写类型名的地方生成成员，而不是每个调用都生成 |
+
+## D1. 状态变化即数据：没有事件和回调 [#d1-state-changes-are-data-no-events-or-callbacks]
+
+**决定。** 组件被添加、移除或写入时，不会调用任何用户代码。需要别人响应的变化，要么是一个组件（`Dead` 标签、消息实体），
+要么是一次被追踪的写入（`[Changed<T>]`、`[Removed<T>]`）。
+
+**原因。** 回调在另一个系统内部执行：控制流被藏起来，可能重入触发它的代码，调度器也看不到它的读写，系统就无法安全并行。
+做成数据之后，效果的先后就是调度的先后，生成器知道每一次访问，测试和快照也能看到这些"事件"。
+
+**比较过。** 组件事件（Friflo、Arch、DefaultEcs）；EasyEcs 曾经有过，后来删掉了。
+
+## D2. 结构变更立即生效：没有命令缓冲 [#d2-structural-changes-apply-at-once-no-command-buffers]
+
+**决定。** 添加、移除、创建和销毁立刻生效，查询进行到一半也一样：遍历期间被移除的行变成墓碑，最后一个遍历结束时 World 关闭墓碑，
+遍历永远看不到行在脚下移动。
+
+**原因。** 延后的变更等于一个更晚的"第二版本" World，每个读者都得考虑它；立即生效的变更怎么写就怎么执行。墓碑的代价是每个被访问行
+一次 id 检查，遍历之外没有任何开销。
+
+**比较过。** 查询结束后回放的命令缓冲（Friflo、Arch、DefaultEcs）。
+
+## D3. 并行 job 也没有命令缓冲 [#d3-no-command-buffer-for-parallel-jobs]
+
+**决定。** 并行 `[ForEach]` 方法和并行阶段不做结构变更（EECS010）。并行 job 只写数据，排在它后面、运行在所属线程上的系统根据这些数据做结构变更：
+
+```csharp
+public record struct Poison(int DamagePerTick) : IComponent;
+
+public class PoisonSystem : EcsSystem
+{
+    [ForEach(Parallel = true)]                                    // 数据，在所有核心上
+    static void Hurt(ref Health hp, in Poison poison) => hp.Value -= poison.DamagePerTick;
+}
+
+[UpdateAfter<PoisonSystem>]
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]                                      // 结构，随后在所属线程上
+    static void Die(Entity entity, in Health hp) { if (hp.Value <= 0) entity.SetDead(); }
+}
+```
+
+**原因。** 每线程一个记录器会把 D2 去掉的延后路径又带回来，还得定义线程之间的顺序，回放的开销也藏在阶段背后。上面的写法用的是用户本来就看得懂的调度，
+批量操作（`SetAll`、`RemoveAll`）又让后续那一遍很便宜。
+
+**比较过。** 阶段结束时回放的每线程命令缓冲（曾列入 4.1 路线图，实现前放弃）。
+
+## D4. 没有 `Added<T>` 过滤 [#d4-no-addedt-filter]
+
+**决定。** 没有"自某个 tick 以来获得了 `T`"的过滤。`[Changed<T>]` 已经会选出新获得 `T` 的行（添加和写入一样会打 tick）。
+系统确实需要区分"新组件"和"被写过的组件"时，由创建者加一个标签，由响应的系统去掉：
+
+```csharp
+public struct Spawned : IComponent;                                  // 标签："上次 Greet 之后新出现的"
+
+public class GreetSystem : EcsSystem
+{
+    [ForEach, With<Spawned>]
+    static void Greet(Entity entity, in Health hp) => entity.RemoveSpawned();   // 首次处理，然后翻一个位
+}
+```
+
+```csharp
+world.CreateEntity(new Health(100), new Spawned());                  // 创建者声明它是新的
+```
+
+**原因。** 标签是显式的、可查询的、会随 World 一起存档，代价只是翻一个存在位。内置过滤则要给每个被追踪的行多存一个变更 tick
+（每行多 8 字节，每次添加多一次写），每种组件还要多一列伴随列，而标签已经能满足需求。
+
+**比较过。** Bevy 的 `Added<T>`、DefaultEcs 的 `WhenAdded`（曾列入 4.1 路线图，实现前放弃）。
+
+## D5. 按依赖而不是优先级给系统排序 [#d5-order-systems-by-dependencies-not-priorities]
+
+**决定。** 系统按注册顺序运行。`[UpdateBefore<T>]` / `[UpdateAfter<T>]` 只在分组内移动声明它的那个系统。阶段由排序图和读写集决定：
+两个系统互不排在对方之前、访问也不冲突时，才一起跑。出现环时 `AddSystem` 抛异常（World 保持不变），分析器能看到时报 EECS019；
+跨分组的排序不起作用（EECS020）。`Priority` 已删除。
+
+**原因。** 来自多个程序集的整数优先级会撞车，也说明不了系统为什么排在那里；排序约束直接写明依赖。两套机制并存只会让一件事有两种做法。
+只移动声明者能保持其他系统的注册顺序，加一条排序不会打乱无关的系统。
+
+**比较过。** 优先级与排序并存（否决：重叠）；按字典序的拓扑排序（否决：会打乱无关系统）。tick 时间不变：ParallelSystems 四轮
+改前 292-345 μs、改后 278-325 μs；WorldSimulation 改前 1,774 μs、改后 1,731 μs。
+
+## D6. 移除组件不搬行 [#d6-removing-a-component-keeps-the-row]
+
+**决定。** 移除只清掉这一行在该列上的存在位；只有添加表里没有对应列的组件才会搬行。
+
+**原因。** 来来去去的状态（眩晕、着火、死亡）第一次之后只需翻一个位，查询一次测 64 行，`[Removed<T>]` 也就是一行普通的数据（tick 说明是什么时候）。
+
+**比较过。** 每次移除都搬行（经典原型模型）：每次状态变化一次复制。
+
+## D7. 连续的列，而不是分页 [#d7-contiguous-columns-not-pages]
+
+**决定。** 列是连续数组。
+
+**原因。** 分页的遍历速度一样，却给每次句柄访问多加一层间接；省下的只是表扩容时的那次复制，而 `InitialEntityCapacity` 和
+`EnsureCapacity` 本来就能消掉它。
+
+## D8. 没有整实体禁用 [#d8-no-whole-entity-disable]
+
+**决定。** 没有"被禁用的实体"这种默认被查询跳过的东西。用一个标签加 `Without<T>` 显式实现；`Disable<T>()` 则是保留单个组件的值、
+同时对查询隐藏它：
+
+```csharp
+public struct Inactive : IComponent;                        // 整个实体关掉
+public struct Bullet : IComponent;
+
+public class BulletSystem : EcsSystem
+{
+    [ForEach, With<Bullet>, Without<Inactive>]              // 要跳过它的系统自己写明
+    static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
+}
+```
+
+```csharp
+var bullet = world.CreateEntity(new Bullet(), new Position(0, 0), new Velocity(4, 0));
+bullet.SetInactive();                                       // 回到对象池：翻一个位，不搬行
+bullet.SetPosition(10, 20).RemoveInactive();                // 重新启用
+
+int pooled = world.Count<Bullet>(QueryFilter.Create().With<Inactive>()); // 存档、清理、统计都能看到全部实体
+```
+
+用途：对象池（子弹、特效）、断线重连期间留在内存里的玩家、没有玩家时 NPC 休眠的区域。
+
+**原因。** 默认排除会让每个查询都依赖一个它没写出来的状态：必须看到全部实体的存档、清理或计数得记着把它们加回来，忘了也不会报错。
+标签是生成器和读代码的人都看得见的数据，这正是 ECS 原则的要求。
+
+**比较过。** Friflo（`entity.Enabled = false`：原型里的隐藏标签，除非 `WithDisabled()`，否则查询跳过）；DefaultEcs
+（`entity.Disable()`：实体离开所有实体集）。按场景比较：
+
+| | Friflo | DefaultEcs | EasyEcs |
+| --- | --- | --- | --- |
+| 关闭或打开一个实体 | 把它的行搬到另一个原型 | 更新每个实体集 | 翻一个存在位（第一次之后） |
+| 遍历时越过被禁用的实体 | 跳过它们的原型 | 它们不在任何集里 | 表里没有被禁用实体时零开销（看计数，不读位）；混在一起时每 64 行测一次 |
+
+对象池和特效切换频繁，翻位比搬行划算。只有大量实体长期禁用、又和启用的实体混在同一张表里时，EasyEcs 才比 Friflo 多出每 64 行一次的测试；
+真有影响时，按休眠状态 `GroupBy` 就能把它们拆到单独的表里。在系统分组上加过滤（在 `ISystemGroup` 结构体上写 `[Without<Inactive>]`）
+会作用到分组内所有系统的每个 `[ForEach]`，过滤只需写一次。
+
+<BenchChart bench="DisableComparison" params="Switched=100" title="10 万单位中 100 个入睡、上一批 100 个醒来，再对醒着的单位求和" />
+
+## D9. 内置存档，基于 Nino [#d9-saves-are-built-in-with-nino]
+
+**决定。** `World.Save` / `Load` 和 `SaveEntities` / `LoadEntities` 直接写表，托管值交给 Nino。非托管行按规范布局写出并附带字段哈希，
+结构体改了在加载时就能发现；生成器记录 `EntityId` 字段的位置，迁移时据此改写成新实体。
+
+**原因。** 改写引用、按类型名加载、重复加载时复用行（0 B 分配）都需要 World 的表和生成器配合；用户在 `Query` 上自己写做不到。
+（4.0 之前存档由用户自己负责。）
+
+## D10. `MoveEntities` 直接复制行，不经过编码 [#d10-moveentities-copies-rows-without-encoding]
+
+**决定。** `world.MoveEntities(target, ids)` 把一组实体的行复制到本线程的另一个 World，改写组内的 id，再销毁原实体。它和 `LoadEntities`、
+预制体组共用一个核心：按列复制一段段连续的行。
+
+**原因。** 测出编码确实占了搬迁的相当一部分才保留它：1,000 个实体往返 150 μs，走 `SaveEntities` + `LoadEntities` 要 207 μs；
+没有层级时单程 32 μs 对 71 μs。
+
+## D11. 预制体里的 id 指向它的成员 [#d11-ids-in-a-prefab-name-its-members]
+
+**决定。** 预制体里的 `EntityId` 字段指向它所在组的某个成员（`member.Id`），每次实例化都会改写；其他 id 一律变成 `EntityId.Null`。
+指向 World 里实体的关系在实例化之后再设置。
+
+**原因。** 预制体不属于任何 World：World 里某个实体的 id 可能恰好等于某个成员的 id，两者无法区分。
+
+## D12. 目标策略按索引选择开启 [#d12-target-policies-are-opt-in-per-index]
+
+**决定。** 在 `EntityId` 索引或关系索引上调用 `WhenTargetDestroyed(TargetPolicy.Remove / Destroy)`，决定销毁一个实体时指向它的链接怎么处理；
+默认是 `Keep`（链接保留，可以按已失效的 id 找到）。`ChildOf` 是 `Destroy`，可以改。
+
+**原因。** 选择开启能让没设策略的 World 销毁实体时和以前完全一样。`ChildOf` 的规则内联检查：走通用规则列表时级联基准要 650 μs，
+内联后 557 μs 变为 561-578 μs。
+
+**比较过。** 在组件类型上加标记接口（否决：那样索引就得泛型地创建，需要反射；在索引上调用方法对 AOT 安全，而且按 World 生效，
+和 `GroupBy<T>()` 一样）。
+
+## D13. 每个 World 一个所属线程 [#d13-one-owner-thread-per-world]
+
+**决定。** World 的系统、查询和结构变更都在它的所属线程上执行；并行阶段和并行 `[ForEach]` 是仅有的并行，由生成器证明安全。
+其他线程把工作投递给所属线程。
+
+**原因。** 任何热路径上都没有锁；规则三行就能说清（[线程模型](/zh/docs/guide/threading)）。
+
+## D14. 没有共享组件 [#d14-no-shared-components]
+
+**决定。** 没有 `SetSameAs` 之类的共享值。共享数据放在单例里，组件只存指向它的 id。
+
+**原因。** 共享值本质上是一个引用，一次写入会同时改掉很多实体，变更追踪和调度器都看不到。
+
+## D15. 只支持 .NET 10 [#d15-net-10-only]
+
+**决定。** EasyEcs 面向 `net10.0`，不支持 Unity 或更老的运行时。
+
+**原因。** 它依赖 C# 14 扩展成员、`Vector256`、放在 POH 上的列以及当前 JIT 的行为，这些老运行时都没有。
+
+## D16. 不需要 `partial`：生成的代码不放进用户的类型 [#d16-no-partial-generated-code-lives-outside-the-users-type]
+
+**决定。** 生成器把 `[ForEach]` 方法的 job 写进单独的 `file` 类，通过 `[UnsafeAccessor]` 调用这个方法（不管是不是私有）。
+系统的更新逻辑和访问集是一个 `SystemCode`，由模块初始化器注册（弱引用持有，可回收的程序集才能卸载）；runner 的入口是它所在类型上的
+C# 14 静态扩展成员。生成的代码无法引用的类型（私有组件、私有 runner 类型）报 EECS022。
+
+**原因。** 系统就是普通的类：它和外层类型都不用写 `partial`，类体里也不生成任何东西，生成的成员不会和用户的冲突。`UnsafeAccessor`
+编译出来就是直接调用（机器码相同，可内联），tick 时间没有变化（ForEachSystemWrite、ParallelSystems 在误差范围内）。
+
+**比较过。** partial 类（缺失时报 EECS001，成员注入用户类型）；指向方法的委托或函数指针（每行一次间接调用，无法内联）；启动时反射（不支持 AOT）。
+
+## D17. 卸载时把类型移出 World，组件位复用 [#d17-unloading-removes-types-from-worlds-bits-are-reused]
+
+**决定。** `world.RemoveTypes(assembly or context)` 把一个程序集的系统、单例、索引、分组和组件移出 World。实体保留；含有它的列的表连同引用这些表的
+所有缓存一起丢弃。可回收的上下文卸载后，EasyEcs 忘掉它的存档名称；没有存活的 World 再引用它的组件位时，这些位会被复用。
+重新加载靠 `Save` 和 `Load` 保留数据，它们按名字映射类型。
+
+**原因。** 长时间运行的服务端热重载游戏逻辑时，不能留下任何东西把旧程序集钉住（列数组、迁移边、查询缓存的键、注册表），反复重载也不能让掩码不断变长。
+丢弃表是 `Dispose` 之外唯一会删除表的地方，稳态代码没有任何额外开销（CreateAddDestroy、Prefab、WorldSimulation 在误差范围内）。
+
+**比较过。** 在内存里把旧类型的行迁移成新类型（每个字段都需要类型映射；`Save` / `Load` 已经按名字和字段哈希做了映射）；从不复用位
+（每重载一次，掩码就多出一批组件）。
+
+## D18. 查询调用不用拦截器；过滤器不持有引用 [#d18-no-interceptors-for-query-calls-filters-carry-no-references]
+
+**决定。** 查询调用不做拦截。`QueryFilter` 把五个集合的前 256 位内联存放，255 之后的位存成一个驻留 id，因此不持有任何对象引用，
+构建器每次调用只复制一次。
+
+**原因。** 拦截器只替换调用绑定的方法，调用参数照样要求值，在调用处构建的过滤器怎么都会被构建；按调用点缓存查询项省下的只是调用本来就有的那次备忘查找。
+真正的开销在过滤器本身：五个各带溢出引用的掩码让每次构建器调用都经过 `BulkMoveWithWriteBarrier` 复制两次，还要清零调用方栈帧。
+去掉引用后，用调用处构建的 `QueryFilter.Create().With<Npc>().Without<Dead>().Without<Frozen>()` 统计 16 个实体从 124 ns 降到 76 ns，
+过滤器放在静态字段里仍是 24 ns（`CallSiteBenchmark`）。热调用仍然建议把过滤器提出去。
+
+**比较过。** 拦截器配静态过滤器、每个调用点缓存查询项（参数求值让它失去意义）；对在调用处构建过滤器给出分析器警告
+（大多数调用是冷的；文档已经教了静态字段的写法）。
+
+## D19. 标签属性不可赋值 [#d19-no-settable-tag-properties]
+
+**决定。** 标签生成的 `IsX` 是只读的；`SetX()` 添加标签，`RemoveX()` 移除标签。
+
+**原因。** `entity.IsDead = true`（Entitas 风格）在 ECS 代码持有实体的地方写不出来：C# 14 不允许给 `foreach` 变量（CS1654）、
+索引器结果（CS1612）或 `in` 参数的字段（CS8332）上的结构体扩展属性赋值，按值接收还是 `in` 接收都一样。一个在局部变量上能编译、
+在 `foreach (var e in hits)` 或 `link.Target` 上却不能编译的成员会教错东西；方法在哪里都能用，结构变更也始终是一次显式调用。
+
+## D20. 泛型系统注册所在程序集用到的封闭类型 [#d20-generic-systems-register-the-closed-types-their-assembly-names]
+
+**决定。** 泛型系统的代码是一个以系统类型参数为参数的泛型类。它的模块初始化器为所在程序集里出现过的每个封闭类型注册一个实例
+（`AddSystem<CountOf<Health>>()`、`new CountOf<Health>()`、基类型 `CountOf<Health>` 及其泛型基类），其他封闭类型则注册泛型定义，
+由 `AddSystem` 在第一次使用时用 `MakeGenericType` 封闭。系统自己的泛型 `[ForEach]` 方法仍报 EECS004。
+
+**原因。** 模块初始化器无从知道程序会用哪些类型参数，系统类里又不生成任何东西（D16）。系统所在程序集里出现过的封闭类型不需要运行时生成代码，
+Native AOT 能保留它们；只在其他程序集里出现的封闭类型在 JIT 下照样能用。runner 两者都不需要：入口本身是泛型的，调用方的类型参数在编译期就封闭了 job。
+系统自己的泛型方法则没有调用方来提供类型参数。
+
+**比较过。** 只用反射（任何值类型参数都会破坏 Native AOT，而组件都是结构体）；系统上的虚泛型钩子（需要 `partial` 或每个元数一个基类）；
+扫描被引用程序集里的封闭用法（生成的代码对系统所在程序集是 file 级私有的）。
+
+## D21. .NET 10 新特性，测得出收益才用 [#d21-net-10-features-only-where-they-measure]
+
+**决定。** 4.1 考虑过的每个 .NET 10 / C# 14 特性都做了原型，用 BenchmarkDotNet 和前一个提交对比（两边各跑两轮，全程 0 字节分配），
+只有净收益才保留：
+
+| 特性 | 结论 | 数据 |
+| --- | --- | --- |
+| `Vector512`（和 `Vector<T>`） | 保留：没有墓碑的表统计行字里的置位数，AVX-512 下每步 8 个字，否则用 `Vector<T>`（AVX2 4 个，Arm64 2 个） | CountBenchmark，10 万需要测位的行：48.9-54.5 μs -> 1.21-1.27 μs；只用 `Vector<T>` 2.4 μs，逐字 5.2 μs；对 `Vector512` 按下标循环 7.6 μs（改为展开） |
+| 查询缓存的 `GetAlternateLookup` | 保留：用调用自己的位和过滤器的 ref 探测，不构建也不复制键 | 超出备忘的过滤器 92-106 ns -> 86-90 ns |
+| 备忘的各路改为一个数组里的结构体 | 保留 | 静态过滤器 21.6-21.9 -> 19.0-19.8 ns，无过滤器 36.8-39.1 -> 35.3-35.5 ns |
+| 备忘用 `[InlineArray]`（所有签名的各路内联在一个扁平数组里） | 放弃 | 快 1-2 ns（20.3-20.6 / 38.9-39.5 ns），但签名下标是进程级的，每个 World 要为进程里的每个签名占约 750 字节（200 个签名 150 KB），每新增一路还要整体复制 |
+| 存档类型表用 `FrozenDictionary`（无锁查找，变更后第一次加载时冻结） | 放弃 | 一个实体的存档加载 2.32-2.33 μs -> 2.23-2.34 μs：在误差范围内；加载时每种类型只解析一次，而不是每个实体一次 |
+| `System.Threading.Lock`、`params ReadOnlySpan`、空条件赋值 | 保留 | 冷路径 |
+| `RegisterImplementationSourceOutput` | 保留：系统代码和存档类型注册只通过模块初始化器访问 | IDE 在输入时跳过它们 |
+| 生成代码使用 C# 14 | 保留：EasyEcs 面向 net10.0（默认 C# 14），每个生成器都要求 C# 14，生成的 lambda 省略参数类型 | |
+| `OverloadResolutionPriority`、`field` | 用不上：它们改变的是重载选择和语法，不是 IL；API 里没有同一方法的数组与 span 重载，候选的后备字段也都在属性之外写入 | |
+| first-class span 转换、`nameof(List<>)` | 用不上：剩下的 `.AsSpan()` 调用是 `Fill` 和 `foreach (ref ...)`，转换管不到；生成器面向 netstandard2.0，比较的是类型名 | |
+
+**比较过。** 把内联组件掩码扩到 512 位（每个过滤器、键和表掩码都要为 256-511 号组件多 32 字节，而溢出区已经覆盖了它们）。
+
+## D22. 并行运行用线程池，划算时才唤醒助手线程 [#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay]
+
+**决定。** 并行 `[ForEach]` 和一个阶段的并行系统在调用线程加上可复用的 `IThreadPoolWorkItem` 助手上运行，按匹配行数切块。
+每个 job 和阶段都测量自己的运行：有助手的运行会给出耗时和各任务线程时间之和，只要助手能让一次运行比工作量快五分之一就保留。
+一旦改为单独运行，就在一个从 16 翻倍到 1,024 次运行的周期之后试探四次带助手的运行；单独运行变慢到 1.5 倍时立即试探。
+没有自旋，没有专用线程，没有分配。
+
+**原因。** 唤醒一个停泊的线程池线程要几微秒到几百微秒，烧掉的 CPU 也差不多，所以服务器 tick 之间的小遍历带助手并不更快，CPU 却翻倍。
+4 核虚拟机上 60 Hz 的 tick、单次 10 万行遍历：遍历中位数 123 -> 111 μs，每 tick CPU 436 -> 290 μs（串行：108 μs、229 μs）。BDN：
+ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs，BattleServer 和 Runner 不变。
+
+**比较过。**
+- 一组专用助手线程，每次运行后自旋约 50 μs：只有遍历首尾相接时才赢（BenchmarkDotNet 的循环）。放到服务器 tick 里就输了：
+  中位数 130 对 135 μs，但 p90 170 对 190 μs，每 tick CPU 990 对 760 μs。
+- `ThreadPool.UnfairSemaphoreSpinLimit`：能消除首尾相接的差距，但它是进程级的，会让线程池线程在 tick 之间一直自旋（每 16 ms tick 49 ms CPU），
+  所以留给应用自己决定。
+
+## D23. 按块维护变更摘要；移除单独汇总 [#d23-change-summaries-per-block-removals-summarized-apart]
+
+**决定。** 被追踪的列为每个 64 行的字保存一个 32 字节的条目（最新 tick、处于它的行、其余行的上界、缺组件的行的 tick 上界），
+为每个 4,096 行的块用位掩码记下处于块内最新 tick 的字，另加其余字的上界。`Changed<T>` 遍历用一次位扫描找到下一个被写过的字；
+`Removed<T>` 遍历按移除上界跳过字、按单独的移除摘要跳过块，`T` 的写入不会让它去访问那些字。
+
+**原因。** BDN，对比按字维护的摘要：RemovalComparison 10 次移除 1.07-1.09 -> 0.87 μs；ChangeTracking `Changed` 写 10 行
+609-650 -> 514 ns；ChangeTrackingComparison 612-636 -> 497-573 ns。BattleServer、WorldSimulation 和写 1,000 行的场景不变。
+
+**剩下的差距。** Friflo 报告 10 次移除只要 0.70 μs：它在回调里随时收集被移除的 id，读的时候不再有额外开销。EasyEcs 把移除当作数据（D1）：
+一次遍历约 90 ns，每个有移除的字再加约 30 ns，花在读摘要和行上。到 1,000 次移除时两者持平（71 对 73 μs）。
+
+**比较过。** 把字的摘要和块的摘要交错存放（没有收益：10 万行的摘要放得进 L2）；用单独的辅助函数逐行记字（更慢：每次查询 tick 600 μs）；
+为一次移除的打 tick 和移除记录只查一次列和字（测不出收益，已回退）。
+
+## D24. 索引的每个键用一个数组存它的实体 [#d24-an-indexs-key-holds-its-entities-in-one-array]
+
+**决定。** 值索引和关系索引把每个键的实体放在一个 id 数组里（`IndexHead`）。实体离开留下的空位由这个键的下一个实体补上，
+实体不会移动，不管循环中销毁了什么，每个实体都只会被找到一次；清空的键的数组会被复用。`CreateEntities` 只查一次键就把整批实体加进索引。
+
+**原因。** 用每实体节点串起来的链表，每个实体要一次依赖读取。BDN：IndexBenchmark 710 -> 156 μs；ValueQueryComparison 648 -> 225 μs
+（Friflo 323 μs）；RelationComparison 26.8 -> 23.4 μs（Friflo 26.5 μs）；级联不变，0 字节。
+
+## D25. 为没有墓碑的表单独编译结构性行循环 [#d25-structural-row-loops-are-compiled-for-tables-without-tombstones]
+
+**决定。** 可能做结构变更的 `[ForEach]` 用编译了两份的行循环处理每张表：一份给有墓碑的表（每行检查 id），一份给没有墓碑的表（不检查）。
+调用时没有墓碑的表只能通过结构变更产生墓碑，而结构变更会让存储版本加一并结束这个循环。
+
+**原因。** StructuralChangeComparison，每 tick 杀死 10 万单位中的 10 个：85.7 -> 80.9 μs（三轮；Friflo 的命令缓冲 77 μs）；
+杀死 1,000 个和 BattleServer 不变。
+
+**比较过。** 把看到的存储版本放在寄存器里，而不是每行重新读：82 -> 108 μs（job 调用之后剩下的被调用者保存寄存器太少，
+一个列引用溢出到栈上，每行往返一次）。
+
+## D26. 在代码会重复写类型名的地方生成成员，而不是每个调用都生成 [#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call]
+
+**决定。** 生成器多生成三样东西：查询元素的组件有了名字（`item.Position` 代替 `item.Component1`，按代码实际调用的每种 `Query<…>` 形状生成）；
+缓冲元素在预制体上有了写方法（`prefab.SetLoot(…)`，基于 `Prefab.SetBuffer<T>(params ReadOnlySpan<T>)`）；代码修复只在结果能编译时才提供。
+放弃了两个提议：多类型的 `Disable` / `Enable` 和批量调用，以及一个隐藏的"改用生成成员"诊断。
+
+**原因。**
+- **查询元素。** `Component1..n` 让读代码的人去数类型参数。命名成员是对同一个 ref 的内联 getter，零开销。每种形状一个文件，
+  程序集只输出它用到的形状；按组件和位置各生成一个扩展块的话，每个组件要 45 个块。
+- **预制体缓冲。** 有 `SetBuffer` 之前，预制体只能持有空缓冲：要填就得复制一个缓冲值，而 EECS012 拒绝这样做。关系没有预制体写方法，
+  因为配方里的链接会指向预制体自己的行。
+
+**比较过。**
+- **`Disable<T1..Tn>()`、`RemoveAll<T1..Tn>()` 等批量调用。** 一张表第一次禁用之后，每次调用都是原地翻位。n 次调用就是 n 次进闸门，
+  每次几纳秒；而跨多个类型的批量调用还得给"有其中任意一个"定义含义，单类型调用不需要。没有实现。
+- **把 `entity.Get<Position>()` 修复成 `entity.Position` 的隐藏诊断。** 这是风格而不是正确性问题：两者编译出来是同一个调用。
+  它会给每个用户项目的每次方法调用多加一个操作回调。文档已经在教生成成员；泛型代码本来就需要泛型 API。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card icon={<Shapes />} title="ECS 设计原则" href="/zh/docs/ecs-principles">
+    大多数决策都源自这些规则。
+  </Card>
+  <Card icon={<Cpu />} title="架构" href="/zh/docs/architecture">
+    这些决策塑造出的数据结构。
+  </Card>
+  <Card icon={<Milestone />} title="路线图" href="/zh/docs/roadmap">
+    计划做什么，放弃了什么。
+  </Card>
+</Cards>

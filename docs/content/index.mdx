@@ -5,7 +5,26 @@ description: Start here. What EasyEcs is, how to install it, a first system in a
 icon: House
 ---
 
-import { BookText, Cpu, Gauge, ListChecks, Rocket, Scale, Shapes, Swords } from 'lucide-react';
+import {
+  Bot,
+  BookText,
+  Boxes,
+  CircleQuestionMark,
+  Cpu,
+  Gauge,
+  Library,
+  ListChecks,
+  Network,
+  RotateCcwClock,
+  Rocket,
+  Scale,
+  Search,
+  Shapes,
+  Swords,
+  TriangleAlert,
+  Workflow,
+  Zap,
+} from 'lucide-react';
 
 **EasyEcs is an open-source, allocation-free archetype Entity Component System (ECS) for C# and .NET 10 servers.**
 You write plain data and `[ForEach]` methods. A source generator turns them into inlined struct jobs, an analyzer
@@ -68,35 +87,81 @@ which rows were written.
 
 ```mermaid
 flowchart LR
-    W[What is an ECS?] --> F[Features] --> G[Getting started] --> P[ECS principles] --> U[Guide]
-    U --> R[API reference]
-    U --> Perf[Performance guide] --> A[Architecture]
-    F --> C[Comparison]
+    W[What is an ECS?] --> F[Features] --> G[Getting started] --> P[ECS principles] --> X[Example]
+    X --> U[Guide] --> R[Reference]
+    U --> Perf[Performance] --> A[Architecture]
+    F --> C[Compare]
 ```
 
 ## Guide [#guide]
 
-The [guide](/en/docs/guide/entities-and-components) has one page per concept, in the order you need them:
-entities and components, prefabs, queries, systems, singletons, structural changes, `ref` and `await`, change
-tracking, dynamic buffers, indexes and relations, snapshots, threading and the analyzer rules.
-
-## Reference [#reference]
+The guide has one page per concept, in the order you need them.
 
 <Cards>
-  <Card icon={<BookText />} title="API reference" href="/en/docs/api">
-    Every public API with its complexity.
+  <Card icon={<Boxes />} title="Entities and components" href="/en/docs/guide/entities-and-components">
+    Handles, ids, tags and the generated members.
   </Card>
-  <Card icon={<Gauge />} title="Performance guide" href="/en/docs/performance">
+  <Card icon={<Search />} title="Queries and filters" href="/en/docs/guide/queries">
+    `Query`, `Count`, `Any` and `QueryFilter`.
+  </Card>
+  <Card icon={<Workflow />} title="Systems" href="/en/docs/guide/systems">
+    `[ForEach]` methods, ordering, groups, cadence and errors.
+  </Card>
+  <Card icon={<Zap />} title="Change tracking" href="/en/docs/guide/change-tracking">
+    Visit only the rows written or removed since a system last ran.
+  </Card>
+  <Card icon={<Network />} title="Threading" href="/en/docs/guide/threading">
+    One owner thread per world, parallel systems and parallel `[ForEach]`.
+  </Card>
+  <Card icon={<TriangleAlert />} title="Common mistakes" href="/en/docs/guide/common-mistakes">
+    What goes wrong first, and the rule or analyzer error that catches it.
+  </Card>
+</Cards>
+
+The rest of the guide covers singletons, structural changes, `ref` and `await`, dynamic buffers, indexes and
+relations, hierarchies, groups, cleanup and disable, bulk changes, snapshots, saves, migration and unloading, and
+every [analyzer rule](/en/docs/guide/analyzer).
+
+## Compare [#compare]
+
+<Cards>
+  <Card icon={<Gauge />} title="Performance" href="/en/docs/performance">
     Which API to use when, do's and don'ts, the benchmarks and how to measure.
   </Card>
   <Card icon={<Scale />} title="Comparison" href="/en/docs/comparison">
     EasyEcs against Friflo.Engine.ECS, Arch and DefaultEcs, feature by feature and measured.
   </Card>
+</Cards>
+
+Coming from another ECS? See EasyEcs against [Arch](/en/docs/vs-arch), [Friflo](/en/docs/vs-friflo),
+[DefaultEcs](/en/docs/vs-defaultecs) and [Unity Entities](/en/docs/vs-unity-entities), and the migration pages for
+[Arch](/en/docs/migrate-from-arch), [Friflo](/en/docs/migrate-from-friflo) and
+[DefaultEcs](/en/docs/migrate-from-defaultecs).
+
+## Reference [#reference]
+
+<Cards>
+  <Card icon={<Library />} title="API reference" href="/en/docs/reference">
+    Every public type and member, generated from the source.
+  </Card>
+  <Card icon={<BookText />} title="API and complexity" href="/en/docs/api">
+    Every public API with its complexity.
+  </Card>
   <Card icon={<Cpu />} title="Architecture" href="/en/docs/architecture">
-    Storage and memory layout, archetype transitions, the query cache, the generators.
+    Storage, entity lifecycle, the query cache, systems, generators and threads.
+  </Card>
+  <Card icon={<CircleQuestionMark />} title="FAQ" href="/en/docs/faq">
+    Production use, allocations, threads, Unity, saves, hot reload, Native AOT.
+  </Card>
+  <Card icon={<Bot />} title="AI assistants" href="/en/docs/ai">
+    `llms.txt`, Markdown copies and a rules file for your project.
+  </Card>
+  <Card icon={<RotateCcwClock />} title="Changelog" href="/en/docs/changelog">
+    What changed in each release.
   </Card>
 </Cards>
 
-Upgrading from an earlier major version? The
+Why it is built this way: the [design decisions](/en/docs/decisions); what comes next: the
+[roadmap](/en/docs/roadmap). Upgrading from an earlier major version? The
 [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md) covers 4.0 to 4.1,
 v3 to v4 and v2 to v3.

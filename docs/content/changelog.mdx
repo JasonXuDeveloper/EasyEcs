@@ -9,3 +9,361 @@ What changed from one EasyEcs release to the next, newest first, for code that u
 major or minor version that needs code changes? The
 [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md) has the steps. Each
 [GitHub release](https://github.com/JasonXuDeveloper/EasyEcs/releases) also lists every pull request it contains.
+
+## 4.1.0 [#v4-1-0]
+
+### New
+
+- Archetype tables: each table stores its components as columns of rows, unmanaged columns pinned and 64-byte
+  aligned. Removing a component keeps the row and clears a presence bit, so states that come and go never move
+  data. See [architecture](/en/docs/architecture).
+- Immediate structural changes with stricter iteration: a pass visits each entity at most once, and `ref` writes of a
+  `[ForEach]` method survive the body's own structural changes. See
+  [structural changes](/en/docs/guide/structural-changes).
+- Batch `[ForEach]` methods taking `Span<T>` / `ReadOnlySpan<T>` (whole runs of rows, with an `EntitySpan`), and
+  `[ForEach(Parallel = true)]` to split one method's rows over threads without allocating. See
+  [systems](/en/docs/guide/systems) and [threading](/en/docs/guide/threading).
+- Static `[ForEach]` methods outside systems, generic systems and runners, filters on system groups, `Maybe<T>`
+  parameters, `UpdatePhase`, and systems need no `partial`. See [systems](/en/docs/guide/systems).
+- Ordering by dependency with `[UpdateBefore<T>]` / `[UpdateAfter<T>]`; errors as data with
+  `SystemErrorPolicy.Disable` and `system.Error`; per-system timing with `WorldOptions.MeasureSystems` and
+  `system.Stats`. See [systems](/en/docs/guide/systems).
+- Change tracking (`ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>(since)`) and removal detection
+  (`[Removed<T>]`, `QueryFilter.Removed<T>(since)`). See [change tracking](/en/docs/guide/change-tracking).
+- Generated members for every component, tag, singleton, index, buffer and query shape: `hero.Position.X += 1`,
+  `hero.SetVelocity(1, 0)`, `hero.SetDead()`, `world.Battle.Tick++`, `world.ZoneIndex.Find(3)`, `item.Position`,
+  `prefab.SetLoot(…)`. See [entities and components](/en/docs/guide/entities-and-components).
+- Prefabs (`new Prefab()`, derived prefabs, groups with `AddMember`), `world.Instantiate`, `EnsureCapacity` and
+  `entity.Clone()`. See [prefabs](/en/docs/guide/prefabs).
+- `DynamicBuffer<T>`: a list per entity held as a tracked component. See
+  [dynamic buffers](/en/docs/guide/dynamic-buffers).
+- Value indexes (`IIndexed<TKey>`, `world.Index<T, TKey>()`), ordered walks (`Range`, `Ascending`), relations
+  (`IRelation` buffers) and target policies (`WhenTargetDestroyed`). See
+  [indexes and relations](/en/docs/guide/indexes-and-relations).
+- Hierarchies: `ChildOf(EntityId Parent)`, children, destroy cascades. See [hierarchy](/en/docs/guide/hierarchy).
+- `GroupBy<T>()` splits tables by a value, so a query for one zone walks only its tables. See
+  [groups](/en/docs/guide/groups).
+- `entity.Disable<T>()` / `Enable<T>()` and cleanup components (`ICleanupComponent`). See
+  [cleanup and disable](/en/docs/guide/cleanup-and-disable).
+- Bulk `SetAll` / `RemoveAll` / `DisableAll` / `EnableAll`, and `CreateEntities` / `DestroyEntities`. See
+  [bulk changes](/en/docs/guide/bulk).
+- Snapshots: `world.Capture()` / `world.Restore(snapshot)`. See [snapshots](/en/docs/guide/snapshots).
+- Saves: `world.Save` / `Load` through Nino. See [saves](/en/docs/guide/saves).
+- `SaveEntities` / `LoadEntities` / `MoveEntities` hand a group of entities to another world or process, and
+  `world.RemoveTypes(assembly)` takes a plugin's types out of a world so its `AssemblyLoadContext` can unload. See
+  [migration and unload](/en/docs/guide/migration-and-unload).
+- `WithAny<T>` filters, `entity.Read<T>()` and `entity.TryGetRef<T>(out found)`. See
+  [queries](/en/docs/guide/queries).
+- `world.Describe()`, `entity.Describe()` and a debugger view of entities. See [API](/en/docs/api).
+- Analyzer rules up to EECS024 and code fixes for them, bundled in the package. See
+  [analyzer](/en/docs/guide/analyzer).
+- Templates: `dotnet new install EasyEcs.Templates`. See [getting started](/en/docs/getting-started).
+
+### Performance
+
+- A realistic server tick of 100,000 entities runs much faster than in 4.0.1 and allocates nothing. See
+  [performance](/en/docs/performance).
+- Structural changes check a plain owner flag instead of a compare-and-swap, so creating and destroying
+  entities is faster.
+- Jobs that cannot change structure iterate with no per-entity bookkeeping.
+- Parallel runs use the thread pool and wake helper threads only when they pay
+  ([D22](/en/docs/decisions#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)).
+- Change and removal summaries per block of rows
+  ([D23](/en/docs/decisions#d23-change-summaries-per-block-removals-summarized-apart)), index keys as id arrays
+  ([D24](/en/docs/decisions#d24-an-indexs-key-holds-its-entities-in-one-array)) and structural loops compiled for
+  tables without tombstones
+  ([D25](/en/docs/decisions#d25-structural-row-loops-are-compiled-for-tables-without-tombstones)).
+- A `QueryFilter` holds no object reference, so building one at the call is cheaper
+  ([D18](/en/docs/decisions#d18-no-interceptors-for-query-calls-filters-carry-no-references)).
+- Counting rows by their set bits with `Vector512` / `Vector<T>`
+  ([D21](/en/docs/decisions#d21-net-10-features-only-where-they-measure)).
+
+### Changes that need code changes
+
+Every step is in the
+[migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v40--v41).
+
+- `WorldOptions.Parallel` is `WorldOptions.ParallelSystems`: write `new WorldOptions { ParallelSystems = true }`.
+- `Entity.Id` is an `EntityId` and `Entity.Version` is gone: read `entity.Id.Index` and `entity.Id.Version`, and
+  store `EntityId`s in components (EECS017 warns about `Entity` fields).
+- `EcsSystem.Priority` is gone: order systems with `[UpdateBefore<T>]` / `[UpdateAfter<T>]`.
+- The `World.SystemError` event is gone: use `new WorldOptions { SystemErrors = SystemErrorPolicy.Disable }` and read
+  `system.Error`.
+- `world.DestroyEntity(entity)` is gone: call `entity.Destroy()`.
+- `entity.Add<T>()` is gone: write `Set(new T(…))` or the generated `SetX(…)` to add or replace, `GetOrAdd<T>()` to add
+  a default only when missing.
+- `world.CompactArchetypes()` and `world.GetFragmentationStats()` are gone: tables stay dense on their own.
+- `IForEach` jobs receive only the components: take the entity through `IForEachEntity`.
+- `Query` results are ref structs: no `await` in the loop, no storing items in fields, lambdas or LINQ.
+- Structural changes belong to the world's owner thread; one made inside a parallel stage or a parallel `[ForEach]`
+  throws `InvalidOperationException`. See [threading](/en/docs/guide/threading).
+- `UpdateInterval` and `UpdatePhase` should return constants: EECS018 warns when they do not.
+- Refs into a table can be invalidated by structural changes of other entities; iteration order follows table rows;
+  `AddSingleton` resets an existing singleton in place; stale handles answer `Has` / `TryGet` with false. See
+  [refs and await](/en/docs/guide/refs-and-await).
+
+### Fixes
+
+- `Entity.GetHashCode()` is deterministic across runs, computed from the entity's index and version.
+- The analyzer knows generated writers by their symbols: a component named `Settings`, read through
+  `entity.Settings`, no longer hides an EECS013.
+
+## 4.0.1 [#v4-0-1]
+
+### New
+
+- `WorldOptions.Parallel` runs systems side by side when their generated read/write sets do not conflict, with the
+  same result as running them in order. See [threading](/en/docs/guide/threading).
+- A `[ForEach]` method may take no component when a `[With<T>]` names what to query:
+  `[ForEach, With<Dead>] static void Remove(Entity e)`. See [systems](/en/docs/guide/systems).
+
+## 4.0.0 [#v4-0-0]
+
+### New
+
+- A rewrite for .NET 10 in one `EasyEcs` namespace: `World`, `Query`, and a single version-checked `Entity` handle whose
+  accessors return `ref T`.
+- Synchronous `EcsSystem`s with source-generated `[ForEach]` methods, system groups with `[UpdateInGroup<T>]`,
+  recycled entity ids and per-world singletons.
+- An analyzer that enforces the ECS principles (EECS006-EECS008). See
+  [ECS principles](/en/docs/ecs-principles).
+
+### Changes that need code changes
+
+Every rename is in the
+[migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v3x--v40).
+
+- `Context` is `World` and `GroupOf` is `Query`.
+- Systems are synchronous: no UniTask, no async callbacks.
+- Events are gone: state changes are components.
+
+## 3.1.1 [#v3-1-1]
+
+### Fixes
+
+- The release build uses the .NET 8 SDK (C# 13); the library is unchanged.
+
+## 3.1.0 [#v3-1-0]
+
+### New
+
+- `Count` and `IsEmpty` on `GroupResultEnumerator`, and `CountOf<T>()` / `AnyOf<T>()` on `Context`.
+- `Tag.SetBits` / `ClearBits` take a `params ReadOnlySpan<int>`.
+
+### Performance
+
+- `Tag.ContainsAll` matches archetypes with SIMD.
+- `GetFragmentationStats` is lock-free, and `Update()` reuses its task buffer.
+- Archetypes are walked by index instead of by dictionary enumeration.
+
+### Fixes
+
+- `Avx2.TestZ` corrected to `Avx.TestZ`.
+
+## 3.0.5 [#v3-0-5]
+
+### Performance
+
+- No state machine cost for tasks that already completed.
+
+## 3.0.4 [#v3-0-4]
+
+### Performance
+
+- Tiny tasks run inline instead of on the thread pool.
+
+## 3.0.3 [#v3-0-3]
+
+### Performance
+
+- Parallel work uses an array pool instead of materializing UniTasks.
+
+## 3.0.2 [#v3-0-2]
+
+### Performance
+
+- Faster `GetMatchingArchetypes`.
+
+## 3.0.1 [#v3-0-1]
+
+### Fixes
+
+- A repeat of the 3.0.0 release with the same contents.
+
+## 3.0.0 [#v3-0-0]
+
+### New
+
+- Archetypes, and adding or removing several components in one call.
+
+### Performance
+
+- Entity creation and destruction and component changes take effect at once.
+- Faster `GroupOf` and tags, with better locality.
+
+### Changes that need code changes
+
+- Callbacks are gone and changes run at once. See the
+  [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#migration-guide-easyecs-v2x--v30).
+
+## 2.1.6 [#v2-1-6]
+
+### Performance
+
+- Iterating systems allocates nothing.
+
+## 2.1.5 [#v2-1-5]
+
+### Performance
+
+- Getting groups allocates nothing (no red-black tree).
+
+## 2.1.4 [#v2-1-4]
+
+### Performance
+
+- Faster `Update`.
+
+## 2.1.3 [#v2-1-3]
+
+### Performance
+
+- Every overload of `GroupOf` allocates nothing.
+
+## 2.1.2 [#v2-1-2]
+
+### Performance
+
+- Faster task scheduling.
+
+## 2.1.1 [#v2-1-1]
+
+### Performance
+
+- Faster task dispatching.
+
+## 2.1.0 [#v2-1-0]
+
+### Performance
+
+- Singleton components allocate less.
+
+## 2.0.10 [#v2-0-10]
+
+### Performance
+
+- A better resize strategy.
+
+## 2.0.9 [#v2-0-9]
+
+### Performance
+
+- Faster component lookup.
+
+## 2.0.8 [#v2-0-8]
+
+### Performance
+
+- Faster entity and component lookup.
+
+## 2.0.7 [#v2-0-7]
+
+### Performance
+
+- No `SortedList` needed.
+
+## 2.0.6 [#v2-0-6]
+
+### Performance
+
+- Fewer allocations through `ValueTask`.
+
+## 2.0.5 [#v2-0-5]
+
+### Fixes
+
+- Several bugs fixed.
+
+## 2.0.4 [#v2-0-4]
+
+### Fixes
+
+- A tag type is registered automatically on first use.
+
+## 2.0.3 [#v2-0-3]
+
+### Fixes
+
+- The `AddSingletonComponent` callback passes a `ref`.
+
+## 2.0.2 [#v2-0-2]
+
+### Performance
+
+- Better memory use.
+
+## 2.0.1 [#v2-0-1]
+
+### Performance
+
+- Faster iteration, refs, entity creation and component adds.
+
+## 2.0.0 [#v2-0-0]
+
+### New
+
+- A lock-free context for parallel systems, components that allocate nothing, faster component lookup.
+
+## 1.0.8 [#v1-0-8]
+
+### Changes that need code changes
+
+- Initializing a context no longer catches exceptions.
+
+## 1.0.7 [#v1-0-7]
+
+### Changes that need code changes
+
+- Components are classes that hold a reference to their entity.
+
+## 1.0.6 [#v1-0-6]
+
+### New
+
+- An entity gives access to its context.
+
+## 1.0.5 [#v1-0-5]
+
+### New
+
+- `SingletonComponent`: a context holds any number of them.
+
+## 1.0.4 [#v1-0-4]
+
+### New
+
+- Systems run in parallel.
+
+## 1.0.3 [#v1-0-3]
+
+### Fixes
+
+- Several systems with the same priority all run.
+
+## 1.0.2 [#v1-0-2]
+
+### New
+
+- Get an entity from a context by its id.
+
+## 1.0.1 [#v1-0-1]
+
+### New
+
+- Systems can be added after the context has been initialized.
+
+## 1.0.0 [#v1-0-0]
+
+### New
+
+- The first release: an ECS with asynchronous, parallel systems.

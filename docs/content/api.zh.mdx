@@ -1,0 +1,239 @@
+---
+title: API 与复杂度
+seoTitle: "EasyEcs API 一览：每个公开调用及其复杂度"
+description: "EasyEcs 所有公开类型和调用集中在一页，按用途分组，标明时间复杂度和分配情况。逐成员的参考页由 XML 文档自动生成。"
+icon: BookText
+---
+
+import { BookText, Cpu, Gauge } from 'lucide-react';
+
+EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开销。所有类型都在 `namespace EasyEcs` 下。T1..T9 重载各自由一个模板生成
+（见[架构](/zh/docs/architecture#source-generators-and-analyzer-easyecsgenerator)）。每个成员的签名、参数和 XML 文档见自动生成的
+[API 参考](/en/docs/reference)（英文），参考页里引用的复杂度就来自本页。
+
+记号：
+
+- *n*：调用涉及的组件数（1 到 9）。
+- *c*：实体拥有的组件数。
+- *M*：匹配查询的表（原型）数。
+- *S*：这些表的行数：存活实体，以及做结构变更的遍历进行期间留下的墓碑。
+- *k*：索引中一个键对应的实体数；*L*：一个实体的关系数。
+- "均摊"：表和实体数组偶尔会翻倍扩容。
+
+除非另有说明，World 预热之后这些调用都不分配内存，而且只能由 World 的所属线程调用（见[线程模型](/zh/docs/guide/threading)）。
+
+## 类型 [#types]
+
+| 类型 | 种类 | 用途 |
+| --- | --- | --- |
+| `World` | sealed class，`IDisposable` | 持有实体、组件、单例、索引和系统。 |
+| `WorldOptions` | sealed class | `ParallelSystems`、`MaxDegreeOfParallelism`、`InitialEntityCapacity`、`MeasureSystems`、`SystemErrors`（仅 init）。 |
+| `Entity` | readonly struct | 句柄：`Id`、`World`、`IsAlive`。已销毁或 default 的句柄回答查询类调用（`IsAlive`、`Has`、`TryGet`、`TryGetRef`）时返回 false，访问和修改时抛异常，`Destroy` 则直接忽略。可隐式转换为 `EntityId`。 |
+| `EntityId` | readonly struct，非托管 | `Index` 和 `Version`，8 字节：组件里用它引用实体。`EntityId.Null` 不指向任何实体。 |
+| `IComponent`、`ISingletonComponent` | 标记接口 | 组件和单例结构体。空组件就是标签。 |
+| `ITrackChanges` | 标记接口 | 每行记录最后一次写入或移除时的变更 tick（[变更追踪](/zh/docs/guide/change-tracking)）。 |
+| `IIndexed<TKey>` | 接口 | World 按 `Key` 建索引的组件；用 `Set` 写入（EECS015）。键是 `EntityId` 时就是指向实体的链接。 |
+| `IRelation` | 接口 | `DynamicBuffer<T>` 的元素，把所在实体链接到 `Target`（[索引与关系](/zh/docs/guide/indexes-and-relations)）。 |
+| `ChildOf` | record struct | `ChildOf(EntityId Parent)`：层级；销毁父实体时子实体一起销毁（[层级](/zh/docs/guide/hierarchy)）。 |
+| `IGroup` | 接口 | 用 `Group` 的值拆分表的组件（`world.GroupBy<T>()`，[分组](/zh/docs/guide/groups)）。 |
+| `ICleanupComponent`、`Destroyed` | 标记接口、标签 | 持有清理组件的实体被销毁后，带着 `Destroyed` 标签保留它，直到它被移除（[清理与禁用](/zh/docs/guide/cleanup-and-disable)）。 |
+| `Disabled<T>` | 标签 | `T` 被禁用期间存在：值保留，组件对查询隐藏。 |
+| `Prefab` | sealed class | 不属于任何 World 的组件值配方（[预制体](/zh/docs/guide/prefabs)）。 |
+| `DynamicBuffer<T>` | struct，`IComponent, ITrackChanges` | 每个实体一个列表；通过 `ref` 上的 `DynamicBufferExtensions` 写入（[动态缓冲](/zh/docs/guide/dynamic-buffers)）。 |
+| `ValueIndex<T, TKey>` | sealed class | `world.Index<T, TKey>()`：`Find`、`TryFind`、`Count`；键可比较时还有有序遍历（`OrderedIndexExtensions`）。 |
+| `RelationIndex<T>` | sealed class | `world.Relations<T>()`：链接到某个目标的实体。 |
+| `TargetPolicy`、`TargetRules` | 枚举、扩展方法 | 目标被销毁时链接怎么处理：`Keep`、`Remove`、`Destroy`。 |
+| `EcsSystem` | abstract class | `World`、`UpdateInterval`、`UpdatePhase`、`Enabled`、`Error`、`Stats`、`LastRunTick`；`OnCreate` / `OnUpdate` / `OnDestroy`（[系统](/zh/docs/guide/systems)）。 |
+| `ForEachAttribute` 及其过滤特性 | 特性 | `[ForEach]`（`Parallel = true`）、`[With<T>]`、`[Without<T>]`、`[WithAny<T>]`、`[Changed<T>]`、`[Removed<T>]`。 |
+| `Maybe<T>` | ref struct | `[ForEach]` 方法的可选组件参数：`HasValue`、`Value`。 |
+| `ISystemGroup`、`[UpdateInGroup<T>]`、`[UpdateBefore<T>]`、`[UpdateAfter<T>]` | 接口、特性 | 系统分组与排序。 |
+| `SystemErrorPolicy` | 枚举 | `Throw`（默认）或 `Disable`：系统抛异常时怎么办。 |
+| `SystemStats`、`SystemList` | readonly struct | 系统的运行次数和耗时；`world.Systems`，零分配。 |
+| `SystemAccess` | struct | 系统读写了哪些数据；只由生成的代码填写。 |
+| `QueryFilter` | readonly struct | `With`、`Without`、`WithAny`、`Changed`、`Removed`、`InGroup`、`Since`；不持有对象引用。 |
+| `QueryEnumerator<T1..Tn>`、`QueryItem<T1..Tn>` | ref struct | `Query` 的结果：`item.Entity` 和指向行内数据的 ref（`item.Position`）。 |
+| `IForEach<…>`、`IForEachEntity<…>`、`IForEachBatch<…>`、`INoStructuralChanges` | 接口 | 临时遍历用的结构体 job；`EntitySpan` 是批处理一段行对应的实体。 |
+| `SingletonRef<T>` | readonly struct | 稳定的单例句柄；`.Value` 是 `ref T`。 |
+| `WorldSnapshot` | sealed class | World 的内存副本（`world.Capture()`）。 |
+| `TableInfo`、`ColumnInfo`、`ComponentValue` | record struct | `world.Describe()` 和 `entity.Describe()` 的返回值。 |
+
+## 实体 [#entities]
+
+| API | 复杂度 | 说明 |
+| --- | --- | --- |
+| `new World(options)` | O(`InitialEntityCapacity`) | `options` 可为 null（默认值）；分配实体数组和空表 |
+| `world.CreateEntity()` | 均摊 O(1) | 复用回收的 id |
+| `world.CreateEntity(in T1 … in Tn)` | 均摊 O(n) | 直接放进最终的表 |
+| `world.CreateEntities(Span<Entity> entities, in T1 … in Tn)` | 均摊 O(count × n) | 整波只过一次闸门，表最多扩容一次；写回句柄 |
+| `entity.Destroy()` | O(c) | 表的最后一行补上空位（遍历期间变成墓碑）；回收 id；失效句柄直接忽略；从索引里摘掉；级联销毁 `ChildOf` 子实体并执行目标策略 |
+| `world.DestroyEntities<T1..Tn>(filter)` | O(M + S) | 一次过闸门销毁所有匹配并返回数量；遍历期间也安全 |
+| `entity.IsAlive` / `world.IsAlive(id)` | O(1) | |
+| `world.TryGetEntity(id, out e)` / `GetEntity(id)` | O(1) | 这个版本的实体不存活时返回 false（或抛异常） |
+| `world.EntityCount` | O(1) | |
+| `world.Entities` | O(容量) | 按 id 顺序列出存活实体，用于诊断 |
+| `world.EnsureEntityCapacity(capacity)` | O(容量) | 预先分配实体数组；已经够大时什么都不做 |
+
+## 组件 [#components]
+
+| API | 复杂度 | 说明 |
+| --- | --- | --- |
+| `entity.Get<T>()` | O(1) | `ref T`：一次版本检查、一次查列、一次存在位测试、一次读取；缺失或不存活时抛异常；对被追踪组件算一次写入 |
+| `entity.Read<T>()` | O(1) | `ref readonly T`；从不算写入 |
+| `entity.TryGetRef<T>(out bool found)` | O(1) | `ref T`，缺失时是空 ref；找到时对被追踪组件算一次写入 |
+| `entity.Has<T>()` / `TryGet<T>(out T)` | O(1) | 缺失或不存活时返回 false；`TryGet` 返回副本（不算写入） |
+| `entity.Has<T1..Tn>()` | O(n) | 全部都有才为 true，只查一次记录 |
+| `entity.Set(in T1 … in Tn)` | O(n)，需要搬行时均摊 O(c) | 添加或覆盖，最多一次行复制，返回实体；表里已有这一列的组件只置存在位；键变了就重新索引（O(1)） |
+| `entity.GetOrAdd<T>()` | O(1)；缺失时，表里有 `T` 的列为 O(1)，否则均摊 O(c) | `ref T`；只在缺失时添加默认值；对被追踪组件算一次写入 |
+| `entity.Remove<T1..Tn>()` | O(n) | 清存在位，行留在原处；缺失的组件忽略；被追踪组件的移除会打 tick（`[Removed<T>]`）；返回实体 |
+| `entity.Disable<T>()` / `Enable<T>()` | O(1)；一张表第一次禁用时搬一次行 | 值保留，但查询、`Has` 和 `Get` 都当它不存在；禁用算移除，启用算写入；无事可做时返回 false |
+| `entity.IsDisabled<T>()` | O(1) | |
+| 生成的成员：`entity.X`、`HasX`、`TryGetX`、`GetOrAddX()`、`SetX(…)`、`RemoveX()`、`WriteX()`、`DisableX()`、`EnableX()`、`IsXDisabled`；标签 `IsX`、`SetX()`；`world.XIndex` | 同对应的泛型调用 | 每个组件的 C# 14 扩展成员（[生成的成员](/zh/docs/guide/entities-and-components)）；`entity.X` 等于 `Get`，被追踪或被索引的组件则等于 `Read`，写入改用 `WriteX()` 或 `SetX(…)` |
+
+## 预制体与克隆 [#prefabs-and-cloning]
+
+副本的每个 `DynamicBuffer<T>` 都是自己独立的列表，会立刻进入索引，它拥有的每个被追踪组件都算一次写入；源上没有的组件在副本上也没有，不算移除。
+
+| API | 复杂度 | 说明 |
+| --- | --- | --- |
+| `new Prefab()` | O(1) | 空配方；只分配一次私有存储 |
+| `new Prefab(basePrefab)` | O(c) | 变体：复制所有值（和成员），之后各改各的 |
+| `prefab.Set(in T1 … in Tn)` | O(n)，新增组件时均摊 O(c) | 添加或替换值；返回预制体 |
+| `prefab.Remove<T1..Tn>()` | O(n) | 缺失的忽略；返回预制体 |
+| `prefab.Has<T>()` / `Read<T>()` | O(1) | 预制体没有 `T` 时 `Read` 抛异常 |
+| `prefab.SetBuffer<T>(params ReadOnlySpan<T>)` | O(n) | 由这些元素组成的 `DynamicBuffer<T>`；每个实例都有自己的列表 |
+| `prefab.AddMember()` | O(1) | 预制体组的一个成员：实例化任何一个都会创建全部；指向成员的 `EntityId` 字段在每个实例上改写 |
+| 生成的成员：`prefab.X`、`HasX`、`SetX(…)`、`RemoveX()`；标签 `IsX`、`SetX()`；缓冲 `SetLoot(items…)` | 同对应的泛型调用 | 写方法返回预制体；属性只读；不算任何 World 的结构变更 |
+| `world.Instantiate(prefab)` | O(c) | 一次行复制；目标表每个预制体表只找一次并缓存；遍历期间也安全（新实体不会被这次遍历访问）；预制体组为 O(成员数 × c) |
+| `world.Instantiate(prefab, Span<Entity> entities)` | O(count × c) | 整波只过一次闸门，表最多扩容一次 |
+| `world.EnsureCapacity(prefab, count)` | O(c)，外加一次扩容 | 为接下来 `count` 个实例要进的表预留空间，生成波次在 tick 中不再扩容 |
+| `entity.Clone()` | O(c) | 同一 World、同一张表里的新实体，复制全部组件；实体不存活时抛异常 |
+
+## 动态缓冲 [#dynamic-buffers]
+
+`new DynamicBuffer<T>()` 在第一次写入之前不持有列表。读可以通过任何引用（`in`、`Read<T>()`）；写必须通过 `ref`，并算作被追踪的写入。
+
+| API | 复杂度 | 说明 |
+| --- | --- | --- |
+| `bag.Count`、`bag.Capacity`、`bag[i]`、`AsReadOnlySpan()`、`GetEnumerator()` | O(1) | 只读；下标越界抛异常 |
+| `bag.Add(item)` / `AddRange(span)` | 均摊 O(1) / O(items) | 只在列表扩容时分配 |
+| `bag.Insert(i, item)` / `RemoveAt(i)` | O(count) | 保持顺序 |
+| `bag.RemoveAtSwapBack(i)` | O(1) | 最后一个元素移到 `i` |
+| `bag.Clear()` | O(1)，元素含引用时 O(count) | 保留容量 |
+| `bag.EnsureCapacity(n)` / `AsSpan()` | 扩容时 O(count) / O(1) | `AsSpan()` 可写 |
+| `bag.TrimExcess()` | O(count) | 重新分配到 count 大小；空列表不持有数组 |
+
+快照、存档或克隆一列缓冲时会复制元素：O(元素数)，每个实体一个新列表。
+
+## 查询 [#queries]
+
+| API | 复杂度 | 说明 |
+| --- | --- | --- |
+| `[ForEach]` 方法 / `world.ForEach<T1..Tn, TJob>(ref job, filter)` | O(M + S) | 最快：结构体 job，没有委托 |
+| `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` | O(M + S) | job 还会拿到 `Entity` |
+| `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数) | 连续行的 span；不能做结构变更 |
+| `world.ForEachParallel<T1..Tn, TJob>(ref job, filter)` / `ForEachEntityParallel` | O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | `INoStructuralChanges` job；每块 1,024 到 `World.ParallelChunkRows` 行，每块一个 job 副本；只在划算时唤醒助手线程 |
+| `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | 指向行内的 ref：被追踪组件的每个被访问行都算写入；循环里不能 `await` |
+| `world.Count<T1..Tn>(filter)` | O(M)，需要测位的表再加 S / 64 | 累加表计数，或数存在位（和 tick），AVX-512 下每步 8 个字 |
+| `world.Any<T1..Tn>(filter)` | 最坏 O(M + S / 64) | 找到第一个就停 |
+| `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1) | 只建一次，放在 `static readonly` 字段里；多个 `WithAny` 组成"至少有一个"的一组 |
+| `filter.Changed<T>(since)` / `[Changed<T>]` | O(1)；遍历跳过 `since` 之前写过的表、4,096 行的块和 64 行的字 | 被追踪的 `T` 在 `since` 及之后被写过的行（[变更追踪](/zh/docs/guide/change-tracking)）；一个过滤器只有一个 tick |
+| `filter.Removed<T>(since)` / `[Removed<T>]` | 同 `Changed` | 在 `since` 及之后失去被追踪的 `T`、且现在仍没有它的实体；已销毁的实体不报告 |
+| `filter.InGroup<T>(group)` | O(1)；遍历只走这个分组的表 | [分组](/zh/docs/guide/groups) |
+| `filter.Since(since)` | O(1) | 把 `Changed` 和 `Removed` 的 tick 换掉，不用重建过滤器 |
+
+一种查询形状第一次使用时建缓存项，O(所有表)，在共享闸门内完成。之后的查找要么命中备忘，要么一次哈希探测。新建一张表
+（第一个拥有新组件组合的实体）的开销是 O(表数 + 已缓存的查询形状数)，因为它要加入所有匹配的缓存查询。两者都是冷路径。
+
+## 禁用与批量修改 [#bulk]
+
+| API | 复杂度 | 说明 |
+| --- | --- | --- |
+| `world.SetAll(in T value, filter)` | O(M + S) | 对每个匹配做 `Set`，一次处理一个字的行；缺 `T` 的实体只搬一次；返回数量 |
+| `world.RemoveAll<T>(filter)` | O(M + S) | 行不动，清存在位；返回数量 |
+| `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | O(M + S) | 每张表的行只搬一次，搬到带 `Disabled<T>` 列的表；返回数量 |
+
+细节见[批量操作](/zh/docs/guide/bulk)和[清理与禁用](/zh/docs/guide/cleanup-and-disable)。
+
+## 索引 [#indexes]
+
+| API | 复杂度 | 说明 |
+| --- | --- | --- |
+| `world.Index<T, TKey>()` | O(1)；第一次调用时创建 | 每个 World、每个被索引组件一个；换另一种键类型会抛异常 |
+| `index.Count(key)` / `TryFind(key, out Entity)` | O(1) | 一次哈希探测（键是实体时是一次数组访问）；第一次查找时把每行索引一遍 |
+| `index.Find(key)` | O(1)，然后每个实体 O(1) | 用于 `foreach` 的 `ref struct`；循环中可以销毁实体，不能修改 `T` |
+| `index.Ascending()` / `Descending()` | 第一次遍历 O(键数 log 键数)，之后每个实体 O(1) | 键可比较时的有序遍历（排行榜、计时器）；第一次遍历之后索引保持键有序：每出现或消失一个键 O(log 键数) 加一次块移动 |
+| `index.Range(min, max)` / `RangeDescending(min, max)` | 第一次遍历 O(键数 log 键数)，之后 O(log 键数) 定位 `min`，每个实体 O(1) | 闭区间 |
+| `index.WhenTargetDestroyed(policy)` | O(1)；之后每个被销毁的实体 O(1) | `EntityId` 键：目标被销毁时，指向它的组件 `Keep`（默认）、`Remove` 或 `Destroy` |
+
+## 层级与关系 [#relations]
+
+| API | 复杂度 | 说明 |
+| --- | --- | --- |
+| `world.Children(parent)` | O(1)，然后每个子实体 O(1) | `ChildOf` 指向 `parent` 的实体；销毁父实体会销毁它们，以及它们的子实体 |
+| `entity.AddRelation(in T relation)` | 均摊 O(1) | 追加到实体的 `DynamicBuffer<T>`（缺失时先添加）和关系索引 |
+| `entity.RemoveRelation<T>(target)` / `HasRelation<T>(target)` | O(L) | `RemoveRelation` 返回删掉了几条 |
+| `world.Relations<T>()` | O(1)；第一次调用时创建 | 关系索引；对关系 `X` 会生成 `world.XIndex` |
+| `relations.Count(target)` | O(1) | 指向 `target` 的链接数 |
+| `relations.Find(target)` | O(1)，然后每条链接 O(1) | 链接到 `target` 的实体 |
+| `relations.WhenTargetDestroyed(policy)` | O(1)；之后每个被销毁的实体 O(1)，每条链接 O(L) | `Remove` 删除链接，`Destroy` 销毁发起链接的实体 |
+
+## 分组 [#groups]
+
+| API | 复杂度 | 说明 |
+| --- | --- | --- |
+| `world.GroupBy<T>()` | O(拥有 `T` 的实体数)，只做一次 | 按 `T.Group` 拆分表；改成新值会把实体搬到对应分组的表（一次行复制）；在初始化时调用 |
+
+## 快照、存档与迁移 [#saves]
+
+| API | 复杂度 | 说明 |
+| --- | --- | --- |
+| `world.Capture()` / `Capture(into)` | O(实体数 × 组件数 + 表数 + 单例数) | 按值复制；`Capture(into)` 复用之前快照的数组，够大之后不再分配；遍历进行时不可用 |
+| `world.Restore(snapshot)` | O(实体数 × 组件数 + 表数 + 单例数) | 快照里的句柄重新有效，之后创建的句柄失效；每个恢复的行都算写入（或移除） |
+| `world.Save(output)` | O(实体数 × 组件数) | 把 World 写成字节：非托管行原样写出，托管值走 Nino；缓冲够大之后不再分配 |
+| `world.Load(input)` | O(实体数 × 组件数) | 实体保留原 id；组件布局变了会抛 `InvalidDataException`，World 保持原样 |
+| `world.SaveEntities(output, ids)` | O(给定实体数 × 组件数) | 一组实体，交给另一个 World 或进程 |
+| `world.LoadEntities(input, entities)` | O(实体数 × 组件数) | 新 id；指向组内实体的 `EntityId` 字段会改写，其他的变成 `EntityId.Null` |
+| `world.MoveEntities(target, ids, moved)` | O(实体数 × 组件数) | 搬到本线程的另一个 World，不经过编码；原实体被销毁 |
+
+细节见[快照](/zh/docs/guide/snapshots)、[存档](/zh/docs/guide/saves)、[迁移与卸载](/zh/docs/guide/migration-and-unload)。
+
+## 系统、单例与维护 [#systems-singletons-maintenance]
+
+| API | 复杂度 | 说明 |
+| --- | --- | --- |
+| `world.AddSystem<T>()` / `AddSystem(system)` | O(s²)，s 为所在分组的系统数 | 调用 `OnCreate`；重建顺序和阶段（冷路径）；系统已属于某个 World，或排序出现环时抛异常 |
+| `world.RemoveSystem<T>()` | O(s²) | 调用 `OnDestroy`；返回是否移除了系统 |
+| `world.GetSystem<T>()` | O(系统数) | 不存在时返回 null |
+| `world.Update()` / `world.Update<TGroup>()` | 分组内所有系统之和 | 同步、零分配；`Dispose` 之后调用抛 `ObjectDisposedException` |
+| `world.ChangeTick` | O(1) | 每个系统阶段加一，每次更新结束再加一 |
+| `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` | O(1) | `ref T`；`AddSingleton` 对已有单例原地重置；`GetSingleton` 在缺失时抛异常 |
+| `world.SingletonRef<T>()` | O(1) | 稳定句柄（缺失时先添加）；`.Value` 一次读取 |
+| `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) | 单例不存在时 `RemoveSingleton` 返回 false |
+| 生成的成员：单例 `X` 的 `world.X`、`HasX`、`GetOrAddX()`、`SetX(…)`、`RemoveX()` | 同对应的泛型调用 | |
+| `world.Systems` | 遍历 O(系统数)，`Count` 为 O(分组数) | 按执行顺序列出所有分组的系统，零分配 |
+| `world.UpdateCount` | O(1) | 默认分组已更新的次数 |
+| `world.RemoveTypes(assembly)` / `RemoveTypes(context)` | O(拥有这些组件的实体数 + 表数 + 已缓存查询数) | 把插件的系统、单例、索引和组件移出 World，它的 `AssemblyLoadContext` 才能卸载；会分配（冷路径） |
+| `world.Describe()` | O(表数 + 列数) | 每张表的列、行数、容量和字节数；会分配（冷路径） |
+| `entity.Describe()` | O(c) | 实体组件的装箱副本，禁用的会标出；会分配（冷路径） |
+| `world.Dispose()` | O(系统数 + 实体数 + 表数) | 按逆序对每个系统调用 `OnDestroy`，然后释放存储 |
+
+`WorldOptions.SystemErrors`：`SystemErrorPolicy.Throw`（默认：异常从 `Update()` 抛出，`OnDestroy` 的异常从 `Dispose` 抛出）或
+`Disable`（关掉出错的系统，把异常留在 `system.Error` 里，直到重新启用；出错的那次运行照样推进 `LastRunTick`）。
+`WorldOptions.MeasureSystems` 把每次运行的耗时记到 `system.Stats`（`Runs`、`Last`、`Total`、`Average`），每次运行多两次取时间戳。
+
+值与句柄，全部 O(1)：`entity.Id` / `World`，`id.Index` / `Version`，`==` / `Equals` / `GetHashCode`（id 和版本）/ `ToString`；
+`snapshot.EntityCount`；`system.LastRunTick`、`UpdateInterval`、`UpdatePhase`、`Enabled`、`Error`、`Stats`、`World`。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card icon={<BookText />} title="API 参考（英文）" href="/en/docs/reference">
+    每个公开类型和成员的签名，由 XML 文档自动生成。
+  </Card>
+  <Card icon={<Gauge />} title="性能指南" href="/zh/docs/performance">
+    什么时候用哪个调用，附实测数据。
+  </Card>
+  <Card icon={<Cpu />} title="架构" href="/zh/docs/architecture">
+    这些复杂度背后的数据结构。
+  </Card>
+</Cards>

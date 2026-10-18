@@ -1,0 +1,212 @@
+---
+title: 常见问题
+seoTitle: "EasyEcs 常见问题：生产可用性、内存分配、线程、Unity、AOT、存档"
+description: "关于 EasyEcs 最常被问到的问题：能否用于生产、会不会分配内存、线程安全、Unity 与 Godot、Native AOT、怎么存档、热重载、为什么没有事件，以及和其他库比怎么样。"
+icon: CircleQuestionMark
+faq: true
+---
+
+import { Lightbulb, Scale, Shapes } from 'lucide-react';
+
+## EasyEcs 能用于生产吗？ [#production-ready]
+
+EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 上，为长时间运行的 .NET 服务端而设计。仓库里能看到的支撑：
+
+- 数百个 NUnit 测试，每个功能一个文件，包括分配预算为 0 字节的分配测试、生成器与分析器测试，以及一个同时跑全部功能的战斗服
+  （[示例](/zh/docs/example)）。
+- 覆盖每个功能的 BenchmarkDotNet 基准，以及与 Friflo.Engine.ECS、Arch、DefaultEcs 的对比，每项结果都在 setup 里校验
+  （[性能指南](/zh/docs/performance)）。
+- CI 会构建、测试、运行所有 sample 和 example，编译本文档里的 C# 代码片段，并检查自动生成的 API 参考是否最新。
+- 分析器会拒绝 ECS 里常见的设计错误（EECS002 到 EECS024），并提供代码修复。
+
+需要权衡的地方：它只面向 `net10.0`；在走向成熟的过程中，小版本之间 API 会有变化（4.0 到 4.1 改名、删除了几个成员，
+[迁移指南](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md)逐条列出）；每个版本改了什么见[更新日志](/zh/docs/changelog)。
+
+## EasyEcs 会分配内存吗？ [#allocations]
+
+热路径上不会。World 预热之后（表、查询缓存和各种池都达到峰值规模），查询、遍历、组件访问、`[ForEach]` 系统、并行运行和结构变更都不分配。
+10 万实体的标准服务器 tick 耗时 <BenchValue k="tick.oneWorld" />，分配 <BenchValue k="tick.oneWorld.alloc" />。
+
+<BenchSource />
+
+有意保留的分配：创建 World、第一个拥有新组件组合的实体（新建一张表）、某种查询形状的第一次使用、表或 `DynamicBuffer<T>`
+超出容量时扩容，以及 `Describe` 这类冷路径工具。`InitialEntityCapacity`、`EnsureCapacity(prefab, count)` 和 `bag.EnsureCapacity(n)`
+可以把扩容挪到 tick 之外。
+
+## 它是线程安全的吗？ [#is-it-thread-safe]
+
+规则明确且简短（[D13](/zh/docs/decisions#d13-one-owner-thread-per-world)）：
+
+- **每个 World 有一个所属线程。** 它的系统、查询和组件读写都在这个线程上执行。服务端上每个线程跑一个 World（每张地图、每个区域或每场对局一个）：
+  World 之间不共享任何东西，不加锁就能用满多核。
+- **结构变更属于所属线程。** 增删组件、创建销毁实体都会检查一个普通的所属标志：在并行阶段、并行 `[ForEach]` 或声称不做结构变更的遍历里
+  做结构变更，会直接抛异常，而不会把表弄坏。分析器能看到的跨线程修改会被报告（[EECS013、EECS014](/zh/docs/guide/analyzer)）。
+- **EasyEcs 自己加的并行是经过检查的。** `WorldOptions.ParallelSystems` 只让生成的访问集互不冲突的系统一起跑，结果与逐个运行相同；
+  `[ForEach(Parallel = true)]` 方法不能做结构变更，也不能写单例（EECS010）。
+- **来自其他线程的输入**（网络、IO）放进你自己的队列，由一个系统在所属线程上取出处理。
+
+不要跨 `await` 持有 `ref`：保留 `Entity`，`await` 之后重新取组件。详见[线程模型](/zh/docs/guide/threading)和
+[`ref` 与 `await`](/zh/docs/guide/refs-and-await)。
+
+## 能在 Unity 或 Godot 里用 EasyEcs 吗？ [#unity-godot]
+
+不能。EasyEcs 只面向 `net10.0`：它依赖 C# 14 扩展成员、`Vector256` / `Vector512`、放在 POH 上的列以及当前 JIT 的行为
+（[D15](/zh/docs/decisions#d15-net-10-only)），Unity 的运行时都不具备。Godot 也不在测试和支持范围内：EasyEcs 是为服务端打造的，
+没有任何引擎集成。常见做法是服务端用 .NET 10 加 EasyEcs，客户端用引擎自带的方案；
+[EasyEcs 与 Unity Entities](/zh/docs/vs-unity-entities)讲了两种模型的区别。
+
+## EasyEcs 和 Arch、Friflo.Engine.ECS、DefaultEcs 比怎么样？ [#compared]
+
+四个都是 C# ECS 库，区别在于替你做了什么、代价多少。EasyEcs 从 `[ForEach]` 方法生成循环，结构变更立即生效（没有命令缓冲），
+把变更和移除当作数据来追踪，并在编译期检查 ECS 规则。同一个服务器 tick 的 BenchmarkDotNet 实测：
+
+<PeerChart />
+
+逐项功能和全部基准见[横向对比](/zh/docs/comparison)，以及[对比 Arch](/zh/docs/vs-arch)、[对比 Friflo](/zh/docs/vs-friflo)、
+[对比 DefaultEcs](/zh/docs/vs-defaultecs)。
+
+## 怎么保存一个 World？ [#save-a-world]
+
+三种需求，三种工具：
+
+| 需求 | 调用 | 页面 |
+| --- | --- | --- |
+| 内存里的撤销、回滚、预测、回放 | `world.Capture()` / `world.Restore(snapshot)` | [快照](/zh/docs/guide/snapshots) |
+| 把整个 World 存盘、存数据库或交给另一个进程 | `world.Save(output)` / `world.Load(bytes)` | [存档](/zh/docs/guide/saves) |
+| 把一组实体（一个玩家和它拥有的东西）交给另一个 World 或服务器 | `SaveEntities` / `LoadEntities`、`MoveEntities` | [迁移与卸载](/zh/docs/guide/migration-and-unload) |
+
+```csharp
+using System.Buffers;
+
+var output = new ArrayBufferWriter<byte>();
+world.Save(output);              // 实体（含 id）、组件、单例
+world.Load(output.WrittenSpan);  // 组件里存的 EntityId 仍然指向同样的实体
+```
+
+存档从 4.1 起内置（[D9](/zh/docs/decisions#d9-saves-are-built-in-with-nino)）：非托管组件按原始行写出，并附带字段哈希，结构体改了在加载时就能发现；
+托管组件和单例走 [Nino](https://github.com/JasonXuDeveloper/Nino)（`[NinoType]`）。
+
+## 能热重载游戏逻辑吗？ [#hot-reload]
+
+能。把系统和组件放进插件程序集，用可回收的 `AssemblyLoadContext` 加载。替换时：先存档，调用 `world.RemoveTypes(assembly)`
+（它的系统、单例、索引和组件离开 World，实体保留），卸载上下文，加载新版本，再 `Load` 存档。类型按名字存档，新版本的组件会接过原来的值
+（[D17](/zh/docs/decisions#d17-unloading-removes-types-from-worlds-bits-are-reused)）。
+[HotReload 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload)完整演示了这个过程，并验证旧程序集确实被回收。
+
+## 支持 Native AOT 吗？ [#native-aot]
+
+支持。`EasyEcs.Core` 标记了 `IsAotCompatible`，库的每次构建都会跑裁剪和 AOT 分析器；生成的代码直接调用你的方法，热路径上没有反射
+（[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。基于它的程序可以用 `PublishAot` 发布并正常运行。
+两点限制：只在别的程序集里被封闭的泛型系统会退回 `MakeGenericType`，Native AOT 做不到
+（[D20](/zh/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names)）；另外，编译带被追踪组件的程序时，
+AOT 编译器目前会报一条 IL3054 警告（经由变更 tick 列类型的泛型递归）。
+
+## 为什么没有事件？ [#why-are-there-no-events]
+
+组件被添加、移除或写入时，不会回调你的代码（[D1](/zh/docs/decisions#d1-state-changes-are-data-no-events-or-callbacks)）。回调总是在另一个系统内部执行：
+控制流被藏起来，可能重入触发它的代码，调度器也看不到它读写了什么，系统就没法安全地并行。事件想表达的东西，改用数据表达：
+
+| 你想要的事件 | 写成 |
+| --- | --- |
+| 实体死亡，其他系统要响应 | 一个 `Dead` 标签；关心的系统用 `[With<Dead>]` 过滤 |
+| 组件被修改 | 标上 `ITrackChanges`；消费方用 `[Changed<T>]` |
+| 组件被移除（buff 到期） | 标上 `ITrackChanges`；消费方用 `[Removed<T>]` |
+| 一次性的消息（一次命中、一次玩家输入） | 一个承载消息的实体，读者都跑完后销毁 |
+| 来自其他线程的输入 | 一个队列，由某个系统在所属线程上取出 |
+
+```csharp
+public record struct Hit(EntityId Target, int Damage) : IComponent;    // 消息就是实体
+
+public class ApplyHitsSystem : EcsSystem
+{
+    [ForEach]
+    static void Apply(in Hit hit, World world)
+    {
+        if (!world.TryGetEntity(hit.Target, out var target)) return;    // 目标已经没了
+        ref var hp = ref target.TryGetRef<Health>(out bool found);
+        if (found) hp = hp with { Value = hp.Value - hit.Damage };
+    }
+}
+
+[UpdateAfter<ApplyHitsSystem>]                                          // 排在所有读者之后
+public sealed class ClearHitsSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.DestroyEntities<Hit>(); // 一次遍历清掉所有消息
+}
+```
+
+效果的先后就是系统的先后，一处就能看清；生成器知道每个系统读写了什么；测试和快照都能看到这些"事件"，因为它们就是数据。
+
+## 为什么没有命令缓冲？ [#command-buffers]
+
+结构变更立即生效，遍历途中也一样（[D2](/zh/docs/decisions#d2-structural-changes-apply-at-once-no-command-buffers)）：遍历期间被移除的行变成墓碑，
+遍历永远看不到行在脚下移动。代码怎么写就怎么执行，也不存在一个延后生效的"第二版本"World。并行 job 不做结构变更；排在它们后面、
+运行在所属线程上的系统根据它们写下的数据去做（[D3](/zh/docs/decisions#d3-no-command-buffer-for-parallel-jobs)）。在遍历里改结构时遍历会看到什么，
+见[结构变更](/zh/docs/guide/structural-changes)。
+
+## 系统怎么排顺序？ [#order-systems]
+
+系统按注册顺序运行。要让一个系统依赖另一个，就把依赖写出来：类上的 `[UpdateBefore<T>]` 或 `[UpdateAfter<T>]` 只在所在分组内移动这一个系统，
+加一条排序不会打乱其他系统（[D5](/zh/docs/decisions#d5-order-systems-by-dependencies-not-priorities)）。出现环时 `AddSystem` 抛异常，
+分析器能看到时报 EECS019。没有整数优先级：`Priority` 在 4.1 中删除了。运行节奏不同的系统放进单独调用更新的[系统分组](/zh/docs/guide/systems)，
+或者设置 `UpdateInterval` 和 `UpdatePhase`。
+
+## 怎么修改组件？ [#how-do-i-change-a-component]
+
+通过 `ref`。在 `[ForEach]` 方法里，`ref` 参数是写，`in` 是读：
+
+```csharp
+public record struct Poison(int DamagePerTick) : IComponent;
+public record struct Mana(int Value) : IComponent;
+
+public class PoisonSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Hurt(ref Health hp, in Poison poison) => hp = hp with { Value = hp.Value - poison.DamagePerTick };
+}
+```
+
+在系统之外：
+
+```csharp
+entity.Get<Health>().Value -= 10;                            // Get 返回 ref T：这里直接写组件
+ref var hp = ref entity.Get<Health>();                       // 要写多次就保留这个 ref
+hp.Value = 100;
+ref var mana = ref entity.TryGetRef<Mana>(out bool found);   // 实体可能没有这个组件时
+if (found) mana.Value += 5;
+entity.Set(new Position(0, 0), new Velocity(1, 0));          // 一次添加或替换多个：只迁移一次
+foreach (var item in world.Query<Position, Velocity>())
+    item.Position.X += item.Velocity.X;                      // 指向行内数据的 ref
+```
+
+三个要避开的错误：
+
+- `var hp = entity.Get<Health>(); hp.Value--;` 改的是副本。要用 `ref var`。
+- 只读时用 `in` 或 `entity.Read<T>()`，不要用 `ref`：对 `ITrackChanges` 组件的每次 `ref` 访问都算一次修改，同步时会把没人改过的行也发出去。
+- 组件里的集合要通过组件的 `ref` 修改，不能通过 `in`：否则变更追踪和调度器都发现不了（[EECS011](/zh/docs/guide/analyzer)）。
+  每个实体需要一个列表时，用 [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers)。
+
+## 一个 World 最多能有多少种组件？ [#component-limit]
+
+每个进程最多 65,536 种组件（组件位是 16 位）。前 256 种匹配一张表只需一条 `Vector256` 指令；其余放在溢出区里，溢出区在第一次建表时分配，
+从不在热路径上分配（[架构](/zh/docs/architecture#storage-model)）。
+
+## 系统必须是 `partial` 吗？ [#partial]
+
+不必。生成器把每个系统的 job 写进单独的 file 类，通过 `[UnsafeAccessor]` 调用你的 `[ForEach]` 方法（私有的也行），编译出来就是直接调用
+（[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。系统就是普通的类，生成的成员也不会和你的成员冲突。
+写了 `partial` 照样能编译。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card icon={<Shapes />} title="什么是 ECS？" href="/zh/docs/what-is-ecs">
+    模式本身、原型与稀疏集存储，以及什么时候适合用 ECS。
+  </Card>
+  <Card icon={<Lightbulb />} title="设计决策" href="/zh/docs/decisions">
+    每个不显然的选择、权衡过的方案和数据。
+  </Card>
+  <Card icon={<Scale />} title="横向对比" href="/zh/docs/comparison">
+    EasyEcs 与 Friflo.Engine.ECS、Arch、DefaultEcs 的逐项功能对比和实测数据。
+  </Card>
+</Cards>

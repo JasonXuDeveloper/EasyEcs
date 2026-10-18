@@ -1,0 +1,56 @@
+---
+title: 路线图
+seoTitle: "EasyEcs 路线图：计划与放弃"
+description: "EasyEcs 接下来计划做什么、每项改动怎样证明，以及权衡后放弃的功能和对应的设计决策。"
+icon: Milestone
+---
+
+import { RotateCcwClock, Lightbulb } from 'lucide-react';
+
+这里按顺序列出计划要做的事。一项发布之后就离开本页，此后由[更新日志](/zh/docs/changelog)和各篇指南介绍它。
+放弃的功能在这里留一行，理由写在[设计决策](/zh/docs/decisions)里。每项性能改动都要用 BenchmarkDotNet 测改前改后，
+时间和分配都是净收益才发布。
+
+## 计划 [#planned]
+
+### 让生成器替用户少写代码 [#less-code-through-the-generator]
+
+生成器已经会写 `entity.Health`、`HasHealth`、`SetHealth(…)`、`IsDead`、单例组件成员、`world.XIndex`、缓冲成员、
+命名的查询元素、预制体的缓冲写方法，以及 job 和访问集。每次发布前都会重新过一遍 API、[战斗服示例](/zh/docs/example)和各篇指南：
+用户写了两遍的代码都是生成成员的候选，没人用的生成成员就删掉。候选能在真实代码里省下代码、又不给每次调用加开销才会加入；
+只是换个写法的会被否决（[D26](/zh/docs/decisions#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call)）。
+
+### 工具链与运行时 [#toolchain-and-runtime]
+
+最低要求是 .NET 10 SDK（C# 14、Roslyn 5.0），生成器基于它构建。只有测得出收益，EasyEcs 才会用更新的运行时特性
+（[D21](/zh/docs/decisions#d21-net-10-features-only-where-they-measure)）。
+
+## 已放弃 [#dropped]
+
+- `Added<T>`：`[Changed<T>]` 也会选出新添加的行；要区分新出现和被写过，用一个由响应系统移除的标签
+  （[D4](/zh/docs/decisions#d4-no-addedt-filter)）。
+- 并行 job 的命令缓冲：并行 job 只写数据，排在它后面的系统做结构变更
+  （[D3](/zh/docs/decisions#d3-no-command-buffer-for-parallel-jobs)）。
+- 给查询调用点用拦截器：调用参数照样求值，在调用处构建的过滤器怎么都会被构建
+  （[D18](/zh/docs/decisions#d18-no-interceptors-for-query-calls-filters-carry-no-references)）。
+  `AddEmbeddedAttributeDefinition`：生成器不生成特性类型（特性都在 EasyEcs.Core 里）。
+- 可赋值的标签属性（`entity.IsDead = true`）：C# 14 不允许在 `foreach` 变量、索引器结果或 `in` 参数的字段上给结构体的扩展属性赋值，
+  而 ECS 代码恰恰在这些地方持有实体（[D19](/zh/docs/decisions#d19-no-settable-tag-properties)）。
+- 扁平的 `[InlineArray]` 备忘、存档类型表用 `FrozenDictionary`、`OverloadResolutionPriority`、`field`：测过或权衡过，没有净收益
+  （[D21](/zh/docs/decisions#d21-net-10-features-only-where-they-measure)）。
+- 多类型的 `Disable` / `Enable` 和批量调用，以及"改用生成成员"的诊断
+  （[D26](/zh/docs/decisions#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call)）。
+- 生成 `world.AddSystems()`：系统按注册顺序运行，这份列表就是 tick 的顺序，应当在构建 World 的地方读到。
+- `[ForEach]` 用到单例组件时自动添加：缺单例说明忘了初始化，而默认值很少是对的（步长为零的时钟）。
+- 由特性生成缓存过滤器、按组件生成计数成员（`world.CountPlayer()`）、命名的 `TryGetXRef`：省不下代码，API 面却更大。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card icon={<Lightbulb />} title="设计决策" href="/zh/docs/decisions">
+    每个选择的理由，以及放弃这些功能的原因。
+  </Card>
+  <Card icon={<RotateCcwClock />} title="更新日志" href="/zh/docs/changelog">
+    各版本发布了什么。
+  </Card>
+</Cards>

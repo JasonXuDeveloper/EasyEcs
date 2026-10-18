@@ -1,54 +1,74 @@
 # EasyEcs documentation
 
-New to EasyEcs? Read the pages in this order. The [project README](../../README.md) has the pitch, the quick start and
-the headline numbers.
+The documentation is published at **https://ecs.xgamedev.net** (English: `/en/docs`, Chinese: `/zh/docs`), with
+search, diagrams, benchmark charts and a Markdown copy of every page (`/llms.txt`, `/llms-full.txt`). This folder is
+its source: each page is `<page>.mdx` (English) and `<page>.zh.mdx` (Chinese), and the sidebar order is in
+`meta.json` / `meta.zh.json`. The [project README](../../README.md) has the pitch and the quick start.
 
-```mermaid
-flowchart LR
-    F0[Features] --> A[Getting started] --> B[ECS principles] --> C[Guide] --> D[Performance guide]
-    C --> E[API reference]
-    D --> F[Architecture]
-    F0 --> G[Comparison]
-```
+## Learn
 
-## Start here
-
-| Page | Read it to |
-|---|---|
-| [Features](features.md) | See every feature on one page: what it does, when to use it, what it costs, which scenarios it serves. |
-| [Comparison](comparison.md) | Compare EasyEcs with Friflo.Engine.ECS, Arch and DefaultEcs: features, the same server tick, operations, change tracking, removal detection, indexes. |
-| [Getting started](getting-started.md) | Build a small simulation step by step: world, entities, components, tags, queries, systems, singletons, groups, update loop. |
-| [ECS principles](ecs-principles.md) | Learn how to design features as data plus one-job systems, and why the analyzer enforces it. |
-| [Example: a battle server](example.md) | See every feature in one world: the code of the battle server benchmark and scenario tests. |
-| [Design questions](faq.md) | Why there are no events and no serialization, what is thread-safe, how to change a component. |
-| [Design decisions](decisions.md) | Why EasyEcs is the way it is: each decision, its reasons, what was weighed against it and the numbers. |
-| [Roadmap](roadmap.md) | What is planned next and what was dropped. |
+| Page | Source | Read it to |
+|---|---|---|
+| [What is ECS](https://ecs.xgamedev.net/en/docs/what-is-ecs) | [what-is-ecs.mdx](what-is-ecs.mdx) | Learn entities, components and systems from scratch. |
+| [Features](https://ecs.xgamedev.net/en/docs/features) | [features.mdx](features.mdx) | See every feature on one page. |
+| [Getting started](https://ecs.xgamedev.net/en/docs/getting-started) | [getting-started.mdx](getting-started.mdx) | Build a small simulation step by step. |
+| [ECS principles](https://ecs.xgamedev.net/en/docs/ecs-principles) | [ecs-principles.mdx](ecs-principles.mdx) | Design features as data plus one-job systems. |
+| [Example: a battle server](https://ecs.xgamedev.net/en/docs/example) | [example.mdx](example.mdx) | See every feature in one world (the code of `BattleServer.cs`). |
+| [Cheat sheet](https://ecs.xgamedev.net/en/docs/cheat-sheet) | [cheat-sheet.mdx](cheat-sheet.mdx) | Look up the common calls. |
+| [Glossary](https://ecs.xgamedev.net/en/docs/glossary) | [glossary.mdx](glossary.mdx) | Look up a term. |
 
 ## Guide
 
-One page per concept, in a sensible reading order:
+One page per concept, under [guide/](guide):
 
-| Page | Covers |
+| Page | Source |
 |---|---|
-| [Entities and components](guide/entities-and-components.md) | Handles, id recycling and versions, component operations, tags, generated members. |
-| [Prefabs and cloning](guide/prefabs.md) | `Prefab` and its generated writers (`SetHealth(…)`), `world.Instantiate`, `entity.Clone()`: spawn kinds of entities defined once, copy a living entity. |
-| [Queries and filters](guide/queries.md) | `Query`, `ForEach` struct jobs, `Count`, `Any`, `QueryFilter`. |
-| [Systems, `[ForEach]` and groups](guide/systems.md) | Lifecycle, ordering (`[UpdateBefore<T>]` / `[UpdateAfter<T>]`), `UpdateInterval`, `[ForEach]` parameters and filters, system groups, errors. |
-| [Singletons](guide/singletons.md) | Per-world state, singleton parameters, `SingletonRef<T>`. |
-| [Structural changes during iteration](guide/structural-changes.md) | What happens when you add, remove, create or destroy while iterating. |
-| [`ref` and `await`](guide/refs-and-await.md) | Mutating through refs, and why refs never cross an `await`. |
-| [Change tracking](guide/change-tracking.md) | `ITrackChanges`, `[Changed<T>]`, `[Removed<T>]`, `QueryFilter.Changed<T>(since)` / `Removed<T>(since)`: visit only what was written, or removed, since a system last ran. |
-| [Dynamic buffers](guide/dynamic-buffers.md) | `DynamicBuffer<T>`: a list per entity as a component, every write tracked, copied by snapshots. |
-| [Indexes and relations](guide/indexes-and-relations.md) | `IIndexed<TKey>`, `world.Index<T, TKey>()`: find entities by a value; relations (`ChildOf(Entity Parent)`) and their reverse lookup. |
-| [Snapshots](guide/snapshots.md) | Capture and restore a world in memory: undo, prediction, replays, tests. |
-| [Threading](guide/threading.md) | Process, world and owner thread; system order; safe `WorldOptions.ParallelSystems`; what the structural gate guards. |
-| [Analyzer rules](guide/analyzer.md) | EECS002-EECS024: meaning, fix and code fix. |
+| [Entities and components](https://ecs.xgamedev.net/en/docs/guide/entities-and-components) | [guide/entities-and-components.mdx](guide/entities-and-components.mdx) |
+| [Prefabs and cloning](https://ecs.xgamedev.net/en/docs/guide/prefabs) | [guide/prefabs.mdx](guide/prefabs.mdx) |
+| [Queries and filters](https://ecs.xgamedev.net/en/docs/guide/queries) | [guide/queries.mdx](guide/queries.mdx) |
+| [Systems](https://ecs.xgamedev.net/en/docs/guide/systems) | [guide/systems.mdx](guide/systems.mdx) |
+| [Singletons](https://ecs.xgamedev.net/en/docs/guide/singletons) | [guide/singletons.mdx](guide/singletons.mdx) |
+| [Structural changes](https://ecs.xgamedev.net/en/docs/guide/structural-changes) | [guide/structural-changes.mdx](guide/structural-changes.mdx) |
+| [`ref` and `await`](https://ecs.xgamedev.net/en/docs/guide/refs-and-await) | [guide/refs-and-await.mdx](guide/refs-and-await.mdx) |
+| [Change tracking](https://ecs.xgamedev.net/en/docs/guide/change-tracking) | [guide/change-tracking.mdx](guide/change-tracking.mdx) |
+| [Dynamic buffers](https://ecs.xgamedev.net/en/docs/guide/dynamic-buffers) | [guide/dynamic-buffers.mdx](guide/dynamic-buffers.mdx) |
+| [Indexes and relations](https://ecs.xgamedev.net/en/docs/guide/indexes-and-relations) | [guide/indexes-and-relations.mdx](guide/indexes-and-relations.mdx) |
+| [Hierarchy](https://ecs.xgamedev.net/en/docs/guide/hierarchy) | [guide/hierarchy.mdx](guide/hierarchy.mdx) |
+| [Groups](https://ecs.xgamedev.net/en/docs/guide/groups) | [guide/groups.mdx](guide/groups.mdx) |
+| [Cleanup and disable](https://ecs.xgamedev.net/en/docs/guide/cleanup-and-disable) | [guide/cleanup-and-disable.mdx](guide/cleanup-and-disable.mdx) |
+| [Bulk changes](https://ecs.xgamedev.net/en/docs/guide/bulk) | [guide/bulk.mdx](guide/bulk.mdx) |
+| [Snapshots](https://ecs.xgamedev.net/en/docs/guide/snapshots) | [guide/snapshots.mdx](guide/snapshots.mdx) |
+| [Saves](https://ecs.xgamedev.net/en/docs/guide/saves) | [guide/saves.mdx](guide/saves.mdx) |
+| [Migration and unload](https://ecs.xgamedev.net/en/docs/guide/migration-and-unload) | [guide/migration-and-unload.mdx](guide/migration-and-unload.mdx) |
+| [Threading](https://ecs.xgamedev.net/en/docs/guide/threading) | [guide/threading.mdx](guide/threading.mdx) |
+| [Analyzer rules](https://ecs.xgamedev.net/en/docs/guide/analyzer) | [guide/analyzer.mdx](guide/analyzer.mdx) |
+| [Common mistakes](https://ecs.xgamedev.net/en/docs/guide/common-mistakes) | [guide/common-mistakes.mdx](guide/common-mistakes.mdx) |
+
+## Compare
+
+| Page | Source |
+|---|---|
+| [Performance](https://ecs.xgamedev.net/en/docs/performance) | [performance.mdx](performance.mdx) |
+| [Why it is fast](https://ecs.xgamedev.net/en/docs/why-fast) | [why-fast.mdx](why-fast.mdx) |
+| [Comparison](https://ecs.xgamedev.net/en/docs/comparison) | [comparison.mdx](comparison.mdx) |
+| [EasyEcs vs Arch](https://ecs.xgamedev.net/en/docs/vs-arch) | [vs-arch.mdx](vs-arch.mdx) |
+| [EasyEcs vs Friflo](https://ecs.xgamedev.net/en/docs/vs-friflo) | [vs-friflo.mdx](vs-friflo.mdx) |
+| [EasyEcs vs DefaultEcs](https://ecs.xgamedev.net/en/docs/vs-defaultecs) | [vs-defaultecs.mdx](vs-defaultecs.mdx) |
+| [EasyEcs vs Unity Entities](https://ecs.xgamedev.net/en/docs/vs-unity-entities) | [vs-unity-entities.mdx](vs-unity-entities.mdx) |
+| [Migrate from Arch](https://ecs.xgamedev.net/en/docs/migrate-from-arch) | [migrate-from-arch.mdx](migrate-from-arch.mdx) |
+| [Migrate from Friflo](https://ecs.xgamedev.net/en/docs/migrate-from-friflo) | [migrate-from-friflo.mdx](migrate-from-friflo.mdx) |
+| [Migrate from DefaultEcs](https://ecs.xgamedev.net/en/docs/migrate-from-defaultecs) | [migrate-from-defaultecs.mdx](migrate-from-defaultecs.mdx) |
 
 ## Reference
 
-| Page | Contents |
-|---|---|
-| [API reference](api.md) | Every public API with its complexity. |
-| [Performance guide](performance.md) | Choosing an iteration API, do's and don'ts, benchmarks and how to measure. |
-| [Architecture](architecture.md) | Storage and memory layout, entity lifecycle, archetype transitions, query cache, systems, generators. |
-| [Migration guide](../../MIGRATION_GUIDE.md) | Upgrading from 4.0 to 4.1, from v3 to v4 (and from v2 to v3). |
+| Page | Source | Contents |
+|---|---|---|
+| [API reference](https://ecs.xgamedev.net/en/docs/reference) | [reference/](reference) | Every public type, generated by `tools/ApiDocs` (do not edit by hand). |
+| [API and complexity](https://ecs.xgamedev.net/en/docs/api) | [api.mdx](api.mdx) | Every public API with its complexity (read by `tools/ApiDocs`). |
+| [Architecture](https://ecs.xgamedev.net/en/docs/architecture) | [architecture.mdx](architecture.mdx) | Storage, entity lifecycle, query cache, systems, generators, threads. |
+| [FAQ](https://ecs.xgamedev.net/en/docs/faq) | [faq.mdx](faq.mdx) | Short answers to common questions. |
+| [Using EasyEcs with AI assistants](https://ecs.xgamedev.net/en/docs/ai) | [ai.mdx](ai.mdx) | `llms.txt`, Markdown copies and a rules file ([easyecs-rules.md](../public/easyecs-rules.md)). |
+| [Design decisions](https://ecs.xgamedev.net/en/docs/decisions) | [decisions.mdx](decisions.mdx) | Why EasyEcs is the way it is. |
+| [Roadmap](https://ecs.xgamedev.net/en/docs/roadmap) | [roadmap.mdx](roadmap.mdx) | What is planned and what was dropped. |
+| [Changelog](https://ecs.xgamedev.net/en/docs/changelog) | [changelog.mdx](changelog.mdx) | What changed in each release. |
+| [Migration guide](../../MIGRATION_GUIDE.md) | | Upgrading from 4.0 to 4.1, from v3 to v4 and from v2 to v3. |

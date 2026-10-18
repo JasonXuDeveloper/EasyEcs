@@ -1,0 +1,321 @@
+---
+title: Architecture
+seoTitle: "EasyEcs Architecture: Archetype Tables, Presence Bits, Change Ticks and Generators"
+description: "How EasyEcs stores entities and components, keeps tables dense under churn, caches queries, schedules systems and generates code, and the guarantees every change must keep."
+icon: Cpu
+---
+
+import { BookText, Gauge, Lightbulb, Scale } from 'lucide-react';
+
+How EasyEcs stores data, walks it and schedules the code that changes it, and why. You do not need this page to use
+the library ([Getting started](/en/docs/getting-started) is the place for that); it is for contributors and for
+anyone who wants to know what a call costs before making it. Every change to EasyEcs must keep four guarantees:
+
+- **No allocation on hot paths**: queries, iteration, component access and structural changes after warm-up.
+- **Bounded memory under churn**: ids, rows and buffers are recycled, so memory follows the peak population.
+- **Cache-friendly layouts**: 64-byte lines, columns that SIMD can walk front to back.
+- **Immediate structural changes**: adding, removing, creating and destroying take effect at once, also while a
+  pass iterates.
+
+## Storage model [#storage-model]
+
+```mermaid
+flowchart TB
+    subgraph W["World (one owner thread)"]
+        Meta["Meta[id]: EntityMeta, 16 B<br/>table · version · row"]
+        T["Table (archetype)<br/>Slots[row]: EntityId · one column per component<br/>presence bits · change ticks · add edges"]
+        QC["Query cache<br/>filter → tables + row filters"]
+        S["Singletons[slot]"]
+        Sys["Schedules: one per system group,<br/>split into stages"]
+        Idx["Value and relation indexes<br/>(only when created)"]
+    end
+    Meta -->|table + row| T
+    QC --> T
+    Idx -->|entity ids| Meta
+```
+
+- **Per entity**, the world keeps one `EntityMeta`: its table, version and row, 16 bytes, so four share a 64-byte
+  line. The component set is the table's mask and is not stored per entity. The only other per-entity state is
+  opt-in: a value index, once a world creates one, keeps a node per entity id.
+- **Tables are structures of arrays.** An archetype is a table with one column per component type and one row per
+  entity, plus an `EntityId` per row (index and version side by side, 8 bytes, so a handle needs one load). Passes walk
+  columns front to back, which hardware prefetchers and SIMD handle best.
+  - Unmanaged columns are pinned arrays (pinned object heap) whose row 0 starts on a 64-byte boundary: a row of a
+    power-of-two-sized component never straddles two lines, and vector loads stay aligned.
+  - Columns of types that hold references are plain `T[]`; a row's references are cleared when the row loses its
+    entity or its component, so the GC can collect what they pointed to.
+  - A [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) column holds one reference per row to that row's own
+    list, created by its first write. Moving the row moves the reference; snapshots and clones copy the elements into
+    new lists.
+  - Tables double when full and never shrink: each is bounded by the most entities it ever held.
+- **Presence bits.** Removing a component keeps the entity in its table and clears the row's bit for that
+  component (one bit per row, 64 rows per `ulong`). A column gets its bits on its first removal; until then every row
+  has the component and the column carries no bits. Each column also counts its living rows that lack the component,
+  so a pass knows per table whether it can skip it, walk every row, or test bits. `Count` and `Any` answer a table
+  from those counts when only one column varies, without reading bits.
+- **Disabled components** are presence bits too: `entity.Disable<T>()` clears `T`'s bit and adds a `Disabled<T>` tag,
+  whose column the table gains on the first disable (one row move per table, then bit flips).
+- **Groups.** `world.GroupBy<T>()` keys tables by the value of an [`IGroup`](/en/docs/guide/groups) component as
+  well as by their mask, so the entities of one group are contiguous and `QueryFilter.InGroup<T>(g)` walks only their
+  tables.
+- **Masks** (`BitMask`) are 256-bit SIMD bitsets with an overflow. Component bits are `ushort`s, so a process can use
+  up to 65,536 component types: the first 256 are inline (one `Vector256` test per table match), the rest go to an
+  overflow array that is allocated when a table or a transition is first built, never on a hot path.
+  `QueryFilter` keeps its bits past 255 as an interned id, so a filter holds no object reference
+  ([D18](/en/docs/decisions#d18-no-interceptors-for-query-calls-filters-carry-no-references)).
+
+### Change ticks [#change-ticks]
+
+A component marked `ITrackChanges` brings a hidden column of 8-byte ticks into every table that has it: the world's
+change tick of each row's last write. Writes stamp it (a run of rows with one vectorized fill) and keep summaries at
+three levels, so a pass can skip what nobody wrote:
+
+| Level | Summary | Lets a `Changed<T>` pass |
+| --- | --- | --- |
+| Column | the latest tick of any row | skip a table nobody wrote since its tick, with one load |
+| Block of 4,096 rows | the words at the block's latest tick (a bit mask) and a bound for the others | find the next written word with one bit scan |
+| Word of 64 rows | 32 bytes: latest tick, the rows holding it, a bound for the other rows, a bound for removals | take a word's written rows from its summary, without reading their ticks |
+
+Only words that mix older and newer ticks compare their rows, four per SIMD instruction. The result is 64 bits per
+word, like presence bits, so it rides on the same row filters. Removing a tracked component stamps its row's tick and
+clears its presence bit: a `Removed<T>` filter is "bit clear and tick recent enough", so removal detection needs no
+extra storage, and removals keep their own block summaries so that writes do not make removal passes visit their
+words ([D23](/en/docs/decisions#d23-change-summaries-per-block-removals-summarized-apart)). Untracked components
+have no tick column and no stamping code: the checks are JIT-time constants.
+
+### Value and relation indexes [#indexes]
+
+`world.Index<T, TKey>()` keeps, per key, the key's entities in one id array (`IndexHead`); a leaving entity's hole
+is filled by the key's next entity, so entities never move under a loop
+([D24](/en/docs/decisions#d24-an-indexs-key-holds-its-entities-in-one-array)). Keys that are entities of the world
+(relations, `ChildOf`) sit in an array indexed by the target's id, so a relation lookup hashes nothing. The index is
+kept on write: `Set`, `CreateEntity` and `CreateEntities` call one inlined hook that the JIT removes for components
+without an index. A write through a `ref` cannot be seen (the ref is handed out before the value changes), so the
+analyzer rejects it ([EECS015](/en/docs/guide/analyzer)) instead of every lookup paying for it. The first lookup
+builds the index with one query; destroying an entity or removing an indexed component unlinks it at once.
+
+### Why rows move only on adds [#why-rows-move-only-on-adds]
+
+A table copies an entity's row when the entity gains a component its table has no column for: that is what keeps
+iteration dense. States that come and go (stunned, burning, dead) flip presence bits after their first time, so they
+copy nothing ([D6](/en/docs/decisions#d6-removing-a-component-keeps-the-row)). Columns are contiguous arrays, not
+pages: paged columns iterate at the same speed but add an indirection to every handle access, and save only the copy
+when a table grows, which `InitialEntityCapacity` and `EnsureCapacity` remove
+([D7](/en/docs/decisions#d7-contiguous-columns-not-pages)).
+
+## Memory layout at a glance [#memory-layout]
+
+```mermaid
+flowchart LR
+    M["Meta[id]<br/>EntityMeta 16 B<br/>4 per cache line"]
+    subgraph A1["Table {Position, Velocity, Stunned}"]
+        I1["Slots[]: EntityId"]
+        P1["Position[] (64-byte aligned)"]
+        V1["Velocity[] (64-byte aligned)"]
+        S1["Stunned[] + presence bits"]
+    end
+    subgraph A2["Table {Position, Health}"]
+        I2["Slots[]: EntityId"]
+        P2["Position[]"]
+        H2["Health[] + change ticks"]
+    end
+    M -->|table + row| A1
+    M -->|table + row| A2
+```
+
+- `entity.Get<T>()` is a version check on the 16-byte record, a column lookup in the table (bit to column, a small
+  array), one presence-bit test when the column has bits, then an indexed load.
+- `CreateEntity(a, b, …)`, `Set(a, b, …)` and `GetOrAdd<T>()` follow transitions cached per table, so a repeated
+  structural change is one array load plus the row copy.
+
+## Entity lifecycle [#entity-lifecycle]
+
+```mermaid
+stateDiagram-v2
+    [*] --> Free
+    Free --> Alive: CreateEntity / Instantiate / Clone
+    Alive --> Alive: Set a new component (row copied to another table)
+    Alive --> Alive: Remove, Disable, re-add (presence bit, no move)
+    Alive --> Destroyed: Destroy while it holds a cleanup component
+    Destroyed --> Free: last cleanup component removed
+    Alive --> Free: Destroy (version + 1, row removed, id recycled)
+```
+
+- `Entity` is a handle: world, id and version. Every operation validates the version, so a handle to a destroyed
+  entity never touches the entity that reuses its index. Store `EntityId`s in components, not handles.
+- Ids are recycled last in, first out: recently freed ids still have warm cache lines, and `Meta` stays bounded by
+  the peak number of live entities. `Meta` never shrinks (on `Dispose` it is cleared), which lets handles index it
+  without bounds checks.
+- An entity destroyed while it holds an [`ICleanupComponent`](/en/docs/guide/cleanup-and-disable) loses its other
+  components and keeps a `Destroyed` tag until a system removes its last cleanup component.
+
+## Archetype transitions and row removal [#transitions]
+
+- An entity moves only when it gains a component its table has no column for. The move copies the components both
+  tables have (a copy plan of column pairs, computed once per edge) into a new row of the target table: unmanaged
+  values as bytes, managed ones through their typed copy.
+- Single-component adds follow **edges** cached on the table per component bit. Multi-component adds follow **set
+  edges** keyed by the dense index of the call's generic signature (`(T1, …, Tn)`). The first call per table and
+  signature builds the target mask and does one hash lookup; later calls are one array load.
+- `CreateEntity(in T1 … in Tn)` places the entity in its final table directly.
+- **Prefabs and clones.** A `Prefab` is one row of a private world, so no query of yours sees it. `Instantiate` finds
+  the target table from the prefab table's mask once and caches it; `Clone` uses the original's table. Then one row
+  copy fills the new entity: unmanaged bytes, managed values through their clone (a `DynamicBuffer<T>` gets a new list
+  with the same elements), presence bits for what the source lacks, and the current tick for each tracked component
+  it has. `Instantiate(prefab, span)` reserves ids and rows once for the whole wave.
+- A row that loses its entity is filled at once by the table's last row when no pass is iterating, so tables stay
+  dense. While a pass iterates, the row becomes a **tombstone** (index -1) instead, so rows never shift under the
+  pass; the last pass to end closes the tombstones, found with vectorized scans of the rows read as `long`s.
+
+## Query cache [#query-cache]
+
+```mermaid
+flowchart LR
+    Call["Query / Count / [ForEach]"] --> Memo{"Memo of the call's<br/>signature (4 ways)"}
+    Memo -->|hit| Entry["Cache entry<br/>tables + row filters"]
+    Memo -->|miss| Dict["ConcurrentDictionary<br/>keyed by the filter"]
+    Dict -->|first use: scan every table| Entry
+    New["New table created"] -->|copy-on-write| Entry
+```
+
+A query's key is its component sets: required, excluded, `WithAny`, `Changed`, `Removed` and the group. Its entry
+holds an immutable snapshot: the tables whose mask has every required component and the column of every `Removed`
+component (and, with `WithAny`, at least one of those), each with a row filter naming the columns whose presence bits
+and ticks the pass tests. An excluded component does not rule a table out, since its rows may lack it; the row filter
+does. Each call signature keeps a memo of its first four filters, so a hot call usually finds its entry without
+hashing; past the memo, the dictionary's alternate lookup probes with the call's own bits.
+
+When a new table is created, under the structural gate, every matching entry is replaced copy-on-write and published
+with `Volatile.Write`: readers never lock and never see a list being changed. The first use of a query shape costs one
+scan of every table; a new table costs a pass over the cached shapes. Both are cold paths.
+
+Per pass and table, the row filter picks one of three modes from the column counts: skip the table, walk every row,
+or test bits. A `Changed` or `Removed` filter always tests: its words also AND in the rows whose tick reaches the
+pass's tick, which travels with the pass while the plan is shared.
+
+## Iteration and structural changes [#iteration-and-structural-changes]
+
+Every iteration API walks tables front to back. What differs is the bookkeeping a pass needs:
+
+- **Jobs that make no structural change** (`INoStructuralChanges`, which the generator adds to a static `[ForEach]`
+  method that takes no `World` and only reads through its `Entity` parameter) walk dense tables with no per-row check
+  and tables with presence bits 64 rows per word. Their passes freeze the world's structure: a structural change
+  inside throws. Batch methods (spans) and `ForEachBatch` receive whole runs of consecutive passing rows.
+- **Other passes** register with the world (`BeginPass` / `EndPass`), so removed rows become tombstones instead of
+  being filled. A pass records each matching table's row count before walking it; rows appended during the pass
+  (entities created or moved into a matching table) are past that count and not visited. Each entity is visited at
+  most once, and one that loses a queried component or is destroyed before its turn is skipped.
+- Each table is walked by a row loop compiled twice: for a table with tombstones (each row tests its id) and for one
+  without (no test) ([D25](/en/docs/decisions#d25-structural-row-loops-are-compiled-for-tables-without-tombstones)).
+  After each entity, the pass compares the world's `StorageVersion` with the value it last saw: every change that can
+  reallocate storage, move rows or flip presence bits bumps it, and the pass then re-reads its column refs and bits
+  from the next row.
+- When a job changes the archetype of the entity it visits, its writes through the refs land in the old row (now a
+  tombstone). After the job returns, the pass copies the components the job writes (`Writes`, generated from its
+  `ref` parameters) to the entity's new row, so no write is lost.
+- `Query` follows the same rules. Its enumerator keeps the hot state (row, row count, entity rows, column refs) in its
+  own fields, and every member a loop calls is inlined, so the JIT keeps them in registers. The cold state lives in a
+  `QueryWalk`, pooled per thread, reached once per table and per structural change. A ticket tells a walk's current
+  use from a copy of an enumerator that already ended.
+
+The rules from the user's side: [Structural changes during iteration](/en/docs/guide/structural-changes).
+
+## Systems [#systems]
+
+```mermaid
+flowchart LR
+    Add["AddSystem"] --> Sort["Order: registration order,<br/>moved by UpdateBefore / UpdateAfter"]
+    Sort --> Stages["Stages: after the latest system<br/>it follows or conflicts with"]
+    Stages --> Run["Update(): stage by stage,<br/>OnUpdate + generated [ForEach]"]
+    Run --> Tick["ChangeTick + 1 per stage"]
+```
+
+- Each system group has one schedule: its systems in registration order, moved as `[UpdateBefore<T>]` /
+  `[UpdateAfter<T>]` require (a stable topological sort; a cycle throws in `AddSystem` before anything changes). The
+  schedule is split into stages: a system goes to the stage after the latest one holding a system it must follow,
+  by an ordering or by an earlier conflicting access (`SystemAccess`). Of two conflicting systems the earlier one
+  always finishes first. Both arrays are copy-on-write; rebuilding them is O(systems²), once per `AddSystem` or
+  `RemoveSystem`.
+- `Update()` and `Update<TGroup>()` are synchronous. For each due, enabled system they call `OnUpdate()` and the
+  generated `[ForEach]` methods. Each stage advances the change tick once, and each update once more.
+- `AddSystem` calls `OnCreate()`; `RemoveSystem` and `Dispose` call `OnDestroy()`, `Dispose` in reverse order.
+- An exception propagates out of the update, or, with `SystemErrorPolicy.Disable`, switches its system off and stays
+  in `system.Error`.
+- Systems cooperate through data only ([D1](/en/docs/decisions#d1-state-changes-are-data-no-events-or-callbacks)),
+  so all behavior runs in schedule order. User-facing details: [Systems](/en/docs/guide/systems).
+
+## Source generators and analyzer [#source-generators-and-analyzer-easyecsgenerator]
+
+| Part | What it does |
+| --- | --- |
+| `ArityGenerator` | Writes every T1..T9 family of `EasyEcs.Core` from one template each (`Entity.Set` / `Remove`, `World.CreateEntity` / `CreateEntities` / `DestroyEntities`, the job interfaces, `ForEach` and its variants, `Query`, `Count`, `Any`). Runs only for `EasyEcs.Core`. |
+| `SystemGenerator` | Turns `[ForEach]` methods into struct jobs (per entity, or per run of rows for span parameters) in a file class of their own, which call the user's method through `[UnsafeAccessor]` ([D16](/en/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)). Each system gets a `SystemCode` (its update and access set) registered by a module initializer; a static method outside a system gets an entry point. `[Changed<T>]` / `[Removed<T>]` become `Since(LastRunTick + 1)` and a declared read of `T`; `Parallel = true` runs the job over chunks. Jobs that cannot change structure get `INoStructuralChanges`. |
+| `ComponentGenerator` | C# 14 extension members per component and singleton: `entity.Health`, `HasHealth`, `SetHealth(…)`, `IsDead`, `world.Clock`, `world.KillsIndex`, `item.Position` per query shape, the buffer and prefab writers, and the registration of the types a save may name. |
+| `EasyEcsAnalyzer` | Reports EECS002–EECS024: input the generators skip, and code that breaks the [ECS principles](/en/docs/ecs-principles). Generators never report diagnostics; both use the same checks. [EasyEcs.CodeFixes](/en/docs/guide/analyzer) offers the mechanical fixes. |
+
+The generators follow the incremental rules: `ForAttributeWithMetadataName` or syntax-only predicates first, models
+that are equatable records of strings (no symbol, node or location survives a transform), a tracking name per stage,
+and a test (`GeneratorTests`) that an unrelated edit leaves the stages cached.
+
+## Type indices [#type-indices]
+
+`TypeIndex<TFamily, T>` gives each type a dense, process-wide index within a family on first use. It is a static
+readonly field, so the JIT folds it to a constant:
+
+- `ComponentType<T>.Bit`: the mask bit. Assigning it registers the type's column operations (size, managed or not,
+  create, grow, copy, clone, clear), which tables use without knowing `T`. A tracked component also registers its
+  hidden tick column, paired with its own, so every copy, move and growth carries the ticks.
+- `SingletonType<T>.Index`: the singleton slot. `SystemGroup<T>.Index`: the system group (0 is the default group).
+- `ComponentSignature`: one index per generic signature of a multi-component call, keying set edges and query memos.
+
+Every world uses the same indices, so masks are comparable across worlds. When a collectible assembly unloads,
+its component bits are reused once no live world mentions them
+([D17](/en/docs/decisions#d17-unloading-removes-types-from-worlds-bits-are-reused)).
+
+## Threading [#threading]
+
+```mermaid
+flowchart TB
+    Owner["Owner thread<br/>Update, queries, structural changes"] --> Gate{"Structural gate<br/>plain flag"}
+    Owner --> Stage["Parallel stage or<br/>parallel [ForEach]"]
+    Stage -->|freezes| Gate
+    Stage --> Helpers["Caller + thread-pool helpers<br/>claim items by one cursor"]
+    Helpers --> Shared{"Shared gate (CAS)<br/>cold paths only"}
+```
+
+- Structural changes, system changes, `Capture` and `Restore` enter the world's **structural gate**, which belongs to
+  the owner thread: a plain flag, checked and set on the way in, cleared on the way out, with no atomic instruction.
+  A parallel stage of systems, the chunks of a parallel `[ForEach]` and a batch job freeze it while they run, so a
+  structural change inside them throws `InvalidOperationException`, deterministically, as does one reentered under
+  the gate.
+- The cold paths that the threads of a parallel stage reach on their own (the first match of a query shape, a
+  singleton resolved first, closing tombstones when the last pass ends) take a separate **shared gate**, a
+  compare-and-swap flag with a spinning wait. Both flags sit on a cache line of their own.
+- Queries, `Get` and `Has` are lock-free; component values are unsynchronized by design. The model is
+  **one world per owner thread** ([D13](/en/docs/decisions#d13-one-owner-thread-per-world)). The analyzer reports
+  structural changes in `[ForEach]` methods that promise none (EECS013) and in delegates handed to other threads
+  (EECS014).
+- Parallel runs use the calling thread plus reusable `IThreadPoolWorkItem` helpers that claim items through one
+  `Interlocked` cursor (the run's epoch in the high 32 bits, so a helper that starts late never touches the next
+  run). Each job and stage measures its runs and wakes helpers only while they make a run at least a fifth faster
+  ([D22](/en/docs/decisions#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)). Nothing is
+  allocated per update.
+
+The rules from the user's side: [Threading](/en/docs/guide/threading).
+
+## Related [#related]
+
+<Cards>
+  <Card icon={<Lightbulb />} title="Design decisions" href="/en/docs/decisions">
+    Why each of these choices was made, what was weighed against it, and the numbers.
+  </Card>
+  <Card icon={<Gauge />} title="Performance" href="/en/docs/performance">
+    What these structures mean for the API you pick.
+  </Card>
+  <Card icon={<BookText />} title="API and complexity" href="/en/docs/api">
+    The cost of every public call.
+  </Card>
+  <Card icon={<Scale />} title="Comparison" href="/en/docs/comparison">
+    The same storage questions answered by Friflo, Arch and DefaultEcs.
+  </Card>
+</Cards>

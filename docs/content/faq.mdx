@@ -1,0 +1,240 @@
+---
+title: FAQ
+seoTitle: "EasyEcs FAQ: Production Use, Allocations, Threads, Unity, AOT, Saves"
+description: "Short answers to the questions people ask about EasyEcs: production use, allocations, thread safety, Unity and Godot, Native AOT, saving a world, hot reload, events, and how it compares."
+icon: CircleQuestionMark
+faq: true
+---
+
+import { Lightbulb, Scale, Shapes } from 'lucide-react';
+
+## Is EasyEcs production ready? [#production-ready]
+
+EasyEcs is published on [NuGet](https://www.nuget.org/packages/EasyEcs) under the MIT license and built for
+long-running .NET servers. What backs it up, in the repository:
+
+- Hundreds of NUnit tests, one file per feature, including allocation tests with a budget of 0 bytes, generator and
+  analyzer tests, and a battle server that runs every feature at once
+  ([the example](/en/docs/example)).
+- BenchmarkDotNet suites for every feature and against Friflo.Engine.ECS, Arch and DefaultEcs, each result checked
+  in setup ([Performance](/en/docs/performance)).
+- CI that builds, tests, runs every sample and example, compiles the C# snippets of these docs and checks the
+  generated API reference.
+- An analyzer that rejects the design mistakes an ECS makes easy (EECS002 to EECS024), with code fixes.
+
+What to weigh: it targets `net10.0` only, the API changes between minor versions while it matures (4.0 to 4.1 renamed
+and removed a few members; the [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md)
+lists each change), and the [changelog](/en/docs/changelog) shows what each release changed.
+
+## Does EasyEcs allocate? [#allocations]
+
+Not on hot paths. Queries, iteration, component access, `[ForEach]` systems, parallel runs and structural changes
+allocate nothing once the world is warmed up (its tables, query cache and pools have reached their peak sizes).
+The headline server tick of 100,000 entities takes <BenchValue k="tick.oneWorld" /> and allocates
+<BenchValue k="tick.oneWorld.alloc" />.
+
+<BenchSource />
+
+What allocates, on purpose: creating a world, the first entity of a new component set (a new table), the first use
+of a query shape, a table or a `DynamicBuffer<T>` growing past its capacity, and cold tools such as `Describe`.
+`InitialEntityCapacity`, `EnsureCapacity(prefab, count)` and `bag.EnsureCapacity(n)` move growth out of the tick.
+
+## Is it thread-safe? [#is-it-thread-safe]
+
+The rules are explicit and short ([D13](/en/docs/decisions#d13-one-owner-thread-per-world)):
+
+- **A world has one owner thread.** Its systems, queries and component reads and writes run there. On a server, run
+  one world per thread (one per map, zone or match): worlds share nothing, so they scale across cores without locks.
+- **Structural changes belong to the owner thread.** Adding or removing components and creating or destroying
+  entities check a plain owner flag: a change made inside a parallel stage, a parallel `[ForEach]` or a pass that
+  promised none throws instead of tearing the tables. The analyzer reports the off-thread changes it can see
+  ([EECS013, EECS014](/en/docs/guide/analyzer)).
+- **The parallelism EasyEcs adds is checked.** `WorldOptions.ParallelSystems` runs systems together only when their
+  generated access does not conflict, with the same result as running them one by one; a
+  `[ForEach(Parallel = true)]` method must change no structure and write no singleton (EECS010).
+- **Input from other threads** (network, IO) goes into a queue of yours that one system drains on the owner thread.
+
+Never keep a `ref` across an `await`: keep the `Entity` and get the component again. More in
+[Threading](/en/docs/guide/threading) and [`ref` and `await`](/en/docs/guide/refs-and-await).
+
+## Can I use EasyEcs with Unity or Godot? [#unity-godot]
+
+No. EasyEcs targets `net10.0` only: it relies on C# 14 extension members, `Vector256` / `Vector512`, columns on the
+pinned object heap and current JIT behavior ([D15](/en/docs/decisions#d15-net-10-only)), which Unity's runtimes do
+not offer. Godot is not a tested or supported target either: EasyEcs is built for servers and has no engine
+integration. The usual setup is EasyEcs on a .NET 10 game server and the client engine's own tools on the client;
+[EasyEcs and Unity Entities](/en/docs/vs-unity-entities) says how the two models differ.
+
+## How does EasyEcs compare with Arch, Friflo.Engine.ECS and DefaultEcs? [#compared]
+
+All four are C# ECS libraries; they differ in what they do for you and what it costs. EasyEcs generates the loops
+from `[ForEach]` methods, applies structural changes immediately (no command buffers), tracks changes and removals as
+data, and checks the ECS rules at compile time. On the same server tick, measured with BenchmarkDotNet:
+
+<PeerChart />
+
+Feature by feature, with every benchmark: [Comparison](/en/docs/comparison), and the pages
+[vs Arch](/en/docs/vs-arch), [vs Friflo](/en/docs/vs-friflo) and [vs DefaultEcs](/en/docs/vs-defaultecs).
+
+## How do I save a world? [#save-a-world]
+
+Three tools, for three needs:
+
+| Need | Call | Page |
+| --- | --- | --- |
+| Undo, rollback, prediction, replays in memory | `world.Capture()` / `world.Restore(snapshot)` | [Snapshots](/en/docs/guide/snapshots) |
+| A whole world to disk, a database or another process | `world.Save(output)` / `world.Load(bytes)` | [Saves](/en/docs/guide/saves) |
+| A group of entities (a player and what it owns) to another world or server | `SaveEntities` / `LoadEntities`, `MoveEntities` | [Migration and unloading](/en/docs/guide/migration-and-unload) |
+
+```csharp
+using System.Buffers;
+
+var output = new ArrayBufferWriter<byte>();
+world.Save(output);              // entities with their ids, components, singletons
+world.Load(output.WrittenSpan);  // EntityIds stored in components still point at the same entities
+```
+
+Saves are built in from 4.1 ([D9](/en/docs/decisions#d9-saves-are-built-in-with-nino)): unmanaged components are
+written as their raw rows with a hash of their fields, so a changed struct is detected at load; managed components
+and singletons go through [Nino](https://github.com/JasonXuDeveloper/Nino) (`[NinoType]`).
+
+## Can I hot-reload game logic? [#hot-reload]
+
+Yes. Load your systems and components from a plugin assembly in a collectible `AssemblyLoadContext`. To replace it,
+save the world, call `world.RemoveTypes(assembly)` (its systems, singletons, indexes and components leave the world;
+the entities stay), unload the context, load the new version and `Load` the save: types are saved by name, so the new
+version's components take the values ([D17](/en/docs/decisions#d17-unloading-removes-types-from-worlds-bits-are-reused)).
+The [HotReload sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload) does it end to
+end and checks that the old assembly was collected.
+
+## Does EasyEcs work with Native AOT? [#native-aot]
+
+Yes. `EasyEcs.Core` is marked `IsAotCompatible`, so the trimming and AOT analyzers run on every build of the library,
+and the generated code calls your methods directly (no reflection on hot paths;
+[D16](/en/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)). A program built on it
+publishes with `PublishAot` and runs. Two limits: a generic system closed only by another assembly falls back to
+`MakeGenericType`, which Native AOT cannot do
+([D20](/en/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names)); and the AOT compiler
+currently reports one IL3054 warning (generic recursion through the change-tick column type) when it compiles a
+program with tracked components.
+
+## Why are there no events? [#why-are-there-no-events]
+
+Nothing calls your code when a component is added, removed or written
+([D1](/en/docs/decisions#d1-state-changes-are-data-no-events-or-callbacks)). A callback runs inside another system:
+it hides the control flow, can re-enter the code that raised it, and its reads and writes are invisible to the
+scheduler, so systems could not run in parallel safely. What an event would say is data instead:
+
+| The event you want | Write it as |
+| --- | --- |
+| An entity died, others should react | a `Dead` tag; the systems that care filter `[With<Dead>]` |
+| A component was changed | mark it `ITrackChanges`; the consumer takes `[Changed<T>]` |
+| A component was removed (a buff expired) | mark it `ITrackChanges`; the consumer takes `[Removed<T>]` |
+| A one-off message (a hit, a player input) | an entity holding the message, destroyed after its readers ran |
+| Input from another thread | a queue that one system drains on the owner thread |
+
+```csharp
+public record struct Hit(EntityId Target, int Damage) : IComponent;    // a message is an entity
+
+public class ApplyHitsSystem : EcsSystem
+{
+    [ForEach]
+    static void Apply(in Hit hit, World world)
+    {
+        if (!world.TryGetEntity(hit.Target, out var target)) return;    // the target is gone
+        ref var hp = ref target.TryGetRef<Health>(out bool found);
+        if (found) hp = hp with { Value = hp.Value - hit.Damage };
+    }
+}
+
+[UpdateAfter<ApplyHitsSystem>]                                          // after every reader
+public sealed class ClearHitsSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.DestroyEntities<Hit>(); // every message, one pass
+}
+```
+
+The order of effects is the order of the systems, visible in one place; the generator knows what every system reads
+and writes; tests and snapshots see the "events", because they are data.
+
+## Why are there no command buffers? [#command-buffers]
+
+Structural changes apply at once, also in the middle of a pass
+([D2](/en/docs/decisions#d2-structural-changes-apply-at-once-no-command-buffers)): a removed row becomes a tombstone
+while the pass runs and the pass never sees rows shift, so code reads as it is written and no second, deferred
+version of the world exists. Parallel jobs make no structural change; a system after them, on the owner thread,
+makes it from the data they wrote ([D3](/en/docs/decisions#d3-no-command-buffer-for-parallel-jobs)). What a pass
+sees when you change structure inside it: [Structural changes](/en/docs/guide/structural-changes).
+
+## How do I order systems? [#order-systems]
+
+Systems run in the order you register them. To make one depend on another, name the dependency:
+`[UpdateBefore<T>]` or `[UpdateAfter<T>]` on the class moves only that system within its group, so adding one
+ordering never reshuffles the others ([D5](/en/docs/decisions#d5-order-systems-by-dependencies-not-priorities)).
+A cycle throws in `AddSystem` and is reported by EECS019 when the analyzer can see it. There are no integer
+priorities: `Priority` was removed in 4.1. Systems that run on a different cadence go into a
+[system group](/en/docs/guide/systems) updated by its own call, or set `UpdateInterval` and `UpdatePhase`.
+
+## How do I change a component? [#how-do-i-change-a-component]
+
+Through a `ref`. In a `[ForEach]` method, a `ref` parameter is a write and `in` is a read:
+
+```csharp
+public record struct Poison(int DamagePerTick) : IComponent;
+public record struct Mana(int Value) : IComponent;
+
+public class PoisonSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Hurt(ref Health hp, in Poison poison) => hp = hp with { Value = hp.Value - poison.DamagePerTick };
+}
+```
+
+Outside systems:
+
+```csharp
+entity.Get<Health>().Value -= 10;                            // Get returns ref T: this writes the component
+ref var hp = ref entity.Get<Health>();                       // keep the ref for several writes
+hp.Value = 100;
+ref var mana = ref entity.TryGetRef<Mana>(out bool found);   // when the entity may not have it
+if (found) mana.Value += 5;
+entity.Set(new Position(0, 0), new Velocity(1, 0));          // add or replace several at once: one transition
+foreach (var item in world.Query<Position, Velocity>())
+    item.Position.X += item.Velocity.X;                      // refs into the row
+```
+
+Three mistakes to avoid:
+
+- `var hp = entity.Get<Health>(); hp.Value--;` changes a copy. Keep a `ref var`.
+- Read with `in` or `entity.Read<T>()`, not `ref`: every `ref` access to an `ITrackChanges` component counts as a
+  change, so replication would send rows nobody changed.
+- Change a collection inside a component through a `ref` to the component, never through `in`: change tracking and
+  the scheduler would miss it ([EECS011](/en/docs/guide/analyzer)). For a list per entity, use a
+  [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers).
+
+## How many component types can a world have? [#component-limit]
+
+Up to 65,536 component types per process (component bits are 16-bit). The first 256 are tested with one
+`Vector256` instruction per table; the rest live in an overflow that is allocated when a table is first built, never
+on a hot path ([Architecture](/en/docs/architecture#storage-model)).
+
+## Do systems have to be `partial`? [#partial]
+
+No. The generator writes each system's jobs in a file class of its own and calls your `[ForEach]` methods, private
+or not, through `[UnsafeAccessor]`, which compiles to a direct call
+([D16](/en/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)). A system is an ordinary
+class, and generated members never collide with yours. `partial` still compiles.
+
+## Related [#related]
+
+<Cards>
+  <Card icon={<Shapes />} title="What is an ECS?" href="/en/docs/what-is-ecs">
+    The pattern itself, archetype and sparse-set storage, and when an ECS fits.
+  </Card>
+  <Card icon={<Lightbulb />} title="Design decisions" href="/en/docs/decisions">
+    Every non-obvious choice, what was weighed against it, and the numbers.
+  </Card>
+  <Card icon={<Scale />} title="Comparison" href="/en/docs/comparison">
+    EasyEcs against Friflo.Engine.ECS, Arch and DefaultEcs, feature by feature and measured.
+  </Card>
+</Cards>

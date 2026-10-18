@@ -1,0 +1,134 @@
+---
+title: Using EasyEcs with AI assistants
+seoTitle: "EasyEcs with AI Assistants: llms.txt, Markdown and a Rules File"
+description: "How to give Claude, ChatGPT, Cursor or Copilot the EasyEcs docs: llms.txt, Markdown copies of every page, and a rules file for AGENTS.md, CLAUDE.md, Cursor rules, Claude Code skills and Copilot instructions."
+icon: Bot
+---
+
+import { BookOpen, CircleQuestionMark, Shapes } from 'lucide-react';
+
+EasyEcs is newer than most models' training data, and its rules (stateless systems, state changes as data, `in` and
+`ref` parameters, the owner thread) are what an assistant gets wrong first. This page shows the three ways to put the
+real docs in front of one: the `llms.txt` files, the Markdown copy of each page, and a rules file for your project.
+
+## The docs as text [#docs-as-text]
+
+| File | What it holds |
+| --- | --- |
+| [`/llms.txt`](https://ecs.xgamedev.net/llms.txt) | A summary of EasyEcs, its key facts and a link to the Markdown copy of every English page ([llmstxt.org](https://llmstxt.org) format) |
+| [`/llms-full.txt`](https://ecs.xgamedev.net/llms-full.txt) | The full text of every English page in one file |
+| [`/llms.zh.txt`](https://ecs.xgamedev.net/llms.zh.txt), [`/llms-full.zh.txt`](https://ecs.xgamedev.net/llms-full.zh.txt) | The same for the Chinese pages (also at `/zh/llms.txt` and `/zh/llms-full.txt`) |
+
+Give an assistant `llms.txt` when it can follow links, `llms-full.txt` when it cannot. The full file includes the
+code of the [battle server example](/en/docs/example), so a model sees every feature used together.
+
+## Markdown copies of every page [#markdown-copies]
+
+Add `.md` to a page's URL for its Markdown: `https://ecs.xgamedev.net/en/docs/guide/queries.md`. The docs home is
+`/en/docs.md`. A request for the page itself with `Accept: text/markdown` gets the same Markdown, so tools that ask for
+Markdown first need no special URL:
+
+```bash
+curl -H "Accept: text/markdown" https://ecs.xgamedev.net/en/docs/guide/systems
+```
+
+The menu at the top of each page copies its Markdown or opens it in ChatGPT, Claude, T3 Chat or Scira with the page
+attached.
+
+## A rules file for your project [#rules-file]
+
+[`easyecs-rules.md`](https://raw.githubusercontent.com/JasonXuDeveloper/EasyEcs/master/docs/public/easyecs-rules.md)
+is a short file of the rules that matter when writing EasyEcs code: components and systems, filters, structural
+changes, threads and refs, performance, what EasyEcs does not do, and an example. It is drawn from the
+[ECS principles](/en/docs/ecs-principles), the [analyzer rules](/en/docs/guide/analyzer) and the
+[performance guide](/en/docs/performance). Download it into your repository:
+
+```bash
+curl -fsSL -o easyecs-rules.md https://raw.githubusercontent.com/JasonXuDeveloper/EasyEcs/master/docs/public/easyecs-rules.md
+```
+
+Then point your assistant at it. The analyzer still checks every build, so a rule the assistant misses becomes a
+compile error, not a bug.
+
+### AGENTS.md [#agents-md]
+
+Codex, Jules, Cursor, Zed and other agents read `AGENTS.md` at the repository root. Add a line that names the file:
+
+```markdown title="AGENTS.md"
+## EasyEcs
+
+Follow docs/easyecs-rules.md when writing code that uses EasyEcs.
+```
+
+### Claude Code [#claude-code]
+
+`CLAUDE.md` can import the file, so Claude Code loads it with the project instructions:
+
+```markdown title="CLAUDE.md"
+@docs/easyecs-rules.md
+```
+
+Or make it a skill that loads only when the task touches EasyEcs. A skill is a folder with a `SKILL.md` whose
+frontmatter tells Claude when to use it:
+
+```text
+.claude/skills/easyecs/
+  SKILL.md            frontmatter (name, description) + the rules
+```
+
+```markdown title=".claude/skills/easyecs/SKILL.md"
+---
+name: easyecs
+description: Rules for writing EasyEcs code (components, systems, [ForEach], queries). Use when editing code that uses EasyEcs.
+---
+
+(paste the contents of easyecs-rules.md here)
+```
+
+### Cursor [#cursor]
+
+A rule in `.cursor/rules/` with `.mdc` frontmatter applies to the files its globs match:
+
+```markdown title=".cursor/rules/easyecs.mdc"
+---
+description: EasyEcs rules
+globs: "**/*.cs"
+alwaysApply: false
+---
+
+(paste the contents of easyecs-rules.md here)
+```
+
+### GitHub Copilot [#github-copilot]
+
+Copilot reads `.github/copilot-instructions.md` for the whole repository, and `.github/instructions/*.instructions.md`
+for the files an `applyTo` glob matches:
+
+```markdown title=".github/instructions/easyecs.instructions.md"
+---
+applyTo: "**/*.cs"
+---
+
+(paste the contents of easyecs-rules.md here)
+```
+
+## Other tools [#other-tools]
+
+Services that index GitHub repositories and documentation for assistants, such as [Context7](https://context7.com)
+and [DeepWiki](https://deepwiki.com), can be pointed at the
+[EasyEcs repository](https://github.com/JasonXuDeveloper/EasyEcs) from their own sites. They are run by others: check
+what they return against these docs, which are the source.
+
+## Related [#related]
+
+<Cards>
+  <Card icon={<Shapes />} title="ECS principles" href="/en/docs/ecs-principles">
+    The rules behind the rules file.
+  </Card>
+  <Card icon={<BookOpen />} title="Getting started" href="/en/docs/getting-started">
+    The first world, systems and queries.
+  </Card>
+  <Card icon={<CircleQuestionMark />} title="FAQ" href="/en/docs/faq">
+    Short answers to common questions.
+  </Card>
+</Cards>

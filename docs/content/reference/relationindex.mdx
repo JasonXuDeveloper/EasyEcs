@@ -21,6 +21,8 @@ public int Count(EntityId target);
 
 Number of links to `target`. O(1).
 
+**Complexity** ([API table](/en/docs/api)): O(1)
+
 ### `Find` [#find]
 
 ```csharp
@@ -29,6 +31,8 @@ public RelationIndex<T>.Sources Find(EntityId target);
 
 The entities linking to `target`, once per link. Destroying entities during the loop is allowed, changing links is not.
 
+**Complexity** ([API table](/en/docs/api)): O(1), then O(1) per link
+
 ### `WhenTargetDestroyed` [#whentargetdestroyed]
 
 ```csharp
@@ -36,3 +40,5 @@ public RelationIndex<T> WhenTargetDestroyed(TargetPolicy policy);
 ```
 
 Decide what destroying an entity does to the links to it: [`TargetPolicy.Remove`](/en/docs/reference/targetpolicy#remove) drops them (a party forgets a member that left the world), [`TargetPolicy.Destroy`](/en/docs/reference/targetpolicy#destroy) destroys the linking entities (the buffs a caster applied end with the caster), [`TargetPolicy.Keep`](/en/docs/reference/targetpolicy#keep) (the default) leaves them. Applied inside every destroy (the index is kept built); O(1) per destroyed entity, O(links of each source) per link. Owner thread only.
+
+**Complexity** ([API table](/en/docs/api)): O(1); then O(1) per destroyed entity and O(L) per link

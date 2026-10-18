@@ -55,6 +55,8 @@ public Entity AddRelation<T>(in T relation) where T : struct, IRelation;
 
 Link the entity to `relation`'s target: append it to the entity's [`DynamicBuffer`](/en/docs/reference/dynamicbuffer) (added first if missing) and to the relation index. Returns the entity. O(1) amortized; structural only when the buffer is added. Throws if the entity is not alive.
 
+**Complexity** ([API table](/en/docs/api)): O(1) amortized
+
 ### `Clone` [#clone]
 
 ```csharp
@@ -72,6 +74,8 @@ public ComponentValue[] Describe();
 ```
 
 Boxed copies of the entity's components, disabled ones marked; none when it is not alive. For diagnostics (the debugger shows the same): cold, allocates. O(components). Owner thread only.
+
+**Complexity** ([API table](/en/docs/api)): O(c)
 
 ### `Destroy` [#destroy]
 
@@ -91,6 +95,8 @@ public bool Disable<T>() where T : struct, IComponent;
 
 Disable component `T`: the entity keeps its value but lacks it (queries, `Has`, `Get`) until [`Entity.Enable`](/en/docs/reference/entity#enable), and gets the tag [`Disabled`](/en/docs/reference/disabled). Counts as a removal for `[Removed<T>]`; an indexed component leaves its index. Returns false when the entity lacks `T` (or has it disabled already); throws if it is not alive. O(1); the first disable in a table moves the row once (to the table with the tag's column). Not for an [`ICleanupComponent`](/en/docs/reference/icleanupcomponent) (it must stay to be released) or [`ChildOf`](/en/docs/reference/childof) (a parent's destruction must find its children): those throw. Owner thread only.
 
+**Complexity** ([API table](/en/docs/api)): O(1); the first disable in a table moves the row once
+
 ### `Enable` [#enable]
 
 ```csharp
@@ -98,6 +104,8 @@ public bool Enable<T>() where T : struct, IComponent;
 ```
 
 Give back a component disabled by [`Entity.Disable`](/en/docs/reference/entity#disable), with the value it kept (`Set` would replace it). Counts as a write of a tracked component; an indexed one rejoins its index. Returns false when `T` is not disabled; throws if the entity is not alive. O(1). Owner thread only.
+
+**Complexity** ([API table](/en/docs/api)): O(1); the first disable in a table moves the row once
 
 ### `Equals` [#equals]
 
@@ -134,7 +142,7 @@ public ref T GetOrAdd<T>() where T : struct, IComponent;
 
 Ref to component `T`, adding it (default) first if missing. Counts as a write of a tracked component. O(1); when missing, O(1) if the entity's table has a column for it (the row only gets its presence bit back), else O(c) amortized: the row moves to the table with the column (c components copied).
 
-**Complexity** ([API table](/en/docs/api)): O(1); when missing, O(1) if the table has a column for `T`, else O(c) amortized (the row moves)
+**Complexity** ([API table](/en/docs/api)): O(1); when missing, O(1) if the table has a column for `T`, else O(c) amortized
 
 ### `Has` [#has]
 
@@ -177,6 +185,8 @@ public bool HasRelation<T>(EntityId target) where T : struct, IRelation;
 
 Whether the entity links to `target` with a `T`. O(links of the entity).
 
+**Complexity** ([API table](/en/docs/api)): O(L)
+
 ### `IsDisabled` [#isdisabled]
 
 ```csharp
@@ -184,6 +194,8 @@ public bool IsDisabled<T>() where T : struct, IComponent;
 ```
 
 Whether component `T` is disabled ([`Entity.Disable`](/en/docs/reference/entity#disable)): the entity has [`Disabled`](/en/docs/reference/disabled). O(1).
+
+**Complexity** ([API table](/en/docs/api)): O(1)
 
 ### `Read` [#read]
 
@@ -222,6 +234,8 @@ public int RemoveRelation<T>(EntityId target) where T : struct, IRelation;
 ```
 
 Drop the entity's links of kind `T` to `target` (every element with that target). Returns how many went. O(links of the entity). Throws if the entity is not alive.
+
+**Complexity** ([API table](/en/docs/api)): O(L)
 
 ### `Set` [#set]
 

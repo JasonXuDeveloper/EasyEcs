@@ -1,0 +1,124 @@
+---
+title: 让 AI 助手用好 EasyEcs
+seoTitle: "在 AI 助手中使用 EasyEcs：llms.txt、Markdown 与规则文件"
+description: "把 EasyEcs 文档交给 Claude、ChatGPT、Cursor 或 Copilot：llms.txt、每页的 Markdown 版本，以及可用于 AGENTS.md、CLAUDE.md、Cursor 规则、Claude Code 技能和 Copilot 指令的规则文件。"
+icon: Bot
+---
+
+import { BookOpen, CircleQuestionMark, Shapes } from 'lucide-react';
+
+EasyEcs 比大多数模型的训练数据都新，它的规则（无状态系统、状态变化即数据、`in` 和 `ref` 参数、所属线程）恰恰是 AI 助手最先写错的地方。
+本页介绍三种把真实文档交给助手的办法：`llms.txt` 文件、每页的 Markdown 版本，以及放进项目的规则文件。
+
+## 纯文本形式的文档 [#docs-as-text]
+
+| 文件 | 内容 |
+| --- | --- |
+| [`/llms.zh.txt`](https://ecs.xgamedev.net/llms.zh.txt) | EasyEcs 简介、关键事实，以及每个中文页面 Markdown 版本的链接（[llmstxt.org](https://llmstxt.org) 格式；也可访问 `/zh/llms.txt`） |
+| [`/llms-full.zh.txt`](https://ecs.xgamedev.net/llms-full.zh.txt) | 所有中文页面的全文，合成一个文件（也可访问 `/zh/llms-full.txt`） |
+| [`/llms.txt`](https://ecs.xgamedev.net/llms.txt)、[`/llms-full.txt`](https://ecs.xgamedev.net/llms-full.txt) | 英文页面的同类文件 |
+
+助手能跟随链接时给它 `llms.txt`，不能时给 `llms-full.txt`。全文文件包含[战斗服示例](/zh/docs/example)的代码，模型能看到所有功能放在一起的用法。
+
+## 每页的 Markdown 版本 [#markdown-copies]
+
+在页面地址后加 `.md` 就是它的 Markdown：`https://ecs.xgamedev.net/zh/docs/guide/queries.md`，文档首页是 `/zh/docs.md`。
+请求页面本身时带上 `Accept: text/markdown`，得到的也是同一份 Markdown，优先请求 Markdown 的工具不需要特殊地址：
+
+```bash
+curl -H "Accept: text/markdown" https://ecs.xgamedev.net/zh/docs/guide/systems
+```
+
+每页顶部的菜单可以复制本页 Markdown，或者带着本页在 ChatGPT、Claude、T3 Chat、Scira 中打开。
+
+## 给项目用的规则文件 [#rules-file]
+
+[`easyecs-rules.md`](https://raw.githubusercontent.com/JasonXuDeveloper/EasyEcs/master/docs/public/easyecs-rules.md)
+是一份简短的英文文件，列出写 EasyEcs 代码时要紧的规则：组件和系统、过滤器、结构变更、线程与 ref、性能、EasyEcs 不做的事，外加一个示例。
+内容取自 [ECS 设计原则](/zh/docs/ecs-principles)、[分析器规则](/zh/docs/guide/analyzer)和[性能指南](/zh/docs/performance)。
+把它下载到仓库里：
+
+```bash
+curl -fsSL -o easyecs-rules.md https://raw.githubusercontent.com/JasonXuDeveloper/EasyEcs/master/docs/public/easyecs-rules.md
+```
+
+再让助手读它。分析器仍会检查每次构建，助手漏掉的规则会变成编译错误，而不是 bug。
+
+### AGENTS.md [#agents-md]
+
+Codex、Jules、Cursor、Zed 等代理会读仓库根目录的 `AGENTS.md`。加一行指向这个文件：
+
+```markdown title="AGENTS.md"
+## EasyEcs
+
+Follow docs/easyecs-rules.md when writing code that uses EasyEcs.
+```
+
+### Claude Code [#claude-code]
+
+`CLAUDE.md` 可以导入这个文件，Claude Code 加载项目说明时会一并读到：
+
+```markdown title="CLAUDE.md"
+@docs/easyecs-rules.md
+```
+
+也可以做成技能，只在任务涉及 EasyEcs 时加载。技能是一个包含 `SKILL.md` 的文件夹，`SKILL.md` 的 frontmatter 告诉 Claude 什么时候用它：
+
+```text
+.claude/skills/easyecs/
+  SKILL.md            frontmatter（name、description）+ 规则内容
+```
+
+```markdown title=".claude/skills/easyecs/SKILL.md"
+---
+name: easyecs
+description: Rules for writing EasyEcs code (components, systems, [ForEach], queries). Use when editing code that uses EasyEcs.
+---
+
+（把 easyecs-rules.md 的内容粘贴到这里）
+```
+
+### Cursor [#cursor]
+
+`.cursor/rules/` 下的规则带 `.mdc` frontmatter，作用于 globs 匹配的文件：
+
+```markdown title=".cursor/rules/easyecs.mdc"
+---
+description: EasyEcs rules
+globs: "**/*.cs"
+alwaysApply: false
+---
+
+（把 easyecs-rules.md 的内容粘贴到这里）
+```
+
+### GitHub Copilot [#github-copilot]
+
+Copilot 对整个仓库读 `.github/copilot-instructions.md`，对 `applyTo` glob 匹配的文件读 `.github/instructions/*.instructions.md`：
+
+```markdown title=".github/instructions/easyecs.instructions.md"
+---
+applyTo: "**/*.cs"
+---
+
+（把 easyecs-rules.md 的内容粘贴到这里）
+```
+
+## 其他工具 [#other-tools]
+
+[Context7](https://context7.com)、[DeepWiki](https://deepwiki.com) 这类为 AI 助手索引 GitHub 仓库和文档的服务，可以在它们自己的网站上指向
+[EasyEcs 仓库](https://github.com/JasonXuDeveloper/EasyEcs)。这些服务由第三方运营，返回的内容请以本文档为准核对。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card icon={<Shapes />} title="ECS 设计原则" href="/zh/docs/ecs-principles">
+    规则文件背后的规则。
+  </Card>
+  <Card icon={<BookOpen />} title="快速上手" href="/zh/docs/getting-started">
+    第一个 World、系统和查询。
+  </Card>
+  <Card icon={<CircleQuestionMark />} title="常见问题" href="/zh/docs/faq">
+    常见问题的简短回答。
+  </Card>
+</Cards>
