@@ -346,7 +346,30 @@ public class ChangedTests
     }
 
     [Test]
-    public void ChangedFiltersMatchTheLastWriteOfEveryRowThroughMovesAndDestroys()
+    public void ARowMovedInWithAnOlderTickIsFoundBesideNewerWords()
+    {
+        // A block whose latest word is newer than a row that moves in later: the moved row's word keeps its own tick.
+        using var world = new World();
+        var plain = new Entity[200];
+        var frozen = new Entity[200]; // words 0-3 of the frozen table, one block
+        world.CreateEntities(plain, new Armor(1), new Seen());
+        world.CreateEntities(frozen, new Armor(1), new Seen(), new Frozen());
+        world.Update();
+        plain[5].Get<Armor>().Value++;
+        ulong older = world.ChangeTick;
+        world.Update();
+        frozen[0].Get<Armor>().Value++; // the block's latest, newer than the moving row's tick
+        world.Update();
+        plain[5].Set(new Frozen()); // row 200 (word 3) of the frozen table, with its older tick
+
+        var found = new System.Collections.Generic.HashSet<Entity>();
+        foreach (var item in world.Query<Seen>(QueryFilter.Create().With<Frozen>().Changed<Armor>(older))) found.Add(item.Entity);
+        Assert.That(found, Is.EquivalentTo(new[] { frozen[0], plain[5] }));
+    }
+
+    [TestCase(600, 40)] // one block: rows of different ticks share words
+    [TestCase(10_000, 12)] // three blocks of 4,096 rows: sparse writes, blocks whose words differ in their latest ticks
+    public void ChangedFiltersMatchTheLastWriteOfEveryRowThroughMovesAndDestroys(int entities, int rounds)
     {
         // Rows of different ticks share words, older rows move into words written later, rows leave and fill holes,
         // a system writes runs of rows and single words: for every mark, the filter must select exactly the entities
@@ -355,7 +378,7 @@ public class ChangedTests
         var random = new System.Random(7);
         var written = new System.Collections.Generic.Dictionary<Entity, ulong>();
         var live = new System.Collections.Generic.List<Entity>();
-        for (int i = 0; i < 600; i++)
+        for (int i = 0; i < entities; i++)
         {
             // Half start stunned, in a table of their own: the writer covers it in long runs (whole words).
             var e = i % 2 == 0 ? world.CreateEntity(new Armor(i), new Seen(), new Stun(1)) : world.CreateEntity(new Armor(i), new Seen());
@@ -365,7 +388,7 @@ public class ChangedTests
 
         world.AddSystem<Wear>(); // writes the armor of stunned entities: runs of rows and words of tested rows
 
-        for (int round = 0; round < 40; round++)
+        for (int round = 0; round < rounds; round++)
         {
             ulong batch = world.ChangeTick + 1; // the tick of the update's one batch
             world.Update();

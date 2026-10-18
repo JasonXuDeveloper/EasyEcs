@@ -196,7 +196,7 @@ public sealed partial class World
             {
                 ref var meta = ref world.MetaRef(source.Index);
                 if (Policy == TargetPolicy.Destroy) world.Destroy(ref meta, source.Id);
-                else world.RemoveBit(ref meta, ComponentType<T>.Bit);
+                else world.RemoveBit<T>(ref meta);
             }
         }
     }

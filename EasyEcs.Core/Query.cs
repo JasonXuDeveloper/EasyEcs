@@ -306,7 +306,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
             changed.Add((short)archetype.ColumnIndex(ComponentInfo.Of(bit).Companion));
         }
 
-        return new RowPlan(require, exclude.ToArray(), any.ToArray(), changed.ToArray());
+        return new RowPlan(require, exclude.ToArray(), any.ToArray(), changed.ToArray(), _changedOf.Length);
     }
 
     public bool Equals(QueryKey other) =>
@@ -434,12 +434,21 @@ internal struct ChangeTick : IComponent
 /// the change ticks in the <see cref="Changed"/> columns newer than the pass's tick (column indices of the archetype; a
 /// column without presence bits is full).
 /// </summary>
-internal sealed class RowPlan(short[] require, short[] exclude, short[] anyOf, short[] changed)
+internal sealed class RowPlan(short[] require, short[] exclude, short[] anyOf, short[] changed, int removed)
 {
     public readonly short[] Require = require;
     public readonly short[] Exclude = exclude;
     public readonly short[] AnyOf = anyOf;
     public readonly short[] Changed = changed;
+
+    /// <summary>
+    /// The tick column whose summaries skip words (-1 without Changed columns): a removed component's when there is one
+    /// (removals are sparser than writes, and its summaries leave writes out), else the first changed one.
+    /// </summary>
+    public readonly short Lead = changed.Length == 0 ? (short)-1 : changed[removed < changed.Length ? removed : 0];
+
+    /// <summary>Whether <see cref="Lead"/> skips by its removal summaries.</summary>
+    public readonly bool LeadRemoved = removed < changed.Length;
 }
 
 /// <summary>
@@ -655,39 +664,58 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
 
     /// <summary>
     /// The first word at or after <paramref name="word"/> (below <paramref name="words"/>) that may have passing rows:
-    /// for a <c>Changed</c> filter, blocks of 64 words, then words, whose first changed column was not written since the
-    /// pass's tick are skipped (words 4 per compare); otherwise <paramref name="word"/>. Returns <paramref name="words"/>
+    /// for a <c>Changed</c> or <c>Removed</c> filter, blocks of 64 words, then words, whose <see cref="RowPlan.Lead"/>
+    /// column was not written (or had no removal) since the pass's tick are skipped (one bit scan per block when its other
+    /// words are older, else one compare per word); otherwise <paramref name="word"/>. Returns <paramref name="words"/>
     /// when none is left.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int NextWord(Archetype archetype, int word, int words)
     {
-        if (_plan.Changed.Length == 0) return word;
-        int column = _plan.Changed[0];
-        return NextWritten(archetype.BlockWrite[column], archetype.WordWrite[column], word, words, _since);
+        var plan = _plan;
+        if (plan.Lead < 0) return word;
+        return NextWritten(plan.LeadRemoved ? archetype.Removals[plan.Lead] : archetype.Blocks[plan.Lead],
+            archetype.Words[plan.Lead], plan.LeadRemoved, word, words, _since);
     }
 
-    private static int NextWritten(ulong[] blocks, ulong[] summary, int word, int words, ulong since)
+    private static int NextWritten(BlockTicks[] blocks, WordTicks[] summary, bool removed, int word, int words, ulong since)
     {
         // words <= summary.Length and (words + 63) / 64 <= blocks.Length: the summaries cover the column's capacity,
         // words cover the table's rows.
-        ref long s = ref Unsafe.As<ulong, long>(ref MemoryMarshal.GetArrayDataReference(summary));
-        long threshold = (long)since - 1; // signed: ticks stay below 2^63 (see Newer)
+        ref var first = ref MemoryMarshal.GetArrayDataReference(blocks);
         while (word < words)
         {
-            int block = word >> 6;
-            int end = Math.Min(words, (block + 1) << 6);
-            if (Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(blocks), block) >= since)
-                for (; word < end; word += 4) // one 256-bit compare (two 128-bit), then stop at the first
+            int index = word >> 6;
+            int end = Math.Min(words, (index + 1) << 6);
+            ref var block = ref Unsafe.Add(ref first, index);
+            if (block.Latest >= since)
+            {
+                if (block.Rest < since)
                 {
-                    ulong newer = Above(ref Unsafe.Add(ref s, word), Math.Min(4, end - word), threshold);
-                    if (newer != 0) return word + BitOperations.TrailingZeroCount(newer);
+                    // Exactly the block's Words are newer than since (shift is mod 64: word & 63).
+                    ulong newer = block.Words & (ulong.MaxValue << word);
+                    if (newer != 0) return Math.Min(end, (index << 6) + BitOperations.TrailingZeroCount(newer));
                 }
+                else if (ScanWords(summary, removed, word, end, since) is var found and >= 0) return found;
+            }
 
             word = end;
         }
 
         return words;
+    }
+
+    /// <summary>
+    /// The first word of [<paramref name="word"/>, <paramref name="end"/>) whose write (or removal) tick is at least
+    /// <paramref name="since"/>, -1 when none.
+    /// </summary>
+    private static int ScanWords(WordTicks[] summary, bool removed, int word, int end, ulong since)
+    {
+        // end <= summary.Length (see NextWritten): no bounds checks.
+        ref var s = ref MemoryMarshal.GetArrayDataReference(summary);
+        for (; word < end; word++)
+            if ((removed ? Unsafe.Add(ref s, word).Removed : Unsafe.Add(ref s, word).Write) >= since) return word;
+        return -1;
     }
 
     /// <summary>
@@ -697,9 +725,10 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     private static ulong Newer(Archetype archetype, int column, int word, ulong since)
     {
         // Rows past the column's capacity do not exist (their bits are masked by the callers' row counts).
-        if (archetype.WordWrite[column][word] < since) return 0; // no row of the word written since
+        ref var summary = ref archetype.Words[column][word];
+        if (summary.Write < since) return 0; // no row of the word written since
         // The rows of the word's latest tick, when every other row is older than since: no tick is read.
-        if (archetype.WordRest[column][word] < since) return archetype.WordRows[column][word];
+        if (summary.Rest < since) return summary.Rows;
         int first = word << 6;
         int rows = Math.Min(64, archetype.Slots.Length - first);
         ref ulong ticks = ref Unsafe.Add(ref Unsafe.As<ChangeTick, ulong>(ref archetype.Data<ChangeTick>(column)), first);

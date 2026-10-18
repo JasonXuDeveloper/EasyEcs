@@ -190,15 +190,28 @@ public sealed partial class World
     /// Remove one component bit: the row keeps its column and only loses the component (no move). A missing component
     /// is ignored. Inside the structural gate.
     /// </summary>
-    internal void RemoveBit(ref EntityMeta meta, ushort bit)
+    internal void RemoveBit<T>(ref EntityMeta meta) where T : struct, IComponent
     {
-        if (!TakeBit(meta.Archetype, meta.Slot, bit)) return;
+        var archetype = meta.Archetype;
+        int slot = meta.Slot;
+        ushort bit = ComponentType<T>.Bit;
+        int column = archetype.ColumnIndex(bit);
+        if (column < 0) return;
+        if (archetype.MarkAbsent(column, slot))
+        {
+            // Gone with T known: a tracked component's tick column is in every table that has it (WithCompanions),
+            // and the removal's tick is the world's, so it is stamped like a write (and noted as a removal).
+            archetype.StampRemoved<T>(slot, _changeTick);
+            if (_indexByBit != null) Unindex(bit, archetype.Slots[slot].Index);
+        }
+        else if (!archetype.HasDisabled || !DropDisabled(archetype, column, slot)) return;
+
         StorageVersion++; // passes re-read presence bits
-        if (meta.Archetype.HasCleanup) Released(ref meta);
+        if (archetype.HasCleanup) Released(ref meta);
     }
 
     /// <summary>
-    /// Remove component bits (see <see cref="RemoveBit"/>): the row is found once, and passes are told once that
+    /// Remove component bits (see <see cref="RemoveBit{T}"/>): the row is found once, and passes are told once that
     /// presence bits changed. Inside the structural gate.
     /// </summary>
     internal void RemoveBits(ref EntityMeta meta, ReadOnlySpan<ushort> bits)

@@ -112,7 +112,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         using (world.Structural())
                         {
                             ref var meta = ref world.Live(new Entity(world, id, version));
-                            {{(n == 1 ? "world.RemoveBit(ref meta, ComponentType<T1>.Bit);"
+                            {{(n == 1 ? "world.RemoveBit<T1>(ref meta);"
                                 : $"world.RemoveBits(ref meta, [{List(n, i => $"ComponentType<T{i}>.Bit")}]);")}}
                         }
                     }
@@ -1040,11 +1040,21 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         // Rows come in order: the summaries of a word are noted once per word and tick.
                         if (slot >> 6 != walk.StampWord || tick != walk.StampTick)
                         {
-                            walk.StampWord = slot >> 6;
-                            walk.StampTick = tick;
-                {{Lines(n, i => $"            archetype.NoteVisited<T{i}>(slot, tick);")}}
+                            StampWord(walk, archetype, slot, tick);
+                            return;
                         }
 
+                {{Lines(n, i => $"        archetype.StampTick<T{i}>(slot, tick);")}}
+                    }
+
+                    // The first row of a word: a call in tail position, so the per-row Stamp keeps no register of
+                    // the summaries' code (its prologue would save them for every row).
+                    [MethodImpl(MethodImplOptions.NoInlining)]
+                    private static void StampWord(QueryWalk walk, Archetype archetype, int slot, ulong tick)
+                    {
+                        walk.StampWord = slot >> 6;
+                        walk.StampTick = tick;
+                {{Lines(n, i => $"        archetype.NoteVisited<T{i}>(slot, tick);")}}
                 {{Lines(n, i => $"        archetype.StampTick<T{i}>(slot, tick);")}}
                     }
 
