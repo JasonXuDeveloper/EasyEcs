@@ -568,7 +568,8 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
     {
         var syntax = (MethodDeclarationSyntax)context.Node;
         if (context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method
-            || !Symbols.IsForEach(method) || !Symbols.IsParallel(method)) return;
+            || !Symbols.IsForEach(method) || !Symbols.IsParallel(method)
+            || method.PartialDefinitionPart != null) return; // a partial method: reported once, on its definition
         if (Symbols.ParallelProblem(method, syntax, context.SemanticModel) is { } problem)
             context.ReportDiagnostic(Diagnostic.Create(NotParallel, method.Locations.FirstOrDefault(), method.Name, problem));
     }

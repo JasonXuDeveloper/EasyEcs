@@ -166,11 +166,30 @@ internal static class Symbols
         _ => true,
     };
 
-    /// <summary>The type and its containing types are public or internal (accessible anywhere in their assembly).</summary>
+    /// <summary>A type every assembly can name: public, as are its containing types, elements and type arguments.</summary>
+    public static bool IsPublic(ITypeSymbol type) => type switch
+    {
+        IArrayTypeSymbol array => IsPublic(array.ElementType),
+        ITypeParameterSymbol => true,
+        INamedTypeSymbol named => IsPublicChain(named) && named.TypeArguments.All(IsPublic),
+        _ => true,
+    };
+
+    private static bool IsPublicChain(INamedTypeSymbol type)
+    {
+        for (var t = type; t != null; t = t.ContainingType)
+            if (t.DeclaredAccessibility != Accessibility.Public || t.IsFileLocal) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// The type and its containing types are public or internal (accessible anywhere in their assembly); a <c>file</c>
+    /// type is not (its name is mangled, and other files cannot name it).
+    /// </summary>
     public static bool IsVisible(INamedTypeSymbol type)
     {
         for (var t = type; t != null; t = t.ContainingType)
-            if (t.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal))
+            if (t.IsFileLocal || t.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal))
                 return false;
         return true;
     }
@@ -182,6 +201,8 @@ internal static class Symbols
     public static ITypeSymbol? Unnameable(IMethodSymbol method)
     {
         if (IsRunner(method) && !IsVisible(method.ContainingType)) return method.ContainingType;
+        for (var t = method.ContainingType; t != null; t = t.ContainingType)
+            if (t.IsFileLocal) return t; // a system too: the runtime finds its code by a name the compiler mangles
         if (!method.ReturnsVoid && !IsNameable(method.ReturnType)) return method.ReturnType;
         return method.Parameters.Select(p => p.Type).FirstOrDefault(t => !IsNameable(t));
     }
@@ -283,6 +304,8 @@ internal static class Symbols
         if (kind != ParamKind.Invalid || !outside || p.RefKind is not (RefKind.None or RefKind.Ref or RefKind.In)) return kind;
         var element = SpanElement(p.Type) ?? MaybeElement(p.Type) ?? p.Type;
         if (IsA(element, Component) || IsA(element, Singleton)) return ParamKind.Invalid; // a component by value
+        // A span or other ref struct goes into the job by value: a job holds no ref field to a ref struct.
+        if (p.Type.IsRefLikeType && p.RefKind != RefKind.None) return ParamKind.Invalid;
         return p.Type.ToDisplayString() is Entity or EntitySpan or World ? ParamKind.Invalid : ParamKind.Context;
     }
 
@@ -412,9 +435,24 @@ internal static class Symbols
     /// The method cannot make structural changes: it is static, takes no <c>World</c>, and uses its <c>Entity</c>
     /// parameter (if any) only to read (<see cref="ReadOnlyEntityMembers"/>). Its job gets INoStructuralChanges.
     /// </summary>
-    public static bool IsStable(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model) =>
-        method.IsStatic && !method.Parameters.Any(p => Classify(p) == ParamKind.World)
-        && method.Parameters.Where(p => Classify(p) == ParamKind.Entity).All(p => OnlyReads(syntax, p.Name, model));
+    public static bool IsStable(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model)
+    {
+        (syntax, model) = WithBody(method, syntax, model);
+        return method.IsStatic && !method.Parameters.Any(p => Classify(p) == ParamKind.World)
+            && method.Parameters.Where(p => Classify(p) == ParamKind.Entity).All(p => OnlyReads(syntax, p.Name, model));
+    }
+
+    /// <summary>
+    /// The declaration holding the method's body: a partial method's implementing part (maybe in another file) when
+    /// <paramref name="syntax"/> is its bodiless definition.
+    /// </summary>
+    public static (MethodDeclarationSyntax, SemanticModel) WithBody(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model)
+    {
+        if (syntax.Body != null || syntax.ExpressionBody != null
+            || method.PartialImplementationPart?.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is not MethodDeclarationSyntax body)
+            return (syntax, model);
+        return (body, body.SyntaxTree == syntax.SyntaxTree ? model : model.Compilation.GetSemanticModel(body.SyntaxTree));
+    }
 
     /// <summary>The <c>Parallel</c> named argument of the method's [ForEach] attribute.</summary>
     public static bool IsParallel(IMethodSymbol method) => method.GetAttributes()
@@ -434,6 +472,8 @@ internal static class Symbols
             return "it writes a singleton, which every chunk would race on (take it as 'in')";
         if (IsRunner(method) && method.Parameters.Any(p => Classify(p, true) == ParamKind.Context && p.RefKind == RefKind.Ref))
             return "it takes a context parameter by 'ref', which every chunk would race on (pass it by value or 'in')";
+        if (IsRunner(method) && method.Parameters.Any(p => Classify(p, true) == ParamKind.Context && p.Type.IsRefLikeType))
+            return "it takes a span or other ref struct, which a job on other threads cannot hold";
         return null;
     }
 
@@ -585,10 +625,14 @@ internal static class Symbols
             if (identifier.Parent is not MemberAccessExpressionSyntax access || access.Expression != identifier) return false;
             if (access.Name.Identifier.ValueText == "HasValue") continue;
             if (access.Name.Identifier.ValueText != "Value") return false;
-            SyntaxNode top = access; // name.Value.Field.Field: the outermost field read
-            while (top.Parent is MemberAccessExpressionSyntax outer && outer.Expression == top) top = outer;
+            SyntaxNode top = access; // name.Value.Field[i].Field: the outermost field or element read, unparenthesized
+            while (top.Parent is MemberAccessExpressionSyntax { Expression: var e } && e == top
+                   || top.Parent is ElementAccessExpressionSyntax { Expression: var x } && x == top
+                   || top.Parent is ParenthesizedExpressionSyntax)
+                top = top.Parent;
             switch (top.Parent)
             {
+                case ArgumentSyntax { Parent: TupleExpressionSyntax }: // (t.Value.V, p.V) = ...: conservative
                 case AssignmentExpressionSyntax assignment when assignment.Left == top:
                 case PrefixUnaryExpressionSyntax or PostfixUnaryExpressionSyntax: // ++, -- (and !, - on a read: conservative)
                 case RefExpressionSyntax:

@@ -116,7 +116,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         private static SavedType? Registration(SemanticModel model, INamedTypeSymbol buffer)
         {
             if (buffer.TypeArguments[0] is not INamedTypeSymbol element || ContainsTypeParameter(element)
-                || !model.Compilation.IsSymbolAccessibleWithin(element, model.Compilation.Assembly))
+                || !model.Compilation.IsSymbolAccessibleWithin(element, model.Compilation.Assembly) || !Symbols.IsNameable(element))
                 return null;
             return new SavedType("Component<" + buffer.ToDisplayString(Symbols.Fqn) + ">", element.ToDisplayString(Symbols.Fqn),
                 new EquatableArray<string>(Symbols.EntityIdPaths(element, model.Compilation)),
@@ -217,7 +217,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             sb.Append("    extension(global::EasyEcs.World @this)\n    {\n");
             if (!m.Tag && Free(n))
                 Property($"The world's <see cref=\"{t}\"/> by <c>ref</c> (<c>GetSingleton</c>); throws if it was not added.",
-                    $"ref {t} {n}", $"ref @this.GetSingleton<{t}>()");
+                    $"ref {t} {ComponentModel.Escape(n)}", $"ref @this.GetSingleton<{t}>()");
             if (Free("Has" + n))
                 Property($"Whether the world has a <see cref=\"{t}\"/> (<c>HasSingleton</c>).", $"bool Has{n}", $"@this.HasSingleton<{t}>()");
             if (!m.Tag && Free("GetOrAdd" + n))
@@ -245,7 +245,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                     Property(m.Watched
                             ? $"The entity's <see cref=\"{t}\"/>, read-only (<c>Read</c>: never a write); write it with <c>Set</c>, so the change is stamped and indexed. Throws if missing."
                             : $"The entity's <see cref=\"{t}\"/> by <c>ref</c> (<c>Get</c>); throws if missing.",
-                        $"ref {(m.Watched ? "readonly " : "")}{t} {n}", $"ref @this.{(m.Watched ? "Read" : "Get")}<{t}>()");
+                        $"ref {(m.Watched ? "readonly " : "")}{t} {ComponentModel.Escape(n)}", $"ref @this.{(m.Watched ? "Read" : "Get")}<{t}>()");
                 if (Free("Has" + n)) Property($"Whether the entity has a <see cref=\"{t}\"/>.", $"bool Has{n}", $"@this.Has<{t}>()");
                 if (m.Writable && Free("Write" + n))
                     Member($"The entity's <see cref=\"{t}\"/> by <c>ref</c> for writing (<c>Get</c>): stamped as changed. Throws if missing.",
@@ -306,7 +306,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             {
                 if (Free(n))
                     Property($"The prefab's <see cref=\"{t}\"/>, read-only (<c>Read</c>); change it with <c>Set</c>. Throws if missing.",
-                        $"ref readonly {t} {n}", $"ref @this.Read<{t}>()");
+                        $"ref readonly {t} {ComponentModel.Escape(n)}", $"ref @this.Read<{t}>()");
                 if (Free("Has" + n)) Property($"Whether the prefab has a <see cref=\"{t}\"/>.", $"bool Has{n}", $"@this.Has<{t}>()");
             }
 
@@ -338,7 +338,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         sb.Append("    extension(global::EasyEcs.Entity @this)\n    {\n");
         if (Free(n))
             sb.Append($"        /// <summary>The entity's buffer of <see cref=\"{e}\"/>, read-only (<c>Read</c>: never a write); write it through <c>{(m.Relation ? "AddRelation / RemoveRelation" : $"Write{n}()")}</c>. Throws if missing.</summary>\n" +
-                      $"        {a} ref readonly {t} {n}\n        {{\n    {Inline}            get => ref @this.Read<{t}>();\n        }}\n");
+                      $"        {a} ref readonly {t} {ComponentModel.Escape(n)}\n        {{\n    {Inline}            get => ref @this.Read<{t}>();\n        }}\n");
         if (Free("Has" + n))
             sb.Append($"        /// <summary>Whether the entity has a buffer of <see cref=\"{e}\"/>.</summary>\n" +
                       $"        {a} bool Has{n}\n        {{\n    {Inline}            get => @this.Has<{t}>();\n        }}\n");
@@ -394,7 +394,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             bool isPublic = true;
             for (var t = type; t != null; t = t.ContainingType)
             {
-                if (t.TypeParameters.Length > 0) return null;
+                if (t.TypeParameters.Length > 0 || t.IsFileLocal) return null; // a file type: no other file can name it
                 if (t.DeclaredAccessibility == Accessibility.Internal) isPublic = false;
                 else if (t.DeclaredAccessibility != Accessibility.Public) return null;
             }
@@ -427,11 +427,6 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         private static readonly SymbolDisplayFormat TypeName = Symbols.Fqn
             .AddMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
 
-        private static readonly SymbolDisplayFormat Parameter = TypeName
-            .WithParameterOptions(SymbolDisplayParameterOptions.IncludeType | SymbolDisplayParameterOptions.IncludeName |
-                                  SymbolDisplayParameterOptions.IncludeDefaultValue | SymbolDisplayParameterOptions.IncludeParamsRefOut)
-            .AddMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.EscapeKeywordIdentifiers);
-
         public static ComponentModel? Create(SyntaxNode node, ISymbol? symbol, Compilation compilation, CancellationToken token)
         {
             if (symbol is not INamedTypeSymbol { TypeKind: TypeKind.Struct, IsGenericType: false } type) return null;
@@ -444,7 +439,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             bool isPublic = true;
             for (var t = type; t != null; t = t.ContainingType)
             {
-                if (t.TypeParameters.Length > 0) return null;
+                if (t.TypeParameters.Length > 0 || t.IsFileLocal) return null; // a file type: no other file can name it
                 if (t.DeclaredAccessibility == Accessibility.Internal) isPublic = false;
                 else if (t.DeclaredAccessibility != Accessibility.Public) return null;
             }
@@ -461,8 +456,11 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             var setters = SettersOf(type, fqn, fields);
             string name = type.Name;
             var receiver = singleton ? world : entity;
-            var taken = new[] { name, "Has" + name, "Is" + name, "TryGet" + name, "GetOrAdd" + name, "Set" + name, "Remove" + name, "Write" + name }
-                .Where(n => receiver.GetMembers(n).Length > 0).ToArray();
+            var members = new[] { name, "Has" + name, "Is" + name, "TryGet" + name, "GetOrAdd" + name, "Set" + name, "Remove" + name, "Write" + name };
+            // A nested component named like another component of its namespace: both would get entity.X, ambiguous
+            // wherever the namespace is imported, so the nested one gets no members (the generic API still works).
+            var taken = type.ContainingType != null && HasNamesake(type.ContainingNamespace, type)
+                ? members : members.Where(n => receiver.GetMembers(n).Length > 0).ToArray();
             var key = type.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.ToDisplayString() == Symbols.Indexed)?.TypeArguments[0];
             bool grouped = Symbols.Implements(type, Symbols.Group);
             bool tracked = Symbols.Implements(type, Symbols.TrackChanges);
@@ -476,31 +474,84 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         }
 
         /// <summary>
-        /// One setter per public constructor with parameters (none taken by ref or out); without such a constructor, one
-        /// taking every field when all are public and writable (or none for a tag).
+        /// One setter per public constructor with parameters (none taken by ref or out, none a pointer, each setting the
+        /// type's required members); without such a constructor, one taking every field when all are public, writable
+        /// and safe to name (or none for a tag).
         /// </summary>
         internal static Setter[] SettersOf(INamedTypeSymbol type, string fqn, IFieldSymbol[] fields)
         {
             var ctors = type.InstanceConstructors
                 .Where(c => c.DeclaredAccessibility == Accessibility.Public && c.Parameters.Length > 0)
                 .ToArray();
+            bool required = type.GetMembers().Any(m => m is IFieldSymbol { IsRequired: true } or IPropertySymbol { IsRequired: true });
             if (ctors.Length > 0)
-                return ctors.Where(c => c.Parameters.All(p => p.RefKind is RefKind.None or RefKind.In))
+                return ctors.Where(c => c.Parameters.All(p => p.RefKind is RefKind.None or RefKind.In && !Unsafe(p.Type))
+                        && (!required || c.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == "System.Diagnostics.CodeAnalysis.SetsRequiredMembersAttribute")))
                     .Select(c => new Setter(
-                        string.Join(", ", c.Parameters.Select(p => p.ToDisplayString(Parameter))),
-                        $"new {fqn}({string.Join(", ", c.Parameters.Select(p => Escape(p.Name)))})"))
+                        string.Join(", ", c.Parameters.Select(p => $"{(p.IsParams ? "params " : p.RefKind == RefKind.In ? "in " : "")}{p.Type.ToDisplayString(TypeName)} {ParameterName(p.Name)}{Default(p)}")),
+                        $"new {fqn}({string.Join(", ", c.Parameters.Select(p => ParameterName(p.Name)))})"))
                     .ToArray();
             if (fields.Length == 0) return [new Setter("", $"default({fqn})")];
-            if (fields.Any(f => f.DeclaredAccessibility != Accessibility.Public || f.IsReadOnly || f.IsImplicitlyDeclared)) return [];
+            if (fields.Any(f => f.DeclaredAccessibility != Accessibility.Public || f.IsReadOnly || f.IsImplicitlyDeclared
+                    || f.IsFixedSizeBuffer || Unsafe(f.Type)))
+                return [];
 
-            var names = fields.Select(f => Escape(char.ToLowerInvariant(f.Name[0]) + f.Name.Substring(1))).ToArray();
+            var names = fields.Select(f => ParameterName(char.ToLowerInvariant(f.Name[0]) + f.Name.Substring(1))).ToArray();
+            if (names.Distinct().Count() < names.Length) return []; // X and x: one parameter name for both
             return [new Setter(
                 string.Join(", ", fields.Select((f, i) => $"{f.Type.ToDisplayString(TypeName)} {names[i]}")),
                 $"new {fqn} {{ {string.Join(", ", fields.Select((f, i) => $"{Escape(f.Name)} = {names[i]}"))} }}")];
         }
 
-        private static string Escape(string name) =>
+        /// <summary>A parameter's name in a generated writer: escaped, and never the receiver's (<c>@this</c>).</summary>
+        private static string ParameterName(string name) => name == "this" ? "_this" : Escape(name);
+
+        private static bool Unsafe(ITypeSymbol type) => type.TypeKind is TypeKind.Pointer or TypeKind.FunctionPointer;
+
+        /// <summary>
+        /// A parameter's default value as C# source (Roslyn's display drops literal suffixes and enum type names: 1.5f
+        /// would read 1.5, Color.Blue would read Blue).
+        /// </summary>
+        private static string Default(IParameterSymbol p)
+        {
+            if (!p.HasExplicitDefaultValue) return "";
+            object? value = p.ExplicitDefaultValue;
+            if (value is null) return p.Type.IsValueType && p.Type.OriginalDefinition.SpecialType != SpecialType.System_Nullable_T ? " = default" : " = null";
+            var inner = p.Type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable ? nullable.TypeArguments[0] : p.Type;
+            if (inner.TypeKind == TypeKind.Enum) return $" = ({inner.ToDisplayString(TypeName)})({SymbolDisplay.FormatPrimitive(value, false, false)})";
+            return " = " + value switch
+            {
+                float f when float.IsNaN(f) => "float.NaN",
+                float f when float.IsInfinity(f) => f > 0 ? "float.PositiveInfinity" : "float.NegativeInfinity",
+                double d when double.IsNaN(d) => "double.NaN",
+                double d when double.IsInfinity(d) => d > 0 ? "double.PositiveInfinity" : "double.NegativeInfinity",
+                float f => f.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "f",
+                double d => d.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "d",
+                decimal m => m.ToString(System.Globalization.CultureInfo.InvariantCulture) + "m",
+                long l => l + "L",
+                ulong u => u + "UL",
+                uint u => u + "U",
+                _ => SymbolDisplay.FormatPrimitive(value, true, false),
+            };
+        }
+
+        internal static string Escape(string name) =>
             SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None ? "@" + name : name;
+
+        private static bool HasNamesake(INamespaceSymbol ns, INamedTypeSymbol type)
+        {
+            var pending = new Stack<INamedTypeSymbol>(ns.GetTypeMembers());
+            while (pending.Count > 0)
+            {
+                var t = pending.Pop();
+                if (t.Name == type.Name && !SymbolEqualityComparer.Default.Equals(t, type)
+                    && (Symbols.Implements(t, Symbols.Component) || Symbols.Implements(t, Symbols.Singleton)))
+                    return true;
+                foreach (var nested in t.GetTypeMembers()) pending.Push(nested);
+            }
+
+            return false;
+        }
 
         /// <summary>EasyEcs's <c>Entity</c> or <c>World</c>, found next to the interface the type implements.</summary>
         private static INamedTypeSymbol? Core(INamedTypeSymbol type, string name) =>

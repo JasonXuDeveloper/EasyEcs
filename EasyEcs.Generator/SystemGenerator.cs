@@ -69,7 +69,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
     private static string Emit(UpdateModel model)
     {
         var owner = model.Owner;
-        var sb = new StringBuilder(Header).Append("using System.Runtime.CompilerServices;\n\n");
+        var sb = new StringBuilder(Header).Append('\n');
         if (owner.Namespace.Length > 0) sb.Append("namespace ").Append(owner.Namespace).Append(";\n\n");
         if (!owner.IsSystem) EmitRunners(sb, model);
 
@@ -96,8 +96,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
     {
         string kind = method.IsStatic ? "StaticMethod" : "Method";
         string parameters = string.Concat(method.Parameters.Select(p => $", {p.Declared} {Escape(p.Name)}"));
-        sb.Append($"    [UnsafeAccessor(UnsafeAccessorKind.{kind}, Name = \"{method.Name}\")]\n");
-        sb.Append($"    internal static extern {method.Returns} {method.Name}_{index}{method.TypeParameters}([UnsafeAccessorType(\"{owner.AccessorType}\")] object owner{parameters}){method.Constraints};\n\n");
+        sb.Append($"    [global::System.Runtime.CompilerServices.UnsafeAccessor(global::System.Runtime.CompilerServices.UnsafeAccessorKind.{kind}, Name = \"{method.Name}\")]\n");
+        sb.Append($"    internal static extern {method.Returns} {method.Name}_{index}{method.TypeParameters}([global::System.Runtime.CompilerServices.UnsafeAccessorType(\"{owner.AccessorType}\")] object owner{parameters}){method.Constraints};\n\n");
     }
 
     /// <summary>
@@ -115,7 +115,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         {
             var method = model.Methods[m];
             var contexts = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Context).ToArray();
-            var names = new HashSet<string>(contexts.Select(p => p.Name));
+            var names = new HashSet<string>(contexts.Select(p => p.Name).Concat(method.TypeParameterNames));
             string world = Free("world"), since = Free("since"), local = Free("job");
             var signature = new List<string> { $"global::EasyEcs.World {world}" };
             if (method.Since) signature.Add($"ulong {since}");
@@ -125,7 +125,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             string filter = method.Since ? $", {forEach}.{method.Name}Filter{m}.Since({since})" : method.HasFilter ? $", in {forEach}.{method.Name}Filter{m}" : "";
             sb.Append($"        /// <summary>Runs <c>{method.Name}</c> for every matching entity of <paramref name=\"{world}\"/>{(method.Since ? $" whose filtered components changed (or went) at or after tick <paramref name=\"{since}\"/>" : "")}. Owner thread only.</summary>\n");
             sb.Append($"        [global::System.CodeDom.Compiler.GeneratedCode(\"{Symbols.GeneratorName}\", \"{ComponentGenerator.Version}\")]\n");
-            sb.Append($"        public static void {method.Name}{method.TypeParameters}({string.Join(", ", signature)}){method.Constraints}\n        {{\n");
+            sb.Append($"        {(method.PublicEntry ? "public" : "internal")} static void {Escape(method.Name)}{method.TypeParameters}({string.Join(", ", signature)}){method.Constraints}\n        {{\n");
             sb.Append($"            var {local} = new {job}{Fields(method, world, null)};\n");
             sb.Append($"            {world}.{method.ForEach}<{method.ComponentTypes}, {job}>(ref {local}{filter});\n        }}\n\n");
 
@@ -185,7 +185,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append("    }\n");
         if (owner.TypeParameters.Length > 0) return; // registered by EmitGenericRegistration: a module initializer is never generic
         string type = owner.IsVisible ? $"typeof({owner.FullName})" : $"global::System.Type.GetType(\"{owner.MetadataName}\")";
-        sb.Append("\n    [ModuleInitializer]\n");
+        sb.Append("\n    [global::System.Runtime.CompilerServices.ModuleInitializer]\n");
         sb.Append($"    internal static void Register() => global::EasyEcs.SystemCode.Register({type}, new Code());\n");
     }
 
@@ -198,7 +198,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         var owner = model.Owner;
         string open = $"__ForEach<{new string(',', owner.Arity - 1)}>.Code";
         string definition = owner.IsVisible ? $"typeof({owner.Definition})" : $"global::System.Type.GetType(\"{owner.MetadataName}\")";
-        sb.Append("\nfile static class __ForEachRegistration\n{\n    [ModuleInitializer]\n    internal static void Register()\n    {\n");
+        sb.Append("\nfile static class __ForEachRegistration\n{\n    [global::System.Runtime.CompilerServices.ModuleInitializer]\n    internal static void Register()\n    {\n");
         sb.Append($"        global::EasyEcs.SystemCode.RegisterGeneric({definition}, typeof({open}));\n");
         foreach (var use in model.Closed)
             sb.Append($"        global::EasyEcs.SystemCode.Register(typeof({use.Closed}), new __ForEach<{use.Arguments}>.Code());\n");
@@ -246,7 +246,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         bool[] local = method.Parameters.Select(p => method.IsBatch && p.Kind == Symbols.ParamKind.Context && p.RefKind == "ref").ToArray();
         var args = string.Join(", ", method.Parameters.Select((p, i) => p.Kind switch
         {
-            Symbols.ParamKind.Component when runs => $"{p.RefKind} Unsafe.Add(ref r{++index}, i)",
+            Symbols.ParamKind.Component when runs => $"{p.RefKind} global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++index}, i)",
             Symbols.ParamKind.Entity when runs => "entities[(int)i]",
             Symbols.ParamKind.Optional when runs => $"m{i}[(int)i]",
             Symbols.ParamKind.Component => $"{p.RefKind} c{++index}",
@@ -284,7 +284,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     : $"        public ref {(p.RefKind == "in" ? "readonly " : "")}{p.Type} x{i};\n");
         }
         if (sb[sb.Length - 2] != '{') sb.Append('\n'); // a blank line after the fields, if any
-        sb.Append("        [MethodImpl(MethodImplOptions.AggressiveInlining)]\n");
+        sb.Append("        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n");
         string first = method.IsBatch ? "global::EasyEcs.EntitySpan entities, " : method.TakesEntity ? "global::EasyEcs.Entity entity, " : "";
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
         sb.Append($"        public void Execute({first}{List(components.Length, i => string.Format(each, components[i - 1], i))})\n");
@@ -380,7 +380,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
     private sealed record ForEachModel(OwnerModel Owner, string Name, bool IsStatic, bool Stable, bool Parallel, int Order,
         EquatableArray<string> Query, EquatableArray<ParamModel> Parameters, EquatableArray<string> With,
         EquatableArray<string> Without, EquatableArray<string> WithAny, EquatableArray<string> Changed,
-        EquatableArray<string> Removed, string Returns, string TypeParameters, string Constraints)
+        EquatableArray<string> Removed, string Returns, string TypeParameters, string Constraints,
+        EquatableArray<string> TypeParameterNames, bool PublicEntry)
     {
         /// <summary>The World method that runs the job.</summary>
         public string ForEach => Loop + (Parallel ? "Parallel" : "");
@@ -429,7 +430,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                         Symbols.SpanElement(p.Type)!.ToDisplayString(Symbols.Fqn),
                         ((INamedTypeSymbol)p.Type).ConstructedFrom.ToDisplayString() == "System.Span<T>" ? "ref" : "in", p.Name, declared),
                     Symbols.ParamKind.Optional => new ParamModel(Symbols.ParamKind.Optional, // a write unless it only reads Value
-                        Symbols.MaybeElement(p.Type)!.ToDisplayString(Symbols.Fqn), Symbols.OnlyReadsValue(syntax, p.Name) ? "in" : "ref", p.Name, declared,
+                        Symbols.MaybeElement(p.Type)!.ToDisplayString(Symbols.Fqn), Symbols.OnlyReadsValue(Symbols.WithBody(method, syntax, model).Item1, p.Name) ? "in" : "ref", p.Name, declared,
                         Symbols.Implements(Symbols.MaybeElement(p.Type)!, Symbols.TrackChanges)),
                     Symbols.ParamKind.Context => new ParamModel(Symbols.ParamKind.Context, p.Type.ToDisplayString(Symbols.Fqn),
                         p.RefKind switch { RefKind.Ref => "ref", RefKind.In => "in", _ => "" }, p.Name, declared),
@@ -483,8 +484,13 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 new EquatableArray<ParamModel>(parameters), new EquatableArray<string>(with.ToArray()),
                 new EquatableArray<string>(without.ToArray()), new EquatableArray<string>(withAny.ToArray()),
                 new EquatableArray<string>(changed.ToArray()), new EquatableArray<string>(removed.ToArray()),
-                method.ReturnsVoid ? "void" : method.ReturnType.ToDisplayString(Symbols.Fqn),
-                Symbols.TypeParameterList(method.TypeParameters), Symbols.Constraints(method.TypeParameters));
+                (method.ReturnsByRef ? "ref " : method.ReturnsByRefReadonly ? "ref readonly " : "")
+                    + (method.ReturnsVoid ? "void" : method.ReturnType.ToDisplayString(Symbols.Fqn)),
+                Symbols.TypeParameterList(method.TypeParameters), Symbols.Constraints(method.TypeParameters),
+                new EquatableArray<string>(method.TypeParameters.Select(t => t.Name).ToArray()),
+                // A public entry point names only public types: its context parameters' and its constraints'.
+                method.Parameters.Where(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Context).All(p => Symbols.IsPublic(p.Type))
+                    && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic));
         }
     }
 

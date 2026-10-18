@@ -17,7 +17,7 @@ public class GeneratorTests
     private static CSharpCompilation Compile(params string[] sources) => CSharpCompilation.Create("Test",
         sources.Select(s => CSharpSyntaxTree.ParseText("using EasyEcs;\n" + s, Parse)),
         Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
-        new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true));
 
     private static GeneratorDriver Driver() => CSharpGeneratorDriver.Create(
         [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator()], parseOptions: Parse,
@@ -114,7 +114,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(System.Span<P> p, System.ReadOnlySpan<Q> q) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "IForEachBatch<global::P, global::Q>")]
     [TestCase("[ForEach, Changed<DynamicBuffer<int>>] static void A(in DynamicBuffer<int> b, ref P p) { }", ".Changed<global::EasyEcs.DynamicBuffer<int>>(0)", "access.Read<global::EasyEcs.DynamicBuffer<int>>();")]
     [TestCase("[ForEach, Changed<T>] static void A(ref P p) { }", "access.Read<global::T>();", ".Changed<global::T>(0)", "Since(system.LastRunTick + 1)", "Writes => 1;")]
-    [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Read<global::Q>();", "IForEachBatch<global::P>", "new global::EasyEcs.MaybeColumn<global::Q>(in entities, false)", "ref Unsafe.Add(")]
+    [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Read<global::Q>();", "IForEachBatch<global::P>", "new global::EasyEcs.MaybeColumn<global::Q>(in entities, false)", "ref global::System.Runtime.CompilerServices.Unsafe.Add(")]
     [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) q.Value.V++; }", "access.Write<global::Q>();", "MaybeColumn<global::Q>(in entities, false)")]  // untracked: no stamp
     [TestCase("[ForEach] static void A(ref P p, Maybe<T> t) { if (t.HasValue) t.Value = default; }", "access.Write<global::T>();", "MaybeColumn<global::T>(in entities, true)")]  // tracked: stamped
     [TestCase("[ForEach] void A(in P p) { }", "access.RunsAlone();")]
@@ -136,7 +136,7 @@ public class GeneratorTests
     [TestCase("public static class R { [ForEach] static void A<T>(in T t, ref int n) where T : struct, IComponent { } }",
         "public static void A<T>(global::EasyEcs.World world, ref int n) where T : struct, global::EasyEcs.IComponent",
         "internal ref struct AJob0<T> : global::EasyEcs.IForEachBatch<T> where T : struct, global::EasyEcs.IComponent",
-        "internal static extern void A_0<T>([UnsafeAccessorType(\"R\")] object owner, in T t, ref int n) where T : struct, global::EasyEcs.IComponent;")]
+        "internal static extern void A_0<T>([global::System.Runtime.CompilerServices.UnsafeAccessorType(\"R\")] object owner, in T t, ref int n) where T : struct, global::EasyEcs.IComponent;")]
     [TestCase("[Without<Q>, WithAny<T>] public struct G : ISystemGroup; [UpdateInGroup<G>] public class S : EcsSystem { [ForEach, Without<Q>] static void A(ref P p) { } [ForEach, With<P>] static void B() { } }",
         "AFilter0 = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T>();", // once, though both name it
         "BFilter1 = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T>();", "world.ForEach<global::P, BJob1>")]
@@ -358,6 +358,100 @@ public class GeneratorTests
             """), out var output, out var problems);
         Assert.That(problems, Is.Empty);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+    }
+
+    [Test]
+    public void EdgeInputsCompile()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
+            using System.Diagnostics.CodeAnalysis;
+            public enum Color { Red, Blue }
+            public struct @class : IComponent { public int V; }                                    // a keyword name
+            public struct @event : ISingletonComponent { public int V; }
+            public struct Defaults : IComponent
+            {
+                public float F; public Color C; public double D; public decimal M; public long L;
+                public Defaults(float f = 1.5f, Color c = Color.Blue, double d = double.NaN, decimal m = 2.5m, long l = -3, string? s = null) { F = f; C = c; D = d; M = m; L = l; }
+            }
+            public struct This : IComponent { public int this_; public This(int @this) => this_ = @this; }   // a parameter named this
+            public struct Self : IComponent { public int This; }
+            public struct Twice : IComponent { public int X; public int x; }                        // X and x
+            public unsafe struct Fixed : IComponent { public fixed int A[4]; }
+            public unsafe struct Pointer : IComponent { public int* P; }
+            public struct Required : IComponent { public required int A; public int B; public Required(int b) => B = b; }
+            public struct Sets : IComponent { public required int A; [SetsRequiredMembers] public Sets(int a) => A = a; }
+            file struct Secret : IComponent { public int V; }
+            public static class O1 { public struct State : IComponent { public int V; } }
+            public static class O2 { public struct State : IComponent { public int V; } }
+            public struct Unsafe : IComponent { public int V; }                                     // a CompilerServices name
+            internal struct Cfg { public int V; }
+            public static class R
+            {
+                [ForEach] static void @default(ref P p) { }
+                [ForEach] static void Uses(ref P p, Cfg cfg) { }                                    // internal context: internal entry point
+                [ForEach] static void Typed<world>(ref P p, world w) where world : struct { }       // a type parameter named world
+                [ForEach] static void Span(ref P p, System.ReadOnlySpan<int> table) { }
+            }
+            public class S : EcsSystem
+            {
+                [ForEach] static ref int Bump(ref P p) => ref p.V;                                  // a ref return
+                [ForEach] static void @default(ref Q q) { }
+            }
+            public static class U
+            {
+                public static void Use(Entity e, World w)
+                {
+                    e.SetDefaults(); e.SetDefaults(2f, Color.Red); e.SetThis(1); e.SetSelf(2); e.SetSets(3); _ = e.@class; _ = w.@event;
+                    e.Set(new O1.State()); e.Set(new O2.State());
+                }
+            }
+            """), out var output, out var problems);
+        Assert.That(problems, Is.Empty);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
+    }
+
+    [Test]
+    public void ATupleWriteThroughAMaybeIsAWrite()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components,
+            "public class S : EcsSystem { [ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) (q.Value.V, p.V) = (1, 2); } }"),
+            out var output, out _);
+        string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")).Select(t => t.ToString()));
+        Assert.That(generated, Does.Contain("access.Write<global::Q>();"));
+    }
+
+    [Test]
+    public void APartialMethodIsJudgedByItsBody()
+    {
+        var diagnostics = Diagnose(Components, """
+            public partial class S : EcsSystem
+            {
+                [ForEach(Parallel = true)] static partial void A(Entity e, ref P p);
+                static partial void A(Entity e, ref P p) { if (e.Has<Q>()) p.V++; }
+            }
+            """).Result;
+        Assert.That(diagnostics, Is.Empty);
+    }
+
+    [Test]
+    public void ARefReturningMethodRuns()
+    {
+        using var world = new World();
+        var e = world.CreateEntity(new Counted { V = 1 });
+        world.AddSystem<RefReturning>();
+        world.Update();
+        Assert.That(e.Get<Counted>().V, Is.EqualTo(2));
+    }
+
+    public struct Counted : IComponent { public int V; }
+
+    public class RefReturning : EcsSystem
+    {
+        [ForEach] private static ref int Bump(ref Counted c)
+        {
+            c.V++;
+            return ref c.V;
+        }
     }
 
     [Test]
