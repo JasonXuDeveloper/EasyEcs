@@ -257,6 +257,12 @@ export const keys: Record<string, KeyDef> = {
     params: { Units: '100000' },
     field: 'allocated',
   },
+  'peers.easyecs.alloc': {
+    bench: 'EcsComparisonBenchmark',
+    method: 'EasyEcs',
+    params: { Entities: '100000' },
+    field: 'allocated',
+  },
   'peers.friflo.ratio': {
     bench: 'EcsComparisonBenchmark',
     method: 'Friflo',

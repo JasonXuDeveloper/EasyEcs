@@ -32,6 +32,28 @@ public sealed partial class Mdx(Func<string, string?> link)
         return (end < 0 ? plain : plain[..(end + 1)]).Trim();
     }
 
+    /// <summary>
+    /// The meta description of a reference page (search results show 70 to 160 characters): the summary's first
+    /// sentence, cut at a clause when it is longer, and followed by what the page holds when it is short.
+    /// </summary>
+    public static string Description(string sentence, string title, string kind)
+    {
+        const int min = 70, max = 160;
+        if (sentence.Length > max)
+        {
+            int cut = -1;
+            foreach (var separator in new[] { ": ", "; ", " (", ", ", " " })
+            {
+                cut = sentence.LastIndexOf(separator, max - 2, StringComparison.Ordinal);
+                if (cut >= min) break;
+            }
+            sentence = sentence[..cut].TrimEnd(' ', ',', ':', ';', '.') + "…";
+        }
+        if (sentence.Length >= min) return sentence;
+        string full = $"{sentence} The {title} {kind} of EasyEcs, the C# ECS: its members, parameters and complexity.";
+        return (full.Length <= max ? full : $"{sentence} The {title} {kind} of EasyEcs, the C# ECS.").TrimStart();
+    }
+
     private void Append(StringBuilder text, XElement element)
     {
         foreach (var node in element.Nodes())

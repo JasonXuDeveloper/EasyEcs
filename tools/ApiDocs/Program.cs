@@ -192,8 +192,17 @@ internal sealed class Reference
         var type = family.First;
         var text = new StringBuilder();
         string summary = Doc(type, "summary");
-        text.Append("---\ntitle: ").Append(Yaml(family.Title)).Append("\ndescription: ")
-            .Append(Yaml(Mdx.Sentence(summary).Length != 0 ? Mdx.Sentence(summary) : $"The {family.Title} {KindName(type).TrimEnd('s').ToLowerInvariant()} of EasyEcs."))
+        string kind = type.TypeKind switch
+        {
+            TypeKind.Interface => "interface",
+            TypeKind.Struct => "struct",
+            TypeKind.Enum => "enum",
+            TypeKind.Delegate => "delegate",
+            _ => "class",
+        };
+        text.Append("---\ntitle: ").Append(Yaml(family.Title))
+            .Append("\nseoTitle: ").Append(Yaml($"{family.Title} {kind} – EasyEcs C# API"))
+            .Append("\ndescription: ").Append(Yaml(Mdx.Description(Mdx.Sentence(summary), family.Title, kind)))
             .Append("\n---\n\n").Append(Banner).Append("\n\n```csharp\n");
         foreach (var t in family.Types) text.Append(Declaration(t)).Append('\n');
         text.Append("```\n\n");

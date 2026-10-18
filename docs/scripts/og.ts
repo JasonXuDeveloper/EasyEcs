@@ -10,13 +10,15 @@
  * with missing glyphs. Run with Node (vite-node), not Bun: sharp's text
  * rendering hangs under Bun.
  *
- * `vite-node --mode scripts scripts/og.ts --default`
- * redraws public/og.png.
+ * `vite-node --mode scripts scripts/og.ts --default` (`bun run og:default`)
+ * redraws public/og.png; `--github` (`bun run og:github`) draws the
+ * repository's social preview, ../.github/social-preview.png (1280×640).
  */
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import sharp from 'sharp';
+import { benchNumber } from '../src/lib/benchmarks';
 import type { Locale } from '../src/lib/i18n';
 
 export interface Card {
@@ -139,6 +141,8 @@ async function text(
     color: string;
     maxHeight: number;
     spacing?: number;
+    /** Wrap width, the text column of a page card by default */
+    width?: number;
   },
 ) {
   const { data, info } = await sharp({
@@ -146,7 +150,7 @@ async function text(
       text: `<span foreground="${options.color}">${escapeMarkup(content)}</span>`,
       font: `${options.fonts[options.weight] ? options.family : 'sans-serif'} ${options.weight === 700 ? 'Bold' : ''} ${options.size}`,
       fontfile: options.fonts[options.weight],
-      width: textWidth,
+      width: options.width ?? textWidth,
       dpi: 72,
       rgba: true,
       wrap: 'word-char',
@@ -281,16 +285,271 @@ export async function writeCards(
   );
 }
 
-// Redraw the default card, public/og.png
+/* ------------------------------------------------------------------ */
+/* The home cards, the default card and the GitHub social preview      */
+/* ------------------------------------------------------------------ */
+
+const peerNames = {
+  friflo: 'Friflo.Engine.ECS',
+  arch: 'Arch',
+  defaultecs: 'DefaultEcs',
+} as const;
+
+/**
+ * The headline tick (nine systems over 100,000 entities, EcsComparisonBenchmark)
+ * of EasyEcs and its peers, and whether EasyEcs is the fastest on it: the
+ * cards say "fastest" only while the data does.
+ */
+function headlineTick() {
+  const easyecs = benchNumber('peers.easyecs');
+  const peers = (Object.keys(peerNames) as (keyof typeof peerNames)[]).map(
+    (key) => ({
+      name: peerNames[key],
+      time: benchNumber(`peers.${key}`),
+      ratio: benchNumber(`peers.${key}.ratio`),
+    }),
+  );
+  const complete = Boolean(easyecs) && peers.every((p) => p.time && p.ratio);
+  const fastest = complete && peers.every((p) => (p.ratio?.value ?? 0) > 1);
+  return { easyecs, peers, complete, fastest };
+}
+
+/** The one-line claim of the home cards and the GitHub preview: speed first, then garbage */
+const claim: Record<Locale, string> = {
+  en: 'High-performance, allocation-free ECS for C# and .NET',
+  zh: '高性能、零分配的 C# / .NET ECS',
+};
+
+/**
+ * The cards of /en and /zh; the English one is also the default card
+ * (public/og.png), so every share of the site says the same thing.
+ */
+export function homeCards(): Card[] {
+  const alloc = benchNumber('tick.oneWorld.alloc')?.text;
+  const { fastest } = headlineTick();
+  return [
+    {
+      url: '/en',
+      lang: 'en',
+      eyebrow: 'EasyEcs',
+      title: claim.en,
+      description: [
+        fastest
+          ? 'Fastest on a full server tick of 100,000 entities against Friflo.Engine.ECS, Arch and DefaultEcs'
+          : 'A full server tick of 100,000 entities',
+        alloc ? `, with ${alloc} allocated per tick.` : '.',
+      ].join(''),
+    },
+    {
+      url: '/zh',
+      lang: 'zh',
+      eyebrow: 'EasyEcs',
+      title: claim.zh,
+      description: [
+        fastest
+          ? '10 万实体的完整服务器 tick 上快过 Friflo.Engine.ECS、Arch 和 DefaultEcs'
+          : '10 万实体的完整服务器 tick',
+        alloc ? `，每个 tick 分配 ${alloc}。` : '。',
+      ].join(''),
+    },
+  ];
+}
+
+/** The analyzer's rules (EECS002…), counted in the generator's source */
+async function analyzerRules() {
+  const dir = path.resolve('../src/EasyEcs.Generator');
+  const ids = new Set<string>();
+  for (const file of await fs.readdir(dir)) {
+    if (!file.endsWith('.cs')) continue;
+    const source = await fs.readFile(path.join(dir, file), 'utf8');
+    for (const match of source.matchAll(/"(EECS\d{3})"/g)) ids.add(match[1]);
+  }
+  if (ids.size === 0) throw new Error('No analyzer rules found');
+  return ids.size;
+}
+
+/**
+ * The repository's social preview (Settings -> Social preview), 1280×640:
+ * the icon and name, the claim, three facts and the headline tick against
+ * the peers as bars, centred so a square crop keeps the name, inside
+ * GitHub's 40 px safe margin. Numbers come from src/data/bench.json and the
+ * analyzer's source, like every number the site shows.
+ */
+async function drawGithubPreview() {
+  const W = 1280;
+  const H = 640;
+  const tick = headlineTick();
+  const perEntity = benchNumber('forEach.perEntity');
+  const alloc = benchNumber('tick.oneWorld.alloc');
+  if (!tick.complete || !tick.easyecs || !perEntity || !alloc)
+    throw new Error('Benchmark data is missing the headline tick');
+  const facts = [
+    { value: perEntity.text, label: 'per entity update, [ForEach]' },
+    { value: alloc.text, label: 'allocated per server tick' },
+    {
+      value: String(await analyzerRules()),
+      label: 'analyzer rules, code fixes',
+    },
+  ];
+  const bars = [
+    {
+      name: 'EasyEcs',
+      ns: tick.easyecs.value,
+      text: tick.easyecs.text,
+      note: tick.fastest ? 'fastest' : '',
+    },
+    ...tick.peers.map((p) => ({
+      name: p.name,
+      ns: p.time?.value ?? 0,
+      text: p.time?.text ?? '',
+      note:
+        (p.ratio?.value ?? 0) > 1
+          ? `${p.ratio?.text} slower`
+          : `${p.ratio?.text} the time`,
+    })),
+  ];
+  const chartTitle = 'Full server tick, 100,000 entities (lower is faster)';
+  const footer = 'ecs.xgamedev.net';
+
+  const fonts = await loadFonts([
+    {
+      url: '/github',
+      lang: 'en',
+      eyebrow: 'EasyEcs',
+      title: claim.en,
+      description: [
+        ...facts.map((f) => f.value + f.label),
+        ...bars.map((b) => b.name + b.text + b.note),
+        chartTitle,
+        footer,
+      ].join(''),
+    },
+  ]);
+  const set = fonts.en;
+  if (!set) throw new Error('No font for the social preview');
+  const draw = (content: string, weight: Weight, size: number, color: string) =>
+    text(content, {
+      fonts: set,
+      family: families.en,
+      weight,
+      size,
+      color,
+      maxHeight: size * 2,
+      width: W - 160,
+    });
+  const widthOf = async (image: Buffer) =>
+    (await sharp(image).metadata()).width ?? 0;
+  const layers: Parameters<ReturnType<typeof sharp>['composite']>[0] = [];
+  const shapes: string[] = [];
+  const centred = async (image: Buffer, top: number, centre = W / 2) =>
+    layers.push({
+      input: image,
+      top,
+      left: Math.round(centre - (await widthOf(image)) / 2),
+    });
+
+  // Icon + name on one line
+  const iconSize = 84;
+  const icon = await sharp(logo).resize(iconSize, iconSize).png().toBuffer();
+  const name = await draw('EasyEcs', 700, 80, colors.title);
+  const nameWidth = await widthOf(name.data);
+  const gap = 24;
+  const brandLeft = Math.round((W - (iconSize + gap + nameWidth)) / 2);
+  const brandTop = 58;
+  layers.push(
+    { input: icon, left: brandLeft, top: brandTop },
+    {
+      input: name.data,
+      left: brandLeft + iconSize + gap,
+      top: brandTop + Math.round((iconSize - name.height) / 2) - 4,
+    },
+  );
+  shapes.push(
+    `<rect x="${brandLeft - 0.5}" y="${brandTop - 0.5}" width="${iconSize + 1}" height="${iconSize + 1}" rx="${(iconSize * 14) / 64}" fill="none" stroke="#2a2a2a"/>`,
+  );
+
+  // The claim
+  await centred((await draw(claim.en, 400, 34, colors.description)).data, 172);
+
+  // Three facts with hairline dividers
+  const column = 330;
+  const rowLeft = Math.round((W - column * facts.length) / 2);
+  const factsTop = 240;
+  for (let i = 0; i < facts.length; i++) {
+    const centre = rowLeft + column * i + column / 2;
+    await centred(
+      (await draw(facts[i].value, 700, 46, colors.title)).data,
+      factsTop,
+      centre,
+    );
+    await centred(
+      (await draw(facts[i].label, 400, 21, colors.footer)).data,
+      factsTop + 64,
+      centre,
+    );
+    if (i > 0)
+      shapes.push(
+        `<rect x="${rowLeft + column * i}" y="${factsTop + 4}" width="1" height="84" fill="#262626"/>`,
+      );
+  }
+
+  // The headline tick as bars: EasyEcs in the accent, the peers in grey
+  const chartTop = 372;
+  const labelRight = 375;
+  const barLeft = labelRight + 20;
+  const barMax = 480;
+  const rowHeight = 36;
+  const longest = Math.max(...bars.map((b) => b.ns));
+  await centred(
+    (await draw(chartTitle, 400, 20, colors.footer)).data,
+    chartTop,
+  );
+  for (let i = 0; i < bars.length; i++) {
+    const bar = bars[i];
+    const own = i === 0;
+    const top = chartTop + 36 + rowHeight * i;
+    const label = await draw(
+      bar.name,
+      own ? 700 : 400,
+      22,
+      own ? colors.title : colors.description,
+    );
+    layers.push({
+      input: label.data,
+      top: top + Math.round((22 - label.height) / 2) + 1,
+      left: labelRight - (await widthOf(label.data)),
+    });
+    const length = Math.max(4, Math.round((bar.ns / longest) * barMax));
+    shapes.push(
+      `<rect x="${barLeft}" y="${top}" width="${length}" height="22" rx="4" fill="${own ? colors.accent : '#3a3a3a'}"/>`,
+    );
+    const value = await draw(
+      bar.note ? `${bar.text}  ·  ${bar.note}` : bar.text,
+      own ? 700 : 400,
+      20,
+      own ? colors.accent : colors.description,
+    );
+    layers.push({
+      input: value.data,
+      top: top + Math.round((22 - value.height) / 2) + 1,
+      left: barLeft + length + 14,
+    });
+  }
+
+  await centred((await draw(footer, 700, 24, colors.accent)).data, 568);
+
+  const background = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="${colors.background}"/>${shapes.join('')}<rect x="0" y="${H - 10}" width="${W}" height="10" fill="${colors.accent}"/></svg>`,
+  );
+  return sharp(background)
+    .composite(layers)
+    .png({ compressionLevel: 9, palette: true, quality: 90 })
+    .toBuffer();
+}
+
+// `--default`: redraw public/og.png, the card of /en
 if (process.argv.includes('--default')) {
-  const card: Card = {
-    url: '/default',
-    lang: 'en',
-    eyebrow: 'EasyEcs',
-    title: 'The allocation-free ECS for C# and .NET 10 servers',
-    description:
-      'Source-generated [ForEach] systems, immediate structural changes, change tracking, indexes, relations and snapshots. 0 B per tick, for game servers and simulations.',
-  };
+  const [card] = homeCards();
   const fonts = await loadFonts([card]);
   if (!fonts.en) throw new Error('No font for the default card');
   await fs.writeFile(
@@ -298,4 +557,15 @@ if (process.argv.includes('--default')) {
     await drawCard(card, fonts.en),
   );
   console.log('Wrote public/og.png');
+}
+
+// `--github`: redraw ../.github/social-preview.png (upload it in the
+// repository's Settings -> General -> Social preview)
+if (process.argv.includes('--github')) {
+  const target = path.resolve('../.github/social-preview.png');
+  const image = await drawGithubPreview();
+  await fs.writeFile(target, image);
+  console.log(
+    `Wrote ${path.relative(process.cwd(), target)} (${Math.round(image.length / 1024)} KB)`,
+  );
 }

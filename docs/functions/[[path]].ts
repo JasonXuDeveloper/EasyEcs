@@ -4,6 +4,7 @@ interface Env {
 
 const localizedPathPattern = /^\/(en|zh)(?:\/|$)/;
 const docsMarkdownPattern = /^\/(en|zh)\/docs(\/.+)?$/;
+const homePattern = /^\/(en|zh)\/?$/;
 const markdownMime = 'text/markdown; charset=utf-8';
 const markdownFilePattern = /^\/(en|zh)\/docs(\/.+)?\.mdx?$/;
 const siteUrl = 'https://ecs.xgamedev.net';
@@ -61,6 +62,21 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     return serveMarkdown(context, url);
   }
 
+  // The home pages in Markdown are their language's llms.txt: what EasyEcs
+  // is, the key facts and every page.
+  const home = homePattern.exec(url.pathname);
+  if (home && prefersMarkdown(request)) {
+    const response = await context.env.ASSETS.fetch(
+      new URL(`/${home[1]}/llms.txt`, url),
+    );
+    if (response.ok)
+      return withHeaders(response, {
+        'Content-Type': markdownMime,
+        Link: `<${siteUrl}/${home[1]}>; rel="canonical"`,
+        Vary: 'Accept',
+      });
+  }
+
   if (!localizedPathPattern.test(url.pathname)) {
     const locale = getLocale(request);
     const target = new URL(request.url);
@@ -75,8 +91,11 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     });
   }
 
-  // Docs pages answer with HTML or Markdown depending on Accept (above)
-  if (docsMarkdownPattern.test(url.pathname)) {
+  // Docs and home pages answer with HTML or Markdown depending on Accept (above)
+  if (
+    docsMarkdownPattern.test(url.pathname) ||
+    homePattern.test(url.pathname)
+  ) {
     return withHeaders(await context.next(), { Vary: 'Accept' });
   }
 

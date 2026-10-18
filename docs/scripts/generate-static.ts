@@ -21,7 +21,7 @@ import {
   siteUrl,
 } from '../src/lib/site';
 import { getOwnPage, isFallback, source } from '../src/lib/source';
-import { type Card, writeCards } from './og';
+import { type Card, homeCards, writeCards } from './og';
 
 const outDir = path.resolve('build/client');
 const locales = ['en', 'zh'] as const satisfies Locale[];
@@ -252,18 +252,32 @@ Sitemap: ${siteUrl}/sitemap.xml
 
 const oneWorld = benchNumber('tick.oneWorld');
 const oneWorldAlloc = benchNumber('tick.oneWorld.alloc');
+const peerRatios = {
+  friflo: benchNumber('peers.friflo.ratio'),
+  arch: benchNumber('peers.arch.ratio'),
+  defaultecs: benchNumber('peers.defaultecs.ratio'),
+};
+const hasPeers = Object.values(peerRatios).every(Boolean);
+/** "Fastest" only while the data says so */
+const fastestOnTick =
+  hasPeers && Object.values(peerRatios).every((r) => (r?.value ?? 0) > 1);
 
 const llmsCopy: Record<Locale, { facts: string[]; optional: string[] }> = {
   en: {
     facts: [
+      ...(oneWorld
+        ? [
+            `Performance: one server tick of 9 systems over 100,000 entities takes ${oneWorld.text}${oneWorldAlloc ? ` and allocates ${oneWorldAlloc.text}` : ''} (${sourceLine(false)}) See [Performance](${siteUrl}/en/docs/performance.md).`,
+          ]
+        : []),
+      ...(hasPeers
+        ? [
+            `${fastestOnTick ? 'Fastest of the C# ECS libraries measured on a full server tick' : 'Compared with the other C# ECS libraries on the same tick'}: Friflo.Engine.ECS takes ${peerRatios.friflo?.text} the time of EasyEcs, Arch ${peerRatios.arch?.text} and DefaultEcs ${peerRatios.defaultecs?.text}; Friflo is the closest, and it runs on Unity and older .NET, which EasyEcs does not. Feature matrix and every head-to-head benchmark: [Comparison](${siteUrl}/en/docs/comparison.md).`,
+          ]
+        : []),
       `Install: \`${installCommand}\` in a net10.0 project ([NuGet](${nugetUrl})); the package includes the source generator, the analyzer and its code fixes.`,
       'Usage: components are structs implementing `IComponent` (empty structs are tags, `ISingletonComponent` for per-world state); a system is a class deriving from `EcsSystem` with `[ForEach]` methods; `world.AddSystem<T>()`, `world.CreateEntity(...)`, `world.Update()`.',
       'EasyEcs targets net10.0 only; it does not run on Unity or older .NET runtimes.',
-      ...(oneWorld
-        ? [
-            `Performance: one server tick of 9 systems over 100,000 entities takes ${oneWorld.text}${oneWorldAlloc ? ` and allocates ${oneWorldAlloc.text}` : ''} (${sourceLine(false)}) See [Performance](${siteUrl}/en/docs/performance.md) and [Comparison](${siteUrl}/en/docs/comparison.md).`,
-          ]
-        : []),
       `These docs describe EasyEcs ${docsVersion}. Source code and issues: ${githubUrl} (MIT license).`,
       `Full text of every page: [llms-full.txt](${siteUrl}/llms-full.txt); Chinese: [llms.zh.txt](${siteUrl}/llms.zh.txt)`,
       'Each page below is also served as HTML at the same URL without `.md`.',
@@ -278,14 +292,19 @@ const llmsCopy: Record<Locale, { facts: string[]; optional: string[] }> = {
     facts: [
       // URLs are Markdown links: bare URLs followed by full-width punctuation
       // (。）：) are misread by link extractors.
+      ...(oneWorld
+        ? [
+            `性能：10 万实体、9 个系统的一个服务器 tick 耗时 ${oneWorld.text}${oneWorldAlloc ? `，分配 ${oneWorldAlloc.text}` : ''}（${sourceLine(true)}）参见[性能](${siteUrl}/zh/docs/performance.md)。`,
+          ]
+        : []),
+      ...(hasPeers
+        ? [
+            `${fastestOnTick ? '在完整服务器 tick 上是实测最快的 C# ECS' : '与其他 C# ECS 框架在同一个 tick 上对比'}：Friflo.Engine.ECS 的耗时是 EasyEcs 的 ${peerRatios.friflo?.text}，Arch 是 ${peerRatios.arch?.text}，DefaultEcs 是 ${peerRatios.defaultecs?.text}；Friflo 最接近，而且支持 Unity 和更老的 .NET，EasyEcs 不支持。功能矩阵与全部正面对比：[横向对比](${siteUrl}/zh/docs/comparison.md)。`,
+          ]
+        : []),
       `安装：在 net10.0 项目中运行 \`${installCommand}\`（[NuGet](${nugetUrl})），包内已包含源生成器、分析器和代码修复。`,
       '用法：组件是实现 `IComponent` 的结构体（空结构体即标签，World 级状态用 `ISingletonComponent`）；系统是继承 `EcsSystem` 的类，逻辑写在 `[ForEach]` 方法里；然后调用 `world.AddSystem<T>()`、`world.CreateEntity(...)`、`world.Update()`。',
       'EasyEcs 只面向 net10.0，不支持 Unity 和更老的 .NET 运行时。',
-      ...(oneWorld
-        ? [
-            `性能：10 万实体、9 个系统的一个服务器 tick 耗时 ${oneWorld.text}${oneWorldAlloc ? `，分配 ${oneWorldAlloc.text}` : ''}（${sourceLine(true)}）参见[性能](${siteUrl}/en/docs/performance.md)与[对比](${siteUrl}/en/docs/comparison.md)。`,
-          ]
-        : []),
       `本文档对应 EasyEcs ${docsVersion}。源码与问题反馈：[GitHub](${githubUrl})（MIT 协议）。`,
       `全部页面全文：[llms-full.zh.txt](${siteUrl}/llms-full.zh.txt)。英文版：[llms.txt](${siteUrl}/llms.txt)`,
       '下列每个页面去掉 `.md` 即为对应的 HTML 页面；尚无中文版的页面链接到英文原文。',
@@ -406,24 +425,7 @@ async function llmsFull(locale: Locale) {
 /* ------------------------------------------------------------------ */
 
 function cards(): Card[] {
-  const list: Card[] = [
-    {
-      url: '/en',
-      lang: 'en',
-      eyebrow: 'EasyEcs',
-      title: 'The allocation-free ECS for C# and .NET 10 servers',
-      description:
-        'Source-generated [ForEach] systems, immediate structural changes, change tracking, indexes, relations and snapshots. 0 B per tick, for game servers and simulations.',
-    },
-    {
-      url: '/zh',
-      lang: 'zh',
-      eyebrow: 'EasyEcs',
-      title: '面向 C# 与 .NET 10 服务端的零分配 ECS',
-      description:
-        '源生成的 [ForEach] 系统，结构变更立即生效，内置变更追踪、索引、关系与快照。每个 tick 零分配，适合游戏服务器与模拟。',
-    },
-  ];
+  const list: Card[] = homeCards();
   // Fallback pages use the English page's card (src/lib/seo.ts).
   for (const page of source.getPages().filter(isOwn)) {
     const lang = localeOf(page);
