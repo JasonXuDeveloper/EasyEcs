@@ -266,6 +266,19 @@ public class GeneratorTests
     }
 
     [Test]
+    public async Task ABufferPassedByRefIsNoCopy()
+    {
+        var errors = await Diagnose(Components, """
+            public static class U
+            {
+                static ref T Same<T>(ref T value) => ref value;
+                public static int F(Entity e) { ref var b = ref Same(ref e.Get<DynamicBuffer<int>>()); return b.Count; }
+            }
+            """);
+        Assert.That(errors, Is.Empty, string.Join(", ", errors));
+    }
+
+    [Test]
     public async Task ABufferReadThroughInCannotBeWritten()
     {
         var errors = await Diagnose(Components, "public partial class S : EcsSystem { [ForEach] static void A(in DynamicBuffer<int> b) => b.Add(1); }");

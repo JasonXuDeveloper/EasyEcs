@@ -375,8 +375,8 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
     }
 
     /// <summary>
-    /// EECS012: a DynamicBuffer&lt;T&gt; copied by a local (ref locals are fine), an assignment or an argument of a
-    /// generic method (Set, CreateEntity: the value is stored), unless it is a new, empty buffer.
+    /// EECS012: a DynamicBuffer&lt;T&gt; copied by a local (ref locals are fine), an assignment or an argument (not 'ref' or
+    /// 'out') of a generic method (Set, CreateEntity: the value is stored), unless it is a new, empty buffer.
     /// </summary>
     private static void AnalyzeBufferCopy(OperationAnalysisContext context)
     {
@@ -385,7 +385,8 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             IVariableDeclaratorOperation { Symbol.RefKind: RefKind.None } declarator =>
                 (declarator.Symbol.Name, declarator.Symbol.Type, declarator.Initializer?.Value),
             ISimpleAssignmentOperation { IsRef: false } assignment => (Describe(assignment.Target), assignment.Target.Type, assignment.Value),
-            IArgumentOperation { Parameter.OriginalDefinition.Type: ITypeParameterSymbol } argument =>
+            // 'in' still stores the value (Set); 'ref' and 'out' pass the buffer itself
+            IArgumentOperation { Parameter: { RefKind: not (RefKind.Ref or RefKind.Out), OriginalDefinition.Type: ITypeParameterSymbol } } argument =>
                 (argument.Parameter!.Name, argument.Value.Type, argument.Value),
             _ => (null, null, null),
         };
