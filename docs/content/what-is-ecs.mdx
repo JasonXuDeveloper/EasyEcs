@@ -1,7 +1,7 @@
 ---
 title: What is an ECS?
-seoTitle: What Is an Entity Component System (ECS)? Archetypes, Sparse Sets, ECS vs OOP
-description: "An Entity Component System splits a program into entities, components and systems. How ECS storage works, archetypes vs sparse sets, ECS vs OOP, when to use one."
+seoTitle: "What is an ECS? Entity Component System in C# explained"
+description: "An Entity Component System (ECS) splits a program into entities, components and systems: how storage works, archetypes vs sparse sets, ECS vs OOP, C# libraries."
 icon: Shapes
 faq: true
 ---
@@ -14,6 +14,14 @@ an instance of.
 The pattern comes from game development, where a world holds thousands of things that share some traits and differ
 in others, and every one of them must be updated many times a second. It fits any program with the same shape:
 game servers, simulations, digital twins, agent models.
+
+In C# and .NET an ECS comes as a library. EasyEcs, Friflo.Engine.ECS, Arch and DefaultEcs are .NET libraries (the
+last three also run in Unity); Unity Entities (DOTS) is Unity's own. EasyEcs is an allocation-free archetype ECS for
+.NET 10 game servers and simulations: systems are `[ForEach]` methods that a source generator compiles into struct
+jobs, and a server tick of 100,000 entities takes <BenchValue k="tick.oneWorld" /> and allocates
+<BenchValue k="tick.oneWorld.alloc" />.
+
+<BenchSource />
 
 ## The three parts [#the-three-parts]
 
@@ -238,6 +246,9 @@ parts. That is what makes the data contiguous and each system independent.
 | DefaultEcs | A pool per component type | .NET and Unity |
 | Unity Entities (DOTS) | Archetypes in chunks | Unity only |
 
+On the same server tick of 100,000 entities, Friflo.Engine.ECS takes <BenchValue k="peers.friflo.ratio" /> the time
+of EasyEcs, Arch <BenchValue k="peers.arch.ratio" /> and DefaultEcs <BenchValue k="peers.defaultecs.ratio" />, and only
+EasyEcs and Friflo allocate nothing per tick.
 How EasyEcs measures against the other .NET libraries on the same server tick, feature by feature, is in
 [Comparison](/en/docs/comparison).
 

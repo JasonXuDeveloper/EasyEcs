@@ -1,7 +1,7 @@
 ---
 title: EasyEcs vs DefaultEcs
-seoTitle: "EasyEcs vs DefaultEcs: C# ECS comparison with benchmarks (DefaultEcs alternative)"
-description: EasyEcs and DefaultEcs side by side. Archetype tables against component pools and entity sets, the same system in both, the measured tick and features, and when DefaultEcs is the better choice.
+seoTitle: "EasyEcs vs DefaultEcs: C# ECS comparison and benchmarks"
+description: "EasyEcs and DefaultEcs side by side: archetype tables against component pools and entity sets, the same system in both, the tick, and when DefaultEcs fits."
 icon: GitCompare
 ---
 
@@ -10,6 +10,12 @@ entity sets up to date as components come and go; systems iterate a set's entiti
 pools. EasyEcs stores entities with the same components together in archetype tables and generates a struct job per
 `[ForEach]` method that walks their columns. Both have change tracking, removal tracking, value indexes, parallel
 systems and saves built in; they differ in storage, in how a system is written and in what a tick costs.
+
+On the same server tick of 100,000 entities, DefaultEcs takes <BenchValue k="peers.defaultecs.ratio" /> the time of
+EasyEcs and allocates <BenchValue k="peers.defaultecs.alloc" /> per tick, where EasyEcs allocates
+<BenchValue k="peers.easyecs.alloc" />. DefaultEcs runs on netstandard1.1-2.1 and Unity; EasyEcs needs .NET 10.
+
+<BenchSource />
 
 ## At a glance [#at-a-glance]
 

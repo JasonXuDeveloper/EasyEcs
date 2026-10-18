@@ -1,7 +1,7 @@
 ---
 title: EasyEcs vs Arch
-seoTitle: "EasyEcs vs Arch: a C# ECS comparison with benchmarks (Arch alternative for .NET 10)"
-description: EasyEcs and Arch side by side. How their concepts map, the same systems written in both, the measured server tick and features, and when Arch is the better choice.
+seoTitle: "EasyEcs vs Arch: C# ECS comparison and benchmarks"
+description: "EasyEcs and Arch side by side: how the concepts map, the same systems in both, the measured server tick and features, and when Arch is the better choice."
 icon: GitCompare
 ---
 
@@ -11,6 +11,12 @@ fast core: queries, struct jobs, chunks and a command buffer, with systems and s
 Arch.Extended packages. EasyEcs puts systems, generated jobs, change tracking, indexes, relations, saves and
 snapshots in one package for .NET 10 servers, and applies structural changes immediately instead of through a
 command buffer.
+
+On the same server tick of 100,000 entities, Arch takes <BenchValue k="peers.arch.ratio" /> the time of EasyEcs and
+allocates <BenchValue k="peers.arch.alloc" /> per tick, where EasyEcs allocates <BenchValue k="peers.easyecs.alloc" />.
+Arch runs on more runtimes (netstandard2.1, net6.0, net8.0 and Unity); EasyEcs needs .NET 10.
+
+<BenchSource />
 
 ## At a glance [#at-a-glance]
 

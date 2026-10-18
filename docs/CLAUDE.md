@@ -9,9 +9,11 @@ deployed to Cloudflare Pages. English and Chinese. How to write a page: `WRITING
 bun install
 bun run dev              # http://localhost:5173
 bun run check            # tsc, Biome, links + anchors + icons (scripts/lint-links.ts)
-bun run build            # git history, benchmark sync, prerender, static files -> build/client
+bun run build            # git history, benchmark sync, prerender, static files -> build/client, then lint:seo
+bun run lint:seo         # titles, descriptions, canonical, hreflang, cards, JSON-LD, sitemap, robots, llms files
 bun run sync:benchmarks  # src/data/bench.json from BenchmarkDotNet reports (see Benchmarks)
-bun run og:default       # redraw the default social card
+bun run og:default       # redraw the default social card (public/og.png, the card of /en)
+bun run og:github        # redraw the repository's social preview (../.github/social-preview.png)
 bun run favicons         # favicons from public/icon.svg
 ```
 
@@ -90,6 +92,13 @@ scripts/                 generate-static.ts, og.ts, lint-links.ts, sync-benchmar
   (hreflang alternates, `lastmod` from git), robots.txt (all crawlers, AI crawlers and Baiduspider named),
   `llms.txt` / `llms-full.txt` and their `.zh` versions, a Markdown copy of every page (`<page>.md`, also served for
   `Accept: text/markdown` by `functions/[[path]].ts`) and the social cards (`scripts/og.ts`).
+- `scripts/lint-seo.ts` (last step of `bun run build`) fails on: a `<title>` over 60 characters (a Chinese character
+  counts as two) or shared with another page, a description outside 70-160 characters (Chinese 40-90), a missing
+  canonical, hreflang, Open Graph / Twitter tag or card, JSON-LD that does not parse or lacks its types, a page missing
+  from (or a noindex page in) the sitemap, robots.txt without the AI crawlers, and llms files or Markdown copies
+  missing a page. Fix the page's `seoTitle` / `description`; `pending` in the script lists pages being rewritten.
+- The GitHub social preview (`.github/social-preview.png`, `bun run og:github`) takes its numbers from
+  `src/data/bench.json` and the analyzer's source; upload it in the repository settings after redrawing it.
 - Search console verification: `VITE_GOOGLE_SITE_VERIFICATION`, `VITE_BING_SITE_VERIFICATION`,
   `VITE_BAIDU_SITE_VERIFICATION` at build time.
 

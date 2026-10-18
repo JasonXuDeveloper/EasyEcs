@@ -1,6 +1,6 @@
 ---
 title: EasyEcs 与 Arch
-seoTitle: "EasyEcs 与 Arch：C# ECS 对比与跑分（.NET 10 上的 Arch 替代方案）"
+seoTitle: "EasyEcs 与 Arch：C# ECS 对比与跑分"
 description: EasyEcs 和 Arch 并排对比。概念如何对应，两边写同一个系统，实测的服务器 tick 和各项功能，以及什么时候 Arch 更合适。
 icon: GitCompare
 ---
@@ -9,6 +9,12 @@ icon: GitCompare
 表的列走。区别在于核心库替你做了多少。Arch 是一个小而快的核心：查询、struct job、chunk 和命令缓冲，系统和源生成器在
 单独的 Arch.Extended 包里。EasyEcs 把系统、生成的 job、变更追踪、索引、关系、存档和快照都放进一个包，面向 .NET 10
 服务器，结构变更当场生效，不走命令缓冲。
+
+在 10 万实体的同一个服务器 tick 上，Arch 的耗时是 EasyEcs 的 <BenchValue k="peers.arch.ratio" />，每个 tick 分配
+<BenchValue k="peers.arch.alloc" />，EasyEcs 分配 <BenchValue k="peers.easyecs.alloc" />。Arch 支持的运行时更多
+（netstandard2.1、net6.0、net8.0 和 Unity），EasyEcs 只支持 .NET 10。
+
+<BenchSource />
 
 ## 一览 [#at-a-glance]
 

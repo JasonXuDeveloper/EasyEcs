@@ -1,11 +1,12 @@
 # EasyEcs
 
-**EasyEcs is an open-source, allocation-free archetype Entity Component System (ECS) for C# and .NET 10 servers.**
-Write plain data and `[ForEach]` methods; the source generator turns them into inlined struct jobs, the analyzer
-catches design mistakes at compile time, and a full server tick allocates 0 bytes. It is built for game servers,
-simulations and other long-running real-time backends.
+**EasyEcs is a high-performance, allocation-free archetype Entity Component System (ECS) for C# and .NET 10
+servers.** On a full server tick of 100,000 entities it is faster than Friflo.Engine.ECS, Arch and DefaultEcs
+([comparison](https://ecs.xgamedev.net/en/docs/comparison)), and the tick allocates 0 bytes. Write plain data and
+`[ForEach]` methods; the source generator turns them into inlined struct jobs and the analyzer catches design mistakes
+at compile time. It is built for game servers, simulations and other long-running real-time backends.
 
-**Documentation: [ecs.xgamedev.net](https://ecs.xgamedev.net)**
+**Documentation: [ecs.xgamedev.net](https://ecs.xgamedev.net)** · 中文文档：[ecs.xgamedev.net/zh](https://ecs.xgamedev.net/zh)（高性能、零分配的 C# / .NET ECS 框架，面向游戏服务器）
 
 [![NuGet](https://img.shields.io/nuget/v/EasyEcs?logo=nuget&color=004880)](https://www.nuget.org/packages/EasyEcs)
 [![Downloads](https://img.shields.io/nuget/dt/EasyEcs?logo=nuget)](https://www.nuget.org/packages/EasyEcs)

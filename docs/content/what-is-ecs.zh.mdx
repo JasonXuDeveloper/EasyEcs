@@ -1,7 +1,7 @@
 ---
 title: 什么是 ECS？
-seoTitle: 什么是实体组件系统（ECS）？原型与稀疏集存储、ECS 与面向对象对比
-description: 实体组件系统（ECS）把程序拆成实体、组件和系统。本文讲清 ECS 怎么存储组件、原型与稀疏集怎么取舍、ECS 与面向对象的区别，以及什么时候该用 ECS。
+seoTitle: "什么是 ECS？实体组件系统原理与 C# ECS 框架"
+description: "实体组件系统（ECS）把程序拆成实体、组件和系统。本文讲清 ECS 怎么存储组件、原型与稀疏集的取舍、ECS 与面向对象的区别，以及 C# 有哪些 ECS 框架。"
 icon: Shapes
 faq: true
 ---
@@ -12,6 +12,13 @@ faq: true
 
 这个模式来自游戏开发：一个世界里有成千上万个对象，彼此有共性也有差异，每秒还要更新很多次。凡是形态相同的程序都适用：
 游戏服务器、各类模拟、数字孪生、智能体模型。
+
+在 C# 和 .NET 里，ECS 以库的形式出现。EasyEcs、Friflo.Engine.ECS、Arch 和 DefaultEcs 都是 .NET 库（后三个也能在
+Unity 里用），Unity Entities（DOTS）是 Unity 自带的。EasyEcs 是面向 .NET 10 游戏服务器与模拟的零分配原型（archetype）
+ECS：系统就是 `[ForEach]` 方法，由源生成器编译成结构体 job；10 万实体的服务器 tick 耗时
+<BenchValue k="tick.oneWorld" />，分配 <BenchValue k="tick.oneWorld.alloc" />。
+
+<BenchSource />
 
 ## 三个组成部分 [#the-three-parts]
 
@@ -217,6 +224,10 @@ EasyEcs 的结构变更立即生效，遍历途中也一样。一次遍历里每
 | Arch | 分块（chunk）的原型 | .NET 与 Unity |
 | DefaultEcs | 每种组件一个池 | .NET 与 Unity |
 | Unity Entities（DOTS） | 分块的原型 | 仅 Unity |
+
+在 10 万实体的同一个服务器 tick 上，Friflo.Engine.ECS 的耗时是 EasyEcs 的 <BenchValue k="peers.friflo.ratio" />，
+Arch 是 <BenchValue k="peers.arch.ratio" />，DefaultEcs 是 <BenchValue k="peers.defaultecs.ratio" />；每个 tick 不分配内存的
+只有 EasyEcs 和 Friflo。
 
 EasyEcs 和其他 .NET 库在同一个服务器 tick 上的实测对比、逐项功能对比，见[横向对比](/zh/docs/comparison)。
 

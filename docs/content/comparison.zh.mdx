@@ -1,9 +1,18 @@
 ---
 title: 与其他 ECS 库对比
-seoTitle: "C# ECS 对比：EasyEcs、Friflo.Engine.ECS、Arch、DefaultEcs（跑分）"
-description: EasyEcs 对 Friflo.Engine.ECS、Arch 和 DefaultEcs。功能矩阵、同一个服务器 tick 在各库中的实现，以及全部正面对比跑分，包括 EasyEcs 没赢的那些。
+seoTitle: "C# ECS 框架对比：EasyEcs、Friflo、Arch 与 DefaultEcs"
+description: "哪个 C# ECS 框架更快？EasyEcs 对比 Friflo.Engine.ECS、Arch 和 DefaultEcs：功能矩阵、同一个服务器 tick 和全部跑分。"
 icon: Scale
 ---
+
+哪个 C# ECS 框架最快，要看具体负载。在同一个服务器 tick（9 个系统、10 万实体）上，EasyEcs 耗时
+<BenchValue k="peers.easyecs" />，Friflo.Engine.ECS 是它的 <BenchValue k="peers.friflo.ratio" />，Arch 是
+<BenchValue k="peers.arch.ratio" />，DefaultEcs 是 <BenchValue k="peers.defaultecs.ratio" />。EasyEcs 和 Friflo 每个 tick
+都不分配；Arch 和 DefaultEcs 每个 tick 分别分配 <BenchValue k="peers.arch.alloc" /> 和
+<BenchValue k="peers.defaultecs.alloc" />。Friflo 和 EasyEcs 很接近，不同轮次之间互有领先，下面也有几项单项跑分是 Friflo
+赢：本页全部列出。
+
+<BenchSource />
 
 EasyEcs 和 .NET 上最常用的三个 ECS 库做了对比：[Friflo.Engine.ECS](https://github.com/friflo/Friflo.Engine.ECS)、
 [Arch](https://github.com/genaray/Arch) 和 [DefaultEcs](https://github.com/Doraku/DefaultEcs)，版本固定在

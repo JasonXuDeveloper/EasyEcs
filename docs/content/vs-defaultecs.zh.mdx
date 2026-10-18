@@ -1,6 +1,6 @@
 ---
 title: EasyEcs 与 DefaultEcs
-seoTitle: "EasyEcs 与 DefaultEcs：C# ECS 对比与跑分（DefaultEcs 替代方案）"
+seoTitle: "EasyEcs 与 DefaultEcs：C# ECS 对比与跑分"
 description: EasyEcs 和 DefaultEcs 并排对比。原型表对组件池加实体集合，两边写同一个系统，实测的 tick 和各项功能，以及什么时候 DefaultEcs 更合适。
 icon: GitCompare
 ---
@@ -9,6 +9,12 @@ icon: GitCompare
 遍历集合里的实体，再从池里取组件。EasyEcs 把组件相同的实体放进同一张原型表，为每个 `[ForEach]` 方法生成一个 struct
 job，顺着表的列往下走。两者都内置了变更追踪、移除追踪、值索引、并行系统和存档；区别在存储方式、系统的写法和一个
 tick 的开销。
+
+在 10 万实体的同一个服务器 tick 上，DefaultEcs 的耗时是 EasyEcs 的 <BenchValue k="peers.defaultecs.ratio" />，每个 tick
+分配 <BenchValue k="peers.defaultecs.alloc" />，EasyEcs 分配 <BenchValue k="peers.easyecs.alloc" />。DefaultEcs 支持
+netstandard1.1-2.1 和 Unity，EasyEcs 只支持 .NET 10。
+
+<BenchSource />
 
 ## 一览 [#at-a-glance]
 

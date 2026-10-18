@@ -1,9 +1,18 @@
 ---
 title: Comparison with other ECS libraries
-seoTitle: "C# ECS comparison: EasyEcs vs Friflo.Engine.ECS vs Arch vs DefaultEcs (benchmarks)"
-description: EasyEcs against Friflo.Engine.ECS, Arch and DefaultEcs. A feature matrix, the same server tick in each library and every head-to-head benchmark, including the ones EasyEcs does not win.
+seoTitle: "C# ECS benchmarks: EasyEcs vs Friflo, Arch and DefaultEcs"
+description: "Which C# ECS is fastest? EasyEcs against Friflo.Engine.ECS, Arch and DefaultEcs: a feature matrix, the same server tick and every benchmark, losses included."
 icon: Scale
 ---
+
+Which C# ECS is fastest depends on the work. On the same server tick, nine systems over 100,000 entities, EasyEcs
+takes <BenchValue k="peers.easyecs" />; Friflo.Engine.ECS takes <BenchValue k="peers.friflo.ratio" /> that time, Arch
+<BenchValue k="peers.arch.ratio" /> and DefaultEcs <BenchValue k="peers.defaultecs.ratio" />. EasyEcs and Friflo
+allocate nothing per tick; Arch and DefaultEcs allocate <BenchValue k="peers.arch.alloc" /> and
+<BenchValue k="peers.defaultecs.alloc" />. Friflo is close enough that the lead has changed between runs, and it wins
+some of the single-feature benchmarks below: this page shows all of them.
+
+<BenchSource />
 
 EasyEcs is measured against the three most used .NET ECS libraries: [Friflo.Engine.ECS](https://github.com/friflo/Friflo.Engine.ECS),
 [Arch](https://github.com/genaray/Arch) and [DefaultEcs](https://github.com/Doraku/DefaultEcs), at the versions
