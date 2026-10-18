@@ -100,14 +100,18 @@ public sealed partial class World
             int count = table.Count;
             if (count == table.AliveCount && op.Words(this, table))
             {
-                for (int w = 0; w <= (count - 1) >> 6; w++)
+                int words = ((count - 1) >> 6) + 1;
+                for (int w = 0; w < words; w++)
                     if ((rows.Word(table, w) & RowFilter.RowMask(w, count)) is var passing and not 0) op.ApplyWord(this, table, w, passing);
+                    else w = rows.NextPassing(table, w + 1, words) - 1; // words without a passing row
                 continue;
             }
 
             for (int w = (count - 1) >> 6; w >= 0; w--)
             {
                 ulong bits = rows.Word(table, w) & RowFilter.RowMask(w, count);
+                // Words without a passing row: the walk changes no row below the one it visits, so the bits below hold.
+                if (bits == 0) w = rows.PrevPassing(table, w - 1) + 1;
                 for (; bits != 0; bits &= ~(1UL << 63 >> BitOperations.LeadingZeroCount(bits)))
                 {
                     int slot = (w << 6) + 63 - BitOperations.LeadingZeroCount(bits);

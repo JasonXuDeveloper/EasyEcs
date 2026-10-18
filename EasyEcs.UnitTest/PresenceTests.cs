@@ -49,8 +49,64 @@ public class Cull : EcsSystem
     }
 }
 
+/// <summary>Visits the free once each and stuns those whose health is a multiple of 4,999 (a structural pass).</summary>
+public class SparseStun : EcsSystem
+{
+    [ForEach, Without<Stun>]
+    private static void Visit(Entity entity, in Health health, ref Score score)
+    {
+        score.Points++;
+        if (health.Value % 4_999 == 0) entity.Set(new Stun(1));
+    }
+}
+
 public class PresenceTests
 {
+    [Test]
+    public void LongStretchesWithoutPassingRowsAreSkippedExactly()
+    {
+        // 20,000 rows, a handful stunned: words without a stunned row (With) or with only free rows (Without) are
+        // skipped or spanned whole, by every walk: queries, counts, stable and structural passes, bulk changes.
+        const int n = 20_000;
+        using var world = new World();
+        var entities = new Entity[n];
+        world.CreateEntities(entities, new Health(0), new Stun(1));
+        int[] stunned = [5, 6_000, 6_001, 13_000, 19_999];
+        for (int i = 0; i < n; i++)
+        {
+            entities[i].Set(new Health(i));
+            if (System.Array.IndexOf(stunned, i) < 0) entities[i].Remove<Stun>();
+        }
+
+        entities[9_000].Destroy();
+        var with = QueryFilter.Create().With<Stun>();
+        var without = QueryFilter.Create().Without<Stun>();
+        var seen = new System.Collections.Generic.List<int>();
+        foreach (var item in world.Query<Health>(with)) seen.Add(item.Component1.Value);
+        Assert.That(seen, Is.EquivalentTo(stunned)); // the destroyed row took the last row
+        Assert.That((world.Count<Health>(with), world.Count<Health>(without)), Is.EqualTo((5, n - 6)));
+        Assert.That(world.Any<Health>(with), Is.True);
+
+        world.AddSystem<StunnedHealth>();
+        world.Update();
+        for (int i = 0; i < n; i++)
+            if (i != 9_000) Assert.That(entities[i].Read<Health>().Value, Is.EqualTo(i + (System.Array.IndexOf(stunned, i) < 0 ? 1 : 100)), $"entity {i}");
+        world.RemoveSystem<StunnedHealth>();
+
+        for (int i = 0; i < n; i++)
+            if (i != 9_000) entities[i].Set(new Health(i));
+        world.AddSingleton<Score>();
+        world.AddSystem<SparseStun>();
+        world.Update(); // visits the n - 6 free rows, stuns 0, 4,999, 14,997 and 19,996 (9,998 is free too)
+        Assert.That(world.GetSingleton<Score>().Points, Is.EqualTo(n - 6));
+        Assert.That(world.Count<Health>(with), Is.EqualTo(10));
+        world.RemoveSystem<SparseStun>();
+
+        Assert.That(world.SetAll(new Frozen(), with), Is.EqualTo(10));    // rows move out: walks down
+        Assert.That(world.RemoveAll<Stun>(with), Is.EqualTo(10));         // in place: a presence word at a time
+        Assert.That((world.Any<Health>(with), world.Count<Frozen>()), Is.EqualTo((false, 10)));
+    }
+
     [Test]
     public void ARowThatLosesAComponentDuringAPassIsNotVisited()
     {

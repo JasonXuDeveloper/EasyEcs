@@ -747,6 +747,15 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         // long runs, a sparse word costs one step per run), each walked like a dense table. The run's refs
                         // are locals of the run, so they stay in registers while the word loop's state waits on the stack.
                         ulong bits = rows.Word(archetype, w) & RowFilter.RowMask(w, count);
+                        if (bits == 0 && rows.NextPassing(archetype, w + 1, words) is var to && to > w + 1)
+                        {
+                            // Words without a passing row (vectorized when one presence column decides): skip them.
+                            int skip = (to - w - 1) << 6;
+                            w = to - 1; // the step below moves to word `to`
+                            ids = ref Unsafe.Add(ref ids, skip);
+            {{Lines(n, i => $"                    r{i} = ref Unsafe.Add(ref r{i}, skip);")}}
+                        }
+
                         if (tombstones) bits &= AliveRows(ref ids, left); // rare: the run loops then test nothing
             {{Lines(n, i => $"                if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.StampWord<T{i}>(w, bits, _changeTick);")}}
                         while (bits != 0)

@@ -605,6 +605,16 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     }
 
     /// <summary>
+    /// The last word at or below <paramref name="word"/> that may have a passing row, like <see cref="NextPassing"/>
+    /// walking down; -1 when none is left.
+    /// </summary>
+    public int PrevPassing(Archetype archetype, int word)
+    {
+        if (word < 0 || Decider(archetype, out bool excluded) is not { } bits) return word;
+        return bits.AsSpan(0, word + 1).LastIndexOfAnyExcept(excluded ? ulong.MaxValue : 0);
+    }
+
+    /// <summary>
     /// The first word at or after <paramref name="word"/> (below <paramref name="words"/>, whole words of rows) whose
     /// rows do not all pass, 4 words per compare when one presence column decides (see <see cref="Decider"/>);
     /// otherwise <paramref name="word"/>. Returns <paramref name="words"/> when all pass.
@@ -737,6 +747,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         for (int w = NextWord(archetype, 0, words); w < words; w = NextWord(archetype, w + 1, words))
         {
             ulong bits = Word(archetype, w) & RowMask(w, rows);
+            if (bits == 0) w = NextPassing(archetype, w + 1, words) - 1; // words without a passing row
             while (bits != 0)
             {
                 if (slots[(w << 6) + BitOperations.TrailingZeroCount(bits)].Index >= 0) count++;
@@ -806,6 +817,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         for (int w = NextWord(archetype, 0, words); w < words; w = NextWord(archetype, w + 1, words))
         {
             ulong bits = Word(archetype, w) & RowMask(w, rows);
+            if (bits == 0) w = NextPassing(archetype, w + 1, words) - 1; // words without a passing row
             for (; bits != 0; bits &= bits - 1)
                 if (slots[(w << 6) + BitOperations.TrailingZeroCount(bits)].Index >= 0) return true;
         }
@@ -1081,7 +1093,7 @@ internal sealed class QueryWalk
             ulong bits = _bits & (ulong.MaxValue << slot); // shift is mod 64: slot's position in its word
             if (bits == 0)
             {
-                slot = (w + 1) << 6;
+                slot = _filter.NextPassing(Current, w + 1, words) << 6;
                 continue;
             }
 
