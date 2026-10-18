@@ -50,9 +50,10 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
 - Code fixes (EasyEcs.CodeFixes, in the package beside the generator): EECS002 / EECS012 take the parameter by `in`
   or `ref`, EECS005 makes the method static, EECS006 makes the type a struct, EECS010 drops `Parallel = true`, EECS011
   takes it by `ref` (or `Span`), EECS022 makes the type internal, EECS023 removes the filter.
-- .NET 10 features where they measure: the query memo's ways as structs in one array (a static filter 21.6-21.9 ns ->
-  19.0-19.8 ns, no filter 36.8-39.1 ns -> 35.3-35.5 ns), `Lock` everywhere, `params ReadOnlySpan` for
-  `SavedTypes.EntityIds` ([D21](decisions.md#d21-net-10-features-only-where-they-measure)).
+- .NET 10 features where they measure: counting tested rows by their set bits, 8 words per step with AVX-512
+  (100,000 rows 48.9-54.5 μs -> 1.21-1.27 μs), the query cache's alternate lookup (a filter past the memo 92-106 ns
+  -> 86-90 ns), the memo's ways as structs in one array, `Lock` everywhere, `params ReadOnlySpan`, generators on
+  implementation output and C# 14 ([D21](decisions.md#d21-net-10-features-only-where-they-measure)).
 
 ### Dropped
 
@@ -66,9 +67,8 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
 - Settable tag properties (`entity.IsDead = true`): C# 14 rejects assigning an extension property of a struct on a
   `foreach` variable, an indexer result or a field of an `in` parameter, where ECS code holds its entities
   ([D19](decisions.md#d19-no-settable-tag-properties)).
-- `[InlineArray]`, `GetAlternateLookup` for the query cache, `FrozenDictionary` for saved types,
-  `OverloadResolutionPriority`, `field`, `Vector512`: no place where they pay
-  ([D21](decisions.md#d21-net-10-features-only-where-they-measure)).
+- A flat `[InlineArray]` memo, `FrozenDictionary` for saved types, `OverloadResolutionPriority`, `field`: measured or
+  weighed, no net win ([D21](decisions.md#d21-net-10-features-only-where-they-measure)).
 
 ### Toolchain and runtime
 

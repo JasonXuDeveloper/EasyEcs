@@ -294,23 +294,22 @@ closed uses (the generated code is file-local to the system's assembly).
 
 ## D21. .NET 10 features only where they measure
 
-**Decision.** Of the .NET 10 / C# 14 runtime features weighed for 4.1, the query memo holds its ways as structs in
-one array (a hit reads each way's filter without a hop to an object), every lock is a `System.Threading.Lock`,
-`SavedTypes.EntityIds` takes `params ReadOnlySpan`, and null-conditional assignment is used where it reads better.
-The others have no place in the code.
+**Decision.** Of the .NET 10 / C# 14 features weighed for 4.1, each was prototyped and measured with
+BenchmarkDotNet against the commit before it (two runs each side, 0 bytes allocated throughout), and kept only as a
+net win:
 
-**Why.** CallSiteBenchmark, two runs each: a filter in a static field 21.6-21.9 ns -> 19.0-19.8 ns, no filter
-36.8-39.1 ns -> 35.3-35.5 ns, a filter built at the call and one past the memo within noise, 0 bytes throughout.
+| Feature | Verdict | Numbers |
+|---|---|---|
+| `Vector512` (and `Vector<T>`) | kept: a table without tombstones counts the set bits of its row words, 8 words per step with AVX-512, else `Vector<T>` (4 on AVX2, 2 on Arm64) | CountBenchmark, 100,000 rows that must be tested: 48.9-54.5 μs -> 1.21-1.27 μs; `Vector<T>` alone 2.4 μs, one word at a time 5.2 μs; an indexed lane loop over a `Vector512` 7.6 μs (unrolled instead) |
+| `GetAlternateLookup` on the query cache | kept: probed with the call's bits and a ref to its filter, no key built or copied | a filter past the memo 92-106 ns -> 86-90 ns |
+| the memo's ways as structs in one array | kept | a static filter 21.6-21.9 -> 19.0-19.8 ns, no filter 36.8-39.1 -> 35.3-35.5 ns |
+| `[InlineArray]` for the memo (every signature's ways inline in one flat array) | dropped | 1-2 ns more (20.3-20.6 / 38.9-39.5 ns), but signature indices are process-wide, so every world holds about 750 bytes per signature of the process (150 KB for 200) and copies it all for each new way |
+| `FrozenDictionary` for saved types (lock-free lookups, frozen on the first load after a change) | dropped | a one-entity save and load 2.32-2.33 μs -> 2.23-2.34 μs: within noise; a load resolves each type once, not per entity |
+| `System.Threading.Lock`, `params ReadOnlySpan`, null-conditional assignment | kept | cold paths |
+| `RegisterImplementationSourceOutput` | kept: a system's code and the saved-type registration are reached only through module initializers | IDEs skip them while typing |
+| C# 14 in generated code | kept: EasyEcs targets net10.0 (default C# 14), so every generator asks for C# 14 and generated lambdas leave out parameter types | |
+| `OverloadResolutionPriority`, `field` | no place: they change overload choice and syntax, not the IL; the API has no array and span overloads of one method, and the candidates' backing fields are written outside their properties | |
+| first-class span conversions, `nameof(List<>)` | no place: the remaining `.AsSpan()` calls are `Fill` and `foreach (ref ...)`, which conversions do not reach; the generators target netstandard2.0 and compare type names | |
 
-| Feature | Verdict |
-|---|---|
-| `[InlineArray]` | the memo's ways are one struct array now; access sets are bitmasks, built once per `AddSystem` |
-| `GetAlternateLookup` on the query cache | a filter past the memo costs 80 ns against 19 ns for a memo hit, but the hash and the comparison of five masks are most of it, and an alternate key pays them too; it saves only the key's copy, on a path taken from a call signature's fifth filter on |
-| `FrozenDictionary` for saved types | the registry changes while the process runs (modules load, collectible contexts unload); saves already look names up through an alternate `ReadOnlySpan<char>` key |
-| `OverloadResolutionPriority` | the public API has no array and span overloads of one method |
-| `field` | the candidates' backing fields are also written outside their properties (`EcsSystem.Enabled`) |
-| `Vector512` | a component mask holds 256 bits inline, so a mask operation is one 256-bit instruction already; presence scans skip by summary words, not by scanning lanes |
-
-**Considered.** Widening the inline mask to 512 bits for `Vector512` (every filter, key and table mask grows by 32
-bytes for components 256-511, which overflow already covers).
-
+**Considered.** Widening the inline component mask to 512 bits (every filter, key and table mask grows by 32 bytes
+for components 256-511, which the overflow already covers).
