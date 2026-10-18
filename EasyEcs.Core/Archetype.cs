@@ -583,12 +583,9 @@ internal sealed class Archetype
     /// the block's <see cref="Removals"/> are raised to it.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void NoteRemoved(int column, int slot, ulong tick) => NoteRemoved(ref Summary(Words, column, slot >> 6), column, slot, tick);
-
-    /// <summary><see cref="NoteRemoved(int, int, ulong)"/> with the row's word summary at hand.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void NoteRemoved(ref WordTicks word, int column, int slot, ulong tick)
+    private void NoteRemoved(int column, int slot, ulong tick)
     {
+        ref var word = ref Summary(Words, column, slot >> 6);
         if (tick <= word.Removed) return;
         word.Removed = tick;
         Summary(Removals, column, slot >> 12).Raise(1UL << (slot >> 6), tick); // shift is mod 64
@@ -602,13 +599,8 @@ internal sealed class Archetype
     public void StampRemoved<T>(int slot, ulong tick) where T : struct, IComponent
     {
         if (default(T) is not ITrackChanges) return;
-        // Stamp and NoteRemoved on one column and word: both read the word's summary, found once.
-        int column = ColumnIndex(ComponentType<ChangeTicks<T>>.Bit);
-        ref var word = ref Summary(Words, column, slot >> 6);
-        if (word.Write == tick) word.Rows |= 1UL << slot; // shift is mod 64
-        else NoteWord(column, slot, 1UL << slot, tick);
-        Unsafe.Add(ref Data<ChangeTicks<T>>(column), slot).Tick = tick;
-        NoteRemoved(ref word, column, slot, tick);
+        Stamp<T>(slot, tick);
+        NoteRemoved(ColumnIndex(ComponentType<ChangeTicks<T>>.Bit), slot, tick);
     }
 
     /// <summary>
