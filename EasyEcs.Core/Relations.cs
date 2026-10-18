@@ -165,9 +165,12 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
         if (_built) Put(id, version, in value);
     }
 
-    void World.IValueIndex.Added(int id, int version, Archetype archetype, int slot)
+    void World.IValueIndex.AddedRows(Archetype archetype, int column, int first, int count)
     {
-        if (_built) Put(id, version, in archetype.Ref<DynamicBuffer<T>>(ComponentType<DynamicBuffer<T>>.Bit, slot));
+        if (!_built) return;
+        ref var buffers = ref archetype.Data<DynamicBuffer<T>>(column);
+        for (int r = first; r < first + count; r++)
+            if (archetype.Has(column, r)) Put(archetype.Slots[r].Index, archetype.Slots[r].Version, in Unsafe.Add(ref buffers, r));
     }
 
     void World.IValueIndex.Removed(int id) => Remove(id, default, all: true);

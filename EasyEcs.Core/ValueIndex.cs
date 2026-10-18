@@ -177,10 +177,39 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
         if (_built) Put(id, version, value.Key); // else the first lookup indexes the row
     }
 
-    /// <summary>Entity <paramref name="id"/> was created with row <paramref name="slot"/> of <paramref name="archetype"/>, which has <typeparamref name="T"/> (Instantiate).</summary>
-    void World.IValueIndex.Added(int id, int version, Archetype archetype, int slot)
+    /// <summary>
+    /// New entities were given rows of <paramref name="archetype"/> holding <typeparamref name="T"/> (Instantiate, moves,
+    /// loads). Rows of one key in a row, as the children of one parent, share one head lookup.
+    /// </summary>
+    void World.IValueIndex.AddedRows(Archetype archetype, int column, int first, int count)
     {
-        if (_built) Put(id, version, archetype.Ref<T>(ComponentType<T>.Bit, slot).Key);
+        if (!_built) return;
+        ref var values = ref archetype.Data<T>(column);
+        var slots = archetype.Slots;
+        ref var head = ref Unsafe.NullRef<IndexHead>();
+        TKey previous = default!;
+        for (int r = first; r < first + count; r++)
+        {
+            if (!archetype.Has(column, r)) continue;
+            int id = slots[r].Index;
+            var key = Unsafe.Add(ref values, r).Key;
+            if (id >= _nodes.Length) Array.Resize(ref _nodes, Math.Max(id + 1, _nodes.Length * 2));
+            if (_nodes[id].Linked || IsNull(key))
+            {
+                Put(id, slots[r].Version, key); // may unlink: heads change, so look the next one up
+                head = ref Unsafe.NullRef<IndexHead>();
+                continue;
+            }
+
+            // Valid until the next AddHead or Unlink: linking only writes nodes and this head.
+            if (Unsafe.IsNullRef(ref head) || !previous.Equals(key))
+            {
+                head = ref AddHead(key);
+                previous = key;
+            }
+
+            Link(id, slots[r].Version, key, ref head);
+        }
     }
 
     /// <summary>Entity <paramref name="id"/> is destroyed or loses <typeparamref name="T"/>. Inside the structural gate.</summary>
@@ -266,7 +295,13 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
         }
 
         if (IsNull(key)) return;
-        ref var head = ref AddHead(key);
+        Link(id, version, key, ref AddHead(key));
+    }
+
+    /// <summary>Put unlinked entity <paramref name="id"/> first in <paramref name="head"/>, the list of <paramref name="key"/>.</summary>
+    private void Link(int id, int version, TKey key, ref IndexHead head)
+    {
+        ref var node = ref _nodes[id];
         node.Key = key;
         node.Version = version;
         node.Linked = true;
