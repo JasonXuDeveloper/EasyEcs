@@ -289,6 +289,38 @@ public class IndexTests
     }
 
     [Test]
+    public void EntitiesDestroyedDuringFindLeaveRoomForLaterOnes()
+    {
+        using var world = new World();
+        var index = world.Index<Callsign, string>();
+        var all = new Entity[6];
+        world.CreateEntities(all, new Callsign("x"));
+        var seen = new List<Entity>();
+        foreach (var e in index.Find("x"))
+        {
+            seen.Add(e);
+            e.Destroy();                                       // the current one, and an unvisited one each step
+            foreach (var other in all)
+                if (other.IsAlive && !seen.Contains(other)) { other.Destroy(); break; }
+        }
+
+        Assert.That(seen, Has.Count.EqualTo(3));
+        Assert.That(index.Count("x"), Is.Zero);
+        var later = new Entity[8];
+        world.CreateEntities(later, new Callsign("x"));         // the emptied key comes back
+        all[0] = world.CreateEntity(new Callsign("y"));
+        later[3].Destroy();
+        later[5].Set(new Callsign("y"));
+        var alive = new List<Entity>();
+        foreach (var e in later)
+            if (e.IsAlive && e.Read<Callsign>().Value == "x") alive.Add(e);
+        alive.Add(world.CreateEntity(new Callsign("x")));      // fills a hole
+        Assert.That(All(index.Find("x")), Is.EquivalentTo(alive));
+        Assert.That(index.Count("x"), Is.EqualTo(alive.Count));
+        Assert.That(All(index.Find("y")), Is.EquivalentTo(new[] { all[0], later[5] }));
+    }
+
+    [Test]
     public void RelationsToTheNullIdAreHashed()
     {
         using var world = new World();

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 namespace EasyEcs;
@@ -24,10 +25,127 @@ public interface IIndexed<TKey> : IIndexed where TKey : IEquatable<TKey>
     TKey Key { get; }
 }
 
-/// <summary>The list of one key of an index: its first entity (or link), its length, and for a <see cref="TargetSlots"/> slot the target incarnation it belongs to.</summary>
+/// <summary>
+/// The list of one key of an index (a value index's key, a relation's target): its entities in one array (the first
+/// <see cref="Used"/> slots, entities and holes), its length, and for a <see cref="TargetSlots"/> slot the target
+/// incarnation it belongs to. A leaving entity leaves a hole (a negative index: the next hole of <see cref="Free"/>'s
+/// chain, + 1) that the next entity fills. Entities never move, so a loop reads them in order and finds each once,
+/// whatever is destroyed during it.
+/// </summary>
 internal struct IndexHead
 {
-    public int First, Count, Version;
+    public EntityId[] Ids;
+    public int Used, Free, Count, Version;
+
+    /// <summary>Add <paramref name="id"/> in the first hole, else at the end; its place in <see cref="Ids"/>.</summary>
+    public int Add(EntityId id, SpareIds spares)
+    {
+        int place;
+        if (Free != 0)
+        {
+            place = Free - 1;
+            Free = -1 - Ids[place].Index;
+        }
+        else
+        {
+            if (Ids == null || Used == Ids.Length) Ids = spares.Grow(Ids, Used, Used + 1);
+            place = Used++;
+        }
+
+        Ids[place] = id;
+        Count++;
+        return place;
+    }
+
+    /// <summary>Make room for <paramref name="more"/> entities at once (a run of rows with this key), instead of growing step by step.</summary>
+    public void Reserve(int more, SpareIds spares)
+    {
+        if (Free == 0 && (Ids == null || Used + more > Ids.Length)) Ids = spares.Grow(Ids, Used, Used + more);
+    }
+
+    /// <summary>
+    /// Remove the entity at <paramref name="place"/>; whether the list is empty now. An emptied list gives its array
+    /// to the lists that grow next (keeping it would strand it in a slot whose id no longer names a target).
+    /// </summary>
+    public bool Remove(int place, SpareIds spares)
+    {
+        // A hole even in an emptied list: a loop over it may still be walking the array.
+        Ids[place] = new EntityId(-1 - Free, 0);
+        Free = place + 1;
+        if (--Count != 0) return false;
+        spares.Return(Ids);
+        Ids = null;
+        Used = Free = 0;
+        return true;
+    }
+
+    /// <summary>A walk over the entities the list holds now.</summary>
+    public readonly ListWalk Walk() => new(Ids, Used);
+}
+
+/// <summary>The arrays of emptied lists of an index, by length, for the next lists that grow: keys that come and go allocate nothing.</summary>
+internal sealed class SpareIds
+{
+    private readonly List<EntityId[]>[] _byLength = new List<EntityId[]>[32]; // by log2 of the length
+
+    /// <summary>
+    /// An array holding the first <paramref name="used"/> ids of <paramref name="ids"/> with room for
+    /// <paramref name="needed"/>: twice as long, or the power of two that fits (4 at least).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public EntityId[] Grow(EntityId[] ids, int used, int needed)
+    {
+        int length = (int)BitOperations.RoundUpToPowerOf2((uint)Math.Max(Math.Max(needed, 4), ids == null ? 0 : ids.Length * 2));
+        var spares = _byLength[BitOperations.Log2((uint)length)];
+        EntityId[] grown;
+        if (spares is { Count: > 0 })
+        {
+            grown = spares[^1];
+            spares.RemoveAt(spares.Count - 1);
+        }
+        else grown = new EntityId[length];
+
+        if (ids != null)
+        {
+            ids.AsSpan(0, used).CopyTo(grown);
+            Return(ids);
+        }
+
+        return grown;
+    }
+
+    public void Return(EntityId[] ids) => (_byLength[BitOperations.Log2((uint)ids.Length)] ??= []).Add(ids);
+}
+
+/// <summary>
+/// A walk over the entities of one <see cref="IndexHead"/> list, past its holes, the latest first: a loop that
+/// destroys what it finds (a cascade) removes the newest rows of their table first, which moves no other row.
+/// </summary>
+internal struct ListWalk
+{
+    private readonly EntityId[] _ids;
+    private int _place;
+
+    public ListWalk(EntityId[] ids, int used)
+    {
+        _ids = ids;
+        _place = used;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Next(out EntityId id)
+    {
+        // _place starts at the length the list had when the walk began, within the array the walk holds: no bounds
+        // check.
+        while (--_place >= 0)
+        {
+            id = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_ids), _place);
+            if (id.Index >= 0) return true;
+        }
+
+        id = default;
+        return false;
+    }
 }
 
 /// <summary>
@@ -87,9 +205,10 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
 {
     private readonly World _world;
 
-    // Key -> its list (first entity id and length). Lists are doubly linked through _nodes (indexed by entity id), so
-    // moving an entity between keys and dropping it are O(1) without allocation.
+    // Key -> its list (IndexHead: the entities in one array, read in order by a lookup). _nodes (indexed by entity id)
+    // knows each entity's key and place in its list, so moving it between keys and dropping it are O(1).
     private readonly Dictionary<TKey, IndexHead> _heads = new();
+    private readonly SpareIds _spares = new();
 
     // Relations (EntityId keys): the lists by the target's index, no hashing. A target whose index is still held by
     // links to an older incarnation, and EntityId.Null, use _heads.
@@ -107,8 +226,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
     private struct Node
     {
         public TKey Key;
-        public int Next, Prev;
-        public int Version; // the entity incarnation the node belongs to
+        public int Place; // in its key's Ids
         public bool Linked;
     }
 
@@ -126,7 +244,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
     {
         if (!_built) Build();
         ref var head = ref HeadOf(key);
-        return new Matches(this, Unsafe.IsNullRef(ref head) ? -1 : head.First);
+        return new Matches(_world, Unsafe.IsNullRef(ref head) ? default : head.Walk());
     }
 
     /// <summary>Index every row now if the index is not built (before entering the structural gate).</summary>
@@ -177,6 +295,22 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
         if (_built) Put(id, version, value.Key); // else the first lookup indexes the row
     }
 
+    /// <summary>New entities all given <paramref name="value"/> (CreateEntities): one key lookup, the list sized once.</summary>
+    void World.IIndexOf<T>.PutAll(ReadOnlySpan<Entity> entities, in T value)
+    {
+        if (!_built) return;
+        var key = value.Key;
+        if (IsNull(key)) return;
+        ref var head = ref AddHead(key);
+        head.Reserve(entities.Length, _spares);
+        foreach (var entity in entities)
+        {
+            int id = entity.Index;
+            if (id >= _nodes.Length) Array.Resize(ref _nodes, Math.Max(id + 1, _nodes.Length * 2));
+            Link(id, entity.Version, key, ref head); // a new entity is in no list: its id left its list when destroyed
+        }
+    }
+
     /// <summary>
     /// New entities were given rows of <paramref name="archetype"/> holding <typeparamref name="T"/> (Instantiate, moves,
     /// loads). Rows of one key in a row, as the children of one parent, share one head lookup.
@@ -206,6 +340,9 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
             {
                 head = ref AddHead(key);
                 previous = key;
+                int run = 1; // the rows of this key in a row (the children of one parent) get their room at once
+                while (r + run < first + count && Unsafe.Add(ref values, r + run).Key.Equals(key)) run++;
+                head.Reserve(run, _spares);
             }
 
             Link(id, slots[r].Version, key, ref head);
@@ -298,38 +435,35 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
         Link(id, version, key, ref AddHead(key));
     }
 
-    /// <summary>Put unlinked entity <paramref name="id"/> first in <paramref name="head"/>, the list of <paramref name="key"/>.</summary>
+    /// <summary>Put unlinked entity <paramref name="id"/> in <paramref name="head"/>, the list of <paramref name="key"/>.</summary>
     private void Link(int id, int version, TKey key, ref IndexHead head)
     {
         ref var node = ref _nodes[id];
+        node.Place = head.Add(new EntityId(id, version), _spares);
         node.Key = key;
-        node.Version = version;
         node.Linked = true;
-        node.Prev = -1;
-        node.Next = head.Count != 0 ? head.First : -1;
-        if (head.Count != 0) _nodes[head.First].Prev = id;
-        head.First = id;
-        head.Count++;
     }
 
     private void Unlink(int id)
     {
         ref var node = ref _nodes[id];
-        // Decided by key, before the count changes: the same storage HeadOf picks.
-        bool inSlot = typeof(TKey) == typeof(EntityId) && !Unsafe.IsNullRef(ref SlotOf(node.Key));
-        ref var head = ref HeadOf(node.Key);
-        if (--head.Count == 0)
+        // The same storage HeadOf picks, one lookup: the target's slot, else the dictionary.
+        ref var head = ref Unsafe.NullRef<IndexHead>();
+        bool inSlot = false;
+        if (typeof(TKey) == typeof(EntityId))
         {
-            // An emptied _byTarget slot just stays (Count 0 marks it free); a dictionary entry goes.
-            if (!inSlot)
-            {
-                _heads.Remove(node.Key);
-                if (_sorted != null) RemoveSorted(node.Key);
-            }
+            head = ref SlotOf(node.Key);
+            inSlot = !Unsafe.IsNullRef(ref head);
         }
-        else if (node.Prev < 0) head.First = node.Next;
-        if (node.Prev >= 0) _nodes[node.Prev].Next = node.Next;
-        if (node.Next >= 0) _nodes[node.Next].Prev = node.Prev;
+
+        if (!inSlot) head = ref CollectionsMarshal.GetValueRefOrNullRef(_heads, node.Key);
+        // An emptied _byTarget slot just stays (Count 0 marks it free); a dictionary entry goes.
+        if (head.Remove(node.Place, _spares) && !inSlot)
+        {
+            _heads.Remove(node.Key);
+            if (_sorted != null) RemoveSorted(node.Key);
+        }
+
         node.Linked = false;
         node.Key = default!; // let the GC collect a managed key
     }
@@ -405,7 +539,8 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
         private readonly TKey _min, _max;
         private readonly bool _bounded, _descending;
         private TKey _key;
-        private int _pos, _version, _next;
+        private ListWalk _walk;
+        private int _pos, _version;
         private bool _started;
 
         internal Ordered(ValueIndex<T, TKey> index, TKey min, TKey max, bool bounded, bool descending)
@@ -418,7 +553,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
             _key = default!;
             _pos = 0;
             _version = 0;
-            _next = -1;
+            _walk = default;
             _started = false;
             Current = default;
         }
@@ -438,13 +573,9 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
             var index = _index;
             while (true)
             {
-                while (_next >= 0)
+                if (_walk.Next(out var id))
                 {
-                    ref var node = ref index._nodes[_next];
-                    int id = _next;
-                    _next = node.Next;
-                    if (!node.Linked) continue;
-                    Current = new Entity(index._world, id, node.Version);
+                    Current = new Entity(index._world, id);
                     return true;
                 }
 
@@ -463,7 +594,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
                 if ((uint)_pos >= (uint)index._sortedCount) return false;
                 _key = index._sorted[_pos];
                 if (_bounded && (_descending ? Compare(_key, _min) < 0 : Compare(_key, _max) > 0)) return false;
-                _next = index.HeadOf(_key).First; // a sorted key has entities
+                _walk = index.HeadOf(_key).Walk(); // a sorted key has entities
             }
         }
     }
@@ -471,13 +602,13 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
     /// <summary>Enumerates the entities of one key (<c>foreach</c>).</summary>
     public ref struct Matches
     {
-        private readonly ValueIndex<T, TKey> _index;
-        private int _next;
+        private readonly World _world;
+        private ListWalk _walk;
 
-        internal Matches(ValueIndex<T, TKey> index, int head)
+        internal Matches(World world, ListWalk walk)
         {
-            _index = index;
-            _next = head;
+            _world = world;
+            _walk = walk;
             Current = default;
         }
 
@@ -490,18 +621,10 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
         /// <summary>Move to the next entity with the key. O(1) per entity.</summary>
         public bool MoveNext()
         {
-            // An entity destroyed during the loop (a cascade) leaves the list; the loop moves on past it.
-            while (_next >= 0)
-            {
-                ref var node = ref _index._nodes[_next];
-                int id = _next;
-                _next = node.Next;
-                if (!node.Linked) continue;
-                Current = new Entity(_index._world, id, node.Version);
-                return true;
-            }
-
-            return false;
+            // An entity destroyed during the loop (a cascade) leaves a hole; the walk moves on past it.
+            if (!_walk.Next(out var id)) return false;
+            Current = new Entity(_world, id);
+            return true;
         }
     }
 }

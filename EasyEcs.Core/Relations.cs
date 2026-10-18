@@ -23,14 +23,15 @@ public interface IRelation
 /// entities link to an entity, O(1) to start and O(1) per link. Kept current as links are written and as their entities
 /// are destroyed or lose the buffer; the first lookup (and the first after <see cref="World.Restore"/>) indexes every
 /// buffer once. Links to a destroyed target stay findable by its id, which no later entity has. Owner thread only.
-/// Memory: one 32-byte link per element, recycled.
+/// Memory: one 20-byte link per element, recycled, and 8 bytes in its target's list.
 /// </summary>
 public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<DynamicBuffer<T>> where T : struct, IRelation
 {
     private readonly World _world;
 
-    // Links live in one array, recycled through a free list. Each is in two lists: its target's (doubly linked, so a
-    // link leaves in O(1)) and its source's (singly linked, walked when the source's links are rewritten or dropped).
+    // Links live in one array, recycled through a free list. Each is in two lists: its target's (an IndexHead, the
+    // link knowing its place there, so it leaves in O(1)) and its source's (singly linked, walked when the source's
+    // links are rewritten or dropped).
     private Link[] _links = new Link[16];
     private int _linkCount, _free = -1;
 
@@ -40,14 +41,15 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
     // Target lists by target index; a target whose index holds another incarnation's list, and only it, goes to _older.
     private TargetSlots _byTarget;
     private readonly Dictionary<EntityId, IndexHead> _older = new();
+    private readonly SpareIds _spares = new();
     private bool _built;
 
     private struct Link
     {
         public EntityId Target;
-        public int Source, SourceVersion; // Source < 0: a free link
-        public int Next, Prev;            // the target's list (Next stays valid after unlinking: walks step past it)
-        public int NextOfSource;          // the source's list, or the free list
+        public int Source;       // < 0: a free link
+        public int Place;        // in the target's list
+        public int NextOfSource; // the source's list, or the free list
     }
 
     internal RelationIndex(World world) => _world = world;
@@ -57,7 +59,7 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
     {
         if (!_built) Build();
         ref var head = ref HeadOf(target);
-        return new Sources(this, Unsafe.IsNullRef(ref head) ? -1 : head.First);
+        return new Sources(_world, Unsafe.IsNullRef(ref head) ? default : head.Walk());
     }
 
     /// <summary>Number of links to <paramref name="target"/>. O(1).</summary>
@@ -99,16 +101,10 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
         else if (link == _links.Length) Array.Resize(ref _links, _links.Length * 2);
         if (source >= _bySource.Length) Array.Resize(ref _bySource, Math.Max(source + 1, _bySource.Length * 2));
 
-        ref var head = ref AddHead(target);
         ref var node = ref _links[link];
+        node.Place = AddHead(target).Add(new EntityId(source, version), _spares);
         node.Target = target;
         node.Source = source;
-        node.SourceVersion = version;
-        node.Prev = -1;
-        node.Next = head.Count != 0 ? head.First : -1;
-        if (head.Count != 0) _links[head.First].Prev = link;
-        head.First = link;
-        head.Count++;
         node.NextOfSource = _bySource[source] - 1;
         _bySource[source] = link + 1;
     }
@@ -137,17 +133,11 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
     private void Release(int link)
     {
         ref var node = ref _links[link];
-        // Decided before the count changes: the same storage HeadOf picks.
-        bool older = Unsafe.IsNullRef(ref SlotOf(node.Target));
-        ref var head = ref HeadOf(node.Target);
-        if (--head.Count == 0)
-        {
-            if (older) _older.Remove(node.Target);
-        }
-        else if (node.Prev < 0) head.First = node.Next;
-
-        if (node.Prev >= 0) _links[node.Prev].Next = node.Next;
-        if (node.Next >= 0) _links[node.Next].Prev = node.Prev;
+        // The same storage HeadOf picks, one lookup: the target's slot, else _older.
+        ref var head = ref SlotOf(node.Target);
+        bool older = Unsafe.IsNullRef(ref head);
+        if (older) head = ref System.Runtime.InteropServices.CollectionsMarshal.GetValueRefOrNullRef(_older, node.Target);
+        if (head.Remove(node.Place, _spares) && older) _older.Remove(node.Target);
         node.Source = -1;
         node.NextOfSource = _free;
         _free = link;
@@ -163,6 +153,12 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
     void World.IIndexOf<DynamicBuffer<T>>.Put(int id, int version, in DynamicBuffer<T> value)
     {
         if (_built) Put(id, version, in value);
+    }
+
+    void World.IIndexOf<DynamicBuffer<T>>.PutAll(ReadOnlySpan<Entity> entities, in DynamicBuffer<T> value)
+    {
+        if (!_built) return;
+        foreach (var entity in entities) Put(entity.Index, entity.Version, in value);
     }
 
     void World.IValueIndex.AddedRows(Archetype archetype, int column, int first, int count)
@@ -230,13 +226,13 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
     /// <summary>Enumerates the entities linking to one target (<c>foreach</c>), once per link.</summary>
     public ref struct Sources
     {
-        private readonly RelationIndex<T> _index;
-        private int _next;
+        private readonly World _world;
+        private ListWalk _walk;
 
-        internal Sources(RelationIndex<T> index, int first)
+        internal Sources(World world, ListWalk walk)
         {
-            _index = index;
-            _next = first;
+            _world = world;
+            _walk = walk;
             Current = default;
         }
 
@@ -249,16 +245,10 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
         /// <summary>Move to the next link. O(1) per link.</summary>
         public bool MoveNext()
         {
-            while (_next >= 0)
-            {
-                ref var node = ref _index._links[_next];
-                _next = node.Next;
-                if (node.Source < 0) continue; // dropped during the loop (its source was destroyed)
-                Current = new Entity(_index._world, node.Source, node.SourceVersion);
-                return true;
-            }
-
-            return false;
+            // A link dropped during the loop (its source was destroyed) leaves a hole; the walk moves on past it.
+            if (!_walk.Next(out var id)) return false;
+            Current = new Entity(_world, id);
+            return true;
         }
     }
 }

@@ -184,7 +184,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             int first = PlaceRows(target, entities); // consecutive rows: each column is filled at once
                 {{Lines(n, i => $"            MemoryMarshal.CreateSpan(ref Unsafe.Add(ref target.Base<T{i}>(b{i}), first), entities.Length).Fill(c{i});")}}
                 {{Lines(n, i => $"            target.StampRows<T{i}>(first, entities.Length, _changeTick);")}}
-                {{Lines(n, i => $"            if (ComponentType<T{i}>.Indexed) foreach (var e in entities) Written(e.Index, e.Version, in c{i});")}}
+                {{Lines(n, i => $"            if (ComponentType<T{i}>.Indexed) WrittenAll(entities, in c{i});")}}
                         }
                     }
 

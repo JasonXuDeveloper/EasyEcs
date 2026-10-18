@@ -80,6 +80,9 @@ public sealed partial class World
     internal interface IIndexOf<T> where T : struct, IComponent
     {
         void Put(int id, int version, in T value);
+
+        /// <summary>New <paramref name="entities"/> were all given <paramref name="value"/> (CreateEntities).</summary>
+        void PutAll(ReadOnlySpan<Entity> entities, in T value);
     }
 
     /// <summary>
@@ -100,6 +103,18 @@ public sealed partial class World
         }
 
         if (ComponentType<T>.Grouped && _groupByBit != null) Regroup(id, bit, in value);
+    }
+
+    /// <summary>
+    /// New <paramref name="entities"/> all hold <paramref name="value"/> of indexed <typeparamref name="T"/>
+    /// (CreateEntities, which already placed them in their group's table): one key lookup for all of them, if this
+    /// world has the index. Inside the structural gate.
+    /// </summary>
+    internal void WrittenAll<T>(ReadOnlySpan<Entity> entities, in T value) where T : struct, IComponent
+    {
+        int bit = ComponentType<T>.Bit;
+        var byBit = _indexByBit;
+        if (byBit != null && bit < byBit.Length && byBit[bit] is { } index) Unsafe.As<IIndexOf<T>>(index).PutAll(entities, in value);
     }
 
     /// <summary>Tell the index of <paramref name="bit"/>, if any, that entity <paramref name="id"/> lost it (cold).</summary>
