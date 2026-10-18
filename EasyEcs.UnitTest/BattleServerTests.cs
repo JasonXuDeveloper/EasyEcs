@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Threading;
 using NUnit.Framework;
@@ -9,8 +10,8 @@ using EasyEcs.Benchmark.Showcase;   // inside the namespace: wins over the share
 
 /// <summary>
 /// The battle server example (doc/example.md) and BattleServerBenchmark, run as a whole: every feature it uses must keep its
-/// promise while the others churn the world (changes replicated, indexes in sync, relations cleaned up, struct jobs
-/// and queries agreeing with scans, snapshots replaying, failures isolated, nothing allocated).
+/// promise while the others churn the world (changes replicated, indexes and groups in sync, links cleaned up,
+/// runners and queries agreeing with scans, snapshots replaying, saves loading, failures isolated, nothing allocated).
 /// </summary>
 public class BattleServerTests
 {
@@ -52,11 +53,11 @@ public class BattleServerTests
             else if (to == default && item.Component1.Count < BattleServer.BagSize) to = item.Entity;
         }
 
-        int value = server.LootValue(from) + server.LootValue(to), items = from.Read<DynamicBuffer<Loot>>().Count;
-        var oldest = from.Read<DynamicBuffer<Loot>>()[0];
+        int value = server.LootValue(from) + server.LootValue(to), items = from.Loot.Count;
+        var oldest = from.Loot[0];
         Assert.That(server.Give(from, to), Is.True);
-        Assert.That(from.Read<DynamicBuffer<Loot>>().Count, Is.EqualTo(items - 1));
-        var bag = to.Read<DynamicBuffer<Loot>>().AsReadOnlySpan();
+        Assert.That(from.Loot.Count, Is.EqualTo(items - 1));
+        var bag = to.Loot.AsReadOnlySpan();
         Assert.That(bag[^1], Is.EqualTo(oldest));
         Assert.That(server.LootValue(from) + server.LootValue(to), Is.EqualTo(value));
         Assert.That(server.Give(default, to), Is.False);                     // a stale handle has no bag
@@ -93,14 +94,14 @@ public class BattleServerTests
         Assert.That(mirror, Is.Not.EqualTo(player));
         Assert.That(mirror.Read<Health>(), Is.EqualTo(player.Read<Health>()));
         Assert.That(server.LootValue(mirror), Is.EqualTo(server.LootValue(player)));
-        Assert.That(server.PlayersIn(zone), Is.EqualTo(inZone + 1));         // the zone index learned the copy
-        mirror.Get<DynamicBuffer<Loot>>().Add(new Loot(99));                 // a bag of its own
+        Assert.That(server.PlayersIn(zone), Is.EqualTo(inZone + 1));         // the copy went to its zone's table
+        mirror.WriteLoot().Add(new Loot(99));                                // a bag of its own
         Assert.That(server.LootValue(mirror), Is.EqualTo(server.LootValue(player) + 99));
         Assert.That(server.Mirror(default), Is.EqualTo(default(Entity)));
     }
 
     [Test]
-    public void TheZoneIndexMatchesAScan()
+    public void TheZoneGroupsMatchAScan()
     {
         using var server = Run(200);
         var counts = new int[4];
@@ -110,14 +111,13 @@ public class BattleServerTests
     }
 
     [Test]
-    public void ProjectilesBelongToLivingPlayersAndTheRelationListsThem()
+    public void ProjectilesAreChildrenOfLivingPlayers()
     {
         using var server = Run(200);
-        var shots = server.World.Index<OwnedBy, EntityId>();
         var owned = new Dictionary<Entity, int>();
-        foreach (var item in server.World.Query<OwnedBy>())
+        foreach (var item in server.World.Query<ChildOf>())
         {
-            Assert.That(server.World.TryGetEntity(item.Component1.Owner, out var owner), Is.True);
+            Assert.That(server.World.TryGetEntity(item.Component1.Parent, out var owner), Is.True);
             Assert.That(owner.Has<Player>() && !owner.Has<Dead>(), Is.True);
             owned[owner] = owned.GetValueOrDefault(owner) + 1;
         }
@@ -126,7 +126,7 @@ public class BattleServerTests
         foreach (var (owner, count) in owned)
         {
             int found = 0;
-            foreach (var shot in shots.Find(owner)) found++;
+            foreach (var shot in server.World.Children(owner)) found++;
             Assert.That(found, Is.EqualTo(count));
         }
     }
@@ -160,9 +160,9 @@ public class BattleServerTests
     public void TheCensusIsNotAChange()
     {
         using var server = Run(30);
-        server.Save();
-        server.Census();                                                      // struct jobs that declare no writes
-        Assert.That(server.Unsaved, Is.Zero);
+        server.Checkpoint();
+        server.Census();                                                      // runners that only read
+        Assert.That(server.WrittenSinceCheckpoint, Is.Zero);
     }
 
     [Test]
@@ -205,7 +205,9 @@ public class BattleServerTests
         Assert.That(server.NewRound(), Is.EqualTo(projectiles));
         Assert.That(server.World.Any<Lifetime>(), Is.False);
         foreach (var item in server.World.Query<Health>()) Assert.That(item.Component1.Value, Is.EqualTo(item.Component1.Max));
-        Assert.That(server.World.Index<OwnedBy, EntityId>().Count(server.NearestPlayer(default)), Is.Zero);
+        Assert.That(server.World.Children(server.NearestPlayer(default)).GetEnumerator().MoveNext(), Is.False);
+        Assert.That(server.AnyoneAfflicted, Is.False);                       // statuses lifted in bulk
+        Assert.That(server.Census().ReadyToAttack, Is.EqualTo(server.World.Count<Attack>(QueryFilter.Create().Without<Dead>())));
         Assert.That(server.World.RowStats().HoleRatio, Is.LessThanOrEqualTo(0.1f));
     }
 
@@ -248,28 +250,28 @@ public class BattleServerTests
     }
 
     [Test]
-    public void UnsavedCountsThePlayersWrittenSinceTheSave()
+    public void PlayersWrittenSinceTheCheckpointAreCounted()
     {
         using var server = Run(30);
-        server.Save();
-        Assert.That(server.Unsaved, Is.Zero);
+        server.Checkpoint();
+        Assert.That(server.WrittenSinceCheckpoint, Is.Zero);
         for (int i = 0; i < 10; i++) server.Tick();
         int written = 0;
         foreach (var e in server.World.Entities)
             if (e.Has<Player>() && e.TryGet<Health>(out var hp) && e.TryGet<Replica>(out var replica) && hp.Value != replica.Health)
                 written++;
-        Assert.That(server.Unsaved, Is.Positive.And.AtLeast(written));      // hits since the last send at least
-        Assert.That(server.Unsaved, Is.LessThanOrEqualTo(server.Census().Players));
+        Assert.That(server.WrittenSinceCheckpoint, Is.Positive.And.AtLeast(written));  // hits since the last send at least
+        Assert.That(server.WrittenSinceCheckpoint, Is.LessThanOrEqualTo(server.Census().Players));
     }
 
     [Test]
     public void RestoringASnapshotReplaysTheSameBattle()
     {
         using var server = Run(100);
-        server.Save();
+        server.Checkpoint();
         for (int i = 0; i < 60; i++) server.Tick();
         var first = server.Battle;
-        server.Load();
+        server.Rewind();
         for (int i = 0; i < 60; i++) server.Tick();
         var replay = server.Battle;
         // A restore counts every tracked row as written: the first send after it brings clients the whole state.
@@ -295,6 +297,7 @@ public class BattleServerTests
         using var server = Run(20);
         Assert.That(server.Slowest().Stats.Runs, Is.Positive);
         Assert.That(server.World.GetSystem<RegenerationSystem>().Stats.Runs, Is.EqualTo(2));   // every 10th update
+        Assert.That(server.World.GetSystem<ManaSystem>().Stats.Runs, Is.EqualTo(2));           // the same, phase 5
         Assert.That(server.World.HasSingleton<Waypoints>(), Is.True);         // SteeringSystem.OnCreate
         server.World.RemoveSystem<SteeringSystem>();
         Assert.That(server.World.HasSingleton<Waypoints>(), Is.False);        // SteeringSystem.OnDestroy
@@ -322,10 +325,124 @@ public class BattleServerTests
     [Test]
     public void ATickAllocatesNothing()
     {
-        using var server = Run(300);
+        using var server = Run(1_200);                                        // tables grown to their peak populations
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 100; i++) server.Tick();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+    }
+
+    [Test]
+    public void FrozenUnitsKeepTheirAttackAndVelocityDisabled()
+    {
+        using var server = Run(300);
+        int frozen = 0;
+        foreach (var item in server.World.Query<Frozen>())
+        {
+            Assert.That(item.Entity.IsAttackDisabled && item.Entity.IsVelocityDisabled, Is.True);
+            Assert.That(item.Entity.HasAttack || item.Entity.HasVelocity, Is.False);  // no query sees them
+            frozen++;
+        }
+
+        Assert.That(frozen, Is.Positive);
+        foreach (var item in server.World.Query<Attack>()) Assert.That(item.Entity.Has<Frozen>(), Is.False);
+    }
+
+    [Test]
+    public void DestroyedNpcsComeBackThroughTheirCleanupComponent()
+    {
+        using var server = Run(300);
+        Assert.That(server.World.Any<Destroyed>(), Is.False);                 // revived within the tick
+        Assert.That(server.World.Count<Npc>(), Is.EqualTo(Units - Units / 3)); // as many NPCs as ever
+        Assert.That(server.Battle.Deaths, Is.Positive);
+    }
+
+    [Test]
+    public void TheLeaderboardIsOrderedByKills()
+    {
+        using var server = Run(300);
+        Span<Entity> top = new Entity[10];
+        Assert.That(server.TopKillers(top), Is.EqualTo(10));
+        int most = int.MaxValue;
+        foreach (var player in top)
+        {
+            Assert.That(player.Kills.Count, Is.LessThanOrEqualTo(most));
+            most = player.Kills.Count;
+        }
+
+        int best = 0;
+        foreach (var item in server.World.Query<Kills>()) best = Math.Max(best, item.Component1.Count);
+        Assert.That(top[0].Kills.Count, Is.EqualTo(best).And.Positive);
+    }
+
+    [Test]
+    public void APlayerWhoLeavesTakesItsShotsAndLeavesFriendLists()
+    {
+        using var server = Run(100);
+        Entity player = default;
+        foreach (var item in server.World.Query<ChildOf>())
+            if (server.World.TryGetEntity(item.Component1.Parent, out player)) break;
+        Assert.That(server.FriendsOf(player), Is.EqualTo(2));                 // two players list it
+        int shots = server.World.Count<Lifetime>(), own = 0;
+        foreach (var shot in server.World.Children(player)) own++;
+        Assert.That(own, Is.Positive);
+
+        Assert.That(server.Leave(player), Is.True);
+        Assert.That(server.World.Count<Lifetime>(), Is.EqualTo(shots - own)); // its children went with it
+        Assert.That(server.FriendsOf(player), Is.Zero);                       // the policy dropped the links
+        foreach (var item in server.World.Query<DynamicBuffer<Friend>>())
+            foreach (var link in item.Component1) Assert.That(link.Target, Is.Not.EqualTo(player.Id));
+        Assert.That(server.Leave(player), Is.False);
+    }
+
+    [Test]
+    public void APlayerTransfersWithItsShots()
+    {
+        using var server = Run(100);
+        using var other = new BattleServer(30);
+        Entity player = default;
+        foreach (var item in server.World.Query<ChildOf>())
+            if (server.World.TryGetEntity(item.Component1.Parent, out player)) break;
+        int own = 0, players = server.World.Count<Player>();
+        foreach (var shot in server.World.Children(player)) own++;
+        int value = server.LootValue(player);
+
+        var arrived = server.Transfer(player, other);
+        Assert.That(player.IsAlive, Is.False);
+        Assert.That(server.World.Count<Player>(), Is.EqualTo(players - 1));
+        Assert.That(arrived.World, Is.SameAs(other.World));
+        Assert.That(other.LootValue(arrived), Is.EqualTo(value));
+        int children = 0;
+        foreach (var shot in other.World.Children(arrived)) children++;
+        Assert.That(children, Is.EqualTo(own));                               // still its children over there
+        foreach (var link in arrived.Friend) Assert.That(link.Target, Is.EqualTo(EntityId.Null));  // friends stayed
+    }
+
+    [Test]
+    public void ASavedBattleLoadsAndPlaysOnTheSame()
+    {
+        using var server = Run(100);
+        var save = new ArrayBufferWriter<byte>();
+        server.Save(save);
+        using var copy = new BattleServer(30);
+        copy.Load(save.WrittenSpan);                                          // the copy's own units are replaced
+        Assert.That(copy.Battle, Is.EqualTo(server.Battle));                  // singletons
+        Assert.That(copy.Census(), Is.EqualTo(server.Census() with { Weakest = copy.World.GetEntity(server.Census().Weakest.Id) }));
+        Assert.That(copy.TopKillers(new Entity[1]), Is.EqualTo(1));          // indexes rebuilt
+        for (int zone = 0; zone < 4; zone++) Assert.That(copy.PlayersIn(zone), Is.EqualTo(server.PlayersIn(zone)));  // groups
+        for (int i = 0; i < 60; i++) copy.Tick();                             // and it plays on
+        Assert.That(copy.Battle.Tick, Is.EqualTo(server.Battle.Tick + 60));
+        Assert.That(copy.Failure, Is.Null);
+    }
+
+    [Test]
+    public void TheTablesDescribeEveryEntity()
+    {
+        using var server = Run(30);
+        int entities = 0;
+        foreach (var table in server.Tables()) entities += table.Entities;
+        int scanned = 0;
+        foreach (var e in server.World.Entities) scanned++;
+        Assert.That(entities, Is.EqualTo(scanned));
     }
 
     private static BattleServer Run(int ticks)
