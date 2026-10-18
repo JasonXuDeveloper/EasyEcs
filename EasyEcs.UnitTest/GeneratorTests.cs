@@ -677,6 +677,8 @@ public class GeneratorTests
                     return e.HasLoot && e.RemoveLoot().IsAlive ? sum : 0;
                 }
                 public static Entity Spawn(World w) => w.CreateEntity(new DynamicBuffer<Loot>());   // names the buffer
+                public static Prefab Chest() => new Prefab().SetLoot(new Loot(1), new Loot(2)).RemoveLoot().SetLoot(new Loot(3));
+                public static int ChestSize(Prefab chest) => chest.HasLoot ? chest.Loot.Count : 0;
                 public static bool Friends(Entity e) => e.HasFriend && e.Friend.Count > 0 && e.RemoveFriend().IsAlive;
                 public static int Befriend(World w, Entity e, Entity f) =>
                     e.AddFriend(f).LinksFriend(f) ? w.FriendIndex.Count(f) + e.RemoveFriend(f) : 0;
@@ -695,6 +697,8 @@ public class GeneratorTests
             .And.Contain("public global::EasyEcs.RelationIndex<global::Game.Friend> FriendIndex"));
         Assert.That(output.SyntaxTrees.Count(t => t.FilePath.EndsWith(".Buffer.g.cs")), Is.EqualTo(3)); // not int, not a component
         Assert.That(generated, Does.Not.Contain("WriteFriend").And.Not.Contain("GetOrAddFriend"));    // links: AddRelation only
+        Assert.That(generated, Does.Contain("public global::EasyEcs.Prefab SetLoot(params global::System.ReadOnlySpan<global::Game.Loot> items)")
+            .And.Not.Contain("Prefab SetFriend"));                                                     // a recipe holds no links
         Assert.That(await Diagnose(Components, source), Is.Empty);                                    // no EECS012 on the members
     }
 

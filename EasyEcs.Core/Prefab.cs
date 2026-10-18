@@ -64,4 +64,15 @@ public sealed partial class Prefab
 
     /// <summary>The prefab's value of <typeparamref name="T"/>; throws if it has none (change it with <c>Set</c>).</summary>
     public ref readonly T Read<T>() where T : struct, IComponent => ref Row.Read<T>();
+
+    /// <summary>
+    /// Gives the prefab a <see cref="DynamicBuffer{T}"/> of <paramref name="elements"/>, replacing the one it has: every
+    /// instance gets a list of its own with these elements. Returns the prefab. O(n).
+    /// </summary>
+    public Prefab SetBuffer<T>(params System.ReadOnlySpan<T> elements) where T : struct
+    {
+        Row.Set(new DynamicBuffer<T>());
+        Row.Get<DynamicBuffer<T>>().AddRange(elements);
+        return this;
+    }
 }

@@ -392,6 +392,28 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             sb.Append("    }\n");
         }
 
+        if (!m.Relation) // a recipe's links would name the prefab's own rows: a relation is added to the instances
+        {
+            // A prefab belongs to no world: another tool name, as for components.
+            sb.Append("}\n\n");
+            sb.Append($"[global::System.CodeDom.Compiler.GeneratedCode(\"{Symbols.GeneratorName}.Prefab\", \"{Version}\")]\n");
+            sb.Append($"{a} static class {m.Path}PrefabBufferExtensions\n{{\n");
+            sb.Append("    extension(global::EasyEcs.Prefab @this)\n    {\n");
+            if (Free(n))
+                sb.Append($"        /// <summary>The prefab's buffer of <see cref=\"{e}\"/>, read-only (<c>Read</c>); change it with <c>Set{n}</c>. Throws if missing.</summary>\n" +
+                          $"        {a} ref readonly {t} {ComponentModel.Escape(n)}\n        {{\n    {Inline}            get => ref @this.Read<{t}>();\n        }}\n");
+            if (Free("Has" + n))
+                sb.Append($"        /// <summary>Whether the prefab has a buffer of <see cref=\"{e}\"/>.</summary>\n" +
+                          $"        {a} bool Has{n}\n        {{\n    {Inline}            get => @this.Has<{t}>();\n        }}\n");
+            if (Free("Set" + n))
+                Member($"Gives the recipe a buffer of these <see cref=\"{e}\"/> (<c>SetBuffer</c>), replacing the one it has: every instance gets a list of its own. Returns the prefab.",
+                    $"global::EasyEcs.Prefab Set{n}(params global::System.ReadOnlySpan<{e}> items) => @this.SetBuffer(items);");
+            if (Free("Remove" + n))
+                Member($"Drops the recipe's buffer of <see cref=\"{e}\"/> if it has one; returns the prefab.",
+                    $"global::EasyEcs.Prefab Remove{n}() => @this.Remove<{t}>();");
+            sb.Append("    }\n");
+        }
+
         sb.Append("}\n");
         return sb.ToString();
     }

@@ -72,6 +72,22 @@ public class InstantiateTests
     }
 
     [Test]
+    public void APrefabsBufferElementsReachEveryInstanceInAListOfItsOwn()
+    {
+        using var world = new World();
+        var chest = new Prefab().SetBuffer(new Loot(1, 2), new Loot(3, 4));
+        var first = world.Instantiate(chest);
+        first.Get<DynamicBuffer<Loot>>().Add(new Loot(5, 6));
+        var second = world.Instantiate(chest);
+        Assert.That(second.Read<DynamicBuffer<Loot>>().AsReadOnlySpan().ToArray(), Is.EqualTo(new[] { new Loot(1, 2), new Loot(3, 4) }));
+        Assert.That(first.Read<DynamicBuffer<Loot>>().Count, Is.EqualTo(3));
+
+        chest.SetBuffer(new Loot(7, 8));                                 // replaces the recipe's elements
+        Assert.That(world.Instantiate(chest).Read<DynamicBuffer<Loot>>().AsReadOnlySpan().ToArray(), Is.EqualTo(new[] { new Loot(7, 8) }));
+        Assert.That(chest.Read<DynamicBuffer<Loot>>().Count, Is.EqualTo(1));
+    }
+
+    [Test]
     public void ADerivedPrefabCopiesItsBaseAndChangesOnItsOwn()
     {
         using var world = new World();

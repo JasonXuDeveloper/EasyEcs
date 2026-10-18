@@ -352,7 +352,8 @@ public sealed class BattleServer : IDisposable
     // Unit kinds: recipes that belong to no world (no query sees them), copied by Instantiate
     private static readonly Prefab Hero = new Prefab().Set(new Position(), new Velocity(1, 0))   // several at once
         .SetHealth(500, 500).SetReplica(500, false).SetMana(100, 100).SetAttack(8, 6, 0)        // or one by name
-        .SetZone(0).SetKills(0).SetPlayer().Set(new DynamicBuffer<Loot>()).Set(new DynamicBuffer<Friend>());
+        .SetZone(0).SetKills(0).SetPlayer().Set(new DynamicBuffer<Friend>())
+        .SetLoot(new Loot(0));                                    // a starter item: each hero gets a bag of its own
     private static readonly Prefab Grunt = new Prefab().Set(new Position(), new Velocity())
         .SetHealth(120, 120).SetReplica(120, false).SetAttack(6, 8, 0).SetSpawn(default, 0).SetNpc();
     private static readonly Prefab Brute = new Prefab(Grunt)                                    // a variant: a copy
