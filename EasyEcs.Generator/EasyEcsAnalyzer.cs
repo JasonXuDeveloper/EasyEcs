@@ -153,13 +153,18 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "[With<T>], [Without<T>] and [WithAny<T>] on an ISystemGroup struct join every [ForEach] method of the group's " +
         "systems. On any other struct (a component) they do nothing.");
 
+    public static readonly DiagnosticDescriptor LocalForEach = new("EECS024", "[ForEach] on a local function",
+        "Local function '{0}' carries [ForEach], which the generator cannot reach: make it a method of a system or a static method of a type",
+        Category, DiagnosticSeverity.Error, true,
+        "The generator writes a job for each [ForEach] method and calls it from outside its type; a local function has no name outside its method.");
+
     // EECS002's property for its code fix (EasyEcs.CodeFixes): a component or singleton taken by value.
     public const string ByValue = "ByValue";
 
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
         MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
-        RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups, RunnerCollision, Unnameable, FilterOutsideGroup);
+        RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups, RunnerCollision, Unnameable, FilterOutsideGroup, LocalForEach);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -169,12 +174,15 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterSyntaxNodeAction(AnalyzeSchedule, SyntaxKind.PropertyDeclaration);
         context.RegisterSymbolAction(AnalyzeMethod, SymbolKind.Method);
         context.RegisterSyntaxNodeAction(AnalyzeParallel, SyntaxKind.MethodDeclaration);
+        context.RegisterSyntaxNodeAction(AnalyzeLocalFunction, SyntaxKind.LocalFunctionStatement);
         context.RegisterSymbolAction(AnalyzeBufferHolder, SymbolKind.Field, SymbolKind.Property, SymbolKind.Method);
         context.RegisterOperationAction(AnalyzeBufferCopy, OperationKind.VariableDeclarator, OperationKind.SimpleAssignment,
             OperationKind.Argument);
         context.RegisterOperationAction(AnalyzeWrite, OperationKind.SimpleAssignment, OperationKind.CompoundAssignment,
             OperationKind.CoalesceAssignment, OperationKind.Increment, OperationKind.Decrement, OperationKind.Invocation);
         context.RegisterOperationAction(AnalyzeStructuralCall, OperationKind.Invocation);
+        context.RegisterOperationAction(AnalyzeCapturedWrite, OperationKind.SimpleAssignment, OperationKind.CompoundAssignment,
+            OperationKind.Increment, OperationKind.Decrement);
         context.RegisterOperationAction(AnalyzeIndexedRef, OperationKind.Invocation, OperationKind.VariableDeclarator);
         context.RegisterOperationAction(AnalyzeSystemLookup, OperationKind.Invocation);
         context.RegisterCompilationStartAction(AnalyzeOrderings);
@@ -195,11 +203,13 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             {
                 bool before = Symbols.Is(attribute.AttributeClass, Symbols.UpdateBeforeAttribute);
                 if (!before && !Symbols.Is(attribute.AttributeClass, Symbols.UpdateAfterAttribute)) continue;
-                if (attribute.AttributeClass!.TypeArguments[0] is not INamedTypeSymbol other) continue;
+                // Generic systems by definition: G2<int> and G2<T> are one node of the order (orderings cover subclasses).
+                if (attribute.AttributeClass!.TypeArguments[0] is not INamedTypeSymbol { TypeKind: not TypeKind.Error } argument) continue;
+                var other = argument.OriginalDefinition;
                 var location = attribute.ApplicationSyntaxReference?.GetSyntax(context.CancellationToken).GetLocation() ?? type.Locations[0];
                 if (!SymbolEqualityComparer.Default.Equals(Symbols.GroupOf(type), Symbols.GroupOf(other)))
                     context.ReportDiagnostic(Diagnostic.Create(OrderAcrossGroups, location, type.Name, other.Name));
-                edges.Add(before ? (type, other, location) : (other, type, location));
+                edges.Add(before ? (type.OriginalDefinition, other, location) : (other, type.OriginalDefinition, location));
             }
         }, SymbolKind.NamedType);
 
@@ -245,7 +255,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
     {
         var call = (IInvocationOperation)context.Operation;
         if (call.TargetMethod is not { Name: "GetSystem", TypeArguments.Length: 1 } method
-            || method.ContainingType?.ToDisplayString() != Symbols.World) return;
+            || method.ContainingType?.ToDisplayString() != Symbols.World || method.TypeArguments[0].TypeKind == TypeKind.Error) return;
         for (var type = context.ContainingSymbol.ContainingType; type != null; type = type.ContainingType)
             if (Symbols.IsSystem(type))
             {
@@ -262,8 +272,10 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
     {
         var declaration = (PropertyDeclarationSyntax)context.Node;
         if (declaration.Identifier.ValueText is not ("UpdateInterval" or "UpdatePhase")) return;
-        if (context.SemanticModel.GetDeclaredSymbol(declaration, context.CancellationToken) is not { IsOverride: true } property
-            || property.OverriddenProperty?.ContainingType?.ToDisplayString() != Symbols.EcsSystem) return;
+        if (context.SemanticModel.GetDeclaredSymbol(declaration, context.CancellationToken) is not { IsOverride: true } property) return;
+        var root = property.OverriddenProperty; // up the chain: an override of an override of EcsSystem's
+        while (root?.OverriddenProperty != null) root = root.OverriddenProperty;
+        if (root?.ContainingType?.ToDisplayString() != Symbols.EcsSystem) return;
         var getter = declaration.AccessorList?.Accessors.FirstOrDefault();
         var body = declaration.ExpressionBody?.Expression ?? getter?.ExpressionBody?.Expression
             ?? (getter?.Body?.Statements is { Count: 1 } statements && statements[0] is ReturnStatementSyntax { Expression: { } returned }
@@ -319,7 +331,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        if (context.ContainingSymbol is not IMethodSymbol method || !Symbols.IsForEach(method)) return;
+        if (context.ContainingSymbol is not IMethodSymbol method || !Symbols.IsForEach(method) || OwnWorld(call)) return;
         if (Symbols.IsBatch(method))
             context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), method.Name, name,
                 "it is a batch method, whose spans point into the tables; record the change as data for a method that runs per entity"));
@@ -478,17 +490,47 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
                     type = property.Type;
                     mutable = property.SetMethod is { IsInitOnly: false };
                     break;
+                case IEventSymbol { AddMethod.IsImplicitlyDeclared: true } field: // a field-like event: a delegate field
+                    type = field.Type;
+                    mutable = true;
+                    break;
                 default:
                     continue;
             }
 
             var location = member.Locations.FirstOrDefault();
-            if (type is INamedTypeSymbol named && Symbols.IsSystem(named))
+            if (SystemIn(type) is { } named)
                 context.ReportDiagnostic(Diagnostic.Create(SystemReference, location, system.Name, named.Name, member.Name));
             else if (mutable)
                 context.ReportDiagnostic(Diagnostic.Create(StatefulSystem, location, system.Name, member.Name));
         }
     }
+
+    /// <summary>EECS007: a system's member writes a primary constructor parameter, a hidden mutable field.</summary>
+    private static void AnalyzeCapturedWrite(OperationAnalysisContext context)
+    {
+        var target = context.Operation switch
+        {
+            IAssignmentOperation assignment => assignment.Target,
+            IIncrementOrDecrementOperation step => step.Target,
+            _ => null,
+        };
+        if (target is not IParameterReferenceOperation { Parameter: { ContainingSymbol: IMethodSymbol { MethodKind: MethodKind.Constructor } ctor } parameter }
+            || SymbolEqualityComparer.Default.Equals(context.ContainingSymbol, ctor)
+            || ctor.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is not TypeDeclarationSyntax
+            || !Symbols.IsSystem(ctor.ContainingType))
+            return;
+        context.ReportDiagnostic(Diagnostic.Create(StatefulSystem, target.Syntax.GetLocation(), ctor.ContainingType.Name, parameter.Name));
+    }
+
+    /// <summary>The system a field's type holds (itself, an element, a type argument; EcsSystem too), or null.</summary>
+    private static INamedTypeSymbol? SystemIn(ITypeSymbol? type) => type switch
+    {
+        IArrayTypeSymbol array => SystemIn(array.ElementType),
+        INamedTypeSymbol named when named.ToDisplayString() == Symbols.EcsSystem || Symbols.IsSystem(named) => named,
+        INamedTypeSymbol named => named.TypeArguments.Select(SystemIn).FirstOrDefault(t => t != null),
+        _ => null,
+    };
 
     /// <summary>An auto-property has a compiler-generated backing field (computed properties hold no state).</summary>
     private static bool IsAutoProperty(IPropertySymbol property) => property.ContainingType.GetMembers()
@@ -509,11 +551,12 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, method.Name));
         if (Symbols.Unnameable(method) is { } unnameable)
             context.ReportDiagnostic(Diagnostic.Create(Unnameable, location, unnameable.Locations.Where(l => l.IsInSource), // the type: its code fix
-                method.Name, unnameable.Name));
+                method.Name, unnameable.ToDisplayString()));
 
         var removed = new System.Collections.Generic.List<ITypeSymbol>();
         foreach (var attribute in method.GetAttributes())
-            if (attribute.AttributeClass is { IsGenericType: true } cls && cls.ConstructedFrom.ToDisplayString() == Symbols.RemovedAttribute)
+            if (attribute.AttributeClass is { IsGenericType: true } cls && cls.ConstructedFrom.ToDisplayString() == Symbols.RemovedAttribute
+                && cls.TypeArguments[0].TypeKind != TypeKind.Error) // [Removed<>] while typing: the compiler's error suffices
                 removed.Add(cls.TypeArguments[0]);
         void Required(ISymbol owner, string where)
         {
@@ -533,7 +576,8 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         foreach (var p in method.Parameters)
         {
             var kind = Symbols.Classify(p, outside);
-            if (kind == Symbols.ParamKind.Invalid)
+            if (kind == Symbols.ParamKind.Invalid && p.Type.TypeKind == TypeKind.Error) valid = false; // the compiler reports it
+            else if (kind == Symbols.ParamKind.Invalid)
             {
                 valid = false;
                 context.ReportDiagnostic(Diagnostic.Create(BadParameter, p.Locations.FirstOrDefault(),
@@ -561,6 +605,23 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(ComponentCount, location, method.Name));
         if (valid && Symbols.MixesBatch(method))
             context.ReportDiagnostic(Diagnostic.Create(MixedBatch, location, method.Name));
+    }
+
+    /// <summary>A change of a world the method creates itself (<c>using var w = new World()</c>): not the visited one's.</summary>
+    private static bool OwnWorld(IInvocationOperation call) =>
+        Symbols.Receiver(call) is ILocalReferenceOperation { Local: var local }
+        && local.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is VariableDeclaratorSyntax { Initializer.Value: var value }
+        && value is ObjectCreationExpressionSyntax or ImplicitObjectCreationExpressionSyntax
+        && local.Type.ToDisplayString() == Symbols.World;
+
+    /// <summary>EECS024: [ForEach] on a local function (a symbol action never sees one).</summary>
+    private static void AnalyzeLocalFunction(SyntaxNodeAnalysisContext context)
+    {
+        var function = (LocalFunctionStatementSyntax)context.Node;
+        if (function.AttributeLists.Count == 0
+            || context.SemanticModel.GetDeclaredSymbol(function, context.CancellationToken) is not IMethodSymbol method
+            || !Symbols.IsForEach(method)) return;
+        context.ReportDiagnostic(Diagnostic.Create(LocalForEach, function.Identifier.GetLocation(), method.Name));
     }
 
     /// <summary>EECS010: a [ForEach(Parallel = true)] method that cannot run on several threads.</summary>

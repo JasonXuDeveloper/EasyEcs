@@ -161,6 +161,7 @@ internal static class Symbols
     {
         IArrayTypeSymbol array => IsNameable(array.ElementType),
         ITypeParameterSymbol => true, // the generated code is generic over the same parameters
+        IErrorTypeSymbol => true,     // an unresolved type while typing: the compiler reports it
         IPointerTypeSymbol or IFunctionPointerTypeSymbol => false,
         INamedTypeSymbol named => IsVisible(named) && named.TypeArguments.All(IsNameable),
         _ => true,
@@ -323,7 +324,9 @@ internal static class Symbols
     public static bool RunnerCollides(IMethodSymbol method)
     {
         var expected = EntryPoint(method);
-        return method.ContainingType.GetMembers(method.Name).OfType<IMethodSymbol>().Any(m =>
+        var members = new List<IMethodSymbol>(); // the type's and its base types' (an inherited one wins over an extension)
+        for (var t = method.ContainingType; t != null; t = t.BaseType) members.AddRange(t.GetMembers(method.Name).OfType<IMethodSymbol>());
+        return members.Any(m =>
             !m.GetAttributes().Any(IsGeneratorMark) // not the entry point itself
             && (m.Parameters.Select(p => (p.Type.ToDisplayString(), p.RefKind)).SequenceEqual(expected)
                 || !SymbolEqualityComparer.Default.Equals(m, method) && IsForEach(m) && EntryPoint(m).SequenceEqual(expected)));
@@ -482,12 +485,14 @@ internal static class Symbols
     /// they enter the owner's structural gate, so they belong to the world's owner thread and to code that may change
     /// structure.
     /// </summary>
-    private static readonly HashSet<string> StructuralEntityMembers = ["Set", "Remove", "Destroy", "GetOrAdd", "Clone", "Disable", "Enable"];
+    private static readonly HashSet<string> StructuralEntityMembers =
+        ["Set", "Remove", "Destroy", "GetOrAdd", "Clone", "Disable", "Enable", "AddRelation", "RemoveRelation"];
 
     private static readonly HashSet<string> StructuralWorldMembers =
     [
         "CreateEntity", "CreateEntities", "Instantiate", "DestroyEntities", "EnsureEntityCapacity", "AddSingleton", "RemoveSingleton",
-        "AddSystem", "RemoveSystem", "Update", "Capture", "Restore", "Dispose",
+        "AddSystem", "RemoveSystem", "Update", "Capture", "Restore", "Dispose", "SetAll", "RemoveAll", "DisableAll", "EnableAll",
+        "Save", "Load", "SaveEntities", "LoadEntities", "MoveEntities", "GroupBy", "RemoveTypes", "EnsureCapacity",
     ];
 
     /// <summary>
@@ -719,7 +724,16 @@ internal static class Symbols
 
     /// <summary>The receiver of a call that changes a collection (see <see cref="Mutators"/>), else null.</summary>
     public static IOperation? MutatedReceiver(IInvocationOperation call) =>
-        call.Instance is { Type.IsReferenceType: true } instance && Mutators.Contains(call.TargetMethod.Name) ? instance : null;
+        call.Instance is { Type: { IsReferenceType: true } type } instance && Mutators.Contains(call.TargetMethod.Name) && !Immutable(type)
+            ? instance : null;
+
+    /// <summary>
+    /// Types whose "mutators" return a new value (<c>string.Remove</c>, <c>ImmutableList.Add</c>), and the world itself
+    /// (its RemoveAll is a structural change, EECS013's business).
+    /// </summary>
+    private static bool Immutable(ITypeSymbol type) =>
+        type.SpecialType == SpecialType.System_String || type.ToDisplayString() == World
+        || type.ContainingNamespace?.ToDisplayString() is "System.Collections.Immutable" or "System.Collections.Frozen";
 
     public static bool IsForEach(IMethodSymbol method) =>
         method.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == ForEachAttribute);

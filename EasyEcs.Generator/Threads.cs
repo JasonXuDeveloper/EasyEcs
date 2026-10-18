@@ -24,6 +24,7 @@ internal static class Threads
         if (world && throughElement) return false; // worlds[i]: a world per item, each with one owner
 
         if (starter.ContainingType.ToDisplayString() == "System.Threading.Tasks.Parallel") return true; // runs at once
+        if (Awaited(handoff.Syntax)) return false;                    // the caller waits for it: one change after the other
         if (InLoop(handoff.Syntax, root)) return true;                                                 // handed off again
         return ChangedOutside(root, function.Syntax, handoff, token);
     }
@@ -49,6 +50,36 @@ internal static class Threads
                 case IArrayElementReferenceOperation array: element = true; receiver = array.ArrayReference; break;
                 case IConversionOperation conversion: receiver = conversion.Operand; break;
                 default: return (null, element);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The hand-off's task is waited for at once: <c>await Task.Run(…)</c> (also with <c>ConfigureAwait</c>),
+    /// <c>.Wait()</c>, <c>.Result</c> or <c>.GetAwaiter().GetResult()</c>.
+    /// </summary>
+    private static bool Awaited(SyntaxNode handoff)
+    {
+        SyntaxNode node = handoff;
+        while (true)
+        {
+            switch (node.Parent)
+            {
+                case AwaitExpressionSyntax:
+                    return true;
+                case ParenthesizedExpressionSyntax parenthesized:
+                    node = parenthesized;
+                    continue;
+                case MemberAccessExpressionSyntax access when access.Expression == node:
+                    string name = access.Name.Identifier.ValueText;
+                    if (name is "Result") return true;
+                    if (access.Parent is not InvocationExpressionSyntax invocation) return false;
+                    if (name is "Wait" or "GetResult") return true;
+                    if (name is not ("ConfigureAwait" or "GetAwaiter")) return false;
+                    node = invocation;
+                    continue;
+                default:
+                    return false;
             }
         }
     }

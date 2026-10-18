@@ -258,11 +258,43 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(Entity a, Entity b) => b.Set(a.Read<DynamicBuffer<int>>()); }", "EECS012")]
     [TestCase("public static class U { public static void F(Entity a, Entity b) => b.Get<DynamicBuffer<int>>() = a.Read<DynamicBuffer<int>>(); }", "EECS012")]
     [TestCase("public static class U { public static void F(Entity a) { var b = new DynamicBuffer<int>(); a.Set(b); } }", "EECS012")]
+    [TestCase("public record struct Rel(EntityId Target) : IRelation; public partial class S : EcsSystem { [ForEach] static void A(in Handle h) => h.Target.AddRelation(new Rel(default)); }", "EECS013")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(in Handle h) => h.Target.World.SetAll(new Q()); }", "EECS013")]
+    [TestCase("public static class U { public static void F(World world) { System.Threading.Tasks.Task.Run(() => world.RemoveAll<P>()); world.CreateEntity(new P()); } }", "EECS014")]
+    [TestCase("public class Base { public static string A(World w) => \"\"; } public class R4 : Base { [ForEach] public static void A(ref P p) { } }", "EECS021")]
+    [TestCase("public static class U { public static void M() { [ForEach] static void Local(ref P p) => p.V++; } }", "EECS024")]
+    [TestCase("[UpdateBefore<G2<int>>] public class G1 : EcsSystem { [ForEach] static void A(ref P p) { } } [UpdateBefore<G1>] public class G2<X> : EcsSystem { [ForEach] static void B(ref Q q) { } }", "EECS019")]
+    [TestCase("public class B1 : EcsSystem { public override int UpdateInterval => 4; } public class B2 : B1 { public override int UpdateInterval => System.Environment.TickCount; }", "EECS018")]
+    [TestCase("public class S : EcsSystem { public event System.Action Fired; }", "EECS007")]
+    [TestCase("public class S(int n) : EcsSystem { public void Tick() => n++; }", "EECS007")]
+    [TestCase("public class K : EcsSystem; public class S : EcsSystem { private readonly K[] _all = []; }", "EECS008")]
+    [TestCase("public class S : EcsSystem { private readonly EcsSystem _base; }", "EECS008")]
+    [TestCase("file class S7 : EcsSystem { [ForEach] static void A(ref P p) { } }", "EECS022")]
     public async Task MisuseIsReported(string source, string id)
     {
         var errors = await Diagnose(Components, source);
         Assert.That(errors, Does.Contain(id));
         Assert.That(errors.Where(e => !e.StartsWith("CS")), Is.EqualTo(new[] { id }), "exactly one EasyEcs diagnostic");
+    }
+
+    [TestCase("public struct Named : IComponent { public string Name; } public class S : EcsSystem { [ForEach] static void A(in Named n, ref P p) => p.V = n.Name.Remove(0, 1).Length; }")]
+    [TestCase("public static class U { public static async System.Threading.Tasks.Task F(World world) { await System.Threading.Tasks.Task.Run(() => world.CreateEntity(new P())); world.CreateEntity(new P()); } }")]
+    [TestCase("public static class U { public static void F(World world) { System.Threading.Tasks.Task.Run(() => world.CreateEntity(new P())).Wait(); world.CreateEntity(new P()); } }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void C(in P p) { using var w = new World(); w.CreateEntity(new Q()); } }")]
+    [TestCase("public class S(int n) : EcsSystem { public int N => n; }")]
+    public async Task ValidCodeIsNotReported(string source)
+    {
+        var errors = await Diagnose(Components, source);
+        Assert.That(errors, Is.Empty);
+    }
+
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref Missing m) { } }")]
+    [TestCase("public class S : EcsSystem { [ForEach, Removed<>, With<>] static void A(ref P p) { } }")]
+    [TestCase("[UpdateBefore<Missing>] public class S : EcsSystem { [ForEach] static void A(ref P p) { } }")]
+    public async Task UnfinishedCodeGetsOnlyTheCompilersErrors(string source)
+    {
+        var errors = await Diagnose(Components, source);
+        Assert.That(errors.Where(e => !e.StartsWith("CS")), Is.Empty);
     }
 
     [Test]
