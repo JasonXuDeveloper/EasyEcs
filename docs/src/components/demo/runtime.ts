@@ -3,16 +3,18 @@
  * demo/EasyEcs.Demo by scripts/build-demo.sh) once per page load, on first
  * use. The C# side is EasyEcs.Demo.Demo: every call passes a few numbers, and
  * the sparks come back through one float array in the WebAssembly memory
- * (x, y, glow, opacity per spark), read in place without copying.
+ * (x, y, heat, light per spark), read in place without copying.
  */
 
 /** The [JSExport] methods of demo/EasyEcs.Demo/Demo.cs */
 export interface DemoExports {
   Reset(count: number, width: number, height: number): void;
   Resize(width: number, height: number): void;
+  Point(x: number, y: number, active: boolean): void;
+  MotionMs(batched: boolean): number;
+  Simd(): number;
   Step(dt: number): number;
   FrameAddress(): number;
-  FrameStride(): number;
   UpdateMs(): number;
   EntityCount(): number;
 }
