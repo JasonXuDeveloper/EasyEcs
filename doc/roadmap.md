@@ -59,6 +59,13 @@ BenchmarkDotNet before and after, and ships only as a net win in time and alloca
   relations with a target policy, `Maybe<T>`, update phases, `[ForEach]` runners, bulk changes, saves, migrations and
   introspection; a test per feature. Its ticks allocate nothing once its tables reach their peak populations (1,200
   ticks).
+- `Maybe<T>` in a method that changes no structure finds its column once per run of rows and tests a presence bit
+  per row (100,000 units, half with the optional component: 238 → 114 μs; split into a With and a Without method
+  40 μs); ticks unchanged (WorldSimulation, Runner within noise).
+- Benchmarks for groups (100,000 players, 4 zones of 16: group 46 μs, index 682 μs, scan 710 μs), ordered indexes
+  (top 10 and a range: 69 μs against a 308 μs scan), relations, `Maybe<T>`, cleanup components, introspection and
+  ordering; peer comparisons for hierarchies, relations, whole-entity disable, structural changes during iteration,
+  value queries, parallel queries and saves (each checked in setup).
 - .NET 10 features where they measure: counting tested rows by their set bits, 8 words per step with AVX-512
   (100,000 rows 48.9-54.5 μs -> 1.21-1.27 μs), the query cache's alternate lookup (a filter past the memo 92-106 ns
   -> 86-90 ns), the memo's ways as structs in one array, `Lock` everywhere, `params ReadOnlySpan`, generators on
