@@ -462,20 +462,21 @@ internal static class Symbols
     /// </summary>
     private static bool IsGeneratedWriter(ISymbol member) =>
         member is IMethodSymbol { MethodKind: MethodKind.Ordinary, ContainingType.IsExtension: true } method
-        && !method.Name.StartsWith("TryGet") && !method.Name.StartsWith("Write");
+        && !method.Name.StartsWith("TryGet") && !method.Name.StartsWith("Write") && !method.Name.StartsWith("Links")
+        && !method.Name.StartsWith("In"); // InZone(group): a QueryFilter's, no entity's
 
     /// <summary>
     /// Whether <paramref name="access"/> reads through a member ComponentGenerator wrote. The analyzer resolves it; the
     /// generator cannot (another generator's output is not in its compilation), so there the name decides: a
     /// component's name (<c>e.Position</c>), <c>Has</c> / <c>TryGet</c> / <c>Write</c> + a component, <c>Is</c> + a
-    /// tag, <c>Is</c> + a component + <c>Disabled</c>, or a buffer element's name, <c>Has</c> / <c>Write</c> + it.
+    /// tag, <c>Is</c> + a component + <c>Disabled</c>, or a buffer element's name, <c>Has</c> / <c>Write</c> / <c>Links</c> + it.
     /// </summary>
     private static bool GeneratedRead(SemanticModel model, MemberAccessExpressionSyntax access, string member)
     {
         if (model.GetSymbolInfo(access).Symbol is { } symbol) return IsGenerated(symbol) && !IsGeneratedWriter(symbol);
         if (member.Length > "IsDisabled".Length && member.StartsWith("Is") && member.EndsWith("Disabled"))
             member = member.Substring(2, member.Length - 2 - "Disabled".Length);
-        foreach (var (prefix, tag) in new[] { ("", false), ("Has", false), ("TryGet", false), ("Write", false), ("Is", true) })
+        foreach (var (prefix, tag) in new[] { ("", false), ("Has", false), ("TryGet", false), ("Write", false), ("Links", false), ("Is", true) })
         {
             if (member.Length <= prefix.Length || !member.StartsWith(prefix)) continue;
             string type = member.Substring(prefix.Length);

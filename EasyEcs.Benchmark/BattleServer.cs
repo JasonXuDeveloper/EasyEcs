@@ -190,7 +190,7 @@ public class RespawnSystem : EcsSystem                                        //
     {
         spawn = new Spawn(new Position(p.Y, p.X), npc.Id.Index);              // where the next one appears
         Entity hunter = default;
-        foreach (var item in world.Query<Position>(BattleServer.InZone[npc.Id.Index & 3]))  // a player of some zone:
+        foreach (var item in world.Query<Position>(BattleServer.Zones[npc.Id.Index & 3]))  // a player of some zone:
         {                                                                     // one table to look at
             hunter = item.Entity;
             spawn.At = item.Component1;
@@ -346,8 +346,8 @@ public sealed class BattleServer : IDisposable
     private static readonly QueryFilter Alive = QueryFilter.Create().Without<Dead>();
     internal static readonly QueryFilter Afflicted = QueryFilter.Create().WithAny<Burning>().WithAny<Frozen>();
     private static readonly QueryFilter WrittenPlayers = Players.Changed<Health>(0);    // the tick is set per call
-    internal static readonly QueryFilter[] InZone =                                      // one table each
-        [Players.InGroup<Zone>(0), Players.InGroup<Zone>(1), Players.InGroup<Zone>(2), Players.InGroup<Zone>(3)];
+    internal static readonly QueryFilter[] Zones =                                        // one table each
+        [Players.InZone(0), Players.InZone(1), Players.InZone(2), Players.InZone(3)];
 
     // Unit kinds: recipes that belong to no world (no query sees them), copied by Instantiate
     private static readonly Prefab Hero = new Prefab().Set(new Position(), new Velocity(1, 0))   // several at once
@@ -375,7 +375,7 @@ public sealed class BattleServer : IDisposable
             SystemErrors = SystemErrorPolicy.Disable,                         // a failing system goes off, the battle goes on
         });
         World.GroupBy<Zone>();                                                // a zone's players contiguous, in its table
-        World.Relations<Friend>().WhenTargetDestroyed(TargetPolicy.Remove);   // a player who leaves leaves friend lists
+        World.FriendIndex.WhenTargetDestroyed(TargetPolicy.Remove);   // a player who leaves leaves friend lists
         World.SetRules(ShotCost, BagSize, false);
 
         World.AddSystem<ClockSystem>();                                       // OnCreate adds the Battle singleton
@@ -402,8 +402,8 @@ public sealed class BattleServer : IDisposable
             players[i].Velocity = new Velocity((int)(r % 5) - 2, (int)((r >> 8) % 5) - 2);
             players[i].Attack.Cooldown = (int)(r % 6);
             players[i].WriteLoot().EnsureCapacity(BagSize);                   // room once: a full bag never grows
-            players[i].AddRelation(new Friend(players[(i + 1) % players.Length]));  // each player has two friends
-            players[i].AddRelation(new Friend(players[(i + 7) % players.Length]));
+            players[i].AddFriend(players[(i + 1) % players.Length]);  // each player has two friends
+            players[i].AddFriend(players[(i + 7) % players.Length]);
         }
 
         var npcs = new Entity[units - players.Length];
@@ -455,7 +455,7 @@ public sealed class BattleServer : IDisposable
         set => World.Rules.Ceasefire = value;
     }
 
-    public int PlayersIn(int zone) => World.Count<Player>(InZone[zone]);    // one table: its rows, not a scan
+    public int PlayersIn(int zone) => World.Count<Player>(Zones[zone]);    // one table: its rows, not a scan
 
     public bool AnyoneBurning => World.Any<Burning>();
 
@@ -512,7 +512,7 @@ public sealed class BattleServer : IDisposable
     }
 
     /// <summary>How many players list <paramref name="player"/> as a friend: the relation's index, by target.</summary>
-    public int FriendsOf(Entity player) => World.Relations<Friend>().Count(player);
+    public int FriendsOf(Entity player) => World.FriendIndex.Count(player);
 
     /// <summary>A player leaves: its projectiles go with it (children), and it drops out of friend lists (the policy).</summary>
     public bool Leave(Entity player)

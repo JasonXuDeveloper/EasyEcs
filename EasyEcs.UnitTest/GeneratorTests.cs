@@ -442,6 +442,19 @@ public class GeneratorTests
     }
 
     [Test]
+    public void GroupsGetANamedFilter()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
+            public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }
+            public static class U { public static QueryFilter North => QueryFilter.Create().InZone(1); }
+            """), out var output, out var diagnostics);
+        Assert.That(diagnostics, Is.Empty);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+        string generated = string.Join("\n", output.SyntaxTrees.Select(t => t.ToString()));
+        Assert.That(generated, Does.Contain("public global::EasyEcs.QueryFilter InZone(int group) => @this.InGroup<global::Zone>(group);"));
+    }
+
+    [Test]
     public async Task BufferElementsGetNamedMembers()
     {
         const string source = """
@@ -463,6 +476,8 @@ public class GeneratorTests
                 }
                 public static Entity Spawn(World w) => w.CreateEntity(new DynamicBuffer<Loot>());   // names the buffer
                 public static bool Friends(Entity e) => e.HasFriend && e.Friend.Count > 0 && e.RemoveFriend().IsAlive;
+                public static int Befriend(World w, Entity e, Entity f) =>
+                    e.AddFriend(f).LinksFriend(f) ? w.FriendIndex.Count(f) + e.RemoveFriend(f) : 0;
                 static void Links(in DynamicBuffer<Friend> friends) { }
                 static void Notes(ref DynamicBuffer<Note> notes, in DynamicBuffer<int> ints, in DynamicBuffer<P> components) { }
             }
@@ -473,6 +488,9 @@ public class GeneratorTests
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Buffer.g.cs")).Select(t => t.ToString()));
         Assert.That(generated, Does.Contain("public ref readonly global::EasyEcs.DynamicBuffer<global::Game.Loot> Loot"));
         Assert.That(generated, Does.Contain("internal ref global::EasyEcs.DynamicBuffer<global::Game.Note> WriteNote()"));
+        Assert.That(generated, Does.Contain("public global::EasyEcs.Entity AddFriend(global::EasyEcs.EntityId Target) => @this.AddRelation(new global::Game.Friend(Target));")
+            .And.Contain("public int RemoveFriend(global::EasyEcs.EntityId target)").And.Contain("public bool LinksFriend(global::EasyEcs.EntityId target)")
+            .And.Contain("public global::EasyEcs.RelationIndex<global::Game.Friend> FriendIndex"));
         Assert.That(output.SyntaxTrees.Count(t => t.FilePath.EndsWith(".Buffer.g.cs")), Is.EqualTo(3)); // not int, not a component
         Assert.That(generated, Does.Not.Contain("WriteFriend").And.Not.Contain("GetOrAddFriend"));    // links: AddRelation only
         Assert.That(await Diagnose(Components, source), Is.Empty);                                    // no EECS012 on the members

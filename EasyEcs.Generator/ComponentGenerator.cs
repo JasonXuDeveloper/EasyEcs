@@ -260,6 +260,14 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                     $"global::EasyEcs.Entity Remove{n}() => @this.Remove<{t}>();");
             sb.Append("    }\n");
 
+            if (m.Grouped)
+            {
+                sb.Append("\n    extension(global::EasyEcs.QueryFilter @this)\n    {\n");
+                Member($"Also requires <see cref=\"{t}\"/> group <paramref name=\"group\"/> (<c>InGroup&lt;{n}&gt;</c>): in a world that groups by it, the walk visits that group's tables only.",
+                    $"global::EasyEcs.QueryFilter In{n}(int group) => @this.InGroup<{t}>(group);");
+                sb.Append("    }\n");
+            }
+
             if (m.IndexKey.Length > 0 && !m.WorldTaken)
             {
                 sb.Append("\n    extension(global::EasyEcs.World @this)\n    {\n");
@@ -327,7 +335,30 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         if (Free("Remove" + n))
             Member($"Removes the entity's buffer of <see cref=\"{e}\"/> if it has one; returns the entity.",
                 $"global::EasyEcs.Entity Remove{n}() => @this.Remove<{t}>();");
-        sb.Append("    }\n}\n");
+        if (m.Relation)
+        {
+            if (Free("Add" + n))
+                foreach (var s in m.Setters)
+                    Member($"Links the entity with a <see cref=\"{e}\"/> (<c>AddRelation</c>: the buffer, added if missing, and the index); returns the entity.",
+                        $"global::EasyEcs.Entity Add{n}({s.Parameters}) => @this.AddRelation({s.Value});");
+            if (Free("Remove" + n))
+                Member($"Drops the entity's <see cref=\"{e}\"/> links to <paramref name=\"target\"/> (<c>RemoveRelation</c>); returns how many went.",
+                    $"int Remove{n}(global::EasyEcs.EntityId target) => @this.RemoveRelation<{e}>(target);");
+            if (Free("Has" + n))
+                Member($"Whether the entity links to <paramref name=\"target\"/> with a <see cref=\"{e}\"/> (<c>HasRelation</c>).",
+                    $"bool Links{n}(global::EasyEcs.EntityId target) => @this.HasRelation<{e}>(target);");
+        }
+
+        sb.Append("    }\n");
+        if (m.Relation && !m.WorldTaken)
+        {
+            sb.Append("\n    extension(global::EasyEcs.World @this)\n    {\n");
+            sb.Append($"        /// <summary>The world's index of <see cref=\"{e}\"/> links by target (<c>Relations&lt;{n}&gt;()</c>); keep it in a local or field in loops.</summary>\n" +
+                      $"        {a} global::EasyEcs.RelationIndex<{e}> {n}Index\n        {{\n    {Inline}            get => @this.Relations<{e}>();\n        }}\n");
+            sb.Append("    }\n");
+        }
+
+        sb.Append("}\n");
         return sb.ToString();
     }
 
@@ -336,7 +367,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
     /// it and not itself a component or singleton (those have members of their own). Symbol-free.
     /// </summary>
     private sealed record BufferModel(string Namespace, string Element, string Name, string Path, string HintName, bool IsPublic,
-        bool Relation, EquatableArray<string> Taken)
+        bool Relation, EquatableArray<Setter> Setters, bool WorldTaken, EquatableArray<string> Taken)
     {
         public static BufferModel? Create(SemanticModel model, GenericNameSyntax syntax, CancellationToken token)
         {
@@ -355,15 +386,20 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             }
 
             var entity = buffer.ContainingNamespace.GetTypeMembers("Entity").FirstOrDefault();
-            if (entity == null) return null;
+            var world = buffer.ContainingNamespace.GetTypeMembers("World").FirstOrDefault();
+            if (entity == null || world == null) return null;
             string name = type.Name, fqn = type.ToDisplayString(Symbols.Fqn);
-            var taken = new[] { name, "Has" + name, "Write" + name, "GetOrAdd" + name, "Remove" + name }
+            var taken = new[] { name, "Has" + name, "Write" + name, "GetOrAdd" + name, "Remove" + name, "Add" + name }
                 .Where(n => entity.GetMembers(n).Length > 0).ToArray();
+            bool relation = Symbols.Implements(type, "EasyEcs.IRelation");
+            var setters = relation // a link is added from what builds it: AddFriend(target) for Friend(EntityId Target)
+                ? ComponentModel.SettersOf(type, fqn, type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray())
+                : [];
             string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
             string path = name;
             for (var t = type.ContainingType; t != null; t = t.ContainingType) path = t.Name + "_" + path;
             return new BufferModel(ns, fqn, name, path, fqn.Replace("global::", "").Replace('.', '_'), isPublic,
-                Symbols.Implements(type, "EasyEcs.IRelation"), new EquatableArray<string>(taken));
+                relation, new EquatableArray<Setter>(setters), world.GetMembers(name + "Index").Length > 0, new EquatableArray<string>(taken));
         }
     }
 
@@ -433,7 +469,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         /// One setter per public constructor with parameters (none taken by ref or out); without such a constructor, one
         /// taking every field when all are public and writable (or none for a tag).
         /// </summary>
-        private static Setter[] SettersOf(INamedTypeSymbol type, string fqn, IFieldSymbol[] fields)
+        internal static Setter[] SettersOf(INamedTypeSymbol type, string fqn, IFieldSymbol[] fields)
         {
             var ctors = type.InstanceConstructors
                 .Where(c => c.DeclaredAccessibility == Accessibility.Public && c.Parameters.Length > 0)
