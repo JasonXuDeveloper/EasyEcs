@@ -1,0 +1,186 @@
+---
+title: 存档
+seoTitle: "C# ECS 的存档与读档：World.Save、World.Load 和 Nino"
+description: 用 World.Save 把整个 World 写成字节，用 Load 读回本进程或其他进程：id 不变，非托管组件按原始行写，托管组件走 Nino，布局变了会被拒绝。
+icon: Save
+---
+
+服务器重启后必须恢复原来的 World：玩家站在原地，计时器停在原处，实体之间的链接完好无损。`world.Save(output)` 把实体（id 和版本号）、
+它们的组件和单例写成字节，`world.Load(bytes)` 把它们放进本进程或另一个进程的 World。非托管组件直接写原始行，每列一个块；托管组件
+交给 [Nino](https://github.com/JasonXuDeveloper/Nino)。反复存档、反复读回同一块缓冲区，不产生分配。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  跨重启持久化、写到磁盘的回放、崩溃现场转储、把 World 交给另一个进程（测试工具、回放查看器）、在
+  [热重载](/zh/docs/guide/migration-and-unload#hot-reload)时保住数据。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  进程内回滚：[快照](/zh/docs/guide/snapshots)更快，也不用编码。把玩家迁到另一台服务器：
+  [`SaveEntities`](/zh/docs/guide/migration-and-unload#save-entities) 只写这一组实体。数据结构会频繁变化、而你又控制不了的长期存储：
+  字段变了的组件会被拒绝加载。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### 声明组件 [#declare]
+
+非托管组件什么都不用做。托管组件（含 `string`、数组或类）需要 Nino 格式化器：标上 `[NinoType]`、声明为 `partial`，并在 EasyEcs
+旁边引用 `Nino.Generator` 包。
+
+```xml title="Game.csproj"
+<PackageReference Include="EasyEcs" Version="4.*" />
+<PackageReference Include="Nino.Generator" Version="4.0.0-rc.4" />
+```
+
+```csharp
+using Nino.Core;
+
+public record struct Stock(int Gold, int Wood) : IComponent;          // 非托管：按原始行保存
+public record struct Clock(long Tick) : ISingletonComponent;
+
+[NinoType]
+public partial record struct PlayerName(string Value) : IComponent;    // 托管：由 Nino 写出
+```
+
+</Step>
+<Step>
+
+### 存档 [#save]
+
+`Save` 可以写进任何 `IBufferWriter<byte>`。`NinoArrayBufferWriter` 会被直接写入；其他 writer 则从 World 自己的缓冲区拷贝一份。
+
+```csharp
+world.CreateEntity(new PlayerName("alice"), new Stock(10, 3));
+world.SetClock(1234);
+
+var output = new NinoArrayBufferWriter();
+world.Save(output);                                                    // 实体、组件、单例 // [!code highlight]
+File.WriteAllBytes("world.sav", output.WrittenSpan.ToArray());
+```
+
+</Step>
+<Step>
+
+### 读档 [#load]
+
+`Load` 用存档里的内容替换 World 的实体、组件和单例。实体保留原来的 id 和版本号，所以组件里存的 `EntityId` 仍然指向同一个实体，
+存档前拿到的句柄也重新有效。
+
+```csharp
+using var restarted = new World();
+restarted.Load(File.ReadAllBytes("world.sav"));                       // 同样的 id、值和时钟 // [!code highlight]
+long tick = restarted.Clock.Tick;                                      // 1234
+```
+
+</Step>
+</Steps>
+
+### 存档里有什么 [#what-it-holds]
+
+| 会保存 | 不保存 |
+| --- | --- |
+| 每个存活实体，连同 id 和版本号 | 系统、`WorldOptions` |
+| 每个组件：非托管的按原始行，托管的走 Nino | 索引（下次查找时重建） |
+| 被禁用的组件及其保留的值 | 分组设置（`Load` 按本 World 的 `GroupBy` 调用分组） |
+| [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers) 的元素 | 变更 tick（每个加载的行都算作被写入） |
+| 每个单例 | |
+
+类型按名字记录（带命名空间的完整名字），每列是一个带长度前缀的片段，所以加载时会跳过当前进程没有的组件类型。当前进程用过的类型、
+或者生成器注册过的类型都能找到：使用 EasyEcs 的程序集，其中每个组件和单例都会在模块加载时注册。
+
+### 代码改了之后 [#versioning]
+
+对每个非托管组件，存档记录它的大小和字段哈希（字段名、类型、布局特性）；托管组件的片段必须被它的 Nino 格式化器恰好读到最后一个字节。
+字段变了的组件会以 `InvalidDataException` 拒绝加载，World 保持调用前的样子：
+
+| 存档之后的改动 | 加载结果 |
+| --- | --- |
+| 新增了组件类型 | 正常加载：新类型没有行 |
+| 删除或重命名了组件类型 | 正常加载：跳过它的片段（数据丢弃） |
+| 非托管组件的字段变了（增、删、改类型、改名） | `InvalidDataException` |
+| 托管组件的字段变了，片段读不到最后一个字节 | `InvalidDataException` |
+| 进程里有两个类型存成了同一个名字 | `InvalidDataException`：给其中一个改名 |
+| 字节不是存档，或者已损坏 | `InvalidDataException` |
+
+托管组件只按字节检查：Nino 仍能恰好读完的改动（两个 `string` 字段互换）检测不出来。要改变存盘数据的结构，不要改旧组件，而是加一个新组件类型：
+同时包含两者的版本加载旧存档，由一个系统把旧组件转换成新组件，之后的版本再删掉旧类型。
+
+```csharp
+try
+{
+    restarted.Load(output.WrittenSpan);
+}
+catch (InvalidDataException)
+{
+    // 存档之后某个组件变了：World 还是调用前的样子
+}
+```
+
+### 插件里的组件 [#plugins]
+
+按名字查找类型是进程级的。插件的旧版本和新版本同时加载时，它们的类型同名，加载会以名字歧义拒绝。先卸载旧版本（按
+[热重载](/zh/docs/guide/migration-and-unload#hot-reload)的顺序：存档、`RemoveTypes`、卸载、加载新版本、`Load`），或者把要存档的组件
+放进一个永远不会重载的程序集，比如宿主和插件共用的契约程序集。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+| 别这样 | 这样做 | 原因 |
+| --- | --- | --- |
+| 每次存档新建缓冲区 | 复用一个 `NinoArrayBufferWriter`，每次存档前 `ResetWrittenCount()` | 缓冲区足够大之后，存档不分配 |
+| 用其他 `IBufferWriter<byte>` | 用 `NinoArrayBufferWriter` | 直接写入，省掉从 World 缓冲区的拷贝 |
+| 每次读档新建 World | `Load` 进同一个 World | 复用已有的行：预热后 0 B |
+| 能用值的地方用了托管组件 | 非托管组件（id、数字、定长数组） | 原始行每列一个块；Nino 要逐个值编码 |
+| 自己在 `Query` 上写序列化 | `Save` / `Load` | id、版本号、缓冲、禁用值和单例都一起带上 |
+
+10 万个实体分布在两张表，存档到复用的缓冲区再读回（`SnapshotBenchmark`）：
+
+<BenchTable bench="SnapshotBenchmark" methods="Save,Load" />
+
+## 开销 [#what-it-costs]
+
+- **大小：** 非托管组件就是行本身（填充字节清零，所以相同的 World 存出相同的字节），外加存在位、id 和版本号；托管组件按 Nino 的编码；
+  每个类型的名字只写一次。
+- **时间：** 两个方向都是 O(实体数 × 组件数)。
+- **分配：** 反复 `Save` 到 `NinoArrayBufferWriter` 不分配，反复 `Load` 进同一个 World 也不分配；读出的托管值是新对象。
+- **遍历期间不能调用：** 两者都要进入结构闸门。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 托管组件没有 `[NinoType]` | `Save` 抛 `InvalidOperationException`（没有格式化器） | 运行时 |
+| 写了 `[NinoType]` 却没引用 `Nino.Generator` | 不会生成格式化器 | 运行时 |
+| 组件里存了 `Entity` 句柄 | 托管列，Nino 写不了 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
+| 修改已存档组件的字段 | 旧存档被拒绝 | 加一个新组件类型 |
+| 重命名组件或换了命名空间 | 旧存档加载时丢掉它 | 存档用的类型名保持稳定 |
+| 新旧两个插件版本同时加载 | 名字歧义：`InvalidDataException` | 先卸载旧版本 |
+| 在其他线程存档或读档 | 和拥有者线程竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+
+## 和其他库的对比 [#compared]
+
+Friflo 写 JSON（`EntitySerializer`），DefaultEcs 的二进制序列化器每次都新建一个 World，Arch 要靠单独的包存档。1 万个带位置和库存的单位，
+存档再读回：
+
+<BenchChart bench="SaveComparison" title="存档并读回 1 万个单位" />
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="迁移与卸载" href="/zh/docs/guide/migration-and-unload">
+    `SaveEntities`、`LoadEntities`、`MoveEntities` 和热重载。
+  </Card>
+  <Card title="快照" href="/zh/docs/guide/snapshots">
+    用于回滚的内存拷贝。
+  </Card>
+  <Card title="动态缓冲" href="/zh/docs/guide/dynamic-buffers">
+    连同元素一起存盘的列表。
+  </Card>
+  <Card title="示例：SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">
+    World 写到文件再读回、一组实体迁到另一个 World，每一步都有校验。
+  </Card>
+</Cards>

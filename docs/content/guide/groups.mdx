@@ -1,0 +1,199 @@
+---
+title: Groups
+seoTitle: "GroupBy in a C# ECS: split tables by zone, map or match with IGroup"
+description: GroupBy splits a world's tables by the value of an IGroup component, so a query of one zone, map or match walks only its own contiguous rows. When to group and when to index.
+icon: Boxes
+---
+
+A world often holds many zones, maps or matches, and most work touches one of them: move the units of zone 3, send
+match 12 its state. `GroupBy<T>()` splits the world's tables by the value of an `IGroup` component, so entities of one
+group share tables of their own. `QueryFilter.InGroup<T>(group)` then walks only that group's rows, contiguous in
+memory, at the speed of a plain query over a smaller world.
+
+<Callout type="info" title="Not system groups">
+  These are groups of entities. Groups of *systems* that run at their own cadence (`ISystemGroup`,
+  `[UpdateInGroup<T>]`, `World.Update<T>()`) are another feature: see [Systems](/en/docs/guide/systems).
+</Callout>
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  A few to a few hundred partitions, each holding many entities and walked whole: zones or maps of one server, matches
+  or rooms, teams in a big battle. Entities that change partition now and then (a player walking to the next zone).
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  Keys with few entities each (a guild id, an owner): each group costs tables of its own, so use a
+  [value index](/en/docs/guide/indexes-and-relations#value-indexes). Values that change every tick: each change moves
+  the row. A world per partition when the partitions never interact: [one world per thread](/en/docs/guide/threading#recommended-one-world-per-thread)
+  needs no filter at all.
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### Mark the component [#mark-the-component]
+
+`IGroup.Group` is the partition the entity belongs to.
+
+```csharp
+public record struct Zone(int Id) : IComponent, IGroup
+{
+    public int Group => Id;
+}
+```
+
+</Step>
+<Step>
+
+### Group the world at setup [#group-by]
+
+`GroupBy<T>()` moves the existing entities to their groups' tables and keeps every later write in place: entities
+created with a `Zone` go straight to their group's table.
+
+```csharp
+world.GroupBy<Zone>();                                         // once, before the world fills
+for (int i = 0; i < 9; i++) world.CreateEntity(new Zone(i % 3), new Health(10 * i));
+```
+
+</Step>
+<Step>
+
+### Walk one group [#in-group]
+
+`InGroup<T>(group)` requires `T` with that group: only the group's tables are walked. Keep filters in
+`static readonly` fields; a filter holds one group.
+
+```csharp
+public struct SumHealth : IForEach<Health>
+{
+    public int Total;
+    public void Execute(ref Health health) => Total += health.Value;
+}
+
+public static class Zones
+{
+    public static readonly QueryFilter One = QueryFilter.Create().InGroup<Zone>(1);
+}
+```
+
+```csharp
+int inOne = world.Count<Health>(Zones.One);                   // 3
+var sum = new SumHealth();
+world.ForEach<Health, SumHealth>(ref sum, Zones.One);          // a struct job over zone 1 only
+foreach (var item in world.Query<Health>(Zones.One)) { /* the same rows, as a query */ }
+```
+
+</Step>
+<Step>
+
+### Move an entity to another group [#move]
+
+Write the new value with `Set` (or the generated `SetX`): the entity moves to its group's table at once, one row copy.
+
+```csharp
+var walker = world.CreateEntity(new Zone(1), new Health(50));
+walker.SetZone(2);                                             // now walked by InGroup<Zone>(2)
+```
+
+</Step>
+</Steps>
+
+A grouped component is written only with `Set`: a write through a `ref` would change the value without moving the row,
+so the analyzer rejects it as it does for indexed components ([EECS015](/en/docs/guide/analyzer#eecs015)).
+`Set` is allowed while a query walks the group.
+
+### Groups in systems [#in-systems]
+
+`[ForEach]` filters are attributes and cannot name a group value. A system that works on one group at a time runs a
+struct job from `OnUpdate`, with the group it reads from a singleton:
+
+```csharp
+public record struct ActiveZone(int Id) : ISingletonComponent;
+
+public struct Regenerate : IForEach<Health>
+{
+    public void Execute(ref Health health) => health.Value += 1;
+}
+
+public class RegenerateActiveZone : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        var filter = QueryFilter.Create().InGroup<Zone>(World.GetSingleton<ActiveZone>().Id);
+        var job = new Regenerate();
+        World.ForEach<Health, Regenerate>(ref job, filter);
+    }
+}
+```
+
+An `OnUpdate` override runs alone in its stage. Building the filter per update is cheap: a `QueryFilter` holds no
+object reference.
+
+### What follows a grouping [#what-follows]
+
+| Operation | Lands in |
+| --- | --- |
+| `CreateEntity`, `CreateEntities` | the group of the value, directly (no move) |
+| `Set`, `SetAll` of the grouped component | the new value's group (one row copy if it changed) |
+| `Instantiate(prefab)`, `Clone()`, `LoadEntities`, `MoveEntities` | the group of the copied value |
+| `Restore(snapshot)` | the groups the snapshot had |
+| `Load(bytes)` | the groups of this world's `GroupBy` calls (a save holds no groupings) |
+
+In a world that never called `GroupBy<T>()`, every table holds group 0: `InGroup<T>(0)` matches every entity with `T`.
+
+## How to use it fast [#how-to-use-it-fast]
+
+- **Group at setup.** `GroupBy<T>()` on a full world moves every entity once; on an empty one it costs nothing.
+- **Hoist the filters.** One `static readonly` filter per hot group, or a filter per update as above.
+- **Group by what you walk, index by what you look up.** A group wins when you walk all of a big group; an index wins
+  when a key holds a handful of entities.
+
+100,000 players in 16 zones; 100 players change zones, then the health of the players of 4 zones is summed: as a
+group, as a value index and as a plain component a scan compares (`GroupBenchmark`):
+
+<BenchTable bench="GroupBenchmark" />
+
+## What it costs [#what-it-costs]
+
+- **Memory:** a table per group for each combination of components, with its columns' spare capacity. Thousands of
+  tiny groups fragment the world: that is a job for an index.
+- **Changing group:** one row copy (like adding a component the table has no column for).
+- **Walking a group:** the group's own rows only; no per-row test of the value.
+- **Worlds that never call `GroupBy`** pay nothing: the check is folded away for components that are not `IGroup`.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| Writing the grouped component through a `ref` | The row stays in its old group | [EECS015](/en/docs/guide/analyzer#eecs015) |
+| A group per player, guild or owner | A table per key: memory and fragmentation | Use a [value index](/en/docs/guide/indexes-and-relations#value-indexes) |
+| A value that changes every tick | A row copy per change | Keep it a plain component |
+| Two `InGroup` calls in one filter | A filter holds one group: the last one counts | Code review |
+| `GroupBy` during a pass | Throws: it moves rows | Call it at setup |
+
+## Compared with other libraries [#compared]
+
+Friflo, Arch and DefaultEcs have no grouping by value. The closest is a value index; here are both, against Friflo's
+indexed component, counting a rating range and summing the gold of four zones:
+
+<BenchChart bench="ValueQueryComparison" title="Count a rating range and sum the gold of four zones of 100,000 players" />
+
+## Related [#related]
+
+<Cards>
+  <Card title="Indexes and relations" href="/en/docs/guide/indexes-and-relations">
+    Lookups by key, ranges and links.
+  </Card>
+  <Card title="Queries and filters" href="/en/docs/guide/queries">
+    `QueryFilter`, `Count`, `Query` and struct jobs.
+  </Card>
+  <Card title="Threading" href="/en/docs/guide/threading">
+    One world per thread: partitions that never meet.
+  </Card>
+  <Card title="Example program" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/groups.cs">
+    `examples/groups.cs`, runnable with `dotnet run`.
+  </Card>
+</Cards>

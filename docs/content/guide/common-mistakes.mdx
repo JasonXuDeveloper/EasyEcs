@@ -1,0 +1,479 @@
+---
+title: Common mistakes
+seoTitle: "Common EasyEcs mistakes in C#: copies, refs, state in systems, threads and how to fix them"
+description: Eighteen mistakes people make with EasyEcs, each as the code you might write, why it is wrong and the code to write instead, with the analyzer rule or guide page behind it.
+icon: TriangleAlert
+---
+
+Most of what goes wrong with EasyEcs comes from habits of object-oriented code or of other ECS libraries. The analyzer
+stops half of these mistakes at compile time; the rest compile, run and quietly do the wrong thing. Each entry below
+is the code you might write, why it is wrong, and what to write instead.
+
+## Data [#data]
+
+### Changing a copy of a component [#copy]
+
+```csharp
+var hp = hero.Get<Health>();      // a copy of the row
+hp.Value -= 10;                   // the table still holds the old value
+```
+
+`Get<T>()` returns a `ref`, and `var` copies what it points at. Keep the `ref`, or write through the generated
+property, which is a `ref` too:
+
+```csharp
+ref var health = ref hero.Get<Health>();
+health.Value -= 10;
+hero.Health.Value -= 10;          // the same, through the generated property
+```
+
+No rule catches it. More in [copies and refs](/en/docs/guide/refs-and-await#copies-and-refs).
+
+### Storing an `Entity` in a component [#entity-in-component]
+
+```csharp doccheck=expect-EECS017
+public record struct Follow(Entity Leader) : IComponent;
+```
+
+An `Entity` holds a reference to its world: the column becomes managed (scanned by the GC, not copied as blocks), a
+save cannot write it and a migration does not rewrite it. Store the `EntityId` and look it up when you need it:
+
+```csharp
+public record struct Follow(EntityId Leader) : IComponent;
+```
+
+Caught by [EECS017](/en/docs/guide/analyzer#eecs017) (warning). More in
+[ids, versions and recycling](/en/docs/guide/entities-and-components#entityid).
+
+### Storing an index instead of an id [#raw-index]
+
+```csharp
+public record struct OwnerSlot(int Index) : IComponent;
+```
+
+```csharp
+var owned = world.CreateEntity(new OwnerSlot(hero.Id.Index));   // names whichever entity reuses that index
+```
+
+Ids are recycled: once the owner is destroyed, the index goes to the next entity created. An `EntityId` carries the
+version too, so `TryGetEntity` finds nothing once the owner is gone:
+
+```csharp
+public record struct Owner(EntityId Id) : IComponent;
+```
+
+```csharp
+var item = world.CreateEntity(new Owner(hero.Id));
+if (world.TryGetEntity(item.Read<Owner>().Id, out var owner)) { /* still alive */ }
+```
+
+No rule catches it. More in [ids, versions and recycling](/en/docs/guide/entities-and-components#entityid).
+
+### A flag where a tag would do [#flags]
+
+```csharp
+public record struct Mobility(bool Rooted) : IComponent;
+
+public class MoveRooted : EcsSystem
+{
+    [ForEach] static void Move(ref Position p, in Velocity v, in Mobility m)
+    {
+        if (m.Rooted) return;                  // every row is visited and tested
+        p.X += v.X; p.Y += v.Y;
+    }
+}
+```
+
+A flag makes every system that cares visit every row and branch on it. A tag is a component with no fields: queries
+skip the whole table, and adding or removing it is the state change:
+
+```csharp
+public struct Rooted : IComponent;
+
+public class MoveFree : EcsSystem
+{
+    [ForEach, Without<Rooted>]                 // rooted entities are never visited
+    static void Move(ref Position p, in Velocity v) { p.X += v.X; p.Y += v.Y; }
+}
+```
+
+For a state that flips every tick, a field is cheaper than a table move: see
+[ECS principles, rule 5](/en/docs/ecs-principles#5-choose-the-cheapest-representation-for-frequent-changes).
+
+### Removing a component to pause it [#remove-to-pause]
+
+```csharp
+public record struct Cooldown(int Ticks) : IComponent;
+```
+
+```csharp
+var caster = world.CreateEntity(new Cooldown(30));
+var kept = caster.Read<Cooldown>();     // stash the value somewhere
+caster.Remove<Cooldown>();              // stunned
+caster.Set(kept);                       // and put it back later
+```
+
+The value has to live somewhere in the meantime, and every reader of the stash is code you maintain. `Disable<T>()`
+hides the component from queries, `Has` and `Get`, keeps its value in the row, and `Enable<T>()` brings it back:
+
+```csharp
+caster.Disable<Cooldown>();             // stunned: the cooldown is paused
+caster.Enable<Cooldown>();              // the stun ends: the same value
+```
+
+No rule catches it. More in [disable a component](/en/docs/guide/cleanup-and-disable#disable-a-component).
+
+## Systems [#systems]
+
+### State in a system [#state-in-system]
+
+```csharp doccheck=expect-EECS007
+public class WaveSystem : EcsSystem
+{
+    private int _wave;
+    protected override void OnUpdate() => _wave++;
+}
+```
+
+Nothing else can read, save or snapshot that field, and it is lost when the system is removed. Per-world state is a
+singleton:
+
+```csharp
+public record struct Wave(int Number) : ISingletonComponent;
+
+public class WaveSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.GetOrAddSingleton<Wave>().Number++;
+}
+```
+
+Caught by [EECS007](/en/docs/guide/analyzer#eecs007). More in
+[ECS principles, rule 2](/en/docs/ecs-principles#2-systems-are-stateless).
+
+### A system that calls another [#system-calls-system]
+
+```csharp doccheck=expect-EECS008
+public class LootSystem : EcsSystem { }
+
+public class KillRewards : EcsSystem
+{
+    protected override void OnUpdate() => World.GetSystem<LootSystem>();
+}
+```
+
+Systems that call each other cannot be removed, reordered or tested alone. One writes data (a tag, a component, a
+singleton), and the other reads it, ordered after it:
+
+```csharp
+public struct Looted : IComponent;
+
+public class LootSystem : EcsSystem
+{
+    [ForEach, With<Dead>, Without<Looted>]
+    static void Drop(Entity corpse) => corpse.SetLooted();
+}
+
+[UpdateAfter<LootSystem>]
+public class KillRewards : EcsSystem
+{
+    [ForEach, With<Looted>]
+    static void Reward(in Health hp) { }
+}
+```
+
+Caught by [EECS008](/en/docs/guide/analyzer#eecs008). More in
+[ECS principles, rule 3](/en/docs/ecs-principles#3-systems-never-reference-systems).
+
+### A `ref` parameter that only reads [#ref-that-reads]
+
+```csharp
+public record struct Speed(float Value) : IComponent;
+
+public class Throttle : EcsSystem
+{
+    [ForEach] static void Apply(ref Velocity v, ref Speed max)   // max is only read
+    {
+        v = new Velocity(Math.Min(v.X, max.Value), Math.Min(v.Y, max.Value));
+    }
+}
+```
+
+A `ref` parameter declares a write. With `ParallelSystems`, a system that writes `Speed` cannot share a stage with any
+other system that touches it, and if `Speed` were tracked, every row would count as changed. Read with `in`:
+
+```csharp
+public class Throttle : EcsSystem
+{
+    [ForEach] static void Apply(ref Velocity v, in Speed max)
+    {
+        v = new Velocity(Math.Min(v.X, max.Value), Math.Min(v.Y, max.Value));
+    }
+}
+```
+
+No rule catches it. More in [parallel systems](/en/docs/guide/threading#parallel-systems).
+
+### `[Changed<T>]` on a component that is not tracked [#changed-untracked]
+
+```csharp doccheck=skip
+public record struct Gold(int Amount) : IComponent;
+public record struct Hud(int Gold) : IComponent;
+
+public class ShowGold : EcsSystem
+{
+    [ForEach, Changed<Gold>] static void Show(in Gold gold, ref Hud hud) => hud = new Hud(gold.Amount);
+}
+```
+
+Change ticks cost a column, so only components that ask for them have them. Mark the component `ITrackChanges`:
+
+```csharp
+public record struct Gold(int Amount) : IComponent, ITrackChanges;
+public record struct Hud(int Gold) : IComponent;
+
+public class ShowGold : EcsSystem
+{
+    [ForEach, Changed<Gold>] static void Show(in Gold gold, ref Hud hud) => hud = new Hud(gold.Amount);
+}
+```
+
+Caught by the C# compiler (the attribute requires `ITrackChanges`: CS0315). More in
+[mark the component](/en/docs/guide/change-tracking#mark-the-component).
+
+### Reading a tracked component through a `ref` [#read-tracked-by-ref]
+
+```csharp
+int before = player.Get<Gold>().Amount;      // Get<T>() is a write: the row counts as changed
+```
+
+`Get<T>()` stamps the row, so every `[Changed<Gold>]` system visits it next update. Read with `Read<T>()`, the
+generated property (it is `ref readonly` for a tracked component) or an `in` parameter:
+
+```csharp
+int amount = player.Read<Gold>().Amount;
+int same = player.Gold.Amount;               // ref readonly: no stamp
+```
+
+No rule catches it. More in [what counts as a write](/en/docs/guide/change-tracking#what-counts-as-a-write).
+
+### `[Removed<T>]` that takes `T` [#removed-takes-t]
+
+```csharp
+public record struct Burning(int Ticks) : IComponent, ITrackChanges;
+public record struct Glow(bool On) : IComponent;
+```
+
+```csharp doccheck=expect-EECS016
+public class Extinguish : EcsSystem
+{
+    [ForEach, Removed<Burning>] static void Out(in Burning burning, ref Glow glow) => glow = new Glow(false);
+}
+```
+
+The entities `[Removed<Burning>]` visits no longer have `Burning`, so the method would never run. Read the row's other
+components:
+
+```csharp
+public class Extinguish : EcsSystem
+{
+    [ForEach, Removed<Burning>] static void Out(ref Glow glow) => glow = new Glow(false);
+}
+```
+
+Caught by [EECS016](/en/docs/guide/analyzer#eecs016). More in
+[removal detection](/en/docs/guide/change-tracking#removal-detection).
+
+## Structure [#structure]
+
+### Keeping a `ref` across a structural change [#ref-after-change]
+
+```csharp
+ref var life = ref hero.Get<Health>();
+hero.SetStunned();                 // the row moves to another table
+life.Value -= 10;                  // writes the old copy
+```
+
+Adding or removing a component moves the entity's row, and a `ref` taken before points at the old place. Get it again
+after the change:
+
+```csharp
+hero.SetStunned();
+hero.Get<Health>().Value -= 10;
+```
+
+No rule catches it. More in [refs across a change](/en/docs/guide/structural-changes#refs-across-a-change).
+
+### Keeping a `ref` across an `await` [#ref-across-await]
+
+```csharp doccheck=skip
+ref var stamina = ref hero.Get<Health>();
+await Task.Delay(100);
+stamina.Value -= 10;
+```
+
+The compiler refuses it (CS9217), and with reason: anything may happen to the row while the method waits. Keep the `Entity`
+and get the component again after the `await`, on the owner thread:
+
+```csharp
+await Task.Delay(100);
+if (hero.Has<Health>()) hero.Get<Health>().Value -= 10;
+```
+
+Caught by the C# compiler. More in [across `await`](/en/docs/guide/refs-and-await#across-await).
+
+### Writing an indexed key through a `ref` [#indexed-by-ref]
+
+```csharp
+public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+```
+
+```csharp doccheck=expect-EECS015
+public static class Portals
+{
+    public static void Enter(Entity player) => player.Get<Zone>() = new Zone(2);
+}
+```
+
+The index follows `Set`; a write through a `ref` changes the key behind its back, and lookups keep finding the
+player in the old zone. Write it with `Set` or the generated `SetX`:
+
+```csharp
+public static class Portals
+{
+    public static void Enter(Entity player) => player.SetZone(2);
+}
+```
+
+Caught by [EECS015](/en/docs/guide/analyzer#eecs015). More in
+[value indexes](/en/docs/guide/indexes-and-relations#value-indexes).
+
+### Copying a `DynamicBuffer<T>` [#buffer-copy]
+
+```csharp
+public record struct Loot(int Item);
+```
+
+```csharp doccheck=expect-EECS012
+public static class Inventory
+{
+    public static void Give(Entity player, Loot loot)
+    {
+        var bag = player.Read<DynamicBuffer<Loot>>();    // a copy that shares the list
+        bag.Add(loot);                                   // the write is never stamped
+    }
+}
+```
+
+A buffer refers to its list: a copy writes to the same list without marking the entity changed, and storing it gives
+two entities one list. Reach it through the entity:
+
+```csharp
+public static class Inventory
+{
+    public static void Give(Entity player, Loot loot)
+    {
+        ref var bag = ref player.Get<DynamicBuffer<Loot>>();
+        bag.Add(loot);
+    }
+}
+```
+
+Caught by [EECS012](/en/docs/guide/analyzer#eecs012). More in [dynamic buffers](/en/docs/guide/dynamic-buffers).
+
+### Destroying a parent and expecting the children to stay [#parent-destroy]
+
+```csharp
+var ship = world.CreateEntity(new Position(0, 0));
+var turret = world.CreateEntity(new Position(1, 0), new ChildOf(ship));
+ship.Destroy();                    // the turret is destroyed with it
+```
+
+`ChildOf` starts with `TargetPolicy.Destroy`: destroying a parent destroys its subtree. Choose what happens to the
+children once, for the world:
+
+```csharp
+world.Index<ChildOf, EntityId>().WhenTargetDestroyed(TargetPolicy.Remove);   // orphans become roots
+```
+
+No rule catches it. More in [cascade policy](/en/docs/guide/hierarchy#cascade-policy).
+
+### A loop of structural changes [#loop-of-changes]
+
+```csharp
+public struct Fighter : IComponent;
+```
+
+```csharp
+foreach (var item in world.Query<Fighter>())
+    item.Entity.SetFrozen();       // one structural change per entity
+```
+
+Each call moves one row. `SetAll`, `RemoveAll`, `DisableAll` and `EnableAll` move a table's rows together:
+
+```csharp
+int frozen = world.SetAll(new Frozen(), QueryFilter.Create().With<Fighter>());
+```
+
+No rule catches it. More in [bulk changes](/en/docs/guide/bulk).
+
+## Threads [#threads]
+
+### Changing a world from another thread [#other-thread]
+
+```csharp doccheck=expect-EECS014
+public static class Network
+{
+    public static void OnJoin(World world)
+    {
+        Task.Run(() => world.CreateEntity(new Position(0, 0)));
+        world.CreateEntity(new Position(1, 1));
+    }
+}
+```
+
+A world's structure belongs to its owner thread, and the world adds no lock to share it. Put the input in a queue
+and let a system on the owner thread turn it into entities, or give each thread its own world.
+
+Caught by [EECS014](/en/docs/guide/analyzer#eecs014). More in
+[input from other threads](/en/docs/guide/threading#input-from-other-threads).
+
+### A structural change in a parallel method [#parallel-change]
+
+```csharp doccheck=expect-EECS010
+public class Reap : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Kill(Entity e, in Health hp) { if (hp.Value <= 0) e.SetDead(); }
+}
+```
+
+Chunks of rows run on several threads at once, so none may move rows. Keep the parallel part to values, and let a
+sequential method change structure:
+
+```csharp
+public class Reap : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Kill(Entity e, in Health hp) { if (hp.Value <= 0) e.SetDead(); }
+}
+```
+
+Caught by [EECS010](/en/docs/guide/analyzer#eecs010). More in
+[parallel `[ForEach]` methods](/en/docs/guide/threading#parallel-foreach-methods).
+
+## Related [#related]
+
+<Cards>
+  <Card title="Analyzer rules" href="/en/docs/guide/analyzer">
+    Every rule, EECS002 to EECS024.
+  </Card>
+  <Card title="ECS principles" href="/en/docs/ecs-principles">
+    The rules these mistakes break.
+  </Card>
+  <Card title="Refs and await" href="/en/docs/guide/refs-and-await">
+    When a `ref` expires.
+  </Card>
+  <Card title="FAQ" href="/en/docs/faq">
+    Short answers to common questions.
+  </Card>
+</Cards>

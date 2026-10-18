@@ -1,0 +1,195 @@
+---
+title: Saves
+seoTitle: "Save and load an ECS world in C#: World.Save, World.Load and Nino"
+description: "Write a whole world to bytes with World.Save and read it back with Load, in this or another process: same ids, raw unmanaged rows, Nino for managed components, changed layouts refused."
+icon: Save
+---
+
+A server restarts and must come back with its world: players where they stood, timers where they were, links between
+entities intact. `world.Save(output)` writes the entities (ids and versions), their components and the singletons as
+bytes, and `world.Load(bytes)` puts them into a world of this process or another one. Unmanaged components are their
+raw rows, one block per column; managed ones go through [Nino](https://github.com/JasonXuDeveloper/Nino). Saving and
+loading again into the same buffers allocates nothing.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  Persistence across restarts, replays on disk, crash dumps, shipping a world to another process (a test harness, a
+  replay viewer), keeping data through a [hot reload](/en/docs/guide/migration-and-unload#hot-reload).
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  Rolling back inside one process: a [snapshot](/en/docs/guide/snapshots) is faster and needs no encoding. Moving a
+  player to another server: [`SaveEntities`](/en/docs/guide/migration-and-unload#save-entities) writes just the group.
+  Long-term storage across schema changes you cannot control: a save refuses a component whose fields changed.
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### Declare the components [#declare]
+
+Unmanaged components need nothing. A managed component (one with a `string`, an array, a class) needs a Nino formatter:
+mark it `[NinoType]` and make it `partial`, with the `Nino.Generator` package referenced next to EasyEcs.
+
+```xml title="Game.csproj"
+<PackageReference Include="EasyEcs" Version="4.*" />
+<PackageReference Include="Nino.Generator" Version="4.0.0-rc.4" />
+```
+
+```csharp
+using Nino.Core;
+
+public record struct Stock(int Gold, int Wood) : IComponent;          // unmanaged: saved as raw rows
+public record struct Clock(long Tick) : ISingletonComponent;
+
+[NinoType]
+public partial record struct PlayerName(string Value) : IComponent;    // managed: Nino writes it
+```
+
+</Step>
+<Step>
+
+### Save [#save]
+
+`Save` writes into any `IBufferWriter<byte>`. A `NinoArrayBufferWriter` is written directly; another writer gets a
+copy from the world's own buffer.
+
+```csharp
+world.CreateEntity(new PlayerName("alice"), new Stock(10, 3));
+world.SetClock(1234);
+
+var output = new NinoArrayBufferWriter();
+world.Save(output);                                                    // entities, components, singletons // [!code highlight]
+File.WriteAllBytes("world.sav", output.WrittenSpan.ToArray());
+```
+
+</Step>
+<Step>
+
+### Load [#load]
+
+`Load` replaces the world's entities, components and singletons with the save's. Entities keep their ids and
+versions, so `EntityId`s stored in components still point at the same entities, and handles made before the save work
+again.
+
+```csharp
+using var restarted = new World();
+restarted.Load(File.ReadAllBytes("world.sav"));                       // same ids, values and clock // [!code highlight]
+long tick = restarted.Clock.Tick;                                      // 1234
+```
+
+</Step>
+</Steps>
+
+### What a save holds [#what-it-holds]
+
+| Saved | Not saved |
+| --- | --- |
+| Every alive entity, with its id and version | Systems, `WorldOptions` |
+| Every component, unmanaged as raw rows, managed through Nino | Indexes (they rebuild on the next lookup) |
+| Disabled components, with their kept values | Groupings (`Load` follows this world's `GroupBy` calls) |
+| [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) elements | Change ticks (every loaded row counts as written) |
+| Every singleton | |
+
+Types are recorded by name (their namespace-qualified name), and each column is a length-prefixed slice, so a load
+skips the components this process has no type for. A type is found when the process used it, or when the generator
+registered it: every component and singleton of a compilation that uses EasyEcs is registered when its module loads.
+
+### When the code changed [#versioning]
+
+A save records, for each unmanaged component, its size and a hash of its fields (names, types, layout attributes); a
+managed component's slice must be read to its last byte by its Nino formatter. A load refuses a component whose fields
+changed, with an `InvalidDataException`, and leaves the world as it was:
+
+| Change since the save | Load |
+| --- | --- |
+| A component type added | Loads: the new type has no rows |
+| A component type removed or renamed | Loads: its slices are skipped (its data is dropped) |
+| Fields of an unmanaged component changed (added, removed, retyped, renamed) | `InvalidDataException` |
+| Fields of a managed component changed so that its slice no longer reads to the last byte | `InvalidDataException` |
+| Two types of the process saved under one name | `InvalidDataException`: rename one |
+| Bytes that are not a save, or a damaged one | `InvalidDataException` |
+
+A managed component is checked by its bytes only: a change Nino still reads exactly (two `string` fields swapped) is
+not detected. To change the shape of saved data, add a new component type instead of editing the old one: a build that has both
+loads the old save, a system converts the old component into the new one, and a later build drops the old type.
+
+```csharp
+try
+{
+    restarted.Load(output.WrittenSpan);
+}
+catch (InvalidDataException)
+{
+    // a component changed since this save: the world is as it was before the call
+}
+```
+
+### Components in plugins [#plugins]
+
+The name lookup is process-wide. While a plugin's old version and its new one are both loaded, their types share
+names and a load refuses them as ambiguous. Unload the old version first (the [hot reload](/en/docs/guide/migration-and-unload#hot-reload)
+order: save, `RemoveTypes`, unload, load the new version, `Load`), or keep the components you save in an assembly
+that is never reloaded, such as a contracts assembly shared by the host and the plugins.
+
+## How to use it fast [#how-to-use-it-fast]
+
+| Instead of | Do | Why |
+| --- | --- | --- |
+| A new buffer per save | One `NinoArrayBufferWriter`, `ResetWrittenCount()` before each save | Save allocates nothing once its buffers are large enough |
+| Another `IBufferWriter<byte>` | `NinoArrayBufferWriter` | Written directly, without the copy from the world's buffer |
+| A new world per load | `Load` into the same world | Its rows are reused: 0 B once warm |
+| Managed components where values would do | Unmanaged components (ids, numbers, fixed arrays) | Raw rows are one block per column; Nino encodes value by value |
+| Your own serializer over a `Query` | `Save` / `Load` | Ids, versions, buffers, disabled values and singletons come along |
+
+100,000 entities in two tables, saved into a reused buffer and loaded back (`SnapshotBenchmark`):
+
+<BenchTable bench="SnapshotBenchmark" methods="Save,Load" />
+
+## What it costs [#what-it-costs]
+
+- **Size:** for unmanaged components, the rows themselves (padding bytes cleared, so equal worlds save equal bytes),
+  plus presence bits, ids and versions; managed components as Nino writes them; each type's name once.
+- **Time:** O(entities × components) both ways.
+- **Allocation:** none on a repeated `Save` into a `NinoArrayBufferWriter`, none on a repeated `Load` into the same
+  world; managed values a load reads are new objects.
+- **Not while a pass iterates:** both take the structural gate.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| A managed component without `[NinoType]` | `Save` throws `InvalidOperationException` (no formatter) | At run time |
+| `[NinoType]` without the `Nino.Generator` package | No formatter is generated | At run time |
+| An `Entity` handle in a component | A managed column Nino cannot write | [EECS017](/en/docs/guide/analyzer#eecs017) |
+| Editing the fields of a saved component | Old saves are refused | Add a new component type |
+| Renaming a component or moving its namespace | Old saves load without it | Keep saved type names stable |
+| Old and new plugin versions loaded at once | Ambiguous names: `InvalidDataException` | Unload the old version first |
+| Saving or loading from another thread | Races with the owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |
+
+## Compared with other libraries [#compared]
+
+Friflo writes JSON (`EntitySerializer`), DefaultEcs has a binary serializer that creates a new world each time, and
+Arch saves through a separate package. 10,000 units with a position and a stock, saved and loaded back:
+
+<BenchChart bench="SaveComparison" title="Save and load 10,000 units" />
+
+## Related [#related]
+
+<Cards>
+  <Card title="Migration and unload" href="/en/docs/guide/migration-and-unload">
+    `SaveEntities`, `LoadEntities`, `MoveEntities` and hot reload.
+  </Card>
+  <Card title="Snapshots" href="/en/docs/guide/snapshots">
+    In-memory copies for rollback.
+  </Card>
+  <Card title="Dynamic buffers" href="/en/docs/guide/dynamic-buffers">
+    Lists saved with their elements.
+  </Card>
+  <Card title="Sample: SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">
+    A world to a file and back, a group to another world, verified step by step.
+  </Card>
+</Cards>

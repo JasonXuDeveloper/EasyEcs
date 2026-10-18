@@ -32,7 +32,7 @@ what went away: it visits the entities that lost `T` since then.
 
 ```csharp
 public record struct Health(int Value) : IComponent, ITrackChanges;
-public record struct Replica(int Value) : IComponent;
+public record struct Replica(int Health) : IComponent;
 ```
 
 </Step>
@@ -48,7 +48,7 @@ public class Replicate : EcsSystem
     // Only entities whose Health was written since this system's previous run
     // (all of them on its first run).
     [ForEach, Changed<Health>] // [!code highlight]
-    static void Copy(in Health health, ref Replica replica) => replica = new Replica(health.Value);
+    static void Copy(in Health health, ref Replica replica) => replica.Health = health.Value;
 }
 ```
 
@@ -79,7 +79,8 @@ hands out a `ref`, whether or not the code stores through it:
 | `Query` items (the enumerator stamps every row it visits) | `TryGet<T>(out T)` (a copy), `Read<T>()` (read-only) |
 | `entity.Get<T>()`, `TryGetRef<T>(out found)` when found, `GetOrAdd<T>()`, `Set(...)` | `Has<T>()` |
 | `CreateEntity(...)`, `CreateEntities(...)`, `Instantiate(...)`, `Clone()` with the component | removing the component (a [removal](#removal-detection)) |
-| `world.Restore(snapshot)` (every restored row) | |
+| `entity.Enable<T>()`, `world.EnableAll<T>()` (the kept value comes back) | `entity.Disable<T>()` (a removal) |
+| `world.Restore(snapshot)`, `world.Load(bytes)` (every restored or loaded row) | |
 
 A [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) is a list that can only change through a `ref`, so its
 writes are always tracked.

@@ -1,0 +1,144 @@
+---
+title: Snapshots
+seoTitle: "World snapshots in a C# ECS: Capture and Restore for rollback and replays"
+description: Copy a whole world into memory with Capture and put it back with Restore, for undoing a turn, rollback netcode, replays and resetting tests, allocation-free when a snapshot is reused.
+icon: Camera
+---
+
+`world.Capture()` copies the world's entities, their components and its singletons into a `WorldSnapshot`, and
+`world.Restore(snapshot)` puts them back, any number of times. A turn-based server undoes a move, a rollback server
+rewinds a few ticks to apply a late input and re-simulates, a replay jumps back, a test resets its world. Capturing
+into a snapshot you keep reuses its arrays, so capturing every tick allocates nothing.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  Undoing a turn, rollback and client-side prediction (a ring of recent ticks), replays within a session, resetting a
+  world between tests or matches.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  Persistence: a snapshot lives in memory and shares managed references with the world. Use [saves](/en/docs/guide/saves)
+  for disk and other processes. Capturing millions of entities every tick: each capture copies every row.
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### Capture and restore [#capture-and-restore]
+
+```csharp
+var before = world.Capture();          // O(entities × components)
+int held = before.EntityCount;         // the entities it holds
+
+world.Update();                        // simulate a turn
+if (!running) world.Restore(before);   // undo it: same entities, same values, same singletons // [!code highlight]
+world.Restore(before);                 // a snapshot can be restored any number of times
+```
+
+</Step>
+<Step>
+
+### Reuse snapshots for rollback [#rollback]
+
+`Capture(into)` overwrites a snapshot of this world and reuses its arrays. A ring of the last ticks then costs no
+allocation once its snapshots are large enough.
+
+```csharp
+public static class Rollback
+{
+    public const int Ticks = 8;
+}
+```
+
+```csharp
+var history = new WorldSnapshot[Rollback.Ticks];
+for (int tick = 0; tick < 100; tick++)
+{
+    history[tick % Rollback.Ticks] = world.Capture(history[tick % Rollback.Ticks]);   // null the first time: a new one
+    world.Update();
+}
+
+world.Restore(history[(100 - 3) % Rollback.Ticks]);                                 // back three ticks, then re-simulate
+```
+
+</Step>
+</Steps>
+
+### What a snapshot holds [#what-it-holds]
+
+- **Entities and components, copied by value.** A managed reference inside a component (a `string`, an array, a
+  `List<T>`) is shared with the world, not cloned: a collection in a component comes back as it is now, not as it
+  was. A [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) is the exception: its elements are copied on capture and
+  on restore. Disabled components keep their kept values.
+- **Singletons, copied by value.** After `Restore` every singleton has the snapshot's value in its existing storage,
+  so a `SingletonRef<T>` taken before keeps working; singletons added after the capture are removed.
+- **Handles.** Handles to entities alive in the snapshot are valid again. Every other handle is stale, including
+  handles to entities created after the capture, even when a later entity reuses their id.
+- **Not systems, options or groupings.** Systems keep running as registered; tables created after the capture stay,
+  empty; [groups](/en/docs/guide/groups) are restored as captured.
+
+### What a restore tells the rest of the world [#after-restore]
+
+- **Change tracking:** every restored row of a tracked component counts as written, and every restored row lacking one
+  counts as removed, so [replication](/en/docs/guide/change-tracking#removal-detection) re-sends the restored state.
+- **Indexes** re-index from scratch on their next lookup.
+- **Relations** re-index too.
+
+Both calls take the structural gate and throw while a query iterates: call them between updates, or from a system's
+`OnUpdate` outside its `[ForEach]` methods. A snapshot belongs to the world it was taken from (`ArgumentException`
+otherwise), and one taken before [`RemoveTypes`](/en/docs/guide/migration-and-unload#remove-types) cannot be restored
+after it (`InvalidOperationException`).
+
+## How to use it fast [#how-to-use-it-fast]
+
+| Instead of | Do | Why |
+| --- | --- | --- |
+| `Capture()` every tick | `Capture(snapshot)` into a kept snapshot | Reuses its arrays: 0 B once large enough |
+| A snapshot every tick of a huge world | Every few ticks, or a smaller world per zone | Capture is O(entities × components) |
+| A snapshot for disk | `Save` / `Load` | Bytes, field hashes, other processes |
+| Collections in components you roll back | `DynamicBuffer<T>` | Buffers are copied; other collections are shared |
+
+100,000 entities in two tables with a singleton: a capture into a new snapshot, a restore, and for comparison a save
+into a reused buffer and a load (`SnapshotBenchmark`):
+
+<BenchTable bench="SnapshotBenchmark" />
+
+The capture's allocation is the new snapshot itself; `Capture(into)` reuses one.
+
+## What it costs [#what-it-costs]
+
+- **Memory:** a copy of every row, every singleton and the entity records.
+- **Time:** O(entities × components + tables + singletons) both ways; rows are copied column by column.
+- **After a restore:** one re-indexing walk per index on its next lookup, and every tracked row counts as changed.
+- **Worlds that never capture** pay nothing.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| Expecting a `List<T>` in a component to roll back | It is shared: it comes back as it is now | Use `DynamicBuffer<T>` |
+| Capturing or restoring while a query iterates | `InvalidOperationException` | At run time |
+| Restoring a snapshot into another world | `ArgumentException` | At run time |
+| Keeping handles of entities created after the capture | They are stale after the restore | `IsAlive` |
+| Writing snapshots to disk | They are object graphs, not bytes | Use [saves](/en/docs/guide/saves) |
+| Capturing or restoring from another thread | Structural changes belong to the owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |
+
+## Related [#related]
+
+<Cards>
+  <Card title="Saves" href="/en/docs/guide/saves">
+    The world as bytes, for disk and other processes.
+  </Card>
+  <Card title="Change tracking" href="/en/docs/guide/change-tracking">
+    A restore counts every row as written or removed.
+  </Card>
+  <Card title="Dynamic buffers" href="/en/docs/guide/dynamic-buffers">
+    Lists whose elements a snapshot copies.
+  </Card>
+  <Card title="Example program" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/snapshots.cs">
+    `examples/snapshots.cs`, runnable with `dotnet run`.
+  </Card>
+</Cards>

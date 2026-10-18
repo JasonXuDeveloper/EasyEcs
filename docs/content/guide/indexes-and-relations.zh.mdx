@@ -1,0 +1,248 @@
+---
+title: 索引与关系
+seoTitle: "C# ECS 的值索引、有序范围查询和实体关系"
+description: 按值（名字、区域、分数区间）或按指向的实体查找实体，索引由 World 自动维护。涵盖 IIndexed<TKey>、Range、IRelation 和目标销毁策略。
+icon: Network
+---
+
+查询按"有哪些组件"找实体。服务器还经常要按值找：名叫 "alice" 的玩家、3 号区域里的单位、分数前十、某个玩家拥有的物品、
+某支队伍的成员。给组件实现 `IIndexed<TKey>`，World 就会为它维护一份索引：每次 `Set` 都立即更新索引，查找时既不用追赶
+变化，也不用扫描。关系同样是索引：持有 `EntityId` 的组件能回答"谁指向这个实体"，`IRelation` 缓冲则让一个实体链接多个实体。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  按键查找（按名字找玩家、按区域找单位）、有序遍历（排行榜、截止时间、匹配分段）、反向链接（主人的物品、弓手的箭）
+  和多对多链接（队伍成员、关注者）。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  只在全量遍历里顺带判断的键：普通 `[ForEach]` 反正要读它。键很少、每个键下实体很多、而且要整组遍历（16 个区域、10 万玩家）：
+  用[分组](/zh/docs/guide/groups)，每个键独占自己的表，遍历是满速的。手动同步的字典：索引本身就是。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+### 值索引 [#value-indexes]
+
+实现 `IIndexed<TKey>`，`Key` 就是查找实体用的值。`world.Index<T, TKey>()` 第一次调用时创建索引；生成的
+`world.XIndex` 属性返回的是同一个。
+
+```csharp
+public record struct Callsign(string Value) : IComponent, IIndexed<string>
+{
+    public string Key => Value;
+}
+public record struct Zone(int Id) : IComponent, IIndexed<int>
+{
+    public int Key => Id;
+}
+```
+
+```csharp
+var alpha = world.CreateEntity(new Callsign("alpha"), new Zone(1));
+world.CreateEntity(new Callsign("bravo"), new Zone(1));
+
+var zones = world.ZoneIndex;                        // world.Index<Zone, int>()：存到局部变量或字段里
+int inOne = zones.Count(1);                         // O(1)
+foreach (var e in zones.Find(1)) { /* 1 号区域里的每个实体 */ }
+if (world.CallsignIndex.TryFind("alpha", out var found)) { /* 拥有这个键的任一实体 */ }
+
+alpha.SetZone(2);                                   // 一次 Set：索引立即把 alpha 挪过去 // [!code highlight]
+int inTwo = zones.Count(2);                         // 1
+```
+
+被索引的组件用 `in`、`Read<T>()` 或生成的属性（`alpha.Zone`，`ref readonly`）读取，用 `Set` 或生成的 `SetX` 写入。
+通过 `ref` 写入会在索引不知情时改掉键，所以分析器直接拒绝（[EECS015](/zh/docs/guide/analyzer#eecs015)）。一个组件只有一个索引、
+一种键类型。
+
+### 有序遍历和范围查询 [#ordered-index]
+
+键可以比较时（`IComparable<TKey>`：分数、等级、截止时间），同一个索引还能按键的顺序遍历：
+
+| 调用 | 访问 |
+| --- | --- |
+| `Range(min, max)` | 从 `min` 到 `max`（含两端）的键，升序 |
+| `RangeDescending(min, max)` | 同样的键，降序 |
+| `Ascending()` / `Descending()` | 所有被索引的实体，按键排序 |
+
+```csharp
+public record struct Score(int Points) : IComponent, IIndexed<int>
+{
+    public int Key => Points;
+}
+```
+
+```csharp
+for (int i = 0; i < 100; i++) world.CreateEntity(new Score(i * 10));
+
+int shown = 0;
+foreach (var leader in world.ScoreIndex.Descending())         // 排行榜从第一名开始
+{
+    if (++shown > 10) break;
+}
+foreach (var rival in world.ScoreIndex.Range(400, 500)) { /* 一个匹配分段 */ }
+```
+
+第一次有序遍历时排一次序，之后键的增减都会保持有序。
+
+### `EntityId` 键：每个实体一条链接 [#entityid-keys]
+
+持有 `EntityId` 并以它为键的组件就是一条链接：每支箭有一个主人，索引回答"这个主人有哪些箭"。存 `EntityId`，不要存 `Entity`
+句柄（[EECS017](/zh/docs/guide/analyzer#eecs017)）：id 只有 8 字节，非托管，能随 World 存盘，而且句柄可以隐式转换成它。
+
+```csharp
+public record struct OwnedBy(EntityId Owner) : IComponent, IIndexed<EntityId>
+{
+    public EntityId Key => Owner;
+}
+public struct Arrow : IComponent;
+```
+
+```csharp
+var archer = world.CreateEntity(new Health(10));
+for (int i = 0; i < 3; i++) world.CreateEntity(new OwnedBy(archer), new Arrow());
+
+int quiver = world.OwnedByIndex.Count(archer);                // 3：一次数组访问，不用哈希
+foreach (var arrow in world.OwnedByIndex.Find(archer)) { /* 弓手的每一支箭 */ }
+```
+
+`EntityId` 带着实体的版本号，所以指向已销毁实体的链接，永远不会匹配上之后复用同一编号的新实体。要把 id 变回句柄，用
+`world.TryGetEntity(id, out var entity)`，它同时告诉你实体是否还活着。父子链接是内置的，见[层级](/zh/docs/guide/hierarchy)。
+
+### 关系：每个实体多条链接 [#relations]
+
+一个实体每种组件只能有一个，所以 `EntityId` 键只能给每个实体一条链接。关系可以有任意多条：元素实现 `IRelation`，放在
+[`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers) 里，`world.Relations<T>()` 负责找出链接到某个目标的实体。
+
+```csharp
+public record struct MemberOf(EntityId Target) : IRelation;
+```
+
+```csharp
+var red = world.CreateEntity();
+var blue = world.CreateEntity();
+var knight = world.CreateEntity().AddRelation(new MemberOf(red)).AddRelation(new MemberOf(blue));   // 同时在两支队伍
+
+var parties = world.Relations<MemberOf>();                    // 存到局部变量或字段里
+int members = parties.Count(red);                             // O(1)
+foreach (var member in parties.Find(red)) { /* red 的每个成员 */ }
+bool inBlue = knight.HasRelation<MemberOf>(blue);
+knight.RemoveRelation<MemberOf>(blue);                         // 退出 blue
+```
+
+实体没有缓冲时，`AddRelation` 会先加上缓冲，再追加链接并建立索引。读取链接用 `Read<DynamicBuffer<T>>()` 或 `in` 参数；
+修改链接用 `AddRelation`、`RemoveRelation` 或整个缓冲的 `Set`，这样索引才能跟上（通过 `ref` 写入属于
+[EECS015](/zh/docs/guide/analyzer#eecs015)）。
+
+### 目标被销毁时 [#target-policies]
+
+目标死了，指向它的链接怎么办，是游戏规则的一部分。索引可以在每次销毁时直接执行这条规则：
+
+| `TargetPolicy` | 指向被销毁实体的链接 | 例子 |
+| --- | --- | --- |
+| `Keep`（默认） | 保留，仍能用死去的 id 查到（之后不会有实体拥有这个 id），由你自己的系统清理 | 审计记录 |
+| `Remove` | 删除：从实体上移除这个组件，关系则丢掉这些链接 | 宠物死了，主人失去宠物 |
+| `Destroy` | 链接方也一起销毁，指向它们的也依次销毁 | 召唤物随召唤者一起消失 |
+
+```csharp
+world.OwnedByIndex.WhenTargetDestroyed(TargetPolicy.Destroy);       // 弓手死了，箭也没了
+world.Relations<MemberOf>().WhenTargetDestroyed(TargetPolicy.Remove); // 队伍解散，不留链接
+
+archer.Destroy();
+int arrowsLeft = world.Count<Arrow>();                              // 0
+```
+
+`WhenTargetDestroyed` 按 World、按索引分别设置。[层级](/zh/docs/guide/hierarchy)用的 `ChildOf` 一开始就是 `Destroy`。
+
+### 由索引驱动的系统 [#index-driven-foreach]
+
+`[ForEach]` 方法可以对访问到的每个实体再遍历一次索引：危险区伤害区域里的单位，公会统计成员。把 `World`（或 `Entity`）
+作为参数拿到索引；这样系统会单独运行，正好满足索引只属于 World 拥有者线程的要求。
+
+```csharp
+public record struct Hazard(int Zone, int Damage) : IComponent;
+
+public class BurnZones : EcsSystem
+{
+    [ForEach]
+    static void Burn(in Hazard hazard, World world)
+    {
+        foreach (var unit in world.ZoneIndex.Find(hazard.Zone)) // [!code highlight]
+            if (unit.HasHealth) unit.Health.Value -= hazard.Damage;
+    }
+}
+```
+
+无论 World 里有多少单位，遍历只碰这个区域里的那些。`Find` 循环里可以销毁实体，但不能修改这个索引对应的组件。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+| 别这样 | 这样做 | 原因 |
+| --- | --- | --- |
+| 在热循环里调用 `world.Index<T, TKey>()` | 把索引存进局部变量或字段（或用 `world.XIndex`） | 创建是冷路径；属性虽是 O(1)，也还是一次查找 |
+| 键没变也调用 `Set` | 先比较：`if (unit.Zone.Id != id) unit.SetZone(id);` | 键不变的 `Set` 不会重新链接，但仍是一次写入 |
+| 扫描比较键 | `Find(key)` / `Count(key)` | O(1)，之后每个匹配 O(1) |
+| 每个 tick 给查询结果排序 | `Range` / `Descending` | 键在变化时一直保持有序 |
+| 整组遍历很多大键 | [`GroupBy`](/zh/docs/guide/groups) | 同组的行连续存放在自己的表里 |
+
+10 万件物品里有 100 件换了主人，然后统计 100 个背包（`IndexBenchmark`）；100 个玩家改变关注对象，然后统计并遍历 100 个
+玩家的关注者（`RelationBenchmark`）；1,000 个分数变化，然后读出前 10 名和一个分段，对比手写扫描维护前 10 名
+（`OrderedIndexBenchmark`）：
+
+<BenchTable bench="IndexBenchmark" />
+
+<BenchTable bench="RelationBenchmark" />
+
+<BenchTable bench="OrderedIndexBenchmark" />
+
+## 开销 [#what-it-costs]
+
+- **不用就没有开销。** 索引在第一次查找时建立（遍历一次匹配的表）；从不调用 `Index` 或 `Relations` 的 World 什么都不付。
+- **内存：** 每个被索引的实体一个节点，每个键一个 id 数组。关系的每个元素一个 20 字节的链接（可回收），外加目标列表里的 8 字节。
+- **`Count`** 是一次哈希探测，`EntityId` 键则是一次数组访问；**`Find`** 每个实体多一步。
+- **改了键的 `Set`** 会把实体从旧键摘下、挂到新键上（几次数组写入；非实体键多一次哈希探测）。
+- **有序遍历：** 第一次排序；之后每出现或消失一个键，开销是 O(log 键数) 加一次块移动。
+- **分配：** 只在索引遇到新键或更大的实体 id 时发生，查找本身从不分配。
+- **目标策略：** 每个被销毁的实体 O(1)，它的每条链接 O(1)。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 通过 `ref`、`Get<T>()` 或查询元素写入被索引的组件 | 索引还停在旧键上 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
+| 组件里存 `Entity` 句柄 | 变成托管列，有写屏障，存不了盘 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
+| 在 `Find` 循环里修改同一索引的组件 | 不支持（销毁实体可以） | 代码审查 |
+| 在其他线程使用索引 | 索引属于拥有者线程 | [线程](/zh/docs/guide/threading#what-the-world-synchronizes) |
+| 同一个组件用两种键类型建索引 | 抛 `InvalidOperationException`：每个组件一个索引 | 运行时 |
+| 键是 `null`（`string` 的默认值） | 实体不会出现在任何键下 | 设计如此 |
+
+## 和其他库的对比 [#compared]
+
+Friflo 支持组件索引（`IIndexedComponent`）和链接（`ILinkComponent`、`ILinkRelation`）；DefaultEcs 有 `EntityMultiMap<T>`；
+Arch 的关系在单独的包里。下面每个库用的都是自己的内置索引：
+
+<BenchChart bench="IndexComparison" param="Trades=100" title="10 万件物品中 100 件换主人，然后统计 100 个背包" />
+
+<BenchChart bench="RelationComparison" title="好友列表：100 个玩家改变关注对象，然后读取 100 个关注者列表" />
+
+范围查询和区域查找，区域分别用值索引和[分组](/zh/docs/guide/groups)实现：
+
+<BenchChart bench="ValueQueryComparison" title="10 万玩家中统计一个分数区间，并汇总四个区域的金币" />
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="层级" href="/zh/docs/guide/hierarchy">
+    `ChildOf`、`Children` 和级联销毁。
+  </Card>
+  <Card title="分组" href="/zh/docs/guide/groups">
+    按值拆表：整组遍历一个键的最快方式。
+  </Card>
+  <Card title="动态缓冲" href="/zh/docs/guide/dynamic-buffers">
+    存放关系链接的缓冲。
+  </Card>
+  <Card title="示例程序" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/relations.cs">
+    `examples/indexes.cs` 和 `examples/relations.cs`，用 `dotnet run` 直接运行。
+  </Card>
+</Cards>

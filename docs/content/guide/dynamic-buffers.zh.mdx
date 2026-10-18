@@ -1,0 +1,211 @@
+---
+title: 动态缓冲
+seoTitle: "动态缓冲：用 DynamicBuffer<T> 给每个实体一个列表"
+description: DynamicBuffer<T> 让每个实体都有自己的列表（背包、路径、本 tick 受到的伤害），它是带变更追踪的组件，容量够用时不产生任何分配。
+icon: ListOrdered
+---
+
+服务器里有大量只属于某个实体的小列表：背包里的物品 id、路径上的路点、单位这一 tick 挨的伤害、玩家排队的指令。
+`DynamicBuffer<T>` 把这样的列表做成一个组件。添加、查询、作为 `[ForEach]` 参数，都和普通组件一样；而且对列表的每次
+写入都会被追踪，`[Changed<DynamicBuffer<T>>]` 能精确找出需要同步或存盘的那些背包。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  只有主人自己用、变了才需要同步或存盘的纯值列表：背包里的物品 id 或堆叠、路点、最近发生的事件、待执行的指令。
+  [关系](/zh/docs/guide/indexes-and-relations#relations)的链接也是动态缓冲，元素类型是 `IRelation`。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  元素自带状态、系统要逐个查询的物品（有耐久度的剑）：每件做成一个实体，指向它的主人。数量少且有固定上限的值
+  （四个冷却槽）：在非托管组件里放一个固定长度的 `[InlineArray]` 数组，完全不产生 GC 对象。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### 声明元素类型 [#declare-the-element]
+
+元素是普通结构体，不实现 `IComponent`；`DynamicBuffer<Loot>` 才是组件。
+
+```csharp
+public record struct Loot(int Item);
+public record struct Sent(int Items) : IComponent;
+public struct Player : IComponent;
+```
+
+</Step>
+<Step>
+
+### 用空缓冲创建实体 [#create-entities]
+
+`new DynamicBuffer<T>()` 还没有列表。每个实体第一次写入时才得到自己的列表，所以一个值就能创建一整波实体。
+
+```csharp
+var players = new Entity[1_000];
+world.CreateEntities(players, new DynamicBuffer<Loot>(), new Sent(), new Player());
+foreach (var p in players) p.Get<DynamicBuffer<Loot>>().EnsureCapacity(8);   // 预留满背包的空间：之后不再扩容
+```
+
+</Step>
+<Step>
+
+### 通过 `ref` 写入 [#write-through-a-ref]
+
+写入方法都按 `ref` 接收缓冲，所以和普通被追踪组件一样，每次写入都会打上 tick。
+
+```csharp title="Pickup.cs"
+public class Pickup : EcsSystem
+{
+    [ForEach, With<Player>]
+    static void Collect(ref DynamicBuffer<Loot> bag) // [!code highlight]
+    {
+        if (bag.Count == 8) bag.RemoveAt(0);         // 背包满了就丢掉最早的物品
+        bag.Add(new Loot(1));
+    }
+}
+```
+
+</Step>
+<Step>
+
+### 响应变化了的列表 [#react-to-changes]
+
+`[Changed<DynamicBuffer<Loot>>]` 方法只访问系统上次运行后被写过的背包。用 `in` 读取，不算写入。
+
+```csharp title="SendBags.cs"
+public class SendBags : EcsSystem
+{
+    [ForEach, Changed<DynamicBuffer<Loot>>] // [!code highlight]
+    static void Send(in DynamicBuffer<Loot> bag, ref Sent sent)
+    {
+        int items = 0;
+        foreach (var loot in bag) items += loot.Item;
+        sent = new Sent(items);
+    }
+}
+```
+
+```csharp
+world.AddSystem<Pickup>();
+world.AddSystem<SendBags>();
+world.Update();
+```
+
+</Step>
+</Steps>
+
+### 列表该怎么存 [#choosing-how-to-hold-a-list]
+
+| 列表 | 存成 |
+| --- | --- |
+| 只有主人自己用、变了才同步或存盘的纯值：物品 id 或堆叠、路点、本 tick 受到的伤害 | **`DynamicBuffer<T>`** |
+| 元素自带状态（耐久度、带计时的 buff），系统要逐个查询或修改 | **每件一个实体**，用 [`EntityId` 链接](/zh/docs/guide/indexes-and-relations#entityid-keys)指向主人 |
+| 数量少且有固定上限（4 个冷却槽、最近 8 次输入） | 非托管组件里的**固定长度 `[InlineArray]` 数组** |
+| 存盘时整体读写的数据（任务进度、设置） | **组件里的集合**，通过 `ref` 修改 |
+
+玩家背包里的物品 id 是缓冲；一把有耐久和附魔的剑是指向主人的实体。包括只读数据和不可变数据在内的完整对照表，见
+[ECS 原则第 8 条](/zh/docs/ecs-principles#8-choose-how-to-hold-a-collection)。
+
+### 读和写 [#reading-and-writing]
+
+| 读（`in`、`Read<T>()` 或 `ref`） | 写（只能用 `ref`：`ref` 参数、`Get<T>()`、`TryGetRef<T>`） |
+| --- | --- |
+| `Count`、`Capacity`、`bag[i]`（只读）、`AsReadOnlySpan()`、`foreach` | `Add`、`AddRange`、`Insert`、`RemoveAt`、`RemoveAtSwapBack`、`Clear`、`EnsureCapacity`、`TrimExcess`、`AsSpan()`（可写） |
+
+写入方法是 `ref DynamicBuffer<T>` 上的扩展方法，在 `in` 参数或 `Read<T>()` 上调用会直接编译失败：列表不可能绕过追踪被修改。
+
+在系统之外，通过实体拿到缓冲：
+
+```csharp
+ref var bag = ref player.Get<DynamicBuffer<Loot>>();          // ref 局部变量：一次被追踪的写入
+bag.Add(new Loot(7));
+int held = player.Read<DynamicBuffer<Loot>>().Count;          // 只读：不打 tick
+```
+
+### 不要复制 [#copies]
+
+列表放在组件引用的一个对象里。复制一个 `DynamicBuffer<T>` 值，副本指向的还是同一个列表：通过副本写入不会打 tick，
+把副本存到别处还会让两个实体共用一个列表。分析器会拒绝所有复制（[EECS012](/zh/docs/guide/analyzer#eecs012)）：
+
+```csharp doccheck=expect-EECS012
+public static class Bags
+{
+    public static int Items(Entity player)
+    {
+        var copy = player.Read<DynamicBuffer<Loot>>();   // EECS012：复制了缓冲
+        return copy.Count;
+    }
+}
+```
+
+用 `ref`、`in` 参数、`ref` 局部变量和 `Get` / `Read`。新值写 `new DynamicBuffer<T>()`（或 `default`），里面没有列表。
+
+### 移动、移除、快照和预制体 [#lifecycle]
+
+- 行移到另一张表（加了组件）时，列表跟着走。
+- 移除这个组件或销毁实体，列表随之丢弃；再加回组件，从空列表开始。
+- `world.Capture()` 复制元素，`Restore` 再复制回去：World 和它的[快照](/zh/docs/guide/snapshots)永远不共用列表。
+- `world.Instantiate(prefab)` 和 `entity.Clone()` 给新实体一份自己的列表，元素相同。[预制体](/zh/docs/guide/prefabs)用
+  `SetBuffer(...)` 设置元素：
+
+```csharp
+var chest = new Prefab().SetBuffer(new Loot(1), new Loot(2));
+var opened = world.Instantiate(chest);                        // 自己的列表：Loot 1、Loot 2
+```
+
+- [`Save`](/zh/docs/guide/saves) 会写出元素：非托管元素按原始行写，托管元素走 Nino。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+| 别这样 | 这样做 | 原因 |
+| --- | --- | --- |
+| 让列表从空开始慢慢长 | 知道大小时调用一次 `EnsureCapacity(n)` | 容量之内的 `Add` 不分配 |
+| 每个 tick 新建列表 | `Clear()` 后重新填充 | `Clear` 保留容量：每 tick 重填的列表长到稳定大小后不再分配 |
+| 不在乎顺序还用 `RemoveAt(i)` | `RemoveAtSwapBack(i)` | O(1)，而不是 O(count) |
+| 用 `ref` 参数只读 | 改成 `in` 参数 | `ref` 会给行打 tick，下游每个 `[Changed<T>]` 读取方都要访问它 |
+| `Add` 之后还用之前的 span | 可能扩容的调用之后重新取 span | `Add`、`AddRange`、`Insert`、`EnsureCapacity`、`TrimExcess` 都可能换数组 |
+
+10 万个装 8 件物品的背包，每 tick 有 1,000 个交易一件物品，再由一个 `[Changed]` 系统发送变化的背包
+（`DynamicBufferBenchmark`），对比把背包存成被追踪组件里的 `List<T>`：
+
+<BenchTable bench="DynamicBufferBenchmark" />
+
+缓冲不比它替代的列表慢，而且背包的任何改动都逃不过追踪。
+
+## 开销 [#what-it-costs]
+
+- **内存：** 列中每行一个引用，外加每个实体一个对象和一个数组，第一次写入时才创建。没有内联容量，每个列表都在堆上。
+- **每次写入：** 给这一行打一次 tick，和其他[被追踪组件](/zh/docs/guide/change-tracking#what-it-costs)一样。
+- **容量之内的添加** 不分配；扩容时数组翻倍（至少 4 个元素）。
+- **`TrimExcess`** 把曾经变大的列表多余的空间还回去；空列表随后不再持有数组。
+- **并行方法** 可以接收 `ref DynamicBuffer<T>`：每个分块只写自己那些实体的列表。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 把缓冲复制到局部变量、字段或另一个实体 | 一个列表两个主人；通过副本的写入不被追踪 | [EECS012](/zh/docs/guide/analyzer#eecs012) |
+| 在 `in` 参数或 `Read<T>()` 上调用 `Add` | 编译不过：写入需要 `ref` | 编译器 |
+| `Add` 之后继续用之前的 `AsSpan()` | span 还指着旧数组 | 代码审查：重新取 span |
+| 用 `ref` 参数读取缓冲 | 访问到的每一行都算作已变化 | 代码审查：改成 `in` |
+| 纯值列表的每个元素都建一个实体 | 每件物品一个实体、一行、一条索引 | 纯值用缓冲 |
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="变更追踪" href="/zh/docs/guide/change-tracking">
+    `[Changed<T>]`，以及哪些操作算写入。
+  </Card>
+  <Card title="索引与关系" href="/zh/docs/guide/indexes-and-relations#relations">
+    `IRelation` 缓冲：一个实体链接到多个实体。
+  </Card>
+  <Card title="存档" href="/zh/docs/guide/saves">
+    缓冲连同元素一起存盘。
+  </Card>
+  <Card title="示例程序" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/dynamic-buffers.cs">
+    `examples/dynamic-buffers.cs`：用 `dotnet run` 直接运行。
+  </Card>
+</Cards>

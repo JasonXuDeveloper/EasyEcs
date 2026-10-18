@@ -30,7 +30,7 @@ icon: Radar
 
 ```csharp
 public record struct Health(int Value) : IComponent, ITrackChanges;
-public record struct Replica(int Value) : IComponent;
+public record struct Replica(int Health) : IComponent;
 ```
 
 </Step>
@@ -46,7 +46,7 @@ public class Replicate : EcsSystem
     // 只处理自本系统上次运行以来 Health 被写过的实体
     // （第一次运行时是全部实体）
     [ForEach, Changed<Health>] // [!code highlight]
-    static void Copy(in Health health, ref Replica replica) => replica = new Replica(health.Value);
+    static void Copy(in Health health, ref Replica replica) => replica.Health = health.Value;
 }
 ```
 
@@ -76,7 +76,8 @@ world.Update();
 | `Query` 的元素（枚举器会给访问到的每一行打上 tick） | `TryGet<T>(out T)`（拿到的是副本）、`Read<T>()`（只读） |
 | `entity.Get<T>()`、找到时的 `TryGetRef<T>(out found)`、`GetOrAdd<T>()`、`Set(...)` | `Has<T>()` |
 | 带着该组件的 `CreateEntity(...)`、`CreateEntities(...)`、`Instantiate(...)`、`Clone()` | 移除组件（属于[移除](#removal-detection)） |
-| `world.Restore(snapshot)`（恢复的每一行） | |
+| `entity.Enable<T>()`、`world.EnableAll<T>()`（保留的值回来了） | `entity.Disable<T>()`（算作移除） |
+| `world.Restore(snapshot)`、`world.Load(bytes)`（恢复或加载的每一行） | |
 
 [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers) 只能通过 `ref` 修改，所以它的写入总会被追踪到。
 

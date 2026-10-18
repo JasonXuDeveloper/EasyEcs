@@ -1,0 +1,259 @@
+---
+title: Indexes and relations
+seoTitle: "Value indexes, ordered ranges and entity relations in a C# ECS"
+description: Find entities by a value (a name, a zone, a score range) or by the entity they point at, with indexes the world keeps current. IIndexed<TKey>, Range, IRelation and target policies.
+icon: Network
+---
+
+Queries find entities by the components they have. A server also needs them by value: the player named "alice", the
+units in zone 3, the top ten scores, the items a player owns, the members of a party. Implement `IIndexed<TKey>` on a
+component and the world keeps an index of it: every `Set` re-indexes the entity at once, so a lookup never catches up
+and never scans. Relations are indexes too: a component holding an `EntityId` answers "who points at this entity", and
+an `IRelation` buffer links one entity to many.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  Lookups by key (a player by name, units by zone), ordered walks (leaderboards, deadlines, matchmaking brackets),
+  reverse links (the items of an owner, the arrows of an archer) and many-to-many links (party members, followers).
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  A key you only filter by in a full pass: a plain `[ForEach]` reads it anyway. Few keys holding many entities each
+  that you walk whole (16 zones of 100,000 players): [groups](/en/docs/guide/groups) put each key in its own tables
+  and walk them at full speed. Dictionaries kept in sync by hand: the index already is one.
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+### Value indexes [#value-indexes]
+
+Implement `IIndexed<TKey>`: `Key` is the value the entity is found by. `world.Index<T, TKey>()` creates the index on
+first use; the generated `world.XIndex` property returns the same one.
+
+```csharp
+public record struct Callsign(string Value) : IComponent, IIndexed<string>
+{
+    public string Key => Value;
+}
+public record struct Zone(int Id) : IComponent, IIndexed<int>
+{
+    public int Key => Id;
+}
+```
+
+```csharp
+var alpha = world.CreateEntity(new Callsign("alpha"), new Zone(1));
+world.CreateEntity(new Callsign("bravo"), new Zone(1));
+
+var zones = world.ZoneIndex;                        // world.Index<Zone, int>(): keep it in a local or a field
+int inOne = zones.Count(1);                         // O(1)
+foreach (var e in zones.Find(1)) { /* every entity in zone 1 */ }
+if (world.CallsignIndex.TryFind("alpha", out var found)) { /* any entity with that key */ }
+
+alpha.SetZone(2);                                   // a Set: the index moves alpha at once // [!code highlight]
+int inTwo = zones.Count(2);                         // 1
+```
+
+Read an indexed component with `in`, `Read<T>()` or the generated property (`alpha.Zone`, a `ref readonly`), and write
+it with `Set` or the generated `SetX`. A write through a `ref` would change the key behind the index's back, so the
+analyzer rejects it ([EECS015](/en/docs/guide/analyzer#eecs015)). A component has one index, with one key type.
+
+### Ordered walks and ranges [#ordered-index]
+
+When the key compares (`IComparable<TKey>`: a score, a level, a deadline), the same index walks in key order:
+
+| Call | Visits |
+| --- | --- |
+| `Range(min, max)` | keys from `min` to `max` (inclusive), ascending |
+| `RangeDescending(min, max)` | the same keys, descending |
+| `Ascending()` / `Descending()` | every indexed entity in key order |
+
+```csharp
+public record struct Score(int Points) : IComponent, IIndexed<int>
+{
+    public int Key => Points;
+}
+```
+
+```csharp
+for (int i = 0; i < 100; i++) world.CreateEntity(new Score(i * 10));
+
+int shown = 0;
+foreach (var leader in world.ScoreIndex.Descending())         // the top of the leaderboard first
+{
+    if (++shown > 10) break;
+}
+foreach (var rival in world.ScoreIndex.Range(400, 500)) { /* a matchmaking bracket */ }
+```
+
+The first ordered walk sorts the keys once; from then on the index keeps them sorted as keys appear and disappear.
+
+### `EntityId` keys: one link per entity [#entityid-keys]
+
+A component holding an `EntityId` and indexed by it is a link: each arrow has one owner, and the index answers which
+arrows an owner has. Store the `EntityId`, not the `Entity` handle ([EECS017](/en/docs/guide/analyzer#eecs017)): the id
+is 8 bytes, unmanaged and saved with the world, and a handle converts to it implicitly.
+
+```csharp
+public record struct OwnedBy(EntityId Owner) : IComponent, IIndexed<EntityId>
+{
+    public EntityId Key => Owner;
+}
+public struct Arrow : IComponent;
+```
+
+```csharp
+var archer = world.CreateEntity(new Health(10));
+for (int i = 0; i < 3; i++) world.CreateEntity(new OwnedBy(archer), new Arrow());
+
+int quiver = world.OwnedByIndex.Count(archer);                // 3: an array access, no hashing
+foreach (var arrow in world.OwnedByIndex.Find(archer)) { /* each arrow of the archer */ }
+```
+
+An `EntityId` carries the entity's version, so a link to a destroyed entity never matches a later entity that reuses
+its index. To turn an id back into a handle, `world.TryGetEntity(id, out var entity)` also says whether it still lives.
+The parent-child link is built in: see [Hierarchy](/en/docs/guide/hierarchy).
+
+### Relations: many links per entity [#relations]
+
+An entity holds one component of each type, so an `EntityId` key gives each entity one link. A relation gives it any
+number: its elements implement `IRelation` and live in a [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers), and
+`world.Relations<T>()` finds the entities linking to a target.
+
+```csharp
+public record struct MemberOf(EntityId Target) : IRelation;
+```
+
+```csharp
+var red = world.CreateEntity();
+var blue = world.CreateEntity();
+var knight = world.CreateEntity().AddRelation(new MemberOf(red)).AddRelation(new MemberOf(blue));   // in two parties
+
+var parties = world.Relations<MemberOf>();                    // keep it in a local or a field
+int members = parties.Count(red);                             // O(1)
+foreach (var member in parties.Find(red)) { /* each member of red */ }
+bool inBlue = knight.HasRelation<MemberOf>(blue);
+knight.RemoveRelation<MemberOf>(blue);                         // leaves blue
+```
+
+`AddRelation` adds the buffer if the entity has none, then appends the link and indexes it. Read the links with
+`Read<DynamicBuffer<T>>()` or an `in` parameter; write them with `AddRelation`, `RemoveRelation` or a `Set` of a whole
+buffer, so the index follows (a `ref` write is [EECS015](/en/docs/guide/analyzer#eecs015)).
+
+### When the target is destroyed [#target-policies]
+
+What happens to links when their target dies is a rule of your game, and the index can apply it inside every destroy:
+
+| `TargetPolicy` | The links to a destroyed entity | Example |
+| --- | --- | --- |
+| `Keep` (the default) | stay, findable by the dead id (which no later entity has); a system of yours cleans them | an audit trail |
+| `Remove` | go: the component is removed from its entities, a relation drops the links | an owner loses its pet |
+| `Destroy` | the linking entities are destroyed too, and what links to them in turn | a summon dies with its summoner |
+
+```csharp
+world.OwnedByIndex.WhenTargetDestroyed(TargetPolicy.Destroy);       // arrows go with their archer
+world.Relations<MemberOf>().WhenTargetDestroyed(TargetPolicy.Remove); // a disbanded party leaves no links
+
+archer.Destroy();
+int arrowsLeft = world.Count<Arrow>();                              // 0
+```
+
+`WhenTargetDestroyed` is set per world and per index. `ChildOf`, the [hierarchy](/en/docs/guide/hierarchy) link, is
+`Destroy` from the start.
+
+### Driving a system from an index [#index-driven-foreach]
+
+A `[ForEach]` method can walk an index for each entity it visits: a hazard hurts the units of its zone, a guild totals
+its members. Take the `World` (or an `Entity`) as a parameter to reach the index; the system then runs alone, which
+an index needs, since it belongs to the world's owner thread.
+
+```csharp
+public record struct Hazard(int Zone, int Damage) : IComponent;
+
+public class BurnZones : EcsSystem
+{
+    [ForEach]
+    static void Burn(in Hazard hazard, World world)
+    {
+        foreach (var unit in world.ZoneIndex.Find(hazard.Zone)) // [!code highlight]
+            if (unit.HasHealth) unit.Health.Value -= hazard.Damage;
+    }
+}
+```
+
+The walk visits only the units of that zone, however many units the world holds. Destroying entities during a `Find`
+loop is allowed; changing the indexed component of that index during the loop is not.
+
+## How to use it fast [#how-to-use-it-fast]
+
+| Instead of | Do | Why |
+| --- | --- | --- |
+| `world.Index<T, TKey>()` in a hot loop | Keep the index in a local or a field (or use `world.XIndex`) | Creation is cold; the property is O(1) but still a lookup |
+| `Set` with the key the entity already has | Compare first: `if (unit.Zone.Id != id) unit.SetZone(id);` | A `Set` that keeps the key re-links nothing, but it is still a write |
+| A scan comparing a key | `Find(key)` / `Count(key)` | O(1), then O(1) per match |
+| Sorting a query's results each tick | `Range` / `Descending` | The keys stay sorted as they change |
+| Walking many big keys whole | [`GroupBy`](/en/docs/guide/groups) | A group's rows are contiguous in their own tables |
+
+100 items changing hands among 100,000, then 100 inventories counted (`IndexBenchmark`); 100 players changing whom they
+follow, then the followers of 100 players counted and walked (`RelationBenchmark`); 1,000 scores changing, then the top
+10 and one bracket read, against a scan keeping the best 10 by hand (`OrderedIndexBenchmark`):
+
+<BenchTable bench="IndexBenchmark" />
+
+<BenchTable bench="RelationBenchmark" />
+
+<BenchTable bench="OrderedIndexBenchmark" />
+
+## What it costs [#what-it-costs]
+
+- **Nothing until you ask.** The index is built by its first lookup (one walk of the matching tables); a world that
+  never calls `Index` or `Relations` pays nothing.
+- **Memory:** one node per indexed entity, and one array of ids per key. A relation keeps one 20-byte link per element,
+  recycled, and 8 bytes in its target's list.
+- **`Count`** is a hash probe, or an array access for an `EntityId` key; **`Find`** adds one step per entity.
+- **A `Set` that changes the key** unlinks and links the entity (a few array writes; a hash probe for non-entity keys).
+- **Ordered walks:** the first one sorts the keys; then each new or vanished key costs O(log keys) plus a block move.
+- **Allocation:** only when the index sees a new key or a larger entity id, never per lookup.
+- **Target policies:** O(1) per destroyed entity and O(1) per link it had.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| Writing an indexed component through `ref`, `Get<T>()` or a query item | The index keeps the old key | [EECS015](/en/docs/guide/analyzer#eecs015) |
+| Storing an `Entity` handle in a component | A managed column, write barriers, not saved | [EECS017](/en/docs/guide/analyzer#eecs017) |
+| Changing the indexed component inside a `Find` loop over it | Not supported (destroying entities is) | Code review |
+| Using an index from another thread | Indexes belong to the owner thread | [Threading](/en/docs/guide/threading#what-the-world-synchronizes) |
+| Indexing one component by two key types | `InvalidOperationException`: one index per component | At run time |
+| A `null` key (the default of a `string`) | The entity is indexed nowhere | By design |
+
+## Compared with other libraries [#compared]
+
+Friflo indexes components (`IIndexedComponent`) and links (`ILinkComponent`, `ILinkRelation`); DefaultEcs has
+`EntityMultiMap<T>`; Arch keeps relations in a separate package. Each runs its own built-in index here:
+
+<BenchChart bench="IndexComparison" param="Trades=100" title="100 items change hands among 100,000, then 100 inventories are counted" />
+
+<BenchChart bench="RelationComparison" title="Friend lists: 100 players change whom they follow, then 100 follower lists are read" />
+
+Ranges and a zone lookup, with the zone as a value index and as a [group](/en/docs/guide/groups):
+
+<BenchChart bench="ValueQueryComparison" title="Count a rating range and sum the gold of four zones of 100,000 players" />
+
+## Related [#related]
+
+<Cards>
+  <Card title="Hierarchy" href="/en/docs/guide/hierarchy">
+    `ChildOf`, `Children` and destroy cascades.
+  </Card>
+  <Card title="Groups" href="/en/docs/guide/groups">
+    Tables split by value: the fastest walk of a whole key.
+  </Card>
+  <Card title="Dynamic buffers" href="/en/docs/guide/dynamic-buffers">
+    The buffers that hold relation links.
+  </Card>
+  <Card title="Example programs" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/relations.cs">
+    `examples/indexes.cs` and `examples/relations.cs`, runnable with `dotnet run`.
+  </Card>
+</Cards>

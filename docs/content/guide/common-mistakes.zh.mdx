@@ -1,0 +1,457 @@
+---
+title: 常见错误
+seoTitle: "EasyEcs 常见错误：改了副本、ref 失效、系统里存状态、跨线程，以及怎么改"
+description: 使用 EasyEcs 时最常犯的十八个错误：每个都给出你可能会写的代码、错在哪里、应该怎么写，以及对应的分析器规则或指南页面。
+icon: TriangleAlert
+---
+
+EasyEcs 里出的问题，大多来自面向对象的写法习惯，或者其他 ECS 库的习惯。其中一半会被分析器在编译期拦下；另一半能编译、能运行，
+只是悄悄做错了事。下面每一条都是：你可能会这样写，为什么不对，应该怎么写。
+
+## 数据 [#data]
+
+### 改的是组件的副本 [#copy]
+
+```csharp
+var hp = hero.Get<Health>();      // 行的一份副本
+hp.Value -= 10;                   // 表里还是旧值
+```
+
+`Get<T>()` 返回的是 `ref`，而 `var` 会把它指向的值复制出来。保留 `ref`，或者通过生成的属性来写，它同样是 `ref`：
+
+```csharp
+ref var health = ref hero.Get<Health>();
+health.Value -= 10;
+hero.Health.Value -= 10;          // 一样，通过生成的属性
+```
+
+没有规则能发现。详见[副本与 ref](/zh/docs/guide/refs-and-await#copies-and-refs)。
+
+### 组件里存 `Entity` [#entity-in-component]
+
+```csharp doccheck=expect-EECS017
+public record struct Follow(Entity Leader) : IComponent;
+```
+
+`Entity` 持有对 World 的引用：这一列变成托管类型（要被 GC 扫描，不能整块复制），存档写不了它，迁移也不会改写它。存 `EntityId`，
+需要时再查：
+
+```csharp
+public record struct Follow(EntityId Leader) : IComponent;
+```
+
+由 [EECS017](/zh/docs/guide/analyzer#eecs017) 发现（警告）。详见 [id、版本号与回收](/zh/docs/guide/entities-and-components#entityid)。
+
+### 存下标而不是 id [#raw-index]
+
+```csharp
+public record struct OwnerSlot(int Index) : IComponent;
+```
+
+```csharp
+var owned = world.CreateEntity(new OwnerSlot(hero.Id.Index));   // 指向之后复用这个下标的随便哪个实体
+```
+
+id 会被回收：主人销毁后，这个下标会分给下一个新建的实体。`EntityId` 还带着版本号，主人一旦不在，`TryGetEntity` 就什么也找不到：
+
+```csharp
+public record struct Owner(EntityId Id) : IComponent;
+```
+
+```csharp
+var item = world.CreateEntity(new Owner(hero.Id));
+if (world.TryGetEntity(item.Read<Owner>().Id, out var owner)) { /* 还活着 */ }
+```
+
+没有规则能发现。详见 [id、版本号与回收](/zh/docs/guide/entities-and-components#entityid)。
+
+### 该用标签的地方用了标志位 [#flags]
+
+```csharp
+public record struct Mobility(bool Rooted) : IComponent;
+
+public class MoveRooted : EcsSystem
+{
+    [ForEach] static void Move(ref Position p, in Velocity v, in Mobility m)
+    {
+        if (m.Rooted) return;                  // 每一行都要访问、都要判断
+        p.X += v.X; p.Y += v.Y;
+    }
+}
+```
+
+标志位让每个关心它的系统都得访问每一行、再做分支。标签是没有字段的组件：查询直接跳过整张表，添加或移除它本身就是状态的变化：
+
+```csharp
+public struct Rooted : IComponent;
+
+public class MoveFree : EcsSystem
+{
+    [ForEach, Without<Rooted>]                 // 被定身的实体根本不会被访问
+    static void Move(ref Position p, in Velocity v) { p.X += v.X; p.Y += v.Y; }
+}
+```
+
+如果状态每个 tick 都在翻转，字段比搬表便宜：见 [ECS 原则第 5 条](/zh/docs/ecs-principles#5-choose-the-cheapest-representation-for-frequent-changes)。
+
+### 为了暂停而移除组件 [#remove-to-pause]
+
+```csharp
+public record struct Cooldown(int Ticks) : IComponent;
+```
+
+```csharp
+var caster = world.CreateEntity(new Cooldown(30));
+var kept = caster.Read<Cooldown>();     // 把值先存到别处
+caster.Remove<Cooldown>();              // 被眩晕
+caster.Set(kept);                       // 之后再放回去
+```
+
+这段时间里值总得有地方放，读这份暂存的每一处都是你要维护的代码。`Disable<T>()` 让组件对查询、`Has` 和 `Get` 不可见，值留在行里，
+`Enable<T>()` 再把它还回来：
+
+```csharp
+caster.Disable<Cooldown>();             // 被眩晕：冷却暂停
+caster.Enable<Cooldown>();              // 眩晕结束：还是原来的值
+```
+
+没有规则能发现。详见[禁用组件](/zh/docs/guide/cleanup-and-disable#disable-a-component)。
+
+## 系统 [#systems]
+
+### 系统里存状态 [#state-in-system]
+
+```csharp doccheck=expect-EECS007
+public class WaveSystem : EcsSystem
+{
+    private int _wave;
+    protected override void OnUpdate() => _wave++;
+}
+```
+
+这个字段别的代码读不到、存不了档、拍不了快照，系统一移除就没了。每个 World 一份的状态放进单例：
+
+```csharp
+public record struct Wave(int Number) : ISingletonComponent;
+
+public class WaveSystem : EcsSystem
+{
+    protected override void OnUpdate() => World.GetOrAddSingleton<Wave>().Number++;
+}
+```
+
+由 [EECS007](/zh/docs/guide/analyzer#eecs007) 发现。详见 [ECS 原则第 2 条](/zh/docs/ecs-principles#2-systems-are-stateless)。
+
+### 一个系统调用另一个系统 [#system-calls-system]
+
+```csharp doccheck=expect-EECS008
+public class LootSystem : EcsSystem { }
+
+public class KillRewards : EcsSystem
+{
+    protected override void OnUpdate() => World.GetSystem<LootSystem>();
+}
+```
+
+互相调用的系统没法单独移除、调整顺序或测试。一个写数据（标签、组件、单例），另一个排在它后面读：
+
+```csharp
+public struct Looted : IComponent;
+
+public class LootSystem : EcsSystem
+{
+    [ForEach, With<Dead>, Without<Looted>]
+    static void Drop(Entity corpse) => corpse.SetLooted();
+}
+
+[UpdateAfter<LootSystem>]
+public class KillRewards : EcsSystem
+{
+    [ForEach, With<Looted>]
+    static void Reward(in Health hp) { }
+}
+```
+
+由 [EECS008](/zh/docs/guide/analyzer#eecs008) 发现。详见 [ECS 原则第 3 条](/zh/docs/ecs-principles#3-systems-never-reference-systems)。
+
+### 只读却写成 `ref` 参数 [#ref-that-reads]
+
+```csharp
+public record struct Speed(float Value) : IComponent;
+
+public class Throttle : EcsSystem
+{
+    [ForEach] static void Apply(ref Velocity v, ref Speed max)   // max 只是读
+    {
+        v = new Velocity(Math.Min(v.X, max.Value), Math.Min(v.Y, max.Value));
+    }
+}
+```
+
+`ref` 参数声明的是写。开启 `ParallelSystems` 时，写 `Speed` 的系统没法和任何碰 `Speed` 的系统同处一个阶段；如果 `Speed` 被追踪，
+每一行还会被算作改过。只读就用 `in`：
+
+```csharp
+public class Throttle : EcsSystem
+{
+    [ForEach] static void Apply(ref Velocity v, in Speed max)
+    {
+        v = new Velocity(Math.Min(v.X, max.Value), Math.Min(v.Y, max.Value));
+    }
+}
+```
+
+没有规则能发现。详见[并行系统](/zh/docs/guide/threading#parallel-systems)。
+
+### 对没有追踪的组件用 `[Changed<T>]` [#changed-untracked]
+
+```csharp doccheck=skip
+public record struct Gold(int Amount) : IComponent;
+public record struct Hud(int Gold) : IComponent;
+
+public class ShowGold : EcsSystem
+{
+    [ForEach, Changed<Gold>] static void Show(in Gold gold, ref Hud hud) => hud = new Hud(gold.Amount);
+}
+```
+
+变更 tick 要占一列，所以只有声明要它的组件才有。给组件加上 `ITrackChanges`：
+
+```csharp
+public record struct Gold(int Amount) : IComponent, ITrackChanges;
+public record struct Hud(int Gold) : IComponent;
+
+public class ShowGold : EcsSystem
+{
+    [ForEach, Changed<Gold>] static void Show(in Gold gold, ref Hud hud) => hud = new Hud(gold.Amount);
+}
+```
+
+由 C# 编译器发现（这个特性要求 `ITrackChanges`，报 CS0315）。详见[标记组件](/zh/docs/guide/change-tracking#mark-the-component)。
+
+### 通过 `ref` 读被追踪的组件 [#read-tracked-by-ref]
+
+```csharp
+int before = player.Get<Gold>().Amount;      // Get<T>() 算写：这一行被当成改过
+```
+
+`Get<T>()` 会给行打上标记，下次更新时每个 `[Changed<Gold>]` 系统都会访问它。用 `Read<T>()`、生成的属性（被追踪组件的属性是
+`ref readonly`）或 `in` 参数来读：
+
+```csharp
+int amount = player.Read<Gold>().Amount;
+int same = player.Gold.Amount;               // ref readonly：不打标记
+```
+
+没有规则能发现。详见[什么算写入](/zh/docs/guide/change-tracking#what-counts-as-a-write)。
+
+### `[Removed<T>]` 方法接收了 `T` [#removed-takes-t]
+
+```csharp
+public record struct Burning(int Ticks) : IComponent, ITrackChanges;
+public record struct Glow(bool On) : IComponent;
+```
+
+```csharp doccheck=expect-EECS016
+public class Extinguish : EcsSystem
+{
+    [ForEach, Removed<Burning>] static void Out(in Burning burning, ref Glow glow) => glow = new Glow(false);
+}
+```
+
+`[Removed<Burning>]` 访问的实体已经没有 `Burning` 了，这个方法永远不会运行。读行里的其他组件：
+
+```csharp
+public class Extinguish : EcsSystem
+{
+    [ForEach, Removed<Burning>] static void Out(ref Glow glow) => glow = new Glow(false);
+}
+```
+
+由 [EECS016](/zh/docs/guide/analyzer#eecs016) 发现。详见[移除检测](/zh/docs/guide/change-tracking#removal-detection)。
+
+## 结构 [#structure]
+
+### 结构变更之后还拿着 `ref` [#ref-after-change]
+
+```csharp
+ref var life = ref hero.Get<Health>();
+hero.SetStunned();                 // 行搬到了另一张表
+life.Value -= 10;                  // 写的是旧位置
+```
+
+添加或移除组件会搬动实体的行，之前拿到的 `ref` 还指着旧位置。变更之后重新取：
+
+```csharp
+hero.SetStunned();
+hero.Get<Health>().Value -= 10;
+```
+
+没有规则能发现。详见[变更前后的 ref](/zh/docs/guide/structural-changes#refs-across-a-change)。
+
+### 跨 `await` 拿着 `ref` [#ref-across-await]
+
+```csharp doccheck=skip
+ref var stamina = ref hero.Get<Health>();
+await Task.Delay(100);
+stamina.Value -= 10;
+```
+
+编译器会拒绝（CS9217），而且有道理：等待期间这一行什么都可能发生。保留 `Entity`，在 `await` 之后、回到拥有者线程上再取一次组件：
+
+```csharp
+await Task.Delay(100);
+if (hero.Has<Health>()) hero.Get<Health>().Value -= 10;
+```
+
+由 C# 编译器发现。详见[跨 `await`](/zh/docs/guide/refs-and-await#across-await)。
+
+### 通过 `ref` 写被索引的键 [#indexed-by-ref]
+
+```csharp
+public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+```
+
+```csharp doccheck=expect-EECS015
+public static class Portals
+{
+    public static void Enter(Entity player) => player.Get<Zone>() = new Zone(2);
+}
+```
+
+索引跟踪的是 `Set`；通过 `ref` 写会背着它改掉键，查找时玩家还在旧区域。用 `Set` 或生成的 `SetX` 写：
+
+```csharp
+public static class Portals
+{
+    public static void Enter(Entity player) => player.SetZone(2);
+}
+```
+
+由 [EECS015](/zh/docs/guide/analyzer#eecs015) 发现。详见[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)。
+
+### 复制 `DynamicBuffer<T>` [#buffer-copy]
+
+```csharp
+public record struct Loot(int Item);
+```
+
+```csharp doccheck=expect-EECS012
+public static class Inventory
+{
+    public static void Give(Entity player, Loot loot)
+    {
+        var bag = player.Read<DynamicBuffer<Loot>>();    // 共享同一个列表的副本
+        bag.Add(loot);                                   // 这次写入不会被标记
+    }
+}
+```
+
+缓冲指向它的列表：通过副本写的还是同一个列表，却不会把实体标记为改过；把副本存起来，两个实体就共用一个列表。通过实体去拿：
+
+```csharp
+public static class Inventory
+{
+    public static void Give(Entity player, Loot loot)
+    {
+        ref var bag = ref player.Get<DynamicBuffer<Loot>>();
+        bag.Add(loot);
+    }
+}
+```
+
+由 [EECS012](/zh/docs/guide/analyzer#eecs012) 发现。详见[动态缓冲](/zh/docs/guide/dynamic-buffers)。
+
+### 销毁父实体，却以为子实体还在 [#parent-destroy]
+
+```csharp
+var ship = world.CreateEntity(new Position(0, 0));
+var turret = world.CreateEntity(new Position(1, 0), new ChildOf(ship));
+ship.Destroy();                    // 炮塔跟着一起被销毁
+```
+
+`ChildOf` 默认是 `TargetPolicy.Destroy`：销毁父实体会销毁它的整棵子树。子实体怎么处理，为整个 World 定一次：
+
+```csharp
+world.Index<ChildOf, EntityId>().WhenTargetDestroyed(TargetPolicy.Remove);   // 孤儿变成根
+```
+
+没有规则能发现。详见[级联策略](/zh/docs/guide/hierarchy#cascade-policy)。
+
+### 一个实体一个实体地做结构变更 [#loop-of-changes]
+
+```csharp
+public struct Fighter : IComponent;
+```
+
+```csharp
+foreach (var item in world.Query<Fighter>())
+    item.Entity.SetFrozen();       // 每个实体一次结构变更
+```
+
+每次调用搬一行。`SetAll`、`RemoveAll`、`DisableAll` 和 `EnableAll` 把一张表的行一起搬：
+
+```csharp
+int frozen = world.SetAll(new Frozen(), QueryFilter.Create().With<Fighter>());
+```
+
+没有规则能发现。详见[批量变更](/zh/docs/guide/bulk)。
+
+## 线程 [#threads]
+
+### 在其他线程上改 World [#other-thread]
+
+```csharp doccheck=expect-EECS014
+public static class Network
+{
+    public static void OnJoin(World world)
+    {
+        Task.Run(() => world.CreateEntity(new Position(0, 0)));
+        world.CreateEntity(new Position(1, 1));
+    }
+}
+```
+
+World 的结构属于它的拥有者线程，World 也不会加锁来共享它。把输入放进队列，由拥有者线程上的系统把它变成实体；或者给每个线程一个
+自己的 World。
+
+由 [EECS014](/zh/docs/guide/analyzer#eecs014) 发现。详见[来自其他线程的输入](/zh/docs/guide/threading#input-from-other-threads)。
+
+### 在并行方法里做结构变更 [#parallel-change]
+
+```csharp doccheck=expect-EECS010
+public class Reap : EcsSystem
+{
+    [ForEach(Parallel = true)]
+    static void Kill(Entity e, in Health hp) { if (hp.Value <= 0) e.SetDead(); }
+}
+```
+
+一块块的行同时在多个线程上运行，谁都不能搬行。并行的部分只改值，结构变更交给顺序执行的方法：
+
+```csharp
+public class Reap : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Kill(Entity e, in Health hp) { if (hp.Value <= 0) e.SetDead(); }
+}
+```
+
+由 [EECS010](/zh/docs/guide/analyzer#eecs010) 发现。详见[并行 `[ForEach]` 方法](/zh/docs/guide/threading#parallel-foreach-methods)。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="分析器规则" href="/zh/docs/guide/analyzer">
+    从 EECS002 到 EECS024 的每一条规则。
+  </Card>
+  <Card title="ECS 原则" href="/zh/docs/ecs-principles">
+    这些错误违反的规则。
+  </Card>
+  <Card title="ref 与 await" href="/zh/docs/guide/refs-and-await">
+    `ref` 什么时候失效。
+  </Card>
+  <Card title="常见问题" href="/zh/docs/faq">
+    常见问题的简短回答。
+  </Card>
+</Cards>

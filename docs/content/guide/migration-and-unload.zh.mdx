@@ -1,0 +1,177 @@
+---
+title: 迁移与卸载
+seoTitle: "C# 中在 ECS World 之间迁移实体，并热重载游戏逻辑"
+description: 用 SaveEntities、LoadEntities 和 MoveEntities 把玩家及其所有物迁到另一个 World 或服务器，id 自动改写；用 RemoveTypes 和可回收的 AssemblyLoadContext 卸载、重载游戏逻辑。
+icon: ArrowRightLeft
+---
+
+玩家穿过传送门进入另一个区域的 World，或者被交给另一台服务器。他的实体、物品和宠物必须一起过去，彼此之间的指向也不能断。
+`SaveEntities` / `LoadEntities` 通过字节传送这样一组实体，`MoveEntities` 直接把它拷进同一线程的另一个 World，两者都会把组内的
+`EntityId` 改写成新实体的 id。长期运行的服务器还要在不重启的情况下替换游戏逻辑：`RemoveTypes` 把插件的系统和组件从 World 中移除，
+它所在的可回收 `AssemblyLoadContext` 就能卸载，新版本再加载存下来的数据。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  同一进程内 World 之间切换区域或地图（`MoveEntities`），把玩家交给另一台服务器、或保存离线玩家（`SaveEntities` / `LoadEntities`），
+  不能重启的服务器热重载游戏逻辑（`RemoveTypes`）。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  迁移整个 World：[`Save` / `Load`](/zh/docs/guide/saves) 能保留所有 id。同一个 World 里换"区域"：[分组](/zh/docs/guide/groups)或
+  一个组件值就够了。重载不在可回收上下文里的类型：默认上下文永远不会卸载。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+### 通过字节传送一组实体 [#save-entities]
+
+`SaveEntities(output, ids)` 写出列出的实体和它们的组件（跳过失效的 id 和重复项；不写单例）。`LoadEntities(bytes, handles)` 在另一个
+World（本进程或其他进程）里用新 id 创建它们，并按存档顺序写回句柄。
+
+```csharp
+using Nino.Core;
+
+public record struct Sword(int Damage) : IComponent;
+public record struct Pet(EntityId Owner) : IComponent;
+```
+
+```csharp
+var hero = world.CreateEntity(new Health(100));
+world.CreateEntity(new Sword(10), new ChildOf(hero));
+world.CreateEntity(new Pet(hero), new Health(20));
+
+// 收集这一组：英雄、挂在他身上的、指向他的
+var group = new List<EntityId> { hero.Id };
+foreach (var child in world.Children(hero)) group.Add(child.Id);
+foreach (var item in world.Query<Pet>()) if (item.Pet.Owner == hero.Id) group.Add(item.Entity.Id);
+
+var bytes = new NinoArrayBufferWriter();
+world.SaveEntities(bytes, group.ToArray());                  // 只写这一组 // [!code highlight]
+
+using var otherServer = new World();
+var arrived = new Entity[group.Count];
+int created = otherServer.LoadEntities(bytes.WrittenSpan, arrived);   // 新 id，链接已改写 // [!code highlight]
+```
+
+### 迁到同一线程的另一个 World [#move-entities]
+
+`MoveEntities(target, ids, moved)` 在同一线程的两个 World 之间做同样的事，但不经过编码：拷贝行、改写 id，然后销毁原实体。`moved`
+按顺序接收新句柄（跳过的 id 对应 `default`）。
+
+```csharp
+using var nextZone = new World();
+var moved = new Entity[group.Count];
+int count = world.MoveEntities(nextZone, group.ToArray(), moved);   // 英雄、剑和宠物离开这个 World
+```
+
+- 原实体销毁时会连同子实体一起销毁，所以[层级](/zh/docs/guide/hierarchy#moving)要整体迁移。
+- 清理组件留在原地、跟着退休的原实体，等它们的系统来释放。
+- 两个 World 都必须属于调用线程；把 World 迁到自己身上会被拒绝（`ArgumentException`）。
+
+### id 怎么改写 [#entityid-rewriting]
+
+生成器会记下组件和缓冲元素里每个 `EntityId` 字段的位置，私有字段和嵌套结构体也算在内。一组实体到达时：
+
+| `EntityId` 字段原来指向 | 变成 |
+| --- | --- |
+| 组内的实体 | 它对应新实体的 id |
+| 组外的实体（留在原地） | `EntityId.Null` |
+| 留在原地的父实体（`ChildOf`） | 移除 `ChildOf`：实体在这边成为根 |
+
+集合里的 id（组件里的 `List<EntityId>`）不会改写。索引和分组会认识新到的实体，被追踪组件算作写入。
+
+### 卸载插件的类型 [#remove-types]
+
+`world.RemoveTypes(assembly)`（或 `RemoveTypes(context)`，针对一个 `AssemblyLoadContext` 里的所有程序集）把插件的一切从 World 中移除：
+它的系统（会执行 `OnDestroy`）、单例、索引和分组设置，以及所有实体上它的组件。实体本身保留，只是没了这些组件。含有这类列的表会连同
+引用它们的所有缓存一起丢弃，World 不再持有对这个程序集的任何引用。所有 World 都移除之后，可回收上下文就能卸载；卸载时，EasyEcs
+会忘掉这些类型的存档名，并在没有存活 World 用到它们时复用其组件位。
+
+### 热重载 [#hot-reload]
+
+存档按名字记录类型，所以重载能保住插件的数据：存档、移除类型、卸载、加载新版本、读档。
+
+```csharp
+using System.Buffers;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
+
+public sealed class PluginContext() : AssemblyLoadContext("plugin", isCollectible: true);
+
+public static class Plugins
+{
+    public static Assembly Reload(World world, PluginContext old, PluginContext next, string path)
+    {
+        var saved = new ArrayBufferWriter<byte>();
+        world.Save(saved);                                      // 插件的组件也一起存，按类型名
+        world.RemoveTypes(old);                                 // 它的系统、单例和组件全部离开 // [!code highlight]
+        old.Unload();                                           // 没有别的引用后就会被回收
+
+        var plugin = next.LoadFromAssemblyPath(path);
+        RuntimeHelpers.RunModuleConstructor(plugin.ManifestModule.ModuleHandle);   // 注册它的类型，供 Load 查找
+        world.Load(saved.WrittenSpan);                          // 新版本的组件拿到存下来的值
+        return plugin;                                          // 之后把它的系统加回 World
+    }
+}
+```
+
+顺序很重要：两个版本同时加载时类型同名，读档会以名字歧义拒绝。宿主自己的组件（位置、id）放在一个永远不会重载的程序集里；自己也不要
+持有旧版本类型的引用（系统、插件对象），否则上下文无法回收。`RemoveTypes` 之前拍的[快照](/zh/docs/guide/snapshots)，之后不能再恢复。
+
+[HotReload 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload)完整跑一遍这个流程，并校验旧上下文已被回收、
+插件数据已经带过来。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+| 别这样 | 这样做 | 原因 |
+| --- | --- | --- |
+| 同一进程的 World 之间用 `SaveEntities` + `LoadEntities` | `MoveEntities` | 直接拷行，不编码 |
+| 每次迁移新建缓冲区 | 复用一个 `NinoArrayBufferWriter`，每次 `ResetWrittenCount()` | 足够大之后不分配 |
+| 一个实体一个实体地迁移 | 整组一次迁移 | 存档的固定开销（按名字写类型）只付一次 |
+| 重载时重建整个 World | 先 `RemoveTypes`，再 `Load` | 宿主的实体和组件原地不动 |
+
+10 个玩家各带 99 件物品，通过字节和在内存中迁到另一个 World 再迁回来，以及一个带四个组件的实体通过字节迁移（`MigrationBenchmark`）；
+一个插件在每个玩家身上有一个被追踪组件和一个被索引组件，外加一个单例、一个系统和一个索引，用 `RemoveTypes` 移除（`UnloadBenchmark`）：
+
+<BenchTable bench="MigrationBenchmark" />
+
+<BenchTable bench="UnloadBenchmark" />
+
+## 开销 [#what-it-costs]
+
+- **迁移：** O(实体数 × 组件数)；改写 id 是每个 `EntityId` 字段一次查找。
+- **分配：** 缓冲区足够大之后，`SaveEntities`、`LoadEntities` 和 `MoveEntities` 都不分配。
+- **`RemoveTypes`：** O(带这类组件的实体 + 表 + 缓存的查询)；它会分配，属于冷路径：在两次更新之间调用，不要放在 tick 里。
+- **稳态：** 零开销。从不调用 `RemoveTypes` 的 World，不为卸载支持付出任何时间。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 只迁移父实体，不带子实体 | 子实体随原实体一起被销毁 | 用 `Children` 收集整组 |
+| 组件里的 `List<T>` 存着 `EntityId` | 不会改写：仍指向旧 World 的实体 | 用字段、缓冲或关系 |
+| 组件里存了 `Entity` 句柄 | 不能存档，也不会改写 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
+| 先加载新插件，再卸载旧插件 | 类型名歧义：`InvalidDataException` | 按上面的重载顺序 |
+| 还留着旧插件系统的引用 | 上下文永远回收不了 | `RemoveTypes` 之后丢掉引用 |
+| 在更新或遍历期间调用 `RemoveTypes` | 抛 `InvalidOperationException` | 运行时 |
+| 恢复 `RemoveTypes` 之前拍的快照 | 抛 `InvalidOperationException` | 运行时 |
+| 在其他线程迁移 | 两个 World 都只属于各自的拥有者线程 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="存档" href="/zh/docs/guide/saves">
+    整个 World 写成字节、版本兼容和 Nino。
+  </Card>
+  <Card title="层级" href="/zh/docs/guide/hierarchy">
+    用 `Children` 收集一组实体。
+  </Card>
+  <Card title="示例：SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">
+    `SaveEntities`、`LoadEntities` 和 `MoveEntities`，每一步都有校验。
+  </Card>
+  <Card title="示例：HotReload" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload">
+    一个可回收插件被卸载、再连同数据一起重载。
+  </Card>
+</Cards>

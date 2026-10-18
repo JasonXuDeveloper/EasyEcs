@@ -1,0 +1,232 @@
+---
+title: Cleanup and disable
+seoTitle: "Cleanup components, disabled components and pooled entities in a C# ECS"
+description: Release outside resources exactly once with ICleanupComponent and the Destroyed tag, pause a component with Disable<T>, switch whole entities off with a tag, and tell new entities apart.
+icon: Recycle
+---
+
+Four lifecycle needs of a server, each solved with data. A session that holds a socket must close it once, even when
+the session is destroyed in a bulk call: a **cleanup component** keeps the entity until a system releases it. A
+cooldown paused by a stun must keep its value: **`Disable<T>()`** hides a component and keeps it. A pooled bullet must
+leave every system without being destroyed: a **tag** with `Without<T>` switches the whole entity off. And a system
+that greets new players needs to tell them apart: a **`Spawned` tag** marks them.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  Cleanup components: anything outside the world released exactly once (sockets, seats, leases, file handles, a slot
+  in another service). `Disable<T>()`: a component paused for a while with its value kept (a cooldown under a stun, an
+  AI behaviour while a cutscene runs). A tag: whole entities parked (pools, sleeping zones, players reconnecting).
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  Cleanup components for state the world owns: destroying the entity already frees it. `Disable<T>()` for a state you
+  can express as a tag the systems read: a tag is clearer. Whole-entity disable "by default" does not exist on purpose:
+  see [Disabling a whole entity](#disable-an-entity).
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+### Cleanup components [#cleanup-components]
+
+An entity destroyed while it holds an `ICleanupComponent` is not freed. It loses every other component, gets the
+`Destroyed` tag, and stays alive until its last cleanup component is removed:
+
+```csharp
+public record struct Seat(int Number) : ICleanupComponent;   // a resource outside the world
+public record struct Seats(int Released) : ISingletonComponent;
+```
+
+```csharp title="ReleaseSeats.cs"
+public class ReleaseSeats : EcsSystem
+{
+    [ForEach, With<Destroyed>]                                // only entities already destroyed // [!code highlight]
+    static void Release(Entity entity, in Seat seat, ref Seats seats)
+    {
+        seats.Released++;                                     // give the seat back here
+        entity.RemoveSeat();                                  // the last cleanup component: the entity is freed
+    }
+}
+```
+
+```csharp
+world.AddSingleton<Seats>();
+world.AddSystem<ReleaseSeats>();
+var guest = world.CreateEntity(new Seat(7), new Health(10));
+
+guest.Destroy();                       // alive, tagged Destroyed, Health gone
+world.Update();                        // ReleaseSeats frees it: guest.IsAlive is false
+```
+
+- Every destroy path retires such entities: `Destroy`, `DestroyEntities<T>()`, a [hierarchy](/en/docs/guide/hierarchy)
+  cascade or a [target policy](/en/docs/guide/indexes-and-relations#target-policies).
+- A system that acquires the resource for new entities filters `Without<Destroyed>`.
+- Destroying a retired entity again does nothing. Removing a cleanup component from a live entity just removes it.
+- A retired entity leaves its indexes, and its children go with it.
+- A cleanup component cannot be disabled (`Disable<T>()` throws): it must stay to be released.
+
+### Disabling a component [#disable-a-component]
+
+`Disable<T>()` keeps the value of `T` but hides it: queries, `Has` and `Get` act as if the entity lacked `T`, until
+`Enable<T>()` gives it back. The entity gets the tag `Disabled<T>`, which you can query.
+
+```csharp
+public record struct Cooldown(int Ticks) : IComponent;
+
+public class TickCooldowns : EcsSystem
+{
+    [ForEach]
+    static void Tick(ref Cooldown cooldown) => cooldown.Ticks--;
+}
+```
+
+```csharp
+world.AddSystem<TickCooldowns>();
+var caster = world.CreateEntity(new Cooldown(3));
+
+caster.Disable<Cooldown>();             // stunned: the cooldown is paused, its value kept // [!code highlight]
+world.Update();                         // TickCooldowns skips it
+bool paused = caster.IsDisabled<Cooldown>();
+int stunnedCasters = world.Count<Disabled<Cooldown>>();
+
+caster.Enable<Cooldown>();              // back with Ticks = 3
+```
+
+| Call | Effect |
+| --- | --- |
+| `Disable<T>()` / generated `DisableX()` | Hides `T`, keeps its value, adds `Disabled<T>`. False if the entity lacks `T` |
+| `Enable<T>()` / generated `EnableX()` | Gives the kept value back. False if `T` is not disabled |
+| `IsDisabled<T>()` / generated `IsXDisabled` | Whether the entity has `Disabled<T>` |
+| `Set(new T(...))` on a disabled `T` | Replaces it: enabled, with the new value |
+| `Remove<T>()` on a disabled `T` | Drops it: nothing left to enable |
+| `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | The same on every match, in [bulk](/en/docs/guide/bulk) |
+
+A disable counts as a removal for `[Removed<T>]`, and an enable as a write for `[Changed<T>]`, so
+[replication](/en/docs/guide/change-tracking#removal-detection) sees both. An indexed component leaves its index while
+disabled. The kept value survives moves, clones, snapshots and saves.
+
+### Disabling a whole entity [#disable-an-entity]
+
+There is no "disabled entity" that queries skip by default. A tag and `Without<T>` do it, and say so where it matters:
+
+```csharp
+public struct Inactive : IComponent;                         // the whole entity is off
+public struct Bullet : IComponent;
+
+public class MoveBullets : EcsSystem
+{
+    [ForEach, Without<Inactive>]                             // the systems that skip it say so // [!code highlight]
+    static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
+}
+```
+
+```csharp
+var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Bullet());
+bullet.SetInactive();                                        // back to the pool: a bit flip, no row moves
+bullet.SetPosition(5, 5).RemoveInactive();                   // reused
+int pooled = world.Count<Bullet>(QueryFilter.Create().With<Inactive>());   // saves, cleanup and stats see everything
+```
+
+Why a tag ([decision D8](/en/docs/decisions#d8-no-whole-entity-disable)): excluding by default would make every query
+depend on a state it does not name. A save, a cleanup or a count that must see every entity would have to opt back in,
+and forgetting it fails silently. The tag is data the generator and the reader both see.
+
+| | Friflo.Engine.ECS | DefaultEcs | EasyEcs |
+| --- | --- | --- | --- |
+| How | `entity.Enabled = false`: a hidden tag, queries skip it unless `WithDisabled()` | `entity.Disable()`: the entity leaves every entity set | A tag of yours and `Without<T>` |
+| Switching off or on | Moves the row to another archetype | Updates every set | Flips a presence bit (after the first time) |
+| Iterating past disabled entities | Skips their archetype | They are in no set | Free while a table has none; a test per 64 rows when mixed |
+
+The measured cost, with 100 units switching per operation (most stay as they are) and with 10,000 (frequent
+switching), then the awake units summed (`DisableComparison`):
+
+<BenchChart bench="DisableComparison" param="Switched=100" title="100,000 units, 100 fall asleep and wake per operation" />
+
+<BenchChart bench="DisableComparison" param="Switched=10000" title="100,000 units, 10,000 fall asleep and wake per operation" />
+
+Pools and effects switch often, where a bit flip beats a row move. When many entities stay off for long, mixed with
+awake ones in one table, [`GroupBy`](/en/docs/guide/groups) on a sleeping state puts them in tables of their own.
+
+### Telling new entities apart: the `Spawned` tag [#spawned-tag]
+
+There is no `Added<T>` filter. `[Changed<T>]` already selects rows that gained `T` (adding stamps the tick, as a write
+does). When a system must tell a new entity from a written one, the creator adds a tag and the reacting system
+removes it ([decision D4](/en/docs/decisions#d4-no-addedt-filter)):
+
+```csharp
+public struct Spawned : IComponent;
+public record struct Greeted(int Count) : ISingletonComponent;
+
+public class GreetNewcomers : EcsSystem
+{
+    [ForEach, With<Spawned>]
+    static void Greet(Entity entity, in Health health, ref Greeted greeted)
+    {
+        greeted.Count++;                                     // first-time work
+        entity.RemoveSpawned();                              // a bit flip: greeted once
+    }
+}
+```
+
+```csharp
+world.AddSingleton<Greeted>();
+world.AddSystem<GreetNewcomers>();
+world.CreateEntity(new Health(100), new Spawned());          // the creator says it is new
+world.Update();
+```
+
+The tag is explicit, queryable, saved with the world and costs one presence bit flip.
+
+## How to use it fast [#how-to-use-it-fast]
+
+| Instead of | Do | Why |
+| --- | --- | --- |
+| Releasing a resource in every place that destroys | A cleanup component and one system | One release path, also for bulk destroys and cascades |
+| Removing and re-adding a component to pause it | `Disable<T>()` / `Enable<T>()` | The value stays; `Set` would need it stored elsewhere |
+| A loop of `Disable` over many entities | `world.DisableAll<T>(filter)` | Whole words of rows at once ([bulk](/en/docs/guide/bulk)) |
+| A flag field every system tests | A tag and `Without<T>` | Tables without the tag skip the test entirely |
+
+10,000 sessions with an outside resource, 1,000 disconnecting and 1,000 connecting per operation, with a cleanup
+component against a plain component released before the destroy (`CleanupBenchmark`); and 100,000 entities disabled
+and enabled in bulk and one by one (`BulkBenchmark`):
+
+<BenchTable bench="CleanupBenchmark" />
+
+<BenchTable bench="BulkBenchmark" methods="DisableAndEnable,DisableAndEnableEach" />
+
+## What it costs [#what-it-costs]
+
+- **Cleanup components:** a retired entity keeps its id and a row with its cleanup components until released; a
+  world without them pays nothing on destroy.
+- **`Disable<T>()`:** O(1). The first disable in a table moves the row once, to the table with the `Disabled<T>`
+  column; after that a disable or enable flips presence bits.
+- **A tag:** one presence bit per row; a flip after the first time. Tables with no `Inactive` row skip the test.
+- **`Spawned`:** a tag like any other: a bit flip to add, a bit flip to remove.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| A cleanup system without `With<Destroyed>` | It releases resources of live entities | Code review |
+| Never removing the last cleanup component | The retired entity stays forever | `world.Count<Destroyed>()` in your stats |
+| `Disable<T>()` on a cleanup component or `ChildOf` | `InvalidOperationException` | At run time |
+| `Set` on a disabled component expecting it to stay disabled | `Set` enables it with the new value | By design: use `Enable` to keep the old value |
+| Forgetting `Without<Inactive>` on a system | Pooled entities keep moving | Code review |
+| Expecting `[Changed<T>]` to tell new from written | Both are writes | Use a `Spawned` tag |
+
+## Related [#related]
+
+<Cards>
+  <Card title="Bulk changes" href="/en/docs/guide/bulk">
+    `DisableAll`, `EnableAll`, `SetAll`, `RemoveAll`.
+  </Card>
+  <Card title="Change tracking" href="/en/docs/guide/change-tracking">
+    Disabling counts as a removal, enabling as a write.
+  </Card>
+  <Card title="Hierarchy" href="/en/docs/guide/hierarchy">
+    Cascades retire children that hold cleanup components.
+  </Card>
+  <Card title="Example programs" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/cleanup.cs">
+    `examples/cleanup.cs` and `examples/disable.cs`, runnable with `dotnet run`.
+  </Card>
+</Cards>

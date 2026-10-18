@@ -1,0 +1,209 @@
+---
+title: 层级
+seoTitle: "C# ECS 的父子层级：ChildOf、Children 与级联销毁"
+description: 用 ChildOf 把实体挂到父实体下，用 world.Children 列出子实体，销毁父实体时连同后代一起销毁，在 World 之间整体迁移层级，并实现变换传播。
+icon: GitFork
+---
+
+船上装着炮塔，炮塔上装着炮管，队长带着队员。`ChildOf(parent)` 把实体挂到父实体下：`world.Children(parent)` 列出子实体，
+销毁父实体时后代一并销毁。船沉了，炮塔跟着没了，一行清理代码都不用写。`ChildOf` 和其他
+[带索引的 `EntityId` 链接](/zh/docs/guide/indexes-and-relations#entityid-keys)没有区别，只是默认打开了级联销毁。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  和另一个实体同生共死的实体：船上的炮塔、玩家身上的物品、小队成员、载具的部件。把玩家和他拥有的一切迁移到另一个
+  World 或另一台服务器。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  不该连带杀死对方的链接（攻击目标、跟随者）：用自己的 `EntityId` 键，配 `Keep` 或 `Remove`。一个实体有多个"父亲"
+  （同时属于多支队伍）：用[关系](/zh/docs/guide/indexes-and-relations#relations)。变换传播不是内置功能，
+  [下面的示例](#transform-propagation)是你自己写的系统。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### 挂上子实体 [#attach]
+
+给子实体加一个 `ChildOf`，参数是父实体的 id（句柄可以直接转换）。
+
+```csharp
+public record struct Name(string Value) : IComponent;
+```
+
+```csharp
+var ship = world.CreateEntity(new Name("ship"));
+var turret = world.CreateEntity(new Name("turret"), new ChildOf(ship));
+var gun = world.CreateEntity(new Name("gun"), new ChildOf(turret));
+```
+
+</Step>
+<Step>
+
+### 列出子实体 [#children]
+
+`world.Children(parent)` 返回 `ChildOf` 指向这个父实体的实体：O(1)，之后每个子实体 O(1)。第一次调用会把所有 `ChildOf`
+索引一遍。
+
+```csharp
+foreach (var child in world.Children(ship)) { /* 炮塔 */ }
+```
+
+</Step>
+<Step>
+
+### 换父实体、解除挂接 [#reparent]
+
+`ChildOf` 就是一个普通的值：设一个新值就是换父实体，移除它，实体就成了根。
+
+```csharp
+gun.Set(new ChildOf(ship));                // 炮管改挂到船上
+turret.Remove<ChildOf>();                  // 炮塔成了根
+```
+
+</Step>
+<Step>
+
+### 销毁父实体 [#cascade]
+
+销毁父实体时，它的子实体、子实体的子实体都会在同一次调用里销毁。
+
+```csharp
+ship.Destroy();                            // 炮管跟着没了；已经解除挂接的炮塔还在
+bool gunAlive = gun.IsAlive;               // false
+```
+
+</Step>
+</Steps>
+
+### 改变销毁的行为 [#cascade-policy]
+
+`ChildOf` 的初始策略是 `TargetPolicy.Destroy`。和其他[目标策略](/zh/docs/guide/indexes-and-relations#target-policies)一样，
+可以按 World 修改：`Remove` 让被销毁父实体的子实体变成根，`Keep` 让它们的 `ChildOf` 继续指向那个死去的 id。
+
+```csharp
+world.Index<ChildOf, EntityId>().WhenTargetDestroyed(TargetPolicy.Remove);   // 孤儿变成根
+```
+
+- 持有[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)的子实体不会被直接释放，而是"退休"：带着
+  `Destroyed` 标签保留清理组件，它自己的子实体照样随它而去。
+- 环（实体是自己的祖先）会正常结束：销毁其中任何一个，整个环都会被销毁。
+- `ChildOf` 不能被禁用（`Disable<ChildOf>()` 会抛异常）：父实体销毁时必须找得到子实体。
+
+### 变换传播 [#transform-propagation]
+
+EasyEcs 没有内置变换组件。传播就是一个系统：从根（`Without<ChildOf>`）开始，用 `Children` 往下走，每个世界坐标都由父实体
+刚算好的坐标得出。
+
+```csharp
+public record struct LocalPosition(float X, float Y) : IComponent;
+public record struct WorldPosition(float X, float Y) : IComponent;
+```
+
+```csharp title="PropagateTransforms.cs"
+public class PropagateTransforms : EcsSystem
+{
+    // 根：世界坐标就是本地坐标；然后每棵子树跟随它的父实体
+    [ForEach, Without<ChildOf>]
+    static void FromRoot(Entity root, in LocalPosition local, ref WorldPosition position)
+    {
+        position = new WorldPosition(local.X, local.Y);
+        Follow(root, position);
+    }
+
+    static void Follow(Entity parent, WorldPosition at)
+    {
+        foreach (var child in parent.World.Children(parent)) // [!code highlight]
+        {
+            ref readonly var local = ref child.Read<LocalPosition>();
+            var position = new WorldPosition(at.X + local.X, at.Y + local.Y);
+            child.Get<WorldPosition>() = position;
+            Follow(child, position);
+        }
+    }
+}
+```
+
+```csharp
+world.AddSystem<PropagateTransforms>();
+var hull = world.CreateEntity(new LocalPosition(10, 0), new WorldPosition());
+var mount = world.CreateEntity(new LocalPosition(0, 2), new WorldPosition(), new ChildOf(hull));
+var barrel = world.CreateEntity(new LocalPosition(1, 0), new WorldPosition(), new ChildOf(mount));
+world.Update();                            // barrel：WorldPosition(11, 2)
+```
+
+方法接收了 `Entity`，所以这个系统单独运行（它要读写别的实体的组件）。子实体带着 `ChildOf`，和根不在同一张表里，写它们
+不会挪动当前遍历所在的行。整个过程没有任何分配。
+
+### 迁移层级 [#moving]
+
+`MoveEntities` 和 `SaveEntities` 只处理你列出的实体，不会顺带它们的子实体。用 `Children` 收集整棵层级再一起迁移：父实体
+没跟过去的子实体，到了那边会去掉 `ChildOf`（成为根）；而 `MoveEntities` 销毁原实体时会连同子实体一起销毁，没列出的子实体
+就丢了。详见[迁移](/zh/docs/guide/migration-and-unload#move-entities)。
+
+```csharp
+var player = world.CreateEntity(new Name("bob"));
+world.CreateEntity(new Name("sword"), new ChildOf(player));
+
+var group = new List<EntityId> { player.Id };
+foreach (var child in world.Children(player)) group.Add(child.Id);
+using var other = new World();
+world.MoveEntities(other, group.ToArray());   // bob 和他的剑，链接保持不变
+```
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+- **销毁根。** 一次 `Destroy` 在结构闸门内顺着整棵子树走完，不递归（用一个目标栈）。先一个个销毁子实体再销毁父实体，
+  做的事一样，只是调用更多。
+- **做传播时层级尽量浅。** 上面的遍历每个实体查一次 `Children`；扁平的层级（船和它的炮塔）走得最快。
+- **`DestroyEntities<T>()`** 一次销毁整张表，级联照样生效。
+
+创建 1,000 支小队（一个队长加 10 个队员），然后销毁队长：队员用 `ChildOf` 挂在队长下（`Cascade`），以及用自己的链接配
+`TargetPolicy.Remove`（`RemoveLinks`，`HierarchyBenchmark`）：
+
+<BenchTable bench="HierarchyBenchmark" />
+
+## 开销 [#what-it-costs]
+
+- **出现第一个 `ChildOf` 之前零开销。** 没有任何表包含 `ChildOf` 的 World，销毁实体时根本不去找子实体。
+- **内存：** `ChildOf` 列（每行 8 字节），外加 `EntityId` 键的索引（每个子实体一个节点）。
+- **`Children`：** O(1)，之后每个子实体 O(1)；第一次调用会索引所有 `ChildOf`。
+- **一次级联：** 每个被销毁的实体 O(1)，再加上它的每个子实体 O(1)。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 通过 `ref` 写 `ChildOf` | 索引还记着旧的父实体 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
+| 自己用 `Entity` 字段存父指针 | 托管列，存不了盘，也没有级联 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
+| 只迁移父实体，不带子实体 | 子实体留在原地，随原实体一起被销毁 | 用 `Children` 收集整组 |
+| `Disable<ChildOf>()` | 抛 `InvalidOperationException` | 运行时 |
+| 没写系统却指望有世界坐标 | 没有内置变换 | 写一个[传播系统](#transform-propagation) |
+
+## 和其他库的对比 [#compared]
+
+Friflo 有内置层级（`AddChild`），但删除父实体会先把子实体摘下来，所以只能先删子实体；Arch 和 DefaultEcs 没有层级。同样的
+小队，创建后连同队员一起销毁：
+
+<BenchChart bench="HierarchyComparison" title="1,000 支 11 人小队：创建，然后连同队员销毁队长" />
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="索引与关系" href="/zh/docs/guide/indexes-and-relations">
+    `EntityId` 键、关系和目标策略。
+  </Card>
+  <Card title="清理与禁用" href="/zh/docs/guide/cleanup-and-disable">
+    离开前要先释放资源的实体。
+  </Card>
+  <Card title="迁移与卸载" href="/zh/docs/guide/migration-and-unload">
+    把玩家和他拥有的一切迁移到另一个 World。
+  </Card>
+  <Card title="示例程序" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/hierarchy.cs">
+    `examples/hierarchy.cs`，用 `dotnet run` 直接运行。
+  </Card>
+</Cards>

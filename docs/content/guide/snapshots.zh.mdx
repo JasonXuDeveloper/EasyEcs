@@ -1,0 +1,137 @@
+---
+title: 快照
+seoTitle: "C# ECS 的 World 快照：用 Capture 和 Restore 做回滚与回放"
+description: 用 Capture 把整个 World 复制到内存，用 Restore 恢复，用于撤销回合、回滚网络同步、回放和测试重置；复用快照时零分配。
+icon: Camera
+---
+
+`world.Capture()` 把 World 的实体、组件和单例复制到一个 `WorldSnapshot` 里，`world.Restore(snapshot)` 再把它们放回去，次数不限。
+回合制服务器可以撤销一步操作，回滚服务器可以倒退几个 tick 补上迟到的输入再重新模拟，回放可以跳回过去，测试可以重置 World。
+复制到一个保留下来的快照里会复用它的数组，所以每个 tick 都 capture 也不分配。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  撤销回合、回滚和客户端预测（保留最近几个 tick 的环形缓冲）、会话内的回放、测试或对局之间重置 World。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  持久化：快照在内存里，并且和 World 共享托管引用。写盘、跨进程用[存档](/zh/docs/guide/saves)。每个 tick 给几百万实体拍快照：
+  每次 capture 都要复制每一行。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### 拍快照和恢复 [#capture-and-restore]
+
+```csharp
+var before = world.Capture();          // O(实体数 × 组件数)
+int held = before.EntityCount;         // 快照里的实体数
+
+world.Update();                        // 模拟一个回合
+if (!running) world.Restore(before);   // 撤销：同样的实体、同样的值、同样的单例 // [!code highlight]
+world.Restore(before);                 // 同一个快照可以恢复任意多次
+```
+
+</Step>
+<Step>
+
+### 复用快照做回滚 [#rollback]
+
+`Capture(into)` 覆盖本 World 的一个旧快照，复用它的数组。保留最近几个 tick 的环形缓冲，在快照足够大之后就不再分配。
+
+```csharp
+public static class Rollback
+{
+    public const int Ticks = 8;
+}
+```
+
+```csharp
+var history = new WorldSnapshot[Rollback.Ticks];
+for (int tick = 0; tick < 100; tick++)
+{
+    history[tick % Rollback.Ticks] = world.Capture(history[tick % Rollback.Ticks]);   // 第一次是 null：新建一个
+    world.Update();
+}
+
+world.Restore(history[(100 - 3) % Rollback.Ticks]);                                 // 倒退三个 tick，再重新模拟
+```
+
+</Step>
+</Steps>
+
+### 快照里有什么 [#what-it-holds]
+
+- **实体和组件，按值复制。** 组件里的托管引用（`string`、数组、`List<T>`）和 World 共享，不会被克隆：组件里的集合恢复后是它
+  现在的样子，而不是当时的样子。[`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers) 是例外：capture 和 restore 都会复制元素。
+  被禁用的组件保留的值也会一起恢复。
+- **单例，按值复制。** `Restore` 之后，每个单例在原来的存储里换成快照里的值，所以之前拿到的 `SingletonRef<T>` 继续有效；
+  capture 之后新加的单例会被移除。
+- **句柄。** 快照里存活实体的句柄重新有效。其他句柄全部失效，包括 capture 之后创建的实体的句柄，哪怕之后有新实体复用了它们的 id。
+- **不包括系统、选项和分组设置。** 系统照常按注册的样子运行；capture 之后新建的表保留下来，但是空的；
+  [分组](/zh/docs/guide/groups)按快照时的状态恢复。
+
+### 恢复之后，其他部分会看到什么 [#after-restore]
+
+- **变更追踪：** 被追踪组件恢复出来的每一行都算作被写入，没有这个组件的每一行都算作被移除，所以
+  [同步](/zh/docs/guide/change-tracking#removal-detection)会把恢复后的状态重新发一遍。
+- **索引** 在下一次查找时从头重建。
+- **关系** 也一样重建。
+
+两个调用都会进入结构闸门，查询遍历期间调用会抛异常：在两次更新之间调用，或者在系统的 `OnUpdate` 里、`[ForEach]` 方法之外调用。
+快照只属于拍它的那个 World（否则抛 `ArgumentException`）；[`RemoveTypes`](/zh/docs/guide/migration-and-unload#remove-types) 之前拍的
+快照，之后不能再恢复（抛 `InvalidOperationException`）。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+| 别这样 | 这样做 | 原因 |
+| --- | --- | --- |
+| 每个 tick 调用 `Capture()` | `Capture(snapshot)` 写进保留的快照 | 复用数组：足够大之后 0 B |
+| 巨大的 World 每个 tick 拍一次 | 隔几个 tick 拍一次，或每个区域一个更小的 World | capture 是 O(实体数 × 组件数) |
+| 用快照写盘 | `Save` / `Load` | 字节流、字段哈希、跨进程 |
+| 需要回滚的集合放在组件里 | 用 `DynamicBuffer<T>` | 缓冲会被复制；其他集合是共享的 |
+
+10 万个实体分布在两张表、外加一个单例：capture 到新快照、restore，以及作为对比的存档到复用缓冲区和加载（`SnapshotBenchmark`）：
+
+<BenchTable bench="SnapshotBenchmark" />
+
+capture 的分配就是新建的那个快照本身；`Capture(into)` 会复用快照。
+
+## 开销 [#what-it-costs]
+
+- **内存：** 每一行、每个单例以及实体记录各一份拷贝。
+- **时间：** 两个方向都是 O(实体数 × 组件数 + 表数 + 单例数)；行按列逐列复制。
+- **恢复之后：** 每个索引在下一次查找时重建一遍，每个被追踪的行都算作已变化。
+- **从不拍快照的 World** 零开销。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 以为组件里的 `List<T>` 会回滚 | 它是共享的：恢复后还是现在的样子 | 改用 `DynamicBuffer<T>` |
+| 查询遍历期间 capture 或 restore | 抛 `InvalidOperationException` | 运行时 |
+| 把快照恢复到另一个 World | 抛 `ArgumentException` | 运行时 |
+| 继续使用 capture 之后创建的实体的句柄 | 恢复后它们失效 | `IsAlive` |
+| 把快照写到磁盘 | 快照是对象图，不是字节 | 用[存档](/zh/docs/guide/saves) |
+| 在其他线程 capture 或 restore | 结构变更只属于拥有者线程 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="存档" href="/zh/docs/guide/saves">
+    把 World 变成字节，写盘或发给其他进程。
+  </Card>
+  <Card title="变更追踪" href="/zh/docs/guide/change-tracking">
+    恢复会把每一行都算作写入或移除。
+  </Card>
+  <Card title="动态缓冲" href="/zh/docs/guide/dynamic-buffers">
+    快照会复制元素的列表。
+  </Card>
+  <Card title="示例程序" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/snapshots.cs">
+    `examples/snapshots.cs`，用 `dotnet run` 直接运行。
+  </Card>
+</Cards>

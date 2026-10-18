@@ -1,0 +1,191 @@
+---
+title: 分组
+seoTitle: "C# ECS 的 GroupBy：用 IGroup 按区域、地图或对局拆表"
+description: GroupBy 按 IGroup 组件的值拆分 World 的表，查询某个区域、地图或对局时只遍历它自己那段连续的行。什么时候分组，什么时候建索引。
+icon: Boxes
+---
+
+一个 World 里常常有很多区域、地图或对局，而大部分工作只涉及其中一个：移动 3 号区域的单位，给 12 号对局发状态。
+`GroupBy<T>()` 按 `IGroup` 组件的值拆分 World 的表，同组的实体共用自己的表。之后 `QueryFilter.InGroup<T>(group)` 只遍历
+这一组的行，内存连续，速度就像在一个更小的 World 上做普通查询。
+
+<Callout type="info" title="不是系统分组">
+  这里分的是实体。按自己的节奏运行的*系统*分组（`ISystemGroup`、`[UpdateInGroup<T>]`、`World.Update<T>()`）是另一个功能，
+  见[系统](/zh/docs/guide/systems)。
+</Callout>
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  几个到几百个分区，每个分区实体很多、经常整组遍历：一台服务器上的区域或地图、对局或房间、大型战斗里的阵营。
+  实体偶尔换分区（玩家走进下一个区域）。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  每个键下实体很少（公会 id、物品主人）：每个分组都有自己的表，应该用[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)。
+  每个 tick 都在变的值：每次变化都要挪行。分区之间完全没有交互：[每个线程一个 World](/zh/docs/guide/threading#recommended-one-world-per-thread)
+  连过滤器都不需要。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### 标记组件 [#mark-the-component]
+
+`IGroup.Group` 就是实体所属的分区。
+
+```csharp
+public record struct Zone(int Id) : IComponent, IGroup
+{
+    public int Group => Id;
+}
+```
+
+</Step>
+<Step>
+
+### 初始化时分组 [#group-by]
+
+`GroupBy<T>()` 把已有实体挪到各自分组的表里，之后的写入也都会放到正确的位置：带着 `Zone` 创建的实体直接进入所属分组的表。
+
+```csharp
+world.GroupBy<Zone>();                                         // 只调用一次，最好在 World 填满之前
+for (int i = 0; i < 9; i++) world.CreateEntity(new Zone(i % 3), new Health(10 * i));
+```
+
+</Step>
+<Step>
+
+### 遍历一个分组 [#in-group]
+
+`InGroup<T>(group)` 要求实体有 `T` 且属于这个分组，只遍历该分组的表。过滤器放进 `static readonly` 字段；一个过滤器只能
+指定一个分组。
+
+```csharp
+public struct SumHealth : IForEach<Health>
+{
+    public int Total;
+    public void Execute(ref Health health) => Total += health.Value;
+}
+
+public static class Zones
+{
+    public static readonly QueryFilter One = QueryFilter.Create().InGroup<Zone>(1);
+}
+```
+
+```csharp
+int inOne = world.Count<Health>(Zones.One);                   // 3
+var sum = new SumHealth();
+world.ForEach<Health, SumHealth>(ref sum, Zones.One);          // 只在 1 号区域上跑结构体 job
+foreach (var item in world.Query<Health>(Zones.One)) { /* 同样的行，用查询的写法 */ }
+```
+
+</Step>
+<Step>
+
+### 把实体移到另一个分组 [#move]
+
+用 `Set`（或生成的 `SetX`）写入新值，实体立即挪到新分组的表里，代价是一次行拷贝。
+
+```csharp
+var walker = world.CreateEntity(new Zone(1), new Health(50));
+walker.SetZone(2);                                             // 之后由 InGroup<Zone>(2) 遍历
+```
+
+</Step>
+</Steps>
+
+分组组件只能用 `Set` 写：通过 `ref` 写入会改了值却不挪行，所以分析器和对待索引组件一样拒绝它
+（[EECS015](/zh/docs/guide/analyzer#eecs015)）。查询遍历某个分组时，可以对其中的实体调用 `Set`。
+
+### 在系统里使用分组 [#in-systems]
+
+`[ForEach]` 的过滤器是特性，写不进分组的值。一次只处理一个分组的系统，在 `OnUpdate` 里跑一个结构体 job，分组号从单例里读：
+
+```csharp
+public record struct ActiveZone(int Id) : ISingletonComponent;
+
+public struct Regenerate : IForEach<Health>
+{
+    public void Execute(ref Health health) => health.Value += 1;
+}
+
+public class RegenerateActiveZone : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        var filter = QueryFilter.Create().InGroup<Zone>(World.GetSingleton<ActiveZone>().Id);
+        var job = new Regenerate();
+        World.ForEach<Health, Regenerate>(ref job, filter);
+    }
+}
+```
+
+重写了 `OnUpdate` 的系统会单独占一个阶段。每次更新都新建过滤器也很便宜：`QueryFilter` 不持有任何对象引用。
+
+### 哪些操作会遵守分组 [#what-follows]
+
+| 操作 | 落到 |
+| --- | --- |
+| `CreateEntity`、`CreateEntities` | 值所在的分组，直接放入（不挪行） |
+| 对分组组件 `Set`、`SetAll` | 新值的分组（值变了才拷贝一次行） |
+| `Instantiate(prefab)`、`Clone()`、`LoadEntities`、`MoveEntities` | 拷贝过来的值所在的分组 |
+| `Restore(snapshot)` | 快照里原来的分组 |
+| `Load(bytes)` | 按本 World 的 `GroupBy` 调用重新分组（存档里不保存分组设置） |
+
+在从未调用过 `GroupBy<T>()` 的 World 里，所有表都属于 0 组：`InGroup<T>(0)` 匹配所有带 `T` 的实体。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+- **初始化时分组。** 在满的 World 上调用 `GroupBy<T>()` 要把每个实体挪一次；在空 World 上没有开销。
+- **把过滤器提出来。** 每个热点分组一个 `static readonly` 过滤器，或者像上面那样每次更新建一个。
+- **要整组遍历就分组，要按键查找就建索引。** 整组遍历一个大分组时分组更快；一个键下只有几个实体时索引更快。
+
+10 万玩家分布在 16 个区域；100 个玩家换区域，然后汇总 4 个区域玩家的生命值。分别用分组、值索引和普通组件加扫描比较实现
+（`GroupBenchmark`）：
+
+<BenchTable bench="GroupBenchmark" />
+
+## 开销 [#what-it-costs]
+
+- **内存：** 每种组件组合、每个分组各一张表，各带列的富余容量。成千上万个小分组会把 World 切得很碎，这种情况该用索引。
+- **换分组：** 一次行拷贝（和添加一个表里没有列的组件一样）。
+- **遍历分组：** 只碰这个分组自己的行，不用逐行比较值。
+- **从不调用 `GroupBy` 的 World** 零开销：对不是 `IGroup` 的组件，这个检查在 JIT 时就被消掉了。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 通过 `ref` 写分组组件 | 行还留在旧分组 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
+| 每个玩家、公会或主人一个分组 | 每个键一张表：浪费内存，World 碎片化 | 改用[值索引](/zh/docs/guide/indexes-and-relations#value-indexes) |
+| 值每个 tick 都变 | 每次变化一次行拷贝 | 保持普通组件 |
+| 一个过滤器里调用两次 `InGroup` | 一个过滤器只有一个分组，以最后一次为准 | 代码审查 |
+| 遍历途中调用 `GroupBy` | 抛异常：它要挪行 | 初始化时调用 |
+
+## 和其他库的对比 [#compared]
+
+Friflo、Arch 和 DefaultEcs 都没有按值分组，最接近的是值索引。下面同时给出两种写法，并对比 Friflo 的索引组件：统计一个
+分数区间，并汇总四个区域的金币：
+
+<BenchChart bench="ValueQueryComparison" title="10 万玩家中统计一个分数区间，并汇总四个区域的金币" />
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="索引与关系" href="/zh/docs/guide/indexes-and-relations">
+    按键查找、范围查询和链接。
+  </Card>
+  <Card title="查询与过滤" href="/zh/docs/guide/queries">
+    `QueryFilter`、`Count`、`Query` 和结构体 job。
+  </Card>
+  <Card title="线程" href="/zh/docs/guide/threading">
+    每个线程一个 World：互不往来的分区。
+  </Card>
+  <Card title="示例程序" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/groups.cs">
+    `examples/groups.cs`，用 `dotnet run` 直接运行。
+  </Card>
+</Cards>

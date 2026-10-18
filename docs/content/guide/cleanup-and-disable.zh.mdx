@@ -1,0 +1,222 @@
+---
+title: 清理与禁用
+seoTitle: "C# ECS 的清理组件、组件禁用与对象池实体"
+description: 用 ICleanupComponent 和 Destroyed 标签保证外部资源只释放一次，用 Disable<T> 暂停组件，用标签整体关闭实体，并区分新创建的实体。
+icon: Recycle
+---
+
+服务器里有四种常见的生命周期需求，每种都用数据解决。持有 socket 的会话必须恰好关闭一次，哪怕它是被批量销毁的：
+**清理组件**让实体留下来，直到某个系统把资源释放掉。被眩晕暂停的冷却必须保留剩余时间：**`Disable<T>()`** 隐藏组件但保留它的值。
+回到对象池的子弹要退出所有系统，但不能被销毁：用**标签**加 `Without<T>` 整体关闭实体。欢迎新玩家的系统得认出谁是新来的：
+用 **`Spawned` 标签**标记它们。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  清理组件：World 之外、必须恰好释放一次的东西（socket、座位、租约、文件句柄、另一个服务里的名额）。`Disable<T>()`：
+  暂停一段时间、值要保留的组件（眩晕期间的冷却、过场动画期间的 AI 行为）。标签：暂时搁置的整个实体（对象池、休眠区域、
+  正在重连的玩家）。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  World 自己管理的状态不需要清理组件：销毁实体就释放了。能用一个系统会读的标签表达的状态，不必用 `Disable<T>()`：标签更清楚。
+  "默认跳过"的整实体禁用是有意不提供的，见[禁用整个实体](#disable-an-entity)。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+### 清理组件 [#cleanup-components]
+
+持有 `ICleanupComponent` 的实体被销毁时不会立即释放。它失去其他所有组件，得到 `Destroyed` 标签，一直活到最后一个清理组件被移除：
+
+```csharp
+public record struct Seat(int Number) : ICleanupComponent;   // World 之外的资源
+public record struct Seats(int Released) : ISingletonComponent;
+```
+
+```csharp title="ReleaseSeats.cs"
+public class ReleaseSeats : EcsSystem
+{
+    [ForEach, With<Destroyed>]                                // 只处理已经销毁的实体 // [!code highlight]
+    static void Release(Entity entity, in Seat seat, ref Seats seats)
+    {
+        seats.Released++;                                     // 在这里归还座位
+        entity.RemoveSeat();                                  // 最后一个清理组件没了：实体被释放
+    }
+}
+```
+
+```csharp
+world.AddSingleton<Seats>();
+world.AddSystem<ReleaseSeats>();
+var guest = world.CreateEntity(new Seat(7), new Health(10));
+
+guest.Destroy();                       // 仍然存活，带 Destroyed 标签，Health 没了
+world.Update();                        // ReleaseSeats 释放它：guest.IsAlive 为 false
+```
+
+- 所有销毁途径都会让这类实体"退休"：`Destroy`、`DestroyEntities<T>()`、[层级](/zh/docs/guide/hierarchy)级联、
+  [目标策略](/zh/docs/guide/indexes-and-relations#target-policies)。
+- 给新实体申请资源的系统用 `Without<Destroyed>` 过滤。
+- 再次销毁已退休的实体没有任何效果。从存活实体上移除清理组件，就只是移除而已。
+- 退休的实体会离开它所在的索引，它的子实体也随之而去。
+- 清理组件不能被禁用（`Disable<T>()` 会抛异常）：它必须留着等待释放。
+
+### 禁用组件 [#disable-a-component]
+
+`Disable<T>()` 保留 `T` 的值，但把它藏起来：在 `Enable<T>()` 还回来之前，查询、`Has` 和 `Get` 都当实体没有 `T`。实体会得到
+`Disabled<T>` 标签，可以直接查询。
+
+```csharp
+public record struct Cooldown(int Ticks) : IComponent;
+
+public class TickCooldowns : EcsSystem
+{
+    [ForEach]
+    static void Tick(ref Cooldown cooldown) => cooldown.Ticks--;
+}
+```
+
+```csharp
+world.AddSystem<TickCooldowns>();
+var caster = world.CreateEntity(new Cooldown(3));
+
+caster.Disable<Cooldown>();             // 被眩晕：冷却暂停，值保留 // [!code highlight]
+world.Update();                         // TickCooldowns 跳过它
+bool paused = caster.IsDisabled<Cooldown>();
+int stunnedCasters = world.Count<Disabled<Cooldown>>();
+
+caster.Enable<Cooldown>();              // 回来时 Ticks 仍是 3
+```
+
+| 调用 | 效果 |
+| --- | --- |
+| `Disable<T>()` / 生成的 `DisableX()` | 隐藏 `T`，保留值，加上 `Disabled<T>`。实体没有 `T` 时返回 false |
+| `Enable<T>()` / 生成的 `EnableX()` | 还回保留的值。`T` 没被禁用时返回 false |
+| `IsDisabled<T>()` / 生成的 `IsXDisabled` | 实体是否带有 `Disabled<T>` |
+| 对被禁用的 `T` 调用 `Set(new T(...))` | 替换它：重新启用，值是新的 |
+| 对被禁用的 `T` 调用 `Remove<T>()` | 丢弃它：没有可启用的了 |
+| `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | 对所有匹配实体做同样的事，见[批量操作](/zh/docs/guide/bulk) |
+
+禁用对 `[Removed<T>]` 来说算一次移除，启用对 `[Changed<T>]` 来说算一次写入，所以[同步](/zh/docs/guide/change-tracking#removal-detection)
+两边都能看到。被索引的组件在禁用期间离开索引。保留的值在挪行、克隆、快照和存档中都不会丢。
+
+### 禁用整个实体 [#disable-an-entity]
+
+EasyEcs 没有"查询默认跳过"的禁用实体。用一个标签加 `Without<T>` 实现，而且在需要的地方明确写出来：
+
+```csharp
+public struct Inactive : IComponent;                         // 整个实体关闭
+public struct Bullet : IComponent;
+
+public class MoveBullets : EcsSystem
+{
+    [ForEach, Without<Inactive>]                             // 要跳过它的系统自己说明 // [!code highlight]
+    static void Move(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
+}
+```
+
+```csharp
+var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Bullet());
+bullet.SetInactive();                                        // 回到对象池：翻转一个位，不挪行
+bullet.SetPosition(5, 5).RemoveInactive();                   // 重新使用
+int pooled = world.Count<Bullet>(QueryFilter.Create().With<Inactive>());   // 存档、清理、统计都能看到所有实体
+```
+
+为什么用标签（[决策 D8](/zh/docs/decisions#d8-no-whole-entity-disable)）：默认排除会让每个查询都依赖一个它没写出来的状态。
+必须看到所有实体的存档、清理或统计，都得记得重新把它们包含进来，忘了就悄无声息地出错。标签是生成器和读代码的人都看得见的数据。
+
+| | Friflo.Engine.ECS | DefaultEcs | EasyEcs |
+| --- | --- | --- | --- |
+| 做法 | `entity.Enabled = false`：一个隐藏标签，查询默认跳过，除非 `WithDisabled()` | `entity.Disable()`：实体离开所有实体集合 | 自己的标签加 `Without<T>` |
+| 开关一次 | 把行挪到另一个原型（archetype） | 更新每个集合 | 翻转一个存在位（第一次之后） |
+| 遍历时跳过被禁用的实体 | 跳过它们所在的原型 | 它们不在任何集合里 | 表里没有时零开销；混在一起时每 64 行测一次 |
+
+实测：每次操作有 100 个单位切换状态（大多数保持不变），以及有 10,000 个（频繁切换），然后汇总醒着的单位（`DisableComparison`）：
+
+<BenchChart bench="DisableComparison" param="Switched=100" title="10 万个单位，每次操作 100 个入睡、醒来" />
+
+<BenchChart bench="DisableComparison" param="Switched=10000" title="10 万个单位，每次操作 10,000 个入睡、醒来" />
+
+对象池和特效切换很频繁，翻转一个位比挪一次行划算。如果大量实体长时间关闭、又和醒着的实体混在同一张表里，可以对睡眠状态
+做 [`GroupBy`](/zh/docs/guide/groups)，把它们放进自己的表。
+
+### 区分新实体：`Spawned` 标签 [#spawned-tag]
+
+EasyEcs 没有 `Added<T>` 过滤器。`[Changed<T>]` 已经会选中新得到 `T` 的行（添加和写入一样会打 tick）。如果系统必须区分新实体
+和被写过的实体，就让创建方加一个标签，响应的系统再把它去掉（[决策 D4](/zh/docs/decisions#d4-no-addedt-filter)）：
+
+```csharp
+public struct Spawned : IComponent;
+public record struct Greeted(int Count) : ISingletonComponent;
+
+public class GreetNewcomers : EcsSystem
+{
+    [ForEach, With<Spawned>]
+    static void Greet(Entity entity, in Health health, ref Greeted greeted)
+    {
+        greeted.Count++;                                     // 只做一次的工作
+        entity.RemoveSpawned();                              // 翻转一个位：只欢迎一次
+    }
+}
+```
+
+```csharp
+world.AddSingleton<Greeted>();
+world.AddSystem<GreetNewcomers>();
+world.CreateEntity(new Health(100), new Spawned());          // 创建方声明它是新的
+world.Update();
+```
+
+标签是显式的，能查询，随 World 一起存盘，开销只是翻转一个存在位。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+| 别这样 | 这样做 | 原因 |
+| --- | --- | --- |
+| 在每个销毁的地方各自释放资源 | 一个清理组件加一个系统 | 只有一条释放路径，批量销毁和级联也覆盖 |
+| 移除再加回组件来暂停它 | `Disable<T>()` / `Enable<T>()` | 值保留下来；用 `Set` 得先把值存到别处 |
+| 对大量实体循环调用 `Disable` | `world.DisableAll<T>(filter)` | 一次处理整字的行（[批量操作](/zh/docs/guide/bulk)） |
+| 每个系统都判断的标志字段 | 标签加 `Without<T>` | 没有这个标签的表完全不用判断 |
+
+1 万个持有外部资源的会话，每次操作 1,000 个断开、1,000 个连入，对比用清理组件和在销毁前手动释放普通组件（`CleanupBenchmark`）；
+以及 10 万个实体批量禁用、启用，对比逐个操作（`BulkBenchmark`）：
+
+<BenchTable bench="CleanupBenchmark" />
+
+<BenchTable bench="BulkBenchmark" methods="DisableAndEnable,DisableAndEnableEach" />
+
+## 开销 [#what-it-costs]
+
+- **清理组件：** 退休的实体在释放前保留 id 和一行（只剩清理组件）；没有清理组件的 World，销毁时零开销。
+- **`Disable<T>()`：** O(1)。一张表里第一次禁用会把行挪一次，挪到带 `Disabled<T>` 列的表；之后禁用、启用都只是翻转存在位。
+- **标签：** 每行一个存在位；第一次之后只是翻转。没有 `Inactive` 行的表直接跳过判断。
+- **`Spawned`：** 和其他标签一样：加上翻一个位，去掉再翻一个位。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 清理系统没写 `With<Destroyed>` | 把存活实体的资源也释放了 | 代码审查 |
+| 从不移除最后一个清理组件 | 退休的实体永远留着 | 在统计里看 `world.Count<Destroyed>()` |
+| 对清理组件或 `ChildOf` 调用 `Disable<T>()` | 抛 `InvalidOperationException` | 运行时 |
+| 对被禁用的组件 `Set`，以为它还是禁用状态 | `Set` 会用新值重新启用它 | 设计如此：要保留旧值用 `Enable` |
+| 系统忘了写 `Without<Inactive>` | 池里的实体还在动 | 代码审查 |
+| 指望 `[Changed<T>]` 区分新建和写入 | 两者都算写入 | 用 `Spawned` 标签 |
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="批量操作" href="/zh/docs/guide/bulk">
+    `DisableAll`、`EnableAll`、`SetAll`、`RemoveAll`。
+  </Card>
+  <Card title="变更追踪" href="/zh/docs/guide/change-tracking">
+    禁用算移除，启用算写入。
+  </Card>
+  <Card title="层级" href="/zh/docs/guide/hierarchy">
+    级联销毁会让持有清理组件的子实体退休。
+  </Card>
+  <Card title="示例程序" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/cleanup.cs">
+    `examples/cleanup.cs` 和 `examples/disable.cs`，用 `dotnet run` 直接运行。
+  </Card>
+</Cards>

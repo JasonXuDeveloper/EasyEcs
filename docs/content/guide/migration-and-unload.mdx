@@ -1,0 +1,192 @@
+---
+title: Migration and unload
+seoTitle: "Move entities between ECS worlds and hot-reload game logic in C#"
+description: Move a player and what it owns to another world or server with SaveEntities, LoadEntities and MoveEntities, ids rewritten; unload and reload game logic with RemoveTypes and a collectible AssemblyLoadContext.
+icon: ArrowRightLeft
+---
+
+A player walks through a portal into another zone's world, or is handed to another server. Their entity, their items
+and their pets must arrive together, still pointing at each other. `SaveEntities` / `LoadEntities` carry such a group
+through bytes, `MoveEntities` copies it straight into another world of the thread, and both rewrite the `EntityId`s
+inside the group to the new entities. A long-running server also replaces its game logic without a restart:
+`RemoveTypes` takes a plugin's systems and components out of a world, so its collectible `AssemblyLoadContext` can
+unload and a new version can load the saved data.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  Zone or map changes between worlds of one process (`MoveEntities`), handing a player to another server or storing
+  an offline player (`SaveEntities` / `LoadEntities`), hot reload of game logic in a server that must not restart
+  (`RemoveTypes`).
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  Moving a whole world: [`Save` / `Load`](/en/docs/guide/saves) keeps every id. Entities that change "zone" inside one
+  world: a [group](/en/docs/guide/groups) or a component value is enough. Reloading types that are not in a collectible
+  context: the default context never unloads.
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+### A group through bytes [#save-entities]
+
+`SaveEntities(output, ids)` writes the listed entities and their components (stale ids and repeats are skipped; no
+singletons). `LoadEntities(bytes, handles)` creates them in another world, in this or another process, with new ids,
+and writes their handles in save order.
+
+```csharp
+using Nino.Core;
+
+public record struct Sword(int Damage) : IComponent;
+public record struct Pet(EntityId Owner) : IComponent;
+```
+
+```csharp
+var hero = world.CreateEntity(new Health(100));
+world.CreateEntity(new Sword(10), new ChildOf(hero));
+world.CreateEntity(new Pet(hero), new Health(20));
+
+// Collect the group: the hero, what hangs on it, what points at it.
+var group = new List<EntityId> { hero.Id };
+foreach (var child in world.Children(hero)) group.Add(child.Id);
+foreach (var item in world.Query<Pet>()) if (item.Pet.Owner == hero.Id) group.Add(item.Entity.Id);
+
+var bytes = new NinoArrayBufferWriter();
+world.SaveEntities(bytes, group.ToArray());                  // the group only // [!code highlight]
+
+using var otherServer = new World();
+var arrived = new Entity[group.Count];
+int created = otherServer.LoadEntities(bytes.WrittenSpan, arrived);   // new ids, links rewritten // [!code highlight]
+```
+
+### A group to another world of the thread [#move-entities]
+
+`MoveEntities(target, ids, moved)` does the same between two worlds of the thread, without encoding: rows are copied,
+ids rewritten, then the originals are destroyed. `moved` receives the new handles in order (`default` for a skipped
+id).
+
+```csharp
+using var nextZone = new World();
+var moved = new Entity[group.Count];
+int count = world.MoveEntities(nextZone, group.ToArray(), moved);   // hero, sword and pet leave this world
+```
+
+- The originals are destroyed with their children, so move a [hierarchy](/en/docs/guide/hierarchy#moving) together.
+- Cleanup components stay behind with the retired originals, for their systems to release.
+- Both worlds must be owned by the calling thread; moving a world into itself is refused (`ArgumentException`).
+
+### How ids are rewritten [#entityid-rewriting]
+
+The generator records where every `EntityId` field of a component or buffer element is, private fields and nested
+structs included. When a group arrives:
+
+| An `EntityId` field that named | Becomes |
+| --- | --- |
+| An entity of the group | The id of its new entity |
+| Any other entity (it stayed behind) | `EntityId.Null` |
+| The parent of a `ChildOf` that stayed behind | The `ChildOf` is removed: the entity is a root here |
+
+Ids inside collections (a `List<EntityId>` in a component) are not rewritten. Indexes and groups learn the arrivals,
+and their tracked components count as written.
+
+### Unloading a plugin's types [#remove-types]
+
+`world.RemoveTypes(assembly)` (or `RemoveTypes(context)` for every assembly of an `AssemblyLoadContext`) removes
+everything of the plugin from the world: its systems (their `OnDestroy` runs), singletons, indexes and groupings, and
+its components from every entity. The entities stay, without those components. Tables that had such a column are
+dropped with every cache naming them, so the world holds no reference to the assembly. Once every world removed it,
+the collectible context can unload; when it does, EasyEcs forgets the types' save names and reuses their component
+bits once no live world mentions them.
+
+### Hot reload [#hot-reload]
+
+Saves record types by name, so a reload keeps the plugin's data: save, remove the types, unload, load the new
+version, load the save.
+
+```csharp
+using System.Buffers;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
+
+public sealed class PluginContext() : AssemblyLoadContext("plugin", isCollectible: true);
+
+public static class Plugins
+{
+    public static Assembly Reload(World world, PluginContext old, PluginContext next, string path)
+    {
+        var saved = new ArrayBufferWriter<byte>();
+        world.Save(saved);                                      // the plugin's components too, by type name
+        world.RemoveTypes(old);                                 // its systems, singletons and components leave // [!code highlight]
+        old.Unload();                                           // collected once nothing else roots it
+
+        var plugin = next.LoadFromAssemblyPath(path);
+        RuntimeHelpers.RunModuleConstructor(plugin.ManifestModule.ModuleHandle);   // registers its types for Load
+        world.Load(saved.WrittenSpan);                          // the new version's components take the values
+        return plugin;                                          // then add its systems to the world
+    }
+}
+```
+
+The order matters: while both versions are loaded their types share names, and a load would refuse them as ambiguous.
+Keep the components the host owns (positions, ids) in an assembly that is never reloaded, and hold no references of
+your own to the old version's types (systems, plugin objects), or the context cannot be collected. A
+[snapshot](/en/docs/guide/snapshots) taken before `RemoveTypes` cannot be restored after it.
+
+The [HotReload sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload) runs the whole cycle
+and checks that the old context was collected and that the plugin's data carried over.
+
+## How to use it fast [#how-to-use-it-fast]
+
+| Instead of | Do | Why |
+| --- | --- | --- |
+| `SaveEntities` + `LoadEntities` between worlds of one process | `MoveEntities` | Rows copied, no encoding |
+| A new buffer per migration | One `NinoArrayBufferWriter`, `ResetWrittenCount()` each time | No allocation once it is large enough |
+| Many small migrations of one entity | One migration of the whole group | A save's fixed cost (the types by name) is paid once |
+| A reload that rebuilds the world | `RemoveTypes`, then `Load` | The host's entities and components stay where they are |
+
+10 players with 99 items each, moved to another world and back through bytes and in memory, and one entity of four
+components through bytes (`MigrationBenchmark`); a plugin with a tracked and an indexed component on every player, a
+singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`):
+
+<BenchTable bench="MigrationBenchmark" />
+
+<BenchTable bench="UnloadBenchmark" />
+
+## What it costs [#what-it-costs]
+
+- **Migration:** O(entities × components); the rewrite of ids is a lookup per `EntityId` field.
+- **Allocation:** none for `SaveEntities`, `LoadEntities` and `MoveEntities` once their buffers are large enough.
+- **`RemoveTypes`:** O(entities with such components + tables + cached queries); it allocates, and it is cold: run it
+  between updates, not in a tick.
+- **Steady state:** nothing. The unload support costs no time in worlds that never call `RemoveTypes`.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| Moving a parent without its children | The children are destroyed with the original | Collect the group with `Children` |
+| `EntityId`s in a `List<T>` inside a component | Not rewritten: they name entities of the old world | Use fields, a buffer or a relation |
+| An `Entity` handle in a component | Not saved, not rewritten | [EECS017](/en/docs/guide/analyzer#eecs017) |
+| Loading the new plugin before unloading the old one | Ambiguous type names: `InvalidDataException` | The reload order above |
+| Keeping references to the old plugin's systems | The context is never collected | Drop them after `RemoveTypes` |
+| `RemoveTypes` during an update or a pass | `InvalidOperationException` | At run time |
+| Restoring a snapshot taken before `RemoveTypes` | `InvalidOperationException` | At run time |
+| Migrating from another thread | Both worlds belong to their owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |
+
+## Related [#related]
+
+<Cards>
+  <Card title="Saves" href="/en/docs/guide/saves">
+    The whole world as bytes, versioning and Nino.
+  </Card>
+  <Card title="Hierarchy" href="/en/docs/guide/hierarchy">
+    Collect a group with `Children`.
+  </Card>
+  <Card title="Sample: SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">
+    `SaveEntities`, `LoadEntities` and `MoveEntities`, verified step by step.
+  </Card>
+  <Card title="Sample: HotReload" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload">
+    A collectible plugin unloaded and reloaded with its data.
+  </Card>
+</Cards>

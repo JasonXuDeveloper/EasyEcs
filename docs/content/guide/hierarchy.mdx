@@ -1,0 +1,216 @@
+---
+title: Hierarchy
+seoTitle: "Parent-child hierarchy in a C# ECS: ChildOf, Children and cascading destroy"
+description: Link entities to a parent with ChildOf, list children with world.Children, destroy a parent with its descendants, move a hierarchy between worlds and propagate transforms.
+icon: GitFork
+---
+
+A ship carries turrets, a turret carries a gun, a squad leader leads its members. `ChildOf(parent)` links an entity
+to its parent: `world.Children(parent)` lists the children, and destroying the parent destroys its descendants, so a
+ship that sinks takes its turrets with it without a line of cleanup code. `ChildOf` is an
+[indexed `EntityId` link](/en/docs/guide/indexes-and-relations#entityid-keys) like any other, with the destroy cascade
+switched on.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  Entities that live and die with another one: turrets on a ship, items a player carries, members of a squad, the
+  parts of a vehicle. Moving a player and everything it owns to another world or server.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  Links that must not kill the linked entity (a target, a follower): use your own `EntityId` key with `Keep` or `Remove`.
+  An entity with several "parents" (a member of many parties): use a [relation](/en/docs/guide/indexes-and-relations#relations).
+  Transform propagation is not built in: the [sample below](#transform-propagation) is a system you write.
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### Attach children [#attach]
+
+Give the child a `ChildOf` with the parent's id (a handle converts to it).
+
+```csharp
+public record struct Name(string Value) : IComponent;
+```
+
+```csharp
+var ship = world.CreateEntity(new Name("ship"));
+var turret = world.CreateEntity(new Name("turret"), new ChildOf(ship));
+var gun = world.CreateEntity(new Name("gun"), new ChildOf(turret));
+```
+
+</Step>
+<Step>
+
+### List them [#children]
+
+`world.Children(parent)` returns the entities whose `ChildOf` points at the parent: O(1), then O(1) per child. The
+first call indexes every `ChildOf` once.
+
+```csharp
+foreach (var child in world.Children(ship)) { /* the turret */ }
+```
+
+</Step>
+<Step>
+
+### Re-parent and detach [#reparent]
+
+`ChildOf` is a value like any other: set a new one to re-parent, remove it to make the entity a root.
+
+```csharp
+gun.Set(new ChildOf(ship));                // the gun now hangs on the ship
+turret.Remove<ChildOf>();                  // the turret is a root
+```
+
+</Step>
+<Step>
+
+### Destroy a parent [#cascade]
+
+Destroying a parent destroys its children, and theirs, in the same call.
+
+```csharp
+ship.Destroy();                            // the gun goes with it; the detached turret stays
+bool gunAlive = gun.IsAlive;               // false
+```
+
+</Step>
+</Steps>
+
+### Changing what a destroy does [#cascade-policy]
+
+`ChildOf` starts with `TargetPolicy.Destroy`. Like any [target policy](/en/docs/guide/indexes-and-relations#target-policies)
+it can be changed per world: `Remove` makes the children of a destroyed parent roots, `Keep` leaves their `ChildOf`
+pointing at the dead id.
+
+```csharp
+world.Index<ChildOf, EntityId>().WhenTargetDestroyed(TargetPolicy.Remove);   // orphans become roots
+```
+
+- A child that holds a [cleanup component](/en/docs/guide/cleanup-and-disable#cleanup-components) is retired, not freed:
+  it keeps its cleanup components with the `Destroyed` tag, and its own children go with it.
+- A cycle (an entity that is its own ancestor) ends: destroying any of them destroys the loop.
+- `ChildOf` cannot be disabled (`Disable<ChildOf>()` throws): a parent's destroy must find its children.
+
+### Transform propagation [#transform-propagation]
+
+EasyEcs has no transform component. Propagation is a system: start at the roots (`Without<ChildOf>`) and walk down
+with `Children`, so each world position is computed from its parent's new one.
+
+```csharp
+public record struct LocalPosition(float X, float Y) : IComponent;
+public record struct WorldPosition(float X, float Y) : IComponent;
+```
+
+```csharp title="PropagateTransforms.cs"
+public class PropagateTransforms : EcsSystem
+{
+    // Roots: their world position is their local one; then each subtree follows its parent.
+    [ForEach, Without<ChildOf>]
+    static void FromRoot(Entity root, in LocalPosition local, ref WorldPosition position)
+    {
+        position = new WorldPosition(local.X, local.Y);
+        Follow(root, position);
+    }
+
+    static void Follow(Entity parent, WorldPosition at)
+    {
+        foreach (var child in parent.World.Children(parent)) // [!code highlight]
+        {
+            ref readonly var local = ref child.Read<LocalPosition>();
+            var position = new WorldPosition(at.X + local.X, at.Y + local.Y);
+            child.Get<WorldPosition>() = position;
+            Follow(child, position);
+        }
+    }
+}
+```
+
+```csharp
+world.AddSystem<PropagateTransforms>();
+var hull = world.CreateEntity(new LocalPosition(10, 0), new WorldPosition());
+var mount = world.CreateEntity(new LocalPosition(0, 2), new WorldPosition(), new ChildOf(hull));
+var barrel = world.CreateEntity(new LocalPosition(1, 0), new WorldPosition(), new ChildOf(mount));
+world.Update();                            // barrel: WorldPosition(11, 2)
+```
+
+The method takes an `Entity`, so the system runs alone (it reads and writes other entities' components). Children are
+in other tables than the roots (they have `ChildOf`), so writing them never moves the row the pass stands on. Nothing
+here allocates.
+
+### Moving a hierarchy [#moving]
+
+`MoveEntities` and `SaveEntities` take the entities you list, not their children. Collect a hierarchy with `Children`
+and move it together: a child whose parent stays behind arrives without its `ChildOf` (a root there), and
+`MoveEntities` destroys the originals with their children, so a child you did not list is lost. See
+[migration](/en/docs/guide/migration-and-unload#move-entities).
+
+```csharp
+var player = world.CreateEntity(new Name("bob"));
+world.CreateEntity(new Name("sword"), new ChildOf(player));
+
+var group = new List<EntityId> { player.Id };
+foreach (var child in world.Children(player)) group.Add(child.Id);
+using var other = new World();
+world.MoveEntities(other, group.ToArray());   // bob and his sword, still linked
+```
+
+## How to use it fast [#how-to-use-it-fast]
+
+- **Destroy the root.** One `Destroy` follows the whole subtree inside the structural gate, with no recursion (a stack
+  of targets). Destroying children one by one before their parent does the same work in more calls.
+- **Keep depth shallow when you propagate.** The walk above costs one `Children` lookup per entity; flat hierarchies
+  (a ship and its turrets) walk fastest.
+- **`DestroyEntities<T>()`** destroys a whole table at once and still applies the cascade.
+
+1,000 squads (a leader and 10 members) created, then the leaders destroyed: with members as `ChildOf` their leader
+(`Cascade`), and with a link of your own under `TargetPolicy.Remove` (`RemoveLinks`, `HierarchyBenchmark`):
+
+<BenchTable bench="HierarchyBenchmark" />
+
+## What it costs [#what-it-costs]
+
+- **Nothing until the first `ChildOf`.** A world without a table holding `ChildOf` does not look for children when it
+  destroys an entity.
+- **Memory:** the `ChildOf` column (8 bytes per row) and the index of an `EntityId` key (one node per child).
+- **`Children`:** O(1), then O(1) per child; the first call indexes every `ChildOf`.
+- **A cascade:** O(1) per destroyed entity, plus O(1) per child it had.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| Writing `ChildOf` through a `ref` | The index keeps the old parent | [EECS015](/en/docs/guide/analyzer#eecs015) |
+| A parent pointer of your own as an `Entity` field | A managed column, not saved, no cascade | [EECS017](/en/docs/guide/analyzer#eecs017) |
+| Moving a parent without its children | The children stay and die with the destroyed original | Collect the group with `Children` |
+| `Disable<ChildOf>()` | `InvalidOperationException` | At run time |
+| Expecting world positions without a system | There is no built-in transform | Write the [propagation system](#transform-propagation) |
+
+## Compared with other libraries [#compared]
+
+Friflo has a built-in hierarchy (`AddChild`), but deleting a parent detaches its children, so they are deleted first;
+Arch and DefaultEcs have none. The same squads, created and destroyed with their members:
+
+<BenchChart bench="HierarchyComparison" title="1,000 squads of 11: create, then destroy the leaders with their members" />
+
+## Related [#related]
+
+<Cards>
+  <Card title="Indexes and relations" href="/en/docs/guide/indexes-and-relations">
+    `EntityId` keys, relations and target policies.
+  </Card>
+  <Card title="Cleanup and disable" href="/en/docs/guide/cleanup-and-disable">
+    Entities that release a resource before they go.
+  </Card>
+  <Card title="Migration and unload" href="/en/docs/guide/migration-and-unload">
+    Moving a player and what it owns to another world.
+  </Card>
+  <Card title="Example program" href="https://github.com/JasonXuDeveloper/EasyEcs/blob/master/examples/hierarchy.cs">
+    `examples/hierarchy.cs`, runnable with `dotnet run`.
+  </Card>
+</Cards>

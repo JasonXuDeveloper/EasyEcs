@@ -1,0 +1,140 @@
+---
+title: 批量操作
+seoTitle: "C# ECS 的批量组件变更：SetAll、RemoveAll、DisableAll、EnableAll"
+description: 对过滤器选中的所有实体一次性设置、移除、禁用或启用某个组件，用于回合重置、整区状态和刷怪，零分配。
+icon: Layers
+---
+
+回合结束，所有战士被眩晕；眩晕从所有人身上解除；某个区域冻结；一波怪物刷出来，过一会儿再清掉。逐个实体写，每一件都是一个
+结构变更的循环。`SetAll`、`RemoveAll`、`DisableAll` 和 `EnableAll` 只经过一次结构闸门，就能对过滤器选中的所有实体修改同一个组件，
+能整字处理时一次处理 64 行，结果和循环完全一样：被追踪组件算作写入，索引和分组都会跟上。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  一次对很多实体做同样的改动：回合重置、给整支队伍或整个区域加上或解除某个状态、到处暂停某个组件（`DisableAll`）、
+  刷出和清理一波实体（`CreateEntities`、`DestroyEntities`）。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  值因实体而异的改动（按每个单位的护甲算伤害）：那是通过 `ref` 写入的 `[ForEach]` 系统。手里已经拿着的几个实体：
+  逐个 `Set` 一样快。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+### 对所有匹配实体设置和移除 [#set-all]
+
+`SetAll(value, filter)` 给每个匹配的实体加上或替换这个组件；`RemoveAll<T>(filter)` 从拥有它的每个匹配实体上移除。两者都返回
+改动了多少个实体。
+
+```csharp
+public record struct Fighter(int Team) : IComponent;
+public record struct Stun(int Ticks) : IComponent;
+
+public static class Rounds
+{
+    public static readonly QueryFilter Fighters = QueryFilter.Create().With<Fighter>();
+}
+```
+
+```csharp
+var fighters = new Entity[1_000];
+world.CreateEntities(fighters, new Fighter(1), new Health(100));
+
+int stunned = world.SetAll(new Stun(3), Rounds.Fighters);   // 回合结束：所有人被眩晕 // [!code highlight]
+int lifted = world.RemoveAll<Stun>();                        // 所有人解除眩晕
+```
+
+不带过滤器时，`RemoveAll<T>()` 从所有拥有 `T` 的实体上移除它，而 `SetAll` 会给每个存活实体都加上，所以要写明选谁
+（`With<Fighter>()`）。任何 `QueryFilter` 都可以用，包括 `Without`、`WithAny`、`Changed` 和 [`InGroup`](/zh/docs/guide/groups)。
+
+### 对所有匹配实体禁用和启用 [#disable-all]
+
+`DisableAll<T>(filter)` 和 `EnableAll<T>(filter)` 就是对每个匹配实体执行
+[`Disable<T>()` 和 `Enable<T>()`](/zh/docs/guide/cleanup-and-disable#disable-a-component)：值保留，之后原样还回来。
+
+```csharp
+int paused = world.DisableAll<Health>(Rounds.Fighters);     // 过场期间谁也不回血
+int resumed = world.EnableAll<Health>();                     // 保留的值全部回来
+```
+
+### 刷出和清理一波实体 [#spawn-and-clear]
+
+针对整个实体的结构操作：用同一组值创建一波实体，以及销毁所有匹配的实体：
+
+```csharp
+public record struct Shot(int Damage) : IComponent;
+```
+
+```csharp
+var volley = new Entity[10_000];
+world.CreateEntities(volley, new Shot(5), new Position(0, 0));   // 一张表，所有行一次放好
+int cleared = world.DestroyEntities<Shot>();                     // 所有子弹，一次遍历
+```
+
+`world.Instantiate(prefab, span)` 用[预制体](/zh/docs/guide/prefabs)刷出一波实体。
+
+### 批量操作保证什么 [#semantics]
+
+| | `SetAll` | `RemoveAll` | `DisableAll` | `EnableAll` |
+| --- | --- | --- | --- | --- |
+| [变更追踪](/zh/docs/guide/change-tracking) | 每行一次写入 | 每行一次移除（被追踪的 `T`） | 每行一次移除 | 每行一次写入 |
+| [索引](/zh/docs/guide/indexes-and-relations) | 重新索引 | 摘除 | 摘除 | 重新挂上 |
+| [分组](/zh/docs/guide/groups) | 挪到值所在的分组 | | | |
+| [清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components) | | 移除最后一个时释放退休实体 | 拒绝（抛异常） | |
+
+四个调用都是拥有者线程上的结构变更：在两次更新之间、系统的 `OnUpdate` 里，或者接收 `Entity` 或 `World` 的 `[ForEach]` 方法里调用
+（两者都不接收的方法，承诺了不做结构变更）。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+- **让列留下来。** 第一回合之后，眩晕的列会留在战士的表里：之后的 `SetAll` 和 `RemoveAll` 只是翻转存在位，每个字 64 行，
+  不挪行。
+- **过滤器放进 `static readonly` 字段**，和所有热点过滤器一样。
+- **一次调用代替循环。** 批量调用只进一次结构闸门，按表逐张处理。
+
+10 万个战士的回合重置（全员眩晕、再解除），以及给所有人禁用再启用一个状态，批量与逐个对比（`BulkBenchmark`）：
+
+<BenchTable bench="BulkBenchmark" />
+
+## 开销 [#what-it-costs]
+
+- **时间：** O(匹配的表 + 行)。已经有这一列的行只是翻转存在位；没有这一列的实体挪一次，挪到有这一列的表。
+- **分配：** 目标表存在之后为 0 B。
+- **`SetAll` 先计数：** 挪过的行可能在新表里再次被访问到，所以在修改之前就把数量算好。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 在不接收 `Entity` 或 `World` 的 `[ForEach]` 方法里调用批量操作 | 遍历没预料到的结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
+| 在其他线程调用批量操作 | 和拥有者线程竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+| 对清理组件或 `ChildOf` 调用 `DisableAll` | 抛 `InvalidOperationException` | 运行时 |
+| 值本该因实体而异却用了 `SetAll` | 所有实体拿到同一个值 | 改用 `[ForEach]` 系统 |
+| 对成千上万个实体循环 `Set` / `Remove` | 结果相同，慢很多倍 | 代码审查：改用批量调用 |
+
+## 和其他库的对比 [#compared]
+
+Friflo 把一个 `EntityBatch` 应用到查询的实体上，Arch 按查询添加或移除（整张表挪动），DefaultEcs 只能逐个实体修改。
+同样是 10 万个战士的回合重置：
+
+<BenchChart bench="BulkChangeComparison" title="眩晕 10 万个战士，然后全员解除" />
+
+在 10 万个战士旁边刷出 1 万发子弹，再全部清掉：
+
+<BenchChart bench="BulkSpawnComparison" title="刷出 1 万发子弹，然后全部销毁" />
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="清理与禁用" href="/zh/docs/guide/cleanup-and-disable">
+    单个实体的 `Disable<T>()`，以及清理组件。
+  </Card>
+  <Card title="结构变更" href="/zh/docs/guide/structural-changes">
+    什么是结构变更，什么时候生效。
+  </Card>
+  <Card title="查询与过滤" href="/zh/docs/guide/queries">
+    每个批量调用都接收的 `QueryFilter`。
+  </Card>
+</Cards>
