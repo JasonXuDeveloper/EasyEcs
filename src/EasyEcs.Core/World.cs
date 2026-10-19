@@ -277,6 +277,7 @@ public sealed partial class World : IDisposable
         if (_indexByBit != null) Unindex(archetype, id);
         meta.Version++; // invalidates every outstanding handle
         meta.Archetype = null;
+        archetype.ReleaseBuffers(meta.Slot, 1);
         RemoveRow(archetype, meta.Slot);
         StorageVersion++;
 
@@ -345,6 +346,7 @@ public sealed partial class World : IDisposable
             _freeIds[_freeIdCount++] = id;
         }
 
+        archetype.ReleaseBuffers(0, count);
         archetype.Clear();
         _entityCount -= count;
         StorageVersion++;

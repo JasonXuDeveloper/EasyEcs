@@ -46,6 +46,9 @@ internal sealed class Archetype
     /// <summary>Whether any column holds managed references (cleared when a row dies, so they can be collected).</summary>
     private readonly bool _hasManaged;
 
+    /// <summary>Whether any column is a <see cref="DynamicBuffer{T}"/> (its lists go back to their pool when a row dies).</summary>
+    private readonly bool _hasBuffers;
+
     /// <summary>
     /// Per column: one bit per row, set while the entity has the component (64 rows per word, so queries test 64 rows
     /// with one load). Allocated when a row of the column first loses its component; null means every row has it.
@@ -149,6 +152,7 @@ internal sealed class Archetype
             var info = ComponentInfo.Of(Components[i]);
             _infos[i] = info;
             _hasManaged |= info.Managed;
+            _hasBuffers |= info.IsBuffer;
             Columns[i] = info.Create(initialCapacity);
             if (info.Owner >= 0)
             {
@@ -265,7 +269,7 @@ internal sealed class Archetype
         if ((word & bit) == 0) return false;
         word &= ~bit;
         AbsentOf(column)++;
-        if (!keep && _hasManaged && Info(column) is { Managed: true } info) info.Clear(Columns[column], slot, 1);
+        if (!keep && _hasManaged && Info(column) is { Managed: true } info) info.Release(Columns[column], slot, 1);
         return true;
     }
 
@@ -281,7 +285,7 @@ internal sealed class Archetype
         present &= ~rows;
         AbsentOf(column) += BitOperations.PopCount(rows);
         if (!keep && _hasManaged && Info(column) is { Managed: true } info)
-            for (ulong r = rows; r != 0; r &= r - 1) info.Clear(Columns[column], (word << 6) + BitOperations.TrailingZeroCount(r), 1);
+            for (ulong r = rows; r != 0; r &= r - 1) info.Release(Columns[column], (word << 6) + BitOperations.TrailingZeroCount(r), 1);
         return rows;
     }
 
@@ -874,6 +878,24 @@ internal sealed class Archetype
         var entity = Unsafe.Add(ref rows, from);
         Unsafe.Add(ref rows, to) = entity;
         Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(meta), entity.Index).Slot = to;
+    }
+
+    /// <summary>
+    /// The entities of rows [<paramref name="start"/>, +<paramref name="count"/>) die: their buffers' lists go back to
+    /// their pool (see <see cref="ComponentInfo.Release"/>). Before the rows are removed. Inside the structural gate.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void ReleaseBuffers(int start, int count)
+    {
+        if (_hasBuffers) ReleaseBufferColumns(start, count);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ReleaseBufferColumns(int start, int count)
+    {
+        for (int i = 0; i < _infos.Length; i++)
+            if (_infos[i].IsBuffer)
+                _infos[i].Release(Columns[i], start, count);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

@@ -108,3 +108,45 @@ public class DynamicBufferBenchmark
         }
     }
 }
+
+/// <summary>
+/// Actors that load and unload: each operation creates <see cref="Actors"/> entities with a mailbox (a
+/// <see cref="DynamicBuffer{T}"/>), posts <see cref="Mail"/> messages to each, and destroys them, the way a server
+/// keeps players coming and going. A destroyed entity's list goes back to a pool and serves the next mailbox.
+/// </summary>
+[MemoryDiagnoser]
+public class BufferChurnBenchmark
+{
+    public const int Mail = 4;
+
+    [Params(1_000)] public int Actors;
+
+    private World _world;
+    private Entity[] _actors;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _world = new World(new WorldOptions { InitialEntityCapacity = Actors });
+        _actors = new Entity[Actors];
+        for (int i = 0; i < 20; i++) LoadAndUnload();
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => _world.Dispose();
+
+    [Benchmark]
+    public void LoadAndUnload()
+    {
+        _world.CreateEntities(_actors, new DynamicBuffer<long>(), new Actor());
+        foreach (var actor in _actors)
+        {
+            ref var mailbox = ref actor.Get<DynamicBuffer<long>>();
+            for (int m = 0; m < Mail; m++) mailbox.Add(m);
+        }
+
+        foreach (var actor in _actors) actor.Destroy(); // one by one, as actors unload
+    }
+
+    public record struct Actor(int Shard) : IComponent;
+}

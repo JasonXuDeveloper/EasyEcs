@@ -192,6 +192,13 @@ internal abstract class ComponentInfo
     public abstract void Clear(Array column, int start, int count);
 
     /// <summary>
+    /// <see cref="Clear"/> of values that die (their component was removed, their entity destroyed): the lists of a
+    /// buffer column go back to the pool of their element type (<see cref="BufferStore.Recycle"/>). Never for rows
+    /// whose values were copied elsewhere (a moved row): the copies still hold them.
+    /// </summary>
+    public abstract void Release(Array column, int start, int count);
+
+    /// <summary>
     /// Copy rows [0, <paramref name="count"/>) of a managed column for a snapshot (capture or restore): values, and for
     /// <see cref="DynamicBuffer{T}"/> columns copies of their lists, so the two sides never share one. With
     /// <paramref name="swap"/> the lists change sides instead (a Load's private snapshot): the target's old lists go to
@@ -333,6 +340,23 @@ internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsRefere
     }
 
     public override void Clear(Array column, int start, int count) => Array.Clear(column, start, count);
+
+    public override void Release(Array column, int start, int count)
+    {
+        if (default(T) is not IBuffer) // a JIT-time constant
+        {
+            Array.Clear(column, start, count);
+            return;
+        }
+
+        var rows = Unsafe.As<T[]>(column);
+        for (int i = start; i < start + count; i++)
+        {
+            ref var store = ref Unsafe.As<T, BufferStore>(ref rows[i]); // a DynamicBuffer's single field (see CopyRows)
+            store?.Recycle();
+            store = null;
+        }
+    }
 
     public override void CopyRows(Array source, Array target, int count, bool swap = false)
     {

@@ -79,7 +79,7 @@ public static class DynamicBufferExtensions
     /// <summary>Append <paramref name="item"/>. O(1) amortized; allocates only when the list grows.</summary>
     public static void Add<T>(this ref DynamicBuffer<T> buffer, in T item)
     {
-        var store = buffer.Store ??= new BufferStore<T>(0);
+        var store = buffer.Store ??= BufferStore<T>.Rent();
         if (store.Count == store.Items.Length) store.Grow(store.Count + 1);
         store.Items[store.Count++] = item;
     }
@@ -87,7 +87,7 @@ public static class DynamicBufferExtensions
     /// <summary>Append <paramref name="items"/>. O(items).</summary>
     public static void AddRange<T>(this ref DynamicBuffer<T> buffer, ReadOnlySpan<T> items)
     {
-        var store = buffer.Store ??= new BufferStore<T>(0);
+        var store = buffer.Store ??= BufferStore<T>.Rent();
         if (store.Count + items.Length > store.Items.Length) store.Grow(store.Count + items.Length);
         items.CopyTo(store.Items.AsSpan(store.Count));
         store.Count += items.Length;
@@ -96,7 +96,7 @@ public static class DynamicBufferExtensions
     /// <summary>Insert <paramref name="item"/> at <paramref name="index"/>, keeping the order. O(count).</summary>
     public static void Insert<T>(this ref DynamicBuffer<T> buffer, int index, in T item)
     {
-        var store = buffer.Store ??= new BufferStore<T>(0);
+        var store = buffer.Store ??= BufferStore<T>.Rent();
         if ((uint)index > (uint)store.Count) DynamicBuffer<T>.ThrowIndex();
         if (store.Count == store.Items.Length) store.Grow(store.Count + 1);
         Array.Copy(store.Items, index, store.Items, index + 1, store.Count - index);
@@ -144,7 +144,7 @@ public static class DynamicBufferExtensions
     /// <summary>Make room for at least <paramref name="capacity"/> elements.</summary>
     public static void EnsureCapacity<T>(this ref DynamicBuffer<T> buffer, int capacity)
     {
-        var store = buffer.Store ??= new BufferStore<T>(0);
+        var store = buffer.Store ??= BufferStore<T>.Rent();
         if (capacity > store.Items.Length) store.Resize(capacity);
     }
 }
@@ -173,12 +173,54 @@ internal abstract class BufferStore
 {
     /// <summary>A store with copies of the elements.</summary>
     public abstract BufferStore Clone();
+
+    /// <summary>Empty the store and keep it for the next first write on this thread (its buffer died: nothing refers to it).</summary>
+    public abstract void Recycle();
 }
 
 internal sealed class BufferStore<T>(int capacity) : BufferStore
 {
     public T[] Items = capacity == 0 ? [] : new T[capacity];
     public int Count;
+
+    // The emptied stores of this thread, taken by first writes: a world's structural changes (where buffers die) run
+    // on its owner thread, so a world's lists come back to the buffers of that world, and an actor loaded after one
+    // unloaded reuses its list instead of allocating one. Bounded like a table's rows: the pool holds at most as many
+    // stores as died while none were taken (the peak a table's capacity keeps too), each with at most MaxFreeBytes of
+    // elements (a list that grew larger is left to the GC).
+    private const int MaxFreeBytes = 4096;
+
+    [ThreadStatic] private static BufferStore<T>[] t_free;
+    [ThreadStatic] private static int t_freeCount;
+
+    /// <summary>An empty store: one this thread recycled, else a new one.</summary>
+    public static BufferStore<T> Rent()
+    {
+        var free = t_free;
+        if (free == null || t_freeCount == 0) return new BufferStore<T>(0);
+        int last = --t_freeCount;
+        var store = free[last];
+        free[last] = null;
+        return store;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static BufferStore<T>[] Grown(BufferStore<T>[] free)
+    {
+        var grown = new BufferStore<T>[free == null ? 16 : free.Length * 2];
+        free?.CopyTo(grown, 0);
+        return grown;
+    }
+
+    public override void Recycle()
+    {
+        if (RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(Items, 0, Count);
+        Count = 0;
+        if ((long)Items.Length * Unsafe.SizeOf<T>() > MaxFreeBytes) return;
+        var free = t_free;
+        if (free == null || t_freeCount == free.Length) t_free = free = Grown(free);
+        free[t_freeCount++] = this;
+    }
 
     /// <summary>Grow to hold at least <paramref name="needed"/> elements (doubling, at least 4).</summary>
     public void Grow(int needed) => Resize(Math.Max(needed, Math.Max(4, Items.Length * 2)));

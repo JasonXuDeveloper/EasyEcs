@@ -167,6 +167,60 @@ public class DynamicBufferTests
     }
 
     [Test]
+    public void BuffersThatComeAndGoDoNotAllocate()
+    {
+        using var world = new World();
+        var bags = new Entity[64];
+        var held = world.CreateEntity(new Health());
+
+        void Churn()
+        {
+            for (int i = 0; i < bags.Length; i++)
+            {
+                bags[i] = world.CreateEntity(new DynamicBuffer<Loot>(), new Position());
+                bags[i].Get<DynamicBuffer<Loot>>().Add(new Loot(i, 1));            // a loaded actor fills its mailbox
+            }
+
+            foreach (var bag in bags) bag.Destroy();                               // and unloads
+            world.CreateEntities(bags, new DynamicBuffer<Loot>(), new Frozen());
+            foreach (var bag in bags) bag.Get<DynamicBuffer<Loot>>().Add(new Loot(1, 1));
+            world.DestroyEntities<Frozen>();                                      // a whole table at once
+            held.Set(new DynamicBuffer<Loot>());
+            held.Get<DynamicBuffer<Loot>>().Add(new Loot(2, 2));
+            held.Remove<DynamicBuffer<Loot>>();                                   // a component that goes
+        }
+
+        for (int i = 0; i < 5; i++) Churn();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++) Churn();
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+    }
+
+    [Test]
+    public void AListThatServedADeadBufferStartsEmptyAndBelongsToOneEntity()
+    {
+        using var world = new World();
+        var first = world.CreateEntity(new DynamicBuffer<string>());
+        first.Get<DynamicBuffer<string>>().Add("mail");
+        var kept = world.CreateEntity(new DynamicBuffer<string>());
+        kept.Get<DynamicBuffer<string>>().Add("kept");
+        first.Destroy();
+
+        var next = world.CreateEntity(new DynamicBuffer<string>());
+        var other = world.CreateEntity(new DynamicBuffer<string>());
+        Assert.That(next.Read<DynamicBuffer<string>>().Count, Is.Zero);
+        next.Get<DynamicBuffer<string>>().Add("a");
+        other.Get<DynamicBuffer<string>>().Add("b");
+        Assert.That((next.Read<DynamicBuffer<string>>()[0], other.Read<DynamicBuffer<string>>()[0], kept.Read<DynamicBuffer<string>>()[0]),
+            Is.EqualTo(("a", "b", "kept")));
+
+        kept.Disable<DynamicBuffer<string>>();                // a disabled buffer keeps its list
+        kept.Set(new Position());                             // and moves with its row
+        kept.Enable<DynamicBuffer<string>>();
+        Assert.That(kept.Read<DynamicBuffer<string>>()[0], Is.EqualTo("kept"));
+    }
+
+    [Test]
     public void NamedMembersReadWriteAddAndRemoveTheBuffer()
     {
         using var world = new World();
