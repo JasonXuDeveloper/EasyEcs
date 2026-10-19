@@ -63,6 +63,7 @@ public static class Program
         var values = new ValueQueryComparison();
         var parallel = new ParallelQueryComparison();
         var saves = new SaveComparison();
+        var cold = new ColdCreateComparison();
         (string Name, Action Setup, Action Cleanup)[] setups =
         [
             ("ChangeTracking EasyEcs", changes.SetupEasyEcs, changes.Cleanup),
@@ -98,6 +99,7 @@ public static class Program
             ("Save EasyEcs", saves.SetupEasyEcs, saves.Cleanup),
             ("Save Friflo", saves.SetupFriflo, saves.Cleanup),
             ("Save DefaultEcs", saves.SetupDefaultEcs, saves.Cleanup),
+            ("ColdCreate (every library)", cold.CheckAll, static () => { }), // each case cleans up after itself
         ];
         bool ok = true;
         foreach (var (name, setup, cleanup) in setups)

@@ -269,3 +269,236 @@ public class BulkSpawnComparison
                 throw new InvalidOperationException($"the volley went wrong: {alive()} alive");
     }
 }
+
+public record struct Cold1(int Value) : EasyEcs.IComponent;
+public record struct Cold2(int Value) : EasyEcs.IComponent;
+public record struct Cold3(int Value) : EasyEcs.IComponent;
+
+public struct FCold1 : F.IComponent { public int Value; }
+public struct FCold2 : F.IComponent { public int Value; }
+public struct FCold3 : F.IComponent { public int Value; }
+
+public struct ACold1 { public int Value; }
+public struct ACold2 { public int Value; }
+public struct ACold3 { public int Value; }
+
+public record struct DCold1(int Value);
+public record struct DCold2(int Value);
+public record struct DCold3(int Value);
+
+/// <summary>
+/// A server's start: 100,000 entities with one, two or three components created in a world that has never held any,
+/// the setup of Doraku/Ecs.CSharp.Benchmark (CreateEntityWith*Components): every invocation gets a fresh world from
+/// <c>[IterationSetup]</c> and is measured once, so the first growth of every table and array, and any collection the
+/// allocations set off, is part of the cost. Each library creates entities one by one without pre-sizing
+/// (<c>PerEntity</c>), one by one after its pre-sizing call (<c>Reserved</c>) and in one bulk call where it has one
+/// (<c>Bulk</c>).
+/// <list type="bullet">
+/// <item>EasyEcs: <c>CreateEntity(values)</c> per entity, after <c>EnsureCapacity&lt;T1..Tn&gt;(count)</c> when reserved;
+/// bulk: <c>CreateEntities(new Entity[count], values)</c> (the handle array is part of the cost).</item>
+/// <item>Friflo: <c>archetype.CreateEntity()</c> per entity (default values, as the external suite writes it), after
+/// <c>store.EnsureCapacity</c> and <c>archetype.EnsureCapacity</c> when reserved; no bulk create.</item>
+/// <item>Arch: <c>Create(values)</c> per entity, after <c>EnsureCapacity(signature, count)</c> when reserved (its bulk
+/// <c>Create(span, signature, count)</c> made one entity in 2.1.0).</item>
+/// <item>DefaultEcs: <c>CreateEntity</c> and <c>Set</c> per component; it has no pre-sizing (its world's capacity is a
+/// maximum) and no bulk create.</item>
+/// </list>
+/// The cleanup checks each library's entity count before it disposes the world.
+/// </summary>
+[MemoryDiagnoser]
+[WarmupCount(10)]
+[IterationCount(40)]
+[GroupBenchmarksBy(BenchmarkDotNet.Configs.BenchmarkLogicalGroupRule.ByCategory, BenchmarkDotNet.Configs.BenchmarkLogicalGroupRule.ByParams)]
+public class ColdCreateComparison
+{
+    private const int Count = 100_000;
+    private const string PerEntity = "PerEntity", Reserved = "Reserved", Bulk = "Bulk";
+
+    [Params(1, 2, 3)]
+    public int Components { get; set; }
+
+    private EasyEcs.World _world;
+    private F.EntityStore _store;
+    private A.World _arch;
+    private D.World _default;
+
+    private static readonly A.Signature Arch1 = new(typeof(ACold1));
+    private static readonly A.Signature Arch2 = new(typeof(ACold1), typeof(ACold2));
+    private static readonly A.Signature Arch3 = new(typeof(ACold1), typeof(ACold2), typeof(ACold3));
+
+    [IterationSetup(Targets = [nameof(EasyEcs_PerEntity), nameof(EasyEcs_PerEntity_Reserved), nameof(EasyEcs_Bulk)])]
+    public void SetupEasyEcs() => _world = new EasyEcs.World();
+
+    [IterationSetup(Targets = [nameof(Friflo_PerEntity), nameof(Friflo_PerEntity_Reserved)])]
+    public void SetupFriflo() => _store = new F.EntityStore(F.PidType.UsePidAsId);
+
+    [IterationSetup(Targets = [nameof(Arch_PerEntity), nameof(Arch_PerEntity_Reserved)])]
+    public void SetupArch() => _arch = A.World.Create();
+
+    [IterationSetup(Target = nameof(DefaultEcs_PerEntity))]
+    public void SetupDefaultEcs() => _default = new D.World();
+
+    [IterationCleanup]
+    public void Cleanup()
+    {
+        int created = _world?.EntityCount ?? _store?.Count ?? _arch?.Size ?? _default?.GetEntities().AsSet().Count ?? -1;
+        _world?.Dispose();
+        if (_arch != null) A.World.Destroy(_arch);
+        _default?.Dispose();
+        (_world, _store, _arch, _default) = (null, null, null, null);
+        if (created != Count) throw new InvalidOperationException($"created {created} entities, not {Count}");
+    }
+
+    /// <summary>Every case once on a fresh world, its entity count checked (the <c>--features</c> run).</summary>
+    public void CheckAll()
+    {
+        (Action Setup, Action Create)[] cases =
+        [
+            (SetupEasyEcs, EasyEcs_PerEntity), (SetupEasyEcs, EasyEcs_PerEntity_Reserved), (SetupEasyEcs, EasyEcs_Bulk),
+            (SetupFriflo, Friflo_PerEntity), (SetupFriflo, Friflo_PerEntity_Reserved),
+            (SetupArch, Arch_PerEntity), (SetupArch, Arch_PerEntity_Reserved), (SetupDefaultEcs, DefaultEcs_PerEntity),
+        ];
+        for (int components = 1; components <= 3; components++)
+        {
+            Components = components;
+            foreach (var (setup, create) in cases)
+            {
+                setup();
+                create();
+                Cleanup();
+            }
+        }
+    }
+
+    [Benchmark(Baseline = true), BenchmarkCategory(PerEntity)]
+    public void EasyEcs_PerEntity() => EasyEcsLoop(_world);
+
+    [Benchmark(Baseline = true), BenchmarkCategory(Reserved)]
+    public void EasyEcs_PerEntity_Reserved()
+    {
+        var world = _world;
+        switch (Components)
+        {
+            case 1: world.EnsureCapacity<Cold1>(Count); break;
+            case 2: world.EnsureCapacity<Cold1, Cold2>(Count); break;
+            default: world.EnsureCapacity<Cold1, Cold2, Cold3>(Count); break;
+        }
+
+        EasyEcsLoop(world);
+    }
+
+    private void EasyEcsLoop(EasyEcs.World world)
+    {
+        switch (Components)
+        {
+            case 1:
+                for (int i = 0; i < Count; i++) world.CreateEntity(new Cold1(i));
+                break;
+            case 2:
+                for (int i = 0; i < Count; i++) world.CreateEntity(new Cold1(i), new Cold2(i));
+                break;
+            default:
+                for (int i = 0; i < Count; i++) world.CreateEntity(new Cold1(i), new Cold2(i), new Cold3(i));
+                break;
+        }
+    }
+
+    [Benchmark(Baseline = true), BenchmarkCategory(Bulk)]
+    public void EasyEcs_Bulk()
+    {
+        switch (Components)
+        {
+            case 1: _world.CreateEntities(new EasyEcs.Entity[Count], new Cold1(1)); break;
+            case 2: _world.CreateEntities(new EasyEcs.Entity[Count], new Cold1(1), new Cold2(2)); break;
+            default: _world.CreateEntities(new EasyEcs.Entity[Count], new Cold1(1), new Cold2(2), new Cold3(3)); break;
+        }
+    }
+
+    [Benchmark, BenchmarkCategory(PerEntity)]
+    public void Friflo_PerEntity() => FrifloLoop(FrifloArchetype());
+
+    [Benchmark, BenchmarkCategory(Reserved)]
+    public void Friflo_PerEntity_Reserved()
+    {
+        _store.EnsureCapacity(Count);
+        var archetype = FrifloArchetype();
+        archetype.EnsureCapacity(Count);
+        FrifloLoop(archetype);
+    }
+
+    private F.Archetype FrifloArchetype() => _store.GetArchetype(Components switch
+    {
+        1 => F.ComponentTypes.Get<FCold1>(),
+        2 => F.ComponentTypes.Get<FCold1, FCold2>(),
+        _ => F.ComponentTypes.Get<FCold1, FCold2, FCold3>(),
+    });
+
+    private static void FrifloLoop(F.Archetype archetype)
+    {
+        for (int i = 0; i < Count; i++) archetype.CreateEntity();
+    }
+
+    [Benchmark, BenchmarkCategory(PerEntity)]
+    public void Arch_PerEntity() => ArchLoop(_arch);
+
+    [Benchmark, BenchmarkCategory(Reserved)]
+    public void Arch_PerEntity_Reserved()
+    {
+        var world = _arch;
+        switch (Components)
+        {
+            case 1: world.EnsureCapacity(in Arch1, Count); break;
+            case 2: world.EnsureCapacity(in Arch2, Count); break;
+            default: world.EnsureCapacity(in Arch3, Count); break;
+        }
+
+        ArchLoop(world);
+    }
+
+    private void ArchLoop(A.World world)
+    {
+        switch (Components)
+        {
+            case 1:
+                for (int i = 0; i < Count; i++) world.Create(new ACold1 { Value = i });
+                break;
+            case 2:
+                for (int i = 0; i < Count; i++) world.Create(new ACold1 { Value = i }, new ACold2 { Value = i });
+                break;
+            default:
+                for (int i = 0; i < Count; i++) world.Create(new ACold1 { Value = i }, new ACold2 { Value = i }, new ACold3 { Value = i });
+                break;
+        }
+    }
+
+    [Benchmark, BenchmarkCategory(PerEntity)]
+    public void DefaultEcs_PerEntity()
+    {
+        var world = _default;
+        switch (Components)
+        {
+            case 1:
+                for (int i = 0; i < Count; i++) world.CreateEntity().Set(new DCold1(i));
+                break;
+            case 2:
+                for (int i = 0; i < Count; i++)
+                {
+                    var entity = world.CreateEntity();
+                    entity.Set(new DCold1(i));
+                    entity.Set(new DCold2(i));
+                }
+
+                break;
+            default:
+                for (int i = 0; i < Count; i++)
+                {
+                    var entity = world.CreateEntity();
+                    entity.Set(new DCold1(i));
+                    entity.Set(new DCold2(i));
+                    entity.Set(new DCold3(i));
+                }
+
+                break;
+        }
+    }
+}
