@@ -142,7 +142,7 @@ public class SaveSystem : EcsSystem
     public override int UpdateInterval => 60;      // every 60th update
     public override int UpdatePhase => 30;         // half a cycle after the others with the same interval
 
-    protected override void OnUpdate() => World.GetOrAddSingleton<Autosave>().Count++;
+    protected override void OnUpdate() => World.GetOrAddAutosave().Count++;
 }
 ```
 

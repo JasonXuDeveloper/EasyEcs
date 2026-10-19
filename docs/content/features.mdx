@@ -259,7 +259,7 @@ world.GroupBy<Zone>();                                          // at setup
 world.CreateEntity(new Team(1), new Zone(3), new Position(0, 0));
 
 int red = world.TeamIndex.Count(1);                             // a hash probe
-int inZone = world.Count<Position>(QueryFilter.Create().InGroup<Zone>(3));   // walks zone 3's rows only
+int inZone = world.Count<Position>(QueryFilter.Create().InZone(3));   // walks zone 3's rows only
 ```
 
 ### Value indexes [#value-indexes]

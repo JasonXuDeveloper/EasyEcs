@@ -42,7 +42,7 @@ public record struct Score(int Deaths) : ISingletonComponent;
 
 ```csharp
 var world = new World();
-world.AddSingleton<Clock>() = new Clock(0, 1f / 30);     // add (or reset to default); returns a ref
+world.SetClock(0, 1f / 30);                              // generated: adds it, or overwrites it
 world.Clock.Tick++;                                       // generated: a ref, throws if not added
 ref var score = ref world.GetOrAddScore();                // adds a default value if missing
 score.Deaths++;

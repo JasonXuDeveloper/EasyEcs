@@ -46,13 +46,13 @@ older .NET (netstandard2.1, net6.0-8.0); EasyEcs needs .NET 10.
 | --- | --- | --- |
 | World | `new EntityStore()` | `new World()` |
 | Component | `struct X : IComponent` | `struct X : IComponent` (namespace `EasyEcs`) |
-| Tag | `struct Dead : ITag`, `AddTag<Dead>()` | `struct Dead : IComponent` (empty), `entity.Set(new Dead())` |
+| Tag | `struct Dead : ITag`, `AddTag<Dead>()` | `struct Dead : IComponent` (empty), `entity.SetDead()` |
 | Singleton | `UniqueEntity` | `ISingletonComponent`, `world.AddSingleton<T>()` |
 | Create | `store.CreateEntity(a, b)` | `world.CreateEntity(a, b)` |
 | Reserve before creating | `store.EnsureCapacity(n)`, `archetype.EnsureCapacity(n)` | `world.EnsureCapacity<A, B>(n)` |
 | Create many | `archetype.CreateEntity()` per entity, `CreateEntityBatch` | `world.CreateEntities(span, a, b)` |
-| Read, write | `entity.GetComponent<T>()` (ref) | `entity.Get<T>()` (ref), `entity.Read<T>()` (read-only) |
-| Add, remove | `entity.AddComponent(c)`, `RemoveComponent<T>()` | `entity.Set(c)`, `entity.Remove<T>()` |
+| Read, write | `entity.GetComponent<T>()` (ref) | `entity.Hp` (ref, generated), `entity.Get<T>()` in generic code |
+| Add, remove | `entity.AddComponent(c)`, `RemoveComponent<T>()` | `entity.SetHp(…)`, `entity.RemoveHp()` |
 | Destroy | `entity.DeleteEntity()` | `entity.Destroy()`, `world.DestroyEntities<T>(filter)` |
 | Query | `store.Query<A, B>().WithoutAnyTags(Tags.Get<Dead>())` | `[ForEach, Without<Dead>]`; `QueryFilter.Create().Without<Dead>()` |
 | Iterate | `foreach (var (as, bs, entities) in query.Chunks)` + `Span` loops | a `[ForEach]` method, or a batch method taking `Span<T>` |
@@ -89,9 +89,9 @@ public class DeathSystem : EcsSystem
     static void CheckDeath(Entity entity, in Hp hp, ref Deaths deaths)
     {
         if (hp.Value > 0) return;
-        entity.Set(new Dead());                       // applied now
+        entity.SetDead();                       // applied now
         deaths.Count++;
-        if (entity.Has<Npc>()) deaths.NpcKills++;
+        if (entity.HasNpc) deaths.NpcKills++;
     }
 }
 ```

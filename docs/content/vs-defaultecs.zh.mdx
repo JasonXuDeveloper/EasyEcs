@@ -45,10 +45,10 @@ netstandard1.1-2.1 和 Unity，EasyEcs 只支持 .NET 10。
 | 组件 | 任意 struct | 实现 `IComponent` 的 struct |
 | 带组件创建 | `var e = world.CreateEntity(); e.Set(a); e.Set(b);` | `world.CreateEntity(a, b)`（一次放进最终的表） |
 | 批量创建 | 同样逐个创建 | `world.CreateEntities(span, a, b)`，或者循环前先 `world.EnsureCapacity<A, B>(n)` |
-| 读、写 | `e.Get<T>()`（ref）、`world.GetComponents<T>()[e]` | `entity.Get<T>()`（ref）、`entity.Read<T>()`；`[ForEach]` 参数 |
-| 标签 | `e.Set<Dead>()` | `entity.Set(new Dead())` |
+| 读、写 | `e.Get<T>()`（ref）、`world.GetComponents<T>()[e]` | `entity.Hp`（`ref`；被追踪的组件是 `ref readonly`）；`[ForEach]` 参数 |
+| 标签 | `e.Set<Dead>()` | `entity.SetDead()` |
 | 销毁 | `e.Dispose()` | `entity.Destroy()` |
-| 单例 | `world.Set<T>(value)`、`world.Get<T>()` | `ISingletonComponent`、`world.AddSingleton<T>()`、`ref T` 参数 |
+| 单例 | `world.Set<T>(value)`、`world.Get<T>()` | `ISingletonComponent`、`world.SetClock(…)`、`world.Clock`、`ref T` 参数 |
 | 遍历集合的系统 | `[With(typeof(A)), Without(typeof(B))] class S : AEntitySetSystem<TState>` | `class S : EcsSystem`，内含 `[ForEach, Without<B>] static void M(ref A a)` |
 | 遍历单个组件的系统 | `AComponentSystem<TState, A>` | 参数为 `ref A` 的 `[ForEach]` 方法 |
 | 系统序列 | `new SequentialSystem<T>(systems)` | 按顺序 `world.AddSystem<S>()`，或用 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` |
@@ -59,7 +59,7 @@ netstandard1.1-2.1 和 Unity，EasyEcs 只支持 .NET 10。
 | 上次之后被移除的 | `.WhenRemoved<T>()` + `Complete()` | `ITrackChanges` + `[Removed<T>]` |
 | 按值索引 | `AsMultiMap<T>()`、`AsMap<T>()` | `IIndexed<TKey>`、`world.Index<T, TKey>()` |
 | 延迟变更 | `EntityCommandRecorder`、`Record(e).Set<T>()`、`Execute()` | 不需要 |
-| 禁用 | `e.Disable()`、`e.Disable<T>()` | 标签加 `[Without<T>]`，或 `entity.Disable<T>()` |
+| 禁用 | `e.Disable()`、`e.Disable<T>()` | 标签加 `[Without<T>]`，或 `entity.DisableHp()` |
 | 复制到 World | `e.CopyTo(world)` | `entity.Clone()`、`world.MoveEntities(...)`、`Prefab` |
 | 存档 | `BinarySerializer`、`TextSerializer` | `world.Save(writer)` / `world.Load(bytes)` |
 | 消息 | `world.Subscribe<T>`、`world.Publish<T>` | 数据：后面的系统去读的单例或组件 |
@@ -82,7 +82,7 @@ public class StatusSystem : EcsSystem
     static void Burn(Entity entity, ref Fire fire, ref Hp hp)
     {
         hp.Value -= fire.DamagePerTick;
-        if (--fire.Ticks <= 0) entity.Remove<Fire>();   // 只翻一个位，行不动
+        if (--fire.Ticks <= 0) entity.RemoveFire();      // 只翻一个位，行不动
     }
 }
 ```

@@ -43,6 +43,11 @@ The package carries the source generator and the analyzer: `[ForEach]` systems, 
 
 ## API mapping [#api-mapping]
 
+The rows name the components of the example below (`Health`, the tag `Dead`). For each
+component the generator writes named members (`entity.Health`, `HasHealth`, `SetHealth(…)`, `IsDead`): use them
+in your code. The generic calls after them (`Get<T>()`, `Set(c)`, `Remove<T>()`) are for generic code
+([generated members](/en/docs/guide/entities-and-components#generated-members)).
+
 ### World and entities [#world-and-entities]
 
 | Arch | EasyEcs |
@@ -51,11 +56,11 @@ The package carries the source generator and the analyzer: `[ForEach]` systems, 
 | `World.Destroy(world);` | `world.Dispose();` |
 | `world.Create(a, b, c)` | `world.CreateEntity(a, b, c)` |
 | `world.Destroy(entity)` | `entity.Destroy()` |
-| `world.Add(entity, c)` | `entity.Set(c)` |
-| `world.Add<Tag>(entity)` | `entity.Set(new Tag())` |
-| `world.Remove<T>(entity)` | `entity.Remove<T>()` |
-| `world.Has<T>(entity)` | `entity.Has<T>()` |
-| `ref var c = ref world.Get<T>(entity)` | `ref var c = ref entity.Get<T>()`; `entity.Read<T>()` to read only |
+| `world.Add(entity, c)` | `entity.SetHealth(100, 100)`, `entity.Set(c)` |
+| `world.Add<Dead>(entity)` | `entity.SetDead()` |
+| `world.Remove<Health>(entity)` | `entity.RemoveHealth()`, `entity.Remove<T>()` |
+| `world.Has<Health>(entity)` | `entity.HasHealth`, `entity.IsDead` for a tag, `entity.Has<T>()` |
+| `ref var c = ref world.Get<Health>(entity)` | `ref var hp = ref entity.Health`, `entity.Get<T>()` |
 | `world.Size` | `world.EntityCount` |
 | `entity.Id` | `entity.Id.Index`; store `entity.Id` (an `EntityId`) in data |
 | `world.EnsureCapacity(in signature, n)` | `world.EnsureCapacity<T1, …, Tn>(n)`, `world.EnsureCapacity(prefab, n)` |
@@ -78,8 +83,8 @@ The package carries the source generator and the analyzer: `[ForEach]` systems, 
 
 | Arch | EasyEcs |
 | --- | --- |
-| `buffer.Add(e, c)` then `buffer.Playback(world)` | `e.Set(c)` |
-| `buffer.Remove<T>(e)` | `e.Remove<T>()` |
+| `buffer.Add(e, c)` then `buffer.Playback(world)` | `e.SetBurning(10, 3)`, `e.Set(c)` |
+| `buffer.Remove<Burning>(e)` | `e.RemoveBurning()` |
 | `buffer.Destroy(e)` | `e.Destroy()` |
 | `var n = buffer.Create(types); buffer.Set(n, c);` | `world.CreateEntity(a, b, c)` (a `World` parameter in a `[ForEach]` method) |
 | `world.Add(in q, value)` | `world.SetAll(value, filter)` |
@@ -185,8 +190,8 @@ public class CombatSystem : EcsSystem
         attack.Cooldown = attack.Interval;
         stats.Hits++;
         health.Value -= attack.Damage;
-        if (entity.Id.Index % 20 == 0 && !entity.Has<Burning>())
-            entity.Set(new Burning { Ticks = 10, DamagePerTick = 3 });
+        if (entity.Id.Index % 20 == 0 && !entity.HasBurning)
+            entity.SetBurning(ticks: 10, damagePerTick: 3);
     }
 }
 
@@ -196,7 +201,7 @@ public class StatusSystem : EcsSystem
     static void Burn(Entity entity, ref Burning burning, ref Health health)
     {
         health.Value -= burning.DamagePerTick;
-        if (--burning.Ticks <= 0) entity.Remove<Burning>();
+        if (--burning.Ticks <= 0) entity.RemoveBurning();
     }
 }
 
@@ -206,9 +211,9 @@ public class DeathSystem : EcsSystem
     static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
     {
         if (health.Value > 0) return;
-        entity.Set(new Dead());
+        entity.SetDead();
         stats.Deaths++;
-        if (entity.Has<Npc>()) stats.NpcKills++;
+        if (entity.HasNpc) stats.NpcKills++;
     }
 }
 ```
@@ -246,7 +251,7 @@ public class LifetimeSystem : EcsSystem
 
 public sealed class ClockSystem : EcsSystem
 {
-    protected override void OnUpdate() => World.GetSingleton<WorldStats>().Tick++;
+    protected override void OnUpdate() => World.WorldStats.Tick++;
 }
 ```
 

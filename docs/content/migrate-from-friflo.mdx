@@ -43,6 +43,11 @@ Both libraries name their component interface `IComponent`. During a port, alias
 
 ## API mapping [#api-mapping]
 
+The rows name the components of the example below (`Health`, the tag `Dead`). For each
+component the generator writes named members (`entity.Health`, `HasHealth`, `SetHealth(…)`, `IsDead`): use them
+in your code. The generic calls after them (`Get<T>()`, `Set(c)`, `Remove<T>()`) are for generic code
+([generated members](/en/docs/guide/entities-and-components#generated-members)).
+
 ### Entities and components [#entities-and-components]
 
 | Friflo.Engine.ECS | EasyEcs |
@@ -52,12 +57,12 @@ Both libraries name their component interface `IComponent`. During a port, alias
 | `archetype.EnsureCapacity(n)` | `world.EnsureCapacity<T1, …, Tn>(n)` (the entity storage too) |
 | `store.CreateEntity(a, b, c)` | `world.CreateEntity(a, b, c)` |
 | `store.Count` | `world.EntityCount` |
-| `entity.AddComponent(c)` | `entity.Set(c)` |
-| `entity.RemoveComponent<T>()` | `entity.Remove<T>()` |
-| `ref var c = ref entity.GetComponent<T>()` | `ref var c = ref entity.Get<T>()`; `entity.Read<T>()` to read |
-| `entity.HasComponent<T>()` | `entity.Has<T>()` |
-| `entity.AddTag<Dead>()` / `RemoveTag<Dead>()` | `entity.Set(new Dead())` / `entity.Remove<Dead>()` |
-| `entity.Tags.Has<Dead>()` | `entity.Has<Dead>()` |
+| `entity.AddComponent(c)` | `entity.SetHealth(100, 100)`, `entity.Set(c)` |
+| `entity.RemoveComponent<Health>()` | `entity.RemoveHealth()`, `entity.Remove<T>()` |
+| `ref var c = ref entity.GetComponent<Health>()` | `ref var hp = ref entity.Health`, `entity.Get<T>()` |
+| `entity.HasComponent<Health>()` | `entity.HasHealth`, `entity.Has<T>()` |
+| `entity.AddTag<Dead>()` / `RemoveTag<Dead>()` | `entity.SetDead()` / `entity.RemoveDead()` |
+| `entity.Tags.Has<Dead>()` | `entity.IsDead` |
 | `entity.DeleteEntity()` | `entity.Destroy()` |
 | `store.GetEntityById(id)` | `world.TryGetEntity(entityId, out var entity)` |
 | `store.CloneEntity(template)` | `world.Instantiate(prefab)`, `entity.Clone()` |
@@ -189,9 +194,9 @@ public class DeathSystem : EcsSystem
     static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
     {
         if (health.Value > 0) return;
-        entity.Set(new Dead());
+        entity.SetDead();
         stats.Deaths++;
-        if (entity.Has<Npc>()) stats.NpcKills++;
+        if (entity.HasNpc) stats.NpcKills++;
     }
 }
 
@@ -201,7 +206,7 @@ public class RespawnSystem : EcsSystem
     static void Respawn(Entity entity, ref Health health)
     {
         health.Value = health.Max;
-        entity.Remove<Dead>();
+        entity.RemoveDead();
     }
 }
 ```
@@ -216,8 +221,8 @@ outside every world, and a wave is one call:
 
 ```csharp
 private static readonly Prefab Grunt = new Prefab()
-    .Set(new Position(), new Velocity(), new Health { Value = 100, Max = 100 })
-    .Set(new AoiCell { Cell = -1 }, new Npc { TemplateId = 7 });
+    .SetPosition(0, 0).SetVelocity(0, 0).SetHealth(value: 100, max: 100)
+    .SetAoiCell(cell: -1).SetNpc(templateId: 7);
 ```
 
 ```csharp

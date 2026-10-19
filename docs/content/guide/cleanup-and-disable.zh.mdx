@@ -81,19 +81,19 @@ public class TickCooldowns : EcsSystem
 world.AddSystem<TickCooldowns>();
 var caster = world.CreateEntity(new Cooldown(3));
 
-caster.Disable<Cooldown>();             // 被眩晕：冷却暂停，值保留 // [!code highlight]
+caster.DisableCooldown();               // 被眩晕：冷却暂停，值保留 // [!code highlight]
 world.Update();                         // TickCooldowns 跳过它
-bool paused = caster.IsDisabled<Cooldown>();
+bool paused = caster.IsCooldownDisabled;
 int stunnedCasters = world.Count<Disabled<Cooldown>>();
 
-caster.Enable<Cooldown>();              // 回来时 Ticks 仍是 3
+caster.EnableCooldown();                // 回来时 Ticks 仍是 3
 ```
 
 | 调用 | 效果 |
 | --- | --- |
-| `Disable<T>()` / 生成的 `DisableX()` | 隐藏 `T`，保留值，加上 `Disabled<T>`。实体没有 `T` 时返回 false |
-| `Enable<T>()` / 生成的 `EnableX()` | 还回保留的值。`T` 没被禁用时返回 false |
-| `IsDisabled<T>()` / 生成的 `IsXDisabled` | 实体是否带有 `Disabled<T>` |
+| 生成的 `DisableX()` / `Disable<T>()` | 隐藏 `T`，保留值，加上 `Disabled<T>`。实体没有 `T` 时返回 false |
+| 生成的 `EnableX()` / `Enable<T>()` | 还回保留的值。`T` 没被禁用时返回 false |
+| 生成的 `IsXDisabled` / `IsDisabled<T>()` | 实体是否带有 `Disabled<T>` |
 | 对被禁用的 `T` 调用 `Set(new T(...))` | 替换它：重新启用，值是新的 |
 | 对被禁用的 `T` 调用 `Remove<T>()` | 丢弃它：没有可启用的了 |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | 对所有匹配实体做同样的事，见[批量操作](/zh/docs/guide/bulk) |
@@ -235,13 +235,13 @@ world.AddSystem<ReleaseSeatsSystem>();
 Entity player = world.CreateEntity(new Seat(7), new Cooldown(3));
 
 // 眩晕：冷却对查询不可见，但值保留着。
-player.Disable<Cooldown>();
+player.DisableCooldown();
 world.Update();
 int stunned = world.Count<Disabled<Cooldown>>();
 Console.WriteLine($"stunned: has cooldown {player.HasCooldown}, stunned players {stunned}");
 
 // 恢复：保留的值回来了，暂停期间那次更新不算数。
-player.Enable<Cooldown>();
+player.EnableCooldown();
 world.Update();
 Console.WriteLine($"resumed: {player.Cooldown.Ticks} ticks left");
 

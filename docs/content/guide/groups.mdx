@@ -63,8 +63,8 @@ for (int i = 0; i < 9; i++) world.CreateEntity(new Zone(i % 3), new Health(10 * 
 
 ### Walk one group [#in-group]
 
-`InGroup<T>(group)` requires `T` with that group: only the group's tables are walked. Keep filters in
-`static readonly` fields; a filter holds one group.
+`InGroup<T>(group)`, generated as `InZone(group)` for `Zone`, requires `T` with that group: only the group's
+tables are walked. Keep filters in `static readonly` fields; a filter holds one group.
 
 ```csharp
 public struct SumHealth : IForEach<Health>
@@ -75,7 +75,7 @@ public struct SumHealth : IForEach<Health>
 
 public static class Zones
 {
-    public static readonly QueryFilter One = QueryFilter.Create().InGroup<Zone>(1);
+    public static readonly QueryFilter One = QueryFilter.Create().InZone(1);
 }
 ```
 
@@ -122,7 +122,7 @@ public class RegenerateActiveZone : EcsSystem
 {
     protected override void OnUpdate()
     {
-        var filter = QueryFilter.Create().InGroup<Zone>(World.GetSingleton<ActiveZone>().Id);
+        var filter = QueryFilter.Create().InZone(World.ActiveZone.Id);
         var job = new Regenerate();
         World.ForEach<Health, Regenerate>(ref job, filter);
     }
@@ -207,7 +207,7 @@ public class RegenerateActiveZone : EcsSystem
     protected override void OnUpdate()
     {
         int zone = World.ActiveZone.Id;
-        var inZone = QueryFilter.Create().InGroup<Zone>(zone);
+        var inZone = QueryFilter.Create().InZone(zone);
         var job = new Regenerate();
         World.ForEach<Health, Regenerate>(ref job, inZone);
     }
@@ -223,8 +223,8 @@ using EasyEcs;
 public static class Zones
 {
     // Filters are values: build them once and keep them in fields. A filter holds one group.
-    public static readonly QueryFilter One = QueryFilter.Create().InGroup<Zone>(1);
-    public static readonly QueryFilter Two = QueryFilter.Create().InGroup<Zone>(2);
+    public static readonly QueryFilter One = QueryFilter.Create().InZone(1);
+    public static readonly QueryFilter Two = QueryFilter.Create().InZone(2);
 
     // The units and total health of one zone. Walks the tables of that zone only.
     public static string Describe(World world, QueryFilter zone)

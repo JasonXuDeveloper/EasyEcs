@@ -41,23 +41,27 @@ dotnet add package EasyEcs
 
 ## API 对照 [#api-mapping]
 
+表里用的是下面例子中的组件（`Hp`、标签 `Dead`）。生成器为每个组件写好具名成员（`e.Hp`、`HasHp`、
+`SetHp(…)`、`IsDead`），业务代码直接用它们；排在后面的泛型调用（`Get<T>()`、`Set(c)`、`Remove<T>()`）留给泛型代码
+（[生成的成员](/zh/docs/guide/entities-and-components#generated-members)）。
+
 ### 实体和组件 [#entities-and-components]
 
 | DefaultEcs | EasyEcs |
 | --- | --- |
 | `new World(maxCapacity)`（硬上限） | `new World(new WorldOptions { InitialEntityCapacity = n })`（初始大小，World 会增长） |
 | `var e = world.CreateEntity(); e.Set(a); e.Set(b);` | `var e = world.CreateEntity(a, b);` |
-| `e.Set(c)`（添加或替换） | `e.Set(c)` |
-| `e.Set<Dead>()` | `e.Set(new Dead())` |
-| `ref var c = ref e.Get<T>()` | `ref var c = ref e.Get<T>()`；只读用 `e.Read<T>()` |
-| `e.Has<T>()` | `e.Has<T>()` |
-| `e.Remove<T>()` | `e.Remove<T>()` |
+| `e.Set(c)`（添加或替换） | `e.SetHp(100)`、`e.Set(c)` |
+| `e.Set<Dead>()` | `e.SetDead()` |
+| `ref var c = ref e.Get<Hp>()` | 读用 `e.Hp`，写用 `ref var hp = ref e.WriteHp()` |
+| `e.Has<Hp>()` | `e.HasHp`、`e.Has<T>()` |
+| `e.Remove<Hp>()` | `e.RemoveHp()`、`e.Remove<T>()` |
 | `e.Dispose()` | `e.Destroy()` |
 | `e.Disable()` / `Enable()` | 一个标签（`Asleep`）加 `[Without<Asleep>]` |
-| `e.Disable<T>()` / `Enable<T>()` | `e.Disable<T>()` / `Enable<T>()` |
+| `e.Disable<Hp>()` / `Enable<Hp>()` | `e.DisableHp()` / `EnableHp()` |
 | `e.CopyTo(world)` | `e.Clone()`；跨 World 用 `world.MoveEntities(...)`；模板用 `Prefab` |
 | 拿 `e.GetHashCode()` 当 id | `e.Id`（`EntityId`：下标加版本） |
-| `world.Set(value)` / `world.Get<T>()` | `world.AddSingleton<T>() = value`、`world.GetSingleton<T>()` |
+| `world.Set(value)` / `world.Get<WorldStats>()` | `world.SetWorldStats(…)`、`world.WorldStats` |
 
 ### 系统和集合 [#systems-and-sets]
 

@@ -392,7 +392,7 @@ public class ShieldLossSystem : EcsSystem
 ### 成批的实体：批量调用 [#waves-of-entities-bulk-calls]
 
 ```csharp
-private static readonly Prefab Goblin = new Prefab().Set(new Position(0, 0), new Health(30));
+private static readonly Prefab Goblin = new Prefab().SetPosition(0, 0).SetHealth(30);
 ```
 
 ```csharp

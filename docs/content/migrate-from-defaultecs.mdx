@@ -43,23 +43,28 @@ dotnet add package EasyEcs
 
 ## API mapping [#api-mapping]
 
+The rows name the components of the example below (`Hp`, the tag `Dead`). For each
+component the generator writes named members (`e.Hp`, `HasHp`, `SetHp(…)`, `IsDead`): use them
+in your code. The generic calls after them (`Get<T>()`, `Set(c)`, `Remove<T>()`) are for generic code
+([generated members](/en/docs/guide/entities-and-components#generated-members)).
+
 ### Entities and components [#entities-and-components]
 
 | DefaultEcs | EasyEcs |
 | --- | --- |
 | `new World(maxCapacity)` (a hard limit) | `new World(new WorldOptions { InitialEntityCapacity = n })` (a starting size; the world grows) |
 | `var e = world.CreateEntity(); e.Set(a); e.Set(b);` | `var e = world.CreateEntity(a, b);` |
-| `e.Set(c)` (add or replace) | `e.Set(c)` |
-| `e.Set<Dead>()` | `e.Set(new Dead())` |
-| `ref var c = ref e.Get<T>()` | `ref var c = ref e.Get<T>()`; `e.Read<T>()` to read |
-| `e.Has<T>()` | `e.Has<T>()` |
-| `e.Remove<T>()` | `e.Remove<T>()` |
+| `e.Set(c)` (add or replace) | `e.SetHp(100)`, `e.Set(c)` |
+| `e.Set<Dead>()` | `e.SetDead()` |
+| `ref var c = ref e.Get<Hp>()` | `e.Hp` to read, `ref var hp = ref e.WriteHp()` to write |
+| `e.Has<Hp>()` | `e.HasHp`, `e.Has<T>()` |
+| `e.Remove<Hp>()` | `e.RemoveHp()`, `e.Remove<T>()` |
 | `e.Dispose()` | `e.Destroy()` |
 | `e.Disable()` / `Enable()` | a tag (`Asleep`) and `[Without<Asleep>]` |
-| `e.Disable<T>()` / `Enable<T>()` | `e.Disable<T>()` / `Enable<T>()` |
+| `e.Disable<Hp>()` / `Enable<Hp>()` | `e.DisableHp()` / `EnableHp()` |
 | `e.CopyTo(world)` | `e.Clone()`; `world.MoveEntities(...)` for another world; a `Prefab` for templates |
 | `e.GetHashCode()` as an id | `e.Id` (an `EntityId`: index and version) |
-| `world.Set(value)` / `world.Get<T>()` | `world.AddSingleton<T>() = value`, `world.GetSingleton<T>()` |
+| `world.Set(value)` / `world.Get<WorldStats>()` | `world.SetWorldStats(…)`, `world.WorldStats` |
 
 ### Systems and sets [#systems-and-sets]
 

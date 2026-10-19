@@ -46,10 +46,10 @@ EasyEcs and allocates <BenchValue k="peers.defaultecs.alloc" /> per tick, where 
 | Component | any struct | a struct implementing `IComponent` |
 | Create with components | `var e = world.CreateEntity(); e.Set(a); e.Set(b);` | `world.CreateEntity(a, b)` (placed in its final table at once) |
 | Create many | the same per entity | `world.CreateEntities(span, a, b)`, or `world.EnsureCapacity<A, B>(n)` before a loop |
-| Read, write | `e.Get<T>()` (ref), `world.GetComponents<T>()[e]` | `entity.Get<T>()` (ref), `entity.Read<T>()`; a `[ForEach]` parameter |
-| Tag | `e.Set<Dead>()` | `entity.Set(new Dead())` |
+| Read, write | `e.Get<T>()` (ref), `world.GetComponents<T>()[e]` | `entity.Hp` (a `ref`; `ref readonly` for a tracked component); a `[ForEach]` parameter |
+| Tag | `e.Set<Dead>()` | `entity.SetDead()` |
 | Destroy | `e.Dispose()` | `entity.Destroy()` |
-| Singleton | `world.Set<T>(value)`, `world.Get<T>()` | `ISingletonComponent`, `world.AddSingleton<T>()`, a `ref T` parameter |
+| Singleton | `world.Set<T>(value)`, `world.Get<T>()` | `ISingletonComponent`, `world.SetClock(…)`, `world.Clock`, a `ref T` parameter |
 | System over a set | `[With(typeof(A)), Without(typeof(B))] class S : AEntitySetSystem<TState>` | `class S : EcsSystem` with `[ForEach, Without<B>] static void M(ref A a)` |
 | System over one component | `AComponentSystem<TState, A>` | a `[ForEach]` method taking `ref A` |
 | Sequence of systems | `new SequentialSystem<T>(systems)` | `world.AddSystem<S>()` in order, or `[UpdateBefore<T>]` / `[UpdateAfter<T>]` |
@@ -60,7 +60,7 @@ EasyEcs and allocates <BenchValue k="peers.defaultecs.alloc" /> per tick, where 
 | Removed since last look | `.WhenRemoved<T>()` + `Complete()` | `ITrackChanges` + `[Removed<T>]` |
 | Index by value | `AsMultiMap<T>()`, `AsMap<T>()` | `IIndexed<TKey>`, `world.Index<T, TKey>()` |
 | Deferred changes | `EntityCommandRecorder`, `Record(e).Set<T>()`, `Execute()` | not needed |
-| Disable | `e.Disable()`, `e.Disable<T>()` | a tag and `[Without<T>]`, or `entity.Disable<T>()` |
+| Disable | `e.Disable()`, `e.Disable<T>()` | a tag and `[Without<T>]`, or `entity.DisableHp()` |
 | Copy to a world | `e.CopyTo(world)` | `entity.Clone()`, `world.MoveEntities(...)`, a `Prefab` |
 | Save | `BinarySerializer`, `TextSerializer` | `world.Save(writer)` / `world.Load(bytes)` |
 | Messages | `world.Subscribe<T>`, `world.Publish<T>` | data: a singleton or components later systems read |
@@ -84,7 +84,7 @@ public class StatusSystem : EcsSystem
     static void Burn(Entity entity, ref Fire fire, ref Hp hp)
     {
         hp.Value -= fire.DamagePerTick;
-        if (--fire.Ticks <= 0) entity.Remove<Fire>();   // a bit flip: the row stays
+        if (--fire.Ticks <= 0) entity.RemoveFire();      // a bit flip: the row stays
     }
 }
 ```

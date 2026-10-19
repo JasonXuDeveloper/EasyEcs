@@ -51,7 +51,7 @@ icon: GitCompare
 | 带实体的 job | `IForEachWithEntity<A>`、`InlineEntityQuery` | `IForEachEntity<A>`、`ForEachEntity`，或 `[ForEach]` 方法的 `Entity` 参数 |
 | chunk | `world.Query(in query).GetChunkIterator()`，再 `chunk.GetSpan<T>()` | 参数为 `Span<T>` 的批量 `[ForEach]` 方法，或 `ForEachBatch` |
 | 系统 | Arch.Extended 的 `BaseSystem` | 带 `[ForEach]` 方法的 `EcsSystem` |
-| 命令缓冲 | `CommandBuffer`、`Playback(world)` | 没有：`entity.Set`、`Remove`、`Destroy` 当场生效 |
+| 命令缓冲 | `CommandBuffer`、`Playback(world)` | 没有：`entity.SetFire(10)`、`RemoveFire()`、`Destroy()` 当场生效 |
 | 批量变更 | `world.Add(in query, value)`、`world.Remove<T>(in query)` | `world.SetAll(value, filter)`、`world.RemoveAll<T>(filter)` |
 | 创建前预留 | `world.EnsureCapacity(in signature, n)` | `world.EnsureCapacity<A, B>(n)`，或者用 `world.CreateEntities(span, a, b)` 一次创建 |
 | 并行查询 | `World.SharedJobScheduler`、`InlineParallelQuery` | `[ForEach(Parallel = true)]` |
@@ -78,8 +78,8 @@ public class CombatSystem : EcsSystem
         if (--attack.Cooldown > 0) return;
         attack.Cooldown = attack.Interval;
         hp.Value -= attack.Damage;
-        if (entity.Id.Index % 20 == 0 && !entity.Has<Fire>())
-            entity.Set(new Fire { Ticks = 10 });   // 当场生效，遍历途中也一样
+        if (entity.Id.Index % 20 == 0 && !entity.HasFire)
+            entity.SetFire(10);   // 当场生效，遍历途中也一样
     }
 }
 ```

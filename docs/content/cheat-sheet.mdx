@@ -66,6 +66,9 @@ using var world = new World();
 Entity unit = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Health(100));
 ```
 
+The generic calls, what the [generated members](#generated-members) call; code that names a component uses the
+members (`unit.Velocity`, `SetHealth(50)`, `RemoveDead()`), as in the example under the table.
+
 | Call | Does | Structural |
 | --- | --- | --- |
 | `world.CreateEntity(a, b, …)` | Creates with up to 9 components, straight into the final table | yes |
@@ -84,11 +87,11 @@ Entity unit = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Hea
 | `entity.Describe()` | Its component values, for debuggers and logs | no |
 
 ```csharp
-unit.Get<Velocity>().X = 2;                         // write in place through the ref
-float x = unit.Read<Position>().X;                  // read only
+unit.Velocity.X = 2;                                // write in place through the ref
+float x = unit.Position.X;                          // a read (ref readonly for a tracked component)
 unit.Set(new Health(50), new Dead());               // one move for both
-unit.Remove<Dead>();                                // flips a presence bit: the row stays
-if (unit.TryGet<Health>(out var hp)) { /* hp is a copy */ }
+unit.RemoveDead();                                  // flips a presence bit: the row stays
+if (unit.TryGetHealth(out var hp)) { /* hp is a copy */ }
 ```
 
 A `ref` stays valid until the next structural change and never across `await`

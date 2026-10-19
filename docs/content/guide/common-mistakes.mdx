@@ -14,17 +14,17 @@ is the code you might write, why it is wrong, and what to write instead.
 ### Changing a copy of a component [#copy]
 
 ```csharp
-var hp = hero.Get<Health>();      // a copy of the row
+var hp = hero.Health;             // a copy of the row
 hp.Value -= 10;                   // the table still holds the old value
 ```
 
-`Get<T>()` returns a `ref`, and `var` copies what it points at. Keep the `ref`, or write through the generated
-property, which is a `ref` too:
+The generated property returns a `ref` (as `Get<T>()` does), and `var` copies what it points at. Keep the `ref`, or
+write through the property directly:
 
 ```csharp
-ref var health = ref hero.Get<Health>();
+ref var health = ref hero.Health;
 health.Value -= 10;
-hero.Health.Value -= 10;          // the same, through the generated property
+hero.Health.Value -= 10;          // the same, inline
 ```
 
 No rule catches it. More in [copies and refs](/en/docs/guide/refs-and-await#copies-and-refs).
@@ -64,7 +64,7 @@ public record struct Owner(EntityId Id) : IComponent;
 
 ```csharp
 var item = world.CreateEntity(new Owner(hero.Id));
-if (world.TryGetEntity(item.Read<Owner>().Id, out var owner)) { /* still alive */ }
+if (world.TryGetEntity(item.Owner.Id, out var owner)) { /* still alive */ }
 ```
 
 No rule catches it. More in [ids, versions and recycling](/en/docs/guide/entities-and-components#entityid).
@@ -108,17 +108,18 @@ public record struct Cooldown(int Ticks) : IComponent;
 
 ```csharp
 var caster = world.CreateEntity(new Cooldown(30));
-var kept = caster.Read<Cooldown>();     // stash the value somewhere
-caster.Remove<Cooldown>();              // stunned
+var kept = caster.Cooldown;             // stash the value somewhere
+caster.RemoveCooldown();                // stunned
 caster.Set(kept);                       // and put it back later
 ```
 
-The value has to live somewhere in the meantime, and every reader of the stash is code you maintain. `Disable<T>()`
-hides the component from queries, `Has` and `Get`, keeps its value in the row, and `Enable<T>()` brings it back:
+The value has to live somewhere in the meantime, and every reader of the stash is code you maintain. `DisableCooldown()`
+(`Disable<T>()`) hides the component from queries, `Has` and `Get`, keeps its value in the row, and `EnableCooldown()`
+brings it back:
 
 ```csharp
-caster.Disable<Cooldown>();             // stunned: the cooldown is paused
-caster.Enable<Cooldown>();              // the stun ends: the same value
+caster.DisableCooldown();               // stunned: the cooldown is paused
+caster.EnableCooldown();                // the stun ends: the same value
 ```
 
 No rule catches it. More in [disable a component](/en/docs/guide/cleanup-and-disable#disable-a-component).
@@ -143,7 +144,7 @@ public record struct Wave(int Number) : ISingletonComponent;
 
 public class WaveSystem : EcsSystem
 {
-    protected override void OnUpdate() => World.GetOrAddSingleton<Wave>().Number++;
+    protected override void OnUpdate() => World.GetOrAddWave().Number++;
 }
 ```
 
@@ -246,12 +247,11 @@ Caught by the C# compiler (the attribute requires `ITrackChanges`: CS0315). More
 int before = player.Get<Gold>().Amount;      // Get<T>() is a write: the row counts as changed
 ```
 
-`Get<T>()` stamps the row, so every `[Changed<Gold>]` system visits it next update. Read with `Read<T>()`, the
-generated property (it is `ref readonly` for a tracked component) or an `in` parameter:
+`Get<T>()` stamps the row, so every `[Changed<Gold>]` system visits it next update. Read with the generated
+property (it is `ref readonly` for a tracked component), `Read<T>()` in generic code, or an `in` parameter:
 
 ```csharp
-int amount = player.Read<Gold>().Amount;
-int same = player.Gold.Amount;               // ref readonly: no stamp
+int amount = player.Gold.Amount;             // ref readonly: no stamp
 ```
 
 No rule catches it. More in [what counts as a write](/en/docs/guide/change-tracking#what-counts-as-a-write).
@@ -288,7 +288,7 @@ Caught by [EECS016](/en/docs/guide/analyzer#eecs016). More in
 ### Keeping a `ref` across a structural change [#ref-after-change]
 
 ```csharp
-ref var life = ref hero.Get<Health>();
+ref var life = ref hero.Health;
 hero.SetStunned();                 // the row moves to another table
 life.Value -= 10;                  // writes the old copy
 ```
@@ -298,7 +298,7 @@ after the change:
 
 ```csharp
 hero.SetStunned();
-hero.Get<Health>().Value -= 10;
+hero.Health.Value -= 10;
 ```
 
 No rule catches it. More in [refs across a change](/en/docs/guide/structural-changes#refs-across-a-change).
@@ -306,7 +306,7 @@ No rule catches it. More in [refs across a change](/en/docs/guide/structural-cha
 ### Keeping a `ref` across an `await` [#ref-across-await]
 
 ```csharp doccheck=skip
-ref var stamina = ref hero.Get<Health>();
+ref var stamina = ref hero.Health;
 await Task.Delay(100);
 stamina.Value -= 10;
 ```
@@ -316,7 +316,7 @@ and get the component again after the `await`, on the owner thread:
 
 ```csharp
 await Task.Delay(100);
-if (hero.Has<Health>()) hero.Get<Health>().Value -= 10;
+if (hero.HasHealth) hero.Health.Value -= 10;
 ```
 
 Caught by the C# compiler. More in [across `await`](/en/docs/guide/refs-and-await#across-await).

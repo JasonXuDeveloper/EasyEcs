@@ -66,6 +66,9 @@ using var world = new World();
 Entity unit = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Health(100));
 ```
 
+下表是泛型调用，也就是[生成的成员](#generated-members)底下调用的 API；写明组件的代码用生成的成员（`unit.Velocity`、
+`SetHealth(50)`、`RemoveDead()`），见表后的例子。
+
 | 调用 | 作用 | 结构变更 |
 | --- | --- | --- |
 | `world.CreateEntity(a, b, …)` | 带最多 9 个组件创建，直接放进最终的表 | 是 |
@@ -84,11 +87,11 @@ Entity unit = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Hea
 | `entity.Describe()` | 实体的组件值，给调试器和日志用 | 否 |
 
 ```csharp
-unit.Get<Velocity>().X = 2;                         // 通过 ref 原地写入
-float x = unit.Read<Position>().X;                  // 只读
+unit.Velocity.X = 2;                                // 通过 ref 原地写入
+float x = unit.Position.X;                          // 读（被追踪的组件是 ref readonly）
 unit.Set(new Health(50), new Dead());               // 两个组件一次搬迁
-unit.Remove<Dead>();                                // 只翻一个存在位，行保留
-if (unit.TryGet<Health>(out var hp)) { /* hp 是拷贝 */ }
+unit.RemoveDead();                                  // 只翻一个存在位，行保留
+if (unit.TryGetHealth(out var hp)) { /* hp 是拷贝 */ }
 ```
 
 `ref` 在下一次结构变更之前有效，跨 `await` 一律无效（[`ref` 与 `await`](/zh/docs/guide/refs-and-await)）。

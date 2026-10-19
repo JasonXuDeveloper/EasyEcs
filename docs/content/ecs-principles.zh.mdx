@@ -279,14 +279,14 @@ public static class PlayerRules
     // 存的是槽位再次可用的 tick，而不是倒计时：没有系统每个 tick 写每一行，所以只有使用才算变化
     public static bool TryUse(Entity player, int slot, int tick, int cooldown)
     {
-        if (player.Read<Cooldowns>().ReadyAt[slot] > tick) return false;     // Read：不打 tick
-        player.Get<Cooldowns>().ReadyAt[slot] = tick + cooldown;              // Get：这一行打上 tick
+        if (player.Cooldowns.ReadyAt[slot] > tick) return false;             // 只读：不打 tick
+        player.WriteCooldowns().ReadyAt[slot] = tick + cooldown;              // 写入：这一行打上 tick
         return true;
     }
 
     public static void Advance(Entity player, int quest)
     {
-        var progress = player.Get<Quests>().Progress;                         // Get：这一行打上 tick
+        var progress = player.WriteQuests().Progress;                         // 写入：这一行打上 tick
         progress[quest] = progress.TryGetValue(quest, out int step) ? step + 1 : 1;
     }
 

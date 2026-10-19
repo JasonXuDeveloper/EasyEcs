@@ -28,13 +28,13 @@ re-acquire the data through the `Entity` handle, which tells you whether the ent
 ### Copies and refs [#copies-and-refs]
 
 ```csharp
-var copy = entity.Get<Health>();       // a copy: the change below is lost
+var copy = entity.Health;              // a copy: the change below is lost
 copy.Value -= 10;
 
-ref var hp = ref entity.Get<Health>(); // a ref into the table
+ref var hp = ref entity.Health;        // a ref into the table
 hp.Value -= 10;
-entity.Get<Health>().Value -= 10;      // the same, inline
-entity.Health.Value -= 10;             // the same, through the generated member
+entity.Health.Value -= 10;             // the same, inline
+entity.Get<Health>().Value -= 10;      // the same, through the generic API
 ```
 
 ### Why a `ref` expires [#why-a-ref-expires]
@@ -68,10 +68,10 @@ public class StrikeSystem : EcsSystem
     static void Strike(Entity attacker, in Target target, World world)
     {
         if (!world.TryGetEntity(target.Id, out var victim) || !victim.HasHealth) return;
-        ref var hp = ref victim.Get<Health>();
+        ref var hp = ref victim.Health;
         hp.Value -= 10;                                   // write first...
         if (hp.Value <= 0) victim.SetDead();              // ...then change structure: hp may now be stale
-        attacker.Remove<Target>();                        // structural too; refs from Get are not used after it
+        attacker.RemoveTarget();                          // structural too; refs taken before it are not used after it
     }
 }
 ```
@@ -99,10 +99,10 @@ public static class Potions
     // Runs on the world's owner thread, and resumes there (a single-threaded server loop).
     public static async ValueTask HealFromStoreAsync(Entity player, IShop shop)
     {
-        long id = player.Read<Account>().Id;              // read what you need before awaiting
+        long id = player.Account.Id;                       // read what you need before awaiting
         int heal = await shop.RedeemPotionAsync(id);      // the world may change meanwhile
         if (player.IsAlive && player.HasHealth)           // re-validate after the await
-            player.Get<Health>().Value += heal;           // a fresh ref into current storage
+            player.Health.Value += heal;                  // a fresh ref into current storage
     }
 }
 ```
@@ -124,7 +124,7 @@ public sealed class ApplyRedemptions(ConcurrentQueue<PotionRedeemed> inbox) : Ec
     {
         while (_inbox.TryDequeue(out var done))
             if (World.TryGetEntity(done.Player, out var player) && player.HasHealth)
-                player.Get<Health>().Value += done.Heal;              // on the owner thread, during the update
+                player.Health.Value += done.Heal;                     // on the owner thread, during the update
     }
 }
 ```

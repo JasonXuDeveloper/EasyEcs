@@ -60,7 +60,7 @@ for (int i = 0; i < 9; i++) world.CreateEntity(new Zone(i % 3), new Health(10 * 
 
 ### 遍历一个分组 [#in-group]
 
-`InGroup<T>(group)` 要求实体有 `T` 且属于这个分组，只遍历该分组的表。过滤器放进 `static readonly` 字段；一个过滤器只能
+`InGroup<T>(group)`（`Zone` 生成的是 `InZone(group)`）要求实体有 `T` 且属于这个分组，只遍历该分组的表。过滤器放进 `static readonly` 字段；一个过滤器只能
 指定一个分组。
 
 ```csharp
@@ -72,7 +72,7 @@ public struct SumHealth : IForEach<Health>
 
 public static class Zones
 {
-    public static readonly QueryFilter One = QueryFilter.Create().InGroup<Zone>(1);
+    public static readonly QueryFilter One = QueryFilter.Create().InZone(1);
 }
 ```
 
@@ -117,7 +117,7 @@ public class RegenerateActiveZone : EcsSystem
 {
     protected override void OnUpdate()
     {
-        var filter = QueryFilter.Create().InGroup<Zone>(World.GetSingleton<ActiveZone>().Id);
+        var filter = QueryFilter.Create().InZone(World.ActiveZone.Id);
         var job = new Regenerate();
         World.ForEach<Health, Regenerate>(ref job, filter);
     }
@@ -200,7 +200,7 @@ public class RegenerateActiveZone : EcsSystem
     protected override void OnUpdate()
     {
         int zone = World.ActiveZone.Id;
-        var inZone = QueryFilter.Create().InGroup<Zone>(zone);
+        var inZone = QueryFilter.Create().InZone(zone);
         var job = new Regenerate();
         World.ForEach<Health, Regenerate>(ref job, inZone);
     }
@@ -216,8 +216,8 @@ using EasyEcs;
 public static class Zones
 {
     // 过滤条件是值：只构建一次，存在字段里。一个过滤条件只对应一个分组。
-    public static readonly QueryFilter One = QueryFilter.Create().InGroup<Zone>(1);
-    public static readonly QueryFilter Two = QueryFilter.Create().InGroup<Zone>(2);
+    public static readonly QueryFilter One = QueryFilter.Create().InZone(1);
+    public static readonly QueryFilter Two = QueryFilter.Create().InZone(2);
 
     // 一个区域的单位数和总血量。只遍历这个区域的表。
     public static string Describe(World world, QueryFilter zone)

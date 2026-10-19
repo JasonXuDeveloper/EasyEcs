@@ -84,19 +84,19 @@ public class TickCooldowns : EcsSystem
 world.AddSystem<TickCooldowns>();
 var caster = world.CreateEntity(new Cooldown(3));
 
-caster.Disable<Cooldown>();             // stunned: the cooldown is paused, its value kept // [!code highlight]
+caster.DisableCooldown();               // stunned: the cooldown is paused, its value kept // [!code highlight]
 world.Update();                         // TickCooldowns skips it
-bool paused = caster.IsDisabled<Cooldown>();
+bool paused = caster.IsCooldownDisabled;
 int stunnedCasters = world.Count<Disabled<Cooldown>>();
 
-caster.Enable<Cooldown>();              // back with Ticks = 3
+caster.EnableCooldown();                // back with Ticks = 3
 ```
 
 | Call | Effect |
 | --- | --- |
-| `Disable<T>()` / generated `DisableX()` | Hides `T`, keeps its value, adds `Disabled<T>`. False if the entity lacks `T` |
-| `Enable<T>()` / generated `EnableX()` | Gives the kept value back. False if `T` is not disabled |
-| `IsDisabled<T>()` / generated `IsXDisabled` | Whether the entity has `Disabled<T>` |
+| `DisableX()` (generated) / `Disable<T>()` | Hides `T`, keeps its value, adds `Disabled<T>`. False if the entity lacks `T` |
+| `EnableX()` (generated) / `Enable<T>()` | Gives the kept value back. False if `T` is not disabled |
+| `IsXDisabled` (generated) / `IsDisabled<T>()` | Whether the entity has `Disabled<T>` |
 | `Set(new T(...))` on a disabled `T` | Replaces it: enabled, with the new value |
 | `Remove<T>()` on a disabled `T` | Drops it: nothing left to enable |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | The same on every match, in [bulk](/en/docs/guide/bulk) |
@@ -243,13 +243,13 @@ world.AddSystem<ReleaseSeatsSystem>();
 Entity player = world.CreateEntity(new Seat(7), new Cooldown(3));
 
 // Stunned: the cooldown is hidden from queries and keeps its value.
-player.Disable<Cooldown>();
+player.DisableCooldown();
 world.Update();
 int stunned = world.Count<Disabled<Cooldown>>();
 Console.WriteLine($"stunned: has cooldown {player.HasCooldown}, stunned players {stunned}");
 
 // Back: the kept value returns, and the paused update did not count.
-player.Enable<Cooldown>();
+player.EnableCooldown();
 world.Update();
 Console.WriteLine($"resumed: {player.Cooldown.Ticks} ticks left");
 

@@ -141,7 +141,7 @@ public class Chase : EcsSystem
     [ForEach]
     static void Follow(ref Position p, in Target target, World world)
     {
-        if (world.TryGetEntity(target.Id, out var prey)) p = prey.Read<Position>();   // 目标没了：id 找不到实体
+        if (world.TryGetEntity(target.Id, out var prey)) p = prey.Position;   // 目标没了：id 找不到实体
     }
 }
 ```

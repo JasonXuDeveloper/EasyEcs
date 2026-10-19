@@ -73,7 +73,7 @@ public class MoveSystem : EcsSystem
 ```
 
 ```csharp
-world.AddSingleton<TickLength>() = new TickLength(0.05f);   // AddSingleton returns a ref
+world.SetTickLength(0.05f);                                // generated: adds the singleton
 world.AddSystem<MoveSystem>();
 world.CreateEntity(new Position(0, 0), new Speed(2));
 world.Update();
@@ -112,7 +112,7 @@ public class DeathSystem : EcsSystem
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health health)
     {
-        if (health.Value <= 0) unit.Set(new Dead());   // no command buffer, no sync point
+        if (health.Value <= 0) unit.SetDead();   // no command buffer, no sync point
     }
 }
 ```

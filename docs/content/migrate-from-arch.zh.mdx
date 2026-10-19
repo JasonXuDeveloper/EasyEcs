@@ -40,6 +40,10 @@ dotnet add package EasyEcs
 
 ## API 对照 [#api-mapping]
 
+表里用的是下面例子中的组件（`Health`、标签 `Dead`）。生成器为每个组件写好具名成员（`entity.Health`、`HasHealth`、
+`SetHealth(…)`、`IsDead`），业务代码直接用它们；排在后面的泛型调用（`Get<T>()`、`Set(c)`、`Remove<T>()`）留给泛型代码
+（[生成的成员](/zh/docs/guide/entities-and-components#generated-members)）。
+
 ### World 和实体 [#world-and-entities]
 
 | Arch | EasyEcs |
@@ -48,11 +52,11 @@ dotnet add package EasyEcs
 | `World.Destroy(world);` | `world.Dispose();` |
 | `world.Create(a, b, c)` | `world.CreateEntity(a, b, c)` |
 | `world.Destroy(entity)` | `entity.Destroy()` |
-| `world.Add(entity, c)` | `entity.Set(c)` |
-| `world.Add<Tag>(entity)` | `entity.Set(new Tag())` |
-| `world.Remove<T>(entity)` | `entity.Remove<T>()` |
-| `world.Has<T>(entity)` | `entity.Has<T>()` |
-| `ref var c = ref world.Get<T>(entity)` | `ref var c = ref entity.Get<T>()`；只读用 `entity.Read<T>()` |
+| `world.Add(entity, c)` | `entity.SetHealth(100, 100)`、`entity.Set(c)` |
+| `world.Add<Dead>(entity)` | `entity.SetDead()` |
+| `world.Remove<Health>(entity)` | `entity.RemoveHealth()`、`entity.Remove<T>()` |
+| `world.Has<Health>(entity)` | `entity.HasHealth`、`entity.IsDead` for a tag, `entity.Has<T>()` |
+| `ref var c = ref world.Get<Health>(entity)` | `ref var hp = ref entity.Health`、`entity.Get<T>()` |
 | `world.Size` | `world.EntityCount` |
 | `entity.Id` | `entity.Id.Index`；数据里存 `entity.Id`（`EntityId`） |
 | `world.EnsureCapacity(in signature, n)` | `world.EnsureCapacity<T1, …, Tn>(n)`、`world.EnsureCapacity(prefab, n)` |
@@ -75,8 +79,8 @@ dotnet add package EasyEcs
 
 | Arch | EasyEcs |
 | --- | --- |
-| `buffer.Add(e, c)` 再 `buffer.Playback(world)` | `e.Set(c)` |
-| `buffer.Remove<T>(e)` | `e.Remove<T>()` |
+| `buffer.Add(e, c)` 再 `buffer.Playback(world)` | `e.SetBurning(10, 3)`、`e.Set(c)` |
+| `buffer.Remove<Burning>(e)` | `e.RemoveBurning()` |
 | `buffer.Destroy(e)` | `e.Destroy()` |
 | `var n = buffer.Create(types); buffer.Set(n, c);` | `world.CreateEntity(a, b, c)`（`[ForEach]` 方法里拿一个 `World` 参数） |
 | `world.Add(in q, value)` | `world.SetAll(value, filter)` |
@@ -181,8 +185,8 @@ public class CombatSystem : EcsSystem
         attack.Cooldown = attack.Interval;
         stats.Hits++;
         health.Value -= attack.Damage;
-        if (entity.Id.Index % 20 == 0 && !entity.Has<Burning>())
-            entity.Set(new Burning { Ticks = 10, DamagePerTick = 3 });
+        if (entity.Id.Index % 20 == 0 && !entity.HasBurning)
+            entity.SetBurning(ticks: 10, damagePerTick: 3);
     }
 }
 
@@ -192,7 +196,7 @@ public class StatusSystem : EcsSystem
     static void Burn(Entity entity, ref Burning burning, ref Health health)
     {
         health.Value -= burning.DamagePerTick;
-        if (--burning.Ticks <= 0) entity.Remove<Burning>();
+        if (--burning.Ticks <= 0) entity.RemoveBurning();
     }
 }
 
@@ -202,9 +206,9 @@ public class DeathSystem : EcsSystem
     static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
     {
         if (health.Value > 0) return;
-        entity.Set(new Dead());
+        entity.SetDead();
         stats.Deaths++;
-        if (entity.Has<Npc>()) stats.NpcKills++;
+        if (entity.HasNpc) stats.NpcKills++;
     }
 }
 ```
@@ -241,7 +245,7 @@ public class LifetimeSystem : EcsSystem
 
 public sealed class ClockSystem : EcsSystem
 {
-    protected override void OnUpdate() => World.GetSingleton<WorldStats>().Tick++;
+    protected override void OnUpdate() => World.WorldStats.Tick++;
 }
 ```
 

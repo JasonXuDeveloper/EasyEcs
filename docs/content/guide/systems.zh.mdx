@@ -133,7 +133,7 @@ public class SaveSystem : EcsSystem
     public override int UpdateInterval => 60;      // 每 60 次更新一次
     public override int UpdatePhase => 30;         // 和同间隔的其他系统错开半个周期
 
-    protected override void OnUpdate() => World.GetOrAddSingleton<Autosave>().Count++;
+    protected override void OnUpdate() => World.GetOrAddAutosave().Count++;
 }
 ```
 

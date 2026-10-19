@@ -122,9 +122,9 @@ public class PropagateTransforms : EcsSystem
     {
         foreach (var child in parent.World.Children(parent)) // [!code highlight]
         {
-            ref readonly var local = ref child.Read<LocalPosition>();
+            ref readonly var local = ref child.LocalPosition;
             var position = new WorldPosition(at.X + local.X, at.Y + local.Y);
-            child.Get<WorldPosition>() = position;
+            child.WorldPosition = position;
             Follow(child, position);
         }
     }
@@ -203,11 +203,11 @@ public class PropagateTransforms : EcsSystem
     {
         foreach (var child in parent.World.Children(parent))
         {
-            LocalPosition local = child.Read<LocalPosition>();
+            LocalPosition local = child.LocalPosition;
             float x = parentPosition.X + local.X;
             float y = parentPosition.Y + local.Y;
             var position = new WorldPosition(x, y);
-            child.Get<WorldPosition>() = position;
+            child.WorldPosition = position;
             Follow(child, position);
         }
     }
@@ -235,7 +235,7 @@ Console.WriteLine($"gun at {gun.WorldPosition}");
 
 foreach (var child in world.Children(ship))
 {
-    Console.WriteLine($"ship > {child.Read<Name>().Value}");
+    Console.WriteLine($"ship > {child.Name.Value}");
 }
 
 // Re-parent: set a new ChildOf. Detach: remove it, and the entity is a root.

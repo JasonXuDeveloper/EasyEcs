@@ -106,7 +106,7 @@ public class DeathSystem : EcsSystem
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health hp)
     {
-        if (hp.Value <= 0) unit.Set(new Dead());   // 当场生效：后面的系统已经能看到尸体
+        if (hp.Value <= 0) unit.SetDead();   // 当场生效：后面的系统已经能看到尸体
     }
 }
 ```

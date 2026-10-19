@@ -26,13 +26,13 @@ icon: Link
 ### 副本与 ref [#copies-and-refs]
 
 ```csharp
-var copy = entity.Get<Health>();       // 副本：下面的修改会丢失
+var copy = entity.Health;              // 副本：下面的修改会丢失
 copy.Value -= 10;
 
-ref var hp = ref entity.Get<Health>(); // 指向表的 ref
+ref var hp = ref entity.Health;        // 指向表的 ref
 hp.Value -= 10;
-entity.Get<Health>().Value -= 10;      // 同上，写在一行
-entity.Health.Value -= 10;             // 同上，用生成的成员
+entity.Health.Value -= 10;             // 同上，写在一行
+entity.Get<Health>().Value -= 10;      // 同上，用泛型 API
 ```
 
 ### ref 为什么会失效 [#why-a-ref-expires]
@@ -63,10 +63,10 @@ public class StrikeSystem : EcsSystem
     static void Strike(Entity attacker, in Target target, World world)
     {
         if (!world.TryGetEntity(target.Id, out var victim) || !victim.HasHealth) return;
-        ref var hp = ref victim.Get<Health>();
+        ref var hp = ref victim.Health;
         hp.Value -= 10;                                   // 先写……
         if (hp.Value <= 0) victim.SetDead();              // ……再改结构：hp 此后可能已经过期
-        attacker.Remove<Target>();                        // 也是结构变更；之后不再使用 Get 拿到的 ref
+        attacker.RemoveTarget();                          // 也是结构变更；之后不再使用它之前拿到的 ref
     }
 }
 ```
@@ -93,10 +93,10 @@ public static class Potions
     // 在 World 的所有者线程上运行，并在该线程上恢复（单线程的服务器主循环）
     public static async ValueTask HealFromStoreAsync(Entity player, IShop shop)
     {
-        long id = player.Read<Account>().Id;              // await 之前先读出需要的数据
+        long id = player.Account.Id;                       // await 之前先读出需要的数据
         int heal = await shop.RedeemPotionAsync(id);      // 这期间 World 可能已经变了
         if (player.IsAlive && player.HasHealth)           // await 之后重新校验
-            player.Get<Health>().Value += heal;           // 指向当前存储的新 ref
+            player.Health.Value += heal;                  // 指向当前存储的新 ref
     }
 }
 ```
@@ -117,7 +117,7 @@ public sealed class ApplyRedemptions(ConcurrentQueue<PotionRedeemed> inbox) : Ec
     {
         while (_inbox.TryDequeue(out var done))
             if (World.TryGetEntity(done.Player, out var player) && player.HasHealth)
-                player.Get<Health>().Value += done.Heal;              // 在所有者线程上、更新过程中执行
+                player.Health.Value += done.Heal;                     // 在所有者线程上、更新过程中执行
     }
 }
 ```

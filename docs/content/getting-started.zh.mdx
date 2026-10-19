@@ -83,13 +83,13 @@ for (int i = 0; i < units.Length; i += 10) units[i].SetBurning(40);   // 每十�
 ### 读写组件 [#read-and-write]
 
 生成器为每个组件写好具名成员：`scout.Velocity` 是指向存储的 `ref`，`SetBurning(…)` 添加或覆盖，`HasBurning`、`RemoveBurning()`
-顾名思义。底下的泛型 API 是 `Get<T>()`（拿 `ref` 来写）、`Read<T>()`（只读）、`Set(…)`、`Has<T>()` 和 `Remove<T>()`。
+顾名思义。业务代码就用这些成员；底下的泛型 API（`Get<T>()`、`Read<T>()`、`Set(…)`、`Has<T>()`、`Remove<T>()`）留给泛型代码。
 在 `Program.cs` 里接着写：
 
 ```csharp
 Entity scout = units[1];
 scout.Velocity = new Velocity(2, 0);         // 经 ref 原地写入
-float speed = scout.Read<Velocity>().X;      // 泛型 API：2
+float speed = scout.Velocity.X;              // 同一个 ref 读出来：2
 scout.SetBurning(5);                         // 添加组件
 bool burning = scout.HasBurning;             // true
 scout.RemoveBurning();                       // 移除：实体的行保留
@@ -375,7 +375,7 @@ for (int i = 0; i < units.Length; i += 10) units[i].SetBurning(40);   // 每十�
 
 Entity scout = units[1];
 scout.Velocity = new Velocity(2, 0);
-float speed = scout.Read<Velocity>().X;
+float speed = scout.Velocity.X;
 scout.SetBurning(5);
 bool burning = scout.HasBurning;
 scout.RemoveBurning();

@@ -41,6 +41,10 @@ dotnet add package EasyEcs
 
 ## API 对照 [#api-mapping]
 
+表里用的是下面例子中的组件（`Health`、标签 `Dead`）。生成器为每个组件写好具名成员（`entity.Health`、`HasHealth`、
+`SetHealth(…)`、`IsDead`），业务代码直接用它们；排在后面的泛型调用（`Get<T>()`、`Set(c)`、`Remove<T>()`）留给泛型代码
+（[生成的成员](/zh/docs/guide/entities-and-components#generated-members)）。
+
 ### 实体和组件 [#entities-and-components]
 
 | Friflo.Engine.ECS | EasyEcs |
@@ -50,12 +54,12 @@ dotnet add package EasyEcs
 | `archetype.EnsureCapacity(n)` | `world.EnsureCapacity<T1, …, Tn>(n)`（实体存储也一起扩） |
 | `store.CreateEntity(a, b, c)` | `world.CreateEntity(a, b, c)` |
 | `store.Count` | `world.EntityCount` |
-| `entity.AddComponent(c)` | `entity.Set(c)` |
-| `entity.RemoveComponent<T>()` | `entity.Remove<T>()` |
-| `ref var c = ref entity.GetComponent<T>()` | `ref var c = ref entity.Get<T>()`；只读用 `entity.Read<T>()` |
-| `entity.HasComponent<T>()` | `entity.Has<T>()` |
-| `entity.AddTag<Dead>()` / `RemoveTag<Dead>()` | `entity.Set(new Dead())` / `entity.Remove<Dead>()` |
-| `entity.Tags.Has<Dead>()` | `entity.Has<Dead>()` |
+| `entity.AddComponent(c)` | `entity.SetHealth(100, 100)`、`entity.Set(c)` |
+| `entity.RemoveComponent<Health>()` | `entity.RemoveHealth()`、`entity.Remove<T>()` |
+| `ref var c = ref entity.GetComponent<Health>()` | `ref var hp = ref entity.Health`、`entity.Get<T>()` |
+| `entity.HasComponent<Health>()` | `entity.HasHealth`、`entity.Has<T>()` |
+| `entity.AddTag<Dead>()` / `RemoveTag<Dead>()` | `entity.SetDead()` / `entity.RemoveDead()` |
+| `entity.Tags.Has<Dead>()` | `entity.IsDead` |
 | `entity.DeleteEntity()` | `entity.Destroy()` |
 | `store.GetEntityById(id)` | `world.TryGetEntity(entityId, out var entity)` |
 | `store.CloneEntity(template)` | `world.Instantiate(prefab)`、`entity.Clone()` |
@@ -187,9 +191,9 @@ public class DeathSystem : EcsSystem
     static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
     {
         if (health.Value > 0) return;
-        entity.Set(new Dead());
+        entity.SetDead();
         stats.Deaths++;
-        if (entity.Has<Npc>()) stats.NpcKills++;
+        if (entity.HasNpc) stats.NpcKills++;
     }
 }
 
@@ -199,7 +203,7 @@ public class RespawnSystem : EcsSystem
     static void Respawn(Entity entity, ref Health health)
     {
         health.Value = health.Max;
-        entity.Remove<Dead>();
+        entity.RemoveDead();
     }
 }
 ```
@@ -214,8 +218,8 @@ Friflo 靠克隆 store 里的模板实体来生成 NPC，这个模板对查询�
 
 ```csharp
 private static readonly Prefab Grunt = new Prefab()
-    .Set(new Position(), new Velocity(), new Health { Value = 100, Max = 100 })
-    .Set(new AoiCell { Cell = -1 }, new Npc { TemplateId = 7 });
+    .SetPosition(0, 0).SetVelocity(0, 0).SetHealth(value: 100, max: 100)
+    .SetAoiCell(cell: -1).SetNpc(templateId: 7);
 ```
 
 ```csharp

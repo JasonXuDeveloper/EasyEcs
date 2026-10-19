@@ -71,7 +71,7 @@ public class MoveSystem : EcsSystem
 ```
 
 ```csharp
-world.AddSingleton<TickLength>() = new TickLength(0.05f);   // AddSingleton 返回 ref
+world.SetTickLength(0.05f);                                // 生成的成员：添加这个单例
 world.AddSystem<MoveSystem>();
 world.CreateEntity(new Position(0, 0), new Speed(2));
 world.Update();
@@ -109,7 +109,7 @@ public class DeathSystem : EcsSystem
     [ForEach, Without<Dead>]
     static void Die(Entity unit, in Health health)
     {
-        if (health.Value <= 0) unit.Set(new Dead());   // 没有命令缓冲，也没有同步点
+        if (health.Value <= 0) unit.SetDead();   // 没有命令缓冲，也没有同步点
     }
 }
 ```

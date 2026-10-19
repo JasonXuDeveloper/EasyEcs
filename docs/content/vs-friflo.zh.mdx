@@ -44,13 +44,13 @@ chunk，把结构变更记进命令缓冲；EasyEcs 从 `[ForEach]` 方法生成
 | --- | --- | --- |
 | World | `new EntityStore()` | `new World()` |
 | 组件 | `struct X : IComponent` | `struct X : IComponent`（命名空间 `EasyEcs`） |
-| 标签 | `struct Dead : ITag`、`AddTag<Dead>()` | `struct Dead : IComponent`（空的）、`entity.Set(new Dead())` |
+| 标签 | `struct Dead : ITag`、`AddTag<Dead>()` | `struct Dead : IComponent`（空的）、`entity.SetDead()` |
 | 单例 | `UniqueEntity` | `ISingletonComponent`、`world.AddSingleton<T>()` |
 | 创建 | `store.CreateEntity(a, b)` | `world.CreateEntity(a, b)` |
 | 创建前预留 | `store.EnsureCapacity(n)`、`archetype.EnsureCapacity(n)` | `world.EnsureCapacity<A, B>(n)` |
 | 批量创建 | 每个实体一次 `archetype.CreateEntity()`，或 `CreateEntityBatch` | `world.CreateEntities(span, a, b)` |
-| 读、写 | `entity.GetComponent<T>()`（ref） | `entity.Get<T>()`（ref）、`entity.Read<T>()`（只读） |
-| 加、删 | `entity.AddComponent(c)`、`RemoveComponent<T>()` | `entity.Set(c)`、`entity.Remove<T>()` |
+| 读、写 | `entity.GetComponent<T>()`（ref） | `entity.Hp`（ref，生成的成员），泛型代码用 `entity.Get<T>()` |
+| 加、删 | `entity.AddComponent(c)`、`RemoveComponent<T>()` | `entity.SetHp(…)`、`entity.RemoveHp()` |
 | 销毁 | `entity.DeleteEntity()` | `entity.Destroy()`、`world.DestroyEntities<T>(filter)` |
 | 查询 | `store.Query<A, B>().WithoutAnyTags(Tags.Get<Dead>())` | `[ForEach, Without<Dead>]`；`QueryFilter.Create().Without<Dead>()` |
 | 遍历 | `foreach (var (as, bs, entities) in query.Chunks)` 加 `Span` 循环 | `[ForEach]` 方法，或参数为 `Span<T>` 的批量方法 |
@@ -86,9 +86,9 @@ public class DeathSystem : EcsSystem
     static void CheckDeath(Entity entity, in Hp hp, ref Deaths deaths)
     {
         if (hp.Value > 0) return;
-        entity.Set(new Dead());                       // 当场生效
+        entity.SetDead();                       // 当场生效
         deaths.Count++;
-        if (entity.Has<Npc>()) deaths.NpcKills++;
+        if (entity.HasNpc) deaths.NpcKills++;
     }
 }
 ```

@@ -298,14 +298,14 @@ public static class PlayerRules
     // The tick a slot is ready again, not a countdown: no system writes every row every tick, so only uses are changes
     public static bool TryUse(Entity player, int slot, int tick, int cooldown)
     {
-        if (player.Read<Cooldowns>().ReadyAt[slot] > tick) return false;     // Read: no stamp
-        player.Get<Cooldowns>().ReadyAt[slot] = tick + cooldown;              // Get: the row is stamped
+        if (player.Cooldowns.ReadyAt[slot] > tick) return false;             // a read: no stamp
+        player.WriteCooldowns().ReadyAt[slot] = tick + cooldown;              // a write: the row is stamped
         return true;
     }
 
     public static void Advance(Entity player, int quest)
     {
-        var progress = player.Get<Quests>().Progress;                         // Get: the row is stamped
+        var progress = player.WriteQuests().Progress;                         // a write: the row is stamped
         progress[quest] = progress.TryGetValue(quest, out int step) ? step + 1 : 1;
     }
 

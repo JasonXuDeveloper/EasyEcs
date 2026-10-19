@@ -187,8 +187,8 @@ public class PoisonSystem : EcsSystem
 在系统之外：
 
 ```csharp
-entity.Get<Health>().Value -= 10;                            // Get 返回 ref T：这里直接写组件
-ref var hp = ref entity.Get<Health>();                       // 要写多次就保留这个 ref
+entity.Health.Value -= 10;                                   // 生成的属性是 ref：这里直接写组件
+ref var hp = ref entity.Health;                              // 要写多次就保留这个 ref
 hp.Value = 100;
 ref var mana = ref entity.TryGetRef<Mana>(out bool found);   // 实体可能没有这个组件时
 if (found) mana.Value += 5;
@@ -199,8 +199,9 @@ foreach (var item in world.Query<Position, Velocity>())
 
 三个要避开的错误：
 
-- `var hp = entity.Get<Health>(); hp.Value--;` 改的是副本。要用 `ref var`。
-- 只读时用 `in` 或 `entity.Read<T>()`，不要用 `ref`：对 `ITrackChanges` 组件的每次 `ref` 访问都算一次修改，同步时会把没人改过的行也发出去。
+- `var hp = entity.Health; hp.Value--;` 改的是副本。要用 `ref var`。
+- 只读时用 `in`，不要用 `ref`：对 `ITrackChanges` 组件的每次 `ref` 访问都算一次修改，同步时会把没人改过的行也发出去。
+  所以被追踪组件的生成属性是只读的，写入用 `entity.WriteX()`。
 - 组件里的集合要通过组件的 `ref` 修改，不能通过 `in`：否则变更追踪和调度器都发现不了（[EECS011](/zh/docs/guide/analyzer)）。
   每个实体需要一个列表时，用 [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers)。
 

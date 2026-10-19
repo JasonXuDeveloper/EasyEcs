@@ -226,7 +226,7 @@ world.GroupBy<Zone>();                                          // 初始化时�
 world.CreateEntity(new Team(1), new Zone(3), new Position(0, 0));
 
 int red = world.TeamIndex.Count(1);                             // 一次哈希查找
-int inZone = world.Count<Position>(QueryFilter.Create().InGroup<Zone>(3));   // 只遍历 3 号场景的行
+int inZone = world.Count<Position>(QueryFilter.Create().InZone(3));   // 只遍历 3 号场景的行
 ```
 
 ### 值索引 [#value-indexes]

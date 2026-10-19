@@ -87,14 +87,13 @@ old handle never reaches the entity that reuses its id. More in
 ### Read and write components [#read-and-write]
 
 For every component the generator writes named members: `scout.Velocity` is a `ref` into storage, `SetBurning(…)`
-adds or overwrites, `HasBurning` and `RemoveBurning()` do what they say. The generic API underneath is
-`Get<T>()` (a `ref` to write), `Read<T>()` (read only), `Set(…)`, `Has<T>()` and `Remove<T>()`. Add to
-`Program.cs`:
+adds or overwrites, `HasBurning` and `RemoveBurning()` do what they say. Use these in your code; the generic API
+underneath (`Get<T>()`, `Read<T>()`, `Set(…)`, `Has<T>()`, `Remove<T>()`) is for generic code. Add to `Program.cs`:
 
 ```csharp
 Entity scout = units[1];
 scout.Velocity = new Velocity(2, 0);         // writes in place, through the ref
-float speed = scout.Read<Velocity>().X;      // the generic API: 2
+float speed = scout.Velocity.X;              // reads through the same ref: 2
 scout.SetBurning(5);                         // adds the component
 bool burning = scout.HasBurning;             // true
 scout.RemoveBurning();                       // removes it: the entity keeps its row
@@ -389,7 +388,7 @@ for (int i = 0; i < units.Length; i += 10) units[i].SetBurning(40);   // every t
 
 Entity scout = units[1];
 scout.Velocity = new Velocity(2, 0);
-float speed = scout.Read<Velocity>().X;
+float speed = scout.Velocity.X;
 scout.SetBurning(5);
 bool burning = scout.HasBurning;
 scout.RemoveBurning();

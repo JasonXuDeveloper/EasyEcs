@@ -39,7 +39,7 @@ public record struct Score(int Deaths) : ISingletonComponent;
 
 ```csharp
 var world = new World();
-world.AddSingleton<Clock>() = new Clock(0, 1f / 30);     // 添加（已存在则重置为 default），返回 ref
+world.SetClock(0, 1f / 30);                              // 生成的成员：没有就添加，有就覆盖
 world.Clock.Tick++;                                       // 生成的成员：ref，没添加时抛异常
 ref var score = ref world.GetOrAddScore();                // 不存在就先加一个默认值
 score.Deaths++;

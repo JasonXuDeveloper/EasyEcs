@@ -13,16 +13,16 @@ EasyEcs 里出的问题，大多来自面向对象的写法习惯，或者其他
 ### 改的是组件的副本 [#copy]
 
 ```csharp
-var hp = hero.Get<Health>();      // 行的一份副本
+var hp = hero.Health;             // 行的一份副本
 hp.Value -= 10;                   // 表里还是旧值
 ```
 
-`Get<T>()` 返回的是 `ref`，而 `var` 会把它指向的值复制出来。保留 `ref`，或者通过生成的属性来写，它同样是 `ref`：
+生成的属性和 `Get<T>()` 一样返回 `ref`，而 `var` 会把它指向的值复制出来。保留 `ref`，或者直接通过属性来写：
 
 ```csharp
-ref var health = ref hero.Get<Health>();
+ref var health = ref hero.Health;
 health.Value -= 10;
-hero.Health.Value -= 10;          // 一样，通过生成的属性
+hero.Health.Value -= 10;          // 一样，写在一行里
 ```
 
 没有规则能发现。详见[副本与 ref](/zh/docs/guide/refs-and-await#copies-and-refs)。
@@ -60,7 +60,7 @@ public record struct Owner(EntityId Id) : IComponent;
 
 ```csharp
 var item = world.CreateEntity(new Owner(hero.Id));
-if (world.TryGetEntity(item.Read<Owner>().Id, out var owner)) { /* 还活着 */ }
+if (world.TryGetEntity(item.Owner.Id, out var owner)) { /* 还活着 */ }
 ```
 
 没有规则能发现。详见 [id、版本号与回收](/zh/docs/guide/entities-and-components#entityid)。
@@ -102,17 +102,17 @@ public record struct Cooldown(int Ticks) : IComponent;
 
 ```csharp
 var caster = world.CreateEntity(new Cooldown(30));
-var kept = caster.Read<Cooldown>();     // 把值先存到别处
-caster.Remove<Cooldown>();              // 被眩晕
+var kept = caster.Cooldown;             // 把值先存到别处
+caster.RemoveCooldown();                // 被眩晕
 caster.Set(kept);                       // 之后再放回去
 ```
 
-这段时间里值总得有地方放，读这份暂存的每一处都是你要维护的代码。`Disable<T>()` 让组件对查询、`Has` 和 `Get` 不可见，值留在行里，
-`Enable<T>()` 再把它还回来：
+这段时间里值总得有地方放，读这份暂存的每一处都是你要维护的代码。`DisableCooldown()`（即 `Disable<T>()`）让组件对查询、`Has` 和 `Get` 不可见，
+值留在行里，`EnableCooldown()` 再把它还回来：
 
 ```csharp
-caster.Disable<Cooldown>();             // 被眩晕：冷却暂停
-caster.Enable<Cooldown>();              // 眩晕结束：还是原来的值
+caster.DisableCooldown();               // 被眩晕：冷却暂停
+caster.EnableCooldown();                // 眩晕结束：还是原来的值
 ```
 
 没有规则能发现。详见[禁用组件](/zh/docs/guide/cleanup-and-disable#disable-a-component)。
@@ -136,7 +136,7 @@ public record struct Wave(int Number) : ISingletonComponent;
 
 public class WaveSystem : EcsSystem
 {
-    protected override void OnUpdate() => World.GetOrAddSingleton<Wave>().Number++;
+    protected override void OnUpdate() => World.GetOrAddWave().Number++;
 }
 ```
 
@@ -235,12 +235,11 @@ public class ShowGold : EcsSystem
 int before = player.Get<Gold>().Amount;      // Get<T>() 算写：这一行被当成改过
 ```
 
-`Get<T>()` 会给行打上标记，下次更新时每个 `[Changed<Gold>]` 系统都会访问它。用 `Read<T>()`、生成的属性（被追踪组件的属性是
-`ref readonly`）或 `in` 参数来读：
+`Get<T>()` 会给行打上标记，下次更新时每个 `[Changed<Gold>]` 系统都会访问它。用生成的属性（被追踪组件的属性是
+`ref readonly`）、泛型代码里的 `Read<T>()` 或 `in` 参数来读：
 
 ```csharp
-int amount = player.Read<Gold>().Amount;
-int same = player.Gold.Amount;               // ref readonly：不打标记
+int amount = player.Gold.Amount;             // ref readonly：不打标记
 ```
 
 没有规则能发现。详见[什么算写入](/zh/docs/guide/change-tracking#what-counts-as-a-write)。
@@ -275,7 +274,7 @@ public class Extinguish : EcsSystem
 ### 结构变更之后还拿着 `ref` [#ref-after-change]
 
 ```csharp
-ref var life = ref hero.Get<Health>();
+ref var life = ref hero.Health;
 hero.SetStunned();                 // 行搬到了另一张表
 life.Value -= 10;                  // 写的是旧位置
 ```
@@ -284,7 +283,7 @@ life.Value -= 10;                  // 写的是旧位置
 
 ```csharp
 hero.SetStunned();
-hero.Get<Health>().Value -= 10;
+hero.Health.Value -= 10;
 ```
 
 没有规则能发现。详见[变更前后的 ref](/zh/docs/guide/structural-changes#refs-across-a-change)。
@@ -292,7 +291,7 @@ hero.Get<Health>().Value -= 10;
 ### 跨 `await` 拿着 `ref` [#ref-across-await]
 
 ```csharp doccheck=skip
-ref var stamina = ref hero.Get<Health>();
+ref var stamina = ref hero.Health;
 await Task.Delay(100);
 stamina.Value -= 10;
 ```
@@ -301,7 +300,7 @@ stamina.Value -= 10;
 
 ```csharp
 await Task.Delay(100);
-if (hero.Has<Health>()) hero.Get<Health>().Value -= 10;
+if (hero.HasHealth) hero.Health.Value -= 10;
 ```
 
 由 C# 编译器发现。详见[跨 `await`](/zh/docs/guide/refs-and-await#across-await)。

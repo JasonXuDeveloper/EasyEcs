@@ -214,8 +214,8 @@ public class PoisonSystem : EcsSystem
 Outside systems:
 
 ```csharp
-entity.Get<Health>().Value -= 10;                            // Get returns ref T: this writes the component
-ref var hp = ref entity.Get<Health>();                       // keep the ref for several writes
+entity.Health.Value -= 10;                                   // the generated property is a ref: this writes it
+ref var hp = ref entity.Health;                              // keep the ref for several writes
 hp.Value = 100;
 ref var mana = ref entity.TryGetRef<Mana>(out bool found);   // when the entity may not have it
 if (found) mana.Value += 5;
@@ -226,9 +226,10 @@ foreach (var item in world.Query<Position, Velocity>())
 
 Three mistakes to avoid:
 
-- `var hp = entity.Get<Health>(); hp.Value--;` changes a copy. Keep a `ref var`.
-- Read with `in` or `entity.Read<T>()`, not `ref`: every `ref` access to an `ITrackChanges` component counts as a
-  change, so replication would send rows nobody changed.
+- `var hp = entity.Health; hp.Value--;` changes a copy. Keep a `ref var`.
+- Read with `in`, not `ref`: every `ref` access to an `ITrackChanges` component counts as a change, so replication
+  would send rows nobody changed. The generated property of a tracked component is read-only for this reason;
+  `entity.WriteX()` is the write.
 - Change a collection inside a component through a `ref` to the component, never through `in`: change tracking and
   the scheduler would miss it ([EECS011](/en/docs/guide/analyzer)). For a list per entity, use a
   [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers).
