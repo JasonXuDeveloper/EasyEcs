@@ -110,6 +110,8 @@ const leadList = (zh: boolean, n = 3) => {
     ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
     : parts.join('');
 };
+/** "146\u00a0μs": a time that does not break across lines */
+const time = (ns: number) => formatTime(ns).replace(' ', '\u00a0');
 /** The lead figure under the hero: the biggest lead; the cards under it show the next ones */
 const topLead = leads[0];
 const nextLeads = leads.slice(1, 4);
@@ -118,6 +120,16 @@ const tickLead =
   peerList[0]?.ours && peerList[1]?.row.ratio
     ? peerList[1].row.ratio
     : undefined;
+/**
+ * The headline says "fastest" only while the data backs it: EasyEcs runs the
+ * full server tick fastest, is faster beyond the measurement error in more
+ * than half of the head-to-head comparisons, and slower beyond it in at most
+ * one in ten. Otherwise it says "high-performance".
+ */
+const fastest =
+  tickLead !== undefined &&
+  counts.ahead * 2 > counts.total &&
+  counts.slower * 10 <= counts.total;
 /** "Friflo" -> "Friflo.Engine.ECS 3.6", with the version the comparison ran */
 const versioned = (library: string) => peerLabel(library, docsVersion);
 /** "Friflo.Engine.ECS 3.6, Arch 2.1 and DefaultEcs 0.17" */
@@ -307,19 +319,17 @@ const copy: Record<Locale, Copy> = {
     description: topLeads(false)
       ? `High-performance ECS for C# and .NET 10 servers: ${leadPhrase(0, false)} and ${leadPhrase(1, false)} than the next-fastest C# ECS, ${tickBytes} allocated per tick.`
       : `High-performance ECS for C# and .NET 10 servers: a full server tick in ${tickTime}, source-generated systems, change tracking and ${tickBytes} per tick.`,
-    pill: `EasyEcs ${docsVersion} · .NET 10 · MIT`,
-    headline: 'High-performance ECS',
+    pill: `EasyEcs ${docsVersion} · C# ECS for .NET 10`,
+    headline: fastest ? 'The fastest ECS' : 'High-performance ECS',
     headlineAccent: 'for .NET\u00a010 servers.',
-    lede: topLeads(false)
-      ? `${topLeads(false)}, ${tickBytes} per tick.`
-      : `A full server tick in ${tickTime}, ${tickBytes} allocated.`,
+    lede: `You write plain data and [ForEach] methods; a source generator turns them into inlined struct jobs. Faster than Friflo, Arch and DefaultEcs in ${counts.ahead} of ${counts.total} head-to-head benchmarks${zeroAlloc ? ', and a server tick allocates nothing' : `, ${tickBytes} allocated per tick`}.`,
     definition: `EasyEcs is an open-source, high-performance archetype Entity Component System (ECS) for C# and .NET 10 servers. In ${counts.total} head-to-head benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs, each library doing the same work its own way, it is faster in ${counts.ahead} and within the measurement error in ${counts.even}${zeroAlloc ? ', and a full server tick allocates nothing' : ''}. Write plain data and [ForEach] methods; a source generator turns them into inlined struct jobs, and an analyzer catches design mistakes at compile time.`,
     start: 'Get started',
     github: 'View on GitHub',
     demo: 'Try it in the browser',
     statLabel: (library) => `Biggest lead, vs ${library}`,
     statClaim: (l) =>
-      `${l.label.en}: ${formatTime(l.ours.meanNs)} with EasyEcs, ${formatTime(l.versus.row.meanNs)} with ${libraryName(l.versus.library)}.`,
+      `${l.label.en}: ${time(l.ours.meanNs)} with EasyEcs, ${time(l.versus.row.meanNs)} with ${libraryName(l.versus.library)}.`,
     faster: 'faster',
     leadsTitle: 'The next biggest leads',
     tickTitle: 'One server tick, 100,000 entities',
@@ -579,19 +589,17 @@ const copy: Record<Locale, Copy> = {
     description: topLeads(true)
       ? `高性能 C# / .NET 10 服务端 ECS 框架：${leads[0].short.zh}比次快的 C# ECS 快 ${formatRatio(leads[0].ratio)}，${leadPhrase(1, true)}，每个 tick 分配 ${tickBytes}。`
       : `高性能 C# / .NET 10 服务端 ECS 框架：完整服务器 tick 只要 ${tickTime}，源生成系统、变更追踪，每个 tick 分配 ${tickBytes}。`,
-    pill: `EasyEcs ${docsVersion} · .NET 10 · MIT`,
-    headline: '高性能 ECS',
-    headlineAccent: '为 .NET\u00a010 服务端打造。',
-    lede: topLeads(true)
-      ? `${topLeads(true)}，每个 tick 分配 ${tickBytes}。`
-      : `完整服务器 tick 只要 ${tickTime}，分配 ${tickBytes}。`,
+    pill: `EasyEcs ${docsVersion} · C# 高性能 ECS 框架`,
+    headline: fastest ? '最快的 ECS 框架' : '高性能 ECS 框架',
+    headlineAccent: '为 .NET\u00a010 服务端而生。',
+    lede: `你只写普通数据和 [ForEach] 方法，源生成器把它们编译成内联的结构体 job。与 Friflo、Arch、DefaultEcs 正面对比 ${counts.total} 项，${counts.ahead} 项更快${zeroAlloc ? '，服务器 tick 不分配任何内存' : `，每个 tick 分配 ${tickBytes}`}。`,
     definition: `EasyEcs 是开源、高性能的 archetype（原型）实体组件系统（ECS），面向 C# 与 .NET 10 服务端。与 Friflo.Engine.ECS、Arch、DefaultEcs 的 ${counts.total} 项正面对比里，每个库用自己的写法做同样的事，它在 ${counts.ahead} 项更快，${counts.even} 项差距在测量误差之内${zeroAlloc ? '，完整的服务器 tick 也不分配任何内存' : ''}。你只写普通数据和 [ForEach] 方法：源生成器把它们编译成内联的结构体 job，分析器在编译期拦下设计错误。`,
     start: '快速开始',
     github: '在 GitHub 上查看',
     demo: '在浏览器里试试',
     statLabel: (library) => `领先最多的一项，对比 ${library}`,
     statClaim: (l) =>
-      `${l.label.zh}：EasyEcs 用时 ${formatTime(l.ours.meanNs)}，${libraryName(l.versus.library)} 要 ${formatTime(l.versus.row.meanNs)}。`,
+      `${l.label.zh}：EasyEcs 用时 ${time(l.ours.meanNs)}，${libraryName(l.versus.library)} 要 ${time(l.versus.row.meanNs)}。`,
     faster: '更快',
     leadsTitle: '领先幅度紧随其后的几项',
     tickTitle: '一个服务器 tick，10 万实体',
