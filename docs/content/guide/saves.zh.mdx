@@ -1,13 +1,13 @@
 ---
 title: 存档
 seoTitle: "C# ECS 的存档与读档：World.Save、World.Load 和 Nino"
-description: 用 World.Save 把整个 World 写成字节，用 Load 读回本进程或其他进程：id 不变，非托管组件按原始行写，托管组件走 Nino，布局变了会被拒绝。
+description: World.Save 把整个 World 写成字节，Load 在本进程或别的进程读回：id 不变，非托管组件写原始行，托管组件走 Nino，改名靠 NinoFormerName。
 icon: Save
 ---
 
 服务器重启后必须恢复原来的 World：玩家站在原地，计时器停在原处，实体之间的链接完好无损。`world.Save(output)` 把实体（id 和版本号）、
-它们的组件和单例写成字节，`world.Load(bytes)` 把它们放进本进程或另一个进程的 World。非托管组件直接写原始行，每列一个块；托管组件
-交给 [Nino](https://github.com/JasonXuDeveloper/Nino)。反复存档、反复读回同一块缓冲区，不产生分配。
+它们的组件和单例写成字节，`world.Load(bytes)` 把它们放进本进程或另一个进程的 World。非托管组件直接写原始行，每列一个块；托管组件和标了
+`[NinoType]` 的组件交给 [Nino](https://github.com/JasonXuDeveloper/Nino)。反复存档、反复读回同一块缓冲区，不产生分配。
 
 ## 什么时候用 [#when-to-use-it]
 
@@ -18,8 +18,8 @@ icon: Save
 
 <Callout type="warn" title="不适合">
   进程内回滚：[快照](/zh/docs/guide/snapshots)更快，也不用编码。把玩家迁到另一台服务器：
-  [`SaveEntities`](/zh/docs/guide/migration-and-unload#save-entities) 只写这一组实体。数据结构会频繁变化、而你又控制不了的长期存储：
-  字段变了的组件会被拒绝加载。
+  [`SaveEntities`](/zh/docs/guide/migration-and-unload#save-entities) 只写这一组实体。只存实体里需要持久化的部分、再读回到活着的实体上：
+  用[记录](/zh/docs/guide/migration-and-unload#records)，即带 `ComponentSet` 的 `SaveEntities`，由 `LoadEntitiesInto` 读回。
 </Callout>
 
 ## 怎么用 [#how-to-use-it]
@@ -30,7 +30,7 @@ icon: Save
 ### 声明组件 [#declare]
 
 非托管组件什么都不用做。托管组件（含 `string`、数组或类）需要 Nino 格式化器：标上 `[NinoType]`、声明为 `partial`，并在 EasyEcs
-旁边引用 `Nino.Generator` 包。
+旁边引用 `Nino.Generator` 包。结构会在版本之间变化的非托管组件也标上 `[NinoType]`（见[下文](#versioning)）。
 
 ```xml title="Game.csproj"
 <PackageReference Include="EasyEcs" Version="4.*" />
@@ -90,38 +90,54 @@ long tick = restarted.Clock.Tick;                                      // 1234
 | [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers) 的元素 | 变更 tick（每个加载的行都算作被写入） |
 | 每个单例 | |
 
-类型按名字记录（带命名空间的完整名字），每列是一个带长度前缀的片段，所以加载时会跳过当前进程没有的组件类型。当前进程用过的类型、
-或者生成器注册过的类型都能找到：使用 EasyEcs 的程序集，其中每个组件和单例都会在模块加载时注册。
+类型按 Nino 类型 id 记录（带命名空间的完整名字的哈希），每列是一个带长度前缀的片段，所以加载时会跳过当前进程没有的组件类型。当前进程
+用过的类型、或者生成器注册过的类型都能找到：使用 EasyEcs 的程序集，其中每个组件和单例都会在模块加载时注册。
 
 ### 代码改了之后 [#versioning]
 
-对每个非托管组件，存档记录它的大小和字段哈希（字段名、类型、布局特性）；托管组件的片段必须被它的 Nino 格式化器恰好读到最后一个字节。
-字段变了的组件会以 `InvalidDataException` 拒绝加载，World 保持调用前的样子：
+组件能怎么改，取决于它是怎么写进存档的。普通的非托管组件按原始行写：存档记下它的大小和字段哈希（字段名、类型、布局特性），只有结构
+完全相同才能读回。标了 `[NinoType]` 的组件（托管或非托管）由它的 Nino 格式化器写，能改什么由它的
+[格式](https://nino.xgamedev.net/zh/docs/v4/evolving-data)决定：`Positional`（默认）只认写入时的结构，`VersionTolerant` 能读追加成员
+之前写的行，`Keyed` 连插入、删除、调换成员都能接受。读不了的组件会以 `InvalidDataException` 拒绝加载，World 保持调用前的样子：
 
 | 存档之后的改动 | 加载结果 |
 | --- | --- |
 | 新增了组件类型 | 正常加载：新类型没有行 |
-| 删除或重命名了组件类型 | 正常加载：跳过它的片段（数据丢弃） |
-| 非托管组件的字段变了（增、删、改类型、改名） | `InvalidDataException` |
-| 托管组件的字段变了，片段读不到最后一个字节 | `InvalidDataException` |
-| 进程里有两个类型存成了同一个名字 | `InvalidDataException`：给其中一个改名 |
+| 删除了组件类型 | 正常加载：跳过它的片段（数据丢弃） |
+| 组件类型改名或换了命名空间 | 标上 `[NinoFormerName("旧命名空间.旧名字")]` 就能加载；不标则跳过 |
+| 原始行组件的字段变了（增、删、改类型、改名） | `InvalidDataException` |
+| `VersionTolerant` 或 `Keyed` 组件追加了成员 | 正常加载：新成员取默认值 |
+| 组件的 Nino 格式不允许的改动（片段读不到最后一个字节） | `InvalidDataException` |
+| 组件在原始行和 `[NinoType]` 之间切换 | `InvalidDataException` |
+| 进程里两个类型 id 相同（同名，或一个的旧名是另一个的名字） | `InvalidDataException`：给其中一个改名 |
 | 字节不是存档，或者已损坏 | `InvalidDataException` |
 
-托管组件只按字节检查：Nino 仍能恰好读完的改动（两个 `string` 字段互换）检测不出来。要改变存盘数据的结构，不要改旧组件，而是加一个新组件类型：
-同时包含两者的版本加载旧存档，由一个系统把旧组件转换成新组件，之后的版本再删掉旧类型。
+所以结构以后会变的组件，从第一次存档起就标成 `[NinoType]`。它仍是非托管的（一列值，没有引用），只是 Nino 会逐个值写，不再整块拷贝：
 
 ```csharp
-public record struct Inventory(int Gold, int Wood, int Stone) : IComponent;   // 新结构
+[NinoType(format: NinoFormat.VersionTolerant)]
+public partial record struct Rank(int Tier, int Points) : IComponent;          // 第一个版本
 
-// 在同时认识两个类型的版本里运行：加载进来的每个 Stock 都变成 Inventory。
-// 之后的版本删掉 Stock 和这个系统。
-public class UpgradeStock : EcsSystem
+// 之后的版本给它改了名、追加了一个成员：旧存档照样能读，读进来的行 Season 为 0。
+[NinoType(format: NinoFormat.VersionTolerant), NinoFormerName("Rank")]
+public partial record struct Standing(int Tier, int Points, int Season) : IComponent;
+```
+
+原始行组件的结构改不了，只能加一个新组件类型：同时包含两者的版本加载旧存档，由一个系统把旧组件转换成新组件，之后的版本再删掉旧类型。
+
+```csharp
+public record struct Crafting(int Recipe, int Progress) : IComponent;          // 按原始行存档
+public record struct Workshop(int Recipe, int Progress, int Queue) : IComponent;   // 新结构
+
+// 在同时认识两个类型的版本里运行：加载进来的每个 Crafting 都变成 Workshop。
+// 之后的版本删掉 Crafting 和这个系统。
+public class UpgradeCrafting : EcsSystem
 {
     [ForEach]
-    static void Upgrade(Entity player, in Stock old)
+    static void Upgrade(Entity player, in Crafting old)
     {
-        player.SetInventory(old.Gold, old.Wood, Stone: 0);
-        player.RemoveStock();
+        player.SetWorkshop(old.Recipe, old.Progress, Queue: 0);
+        player.RemoveCrafting();
     }
 }
 ```
@@ -139,7 +155,7 @@ catch (InvalidDataException)
 
 ### 插件里的组件 [#plugins]
 
-按名字查找类型是进程级的。插件的旧版本和新版本同时加载时，它们的类型同名，加载会以名字歧义拒绝。先卸载旧版本（按
+按 id 查找类型是进程级的。插件的旧版本和新版本同时加载时，它们的类型 id 相同，加载会以歧义拒绝。先卸载旧版本（按
 [热重载](/zh/docs/guide/migration-and-unload#hot-reload)的顺序：存档、`RemoveTypes`、卸载、加载新版本、`Load`），或者把要存档的组件
 放进一个永远不会重载的程序集，比如宿主和插件共用的契约程序集。
 
@@ -151,6 +167,7 @@ catch (InvalidDataException)
 | 用其他 `IBufferWriter<byte>` | 用 `NinoArrayBufferWriter` | 直接写入，省掉从 World 缓冲区的拷贝 |
 | 每次读档新建 World | `Load` 进同一个 World | 复用已有的行：预热后 0 B |
 | 能用值的地方用了托管组件 | 非托管组件（id、数字、定长数组） | 原始行每列一个块；Nino 要逐个值编码 |
+| 结构从不变化的非托管组件也标 `[NinoType]` | 这些按原始行写，结构会变的才标 `[NinoType]` | 原始行一列只拷贝一次 |
 | 自己在 `Query` 上写序列化 | `Save` / `Load` | id、版本号、缓冲、禁用值和单例都一起带上 |
 
 10 万个实体分布在两张表，存档到复用的缓冲区再读回（`SnapshotBenchmark`）：
@@ -159,8 +176,8 @@ catch (InvalidDataException)
 
 ## 开销 [#what-it-costs]
 
-- **大小：** 非托管组件就是行本身（填充字节清零，所以相同的 World 存出相同的字节），外加存在位、id 和版本号；托管组件按 Nino 的编码；
-  每个类型的名字只写一次。
+- **大小：** 非托管组件就是行本身（填充字节清零，所以相同的 World 存出相同的字节），外加存在位、id 和版本号；托管组件和 `[NinoType]` 组件按 Nino 的编码；
+  每个类型的 id 只写一次。
 - **时间：** 两个方向都是 O(实体数 × 组件数)。
 - **分配：** 反复 `Save` 到 `NinoArrayBufferWriter` 不分配，反复 `Load` 进同一个 World 也不分配；读出的托管值是新对象。
 - **遍历期间不能调用：** 两者都要进入结构闸门。
@@ -172,8 +189,8 @@ catch (InvalidDataException)
 | 托管组件没有 `[NinoType]` | `Save` 抛 `InvalidOperationException`（没有格式化器） | 运行时 |
 | 写了 `[NinoType]` 却没引用 `Nino.Generator` | 不会生成格式化器 | 运行时 |
 | 组件里存了 `Entity` 句柄 | 托管列，Nino 写不了 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
-| 修改已存档组件的字段 | 旧存档被拒绝 | 加一个新组件类型 |
-| 重命名组件或换了命名空间 | 旧存档加载时丢掉它 | 存档用的类型名保持稳定 |
+| 修改已存档的原始行组件的字段 | 旧存档被拒绝 | 从第一次存档起用 `[NinoType(format: NinoFormat.VersionTolerant)]`，或加一个新组件类型 |
+| 重命名组件或换了命名空间 | 旧存档加载时丢掉它 | 用 `[NinoFormerName]` 标上旧的完整名字 |
 | 新旧两个插件版本同时加载 | 名字歧义：`InvalidDataException` | 先卸载旧版本 |
 | 在其他线程存档或读档 | 和所有者线程竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 

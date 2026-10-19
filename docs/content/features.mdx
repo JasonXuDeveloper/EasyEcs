@@ -398,9 +398,9 @@ them back, any number of times. `Capture(into)` reuses a snapshot's arrays.
 ### Saves [#saves]
 
 `world.Save(writer)` writes a whole world as bytes and `world.Load(bytes)` reads it into a world of this or another
-process: same ids, components and singletons. Unmanaged components are their raw rows; managed components and
-singletons are written by Nino (`[NinoType]`). Types are recorded by name, so a load skips components the process
-no longer has.
+process: same ids, components and singletons. Unmanaged components are their raw rows; managed components, singletons and
+the unmanaged components marked `[NinoType]` are written by Nino. Types are recorded by Nino type id, so a load skips
+components the process no longer has, and `[NinoFormerName]` keeps a renamed one.
 
 - **Use it for:** persistence across restarts, replays on disk, shipping a world to another machine.
 - **Skip it for:** changing an unmanaged component's layout in place: add a new component type, or old saves will

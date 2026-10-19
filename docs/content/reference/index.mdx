@@ -37,6 +37,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 |---|---|
 | [`ChildOf`](/en/docs/reference/childof) | The hierarchy relation: the entity is a child of ChildOf.Parent. |
 | [`ColumnInfo`](/en/docs/reference/columninfo) | A column of a table (TableInfo). |
+| [`ComponentSet`](/en/docs/reference/componentset) | A set of component types, built once and kept (a static readonly field): the components a save writes (World.SaveEntities), the record of what persists without the runtime state around it. |
 | [`ComponentValue`](/en/docs/reference/componentvalue) | A component of an entity, as Entity.Describe reads it: a boxed copy of its value. |
 | [`Destroyed`](/en/docs/reference/destroyed) | Tag of an entity that was destroyed while holding ICleanupComponents: its other components are gone, it stays alive until its last cleanup component is removed. |
 | [`Disabled<T>`](/en/docs/reference/disabled) | The tag of an entity whose T is disabled (Entity.Disable): the entity keeps the value of T but lacks it for queries, Has and Get until Entity.Enable gives it back. |

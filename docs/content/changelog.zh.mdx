@@ -9,6 +9,42 @@ icon: RotateCcwClock
 [迁移指南](/zh/docs/migration)。每个
 [GitHub Release](https://github.com/JasonXuDeveloper/EasyEcs/releases) 也会列出它包含的全部 pull request。
 
+## 4.4.0 [#v4-4-0]
+
+### 新功能 [#v4-4-0-new]
+
+- `world.SaveEntities(output, ids, set)` 只存 `ComponentSet` 里的组件（`ComponentSet.Create().With<Bank>()`，运行时才知道的类型用
+  `With(typeof(Bank))`）：只记录需要持久化的数据，不带周围的运行时组件，这些组件也就不需要 Nino 格式化器。见
+  [只存需要持久化的部分](/zh/docs/guide/migration-and-unload#records)。
+- `world.LoadEntitiesInto(input, entities)` 把这样的存档读到已经存在的实体上：存档里第 i 个实体的组件加到或覆盖第 i 个实体上的组件，
+  每个实体最多换一次表，索引、分组、变更追踪和 `EntityId` 字段都随之更新。见
+  [只存需要持久化的部分](/zh/docs/guide/migration-and-unload#records)。
+- 组件改名或换了命名空间之后，标上 `[NinoFormerName("旧名字")]` 就能读回原来的存档：存档按 Nino 类型 id 记录类型。见
+  [代码改了之后](/zh/docs/guide/saves#versioning)。
+- 标了 `[NinoType]` 的非托管组件由它的 Nino 格式化器写出，所以 `VersionTolerant` 或 `Keyed` 格式的组件可以在版本之间追加成员，旧的行
+  照样能读。见[代码改了之后](/zh/docs/guide/saves#versioning)。
+- 存档加载被拒绝时，报错会写明原因和改法：原始行与格式化器不符、大小或布局变了、进程里两个类型 id 相同。见
+  [为什么存档加载不了](/zh/docs/guide/troubleshooting#save-refused)。
+
+### 性能 [#v4-4-0-performance]
+
+- `DynamicBuffer<T>` 销毁时（实体被销毁、组件被移除），它的列表清空后交给本线程之后创建的、同一元素类型的下一个缓冲：带缓冲的实体
+  反复出现又消失，预热后不分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#what-it-costs)和
+  [决策 D32](/zh/docs/decisions#d32-the-lists-of-dead-buffers-are-pooled-per-thread)。
+
+### 需要修改代码的变更 [#v4-4-0-breaking]
+
+- 4.3 及更早版本写的存档读不了（`InvalidDataException`）：升级之后还要用的数据需要重新写一遍。见
+  [迁移指南](/zh/docs/migration#v4-4-saves)。
+- EasyEcs 改为基于 Nino 4.0.0-rc.6：`Nino.Generator` 也引用 4.0.0-rc.6。见[迁移指南](/zh/docs/migration#v4-4-nino)。
+- 标了 `[NinoType]` 的非托管组件改由格式化器存档，不再按原始行；想要原始行的，去掉这个特性。见
+  [迁移指南](/zh/docs/migration#v4-4-ninotype)。
+
+### 修复 [#v4-4-0-fixes]
+
+- [EECS033](/zh/docs/guide/analyzer#eecs033) 不再建议接收者没有的生成成员（以前会让 `entity.Read<ChildOf>()` 改成 `entity.ChildOf`，
+  那是查询项的成员，改了编译不过）。
+
 ## 4.3.0 [#v4-3-0]
 
 ### 新功能 [#v4-3-0-new]

@@ -119,7 +119,7 @@ world.Load(output.WrittenSpan);  // 组件里存的 EntityId 仍然指向同样�
 ## 能热重载游戏逻辑吗？ [#hot-reload]
 
 能。把系统和组件放进插件程序集，用可回收的 `AssemblyLoadContext` 加载。替换时：先存档，调用 `world.RemoveTypes(assembly)`
-（它的系统、单例、索引和组件离开 World，实体保留），卸载上下文，加载新版本，再 `Load` 存档。类型按名字存档，新版本的组件会接过原来的值
+（它的系统、单例、索引和组件离开 World，实体保留），卸载上下文，加载新版本，再 `Load` 存档。类型按类型 id 存档，新版本的组件会接过原来的值
 （[D17](/zh/docs/decisions#d17-unloading-removes-types-from-worlds-bits-are-reused)）。
 [HotReload 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload)完整演示了这个过程，并验证旧程序集确实被回收。
 

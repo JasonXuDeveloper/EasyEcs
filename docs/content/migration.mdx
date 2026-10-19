@@ -10,6 +10,63 @@ lists every rename, removal and behavior change of its step, with the code to wr
 [changelog](/en/docs/changelog) lists everything each release added; the [API reference](/en/docs/api) is the
 current API.
 
+## v4.3 → v4.4 [#v4-3-to-v4-4]
+
+The save format changed, and EasyEcs builds on Nino 4.0.0-rc.6. Code written for 4.3 compiles unchanged; what needs
+attention is saved data and the Nino package reference.
+
+### Saves of 4.3 and earlier do not load [#v4-4-saves]
+
+A save now records each type by its Nino type id instead of its name, and writes unmanaged `[NinoType]` components
+through their formatter. `Load`, `LoadEntities` and `LoadEntitiesInto` refuse the bytes of an earlier version with
+`InvalidDataException: Not an EasyEcs save (or one of another format version)`, and leave the world as it was.
+
+Write again what must outlive the upgrade: load it with the 4.3 build, move it into a format of your own (or keep the
+4.3 build as the tool that reads it), and save it with 4.4. Saves that only live as long as a process (hot reload,
+handing a player to another server of the same build) need nothing.
+
+### Nino 4.0.0-rc.6 [#v4-4-nino]
+
+EasyEcs references `Nino.Serialization` 4.0.0-rc.6. A project that generates formatters references the same version
+of `Nino.Generator`:
+
+**4.3**
+
+```xml
+<PackageReference Include="Nino.Generator" Version="4.0.0-rc.4" />
+```
+
+**4.4**
+
+```xml
+<PackageReference Include="Nino.Generator" Version="4.0.0-rc.6" />
+```
+
+### Unmanaged `[NinoType]` components are written by Nino [#v4-4-ninotype]
+
+An unmanaged component marked `[NinoType]` was saved as raw rows, like any unmanaged component. It is now written by
+its Nino formatter, value by value, so its format decides how it may change between builds
+([when the code changed](/en/docs/guide/saves#versioning)). Keep the attribute where the shape will change; remove it
+where raw rows (one block per column) are what you want:
+
+**4.3**
+
+```csharp doccheck=skip
+[NinoType]
+public partial record struct Speed(float Value) : IComponent;   // saved as raw rows
+```
+
+**4.4**
+
+```csharp
+using Nino.Core;
+
+public record struct Speed(float Value) : IComponent;            // raw rows
+
+[NinoType(format: NinoFormat.VersionTolerant)]
+public partial record struct Rank(int Tier, int Points) : IComponent;   // by its formatter: may gain members
+```
+
 ## v4.2 → v4.3 [#v4-2-to-v4-3]
 
 The analyzer gained performance rules ([EECS025 to EECS034](/en/docs/guide/analyzer#eecs025)). Code written for 4.2

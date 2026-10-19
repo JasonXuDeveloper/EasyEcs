@@ -574,7 +574,7 @@ Whether entity `id` (that incarnation) is alive. O(1).
 public void Load(ReadOnlySpan<byte> input);
 ```
 
-Replace this world's entities, components and singletons with those [`World.Save`](/en/docs/reference/world#save) wrote (in this process or another). Entities keep their ids and versions, so [`EntityId`](/en/docs/reference/entityid)s stored in components still point at the same entities, and handles made before the save work again. Components and singletons this process has no type for are skipped (their slices); a type is found by name when the process used it or the generator registered it (every component and singleton of a compilation using EasyEcs). Indexes rebuild; groups follow this world's [`World.GroupBy`](/en/docs/reference/world#groupby). Every loaded row counts as written (`[Changed<T>]`). O(entities × components). Not while a pass iterates.
+Replace this world's entities, components and singletons with those [`World.Save`](/en/docs/reference/world#save) wrote (in this process or another). Entities keep their ids and versions, so [`EntityId`](/en/docs/reference/entityid)s stored in components still point at the same entities, and handles made before the save work again. Components and singletons this process has no type for are skipped (their slices); a type is found by its type id when the process used it or the generator registered it (every component and singleton of a compilation using EasyEcs). Indexes rebuild; groups follow this world's [`World.GroupBy`](/en/docs/reference/world#groupby). Every loaded row counts as written (`[Changed<T>]`). O(entities × components). Not while a pass iterates.
 
 **Exceptions**
 
@@ -588,10 +588,25 @@ Replace this world's entities, components and singletons with those [`World.Save
 public int LoadEntities(ReadOnlySpan<byte> input, Span<Entity> entities = default);
 ```
 
-Create the entities [`World.SaveEntities`](/en/docs/reference/world#saveentities) wrote (in this process or another), with new ids, and write their handles in save order into `entities` (as many as fit); returns how many were created. [`EntityId`](/en/docs/reference/entityid) fields of their components and buffer elements that named an entity of the group name its new entity, every other one is [`EntityId.Null`](/en/docs/reference/entityid#null) (the generator tells the world where those fields are; ids inside collections are not rewritten). A [`ChildOf`](/en/docs/reference/childof) whose parent stayed behind is removed: the entity is a root here. Indexes and groups learn the entities; tracked components count as written. O(entities × components). Not while a pass iterates.
+Create the entities `SaveEntities` wrote (in this process or another), with new ids, and write their handles in save order into `entities` (as many as fit); returns how many were created. [`EntityId`](/en/docs/reference/entityid) fields of their components and buffer elements that named an entity of the group name its new entity, every other one is [`EntityId.Null`](/en/docs/reference/entityid#null) (the generator tells the world where those fields are; ids inside collections are not rewritten). A [`ChildOf`](/en/docs/reference/childof) whose parent stayed behind is removed: the entity is a root here. Indexes and groups learn the entities; tracked components count as written. O(entities × components). Not while a pass iterates.
 
 **Exceptions**
 
+- `InvalidDataException`: The bytes are not a save.
+
+**Complexity** ([API table](/en/docs/api)): O(entities × components)
+
+### `LoadEntitiesInto` [#loadentitiesinto]
+
+```csharp
+public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into);
+```
+
+Put the components [`World.SaveEntities`](/en/docs/reference/world#saveentities) wrote onto entities that exist already (an actor whose entity was made before its record arrived): the components of the i-th saved entity are set on `into`[i], added or replacing the values it has, each entity moving table at most once; components the save does not hold stay as they are. Indexes, groups and change ticks follow as with `Set` (every loaded component counts as written); a disabled component arrives disabled with its value. [`EntityId`](/en/docs/reference/entityid) fields that named an entity of the group name the entity of `into` it became, every other one is [`EntityId.Null`](/en/docs/reference/entityid#null), and a [`ChildOf`](/en/docs/reference/childof) whose parent stayed behind is not set. Returns how many entities were loaded. O(entities × components). Not while a pass iterates.
+
+**Exceptions**
+
+- `ArgumentException`: `into` does not hold one living entity of this world per saved entity.
 - `InvalidDataException`: The bytes are not a save.
 
 **Complexity** ([API table](/en/docs/api)): O(entities × components)
@@ -672,7 +687,7 @@ public void RemoveTypes(Assembly assembly);
 
 Remove from this world everything of the types of `assembly`: its systems (OnDestroy runs), singletons, indexes and groupings, and its components from every entity (the entities stay, without them). Tables that had such a column are dropped, with every cache that names them, so the world holds no reference to the assembly any more: once every world removed it, its collectible context can unload, and when it does, EasyEcs reuses its component bits.
 
-To reload game logic and keep its data: [`World.Save`](/en/docs/reference/world#save), remove the types, unload the old context, load the new version, then [`World.Load`](/en/docs/reference/world#load) (types are saved by name, so the new version's components take the values). Owner thread only, not during a pass or an update. O(entities with such components + tables + cached queries); allocates (cold).
+To reload game logic and keep its data: [`World.Save`](/en/docs/reference/world#save), remove the types, unload the old context, load the new version, then [`World.Load`](/en/docs/reference/world#load) (types are saved by type id, so the new version's components take the values). Owner thread only, not during a pass or an update. O(entities with such components + tables + cached queries); allocates (cold).
 
 **Complexity** ([API table](/en/docs/api)):
 
@@ -708,7 +723,7 @@ Put the world back to `snapshot` (taken from this world). Handles of entities al
 public void Save(IBufferWriter<byte> output);
 ```
 
-Write the entities (ids and versions), their components and the singletons into `output`, for [`World.Load`](/en/docs/reference/world#load). Unmanaged components are their raw rows (a layout change makes old saves unloadable: add a new component type instead); managed components and singletons need a Nino formatter (`[NinoType]`). Allocates nothing once its buffers are large enough. O(entities × components). Not while a pass iterates.
+Write the entities (ids and versions), their components and the singletons into `output`, for [`World.Load`](/en/docs/reference/world#load). Unmanaged components are their raw rows (a layout change makes old saves unloadable) unless they are `[NinoType]`s, whose formatter writes them (its format decides what a type may change: fields appended with `VersionTolerant`, any change of members with `Keyed`); managed components and singletons need a Nino formatter. Types are recorded by Nino type id: a type renamed with `[NinoFormerName]` loads its old rows. Allocates nothing once its buffers are large enough. O(entities × components). Not while a pass iterates.
 
 **Complexity** ([API table](/en/docs/api)): O(entities × components)
 
@@ -718,9 +733,25 @@ Write the entities (ids and versions), their components and the singletons into 
 public void SaveEntities(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities);
 ```
 
-Write `entities` (stale ids and repeats are skipped) and their components into `output`, for [`World.LoadEntities`](/en/docs/reference/world#loadentities): a group of entities that moves to another world (a player and what it owns, to another server). Singletons and the other entities are not written; collect a hierarchy with [`World.Children`](/en/docs/reference/world#children). Allocates nothing once its buffers are large enough. O(entities given × components). Not while a pass iterates.
+Write `entities` (stale ids and repeats are skipped) and their components into `output`, for [`World.LoadEntities`](/en/docs/reference/world#loadentities) or [`World.LoadEntitiesInto`](/en/docs/reference/world#loadentitiesinto): a group of entities that moves to another world (a player and what it owns, to another server). Singletons and the other entities are not written; collect a hierarchy with [`World.Children`](/en/docs/reference/world#children). Allocates nothing once its buffers are large enough. O(entities given × components). Not while a pass iterates.
 
-**Complexity** ([API table](/en/docs/api)): O(entities given × components)
+**Complexity** ([API table](/en/docs/api)):
+
+- `world.SaveEntities(output, ids)`: O(entities given × components)
+- `world.SaveEntities(output, ids, set)`: O(entities given × components)
+
+### `SaveEntities` [#saveentities-2]
+
+```csharp
+public void SaveEntities(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, in ComponentSet components);
+```
+
+[`World.SaveEntities`](/en/docs/reference/world#saveentities) of the components in `components` only (a record of the components that persist, without the runtime ones): the others are not written and need no Nino formatter; a tag is written as present or not, a disabled component with its kept value. Entities without any of them are written too, empty. Allocates nothing once its buffers are large enough. O(entities given × components). Not while a pass iterates.
+
+**Complexity** ([API table](/en/docs/api)):
+
+- `world.SaveEntities(output, ids)`: O(entities given × components)
+- `world.SaveEntities(output, ids, set)`: O(entities given × components)
 
 ### `SetAll` [#setall]
 

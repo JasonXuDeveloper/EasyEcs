@@ -1,0 +1,23 @@
+<doc>
+  <member name="T:EasyEcs.ComponentSet" source="ae6790f1e62e">
+    <summary>
+      一组组件类型，建一次就一直留着（放在 <c>static readonly</c> 字段里）：存档要写的组件
+      （<see cref="M:EasyEcs.World.SaveEntities(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId},EasyEcs.ComponentSet@)" />），也就是只记录需要持久化的数据、不带周围运行时状态的那份记录。
+      <c>ComponentSet.Create().With&lt;Bank&gt;().With&lt;Deposits&gt;()</c>；注册时才知道类型的框架按 <see cref="T:System.Type" /> 添加。
+      每次调用都返回一个新集合。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.ComponentSet.Contains``1" source="8860c2e57f9e">
+    <summary>集合里是否有 <typeparamref name="T" />。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.ComponentSet.Create" source="93cd510ab024">
+    <summary>空集合：链式调用的起点。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.ComponentSet.With(System.Type)" source="db0be884050e">
+    <summary>这个集合加上组件类型 <paramref name="type" />（实现 <see cref="T:EasyEcs.IComponent" /> 的结构体）。冷路径：一次查找。</summary>
+    <exception cref="T:System.ArgumentException"><paramref name="type" /> 不是生成器或某个 World 登记过的组件类型。</exception>
+  </member>
+  <member name="M:EasyEcs.ComponentSet.With``1" source="4ff8adba6146">
+    <summary>这个集合加上 <typeparamref name="T" />。O(1)。</summary>
+  </member>
+</doc>

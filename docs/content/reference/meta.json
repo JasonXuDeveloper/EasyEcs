@@ -5,6 +5,7 @@
     "changedattribute",
     "childof",
     "columninfo",
+    "componentset",
     "componentvalue",
     "destroyed",
     "disabled",

@@ -445,6 +445,9 @@ needed, and a method that writes a singleton:
 
 - **A `[ForEach]` method** is a struct job the JIT inlines into the row loop: no delegate, no allocation.
 - **Per system and update:** the `OnUpdate` call, one call per generated job, and one query-cache lookup per method.
+- **A group's filters** (`[With<T>]`, `[Without<T>]` on the group type) cost nothing per update for the tables they exclude: a query's
+  cache holds only the tables that match, so the tables of other kinds of entities in the world (other actor types)
+  add no work to the group's systems, however many there are.
 - **Singleton parameters** are resolved once per pass, not per entity.
 - **Ordering** is resolved when systems are added: an update pays nothing for it.
 - **`MeasureSystems`** costs two timestamp reads per system run; nothing when off.

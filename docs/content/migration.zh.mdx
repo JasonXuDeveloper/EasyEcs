@@ -9,6 +9,57 @@ icon: CircleArrowUp
 要跨好几个版本升级，就从最旧的一节开始，按顺序往下改。每个版本新增了什么见[更新日志](/zh/docs/changelog)；当前的 API
 见 [API 参考](/zh/docs/api)。
 
+## v4.3 → v4.4 [#v4-3-to-v4-4]
+
+存档格式变了，EasyEcs 也改为基于 Nino 4.0.0-rc.6。为 4.3 写的代码不用改就能编译；要注意的是已经存下的数据和 Nino 的包引用。
+
+### 4.3 及更早版本的存档读不了 [#v4-4-saves]
+
+存档现在按 Nino 类型 id 记录每个类型，不再记名字，标了 `[NinoType]` 的非托管组件也改由格式化器写出。`Load`、`LoadEntities` 和
+`LoadEntitiesInto` 读到旧版本的字节时抛 `InvalidDataException: Not an EasyEcs save (or one of another format version)`，World 保持原样。
+
+升级之后还要用的数据，需要重新写一遍：用 4.3 的版本读出来，转存成你自己的格式（或者留着 4.3 的版本专门读它），再用 4.4 存档。只在进程
+存活期间用到的存档（热重载、把玩家交给同一版本的另一台服务器）不用处理。
+
+### Nino 4.0.0-rc.6 [#v4-4-nino]
+
+EasyEcs 引用 `Nino.Serialization` 4.0.0-rc.6。生成格式化器的项目，`Nino.Generator` 也要引用同一版本：
+
+**4.3**
+
+```xml
+<PackageReference Include="Nino.Generator" Version="4.0.0-rc.4" />
+```
+
+**4.4**
+
+```xml
+<PackageReference Include="Nino.Generator" Version="4.0.0-rc.6" />
+```
+
+### 标了 `[NinoType]` 的非托管组件改由 Nino 写出 [#v4-4-ninotype]
+
+标了 `[NinoType]` 的非托管组件，以前和其他非托管组件一样按原始行存档；现在由它的 Nino 格式化器逐个值写出，所以它在版本之间能怎么改，
+由它的格式决定（[代码改了之后](/zh/docs/guide/saves#versioning)）。结构会变的组件保留这个特性；想要原始行（每列一个块）的，去掉它：
+
+**4.3**
+
+```csharp doccheck=skip
+[NinoType]
+public partial record struct Speed(float Value) : IComponent;   // 按原始行存档
+```
+
+**4.4**
+
+```csharp
+using Nino.Core;
+
+public record struct Speed(float Value) : IComponent;            // 原始行
+
+[NinoType(format: NinoFormat.VersionTolerant)]
+public partial record struct Rank(int Tier, int Points) : IComponent;   // 由格式化器写出：以后可以追加成员
+```
+
 ## v4.2 → v4.3 [#v4-2-to-v4-3]
 
 分析器加了性能规则（[EECS025 到 EECS034](/zh/docs/guide/analyzer#eecs025)）。为 4.2 写的代码不用改就能编译，除非某个系统调用了

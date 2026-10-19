@@ -313,6 +313,19 @@ The documentation lives at **[ecs.xgamedev.net](https://ecs.xgamedev.net)**; its
 
 The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading order.
 
+## What's new in 4.4
+
+- **Records of what persists.** `SaveEntities(output, ids, set)` saves only the components of a `ComponentSet`
+  (runtime components need no formatter), and `LoadEntitiesInto` loads them onto entities that exist already, each
+  moving table once ([a record of what persists](https://ecs.xgamedev.net/en/docs/guide/migration-and-unload#records)).
+- **Saved components can evolve.** Saves record types by Nino type id, so `[NinoFormerName]` keeps a renamed
+  component's saves, and an unmanaged `[NinoType]` component is written by its formatter, so a `VersionTolerant` one
+  may gain members ([when the code changed](https://ecs.xgamedev.net/en/docs/guide/saves#versioning)).
+- **Buffers that come and go allocate nothing**: a dead `DynamicBuffer<T>`'s list goes to the next buffer of its
+  element type.
+- The save format changed (saves of 4.3 do not load) and EasyEcs builds on Nino 4.0.0-rc.6: see the
+  [migration guide](https://ecs.xgamedev.net/en/docs/migration#v4-3-to-v4-4).
+
 ## What's new in 4.3
 
 - **Performance rules in the analyzer** ([EECS025 to EECS034](https://ecs.xgamedev.net/en/docs/guide/analyzer#eecs025)): a `ref` that only reads, an

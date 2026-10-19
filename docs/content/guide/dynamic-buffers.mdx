@@ -297,12 +297,21 @@ changed bags (`DynamicBufferBenchmark`), against the same bag as a `List<T>` in 
 
 The buffer is at least as fast as the list it replaces, and the bag cannot change without the change being tracked.
 
+1,000 actors with a mailbox of four messages unloaded and loaded again each operation (`BufferChurnBenchmark`): the
+new buffers take the lists of the dead ones.
+
+<BenchTable bench="BufferChurnBenchmark" />
+
 ## What it costs [#what-it-costs]
 
 - **Memory:** one reference per row in the column, plus one object and one array per entity, made by its first write.
   There is no inline capacity: every list lives on the heap.
 - **A write** stamps the row once, like any [tracked component](/en/docs/guide/change-tracking#what-it-costs).
 - **Adding within the capacity** allocates nothing; growing doubles the array (at least 4 elements).
+- **A buffer that dies** (its entity destroyed, the component removed) hands its list, emptied, to the next buffer of
+  its element type that the thread creates, so entities that come and go with buffers (actors loaded and unloaded,
+  units spawned and killed) allocate nothing once warm. Only lists that died while none were taken wait there, and a
+  list of more than 4 KB is left to the GC.
 - **`TrimExcess`** gives back what a list that once grew large no longer needs; an empty list then holds no array.
 - **Parallel methods** may take a `ref DynamicBuffer<T>`: each chunk writes only its own entities' lists.
 

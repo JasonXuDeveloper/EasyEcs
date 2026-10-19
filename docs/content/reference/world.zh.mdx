@@ -574,7 +574,7 @@ public bool IsAlive(EntityId id);
 public void Load(ReadOnlySpan<byte> input);
 ```
 
-用 [`World.Save`](/zh/docs/reference/world#save) 写出的数据（本进程或别的进程写的）替换这个 World 的实体、组件和单例。实体保留原来的 id 和版本号，所以组件里存的 [`EntityId`](/zh/docs/reference/entityid) 仍然指向原来的实体，存档前拿到的句柄也重新可用。本进程没有对应类型的组件和单例直接跳过（跳过它们那段数据）；进程用过某个类型，或者生成器登记过它（使用 EasyEcs 的程序集里的每个组件和单例都会登记），就能按名字找到它。索引重建；分组按这个 World 自己的 [`World.GroupBy`](/zh/docs/reference/world#groupby) 来。加载的每一行都算写入（`[Changed<T>]`）。O(实体数 × 组件数)。遍历进行中不能调用。
+用 [`World.Save`](/zh/docs/reference/world#save) 写出的数据（本进程或别的进程写的）替换这个 World 的实体、组件和单例。实体保留原来的 id 和版本号，所以组件里存的 [`EntityId`](/zh/docs/reference/entityid) 仍然指向原来的实体，存档前拿到的句柄也重新可用。本进程没有对应类型的组件和单例直接跳过（跳过它们那段数据）；进程用过某个类型，或者生成器登记过它（使用 EasyEcs 的程序集里的每个组件和单例都会登记），就能按类型 id 找到它。索引重建；分组按这个 World 自己的 [`World.GroupBy`](/zh/docs/reference/world#groupby) 来。加载的每一行都算写入（`[Changed<T>]`）。O(实体数 × 组件数)。遍历进行中不能调用。
 
 **异常**
 
@@ -588,10 +588,25 @@ public void Load(ReadOnlySpan<byte> input);
 public int LoadEntities(ReadOnlySpan<byte> input, Span<Entity> entities = default);
 ```
 
-创建 [`World.SaveEntities`](/zh/docs/reference/world#saveentities) 写出的实体（本进程或别的进程写的），分配新的 id，按存档顺序把句柄写进 `entities`（放得下多少写多少）；返回创建的数量。组件和缓冲元素里的 [`EntityId`](/zh/docs/reference/entityid) 字段，原来指向组内实体的，改为指向那个实体的新实体；其余的一律变成 [`EntityId.Null`](/zh/docs/reference/entityid#null)（字段在哪里由生成器告诉 World；集合里的 id 不改写）。父实体没有一起过来的，移除它的 [`ChildOf`](/zh/docs/reference/childof)：实体在这里成为根。索引和分组收录这些实体；被追踪组件算作写入。O(实体数 × 组件数)。遍历进行中不能调用。
+创建 `SaveEntities` 写出的实体（本进程或别的进程写的），分配新的 id，按存档顺序把句柄写进 `entities`（放得下多少写多少）；返回创建的数量。组件和缓冲元素里的 [`EntityId`](/zh/docs/reference/entityid) 字段，原来指向组内实体的，改为指向那个实体的新实体；其余的一律变成 [`EntityId.Null`](/zh/docs/reference/entityid#null)（字段在哪里由生成器告诉 World；集合里的 id 不改写）。父实体没有一起过来的，移除它的 [`ChildOf`](/zh/docs/reference/childof)：实体在这里成为根。索引和分组收录这些实体；被追踪组件算作写入。O(实体数 × 组件数)。遍历进行中不能调用。
 
 **异常**
 
+- `InvalidDataException`：字节不是存档。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(实体数 × 组件数)
+
+### `LoadEntitiesInto` [#loadentitiesinto]
+
+```csharp
+public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into);
+```
+
+把 [`World.SaveEntities`](/zh/docs/reference/world#saveentities) 写出的组件放到已经存在的实体上（Actor 的实体先建好、记录后到的情形）：存档里第 i 个实体的组件设到 `into`[i] 上，没有的加上，已有的覆盖，每个实体最多换一次表；存档里没有的组件保持不变。索引、分组和变更 tick 的表现和 `Set` 一样（加载的每个组件都算写入）；被禁用的组件读进来仍是禁用的，值也保留。[`EntityId`](/zh/docs/reference/entityid) 字段原来指向组内实体的，改为指向它在 `into` 里对应的实体，其余的一律变成 [`EntityId.Null`](/zh/docs/reference/entityid#null)；父实体不在组内的 [`ChildOf`](/zh/docs/reference/childof) 不会被设置。返回加载的实体数。O(实体数 × 组件数)。遍历进行中不能调用。
+
+**异常**
+
+- `ArgumentException`：`into` 没有按存档里的每个实体各给出一个本 World 的存活实体。
 - `InvalidDataException`：字节不是存档。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(实体数 × 组件数)
@@ -672,7 +687,7 @@ public void RemoveTypes(Assembly assembly);
 
 从这个 World 里清掉 `assembly` 里的类型留下的一切：它的系统（执行 OnDestroy）、单例、索引和分组，以及每个实体上它的组件（实体还在，只是没了这些组件）。带这类列的表连同引用它们的所有缓存一起丢弃，World 不再持有这个程序集的任何引用：所有 World 都清掉之后，它所在的可回收上下文就能卸载；卸载之后，EasyEcs 会复用它占用的组件位。
 
-想重新加载游戏逻辑又保留数据：先 [`World.Save`](/zh/docs/reference/world#save)，清掉这些类型，卸载旧上下文，加载新版本，再 [`World.Load`](/zh/docs/reference/world#load)（类型按名字存档，所以新版本的组件会拿到这些值）。只能在所有者线程调用，不能在遍历或更新进行中调用。O(拥有这类组件的实体数 + 表数 + 缓存的查询数)；会分配内存（冷路径）。
+想重新加载游戏逻辑又保留数据：先 [`World.Save`](/zh/docs/reference/world#save)，清掉这些类型，卸载旧上下文，加载新版本，再 [`World.Load`](/zh/docs/reference/world#load)（类型按 id 存档，所以新版本的组件会拿到这些值）。只能在所有者线程调用，不能在遍历或更新进行中调用。O(拥有这类组件的实体数 + 表数 + 缓存的查询数)；会分配内存（冷路径）。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 
@@ -708,7 +723,7 @@ public void Restore(WorldSnapshot snapshot);
 public void Save(IBufferWriter<byte> output);
 ```
 
-把实体（id 和版本号）、它们的组件和单例写进 `output`，供 [`World.Load`](/zh/docs/reference/world#load) 读取。非托管组件按原始行写出（布局一改，旧存档就加载不了，所以要改布局就新增一个组件类型）；托管组件和单例需要 Nino 格式化器（`[NinoType]`）。缓冲区够大之后不分配内存。O(实体数 × 组件数)。遍历进行中不能调用。
+把实体（id 和版本号）、它们的组件和单例写进 `output`，供 [`World.Load`](/zh/docs/reference/world#load) 读取。非托管组件按原始行写出（布局一改，旧存档就加载不了），标了 `[NinoType]` 的除外：它们由格式化器写出，类型能怎么改由格式决定（`VersionTolerant` 可以追加字段，`Keyed` 可以任意增删调换成员）；托管组件和单例需要 Nino 格式化器。类型按 Nino 类型 id 记录：用 `[NinoFormerName]` 改了名的类型能读回旧的行。缓冲区够大之后不分配内存。O(实体数 × 组件数)。遍历进行中不能调用。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(实体数 × 组件数)
 
@@ -718,9 +733,25 @@ public void Save(IBufferWriter<byte> output);
 public void SaveEntities(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities);
 ```
 
-把 `entities`（失效的 id 和重复的 id 跳过）和它们的组件写进 `output`，供 [`World.LoadEntities`](/zh/docs/reference/world#loadentities) 读取：一组要搬去另一个 World 的实体（一个玩家和他拥有的东西，搬到另一台服务器）。单例和组外的实体不写；整棵层级用 [`World.Children`](/zh/docs/reference/world#children) 收集。缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。遍历进行中不能调用。
+把 `entities`（失效的 id 和重复的 id 跳过）和它们的组件写进 `output`，供 [`World.LoadEntities`](/zh/docs/reference/world#loadentities) 或 [`World.LoadEntitiesInto`](/zh/docs/reference/world#loadentitiesinto) 读取：一组要搬去另一个 World 的实体（一个玩家和他拥有的东西，搬到另一台服务器）。单例和组外的实体不写；整棵层级用 [`World.Children`](/zh/docs/reference/world#children) 收集。缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。遍历进行中不能调用。
 
-**复杂度**（[API 表](/zh/docs/api)）：O(给定实体数 × 组件数)
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `world.SaveEntities(output, ids)`：O(给定实体数 × 组件数)
+- `world.SaveEntities(output, ids, set)`：O(给定实体数 × 组件数)
+
+### `SaveEntities` [#saveentities-2]
+
+```csharp
+public void SaveEntities(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, in ComponentSet components);
+```
+
+只写 `components` 里的组件的 [`World.SaveEntities`](/zh/docs/reference/world#saveentities)（只记录需要持久化的组件，不带运行时组件）：其余组件不写，也不需要 Nino 格式化器；标签只记有没有，被禁用的组件连同保留的值一起写。一个这些组件都没有的实体也会写出，只是是空的。缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。遍历进行中不能调用。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `world.SaveEntities(output, ids)`：O(给定实体数 × 组件数)
+- `world.SaveEntities(output, ids, set)`：O(给定实体数 × 组件数)
 
 ### `SetAll` [#setall]
 

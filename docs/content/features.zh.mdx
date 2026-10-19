@@ -350,7 +350,7 @@ restarted.Load(bytes.WrittenSpan);
 ### 存档 [#saves]
 
 `world.Save(writer)` 把整个 World 写成字节，`world.Load(bytes)` 在本进程或另一个进程的 World 里读回来：id、组件和单例都一样。
-非托管组件按原始行写出；托管组件和单例由 Nino 写出（`[NinoType]`）。类型按名字记录，所以加载时会跳过进程里已经不存在的组件。
+非托管组件按原始行写出；托管组件、单例和标了 `[NinoType]` 的非托管组件由 Nino 写出。类型按 Nino 类型 id 记录，所以加载时会跳过进程里已经不存在的组件，改了名的组件用 `[NinoFormerName]` 就能留住。
 
 - **适合：** 跨重启持久化、落盘的回放、把一个 World 发到另一台机器。
 - **别用于：** 原地修改非托管组件的内存布局：请新增一个组件类型，否则旧存档加载不了。

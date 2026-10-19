@@ -10,6 +10,46 @@ major or minor version that needs code changes? The
 [migration guide](/en/docs/migration) has the steps. Each
 [GitHub release](https://github.com/JasonXuDeveloper/EasyEcs/releases) also lists every pull request it contains.
 
+## 4.4.0 [#v4-4-0]
+
+### New [#v4-4-0-new]
+
+- `world.SaveEntities(output, ids, set)` saves only the components of a `ComponentSet`
+  (`ComponentSet.Create().With<Bank>()`, or `With(typeof(Bank))` for types learned at run time): a record of what
+  persists, without the runtime components around it, which then need no Nino formatter. See
+  [a record of what persists](/en/docs/guide/migration-and-unload#records).
+- `world.LoadEntitiesInto(input, entities)` loads such a save onto entities that exist already: the i-th saved
+  entity's components are added to or replace those of the i-th entity, each entity moving table at most once, with
+  indexes, groups, change tracking and `EntityId` fields following. See
+  [a record of what persists](/en/docs/guide/migration-and-unload#records).
+- A component renamed or moved to another namespace keeps its saves with `[NinoFormerName("Old.Name")]`: saves
+  record types by their Nino type id. See [when the code changed](/en/docs/guide/saves#versioning).
+- An unmanaged `[NinoType]` component is written by its Nino formatter, so a `VersionTolerant` or `Keyed` one may gain
+  members between builds and still load its old rows. See [when the code changed](/en/docs/guide/saves#versioning).
+- A refused load names the cause and the fix: raw rows against a formatter, a changed size or layout, two types of the
+  process sharing an id. See [why a save does not load](/en/docs/guide/troubleshooting#save-refused).
+
+### Performance [#v4-4-0-performance]
+
+- A `DynamicBuffer<T>` that dies (its entity destroyed, the component removed) hands its emptied list to the next
+  buffer of its element type the thread creates: entities that come and go with buffers allocate nothing once warm.
+  See [dynamic buffers](/en/docs/guide/dynamic-buffers#what-it-costs) and
+  [decision D32](/en/docs/decisions#d32-the-lists-of-dead-buffers-are-pooled-per-thread).
+
+### Changes that need code changes [#v4-4-0-breaking]
+
+- Saves written by 4.3 or earlier do not load (`InvalidDataException`): write again the data that must outlive the
+  upgrade. See the [migration guide](/en/docs/migration#v4-4-saves).
+- EasyEcs builds on Nino 4.0.0-rc.6: reference `Nino.Generator` 4.0.0-rc.6. See the
+  [migration guide](/en/docs/migration#v4-4-nino).
+- An unmanaged component marked `[NinoType]` is saved by its formatter instead of as raw rows; remove the attribute
+  where raw rows are meant. See the [migration guide](/en/docs/migration#v4-4-ninotype).
+
+### Fixes [#v4-4-0-fixes]
+
+- [EECS033](/en/docs/guide/analyzer#eecs033) no longer suggests a generated member the receiver does not have
+  (`entity.Read<ChildOf>()` was told to become `entity.ChildOf`, a member of query items, which does not compile).
+
 ## 4.3.0 [#v4-3-0]
 
 ### New [#v4-3-0-new]

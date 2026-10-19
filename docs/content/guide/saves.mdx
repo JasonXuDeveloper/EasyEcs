@@ -8,7 +8,8 @@ icon: Save
 A server restarts and must come back with its world: players where they stood, timers where they were, links between
 entities intact. `world.Save(output)` writes the entities (ids and versions), their components and the singletons as
 bytes, and `world.Load(bytes)` puts them into a world of this process or another one. Unmanaged components are their
-raw rows, one block per column; managed ones go through [Nino](https://github.com/JasonXuDeveloper/Nino). Saving and
+raw rows, one block per column; managed ones, and the components marked `[NinoType]`, go through
+[Nino](https://github.com/JasonXuDeveloper/Nino). Saving and
 loading again into the same buffers allocates nothing.
 
 ## When to use it [#when-to-use-it]
@@ -21,7 +22,8 @@ loading again into the same buffers allocates nothing.
 <Callout type="warn" title="Skip it for">
   Rolling back inside one process: a [snapshot](/en/docs/guide/snapshots) is faster and needs no encoding. Moving a
   player to another server: [`SaveEntities`](/en/docs/guide/migration-and-unload#save-entities) writes just the group.
-  Long-term storage across schema changes you cannot control: a save refuses a component whose fields changed.
+  Saving only what persists of an entity and loading it onto a live one: [a record](/en/docs/guide/migration-and-unload#records)
+  is `SaveEntities` with a `ComponentSet`, loaded by `LoadEntitiesInto`.
 </Callout>
 
 ## How to use it [#how-to-use-it]
@@ -32,7 +34,8 @@ loading again into the same buffers allocates nothing.
 ### Declare the components [#declare]
 
 Unmanaged components need nothing. A managed component (one with a `string`, an array, a class) needs a Nino formatter:
-mark it `[NinoType]` and make it `partial`, with the `Nino.Generator` package referenced next to EasyEcs.
+mark it `[NinoType]` and make it `partial`, with the `Nino.Generator` package referenced next to EasyEcs. Mark an
+unmanaged component `[NinoType]` too when its shape will change between builds ([below](#versioning)).
 
 ```xml title="Game.csproj"
 <PackageReference Include="EasyEcs" Version="4.*" />
@@ -94,41 +97,61 @@ long tick = restarted.Clock.Tick;                                      // 1234
 | [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) elements | Change ticks (every loaded row counts as written) |
 | Every singleton | |
 
-Types are recorded by name (their namespace-qualified name), and each column is a length-prefixed slice, so a load
-skips the components this process has no type for. A type is found when the process used it, or when the generator
-registered it: every component and singleton of a compilation that uses EasyEcs is registered when its module loads.
+Types are recorded by their Nino type id (a hash of the namespace-qualified name), and each column is a
+length-prefixed slice, so a load skips the components this process has no type for. A type is found when the process
+used it, or when the generator registered it: every component and singleton of a compilation that uses EasyEcs is
+registered when its module loads.
 
 ### When the code changed [#versioning]
 
-A save records, for each unmanaged component, its size and a hash of its fields (names, types, layout attributes); a
-managed component's slice must be read to its last byte by its Nino formatter. A load refuses a component whose fields
-changed, with an `InvalidDataException`, and leaves the world as it was:
+How a component may change depends on how it is written. A plain unmanaged component is its raw rows: the save records
+its size and a hash of its fields (names, types, layout attributes), and only the same shape loads them. A
+`[NinoType]` component, managed or unmanaged, is written by its Nino formatter, and its
+[format](https://nino.xgamedev.net/en/docs/v4/evolving-data) decides what may change: `Positional` (the default) reads
+only the shape it wrote, `VersionTolerant` reads rows written before members were appended, `Keyed` also takes
+members inserted, removed or reordered. A load refuses what it cannot read, with an `InvalidDataException`, and leaves
+the world as it was:
 
 | Change since the save | Load |
 | --- | --- |
 | A component type added | Loads: the new type has no rows |
-| A component type removed or renamed | Loads: its slices are skipped (its data is dropped) |
-| Fields of an unmanaged component changed (added, removed, retyped, renamed) | `InvalidDataException` |
-| Fields of a managed component changed so that its slice no longer reads to the last byte | `InvalidDataException` |
-| Two types of the process saved under one name | `InvalidDataException`: rename one |
+| A component type removed | Loads: its slices are skipped (its data is dropped) |
+| A component type renamed or moved to another namespace | Loads with `[NinoFormerName("Old.Namespace.Name")]` on it; skipped without |
+| Fields of a raw unmanaged component changed (added, removed, retyped, renamed) | `InvalidDataException` |
+| Members appended to a `VersionTolerant` or `Keyed` component | Loads: the new members keep their defaults |
+| A change the component's Nino format does not allow (its slice no longer reads to the last byte) | `InvalidDataException` |
+| A component switched between raw rows and `[NinoType]` | `InvalidDataException` |
+| Two types of the process with one id (one name, or a former name that is another's) | `InvalidDataException`: rename one |
 | Bytes that are not a save, or a damaged one | `InvalidDataException` |
 
-A managed component is checked by its bytes only: a change Nino still reads exactly (two `string` fields swapped) is
-not detected. To change the shape of saved data, add a new component type instead of editing the old one: a build that has both
-loads the old save, a system converts the old component into the new one, and a later build drops the old type.
+So a component whose shape will change is a `[NinoType]` from its first save. It stays unmanaged (a column of
+values, no references), and Nino writes it value by value instead of as one block:
 
 ```csharp
-public record struct Inventory(int Gold, int Wood, int Stone) : IComponent;   // the new shape
+[NinoType(format: NinoFormat.VersionTolerant)]
+public partial record struct Rank(int Tier, int Points) : IComponent;          // the first build
 
-// Runs in the build that knows both types: every loaded Stock becomes an Inventory.
-// A later build deletes Stock and this system.
-public class UpgradeStock : EcsSystem
+// A later build renames it and appends a member: old saves load, Season is 0 in their rows.
+[NinoType(format: NinoFormat.VersionTolerant), NinoFormerName("Rank")]
+public partial record struct Standing(int Tier, int Points, int Season) : IComponent;
+```
+
+A raw component cannot change shape. Add a new component type instead: a build that has both loads the old save, a
+system converts the old component into the new one, and a later build drops the old type.
+
+```csharp
+public record struct Crafting(int Recipe, int Progress) : IComponent;          // saved as raw rows
+public record struct Workshop(int Recipe, int Progress, int Queue) : IComponent;   // the new shape
+
+// Runs in the build that knows both types: every loaded Crafting becomes a Workshop.
+// A later build deletes Crafting and this system.
+public class UpgradeCrafting : EcsSystem
 {
     [ForEach]
-    static void Upgrade(Entity player, in Stock old)
+    static void Upgrade(Entity player, in Crafting old)
     {
-        player.SetInventory(old.Gold, old.Wood, Stone: 0);
-        player.RemoveStock();
+        player.SetWorkshop(old.Recipe, old.Progress, Queue: 0);
+        player.RemoveCrafting();
     }
 }
 ```
@@ -146,8 +169,8 @@ catch (InvalidDataException)
 
 ### Components in plugins [#plugins]
 
-The name lookup is process-wide. While a plugin's old version and its new one are both loaded, their types share
-names and a load refuses them as ambiguous. Unload the old version first (the [hot reload](/en/docs/guide/migration-and-unload#hot-reload)
+The id lookup is process-wide. While a plugin's old version and its new one are both loaded, their types share ids and
+a load refuses them as ambiguous. Unload the old version first (the [hot reload](/en/docs/guide/migration-and-unload#hot-reload)
 order: save, `RemoveTypes`, unload, load the new version, `Load`), or keep the components you save in an assembly
 that is never reloaded, such as a contracts assembly shared by the host and the plugins.
 
@@ -159,6 +182,7 @@ that is never reloaded, such as a contracts assembly shared by the host and the 
 | Another `IBufferWriter<byte>` | `NinoArrayBufferWriter` | Written directly, without the copy from the world's buffer |
 | A new world per load | `Load` into the same world | Its rows are reused: 0 B once warm |
 | Managed components where values would do | Unmanaged components (ids, numbers, fixed arrays) | Raw rows are one block per column; Nino encodes value by value |
+| `[NinoType]` on unmanaged components that never change | Raw rows for those, `[NinoType]` where the shape will change | A raw column is one copy |
 | Your own serializer over a `Query` | `Save` / `Load` | Ids, versions, buffers, disabled values and singletons come along |
 
 100,000 entities in two tables, saved into a reused buffer and loaded back (`SnapshotBenchmark`):
@@ -168,7 +192,7 @@ that is never reloaded, such as a contracts assembly shared by the host and the 
 ## What it costs [#what-it-costs]
 
 - **Size:** for unmanaged components, the rows themselves (padding bytes cleared, so equal worlds save equal bytes),
-  plus presence bits, ids and versions; managed components as Nino writes them; each type's name once.
+  plus presence bits, ids and versions; managed and `[NinoType]` components as Nino writes them; each type's id once.
 - **Time:** O(entities × components) both ways.
 - **Allocation:** none on a repeated `Save` into a `NinoArrayBufferWriter`, none on a repeated `Load` into the same
   world; managed values a load reads are new objects.
@@ -181,8 +205,8 @@ that is never reloaded, such as a contracts assembly shared by the host and the 
 | A managed component without `[NinoType]` | `Save` throws `InvalidOperationException` (no formatter) | At run time |
 | `[NinoType]` without the `Nino.Generator` package | No formatter is generated | At run time |
 | An `Entity` handle in a component | A managed column Nino cannot write | [EECS017](/en/docs/guide/analyzer#eecs017) |
-| Editing the fields of a saved component | Old saves are refused | Add a new component type |
-| Renaming a component or moving its namespace | Old saves load without it | Keep saved type names stable |
+| Editing the fields of a saved raw component | Old saves are refused | `[NinoType(format: NinoFormat.VersionTolerant)]` from the first save, or a new component type |
+| Renaming a component or moving its namespace | Old saves load without it | `[NinoFormerName]` with the old full name |
 | Old and new plugin versions loaded at once | Ambiguous names: `InvalidDataException` | Unload the old version first |
 | Saving or loading from another thread | Races with the owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |
 

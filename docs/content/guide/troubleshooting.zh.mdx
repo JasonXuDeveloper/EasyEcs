@@ -21,10 +21,11 @@ faq: true
 | `[UpdateBefore] / [UpdateAfter] form a cycle` | [顺序成环](#ordering-cycle) |
 | `X cannot be disabled: remove it instead` | [禁用清理组件或 `ChildOf`](#cannot-disable) |
 | `Snapshots cannot be captured or restored while a query iterates`、`Types cannot be removed during a pass` | [要等遍历结束的调用](#during-a-pass) |
-| `Not an EasyEcs save`、`The size of X changed`、`The fields of X changed`、`A damaged save` | [存档加载不了](#save-refused) |
+| `Not an EasyEcs save`、`The size of X changed`、`The fields of X changed`、`X was saved as`、`Types of this process share the save id`、`A damaged save` | [存档加载不了](#save-refused) |
 
 不抛异常的问题：[系统从不运行](#system-does-not-run)、[系统没有并行](#not-parallel)、[生成成员缺失](#member-missing)、
-[通过 `ref` 写的值丢了](#ref-lost)、[加载后组件不见了](#save-dropped-data)。
+[通过 `ref` 写的值丢了](#ref-lost)、[加载后组件不见了](#save-dropped-data)、
+[另一个生成器加上的接口](#other-generators)。
 
 ## 为什么结构变更报 “started while another one was running”？ [#structural-change-running]
 
@@ -141,16 +142,21 @@ InvalidOperationException: Types cannot be removed during a pass
 
 ```text
 InvalidDataException: Not an EasyEcs save (or one of another format version)
-InvalidDataException: The size of Stock changed (8 bytes saved, 12 now): its saves cannot be loaded
-InvalidDataException: The fields of Stock changed since the save: its saves cannot be loaded (add a new component type instead)
+InvalidDataException: The size of Stock changed (8 bytes saved, 12 now): its saves cannot be loaded (…)
+InvalidDataException: The fields of Stock changed since the save: its saves cannot be loaded (…)
+InvalidDataException: Stock was saved as raw rows and is written by its Nino formatter now: its saves cannot be loaded
+InvalidDataException: Types of this process share the save id … (…): unload or rename one of them (…)
 InvalidDataException: A damaged save: …
 ```
 
 加载时，每个组件都要和读取它的代码对上，加载被拒绝时 World 保持原样。
 
-- **Not an EasyEcs save：**这些字节是别的东西、被截断了，或者是另一个存档格式版本写的。
-- **大小或字段变了：**存档之后，非托管组件的字段被增、删、改名或改了类型，或者托管（`[NinoType]`）组件的数据读不到最后一个字节。
-  保留旧类型，加一个新类型，再用系统转换（[代码改了之后](/zh/docs/guide/saves#versioning)）。
+- **Not an EasyEcs save：**这些字节是别的东西、被截断了，或者是另一个存档格式版本写的（EasyEcs 4.3 及更早版本的存档）。
+- **大小或字段变了：**存档之后，原始行组件的字段被增、删、改名或改了类型，或者 `[NinoType]` 组件的改动超出了它的 Nino 格式允许的范围。
+  结构会变的组件标成 `VersionTolerant` 或 `Keyed` 格式的 `[NinoType]`，或者保留旧类型、再用系统转换（[代码改了之后](/zh/docs/guide/saves#versioning)）。
+- **原始行与 Nino：**存档之后，给非托管组件加上或去掉了 `[NinoType]`。
+- **存档 id 冲突：**进程里两个类型的 id 相同：带命名空间的全名相同（同一插件的两个版本同时加载），或者某个 `[NinoFormerName]` 正好是
+  另一个类型的名字。先卸载旧版本，或者给其中一个改名。
 - **A damaged save：**某个计数或 id 越界，或者缓冲比它的字节还长：字节已损坏。
 
 ## 为什么我的系统从不运行？ [#system-does-not-run]
@@ -198,8 +204,15 @@ InvalidDataException: A damaged save: …
 
 ## 为什么加载后某个组件不见了？ [#save-dropped-data]
 
-存档按带命名空间的全名记录每个类型，加载时跳过这个进程里没有的类型。存档之后被改名或挪了命名空间的组件，加载时就当作不存在：数据被
-丢弃，也不报错。存档用到的类型名要保持稳定；插件的新旧两个版本同时加载时，先卸载旧版本再加载存档（[存档](/zh/docs/guide/saves#plugins)）。
+存档按 Nino 类型 id（带命名空间的全名的哈希）记录每个类型，加载时跳过这个进程里没有的类型。存档之后被改名或挪了命名空间的组件，加载时
+就当作不存在：数据被丢弃，也不报错。给改了名的类型标上 `[NinoFormerName("旧命名空间.旧名字")]`，旧的行就能读回来
+（[代码改了之后](/zh/docs/guide/saves#versioning)）。
+
+## 为什么生成器看不到另一个生成器加上的接口？ [#other-generators]
+
+组件、单例和系统的 EasyEcs 接口（`IComponent`、`ITrackChanges`、`IIndexed<TKey>` 等）必须写在你自己的代码里。所有源生成器读的是
+同一份输入，谁也看不到别人的输出，所以另一个生成器给 partial 类型加上 `IComponent` 时，EasyEcs 的生成器并不知道它是组件：不会为它
+生成成员，加载存档时也要等进程用过这个类型才找得到它。把接口写在你自己的声明上；另一个生成器照样可以往同一个 partial 类型里加成员。
 
 ## 相关页面 [#related]
 

@@ -22,11 +22,12 @@ page for the first words of your message.
 | `[UpdateBefore] / [UpdateAfter] form a cycle` | [An ordering cycle](#ordering-cycle) |
 | `X cannot be disabled: remove it instead` | [Disabling a cleanup component or `ChildOf`](#cannot-disable) |
 | `Snapshots cannot be captured or restored while a query iterates`, `Types cannot be removed during a pass` | [Calls that wait for the end of a pass](#during-a-pass) |
-| `Not an EasyEcs save`, `The size of X changed`, `The fields of X changed`, `A damaged save` | [A save that does not load](#save-refused) |
+| `Not an EasyEcs save`, `The size of X changed`, `The fields of X changed`, `X was saved as`, `Types of this process share the save id`, `A damaged save` | [A save that does not load](#save-refused) |
 
 The problems that throw nothing: [a system that never runs](#system-does-not-run),
 [systems that do not run in parallel](#not-parallel), [a missing generated member](#member-missing),
-[a lost write through a `ref`](#ref-lost) and [a component dropped by a load](#save-dropped-data).
+[a lost write through a `ref`](#ref-lost), [a component dropped by a load](#save-dropped-data) and
+[an interface another generator adds](#other-generators).
 
 ## Why does a structural change throw "started while another one was running"? [#structural-change-running]
 
@@ -153,17 +154,25 @@ between updates, outside any query loop ([snapshots](/en/docs/guide/snapshots),
 
 ```text
 InvalidDataException: Not an EasyEcs save (or one of another format version)
-InvalidDataException: The size of Stock changed (8 bytes saved, 12 now): its saves cannot be loaded
-InvalidDataException: The fields of Stock changed since the save: its saves cannot be loaded (add a new component type instead)
+InvalidDataException: The size of Stock changed (8 bytes saved, 12 now): its saves cannot be loaded (…)
+InvalidDataException: The fields of Stock changed since the save: its saves cannot be loaded (…)
+InvalidDataException: Stock was saved as raw rows and is written by its Nino formatter now: its saves cannot be loaded
+InvalidDataException: Types of this process share the save id … (…): unload or rename one of them (…)
 InvalidDataException: A damaged save: …
 ```
 
 A load checks every component against the code that reads it, and a refused load leaves the world as it was.
 
-- **Not an EasyEcs save:** the bytes are something else, cut short, or written by another save format version.
-- **Size or fields changed:** an unmanaged component's fields were added, removed, renamed or retyped since the save,
-  or a managed (`[NinoType]`) component's data no longer reads to its last byte. Keep the old type and add a new one,
-  then convert in a system ([when the code changed](/en/docs/guide/saves#versioning)).
+- **Not an EasyEcs save:** the bytes are something else, cut short, or written by another save format version (a
+  save of EasyEcs 4.3 or earlier).
+- **Size or fields changed:** a raw unmanaged component's fields were added, removed, renamed or retyped since the
+  save, or a `[NinoType]` component changed in a way its Nino format does not allow. Make a component whose shape will
+  change a `[NinoType]` with the `VersionTolerant` or `Keyed` format, or keep the old type and convert it in a system
+  ([when the code changed](/en/docs/guide/saves#versioning)).
+- **Raw rows and Nino:** `[NinoType]` was added to or removed from an unmanaged component since the save.
+- **A shared save id:** two types of the process have one id: the same namespace-qualified name (two versions of a
+  plugin loaded at once), or a `[NinoFormerName]` that is another type's name. Unload the old version first, or rename
+  one of them.
 - **A damaged save:** a count or an id is out of range, or a buffer is longer than its bytes: the bytes are corrupt.
 
 ## Why does my system never run? [#system-does-not-run]
@@ -222,10 +231,19 @@ generated `WriteX()` for a tracked one, so that the change is stamped
 
 ## Why did a component vanish after a load? [#save-dropped-data]
 
-A save names each type by its namespace-qualified name, and a load skips the types this process does not have. A
-component renamed or moved to another namespace since the save loads as missing: its data is dropped without an
-error. Keep the names of saved types stable, and while a plugin's old and new versions are both loaded, unload the old
-one before loading a save ([saves](/en/docs/guide/saves#plugins)).
+A save names each type by its Nino type id (a hash of its namespace-qualified name), and a load skips the types this
+process does not have. A component renamed or moved to another namespace since the save loads as missing: its data is
+dropped without an error. Put `[NinoFormerName("Old.Namespace.Name")]` on the renamed type, and its old rows load
+([when the code changed](/en/docs/guide/saves#versioning)).
+
+## Why does the generator not see an interface another generator adds? [#other-generators]
+
+A component, singleton or system must declare its EasyEcs interface (`IComponent`, `ITrackChanges`,
+`IIndexed<TKey>` and the others) in code you wrote. Source generators all run on the same input and none sees the
+others' output, so when another generator adds `IComponent` to a partial type, EasyEcs's generator never learns that
+the type is a component: it writes no members for it, and a load finds the type only once the process has used
+it. Write the interface on your own
+declaration; the other generator may still add its members to the same partial type.
 
 ## Related [#related]
 

@@ -37,6 +37,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 |---|---|
 | [`ChildOf`](/zh/docs/reference/childof) | 层级关系：实体是 ChildOf.Parent 的子实体。 |
 | [`ColumnInfo`](/zh/docs/reference/columninfo) | 表的一列（TableInfo）。 |
+| [`ComponentSet`](/zh/docs/reference/componentset) | 一组组件类型，建一次就一直留着（放在 static readonly 字段里）：存档要写的组件（World.SaveEntities），也就是只记录需要持久化的数据、不带周围运行时状态的那份记录。 |
 | [`ComponentValue`](/zh/docs/reference/componentvalue) | 实体的一个组件，即 Entity.Describe 读到的结果：它的值的装箱副本。 |
 | [`Destroyed`](/zh/docs/reference/destroyed) | 实体持有 ICleanupComponent 时销毁，就会带上这个标签：其他组件已经去掉，实体一直存活到最后一个清理组件移除为止。 |
 | [`Disabled<T>`](/zh/docs/reference/disabled) | T 处于禁用状态（Entity.Disable）的实体带的标签：实体保留 T 的值，但在 Entity.Enable 还回来之前，查询、Has 和 Get 都当它不存在。 |

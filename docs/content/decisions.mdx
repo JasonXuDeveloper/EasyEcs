@@ -47,6 +47,9 @@ after the change on the machine of the time; they are history, not the current r
 | [D27](#d27-reading-a-missing-singleton-throws-everywhere) | Reading a missing singleton throws everywhere |
 | [D28](#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap) | Reservations grow to what they need; entity storage on the pinned heap |
 | [D29](#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same) | Performance rules only where the cost is measured and the fix does the same |
+| [D30](#d30-saves-record-types-by-nino-type-id) | Saves record types by Nino type id; Nino writes the unmanaged components marked `[NinoType]` |
+| [D31](#d31-a-record-of-what-persists) | A record of what persists: a component set to save, loading onto existing entities |
+| [D32](#d32-the-lists-of-dead-buffers-are-pooled-per-thread) | The lists of dead buffers are pooled per thread |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -210,7 +213,7 @@ splits them into their own tables when that matters. A filter on a system group 
 Unmanaged rows are written in a canonical layout with a hash of their fields, so a changed struct is detected at load;
 the generator records where `EntityId` fields are, so a migration can point them at the new entities.
 
-**Why.** Rewriting references, loading by type name and reusing rows on repeated loads (0 B allocated) need the
+**Why.** Rewriting references, loading by type id and reusing rows on repeated loads (0 B allocated) need the
 world's tables and the generator; user code over a `Query` could not do them. (Until 4.0 saving was left to the user.)
 
 ## D10. `MoveEntities` copies rows without encoding [#d10-moveentities-copies-rows-without-encoding]
@@ -281,7 +284,7 @@ pointers to the methods (an indirect call per row, no inlining); reflection at s
 **Decision.** `world.RemoveTypes(assembly or context)` takes an assembly's systems, singletons, indexes, groupings and
 components out of the world. Entities stay; tables that had one of its columns are dropped with every cache naming
 them. When a collectible context unloads, EasyEcs forgets its save names, and its component bits are reused once no
-live world mentions them. A reload keeps data through `Save` and `Load`, which map types by name.
+live world mentions them. A reload keeps data through `Save` and `Load`, which map types by id.
 
 **Why.** Game logic reloaded in a long-running server must leave nothing rooting the old assembly (column arrays,
 transition edges, query cache keys, registries), and repeated reloads must not grow every mask. Dropping tables is
@@ -289,7 +292,7 @@ the one place a table is deleted outside `Dispose`, so steady-state code pays no
 WorldSimulation within noise).
 
 **Considered.** Migrating rows from the old types to the new ones in memory (needs a type map for every field; `Save`
-/ `Load` already map by name and field hash); never reusing bits (the mask grows by every reloaded component).
+/ `Load` already map by type id and field hash); never reusing bits (the mask grows by every reloaded component).
 
 ## D18. No interceptors for query calls; filters carry no references [#d18-no-interceptors-for-query-calls-filters-carry-no-references]
 
@@ -587,6 +590,84 @@ allocates nothing.
   an index lookup is O(1) and a `[ForEach]` method cannot hoist it. No rule.
 - **A `QueryFilter` built per call instead of kept in a `static readonly` field**: a filter is a small struct with no
   references ([D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references)); not measured as a cost. No rule.
+
+## D30. Saves record types by Nino type id; Nino writes the unmanaged components marked `[NinoType]` [#d30-saves-record-types-by-nino-type-id]
+
+**Decision.** A save (format 2) records each component, buffer element and singleton type by its Nino type id: the
+hash Nino computes from the namespace-qualified name, or from the name `[NinoFormerName]` keeps. A plain unmanaged
+component is written as its raw rows, as before; an unmanaged one marked `[NinoType]` is written by its formatter, row
+by row. A load refuses rows written another way than the process writes them, and two types of the process that share
+an id, with a message that names the fix. Format 1 saves (4.3 and earlier) are refused.
+
+**Why.**
+- **Renames are the change saved data meets most often**, and a name in the save made each one a silent loss of data.
+  Nino already has the rule for it (`[NinoFormerName]` keeps a type's id across renames, also for its own polymorphic
+  data), so EasyEcs follows that rule instead of adding a second rename attribute or map.
+- **Unmanaged components need to change too.** A raw row can only load into the same shape; a component that will
+  gain fields says so by marking itself `[NinoType]`, and its format decides what may change (`VersionTolerant`
+  appended members, `Keyed` any member change). Components that stay raw keep the block copy.
+- **The cost stays where it is chosen.** 100,000 entities in two raw tables save in 271 µs before and 262 µs after,
+  load in 1,052 and 1,003 µs; one entity of four components goes through bytes and back in 2.25 and 2.22 µs; all
+  0 B. A type costs four bytes for its id instead of its name.
+- **No conversion of old saves.** A reader for format 1 would keep the name lookup in every later version, for data a
+  build can write again once (the [migration guide](/en/docs/migration#v4-4-saves) has the steps).
+
+**Considered.**
+- **Names with a rename map** (`World.RenameType("Old", typeof(New))`): a second mechanism next to Nino's, configured
+  in code instead of on the type.
+- **Nino's type registry** for the lookup: it caches types process-wide, so a collectible plugin's types could never
+  unload; EasyEcs computes the ids itself and forgets them with the plugin.
+- **Every unmanaged component through Nino:** the block copy of a column is what makes a save fast, and most
+  components never change shape.
+
+## D31. A record of what persists: a component set to save, loading onto existing entities [#d31-a-record-of-what-persists]
+
+**Decision.** `SaveEntities(output, ids, set)` writes only the components of a `ComponentSet`, and
+`LoadEntitiesInto(input, entities)` loads a group save onto entities that exist, the i-th saved entity onto the i-th
+given, each moving table at most once. A `ComponentSet` is a bit mask built once (`With<T>()`, `With(Type)`); the save
+selects each table's rows in O(group).
+
+**Why.**
+- **An actor persists part of its entity**: a balance survives a restart, its connection and timers do not, and those
+  runtime components often have no Nino formatter. A set names the record per save, so one entity can feed several
+  stores.
+- **The entity exists before its record arrives.** An actor is activated, gets its entity and starts handling
+  messages while its record loads from a database; `LoadEntities` would create a second entity and rewrite the
+  record's `EntityId` fields to it.
+- **One move per entity.** The components a record brings are added with one transition (a signature cached per
+  table), then written, so the indexes, groups and change ticks follow as with one `Set` of all of them.
+- **Measured** (`MigrationBenchmark`, warm, 0 B): saving two of an entity's four components takes 104 ns, loading
+  them onto an entity that holds the other two 722 ns, against 2.22 µs to send the whole entity through bytes and
+  create it again.
+
+**Considered.**
+- **A `[Persistent]` attribute on component types:** one global choice, where different saves of one entity need
+  different components.
+- **Filtering at load time:** the save would still write, and need formatters for, the runtime components.
+- **`LoadEntities`, then copying the components onto the actor by hand:** two moves per entity, a temporary entity,
+  and `EntityId` fields that name the temporary one.
+
+## D32. The lists of dead buffers are pooled per thread [#d32-the-lists-of-dead-buffers-are-pooled-per-thread]
+
+**Decision.** A `DynamicBuffer<T>` whose value dies (its component removed, its entity destroyed, its table dropped,
+a disabled value discarded) empties its list and keeps it in a pool of its element type on the current thread; a first
+write takes a list from there before allocating one. The pool holds only lists that died while none were taken, and
+drops a list of more than 4 KB.
+
+**Why.**
+- **Entities that come and go with buffers allocated per entity.** An actor loading with a mailbox and unloading
+  again cost two allocations each time: 1,000 actors with four messages each, unloaded and loaded,
+  took 76.4 µs and 85.9 KB before, 76.9 µs and 0 B after (`BufferChurnBenchmark`); the other buffer benchmarks did not
+  move.
+- **Per thread is per world.** Buffers die in structural changes, which run on the world's owner thread, so the lists
+  of a world come back to the buffers of that world (or another world of the thread) with no lock.
+- **Bounded like the rows.** The pool grows only to the most lists dead at once, the peak a table's capacity keeps
+  as well, and the 4 KB cap leaves a list that once grew large to the collector.
+
+**Considered.**
+- **Recycling when rows are released:** a row move copies the reference first, so the list would still be in use.
+- **A fixed number of pooled lists** (256): churn above it allocated again, and a peak is already bounded by the
+  entities that held the lists.
 
 ## Related [#related]
 

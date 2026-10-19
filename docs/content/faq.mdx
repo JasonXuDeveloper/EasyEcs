@@ -140,7 +140,7 @@ and singletons go through [Nino](https://github.com/JasonXuDeveloper/Nino) (`[Ni
 
 Yes. Load your systems and components from a plugin assembly in a collectible `AssemblyLoadContext`. To replace it,
 save the world, call `world.RemoveTypes(assembly)` (its systems, singletons, indexes and components leave the world;
-the entities stay), unload the context, load the new version and `Load` the save: types are saved by name, so the new
+the entities stay), unload the context, load the new version and `Load` the save: types are saved by type id, so the new
 version's components take the values ([D17](/en/docs/decisions#d17-unloading-removes-types-from-worlds-bits-are-reused)).
 The [HotReload sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload) does it end to
 end and checks that the old assembly was collected.

@@ -10,7 +10,7 @@ Game logic in a plugin that is replaced while the world keeps running. Read [Mul
   of the world, so nothing in it roots the plugin and the context can be collected. The host's own entities,
   components and systems stay.
 - **Keeping the data.** Saving before the unload and loading after the reload carries the plugin's component
-  values over: a save names types by name, not by the assembly that loaded them.
+  values over: a save names types by their type id (a hash of the full name), not by the assembly that loaded them.
 
 ## Projects and files, in reading order
 

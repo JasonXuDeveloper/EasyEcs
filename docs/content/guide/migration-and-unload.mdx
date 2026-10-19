@@ -75,6 +75,42 @@ int count = world.MoveEntities(nextZone, group.ToArray(), moved);   // hero, swo
 - Cleanup components stay behind with the retired originals, for their systems to release.
 - Both worlds must be owned by the calling thread; moving a world into itself is refused (`ArgumentException`).
 
+### A record of what persists [#records]
+
+An actor's entity holds runtime state next to what persists: a connection, timers, a cache, and a bank balance that
+must survive a restart. A `ComponentSet` names the components of the record, `SaveEntities(output, ids, set)` writes
+those only (the others need no Nino formatter), and `LoadEntitiesInto(bytes, entities)` puts them onto entities that
+exist already, such as the one the actor got when it was activated, before its record came back from the database.
+
+```csharp
+public record struct Bank(long Gold) : IComponent;
+public record struct Connection(int Socket) : IComponent;              // runtime only: never saved
+
+public static class Records
+{
+    public static readonly ComponentSet Persistent = ComponentSet.Create().With<Bank>();   // built once
+}
+```
+
+```csharp
+var actor = world.CreateEntity(new Bank(500), new Connection(7));
+var record = new NinoArrayBufferWriter();
+world.SaveEntities(record, [actor.Id], Records.Persistent);            // Bank only // [!code highlight]
+
+// Later, maybe in another process: the actor is activated, then its record arrives.
+var activated = world.CreateEntity(new Connection(9));
+world.LoadEntitiesInto(record.WrittenSpan, [activated]);               // Bank added, Connection kept // [!code highlight]
+```
+
+- The i-th saved entity loads onto the i-th entity given; the counts must match and every entity must be alive in
+  this world, or the call throws `ArgumentException` before changing anything.
+- Each entity moves table at most once, whatever the number of components it receives. Components the record holds
+  are added or replace the entity's values; the others stay.
+- Indexes, groups and change tracking follow as with `Set`. A disabled component arrives disabled with its value.
+- `EntityId` fields are rewritten as below, onto the entities given; a `ChildOf` whose parent is not in the record is
+  not set.
+- A framework that learns its types at run time builds the set with `With(typeof(Bank))`.
+
 ### How ids are rewritten [#entityid-rewriting]
 
 The generator records where every `EntityId` field of a component or buffer element is, private fields and nested
@@ -95,12 +131,12 @@ and their tracked components count as written.
 everything of the plugin from the world: its systems (their `OnDestroy` runs), singletons, indexes and groupings, and
 its components from every entity. The entities stay, without those components. Tables that had such a column are
 dropped with every cache naming them, so the world holds no reference to the assembly. Once every world removed it,
-the collectible context can unload; when it does, EasyEcs forgets the types' save names and reuses their component
+the collectible context can unload; when it does, EasyEcs forgets the types' save ids and reuses their component
 bits once no live world mentions them.
 
 ### Hot reload [#hot-reload]
 
-Saves record types by name, so a reload keeps the plugin's data: save, remove the types, unload, load the new
+Saves record types by id, so a reload keeps the plugin's data: save, remove the types, unload, load the new
 version, load the save.
 
 ```csharp
@@ -116,7 +152,7 @@ public static class Plugins
     public static Assembly Reload(World world, PluginContext old, PluginContext next, string path)
     {
         var saved = new ArrayBufferWriter<byte>();
-        world.Save(saved);                                      // the plugin's components too, by type name
+        world.Save(saved);                                      // the plugin's components too, by type id
         world.RemoveTypes(old);                                 // its systems, singletons and components leave // [!code highlight]
         old.Unload();                                           // collected once nothing else roots it
 
@@ -128,7 +164,7 @@ public static class Plugins
 }
 ```
 
-The order matters: while both versions are loaded their types share names, and a load would refuse them as ambiguous.
+The order matters: while both versions are loaded their types share ids, and a load would refuse them as ambiguous.
 Keep the components the host owns (positions, ids) in an assembly that is never reloaded, and hold no references of
 your own to the old version's types (systems, plugin objects), or the context cannot be collected. A
 [snapshot](/en/docs/guide/snapshots) taken before `RemoveTypes` cannot be restored after it.
@@ -142,11 +178,13 @@ and checks that the old context was collected and that the plugin's data carried
 | --- | --- | --- |
 | `SaveEntities` + `LoadEntities` between worlds of one process | `MoveEntities` | Rows copied, no encoding |
 | A new buffer per migration | One `NinoArrayBufferWriter`, `ResetWrittenCount()` each time | No allocation once it is large enough |
-| Many small migrations of one entity | One migration of the whole group | A save's fixed cost (the types by name) is paid once |
+| Many small migrations of one entity | One migration of the whole group | A save's fixed cost (the types by id) is paid once |
+| `SaveEntities` of whole entities when only some components persist | A `ComponentSet` | The runtime components are not written, and need no formatter |
 | A reload that rebuilds the world | `RemoveTypes`, then `Load` | The host's entities and components stay where they are |
 
 10 players with 99 items each, moved to another world and back through bytes and in memory, and one entity of four
-components through bytes (`MigrationBenchmark`); a plugin with a tracked and an indexed component on every player, a
+components through bytes, and a record of two of its components saved and loaded onto an entity that holds the
+others (`MigrationBenchmark`); a plugin with a tracked and an indexed component on every player, a
 singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`):
 
 <BenchTable bench="MigrationBenchmark" />
@@ -156,7 +194,7 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
 ## What it costs [#what-it-costs]
 
 - **Migration:** O(entities × components); the rewrite of ids is a lookup per `EntityId` field.
-- **Allocation:** none for `SaveEntities`, `LoadEntities` and `MoveEntities` once their buffers are large enough.
+- **Allocation:** none for `SaveEntities`, `LoadEntities`, `LoadEntitiesInto` and `MoveEntities` once their buffers are large enough.
 - **`RemoveTypes`:** O(entities with such components + tables + cached queries); it allocates, and it is cold: run it
   between updates, not in a tick.
 - **Steady state:** nothing. The unload support costs no time in worlds that never call `RemoveTypes`.
@@ -168,7 +206,7 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
 | Moving a parent without its children | The children are destroyed with the original | Collect the group with `Children` |
 | `EntityId`s in a `List<T>` inside a component | Not rewritten: they name entities of the old world | Use fields, a buffer or a relation |
 | An `Entity` handle in a component | Not saved, not rewritten | [EECS017](/en/docs/guide/analyzer#eecs017) |
-| Loading the new plugin before unloading the old one | Ambiguous type names: `InvalidDataException` | The reload order above |
+| Loading the new plugin before unloading the old one | Ambiguous type ids: `InvalidDataException` | The reload order above |
 | Keeping references to the old plugin's systems | The context is never collected | Drop them after `RemoveTypes` |
 | `RemoveTypes` during an update or a pass | `InvalidOperationException` | At run time |
 | Restoring a snapshot taken before `RemoveTypes` | `InvalidOperationException` | At run time |

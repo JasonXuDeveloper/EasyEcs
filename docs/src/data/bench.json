@@ -1,6 +1,6 @@
 {
   "source": "BenchmarkDotNet *-report.csv (scripts/sync-benchmarks.ts)",
-  "generatedAt": "2026-10-19T04:53:39.042Z",
+  "generatedAt": "2026-10-19T15:10:59.035Z",
   "environment": {
     "benchmarkDotNet": "0.15.2",
     "os": "Linux Ubuntu 24.04.5 LTS (Noble Numbat)",
@@ -25,9 +25,9 @@
           "params": {
             "Units": "100000"
           },
-          "meanNs": 3167000,
-          "errorNs": 306800,
-          "stdDevNs": 301300,
+          "meanNs": 2969000,
+          "errorNs": 117200,
+          "stdDevNs": 115100,
           "ratio": null,
           "allocatedBytes": 0
         }
@@ -291,9 +291,9 @@
             "Written": "1000",
             "List": "False"
           },
-          "meanNs": 60950,
-          "errorNs": 5483,
-          "stdDevNs": 4860,
+          "meanNs": 56550,
+          "errorNs": 5365,
+          "stdDevNs": 5019,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -304,9 +304,9 @@
             "Written": "1000",
             "List": "True"
           },
-          "meanNs": 61840,
-          "errorNs": 1105,
-          "stdDevNs": 1085,
+          "meanNs": 61800,
+          "errorNs": 3879,
+          "stdDevNs": 3628,
           "ratio": null,
           "allocatedBytes": 0
         }
@@ -651,10 +651,10 @@
           "params": {
             "Entities": "1000"
           },
-          "meanNs": 223787,
-          "errorNs": 13991.6,
-          "stdDevNs": 13741.6,
-          "ratio": 1,
+          "meanNs": 222465.4,
+          "errorNs": 9813.88,
+          "stdDevNs": 9179.91,
+          "ratio": 1.002,
           "allocatedBytes": 0
         },
         {
@@ -662,10 +662,10 @@
           "params": {
             "Entities": "1000"
           },
-          "meanNs": 164338,
-          "errorNs": 11784.7,
-          "stdDevNs": 11574.1,
-          "ratio": 0.74,
+          "meanNs": 164655.4,
+          "errorNs": 10645.89,
+          "stdDevNs": 9437.31,
+          "ratio": 0.741,
           "allocatedBytes": 0
         },
         {
@@ -673,10 +673,32 @@
           "params": {
             "Entities": "1000"
           },
-          "meanNs": 2323,
-          "errorNs": 99.7,
-          "stdDevNs": 97.9,
+          "meanNs": 2216.9,
+          "errorNs": 59.11,
+          "stdDevNs": 52.4,
           "ratio": 0.01,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "SaveRecord",
+          "params": {
+            "Entities": "1000"
+          },
+          "meanNs": 103.9,
+          "errorNs": 7.7,
+          "stdDevNs": 7.2,
+          "ratio": 0,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "LoadRecord",
+          "params": {
+            "Entities": "1000"
+          },
+          "meanNs": 721.6,
+          "errorNs": 39.26,
+          "stdDevNs": 34.81,
+          "ratio": 0.003,
           "allocatedBytes": 0
         }
       ]
@@ -931,20 +953,20 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 976600,
-          "errorNs": 133890,
-          "stdDevNs": 125240,
+          "meanNs": 930900,
+          "errorNs": 165250,
+          "stdDevNs": 162290,
           "ratio": null,
-          "allocatedBytes": 2801793
+          "allocatedBytes": 2802154
         },
         {
           "method": "Restore",
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 423500,
-          "errorNs": 30350,
-          "stdDevNs": 28390,
+          "meanNs": 428300,
+          "errorNs": 46790,
+          "stdDevNs": 43770,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -953,9 +975,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 258700,
-          "errorNs": 20160,
-          "stdDevNs": 19800,
+          "meanNs": 261800,
+          "errorNs": 36000,
+          "stdDevNs": 33670,
           "ratio": null,
           "allocatedBytes": 0
         },
@@ -964,9 +986,9 @@
           "params": {
             "Entities": "100000"
           },
-          "meanNs": 1049700,
-          "errorNs": 48760,
-          "stdDevNs": 45610,
+          "meanNs": 1002700,
+          "errorNs": 83940,
+          "stdDevNs": 78520,
           "ratio": null,
           "allocatedBytes": 0
         }
@@ -2513,6 +2535,23 @@
           "stdDevNs": 689200,
           "ratio": 1.63,
           "allocatedBytes": 4844421
+        }
+      ]
+    },
+    "BufferChurnBenchmark": {
+      "namespace": "EasyEcs.Benchmark",
+      "job": "EnvironmentVariables=DOTNET_TC_CallCountingDelayMs=0 IterationCount=8 IterationTime=250ms LaunchCount=2 WarmupCount=6",
+      "rows": [
+        {
+          "method": "LoadAndUnload",
+          "params": {
+            "Actors": "1000"
+          },
+          "meanNs": 76640,
+          "errorNs": 2439,
+          "stdDevNs": 2395,
+          "ratio": null,
+          "allocatedBytes": 0
         }
       ]
     }
