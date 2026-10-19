@@ -15,14 +15,16 @@ namespace EasyEcs.CodeFixes;
 /// <summary>
 /// Code fixes for the diagnostics of EasyEcsAnalyzer that have one mechanical answer: a parameter's modifier, a
 /// missing <c>static</c>, a class that should be a struct, a filter or <c>Parallel = true</c> that cannot apply, a type
-/// the generated code cannot name. Each reads the diagnostic's location (and EECS011 / EECS022 their additional
-/// location: the parameter, the type), so the analyzer stays the only place that decides.
+/// the generated code cannot name, a parameter that only reads or is not used, and the replacements the performance
+/// rules computed (a bulk call, a generated member). Each reads the diagnostic's location, its additional locations
+/// and its properties, so the analyzer stays the only place that decides.
 /// </summary>
 [ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(EasyEcsCodeFixes)), Shared]
 public sealed class EasyEcsCodeFixes : CodeFixProvider
 {
     public override ImmutableArray<string> FixableDiagnosticIds { get; } =
-        ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS010", "EECS011", "EECS012", "EECS022", "EECS023");
+        ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS010", "EECS011", "EECS012", "EECS022", "EECS023",
+            "EECS025", "EECS026", "EECS029", "EECS030", "EECS031", "EECS032", "EECS033");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 
@@ -33,9 +35,37 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
         var generator = SyntaxGenerator.GetGenerator(context.Document); // modifiers with their trivia in place
         foreach (var diagnostic in context.Diagnostics)
         {
-            var node = root.FindNode(diagnostic.Location.SourceSpan);
+            var node = root.FindNode(diagnostic.Location.SourceSpan, getInnermostNodeForTie: true);
+            if (diagnostic.Properties.TryGetValue("Title", out var title) && title != null
+                && (diagnostic.Properties.ContainsKey("Replace") || diagnostic.Properties.ContainsKey("Insert")))
+            {
+                context.RegisterCodeFix(CodeAction.Create(title, _ => Task.FromResult(Rewrite(context.Document, root, node, diagnostic)),
+                    diagnostic.Id + title), diagnostic);
+                continue;
+            }
+
             switch (diagnostic.Id)
             {
+                case "EECS025" when node.FirstAncestorOrSelf<ParameterSyntax>() is { } p
+                                    && !await HasCallers(context.Document, p, context.CancellationToken).ConfigureAwait(false):
+                    if (diagnostic.Properties.TryGetValue("Fix", out var kind) && kind == "ReadOnlySpan")
+                        Register(context, diagnostic, "Take it as a ReadOnlySpan", root, p, ReadOnly(p));
+                    else
+                        Register(context, diagnostic, "Take it by 'in'", root, p, Modify(p, SyntaxKind.InKeyword));
+                    break;
+                case "EECS026" when diagnostic.Properties.ContainsKey("Fix") && node.FirstAncestorOrSelf<ParameterSyntax>() is { Parent.Parent: MethodDeclarationSyntax method } p
+                                    && method.Modifiers.All(m => !m.IsKind(SyntaxKind.PartialKeyword))
+                                    && !await HasCallers(context.Document, p, context.CancellationToken).ConfigureAwait(false):
+                    diagnostic.Properties.TryGetValue("With", out var with);
+                    Register(context, diagnostic, with == null ? "Remove the parameter" : $"Require it with [With<{with}>]", root, method,
+                        Unused(method, p, with));
+                    break;
+                case "EECS029" when node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } instance
+                                    && !await HasCallers(context.Document, instance.ParameterList.Parameters.FirstOrDefault(), context.CancellationToken, instance)
+                                        .ConfigureAwait(false):
+                    Register(context, diagnostic, "Make it static", root, instance,
+                        generator.WithModifiers(instance, generator.GetModifiers(instance).WithIsStatic(true)));
+                    break;
                 case "EECS002" when diagnostic.Properties.ContainsKey("ByValue") && node is ParameterSyntax parameter:
                     Register(context, diagnostic, "Take it by 'in' (read)", root, parameter, Modify(parameter, SyntaxKind.InKeyword));
                     Register(context, diagnostic, "Take it by 'ref' (write)", root, parameter, Modify(parameter, SyntaxKind.RefKeyword));
@@ -74,6 +104,76 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// The analyzer's replacement: <c>Replace</c> takes the place of the node at the diagnostic's location (and with
+    /// <c>Remove</c> the statements at its additional locations go), <c>Insert</c> goes before its statement.
+    /// </summary>
+    private static Document Rewrite(Document document, SyntaxNode root, SyntaxNode node, Diagnostic diagnostic)
+    {
+        var props = diagnostic.Properties;
+        if (props.TryGetValue("Insert", out var insert) && insert != null && node.FirstAncestorOrSelf<StatementSyntax>() is { } before)
+        {
+            var indent = before.GetLeadingTrivia().Where(t => t.IsKind(SyntaxKind.WhitespaceTrivia)).LastOrDefault();
+            // The file's own line ending: a CRLF file stays CRLF, an LF file LF.
+            var eol = root.DescendantTrivia().FirstOrDefault(t => t.IsKind(SyntaxKind.EndOfLineTrivia));
+            var statement = SyntaxFactory.ParseStatement(insert).WithLeadingTrivia(indent)
+                .WithTrailingTrivia(eol.IsKind(SyntaxKind.EndOfLineTrivia) ? eol : SyntaxFactory.LineFeed);
+            return document.WithSyntaxRoot(root.InsertNodesBefore(before, [statement]));
+        }
+
+        string text = props["Replace"]!;
+        SyntaxNode replacement = node is StatementSyntax ? SyntaxFactory.ParseStatement(text) : SyntaxFactory.ParseExpression(text);
+        replacement = replacement.WithTriviaFrom(node);
+        if (!props.ContainsKey("Remove") || diagnostic.AdditionalLocations.Count == 0)
+            return document.WithSyntaxRoot(root.ReplaceNode(node, replacement));
+        var others = diagnostic.AdditionalLocations.Select(l => root.FindNode(l.SourceSpan, getInnermostNodeForTie: true).FirstAncestorOrSelf<StatementSyntax>()!)
+            .Where(n => n != null).ToList();
+        var tracked = root.TrackNodes(others.Append(node));
+        tracked = tracked.ReplaceNode(tracked.GetCurrentNode(node)!, replacement);
+        tracked = tracked.RemoveNodes(others.Select(o => tracked.GetCurrentNode(o)!), SyntaxRemoveOptions.KeepNoTrivia)!;
+        return document.WithSyntaxRoot(tracked);
+    }
+
+    /// <summary>EECS025: <c>Span&lt;T&gt;</c> (however it is spelled) becomes <c>ReadOnlySpan&lt;T&gt;</c>.</summary>
+    private static ParameterSyntax ReadOnly(ParameterSyntax parameter)
+    {
+        var type = parameter.Type!;
+        var generic = type as GenericNameSyntax ?? (type as QualifiedNameSyntax)?.Right as GenericNameSyntax;
+        if (generic is { Identifier.Text: "Span" })
+            return parameter.WithType(type.ReplaceNode(generic, generic.WithIdentifier(SyntaxFactory.Identifier("ReadOnlySpan").WithTriviaFrom(generic.Identifier))));
+        return parameter; // an alias: left as it is (the fix then changes nothing)
+    }
+
+    /// <summary>EECS026: the parameter goes; a component is required by a [With&lt;T&gt;] next to [ForEach].</summary>
+    private static MethodDeclarationSyntax Unused(MethodDeclarationSyntax method, ParameterSyntax parameter, string? with)
+    {
+        var updated = method.WithParameterList(method.ParameterList.WithParameters(method.ParameterList.Parameters.Remove(parameter)));
+        if (with == null) return updated;
+        foreach (var list in updated.AttributeLists)
+            foreach (var attribute in list.Attributes)
+                if (attribute.Name.ToString() is "ForEach" or "ForEachAttribute" or "EasyEcs.ForEach" or "EasyEcs.ForEachAttribute" or "global::EasyEcs.ForEach")
+                {
+                    var added = SyntaxFactory.Attribute(SyntaxFactory.ParseName($"With<{with}>"));
+                    return updated.ReplaceNode(list, list.WithAttributes(list.Attributes.Insert(list.Attributes.IndexOf(attribute) + 1, added)));
+                }
+
+        return updated;
+    }
+
+    /// <summary>
+    /// Whether code calls the method itself (a runner's method called directly): changing its signature would break the
+    /// call. The generated code reaches it by name (UnsafeAccessor), not by reference.
+    /// </summary>
+    private static async Task<bool> HasCallers(Document document, ParameterSyntax? parameter, CancellationToken token, MethodDeclarationSyntax? declaration = null)
+    {
+        var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
+        var syntax = declaration ?? parameter?.FirstAncestorOrSelf<MethodDeclarationSyntax>();
+        if (model == null || syntax == null || model.GetDeclaredSymbol(syntax, token) is not IMethodSymbol method) return true;
+        foreach (var found in await Microsoft.CodeAnalysis.FindSymbols.SymbolFinder.FindReferencesAsync(method, document.Project.Solution, token).ConfigureAwait(false))
+            if (found.Locations.Any()) return true;
+        return false;
     }
 
     private static void Register(CodeFixContext context, Diagnostic diagnostic, string title, SyntaxNode root, SyntaxNode node,

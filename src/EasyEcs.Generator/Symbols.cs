@@ -572,7 +572,7 @@ internal static class Symbols
     /// properties, <c>TryGetX</c> and <c>WriteX</c> (a value write, like <c>Get</c>). Decided by the symbol, not the name: a component named <c>Settings</c> is read
     /// through the property <c>entity.Settings</c>.
     /// </summary>
-    private static bool IsGeneratedWriter(ISymbol member) =>
+    public static bool IsGeneratedWriter(ISymbol member) =>
         member is IMethodSymbol { MethodKind: MethodKind.Ordinary, ContainingType.IsExtension: true } method
         && !method.Name.StartsWith("TryGet") && !method.Name.StartsWith("Write") && !method.Name.StartsWith("Links")
         && !method.Name.StartsWith("In"); // InZone(group): a QueryFilter's, no entity's

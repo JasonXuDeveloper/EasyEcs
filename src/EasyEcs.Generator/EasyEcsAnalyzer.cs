@@ -13,64 +13,64 @@ namespace EasyEcs.Generator;
 /// split: generators stay pure and cacheable, analyzers run on the symbols they need).
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
-public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
+public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
 {
     private const string Category = "EasyEcs";
 
     public static readonly DiagnosticDescriptor BadParameter = new("EECS002", "Invalid [ForEach] parameter",
         "Parameter '{0}' of [ForEach] method '{1}' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, a Maybe of one, an Entity or the World (outside a system, also a value the caller passes, of any other type)",
-        Category, DiagnosticSeverity.Error, true);
+        Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS002"));
 
     public static readonly DiagnosticDescriptor ComponentCount = new("EECS003", "Invalid component count",
-        "[ForEach] method '{0}' must take between 1 and 9 components, or none with a [With<T>] or [Changed<T>] filter", Category, DiagnosticSeverity.Error, true);
+        "[ForEach] method '{0}' must take between 1 and 9 components, or none with a [With<T>] or [Changed<T>] filter", Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS003"));
 
     public static readonly DiagnosticDescriptor Generic = new("EECS004", "Generic [ForEach] method in a system",
         "[ForEach] method '{0}' of a system is generic, and nothing gives it type arguments: make the system generic instead (class Regen<T> : EcsSystem)",
         Category, DiagnosticSeverity.Error, true,
         "A system runs its [ForEach] methods itself, once per update, so a generic method would have no type arguments. " +
         "Generic systems are fine (each closed type is a system of its own), and so are generic [ForEach] methods outside " +
-        "systems, whose entry points take the type arguments.");
+        "systems, whose entry points take the type arguments.", helpLinkUri: Help("EECS004"));
 
     public static readonly DiagnosticDescriptor NotASystem = new("EECS005", "Instance [ForEach] method outside a system",
         "[ForEach] method '{0}' is an instance method of '{1}', which is no EcsSystem: make it static (the generator writes an entry point that takes the world) or move it into a system",
-        Category, DiagnosticSeverity.Error, true);
+        Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS005"));
 
     public static readonly DiagnosticDescriptor NotStruct = new("EECS006", "ECS data must be a struct",
         "'{0}' implements {1} and must be a struct: components and singletons are stored by value",
-        Category, DiagnosticSeverity.Error, true);
+        Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS006"));
 
     public static readonly DiagnosticDescriptor StatefulSystem = new("EECS007", "Systems must be stateless",
         "System '{0}' keeps mutable state in '{1}'; store it in a component (per entity) or a singleton (per world)",
         Category, DiagnosticSeverity.Error, true,
         "A system is behavior only. State in a system is invisible to other systems, queries and persistence, and it is " +
         "lost or duplicated when the system is removed or re-added; a static field is also shared by every world. " +
-        "Readonly fields (dependencies, reusable scratch buffers) are allowed.");
+        "Readonly fields (dependencies, reusable scratch buffers) are allowed.", helpLinkUri: Help("EECS007"));
 
     public static readonly DiagnosticDescriptor SystemReference = new("EECS008", "Systems must not reference systems",
         "System '{0}' references system '{1}' through '{2}'; communicate through components or singletons",
         Category, DiagnosticSeverity.Error, true,
         "Systems that call each other, through a field or World.GetSystem, are coupled: neither can be removed, reordered " +
-        "or tested alone. Write the data another system reads (a component or a singleton).");
+        "or tested alone. Write the data another system reads (a component or a singleton).", helpLinkUri: Help("EECS008"));
 
     public static readonly DiagnosticDescriptor MixedBatch = new("EECS009", "Batch [ForEach] mixes spans and per-entity parameters",
         "[ForEach] method '{0}' mixes batch and per-entity parameters: a batch method takes component spans, an EntitySpan and singletons ('ref'/'in'); an EntitySpan needs component spans",
         Category, DiagnosticSeverity.Error, true,
         "A batch method receives runs of rows as spans, and their entities as an EntitySpan. A per-entity parameter " +
         "(ref/in component, Entity) has no single value for a run, and the World could change rows while the spans point " +
-        "at them.");
+        "at them.", helpLinkUri: Help("EECS009"));
 
     public static readonly DiagnosticDescriptor NotParallel = new("EECS010", "[ForEach(Parallel = true)] cannot run on several threads",
         "[ForEach] method '{0}' cannot run in parallel: {1}",
         Category, DiagnosticSeverity.Error, true,
         "A parallel [ForEach] runs chunks of rows on several threads at once. It must make no structural change, run per " +
-        "entity, and write nothing that another row's run reads, such as a singleton.");
+        "entity, and write nothing that another row's run reads, such as a singleton.", helpLinkUri: Help("EECS010"));
 
     public static readonly DiagnosticDescriptor ReadOnlyWrite = new("EECS011", "Write through a read-only parameter",
         "[ForEach] method '{0}' changes data that '{1}' holds by reference, but takes '{1}' as read-only; take it by 'ref'",
         Category, DiagnosticSeverity.Error, true,
         "A read-only component or singleton ('in', ReadOnlySpan) is scheduled as a read and never stamped as changed. A " +
         "collection or class it holds is still writable: changing it would race with parallel systems that read it, " +
-        "and [Changed<T>] systems would not see the change. Take it by 'ref' so the write is scheduled and stamped.");
+        "and [Changed<T>] systems would not see the change. Take it by 'ref' so the write is scheduled and stamped.", helpLinkUri: Help("EECS011"));
 
     public static readonly DiagnosticDescriptor BufferCopy = new("EECS012", "DynamicBuffer<T> held by value",
         "'{0}' copies a DynamicBuffer<{1}>; reach the buffer through its entity ('ref' or 'in')",
@@ -78,7 +78,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "A DynamicBuffer<T> is a component: its writes are tracked through the 'ref' that reaches it. A copy refers to " +
         "the same list, so writes through the copy are never stamped as changed, and a snapshot or another entity " +
         "would share the list. Use 'ref' (write) or 'in' (read) parameters, ref locals and Entity.Get / Read; a new " +
-        "component value is 'new DynamicBuffer<T>()' (no list until its first write).");
+        "component value is 'new DynamicBuffer<T>()' (no list until its first write).", helpLinkUri: Help("EECS012"));
 
     public static readonly DiagnosticDescriptor HiddenStructuralChange = new("EECS013", "Structural change in a [ForEach] method that promises none",
         "[ForEach] method '{0}' calls '{1}', a structural change, but {2}",
@@ -88,14 +88,14 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "with others. A change made through a handle a component holds (a relation) or a world kept elsewhere breaks " +
         "both: refs into moved rows, and a change while other systems run (which throws). Taking the Entity as a " +
         "parameter makes the system run alone with a pass that notices the change. A batch method holds spans into the " +
-        "tables, so it changes no structure at all (the runtime throws).");
+        "tables, so it changes no structure at all (the runtime throws).", helpLinkUri: Help("EECS013"));
 
     public static readonly DiagnosticDescriptor OffThreadStructuralChange = new("EECS014", "Structural change on another thread",
         "'{0}' is a structural change, made in a delegate that '{1}' runs on another thread; structural changes belong to the world's owner thread",
         Category, DiagnosticSeverity.Error, true,
         "A world's structure (create/destroy, Set/Remove, singletons, systems, Capture/Restore, Update) is changed by " +
         "one owner thread. A change from another thread races with the owner's and can tear the tables. Hand the " +
-        "change to the owner as data (a queue the owner drains in a system), or give that thread its own world.");
+        "change to the owner as data (a queue the owner drains in a system), or give that thread its own world.", helpLinkUri: Help("EECS014"));
 
     public static readonly DiagnosticDescriptor IndexedByRef = new("EECS015", "Indexed component written through a ref",
         "'{0}' is indexed: {1}; write it with Set (or the generated Set{0}) so its index follows",
@@ -103,13 +103,13 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "The index of an IIndexed<TKey> component follows the values written with Set and CreateEntity as they are " +
         "written; a write through a ref (Get, GetOrAdd, TryGetRef, a 'ref' or Span [ForEach] parameter, a " +
         "query item, a job's 'ref' parameter) would leave it stale. Read it with Read, 'in' or ReadOnlySpan; write it " +
-        "with Set or the generated SetX.");
+        "with Set or the generated SetX.", helpLinkUri: Help("EECS015"));
 
     public static readonly DiagnosticDescriptor RemovedRequired = new("EECS016", "A [Removed<T>] method requires T",
         "[ForEach] method '{0}' visits entities that lost '{1}' but {2}; no row passes both",
         Category, DiagnosticSeverity.Error, true,
         "[Removed<T>] visits entities that no longer have T. Taking T as a parameter, or requiring it with [With<T>] or " +
-        "[Changed<T>], asks for entities that have it: the method would never run. Read the entity's other components.");
+        "[Changed<T>], asks for entities that have it: the method would never run. Read the entity's other components.", helpLinkUri: Help("EECS016"));
 
     public static readonly DiagnosticDescriptor EntityInData = new("EECS017", "A component stores an Entity handle",
         "'{0}' stores an Entity in '{1}': store its EntityId instead",
@@ -117,46 +117,46 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         "An Entity is a handle: it holds a reference to its world. A component (or singleton) holding one is managed, " +
         "so its column is scanned by the GC, every store pays a write barrier, rows are not copied as blocks, and it " +
         "cannot be serialized. Store the EntityId (8 bytes, unmanaged; a handle converts to it implicitly) and turn it " +
-        "back into a handle with world.TryGetEntity(id, out var entity).");
+        "back into a handle with world.TryGetEntity(id, out var entity).", helpLinkUri: Help("EECS017"));
 
     public static readonly DiagnosticDescriptor ScheduleNotConstant = new("EECS018", "A system's schedule is not a constant",
         "'{0}.{1}' is not a constant: {2}",
         Category, DiagnosticSeverity.Warning, true,
         "UpdateInterval and UpdatePhase are read every update, so a changing value makes the system skip or repeat " +
-        "runs. Return a constant; to stop and resume a system, set Enabled.");
+        "runs. Return a constant; to stop and resume a system, set Enabled.", helpLinkUri: Help("EECS018"));
 
     public static readonly DiagnosticDescriptor OrderCycle = new("EECS019", "Systems are ordered in a cycle",
         "[UpdateBefore] / [UpdateAfter] order '{0}' in a cycle: {1}",
         Category, DiagnosticSeverity.Error, true,
         "Each ordering says which of two systems runs first; a cycle cannot hold, and AddSystem throws when the last " +
-        "system of the cycle is added. Remove one of the orderings.", customTags: WellKnownDiagnosticTags.CompilationEnd);
+        "system of the cycle is added. Remove one of the orderings.", helpLinkUri: Help("EECS019"), customTags: WellKnownDiagnosticTags.CompilationEnd);
 
     public static readonly DiagnosticDescriptor OrderAcrossGroups = new("EECS020", "A system is ordered against another group",
         "'{0}' is ordered against '{1}', which runs in another group: the ordering never applies",
         Category, DiagnosticSeverity.Warning, true,
         "Orderings apply within one group: World.Update() and World.Update<TGroup>() run their groups separately, in the " +
-        "order the caller calls them. Order the systems of one group, or move the system into the other's group.");
+        "order the caller calls them. Order the systems of one group, or move the system into the other's group.", helpLinkUri: Help("EECS020"));
 
     public static readonly DiagnosticDescriptor RunnerCollision = new("EECS021", "[ForEach] entry point has the method's signature",
         "The entry point of [ForEach] method '{0}' (the World, {1}the caller's values) would have the signature of a method '{0}' of its type, or of another [ForEach] overload's entry point: rename one of them",
         Category, DiagnosticSeverity.Error, true,
-        "Outside a system, the generator writes an overload of a [ForEach] method that takes the World (and the change tick, for [Changed<T>] / [Removed<T>]) followed by the method's context parameters, and runs the method over every matching entity.");
+        "Outside a system, the generator writes an overload of a [ForEach] method that takes the World (and the change tick, for [Changed<T>] / [Removed<T>]) followed by the method's context parameters, and runs the method over every matching entity.", helpLinkUri: Help("EECS021"));
 
     public static readonly DiagnosticDescriptor Unnameable = new("EECS022", "Type out of reach of the generated code",
         "[ForEach] method '{0}' uses '{1}', which code outside its declaring type cannot name: make it internal or public",
         Category, DiagnosticSeverity.Error, true,
-        "The generator writes the jobs of [ForEach] methods outside the user's type (no partial needed) and calls the method through UnsafeAccessor, so private methods and systems are fine; the types of its parameters, and the type of a [ForEach] method outside a system, must be internal or public.");
+        "The generator writes the jobs of [ForEach] methods outside the user's type (no partial needed) and calls the method through UnsafeAccessor, so private methods and systems are fine; the types of its parameters, and the type of a [ForEach] method outside a system, must be internal or public.", helpLinkUri: Help("EECS022"));
 
     public static readonly DiagnosticDescriptor FilterOutsideGroup = new("EECS023", "Filter on a struct that is no system group",
         "'{0}' carries [{1}], which filters only on [ForEach] methods and on system groups (ISystemGroup structs)",
         Category, DiagnosticSeverity.Error, true,
         "[With<T>], [Without<T>] and [WithAny<T>] on an ISystemGroup struct join every [ForEach] method of the group's " +
-        "systems. On any other struct (a component) they do nothing.");
+        "systems. On any other struct (a component) they do nothing.", helpLinkUri: Help("EECS023"));
 
     public static readonly DiagnosticDescriptor LocalForEach = new("EECS024", "[ForEach] on a local function",
         "Local function '{0}' carries [ForEach], which the generator cannot reach: make it a method of a system or a static method of a type",
         Category, DiagnosticSeverity.Error, true,
-        "The generator writes a job for each [ForEach] method and calls it from outside its type; a local function has no name outside its method.");
+        "The generator writes a job for each [ForEach] method and calls it from outside its type; a local function has no name outside its method.", helpLinkUri: Help("EECS024"));
 
     // EECS002's property for its code fix (EasyEcs.CodeFixes): a component or singleton taken by value.
     public const string ByValue = "ByValue";
@@ -167,7 +167,9 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         BadParameter, ComponentCount, Generic, NotASystem, NotStruct, StatefulSystem, SystemReference,
         MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
-        RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups, RunnerCollision, Unnameable, FilterOutsideGroup, LocalForEach);
+        RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups, RunnerCollision, Unnameable, FilterOutsideGroup, LocalForEach,
+        ReadOnlyWriteAccess, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
+        GeneratedMember, UpdateInSystem);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -189,6 +191,7 @@ public sealed class EasyEcsAnalyzer : DiagnosticAnalyzer
         context.RegisterOperationAction(AnalyzeIndexedRef, OperationKind.Invocation, OperationKind.VariableDeclarator);
         context.RegisterOperationAction(AnalyzeSystemLookup, OperationKind.Invocation);
         context.RegisterCompilationStartAction(AnalyzeOrderings);
+        InitializePerformance(context);
     }
 
     /// <summary>
