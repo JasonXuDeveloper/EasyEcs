@@ -57,7 +57,17 @@ EasyEcs 文档里的术语，每个用几句话讲清，并链接到详细讲解
 ## 过滤条件（Filter） [#filter]
 
 组件之外的查询条件：`With`、`Without`、`WithAny`、`Changed`、`Removed` 和 `InGroup`。写在 `[ForEach]` 方法上就是特性，
-在其他代码里就是存放在 `static readonly` 字段里的 `QueryFilter`。见[查询与过滤](/zh/docs/guide/queries)。
+在其他代码里就是存放在 `static readonly` 字段里的 `QueryFilter`。见[查询与过滤](/zh/docs/guide/queries#filters)。
+
+## 查询缓存（Query cache） [#query-cache]
+
+World 记着每种查询匹配哪些表。一种查询第一次用时扫一遍所有表；之后查询直接读一份不可变的表列表，新建的表在创建时加进它匹配的列表。
+读的一方从不加锁。见[架构](/zh/docs/architecture#query-cache)。
+
+## 预热（Warm-up） [#warm-up]
+
+World 最初的几次更新：建好表、查询缓存和之后反复使用的缓冲。预热之后，查询、遍历、组件访问和结构变更都零分配，
+所以分配测试先跑一次更新，再开始统计字节数。见[测试系统](/zh/docs/guide/testing#allocations)。
 
 ## 系统（System） [#system]
 
@@ -67,17 +77,51 @@ EasyEcs 文档里的术语，每个用几句话讲清，并链接到详细讲解
 ## 系统分组（System group） [#system-group]
 
 实现 `ISystemGroup` 的结构体。标了 `[UpdateInGroup<G>]` 的系统只在 `world.Update<G>()` 时执行，所以输入、模拟和存盘可以各按各的节奏跑。
-见[系统](/zh/docs/guide/systems)。
+没标这个特性的系统属于默认分组，由 `world.Update()` 执行。见[系统](/zh/docs/guide/systems#system-groups)。
+
+## 更新与 tick（Update、tick） [#update]
+
+一次更新就是调用一次 `world.Update()`（或 `world.Update<G>()`）：分组里每个启用的系统按顺序各跑一次，被 `UpdateInterval`
+跳过的除外。tick 是模拟按固定频率走的一步；服务器的主循环每个 tick 调用一次 `Update()`。见[系统](/zh/docs/guide/systems#one-update)。
 
 ## 阶段（Stage） [#stage]
 
-一串相邻、彼此没有顺序约束、读写也不冲突的系统。打开 `WorldOptions.ParallelSystems` 后，同一阶段的系统同时执行；不打开时，
-每个系统各自是一个阶段。见[线程模型](/zh/docs/guide/threading)。
+一串相邻、彼此没有顺序约束、[读写](#access-set)也不冲突的系统。打开 `WorldOptions.ParallelSystems` 后，同一阶段的系统同时执行；
+不打开时，每个系统各自是一个阶段。见[多线程](/zh/docs/guide/threading#parallel-systems)。
+
+## 访问集（Access set） [#access-set]
+
+一个系统读什么、写什么，由生成器根据 `[ForEach]` 参数得出：`ref` 的组件或单例算写，`in` 的算读，`[Changed<T>]`、`[Removed<T>]`
+算读 `T`。一个写了另一个读或写的东西，两个系统就冲突。能碰到整个 World 的系统（带 `Entity` 或 `World` 参数、实例方法、
+重写了 `OnUpdate`）独占运行。只有互不冲突的系统才会进同一个[阶段](#stage)。见[多线程](/zh/docs/guide/threading#parallel-systems)。
+
+## 执行器（Runner） [#runner]
+
+World 用来跑并行工作的部件：一个阶段里的系统，或者一个并行方法的各个块。调用线程和最多 `WorldOptions.MaxDegreeOfParallelism - 1`
+个复用的线程池工作项一起领取任务，所以并行执行零分配。只有实测表明帮手线程确实让工作变快时，它才去唤醒它们；执行器正忙时，
+任务留给调用线程自己跑。见[多线程](/zh/docs/guide/threading#parallel-systems)。
+
+## 块（Chunk） [#chunk]
+
+并行方法（`[ForEach(Parallel = true)]`、`ForEachParallel`）把匹配的行切成的一段：行数是 64 的倍数，每个线程大约四块，
+在 1,024 到 16,384 行之间。[执行器](#runner)把块分给各个线程；不足两块时只在调用线程上跑。见[系统](/zh/docs/guide/systems#parallel-methods)。
 
 ## 结构体 job（Struct job） [#struct-job]
 
 实现 `IForEach<T…>`、`IForEachEntity<T…>` 或 `IForEachBatch<T…>` 的结构体，行循环调用它的 `Execute` 方法。JIT 会把它内联，
-所以每个实体既没有委托调用，也没有虚调用。生成器为每个 `[ForEach]` 方法写一个。见[查询与过滤](/zh/docs/guide/queries)。
+所以每个实体既没有委托调用，也没有虚调用。生成器为每个 `[ForEach]` 方法写一个。
+见[查询与过滤](/zh/docs/guide/queries#foreach-a-struct-job)。
+
+## 批量方法（Batch method） [#batch-method]
+
+组件参数是 span（`Span<Position>`、`ReadOnlySpan<Velocity>`）的 `[ForEach]` 方法。它每次拿到一段连续的匹配行，每个 span 的第 `i`
+个元素属于同一个实体；一张表的行全部匹配时，整张表只调用一次。加一个 `EntitySpan` 参数就能拿到这段行对应的实体。span 直接指向表，
+所以它运行期间结构是[冻结](#frozen-structure)的。想把循环向量化时就写批量方法。见[系统](/zh/docs/guide/systems#batch-methods)。
+
+## 可选组件（`Maybe<T>`） [#maybe]
+
+`[ForEach]` 方法里表示“实体可能没有”的组件参数：方法访问所有具备其他组件的实体，`HasValue` 说明这个实体是否也有 `T`。
+见[系统](/zh/docs/guide/systems#maybe)。
 
 ## 变更 tick（Change tick） [#change-tick]
 
@@ -94,15 +138,40 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 改变实体有哪些组件、或者 World 里有哪些实体的操作：创建、销毁、`Set` 一个新组件、`Remove`、`Disable`。在 EasyEcs 里它立即生效，
 遍历途中也一样，不需要命令缓冲。见[结构变更](/zh/docs/guide/structural-changes)。
 
+## 遍历（Pass） [#pass]
+
+对匹配行的一次完整走查：一次 `[ForEach]` 方法的执行、一个 `ForEach` job 或一个 `Query` 循环。一次遍历里每个实体最多访问一次；
+轮到之前就不再匹配的实体会跳过；遍历途中才进入匹配表的实体，这次遍历不会访问。
+见[结构变更](/zh/docs/guide/structural-changes#during-a-pass)。
+
+## 墓碑（Tombstone） [#tombstone]
+
+[遍历](#pass)途中实体被销毁、或搬到别的表之后留下的那一行。不在遍历中时，表的最后一行立刻填上这个空洞；遍历中则留下一块墓碑，
+所有遍历都跳过它，这样循环底下的行不会挪动。最后一个遍历结束时，把存活的行搬进墓碑，把它们补上。所以遍历时可以直接销毁实体、
+移除组件，不需要命令缓冲。见[结构变更](/zh/docs/guide/structural-changes#keeping-tables-dense)。
+
+## 冻结的结构（Frozen structure） [#frozen-structure]
+
+有些遍历在一次调用之外还持有指向表的 ref 或 span，它们运行期间会冻结 World 的结构：[批量方法](#batch-method)、实现了
+`INoStructuralChanges` 的 job、并行方法和并行阶段。在里面做结构变更会抛 `InvalidOperationException`。
+见[结构变更](/zh/docs/guide/structural-changes#frozen-passes)。
+
 ## 结构闸门（Structural gate） [#structural-gate]
 
-每次结构变更都要经过的检查。它属于 World 的所有者线程；变更重入、或者发生在并行区域和批量方法里时，它直接抛异常，
-而不是把表写坏。见[线程模型](/zh/docs/guide/threading)。
+每次结构变更都要经过的检查（EasyEcs 内部的 `World.Structural()`）。结构变更只属于[所有者线程](#owner-thread)，所以闸门只是一个
+由所有者置位、清除的普通标志，不用原子指令。变更在闸门内重入，或者发生在结构[冻结](#frozen-structure)期间，它直接抛
+`InvalidOperationException`，而不是把表写坏。别的线程恰好同时做的变更它不一定看得见；分析器能看到的会报出来（EECS013、EECS014）。
+见[多线程](/zh/docs/guide/threading#what-the-world-synchronizes)。
 
 ## 所有者线程（Owner thread） [#owner-thread]
 
 调用 World 的 `Update`、执行其结构变更的那个线程。一个 World 同一时间只有一个所有者线程；服务器通常每个线程一个 World，
-其他线程的输入通过它自己的队列交给它。见[线程模型](/zh/docs/guide/threading)。
+其他线程的输入通过[邮箱](#mailbox)交给它。见[多线程](/zh/docs/guide/threading#terms-process-world-owner-thread)。
+
+## 邮箱（Mailbox） [#mailbox]
+
+由你的代码持有的队列，把其他线程（网络、定时器、数据库）的输入送到 World 的所有者线程。EasyEcs 自己不带：其他线程投递消息，
+所有者线程上的一个系统取出消息，把每条变成数据，比如一个请求实体。见[多线程](/zh/docs/guide/threading#input-from-other-threads)。
 
 ## 预制体（Prefab） [#prefab]
 
@@ -137,7 +206,12 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 ## 清理组件（Cleanup component） [#cleanup-component]
 
 实现 `ICleanupComponent` 的组件。销毁它所在的实体时，其他组件被移除，并加上 `Destroyed` 标签；实体会一直保留，
-直到某个系统释放了对应的资源（一个连接、一个座位）并移除这个组件。见[清理与禁用](/zh/docs/guide/cleanup-and-disable)。
+直到某个系统释放了对应的资源（一个连接、一个座位）并移除这个组件。见[清理与禁用](/zh/docs/guide/cleanup-and-disable#cleanup-components)。
+
+## 禁用的组件（Disabled component） [#disabled-component]
+
+用 `entity.Disable<T>()` 藏起来的组件：值还在，但在 `Enable<T>()` 之前，查询、`Has` 和 `Get` 都当实体没有它。
+这期间实体带着 `Disabled<T>` 标签，查询可以按它筛选。见[清理与禁用](/zh/docs/guide/cleanup-and-disable#disable-a-component)。
 
 ## 快照（Snapshot） [#snapshot]
 
@@ -158,3 +232,20 @@ World 在内存里的一份拷贝：`world.Capture()` 拍下，`world.Restore(sn
 
 可回收的 `AssemblyLoadContext`：.NET 用来加载插件、之后再卸载的机制。`world.RemoveTypes(context)` 从 World 里移除插件的系统、
 组件和单例，于是这个上下文可以卸载，而 World 照常运行。见[迁移与卸载](/zh/docs/guide/migration-and-unload)。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="实体与组件" href="/zh/docs/guide/entities-and-components">
+    句柄、id、组件、标签，以及它们存在哪里。
+  </Card>
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+    `[ForEach]`、批量方法和并行方法、分组、顺序和间隔。
+  </Card>
+  <Card title="多线程" href="/zh/docs/guide/threading">
+    所有者线程、阶段、执行器，以及来自其他线程的输入。
+  </Card>
+  <Card title="变更追踪" href="/zh/docs/guide/change-tracking">
+    变更 tick、`[Changed<T>]` 和 `[Removed<T>]`。
+  </Card>
+</Cards>

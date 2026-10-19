@@ -65,7 +65,19 @@ systems, `world.Query<T…>()`, `Count`, `Any` and struct jobs ask it. See [Quer
 
 The conditions of a query beyond its components: `With`, `Without`, `WithAny`, `Changed`, `Removed` and `InGroup`.
 They are attributes on `[ForEach]` methods, or a `QueryFilter` kept in a `static readonly` field. See
-[Queries and filters](/en/docs/guide/queries).
+[Queries and filters](/en/docs/guide/queries#filters).
+
+## Query cache [#query-cache]
+
+The world's memory of which tables match each query. The first use of a query shape scans every table once; after
+that the query reads an immutable list of its tables, and a new table is added to the lists it matches when it is
+created. Readers never lock. See [Architecture](/en/docs/architecture#query-cache).
+
+## Warm-up [#warm-up]
+
+The first updates of a world, which create the tables, the query cache entries and the buffers that later updates
+reuse. After warm-up, queries, iteration, component access and structural changes allocate nothing, so an allocation
+test runs one update before it counts bytes. See [Testing systems](/en/docs/guide/testing#allocations).
 
 ## System [#system]
 
@@ -75,19 +87,61 @@ update; it keeps no state of its own and never calls another system. See [System
 ## System group [#system-group]
 
 A struct implementing `ISystemGroup`. Systems marked `[UpdateInGroup<G>]` run only on `world.Update<G>()`, so input,
-simulation and persistence can run at their own cadence. See [Systems](/en/docs/guide/systems).
+simulation and persistence can run at their own cadence. Systems without the attribute are in the default group,
+which `world.Update()` runs. See [Systems](/en/docs/guide/systems#system-groups).
+
+## Update and tick [#update]
+
+An update is one call of `world.Update()` (or `world.Update<G>()`): every enabled system of the group runs once, in
+order, unless its `UpdateInterval` skips this update. A tick is one step of the simulation at a fixed rate; a
+server's loop calls `Update()` once per tick. See [Systems](/en/docs/guide/systems#one-update).
 
 ## Stage [#stage]
 
-A run of consecutive systems with no order and no conflicting access between them. With
+A run of consecutive systems with no order and no conflicting [access](#access-set) between them. With
 `WorldOptions.ParallelSystems`, a stage's systems run at the same time; without it, every system is its own stage.
-See [Threading](/en/docs/guide/threading).
+See [Threading](/en/docs/guide/threading#parallel-systems).
+
+## Access set [#access-set]
+
+What a system reads and writes, generated from its `[ForEach]` parameters: a `ref` component or singleton is a
+write, an `in` one a read, and `[Changed<T>]` or `[Removed<T>]` reads `T`. Two systems conflict when one writes what
+the other reads or writes. A system that can reach the whole world (an `Entity` or `World` parameter, an instance
+method, an `OnUpdate` override) runs alone. Only systems that do not conflict share a [stage](#stage). See
+[Threading](/en/docs/guide/threading#parallel-systems).
+
+## Runner [#runner]
+
+What runs parallel work for a world: the systems of a stage, or the chunks of a parallel method. The calling thread
+works through the items together with up to `WorldOptions.MaxDegreeOfParallelism - 1` reusable thread-pool work
+items, so a parallel run allocates nothing. It wakes those helpers only while measured runs show they make the work
+faster; a busy runner leaves the items to the calling thread. See
+[Threading](/en/docs/guide/threading#parallel-systems).
+
+## Chunk [#chunk]
+
+A slice of the matching rows of a parallel method (`[ForEach(Parallel = true)]`, `ForEachParallel`): a multiple of 64
+rows, about four per thread, between 1,024 and 16,384 rows. The [runner](#runner) hands the chunks to its threads;
+fewer than two chunks run on the calling thread alone. See [Systems](/en/docs/guide/systems#parallel-methods).
 
 ## Struct job [#struct-job]
 
 A struct implementing `IForEach<T…>`, `IForEachEntity<T…>` or `IForEachBatch<T…>` whose `Execute` method the row
 loop calls. The JIT inlines it, so there is no delegate and no virtual call per entity. The generator writes one for
-every `[ForEach]` method. See [Queries and filters](/en/docs/guide/queries).
+every `[ForEach]` method. See [Queries and filters](/en/docs/guide/queries#foreach-a-struct-job).
+
+## Batch method [#batch-method]
+
+A `[ForEach]` method whose component parameters are spans (`Span<Position>`, `ReadOnlySpan<Velocity>`). It receives
+runs of consecutive matching rows, element `i` of every span being the same entity, and a whole table in one call
+when every row matches; an `EntitySpan` parameter gives the entities of the run. The spans point into the tables, so
+the structure is [frozen](#frozen-structure) while it runs. Write one to vectorize a loop. See
+[Systems](/en/docs/guide/systems#batch-methods).
+
+## Optional component (`Maybe<T>`) [#maybe]
+
+A `[ForEach]` parameter for a component the entity may lack: the method visits every entity with its other
+components, and `HasValue` says whether this one also has `T`. See [Systems](/en/docs/guide/systems#maybe).
 
 ## Change tick [#change-tick]
 
@@ -107,16 +161,48 @@ Anything that changes which components an entity has, or which entities exist: c
 component, `Remove`, `Disable`. In EasyEcs it applies at once, even in the middle of a pass, with no command buffer.
 See [Structural changes](/en/docs/guide/structural-changes).
 
+## Pass [#pass]
+
+One walk over the matching rows: a run of a `[ForEach]` method, a `ForEach` job or a `Query` loop. A pass visits each
+entity at most once, skips the entities that stop matching before their turn, and does not visit the ones that join
+a matching table during it. See [Structural changes](/en/docs/guide/structural-changes#during-a-pass).
+
+## Tombstone [#tombstone]
+
+The row an entity leaves when it is destroyed or moves to another table during a [pass](#pass). Outside a pass, the
+table's last row fills the hole at once; during one, the row stays as a tombstone that passes skip, so no row shifts
+under a loop. The last pass to end closes the tombstones by moving live rows into them. This is why you can destroy
+or remove while iterating, with no command buffer. See
+[Structural changes](/en/docs/guide/structural-changes#keeping-tables-dense).
+
+## Frozen structure [#frozen-structure]
+
+A pass that holds refs or spans into the tables for longer than one call freezes the world's structure while it
+runs: [batch methods](#batch-method), jobs that implement `INoStructuralChanges`, parallel methods and parallel
+stages. A structural change inside one throws `InvalidOperationException`. See
+[Structural changes](/en/docs/guide/structural-changes#frozen-passes).
+
 ## Structural gate [#structural-gate]
 
-The check every structural change passes through. It belongs to the world's owner thread and throws when a change is
-reentered, or made inside a parallel region or a batch method, instead of corrupting the tables. See
-[Threading](/en/docs/guide/threading).
+The check every structural change passes through (`World.Structural()`, internal to EasyEcs). Structural changes
+belong to the [owner thread](#owner-thread), so the gate is a plain flag the owner sets and clears, with no atomic
+instruction. It throws `InvalidOperationException` when a change is reentered from code running under the gate, or
+made while the structure is [frozen](#frozen-structure), instead of tearing the tables. It cannot see every change
+made from another thread at the same moment; the analyzer reports the ones it can (EECS013, EECS014). See
+[Threading](/en/docs/guide/threading#what-the-world-synchronizes).
 
 ## Owner thread [#owner-thread]
 
 The thread that calls a world's `Update` and makes its structural changes. A world has one at a time; a server runs
-one world per thread and hands input to it through a queue it owns. See [Threading](/en/docs/guide/threading).
+one world per thread and hands input to it through a [mailbox](#mailbox). See
+[Threading](/en/docs/guide/threading#terms-process-world-owner-thread).
+
+## Mailbox [#mailbox]
+
+A queue your code owns that carries input from other threads (network, timers, a database) to a world's owner
+thread. EasyEcs has none of its own: other threads post messages, and a system on the owner thread takes them and
+turns each into data, such as a request entity. See
+[Threading](/en/docs/guide/threading#input-from-other-threads).
 
 ## Prefab [#prefab]
 
@@ -157,7 +243,13 @@ map or match share tables, so a query of that group walks only its rows. Not to 
 
 A component implementing `ICleanupComponent`. Destroying its entity removes the other components and adds the
 `Destroyed` tag; the entity stays until a system releases the resource (a socket, a seat) and removes the component.
-See [Cleanup and disable](/en/docs/guide/cleanup-and-disable).
+See [Cleanup and disable](/en/docs/guide/cleanup-and-disable#cleanup-components).
+
+## Disabled component [#disabled-component]
+
+A component hidden by `entity.Disable<T>()`: the value stays, but queries, `Has` and `Get` act as if the entity
+lacked it until `Enable<T>()`. The entity carries the `Disabled<T>` tag meanwhile, which queries can ask for. See
+[Cleanup and disable](/en/docs/guide/cleanup-and-disable#disable-a-component).
 
 ## Snapshot [#snapshot]
 
@@ -180,3 +272,20 @@ follow the new ids. See [Migration and unloading](/en/docs/guide/migration-and-u
 A collectible `AssemblyLoadContext`: .NET's way to load a plugin and unload it later. `world.RemoveTypes(context)`
 removes the plugin's systems, components and singletons from a world, so the context can unload while the world
 keeps running. See [Migration and unloading](/en/docs/guide/migration-and-unload).
+
+## Related [#related]
+
+<Cards>
+  <Card title="Entities and components" href="/en/docs/guide/entities-and-components">
+    Handles, ids, components, tags and where they are stored.
+  </Card>
+  <Card title="Systems" href="/en/docs/guide/systems">
+    `[ForEach]`, batch and parallel methods, groups, ordering and intervals.
+  </Card>
+  <Card title="Threading" href="/en/docs/guide/threading">
+    The owner thread, stages, the runner and input from other threads.
+  </Card>
+  <Card title="Change tracking" href="/en/docs/guide/change-tracking">
+    Change ticks, `[Changed<T>]` and `[Removed<T>]`.
+  </Card>
+</Cards>
