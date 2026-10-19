@@ -1,0 +1,218 @@
+---
+title: 问题排查
+seoTitle: "EasyEcs 问题排查：异常与不报错的问题"
+description: "EasyEcs 每条异常信息的含义和修法，以及系统不运行、生成成员缺失、加载后数据丢失这类不报错的问题。"
+icon: LifeBuoy
+faq: true
+---
+
+大多数错误到不了运行时：你还在写代码，[分析器](/zh/docs/guide/analyzer)就拒绝了它们。这一页讲剩下的：EasyEcs 抛出的异常（照原文
+引用），以及什么都不抛的问题。在页面里搜索你那条信息的开头几个词。
+
+| 信息开头 | 小节 |
+| --- | --- |
+| `A structural change started while another one was running` | [两个结构变更同时发生](#structural-change-running) |
+| `A structural change was made while the world's structure is frozen` | [结构冻结时的变更](#structure-frozen) |
+| `Entity is not alive` | [失效或默认的句柄](#entity-not-alive) |
+| `Entity has no X component` | [缺少组件](#no-component) |
+| `Singleton X was not added to this world` | [缺少单例](#singleton-not-added) |
+| `The entity has no X (check HasValue)` | [空的 `Maybe<T>`](#maybe-empty) |
+| `X already belongs to a world` | [系统被添加了两次](#system-in-a-world) |
+| `[UpdateBefore] / [UpdateAfter] form a cycle` | [顺序成环](#ordering-cycle) |
+| `X cannot be disabled: remove it instead` | [禁用清理组件或 `ChildOf`](#cannot-disable) |
+| `Snapshots cannot be captured or restored while a query iterates`、`Types cannot be removed during a pass` | [要等遍历结束的调用](#during-a-pass) |
+| `Not an EasyEcs save`、`The size of X changed`、`The fields of X changed`、`A damaged save` | [存档加载不了](#save-refused) |
+
+不抛异常的问题：[系统从不运行](#system-does-not-run)、[系统没有并行](#not-parallel)、[生成成员缺失](#member-missing)、
+[通过 `ref` 写的值丢了](#ref-lost)、[加载后组件不见了](#save-dropped-data)。
+
+## 为什么结构变更报 “started while another one was running”？ [#structural-change-running]
+
+```text
+InvalidOperationException: A structural change started while another one was running on this world: structural
+changes are made by the world's owner thread, one at a time
+```
+
+一个 World 上有两个结构变更（创建、销毁、`Set`、`Remove`、添加单例或系统）重叠了。要么是所有者在改的同时另一个线程也在改，要么是
+某个变更内部（你自己包在 EasyEcs 调用外面的回调）又发起了一个。EasyEcs 检查的是一个普通标志，能抓住很多这类竞争，但不是全部。
+
+**修法：**同一时刻只让一个线程改 World。其他线程把改动作为数据交出来，经由一个队列，由所有者线程上的系统读空
+（[来自其他线程的输入](/zh/docs/guide/threading#input-from-other-threads)、[托管](/zh/docs/guide/hosting#requests)），
+或者每个线程各用一个 World。
+
+## 为什么结构变更报 “while the world's structure is frozen”？ [#structure-frozen]
+
+```text
+InvalidOperationException: A structural change was made while the world's structure is frozen (systems or a parallel
+[ForEach] running on several threads, or a batch job holding spans into the tables)
+```
+
+变更发生时，有别的代码正把表固定住：`ParallelSystems` 的并行阶段、`[ForEach(Parallel = true)]` 方法、批处理方法或
+`ForEachBatch` 作业（span 指向列内部），或者标记了 `INoStructuralChanges` 的作业。分析器能看到的变更它会报
+（[EECS010](/zh/docs/guide/analyzer#eecs010)、[EECS013](/zh/docs/guide/analyzer#eecs013)）；这一个是经由它跟踪不到的辅助
+方法或句柄发生的。
+
+**修法：**把变更记成数据（标签、组件、请求实体），在一个单独运行的系统或 `[ForEach]` 方法里执行：带 `Entity` 或 `World` 参数的
+方法，或者 `OnUpdate`。
+
+## 为什么实体 “not alive”？ [#entity-not-alive]
+
+```text
+InvalidOperationException: Entity is not alive (destroyed, or a default handle)
+```
+
+在一个实体已被销毁的句柄上（它的 id 可能已经归了别的实体，版本号把两者区分开），或者在 `default(Entity)` 上调用了 `Get`、
+`GetOrAdd`、`Set`、`Remove` 或 `Destroy`。询问类调用不会抛异常，而是回答 false：`IsAlive`、`Has<T>()` 和 `TryGet<T>()`。
+
+**修法：**实体可能在你拿到句柄之后死掉的地方，先查 `entity.IsAlive`；组件里存 `EntityId`，用
+`world.TryGetEntity(id, out var entity)` 解析（[实体与组件](/zh/docs/guide/entities-and-components)）。
+
+## 为什么 `Get<T>()` 说实体没有这个组件？ [#no-component]
+
+```text
+InvalidOperationException: Entity has no Mana component
+```
+
+`Get<T>()`（以及生成的 `entity.Mana`）要求组件存在；被移除或[被禁用](/zh/docs/guide/cleanup-and-disable)的组件都算不存在。
+**修法：**可有可无的地方用 `TryGet<T>(out var value)` 或生成的 `TryGetMana(out …)`，要默认值就用 `GetOrAdd<T>()`；在
+`[ForEach]` 方法里用 [`Maybe<T>` 参数](/zh/docs/guide/systems#maybe)，或者按 `[With<T>]` / `[Without<T>]` 拆成两个方法。
+
+## 为什么单例 “not added to this world”？ [#singleton-not-added]
+
+```text
+InvalidOperationException: Singleton Clock was not added to this world
+```
+
+`world.GetSingleton<T>()` 或生成的 `world.Clock` 读了一个没人添加过的单例。World 不会凭空造一个，因为默认值很少是对的（步长为零的
+时钟）。
+
+**修法：**在建 World 的地方添加它（`world.SetClock(…)`、`world.AddSingleton<Clock>()`），默认值合适的地方用
+`GetOrAddSingleton<T>()` / `GetOrAddClock()`。`[ForEach]` 参数不一样：它通过 `SingletonRef<T>()` 解析，单例不存在时会以默认值
+添加，所以漏了初始化表现为值不对，而不是这个异常（[单例](/zh/docs/guide/singletons#in-systems)）。
+
+## 为什么 `Maybe<T>.Value` 会抛异常？ [#maybe-empty]
+
+```text
+InvalidOperationException: The entity has no Mana (check HasValue)
+```
+
+方法访问的实体没有 `T`。**修法：**读 `Value` 之前先检查 `HasValue`（[`Maybe<T>`](/zh/docs/guide/systems#maybe)）。
+
+## 为什么 `AddSystem` 说系统 “already belongs to a world”？ [#system-in-a-world]
+
+```text
+InvalidOperationException: ReceiveSpawns already belongs to a world
+```
+
+一个系统实例只属于一个 World。**修法：**每个 World 各建一个实例（`world.AddSystem<T>()` 每次都新建）。另外，同一个系统类型可以
+在一个 World 里添加两次，那样它每次更新会运行两次。
+
+## 为什么 `AddSystem` 报顺序成环？ [#ordering-cycle]
+
+```text
+InvalidOperationException: [UpdateBefore] / [UpdateAfter] form a cycle among A, B
+```
+
+列出的这些系统之间的顺序无法同时满足。分析器会报它在一次编译里看到的环（[EECS019](/zh/docs/guide/analyzer#eecs019)）；这个环跨了
+程序集。**修法：**去掉其中一条顺序。
+
+## 为什么有的组件不能禁用？ [#cannot-disable]
+
+```text
+InvalidOperationException: ChildOf cannot be disabled: remove it instead
+```
+
+`Disable<T>()` 让值保留、但对查询隐藏。[清理组件](/zh/docs/guide/cleanup-and-disable)和 `ChildOf` 不能这样隐藏：World 要一直看到
+它们，才能完成销毁、维持层级。**修法：**移除这个组件，或者禁用另一个系统会过滤的组件。
+
+## 为什么 `Capture`、`Restore`、`RemoveTypes` 要等遍历结束？ [#during-a-pass]
+
+```text
+InvalidOperationException: Snapshots cannot be captured or restored while a query iterates
+InvalidOperationException: Types cannot be removed during a pass
+```
+
+它们会重写或丢弃整张表，而查询的 `foreach` 或正在运行的系统正在遍历这些表。**修法：**在两次更新之间、任何查询循环之外调用它们
+（[快照](/zh/docs/guide/snapshots)、[卸载](/zh/docs/guide/migration-and-unload#remove-types)）。`Restore` 也会拒绝另一个 World
+的快照（`ArgumentException`），以及 `RemoveTypes` 丢掉其中某些表之前拍的快照。
+
+## 为什么存档加载不了？ [#save-refused]
+
+```text
+InvalidDataException: Not an EasyEcs save (or one of another format version)
+InvalidDataException: The size of Stock changed (8 bytes saved, 12 now): its saves cannot be loaded
+InvalidDataException: The fields of Stock changed since the save: its saves cannot be loaded (add a new component type instead)
+InvalidDataException: A damaged save: …
+```
+
+加载时，每个组件都要和读取它的代码对上，加载被拒绝时 World 保持原样。
+
+- **Not an EasyEcs save：**这些字节是别的东西、被截断了，或者是另一个存档格式版本写的。
+- **大小或字段变了：**存档之后，非托管组件的字段被增、删、改名或改了类型，或者托管（`[NinoType]`）组件的数据读不到最后一个字节。
+  保留旧类型，加一个新类型，再用系统转换（[代码改了之后](/zh/docs/guide/saves#versioning)）。
+- **A damaged save：**某个计数或 id 越界，或者缓冲比它的字节还长：字节已损坏。
+
+## 为什么我的系统从不运行？ [#system-does-not-run]
+
+按顺序检查：
+
+1. **它被添加到了这个 World：**`world.Systems` 列出所有系统。
+2. **它是启用的：**`Enabled` 为 true，且 `Error` 为 null。`SystemErrorPolicy.Disable` 下，异常会把它关掉；设
+   `Enabled = true` 会清掉错误并重试。
+3. **它的分组被更新了：**带 `[UpdateInGroup<G>]` 的系统只在 `world.Update<G>()` 时运行，`world.Update()` 永远不会跑它。
+4. **它的间隔到了：**`UpdateInterval => N` 时，它在所属分组每第 N 次更新时运行，第一次是第 N 次，再按 `UpdatePhase` 偏移。
+5. **它的过滤条件能匹配：**用 `world.Count<T…>(filter)` 数一数方法需要的实体。系统分组上的 `[Without<T>]` 对分组里所有方法都
+   生效，被禁用的组件算不存在。
+6. **确实有东西可看：**`[Changed<T>]` 方法只访问它的系统上次运行以来被写过的行，`[Removed<T>]` 方法只访问那之后失去 `T` 的实体
+   （[变更追踪](/zh/docs/guide/change-tracking#ticks)）。
+
+`WorldOptions.MeasureSystems` 会在 `system.Stats.Runs` 里统计每次运行，能分清“从没跑过”和“跑了但什么都没做”。
+
+## 为什么我的系统没有并行？ [#not-parallel]
+
+开了 `ParallelSystems`，系统只有在访问集已知、且不冲突时才会共享一个阶段。带 `Entity` 或 `World` 参数、有实例 `[ForEach]` 方法、
+重写了 `OnUpdate`，或者一个 `[ForEach]` 方法都没有的系统，都单独运行。一个写另一个读或写的东西，两个系统就冲突；`ref` 参数即使
+方法体只读也算写：改用 `in`（[并行系统](/zh/docs/guide/threading#parallel-systems)）。顺序（`[UpdateAfter<T>]`）也会把后面的
+系统放进后面的阶段。
+
+## 为什么某个生成成员不见了？ [#member-missing]
+
+生成器把 `entity.Health`、`SetHealth(…)`、`world.Clock` 等写成 C# 14 扩展成员。以下情况它什么都不生成：
+
+- 项目的语言版本低于 C# 14（`<LangVersion>` 设得比 .NET 10 默认值低）。
+- 类型是泛型，或者嵌套在生成代码看不到的类型里。
+- 接收者已经有同名成员：叫 `Id` 的组件不会得到 `entity.Id`（句柄自己就有），你自己写的同名成员优先。
+- 组件带索引（`IIndexed<TKey>`）：没有 `GetOrAddX()`，`entity.X` 是只读的；用 `SetX(…)` 写。
+
+泛型 API 始终可用：`Get<T>()`、`Read<T>()`、`Set(…)`、`Has<T>()`、`Remove<T>()`、`GetSingleton<T>()`
+（[生成成员](/zh/docs/guide/entities-and-components)）。
+
+## 为什么通过 `ref` 写的值不见了？ [#ref-lost]
+
+`entity.Get<T>()` 或查询项给出的 `ref`，只在 World 下一次结构变更之前有效（变更可能搬动行），也绝不能跨 `await`。通过旧 `ref`
+写入，落在了实体已经不用的内存上。变更之后通过句柄重新读（[ref 与 await](/zh/docs/guide/refs-and-await)）。
+
+被追踪或带索引的组件，通过 `entity.X` 和 `Read<T>()` 拿到的是只读的：写入走 `Set(…)`，被追踪的组件也可以用生成的 `WriteX()`，
+这样变更才会被打上 tick（[变更追踪](/zh/docs/guide/change-tracking#write-as-usual)）。
+
+## 为什么加载后某个组件不见了？ [#save-dropped-data]
+
+存档按带命名空间的全名记录每个类型，加载时跳过这个进程里没有的类型。存档之后被改名或挪了命名空间的组件，加载时就当作不存在：数据被
+丢弃，也不报错。存档用到的类型名要保持稳定；插件的新旧两个版本同时加载时，先卸载旧版本再加载存档（[存档](/zh/docs/guide/saves#plugins)）。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="常见错误" href="/zh/docs/guide/common-mistakes">
+    常见的错误、会犯错的代码，以及修法。
+  </Card>
+  <Card title="分析器规则" href="/zh/docs/guide/analyzer">
+    EECS002 到 EECS024，各自由什么触发、怎么修。
+  </Card>
+  <Card title="多线程" href="/zh/docs/guide/threading">
+    所有者线程，以及 World 同步了什么。
+  </Card>
+  <Card title="FAQ" href="/zh/docs/faq">
+    关于生产环境、分配、线程和存档的简短回答。
+  </Card>
+</Cards>

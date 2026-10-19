@@ -41,8 +41,11 @@ One page per concept, under [guide/](guide):
 | [Saves](https://ecs.xgamedev.net/en/docs/guide/saves) | [guide/saves.mdx](guide/saves.mdx) |
 | [Migration and unload](https://ecs.xgamedev.net/en/docs/guide/migration-and-unload) | [guide/migration-and-unload.mdx](guide/migration-and-unload.mdx) |
 | [Threading](https://ecs.xgamedev.net/en/docs/guide/threading) | [guide/threading.mdx](guide/threading.mdx) |
+| [Hosting in a .NET server](https://ecs.xgamedev.net/en/docs/guide/hosting) | [guide/hosting.mdx](guide/hosting.mdx) |
+| [Testing systems](https://ecs.xgamedev.net/en/docs/guide/testing) | [guide/testing.mdx](guide/testing.mdx) |
 | [Analyzer rules](https://ecs.xgamedev.net/en/docs/guide/analyzer) | [guide/analyzer.mdx](guide/analyzer.mdx) |
 | [Common mistakes](https://ecs.xgamedev.net/en/docs/guide/common-mistakes) | [guide/common-mistakes.mdx](guide/common-mistakes.mdx) |
+| [Troubleshooting](https://ecs.xgamedev.net/en/docs/guide/troubleshooting) | [guide/troubleshooting.mdx](guide/troubleshooting.mdx) |
 
 ## Compare
 

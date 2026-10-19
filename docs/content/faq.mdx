@@ -57,6 +57,20 @@ The rules are explicit and short ([D13](/en/docs/decisions#d13-one-owner-thread-
 Never keep a `ref` across an `await`: keep the `Entity` and get the component again. More in
 [Threading](/en/docs/guide/threading) and [`ref` and `await`](/en/docs/guide/refs-and-await).
 
+## How do I run EasyEcs in ASP.NET Core or a Worker Service? [#hosting]
+
+Give the world one owner: a `BackgroundService` that builds it, calls `world.Update()` on a `PeriodicTimer` and saves
+it when the host stops. Request handlers never touch the world: they write requests into a bounded `Channel<T>` that a
+system drains each tick (with a `TaskCompletionSource` for the reply), and read an immutable status the world
+publishes. No hosting package is needed; [Hosting in a .NET server](/en/docs/guide/hosting) has the whole server.
+
+## How do I test a system? [#testing]
+
+Build a world in the test, add the system and the entities and singletons it needs, call `world.Update()` and assert
+on the components. Systems never call each other, so there is nothing to mock; share the server's setup method so the
+test runs the real order. A zero-allocation budget is one more test: count
+`GC.GetAllocatedBytesForCurrentThread()` around warm updates ([Testing systems](/en/docs/guide/testing)).
+
 ## Can I use EasyEcs with Unity or Godot? [#unity-godot]
 
 No. EasyEcs targets `net10.0` only: it relies on C# 14 extension members, `Vector256` / `Vector512`, columns on the
@@ -116,7 +130,7 @@ publishes with `PublishAot` and runs. Two limits: a generic system closed only b
 `MakeGenericType`, which Native AOT cannot do
 ([D20](/en/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names)); and the AOT compiler
 currently reports one IL3054 warning (generic recursion through the change-tick column type) when it compiles a
-program with tracked components.
+program with tracked components. Deploying a server: [hosting](/en/docs/guide/hosting#deploy).
 
 ## Why are there no events? [#why-are-there-no-events]
 

@@ -1,0 +1,431 @@
+---
+title: 测试系统
+seoTitle: "用 NUnit 给 C# ECS 系统写单元测试"
+description: "每个测试一个 World 来测 EasyEcs 系统：准备实体和单例，调用 Update，再检查数据。共用初始化、错误、零分配预算和存档。"
+icon: FlaskConical
+---
+
+系统没有需要 mock 的依赖：它只读写自己 World 里的数据，也从不调用别的系统。所以测试只要搭一个小 World，放进系统需要的实体和单例，
+调用 `world.Update()`，再检查系统留下的数据。整个 tick 也一样：按服务器的顺序跑服务器的系统，然后断言结果。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  每个系统的规则（伤害、过期、死亡）、整个 tick 的顺序、存档保留了什么，以及每个 tick 零字节分配的预算。测试以毫秒计：创建和释放
+  一个 World 都很便宜。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  计时：断言一个 tick 要多久的测试不稳定，改用 BenchmarkDotNet 测（[性能](/zh/docs/performance)）。测试 EasyEcs 本身（查询、
+  结构变更）：库自己的测试已经覆盖，你的测试应该写你游戏的规则。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+例子用 NUnit，和 `dotnet new easyecs --tests` 模板一致；xUnit、MSTest 写法相同。组件和系统来自[完整例子](#full-example)：
+`Health`、`Poison`、`Dead` 标签、`Score` 单例、`PoisonSystem` 和 `DeathSystem`。
+
+### 准备、更新、断言 [#arrange-update-assert]
+
+每个测试一个 World，结束时释放。只加被测的系统和它需要的数据，跑一次更新，再通过留下的句柄读组件：
+
+```csharp doccheck=skip
+[Test]
+public void HurtsEveryTickThenWearsOff()
+{
+    using var world = new World();
+    world.AddSystem<PoisonSystem>();
+    var unit = world.CreateEntity(new Health(10), new Poison(DamagePerTick: 3, Ticks: 2));
+
+    world.Update();
+    Assert.That(unit.Health.Value, Is.EqualTo(7));
+    Assert.That(unit.Poison.Ticks, Is.EqualTo(1));
+
+    world.Update();
+    Assert.That(unit.Health.Value, Is.EqualTo(4));
+    Assert.That(unit.HasPoison, Is.False, "最后一个 tick 移除毒");
+}
+```
+
+过滤条件也要测：系统必须跳过的实体，就是多一次 `CreateEntity`、多一条断言。结构变更都是立即生效的，`Update()` 一返回就能看到系统
+做了什么：没有要刷新的命令缓冲。
+
+### 和服务器共用初始化 [#share-the-setup]
+
+系统按注册顺序运行。服务器和测试各自手写一遍添加系统的代码，测试就可能在服务器从不使用的顺序下通过。把初始化放进一个方法，
+`Program.cs` 和测试都调用它：
+
+```csharp doccheck=skip
+public static class Battle
+{
+    public static void Setup(World world)
+    {
+        world.AddSingleton<Score>();
+        world.AddSystem<PoisonSystem>();
+        world.AddSystem<DeathSystem>();
+    }
+}
+
+[Test]
+public void APoisonedUnitDiesAndScores()
+{
+    using var world = new World();
+    Battle.Setup(world);
+    var unit = world.CreateEntity(new Health(5), new Poison(5, 3));
+
+    world.Update();
+
+    Assert.That(unit.IsDead, Is.True);
+    Assert.That(world.Score.Kills, Is.EqualTo(1));
+}
+```
+
+### 用数据控制时间和输入 [#time-and-input]
+
+读 `DateTime.Now`、随机数生成器或 socket 的系统没法精确测试。改给它一个单例（带 tick 和步长的时钟、种子、配置），在测试里设置这个
+单例。输入也是数据：测试直接创建网络系统本来会创建的请求实体，或者往输入系统消费的队列里写（[托管](/zh/docs/guide/hosting#requests)）。
+
+- **间隔：**`UpdateInterval => 4` 的系统每四次 `Update()` 跑一次；测试里就调用这么多次 `Update()`。
+- **分组：**`[UpdateInGroup<G>]` 里的系统只在 `world.Update<G>()` 时运行；测试像主机那样调用它。
+- **变更追踪：**`[Changed<T>]` 方法只看到它的系统上次运行以来的写入；在两次更新之间写组件，对第二次更新做断言
+  （[变更追踪](/zh/docs/guide/change-tracking)）。
+
+### 测试错误 [#errors]
+
+默认情况下，系统里的异常会抛出 `Update()`，测试用 `Assert.Throws` 断言。`SystemErrorPolicy.Disable` 下，系统被关掉，异常留在
+`Error` 里：
+
+```csharp doccheck=skip
+// 打印分数；它读取单例，却没有添加它。
+public class ScoreReport : EcsSystem
+{
+    protected override void OnUpdate() => Console.WriteLine($"kills: {World.Score.Kills}");
+}
+
+[Test]
+public void AMissingSingletonThrowsOutOfUpdate()
+{
+    using var world = new World();
+    world.AddSystem<ScoreReport>();
+
+    Assert.Throws<InvalidOperationException>(() => world.Update());
+}
+
+[Test]
+public void UnderDisableTheSystemIsSwitchedOff()
+{
+    using var world = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
+    var report = new ScoreReport();
+    world.AddSystem(report);
+
+    world.Update();
+
+    Assert.That(report.Enabled, Is.False);
+    Assert.That(report.Error, Is.InstanceOf<InvalidOperationException>());
+}
+```
+
+### 守住零字节预算 [#allocations]
+
+会分配内存的 tick 在喂垃圾回收器，停顿随之而来。把预算写成断言：建好 World，先跑一次更新预热查询缓存和表，再统计之后的更新在当前
+线程上分配了多少字节：
+
+```csharp doccheck=skip
+[Test]
+public void ATickAllocatesNothing()
+{
+    using var world = new World();
+    Battle.Setup(world);
+    var units = new Entity[1_000];
+    world.CreateEntities(units, new Health(1_000_000), new Poison(1, int.MaxValue));
+
+    // 第一次更新会建立查询缓存：只统计之后的更新。
+    world.Update();
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    for (int i = 0; i < 100; i++)
+    {
+        world.Update();
+    }
+
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+    Assert.That(allocated, Is.Zero);
+}
+```
+
+`GC.GetAllocatedBytesForCurrentThread()` 只统计当前线程：开了 `ParallelSystems` 或并行 `[ForEach]` 方法时，改用
+`GC.GetTotalAllocatedBytes(precise: true)`，并且别让其他测试同时运行。结构变更进入一张还不存在的表时，会分配一次这张表，所以预热时
+要做和被测 tick 同样种类的变更。
+
+### 测试存档保留了什么 [#saves]
+
+存档，把字节加载进一个新 World，再找你关心的状态。实体保留 id，所以在新 World 里按 `EntityId` 找到的句柄就是同一个实体：
+
+```csharp doccheck=skip
+[Test]
+public void ABattleSurvivesARestart()
+{
+    using var world = new World();
+    Battle.Setup(world);
+    var unit = world.CreateEntity(new Health(5), new Poison(5, 3));
+    world.Update();
+    var output = new ArrayBufferWriter<byte>();
+    world.Save(output);
+
+    using var restarted = new World();
+    Battle.Setup(restarted);
+    // 放在 Setup 之后：Load 会替换 Setup 添加的单例。
+    restarted.Load(output.WrittenSpan);
+
+    var loaded = restarted.GetEntity(unit.Id);
+    Assert.That(loaded.IsDead, Is.True);
+    Assert.That(restarted.Score.Kills, Is.EqualTo(1));
+}
+```
+
+用上一个版本留下的存档文件跑这样的测试，还能提前发现哪次组件改动会让旧存档加载失败（[存档](/zh/docs/guide/saves#versioning)）。
+
+## 完整例子 [#full-example]
+
+会消退的毒、会计分的死亡，以及五个测试：单个系统、整个 tick、零字节预算和存档。游戏是一个类库；测试是引用它的 NUnit 项目
+（`dotnet new nunit`，再 `dotnet add reference` 引用游戏项目，`dotnet add package EasyEcs`）。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Health(int Value) : IComponent;
+
+// 持续伤害：接下来 Ticks 个 tick，每个 tick 造成 DamagePerTick。
+public record struct Poison(int DamagePerTick, int Ticks) : IComponent;
+
+public struct Dead : IComponent;
+
+public record struct Score(int Kills) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+public class PoisonSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Hurt(Entity unit, ref Poison poison, ref Health health)
+    {
+        health.Value -= poison.DamagePerTick;
+        if (--poison.Ticks == 0)
+        {
+            unit.RemovePoison();
+        }
+    }
+}
+
+[UpdateAfter<PoisonSystem>]
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health health, ref Score score)
+    {
+        if (health.Value > 0)
+        {
+            return;
+        }
+
+        unit.SetDead();
+        score.Kills++;
+    }
+}
+
+// 搭建战斗的唯一入口：Program.cs 和测试都调用它，
+// 所以测试里系统的顺序和服务器一致。
+public static class Battle
+{
+    public static void Setup(World world)
+    {
+        world.AddSingleton<Score>();
+        world.AddSystem<PoisonSystem>();
+        world.AddSystem<DeathSystem>();
+    }
+}
+```
+
+</Accordion>
+<Accordion title="BattleTests.cs">
+
+```csharp title="BattleTests.cs" doccheck=skip
+using System.Buffers;
+using EasyEcs;
+using NUnit.Framework;
+
+public class PoisonSystemTests
+{
+    [Test]
+    public void HurtsEveryTickThenWearsOff()
+    {
+        using var world = new World();
+        world.AddSystem<PoisonSystem>();
+        var unit = world.CreateEntity(new Health(10), new Poison(DamagePerTick: 3, Ticks: 2));
+
+        world.Update();
+        Assert.That(unit.Health.Value, Is.EqualTo(7));
+        Assert.That(unit.Poison.Ticks, Is.EqualTo(1));
+
+        world.Update();
+        Assert.That(unit.Health.Value, Is.EqualTo(4));
+        Assert.That(unit.HasPoison, Is.False, "最后一个 tick 移除毒");
+    }
+
+    [Test]
+    public void LeavesTheDeadAlone()
+    {
+        using var world = new World();
+        world.AddSystem<PoisonSystem>();
+        var corpse = world.CreateEntity(new Health(0), new Poison(3, 2));
+        corpse.SetDead();
+
+        world.Update();
+
+        Assert.That(corpse.Health.Value, Is.Zero);
+    }
+}
+
+public class BattleTests
+{
+    [Test]
+    public void APoisonedUnitDiesAndScores()
+    {
+        using var world = new World();
+        Battle.Setup(world);
+        var unit = world.CreateEntity(new Health(5), new Poison(5, 3));
+
+        world.Update();
+
+        Assert.That(unit.IsDead, Is.True);
+        Assert.That(world.Score.Kills, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void ATickAllocatesNothing()
+    {
+        using var world = new World();
+        Battle.Setup(world);
+        var units = new Entity[1_000];
+        world.CreateEntities(units, new Health(1_000_000), new Poison(1, int.MaxValue));
+
+        // 第一次更新会建立查询缓存：只统计之后的更新。
+        world.Update();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++)
+        {
+            world.Update();
+        }
+
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.That(allocated, Is.Zero);
+    }
+
+    [Test]
+    public void ABattleSurvivesARestart()
+    {
+        using var world = new World();
+        Battle.Setup(world);
+        var unit = world.CreateEntity(new Health(5), new Poison(5, 3));
+        world.Update();
+        var output = new ArrayBufferWriter<byte>();
+        world.Save(output);
+
+        using var restarted = new World();
+        Battle.Setup(restarted);
+        // 放在 Setup 之后：Load 会替换 Setup 添加的单例。
+        restarted.Load(output.WrittenSpan);
+
+        var loaded = restarted.GetEntity(unit.Id);
+        Assert.That(loaded.IsDead, Is.True);
+        Assert.That(restarted.Score.Kills, Is.EqualTo(1));
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Battle.Tests.csproj">
+
+```xml title="Battle.Tests.csproj"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="NUnit" Version="4.6.1" />
+    <PackageReference Include="NUnit3TestAdapter" Version="5.2.0" />
+    <PackageReference Include="EasyEcs" Version="4.1.0" />
+    <ProjectReference Include="..\Battle\Battle.csproj" />
+  </ItemGroup>
+</Project>
+```
+
+</Accordion>
+</Accordions>
+
+`dotnet test --logger "console;verbosity=normal"` 输出：
+
+```text
+  Passed ABattleSurvivesARestart [118 ms]
+  Passed APoisonedUnitDiesAndScores [< 1 ms]
+  Passed ATickAllocatesNothing [43 ms]
+  Passed HurtsEveryTickThenWearsOff [2 ms]
+  Passed LeavesTheDeadAlone [1 ms]
+Total tests: 5
+     Passed: 5
+```
+
+耗时主要是 JIT 第一次编译各条路径。注意预算测试：第一个 tick 跑过之后，一千个中毒单位跑一百个 tick 不分配任何内存。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+| 别这样 | 这样做 | 原因 |
+| --- | --- | --- |
+| 所有测试共用一个 World | 每个测试一个 World，放在 `using` 里 | 测试互不影响，可以并行 |
+| 每个测试手写添加系统 | 调用服务器自己的初始化方法 | 测试跑的就是 tick 真实的顺序 |
+| 等真实时间流逝 | 测试设置时钟单例 | 精确，而且和代码一样快 |
+| 断言 tick 耗时 | 测试里守零字节预算，耗时交给 BenchmarkDotNet | 分配次数是精确的，时间不是 |
+| 手工比较整个 World | 计数（`world.Count<T>()`）和留下的句柄上的组件 | 一条规则一行 |
+
+## 开销 [#what-it-costs]
+
+- **一个 World：**一次 `new World()` 和它的 `Dispose()`：实体数组和一张空表。
+- **分析器：**它也在测试项目上运行，所以测试里带状态或有竞争的系统同样编译不过（[分析器规则](/zh/docs/guide/analyzer)）。
+- **游戏代码零开销：**测试只用公开 API；没有要打开的测试模式。
+
+## 常见坑 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 漏掉系统作为 `[ForEach]` 参数使用的单例 | 自动以默认值添加（步长为零的时钟），测试因为错误的原因通过 | 调用服务器的初始化方法 |
+| 漏掉系统通过 `World.X` 或 `GetSingleton<T>()` 读取的单例 | `Update()` 抛出 `InvalidOperationException` | 测试失败 |
+| 存档测试里 `Load` 之后才 `AddSingleton` | 加载的值被重置 | 在 `Load` 之前添加单例 |
+| 预热之前就统计分配 | 查询缓存和新表都算进了分配 | 先预热 |
+| 跨 `world.Update()` 持有 `ref` | 更新可能搬动行：`ref` 读到过期内存 | 更新后通过句柄重新读（[ref](/zh/docs/guide/refs-and-await)） |
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+    生命周期、顺序、间隔、分组和错误。
+  </Card>
+  <Card title="在 .NET 服务器里托管" href="/zh/docs/guide/hosting">
+    同样的初始化，由托管服务按固定 tick 运行。
+  </Card>
+  <Card title="存档" href="/zh/docs/guide/saves">
+    `Save` 保留了什么，代码改了之后存档还能不能加载。
+  </Card>
+  <Card title="模板" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/templates">
+    `dotnet new easyecs --tests`：每个系统一个测试文件。
+  </Card>
+</Cards>

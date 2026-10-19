@@ -1,0 +1,447 @@
+---
+title: Testing systems
+seoTitle: "Unit testing ECS systems in C# with NUnit"
+description: "Test EasyEcs systems with a world per test: arrange entities and singletons, call Update, assert on data. Shared setup, errors, allocation budgets, saves."
+icon: FlaskConical
+---
+
+A system has no dependencies to mock: it reads and writes data in its world, and it never calls another system. So a
+test builds a small world of its own, adds the entities and singletons the system needs, calls `world.Update()` and
+checks the data the system left. The same holds for a whole tick: run the server's systems in the server's order and
+assert on the outcome.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  Every system's rules (damage, expiry, death), the order of a whole tick, what a save keeps, and a budget of zero
+  bytes allocated per tick. Tests run in milliseconds: a world is cheap to create and dispose.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  Timing: a test that asserts how long a tick takes is flaky; measure with BenchmarkDotNet instead
+  ([performance](/en/docs/performance)). Testing EasyEcs itself (queries, structural changes): the library's own
+  tests cover it, and your tests should state your game's rules.
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+The examples use NUnit, as the `dotnet new easyecs --tests` template does; xUnit and MSTest work the same way. The
+components and systems are those of the [full example](#full-example): `Health`, `Poison`, the `Dead` tag, the
+`Score` singleton, `PoisonSystem` and `DeathSystem`.
+
+### Arrange, update, assert [#arrange-update-assert]
+
+One world per test, disposed at the end. Add only the system under test and the data it needs, run one update, then
+read components through the handles you kept:
+
+```csharp doccheck=skip
+[Test]
+public void HurtsEveryTickThenWearsOff()
+{
+    using var world = new World();
+    world.AddSystem<PoisonSystem>();
+    var unit = world.CreateEntity(new Health(10), new Poison(DamagePerTick: 3, Ticks: 2));
+
+    world.Update();
+    Assert.That(unit.Health.Value, Is.EqualTo(7));
+    Assert.That(unit.Poison.Ticks, Is.EqualTo(1));
+
+    world.Update();
+    Assert.That(unit.Health.Value, Is.EqualTo(4));
+    Assert.That(unit.HasPoison, Is.False, "the last tick removes the poison");
+}
+```
+
+Test the filters too: an entity the system must leave alone is one more `CreateEntity` and one more assertion. Every
+structural change applies at once, so what a system did is visible right after `Update()` returns: there is no
+command buffer to flush.
+
+### Share the setup with the server [#share-the-setup]
+
+Systems run in registration order. When the server and the tests each add the systems by hand, the tests can pass
+in an order the server never runs. Put the setup in one method that `Program.cs` and the tests both call:
+
+```csharp doccheck=skip
+public static class Battle
+{
+    public static void Setup(World world)
+    {
+        world.AddSingleton<Score>();
+        world.AddSystem<PoisonSystem>();
+        world.AddSystem<DeathSystem>();
+    }
+}
+
+[Test]
+public void APoisonedUnitDiesAndScores()
+{
+    using var world = new World();
+    Battle.Setup(world);
+    var unit = world.CreateEntity(new Health(5), new Poison(5, 3));
+
+    world.Update();
+
+    Assert.That(unit.IsDead, Is.True);
+    Assert.That(world.Score.Kills, Is.EqualTo(1));
+}
+```
+
+### Control time and input with data [#time-and-input]
+
+A system that reads `DateTime.Now`, a random generator or a socket cannot be tested exactly. Give it a singleton
+instead (a clock with a tick and a step, a seed, a config) and set that singleton in the test. Input is data too: a
+test creates the request entities a network system would have created, or writes into the queue the input system
+drains ([hosting](/en/docs/guide/hosting#requests)).
+
+- **Intervals:** a system with `UpdateInterval => 4` runs on every fourth `Update()`; call `Update()` that many times.
+- **Groups:** systems in `[UpdateInGroup<G>]` run only on `world.Update<G>()`; call it in the test as the host
+  would.
+- **Change tracking:** a `[Changed<T>]` method sees the writes made since its system last ran; write the component
+  between two updates and assert on the second one
+  ([change tracking](/en/docs/guide/change-tracking)).
+
+### Test errors [#errors]
+
+By default an exception in a system propagates out of `Update()`, so a test asserts it with `Assert.Throws`. Under
+`SystemErrorPolicy.Disable` the system is switched off and keeps the exception in `Error`:
+
+```csharp doccheck=skip
+// Prints the score; it reads the singleton without adding it.
+public class ScoreReport : EcsSystem
+{
+    protected override void OnUpdate() => Console.WriteLine($"kills: {World.Score.Kills}");
+}
+
+[Test]
+public void AMissingSingletonThrowsOutOfUpdate()
+{
+    using var world = new World();
+    world.AddSystem<ScoreReport>();
+
+    Assert.Throws<InvalidOperationException>(() => world.Update());
+}
+
+[Test]
+public void UnderDisableTheSystemIsSwitchedOff()
+{
+    using var world = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
+    var report = new ScoreReport();
+    world.AddSystem(report);
+
+    world.Update();
+
+    Assert.That(report.Enabled, Is.False);
+    Assert.That(report.Error, Is.InstanceOf<InvalidOperationException>());
+}
+```
+
+### Hold a budget of zero bytes [#allocations]
+
+A tick that allocates feeds the garbage collector, and pauses follow. Assert the budget: build the world, run one
+update to warm up the query caches and tables, then count the bytes the next updates allocate on this thread:
+
+```csharp doccheck=skip
+[Test]
+public void ATickAllocatesNothing()
+{
+    using var world = new World();
+    Battle.Setup(world);
+    var units = new Entity[1_000];
+    world.CreateEntities(units, new Health(1_000_000), new Poison(1, int.MaxValue));
+
+    // The first update builds the query caches: measure the ones after it.
+    world.Update();
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    for (int i = 0; i < 100; i++)
+    {
+        world.Update();
+    }
+
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+    Assert.That(allocated, Is.Zero);
+}
+```
+
+`GC.GetAllocatedBytesForCurrentThread()` counts this thread only: with `ParallelSystems` or parallel `[ForEach]`
+methods, use `GC.GetTotalAllocatedBytes(precise: true)` and keep other tests from running at the same time. A
+structural change into a table that does not exist yet allocates the table once, so warm up with the same kinds of
+changes the measured ticks make.
+
+### Test what a save keeps [#saves]
+
+Save the world, load the bytes into a new one and look for the state you care about. Entities keep their ids, so a
+handle found by its `EntityId` in the new world is the same entity:
+
+```csharp doccheck=skip
+[Test]
+public void ABattleSurvivesARestart()
+{
+    using var world = new World();
+    Battle.Setup(world);
+    var unit = world.CreateEntity(new Health(5), new Poison(5, 3));
+    world.Update();
+    var output = new ArrayBufferWriter<byte>();
+    world.Save(output);
+
+    using var restarted = new World();
+    Battle.Setup(restarted);
+    // After Setup: Load replaces the singletons Setup added.
+    restarted.Load(output.WrittenSpan);
+
+    var loaded = restarted.GetEntity(unit.Id);
+    Assert.That(loaded.IsDead, Is.True);
+    Assert.That(restarted.Score.Kills, Is.EqualTo(1));
+}
+```
+
+A test like this, run against a save file kept from the previous release, also tells you when a component change would
+make old saves fail to load ([saves](/en/docs/guide/saves#versioning)).
+
+## Full example [#full-example]
+
+A poison that wears off, a death that scores, and five tests: one system alone, the whole tick, a zero-byte budget and
+a save. The game is a class library; the tests are an NUnit project that references it
+(`dotnet new nunit`, then `dotnet add reference` to the game and `dotnet add package EasyEcs`).
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Health(int Value) : IComponent;
+
+// Damage over time: DamagePerTick for the next Ticks ticks.
+public record struct Poison(int DamagePerTick, int Ticks) : IComponent;
+
+public struct Dead : IComponent;
+
+public record struct Score(int Kills) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+public class PoisonSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Hurt(Entity unit, ref Poison poison, ref Health health)
+    {
+        health.Value -= poison.DamagePerTick;
+        if (--poison.Ticks == 0)
+        {
+            unit.RemovePoison();
+        }
+    }
+}
+
+[UpdateAfter<PoisonSystem>]
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health health, ref Score score)
+    {
+        if (health.Value > 0)
+        {
+            return;
+        }
+
+        unit.SetDead();
+        score.Kills++;
+    }
+}
+
+// The one place that builds a battle: Program.cs and the tests both call it,
+// so the tests run the systems in the order the server does.
+public static class Battle
+{
+    public static void Setup(World world)
+    {
+        world.AddSingleton<Score>();
+        world.AddSystem<PoisonSystem>();
+        world.AddSystem<DeathSystem>();
+    }
+}
+```
+
+</Accordion>
+<Accordion title="BattleTests.cs">
+
+```csharp title="BattleTests.cs" doccheck=skip
+using System.Buffers;
+using EasyEcs;
+using NUnit.Framework;
+
+public class PoisonSystemTests
+{
+    [Test]
+    public void HurtsEveryTickThenWearsOff()
+    {
+        using var world = new World();
+        world.AddSystem<PoisonSystem>();
+        var unit = world.CreateEntity(new Health(10), new Poison(DamagePerTick: 3, Ticks: 2));
+
+        world.Update();
+        Assert.That(unit.Health.Value, Is.EqualTo(7));
+        Assert.That(unit.Poison.Ticks, Is.EqualTo(1));
+
+        world.Update();
+        Assert.That(unit.Health.Value, Is.EqualTo(4));
+        Assert.That(unit.HasPoison, Is.False, "the last tick removes the poison");
+    }
+
+    [Test]
+    public void LeavesTheDeadAlone()
+    {
+        using var world = new World();
+        world.AddSystem<PoisonSystem>();
+        var corpse = world.CreateEntity(new Health(0), new Poison(3, 2));
+        corpse.SetDead();
+
+        world.Update();
+
+        Assert.That(corpse.Health.Value, Is.Zero);
+    }
+}
+
+public class BattleTests
+{
+    [Test]
+    public void APoisonedUnitDiesAndScores()
+    {
+        using var world = new World();
+        Battle.Setup(world);
+        var unit = world.CreateEntity(new Health(5), new Poison(5, 3));
+
+        world.Update();
+
+        Assert.That(unit.IsDead, Is.True);
+        Assert.That(world.Score.Kills, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void ATickAllocatesNothing()
+    {
+        using var world = new World();
+        Battle.Setup(world);
+        var units = new Entity[1_000];
+        world.CreateEntities(units, new Health(1_000_000), new Poison(1, int.MaxValue));
+
+        // The first update builds the query caches: measure the ones after it.
+        world.Update();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++)
+        {
+            world.Update();
+        }
+
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.That(allocated, Is.Zero);
+    }
+
+    [Test]
+    public void ABattleSurvivesARestart()
+    {
+        using var world = new World();
+        Battle.Setup(world);
+        var unit = world.CreateEntity(new Health(5), new Poison(5, 3));
+        world.Update();
+        var output = new ArrayBufferWriter<byte>();
+        world.Save(output);
+
+        using var restarted = new World();
+        Battle.Setup(restarted);
+        // After Setup: Load replaces the singletons Setup added.
+        restarted.Load(output.WrittenSpan);
+
+        var loaded = restarted.GetEntity(unit.Id);
+        Assert.That(loaded.IsDead, Is.True);
+        Assert.That(restarted.Score.Kills, Is.EqualTo(1));
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Battle.Tests.csproj">
+
+```xml title="Battle.Tests.csproj"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="NUnit" Version="4.6.1" />
+    <PackageReference Include="NUnit3TestAdapter" Version="5.2.0" />
+    <PackageReference Include="EasyEcs" Version="4.1.0" />
+    <ProjectReference Include="..\Battle\Battle.csproj" />
+  </ItemGroup>
+</Project>
+```
+
+</Accordion>
+</Accordions>
+
+`dotnet test --logger "console;verbosity=normal"` prints:
+
+```text
+  Passed ABattleSurvivesARestart [118 ms]
+  Passed APoisonedUnitDiesAndScores [< 1 ms]
+  Passed ATickAllocatesNothing [43 ms]
+  Passed HurtsEveryTickThenWearsOff [2 ms]
+  Passed LeavesTheDeadAlone [1 ms]
+Total tests: 5
+     Passed: 5
+```
+
+The times are mostly the JIT compiling each path once. Notice the budget test: a hundred ticks of a thousand poisoned
+units allocate nothing once the first tick has run.
+
+## How to use it fast [#how-to-use-it-fast]
+
+| Instead of | Do | Why |
+| --- | --- | --- |
+| A world shared by all tests | A world per test, in `using` | Tests stay independent and can run in parallel |
+| Systems added by hand in each test | The server's own setup method | The test runs the tick's real order |
+| Waiting for real time | A clock singleton set by the test | Exact, and as fast as the code |
+| Asserting how long a tick takes | A zero-byte budget in the test, timings in BenchmarkDotNet | Allocation counts are exact; times are not |
+| Comparing whole worlds by hand | Counts (`world.Count<T>()`) and the components of kept handles | One line per rule |
+
+## What it costs [#what-it-costs]
+
+- **A world:** one `new World()` and its `Dispose()`: the entity array and an empty table.
+- **The analyzer:** it also runs on the test project, so a test system with state or a race fails the build there too
+  ([analyzer rules](/en/docs/guide/analyzer)).
+- **Nothing in the game:** tests use the public API only; there is no test mode to switch on.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| Forgetting a singleton the system takes as a `[ForEach]` parameter | It is added with its default value (a clock with no step), and the test passes for the wrong reason | Call the server's setup method |
+| Forgetting a singleton the system reads through `World.X` or `GetSingleton<T>()` | `Update()` throws `InvalidOperationException` | The test fails |
+| `AddSingleton` after `Load` in a save test | The loaded value is reset | Add singletons before `Load` |
+| Measuring allocations without a warm-up update | The query caches and new tables count as allocations | Warm up first |
+| A `ref` held across `world.Update()` | The update may move rows: the ref reads stale memory | Read through the handle after the update ([refs](/en/docs/guide/refs-and-await)) |
+
+## Related [#related]
+
+<Cards>
+  <Card title="Systems" href="/en/docs/guide/systems">
+    Lifecycle, ordering, intervals, groups and errors.
+  </Card>
+  <Card title="Hosting in a .NET server" href="/en/docs/guide/hosting">
+    The same setup run by a hosted service on a fixed tick.
+  </Card>
+  <Card title="Saves" href="/en/docs/guide/saves">
+    What `Save` keeps and which code changes a save survives.
+  </Card>
+  <Card title="Templates" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/templates">
+    `dotnet new easyecs --tests`: a test file per system.
+  </Card>
+</Cards>

@@ -48,6 +48,18 @@ EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 
 不要跨 `await` 持有 `ref`：保留 `Entity`，`await` 之后重新取组件。详见[线程模型](/zh/docs/guide/threading)和
 [`ref` 与 `await`](/zh/docs/guide/refs-and-await)。
 
+## 怎么在 ASP.NET Core 或 Worker Service 里运行 EasyEcs？ [#hosting]
+
+给 World 指定一个所有者：一个 `BackgroundService` 负责建 World、按 `PeriodicTimer` 调用 `world.Update()`，主机停止时存档。请求
+处理代码从不碰 World：它们把请求写进有界的 `Channel<T>`，由一个系统每个 tick 读空（回复用 `TaskCompletionSource`），读取则看
+World 发布的不可变状态。不需要专门的托管包；完整的服务器见[在 .NET 服务器里托管](/zh/docs/guide/hosting)。
+
+## 怎么测试一个系统？ [#testing]
+
+在测试里建一个 World，加上系统和它需要的实体、单例，调用 `world.Update()`，再断言组件。系统之间从不互相调用，没有要 mock 的东西；
+共用服务器的初始化方法，测试跑的就是真实的顺序。零分配预算也只是多一个测试：在预热后的更新前后统计
+`GC.GetAllocatedBytesForCurrentThread()`（[测试系统](/zh/docs/guide/testing)）。
+
 ## 能在 Unity 或 Godot 里用 EasyEcs 吗？ [#unity-godot]
 
 不能。EasyEcs 只面向 `net10.0`：它依赖 C# 14 扩展成员、`Vector256` / `Vector512`、放在 POH 上的列以及当前 JIT 的行为
@@ -99,7 +111,7 @@ world.Load(output.WrittenSpan);  // 组件里存的 EntityId 仍然指向同样�
 （[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。基于它的程序可以用 `PublishAot` 发布并正常运行。
 两点限制：只在别的程序集里被封闭的泛型系统会退回 `MakeGenericType`，Native AOT 做不到
 （[D20](/zh/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names)）；另外，编译带被追踪组件的程序时，
-AOT 编译器目前会报一条 IL3054 警告（经由变更 tick 列类型的泛型递归）。
+AOT 编译器目前会报一条 IL3054 警告（经由变更 tick 列类型的泛型递归）。服务器部署见[托管](/zh/docs/guide/hosting#deploy)。
 
 ## 为什么没有事件？ [#why-are-there-no-events]
 

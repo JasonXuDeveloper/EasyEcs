@@ -20,7 +20,10 @@
     "saves",
     "migration-and-unload",
     "threading",
+    "hosting",
+    "testing",
     "analyzer",
-    "common-mistakes"
+    "common-mistakes",
+    "troubleshooting"
   ]
 }
