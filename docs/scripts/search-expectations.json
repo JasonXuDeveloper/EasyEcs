@@ -1,0 +1,40 @@
+{
+  "en": [
+    { "query": "singleton", "page": "guide/singletons" },
+    { "query": "remove while iterating", "page": "guide/structural-changes" },
+    { "query": "parallel", "page": "guide/threading" },
+    { "query": "EnsureCapacity", "page": "guide/prefabs", "top": 3 },
+    { "query": "ForEach", "page": "guide/systems" },
+    { "query": "change tracking", "page": "guide/change-tracking" },
+    { "query": "hot reload", "page": "guide/migration-and-unload" },
+    { "query": "save load", "page": "guide/saves" },
+    { "query": "project structure", "page": "guide/project-structure" },
+    { "query": "prefab", "page": "guide/prefabs" },
+    { "query": "index", "page": "guide/indexes-and-relations" },
+    { "query": "relation", "page": "guide/indexes-and-relations" },
+    { "query": "hierarchy", "page": "guide/hierarchy" },
+    { "query": "snapshot", "page": "guide/snapshots" },
+    { "query": "analyzer", "page": "guide/analyzer" },
+    { "query": "testing", "page": "guide/testing" },
+    { "query": "threading", "page": "guide/threading" },
+    { "query": "debugging", "page": "guide/diagnostics" }
+  ],
+  "zh": [
+    { "query": "单例", "page": "guide/singletons" },
+    { "query": "遍历时删除", "page": "guide/structural-changes" },
+    { "query": "并行", "page": "guide/threading" },
+    { "query": "变更追踪", "page": "guide/change-tracking" },
+    { "query": "热重载", "page": "guide/migration-and-unload" },
+    { "query": "存档", "page": "guide/saves" },
+    { "query": "项目结构", "page": "guide/project-structure" },
+    { "query": "预制体", "page": "guide/prefabs" },
+    { "query": "索引", "page": "guide/indexes-and-relations" },
+    { "query": "关系", "page": "guide/indexes-and-relations" },
+    { "query": "层级", "page": "guide/hierarchy" },
+    { "query": "快照", "page": "guide/snapshots" },
+    { "query": "分析器", "page": "guide/analyzer" },
+    { "query": "测试", "page": "guide/testing" },
+    { "query": "多线程", "page": "guide/threading" },
+    { "query": "调试", "page": "guide/diagnostics" }
+  ]
+}

@@ -19,6 +19,7 @@ import { z } from 'zod';
 import { remarkCjkLineBreaks } from './src/lib/cjk';
 import { legacyFrontmatter, remarkLegacyPage } from './src/lib/legacy';
 import { mermaidOptions, remarkMermaidSource } from './src/lib/mermaid';
+import { remarkSearchSkip } from './src/lib/search-skip';
 
 // "Last updated" dates come from `git log`, but only with the full history:
 // in a shallow clone the oldest commit looks like it added every file, so
@@ -108,6 +109,9 @@ export default defineConfig({
       remarkMermaidSource,
       // Block-level feedback: a "Feedback" button on each paragraph
       remarkFeedbackBlock,
+      // `{/* search: skip */}`: the next block stays out of the search index
+      // (src/lib/search-skip.ts)
+      remarkSearchSkip,
     ],
     // Diagrams are drawn at build time, before rehype-code highlights fences.
     rehypePlugins: (plugins) => [[rehypeMermaid, mermaidOptions], ...plugins],
