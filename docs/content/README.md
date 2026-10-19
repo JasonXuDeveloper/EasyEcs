@@ -76,4 +76,4 @@ One page per concept, under [guide/](guide):
 | [Design decisions](https://ecs.xgamedev.net/en/docs/decisions) | [decisions.mdx](decisions.mdx) | Why EasyEcs is the way it is. |
 | [Roadmap](https://ecs.xgamedev.net/en/docs/roadmap) | [roadmap.mdx](roadmap.mdx) | What is planned and what was dropped. |
 | [Changelog](https://ecs.xgamedev.net/en/docs/changelog) | [changelog.mdx](changelog.mdx) | What changed in each release. |
-| [Migration guide](../../MIGRATION_GUIDE.md) | | Upgrading from 4.0 to 4.1, from v3 to v4 and from v2 to v3. |
+| [Migration guide](https://ecs.xgamedev.net/en/docs/migration) | [migration.mdx](migration.mdx) | What to change when upgrading: between 4.x releases, from v3 to v4 and from v2 to v3. |

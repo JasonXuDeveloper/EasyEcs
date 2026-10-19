@@ -6,7 +6,7 @@ icon: RotateCcwClock
 ---
 
 这里从新到旧列出 EasyEcs 各版本之间的变化，只写影响使用者代码的部分。跨版本升级需要改代码时，步骤见
-[迁移指南](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md)（英文）。每个
+[迁移指南](/zh/docs/migration)。每个
 [GitHub Release](https://github.com/JasonXuDeveloper/EasyEcs/releases) 也会列出它包含的全部 pull request。
 
 ## 4.3.0 [#v4-3-0]
@@ -31,7 +31,7 @@ icon: RotateCcwClock
 ### 需要修改代码的变更 [#v4-3-0-breaking]
 
 - 把警告当错误的构建会因新警告（EECS025 到 EECS032）失败，直到改了代码或压掉规则；调用 `World.Update()` 的系统不再能编译
-  （EECS034）。见[迁移指南](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v42--v43)（英文）。
+  （EECS034）。见[迁移指南](/zh/docs/migration#v4-2-to-v4-3)。
 
 ## 4.2.0 [#v4-2-0]
 
@@ -52,7 +52,7 @@ icon: RotateCcwClock
 - World 里没有对应的单例时，`[ForEach]` 方法的单例参数会抛 `InvalidOperationException`，和 `world.X`、`GetSingleton<T>()`
   一样（以前会添加默认值）；`world.SingletonRef<T>()` 也一样会抛。在建 World 的地方、第一次 `Update()` 之前添加单例：
   `world.SetClock(…)` 或 `world.AddSingleton<Clock>()`，默认值合适的地方用 `world.GetOrAddClock()`。见
-  [单例](/zh/docs/guide/singletons#in-systems)和[迁移指南](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v41--v42)（英文）。
+  [单例](/zh/docs/guide/singletons#in-systems)和[迁移指南](/zh/docs/migration#v4-1-to-v4-2)。
 
 ### 修复 [#v4-2-0-fixes]
 
@@ -113,7 +113,7 @@ icon: RotateCcwClock
 
 ### 需要修改代码的变更 [#v4-1-0-breaking]
 
-完整步骤见[迁移指南](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v40--v41)（英文）。
+完整步骤见[迁移指南](/zh/docs/migration#v4-0-to-v4-1)。
 
 - `WorldOptions.Parallel` 改名为 `WorldOptions.ParallelSystems`：写成 `new WorldOptions { ParallelSystems = true }`。
 - `Entity.Id` 是 `EntityId`，`Entity.Version` 已删除：读 `entity.Id.Index` 和 `entity.Id.Version`；组件里存 `EntityId`
@@ -157,7 +157,7 @@ icon: RotateCcwClock
 
 ### 需要修改代码的变更 [#v4-0-0-breaking]
 
-所有改名见[迁移指南](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v3x--v40)（英文）。
+所有改名见[迁移指南](/zh/docs/migration#v3-to-v4-0)。
 
 - `Context` 改为 `World`，`GroupOf` 改为 `Query`。
 - 系统是同步的：没有 UniTask，也没有异步回调。
@@ -229,7 +229,7 @@ icon: RotateCcwClock
 
 ### 需要修改代码的变更 [#v3-0-0-breaking]
 
-- 回调已删除，变更立即执行。见[迁移指南](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#migration-guide-easyecs-v2x--v30)（英文）。
+- 回调已删除，变更立即执行。见[迁移指南](/zh/docs/migration#v2-to-v3-0)。
 
 ## 2.1.6 [#v2-1-6]
 

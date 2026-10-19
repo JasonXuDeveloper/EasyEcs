@@ -1,0 +1,597 @@
+---
+title: 迁移指南
+seoTitle: "迁移指南：EasyEcs 从 v2、v3 和 4.x 升级"
+description: "按版本逐步升级 EasyEcs：从 v2 到 v3、从 v3 到 v4，以及 4.x 各版本之间，代码要改哪些地方，附改前改后的代码。"
+icon: CircleArrowUp
+---
+
+升级 EasyEcs 时代码要改什么。一个版本跨度一节，从新到旧。每节列出这一步的所有改名、删除和行为变化，以及改成什么写法。
+要跨好几个版本升级，就从最旧的一节开始，按顺序往下改。每个版本新增了什么见[更新日志](/zh/docs/changelog)；当前的 API
+见 [API 参考](/zh/docs/api)。
+
+## v4.2 → v4.3 [#v4-2-to-v4-3]
+
+分析器加了性能规则（[EECS025 到 EECS034](/zh/docs/guide/analyzer#eecs025)）。为 4.2 写的代码不用改就能编译，除非某个系统调用了
+`World.Update()`，或者构建把警告当作错误。
+
+### 新增警告：EECS025 到 EECS032 [#v4-3-warnings]
+
+每条规则指出能跑但有额外开销的代码，修法写在[分析器规则](/zh/docs/guide/analyzer)的对应小节里；改动是机械性的，IDE 里还有代码修复。
+照着修，或者在确实有意这样写的地方抑制规则，并在旁边写明原因。比如有一个被追踪的 `Armor` 和一个计数用的 `Seen`：
+
+```csharp
+public record struct Armor(int Value) : IComponent, ITrackChanges;
+public record struct Seen(int Count) : IComponent;
+```
+
+```csharp doccheck=system
+#pragma warning disable EECS026 // 写访问正是目的：它给 [Changed<T>] 系统要响应的行打 tick
+[ForEach] static void Touch(ref Armor armor, ref Seen seen) => seen.Count++;
+#pragma warning restore EECS026
+```
+
+也可以在 `.editorconfig` 里对整个项目调低某条规则：
+
+```ini title=".editorconfig"
+dotnet_diagnostic.EECS028.severity = suggestion
+```
+
+### 系统里调用 `World.Update()` 是错误：EECS034 [#v4-3-update-in-a-system]
+
+它会在系统自己运行的途中把这个系统再跑一遍。更新和分组应该由托管 World 的代码来跑。
+
+**4.2**
+
+```csharp doccheck=expect-EECS034
+public class CatchUp : EcsSystem
+{
+    protected override void OnUpdate() => World.Update();
+}
+```
+
+**4.3**
+
+```csharp
+while (running) world.Update();   // 在宿主循环里
+```
+
+### 建议 EECS033 [#v4-3-suggestion]
+
+EECS033 只在 IDE 里显示，不会让构建失败：生成的成员和原来是同一个调用、同样的开销，只是更短。在 `.editorconfig` 里写
+`dotnet_diagnostic.EECS033.severity = warning` 可以把它升为警告。
+
+## v4.1 → v4.2 [#v4-1-to-v4-2]
+
+只改了一处行为；为 4.1 写的代码不用改就能编译。
+
+### `[ForEach]` 方法读不到单例时抛异常 [#v4-2-missing-singleton]
+
+`[ForEach]` 的单例参数通过 `world.SingletonRef<T>()` 解析，以前缺了单例会自动按默认值添加一个。现在两者都抛
+`InvalidOperationException`，和 `world.X`、`GetSingleton<T>()` 一样；在系统第一次运行时抛出，哪怕没有实体匹配。异常信息写明了修法：
+
+```text
+Singleton Clock was not added to this world: set it before the systems that read it run
+(world.SetClock(...) or world.AddSingleton<Clock>()), or use GetOrAddClock() where a default is meant
+```
+
+在构建 World 的地方、第一次 `Update()` 之前，把系统要读的单例都加上，测试里也一样。以下面的单例和系统为例：
+
+```csharp
+public record struct Clock(long Tick, float DeltaTime) : ISingletonComponent;
+
+public class Ticker : EcsSystem
+{
+    [ForEach] static void Advance(in Clock clock, ref Position position) => position.X += clock.DeltaTime;
+}
+```
+
+**4.1**：第一次更新会加一个默认值的 `Clock`，步长是 0。
+
+```csharp
+var world = new World();
+world.AddSystem<Ticker>();
+world.Update();
+```
+
+**4.2**：先设好；默认值确实合适的地方，调用 `world.GetOrAddClock()`。
+
+```csharp
+var world = new World();
+world.SetClock(Tick: 0, DeltaTime: 1f / 30);
+world.AddSystem<Ticker>();
+world.Update();
+```
+
+用 `Load` 恢复的 World 已经带着存档里的单例，只需补上存档里没有的那些。见[系统里的单例](/zh/docs/guide/singletons#in-systems)。
+
+## v4.0 → v4.1 [#v4-0-to-v4-1]
+
+有几个 API 变了（先列出来）。为 4.0 写的其他代码不用改就能编译，除非它把 `Query` 的结果存进字段、跨 `await` 使用、在 lambda
+里捕获、在迭代器或 LINQ 里使用，或者当作泛型参数传递：这些结果现在是 ref struct。存储从“每种组件一列（按实体 id 下标）”换成了原型（archetype）表（每个实体一行，列按
+64 字节对齐），有几处行为因此变了。
+
+### 改名和删除的 API [#v4-1-api]
+
+- **`WorldOptions.Parallel` 改名为 `WorldOptions.ParallelSystems`。** 这个选项让系统并排运行；新名字把它和
+  `[ForEach(Parallel = true)]` 区分开，后者是把一个方法的行分给多个线程。初始化器改成 `new WorldOptions { ParallelSystems = true }`。
+- **`Entity.Id` 的类型从 `int` 变成 `EntityId`**（下标 + 版本号，8 字节，非托管），`Entity.Version` 字段删掉了：改读
+  `entity.Id.Index` 和 `entity.Id.Version`。`world.GetEntity`、`TryGetEntity` 和 `IsAlive` 接受 `EntityId`；句柄可以隐式转换成
+  `EntityId`，所以 `world.GetEntity(entity)` 照样能编译。组件里存 `EntityId`，别存 `Entity` 句柄：句柄带着它的 World，会让这一列变成托管列（GC
+  要扫描，不能整块复制，不能序列化），新的警告 [EECS017](/zh/docs/guide/analyzer#eecs017) 会指出这样的字段。
+- **`EcsSystem.Priority` 删掉了。** 系统按注册顺序运行；要按依赖排序，在类上加 `[UpdateBefore<TSystem>]` /
+  `[UpdateAfter<TSystem>]`。出现环是 [EECS019](/zh/docs/guide/analyzer#eecs019)，和别的分组里的系统排序是
+  [EECS020](/zh/docs/guide/analyzer#eecs020)。
+- **`World.SystemError` 事件删掉了。** 系统抛的异常默认传出 `Update`；设了 `new WorldOptions { SystemErrors = SystemErrorPolicy.Disable }`
+  时，系统被关掉，异常留在 `system.Error` 里，应用从 `world.Systems` 读取。重新启用系统就会重试。
+- **系统不再需要 `partial`。** 生成的代码放在系统类型之外，所以 EECS001 删掉了；写着 `partial` 也照样能编译。
+- **`UpdateInterval` 和新增的 `UpdatePhase` 应该是常量**：每次更新都会读它们，警告 [EECS018](/zh/docs/guide/analyzer#eecs018)
+  会指出计算出值的重写。要停下和恢复一个系统，设置 `Enabled`。
+- **`world.DestroyEntity(entity)` 删掉了**：它做的就是 `entity.Destroy()` 做的事。调用 `entity.Destroy()`，或者用
+  `world.DestroyEntities<T…>(filter)` 一次销毁所有匹配的实体。
+- **`IForEach` job 只收组件。** `Execute(int entityId, ref T1 c1, …)` 变成 `Execute(ref T1 c1, …)`，遍历不必为它们加载实体行。需要实体的
+  job 实现 `IForEachEntity<…>`（`Execute(Entity entity, ref T1 c1, …)`），用 `world.ForEachEntity` 运行。
+- **`CompactArchetypes()` 和 `GetFragmentationStats()` 删掉了。** 表自己保持紧凑，job 抛异常时遍历也会正常结束，没什么要压缩、也没什么要监控的（两次更新之间这个比例一直是
+  0）。删掉这些调用。
+- **`entity.Add<T>()` 删掉了。** 它做的事 `Set` 和 `GetOrAdd` 都能做，而且实体已有这个组件时会把它重置，这和其他 ECS 框架里“添加”的含义不同。添加或替换值，写生成的
+  `entity.SetX(…)`（标签用 `SetDead()`）或 `entity.Set(new T(…))`；只在缺少时添加默认值、再通过 ref 填写，用
+  `ref var c = ref entity.GetOrAdd<T>()`。
+- **`world.Systems` 是 `SystemList`**（`foreach` 和 `Count` 零分配），不再每次新建一个 `IReadOnlyList`；`foreach` 循环不用改。
+- **`QueryEnumerator.Count` / `IsEmpty` 删掉了**：用同样的过滤条件调用 `world.Count` / `world.Any`。
+- **`entity.Remove<…>()` 返回实体本身**，方便链式调用；不用返回值的调用不用改。
+- **`RemoveSingleton<T>()` 返回 `bool`**（没添加过这个单例时返回 false）。不用返回值的调用不用改。
+
+### 行为变化 [#v4-1-behavior]
+
+- **失效的句柄和 `default` 句柄回答问题时返回 false。** `Has<T>()` 和 `TryGet<T>()` 以前对已销毁的实体会抛异常（`default(Entity).Has<T>()`
+  抛的是 `NullReferenceException`），现在和 `IsAlive` 一样返回 false。`Get`、`GetOrAdd`、`Set` 和 `Remove` 仍然抛异常，`default`
+  句柄现在也抛 `InvalidOperationException`。
+- **结构变更只属于 World 的所有者线程。** 4.0 用一把比较并交换（CAS）锁，把任意线程的创建、销毁、`Add` / `Set` / `Remove`
+  以及单例和系统的变更串行化。4.1 改成检查一个普通的所有者标志：在另一个变更进行时、在系统的并行阶段里或在并行 `[ForEach]` 里做变更，会抛
+  `InvalidOperationException`；你自己的两个线程同时改同一个 World，不一定能被发现。结构变更放在调用 `Update` 的线程上做（其他线程把变更当作数据，放进一个由系统清空的队列交过来：见[来自其他线程的输入](/zh/docs/guide/threading#input-from-other-threads)），或者每个线程用自己的
+  World。有两条分析器错误会指出这类代码：[EECS013](/zh/docs/guide/analyzer#eecs013)，不接收 `Entity` 或 `World` 的 `[ForEach]`
+  方法里做了结构变更（比如通过组件里存的句柄；改成把 `Entity` 作为参数）；[EECS014](/zh/docs/guide/analyzer#eecs014)，交给
+  `Task.Run`、`Parallel.*`、`ThreadPool` 或 `Thread` 的 lambda 里做了结构变更，会和同一个 World 的其他变更竞争。
+- **EECS007 和 EECS008 是错误。** 系统里有可变状态（[EECS007](/zh/docs/guide/analyzer#eecs007)）和系统引用系统（[EECS008](/zh/docs/guide/analyzer#eecs008)）在
+  4.0 是警告；触发它们的代码现在编译不过。把状态移进组件或单例，系统之间通过数据通信。除了上面提到的警告 EECS017、EECS018 和
+  EECS020，4.1 的规则都是错误。
+- **遍历语义更严格。** 一次遍历每个实体最多访问一次：遍历途中新建的、或移进匹配原型的实体，这次遍历不会访问（只是把被查询的组件加回来的实体保留原来的行，遍历还没走到它时会访问到）；轮到之前被销毁、或失去被查询组件的实体会被跳过。只为防止
+  job 重复访问自己产出的实体而加的 `Without<T>` 过滤条件不再需要（留着也能用）。
+- **ref 失效得更频繁。** `entity.Get<T>()` 或 `Query` 条目拿到的 `ref`，现在可能因为*另一个*实体的结构变更而失效（某一行被表的最后一行填上、表扩容），不只是实体容量扩容。文档里的规则本来就是“ref
+  在下一次结构变更之前有效”；依赖 ref 在变更后仍然有效的代码，必须通过 `entity.Get<T>()` 重新读取。`[ForEach]` 方法和 `ForEach` job 的
+  `ref` 参数，在方法体改变了当前实体的原型时仍然可写。见 [ref 与 await](/zh/docs/guide/refs-and-await)。
+- **移除组件时实体保留原来的行。** `Has<T>()`、`Get<T>()` 和所有查询都把这个组件当作不存在；再加回来只是翻转一个存在位。
+- **`Query` 的结果是 ref struct。** `QueryEnumerator<…>` 和 `QueryItem<…>` 持有指向当前表的 ref，所以遍历查询的 `foreach`
+  里不能有 `await`，条目也不能存下来。先读出需要的数据，或者留下 `item.Entity`，然后在循环外面 await。
+- **遍历顺序**按表的行，而不是实体 id，行被移动或填补时顺序会变。永远不要依赖它。
+- **`EnsureEntityCapacity` / `InitialEntityCapacity`** 只预分配实体记录；原型表自己扩容。
+- **`ParallelSystems` 让它看不清的子类独占运行。** 从生成过的系统派生、自己又没加 `[ForEach]` 方法的系统类（比如为了重写
+  `OnUpdate`），现在独占运行（不和任何系统共用一个阶段），因为它的 `OnUpdate` 可能碰任何东西。给子类加一个 `[ForEach]` 方法（它就会被生成），就又能和别的系统并排运行。
+- **对已存在的单例调用 `AddSingleton<T>()` 会就地重置它。** 以前是替换存储，之前拿到的 `SingletonRef<T>` 句柄会指向一份脱离 World 的副本；现在它们看到的是重置后的值。
+- **`Entity.GetHashCode()` 是确定的**（`Index ^ (Version << 20)`），不再用 `HashCode.Combine`（每个进程随机）。相等判断不变；只有把哈希码跨进程持久化的代码才会察觉。
+
+### 4.1 新增 [#v4-1-new]
+
+{/* search: skip */}
+
+- `[ForEach]` 方法可以接收 `Span<T>` / `ReadOnlySpan<T>` 组件（以及单例），一次拿到一段连续的行，便于 SIMD（签名混用时
+  [EECS009](/zh/docs/guide/analyzer#eecs009) 报告）。临时写法是 `world.ForEachBatch` 配一个 `IForEachBatch<T1..Tn>` job。
+- `world.ForEachEntity` 配 `IForEachEntity<T1..Tn>` job，收到的是 `Entity` 句柄而不是 id。
+- `INoStructuralChanges` 标记不做结构变更的 job；生成器会给不可能改变结构的 `[ForEach]` 方法加上它，这些方法遍历时省掉逐个实体的簿记。
+- `QueryFilter.WithAny<T>()` 和 `[WithAny<T>]`：实体至少要有其中一个组件。
+- `world.CreateEntities(span, components…)` 和 `world.DestroyEntities<T…>(filter)`：成批生成和清除，只过一次结构闸门。
+- `WorldOptions.MeasureSystems` 把每次系统运行的耗时记进 `system.Stats`（`SystemStats`）。
+- `[ForEach(Parallel = true)]`（以及 `world.ForEachParallel` / `ForEachEntityParallel`）把行按 `World.ParallelChunkRows`
+  分块，在多个线程上运行；[EECS010](/zh/docs/guide/analyzer#eecs010) 报告可能有竞争的方法。
+- `world.Capture()` / `world.Restore(snapshot)`：实体、组件和单例的内存快照（[快照](/zh/docs/guide/snapshots)）。
+- `ITrackChanges`、`[Changed<T>]`、`QueryFilter.Changed<T>(since)` / `Since(since)`、`world.ChangeTick`、`system.LastRunTick`：变更追踪（[变更追踪](/zh/docs/guide/change-tracking)）。job
+  接口多了一个可选的静态成员 `Writes`（有默认值）。
+- `[Removed<T>]` 和 `QueryFilter.Removed<T>(since)`：某个 tick 以来失去了被追踪组件的实体（用来同步消失的东西），过滤条件没有任何行能通过时报
+  [EECS016](/zh/docs/guide/analyzer#eecs016)。
+- `Prefab` 和 `world.Instantiate(prefab)` / `Instantiate(prefab, span)`：按一份不属于任何 World 的组件配方创建实体，配方用 `Set` /
+  `Remove` 或生成的 `prefab.SetX(…)` / `RemoveX()`（可链式调用）搭建，`DynamicBuffer<T>` 的元素用 `SetBuffer(…)` / `SetLoot(…)`；`entity.Clone()`
+  复制一个存活的实体。
+- `IIndexed<TKey>`、`world.Index<T, TKey>()`、`ValueIndex<T, TKey>`：按组件的值查找实体；关系就是以 `Entity` 为键的索引（[索引与关系](/zh/docs/guide/indexes-and-relations)）。
+- `entity.Read<T>()` 返回 `ref readonly T`，读被追踪的组件也不算写入；`entity.TryGetRef<T>(out bool found)` 返回 `ref T`（缺少时是空
+  ref）：可选访问，不用复制。`entity.Has<T1..Tn>()` 一次查找判断多个组件。
+- `DynamicBuffer<T>`：每个实体一个列表，作为组件存放，只能通过 `ref` 写（每次写都是一次被追踪的变更），快照会复制它（[动态缓冲](/zh/docs/guide/dynamic-buffers)）。
+- [EECS011](/zh/docs/guide/analyzer#eecs011) 拒绝修改 `in` 参数所持有的集合或类的 `[ForEach]` 方法（这种修改既不会按写入调度，也不会被追踪）；[EECS012](/zh/docs/guide/analyzer#eecs012)
+  拒绝按值复制的 `DynamicBuffer<T>`。
+- 库标记了 `IsAotCompatible`：每次构建都跑裁剪和 Native AOT 分析器，可以用 Native AOT 发布和运行。
+- `entity.Disable<T>()` / `Enable<T>()`（生成的 `DisableX()` / `EnableX()` / `IsXDisabled`）：关掉一个组件并保留它的值；查询看到的是
+  `Disabled<T>`。`world.SetAll` / `RemoveAll` / `DisableAll` / `EnableAll` 修改过滤条件匹配的所有实体，一次 64 行。
+- `ICleanupComponent`：销毁带有它的实体时，实体会保留下来并打上 `Destroyed` 标签，直到某个系统释放它持有的资源、移除最后一个清理组件。
+- `ChildOf(EntityId Parent)` 和 `world.Children(parent)`：父实体会销毁子实体的层级；`DynamicBuffer<T>` 中的 `IRelation`
+  元素（`entity.AddRelation`、`world.Relations<T>()`）把一个实体链接到任意多个目标，`TargetRules` 规定目标被销毁时链接怎么处理。
+- 键可比较的值索引支持有序遍历（`Range`、`RangeDescending`、`Ascending`、`Descending`）；`world.GroupBy<T>()` 按 `IGroup`
+  组件的值拆分表。
+- `[ForEach]` 方法的 `Maybe<T>` 参数：可选组件，不用再写第二个方法。
+- `world.Save` / `world.Load`（整个 World 存成字节，通过 Nino），`SaveEntities` / `LoadEntities` / `MoveEntities`（把一组实体移到另一个 World
+  或进程，`EntityId` 字段会被改写），`world.Capture(into)`（复用之前快照的数组）。
+- `world.RemoveTypes(assembly)`：卸载加载进可回收 `AssemblyLoadContext` 的游戏逻辑；它的系统、单例、索引和组件离开 World，卸载后进程也会忘掉这些类型。
+- `world.Describe()`（表、列、大小）、`entity.Describe()`，以及实体的调试器视图。
+- 系统之外的静态 `[ForEach]` 方法（生成的入口接收 `World` 和方法的其他参数：给工具和测试用的一次遍历）、泛型系统、系统分组上的过滤条件（分组
+  struct 上的 `[With<T>]` 作用于它的所有系统）、`UpdatePhase`（把 `UpdateInterval` 相同的系统错开到不同的更新）、单例的
+  `world.GetOrAddX()`、具名查询条目（用 `item.Position` 代替 `item.Component1`）、分析器诊断的代码修复，以及针对本地函数上
+  `[ForEach]` 的 [EECS024](/zh/docs/guide/analyzer#eecs024)。
+
+## v3.x → v4.0 [#v3-to-v4-0]
+
+v4 **只面向 .NET 10**，把全部 API 放进 `EasyEcs` 一个命名空间，用标准的 ECS 术语；系统改成同步的，重复的部分（各种参数个数的重载、逐个实体的
+job）由生成器写。
+
+### 命名空间 [#v4-0-namespaces]
+
+`EasyEcs.Core`、`EasyEcs.Core.Components` 和 `EasyEcs.Core.Systems` 合并成一个：`using EasyEcs;`。
+
+### 实体和组件 [#v4-0-entities-and-components]
+
+v3 有三种句柄类型（`Entity` 值、`EntityRef`、`ComponentRef<T>`），v4 只有一种：`Entity`，一个带版本校验的 16 字节句柄。访问组件直接返回
+`ref T`。从 4.1 起，生成器还会给每个组件写具名成员（`e.Position`、`e.SetPosition(…)`、`e.HasPosition`），现在的代码优先用它们，而不是下表里的泛型调用（[生成的成员](/zh/docs/guide/entities-and-components#generated-members)）。
+
+| v3 | v4 |
+| --- | --- |
+| `Context` | `World` |
+| `EntityRef e = ctx.CreateEntity()` | `Entity e = world.CreateEntity()` 或 `world.CreateEntity(new Position(..), new Velocity(..))` |
+| `e.Value.AddComponent<T>().Value.X = 1` | `e.GetOrAdd<T>().X = 1`（`ref T`），或 `e.Set(new T(..))` |
+| `e.Value.AddComponents<A, B>()` | `e.Set(new A(..), new B(..))`（添加或覆盖值，一次转移） |
+| `e.Value.GetComponent<T>().Value` | `e.Get<T>()`（`ref T`） |
+| `e.Value.TryGetComponent<T>(out ComponentRef<T> r)` | `e.TryGet<T>(out T value)` / `ref var x = ref e.GetOrAdd<T>()` |
+| `e.Value.HasComponent<T>()` | `e.Has<T>()` |
+| `e.Value.RemoveComponent(s)<..>()` | `e.Remove<..>()` |
+| `ctx.DestroyEntity(e)` | `e.Destroy()` |
+| `ctx.GetEntityById(id)` / `TryGetEntityById` | `world.GetEntity(id)` / `TryGetEntity` |
+| `ctx.AllEntities` | `world.Entities` |
+| `ctx.GroupOf<T..>()` → `GroupResult` | `world.Query<T..>(filter)` → `QueryItem`（`item.Entity`、`item.Component1..n`） |
+| `ctx.CountOf<T..>()` / `AnyOf<T..>()` | `world.Count<T..>(filter)` / `world.Any<T..>(filter)` |
+| `new Context(new Context.Options(parallel, levels, capacity))` | `new World(new WorldOptions { ParallelSystems = .., MaxDegreeOfParallelism = .., InitialEntityCapacity = .. })`（并行默认**关闭**） |
+
+### 单例 [#v4-0-singletons]
+
+| v3 | v4 |
+| --- | --- |
+| `AddSingletonComponent<T>()` / `GetSingletonComponent<T>().Value` | `AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()`（都返回 `ref T`） |
+| `TryGetSingletonComponent<T>(out SingletonComponentRef<T>)` | `TryGetSingleton<T>(out T value)` |
+
+单例现在**每个 World 一份**（v3 是整个进程共享）。`[ForEach]` 方法把单例作为 `ref` / `in` 参数接收（每次遍历只解析一次），所以系统很少需要自己调用
+`GetSingleton`。
+
+### 系统 [#v4-0-systems]
+
+v3 的系统实现 `IInitSystem` / `IExecuteSystem` / `IEndSystem`，方法返回 `UniTask`。v4 的系统继承 `EcsSystem`，重写同步的钩子方法；不再依赖
+UniTask。
+
+**v3**
+
+```csharp doccheck=skip
+public class S : SystemBase, IInitSystem, IExecuteSystem
+{
+    public UniTask OnInit(Context ctx) { ...; return UniTask.CompletedTask; }
+    public UniTask OnExecute(Context ctx) { ...; return UniTask.CompletedTask; }
+}
+```
+
+**v4**
+
+```csharp
+public partial class S : EcsSystem
+{
+    // 加入 World 时
+    protected override void OnCreate() { }
+
+    // 每次更新（可以用 World 属性）
+    protected override void OnUpdate() { }
+
+    // 逐个实体，在 OnUpdate 之后
+    [ForEach] static void Step(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
+}
+```
+
+- `ctx.Init()` 删掉了：系统加入时就运行 `OnCreate`。`await ctx.Update()` 改成 `world.Update()`；`await ctx.DisposeAsync()` 改成
+  `world.Dispose()`（按相反顺序调用 `OnDestroy`）。
+- `IExecuteSystem.ExecuteFrequency` 改成 `EcsSystem.UpdateInterval`；`AddSystem<T>()` 返回系统；新增 `GetSystem<T>()` 和
+  `Enabled`；`RemoveSystem<T>()` 现在返回 `bool`（是否移除了系统）。
+- 异常：`world.SystemError`（系统、异常）；没有订阅者时异常向外传出。（4.1 换掉了这个事件，见 [v4.0 → v4.1](/zh/docs/migration#v4-1-api)。）
+
+### 行为变化 [#v4-0-behavior]
+
+1. **实体 id 会被回收。** `Entity.Id` 只在存活的实体之间唯一；要留住的是 `Entity` 句柄（id + 版本号）。相等判断包含版本号。
+2. **失效的句柄会被拒绝**：访问和结构变更都会抛异常；对失效句柄调用 `Destroy` 会被忽略。
+3. **移除组件或销毁实体会释放组件持有的托管引用。**
+4. **组件和单例必须是 struct**：class 会被分析器报 [EECS006](/zh/docs/guide/analyzer#eecs006)。
+5. 不要在遍历时调用 `CompactArchetypes()`（它会改写行）。4.1 已删掉它。
+6. **系统应该无状态、彼此独立**：分析器会对系统上的可变字段（[EECS007](/zh/docs/guide/analyzer#eecs007)：把状态移进组件或单例）和引用其他系统的系统（[EECS008](/zh/docs/guide/analyzer#eecs008)：通过数据通信）发出警告。见
+   [ECS 设计原则](/zh/docs/ecs-principles)。
+7. **`IEvent`、`IEventHandler<T>` 和 `Publish` 删掉了。** 把状态变化写成数据（一个标签或一个字段），让后面的系统去查询。
+8. **`ParallelSystems` 天生安全。** v3 把同一优先级的系统一起跑，数据竞争留给你自己处理。v4 只在生成的读写不冲突时（`ref` 是写，`in`
+   是读）才把同一优先级的系统一起跑；带 `Entity` / `World` 参数、实例 `[ForEach]` 方法、重写了 `OnUpdate` 或没有 `[ForEach]`
+   方法的系统独占运行。结果和顺序更新一样。见[多线程与并行](/zh/docs/guide/threading#parallel-systems)。
+
+### 源生成器和分析器 [#v4-0-generator]
+
+两者都随包发布（`analyzers/dotnet/cs`）。通过 `ProjectReference` 引用 `EasyEcs.Core` 的项目，还必须引用
+`EasyEcs.Generator.csproj`，并设置 `OutputItemType="Analyzer" ReferenceOutputAssembly="false"`：
+
+```xml
+<ProjectReference Include="..\EasyEcs\src\EasyEcs.Generator\EasyEcs.Generator.csproj"
+                  OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+```
+
+## v2.x → v3.0 [#v2-to-v3-0]
+
+v3.0 围绕**零分配、立即执行**彻底重新设计，面向高性能服务器：回调和命令缓冲都没了，每个操作当场执行并返回结果。本节的代码是 v2 和
+v3 的代码，都不能在 v4 上编译。
+
+### 不兼容的变更 [#v3-0-breaking]
+
+**不再有回调。** v2 把每个操作推迟执行，再把结果交给回调；v3 当场执行并直接返回。
+
+**v2**
+
+```csharp doccheck=skip
+context.CreateEntity(entity => {
+    entity.AddComponent<Position>(pos => {
+        pos.Value.X = 10;
+        entity.AddComponent<Velocity>(vel => {
+            vel.Value.X = 5;
+        });
+    });
+});
+```
+
+**v3**
+
+```csharp doccheck=skip
+var entity = context.CreateEntity();
+var pos = entity.AddComponent<Position>();
+pos.Value.X = 10;
+var vel = entity.AddComponent<Velocity>();
+vel.Value.X = 5;
+```
+
+| v2 | v3 | 说明 |
+| --- | --- | --- |
+| `void CreateEntity(Action<EntityRef>)` | `EntityRef CreateEntity()` | 直接返回实体 |
+| `void AddComponent<T>(Entity, Action<ComponentRef<T>>)` | `ComponentRef<T> AddComponent<T>(Entity)` | 返回组件 ref |
+| `void AddComponent<T>(Action<ComponentRef<T>>)` | `ComponentRef<T> AddComponent<T>()` | 在 `Entity` struct 上 |
+| `void AddSingletonComponent<T>(Action<...>)` | `SingletonComponentRef<T> AddSingletonComponent<T>()` | 返回 ref |
+| `void AddSystem<T>()` | `void AddSystem<T>()` | 不变（立即执行） |
+| `void RemoveSystem<T>()` | `void RemoveSystem<T>()` | 不变（立即执行） |
+
+**执行模型。** v2 把操作排进命令缓冲，在帧末执行，执行完再调用回调。v3 每个操作当场执行，靠 .NET 8 的 `Lock` 保证线程安全，没有命令缓冲，也没有回调。
+
+**版本号。** v3 给实体加了版本号，销毁时递增。`EntityRef` 和 `ComponentRef` 访问时校验版本号，实体已销毁就抛异常。
+
+```csharp doccheck=skip
+public struct Entity
+{
+    public readonly int Id;
+    public readonly int Version;  // 新增：销毁时递增
+    // ...
+}
+```
+
+### 迁移步骤 [#v3-0-steps]
+
+<Steps>
+<Step>
+
+#### 改用 .NET 8 和 C# 13 [#v3-0-target]
+
+ref 字段和其他性能优化需要 C# 13。
+
+```xml title="v2"
+<TargetFramework>net6.0</TargetFramework>
+<LangVersion>10</LangVersion>
+```
+
+```xml title="v3"
+<TargetFramework>net8.0</TargetFramework>
+<LangVersion>13</LangVersion>
+```
+
+</Step>
+<Step>
+
+#### 用返回值代替回调 [#v3-0-callbacks]
+
+创建实体、添加组件、嵌套回调，以及系统里的同类代码，都变成普通语句：
+
+```csharp doccheck=skip
+// v2
+context.CreateEntity(entity => {
+    entity.AddComponent<Position>();
+});
+entity.AddComponent<Health>(health => {
+    health.Value.HP = 100;
+});
+
+// v3
+var entity = context.CreateEntity();
+entity.AddComponent<Position>();
+var health = entity.AddComponent<Health>();
+health.Value.HP = 100;
+```
+
+</Step>
+<Step>
+
+#### 改单例组件 [#v3-0-singletons]
+
+```csharp doccheck=skip
+// v2
+context.AddSingletonComponent<GameConfig>(config => {
+    config.Value.MaxPlayers = 100;
+});
+
+// v3
+var config = context.AddSingletonComponent<GameConfig>();
+config.Value.MaxPlayers = 100;
+```
+
+</Step>
+<Step>
+
+#### 销毁实体、遍历和系统不用改 [#v3-0-unchanged]
+
+`context.DestroyEntity(entity)` 两个版本一样，仍然立即执行。`GroupOf` 遍历不变。系统的写法也一样，只是里面换成立即执行的 API：
+
+```csharp doccheck=skip
+public class MovementSystem : SystemBase, IExecuteSystem
+{
+    public async UniTask OnExecute(Context context)
+    {
+        foreach (var result in context.GroupOf<Position, Velocity>())
+        {
+            ref var pos = ref result.Component1.Value;
+            ref var vel = ref result.Component2.Value;
+            pos.X += vel.X;
+        }
+    }
+}
+```
+
+</Step>
+<Step>
+
+#### 一次添加和移除多个组件 [#v3-0-batch]
+
+v3.0 新增：多个组件只做一次原型转移，而不是每次调用一次（分开调用两次，开销翻倍）。给一个实体加减 2 到 3 个组件、构建带多个组件的实体，或者热路径上频繁改组件时用它们。
+
+```csharp doccheck=skip
+var (pos, vel) = entity.AddComponents<Position, Velocity>();
+pos.Value.X = 10;
+vel.Value.X = 5;
+var (pos, vel, health) = entity.AddComponents<Position, Velocity, Health>();
+entity.RemoveComponents<Position, Velocity>();
+```
+
+</Step>
+</Steps>
+
+### 修改组件与持有 ref [#v3-0-refs]
+
+组件是 struct。通过 `ComponentRef` 写（`health.Value.HP = 100`），或者通过 `ref var h = ref health.Value` 写；`var h = health.Value`
+复制了一份组件，改的是副本，改动会丢失。
+
+`ref` 只在组件数组扩容之前有效。组件数据存在 `Context.Components[typeIndex][entityId]` 里，只有 `CreateEntity`（超出容量时）会让这些数组扩容，所以跨
+`CreateEntity` 持有的 `ref` 可能悬空，导致崩溃或读到错误的数据。`AddComponent`、`RemoveComponent` 和 `DestroyEntity` 只改变实体属于哪个原型列表，`CompactArchetypes`
+只清掉原型列表里的墓碑：它们都不移动组件数据，所以 ref 不受影响（不过销毁 `ref` 所指组件的实体，逻辑上仍然是错的）。单例单独存放，不受
+`CreateEntity` 和 `CompactArchetypes` 影响。
+
+```csharp doccheck=skip
+var health = entity.AddComponent<Health>();
+ref var h = ref health.Value;
+h.HP = 100;                  // 安全
+context.CreateEntity();      // 可能让所有组件数组扩容
+h.HP = 50;                   // 不安全：h 可能还指向旧数组
+health.Value.HP = 50;        // 安全：ComponentRef 会找到当前位置
+```
+
+`GroupOf` 遍历时，`DestroyEntity`、`AddComponent` 和 `RemoveComponent` 是安全的（墓碑会处理它们）；`CreateEntity`
+不影响迭代器，但会让 `ref` 局部变量失效，所以循环里要创建实体时，通过 `result.Component1.Value` 读写；`CompactArchetypes`
+会直接破坏迭代器，必须放在循环外面。经验法则：拿不准时写 `compRef.Value.field`，`ref` 只留给不创建实体的短小局部代码。
+
+给实体或 Context 再添加一次已有的组件或单例，会抹掉原来的数据（组件被重置为默认值）。先检查：
+
+```csharp doccheck=skip
+if (!entity.TryGetComponent<Health>(out var health))
+{
+    health = entity.AddComponent<Health>();
+}
+health.Value.HP = 100;
+```
+
+### 常见写法 [#v3-0-patterns]
+
+```csharp doccheck=skip
+// 测试：不用再等回调
+var entity = context.CreateEntity();
+Assert.GreaterOrEqual(entity.Value.Id, 0);
+
+// 构建实体的方法直接返回实体
+public EntityRef SpawnEnemy(Vector2 pos)
+{
+    var entity = context.CreateEntity();
+    entity.AddComponent<Position>().Value = pos;
+    entity.AddComponent<Enemy>().Value.HP = 100;
+    entity.AddComponent<AI>();
+    return entity;
+}
+
+// 初始化和条件分支都是普通语句
+var inv = entity.AddComponent<Inventory>();
+inv.Value.Capacity = 20;
+inv.Value.Items = new List<Item>();
+if (isPlayer) entity.AddComponent<PlayerControlled>();
+```
+
+### 线程安全 [#v3-0-threads]
+
+v2 的命令队列是线程安全的，回调在帧末于主线程执行。v3 的每个操作都靠 .NET 8 的 `Lock` 保证线程安全，实体 id 的分配是无锁的（`Interlocked`），多个线程可以同时创建和修改实体：
+
+```csharp doccheck=skip
+Parallel.For(0, 1000, i => {
+    var entity = context.CreateEntity();
+    entity.AddComponent<Position>();
+});
+```
+
+v4.1 改了这一点：结构变更只属于 World 的所有者线程（见 [v4.0 → v4.1](/zh/docs/migration#v4-1-behavior)）。
+
+### 性能上的变化 [#v3-0-performance]
+
+v2 每次 `CreateEntity` 分配一个闭包（约 24 字节），每次 `AddComponent` 分配四个（约 96 字节）：1 万个带 3 个组件的实体，约 2.9 MB/s。v3
+预热之后零分配：数组提前分配，只扩容一次，没有闭包。v3.0 发布时给出的估算：
+
+| 操作 | v2 | v3 | 提升 |
+| --- | --- | --- | --- |
+| 标签的位运算 | 4 次标量运算 | 1 条 SIMD 指令 | 4 倍 |
+| 原型查询 | O(N) 扫描 | O(1) 缓存 | 10 到 100 倍 |
+| 边界检查 | 正常 | Unsafe（消除） | 访问快约 2 倍 |
+
+遍历时修改也变得安全：v2 在遍历途中改动实体属于未定义行为（实体可能被跳过或访问两次）；v3 用墓碑（-1）标记移除的槽位，扩容后重新取 span，行为可以预期。
+
+### v3.0 新增 [#v3-0-new]
+
+- **跨平台 SIMD**：x86 / x64 上用 AVX2，ARM 上用 AdvSimd（NEON），其他平台退回标量实现。
+- **最多 65,536 种组件类型**（组件下标从 `byte` 改成 `ushort`）：前 256 种内联存放（32 字节，两个 `Vector128`），其余放进溢出数组。
+- **原型查询缓存**：某种形状第一次 `GroupOf` 用 O(N) 建缓存，之后 O(1) 查找。
+- **手动整理碎片**：`GetFragmentationStats()` 返回 `(totalSlots, alive, ratio)`，`CompactArchetypes()` 清掉墓碑（比如在加载界面、比例超过 0.5 时）。
+- **预分配**：`new Context(new Context.Options(parallel: true, levelOfParallelism: -1, initialEntityCapacity: 10_000))`（`-1`
+  表示用满所有核心），之后还可以 `context.EnsureEntityCapacity(100_000)`。
+
+### v3 的性能建议 [#v3-0-tips]
+
+- 预分配实体容量：`context.EnsureEntityCapacity(expected)`。
+- 在关卡之间、任何 `GroupOf` 循环之外检查碎片并压缩：`CompactArchetypes()` 会让 `GroupOf` 迭代器失效，但不影响组件 ref。
+- 用 `AddComponents` / `RemoveComponents` 加减组件：一次原型转移，而不是三次。
+- 并行跑系统：`new Context(new Context.Options(parallel: true))`。
+- 用普通循环创建实体：每个操作只加一次锁。
+- 就地修改组件：`result.Component1.Value.X += 1`，循环里不创建实体时也可以用 `ref` 局部变量。
+
+### v3 常见问题排查 [#v3-0-troubleshooting]
+
+| 现象 | 原因 | 解决 |
+| --- | --- | --- |
+| 抛出 “Entity has been destroyed” 异常 | 实体销毁后还在用失效的 `EntityRef` / `ComponentRef`，版本号检测到了 | 不要跨帧缓存 ref；用 `context.TryGetEntityById(id, out var entity)` 重新查找实体 |
+| 升级后测试失败 | 断言写在回调里 | 先创建实体再断言：`var entity = context.CreateEntity(); Assert.NotNull(entity);` |
+| 组件的修改没有保存下来 | 组件值被复制到了局部变量（struct） | 写 `health.Value.HP = 100`，或者通过 `ref var h = ref health.Value` 写 |
+| 用 `ref` 时崩溃或数据错乱 | `ref` 跨 `CreateEntity` 持有，而它可能让数组扩容 | 保留 `ComponentRef`，通过 `.Value` 写；`AddComponent`、`RemoveComponent` 和 `CompactArchetypes` 对 ref 是安全的 |
+| 遍历的表现变了 | v3 会跳过遍历途中增删实体留下的墓碑 | 通常不用改：遍历现在是安全的 |
+
+总结：删掉所有回调，用返回值，并且记住每个操作都当场执行、线程安全、预热后零分配。有问题请到
+[GitHub 提 issue](https://github.com/JasonXuDeveloper/EasyEcs/issues)。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="更新日志" href="/zh/docs/changelog">
+    每个版本新增、改进和修复了什么。
+  </Card>
+  <Card title="分析器规则" href="/zh/docs/guide/analyzer">
+    每条 EECS 规则和它的修法，包括升级带来的新规则。
+  </Card>
+  <Card title="API 与复杂度" href="/zh/docs/api">
+    当前的 API，以及每个调用的开销。
+  </Card>
+</Cards>

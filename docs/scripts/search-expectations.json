@@ -17,7 +17,10 @@
     { "query": "analyzer", "page": "guide/analyzer" },
     { "query": "testing", "page": "guide/testing" },
     { "query": "threading", "page": "guide/threading" },
-    { "query": "debugging", "page": "guide/diagnostics" }
+    { "query": "debugging", "page": "guide/diagnostics" },
+    { "query": "upgrade", "page": "migration" },
+    { "query": "migration guide", "page": "migration" },
+    { "query": "migrate from Arch", "page": "migrate-from-arch" }
   ],
   "zh": [
     { "query": "单例", "page": "guide/singletons" },
@@ -35,6 +38,9 @@
     { "query": "分析器", "page": "guide/analyzer" },
     { "query": "测试", "page": "guide/testing" },
     { "query": "多线程", "page": "guide/threading" },
-    { "query": "调试", "page": "guide/diagnostics" }
+    { "query": "调试", "page": "guide/diagnostics" },
+    { "query": "升级", "page": "migration" },
+    { "query": "迁移指南", "page": "migration" },
+    { "query": "从 Arch 迁移", "page": "migrate-from-arch" }
   ]
 }

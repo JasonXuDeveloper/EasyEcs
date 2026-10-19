@@ -1,0 +1,688 @@
+---
+title: Migration guide
+seoTitle: "Migration guide: upgrade EasyEcs from v2, v3 and 4.x"
+description: "Upgrade EasyEcs one version step at a time: what to change in your code from v2 to v3, v3 to v4 and between 4.x releases, with code before and after."
+icon: CircleArrowUp
+---
+
+What to change in your code when you upgrade EasyEcs, one version step per section, newest first. Each section
+lists every rename, removal and behavior change of its step, with the code to write instead. Upgrading across several versions? Apply the sections in order, oldest first. The
+[changelog](/en/docs/changelog) lists everything each release added; the [API reference](/en/docs/api) is the
+current API.
+
+## v4.2 → v4.3 [#v4-2-to-v4-3]
+
+The analyzer gained performance rules ([EECS025 to EECS034](/en/docs/guide/analyzer#eecs025)). Code written for 4.2
+compiles unchanged unless a system calls `World.Update()`, or the build treats warnings as errors.
+
+### New warnings: EECS025 to EECS032 [#v4-3-warnings]
+
+Each names code that works but costs, with the fix in its [section of the analyzer rules](/en/docs/guide/analyzer)
+and, where the change is mechanical, a code fix in the IDE. Apply the fix, or suppress the rule where the code is
+deliberate, with the reason next to it. With a tracked `Armor` and a `Seen` counter:
+
+```csharp
+public record struct Armor(int Value) : IComponent, ITrackChanges;
+public record struct Seen(int Count) : IComponent;
+```
+
+```csharp doccheck=system
+#pragma warning disable EECS026 // the write access is the point: it stamps the rows a [Changed<T>] system reacts to
+[ForEach] static void Touch(ref Armor armor, ref Seen seen) => seen.Count++;
+#pragma warning restore EECS026
+```
+
+Or turn a rule down for a whole project in `.editorconfig`:
+
+```ini title=".editorconfig"
+dotnet_diagnostic.EECS028.severity = suggestion
+```
+
+### `World.Update()` in a system is an error: EECS034 [#v4-3-update-in-a-system]
+
+It ran the system again inside its own run. Run updates and groups from the code that hosts the world.
+
+**4.2**
+
+```csharp doccheck=expect-EECS034
+public class CatchUp : EcsSystem
+{
+    protected override void OnUpdate() => World.Update();
+}
+```
+
+**4.3**
+
+```csharp
+while (running) world.Update();   // in the host loop
+```
+
+### The suggestion EECS033 [#v4-3-suggestion]
+
+EECS033 shows in the IDE only and never fails a build: the generated member is the same call at the same cost, only
+shorter. `dotnet_diagnostic.EECS033.severity = warning` in `.editorconfig` turns it into a warning.
+
+## v4.1 → v4.2 [#v4-1-to-v4-2]
+
+One behavior changed; code written for 4.1 compiles unchanged.
+
+### A missing singleton throws in `[ForEach]` methods [#v4-2-missing-singleton]
+
+A `[ForEach]` singleton parameter resolves through `world.SingletonRef<T>()`, which used to add the singleton with
+its default value. Both now throw `InvalidOperationException`, like `world.X` and `GetSingleton<T>()`, on the
+system's first run, even when no entity matches. The message names the fix:
+
+```text
+Singleton Clock was not added to this world: set it before the systems that read it run
+(world.SetClock(...) or world.AddSingleton<Clock>()), or use GetOrAddClock() where a default is meant
+```
+
+Add every singleton your systems read where the world is built, before the first `Update()`, also in tests. With
+this singleton and system:
+
+```csharp
+public record struct Clock(long Tick, float DeltaTime) : ISingletonComponent;
+
+public class Ticker : EcsSystem
+{
+    [ForEach] static void Advance(in Clock clock, ref Position position) => position.X += clock.DeltaTime;
+}
+```
+
+**4.1**: the first update added a default `Clock`, with no step.
+
+```csharp
+var world = new World();
+world.AddSystem<Ticker>();
+world.Update();
+```
+
+**4.2**: set it first, or call `world.GetOrAddClock()` where the default is right.
+
+```csharp
+var world = new World();
+world.SetClock(Tick: 0, DeltaTime: 1f / 30);
+world.AddSystem<Ticker>();
+world.Update();
+```
+
+A world restored with `Load` already holds the singletons of its save; add only the ones the save did not hold. See
+[singletons in systems](/en/docs/guide/singletons#in-systems).
+
+## v4.0 → v4.1 [#v4-0-to-v4-1]
+
+A few APIs changed (listed first). Other code written for 4.0 compiles unchanged unless it stores `Query` results in
+fields, uses them across `await`, captures them in lambdas, uses them in iterators or LINQ, or passes them as generic
+arguments: they are ref structs now. The storage moved from one column per component type (indexed by entity id) to
+archetype tables (one row per entity, columns 64-byte aligned), which changes a few behaviors.
+
+### Renamed and removed APIs [#v4-1-api]
+
+- **`WorldOptions.Parallel` is `WorldOptions.ParallelSystems`.** The option runs systems side by side; the new name
+  keeps it apart from `[ForEach(Parallel = true)]`, which splits one method's rows over threads. Rename the
+  initializer: `new WorldOptions { ParallelSystems = true }`.
+- **`Entity.Id` is an `EntityId`** (index + incarnation, 8 bytes, unmanaged) instead of an `int`, and the
+  `Entity.Version` field is gone: read `entity.Id.Index` and `entity.Id.Version`. `world.GetEntity`,
+  `TryGetEntity` and `IsAlive` take an `EntityId`; a handle converts to one implicitly, so `world.GetEntity(entity)`
+  compiles. Store `EntityId`s, not `Entity` handles, in components: a handle holds its world, which makes the column
+  managed (scanned by the GC, not copied as a block, not serializable), and the new warning
+  [EECS017](/en/docs/guide/analyzer#eecs017) points at such fields.
+- **`EcsSystem.Priority` is gone.** Systems run in registration order; order them by what they depend on with
+  `[UpdateBefore<TSystem>]` / `[UpdateAfter<TSystem>]` on the class. A cycle is
+  [EECS019](/en/docs/guide/analyzer#eecs019), an order against a system of another group
+  [EECS020](/en/docs/guide/analyzer#eecs020).
+- **The `World.SystemError` event is gone.** A system's exception propagates out of `Update` (the default), or, with
+  `new WorldOptions { SystemErrors = SystemErrorPolicy.Disable }`, switches the system off and stays in
+  `system.Error` for the application to read from `world.Systems`. Enable the system again to retry.
+- **Systems need no `partial`.** The generated code lives outside the system's type, so EECS001 is gone; `partial`
+  still compiles.
+- **`UpdateInterval` and the new `UpdatePhase` should be constants**: they are read every update, and the warning
+  [EECS018](/en/docs/guide/analyzer#eecs018) points at overrides that compute them. To stop and resume a system, set
+  `Enabled`.
+- **`world.DestroyEntity(entity)` is gone**: it did what `entity.Destroy()` does. Call `entity.Destroy()`, or
+  `world.DestroyEntities<T…>(filter)` for every match at once.
+- **`IForEach` jobs receive only the components.** `Execute(int entityId, ref T1 c1, …)` became
+  `Execute(ref T1 c1, …)`, so a pass never loads the entity rows for them. A job that needs the entity implements
+  `IForEachEntity<…>` (`Execute(Entity entity, ref T1 c1, …)`) and runs with `world.ForEachEntity`.
+- **`CompactArchetypes()` and `GetFragmentationStats()` are gone.** Tables stay dense on their own, and passes now
+  end even when a job throws, so there is nothing to compact and nothing to monitor (the ratio was always 0 between
+  updates). Delete the calls.
+- **`entity.Add<T>()` is gone.** It did what `Set` and `GetOrAdd` do, and reset a component the entity already had,
+  unlike adding in other ECS libraries. Write the generated `entity.SetX(…)` (`SetDead()` for a tag) or
+  `entity.Set(new T(…))` to add or replace a value, and `ref var c = ref entity.GetOrAdd<T>()` to add a default
+  value only when it is missing and fill it through the ref.
+- **`world.Systems` is a `SystemList`** (allocation-free `foreach` and `Count`) instead of a new `IReadOnlyList`;
+  `foreach` loops compile unchanged.
+- **`QueryEnumerator.Count` / `IsEmpty` are gone**: use `world.Count` / `world.Any` with the same filter.
+- **`entity.Remove<…>()` returns the entity** for chaining; calls that ignore it compile unchanged.
+- **`RemoveSingleton<T>()` returns `bool`** (false when the singleton was not added). Calls that ignore the result
+  compile unchanged.
+
+### Behavior changes [#v4-1-behavior]
+
+- **Stale and `default` handles answer questions with false.** `Has<T>()` and `TryGet<T>()` used to throw for a
+  destroyed entity (and `default(Entity).Has<T>()` threw a `NullReferenceException`); they now return false, like
+  `IsAlive`. `Get`, `GetOrAdd`, `Set` and `Remove` still throw, now `InvalidOperationException` for `default`
+  handles too.
+- **Structural changes belong to the world's owner thread.** 4.0 serialized creates, destroys, `Add` / `Set` /
+  `Remove` and singleton or system changes from any thread with a compare-and-swap lock. 4.1 checks a plain owner
+  flag instead: a change made while another runs, or inside a parallel stage of systems or a parallel `[ForEach]`,
+  throws `InvalidOperationException`; two threads of your own changing one world at once are not caught reliably.
+  Make structural changes on the thread that calls `Update` (other threads hand them over as data through a queue a
+  system drains: [input from other threads](/en/docs/guide/threading#input-from-other-threads)), or give each thread
+  its own world. Two analyzer errors point at such code: [EECS013](/en/docs/guide/analyzer#eecs013), a structural
+  change in a `[ForEach]` method that takes no `Entity` or `World` (for example through a handle a component holds:
+  take the `Entity` as a parameter), and [EECS014](/en/docs/guide/analyzer#eecs014), a structural change in a
+  lambda handed to `Task.Run`, `Parallel.*`, `ThreadPool` or a `Thread` that races with other changes of the same
+  world.
+- **EECS007 and EECS008 are errors.** Mutable state in a system ([EECS007](/en/docs/guide/analyzer#eecs007)) and a
+  system referencing a system ([EECS008](/en/docs/guide/analyzer#eecs008)) were warnings in 4.0; code that triggers
+  them no longer builds. Move the state into a component or singleton, and communicate through data. Every rule of
+  4.1 is an error except the warnings EECS017, EECS018 and EECS020 named above.
+- **Iteration semantics are stricter.** A pass visits each entity at most once: entities created or moved into a
+  matching archetype during the pass are not visited by it (one that only gets a queried component back keeps its
+  row and is visited if the pass has not reached it); entities destroyed or losing a queried component before their
+  turn are skipped. `Without<T>` filters that only existed to stop a job from revisiting what it produced are no
+  longer needed (they still work).
+- **Refs move more often.** A `ref` from `entity.Get<T>()` or a `Query` item can now be invalidated by a structural
+  change of *another* entity (a row filled by a table's last row, a table that grows), not only by entity-capacity
+  growth. The documented rule was already "a ref is valid until the next structural change"; code that relied on
+  refs surviving changes must re-read through `entity.Get<T>()`. The `ref` parameters of `[ForEach]` methods and
+  `ForEach` jobs stay writable when the body changes the visited entity's archetype. See
+  [refs and await](/en/docs/guide/refs-and-await).
+- **Removing a component keeps the entity's row.** `Has<T>()`, `Get<T>()` and every query treat the component as
+  absent; adding it back is a bit flip.
+- **`Query` results are ref structs.** `QueryEnumerator<…>` and `QueryItem<…>` hold refs into the current table, so
+  a `foreach` over a query cannot contain an `await` and an item cannot be stored. Read what you need, or keep
+  `item.Entity`, then await outside the loop.
+- **Iteration order** follows table rows, not entity ids, and can change when rows are moved or filled. Never rely
+  on it.
+- **`EnsureEntityCapacity` / `InitialEntityCapacity`** pre-size the entity records only; archetype tables grow on
+  their own.
+- **`ParallelSystems` keeps subclasses it cannot see alone.** A system class that derives from a generated system
+  without adding `[ForEach]` methods of its own (for example to override `OnUpdate`) now runs alone (it never shares
+  a stage with another system), as its `OnUpdate` may touch anything. Give the subclass a `[ForEach]` method (it is
+  then generated) to run it beside others again.
+- **`AddSingleton<T>()` on an existing singleton resets it in place.** It used to replace the storage, which left
+  `SingletonRef<T>` handles taken before pointing at a detached copy; they now see the reset value.
+- **`Entity.GetHashCode()` is deterministic** (`Index ^ (Version << 20)`) instead of `HashCode.Combine` (randomized
+  per process). Equality is unchanged; only code that persisted hash codes across processes could notice.
+
+### New in 4.1 [#v4-1-new]
+
+{/* search: skip */}
+
+- `[ForEach]` methods can take `Span<T>` / `ReadOnlySpan<T>` components (plus singletons) and receive whole runs of
+  rows, for SIMD ([EECS009](/en/docs/guide/analyzer#eecs009) reports mixed signatures). The ad-hoc form is
+  `world.ForEachBatch` with an `IForEachBatch<T1..Tn>` job.
+- `world.ForEachEntity` with an `IForEachEntity<T1..Tn>` job receives the `Entity` handle instead of the id.
+- `INoStructuralChanges` marks a job that makes no structural change; the generator adds it to `[ForEach]` methods
+  that cannot change structure, which then iterate without per-entity bookkeeping.
+- `QueryFilter.WithAny<T>()` and `[WithAny<T>]`: the entity needs at least one of the named components.
+- `world.CreateEntities(span, components…)` and `world.DestroyEntities<T…>(filter)` spawn and clear waves with one
+  pass through the structural gate.
+- `WorldOptions.MeasureSystems` times every system run into `system.Stats` (`SystemStats`).
+- `[ForEach(Parallel = true)]` (and `world.ForEachParallel` / `ForEachEntityParallel`) runs chunks of
+  `World.ParallelChunkRows` rows on several threads; [EECS010](/en/docs/guide/analyzer#eecs010) reports methods that
+  could race.
+- `world.Capture()` / `world.Restore(snapshot)`: in-memory snapshots of entities, components and singletons
+  ([snapshots](/en/docs/guide/snapshots)).
+- `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>(since)` / `Since(since)`, `world.ChangeTick`,
+  `system.LastRunTick`: change tracking ([change tracking](/en/docs/guide/change-tracking)). The job interfaces
+  gained an optional static `Writes` member (with a default).
+- `[Removed<T>]` and `QueryFilter.Removed<T>(since)`: the entities that lost a tracked component since a tick
+  (replication of what went away), with [EECS016](/en/docs/guide/analyzer#eecs016) for filters no row can pass.
+- `Prefab` and `world.Instantiate(prefab)` / `Instantiate(prefab, span)`: entities from a recipe of components that
+  belongs to no world, built with `Set` / `Remove` or the generated `prefab.SetX(…)` / `RemoveX()` (chainable),
+  and `SetBuffer(…)` / `SetLoot(…)` for the elements of a `DynamicBuffer<T>`; `entity.Clone()` copies a living
+  entity.
+- `IIndexed<TKey>`, `world.Index<T, TKey>()`, `ValueIndex<T, TKey>`: find entities by a component value; relations
+  are indexed `Entity` keys ([indexes and relations](/en/docs/guide/indexes-and-relations)).
+- `entity.Read<T>()` returns a `ref readonly T` that never counts as a write of a tracked component, and
+  `entity.TryGetRef<T>(out bool found)` returns a `ref T` (a null ref when missing): optional access without a
+  copy. `entity.Has<T1..Tn>()` tests several components with one lookup.
+- `DynamicBuffer<T>`: a list per entity as a component, written only through `ref` (each write is a tracked change),
+  copied by snapshots ([dynamic buffers](/en/docs/guide/dynamic-buffers)).
+- [EECS011](/en/docs/guide/analyzer#eecs011) rejects a `[ForEach]` method that changes a collection or class held by
+  an `in` parameter (the change would be neither scheduled as a write nor tracked);
+  [EECS012](/en/docs/guide/analyzer#eecs012) rejects a `DynamicBuffer<T>` copied by value.
+- The library is marked `IsAotCompatible`: trimming and Native AOT analyzers run on every build, and it publishes
+  and runs with Native AOT.
+- `entity.Disable<T>()` / `Enable<T>()` (generated `DisableX()` / `EnableX()` / `IsXDisabled`): switch a component
+  off and keep its value; queries see `Disabled<T>`. `world.SetAll` / `RemoveAll` / `DisableAll` / `EnableAll`
+  change every entity a filter matches, 64 rows at a time.
+- `ICleanupComponent`: destroying an entity that holds one keeps it, tagged `Destroyed`, until a system releases what
+  it holds and removes the last cleanup component.
+- `ChildOf(EntityId Parent)` and `world.Children(parent)`: a hierarchy whose parents destroy their children;
+  `IRelation` elements of a `DynamicBuffer<T>` (`entity.AddRelation`, `world.Relations<T>()`) link an entity to any
+  number of targets, and `TargetRules` say what happens to links when a target is destroyed.
+- Ordered walks of a value index with a comparable key (`Range`, `RangeDescending`, `Ascending`, `Descending`), and
+  `world.GroupBy<T>()`, which splits tables by the value of an `IGroup` component.
+- `Maybe<T>` parameters of `[ForEach]` methods: an optional component without a second method.
+- `world.Save` / `world.Load` (a world as bytes, through Nino), `SaveEntities` / `LoadEntities` / `MoveEntities` (a
+  group of entities to another world or process, `EntityId` fields rewritten), `world.Capture(into)` (reuses an
+  earlier snapshot's arrays).
+- `world.RemoveTypes(assembly)`: unload game logic loaded into a collectible `AssemblyLoadContext`; its systems,
+  singletons, indexes and components leave the world, and the process forgets its types once it unloads.
+- `world.Describe()` (tables, columns, sizes), `entity.Describe()` and a debugger view of entities.
+- Static `[ForEach]` methods outside systems (a generated entry point takes the `World` and the method's other
+  arguments: one pass for tools and tests), generic systems, filters on system groups (`[With<T>]` on a group struct
+  applies to all its systems), `UpdatePhase` to spread systems with the same `UpdateInterval` over updates,
+  `world.GetOrAddX()` for singletons, named query items (`item.Position` for `item.Component1`), code fixes for the
+  analyzer's diagnostics, and [EECS024](/en/docs/guide/analyzer#eecs024) for `[ForEach]` on a local function.
+
+## v3.x → v4.0 [#v3-to-v4-0]
+
+v4 targets **.NET 10 only**, moves the whole API into the `EasyEcs` namespace with standard ECS vocabulary, makes
+systems synchronous and generates the repetitive parts (arity overloads, per-entity jobs).
+
+### Namespaces [#v4-0-namespaces]
+
+`EasyEcs.Core`, `EasyEcs.Core.Components` and `EasyEcs.Core.Systems` become one namespace: `using EasyEcs;`.
+
+### Entities and components [#v4-0-entities-and-components]
+
+v3 had three handle types (`Entity` value, `EntityRef`, `ComponentRef<T>`). v4 has one: `Entity`, a version-checked
+16-byte handle. Component access returns `ref T` directly. Since 4.1 the generator also writes a named member for
+each component (`e.Position`, `e.SetPosition(…)`, `e.HasPosition`), which current code prefers over the generic
+calls in this table ([generated members](/en/docs/guide/entities-and-components#generated-members)).
+
+| v3 | v4 |
+| --- | --- |
+| `Context` | `World` |
+| `EntityRef e = ctx.CreateEntity()` | `Entity e = world.CreateEntity()` or `world.CreateEntity(new Position(..), new Velocity(..))` |
+| `e.Value.AddComponent<T>().Value.X = 1` | `e.GetOrAdd<T>().X = 1` (`ref T`), or `e.Set(new T(..))` |
+| `e.Value.AddComponents<A, B>()` | `e.Set(new A(..), new B(..))` (add or overwrite values, one transition) |
+| `e.Value.GetComponent<T>().Value` | `e.Get<T>()` (`ref T`) |
+| `e.Value.TryGetComponent<T>(out ComponentRef<T> r)` | `e.TryGet<T>(out T value)` / `ref var x = ref e.GetOrAdd<T>()` |
+| `e.Value.HasComponent<T>()` | `e.Has<T>()` |
+| `e.Value.RemoveComponent(s)<..>()` | `e.Remove<..>()` |
+| `ctx.DestroyEntity(e)` | `e.Destroy()` |
+| `ctx.GetEntityById(id)` / `TryGetEntityById` | `world.GetEntity(id)` / `TryGetEntity` |
+| `ctx.AllEntities` | `world.Entities` |
+| `ctx.GroupOf<T..>()` → `GroupResult` | `world.Query<T..>(filter)` → `QueryItem` (`item.Entity`, `item.Component1..n`) |
+| `ctx.CountOf<T..>()` / `AnyOf<T..>()` | `world.Count<T..>(filter)` / `world.Any<T..>(filter)` |
+| `new Context(new Context.Options(parallel, levels, capacity))` | `new World(new WorldOptions { ParallelSystems = .., MaxDegreeOfParallelism = .., InitialEntityCapacity = .. })` (parallel is **off** by default) |
+
+### Singletons [#v4-0-singletons]
+
+| v3 | v4 |
+| --- | --- |
+| `AddSingletonComponent<T>()` / `GetSingletonComponent<T>().Value` | `AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` (all `ref T`) |
+| `TryGetSingletonComponent<T>(out SingletonComponentRef<T>)` | `TryGetSingleton<T>(out T value)` |
+
+Singletons are now **per world** (v3 shared them process-wide). A `[ForEach]` method takes a singleton as a
+`ref` / `in` parameter (resolved once per pass), so systems rarely call `GetSingleton` themselves.
+
+### Systems [#v4-0-systems]
+
+v3 systems implemented `IInitSystem` / `IExecuteSystem` / `IEndSystem` with `UniTask` methods. v4 systems derive
+from `EcsSystem` and override synchronous hooks; the UniTask dependency is gone.
+
+**v3**
+
+```csharp doccheck=skip
+public class S : SystemBase, IInitSystem, IExecuteSystem
+{
+    public UniTask OnInit(Context ctx) { ...; return UniTask.CompletedTask; }
+    public UniTask OnExecute(Context ctx) { ...; return UniTask.CompletedTask; }
+}
+```
+
+**v4**
+
+```csharp
+public partial class S : EcsSystem
+{
+    // when added to the world
+    protected override void OnCreate() { }
+
+    // every update (World property available)
+    protected override void OnUpdate() { }
+
+    // per entity, after OnUpdate
+    [ForEach] static void Step(ref Position p, in Velocity v) => p = new Position(p.X + v.X, p.Y + v.Y);
+}
+```
+
+- `ctx.Init()` is gone: `OnCreate` runs when the system is added. `await ctx.Update()` becomes `world.Update()`;
+  `await ctx.DisposeAsync()` becomes `world.Dispose()` (`OnDestroy` in reverse order).
+- `IExecuteSystem.ExecuteFrequency` becomes `EcsSystem.UpdateInterval`; `AddSystem<T>()` returns the system;
+  `GetSystem<T>()` and `Enabled` were added; `RemoveSystem<T>()` now returns `bool` (whether a system was removed).
+- Exceptions: `world.SystemError` (system, exception); without a subscriber the exception propagates. (4.1 replaced
+  the event, see [v4.0 → v4.1](/en/docs/migration#v4-1-api).)
+
+### Behavioral changes [#v4-0-behavior]
+
+1. **Entity ids are recycled.** `Entity.Id` is unique only among live entities; keep the `Entity` handle (id +
+   version). Equality includes the version.
+2. **Stale handles are rejected**: access and structural changes throw; `Destroy` of a stale handle is ignored.
+3. **Removing a component or destroying an entity releases managed references** held by the component.
+4. **Components and singletons must be structs**: the analyzer reports [EECS006](/en/docs/guide/analyzer#eecs006)
+   for classes.
+5. Never call `CompactArchetypes()` while iterating (it rewrites rows). 4.1 removed it.
+6. **Systems should be stateless and independent**: the analyzer warns about mutable fields on systems
+   ([EECS007](/en/docs/guide/analyzer#eecs007): move the state into a component or singleton) and about systems
+   referencing other systems ([EECS008](/en/docs/guide/analyzer#eecs008): communicate through data). See
+   [ECS principles](/en/docs/ecs-principles).
+7. **`IEvent`, `IEventHandler<T>` and `Publish` are removed.** Write state changes as data (a tag or a field) and
+   let later systems query them.
+8. **`ParallelSystems` is safe by construction.** v3 ran every system of one priority at once and left data races to
+   you. v4 runs systems of one priority together only when their generated access does not conflict (`ref` = write,
+   `in` = read); systems with an `Entity` / `World` parameter, instance `[ForEach]` methods, an `OnUpdate` override
+   or no `[ForEach]` method run alone. The result equals a sequential update. See
+   [threading](/en/docs/guide/threading#parallel-systems).
+
+### Source generator and analyzer [#v4-0-generator]
+
+Both ship in the package (`analyzers/dotnet/cs`). A project that references `EasyEcs.Core` by `ProjectReference`
+must also reference `EasyEcs.Generator.csproj` with `OutputItemType="Analyzer" ReferenceOutputAssembly="false"`:
+
+```xml
+<ProjectReference Include="..\EasyEcs\src\EasyEcs.Generator\EasyEcs.Generator.csproj"
+                  OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+```
+
+## v2.x → v3.0 [#v2-to-v3-0]
+
+v3.0 was a complete redesign around **zero-allocation immediate execution** for high-performance servers: callbacks
+and the command buffer are gone, every operation runs at once and returns its result. The code in this section is
+v2 and v3 code; none of it compiles against v4.
+
+### Breaking changes [#v3-0-breaking]
+
+**No more callbacks.** v2 deferred every operation and handed the result to a callback; v3 executes at once and
+returns it.
+
+**v2**
+
+```csharp doccheck=skip
+context.CreateEntity(entity => {
+    entity.AddComponent<Position>(pos => {
+        pos.Value.X = 10;
+        entity.AddComponent<Velocity>(vel => {
+            vel.Value.X = 5;
+        });
+    });
+});
+```
+
+**v3**
+
+```csharp doccheck=skip
+var entity = context.CreateEntity();
+var pos = entity.AddComponent<Position>();
+pos.Value.X = 10;
+var vel = entity.AddComponent<Velocity>();
+vel.Value.X = 5;
+```
+
+| v2 | v3 | Notes |
+| --- | --- | --- |
+| `void CreateEntity(Action<EntityRef>)` | `EntityRef CreateEntity()` | Returns the entity |
+| `void AddComponent<T>(Entity, Action<ComponentRef<T>>)` | `ComponentRef<T> AddComponent<T>(Entity)` | Returns the component ref |
+| `void AddComponent<T>(Action<ComponentRef<T>>)` | `ComponentRef<T> AddComponent<T>()` | On the `Entity` struct |
+| `void AddSingletonComponent<T>(Action<...>)` | `SingletonComponentRef<T> AddSingletonComponent<T>()` | Returns the ref |
+| `void AddSystem<T>()` | `void AddSystem<T>()` | Unchanged (immediate) |
+| `void RemoveSystem<T>()` | `void RemoveSystem<T>()` | Unchanged (immediate) |
+
+**Execution model.** v2 queued operations into a command buffer, executed them at the end of the frame and invoked
+the callbacks after. v3 executes every operation at once, thread-safe through the .NET 8 `Lock`, with no command
+buffer and no callbacks.
+
+**Version tracking.** v3 adds a version to the entity, incremented on destroy. `EntityRef` and `ComponentRef`
+validate it on access and throw if the entity was destroyed.
+
+```csharp doccheck=skip
+public struct Entity
+{
+    public readonly int Id;
+    public readonly int Version;  // new: increments on destroy
+    // ...
+}
+```
+
+### Migration steps [#v3-0-steps]
+
+<Steps>
+<Step>
+
+#### Target .NET 8 and C# 13 [#v3-0-target]
+
+C# 13 is required for ref fields and other performance optimizations.
+
+```xml title="v2"
+<TargetFramework>net6.0</TargetFramework>
+<LangVersion>10</LangVersion>
+```
+
+```xml title="v3"
+<TargetFramework>net8.0</TargetFramework>
+<LangVersion>13</LangVersion>
+```
+
+</Step>
+<Step>
+
+#### Replace callbacks with return values [#v3-0-callbacks]
+
+Entity creation, component addition, nested callbacks and the same in systems all become plain statements:
+
+```csharp doccheck=skip
+// v2
+context.CreateEntity(entity => {
+    entity.AddComponent<Position>();
+});
+entity.AddComponent<Health>(health => {
+    health.Value.HP = 100;
+});
+
+// v3
+var entity = context.CreateEntity();
+entity.AddComponent<Position>();
+var health = entity.AddComponent<Health>();
+health.Value.HP = 100;
+```
+
+</Step>
+<Step>
+
+#### Update singleton components [#v3-0-singletons]
+
+```csharp doccheck=skip
+// v2
+context.AddSingletonComponent<GameConfig>(config => {
+    config.Value.MaxPlayers = 100;
+});
+
+// v3
+var config = context.AddSingletonComponent<GameConfig>();
+config.Value.MaxPlayers = 100;
+```
+
+</Step>
+<Step>
+
+#### Keep entity destruction, iteration and systems [#v3-0-unchanged]
+
+`context.DestroyEntity(entity)` is the same in both versions, and still immediate. `GroupOf` iteration is
+unchanged. Systems work the same way, with the immediate API inside:
+
+```csharp doccheck=skip
+public class MovementSystem : SystemBase, IExecuteSystem
+{
+    public async UniTask OnExecute(Context context)
+    {
+        foreach (var result in context.GroupOf<Position, Velocity>())
+        {
+            ref var pos = ref result.Component1.Value;
+            ref var vel = ref result.Component2.Value;
+            pos.X += vel.X;
+        }
+    }
+}
+```
+
+</Step>
+<Step>
+
+#### Add and remove several components at once [#v3-0-batch]
+
+New in v3.0: one archetype transition for several components, instead of one per call (two separate calls cost
+twice as much). Use them when you add or remove 2 or 3 components on one entity, build entities with several
+components, or change components often on a hot path.
+
+```csharp doccheck=skip
+var (pos, vel) = entity.AddComponents<Position, Velocity>();
+pos.Value.X = 10;
+vel.Value.X = 5;
+var (pos, vel, health) = entity.AddComponents<Position, Velocity, Health>();
+entity.RemoveComponents<Position, Velocity>();
+```
+
+</Step>
+</Steps>
+
+### Modifying components and holding refs [#v3-0-refs]
+
+Components are structs. Write through the `ComponentRef` (`health.Value.HP = 100`) or through
+`ref var h = ref health.Value`; `var h = health.Value` copies the component, and the changes to the copy are lost.
+
+A `ref` stays valid only until the component arrays are resized. Component data lives in
+`Context.Components[typeIndex][entityId]`, and only `CreateEntity` (when the capacity is exceeded) resizes those
+arrays, so a `ref` held across `CreateEntity` may dangle and crash or read the wrong data. `AddComponent`,
+`RemoveComponent` and `DestroyEntity` only change which archetype list an entity belongs to, and
+`CompactArchetypes` only removes tombstones from the archetype lists: none of them moves component data, so refs
+survive them (destroying the entity whose component a `ref` points at is still a logic error). Singletons are
+stored apart and are not affected by `CreateEntity` or `CompactArchetypes`.
+
+```csharp doccheck=skip
+var health = entity.AddComponent<Health>();
+ref var h = ref health.Value;
+h.HP = 100;                  // safe
+context.CreateEntity();      // may resize every component array
+h.HP = 50;                   // unsafe: h may point to the old array
+health.Value.HP = 50;        // safe: the ComponentRef finds the current location
+```
+
+During `GroupOf` iteration, `DestroyEntity`, `AddComponent` and `RemoveComponent` are safe (tombstones handle
+them); `CreateEntity` leaves the iterator working but invalidates `ref` locals, so read through
+`result.Component1.Value` when the loop creates entities; `CompactArchetypes` breaks the iterator itself and must
+run outside the loop. Rule of thumb: when unsure, write `compRef.Value.field`, and keep `ref` for short local code
+that creates no entity.
+
+Adding a component or a singleton the entity or context already has erases its data (the component is
+reinitialized to default). Check first:
+
+```csharp doccheck=skip
+if (!entity.TryGetComponent<Health>(out var health))
+{
+    health = entity.AddComponent<Health>();
+}
+health.Value.HP = 100;
+```
+
+### Common patterns [#v3-0-patterns]
+
+```csharp doccheck=skip
+// a test: no callback to wait for
+var entity = context.CreateEntity();
+Assert.GreaterOrEqual(entity.Value.Id, 0);
+
+// an entity builder returns the entity
+public EntityRef SpawnEnemy(Vector2 pos)
+{
+    var entity = context.CreateEntity();
+    entity.AddComponent<Position>().Value = pos;
+    entity.AddComponent<Enemy>().Value.HP = 100;
+    entity.AddComponent<AI>();
+    return entity;
+}
+
+// initialization and conditions are plain statements
+var inv = entity.AddComponent<Inventory>();
+inv.Value.Capacity = 20;
+inv.Value.Items = new List<Item>();
+if (isPlayer) entity.AddComponent<PlayerControlled>();
+```
+
+### Thread safety [#v3-0-threads]
+
+v2's command queue was thread-safe and the callbacks ran on the main thread at the end of the frame. In v3 every
+operation is thread-safe through the .NET 8 `Lock`, entity id allocation is lock-free (`Interlocked`), and several
+threads can create and modify entities at once:
+
+```csharp doccheck=skip
+Parallel.For(0, 1000, i => {
+    var entity = context.CreateEntity();
+    entity.AddComponent<Position>();
+});
+```
+
+v4.1 changed this: structural changes belong to the world's owner thread (see
+[v4.0 → v4.1](/en/docs/migration#v4-1-behavior)).
+
+### What changed for performance [#v3-0-performance]
+
+v2 allocated a closure per `CreateEntity` call (about 24 bytes) and four per `AddComponent` call (about 96 bytes):
+about 2.9 MB/s for 10,000 entities with 3 components. v3 allocates nothing after warm-up: its arrays are allocated
+up front and grow only once, with no closures. The v3.0 release estimated these gains:
+
+| Operation | v2 | v3 | Improvement |
+| --- | --- | --- | --- |
+| Tag bitwise operations | 4 scalar operations | 1 SIMD instruction | 4x |
+| Archetype queries | O(N) scan | O(1) cached | 10-100x |
+| Bounds checks | Normal | Unsafe (eliminated) | about 2x faster access |
+
+Iteration became safe to modify: v2 had undefined behavior when an entity changed during iteration (entities could
+be skipped or visited twice); v3 marks removed slots with a tombstone (-1) and reads a fresh span after a resize, so
+the behavior is predictable.
+
+### New in v3.0 [#v3-0-new]
+
+- **Cross-platform SIMD**: AVX2 on x86 / x64, AdvSimd (NEON) on ARM, a scalar fallback elsewhere.
+- **Up to 65,536 component types** (the component index became a `ushort` instead of a `byte`): the first 256 inline
+  (32 bytes, two `Vector128`), the rest in an overflow array.
+- **Archetype query cache**: the first `GroupOf` of a shape builds the cache in O(N), later ones look it up in O(1).
+- **Manual defragmentation**: `GetFragmentationStats()` returns `(totalSlots, alive, ratio)`, and
+  `CompactArchetypes()` removes the tombstones (during loading screens, for example when the ratio passes 0.5).
+- **Pre-allocation**: `new Context(new Context.Options(parallel: true, levelOfParallelism: -1, initialEntityCapacity: 10_000))`
+  (`-1` uses all cores), and `context.EnsureEntityCapacity(100_000)` later.
+
+### Performance tips for v3 [#v3-0-tips]
+
+- Pre-allocate the entity capacity: `context.EnsureEntityCapacity(expected)`.
+- Check fragmentation and compact between levels, outside any `GroupOf` loop: `CompactArchetypes()` invalidates
+  `GroupOf` iterators but not component refs.
+- Add and remove components with `AddComponents` / `RemoveComponents`: one archetype transition instead of three.
+- Run systems in parallel: `new Context(new Context.Options(parallel: true))`.
+- Create entities in a plain loop: the lock is taken once per operation.
+- Modify components in place: `result.Component1.Value.X += 1`, or a `ref` local when the loop creates no entity.
+
+### Troubleshooting v3 [#v3-0-troubleshooting]
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| "Entity has been destroyed" exception | A stale `EntityRef` / `ComponentRef` used after the entity was destroyed; versioning detects it | Do not cache refs across frames; look the entity up again with `context.TryGetEntityById(id, out var entity)` |
+| Tests fail after the upgrade | Assertions inside callbacks | Create the entity, then assert: `var entity = context.CreateEntity(); Assert.NotNull(entity);` |
+| Component changes do not persist | The component value was copied to a local (structs) | Write `health.Value.HP = 100`, or through `ref var h = ref health.Value` |
+| Crash or corrupted data with `ref` | A `ref` held across `CreateEntity`, which may resize the arrays | Keep the `ComponentRef` and write through `.Value`; `AddComponent`, `RemoveComponent` and `CompactArchetypes` are safe with refs |
+| Iteration behaves differently | v3 skips tombstones of entities added or removed during iteration | Usually nothing: iteration is safe now |
+
+In short: remove every callback, use the returned values, and expect every operation to run at once, thread-safe and
+without allocations after warm-up. For questions, open an
+[issue on GitHub](https://github.com/JasonXuDeveloper/EasyEcs/issues).
+
+## Related [#related]
+
+<Cards>
+  <Card title="Changelog" href="/en/docs/changelog">
+    What each release added, improved and fixed.
+  </Card>
+  <Card title="Analyzer rules" href="/en/docs/guide/analyzer">
+    Every EECS rule with its fix, including the ones an upgrade brings.
+  </Card>
+  <Card title="API and complexity" href="/en/docs/api">
+    The current API, with the cost of every call.
+  </Card>
+</Cards>

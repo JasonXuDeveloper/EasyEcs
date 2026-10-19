@@ -309,7 +309,7 @@ The documentation lives at **[ecs.xgamedev.net](https://ecs.xgamedev.net)**; its
 | [API reference](https://ecs.xgamedev.net/docs/api) | Every public API with its complexity. |
 | [Performance guide](https://ecs.xgamedev.net/docs/performance) | Which API to use when, do's and don'ts, benchmarks. |
 | [Architecture](https://ecs.xgamedev.net/docs/architecture) | Storage, memory layout, archetypes, id recycling, iteration safety, generators. |
-| [Migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md) | Upgrading from 4.0 to 4.1, from v3 (and from v2). |
+| [Migration guide](https://ecs.xgamedev.net/en/docs/migration) | What to change when upgrading: between 4.x releases, from v3 to v4 and from v2 to v3. |
 
 The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading order.
 
@@ -321,7 +321,7 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   in a counted loop, `Count() > 0` instead of `Any()` (warnings: the code costs); the generic call that has a
   generated member (a suggestion: the same cost, shorter); `World.Update()` inside a system (an error). Most come with a code fix. Builds that treat
   warnings as errors may need changes: see the
-  [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v42--v43).
+  [migration guide](https://ecs.xgamedev.net/en/docs/migration#v4-2-to-v4-3).
 
 ## What's new in 4.2
 
@@ -329,7 +329,7 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   `world.SingletonRef<T>()`) used to add the default value; it now throws `InvalidOperationException` on the system's
   first run, like `world.X` and `GetSingleton<T>()`, and the message names the call to add it. A forgotten
   `world.SetClock(…)` fails at once instead of running on a clock with no step; `world.GetOrAddClock()` is the
-  explicit default. See the [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v41--v42).
+  explicit default. See the [migration guide](https://ecs.xgamedev.net/en/docs/migration#v4-1-to-v4-2).
 - A `[ForEach]` method with a parameter named `owner` builds again (the generated code no longer fails with CS0100).
 
 ## What's new in 4.1
@@ -413,7 +413,7 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   subclass the generator did not see runs alone; structural changes from several threads at once are no longer
   serialized (owner thread only); `AddSingleton` resets an existing singleton in place; `IForEach` jobs
   receive only the components; stale handles answer `Has` / `TryGet` with false. See the
-  [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v40--v41).
+  [migration guide](https://ecs.xgamedev.net/en/docs/migration#v4-0-to-v4-1).
 - A realistic 100k-entity server tick takes 1.72 ms instead of 4.33 ms; toggling a status component on 10,000
   entities 158 μs instead of 338 μs; reading a component through 1,000 random handles 3.33 μs instead of 3.56 μs
   (the v4.0.1 numbers are from an earlier run on the same VM).
@@ -431,7 +431,7 @@ v4 is a rewrite for .NET 10 with standard ECS vocabulary in a single `EasyEcs` n
 - A `[ForEach]` method may take no component when a `[With<T>]` names what to query
   (`[ForEach, With<Dead>] static void Remove(Entity e)`).
 
-See the [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md) for every rename and behavioral change.
+See the [migration guide](https://ecs.xgamedev.net/en/docs/migration) for every rename and behavioral change.
 
 ## License
 

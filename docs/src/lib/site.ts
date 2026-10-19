@@ -15,7 +15,6 @@ export const contentBlobUrl = `${githubUrl}/blob/master/docs/content`;
 export const contentEditUrl = `${githubUrl}/edit/master/docs/content`;
 export const nugetUrl = 'https://www.nuget.org/packages/EasyEcs';
 export const licenseUrl = `${githubUrl}/blob/master/LICENSE`;
-export const migrationGuideUrl = `${githubUrl}/blob/master/MIGRATION_GUIDE.md`;
 export const author = {
   name: 'Jason Xu',
   url: 'https://github.com/JasonXuDeveloper',

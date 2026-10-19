@@ -8,7 +8,7 @@
  * - the H1 and the "[Docs index](README.md) ·" breadcrumb under it are dropped
  *   (the page renders its own title, the sidebar replaces the breadcrumb);
  * - relative links to other pages become site URLs (`/en/docs/guide/queries`),
- *   links to files outside content/ (README, MIGRATION_GUIDE, benchmarks)
+ *   links to files outside content/ (README, benchmarks)
  *   become GitHub blob URLs.
  *
  * `remarkLegacyPage` only touches files without frontmatter, so MDX pages are

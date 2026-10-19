@@ -7,7 +7,7 @@ icon: RotateCcwClock
 
 What changed from one EasyEcs release to the next, newest first, for code that uses EasyEcs. Upgrading across a
 major or minor version that needs code changes? The
-[migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md) has the steps. Each
+[migration guide](/en/docs/migration) has the steps. Each
 [GitHub release](https://github.com/JasonXuDeveloper/EasyEcs/releases) also lists every pull request it contains.
 
 ## 4.3.0 [#v4-3-0]
@@ -36,7 +36,7 @@ major or minor version that needs code changes? The
 
 - A build that treats warnings as errors fails on the new warnings (EECS025 to EECS032) until the code is changed or
   the rule is suppressed, and a system that calls `World.Update()` no longer builds (EECS034). See the
-  [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v42--v43).
+  [migration guide](/en/docs/migration#v4-2-to-v4-3).
 
 ## 4.2.0 [#v4-2-0]
 
@@ -62,7 +62,7 @@ major or minor version that needs code changes? The
   way. Add the singleton where the world is built, before the first `Update()`: `world.SetClock(…)` or
   `world.AddSingleton<Clock>()`, or `world.GetOrAddClock()` where the default is right. See
   [singletons](/en/docs/guide/singletons#in-systems) and the
-  [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v41--v42).
+  [migration guide](/en/docs/migration#v4-1-to-v4-2).
 
 ### Fixes [#v4-2-0-fixes]
 
@@ -142,7 +142,7 @@ major or minor version that needs code changes? The
 ### Changes that need code changes [#v4-1-0-breaking]
 
 Every step is in the
-[migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v40--v41).
+[migration guide](/en/docs/migration#v4-0-to-v4-1).
 
 - `WorldOptions.Parallel` is `WorldOptions.ParallelSystems`: write `new WorldOptions { ParallelSystems = true }`.
 - `Entity.Id` is an `EntityId` and `Entity.Version` is gone: read `entity.Id.Index` and `entity.Id.Version`, and
@@ -195,7 +195,7 @@ Every step is in the
 ### Changes that need code changes [#v4-0-0-breaking]
 
 Every rename is in the
-[migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v3x--v40).
+[migration guide](/en/docs/migration#v3-to-v4-0).
 
 - `Context` is `World` and `GroupOf` is `Query`.
 - Systems are synchronous: no UniTask, no async callbacks.
@@ -268,7 +268,7 @@ Every rename is in the
 ### Changes that need code changes [#v3-0-0-breaking]
 
 - Callbacks are gone and changes run at once. See the
-  [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#migration-guide-easyecs-v2x--v30).
+  [migration guide](/en/docs/migration#v2-to-v3-0).
 
 ## 2.1.6 [#v2-1-6]
 

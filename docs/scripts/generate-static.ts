@@ -19,7 +19,6 @@ import {
   githubUrl,
   installCommand,
   languageTag,
-  migrationGuideUrl,
   nugetUrl,
   productSummary,
   siteUrl,
@@ -304,7 +303,6 @@ const llmsCopy: Record<Locale, { facts: string[]; optional: string[] }> = {
     optional: [
       `- [Source code on GitHub](${githubUrl}): the library, its tests, benchmarks and these docs (docs/content)`,
       `- [NuGet package](${nugetUrl}): EasyEcs, with the source generator and the analyzer`,
-      `- [Migration guide](${migrationGuideUrl}): upgrading between major versions`,
     ],
   },
   zh: {
@@ -333,7 +331,6 @@ const llmsCopy: Record<Locale, { facts: string[]; optional: string[] }> = {
     optional: [
       `- [GitHub 源码](${githubUrl})：库、测试、基准测试与本文档（docs/content）`,
       `- [NuGet 包](${nugetUrl})：EasyEcs，含源生成器与分析器`,
-      `- [迁移指南](${migrationGuideUrl})：大版本之间的升级（英文）`,
     ],
   },
 };
