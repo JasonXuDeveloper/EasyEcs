@@ -7,11 +7,13 @@
  * - Every row is focusable and has a tooltip; a data table sits under the
  *   chart in <details> for screen readers and copy-paste.
  * - Bars grow in when scrolled into view, except with prefers-reduced-motion.
+ * - Labels wrap to the chart's width; `scale="log"` draws values that span
+ *   orders of magnitude.
  */
 import { AxisBottom } from '@visx/axis';
 import { GridColumns } from '@visx/grid';
 import { Group } from '@visx/group';
-import { scaleLinear } from '@visx/scale';
+import { scaleLinear, scaleLog } from '@visx/scale';
 import { BarRounded } from '@visx/shape';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useReveal } from '@/components/showcase';
@@ -49,6 +51,15 @@ export interface BarChartProps {
   tickFormat?: (value: number) => string;
   /** Upper end of the axis; defaults to the largest value */
   max?: number;
+  /**
+   * "log" for values that span orders of magnitude (ratios from 1 to 150):
+   * the axis starts at `min` (default 1) and every value is at least that
+   */
+  scale?: 'linear' | 'log';
+  /** Lower end of a log axis */
+  min?: number;
+  /** The axis ticks, instead of the scale's own */
+  tickValues?: number[];
   footnotes?: ReactNode[];
   table?: { caption: string; head: string[]; rows: ReactNode[][] };
 }
@@ -56,6 +67,8 @@ export interface BarChartProps {
 const BAR = 12;
 const BAR_GAP = 4;
 const HEADER = 20;
+/** Each further line of a label that wraps */
+const LINE = 17;
 const BADGE_H = 18;
 const ROW_GAP = 20;
 const AXIS_BAND = 44;
@@ -69,6 +82,25 @@ function textWidth(text: string, size: number, mono = false) {
     else width += size * (mono ? 0.62 : 0.56);
   }
   return width;
+}
+
+/**
+ * A label in lines that fit `max` pixels: words wrap at spaces, CJK text at
+ * any character.
+ */
+function wrapLabel(text: string, max: number, size: number, mono = false) {
+  if (textWidth(text, size, mono) <= max) return [text];
+  const units = text.match(/[⺀-鿿＀-￯]|[^\s⺀-鿿＀-￯]+\s*|\s+/g) ?? [text];
+  const lines: string[] = [];
+  let line = '';
+  for (const unit of units) {
+    if (line && textWidth((line + unit).trimEnd(), size, mono) > max) {
+      lines.push(line.trimEnd());
+      line = unit.trimStart();
+    } else line += unit;
+  }
+  if (line) lines.push(line.trimEnd());
+  return lines;
 }
 
 function useWidth<T extends HTMLElement>() {
@@ -91,7 +123,11 @@ function useWidth<T extends HTMLElement>() {
 interface Layout {
   top: number;
   height: number;
+  /** The label's lines, wrapped to the chart's width */
+  lines: string[];
   badgeBelow: boolean;
+  /** Where the bars start: under the label's lines and the badge */
+  header: number;
 }
 
 const badgeTone = {
@@ -114,6 +150,9 @@ export function BarChart({
   axisLabel,
   tickFormat = (value) => String(value),
   max,
+  scale = 'linear',
+  min = 1,
+  tickValues,
   footnotes,
   table,
 }: BarChartProps) {
@@ -140,11 +179,20 @@ export function BarChart({
     Math.max(
       ...rows.flatMap((row) => series.map((s) => row.values[s.key] ?? 0)),
     );
-  const x = scaleLinear<number>({
-    domain: [0, domainMax],
-    range: [0, plotWidth],
-    nice: max === undefined,
-  });
+  const x =
+    scale === 'log'
+      ? scaleLog<number>({
+          domain: [min, Math.max(domainMax, min * 2)],
+          range: [0, plotWidth],
+          clamp: true,
+        })
+      : scaleLinear<number>({
+          domain: [0, domainMax],
+          range: [0, plotWidth],
+          nice: max === undefined,
+        });
+  // A log axis keeps the ticks inside its domain
+  const ticks = tickValues?.filter((t) => t <= x.domain()[1]);
 
   // Vertical layout of each row: label (+ badge), then one bar per series.
   const barCount = (row: ChartRow) =>
@@ -152,13 +200,17 @@ export function BarChart({
   const layouts: Layout[] = [];
   let y = 0;
   for (const row of rows) {
-    const labelWidth = textWidth(row.label + (row.mark ?? ''), 13, row.code);
+    const label = row.label + (row.mark ?? '');
+    const lines = wrapLabel(label, width, 13, row.code);
+    const labelWidth = textWidth(label, 13, row.code);
     const badgeWidth = row.badge ? textWidth(row.badge.text, 11) + 16 : 0;
-    const badgeBelow = !!row.badge && labelWidth + 12 + badgeWidth > width;
-    const header = HEADER + (badgeBelow ? BADGE_H + 4 : 0);
+    const badgeBelow =
+      !!row.badge && (lines.length > 1 || labelWidth + 12 + badgeWidth > width);
+    const header =
+      HEADER + (lines.length - 1) * LINE + (badgeBelow ? BADGE_H + 4 : 0);
     const n = barCount(row);
     const height = header + 6 + n * BAR + (n - 1) * BAR_GAP;
-    layouts.push({ top: y, height, badgeBelow });
+    layouts.push({ top: y, height, lines, badgeBelow, header });
     y += height + ROW_GAP;
   }
   const plotBottom = y - ROW_GAP + 10;
@@ -207,12 +259,13 @@ export function BarChart({
             scale={x}
             height={plotBottom}
             numTicks={numTicks}
+            tickValues={ticks}
             stroke="var(--color-fd-border)"
             strokeWidth={1}
           />
           {rows.map((row, index) => {
             const layout = layouts[index];
-            const header = HEADER + (layout.badgeBelow ? BADGE_H + 4 : 0);
+            const header = layout.header;
             const plotted = series.filter(
               (s) => row.values[s.key] !== undefined,
             );
@@ -277,18 +330,28 @@ export function BarChart({
                       : undefined
                   }
                 >
-                  {row.label}
-                  {row.mark && (
-                    <tspan fill="var(--color-fd-muted-foreground)">
-                      {row.mark}
-                    </tspan>
+                  {layout.lines.length === 1 ? (
+                    <>
+                      {row.label}
+                      {row.mark && (
+                        <tspan fill="var(--color-fd-muted-foreground)">
+                          {row.mark}
+                        </tspan>
+                      )}
+                    </>
+                  ) : (
+                    layout.lines.map((line, i) => (
+                      <tspan key={line} x={0} dy={i === 0 ? 0 : LINE}>
+                        {line}
+                      </tspan>
+                    ))
                   )}
                 </text>
                 {row.badge && tone && (
                   <g
                     transform={
                       layout.badgeBelow
-                        ? `translate(0, ${HEADER + 2})`
+                        ? `translate(0, ${HEADER + (layout.lines.length - 1) * LINE + 2})`
                         : `translate(${width - badgeWidth}, 0)`
                     }
                   >
@@ -312,7 +375,14 @@ export function BarChart({
                 )}
                 {plotted.map((s, i) => {
                   const value = row.values[s.key] ?? 0;
-                  const barWidth = value > 0 ? Math.max(x(value), 3) : 0;
+                  const barWidth =
+                    value > 0
+                      ? Math.max(
+                          x(scale === 'log' ? Math.max(value, min) : value) ??
+                            0,
+                          3,
+                        )
+                      : 0;
                   const barY = header + 6 + i * (BAR + BAR_GAP);
                   const delay = `${index * 60 + i * 90}ms`;
                   return (
@@ -354,6 +424,7 @@ export function BarChart({
             top={plotBottom}
             scale={x}
             numTicks={numTicks}
+            tickValues={ticks}
             tickFormat={(value) => tickFormat(Number(value))}
             stroke="var(--color-fd-border)"
             tickStroke="var(--color-fd-border)"

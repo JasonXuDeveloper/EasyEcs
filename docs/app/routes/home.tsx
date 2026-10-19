@@ -22,12 +22,12 @@ import {
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
-import { PeerChart } from '@/components/charts';
+import { FeatureComparison } from '@/components/bench-data';
+import { LeadChart, PeerChart } from '@/components/charts';
 import {
   type BenchNumber,
   bench,
   benchNumber,
-  benchRows,
   formatBytes,
   formatRatio,
   formatTime,
@@ -36,6 +36,7 @@ import {
   sourceLine,
 } from '@/lib/benchmarks';
 import { cn } from '@/lib/cn';
+import { featureComparison, featureCounts } from '@/lib/feature-comparison';
 import { getLocale, type Locale } from '@/lib/i18n';
 import { baseOptions } from '@/lib/layout.shared';
 import { homeMeta } from '@/lib/seo';
@@ -60,8 +61,6 @@ const zeroAlloc = tickAlloc?.value === 0;
 
 /** The peers of the headline tick, fastest first */
 const peerList = peers();
-/** True when EasyEcs runs the headline tick faster than every peer (the headline and description say so) */
-const tickLeads = peerList[0]?.ours === true;
 /** EasyEcs' own row of the headline tick: what the headline's allocation figure quotes */
 const oursPeer = peerList.find((p) => p.ours);
 /** "0 B": the memory one headline tick allocates */
@@ -82,15 +81,37 @@ const peerTimes = (zh: boolean) =>
     )
     .join(zh ? '，' : ', ');
 
-/** True when [Changed<T>] is the fastest change detection of every library at every size */
-const changeTrackingLeads = ['10', '1000'].every((written) => {
-  const rows = benchRows('ChangeTrackingComparison', { Written: written });
-  const ours = rows.find((r) => r.method === 'EasyEcs_Changed');
-  return (
-    !!ours &&
-    rows.every((r) => r.method.startsWith('EasyEcs') || r.meanNs > ours.meanNs)
-  );
-});
+/** The head-to-head comparisons, the biggest lead first (src/lib/feature-comparison.ts) */
+const leads = featureComparison('lead');
+const counts = featureCounts();
+/** "30× faster saves": a lead in a few words, for the headline and the description */
+const leadPhrase = (i: number, zh: boolean) => {
+  const item = leads[i];
+  if (!item) return '';
+  return zh
+    ? `${item.short.zh}快 ${formatRatio(item.ratio)}`
+    : `${formatRatio(item.ratio)} faster ${item.short.en}`;
+};
+/** The two biggest leads, joined: the claim of the headline */
+const topLeads = (zh: boolean) =>
+  leads.length >= 2
+    ? `${leadPhrase(0, zh)}${zh ? '，' : ', '}${leadPhrase(1, zh)}`
+    : '';
+/** "saves 30×, bulk changes 15× and spawning 2.75×" */
+const leadList = (zh: boolean, n = 3) => {
+  const parts = leads
+    .slice(0, n)
+    .map((l) => `${l.short[zh ? 'zh' : 'en']} ${formatRatio(l.ratio)}`);
+  if (zh) return parts.join('、');
+  return parts.length > 1
+    ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+    : parts.join('');
+};
+/** Where EasyEcs is behind, in a few words each */
+const behindList = (zh: boolean) =>
+  featureComparison('behind')
+    .map((b) => b.short[zh ? 'zh' : 'en'])
+    .join(zh ? '、' : ', ');
 
 /**
  * The speed-ups behind the numbers, each as "how much faster than the alternative": a ratio of two rows of one
@@ -179,6 +200,10 @@ interface Copy {
   howText: string;
   steps: { title: string; text: string; code: string }[];
   peersLink: string;
+  compareTitle: string;
+  compareText: string;
+  behindTitle: string;
+  compareLink: string;
   speedTitle: string;
   speedText: string;
   speedLink: string;
@@ -243,15 +268,15 @@ world.Update();                                // 0 B once warmed up`,
 
 const copy: Record<Locale, Copy> = {
   en: {
-    description: tickLeads
-      ? `High-performance ECS for C# and .NET 10 servers: the fastest full server tick against Friflo, Arch and DefaultEcs, with ${tickBytes} allocated per tick.`
+    description: topLeads(false)
+      ? `High-performance ECS for C# and .NET 10 servers: ${leadPhrase(0, false)} and ${leadPhrase(1, false)} than the next-fastest C# ECS, ${tickBytes} allocated per tick.`
       : `High-performance ECS for C# and .NET 10 servers: a full server tick in ${tickTime}, source-generated systems, change tracking and ${tickBytes} per tick.`,
     pill: `EasyEcs ${docsVersion} · .NET 10 · MIT`,
     headline: 'High-performance ECS for .NET\u00a010 servers.',
-    headlineProof: tickLeads
-      ? `The fastest full server tick, ${tickBytes} allocated.`
+    headlineProof: topLeads(false)
+      ? `${topLeads(false)}, ${tickBytes} per tick.`
       : `A full server tick in ${tickTime}, ${tickBytes} allocated.`,
-    definition: `EasyEcs is an open-source, high-performance archetype Entity Component System (ECS) for C# and .NET 10 servers. ${tickLeads ? 'It runs a full 100,000-entity server tick faster than Friflo, Arch and DefaultEcs' : `It runs a full 100,000-entity server tick in ${tickTime}`}${zeroAlloc ? ', and allocates nothing while doing it' : ''}. Write plain data and [ForEach] methods; a source generator turns them into inlined struct jobs, and an analyzer catches design mistakes at compile time.`,
+    definition: `EasyEcs is an open-source, high-performance archetype Entity Component System (ECS) for C# and .NET 10 servers. In ${counts.total} head-to-head benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs, each library doing the same work its own way, it is faster in ${counts.ahead} and within the measurement error in ${counts.even}${zeroAlloc ? ', and a full server tick allocates nothing' : ''}. Write plain data and [ForEach] methods; a source generator turns them into inlined struct jobs, and an analyzer catches design mistakes at compile time.`,
     start: 'Get started',
     github: 'GitHub',
     demo: 'Try it in the browser',
@@ -306,7 +331,11 @@ const copy: Record<Locale, Copy> = {
         code: stepCode[2],
       },
     ],
-    peersLink: 'The full comparison',
+    peersLink: 'Every comparison, losses included',
+    compareTitle: 'Feature by feature, losses included',
+    compareText: `${counts.total} head-to-head benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs, each the same work in each library's own idiomatic way, with identical results checked before anything is measured. The full server tick is one of them; where another library comes out ahead, the table says why.`,
+    behindTitle: 'Where another library is faster',
+    compareLink: 'Every comparison, sorted by lead',
     featuresTitle: 'Everything a long-running simulation needs',
     featuresText:
       'Each feature is opt-in and costs nothing until a world uses it.',
@@ -439,7 +468,7 @@ const copy: Record<Locale, Copy> = {
       },
       {
         question: 'What is the fastest ECS for C# and .NET?',
-        answer: `It depends on the workload. In the comparison benchmark of the EasyEcs repository, the same 100,000-entity server tick is ported to each library's fast path and checked to compute the same results. Measured with BenchmarkDotNet on .NET 10: ${peerTimes(false)}.${slowRange ? ` The two fastest allocate nothing per tick; the others take ${slowRange} as long and allocate every tick.` : ''}${changeTrackingLeads ? ' On change tracking, EasyEcs is the fastest of the four.' : ''}`,
+        answer: `It depends on the work. The EasyEcs repository measures it against Friflo.Engine.ECS, Arch and DefaultEcs in ${counts.total} head-to-head benchmarks with BenchmarkDotNet on .NET 10, each library doing the same work its own idiomatic way, with identical results checked in setup. EasyEcs is faster in ${counts.ahead}, within the measurement error in ${counts.even} and slower in ${counts.slower}. Its biggest leads over the next-fastest library: ${leadList(false, 5)}. On the full 100,000-entity server tick: ${peerTimes(false)}.${slowRange ? ` The two fastest allocate nothing per tick; the others take ${slowRange} as long and allocate every tick.` : ''}${behindList(false) ? ` Another library comes out ahead on ${behindList(false)}.` : ''}`,
         more: {
           text: 'Comparison with Friflo, Arch and DefaultEcs',
           href: 'comparison',
@@ -482,15 +511,15 @@ const copy: Record<Locale, Copy> = {
     ctaLlms: 'Docs for AI assistants',
   },
   zh: {
-    description: tickLeads
-      ? `高性能 C# / .NET 10 服务端 ECS 框架：完整服务器 tick 快过 Friflo、Arch 和 DefaultEcs，每个 tick 分配 ${tickBytes}。`
+    description: topLeads(true)
+      ? `高性能 C# / .NET 10 服务端 ECS 框架：${leads[0].short.zh}比次快的 C# ECS 快 ${formatRatio(leads[0].ratio)}，${leadPhrase(1, true)}，每个 tick 分配 ${tickBytes}。`
       : `高性能 C# / .NET 10 服务端 ECS 框架：完整服务器 tick 只要 ${tickTime}，源生成系统、变更追踪，每个 tick 分配 ${tickBytes}。`,
     pill: `EasyEcs ${docsVersion} · .NET 10 · MIT`,
     headline: '为 .NET\u00a010 服务端打造的高性能 ECS。',
-    headlineProof: tickLeads
-      ? `完整服务器 tick 最快，分配 ${tickBytes}。`
+    headlineProof: topLeads(true)
+      ? `${topLeads(true)}，每个 tick 分配 ${tickBytes}。`
       : `完整服务器 tick 只要 ${tickTime}，分配 ${tickBytes}。`,
-    definition: `EasyEcs 是开源、高性能的 archetype（原型）实体组件系统（ECS），面向 C# 与 .NET 10 服务端。${tickLeads ? '一个 10 万实体的完整服务器 tick，它比 Friflo、Arch 和 DefaultEcs 都快' : `一个 10 万实体的完整服务器 tick 只要 ${tickTime}`}${zeroAlloc ? '，而且不分配任何内存' : ''}。你只写普通数据和 [ForEach] 方法：源生成器把它们编译成内联的结构体 job，分析器在编译期拦下设计错误。`,
+    definition: `EasyEcs 是开源、高性能的 archetype（原型）实体组件系统（ECS），面向 C# 与 .NET 10 服务端。与 Friflo.Engine.ECS、Arch、DefaultEcs 的 ${counts.total} 项正面对比里，每个库用自己的写法做同样的事，它在 ${counts.ahead} 项更快，${counts.even} 项差距在测量误差之内${zeroAlloc ? '，完整的服务器 tick 也不分配任何内存' : ''}。你只写普通数据和 [ForEach] 方法：源生成器把它们编译成内联的结构体 job，分析器在编译期拦下设计错误。`,
     start: '快速开始',
     github: 'GitHub',
     demo: '在浏览器里试试',
@@ -545,7 +574,11 @@ const copy: Record<Locale, Copy> = {
         code: stepCode[2],
       },
     ],
-    peersLink: '完整对比',
+    peersLink: '全部对比，落后的也在内',
+    compareTitle: '逐项对比，落后的也列出来',
+    compareText: `与 Friflo.Engine.ECS、Arch、DefaultEcs 的 ${counts.total} 项正面对比：每一项都在每个库里用它惯用的写法做同样的事，测量之前先校验结果一致。完整服务器 tick 也是其中一项；其他库领先的地方，表里写明了原因。`,
+    behindTitle: '其他库更快的地方',
+    compareLink: '全部对比，按领先幅度排序',
     featuresTitle: '长时间运行的模拟需要的，都在这里',
     featuresText: '每个功能都按需启用，World 不用就没有开销。',
     features: [
@@ -677,7 +710,7 @@ const copy: Record<Locale, Copy> = {
       },
       {
         question: 'C# / .NET 里最快的 ECS 是哪个？',
-        answer: `取决于负载。EasyEcs 仓库的对比基准把同一个 10 万实体的服务器 tick 移植到每个库的最快写法，并校验结果一致。在 .NET 10 上用 BenchmarkDotNet 测得：${peerTimes(true)}。${slowRange ? `最快的两个库每个 tick 都不分配内存；另外两个耗时是它的 ${slowRange}，而且每个 tick 都有分配。` : ''}${changeTrackingLeads ? '在变更追踪上，EasyEcs 是四个库里最快的。' : ''}`,
+        answer: `取决于负载。EasyEcs 仓库在 .NET 10 上用 BenchmarkDotNet 把它和 Friflo.Engine.ECS、Arch、DefaultEcs 做了 ${counts.total} 项正面对比，每个库都用自己惯用的写法做同样的事，并在 setup 中校验结果一致。EasyEcs 在 ${counts.ahead} 项更快，${counts.even} 项差距在测量误差之内，${counts.slower} 项更慢。领先次快的库最多的几项：${leadList(true, 5)}。10 万实体的完整服务器 tick：${peerTimes(true)}。${slowRange ? `最快的两个库每个 tick 都不分配内存；另外两个耗时是它的 ${slowRange}，而且每个 tick 都有分配。` : ''}${behindList(true) ? `其他库领先的项目：${behindList(true)}。` : ''}`,
         more: {
           text: '与 Friflo、Arch、DefaultEcs 的对比',
           href: 'comparison',
@@ -873,11 +906,13 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
                 <MoreLink to={`${docs}/demo`}>{t.demo}</MoreLink>
               </p>
             </div>
-            {/* The proof beside the claim: the headline tick, every library */}
+            {/* The proof beside the claim: the biggest leads, feature by feature */}
             <div className="min-w-0 [&>figure]:my-0">
-              <PeerChart lang={lang} />
+              <LeadChart lang={lang} limit={6} />
               <p className="mt-4">
-                <MoreLink to={`${docs}/comparison`}>{t.peersLink}</MoreLink>
+                <MoreLink to={`${docs}/comparison#feature-by-feature`}>
+                  {t.peersLink}
+                </MoreLink>
               </p>
             </div>
           </div>
@@ -921,6 +956,22 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
             </p>
           </div>
         </section>
+
+        {/* Feature by feature: the whole tick, and where EasyEcs is behind and why */}
+        <Section id="compare" title={t.compareTitle} text={t.compareText}>
+          <div className="[&>figure]:my-0">
+            <PeerChart lang={lang} />
+          </div>
+          <h3 className="mt-12 text-lg font-medium">{t.behindTitle}</h3>
+          <div className="prose max-w-none text-sm">
+            <FeatureComparison tier="behind" lang={lang} />
+          </div>
+          <p className="mt-6">
+            <MoreLink to={`${docs}/comparison#feature-by-feature`}>
+              {t.compareLink}
+            </MoreLink>
+          </p>
+        </Section>
 
         {/* Code sample */}
         <Section title={t.codeTitle} text={t.codeText}>

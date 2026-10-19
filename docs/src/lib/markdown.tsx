@@ -6,7 +6,7 @@
  */
 import { asMarkdown, md, renderToMarkdown } from 'fumadocs-core/server';
 import type { ComponentProps, ReactNode } from 'react';
-import { benchTable } from '@/components/bench-data';
+import { benchTable, featureTable } from '@/components/bench-data';
 import {
   benchValue,
   formatBytes,
@@ -16,6 +16,7 @@ import {
   peers,
   sourceLine,
 } from '@/lib/benchmarks';
+import { featureCounts, type Tier } from '@/lib/feature-comparison';
 import { getMDXComponents } from '@/mdx-components';
 import type { Locale } from './i18n';
 import { docsVersion, siteUrl } from './site';
@@ -207,7 +208,35 @@ function markdownComponents(lang: Locale, pageUrl: string) {
       asMarkdown();
       return benchTable(props, zh, true);
     },
+    FeatureComparison(props: Parameters<typeof featureTable>[0]) {
+      asMarkdown();
+      return featureTable(props, zh, true);
+    },
+    FeatureCount({
+      k,
+      library,
+    }: {
+      k: keyof ReturnType<typeof featureCounts>;
+      library?: string;
+    }) {
+      asMarkdown();
+      return String(featureCounts(library)[k]);
+    },
     // A chart becomes its title, its data table and the source line.
+    LeadChart({
+      tier = 'lead',
+      limit,
+    }: {
+      tier?: Tier | 'all';
+      limit?: number | string;
+    }) {
+      asMarkdown();
+      return featureTable(
+        { tier: tier === 'all' ? undefined : tier, limit, lang },
+        zh,
+        true,
+      );
+    },
     PeerChart({ entities = '100000' }: { entities?: string }) {
       asMarkdown();
       const list = peers(entities);

@@ -6,7 +6,11 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type * as PageTree from 'fumadocs-core/page-tree';
-import { benchNumber, sourceLine } from '../src/lib/benchmarks';
+import { benchNumber, formatRatio, sourceLine } from '../src/lib/benchmarks';
+import {
+  featureComparison,
+  featureCounts,
+} from '../src/lib/feature-comparison';
 import type { Locale } from '../src/lib/i18n';
 import { pageBodyMarkdown } from '../src/lib/markdown';
 import { docDescription, markdownPath } from '../src/lib/seo';
@@ -262,9 +266,23 @@ const hasPeers = Object.values(peerRatios).every(Boolean);
 const fastestOnTick =
   hasPeers && Object.values(peerRatios).every((r) => (r?.value ?? 0) > 1);
 
+/** The head-to-head comparisons: counts, the biggest leads, where EasyEcs is behind */
+const features = featureCounts();
+const featureFact = (lang: Locale) => {
+  const leads = featureComparison('lead')
+    .slice(0, 6)
+    .map((l) => `${l.short[lang]} ${formatRatio(l.ratio)}`);
+  const behind = featureComparison('behind').map((b) => b.short[lang]);
+  const url = `${siteUrl}/${lang}/docs/comparison.md`;
+  return lang === 'zh'
+    ? `与 Friflo.Engine.ECS、Arch、DefaultEcs 的 ${features.total} 项正面对比（每个库用自己惯用的写法做同样的事，setup 中校验结果一致）：EasyEcs 在 ${features.ahead} 项更快，${features.even} 项差距在测量误差之内，${features.slower} 项更慢。领先次快的库最多的是：${leads.join('、')}。其他库领先的项目：${behind.join('、')}，原因见[横向对比](${url})。`
+    : `In ${features.total} head-to-head benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs (each library doing the same work its own idiomatic way, identical results checked in setup), EasyEcs is faster in ${features.ahead}, within the measurement error in ${features.even} and slower in ${features.slower}. Its biggest leads over the next-fastest library: ${leads.join(', ')}. Another library comes out ahead on ${behind.join(', ')}; why is on [Comparison](${url}).`;
+};
+
 const llmsCopy: Record<Locale, { facts: string[]; optional: string[] }> = {
   en: {
     facts: [
+      ...(features.total ? [featureFact('en')] : []),
       ...(oneWorld
         ? [
             `Performance: one server tick of 9 systems over 100,000 entities takes ${oneWorld.text}${oneWorldAlloc ? ` and allocates ${oneWorldAlloc.text}` : ''} (${sourceLine(false)}) See [Performance](${siteUrl}/en/docs/performance.md).`,
@@ -292,6 +310,7 @@ const llmsCopy: Record<Locale, { facts: string[]; optional: string[] }> = {
     facts: [
       // URLs are Markdown links: bare URLs followed by full-width punctuation
       // (。）：) are misread by link extractors.
+      ...(features.total ? [featureFact('zh')] : []),
       ...(oneWorld
         ? [
             `性能：10 万实体、9 个系统的一个服务器 tick 耗时 ${oneWorld.text}${oneWorldAlloc ? `，分配 ${oneWorldAlloc.text}` : ''}（${sourceLine(true)}）参见[性能](${siteUrl}/zh/docs/performance.md)。`,

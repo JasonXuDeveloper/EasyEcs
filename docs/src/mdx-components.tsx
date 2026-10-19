@@ -9,8 +9,14 @@ import { TypeTable } from 'fumadocs-ui/components/type-table';
 import defaultMdxComponents from 'fumadocs-ui/mdx';
 import type { MDXComponents } from 'mdx/types';
 import type { ComponentProps, ReactNode } from 'react';
-import { BenchSource, BenchTable, BenchValue } from '@/components/bench-data';
-import { BenchChart, PeerChart } from '@/components/charts';
+import {
+  BenchSource,
+  BenchTable,
+  BenchValue,
+  FeatureComparison,
+  FeatureCount,
+} from '@/components/bench-data';
+import { BenchChart, LeadChart, PeerChart } from '@/components/charts';
 import { EcsDemo } from '@/components/demo';
 import { handleBlockFeedback } from '@/components/feedback/actions';
 import { FeedbackBlock } from '@/components/feedback/client';
@@ -31,9 +37,12 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     Card,
     Cards,
     EcsDemo,
+    FeatureComparison,
+    FeatureCount,
     File,
     Files,
     Folder,
+    LeadChart,
     Mermaid,
     PeerChart,
     Step,

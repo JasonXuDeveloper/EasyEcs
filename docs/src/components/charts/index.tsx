@@ -1,12 +1,17 @@
 /**
- * <PeerChart /> and <BenchChart bench="..." /> for MDX and the home page.
+ * <LeadChart />, <PeerChart /> and <BenchChart bench="..." /> for MDX and the
+ * home page.
  *
  * The chart code (visx) is a separate chunk loaded only where a chart is used.
  */
 import { lazy, Suspense } from 'react';
 import { cn } from '@/lib/cn';
 import { surface } from '@/lib/ui';
-import type { BenchChartProps, PeerChartProps } from './benchmark-charts';
+import type {
+  BenchChartProps,
+  LeadChartProps,
+  PeerChartProps,
+} from './benchmark-charts';
 
 // Prerendering imports the charts up front so the HTML holds the finished SVG
 // in place; the browser loads the chunk lazily and keeps the server markup
@@ -20,9 +25,16 @@ const Charts = import.meta.env.SSR
       BenchChart: lazy(() =>
         import('./benchmark-charts').then((m) => ({ default: m.BenchChart })),
       ),
+      LeadChart: lazy(() =>
+        import('./benchmark-charts').then((m) => ({ default: m.LeadChart })),
+      ),
     };
 
-export type { BenchChartProps, PeerChartProps } from './benchmark-charts';
+export type {
+  BenchChartProps,
+  LeadChartProps,
+  PeerChartProps,
+} from './benchmark-charts';
 
 function Fallback() {
   return (
@@ -50,6 +62,15 @@ export function BenchChart(props: BenchChartProps) {
   return (
     <Suspense fallback={<Fallback />}>
       <Charts.BenchChart {...props} />
+    </Suspense>
+  );
+}
+
+/** The head-to-head comparisons, the biggest lead first */
+export function LeadChart(props: LeadChartProps) {
+  return (
+    <Suspense fallback={<Fallback />}>
+      <Charts.LeadChart {...props} />
     </Suspense>
   );
 }

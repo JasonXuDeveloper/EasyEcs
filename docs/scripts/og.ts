@@ -18,7 +18,8 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import sharp from 'sharp';
-import { benchNumber } from '../src/lib/benchmarks';
+import { benchNumber, formatRatio } from '../src/lib/benchmarks';
+import { featureComparison } from '../src/lib/feature-comparison';
 import type { Locale } from '../src/lib/i18n';
 
 export interface Card {
@@ -289,29 +290,12 @@ export async function writeCards(
 /* The home cards, the default card and the GitHub social preview      */
 /* ------------------------------------------------------------------ */
 
-const peerNames = {
-  friflo: 'Friflo.Engine.ECS',
-  arch: 'Arch',
-  defaultecs: 'DefaultEcs',
-} as const;
-
 /**
- * The headline tick (nine systems over 100,000 entities, EcsComparisonBenchmark)
- * of EasyEcs and its peers, and whether EasyEcs is the fastest on it: the
- * cards say "fastest" only while the data does.
+ * The biggest leads of the head-to-head comparisons (src/lib/feature-comparison.ts):
+ * the cards name what EasyEcs is fastest at, by how much, from the data.
  */
-function headlineTick() {
-  const easyecs = benchNumber('peers.easyecs');
-  const peers = (Object.keys(peerNames) as (keyof typeof peerNames)[]).map(
-    (key) => ({
-      name: peerNames[key],
-      time: benchNumber(`peers.${key}`),
-      ratio: benchNumber(`peers.${key}.ratio`),
-    }),
-  );
-  const complete = Boolean(easyecs) && peers.every((p) => p.time && p.ratio);
-  const fastest = complete && peers.every((p) => (p.ratio?.value ?? 0) > 1);
-  return { easyecs, peers, complete, fastest };
+function biggestLeads(n: number) {
+  return featureComparison('lead').slice(0, n);
 }
 
 /** The one-line claim of the home cards and the GitHub preview: speed first, then garbage */
@@ -326,7 +310,7 @@ const claim: Record<Locale, string> = {
  */
 export function homeCards(): Card[] {
   const alloc = benchNumber('tick.oneWorld.alloc')?.text;
-  const { fastest } = headlineTick();
+  const [first, second] = biggestLeads(2);
   return [
     {
       url: '/en',
@@ -334,9 +318,9 @@ export function homeCards(): Card[] {
       eyebrow: 'EasyEcs',
       title: claim.en,
       description: [
-        fastest
-          ? 'Fastest on a full server tick of 100,000 entities against Friflo.Engine.ECS, Arch and DefaultEcs'
-          : 'A full server tick of 100,000 entities',
+        first && second
+          ? `${formatRatio(first.ratio)} faster ${first.short.en} and ${formatRatio(second.ratio)} faster ${second.short.en} than the next-fastest of Friflo.Engine.ECS, Arch and DefaultEcs`
+          : 'Source-generated systems for .NET 10 servers',
         alloc ? `, with ${alloc} allocated per tick.` : '.',
       ].join(''),
     },
@@ -346,9 +330,9 @@ export function homeCards(): Card[] {
       eyebrow: 'EasyEcs',
       title: claim.zh,
       description: [
-        fastest
-          ? '10 万实体的完整服务器 tick 上快过 Friflo.Engine.ECS、Arch 和 DefaultEcs'
-          : '10 万实体的完整服务器 tick',
+        first && second
+          ? `对比 Friflo.Engine.ECS、Arch、DefaultEcs 中次快的库，${first.short.zh}快 ${formatRatio(first.ratio)}，${second.short.zh}快 ${formatRatio(second.ratio)}`
+          : '为 .NET 10 服务端打造的源生成系统',
         alloc ? `，每个 tick 分配 ${alloc}。` : '。',
       ].join(''),
     },
@@ -370,19 +354,19 @@ async function analyzerRules() {
 
 /**
  * The repository's social preview (Settings -> Social preview), 1280×640:
- * the icon and name, the claim, three facts and the headline tick against
- * the peers as bars, centred so a square crop keeps the name, inside
+ * the icon and name, the claim, three facts and the four biggest leads over
+ * the next-fastest library as bars, centred so a square crop keeps the name, inside
  * GitHub's 40 px safe margin. Numbers come from src/data/bench.json and the
  * analyzer's source, like every number the site shows.
  */
 async function drawGithubPreview() {
   const W = 1280;
   const H = 640;
-  const tick = headlineTick();
+  const leads = biggestLeads(4);
   const perEntity = benchNumber('forEach.perEntity');
   const alloc = benchNumber('tick.oneWorld.alloc');
-  if (!tick.complete || !tick.easyecs || !perEntity || !alloc)
-    throw new Error('Benchmark data is missing the headline tick');
+  if (leads.length < 4 || !perEntity || !alloc)
+    throw new Error('Benchmark data is missing the comparisons');
   const facts = [
     { value: perEntity.text, label: 'per entity update, [ForEach]' },
     { value: alloc.text, label: 'allocated per server tick' },
@@ -391,24 +375,15 @@ async function drawGithubPreview() {
       label: 'analyzer rules, code fixes',
     },
   ];
-  const bars = [
-    {
-      name: 'EasyEcs',
-      ns: tick.easyecs.value,
-      text: tick.easyecs.text,
-      note: tick.fastest ? 'fastest' : '',
-    },
-    ...tick.peers.map((p) => ({
-      name: p.name,
-      ns: p.time?.value ?? 0,
-      text: p.time?.text ?? '',
-      note:
-        (p.ratio?.value ?? 0) > 1
-          ? `${p.ratio?.text} slower`
-          : `${p.ratio?.text} the time`,
-    })),
-  ];
-  const chartTitle = 'Full server tick, 100,000 entities (lower is faster)';
+  // The biggest leads as bars: how many times longer the next-fastest library takes
+  const bars = leads.map((l) => ({
+    name: l.short.en.charAt(0).toUpperCase() + l.short.en.slice(1),
+    ratio: l.ratio,
+    text: formatRatio(l.ratio),
+    note: `vs ${l.versus.library}`,
+  }));
+  const chartTitle =
+    'Times faster than the next-fastest of Friflo, Arch and DefaultEcs (log scale)';
   const footer = 'ecs.xgamedev.net';
 
   const fonts = await loadFonts([
@@ -493,41 +468,38 @@ async function drawGithubPreview() {
       );
   }
 
-  // The headline tick as bars: EasyEcs in the accent, the peers in grey
+  // The leads as bars on a log axis, in the accent
   const chartTop = 372;
   const labelRight = 375;
   const barLeft = labelRight + 20;
   const barMax = 480;
   const rowHeight = 36;
-  const longest = Math.max(...bars.map((b) => b.ns));
+  const longest = Math.log(Math.max(...bars.map((b) => b.ratio)));
   await centred(
     (await draw(chartTitle, 400, 20, colors.footer)).data,
     chartTop,
   );
   for (let i = 0; i < bars.length; i++) {
     const bar = bars[i];
-    const own = i === 0;
     const top = chartTop + 36 + rowHeight * i;
-    const label = await draw(
-      bar.name,
-      own ? 700 : 400,
-      22,
-      own ? colors.title : colors.description,
-    );
+    const label = await draw(bar.name, 700, 22, colors.title);
     layers.push({
       input: label.data,
       top: top + Math.round((22 - label.height) / 2) + 1,
       left: labelRight - (await widthOf(label.data)),
     });
-    const length = Math.max(4, Math.round((bar.ns / longest) * barMax));
+    const length = Math.max(
+      4,
+      Math.round((Math.log(bar.ratio) / longest) * barMax),
+    );
     shapes.push(
-      `<rect x="${barLeft}" y="${top}" width="${length}" height="22" rx="4" fill="${own ? colors.accent : '#3a3a3a'}"/>`,
+      `<rect x="${barLeft}" y="${top}" width="${length}" height="22" rx="4" fill="${colors.accent}"/>`,
     );
     const value = await draw(
-      bar.note ? `${bar.text}  ·  ${bar.note}` : bar.text,
-      own ? 700 : 400,
+      `${bar.text}  ·  ${bar.note}`,
+      700,
       20,
-      own ? colors.accent : colors.description,
+      colors.accent,
     );
     layers.push({
       input: value.data,

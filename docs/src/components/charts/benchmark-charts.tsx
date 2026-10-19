@@ -17,6 +17,7 @@ import {
   peers,
   sourceLine,
 } from '@/lib/benchmarks';
+import { featureComparison, type Tier } from '@/lib/feature-comparison';
 import type { Locale } from '@/lib/i18n';
 import { docsVersion } from '@/lib/site';
 import { BarChart, type ChartRow, type ChartSeries } from './bar-chart';
@@ -93,6 +94,90 @@ export function PeerChart({ entities = '100000', lang }: PeerChartProps) {
           formatTime(p.row.meanNs),
           p.row.ratio === null ? '—' : formatRatio(p.row.ratio),
           formatBytes(p.row.allocatedBytes),
+        ]),
+      }}
+    />
+  );
+}
+
+export interface LeadChartProps {
+  /** One tier of the comparisons (default "lead"), or "all" */
+  tier?: Tier | 'all';
+  /** Only the biggest leads */
+  limit?: number | string;
+  title?: string;
+  subtitle?: string;
+  lang?: Locale;
+}
+
+/**
+ * The head-to-head comparisons as bars, the biggest lead first: each bar is
+ * the fastest other library's time over EasyEcs' time, on a log axis (the
+ * leads span from about 1× to over 100×).
+ */
+export function LeadChart({
+  tier = 'lead',
+  limit,
+  title,
+  subtitle,
+  lang,
+}: LeadChartProps) {
+  const locale = useLang(lang);
+  const zh = locale === 'zh';
+  const s = seriesFor(zh);
+  const items = featureComparison(tier === 'all' ? undefined : tier).slice(
+    0,
+    limit === undefined ? undefined : Number(limit),
+  );
+  const top = Math.max(...items.map((i) => i.ratio), 2);
+  // 1×, 2×, 5×, 10×, 20×, 50×, ... up to the largest lead
+  const ticks = [1, 2, 5, 10, 20, 50, 100, 200, 500].filter(
+    (t) => t <= top * 1.05,
+  );
+  return (
+    <BarChart
+      title={
+        title ??
+        (zh
+          ? '逐项对比：次快的库耗时是 EasyEcs 的几倍'
+          : 'Feature by feature: how many times longer the next-fastest library takes')
+      }
+      subtitle={
+        subtitle ??
+        (zh
+          ? '每一项都在 Friflo.Engine.ECS、Arch、DefaultEcs 里用各自惯用的写法做同样的事，并在 setup 中校验结果一致。条形为最快的其他库耗时除以 EasyEcs 耗时（对数坐标）。'
+          : "Each comparison does the same work in Friflo.Engine.ECS, Arch and DefaultEcs, each library's own idiomatic way, with identical results checked in setup. A bar is the fastest other library's time over EasyEcs' time (log scale).")
+      }
+      series={[s.ours]}
+      rows={items.map((item) => {
+        const next = item.versus;
+        return {
+          label: item.label[locale],
+          values: { ours: item.ratio },
+          text: { ours: `${formatRatio(item.ratio)} · ${next.library}` },
+          detail: `EasyEcs ${formatTime(item.ours.meanNs)}, ${libraryName(next.library)} ${formatTime(next.row.meanNs)}`,
+        };
+      })}
+      scale="log"
+      tickValues={ticks}
+      max={top}
+      axisLabel={
+        zh
+          ? '它的耗时 ÷ EasyEcs 耗时（对数坐标）'
+          : "Its time ÷ EasyEcs' time (log scale)"
+      }
+      tickFormat={(v) => `${v}×`}
+      footnotes={[sourceLine(zh)]}
+      table={{
+        caption: zh ? '数据表' : 'Data table',
+        head: zh
+          ? ['测的是什么', 'EasyEcs', '次快的库', '对比 EasyEcs']
+          : ['What is measured', 'EasyEcs', 'Next fastest', 'vs EasyEcs'],
+        rows: items.map((item) => [
+          item.label[locale],
+          formatTime(item.ours.meanNs),
+          `${libraryName(item.versus.library)} ${formatTime(item.versus.row.meanNs)}`,
+          formatRatio(item.ratio),
         ]),
       }}
     />

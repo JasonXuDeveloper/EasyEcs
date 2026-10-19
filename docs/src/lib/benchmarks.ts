@@ -551,7 +551,8 @@ export function parseParams(params?: string) {
   return out;
 }
 
-const splitMethod = (method: string) => {
+/** "Friflo_DirtyTag" -> { library: "Friflo", case: "DirtyTag" } */
+export const splitMethod = (method: string) => {
   const at = method.indexOf('_');
   return at < 0
     ? { library: method, case: '' }
