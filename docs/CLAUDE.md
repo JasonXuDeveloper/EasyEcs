@@ -9,7 +9,7 @@ deployed to Cloudflare Pages. English and Chinese. How to write a page: `WRITING
 bun install
 bun run dev              # http://localhost:5173
 bun run check            # tsc, Biome, links + anchors + icons (scripts/lint-links.ts)
-bun run build            # git history, benchmark sync, prerender, static files -> build/client, then lint:seo
+bun run build            # Chromium check, git history, benchmark sync, prerender, static files -> build/client, then lint:seo
 bun run lint:seo         # titles, descriptions, canonical, hreflang, cards, JSON-LD, sitemap, robots, llms files
 bun run sync:benchmarks  # src/data/bench.json from BenchmarkDotNet reports (see Benchmarks)
 bun run og:default       # redraw the default social card (public/og.png, the card of /en)
@@ -30,7 +30,7 @@ content/                 the pages (the docs folder of the repository, read on G
                          Chinese text is tools/ApiDocs/zh/)
   meta.json / .zh.json   sidebar order and sections
 app/                     routes: home.tsx (landing page, copy for both languages inline), docs.tsx, not-found,
-                         redirect-root (/ -> /en or /zh), api/search
+                         redirect-root (/ -> /en or /zh), api/search (/api/search/{lang}.json, one index per language)
 src/lib/                 site.ts (domain, links, product summary), seo.ts (meta, hreflang, JSON-LD), source.ts,
                          i18n.ts / i18n-ui.ts, legacy.ts, benchmarks.ts, markdown.tsx (the .md copies)
 src/components/          bench-data.tsx (BenchValue, BenchTable, BenchSource), charts/ (visx BarChart, PeerChart,
@@ -120,6 +120,19 @@ scripts/                 generate-static.ts, og.ts, lint-links.ts, sync-benchmar
 - `/demo/*` bypasses the Pages Function (`public/_routes.json`, `functions/[[path]].ts`); `public/_headers` serves
   `.wasm` as `application/wasm` and caches the fingerprinted files forever (`dotnet.js`, the entry, is revalidated).
   Biome skips `public/demo`.
+
+## Diagrams and page weight
+
+- ```mermaid fences are drawn at build time by `rehype-mermaid` (Mermaid in a headless Chromium through Playwright;
+  options in `src/lib/mermaid.ts`): the prerendered page holds the SVG, the browser loads no Mermaid. One drawing in
+  Mermaid's grayscale `neutral` theme; the dark site shows it inverted (`src/components/mermaid.tsx`). The `chart`
+  attribute keeps the source for the Markdown copies. `bun run dev` and `bun run build` need a Chromium:
+  `scripts/chromium.ts` (first step of the build) installs Playwright's headless shell when none starts.
+- The browser bundle of a page leaves out `_markdown` and `structuredData` (build-time only, `vite.config.ts`); the
+  search dialog loads lazily, then fetches its language's index only.
+- Off-screen code blocks skip layout and paint (`content-visibility: auto`, `app/app.css`).
+- `public/_headers`: hashed assets immutable, icons and the manifest a day, the search indexes five minutes; HTML keeps
+  Cloudflare's default (revalidated).
 
 ## Redirects
 
