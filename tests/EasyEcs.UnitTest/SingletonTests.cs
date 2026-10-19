@@ -24,10 +24,32 @@ public class SingletonTests
         Assert.That(world.GetOrAddSingleton<Clock>().Tick, Is.EqualTo(1));
     }
 
+    public class Ticker : EcsSystem
+    {
+        [ForEach] static void Tick(in Health health, ref Clock clock) => clock.Tick++;
+    }
+
+    [Test]
+    public void ASystemWhoseSingletonWasNeverSetThrows()
+    {
+        using var world = new World();
+        world.CreateEntity(new Health(1));
+        world.AddSystem<Ticker>();
+        var error = Assert.Throws<InvalidOperationException>(() => world.Update());
+        Assert.That(error!.Message, Does.Contain("Singleton Clock was not added").And.Contain("SetClock"));
+        Assert.That(world.HasSingleton<Clock>(), Is.False, "a read never adds the singleton");
+        Assert.Throws<InvalidOperationException>(() => world.SingletonRef<Clock>());
+
+        world.SetClock(10);
+        world.Update();
+        Assert.That(world.Clock.Tick, Is.EqualTo(11));
+    }
+
     [Test]
     public void AddingAgainResetsTheSameStorage()
     {
         using var world = new World();
+        world.AddSingleton<Clock>();
         var clock = world.SingletonRef<Clock>();
         clock.Value.Tick = 5;
         world.AddSingleton<Clock>().Tick += 2;   // reset to default, then written

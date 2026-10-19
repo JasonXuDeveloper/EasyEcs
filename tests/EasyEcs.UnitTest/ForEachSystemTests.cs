@@ -302,6 +302,7 @@ public class ForEachSystemTests
         using var world = new World();
         for (int hp = 1; hp <= 3; hp++) world.CreateEntity(new Health(hp), new Velocity());
         var bystander = world.CreateEntity(new Health(1)); // no Velocity: filtered out
+        world.AddSingleton<Score>();
         world.AddSystem<Damage>();
 
         world.Update();
@@ -326,6 +327,7 @@ public class ForEachSystemTests
         for (int i = old.Length - 1; i >= 0; i -= 2) old[i].Destroy();
         var fresh = new Entity[32];
         for (int i = 0; i < fresh.Length; i++) fresh[i] = world.CreateEntity(new Health(1), new Velocity());
+        world.AddSingleton<Score>();
         world.AddSystem<Damage>();
 
         world.Update(); // Hurt sets Dead through its Entity, Corpses removes Velocity through its Entity

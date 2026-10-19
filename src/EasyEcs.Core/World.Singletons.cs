@@ -54,12 +54,17 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Stable handle to singleton <typeparamref name="T"/> (added first if missing): resolve it once, then read and write
-    /// <see cref="SingletonRef{T}.Value"/> without a lookup. Generated <c>[ForEach]</c> jobs resolve singleton
-    /// parameters through it once per pass. O(1).
+    /// Stable handle to singleton <typeparamref name="T"/>; throws if it was not added: resolve it once, then read and
+    /// write <see cref="SingletonRef{T}.Value"/> without a lookup. Generated <c>[ForEach]</c> jobs resolve singleton
+    /// parameters through it once per pass, so a system whose singleton was never set fails on its first run. O(1).
     /// </summary>
-    public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent =>
-        new(Box<T>() ?? AddMissingSingleton<T>());
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent
+    {
+        var box = Box<T>();
+        if (box == null) ThrowSingletonMissing(typeof(T));
+        return new(box!);
+    }
 
     /// <summary>
     /// Add <typeparamref name="T"/> unless another thread did first (systems of one parallel stage may resolve the same
@@ -110,7 +115,9 @@ public sealed partial class World
 
     [DoesNotReturn] // no NoInlining: the JIT sees it never returns (Entity.ThrowStale)
     private static void ThrowSingletonMissing(Type type) =>
-        throw new InvalidOperationException($"Singleton {type.Name} was not added to this world");
+        throw new InvalidOperationException(
+            $"Singleton {type.Name} was not added to this world: set it before the systems that read it run " +
+            $"(world.Set{type.Name}(...) or world.AddSingleton<{type.Name}>()), or use GetOrAdd{type.Name}() where a default is meant");
 }
 
 /// <summary>

@@ -17,6 +17,7 @@ public class AllocationTests
         }
 
         world.AddSystem<Movement>();
+        world.AddSingleton<Score>();
         world.AddSystem<Damage>();
         world.AddSystem<ChangedTests.Wear>();
         world.AddSystem<ChangedTests.ArmorWatch>();
