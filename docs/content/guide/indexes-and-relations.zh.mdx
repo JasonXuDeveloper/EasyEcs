@@ -158,7 +158,7 @@ int arrowsLeft = world.Count<Arrow>();                              // 0
 ### 由索引驱动的系统 [#index-driven-foreach]
 
 `[ForEach]` 方法可以对访问到的每个实体再遍历一次索引：危险区伤害区域里的单位，公会统计成员。把 `World`（或 `Entity`）
-作为参数拿到索引；这样系统会单独运行，正好满足索引只属于 World 拥有者线程的要求。
+作为参数拿到索引；这样系统会单独运行，正好满足索引只属于 World 所有者线程的要求。
 
 ```csharp
 public record struct Hazard(int Zone, int Damage) : IComponent;
@@ -345,7 +345,7 @@ arrows left after the archer died: 0
 | 通过 `ref`、`Get<T>()` 或查询元素写入被索引的组件 | 索引还停在旧键上 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
 | 组件里存 `Entity` 句柄 | 变成托管列，有写屏障，存不了盘 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
 | 在 `Find` 循环里修改同一索引的组件 | 不支持（销毁实体可以） | 代码审查 |
-| 在其他线程使用索引 | 索引属于拥有者线程 | [线程](/zh/docs/guide/threading#what-the-world-synchronizes) |
+| 在其他线程使用索引 | 索引属于所有者线程 | [线程](/zh/docs/guide/threading#what-the-world-synchronizes) |
 | 同一个组件用两种键类型建索引 | 抛 `InvalidOperationException`：每个组件一个索引 | 运行时 |
 | 键是 `null`（`string` 的默认值） | 实体不会出现在任何键下 | 设计如此 |
 

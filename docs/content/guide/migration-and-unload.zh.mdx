@@ -157,7 +157,7 @@ public static class Plugins
 | 还留着旧插件系统的引用 | 上下文永远回收不了 | `RemoveTypes` 之后丢掉引用 |
 | 在更新或遍历期间调用 `RemoveTypes` | 抛 `InvalidOperationException` | 运行时 |
 | 恢复 `RemoveTypes` 之前拍的快照 | 抛 `InvalidOperationException` | 运行时 |
-| 在其他线程迁移 | 两个 World 都只属于各自的拥有者线程 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+| 在其他线程迁移 | 两个 World 都只属于各自的所有者线程 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 
 ## 相关页面 [#related]
 

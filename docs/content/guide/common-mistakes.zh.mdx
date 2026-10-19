@@ -297,7 +297,7 @@ await Task.Delay(100);
 stamina.Value -= 10;
 ```
 
-编译器会拒绝（CS9217），而且有道理：等待期间这一行什么都可能发生。保留 `Entity`，在 `await` 之后、回到拥有者线程上再取一次组件：
+编译器会拒绝（CS9217），而且有道理：等待期间这一行什么都可能发生。保留 `Entity`，在 `await` 之后、回到所有者线程上再取一次组件：
 
 ```csharp
 await Task.Delay(100);
@@ -412,7 +412,7 @@ public static class Network
 }
 ```
 
-World 的结构属于它的拥有者线程，World 也不会加锁来共享它。把输入放进队列，由拥有者线程上的系统把它变成实体；或者给每个线程一个
+World 的结构属于它的所有者线程，World 也不会加锁来共享它。把输入放进队列，由所有者线程上的系统把它变成实体；或者给每个线程一个
 自己的 World。
 
 由 [EECS014](/zh/docs/guide/analyzer#eecs014) 发现。详见[来自其他线程的输入](/zh/docs/guide/threading#input-from-other-threads)。

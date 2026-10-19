@@ -1,7 +1,7 @@
 ---
 title: 多线程
 seoTitle: "C# ECS 的多线程：每线程一个 World、并行系统和并行 ForEach"
-description: "EasyEcs 如何在热路径不加锁的前提下用满多核：每个 World 一个拥有者线程、互不冲突的系统并行执行、并行 [ForEach] 与跨线程输入。"
+description: "EasyEcs 如何在热路径不加锁的前提下用满多核：每个 World 一个所有者线程、互不冲突的系统并行执行、并行 [ForEach] 与跨线程输入。"
 icon: Cpu
 ---
 
@@ -17,20 +17,20 @@ icon: Cpu
 </Callout>
 
 <Callout type="warn" title="不适合">
-  用自己开的多个线程同时改一个 World：结构变更只属于拥有者线程（EECS014 会报出它能看到的情况）。只有几百行的并行系统或并行方法：
+  用自己开的多个线程同时改一个 World：结构变更只属于所有者线程（EECS014 会报出它能看到的情况）。只有几百行的并行系统或并行方法：
   交给线程池要花几微秒，比活本身还贵。
 </Callout>
 
 ## 怎么用 [#how-to-use-it]
 
-### 术语：进程、World、拥有者线程 [#terms-process-world-owner-thread]
+### 术语：进程、World、所有者线程 [#terms-process-world-owner-thread]
 
 | 术语 | 含义 |
 | --- | --- |
 | **进程** | 你的服务器。可以有任意多个 World，它们之间除了类型索引什么都不共享。 |
 | **World** | 一套独立的实体、组件、单例和系统（`new World()`）。 |
-| **拥有者线程** | 调用 `world.Update()`、读写这个 World 数据的线程。同一时刻每个 World 只有一个。 |
-| **并行阶段** | 同一次 `Update()` 里，彼此没有顺序约束也没有冲突的一批系统，在线程池线程上运行，拥有者线程也参与。所有权不变。 |
+| **所有者线程** | 调用 `world.Update()`、读写这个 World 数据的线程。同一时刻每个 World 只有一个。 |
+| **并行阶段** | 同一次 `Update()` 里，彼此没有顺序约束也没有冲突的一批系统，在线程池线程上运行，所有者线程也参与。所有权不变。 |
 
 ### 推荐：每线程一个 World [#recommended-one-world-per-thread]
 
@@ -152,8 +152,8 @@ public class RegenerateAll : EcsSystem
 
 ### 来自其他线程的输入 [#input-from-other-threads]
 
-一个 World 只有一个拥有者线程，EasyEcs 自己也不提供跨线程队列：结构变更在这个线程上立即生效，没有什么需要推迟。来自其他线程的输入
-（网络、定时器、数据库）走你自己的队列，由拥有者线程上的一个系统把它变成数据：
+一个 World 只有一个所有者线程，EasyEcs 自己也不提供跨线程队列：结构变更在这个线程上立即生效，没有什么需要推迟。来自其他线程的输入
+（网络、定时器、数据库）走你自己的队列，由所有者线程上的一个系统把它变成数据：
 
 ```csharp
 using System.Collections.Concurrent;
@@ -180,20 +180,20 @@ public sealed class ReceiveMoves(ConcurrentQueue<MoveRequest> inbox) : EcsSystem
 
 | 操作 | 安全性 |
 | --- | --- |
-| 结构变更、增删系统和单例、`Capture` / `Restore`、`Save` / `Load` | 只能在拥有者线程上，一次一个。靠一个普通的拥有者标志（没有原子指令）：另一个操作进行中，或者结构被冻结时（并行阶段、并行 `[ForEach]`、批量作业、`INoStructuralChanges` 遍历）再开始一个，会抛 `InvalidOperationException`，而不是把表写坏。 |
+| 结构变更、增删系统和单例、`Capture` / `Restore`、`Save` / `Load` | 只能在所有者线程上，一次一个。靠一个普通的拥有者标志（没有原子指令）：另一个操作进行中，或者结构被冻结时（并行阶段、并行 `[ForEach]`、批量作业、`INoStructuralChanges` 遍历）再开始一个，会抛 `InvalidOperationException`，而不是把表写坏。 |
 | 查询匹配、`Has`、`Get` 查找 | 无锁，读的是不可变、写时复制的表列表。某种查询形状第一次使用时，走一次比较交换闸门。 |
 | 系统用 `GetOrAddSingleton<T>()` / `GetOrAddX()` 添加的单例 | 同一个闸门：同一阶段的多个系统可以同时添加它。 |
-| 组件和单例的值 | 有意不做同步：由拥有者线程或调度器决定谁能碰它们。 |
-| 值索引，以及销毁和移除时做的解链 | World 有索引时，只能在拥有者线程上。 |
+| 组件和单例的值 | 有意不做同步：由所有者线程或调度器决定谁能碰它们。 |
+| 值索引，以及销毁和移除时做的解链 | World 有索引时，只能在所有者线程上。 |
 
-谁能发现不在拥有者线程上做的变更：
+谁能发现不在所有者线程上做的变更：
 
 | 变更从哪来 | 谁能发现 |
 | --- | --- |
 | 不带 `Entity` 或 `World` 的 `[ForEach]` 方法，通过手里的句柄改结构 | 编译期 [EECS013](/zh/docs/guide/analyzer#eecs013)；在并行阶段里运行时也会抛异常 |
 | 并行阶段里的系统或并行作业，通过辅助方法改结构 | 运行时：结构已冻结，任何结构变更都会抛异常 |
 | 交给 `Task.Run`、`Parallel.*`、`ThreadPool`、`new Thread` 或 `new Timer` 的 lambda，改的 World 外层代码也在改 | 编译期 [EECS014](/zh/docs/guide/analyzer#eecs014) |
-| 你自己的线程，用其他任何方式 | 没有可靠的办法：把变更当作数据交给拥有者线程 |
+| 你自己的线程，用其他任何方式 | 没有可靠的办法：把变更当作数据交给所有者线程 |
 
 ## 完整例子 [#full-example]
 
@@ -329,7 +329,7 @@ unit 0 at (7.06, 7.06) with 60 hp
 | 并行方法里用 `ref` 单例 | 多个块争抢同一个值 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
 | 通过 `in` 参数修改集合 | 被当成读来调度：和并行的读者竞争 | [EECS011](/zh/docs/guide/analyzer#eecs011) |
 | 不带 `Entity` 的方法通过手里的句柄改结构 | 系统进了它不该进的阶段 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
-| 在拥有者线程之外 `Task.Run(() => world.CreateEntity(...))` | 两个线程同时改一个 World | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+| 在所有者线程之外 `Task.Run(() => world.CreateEntity(...))` | 两个线程同时改一个 World | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 | 只读却写成 `ref` 参数 | 声明了写：能一起跑的系统变少 | 代码审查：改用 `in` |
 
 ## 和其他 ECS 库的对比 [#compared-with-other-ecs-libraries]

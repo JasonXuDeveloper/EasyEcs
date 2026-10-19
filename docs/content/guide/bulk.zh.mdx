@@ -84,7 +84,7 @@ int cleared = world.DestroyEntities<Shot>();                     // 所有子弹
 | [分组](/zh/docs/guide/groups) | 挪到值所在的分组 | | | |
 | [清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components) | | 移除最后一个时释放退休实体 | 拒绝（抛异常） | |
 
-四个调用都是拥有者线程上的结构变更：在两次更新之间、系统的 `OnUpdate` 里，或者接收 `Entity` 或 `World` 的 `[ForEach]` 方法里调用
+四个调用都是所有者线程上的结构变更：在两次更新之间、系统的 `OnUpdate` 里，或者接收 `Entity` 或 `World` 的 `[ForEach]` 方法里调用
 （两者都不接收的方法，承诺了不做结构变更）。
 
 ## 怎么用得快 [#how-to-use-it-fast]
@@ -109,7 +109,7 @@ int cleared = world.DestroyEntities<Shot>();                     // 所有子弹
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
 | 在不接收 `Entity` 或 `World` 的 `[ForEach]` 方法里调用批量操作 | 遍历没预料到的结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
-| 在其他线程调用批量操作 | 和拥有者线程竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+| 在其他线程调用批量操作 | 和所有者线程竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 | 对清理组件或 `ChildOf` 调用 `DisableAll` | 抛 `InvalidOperationException` | 运行时 |
 | 值本该因实体而异却用了 `SetAll` | 所有实体拿到同一个值 | 改用 `[ForEach]` 系统 |
 | 对成千上万个实体循环 `Set` / `Remove` | 结果相同，慢很多倍 | 代码审查：改用批量调用 |

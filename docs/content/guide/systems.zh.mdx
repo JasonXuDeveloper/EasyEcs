@@ -337,7 +337,7 @@ Reports.Rich(world, mark, ref rich, 1_000);       // [Changed<T>]：tick 紧跟�
 - runner 可以是泛型方法，也可以是泛型类型的成员：入口会接收类型参数（`Census.CountAlive<Health>(world, ref count)`）。
 - 批处理和并行 runner 遵循[批处理方法](#batch-methods)和[并行方法](#parallel-methods)的规则。
 - 入口不能和类型里已有的方法冲突（[EECS021](/zh/docs/guide/analyzer#eecs021)），局部函数也不能当 runner（[EECS024](/zh/docs/guide/analyzer#eecs024)）。
-- 和其他结构变更代码一样，要在 World 的所属线程上调用。
+- 和其他结构变更代码一样，要在 World 的所有者线程上调用。
 
 ### 统计系统耗时 [#measuring-systems]
 

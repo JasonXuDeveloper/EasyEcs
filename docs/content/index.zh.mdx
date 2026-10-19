@@ -108,7 +108,7 @@ flowchart LR
     只访问系统上次运行以来被写过或被移除的行。
   </Card>
   <Card icon={<Network />} title="线程模型" href="/zh/docs/guide/threading">
-    每个 World 一个所属线程，并行系统与并行 `[ForEach]`。
+    每个 World 一个所有者线程，并行系统与并行 `[ForEach]`。
   </Card>
   <Card icon={<TriangleAlert />} title="常见错误" href="/zh/docs/guide/common-mistakes">
     最先出错的地方，以及拦下它的规则或分析器错误。

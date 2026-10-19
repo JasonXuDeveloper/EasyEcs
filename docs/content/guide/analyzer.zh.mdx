@@ -36,7 +36,7 @@ EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/doc
 | [EECS011](#eecs011) | 错误 | `[ForEach]` 方法不修改只读参数持有的数据 | 改用 `ref` |
 | [EECS012](#eecs012) | 错误 | `DynamicBuffer<T>` 从不被复制 | `in`，或连同调用方一起改 `ref` |
 | [EECS013](#eecs013) | 错误 | 不接收 `Entity` 或 `World` 的 `[ForEach]` 方法不做结构变更 | |
-| [EECS014](#eecs014) | 错误 | 结构变更只在 World 的拥有者线程上做 | |
+| [EECS014](#eecs014) | 错误 | 结构变更只在 World 的所有者线程上做 | |
 | [EECS015](#eecs015) | 错误 | 被索引的组件用 `Set` 写 | |
 | [EECS016](#eecs016) | 错误 | `[Removed<T>]` 方法不要求 `T` | |
 | [EECS017](#eecs017) | 警告 | 组件存 `EntityId`，不存 `Entity` | |
@@ -409,7 +409,7 @@ public class MarkTargets : EcsSystem
 
 **在其他线程上做结构变更。** 错误。没有代码修复。
 
-World 的结构属于它的拥有者线程。对于交给 `Task.Run`、`TaskFactory.StartNew`、`new Task`、`Parallel.*`、`ThreadPool.QueueUserWorkItem`
+World 的结构属于它的所有者线程。对于交给 `Task.Run`、`TaskFactory.StartNew`、`new Task`、`Parallel.*`、`ThreadPool.QueueUserWorkItem`
 （及其同类）、`new Thread` 或 `new Timer` 的 lambda 或匿名方法，如果其中的结构调用（EECS013 列出的那些成员）改的 World 或实体可能同时被
 另一个线程修改，规则就会报出来：
 
@@ -431,7 +431,7 @@ public static class Spawner
 ```
 
 交给某个线程、从此由它拥有的 World（每线程一个 World、在委托里新建的 World）不会报；调用方立刻等待的交接（`await`、`Wait()`、
-`Result`、`GetAwaiter().GetResult()`）也不会报：没有东西和它并行。把变更作为数据，经由拥有者线程上某个系统消费的队列交过去
+`Result`、`GetAwaiter().GetResult()`）也不会报：没有东西和它并行。把变更作为数据，经由所有者线程上某个系统消费的队列交过去
 （[来自其他线程的输入](/zh/docs/guide/threading#input-from-other-threads)），或者给另一个线程它自己的 World：
 
 ```csharp
@@ -729,6 +729,6 @@ public static class Report
     分析器背后的规则。
   </Card>
   <Card title="多线程" href="/zh/docs/guide/threading">
-    并行阶段、并行方法和拥有者线程。
+    并行阶段、并行方法和所有者线程。
   </Card>
 </Cards>

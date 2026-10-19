@@ -335,7 +335,7 @@ boss 50 hp, twin 50 hp
 | 预制体的组件里放 `Entity` 字段 | 每个实例都指向同一个不属于任何 World 的句柄 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告）；改用指向成员的 `EntityId` |
 | 预制体里放 World 中某个实体的 `EntityId` | 在每个实例里都变成 `EntityId.Null` | 实例化之后再建立链接 |
 | 先填好 `DynamicBuffer<T>` 值再 `Set` | 所有实例共用这个列表 | [EECS012](/zh/docs/guide/analyzer#eecs012)；改用 `SetLoot(...)` |
-| 在不拥有 World 的线程上 `Instantiate` | 和拥有者线程发生竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+| 在不拥有 World 的线程上 `Instantiate` | 和所有者线程发生竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 | 在不带 `Entity` 或 `World` 参数的 `[ForEach]` 方法里 `Instantiate` | 遍历以为不会有结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
 | 其他线程正在实例化时修改预制体 | 复制出残缺的数据 | 启动时建好预制体，之后只读 |
 | 对已销毁的实体调用 `Clone()` | 抛 `InvalidOperationException` | 先查 `IsAlive` |

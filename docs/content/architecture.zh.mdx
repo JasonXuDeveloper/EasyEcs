@@ -19,7 +19,7 @@ import { BookText, Gauge, Lightbulb, Scale } from 'lucide-react';
 
 ```mermaid
 flowchart TB
-    subgraph W["World（一个所属线程）"]
+    subgraph W["World（一个所有者线程）"]
         Meta["Meta[id]：EntityMeta，16 B<br/>表 · 版本 · 行"]
         T["表（原型）<br/>Slots[row]：EntityId · 每个组件一列<br/>存在位 · 变更 tick · 添加边"]
         QC["查询缓存<br/>过滤器 → 表 + 行过滤"]
@@ -239,19 +239,19 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    Owner["所属线程<br/>Update、查询、结构变更"] --> Gate{"结构闸门<br/>普通标志位"}
+    Owner["所有者线程<br/>Update、查询、结构变更"] --> Gate{"结构闸门<br/>普通标志位"}
     Owner --> Stage["并行阶段或<br/>并行 [ForEach]"]
     Stage -->|冻结| Gate
     Stage --> Helpers["调用线程 + 线程池助手<br/>通过一个游标领取任务"]
     Helpers --> Shared{"共享闸门（CAS）<br/>只走冷路径"}
 ```
 
-- 结构变更、增删系统、`Capture` 和 `Restore` 都要进入 World 的**结构闸门**。它属于所属线程：一个普通标志位，进入时检查并置位，
+- 结构变更、增删系统、`Capture` 和 `Restore` 都要进入 World 的**结构闸门**。它属于所有者线程：一个普通标志位，进入时检查并置位，
   离开时清零，没有任何原子指令。并行的系统阶段、并行 `[ForEach]` 的分块和批处理 job 运行期间会冻结它，所以在其中做结构变更会确定地抛出
   `InvalidOperationException`；在闸门内重入也一样。
 - 并行阶段的线程各自会走到的冷路径（某种查询形状的第一次匹配、第一次解析某个单例、最后一个遍历结束时关闭墓碑）走另一个**共享闸门**：
   一个带自旋等待的 CAS 标志位。两个标志位独占一条缓存行。
-- 查询、`Get` 和 `Has` 无锁；组件值按设计不做同步。推荐的模型是**每个 World 一个所属线程**
+- 查询、`Get` 和 `Has` 无锁；组件值按设计不做同步。推荐的模型是**每个 World 一个所有者线程**
   （[D13](/zh/docs/decisions#d13-one-owner-thread-per-world)）。分析器会报告声称不做结构变更的 `[ForEach]` 方法里的结构变更（EECS013），
   以及交给其他线程的委托里的结构变更（EECS014）。
 - 并行运行使用调用线程，加上可复用的 `IThreadPoolWorkItem` 助手；助手通过一个 `Interlocked` 游标领取任务（高 32 位是本次运行的纪元，

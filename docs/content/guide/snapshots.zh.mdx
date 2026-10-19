@@ -191,7 +191,7 @@ capture 的分配就是新建的那个快照本身；`Capture(into)` 会复用�
 | 把快照恢复到另一个 World | 抛 `ArgumentException` | 运行时 |
 | 继续使用 capture 之后创建的实体的句柄 | 恢复后它们失效 | `IsAlive` |
 | 把快照写到磁盘 | 快照是对象图，不是字节 | 用[存档](/zh/docs/guide/saves) |
-| 在其他线程 capture 或 restore | 结构变更只属于拥有者线程 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+| 在其他线程 capture 或 restore | 结构变更只属于所有者线程 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 
 ## 相关页面 [#related]
 

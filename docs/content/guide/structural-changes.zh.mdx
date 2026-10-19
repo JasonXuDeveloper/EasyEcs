@@ -175,7 +175,7 @@ int expired = world.DestroyEntities<Lifetime>(QueryFilter.Create().With<Dead>())
 | 不带 `Entity` 或 `World` 的方法通过组件里的链接改结构 | 遍历拿着指向已搬走行的 ref | [EECS013](/zh/docs/guide/analyzer#eecs013) |
 | 批处理方法里改结构 | 抛 `InvalidOperationException`：span 指向表 | [EECS013](/zh/docs/guide/analyzer#eecs013)，运行时也会抛 |
 | 并行方法里改结构 | 块之间发生竞争 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
-| 从其他线程改结构 | 和所属线程发生竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+| 从其他线程改结构 | 和所有者线程发生竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 | 会改结构的 job 却实现了 `INoStructuralChanges` | 变更处抛 `InvalidOperationException` | 运行时 |
 | 变更之后还在用 `Get<T>()` 拿到的 `ref` | 可能指向过期的副本或别的实体的行 | 代码审查：重新获取 |
 | 指望创建实体的那次遍历访问到它 | 下一次遍历才会访问 | 设计如此 |

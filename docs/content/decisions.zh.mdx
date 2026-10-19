@@ -28,7 +28,7 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D10](#d10-moveentities-copies-rows-without-encoding) | `MoveEntities` 直接复制行，不经过编码 |
 | [D11](#d11-ids-in-a-prefab-name-its-members) | 预制体里的 id 指向它的成员 |
 | [D12](#d12-target-policies-are-opt-in-per-index) | 目标策略按索引选择开启 |
-| [D13](#d13-one-owner-thread-per-world) | 每个 World 一个所属线程 |
+| [D13](#d13-one-owner-thread-per-world) | 每个 World 一个所有者线程 |
 | [D14](#d14-no-shared-components) | 没有共享组件 |
 | [D15](#d15-net-10-only) | 只支持 .NET 10 |
 | [D16](#d16-no-partial-generated-code-lives-outside-the-users-type) | 不需要 `partial`：生成的代码不放进用户的类型 |
@@ -66,7 +66,7 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 
 ## D3. 并行 job 也没有命令缓冲 [#d3-no-command-buffer-for-parallel-jobs]
 
-**决定。** 并行 `[ForEach]` 方法和并行阶段不做结构变更（EECS010）。并行 job 只写数据，排在它后面、运行在所属线程上的系统根据这些数据做结构变更：
+**决定。** 并行 `[ForEach]` 方法和并行阶段不做结构变更（EECS010）。并行 job 只写数据，排在它后面、运行在所有者线程上的系统根据这些数据做结构变更：
 
 ```csharp
 public record struct Poison(int DamagePerTick) : IComponent;
@@ -80,7 +80,7 @@ public class PoisonSystem : EcsSystem
 [UpdateAfter<PoisonSystem>]
 public class DeathSystem : EcsSystem
 {
-    [ForEach, Without<Dead>]                                      // 结构，随后在所属线程上
+    [ForEach, Without<Dead>]                                      // 结构，随后在所有者线程上
     static void Die(Entity entity, in Health hp) { if (hp.Value <= 0) entity.SetDead(); }
 }
 ```
@@ -218,10 +218,10 @@ int pooled = world.Count<Bullet>(QueryFilter.Create().With<Inactive>()); // 存�
 **比较过。** 在组件类型上加标记接口（否决：那样索引就得泛型地创建，需要反射；在索引上调用方法对 AOT 安全，而且按 World 生效，
 和 `GroupBy<T>()` 一样）。
 
-## D13. 每个 World 一个所属线程 [#d13-one-owner-thread-per-world]
+## D13. 每个 World 一个所有者线程 [#d13-one-owner-thread-per-world]
 
-**决定。** World 的系统、查询和结构变更都在它的所属线程上执行；并行阶段和并行 `[ForEach]` 是仅有的并行，由生成器证明安全。
-其他线程把工作投递给所属线程。
+**决定。** World 的系统、查询和结构变更都在它的所有者线程上执行；并行阶段和并行 `[ForEach]` 是仅有的并行，由生成器证明安全。
+其他线程把工作投递给所有者线程。
 
 **原因。** 任何热路径上都没有锁；规则三行就能说清（[线程模型](/zh/docs/guide/threading)）。
 

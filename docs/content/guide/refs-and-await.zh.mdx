@@ -90,7 +90,7 @@ public interface IShop
 
 public static class Potions
 {
-    // 在 World 的所属线程上运行，并在该线程上恢复（单线程的服务器主循环）
+    // 在 World 的所有者线程上运行，并在该线程上恢复（单线程的服务器主循环）
     public static async ValueTask HealFromStoreAsync(Entity player, IShop shop)
     {
         long id = player.Read<Account>().Id;              // await 之前先读出需要的数据
@@ -101,8 +101,8 @@ public static class Potions
 }
 ```
 
-只有当 `await` 之后的代码仍在 World 的所属线程上运行时，这样写才正确，比如带有单线程 `SynchronizationContext` 的服务器主循环。
-如果续体可能在线程池上恢复，它就完全不能碰 World：把结果当作数据交给所属线程，由一个系统来应用。
+只有当 `await` 之后的代码仍在 World 的所有者线程上运行时，这样写才正确，比如带有单线程 `SynchronizationContext` 的服务器主循环。
+如果续体可能在线程池上恢复，它就完全不能碰 World：把结果当作数据交给所有者线程，由一个系统来应用。
 
 ```csharp
 using System.Collections.Concurrent;
@@ -117,17 +117,17 @@ public sealed class ApplyRedemptions(ConcurrentQueue<PotionRedeemed> inbox) : Ec
     {
         while (_inbox.TryDequeue(out var done))
             if (World.TryGetEntity(done.Player, out var player) && player.HasHealth)
-                player.Get<Health>().Value += done.Heal;              // 在所属线程上、更新过程中执行
+                player.Get<Health>().Value += done.Heal;              // 在所有者线程上、更新过程中执行
     }
 }
 ```
 
-所属线程和来自其他线程的输入，详见[线程](/zh/docs/guide/threading#input-from-other-threads)。
+所有者线程和来自其他线程的输入，详见[线程](/zh/docs/guide/threading#input-from-other-threads)。
 
 ### 例外：单例组件 [#singletons]
 
 单例组件的存储永远不会移动，所以 `world.SingletonRef<T>()` 返回的句柄可以保存下来，放在宿主的字段里，或者跨 tick 使用
-（见[单例组件](/zh/docs/guide/singletons#stable-handles)）。它依然是所属线程的数据：可以保存，但只能在所属线程上访问。
+（见[单例组件](/zh/docs/guide/singletons#stable-handles)）。它依然是所有者线程的数据：可以保存，但只能在所有者线程上访问。
 
 ## 怎么用得快 [#how-to-use-it-fast]
 
@@ -160,7 +160,7 @@ public sealed class ApplyRedemptions(ConcurrentQueue<PotionRedeemed> inbox) : Ec
 | 只存原始索引，不存 `EntityId` | 会指向之后复用该索引的实体 | 存 `EntityId`，`TryGetEntity` 会校验版本 |
 | 组件里存 `Entity` | 变成托管列 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告） |
 | 按值拿 `DynamicBuffer<T>` | 写进共享的列表，也不记 tick | [EECS012](/zh/docs/guide/analyzer#eecs012) |
-| `await` 在线程池上恢复后还去访问 World | 和所属线程发生竞争 | 把结果当数据交回去；`Task.Run` 里的 lambda 由 [EECS014](/zh/docs/guide/analyzer#eecs014) 检查 |
+| `await` 在线程池上恢复后还去访问 World | 和所有者线程发生竞争 | 把结果当数据交回去；`Task.Run` 里的 lambda 由 [EECS014](/zh/docs/guide/analyzer#eecs014) 检查 |
 
 ## 相关页面 [#related]
 
@@ -172,7 +172,7 @@ public sealed class ApplyRedemptions(ConcurrentQueue<PotionRedeemed> inbox) : Ec
     句柄、`EntityId`，以及 `Get` / `Read` / `TryGetRef` 这一族 API。
   </Card>
   <Card title="线程" href="/zh/docs/guide/threading">
-    所属线程，以及来自其他线程的输入。
+    所有者线程，以及来自其他线程的输入。
   </Card>
   <Card title="单例组件" href="/zh/docs/guide/singletons">
     唯一一种句柄可以保存下来的存储。

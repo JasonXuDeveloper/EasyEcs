@@ -37,13 +37,13 @@ EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 
 
 规则明确且简短（[D13](/zh/docs/decisions#d13-one-owner-thread-per-world)）：
 
-- **每个 World 有一个所属线程。** 它的系统、查询和组件读写都在这个线程上执行。服务端上每个线程跑一个 World（每张地图、每个区域或每场对局一个）：
+- **每个 World 有一个所有者线程。** 它的系统、查询和组件读写都在这个线程上执行。服务端上每个线程跑一个 World（每张地图、每个区域或每场对局一个）：
   World 之间不共享任何东西，不加锁就能用满多核。
-- **结构变更属于所属线程。** 增删组件、创建销毁实体都会检查一个普通的所属标志：在并行阶段、并行 `[ForEach]` 或声称不做结构变更的遍历里
+- **结构变更属于所有者线程。** 增删组件、创建销毁实体都会检查一个普通的所有者标志：在并行阶段、并行 `[ForEach]` 或声称不做结构变更的遍历里
   做结构变更，会直接抛异常，而不会把表弄坏。分析器能看到的跨线程修改会被报告（[EECS013、EECS014](/zh/docs/guide/analyzer)）。
 - **EasyEcs 自己加的并行是经过检查的。** `WorldOptions.ParallelSystems` 只让生成的访问集互不冲突的系统一起跑，结果与逐个运行相同；
   `[ForEach(Parallel = true)]` 方法不能做结构变更，也不能写单例（EECS010）。
-- **来自其他线程的输入**（网络、IO）放进你自己的队列，由一个系统在所属线程上取出处理。
+- **来自其他线程的输入**（网络、IO）放进你自己的队列，由一个系统在所有者线程上取出处理。
 
 不要跨 `await` 持有 `ref`：保留 `Entity`，`await` 之后重新取组件。详见[线程模型](/zh/docs/guide/threading)和
 [`ref` 与 `await`](/zh/docs/guide/refs-and-await)。
@@ -124,7 +124,7 @@ AOT 编译器目前会报一条 IL3054 警告（经由变更 tick 列类型的�
 | 组件被修改 | 标上 `ITrackChanges`；消费方用 `[Changed<T>]` |
 | 组件被移除（buff 到期） | 标上 `ITrackChanges`；消费方用 `[Removed<T>]` |
 | 一次性的消息（一次命中、一次玩家输入） | 一个承载消息的实体，读者都跑完后销毁 |
-| 来自其他线程的输入 | 一个队列，由某个系统在所属线程上取出 |
+| 来自其他线程的输入 | 一个队列，由某个系统在所有者线程上取出 |
 
 ```csharp
 public record struct Hit(EntityId Target, int Damage) : IComponent;    // 消息就是实体
@@ -153,7 +153,7 @@ public sealed class ClearHitsSystem : EcsSystem
 
 结构变更立即生效，遍历途中也一样（[D2](/zh/docs/decisions#d2-structural-changes-apply-at-once-no-command-buffers)）：遍历期间被移除的行变成墓碑，
 遍历永远看不到行在脚下移动。代码怎么写就怎么执行，也不存在一个延后生效的"第二版本"World。并行 job 不做结构变更；排在它们后面、
-运行在所属线程上的系统根据它们写下的数据去做（[D3](/zh/docs/decisions#d3-no-command-buffer-for-parallel-jobs)）。在遍历里改结构时遍历会看到什么，
+运行在所有者线程上的系统根据它们写下的数据去做（[D3](/zh/docs/decisions#d3-no-command-buffer-for-parallel-jobs)）。在遍历里改结构时遍历会看到什么，
 见[结构变更](/zh/docs/guide/structural-changes)。
 
 ## 系统怎么排顺序？ [#order-systems]

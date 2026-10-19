@@ -62,7 +62,7 @@ icon: RotateCcwClock
 ### 性能 [#v4-1-0-performance]
 
 - 10 万实体的真实服务器 tick 比 4.0.1 快得多，而且零分配。见[性能](/zh/docs/performance)。
-- 结构变更检查一个普通的所属线程标志，不再用比较并交换，创建和销毁实体更快。
+- 结构变更检查一个普通的所有者线程标志，不再用比较并交换，创建和销毁实体更快。
 - 不会做结构变更的 job 遍历时没有逐实体的簿记开销。
 - 并行运行用线程池，只在划算时唤醒助手线程
   （[D22](/zh/docs/decisions#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)）。
@@ -87,7 +87,7 @@ icon: RotateCcwClock
 - `world.CompactArchetypes()` 和 `world.GetFragmentationStats()` 已删除：表自己保持紧凑。
 - `IForEach` job 只接收组件：需要实体时改用 `IForEachEntity`。
 - `Query` 的结果是 ref struct：循环里不能 `await`，元素不能存进字段、lambda 或 LINQ。
-- 结构变更属于 World 的所属线程；在并行阶段或并行 `[ForEach]` 里做结构变更会抛 `InvalidOperationException`。
+- 结构变更属于 World 的所有者线程；在并行阶段或并行 `[ForEach]` 里做结构变更会抛 `InvalidOperationException`。
   见[线程模型](/zh/docs/guide/threading)。
 - 所有分析器规则都是错误：EECS007（系统里有状态）和 EECS008（系统引用系统）在 4.0 里是警告。把状态移进组件或单例，系统之间通过数据
   通信。

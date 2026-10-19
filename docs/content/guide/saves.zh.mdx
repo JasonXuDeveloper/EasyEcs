@@ -175,7 +175,7 @@ catch (InvalidDataException)
 | 修改已存档组件的字段 | 旧存档被拒绝 | 加一个新组件类型 |
 | 重命名组件或换了命名空间 | 旧存档加载时丢掉它 | 存档用的类型名保持稳定 |
 | 新旧两个插件版本同时加载 | 名字歧义：`InvalidDataException` | 先卸载旧版本 |
-| 在其他线程存档或读档 | 和拥有者线程竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+| 在其他线程存档或读档 | 和所有者线程竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 
 ## 和其他库的对比 [#compared]
 
