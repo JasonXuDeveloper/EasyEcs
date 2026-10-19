@@ -132,7 +132,7 @@ public sealed partial class World
                 _saveTypes[bit] = types++;
                 bool disabled = info.DisabledOf >= 0;
                 var named = disabled ? ComponentInfo.Of(info.DisabledOf) : info;
-                writer.Write(named.Name);
+                writer.Write(named.Name.AsSpan()); // UTF-16, read in place by Name
                 writer.Write(disabled);
                 writer.Write(disabled ? 0 : info.Size);
                 writer.Write(disabled ? 0 : info.Layout);
@@ -187,7 +187,7 @@ public sealed partial class World
         foreach (var value in _singletons)
         {
             if (!all || value is not SingletonBox box) continue;
-            writer.Write(box.Name);
+            writer.Write(box.Name.AsSpan());
             int slice = writer.ReserveInt32();
             box.Write(ref writer);
             writer.PatchLength(slice);

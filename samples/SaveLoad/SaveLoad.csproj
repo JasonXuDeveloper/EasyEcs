@@ -17,7 +17,7 @@
 
     <!-- [NinoType] components: the formatters World.Save writes managed components with -->
     <ItemGroup>
-        <PackageReference Include="Nino.Generator" Version="4.0.0-rc.4"/>
+        <PackageReference Include="Nino.Generator" Version="4.0.0-rc.6"/>
     </ItemGroup>
 
 </Project>
