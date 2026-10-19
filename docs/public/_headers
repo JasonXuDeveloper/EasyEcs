@@ -12,3 +12,24 @@
 
 /demo/_framework/dotnet.*.js
   Cache-Control: public, max-age=31536000, immutable
+
+# Icons and the manifest change rarely: cached a day, then refreshed in the background, so a page view does not
+# revalidate them (Cloudflare's default for a file without a hash is a request every time).
+/icon.svg
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+/favicon*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+/apple-touch-icon.png
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+/android-chrome-*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+/manifest.webmanifest
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+# The search indexes (app/routes/search.ts): fresh for five minutes, then served while refreshed.
+/api/search/*
+  Cache-Control: public, max-age=300, stale-while-revalidate=86400

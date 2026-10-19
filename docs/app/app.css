@@ -101,3 +101,12 @@
     scroll-behavior: auto;
   }
 }
+
+/* Rendering cost: a code block off screen is not laid out or painted until it
+   comes near the viewport (it already clips its content, so nothing changes
+   on screen). On the long pages this is most of the main-thread work of a
+   load. `auto` keeps the real height once a block has been rendered. */
+.prose figure.shiki {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
+}
