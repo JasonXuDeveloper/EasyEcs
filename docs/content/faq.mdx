@@ -220,7 +220,7 @@ ref var hp = ref entity.Health;                              // keep the ref for
 hp.Value = 100;
 ref var mana = ref entity.TryGetRef<Mana>(out bool found);   // when the entity may not have it
 if (found) mana.Value += 5;
-entity.Set(new Position(0, 0), new Velocity(1, 0));          // add or replace several at once: one transition
+entity.Set(new Position(0, 0), new Velocity(1, 0));          // add or replace several in one call: shorter, same cost
 foreach (var item in world.Query<Position, Velocity>())
     item.Position.X += item.Velocity.X;                      // refs into the row
 ```

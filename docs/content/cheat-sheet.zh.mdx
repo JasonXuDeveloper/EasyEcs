@@ -89,7 +89,7 @@ Entity unit = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Hea
 ```csharp
 unit.Velocity.X = 2;                                // 通过 ref 原地写入
 float x = unit.Position.X;                          // 读（被追踪的组件是 ref readonly）
-unit.Set(new Health(50), new Dead());               // 两个组件一次搬迁
+unit.Set(new Health(50), new Dead());               // 一次设置两个：写法更简洁，性能相同
 unit.RemoveDead();                                  // 只翻一个存在位，行保留
 if (unit.TryGetHealth(out var hp)) { /* hp 是拷贝 */ }
 ```

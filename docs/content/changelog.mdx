@@ -14,17 +14,17 @@ major or minor version that needs code changes? The
 
 ### New [#v4-3-0-new]
 
-- Performance rules in the analyzer, for code that works but does more than it needs. Warnings:
+- Performance rules in the analyzer, for code that works but does more than it needs. Warnings, for code that costs:
   [EECS025](/en/docs/guide/analyzer#eecs025) a `ref` / `Span<T>` parameter, `Get<T>()` or `WriteX()` that only
   reads, [EECS026](/en/docs/guide/analyzer#eecs026) a `[ForEach]` parameter the method does not use,
   [EECS027](/en/docs/guide/analyzer#eecs027) a component or singleton looked up through the visited `Entity` or the
   `World` on every row, [EECS028](/en/docs/guide/analyzer#eecs028) an allocation in a `[ForEach]` method or
   `OnUpdate`, [EECS029](/en/docs/guide/analyzer#eecs029) an instance `[ForEach]` method that uses nothing of its
-  system, [EECS030](/en/docs/guide/analyzer#eecs030) a structural change entity by entity over a query.
-  Suggestions (Info): [EECS031](/en/docs/guide/analyzer#eecs031) entities created one by one in a counted loop,
-  [EECS032](/en/docs/guide/analyzer#eecs032) `Count() > 0` instead of `Any()` and counting or filtering in a loop,
-  [EECS033](/en/docs/guide/analyzer#eecs033) a generic call with a generated member of the same meaning
-  (`entity.Get<Position>()` as `entity.Position`). Error: [EECS034](/en/docs/guide/analyzer#eecs034) a system that
+  system, [EECS030](/en/docs/guide/analyzer#eecs030) a structural change entity by entity over a query,
+  [EECS031](/en/docs/guide/analyzer#eecs031) entities created one by one in a counted loop,
+  [EECS032](/en/docs/guide/analyzer#eecs032) `Count() > 0` instead of `Any()` and counting or filtering in a loop.
+  Suggestion (Info), for the same cost written shorter: [EECS033](/en/docs/guide/analyzer#eecs033) a generic call
+  with a generated member of the same meaning (`entity.Get<Position>()` as `entity.Position`). Error: [EECS034](/en/docs/guide/analyzer#eecs034) a system that
   calls `World.Update()`. Why each rule is in and the ones left out:
   [decision D29](/en/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same).
 - Code fixes for the new rules where the change is mechanical: `in`, `ReadOnlySpan<T>`, `Read<T>()`, `[With<T>]`,
@@ -34,7 +34,7 @@ major or minor version that needs code changes? The
 
 ### Changes that need code changes [#v4-3-0-breaking]
 
-- A build that treats warnings as errors fails on the new warnings (EECS025 to EECS030) until the code is changed or
+- A build that treats warnings as errors fails on the new warnings (EECS025 to EECS032) until the code is changed or
   the rule is suppressed, and a system that calls `World.Update()` no longer builds (EECS034). See the
   [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v42--v43).
 

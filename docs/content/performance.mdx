@@ -429,8 +429,9 @@ int lifted = world.RemoveAll<Stunned>();                              // every s
 ```
 
 A [prefab](/en/docs/guide/prefabs) built once (`static readonly`) costs one row copy per instance; the world finds
-its target table once and caches it. Several components at once also take one transition: `entity.Set(a, b)`,
-`entity.Remove<A, B>()`.
+its target table once and caches it. `entity.Set(a, b)` and `entity.Remove<A, B>()` change several components in one
+call: shorter to write, and the same cost as one call per component, since the second move takes a cached transition
+([D29](/en/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)).
 
 ## Do [#do]
 
@@ -439,8 +440,8 @@ times every system run.
 
 - **Mutate through refs**: `ref var hp = ref item.Component1;`, `ref var hp = ref entity.Get<Health>();`.
 - **Spawn with every component at once**: `world.CreateEntity(a, b, c)` places the entity in its final table;
-  `world.Instantiate(prefab)` for a kind defined once. Change several at once with `entity.Set(a, b)` /
-  `entity.Remove<A, B>()`.
+  `world.Instantiate(prefab)` for a kind defined once. `entity.Set(a, b)` / `entity.Remove<A, B>()` change several
+  components in one call: shorter, with the same cost as one call each.
 - **Read with `in`, write with `ref`**: `in` parameters, `entity.Read<T>()` or the generated property read; `ref`
   parameters and `entity.Get<T>()` write. A `ref` access counts as a write of a tracked component, and a `Query`
   loop counts every row it visits; a struct job that only reads declares `static int Writes => 0`.
@@ -501,7 +502,7 @@ times every system run.
 | A closure or LINQ in per-update code | Garbage every tick | [EECS028](/en/docs/guide/analyzer#eecs028) (warning), and `AllocationTests`-style checks in your own tests |
 | A lookup through the visited `Entity` in a `[ForEach]` method | A search per row | [EECS027](/en/docs/guide/analyzer#eecs027) (warning) |
 | A structural change entity by entity over a query | One row moved per call | [EECS030](/en/docs/guide/analyzer#eecs030) (warning, code fix: the bulk call) |
-| Filling a fresh world one entity at a time, nothing reserved | Doubling arrays on the large object heap start a full collection ([above](#cold-create)) | [EECS031](/en/docs/guide/analyzer#eecs031) (suggestion, code fix: `CreateEntities` or `EnsureCapacity<T1, …, Tn>(n)`) |
+| Filling a fresh world one entity at a time, nothing reserved | Doubling arrays on the large object heap start a full collection ([above](#cold-create)) | [EECS031](/en/docs/guide/analyzer#eecs031) (warning, code fix: `CreateEntities` or `EnsureCapacity<T1, …, Tn>(n)`) |
 
 ## What is covered [#coverage]
 

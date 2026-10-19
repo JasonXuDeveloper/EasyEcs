@@ -49,6 +49,8 @@ available as Markdown: add `.md` to its URL.
 
 ## Performance
 
+- An `EECS` warning (EECS025 to EECS032, and EECS017, EECS018, EECS020) means the code costs: apply its fix. The one
+  suggestion, EECS033, is the same cost written shorter. An `EECS` error means the code cannot work.
 - Hot paths allocate nothing: no LINQ, closures, boxing, string formatting or `params object[]` in systems (EECS028).
 - Keep a `QueryFilter` in a `static readonly` field when a query runs every tick.
 - Prefer `[ForEach]` methods over hand-written `Query` loops; use bulk calls (`SetAll`, `RemoveAll`, `DisableAll`,

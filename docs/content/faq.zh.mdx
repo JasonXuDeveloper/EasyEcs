@@ -192,7 +192,7 @@ ref var hp = ref entity.Health;                              // 要写多次就�
 hp.Value = 100;
 ref var mana = ref entity.TryGetRef<Mana>(out bool found);   // 实体可能没有这个组件时
 if (found) mana.Value += 5;
-entity.Set(new Position(0, 0), new Velocity(1, 0));          // 一次添加或替换多个：只迁移一次
+entity.Set(new Position(0, 0), new Velocity(1, 0));          // 一次添加或替换多个：写法更简洁，性能相同
 foreach (var item in world.Query<Position, Velocity>())
     item.Position.X += item.Velocity.X;                      // 指向行内数据的 ref
 ```

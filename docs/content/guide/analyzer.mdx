@@ -9,10 +9,10 @@ The EasyEcs analyzer ships in the package next to the source generator, so code 
 [ECS principles](/en/docs/ecs-principles) does not build. The correctness rules (EECS002 to EECS024) are errors except
 three warnings for code that works but costs (EECS017, EECS018, EECS020). The generator skips invalid input and the
 analyzer reports it, so "not generated" always means "reported". The performance rules (EECS025 to EECS034) find code
-that works and does more than it needs: a warning where the cost is measured
-([D29](/en/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)), a
-suggestion (Info) where the rewrite helps only in some programs or only reads better, and an error for a world update
-inside a system. Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
+that works and does more than it needs, and the severity says what kind
+([D29](/en/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)): a warning
+means the code costs (EECS025 to EECS032), a suggestion (Info) means the same cost written shorter (EECS033), and an
+error means code that cannot work (EECS034, a world update inside a system). Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
 same package), and only when the result compiles.
 
 ## When to read it [#when-to-use-it]
@@ -61,8 +61,8 @@ same package), and only when the result compiles.
 | [EECS028](#eecs028) | Warning | Code that runs every update does not allocate | |
 | [EECS029](#eecs029) | Warning | An instance `[ForEach]` method uses its system | Make it static |
 | [EECS030](#eecs030) | Warning | A structural change over a query is one bulk call | The bulk call |
-| [EECS031](#eecs031) | Info | Entities created in a counted loop are created together, or reserved | `CreateEntities`, `EnsureCapacity` |
-| [EECS032](#eecs032) | Info | The world counts and filters | `Any`, `Count` |
+| [EECS031](#eecs031) | Warning | Entities created in a counted loop are created together, or reserved | `CreateEntities`, `EnsureCapacity` |
+| [EECS032](#eecs032) | Warning | The world counts and filters | `Any`, `Count` |
 | [EECS033](#eecs033) | Info | A generated member says it shorter | The generated member |
 | [EECS034](#eecs034) | Error | A system does not run a world update | |
 
@@ -967,13 +967,14 @@ world.DestroyEntities<Health>(QueryFilter.Create().With<Dead>());
 
 ## EECS031 [#eecs031]
 
-**Entities created one by one in a counted loop.** Info. Code fix: the bulk call, or a reservation before the loop.
+**Entities created one by one in a counted loop.** Warning. Code fix: the bulk call, or a reservation before the loop.
 
 Created one by one, a table and the entity storage grow by doubling, and in a world that has never held them the
 discarded arrays can set off a full garbage collection ([D28](/en/docs/decisions#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)).
 `CreateEntities` and `Instantiate(prefab, span)` create them in one pass; `EnsureCapacity` reserves room when each
-entity gets values of its own. The rule leaves out loops of a constant count under 4,096 (no array reaches the large
-object heap), loops after a reservation, and loops in a system (a running world reuses its rows).
+entity gets values of its own. The rule leaves out loops of a constant count under 4,096, or over an array created
+with one (no array reaches the large object heap), loops after a reservation, loops that create only under a branch or
+in an inner loop, and loops in a system (a running world reuses its rows).
 
 ```csharp doccheck=expect-EECS031
 var wave = new Entity[50_000];
@@ -994,7 +995,7 @@ for (int i = 0; i < spawned.Length; i++)
 
 ## EECS032 [#eecs032]
 
-**Query work the world does in one call.** Info. Code fix: `Any`, or `Count` for a loop that only counts.
+**Query work the world does in one call.** Warning. Code fix: `Any`, or `Count` for a loop that only counts.
 
 `Count` sums the row counts of the matching tables and `Any` stops at the first table with a row; neither visits a
 row. A filter skips whole tables and words of rows that a test in the loop visits one by one. The rule reports
@@ -1015,7 +1016,8 @@ foreach (var item in world.Query<Health>(QueryFilter.Create().With<Burning>())) 
 **A generic call with a generated member of the same meaning.** Info. Code fix: the generated member.
 
 The generator writes [named members](/en/docs/guide/entities-and-components#generated-members) for every component, singleton,
-buffer element and query shape, each calling the generic API. The rule offers the member only where it is generated in
+buffer element and query shape, each calling the generic API: the same call at the same cost, which is why this rule
+is a suggestion and not a warning. The rule offers the member only where it is generated in
 that compilation and does the same thing, including the kind of reference it returns: `Get<T>()` of a tracked
 component becomes `WriteX()` (its `entity.X` is read-only), and a buffer's member is offered only while other code
 still names `DynamicBuffer<T>` (the generator writes buffer members for the elements code names that way).

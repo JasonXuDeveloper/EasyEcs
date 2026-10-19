@@ -317,9 +317,9 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
 
 - **Performance rules in the analyzer** ([EECS025 to EECS034](https://ecs.xgamedev.net/en/docs/guide/analyzer#eecs025)): a `ref` that only reads, an
   unused `[ForEach]` parameter, a lookup through the visited `Entity` on every row, an allocation in code that runs
-  every update, an instance `[ForEach]` method, a structural change entity by entity over a query (warnings);
-  creation one by one in a counted loop, `Count() > 0` instead of `Any()`, and the generic call that has a generated
-  member (suggestions); `World.Update()` inside a system (an error). Most come with a code fix. Builds that treat
+  every update, an instance `[ForEach]` method, a structural change entity by entity over a query, creation one by one
+  in a counted loop, `Count() > 0` instead of `Any()` (warnings: the code costs); the generic call that has a
+  generated member (a suggestion: the same cost, shorter); `World.Update()` inside a system (an error). Most come with a code fix. Builds that treat
   warnings as errors may need changes: see the
   [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v42--v43).
 

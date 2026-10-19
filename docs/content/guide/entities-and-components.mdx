@@ -177,7 +177,7 @@ The generic API works for any component type; the [generated members](#generated
 
 ```csharp
 var hero = world.CreateEntity(new Position(0, 0), new Health(100), new Name("Ayla"));
-hero.Set(new Armor(3), new Position(5, 5));        // one call, at most one row move
+hero.Set(new Armor(3), new Position(5, 5));        // one call: shorter than two, same cost
 ref var hp = ref hero.TryGetRef<Health>(out bool has);
 if (has) hp.Value -= 10;                           // one lookup, written in place
 ref var shield = ref hero.GetOrAdd<Armor>();       // kept: Armor(3)
@@ -250,7 +250,7 @@ Components live in archetype tables, one row per entity and one column per compo
 | Instead of | Do | Why |
 | --- | --- | --- |
 | `CreateEntity()` then `Set` per component | `CreateEntity(a, b, c)`, or `Instantiate(prefab)` | One placement instead of one row move per component |
-| `Set(a)` then `Set(b)` | `Set(a, b)`, `Remove<A, B>()` | At most one row move |
+| `Set(a)` then `Set(b)` | `Set(a, b)`, `Remove<A, B>()` | Shorter, the same cost |
 | A loop of `CreateEntity` / `Destroy` | `CreateEntities(span, …)`, `DestroyEntities<T>(filter)` | One pass through the structural gate per wave |
 | `Get<T>()` to read a tracked component | `Read<T>()`, the generated property, `TryGet<T>()` | A `ref` access stamps the row as written |
 | `Has<T>()` then `Get<T>()` | `TryGetRef<T>(out found)` | One lookup |

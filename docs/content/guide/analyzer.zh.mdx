@@ -7,9 +7,9 @@ icon: ShieldCheck
 
 EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/docs/ecs-principles)的代码编译不过。正确性规则（EECS002 到 EECS024）
 除了三条警告都是错误；这三条针对的是能跑、但有代价的写法（EECS017、EECS018、EECS020）。生成器会跳过无效输入，由分析器报出来，
-所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034）找的是能跑、但做了多余工作的代码：代价经过测量的是警告
-（[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)），改写只对部分程序有帮助、
-或者只是更好读的是建议（信息级别），在系统里执行世界更新是错误。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
+所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034）找的是能跑、但做了多余工作的代码，级别说明是哪一种
+（[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）：警告表示这样写有代价
+（EECS025 到 EECS032）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033）；错误表示代码根本不能这样写（EECS034，在系统里执行世界更新）。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
 
 ## 什么时候看 [#when-to-use-it]
 
@@ -56,8 +56,8 @@ EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/doc
 | [EECS028](#eecs028) | 警告 | 每次更新都执行的代码不分配内存 | |
 | [EECS029](#eecs029) | 警告 | 实例 `[ForEach]` 方法用到自己的系统 | 改成 static |
 | [EECS030](#eecs030) | 警告 | 对查询结果的结构变化用一次批量调用 | 批量调用 |
-| [EECS031](#eecs031) | 信息 | 计数循环里的实体一起创建，或先预留容量 | `CreateEntities`、`EnsureCapacity` |
-| [EECS032](#eecs032) | 信息 | 计数和过滤交给世界 | `Any`、`Count` |
+| [EECS031](#eecs031) | 警告 | 计数循环里的实体一起创建，或先预留容量 | `CreateEntities`、`EnsureCapacity` |
+| [EECS032](#eecs032) | 警告 | 计数和过滤交给世界 | `Any`、`Count` |
 | [EECS033](#eecs033) | 信息 | 生成的成员写起来更短 | 生成的成员 |
 | [EECS034](#eecs034) | 错误 | 系统里不执行世界更新 | |
 
@@ -910,12 +910,13 @@ world.DestroyEntities<Health>(QueryFilter.Create().With<Dead>());
 
 ## EECS031 [#eecs031]
 
-**在计数循环里逐个创建实体。** 信息。代码修复：改成批量调用，或在循环前预留容量。
+**在计数循环里逐个创建实体。** 警告。代码修复：改成批量调用，或在循环前预留容量。
 
 逐个创建时，表和实体存储按倍增扩容；如果世界从没装过这么多实体，被丢弃的数组可能触发一次完整的垃圾回收
 （[D28](/zh/docs/decisions#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)）。`CreateEntities` 和
 `Instantiate(prefab, span)` 一遍就能创建完；每个实体的值各不相同时，先用 `EnsureCapacity` 预留空间。规则不报告这些循环：
-次数是小于 4,096 的常量（没有数组会进入大对象堆）、前面已经预留过容量、在系统里（运行中的世界会复用已有的行）。
+次数是小于 4,096 的常量，或者遍历的是用这样的常量创建的数组（没有数组会进入大对象堆）；前面已经预留过容量；只在分支里或内层循环里创建；
+在系统里（运行中的世界会复用已有的行）。
 
 ```csharp doccheck=expect-EECS031
 var wave = new Entity[50_000];
@@ -936,7 +937,7 @@ for (int i = 0; i < spawned.Length; i++)
 
 ## EECS032 [#eecs032]
 
-**世界一次调用就能完成的查询工作。** 信息。代码修复：改用 `Any`；只计数的循环改用 `Count`。
+**世界一次调用就能完成的查询工作。** 警告。代码修复：改用 `Any`；只计数的循环改用 `Count`。
 
 `Count` 把匹配的表的行数加起来，`Any` 遇到第一张有行的表就停，两者都不访问行。过滤器会跳过整张表和整字的行，而循环里的判断
 要一行一行地看。规则报告：把 `Count<...>()` 和 0 或 1 比较来判断有没有；只计数的查询 `foreach`；以及第一条语句按 item 实体的
@@ -956,7 +957,7 @@ foreach (var item in world.Query<Health>(QueryFilter.Create().With<Burning>())) 
 **有同等含义的生成成员可用的泛型调用。** 信息。代码修复：改用生成的成员。
 
 生成器会为每个组件、单例、缓冲区元素和查询形状写出[具名成员](/zh/docs/guide/entities-and-components#generated-members)，
-每个成员都调用对应的泛型 API。只有当该成员在当前编译里确实生成了、而且行为完全相同（包括返回的引用种类）时，规则才会建议：
+每个成员都调用对应的泛型 API：调用相同，代价也相同，所以这条规则是建议而不是警告。只有当该成员在当前编译里确实生成了、而且行为完全相同（包括返回的引用种类）时，规则才会建议：
 追踪组件的 `Get<T>()` 改成 `WriteX()`（它的 `entity.X` 是只读的）；缓冲区的成员只在别处代码仍写着 `DynamicBuffer<T>`
 时才建议（生成器只为代码以这种方式写到的元素类型生成缓冲区成员）。
 

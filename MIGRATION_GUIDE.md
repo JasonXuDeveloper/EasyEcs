@@ -19,7 +19,7 @@ For the current API, see the [documentation](docs/content/README.md).
 The analyzer gained performance rules ([EECS025 to EECS034](https://ecs.xgamedev.net/en/docs/guide/analyzer#eecs025)). Code written for 4.2 compiles
 unchanged unless a system calls `World.Update()`, or the build treats warnings as errors.
 
-- **New warnings (EECS025 to EECS030).** Each names code that works but costs, with the fix in its
+- **New warnings (EECS025 to EECS032).** Each names code that works but costs, with the fix in its
   [section](https://ecs.xgamedev.net/en/docs/guide/analyzer) and, where the change is mechanical, a code fix in the IDE. Apply the fix, or suppress the
   rule where the code is deliberate, with the reason next to it:
 
@@ -48,8 +48,9 @@ unchanged unless a system calls `World.Update()`, or the build treats warnings a
   while (running) world.Update();   // in the host loop
   ```
 
-- **Suggestions (EECS031 to EECS033)** show in the IDE only and never fail a build; `dotnet_diagnostic.EECS033.severity
-  = warning` in `.editorconfig` turns one into a warning.
+- **The suggestion (EECS033)** shows in the IDE only and never fails a build: the generated member is the same call
+  at the same cost, only shorter. `dotnet_diagnostic.EECS033.severity = warning` in `.editorconfig` turns it into a
+  warning.
 
 ## v4.1 → v4.2
 

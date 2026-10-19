@@ -13,15 +13,15 @@ icon: RotateCcwClock
 
 ### 新功能 [#v4-3-0-new]
 
-- 分析器新增性能规则，针对能跑、但做了多余工作的代码。警告：[EECS025](/zh/docs/guide/analyzer#eecs025) 只读的 `ref` /
+- 分析器新增性能规则，针对能跑、但做了多余工作的代码。警告（这样写有代价）：[EECS025](/zh/docs/guide/analyzer#eecs025) 只读的 `ref` /
   `Span<T>` 参数、`Get<T>()` 或 `WriteX()`；[EECS026](/zh/docs/guide/analyzer#eecs026) 方法没用到的 `[ForEach]` 参数；
   [EECS027](/zh/docs/guide/analyzer#eecs027) 每一行都通过被访问的 `Entity` 或 `World` 查组件或单例；
   [EECS028](/zh/docs/guide/analyzer#eecs028) `[ForEach]` 方法或 `OnUpdate` 里的内存分配；
   [EECS029](/zh/docs/guide/analyzer#eecs029) 没用到系统任何成员的实例 `[ForEach]` 方法；
-  [EECS030](/zh/docs/guide/analyzer#eecs030) 遍历查询逐个实体做结构变化。建议（信息级别）：
+  [EECS030](/zh/docs/guide/analyzer#eecs030) 遍历查询逐个实体做结构变化；
   [EECS031](/zh/docs/guide/analyzer#eecs031) 在计数循环里逐个创建实体；[EECS032](/zh/docs/guide/analyzer#eecs032) 用
-  `Count() > 0` 代替 `Any()`，以及在循环里计数或过滤；[EECS033](/zh/docs/guide/analyzer#eecs033) 有同等含义生成成员的泛型调用
-  （`entity.Get<Position>()` 写成 `entity.Position`）。错误：[EECS034](/zh/docs/guide/analyzer#eecs034) 系统调用
+  `Count() > 0` 代替 `Any()`，以及在循环里计数或过滤。建议（信息级别，代价相同、写法更简洁）：
+  [EECS033](/zh/docs/guide/analyzer#eecs033) 有同等含义生成成员的泛型调用（`entity.Get<Position>()` 写成 `entity.Position`）。错误：[EECS034](/zh/docs/guide/analyzer#eecs034) 系统调用
   `World.Update()`。每条规则为什么加、哪些没加：见[决策 D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)。
 - 新规则在改法机械时附带代码修复：`in`、`ReadOnlySpan<T>`、`Read<T>()`、`[With<T>]`、`static`、批量调用（`SetAll`、`RemoveAll`、
   `DisableAll`、`EnableAll`、`DestroyEntities`）、`CreateEntities` 或 `EnsureCapacity`、`Any` / `Count`，以及生成的成员。
@@ -30,7 +30,7 @@ icon: RotateCcwClock
 
 ### 需要修改代码的变更 [#v4-3-0-breaking]
 
-- 把警告当错误的构建会因新警告（EECS025 到 EECS030）失败，直到改了代码或压掉规则；调用 `World.Update()` 的系统不再能编译
+- 把警告当错误的构建会因新警告（EECS025 到 EECS032）失败，直到改了代码或压掉规则；调用 `World.Update()` 的系统不再能编译
   （EECS034）。见[迁移指南](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v42--v43)（英文）。
 
 ## 4.2.0 [#v4-2-0]

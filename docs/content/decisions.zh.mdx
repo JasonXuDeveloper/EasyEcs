@@ -449,8 +449,8 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 
 ## D29. 性能规则只在代价测得出、修复行为不变时才加 [#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same]
 
-**决定。** 分析器用 EECS025 到 EECS034 报告能跑、但做了多余工作的代码。基准测试测得出代价、而且被指出的写法在任何程序里都不对的，
-是警告；改写只对部分程序有好处、或者只是更好读的，是建议（信息级别）；根本不能工作的，是错误。只有修复后行为不变的规则才会加入，
+**决定。** 分析器用 EECS025 到 EECS034 报告能跑、但做了多余工作的代码，级别说明是哪一种：警告表示这样写有代价（基准测试测出它比修复后的写法慢，
+或者会分配）；建议（信息级别）表示修复后代价相同，只是写法更简洁；错误表示代码根本不能这样写。只有修复后行为不变的规则才会加入，
 而且只有分析器已经绑定过替换代码时才提供代码修复。测不出代价、或者修复会改变行为的候选都放弃了。
 
 | 规则 | 级别 | 测量结果（100,000 个实体） |
@@ -461,9 +461,9 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 | EECS028 每次更新都分配 | 警告 | 每个 tick 都产生垃圾；见[不该做的](/zh/docs/performance#dont)清单 |
 | EECS029 实例 `[ForEach]` 方法 | 警告 | 实例方法 104 µs，静态方法 41 µs |
 | EECS030 对查询结果逐个实体做结构变化 | 警告 | `BulkBenchmark`：逐个实体的耗时是 `SetAll` / `RemoveAll` 的 19.1 倍，是 `DisableAll` / `EnableAll` 的约 99 倍 |
-| EECS031 计数循环里逐个创建 | 信息 | 只对新 World 有效（[D28](#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)）；`MicroBenchmarks.Churn` 的耗时是 `ChurnBatch` 的 2.1 倍 |
-| EECS032 手写计数和判断 | 信息 | `Count() > 0` 429 ns，`Any()` 18.6 ns；循环里判断 `Has<T>()` 332 µs，过滤器 59.5 µs |
-| EECS033 生成的成员 | 信息 | 同一个调用（[D26](#d26-generated-members-and-a-suggestion-to-use-them)） |
+| EECS031 计数循环里逐个创建 | 警告 | 只对新 World 有效（[D28](#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)）；`MicroBenchmarks.Churn` 的耗时是 `ChurnBatch` 的 2.1 倍 |
+| EECS032 手写计数和判断 | 警告 | `Count() > 0` 429 ns，`Any()` 18.6 ns；循环里判断 `Has<T>()` 332 µs，过滤器 59.5 µs |
+| EECS033 生成的成员 | 信息 | 同一个调用，代价相同（[D26](#d26-generated-members-and-a-suggestion-to-use-them)） |
 | EECS034 系统里执行世界更新 | 错误 | 递归，或者在阶段进行到一半时运行系统 |
 
 每一对都由 `AccessBenchmark` 测量（BenchmarkDotNet，共享的 4 核 2.1 GHz Xeon，.NET 10.0.13）；所有写法都零分配。
@@ -472,9 +472,12 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 - **警告会让把警告当错误的构建失败**，所以每条警告在任何触发的地方都必须是对的。规则报告之前会检查每一处用法：EECS025 把赋值、
   `++`、`ref` 或 `out` 实参、非 `readonly` 方法、`ref` 局部变量和 `this ref` 扩展方法都算作写入；EECS027 只报告每一行都会执行、
   而且方法自己不改的组件的查询；EECS028 不报告 `throw`、`[Conditional]` 调用、控制台输出，以及自己设置了 `UpdateInterval`
-  的系统的 `OnUpdate`；EECS030 不报告覆盖查询已要求组件的 `Set`，也不报告分组组件的 `Set`（在 `SetAll` 里它的行同样逐个移动）。
-- **收益取决于程序的，用建议。** 预留容量只在 World 第一次长到这么大时才有用，所以 EECS031 不报告小于 4,096 的常量次数
-  （没有数组会进入大对象堆），也不报告系统里的循环（运行中的 World 会复用已有的行）。`Any` 和过滤器的收益与循环本来要访问的行数成正比。
+  的系统的 `OnUpdate`；EECS030 不报告覆盖查询已要求组件的 `Set`，也不报告分组组件的 `Set`（在 `SetAll` 里它的行同样逐个移动）；
+  EECS031 不报告小于 4,096 的常量次数和用这样的常量创建的数组（没有数组会进入大对象堆），也不报告预留过容量之后的循环、只在分支里或内层循环里的创建，
+  以及系统里的循环（运行中的 World 会复用已有的行）；EECS032 只报告和 0 或 1 比较的 `Count`、只计数的循环，以及作为循环第一条语句的判断。
+- **只要有代价就是警告，不论大小。** 预留容量在 World 第一次长到这么大时收益最大，`Any` 和过滤器的收益与循环本来要访问的行数成正比；
+  但在规则触发的地方，原来的写法都比修复后的慢，所以和其他规则一样是警告。只有 EECS033 是建议：生成的成员调用的就是泛型 API，
+  改的只是代码长短，不是代价。
 - **修复就是规则的证明。** 每个替换在提供之前都会在原位置绑定一遍：成员没有生成、过滤器编译不过、或者有调用方按 `ref` 传参给这个方法，
   就不提供修复。
 

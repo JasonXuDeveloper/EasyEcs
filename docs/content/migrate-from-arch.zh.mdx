@@ -268,6 +268,7 @@ sim.AddSystem<LifetimeSystem>();
 sim.AddSystem<ShootingSystem>();
 sim.AddSystem<ClockSystem>();
 
+sim.EnsureCapacity<Position, Velocity, Health, Attack, Player>(100_000);
 for (int i = 0; i < 100_000; i++)
     sim.CreateEntity(new Position { X = i % 4096, Y = i / 25 }, new Velocity { X = 1, Y = -1 },
         new Health { Value = 150, Max = 150 }, new Attack { Damage = 5, Cooldown = i % 10, Interval = 8 },

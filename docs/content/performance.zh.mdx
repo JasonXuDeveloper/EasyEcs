@@ -404,7 +404,8 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 ```
 
 只构造一次（`static readonly`）的[预制体](/zh/docs/guide/prefabs)，每个实例只复制一次行；World 只查一次它的目标表并缓存
-下来。一次改多个组件也只走一次转移：`entity.Set(a, b)`、`entity.Remove<A, B>()`。
+下来。`entity.Set(a, b)`、`entity.Remove<A, B>()` 一次调用改多个组件：写法更简洁，性能和逐个调用相同，因为第二次搬行走的是已缓存的转移
+（[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）。
 
 ## 该做的 [#do]
 
@@ -412,7 +413,7 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 
 - **通过 ref 修改**：`ref var hp = ref item.Component1;`、`ref var hp = ref entity.Get<Health>();`。
 - **生成时一次带齐组件**：`world.CreateEntity(a, b, c)` 直接把实体放进最终的表；定义一次的类型用
-  `world.Instantiate(prefab)`。一次改多个用 `entity.Set(a, b)` / `entity.Remove<A, B>()`。
+  `world.Instantiate(prefab)`。一次改多个组件可以用 `entity.Set(a, b)` / `entity.Remove<A, B>()`：写法更简洁，性能相同。
 - **用 `in` 读，用 `ref` 写**：`in` 参数、`entity.Read<T>()` 或生成的属性读取；`ref` 参数和 `entity.Get<T>()` 是写。对被
   追踪的组件，`ref` 访问算一次写入；`Query` 循环访问的每一行都算；只读的 struct job 声明 `static int Writes => 0`。
 - **不做结构变更的 `[ForEach]` 方法保持 `static`**，不拿 `World` 参数，`Entity` 只读：生成器会给它的 job 标上
@@ -461,7 +462,7 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 | 每次更新都跑的代码里有闭包或 LINQ | 每个 tick 都产生垃圾 | [EECS028](/zh/docs/guide/analyzer#eecs028)（警告），再加上自己测试里 `AllocationTests` 式的检查 |
 | `[ForEach]` 方法里通过被访问的 `Entity` 查组件 | 每行查一次 | [EECS027](/zh/docs/guide/analyzer#eecs027)（警告） |
 | 遍历查询逐个实体做结构变化 | 每次调用搬一行 | [EECS030](/zh/docs/guide/analyzer#eecs030)（警告，代码修复：批量调用） |
-| 新 World 不预留空间，逐个塞满实体 | 大对象堆上一轮轮翻倍的数组触发完整 GC（[见上](#cold-create)） | [EECS031](/zh/docs/guide/analyzer#eecs031)（建议，代码修复：`CreateEntities` 或 `EnsureCapacity<T1, …, Tn>(n)`） |
+| 新 World 不预留空间，逐个塞满实体 | 大对象堆上一轮轮翻倍的数组触发完整 GC（[见上](#cold-create)） | [EECS031](/zh/docs/guide/analyzer#eecs031)（警告，代码修复：`CreateEntities` 或 `EnsureCapacity<T1, …, Tn>(n)`） |
 
 ## 覆盖了什么 [#coverage]
 

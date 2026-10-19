@@ -89,7 +89,7 @@ members (`unit.Velocity`, `SetHealth(50)`, `RemoveDead()`), as in the example un
 ```csharp
 unit.Velocity.X = 2;                                // write in place through the ref
 float x = unit.Position.X;                          // a read (ref readonly for a tracked component)
-unit.Set(new Health(50), new Dead());               // one move for both
+unit.Set(new Health(50), new Dead());               // both in one call: shorter, same cost
 unit.RemoveDead();                                  // flips a presence bit: the row stays
 if (unit.TryGetHealth(out var hp)) { /* hp is a copy */ }
 ```

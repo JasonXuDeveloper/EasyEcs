@@ -157,7 +157,7 @@ for (int i = 0; i < 100_000; i++) world.CreateEntity(new Position(i, 0), new Lif
 | --- | --- | --- |
 | 录进命令缓冲，之后回放 | 在做决定的地方直接改 | 不用录制、不用回放、不分配 |
 | 每个 tick 加一次、删一次组件 | 用字段；持续几个 tick 的状态用标签 | 表里已有列的标签只翻转一个位 |
-| `Set(a)` 后再 `Set(b)` | `Set(a, b)` | 最多搬一次行 |
+| `Set(a)` 后再 `Set(b)` | `Set(a, b)` | 写法更简洁，性能相同 |
 | 逐个创建已知数量的实体 | 循环前调用 `EnsureCapacity<T1, …, Tn>(count)` | 只扩容一次，不用表满一次翻一倍 |
 | 按过滤条件逐个修改 | [批量变更](/zh/docs/guide/bulk)、`DestroyEntities<T>(filter)` | 一次闸门，一次处理整个字 |
 | 方法只读 `Entity` 参数 | 保持只读（`Id`、`Has`、`Get`） | 遍历跳过结构变更簿记 |

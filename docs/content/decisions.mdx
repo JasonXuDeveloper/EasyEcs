@@ -529,11 +529,11 @@ steps of a doubling stay on the large object heap.
 
 ## D29. Performance rules only where the cost is measured and the fix does the same [#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same]
 
-**Decision.** The analyzer reports code that works but does more than it needs, as EECS025 to EECS034. A rule is a
-warning when a benchmark shows its cost and the code it points to is wrong in every program that writes it; a
-suggestion (Info) when the rewrite pays only in some programs or only reads better; an error when the code cannot
-work. A rule ships only when its fix does the same thing, and a code fix is offered only when the analyzer has bound
-the replacement. Candidates without a measured cost, or with a fix that changes behavior, were dropped.
+**Decision.** The analyzer reports code that works but does more than it needs, as EECS025 to EECS034, and the
+severity says which kind: a warning means the code costs (a benchmark shows it slower than its fix, or allocating);
+a suggestion (Info) means the fix is the same cost written shorter; an error means the code cannot work. A rule ships
+only when its fix does the same thing, and a code fix is offered only when the analyzer has bound the replacement.
+Candidates without a measured cost, or with a fix that changes behavior, were dropped.
 
 | Rule | Severity | Measured (100,000 entities) |
 | --- | --- | --- |
@@ -543,9 +543,9 @@ the replacement. Candidates without a measured cost, or with a fix that changes 
 | EECS028 an allocation every update | Warning | garbage every tick; the [Don't](/en/docs/performance#dont) list |
 | EECS029 an instance `[ForEach]` method | Warning | instance 104 µs, static 41 µs |
 | EECS030 a structural change per entity over a query | Warning | `BulkBenchmark`: entity by entity 19.1x the time of `SetAll` / `RemoveAll`, about 99x that of `DisableAll` / `EnableAll` |
-| EECS031 creation one by one in a counted loop | Info | a fresh world only ([D28](#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)); `MicroBenchmarks.Churn` 2.1x the time of `ChurnBatch` |
-| EECS032 counting and testing by hand | Info | `Count() > 0` 429 ns, `Any()` 18.6 ns; a `Has<T>()` test in the loop 332 µs, a filter 59.5 µs |
-| EECS033 the generated member | Info | the same call ([D26](#d26-generated-members-and-a-suggestion-to-use-them)) |
+| EECS031 creation one by one in a counted loop | Warning | a fresh world only ([D28](#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)); `MicroBenchmarks.Churn` 2.1x the time of `ChurnBatch` |
+| EECS032 counting and testing by hand | Warning | `Count() > 0` 429 ns, `Any()` 18.6 ns; a `Has<T>()` test in the loop 332 µs, a filter 59.5 µs |
+| EECS033 the generated member | Info | the same call, the same cost ([D26](#d26-generated-members-and-a-suggestion-to-use-them)) |
 | EECS034 a world update inside a system | Error | recursion, or systems run in the middle of a stage |
 
 `AccessBenchmark` measures each pair (BenchmarkDotNet, a shared 4-core Xeon at 2.1 GHz, .NET 10.0.13); every variant
@@ -557,10 +557,15 @@ allocates nothing.
   `readonly`, a `ref` local and a `this ref` extension as a write; EECS027 reports only lookups made on every row,
   of components the method does not change itself; EECS028 leaves out `throw`, `[Conditional]` calls, console
   output, and the `OnUpdate` of a system with its own `UpdateInterval`; EECS030 leaves out a `Set` that overwrites
-  a component the query requires and one of a grouped component (its rows move one by one in `SetAll` too).
-- **Suggestions where the gain depends on the program.** A reservation pays only in a world growing to that size for
-  the first time, so EECS031 leaves out constant counts under 4,096 (no array reaches the large object heap) and loops
-  in systems (a running world reuses its rows). `Any` and filters pay in proportion to the rows a loop would visit.
+  a component the query requires and one of a grouped component (its rows move one by one in `SetAll` too); EECS031
+  leaves out constant counts under 4,096 and arrays created with one (no array reaches the large object heap), loops
+  after a reservation, creations under a branch or in an inner loop, and loops in systems (a running world reuses its
+  rows); EECS032 reports `Count` compared with 0 or 1, a loop that only counts, and a test that is the loop's first
+  statement.
+- **Every cost is a warning, whatever its size.** A reservation pays most in a world growing to that size for the
+  first time, and `Any` and filters in proportion to the rows a loop would visit; where the rules fire, the code is
+  slower than its fix, so they are warnings like the others. Only EECS033 is a suggestion: the generated member calls
+  the generic API, so it changes how long the code is, not what it costs.
 - **The fix is the rule's proof.** Each replacement is bound in place before it is offered: a member that is not
   generated, a filter that does not compile or a caller that passes `ref` to the method means no fix.
 

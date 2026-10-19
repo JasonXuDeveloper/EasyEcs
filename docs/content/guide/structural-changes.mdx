@@ -176,7 +176,7 @@ over many tables. Entities that a [group](/en/docs/guide/groups) puts in another
 | --- | --- | --- |
 | A command buffer played back later | The change, where it is decided | No recording, no playback, no allocation |
 | Adding and removing a component each tick | A field, or a tag for a state that lasts several ticks | A tag the table has a column for only flips a bit |
-| `Set(a)` then `Set(b)` | `Set(a, b)` | At most one row move |
+| `Set(a)` then `Set(b)` | `Set(a, b)` | Shorter, the same cost |
 | Creating a known number of entities one by one | `EnsureCapacity<T1, …, Tn>(count)` before the loop | One growth instead of a doubling per full table |
 | A loop of single changes over a filter | [Bulk changes](/en/docs/guide/bulk), `DestroyEntities<T>(filter)` | One gate pass, whole words at once |
 | An `Entity` parameter the method only reads | Keep it read-only (`Id`, `Has`, `Get`) | The pass skips structural bookkeeping |
