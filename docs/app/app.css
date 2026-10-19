@@ -9,7 +9,9 @@
  * - muted text a step darker in light mode, so small grey text passes WCAG AA
  *   on the page and on cards (Fumadocs' default is 4.3:1);
  * - the focus ring in the accent, so keyboard focus is visible (3:1 or more).
- * No custom palettes, gradients, glows or decorative animation.
+ * The one decoration is the home page's family look (below): a gradient from
+ * the accent to teal on the headline and the lead figure, and a faint glow
+ * of the accent behind the hero. No decorative animation.
  */
 @theme {
   --color-fd-primary: hsl(221 70% 45%);
@@ -72,6 +74,53 @@
 .ecs-chart-row:focus-visible .ecs-chart-hit {
   stroke: var(--color-fd-ring);
   stroke-width: 2px;
+}
+
+/*
+ * The home page in the look of the family sites (nino.xgamedev.net,
+ * jengine.xgamedev.net): a gradient on the second line of the headline and on
+ * the lead figure, a faint glow behind the hero. Nino runs navy to gold,
+ * JEngine near-black to blue; EasyEcs runs its accent blue to teal. Both
+ * ends keep 4.5:1 or more against the page in both themes (light: 6.1 and
+ * 5.1; dark: 8.4 and 10.9), so the text passes AA wherever it is cut.
+ */
+:root {
+  --ecs-grad-from: hsl(221 70% 45%);
+  --ecs-grad-to: hsl(187 80% 28%);
+  --ecs-glow: hsl(221 70% 45% / 0.09);
+}
+
+.dark {
+  --ecs-grad-from: hsl(213 94% 72%);
+  --ecs-grad-to: hsl(172 66% 58%);
+  --ecs-glow: hsl(213 94% 60% / 0.14);
+}
+
+.ecs-gradient-text {
+  background-image: linear-gradient(
+    to right in oklab,
+    var(--ecs-grad-from) 20%,
+    var(--ecs-grad-to)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.ecs-hero-glow {
+  background: radial-gradient(
+    ellipse 60% 55% at 50% 0%,
+    var(--ecs-glow),
+    transparent 70%
+  );
+}
+
+/* High-contrast modes drop background images: keep the text in the system colour */
+@media (forced-colors: active) {
+  .ecs-gradient-text {
+    background: none;
+    color: CanvasText;
+  }
 }
 
 /* Code on the home page: Shiki's dual themes, switched by the dark class */

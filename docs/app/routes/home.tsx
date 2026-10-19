@@ -4,7 +4,6 @@ import { CodeBlock, Pre } from 'fumadocs-ui/components/codeblock';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import {
   ArrowRight,
-  ArrowUpRight,
   BookOpen,
   Bot,
   Check,
@@ -23,7 +22,6 @@ import {
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { FeatureComparison } from '@/components/bench-data';
-import { LeadChart, PeerChart } from '@/components/charts';
 import {
   type BenchNumber,
   bench,
@@ -31,12 +29,17 @@ import {
   formatBytes,
   formatRatio,
   formatTime,
+  libraryName,
   peerLabel,
   peers,
   sourceLine,
 } from '@/lib/benchmarks';
 import { cn } from '@/lib/cn';
-import { featureComparison, featureCounts } from '@/lib/feature-comparison';
+import {
+  type FeatureResult,
+  featureComparison,
+  featureCounts,
+} from '@/lib/feature-comparison';
 import { getLocale, type Locale } from '@/lib/i18n';
 import { baseOptions } from '@/lib/layout.shared';
 import { homeMeta } from '@/lib/seo';
@@ -107,6 +110,25 @@ const leadList = (zh: boolean, n = 3) => {
     ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
     : parts.join('');
 };
+/** The lead figure under the hero: the biggest lead; the cards under it show the next ones */
+const topLead = leads[0];
+const nextLeads = leads.slice(1, 4);
+/** How many times EasyEcs' time the next-fastest library takes for the whole tick, when EasyEcs is the fastest */
+const tickLead =
+  peerList[0]?.ours && peerList[1]?.row.ratio
+    ? peerList[1].row.ratio
+    : undefined;
+/** "Friflo" -> "Friflo.Engine.ECS 3.6", with the version the comparison ran */
+const versioned = (library: string) => peerLabel(library, docsVersion);
+/** "Friflo.Engine.ECS 3.6, Arch 2.1 and DefaultEcs 0.17" */
+const rivalNames = (zh: boolean) => {
+  const names = peerList.filter((p) => !p.ours).map((p) => versioned(p.method));
+  if (zh) return names.join('、');
+  return names.length > 1
+    ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+    : names.join('');
+};
+
 /** Where EasyEcs is behind, in a few words each */
 const behindList = (zh: boolean) =>
   featureComparison('behind')
@@ -183,13 +205,27 @@ interface Faq {
 interface Copy {
   description: string;
   pill: string;
-  /** The h1 in two parts: the claim, then the proof in the muted colour */
+  /** The h1 on two lines, the second in the gradient */
   headline: string;
-  headlineProof: string;
+  headlineAccent: string;
+  /** The short paragraph under the h1 */
+  lede: string;
   definition: string;
   start: string;
   github: string;
   demo: string;
+  /** Over the lead figure: "Biggest lead, vs DefaultEcs" */
+  statLabel: (library: string) => string;
+  /** The lead figure's claim: what is measured, both times */
+  statClaim: (lead: FeatureResult) => string;
+  /** After a ratio: "faster" */
+  faster: string;
+  leadsTitle: string;
+  tickTitle: string;
+  tickText: string;
+  allocTitle: string;
+  whatTitle: string;
+  facts: { term: string; detail: string; mono?: boolean }[];
   numbersTitle: string;
   numbers: { label: string; value: string; note: string }[];
   numbersNote: string;
@@ -272,14 +308,43 @@ const copy: Record<Locale, Copy> = {
       ? `High-performance ECS for C# and .NET 10 servers: ${leadPhrase(0, false)} and ${leadPhrase(1, false)} than the next-fastest C# ECS, ${tickBytes} allocated per tick.`
       : `High-performance ECS for C# and .NET 10 servers: a full server tick in ${tickTime}, source-generated systems, change tracking and ${tickBytes} per tick.`,
     pill: `EasyEcs ${docsVersion} · .NET 10 · MIT`,
-    headline: 'High-performance ECS for .NET\u00a010 servers.',
-    headlineProof: topLeads(false)
+    headline: 'High-performance ECS',
+    headlineAccent: 'for .NET\u00a010 servers.',
+    lede: topLeads(false)
       ? `${topLeads(false)}, ${tickBytes} per tick.`
       : `A full server tick in ${tickTime}, ${tickBytes} allocated.`,
     definition: `EasyEcs is an open-source, high-performance archetype Entity Component System (ECS) for C# and .NET 10 servers. In ${counts.total} head-to-head benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs, each library doing the same work its own way, it is faster in ${counts.ahead} and within the measurement error in ${counts.even}${zeroAlloc ? ', and a full server tick allocates nothing' : ''}. Write plain data and [ForEach] methods; a source generator turns them into inlined struct jobs, and an analyzer catches design mistakes at compile time.`,
     start: 'Get started',
-    github: 'GitHub',
+    github: 'View on GitHub',
     demo: 'Try it in the browser',
+    statLabel: (library) => `Biggest lead, vs ${library}`,
+    statClaim: (l) =>
+      `${l.label.en}: ${formatTime(l.ours.meanNs)} with EasyEcs, ${formatTime(l.versus.row.meanNs)} with ${libraryName(l.versus.library)}.`,
+    faster: 'faster',
+    leadsTitle: 'The next biggest leads',
+    tickTitle: 'One server tick, 100,000 entities',
+    tickText:
+      'Nine systems; entities spawn, die, gain and lose components every tick.',
+    allocTitle: 'Allocated per tick',
+    whatTitle: 'What is EasyEcs?',
+    facts: [
+      { term: 'Install', detail: installCommand, mono: true },
+      {
+        term: 'Runs on',
+        detail:
+          '.NET 10 (net10.0): game servers, simulations and other long-running backends. Not Unity.',
+      },
+      {
+        term: 'Compared with',
+        detail: `${rivalNames(false)}: faster in ${counts.ahead} of ${counts.total} head-to-head benchmarks, within the measurement error in ${counts.even}`,
+      },
+      {
+        term: 'Ships with',
+        detail:
+          'The source generator, 23 analyzer rules and their code fixes, in one NuGet package',
+      },
+      { term: 'License', detail: 'MIT, open source on GitHub' },
+    ],
     numbersTitle: 'One server tick, measured',
     numbers: [
       {
@@ -515,14 +580,41 @@ const copy: Record<Locale, Copy> = {
       ? `高性能 C# / .NET 10 服务端 ECS 框架：${leads[0].short.zh}比次快的 C# ECS 快 ${formatRatio(leads[0].ratio)}，${leadPhrase(1, true)}，每个 tick 分配 ${tickBytes}。`
       : `高性能 C# / .NET 10 服务端 ECS 框架：完整服务器 tick 只要 ${tickTime}，源生成系统、变更追踪，每个 tick 分配 ${tickBytes}。`,
     pill: `EasyEcs ${docsVersion} · .NET 10 · MIT`,
-    headline: '为 .NET\u00a010 服务端打造的高性能 ECS。',
-    headlineProof: topLeads(true)
+    headline: '高性能 ECS',
+    headlineAccent: '为 .NET\u00a010 服务端打造。',
+    lede: topLeads(true)
       ? `${topLeads(true)}，每个 tick 分配 ${tickBytes}。`
       : `完整服务器 tick 只要 ${tickTime}，分配 ${tickBytes}。`,
     definition: `EasyEcs 是开源、高性能的 archetype（原型）实体组件系统（ECS），面向 C# 与 .NET 10 服务端。与 Friflo.Engine.ECS、Arch、DefaultEcs 的 ${counts.total} 项正面对比里，每个库用自己的写法做同样的事，它在 ${counts.ahead} 项更快，${counts.even} 项差距在测量误差之内${zeroAlloc ? '，完整的服务器 tick 也不分配任何内存' : ''}。你只写普通数据和 [ForEach] 方法：源生成器把它们编译成内联的结构体 job，分析器在编译期拦下设计错误。`,
     start: '快速开始',
-    github: 'GitHub',
+    github: '在 GitHub 上查看',
     demo: '在浏览器里试试',
+    statLabel: (library) => `领先最多的一项，对比 ${library}`,
+    statClaim: (l) =>
+      `${l.label.zh}：EasyEcs 用时 ${formatTime(l.ours.meanNs)}，${libraryName(l.versus.library)} 要 ${formatTime(l.versus.row.meanNs)}。`,
+    faster: '更快',
+    leadsTitle: '领先幅度紧随其后的几项',
+    tickTitle: '一个服务器 tick，10 万实体',
+    tickText: '9 个系统；每个 tick 都有实体生成、死亡、增减组件。',
+    allocTitle: '每个 tick 的分配',
+    whatTitle: 'EasyEcs 是什么？',
+    facts: [
+      { term: '安装', detail: installCommand, mono: true },
+      {
+        term: '运行环境',
+        detail:
+          '.NET 10（net10.0）：游戏服务器、模拟以及其他长时间运行的后端。不支持 Unity。',
+      },
+      {
+        term: '对比',
+        detail: `${rivalNames(true)}：${counts.total} 项正面对比中 ${counts.ahead} 项更快，${counts.even} 项差距在测量误差之内`,
+      },
+      {
+        term: '包含',
+        detail: '源生成器、23 条分析器规则及代码修复，都在同一个 NuGet 包里',
+      },
+      { term: '协议', detail: 'MIT，在 GitHub 上开源' },
+    ],
     numbersTitle: '一个服务器 tick 的实测耗时',
     numbers: [
       {
@@ -823,6 +915,124 @@ function MoreLink({ to, children }: { to: string; children: ReactNode }) {
   );
 }
 
+/** GitHub's mark, for the outlined GitHub button (lucide has no brand icons) */
+function GitHubIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+    </svg>
+  );
+}
+
+interface Bar {
+  name: string;
+  ns: number;
+  ours?: boolean;
+}
+
+/**
+ * Horizontal bars on a linear scale, the longest time full width: EasyEcs in
+ * the accent, the others in grey. The name and the time are text, so a
+ * screen reader reads "EasyEcs 146 μs, DefaultEcs 4.33 ms"; the bars are
+ * decoration.
+ */
+function Bars({ rows }: { rows: Bar[] }) {
+  const max = Math.max(...rows.map((r) => r.ns));
+  return (
+    <ul className="flex flex-col gap-1.5">
+      {rows.map((r) => (
+        <li
+          key={r.name}
+          className="grid grid-cols-[5.5rem_minmax(0,1fr)_4.5rem] items-center gap-3 text-xs"
+        >
+          <span
+            className={cn(
+              'truncate',
+              r.ours ? 'font-medium' : 'text-fd-muted-foreground',
+            )}
+          >
+            {r.name}
+          </span>
+          <span className="relative h-1.5" aria-hidden="true">
+            <span
+              className="absolute inset-y-0 left-0 min-w-1 rounded-full"
+              style={{
+                width: `${(r.ns / max) * 100}%`,
+                background: r.ours
+                  ? 'var(--ecs-chart-ours)'
+                  : 'var(--ecs-chart-other)',
+              }}
+            />
+          </span>
+          <span
+            className={cn(
+              'text-right tabular-nums',
+              r.ours ? 'font-medium' : 'text-fd-muted-foreground',
+            )}
+          >
+            {formatTime(r.ns)}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** EasyEcs against the library a comparison is measured against */
+const leadBars = (l: FeatureResult): Bar[] => [
+  { name: 'EasyEcs', ns: l.ours.meanNs, ours: true },
+  { name: l.versus.library, ns: l.versus.row.meanNs },
+];
+
+/** One lead in a card: what is measured, the ratio, the two bars */
+function LeadRow({
+  lead,
+  lang,
+  faster,
+}: {
+  lead: FeatureResult;
+  lang: Locale;
+  faster: string;
+}) {
+  return (
+    <div className="flex flex-col gap-3 px-5 py-5 sm:px-6">
+      <div className="flex items-start justify-between gap-4">
+        <h3 className="text-sm font-medium">{lead.label[lang]}</h3>
+        <p className="flex shrink-0 items-baseline gap-1.5 leading-none">
+          <span className="text-2xl font-semibold tracking-tight tabular-nums">
+            {formatRatio(lead.ratio)}
+          </span>
+          <span className="text-xs text-fd-muted-foreground">{faster}</span>
+        </p>
+      </div>
+      <Bars rows={leadBars(lead)} />
+    </div>
+  );
+}
+
+/** A card of the lead section: a title, rows split by hairlines, a link at the foot */
+function StatCard({
+  title,
+  link,
+  children,
+}: {
+  title: string;
+  link: { to: string; text: string };
+  children: ReactNode;
+}) {
+  return (
+    <section className={cn(surface, 'flex flex-col')}>
+      <h2 className="px-5 pt-5 pb-1 font-semibold tracking-tight sm:px-6">
+        {title}
+      </h2>
+      <div className="flex-1 divide-y">{children}</div>
+      <p className="border-t px-5 py-4 sm:px-6">
+        <MoreLink to={link.to}>{link.text}</MoreLink>
+      </p>
+    </section>
+  );
+}
+
 function Section({
   id,
   title,
@@ -835,9 +1045,9 @@ function Section({
   children: ReactNode;
 }) {
   return (
-    <section id={id} className="w-full px-4 py-16 sm:px-6 md:py-24">
+    <section id={id} className="w-full border-t px-4 py-16 sm:px-6 md:py-24">
       <div className="mx-auto max-w-6xl">
-        <h2 className="max-w-3xl text-2xl font-medium tracking-tight text-balance sm:text-3xl">
+        <h2 className="max-w-3xl text-2xl font-bold tracking-tight text-balance sm:text-3xl">
           {title}
         </h2>
         {text && (
@@ -859,70 +1069,186 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
   return (
     <HomeLayout {...baseOptions(lang)}>
       <main className="flex flex-1 flex-col items-center">
-        {/* Hero: the claim and its proof side by side */}
-        <section className="w-full px-4 pt-14 pb-16 sm:px-6 md:pt-24 md:pb-20">
-          <div className="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-2 lg:gap-16">
-            <div className="min-w-0">
-              <Link
-                to={`${docs}/changelog`}
-                className="inline-flex items-center gap-1.5 rounded-full border bg-fd-card px-3 py-1 text-xs text-fd-muted-foreground transition-colors hover:text-fd-foreground"
-              >
-                {t.pill}
-                <ArrowRight className="size-3" aria-hidden="true" />
+        {/* Hero, as on the family sites: centred claim, the second line in the gradient */}
+        <section className="relative isolate w-full px-4 pt-12 pb-12 sm:px-6 md:pt-20 md:pb-16">
+          <div
+            aria-hidden="true"
+            className="ecs-hero-glow pointer-events-none absolute inset-0 -z-10"
+          />
+          <div className="mx-auto flex max-w-5xl flex-col items-center text-center">
+            <span className="mb-4 rounded-full border bg-fd-secondary/50 px-3 py-1 text-xs font-medium text-fd-muted-foreground">
+              {t.pill}
+            </span>
+            <h1 className="text-4xl font-extrabold tracking-tight text-balance break-keep sm:text-5xl lg:text-6xl">
+              {t.headline}{' '}
+              <span className="ecs-gradient-text mx-auto block w-fit pb-1">
+                {t.headlineAccent}
+              </span>
+            </h1>
+            <p className="mt-3 max-w-xl text-base leading-relaxed text-balance text-fd-muted-foreground md:text-lg">
+              {t.lede}
+            </p>
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+              <Link to={`${docs}/getting-started`} className={button()}>
+                {t.start}
+                <ArrowRight />
               </Link>
-              <h1 className="mt-6 text-4xl leading-[1.08] font-medium tracking-tight text-balance break-keep sm:text-5xl lg:text-[3.25rem]">
-                {t.headline}
-                {t.headlineProof && (
-                  <span className="block text-fd-muted-foreground">
-                    {t.headlineProof}
-                  </span>
-                )}
-              </h1>
-              <p className="mt-6 max-w-xl leading-relaxed text-fd-muted-foreground sm:text-lg">
+              <a
+                href={githubUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={button('secondary')}
+              >
+                <GitHubIcon />
+                {t.github}
+              </a>
+            </div>
+            {/* Fumadocs' code block: the same copy button as every code sample in the docs */}
+            <CodeBlock
+              className="my-0 mt-4 w-full max-w-sm text-start"
+              keepBackground={false}
+            >
+              <Pre className="px-4">
+                <code>{installCommand}</code>
+              </Pre>
+            </CodeBlock>
+            <p className="mt-4">
+              <MoreLink to={`${docs}/demo`}>{t.demo}</MoreLink>
+            </p>
+          </div>
+        </section>
+
+        {/* The biggest lead as one figure, then the next leads and the whole tick */}
+        {topLead && (
+          <section className="w-full border-t px-4 py-12 sm:px-6 md:py-16">
+            <div className="mx-auto flex max-w-5xl flex-col gap-10">
+              <div className="grid items-end gap-x-14 gap-y-5 lg:grid-cols-[auto_minmax(0,1fr)]">
+                <div>
+                  <p className="text-sm text-fd-muted-foreground">
+                    {t.statLabel(libraryName(topLead.versus.library))}
+                  </p>
+                  <p className="ecs-gradient-text mt-2 w-fit pb-2 text-[5.5rem] leading-none font-extrabold tracking-tighter tabular-nums sm:text-9xl">
+                    {formatRatio(topLead.ratio)}
+                  </p>
+                </div>
+                <div className="flex flex-col gap-4 lg:pb-4">
+                  <p className="max-w-md text-base leading-snug text-pretty sm:text-lg">
+                    {t.statClaim(topLead)}
+                  </p>
+                  <Bars rows={leadBars(topLead)} />
+                </div>
+              </div>
+              <div className="grid gap-6 lg:grid-cols-2 lg:gap-x-8">
+                <StatCard
+                  title={t.leadsTitle}
+                  link={{
+                    to: `${docs}/comparison#feature-by-feature`,
+                    text: t.compareLink,
+                  }}
+                >
+                  {nextLeads.map((l) => (
+                    <LeadRow
+                      key={l.label.en}
+                      lead={l}
+                      lang={lang}
+                      faster={t.faster}
+                    />
+                  ))}
+                </StatCard>
+                <StatCard
+                  title={t.tickTitle}
+                  link={{
+                    to: `${docs}/performance#benchmarks`,
+                    text: t.numbersLink,
+                  }}
+                >
+                  <div className="flex flex-col gap-3 px-5 py-5 sm:px-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <h3 className="text-sm text-fd-muted-foreground">
+                        {t.tickText}
+                      </h3>
+                      {tickLead && (
+                        <p className="flex shrink-0 items-baseline gap-1.5 leading-none">
+                          <span className="text-2xl font-semibold tracking-tight tabular-nums">
+                            {formatRatio(tickLead)}
+                          </span>
+                          <span className="text-xs text-fd-muted-foreground">
+                            {t.faster}
+                          </span>
+                        </p>
+                      )}
+                    </div>
+                    <Bars
+                      rows={peerList.map((p) => ({
+                        name: p.method,
+                        ns: p.row.meanNs,
+                        ours: p.ours,
+                      }))}
+                    />
+                  </div>
+                  <div className="px-5 py-5 sm:px-6">
+                    <h3 className="text-sm font-medium">{t.allocTitle}</h3>
+                    <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+                      {peerList.map((p) => (
+                        <div key={p.method}>
+                          <dt className="text-xs text-fd-muted-foreground">
+                            {p.method}
+                          </dt>
+                          <dd
+                            className={cn(
+                              'mt-0.5 text-lg tracking-tight tabular-nums',
+                              p.ours && 'font-semibold',
+                            )}
+                          >
+                            {formatBytes(p.row.allocatedBytes)}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                </StatCard>
+              </div>
+              <p className="text-xs leading-relaxed text-fd-muted-foreground">
+                {sourceLine(lang === 'zh')}
+              </p>
+            </div>
+          </section>
+        )}
+
+        {/* What EasyEcs is, in a paragraph and the facts beside it */}
+        <section className="w-full border-t px-4 py-16 sm:px-6 md:py-20">
+          <div className="mx-auto grid max-w-5xl gap-10 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:gap-14">
+            <div>
+              <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
+                {t.whatTitle}
+              </h2>
+              <p className="mt-4 leading-relaxed text-fd-muted-foreground sm:text-lg">
                 {t.definition}
               </p>
-              <div className="mt-8 flex flex-wrap items-center gap-3">
-                <Link to={`${docs}/getting-started`} className={button()}>
-                  {t.start}
-                  <ArrowRight />
-                </Link>
-                <a
-                  href={githubUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={button('secondary')}
-                >
-                  {t.github}
-                  <ArrowUpRight />
-                </a>
-              </div>
-              {/* Fumadocs' code block: the same copy button as every code sample in the docs */}
-              <CodeBlock className="my-0 mt-6 max-w-md" keepBackground={false}>
-                <Pre className="px-4">
-                  <code>{installCommand}</code>
-                </Pre>
-              </CodeBlock>
-              <p className="mt-4">
-                <MoreLink to={`${docs}/demo`}>{t.demo}</MoreLink>
-              </p>
             </div>
-            {/* The proof beside the claim: the biggest leads, feature by feature */}
-            <div className="min-w-0 [&>figure]:my-0">
-              <LeadChart lang={lang} limit={6} />
-              <p className="mt-4">
-                <MoreLink to={`${docs}/comparison#feature-by-feature`}>
-                  {t.peersLink}
-                </MoreLink>
-              </p>
-            </div>
+            <dl className={cn(surface, 'flex flex-col gap-4 p-5 text-sm')}>
+              {t.facts.map((f) => (
+                <div key={f.term}>
+                  <dt className="font-medium">{f.term}</dt>
+                  <dd
+                    className={cn(
+                      'mt-1 leading-relaxed text-fd-muted-foreground',
+                      f.mono && 'font-mono text-xs',
+                    )}
+                  >
+                    {f.detail}
+                  </dd>
+                </div>
+              ))}
+            </dl>
           </div>
         </section>
 
         {/* Headline numbers */}
-        <section className="w-full px-4 sm:px-6">
+        <section className="w-full border-t px-4 py-12 sm:px-6">
           <div className="mx-auto max-w-6xl">
             <h2 className="sr-only">{t.numbersTitle}</h2>
-            <dl className="grid grid-cols-2 gap-y-8 border-y py-8 lg:grid-cols-4">
+            <dl className="grid grid-cols-2 gap-y-8 lg:grid-cols-4">
               {t.numbers.map((n, i) => (
                 <div
                   key={n.label}
@@ -936,7 +1262,7 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
                   <dt className="text-xs text-fd-muted-foreground sm:text-sm">
                     {n.label}
                   </dt>
-                  <dd className="mt-2 text-2xl font-medium tracking-tight tabular-nums sm:text-3xl">
+                  <dd className="mt-2 text-2xl font-semibold tracking-tight tabular-nums sm:text-3xl">
                     {n.value}
                   </dd>
                   <dd className="mt-1 text-xs text-fd-muted-foreground">
@@ -945,7 +1271,7 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
                 </div>
               ))}
             </dl>
-            <p className="mt-4 text-xs leading-relaxed text-fd-muted-foreground">
+            <p className="mt-6 text-xs leading-relaxed text-fd-muted-foreground">
               {t.numbersNote}{' '}
               <Link
                 to={`${docs}/performance#benchmarks`}
@@ -957,12 +1283,9 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
           </div>
         </section>
 
-        {/* Feature by feature: the whole tick, and where EasyEcs is behind and why */}
+        {/* Feature by feature: where EasyEcs is behind and why */}
         <Section id="compare" title={t.compareTitle} text={t.compareText}>
-          <div className="[&>figure]:my-0">
-            <PeerChart lang={lang} />
-          </div>
-          <h3 className="mt-12 text-lg font-medium">{t.behindTitle}</h3>
+          <h3 className="text-lg font-semibold">{t.behindTitle}</h3>
           <div className="prose max-w-none text-sm">
             <FeatureComparison tier="behind" lang={lang} />
           </div>
@@ -992,7 +1315,7 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
               <div key={item.title} className="flex flex-col border-t pt-5">
                 <dt className="mt-5 text-sm font-medium">{item.title}</dt>
                 <dd className="order-first">
-                  <span className="text-3xl font-medium tracking-tight tabular-nums">
+                  <span className="text-3xl font-semibold tracking-tight tabular-nums">
                     {item.metric}
                   </span>
                   <span className="mt-1 block text-xs text-fd-muted-foreground">
@@ -1111,7 +1434,7 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
             )}
           >
             <div className="max-w-xl">
-              <h2 className="text-2xl font-medium tracking-tight sm:text-3xl">
+              <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
                 {t.ctaTitle}
               </h2>
               <p className="mt-3 leading-relaxed text-fd-muted-foreground">
