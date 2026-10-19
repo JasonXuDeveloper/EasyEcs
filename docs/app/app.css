@@ -71,6 +71,11 @@
   outline: none;
 }
 
+/* The other rows fade while one is hovered or focused (data-active, bar-chart.tsx) */
+.ecs-chart:has(.ecs-chart-row[data-active]) .ecs-chart-row:not([data-active]) {
+  opacity: 0.45;
+}
+
 .ecs-chart-row:focus-visible .ecs-chart-hit {
   stroke: var(--color-fd-ring);
   stroke-width: 2px;
@@ -158,4 +163,15 @@
 .prose figure.shiki {
   content-visibility: auto;
   contain-intrinsic-size: auto 240px;
+}
+
+/* The same for a chart's SVG (bar-chart.tsx sets its estimated height). The
+   box bleeds 1rem around the plot (PLOT_BLEED) and paints 1rem past that
+   (overflow-clip-margin), so the containment does not clip the axis labels
+   and focus rings that draw past the SVG's edges. */
+.ecs-chart-plot {
+  content-visibility: auto;
+  margin: -1rem;
+  padding: 1rem;
+  overflow-clip-margin: 1rem;
 }

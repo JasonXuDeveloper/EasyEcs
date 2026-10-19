@@ -71,6 +71,7 @@
     "mermaid": "12.1.0"
   },
   "patchedDependencies": {
-    "@react-router/dev@7.18.4": "patches/@react-router%2Fdev@7.18.4.patch"
+    "@react-router/dev@7.18.4": "patches/@react-router%2Fdev@7.18.4.patch",
+    "next-themes@0.4.6": "patches/next-themes@0.4.6.patch"
   }
 }

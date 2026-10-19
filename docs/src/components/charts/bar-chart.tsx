@@ -2,7 +2,10 @@
  * Horizontal grouped bar chart drawn with visx (SVG, no canvas).
  *
  * - Prerenders: the SVG is complete in the static HTML at a default width and
- *   re-lays out to the container width after hydration.
+ *   re-lays out to the container width after hydration (./index.tsx hydrates
+ *   a chart only when it nears the viewport). The plot is memoized: hover,
+ *   focus and the reveal flip data attributes and move the tooltip, so they
+ *   never re-render the SVG.
  * - Colours are CSS variables (app.css), so light and dark mode need no JS.
  * - Every row is focusable and has a tooltip; a data table sits under the
  *   chart in <details> for screen readers and copy-paste.
@@ -15,8 +18,15 @@ import { GridColumns } from '@visx/grid';
 import { Group } from '@visx/group';
 import { scaleLinear, scaleLog } from '@visx/scale';
 import { BarRounded } from '@visx/shape';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { useReveal } from '@/components/showcase';
+import {
+  memo,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+import { reveal } from '@/components/showcase';
 import { cn } from '@/lib/cn';
 import { surface } from '@/lib/ui';
 
@@ -43,6 +53,8 @@ export interface ChartRow {
 }
 
 export interface BarChartProps {
+  /** `data-chart` of the figure (./index.tsx observes it before hydrating) */
+  id?: string;
   title: string;
   subtitle?: ReactNode;
   series: ChartSeries[];
@@ -73,13 +85,21 @@ const BADGE_H = 18;
 const ROW_GAP = 20;
 const AXIS_BAND = 44;
 const FALLBACK_WIDTH = 640;
+/** Room around the plot for what draws outside it (axis labels, focus rings) */
+const PLOT_BLEED = 16;
 
-/** Rough text width; CJK characters are about 1em wide. */
+/** Rough text width; CJK characters (U+2E80-9FFF, U+FF00-FFEF) are about 1em wide. */
 function textWidth(text: string, size: number, mono = false) {
+  const narrow = size * (mono ? 0.62 : 0.56);
   let width = 0;
-  for (const ch of text) {
-    if (/[⺀-鿿＀-￯]/.test(ch)) width += size;
-    else width += size * (mono ? 0.62 : 0.56);
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    // A surrogate pair is one character
+    if (c >= 0xd800 && c <= 0xdbff) i++;
+    width +=
+      (c >= 0x2e80 && c <= 0x9fff) || (c >= 0xff00 && c <= 0xffef)
+        ? size
+        : narrow;
   }
   return width;
 }
@@ -142,27 +162,62 @@ const badgeTone = {
   loss: { fill: 'var(--color-fd-muted)', text: 'var(--color-fd-foreground)' },
 };
 
-export function BarChart({
+const defaultTickFormat = (value: number) => String(value);
+
+interface Active {
+  index: number;
+  x: number;
+  y: number;
+}
+
+type PlotProps = Pick<
+  BarChartProps,
+  | 'title'
+  | 'series'
+  | 'rows'
+  | 'axisLabel'
+  | 'max'
+  | 'scale'
+  | 'min'
+  | 'tickValues'
+> & {
+  tickFormat: (value: number) => string;
+  width: number;
+  containerRef: RefObject<HTMLDivElement | null>;
+  setActive: (active: Active | null) => void;
+};
+
+/** Marks the row under the pointer or focus; app.css fades the others */
+function highlight(row: Element, on: boolean) {
+  row.toggleAttribute('data-active', on);
+}
+
+/**
+ * The SVG, laid out for one width. Memoized: the tooltip state of BarChart
+ * does not re-render it, only a new width does.
+ */
+const Plot = memo(function Plot({
   title,
-  subtitle,
   series,
   rows,
   axisLabel,
-  tickFormat = (value) => String(value),
+  tickFormat,
   max,
   scale = 'linear',
   min = 1,
   tickValues,
-  footnotes,
-  table,
-}: BarChartProps) {
-  const [containerRef, width] = useWidth<HTMLDivElement>();
-  const [revealRef, shown] = useReveal<SVGSVGElement>();
-  const [active, setActive] = useState<{
-    index: number;
-    x: number;
-    y: number;
-  } | null>(null);
+  width,
+  containerRef,
+  setActive,
+}: PlotProps) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  // Bars grow in when scrolled into view: an attribute, not React state
+  useEffect(() => {
+    const svg = svgRef.current;
+    return svg
+      ? reveal(svg, (shown) => svg.toggleAttribute('data-hidden', !shown))
+      : undefined;
+  }, []);
 
   const valueGutter =
     Math.max(
@@ -217,10 +272,247 @@ export function BarChart({
   const height = plotBottom + AXIS_BAND;
   const numTicks = width < 480 ? 4 : 6;
 
+  return (
+    // Off screen the SVG skips style, layout and paint (app.css); its
+    // estimated height is the height it draws at: the container's width
+    // (cqw, the div around it is the container) times this layout's ratio
+    <div
+      className="ecs-chart-plot"
+      style={{
+        containIntrinsicHeight: `auto calc(100cqw * ${(height / width).toFixed(4)} + ${2 * PLOT_BLEED}px)`,
+      }}
+    >
+      {/* biome-ignore lint/a11y/useSemanticElements: <fieldset> cannot live in SVG; the group names the chart */}
+      <svg
+        ref={svgRef}
+        className="ecs-chart block h-auto w-full overflow-visible"
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        role="group"
+        aria-label={title}
+      >
+        <GridColumns
+          scale={x}
+          height={plotBottom}
+          numTicks={numTicks}
+          tickValues={ticks}
+          stroke="var(--color-fd-border)"
+          strokeWidth={1}
+        />
+        {rows.map((row, index) => {
+          const layout = layouts[index];
+          const header = layout.header;
+          const plotted = series.filter((s) => row.values[s.key] !== undefined);
+          const summary = [
+            `${row.label}${row.mark ?? ''}:`,
+            plotted.map((s) => `${s.label} ${row.text[s.key]}`).join(', '),
+            row.badge ? `(${row.badge.text})` : '',
+          ].join(' ');
+          const badgeWidth = row.badge ? textWidth(row.badge.text, 11) + 16 : 0;
+          const tone = row.badge ? badgeTone[row.badge.tone] : undefined;
+          return (
+            // biome-ignore lint/a11y/noInteractiveElementToNoninteractiveRole: a focusable SVG row that only shows a tooltip; role=img gives it one spoken summary
+            <g
+              key={row.label}
+              className="ecs-chart-row"
+              transform={`translate(0, ${layout.top})`}
+              tabIndex={0}
+              role="img"
+              aria-label={summary}
+              onPointerMove={(event) => {
+                const box = containerRef.current?.getBoundingClientRect();
+                if (!box) return;
+                highlight(event.currentTarget, true);
+                setActive({
+                  index,
+                  x: event.clientX - box.left,
+                  y: event.clientY - box.top,
+                });
+              }}
+              onPointerLeave={(event) => {
+                highlight(event.currentTarget, false);
+                setActive(null);
+              }}
+              onFocus={(event) => {
+                const scale =
+                  (containerRef.current?.clientWidth ?? width) / width;
+                highlight(event.currentTarget, true);
+                setActive({
+                  index,
+                  x: width * scale * 0.5,
+                  y: (layout.top + layout.height) * scale,
+                });
+              }}
+              onBlur={(event) => {
+                highlight(event.currentTarget, false);
+                setActive(null);
+              }}
+            >
+              <rect
+                className="ecs-chart-hit"
+                x={-4}
+                y={-6}
+                width={width + 8}
+                height={layout.height + 12}
+                rx={6}
+                fill="transparent"
+              />
+              <text
+                x={0}
+                y={14}
+                fontSize={13}
+                fontWeight={500}
+                fill="var(--color-fd-foreground)"
+                fontFamily={
+                  row.code
+                    ? 'var(--font-mono, ui-monospace, monospace)'
+                    : undefined
+                }
+              >
+                {layout.lines.length === 1 ? (
+                  <>
+                    {row.label}
+                    {row.mark && (
+                      <tspan fill="var(--color-fd-muted-foreground)">
+                        {row.mark}
+                      </tspan>
+                    )}
+                  </>
+                ) : (
+                  layout.lines.map((line, i) => (
+                    <tspan key={line} x={0} dy={i === 0 ? 0 : LINE}>
+                      {line}
+                    </tspan>
+                  ))
+                )}
+              </text>
+              {row.badge && tone && (
+                <g
+                  transform={
+                    layout.badgeBelow
+                      ? `translate(0, ${HEADER + (layout.lines.length - 1) * LINE + 2})`
+                      : `translate(${width - badgeWidth}, 0)`
+                  }
+                >
+                  <rect
+                    width={badgeWidth}
+                    height={BADGE_H}
+                    rx={BADGE_H / 2}
+                    fill={tone.fill}
+                  />
+                  <text
+                    x={badgeWidth / 2}
+                    y={12.5}
+                    fontSize={11}
+                    fontWeight={500}
+                    textAnchor="middle"
+                    fill={tone.text}
+                  >
+                    {row.badge.text}
+                  </text>
+                </g>
+              )}
+              {plotted.map((s, i) => {
+                const value = row.values[s.key] ?? 0;
+                const barWidth =
+                  value > 0
+                    ? Math.max(
+                        x(scale === 'log' ? Math.max(value, min) : value) ?? 0,
+                        3,
+                      )
+                    : 0;
+                const barY = header + 6 + i * (BAR + BAR_GAP);
+                const delay = `${index * 60 + i * 90}ms`;
+                return (
+                  <g key={s.key}>
+                    {barWidth > 0 && (
+                      <BarRounded
+                        className="ecs-chart-bar"
+                        style={{ transitionDelay: delay }}
+                        x={0}
+                        y={barY}
+                        width={barWidth}
+                        height={BAR}
+                        radius={4}
+                        right
+                        fill={s.color}
+                      />
+                    )}
+                    <text
+                      className="ecs-chart-value"
+                      style={{
+                        transitionDelay: delay,
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                      x={barWidth + 6}
+                      y={barY + BAR / 2}
+                      dy="0.35em"
+                      fontSize={11}
+                      fill="var(--color-fd-muted-foreground)"
+                    >
+                      {row.text[s.key]}
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
+          );
+        })}
+        <AxisBottom
+          top={plotBottom}
+          scale={x}
+          numTicks={numTicks}
+          tickValues={ticks}
+          tickFormat={(value) => tickFormat(Number(value))}
+          stroke="var(--color-fd-border)"
+          tickStroke="var(--color-fd-border)"
+          tickLength={4}
+          tickLabelProps={{
+            fill: 'var(--color-fd-muted-foreground)',
+            fontSize: 11,
+            textAnchor: 'middle',
+          }}
+        />
+        <Group top={plotBottom + 38}>
+          <text
+            x={plotWidth / 2}
+            fontSize={11}
+            textAnchor="middle"
+            fill="var(--color-fd-muted-foreground)"
+          >
+            {axisLabel}
+          </text>
+        </Group>
+      </svg>
+    </div>
+  );
+});
+
+export function BarChart({
+  id,
+  title,
+  subtitle,
+  series,
+  rows,
+  axisLabel,
+  tickFormat = defaultTickFormat,
+  max,
+  scale,
+  min,
+  tickValues,
+  footnotes,
+  table,
+}: BarChartProps) {
+  const [containerRef, width] = useWidth<HTMLDivElement>();
+  const [active, setActive] = useState<Active | null>(null);
   const activeRow = active ? rows[active.index] : undefined;
 
   return (
-    <figure className={cn(surface, 'not-prose my-6 p-4 sm:p-6')}>
+    <figure
+      className={cn(surface, 'not-prose my-6 p-4 sm:p-6')}
+      data-chart={id}
+    >
       <figcaption className="mb-5">
         <p className="text-sm font-medium text-fd-foreground">{title}</p>
         {subtitle && (
@@ -243,209 +535,21 @@ export function BarChart({
           ))}
         </ul>
       )}
-      <div ref={containerRef} className="relative">
-        {/* biome-ignore lint/a11y/useSemanticElements: <fieldset> cannot live in SVG; the group names the chart */}
-        <svg
-          ref={revealRef}
-          className="ecs-chart block h-auto w-full overflow-visible"
-          data-hidden={shown ? undefined : ''}
+      <div ref={containerRef} className="relative @container">
+        <Plot
+          title={title}
+          series={series}
+          rows={rows}
+          axisLabel={axisLabel}
+          tickFormat={tickFormat}
+          max={max}
+          scale={scale}
+          min={min}
+          tickValues={tickValues}
           width={width}
-          height={height}
-          viewBox={`0 0 ${width} ${height}`}
-          role="group"
-          aria-label={title}
-        >
-          <GridColumns
-            scale={x}
-            height={plotBottom}
-            numTicks={numTicks}
-            tickValues={ticks}
-            stroke="var(--color-fd-border)"
-            strokeWidth={1}
-          />
-          {rows.map((row, index) => {
-            const layout = layouts[index];
-            const header = layout.header;
-            const plotted = series.filter(
-              (s) => row.values[s.key] !== undefined,
-            );
-            const summary = [
-              `${row.label}${row.mark ?? ''}:`,
-              plotted.map((s) => `${s.label} ${row.text[s.key]}`).join(', '),
-              row.badge ? `(${row.badge.text})` : '',
-            ].join(' ');
-            const badgeWidth = row.badge
-              ? textWidth(row.badge.text, 11) + 16
-              : 0;
-            const tone = row.badge ? badgeTone[row.badge.tone] : undefined;
-            return (
-              // biome-ignore lint/a11y/noInteractiveElementToNoninteractiveRole: a focusable SVG row that only shows a tooltip; role=img gives it one spoken summary
-              <g
-                key={row.label}
-                className="ecs-chart-row"
-                transform={`translate(0, ${layout.top})`}
-                opacity={active && active.index !== index ? 0.45 : 1}
-                tabIndex={0}
-                role="img"
-                aria-label={summary}
-                onPointerMove={(event) => {
-                  const box = containerRef.current?.getBoundingClientRect();
-                  if (!box) return;
-                  setActive({
-                    index,
-                    x: event.clientX - box.left,
-                    y: event.clientY - box.top,
-                  });
-                }}
-                onPointerLeave={() => setActive(null)}
-                onFocus={() => {
-                  const scale =
-                    (containerRef.current?.clientWidth ?? width) / width;
-                  setActive({
-                    index,
-                    x: width * scale * 0.5,
-                    y: (layout.top + layout.height) * scale,
-                  });
-                }}
-                onBlur={() => setActive(null)}
-              >
-                <rect
-                  className="ecs-chart-hit"
-                  x={-4}
-                  y={-6}
-                  width={width + 8}
-                  height={layout.height + 12}
-                  rx={6}
-                  fill="transparent"
-                />
-                <text
-                  x={0}
-                  y={14}
-                  fontSize={13}
-                  fontWeight={500}
-                  fill="var(--color-fd-foreground)"
-                  fontFamily={
-                    row.code
-                      ? 'var(--font-mono, ui-monospace, monospace)'
-                      : undefined
-                  }
-                >
-                  {layout.lines.length === 1 ? (
-                    <>
-                      {row.label}
-                      {row.mark && (
-                        <tspan fill="var(--color-fd-muted-foreground)">
-                          {row.mark}
-                        </tspan>
-                      )}
-                    </>
-                  ) : (
-                    layout.lines.map((line, i) => (
-                      <tspan key={line} x={0} dy={i === 0 ? 0 : LINE}>
-                        {line}
-                      </tspan>
-                    ))
-                  )}
-                </text>
-                {row.badge && tone && (
-                  <g
-                    transform={
-                      layout.badgeBelow
-                        ? `translate(0, ${HEADER + (layout.lines.length - 1) * LINE + 2})`
-                        : `translate(${width - badgeWidth}, 0)`
-                    }
-                  >
-                    <rect
-                      width={badgeWidth}
-                      height={BADGE_H}
-                      rx={BADGE_H / 2}
-                      fill={tone.fill}
-                    />
-                    <text
-                      x={badgeWidth / 2}
-                      y={12.5}
-                      fontSize={11}
-                      fontWeight={500}
-                      textAnchor="middle"
-                      fill={tone.text}
-                    >
-                      {row.badge.text}
-                    </text>
-                  </g>
-                )}
-                {plotted.map((s, i) => {
-                  const value = row.values[s.key] ?? 0;
-                  const barWidth =
-                    value > 0
-                      ? Math.max(
-                          x(scale === 'log' ? Math.max(value, min) : value) ??
-                            0,
-                          3,
-                        )
-                      : 0;
-                  const barY = header + 6 + i * (BAR + BAR_GAP);
-                  const delay = `${index * 60 + i * 90}ms`;
-                  return (
-                    <g key={s.key}>
-                      {barWidth > 0 && (
-                        <BarRounded
-                          className="ecs-chart-bar"
-                          style={{ transitionDelay: delay }}
-                          x={0}
-                          y={barY}
-                          width={barWidth}
-                          height={BAR}
-                          radius={4}
-                          right
-                          fill={s.color}
-                        />
-                      )}
-                      <text
-                        className="ecs-chart-value"
-                        style={{
-                          transitionDelay: delay,
-                          fontVariantNumeric: 'tabular-nums',
-                        }}
-                        x={barWidth + 6}
-                        y={barY + BAR / 2}
-                        dy="0.35em"
-                        fontSize={11}
-                        fill="var(--color-fd-muted-foreground)"
-                      >
-                        {row.text[s.key]}
-                      </text>
-                    </g>
-                  );
-                })}
-              </g>
-            );
-          })}
-          <AxisBottom
-            top={plotBottom}
-            scale={x}
-            numTicks={numTicks}
-            tickValues={ticks}
-            tickFormat={(value) => tickFormat(Number(value))}
-            stroke="var(--color-fd-border)"
-            tickStroke="var(--color-fd-border)"
-            tickLength={4}
-            tickLabelProps={{
-              fill: 'var(--color-fd-muted-foreground)',
-              fontSize: 11,
-              textAnchor: 'middle',
-            }}
-          />
-          <Group top={plotBottom + 38}>
-            <text
-              x={plotWidth / 2}
-              fontSize={11}
-              textAnchor="middle"
-              fill="var(--color-fd-muted-foreground)"
-            >
-              {axisLabel}
-            </text>
-          </Group>
-        </svg>
+          containerRef={containerRef}
+          setActive={setActive}
+        />
         {activeRow && active && (
           <div
             className="pointer-events-none absolute z-10 min-w-44 rounded-lg border bg-fd-popover px-3 py-2 text-xs text-fd-popover-foreground shadow-md"

@@ -42,16 +42,23 @@ export interface PeerChartProps {
   /** [Params] Entities of EcsComparisonBenchmark: "100000" (default) or "10000" */
   entities?: string;
   lang?: Locale;
+  /** Set by ./index.tsx: finds the prerendered figure */
+  chartId?: string;
 }
 
 /** The same server tick ported to EasyEcs, Friflo.Engine.ECS, Arch and DefaultEcs */
-export function PeerChart({ entities = '100000', lang }: PeerChartProps) {
+export function PeerChart({
+  entities = '100000',
+  lang,
+  chartId,
+}: PeerChartProps) {
   const zh = useLang(lang) === 'zh';
   const s = seriesFor(zh);
   const list = peers(entities);
   const count = Number(entities).toLocaleString('en-US');
   return (
     <BarChart
+      id={chartId}
       title={
         zh
           ? `一个服务器 tick，${count} 个实体：EasyEcs 对比 Friflo、Arch、DefaultEcs`
@@ -108,6 +115,8 @@ export interface LeadChartProps {
   title?: string;
   subtitle?: string;
   lang?: Locale;
+  /** Set by ./index.tsx: finds the prerendered figure */
+  chartId?: string;
 }
 
 /**
@@ -121,6 +130,7 @@ export function LeadChart({
   title,
   subtitle,
   lang,
+  chartId,
 }: LeadChartProps) {
   const locale = useLang(lang);
   const zh = locale === 'zh';
@@ -136,6 +146,7 @@ export function LeadChart({
   );
   return (
     <BarChart
+      id={chartId}
       title={
         title ??
         (zh
@@ -191,6 +202,8 @@ export interface BenchChartProps extends ComparisonQuery {
   title?: string;
   subtitle?: string;
   lang?: Locale;
+  /** Set by ./index.tsx: finds the prerendered figure */
+  chartId?: string;
 }
 
 /**
@@ -224,6 +237,7 @@ export function BenchChart({
   title,
   subtitle,
   lang,
+  chartId,
 }: BenchChartProps) {
   const zh = useLang(lang) === 'zh';
   const s = seriesFor(zh);
@@ -306,6 +320,7 @@ export function BenchChart({
 
   return (
     <BarChart
+      id={chartId}
       title={heading}
       subtitle={subtitle}
       series={series}

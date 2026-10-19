@@ -18,6 +18,34 @@ function reducedMotion() {
 }
 
 /**
+ * Hides `element` (`show(false)`) when it is below the fold and shows it again
+ * once scrolled into view; an element already on screen replays its animation
+ * once. Does nothing with reduced motion. Returns the cleanup.
+ */
+export function reveal(element: Element, show: (shown: boolean) => void) {
+  if (reducedMotion() || !('IntersectionObserver' in window)) return;
+  const rect = element.getBoundingClientRect();
+  show(false);
+  if (rect.top < window.innerHeight * 0.9 && rect.bottom > 0) {
+    const id = requestAnimationFrame(() =>
+      requestAnimationFrame(() => show(true)),
+    );
+    return () => cancelAnimationFrame(id);
+  }
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        show(true);
+        observer.disconnect();
+      }
+    },
+    { threshold: 0.25 },
+  );
+  observer.observe(element);
+  return () => observer.disconnect();
+}
+
+/**
  * `shown` is true on the server and for reduced motion. On the client it turns
  * false after hydration for elements below the fold, then true once visible.
  */
@@ -27,29 +55,7 @@ export function useReveal<T extends Element>() {
 
   useEffect(() => {
     const element = ref.current;
-    if (!element || reducedMotion() || !('IntersectionObserver' in window))
-      return;
-    const rect = element.getBoundingClientRect();
-    if (rect.top < window.innerHeight * 0.9 && rect.bottom > 0) {
-      // Already visible: replay the animation once.
-      setShown(false);
-      const id = requestAnimationFrame(() =>
-        requestAnimationFrame(() => setShown(true)),
-      );
-      return () => cancelAnimationFrame(id);
-    }
-    setShown(false);
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setShown(true);
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.25 },
-    );
-    observer.observe(element);
-    return () => observer.disconnect();
+    return element ? reveal(element, setShown) : undefined;
   }, []);
 
   return [ref, shown] as const;
