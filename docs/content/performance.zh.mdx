@@ -469,6 +469,8 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 每个功能都有单元测试（`tests/EasyEcs.UnitTest`）、一个 BenchmarkDotNet 跑分；同类库有这个功能的，还有一项正面对比，测量
 前先校验每个库算出的结果一致。
 
+{/* search: skip */}
+
 | 功能 | 测试 | 跑分 | 与其他库对比 |
 | --- | --- | --- | --- |
 | 完整的服务器 tick | `BattleServerTests` | `WorldSimulationBenchmark`、`MultiWorldBenchmark`、`BattleServerBenchmark` | [`EcsComparisonBenchmark`](/zh/docs/comparison#the-same-server-tick) |

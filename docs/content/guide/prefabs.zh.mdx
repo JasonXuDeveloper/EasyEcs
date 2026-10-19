@@ -178,7 +178,7 @@ warlord.Destroy();                                   // ChildOf：销毁父实�
 
 `ChildOf` 是 EasyEcs 的层级链接，见[层级](/zh/docs/guide/hierarchy)。`Instantiate(group, span)` 会为每个元素实例化一整组。
 
-### 生成前先预留 [#ensure-capacity]
+### 生成前先预留：`EnsureCapacity` [#ensure-capacity]
 
 `world.EnsureCapacity(prefab, count)` 先扩好预制体实例要进的表和实体记录，接下来 `count` 个实例都不再扩容。编组会预留每个成员的表。
 在生成的那个 tick 之前调用，这波生成就不用在 tick 里付扩容的代价。

@@ -509,6 +509,8 @@ times every system run.
 Every feature has unit tests (`tests/EasyEcs.UnitTest`), a BenchmarkDotNet benchmark and, where a peer library has
 the feature, a head-to-head comparison that checks every library computes the same result before it measures.
 
+{/* search: skip */}
+
 | Feature | Tests | Benchmark | Against other libraries |
 | --- | --- | --- | --- |
 | A whole server tick | `BattleServerTests` | `WorldSimulationBenchmark`, `MultiWorldBenchmark`, `BattleServerBenchmark` | [`EcsComparisonBenchmark`](/en/docs/comparison#the-same-server-tick) |

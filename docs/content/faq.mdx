@@ -72,6 +72,22 @@ on the components. Systems never call each other, so there is nothing to mock; s
 test runs the real order. A zero-allocation budget is one more test: count
 `GC.GetAllocatedBytesForCurrentThread()` around warm updates ([Testing systems](/en/docs/guide/testing)).
 
+## How should I structure an EasyEcs project? [#project-structure]
+
+The way `dotnet new easyecs` lays it out: components in `Components/` (one file per thing they describe, plain data),
+one system per file in `Systems/` with one job each, and `Program.cs` as the host that builds the world, sets the
+singletons, adds the systems in one place and runs the loop. Groups give each cadence its own update, input from other
+threads goes through a mailbox (a queue in a singleton), and `--tests` adds one test file per system
+([Structuring a real project](/en/docs/guide/project-structure)).
+
+## How do I debug an ECS world? [#debugging]
+
+Ask the world: `world.Describe()` lists the tables with their components, entities and bytes, `entity.Describe()`
+returns an entity's component values (the debugger shows them too when you expand an `Entity`), `system.Stats` times
+every system with `WorldOptions.MeasureSystems`, and `system.Error` keeps the exception of a system switched off by
+`SystemErrorPolicy.Disable`. Read them on the owner thread between updates
+([Debugging and diagnostics](/en/docs/guide/diagnostics)).
+
 ## Can I use EasyEcs with Unity or Godot? [#unity-godot]
 
 No. EasyEcs targets `net10.0` only: it relies on C# 14 extension members, `Vector256` / `Vector512`, columns on the

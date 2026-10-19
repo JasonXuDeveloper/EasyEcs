@@ -69,6 +69,16 @@ available as Markdown: add `.md` to its URL.
   component and keeps its value.
 - It has no shared components: put shared data in a singleton and store an id.
 
+## Project layout and debugging
+
+- Lay a project out like `dotnet new easyecs` (package `EasyEcs.Templates`): data in `Components/`, one system per
+  file in `Systems/`, and `Program.cs` only as the host: it builds the world, sets every singleton before the first
+  update and adds the systems in one method the tests share. Input from other threads goes through a queue held in a
+  singleton. https://ecs.xgamedev.net/en/docs/guide/project-structure
+- To look inside a world: `world.Describe()` (tables, rows, bytes), `entity.Describe()`, `system.Stats` with
+  `WorldOptions.MeasureSystems`, `system.Error` with `SystemErrorPolicy.Disable`; on the owner thread between updates,
+  never in game logic. https://ecs.xgamedev.net/en/docs/guide/diagnostics
+
 ## Example
 
 ```csharp

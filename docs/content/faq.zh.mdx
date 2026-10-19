@@ -60,6 +60,18 @@ World 发布的不可变状态。不需要专门的托管包；完整的服务�
 共用服务器的初始化方法，测试跑的就是真实的顺序。零分配预算也只是多一个测试：在预热后的更新前后统计
 `GC.GetAllocatedBytesForCurrentThread()`（[测试系统](/zh/docs/guide/testing)）。
 
+## EasyEcs 项目该怎么组织？ [#project-structure]
+
+照 `dotnet new easyecs` 的结构来：组件放 `Components/`（按描述的东西一个文件，只放数据），`Systems/` 里一个文件一个系统、
+每个系统只做一件事，`Program.cs` 只做宿主：建 World、设单例、在一个地方按顺序加系统、跑循环。不同的更新频率各用一个分组，其他线程
+的输入走放在单例里的邮箱，`--tests` 会给每个系统生成一个测试文件（[项目结构](/zh/docs/guide/project-structure)）。
+
+## 怎么调试一个 ECS World？ [#debugging]
+
+直接问 World：`world.Describe()` 列出每张表的组件、实体数和字节数，`entity.Describe()` 返回实体的组件值（调试器里展开 `Entity`
+也能看到），打开 `WorldOptions.MeasureSystems` 后 `system.Stats` 记录每个系统的耗时，`SystemErrorPolicy.Disable` 停掉的系统，
+异常留在 `system.Error` 里。在所有者线程上、两次更新之间读这些数据（[调试与诊断](/zh/docs/guide/diagnostics)）。
+
 ## 能在 Unity 或 Godot 里用 EasyEcs 吗？ [#unity-godot]
 
 不能。EasyEcs 只面向 `net10.0`：它依赖 C# 14 扩展成员、`Vector256` / `Vector512`、放在 POH 上的列以及当前 JIT 的行为

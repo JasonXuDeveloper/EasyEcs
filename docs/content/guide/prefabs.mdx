@@ -189,7 +189,7 @@ warlord.Destroy();                                   // ChildOf: destroying the 
 `ChildOf` is EasyEcs's hierarchy link: see [Hierarchy](/en/docs/guide/hierarchy). `Instantiate(group, span)`
 instantiates the group once per element.
 
-### Reserve before the wave [#ensure-capacity]
+### Reserve before the wave: `EnsureCapacity` [#ensure-capacity]
 
 `world.EnsureCapacity(prefab, count)` grows the table the prefab's instances go to, and the entity records, so the
 next `count` instances grow nothing. For a group, it reserves every member's table. Call it before the tick that
