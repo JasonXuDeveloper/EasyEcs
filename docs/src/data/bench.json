@@ -1,6 +1,6 @@
 {
   "source": "BenchmarkDotNet *-report.csv (scripts/sync-benchmarks.ts)",
-  "generatedAt": "2026-10-18T17:50:56.779Z",
+  "generatedAt": "2026-10-19T04:53:39.042Z",
   "environment": {
     "benchmarkDotNet": "0.15.2",
     "os": "Linux Ubuntu 24.04.5 LTS (Noble Numbat)",
@@ -2243,6 +2243,276 @@
           "stdDevNs": 18964,
           "ratio": null,
           "allocatedBytes": 0
+        }
+      ]
+    },
+    "ColdCreateComparison": {
+      "namespace": "EcsComparison.Features",
+      "job": "EnvironmentVariables=DOTNET_TC_CallCountingDelayMs=0 InvocationCount=1 IterationCount=40 IterationTime=250ms LaunchCount=2 UnrollFactor=1 WarmupCount=10",
+      "rows": [
+        {
+          "method": "EasyEcs_Bulk",
+          "params": {
+            "Components": "1"
+          },
+          "meanNs": 2654000,
+          "errorNs": 174100,
+          "stdDevNs": 446300,
+          "ratio": 1.02,
+          "allocatedBytes": 4404019
+        },
+        {
+          "method": "EasyEcs_Bulk",
+          "params": {
+            "Components": "2"
+          },
+          "meanNs": 2549000,
+          "errorNs": 40800,
+          "stdDevNs": 100800,
+          "ratio": 1,
+          "allocatedBytes": 4802478
+        },
+        {
+          "method": "EasyEcs_Bulk",
+          "params": {
+            "Components": "3"
+          },
+          "meanNs": 2708000,
+          "errorNs": 56400,
+          "stdDevNs": 139400,
+          "ratio": 1,
+          "allocatedBytes": 5200937
+        },
+        {
+          "method": "EasyEcs_PerEntity",
+          "params": {
+            "Components": "1"
+          },
+          "meanNs": 5988000,
+          "errorNs": 415300,
+          "stdDevNs": 1072100,
+          "ratio": 1.03,
+          "allocatedBytes": 7308575
+        },
+        {
+          "method": "Friflo_PerEntity",
+          "params": {
+            "Components": "1"
+          },
+          "meanNs": 15345000,
+          "errorNs": 2310500,
+          "stdDevNs": 6046300,
+          "ratio": 2.64,
+          "allocatedBytes": 8378122
+        },
+        {
+          "method": "Arch_PerEntity",
+          "params": {
+            "Components": "1"
+          },
+          "meanNs": 3764000,
+          "errorNs": 91700,
+          "stdDevNs": 217900,
+          "ratio": 0.65,
+          "allocatedBytes": 4194304
+        },
+        {
+          "method": "DefaultEcs_PerEntity",
+          "params": {
+            "Components": "1"
+          },
+          "meanNs": 13106000,
+          "errorNs": 1482900,
+          "stdDevNs": 3854400,
+          "ratio": 2.26,
+          "allocatedBytes": 11586765
+        },
+        {
+          "method": "EasyEcs_PerEntity",
+          "params": {
+            "Components": "2"
+          },
+          "meanNs": 6350000,
+          "errorNs": 435500,
+          "stdDevNs": 1116300,
+          "ratio": 1.03,
+          "allocatedBytes": 8357151
+        },
+        {
+          "method": "Friflo_PerEntity",
+          "params": {
+            "Components": "2"
+          },
+          "meanNs": 14084000,
+          "errorNs": 1839200,
+          "stdDevNs": 4812900,
+          "ratio": 2.29,
+          "allocatedBytes": 9426698
+        },
+        {
+          "method": "Arch_PerEntity",
+          "params": {
+            "Components": "2"
+          },
+          "meanNs": 4607000,
+          "errorNs": 366100,
+          "stdDevNs": 931800,
+          "ratio": 0.75,
+          "allocatedBytes": 4645192
+        },
+        {
+          "method": "DefaultEcs_PerEntity",
+          "params": {
+            "Components": "2"
+          },
+          "meanNs": 14991000,
+          "errorNs": 1114800,
+          "stdDevNs": 2857700,
+          "ratio": 2.44,
+          "allocatedBytes": 15791555
+        },
+        {
+          "method": "EasyEcs_PerEntity",
+          "params": {
+            "Components": "3"
+          },
+          "meanNs": 7128000,
+          "errorNs": 669100,
+          "stdDevNs": 1702900,
+          "ratio": 1.05,
+          "allocatedBytes": 9405727
+        },
+        {
+          "method": "Friflo_PerEntity",
+          "params": {
+            "Components": "3"
+          },
+          "meanNs": 15357000,
+          "errorNs": 2621200,
+          "stdDevNs": 6859300,
+          "ratio": 2.26,
+          "allocatedBytes": 10475274
+        },
+        {
+          "method": "Arch_PerEntity",
+          "params": {
+            "Components": "3"
+          },
+          "meanNs": 4767000,
+          "errorNs": 335200,
+          "stdDevNs": 859100,
+          "ratio": 0.7,
+          "allocatedBytes": 5075108
+        },
+        {
+          "method": "DefaultEcs_PerEntity",
+          "params": {
+            "Components": "3"
+          },
+          "meanNs": 16931000,
+          "errorNs": 884000,
+          "stdDevNs": 2151900,
+          "ratio": 2.49,
+          "allocatedBytes": 19996344
+        },
+        {
+          "method": "EasyEcs_PerEntity_Reserved",
+          "params": {
+            "Components": "1"
+          },
+          "meanNs": 1941000,
+          "errorNs": 45300,
+          "stdDevNs": 112900,
+          "ratio": 1,
+          "allocatedBytes": 2799698
+        },
+        {
+          "method": "Friflo_PerEntity_Reserved",
+          "params": {
+            "Components": "1"
+          },
+          "meanNs": 11327000,
+          "errorNs": 1757100,
+          "stdDevNs": 4597900,
+          "ratio": 5.85,
+          "allocatedBytes": 3449815
+        },
+        {
+          "method": "Arch_PerEntity_Reserved",
+          "params": {
+            "Components": "1"
+          },
+          "meanNs": 3448000,
+          "errorNs": 53800,
+          "stdDevNs": 134000,
+          "ratio": 1.78,
+          "allocatedBytes": 4037018
+        },
+        {
+          "method": "EasyEcs_PerEntity_Reserved",
+          "params": {
+            "Components": "2"
+          },
+          "meanNs": 2707000,
+          "errorNs": 257700,
+          "stdDevNs": 655800,
+          "ratio": 1.05,
+          "allocatedBytes": 3198157
+        },
+        {
+          "method": "Friflo_PerEntity_Reserved",
+          "params": {
+            "Components": "2"
+          },
+          "meanNs": 12246000,
+          "errorNs": 2129500,
+          "stdDevNs": 5572400,
+          "ratio": 4.74,
+          "allocatedBytes": 3984589
+        },
+        {
+          "method": "Arch_PerEntity_Reserved",
+          "params": {
+            "Components": "2"
+          },
+          "meanNs": 3772000,
+          "errorNs": 92000,
+          "stdDevNs": 222100,
+          "ratio": 1.46,
+          "allocatedBytes": 4445962
+        },
+        {
+          "method": "EasyEcs_PerEntity_Reserved",
+          "params": {
+            "Components": "3"
+          },
+          "meanNs": 2596000,
+          "errorNs": 55100,
+          "stdDevNs": 135100,
+          "ratio": 1,
+          "allocatedBytes": 3607101
+        },
+        {
+          "method": "Friflo_PerEntity_Reserved",
+          "params": {
+            "Components": "3"
+          },
+          "meanNs": 12259000,
+          "errorNs": 2508500,
+          "stdDevNs": 6564300,
+          "ratio": 4.73,
+          "allocatedBytes": 4508877
+        },
+        {
+          "method": "Arch_PerEntity_Reserved",
+          "params": {
+            "Components": "3"
+          },
+          "meanNs": 4215000,
+          "errorNs": 272700,
+          "stdDevNs": 689200,
+          "ratio": 1.63,
+          "allocatedBytes": 4844421
         }
       ]
     }

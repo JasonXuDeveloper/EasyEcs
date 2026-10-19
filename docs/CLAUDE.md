@@ -77,7 +77,8 @@ scripts/                 generate-static.ts, og.ts, lint-links.ts, sync-benchmar
   `*-report.csv` of `EasyEcs.Benchmark` and `EasyEcs.Comparison` (classes, [Params], mean, error, ratio, allocations)
   and the machine from the `*-report-github.md` headers; peer versions come from the comparison project's csproj.
 - Input: `BENCH_RESULTS`, else `../BenchmarkDotNet.Artifacts/results`. The committed file is kept when the directory is
-  missing (Cloudflare) or lacks classes the committed data has (a filtered local run); `--partial` overrides that.
+  missing (Cloudflare) or lacks classes the committed data has (a filtered local run); `--partial` overrides that,
+  `--merge` replaces only the classes the directory holds and keeps the others (refused for another machine).
 - After a full run on the reference machine: `BENCH_RESULTS=<results> bun run sync:benchmarks`, check the diff, commit
   the JSON.
 - Named numbers for prose are `keys` in `src/lib/benchmarks.ts`; charts and tables take a class

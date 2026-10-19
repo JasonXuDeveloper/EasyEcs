@@ -109,6 +109,7 @@ interface KeyDef {
 }
 
 const N100k = { Entities: '100000' };
+const C3 = { Components: '3' };
 
 /**
  * The named numbers MDX and the home page use. A key names what it measures,
@@ -412,6 +413,57 @@ export const keys: Record<string, KeyDef> = {
     method: 'Capture',
     field: 'allocated',
   },
+  // Creating 100,000 entities of three components in a fresh world: one by
+  // one, one by one after EnsureCapacity<T1..Tn>, and in one CreateEntities call
+  'cold.perEntity': {
+    bench: 'ColdCreateComparison',
+    method: 'EasyEcs_PerEntity',
+    params: C3,
+  },
+  'cold.reserved': {
+    bench: 'ColdCreateComparison',
+    method: 'EasyEcs_PerEntity_Reserved',
+    params: C3,
+  },
+  'cold.bulk': {
+    bench: 'ColdCreateComparison',
+    method: 'EasyEcs_Bulk',
+    params: C3,
+  },
+  /** How many times longer creation takes without the reservation */
+  'cold.reserved.speedup': {
+    bench: 'ColdCreateComparison',
+    method: 'EasyEcs_PerEntity',
+    params: C3,
+    field: 'ratio',
+    over: { method: 'EasyEcs_PerEntity_Reserved', params: C3 },
+  },
+  'cold.perEntity.arch': {
+    bench: 'ColdCreateComparison',
+    method: 'Arch_PerEntity',
+    params: C3,
+  },
+  /** EasyEcs' time over Arch's, one by one with nothing reserved */
+  'cold.perEntity.overArch': {
+    bench: 'ColdCreateComparison',
+    method: 'EasyEcs_PerEntity',
+    params: C3,
+    field: 'ratio',
+    over: { method: 'Arch_PerEntity', params: C3 },
+  },
+  'cold.reserved.arch': {
+    bench: 'ColdCreateComparison',
+    method: 'Arch_PerEntity_Reserved',
+    params: C3,
+  },
+  /** Arch's time over EasyEcs', both reserved */
+  'cold.reserved.arch.ratio': {
+    bench: 'ColdCreateComparison',
+    method: 'Arch_PerEntity_Reserved',
+    params: C3,
+    field: 'ratio',
+    over: { method: 'EasyEcs_PerEntity_Reserved', params: C3 },
+  },
 };
 
 export interface BenchNumber {
@@ -525,8 +577,10 @@ export interface Comparison {
   /** [Params] that differ between the rows (shown next to each label) */
   varying: string[];
   /**
-   * Every library runs the same cases (OperationBenchmark: EasyEcs_Iterate1
+   * The libraries run the same cases (OperationBenchmark: EasyEcs_Iterate1
    * and Friflo_Iterate1): the rows are grouped by case, one bar per library.
+   * A case only EasyEcs has (ColdCreateComparison's Bulk) is a group of one
+   * bar, beside the cases the others share.
    */
   grouped: boolean;
   /** A class of EasyEcs.Benchmark: EasyEcs against itself, ratios against the baseline */
@@ -595,10 +649,9 @@ export function comparison({
     items.length > 1 &&
     !cases.has('') &&
     cases.size < items.length &&
+    items.some((r) => !r.ours) &&
     [...cases].every(
-      (c) =>
-        items.filter((r) => r.case === c && r.ours).length === 1 &&
-        items.some((r) => r.case === c && !r.ours),
+      (c) => items.filter((r) => r.case === c && r.ours).length === 1,
     );
   const result: ComparisonRow[] = items.map((item) => {
     const same = items.filter(

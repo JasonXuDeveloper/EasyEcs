@@ -12,10 +12,13 @@
  * with a few rows from another machine.
  *
  *   BENCH_RESULTS=/path/to/BenchmarkDotNet.Artifacts/results bun run sync:benchmarks
- *   bun scripts/sync-benchmarks.ts --dir <results> --out <bench.json> [--partial]
+ *   bun scripts/sync-benchmarks.ts --dir <results> --out <bench.json> [--partial | --merge]
  *
  * `--partial` writes whatever the directory holds (for a first run, or when a
- * benchmark class was removed on purpose).
+ * benchmark class was removed on purpose). `--merge` replaces the classes the
+ * directory holds and keeps every other committed class (a run of new or
+ * changed classes only); it refuses reports from another machine or runtime,
+ * whose numbers would not compare with the committed ones.
  */
 import {
   existsSync,
@@ -40,6 +43,7 @@ const dir =
   path.join(repoRoot, 'BenchmarkDotNet.Artifacts/results');
 const out = arg('--out') ?? path.join(docsRoot, 'src/data/bench.json');
 const partial = process.argv.includes('--partial');
+const merge = process.argv.includes('--merge');
 
 /* ------------------------------------------------------------------ */
 /* Types (src/lib/benchmarks.ts reads the same shape)                  */
@@ -286,6 +290,40 @@ function main() {
   const missing = Object.keys(committed?.benchmarks ?? {}).filter(
     (name) => !(name in benchmarks),
   );
+  if (merge && committed) {
+    const env = [...environments.values()][0];
+    if (
+      environments.size > 1 ||
+      JSON.stringify(env) !== JSON.stringify(committed.environment)
+    ) {
+      console.warn(
+        `[bench] --merge: the reports in ${dir} come from another machine or runtime than ${path.relative(docsRoot, out)}; nothing written`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+    // The committed classes in their order, the new ones replaced or added at the end
+    const merged: BenchFile['benchmarks'] = {};
+    for (const [name, entry] of Object.entries(committed.benchmarks))
+      merged[name] = benchmarks[name] ?? entry;
+    for (const [name, entry] of Object.entries(benchmarks))
+      merged[name] ??= entry;
+    const newest = Math.max(
+      Date.parse(committed.generatedAt),
+      ...reports.map((f) => statSync(path.join(dir, f)).mtimeMs),
+    );
+    const data: BenchFile = {
+      ...committed,
+      generatedAt: new Date(newest).toISOString(),
+      peers: readPeers(),
+      benchmarks: merged,
+    };
+    writeFileSync(out, `${JSON.stringify(data, null, 2)}\n`);
+    console.log(
+      `[bench] merged ${reports.length} class(es) into ${path.relative(docsRoot, out)}: ${Object.keys(benchmarks).join(', ')}`,
+    );
+    return;
+  }
   if (missing.length > 0 && !partial) {
     console.warn(
       `[bench] ${dir} lacks ${missing.length} benchmark class(es) of the committed data (${missing.join(', ')}): keeping ${path.relative(docsRoot, out)}. Pass --partial to write it anyway.`,

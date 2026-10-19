@@ -63,6 +63,51 @@ const matchups: Matchup[] = [
     short: { en: 'spawning', zh: '批量生成' },
     anchor: 'bulk',
   },
+  // Creation in a fresh world, three components: reserved against reserved,
+  // the bulk call against each library's fastest way, and one by one with
+  // nothing reserved against the same in the others
+  {
+    bench: 'ColdCreateComparison',
+    params: { Components: '3' },
+    ours: ['EasyEcs_PerEntity_Reserved'],
+    rivals: ['Friflo_PerEntity_Reserved', 'Arch_PerEntity_Reserved'],
+    label: {
+      en: 'Create 100,000 three-component entities one by one in a fresh world, room reserved first',
+      zh: '在新 World 里先预留空间，再逐个创建 10 万个三组件实体',
+    },
+    short: { en: 'pre-sized creation', zh: '预留后创建' },
+    anchor: 'cold-create',
+  },
+  {
+    bench: 'ColdCreateComparison',
+    params: { Components: '3' },
+    ours: ['EasyEcs_Bulk'],
+    label: {
+      en: "Create 100,000 three-component entities in a fresh world in one call (the others' fastest way)",
+      zh: '在新 World 里一次调用创建 10 万个三组件实体（对比其他库最快的写法）',
+    },
+    short: { en: 'bulk creation', zh: '批量创建' },
+    anchor: 'cold-create',
+  },
+  {
+    bench: 'ColdCreateComparison',
+    params: { Components: '3' },
+    ours: ['EasyEcs_PerEntity'],
+    rivals: ['Friflo_PerEntity', 'Arch_PerEntity', 'DefaultEcs_PerEntity'],
+    label: {
+      en: 'Create 100,000 three-component entities one by one in a fresh world, nothing reserved',
+      zh: '在新 World 里不预留空间，逐个创建 10 万个三组件实体',
+    },
+    short: {
+      en: 'creation without pre-sizing',
+      zh: '不预留的创建',
+    },
+    anchor: 'cold-create',
+    why: {
+      en: 'A fresh EasyEcs world grows its table and entity storage by doubling, and the arrays past 85,000 bytes land on the large object heap; together they pass the budget that sets off a full collection, once per new world (D28). Arch keeps entities in 16 KB chunks, which never reach that heap. Reserve the table with `EnsureCapacity<T1..Tn>(count)` or create the entities with `CreateEntities`, and EasyEcs is the fastest of the four.',
+      zh: '新的 EasyEcs World 按倍数扩表和实体存储，超过 85,000 字节的数组进了大对象堆，累计越过预算，触发一次完整 GC，每个新 World 一次（D28）。Arch 把实体放在 16 KB 的块里，进不了大对象堆。先用 `EnsureCapacity<T1..Tn>(count)` 预留表，或者用 `CreateEntities` 批量创建，EasyEcs 就是四个库里最快的。',
+    },
+  },
   {
     bench: 'ValueQueryComparison',
     label: {
