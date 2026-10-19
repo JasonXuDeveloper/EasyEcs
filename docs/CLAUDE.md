@@ -34,7 +34,8 @@ app/                     routes: home.tsx (landing page, copy for both languages
 src/lib/                 site.ts (domain, links, product summary), seo.ts (meta, hreflang, JSON-LD), source.ts,
                          i18n.ts / i18n-ui.ts, legacy.ts, benchmarks.ts, markdown.tsx (the .md copies)
 src/components/          bench-data.tsx (BenchValue, BenchTable, BenchSource), charts/ (visx BarChart, PeerChart,
-                         BenchChart), demo/ (EcsDemo, the live demo), mermaid.tsx, search.tsx, feedback, page actions
+                         BenchChart), stats.tsx (Stats, Stat), count.tsx (Count), bars.tsx, demo/ (EcsDemo, the live
+                         demo), mermaid.tsx, search.tsx, feedback, page actions
 src/data/bench.json      every benchmark number the site shows (generated, committed)
 functions/               Cloudflare Pages Functions: [[path]].ts (locale redirect, markdown negotiation),
                          api/feedback.ts (GitHub Discussions)
@@ -136,6 +137,10 @@ scripts/                 generate-static.ts, og.ts, lint-links.ts, sync-benchmar
   wrapper element), its memoized SVG re-renders only for a new width (hover, focus and reveal flip data
   attributes), and an off-screen plot skips rendering (`.ecs-chart-plot`); `patches/next-themes` skips the
   whole-document restyle of applying an unchanged theme on mount.
+- Motion is only for the number moments (`src/lib/motion.ts`): figures (`<Count>`, `BenchValue`, `<Stat>`) count up
+  from 0 and bars grow in once, when first in view after hydration; the HTML holds the final values, reduced motion
+  shows them at once, and it runs on transforms/opacity (CSS transitions, `number-flow`'s Web Animations, loaded on
+  the first count, its `@property` rules in `app/app.css` via `patches/number-flow`), never a React render per frame.
 - `public/_headers`: hashed assets immutable, icons and the manifest a day, the search indexes five minutes; HTML keeps
   Cloudflare's default (revalidated).
 

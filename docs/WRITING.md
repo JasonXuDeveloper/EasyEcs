@@ -92,6 +92,7 @@ every page:
 | Component | Shows |
 | --- | --- |
 | `<BenchValue k="tick.oneWorld" />` | One named number; keys are in `src/lib/benchmarks.ts` (`keys`). Add a key there for a new number. |
+| `<Stats><Stat hero lead /><Stat k="tick.oneWorld" label="One server tick">100,000 entities</Stat></Stats>` | A page's headline numbers as stat blocks under its intro: a named number (`k`), a lead of the comparisons (`lead`, `lead="1"` the next one, `library="Arch"` against one library) or a count of them (`count="ahead" of="total"`); `label` above the figure, the children under it; `hero` spans the row with the huge figure. |
 | `<BenchSource />` | The machine and tool line. Put it under prose that quotes `BenchValue`s. |
 | `<BenchChart bench="Features.RemovalComparison" param="Removed=1000" />` | A benchmark class as bars: EasyEcs in the accent, other libraries in grey, each with its time relative to EasyEcs and its allocations, plus the source line and a data table. `methods="A,B"` picks and orders rows; `title` and `subtitle` are optional. |
 | `<BenchTable bench="Operations.OperationBenchmark" />` | The same rows as a table: library, case, [Params], mean, vs EasyEcs, allocated. |
