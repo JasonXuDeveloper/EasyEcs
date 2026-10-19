@@ -9,8 +9,9 @@ deployed to Cloudflare Pages. English and Chinese. How to write a page: `WRITING
 bun install
 bun run dev              # http://localhost:5173
 bun run check            # tsc, Biome, links + anchors + icons (scripts/lint-links.ts)
-bun run build            # Chromium check, git history, benchmark sync, prerender, static files -> build/client, then lint:seo
+bun run build            # Chromium check, git history, benchmark sync, prerender, static files -> build/client, then lint:seo, lint:search
 bun run lint:seo         # titles, descriptions, canonical, hreflang, cards, JSON-LD, sitemap, robots, llms files
+bun run lint:search      # each query of scripts/search-expectations.json finds its page in the built search index
 bun run sync:benchmarks  # src/data/bench.json from BenchmarkDotNet reports (see Benchmarks)
 bun run og:default       # redraw the default social card (public/og.png, the card of /en)
 bun run og:github        # redraw the repository's social preview (../.github/social-preview.png)
@@ -32,7 +33,8 @@ content/                 the pages (the docs folder of the repository, read on G
 app/                     routes: home.tsx (landing page, copy for both languages inline), docs.tsx, not-found,
                          redirect-root (/ -> /en or /zh), api/search (/api/search/{lang}.json, one index per language)
 src/lib/                 site.ts (domain, links, product summary), seo.ts (meta, hreflang, JSON-LD), source.ts,
-                         i18n.ts / i18n-ui.ts, legacy.ts, benchmarks.ts, markdown.tsx (the .md copies)
+                         i18n.ts / i18n-ui.ts, legacy.ts, benchmarks.ts, markdown.tsx (the .md copies),
+                         search.ts (search ranking), search-skip.ts (`{/* search: skip */}`)
 src/components/          bench-data.tsx (BenchValue, BenchTable, BenchSource), charts/ (visx BarChart, PeerChart,
                          BenchChart), stats.tsx (Stats, Stat), count.tsx (Count), bars.tsx, demo/ (EcsDemo, the live
                          demo), mermaid.tsx, search.tsx, feedback, page actions
@@ -40,8 +42,8 @@ src/data/bench.json      every benchmark number the site shows (generated, commi
 functions/               Cloudflare Pages Functions: [[path]].ts (locale redirect, markdown negotiation),
                          api/feedback.ts (GitHub Discussions)
 public/                  _redirects, _headers, _routes.json, icons, manifest, demo/ (the live demo's .NET runtime)
-scripts/                 generate-static.ts, og.ts, lint-links.ts, sync-benchmarks.ts, git-history.ts,
-                         generate-favicons.ts, build-demo.sh
+scripts/                 generate-static.ts, og.ts, lint-links.ts, lint-seo.ts, lint-search.ts (+ search-expectations.json),
+                         sync-benchmarks.ts, git-history.ts, generate-favicons.ts, build-demo.sh
 ```
 
 ## Conventions
@@ -89,7 +91,9 @@ scripts/                 generate-static.ts, og.ts, lint-links.ts, sync-benchmar
 
 - Metadata and JSON-LD: `src/lib/seo.ts` (WebSite; SoftwareSourceCode + SoftwareApplication with GitHub, NuGet and
   MIT; TechArticle with dateModified; BreadcrumbList; FAQPage for `faq: true` pages and the landing page). Site facts:
-  `src/lib/site.ts`; never put a value there that is not true per the EasyEcs repository.
+  `src/lib/site.ts`; never put a value there that is not true per the EasyEcs repository. Facts that change with the
+  code are computed at build time (`vite.config.ts`): `docsVersion` from the changelog, `analyzerRules` from the EECS
+  ids in `src/EasyEcs.Generator`; the landing page and the social cards state them, never a typed count.
 - hreflang `en`, `zh`, `zh-CN` and `x-default` on every page with both languages.
 - `scripts/generate-static.ts` moves pages to `x.html` (slash-less URLs serve 200), writes 404.html, the sitemap
   (hreflang alternates, `lastmod` from git), robots.txt (all crawlers, AI crawlers and Baiduspider named),
@@ -101,9 +105,31 @@ scripts/                 generate-static.ts, og.ts, lint-links.ts, sync-benchmar
   from (or a noindex page in) the sitemap, robots.txt without the AI crawlers, and llms files or Markdown copies
   missing a page. Fix the page's `seoTitle` / `description`; `pending` in the script lists pages being rewritten.
 - The GitHub social preview (`.github/social-preview.png`, `bun run og:github`) takes its numbers from
-  `src/data/bench.json` and the analyzer's source; upload it in the repository settings after redrawing it.
+  `src/data/bench.json` and the analyzer's source (`analyzerRules`); upload it in the repository settings after
+  redrawing it.
 - Search console verification: `VITE_GOOGLE_SITE_VERIFICATION`, `VITE_BING_SITE_VERIFICATION`,
   `VITE_BAIDU_SITE_VERIFICATION` at build time.
+
+## Search
+
+- One index per language, prerendered by `app/routes/search.ts` (`createFromSource`, Fumadocs' advanced index on
+  ZBSearch: a record per page title, heading, paragraph and table row, all in one `content` field) to
+  `/api/search/{lang}.json`; the dialog (`src/components/search.tsx`) loads lazily and searches in the browser.
+- Ranking (`src/lib/search.ts`): ZBSearch's BM25, then a custom `sortBy` (a ZBSearch search parameter, passed through
+  `useStaticSearch({ search })`) weights a page-title record by 3. A per-field `boost` cannot do it: title and body
+  share one field. Results are grouped by page in the order of each page's best record, so a page whose title matches
+  comes first. API reference pages keep their plain score (their titles are type names, which would outrank the
+  guide page about the feature). The weight changes nothing in the index.
+- `{/* search: skip */}` on its own line, followed by a blank line, keeps the next block (a table, list, paragraph or
+  component) out of the index (`src/lib/search-skip.ts`, a remark plugin before Fumadocs' remark-structure: the block
+  gets an empty `data.structuredData`, which remark-structure records instead of its text). Use it for blocks whose
+  words would outrank the pages about them, such as the performance page's list of test and benchmark names. The
+  block still renders and stays in the Markdown copies and llms files.
+- `bun run lint:search` (`scripts/lint-search.ts`, last step of `bun run build`) runs every query of
+  `scripts/search-expectations.json` through Fumadocs' static client over the built index, with the dialog's
+  parameters, prints the top three pages and fails when the expected page is not first (or not within `top` where
+  two pages are legitimately equal). A new feature page gets a query in both languages there; when a query fails,
+  fix the content (a title or heading in the words readers search for, or a skip marker), not the expectation.
 
 ## Live demo
 

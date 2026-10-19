@@ -116,6 +116,15 @@ Fumadocs' `Callout` (`type="info" | "idea" | "warn" | "error"`), `Cards` / `Card
 `lucide-react` (`import { Rocket } from 'lucide-react'`). A new MDX component needs a Markdown form in
 `src/lib/markdown.tsx`, used by the `.md` copies and `llms-full.txt`.
 
+## Search
+
+The site search indexes every heading, paragraph and table row, and ranks a page whose title matches first. Give
+headings the words readers type ("Reserve before the wave: `EnsureCapacity`"). A block that lists many names of
+other features (a table of test or benchmark names, a long index of links) would outrank the pages about them: put
+`{/* search: skip */}` on its own line before it, followed by a blank line. The block still renders and stays in the
+Markdown copy; only search leaves it out. `bun run build` checks the queries in `scripts/search-expectations.json`;
+add one in both languages for a new feature page.
+
 ## Tone: English
 
 - Concise and concrete. Second person ("you"), present tense, active voice.
