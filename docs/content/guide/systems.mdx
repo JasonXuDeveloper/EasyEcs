@@ -67,6 +67,7 @@ public class DeathSystem : EcsSystem
 
 ```csharp
 var world = new World();
+world.AddSingleton<BurnTotals>();                  // BurnSystem reads it: add it before the first update
 world.AddSystem<DeathSystem>();                    // added first, runs second: [UpdateAfter] orders it
 world.AddSystem<BurnSystem>();
 world.CreateEntity(new Health(5), new Burning(3, 10), new Player());
@@ -153,7 +154,7 @@ an instance method. Its parameters say what it runs over:
 | Parameter | Meaning |
 | --- | --- |
 | `ref T` / `in T` / `ref readonly T`, `T : IComponent` | 1 to 9 components: `ref` to write, `in` to read |
-| `ref T` / `in T`, `T : ISingletonComponent` | the world's singleton, resolved once per pass and added if missing |
+| `ref T` / `in T`, `T : ISingletonComponent` | the world's singleton, resolved once per pass; throws if it was not added |
 | `Entity` | the current entity, for structural changes and lookups |
 | `World` | the world (for creating entities, other singletons) |
 | [`Maybe<T>`](#maybe) | a component the entity may lack |
@@ -375,6 +376,7 @@ when off. Read it between updates, for example from a diagnostics endpoint:
 
 ```csharp
 var measured = new World(new WorldOptions { MeasureSystems = true });
+measured.AddSingleton<BurnTotals>();
 measured.AddSystem<BurnSystem>();
 measured.Update();
 var stats = measured.GetSystem<BurnSystem>().Stats;
@@ -391,6 +393,7 @@ With `SystemErrors = SystemErrorPolicy.Disable`, the failing system is switched 
 
 ```csharp
 var guarded = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
+guarded.AddSingleton<BurnTotals>();
 guarded.AddSystem<BurnSystem>();
 guarded.Update();
 foreach (var system in guarded.Systems)                   // a health check, between updates

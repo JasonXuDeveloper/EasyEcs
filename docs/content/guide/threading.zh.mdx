@@ -182,7 +182,7 @@ public sealed class ReceiveMoves(ConcurrentQueue<MoveRequest> inbox) : EcsSystem
 | --- | --- |
 | 结构变更、增删系统和单例、`Capture` / `Restore`、`Save` / `Load` | 只能在拥有者线程上，一次一个。靠一个普通的拥有者标志（没有原子指令）：另一个操作进行中，或者结构被冻结时（并行阶段、并行 `[ForEach]`、批量作业、`INoStructuralChanges` 遍历）再开始一个，会抛 `InvalidOperationException`，而不是把表写坏。 |
 | 查询匹配、`Has`、`Get` 查找 | 无锁，读的是不可变、写时复制的表列表。某种查询形状第一次使用时，走一次比较交换闸门。 |
-| 系统第一次解析的单例 | 同一个闸门：同一阶段的多个系统可以同时添加它。 |
+| 系统用 `GetOrAddSingleton<T>()` / `GetOrAddX()` 添加的单例 | 同一个闸门：同一阶段的多个系统可以同时添加它。 |
 | 组件和单例的值 | 有意不做同步：由拥有者线程或调度器决定谁能碰它们。 |
 | 值索引，以及销毁和移除时做的解链 | World 有索引时，只能在拥有者线程上。 |
 

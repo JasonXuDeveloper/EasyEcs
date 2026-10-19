@@ -208,7 +208,7 @@ tools/ApiDocs/                 writes docs/content/reference/ from the XML docs 
   equatable symbol-free models, no diagnostics from generators (add them to `EasyEcsAnalyzer` using `Symbols`), a
   tracking name per stage and a caching assertion in `GeneratorTests`.
 - **Structural changes go through the gate** (`using (Structural())`: owner thread, not reentrant; `Shared()` only for the cold paths a parallel stage's threads
-  reach on their own: query cache misses, missing singletons, closing tombstones) and through `AddBit(s)` /
+  reach on their own: query cache misses, a missing singleton added by `GetOrAddSingleton`, closing tombstones) and through `AddBit(s)` /
   `RemoveBit(s)` / `MoveTo` / `RemoveRow` (and `Archetype.FillHoles`, which rewrites rows and slots); never mutate
   `Archetype.Slots`, presence bits or `EntityMeta` directly elsewhere.
 - **Per-entity state outside the tables is `EntityMeta` only** (16 bytes). Do not add per-entity arrays or fields

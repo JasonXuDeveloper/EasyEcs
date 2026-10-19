@@ -196,7 +196,7 @@ drains a mailbox from a network thread this way.
 | --- | --- |
 | Structural changes, systems and singletons added or removed, `Capture` / `Restore`, `Save` / `Load` | Owner thread only, one at a time. A plain owner flag (no atomic instruction): one started while another runs, or while the structure is frozen (a parallel stage, a parallel `[ForEach]`, a batch job, an `INoStructuralChanges` pass), throws `InvalidOperationException` instead of tearing the tables. |
 | Query matching, `Has`, `Get` lookups | Lock-free over immutable, copy-on-write table lists. The first use of a query shape takes a compare-and-swap gate once. |
-| A singleton a system resolves first | The same gate: systems of one stage may add it at once. |
+| A singleton a system adds with `GetOrAddSingleton<T>()` / `GetOrAddX()` | The same gate: systems of one stage may add it at once. |
 | Component and singleton values | Not synchronized, by design: the owner thread or the scheduler decides who touches them. |
 | Value indexes, and the unlinking done by destroys and removals | Owner thread only while the world has an index. |
 

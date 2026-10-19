@@ -44,6 +44,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D24](#d24-an-indexs-key-holds-its-entities-in-one-array) | An index's key holds its entities in one array |
 | [D25](#d25-structural-row-loops-are-compiled-for-tables-without-tombstones) | Structural row loops are compiled for tables without tombstones |
 | [D26](#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call) | Generated members where code would repeat a type; not for every call |
+| [D27](#d27-reading-a-missing-singleton-throws-everywhere) | Reading a missing singleton throws everywhere |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -438,6 +439,34 @@ member" diagnostic.
 - **A hidden diagnostic with a fix from `entity.Get<Position>()` to `entity.Position`.** It is style, not
   correctness: the two compile to the same call. It would add an operation callback to every invocation in every
   user project. The docs teach the generated members; generic code needs the generic API.
+
+## D27. Reading a missing singleton throws everywhere [#d27-reading-a-missing-singleton-throws-everywhere]
+
+**Decision.** Every read of a singleton the world does not have throws `InvalidOperationException`: `world.X`,
+`GetSingleton<T>()`, `SingletonRef<T>()`, and so a `[ForEach]` method's singleton parameter, on its system's first
+run. The message names the singleton and the calls that add it (`world.SetClock(...)`, `AddSingleton<Clock>()`, or
+`GetOrAddClock()` where a default is meant). `GetOrAddSingleton<T>()` / `GetOrAddX()` is the one read that adds the
+default, and the code that calls it says so.
+
+**Why.**
+- **A forgotten setup fails where it happens.** Until 4.2 a `[ForEach]` parameter added the default singleton while
+  `world.X` threw. A world built without its `SetClock(...)` then ran on a clock with no step: entities stood still,
+  a test passed for the wrong reason, and nothing pointed at the missing line. Now the first `Update()` names the
+  singleton and the call to add.
+- **One rule for every read.** The same singleton read in `OnUpdate` and taken as a parameter behaved differently;
+  now a read is a read, and only a call named `GetOrAdd` adds.
+- **Nothing on the hot path.** A job resolves its singletons once per pass, when it is built; the check is the null
+  test the old add made, and the throw is a cold method.
+
+**Considered.**
+- **Keep adding the default for `[ForEach]` parameters.** It saves a setup line in small programs and hides the
+  forgotten one in real servers, where the default of most singletons (a clock, a configuration, a spawner) is wrong.
+- **An analyzer rule for a singleton parameter no code adds.** The setup is host code, often in another assembly, or
+  comes from `Load`, `LoadEntities` or a plugin; a compile-time check would miss those or flag correct code.
+- **A check in `AddSystem`.** Systems are often added before their singletons, or before a `Load` brings them; the
+  first run is the earliest point where the singleton has to exist.
+- **`GetOrAddX()` as the explicit default** (chosen): where the default is right, such as a counter starting at
+  zero, one call says it.
 
 ## Related [#related]
 

@@ -269,6 +269,15 @@ The documentation lives at **[ecs.xgamedev.net](https://ecs.xgamedev.net)**; its
 
 The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading order.
 
+## What's new in 4.2
+
+- **Reading a missing singleton throws everywhere.** A `[ForEach]` method's singleton parameter (and
+  `world.SingletonRef<T>()`) used to add the default value; it now throws `InvalidOperationException` on the system's
+  first run, like `world.X` and `GetSingleton<T>()`, and the message names the call to add it. A forgotten
+  `world.SetClock(…)` fails at once instead of running on a clock with no step; `world.GetOrAddClock()` is the
+  explicit default. See the [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v41--v42).
+- A `[ForEach]` method with a parameter named `owner` builds again (the generated code no longer fails with CS0100).
+
 ## What's new in 4.1
 
 - **Archetype tables.** Each archetype stores its components as columns of rows (structure of arrays); unmanaged

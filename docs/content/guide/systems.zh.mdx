@@ -63,6 +63,7 @@ public class DeathSystem : EcsSystem
 
 ```csharp
 var world = new World();
+world.AddSingleton<BurnTotals>();                  // BurnSystem 要读它：第一次更新之前加上
 world.AddSystem<DeathSystem>();                    // 先加，后跑：[UpdateAfter] 决定了顺序
 world.AddSystem<BurnSystem>();
 world.CreateEntity(new Health(5), new Burning(3, 10), new Player());
@@ -143,7 +144,7 @@ public class SaveSystem : EcsSystem
 | 参数 | 含义 |
 | --- | --- |
 | `ref T` / `in T` / `ref readonly T`，`T : IComponent` | 1 到 9 个组件：`ref` 写，`in` 读 |
-| `ref T` / `in T`，`T : ISingletonComponent` | World 的单例组件，每次遍历只解析一次，不存在就添加 |
+| `ref T` / `in T`，`T : ISingletonComponent` | World 的单例组件，每次遍历只解析一次；没添加时抛异常 |
 | `Entity` | 当前实体，用来做结构变更和查找 |
 | `World` | World 本身（创建实体、访问其他单例） |
 | [`Maybe<T>`](#maybe) | 实体可能没有的组件 |
@@ -345,6 +346,7 @@ Reports.Rich(world, mark, ref rich, 1_000);       // [Changed<T>]：tick 紧跟�
 
 ```csharp
 var measured = new World(new WorldOptions { MeasureSystems = true });
+measured.AddSingleton<BurnTotals>();
 measured.AddSystem<BurnSystem>();
 measured.Update();
 var stats = measured.GetSystem<BurnSystem>().Stats;
@@ -360,6 +362,7 @@ Console.WriteLine($"burn: {stats.Last.TotalMicroseconds} μs, average {stats.Ave
 
 ```csharp
 var guarded = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
+guarded.AddSingleton<BurnTotals>();
 guarded.AddSystem<BurnSystem>();
 guarded.Update();
 foreach (var system in guarded.Systems)                   // 健康检查，在两次更新之间

@@ -10,9 +10,18 @@ major or minor version that needs code changes? The
 [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md) has the steps. Each
 [GitHub release](https://github.com/JasonXuDeveloper/EasyEcs/releases) also lists every pull request it contains.
 
-## 4.1.1 [#v4-1-1]
+## 4.2.0 [#v4-2-0]
 
-### Fixes [#v4-1-1-fixes]
+### Changes that need code changes [#v4-2-0-breaking]
+
+- A `[ForEach]` method's singleton parameter throws `InvalidOperationException` when the world has no such singleton,
+  like `world.X` and `GetSingleton<T>()` (it used to add the default value); `world.SingletonRef<T>()` throws the same
+  way. Add the singleton where the world is built, before the first `Update()`: `world.SetClock(…)` or
+  `world.AddSingleton<Clock>()`, or `world.GetOrAddClock()` where the default is right. See
+  [singletons](/en/docs/guide/singletons#in-systems) and the
+  [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v41--v42).
+
+### Fixes [#v4-2-0-fixes]
 
 - A `[ForEach]` method with a parameter named `owner` no longer fails to build with CS0100 in generated code.
 

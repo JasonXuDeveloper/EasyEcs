@@ -53,8 +53,9 @@ score.Deaths++;
 
 ### Take it in a system [#in-systems]
 
-A `[ForEach]` method takes a singleton as a `ref` or `in` parameter. It is resolved once per pass (and added if
-missing), not once per entity.
+A `[ForEach]` method takes a singleton as a `ref` or `in` parameter. It is resolved once per pass, not once per
+entity. The singleton must exist by then: a system whose singleton was never added throws
+`InvalidOperationException` on its first run, even when no entity matches, so add it where the world is built.
 
 ```csharp
 public class DeathSystem : EcsSystem
@@ -88,7 +89,7 @@ public class ClockSystem : EcsSystem
 | `bool HasSingleton<T>()` | `world.HasClock` | Whether it exists |
 | `bool TryGetSingleton<T>(out T)` | | A copy, if present |
 | `bool RemoveSingleton<T>()` | `world.RemoveClock()` | Removes it; false if it was not added |
-| `SingletonRef<T> SingletonRef<T>()` | | A [stable handle](#stable-handles), adding it if missing |
+| `SingletonRef<T> SingletonRef<T>()` | | A [stable handle](#stable-handles); throws if it was not added |
 
 ```csharp
 world.SetScore(0);                                        // generated from the record's constructor
@@ -103,7 +104,7 @@ The generated members follow the rules of [generated members](/en/docs/guide/ent
 ### Stable handles [#stable-handles]
 
 A singleton's storage never moves, unlike component rows. `world.SingletonRef<T>()` returns a `SingletonRef<T>`
-(adding the singleton if missing) whose `Value` is a `ref T` with no lookup at all, valid for as long as the singleton
+(it throws if the singleton was not added) whose `Value` is a `ref T` with no lookup at all, valid for as long as the singleton
 exists. Take it once at setup and keep it, in a field of your host or a local of a loop.
 
 ```csharp
@@ -161,7 +162,7 @@ A pass that writes a singleton for each of 100,000 entities, against Friflo.Engi
 | --- | --- | --- |
 | State kept in a system field instead | Invisible to other systems, lost on remove, shared by worlds if static | [EECS007](/en/docs/guide/analyzer#eecs007) |
 | A class implementing `ISingletonComponent` | Does not compile | [EECS006](/en/docs/guide/analyzer#eecs006) |
-| `GetSingleton<T>()` before it was added | `InvalidOperationException` | Add it at setup, or use `GetOrAddSingleton` |
+| Reading a singleton before it was added (`world.X`, `GetSingleton<T>()`, a `[ForEach]` parameter) | `InvalidOperationException`, naming the call that adds it | Add it at setup, or use `GetOrAddX()` where the default is right |
 | A `ref` singleton in a parallel method | Races between chunks | [EECS010](/en/docs/guide/analyzer#eecs010) |
 | Changing a collection in a singleton through `in` | Scheduled as a read | [EECS011](/en/docs/guide/analyzer#eecs011) |
 | Writing through a `SingletonRef<T>` after `RemoveSingleton` | The write reaches nothing | Take a new handle after re-adding |

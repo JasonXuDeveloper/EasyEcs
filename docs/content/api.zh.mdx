@@ -207,7 +207,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.Update()` / `world.Update<TGroup>()` | 分组内所有系统之和 | 同步、零分配；`Dispose` 之后调用抛 `ObjectDisposedException` |
 | `world.ChangeTick` | O(1) | 每个系统阶段加一，每次更新结束再加一 |
 | `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` | O(1) | `ref T`；`AddSingleton` 对已有单例原地重置；`GetSingleton` 在缺失时抛异常 |
-| `world.SingletonRef<T>()` | O(1) | 稳定句柄（缺失时先添加）；`.Value` 一次读取 |
+| `world.SingletonRef<T>()` | O(1) | 稳定句柄；单例没添加时抛异常；`.Value` 一次读取 |
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) | 单例不存在时 `RemoveSingleton` 返回 false |
 | 生成的成员：单例 `X` 的 `world.X`、`HasX`、`GetOrAddX()`、`SetX(…)`、`RemoveX()` | 同对应的泛型调用 | |
 | `world.Systems` | 遍历 O(系统数)，`Count` 为 O(分组数) | 按执行顺序列出所有分组的系统，零分配 |

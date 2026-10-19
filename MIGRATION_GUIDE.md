@@ -2,6 +2,7 @@
 
 **Contents**
 
+- [v4.1 → v4.2](#v41--v42)
 - [v4.0 → v4.1](#v40--v41)
 - [v3.x → v4.0](#v3x--v40): [Namespaces](#namespaces) · [Entities and components](#entities-and-components) ·
   [Singletons](#singletons) · [Systems](#systems) · [Behavioral changes](#behavioral-changes) ·
@@ -11,6 +12,36 @@
   [Common patterns](#common-migration-patterns) · [Troubleshooting](#troubleshooting)
 
 For the current API, see the [documentation](docs/content/README.md).
+
+## v4.1 → v4.2
+
+One behavior changed; code written for 4.1 compiles unchanged.
+
+- **A `[ForEach]` singleton parameter throws when the singleton is missing.** The parameter resolves through
+  `world.SingletonRef<T>()`, which used to add the singleton with its default value; both now throw
+  `InvalidOperationException`, like `world.X` and `GetSingleton<T>()`, on the system's first run (even when no entity
+  matches). The message names the fix: `Singleton Clock was not added to this world: set it before the systems that
+  read it run (world.SetClock(...) or world.AddSingleton<Clock>()), or use GetOrAddClock() where a default is
+  meant`. Add every singleton your systems read where the world is built, before the first `Update()`, also in tests:
+
+  **v4.1** (`Ticker` takes `ref Clock`; the first update added a default `Clock`, with no step):
+
+  ```csharp
+  var world = new World();
+  world.AddSystem<Ticker>();
+  world.Update();
+  ```
+
+  **v4.2** (set it first, or call `world.GetOrAddClock()` where the default is right):
+
+  ```csharp
+  var world = new World();
+  world.SetClock(Tick: 0, DeltaTime: 1f / 30);
+  world.AddSystem<Ticker>();
+  world.Update();
+  ```
+
+  A world restored with `Load` already holds the singletons of its save; add only the ones the save did not hold.
 
 ## v4.0 → v4.1
 

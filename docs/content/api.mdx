@@ -214,7 +214,7 @@ Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
 | `world.Update()` / `world.Update<TGroup>()` | Σ systems of the group | synchronous, allocation-free; throws `ObjectDisposedException` after `Dispose` |
 | `world.ChangeTick` | O(1) | grows by one per stage of systems and once after each update |
 | `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` | O(1) | `ref T`; `AddSingleton` resets an existing singleton in place; `GetSingleton` throws when missing |
-| `world.SingletonRef<T>()` | O(1) | a stable handle (adds the singleton if missing); `.Value` is one load |
+| `world.SingletonRef<T>()` | O(1) | a stable handle; throws when the singleton was not added; `.Value` is one load |
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) | `RemoveSingleton` returns false when it was not added |
 | generated: `world.X`, `HasX`, `GetOrAddX()`, `SetX(…)`, `RemoveX()` for a singleton `X` | as the generic call | |
 | `world.Systems` | O(systems) to walk, `Count` O(groups) | every group's systems in execution order, allocation-free |

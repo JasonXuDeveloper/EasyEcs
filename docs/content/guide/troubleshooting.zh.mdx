@@ -80,15 +80,16 @@ InvalidOperationException: Entity has no Mana component
 ## 为什么单例 “not added to this world”？ [#singleton-not-added]
 
 ```text
-InvalidOperationException: Singleton Clock was not added to this world
+InvalidOperationException: Singleton Clock was not added to this world: set it before the systems that read it run
+(world.SetClock(...) or world.AddSingleton<Clock>()), or use GetOrAddClock() where a default is meant
 ```
 
-`world.GetSingleton<T>()` 或生成的 `world.Clock` 读了一个没人添加过的单例。World 不会凭空造一个，因为默认值很少是对的（步长为零的
-时钟）。
+代码读了一个没人添加过的单例：`world.GetSingleton<T>()`、生成的 `world.Clock`、`world.SingletonRef<T>()`，或者把 `Clock`
+当参数的 `[ForEach]` 方法。参数在系统运行时解析，所以第一次 `Update()` 就会抛异常，哪怕一个匹配的实体都没有。World 不会凭空造一个单例，
+因为默认值很少是对的：步长为零的时钟会让所有实体原地不动，却没有任何报错指向漏掉的初始化（[单例](/zh/docs/guide/singletons#in-systems)）。
 
-**修法：**在建 World 的地方添加它（`world.SetClock(…)`、`world.AddSingleton<Clock>()`），默认值合适的地方用
-`GetOrAddSingleton<T>()` / `GetOrAddClock()`。`[ForEach]` 参数不一样：它通过 `SingletonRef<T>()` 解析，单例不存在时会以默认值
-添加，所以漏了初始化表现为值不对，而不是这个异常（[单例](/zh/docs/guide/singletons#in-systems)）。
+**修法：**在建 World 的地方、第一次 `Update()` 之前添加它（`world.SetClock(…)`、`world.AddSingleton<Clock>()`），
+默认值合适的地方用 `GetOrAddSingleton<T>()` / `GetOrAddClock()`。
 
 ## 为什么 `Maybe<T>.Value` 会抛异常？ [#maybe-empty]
 

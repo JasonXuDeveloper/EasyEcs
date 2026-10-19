@@ -42,6 +42,7 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D24](#d24-an-indexs-key-holds-its-entities-in-one-array) | 索引的每个键用一个数组存它的实体 |
 | [D25](#d25-structural-row-loops-are-compiled-for-tables-without-tombstones) | 为没有墓碑的表单独编译结构性行循环 |
 | [D26](#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call) | 在代码会重复写类型名的地方生成成员，而不是每个调用都生成 |
+| [D27](#d27-reading-a-missing-singleton-throws-everywhere) | 读取缺失的单例一律抛异常 |
 
 ## D1. 状态变化即数据：没有事件和回调 [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -381,6 +382,27 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
   每次几纳秒；而跨多个类型的批量调用还得给"有其中任意一个"定义含义，单类型调用不需要。没有实现。
 - **把 `entity.Get<Position>()` 修复成 `entity.Position` 的隐藏诊断。** 这是风格而不是正确性问题：两者编译出来是同一个调用。
   它会给每个用户项目的每次方法调用多加一个操作回调。文档已经在教生成成员；泛型代码本来就需要泛型 API。
+
+## D27. 读取缺失的单例一律抛异常 [#d27-reading-a-missing-singleton-throws-everywhere]
+
+**决定。** 读 World 里没有的单例，一律抛 `InvalidOperationException`：`world.X`、`GetSingleton<T>()`、`SingletonRef<T>()`，
+因此也包括 `[ForEach]` 方法的单例参数，在系统第一次运行时抛出。异常信息写明单例的名字和添加它的调用（`world.SetClock(...)`、
+`AddSingleton<Clock>()`，确实要默认值时用 `GetOrAddClock()`）。只有 `GetOrAddSingleton<T>()` / `GetOrAddX()` 会添加默认值，
+调用它的代码自己写明了这一点。
+
+**原因。**
+- **漏掉的初始化在出错的地方暴露。** 4.2 之前，`[ForEach]` 参数会添加默认值的单例，而 `world.X` 会抛异常。漏写 `SetClock(...)`
+  的 World 于是跑在一个步长为零的时钟上：实体原地不动，测试因为错误的原因通过，没有任何线索指向漏掉的那一行。现在第一次
+  `Update()` 就报出单例的名字和该加的调用。
+- **所有读取一个规则。** 同一个单例，在 `OnUpdate` 里读和作为参数接收，行为却不一样；现在读就是读，只有名字里带 `GetOrAdd` 的调用才会添加。
+- **热路径上没有额外开销。** job 在创建时解析单例，每次遍历一次；检查的还是原来添加前就有的那次判空，抛异常放在冷路径方法里。
+
+**比较过。**
+- **`[ForEach]` 参数继续添加默认值。** 小程序里省一行初始化，真实服务器里却把漏掉的那一行藏了起来，而大多数单例（时钟、配置、刷怪器）的默认值都是错的。
+- **分析器检查没有任何代码添加的单例参数。** 初始化是宿主代码，常常在另一个程序集里，或者来自 `Load`、`LoadEntities`、插件；
+  编译期检查要么漏掉这些，要么误报正确的代码。
+- **在 `AddSystem` 时检查。** 系统常常先于单例添加，或者单例要等 `Load` 才带进来；第一次运行是单例必须存在的最早时刻。
+- **用 `GetOrAddX()` 显式要默认值**（采用）：默认值本来就对的地方，比如从零开始的计数器，一次调用就说清楚了。
 
 ## 相关页面 [#related]
 

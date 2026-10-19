@@ -138,7 +138,7 @@ public class MovementSystem : EcsSystem
 | `ref T` | A component the method writes | 1 to 9 components; a write for change tracking |
 | `in T` | A component the method reads | Not a write ([EECS011](/en/docs/guide/analyzer#eecs011) catches writes through `in`) |
 | `Span<T>` / `ReadOnlySpan<T>` | A run of rows of `T` (a batch method) | Cannot mix with per-entity parameters ([EECS009](/en/docs/guide/analyzer#eecs009)) |
-| `ref S` / `in S` | A singleton | Resolved once per pass, added if missing |
+| `ref S` / `in S` | A singleton | Resolved once per pass; throws if it was not added |
 | `Entity` | The current entity | Use it for structural changes |
 | `World` | The world | For creating entities from a static method |
 | `EntitySpan` | The entities of a batch method's run | Batch methods only |

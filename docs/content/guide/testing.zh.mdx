@@ -407,8 +407,7 @@ Total tests: 5
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
-| 漏掉系统作为 `[ForEach]` 参数使用的单例 | 自动以默认值添加（步长为零的时钟），测试因为错误的原因通过 | 调用服务器的初始化方法 |
-| 漏掉系统通过 `World.X` 或 `GetSingleton<T>()` 读取的单例 | `Update()` 抛出 `InvalidOperationException` | 测试失败 |
+| 漏掉系统要读的单例（`[ForEach]` 参数、`World.X` 或 `GetSingleton<T>()`） | `Update()` 抛出 `InvalidOperationException`，信息里有单例的名字 | 测试失败：调用服务器的初始化方法，或者在测试里设置这个单例 |
 | 存档测试里 `Load` 之后才 `AddSingleton` | 加载的值被重置 | 在 `Load` 之前添加单例 |
 | 预热之前就统计分配 | 查询缓存和新表都算进了分配 | 先预热 |
 | 跨 `world.Update()` 持有 `ref` | 更新可能搬动行：`ref` 读到过期内存 | 更新后通过句柄重新读（[ref](/zh/docs/guide/refs-and-await)） |

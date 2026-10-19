@@ -87,16 +87,18 @@ InvalidOperationException: Entity has no Mana component
 ## Why is a singleton "not added to this world"? [#singleton-not-added]
 
 ```text
-InvalidOperationException: Singleton Clock was not added to this world
+InvalidOperationException: Singleton Clock was not added to this world: set it before the systems that read it run
+(world.SetClock(...) or world.AddSingleton<Clock>()), or use GetOrAddClock() where a default is meant
 ```
 
-`world.GetSingleton<T>()`, or the generated `world.Clock`, read a singleton nobody added. The world does not invent
-one, because its default is rarely right (a clock with no step).
+Code read a singleton nobody added: `world.GetSingleton<T>()`, the generated `world.Clock`, `world.SingletonRef<T>()`,
+or a `[ForEach]` method that takes `Clock` as a parameter. A parameter is resolved when its system runs, so the first
+`Update()` throws, even when no entity matches. The world does not invent the singleton, because its default is
+rarely right: a clock with no step would leave every entity standing still, with no error to point at the missing
+setup ([singletons](/en/docs/guide/singletons#in-systems)).
 
-**Fix:** add it where the world is built (`world.SetClock(…)`, `world.AddSingleton<Clock>()`), or use
-`GetOrAddSingleton<T>()` / `GetOrAddClock()` where a default value is right. A `[ForEach]` parameter is different:
-it resolves through `SingletonRef<T>()`, which adds a default value when the singleton is missing, so a forgotten
-setup shows up as wrong values instead of this exception ([singletons](/en/docs/guide/singletons#in-systems)).
+**Fix:** add it where the world is built, before the first `Update()` (`world.SetClock(…)`,
+`world.AddSingleton<Clock>()`), or use `GetOrAddSingleton<T>()` / `GetOrAddClock()` where a default value is right.
 
 ## Why does `Maybe<T>.Value` throw? [#maybe-empty]
 

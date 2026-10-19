@@ -50,7 +50,8 @@ score.Deaths++;
 
 ### 在系统里使用 [#in-systems]
 
-`[ForEach]` 方法用 `ref` 或 `in` 参数接收单例组件。每次遍历只解析一次（不存在就添加），而不是每个实体一次。
+`[ForEach]` 方法用 `ref` 或 `in` 参数接收单例组件。每次遍历只解析一次，而不是每个实体一次。到这时单例必须已经存在：
+从没添加过的话，系统第一次运行就抛 `InvalidOperationException`，哪怕一个匹配的实体都没有，所以要在建 World 的地方把它加上。
 
 ```csharp
 public class DeathSystem : EcsSystem
@@ -84,7 +85,7 @@ public class ClockSystem : EcsSystem
 | `bool HasSingleton<T>()` | `world.HasClock` | 是否存在 |
 | `bool TryGetSingleton<T>(out T)` | | 存在时拿到一份副本 |
 | `bool RemoveSingleton<T>()` | `world.RemoveClock()` | 移除；没添加过返回 false |
-| `SingletonRef<T> SingletonRef<T>()` | | [稳定句柄](#stable-handles)，不存在就添加 |
+| `SingletonRef<T> SingletonRef<T>()` | | [稳定句柄](#stable-handles)；没添加时抛异常 |
 
 ```csharp
 world.SetScore(0);                                        // 按 record 的构造函数生成
@@ -97,7 +98,7 @@ world.RemoveScore();
 
 ### 稳定句柄 [#stable-handles]
 
-和组件行不同，单例组件的存储永远不会移动。`world.SingletonRef<T>()` 返回一个 `SingletonRef<T>`（不存在就先添加），它的 `Value`
+和组件行不同，单例组件的存储永远不会移动。`world.SingletonRef<T>()` 返回一个 `SingletonRef<T>`（单例没添加时抛异常），它的 `Value`
 是一个 `ref T`，完全不需要查找，只要单例组件还在就一直有效。在初始化时取一次保存下来，放在宿主的字段里或循环外的局部变量里。
 
 ```csharp
@@ -149,7 +150,7 @@ clock.Value.Tick++;                          // 之后：直接是 ref，不用�
 | --- | --- | --- |
 | 把状态放在系统字段里 | 其他系统看不到，移除系统就丢了，静态字段还会被所有 World 共享 | [EECS007](/zh/docs/guide/analyzer#eecs007) |
 | 用 class 实现 `ISingletonComponent` | 编译不过 | [EECS006](/zh/docs/guide/analyzer#eecs006) |
-| 还没添加就 `GetSingleton<T>()` | 抛 `InvalidOperationException` | 初始化时添加，或者用 `GetOrAddSingleton` |
+| 单例还没添加就读取（`world.X`、`GetSingleton<T>()`、`[ForEach]` 参数） | 抛 `InvalidOperationException`，信息里写明该用哪个调用添加 | 初始化时添加；默认值合适的地方用 `GetOrAddX()` |
 | 并行方法里用 `ref` 接收单例组件 | 块之间发生竞争 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
 | 通过 `in` 修改单例组件里的集合 | 被当成读来调度 | [EECS011](/zh/docs/guide/analyzer#eecs011) |
 | `RemoveSingleton` 之后还通过旧的 `SingletonRef<T>` 写入 | 写入不会到达任何地方 | 重新添加后取新句柄 |

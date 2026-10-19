@@ -136,7 +136,7 @@ public class MovementSystem : EcsSystem
 | `ref T` | 方法要写的组件 | 1 到 9 个组件；对变更追踪算写入 |
 | `in T` | 方法只读的组件 | 不算写入（经 `in` 写入由 [EECS011](/zh/docs/guide/analyzer#eecs011) 拦下） |
 | `Span<T>` / `ReadOnlySpan<T>` | 一段连续的 `T` 行（批量方法） | 不能和逐实体参数混用（[EECS009](/zh/docs/guide/analyzer#eecs009)） |
-| `ref S` / `in S` | 单例 | 每次遍历解析一次，没有就添加 |
+| `ref S` / `in S` | 单例 | 每次遍历解析一次；没添加时抛异常 |
 | `Entity` | 当前实体 | 做结构变更时用 |
 | `World` | 当前 World | 在静态方法里创建实体时用 |
 | `EntitySpan` | 批量方法这一段行对应的实体 | 仅批量方法 |
