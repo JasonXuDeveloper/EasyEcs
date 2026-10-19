@@ -44,7 +44,12 @@ import {
 import { getLocale, type Locale } from '@/lib/i18n';
 import { baseOptions } from '@/lib/layout.shared';
 import { homeMeta } from '@/lib/seo';
-import { docsVersion, githubUrl, installCommand } from '@/lib/site';
+import {
+  analyzerRules,
+  docsVersion,
+  githubUrl,
+  installCommand,
+} from '@/lib/site';
 import { button, surface } from '@/lib/ui';
 import type { Route } from './+types/home';
 
@@ -336,8 +341,7 @@ const copy: Record<Locale, Copy> = {
       },
       {
         term: 'Ships with',
-        detail:
-          'The source generator, 23 analyzer rules and their code fixes, in one NuGet package',
+        detail: `The source generator, ${analyzerRules} analyzer rules and their code fixes, in one NuGet package`,
       },
       { term: 'License', detail: 'MIT, open source on GitHub' },
     ],
@@ -448,7 +452,7 @@ const copy: Record<Locale, Copy> = {
       {
         icon: ShieldCheck,
         title: 'Mistakes fail the build',
-        text: '23 analyzer rules with code fixes catch stateful systems, systems that call each other, writes through in, and structural changes off the owner thread.',
+        text: `${analyzerRules} analyzer rules with code fixes catch stateful systems, systems that call each other, writes through in, and structural changes off the owner thread.`,
         href: 'guide/analyzer',
       },
     ],
@@ -534,8 +538,7 @@ const copy: Record<Locale, Copy> = {
       {
         question:
           'How is EasyEcs different from Arch, Friflo.Engine.ECS and DefaultEcs?',
-        answer:
-          'Structural changes apply immediately, even in the middle of a query, so there is no command buffer to flush. Systems are generated from [ForEach] methods and checked at compile time by 23 analyzer rules. Change tracking, removal detection, prefabs, value indexes, relations and in-memory snapshots are built in. The other three run on Unity and older runtimes; Friflo also offers events and JSON serialization, and DefaultEcs reactive sets and serializers.',
+        answer: `Structural changes apply immediately, even in the middle of a query, so there is no command buffer to flush. Systems are generated from [ForEach] methods and checked at compile time by ${analyzerRules} analyzer rules. Change tracking, removal detection, prefabs, value indexes, relations and in-memory snapshots are built in. The other three run on Unity and older runtimes; Friflo also offers events and JSON serialization, and DefaultEcs reactive sets and serializers.`,
         more: { text: 'Which library to pick', href: 'comparison' },
       },
       {
@@ -550,7 +553,7 @@ const copy: Record<Locale, Copy> = {
       },
       {
         question: 'How do I install EasyEcs?',
-        answer: `Run "${installCommand}" in a .NET 10 project. The NuGet package includes the source generator, the analyzer and its code fixes; nothing else needs to be registered.`,
+        answer: `Run "${installCommand}" in a .NET 10 project. The NuGet package includes the source generator, the analyzer and its code fixes; nothing else needs to be registered. To start from a laid-out server project instead, run "dotnet new install EasyEcs.Templates" and "dotnet new easyecs".`,
         more: { text: 'Getting started', href: 'getting-started' },
       },
       {
@@ -598,7 +601,7 @@ const copy: Record<Locale, Copy> = {
       },
       {
         term: '包含',
-        detail: '源生成器、23 条分析器规则及代码修复，都在同一个 NuGet 包里',
+        detail: `源生成器、${analyzerRules} 条分析器规则及代码修复，都在同一个 NuGet 包里`,
       },
       { term: '协议', detail: 'MIT，在 GitHub 上开源' },
     ],
@@ -708,7 +711,7 @@ const copy: Record<Locale, Copy> = {
       {
         icon: ShieldCheck,
         title: '写错了就编译不过',
-        text: '23 条带代码修复的分析器规则，拦下有状态的系统、系统互相调用、经 in 写入、在非所有者线程做结构变更等问题。',
+        text: `${analyzerRules} 条带代码修复的分析器规则，拦下有状态的系统、系统互相调用、经 in 写入、在非所有者线程做结构变更等问题。`,
         href: 'guide/analyzer',
       },
     ],
@@ -793,8 +796,7 @@ const copy: Record<Locale, Copy> = {
       },
       {
         question: 'EasyEcs 和 Arch、Friflo.Engine.ECS、DefaultEcs 有什么不同？',
-        answer:
-          '结构变更立即生效，查询途中也一样，没有命令缓冲需要提交。系统由 [ForEach] 方法生成，并在编译期接受 23 条分析器规则的检查。变更追踪、移除检测、预制体、值索引、关系和内存快照都是内置的。另外三个库支持 Unity 和更老的运行时；Friflo 还提供事件和 JSON 序列化，DefaultEcs 提供响应式集合和序列化器。',
+        answer: `结构变更立即生效，查询途中也一样，没有命令缓冲需要提交。系统由 [ForEach] 方法生成，并在编译期接受 ${analyzerRules} 条分析器规则的检查。变更追踪、移除检测、预制体、值索引、关系和内存快照都是内置的。另外三个库支持 Unity 和更老的运行时；Friflo 还提供事件和 JSON 序列化，DefaultEcs 提供响应式集合和序列化器。`,
         more: { text: '该选哪个库', href: 'comparison' },
       },
       {
@@ -809,7 +811,7 @@ const copy: Record<Locale, Copy> = {
       },
       {
         question: '怎么安装 EasyEcs？',
-        answer: `在 .NET 10 项目里运行 "${installCommand}"。NuGet 包里已经带了源生成器、分析器和代码修复，不需要再注册任何东西。`,
+        answer: `在 .NET 10 项目里运行 "${installCommand}"。NuGet 包里已经带了源生成器、分析器和代码修复，不需要再注册任何东西。想直接从组织好的服务器项目开始，运行 "dotnet new install EasyEcs.Templates" 和 "dotnet new easyecs"。`,
         more: { text: '快速开始', href: 'getting-started' },
       },
       {

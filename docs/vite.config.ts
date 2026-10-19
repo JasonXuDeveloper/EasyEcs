@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reactRouter } from '@react-router/dev/vite';
@@ -45,13 +45,30 @@ function docsVersion() {
   return `${match[1]}.${match[2]}`;
 }
 
+/** The analyzer's rules (EECS002…), counted in the generator's source, so the site never states a stale count */
+function analyzerRules() {
+  const dir = path.join(root, '../src/EasyEcs.Generator');
+  const ids = new Set<string>();
+  for (const file of readdirSync(dir)) {
+    if (!file.endsWith('.cs')) continue;
+    const source = readFileSync(path.join(dir, file), 'utf8');
+    for (const match of source.matchAll(/"(EECS\d{3})"/g)) ids.add(match[1]);
+  }
+  if (ids.size === 0)
+    throw new Error('No analyzer rules found in src/EasyEcs.Generator');
+  return ids.size;
+}
+
 // `--mode scripts`: the scripts in scripts/ (run with vite-node) only load the content.
 export default defineConfig(({ mode }) => ({
   plugins:
     mode === 'scripts'
       ? [fumadocsMdx()]
       : [fumadocsMdx(), serverOnlyPageExports(), tailwindcss(), reactRouter()],
-  define: { __DOCS_VERSION__: JSON.stringify(docsVersion()) },
+  define: {
+    __DOCS_VERSION__: JSON.stringify(docsVersion()),
+    __ANALYZER_RULES__: JSON.stringify(analyzerRules()),
+  },
   optimizeDeps:
     mode === 'scripts' ? { noDiscovery: true, include: [] } : undefined,
   resolve: {

@@ -21,6 +21,7 @@ import sharp from 'sharp';
 import { benchNumber, formatRatio } from '../src/lib/benchmarks';
 import { featureComparison } from '../src/lib/feature-comparison';
 import type { Locale } from '../src/lib/i18n';
+import { analyzerRules } from '../src/lib/site';
 
 export interface Card {
   /** Page URL, e.g. /en/docs/guide/queries */
@@ -339,19 +340,6 @@ export function homeCards(): Card[] {
   ];
 }
 
-/** The analyzer's rules (EECS002…), counted in the generator's source */
-async function analyzerRules() {
-  const dir = path.resolve('../src/EasyEcs.Generator');
-  const ids = new Set<string>();
-  for (const file of await fs.readdir(dir)) {
-    if (!file.endsWith('.cs')) continue;
-    const source = await fs.readFile(path.join(dir, file), 'utf8');
-    for (const match of source.matchAll(/"(EECS\d{3})"/g)) ids.add(match[1]);
-  }
-  if (ids.size === 0) throw new Error('No analyzer rules found');
-  return ids.size;
-}
-
 /**
  * The repository's social preview (Settings -> Social preview), 1280×640:
  * the icon and name, the claim, three facts and the four biggest leads over
@@ -371,7 +359,7 @@ async function drawGithubPreview() {
     { value: perEntity.text, label: 'per entity update, [ForEach]' },
     { value: alloc.text, label: 'allocated per server tick' },
     {
-      value: String(await analyzerRules()),
+      value: String(analyzerRules),
       label: 'analyzer rules, code fixes',
     },
   ];
