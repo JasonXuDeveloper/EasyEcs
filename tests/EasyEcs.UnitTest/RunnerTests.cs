@@ -162,6 +162,7 @@ public class RunnerTests
     [Test]
     public void ParallelAndStructuralRunners()
     {
+        _world.EnsureCapacity<Health>(10_000);
         for (int i = 0; i < 10_000; i++) _world.CreateEntity(new Health(i));
         Reports.Scale(_world, 2);
         Reports.Kill(_world, 100);

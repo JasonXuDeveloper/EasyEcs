@@ -311,6 +311,7 @@ public class DisableComparison
     private void CreateEasyEcs()
     {
         _world = new EasyEcs.World(new WorldOptions { InitialEntityCapacity = Units });
+        _world.EnsureCapacity<Vigor>(Units);
         _units = new EasyEcs.Entity[Units];
         for (int i = 0; i < Units; i++) _units[i] = _world.CreateEntity(new Vigor(i % 100));
     }

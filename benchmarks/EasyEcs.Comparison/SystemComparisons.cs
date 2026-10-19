@@ -86,6 +86,7 @@ public class ParallelSystemsComparison
     public void SetupEasyEcs()
     {
         _world = new EasyEcs.World(new WorldOptions { ParallelSystems = Parallel, InitialEntityCapacity = Entities });
+        _world.EnsureCapacity<Body, Vigour, Mana, Recharge>(Entities);
         for (int i = 0; i < Entities; i++)
             _world.CreateEntity(new Body(i, i, 1, 1), new Vigour(i % 100, 100), new Mana(i % 50, 50), new Recharge(i % 30));
         _world.AddSystem<MoveBodies>();

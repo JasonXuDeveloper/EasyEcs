@@ -52,7 +52,9 @@ public class QueryTests
                 int expected = f == 0 ? total : f == filters.Length - 1 ? total - (round + 1) : round + 1;
                 Assert.That(world.Count<Position>(filters[f]), Is.EqualTo(expected), $"filter {f}, round {round}");
                 int visited = 0;
+#pragma warning disable EECS032 // the rows the query visits, counted one by one to check Count against them
                 foreach (var _ in world.Query<Position>(filters[f])) visited++;
+#pragma warning restore EECS032
                 Assert.That(visited, Is.EqualTo(expected));
             }
         }
@@ -75,7 +77,9 @@ public class QueryTests
         Assert.That(_world.Any<Position>(QueryFilter.Create().WithAny<Frozen>()), Is.True);
 
         int visited = 0;
+#pragma warning disable EECS032 // the rows the query visits, counted one by one to check the filter's presence test
         foreach (var _ in _world.Query<Position>(halted)) visited++;
+#pragma warning restore EECS032
         Assert.That(visited, Is.EqualTo(2));
     }
 

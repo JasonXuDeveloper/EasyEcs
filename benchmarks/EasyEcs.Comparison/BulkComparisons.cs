@@ -387,6 +387,7 @@ public class ColdCreateComparison
         EasyEcsLoop(world);
     }
 
+#pragma warning disable EECS031 // one CreateEntity per entity is what the per-entity cases measure
     private void EasyEcsLoop(EasyEcs.World world)
     {
         switch (Components)
@@ -402,6 +403,7 @@ public class ColdCreateComparison
                 break;
         }
     }
+#pragma warning restore EECS031
 
     [Benchmark(Baseline = true), BenchmarkCategory(Bulk)]
     public void EasyEcs_Bulk()

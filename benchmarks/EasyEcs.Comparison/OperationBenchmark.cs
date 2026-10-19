@@ -287,9 +287,11 @@ public class OperationBenchmark
     public void EasyEcs_CreateDestroy()
     {
         var spawned = _spawned;
+#pragma warning disable EECS031 // one CreateEntity per entity is the operation compared here
         for (int i = 0; i < spawned.Length; i++)
             spawned[i] = _world.CreateEntity(new Position(), new Velocity(), new Lifetime { Ticks = 20 },
                 new Projectile { OwnerId = i });
+#pragma warning restore EECS031
         for (int i = 0; i < spawned.Length; i++) spawned[i].Destroy();
     }
 

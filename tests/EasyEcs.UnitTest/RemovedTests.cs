@@ -144,7 +144,9 @@ public class RemovedTests
         var removed = new System.Collections.Generic.Dictionary<Entity, ulong>(); // entities lacking armor: their removal
         var disabled = new System.Collections.Generic.HashSet<Entity>();
         var live = new System.Collections.Generic.List<Entity>();
+#pragma warning disable EECS031 // no reservation on purpose: the tables grow under the change ticks the filter reads
         for (int i = 0; i < entities; i++) live.Add(world.CreateEntity(new Armor(i), new Seen()));
+#pragma warning restore EECS031
 
         for (int round = 0; round < rounds; round++)
         {

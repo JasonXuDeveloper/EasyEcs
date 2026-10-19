@@ -32,7 +32,9 @@ public class PrefabBenchmark
     [Benchmark(Baseline = true)]
     public int InstantiateEach()
     {
+#pragma warning disable EECS031 // the baseline: one Instantiate per entity is what this case measures
         for (int i = 0; i < _spawned.Length; i++) _spawned[i] = _world.Instantiate(_prefab);
+#pragma warning restore EECS031
         return _world.DestroyEntities<Health>();
     }
 

@@ -22,10 +22,13 @@ public class RunnerBenchmark
     public void Setup()
     {
         _world = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        int dead = (Entities + 3) / 4; // every fourth fighter, in a table of its own
+        _world.EnsureCapacity<Health>(Entities - dead);
+        _world.EnsureCapacity<Health, Dead>(dead);
         for (int i = 0; i < Entities; i++)
         {
-            var e = _world.CreateEntity(new Health(i % 100, 100));
-            if (i % 4 == 0) e.Set(new Dead());
+            if (i % 4 == 0) _world.CreateEntity(new Health(i % 100, 100), new Dead());
+            else _world.CreateEntity(new Health(i % 100, 100));
         }
     }
 

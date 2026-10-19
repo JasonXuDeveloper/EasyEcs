@@ -233,7 +233,9 @@ public class PresenceTests
         foreach (var filter in filters)
         {
             int visited = 0;
+#pragma warning disable EECS032 // the rows the query visits, counted one by one to check Count and Any against them
             foreach (var _ in world.Query<Health>(filter)) visited++;
+#pragma warning restore EECS032
             Assert.That(world.Count<Health>(filter), Is.EqualTo(visited));
             Assert.That(world.Any<Health>(filter), Is.EqualTo(visited > 0));
         }

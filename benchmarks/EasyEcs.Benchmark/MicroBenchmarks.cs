@@ -56,18 +56,16 @@ public class MicroBenchmarks
     public void Setup()
     {
         _queryCtx = new World();
-        for (int i = 0; i < N; i++)
-        {
-            var e = _queryCtx.CreateEntity(new Position(), new Velocity());
-            if ((i & 1) == 0) e.Set(new Health());
-        }
+        _queryCtx.CreateEntities(new Entity[N / 2], new Position(), new Velocity());
+        _queryCtx.CreateEntities(new Entity[N - N / 2], new Position(), new Velocity(), new Health()); // every other entity
 
         _queryCtx.AddSingleton<Clock>();
         _systemWorld = new World();
-        for (int i = 0; i < N; i++) _systemWorld.CreateEntity(new Position(), new Velocity());
+        _systemWorld.CreateEntities(new Entity[N], new Position(), new Velocity());
         _systemWorld.AddSystem<IntegrateSystem>();
         _tracked = new World();
         _trackedHandles = new Entity[1000];
+        _tracked.EnsureCapacity<Position, Energy>(N);
         for (int i = 0; i < N; i++)
         {
             var e = _tracked.CreateEntity(new Position(), new Energy());
@@ -114,8 +112,10 @@ public class MicroBenchmarks
         var entities = _churned;
         for (int round = 0; round < 10; round++)
         {
+#pragma warning disable EECS031 // the per-entity side of Churn / ChurnBatch: what this case measures
             for (int i = 0; i < entities.Length; i++)
                 entities[i] = _churn.CreateEntity(new Position(), new Health());
+#pragma warning restore EECS031
 
             for (int i = 0; i < entities.Length; i++) entities[i].Destroy();
         }

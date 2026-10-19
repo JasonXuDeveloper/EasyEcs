@@ -18,11 +18,8 @@ public class MaybeBenchmark
     public void Setup()
     {
         _world = new World(new WorldOptions { InitialEntityCapacity = Units });
-        for (int i = 0; i < Units; i++)
-        {
-            var unit = _world.CreateEntity(new Stamina(0));
-            if (i % 2 == 0) unit.Set(new Shield(2));
-        }
+        _world.CreateEntities(new Entity[Units / 2], new Stamina(0));
+        _world.CreateEntities(new Entity[Units - Units / 2], new Stamina(0), new Shield(2)); // every other unit shielded
 
         OneMethod();
         TwoMethods();

@@ -21,7 +21,9 @@ public class SnapshotBenchmark
     [GlobalSetup]
     public void Setup()
     {
-        _world = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        // Rows move to a second table or are destroyed as they are made: the entity storage is what grows large.
+        _world = new World();
+        _world.EnsureEntityCapacity(Entities);
         for (int i = 0; i < Entities; i++)
         {
             var e = _world.CreateEntity(new Position { X = i }, new Velocity { Y = i });

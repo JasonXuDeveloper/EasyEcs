@@ -137,8 +137,10 @@ public class AccessBenchmark
         _instance = Build(new InstanceMethod());
         _static = Build(new StaticMethod());
 
-        // 16 tables (every combination of four tags), half of the rows bosses; the handles of 10,000 of them.
-        _mixed = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        // 16 tables (every combination of four tags), half of the rows bosses; the handles of 10,000 of them. The rows
+        // spread over 32 tables, so the entity storage is what grows large: reserve it.
+        _mixed = new World();
+        _mixed.EnsureEntityCapacity(Entities);
         _handles = new Entity[10_000];
         for (int i = 0; i < Entities; i++)
         {
