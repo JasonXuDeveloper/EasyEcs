@@ -96,8 +96,11 @@ public sealed class SystemGenerator : IIncrementalGenerator
     {
         string kind = method.IsStatic ? "StaticMethod" : "Method";
         string parameters = string.Concat(method.Parameters.Select(p => $", {p.Declared} {Escape(p.Name)}"));
+        // The instance parameter must not take the name of one of the method's own parameters (CS0100).
+        string self = "owner";
+        while (method.Parameters.Any(p => p.Name == self)) self = "_" + self;
         sb.Append($"    [global::System.Runtime.CompilerServices.UnsafeAccessor(global::System.Runtime.CompilerServices.UnsafeAccessorKind.{kind}, Name = \"{method.Name}\")]\n");
-        sb.Append($"    internal static extern {method.Returns} {method.Name}_{index}{method.TypeParameters}([global::System.Runtime.CompilerServices.UnsafeAccessorType(\"{owner.AccessorType}\")] object owner{parameters}){method.Constraints};\n\n");
+        sb.Append($"    internal static extern {method.Returns} {method.Name}_{index}{method.TypeParameters}([global::System.Runtime.CompilerServices.UnsafeAccessorType(\"{owner.AccessorType}\")] object {self}{parameters}){method.Constraints};\n\n");
     }
 
     /// <summary>

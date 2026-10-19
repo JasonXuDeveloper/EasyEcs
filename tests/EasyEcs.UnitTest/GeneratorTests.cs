@@ -429,6 +429,8 @@ public class GeneratorTests
             {
                 [ForEach] static ref int Bump(ref P p) => ref p.V;                                  // a ref return
                 [ForEach] static void @default(ref Q q) { }
+                [ForEach] static void Owned(Entity owner, ref P p) { }                              // the accessor's instance name
+                [ForEach] void Mine(ref P p, in Q owner, in Q _owner) { }
             }
             public static class U
             {
