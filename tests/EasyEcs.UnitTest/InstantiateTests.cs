@@ -112,6 +112,24 @@ public class InstantiateTests
     }
 
     [Test]
+    public void APassGoesOnInTheGrownColumnsAfterReservingForAPrefab()
+    {
+        var orc = new Prefab().Set(new Health(30));
+        using var world = new World(new WorldOptions { InitialEntityCapacity = 20_000 }); // only the table grows below
+        for (int i = 0; i < 100; i++) world.Instantiate(orc);
+        int visited = 0;
+        foreach (var item in world.Query<Health>())
+        {
+            item.Health.Value = 1; // before the reservation: a ref is valid until the next structural change
+            if (visited++ == 10) world.EnsureCapacity(orc, 10_000); // the columns move under the pass
+        }
+
+        int written = 0;
+        foreach (var item in world.Query<Health>()) written += item.Health.Value;
+        Assert.That(written, Is.EqualTo(100));
+    }
+
+    [Test]
     public void IndexesLearnTheNewEntities()
     {
         using var world = new World();

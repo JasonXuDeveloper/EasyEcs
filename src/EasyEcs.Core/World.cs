@@ -82,6 +82,7 @@ public sealed partial class World : IDisposable
             }
 
             ReserveIds(prefab.Store.EntityCount * count);
+            StorageVersion++; // columns may have moved: a pass in progress refreshes its refs
         }
     }
 
