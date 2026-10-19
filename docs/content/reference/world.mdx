@@ -324,7 +324,33 @@ public void EnsureCapacity(Prefab prefab, int count);
 
 Pre-size the table `prefab`'s instances go to, and the entity storage, so the next `count` [`World.Instantiate`](/en/docs/reference/world#instantiate) calls never grow them: a wave of spawns pays its growth before the tick. Instances whose groups put them in another table ([`World.GroupBy`](/en/docs/reference/world#groupby)) grow that one. For a prefab with members, every member's table. O(components) plus one growth. Owner thread only.
 
-**Complexity** ([API table](/en/docs/api)): O(c), plus one growth
+**Complexity** ([API table](/en/docs/api)):
+
+- `world.EnsureCapacity<T1..Tn>(count)`: O(n), plus one growth
+- `world.EnsureCapacity(prefab, count)`: O(c), plus one growth
+
+### `EnsureCapacity` [#ensurecapacity-2]
+
+```csharp
+public void EnsureCapacity<T1>(int count) where T1 : struct, IComponent;
+public void EnsureCapacity<T1, T2>(int count) where T1 : struct, IComponent where T2 : struct, IComponent;
+public void EnsureCapacity<T1, T2, T3>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent;
+public void EnsureCapacity<T1, T2, T3, T4>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent;
+public void EnsureCapacity<T1, T2, T3, T4, T5>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent;
+public void EnsureCapacity<T1, T2, T3, T4, T5, T6>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent;
+public void EnsureCapacity<T1, T2, T3, T4, T5, T6, T7>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent;
+public void EnsureCapacity<T1, T2, T3, T4, T5, T6, T7, T8>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent;
+public void EnsureCapacity<T1, T2, T3, T4, T5, T6, T7, T8, T9>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent;
+```
+
+One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
+
+Pre-size the table of entities with exactly `T1, T2` and the entity storage, so the next `count` `CreateEntity` / `CreateEntities` calls with these components never grow them: a start-up or a wave of spawns pays its growth once, before the loop. Entities whose groups put them in another table ([`World.GroupBy`](/en/docs/reference/world#groupby)) grow that one; components added later move entities to other tables, which grow on their own. O(2) plus one growth. Owner thread only (see docs/content/guide/threading.md).
+
+**Complexity** ([API table](/en/docs/api)):
+
+- `world.EnsureCapacity<T1..Tn>(count)`: O(n), plus one growth
+- `world.EnsureCapacity(prefab, count)`: O(c), plus one growth
 
 ### `EnsureEntityCapacity` [#ensureentitycapacity]
 

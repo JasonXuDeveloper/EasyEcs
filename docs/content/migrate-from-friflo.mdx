@@ -49,6 +49,7 @@ Both libraries name their component interface `IComponent`. During a port, alias
 | --- | --- |
 | `var store = new EntityStore();` | `var world = new World();` |
 | `store.EnsureCapacity(n)` | `world.EnsureEntityCapacity(n)` |
+| `archetype.EnsureCapacity(n)` | `world.EnsureCapacity<T1, …, Tn>(n)` (the entity storage too) |
 | `store.CreateEntity(a, b, c)` | `world.CreateEntity(a, b, c)` |
 | `store.Count` | `world.EntityCount` |
 | `entity.AddComponent(c)` | `entity.Set(c)` |

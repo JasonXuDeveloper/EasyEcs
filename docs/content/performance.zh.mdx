@@ -335,7 +335,7 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
   （[见上](#regular-code-and-the-fastest-code)）。
 - **用 `world.Count` / `world.Any` 来问**，不要为了计数或找一个匹配去写循环。
 - **预留空间**：大小已知的 `DynamicBuffer<T>` 用 `EnsureCapacity`；World 用 `WorldOptions.InitialEntityCapacity` 或
-  `world.EnsureEntityCapacity(n)` 预先定好大小。
+  `world.EnsureEntityCapacity(n)` 预先定好大小；逐个创建一张表的实体之前，用 `world.EnsureCapacity<T1, …, Tn>(n)` 预留这张表。
 - **`QueryFilter` 放进 `static readonly` 字段**（`[ForEach]` 的过滤由生成器这样处理）。
 - **用值索引查实体**（`IIndexed<TKey>`），不要手动维护一个同步的字典；被索引的组件只在键变化时才写。
 - **服务器上每个线程一个 World**，比如每张地图或每个区一个。

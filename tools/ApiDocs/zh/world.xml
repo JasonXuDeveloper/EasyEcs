@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+
 <doc>
   <member name="T:EasyEcs.World" source="0790ce1801e0">
     <summary>
@@ -129,6 +129,14 @@
       <see cref="M:EasyEcs.World.Instantiate(EasyEcs.Prefab)" /> 都不会再扩容：一波刷怪的扩容开销在 tick 之前就付掉了。
       分组（<see cref="M:EasyEcs.World.GroupBy``1" />）把实例放进别的表时，扩的是那张表；带成员的预制体，每个成员的表都扩。
       O(组件数) 加一次扩容。只能在所有者线程调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.EnsureCapacity``2(System.Int32)" source="8708299b293c">
+    <summary>
+      预先扩好正好有 <c>T1, T2</c> 的实体所在的表和实体存储，接下来 <paramref name="count" /> 次带这些组件的
+      <c>CreateEntity</c> / <c>CreateEntities</c> 都不会再扩容：启动或一波刷怪的扩容开销在循环之前一次付掉。分组
+      （<see cref="M:EasyEcs.World.GroupBy``1" />）把实体放进别的表时，扩的是那张表；之后再加组件会把实体搬到别的表，那些表照常自己扩容。
+      O(2) 加一次扩容。只能在所有者线程调用（见<see href="/zh/docs/guide/threading">线程模型</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.World.EnsureEntityCapacity(System.Int32)" source="c27f427b4f09">

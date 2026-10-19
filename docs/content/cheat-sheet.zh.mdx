@@ -55,7 +55,7 @@ public record struct Clock(long Tick) : ISingletonComponent;                  //
 | `world.RemoveSystem<T>()` / `GetSystem<T>()` / `Systems` | 移除、查找、列出系统 |
 | `world.EntityCount` / `Entities` | 存活实体数，以及零分配的遍历 |
 | `world.ChangeTick` | 当前的变更 tick |
-| `world.EnsureEntityCapacity(n)` / `EnsureCapacity(prefab, n)` | 在已知峰值或一波刷怪之前预分配 |
+| `world.EnsureCapacity<T1, …, Tn>(n)` / `EnsureCapacity(prefab, n)` / `EnsureEntityCapacity(n)` | 在已知峰值或一波刷怪之前预分配 |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` / `IsAlive(id)` | 从 `EntityId` 换回经过校验的句柄 |
 | `world.Describe()` | 表、列、行数和字节数，供工具使用 |
 

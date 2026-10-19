@@ -140,6 +140,17 @@ int expired = world.DestroyEntities<Lifetime>(QueryFilter.Create().With<Dead>())
 
 `SetAll`、`RemoveAll`、`DisableAll`、`EnableAll` 对每个匹配的实体修改一个组件，每次处理一整个 64 行的字：见[批量变更](/zh/docs/guide/bulk)。
 
+一个一个创建的实体（启动时加载、按数据逐个构造）会让表成倍扩容。先预留：`EnsureCapacity<T1, …, Tn>(count)` 把正好有这些组件的表和实体存储一次扩到循环要用的大小，
+接下来 `count` 次带这些组件的创建都不再扩容：
+
+```csharp
+world.EnsureCapacity<Position, Lifetime>(100_000);
+for (int i = 0; i < 100_000; i++) world.CreateEntity(new Position(i, 0), new Lifetime(60));
+```
+
+`CreateEntities` 自己会预留。预制体的实例用 `EnsureCapacity(prefab, count)`（见[预制体](/zh/docs/guide/prefabs)）；实体分散在很多张表里时，
+用 `EnsureEntityCapacity(n)` 只扩实体存储。被[分组](/zh/docs/guide/groups)放进别的表的实体，扩的是那张表。
+
 ## 怎么用得快 [#how-to-use-it-fast]
 
 | 别这样 | 这样做 | 原因 |
@@ -147,6 +158,7 @@ int expired = world.DestroyEntities<Lifetime>(QueryFilter.Create().With<Dead>())
 | 录进命令缓冲，之后回放 | 在做决定的地方直接改 | 不用录制、不用回放、不分配 |
 | 每个 tick 加一次、删一次组件 | 用字段；持续几个 tick 的状态用标签 | 表里已有列的标签只翻转一个位 |
 | `Set(a)` 后再 `Set(b)` | `Set(a, b)` | 最多搬一次行 |
+| 逐个创建已知数量的实体 | 循环前调用 `EnsureCapacity<T1, …, Tn>(count)` | 只扩容一次，不用表满一次翻一倍 |
 | 按过滤条件逐个修改 | [批量变更](/zh/docs/guide/bulk)、`DestroyEntities<T>(filter)` | 一次闸门，一次处理整个字 |
 | 方法只读 `Entity` 参数 | 保持只读（`Id`、`Has`、`Get`） | 遍历跳过结构变更簿记 |
 
@@ -166,6 +178,7 @@ int expired = world.DestroyEntities<Lifetime>(QueryFilter.Create().With<Dead>())
 - **可能改结构的遍历**每个实体检查一次存储版本，以便察觉变更；不可能改结构的方法连这一步都省了。
 - **移除组件再加回：** 一个存在位。**获得表里没有对应列的组件：** 复制一次行，每种新组合只发生一次（搬运方案会缓存）。
 - **销毁：** O(组件数)；不在遍历中时立即补洞，否则在最后一个遍历结束时清理。
+- **扩容：** 表满了就翻倍，复制一遍已有的行；预留（`EnsureCapacity`、`CreateEntities`）只扩一次，正好扩到需要的行数。
 - **预热之后不分配内存**：没有需要扩容的缓冲。
 
 ## 常见陷阱 [#pitfalls]

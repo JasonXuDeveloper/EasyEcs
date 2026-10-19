@@ -12,6 +12,21 @@ major or minor version that needs code changes? The
 
 ## 4.2.0 [#v4-2-0]
 
+### New [#v4-2-0-new]
+
+- `world.EnsureCapacity<T1, …, Tn>(count)` pre-sizes the table of exactly those components and the entity storage,
+  so the next `count` `CreateEntity` / `CreateEntities` calls with them never grow either (Friflo's
+  `archetype.EnsureCapacity`, Arch's `EnsureCapacity(signature, n)`). See
+  [structural changes](/en/docs/guide/structural-changes#bulk).
+
+### Performance [#v4-2-0-performance]
+
+- Creating many entities in a fresh world no longer sets off a full garbage collection inside the call: a
+  reservation (`EnsureCapacity`, `EnsureEntityCapacity`, `CreateEntities`, `InitialEntityCapacity`) grows the table
+  and the entity storage to what it needs instead of the next power of two, and large entity storage sized by one
+  goes to the pinned object heap, beside the columns. See
+  [decision D28](/en/docs/decisions#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap).
+
 ### Changes that need code changes [#v4-2-0-breaking]
 
 - A `[ForEach]` method's singleton parameter throws `InvalidOperationException` when the world has no such singleton,
@@ -24,6 +39,9 @@ major or minor version that needs code changes? The
 ### Fixes [#v4-2-0-fixes]
 
 - A `[ForEach]` method with a parameter named `owner` no longer fails to build with CS0100 in generated code.
+- `world.EnsureCapacity(prefab, count)` called while a query or `[ForEach]` pass walks the table it grows no longer
+  leaves the pass writing to the old columns for the rest of the table. See
+  [structural changes](/en/docs/guide/structural-changes#refs-across-a-change).
 
 ## 4.1.0 [#v4-1-0]
 

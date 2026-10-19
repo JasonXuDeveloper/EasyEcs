@@ -11,6 +11,18 @@ icon: RotateCcwClock
 
 ## 4.2.0 [#v4-2-0]
 
+### 新功能 [#v4-2-0-new]
+
+- `world.EnsureCapacity<T1, …, Tn>(count)` 为正好有这些组件的表和实体存储预留空间，接下来 `count` 次带这些组件的
+  `CreateEntity` / `CreateEntities` 都不会再扩容（相当于 Friflo 的 `archetype.EnsureCapacity`、Arch 的
+  `EnsureCapacity(signature, n)`）。见[结构变更](/zh/docs/guide/structural-changes#bulk)。
+
+### 性能 [#v4-2-0-performance]
+
+- 在新建的 World 里一次创建大量实体，调用过程中不会再触发完整的垃圾回收：预留（`EnsureCapacity`、`EnsureEntityCapacity`、
+  `CreateEntities`、`InitialEntityCapacity`）把表和实体存储扩到正好需要的大小，不再扩到下一个 2 的幂；按预留大小分配的大块实体存储放进
+  固定对象堆，和列放在一起。见[决策 D28](/zh/docs/decisions#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)。
+
 ### 需要修改代码的变更 [#v4-2-0-breaking]
 
 - World 里没有对应的单例时，`[ForEach]` 方法的单例参数会抛 `InvalidOperationException`，和 `world.X`、`GetSingleton<T>()`
@@ -21,6 +33,8 @@ icon: RotateCcwClock
 ### 修复 [#v4-2-0-fixes]
 
 - `[ForEach]` 方法的参数名叫 `owner` 时，生成的代码不再报 CS0100 编译失败。
+- 查询或 `[ForEach]` 遍历一张表时调用 `world.EnsureCapacity(prefab, count)` 扩容这张表，遍历剩下的行不会再写进旧的列。见
+  [结构变更](/zh/docs/guide/structural-changes#refs-across-a-change)。
 
 ## 4.1.0 [#v4-1-0]
 

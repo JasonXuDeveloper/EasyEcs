@@ -55,7 +55,7 @@ Components are structs ([EECS006](/en/docs/guide/analyzer#eecs006)). Keep an ent
 | `world.RemoveSystem<T>()` / `GetSystem<T>()` / `Systems` | Removes, finds, lists systems |
 | `world.EntityCount` / `Entities` | Live entities and an allocation-free walk over them |
 | `world.ChangeTick` | The current change tick |
-| `world.EnsureEntityCapacity(n)` / `EnsureCapacity(prefab, n)` | Pre-size before a known peak or a wave |
+| `world.EnsureCapacity<T1, …, Tn>(n)` / `EnsureCapacity(prefab, n)` / `EnsureEntityCapacity(n)` | Pre-size before a known peak or a wave |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` / `IsAlive(id)` | From an `EntityId` back to a checked handle |
 | `world.Describe()` | Tables, columns, rows and bytes, for tools |
 

@@ -43,6 +43,7 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D25](#d25-structural-row-loops-are-compiled-for-tables-without-tombstones) | 为没有墓碑的表单独编译结构性行循环 |
 | [D26](#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call) | 在代码会重复写类型名的地方生成成员，而不是每个调用都生成 |
 | [D27](#d27-reading-a-missing-singleton-throws-everywhere) | 读取缺失的单例一律抛异常 |
+| [D28](#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap) | 预留只扩到需要的大小；实体存储放在固定对象堆 |
 
 ## D1. 状态变化即数据：没有事件和回调 [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -403,6 +404,39 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
   编译期检查要么漏掉这些，要么误报正确的代码。
 - **在 `AddSystem` 时检查。** 系统常常先于单例添加，或者单例要等 `Load` 才带进来；第一次运行是单例必须存在的最早时刻。
 - **用 `GetOrAddX()` 显式要默认值**（采用）：默认值本来就对的地方，比如从零开始的计数器，一次调用就说清楚了。
+
+## D28. 预留只扩到需要的大小；实体存储放在固定对象堆 [#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap]
+
+**决定。** 预留把表扩到需要的行数（向上取整到整个存在位字，即 64 行），把实体存储扩到需要的 id 数；如果容量翻倍更大，就按翻倍扩。
+不再扩到下一个 2 的幂。预留包括 `EnsureCapacity<T1..Tn>(count)`（正好有这些组件的那张表）、`EnsureCapacity(prefab, count)`、
+`EnsureEntityCapacity`、`CreateEntities`、`InitialEntityCapacity` 和恢复快照。由预留定下大小、不小于 85,000 字节的实体存储数组分配在
+固定对象堆（POH）上，和非托管列放在一起；翻倍扩容的中间数组仍然放在大对象堆（LOH）。
+
+**原因。**
+- **启动时的开销是一次回收，不是创建本身。** 在从没放过实体的 World 里创建 10 万个实体（Doraku/Ecs.CSharp.Benchmark 的做法：每次调用
+  一个新 World，只测一次），批量创建要 11.8 到 12.6 ms；把这些数组改成小对象（调大 `DOTNET_GCLOHThreshold`）后，同样的行只要
+  1.2 到 1.6 ms。.NET 在上次回收之后 LOH 上的分配超过预算时会触发一次完整回收，POH 单独算一份预算；两次迭代之间的回收过后，
+  两边的预算都是 3 MiB（在被测调用里用 `GC.GetGenerationBudget` 读到）。`CreateEntities(new Entity[100_000], ...)` 在 LOH 上放了
+  1.6 MB 的句柄数组和 2 MB 的实体数组（131,072 条记录），一共 3.7 MB，于是每次调用都要付一次后台 gen2 回收；后台回收期间大对象
+  分配会被限流，在这台 4 核机器上一次要 5 到 15 ms（关掉后台回收 `DOTNET_gcConcurrent=0` 时是 4.8 ms）。
+- **两处改动让两边都不超预算。** 按预留的大小分配，10 万个实体省下 0.6 MB；实体记录放到 POH，把 1.6 MB 挪到另一份预算：LOH 上只剩
+  句柄和实体行（2.4 MB），POH 上是实体记录加一到三个 int 列（2.0 到 2.8 MB），不再触发回收。批量创建（一、二、三个组件）从
+  11.8 / 12.6 / 12.6 ms 降到 2.7 / 2.5 / 2.7 ms，分配从 5.03 / 5.53 / 6.03 MB 降到 4.20 / 4.58 / 4.96 MB。
+- **逐个创建的实体用 `EnsureCapacity<T1..Tn>`。** `EnsureEntityCapacity` 只扩实体记录，表还是从 64 行开始翻倍，分配了最终大小的两倍：
+  以前 2.67 / 3.32 / 3.99 ms、4.53 / 5.53 / 6.53 MB，预留好表之后 1.94 / 2.71 / 2.60 ms、2.67 / 3.05 / 3.44 MB（Friflo 对 store 和
+  archetype 都调 `EnsureCapacity`：11 到 12 ms；Arch 调 `EnsureCapacity`：3.4 到 4.2 ms）。
+- **固定住的数组本来也不会移动。** 两个堆默认都不压缩；句柄不做边界检查直接按下标访问实体记录，这个数组从来不搬；GC 扫描固定数组里的
+  引用和普通数组一样。翻倍时丢掉的数组留在 LOH，需要时还能压缩（`GCSettings.LargeObjectHeapCompactionMode`），不会永久留下空洞。
+- **热路径不受影响。** 不扩容的 World 走的还是原来的代码；预留只多一次比较。一张表经过很多次小的预留，仍然按翻倍增长
+  （先 100 行再 30 行：128，然后 256）。
+
+**比较过。**
+- **实体记录和列分页**（像 Arch 那样 16 KB 一块）：小对象不会触发完整回收，但每次句柄访问都要多一次间接寻址（D7）。
+- **所有大的实体记录数组都放 POH**，翻倍的中间数组也放：不预留、三个组件、10 万个实体的启动会超两次 POH 预算（10.0 ms，原来 6.6 ms）。
+- **实体行也放 POH：** 实体记录、实体行加两个 int 列在 POH 上就已经超过 3 MiB。
+- **World 释放时把数组还给池**，给下一个 World 用：实体记录不能还，释放后的 World 的句柄仍会不做检查地按下标访问它；池还会占着进程
+  已经用完的内存。
+- **只传数量的 `CreateEntities(count, values)`**，不要句柄 span：批量调用带着 span 已经在两边预算之内，不需要。
 
 ## 相关页面 [#related]
 

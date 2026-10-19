@@ -75,6 +75,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `world.EntityCount` | O(1) | |
 | `world.Entities` | O(capacity) | living entities in id order, for diagnostics |
 | `world.EnsureEntityCapacity(capacity)` | O(capacity) | pre-size the entity array; a no-op when large enough |
+| `world.EnsureCapacity<T1..Tn>(count)` | O(n), plus one growth | pre-sizes the table of exactly `T1..Tn` and the entity array, so the next `count` creations with those components never grow them |
 
 ## Components [#components]
 

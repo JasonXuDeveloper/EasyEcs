@@ -362,7 +362,8 @@ times every system run.
   changed and `[Removed<T>]` for what went away ([above](#regular-code-and-the-fastest-code)).
 - **Ask `world.Count` / `world.Any`** instead of looping to count or to find one match.
 - **Reserve room** in a `DynamicBuffer<T>` whose size is known (`EnsureCapacity`), and pre-size the world with
-  `WorldOptions.InitialEntityCapacity` or `world.EnsureEntityCapacity(n)`.
+  `WorldOptions.InitialEntityCapacity` or `world.EnsureEntityCapacity(n)`, and a table before creating its entities
+  one by one with `world.EnsureCapacity<T1, …, Tn>(n)`.
 - **Keep `QueryFilter`s in `static readonly` fields** (the generator does this for `[ForEach]`).
 - **Look entities up with a value index** (`IIndexed<TKey>`) instead of a dictionary kept in sync by hand, and write an
   indexed component only when its key changes.

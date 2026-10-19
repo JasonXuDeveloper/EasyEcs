@@ -55,7 +55,7 @@ dotnet add package EasyEcs
 | `ref var c = ref world.Get<T>(entity)` | `ref var c = ref entity.Get<T>()`；只读用 `entity.Read<T>()` |
 | `world.Size` | `world.EntityCount` |
 | `entity.Id` | `entity.Id.Index`；数据里存 `entity.Id`（`EntityId`） |
-| `world.EnsureCapacity(in signature, n)` | `world.EnsureEntityCapacity(n)`、`world.EnsureCapacity(prefab, n)` |
+| `world.EnsureCapacity(in signature, n)` | `world.EnsureCapacity<T1, …, Tn>(n)`、`world.EnsureCapacity(prefab, n)` |
 
 ### 查询和遍历 [#queries-and-iteration]
 

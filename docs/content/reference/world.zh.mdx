@@ -324,7 +324,33 @@ public void EnsureCapacity(Prefab prefab, int count);
 
 预先扩好 `prefab` 的实例要进的表和实体存储，接下来 `count` 次 [`World.Instantiate`](/zh/docs/reference/world#instantiate) 都不会再扩容：一波刷怪的扩容开销在 tick 之前就付掉了。分组（[`World.GroupBy`](/zh/docs/reference/world#groupby)）把实例放进别的表时，扩的是那张表；带成员的预制体，每个成员的表都扩。O(组件数) 加一次扩容。只能在所有者线程调用。
 
-**复杂度**（[API 表](/zh/docs/api)）：O(c)，外加一次扩容
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `world.EnsureCapacity<T1..Tn>(count)`：O(n)，外加一次扩容
+- `world.EnsureCapacity(prefab, count)`：O(c)，外加一次扩容
+
+### `EnsureCapacity` [#ensurecapacity-2]
+
+```csharp
+public void EnsureCapacity<T1>(int count) where T1 : struct, IComponent;
+public void EnsureCapacity<T1, T2>(int count) where T1 : struct, IComponent where T2 : struct, IComponent;
+public void EnsureCapacity<T1, T2, T3>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent;
+public void EnsureCapacity<T1, T2, T3, T4>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent;
+public void EnsureCapacity<T1, T2, T3, T4, T5>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent;
+public void EnsureCapacity<T1, T2, T3, T4, T5, T6>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent;
+public void EnsureCapacity<T1, T2, T3, T4, T5, T6, T7>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent;
+public void EnsureCapacity<T1, T2, T3, T4, T5, T6, T7, T8>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent;
+public void EnsureCapacity<T1, T2, T3, T4, T5, T6, T7, T8, T9>(int count) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent;
+```
+
+组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
+
+预先扩好正好有 `T1, T2` 的实体所在的表和实体存储，接下来 `count` 次带这些组件的 `CreateEntity` / `CreateEntities` 都不会再扩容：启动或一波刷怪的扩容开销在循环之前一次付掉。分组（[`World.GroupBy`](/zh/docs/reference/world#groupby)）把实体放进别的表时，扩的是那张表；之后再加组件会把实体搬到别的表，那些表照常自己扩容。O(2) 加一次扩容。只能在所有者线程调用（见[线程模型](/zh/docs/guide/threading)）。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `world.EnsureCapacity<T1..Tn>(count)`：O(n)，外加一次扩容
+- `world.EnsureCapacity(prefab, count)`：O(c)，外加一次扩容
 
 ### `EnsureEntityCapacity` [#ensureentitycapacity]
 

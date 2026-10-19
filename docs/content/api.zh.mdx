@@ -72,6 +72,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.EntityCount` | O(1) | |
 | `world.Entities` | O(容量) | 按 id 顺序列出存活实体，用于诊断 |
 | `world.EnsureEntityCapacity(capacity)` | O(容量) | 预先分配实体数组；已经够大时什么都不做 |
+| `world.EnsureCapacity<T1..Tn>(count)` | O(n)，外加一次扩容 | 为正好有 `T1..Tn` 的表和实体数组预留空间，接下来 `count` 次带这些组件的创建都不再扩容 |
 
 ## 组件 [#components]
 

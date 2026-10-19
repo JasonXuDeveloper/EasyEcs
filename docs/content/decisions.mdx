@@ -45,6 +45,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D25](#d25-structural-row-loops-are-compiled-for-tables-without-tombstones) | Structural row loops are compiled for tables without tombstones |
 | [D26](#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call) | Generated members where code would repeat a type; not for every call |
 | [D27](#d27-reading-a-missing-singleton-throws-everywhere) | Reading a missing singleton throws everywhere |
+| [D28](#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap) | Reservations grow to what they need; entity storage on the pinned heap |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -467,6 +468,52 @@ default, and the code that calls it says so.
   first run is the earliest point where the singleton has to exist.
 - **`GetOrAddX()` as the explicit default** (chosen): where the default is right, such as a counter starting at
   zero, one call says it.
+
+## D28. Reservations grow to what they need; entity storage on the pinned heap [#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap]
+
+**Decision.** A reservation grows a table to the rows it needs, rounded up to whole presence words (64 rows), and the
+entity storage to the ids it needs, or either to twice its capacity when that is more; not to the next power of two.
+The reservations are `EnsureCapacity<T1..Tn>(count)` (the table of exactly those components), `EnsureCapacity(prefab,
+count)`, `EnsureEntityCapacity`, `CreateEntities`, `InitialEntityCapacity` and a restore. An entity-storage array of
+85,000 bytes or more that a reservation sizes is allocated on the pinned object heap, beside the unmanaged columns; the
+steps of a doubling stay on the large object heap.
+
+**Why.**
+- **A start-up's cost was a collection, not the creation.** In a world that has never held entities, creating 100,000
+  of them (the setup of Doraku/Ecs.CSharp.Benchmark: a fresh world per invocation, measured once) cost 11.8 to 12.6 ms
+  in bulk, while the same rows cost 1.2 to 1.6 ms when the arrays were small objects (`DOTNET_GCLOHThreshold` raised). .NET
+  starts a full collection once the allocations on the large object heap since the last one pass a budget, and,
+  separately, those on the pinned object heap; after the collection between two iterations that budget is 3 MiB for
+  each (`GC.GetGenerationBudget` in the measured call). `CreateEntities(new Entity[100_000], ...)` put the 1.6 MB
+  handle array and a 2 MB entity array (131,072 records) on the large object heap, 3.7 MB, so every call paid a
+  background gen2 collection; its throttling of large allocations made it cost 5 to 15 ms on the 4-core machine
+  (4.8 ms as a blocking collection, `DOTNET_gcConcurrent=0`).
+- **Both changes keep it under both budgets.** Sizes that a reservation names save 0.6 MB of the 100,000 entities;
+  the entity records on the pinned heap move 1.6 MB to the other budget: the large object heap then holds the handles
+  and the entity rows (2.4 MB), the pinned heap the records and one to three int columns (2.0 to 2.8 MB), and no
+  collection runs. Bulk creation went from 11.8 / 12.6 / 12.6 ms to 2.7 / 2.5 / 2.7 ms (one, two, three components),
+  5.03 / 5.53 / 6.03 MB to 4.20 / 4.58 / 4.96 MB.
+- **`EnsureCapacity<T1..Tn>` for entities created one by one.** `EnsureEntityCapacity` sized only the records, so the
+  table still doubled from 64 rows, allocating twice its final size: 2.67 / 3.32 / 3.99 ms and 4.53 / 5.53 / 6.53 MB
+  before, 1.94 / 2.71 / 2.60 ms and 2.67 / 3.05 / 3.44 MB with the table reserved (Friflo with `EnsureCapacity` on its
+  store and archetype: 11 to 12 ms; Arch with `EnsureCapacity`: 3.4 to 4.2 ms).
+- **Pinning moves nothing that would have moved.** Neither heap compacts by default; handles index the record array
+  without bounds checks and it is never moved; the collector scans a pinned array's references like any other. The
+  arrays a doubling discards stay on the large object heap, which can still be compacted when asked to
+  (`GCSettings.LargeObjectHeapCompactionMode`), so they leave no hole for good.
+- **Warm paths are untouched.** A world that is not growing runs the same code; reservations add one comparison.
+  Doubling still bounds a table that grows by many small reservations (two batches of 100 and 30 rows: 128, then 256).
+
+**Considered.**
+- **Pages for the records and columns** (Arch's chunks of 16 KB): small objects never set off a full collection, but
+  every handle access would pay an indirection (D7).
+- **Every large record array on the pinned heap**, doubling steps too: a start-up of 100,000 entities with three
+  components and no reservation then crossed the pinned budget twice (10.0 ms against 6.6 ms).
+- **The entity rows on the pinned heap as well:** the records, rows and two int columns already pass 3 MiB there.
+- **Returning a disposed world's arrays to a pool** for the next world: the records cannot go, since handles of the
+  disposed world still index them unchecked, and the pool would keep memory a process has finished with.
+- **A count-only `CreateEntities(count, values)`** without the handle span: not needed once the bulk call stays under
+  both budgets with the span.
 
 ## Related [#related]
 

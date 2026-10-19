@@ -58,7 +58,7 @@ The package carries the source generator and the analyzer: `[ForEach]` systems, 
 | `ref var c = ref world.Get<T>(entity)` | `ref var c = ref entity.Get<T>()`; `entity.Read<T>()` to read only |
 | `world.Size` | `world.EntityCount` |
 | `entity.Id` | `entity.Id.Index`; store `entity.Id` (an `EntityId`) in data |
-| `world.EnsureCapacity(in signature, n)` | `world.EnsureEntityCapacity(n)`, `world.EnsureCapacity(prefab, n)` |
+| `world.EnsureCapacity(in signature, n)` | `world.EnsureCapacity<T1, …, Tn>(n)`, `world.EnsureCapacity(prefab, n)` |
 
 ### Queries and iteration [#queries-and-iteration]
 

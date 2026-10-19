@@ -157,6 +157,19 @@ int expired = world.DestroyEntities<Lifetime>(QueryFilter.Create().With<Dead>())
 `SetAll`, `RemoveAll`, `DisableAll` and `EnableAll` change a component on every match a whole 64-row word at a time:
 [Bulk changes](/en/docs/guide/bulk).
 
+Entities created one at a time (a start-up that loads them, a loop that builds each from data) grow their table by
+doubling. Reserve it first: `EnsureCapacity<T1, …, Tn>(count)` grows the table of exactly those components and the
+entity storage once, to what the loop needs, so the next `count` creations with those components grow nothing:
+
+```csharp
+world.EnsureCapacity<Position, Lifetime>(100_000);
+for (int i = 0; i < 100_000; i++) world.CreateEntity(new Position(i, 0), new Lifetime(60));
+```
+
+`CreateEntities` reserves on its own. `EnsureCapacity(prefab, count)` does the same for a prefab's instances
+([Prefabs](/en/docs/guide/prefabs)), and `EnsureEntityCapacity(n)` sizes only the entity storage, for entities spread
+over many tables. Entities that a [group](/en/docs/guide/groups) puts in another table grow that one.
+
 ## How to use it fast [#how-to-use-it-fast]
 
 | Instead of | Do | Why |
@@ -164,6 +177,7 @@ int expired = world.DestroyEntities<Lifetime>(QueryFilter.Create().With<Dead>())
 | A command buffer played back later | The change, where it is decided | No recording, no playback, no allocation |
 | Adding and removing a component each tick | A field, or a tag for a state that lasts several ticks | A tag the table has a column for only flips a bit |
 | `Set(a)` then `Set(b)` | `Set(a, b)` | At most one row move |
+| Creating a known number of entities one by one | `EnsureCapacity<T1, …, Tn>(count)` before the loop | One growth instead of a doubling per full table |
 | A loop of single changes over a filter | [Bulk changes](/en/docs/guide/bulk), `DestroyEntities<T>(filter)` | One gate pass, whole words at once |
 | An `Entity` parameter the method only reads | Keep it read-only (`Id`, `Has`, `Get`) | The pass skips structural bookkeeping |
 
@@ -187,6 +201,8 @@ The comparison with 10 changes per pass: [Comparison](/en/docs/comparison).
 - **Removing a component and adding it back:** one presence bit. **Gaining a component the table has no column for:**
   one row copy, once per new combination (the move plan is cached).
 - **Destroying:** O(components); the hole is filled at once outside a pass, or closed when the last pass ends.
+- **Growing:** a full table doubles, copying its rows; a reservation (`EnsureCapacity`, `CreateEntities`) grows it
+  once, to the rows it needs.
 - **No allocation** after warm-up: there is no buffer to grow.
 
 ## Pitfalls [#pitfalls]
