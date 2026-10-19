@@ -436,7 +436,7 @@ restarted.Load(bytes.WrittenSpan);
 
 - **适合：** 在线服务器上的诊断接口或日志，看哪个系统越来越慢。
 - **开销：** 打开时每次执行读两次时间戳；关闭时没有开销。
-- **指南：** [系统](/zh/docs/guide/systems)
+- **指南：** [调试与诊断](/zh/docs/guide/diagnostics#timing)、[系统](/zh/docs/guide/systems#measuring-systems)
 
 ### 异常处理 [#errors]
 
@@ -445,7 +445,7 @@ restarted.Load(bytes.WrittenSpan);
 
 - **适合：** 在线服务器用 `Disable`，故障变成健康检查能读到的数据；测试里用 `Throw`。
 - **开销：** 系统不抛异常就没有开销。
-- **指南：** [系统](/zh/docs/guide/systems)
+- **指南：** [调试与诊断](/zh/docs/guide/diagnostics#errors)、[系统](/zh/docs/guide/systems#errors)
 
 ### 运行时自省 [#introspection]
 
@@ -453,7 +453,7 @@ restarted.Load(bytes.WrittenSpan);
 
 - **适合：** 管理后台、内存报告、调试。
 - **开销：** 生成描述时分配内存（冷路径），不碰热路径。
-- **指南：** [架构](/zh/docs/architecture)
+- **指南：** [调试与诊断](/zh/docs/guide/diagnostics)
 
 ### Native AOT [#native-aot]
 

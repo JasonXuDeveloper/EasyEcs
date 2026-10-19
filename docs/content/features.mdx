@@ -497,7 +497,7 @@ With `WorldOptions.MeasureSystems`, every run of a system is timed: `system.Stat
 
 - **Use it for:** a diagnostics endpoint or a log line on a live server, to see which system grows.
 - **Cost:** two timestamp reads per system run when on; nothing when off.
-- **Guide:** [Systems](/en/docs/guide/systems)
+- **Guide:** [Debugging and diagnostics](/en/docs/guide/diagnostics#timing), [Systems](/en/docs/guide/systems#measuring-systems)
 
 ### Errors [#errors]
 
@@ -507,7 +507,7 @@ By default an exception a system throws propagates out of `Update()`. With
 
 - **Use it for:** `Disable` on a live server, where a failure becomes data a health check reads; `Throw` in tests.
 - **Cost:** nothing until a system throws.
-- **Guide:** [Systems](/en/docs/guide/systems)
+- **Guide:** [Debugging and diagnostics](/en/docs/guide/diagnostics#errors), [Systems](/en/docs/guide/systems#errors)
 
 ### Introspection [#introspection]
 
@@ -516,7 +516,7 @@ component values. A debugger shows an entity's components directly.
 
 - **Use it for:** admin tools, memory reports, debugging.
 - **Cost:** allocates the description (a cold path), never touches the hot paths.
-- **Guide:** [Architecture](/en/docs/architecture)
+- **Guide:** [Debugging and diagnostics](/en/docs/guide/diagnostics)
 
 ### Native AOT [#native-aot]
 

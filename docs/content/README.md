@@ -43,6 +43,7 @@ One page per concept, under [guide/](guide):
 | [Threading](https://ecs.xgamedev.net/en/docs/guide/threading) | [guide/threading.mdx](guide/threading.mdx) |
 | [Hosting in a .NET server](https://ecs.xgamedev.net/en/docs/guide/hosting) | [guide/hosting.mdx](guide/hosting.mdx) |
 | [Testing systems](https://ecs.xgamedev.net/en/docs/guide/testing) | [guide/testing.mdx](guide/testing.mdx) |
+| [Debugging and diagnostics](https://ecs.xgamedev.net/en/docs/guide/diagnostics) | [guide/diagnostics.mdx](guide/diagnostics.mdx) |
 | [Analyzer rules](https://ecs.xgamedev.net/en/docs/guide/analyzer) | [guide/analyzer.mdx](guide/analyzer.mdx) |
 | [Common mistakes](https://ecs.xgamedev.net/en/docs/guide/common-mistakes) | [guide/common-mistakes.mdx](guide/common-mistakes.mdx) |
 | [Troubleshooting](https://ecs.xgamedev.net/en/docs/guide/troubleshooting) | [guide/troubleshooting.mdx](guide/troubleshooting.mdx) |

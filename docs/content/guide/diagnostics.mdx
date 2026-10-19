@@ -1,0 +1,311 @@
+---
+title: Debugging and diagnostics
+seoTitle: "Debugging an ECS world in C#: Describe, Stats, Error"
+description: "Look inside a running EasyEcs world: tables and memory with Describe, an entity's components in the debugger, per-system timing and the systems that failed."
+icon: Stethoscope
+---
+
+An entity is an id, and its data is spread over table columns, so a debugger watch on a handle shows little by
+itself, and a server that slows down does not say which system grew. EasyEcs answers both from data the world already
+has: `world.Describe()` lists the tables with their rows and bytes, `entity.Describe()` (and the debugger) shows an
+entity's component values, `system.Stats` times every system, and `system.Error` keeps the exception of a system that
+failed.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  An admin or health endpoint of a live server (entity counts, memory per table, the slowest system, the systems
+  that failed), a log line when a tick runs long, a breakpoint on an entity in the IDE, and a memory report after a
+  load test.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  Game logic: a system that needs to know what an entity has asks with a filter or `HasX`, not with `Describe`. Every
+  tick: `Describe` allocates its answer, so call it on a request or a timer, not in the loop. Timing a change:
+  `system.Stats` shows trends on a live server; compare two versions with BenchmarkDotNet
+  ([performance](/en/docs/performance#measuring)).
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+### Look at an entity [#entity]
+
+`entity.Describe()` returns the entity's components as `ComponentValue`s: a boxed copy of each value, and `Enabled`
+false for a [disabled](/en/docs/guide/cleanup-and-disable#disable-a-component) one. A stale handle describes as
+nothing. In a debugger, an `Entity` shows as `Entity 1000v1` (index and version) and expands to its id, whether it is
+alive, and its components, read when you expand it.
+
+```csharp
+var guard = world.CreateEntity(new Position(5, 5), new Health(50));
+foreach (var component in guard.Describe())
+    Console.WriteLine(component.Enabled ? $"{component.Value}" : $"{component.Value} (disabled)");
+```
+
+`Console.WriteLine(entity)` prints the same `Entity 1000v1`, and an `EntityId` prints as `1000v1`: what to log, and
+what a client sends back to name an entity.
+
+### Look at the tables [#tables]
+
+`world.Describe()` returns one `TableInfo` per table: its `Columns` (each a component `Type`, the rows `Without` it,
+and its `Group` in a [grouped](/en/docs/guide/groups) world), its living `Entities`, the `Rows` in use, the
+`Capacity` allocated and the `Bytes` that costs.
+
+```csharp
+foreach (var table in world.Describe())
+{
+    var names = new List<string>();
+    foreach (var column in table.Columns) names.Add(column.Type.Name);
+    Console.WriteLine($"[{string.Join(", ", names)}] {table.Entities} entities, {table.Bytes:N0} bytes");
+}
+```
+
+What to read in it:
+
+- **Where the memory is:** `Bytes` per table, which grows with `Capacity`, not with `Entities`: a table that once
+  held a wave keeps its rows for the next one.
+- **Removed components:** a column's `Without` counts the rows that removed or disabled it, since
+  [removing keeps the row](/en/docs/guide/entities-and-components#storage). A large share means most entities of the
+  table no longer have it.
+- **Combinations:** each distinct set of components is a table. Hundreds of small tables mean the code adds many
+  different combinations; a [group](/en/docs/guide/groups) splits tables on purpose.
+- **Holes:** `Rows` above `Entities` is a pass in progress that left holes; they close when it ends.
+
+`world.EntityCount` is the total (O(1)), and `world.Count<T>(filter)` counts the entities a query would visit by
+summing table counts.
+
+### Time each system [#timing]
+
+With `WorldOptions.MeasureSystems`, every run of a system (its `OnUpdate` and its `[ForEach]` methods) is timed:
+`system.Stats` holds `Runs`, `Last`, `Total` and `Average`. `world.Systems` lists the systems without allocating, so
+a status page can show the slowest one ([measuring systems](/en/docs/guide/systems#measuring-systems)).
+
+```csharp
+using var measured = new World(new WorldOptions { MeasureSystems = true });
+// AddSystem, then update as usual
+measured.Update();
+foreach (var system in measured.Systems)
+    Console.WriteLine($"{system.GetType().Name}: last {system.Stats.Last.TotalMicroseconds} μs");
+```
+
+### Find the systems that failed [#errors]
+
+By default an exception a system throws leaves `Update()`. With `SystemErrors = SystemErrorPolicy.Disable`, the
+system is switched off instead, its exception stays in `system.Error`, and the update goes on: a failure becomes
+data a health check reads. Setting `Enabled = true` clears `Error` and tries the system again
+([errors](/en/docs/guide/systems#errors)).
+
+```csharp
+using var guarded = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
+// AddSystem, then update as usual
+guarded.Update();
+foreach (var system in guarded.Systems)
+    if (system.Error is { } error) Console.Error.WriteLine($"{system.GetType().Name} is off: {error.Message}");
+```
+
+### Which thread [#threads]
+
+Read diagnostics on the world's owner thread between two updates, like the [hosting guide](/en/docs/guide/hosting#reads)
+publishes a status: the numbers then describe one finished tick. `world.Describe()` may also be called from another
+thread for a rough picture (it never corrupts the world), but a table changed at the same time may be read half-way.
+`entity.Describe()` and `system.Stats` belong to the owner thread.
+
+## Full example [#full-example]
+
+A world of walkers and guards, with one buggy system, described after three updates. Put the files in a console
+project that references EasyEcs (`dotnet add package EasyEcs`) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Position(float X, float Y) : IComponent;
+public record struct Velocity(float X, float Y) : IComponent;
+public record struct Health(int Value) : IComponent;
+public record struct Cooldown(int Ticks) : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+public class MoveSystem : EcsSystem
+{
+    [ForEach]
+    static void Move(ref Position position, in Velocity velocity)
+    {
+        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+    }
+}
+
+// A bug to find: a cooldown that ran out should be removed; this throws instead.
+public class CooldownSystem : EcsSystem
+{
+    [ForEach]
+    static void Tick(ref Cooldown cooldown)
+    {
+        cooldown.Ticks--;
+        if (cooldown.Ticks < 0)
+        {
+            throw new InvalidOperationException("a cooldown went below zero");
+        }
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+var options = new WorldOptions
+{
+    // Time every run of every system: system.Stats.
+    MeasureSystems = true,
+    // A system that throws is switched off and keeps the exception: system.Error.
+    SystemErrors = SystemErrorPolicy.Disable,
+};
+using var world = new World(options);
+world.AddSystem<MoveSystem>();
+world.AddSystem<CooldownSystem>();
+
+var walkers = new Entity[1_000];
+world.CreateEntities(walkers, new Position(0, 0), new Velocity(1, 0));
+var guards = new Entity[200];
+world.CreateEntities(guards, new Position(5, 5), new Health(50), new Cooldown(2));
+
+// A walker that stops: its row stays, and the Velocity column counts one row without it.
+walkers[0].RemoveVelocity();
+
+for (int tick = 0; tick < 3; tick++)
+{
+    world.Update();
+}
+
+Diagnostics.PrintTables(world);
+Diagnostics.PrintEntity(guards[0]);
+Diagnostics.PrintSystems(world);
+```
+
+</Accordion>
+<Accordion title="Diagnostics.cs">
+
+```csharp title="Diagnostics.cs" doccheck=example
+using EasyEcs;
+
+// What an admin endpoint would return, printed. Cold code that allocates: call it between updates.
+public static class Diagnostics
+{
+    public static void PrintTables(World world)
+    {
+        Console.WriteLine($"{world.EntityCount} entities");
+        foreach (var table in world.Describe())
+        {
+            var columns = new List<string>();
+            foreach (var column in table.Columns)
+            {
+                string without = column.Without > 0 ? $" ({column.Without} without)" : "";
+                columns.Add(column.Type.Name + without);
+            }
+
+            Console.WriteLine($"  [{string.Join(", ", columns)}] {table.Entities} entities, " +
+                              $"{table.Capacity} rows allocated, {table.Bytes:N0} bytes");
+        }
+    }
+
+    public static void PrintEntity(Entity entity)
+    {
+        Console.WriteLine(entity);
+        foreach (var component in entity.Describe())
+        {
+            string state = component.Enabled ? "" : " (disabled)";
+            Console.WriteLine($"  {component.Value}{state}");
+        }
+    }
+
+    public static void PrintSystems(World world)
+    {
+        foreach (var system in world.Systems)
+        {
+            string name = system.GetType().Name;
+            string state = system.Error is { } error ? $"off: {error.Message}" : "on";
+            Console.WriteLine($"{name}: {system.Stats.Runs} runs, {state}");
+        }
+    }
+}
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+1200 entities
+  [] 0 entities, 64 rows allocated, 512 bytes
+  [Position, Velocity (1 without)] 1000 entities, 1024 rows allocated, 24,840 bytes
+  [Position, Cooldown, Health] 200 entities, 256 rows allocated, 6,256 bytes
+Entity 1000v1
+  Position { X = 5, Y = 5 }
+  Cooldown { Ticks = -1 }
+  Health { Value = 50 }
+MoveSystem: 3 runs, on
+CooldownSystem: 3 runs, off: a cooldown went below zero
+```
+
+The walker that stopped stays in its table, counted in `Velocity (1 without)`. The first table is the world's empty
+table, where `CreateEntity()` without components puts an entity. The guard shows the value the buggy system left,
+`Cooldown { Ticks = -1 }`, and `CooldownSystem` is off with its exception kept while `MoveSystem` goes on running:
+the third update did not stop at the bug.
+
+## How to use it fast [#how-to-use-it-fast]
+
+| Instead of | Do | Why |
+| --- | --- | --- |
+| `Describe()` on every tick | On a request or a timer, between updates | It allocates its answer |
+| `entity.Describe()` to test for a component | `HasX`, `TryGetX`, a filter | No boxing, no allocation |
+| A stopwatch around `world.Update()` | `MeasureSystems` and `system.Stats` | Per system, two timestamp reads per run |
+| A try/catch around `Update()` on a live server | `SystemErrorPolicy.Disable` and `system.Error` | The other systems keep running |
+
+Describing the battle server's world for a dashboard and one entity for a debugger (`IntrospectionBenchmark`):
+
+<BenchTable bench="IntrospectionBenchmark" />
+
+## What it costs [#what-it-costs]
+
+- **`world.Describe()`:** O(tables + columns); allocates one `TableInfo` per table and its columns.
+- **`entity.Describe()`:** O(components of the entity); boxes each value.
+- **`MeasureSystems`:** two timestamp reads per system run when on; nothing when off.
+- **`SystemErrorPolicy.Disable`:** nothing until a system throws.
+- **The debugger view** costs nothing at run time: it is read only when a debugger asks.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| `Describe()` in a system or every tick | Allocations on the hot path | Code review |
+| Reading `Describe()` from another thread during an update | Counts of a table caught half-way through a change | Read between updates on the owner thread |
+| Expecting `Bytes` to drop when entities leave | Tables keep their capacity for the next wave | Read `Entities` against `Capacity` |
+| Leaving `SystemErrorPolicy.Disable` on in tests | A failing system is silently off and the test checks other things | Keep the default `Throw` in tests ([testing](/en/docs/guide/testing#errors)) |
+| Logging `entity.Id.Index` alone | The index is reused by later entities | Log the entity or its `EntityId` (`1000v1`) |
+
+## Related [#related]
+
+<Cards>
+  <Card title="Systems" href="/en/docs/guide/systems#measuring-systems">
+    Measuring systems, errors and the system list.
+  </Card>
+  <Card title="Hosting in a .NET server" href="/en/docs/guide/hosting#operations">
+    Publishing health and metrics from the world's loop.
+  </Card>
+  <Card title="Troubleshooting" href="/en/docs/guide/troubleshooting">
+    What an exception from EasyEcs means and how to fix it.
+  </Card>
+  <Card title="Architecture" href="/en/docs/architecture#storage-model">
+    The tables, columns and rows that `Describe` reports.
+  </Card>
+</Cards>
