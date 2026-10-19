@@ -31,10 +31,10 @@ env:
 
 jobs:
   tag:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     if: github.ref == 'refs/heads/master'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -52,7 +52,7 @@ jobs:
           sed -i "s|<Version>[^<]*</Version>|<Version>$VERSION</Version>|" Directory.Build.props
           grep -q "<Version>$VERSION</Version>" Directory.Build.props
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
@@ -76,18 +76,18 @@ jobs:
           git push origin HEAD:master "v$VERSION"
 
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: tag
     permissions:
       contents: write # the GitHub release
       id-token: write # the OIDC token NuGet exchanges for a temporary API key
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: v${{ inputs.version }}
           fetch-depth: 0 # the release notes list the commits since the previous tag
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
