@@ -30,7 +30,7 @@ public class ChangedTests
     public class ArmorWatchBatch : EcsSystem
     {
         [ForEach, Changed<Armor>]
-        private static void Count(System.ReadOnlySpan<Armor> armor, System.Span<Seen> seen)
+        private static void Count(System.Span<Seen> seen)
         {
             for (int i = 0; i < seen.Length; i++) seen[i].Count++;
         }
@@ -54,7 +54,9 @@ public class ChangedTests
     public class ArmorEntityWatch : EcsSystem
     {
         [ForEach, Changed<Armor>]
+#pragma warning disable EECS027 // no component parameter is what this system covers
         private static void Count(Entity entity) => entity.Get<Seen>().Count++;
+#pragma warning restore EECS027
     }
 
     /// <summary>Destroys entities whose armor changed: structural changes inside a Changed pass.</summary>
@@ -71,7 +73,9 @@ public class ChangedTests
     public class Regen : EcsSystem
     {
         [ForEach, Changed<Armor>]
+#pragma warning disable EECS026 // the write access is the point: it stamps the rows this system then must not see
         private static void Apply(ref Armor armor, ref Seen seen) => seen.Count++;
+#pragma warning restore EECS026
     }
 
     /// <summary>A writer ordered after the watch.</summary>

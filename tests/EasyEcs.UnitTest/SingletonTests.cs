@@ -26,7 +26,7 @@ public class SingletonTests
 
     public class Ticker : EcsSystem
     {
-        [ForEach] static void Tick(in Health health, ref Clock clock) => clock.Tick++;
+        [ForEach, With<Health>] static void Tick(ref Clock clock) => clock.Tick++;
     }
 
     [Test]

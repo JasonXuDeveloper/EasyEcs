@@ -19,12 +19,14 @@ public class Movement : EcsSystem
 public class Damage : EcsSystem
 {
     [ForEach, With<Velocity>, Without<Dead>]
+#pragma warning disable EECS029 // the instance form is what this system covers
     private void Hurt(Entity entity, ref Health health, ref Score score)
     {
         if (--health.Value > 0) return;
         entity.Set(new Dead());
         score.Deaths++; // singleton parameter: resolved once per pass (added if missing)
     }
+#pragma warning restore EECS029
 
     [ForEach, With<Dead>]   // no component parameter: Dead is queried through the filter
     private static void Corpses(Entity entity) => entity.Remove<Velocity>();
@@ -128,8 +130,8 @@ public struct DestroyDespitePromise : IForEachEntity<Health>, INoStructuralChang
 /// <summary>Counts positioned entities that are frozen or dead (or both): [WithAny] filters.</summary>
 public class CountHalted : EcsSystem
 {
-    [ForEach, WithAny<Frozen>, WithAny<Dead>]
-    static void Count(in Position position, ref Score score) => score.Points++;
+    [ForEach, With<Position>, WithAny<Frozen>, WithAny<Dead>]
+    static void Count(ref Score score) => score.Points++;
 }
 
 public class ForEachSystemTests

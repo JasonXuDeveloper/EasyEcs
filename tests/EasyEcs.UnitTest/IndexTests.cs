@@ -15,6 +15,7 @@ public class IndexTests
         }
     }
 
+#pragma warning disable EECS028 // a new key is a new string: the renames are what these systems test
     /// <summary>Renames every callsign: a system writes keys with Set.</summary>
     public class Rename : EcsSystem
     {
@@ -36,6 +37,7 @@ public class IndexTests
             entity.Set(new Callsign(callsign.Value + "!"));
         }
     }
+#pragma warning restore EECS028
 
     /// <summary>A component with two key types: only one of them can be indexed.</summary>
     private record struct TwoKeys(int Number, string Name) : IComponent, IIndexed<int>, IIndexed<string>

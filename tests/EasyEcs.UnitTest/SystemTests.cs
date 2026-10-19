@@ -8,7 +8,7 @@ public class SystemTests
 {
     private static readonly List<string> Log = [];
 
-#pragma warning disable EECS018 // one test system, many schedules: each instance's values never change
+#pragma warning disable EECS018, EECS028 // one test system, many schedules: each instance's values never change; its log is the test's record
     private class Logged(string name, int interval = 1, int phase = 0) : EcsSystem
     {
         public override int UpdateInterval => interval;
@@ -18,7 +18,7 @@ public class SystemTests
         protected override void OnUpdate() => Log.Add($"{name}.update");
         protected override void OnDestroy() => Log.Add($"{name}.destroy");
     }
-#pragma warning restore EECS018
+#pragma warning restore EECS018, EECS028
 
     [Test]
     public void PhasesSpreadSystemsOfOneInterval()

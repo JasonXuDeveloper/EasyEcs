@@ -2,6 +2,8 @@ using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
+// StunCycle and Cull walk the Health column on purpose: the tests check a column's walk while rows flip its bits.
+#pragma warning disable EECS026
 /// <summary>Counts stunned and free entities; stuns every free one and frees every stunned one (one bit flip each).</summary>
 public class StunCycle : EcsSystem
 {
@@ -48,6 +50,7 @@ public class Cull : EcsSystem
             target.Remove<Health>();
     }
 }
+#pragma warning restore EECS026
 
 /// <summary>Visits the free once each and stuns those whose health is a multiple of 4,999 (a structural pass).</summary>
 public class SparseStun : EcsSystem

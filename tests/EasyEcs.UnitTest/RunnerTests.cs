@@ -9,8 +9,8 @@ namespace EasyEcs.UnitTest;
 /// </summary>
 public static class Reports
 {
-    [ForEach, Without<Dead>]
-    private static void CountAlive(in Health hp, ref int alive) => alive++;
+    [ForEach, With<Health>, Without<Dead>]
+    private static void CountAlive(ref int alive) => alive++;
 
     [ForEach]
     private static void Heal(ref Health hp, int amount) => hp.Value += amount;
@@ -22,7 +22,7 @@ public static class Reports
     private static void Tick(ref Seen seen, ref Clock clock) => seen.Count = (int)clock.Tick++;
 
     [ForEach, Changed<Armor>]
-    private static void Changed(Entity entity, ref int seen) => seen++;
+    private static void Changed(ref int seen) => seen++;
 
     [ForEach]
     private static void Total(in Health hp, Maybe<Armor> armor, ref int total) => total += hp.Value + (armor.HasValue ? armor.Value.Value : 0);
@@ -39,8 +39,8 @@ public static class Reports
         for (int i = 0; i < hp.Length; i++) total += hp[i].Value;
     }
 
-    [ForEach]
-    private static void Count(in Health hp, ref int counted, int stop)
+    [ForEach, With<Health>]
+    private static void Count(ref int counted, int stop)
     {
         if (counted == stop) throw new InvalidOperationException("stop");
         counted++;
@@ -58,8 +58,8 @@ public static class Reports
 
 public class Tools                  // an instance class may hold runners too
 {
-    [ForEach]
-    private static void Count(in Health hp, ref int count) => count++;
+    [ForEach, With<Health>]
+    private static void Count(ref int count) => count++;
 }
 
 public class RunnerTests

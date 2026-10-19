@@ -230,9 +230,9 @@ public class BattleServerTests
     {
         using var server = Run(30);
         var player = server.NearestPlayer(default);
-        int hp = player.Get<Health>().Value;
+        int hp = player.Read<Health>().Value;
         Assert.That(server.Hit(player.Id, 7), Is.True);
-        Assert.That(player.Get<Health>().Value, Is.EqualTo(hp - 7));
+        Assert.That(player.Read<Health>().Value, Is.EqualTo(hp - 7));
         Assert.That(server.ShotsLeft(player), Is.EqualTo(player.Get<Mana>().Value / BattleServer.ShotCost));
 
         player.Destroy();

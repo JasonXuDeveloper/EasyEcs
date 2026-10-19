@@ -18,7 +18,7 @@ public static class Players
             new Health(100),
             new DynamicBuffer<Item>());
 
-        ref var items = ref player.Get<DynamicBuffer<Item>>();
+        ref var items = ref player.WriteItem();
         items.Add(new Item(PotionKind, 3));
         items.Add(new Item(MapKind, 1));
 

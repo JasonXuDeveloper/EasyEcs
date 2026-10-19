@@ -53,7 +53,9 @@ public class ParallelTests
     {
         [ForEach, With<Left>]
         static void Meet(Entity entity, in Rendezvous rendezvous) =>
+#pragma warning disable EECS027 // the lookup through the Entity is what this system covers
             entity.Get<Right>().Met = rendezvous.Barrier.SignalAndWait(rendezvous.TimeoutMs);
+#pragma warning restore EECS027
     }
 
     /// <summary>Inherits WriteRight's [ForEach] method and adds an OnUpdate the generator never saw: it runs alone.</summary>

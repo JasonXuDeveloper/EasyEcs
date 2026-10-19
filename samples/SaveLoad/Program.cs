@@ -34,7 +34,7 @@ using (var restarted = new World())
 
     // Ids survive a whole-world load, so a saved id still names the same entity.
     Entity bobAgain = restarted.GetEntity(bob.Id);
-    bool sameEntity = bobAgain.Read<Name>().Value == "bob";
+    bool sameEntity = bobAgain.Name.Value == "bob";
     checks.That("a handle's id names the same entity after a reload", sameEntity);
 }
 
@@ -59,7 +59,7 @@ var arrived = new Entity[group.Count];
 other.LoadEntities(bytes.WrittenSpan, arrived);
 
 Entity bobThere = arrived[0];
-bool sameValues = bobThere.Read<Name>().Value == "bob" && bobThere.Read<Health>().Value == 100;
+bool sameValues = bobThere.Name.Value == "bob" && bobThere.Health.Value == 100;
 checks.That("the copy has bob's values", sameValues);
 // ChildOf is an indexed component: its index counts the children of a parent.
 int swordsThere = other.Index<ChildOf, EntityId>().Count(bobThere.Id);
@@ -74,7 +74,7 @@ Console.WriteLine($"other:    {WorldText.Describe(other)}");
 var moved = new Entity[1];
 zone.MoveEntities(other, [carol.Id], moved);
 checks.That("carol left the zone", !carol.IsAlive && zone.Count<Name>() == 1);
-checks.That("and arrived with her values", moved[0].Read<Position>() == new Position(-3, 7));
+checks.That("and arrived with her values", moved[0].Position == new Position(-3, 7));
 Console.WriteLine($"zone:     {WorldText.Describe(zone)}");
 Console.WriteLine($"other:    {WorldText.Describe(other)}");
 int aliceSwords = zone.Index<ChildOf, EntityId>().Count(alice.Id);

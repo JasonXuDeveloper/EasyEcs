@@ -20,7 +20,7 @@ public class InstantiateTests
         Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(world.ChangeTick)), Is.EqualTo(100)); // written now
         Assert.That(world.Count<Health>(QueryFilter.Create().Removed<Armor>(1)), Is.Zero);
         var one = world.Instantiate(orc);                              // the table is found once, then cached
-        Assert.That(one.Get<Armor>(), Is.EqualTo(new Armor(5)));
+        Assert.That(one.Read<Armor>(), Is.EqualTo(new Armor(5)));
     }
 
     [Test]

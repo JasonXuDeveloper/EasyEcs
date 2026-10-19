@@ -8,8 +8,8 @@ public record struct Ticket(int Seat) : ICleanupComponent;  // a second one
 /// <summary>Releases leases of destroyed entities: the system a cleanup component asks for.</summary>
 public class ReleaseLeases : EcsSystem
 {
-    [ForEach, With<Destroyed>]
-    static void Release(Entity entity, in Lease lease, ref Released released)
+    [ForEach, With<Destroyed>, With<Lease>]
+    static void Release(Entity entity, ref Released released)
     {
         released.Count++;
         entity.Remove<Lease>();

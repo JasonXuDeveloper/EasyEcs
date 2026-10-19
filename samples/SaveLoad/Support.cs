@@ -39,9 +39,9 @@ public static class WorldText
     private static string DescribePlayer(World world, Entity player)
     {
         var text = new StringBuilder();
-        Position position = player.Read<Position>();
-        string name = player.Read<Name>().Value;
-        int health = player.Read<Health>().Value;
+        Position position = player.Position;
+        string name = player.Name.Value;
+        int health = player.Health.Value;
         text.Append($"{name}@({position.X},{position.Y}) hp {health}");
 
         if (player.TryGet<DynamicBuffer<Item>>(out var bag))
@@ -54,7 +54,7 @@ public static class WorldText
 
         foreach (var sword in world.Children(player.Id))
         {
-            text.Append($" sword+{sword.Read<Sword>().Damage}");
+            text.Append($" sword+{sword.Sword.Damage}");
         }
 
         return text.ToString();

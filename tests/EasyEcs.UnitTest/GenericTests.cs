@@ -16,8 +16,8 @@ public class CountOf<T> : EcsSystem where T : struct, IComponent
 /// <summary>A closed generic system as a base type: its code runs, and this type adds a pass of its own.</summary>
 public class CountHealthy : CountOf<Health>
 {
-    [ForEach, Without<Dead>]
-    private static void Healthy(in Health hp, ref Score score) => score.Points++;
+    [ForEach, With<Health>, Without<Dead>]
+    private static void Healthy(ref Score score) => score.Points++;
 }
 
 /// <summary>Generic [ForEach] methods outside systems: the entry point takes the type arguments.</summary>
@@ -116,11 +116,11 @@ public struct Thawed : ISystemGroup;
 [UpdateInGroup<Thawed>]
 public class CountThawed : EcsSystem
 {
-    [ForEach]
-    private static void Count(in Position position, ref Tally tally) => tally.Count++;
+    [ForEach, With<Position>]
+    private static void Count(ref Tally tally) => tally.Count++;
 
-    [ForEach, With<Health>]
-    private static void Score(in Position position, ref Score score) => score.Points++;
+    [ForEach, With<Position>, With<Health>]
+    private static void Score(ref Score score) => score.Points++;
 }
 
 public class GroupFilterTests

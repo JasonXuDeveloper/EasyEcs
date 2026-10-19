@@ -103,8 +103,8 @@ public class ChangeTrackingComparison
         _world.CreateEntities(_entities, new Hp(100), new Replica(100));
         _world.AddSystem<ReplicateChanged>();
         _world.AddSystem<ReplicateScan>();
-        WarmUp(EasyEcs_Changed, () => { foreach (var e in _entities) Check(e.Get<Replica>().Value == e.Get<Hp>().Value); });
-        WarmUp(EasyEcs_Scan, () => { foreach (var e in _entities) Check(e.Get<Replica>().Value == e.Get<Hp>().Value); });
+        WarmUp(EasyEcs_Changed, () => { foreach (var e in _entities) Check(e.Read<Replica>().Value == e.Read<Hp>().Value); });
+        WarmUp(EasyEcs_Scan, () => { foreach (var e in _entities) Check(e.Read<Replica>().Value == e.Read<Hp>().Value); });
     }
 
     [GlobalSetup(Targets = [nameof(Friflo_Scan), nameof(Friflo_DirtyTag)])]
