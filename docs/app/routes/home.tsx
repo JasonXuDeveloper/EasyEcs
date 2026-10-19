@@ -1,13 +1,14 @@
 import { getHighlighter } from 'fumadocs-core/highlight';
 import { Card, Cards } from 'fumadocs-ui/components/card';
+import { CodeBlock, Pre } from 'fumadocs-ui/components/codeblock';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import {
   ArrowRight,
+  ArrowUpRight,
   BookOpen,
   Bot,
   Check,
   ChevronDown,
-  Copy as CopyIcon,
   Cpu,
   History,
   Layers,
@@ -19,14 +20,14 @@ import {
   Stamp,
   Zap,
 } from 'lucide-react';
-import { type ReactNode, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Link } from 'react-router';
+import { PeerChart } from '@/components/charts';
 import {
   type BenchNumber,
   bench,
   benchNumber,
   benchRows,
-  formatBytes,
   formatRatio,
   formatTime,
   peerLabel,
@@ -60,8 +61,6 @@ const zeroAlloc = tickAlloc?.value === 0;
 const peerList = peers();
 /** True when EasyEcs runs the headline tick faster than every peer (the headline and description say so) */
 const tickLeads = peerList[0]?.ours === true;
-/** The slowest peer's time, the full length of a bar in the hero's tick card */
-const tickMax = Math.max(1, ...peerList.map((p) => p.row.meanNs));
 const slowerPeers = peerList.filter((p) => !p.ours && (p.row.ratio ?? 0) >= 2);
 const slowRange = slowerPeers.length
   ? `${formatRatio(Math.min(...slowerPeers.map((p) => p.row.ratio ?? 0)))}–${formatRatio(Math.max(...slowerPeers.map((p) => p.row.ratio ?? 0)))}`
@@ -161,12 +160,6 @@ interface Copy {
   start: string;
   github: string;
   demo: string;
-  copy: string;
-  copied: string;
-  tickTitle: string;
-  tickText: string;
-  /** "per tick", after each library's allocation in the tick card */
-  perTick: string;
   numbersTitle: string;
   numbers: { label: string; value: string; note: string }[];
   numbersNote: string;
@@ -252,12 +245,6 @@ const copy: Record<Locale, Copy> = {
     start: 'Get started',
     github: 'GitHub',
     demo: 'Try it in the browser',
-    copy: 'Copy the install command',
-    copied: 'Copied',
-    tickTitle: 'One server tick, 100,000 entities',
-    tickText:
-      "The same simulation on each library's fast path, identical results. Shorter is faster.",
-    perTick: 'per tick',
     numbersTitle: 'One server tick, measured',
     numbers: [
       {
@@ -496,11 +483,6 @@ const copy: Record<Locale, Copy> = {
     start: '快速开始',
     github: 'GitHub',
     demo: '在浏览器里试试',
-    copy: '复制安装命令',
-    copied: '已复制',
-    tickTitle: '一个服务器 tick，10 万实体',
-    tickText: '同一个模拟移植到每个库的最快写法，结果一致。越短越快。',
-    perTick: '/ tick',
     numbersTitle: '一个服务器 tick 的实测耗时',
     numbers: [
       {
@@ -768,20 +750,6 @@ export function meta({ params }: Route.MetaArgs) {
   });
 }
 
-function GitHubIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
-    </svg>
-  );
-}
-
 function Code({ html, className }: { html: string; className?: string }) {
   return (
     <div
@@ -839,103 +807,6 @@ function Section({
   );
 }
 
-/** The install command with a copy button */
-function Install({ label, done }: { label: string; done: string }) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const id = setTimeout(() => setCopied(false), 1500);
-    return () => clearTimeout(id);
-  }, [copied]);
-  return (
-    <div className="inline-flex max-w-full items-center gap-3 rounded-full border bg-fd-card py-1 ps-4 pe-1 font-mono text-[13px]">
-      <span className="text-fd-muted-foreground select-none" aria-hidden="true">
-        $
-      </span>
-      <code className="min-w-0 overflow-x-auto whitespace-nowrap">
-        {installCommand}
-      </code>
-      <button
-        type="button"
-        className={button('ghost', 'sm', 'size-8 shrink-0 px-0')}
-        aria-label={copied ? done : label}
-        title={copied ? done : label}
-        onClick={() =>
-          navigator.clipboard
-            ?.writeText(installCommand)
-            .then(() => setCopied(true))
-            .catch(() => undefined)
-        }
-      >
-        {copied ? <Check /> : <CopyIcon />}
-      </button>
-    </div>
-  );
-}
-
-/**
- * The headline tick as plain bars (no chart library): each library's time,
- * relative to the slowest, and what it allocates per tick. The numbers are
- * text, so the card reads the same without CSS or to a screen reader.
- */
-function TickCard({ t, lang }: { t: Copy; lang: Locale }) {
-  return (
-    <figure className={cn(surface, 'p-5 sm:p-6')}>
-      <figcaption>
-        <p className="text-sm font-medium">{t.tickTitle}</p>
-        <p className="mt-1 text-xs leading-relaxed text-fd-muted-foreground">
-          {t.tickText}
-        </p>
-      </figcaption>
-      <ol className="mt-6 space-y-4">
-        {peerList.map((p) => (
-          <li key={p.method}>
-            <div className="flex items-baseline justify-between gap-3 text-sm">
-              <span
-                className={cn(
-                  'truncate',
-                  p.ours ? 'font-medium' : 'text-fd-muted-foreground',
-                )}
-              >
-                {peerLabel(p.method, docsVersion)}
-              </span>
-              <span className="shrink-0 tabular-nums">
-                <span className={p.ours ? 'font-medium' : undefined}>
-                  {formatTime(p.row.meanNs)}
-                </span>
-                <span className="text-fd-muted-foreground">
-                  {' · '}
-                  {formatBytes(p.row.allocatedBytes)} {t.perTick}
-                </span>
-              </span>
-            </div>
-            <div
-              className="mt-2 h-1.5 overflow-hidden rounded-full bg-fd-muted"
-              aria-hidden="true"
-            >
-              <div
-                className="h-full rounded-full"
-                style={{
-                  width: `${Math.max(2, (p.row.meanNs / tickMax) * 100)}%`,
-                  background: p.ours
-                    ? 'var(--ecs-chart-ours)'
-                    : 'var(--ecs-chart-other)',
-                }}
-              />
-            </div>
-          </li>
-        ))}
-      </ol>
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t pt-4">
-        <p className="text-xs text-fd-muted-foreground">
-          {sourceLine(lang === 'zh')}
-        </p>
-        <MoreLink to={`/${lang}/docs/comparison`}>{t.peersLink}</MoreLink>
-      </div>
-    </figure>
-  );
-}
-
 export default function HomePage({ params, loaderData }: Route.ComponentProps) {
   const lang = getLocale(params.lang);
   const t = copy[lang];
@@ -946,7 +817,7 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
       <main className="flex flex-1 flex-col items-center">
         {/* Hero: the claim and its proof side by side */}
         <section className="w-full px-4 pt-14 pb-16 sm:px-6 md:pt-24 md:pb-20">
-          <div className="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,27rem)] lg:gap-16">
+          <div className="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-2 lg:gap-16">
             <div className="min-w-0">
               <Link
                 to={`${docs}/changelog`}
@@ -955,7 +826,7 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
                 {t.pill}
                 <ArrowRight className="size-3" aria-hidden="true" />
               </Link>
-              <h1 className="mt-6 text-4xl leading-[1.08] font-medium tracking-tight text-balance sm:text-5xl lg:text-[3.5rem]">
+              <h1 className="mt-6 text-4xl leading-[1.08] font-medium tracking-tight text-balance break-keep sm:text-5xl lg:text-[3.25rem]">
                 {t.headline}
                 {t.headlineProof && (
                   <span className="block text-fd-muted-foreground">
@@ -977,16 +848,27 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
                   rel="noopener noreferrer"
                   className={button('secondary')}
                 >
-                  <GitHubIcon />
                   {t.github}
+                  <ArrowUpRight />
                 </a>
               </div>
-              <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-3">
-                <Install label={t.copy} done={t.copied} />
+              {/* Fumadocs' code block: the same copy button as every code sample in the docs */}
+              <CodeBlock className="my-0 mt-6 max-w-md" keepBackground={false}>
+                <Pre className="px-4">
+                  <code>{installCommand}</code>
+                </Pre>
+              </CodeBlock>
+              <p className="mt-4">
                 <MoreLink to={`${docs}/demo`}>{t.demo}</MoreLink>
-              </div>
+              </p>
             </div>
-            <TickCard t={t} lang={lang} />
+            {/* The proof beside the claim: the headline tick, every library */}
+            <div className="min-w-0 [&>figure]:my-0">
+              <PeerChart lang={lang} />
+              <p className="mt-4">
+                <MoreLink to={`${docs}/comparison`}>{t.peersLink}</MoreLink>
+              </p>
+            </div>
           </div>
         </section>
 

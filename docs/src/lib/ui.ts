@@ -24,8 +24,13 @@ export function button(
   className?: string,
 ) {
   return cn(
-    buttonVariants({ variant: variant === 'secondary' ? 'outline' : variant }),
+    // Fumadocs' variants hide the outline for a ring that draws nothing here:
+    // drop that class and draw the accent outline (3:1 or more, both themes)
+    buttonVariants({
+      variant: variant === 'secondary' ? 'outline' : variant,
+    }).replace('focus-visible:outline-none', ''),
     'rounded-full p-0 whitespace-nowrap',
+    'focus-visible:[outline:2px_solid_var(--color-fd-ring)] focus-visible:outline-offset-2',
     sizes[size],
     variant === 'secondary' && 'bg-fd-background',
     className,
