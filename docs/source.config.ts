@@ -16,6 +16,7 @@ import rehypeMermaid from 'rehype-mermaid';
 import remarkCjkFriendly from 'remark-cjk-friendly';
 import remarkCjkFriendlyGfmStrikethrough from 'remark-cjk-friendly-gfm-strikethrough';
 import { z } from 'zod';
+import { remarkCjkLineBreaks } from './src/lib/cjk';
 import { legacyFrontmatter, remarkLegacyPage } from './src/lib/legacy';
 import { mermaidOptions, remarkMermaidSource } from './src/lib/mermaid';
 
@@ -93,6 +94,9 @@ export default defineConfig({
       // remark-gfm, which Fumadocs' preset puts before the plugins listed here.
       remarkCjkFriendly,
       remarkCjkFriendlyGfmStrikethrough,
+      // A source line break between two Chinese characters is no space
+      // (src/lib/cjk.ts).
+      remarkCjkLineBreaks,
       // Legacy pages only (no frontmatter): drop the H1 and the breadcrumb,
       // turn relative links into site or GitHub URLs.
       remarkLegacyPage,
