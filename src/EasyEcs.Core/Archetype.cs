@@ -795,10 +795,16 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Span<long> Rows64(int count) => MemoryMarshal.Cast<EntityId, long>(Slots.AsSpan(0, count));
 
-    /// <summary>Make room for <paramref name="rows"/> rows in one growth (bulk creation).</summary>
+    /// <summary>
+    /// Make room for <paramref name="rows"/> rows in one growth (bulk creation, pre-sizing): to <paramref name="rows"/>
+    /// rounded up to whole presence words (64 rows), or to twice the capacity when that is more, so tables that grow by
+    /// many reservations still double. Not to the next power of two: the 100,000 rows of a start-up are 100,032 rows,
+    /// not 131,072 (each column and the entity rows are large-object allocations, which count toward the full
+    /// collections a process pays for; see decision D28, docs/content/decisions.mdx).
+    /// </summary>
     public void Reserve(int rows)
     {
-        if (rows > Slots.Length) Grow((int)BitOperations.RoundUpToPowerOf2((uint)rows));
+        if (rows > Slots.Length) Grow(Math.Max((rows + 63) & ~63, Slots.Length * 2));
     }
 
     /// <summary>Grow the entity rows (<see cref="Slots"/>) and every column to <paramref name="capacity"/> rows (cold path).</summary>

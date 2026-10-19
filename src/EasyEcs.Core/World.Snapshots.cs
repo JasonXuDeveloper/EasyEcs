@@ -88,7 +88,7 @@ public sealed partial class World
             // then (its old handles work again), else it moves past every version it ever had, so no handle made after
             // the capture can match a later incarnation.
             var saved = snapshot.Meta.AsSpan(0, snapshot.NextId);
-            if (Meta.Length < saved.Length) Grow(saved.Length);
+            if (Meta.Length < saved.Length) Grow(saved.Length, true);
             int used = Math.Max(_nextId, snapshot.NextId);
             for (int id = 0; id < used; id++)
             {

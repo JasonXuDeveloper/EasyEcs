@@ -41,7 +41,7 @@ public sealed partial class World : IDisposable
     public World(WorldOptions options = null)
     {
         _options = options ?? new WorldOptions();
-        Meta = new EntityMeta[Math.Max(1, _options.InitialEntityCapacity)];
+        Meta = AllocateMeta(Math.Max(1, _options.InitialEntityCapacity), true);
         _queryLookup = _queryCache.GetAlternateLookup<QueryLookup>();
         _emptyArchetype = GetOrCreateArchetype(default);
         Collectible.Track(this); // held weakly: a world nobody holds stops mentioning its bits
@@ -59,7 +59,7 @@ public sealed partial class World : IDisposable
         using (Structural())
         {
             if (Meta.Length < capacity)
-                Grow(capacity);
+                Grow(capacity, true);
         }
     }
 
@@ -351,11 +351,16 @@ public sealed partial class World : IDisposable
         return count;
     }
 
-    /// <summary>Make room for <paramref name="count"/> more entities (one growth). Inside the structural gate.</summary>
+    /// <summary>
+    /// Make room for <paramref name="count"/> more entities (one growth: to what they need, or to twice the capacity when
+    /// that is more, as <see cref="Archetype.Reserve"/>). Inside the structural gate.
+    /// </summary>
     private void ReserveIds(int count)
     {
         int needed = _nextId + Math.Max(0, count - _freeIdCount);
-        if (needed > Meta.Length) Grow((int)BitOperations.RoundUpToPowerOf2((uint)needed));
+        if (needed <= Meta.Length) return;
+        int doubled = Meta.Length * 2;
+        Grow(Math.Max(needed, doubled), needed >= doubled);
     }
 
     /// <summary>
@@ -409,18 +414,40 @@ public sealed partial class World : IDisposable
         _entityCount++;
         if (_freeIdCount > 0) return _freeIds[--_freeIdCount];
         int id = _nextId++;
-        if (id == Meta.Length) Grow(Meta.Length * 2);
+        if (id == Meta.Length) Grow(Meta.Length * 2, false);
         MetaRef(id).Version = 1; // versions start at 1: EntityId.Null (version 0) never names an entity
         return id;
     }
 
-    /// <summary>Grow entity metadata to <paramref name="capacity"/> (cold path).</summary>
+    /// <summary>
+    /// Grow entity metadata to <paramref name="capacity"/> (cold path): <paramref name="sized"/> when the capacity is
+    /// the one asked for (a reservation, a restore), not a doubling step (see <see cref="AllocateMeta"/>).
+    /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void Grow(int capacity)
+    private void Grow(int capacity, bool sized)
     {
-        Array.Resize(ref Meta, capacity);
+        var grown = AllocateMeta(capacity, sized);
+        Meta.AsSpan().CopyTo(grown);
+        Meta = grown;
         StorageVersion++;
     }
+
+    /// <summary>
+    /// Entity records for <paramref name="length"/> ids. A large array (85,000 bytes and up) sized by a reservation
+    /// (<paramref name="sized"/>: <see cref="EnsureEntityCapacity"/>, <c>EnsureCapacity</c>, <c>CreateEntities</c>, the
+    /// initial capacity, a restore) goes to the pinned object heap, beside the unmanaged columns; the steps of a doubling
+    /// stay on the large object heap, which can still be compacted when asked to, so the arrays a doubling discards leave
+    /// no hole for good. Neither heap compacts by default, so pinning moves nothing that would have moved. Each heap sets
+    /// off a full collection once its own allocations since the last one pass its budget (3 MiB after a collection of a
+    /// small heap): with the records on the pinned heap, a start-up of 100,000 entities stays under both, the large
+    /// object heap left to the entity rows and the caller's own arrays (the handle span of <c>CreateEntities</c>). See
+    /// decision D28 (docs/content/decisions.mdx).
+    /// </summary>
+    private static EntityMeta[] AllocateMeta(int length, bool sized) =>
+        sized && length >= LargeMeta ? GC.AllocateArray<EntityMeta>(length, pinned: true) : new EntityMeta[length];
+
+    /// <summary>Records from which an <see cref="EntityMeta"/> array is a large object (85,000 bytes).</summary>
+    private const int LargeMeta = 85_000 / 16;
 
     private readonly Archetype _emptyArchetype;
 

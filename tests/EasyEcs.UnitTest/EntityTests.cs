@@ -188,6 +188,16 @@ public class EntityTests
     }
 
     [Test]
+    public void BulkCreationGrowsToWhatItNeedsAndStillDoubles()
+    {
+        _world.CreateEntities(new Entity[100], new Health(1));
+        var table = Array.Find(_world.Describe(), t => t.Entities == 100);
+        Assert.That((table.Capacity, _world.Meta.Length), Is.EqualTo((128, 100))); // exact (rows: whole words)
+        _world.CreateEntities(new Entity[30], new Health(2));                     // a small batch: one doubling
+        Assert.That((Array.Find(_world.Describe(), t => t.Entities == 130).Capacity, _world.Meta.Length), Is.EqualTo((256, 200)));
+    }
+
+    [Test]
     public void AnIdNamesOneIncarnationAndNullNamesNone()
     {
         Assert.That(_world.TryGetEntity(EntityId.Null, out _), Is.False);  // versions start at 1
