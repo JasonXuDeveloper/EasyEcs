@@ -35,16 +35,16 @@ interface Stats {
 const text = {
   en: {
     entities: 'Entities',
-    update: 'ms per update',
+    update: 'ms per update, all systems',
     fps: 'FPS',
     pause: 'Pause',
     resume: 'Resume',
     reset: 'Reset',
     count: 'Entity count',
-    motion: 'Drag + movement, measured live:',
-    batched: 'batch + SIMD',
-    perEntity: 'per entity',
-    faster: 'faster',
+    motion: 'The same motion written two ways, measured live:',
+    batched: 'batch [ForEach] + SIMD',
+    perEntity: 'one entity at a time',
+    faster: (x: string) => `batch is ${x} faster`,
     loading: 'Loading the .NET runtime…',
     error: 'The demo could not start in this browser.',
     noscript: 'The demo needs JavaScript and WebAssembly.',
@@ -54,16 +54,16 @@ const text = {
   },
   zh: {
     entities: '实体',
-    update: '每次更新耗时（ms）',
+    update: '每次更新耗时（ms，全部系统）',
     fps: 'FPS',
     pause: '暂停',
     resume: '继续',
     reset: '重置',
     count: '实体数量',
-    motion: '阻力 + 移动，实时测量：',
-    batched: '批量 + SIMD',
-    perEntity: '逐实体',
-    faster: '更快',
+    motion: '同一段运动逻辑的两种写法，实时测量：',
+    batched: '批量 [ForEach] + SIMD',
+    perEntity: '逐个实体',
+    faster: (x: string) => `批量快 ${x}`,
     loading: '正在加载 .NET 运行时…',
     error: '这个浏览器无法运行演示。',
     noscript: '演示需要 JavaScript 和 WebAssembly。',
@@ -419,21 +419,21 @@ export function EcsDemo() {
       </div>
       <p className="border-t px-3 py-2 text-center text-sm text-fd-muted-foreground tabular-nums">
         {t.motion}{' '}
+        {t.batched}{' '}
         <span className="font-medium text-fd-foreground">
           {stats.batchMs.toFixed(3)} ms
-        </span>{' '}
-        {t.batched} ·{' '}
+        </span>
+        {' · '}
+        {t.perEntity}{' '}
         <span className="font-medium text-fd-foreground">
           {stats.entityMs.toFixed(3)} ms
-        </span>{' '}
-        {t.perEntity}
+        </span>
         {stats.batchMs > 0 && (
           <>
             {' · '}
             <span className="font-medium text-fd-primary">
-              {(stats.entityMs / stats.batchMs).toFixed(1)}×
-            </span>{' '}
-            {t.faster}
+              {t.faster(`${(stats.entityMs / stats.batchMs).toFixed(1)}×`)}
+            </span>
           </>
         )}
       </p>
