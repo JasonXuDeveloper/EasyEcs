@@ -16,6 +16,12 @@ chunk，把结构变更记进命令缓冲；EasyEcs 从 `[ForEach]` 方法生成
 <BenchValue k="peers.friflo10k.ratio" />），两者每个 tick 都不分配。Friflo 还能在 Unity 和更老的 .NET 上运行
 （netstandard2.1、net6.0-8.0），EasyEcs 只支持 .NET 10。
 
+<Stats>
+  <Stat hero lead library="Friflo" />
+  <Stat count="ahead" of="total" library="Friflo" label="EasyEcs 更快的对比">两个库都参与的对比中，差距超出测量误差</Stat>
+  <Stat k="peers.friflo.ratio" label="Friflo 跑一个服务器 tick 的耗时">相对 EasyEcs，10 万实体</Stat>
+</Stats>
+
 <BenchSource />
 
 ## 一览 [#at-a-glance]

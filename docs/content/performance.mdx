@@ -10,6 +10,15 @@ is already a generated, inlined struct job, and a busy world allocates nothing p
 costs on a real tick, which API to pick for each loop, the rewrites that pay when a system shows up in your timings,
 and every benchmark behind those numbers. How the library gets there is on [Why EasyEcs is fast](/en/docs/why-fast).
 
+<Stats>
+  <Stat hero lead />
+  <Stat k="tick.oneWorld" label="One server tick">100,000 entities in one world</Stat>
+  <Stat k="tick.fourWorlds" label="Four worlds, one thread each">4 × 25,000 entities</Stat>
+  <Stat k="tick.oneWorld.alloc" label="Allocated per tick">after warm-up; the unit tests fail the build otherwise</Stat>
+</Stats>
+
+<BenchSource />
+
 ## The headline ticks [#headline]
 
 `WorldSimulationBenchmark` is one tick of a busy MMO-style world, not a toy loop: 30% players, 70% NPCs and

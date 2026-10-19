@@ -17,6 +17,13 @@ On the same server tick of 100,000 entities, DefaultEcs takes <BenchValue k="pee
 EasyEcs and allocates <BenchValue k="peers.defaultecs.alloc" /> per tick, where EasyEcs allocates
 <BenchValue k="peers.easyecs.alloc" />. DefaultEcs runs on netstandard1.1-2.1 and Unity; EasyEcs needs .NET 10.
 
+<Stats>
+  <Stat hero lead library="DefaultEcs" />
+  <Stat count="ahead" of="total" library="DefaultEcs" label="Benchmarks EasyEcs is faster in">of those both libraries take part in, beyond the measurement error</Stat>
+  <Stat k="peers.defaultecs.ratio" label="DefaultEcs's time for the server tick">relative to EasyEcs, 100,000 entities</Stat>
+  <Stat k="peers.defaultecs.alloc" label="DefaultEcs allocates per tick">EasyEcs allocates <BenchValue k="peers.easyecs.alloc" /></Stat>
+</Stats>
+
 <BenchSource />
 
 ## At a glance [#at-a-glance]

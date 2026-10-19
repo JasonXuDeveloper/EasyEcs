@@ -10,6 +10,12 @@ rows with one bit test, calls your code without a delegate, changes structure wi
 allocates nothing. None of this needs you to write unusual code: a plain `[ForEach]` method gets all of it. Each
 section below names one mechanism, where it lives in the source and the benchmark that measures it.
 
+<Stats>
+  <Stat k="forEach.perEntity" label="A [ForEach] write, per entity">two plain arrays take <BenchValue k="rawArray.perEntity" /></Stat>
+  <Stat k="changed.10.speedup" label="[Changed<T>] over a full scan">10 of 100,000 rows written since the last run</Stat>
+  <Stat k="tick.oneWorld.alloc" label="Allocated per server tick">100,000 entities, after warm-up</Stat>
+</Stats>
+
 ## The short answer [#summary]
 
 | Mechanism | What it saves | Measured |

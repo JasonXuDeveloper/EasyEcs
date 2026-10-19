@@ -33,6 +33,15 @@ catches design mistakes at compile time, and a full server tick of 100,000 entit
 
 New to the pattern itself? Read [What is an ECS?](/en/docs/what-is-ecs) first.
 
+<Stats>
+  <Stat hero lead />
+  <Stat count="ahead" of="total" label="Head-to-head benchmarks it is faster in">against Friflo.Engine.ECS, Arch and DefaultEcs</Stat>
+  <Stat k="tick.oneWorld" label="One server tick">100,000 entities in one world</Stat>
+  <Stat k="tick.oneWorld.alloc" label="Allocated per tick">after warm-up</Stat>
+</Stats>
+
+<BenchSource />
+
 ## Install [#install]
 
 ```bash

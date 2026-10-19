@@ -9,6 +9,15 @@ EasyEcs 是为每隔几毫秒跑一次、一跑就是几个月的服务器 tick 
 job；繁忙的 World 每个 tick 都不分配。本页给出一个真实 tick 的开销、每种循环该用哪个 API、当某个系统在计时里冒头时值得
 做的改写，以及这些数字背后的全部跑分。库本身是怎么做到的，见 [EasyEcs 为什么快](/zh/docs/why-fast)。
 
+<Stats>
+  <Stat hero lead />
+  <Stat k="tick.oneWorld" label="一个服务器 tick">一个 World，10 万实体</Stat>
+  <Stat k="tick.fourWorlds" label="四个 World，各占一个线程">4 × 2.5 万实体</Stat>
+  <Stat k="tick.oneWorld.alloc" label="每个 tick 的分配">预热之后；一旦分配，单元测试会让构建失败</Stat>
+</Stats>
+
+<BenchSource />
+
 ## 主 tick [#headline]
 
 `WorldSimulationBenchmark` 是一个繁忙的 MMO 式 World 的一个 tick，不是玩具循环：30% 玩家、70% NPC，外加子弹。一个 tick

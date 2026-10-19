@@ -9,6 +9,12 @@ EasyEcs 快，是因为一个服务器 tick 只做数据允许的最少的活：
 不经过委托，结构变更不走命令缓冲，而且不分配。这些都不需要写特殊的代码：普通的 `[ForEach]` 方法就全都用上了。下面每一节
 讲一个机制、它在源码里的位置，以及测量它的跑分。
 
+<Stats>
+  <Stat k="forEach.perEntity" label="[ForEach] 写入，每个实体">两个普通数组要 <BenchValue k="rawArray.perEntity" /></Stat>
+  <Stat k="changed.10.speedup" label="[Changed<T>] 对比全表扫描">上次运行以来 10 万行中写了 10 行</Stat>
+  <Stat k="tick.oneWorld.alloc" label="每个服务器 tick 的分配">10 万实体，预热之后</Stat>
+</Stats>
+
 ## 简短的回答 [#summary]
 
 | 机制 | 省掉了什么 | 实测 |

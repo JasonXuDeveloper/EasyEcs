@@ -16,6 +16,13 @@ icon: GitCompare
 <BenchValue k="peers.arch.alloc" />，EasyEcs 分配 <BenchValue k="peers.easyecs.alloc" />。Arch 支持的运行时更多
 （netstandard2.1、net6.0、net8.0 和 Unity），EasyEcs 只支持 .NET 10。
 
+<Stats>
+  <Stat hero lead library="Arch" />
+  <Stat count="ahead" of="total" library="Arch" label="EasyEcs 更快的对比">两个库都参与的对比中，差距超出测量误差</Stat>
+  <Stat k="peers.arch.ratio" label="Arch 跑一个服务器 tick 的耗时">相对 EasyEcs，10 万实体</Stat>
+  <Stat k="peers.arch.alloc" label="Arch 每个 tick 的分配">EasyEcs 分配 <BenchValue k="peers.easyecs.alloc" /></Stat>
+</Stats>
+
 <BenchSource />
 
 ## 一览 [#at-a-glance]

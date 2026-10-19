@@ -18,6 +18,13 @@ On the same server tick of 100,000 entities, Arch takes <BenchValue k="peers.arc
 allocates <BenchValue k="peers.arch.alloc" /> per tick, where EasyEcs allocates <BenchValue k="peers.easyecs.alloc" />.
 Arch runs on more runtimes (netstandard2.1, net6.0, net8.0 and Unity); EasyEcs needs .NET 10.
 
+<Stats>
+  <Stat hero lead library="Arch" />
+  <Stat count="ahead" of="total" library="Arch" label="Benchmarks EasyEcs is faster in">of those both libraries take part in, beyond the measurement error</Stat>
+  <Stat k="peers.arch.ratio" label="Arch's time for the server tick">relative to EasyEcs, 100,000 entities</Stat>
+  <Stat k="peers.arch.alloc" label="Arch allocates per tick">EasyEcs allocates <BenchValue k="peers.easyecs.alloc" /></Stat>
+</Stats>
+
 <BenchSource />
 
 ## At a glance [#at-a-glance]

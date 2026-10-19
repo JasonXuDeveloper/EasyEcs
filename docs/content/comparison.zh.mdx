@@ -10,6 +10,13 @@ icon: Scale
 更慢。领先最多的是服务器成批做、或隔一阵才做一次的事（存档、批量变更、批量生成、按值查询、层级、索引、变更检测）；在紧凑
 的列上做普通遍历时差距很小，因为那里的瓶颈是内存，不是库。本页按领先幅度列出全部结果，落后的也在内，并写明原因。
 
+<Stats>
+  <Stat hero count="ahead" of="total" label="EasyEcs 更快的正面对比">对比 Friflo.Engine.ECS、Arch 和 DefaultEcs，差距超出测量误差</Stat>
+  <Stat lead />
+  <Stat lead="1" />
+  <Stat lead="2" />
+</Stats>
+
 <LeadChart />
 
 EasyEcs 和 .NET 上最常用的三个 ECS 库做了对比：[Friflo.Engine.ECS](https://github.com/friflo/Friflo.Engine.ECS)、
