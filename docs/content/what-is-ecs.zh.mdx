@@ -58,7 +58,7 @@ Entity unit = world.CreateEntity(new Position(0, 0), new Health(100));
 </Tab>
 <Tab value="组件">
 
-**组件**是纯数据：只有字段、没有行为的结构体。空结构体就是**标签**，表示"是或否"的状态，比如 `Dead`、`Stunned`。
+**组件**是纯数据：只有字段、没有行为的结构体。空结构体就是**标签**，表示“是或否”的状态，比如 `Dead`、`Stunned`。
 整个 World 只有一份的数据（时钟、地图）是**单例**。
 
 ```csharp
@@ -89,7 +89,7 @@ public class MovementSystem : EcsSystem
 </Tab>
 </Tabs>
 
-**查询**就是系统提出的问题："所有有 `Position` 和 `Velocity`、但没有 `Dead` 的实体"。实体增减组件时，答案随之变化，
+**查询**就是系统提出的问题：“所有有 `Position` 和 `Velocity`、但没有 `Dead` 的实体”。实体增减组件时，答案随之变化，
 实体的行为也就跟着变了：加上 `Velocity` 它就开始移动，加上 `Dead`，所有排除 `Dead` 的系统就再也看不到它。
 
 ## ECS 怎么存储组件 [#storage]
@@ -141,7 +141,7 @@ EnTT 和 DefaultEcs 用的是这种存储；Bevy 也允许按组件类型选用�
 | 每个实体的内存 | 每张表一行，不需要按类型建索引 | 每种组件一条索引 |
 | 适合 | 大量实体共享组合、每个 tick 都要更新 | 组件频繁增删、查询范围很窄 |
 
-EasyEcs 是 archetype ECS，但去掉了这种设计在"来来去去的状态"上的常见开销：移除组件时保留这一行，只清掉一个存在位，
+EasyEcs 是 archetype ECS，但去掉了这种设计在“来来去去的状态”上的常见开销：移除组件时保留这一行，只清掉一个存在位，
 所以像 `Stunned` 这样反复开关的状态，除了第一次，之后都不会再搬数据。细节见[架构](/zh/docs/architecture#storage-model)。
 
 ## 实体怎么改变自己的行为？ [#structural-changes]

@@ -333,7 +333,7 @@ Reports.Rich(world, mark, ref rich, 1_000);       // [Changed<T>]：tick 紧跟�
 ```
 
 - 方法必须是静态的（[EECS005](/zh/docs/guide/analyzer#eecs005)）；它可以是 private，入口在它引用的类型都公开时也是公开的。
-- 带 `[Changed<T>]` 或 `[Removed<T>]` 时，入口要接收一个回看的起点 tick，因为 runner 没有自己的"上次运行"。
+- 带 `[Changed<T>]` 或 `[Removed<T>]` 时，入口要接收一个回看的起点 tick，因为 runner 没有自己的“上次运行”。
 - runner 可以是泛型方法，也可以是泛型类型的成员：入口会接收类型参数（`Census.CountAlive<Health>(world, ref count)`）。
 - 批处理和并行 runner 遵循[批处理方法](#batch-methods)和[并行方法](#parallel-methods)的规则。
 - 入口不能和类型里已有的方法冲突（[EECS021](/zh/docs/guide/analyzer#eecs021)），局部函数也不能当 runner（[EECS024](/zh/docs/guide/analyzer#eecs024)）。
@@ -439,7 +439,7 @@ foreach (var system in guarded.Systems)                   // 健康检查，在�
   <Card title="结构变更" href="/zh/docs/guide/structural-changes">
     在 `[ForEach]` 方法里创建、销毁、添加和移除。
   </Card>
-  <Card title="线程" href="/zh/docs/guide/threading">
+  <Card title="多线程" href="/zh/docs/guide/threading">
     并行阶段、每线程一个 World、来自其他线程的输入。
   </Card>
   <Card title="分析器规则" href="/zh/docs/guide/analyzer">

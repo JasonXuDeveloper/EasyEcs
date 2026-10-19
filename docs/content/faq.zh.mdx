@@ -153,12 +153,12 @@ public sealed class ClearHitsSystem : EcsSystem
 }
 ```
 
-效果的先后就是系统的先后，一处就能看清；生成器知道每个系统读写了什么；测试和快照都能看到这些"事件"，因为它们就是数据。
+效果的先后就是系统的先后，一处就能看清；生成器知道每个系统读写了什么；测试和快照都能看到这些“事件”，因为它们就是数据。
 
 ## 为什么没有命令缓冲？ [#command-buffers]
 
 结构变更立即生效，遍历途中也一样（[D2](/zh/docs/decisions#d2-structural-changes-apply-at-once-no-command-buffers)）：遍历期间被移除的行变成墓碑，
-遍历永远看不到行在脚下移动。代码怎么写就怎么执行，也不存在一个延后生效的"第二版本"World。并行 job 不做结构变更；排在它们后面、
+遍历永远看不到行在脚下移动。代码怎么写就怎么执行，也不存在一个延后生效的“第二版本”World。并行 job 不做结构变更；排在它们后面、
 运行在所有者线程上的系统根据它们写下的数据去做（[D3](/zh/docs/decisions#d3-no-command-buffer-for-parallel-jobs)）。在遍历里改结构时遍历会看到什么，
 见[结构变更](/zh/docs/guide/structural-changes)。
 

@@ -5,9 +5,9 @@ description: 按值（名字、区域、分数区间）或按指向的实体查�
 icon: Network
 ---
 
-查询按"有哪些组件"找实体。服务器还经常要按值找：名叫 "alice" 的玩家、3 号区域里的单位、分数前十、某个玩家拥有的物品、
+查询按“有哪些组件”找实体。服务器还经常要按值找：名叫 “alice” 的玩家、3 号区域里的单位、分数前十、某个玩家拥有的物品、
 某支队伍的成员。给组件实现 `IIndexed<TKey>`，World 就会为它维护一份索引：每次 `Set` 都立即更新索引，查找时既不用追赶
-变化，也不用扫描。关系同样是索引：持有 `EntityId` 的组件能回答"谁指向这个实体"，`IRelation` 缓冲则让一个实体链接多个实体。
+变化，也不用扫描。关系同样是索引：持有 `EntityId` 的组件能回答“谁指向这个实体”，`IRelation` 缓冲则让一个实体链接多个实体。
 
 ## 什么时候用 [#when-to-use-it]
 
@@ -88,7 +88,7 @@ foreach (var rival in world.ScoreIndex.Range(400, 500)) { /* 一个匹配分段 
 
 ### `EntityId` 键：每个实体一条链接 [#entityid-keys]
 
-持有 `EntityId` 并以它为键的组件就是一条链接：每支箭有一个主人，索引回答"这个主人有哪些箭"。存 `EntityId`，不要存 `Entity`
+持有 `EntityId` 并以它为键的组件就是一条链接：每支箭有一个主人，索引回答“这个主人有哪些箭”。存 `EntityId`，不要存 `Entity`
 句柄（[EECS017](/zh/docs/guide/analyzer#eecs017)）：id 只有 8 字节，非托管，能随 World 存盘，而且句柄可以隐式转换成它。
 
 ```csharp

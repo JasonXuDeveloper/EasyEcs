@@ -77,7 +77,7 @@ goblin.Destroy();
 | 在已销毁或 `default` 句柄上调用 | 结果 |
 | --- | --- |
 | `IsAlive`、`Has<T>()`、`TryGet<T>()`、`TryGetRef<T>()` | 返回 `false`，不抛异常 |
-| `Get<T>()`、`Read<T>()`、`GetOrAdd<T>()`、`Set(...)`、`Remove<T>()`、`Clone()` | 抛 `InvalidOperationException`："Entity is not alive" |
+| `Get<T>()`、`Read<T>()`、`GetOrAdd<T>()`、`Set(...)`、`Remove<T>()`、`Clone()` | 抛 `InvalidOperationException`：“Entity is not alive” |
 | `Destroy()` | 忽略 |
 
 两个句柄指向同一个 World 里的同一代实体时才相等。销毁实体会让版本加一，指向它的所有句柄立刻失效，之后复用这个索引的新实体也不会被旧句柄碰到。

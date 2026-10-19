@@ -86,7 +86,7 @@ int cleared = world.DestroyEntities<Position>(QueryFilter.Create().With<Dead>())
 | 对成段的行做临时算术 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` |
 | 临时的重计算，多线程 | [`ForEachParallel` / `ForEachEntityParallel`](#on-several-threads-foreachparallel-and-foreachentityparallel) |
 | 写起来方便的循环（工具、测试、请求处理） | `foreach (var item in world.Query<T1..Tn>(filter))` |
-| "有多少个……？" / "有没有……？" | `world.Count<T1..Tn>(filter)` / `world.Any<T1..Tn>(filter)` |
+| “有多少个……？” / “有没有……？” | `world.Count<T1..Tn>(filter)` / `world.Any<T1..Tn>(filter)` |
 | 销毁所有匹配的实体 | `world.DestroyEntities<T1..Tn>(filter)` |
 | 只要某个 tick 之后写过或移除的行 | `Changed<T>(tick)` / `Removed<T>(tick)`（[变更追踪](/zh/docs/guide/change-tracking)） |
 | 按值查找，或找指向某实体的实体 | `world.Index<T, TKey>().Find(key)`（[索引](/zh/docs/guide/indexes-and-relations)） |

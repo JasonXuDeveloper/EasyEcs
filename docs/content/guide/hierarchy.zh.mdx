@@ -17,7 +17,7 @@ icon: GitFork
 </Callout>
 
 <Callout type="warn" title="不适合">
-  不该连带杀死对方的链接（攻击目标、跟随者）：用自己的 `EntityId` 键，配 `Keep` 或 `Remove`。一个实体有多个"父亲"
+  不该连带杀死对方的链接（攻击目标、跟随者）：用自己的 `EntityId` 键，配 `Keep` 或 `Remove`。一个实体有多个“父亲”
   （同时属于多支队伍）：用[关系](/zh/docs/guide/indexes-and-relations#relations)。变换传播不是内置功能，
   [下面的示例](#transform-propagation)是你自己写的系统。
 </Callout>
@@ -89,7 +89,7 @@ bool gunAlive = gun.IsAlive;               // false
 world.Index<ChildOf, EntityId>().WhenTargetDestroyed(TargetPolicy.Remove);   // 孤儿变成根
 ```
 
-- 持有[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)的子实体不会被直接释放，而是"退休"：带着
+- 持有[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)的子实体不会被直接释放，而是“退休”：带着
   `Destroyed` 标签保留清理组件，它自己的子实体照样随它而去。
 - 环（实体是自己的祖先）会正常结束：销毁其中任何一个，整个环都会被销毁。
 - `ChildOf` 不能被禁用（`Disable<ChildOf>()` 会抛异常）：父实体销毁时必须找得到子实体。

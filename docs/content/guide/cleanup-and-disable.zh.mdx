@@ -20,7 +20,7 @@ icon: Recycle
 
 <Callout type="warn" title="不适合">
   World 自己管理的状态不需要清理组件：销毁实体就释放了。能用一个系统会读的标签表达的状态，不必用 `Disable<T>()`：标签更清楚。
-  "默认跳过"的整实体禁用是有意不提供的，见[禁用整个实体](#disable-an-entity)。
+  “默认跳过”的整实体禁用是有意不提供的，见[禁用整个实体](#disable-an-entity)。
 </Callout>
 
 ## 怎么用 [#how-to-use-it]
@@ -55,7 +55,7 @@ guest.Destroy();                       // 仍然存活，带 Destroyed 标签，
 world.Update();                        // ReleaseSeats 释放它：guest.IsAlive 为 false
 ```
 
-- 所有销毁途径都会让这类实体"退休"：`Destroy`、`DestroyEntities<T>()`、[层级](/zh/docs/guide/hierarchy)级联、
+- 所有销毁途径都会让这类实体“退休”：`Destroy`、`DestroyEntities<T>()`、[层级](/zh/docs/guide/hierarchy)级联、
   [目标策略](/zh/docs/guide/indexes-and-relations#target-policies)。
 - 给新实体申请资源的系统用 `Without<Destroyed>` 过滤。
 - 再次销毁已退休的实体没有任何效果。从存活实体上移除清理组件，就只是移除而已。
@@ -103,7 +103,7 @@ caster.EnableCooldown();                // 回来时 Ticks 仍是 3
 
 ### 禁用整个实体 [#disable-an-entity]
 
-EasyEcs 没有"查询默认跳过"的禁用实体。用一个标签加 `Without<T>` 实现，而且在需要的地方明确写出来：
+EasyEcs 没有“查询默认跳过”的禁用实体。用一个标签加 `Without<T>` 实现，而且在需要的地方明确写出来：
 
 ```csharp
 public struct Inactive : IComponent;                         // 整个实体关闭
