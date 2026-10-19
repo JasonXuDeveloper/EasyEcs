@@ -36,8 +36,9 @@ jobs:
         run: dotnet workload install wasm-tools
       - name: Publish the docs site's live demo (demo/EasyEcs.Demo, WebAssembly, Mono AOT)
         run: dotnet publish demo/EasyEcs.Demo/EasyEcs.Demo.csproj -c Release -o artifacts/demo
-      - name: API reference is up to date (tools/ApiDocs)
+      - name: API reference is up to date, in English and Chinese (tools/ApiDocs)
         run: |
+          # exits with 1 when a Chinese entry (tools/ApiDocs/zh/) is missing, stale or orphaned
           dotnet run --no-build -c Release --project tools/ApiDocs
           if [ -n "$(git status --porcelain -- docs/content/reference)" ]; then
             git status --porcelain -- docs/content/reference
