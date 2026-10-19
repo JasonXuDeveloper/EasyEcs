@@ -21,7 +21,6 @@ import {
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
-import { FeatureComparison } from '@/components/bench-data';
 import {
   type BenchNumber,
   bench,
@@ -247,10 +246,7 @@ interface Copy {
   howTitle: string;
   howText: string;
   steps: { title: string; text: string; code: string }[];
-  peersLink: string;
-  compareTitle: string;
-  compareText: string;
-  behindTitle: string;
+  /** The link from the lead cards to the comparison page */
   compareLink: string;
   speedTitle: string;
   speedText: string;
@@ -406,11 +402,7 @@ const copy: Record<Locale, Copy> = {
         code: stepCode[2],
       },
     ],
-    peersLink: 'Every comparison, losses included',
-    compareTitle: 'Feature by feature, losses included',
-    compareText: `${counts.total} head-to-head benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs, each the same work in each library's own idiomatic way, with identical results checked before anything is measured. The full server tick is one of them; where another library comes out ahead, the table says why.`,
-    behindTitle: 'Where another library is faster',
-    compareLink: 'Every comparison, sorted by lead',
+    compareLink: 'Full comparison',
     featuresTitle: 'Everything a long-running simulation needs',
     featuresText:
       'Each feature is opt-in and costs nothing until a world uses it.',
@@ -674,11 +666,7 @@ const copy: Record<Locale, Copy> = {
         code: stepCode[2],
       },
     ],
-    peersLink: '全部对比，落后的也在内',
-    compareTitle: '逐项对比，落后的也列出来',
-    compareText: `与 Friflo.Engine.ECS、Arch、DefaultEcs 的 ${counts.total} 项正面对比：每一项都在每个库里用它惯用的写法做同样的事，测量之前先校验结果一致。完整服务器 tick 也是其中一项；其他库领先的地方，表里写明了原因。`,
-    behindTitle: '其他库更快的地方',
-    compareLink: '全部对比，按领先幅度排序',
+    compareLink: '完整对比',
     featuresTitle: '长时间运行的模拟需要的，都在这里',
     featuresText: '每个功能都按需启用，World 不用就没有开销。',
     features: [
@@ -1290,19 +1278,6 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
             </p>
           </div>
         </section>
-
-        {/* Feature by feature: where EasyEcs is behind and why */}
-        <Section id="compare" title={t.compareTitle} text={t.compareText}>
-          <h3 className="text-lg font-semibold">{t.behindTitle}</h3>
-          <div className="prose max-w-none text-sm">
-            <FeatureComparison tier="behind" lang={lang} />
-          </div>
-          <p className="mt-6">
-            <MoreLink to={`${docs}/comparison#feature-by-feature`}>
-              {t.compareLink}
-            </MoreLink>
-          </p>
-        </Section>
 
         {/* Code sample */}
         <Section title={t.codeTitle} text={t.codeText}>
