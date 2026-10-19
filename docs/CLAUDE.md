@@ -66,13 +66,19 @@ scripts/                 generate-static.ts, og.ts, lint-links.ts, lint-seo.ts, 
   (lists, links, inline code; no JSX components, no typed benchmark numbers: link the performance page or a decision)
   with absolute `/en/docs/...` links. Entries are user-facing only (no CI, tests, benchmarks, docs or refactors); each
   is checked against the EasyEcs source and links the page that documents it, and a change that needs code changes
-  says what to write and links the matching section of MIGRATION_GUIDE.md. The sources are the GitHub releases
-  (`gh release list -R JasonXuDeveloper/EasyEcs`, `gh release view <tag>`), the commits between tags,
-  `MIGRATION_GUIDE.md` and the README's "What's new". At the start of any work here:
+  says what to write and links the matching section of the migration guide (`/en/docs/migration#v4-2-to-v4-3`). The
+  sources are the GitHub releases (`gh release list -R JasonXuDeveloper/EasyEcs`, `gh release view <tag>`), the
+  commits between tags, the migration guide and the README's "What's new". At the start of any work here:
   1. A released version without a section: add one from its release and its commits.
   2. User-facing changes merged to `master` after the newest tag: describe them in the section of the coming version,
      written as released (the owner cuts the release right after the merge). Ask for the version number if it is not
      known.
+- **Migration guide** (`content/migration.mdx` / `migration.zh.mdx`, next to the changelog in the sidebar): one
+  section per version step that needs code changes, newest first, headed `## v4.2 → v4.3 [#v4-2-to-v4-3]` in both
+  languages (`#v3-to-v4-0`, `#v2-to-v3-0` for the major steps), with `###` subsections whose ids start with the target
+  version (`[#v4-1-api]`). It says what still compiles unchanged, then each change with the code to write: the old
+  code as a `doccheck=skip` fence (or `expect-EECS0xx` when the analyzer now rejects it), the new code compiled by
+  DocCheck and written with the generated members. Every "needs code changes" changelog entry links its section.
 
 ## Benchmarks
 

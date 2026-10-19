@@ -73,7 +73,7 @@ readers search for, one `##` per question.
   too when the text is long or likely to change: `## Compared with other libraries [#compared]`.
 - Internal links are absolute and name the language: `/en/docs/guide/queries#filters` on English pages,
   `/zh/docs/guide/queries#filters` on Chinese pages. `bun run lint:links` checks every target and every `#anchor`.
-- Links to the repository (README, MIGRATION_GUIDE.md, a source file) are full GitHub URLs on `master`.
+- Links to the repository (README, a source file) are full GitHub URLs on `master`.
 
 ## Code
 

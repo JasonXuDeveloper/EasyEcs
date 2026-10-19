@@ -230,7 +230,8 @@ tools/ApiDocs/                 writes docs/content/reference/ from the XML docs 
   `dotnet run --project tools/ApiDocs` after changing it); a new or changed XML doc comment of a public API needs its
   Chinese entry in `tools/ApiDocs/zh/` (the tool reports it); README is the landing page.
 - **Entity ids are recycled**: any id-keyed API must also validate the version (`World.Live`, `Entity.ThrowStale`).
-- Behavioral/breaking changes need a `MIGRATION_GUIDE.md` entry and a README "What's new" entry.
+- Behavioral/breaking changes need an entry in the migration guide (`docs/content/migration.mdx` + `.zh.mdx`,
+  https://ecs.xgamedev.net/en/docs/migration) and a README "What's new" entry.
 - Commits: logic, docs and CI in separate commits. The author is the repository owner; the committer is the
   environment's signing identity so the signature shows as Verified. No session links in commit messages.
 - The version lives only in `Directory.Build.props` (package, EasyEcs.Core and the bundled generator carry it).
