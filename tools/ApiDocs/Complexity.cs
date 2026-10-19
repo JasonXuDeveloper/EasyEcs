@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace ApiDocs;
 
 /// <summary>
-/// The complexity column of the API table (docs/content/api.mdx): for each row, the calls of its first cell
+/// The complexity column of an API table (docs/content/api.mdx, api.zh.mdx): for each row, the calls of its first cell
 /// (<c>world.CreateEntity(in T1 … in Tn)</c>) by type and member, with the row's complexity.
 /// </summary>
 public static partial class Complexity
@@ -19,11 +19,11 @@ public static partial class Complexity
     };
 
     /// <summary>(type name, member name) to the table's rows for it: (the call as the table writes it, complexity).</summary>
-    public static Dictionary<(string Type, string Member), List<(string Call, string Cost)>> Load(string root)
+    public static Dictionary<(string Type, string Member), List<(string Call, string Cost)>> Load(string root, string file, string header, string lang)
     {
         var table = new Dictionary<(string, string), List<(string, string)>>();
-        var path = new[] { "api.mdx", "api.md" }.Select(f => Path.Combine(root, "docs", "content", f)).FirstOrDefault(File.Exists);
-        if (path == null) return table;
+        var path = Path.Combine(root, "docs", "content", file);
+        if (!File.Exists(path)) return table;
         int column = -1;
         foreach (var line in File.ReadLines(path))
         {
@@ -36,12 +36,12 @@ public static partial class Complexity
             var cells = Cells(line);
             if (column < 0)
             {
-                column = cells.FindIndex(c => c.Trim() == "Complexity"); // a header row
+                column = cells.FindIndex(c => c.Trim() == header); // a header row
                 continue;
             }
 
             if (column >= cells.Count || cells[0].Trim().StartsWith("---", StringComparison.Ordinal)) continue;
-            string cost = Relative().Replace(cells[column].Trim(), "](/en/docs/$1$2)");
+            string cost = Relative().Replace(cells[column].Trim(), $"](/{lang}/docs/$1$2)");
             string? receiver = null;
             foreach (Match span in Spans().Matches(cells[0]))
             {

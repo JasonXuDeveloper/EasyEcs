@@ -29,6 +29,8 @@ public sealed partial class Mdx(Func<string, string?> link)
         var plain = Links().Replace(markdown, "$1").Replace("`", "").Replace("\\{", "{").Replace("\\}", "}")
             .Replace("&lt;", "<").Replace("&gt;", ">").Replace('\n', ' ');
         int end = plain.IndexOf(". ", StringComparison.Ordinal);
+        int zh = plain.IndexOf('。');
+        if (zh >= 0 && (end < 0 || zh < end)) return plain[..(zh + 1)].Trim();
         return (end < 0 ? plain : plain[..(end + 1)]).Trim();
     }
 
@@ -54,13 +56,37 @@ public sealed partial class Mdx(Func<string, string?> link)
         return (full.Length <= max ? full : $"{sentence} The {title} {kind} of EasyEcs, the C# ECS.").TrimStart();
     }
 
+    /// <summary>
+    /// The meta description of a Chinese reference page (40 to 90 characters): the summary's first sentence, cut at a
+    /// clause when it is longer, and followed by what the page holds when it is short.
+    /// </summary>
+    public static string DescriptionZh(string sentence, string title, string kind)
+    {
+        const int min = 40, max = 90;
+        if (sentence.Length > max)
+        {
+            int cut = -1;
+            foreach (var separator in new[] { "：", "；", "（", "，", "、" })
+            {
+                cut = sentence.LastIndexOf(separator, max - 2, StringComparison.Ordinal);
+                if (cut >= min) break;
+            }
+            if (cut < min) cut = max - 1;
+            sentence = sentence[..cut].TrimEnd('，', '：', '；', '。', '、') + "…";
+        }
+        if (sentence.Length >= min) return sentence;
+        string full = $"{sentence}EasyEcs（C# ECS 框架）的 {title} {kind}：成员、参数与复杂度。";
+        return full.Length <= max ? full : $"{sentence}EasyEcs 的 {title} {kind}。";
+    }
+
     private void Append(StringBuilder text, XElement element)
     {
         foreach (var node in element.Nodes())
         {
             if (node is XText t)
             {
-                text.Append(Escape(t.Value.Replace('\n', ' ')));
+                // A line break between two Chinese characters is no space (the translations wrap their lines).
+                text.Append(Escape(Wrap().Replace(t.Value, "").Replace('\n', ' ')));
                 continue;
             }
 
@@ -132,6 +158,12 @@ public sealed partial class Mdx(Func<string, string?> link)
         int indent = lines.Where(l => l.Trim().Length != 0).Select(l => l.Length - l.TrimStart().Length).DefaultIfEmpty(0).Min();
         return string.Join("\n", lines.Select(l => l.Length >= indent ? l[indent..] : l.TrimStart())).TrimEnd();
     }
+
+    private const string Han = @"\p{IsCJKUnifiedIdeographs}　-〿＀-￯", Punctuation = @"　-〿＀-￯";
+
+    // Between two Chinese characters, or next to full-width punctuation (between Chinese and Latin a space stays).
+    [GeneratedRegex(@"(?<=[" + Han + @"])[ \t]*\n\s*(?=[" + Han + @"])|(?<=[" + Punctuation + @"])[ \t]*\n\s*|[ \t]*\n\s*(?=[" + Punctuation + "])")]
+    private static partial Regex Wrap();
 
     [GeneratedRegex(@"[ \t]+")]
     private static partial Regex Spaces();
