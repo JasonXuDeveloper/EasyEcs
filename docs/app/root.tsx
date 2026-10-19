@@ -1,5 +1,5 @@
 import { RootProvider } from 'fumadocs-ui/provider/react-router';
-import { type ReactNode, useEffect } from 'react';
+import { lazy, type ReactNode, Suspense, useEffect } from 'react';
 import {
   isRouteErrorResponse,
   Links,
@@ -10,12 +10,10 @@ import {
   useLocation,
   useNavigate,
 } from 'react-router';
-import SearchDialog from '@/components/search';
 import { getLocale } from '@/lib/i18n';
 import { i18nUI } from '@/lib/i18n-ui';
 import { languageTag, siteName, siteVerification } from '@/lib/site';
 import type { Route } from './+types/root';
-import NotFound from './routes/not-found';
 import './app.css';
 
 export const links: Route.LinksFunction = () => [
@@ -36,6 +34,12 @@ export const links: Route.LinksFunction = () => [
   { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
   { rel: 'manifest', href: '/manifest.webmanifest' },
 ];
+
+// The search dialog and its engine load after the page, not with it
+// (Fumadocs mounts the closed dialog once the page is interactive).
+const SearchDialog = lazy(() => import('@/components/search'));
+// Only the error boundary shows it: docs pages do not load the home layout.
+const NotFound = lazy(() => import('./routes/not-found'));
 
 function localeOf(pathname: string) {
   return getLocale(pathname.split('/')[1]);
@@ -131,7 +135,12 @@ function useReloadOnce(enabled: boolean) {
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   useReloadOnce(isStaleBuild(error));
-  if (isRouteErrorResponse(error) && error.status === 404) return <NotFound />;
+  if (isRouteErrorResponse(error) && error.status === 404)
+    return (
+      <Suspense>
+        <NotFound />
+      </Suspense>
+    );
 
   const message =
     import.meta.env.DEV && error instanceof Error

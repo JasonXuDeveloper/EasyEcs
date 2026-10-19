@@ -19,7 +19,15 @@ export default {
     v8_trailingSlashAwareDataRequests: true,
   },
   async prerender({ getStaticPaths }) {
-    const paths = new Set(['/', '/en', '/zh', '/404', ...getStaticPaths()]);
+    const paths = new Set([
+      '/',
+      '/en',
+      '/zh',
+      '/404',
+      '/api/search/en.json',
+      '/api/search/zh.json',
+      ...getStaticPaths(),
+    ]);
     // Every page in both languages: a page without a Chinese file is served
     // in the Chinese tree too, in English (i18n fallback, src/lib/i18n.ts).
     for await (const file of glob('**/*.{md,mdx}', { cwd: 'content' })) {

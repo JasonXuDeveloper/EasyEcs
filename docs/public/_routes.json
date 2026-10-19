@@ -1,5 +1,12 @@
 {
   "version": 1,
   "include": ["/*"],
-  "exclude": ["/assets/*", "/og/*", "/demo/*", "/en/start", "/zh/start"]
+  "exclude": [
+    "/assets/*",
+    "/og/*",
+    "/demo/*",
+    "/api/search/*",
+    "/en/start",
+    "/zh/start"
+  ]
 }

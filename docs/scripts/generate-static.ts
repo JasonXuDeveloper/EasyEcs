@@ -465,6 +465,13 @@ async function main() {
 
   const moved = await flattenPages(outDir);
 
+  // The prerender also writes a .data file (the same JSON, for client-side
+  // navigation) next to each search index: nothing requests it.
+  for (const locale of locales)
+    await fs.rm(path.join(outDir, `api/search/${locale}.json.data`), {
+      force: true,
+    });
+
   const tasks: Promise<void>[] = [
     write('sitemap.xml', sitemap()),
     write('robots.txt', robots()),

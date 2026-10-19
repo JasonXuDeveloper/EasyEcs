@@ -6,6 +6,7 @@ export default [
   route('404', 'routes/not-found.tsx', { id: 'routes/404' }),
   route(':lang', 'routes/home.tsx'),
   route(':lang/docs/*', 'routes/docs.tsx'),
-  route('api/search.json', 'routes/search.ts'),
+  // /api/search/en.json, /api/search/zh.json
+  route('api/search/:file', 'routes/search.ts'),
   route('*', 'routes/not-found.tsx'),
 ] satisfies RouteConfig;

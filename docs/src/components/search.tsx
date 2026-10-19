@@ -13,12 +13,15 @@ import {
 import { useI18n } from 'fumadocs-ui/contexts/i18n';
 
 /**
- * Searches the index prerendered at /api/search.json in the browser, limited
- * to the current language.
+ * Searches the index prerendered at /api/search/{lang}.json in the browser,
+ * the current language's only.
  */
 export default function EasyEcsSearchDialog(props: SharedProps) {
   const { locale } = useI18n();
-  const search = useStaticSearch({ from: '/api/search.json', locale });
+  const search = useStaticSearch({
+    from: `/api/search/${locale}.json`,
+    locale,
+  });
 
   return (
     <SearchDialog {...search} {...props}>
