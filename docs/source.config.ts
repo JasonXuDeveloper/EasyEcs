@@ -12,6 +12,8 @@ import {
   metaSchema,
 } from 'fumadocs-mdx/config';
 import lastModified from 'fumadocs-mdx/plugins/last-modified';
+import remarkCjkFriendly from 'remark-cjk-friendly';
+import remarkCjkFriendlyGfmStrikethrough from 'remark-cjk-friendly-gfm-strikethrough';
 import { z } from 'zod';
 import { legacyFrontmatter, remarkLegacyPage } from './src/lib/legacy';
 
@@ -83,6 +85,12 @@ export default defineConfig({
     // language of each fence (src/lib/markdown.tsx).
     rehypeCodeOptions: { ...rehypeCodeDefaultOptions, addLanguageClass: true },
     remarkPlugins: [
+      // `**` and `~~` next to CJK punctuation: CommonMark's flanking rules
+      // leave `**实体组件系统（ECS）**这种` unparsed (a closing `**` after `）`
+      // followed by a letter). These micromark extensions must come after
+      // remark-gfm, which Fumadocs' preset puts before the plugins listed here.
+      remarkCjkFriendly,
+      remarkCjkFriendlyGfmStrikethrough,
       // Legacy pages only (no frontmatter): drop the H1 and the breadcrumb,
       // turn relative links into site or GitHub URLs.
       remarkLegacyPage,
