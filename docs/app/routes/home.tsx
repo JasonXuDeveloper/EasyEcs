@@ -113,7 +113,8 @@ const leadList = (zh: boolean, n = 3) => {
 const time = (ns: number) => formatTime(ns).replace(' ', '\u00a0');
 /** The lead figure under the hero: the biggest lead; the cards under it show the next ones */
 const topLead = leads[0];
-const nextLeads = leads.slice(1, 4);
+/** Every other clear lead (the other library takes at least `leadRatio` times as long), biggest first */
+const nextLeads = leads.slice(1);
 /** How many times EasyEcs' time the next-fastest library takes for the whole tick, when EasyEcs is the fastest */
 const tickLead =
   peerList[0]?.ours && peerList[1]?.row.ratio
@@ -139,12 +140,6 @@ const rivalNames = (zh: boolean) => {
     ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
     : names.join('');
 };
-
-/** Where EasyEcs is behind, in a few words each */
-const behindList = (zh: boolean) =>
-  featureComparison('behind')
-    .map((b) => b.short[zh ? 'zh' : 'en'])
-    .join(zh ? '、' : ', ');
 
 /**
  * The speed-ups behind the numbers, each as "how much faster than the alternative": a ratio of two rows of one
@@ -232,9 +227,6 @@ interface Copy {
   /** After a ratio: "faster" */
   faster: string;
   leadsTitle: string;
-  tickTitle: string;
-  tickText: string;
-  allocTitle: string;
   whatTitle: string;
   facts: { term: string; detail: string; mono?: boolean }[];
   numbersTitle: string;
@@ -319,7 +311,7 @@ const copy: Record<Locale, Copy> = {
     headline: fastest ? 'The fastest ECS' : 'High-performance ECS',
     headlineAccent: 'for .NET\u00a010 servers.',
     lede: `You write plain data and [ForEach] methods; a source generator turns them into inlined struct jobs. Faster than Friflo, Arch and DefaultEcs in ${counts.ahead} of ${counts.total} head-to-head benchmarks${zeroAlloc ? ', and a server tick allocates nothing' : `, ${tickBytes} allocated per tick`}.`,
-    definition: `EasyEcs is an open-source, high-performance archetype Entity Component System (ECS) for C# and .NET 10 servers. In ${counts.total} head-to-head benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs, each library doing the same work its own way, it is faster in ${counts.ahead} and within the measurement error in ${counts.even}${zeroAlloc ? ', and a full server tick allocates nothing' : ''}. Write plain data and [ForEach] methods; a source generator turns them into inlined struct jobs, and an analyzer catches design mistakes at compile time.`,
+    definition: `EasyEcs is an open-source, high-performance archetype Entity Component System (ECS) for C# and .NET 10 servers. In ${counts.total} head-to-head benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs, each library doing the same work its own way, it is faster in ${counts.ahead}${zeroAlloc ? ', and a full server tick allocates nothing' : ''}. Write plain data and [ForEach] methods; a source generator turns them into inlined struct jobs, and an analyzer catches design mistakes at compile time.`,
     start: 'Get started',
     github: 'View on GitHub',
     demo: 'Try it in the browser',
@@ -327,11 +319,7 @@ const copy: Record<Locale, Copy> = {
     statClaim: (l) =>
       `${l.label.en}: ${time(l.ours.meanNs)} with EasyEcs, ${time(l.versus.row.meanNs)} with ${libraryName(l.versus.library)}.`,
     faster: 'faster',
-    leadsTitle: 'The next biggest leads',
-    tickTitle: 'One server tick, 100,000 entities',
-    tickText:
-      'Nine systems; entities spawn, die, gain and lose components every tick.',
-    allocTitle: 'Allocated per tick',
+    leadsTitle: 'Every clear lead, by margin',
     whatTitle: 'What is EasyEcs?',
     facts: [
       { term: 'Install', detail: installCommand, mono: true },
@@ -342,7 +330,7 @@ const copy: Record<Locale, Copy> = {
       },
       {
         term: 'Compared with',
-        detail: `${rivalNames(false)}: faster in ${counts.ahead} of ${counts.total} head-to-head benchmarks, within the measurement error in ${counts.even}`,
+        detail: `${rivalNames(false)}: faster in ${counts.ahead} of ${counts.total} head-to-head benchmarks`,
       },
       {
         term: 'Ships with',
@@ -402,7 +390,7 @@ const copy: Record<Locale, Copy> = {
         code: stepCode[2],
       },
     ],
-    compareLink: 'Full comparison',
+    compareLink: "Full comparison, including where we're not ahead",
     featuresTitle: 'Everything a long-running simulation needs',
     featuresText:
       'Each feature is opt-in and costs nothing until a world uses it.',
@@ -535,7 +523,7 @@ const copy: Record<Locale, Copy> = {
       },
       {
         question: 'What is the fastest ECS for C# and .NET?',
-        answer: `It depends on the work. The EasyEcs repository measures it against Friflo.Engine.ECS, Arch and DefaultEcs in ${counts.total} head-to-head benchmarks with BenchmarkDotNet on .NET 10, each library doing the same work its own idiomatic way, with identical results checked in setup. EasyEcs is faster in ${counts.ahead}, within the measurement error in ${counts.even} and slower in ${counts.slower}. Its biggest leads over the next-fastest library: ${leadList(false, 5)}. On the full 100,000-entity server tick: ${peerTimes(false)}.${slowRange ? ` The two fastest allocate nothing per tick; the others take ${slowRange} as long and allocate every tick.` : ''}${behindList(false) ? ` Another library comes out ahead on ${behindList(false)}.` : ''}`,
+        answer: `It depends on the work. The EasyEcs repository measures it against Friflo.Engine.ECS, Arch and DefaultEcs in ${counts.total} head-to-head benchmarks with BenchmarkDotNet on .NET 10, each library doing the same work its own idiomatic way, with identical results checked in setup. EasyEcs is faster in ${counts.ahead} of them. Its biggest leads over the next-fastest library: ${leadList(false, 5)}. On the full 100,000-entity server tick: ${peerTimes(false)}.${slowRange ? ` The two fastest allocate nothing per tick; the others take ${slowRange} as long and allocate every tick.` : ''}`,
         more: {
           text: 'Comparison with Friflo, Arch and DefaultEcs',
           href: 'comparison',
@@ -585,7 +573,7 @@ const copy: Record<Locale, Copy> = {
     headline: fastest ? '最快的 ECS 框架' : '高性能 ECS 框架',
     headlineAccent: '为 .NET\u00a010 服务端而生。',
     lede: `你只写普通数据和 [ForEach] 方法，源生成器把它们编译成内联的结构体 job。与 Friflo、Arch、DefaultEcs 正面对比 ${counts.total} 项，${counts.ahead} 项更快${zeroAlloc ? '，服务器 tick 不分配任何内存' : `，每个 tick 分配 ${tickBytes}`}。`,
-    definition: `EasyEcs 是开源、高性能的 archetype（原型）实体组件系统（ECS），面向 C# 与 .NET 10 服务端。与 Friflo.Engine.ECS、Arch、DefaultEcs 的 ${counts.total} 项正面对比里，每个库用自己的写法做同样的事，它在 ${counts.ahead} 项更快，${counts.even} 项差距在测量误差之内${zeroAlloc ? '，完整的服务器 tick 也不分配任何内存' : ''}。你只写普通数据和 [ForEach] 方法：源生成器把它们编译成内联的结构体 job，分析器在编译期拦下设计错误。`,
+    definition: `EasyEcs 是开源、高性能的 archetype（原型）实体组件系统（ECS），面向 C# 与 .NET 10 服务端。与 Friflo.Engine.ECS、Arch、DefaultEcs 的 ${counts.total} 项正面对比里，每个库用自己的写法做同样的事，它在 ${counts.ahead} 项更快${zeroAlloc ? '，完整的服务器 tick 也不分配任何内存' : ''}。你只写普通数据和 [ForEach] 方法：源生成器把它们编译成内联的结构体 job，分析器在编译期拦下设计错误。`,
     start: '快速开始',
     github: '在 GitHub 上查看',
     demo: '在浏览器里试试',
@@ -593,10 +581,7 @@ const copy: Record<Locale, Copy> = {
     statClaim: (l) =>
       `${l.label.zh}：EasyEcs 用时 ${time(l.ours.meanNs)}，${libraryName(l.versus.library)} 要 ${time(l.versus.row.meanNs)}。`,
     faster: '更快',
-    leadsTitle: '领先幅度紧随其后的几项',
-    tickTitle: '一个服务器 tick，10 万实体',
-    tickText: '9 个系统；每个 tick 都有实体生成、死亡、增减组件。',
-    allocTitle: '每个 tick 的分配',
+    leadsTitle: '所有明显领先的项目，按领先幅度排序',
     whatTitle: 'EasyEcs 是什么？',
     facts: [
       { term: '安装', detail: installCommand, mono: true },
@@ -607,7 +592,7 @@ const copy: Record<Locale, Copy> = {
       },
       {
         term: '对比',
-        detail: `${rivalNames(true)}：${counts.total} 项正面对比中 ${counts.ahead} 项更快，${counts.even} 项差距在测量误差之内`,
+        detail: `${rivalNames(true)}：${counts.total} 项正面对比中 ${counts.ahead} 项更快`,
       },
       {
         term: '包含',
@@ -666,7 +651,7 @@ const copy: Record<Locale, Copy> = {
         code: stepCode[2],
       },
     ],
-    compareLink: '完整对比',
+    compareLink: '完整对比，包括我们没有领先的项目',
     featuresTitle: '长时间运行的模拟需要的，都在这里',
     featuresText: '每个功能都按需启用，World 不用就没有开销。',
     features: [
@@ -798,7 +783,7 @@ const copy: Record<Locale, Copy> = {
       },
       {
         question: 'C# / .NET 里最快的 ECS 是哪个？',
-        answer: `取决于负载。EasyEcs 仓库在 .NET 10 上用 BenchmarkDotNet 把它和 Friflo.Engine.ECS、Arch、DefaultEcs 做了 ${counts.total} 项正面对比，每个库都用自己惯用的写法做同样的事，并在 setup 中校验结果一致。EasyEcs 在 ${counts.ahead} 项更快，${counts.even} 项差距在测量误差之内，${counts.slower} 项更慢。领先次快的库最多的几项：${leadList(true, 5)}。10 万实体的完整服务器 tick：${peerTimes(true)}。${slowRange ? `最快的两个库每个 tick 都不分配内存；另外两个耗时是它的 ${slowRange}，而且每个 tick 都有分配。` : ''}${behindList(true) ? `其他库领先的项目：${behindList(true)}。` : ''}`,
+        answer: `取决于负载。EasyEcs 仓库在 .NET 10 上用 BenchmarkDotNet 把它和 Friflo.Engine.ECS、Arch、DefaultEcs 做了 ${counts.total} 项正面对比，每个库都用自己惯用的写法做同样的事，并在 setup 中校验结果一致。EasyEcs 在其中 ${counts.ahead} 项更快。领先次快的库最多的几项：${leadList(true, 5)}。10 万实体的完整服务器 tick：${peerTimes(true)}。${slowRange ? `最快的两个库每个 tick 都不分配内存；另外两个耗时是它的 ${slowRange}，而且每个 tick 都有分配。` : ''}`,
         more: {
           text: '与 Friflo、Arch、DefaultEcs 的对比',
           href: 'comparison',
@@ -991,7 +976,7 @@ function LeadRow({
   faster: string;
 }) {
   return (
-    <div className="flex flex-col gap-3 px-5 py-5 sm:px-6">
+    <div className="flex flex-col gap-3 bg-fd-card px-5 py-5 sm:px-6">
       <div className="flex items-start justify-between gap-4">
         <h3 className="text-sm font-medium">{lead.label[lang]}</h3>
         <p className="flex shrink-0 items-baseline gap-1.5 leading-none">
@@ -1021,7 +1006,7 @@ function StatCard({
       <h2 className="px-5 pt-5 pb-1 font-semibold tracking-tight sm:px-6">
         {title}
       </h2>
-      <div className="flex-1 divide-y">{children}</div>
+      <div className="mt-4 flex-1 border-t">{children}</div>
       <p className="border-t px-5 py-4 sm:px-6">
         <MoreLink to={link.to}>{link.text}</MoreLink>
       </p>
@@ -1134,76 +1119,24 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
                   <Bars rows={leadBars(topLead)} />
                 </div>
               </div>
-              <div className="grid gap-6 lg:grid-cols-2 lg:gap-x-8">
+              {nextLeads.length > 0 && (
                 <StatCard
                   title={t.leadsTitle}
-                  link={{
-                    to: `${docs}/comparison#feature-by-feature`,
-                    text: t.compareLink,
-                  }}
+                  link={{ to: `${docs}/performance`, text: t.compareLink }}
                 >
-                  {nextLeads.map((l) => (
-                    <LeadRow
-                      key={l.label.en}
-                      lead={l}
-                      lang={lang}
-                      faster={t.faster}
-                    />
-                  ))}
-                </StatCard>
-                <StatCard
-                  title={t.tickTitle}
-                  link={{
-                    to: `${docs}/performance#benchmarks`,
-                    text: t.numbersLink,
-                  }}
-                >
-                  <div className="flex flex-col gap-3 px-5 py-5 sm:px-6">
-                    <div className="flex items-start justify-between gap-4">
-                      <h3 className="text-sm text-fd-muted-foreground">
-                        {t.tickText}
-                      </h3>
-                      {tickLead && (
-                        <p className="flex shrink-0 items-baseline gap-1.5 leading-none">
-                          <span className="text-2xl font-semibold tracking-tight tabular-nums">
-                            {formatRatio(tickLead)}
-                          </span>
-                          <span className="text-xs text-fd-muted-foreground">
-                            {t.faster}
-                          </span>
-                        </p>
-                      )}
-                    </div>
-                    <Bars
-                      rows={peerList.map((p) => ({
-                        name: p.method,
-                        ns: p.row.meanNs,
-                        ours: p.ours,
-                      }))}
-                    />
-                  </div>
-                  <div className="px-5 py-5 sm:px-6">
-                    <h3 className="text-sm font-medium">{t.allocTitle}</h3>
-                    <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
-                      {peerList.map((p) => (
-                        <div key={p.method}>
-                          <dt className="text-xs text-fd-muted-foreground">
-                            {p.method}
-                          </dt>
-                          <dd
-                            className={cn(
-                              'mt-0.5 text-lg tracking-tight tabular-nums',
-                              p.ours && 'font-semibold',
-                            )}
-                          >
-                            {formatBytes(p.row.allocatedBytes)}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
+                  {/* Hairlines between the cells: the grid's gap shows the border colour */}
+                  <div className="grid gap-px bg-fd-border sm:grid-cols-2 sm:[&>:last-child:nth-child(odd)]:col-span-2">
+                    {nextLeads.map((l) => (
+                      <LeadRow
+                        key={l.label.en + l.versus.library}
+                        lead={l}
+                        lang={lang}
+                        faster={t.faster}
+                      />
+                    ))}
                   </div>
                 </StatCard>
-              </div>
+              )}
               <p className="text-xs leading-relaxed text-fd-muted-foreground">
                 {sourceLine(lang === 'zh')}
               </p>
