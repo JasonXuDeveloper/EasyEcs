@@ -2,6 +2,7 @@
   "title": "指南",
   "icon": "BookOpen",
   "pages": [
+    "project-structure",
     "entities-and-components",
     "prefabs",
     "queries",

@@ -10,6 +10,7 @@ import {
   BookText,
   Boxes,
   CircleQuestionMark,
+  FolderTree,
   Cpu,
   Gauge,
   Library,
@@ -104,6 +105,9 @@ flowchart LR
 指南每页讲一个概念，按用到的先后排列。
 
 <Cards>
+  <Card icon={<FolderTree />} title="项目结构" href="/zh/docs/guide/project-structure">
+    组件、系统、宿主循环和测试各放在哪，照 `dotnet new easyecs` 的布局。
+  </Card>
   <Card icon={<Boxes />} title="实体与组件" href="/zh/docs/guide/entities-and-components">
     句柄、id、标签和生成的成员。
   </Card>

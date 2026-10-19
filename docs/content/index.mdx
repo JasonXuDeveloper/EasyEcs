@@ -10,6 +10,7 @@ import {
   BookText,
   Boxes,
   CircleQuestionMark,
+  FolderTree,
   Cpu,
   Gauge,
   Library,
@@ -107,6 +108,9 @@ flowchart LR
 The guide has one page per concept, in the order you need them.
 
 <Cards>
+  <Card icon={<FolderTree />} title="Structuring a real project" href="/en/docs/guide/project-structure">
+    Where components, systems, the host loop and the tests go, as `dotnet new easyecs` lays them out.
+  </Card>
   <Card icon={<Boxes />} title="Entities and components" href="/en/docs/guide/entities-and-components">
     Handles, ids, tags and the generated members.
   </Card>

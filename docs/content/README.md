@@ -23,6 +23,7 @@ One page per concept, under [guide/](guide):
 
 | Page | Source |
 |---|---|
+| [Structuring a real project](https://ecs.xgamedev.net/en/docs/guide/project-structure) | [guide/project-structure.mdx](guide/project-structure.mdx) |
 | [Entities and components](https://ecs.xgamedev.net/en/docs/guide/entities-and-components) | [guide/entities-and-components.mdx](guide/entities-and-components.mdx) |
 | [Prefabs and cloning](https://ecs.xgamedev.net/en/docs/guide/prefabs) | [guide/prefabs.mdx](guide/prefabs.mdx) |
 | [Queries and filters](https://ecs.xgamedev.net/en/docs/guide/queries) | [guide/queries.mdx](guide/queries.mdx) |
@@ -38,7 +39,7 @@ One page per concept, under [guide/](guide):
 | [Cleanup and disable](https://ecs.xgamedev.net/en/docs/guide/cleanup-and-disable) | [guide/cleanup-and-disable.mdx](guide/cleanup-and-disable.mdx) |
 | [Bulk changes](https://ecs.xgamedev.net/en/docs/guide/bulk) | [guide/bulk.mdx](guide/bulk.mdx) |
 | [Snapshots](https://ecs.xgamedev.net/en/docs/guide/snapshots) | [guide/snapshots.mdx](guide/snapshots.mdx) |
-| [Saves](https://ecs.xgamedev.net/en/docs/guide/saves) | [guide/saves.mdx](guide/saves.mdx) |
+| [Save and load](https://ecs.xgamedev.net/en/docs/guide/saves) | [guide/saves.mdx](guide/saves.mdx) |
 | [Migration and unload](https://ecs.xgamedev.net/en/docs/guide/migration-and-unload) | [guide/migration-and-unload.mdx](guide/migration-and-unload.mdx) |
 | [Threading](https://ecs.xgamedev.net/en/docs/guide/threading) | [guide/threading.mdx](guide/threading.mdx) |
 | [Hosting in a .NET server](https://ecs.xgamedev.net/en/docs/guide/hosting) | [guide/hosting.mdx](guide/hosting.mdx) |

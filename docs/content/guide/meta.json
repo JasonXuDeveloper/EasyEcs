@@ -2,6 +2,7 @@
   "title": "Guide",
   "icon": "BookOpen",
   "pages": [
+    "project-structure",
     "entities-and-components",
     "prefabs",
     "queries",
