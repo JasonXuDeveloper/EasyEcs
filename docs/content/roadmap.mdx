@@ -46,8 +46,9 @@ feature only where it measures ([D21](/en/docs/decisions#d21-net-10-features-onl
   ([D26](/en/docs/decisions#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call)).
 - A generated `world.AddSystems()`: systems run in registration order, so the list is the tick's order and is read
   where the world is built.
-- Singletons added when a `[ForEach]` names them: a missing singleton is a forgotten setup, and its default is rarely
-  right (a clock with no step).
+- Singletons added when `world.X` or `GetSingleton<T>()` reads them: a missing singleton there is a forgotten setup,
+  and its default is rarely right (a clock with no step), so the read throws. `[ForEach]` parameters resolve through
+  `SingletonRef<T>()`, which adds the default.
 - Cached filters from attributes, counting members per component (`world.CountPlayer()`) and a named `TryGetXRef`:
   no line saved, more surface.
 

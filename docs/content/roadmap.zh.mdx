@@ -41,7 +41,7 @@ import { RotateCcwClock, Lightbulb } from 'lucide-react';
 - 多类型的 `Disable` / `Enable` 和批量调用，以及"改用生成成员"的诊断
   （[D26](/zh/docs/decisions#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call)）。
 - 生成 `world.AddSystems()`：系统按注册顺序运行，这份列表就是 tick 的顺序，应当在构建 World 的地方读到。
-- `[ForEach]` 用到单例组件时自动添加：缺单例说明忘了初始化，而默认值很少是对的（步长为零的时钟）。
+- `world.X` 或 `GetSingleton<T>()` 读单例时自动添加：这里缺单例说明忘了初始化，而默认值很少是对的（步长为零的时钟），所以读取会抛异常。`[ForEach]` 参数通过 `SingletonRef<T>()` 解析，会添加默认值。
 - 由特性生成缓存过滤器、按组件生成计数成员（`world.CountPlayer()`）、命名的 `TryGetXRef`：省不下代码，API 面却更大。
 
 ## 相关页面 [#related]

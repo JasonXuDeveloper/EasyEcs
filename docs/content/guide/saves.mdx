@@ -118,6 +118,22 @@ not detected. To change the shape of saved data, add a new component type instea
 loads the old save, a system converts the old component into the new one, and a later build drops the old type.
 
 ```csharp
+public record struct Inventory(int Gold, int Wood, int Stone) : IComponent;   // the new shape
+
+// Runs in the build that knows both types: every loaded Stock becomes an Inventory.
+// A later build deletes Stock and this system.
+public class UpgradeStock : EcsSystem
+{
+    [ForEach]
+    static void Upgrade(Entity player, in Stock old)
+    {
+        player.SetInventory(old.Gold, old.Wood, Stone: 0);
+        player.RemoveStock();
+    }
+}
+```
+
+```csharp
 try
 {
     restarted.Load(output.WrittenSpan);

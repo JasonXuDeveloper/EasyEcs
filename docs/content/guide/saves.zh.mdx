@@ -111,6 +111,22 @@ long tick = restarted.Clock.Tick;                                      // 1234
 同时包含两者的版本加载旧存档，由一个系统把旧组件转换成新组件，之后的版本再删掉旧类型。
 
 ```csharp
+public record struct Inventory(int Gold, int Wood, int Stone) : IComponent;   // 新结构
+
+// 在同时认识两个类型的版本里运行：加载进来的每个 Stock 都变成 Inventory。
+// 之后的版本删掉 Stock 和这个系统。
+public class UpgradeStock : EcsSystem
+{
+    [ForEach]
+    static void Upgrade(Entity player, in Stock old)
+    {
+        player.SetInventory(old.Gold, old.Wood, Stone: 0);
+        player.RemoveStock();
+    }
+}
+```
+
+```csharp
 try
 {
     restarted.Load(output.WrittenSpan);
