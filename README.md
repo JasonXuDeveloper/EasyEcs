@@ -1,7 +1,7 @@
 # EasyEcs
 
 **EasyEcs is a high-performance, allocation-free archetype Entity Component System (ECS) for C# and .NET 10
-servers.** In 34 head-to-head benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs it is faster in 22 and within
+servers.** In 37 head-to-head benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs it is faster in 24 and within
 the measurement error in 11, with saves 30× and bulk changes 15× faster than the next-fastest library
 ([comparison](https://ecs.xgamedev.net/en/docs/comparison#feature-by-feature)); a full server tick allocates 0 bytes. Write plain data and
 `[ForEach]` methods; the source generator turns them into inlined struct jobs and the analyzer catches design mistakes
@@ -211,9 +211,9 @@ dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*'
 
 ## Compared with other ECS libraries
 
-34 head-to-head benchmarks (project `EasyEcs.Comparison`, same VM) port the same work to Friflo.Engine.ECS 3.6, Arch
+37 head-to-head benchmarks (project `EasyEcs.Comparison`, same VM) port the same work to Friflo.Engine.ECS 3.6, Arch
 2.1 and DefaultEcs 0.17, each library its own idiomatic way, and check in setup that every library computes the same
-result. EasyEcs is faster in 22, within the measurement error in 11 and slower in 1. "Its time vs EasyEcs" is the
+result. EasyEcs is faster in 24, within the measurement error in 11 and slower in 2. "Its time vs EasyEcs" is the
 time of the fastest other library over the time of EasyEcs (2× = it takes twice as long); the site sorts the same
 data live ([feature by feature](https://ecs.xgamedev.net/docs/comparison#feature-by-feature)).
 
@@ -230,8 +230,10 @@ data live ([feature by feature](https://ecs.xgamedev.net/docs/comparison#feature
 | [Add a status component to 5% of 100,000 entities, then remove it](https://ecs.xgamedev.net/docs/comparison#operations) | 517 μs | Friflo.Engine.ECS 1.00 ms | **1.94×** |
 | [Find the 10 of 100,000 entities written this tick](https://ecs.xgamedev.net/docs/comparison#change-tracking) | 507 ns | Arch 966 ns | **1.91×** |
 | [Spawn 5,000 entities from a prefab, then destroy them](https://ecs.xgamedev.net/docs/comparison#operations) | 164 μs | Friflo.Engine.ECS 276 μs | **1.68×** |
+| [Create 100,000 three-component entities one by one in a fresh world, room reserved first](https://ecs.xgamedev.net/docs/comparison#cold-create) | 2.60 ms | Arch 4.21 ms | **1.62×** |
 | [Iterate one component over 100,000 entities](https://ecs.xgamedev.net/docs/comparison#operations) | 37.7 μs | Friflo.Engine.ECS 59.9 μs | **1.59×** |
 | [Put 10,000 of 100,000 entities to sleep, wake the last ones](https://ecs.xgamedev.net/docs/comparison#disabling) | 478 μs | DefaultEcs 745 μs | **1.56×** |
+| [Create 100,000 three-component entities in a fresh world in one call (the others' fastest way)](https://ecs.xgamedev.net/docs/comparison#cold-create) | 2.71 ms | Arch 4.21 ms | **1.56×** |
 | [Count 100 inventories through an index (100 items traded)](https://ecs.xgamedev.net/docs/comparison#indexes-and-relations) | 5.11 μs | DefaultEcs 7.87 μs | **1.54×** |
 | [Iterate with a filter: the players among 100,000 entities](https://ecs.xgamedev.net/docs/comparison#operations) | 11.3 μs | Friflo.Engine.ECS 16.6 μs | **1.46×** |
 | [Find the 1,000 of 100,000 entities written this tick](https://ecs.xgamedev.net/docs/comparison#change-tracking) | 38.5 μs | Friflo.Engine.ECS 53.7 μs | **1.40×** |
@@ -267,6 +269,7 @@ and allocate 535 KB and 61 KB per tick (EasyEcs and Friflo: 0 B):
 | [Steer 100,000 agents on all cores (parallel query)](https://ecs.xgamedev.net/docs/comparison#parallel) | 766 μs | Arch 685 μs | 0.89× (within error) | Arch's and Friflo's runners keep worker threads of their own, which win when passes run back to back, as BenchmarkDotNet runs them. EasyEcs wakes thread-pool helpers only while they pay: in a real server tick a dedicated crew measured worse tail latency and more CPU per tick (D22). |
 | [Scan 100,000 entities for the 1,000 written, without a change filter](https://ecs.xgamedev.net/docs/comparison#change-tracking) | 61.4 μs | Friflo.Engine.ECS 53.7 μs | 0.88× | Not the way to do it in EasyEcs: the component is `ITrackChanges`, so each of the 1,000 writes also stamps its row's change tick, which `[Changed<T>]` needs and the scan ignores; Friflo's component is not tracked. `[Changed<T>]` does the same job faster than every library's scan. |
 | [Find the 10 of 100,000 entities that lost a component](https://ecs.xgamedev.net/docs/comparison#removal-detection) | 830 ns | Friflo.Engine.ECS 697 ns | 0.84× (within error) | Friflo's `OnComponentRemoved` event pushes each id into a list you keep as the removal happens, a cost per removal; `[Removed<T>]` finds the removals through per-block summaries, a fixed cost per pass that 10 removals do not cover. From 1,000 removals on, EasyEcs leads, with no subscription to write. |
+| [Create 100,000 three-component entities one by one in a fresh world, nothing reserved](https://ecs.xgamedev.net/docs/comparison#cold-create) | 7.13 ms | Arch 4.77 ms | 0.67× | A fresh EasyEcs world grows its table and entity storage by doubling, and the arrays past 85,000 bytes land on the large object heap; together they pass the budget that sets off a full collection, once per new world (D28). Arch keeps entities in 16 KB chunks, which never reach that heap. Reserve the table with `EnsureCapacity<T1..Tn>(count)` or create the entities with `CreateEntities`, and EasyEcs is the fastest of the four. |
 
 What each library has built in:
 
