@@ -4,6 +4,8 @@
  * The chart code (visx) is a separate chunk loaded only where a chart is used.
  */
 import { lazy, Suspense } from 'react';
+import { cn } from '@/lib/cn';
+import { surface } from '@/lib/ui';
 import type { BenchChartProps, PeerChartProps } from './benchmark-charts';
 
 // Prerendering imports the charts up front so the HTML holds the finished SVG
@@ -25,7 +27,10 @@ export type { BenchChartProps, PeerChartProps } from './benchmark-charts';
 function Fallback() {
   return (
     <div
-      className="not-prose my-6 h-80 animate-pulse rounded-xl border bg-fd-card motion-reduce:animate-none"
+      className={cn(
+        surface,
+        'not-prose my-6 h-80 animate-pulse motion-reduce:animate-none',
+      )}
       aria-hidden="true"
     />
   );

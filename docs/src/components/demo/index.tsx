@@ -11,6 +11,7 @@ import { useI18n } from 'fumadocs-ui/contexts/i18n';
 import { Pause, Play, RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
+import { button, surface } from '@/lib/ui';
 import { createRenderer, type Palette, type Renderer } from './renderer';
 import { type DemoRuntime, loadDemoRuntime } from './runtime';
 
@@ -346,13 +347,13 @@ export function EcsDemo() {
     };
   }, [count, generation]);
 
-  const button =
-    'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm font-medium transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground disabled:opacity-50';
+  const tool = button('secondary', 'sm');
 
   return (
-    <div className="not-prose my-6 overflow-hidden rounded-xl border bg-fd-card">
+    <div className={cn(surface, 'not-prose my-6 overflow-hidden')}>
       <div className="flex flex-wrap items-center gap-2 border-b p-3">
-        <fieldset className="inline-flex overflow-hidden rounded-md border">
+        {/* A segmented control, like Fumadocs' theme toggle: the pressed count is filled */}
+        <fieldset className="inline-flex rounded-full border bg-fd-background p-0.5">
           <legend className="sr-only">{t.count}</legend>
           {counts.map((n) => (
             <button
@@ -361,10 +362,10 @@ export function EcsDemo() {
               aria-pressed={count === n}
               onClick={() => setCount(n)}
               className={cn(
-                'px-2.5 py-1 text-sm tabular-nums transition-colors',
+                'h-7 rounded-full px-3 text-[13px] tabular-nums transition-colors',
                 count === n
-                  ? 'bg-fd-primary text-fd-primary-foreground'
-                  : 'hover:bg-fd-accent hover:text-fd-accent-foreground',
+                  ? 'bg-fd-accent font-medium text-fd-accent-foreground'
+                  : 'text-fd-muted-foreground hover:text-fd-foreground',
               )}
             >
               {n >= 1000 ? `${n / 1000}k` : n}
@@ -373,7 +374,7 @@ export function EcsDemo() {
         </fieldset>
         <button
           type="button"
-          className={button}
+          className={tool}
           disabled={status !== 'running'}
           onClick={() => setPaused((p) => !p)}
         >
@@ -386,7 +387,7 @@ export function EcsDemo() {
         </button>
         <button
           type="button"
-          className={button}
+          className={tool}
           disabled={status !== 'running'}
           onClick={() => setGeneration((g) => g + 1)}
         >
@@ -418,18 +419,18 @@ export function EcsDemo() {
       </div>
       <p className="border-t px-3 py-2 text-center text-sm text-fd-muted-foreground tabular-nums">
         {t.motion}{' '}
-        <span className="font-mono font-semibold text-fd-foreground">
+        <span className="font-medium text-fd-foreground">
           {stats.batchMs.toFixed(3)} ms
         </span>{' '}
         {t.batched} ·{' '}
-        <span className="font-mono font-semibold text-fd-foreground">
+        <span className="font-medium text-fd-foreground">
           {stats.entityMs.toFixed(3)} ms
         </span>{' '}
         {t.perEntity}
         {stats.batchMs > 0 && (
           <>
             {' · '}
-            <span className="font-mono font-semibold text-fd-primary">
+            <span className="font-medium text-fd-primary">
               {(stats.entityMs / stats.batchMs).toFixed(1)}×
             </span>{' '}
             {t.faster}
@@ -442,11 +443,12 @@ export function EcsDemo() {
           [t.update, stats.updateMs.toFixed(2)],
           [t.fps, stats.fps.toFixed(0)],
         ].map(([label, value]) => (
-          <div key={label} className="px-2 py-2">
-            <dd className="font-mono text-lg font-semibold tabular-nums">
+          // The value shows above its label; the markup keeps <dt> before <dd>
+          <div key={label} className="flex flex-col-reverse px-2 py-3">
+            <dt className="text-xs text-fd-muted-foreground">{label}</dt>
+            <dd className="text-lg font-medium tracking-tight tabular-nums">
               {value}
             </dd>
-            <dt className="text-xs text-fd-muted-foreground">{label}</dt>
           </div>
         ))}
       </dl>

@@ -3,30 +3,47 @@
 @import "fumadocs-ui/css/preset.css";
 
 /*
- * Stock Fumadocs neutral theme; the one override is the accent, a calm blue.
+ * Stock Fumadocs neutral theme with three overrides, in both themes:
+ * - one accent, a calm blue (links, the active page, primary buttons, EasyEcs
+ *   in the charts), at least 4.5:1 against its text and the page;
+ * - muted text a step darker in light mode, so small grey text passes WCAG AA
+ *   on the page and on cards (Fumadocs' default is 4.3:1);
+ * - the focus ring in the accent, so keyboard focus is visible (3:1 or more).
  * No custom palettes, gradients, glows or decorative animation.
  */
 @theme {
-  --color-fd-primary: hsl(221 58% 46%);
+  --color-fd-primary: hsl(221 70% 45%);
   --color-fd-primary-foreground: hsl(0 0% 100%);
+  --color-fd-muted-foreground: hsl(0 0% 40%);
+  --color-fd-ring: hsl(221 70% 45%);
 }
 
 .dark {
-  --color-fd-primary: hsl(218 85% 74%);
+  --color-fd-primary: hsl(213 94% 68%);
   --color-fd-primary-foreground: hsl(222 47% 11%);
+  --color-fd-ring: hsl(213 94% 68%);
+}
+
+@layer base {
+  /* Keyboard focus on anything Fumadocs does not style itself */
+  :where(a, button, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-fd-ring);
+    outline-offset: 2px;
+  }
 }
 
 /*
- * Benchmark charts (src/components/charts): EasyEcs in the accent,
- * every other library in neutral grey.
+ * Benchmark charts (src/components/charts) and the home page's tick card:
+ * EasyEcs in the accent, every other library in neutral grey (3:1 or more
+ * against the card in both themes).
  */
 :root {
   --ecs-chart-ours: var(--color-fd-primary);
-  --ecs-chart-other: hsl(0, 0%, 64%);
+  --ecs-chart-other: hsl(0 0% 52%);
 }
 
 .dark {
-  --ecs-chart-other: hsl(0, 0%, 45%);
+  --ecs-chart-other: hsl(0 0% 45%);
 }
 
 .ecs-chart-bar {
@@ -66,20 +83,21 @@
   color: var(--shiki-dark);
 }
 
+/*
+ * Less motion: no transitions or animations anywhere. Unlayered, so it wins
+ * over every layered rule (Tailwind's utilities, Fumadocs' styles) without
+ * !important; the chart classes are named to outrank their own rules above.
+ */
 @media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after,
   .ecs-chart-bar,
   .ecs-chart-value,
   .ecs-chart-row {
-    transition: none;
-  }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  * {
-    transition-property:
-      color, background-color, border-color, box-shadow, outline-color,
-      text-decoration-color, fill, stroke;
-    transition-duration: 0.2s;
-    transition-timing-function: ease-out;
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    scroll-behavior: auto;
   }
 }

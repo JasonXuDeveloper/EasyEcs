@@ -1,10 +1,13 @@
 import { getHighlighter } from 'fumadocs-core/highlight';
+import { Card, Cards } from 'fumadocs-ui/components/card';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import {
   ArrowRight,
   BookOpen,
   Bot,
+  Check,
   ChevronDown,
+  Copy as CopyIcon,
   Cpu,
   History,
   Layers,
@@ -16,24 +19,26 @@ import {
   Stamp,
   Zap,
 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { PeerChart } from '@/components/charts';
 import {
   type BenchNumber,
   bench,
   benchNumber,
   benchRows,
+  formatBytes,
   formatRatio,
   formatTime,
   peerLabel,
   peers,
   sourceLine,
 } from '@/lib/benchmarks';
+import { cn } from '@/lib/cn';
 import { getLocale, type Locale } from '@/lib/i18n';
 import { baseOptions } from '@/lib/layout.shared';
 import { homeMeta } from '@/lib/seo';
 import { docsVersion, githubUrl, installCommand } from '@/lib/site';
+import { button, surface } from '@/lib/ui';
 import type { Route } from './+types/home';
 
 /* ------------------------------------------------------------------ */
@@ -53,8 +58,10 @@ const zeroAlloc = tickAlloc?.value === 0;
 
 /** The peers of the headline tick, fastest first */
 const peerList = peers();
-/** True when EasyEcs runs the headline tick faster than every peer (the meta description says so) */
+/** True when EasyEcs runs the headline tick faster than every peer (the headline and description say so) */
 const tickLeads = peerList[0]?.ours === true;
+/** The slowest peer's time, the full length of a bar in the hero's tick card */
+const tickMax = Math.max(1, ...peerList.map((p) => p.row.meanNs));
 const slowerPeers = peerList.filter((p) => !p.ours && (p.row.ratio ?? 0) >= 2);
 const slowRange = slowerPeers.length
   ? `${formatRatio(Math.min(...slowerPeers.map((p) => p.row.ratio ?? 0)))}–${formatRatio(Math.max(...slowerPeers.map((p) => p.row.ratio ?? 0)))}`
@@ -147,11 +154,19 @@ interface Faq {
 interface Copy {
   description: string;
   pill: string;
+  /** The h1 in two parts: the claim, then the proof in the muted colour */
   headline: string;
+  headlineProof: string;
   definition: string;
   start: string;
   github: string;
   demo: string;
+  copy: string;
+  copied: string;
+  tickTitle: string;
+  tickText: string;
+  /** "per tick", after each library's allocation in the tick card */
+  perTick: string;
   numbersTitle: string;
   numbers: { label: string; value: string; note: string }[];
   numbersNote: string;
@@ -161,8 +176,6 @@ interface Copy {
   howTitle: string;
   howText: string;
   steps: { title: string; text: string; code: string }[];
-  peersTitle: string;
-  peersText: string;
   peersLink: string;
   speedTitle: string;
   speedText: string;
@@ -233,11 +246,18 @@ const copy: Record<Locale, Copy> = {
       : `High-performance, allocation-free ECS for C# and .NET 10 servers: source-generated systems, change tracking, indexes and saves, ${zeroAlloc ? '0 B' : text(tickAlloc)} per tick.`,
     pill: `EasyEcs ${docsVersion} · .NET 10 · MIT`,
     headline: 'The allocation-free ECS for .NET 10 servers',
+    headlineProof: '',
     definition:
       'EasyEcs is an open-source, allocation-free archetype Entity Component System (ECS) for C# and .NET 10 servers. Write plain data and [ForEach] methods; a source generator turns them into inlined struct jobs, an analyzer catches design mistakes at compile time, and a full server tick allocates nothing.',
     start: 'Get started',
     github: 'GitHub',
     demo: 'Try it in the browser',
+    copy: 'Copy the install command',
+    copied: 'Copied',
+    tickTitle: 'One server tick, 100,000 entities',
+    tickText:
+      "The same simulation on each library's fast path, identical results. Shorter is faster.",
+    perTick: 'per tick',
     numbersTitle: 'One server tick, measured',
     numbers: [
       {
@@ -289,10 +309,7 @@ const copy: Record<Locale, Copy> = {
         code: stepCode[2],
       },
     ],
-    peersTitle: 'Measured against Friflo, Arch and DefaultEcs',
-    peersText:
-      "The same 100,000-entity server tick, ported to each library's fast path, with identical results checked in setup.",
-    peersLink: 'The full comparison, feature by feature',
+    peersLink: 'The full comparison',
     featuresTitle: 'Everything a long-running simulation needs',
     featuresText:
       'Each feature is opt-in and costs nothing until a world uses it.',
@@ -473,11 +490,17 @@ const copy: Record<Locale, Copy> = {
       : `高性能、零分配的 C# / .NET 10 ECS 框架：源生成系统、变更追踪、索引与存档，每个 tick ${zeroAlloc ? '0 B' : text(tickAlloc)} 分配。`,
     pill: `EasyEcs ${docsVersion} · .NET 10 · MIT`,
     headline: '为 .NET 10 服务端打造的零分配 ECS',
+    headlineProof: '',
     definition:
       'EasyEcs 是开源、零 GC 分配的 archetype（原型）实体组件系统（ECS），面向 C# 与 .NET 10 服务端。你只写普通数据和 [ForEach] 方法：源生成器把它们编译成内联的结构体 job，分析器在编译期拦下设计错误，一整个服务器 tick 不分配任何内存。',
     start: '快速开始',
     github: 'GitHub',
     demo: '在浏览器里试试',
+    copy: '复制安装命令',
+    copied: '已复制',
+    tickTitle: '一个服务器 tick，10 万实体',
+    tickText: '同一个模拟移植到每个库的最快写法，结果一致。越短越快。',
+    perTick: '/ tick',
     numbersTitle: '一个服务器 tick 的实测耗时',
     numbers: [
       {
@@ -529,10 +552,7 @@ const copy: Record<Locale, Copy> = {
         code: stepCode[2],
       },
     ],
-    peersTitle: '与 Friflo、Arch、DefaultEcs 实测对比',
-    peersText:
-      '同一个 10 万实体的服务器 tick，移植到每个库的最快写法，并在 setup 中校验结果完全一致。',
-    peersLink: '查看逐项功能对比',
+    peersLink: '完整对比',
     featuresTitle: '长时间运行的模拟需要的，都在这里',
     featuresText: '每个功能都按需启用，World 不用就没有开销。',
     features: [
@@ -765,10 +785,29 @@ function GitHubIcon() {
 function Code({ html, className }: { html: string; className?: string }) {
   return (
     <div
-      className={`home-code overflow-x-auto text-[13px] leading-relaxed [&_pre]:p-4 ${className ?? ''}`}
+      className={cn(
+        'home-code overflow-x-auto font-mono text-[13px] leading-relaxed [&_pre]:p-5',
+        className,
+      )}
       // biome-ignore lint/security/noDangerouslySetInnerHtml: Shiki's HTML for the page's own code samples, made at build time
       dangerouslySetInnerHTML={{ __html: html }}
     />
+  );
+}
+
+/** A text link with an arrow: "The full comparison →" */
+function MoreLink({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    <Link
+      to={to}
+      className="group inline-flex items-center gap-1 text-sm font-medium text-fd-foreground underline-offset-4 hover:underline"
+    >
+      {children}
+      <ArrowRight
+        className="size-3.5 transition-transform group-hover:translate-x-0.5"
+        aria-hidden="true"
+      />
+    </Link>
   );
 }
 
@@ -784,24 +823,118 @@ function Section({
   children: ReactNode;
 }) {
   return (
-    <section id={id} className="w-full border-t px-4 py-14 sm:px-6 md:py-20">
-      <div className="mx-auto max-w-5xl">
-        <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+    <section id={id} className="w-full px-4 py-16 sm:px-6 md:py-24">
+      <div className="mx-auto max-w-6xl">
+        <h2 className="max-w-3xl text-2xl font-medium tracking-tight text-balance sm:text-3xl">
           {title}
         </h2>
         {text && (
-          <p className="mt-3 max-w-3xl text-fd-muted-foreground">{text}</p>
+          <p className="mt-3 max-w-2xl leading-relaxed text-fd-muted-foreground">
+            {text}
+          </p>
         )}
-        <div className="mt-8">{children}</div>
+        <div className="mt-10">{children}</div>
       </div>
     </section>
   );
 }
 
-const button =
-  'inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium transition-colors';
-const primary = `${button} bg-fd-primary text-fd-primary-foreground hover:bg-fd-primary/90`;
-const secondary = `${button} border hover:bg-fd-accent hover:text-fd-accent-foreground`;
+/** The install command with a copy button */
+function Install({ label, done }: { label: string; done: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const id = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(id);
+  }, [copied]);
+  return (
+    <div className="inline-flex max-w-full items-center gap-3 rounded-full border bg-fd-card py-1 ps-4 pe-1 font-mono text-[13px]">
+      <span className="text-fd-muted-foreground select-none" aria-hidden="true">
+        $
+      </span>
+      <code className="min-w-0 overflow-x-auto whitespace-nowrap">
+        {installCommand}
+      </code>
+      <button
+        type="button"
+        className={button('ghost', 'sm', 'size-8 shrink-0 px-0')}
+        aria-label={copied ? done : label}
+        title={copied ? done : label}
+        onClick={() =>
+          navigator.clipboard
+            ?.writeText(installCommand)
+            .then(() => setCopied(true))
+            .catch(() => undefined)
+        }
+      >
+        {copied ? <Check /> : <CopyIcon />}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The headline tick as plain bars (no chart library): each library's time,
+ * relative to the slowest, and what it allocates per tick. The numbers are
+ * text, so the card reads the same without CSS or to a screen reader.
+ */
+function TickCard({ t, lang }: { t: Copy; lang: Locale }) {
+  return (
+    <figure className={cn(surface, 'p-5 sm:p-6')}>
+      <figcaption>
+        <p className="text-sm font-medium">{t.tickTitle}</p>
+        <p className="mt-1 text-xs leading-relaxed text-fd-muted-foreground">
+          {t.tickText}
+        </p>
+      </figcaption>
+      <ol className="mt-6 space-y-4">
+        {peerList.map((p) => (
+          <li key={p.method}>
+            <div className="flex items-baseline justify-between gap-3 text-sm">
+              <span
+                className={cn(
+                  'truncate',
+                  p.ours ? 'font-medium' : 'text-fd-muted-foreground',
+                )}
+              >
+                {peerLabel(p.method, docsVersion)}
+              </span>
+              <span className="shrink-0 tabular-nums">
+                <span className={p.ours ? 'font-medium' : undefined}>
+                  {formatTime(p.row.meanNs)}
+                </span>
+                <span className="text-fd-muted-foreground">
+                  {' · '}
+                  {formatBytes(p.row.allocatedBytes)} {t.perTick}
+                </span>
+              </span>
+            </div>
+            <div
+              className="mt-2 h-1.5 overflow-hidden rounded-full bg-fd-muted"
+              aria-hidden="true"
+            >
+              <div
+                className="h-full rounded-full"
+                style={{
+                  width: `${Math.max(2, (p.row.meanNs / tickMax) * 100)}%`,
+                  background: p.ours
+                    ? 'var(--ecs-chart-ours)'
+                    : 'var(--ecs-chart-other)',
+                }}
+              />
+            </div>
+          </li>
+        ))}
+      </ol>
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t pt-4">
+        <p className="text-xs text-fd-muted-foreground">
+          {sourceLine(lang === 'zh')}
+        </p>
+        <MoreLink to={`/${lang}/docs/comparison`}>{t.peersLink}</MoreLink>
+      </div>
+    </figure>
+  );
+}
 
 export default function HomePage({ params, loaderData }: Route.ComponentProps) {
   const lang = getLocale(params.lang);
@@ -811,57 +944,71 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
   return (
     <HomeLayout {...baseOptions(lang)}>
       <main className="flex flex-1 flex-col items-center">
-        {/* Hero: the definition answer engines quote, install, start */}
-        <section className="w-full px-4 pt-12 pb-12 sm:px-6 md:pt-20 md:pb-16">
-          <div className="mx-auto flex max-w-3xl flex-col items-center text-center">
-            <span className="mb-5 rounded-full border bg-fd-secondary/50 px-3 py-1 text-xs font-medium text-fd-muted-foreground">
-              {t.pill}
-            </span>
-            <h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
-              {t.headline}
-            </h1>
-            <p className="mt-5 max-w-2xl text-base leading-relaxed text-fd-muted-foreground md:text-lg">
-              {t.definition}
-            </p>
-            <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-              <Link to={`${docs}/getting-started`} className={primary}>
-                {t.start}
-                <ArrowRight className="size-4" />
-              </Link>
-              <a
-                href={githubUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={secondary}
+        {/* Hero: the claim and its proof side by side */}
+        <section className="w-full px-4 pt-14 pb-16 sm:px-6 md:pt-24 md:pb-20">
+          <div className="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,27rem)] lg:gap-16">
+            <div className="min-w-0">
+              <Link
+                to={`${docs}/changelog`}
+                className="inline-flex items-center gap-1.5 rounded-full border bg-fd-card px-3 py-1 text-xs text-fd-muted-foreground transition-colors hover:text-fd-foreground"
               >
-                <GitHubIcon />
-                {t.github}
-              </a>
+                {t.pill}
+                <ArrowRight className="size-3" aria-hidden="true" />
+              </Link>
+              <h1 className="mt-6 text-4xl leading-[1.08] font-medium tracking-tight text-balance sm:text-5xl lg:text-[3.5rem]">
+                {t.headline}
+                {t.headlineProof && (
+                  <span className="block text-fd-muted-foreground">
+                    {t.headlineProof}
+                  </span>
+                )}
+              </h1>
+              <p className="mt-6 max-w-xl leading-relaxed text-fd-muted-foreground sm:text-lg">
+                {t.definition}
+              </p>
+              <div className="mt-8 flex flex-wrap items-center gap-3">
+                <Link to={`${docs}/getting-started`} className={button()}>
+                  {t.start}
+                  <ArrowRight />
+                </Link>
+                <a
+                  href={githubUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={button('secondary')}
+                >
+                  <GitHubIcon />
+                  {t.github}
+                </a>
+              </div>
+              <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-3">
+                <Install label={t.copy} done={t.copied} />
+                <MoreLink to={`${docs}/demo`}>{t.demo}</MoreLink>
+              </div>
             </div>
-            <code className="mt-5 max-w-full overflow-x-auto rounded-md border bg-fd-secondary/50 px-3 py-1.5 font-mono text-sm whitespace-nowrap text-fd-muted-foreground">
-              {installCommand}
-            </code>
-            <Link
-              to={`${docs}/demo`}
-              className="mt-3 inline-flex items-center gap-1 text-sm text-fd-muted-foreground underline-offset-4 transition-colors hover:text-fd-foreground hover:underline"
-            >
-              {t.demo}
-              <ArrowRight className="size-3.5" />
-            </Link>
+            <TickCard t={t} lang={lang} />
           </div>
         </section>
 
         {/* Headline numbers */}
-        <section className="w-full px-4 pb-14 sm:px-6">
-          <div className="mx-auto max-w-5xl">
+        <section className="w-full px-4 sm:px-6">
+          <div className="mx-auto max-w-6xl">
             <h2 className="sr-only">{t.numbersTitle}</h2>
-            <dl className="grid gap-px overflow-hidden rounded-xl border bg-fd-border sm:grid-cols-2 lg:grid-cols-4">
-              {t.numbers.map((n) => (
-                <div key={n.label} className="bg-fd-card p-5">
-                  <dt className="text-sm text-fd-muted-foreground">
+            <dl className="grid grid-cols-2 gap-y-8 border-y py-8 lg:grid-cols-4">
+              {t.numbers.map((n, i) => (
+                <div
+                  key={n.label}
+                  className={cn(
+                    'px-4 sm:px-6',
+                    // The first column of each row starts at the content edge
+                    i % 2 === 0 ? 'ps-0 sm:ps-0' : 'border-s',
+                    i === 2 && 'lg:border-s lg:ps-6',
+                  )}
+                >
+                  <dt className="text-xs text-fd-muted-foreground sm:text-sm">
                     {n.label}
                   </dt>
-                  <dd className="mt-1.5 text-3xl font-semibold tracking-tight tabular-nums">
+                  <dd className="mt-2 text-2xl font-medium tracking-tight tabular-nums sm:text-3xl">
                     {n.value}
                   </dd>
                   <dd className="mt-1 text-xs text-fd-muted-foreground">
@@ -870,11 +1017,11 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
                 </div>
               ))}
             </dl>
-            <p className="mt-3 text-xs leading-relaxed text-fd-muted-foreground">
+            <p className="mt-4 text-xs leading-relaxed text-fd-muted-foreground">
               {t.numbersNote}{' '}
               <Link
                 to={`${docs}/performance#benchmarks`}
-                className="underline underline-offset-2 hover:text-fd-foreground"
+                className="text-fd-foreground underline underline-offset-2"
               >
                 {t.numbersLink}
               </Link>
@@ -884,34 +1031,61 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
 
         {/* Code sample */}
         <Section title={t.codeTitle} text={t.codeText}>
-          <div className="overflow-hidden rounded-xl border bg-fd-card">
-            <div className="border-b px-4 py-2.5 font-mono text-xs text-fd-muted-foreground">
-              Battle.cs
+          <div className={cn(surface, 'overflow-hidden')}>
+            <div className="flex items-center justify-between border-b px-5 py-3 font-mono text-xs text-fd-muted-foreground">
+              <span>Battle.cs</span>
+              <span>C#</span>
             </div>
             <Code html={loaderData.hero} />
           </div>
         </Section>
 
+        {/* Why it is fast: each mechanism with its measured ratio */}
+        <Section title={t.speedTitle} text={t.speedText}>
+          <dl className="grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-4">
+            {t.speed.map((item) => (
+              // The metric reads first on screen, the title first in the markup (<dt> before <dd>)
+              <div key={item.title} className="flex flex-col border-t pt-5">
+                <dt className="mt-5 text-sm font-medium">{item.title}</dt>
+                <dd className="order-first">
+                  <span className="text-3xl font-medium tracking-tight tabular-nums">
+                    {item.metric}
+                  </span>
+                  <span className="mt-1 block text-xs text-fd-muted-foreground">
+                    {item.note}
+                  </span>
+                </dd>
+                <dd className="mt-1.5 text-sm leading-relaxed text-fd-muted-foreground">
+                  {item.text}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <p className="mt-10">
+            <MoreLink to={`${docs}/why-fast`}>{t.speedLink}</MoreLink>
+          </p>
+        </Section>
+
         {/* How it works */}
         <Section title={t.howTitle} text={t.howText}>
-          <ol className="divide-y overflow-hidden rounded-xl border bg-fd-card">
+          <ol className={cn(surface, 'divide-y overflow-hidden')}>
             {t.steps.map((s, i) => (
               <li
                 key={s.title}
                 className="grid min-w-0 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]"
               >
                 <div className="flex gap-4 p-5 md:p-6">
-                  <span className="flex size-7 shrink-0 items-center justify-center rounded-full border font-mono text-xs text-fd-muted-foreground">
-                    {i + 1}
+                  <span className="font-mono text-xs leading-6 text-fd-muted-foreground">
+                    {String(i + 1).padStart(2, '0')}
                   </span>
                   <div>
-                    <h3 className="font-semibold">{s.title}</h3>
+                    <h3 className="font-medium">{s.title}</h3>
                     <p className="mt-1.5 text-sm leading-relaxed text-fd-muted-foreground">
                       {s.text}
                     </p>
                   </div>
                 </div>
-                <div className="flex min-w-0 items-center border-t bg-fd-secondary/30 md:border-t-0 md:border-l">
+                <div className="flex min-w-0 items-center border-t bg-fd-background/60 md:border-t-0 md:border-s">
                   <Code html={loaderData.steps[i]} className="w-full" />
                 </div>
               </li>
@@ -919,77 +1093,30 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
           </ol>
         </Section>
 
-        {/* Peer comparison */}
-        <Section title={t.peersTitle} text={t.peersText}>
-          <PeerChart lang={lang} />
-          <p className="text-sm">
-            <Link
-              to={`${docs}/comparison`}
-              className="font-medium underline underline-offset-4"
-            >
-              {t.peersLink}
-            </Link>
-          </p>
-        </Section>
-
-        {/* Why it is fast: each mechanism with its measured ratio */}
-        <Section title={t.speedTitle} text={t.speedText}>
-          <dl className="grid gap-px overflow-hidden rounded-xl border bg-fd-border sm:grid-cols-2 lg:grid-cols-4">
-            {t.speed.map((item) => (
-              <div key={item.title} className="flex flex-col bg-fd-card p-5">
-                <dt className="text-sm font-semibold">{item.title}</dt>
-                <dd className="mt-1.5 text-sm leading-relaxed text-fd-muted-foreground">
-                  {item.text}
-                </dd>
-                <dd className="mt-auto pt-4">
-                  <span className="text-2xl font-semibold tracking-tight tabular-nums">
-                    {item.metric}
-                  </span>
-                  <span className="mt-0.5 block text-xs text-fd-muted-foreground">
-                    {item.note}
-                  </span>
-                </dd>
-              </div>
-            ))}
-          </dl>
-          <p className="mt-5 text-sm">
-            <Link
-              to={`${docs}/why-fast`}
-              className="font-medium underline underline-offset-4"
-            >
-              {t.speedLink}
-            </Link>
-          </p>
-        </Section>
-
-        {/* Features */}
+        {/* Features: Fumadocs' own cards, the same as the docs pages' */}
         <Section title={t.featuresTitle} text={t.featuresText}>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Cards className="gap-4 lg:grid-cols-3">
             {t.features.map((f) => (
-              <Link
+              <Card
                 key={f.href}
-                to={`${docs}/${f.href}`}
-                className="rounded-xl border bg-fd-card p-5 transition-colors hover:bg-fd-accent"
-              >
-                <f.icon className="size-5 text-fd-primary" aria-hidden="true" />
-                <h3 className="mt-3 text-sm font-semibold">{f.title}</h3>
-                <p className="mt-1 text-sm text-fd-muted-foreground">
-                  {f.text}
-                </p>
-              </Link>
+                href={`${docs}/${f.href}`}
+                icon={<f.icon />}
+                title={f.title}
+                description={f.text}
+              />
             ))}
-          </div>
+          </Cards>
         </Section>
 
         {/* Built for servers */}
         <Section title={t.serversTitle} text={t.serversText}>
-          <ul className="grid gap-3 sm:grid-cols-2">
+          <ul className="grid gap-x-10 gap-y-5 sm:grid-cols-2">
             {t.serverPoints.map((point) => (
-              <li
-                key={point}
-                className="flex gap-3 rounded-xl border bg-fd-card p-4 text-sm"
-              >
-                <span className="mt-2 size-1.5 shrink-0 rounded-full bg-fd-primary" />
+              <li key={point} className="flex gap-3 text-sm leading-relaxed">
+                <Check
+                  className="mt-0.5 size-4 shrink-0 text-fd-primary"
+                  aria-hidden="true"
+                />
                 <span>{point}</span>
               </li>
             ))}
@@ -998,25 +1125,25 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
 
         {/* FAQ: the same text is the page's FAQPage JSON-LD (meta) */}
         <Section id="faq" title={t.faqTitle}>
-          <div className="divide-y rounded-xl border bg-fd-card">
+          <div className={cn(surface, 'divide-y')}>
             {t.faq.map((item) => (
               // <details>: the answer stays in the HTML (crawlers read it) and opens on click.
-              <details key={item.question} className="group px-5 py-4">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 [&::-webkit-details-marker]:hidden">
-                  <h3 className="text-sm font-semibold">{item.question}</h3>
+              <details key={item.question} className="group">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-xl px-5 py-4 transition-colors hover:bg-fd-accent/40 [&::-webkit-details-marker]:hidden">
+                  <h3 className="text-sm font-medium">{item.question}</h3>
                   <ChevronDown
                     className="size-4 shrink-0 text-fd-muted-foreground transition-transform group-open:rotate-180"
                     aria-hidden="true"
                   />
                 </summary>
-                <p className="mt-2 text-sm leading-relaxed text-fd-muted-foreground">
+                <p className="px-5 pb-5 text-sm leading-relaxed text-fd-muted-foreground">
                   {item.answer}
                   {item.more && (
                     <>
                       {' '}
                       <Link
                         to={`${docs}/${item.more.href}`}
-                        className="underline underline-offset-4 hover:text-fd-foreground"
+                        className="text-fd-foreground underline underline-offset-4"
                       >
                         {item.more.text}
                       </Link>
@@ -1026,35 +1153,45 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
               </details>
             ))}
           </div>
-          <p className="mt-5 text-sm">
-            <Link
-              to={`${docs}/faq`}
-              className="underline underline-offset-4 hover:text-fd-foreground"
-            >
-              {t.allFaq}
-            </Link>
+          <p className="mt-6">
+            <MoreLink to={`${docs}/faq`}>{t.allFaq}</MoreLink>
           </p>
         </Section>
 
         {/* Call to action */}
-        <Section title={t.ctaTitle} text={t.ctaText}>
-          <div className="flex flex-wrap gap-3">
-            <Link to={`${docs}/getting-started`} className={primary}>
-              <BookOpen className="size-4" />
-              {t.ctaStart}
-            </Link>
-            <Link to={`${docs}/example`} className={secondary}>
-              {t.ctaExample}
-            </Link>
-            <a
-              href={lang === 'zh' ? '/llms-full.zh.txt' : '/llms-full.txt'}
-              className={secondary}
-            >
-              <Bot className="size-4" />
-              {t.ctaLlms}
-            </a>
+        <section className="w-full px-4 pb-20 sm:px-6 md:pb-28">
+          <div
+            className={cn(
+              surface,
+              'mx-auto flex max-w-6xl flex-col gap-8 p-8 md:flex-row md:items-end md:justify-between md:p-12',
+            )}
+          >
+            <div className="max-w-xl">
+              <h2 className="text-2xl font-medium tracking-tight sm:text-3xl">
+                {t.ctaTitle}
+              </h2>
+              <p className="mt-3 leading-relaxed text-fd-muted-foreground">
+                {t.ctaText}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Link to={`${docs}/getting-started`} className={button()}>
+                <BookOpen />
+                {t.ctaStart}
+              </Link>
+              <Link to={`${docs}/example`} className={button('secondary')}>
+                {t.ctaExample}
+              </Link>
+              <a
+                href={lang === 'zh' ? '/llms-full.zh.txt' : '/llms-full.txt'}
+                className={button('secondary')}
+              >
+                <Bot />
+                {t.ctaLlms}
+              </a>
+            </div>
           </div>
-        </Section>
+        </section>
       </main>
     </HomeLayout>
   );

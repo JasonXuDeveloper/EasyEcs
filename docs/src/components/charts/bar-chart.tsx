@@ -16,6 +16,7 @@ import { BarRounded } from '@visx/shape';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useReveal } from '@/components/showcase';
 import { cn } from '@/lib/cn';
+import { surface } from '@/lib/ui';
 
 export interface ChartSeries {
   key: string;
@@ -167,19 +168,21 @@ export function BarChart({
   const activeRow = active ? rows[active.index] : undefined;
 
   return (
-    <figure className="not-prose my-6 rounded-xl border bg-fd-card p-4 sm:p-5">
-      <figcaption className="mb-4">
-        <p className="text-sm font-semibold text-fd-foreground">{title}</p>
+    <figure className={cn(surface, 'not-prose my-6 p-4 sm:p-6')}>
+      <figcaption className="mb-5">
+        <p className="text-sm font-medium text-fd-foreground">{title}</p>
         {subtitle && (
-          <p className="mt-0.5 text-xs text-fd-muted-foreground">{subtitle}</p>
+          <p className="mt-1 text-xs leading-relaxed text-fd-muted-foreground">
+            {subtitle}
+          </p>
         )}
       </figcaption>
       {series.length > 1 && (
-        <ul className="mb-4 flex flex-wrap gap-x-4 gap-y-1 text-xs text-fd-muted-foreground">
+        <ul className="mb-5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-fd-muted-foreground">
           {series.map((s) => (
             <li key={s.key} className="inline-flex items-center gap-1.5">
               <span
-                className="inline-block size-2.5 rounded-sm"
+                className="inline-block size-2 rounded-full"
                 style={{ background: s.color }}
                 aria-hidden="true"
               />
@@ -266,7 +269,7 @@ export function BarChart({
                   x={0}
                   y={14}
                   fontSize={13}
-                  fontWeight={600}
+                  fontWeight={500}
                   fill="var(--color-fd-foreground)"
                   fontFamily={
                     row.code
@@ -374,7 +377,7 @@ export function BarChart({
         </svg>
         {activeRow && active && (
           <div
-            className="pointer-events-none absolute z-10 min-w-44 rounded-lg border bg-fd-popover px-3 py-2 text-xs text-fd-popover-foreground shadow-lg"
+            className="pointer-events-none absolute z-10 min-w-44 rounded-lg border bg-fd-popover px-3 py-2 text-xs text-fd-popover-foreground shadow-md"
             style={{
               left: Math.min(
                 Math.max(active.x + 12, 0),
@@ -386,7 +389,7 @@ export function BarChart({
           >
             <p
               className={cn(
-                'mb-1.5 font-semibold',
+                'mb-1.5 font-medium',
                 activeRow.code && 'font-mono',
               )}
             >
@@ -418,7 +421,7 @@ export function BarChart({
         )}
       </div>
       {footnotes && footnotes.length > 0 && (
-        <div className="mt-3 space-y-1 text-xs text-fd-muted-foreground">
+        <div className="mt-4 space-y-1 border-t pt-3 text-xs text-fd-muted-foreground">
           {footnotes.map((note, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: static footnotes
             <p key={i}>{note}</p>

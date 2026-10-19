@@ -2,6 +2,7 @@ import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { useLocation } from 'react-router';
 import { getLocale, type Locale } from '@/lib/i18n';
 import { baseOptions } from '@/lib/layout.shared';
+import { button } from '@/lib/ui';
 
 export function meta() {
   return [
@@ -33,19 +34,13 @@ function Message({ lang }: { lang: Locale }) {
   const t = copy[lang];
   return (
     <div className="flex flex-col items-center gap-3">
-      <h1 className="text-2xl font-semibold">{t.title}</h1>
+      <h1 className="text-2xl font-medium tracking-tight">{t.title}</h1>
       <p className="text-fd-muted-foreground">{t.text}</p>
       <div className="flex flex-wrap justify-center gap-3">
-        <a
-          href={`/${lang}`}
-          className="inline-flex items-center rounded-lg border px-5 py-2.5 text-sm font-medium transition-colors hover:bg-fd-accent"
-        >
+        <a href={`/${lang}`} className={button('secondary')}>
           {t.home}
         </a>
-        <a
-          href={`/${lang}/docs`}
-          className="inline-flex items-center rounded-lg bg-fd-primary px-5 py-2.5 text-sm font-medium text-fd-primary-foreground transition-colors hover:bg-fd-primary/90"
-        >
+        <a href={`/${lang}/docs`} className={button()}>
           {t.docs}
         </a>
       </div>
@@ -63,9 +58,7 @@ export default function NotFound() {
   return (
     <HomeLayout {...baseOptions(langs[0])}>
       <main className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center gap-10 p-8 text-center">
-        <p className="text-6xl font-extrabold tracking-tight text-fd-muted-foreground">
-          404
-        </p>
+        <p className="font-mono text-sm text-fd-muted-foreground">404</p>
         {langs.map((lang) => (
           <Message key={lang} lang={lang} />
         ))}
