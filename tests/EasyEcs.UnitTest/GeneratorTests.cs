@@ -807,6 +807,8 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(World w, int n) { for (int i = 0; i < n; i++) w.CreateEntity(new P { V = i }); } }", "EECS031")]
     [TestCase("public static class U { public static void F(World w, Entity[] all) { for (int i = 0; i < all.Length; i++) all[i] = w.CreateEntity(new P()); } }", "EECS031")]
     [TestCase("public static class U { public static void F(World w) { for (int i = 0; i < 10_000; i++) w.CreateEntity(new P()); } }", "EECS031")]
+    [TestCase("public static class U { public static void F(World w) { var all = new Entity[10_000]; for (int i = 0; i < all.Length; i++) all[i] = w.CreateEntity(new P { V = i }); } }", "EECS031")]
+    [TestCase("public static class U { public static void F(World w, Entity[] more) { var all = new Entity[64]; all = more; for (int i = 0; i < all.Length; i++) all[i] = w.CreateEntity(new P { V = i }); } }", "EECS031")]
     // EECS032: query work the world does in one call.
     [TestCase("public static class U { public static bool F(World w) => w.Count<P>() > 0; }", "EECS032")]
     [TestCase("public static class U { public static bool F(World w) => 0 == w.Count<P>(); }", "EECS032")]
@@ -832,6 +834,20 @@ public class GeneratorTests
             string.Join("\n", costs.Select(d => d.GetMessage())));
         Assert.That((await Diagnose(Components, Extra, source)).Where(e => e.StartsWith("CS")), Is.Empty, "the case compiles");
     }
+
+    // A warning costs, a suggestion (Info) is the same call written shorter, an error is code that cannot work (D29).
+    [TestCase("EECS025", DiagnosticSeverity.Warning)]
+    [TestCase("EECS026", DiagnosticSeverity.Warning)]
+    [TestCase("EECS027", DiagnosticSeverity.Warning)]
+    [TestCase("EECS028", DiagnosticSeverity.Warning)]
+    [TestCase("EECS029", DiagnosticSeverity.Warning)]
+    [TestCase("EECS030", DiagnosticSeverity.Warning)]
+    [TestCase("EECS031", DiagnosticSeverity.Warning)]
+    [TestCase("EECS032", DiagnosticSeverity.Warning)]
+    [TestCase("EECS033", DiagnosticSeverity.Info)]
+    [TestCase("EECS034", DiagnosticSeverity.Error)]
+    public void SeveritySaysWhatARuleCosts(string id, DiagnosticSeverity severity) =>
+        Assert.That(new EasyEcsAnalyzer().SupportedDiagnostics.Single(d => d.Id == id).DefaultSeverity, Is.EqualTo(severity));
 
     // The tricky "written" cases: every form of a write keeps the write access.
     [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) => p.V = 1; }")]
@@ -872,6 +888,9 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Set(new P { V = 1 }); } }")]   // overwrites
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Set(new Q { V = item.Entity.Id.Index }); } }")]
     [TestCase("public static class U { public static void F(World w) { for (int i = 0; i < 100; i++) w.CreateEntity(new P()); } }")]
+    [TestCase("public static class U { public static void F(World w) { var all = new Entity[100]; for (int i = 0; i < all.Length; i++) all[i] = w.CreateEntity(new P { V = i }); } }")]
+    [TestCase("public static class U { public static void F(World w, int n) { for (int i = 0; i < n; i++) if (w.Count<P>() < i) w.CreateEntity(new P { V = i }); } }")]   // now and then
+    [TestCase("public static class U { public static void F(World w, int n) { for (int r = 0; r < n; r++) for (int i = 0; i < 8; i++) w.CreateEntity(new P { V = i }); } }")]   // the inner loop's
     [TestCase("public static class U { public static void F(World w, int n) { w.EnsureCapacity<P>(n); for (int i = 0; i < n; i++) w.CreateEntity(new P { V = i }); } }")]
     [TestCase("public class S : EcsSystem { protected override void OnUpdate() { for (int i = 0; i < World.Clock.Ticks; i++) World.CreateEntity(new P()); } }")]
     [TestCase("public static class U { public static bool F(World w) => w.Count<P>() > 2; }")]

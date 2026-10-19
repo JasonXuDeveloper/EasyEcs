@@ -10,10 +10,12 @@ using Microsoft.CodeAnalysis.Operations;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// The rules for code that works but costs (EECS025-EECS033) and EECS034: what a [ForEach] method declares and does per
-/// row, allocations in code that runs every update, structural changes and queries one call could make, and the
-/// generated members. Each is reported only where the cheaper form does the same thing; the code fixes
-/// (EasyEcs.CodeFixes) apply the replacement the analyzer computed, so the analyzer stays the only place that decides.
+/// The rules for code that works but does more than it needs (EECS025-EECS033) and EECS034: what a [ForEach] method
+/// declares and does per row, allocations in code that runs every update, structural changes and queries one call could
+/// make, and the generated members. A rule whose code costs is a warning (EECS025-EECS032), the generated member is a
+/// suggestion (the same call at the same cost, shorter) and an update inside a system an error. Each is reported only where the cheaper form does the
+/// same thing; the code fixes (EasyEcs.CodeFixes) apply the replacement the analyzer computed, so the analyzer stays
+/// the only place that decides.
 /// </summary>
 public sealed partial class EasyEcsAnalyzer
 {
@@ -70,7 +72,7 @@ public sealed partial class EasyEcsAnalyzer
 
     public static readonly DiagnosticDescriptor CreateInLoop = new("EECS031", "Entities created one by one in a counted loop",
         "This loop creates {0} entities one by one; {1}",
-        Category, DiagnosticSeverity.Info, true,
+        Category, DiagnosticSeverity.Warning, true,
         "Creating entities one by one grows the table and the entity storage by doubling as they fill, and in a world " +
         "that has never held them the discarded arrays can set off a full garbage collection. CreateEntities and " +
         "Instantiate(prefab, span) create them in one pass; EnsureCapacity reserves room first when each entity gets " +
@@ -79,7 +81,7 @@ public sealed partial class EasyEcsAnalyzer
 
     public static readonly DiagnosticDescriptor QueryByHand = new("EECS032", "Query work the world does in one call",
         "{0}; {1}",
-        Category, DiagnosticSeverity.Info, true,
+        Category, DiagnosticSeverity.Warning, true,
         "Count sums the row counts of the matching tables and Any stops at the first table with a row, without visiting " +
         "rows. A filter skips whole tables and words of rows that a test in the loop would visit one by one.",
         helpLinkUri: Help("EECS032"));
@@ -103,7 +105,10 @@ public sealed partial class EasyEcsAnalyzer
     /// <summary>Property keys of the diagnostics' code fixes: what the analyzer decided, the fix only applies it.</summary>
     public const string FixKind = "Fix", FixTitle = "Title", Replace = "Replace", Insert = "Insert", RemoveOthers = "Remove", WithType = "With";
 
-    /// <summary>EECS031 leaves out loops of a constant count below this: 64 presence words, entity records of 64 KB.</summary>
+    /// <summary>
+    /// EECS031 leaves out loops of a constant count below this (or over an array created with one): 64 presence words,
+    /// entity records of 64 KB.
+    /// </summary>
     private const int SmallCount = 4096;
 
     private static string Help(string id) => "https://ecs.xgamedev.net/en/docs/guide/analyzer#" + id.ToLowerInvariant();
@@ -969,12 +974,18 @@ public sealed partial class EasyEcsAnalyzer
                 || c.TargetMethod.Name == "Instantiate" && c.Arguments.Length == 1) && c.Instance != null).ToArray();
         if (creations.Length != 1 || loop.Body.Descendants().Any(o => o is IAnonymousFunctionOperation)) return;
         var create = creations[0];
+        // Only a creation on every pass of this loop creates its count: one under a branch or in an inner loop replaces
+        // an entity now and then, or is the inner loop's to report.
+        for (var parent = create.Parent; parent != null && parent != loop; parent = parent.Parent)
+            if (parent is ILoopOperation or IConditionalOperation or ISwitchOperation or ICoalesceOperation or IConditionalAccessOperation)
+                return;
         string world = create.Instance!.Syntax.ToString();
         // A system creates entities in a world that is running: rows freed by earlier destroys are reused, and a
         // table that grew keeps its size, so the cost is a start-up's, paid once.
         if (Reserved(loop, world, core) || core.SystemOf(context.ContainingSymbol) != null) return;
         // A count known to be small never sends an array to the large object heap (D28): doubling costs nothing there.
-        if (bound.ConstantValue is { HasValue: true, Value: int end } && (start.ConstantValue is { HasValue: true, Value: int begin } ? end - begin : end) < SmallCount)
+        if ((bound.ConstantValue is { HasValue: true, Value: int end } ? end : FixedLength(bound)) is int known
+            && (start.ConstantValue is { HasValue: true, Value: int begin } ? known - begin : known) < SmallCount)
             return;
 
         var model = loop.SemanticModel!;
@@ -1008,6 +1019,35 @@ public sealed partial class EasyEcsAnalyzer
         context.ReportDiagnostic(Diagnostic.Create(CreateInLoop, loop.Syntax.GetLocation(),
             Binds(model, loop.Syntax, reserve, out _) ? ImmutableDictionary<string, string?>.Empty.Add(Insert, reserve + ";").Add(FixTitle, "Reserve room first") : null,
             count, $"reserve room first with '{reserve}'"));
+    }
+
+    /// <summary>
+    /// <c>handles.Length</c> of a local declared as <c>new T[constant]</c> and never assigned or passed by reference
+    /// afterwards: that constant; else null.
+    /// </summary>
+    private static int? FixedLength(IOperation bound)
+    {
+        if (Unwrap(bound) is not IPropertyReferenceOperation { Property.Name: "Length", Instance: ILocalReferenceOperation { Local: { Type: IArrayTypeSymbol } local } } length)
+            return null;
+        IOperation root = length;
+        while (root.Parent != null) root = root.Parent;
+        int? size = null;
+        foreach (var operation in root.Descendants())
+            switch (operation)
+            {
+                case IVariableDeclaratorOperation declarator when SymbolEqualityComparer.Default.Equals(declarator.Symbol, local):
+                    if (Unwrap(declarator.Initializer?.Value) is not IArrayCreationOperation { DimensionSizes: { Length: 1 } sizes }
+                        || sizes[0].ConstantValue is not { HasValue: true, Value: int n }) return null;
+                    size = n;
+                    break;
+                case IAssignmentOperation { Target: ILocalReferenceOperation target } when SymbolEqualityComparer.Default.Equals(target.Local, local):
+                    return null;
+                case IArgumentOperation { Parameter.RefKind: not RefKind.None, Value: ILocalReferenceOperation passed }
+                    when SymbolEqualityComparer.Default.Equals(passed.Local, local):
+                    return null;
+            }
+
+        return size;
     }
 
     /// <summary>The one variable a declaration declares, or null.</summary>
