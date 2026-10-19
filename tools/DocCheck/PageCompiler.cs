@@ -24,7 +24,10 @@ public sealed class PageCompiler
 {
     private const string Holder = "DocPage";
 
-    /// <summary>Variables a snippet may use without declaring them: the world and entities the prose talks about.</summary>
+    /// <summary>
+    /// Variables a snippet may use without declaring them: the world and entities the prose talks about, and the
+    /// command-line arguments of a top-level Program.cs.
+    /// </summary>
     public static readonly IReadOnlyDictionary<string, string> Ambient = new Dictionary<string, string>
     {
         ["world"] = "global::EasyEcs.World",
@@ -33,6 +36,7 @@ public sealed class PageCompiler
         ["hero"] = "global::EasyEcs.Entity",
         ["player"] = "global::EasyEcs.Entity",
         ["running"] = "bool",
+        ["args"] = "string[]",
     };
 
     private static readonly string[] ImplicitUsings =

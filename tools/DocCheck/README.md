@@ -28,8 +28,8 @@ generator and analyzer. A page reads like a story, and DocCheck compiles the sto
 - **Statements** (`var hero = world.CreateEntity(...)`; `world.Update();`) become the body of a method, one per fence.
   `await` makes it async; `return` is allowed.
 - **Locals carry over**: a local declared in one fence can be used by a later fence without declaring it again.
-- **Ambient names** may be used undeclared: `world` (a `World`), `entity`, `unit`, `hero`, `player` (an `Entity`) and
-  `running` (a `bool`).
+- **Ambient names** may be used undeclared: `world` (a `World`), `entity`, `unit`, `hero`, `player` (an `Entity`),
+  `running` (a `bool`) and `args` (a `string[]`, the command line of a top-level `Program.cs`).
 - **The prelude** (`Prelude.cs`) declares components the docs share: `Position(float X, float Y)`,
   `Velocity(float X, float Y)`, `Health(int Value)`, `Burning(int Ticks)` and the tags `Dead`, `Frozen`, `Stunned`.
   A page that declares one of these names uses its own.
