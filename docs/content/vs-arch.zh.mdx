@@ -10,6 +10,8 @@ icon: GitCompare
 单独的 Arch.Extended 包里。EasyEcs 把系统、生成的 job、变更追踪、索引、关系、存档和快照都放进一个包，面向 .NET 10
 服务器，结构变更当场生效，不走命令缓冲。
 
+两个库都参与的 <FeatureCount library="Arch" k="total" /> 项正面对比里，EasyEcs 在 <FeatureCount library="Arch" k="ahead" /> 项更快，<FeatureCount library="Arch" k="even" /> 项差距在测量误差之内，
+<FeatureCount library="Arch" k="slower" /> 项更慢。
 在 10 万实体的同一个服务器 tick 上，Arch 的耗时是 EasyEcs 的 <BenchValue k="peers.arch.ratio" />，每个 tick 分配
 <BenchValue k="peers.arch.alloc" />，EasyEcs 分配 <BenchValue k="peers.easyecs.alloc" />。Arch 支持的运行时更多
 （netstandard2.1、net6.0、net8.0 和 Unity），EasyEcs 只支持 .NET 10。
@@ -113,6 +115,10 @@ buffer.Playback(world);                          // 在这里才生效
 分析器拦下。
 
 ## 数字 [#numbers]
+
+两个库都参与的全部对比，按领先幅度排序（每行链接到[横向对比](/zh/docs/comparison)里对应的小节）：
+
+<FeatureComparison library="Arch" />
 
 主 tick，两个库用同一套规则，并校验过产出的计数器一致：
 

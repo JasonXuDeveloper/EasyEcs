@@ -10,6 +10,8 @@ icon: GitCompare
 chunk，把结构变更记进命令缓冲；EasyEcs 从 `[ForEach]` 方法生成 struct job，变更当场生效，组件被移除后用存在位保留原行，
 变更和移除都作为数据追踪，而不是事件。
 
+两个库都参与的 <FeatureCount library="Friflo" k="total" /> 项正面对比里，EasyEcs 在 <FeatureCount library="Friflo" k="ahead" /> 项更快，<FeatureCount library="Friflo" k="even" /> 项差距在测量误差之内，
+<FeatureCount library="Friflo" k="slower" /> 项更慢。
 在 10 万实体的同一个服务器 tick 上，Friflo 的耗时是 EasyEcs 的 <BenchValue k="peers.friflo.ratio" />（1 万实体时是
 <BenchValue k="peers.friflo10k.ratio" />），两者每个 tick 都不分配。Friflo 还能在 Unity 和更老的 .NET 上运行
 （netstandard2.1、net6.0-8.0），EasyEcs 只支持 .NET 10。
@@ -118,6 +120,10 @@ buffer.Playback();                                    // 在这里才生效
 计数器放在单例里，生成的 job 每一遍只解析一次。`Dead` 标签当场生效，所以同一次更新里后面的系统已经会跳过这具尸体。
 
 ## 数字 [#numbers]
+
+两个库都参与的全部对比，按领先幅度排序（每行链接到[横向对比](/zh/docs/comparison)里对应的小节）：
+
+<FeatureComparison library="Friflo" />
 
 主 tick：
 

@@ -83,11 +83,18 @@ integration. The usual setup is EasyEcs on a .NET 10 game server and the client 
 
 All four are C# ECS libraries; they differ in what they do for you and what it costs. EasyEcs generates the loops
 from `[ForEach]` methods, applies structural changes immediately (no command buffers), tracks changes and removals as
-data, and checks the ECS rules at compile time. On the same server tick, measured with BenchmarkDotNet:
+data, and checks the ECS rules at compile time. In <FeatureCount k="total" /> head-to-head benchmarks (BenchmarkDotNet,
+each library doing the same work its own idiomatic way), EasyEcs is faster in <FeatureCount k="ahead" />, within the
+measurement error in <FeatureCount k="even" /> and slower in <FeatureCount k="slower" />. Its biggest leads:
+
+<LeadChart limit="6" />
+
+On the full server tick the four are closer:
 
 <PeerChart />
 
-Feature by feature, with every benchmark: [Comparison](/en/docs/comparison), and the pages
+Every result, with where another library is faster and why: [Comparison](/en/docs/comparison#feature-by-feature),
+and the pages
 [vs Arch](/en/docs/vs-arch), [vs Friflo](/en/docs/vs-friflo) and [vs DefaultEcs](/en/docs/vs-defaultecs).
 
 ## How do I save a world? [#save-a-world]

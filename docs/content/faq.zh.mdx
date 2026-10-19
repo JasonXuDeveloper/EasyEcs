@@ -70,11 +70,17 @@ World 发布的不可变状态。不需要专门的托管包；完整的服务�
 ## EasyEcs 和 Arch、Friflo.Engine.ECS、DefaultEcs 比怎么样？ [#compared]
 
 四个都是 C# ECS 库，区别在于替你做了什么、代价多少。EasyEcs 从 `[ForEach]` 方法生成循环，结构变更立即生效（没有命令缓冲），
-把变更和移除当作数据来追踪，并在编译期检查 ECS 规则。同一个服务器 tick 的 BenchmarkDotNet 实测：
+把变更和移除当作数据来追踪，并在编译期检查 ECS 规则。<FeatureCount k="total" /> 项正面对比（BenchmarkDotNet，每个库用自己惯用的写法做同样的事）里，
+EasyEcs 在 <FeatureCount k="ahead" /> 项更快，<FeatureCount k="even" /> 项差距在测量误差之内，<FeatureCount k="slower" />
+项更慢。领先最多的几项：
+
+<LeadChart limit="6" />
+
+在完整的服务器 tick 上，四个库的差距要小一些：
 
 <PeerChart />
 
-逐项功能和全部基准见[横向对比](/zh/docs/comparison)，以及[对比 Arch](/zh/docs/vs-arch)、[对比 Friflo](/zh/docs/vs-friflo)、
+全部结果，以及其他库更快的项目和原因，见[横向对比](/zh/docs/comparison#feature-by-feature)，以及[对比 Arch](/zh/docs/vs-arch)、[对比 Friflo](/zh/docs/vs-friflo)、
 [对比 DefaultEcs](/zh/docs/vs-defaultecs)。
 
 ## 怎么保存一个 World？ [#save-a-world]

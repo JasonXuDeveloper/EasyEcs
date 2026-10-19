@@ -10,6 +10,8 @@ icon: GitCompare
 job，顺着表的列往下走。两者都内置了变更追踪、移除追踪、值索引、并行系统和存档；区别在存储方式、系统的写法和一个
 tick 的开销。
 
+两个库都参与的 <FeatureCount library="DefaultEcs" k="total" /> 项正面对比里，EasyEcs 在 <FeatureCount library="DefaultEcs" k="ahead" /> 项更快，<FeatureCount library="DefaultEcs" k="even" /> 项差距在测量误差之内，
+<FeatureCount library="DefaultEcs" k="slower" /> 项更慢。
 在 10 万实体的同一个服务器 tick 上，DefaultEcs 的耗时是 EasyEcs 的 <BenchValue k="peers.defaultecs.ratio" />，每个 tick
 分配 <BenchValue k="peers.defaultecs.alloc" />，EasyEcs 分配 <BenchValue k="peers.easyecs.alloc" />。DefaultEcs 支持
 netstandard1.1-2.1 和 Unity，EasyEcs 只支持 .NET 10。
@@ -110,6 +112,10 @@ systems.Update(counters);
 </Tabs>
 
 ## 数字 [#numbers]
+
+两个库都参与的全部对比，按领先幅度排序（每行链接到[横向对比](/zh/docs/comparison)里对应的小节）：
+
+<FeatureComparison library="DefaultEcs" />
 
 主 tick：
 

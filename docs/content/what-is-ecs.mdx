@@ -246,11 +246,12 @@ parts. That is what makes the data contiguous and each system independent.
 | DefaultEcs | A pool per component type | .NET and Unity |
 | Unity Entities (DOTS) | Archetypes in chunks | Unity only |
 
-On the same server tick of 100,000 entities, Friflo.Engine.ECS takes <BenchValue k="peers.friflo.ratio" /> the time
-of EasyEcs, Arch <BenchValue k="peers.arch.ratio" /> and DefaultEcs <BenchValue k="peers.defaultecs.ratio" />, and only
-EasyEcs and Friflo allocate nothing per tick.
-How EasyEcs measures against the other .NET libraries on the same server tick, feature by feature, is in
-[Comparison](/en/docs/comparison).
+Measured against Friflo.Engine.ECS, Arch and DefaultEcs in <FeatureCount k="total" /> head-to-head benchmarks, each
+library doing the same work its own idiomatic way, EasyEcs is faster in <FeatureCount k="ahead" /> and within the
+measurement error in <FeatureCount k="even" />. On a whole server tick of 100,000 entities, Friflo.Engine.ECS takes
+<BenchValue k="peers.friflo.ratio" /> the time of EasyEcs, Arch <BenchValue k="peers.arch.ratio" /> and DefaultEcs
+<BenchValue k="peers.defaultecs.ratio" />, and only EasyEcs and Friflo allocate nothing per tick. Every result, sorted
+by lead: [Comparison](/en/docs/comparison#feature-by-feature).
 
 ## What does EasyEcs add? [#easyecs]
 

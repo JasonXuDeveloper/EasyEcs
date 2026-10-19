@@ -474,9 +474,16 @@ restarted.Load(bytes.WrittenSpan);
 
 ## 和其他库的对比 [#compared]
 
-同一个服务器 tick 移植到各个库上（10 万实体）：
+每一项都在每个库里用它惯用的写法做同样的事，并在 setup 中校验结果一致。<FeatureCount k="total" /> 项对比里，EasyEcs
+在 <FeatureCount k="ahead" /> 项更快，另有 <FeatureCount k="even" /> 项差距在测量误差之内；领先最快的其他库最多的几项：
+
+<LeadChart limit="6" />
+
+同一个服务器 tick 移植到各个库上（10 万实体），差距要小一些，因为一个 tick 的大部分时间是受内存限制的遍历：
 
 <PeerChart />
+
+全部结果按领先幅度排序，其他库更快的项目和原因也在里面：[横向对比](/zh/docs/comparison#feature-by-feature)。
 
 | | EasyEcs | Friflo.Engine.ECS | Arch | DefaultEcs |
 | --- | --- | --- | --- | --- |

@@ -1,18 +1,18 @@
 ---
 title: Comparison with other ECS libraries
 seoTitle: "C# ECS benchmarks: EasyEcs vs Friflo, Arch and DefaultEcs"
-description: "Which C# ECS is fastest? EasyEcs against Friflo.Engine.ECS, Arch and DefaultEcs: a feature matrix, the same server tick and every benchmark, losses included."
+description: "Which C# ECS is fastest? EasyEcs against Friflo.Engine.ECS, Arch and DefaultEcs, feature by feature: every benchmark sorted by lead, losses explained."
 icon: Scale
 ---
 
-Which C# ECS is fastest depends on the work. On the same server tick, nine systems over 100,000 entities, EasyEcs
-takes <BenchValue k="peers.easyecs" />; Friflo.Engine.ECS takes <BenchValue k="peers.friflo.ratio" /> that time, Arch
-<BenchValue k="peers.arch.ratio" /> and DefaultEcs <BenchValue k="peers.defaultecs.ratio" />. EasyEcs and Friflo
-allocate nothing per tick; Arch and DefaultEcs allocate <BenchValue k="peers.arch.alloc" /> and
-<BenchValue k="peers.defaultecs.alloc" />. Friflo is close enough that the lead has changed between runs, and it wins
-some of the single-feature benchmarks below: this page shows all of them.
+Which C# ECS is fastest depends on the work. EasyEcs is measured against Friflo.Engine.ECS, Arch and DefaultEcs in
+<FeatureCount k="total" /> head-to-head benchmarks: it is faster in <FeatureCount k="ahead" />, within the
+measurement error in <FeatureCount k="even" /> and slower in <FeatureCount k="slower" />. The biggest leads are in
+the work a server does in bulk or now and then (saving, bulk changes, spawning, value queries, hierarchies, indexes,
+change detection); plain iteration over dense columns is close, because there the loop is bound by memory, not by the
+library. This page lists every result, sorted by lead, losses included and explained.
 
-<BenchSource />
+<LeadChart />
 
 EasyEcs is measured against the three most used .NET ECS libraries: [Friflo.Engine.ECS](https://github.com/friflo/Friflo.Engine.ECS),
 [Arch](https://github.com/genaray/Arch) and [DefaultEcs](https://github.com/Doraku/DefaultEcs), at the versions
@@ -21,6 +21,34 @@ pinned in [`benchmarks/EasyEcs.Comparison`](https://github.com/JasonXuDeveloper/
 recommend, and checks in setup that every library computes the same result before anything is measured. This page
 is the overview; the head-to-head pages ([Arch](/en/docs/vs-arch), [Friflo](/en/docs/vs-friflo),
 [DefaultEcs](/en/docs/vs-defaultecs)) map the APIs side by side.
+
+## Feature by feature [#feature-by-feature]
+
+Each row is one comparison: what it measures (linked to its section below), the time of EasyEcs, and the time of the
+fastest other library as a multiple of it, so 2× means that library takes twice as long. A library missing from a
+row has no such feature in its core package, or is not part of that comparison: the single operations run against
+Friflo only, the closest library on the full tick. The rows are sorted by the data, the biggest lead first, and a ratio
+marked "within error" is closer than the two rows' measurement errors added up.
+
+### Clear leads [#clear-leads]
+
+The fastest other library takes at least 1.25 times as long as EasyEcs.
+
+<FeatureComparison tier="lead" />
+
+### Close [#close]
+
+EasyEcs ahead by less than that; the full server tick is one of these rows.
+
+<FeatureComparison tier="close" />
+
+### Where another library is faster [#behind]
+
+Each with the reason, read from the benchmark's source.
+
+<FeatureComparison tier="behind" />
+
+EasyEcs also does not run on Unity or runtimes older than .NET 10; the other three do.
 
 ## Features [#features]
 
@@ -88,7 +116,8 @@ records changes), so the measured worlds behave the same. How EasyEcs makes imme
 
 ## The same server tick [#the-same-server-tick]
 
-`EcsComparisonBenchmark` runs the headline world of EasyEcs (30% players, 70% NPCs, projectiles; movement, area of
+A whole tick mixes every kind of work, so it shows what a real server gets, and it is closer than the single
+features: most of its time is iteration, where the loop is bound by memory. `EcsComparisonBenchmark` runs the headline world of EasyEcs (30% players, 70% NPCs, projectiles; movement, area of
 interest, combat, status effects, death, respawn, shooting) in each library, single-threaded. The EasyEcs side is
 `benchmarks/EasyEcs.Benchmark/WorldSimulation.cs` compiled unchanged; the others are `ArchSimulation.cs`,
 `FrifloSimulation.cs` and `DefaultEcsSimulation.cs`. Setup warms every world up for 200 ticks and checks that its
@@ -109,7 +138,8 @@ exactly, because entity ids feed the random rolls and each library recycles ids 
 </Tabs>
 
 EasyEcs and Friflo are close on this tick (Friflo takes <BenchValue k="peers.friflo.ratio" /> the time of EasyEcs at
-100,000 entities, <BenchValue k="peers.friflo10k.ratio" /> at 10,000), and both allocate nothing per tick. Arch and
+100,000 entities, <BenchValue k="peers.friflo10k.ratio" /> at 10,000; the lead has changed between runs), and both
+allocate nothing per tick. Arch and
 DefaultEcs take <BenchValue k="peers.arch.ratio" /> and <BenchValue k="peers.defaultecs.ratio" /> the time and
 allocate every tick (<BenchValue k="peers.arch.alloc" /> and <BenchValue k="peers.defaultecs.alloc" />), mostly in
 their command buffers and entity sets. EasyEcs gains in the systems that add, remove and destroy (presence bits,
@@ -177,12 +207,12 @@ once.
 </Tab>
 </Tabs>
 
-**Friflo's event wins at 10 removals** (<BenchValue k="removed.friflo.10" /> against
-<BenchValue k="removed.10" />): it collects the ids in a callback as the removals happen, so reading them costs
-nothing extra. EasyEcs keeps removals as data: its pass loads the summaries and rows of each word with a removal.
-At 1,000 removals the two are even (<BenchValue k="removed.friflo.1000" /> against <BenchValue k="removed.1000" />).
-What EasyEcs gives in exchange: no subscription, no list kept by hand, and the removal is visible to any system that
-runs later, not only to the one callback.
+At 10 removals, Friflo's event (<BenchValue k="removed.friflo.10" />) is ahead of `[Removed<T>]`
+(<BenchValue k="removed.10" />): it collects the ids in a callback as the removals happen, a cost per removal, while
+the EasyEcs pass finds them through per-block summaries, a fixed cost that 10 removals do not cover. At 1,000
+removals, EasyEcs takes <BenchValue k="removed.1000" /> and Friflo <BenchValue k="removed.friflo.1000" />. What
+EasyEcs gives in exchange: no subscription, no list kept by hand, and the removal is visible to any system that runs
+later, not only to the one callback.
 
 ## Indexes and relations [#indexes-and-relations]
 
@@ -220,9 +250,8 @@ entity, indexed by target), Friflo `ILinkRelation`.
 
 <BenchChart bench="RelationComparison" title="Rewire 100 of 10,000 friend lists, walk 100 follower sets" />
 
-**This one is a tie, with Friflo slightly ahead** (<BenchValue k="relation.friflo" /> against
-<BenchValue k="relation.easyecs" />): both libraries keep the same structure, a list of links per entity and an index
-by target, and the difference is within the run's error.
+Both libraries keep the same structure, a list of links per entity and an index by target, so the two are close
+(EasyEcs <BenchValue k="relation.easyecs" />, Friflo <BenchValue k="relation.friflo" />).
 
 ## Hierarchy [#hierarchy]
 
@@ -253,8 +282,8 @@ keeps the value while queries skip it; Friflo `entity.Enabled` (a `Disabled` tag
 </Tab>
 </Tabs>
 
-At 100 switched, Friflo's `Enabled` and EasyEcs' `Disable<T>()` are even: the sum dominates. With frequent switching,
-moving entities between archetypes costs more than flipping bits.
+At 100 switched, the sum dominates and Friflo's `Enabled` is close to EasyEcs. With frequent switching, moving
+entities between archetypes costs more than flipping bits, and the gap grows.
 
 ## Structural changes [#structural-changes]
 
@@ -301,9 +330,9 @@ scheduler, DefaultEcs an `AEntitySetSystem` with a `DefaultParallelRunner`.
 
 <BenchChart bench="ParallelQueryComparison" title="Steer 100,000 agents on all cores" />
 
-**EasyEcs does not win this one**: Friflo (<BenchValue k="parallelQuery.friflo" />) and Arch are ahead of EasyEcs
-(<BenchValue k="parallelQuery.easyecs" />). Their runners keep worker threads of their own; EasyEcs runs on the
-calling thread plus thread-pool helpers that it wakes only while they pay. Measured back to back, as BenchmarkDotNet
+**EasyEcs does not win this one**: Arch and Friflo (<BenchValue k="parallelQuery.friflo" />) come out ahead of
+EasyEcs (<BenchValue k="parallelQuery.easyecs" />), within this run's error. Their runners keep worker threads of
+their own; EasyEcs runs on the calling thread plus thread-pool helpers that it wakes only while they pay. Measured back to back, as BenchmarkDotNet
 does, dedicated workers win; in a server tick where passes are milliseconds apart, a dedicated spinning crew measured
 worse in tail latency and CPU per tick ([D22](/en/docs/decisions)), so EasyEcs keeps the thread pool.
 
@@ -324,17 +353,6 @@ differ: EasyEcs writes binary (Nino; unmanaged rows copied as raw bytes with a f
 its binary serializer into a new world. Arch saves through a separate package.
 
 <BenchChart bench="SaveComparison" title="Save and load 10,000 units" />
-
-## Where EasyEcs does not win [#where-easyecs-does-not-win]
-
-| Comparison | Result | Why |
-| --- | --- | --- |
-| [Parallel query](#parallel) | Friflo and Arch ahead | Dedicated worker threads beat woken pool threads when passes run back to back; EasyEcs chose the pool for server ticks |
-| [Relations](#indexes-and-relations) | Friflo slightly ahead, within the error | The same design in both libraries |
-| [10 removals](#removal-detection) | Friflo's event ahead | A callback collects the ids as they happen; EasyEcs reads them from the summaries |
-| [Two- and three-component iteration, batched entities](#operations) | Even with Friflo | Dense arrays in both; the loop is bound by memory |
-| [Disabling 100 of 100,000](#disabling) | Even with Friflo | The sum dominates, not the switch |
-| Unity and older runtimes | Not offered | EasyEcs targets net10.0 only |
 
 ## Their features in EasyEcs [#their-features-in-easyecs]
 

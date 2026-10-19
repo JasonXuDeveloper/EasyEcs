@@ -538,9 +538,19 @@ full example.
 
 ## Compared with other libraries [#compared]
 
-The same server tick, ported to each library (100,000 entities):
+Each comparison does the same work in each library its own idiomatic way, with identical results checked in setup.
+EasyEcs is faster in <FeatureCount k="ahead" /> of <FeatureCount k="total" /> and within the measurement error in
+<FeatureCount k="even" /> more; its biggest leads over the fastest other library:
+
+<LeadChart limit="6" />
+
+The same server tick, ported to each library (100,000 entities), is closer, since most of a tick is iteration bound
+by memory:
 
 <PeerChart />
+
+Every result, sorted by lead, with where another library is faster and why:
+[Comparison](/en/docs/comparison#feature-by-feature).
 
 | | EasyEcs | Friflo.Engine.ECS | Arch | DefaultEcs |
 | --- | --- | --- | --- | --- |

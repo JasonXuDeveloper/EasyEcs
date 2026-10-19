@@ -25,8 +25,6 @@ job；繁忙的 World 每个 tick 都不分配。本页给出一个真实 tick �
 | `MultiWorldBenchmark` | 四个各 25,000 实体的 World，各占一个线程 | <BenchValue k="tick.fourWorlds" /> | <BenchValue k="tick.fourWorlds.alloc" /> |
 | `BattleServerBenchmark` | [战斗服务器](/zh/docs/example)：所有功能一起上 | <BenchValue k="tick.battle" /> | <BenchValue k="tick.battle.alloc" /> |
 
-<PeerChart />
-
 </Tab>
 <Tab value="10,000 个实体">
 
@@ -34,16 +32,26 @@ job；繁忙的 World 每个 tick 都不分配。本页给出一个真实 tick �
 | --- | --- | --- | --- |
 | `WorldSimulationBenchmark` | 一个 World，10,000 个实体 | <BenchValue k="tick.oneWorld10k" /> | <BenchValue k="tick.oneWorld10k.alloc" /> |
 
-<PeerChart entities="10000" />
-
 </Tab>
 </Tabs>
 
 <BenchSource />
 
-`MultiWorldBenchmark` 的四个 World 就是服务器推荐的布局：每张地图或每个区一个 World，各由一个长期存在的线程持有。同类
-对比图把同一个 tick 移植到 Friflo.Engine.ECS、Arch 和 DefaultEcs 上跑；移植方式和其余结果见
-[对比](/zh/docs/comparison#the-same-server-tick)。
+`MultiWorldBenchmark` 的四个 World 就是服务器推荐的布局：每张地图或每个区一个 World，各由一个长期存在的线程持有。
+
+## 与其他库对比 [#against-other-libraries]
+
+把同样的工作移植到 Friflo.Engine.ECS、Arch 和 DefaultEcs，每个库用自己惯用的写法，并在 setup 中校验结果一致：
+<FeatureCount k="total" /> 项正面对比里，EasyEcs 在 <FeatureCount k="ahead" /> 项更快，另有 <FeatureCount k="even" />
+项差距在测量误差之内。下面是它领先最快的其他库最多的几项：
+
+<LeadChart limit="8" />
+
+完整服务器 tick 的差距小一些，因为一个 tick 的大部分时间是在紧凑的列上遍历，瓶颈更多在内存而不在库：
+
+<PeerChart />
+
+全部对比按领先幅度排序，其他库更快的项目和原因也在里面：[横向对比](/zh/docs/comparison#feature-by-feature)。
 
 ## 选择遍历 API [#choosing-an-iteration-api]
 

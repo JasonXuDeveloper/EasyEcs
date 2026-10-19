@@ -12,6 +12,8 @@ iterates chunks of a cached query and records structural changes in a command bu
 from `[ForEach]` methods, applies changes immediately, keeps removed components' rows with presence bits, and tracks
 changes and removals as data instead of events.
 
+In the <FeatureCount library="Friflo" k="total" /> head-to-head benchmarks both libraries take part in, EasyEcs is faster in
+<FeatureCount library="Friflo" k="ahead" />, within the measurement error in <FeatureCount library="Friflo" k="even" /> and slower in <FeatureCount library="Friflo" k="slower" />.
 On the same server tick of 100,000 entities, Friflo takes <BenchValue k="peers.friflo.ratio" /> the time of EasyEcs
 (<BenchValue k="peers.friflo10k.ratio" /> at 10,000), and neither allocates per tick. Friflo also runs in Unity and on
 older .NET (netstandard2.1, net6.0-8.0); EasyEcs needs .NET 10.
@@ -122,6 +124,11 @@ The counters live in a singleton that the generated job resolves once per pass. 
 once, a later system in the same update already skips the corpse.
 
 ## The numbers [#numbers]
+
+Every comparison both libraries take part in, sorted by lead (each row links to its section of
+[the comparison](/en/docs/comparison)):
+
+<FeatureComparison library="Friflo" />
 
 The headline tick:
 

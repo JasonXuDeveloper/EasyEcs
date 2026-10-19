@@ -28,8 +28,6 @@ happen.
 | `MultiWorldBenchmark` | four worlds of 25,000, one thread each | <BenchValue k="tick.fourWorlds" /> | <BenchValue k="tick.fourWorlds.alloc" /> |
 | `BattleServerBenchmark` | the [battle server](/en/docs/example): every feature at once | <BenchValue k="tick.battle" /> | <BenchValue k="tick.battle.alloc" /> |
 
-<PeerChart />
-
 </Tab>
 <Tab value="10,000 entities">
 
@@ -37,16 +35,30 @@ happen.
 | --- | --- | --- | --- |
 | `WorldSimulationBenchmark` | one world, 10,000 entities | <BenchValue k="tick.oneWorld10k" /> | <BenchValue k="tick.oneWorld10k.alloc" /> |
 
-<PeerChart entities="10000" />
-
 </Tab>
 </Tabs>
 
 <BenchSource />
 
 The four worlds of `MultiWorldBenchmark` are the layout recommended for a server: one world per map or zone, each
-owned by one long-lived thread. The peer chart runs the same tick ported to Friflo.Engine.ECS, Arch and DefaultEcs;
-[the comparison](/en/docs/comparison#the-same-server-tick) explains the ports and every other result.
+owned by one long-lived thread.
+
+## Against other libraries [#against-other-libraries]
+
+The same work ported to Friflo.Engine.ECS, Arch and DefaultEcs, each library its own idiomatic way, with identical
+results checked in setup: EasyEcs is faster in <FeatureCount k="ahead" /> of <FeatureCount k="total" /> head-to-head
+benchmarks and within the measurement error in <FeatureCount k="even" /> more. These are its biggest leads over the
+fastest other library:
+
+<LeadChart limit="8" />
+
+The full server tick is closer, because most of a tick is iteration over dense columns, bound by memory more than
+by the library:
+
+<PeerChart />
+
+Every comparison, sorted by lead, with the ones where another library is faster and why:
+[Comparison](/en/docs/comparison#feature-by-feature).
 
 ## Choosing an iteration API [#choosing-an-iteration-api]
 

@@ -225,11 +225,11 @@ EasyEcs 的结构变更立即生效，遍历途中也一样。一次遍历里每
 | DefaultEcs | 每种组件一个池 | .NET 与 Unity |
 | Unity Entities（DOTS） | 分块的原型 | 仅 Unity |
 
-在 10 万实体的同一个服务器 tick 上，Friflo.Engine.ECS 的耗时是 EasyEcs 的 <BenchValue k="peers.friflo.ratio" />，
-Arch 是 <BenchValue k="peers.arch.ratio" />，DefaultEcs 是 <BenchValue k="peers.defaultecs.ratio" />；每个 tick 不分配内存的
-只有 EasyEcs 和 Friflo。
-
-EasyEcs 和其他 .NET 库在同一个服务器 tick 上的实测对比、逐项功能对比，见[横向对比](/zh/docs/comparison)。
+与 Friflo.Engine.ECS、Arch、DefaultEcs 做的 <FeatureCount k="total" /> 项正面对比里，每个库用自己惯用的写法做同样的事，
+EasyEcs 在 <FeatureCount k="ahead" /> 项更快，<FeatureCount k="even" /> 项差距在测量误差之内。在 10 万实体的完整服务器 tick
+上，Friflo.Engine.ECS 的耗时是 EasyEcs 的 <BenchValue k="peers.friflo.ratio" />，Arch 是 <BenchValue k="peers.arch.ratio" />，
+DefaultEcs 是 <BenchValue k="peers.defaultecs.ratio" />；每个 tick 不分配内存的只有 EasyEcs 和 Friflo。全部结果按领先幅度
+排序，见[横向对比](/zh/docs/comparison#feature-by-feature)。
 
 ## EasyEcs 在此之上提供了什么？ [#easyecs]
 

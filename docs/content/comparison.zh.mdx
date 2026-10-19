@@ -1,18 +1,16 @@
 ---
 title: 与其他 ECS 库对比
 seoTitle: "C# ECS 框架对比：EasyEcs、Friflo、Arch 与 DefaultEcs"
-description: "哪个 C# ECS 框架更快？EasyEcs 对比 Friflo.Engine.ECS、Arch 和 DefaultEcs：功能矩阵、同一个服务器 tick 和全部跑分。"
+description: "哪个 C# ECS 框架更快？EasyEcs 对比 Friflo.Engine.ECS、Arch 和 DefaultEcs：逐项跑分按领先幅度排序，落后项也写明原因。"
 icon: Scale
 ---
 
-哪个 C# ECS 框架最快，要看具体负载。在同一个服务器 tick（9 个系统、10 万实体）上，EasyEcs 耗时
-<BenchValue k="peers.easyecs" />，Friflo.Engine.ECS 是它的 <BenchValue k="peers.friflo.ratio" />，Arch 是
-<BenchValue k="peers.arch.ratio" />，DefaultEcs 是 <BenchValue k="peers.defaultecs.ratio" />。EasyEcs 和 Friflo 每个 tick
-都不分配；Arch 和 DefaultEcs 每个 tick 分别分配 <BenchValue k="peers.arch.alloc" /> 和
-<BenchValue k="peers.defaultecs.alloc" />。Friflo 和 EasyEcs 很接近，不同轮次之间互有领先，下面也有几项单项跑分是 Friflo
-赢：本页全部列出。
+哪个 C# ECS 框架最快，要看具体负载。EasyEcs 和 Friflo.Engine.ECS、Arch、DefaultEcs 做了 <FeatureCount k="total" /> 项正面
+对比：<FeatureCount k="ahead" /> 项更快，<FeatureCount k="even" /> 项差距在测量误差之内，<FeatureCount k="slower" /> 项
+更慢。领先最多的是服务器成批做、或隔一阵才做一次的事（存档、批量变更、批量生成、按值查询、层级、索引、变更检测）；在紧凑
+的列上做普通遍历时差距很小，因为那里的瓶颈是内存，不是库。本页按领先幅度列出全部结果，落后的也在内，并写明原因。
 
-<BenchSource />
+<LeadChart />
 
 EasyEcs 和 .NET 上最常用的三个 ECS 库做了对比：[Friflo.Engine.ECS](https://github.com/friflo/Friflo.Engine.ECS)、
 [Arch](https://github.com/genaray/Arch) 和 [DefaultEcs](https://github.com/Doraku/DefaultEcs)，版本固定在
@@ -20,6 +18,32 @@ EasyEcs 和 .NET 上最常用的三个 ECS 库做了对比：[Friflo.Engine.ECS]
 里（图表标签上写着）。每项对比都按各库文档推荐的方式移植同样的工作，并在 setup 里先校验所有库算出的结果一致，然后才开始
 测量。本页是总览；逐个对照 API 的页面见 [Arch](/zh/docs/vs-arch)、[Friflo](/zh/docs/vs-friflo)、
 [DefaultEcs](/zh/docs/vs-defaultecs)。
+
+## 逐项对比 [#feature-by-feature]
+
+每一行是一项对比：测的是什么（链接到下文对应的小节）、EasyEcs 的耗时，以及最快的其他库的耗时是 EasyEcs 的几倍，2× 就是
+那个库要花两倍时间。某行里没有出现的库，要么核心包里没有这项功能，要么不在这项对比里：单项操作只和 Friflo 比，它在完整 tick 上最接近。各行按数据排序，领先最多的在前；标着“误差内”的比值，两者
+之差小于两行测量误差之和。
+
+### 明显领先 [#clear-leads]
+
+最快的其他库耗时至少是 EasyEcs 的 1.25 倍。
+
+<FeatureComparison tier="lead" />
+
+### 接近 [#close]
+
+EasyEcs 领先，但不到上面的幅度；完整服务器 tick 就在这里。
+
+<FeatureComparison tier="close" />
+
+### 其他库更快的地方 [#behind]
+
+每一项都附上原因，依据是基准测试的源码。
+
+<FeatureComparison tier="behind" />
+
+另外，EasyEcs 不支持 Unity 和 .NET 10 以前的运行时，另外三个库都支持。
 
 ## 功能 [#features]
 
@@ -84,6 +108,7 @@ public class DeathSystem : EcsSystem
 
 ## 同一个服务器 tick [#the-same-server-tick]
 
+一个完整的 tick 什么活都有，最能说明真实服务器拿到的是什么；它也比单项更接近，因为大部分时间花在遍历上，瓶颈是内存。
 `EcsComparisonBenchmark` 在每个库里单线程运行 EasyEcs 的主 World（30% 玩家、70% NPC，外加子弹；移动、视野、战斗、
 状态效果、死亡、复活、射击）。EasyEcs 一侧是原样编译的 `benchmarks/EasyEcs.Benchmark/WorldSimulation.cs`；其他库是
 `ArchSimulation.cs`、`FrifloSimulation.cs` 和 `DefaultEcsSimulation.cs`。setup 让每个 World 预热 200 个 tick，并校验其
@@ -104,7 +129,7 @@ public class DeathSystem : EcsSystem
 </Tabs>
 
 这个 tick 上 EasyEcs 和 Friflo 很接近（100,000 个实体时 Friflo 的耗时是 EasyEcs 的 <BenchValue k="peers.friflo.ratio" />，
-10,000 个时是 <BenchValue k="peers.friflo10k.ratio" />），两者每个 tick 都不分配。Arch 和 DefaultEcs 的耗时分别是
+10,000 个时是 <BenchValue k="peers.friflo10k.ratio" />；不同轮次之间互有领先），两者每个 tick 都不分配。Arch 和 DefaultEcs 的耗时分别是
 <BenchValue k="peers.arch.ratio" /> 和 <BenchValue k="peers.defaultecs.ratio" />，每个 tick 都有分配
 （<BenchValue k="peers.arch.alloc" /> 和 <BenchValue k="peers.defaultecs.alloc" />），主要来自命令缓冲和实体集合。EasyEcs
 在添加、移除、销毁的系统里占优（存在位，没有命令缓冲），在把实体传给 job 的系统里也占优。
@@ -167,9 +192,9 @@ public class DeathSystem : EcsSystem
 </Tab>
 </Tabs>
 
-**10 次移除时 Friflo 的事件胜出**（<BenchValue k="removed.friflo.10" /> 对 <BenchValue k="removed.10" />）：它在移除发生
-时就在回调里收集 id，读取时不再有额外开销。EasyEcs 把移除当作数据：遍历要加载每个有移除的字的摘要和行。1,000 次移除时
-两者打平（<BenchValue k="removed.friflo.1000" /> 对 <BenchValue k="removed.1000" />）。EasyEcs 换来的是：不用订阅，不用
+10 次移除时，Friflo 的事件（<BenchValue k="removed.friflo.10" />）领先 `[Removed<T>]`（<BenchValue k="removed.10" />）：
+它在移除发生时就在回调里收集 id，每次移除付一次；EasyEcs 的遍历通过按块的摘要找出移除，是一笔固定开销，10 次移除摊不薄。
+1,000 次移除时，EasyEcs 耗时 <BenchValue k="removed.1000" />，Friflo <BenchValue k="removed.friflo.1000" />。EasyEcs 换来的是：不用订阅，不用
 手动维护列表，之后运行的任何系统都能看到这次移除，而不只是那一个回调。
 
 ## 索引和关系 [#indexes-and-relations]
@@ -205,8 +230,8 @@ EasyEcs 用索引的 `EntityId`（`IIndexed<EntityId>`），Friflo 用链接组�
 
 <BenchChart bench="RelationComparison" title="改写 10,000 个好友列表里的 100 个，遍历 100 个关注者集合" />
 
-**这一项打平，Friflo 略快**（<BenchValue k="relation.friflo" /> 对 <BenchValue k="relation.easyecs" />）：两个库的结构
-一样，每个实体一个链接列表，再按目标建索引，差距在这次运行的误差之内。
+两个库的结构一样，每个实体一个链接列表，再按目标建索引，所以两者很接近（EasyEcs <BenchValue k="relation.easyecs" />，
+Friflo <BenchValue k="relation.friflo" />）。
 
 ## 层级 [#hierarchy]
 
@@ -235,7 +260,7 @@ EasyEcs 用 `Asleep` 标签（一个存在位）或 `Disable<Vigor>()`，后者�
 </Tab>
 </Tabs>
 
-切换 100 个时，Friflo 的 `Enabled` 和 EasyEcs 的 `Disable<T>()` 打平：求和占了大头。切换频繁时，在原型间搬实体比翻位贵。
+切换 100 个时，求和占了大头，Friflo 的 `Enabled` 和 EasyEcs 很接近。切换频繁时，在原型间搬实体比翻位贵，差距随之拉大。
 
 ## 结构变更 [#structural-changes]
 
@@ -280,8 +305,8 @@ DefaultEcs 用配 `DefaultParallelRunner` 的 `AEntitySetSystem`。
 
 <BenchChart bench="ParallelQueryComparison" title="用所有核心驱动 100,000 个代理" />
 
-**这一项 EasyEcs 没赢**：Friflo（<BenchValue k="parallelQuery.friflo" />）和 Arch 都领先 EasyEcs
-（<BenchValue k="parallelQuery.easyecs" />）。它们的调度器有自己的工作线程；EasyEcs 在调用线程加线程池帮手上运行，帮手只在
+**这一项 EasyEcs 没赢**：Arch 和 Friflo（<BenchValue k="parallelQuery.friflo" />）都领先 EasyEcs
+（<BenchValue k="parallelQuery.easyecs" />），差距在这次运行的误差之内。它们的调度器有自己的工作线程；EasyEcs 在调用线程加线程池帮手上运行，帮手只在
 划算时唤醒。像 BenchmarkDotNet 这样连续测量时，专用工作线程占优；而在服务器 tick 里，两遍之间隔着几毫秒，一组专用的
 自旋线程测出来尾延迟更差、每 tick 的 CPU 更多（[D22](/zh/docs/decisions)），所以 EasyEcs 保留线程池。
 
@@ -300,17 +325,6 @@ DefaultEcs 用配 `DefaultParallelRunner` 的 `AEntitySetSystem`。
 行带字段哈希、按原始字节复制），Friflo 写 JSON，DefaultEcs 用它的二进制序列化器读进一个新 World。Arch 的存档在单独的包里。
 
 <BenchChart bench="SaveComparison" title="保存并加载 10,000 个单位" />
-
-## EasyEcs 没赢的地方 [#where-easyecs-does-not-win]
-
-| 对比 | 结果 | 原因 |
-| --- | --- | --- |
-| [并行查询](#parallel) | Friflo 和 Arch 领先 | 连续运行时，专用工作线程胜过被唤醒的线程池线程；EasyEcs 为服务器 tick 选了线程池 |
-| [关系](#indexes-and-relations) | Friflo 略快，在误差之内 | 两个库设计相同 |
-| [10 次移除](#removal-detection) | Friflo 的事件领先 | 回调在移除发生时就收集 id；EasyEcs 从摘要里读 |
-| [两组件、三组件遍历，批量实体](#operations) | 和 Friflo 打平 | 两边都是紧凑数组；循环受内存带宽限制 |
-| [100,000 个里禁用 100 个](#disabling) | 和 Friflo 打平 | 大头是求和，不是切换 |
-| Unity 和老运行时 | 不支持 | EasyEcs 只面向 net10.0 |
 
 ## 它们的功能在 EasyEcs 里怎么做 [#their-features-in-easyecs]
 
