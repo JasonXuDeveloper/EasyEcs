@@ -12,10 +12,12 @@ import {
   metaSchema,
 } from 'fumadocs-mdx/config';
 import lastModified from 'fumadocs-mdx/plugins/last-modified';
+import rehypeMermaid from 'rehype-mermaid';
 import remarkCjkFriendly from 'remark-cjk-friendly';
 import remarkCjkFriendlyGfmStrikethrough from 'remark-cjk-friendly-gfm-strikethrough';
 import { z } from 'zod';
 import { legacyFrontmatter, remarkLegacyPage } from './src/lib/legacy';
+import { mermaidOptions, remarkMermaidSource } from './src/lib/mermaid';
 
 // "Last updated" dates come from `git log`, but only with the full history:
 // in a shallow clone the oldest commit looks like it added every file, so
@@ -95,10 +97,15 @@ export default defineConfig({
       // turn relative links into site or GitHub URLs.
       remarkLegacyPage,
       [remarkImage, { external: false, publicDir: 'public' }],
-      // ```mermaid fences -> <Mermaid chart="..." />
+      // ```mermaid fences -> <Mermaid chart="...">fence</Mermaid>: the
+      // attribute is the Markdown copy's source, rehype-mermaid below
+      // replaces the fence inside with the SVG.
       remarkMdxMermaid,
+      remarkMermaidSource,
       // Block-level feedback: a "Feedback" button on each paragraph
       remarkFeedbackBlock,
     ],
+    // Diagrams are drawn at build time, before rehype-code highlights fences.
+    rehypePlugins: (plugins) => [[rehypeMermaid, mermaidOptions], ...plugins],
   },
 });
