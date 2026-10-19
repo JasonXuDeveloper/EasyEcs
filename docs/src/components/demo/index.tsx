@@ -418,8 +418,7 @@ export function EcsDemo() {
         )}
       </div>
       <p className="border-t px-3 py-2 text-center text-sm text-fd-muted-foreground tabular-nums">
-        {t.motion}{' '}
-        {t.batched}{' '}
+        {t.motion} {t.batched}{' '}
         <span className="font-medium text-fd-foreground">
           {stats.batchMs.toFixed(3)} ms
         </span>
