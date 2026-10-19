@@ -332,10 +332,11 @@
       O(匹配的表数 + 行数)；缺少 <typeparamref name="T" /> 的实体搬一次行。只能在所有者线程调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.SingletonRef``1" source="bdda71572e90">
+  <member name="M:EasyEcs.World.SingletonRef``1" source="11613cc9d6b0">
     <summary>
-      单例 <typeparamref name="T" /> 的稳定句柄（不存在时先添加）：解析一次，之后直接读写
-      <see cref="P:EasyEcs.SingletonRef`1.Value" />，不用再查找。生成的 <c>[ForEach]</c> job 每次遍历通过它把单例参数解析一次。O(1)。
+      单例 <typeparamref name="T" /> 的稳定句柄，单例没添加时抛异常：解析一次，之后直接读写
+      <see cref="P:EasyEcs.SingletonRef`1.Value" />，不用再查找。生成的 <c>[ForEach]</c> job 每次遍历通过它把单例参数解析一次，
+      所以单例一直没设置的系统，第一次运行就会报错。O(1)。
     </summary>
   </member>
   <member name="M:EasyEcs.World.TryGetEntity(EasyEcs.EntityId,EasyEcs.Entity@)" source="03175b1283a8">

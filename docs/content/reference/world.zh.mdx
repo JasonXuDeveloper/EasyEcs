@@ -712,7 +712,7 @@ public int SetAll<T>(in T value, in QueryFilter filter = default) where T : stru
 public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent;
 ```
 
-单例 `T` 的稳定句柄（不存在时先添加）：解析一次，之后直接读写 [`SingletonRef.Value`](/zh/docs/reference/singletonref#value)，不用再查找。生成的 `[ForEach]` job 每次遍历通过它把单例参数解析一次。O(1)。
+单例 `T` 的稳定句柄，单例没添加时抛异常：解析一次，之后直接读写 [`SingletonRef.Value`](/zh/docs/reference/singletonref#value)，不用再查找。生成的 `[ForEach]` job 每次遍历通过它把单例参数解析一次，所以单例一直没设置的系统，第一次运行就会报错。O(1)。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
 
