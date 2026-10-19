@@ -16,14 +16,16 @@ unload and a new version can load the saved data.
 
 <Callout type="idea" title="Use it for">
   Zone or map changes between worlds of one process (`MoveEntities`), handing a player to another server or storing
-  an offline player (`SaveEntities` / `LoadEntities`), hot reload of game logic in a server that must not restart
-  (`RemoveTypes`).
+  an offline player (`SaveEntities` / `LoadEntities`), persisting part of an entity, such as an actor's balance
+  without its connection, and loading it onto the entity it already has (a [record](#records): a `ComponentSet` and
+  `LoadEntitiesInto`), hot reload of game logic in a server that must not restart (`RemoveTypes`).
 </Callout>
 
 <Callout type="warn" title="Skip it for">
   Moving a whole world: [`Save` / `Load`](/en/docs/guide/saves) keeps every id. Entities that change "zone" inside one
   world: a [group](/en/docs/guide/groups) or a component value is enough. Reloading types that are not in a collectible
-  context: the default context never unloads.
+  context: the default context never unloads. A record of every component of an entity that does not exist yet:
+  `SaveEntities` without a set and `LoadEntities` create it.
 </Callout>
 
 ## How to use it [#how-to-use-it]
@@ -81,6 +83,11 @@ An actor's entity holds runtime state next to what persists: a connection, timer
 must survive a restart. A `ComponentSet` names the components of the record, `SaveEntities(output, ids, set)` writes
 those only (the others need no Nino formatter), and `LoadEntitiesInto(bytes, entities)` puts them onto entities that
 exist already, such as the one the actor got when it was activated, before its record came back from the database.
+
+Use a record when only part of an entity outlives the process (the rest is rebuilt by the code that activates it), or
+when the entity is created before its data arrives. Build the set once, in a `static readonly` field, from the
+components that persist; save into a reused `NinoArrayBufferWriter` and store the written bytes wherever the data
+lives (a database row, a file, a message to another server).
 
 ```csharp
 public record struct Bank(long Gold) : IComponent;
@@ -180,6 +187,7 @@ and checks that the old context was collected and that the plugin's data carried
 | A new buffer per migration | One `NinoArrayBufferWriter`, `ResetWrittenCount()` each time | No allocation once it is large enough |
 | Many small migrations of one entity | One migration of the whole group | A save's fixed cost (the types by id) is paid once |
 | `SaveEntities` of whole entities when only some components persist | A `ComponentSet` | The runtime components are not written, and need no formatter |
+| A `ComponentSet` built for every save | One `static readonly` set | Each `With` copies the set |
 | A reload that rebuilds the world | `RemoveTypes`, then `Load` | The host's entities and components stay where they are |
 
 10 players with 99 items each, moved to another world and back through bytes and in memory, and one entity of four
@@ -211,6 +219,9 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
 | `RemoveTypes` during an update or a pass | `InvalidOperationException` | At run time |
 | Restoring a snapshot taken before `RemoveTypes` | `InvalidOperationException` | At run time |
 | Migrating from another thread | Both worlds belong to their owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |
+| A component that persists left out of the record's set | Not saved: the loaded entity keeps its own value, or has none | Build the set from the persisting components, in one place |
+| A record loaded with `LoadEntities` | New entities beside the live ones | `LoadEntitiesInto` with the live entities |
+| `LoadEntitiesInto` with another number of entities than the save holds, or a stale one | `ArgumentException`; nothing changes | One live entity per saved entity, in save order |
 
 ## Related [#related]
 

@@ -14,12 +14,14 @@ icon: ArrowRightLeft
 
 <Callout type="idea" title="适合">
   同一进程内 World 之间切换区域或地图（`MoveEntities`），把玩家交给另一台服务器、或保存离线玩家（`SaveEntities` / `LoadEntities`），
-  不能重启的服务器热重载游戏逻辑（`RemoveTypes`）。
+  只持久化实体的一部分（比如 Actor 的余额，不带它的连接）、再读回到它已有的实体上（[记录](#records)：`ComponentSet` 加
+  `LoadEntitiesInto`），不能重启的服务器热重载游戏逻辑（`RemoveTypes`）。
 </Callout>
 
 <Callout type="warn" title="不适合">
   迁移整个 World：[`Save` / `Load`](/zh/docs/guide/saves) 能保留所有 id。同一个 World 里换“区域”：[分组](/zh/docs/guide/groups)或
-  一个组件值就够了。重载不在可回收上下文里的类型：默认上下文永远不会卸载。
+  一个组件值就够了。重载不在可回收上下文里的类型：默认上下文永远不会卸载。实体还不存在、要存的是它的全部组件：不带集合的
+  `SaveEntities` 加 `LoadEntities` 会把它创建出来。
 </Callout>
 
 ## 怎么用 [#how-to-use-it]
@@ -74,6 +76,10 @@ int count = world.MoveEntities(nextZone, group.ToArray(), moved);   // 英雄、
 Actor 的实体上，运行时状态和需要持久化的数据放在一起：连接、计时器、缓存，以及重启后必须还在的银行余额。`ComponentSet` 列出记录里
 的组件，`SaveEntities(output, ids, set)` 只写这些（其余组件不需要 Nino 格式化器），`LoadEntitiesInto(bytes, entities)` 把它们放到
 已经存在的实体上，比如 Actor 激活时就有了、记录还没从数据库取回来的那个实体。
+
+只有实体的一部分需要撑过进程重启（其余部分由激活它的代码重建），或者实体比数据先创建出来，就用记录。集合只建一次，放在
+`static readonly` 字段里，列出需要持久化的组件；存进一个复用的 `NinoArrayBufferWriter`，写出的字节放到数据该在的地方（数据库的一行、
+文件、发给另一台服务器的消息）。
 
 ```csharp
 public record struct Bank(long Gold) : IComponent;
@@ -164,6 +170,7 @@ public static class Plugins
 | 每次迁移新建缓冲区 | 复用一个 `NinoArrayBufferWriter`，每次 `ResetWrittenCount()` | 足够大之后不分配 |
 | 一个实体一个实体地迁移 | 整组一次迁移 | 存档的固定开销（按 id 写类型）只付一次 |
 | 只有部分组件需要持久化，却用 `SaveEntities` 存整个实体 | 用 `ComponentSet` | 运行时组件不写入，也不需要格式化器 |
+| 每次存档都新建 `ComponentSet` | 一个 `static readonly` 集合 | 每次 `With` 都会复制集合 |
 | 重载时重建整个 World | 先 `RemoveTypes`，再 `Load` | 宿主的实体和组件原地不动 |
 
 10 个玩家各带 99 件物品，通过字节和在内存中迁到另一个 World 再迁回来，以及一个带四个组件的实体通过字节迁移，再加上只存其中两个组件的记录、读回到带着另外两个组件的实体上
@@ -193,6 +200,9 @@ public static class Plugins
 | 在更新或遍历期间调用 `RemoveTypes` | 抛 `InvalidOperationException` | 运行时 |
 | 恢复 `RemoveTypes` 之前拍的快照 | 抛 `InvalidOperationException` | 运行时 |
 | 在其他线程迁移 | 两个 World 都只属于各自的所有者线程 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+| 需要持久化的组件没放进记录的集合 | 不会存档：读回后实体保留自己原来的值，或者根本没有这个组件 | 在一个地方、按需要持久化的组件建集合 |
+| 用 `LoadEntities` 读记录 | 在已有实体之外又建了新实体 | 对已有实体用 `LoadEntitiesInto` |
+| `LoadEntitiesInto` 传入的实体数和存档不一致，或者有失效的实体 | `ArgumentException`；什么都不改 | 按存档顺序，每个存档实体对应一个存活实体 |
 
 ## 相关页面 [#related]
 
