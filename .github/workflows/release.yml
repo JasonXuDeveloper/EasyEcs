@@ -2,7 +2,7 @@ name: Release
 
 # Run manually: Actions -> Release -> Run workflow (on master), enter the version (e.g. 4.0.0 or 4.1.0-preview.1).
 #   tag:     bump <Version> in Directory.Build.props, build and test it, commit
-#            "Bump to vX.Y.Z", tag vX.Y.Z, push.
+#            "Bump to vX.Y.Z", tag vX.Y.Z, merge what reached master meanwhile, push.
 #   publish: from the tag, pack EasyEcs and EasyEcs.Templates and push them to NuGet (Trusted Publishing: a short-lived
 #            key from this workflow's OIDC token, no stored secret), then create the GitHub release: install line, the
 #            version's changelog section, every commit since the previous tag (.github/scripts/release-notes.sh), then
@@ -69,6 +69,10 @@ jobs:
             git commit -m "Bump to v$VERSION" -- Directory.Build.props
           fi
           git tag "v$VERSION"
+          # The tag stays on the commit that was built and tested; commits pushed to master while this job ran are
+          # merged in after it (a merge commit, or a fast-forward when none came), so the push is never rejected.
+          git fetch origin master
+          git merge --no-edit origin/master
           git push origin HEAD:master "v$VERSION"
 
   publish:
