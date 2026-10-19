@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
+import { type Bar, Bars } from '@/components/bars';
+import { Count } from '@/components/count';
 import {
   type BenchNumber,
   bench,
@@ -905,60 +907,6 @@ function GitHubIcon() {
   );
 }
 
-interface Bar {
-  name: string;
-  ns: number;
-  ours?: boolean;
-}
-
-/**
- * Horizontal bars on a linear scale, the longest time full width: EasyEcs in
- * the accent, the others in grey. The name and the time are text, so a
- * screen reader reads "EasyEcs 146 μs, DefaultEcs 4.33 ms"; the bars are
- * decoration.
- */
-function Bars({ rows }: { rows: Bar[] }) {
-  const max = Math.max(...rows.map((r) => r.ns));
-  return (
-    <ul className="flex flex-col gap-1.5">
-      {rows.map((r) => (
-        <li
-          key={r.name}
-          className="grid grid-cols-[5.5rem_minmax(0,1fr)_4.5rem] items-center gap-3 text-xs"
-        >
-          <span
-            className={cn(
-              'truncate',
-              r.ours ? 'font-medium' : 'text-fd-muted-foreground',
-            )}
-          >
-            {r.name}
-          </span>
-          <span className="relative h-1.5" aria-hidden="true">
-            <span
-              className="absolute inset-y-0 left-0 min-w-1 rounded-full"
-              style={{
-                width: `${(r.ns / max) * 100}%`,
-                background: r.ours
-                  ? 'var(--ecs-chart-ours)'
-                  : 'var(--ecs-chart-other)',
-              }}
-            />
-          </span>
-          <span
-            className={cn(
-              'text-right tabular-nums',
-              r.ours ? 'font-medium' : 'text-fd-muted-foreground',
-            )}
-          >
-            {formatTime(r.ns)}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 /** EasyEcs against the library a comparison is measured against */
 const leadBars = (l: FeatureResult): Bar[] => [
   { name: 'EasyEcs', ns: l.ours.meanNs, ours: true },
@@ -980,9 +928,9 @@ function LeadRow({
       <div className="flex items-start justify-between gap-4">
         <h3 className="text-sm font-medium">{lead.label[lang]}</h3>
         <p className="flex shrink-0 items-baseline gap-1.5 leading-none">
-          <span className="text-2xl font-semibold tracking-tight tabular-nums">
+          <Count className="text-2xl font-semibold tracking-tight" spin>
             {formatRatio(lead.ratio)}
-          </span>
+          </Count>
           <span className="text-xs text-fd-muted-foreground">{faster}</span>
         </p>
       </div>
@@ -1108,8 +1056,14 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
                   <p className="text-sm text-fd-muted-foreground">
                     {t.statLabel(libraryName(topLead.versus.library))}
                   </p>
-                  <p className="ecs-gradient-text mt-2 w-fit pb-2 text-[5.5rem] leading-none font-extrabold tracking-tighter tabular-nums sm:text-9xl">
-                    {formatRatio(topLead.ratio)}
+                  <p className="mt-2 text-[5.5rem] leading-none font-extrabold tracking-tighter sm:text-9xl">
+                    <Count
+                      className="ecs-gradient-text pb-2"
+                      duration={1800}
+                      spin
+                    >
+                      {formatRatio(topLead.ratio)}
+                    </Count>
                   </p>
                 </div>
                 <div className="flex flex-col gap-4 lg:pb-4">
@@ -1191,8 +1145,10 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
                   <dt className="text-xs text-fd-muted-foreground sm:text-sm">
                     {n.label}
                   </dt>
-                  <dd className="mt-2 text-2xl font-semibold tracking-tight tabular-nums sm:text-3xl">
-                    {n.value}
+                  <dd className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
+                    <Count duration={1200} spin>
+                      {n.value}
+                    </Count>
                   </dd>
                   <dd className="mt-1 text-xs text-fd-muted-foreground">
                     {n.note}
@@ -1231,9 +1187,13 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
               <div key={item.title} className="flex flex-col border-t pt-5">
                 <dt className="mt-5 text-sm font-medium">{item.title}</dt>
                 <dd className="order-first">
-                  <span className="text-3xl font-semibold tracking-tight tabular-nums">
+                  <Count
+                    className="text-3xl font-semibold tracking-tight"
+                    duration={1200}
+                    spin
+                  >
                     {item.metric}
-                  </span>
+                  </Count>
                   <span className="mt-1 block text-xs text-fd-muted-foreground">
                     {item.note}
                   </span>

@@ -14,6 +14,7 @@
  * Every value comes from src/data/bench.json; MDX never types a number.
  */
 import { useI18n } from 'fumadocs-ui/contexts/i18n';
+import { Count } from '@/components/count';
 import {
   benchValue,
   type ComparisonQuery,
@@ -33,8 +34,9 @@ import {
 import type { Locale } from '@/lib/i18n';
 import { siteUrl } from '@/lib/site';
 
+/** One named number; it counts up the first time it comes into view */
 export function BenchValue({ k }: { k: string }) {
-  return <span className="tabular-nums">{benchValue(k)}</span>;
+  return <Count duration={700}>{benchValue(k)}</Count>;
 }
 
 function useZh(lang?: Locale) {
@@ -359,5 +361,5 @@ export function FeatureCount({
   k: CountKey;
   library?: string;
 }) {
-  return <span className="tabular-nums">{featureCounts(library)[k]}</span>;
+  return <Count duration={700}>{featureCounts(library)[k]}</Count>;
 }

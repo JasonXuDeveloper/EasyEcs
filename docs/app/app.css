@@ -9,9 +9,11 @@
  * - muted text a step darker in light mode, so small grey text passes WCAG AA
  *   on the page and on cards (Fumadocs' default is 4.3:1);
  * - the focus ring in the accent, so keyboard focus is visible (3:1 or more).
- * The one decoration is the home page's family look (below): a gradient from
- * the accent to teal on the headline and the lead figure, and a faint glow
- * of the accent behind the hero. No decorative animation.
+ * The one decoration is the family look (below): a gradient from the accent
+ * to teal on the headline and the stat figures, and a faint glow of the
+ * accent behind the hero. The only motion is the number moments: figures
+ * count up and bars grow in once, when they first come into view
+ * (src/lib/motion.ts), on transforms and opacity, never with reduced motion.
  */
 @theme {
   --color-fd-primary: hsl(221 70% 45%);
@@ -48,14 +50,33 @@
   --ecs-chart-other: hsl(0 0% 45%);
 }
 
+:root {
+  /* The ease of every count and growth: quick out of the gate, a long settle */
+  --ecs-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  /* The pop of a badge: a touch past its size, then back */
+  --ecs-ease-pop: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* A chart's bars grow from the axis row by row (delays in bar-chart.tsx), the
+   value riding on the tip of its bar; the badge pops in once its bar is out */
 .ecs-chart-bar {
   transform-box: fill-box;
   transform-origin: left center;
-  transition: transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1);
+  transition: transform 1.1s var(--ecs-ease-out);
 }
 
 .ecs-chart-value {
-  transition: opacity 0.4s ease;
+  transition:
+    transform 1.1s var(--ecs-ease-out),
+    opacity 0.5s ease;
+}
+
+.ecs-chart-badge {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    transform 0.45s var(--ecs-ease-pop),
+    opacity 0.25s ease;
 }
 
 .ecs-chart[data-hidden] .ecs-chart-bar {
@@ -63,7 +84,23 @@
 }
 
 .ecs-chart[data-hidden] .ecs-chart-value {
+  transform: translateX(var(--ecs-tip, 0));
   opacity: 0;
+}
+
+.ecs-chart[data-hidden] .ecs-chart-badge {
+  transform: scale(0.6);
+  opacity: 0;
+}
+
+/* The bars of the home page's lead cards (HTML, not SVG): the same growth */
+.ecs-bars-bar {
+  transform-origin: left center;
+  transition: transform 1.1s var(--ecs-ease-out);
+}
+
+[data-hidden] .ecs-bars-bar {
+  transform: scaleX(0);
 }
 
 .ecs-chart-row {
@@ -120,12 +157,137 @@
   );
 }
 
+/*
+ * While a gradient figure counts, its digits move on layers of their own,
+ * which background-clip: text does not reach: the digits are drawn black
+ * (white in dark mode) and the same gradient over them keeps only its colour
+ * there (lighten / darken against the page), so the figure looks the same
+ * moving and at rest.
+ */
+.ecs-gradient-text[data-count="playing"] {
+  background: none;
+  color: #000;
+}
+
+.ecs-gradient-text[data-count="playing"]::after {
+  content: "";
+  position: absolute;
+  /* Where the digits roll (.ecs-count-roll): the gradient lines up with the
+     one at rest */
+  inset: 0 0 -0.1em;
+  pointer-events: none;
+  background-image: linear-gradient(
+    to right in oklab,
+    var(--ecs-grad-from) 20%,
+    var(--ecs-grad-to)
+  );
+  mix-blend-mode: lighten;
+}
+
+.dark .ecs-gradient-text[data-count="playing"] {
+  color: #fff;
+}
+
+.dark .ecs-gradient-text[data-count="playing"]::after {
+  mix-blend-mode: darken;
+}
+
 /* High-contrast modes drop background images: keep the text in the system colour */
 @media (forced-colors: active) {
-  .ecs-gradient-text {
+  .ecs-gradient-text,
+  .ecs-gradient-text[data-count="playing"] {
     background: none;
     color: CanvasText;
   }
+
+  .ecs-gradient-text[data-count="playing"]::after {
+    content: none;
+  }
+}
+
+/*
+ * A figure that counts up (src/lib/motion.ts). Below the fold its digits stay
+ * hidden (their width kept) until it comes into view; while it counts, its
+ * text keeps its place, transparent, under the rolling digits (an overlay out
+ * of the flow, clipped to the figure: nothing around it moves or spills).
+ * Printing shows every figure.
+ */
+.ecs-count {
+  display: inline-block;
+  position: relative;
+}
+
+.ecs-count[data-count="armed"],
+.ecs-count[data-count="playing"] > .ecs-count-text {
+  opacity: 0;
+}
+
+/* The rolling digits: out of the flow over the figure's own box (and room for
+   the descenders), clipped to it */
+.ecs-count-roll {
+  position: absolute;
+  inset: 0 0 -0.1em;
+  overflow: hidden;
+}
+
+/* The figure's own line height and no fade band above and below the digits
+   (it pads the line and drops the digits lower than the text they cover):
+   the clip of .ecs-count-roll is the window instead */
+.ecs-count-roll > number-flow {
+  line-height: inherit;
+  --number-flow-mask-height: 0px;
+}
+
+@media print {
+  .ecs-count[data-count] {
+    opacity: 1;
+  }
+}
+
+/* The custom properties number-flow animates. Registered here, with the page,
+   instead of by the library when it loads (patches/number-flow): a
+   registration later restyles the whole document, a long task on a big page. */
+@property --_number-flow-d-opacity {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+@property --_number-flow-dx {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --_number-flow-d-width {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+@property --_number-flow-d {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+/* A stat block (src/components/stats.tsx) lifts a little under the pointer */
+.ecs-stat {
+  transition:
+    transform 0.3s var(--ecs-ease-out),
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+.ecs-stat:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(
+    in oklab,
+    var(--color-fd-primary) 35%,
+    var(--color-fd-border)
+  );
+  box-shadow: 0 14px 32px -18px
+    color-mix(in oklab, var(--color-fd-primary) 45%, transparent);
 }
 
 /* Code on the home page: Shiki's dual themes, switched by the dark class */
@@ -148,7 +310,10 @@
   ::after,
   .ecs-chart-bar,
   .ecs-chart-value,
-  .ecs-chart-row {
+  .ecs-chart-badge,
+  .ecs-chart-row,
+  .ecs-bars-bar,
+  .ecs-stat {
     animation-duration: 0.01ms;
     animation-iteration-count: 1;
     transition-duration: 0.01ms;

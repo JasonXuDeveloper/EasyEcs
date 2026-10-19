@@ -36,6 +36,7 @@
     "fumadocs-ui": "16.17.3",
     "lucide-react": "1.57.0",
     "mermaid": "12.1.0",
+    "number-flow": "0.6.2",
     "octokit": "5.0.5",
     "playwright": "1.56.1",
     "react": "19.3.1",
@@ -72,6 +73,7 @@
   },
   "patchedDependencies": {
     "@react-router/dev@7.18.4": "patches/@react-router%2Fdev@7.18.4.patch",
-    "next-themes@0.4.6": "patches/next-themes@0.4.6.patch"
+    "next-themes@0.4.6": "patches/next-themes@0.4.6.patch",
+    "number-flow@0.6.2": "patches/number-flow@0.6.2.patch"
   }
 }

@@ -9,7 +9,9 @@
  * - Colours are CSS variables (app.css), so light and dark mode need no JS.
  * - Every row is focusable and has a tooltip; a data table sits under the
  *   chart in <details> for screen readers and copy-paste.
- * - Bars grow in when scrolled into view, except with prefers-reduced-motion.
+ * - Bars grow in when scrolled into view, row after row, the value riding on
+ *   the tip of its bar, then the badge pops in (app.css); not with
+ *   prefers-reduced-motion.
  * - Labels wrap to the chart's width; `scale="log"` draws values that span
  *   orders of magnitude.
  */
@@ -19,6 +21,7 @@ import { Group } from '@visx/group';
 import { scaleLinear, scaleLog } from '@visx/scale';
 import { BarRounded } from '@visx/shape';
 import {
+  type CSSProperties,
   memo,
   type ReactNode,
   type RefObject,
@@ -26,8 +29,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import { reveal } from '@/components/showcase';
 import { cn } from '@/lib/cn';
+import { revealAttribute } from '@/lib/motion';
 import { surface } from '@/lib/ui';
 
 export interface ChartSeries {
@@ -162,6 +165,9 @@ const badgeTone = {
   loss: { fill: 'var(--color-fd-muted)', text: 'var(--color-fd-foreground)' },
 };
 
+/** Rows start one after another; past the twelfth they start together */
+const rowDelay = (index: number) => Math.min(index, 12) * 55;
+
 const defaultTickFormat = (value: number) => String(value);
 
 interface Active {
@@ -212,12 +218,10 @@ const Plot = memo(function Plot({
 }: PlotProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   // Bars grow in when scrolled into view: an attribute, not React state
-  useEffect(() => {
-    const svg = svgRef.current;
-    return svg
-      ? reveal(svg, (shown) => svg.toggleAttribute('data-hidden', !shown))
-      : undefined;
-  }, []);
+  useEffect(
+    () => (svgRef.current ? revealAttribute(svgRef.current) : undefined),
+    [],
+  );
 
   const valueGutter =
     Math.max(
@@ -395,22 +399,28 @@ const Plot = memo(function Plot({
                       : `translate(${width - badgeWidth}, 0)`
                   }
                 >
-                  <rect
-                    width={badgeWidth}
-                    height={BADGE_H}
-                    rx={BADGE_H / 2}
-                    fill={tone.fill}
-                  />
-                  <text
-                    x={badgeWidth / 2}
-                    y={12.5}
-                    fontSize={11}
-                    fontWeight={500}
-                    textAnchor="middle"
-                    fill={tone.text}
+                  {/* The pop scales this inner group; the outer one keeps its translate */}
+                  <g
+                    className="ecs-chart-badge"
+                    style={{ transitionDelay: `${rowDelay(index) + 420}ms` }}
                   >
-                    {row.badge.text}
-                  </text>
+                    <rect
+                      width={badgeWidth}
+                      height={BADGE_H}
+                      rx={BADGE_H / 2}
+                      fill={tone.fill}
+                    />
+                    <text
+                      x={badgeWidth / 2}
+                      y={12.5}
+                      fontSize={11}
+                      fontWeight={500}
+                      textAnchor="middle"
+                      fill={tone.text}
+                    >
+                      {row.badge.text}
+                    </text>
+                  </g>
                 </g>
               )}
               {plotted.map((s, i) => {
@@ -423,7 +433,7 @@ const Plot = memo(function Plot({
                       )
                     : 0;
                 const barY = header + 6 + i * (BAR + BAR_GAP);
-                const delay = `${index * 60 + i * 90}ms`;
+                const delay = `${rowDelay(index) + i * 80}ms`;
                 return (
                   <g key={s.key}>
                     {barWidth > 0 && (
@@ -441,10 +451,14 @@ const Plot = memo(function Plot({
                     )}
                     <text
                       className="ecs-chart-value"
-                      style={{
-                        transitionDelay: delay,
-                        fontVariantNumeric: 'tabular-nums',
-                      }}
+                      style={
+                        {
+                          transitionDelay: delay,
+                          fontVariantNumeric: 'tabular-nums',
+                          // Starts at the bar's root and rides out on its tip
+                          '--ecs-tip': `${-barWidth}px`,
+                        } as CSSProperties
+                      }
                       x={barWidth + 6}
                       y={barY + BAR / 2}
                       dy="0.35em"

@@ -1,0 +1,40 @@
+diff --git a/dist/ssr-DvIINv8w.mjs b/dist/ssr-DvIINv8w.mjs
+index 7aa7b3a339d2f8feda94f74aea852bab75181326..411d0e90990b7151d401c704368148609effd0ee 100644
+--- a/dist/ssr-DvIINv8w.mjs
++++ b/dist/ssr-DvIINv8w.mjs
+@@ -7,31 +7,10 @@ const h = String.raw, m = String.raw, v = o && (() => {
+   }
+   return !0;
+ })(), k = o && typeof CSS < "u" && CSS.supports && CSS.supports("line-height", "mod(1,1)"), S = o && typeof matchMedia < "u" ? matchMedia("(prefers-reduced-motion: reduce)") : null, d = "--_number-flow-d-opacity", g = "--_number-flow-d-width", c = "--_number-flow-dx", u = "--_number-flow-d", _ = (() => {
+-  try {
+-    return CSS.registerProperty({
+-      name: d,
+-      syntax: "<number>",
+-      inherits: !1,
+-      initialValue: "0"
+-    }), CSS.registerProperty({
+-      name: c,
+-      syntax: "<length>",
+-      inherits: !0,
+-      initialValue: "0px"
+-    }), CSS.registerProperty({
+-      name: g,
+-      syntax: "<number>",
+-      inherits: !1,
+-      initialValue: "0"
+-    }), CSS.registerProperty({
+-      name: u,
+-      syntax: "<number>",
+-      inherits: !0,
+-      initialValue: "0"
+-    }), !0;
+-  } catch {
+-    return !1;
+-  }
++  // Patched: the four properties are @property rules in the site's own
++  // stylesheet (docs/app/app.css), read with the page; registering them here
++  // restyles the whole document once, a long task on a big page.
++  return typeof CSS < "u" && "registerProperty" in CSS;
+ })(), s = "round(nearest, calc(var(--number-flow-mask-height, 0.25em) / 2), 1px)", t = `calc(${s} * 2)`, p = "var(--number-flow-mask-width, 0.5em)", n = `calc(${p} / var(--scale-x))`, r = "#000 0, transparent 71%", x = m`:host{display:inline-block;direction:ltr;white-space:nowrap;isolation:isolate;line-height:1}.number,.number__inner{display:inline-block;transform-origin:left top}:host([data-will-change]) :is(.number,.number__inner,.section,.digit,.digit__num,.symbol){will-change:transform}.number{--scale-x:calc(1 + var(${g}) / var(--width));transform:translateX(var(${c})) scaleX(var(--scale-x));margin:0 calc(-1 * ${p});position:relative;-webkit-mask-image:linear-gradient(to right,transparent 0,#000 ${n},#000 calc(100% - ${n}),transparent ),linear-gradient(to bottom,transparent 0,#000 ${t},#000 calc(100% - ${t}),transparent 100% ),radial-gradient(at bottom right,${r}),radial-gradient(at bottom left,${r}),radial-gradient(at top left,${r}),radial-gradient(at top right,${r});-webkit-mask-size:100% calc(100% - ${t} * 2),calc(100% - ${n} * 2) 100%,${n} ${t},${n} ${t},${n} ${t},${n} ${t};-webkit-mask-position:center,center,top left,top right,bottom right,bottom left;-webkit-mask-repeat:no-repeat}.number__inner{padding:${s} ${p};transform:scaleX(calc(1 / var(--scale-x))) translateX(calc(-1 * var(${c})))}:host > :not(.number){z-index:5}.section,.symbol{display:inline-block;position:relative;isolation:isolate}.section::after{content:'\200b';display:inline-block}.section--justify-left{transform-origin:center left}.section--justify-right{transform-origin:center right}.section > [inert],.symbol > [inert]{margin:0 !important;position:absolute !important;z-index:-1}.digit{display:inline-block;position:relative;--c:var(--current) + var(${u})}.digit__num,.number .section::after{padding:${s} 0}.digit__num{display:inline-block;--offset-raw:mod(var(--length) + var(--n) - mod(var(--c),var(--length)),var(--length));--offset:calc( var(--offset-raw) - var(--length) * round(down,var(--offset-raw) / (var(--length) / 2),1) );--y:clamp(-100%,var(--offset) * 100%,100%);transform:translateY(var(--y))}.digit__num[inert]{position:absolute;top:0;left:50%;transform:translateX(-50%) translateY(var(--y))}.digit:not(.is-spinning) .digit__num[inert]{display:none}.symbol__value{display:inline-block;mix-blend-mode:plus-lighter;white-space:pre}.section--justify-left .symbol > [inert]{left:0}.section--justify-right .symbol > [inert]{right:0}.animate-presence{opacity:calc(1 + var(${d}))}`, M = o && typeof HTMLElement < "u" ? HTMLElement : class {
+ }, y = m`:host{display:inline-block;direction:ltr;white-space:nowrap;line-height:1}span{display:inline-block}:host([data-will-change]) span{will-change:transform}.number,.digit{padding:${s} 0}.symbol{white-space:pre}`, b = (e) => `<span class="${e.type === "integer" || e.type === "fraction" ? "digit" : "symbol"}" part="${e.type === "integer" || e.type === "fraction" ? `digit ${e.type}-digit` : `symbol ${e.type}`}">${e.value}</span>`, i = (e, a) => `<span part="${a}">${e.reduce((l, f) => l + b(f), "")}</span>`, $ = (e = "") => m`:where(number-flow${e}){line-height:1}number-flow${e} > span{font-kerning:none;display:inline-block;padding:${t} 0}`, V = (e, { nonce: a, elementSuffix: l } = {}) => (
+   // shadowroot="open" non-standard attribute for old Chrome:

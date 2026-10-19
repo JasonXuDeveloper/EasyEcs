@@ -21,6 +21,7 @@ import { EcsDemo } from '@/components/demo';
 import { handleBlockFeedback } from '@/components/feedback/actions';
 import { FeedbackBlock } from '@/components/feedback/client';
 import { Mermaid } from '@/components/mermaid';
+import { Stat, Stats } from '@/components/stats';
 
 export function getMDXComponents(components?: MDXComponents): MDXComponents {
   return {
@@ -45,6 +46,8 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     LeadChart,
     Mermaid,
     PeerChart,
+    Stat,
+    Stats,
     Step,
     Steps,
     Tab,

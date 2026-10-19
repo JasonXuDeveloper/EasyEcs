@@ -7,6 +7,7 @@
 import { asMarkdown, md, renderToMarkdown } from 'fumadocs-core/server';
 import type { ComponentProps, ReactNode } from 'react';
 import { benchTable, featureTable } from '@/components/bench-data';
+import { type StatProps, statData } from '@/components/stats';
 import {
   benchValue,
   formatBytes,
@@ -128,6 +129,24 @@ function markdownComponents(lang: Locale, pageUrl: string) {
           .trim()
           .replace(/\s*\n\s*/g, ' ');
         return text ? md`- ${name}: ${text}\n` : md`- ${name}\n`;
+      })();
+    },
+    // A stat block is a list item: "- One server tick: **1.68 ms**, 100,000 entities"
+    Stats({ children }: Children) {
+      asMarkdown();
+      return md`\n${children}\n\n`;
+    },
+    Stat(props: StatProps) {
+      asMarkdown();
+      const data = statData(props, lang);
+      const figure = data.unit ? `${data.value} ${data.unit}` : data.value;
+      return (async () => {
+        const note = data.note
+          ? (await md`${data.note}`).trim().replace(/\s*\n\s*/g, ' ')
+          : '';
+        const head = data.label ? `${data.label}${zh ? '：' : ': '}` : '';
+        const tail = note ? `${zh ? '，' : ', '}${note}` : '';
+        return `- ${head}**${figure}**${tail}\n`;
       })();
     },
     Steps({ children }: Children) {
