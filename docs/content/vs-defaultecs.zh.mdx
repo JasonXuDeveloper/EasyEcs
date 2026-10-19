@@ -37,6 +37,7 @@ netstandard1.1-2.1 和 Unity，EasyEcs 只支持 .NET 10。
 | World | `new World(capacity)` | `new World(new WorldOptions { InitialEntityCapacity = n })` |
 | 组件 | 任意 struct | 实现 `IComponent` 的 struct |
 | 带组件创建 | `var e = world.CreateEntity(); e.Set(a); e.Set(b);` | `world.CreateEntity(a, b)`（一次放进最终的表） |
+| 批量创建 | 同样逐个创建 | `world.CreateEntities(span, a, b)`，或者循环前先 `world.EnsureCapacity<A, B>(n)` |
 | 读、写 | `e.Get<T>()`（ref）、`world.GetComponents<T>()[e]` | `entity.Get<T>()`（ref）、`entity.Read<T>()`；`[ForEach]` 参数 |
 | 标签 | `e.Set<Dead>()` | `entity.Set(new Dead())` |
 | 销毁 | `e.Dispose()` | `entity.Destroy()` |

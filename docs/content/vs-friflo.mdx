@@ -43,6 +43,8 @@ older .NET (netstandard2.1, net6.0-8.0); EasyEcs needs .NET 10.
 | Tag | `struct Dead : ITag`, `AddTag<Dead>()` | `struct Dead : IComponent` (empty), `entity.Set(new Dead())` |
 | Singleton | `UniqueEntity` | `ISingletonComponent`, `world.AddSingleton<T>()` |
 | Create | `store.CreateEntity(a, b)` | `world.CreateEntity(a, b)` |
+| Reserve before creating | `store.EnsureCapacity(n)`, `archetype.EnsureCapacity(n)` | `world.EnsureCapacity<A, B>(n)` |
+| Create many | `archetype.CreateEntity()` per entity, `CreateEntityBatch` | `world.CreateEntities(span, a, b)` |
 | Read, write | `entity.GetComponent<T>()` (ref) | `entity.Get<T>()` (ref), `entity.Read<T>()` (read-only) |
 | Add, remove | `entity.AddComponent(c)`, `RemoveComponent<T>()` | `entity.Set(c)`, `entity.Remove<T>()` |
 | Destroy | `entity.DeleteEntity()` | `entity.Destroy()`, `world.DestroyEntities<T>(filter)` |

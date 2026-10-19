@@ -60,6 +60,92 @@ by the library:
 Every comparison, sorted by lead, with the ones where another library is faster and why:
 [Comparison](/en/docs/comparison#feature-by-feature).
 
+## Creating entities in a fresh world [#cold-create]
+
+A server creates most of its entities in a world that has never held any: at start-up, or when it opens a map or a
+match. `ColdCreateComparison` measures that moment: 100,000 entities of one, two or three components created in a new
+world of each library, a new world for every call, three ways:
+
+- **`PerEntity`**: one `CreateEntity` per entity, nothing reserved.
+- **`PerEntity_Reserved`**: the same loop after reserving room for all of them: `world.EnsureCapacity<T1, …, Tn>(n)` in
+  EasyEcs, `EnsureCapacity` on the store and the archetype in Friflo, `EnsureCapacity` with the signature in Arch.
+  DefaultEcs has no reservation per component set.
+- **`Bulk`**: one `world.CreateEntities(span, values)` call. Only EasyEcs runs this case; the comparisons count each
+  other library's fastest way against it.
+
+<Tabs items={['1 component', '2 components', '3 components']}>
+<Tab value="1 component">
+
+<BenchChart
+  bench="ColdCreateComparison"
+  params="Components=1"
+  methods="EasyEcs_PerEntity,Friflo_PerEntity,Arch_PerEntity,DefaultEcs_PerEntity,EasyEcs_PerEntity_Reserved,Friflo_PerEntity_Reserved,Arch_PerEntity_Reserved,EasyEcs_Bulk"
+  title="Create 100,000 entities of one component in a fresh world"
+  subtitle="Without and with a reservation, and in one call. Shorter is faster."
+/>
+
+</Tab>
+<Tab value="2 components">
+
+<BenchChart
+  bench="ColdCreateComparison"
+  params="Components=2"
+  methods="EasyEcs_PerEntity,Friflo_PerEntity,Arch_PerEntity,DefaultEcs_PerEntity,EasyEcs_PerEntity_Reserved,Friflo_PerEntity_Reserved,Arch_PerEntity_Reserved,EasyEcs_Bulk"
+  title="Create 100,000 entities of two components in a fresh world"
+  subtitle="Without and with a reservation, and in one call. Shorter is faster."
+/>
+
+</Tab>
+<Tab value="3 components">
+
+<BenchChart
+  bench="ColdCreateComparison"
+  params="Components=3"
+  methods="EasyEcs_PerEntity,Friflo_PerEntity,Arch_PerEntity,DefaultEcs_PerEntity,EasyEcs_PerEntity_Reserved,Friflo_PerEntity_Reserved,Arch_PerEntity_Reserved,EasyEcs_Bulk"
+  title="Create 100,000 entities of three components in a fresh world"
+  subtitle="Without and with a reservation, and in one call. Shorter is faster."
+/>
+
+</Tab>
+</Tabs>
+
+**Pre-sized or in one call, EasyEcs is the fastest of the four.** With three components, the reserved loop takes
+<BenchValue k="cold.reserved" /> and one `CreateEntities` call <BenchValue k="cold.bulk" />; Arch, the next fastest,
+takes <BenchValue k="cold.reserved.arch" /> reserved, <BenchValue k="cold.reserved.arch.ratio" /> as long.
+
+**One by one with nothing reserved, Arch is faster.** EasyEcs takes <BenchValue k="cold.perEntity" />,
+<BenchValue k="cold.perEntity.overArch" /> as long as Arch's <BenchValue k="cold.perEntity.arch" />. Without a
+reservation, a fresh table grows by doubling, and so does the entity storage. Their arrays past 85,000 bytes go to the
+large object heap, and once the allocations there pass the runtime's budget, .NET starts a full collection: one per new
+world in this benchmark, and most of the difference. Arch keeps entities in chunks of 16 KB, small objects that never
+reach that heap. Friflo and DefaultEcs pay the collection too and stay slower than EasyEcs.
+
+A reservation sizes the table and the entity storage once and puts the entity records on the pinned object heap, so
+the run stays under both budgets and no collection starts
+([D28](/en/docs/decisions#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)); the loop without
+it takes <BenchValue k="cold.reserved.speedup" /> as long. So when you know how many entities a world is about to
+get, say so:
+
+```csharp
+// The table of exactly these components, sized for the whole start-up
+world.EnsureCapacity<Position, Velocity, Health>(100_000);
+for (int i = 0; i < 100_000; i++)
+    world.CreateEntity(new Position(i, 0), new Velocity(1, 0), new Health(100));
+```
+
+Entities that start with the same values can also come in one call, which sizes the table from the span and hands
+you the handles:
+
+```csharp
+var garrison = new Entity[100_000];
+world.CreateEntities(garrison, new Position(0, 0), new Velocity(0, 0), new Health(100));
+```
+
+Only the first fill of a world pays the growth. A world that already has the room creates and destroys at full speed:
+`CreateDestroy` in the [single operations](/en/docs/comparison#operations).
+
+<BenchSource />
+
 ## Choosing an iteration API [#choosing-an-iteration-api]
 
 Every API walks the same tables front to back. What differs is the bookkeeping around each row: a delegate call, an
@@ -395,6 +481,7 @@ times every system run.
 | A computed `UpdateInterval` | Read every update | [EECS018](/en/docs/guide/analyzer#eecs018) (warning) |
 | A `ref` parameter that only reads a tracked component | Every visited row counts as changed | Code review: declare it `in` |
 | A closure or LINQ in per-update code | Garbage every tick | `AllocationTests`-style checks in your own tests |
+| Filling a fresh world one entity at a time, nothing reserved | Doubling arrays on the large object heap start a full collection ([above](#cold-create)) | Code review: `EnsureCapacity<T1, …, Tn>(n)` or `CreateEntities` |
 
 ## What is covered [#coverage]
 

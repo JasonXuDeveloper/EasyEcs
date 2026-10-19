@@ -53,6 +53,86 @@ job；繁忙的 World 每个 tick 都不分配。本页给出一个真实 tick �
 
 全部对比按领先幅度排序，其他库更快的项目和原因也在里面：[横向对比](/zh/docs/comparison#feature-by-feature)。
 
+## 在新 World 里创建实体 [#cold-create]
+
+服务器的大部分实体，都是在一个从没装过实体的 World 里创建的：启动时，或者开一张地图、一局比赛时。
+`ColdCreateComparison` 测的就是这一刻：每个库各开一个新 World，创建 10 万个带一个、两个或三个组件的实体，每次调用都换一个新
+World。分三种写法：
+
+- **`PerEntity`**：每个实体调一次 `CreateEntity`，不预留。
+- **`PerEntity_Reserved`**：先给全部实体留好空间，再跑同样的循环。EasyEcs 用 `world.EnsureCapacity<T1, …, Tn>(n)`，Friflo
+  在 store 和 archetype 上各调一次 `EnsureCapacity`，Arch 用带签名的 `EnsureCapacity`。DefaultEcs 没有按组件组合预留的接口。
+- **`Bulk`**：一次 `world.CreateEntities(span, values)` 调用。只有 EasyEcs 跑这一项；逐项对比里，拿其他库各自最快的写法和它比。
+
+<Tabs items={['1 个组件', '2 个组件', '3 个组件']}>
+<Tab value="1 个组件">
+
+<BenchChart
+  bench="ColdCreateComparison"
+  params="Components=1"
+  methods="EasyEcs_PerEntity,Friflo_PerEntity,Arch_PerEntity,DefaultEcs_PerEntity,EasyEcs_PerEntity_Reserved,Friflo_PerEntity_Reserved,Arch_PerEntity_Reserved,EasyEcs_Bulk"
+  title="在新 World 里创建 100,000 个单组件实体"
+  subtitle="不预留、预留后逐个创建、一次调用批量创建。越短越快。"
+/>
+
+</Tab>
+<Tab value="2 个组件">
+
+<BenchChart
+  bench="ColdCreateComparison"
+  params="Components=2"
+  methods="EasyEcs_PerEntity,Friflo_PerEntity,Arch_PerEntity,DefaultEcs_PerEntity,EasyEcs_PerEntity_Reserved,Friflo_PerEntity_Reserved,Arch_PerEntity_Reserved,EasyEcs_Bulk"
+  title="在新 World 里创建 100,000 个双组件实体"
+  subtitle="不预留、预留后逐个创建、一次调用批量创建。越短越快。"
+/>
+
+</Tab>
+<Tab value="3 个组件">
+
+<BenchChart
+  bench="ColdCreateComparison"
+  params="Components=3"
+  methods="EasyEcs_PerEntity,Friflo_PerEntity,Arch_PerEntity,DefaultEcs_PerEntity,EasyEcs_PerEntity_Reserved,Friflo_PerEntity_Reserved,Arch_PerEntity_Reserved,EasyEcs_Bulk"
+  title="在新 World 里创建 100,000 个三组件实体"
+  subtitle="不预留、预留后逐个创建、一次调用批量创建。越短越快。"
+/>
+
+</Tab>
+</Tabs>
+
+**预留空间或者批量创建，EasyEcs 是四个库里最快的。** 三个组件时，预留后的循环要 <BenchValue k="cold.reserved" />，一次
+`CreateEntities` 调用要 <BenchValue k="cold.bulk" />；次快的 Arch 预留后要 <BenchValue k="cold.reserved.arch" />，是
+EasyEcs 的 <BenchValue k="cold.reserved.arch.ratio" />。
+
+**不预留、逐个创建，Arch 更快。** EasyEcs 要 <BenchValue k="cold.perEntity" />，Arch 要
+<BenchValue k="cold.perEntity.arch" />，EasyEcs 的耗时是它的 <BenchValue k="cold.perEntity.overArch" />。不预留时，新表按倍数
+扩容，实体存储也一样。超过 85,000 字节的数组进了大对象堆，这里的分配一旦超过运行时的预算，.NET 就启动一次完整 GC：这个基准里每个新
+World 一次，差距大半来自这里。Arch 把实体放在 16 KB 的块里，都是小对象，进不了大对象堆。Friflo 和 DefaultEcs 同样要挨这次
+GC，仍然比 EasyEcs 慢。
+
+预留会一次性定好表和实体存储的大小，并把实体记录放到固定对象堆（pinned object heap）上，两边的分配都不超预算，也就不会触发 GC
+（[D28](/zh/docs/decisions#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)）；不预留的循环，耗时是预留后的
+<BenchValue k="cold.reserved.speedup" />。所以，知道一个 World 马上要装多少实体，就提前说一声：
+
+```csharp
+// 只预留这几个组件组成的那张表，大小按整个启动阶段来
+world.EnsureCapacity<Position, Velocity, Health>(100_000);
+for (int i = 0; i < 100_000; i++)
+    world.CreateEntity(new Position(i, 0), new Velocity(1, 0), new Health(100));
+```
+
+初始值都一样的实体，也可以一次调用全部创建：表的大小直接按 span 定，句柄也写进这个 span：
+
+```csharp
+var garrison = new Entity[100_000];
+world.CreateEntities(garrison, new Position(0, 0), new Velocity(0, 0), new Health(100));
+```
+
+只有 World 第一次装满时才要付扩容的钱。空间已经够的 World，创建和销毁都是全速：见[单项操作](/zh/docs/comparison#operations)里的
+`CreateDestroy`。
+
+<BenchSource />
+
 ## 选择遍历 API [#choosing-an-iteration-api]
 
 每个 API 都是从头到尾走同样的表。区别在每一行周围的簿记：一次委托调用、一个枚举器、一次结构变更检查。取第一个合适的：
@@ -364,6 +444,7 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 | 计算出来的 `UpdateInterval` | 每次更新都要读 | [EECS018](/zh/docs/guide/analyzer#eecs018)（警告） |
 | 只读被追踪组件的 `ref` 参数 | 访问过的每一行都算变了 | 代码审查：声明成 `in` |
 | 每次更新都跑的代码里有闭包或 LINQ | 每个 tick 都产生垃圾 | 在自己的测试里做 `AllocationTests` 式的检查 |
+| 新 World 不预留空间，逐个塞满实体 | 大对象堆上一轮轮翻倍的数组触发完整 GC（[见上](#cold-create)） | 代码审查：用 `EnsureCapacity<T1, …, Tn>(n)` 或 `CreateEntities` |
 
 ## 覆盖了什么 [#coverage]
 

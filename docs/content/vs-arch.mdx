@@ -48,6 +48,7 @@ Arch runs on more runtimes (netstandard2.1, net6.0, net8.0 and Unity); EasyEcs n
 | System | Arch.Extended `BaseSystem` | `EcsSystem` with `[ForEach]` methods |
 | Command buffer | `CommandBuffer`, `Playback(world)` | none: `entity.Set`, `Remove`, `Destroy` apply at once |
 | Bulk change | `world.Add(in query, value)`, `world.Remove<T>(in query)` | `world.SetAll(value, filter)`, `world.RemoveAll<T>(filter)` |
+| Reserve before creating | `world.EnsureCapacity(in signature, n)` | `world.EnsureCapacity<A, B>(n)`, or `world.CreateEntities(span, a, b)` at once |
 | Parallel query | `World.SharedJobScheduler`, `InlineParallelQuery` | `[ForEach(Parallel = true)]` |
 | Events | `SubscribeComponentAdded` / `Removed` / `Set` | none: `[Changed<T>]`, `[Removed<T>]`, tags queried by later systems |
 
@@ -162,6 +163,14 @@ records and plays back.
 />
 
 <BenchChart
+  bench="ColdCreateComparison"
+  param="Components=3"
+  methods="EasyEcs_PerEntity,Arch_PerEntity,EasyEcs_PerEntity_Reserved,Arch_PerEntity_Reserved,EasyEcs_Bulk"
+  title="Create 100,000 entities of three components in a fresh world"
+  subtitle="One by one, one by one after EnsureCapacity, and EasyEcs' CreateEntities. Arch leads only without the reservation."
+/>
+
+<BenchChart
   bench="ParallelQueryComparison"
   methods="EasyEcs_Parallel,Arch_InlineParallelQuery"
   title="Steer 100,000 agents on all cores"
@@ -176,6 +185,11 @@ Every other result, including the ones without Arch (Arch has no value index, hi
   in this run: the scheduler keeps worker threads of its own, which wins when passes run back to back. EasyEcs
   chose thread-pool helpers woken only while they pay ([D22](/en/docs/decisions)); the parallel numbers of this run
   carry a large error.
+- **Filling a fresh world without a reservation.** Created one by one in a new world, Arch's entities take
+  <BenchValue k="cold.perEntity.arch" /> against EasyEcs' <BenchValue k="cold.perEntity" />: EasyEcs' doubling arrays
+  reach the large object heap and start a full collection, Arch's 16 KB chunks never do. Reserve the table first
+  (`EnsureCapacity<T1, …, Tn>(n)`) or create in one call, and EasyEcs is ahead
+  ([creating entities in a fresh world](/en/docs/performance#cold-create)).
 - **Reach.** Arch runs on netstandard2.1, net6.0 and net8.0, and in Unity. EasyEcs needs .NET 10.
 - **A small core.** If you want queries and storage and nothing else, Arch's core is smaller; systems, relations and
   persistence are packages you add when you need them.

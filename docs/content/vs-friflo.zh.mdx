@@ -41,6 +41,8 @@ chunk，把结构变更记进命令缓冲；EasyEcs 从 `[ForEach]` 方法生成
 | 标签 | `struct Dead : ITag`、`AddTag<Dead>()` | `struct Dead : IComponent`（空的）、`entity.Set(new Dead())` |
 | 单例 | `UniqueEntity` | `ISingletonComponent`、`world.AddSingleton<T>()` |
 | 创建 | `store.CreateEntity(a, b)` | `world.CreateEntity(a, b)` |
+| 创建前预留 | `store.EnsureCapacity(n)`、`archetype.EnsureCapacity(n)` | `world.EnsureCapacity<A, B>(n)` |
+| 批量创建 | 每个实体一次 `archetype.CreateEntity()`，或 `CreateEntityBatch` | `world.CreateEntities(span, a, b)` |
 | 读、写 | `entity.GetComponent<T>()`（ref） | `entity.Get<T>()`（ref）、`entity.Read<T>()`（只读） |
 | 加、删 | `entity.AddComponent(c)`、`RemoveComponent<T>()` | `entity.Set(c)`、`entity.Remove<T>()` |
 | 销毁 | `entity.DeleteEntity()` | `entity.Destroy()`、`world.DestroyEntities<T>(filter)` |

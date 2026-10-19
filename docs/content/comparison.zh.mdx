@@ -63,6 +63,7 @@ EasyEcs 领先，但不到上面的幅度；完整服务器 tick 就在这里。
 | struct 查询 job | ✅ `IForEach`、`IForEachEntity`、`IForEachBatch` | ✅ | ✅ `IForEach`、`InlineQuery` | – |
 | 批量变更 | ✅ `SetAll`、`RemoveAll`、`DisableAll`、`EnableAll` | ✅ `EntityBatch`、`ApplyBatch` | ✅ 按查询加 / 删 | ❌ |
 | 批量创建和销毁 | ✅ `CreateEntities`、`DestroyEntities(filter)`、`Instantiate(prefab, span)` | ⚠️ `CreateEntityBatch`；逐个删除 | ⚠️ 按查询销毁 | ❌ |
+| 创建前预留一张表 | ✅ `EnsureCapacity<T1, …, Tn>(n)` | ✅ store 和 archetype 上的 `EnsureCapacity` | ✅ `EnsureCapacity(signature, n)` | – |
 | 预制体 | ✅ `Prefab`：不属于任何 World 的数据 | ⚠️ store 里的实体，用 `CloneEntity` 复制 | ❌ | ⚠️ 用 `CopyTo(world)` 复制的实体 |
 | 变更追踪（某 tick 之后写过的行） | ✅ `ITrackChanges`、`[Changed<T>]`，每次 `ref` 写入 | ❌ | ❌（事件） | ✅ `NotifyChanged<T>()` 之后的 `WhenChanged<T>()` |
 | 移除检测 | ✅ `[Removed<T>]` | ⚠️ `OnComponentRemoved` 事件 | ⚠️ `SubscribeComponentRemoved` 事件 | ✅ `WhenRemoved<T>()` 集合 |
@@ -296,6 +297,52 @@ Friflo 的命令缓冲和直接修改相差不大：大部分开销在遍历本�
 创建，按查询销毁。
 
 <BenchChart bench="BulkSpawnComparison" title="生成 10,000 发子弹，再全部清掉" />
+
+## 在新 World 里创建实体 [#cold-create]
+
+`ColdCreateComparison`：在从没装过实体的 World 里创建 10 万个带一个、两个或三个组件的实体，每次调用都换一个新 World。三种
+写法：逐个创建（`PerEntity`）；先预留空间再逐个创建（`PerEntity_Reserved`：EasyEcs 用 `EnsureCapacity<T1, …, Tn>(n)`，
+Friflo 在 store 和 archetype 上调 `EnsureCapacity`，Arch 在 World 上调；DefaultEcs 没有表可预留）；一次 `CreateEntities`
+调用（`Bulk`，只有 EasyEcs）。上面的逐项对比按三个组件算：预留对预留，批量创建对其他库最快的写法，逐个对逐个。
+
+<Tabs items={['1 个组件', '2 个组件', '3 个组件']}>
+<Tab value="1 个组件">
+
+<BenchChart
+  bench="ColdCreateComparison"
+  params="Components=1"
+  methods="EasyEcs_PerEntity,Friflo_PerEntity,Arch_PerEntity,DefaultEcs_PerEntity,EasyEcs_PerEntity_Reserved,Friflo_PerEntity_Reserved,Arch_PerEntity_Reserved,EasyEcs_Bulk"
+  title="在新 World 里创建 100,000 个单组件实体"
+/>
+
+</Tab>
+<Tab value="2 个组件">
+
+<BenchChart
+  bench="ColdCreateComparison"
+  params="Components=2"
+  methods="EasyEcs_PerEntity,Friflo_PerEntity,Arch_PerEntity,DefaultEcs_PerEntity,EasyEcs_PerEntity_Reserved,Friflo_PerEntity_Reserved,Arch_PerEntity_Reserved,EasyEcs_Bulk"
+  title="在新 World 里创建 100,000 个双组件实体"
+/>
+
+</Tab>
+<Tab value="3 个组件">
+
+<BenchChart
+  bench="ColdCreateComparison"
+  params="Components=3"
+  methods="EasyEcs_PerEntity,Friflo_PerEntity,Arch_PerEntity,DefaultEcs_PerEntity,EasyEcs_PerEntity_Reserved,Friflo_PerEntity_Reserved,Arch_PerEntity_Reserved,EasyEcs_Bulk"
+  title="在新 World 里创建 100,000 个三组件实体"
+/>
+
+</Tab>
+</Tabs>
+
+**不预留、逐个创建，Arch 更快**（三个组件时，EasyEcs 的耗时是它的 <BenchValue k="cold.perEntity.overArch" />）。新的
+EasyEcs 表和实体存储按倍数扩容，大数组落进大对象堆，每个新 World 都会触发一次完整 GC；Arch 的 16 KB 块进不了大对象堆。
+预留之后或者批量创建，不会触发 GC，EasyEcs 是四个库里最快的
+（[D28](/zh/docs/decisions#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)；怎么写见
+[性能指南](/zh/docs/performance#cold-create)）。
 
 ## 并行工作 [#parallel]
 
