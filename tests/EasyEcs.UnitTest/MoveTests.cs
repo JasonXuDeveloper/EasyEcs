@@ -1,7 +1,16 @@
 using System;
+using Nino.Core;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
+
+/// <summary>An actor's login: a managed value with a formatter, indexed by it.</summary>
+[NinoType(false)]
+public partial struct Account : IComponent, IIndexed<string>
+{
+    [NinoMember(0)] public string Login;
+    public readonly string Key => Login;
+}
 
 public class MoveTests
 {
@@ -51,6 +60,109 @@ public class MoveTests
         var moved = new Entity[1];
         from.MoveEntities(to, [b.Id], moved);                                // c stays: its id is not the earlier arrival
         Assert.That((c.Id.Index, moved[0].Read<Follows>().Target), Is.EqualTo((a.Id.Index, EntityId.Null)));
+    }
+
+    private static readonly ComponentSet Record = ComponentSet.Create().With<Health>().With<Follows>().With<Account>()
+        .With<Armor>().With<ChildOf>().With<Zone>().With<Frozen>().With<DynamicBuffer<DynamicBufferTests.Loot>>();
+
+    [Test]
+    public void ARecordLoadsOntoTheEntitiesMadeForIt()
+    {
+        var output = new NinoArrayBufferWriter();
+        using (var from = new World())
+        {
+            var guild = from.CreateEntity(new Health(0));                         // stays behind
+            var bank = from.CreateEntity(new Health(50), new Account { Login = "bank" }, new Armor(1), new Zone(2), new Frozen());
+            var vault = from.CreateEntity(new ChildOf(bank), new Health(7), new Follows(guild));
+            bank.Set(new Follows(vault)).Set(new DynamicBuffer<DynamicBufferTests.Loot>());
+            bank.Get<DynamicBuffer<DynamicBufferTests.Loot>>().Add(new DynamicBufferTests.Loot(1, 1));
+            from.SaveEntities(output, [bank.Id, vault.Id], in Record);
+        }
+
+        using var to = new World();
+        to.GroupBy<Zone>();
+        var accounts = to.Index<Account, string>();
+        var follows = to.Index<Follows, EntityId>();
+        var a = to.CreateEntity(new Position(9, 9), new Account { Login = "old" }, new Health(1), new Zone(0)); // runtime state and old values
+        var b = to.CreateEntity(new Position(8, 8));
+        ulong tick = to.ChangeTick;
+        Assert.That(to.LoadEntitiesInto(output.WrittenSpan, [a, b]), Is.EqualTo(2));
+
+        Assert.That((a.Read<Position>(), a.Read<Health>(), a.Read<Account>().Login, a.Has<Frozen>()), Is.EqualTo((new Position(9, 9), new Health(50), "bank", true)));
+        Assert.That((accounts.Count("old"), accounts.Count("bank")), Is.EqualTo((0, 1)));            // re-keyed
+        Assert.That((a.Read<Follows>().Target, follows.Count(b.Id)), Is.EqualTo((b.Id, 1)));            // inside the group: the entity loaded into
+        Assert.That(a.Read<DynamicBuffer<DynamicBufferTests.Loot>>()[0], Is.EqualTo(new DynamicBufferTests.Loot(1, 1)));
+        Assert.That(to.Count<Armor>(QueryFilter.Create().Changed<Armor>(tick)), Is.EqualTo(1));        // a loaded value counts as written
+        Assert.That(to.Count<Position>(QueryFilter.Create().InGroup<Zone>(2)), Is.EqualTo(1));          // its group's table
+        Assert.That((b.Read<Position>(), b.Read<ChildOf>().Parent, b.Read<Health>()), Is.EqualTo((new Position(8, 8), a.Id, new Health(7))));
+        Assert.That(b.Read<Follows>().Target, Is.EqualTo(EntityId.Null));                              // the guild did not come
+        Assert.That((b.Has<Account>(), b.Has<Frozen>(), b.Has<Zone>()), Is.EqualTo((false, false, false))); // only what its record holds
+        a.Destroy();                                                                                    // the hierarchy works on them
+        Assert.That((b.IsAlive, to.EntityCount), Is.EqualTo((false, 0)));
+    }
+
+    [Test]
+    public void ARecordKeepsWhatItDoesNotHoldAndBringsItsDisabledValues()
+    {
+        var output = new NinoArrayBufferWriter();
+        using (var from = new World())
+        {
+            var parent = from.CreateEntity(new Health(1));                        // stays behind
+            var child = from.CreateEntity(new ChildOf(parent), new Health(5), new Armor(2));
+            child.Disable<Health>();
+            from.SaveEntities(output, [child.Id], in Record);
+        }
+
+        using var to = new World();
+        var here = to.CreateEntity(new Health(1));
+        var c = to.CreateEntity(new ChildOf(here), new Health(9));
+        to.LoadEntitiesInto(output.WrittenSpan, [c]);
+        Assert.That(c.Read<ChildOf>().Parent, Is.EqualTo(here.Id));                // its parent stayed behind: kept as it was
+        Assert.That((c.Has<Health>(), c.IsDisabled<Health>(), c.Read<Armor>()), Is.EqualTo((false, true, new Armor(2))));
+        Assert.That((c.Enable<Health>(), c.Read<Health>()), Is.EqualTo((true, new Health(5))));
+        Assert.That(to.Index<ChildOf, EntityId>().Count(here.Id), Is.EqualTo(1));
+    }
+
+    [Test]
+    public void LoadingIntoTheWrongEntitiesIsRefusedAndChangesNothing()
+    {
+        var output = new NinoArrayBufferWriter();
+        using (var from = new World())
+            from.SaveEntities(output, [from.CreateEntity(new Health(5)).Id, from.CreateEntity(new Health(6)).Id], in Record);
+
+        using var to = new World();
+        var a = to.CreateEntity(new Health(1));
+        var gone = to.CreateEntity(new Health(2));
+        gone.Destroy();
+        Assert.Throws<ArgumentException>(() => to.LoadEntitiesInto(output.WrittenSpan, [a]));          // two saved, one given
+        Assert.Throws<ArgumentException>(() => to.LoadEntitiesInto(output.WrittenSpan, [a, gone]));    // a stale entity
+        Assert.That((a.Read<Health>(), to.EntityCount), Is.EqualTo((new Health(1), 1)));
+    }
+
+    [Test]
+    public void LoadingIntoAgainAllocatesNothing()
+    {
+        var output = new NinoArrayBufferWriter();
+        using (var from = new World())
+        {
+            var actor = from.CreateEntity(new Health(5), new Armor(1), new Zone(1));   // values without references
+            actor.Set(new DynamicBuffer<DynamicBufferTests.Loot>()).Get<DynamicBuffer<DynamicBufferTests.Loot>>().Add(new DynamicBufferTests.Loot(1, 1));
+            from.SaveEntities(output, [actor.Id], in Record);
+        }
+
+        using var to = new World();
+        var into = new Entity[1];
+        void Arrive()
+        {
+            into[0] = to.CreateEntity(new Position(1, 1));
+            to.LoadEntitiesInto(output.WrittenSpan, into);
+            into[0].Destroy();
+        }
+
+        for (int i = 0; i < 5; i++) Arrive();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++) Arrive();
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
 
     [Test]

@@ -49,6 +49,15 @@ internal sealed class Archetype
     /// <summary>Whether any column is a <see cref="DynamicBuffer{T}"/> (its lists go back to their pool when a row dies).</summary>
     private readonly bool _hasBuffers;
 
+    /// <summary>A group save's mark (World._saveStamp when it holds some of the group) and its index among the save's tables.</summary>
+    internal int SaveMark, SaveIndex;
+
+    /// <summary>
+    /// The signature of this table's components as the components a load puts on entities of another world
+    /// (<see cref="World.LoadEntitiesInto"/>): it keys their tables' add edges like a Set of those types. -1 until then.
+    /// </summary>
+    internal int LoadSignature = -1;
+
     /// <summary>
     /// Per column: one bit per row, set while the entity has the component (64 rows per word, so queries test 64 rows
     /// with one load). Allocated when a row of the column first loses its component; null means every row has it.
@@ -269,7 +278,7 @@ internal sealed class Archetype
         if ((word & bit) == 0) return false;
         word &= ~bit;
         AbsentOf(column)++;
-        if (!keep && _hasManaged && Info(column) is { Managed: true } info) info.Release(Columns[column], slot, 1);
+        if (!keep && _hasManaged && Info(column) is { Managed: true } info) info.Discard(Columns[column], slot, 1);
         return true;
     }
 
@@ -285,7 +294,7 @@ internal sealed class Archetype
         present &= ~rows;
         AbsentOf(column) += BitOperations.PopCount(rows);
         if (!keep && _hasManaged && Info(column) is { Managed: true } info)
-            for (ulong r = rows; r != 0; r &= r - 1) info.Release(Columns[column], (word << 6) + BitOperations.TrailingZeroCount(r), 1);
+            for (ulong r = rows; r != 0; r &= r - 1) info.Discard(Columns[column], (word << 6) + BitOperations.TrailingZeroCount(r), 1);
         return rows;
     }
 
@@ -882,7 +891,7 @@ internal sealed class Archetype
 
     /// <summary>
     /// The entities of rows [<paramref name="start"/>, +<paramref name="count"/>) die: their buffers' lists go back to
-    /// their pool (see <see cref="ComponentInfo.Release"/>). Before the rows are removed. Inside the structural gate.
+    /// their pool (see <see cref="ComponentInfo.Discard"/>). Before the rows are removed. Inside the structural gate.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void ReleaseBuffers(int start, int count)
@@ -895,7 +904,7 @@ internal sealed class Archetype
     {
         for (int i = 0; i < _infos.Length; i++)
             if (_infos[i].IsBuffer)
-                _infos[i].Release(Columns[i], start, count);
+                _infos[i].Discard(Columns[i], start, count);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

@@ -196,7 +196,7 @@ internal abstract class ComponentInfo
     /// buffer column go back to the pool of their element type (<see cref="BufferStore.Recycle"/>). Never for rows
     /// whose values were copied elsewhere (a moved row): the copies still hold them.
     /// </summary>
-    public abstract void Release(Array column, int start, int count);
+    public abstract void Discard(Array column, int start, int count);
 
     /// <summary>
     /// Copy rows [0, <paramref name="count"/>) of a managed column for a snapshot (capture or restore): values, and for
@@ -212,8 +212,11 @@ internal abstract class ComponentInfo
     /// <summary>Bytes of one row of the column (an element of a managed column: its references, not what they point at).</summary>
     public abstract int Stride { get; }
 
-    /// <summary>The name a save records the type by (<see cref="SavedTypes.NameOf{T}"/>).</summary>
+    /// <summary>The name of the type in messages (<see cref="SavedTypes.NameOf{T}"/>).</summary>
     public abstract string Name { get; }
+
+    /// <summary>The id a save records the type by (<see cref="SavedTypes.IdOf"/>).</summary>
+    public abstract int TypeId { get; }
 
     /// <summary>Bit of <see cref="Disabled{T}"/> of this component (registered on first use).</summary>
     public abstract ushort DisabledBit { get; }
@@ -236,8 +239,14 @@ internal abstract class ComponentInfo
     /// <summary>Read unmanaged rows written by <see cref="WriteRows"/>.</summary>
     public abstract void ReadRows(ref Reader reader, Span<byte> rows);
 
-    /// <summary>The layout hash of an unmanaged type the generator registered (<see cref="SavedTypes.Raw{T}"/>), else 0.</summary>
-    public abstract int Layout { get; }
+    /// <summary>
+    /// How a save writes the rows (of a buffer column: its elements): the size of a raw row, 0 when Nino writes them
+    /// (<see cref="SavedTypes.RowSize{T}"/>).
+    /// </summary>
+    public abstract int SavedSize { get; }
+
+    /// <summary>The layout hash of raw rows the generator registered (<see cref="SavedTypes.Raw{T}"/>), else 0.</summary>
+    public abstract int SavedLayout { get; }
 
     /// <summary>Read <paramref name="count"/> rows written by <see cref="Write"/> into managed column <paramref name="column"/> from <paramref name="start"/>.</summary>
     public abstract void Read(ref Reader reader, Array column, int start, int count);
@@ -253,6 +262,8 @@ internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsRefere
     public override Type Type => typeof(T);
 
     public override string Name => SavedTypes.NameOf<T>.Value;
+
+    public override int TypeId => SavedTypes.TypeId<T>.Value;
 
     public override int Stride => Unsafe.SizeOf<T>();
 
@@ -277,7 +288,9 @@ internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsRefere
 
     public override void ReadRows(ref Reader reader, Span<byte> rows) => SavedTypes.ReadRows<T>(ref reader, rows);
 
-    public override int Layout => SavedTypes.RawLayout<T>.Hash;
+    public override int SavedSize => default(T) is IBuffer ? Buffer.RowSize : SavedTypes.RowSize<T>();
+
+    public override int SavedLayout => default(T) is IBuffer ? Buffer.Layout : SavedTypes.RowSize<T>() != 0 ? SavedTypes.RawLayout<T>.Hash : 0;
 
     public override void Remap(Array column, int start, int count, IdMap map)
     {
@@ -341,7 +354,7 @@ internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsRefere
 
     public override void Clear(Array column, int start, int count) => Array.Clear(column, start, count);
 
-    public override void Release(Array column, int start, int count)
+    public override void Discard(Array column, int start, int count)
     {
         if (default(T) is not IBuffer) // a JIT-time constant
         {

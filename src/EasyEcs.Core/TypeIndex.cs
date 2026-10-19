@@ -70,7 +70,7 @@ internal static class SingletonType<T> where T : struct, ISingletonComponent
 
     private static int Register()
     {
-        Collectible.Watch(typeof(T)); // its save name is forgotten when its context unloads
+        Collectible.Watch(typeof(T)); // its save id is forgotten when its context unloads
         SavedTypes.Singleton<T>(); // a type the process uses can be loaded
         return TypeIndex<ISingletonComponent, T>.Value;
     }
@@ -82,8 +82,11 @@ internal abstract class SingletonBox
     /// <summary>The singleton's slot in every world (<see cref="SingletonType{T}.Index"/>).</summary>
     public abstract int Slot { get; }
 
-    /// <summary>The name a save records the type by (<see cref="SavedTypes.NameOf{T}"/>).</summary>
+    /// <summary>The name of the type in messages (<see cref="SavedTypes.NameOf{T}"/>).</summary>
     public abstract string Name { get; }
+
+    /// <summary>The id a save records the type by (<see cref="SavedTypes.IdOf"/>).</summary>
+    public abstract int TypeId { get; }
 
     /// <summary>Write the value (Nino).</summary>
     public abstract void Write(ref Writer writer);
@@ -108,6 +111,8 @@ internal sealed class SingletonBox<T> : SingletonBox where T : struct, ISingleto
     public override int Slot => SingletonType<T>.Index;
 
     public override string Name => SavedTypes.NameOf<T>.Value;
+
+    public override int TypeId => SavedTypes.TypeId<T>.Value;
 
     public override void Write(ref Writer writer) => NinoSerializer.Serialize(Value, ref writer);
 

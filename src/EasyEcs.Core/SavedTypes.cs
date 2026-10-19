@@ -11,36 +11,38 @@ namespace EasyEcs;
 
 /// <summary>
 /// The component and singleton types a save can name (<see cref="World.Save(System.Buffers.IBufferWriter{byte})"/>, <see cref="World.Load"/>): a save
-/// records types by name, and loading resolves each name to a type of this process. The generator registers every
-/// component and singleton of a compilation (and every <c>DynamicBuffer&lt;T&gt;</c> it mentions) when the module
-/// loads; a type gets no bit until a load or the world uses it. Types the world used are known anyway. Generated code
-/// calls this; user code does not need to.
+/// records each type by its Nino type id (<see cref="NinoTypeId"/>: a hash of its full name, or of the name its
+/// <c>[NinoFormerName]</c> gives, so a renamed type keeps loading its rows), and loading resolves each id to a type
+/// of this process. The generator registers every component and singleton of a compilation (and every
+/// <c>DynamicBuffer&lt;T&gt;</c> it mentions) when the module loads; a type gets no bit until a load or the world uses
+/// it. Types the world used are known anyway. Generated code calls this; user code does not need to.
 /// </summary>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public static class SavedTypes
 {
     private static readonly Lock Gate = new();
-    // By save name, the types registered under it: one loads, several are ambiguous (two assemblies, or two versions
-    // of a reloaded one until the old one unloads).
-    private static readonly Dictionary<string, List<(Type Type, Func<ushort> Bit)>> Components = new(StringComparer.Ordinal);
-    private static readonly Dictionary<string, List<(Type Type, Func<SingletonBox> Box)>> Singletons = new(StringComparer.Ordinal);
+    // By type id, the types registered under it: one loads, several are ambiguous (two types of one name in two
+    // assemblies, two versions of a reloaded one until the old one unloads, a former name another type still has).
+    private static readonly Dictionary<int, List<(Type Type, Func<ushort> Bit)>> Components = new();
+    private static readonly Dictionary<int, List<(Type Type, Func<SingletonBox> Box)>> Singletons = new();
+    // The components by type, for sets built from types a framework learns at run time (ComponentSet.With(Type)).
+    private static readonly Dictionary<Type, Func<ushort>> ComponentsByType = new();
 
-    // Loads look names up as they lie in the bytes (no string is made).
-    private static readonly Dictionary<string, List<(Type Type, Func<ushort> Bit)>>.AlternateLookup<ReadOnlySpan<char>> ComponentsByName =
-        Components.GetAlternateLookup<ReadOnlySpan<char>>();
-    private static readonly Dictionary<string, List<(Type Type, Func<SingletonBox> Box)>>.AlternateLookup<ReadOnlySpan<char>> SingletonsByName =
-        Singletons.GetAlternateLookup<ReadOnlySpan<char>>();
-
-    /// <summary>Make component <typeparamref name="T"/> loadable by name (no bit is assigned yet).</summary>
+    /// <summary>Make component <typeparamref name="T"/> loadable by its type id (no bit is assigned yet).</summary>
     public static void Component<T>() where T : struct, IComponent
     {
-        lock (Gate) Add(Components, typeof(T), static () => ComponentType<T>.Bit);
+        Func<ushort> bit = static () => ComponentType<T>.Bit;
+        lock (Gate)
+        {
+            Add(Components, TypeId<T>.Value, typeof(T), bit);
+            ComponentsByType.TryAdd(typeof(T), bit);
+        }
     }
 
-    /// <summary>Make singleton <typeparamref name="T"/> loadable by name.</summary>
+    /// <summary>Make singleton <typeparamref name="T"/> loadable by its type id.</summary>
     public static void Singleton<T>() where T : struct, ISingletonComponent
     {
-        lock (Gate) Add(Singletons, typeof(T), static () => new SingletonBox<T>());
+        lock (Gate) Add(Singletons, TypeId<T>.Value, typeof(T), static () => new SingletonBox<T>());
     }
 
     /// <summary>
@@ -69,19 +71,46 @@ public static class SavedTypes
         if (layout != 0) RawLayout<T>.Hash = layout; // 0: registered by a module that cannot see all of T's fields
     }
 
-    /// <summary>Write unmanaged rows of <typeparamref name="T"/>: canonical when registered (<see cref="Raw{T}"/>), else as they are in memory.</summary>
+    /// <summary>
+    /// Write unmanaged rows of <typeparamref name="T"/>: by its Nino formatter when it is a <c>[NinoType]</c>
+    /// (<see cref="Coded{T}"/>), else canonical when registered (<see cref="Raw{T}"/>), else as they are in memory.
+    /// </summary>
     internal static void WriteRows<T>(ref Writer writer, ReadOnlySpan<byte> rows)
     {
-        if (RawLayout<T>.Rows is { } raw) raw.Write(ref writer, rows);
+        if (Coded<T>.Value)
+        {
+            var values = Values<T>(rows);
+            for (int i = 0; i < values.Length; i++) NinoSerializer.Serialize(values[i], ref writer);
+        }
+        else if (RawLayout<T>.Rows is { } raw) raw.Write(ref writer, rows);
         else writer.WriteRaw(rows);
     }
 
     /// <summary>Read rows written by <see cref="WriteRows{T}"/> into <paramref name="rows"/>.</summary>
     internal static void ReadRows<T>(ref Reader reader, Span<byte> rows)
     {
-        if (RawLayout<T>.Rows is { } raw) raw.Read(ref reader, rows);
+        if (Coded<T>.Value)
+        {
+            var values = Values<T>(rows);
+            for (int i = 0; i < values.Length; i++) NinoDeserializer.Deserialize(ref values[i], ref reader);
+        }
+        else if (RawLayout<T>.Rows is { } raw) raw.Read(ref reader, rows);
         else reader.ReadRaw(rows.Length).CopyTo(rows);
     }
+
+    /// <summary>
+    /// The rows of unmanaged <typeparamref name="T"/> in <paramref name="rows"/> (whole rows: the caller passes count ×
+    /// size bytes of a column or a buffer, aligned for T).
+    /// </summary>
+    private static Span<T> Values<T>(ReadOnlySpan<byte> rows) =>
+        MemoryMarshal.CreateSpan(ref Unsafe.As<byte, T>(ref MemoryMarshal.GetReference(rows)), rows.Length / Unsafe.SizeOf<T>());
+
+    /// <summary>
+    /// How a save writes the rows of <typeparamref name="T"/> (a component, or a buffer's element): the size of a raw
+    /// row, 0 when Nino writes them (managed values, <c>[NinoType]</c> ones). A load refuses rows written another way.
+    /// </summary>
+    internal static int RowSize<T>() =>
+        RuntimeHelpers.IsReferenceOrContainsReferences<T>() || Coded<T>.Value ? 0 : Unsafe.SizeOf<T>();
 
     /// <summary>The canonical writer and the layout hash of unmanaged <typeparamref name="T"/> (null and 0 until registered).</summary>
     internal static class RawLayout<T>
@@ -105,14 +134,13 @@ public static class SavedTypes
     }
 
     /// <summary>
-    /// Register <paramref name="type"/> under its save name. Names leave out assemblies: when two types share one (in
-    /// two assemblies), neither may load the other's rows, so a load of the name fails until one of them is forgotten
-    /// (its context unloaded). Inside the lock.
+    /// Register <paramref name="type"/> under its type <paramref name="id"/>. When two types share one, neither may load
+    /// the other's rows, so a load of the id fails until one of them is forgotten (its context unloaded) or renamed.
+    /// Inside the lock.
     /// </summary>
-    private static void Add<TValue>(Dictionary<string, List<(Type Type, TValue Value)>> types, Type type, TValue value)
+    private static void Add<TValue>(Dictionary<int, List<(Type Type, TValue Value)>> types, int id, Type type, TValue value)
     {
-        string name = type.ToString();
-        if (!types.TryGetValue(name, out var candidates)) types[name] = candidates = [];
+        if (!types.TryGetValue(id, out var candidates)) types[id] = candidates = [];
         foreach (var candidate in candidates)
             if (candidate.Type == type)
                 return;
@@ -126,48 +154,69 @@ public static class SavedTypes
         {
             Forget(Components, unloading);
             Forget(Singletons, unloading);
+            List<Type> gone = null;
+            foreach (var type in ComponentsByType.Keys)
+                if (unloading(type)) (gone ??= []).Add(type);
+            if (gone != null)
+                foreach (var type in gone)
+                    ComponentsByType.Remove(type);
         }
     }
 
-    private static void Forget<TValue>(Dictionary<string, List<(Type Type, TValue Value)>> types, Func<Type, bool> unloading)
+    private static void Forget<TValue>(Dictionary<int, List<(Type Type, TValue Value)>> types, Func<Type, bool> unloading)
     {
-        List<string> empty = null;
-        foreach (var (name, candidates) in types)
+        List<int> empty = null;
+        foreach (var (id, candidates) in types)
         {
             candidates.RemoveAll(candidate => unloading(candidate.Type));
-            if (candidates.Count == 0) (empty ??= []).Add(name);
+            if (candidates.Count == 0) (empty ??= []).Add(id);
         }
 
         if (empty != null)
-            foreach (var name in empty)
-                types.Remove(name);
+            foreach (var id in empty)
+                types.Remove(id);
     }
 
-    private static InvalidDataException Ambiguous(ReadOnlySpan<char> name) =>
-        new($"Two types of this process are saved as {name}: rename one to load it");
+    private static InvalidDataException Ambiguous<TValue>(int id, List<(Type Type, TValue Value)> candidates)
+    {
+        var names = new List<string>();
+        foreach (var candidate in candidates) names.Add(candidate.Type.AssemblyQualifiedName);
+        return new InvalidDataException($"Types of this process share the save id {id} ({string.Join(", ", names)}): " +
+            "unload or rename one of them (one type per name, its own or the one its [NinoFormerName] keeps)");
+    }
 
-    /// <summary>The bit of the component saved as <paramref name="name"/>, or -1 when this process has no such type.</summary>
-    internal static int FindComponent(ReadOnlySpan<char> name)
+    /// <summary>The bit of the component saved as type <paramref name="id"/>, or -1 when this process has no such type.</summary>
+    internal static int FindComponent(int id)
     {
         Func<ushort> bit;
         lock (Gate)
         {
-            if (!ComponentsByName.TryGetValue(name, out var candidates)) return -1;
-            if (candidates.Count > 1) throw Ambiguous(name);
+            if (!Components.TryGetValue(id, out var candidates)) return -1;
+            if (candidates.Count > 1) throw Ambiguous(id, candidates);
             bit = candidates[0].Bit;
         }
 
         return bit(); // outside the lock: registering the type takes others
     }
 
-    /// <summary>A new box of the singleton saved as <paramref name="name"/>, or null when this process has no such type.</summary>
-    internal static SingletonBox NewSingleton(ReadOnlySpan<char> name)
+    /// <summary>The bit of component type <paramref name="type"/>, or -1 when it is not a registered component type.</summary>
+    internal static int BitOf(Type type)
+    {
+        Func<ushort> bit;
+        lock (Gate)
+            if (!ComponentsByType.TryGetValue(type, out bit))
+                return -1;
+        return bit();
+    }
+
+    /// <summary>A new box of the singleton saved as type <paramref name="id"/>, or null when this process has no such type.</summary>
+    internal static SingletonBox NewSingleton(int id)
     {
         Func<SingletonBox> create;
         lock (Gate)
         {
-            if (!SingletonsByName.TryGetValue(name, out var candidates)) return null;
-            if (candidates.Count > 1) throw Ambiguous(name);
+            if (!Singletons.TryGetValue(id, out var candidates)) return null;
+            if (candidates.Count > 1) throw Ambiguous(id, candidates);
             create = candidates[0].Box;
         }
 
@@ -181,12 +230,37 @@ public static class SavedTypes
     }
 
     /// <summary>
-    /// The name a save records <typeparamref name="T"/> by: namespace, nesting and type arguments without assemblies
-    /// (<c>Game.Health</c>, <c>EasyEcs.DynamicBuffer`1[Game.Item]</c>), so it survives version changes.
+    /// The name of <typeparamref name="T"/> in messages: namespace, nesting and type arguments without assemblies
+    /// (<c>Game.Health</c>, <c>EasyEcs.DynamicBuffer`1[Game.Item]</c>).
     /// </summary>
     internal static class NameOf<T>
     {
         public static readonly string Value = typeof(T).ToString();
+    }
+
+    /// <summary>The id a save records <typeparamref name="T"/> by (see <see cref="IdOf"/>).</summary>
+    internal static class TypeId<T>
+    {
+        public static readonly int Value = IdOf(typeof(T));
+    }
+
+    /// <summary>
+    /// The id a save records <paramref name="type"/> by: Nino's type id (the FNV-1a hash of its full name, or of its
+    /// <c>[NinoFormerName]</c>). A <c>DynamicBuffer&lt;T&gt;</c> is named after its element's id name, so renaming
+    /// the element keeps its buffers loading too. Computed without Nino's cache, which would keep collectible types alive.
+    /// </summary>
+    internal static int IdOf(Type type) =>
+        type.IsGenericType && type.GetGenericTypeDefinition() == typeof(DynamicBuffer<>)
+            ? NinoTypeId.Compute("EasyEcs.DynamicBuffer<" + NinoTypeId.GetIdName(type.GetGenericArguments()[0]) + ">")
+            : NinoTypeId.Compute(NinoTypeId.GetIdName(type));
+
+    /// <summary>
+    /// Whether unmanaged <typeparamref name="T"/> (a component or a buffer's element) is written by its Nino formatter
+    /// (<c>[NinoType]</c>: its format decides which changes old saves survive) instead of as raw rows.
+    /// </summary>
+    internal static class Coded<T>
+    {
+        public static readonly bool Value = !RuntimeHelpers.IsReferenceOrContainsReferences<T>() && typeof(T).IsDefined(typeof(NinoTypeAttribute), false);
     }
 }
 

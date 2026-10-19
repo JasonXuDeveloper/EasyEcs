@@ -7,7 +7,10 @@ namespace EasyEcs.Benchmark;
 /// Players changing worlds: 10 players, each with 99 items (<see cref="ChildOf"/> the player), move from one world to
 /// another and back, in warm worlds. Once through bytes (<c>SaveEntities</c>, <c>LoadEntities</c>, then destroying
 /// the originals: how a group crosses processes) and once in memory (<c>MoveEntities</c>: rows copied, no encoding).
-/// <c>SaveAndLoadOne</c> sends one entity of four components through bytes (a save's fixed costs: the types by name).
+/// <c>SaveAndLoadOne</c> sends one entity of four components through bytes (a save's fixed costs: the types by id).
+/// <c>SaveRecord</c> saves the persistent part of one entity (two of its four components, a <see cref="ComponentSet"/>)
+/// and <c>LoadRecord</c> loads that record onto an entity that already holds runtime state (<c>LoadEntitiesInto</c>):
+/// what a persistence layer does per actor.
 /// </summary>
 [MemoryDiagnoser]
 public class MigrationBenchmark
@@ -20,6 +23,9 @@ public class MigrationBenchmark
     private EntityId[] _ids;
     private Entity[] _handles;
     private readonly NinoArrayBufferWriter _bytes = new();
+    private readonly NinoArrayBufferWriter _record = new();
+    private static readonly ComponentSet Persistent = ComponentSet.Create().With<Health>().With<Energy>();
+    private readonly Entity[] _actor = new Entity[1];
 
     [GlobalSetup]
     public void Setup()
@@ -41,6 +47,9 @@ public class MigrationBenchmark
         SaveAndLoad();
         Move();
         SaveAndLoadOne();
+        _actor[0] = _d.CreateEntity(new Position { X = 2 }, new Velocity { Y = 2 });
+        SaveRecord();
+        LoadRecord();
     }
 
     [GlobalCleanup]
@@ -60,6 +69,17 @@ public class MigrationBenchmark
 
     [Benchmark]
     public int SaveAndLoadOne() => SaveAndLoadOne(_c, _d) + SaveAndLoadOne(_d, _c);
+
+    [Benchmark]
+    public int SaveRecord()
+    {
+        _record.ResetWrittenCount();
+        _c.SaveEntities(_record, _one, Persistent);
+        return _record.WrittenCount;
+    }
+
+    [Benchmark]
+    public int LoadRecord() => _d.LoadEntitiesInto(_record.WrittenSpan, _actor);
 
     private int SaveAndLoadOne(World from, World to)
     {

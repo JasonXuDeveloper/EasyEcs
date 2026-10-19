@@ -274,7 +274,7 @@ public sealed partial class World
     {
         if (archetype.DisablerColumn(column) is not (var tag and >= 0) || !archetype.MarkAbsent(tag, slot)) return false;
         var info = archetype.Info(column);
-        if (info.Managed) info.Release(archetype.Columns[column], slot, 1);
+        if (info.Managed) info.Discard(archetype.Columns[column], slot, 1);
         return true;
     }
 

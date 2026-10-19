@@ -17,6 +17,17 @@ public struct Padded : IComponent { public byte Flag; public long Value; } // 7 
 public struct Grip { private EntityId _holder; public Grip(EntityId holder) => _holder = holder; public EntityId Holder => _holder; }
 public struct Held : IComponent { public Grip Grip; }                 // an id two levels down, in a private field
 
+// One component in three builds: Stats as it was, renamed to Vitals with a field appended (both [NinoType]s, written by
+// their formatter), and a raw one that took over the name. A test registers one of them at a time, as a deploy would.
+[NinoType(format: NinoFormat.VersionTolerant)]
+public partial struct Stats : IComponent { public int Hp; }
+
+[NinoType(format: NinoFormat.VersionTolerant), NinoFormerName("EasyEcs.UnitTest.Stats")]
+public partial struct Vitals : IComponent { public int Hp; public int Mana; }
+
+[NinoFormerName("EasyEcs.UnitTest.Stats")]
+public struct RawStats : IComponent { public int Hp; }
+
 public class SerializationTests
 {
     private static byte[] Save(World world)
@@ -134,7 +145,7 @@ public class SerializationTests
 
         long before = GC.GetAllocatedBytesForCurrentThread();
         loaded.Load(full);
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);  // names are looked up as they lie in the bytes
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);  // types are looked up by id
         int sum = 0;
         foreach (var item in loaded.Query<Health>()) sum += item.Component1.Value;
         int loot = 0;
@@ -249,10 +260,115 @@ public class SerializationTests
         Assert.That((loaded.EntityCount, mine.Read<Velocity>()), Is.EqualTo((1, new Velocity(5, 5))));
 
         var count = bytes.AsSpan().ToArray();
-        BitConverter.TryWriteBytes(count.AsSpan(12), int.MaxValue);      // a type count no save could hold
+        BitConverter.TryWriteBytes(count.AsSpan(8), int.MaxValue);       // a type count no save could hold
         Assert.Throws<InvalidDataException>(() => loaded.Load(count));
         loaded.Load(bytes);
         Assert.That(loaded.EntityCount, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void ASetSavesItsComponentsOnly()
+    {
+        var output = new NinoArrayBufferWriter();
+        Entity[] moved = new Entity[2];
+        using (var world = new World())
+        {
+            var actor = world.CreateEntity(new Position(1, 2), new Health(3), new Name("runtime"));   // Name has no formatter
+            actor.Set(new Frozen()).Set(new DynamicBuffer<DynamicBufferTests.Loot>());
+            actor.Disable<Health>();                                       // kept value, absent
+            var bare = world.CreateEntity(new Name("runtime only"));
+            Assert.Catch(() => world.SaveEntities(output, [actor.Id]));   // every column: Name cannot be written
+
+            output.ResetWrittenCount();
+            var stored = ComponentSet.Create().With<Position>().With(typeof(Health)).With<Frozen>();
+            world.SaveEntities(output, [actor.Id, bare.Id], in stored);
+        }
+
+        using var arrival = new World();
+        Assert.That(arrival.LoadEntities(output.WrittenSpan, moved), Is.EqualTo(2));
+        var (a, b) = (moved[0], moved[1]);
+        Assert.That((a.Read<Position>(), a.Has<Frozen>(), a.Has<Name>(), a.Has<DynamicBuffer<DynamicBufferTests.Loot>>()),
+            Is.EqualTo((new Position(1, 2), true, false, false)));
+        Assert.That((a.IsDisabled<Health>(), a.Enable<Health>(), a.Read<Health>()), Is.EqualTo((true, true, new Health(3))));
+        Assert.That((b.IsAlive, b.Has<Name>()), Is.EqualTo((true, false)));      // in the group, with none of the set
+    }
+
+    [Test]
+    public void ASetIsBuiltFromTypesOrTypeArguments()
+    {
+        var set = ComponentSet.Create().With(typeof(Position)).With<Armor>();
+        Assert.That((set.Contains<Position>(), set.Contains<Armor>(), set.Contains<Health>()), Is.EqualTo((true, true, false)));
+        Assert.That(ComponentSet.Create().Contains<Position>(), Is.False);
+        Assert.Throws<ArgumentException>(() => ComponentSet.Create().With(typeof(string)));   // not a component type
+    }
+
+    [Test]
+    public void SavingOneEntityOfALargeWorldAgainAllocatesNothing()
+    {
+        using var world = new World();
+        world.CreateEntities(new Entity[10_000], new Position(), new Health(1));
+        var actor = world.CreateEntity(new Position(1, 1), new Health(1), new Armor(1));
+        var stored = ComponentSet.Create().With<Position>().With<Health>().With<Armor>();
+        var output = new NinoArrayBufferWriter();
+        for (int i = 0; i < 3; i++)
+        {
+            output.ResetWrittenCount();
+            world.SaveEntities(output, [actor.Id], in stored);
+        }
+
+        output.ResetWrittenCount();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        world.SaveEntities(output, [actor.Id], in stored);
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+    }
+
+    [Test]
+    public void ARenamedTypeWithAnAppendedFieldLoadsItsOldRows()
+    {
+        byte[] bytes;
+        try
+        {
+            SavedTypes.Forget(type => type == typeof(Vitals) || type == typeof(RawStats)); // the build that has Stats
+            using (var world = new World())
+            {
+                world.CreateEntity(new Stats { Hp = 7 }, new Position(1, 1));
+                bytes = Save(world);
+            }
+
+            SavedTypes.Forget(type => type == typeof(Stats));                                // the build that renamed it
+            SavedTypes.Component<Vitals>();
+            using var loaded = new World();
+            loaded.Load(bytes);
+            foreach (var item in loaded.Query<Vitals, Position>())
+                Assert.That((item.Component1.Hp, item.Component1.Mana, item.Component2), Is.EqualTo((7, 0, new Position(1, 1))));
+            Assert.That(loaded.Count<Vitals>(), Is.EqualTo(1));
+
+            SavedTypes.Forget(type => type == typeof(Vitals));                               // a raw type of that name
+            SavedTypes.Component<RawStats>();
+            var refused = Assert.Throws<InvalidDataException>(() => loaded.Load(bytes));
+            Assert.That(refused!.Message, Does.Contain("Nino formatter"));
+        }
+        finally
+        {
+            SavedTypes.Component<Stats>();
+            SavedTypes.Component<Vitals>();
+            SavedTypes.Component<RawStats>();
+        }
+    }
+
+    [Test]
+    public void TypesSharingAnIdAreRefused()
+    {
+        byte[] bytes;
+        using (var world = new World())
+        {
+            world.CreateEntity(new Stats { Hp = 1 });
+            bytes = Save(world);
+        }
+
+        using var loaded = new World();
+        var refused = Assert.Throws<InvalidDataException>(() => loaded.Load(bytes)); // Stats, Vitals and RawStats share it
+        Assert.That(refused!.Message, Does.Contain("NinoFormerName"));
     }
 
     [Test]

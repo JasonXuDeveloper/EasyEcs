@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace EasyEcs;
 
@@ -22,7 +23,7 @@ public sealed partial class World
     private readonly List<Entity> _roots = [];
 
     /// <summary>
-    /// Create the entities <see cref="SaveEntities"/> wrote (in this process or another), with new ids, and write their
+    /// Create the entities <c>SaveEntities</c> wrote (in this process or another), with new ids, and write their
     /// handles in save order into <paramref name="entities"/> (as many as fit); returns how many were created.
     /// <see cref="EntityId"/> fields of their components and buffer elements that named an entity of the group name
     /// its new entity, every other one is <see cref="EntityId.Null"/> (the generator tells the world where those fields
@@ -39,6 +40,122 @@ public sealed partial class World
         int order = Math.Min(entities.Length, source._loadOrderCount);
         for (int i = 0; i < order; i++) entities[i] = Arrived(source._loadOrder[i]);
         return created;
+    }
+
+    /// <summary>
+    /// Put the components <see cref="SaveEntities(System.Buffers.IBufferWriter{byte}, ReadOnlySpan{EntityId})"/> wrote
+    /// onto entities that exist already (an actor whose entity was made before its record arrived): the components of
+    /// the i-th saved entity are set on <paramref name="into"/>[i], added or replacing the values it has, each entity
+    /// moving table at most once; components the save does not hold stay as they are. Indexes, groups and change ticks
+    /// follow as with <c>Set</c> (every loaded component counts as written); a disabled component arrives disabled
+    /// with its value. <see cref="EntityId"/> fields that named an entity of the group name the entity of
+    /// <paramref name="into"/> it became, every other one is <see cref="EntityId.Null"/>, and a <see cref="ChildOf"/>
+    /// whose parent stayed behind is not set. Returns how many entities were loaded. O(entities × components). Not
+    /// while a pass iterates.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="into"/> does not hold one living entity of this world per saved entity.</exception>
+    /// <exception cref="System.IO.InvalidDataException">The bytes are not a save.</exception>
+    public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into)
+    {
+        var source = _arrivals ??= new World(new WorldOptions { InitialEntityCapacity = 16 });
+        source.Load(input);
+        int count = source._loadOrderCount;
+        if (into.Length != count)
+            throw new ArgumentException($"The save holds {count} entities and {into.Length} were given", nameof(into));
+        using (Structural())
+        {
+            ThrowIfIterating();
+            foreach (var entity in into)
+                if (entity.World != this || !IsAlive(entity.Id))
+                    throw new ArgumentException("An entity to load into is stale or of another world", nameof(into));
+
+            // Every saved entity maps to its entity of into: the loaded values' references are rewritten in the source
+            // first, then copied.
+            BeginArrival(source);
+            for (int i = 0; i < count; i++)
+            {
+                var saved = source._loadOrder[i];
+                _arrived[saved.Index] = into[i].Id;
+                Stamp(saved);
+            }
+
+            var map = new IdMap(source, _arrived, _arrivedStamp, _arrival);
+            foreach (var table in source._allArchetypes)
+                for (int c = 0; c < table.Columns.Length && table.Count != 0; c++)
+                    table.Info(c).Remap(table.Columns[c], 0, table.Count, map);
+            for (int i = 0; i < count; i++)
+            {
+                ref var from = ref source.MetaRef(source._loadOrder[i].Index);
+                LoadInto(from.Archetype, from.Slot, into[i].Index);
+            }
+
+            StorageVersion++;
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Set the components of row <paramref name="row"/> of <paramref name="source"/> (a loaded table, references
+    /// rewritten) on entity <paramref name="id"/>: one move to the table with both sets of components, then each value
+    /// as <c>Set</c> writes it. Inside the structural gate.
+    /// </summary>
+    private void LoadInto(Archetype source, int row, int id)
+    {
+        ref var meta = ref MetaRef(id);
+        var before = meta.Archetype;
+        if (_indexByBit != null) // the values the load replaces leave their indexes (they come back with the new ones)
+            for (int sc = 0; sc < source.Columns.Length; sc++)
+                if (source.Components[sc] < _indexByBit.Length && _indexByBit[source.Components[sc]] is { } index && Loads(source, sc, row))
+                    index.Removed(id);
+
+        if (source.LoadSignature < 0) source.LoadSignature = Interlocked.Increment(ref TypeIndex<ComponentSignature>.Count) - 1;
+        MoveTo(ref meta, id, before.GetAddSetEdge(source.LoadSignature) ?? CreateSetEdge(before, source.Components, source.LoadSignature));
+        var table = meta.Archetype;
+        int slot = meta.Slot;
+        for (int sc = 0; sc < source.Columns.Length; sc++)
+        {
+            var info = source.Info(sc);
+            if (info.Owner >= 0) continue; // a change-tick column: stamped with its component
+            ushort bit = source.Components[sc];
+            int c = table.ColumnIndex(bit);
+            if (!Loads(source, sc, row))
+            {
+                if (before.ColumnIndex(bit) < 0) table.MarkAbsent(c, slot); // the move added the column: the entity lacks it
+                continue;
+            }
+
+            bool present = source.Has(sc, row);
+            if (info.Managed)
+            {
+                info.Discard(table.Columns[c], slot, 1); // the value it replaces (a buffer's list goes back to its pool)
+                info.CopyManaged(source.Columns[sc], row, table.Columns[c], slot);
+                if (info.IsBuffer) info.Clear(source.Columns[sc], row, 1); // the list moves: the next load takes another
+            }
+            else Archetype.CopyElement(info, source.Columns[sc], row, table.Columns[c], slot);
+
+            if (present)
+            {
+                table.MarkPresent(c, slot);
+                if (table.HasDisabled) Undisable(table, c, slot);
+            }
+            else table.MarkAbsent(c, slot, keep: true); // disabled: its tag is a column of the source too
+
+            if (table.Tracked && info.Companion is var ticks and >= 0) table.SetTick(table.ColumnIndex(ticks), slot, _changeTick);
+            if (present && _indexByBit != null && bit < _indexByBit.Length && _indexByBit[bit] is { } index) index.AddedRows(table, c, slot, 1);
+        }
+
+        if (_groupByBit != null) RegroupRow(id);
+    }
+
+    /// <summary>
+    /// Whether column <paramref name="column"/> of loaded row <paramref name="row"/> is put on the entity: the row has
+    /// the component (or keeps it disabled), and a <see cref="ChildOf"/> names a parent that came along.
+    /// </summary>
+    private static bool Loads(Archetype source, int column, int row)
+    {
+        if (!source.Has(column, row) && !(source.HasDisabled && source.Keeps(column, row))) return false;
+        return source.Components[column] != ChildOfBit || !Unsafe.Add(ref Archetype.Row0<ChildOf>(source.Columns[column]), row).Parent.IsNull;
     }
 
     /// <summary>

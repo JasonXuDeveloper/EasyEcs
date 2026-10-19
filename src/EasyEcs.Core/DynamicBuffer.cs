@@ -28,6 +28,10 @@ public struct DynamicBuffer<T> : IComponent, ITrackChanges, IBuffer
 
     readonly bool IBuffer.Relational => default(T) is IRelation;
 
+    readonly int IBuffer.RowSize => SavedTypes.RowSize<T>();
+
+    readonly int IBuffer.Layout => SavedTypes.RowSize<T>() != 0 ? SavedTypes.RawLayout<T>.Hash : 0;
+
     readonly void IBuffer.Write(ref Writer writer, BufferStore store) => BufferStore<T>.Write(ref writer, Unsafe.As<BufferStore<T>>(store));
 
     readonly BufferStore IBuffer.Read(ref Reader reader, BufferStore reuse) => BufferStore<T>.Read(ref reader, reuse as BufferStore<T>);
@@ -155,12 +159,18 @@ internal interface IBuffer
     /// <summary>Its elements are <see cref="IRelation"/>s: the buffer is indexed by their targets.</summary>
     bool Relational { get; }
 
+    /// <summary>How a save writes the elements (<see cref="SavedTypes.RowSize{T}"/>).</summary>
+    int RowSize { get; }
+
+    /// <summary>The layout hash of raw elements (<see cref="SavedTypes.Raw{T}"/>), else 0.</summary>
+    int Layout { get; }
+
     /// <summary>Write the elements of <paramref name="store"/> (a buffer of this type's; null: none) for a save.</summary>
     void Write(ref Writer writer, BufferStore store);
 
     /// <summary>
     /// Read elements written by <see cref="Write"/> into <paramref name="reuse"/> (a store of this type's from an
-    /// earlier Load, or null) when it has room, else into a new store; null for none and no store to reuse.
+    /// earlier Load, grown when it lacks room), else into one from the pool; null for none and no store to reuse.
     /// </summary>
     BufferStore Read(ref Reader reader, BufferStore reuse);
 
@@ -243,7 +253,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         writer.Write(count);
         if (count == 0) return;
         var items = store!.Items.AsSpan(0, count);
-        if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>()) SavedTypes.WriteRows<T>(ref writer, Bytes(items));
+        if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>()) SavedTypes.WriteRows<T>(ref writer, Bytes(items)); // raw or [NinoType]
         else for (int i = 0; i < items.Length; i++) NinoSerializer.Serialize(items[i], ref writer);
     }
 
@@ -252,12 +262,12 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         MemoryMarshal.CreateSpan(ref Unsafe.As<T, byte>(ref MemoryMarshal.GetReference(items)), items.Length * Unsafe.SizeOf<T>());
 
     /// <summary>
-    /// Read a store written by <see cref="Write"/> into <paramref name="reuse"/> when it has room, else a new one
-    /// (null for an empty buffer without a store to reuse).
+    /// Read a store written by <see cref="Write"/> into <paramref name="reuse"/> (grown when it lacks room), else into
+    /// one from the pool (null for an empty buffer without a store to reuse).
     /// </summary>
     public static BufferStore<T> Read(ref Reader reader, BufferStore<T> reuse)
     {
-        int count = reader.ReadLength(RuntimeHelpers.IsReferenceOrContainsReferences<T>() ? 1 : Unsafe.SizeOf<T>());
+        int count = reader.ReadLength(Math.Max(1, SavedTypes.RowSize<T>()));
         if (count < 0) throw new System.IO.InvalidDataException("A damaged save: a buffer longer than its bytes");
         if (reuse != null && RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(reuse.Items, 0, reuse.Count);
         if (count == 0)
@@ -266,7 +276,9 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
             return reuse;
         }
 
-        var store = reuse != null && reuse.Items.Length >= count ? reuse : new BufferStore<T>(count);
+        var store = reuse ?? Rent();
+        store.Count = 0;
+        if (store.Items.Length < count) store.Resize(count);
         store.Count = count;
         var items = store.Items.AsSpan(0, count);
         if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>()) SavedTypes.ReadRows<T>(ref reader, Bytes(items));

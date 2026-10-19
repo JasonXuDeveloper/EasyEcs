@@ -12,7 +12,7 @@ public record struct ChildOf(EntityId Parent) : IComponent, IIndexed<EntityId>
     /// <inheritdoc/>
     public EntityId Key => Parent;
 
-    // What the generator registers for user components (SavedTypes): loadable by name, its parent rewritten by migrations.
+    // What the generator registers for user components (SavedTypes): loadable by its type id, its parent rewritten by migrations.
 #pragma warning disable CA2255 // a library initializer on purpose: saves must find ChildOf before any world uses it
     [ModuleInitializer]
 #pragma warning restore CA2255
