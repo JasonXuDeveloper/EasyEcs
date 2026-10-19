@@ -114,11 +114,6 @@ src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, req
                                changes and counting over queries, creation loops, the generated member, Update in a
                                system); each computes its fix as diagnostic properties for EasyEcs.CodeFixes
   Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)
-  EasyEcsAnalyzer.Performance.cs  EECS025-034: code that works but costs (write access that only reads, unused or
-                               per-row lookups in [ForEach] methods, allocations per update, per-entity structural
-                               changes and counting over queries, creation loops, the generated member, Update in a
-                               system); each computes its fix as diagnostic properties for EasyEcs.CodeFixes
-  Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)
   Threads.cs                   EECS014's check: does a structural call in a delegate handed to another thread race
   Symbols.cs                   symbol checks shared by generator and analyzer
   Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
