@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -24,6 +25,9 @@ public class CodeFixTests
         public struct Clock : ISingletonComponent { public int Ticks; }
         public class Box { public int V; }
         public struct Holder : IComponent { public System.Collections.Generic.List<int> Items; }
+        public struct Q : IComponent { public int V; }
+        public struct T : IComponent, ITrackChanges { public int V; }
+        public struct Boss : IComponent;
 
         """;
 
@@ -40,11 +44,11 @@ public class CodeFixTests
         "public class Runner { [ForEach] public void A(ref P p) => p.V++; }",
         "[ForEach] public static void A(ref P p)")]
     [TestCase("EECS006", "Make it a struct",
-        "public sealed class Q : IComponent { public int V; }",
-        "public struct Q : IComponent { public int V; }")]
+        "public sealed class R : IComponent { public int V; }",
+        "public struct R : IComponent { public int V; }")]
     [TestCase("EECS006", "Make it a struct",
-        "public record Q(int V) : IComponent;",
-        "public record struct Q(int V) : IComponent;")]
+        "public record R(int V) : IComponent;",
+        "public record struct R(int V) : IComponent;")]
     [TestCase("EECS010", "Run it on one thread",
         "public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, ref Clock c) => c.Ticks += p.V; }",
         "[ForEach] static void A")]
@@ -88,14 +92,83 @@ public class CodeFixTests
         + "public partial class S { private partial class Outer { } }",
         "internal partial class Outer { } }")]
     [TestCase("EECS023", "Remove the filter",
-        "[With<P>] public struct Q : IComponent { public int V; }",
-        "public struct Q : IComponent")]
+        "[With<P>] public struct R : IComponent { public int V; }",
+        "public struct R : IComponent")]
     [TestCase("EECS023", "Remove the filter",
-        "[System.Serializable, With<P>] public struct Q : IComponent { public int V; }",
-        "[System.Serializable] public struct Q")]
+        "[System.Serializable, With<P>] public struct R : IComponent { public int V; }",
+        "[System.Serializable] public struct R")]
+    [TestCase("EECS025", "Take it by 'in'",
+        "public class S : EcsSystem { [ForEach] static void A(ref P p, ref Clock c) => c.Ticks += p.V; }",
+        "static void A(in P p, ref Clock c)")]
+    [TestCase("EECS025", "Take it as a ReadOnlySpan",
+        "public class S : EcsSystem { [ForEach] static void A(System.Span<P> p, ref Clock c) { for (int i = 0; i < p.Length; i++) c.Ticks += p[i].V; } }",
+        "static void A(System.ReadOnlySpan<P> p, ref Clock c)")]
+    [TestCase("EECS025", "Read it with Read<T>()",
+        "public static class U { public static int F(Entity e) => e.Get<T>().V; }",
+        "=> e.Read<T>().V;")]
+    [TestCase("EECS025", "Read it with .T",
+        "public static class U { public static int F(Entity e) => e.WriteT().V; }",
+        "=> e.T.V;")]
+    [TestCase("EECS026", "Require it with [With<P>]",
+        "public class S : EcsSystem { [ForEach] static void A(in P p, ref Clock c) => c.Ticks++; }",
+        "[ForEach, With<P>] static void A(ref Clock c)")]
+    [TestCase("EECS026", "Remove the parameter",
+        "public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V++; }",
+        "[ForEach] static void A(ref P p)")]
+    [TestCase("EECS026", "Remove the parameter",
+        "public class S : EcsSystem { [ForEach, Changed<T>] static void A(in T t, ref P p) => p.V++; }",
+        "[ForEach, Changed<T>] static void A(ref P p)")]
+    [TestCase("EECS029", "Make it static",
+        "public class S : EcsSystem { [ForEach] void A(ref P p) => p.V++; }",
+        "[ForEach] static void A(ref P p)")]
+    [TestCase("EECS030", "Make it one bulk call",
+        "public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Destroy(); } }",
+        "{ w.DestroyEntities<P>(); }")]
+    [TestCase("EECS030", "Make it one bulk call",
+        "public static class U { public static void F(World w, QueryFilter f) { foreach (var item in w.Query<P>(f)) item.Entity.Set(new Q { V = 1 }); } }",
+        "{ w.SetAll(new Q { V = 1 }, (f).With<P>()); }")]
+    [TestCase("EECS030", "Make it one bulk call",
+        "public static class U { public static void F(World w) { foreach (var item in w.Query<P, Q>()) item.Entity.RemoveQ(); } }",
+        "{ w.RemoveAll<Q>(QueryFilter.Create().With<P>().With<Q>()); }")]
+    [TestCase("EECS031", "Create them in one call",
+        "public static class U { public static void F(World w, Entity[] all) { for (int i = 0; i < all.Length; i++) all[i] = w.CreateEntity(new P()); } }",
+        "{ w.CreateEntities(all, new P()); }")]
+    [TestCase("EECS031", "Reserve room first",
+        "public static class U { public static void F(World w, int n)\n    {\n        for (int i = 0; i < n; i++) w.CreateEntity(new P { V = i });\n    }\n}",
+        "    {\n        w.EnsureCapacity<P>(n);\n        for (int i = 0; i < n; i++)")]
+    [TestCase("EECS032", "Use Any",
+        "public static class U { public static bool F(World w) => w.Count<P>() > 0; }",
+        "=> w.Any<P>();")]
+    [TestCase("EECS032", "Use Any",
+        "public static class U { public static bool F(World w) => w.Count<P>() == 0; }",
+        "=> !w.Any<P>();")]
+    [TestCase("EECS032", "Count them with Count",
+        "public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<P>()) n++; return n; } }",
+        "{ int n = 0; n += w.Count<P>(); return n; }")]
+    [TestCase("EECS033", "Use .P",
+        "public static class U { public static void F(Entity e) => e.Get<P>().V = 1; }",
+        "=> e.P.V = 1;")]
+    [TestCase("EECS033", "Use .WriteT",
+        "public static class U { public static void F(Entity e) => e.Get<T>().V = 1; }",
+        "=> e.WriteT().V = 1;")]
+    [TestCase("EECS033", "Use .T",
+        "public static class U { public static int F(Entity e) => e.Read<T>().V; }",
+        "=> e.T.V;")]
+    [TestCase("EECS033", "Use .HasP",
+        "public static class U { public static bool F(Entity e) => e.Has<P>(); }",
+        "=> e.HasP;")]
+    [TestCase("EECS033", "Use .SetBoss",
+        "public static class U { public static void F(Entity e) => e.Set(new Boss()); }",
+        "=> e.SetBoss();")]
+    [TestCase("EECS033", "Use .Clock",
+        "public static class U { public static int F(World w) => w.GetSingleton<Clock>().Ticks; }",
+        "=> w.Clock.Ticks;")]
+    [TestCase("EECS033", "Use .P",
+        "public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<P>()) n += item.Component1.V; return n; } }",
+        "n += item.P.V;")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
-        var document = Document(Data + source);
+        var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);
         var diagnostic = (await Analyze(document)).First(d => d.Id == id);
 
         var actions = new List<CodeAction>();
@@ -115,9 +188,9 @@ public class CodeFixTests
 
     [TestCase("EECS005", "public class Runner { int x = 1; [ForEach] void A(ref P p) => p.V += x; }")]
     [TestCase("EECS005", "public class Runner { int X() => 1; [ForEach] void A(ref P p) => p.V += this.X(); }")]
-    [TestCase("EECS006", "public partial class Q : IComponent { public int V; }\npublic partial class Q { }")]
-    [TestCase("EECS006", "public class Base { } public class Q : Base, IComponent { public int V; }")]
-    [TestCase("EECS006", "public class Q : IComponent { protected int V; }")]
+    [TestCase("EECS006", "public partial class R : IComponent { public int V; }\npublic partial class R { }")]
+    [TestCase("EECS006", "public class Base { } public class R : Base, IComponent { public int V; }")]
+    [TestCase("EECS006", "public class R : IComponent { protected int V; }")]
     [TestCase("EECS011", "public struct Grid : ISingletonComponent { public System.Collections.Generic.List<int> Cells; }\n"
                          + "public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, in Grid g) => g.Cells.Add(p.V); }")]
     [TestCase("EECS012", "public interface IUse { int Count(DynamicBuffer<int> items); }\n"
@@ -125,6 +198,10 @@ public class CodeFixTests
     [TestCase("EECS012", "public static class Use { public static int Count(DynamicBuffer<int> items) => items.Count;\n"
                          + "  public static int Call(Entity e) => Count(e.Read<DynamicBuffer<int>>()); }", "Take it by 'in' (read)")]
     [TestCase("EECS022", "file struct C : IComponent { public int V; } public class S : EcsSystem { [ForEach] static void A(ref C c) => c.V++; }")]
+    [TestCase("EECS026", "public class S : EcsSystem { [ForEach] static void A(ref P p, ref T t) => p.V++; }")]  // the stamp: [With<T>] would change it
+    [TestCase("EECS025", "public static class R { [ForEach] static void A(ref P p, ref int n) => n += p.V;\n"
+                         + "  public static int Call() { P p = default; int n = 0; A(ref p, ref n); return n; } }")]       // a caller passes 'ref'
+    [TestCase("EECS032", "public static class U { public static bool F(World w) => w.Count<P>(QueryFilter.Create().With<Q>()) > 0; }", "Use Any")]
     public async Task OffersNoFixThatBreaksTheCode(string id, string source, string only = null)
     {
         var document = Document(Data + source);
@@ -145,14 +222,30 @@ public class CodeFixTests
         Assert.That(actions, Is.Empty, "a class is no component: nothing mechanical to do");
     }
 
-    private static Document Document(string source)
+    /// <summary>A one-file project; with <paramref name="generate"/> the generators run as in a build (the generated members exist).</summary>
+    private static Document Document(string source, bool generate = false)
     {
         var workspace = new AdhocWorkspace();
         var project = workspace.AddProject(ProjectInfo.Create(ProjectId.CreateNewId(), VersionStamp.Default, "Test", "Test", LanguageNames.CSharp,
             compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
             parseOptions: CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview),
-            metadataReferences: GeneratorTests.Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location))));
+            metadataReferences: GeneratorTests.Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
+            analyzerReferences: generate ? [new Generators()] : []));
         return workspace.AddDocument(project.Id, "Test.cs", SourceText.From(source));
+    }
+
+    /// <summary>The package's generators, run by the workspace as a build runs them: the generated members exist.</summary>
+    private sealed class Generators : AnalyzerReference
+    {
+        public override string FullPath => "EasyEcs.Generator";
+        public override object Id => typeof(Generators);
+        public override ImmutableArray<DiagnosticAnalyzer> GetAnalyzers(string language) => [];
+        public override ImmutableArray<DiagnosticAnalyzer> GetAnalyzersForAllLanguages() => [];
+        // The same instances every call: the workspace maps each generator back to its reference.
+        private readonly ImmutableArray<ISourceGenerator> _generators =
+            [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator()];
+
+        public override ImmutableArray<ISourceGenerator> GetGenerators(string language) => _generators;
     }
 
     private static async Task<Diagnostic[]> Analyze(Document document)

@@ -23,12 +23,24 @@ public class GeneratorTests
         [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator()], parseOptions: Parse,
         driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true));
 
-    private static async Task<string[]> Diagnose(params string[] sources)
+    /// <summary>
+    /// Errors and the diagnostics of the correctness rules (EECS002-024). The performance rules (EECS025-033) are left
+    /// out: the cases here write the shortest code that shows a rule, which often also costs; <see cref="Costs"/> checks them.
+    /// </summary>
+    private static async Task<string[]> Diagnose(params string[] sources) =>
+        (await Analyze(sources)).Where(d => d.Severity == DiagnosticSeverity.Error || d.Id.StartsWith("EECS") && !IsPerformance(d.Id))
+            .Select(d => d.Id).Distinct().OrderBy(x => x).ToArray();
+
+    /// <summary>The diagnostics of the performance rules (EECS025-034), with their properties for the code fixes.</summary>
+    internal static async Task<Diagnostic[]> Costs(params string[] sources) =>
+        (await Analyze(sources)).Where(d => IsPerformance(d.Id) || d.Id == "EECS034").OrderBy(d => d.Location.SourceSpan.Start).ToArray();
+
+    private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0;
+
+    private static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(sources), out var output, out _);
-        var analyzed = output.WithAnalyzers([new EasyEcsAnalyzer()]);
-        var all = await analyzed.GetAllDiagnosticsAsync();
-        return all.Where(d => d.Severity == DiagnosticSeverity.Error || d.Id.StartsWith("EECS")).Select(d => d.Id).Distinct().OrderBy(x => x).ToArray();
+        return await output.WithAnalyzers([new EasyEcsAnalyzer()]).GetAllDiagnosticsAsync();
     }
 
     private const string Components = """
@@ -745,6 +757,130 @@ public class GeneratorTests
         var reasons = Steps(driver)["QueryShapes"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
         Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(2));
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.New), Is.EqualTo(1));
+    }
+
+    private const string Extra = """
+        public struct Counter : IComponent { public int V; public void Bump() => V++; public readonly int Peek() => V; }
+        public struct Boss : IComponent;
+        public struct Loot { public int Item; }
+        public static class Helpers { public static void Inc(ref int v) => v++; public static int Look(in P p) => p.V; }
+        """;
+
+    // EECS025: a write access that only reads.
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref T t, ref P p) => p.V = t.V; }", "EECS025")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, ref Q q) => p.V = q.V; }", "EECS025")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, ref Clock c) => p.V = c.Ticks; }", "EECS025")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(System.Span<P> p, ref Clock c) { for (int i = 0; i < p.Length; i++) c.Ticks += p[i].V; } }", "EECS025")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref Counter c, ref P p) => p.V = c.Peek(); }", "EECS025")]          // a readonly method
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, ref Q q) => p.V = Helpers.Look(q.V == 0 ? p : default); }", "EECS025")]
+    [TestCase("public static class U { public static int F(Entity e) => e.Get<T>().V; }", "EECS025")]
+    [TestCase("public static class U { public static int F(Entity e) => e.WriteT().V; }", "EECS025")]
+    // EECS026: a parameter the method does not use.
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(in P p, ref Clock c) => c.Ticks++; }", "EECS026")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V++; }", "EECS026")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, World w) => p.V++; }", "EECS026")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, ref Clock c) => p.V++; }", "EECS026")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, ref T t) => p.V++; }", "EECS026")]                       // stamps: no fix
+    [TestCase("public class S : EcsSystem { [ForEach, Changed<T>] static void A(in T t, ref P p) => p.V++; }", "EECS026")]
+    // EECS027: a lookup per row.
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V = e.Q.V; }", "EECS027")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { if (e.HasQ) p.V++; } }", "EECS027")]
+    [TestCase("public class S : EcsSystem { [ForEach] void A(ref P p) => p.V = World.Clock.Ticks; }", "EECS027")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, World w) => p.V = w.HasClock ? 1 : 0; }", "EECS027")]
+    // EECS028: allocations in code that runs every update.
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) { var l = new System.Collections.Generic.List<int>(); p.V = l.Count; } }", "EECS028")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, in Q q) => p.V = new[] { q.V }.Length; }", "EECS028")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, in Q q) { int v = q.V; System.Func<int> f = () => v; p.V = f(); } }", "EECS028")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, in Q q) => p.V = $\"{q.V}\".Length; }", "EECS028")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, in Q q) => p.V = q.V.ToString().Length; }", "EECS028")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, in Q q) { object o = q.V; p.V = o.GetHashCode(); } }", "EECS028")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, in Q q) => p.V = System.Linq.Enumerable.Count(System.Linq.Enumerable.Range(0, q.V)); }", "EECS028")]
+    [TestCase("public class S : EcsSystem { protected override void OnUpdate() => World.Clock.Ticks += new System.Text.StringBuilder().Length; }", "EECS028")]
+    // EECS029: an instance [ForEach] method that uses nothing of its system.
+    [TestCase("public class S : EcsSystem { [ForEach] void A(ref P p) => p.V++; }", "EECS029")]
+    // EECS030: a structural change entity by entity over a query.
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Destroy(); } }", "EECS030")]
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Set(new Q { V = 1 }); } }", "EECS030")]
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P, Q>()) item.Entity.RemoveQ(); } }", "EECS030")]
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) { item.Entity.DisableP(); } } }", "EECS030")]
+    // EECS031: entities created one by one in a counted loop.
+    [TestCase("public static class U { public static void F(World w, int n) { for (int i = 0; i < n; i++) w.CreateEntity(new P { V = i }); } }", "EECS031")]
+    [TestCase("public static class U { public static void F(World w, Entity[] all) { for (int i = 0; i < all.Length; i++) all[i] = w.CreateEntity(new P()); } }", "EECS031")]
+    [TestCase("public static class U { public static void F(World w) { for (int i = 0; i < 10_000; i++) w.CreateEntity(new P()); } }", "EECS031")]
+    // EECS032: query work the world does in one call.
+    [TestCase("public static class U { public static bool F(World w) => w.Count<P>() > 0; }", "EECS032")]
+    [TestCase("public static class U { public static bool F(World w) => 0 == w.Count<P>(); }", "EECS032")]
+    [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<P>()) n++; return n; } }", "EECS032")]
+    [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<P>()) { if (!item.Entity.Has<Q>()) continue; n += item.Component1.V; } return n; } }", "EECS032", "EECS033")]
+    // EECS033: the generated member.
+    [TestCase("public static class U { public static void F(Entity e) => e.Get<P>().V = 1; }", "EECS033")]
+    [TestCase("public static class U { public static bool F(Entity e) => e.Has<P>(); }", "EECS033")]
+    [TestCase("public static class U { public static bool F(Entity e) => e.Has<Boss>(); }", "EECS033")]
+    [TestCase("public static class U { public static void F(Entity e) => e.Set(new Boss()); }", "EECS033")]
+    [TestCase("public static class U { public static void F(Entity e) => e.Remove<P>(); }", "EECS033")]
+    [TestCase("public static class U { public static int F(World w) => w.GetSingleton<Clock>().Ticks; }", "EECS033")]
+    [TestCase("public static class U { public static int F(World w, Entity e) => w.Index<Owned, EntityId>().Count(e); }", "EECS033")]
+    [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<P>()) n += item.Component1.V; return n; } }", "EECS033")]
+    [TestCase("public static class U { public static void F(Entity e) => e.GetOrAdd<DynamicBuffer<Loot>>().Add(new Loot()); static DynamicBuffer<Loot> named; }", "EECS033")]
+    // EECS034: a world update from a system.
+    [TestCase("public class S : EcsSystem { protected override void OnUpdate() => World.Update(); }", "EECS034")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, in P p) { if (p.V == 0) e.World.Update(); } }", "EECS034")]
+    public async Task CostsAreReported(string source, params string[] ids)
+    {
+        var costs = await Costs(Components, Extra, source);
+        Assert.That(costs.Select(d => d.Id).Distinct().OrderBy(x => x), Is.EqualTo(ids),
+            string.Join("\n", costs.Select(d => d.GetMessage())));
+        Assert.That((await Diagnose(Components, Extra, source)).Where(e => e.StartsWith("CS")), Is.Empty, "the case compiles");
+    }
+
+    // The tricky "written" cases: every form of a write keeps the write access.
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) => p.V = 1; }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) => p.V++; }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) => p.V += 2; }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) => p = default; }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) => Helpers.Inc(ref p.V); }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref Counter c) => c.Bump(); }")]                                    // a mutating method
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) { ref var x = ref p; x.V = 2; } }")]                         // a ref local
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) { ref int v = ref p.V; v = 3; } }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref DynamicBuffer<int> b) => b.Add(1); }")]                         // a 'this ref' extension
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(System.Span<P> p) => p.Fill(default); }")]                            // a Span method
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(System.Span<P> p) { foreach (ref var x in p) x.V++; } }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(System.Span<P> p) => p[0].V = 1; }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p) => (p.V, _) = (1, 2); }")]                                // a deconstruction
+    [TestCase("public static class U { public static void F(Entity e) { ref var t = ref e.Get<T>(); t.V++; } }")]
+    [TestCase("public static class U { public static void F(Entity e) => e.Get<T>().V = 1; }")]
+    [TestCase("public static class U { public static void F(Entity e) => e.WriteT().V = 1; }")]
+    public async Task WritesKeepTheWriteAccess(string source)
+    {
+        var costs = await Costs(Components, Extra, source);
+        Assert.That(costs.Select(d => d.Id), Has.None.EqualTo("EECS025").And.None.EqualTo("EECS026"), string.Join("\n", costs.Select(d => d.GetMessage())));
+    }
+
+    // Not reported: used, filters, branches, small or reserved creation, and the code each rule leaves alone.
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(in P p, ref Clock c) { } }")]                                           // being written
+    [TestCase("public class S : EcsSystem { [ForEach, With<P>] static void A(ref Clock c) => c.Ticks++; }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { if (p.V > 0) p.V = e.Q.V; } }")]       // some rows only
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { if (p.V > 0) return; p.V = e.Q.V; } }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) { if (e.HasQ) e.RemoveQ(); p.V++; } }")]    // changed here
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V = e.Owned.Owner.Index; }")]               // indexed
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, in Q q) { if (q.V < 0) throw new System.InvalidOperationException($\"{q.V}\"); p.V = q.V; } }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, in Q q) { System.Diagnostics.Debug.Assert(q.V >= 0, $\"{q.V}\"); p.V = q.V; } }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(in P p, in Q q) => System.Console.WriteLine($\"{p.V} {q.V}\"); }")]
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(ref P p, in Q q) { System.Func<int, int> f = static x => x + 1; p.V = f(q.V); } }")]
+    [TestCase("public class S : EcsSystem { public override int UpdateInterval => 20; protected override void OnUpdate() => World.Clock.Ticks += new int[4].Length; }")]
+    [TestCase("public class S : EcsSystem { [ForEach] void A(ref P p) => p.V = World.UpdateCount > 0 ? 1 : 0; }")]                      // uses its system
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Set(new P { V = 1 }); } }")]   // overwrites
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Set(new Q { V = item.Entity.Id.Index }); } }")]
+    [TestCase("public static class U { public static void F(World w) { for (int i = 0; i < 100; i++) w.CreateEntity(new P()); } }")]
+    [TestCase("public static class U { public static void F(World w, int n) { w.EnsureCapacity<P>(n); for (int i = 0; i < n; i++) w.CreateEntity(new P { V = i }); } }")]
+    [TestCase("public class S : EcsSystem { protected override void OnUpdate() { for (int i = 0; i < World.Clock.Ticks; i++) World.CreateEntity(new P()); } }")]
+    [TestCase("public static class U { public static bool F(World w) => w.Count<P>() > 2; }")]
+    [TestCase("public static class U { public static void F(Entity e) => e.GetOrAdd<DynamicBuffer<Loot>>().Add(new Loot()); }")]          // the only name of the buffer
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p) { } }")]
+    public async Task CheapCodeIsNotReported(string source)
+    {
+        var costs = await Costs(Components, Extra, source);
+        Assert.That(costs.Select(d => d.Id), Is.Empty, string.Join("\n", costs.Select(d => d.GetMessage())));
     }
 
     /// <summary>Framework references of the running test host (enough for the generated code to compile).</summary>
