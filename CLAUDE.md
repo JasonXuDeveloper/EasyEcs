@@ -63,7 +63,7 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
                                lookup, kept by Set / CreateEntities / Remove / Destroy
   OrderedIndex.cs              sorted walks and ranges of a value index with a comparable key
   Relations.cs                 IRelation buffers + RelationIndex<T> (entities linking to a target)
-  Hierarchy.cs                 Parent (the hierarchy relation); World.Hierarchy.cs: Children, destroy cascades,
+  Hierarchy.cs                 ChildOf (the hierarchy relation); World.Hierarchy.cs: Children, destroy cascades,
                                TargetRules (what happens to links when their target is destroyed)
   World.Groups.cs              GroupBy: tables split by the value of an IGroup component
   Cleanup.cs                   ICleanupComponent + Destroyed tag (entities kept until their cleanup components go)
