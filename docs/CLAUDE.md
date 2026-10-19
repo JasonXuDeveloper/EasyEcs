@@ -131,6 +131,10 @@ scripts/                 generate-static.ts, og.ts, lint-links.ts, sync-benchmar
 - The browser bundle of a page leaves out `_markdown` and `structuredData` (build-time only, `vite.config.ts`); the
   search dialog loads lazily, then fetches its language's index only.
 - Off-screen code blocks skip layout and paint (`content-visibility: auto`, `app/app.css`).
+- Charts stay cheap: a prerendered chart hydrates only near the viewport (`src/components/charts/index.tsx`, no
+  wrapper element), its memoized SVG re-renders only for a new width (hover, focus and reveal flip data
+  attributes), and an off-screen plot skips rendering (`.ecs-chart-plot`); `patches/next-themes` skips the
+  whole-document restyle of applying an unchanged theme on mount.
 - `public/_headers`: hashed assets immutable, icons and the manifest a day, the search indexes five minutes; HTML keeps
   Cloudflare's default (revalidated).
 
