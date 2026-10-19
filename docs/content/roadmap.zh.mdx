@@ -18,7 +18,7 @@ import { RotateCcwClock, Lightbulb } from 'lucide-react';
 生成器已经会写 `entity.Health`、`HasHealth`、`SetHealth(…)`、`IsDead`、单例组件成员、`world.XIndex`、缓冲成员、
 命名的查询元素、预制体的缓冲写方法，以及 job 和访问集。每次发布前都会重新过一遍 API、[战斗服示例](/zh/docs/example)和各篇指南：
 用户写了两遍的代码都是生成成员的候选，没人用的生成成员就删掉。候选能在真实代码里省下代码、又不给每次调用加开销才会加入；
-只是换个写法的会被否决（[D26](/zh/docs/decisions#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call)）。
+只是换个写法的会被否决（[D26](/zh/docs/decisions#d26-generated-members-and-a-suggestion-to-use-them)）。
 
 ### 工具链与运行时 [#toolchain-and-runtime]
 
@@ -38,8 +38,8 @@ import { RotateCcwClock, Lightbulb } from 'lucide-react';
   而 ECS 代码恰恰在这些地方持有实体（[D19](/zh/docs/decisions#d19-no-settable-tag-properties)）。
 - 扁平的 `[InlineArray]` 备忘、存档类型表用 `FrozenDictionary`、`OverloadResolutionPriority`、`field`：测过或权衡过，没有净收益
   （[D21](/zh/docs/decisions#d21-net-10-features-only-where-they-measure)）。
-- 多类型的 `Disable` / `Enable` 和批量调用，以及"改用生成成员"的诊断
-  （[D26](/zh/docs/decisions#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call)）。
+- 多类型的 `Disable` / `Enable` 和批量调用
+  （[D26](/zh/docs/decisions#d26-generated-members-and-a-suggestion-to-use-them)）。
 - 生成 `world.AddSystems()`：系统按注册顺序运行，这份列表就是 tick 的顺序，应当在构建 World 的地方读到。
 - 读单例时发现缺失就自动添加（`world.X`、`GetSingleton<T>()`、`[ForEach]` 参数）：缺单例说明忘了初始化，而默认值很少是对的
   （步长为零的时钟），所以所有读取都抛异常；确实要默认值的地方用 `GetOrAddX()`

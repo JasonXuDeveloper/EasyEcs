@@ -43,9 +43,10 @@ after the change on the machine of the time; they are history, not the current r
 | [D23](#d23-change-summaries-per-block-removals-summarized-apart) | Change summaries per block; removals summarized apart |
 | [D24](#d24-an-indexs-key-holds-its-entities-in-one-array) | An index's key holds its entities in one array |
 | [D25](#d25-structural-row-loops-are-compiled-for-tables-without-tombstones) | Structural row loops are compiled for tables without tombstones |
-| [D26](#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call) | Generated members where code would repeat a type; not for every call |
+| [D26](#d26-generated-members-and-a-suggestion-to-use-them) | Generated members where code would repeat a type, and a suggestion to use them |
 | [D27](#d27-reading-a-missing-singleton-throws-everywhere) | Reading a missing singleton throws everywhere |
 | [D28](#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap) | Reservations grow to what they need; entity storage on the pinned heap |
+| [D29](#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same) | Performance rules only where the cost is measured and the fix does the same |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -109,8 +110,8 @@ public struct Spawned : IComponent;                                  // a tag: "
 
 public class GreetSystem : EcsSystem
 {
-    [ForEach, With<Spawned>]
-    static void Greet(Entity entity, in Health hp) => entity.RemoveSpawned();   // first-time work, then a bit flip
+    [ForEach, With<Spawned>, With<Health>]
+    static void Greet(Entity entity) => entity.RemoveSpawned();   // first-time work, then a bit flip
 }
 ```
 
@@ -417,29 +418,40 @@ command buffer 77 μs); 1,000 killed and BattleServer unchanged.
 **Considered.** Holding the storage version seen in a register instead of re-reading it per row: 82 -> 108 μs (the
 job's call leaves too few callee-saved registers, a column ref spills and round-trips the stack every row).
 
-## D26. Generated members where code would repeat a type; not for every call [#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call]
+## D26. Generated members where code would repeat a type, and a suggestion to use them [#d26-generated-members-and-a-suggestion-to-use-them]
 
-**Decision.** The generator names three more things. A query item's components get names: `item.Position` for
-`item.Component1`, generated per `Query<…>` shape the code calls. A buffer element gets writers on prefabs:
-`prefab.SetLoot(…)`, on `Prefab.SetBuffer<T>(params ReadOnlySpan<T>)`. Code fixes are offered only when their result
-compiles. Two proposals were dropped: multi-type `Disable` / `Enable` and bulk calls, and a hidden "use the generated
-member" diagnostic.
+**Decision.** A query item's components have names: `item.Position` for `item.Component1`, generated per `Query<…>`
+shape the code calls. A buffer element has writers on prefabs: `prefab.SetLoot(…)`, on
+`Prefab.SetBuffer<T>(params ReadOnlySpan<T>)`. The analyzer suggests the generated member wherever code calls the
+generic API (EECS033, Info, with a code fix): `entity.Get<Position>()` as `entity.Position`, `Has<T>()` as `HasX` or
+`IsX`, `Set(new T(…))` as `SetX(…)`, `GetSingleton<T>()` as `world.X`, `Index<T, TKey>()` as `world.XIndex`,
+`item.Component1` as `item.Position`, and the other members the generator writes. Multi-type `Disable` / `Enable` and
+multi-type bulk calls are not built.
 
 **Why.**
 - **Query items.** `Component1..n` makes the reader count the type arguments. The named member is an inlined getter
   over the same ref, so it costs nothing. One file per shape keeps an assembly's output to the shapes it uses; one
   extension block per component and position would mean 45 blocks per component.
-- **Prefab buffers.** Before `SetBuffer`, a prefab could hold only an empty buffer: filling one meant copying a
+- **Prefab buffers.** Without `SetBuffer`, a prefab could hold only an empty buffer: filling one meant copying a
   buffer value, which EECS012 rejects. A relation gets no prefab writer, because a recipe's links would name the
   prefab's own rows.
+- **The suggestion.** The docs, samples and templates write the generated members, and code that mixes both spellings
+  reads worse than either. The rewrite is offered only where it means exactly the same call: the member must be
+  generated for that type in that compilation (checked by binding the replacement), and it must return the same kind
+  of reference: `Get<T>()` of a tracked component, whose property is `ref readonly`, becomes `WriteX()` (an indexed
+  component has no writer, so its `Get<T>()` keeps its spelling).
+  A buffer's members exist only while code names `DynamicBuffer<T>`, so the suggestion is not made where the call
+  is the last such name. It is Info: a suggestion in the IDE that does not fail a build, since generic code needs the
+  generic API and the two spellings compile to the same call. The analyzer's operation callback on invocations
+  already runs for EECS025 and EECS034, so the suggestion adds one symbol check per call.
 
 **Considered.**
-- **`Disable<T1..Tn>()`, `RemoveAll<T1..Tn>()` and the other bulk calls.** After a table's first disable, each call
-  flips presence bits in place. n calls cost n gate entries of a few nanoseconds, and a bulk call over several types
-  needs a meaning for "has any of them" that one-type calls do not. Not built.
-- **A hidden diagnostic with a fix from `entity.Get<Position>()` to `entity.Position`.** It is style, not
-  correctness: the two compile to the same call. It would add an operation callback to every invocation in every
-  user project. The docs teach the generated members; generic code needs the generic API.
+- **`Disable<T1..Tn>()`, `RemoveAll<T1..Tn>()` and the other multi-type calls.** After a table's first disable, each
+  call flips presence bits in place. n calls cost n gate entries of a few nanoseconds, and a bulk call over several
+  types needs a meaning for "has any of them" that one-type calls do not. Not built.
+- **A warning instead of a suggestion.** It would fail builds that treat warnings as errors over spelling alone.
+- **Rewriting `SingletonRef<T>.Value` as `world.X`.** A `SingletonRef<T>` keeps the singleton's slot, so the
+  rewrite would add a lookup per access. Not suggested.
 
 ## D27. Reading a missing singleton throws everywhere [#d27-reading-a-missing-singleton-throws-everywhere]
 
@@ -514,6 +526,62 @@ steps of a doubling stay on the large object heap.
   disposed world still index them unchecked, and the pool would keep memory a process has finished with.
 - **A count-only `CreateEntities(count, values)`** without the handle span: not needed once the bulk call stays under
   both budgets with the span.
+
+## D29. Performance rules only where the cost is measured and the fix does the same [#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same]
+
+**Decision.** The analyzer reports code that works but does more than it needs, as EECS025 to EECS034. A rule is a
+warning when a benchmark shows its cost and the code it points to is wrong in every program that writes it; a
+suggestion (Info) when the rewrite pays only in some programs or only reads better; an error when the code cannot
+work. A rule ships only when its fix does the same thing, and a code fix is offered only when the analyzer has bound
+the replacement. Candidates without a measured cost, or with a fix that changes behavior, were dropped.
+
+| Rule | Severity | Measured (100,000 entities) |
+| --- | --- | --- |
+| EECS025 a write access that only reads | Warning | a tracked `ref` 306 µs, `in` 271 µs; untracked equal (270 / 276 µs): the cost is the write set |
+| EECS026 an unused parameter | Warning | per row equal (41 / 46 µs); an `Entity` or `World` makes the system run alone, a `ref` of a tracked component stamps every row |
+| EECS027 a lookup per row | Warning | `entity.Read<T>()` 258 µs, a parameter 40 µs; `Has<T>()` 208 µs, `Maybe<T>` 86 µs; a singleton through the `World` 105 µs, a parameter 48 µs |
+| EECS028 an allocation every update | Warning | garbage every tick; the [Don't](/en/docs/performance#dont) list |
+| EECS029 an instance `[ForEach]` method | Warning | instance 104 µs, static 41 µs |
+| EECS030 a structural change per entity over a query | Warning | `BulkBenchmark`: entity by entity 19.1x the time of `SetAll` / `RemoveAll`, about 99x that of `DisableAll` / `EnableAll` |
+| EECS031 creation one by one in a counted loop | Info | a fresh world only ([D28](#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)); `MicroBenchmarks.Churn` 2.1x the time of `ChurnBatch` |
+| EECS032 counting and testing by hand | Info | `Count() > 0` 429 ns, `Any()` 18.6 ns; a `Has<T>()` test in the loop 332 µs, a filter 59.5 µs |
+| EECS033 the generated member | Info | the same call ([D26](#d26-generated-members-and-a-suggestion-to-use-them)) |
+| EECS034 a world update inside a system | Error | recursion, or systems run in the middle of a stage |
+
+`AccessBenchmark` measures each pair (BenchmarkDotNet, a shared 4-core Xeon at 2.1 GHz, .NET 10.0.13); every variant
+allocates nothing.
+
+**Why.**
+- **Warnings fail builds that treat warnings as errors**, so each must be right wherever it fires. The rules read
+  every use before they report: EECS025 counts an assignment, `++`, a `ref` or `out` argument, a method that is not
+  `readonly`, a `ref` local and a `this ref` extension as a write; EECS027 reports only lookups made on every row,
+  of components the method does not change itself; EECS028 leaves out `throw`, `[Conditional]` calls, console
+  output, and the `OnUpdate` of a system with its own `UpdateInterval`; EECS030 leaves out a `Set` that overwrites
+  a component the query requires and one of a grouped component (its rows move one by one in `SetAll` too).
+- **Suggestions where the gain depends on the program.** A reservation pays only in a world growing to that size for
+  the first time, so EECS031 leaves out constant counts under 4,096 (no array reaches the large object heap) and loops
+  in systems (a running world reuses its rows). `Any` and filters pay in proportion to the rows a loop would visit.
+- **The fix is the rule's proof.** Each replacement is bound in place before it is offered: a member that is not
+  generated, a filter that does not compile or a caller that passes `ref` to the method means no fix.
+
+**Considered.**
+- **Several components added or removed one call at a time** (`e.Set(a); e.Set(b);` as `e.Set(a, b)`): 500.7 µs one
+  by one against 480.7 µs together, and 290.1 against 308.7 µs for two 16-byte components. The second move is as
+  cheap as the first once the transition is cached. Dropped.
+- **A tag taken as a parameter instead of `[With<T>]`**: 37.7 against 38.6 µs; what costs is the access it
+  declares, which EECS026 already reports for any unused parameter.
+- **`[Changed<T>]` of an untracked component**: the attribute's constraint already fails it (CS0315).
+- **`Parallel = true` on structural or tiny work**: structural work is EECS010; whether a pass is tiny depends on the
+  entity counts at run time.
+- **Conflicts between systems of a parallel stage and redundant orderings**: the stages are formed from the order the
+  host adds systems in, at run time; a redundant `[UpdateAfter<T>]` costs nothing.
+- **`World.Update` from another thread**: a world may run on any one thread that owns it (one world per thread), and
+  EECS014 reports the structural calls that race with its owner.
+- **Hand-written `Query` loops in `OnUpdate`, `Capture` or `Describe` on the hot path, value index lookups in loops**:
+  `Query` is a supported API whose costs EECS030 and EECS032 already name; a snapshot per tick is how rollback works;
+  an index lookup is O(1) and a `[ForEach]` method cannot hoist it. No rule.
+- **A `QueryFilter` built per call instead of kept in a `static readonly` field**: a filter is a small struct with no
+  references ([D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references)); not measured as a cost. No rule.
 
 ## Related [#related]
 

@@ -1,13 +1,15 @@
 ---
 title: 分析器规则
-seoTitle: "EasyEcs 分析器规则 EECS002-EECS024：每条 C# 诊断的含义与修法"
-description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS024：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
+seoTitle: "EasyEcs 分析器规则 EECS002-EECS034：每条 C# 诊断的含义与修法"
+description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS034：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
 icon: ShieldCheck
 ---
 
-EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/docs/ecs-principles)的代码编译不过。除了三条警告，所有规则都是错误；
-这三条针对的是能跑、但有代价的写法（EECS017、EECS018、EECS020）。生成器会跳过无效输入，由分析器报出来，所以"没生成"一定意味着
-"报了错"。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
+EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/docs/ecs-principles)的代码编译不过。正确性规则（EECS002 到 EECS024）
+除了三条警告都是错误；这三条针对的是能跑、但有代价的写法（EECS017、EECS018、EECS020）。生成器会跳过无效输入，由分析器报出来，
+所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034）找的是能跑、但做了多余工作的代码：代价经过测量的是警告
+（[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)），改写只对部分程序有帮助、
+或者只是更好读的是建议（信息级别），在系统里执行世界更新是错误。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
 
 ## 什么时候看 [#when-to-use-it]
 
@@ -17,7 +19,8 @@ EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/doc
 </Callout>
 
 <Callout type="warn" title="不要">
-  用 `#pragma` 压掉 `EECS` 错误：生成器已经跳过了规则所指的方法或类型，它需要的代码根本不存在。三条警告可以压掉，代价就是它们描述的那些。
+  用 `#pragma` 压掉 `EECS` 错误：生成器已经跳过了规则所指的方法或类型，它需要的代码根本不存在。警告可以压掉，代价就是它们描述的那些；建议（信息级别）只在 IDE 里显示，
+  在 `.editorconfig` 里写 `dotnet_diagnostic.EECS033.severity = warning` 可以让整个项目把它当警告报出来。
 </Callout>
 
 ## 全部规则 [#rules]
@@ -47,6 +50,16 @@ EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/doc
 | [EECS022](#eecs022) | 错误 | 生成的代码能访问 `[ForEach]` 方法用到的类型 | 改成 internal |
 | [EECS023](#eecs023) | 错误 | 过滤器只放在 `[ForEach]` 方法和系统分组上 | 删掉过滤器 |
 | [EECS024](#eecs024) | 错误 | `[ForEach]` 不能放在局部函数上 | |
+| [EECS025](#eecs025) | 警告 | 写访问没有只读 | `in`、`ReadOnlySpan<T>`、`Read<T>()` |
+| [EECS026](#eecs026) | 警告 | `[ForEach]` 方法用到自己的参数 | `[With<T>]`，或删掉参数 |
+| [EECS027](#eecs027) | 警告 | 每行都要查的数据，作为 `[ForEach]` 参数传入 | |
+| [EECS028](#eecs028) | 警告 | 每次更新都执行的代码不分配内存 | |
+| [EECS029](#eecs029) | 警告 | 实例 `[ForEach]` 方法用到自己的系统 | 改成 static |
+| [EECS030](#eecs030) | 警告 | 对查询结果的结构变化用一次批量调用 | 批量调用 |
+| [EECS031](#eecs031) | 信息 | 计数循环里的实体一起创建，或先预留容量 | `CreateEntities`、`EnsureCapacity` |
+| [EECS032](#eecs032) | 信息 | 计数和过滤交给世界 | `Any`、`Count` |
+| [EECS033](#eecs033) | 信息 | 生成的成员写起来更短 | 生成的成员 |
+| [EECS034](#eecs034) | 错误 | 系统里不执行世界更新 | |
 
 ## EECS002 [#eecs002]
 
@@ -189,7 +202,7 @@ public record struct Spawned(int Count) : ISingletonComponent;
 
 public class SpawnSystem : EcsSystem
 {
-    protected override void OnUpdate() => World.GetOrAddSingleton<Spawned>().Count++;
+    protected override void OnUpdate() => World.GetOrAddSpawned().Count++;
 }
 ```
 
@@ -224,7 +237,7 @@ public class KillSystem : EcsSystem
 public sealed class ScoreSystem : EcsSystem
 {
     // 一次遍历销毁所有尸体并返回数量：每个只算一次
-    protected override void OnUpdate() => World.GetOrAddSingleton<Score>().Deaths += World.DestroyEntities<Dead>();
+    protected override void OnUpdate() => World.GetOrAddScore().Deaths += World.DestroyEntities<Dead>();
 }
 ```
 
@@ -396,7 +409,7 @@ public class MarkTargets : EcsSystem
     [ForEach, With<Target>]
     static void Mark(Entity hunter, in Target target, World world)
     {
-        hunter.Remove<Target>();                                       // 通过参数改：这个系统单独运行
+        hunter.RemoveTarget();                                       // 通过参数改：这个系统单独运行
         if (world.TryGetEntity(target.Id, out var prey)) prey.SetDoomed();   // 遍历也能察觉这一次
     }
 }
@@ -511,7 +524,7 @@ public class ReplicateFire : EcsSystem
 }
 ```
 
-读实体的其他组件（行里还保留着它们），"重新添加"或"被写入"放到另一个带 `[Changed<T>]` 的方法里处理：
+读实体的其他组件（行里还保留着它们），“重新添加”或“被写入”放到另一个带 `[Changed<T>]` 的方法里处理：
 
 ```csharp
 public class ReplicateFire : EcsSystem
@@ -546,7 +559,7 @@ public class ChaseSystem : EcsSystem
     [ForEach]
     static void Follow(ref Position p, in Chase chase, World world)
     {
-        if (world.TryGetEntity(chase.Prey, out var prey)) p = prey.Read<Position>();   // 已经没了：id 什么也找不到
+        if (world.TryGetEntity(chase.Prey, out var prey)) p = prey.Position;   // 已经没了：id 什么也找不到
     }
 }
 ```
@@ -694,7 +707,7 @@ public static class Report
     public static int Alive(World world)
     {
         int alive = 0;
-        [ForEach] static void Count(in Health hp, ref int alive) => alive++;   // 谁也调用不了它
+        [ForEach, With<Health>] static void Count(ref int alive) => alive++;   // 谁也调用不了它
         return alive;
     }
 }
@@ -705,7 +718,7 @@ public static class Report
 ```csharp
 public static class Report
 {
-    [ForEach] static void Count(in Health hp, ref int alive) => alive++;
+    [ForEach, With<Health>] static void Count(ref int alive) => alive++;
 
     public static int Alive(World world)
     {
@@ -714,6 +727,277 @@ public static class Report
         return alive;
     }
 }
+```
+
+## EECS025 [#eecs025]
+
+**只读的写访问。** 警告。代码修复：组件或单例改成 `in`，span 改成 `ReadOnlySpan<T>`，`Get<T>()` 改成 `Read<T>()`，
+`WriteX()` 改成 `.X`。
+
+`ref` 参数（批量方法里的 `Span<T>`）会把它的类型放进系统的写集合：任何[并行阶段](/zh/docs/guide/threading#parallel-systems)
+都不会让这个系统和读该类型的系统同时运行。如果是[追踪变化的组件](/zh/docs/guide/change-tracking)，方法访问的每一行还会被打上
+变化戳，`[Changed<T>]` 系统就会去处理没人改过的行。`entity.Get<T>()` 和生成的 `entity.WriteX()` 同样会给行打戳。
+规则会逐个检查用法：赋值、`++`、`ref` 或 `out` 实参、非 `readonly` 方法、`ref` 局部变量、`this ref` 扩展方法
+（`DynamicBuffer<T>.Add`）都算写入，遇到这些就保留写访问。
+
+```csharp
+public record struct Armor(int Value) : IComponent, ITrackChanges;
+```
+
+```csharp doccheck=expect-EECS025
+public class ArmorBonus : EcsSystem
+{
+    [ForEach]
+    static void Apply(ref Armor armor, ref Health health) => health = new Health(health.Value + armor.Value);   // armor 只被读取
+}
+```
+
+用 `in` 读：
+
+```csharp
+public class ArmorBonus : EcsSystem
+{
+    [ForEach]
+    static void Apply(in Armor armor, ref Health health) => health = new Health(health.Value + armor.Value);
+}
+```
+
+## EECS026 [#eecs026]
+
+**方法没有用到的 `[ForEach]` 参数。** 警告。代码修复：组件改成 `[With<T>]` 过滤器（已有 `[With<T>]` 或 `[Changed<T>]`
+要求它时直接删掉）；`Entity`、`World`、`EntitySpan`、单例或 `Maybe<T>` 直接删掉。
+
+每个参数在每一行或每一遍上都有开销：组件的列要加载、要前进，单例要解析、要作为一次访问参与调度，`Entity` 每行都要构造句柄，
+而且和 `World` 一样会让系统[单独运行](/zh/docs/guide/threading#parallel-systems)。方法只要求实体有某个组件时，用过滤器表达。
+没用到的追踪组件 `ref` 参数会报告，但不提供修复：它会给访问到的每一行打戳，换成 `[With<T>]` 就不会了。方法体为空时视为
+还在编写中，不报告。
+
+```csharp
+public record struct Survivors(int Count) : ISingletonComponent;
+```
+
+```csharp doccheck=expect-EECS026
+public class CountSurvivors : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Count(in Health health, ref Survivors survivors) => survivors = new Survivors(survivors.Count + 1);
+}
+```
+
+用过滤器要求这个组件：
+
+```csharp
+public class CountSurvivors : EcsSystem
+{
+    [ForEach, With<Health>, Without<Dead>]
+    static void Count(ref Survivors survivors) => survivors = new Survivors(survivors.Count + 1);
+}
+```
+
+## EECS027 [#eecs027]
+
+**参数一次就能拿到的数据，却每行查一次。** 警告。无代码修复。
+
+`[ForEach]` 方法的参数按表或按遍解析一次：组件是循环顺着走的一列，单例是循环开始前取好的 `ref`。通过被访问的 `Entity`
+（`entity.Velocity`、`entity.Has<T>()`、`entity.TryGet<T>(...)`）或 `World`（`World.Clock`）查同样的数据，每一行都要重新查一遍：
+实体记录、所在的表、对应的列。规则只报告每一行都会执行的查询（不在分支、循环里，也不在提前 `return` 之后），并且排除方法自己
+添加或移除的组件和带索引的组件。
+
+```csharp doccheck=expect-EECS027
+public class Drift : EcsSystem
+{
+    [ForEach]
+    static void Move(Entity entity, ref Position position) =>
+        position = new Position(position.X + entity.Velocity.X, position.Y + entity.Velocity.Y);
+}
+```
+
+把组件作为参数（`in`、`ref`，部分实体没有它时用 `Maybe<T>`；判断有没有某个组件，用 `Maybe<T>` 或者拆成 `[With<T>]` /
+`[Without<T>]` 两个方法），单例也作为参数：
+
+```csharp
+public class Drift : EcsSystem
+{
+    [ForEach]
+    static void Move(ref Position position, in Velocity velocity) =>
+        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+}
+```
+
+## EECS028 [#eecs028]
+
+**每次更新都会执行的代码里有分配。** 警告。无代码修复。
+
+`[ForEach]` 方法对访问到的每个实体都执行一次，`OnUpdate` 每次更新执行一次，所以它们分配的内存每个 tick 都会变成垃圾，
+由此触发的回收会让整个世界停顿。规则会指出每一个会分配的表达式：对象或数组、捕获变量的 lambda、实例方法组、LINQ、运行时拼出来的
+字符串（`$"..."`、`+`、`string.Format`、`ToString()`）、装箱，以及对接口做 `foreach`。不报告的情况：`throw` 里的代码、会被编译器
+去掉的调用（`[Conditional]`，例如 `Debug.Assert`）、控制台输出（写入本身比字符串更贵），以及重写了 `UpdateInterval` 的系统的
+`OnUpdate`（执行频率是作者选的）。
+
+```csharp doccheck=expect-EECS028
+public class Steer : EcsSystem
+{
+    [ForEach]
+    static void Aim(in Position position, ref Velocity velocity)
+    {
+        var path = new List<Position> { position };   // 每个实体、每次更新都新建一个列表
+        velocity = new Velocity(-path[0].X, -path[0].Y);
+    }
+}
+```
+
+值放在结构体、span 和 `stackalloc` 里；要复用的集合放进组件，或者放进以 `ref` 传入的单例；传数值，不传字符串：
+
+```csharp
+public class Steer : EcsSystem
+{
+    [ForEach]
+    static void Aim(in Position position, ref Velocity velocity)
+    {
+        Span<Position> path = stackalloc Position[1];
+        path[0] = position;
+        velocity = new Velocity(-path[0].X, -path[0].Y);
+    }
+}
+```
+
+## EECS029 [#eecs029]
+
+**没用到任何实例成员的实例 `[ForEach]` 方法。** 警告。代码修复：改成 `static`。
+
+实例方法可以通过所在的系统拿到 `World`，所以生成器把它当成可能改变结构的方法：它的系统在并行阶段里只能单独运行，遍历行时
+也要带上结构变化所需的检查。不接收 `Entity` 或 `World` 的静态方法可以证明不会改变结构（[EECS013](#eecs013)）。
+
+```csharp doccheck=expect-EECS029
+public class MoveSystem : EcsSystem
+{
+    [ForEach]
+    void Move(ref Position position, in Velocity velocity) =>
+        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+}
+```
+
+改成静态方法：
+
+```csharp
+public class MoveSystem : EcsSystem
+{
+    [ForEach]
+    static void Move(ref Position position, in Velocity velocity) =>
+        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+}
+```
+
+## EECS030 [#eecs030]
+
+**对查询结果逐个实体做结构变化。** 警告。代码修复：改成批量调用。
+
+逐个实体做结构变化，每次调用只移动（或翻转）一行，每次都要经过结构闸门。`SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`
+和 `DestroyEntities` 会一起修改一张表里所有匹配的行，一次处理整字的行（[批量修改](/zh/docs/guide/bulk)）。规则报告这样的
+`foreach`：遍历 `world.Query<...>()`，循环体只有一个这类调用，作用在 item 的实体上，且每一行用的值都一样。对查询已经要求的
+组件做 `Set` 只是写值，不移动行，不报告。
+
+```csharp doccheck=expect-EECS030
+foreach (var item in world.Query<Health>(QueryFilter.Create().With<Dead>()))
+    item.Entity.Destroy();
+```
+
+一次调用：
+
+```csharp
+world.DestroyEntities<Health>(QueryFilter.Create().With<Dead>());
+```
+
+## EECS031 [#eecs031]
+
+**在计数循环里逐个创建实体。** 信息。代码修复：改成批量调用，或在循环前预留容量。
+
+逐个创建时，表和实体存储按倍增扩容；如果世界从没装过这么多实体，被丢弃的数组可能触发一次完整的垃圾回收
+（[D28](/zh/docs/decisions#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)）。`CreateEntities` 和
+`Instantiate(prefab, span)` 一遍就能创建完；每个实体的值各不相同时，先用 `EnsureCapacity` 预留空间。规则不报告这些循环：
+次数是小于 4,096 的常量（没有数组会进入大对象堆）、前面已经预留过容量、在系统里（运行中的世界会复用已有的行）。
+
+```csharp doccheck=expect-EECS031
+var wave = new Entity[50_000];
+for (int i = 0; i < wave.Length; i++)
+    wave[i] = world.CreateEntity(new Position(0, 0), new Health(100));
+```
+
+值都一样时用一次调用，不一样时先预留：
+
+```csharp
+var spawned = new Entity[50_000];
+world.CreateEntities(spawned, new Position(0, 0), new Health(100));
+
+world.EnsureCapacity<Position, Health>(spawned.Length);
+for (int i = 0; i < spawned.Length; i++)
+    world.CreateEntity(new Position(i, 0), new Health(100));
+```
+
+## EECS032 [#eecs032]
+
+**世界一次调用就能完成的查询工作。** 信息。代码修复：改用 `Any`；只计数的循环改用 `Count`。
+
+`Count` 把匹配的表的行数加起来，`Any` 遇到第一张有行的表就停，两者都不访问行。过滤器会跳过整张表和整字的行，而循环里的判断
+要一行一行地看。规则报告：把 `Count<...>()` 和 0 或 1 比较来判断有没有；只计数的查询 `foreach`；以及第一条语句按 item 实体的
+组件判断来跳过行的循环（这种没有修复：过滤器要写在构造查询的地方）。
+
+```csharp doccheck=expect-EECS032
+bool anyDead = world.Count<Dead>() > 0;
+```
+
+```csharp
+bool someoneDied = world.Any<Dead>();
+foreach (var item in world.Query<Health>(QueryFilter.Create().With<Burning>())) { }   // 用过滤器，而不是在循环里判断
+```
+
+## EECS033 [#eecs033]
+
+**有同等含义的生成成员可用的泛型调用。** 信息。代码修复：改用生成的成员。
+
+生成器会为每个组件、单例、缓冲区元素和查询形状写出[具名成员](/zh/docs/guide/entities-and-components#generated-members)，
+每个成员都调用对应的泛型 API。只有当该成员在当前编译里确实生成了、而且行为完全相同（包括返回的引用种类）时，规则才会建议：
+追踪组件的 `Get<T>()` 改成 `WriteX()`（它的 `entity.X` 是只读的）；缓冲区的成员只在别处代码仍写着 `DynamicBuffer<T>`
+时才建议（生成器只为代码以这种方式写到的元素类型生成缓冲区成员）。
+
+| 泛型写法 | 生成的成员 |
+| --- | --- |
+| `entity.Get<Health>()`、`entity.Read<Health>()` | `entity.Health`（追踪组件用 `WriteHealth()`） |
+| `entity.Has<Health>()`、`entity.Has<Dead>()` | `entity.HasHealth`、`entity.IsDead` |
+| `entity.TryGet<Health>(out h)`、`entity.GetOrAdd<Health>()` | `entity.TryGetHealth(out h)`、`entity.GetOrAddHealth()` |
+| `entity.Set(new Health(100))`、`entity.Set(new Dead())` | `entity.SetHealth(100)`、`entity.SetDead()` |
+| `entity.Remove<Health>()`、`Disable<T>()`、`Enable<T>()`、`IsDisabled<T>()` | `entity.RemoveHealth()`、`DisableHealth()`、`EnableHealth()`、`IsHealthDisabled` |
+| `world.GetSingleton<Clock>()`、`HasSingleton`、`GetOrAddSingleton`、`RemoveSingleton` | `world.Clock`、`HasClock`、`GetOrAddClock()`、`RemoveClock()` |
+| `world.Index<Zone, int>()`、`world.Relations<Friend>()` | `world.ZoneIndex`、`world.FriendIndex` |
+| `item.Component1` | `item.Health` |
+
+```csharp doccheck=expect-EECS033
+int hpGeneric = player.Get<Health>().Value;
+```
+
+```csharp
+int hp = player.Health.Value;
+```
+
+## EECS034 [#eecs034]
+
+**系统里执行世界更新。** 错误。无代码修复。
+
+`World.Update()` 和 `World.Update<TGroup>()` 会运行系统。在系统里调用 `Update()`，会在系统自己的运行过程中再运行它一次，
+直到栈溢出；调用分组更新，会在一个阶段进行到一半时、用这个阶段的变化 tick 运行别的系统。稳定的 `[ForEach]` 方法里调用它，
+报的是 [EECS013](#eecs013)。
+
+```csharp doccheck=expect-EECS034
+public class CatchUp : EcsSystem
+{
+    protected override void OnUpdate() => World.Update();
+}
+```
+
+由托管世界的代码按应有的顺序执行更新和分组：
+
+```csharp
+while (running) world.Update();
 ```
 
 ## 相关页面 [#related]
@@ -725,7 +1009,7 @@ public static class Report
   <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
     `[ForEach]` 方法能接收什么、怎样被调度。
   </Card>
-  <Card title="ECS 原则" href="/zh/docs/ecs-principles">
+  <Card title="ECS 设计原则" href="/zh/docs/ecs-principles">
     分析器背后的规则。
   </Card>
   <Card title="多线程" href="/zh/docs/guide/threading">

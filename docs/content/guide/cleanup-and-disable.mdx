@@ -40,8 +40,8 @@ public record struct Seats(int Released) : ISingletonComponent;
 ```csharp title="ReleaseSeats.cs"
 public class ReleaseSeats : EcsSystem
 {
-    [ForEach, With<Destroyed>]                                // only entities already destroyed // [!code highlight]
-    static void Release(Entity entity, in Seat seat, ref Seats seats)
+    [ForEach, With<Destroyed>, With<Seat>]                    // only entities already destroyed // [!code highlight]
+    static void Release(Entity entity, ref Seats seats)
     {
         seats.Released++;                                     // give the seat back here
         entity.RemoveSeat();                                  // the last cleanup component: the entity is freed
@@ -159,8 +159,8 @@ public record struct Greeted(int Count) : ISingletonComponent;
 
 public class GreetNewcomers : EcsSystem
 {
-    [ForEach, With<Spawned>]
-    static void Greet(Entity entity, in Health health, ref Greeted greeted)
+    [ForEach, With<Spawned>, With<Health>]
+    static void Greet(Entity entity, ref Greeted greeted)
     {
         greeted.Count++;                                     // first-time work
         entity.RemoveSpawned();                              // a bit flip: greeted once
@@ -220,8 +220,8 @@ public class CooldownSystem : EcsSystem
 // Gives back the seats of destroyed players. Removing the last cleanup component frees the entity.
 public class ReleaseSeatsSystem : EcsSystem
 {
-    [ForEach, With<Destroyed>]
-    static void Release(Entity player, in Seat seat, ref Seats seats)
+    [ForEach, With<Destroyed>, With<Seat>]
+    static void Release(Entity player, ref Seats seats)
     {
         seats.Released++;
         player.RemoveSeat();

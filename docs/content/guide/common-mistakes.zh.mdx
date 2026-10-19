@@ -178,7 +178,9 @@ public class KillRewards : EcsSystem
 
 ```csharp
 public record struct Speed(float Value) : IComponent;
+```
 
+```csharp doccheck=expect-EECS025
 public class Throttle : EcsSystem
 {
     [ForEach] static void Apply(ref Velocity v, ref Speed max)   // max 只是读
@@ -201,7 +203,7 @@ public class Throttle : EcsSystem
 }
 ```
 
-没有规则能发现。详见[并行系统](/zh/docs/guide/threading#parallel-systems)。
+由 [EECS025](/zh/docs/guide/analyzer#eecs025) 发现（警告，带代码修复）。详见[并行系统](/zh/docs/guide/threading#parallel-systems)。
 
 ### 对没有追踪的组件用 `[Changed<T>]` [#changed-untracked]
 
@@ -231,7 +233,7 @@ public class ShowGold : EcsSystem
 
 ### 通过 `ref` 读被追踪的组件 [#read-tracked-by-ref]
 
-```csharp
+```csharp doccheck=expect-EECS025
 int before = player.Get<Gold>().Amount;      // Get<T>() 算写：这一行被当成改过
 ```
 
@@ -242,7 +244,7 @@ int before = player.Get<Gold>().Amount;      // Get<T>() 算写：这一行被�
 int amount = player.Gold.Amount;             // ref readonly：不打标记
 ```
 
-没有规则能发现。详见[什么算写入](/zh/docs/guide/change-tracking#what-counts-as-a-write)。
+由 [EECS025](/zh/docs/guide/analyzer#eecs025) 发现（警告，带代码修复）。详见[什么算写入](/zh/docs/guide/change-tracking#what-counts-as-a-write)。
 
 ### `[Removed<T>]` 方法接收了 `T` [#removed-takes-t]
 
@@ -383,7 +385,7 @@ world.Index<ChildOf, EntityId>().WhenTargetDestroyed(TargetPolicy.Remove);   // 
 public struct Fighter : IComponent;
 ```
 
-```csharp
+```csharp doccheck=expect-EECS030
 foreach (var item in world.Query<Fighter>())
     item.Entity.SetFrozen();       // 每个实体一次结构变更
 ```
@@ -394,7 +396,7 @@ foreach (var item in world.Query<Fighter>())
 int frozen = world.SetAll(new Frozen(), QueryFilter.Create().With<Fighter>());
 ```
 
-没有规则能发现。详见[批量变更](/zh/docs/guide/bulk)。
+由 [EECS030](/zh/docs/guide/analyzer#eecs030) 发现（警告，带代码修复）。详见[批量变更](/zh/docs/guide/bulk)。
 
 ## 线程 [#threads]
 

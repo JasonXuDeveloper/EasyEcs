@@ -50,7 +50,7 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
 - **Prefabs that stay out of your queries.** A `Prefab` is a recipe of component values that belongs to no world:
   `world.Instantiate(prefab)` spawns from it (a whole wave in one pass), and no system ever has to filter templates
   out. `entity.Clone()` copies a living entity.
-- **Mistakes fail the build.** The bundled analyzer (EECS002-EECS024, with code fixes) reports invalid `[ForEach]`
+- **Mistakes fail the build.** The bundled analyzer (EECS002-EECS034, with code fixes) reports invalid `[ForEach]`
   methods and systems, class components, stateful systems, systems that reference each other, batch methods mixing
   spans with per-entity parameters, parallel methods that would race, writes through read-only parameters, copied
   dynamic buffers, structural changes off the owner thread, indexed components written behind their index's back,
@@ -92,7 +92,7 @@ costs and when to use it).
 | [Bulk create and destroy](https://ecs.xgamedev.net/docs/guide/entities-and-components#entities) | `CreateEntities`, `Instantiate(prefab, span)`, `DestroyEntities`, `EnsureEntityCapacity` | Spawn and clear waves in one pass through the structural gate. |
 | [Per-system timing](https://ecs.xgamedev.net/docs/guide/systems#measuring-systems) | `WorldOptions.MeasureSystems`, `system.Stats` | Run counts and times of every system. |
 | [Errors](https://ecs.xgamedev.net/docs/guide/systems#errors) | `WorldOptions.SystemErrors`, `system.Error` | A failing system throws out of the update, or is switched off with its exception kept while the tick goes on. |
-| [Analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) | EECS002-EECS024 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
+| [Analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) | EECS002-EECS034 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
 | [Threading and Native AOT](https://ecs.xgamedev.net/docs/guide/threading) | one owner thread per world; no reflection on hot paths | Many worlds per process, one per thread; AOT works with nothing to configure. |
 
 ## Example
@@ -312,6 +312,16 @@ The documentation lives at **[ecs.xgamedev.net](https://ecs.xgamedev.net)**; its
 | [Migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md) | Upgrading from 4.0 to 4.1, from v3 (and from v2). |
 
 The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading order.
+
+## What's new in 4.3
+
+- **Performance rules in the analyzer** ([EECS025 to EECS034](https://ecs.xgamedev.net/en/docs/guide/analyzer#eecs025)): a `ref` that only reads, an
+  unused `[ForEach]` parameter, a lookup through the visited `Entity` on every row, an allocation in code that runs
+  every update, an instance `[ForEach]` method, a structural change entity by entity over a query (warnings);
+  creation one by one in a counted loop, `Count() > 0` instead of `Any()`, and the generic call that has a generated
+  member (suggestions); `World.Update()` inside a system (an error). Most come with a code fix. Builds that treat
+  warnings as errors may need changes: see the
+  [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md#v42--v43).
 
 ## What's new in 4.2
 

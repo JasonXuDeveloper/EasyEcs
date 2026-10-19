@@ -21,7 +21,7 @@ The generator already writes `entity.Health`, `HasHealth`, `SetHealth(…)`, `Is
 the API, the [battle server](/en/docs/example) and the guides are scanned again: every line users write twice is a
 candidate for a generated member, and every generated member nobody uses goes. A candidate ships when it saves lines
 in real code at no cost per call; one that only changes style is rejected
-([D26](/en/docs/decisions#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call)).
+([D26](/en/docs/decisions#d26-generated-members-and-a-suggestion-to-use-them)).
 
 ### Toolchain and runtime [#toolchain-and-runtime]
 
@@ -42,8 +42,8 @@ feature only where it measures ([D21](/en/docs/decisions#d21-net-10-features-onl
   ([D19](/en/docs/decisions#d19-no-settable-tag-properties)).
 - A flat `[InlineArray]` memo, `FrozenDictionary` for saved types, `OverloadResolutionPriority`, `field`: measured or
   weighed, no net win ([D21](/en/docs/decisions#d21-net-10-features-only-where-they-measure)).
-- Multi-type `Disable` / `Enable` and bulk calls, and a "use the generated member" diagnostic
-  ([D26](/en/docs/decisions#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call)).
+- Multi-type `Disable` / `Enable` and bulk calls
+  ([D26](/en/docs/decisions#d26-generated-members-and-a-suggestion-to-use-them)).
 - A generated `world.AddSystems()`: systems run in registration order, so the list is the tick's order and is read
   where the world is built.
 - Singletons added when a read finds them missing (`world.X`, `GetSingleton<T>()`, a `[ForEach]` parameter): a

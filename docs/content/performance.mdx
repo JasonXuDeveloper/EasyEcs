@@ -470,11 +470,20 @@ times every system run.
 - **Don't keep `ref`s across `await` or in fields**: keep the `Entity` handle.
 - **Don't store raw entity indexes**: ids are recycled; store an `EntityId` (index and version).
 - **Don't write lambdas that capture locals** in methods that run every update: the closure is allocated at method
-  entry even when its branch is not taken. `AllocationTests` caught exactly this in `World.Update`.
-- **Don't use LINQ, `params object[]` or string formatting** in per-update code.
-- **Don't take an `Entity` or a singleton parameter a method does not need**: the loop loads it for every row.
+  entry even when its branch is not taken. `AllocationTests` caught exactly this in `World.Update`
+  ([EECS028](/en/docs/guide/analyzer#eecs028)).
+- **Don't use LINQ, `params object[]` or string formatting** in per-update code ([EECS028](/en/docs/guide/analyzer#eecs028)).
+- **Don't take an `Entity` or a singleton parameter a method does not need**: the loop loads it for every row
+  ([EECS026](/en/docs/guide/analyzer#eecs026)).
 - **Don't take a tracked component by `ref` when the method only reads it**: every visited row then counts as
-  changed.
+  changed ([EECS025](/en/docs/guide/analyzer#eecs025)).
+- **Don't look up the visited entity's components or a singleton inside a `[ForEach]` method**: a parameter resolves
+  them once per table ([EECS027](/en/docs/guide/analyzer#eecs027)).
+- **Don't make a `[ForEach]` method an instance method when it uses nothing of its system**: it then runs alone and
+  pays the checks of a structural change ([EECS029](/en/docs/guide/analyzer#eecs029)).
+- **Don't loop over a query to change, count or test entities one by one**: `SetAll`, `DestroyEntities`, `Count`,
+  `Any` and filters do it per table ([EECS030](/en/docs/guide/analyzer#eecs030),
+  [EECS032](/en/docs/guide/analyzer#eecs032)).
 - **Don't use a value index, or destroy entities, from another thread**: the index follows those changes on the
   owner thread and is not synchronized.
 
@@ -488,9 +497,11 @@ times every system run.
 | An `Entity` stored in a component | The column holds references: no longer pinned, scanned by the GC | [EECS017](/en/docs/guide/analyzer#eecs017) (warning) |
 | Writing an indexed component through a `ref` | The index cannot see the new key | [EECS015](/en/docs/guide/analyzer#eecs015) |
 | A computed `UpdateInterval` | Read every update | [EECS018](/en/docs/guide/analyzer#eecs018) (warning) |
-| A `ref` parameter that only reads a tracked component | Every visited row counts as changed | Code review: declare it `in` |
-| A closure or LINQ in per-update code | Garbage every tick | `AllocationTests`-style checks in your own tests |
-| Filling a fresh world one entity at a time, nothing reserved | Doubling arrays on the large object heap start a full collection ([above](#cold-create)) | Code review: `EnsureCapacity<T1, …, Tn>(n)` or `CreateEntities` |
+| A `ref` parameter that only reads a tracked component | Every visited row counts as changed | [EECS025](/en/docs/guide/analyzer#eecs025) (warning, code fix: `in`) |
+| A closure or LINQ in per-update code | Garbage every tick | [EECS028](/en/docs/guide/analyzer#eecs028) (warning), and `AllocationTests`-style checks in your own tests |
+| A lookup through the visited `Entity` in a `[ForEach]` method | A search per row | [EECS027](/en/docs/guide/analyzer#eecs027) (warning) |
+| A structural change entity by entity over a query | One row moved per call | [EECS030](/en/docs/guide/analyzer#eecs030) (warning, code fix: the bulk call) |
+| Filling a fresh world one entity at a time, nothing reserved | Doubling arrays on the large object heap start a full collection ([above](#cold-create)) | [EECS031](/en/docs/guide/analyzer#eecs031) (suggestion, code fix: `CreateEntities` or `EnsureCapacity<T1, …, Tn>(n)`) |
 
 ## What is covered [#coverage]
 

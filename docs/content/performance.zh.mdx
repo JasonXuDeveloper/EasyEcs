@@ -435,10 +435,16 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 - **不要跨 `await` 或在字段里保留 `ref`**：保留 `Entity` 句柄。
 - **不要存裸的实体下标**：id 会被回收；存 `EntityId`（下标加版本）。
 - **不要在每次更新都跑的方法里写捕获局部变量的 lambda**：哪怕那个分支没走，闭包在进入方法时就分配了。
-  `AllocationTests` 就在 `World.Update` 里抓到过这样一个。
-- **每次更新都跑的代码里不要用 LINQ、`params object[]` 或字符串格式化。**
-- **不要拿方法用不到的 `Entity` 或单例参数**：循环会为每一行加载它。
-- **被追踪的组件只读时不要按 `ref` 接**：否则访问过的每一行都算变了。
+  `AllocationTests` 就在 `World.Update` 里抓到过这样一个（[EECS028](/zh/docs/guide/analyzer#eecs028)）。
+- **每次更新都跑的代码里不要用 LINQ、`params object[]` 或字符串格式化**（[EECS028](/zh/docs/guide/analyzer#eecs028)）。
+- **不要拿方法用不到的 `Entity` 或单例参数**：循环会为每一行加载它（[EECS026](/zh/docs/guide/analyzer#eecs026)）。
+- **被追踪的组件只读时不要按 `ref` 接**：否则访问过的每一行都算变了（[EECS025](/zh/docs/guide/analyzer#eecs025)）。
+- **不要在 `[ForEach]` 方法里通过被访问的实体查它的组件，或查单例**：作为参数，每张表只解析一次
+  （[EECS027](/zh/docs/guide/analyzer#eecs027)）。
+- **`[ForEach]` 方法用不到系统的任何成员时，不要写成实例方法**：否则它只能单独运行，还要承担结构变化的检查
+  （[EECS029](/zh/docs/guide/analyzer#eecs029)）。
+- **不要遍历查询逐个修改、计数或判断实体**：`SetAll`、`DestroyEntities`、`Count`、`Any` 和过滤器按表处理
+  （[EECS030](/zh/docs/guide/analyzer#eecs030)、[EECS032](/zh/docs/guide/analyzer#eecs032)）。
 - **不要在别的线程上使用值索引或销毁实体**：索引在所有者线程上跟随这些变化，没有做同步。
 
 ## 常见陷阱 [#pitfalls]
@@ -451,9 +457,11 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 | 组件里存 `Entity` | 列里有了引用：不再固定，GC 要扫描 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告） |
 | 通过 `ref` 写被索引的组件 | 索引看不到新键 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
 | 计算出来的 `UpdateInterval` | 每次更新都要读 | [EECS018](/zh/docs/guide/analyzer#eecs018)（警告） |
-| 只读被追踪组件的 `ref` 参数 | 访问过的每一行都算变了 | 代码审查：声明成 `in` |
-| 每次更新都跑的代码里有闭包或 LINQ | 每个 tick 都产生垃圾 | 在自己的测试里做 `AllocationTests` 式的检查 |
-| 新 World 不预留空间，逐个塞满实体 | 大对象堆上一轮轮翻倍的数组触发完整 GC（[见上](#cold-create)） | 代码审查：用 `EnsureCapacity<T1, …, Tn>(n)` 或 `CreateEntities` |
+| 只读被追踪组件的 `ref` 参数 | 访问过的每一行都算变了 | [EECS025](/zh/docs/guide/analyzer#eecs025)（警告，代码修复：`in`） |
+| 每次更新都跑的代码里有闭包或 LINQ | 每个 tick 都产生垃圾 | [EECS028](/zh/docs/guide/analyzer#eecs028)（警告），再加上自己测试里 `AllocationTests` 式的检查 |
+| `[ForEach]` 方法里通过被访问的 `Entity` 查组件 | 每行查一次 | [EECS027](/zh/docs/guide/analyzer#eecs027)（警告） |
+| 遍历查询逐个实体做结构变化 | 每次调用搬一行 | [EECS030](/zh/docs/guide/analyzer#eecs030)（警告，代码修复：批量调用） |
+| 新 World 不预留空间，逐个塞满实体 | 大对象堆上一轮轮翻倍的数组触发完整 GC（[见上](#cold-create)） | [EECS031](/zh/docs/guide/analyzer#eecs031)（建议，代码修复：`CreateEntities` 或 `EnsureCapacity<T1, …, Tn>(n)`） |
 
 ## 覆盖了什么 [#coverage]
 

@@ -2,6 +2,7 @@
 
 **Contents**
 
+- [v4.2 → v4.3](#v42--v43)
 - [v4.1 → v4.2](#v41--v42)
 - [v4.0 → v4.1](#v40--v41)
 - [v3.x → v4.0](#v3x--v40): [Namespaces](#namespaces) · [Entities and components](#entities-and-components) ·
@@ -12,6 +13,43 @@
   [Common patterns](#common-migration-patterns) · [Troubleshooting](#troubleshooting)
 
 For the current API, see the [documentation](docs/content/README.md).
+
+## v4.2 → v4.3
+
+The analyzer gained performance rules ([EECS025 to EECS034](https://ecs.xgamedev.net/en/docs/guide/analyzer#eecs025)). Code written for 4.2 compiles
+unchanged unless a system calls `World.Update()`, or the build treats warnings as errors.
+
+- **New warnings (EECS025 to EECS030).** Each names code that works but costs, with the fix in its
+  [section](https://ecs.xgamedev.net/en/docs/guide/analyzer) and, where the change is mechanical, a code fix in the IDE. Apply the fix, or suppress the
+  rule where the code is deliberate, with the reason next to it:
+
+  ```csharp
+  #pragma warning disable EECS026 // the write access is the point: it stamps the rows a [Changed<T>] system reacts to
+  [ForEach] static void Touch(ref Armor armor, ref Seen seen) => seen.Count++;
+  #pragma warning restore EECS026
+  ```
+
+  or for a whole project in `.editorconfig`: `dotnet_diagnostic.EECS028.severity = suggestion`.
+- **`World.Update()` in a system is an error (EECS034).** It ran the system again inside its own run. Run updates and
+  groups from the code that hosts the world:
+
+  **v4.2**
+
+  ```csharp
+  public class CatchUp : EcsSystem
+  {
+      protected override void OnUpdate() => World.Update();
+  }
+  ```
+
+  **v4.3**
+
+  ```csharp
+  while (running) world.Update();   // in the host loop
+  ```
+
+- **Suggestions (EECS031 to EECS033)** show in the IDE only and never fail a build; `dotnet_diagnostic.EECS033.severity
+  = warning` in `.editorconfig` turns one into a warning.
 
 ## v4.1 → v4.2
 

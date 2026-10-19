@@ -189,7 +189,9 @@ Caught by [EECS008](/en/docs/guide/analyzer#eecs008). More in
 
 ```csharp
 public record struct Speed(float Value) : IComponent;
+```
 
+```csharp doccheck=expect-EECS025
 public class Throttle : EcsSystem
 {
     [ForEach] static void Apply(ref Velocity v, ref Speed max)   // max is only read
@@ -212,7 +214,8 @@ public class Throttle : EcsSystem
 }
 ```
 
-No rule catches it. More in [parallel systems](/en/docs/guide/threading#parallel-systems).
+Caught by [EECS025](/en/docs/guide/analyzer#eecs025) (warning, with a code fix). More in
+[parallel systems](/en/docs/guide/threading#parallel-systems).
 
 ### `[Changed<T>]` on a component that is not tracked [#changed-untracked]
 
@@ -243,7 +246,7 @@ Caught by the C# compiler (the attribute requires `ITrackChanges`: CS0315). More
 
 ### Reading a tracked component through a `ref` [#read-tracked-by-ref]
 
-```csharp
+```csharp doccheck=expect-EECS025
 int before = player.Get<Gold>().Amount;      // Get<T>() is a write: the row counts as changed
 ```
 
@@ -254,7 +257,8 @@ property (it is `ref readonly` for a tracked component), `Read<T>()` in generic 
 int amount = player.Gold.Amount;             // ref readonly: no stamp
 ```
 
-No rule catches it. More in [what counts as a write](/en/docs/guide/change-tracking#what-counts-as-a-write).
+Caught by [EECS025](/en/docs/guide/analyzer#eecs025) (warning, with a code fix). More in
+[what counts as a write](/en/docs/guide/change-tracking#what-counts-as-a-write).
 
 ### `[Removed<T>]` that takes `T` [#removed-takes-t]
 
@@ -403,7 +407,7 @@ No rule catches it. More in [cascade policy](/en/docs/guide/hierarchy#cascade-po
 public struct Fighter : IComponent;
 ```
 
-```csharp
+```csharp doccheck=expect-EECS030
 foreach (var item in world.Query<Fighter>())
     item.Entity.SetFrozen();       // one structural change per entity
 ```
@@ -414,7 +418,8 @@ Each call moves one row. `SetAll`, `RemoveAll`, `DisableAll` and `EnableAll` mov
 int frozen = world.SetAll(new Frozen(), QueryFilter.Create().With<Fighter>());
 ```
 
-No rule catches it. More in [bulk changes](/en/docs/guide/bulk).
+Caught by [EECS030](/en/docs/guide/analyzer#eecs030) (warning, with a code fix). More in
+[bulk changes](/en/docs/guide/bulk).
 
 ## Threads [#threads]
 

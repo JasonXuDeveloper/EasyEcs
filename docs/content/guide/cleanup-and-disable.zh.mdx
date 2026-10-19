@@ -37,8 +37,8 @@ public record struct Seats(int Released) : ISingletonComponent;
 ```csharp title="ReleaseSeats.cs"
 public class ReleaseSeats : EcsSystem
 {
-    [ForEach, With<Destroyed>]                                // 只处理已经销毁的实体 // [!code highlight]
-    static void Release(Entity entity, in Seat seat, ref Seats seats)
+    [ForEach, With<Destroyed>, With<Seat>]                    // 只处理已经销毁的实体 // [!code highlight]
+    static void Release(Entity entity, ref Seats seats)
     {
         seats.Released++;                                     // 在这里归还座位
         entity.RemoveSeat();                                  // 最后一个清理组件没了：实体被释放
@@ -152,8 +152,8 @@ public record struct Greeted(int Count) : ISingletonComponent;
 
 public class GreetNewcomers : EcsSystem
 {
-    [ForEach, With<Spawned>]
-    static void Greet(Entity entity, in Health health, ref Greeted greeted)
+    [ForEach, With<Spawned>, With<Health>]
+    static void Greet(Entity entity, ref Greeted greeted)
     {
         greeted.Count++;                                     // 只做一次的工作
         entity.RemoveSpawned();                              // 翻转一个位：只欢迎一次
@@ -212,8 +212,8 @@ public class CooldownSystem : EcsSystem
 // 归还已销毁玩家的座位。最后一个清理组件被移除后，实体才被释放。
 public class ReleaseSeatsSystem : EcsSystem
 {
-    [ForEach, With<Destroyed>]
-    static void Release(Entity player, in Seat seat, ref Seats seats)
+    [ForEach, With<Destroyed>, With<Seat>]
+    static void Release(Entity player, ref Seats seats)
     {
         seats.Released++;
         player.RemoveSeat();

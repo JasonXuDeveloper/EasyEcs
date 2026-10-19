@@ -223,7 +223,7 @@ public class PickupSystem : EcsSystem
 public class SyncBagsSystem : EcsSystem
 {
     [ForEach, Changed<DynamicBuffer<Loot>>]
-    static void Sync(in DynamicBuffer<Loot> bag, ref Synced synced)
+    static void Sync(ref Synced synced)
     {
         synced.Bags++;
     }

@@ -1,15 +1,19 @@
 ---
 title: Analyzer rules
-seoTitle: "EasyEcs analyzer rules EECS002-EECS024 for C# ECS code"
-description: Every EasyEcs analyzer rule, EECS002 to EECS024, with its severity, its code fix, the code it rejects and the code to write instead.
+seoTitle: "EasyEcs analyzer rules EECS002-EECS034 for C# ECS code"
+description: Every EasyEcs analyzer rule, EECS002 to EECS034, with its severity, its code fix, the code it rejects and the code to write instead.
 icon: ShieldCheck
 ---
 
 The EasyEcs analyzer ships in the package next to the source generator, so code that breaks the
-[ECS principles](/en/docs/ecs-principles) does not build. Every rule is an error except three warnings, for code that
-works but costs (EECS017, EECS018, EECS020). The generator skips invalid input and the analyzer reports it, so "not
-generated" always means "reported". Where a rule has one mechanical answer, the IDE offers it as a code fix
-(EasyEcs.CodeFixes, in the same package), and only when the result compiles.
+[ECS principles](/en/docs/ecs-principles) does not build. The correctness rules (EECS002 to EECS024) are errors except
+three warnings for code that works but costs (EECS017, EECS018, EECS020). The generator skips invalid input and the
+analyzer reports it, so "not generated" always means "reported". The performance rules (EECS025 to EECS034) find code
+that works and does more than it needs: a warning where the cost is measured
+([D29](/en/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)), a
+suggestion (Info) where the rewrite helps only in some programs or only reads better, and an error for a world update
+inside a system. Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
+same package), and only when the result compiles.
 
 ## When to read it [#when-to-use-it]
 
@@ -20,7 +24,8 @@ generated" always means "reported". Where a rule has one mechanical answer, the 
 
 <Callout type="warn" title="Do not">
   Suppress an `EECS` error with `#pragma`: the generator skipped the method or type the rule names, so the code it
-  needs does not exist. The three warnings can be suppressed, at the cost they describe.
+  needs does not exist. The warnings can be suppressed, at the cost they describe; a suggestion (Info) shows in the
+  IDE only, and `dotnet_diagnostic.EECS033.severity = warning` in `.editorconfig` raises one for a whole project.
 </Callout>
 
 ## All rules [#rules]
@@ -50,6 +55,16 @@ generated" always means "reported". Where a rule has one mechanical answer, the 
 | [EECS022](#eecs022) | Error | The generated code can name a `[ForEach]` method's types | Make it internal |
 | [EECS023](#eecs023) | Error | Filters go on `[ForEach]` methods and system groups | Remove the filter |
 | [EECS024](#eecs024) | Error | `[ForEach]` is not on a local function | |
+| [EECS025](#eecs025) | Warning | A write access only reads | `in`, `ReadOnlySpan<T>`, `Read<T>()` |
+| [EECS026](#eecs026) | Warning | A `[ForEach]` method uses its parameters | `[With<T>]`, or remove the parameter |
+| [EECS027](#eecs027) | Warning | A `[ForEach]` method takes what it looks up on every row | |
+| [EECS028](#eecs028) | Warning | Code that runs every update does not allocate | |
+| [EECS029](#eecs029) | Warning | An instance `[ForEach]` method uses its system | Make it static |
+| [EECS030](#eecs030) | Warning | A structural change over a query is one bulk call | The bulk call |
+| [EECS031](#eecs031) | Info | Entities created in a counted loop are created together, or reserved | `CreateEntities`, `EnsureCapacity` |
+| [EECS032](#eecs032) | Info | The world counts and filters | `Any`, `Count` |
+| [EECS033](#eecs033) | Info | A generated member says it shorter | The generated member |
+| [EECS034](#eecs034) | Error | A system does not run a world update | |
 
 ## EECS002 [#eecs002]
 
@@ -201,7 +216,7 @@ public record struct Spawned(int Count) : ISingletonComponent;
 
 public class SpawnSystem : EcsSystem
 {
-    protected override void OnUpdate() => World.GetOrAddSingleton<Spawned>().Count++;
+    protected override void OnUpdate() => World.GetOrAddSpawned().Count++;
 }
 ```
 
@@ -239,7 +254,7 @@ public class KillSystem : EcsSystem
 public sealed class ScoreSystem : EcsSystem
 {
     // One pass destroys the corpses and says how many there were: each is counted once.
-    protected override void OnUpdate() => World.GetOrAddSingleton<Score>().Deaths += World.DestroyEntities<Dead>();
+    protected override void OnUpdate() => World.GetOrAddScore().Deaths += World.DestroyEntities<Dead>();
 }
 ```
 
@@ -423,7 +438,7 @@ public class MarkTargets : EcsSystem
     [ForEach, With<Target>]
     static void Mark(Entity hunter, in Target target, World world)
     {
-        hunter.Remove<Target>();                                       // through the parameter: this system runs alone
+        hunter.RemoveTarget();                                       // through the parameter: this system runs alone
         if (world.TryGetEntity(target.Id, out var prey)) prey.SetDoomed();   // and its pass notices this one too
     }
 }
@@ -585,7 +600,7 @@ public class ChaseSystem : EcsSystem
     [ForEach]
     static void Follow(ref Position p, in Chase chase, World world)
     {
-        if (world.TryGetEntity(chase.Prey, out var prey)) p = prey.Read<Position>();   // gone: the id finds nothing
+        if (world.TryGetEntity(chase.Prey, out var prey)) p = prey.Position;   // gone: the id finds nothing
     }
 }
 ```
@@ -739,7 +754,7 @@ public static class Report
     public static int Alive(World world)
     {
         int alive = 0;
-        [ForEach] static void Count(in Health hp, ref int alive) => alive++;   // nothing can call it
+        [ForEach, With<Health>] static void Count(ref int alive) => alive++;   // nothing can call it
         return alive;
     }
 }
@@ -750,7 +765,7 @@ Make it a method of a system, or a static method of a type (its entry point take
 ```csharp
 public static class Report
 {
-    [ForEach] static void Count(in Health hp, ref int alive) => alive++;
+    [ForEach, With<Health>] static void Count(ref int alive) => alive++;
 
     public static int Alive(World world)
     {
@@ -759,6 +774,290 @@ public static class Report
         return alive;
     }
 }
+```
+
+## EECS025 [#eecs025]
+
+**A write access that only reads.** Warning. Code fix: `in` for a component or singleton, `ReadOnlySpan<T>` for a
+span, `Read<T>()` for `Get<T>()`, `.X` for `WriteX()`.
+
+A `ref` parameter (a `Span<T>` in a batch method) puts its type in the system's write set: no
+[parallel stage](/en/docs/guide/threading#parallel-systems) runs the system beside one that reads the type. On a
+[tracked component](/en/docs/guide/change-tracking) it also stamps every row the method visits, so `[Changed<T>]`
+systems visit rows nobody changed. `entity.Get<T>()` and the generated `entity.WriteX()` stamp the row the same way.
+The rule looks at every use: an assignment, `++`, a `ref` or `out` argument, a method that is not `readonly`, a `ref`
+local or a `this ref` extension (`DynamicBuffer<T>.Add`) is a write, and keeps the access.
+
+```csharp
+public record struct Armor(int Value) : IComponent, ITrackChanges;
+```
+
+```csharp doccheck=expect-EECS025
+public class ArmorBonus : EcsSystem
+{
+    [ForEach]
+    static void Apply(ref Armor armor, ref Health health) => health = new Health(health.Value + armor.Value);   // armor is only read
+}
+```
+
+Read it by `in`:
+
+```csharp
+public class ArmorBonus : EcsSystem
+{
+    [ForEach]
+    static void Apply(in Armor armor, ref Health health) => health = new Health(health.Value + armor.Value);
+}
+```
+
+## EECS026 [#eecs026]
+
+**A `[ForEach]` parameter the method does not use.** Warning. Code fix: a component becomes a `[With<T>]` filter (or
+goes, when a `[With<T>]` or `[Changed<T>]` already requires it); an `Entity`, `World`, `EntitySpan`, singleton or
+`Maybe<T>` goes.
+
+Each parameter costs something on every row or every pass: a component's column is loaded and advanced, a singleton is
+resolved and scheduled as an access, an `Entity` builds a handle for every row and, like the `World`, makes the system
+[run alone](/en/docs/guide/threading#parallel-systems). A component the method only requires is a filter. An unused
+`ref` of a tracked component is reported without a fix: it stamps every row it visits, and `[With<T>]` would not.
+A method with an empty body is left alone while it is being written.
+
+```csharp
+public record struct Survivors(int Count) : ISingletonComponent;
+```
+
+```csharp doccheck=expect-EECS026
+public class CountSurvivors : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Count(in Health health, ref Survivors survivors) => survivors = new Survivors(survivors.Count + 1);
+}
+```
+
+Require the component with a filter:
+
+```csharp
+public class CountSurvivors : EcsSystem
+{
+    [ForEach, With<Health>, Without<Dead>]
+    static void Count(ref Survivors survivors) => survivors = new Survivors(survivors.Count + 1);
+}
+```
+
+## EECS027 [#eecs027]
+
+**A lookup per row that a parameter makes once.** Warning. No code fix.
+
+A `[ForEach]` method's parameters are resolved once per table or per pass: a component is a column the loop walks, a
+singleton a `ref` taken before the loop. The same data looked up through the visited `Entity` (`entity.Velocity`,
+`entity.Has<T>()`, `entity.TryGet<T>(...)`) or through the `World` (`World.Clock`) repeats the search on every row:
+the entity's record, its table, the column. The rule reports only lookups that run on every row (not in a branch,
+a loop or after an early `return`), of components the method does not add or remove itself, and not of indexed
+components.
+
+```csharp doccheck=expect-EECS027
+public class Drift : EcsSystem
+{
+    [ForEach]
+    static void Move(Entity entity, ref Position position) =>
+        position = new Position(position.X + entity.Velocity.X, position.Y + entity.Velocity.Y);
+}
+```
+
+Take the component as a parameter (`in`, `ref`, or `Maybe<T>` when some entities lack it; a presence test is a
+`Maybe<T>` or a `[With<T>]` / `[Without<T>]` split), and a singleton as a parameter too:
+
+```csharp
+public class Drift : EcsSystem
+{
+    [ForEach]
+    static void Move(ref Position position, in Velocity velocity) =>
+        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+}
+```
+
+## EECS028 [#eecs028]
+
+**An allocation in code that runs every update.** Warning. No code fix.
+
+A `[ForEach]` method runs for every entity it visits and `OnUpdate` once per update, so what they allocate is garbage
+of every tick, and the collections it causes pause the world. The rule names each allocating expression: an object or
+array, a lambda that captures, a method group of an instance, LINQ, a string built at run time (`$"..."`, `+`,
+`string.Format`, `ToString()`), boxing, and `foreach` over an interface. Left out: code inside a `throw`, calls the
+compiler removes (`[Conditional]`, such as `Debug.Assert`), console output (the write costs more than its string),
+and the `OnUpdate` of a system that overrides `UpdateInterval` (its author chose that cadence).
+
+```csharp doccheck=expect-EECS028
+public class Steer : EcsSystem
+{
+    [ForEach]
+    static void Aim(in Position position, ref Velocity velocity)
+    {
+        var path = new List<Position> { position };   // a list for every entity, every update
+        velocity = new Velocity(-path[0].X, -path[0].Y);
+    }
+}
+```
+
+Keep values in structs, spans and `stackalloc`; keep a reusable collection in a component or a singleton taken by
+`ref`; pass numbers, not strings:
+
+```csharp
+public class Steer : EcsSystem
+{
+    [ForEach]
+    static void Aim(in Position position, ref Velocity velocity)
+    {
+        Span<Position> path = stackalloc Position[1];
+        path[0] = position;
+        velocity = new Velocity(-path[0].X, -path[0].Y);
+    }
+}
+```
+
+## EECS029 [#eecs029]
+
+**An instance `[ForEach]` method that uses no instance member.** Warning. Code fix: makes it `static`.
+
+An instance method could reach the `World` through its system, so the generator treats it as one that may change
+structure: its system runs alone in a parallel stage, and its rows are walked with the checks a structural change
+needs. A static method that takes no `Entity` or `World` is proven not to change structure
+([EECS013](#eecs013)).
+
+```csharp doccheck=expect-EECS029
+public class MoveSystem : EcsSystem
+{
+    [ForEach]
+    void Move(ref Position position, in Velocity velocity) =>
+        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+}
+```
+
+Make it static:
+
+```csharp
+public class MoveSystem : EcsSystem
+{
+    [ForEach]
+    static void Move(ref Position position, in Velocity velocity) =>
+        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+}
+```
+
+## EECS030 [#eecs030]
+
+**A structural change entity by entity over a query.** Warning. Code fix: the bulk call.
+
+A structural change through each entity of a query moves (or flips) one row per call, through the structural gate each
+time. `SetAll`, `RemoveAll`, `DisableAll`, `EnableAll` and `DestroyEntities` change every matching row of a table
+together, whole words of rows at once ([bulk changes](/en/docs/guide/bulk)). The rule
+reports a `foreach` over `world.Query<...>()` whose body is one such call on the item's entity with the same value for
+every row. A `Set` of a component the query already requires writes a value instead of moving a row, and is left alone.
+
+```csharp doccheck=expect-EECS030
+foreach (var item in world.Query<Health>(QueryFilter.Create().With<Dead>()))
+    item.Entity.Destroy();
+```
+
+One call:
+
+```csharp
+world.DestroyEntities<Health>(QueryFilter.Create().With<Dead>());
+```
+
+## EECS031 [#eecs031]
+
+**Entities created one by one in a counted loop.** Info. Code fix: the bulk call, or a reservation before the loop.
+
+Created one by one, a table and the entity storage grow by doubling, and in a world that has never held them the
+discarded arrays can set off a full garbage collection ([D28](/en/docs/decisions#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)).
+`CreateEntities` and `Instantiate(prefab, span)` create them in one pass; `EnsureCapacity` reserves room when each
+entity gets values of its own. The rule leaves out loops of a constant count under 4,096 (no array reaches the large
+object heap), loops after a reservation, and loops in a system (a running world reuses its rows).
+
+```csharp doccheck=expect-EECS031
+var wave = new Entity[50_000];
+for (int i = 0; i < wave.Length; i++)
+    wave[i] = world.CreateEntity(new Position(0, 0), new Health(100));
+```
+
+One call when the values are the same; a reservation when they are not:
+
+```csharp
+var spawned = new Entity[50_000];
+world.CreateEntities(spawned, new Position(0, 0), new Health(100));
+
+world.EnsureCapacity<Position, Health>(spawned.Length);
+for (int i = 0; i < spawned.Length; i++)
+    world.CreateEntity(new Position(i, 0), new Health(100));
+```
+
+## EECS032 [#eecs032]
+
+**Query work the world does in one call.** Info. Code fix: `Any`, or `Count` for a loop that only counts.
+
+`Count` sums the row counts of the matching tables and `Any` stops at the first table with a row; neither visits a
+row. A filter skips whole tables and words of rows that a test in the loop visits one by one. The rule reports
+`Count<...>()` compared with 0 or 1 as a presence test, a `foreach` over a query that only counts, and a loop whose
+first statement skips rows by a component test of the item's entity (no fix: the filter goes where the query is made).
+
+```csharp doccheck=expect-EECS032
+bool anyDead = world.Count<Dead>() > 0;
+```
+
+```csharp
+bool someoneDied = world.Any<Dead>();
+foreach (var item in world.Query<Health>(QueryFilter.Create().With<Burning>())) { }   // the filter, not a test in the loop
+```
+
+## EECS033 [#eecs033]
+
+**A generic call with a generated member of the same meaning.** Info. Code fix: the generated member.
+
+The generator writes [named members](/en/docs/guide/entities-and-components#generated-members) for every component, singleton,
+buffer element and query shape, each calling the generic API. The rule offers the member only where it is generated in
+that compilation and does the same thing, including the kind of reference it returns: `Get<T>()` of a tracked
+component becomes `WriteX()` (its `entity.X` is read-only), and a buffer's member is offered only while other code
+still names `DynamicBuffer<T>` (the generator writes buffer members for the elements code names that way).
+
+| Generic | Generated |
+| --- | --- |
+| `entity.Get<Health>()`, `entity.Read<Health>()` | `entity.Health` (or `WriteHealth()` for a tracked component) |
+| `entity.Has<Health>()`, `entity.Has<Dead>()` | `entity.HasHealth`, `entity.IsDead` |
+| `entity.TryGet<Health>(out h)`, `entity.GetOrAdd<Health>()` | `entity.TryGetHealth(out h)`, `entity.GetOrAddHealth()` |
+| `entity.Set(new Health(100))`, `entity.Set(new Dead())` | `entity.SetHealth(100)`, `entity.SetDead()` |
+| `entity.Remove<Health>()`, `Disable<T>()`, `Enable<T>()`, `IsDisabled<T>()` | `entity.RemoveHealth()`, `DisableHealth()`, `EnableHealth()`, `IsHealthDisabled` |
+| `world.GetSingleton<Clock>()`, `HasSingleton`, `GetOrAddSingleton`, `RemoveSingleton` | `world.Clock`, `HasClock`, `GetOrAddClock()`, `RemoveClock()` |
+| `world.Index<Zone, int>()`, `world.Relations<Friend>()` | `world.ZoneIndex`, `world.FriendIndex` |
+| `item.Component1` | `item.Health` |
+
+```csharp doccheck=expect-EECS033
+int hpGeneric = player.Get<Health>().Value;
+```
+
+```csharp
+int hp = player.Health.Value;
+```
+
+## EECS034 [#eecs034]
+
+**A system runs a world update.** Error. No code fix.
+
+`World.Update()` and `World.Update<TGroup>()` run systems. Called from a system, `Update()` runs the system again
+inside its own run until the stack overflows, and a group's update runs other systems in the middle of a stage, under
+its change tick. A stable `[ForEach]` method that calls it is [EECS013](#eecs013).
+
+```csharp doccheck=expect-EECS034
+public class CatchUp : EcsSystem
+{
+    protected override void OnUpdate() => World.Update();
+}
+```
+
+The code that hosts the world runs its updates and groups, in the order they belong:
+
+```csharp
+while (running) world.Update();
 ```
 
 ## Related [#related]

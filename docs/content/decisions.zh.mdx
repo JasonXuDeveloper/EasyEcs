@@ -41,9 +41,10 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D23](#d23-change-summaries-per-block-removals-summarized-apart) | 按块维护变更摘要；移除单独汇总 |
 | [D24](#d24-an-indexs-key-holds-its-entities-in-one-array) | 索引的每个键用一个数组存它的实体 |
 | [D25](#d25-structural-row-loops-are-compiled-for-tables-without-tombstones) | 为没有墓碑的表单独编译结构性行循环 |
-| [D26](#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call) | 在代码会重复写类型名的地方生成成员，而不是每个调用都生成 |
+| [D26](#d26-generated-members-and-a-suggestion-to-use-them) | 在代码会重复写类型名的地方生成成员，并建议使用它们 |
 | [D27](#d27-reading-a-missing-singleton-throws-everywhere) | 读取缺失的单例一律抛异常 |
 | [D28](#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap) | 预留只扩到需要的大小；实体存储放在固定对象堆 |
+| [D29](#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same) | 性能规则只在代价测得出、修复行为不变时才加 |
 
 ## D1. 状态变化即数据：没有事件和回调 [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -101,8 +102,8 @@ public struct Spawned : IComponent;                                  // 标签�
 
 public class GreetSystem : EcsSystem
 {
-    [ForEach, With<Spawned>]
-    static void Greet(Entity entity, in Health hp) => entity.RemoveSpawned();   // 首次处理，然后翻一个位
+    [ForEach, With<Spawned>, With<Health>]
+    static void Greet(Entity entity) => entity.RemoveSpawned();   // 首次处理，然后翻一个位
 }
 ```
 
@@ -366,23 +367,31 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 **比较过。** 把看到的存储版本放在寄存器里，而不是每行重新读：82 -> 108 μs（job 调用之后剩下的被调用者保存寄存器太少，
 一个列引用溢出到栈上，每行往返一次）。
 
-## D26. 在代码会重复写类型名的地方生成成员，而不是每个调用都生成 [#d26-generated-members-where-code-would-repeat-a-type-not-for-every-call]
+## D26. 在代码会重复写类型名的地方生成成员，并建议使用它们 [#d26-generated-members-and-a-suggestion-to-use-them]
 
-**决定。** 生成器多生成三样东西：查询元素的组件有了名字（`item.Position` 代替 `item.Component1`，按代码实际调用的每种 `Query<…>` 形状生成）；
-缓冲元素在预制体上有了写方法（`prefab.SetLoot(…)`，基于 `Prefab.SetBuffer<T>(params ReadOnlySpan<T>)`）；代码修复只在结果能编译时才提供。
-放弃了两个提议：多类型的 `Disable` / `Enable` 和批量调用，以及一个隐藏的"改用生成成员"诊断。
+**决定。** 查询元素的组件有名字：`item.Position` 代替 `item.Component1`，按代码实际调用的每种 `Query<…>` 形状生成。
+缓冲元素在预制体上有写方法：`prefab.SetLoot(…)`，基于 `Prefab.SetBuffer<T>(params ReadOnlySpan<T>)`。凡是代码调用泛型 API
+的地方，分析器都建议改用生成的成员（EECS033，信息级别，带代码修复）：`entity.Get<Position>()` 写成 `entity.Position`，
+`Has<T>()` 写成 `HasX` 或 `IsX`，`Set(new T(…))` 写成 `SetX(…)`，`GetSingleton<T>()` 写成 `world.X`，`Index<T, TKey>()`
+写成 `world.XIndex`，`item.Component1` 写成 `item.Position`，以及生成器写出的其他成员。多类型的 `Disable` / `Enable` 和多类型
+批量调用不做。
 
 **原因。**
 - **查询元素。** `Component1..n` 让读代码的人去数类型参数。命名成员是对同一个 ref 的内联 getter，零开销。每种形状一个文件，
   程序集只输出它用到的形状；按组件和位置各生成一个扩展块的话，每个组件要 45 个块。
-- **预制体缓冲。** 有 `SetBuffer` 之前，预制体只能持有空缓冲：要填就得复制一个缓冲值，而 EECS012 拒绝这样做。关系没有预制体写方法，
+- **预制体缓冲。** 没有 `SetBuffer` 时，预制体只能持有空缓冲：要填就得复制一个缓冲值，而 EECS012 拒绝这样做。关系没有预制体写方法，
   因为配方里的链接会指向预制体自己的行。
+- **建议。** 文档、示例和模板都写生成的成员，两种写法混在一起比只用任何一种都难读。只有在意思完全相同的地方才建议改写：
+  该类型在当前编译里确实生成了这个成员（通过绑定替换后的代码来确认），而且返回的引用种类相同：追踪组件的属性是
+  `ref readonly`，所以它的 `Get<T>()` 改写成 `WriteX()`（被索引的组件没有写方法，它的 `Get<T>()` 保持原样）。缓冲区的成员只在代码写着 `DynamicBuffer<T>` 时才存在，所以当这个调用是
+  最后一处这样的写法时不提建议。级别是信息：IDE 里的建议，不会让构建失败，因为泛型代码需要泛型 API，而两种写法编译出来是同一个调用。
+  分析器对方法调用的操作回调本来就为 EECS025 和 EECS034 运行，这条建议只是给每次调用多一次符号检查。
 
 **比较过。**
-- **`Disable<T1..Tn>()`、`RemoveAll<T1..Tn>()` 等批量调用。** 一张表第一次禁用之后，每次调用都是原地翻位。n 次调用就是 n 次进闸门，
-  每次几纳秒；而跨多个类型的批量调用还得给"有其中任意一个"定义含义，单类型调用不需要。没有实现。
-- **把 `entity.Get<Position>()` 修复成 `entity.Position` 的隐藏诊断。** 这是风格而不是正确性问题：两者编译出来是同一个调用。
-  它会给每个用户项目的每次方法调用多加一个操作回调。文档已经在教生成成员；泛型代码本来就需要泛型 API。
+- **`Disable<T1..Tn>()`、`RemoveAll<T1..Tn>()` 等多类型调用。** 一张表第一次禁用之后，每次调用都是原地翻位。n 次调用就是 n 次进闸门，
+  每次几纳秒；而跨多个类型的批量调用还得给“有其中任意一个”定义含义，单类型调用不需要。没有实现。
+- **用警告而不是建议。** 那样会让把警告当错误的构建只因写法不同就失败。
+- **把 `SingletonRef<T>.Value` 改写成 `world.X`。** `SingletonRef<T>` 记住了单例的槽位，改写后每次访问都要多查一次。不提建议。
 
 ## D27. 读取缺失的单例一律抛异常 [#d27-reading-a-missing-singleton-throws-everywhere]
 
@@ -437,6 +446,50 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 - **World 释放时把数组还给池**，给下一个 World 用：实体记录不能还，释放后的 World 的句柄仍会不做检查地按下标访问它；池还会占着进程
   已经用完的内存。
 - **只传数量的 `CreateEntities(count, values)`**，不要句柄 span：批量调用带着 span 已经在两边预算之内，不需要。
+
+## D29. 性能规则只在代价测得出、修复行为不变时才加 [#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same]
+
+**决定。** 分析器用 EECS025 到 EECS034 报告能跑、但做了多余工作的代码。基准测试测得出代价、而且被指出的写法在任何程序里都不对的，
+是警告；改写只对部分程序有好处、或者只是更好读的，是建议（信息级别）；根本不能工作的，是错误。只有修复后行为不变的规则才会加入，
+而且只有分析器已经绑定过替换代码时才提供代码修复。测不出代价、或者修复会改变行为的候选都放弃了。
+
+| 规则 | 级别 | 测量结果（100,000 个实体） |
+| --- | --- | --- |
+| EECS025 只读的写访问 | 警告 | 追踪组件用 `ref` 306 µs，用 `in` 271 µs；不追踪的组件两者一样（270 / 276 µs）：代价在写集合上 |
+| EECS026 没用到的参数 | 警告 | 每行一样（41 / 46 µs）；`Entity` 或 `World` 让系统单独运行，追踪组件的 `ref` 给每一行打戳 |
+| EECS027 每行查一次 | 警告 | `entity.Read<T>()` 258 µs，参数 40 µs；`Has<T>()` 208 µs，`Maybe<T>` 86 µs；通过 `World` 取单例 105 µs，参数 48 µs |
+| EECS028 每次更新都分配 | 警告 | 每个 tick 都产生垃圾；见[不该做的](/zh/docs/performance#dont)清单 |
+| EECS029 实例 `[ForEach]` 方法 | 警告 | 实例方法 104 µs，静态方法 41 µs |
+| EECS030 对查询结果逐个实体做结构变化 | 警告 | `BulkBenchmark`：逐个实体的耗时是 `SetAll` / `RemoveAll` 的 19.1 倍，是 `DisableAll` / `EnableAll` 的约 99 倍 |
+| EECS031 计数循环里逐个创建 | 信息 | 只对新 World 有效（[D28](#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)）；`MicroBenchmarks.Churn` 的耗时是 `ChurnBatch` 的 2.1 倍 |
+| EECS032 手写计数和判断 | 信息 | `Count() > 0` 429 ns，`Any()` 18.6 ns；循环里判断 `Has<T>()` 332 µs，过滤器 59.5 µs |
+| EECS033 生成的成员 | 信息 | 同一个调用（[D26](#d26-generated-members-and-a-suggestion-to-use-them)） |
+| EECS034 系统里执行世界更新 | 错误 | 递归，或者在阶段进行到一半时运行系统 |
+
+每一对都由 `AccessBenchmark` 测量（BenchmarkDotNet，共享的 4 核 2.1 GHz Xeon，.NET 10.0.13）；所有写法都零分配。
+
+**原因。**
+- **警告会让把警告当错误的构建失败**，所以每条警告在任何触发的地方都必须是对的。规则报告之前会检查每一处用法：EECS025 把赋值、
+  `++`、`ref` 或 `out` 实参、非 `readonly` 方法、`ref` 局部变量和 `this ref` 扩展方法都算作写入；EECS027 只报告每一行都会执行、
+  而且方法自己不改的组件的查询；EECS028 不报告 `throw`、`[Conditional]` 调用、控制台输出，以及自己设置了 `UpdateInterval`
+  的系统的 `OnUpdate`；EECS030 不报告覆盖查询已要求组件的 `Set`，也不报告分组组件的 `Set`（在 `SetAll` 里它的行同样逐个移动）。
+- **收益取决于程序的，用建议。** 预留容量只在 World 第一次长到这么大时才有用，所以 EECS031 不报告小于 4,096 的常量次数
+  （没有数组会进入大对象堆），也不报告系统里的循环（运行中的 World 会复用已有的行）。`Any` 和过滤器的收益与循环本来要访问的行数成正比。
+- **修复就是规则的证明。** 每个替换在提供之前都会在原位置绑定一遍：成员没有生成、过滤器编译不过、或者有调用方按 `ref` 传参给这个方法，
+  就不提供修复。
+
+**比较过。**
+- **一次一个地添加或移除多个组件**（`e.Set(a); e.Set(b);` 写成 `e.Set(a, b)`）：逐个 500.7 µs，合并 480.7 µs；两个 16 字节的组件
+  是 290.1 对 308.7 µs。转换缓存之后，第二次移动和第一次一样便宜。放弃。
+- **把标签作为参数而不是 `[With<T>]`**：37.7 对 38.6 µs；代价在它声明的访问上，而任何没用到的参数 EECS026 都已经报告了。
+- **对不追踪的组件用 `[Changed<T>]`**：特性的约束已经让它编译失败（CS0315）。
+- **对结构变化或很小的工作用 `Parallel = true`**：结构变化是 EECS010；一遍算不算小取决于运行时的实体数量。
+- **并行阶段内系统之间的冲突、多余的排序**：阶段是运行时按宿主添加系统的顺序划分的；多余的 `[UpdateAfter<T>]` 没有代价。
+- **从别的线程调用 `World.Update`**：World 可以在拥有它的任意一个线程上运行（每个线程一个 World），和所有者线程竞争的结构调用由 EECS014 报告。
+- **`OnUpdate` 里手写的 `Query` 循环、热路径上的 `Capture` 或 `Describe`、循环里的值索引查询**：`Query` 是正式支持的 API，
+  它的代价 EECS030 和 EECS032 已经指出；每个 tick 拍快照正是回滚的做法；索引查询是 O(1)，`[ForEach]` 方法也没法把它提到循环外。不加规则。
+- **每次调用都构建 `QueryFilter`，而不是放进 `static readonly` 字段**：过滤器是不含引用的小结构体
+  （[D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references)）；测不出代价。不加规则。
 
 ## 相关页面 [#related]
 
