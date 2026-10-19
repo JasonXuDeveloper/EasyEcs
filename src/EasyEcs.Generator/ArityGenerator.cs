@@ -138,6 +138,28 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
             world.Append($$"""
                     /// <summary>
+                    /// Pre-size the table of entities with exactly <c>{{tps}}</c> and the entity storage, so the next
+                    /// <paramref name="count"/> <c>CreateEntity</c> / <c>CreateEntities</c> calls with these components never grow
+                    /// them: a start-up or a wave of spawns pays its growth once, before the loop. Entities whose groups put them
+                    /// in another table (<see cref="GroupBy{T}"/>) grow that one; components added later move entities to other
+                    /// tables, which grow on their own. O({{n}}) plus one growth. Owner thread only (see docs/content/guide/threading.md).
+                    /// </summary>
+                    public void EnsureCapacity<{{tps}}>(int count)
+                {{cons}}
+                    {
+                        using (Structural())
+                        {
+                {{Lines(n, i => $"            ushort b{i} = ComponentType<T{i}>.Bit;")}}
+                            var target = ({{(n == 1 ? "_emptyArchetype.GetAddEdge(b1) ?? CreateEdge(_emptyArchetype, b1)"
+                                : $"_emptyArchetype.GetAddSetEdge({signature}) ?? CreateSetEdge(_emptyArchetype, [{List(n, i => $"b{i}")}], {signature})")}}).Target;
+                            if (count <= 0) return;
+                            ReserveIds(count);
+                            target.Reserve(target.Count + count);
+                            StorageVersion++; // its columns may have moved: a pass in progress refreshes its refs
+                        }
+                    }
+
+                    /// <summary>
                     /// Create an entity with {{what}} placed directly in its final archetype (no intermediate moves).
                     /// O({{n}}) amortized. Owner thread only (see docs/content/guide/threading.md).
                     /// </summary>

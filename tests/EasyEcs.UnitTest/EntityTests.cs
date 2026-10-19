@@ -188,6 +188,40 @@ public class EntityTests
     }
 
     [Test]
+    public void ReservingAComponentSetMakesItsCreationsGrowNothing()
+    {
+        using (var warm = new World()) warm.CreateEntity(new Position(), new Velocity()).Destroy(); // JIT and caches
+        var kept = _world.CreateEntity(new Position(1, 2), new Velocity(3, 4));
+        _world.EnsureCapacity<Position, Velocity>(5000);
+        Assert.That(kept.Read<Position>(), Is.EqualTo(new Position(1, 2)));     // its row moved to the grown columns
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 5000; i++) _world.CreateEntity(new Position(i, 0), new Velocity());
+        Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, _world.EntityCount), Is.EqualTo((0L, 5001)));
+        var table = Array.Find(_world.Describe(), t => t.Entities == 5001);
+        Assert.That(table.Capacity, Is.EqualTo(5056)); // 5,001 rows in whole presence words, not the next power of two
+        _world.EnsureCapacity<Position, Velocity>(0); // nothing to reserve
+        _world.EnsureCapacity<Position, Velocity>(-1);
+        Assert.That(Array.Find(_world.Describe(), t => t.Entities == 5001).Capacity, Is.EqualTo(5056));
+    }
+
+    [Test]
+    public void APassGoesOnInTheGrownColumnsAfterAReservation()
+    {
+        _world.EnsureEntityCapacity(20_000); // only the table grows below
+        for (int i = 0; i < 100; i++) _world.CreateEntity(new Position(i, 0));
+        int visited = 0;
+        foreach (var item in _world.Query<Position>())
+        {
+            item.Position.Y = 1; // before the reservation: a ref is valid until the next structural change
+            if (visited++ == 10) _world.EnsureCapacity<Position>(10_000); // the columns move under the pass
+        }
+
+        int written = 0;
+        foreach (var item in _world.Query<Position>()) written += (int)item.Position.Y;
+        Assert.That(written, Is.EqualTo(100));
+    }
+
+    [Test]
     public void BulkCreationGrowsToWhatItNeedsAndStillDoubles()
     {
         _world.CreateEntities(new Entity[100], new Health(1));
