@@ -117,7 +117,7 @@ public sealed partial class Snippet
         {
             int line = _parsed.GetText().Lines.GetLineFromPosition(node.FullSpan.Start).LineNumber;
             text.Append("#line ").Append(Fence.Line + line).Append(" \"").Append(page).Append("\"\n");
-            text.Append(code.TrimEnd()).Append("\n#line hidden\n");
+            text.Append(code.TrimEnd()).Append("\n#line default\n");
         }
     }
 

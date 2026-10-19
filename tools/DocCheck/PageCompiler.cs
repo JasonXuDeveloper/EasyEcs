@@ -174,7 +174,8 @@ public sealed class PageCompiler
             var expected = snippet.Fence.Expected.ToHashSet();
             foreach (var diagnostic in diagnostics)
             {
-                if (!Counts(diagnostic)) continue;
+                // A suggestion (Info) counts only where the fence expects it: the page shows the code the rule points at.
+                if (!Counts(diagnostic) && !(diagnostic.Id.StartsWith("EECS", StringComparison.Ordinal) && expected.Contains(diagnostic.Id))) continue;
                 int line = LineOf(diagnostic, snippet);
                 if (line < 0) continue;
                 found.Add(diagnostic.Id);

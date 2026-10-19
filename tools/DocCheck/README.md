@@ -37,7 +37,8 @@ generator and analyzer. A page reads like a story, and DocCheck compiles the sto
   `System.Threading.Tasks` and `EasyEcs`. A fence's own `using` lines apply to the page.
 - A fence with a `namespace` is a file of its own.
 - **What fails**: every compiler error, and every analyzer finding (`EECS…`, warnings included). Compiler warnings
-  (unused variables and the like) do not.
+  (unused variables and the like) do not, nor do the analyzer's suggestions (Info: EECS031-033) unless a fence expects
+  one (`expect-EECS033`).
 
 ## Flags
 
