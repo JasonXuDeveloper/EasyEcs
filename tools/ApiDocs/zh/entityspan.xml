@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.EntitySpan" source="0b4448aa683a">
+    <summary>
+      批处理 job 里一段行对应的实体：第 <c>i</c> 个元素，就是这段行各个 span 第 <c>i</c> 个元素所属的实体。只有按下标访问时才构造句柄，
+      所以批处理只需要其中几行的实体时，只读那几行的 id。只在传入它的那次调用里有效（和 span 一样是 ref struct）。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.EntitySpan.Ids" source="fe2c31bd7a93">
+    <summary>这段行里实体的 id，直接从表里读（不复制）：用来保存或发送。</summary>
+  </member>
+  <member name="P:EasyEcs.EntitySpan.Length" source="1ccc86ac260b">
+    <summary>实体数量（等于这段行各个 span 的长度）。</summary>
+  </member>
+  <member name="P:EasyEcs.EntitySpan.Item(System.Int32)" source="8a78b7a7c2a6">
+    <summary>这段行里第 <paramref name="index" /> 行的实体。O(1)：一次 8 字节读取。</summary>
+  </member>
+</doc>

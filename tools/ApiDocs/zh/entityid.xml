@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.EntityId" source="2176bf6b8142">
+    <summary>
+      实体的身份：下标，加上这个下标的版本号（8 字节，非托管）。凡是从数据里引用实体的地方（关系、目标、主人、消息）都存它：
+      只含非托管值的组件保持非托管列，这种列固定在内存里、整块复制、GC 从不扫描，序列化时直接写原始字节。用
+      <see cref="M:EasyEcs.World.TryGetEntity(EasyEcs.EntityId,EasyEcs.Entity@)" /> 换回句柄；句柄可以隐式转换成 id。
+      <c>default</c> 就是 <see cref="P:EasyEcs.EntityId.Null" />，没有哪个实体用这个 id。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.EntityId.#ctor(System.Int32,System.Int32)" source="8f119e01204e">
+    <summary>下标为 <paramref name="index" />、版本号为 <paramref name="version" /> 的实体 id。</summary>
+  </member>
+  <member name="F:EasyEcs.EntityId.Index" source="c3ca115879f8">
+    <summary>实体下标（稠密，实体销毁后回收）。</summary>
+  </member>
+  <member name="F:EasyEcs.EntityId.Version" source="453e43cf0840">
+    <summary><see cref="F:EasyEcs.EntityId.Index" /> 的版本号：从 1 开始，这个下标上的实体每销毁一次加一。</summary>
+  </member>
+  <member name="P:EasyEcs.EntityId.IsNull" source="e1a605d84bda">
+    <summary>是否是 <see cref="P:EasyEcs.EntityId.Null" />。</summary>
+  </member>
+  <member name="P:EasyEcs.EntityId.Null" source="df0e9ccc6a55">
+    <summary>不属于任何实体的 id（<c>default</c>）：空引用。</summary>
+  </member>
+  <member name="M:EasyEcs.EntityId.op_Inequality(EasyEcs.EntityId,EasyEcs.EntityId)" source="00cc2c502da6">
+    <summary>id 不同，指的就是不同的实体，或同一个下标的不同版本。</summary>
+  </member>
+  <member name="M:EasyEcs.EntityId.op_Equality(EasyEcs.EntityId,EasyEcs.EntityId)" source="ddaf84000c5f">
+    <summary>id 相等，指的就是同一个实体的同一个版本。</summary>
+  </member>
+</doc>

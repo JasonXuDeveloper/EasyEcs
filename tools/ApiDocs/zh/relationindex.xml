@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.RelationIndex`1" source="7491e0416521">
+    <summary>
+      一个 World 里关系 <typeparamref name="T" /> 的链接，按目标组织（<see cref="M:EasyEcs.World.Relations``1" />）：哪些实体链接到某个实体，
+      开始 O(1)，之后每条链接 O(1)。写入链接时，以及来源实体销毁或失去缓冲时，索引都会跟着更新；第一次查找（以及
+      <see cref="M:EasyEcs.World.Restore(EasyEcs.WorldSnapshot)" /> 之后的第一次）会把所有缓冲索引一遍。指向已销毁目标的链接，
+      仍然能按目标的 id 找到，之后的实体不会再用这个 id。只能在所有者线程使用。内存：每个元素一条 20 字节的链接（回收复用），
+      目标的列表里再占 8 字节。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.RelationIndex`1.Count(EasyEcs.EntityId)" source="a49fadfb268c">
+    <summary>指向 <paramref name="target" /> 的链接数。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.RelationIndex`1.Find(EasyEcs.EntityId)" source="e84ba8ae6576">
+    <summary>链接到 <paramref name="target" /> 的实体，每条链接一次。循环里可以销毁实体，但不能改链接。</summary>
+  </member>
+  <member name="M:EasyEcs.RelationIndex`1.WhenTargetDestroyed(EasyEcs.TargetPolicy)" source="e2b0d21c65b0">
+    <summary>
+      决定销毁一个实体时，指向它的链接怎么处理：<see cref="F:EasyEcs.TargetPolicy.Remove" /> 删掉链接（成员离开了 World，队伍就忘掉他），
+      <see cref="F:EasyEcs.TargetPolicy.Destroy" /> 销毁链接过来的实体（施法者没了，他施加的 buff 一起结束），
+      <see cref="F:EasyEcs.TargetPolicy.Keep" />（默认）保留链接。每次销毁时都会执行（索引一直保持建好的状态）；每个销毁的实体 O(1)，
+      每条链接 O(它的来源实体的链接数)。只能在所有者线程调用。
+    </summary>
+  </member>
+</doc>

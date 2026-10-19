@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.IIndexed" source="bd13cae07572">
+    <summary>
+      所有 <see cref="T:EasyEcs.IIndexed`1" /> 共同实现的接口：不用反射，就能知道一个组件类型建了索引（JIT 会把这个类型检测折叠掉）。
+      要实现的是 <see cref="T:EasyEcs.IIndexed`1" />，不是这个接口。
+    </summary>
+  </member>
+</doc>

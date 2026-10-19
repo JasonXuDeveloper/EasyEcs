@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.TargetPolicy" source="42f08dd40529">
+    <summary>
+      实体销毁时，指向它的链接怎么处理（<see cref="M:EasyEcs.TargetRules.WhenTargetDestroyed``1(EasyEcs.ValueIndex{``0,EasyEcs.EntityId},EasyEcs.TargetPolicy)" />、
+      <see cref="M:EasyEcs.RelationIndex`1.WhenTargetDestroyed(EasyEcs.TargetPolicy)" />）。
+    </summary>
+  </member>
+  <member name="F:EasyEcs.TargetPolicy.Destroy" source="08988cc82147">
+    <summary>链接过来的实体也一起销毁，链接到它们的实体也一样（和 <see cref="T:EasyEcs.ChildOf" /> 一样）。</summary>
+  </member>
+  <member name="F:EasyEcs.TargetPolicy.Keep" source="d6c00ca522b4">
+    <summary>链接保留，仍然能按销毁的 id 找到（之后的实体不会再用这个 id）；由某个系统负责清理。</summary>
+  </member>
+  <member name="F:EasyEcs.TargetPolicy.Remove" source="b68ca5627585">
+    <summary>链接删掉：从实体上移除组件，删掉关系的链接。</summary>
+  </member>
+</doc>

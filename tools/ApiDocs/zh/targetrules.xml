@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.TargetRules" source="7178c5a400f8">
+    <summary>
+      指向实体的组件（键是 <see cref="T:EasyEcs.EntityId" /> 的 <see cref="T:EasyEcs.IIndexed`1" />）的目标策略。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.TargetRules.WhenTargetDestroyed``1(EasyEcs.ValueIndex{``0,EasyEcs.EntityId},EasyEcs.TargetPolicy)" source="9273ad2c8453">
+    <summary>
+      决定销毁一个实体时，键是这个实体的 <typeparamref name="T" /> 组件怎么处理：宠物死了，主人失去 <c>Pet</c>
+      （<see cref="F:EasyEcs.TargetPolicy.Remove" />）；召唤者死了，召唤物跟着死（<see cref="F:EasyEcs.TargetPolicy.Destroy" />）。
+      <see cref="T:EasyEcs.ChildOf" /> 一开始就是 <see cref="F:EasyEcs.TargetPolicy.Destroy" />；其他组件默认
+      <see cref="F:EasyEcs.TargetPolicy.Keep" />。每次销毁时都会执行（索引一直保持建好的状态）；每个销毁的实体 O(1)，
+      它的每条链接 O(1)。只能在所有者线程调用。
+    </summary>
+  </member>
+</doc>

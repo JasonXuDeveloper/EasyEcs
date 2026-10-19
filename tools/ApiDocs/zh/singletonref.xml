@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.SingletonRef`1" source="0ef40d1fa44c">
+    <summary>
+      某个 World 的单例 <typeparamref name="T" /> 的句柄。单例的存储从不移动，所以句柄在单例移除之前一直有效
+      （单例移除后就和 World 脱离：再写入也到不了 World）。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.SingletonRef`1.Value" source="6784d952db26">
+    <summary>单例的值，按引用返回。</summary>
+  </member>
+</doc>

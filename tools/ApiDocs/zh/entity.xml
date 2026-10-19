@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.Entity" source="bf0c37b176e1">
+    <summary>
+      实体的句柄：id + 版本号 + World（16 字节）。每次访问都校验版本号，所以指向已销毁实体的句柄永远碰不到复用了这个 id 的新实体：
+      查询类调用（<see cref="P:EasyEcs.Entity.IsAlive" />、<see cref="M:EasyEcs.Entity.Has``1" />、<see cref="M:EasyEcs.Entity.TryGet``1(``0@)" />、
+      <see cref="M:EasyEcs.Entity.TryGetRef``1(System.Boolean@)" />）返回 false，访问和修改（<see cref="M:EasyEcs.Entity.Get``1" />、
+      <see cref="M:EasyEcs.Entity.Read``1" />、<see cref="M:EasyEcs.Entity.GetOrAdd``1" />、<c>Set</c>、<c>Remove</c>）抛异常，
+      <see cref="M:EasyEcs.Entity.Destroy" /> 什么都不做。可以放心保存和比较。
+    </summary>
+    <remarks>
+      <see cref="M:EasyEcs.Entity.Get``1" /> / <see cref="M:EasyEcs.Entity.GetOrAdd``1" /> 返回的 ref 指向实体所在原型表的那一行：
+      拿到就用，不要跨过这个实体的结构变更（它会搬行）或 <c>await</c> 保留它。
+    </remarks>
+  </member>
+  <member name="F:EasyEcs.Entity.Id" source="21b2a5d72e07">
+    <summary>
+      实体的身份（下标加版本号）。要在组件里引用这个实体，或者把它发给别处，就存它
+      （<see cref="M:EasyEcs.World.TryGetEntity(EasyEcs.EntityId,EasyEcs.Entity@)" /> 能把它换回句柄）。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.Entity.IsAlive" source="182613280c97">
+    <summary>这个版本的实体是否存活。O(1)。</summary>
+  </member>
+  <member name="P:EasyEcs.Entity.World" source="bbba30a86dea">
+    <summary>实体所属的 World（<c>default</c> 句柄为 null）。</summary>
+  </member>
+  <member name="M:EasyEcs.Entity.AddRelation``1(``0@)" source="654f77f21a62">
+    <summary>
+      把实体链接到 <paramref name="relation" /> 的目标：追加到实体的 <see cref="T:EasyEcs.DynamicBuffer`1" />（没有就先添加）
+      和关系索引里。返回实体。均摊 O(1)；只有添加缓冲时才是结构变更。实体不存活时抛异常。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Entity.Clone" source="139d91b7b854">
+    <summary>
+      在同一个 World 里新建一个实体，带上这个实体每个组件的副本（<see cref="T:EasyEcs.DynamicBuffer`1" /> 拿到自己的一份列表，
+      索引收录副本，被追踪组件算作刚刚写入）；这个实体不存活时抛异常。要按模板创建实体，用 <see cref="T:EasyEcs.Prefab" />。
+      O(组件数)。只能在所有者线程调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Entity.Describe" source="36ddeb3a1f64">
+    <summary>
+      实体各个组件的装箱副本，禁用的组件会标出来；实体不存活时为空。用于诊断（调试器显示的也是这些）：冷路径，会分配内存。
+      O(组件数)。只能在所有者线程调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Entity.Destroy" source="91954508c38b">
+    <summary>销毁实体；已经销毁的句柄直接忽略。O(组件数)。</summary>
+  </member>
+  <member name="M:EasyEcs.Entity.Disable``1" source="0eff8d0de29b">
+    <summary>
+      禁用组件 <typeparamref name="T" />：实体保留它的值，但在 <see cref="M:EasyEcs.Entity.Enable``1" /> 之前都当作没有它
+      （查询、<c>Has</c>、<c>Get</c>），同时加上 <see cref="T:EasyEcs.Disabled`1" /> 标签。对 <c>[Removed&lt;T&gt;]</c>
+      来说算一次移除；被索引的组件离开索引。实体没有 <typeparamref name="T" />（或者已经禁用）时返回 false；实体不存活时抛异常。
+      O(1)；一张表里第一次禁用时搬一次行（搬到带这个标签列的表）。不能禁用 <see cref="T:EasyEcs.ICleanupComponent" />
+      （它要留着等释放）和 <see cref="T:EasyEcs.ChildOf" />（销毁父实体时要找到子实体）：这两种会抛异常。只能在所有者线程调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Entity.Enable``1" source="3841d2af331c">
+    <summary>
+      取回用 <see cref="M:EasyEcs.Entity.Disable``1" /> 禁用的组件，值还是禁用时保留的那个（<c>Set</c> 则会替换它）。
+      对被追踪组件算一次写入；被索引的组件重新进入索引。<typeparamref name="T" /> 没有禁用时返回 false；实体不存活时抛异常。
+      O(1)。只能在所有者线程调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Entity.Equals(EasyEcs.Entity)" source="f6ae8a01d36a">
+    <summary>两个句柄是否指向同一个 World 的同一个实体：id 和版本号都相同。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.Entity.Get``1" source="a0c95aba232d">
+    <summary>
+      组件 <typeparamref name="T" /> 的 ref；实体没有它或者不存活时抛异常。对被追踪组件（<see cref="T:EasyEcs.ITrackChanges" />）
+      算一次写入。O(1)。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Entity.GetHashCode" source="62084449ca88">
+    <summary>由 id 和版本号算出的哈希值。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.Entity.GetOrAdd``1" source="79fd6476aa98">
+    <summary>
+      组件 <typeparamref name="T" /> 的 ref；没有时先添加（默认值）。对被追踪组件算一次写入。O(1)；缺少这个组件时，
+      实体所在的表已经有这一列就是 O(1)（这一行只是重新置上存在位），否则均摊 O(c)：这一行搬到有这一列的表（复制 c 个组件）。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Entity.Has``1" source="3952ce6c8ac4">
+    <summary>实体是否拥有组件 <typeparamref name="T" />；句柄已经销毁或是 default 时返回 false。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.Entity.Has``2" source="51dd3aa79ab8">
+    <summary>实体是否同时拥有 <c>T1, T2</c>；句柄已经销毁或是 default 时返回 false。O(2)。</summary>
+  </member>
+  <member name="M:EasyEcs.Entity.HasRelation``1(EasyEcs.EntityId)" source="e03baaead9ab">
+    <summary>实体是否有 <typeparamref name="T" /> 链接指向 <paramref name="target" />。O(实体的链接数)。</summary>
+  </member>
+  <member name="M:EasyEcs.Entity.IsDisabled``1" source="714ae6bc43bf">
+    <summary>
+      组件 <typeparamref name="T" /> 是否处于禁用状态（<see cref="M:EasyEcs.Entity.Disable``1" />），也就是实体带着
+      <see cref="T:EasyEcs.Disabled`1" />。O(1)。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Entity.Read``1" source="8dd2c18ec3c2">
+    <summary>
+      组件 <typeparamref name="T" /> 的只读 ref；实体没有它或者不存活时抛异常。不算写入：被追踪组件
+      （<see cref="T:EasyEcs.ITrackChanges" />）不打 tick。O(1)。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Entity.Remove``2" source="3ce16bab43f0">
+    <summary>
+      移除 2 个组件；没有的组件忽略。实体的行留在原处（不搬行）。返回实体，方便链式调用。O(2)。只能在所有者线程调用
+      （见<see href="/zh/docs/guide/threading">线程模型</see>）。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Entity.RemoveRelation``1(EasyEcs.EntityId)" source="aca13801f198">
+    <summary>
+      删掉实体指向 <paramref name="target" /> 的 <typeparamref name="T" /> 链接（目标是它的每一个元素）。返回删掉的数量。
+      O(实体的链接数)。实体不存活时抛异常。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Entity.Set``2(``0@,``1@)" source="b45aadfbd436">
+    <summary>
+      用传入的值添加或覆盖 2 个组件，最多一次行复制。返回实体，方便链式调用。均摊 O(2)。只能在所有者线程调用
+      （见<see href="/zh/docs/guide/threading">线程模型</see>）。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Entity.ToString" source="5512d3ae8701">
+    <summary><c>Entity 3v1</c>：id 的下标和版本号。</summary>
+  </member>
+  <member name="M:EasyEcs.Entity.TryGet``1(``0@)" source="02059badbd5b">
+    <summary>
+      实体拥有组件 <typeparamref name="T" /> 时取得它的副本；没有这个组件或实体不存活时返回 false。不算写入。O(1)。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Entity.TryGetRef``1(System.Boolean@)" source="0c5a1646c520">
+    <summary>
+      实体拥有组件 <typeparamref name="T" /> 时返回它的 ref，<paramref name="found" /> 为 true；否则返回空 ref：用之前先检查
+      <paramref name="found" />。实体不存活时 <paramref name="found" /> 为 false。找到时，对被追踪组件算一次写入。O(1)。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Entity.op_Inequality(EasyEcs.Entity,EasyEcs.Entity)" source="d5b524cd5e20">
+    <summary>两个句柄是否指向不同的实体（或不同的 World）。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.Entity.op_Implicit(EasyEcs.Entity)~EasyEcs.EntityId" source="b15c8d893c64">
+    <summary>句柄的 <see cref="F:EasyEcs.Entity.Id" />：组件里存 id，不要存句柄。</summary>
+  </member>
+</doc>

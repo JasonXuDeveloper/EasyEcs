@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.TableInfo" source="4b6bc20c6b43">
+    <summary>一张表：拥有同一组组件列的实体（<see cref="M:EasyEcs.World.Describe" />）。</summary>
+    <param name="Columns">组件列，按位顺序排列（不列出变更 tick 列和 <see cref="T:EasyEcs.Disabled`1" /> 列）。</param>
+    <param name="Entities">存活实体数。</param>
+    <param name="Rows">已用的行：实体，加上进行中的查询留下的空洞（查询结束时补上）。</param>
+    <param name="Capacity">已分配的行数。</param>
+    <param name="Bytes">已分配的行占用的内存：列、变更 tick、存在位和实体槽（不含托管组件引用的对象）。</param>
+  </member>
+  <member name="P:EasyEcs.TableInfo.Bytes" source="257983464843">
+    <summary>已分配的行占用的内存：列、变更 tick、存在位和实体槽（不含托管组件引用的对象）。</summary>
+  </member>
+  <member name="P:EasyEcs.TableInfo.Capacity" source="149885154ea1">
+    <summary>已分配的行数。</summary>
+  </member>
+  <member name="P:EasyEcs.TableInfo.Columns" source="e98b66716b9e">
+    <summary>组件列，按位顺序排列（不列出变更 tick 列和 <see cref="T:EasyEcs.Disabled`1" /> 列）。</summary>
+  </member>
+  <member name="P:EasyEcs.TableInfo.Entities" source="80ea211ae56c">
+    <summary>存活实体数。</summary>
+  </member>
+  <member name="P:EasyEcs.TableInfo.Rows" source="6b9a1476b294">
+    <summary>已用的行：实体，加上进行中的查询留下的空洞（查询结束时补上）。</summary>
+  </member>
+</doc>

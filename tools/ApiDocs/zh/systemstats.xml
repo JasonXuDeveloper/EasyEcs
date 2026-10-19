@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.SystemStats" source="92a72b8ff4fe">
+    <summary>
+      系统运行了多少次、花了多长时间（<see cref="P:EasyEcs.WorldOptions.MeasureSystems" />）：每次运行包括
+      <see cref="M:EasyEcs.EcsSystem.OnUpdate" /> 和它的 <c>[ForEach]</c> 方法。在两次更新之间读取；打开
+      <see cref="P:EasyEcs.WorldOptions.ParallelSystems" /> 时，每个系统各自记录自己的运行。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.SystemStats.Average" source="493d7e63e58b">
+    <summary>每次运行的平均耗时（第一次运行前为零）。</summary>
+  </member>
+  <member name="P:EasyEcs.SystemStats.Last" source="4da4f6cef651">
+    <summary>最近一次运行的耗时。</summary>
+  </member>
+  <member name="P:EasyEcs.SystemStats.Runs" source="4c16f59609c5">
+    <summary>到目前为止测量过的运行次数。</summary>
+  </member>
+  <member name="P:EasyEcs.SystemStats.Total" source="ef4f9286c18c">
+    <summary>所有测量过的运行加起来的耗时。</summary>
+  </member>
+</doc>

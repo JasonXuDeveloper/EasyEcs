@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.EcsSystem" source="8ecd51d11255">
+    <summary>
+      在 World 上运行的逻辑。生命周期：添加时调用 <see cref="M:EasyEcs.EcsSystem.OnCreate" />；之后每次更新先调用
+      <see cref="M:EasyEcs.EcsSystem.OnUpdate" />，再执行 <see cref="T:EasyEcs.ForEachAttribute">[ForEach]</see> 方法；
+      移除时或 World 释放时调用 <see cref="M:EasyEcs.EcsSystem.OnDestroy" />。这些都在 <see cref="M:EasyEcs.World.Update" />
+      里同步执行（<see cref="T:EasyEcs.UpdateInGroupAttribute`1">分组</see>里的系统是 <see cref="M:EasyEcs.World.Update``1" />）：
+      在调用线程上执行；打开 <see cref="P:EasyEcs.WorldOptions.ParallelSystems" /> 后，也可能和
+      <see cref="T:EasyEcs.SystemAccess">读写</see>不冲突的系统一起，在线程池线程上执行。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.EcsSystem.Enabled" source="d24365a3c7d1">
+    <summary>
+      <see cref="M:EasyEcs.World.Update" /> 和 <see cref="M:EasyEcs.World.Update``1" /> 跳过禁用的系统。启用系统时会清掉它的
+      <see cref="P:EasyEcs.EcsSystem.Error" />。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.EcsSystem.Error" source="934e60ea3188">
+    <summary>
+      在 <see cref="F:EasyEcs.SystemErrorPolicy.Disable" /> 策略下让这个系统停掉的异常，重新启用之前一直保留；其他情况为 null。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.EcsSystem.LastRunTick" source="eee3a45a2d3e">
+    <summary>
+      这个系统上次运行时 World 的 <see cref="P:EasyEcs.World.ChangeTick" />（第一次运行前为 0）：它的
+      <c>[Changed&lt;T&gt;]</c> 方法选出这个 tick 之后写入的行，所以不包括它们自己在那一轮的写入。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.EcsSystem.Stats" source="54e5b229d5fe">
+    <summary>这个系统的运行次数和耗时；只有打开 <see cref="P:EasyEcs.WorldOptions.MeasureSystems" /> 才记录。</summary>
+  </member>
+  <member name="P:EasyEcs.EcsSystem.UpdateInterval" source="27ca4f84e26b">
+    <summary>每 N 次 World 更新运行一次（1 表示每次都运行）；另见 <see cref="P:EasyEcs.EcsSystem.UpdatePhase" />。</summary>
+  </member>
+  <member name="P:EasyEcs.EcsSystem.UpdatePhase" source="bfe638f77a74">
+    <summary>
+      系统在每 <see cref="P:EasyEcs.EcsSystem.UpdateInterval" /> 次更新里的第几次运行（0 到 interval - 1）：间隔相同、相位不同的系统，
+      把工作分散到不同的更新里，不会全挤在同一次。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.EcsSystem.World" source="b98d23b4c8c7">
+    <summary>这个系统所属的 World（在 <see cref="M:EasyEcs.EcsSystem.OnCreate" /> 之前设置好）。</summary>
+  </member>
+  <member name="M:EasyEcs.EcsSystem.OnCreate" source="84208da5f80b">
+    <summary>系统添加到 World 时调用一次。</summary>
+  </member>
+  <member name="M:EasyEcs.EcsSystem.OnDestroy" source="bbbe775f7302">
+    <summary>系统移除时或 World 释放时调用一次。</summary>
+  </member>
+  <member name="M:EasyEcs.EcsSystem.OnUpdate" source="9530f911ae8c">
+    <summary>每次更新时调用，在系统的 [ForEach] 方法之前。</summary>
+  </member>
+</doc>

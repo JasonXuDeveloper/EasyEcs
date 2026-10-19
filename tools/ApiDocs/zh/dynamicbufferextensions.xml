@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.DynamicBufferExtensions" source="40c4ebc04f15">
+    <summary>
+      <see cref="T:EasyEcs.DynamicBuffer`1" /> 的写入方法。每个方法都按 <c>ref</c> 接收缓冲：只能通过写访问拿到它（算一次被追踪的变更），
+      不能通过 <c>in</c>。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.DynamicBufferExtensions.Add``1(EasyEcs.DynamicBuffer{``0}@,``0@)" source="245441155d3e">
+    <summary>追加 <paramref name="item" />。均摊 O(1)；只有列表扩容时才分配内存。</summary>
+  </member>
+  <member name="M:EasyEcs.DynamicBufferExtensions.AddRange``1(EasyEcs.DynamicBuffer{``0}@,System.ReadOnlySpan{``0})" source="3058097f3b53">
+    <summary>追加 <paramref name="items" />。O(items)。</summary>
+  </member>
+  <member name="M:EasyEcs.DynamicBufferExtensions.AsSpan``1(EasyEcs.DynamicBuffer{``0}@)" source="11418799f778">
+    <summary>全部元素，可写。</summary>
+  </member>
+  <member name="M:EasyEcs.DynamicBufferExtensions.Clear``1(EasyEcs.DynamicBuffer{``0}@)" source="119f86e76a07">
+    <summary>移除所有元素，容量不变。O(1)；元素含引用时为 O(count)。</summary>
+  </member>
+  <member name="M:EasyEcs.DynamicBufferExtensions.EnsureCapacity``1(EasyEcs.DynamicBuffer{``0}@,System.Int32)" source="bedb8622c69e">
+    <summary>预留至少能放下 <paramref name="capacity" /> 个元素的空间。</summary>
+  </member>
+  <member name="M:EasyEcs.DynamicBufferExtensions.Insert``1(EasyEcs.DynamicBuffer{``0}@,System.Int32,``0@)" source="de1de1f4b4e7">
+    <summary>在 <paramref name="index" /> 处插入 <paramref name="item" />，保持原有顺序。O(count)。</summary>
+  </member>
+  <member name="M:EasyEcs.DynamicBufferExtensions.RemoveAt``1(EasyEcs.DynamicBuffer{``0}@,System.Int32)" source="02c0c72f8c89">
+    <summary>移除 <paramref name="index" /> 处的元素，保持原有顺序。O(count)。</summary>
+  </member>
+  <member name="M:EasyEcs.DynamicBufferExtensions.RemoveAtSwapBack``1(EasyEcs.DynamicBuffer{``0}@,System.Int32)" source="8f59d6964dbe">
+    <summary>移除 <paramref name="index" /> 处的元素，把最后一个元素挪到这个位置。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.DynamicBufferExtensions.TrimExcess``1(EasyEcs.DynamicBuffer{``0}@)" source="52746fc46e33">
+    <summary>
+      把容量缩到和元素数一样，曾经涨得很大的列表就不会一直占着峰值时的内存（列表的数组会重新分配；空列表不占数组）。O(count)。
+    </summary>
+  </member>
+</doc>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.ForEachAttribute" source="e00d3dbc7e60">
+    <summary>
+      对每个匹配组件参数（以及 <see cref="T:EasyEcs.WithAttribute`1" /> / <see cref="T:EasyEcs.WithoutAttribute`1" /> /
+      <see cref="T:EasyEcs.WithAnyAttribute`1" /> 过滤条件）的实体，执行 <see cref="T:EasyEcs.EcsSystem" /> 的一个方法
+      （或者通过生成的入口点，执行任何其他类型的静态方法）。每次更新执行一次，在 <see cref="M:EasyEcs.EcsSystem.OnUpdate" />
+      之后，按声明顺序。
+      <para>参数：1 到 9 个组件（<c>ref</c> 表示写，<c>in</c> 表示读；按段接收行的批处理方法用 <c>Span&lt;T&gt;</c> /
+      <c>ReadOnlySpan&lt;T&gt;</c>）、单例（<c>ref</c> / <c>in</c>），还可以加上 <see cref="T:EasyEcs.Entity" /> 和
+      <see cref="T:EasyEcs.World" />。静态方法和实例方法都支持。</para>
+      <code>
+      public class MovementSystem : EcsSystem
+      {
+          [ForEach, Without&lt;Frozen&gt;]
+          static void Move(ref Position p, in Velocity v) { p.X += v.X; p.Y += v.Y; }
+      }
+      </code>
+      EasyEcs.Generator 把它编译成结构体 job（<see cref="T:EasyEcs.IForEach`1" />、<see cref="T:EasyEcs.IForEachEntity`1" /> 或
+      <see cref="T:EasyEcs.IForEachBatch`1" />）：没有委托，不分配内存，可以内联。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.ForEachAttribute.Parallel" source="c2ab3c793ca6">
+    <summary>
+      把匹配的行分块，放到多个线程上执行（<c>World.ForEachParallel</c>）。方法不能做结构变更，必须逐实体执行，也不能写单例（EECS010）；
+      每行工作量大、行数上万时才划算。默认 false。
+    </summary>
+  </member>
+</doc>

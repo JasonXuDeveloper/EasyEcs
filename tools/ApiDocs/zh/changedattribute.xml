@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.ChangedAttribute`1" source="0e88f39d23b3">
+    <summary>
+      <see cref="T:EasyEcs.ForEachAttribute" /> 方法只访问 <typeparamref name="T" /> 在系统上次运行之后写过的实体
+      （<see cref="P:EasyEcs.EcsSystem.LastRunTick" />；第一次运行时是所有拥有它的实体）。和 <see cref="T:EasyEcs.WithAttribute`1" />
+      一样要求有 <typeparamref name="T" />；<typeparamref name="T" /> 要追踪变更（<see cref="T:EasyEcs.ITrackChanges" />）。
+      加了多个这种特性，就要求这些组件全都变过。
+    </summary>
+  </member>
+</doc>

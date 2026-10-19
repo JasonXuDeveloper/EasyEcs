@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.RelationIndex`1.Sources" source="853f79a98a18">
+    <summary>枚举链接到某个目标的实体（<c>foreach</c>），每条链接一次。</summary>
+  </member>
+  <member name="P:EasyEcs.RelationIndex`1.Sources.Current" source="90fd95154179">
+    <summary>当前这条链接的来源实体。</summary>
+  </member>
+  <member name="M:EasyEcs.RelationIndex`1.Sources.MoveNext" source="128456cad61e">
+    <summary>移到下一条链接。每条链接 O(1)。</summary>
+  </member>
+</doc>

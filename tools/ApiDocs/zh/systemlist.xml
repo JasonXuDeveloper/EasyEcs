@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.SystemList" source="fe64ce9b0a99">
+    <summary>
+      World 的系统，所有分组按执行顺序排列（默认分组在前）：用 <c>foreach</c> 遍历，或者读 <see cref="P:EasyEcs.SystemList.Count" />。
+      它是视图不是副本：零分配，遍历到每个分组时，看到的是那一刻已经注册的系统。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.SystemList.Count" source="dffcc24ff6d7">
+    <summary>所有分组里的系统总数。O(分组数)。</summary>
+  </member>
+  <member name="M:EasyEcs.SystemList.GetEnumerator" source="0714c13d66a6">
+    <summary><c>foreach</c> 用的枚举器：每个分组的系统按执行顺序排列，零分配。</summary>
+  </member>
+</doc>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.World.EntityEnumerator" source="fa2659a10395">
+    <summary>按 id 顺序枚举存活实体；超出开始时容量的 id 不会访问到。</summary>
+  </member>
+  <member name="P:EasyEcs.World.EntityEnumerator.Current" source="e1f20c1e03b7">
+    <summary>当前的存活实体。</summary>
+  </member>
+  <member name="M:EasyEcs.World.EntityEnumerator.MoveNext" source="174225a52d05">
+    <summary>移到下一个存活实体（id 升序）。每个 id 均摊 O(1)。</summary>
+  </member>
+</doc>

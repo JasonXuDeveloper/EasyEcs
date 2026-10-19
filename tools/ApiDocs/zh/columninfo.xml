@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.ColumnInfo" source="82372ad9df3a">
+    <summary>表的一列（<see cref="T:EasyEcs.TableInfo" />）。</summary>
+    <param name="Type">组件类型。</param>
+    <param name="Without">表里没有这个组件的存活行（移除或禁用的：不搬行）。</param>
+    <param name="Group">列的组件是 <see cref="T:EasyEcs.IGroup" /> 时，表里所有行所在的分组；否则为 0。</param>
+  </member>
+  <member name="P:EasyEcs.ColumnInfo.Group" source="8afc9dfc4ee8">
+    <summary>列的组件是 <see cref="T:EasyEcs.IGroup" /> 时，表里所有行所在的分组；否则为 0。</summary>
+  </member>
+  <member name="P:EasyEcs.ColumnInfo.Type" source="95b4024a331b">
+    <summary>组件类型。</summary>
+  </member>
+  <member name="P:EasyEcs.ColumnInfo.Without" source="82104c55a3f1">
+    <summary>表里没有这个组件的存活行（移除或禁用的：不搬行）。</summary>
+  </member>
+</doc>

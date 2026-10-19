@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.ValueIndex`2.Ordered" source="d46d108ccc61">
+    <summary>
+      按键的顺序枚举实体（<c>foreach</c>）：先是一个键的所有实体，再到下一个键。开始 O(log 键数)，之后每个实体、每个键 O(1)。
+      循环里可以销毁实体，但不能改 <typeparamref name="T" />。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.ValueIndex`2.Ordered.Current" source="f29c3699ce0c">
+    <summary>当前实体。</summary>
+  </member>
+  <member name="P:EasyEcs.ValueIndex`2.Ordered.Key" source="508e15043378">
+    <summary><see cref="P:EasyEcs.ValueIndex`2.Ordered.Current" /> 的键。</summary>
+  </member>
+  <member name="M:EasyEcs.ValueIndex`2.Ordered.MoveNext" source="4058b93f694e">
+    <summary>按键的顺序移到下一个实体。</summary>
+  </member>
+</doc>

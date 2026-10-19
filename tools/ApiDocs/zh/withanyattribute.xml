@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.WithAnyAttribute`1" source="6eead7817111">
+    <summary>
+      <see cref="T:EasyEcs.ForEachAttribute" /> 方法要求实体至少拥有它的 <c>[WithAny&lt;T&gt;]</c> 特性列出的组件之一（不传入方法）：
+      <c>[ForEach, WithAny&lt;Burning&gt;, WithAny&lt;Poisoned&gt;]</c>。加在系统分组上时，分组里所有系统的每个 [ForEach]
+      方法都要求拥有分组列出的组件之一。
+    </summary>
+  </member>
+</doc>

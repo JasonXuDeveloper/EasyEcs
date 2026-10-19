@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.DynamicBuffer`1" source="6a65a9963302">
+    <summary>
+      每个实体一个 <typeparamref name="T" /> 列表，作为组件存放：背包、路径、这个 tick 的命中记录。写入要通过组件的 <c>ref</c>
+      （<c>[ForEach]</c> 方法和 job 的 <c>ref</c> 参数、<see cref="M:EasyEcs.Entity.Get``1" />），所以它和
+      <see cref="T:EasyEcs.ITrackChanges" /> 组件的任何写入一样会记录下来，<c>[Changed&lt;DynamicBuffer&lt;T&gt;&gt;]</c>
+      能选出列表变过的实体。通过 <c>in</c> 或 <see cref="M:EasyEcs.Entity.Read``1" /> 拿到的列表是只读的：修改方法
+      （<see cref="T:EasyEcs.DynamicBufferExtensions" />）接收 <c>ref this</c>，所以通过只读引用写入根本编译不过。快照会复制元素
+      （<see cref="M:EasyEcs.World.Capture" />）；搬行时列表跟着走。在容量以内添加元素不分配内存。
+    </summary>
+    <remarks>
+      <c>new DynamicBuffer&lt;T&gt;()</c> 不持有列表：每个实体的列表在第一次写入时才创建（用
+      <see cref="M:EasyEcs.DynamicBufferExtensions.EnsureCapacity``1(EasyEcs.DynamicBuffer{``0}@,System.Int32)" /> 预留空间），
+      所以同一个值可以用来创建很多实体。列表存放在组件引用的一个对象里，复制组件，副本也会引用同一个列表：分析器禁止复制（EECS012），
+      要通过实体访问列表。
+    </remarks>
+  </member>
+  <member name="P:EasyEcs.DynamicBuffer`1.Capacity" source="a461bc11eaf7">
+    <summary>列表扩容之前能放下的元素数。</summary>
+  </member>
+  <member name="P:EasyEcs.DynamicBuffer`1.Count" source="557b24ef62ea">
+    <summary>元素数量。</summary>
+  </member>
+  <member name="P:EasyEcs.DynamicBuffer`1.Item(System.Int32)" source="dae08a5c5148">
+    <summary>
+      第 <paramref name="index" /> 个元素，只读（写入用
+      <see cref="M:EasyEcs.DynamicBufferExtensions.AsSpan``1(EasyEcs.DynamicBuffer{``0}@)" />）。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.DynamicBuffer`1.AsReadOnlySpan" source="c1f9ffdace13">
+    <summary>全部元素，只读。</summary>
+  </member>
+  <member name="M:EasyEcs.DynamicBuffer`1.GetEnumerator" source="546a0591a584">
+    <summary>枚举元素（只读，零分配）。</summary>
+  </member>
+</doc>

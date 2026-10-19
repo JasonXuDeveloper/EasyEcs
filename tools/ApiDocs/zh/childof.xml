@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.ChildOf" source="86f8e542c42a">
+    <summary>
+      层级关系：实体是 <see cref="P:EasyEcs.ChildOf.Parent" /> 的子实体。销毁父实体时，子实体连同子实体的子实体一起销毁
+      （<see cref="M:EasyEcs.World.Children(EasyEcs.EntityId)" /> 列出它们）。它和其他被索引的关系一样：用 <c>Set</c> 写入，
+      设置新值就是换父实体，移除它就是脱离父实体。
+    </summary>
+  </member>
+</doc>

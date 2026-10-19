@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.WithAttribute`1" source="8faa1683b726">
+    <summary>
+      <see cref="T:EasyEcs.ForEachAttribute" /> 方法还要求实体有组件 <typeparamref name="T" />（不传入方法）。加在系统分组
+      （<see cref="T:EasyEcs.ISystemGroup" /> 结构体）上时，分组里所有系统的每个 [ForEach] 方法都有这个要求。
+    </summary>
+  </member>
+</doc>

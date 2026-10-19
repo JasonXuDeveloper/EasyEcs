@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.WorldSnapshot" source="d4c31eb7f360">
+    <summary>
+      World 的实体、组件和单例的一份拷贝：<see cref="M:EasyEcs.World.Capture" /> 拍下，
+      <see cref="M:EasyEcs.World.Restore(EasyEcs.WorldSnapshot)" /> 放回（系统和选项不在里面）。它只保存这些拷贝；可以恢复任意多次，
+      但只能恢复到拍它的那个 World。<see cref="M:EasyEcs.World.Capture(EasyEcs.WorldSnapshot)" /> 会覆盖它，并复用它的数组
+      （数组够大之后不分配内存）。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.WorldSnapshot.EntityCount" source="e6fc25116074">
+    <summary>快照里的存活实体数。</summary>
+  </member>
+</doc>

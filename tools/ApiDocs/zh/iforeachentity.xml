@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.IForEachEntity`1" source="a03122c6a5c5">
+    <summary>
+      和 <see cref="T:EasyEcs.IForEach`1" /> 一样，但还接收 <see cref="T:EasyEcs.Entity" /> 句柄。句柄直接用原型的实体行
+      （id 和版本号挨着存）构造，不用逐个实体查找。带 <see cref="T:EasyEcs.Entity" /> 参数的 <c>[ForEach]</c> 方法编译成它。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.IForEachEntity`1.Execute(EasyEcs.Entity,`0@)" source="e61c1f32f0d1">
+    <summary>一个匹配的实体：它的句柄和组件，组件按引用传入。</summary>
+  </member>
+</doc>

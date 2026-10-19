@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.Destroyed" source="4829286c9f25">
+    <summary>
+      实体持有 <see cref="T:EasyEcs.ICleanupComponent" /> 时销毁，就会带上这个标签：其他组件已经去掉，实体一直存活到最后一个清理组件移除为止。
+      清理系统用 <c>With&lt;Destroyed&gt;</c> 选出这些实体，获取资源的系统用 <c>Without&lt;Destroyed&gt;</c> 只选新实体。
+    </summary>
+  </member>
+</doc>

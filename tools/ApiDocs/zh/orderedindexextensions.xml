@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.OrderedIndexExtensions" source="2b912e0cfdb0">
+    <summary>
+      键可比较（分数、截止时间、等级）的值索引的有序遍历：按区间或按顺序遍历，用于排行榜、计时器和匹配分段。第一次遍历时把键排一次序；
+      之后键出现和消失，索引都保持有序（每次 O(log 键数)，外加一次块移动）。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.OrderedIndexExtensions.&lt;G&gt;$A0E188605115447CBAACD98406FED6F5`2.Ascending" source="da24b9a2bf84">
+    <summary>按键升序列出所有建了索引的实体。</summary>
+  </member>
+  <member name="M:EasyEcs.OrderedIndexExtensions.&lt;G&gt;$A0E188605115447CBAACD98406FED6F5`2.Descending" source="ad5cacf1a435">
+    <summary>按键降序列出所有建了索引的实体（排行榜从第一名开始）。</summary>
+  </member>
+  <member name="M:EasyEcs.OrderedIndexExtensions.&lt;G&gt;$A0E188605115447CBAACD98406FED6F5`2.Range(`1,`1)" source="dca6701c1139">
+    <summary>键在 <paramref name="min" /> 和 <paramref name="max" /> 之间（含两端）的实体，按键升序。</summary>
+  </member>
+  <member name="M:EasyEcs.OrderedIndexExtensions.&lt;G&gt;$A0E188605115447CBAACD98406FED6F5`2.RangeDescending(`1,`1)" source="4f75cfbf592f">
+    <summary>键在 <paramref name="min" /> 和 <paramref name="max" /> 之间（含两端）的实体，按键降序。</summary>
+  </member>
+</doc>

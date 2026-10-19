@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.EntityIdField`1" source="0ef8073d8578">
+    <summary>
+      <paramref name="value" /> 里的一个 <see cref="T:EasyEcs.EntityId" /> 字段（见
+      <see cref="M:EasyEcs.SavedTypes.EntityIds``1(System.ReadOnlySpan{EasyEcs.EntityIdField{``0}})" />）。
+    </summary>
+  </member>
+</doc>

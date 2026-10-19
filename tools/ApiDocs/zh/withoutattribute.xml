@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.WithoutAttribute`1" source="c208c7ec0f12">
+    <summary>
+      <see cref="T:EasyEcs.ForEachAttribute" /> 方法跳过拥有组件 <typeparamref name="T" /> 的实体。加在系统分组
+      （<see cref="T:EasyEcs.ISystemGroup" /> 结构体）上时，分组里所有系统的每个 [ForEach] 方法都会跳过它们：
+      <code>[Without&lt;Inactive&gt;] public struct Gameplay : ISystemGroup;</code>
+    </summary>
+  </member>
+</doc>

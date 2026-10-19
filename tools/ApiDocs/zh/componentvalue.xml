@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.ComponentValue" source="30fc4ea263ea">
+    <summary>实体的一个组件，即 <see cref="M:EasyEcs.Entity.Describe" /> 读到的结果：它的值的装箱副本。</summary>
+    <param name="Value">装箱后的值。</param>
+    <param name="Enabled">禁用的组件（<see cref="M:EasyEcs.Entity.Disable``1" />）为 false，它的值仍然保留。</param>
+  </member>
+  <member name="P:EasyEcs.ComponentValue.Enabled" source="67d5b75cf4bf">
+    <summary>禁用的组件（<see cref="M:EasyEcs.Entity.Disable``1" />）为 false，它的值仍然保留。</summary>
+  </member>
+  <member name="P:EasyEcs.ComponentValue.Value" source="108dbcdbb474">
+    <summary>装箱后的值。</summary>
+  </member>
+</doc>

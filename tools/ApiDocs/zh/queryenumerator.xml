@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.QueryEnumerator`1" source="f1e80c2e201a">
+    <summary>
+      零分配的查询枚举器；遍历途中做结构变更也安全（访问规则和 ForEach 相同）。它是 ref struct，持有指向当前表的 ref，
+      所以遍历它的循环里不能 <c>await</c>。
+    </summary>
+    <remarks>
+      循环调用的每个成员都会内联，冷路径是静态的（<see cref="T:EasyEcs.QueryWalk" />，按值传入传出）：枚举器从不按引用传递，
+      所以它的字段都能留在寄存器里。
+    </remarks>
+  </member>
+  <member name="P:EasyEcs.QueryEnumerator`1.Current" source="4fdb10402ac1">
+    <summary>当前实体和它的组件。</summary>
+  </member>
+  <member name="M:EasyEcs.QueryEnumerator`1.Dispose" source="39e7889631fe">
+    <summary>提前结束遍历（<c>foreach</c> 会调用它）；走到末尾的遍历会自己结束。</summary>
+  </member>
+  <member name="M:EasyEcs.QueryEnumerator`1.GetEnumerator" source="97cf2e8b7f5a">
+    <summary>返回枚举器自身（支持 <c>foreach</c>，零分配）。</summary>
+  </member>
+  <member name="M:EasyEcs.QueryEnumerator`1.MoveNext" source="c7a41a822cfc">
+    <summary>移到下一个匹配的实体。每行 O(1)，再加上跳过的表。</summary>
+  </member>
+</doc>

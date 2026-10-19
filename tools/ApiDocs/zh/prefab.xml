@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.Prefab" source="63de15ca5842">
+    <summary>
+      实体的配方：一组不属于任何 World 的组件值，所以任何查询都看不到它。<see cref="M:EasyEcs.World.Instantiate(EasyEcs.Prefab)" />
+      在任意 World 里创建一个实体，带上每个值的副本。建一次（用代码或配置）并保存起来；只要没人在改它，一个预制体可以同时给多个线程上的
+      World 使用。
+      <br />
+      预制体可以有成员（<see cref="M:EasyEcs.Prefab.AddMember" />）：一个 Boss 带着它的小怪和坐骑。实例化其中任何一个，都会创建整组；
+      指向某个成员的 <see cref="T:EasyEcs.EntityId" /> 字段（<see cref="P:EasyEcs.Prefab.Id" />，比如 <c>new ChildOf(boss.Id)</c>）
+      会指向那个成员新建的实体，其余的都变成 <see cref="P:EasyEcs.EntityId.Null" />：预制体里的 id 只能指成员（World 里某个实体的 id
+      可能恰好和成员的一样）。<see cref="T:EasyEcs.Entity" /> 字段原样复制：指向 World 里实体的关系，实例化之后再设置。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Prefab.#ctor" source="5241a2ddc802">
+    <summary>空配方。O(1)；只分配一次私有存储。</summary>
+  </member>
+  <member name="M:EasyEcs.Prefab.#ctor(EasyEcs.Prefab)" source="d6d79e5d8fb9">
+    <summary>
+      复制 <paramref name="basePrefab" />（和它的成员）的每个值，得到一个能单独修改的预制体：比如配置好的 NPC 的一个变体。
+      之后改其中一个，另一个不受影响（是复制，不是继承）。O(组件数)。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.Prefab.Id" source="084da4a6df19">
+    <summary>组内的组件用来指代这个成员的 id（每次实例化都改写成新实体的 id）。</summary>
+  </member>
+  <member name="M:EasyEcs.Prefab.AddMember" source="4f15f443dfb7">
+    <summary>
+      给这个预制体的组加一个没有组件的新成员：实例化这个预制体或任何一个成员，都会创建所有成员。O(1)。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Prefab.Has``1" source="bb22ed80cf7e">
+    <summary>预制体是否有组件 <typeparamref name="T" />。</summary>
+  </member>
+  <member name="M:EasyEcs.Prefab.Read``1" source="91a76e3ae5c4">
+    <summary>预制体里 <typeparamref name="T" /> 的值；没有时抛异常（修改用 <c>Set</c>）。</summary>
+  </member>
+  <member name="M:EasyEcs.Prefab.Remove``2" source="9c0ee0f9d91e">
+    <summary>从配方里去掉 2 个组件；没有的组件忽略。返回这个预制体。O(2)。</summary>
+  </member>
+  <member name="M:EasyEcs.Prefab.Set``2(``0@,``1@)" source="39d45587aa6d">
+    <summary>给配方添加 2 个组件，或替换它们的值。返回这个预制体（可以链式调用）。O(2)。</summary>
+  </member>
+  <member name="M:EasyEcs.Prefab.SetBuffer``1(System.ReadOnlySpan{``0})" source="23d20e076855">
+    <summary>
+      给预制体一个装着 <paramref name="elements" /> 的 <see cref="T:EasyEcs.DynamicBuffer`1" />，替换原来那个：每个实例都拿到自己的一份列表，
+      里面就是这些元素。返回预制体。O(n)。
+    </summary>
+  </member>
+</doc>

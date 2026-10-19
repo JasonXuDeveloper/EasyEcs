@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.IForEachBatch`1" source="b322f30d402d">
+    <summary>
+      <c>World.ForEachBatch</c> 的结构体回调：一次接收一整段行，每个组件一个 span，job 可以用 SIMD 处理
+      （<c>System.Numerics.Vector</c>、<c>MemoryMarshal.Cast</c>），还能拿到这些行的实体（按下标访问时才构造）。参数是
+      <c>Span&lt;T&gt;</c> / <c>ReadOnlySpan&lt;T&gt;</c> 的 <c>[ForEach]</c> 方法编译成它。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.IForEachBatch`1.Execute(EasyEcs.EntitySpan,System.Span{`0})" source="3fcac9a72486">
+    <summary>
+      一个原型里的一段连续行：<paramref name="entities" /> 和每个 span 的第 i 个元素属于同一个实体。
+    </summary>
+  </member>
+</doc>

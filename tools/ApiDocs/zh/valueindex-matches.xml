@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.ValueIndex`2.Matches" source="c058dc187a84">
+    <summary>枚举一个键对应的实体（<c>foreach</c>）。</summary>
+  </member>
+  <member name="P:EasyEcs.ValueIndex`2.Matches.Current" source="b1fee2597483">
+    <summary>当前匹配的实体。</summary>
+  </member>
+  <member name="M:EasyEcs.ValueIndex`2.Matches.MoveNext" source="db24aefd5117">
+    <summary>移到下一个拥有这个键的实体。每个实体 O(1)。</summary>
+  </member>
+</doc>

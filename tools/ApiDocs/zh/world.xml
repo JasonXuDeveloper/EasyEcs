@@ -1,0 +1,358 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.World" source="0790ce1801e0">
+    <summary>
+      一个 ECS World：装着实体、实体的组件、单例，以及更新它们的系统。World 之间完全隔离；服务器推荐每个线程一个
+      World，完全不需要同步。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.#ctor(EasyEcs.WorldOptions)" source="5559acb48e5f">
+    <summary>
+      新建一个空 World，按 <paramref name="options" /> 配置（null 表示用默认值）。
+      O(<see cref="P:EasyEcs.WorldOptions.InitialEntityCapacity" />)：分配实体数组和空表。
+    </summary>
+  </member>
+  <member name="F:EasyEcs.World.ParallelChunkRows" source="e4c92badb392">
+    <summary>
+      并行 [ForEach] 每块最多的行数。每块大约是每个线程分到的匹配行的四分之一（至少 1,024 行）：块一样大，就会同时跑完；
+      每个线程分四块，行与行开销不均时也能摊平。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.World.ChangeTick" source="247e9495f664">
+    <summary>
+      当前的变更 tick。被追踪组件的行每次写入都记下它（<see cref="T:EasyEcs.ITrackChanges" />）。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.World.Entities" source="e23724cbf7c2">
+    <summary>所有存活实体，按 id 顺序排列（用于诊断：O(容量)）。</summary>
+  </member>
+  <member name="P:EasyEcs.World.EntityCount" source="2b100939cefb">
+    <summary>存活实体的数量。O(1)。</summary>
+  </member>
+  <member name="P:EasyEcs.World.Systems" source="8ea3f54eaf95">
+    <summary>所有分组的系统，每个分组内按执行顺序排列（默认分组在前）。零分配。</summary>
+  </member>
+  <member name="P:EasyEcs.World.UpdateCount" source="72b6b197f5e6">
+    <summary>已经完成的 <see cref="M:EasyEcs.World.Update" /> 调用次数（默认分组）。</summary>
+  </member>
+  <member name="M:EasyEcs.World.AddSingleton``1" source="22b9ca554dd4">
+    <summary>
+      添加单例 <typeparamref name="T" />（已存在时重置为默认值），返回它的 ref。重置不换存储，所以之前拿到的
+      <see cref="M:EasyEcs.World.SingletonRef``1" /> 句柄仍然指向这个单例。O(1)。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.AddSystem(EasyEcs.EcsSystem)" source="e24f77f0480f">
+    <summary>
+      把 <paramref name="system" /> 挂到它的分组（<see cref="T:EasyEcs.UpdateInGroupAttribute`1" /> 指定的分组，没有就是默认分组），
+      然后调用它的 <see cref="M:EasyEcs.EcsSystem.OnCreate" />。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.AddSystem``1" source="cedf6b2b504a">
+    <summary>创建一个系统，挂到这个 World 上，然后调用它的 <see cref="M:EasyEcs.EcsSystem.OnCreate" />。</summary>
+  </member>
+  <member name="M:EasyEcs.World.Any``2(EasyEcs.QueryFilter@)" source="8d4f20b3c898">
+    <summary>
+      是否有存活实体同时拥有 <c>T1, T2</c>。O(匹配的原型数)，需要逐行检测的表再加 O(行数 / 64)；找到一个就返回。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.Capture" source="db595c58a941">
+    <summary>
+      复制实体、它们的组件和单例。O(实体数 × 组件数 + 原型数 + 单例数)。组件和单例按值复制：里面的托管引用只复制引用，
+      不克隆对象。遍历进行中不能调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.Capture(EasyEcs.WorldSnapshot)" source="6524a1162ca4">
+    <summary>
+      把 <see cref="M:EasyEcs.World.Capture" /> 拍进 <paramref name="into" />（这个 World 的快照，传 null 则新建一个），
+      覆盖原有内容并复用它的数组：数组够大之后，每个 tick 都拍快照（回滚、回放）也不分配内存。返回这个快照。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.Children(EasyEcs.EntityId)" source="e0547b5ae89e">
+    <summary>
+      <paramref name="parent" /> 的子实体，即 <see cref="T:EasyEcs.ChildOf" /> 指向它的实体。开始 O(1)，之后每个子实体
+      O(1)；第一次调用会给所有 <see cref="T:EasyEcs.ChildOf" /> 建一次索引。只能在所有者线程调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.Count``2(EasyEcs.QueryFilter@)" source="0d5d4fca0e1d">
+    <summary>同时拥有 <c>T1, T2</c> 的存活实体数量。O(匹配的原型数)，需要逐行检测的表再加 O(行数 / 64)。</summary>
+  </member>
+  <member name="M:EasyEcs.World.CreateEntities``2(System.Span{EasyEcs.Entity},``0@,``1@)" source="5172671c4d15">
+    <summary>
+      创建 <c>entities.Length</c> 个带 2 个组件的实体（每个实体的值都一样），直接放进最终的原型，并把句柄写进
+      <paramref name="entities" />。整批只过一次结构闸门，表最多扩容一次：O(数量 × 2)。只能在所有者线程调用
+      （见<see href="/zh/docs/guide/threading">线程模型</see>）。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.CreateEntity" source="90176613439e">
+    <summary>
+      创建一个没有组件的实体。均摊 O(1)。只能在所有者线程调用（见<see href="/zh/docs/guide/threading">线程模型</see>）。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.CreateEntity``2(``0@,``1@)" source="de28b17e3931">
+    <summary>
+      创建一个带 2 个组件的实体，直接放进最终的原型（中途不搬行）。均摊 O(2)。只能在所有者线程调用
+      （见<see href="/zh/docs/guide/threading">线程模型</see>）。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.Describe" source="9cbe4fd505c8">
+    <summary>
+      列出 World 里的表，用于诊断（管理接口、监控面板）：每张表装了什么、有多满、占多少内存。冷路径：结果要分配内存；
+      任何线程都能调用（正在变更的表可能读到一半）。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.DestroyEntities``2(EasyEcs.QueryFilter@)" source="d186184a7d2f">
+    <summary>
+      销毁所有同时拥有 <c>T1, T2</c>（并匹配 <paramref name="filter" />）的存活实体，返回销毁的数量。只过一次结构闸门：
+      O(匹配的原型数 + 行数)。只能在所有者线程调用（见<see href="/zh/docs/guide/threading">线程模型</see>）。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.DisableAll``1(EasyEcs.QueryFilter@)" source="9aa4775b72ed">
+    <summary>
+      对每个拥有 <typeparamref name="T" /> 且匹配 <paramref name="filter" /> 的存活实体执行
+      <see cref="M:EasyEcs.Entity.Disable``1" />：值保留，加上 <see cref="T:EasyEcs.Disabled`1" /> 标签。返回处理的数量。
+      O(匹配的表数 + 行数)；一张表的行只搬一次，搬到带这个标签的表。只能在所有者线程调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.Dispose" source="3b0475540520">
+    <summary>销毁所有系统（按相反顺序调用 OnDestroy），然后释放全部存储。</summary>
+  </member>
+  <member name="M:EasyEcs.World.EnableAll``1(EasyEcs.QueryFilter@)" source="bff27bef605f">
+    <summary>
+      对每个禁用了 <typeparamref name="T" /> 且匹配 <paramref name="filter" /> 的存活实体执行
+      <see cref="M:EasyEcs.Entity.Enable``1" />：拿回保留的值（对被追踪组件算一次写入，索引跟着更新）。返回处理的数量。
+      O(匹配的表数 + 行数)。只能在所有者线程调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.EnsureCapacity(EasyEcs.Prefab,System.Int32)" source="c90e6f3ca262">
+    <summary>
+      预先扩好 <paramref name="prefab" /> 的实例要进的表和实体存储，接下来 <paramref name="count" /> 次
+      <see cref="M:EasyEcs.World.Instantiate(EasyEcs.Prefab)" /> 都不会再扩容：一波刷怪的扩容开销在 tick 之前就付掉了。
+      分组（<see cref="M:EasyEcs.World.GroupBy``1" />）把实例放进别的表时，扩的是那张表；带成员的预制体，每个成员的表都扩。
+      O(组件数) 加一次扩容。只能在所有者线程调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.EnsureEntityCapacity(System.Int32)" source="c27f427b4f09">
+    <summary>预先扩好实体存储，之后创建的实体不超过 <paramref name="capacity" /> 个就不会再扩容。</summary>
+  </member>
+  <member name="M:EasyEcs.World.ForEach``3(``2@,EasyEcs.QueryFilter@)" source="51f0def3249d">
+    <summary>
+      对每个同时拥有 <c>T1, T2</c>（并匹配 <paramref name="filter" />）的实体，把它的组件交给 <paramref name="job" /> 执行。
+      这是最快的遍历：按列从头到尾扫每个匹配的原型，O(匹配的原型数 + 行数)，零分配。job 里可以做结构变更，而且立即生效：
+      每个实体最多访问一次（遍历途中新进入匹配原型的实体不访问，轮到之前就离开的实体跳过）；job 改变了当前实体的原型时，
+      它通过 ref 写的值会带到实体的新行（<c>IForEach.Writes</c>）。实现了 <see cref="T:EasyEcs.INoStructuralChanges" />
+      的 job 省掉这些簿记。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.ForEachBatch``3(``2@,EasyEcs.QueryFilter@)" source="8ae35fa9436b">
+    <summary>
+      对每个同时拥有 <c>T1, T2</c>（并匹配 <paramref name="filter" />）的实体执行 <paramref name="job" />，每次交给它一段连续的行：
+      没有空洞的原型只调用一次。零分配。job 拿到的是直接指向表的 span，所以它运行期间做结构变更会抛异常
+      （<see cref="T:System.InvalidOperationException" />）。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.ForEachEntity``3(``2@,EasyEcs.QueryFilter@)" source="e9244d71a567">
+    <summary>
+      对每个同时拥有 <c>T1, T2</c>（并匹配 <paramref name="filter" />）的实体，把实体句柄和组件交给
+      <paramref name="job" /> 执行。这是最快的遍历：按列从头到尾扫每个匹配的原型，O(匹配的原型数 + 行数)，零分配。
+      job 里可以做结构变更，而且立即生效：每个实体最多访问一次（遍历途中新进入匹配原型的实体不访问，轮到之前就离开的实体跳过）；
+      job 改变了当前实体的原型时，它通过 ref 写的值会带到实体的新行（<c>IForEachEntity.Writes</c>）。实现了
+      <see cref="T:EasyEcs.INoStructuralChanges" /> 的 job 省掉这些簿记。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.ForEachEntityParallel``3(``2@,EasyEcs.QueryFilter@)" source="5e0577cd5889">
+    <summary>
+      多线程版的 <see cref="M:EasyEcs.World.ForEachEntity``3(``2@,EasyEcs.QueryFilter@)" />：匹配的行切成块（每个线程大约四块，
+      行数是 64 的倍数，最多 <see cref="F:EasyEcs.World.ParallelChunkRows" /> 行），由调用线程和最多
+      <see cref="P:EasyEcs.WorldOptions.MaxDegreeOfParallelism" /> - 1 个线程池线程同时执行，每个线程用自己的一份
+      <paramref name="job" /> 副本（job 存在字段里的状态不会合并回来）。job 不能做结构变更，也不能写别的行会读的数据
+      （单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。
+      每种 job 类型第一次调用之后零分配。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.ForEachParallel``3(``2@,EasyEcs.QueryFilter@)" source="59bd978218c6">
+    <summary>
+      多线程版的 <see cref="M:EasyEcs.World.ForEach``3(``2@,EasyEcs.QueryFilter@)" />：匹配的行切成块（每个线程大约四块，
+      行数是 64 的倍数，最多 <see cref="F:EasyEcs.World.ParallelChunkRows" /> 行），由调用线程和最多
+      <see cref="P:EasyEcs.WorldOptions.MaxDegreeOfParallelism" /> - 1 个线程池线程同时执行，每个线程用自己的一份
+      <paramref name="job" /> 副本（job 存在字段里的状态不会合并回来）。job 不能做结构变更，也不能写别的行会读的数据
+      （单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。
+      每种 job 类型第一次调用之后零分配。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.GetEntity(EasyEcs.EntityId)" source="904ab00d24aa">
+    <summary>实体 <paramref name="id" /> 的句柄；这个版本的实体已经不存活时抛异常。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.World.GetOrAddSingleton``1" source="831c92cce628">
+    <summary>单例 <typeparamref name="T" /> 的 ref；不存在时先添加（默认值）。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.World.GetSingleton``1" source="94e90f9efefe">
+    <summary>单例 <typeparamref name="T" /> 的 ref；没有添加过时抛异常。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.World.GetSystem``1" source="3c3a7509b01d">
+    <summary>取得类型为 <typeparamref name="T" /> 的系统，没有就返回 null。</summary>
+  </member>
+  <member name="M:EasyEcs.World.GroupBy``1" source="9181338b9284">
+    <summary>
+      按 <typeparamref name="T" /> 的 <see cref="P:EasyEcs.IGroup.Group" /> 拆分这个 World 的表：同一组的实体共用表，所以
+      <see cref="M:EasyEcs.QueryFilter.InGroup``1(System.Int32)" /> 只遍历这一组的行，而且这些行在内存里是连续的。
+      写入新值时，实体搬到新组的表（一次行复制）。已有的实体会立即搬走，所以要在初始化时调用。只执行一次，
+      O(拥有 <typeparamref name="T" /> 的实体数)；重复调用不再做任何事。只能在所有者线程调用，不能在遍历进行中调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.HasSingleton``1" source="cede0e37adbd">
+    <summary>单例 <typeparamref name="T" /> 是否存在。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.World.Index``2" source="a27f1547115c">
+    <summary>
+      <typeparamref name="T" /> 的值索引：按 <typeparamref name="T" /> 的键查实体，或者按关系组件指向的实体查。第一次调用时创建
+      （冷路径），之后 O(1)；存进局部变量或字段里复用。<typeparamref name="T" /> 已经用另一种键类型建过索引时，抛
+      <see cref="T:System.InvalidOperationException" />。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.Instantiate(EasyEcs.Prefab)" source="a3072de20f2a">
+    <summary>
+      创建一个实体，带上 <paramref name="prefab" /> 每个组件的副本。值原样复制：<see cref="T:EasyEcs.DynamicBuffer`1" />
+      拿到自己的一份列表，索引收录新实体，被追踪组件算作刚刚写入。O(组件数)：一次行复制，第一个实例之后不再查找表。
+      带成员的预制体会创建所有成员，返回传入的那个预制体对应的实体（O(成员数 × 组件数)）。只能在所有者线程调用
+      （见<see href="/zh/docs/guide/threading">线程模型</see>）。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.Instantiate(EasyEcs.Prefab,System.Span{EasyEcs.Entity})" source="18e7b388f5be">
+    <summary>
+      批量版的 <see cref="M:EasyEcs.World.Instantiate(EasyEcs.Prefab)" />：创建 <c>entities.Length</c> 个
+      <paramref name="prefab" /> 的副本，把句柄写进 <paramref name="entities" />。只过一次结构闸门，表最多扩容一次。
+      O(数量 × 组件数)。只能在所有者线程调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.IsAlive(EasyEcs.EntityId)" source="b3a94f7c4bd5">
+    <summary>实体 <paramref name="id" />（这个版本）是否存活。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.World.Load(System.ReadOnlySpan{System.Byte})" source="ad95fa67d8ec">
+    <summary>
+      用 <see cref="M:EasyEcs.World.Save(System.Buffers.IBufferWriter{System.Byte})" /> 写出的数据（本进程或别的进程写的）
+      替换这个 World 的实体、组件和单例。实体保留原来的 id 和版本号，所以组件里存的 <see cref="T:EasyEcs.EntityId" />
+      仍然指向原来的实体，存档前拿到的句柄也重新可用。本进程没有对应类型的组件和单例直接跳过（跳过它们那段数据）；
+      进程用过某个类型，或者生成器登记过它（使用 EasyEcs 的程序集里的每个组件和单例都会登记），就能按名字找到它。
+      索引重建；分组按这个 World 自己的 <see cref="M:EasyEcs.World.GroupBy``1" /> 来。加载的每一行都算写入
+      （<c>[Changed&lt;T&gt;]</c>）。O(实体数 × 组件数)。遍历进行中不能调用。
+    </summary>
+    <exception cref="T:System.IO.InvalidDataException">
+      字节不是存档，或者已经损坏，或者某个组件的字段在存档之后改过（非托管组件的大小或布局，托管组件的 Nino 布局）。
+      这时 World 保持原样。
+    </exception>
+  </member>
+  <member name="M:EasyEcs.World.LoadEntities(System.ReadOnlySpan{System.Byte},System.Span{EasyEcs.Entity})" source="4c3c1a0fae9e">
+    <summary>
+      创建 <see cref="M:EasyEcs.World.SaveEntities(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId})" />
+      写出的实体（本进程或别的进程写的），分配新的 id，按存档顺序把句柄写进 <paramref name="entities" />（放得下多少写多少）；
+      返回创建的数量。组件和缓冲元素里的 <see cref="T:EasyEcs.EntityId" /> 字段，原来指向组内实体的，改为指向那个实体的新实体；
+      其余的一律变成 <see cref="P:EasyEcs.EntityId.Null" />（字段在哪里由生成器告诉 World；集合里的 id 不改写）。
+      父实体没有一起过来的，移除它的 <see cref="T:EasyEcs.ChildOf" />：实体在这里成为根。索引和分组收录这些实体；
+      被追踪组件算作写入。O(实体数 × 组件数)。遍历进行中不能调用。
+    </summary>
+    <exception cref="T:System.IO.InvalidDataException">字节不是存档。</exception>
+  </member>
+  <member name="M:EasyEcs.World.MoveEntities(EasyEcs.World,System.ReadOnlySpan{EasyEcs.EntityId},System.Span{EasyEcs.Entity})" source="984c77bc564a">
+    <summary>
+      把 <paramref name="entities" />（失效的 id 和重复的 id 跳过）搬到 <paramref name="target" />，即同一线程上的另一个 World：
+      目标 World 新建带着这些组件的实体，结果和 <see cref="M:EasyEcs.World.LoadEntities(System.ReadOnlySpan{System.Byte},System.Span{EasyEcs.Entity})" />
+      读这组实体的存档一样，只是省掉了编码；然后在这边销毁它们（子实体一起销毁，所以层级要整棵一起搬；清理组件留在这边，
+      交给各自的系统处理）。新句柄按顺序写进 <paramref name="moved" />（放得下多少写多少，跳过的 id 对应
+      <see cref="T:EasyEcs.Entity" /> 的 default）；返回搬走的数量。O(实体数 × 组件数)。调用线程必须同时是两个 World
+      的所有者线程；任何一个 World 正在遍历时都不能调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.Query``2(EasyEcs.QueryFilter@)" source="4dda772f1c10">
+    <summary>枚举同时拥有 <c>T1, T2</c>（并匹配 <paramref name="filter" />）的实体。零分配。</summary>
+  </member>
+  <member name="M:EasyEcs.World.Relations``1" source="68c463917a5f">
+    <summary>
+      <typeparamref name="T" /> 的关系索引：哪些实体的 <see cref="T:EasyEcs.DynamicBuffer`1" /> 链接到某个目标。第一次调用时创建
+      （冷路径），之后 O(1)；存进局部变量或字段里复用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.RemoveAll``1(EasyEcs.QueryFilter@)" source="c7af97e33bcb">
+    <summary>
+      从每个拥有组件 <typeparamref name="T" /> 且匹配 <paramref name="filter" /> 的存活实体上移除它，效果和逐个调用
+      <c>Remove</c> 一样（行留在原处，清掉存在位）。返回处理的数量。O(匹配的表数 + 行数)。只能在所有者线程调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.RemoveSingleton``1" source="89c98c21f4b6">
+    <summary>移除单例 <typeparamref name="T" />；没有添加过时返回 false。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.World.RemoveSystem``1" source="aa99f60dfe1f">
+    <summary>移除类型为 <typeparamref name="T" /> 的系统（会调用它的 <see cref="M:EasyEcs.EcsSystem.OnDestroy" />）。</summary>
+  </member>
+  <member name="M:EasyEcs.World.RemoveTypes(System.Reflection.Assembly)" source="297b8f76d50a">
+    <summary>
+      从这个 World 里清掉 <paramref name="assembly" /> 里的类型留下的一切：它的系统（执行 OnDestroy）、单例、索引和分组，以及每个实体上
+      它的组件（实体还在，只是没了这些组件）。带这类列的表连同引用它们的所有缓存一起丢弃，World 不再持有这个程序集的任何引用：
+      所有 World 都清掉之后，它所在的可回收上下文就能卸载；卸载之后，EasyEcs 会复用它占用的组件位。
+      <br />
+      想重新加载游戏逻辑又保留数据：先 <see cref="M:EasyEcs.World.Save(System.Buffers.IBufferWriter{System.Byte})" />，清掉这些类型，
+      卸载旧上下文，加载新版本，再 <see cref="M:EasyEcs.World.Load(System.ReadOnlySpan{System.Byte})" />（类型按名字存档，
+      所以新版本的组件会拿到这些值）。只能在所有者线程调用，不能在遍历或更新进行中调用。
+      O(拥有这类组件的实体数 + 表数 + 缓存的查询数)；会分配内存（冷路径）。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.RemoveTypes(System.Runtime.Loader.AssemblyLoadContext)" source="6c838588c8a0">
+    <summary>
+      对加载进 <paramref name="context" /> 的每个程序集（插件和它带进来的库）执行
+      <see cref="M:EasyEcs.World.RemoveTypes(System.Reflection.Assembly)" />。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.Restore(EasyEcs.WorldSnapshot)" source="081649a3c643">
+    <summary>
+      把 World 恢复到 <paramref name="snapshot" />（必须是从这个 World 拍的）。快照里存活的实体，句柄重新有效；其他句柄全部失效，
+      包括快照之后创建的实体的句柄。快照之后创建的原型保留，但变成空的。单例沿用原来的存储（<see cref="M:EasyEcs.World.SingletonRef``1" />
+      仍然可用），值换成快照里的；快照之后才添加的单例直接移除。O(实体数 × 组件数 + 原型数 + 单例数)。遍历进行中不能调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.Save(System.Buffers.IBufferWriter{System.Byte})" source="4bbbd3f9fc82">
+    <summary>
+      把实体（id 和版本号）、它们的组件和单例写进 <paramref name="output" />，供
+      <see cref="M:EasyEcs.World.Load(System.ReadOnlySpan{System.Byte})" /> 读取。非托管组件按原始行写出（布局一改，旧存档就加载不了，
+      所以要改布局就新增一个组件类型）；托管组件和单例需要 Nino 格式化器（<c>[NinoType]</c>）。缓冲区够大之后不分配内存。
+      O(实体数 × 组件数)。遍历进行中不能调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.SaveEntities(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId})" source="71656948d242">
+    <summary>
+      把 <paramref name="entities" />（失效的 id 和重复的 id 跳过）和它们的组件写进 <paramref name="output" />，供
+      <see cref="M:EasyEcs.World.LoadEntities(System.ReadOnlySpan{System.Byte},System.Span{EasyEcs.Entity})" /> 读取：
+      一组要搬去另一个 World 的实体（一个玩家和他拥有的东西，搬到另一台服务器）。单例和组外的实体不写；整棵层级用
+      <see cref="M:EasyEcs.World.Children(EasyEcs.EntityId)" /> 收集。缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。
+      遍历进行中不能调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.SetAll``1(``0@,EasyEcs.QueryFilter@)" source="6408357dc4a1">
+    <summary>
+      给每个匹配 <paramref name="filter" /> 的存活实体设置组件 <typeparamref name="T" /> = <paramref name="value" />
+      （没有就添加，有就替换），效果和逐个调用 <c>Set</c> 一样：被追踪组件算作写入，索引和分组跟着更新。返回实体数量。
+      O(匹配的表数 + 行数)；缺少 <typeparamref name="T" /> 的实体搬一次行。只能在所有者线程调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.SingletonRef``1" source="bdda71572e90">
+    <summary>
+      单例 <typeparamref name="T" /> 的稳定句柄（不存在时先添加）：解析一次，之后直接读写
+      <see cref="P:EasyEcs.SingletonRef`1.Value" />，不用再查找。生成的 <c>[ForEach]</c> job 每次遍历通过它把单例参数解析一次。O(1)。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.TryGetEntity(EasyEcs.EntityId,EasyEcs.Entity@)" source="03175b1283a8">
+    <summary>
+      这个版本的实体 <paramref name="id" /> 还存活时，取得它的句柄；实体已经销毁（即使下标已经复用）或者 id 是
+      <see cref="P:EasyEcs.EntityId.Null" /> 时返回 false。O(1)。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.TryGetSingleton``1(``0@)" source="78b39f6d1d27">
+    <summary>单例 <typeparamref name="T" /> 存在时，取得它的副本。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.World.Update" source="7f05173a8461">
+    <summary>让默认分组里每个启用的系统更新一次（同步执行）。零分配。</summary>
+  </member>
+  <member name="M:EasyEcs.World.Update``1" source="68649fef8ac5">
+    <summary>
+      让分组 <typeparamref name="TGroup" /> 里每个启用的系统更新一次（同步执行，零分配）。没有系统的分组什么都不做。
+    </summary>
+  </member>
+</doc>

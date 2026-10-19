@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.WorldOptions" source="4b663d539d6b">
+    <summary><see cref="T:EasyEcs.World" /> 的配置。</summary>
+  </member>
+  <member name="P:EasyEcs.WorldOptions.InitialEntityCapacity" source="b4c4d768e4f9">
+    <summary>预先分配的实体容量（避免运行时扩容重新分配）。</summary>
+  </member>
+  <member name="P:EasyEcs.WorldOptions.MaxDegreeOfParallelism" source="7ff09c34aa30">
+    <summary>
+      一次并行执行最多用多少个线程（默认：处理器数）。管的是 <see cref="P:EasyEcs.WorldOptions.ParallelSystems" /> 并行执行的系统，
+      以及并行 <c>[ForEach]</c> 方法、<c>ForEachParallel</c> 和 <c>ForEachEntityParallel</c> 的行分块（不管
+      <see cref="P:EasyEcs.WorldOptions.ParallelSystems" /> 开没开，它们都分块执行）。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.WorldOptions.MeasureSystems" source="4bdea71410f4">
+    <summary>
+      把每个系统每次运行的耗时记进 <see cref="P:EasyEcs.EcsSystem.Stats" />（每次运行读两次时间戳）。默认 false。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.WorldOptions.ParallelSystems" source="d03b24860bca">
+    <summary>
+      彼此没有顺序约束、生成的读写声明也不冲突（<see cref="T:EasyEcs.SystemAccess" />）的系统同时运行（线程池）。默认 false：
+      推荐的模型是每个 World 一个所有者线程。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.WorldOptions.SystemErrors" source="0477c5410b10">
+    <summary>
+      系统抛出异常时怎么处理（默认 <see cref="F:EasyEcs.SystemErrorPolicy.Throw" />）：抛出 <see cref="M:EasyEcs.World.Update" />，
+      或者停掉这个系统，把异常记进 <see cref="P:EasyEcs.EcsSystem.Error" />。
+    </summary>
+  </member>
+</doc>

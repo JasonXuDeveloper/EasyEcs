@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.SystemList.Enumerator" source="e594da9462a4">
+    <summary>依次遍历各个分组，以及每个分组里的系统。</summary>
+  </member>
+  <member name="P:EasyEcs.SystemList.Enumerator.Current" source="8cd4e94b666c">
+    <summary>当前系统。</summary>
+  </member>
+  <member name="M:EasyEcs.SystemList.Enumerator.MoveNext" source="a12948db744c">
+    <summary>移到下一个系统。均摊 O(1)。</summary>
+  </member>
+</doc>

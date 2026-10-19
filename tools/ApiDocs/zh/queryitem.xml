@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.QueryItem`1" source="ea91f9a837ec">
+    <summary>
+      一条查询结果：实体，以及指向它所在行的 ref。和所有指向 ECS 存储的 ref 一样，这些 ref 只在下一次结构变更之前有效；
+      变更之后通过 <see cref="P:EasyEcs.QueryItem`1.Entity" /> 重新读取。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.QueryItem`1.Component1" source="bc5e2bc0058f">
+    <summary>当前实体的 T1，指向它所在行的引用（生成器会按组件给它起名：<c>item.Position</c>）。</summary>
+  </member>
+  <member name="P:EasyEcs.QueryItem`1.Entity" source="20c775e285c8">
+    <summary>当前实体的句柄。</summary>
+  </member>
+</doc>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.Disabled`1" source="1df4cd332c3f">
+    <summary>
+      <typeparamref name="T" /> 处于禁用状态（<see cref="M:EasyEcs.Entity.Disable``1" />）的实体带的标签：实体保留
+      <typeparamref name="T" /> 的值，但在 <see cref="M:EasyEcs.Entity.Enable``1" /> 还回来之前，查询、<c>Has</c> 和 <c>Get</c>
+      都当它不存在。像查询别的标签一样查询它（<c>[With&lt;Disabled&lt;Cooldown&gt;&gt;]</c>），就能找到 <typeparamref name="T" />
+      暂停中的实体。只能通过 <c>Disable</c> 和 <c>Enable</c> 改变它。
+    </summary>
+  </member>
+</doc>

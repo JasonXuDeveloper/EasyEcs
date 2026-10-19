@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.IComponent" source="01ac7682fb97">
+    <summary>
+      把结构体标记为组件数据。组件是存放在原型表里的纯数据，每种类型一列，每个实体一行。组件要小（最好只有几个字段，远小于一条 64 字节的缓存行），
+      很少用到的数据拆成单独的组件，这样遍历只加载它用到的数据。
+    </summary>
+  </member>
+</doc>

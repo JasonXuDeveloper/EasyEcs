@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.IForEach`1" source="baae0e50033c">
+    <summary>
+      <c>World.ForEach</c> 的结构体回调。它是带 struct 约束的泛型参数，JIT 会去掉虚调用，通常还会内联：没有委托，没有闭包，不分配内存。
+      <c>[ForEach]</c> 方法就编译成它。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.IForEach`1.Writes" source="770a240bfd46">
+    <summary>
+      job 通过 ref 写入的组件：第 k 个组件对应第 k - 1 位（默认：全部）。job 改变了当前实体的原型时，ForEach 在 job 返回后，
+      把这些组件从 ref 指向的那一行带到实体的新行。生成的 job 只标出它们的 <c>ref</c> 参数。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.IForEach`1.Execute(`0@)" source="7134fe0d23a2">
+    <summary>一个匹配的实体：它的组件，按引用传入（<c>ref</c> 就地写入）。</summary>
+  </member>
+</doc>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.Maybe`1" source="f5dd430b2497">
+    <summary>
+      <c>[ForEach]</c> 方法所访问实体的一个可选组件：<c>static void Regen(ref Health h, Maybe&lt;Buff&gt; buff)</c>
+      访问所有带 Health 的实体，<see cref="P:EasyEcs.Maybe`1.HasValue" /> 告诉你当前这个实体有没有 Buff。可选的部分不大时，
+      一个方法就够了，不用写 With 和 Without 两个版本。不做结构变更的方法，每段行查一次列，每行测一个存在位；做结构变更的方法，
+      则要通过每个实体查找这个组件。在最热的循环里，用 <c>[With&lt;T&gt;]</c> / <c>[Without&lt;T&gt;]</c> 把方法拆成两个
+      （每行不用测试）。只读 <see cref="P:EasyEcs.Maybe`1.Value" /> 的方法算读 <typeparamref name="T" />；通过它写入
+      （赋值、自增、按 <c>ref</c> 传出、调用它的方法）的方法算写 <typeparamref name="T" />，被追踪组件存在时会打 tick。
+      只在传入它的那次调用里有效（ref struct）。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Maybe`1.#ctor(`0@)" source="5f40af0f56df">
+    <summary>包装 <paramref name="value" />；实体没有这个组件时，它是空 ref。</summary>
+  </member>
+  <member name="P:EasyEcs.Maybe`1.HasValue" source="d0e631fe58b7">
+    <summary>实体是否有这个组件。</summary>
+  </member>
+  <member name="P:EasyEcs.Maybe`1.Value" source="98d323ab6d42">
+    <summary>按 <c>ref</c> 返回组件；实体没有它时抛异常（先检查 <see cref="P:EasyEcs.Maybe`1.HasValue" />）。</summary>
+  </member>
+</doc>

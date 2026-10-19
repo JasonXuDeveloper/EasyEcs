@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.INoStructuralChanges" source="a0b7c88230d6">
+    <summary>
+      标记一个不做结构变更的 <c>ForEach</c> job：不在它遍历的 World 里创建或销毁实体，也不增删、设置任何组件。ForEach
+      遍历表时就不用做逐实体的簿记。源生成器会给符合条件的 <c>[ForEach]</c> 方法加上它：静态方法，不接收 <see cref="T:EasyEcs.World" />，
+      <see cref="T:EasyEcs.Entity" /> 参数（如果有）只用来读。只有 job 确实遵守这个约定时，才手动实现它。
+    </summary>
+  </member>
+</doc>

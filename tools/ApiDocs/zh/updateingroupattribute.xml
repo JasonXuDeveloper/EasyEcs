@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.UpdateInGroupAttribute`1" source="9002de2649e6">
+    <summary>把系统（和它的派生系统）放进分组 <typeparamref name="TGroup" />。</summary>
+  </member>
+</doc>

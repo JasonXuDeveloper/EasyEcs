@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.IGroup" source="0cf4fe56ece9">
+    <summary>
+      标记一个按值拆分表的组件：在调用过 <see cref="M:EasyEcs.World.GroupBy``1" /> 的 World 里，<see cref="P:EasyEcs.IGroup.Group" />
+      不同的实体放在不同的表，所以只查询一组（<see cref="M:EasyEcs.QueryFilter.InGroup``1(System.Int32)" />）时只遍历这一组的行，
+      这些行在内存里是连续的（一个区域、一张地图、一场对局、一支队伍）。用 <c>Set</c> 写入新值会把实体搬到新组的表，所以分组组件和被索引的组件一样，
+      不能通过 <c>ref</c> 写入（EECS015）。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.IGroup.Group" source="20766906f170">
+    <summary>实体所属的分组。</summary>
+  </member>
+</doc>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.ISingletonComponent" source="6226e240e36b">
+    <summary>把结构体标记为 World 单例：每个 World 恰好有一个值（时钟、配置、共享状态）。</summary>
+  </member>
+</doc>

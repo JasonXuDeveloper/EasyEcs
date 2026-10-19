@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.ISystemGroup" source="9fc8a99ffe8d">
+    <summary>
+      系统分组的标记：标了 <see cref="T:EasyEcs.UpdateInGroupAttribute`1" /> 的系统在调用 <see cref="M:EasyEcs.World.Update``1" />
+      时一起运行，和 <see cref="M:EasyEcs.World.Update" /> 运行的默认分组互不相干。节奏不同的工作放进不同的分组
+      （固定频率的模拟 tick，和有输入到达就运行的工作）。
+      <code>
+      public struct NetworkGroup : ISystemGroup;
+
+      [UpdateInGroup&lt;NetworkGroup&gt;]
+      public class ReceiveSystem : EcsSystem { ... }
+
+      world.Update&lt;NetworkGroup&gt;();   // whenever packets arrive
+      world.Update();                     // fixed tick: default group
+      </code>
+      分组上可以加 <see cref="T:EasyEcs.WithAttribute`1" />、<see cref="T:EasyEcs.WithoutAttribute`1" /> 和
+      <see cref="T:EasyEcs.WithAnyAttribute`1" /> 过滤条件：生成器把它们加到分组里所有系统的每个 [ForEach] 方法上
+      （<c>[Without&lt;Inactive&gt;] public struct Gameplay : ISystemGroup;</c> 让整个分组都不处理不活跃的实体）。
+      系统在 OnUpdate 里自己发起的查询不受影响。
+    </summary>
+  </member>
+</doc>
