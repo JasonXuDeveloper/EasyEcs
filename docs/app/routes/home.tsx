@@ -28,6 +28,7 @@ import {
   bench,
   benchNumber,
   benchRows,
+  formatBytes,
   formatRatio,
   formatTime,
   peerLabel,
@@ -61,6 +62,14 @@ const zeroAlloc = tickAlloc?.value === 0;
 const peerList = peers();
 /** True when EasyEcs runs the headline tick faster than every peer (the headline and description say so) */
 const tickLeads = peerList[0]?.ours === true;
+/** EasyEcs' own row of the headline tick: what the headline's allocation figure quotes */
+const oursPeer = peerList.find((p) => p.ours);
+/** "0 B": the memory one headline tick allocates */
+const tickBytes = (
+  oursPeer ? formatBytes(oursPeer.row.allocatedBytes) : text(tickAlloc)
+).replace(' ', '\u00a0');
+/** "1.68 ms": EasyEcs' time for the headline tick */
+const tickTime = oursPeer ? formatTime(oursPeer.row.meanNs) : text(oneWorld);
 const slowerPeers = peerList.filter((p) => !p.ours && (p.row.ratio ?? 0) >= 2);
 const slowRange = slowerPeers.length
   ? `${formatRatio(Math.min(...slowerPeers.map((p) => p.row.ratio ?? 0)))}–${formatRatio(Math.max(...slowerPeers.map((p) => p.row.ratio ?? 0)))}`
@@ -235,23 +244,19 @@ world.Update();                                // 0 B once warmed up`,
 const copy: Record<Locale, Copy> = {
   en: {
     description: tickLeads
-      ? `High-performance, allocation-free ECS for C# and .NET 10: fastest on a full server tick against Friflo, Arch and DefaultEcs, ${zeroAlloc ? '0 B' : text(tickAlloc)} per tick.`
-      : `High-performance, allocation-free ECS for C# and .NET 10 servers: source-generated systems, change tracking, indexes and saves, ${zeroAlloc ? '0 B' : text(tickAlloc)} per tick.`,
+      ? `High-performance ECS for C# and .NET 10 servers: the fastest full server tick against Friflo, Arch and DefaultEcs, with ${tickBytes} allocated per tick.`
+      : `High-performance ECS for C# and .NET 10 servers: a full server tick in ${tickTime}, source-generated systems, change tracking and ${tickBytes} per tick.`,
     pill: `EasyEcs ${docsVersion} · .NET 10 · MIT`,
-    headline: 'The allocation-free ECS for .NET 10 servers',
-    headlineProof: '',
-    definition:
-      'EasyEcs is an open-source, allocation-free archetype Entity Component System (ECS) for C# and .NET 10 servers. Write plain data and [ForEach] methods; a source generator turns them into inlined struct jobs, an analyzer catches design mistakes at compile time, and a full server tick allocates nothing.',
+    headline: 'High-performance ECS for .NET\u00a010 servers.',
+    headlineProof: tickLeads
+      ? `The fastest full server tick, ${tickBytes} allocated.`
+      : `A full server tick in ${tickTime}, ${tickBytes} allocated.`,
+    definition: `EasyEcs is an open-source, high-performance archetype Entity Component System (ECS) for C# and .NET 10 servers. ${tickLeads ? 'It runs a full 100,000-entity server tick faster than Friflo, Arch and DefaultEcs' : `It runs a full 100,000-entity server tick in ${tickTime}`}${zeroAlloc ? ', and allocates nothing while doing it' : ''}. Write plain data and [ForEach] methods; a source generator turns them into inlined struct jobs, and an analyzer catches design mistakes at compile time.`,
     start: 'Get started',
     github: 'GitHub',
     demo: 'Try it in the browser',
     numbersTitle: 'One server tick, measured',
     numbers: [
-      {
-        label: 'One world',
-        value: text(oneWorld),
-        note: '100,000 entities, 9 systems',
-      },
       {
         label: 'Four worlds, one per thread',
         value: text(fourWorlds),
@@ -270,8 +275,13 @@ const copy: Record<Locale, Copy> = {
             ? 'per entity, faster than two plain arrays'
             : 'per entity, one archetype',
       },
+      {
+        label: 'Allocated per tick',
+        value: text(tickAlloc),
+        note: 'one world of 100,000 entities, after warm-up',
+      },
     ],
-    numbersNote: `${zeroAlloc ? 'Every tick allocates 0 B. ' : ''}Entities spawn, die, gain and lose components every tick. ${sourceLine(false)}`,
+    numbersNote: `Entities spawn, die, gain and lose components every tick. ${sourceLine(false)}`,
     numbersLink: 'What the tick simulates',
     codeTitle: 'Plain data in, inlined jobs out',
     codeText:
@@ -473,23 +483,19 @@ const copy: Record<Locale, Copy> = {
   },
   zh: {
     description: tickLeads
-      ? `高性能、零分配的 C# / .NET 10 ECS 框架：完整服务器 tick 快过 Friflo、Arch 和 DefaultEcs，每个 tick ${zeroAlloc ? '0 B' : text(tickAlloc)} 分配。`
-      : `高性能、零分配的 C# / .NET 10 ECS 框架：源生成系统、变更追踪、索引与存档，每个 tick ${zeroAlloc ? '0 B' : text(tickAlloc)} 分配。`,
+      ? `高性能 C# / .NET 10 服务端 ECS 框架：完整服务器 tick 快过 Friflo、Arch 和 DefaultEcs，每个 tick 分配 ${tickBytes}。`
+      : `高性能 C# / .NET 10 服务端 ECS 框架：完整服务器 tick 只要 ${tickTime}，源生成系统、变更追踪，每个 tick 分配 ${tickBytes}。`,
     pill: `EasyEcs ${docsVersion} · .NET 10 · MIT`,
-    headline: '为 .NET 10 服务端打造的零分配 ECS',
-    headlineProof: '',
-    definition:
-      'EasyEcs 是开源、零 GC 分配的 archetype（原型）实体组件系统（ECS），面向 C# 与 .NET 10 服务端。你只写普通数据和 [ForEach] 方法：源生成器把它们编译成内联的结构体 job，分析器在编译期拦下设计错误，一整个服务器 tick 不分配任何内存。',
+    headline: '为 .NET\u00a010 服务端打造的高性能 ECS。',
+    headlineProof: tickLeads
+      ? `完整服务器 tick 最快，分配 ${tickBytes}。`
+      : `完整服务器 tick 只要 ${tickTime}，分配 ${tickBytes}。`,
+    definition: `EasyEcs 是开源、高性能的 archetype（原型）实体组件系统（ECS），面向 C# 与 .NET 10 服务端。${tickLeads ? '一个 10 万实体的完整服务器 tick，它比 Friflo、Arch 和 DefaultEcs 都快' : `一个 10 万实体的完整服务器 tick 只要 ${tickTime}`}${zeroAlloc ? '，而且不分配任何内存' : ''}。你只写普通数据和 [ForEach] 方法：源生成器把它们编译成内联的结构体 job，分析器在编译期拦下设计错误。`,
     start: '快速开始',
     github: 'GitHub',
     demo: '在浏览器里试试',
     numbersTitle: '一个服务器 tick 的实测耗时',
     numbers: [
-      {
-        label: '单个 World',
-        value: text(oneWorld),
-        note: '10 万实体，9 个系统',
-      },
       {
         label: '4 个 World，每线程一个',
         value: text(fourWorlds),
@@ -508,8 +514,13 @@ const copy: Record<Locale, Copy> = {
             ? '每个实体，比两个普通数组还快'
             : '每个实体，单个原型',
       },
+      {
+        label: '每个 tick 的分配',
+        value: text(tickAlloc),
+        note: '单个 World，10 万实体，预热之后',
+      },
     ],
-    numbersNote: `${zeroAlloc ? '每个 tick 分配 0 B。' : ''}每个 tick 都有实体生成、死亡、增减组件。${sourceLine(true)}`,
+    numbersNote: `每个 tick 都有实体生成、死亡、增减组件。${sourceLine(true)}`,
     numbersLink: '这个 tick 模拟了什么',
     codeTitle: '写的是数据，跑的是内联 job',
     codeText:
@@ -711,8 +722,8 @@ const copy: Record<Locale, Copy> = {
 
 // Search result titles: the product and the category people search for.
 const seoTitle: Record<Locale, string> = {
-  en: 'EasyEcs – Allocation-Free ECS for C# and .NET 10 Servers',
-  zh: 'EasyEcs – 面向 C# 与 .NET 10 服务端的零分配 ECS',
+  en: 'EasyEcs – High-Performance ECS for C# and .NET 10 Servers',
+  zh: 'EasyEcs – 高性能 C# / .NET 10 服务端 ECS 框架',
 };
 
 /** The home FAQ as plain text, for the FAQPage JSON-LD */
