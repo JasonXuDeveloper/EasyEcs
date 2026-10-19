@@ -896,6 +896,7 @@ public class GeneratorTests
     [TestCase("public static class U { public static bool F(World w) => w.Count<P>() > 2; }")]
     [TestCase("public static class U { public static void F(Entity e) => e.GetOrAdd<DynamicBuffer<Loot>>().Add(new Loot()); }")]          // the only name of the buffer
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p) { } }")]
+    [TestCase("public static class U { public static EntityId F(World w, Entity e) { foreach (var item in w.Query<P, ChildOf>()) _ = item.ChildOf; return e.Read<ChildOf>().Parent; } }")]   // a member of query items only
     public async Task CheapCodeIsNotReported(string source)
     {
         var costs = await Costs(Components, Extra, source);

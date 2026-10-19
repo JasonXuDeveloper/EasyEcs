@@ -642,6 +642,13 @@ public sealed partial class EasyEcsAnalyzer
         var expression = SyntaxFactory.ParseExpression(text);
         var info = model.GetSpeculativeSymbolInfo(node.SpanStart, expression, SpeculativeBindingOption.BindAsExpression);
         symbol = info.Symbol;
+        // A speculative member access binds to an extension block's member even when the receiver is not of the
+        // block's type (entity.ChildOf finds the member of QueryItem<P, ChildOf>): the receiver must convert to it.
+        if (symbol?.ContainingType is { IsExtension: true, ExtensionParameter: { } extended }
+            && (expression is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax called } ? called : expression as MemberAccessExpressionSyntax) is { } access
+            && model.GetSpeculativeTypeInfo(node.SpanStart, access.Expression, SpeculativeBindingOption.BindAsExpression).Type is { } receiver
+            && !model.Compilation.ClassifyConversion(receiver, extended.Type).IsImplicit)
+            symbol = null;
         return symbol != null;
     }
 
