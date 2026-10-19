@@ -158,8 +158,8 @@ Every step is in the
 - `Query` results are ref structs: no `await` in the loop, no storing items in fields, lambdas or LINQ.
 - Structural changes belong to the world's owner thread; one made inside a parallel stage or a parallel `[ForEach]`
   throws `InvalidOperationException`. See [threading](/en/docs/guide/threading).
-- Every analyzer rule is an error: EECS007 (state in a system) and EECS008 (a system referencing a system) were
-  warnings in 4.0. Move the state into a component or singleton, and let systems communicate through data.
+- EECS007 (state in a system) and EECS008 (a system referencing a system) are errors; they were warnings in
+  4.0. Move the state into a component or singleton, and let systems communicate through data.
 - `QueryEnumerator.Count` and `IsEmpty` are gone: call `world.Count<…>(filter)` / `world.Any<…>(filter)`.
 - `UpdateInterval` and `UpdatePhase` should return constants: EECS018 warns when they do not.
 - Refs into a table can be invalidated by structural changes of other entities; iteration order follows table rows;

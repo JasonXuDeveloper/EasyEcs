@@ -624,15 +624,17 @@ v4.1 changed this: structural changes belong to the world's owner thread (see
 
 ### What changed for performance [#v3-0-performance]
 
-v2 allocated a closure per `CreateEntity` call (about 24 bytes) and four per `AddComponent` call (about 96 bytes):
-about 2.9 MB/s for 10,000 entities with 3 components. v3 allocates nothing after warm-up: its arrays are allocated
-up front and grow only once, with no closures. The v3.0 release estimated these gains:
+v2 allocated a closure on every `CreateEntity` call and four on every `AddComponent` call, so a world that kept
+creating entities kept producing garbage. v3 allocates nothing after warm-up: its arrays are allocated up front and
+grow only once, with no closures. The rest of the hot path changed too:
 
-| Operation | v2 | v3 | Improvement |
-| --- | --- | --- | --- |
-| Tag bitwise operations | 4 scalar operations | 1 SIMD instruction | 4x |
-| Archetype queries | O(N) scan | O(1) cached | 10-100x |
-| Bounds checks | Normal | Unsafe (eliminated) | about 2x faster access |
+| Operation | v2 | v3 |
+| --- | --- | --- |
+| Tag bitwise operations | scalar operations | one SIMD instruction |
+| Archetype queries | a scan of every archetype | a cached match |
+| Bounds checks | on every access | removed behind invariants (`Unsafe`) |
+
+For what EasyEcs measures today, see [performance](/en/docs/performance).
 
 Iteration became safe to modify: v2 had undefined behavior when an entity changed during iteration (entities could
 be skipped or visited twice); v3 marks removed slots with a tombstone (-1) and reads a fresh span after a resize, so

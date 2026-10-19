@@ -127,7 +127,7 @@ icon: RotateCcwClock
 - `Query` 的结果是 ref struct：循环里不能 `await`，元素不能存进字段、lambda 或 LINQ。
 - 结构变更属于 World 的所有者线程；在并行阶段或并行 `[ForEach]` 里做结构变更会抛 `InvalidOperationException`。
   见[线程模型](/zh/docs/guide/threading)。
-- 所有分析器规则都是错误：EECS007（系统里有状态）和 EECS008（系统引用系统）在 4.0 里是警告。把状态移进组件或单例，系统之间通过数据
+- EECS007（系统里有状态）和 EECS008（系统引用系统）改为错误，它们在 4.0 里是警告。把状态移进组件或单例，系统之间通过数据
   通信。
 - `QueryEnumerator.Count` 和 `IsEmpty` 删除了：改用 `world.Count<…>(filter)` / `world.Any<…>(filter)`。
 - `UpdateInterval` 和 `UpdatePhase` 应当返回常量，否则 EECS018 会警告。
