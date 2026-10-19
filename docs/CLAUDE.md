@@ -148,7 +148,7 @@ scripts/                 generate-static.ts, og.ts, lint-links.ts, sync-benchmar
 | Build output directory | `build/client` |
 | Environment variable | `BUN_VERSION=1.4.2` |
 | Compatibility flags | `nodejs_compat` |
-| Build watch paths | include `docs/**` |
+| Build watch paths | include `docs/*` (paths from the repository root; a push of 20+ commits always builds) |
 | Secrets (Production) | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_INSTALLATION_ID` |
 
 The feedback widget posts to GitHub Discussions on JasonXuDeveloper/EasyEcs, category "Docs Feedback", through a
