@@ -353,7 +353,7 @@ export function EcsDemo() {
     <div className={cn(surface, 'not-prose my-6 overflow-hidden')}>
       <div className="flex flex-wrap items-center gap-2 border-b p-3">
         {/* A segmented control, like Fumadocs' theme toggle: the pressed count is filled */}
-        <fieldset className="inline-flex rounded-full border bg-fd-background p-0.5">
+        <fieldset className="inline-flex rounded-lg border bg-fd-background p-0.5">
           <legend className="sr-only">{t.count}</legend>
           {counts.map((n) => (
             <button
@@ -362,7 +362,7 @@ export function EcsDemo() {
               aria-pressed={count === n}
               onClick={() => setCount(n)}
               className={cn(
-                'h-7 rounded-full px-3 text-[13px] tabular-nums transition-colors',
+                'h-7 rounded-md px-3 text-[13px] tabular-nums transition-colors',
                 count === n
                   ? 'bg-fd-accent font-medium text-fd-accent-foreground'
                   : 'text-fd-muted-foreground hover:text-fd-foreground',

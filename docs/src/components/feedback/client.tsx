@@ -71,7 +71,7 @@ function useTranslations() {
 
 function rateButtonVariants({ active }: { active: boolean }) {
   return cn(
-    'inline-flex items-center gap-2 px-3 py-2 rounded-full font-medium border text-sm [&_svg]:size-4 disabled:cursor-not-allowed',
+    'inline-flex items-center gap-2 px-3 py-2 rounded-lg font-medium border text-sm [&_svg]:size-4 disabled:cursor-not-allowed',
     active
       ? 'bg-fd-accent text-fd-accent-foreground [&_svg]:fill-current'
       : 'text-fd-muted-foreground',
