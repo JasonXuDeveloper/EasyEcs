@@ -54,7 +54,7 @@ public class MovementSystem : EcsSystem
 
 - **适合：** 每个独立的模拟一个 World（一张地图、一个场景、一局对战、一个测试）。代码里存 `Entity` 句柄，组件里存 `EntityId`。
 - **开销：** 每个实体 id 一条 16 字节的记录。带组件创建时一次放进最终的表；销毁时用表的最后一行填洞。
-  `WorldOptions.InitialEntityCapacity` 和 `EnsureEntityCapacity(n)` 按已知峰值预分配，长期运行的服务器运行时不会再扩容。
+  `WorldOptions.InitialEntityCapacity`、`EnsureEntityCapacity(n)` 和 `EnsureCapacity<T1, …, Tn>(n)`（连表一起）按已知峰值预分配，长期运行的服务器运行时不会再扩容。
 - **指南：** [实体与组件](/zh/docs/guide/entities-and-components)
 
 ### 组件与标签 [#components-and-tags]

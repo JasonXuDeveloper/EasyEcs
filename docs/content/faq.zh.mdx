@@ -19,7 +19,7 @@ EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 
 - CI 会构建、测试、运行所有 sample 和 example，编译本文档里的 C# 代码片段，并检查自动生成的 API 参考是否最新。
 - 分析器会拒绝 ECS 里常见的设计错误（EECS002 到 EECS024），并提供代码修复。
 
-需要权衡的地方：它只面向 `net10.0`；在走向成熟的过程中，小版本之间 API 会有变化（4.0 到 4.1 改名、删除了几个成员，
+需要权衡的地方：它只面向 `net10.0`；在走向成熟的过程中，小版本之间 API 会有变化（4.0 到 4.1 改名、删除了几个成员，4.2 起读取没添加过的单例会抛异常，
 [迁移指南](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md)逐条列出）；每个版本改了什么见[更新日志](/zh/docs/changelog)。
 
 ## EasyEcs 会分配内存吗？ [#allocations]
@@ -30,8 +30,8 @@ EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 
 <BenchSource />
 
 有意保留的分配：创建 World、第一个拥有新组件组合的实体（新建一张表）、某种查询形状的第一次使用、表或 `DynamicBuffer<T>`
-超出容量时扩容，以及 `Describe` 这类冷路径工具。`InitialEntityCapacity`、`EnsureCapacity(prefab, count)` 和 `bag.EnsureCapacity(n)`
-可以把扩容挪到 tick 之外。
+超出容量时扩容，以及 `Describe` 这类冷路径工具。`InitialEntityCapacity`、`EnsureCapacity<T1, …, Tn>(count)`、`EnsureCapacity(prefab, count)`
+和 `bag.EnsureCapacity(n)` 可以把扩容挪到 tick 之外。
 
 ## 它是线程安全的吗？ [#is-it-thread-safe]
 

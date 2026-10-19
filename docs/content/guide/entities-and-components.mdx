@@ -109,8 +109,9 @@ foreach (var e in world.Entities)         // diagnostics: walks the whole id ran
     Console.WriteLine(e);
 ```
 
-`WorldOptions.InitialEntityCapacity` does the same at construction. Tables grow on their own; to size the table of
-a prefab's instances too, use [`EnsureCapacity(prefab, count)`](/en/docs/guide/prefabs#ensure-capacity).
+`WorldOptions.InitialEntityCapacity` does the same at construction. Tables grow on their own; to size a table too,
+use [`EnsureCapacity<T1, …, Tn>(count)`](/en/docs/guide/structural-changes#bulk) for entities created with exactly
+those components, or [`EnsureCapacity(prefab, count)`](/en/docs/guide/prefabs#ensure-capacity) for a prefab's instances.
 
 ### Ids, versions and recycling [#entityid]
 

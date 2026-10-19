@@ -23,7 +23,7 @@ long-running .NET servers. What backs it up, in the repository:
 - An analyzer that rejects the design mistakes an ECS makes easy (EECS002 to EECS024), with code fixes.
 
 What to weigh: it targets `net10.0` only, the API changes between minor versions while it matures (4.0 to 4.1 renamed
-and removed a few members; the [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md)
+and removed a few members, and in 4.2 reading a singleton that was never added throws; the [migration guide](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/MIGRATION_GUIDE.md)
 lists each change), and the [changelog](/en/docs/changelog) shows what each release changed.
 
 ## Does EasyEcs allocate? [#allocations]
@@ -37,7 +37,8 @@ The headline server tick of 100,000 entities takes <BenchValue k="tick.oneWorld"
 
 What allocates, on purpose: creating a world, the first entity of a new component set (a new table), the first use
 of a query shape, a table or a `DynamicBuffer<T>` growing past its capacity, and cold tools such as `Describe`.
-`InitialEntityCapacity`, `EnsureCapacity(prefab, count)` and `bag.EnsureCapacity(n)` move growth out of the tick.
+`InitialEntityCapacity`, `EnsureCapacity<T1, …, Tn>(count)`, `EnsureCapacity(prefab, count)` and
+`bag.EnsureCapacity(n)` move growth out of the tick.
 
 ## Is it thread-safe? [#is-it-thread-safe]
 

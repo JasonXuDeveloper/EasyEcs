@@ -102,7 +102,8 @@ foreach (var e in world.Entities)         // 诊断用：会走完整个 id 范�
     Console.WriteLine(e);
 ```
 
-`WorldOptions.InitialEntityCapacity` 在构造时做同样的事。表会自己扩容；要连预制体实例所在的表一起预留，用
+`WorldOptions.InitialEntityCapacity` 在构造时做同样的事。表会自己扩容；要连表一起预留：实体恰好带这几个组件时用
+[`EnsureCapacity<T1, …, Tn>(count)`](/zh/docs/guide/structural-changes#bulk)，预制体实例用
 [`EnsureCapacity(prefab, count)`](/zh/docs/guide/prefabs#ensure-capacity)。
 
 ### Id、版本与复用 [#entityid]

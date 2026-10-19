@@ -59,8 +59,9 @@ throws instead of reaching the entity that reuses its id.
 - **Use it for:** one world per independent simulation (a map, a zone, a match, a test). Keep `Entity` handles in
   code and `EntityId`s in components.
 - **Cost:** a 16-byte record per entity id. Creating with its components is one placement in the final table;
-  destroying fills the hole with the table's last row. `WorldOptions.InitialEntityCapacity` and
-  `EnsureEntityCapacity(n)` pre-size for a known peak, so a long-running server never grows at run time.
+  destroying fills the hole with the table's last row. `WorldOptions.InitialEntityCapacity`,
+  `EnsureEntityCapacity(n)` and `EnsureCapacity<T1, …, Tn>(n)` (the table too) pre-size for a known peak, so a
+  long-running server never grows at run time.
 - **Guide:** [Entities and components](/en/docs/guide/entities-and-components)
 
 ### Components and tags [#components-and-tags]
