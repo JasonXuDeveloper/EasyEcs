@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reactRouter } from '@react-router/dev/vite';
@@ -29,12 +30,28 @@ function serverOnlyPageExports(): Plugin {
   };
 }
 
+/**
+ * The release the docs describe: the newest "## X.Y.Z" section of the changelog, which is written for the coming
+ * release before it is cut (docs/CLAUDE.md), shown as major.minor.
+ */
+function docsVersion() {
+  const changelog = readFileSync(
+    path.join(root, 'content/changelog.mdx'),
+    'utf8',
+  );
+  const match = /^## (\d+)\.(\d+)\.\d+/m.exec(changelog);
+  if (!match)
+    throw new Error('content/changelog.mdx has no "## X.Y.Z" section');
+  return `${match[1]}.${match[2]}`;
+}
+
 // `--mode scripts`: the scripts in scripts/ (run with vite-node) only load the content.
 export default defineConfig(({ mode }) => ({
   plugins:
     mode === 'scripts'
       ? [fumadocsMdx()]
       : [fumadocsMdx(), serverOnlyPageExports(), tailwindcss(), reactRouter()],
+  define: { __DOCS_VERSION__: JSON.stringify(docsVersion()) },
   optimizeDeps:
     mode === 'scripts' ? { noDiscovery: true, include: [] } : undefined,
   resolve: {

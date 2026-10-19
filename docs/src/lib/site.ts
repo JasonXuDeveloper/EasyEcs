@@ -21,8 +21,10 @@ export const author = {
   url: 'https://github.com/JasonXuDeveloper',
 };
 
-/** The release the docs describe (Directory.Build.props carries the published one) */
-export const docsVersion = '4.1';
+declare const __DOCS_VERSION__: string;
+
+/** The release the docs describe: major.minor of the changelog's newest section (vite.config.ts) */
+export const docsVersion = __DOCS_VERSION__;
 export const installCommand = 'dotnet add package EasyEcs';
 
 /** BCP 47 tags: `<html lang>`, hreflang, JSON-LD inLanguage */
