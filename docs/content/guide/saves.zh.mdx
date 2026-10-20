@@ -110,14 +110,20 @@ public class SaveBalances : EcsSystem
 ```
 
 ```csharp
+var bank = new World();                                                // 旧进程
+bank.SetOutbox(0);
+bank.CreateEntity(new Balance(100));
 var previous = new NinoArrayBufferWriter();
-world.Save(previous);                                                  // 旧进程，两个 tick 之间
+bank.Save(previous);                                                   // 两个 tick 之间
 
 using var resumed = new World();                                       // 新进程
 resumed.Load(previous.WrittenSpan, markWritten: false);                // 记录里已经是这些值 // [!code highlight]
 resumed.AddSystem<SaveBalances>();
-resumed.Update();                                                      // 没有要存的：没有一行算变更
+resumed.Update();
+int records = resumed.Outbox.Records;                                  // 0：读进来的余额都不算变更
 ```
+
+单例也来自存档（这里的 `Outbox`），所以新进程只补存档里没有的单例，和[启动时](/zh/docs/guide/hosting#persistence)一样。
 
 之后才加到已经有状态的 World 上的系统（不管状态是谁写的），也可以从当前 tick 开始算：`world.AddSystem<T>(changesFromNow: true)`
 让它第一次运行只访问调用之后写入的行（[tick](/zh/docs/guide/change-tracking#ticks)）。

@@ -122,14 +122,21 @@ public class SaveBalances : EcsSystem
 ```
 
 ```csharp
+var bank = new World();                                                // the old process
+bank.SetOutbox(0);
+bank.CreateEntity(new Balance(100));
 var previous = new NinoArrayBufferWriter();
-world.Save(previous);                                                  // the old process, between two ticks
+bank.Save(previous);                                                   // between two ticks
 
 using var resumed = new World();                                       // the new process
 resumed.Load(previous.WrittenSpan, markWritten: false);                // the records hold these values // [!code highlight]
 resumed.AddSystem<SaveBalances>();
-resumed.Update();                                                      // nothing to save: no row is a change
+resumed.Update();
+int records = resumed.Outbox.Records;                                  // 0: no loaded balance is a change
 ```
+
+The singletons come from the save (`Outbox` here), so the new process adds only those the save did not hold, as at
+[startup](/en/docs/guide/hosting#persistence).
 
 A system added later to a world that already holds its state, whatever wrote it, can start from the current tick
 instead: `world.AddSystem<T>(changesFromNow: true)` makes its first run visit only what is written after the call
