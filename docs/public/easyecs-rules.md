@@ -10,12 +10,18 @@ available as Markdown: add `.md` to its URL.
   A tag is a struct with no fields: `public struct Dead : IComponent;`. Never a class (EECS006).
 - Singletons are structs implementing `ISingletonComponent`, one per world: `world.Arena.Tick++`.
 - Store `EntityId`, not `Entity`, in components (EECS017).
-- Use the generated members: `entity.Health` (a `ref`), `HasHealth`, `SetHealth(100)`, `RemoveHealth()`,
+- Use the generated members: `entity.Health` (a `ref`; `ref readonly` for an `ITrackChanges` or indexed component,
+  written with `SetHealth(…)` or, for a tracked one, `WriteHealth()`), `HasHealth`, `SetHealth(100)`, `RemoveHealth()`,
   `IsDead` / `SetDead()` / `RemoveDead()` for tags, `world.Arena` for singletons, `item.Position` on query items.
   `entity.Read<T>()` reads without counting as a write. Prefer them to the generic calls (EECS033).
 - Components marked `ITrackChanges` record writes; indexed components (`IIndexed<TKey>`) are written with `Set` or
   `SetX(…)`, never through a `ref` (EECS015).
-- A list per entity is a `DynamicBuffer<T>` component; never copy it by value (EECS012).
+- A list per entity is a `DynamicBuffer<T>` component; never copy it by value (EECS012). Call
+  `EnsureCapacity(n)` on it (and `world.EnsureCapacity<T…>(n)` on the world) before a wave of known size.
+- An external resource (a socket, a seat) lives in an `ICleanupComponent`: destroying the entity keeps it with the
+  `Destroyed` tag until a system releases the resource and removes the component.
+- An optional component is a `Maybe<T>` parameter, but not in the hottest loops: there, write two methods with
+  `[With<T>]` and `[Without<T>]`.
 
 ## Systems
 
@@ -27,8 +33,12 @@ available as Markdown: add `.md` to its URL.
   what an `in` parameter holds (EECS011). Take only what the method uses: a component it only requires is a
   `[With<T>]` filter (EECS026), and a component or singleton it reads is a parameter, not a lookup through the
   `Entity` or `World` on every row (EECS027). A method that uses nothing of its system is `static` (EECS029).
-- Filters are attributes on the method or on the system group struct: `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`,
-  `[Changed<T>]`, `[Removed<T>]` (EECS023). A `[Removed<T>]` method does not take `T` (EECS016).
+- Filters on a `[ForEach]` method: `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`.
+  A `[Removed<T>]` method does not take `T` (EECS016). On a system group struct, for all its systems: `[With<T>]`,
+  `[Without<T>]`, `[WithAny<T>]` (on any other struct: EECS023), or `IGroupWith<T>` / `IGroupWithout<T>` implemented
+  by the group or an interface it implements; a generic group interface needs the interfaces, as an attribute cannot
+  name a type parameter. `[Changed<T>]` / `[Removed<T>]` go on methods only.
+- React to changes with `[Changed<T>]` / `[Removed<T>]` on an `ITrackChanges` component, not with dirty flags.
 - To change structure (add, remove, create, destroy) in a `[ForEach]` method, take `Entity` or `World`
   (EECS013). Changes apply at once; the pass stays safe.
 - Order systems with `[UpdateBefore<T>]` / `[UpdateAfter<T>]` inside the same group; no cycles (EECS019, EECS020).
@@ -37,6 +47,11 @@ available as Markdown: add `.md` to its URL.
 - A system never calls `World.Update()` (EECS034): the host runs the world.
 - `[ForEach(Parallel = true)]` methods write data only and make no structural changes (EECS010); a later system on the
   owner thread acts on that data.
+- A request or message for one entity runs as a struct job on it: `entity.Run<T…, TJob>(ref job, Filter)` with an
+  `IForEachEntity` job and a `static readonly` `QueryFilter`; it returns `false` when the entity is gone, lacks a
+  component or fails the filter. It is structural: never inside a parallel `[ForEach]` (EECS010), never in a
+  `[ForEach]` method without `Entity` or `World` (EECS013), never off the owner thread (EECS014). A job that makes no
+  structural change implements `INoStructuralChanges`; `static int Writes` names the components it writes.
 - No events or callbacks: a state change is data (a tag, a component, a message entity, a tracked write). There is no
   command buffer and no `Added<T>`: add a tag such as `Spawned` and remove it in the system that reacts.
 
@@ -67,7 +82,25 @@ available as Markdown: add `.md` to its URL.
 - It does not run on Unity, Godot or runtimes older than .NET 10.
 - It has no whole-entity disable flag: add a tag and filter with `Without<T>`; `entity.Disable<T>()` hides one
   component and keeps its value.
+- It has no actor type. An actor is a pattern: one type per kind of actor that is its key component
+  (`IIndexed<TSelf>`), its system group and the group's filter (`IGroupWith<In<TSelf>>`), declared once through a
+  generic interface (`interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, IGroupWith<In<TSelf>>`).
+  Implement `Key` explicitly on a record struct (`Shop IIndexed<Shop>.Key => this;`): a public `Key => this` makes
+  the record's `ToString()` recurse until the stack overflows.
+  https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors
 - It has no shared components: put shared data in a singleton and store an id.
+
+## Persistence
+
+- `world.Capture()` / `Restore(snapshot)` copy a world in memory (undo, rollback, tests); `world.Save` / `Load` write
+  bytes that survive a restart or go to another process.
+- Collect a subtree with `world.Descendants(root)` (not only `Children`) before `SaveEntities` or `MoveEntities`:
+  a child left behind dies with the original.
+- Durable state is a record: `SaveEntities(writer, ids, Persistent)` with a `static readonly ComponentSet` of the
+  durable components only, never the runtime ones (connections, timers, caches).
+- Restore a record with `LoadEntitiesInto(bytes, entities, markWritten: false)`, so a system that saves or
+  replicates changed components does not send it straight back. The persistent components come only from the record:
+  do not create them on the entity before it arrives. `LoadEntitiesInto` is structural (EECS010, EECS013, EECS014).
 
 ## Project layout and debugging
 

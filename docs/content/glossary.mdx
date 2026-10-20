@@ -88,7 +88,10 @@ update; it keeps no state of its own and never calls another system. See [System
 
 A struct implementing `ISystemGroup`. Systems marked `[UpdateInGroup<G>]` run only on `world.Update<G>()`, so input,
 simulation and persistence can run at their own cadence. Systems without the attribute are in the default group,
-which `world.Update()` runs. See [Systems](/en/docs/guide/systems#system-groups).
+which `world.Update()` runs. A group can filter the entities of all its systems: `[With<T>]`, `[Without<T>]` and
+`[WithAny<T>]` on the group struct, or `IGroupWith<T>` / `IGroupWithout<T>` implemented by the group or an interface
+it implements (the way a generic interface gives each actor type its own group). See
+[Systems](/en/docs/guide/systems#system-groups).
 
 ## Update and tick [#update]
 
@@ -128,7 +131,9 @@ fewer than two chunks run on the calling thread alone. See [Systems](/en/docs/gu
 
 A struct implementing `IForEach<T…>`, `IForEachEntity<T…>` or `IForEachBatch<T…>` whose `Execute` method the row
 loop calls. The JIT inlines it, so there is no delegate and no virtual call per entity. The generator writes one for
-every `[ForEach]` method. See [Queries and filters](/en/docs/guide/queries#foreach-a-struct-job).
+every `[ForEach]` method. `entity.Run<T…, TJob>(ref job)` runs an `IForEachEntity` job on one entity. A job's
+`static int Writes` names the components it writes; implementing `INoStructuralChanges` promises no structural change.
+See [Queries and filters](/en/docs/guide/queries#foreach-a-struct-job).
 
 ## Batch method [#batch-method]
 
@@ -204,6 +209,14 @@ thread. EasyEcs has none of its own: other threads post messages, and a system o
 turns each into data, such as a request entity. See
 [Threading](/en/docs/guide/threading#input-from-other-threads).
 
+## Actor [#actor]
+
+A pattern, not an EasyEcs type: an entity that handles messages addressed to it by key (a shop, a bank account, a
+player). One type per kind of actor is at once its key component (`IIndexed<TSelf>`, found through its index), its
+system group and the group's filter (`IGroupWith<In<TSelf>>`), declared once through a generic interface; a request
+runs on its entity with `entity.Run`. See
+[samples/Actors](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors).
+
 ## Prefab [#prefab]
 
 A recipe of component values that belongs to no world (`new Prefab().SetHealth(30)`), so no query ever sees it.
@@ -231,7 +244,7 @@ kind per entity are `IRelation` elements of a buffer. Both answer "who links to 
 ## Hierarchy [#hierarchy]
 
 Parent and child entities linked by the built-in `ChildOf` component. `world.Children(parent)` lists the children,
-and destroying a parent destroys its descendants. See [Hierarchy](/en/docs/guide/hierarchy).
+`world.Descendants(root)` walks the whole subtree depth first, and destroying a parent destroys its descendants. See [Hierarchy](/en/docs/guide/hierarchy).
 
 ## Group (IGroup) [#group]
 
@@ -265,7 +278,9 @@ as raw rows, managed ones through Nino (`[NinoType]`). See [Saves](/en/docs/guid
 
 Moving a group of entities, such as a player and what it owns, to another world: `SaveEntities` and `LoadEntities`
 through bytes (another process), or `MoveEntities` directly (another world of the thread). Links inside the group
-follow the new ids. See [Migration and unloading](/en/docs/guide/migration-and-unload).
+follow the new ids. A record saves only what persists: `SaveEntities` with a `ComponentSet`, loaded onto entities
+that exist already with `LoadEntitiesInto` (`markWritten: false` keeps the restored values from counting as changed).
+See [Migration and unloading](/en/docs/guide/migration-and-unload).
 
 ## Collectible ALC [#collectible-alc]
 

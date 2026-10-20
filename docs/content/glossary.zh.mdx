@@ -77,7 +77,9 @@ World 最初的几次更新：建好表、查询缓存和之后反复使用的�
 ## 系统分组（System group） [#system-group]
 
 实现 `ISystemGroup` 的结构体。标了 `[UpdateInGroup<G>]` 的系统只在 `world.Update<G>()` 时执行，所以输入、模拟和存盘可以各按各的节奏跑。
-没标这个特性的系统属于默认分组，由 `world.Update()` 执行。见[系统](/zh/docs/guide/systems#system-groups)。
+没标这个特性的系统属于默认分组，由 `world.Update()` 执行。分组可以给它所有的系统统一过滤实体：在分组结构体上写 `[With<T>]`、
+`[Without<T>]`、`[WithAny<T>]`，或者让分组自己、它实现的接口实现 `IGroupWith<T>` / `IGroupWithout<T>`（一个泛型接口就这样给每种
+actor 类型各配一个分组）。见[系统](/zh/docs/guide/systems#system-groups)。
 
 ## 更新与 tick（Update、tick） [#update]
 
@@ -109,7 +111,8 @@ World 用来跑并行工作的部件：一个阶段里的系统，或者一个�
 ## 结构体 job（Struct job） [#struct-job]
 
 实现 `IForEach<T…>`、`IForEachEntity<T…>` 或 `IForEachBatch<T…>` 的结构体，行循环调用它的 `Execute` 方法。JIT 会把它内联，
-所以每个实体既没有委托调用，也没有虚调用。生成器为每个 `[ForEach]` 方法写一个。
+所以每个实体既没有委托调用，也没有虚调用。生成器为每个 `[ForEach]` 方法写一个。`entity.Run<T…, TJob>(ref job)` 在单个实体上跑一个
+`IForEachEntity` job。job 的 `static int Writes` 指明它写哪些组件；实现 `INoStructuralChanges` 表示保证不做结构变更。
 见[查询与过滤](/zh/docs/guide/queries#foreach-a-struct-job)。
 
 ## 批量方法（Batch method） [#batch-method]
@@ -173,6 +176,12 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 由你的代码持有的队列，把其他线程（网络、定时器、数据库）的输入送到 World 的所有者线程。EasyEcs 自己不带：其他线程投递消息，
 所有者线程上的一个系统取出消息，把每条变成数据，比如一个请求实体。见[多线程](/zh/docs/guide/threading#input-from-other-threads)。
 
+## Actor [#actor]
+
+一种写法，不是 EasyEcs 的类型：按键接收消息的实体（一家商店、一个银行账户、一个玩家）。每种 actor 一个类型，它同时是键组件
+（`IIndexed<TSelf>`，通过索引找到）、系统分组和分组的过滤条件（`IGroupWith<In<TSelf>>`），用一个泛型接口统一声明；
+请求用 `entity.Run` 在对应的实体上处理。见 [samples/Actors](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)。
+
 ## 预制体（Prefab） [#prefab]
 
 一份不属于任何 World 的组件值配方（`new Prefab().SetHealth(30)`），所以任何查询都看不到它。`world.Instantiate(prefab)`
@@ -195,7 +204,8 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 
 ## 层级（Hierarchy） [#hierarchy]
 
-用内置的 `ChildOf` 组件把父子实体连起来。`world.Children(parent)` 列出子实体，销毁父实体会连带销毁它的所有后代。
+用内置的 `ChildOf` 组件把父子实体连起来。`world.Children(parent)` 列出子实体，`world.Descendants(root)` 深度优先走完整棵子树，
+销毁父实体会连带销毁它的所有后代。
 见[层级](/zh/docs/guide/hierarchy)。
 
 ## 分组（IGroup） [#group]
@@ -226,7 +236,8 @@ World 在内存里的一份拷贝：`world.Capture()` 拍下，`world.Restore(sn
 ## 迁移（Migration） [#migration]
 
 把一组实体（比如一个玩家和他拥有的东西）搬到另一个 World：经由字节用 `SaveEntities` 和 `LoadEntities`（可以跨进程），
-或者在同一线程的两个 World 之间直接用 `MoveEntities`。组内的链接会改成新的 id。见[迁移与卸载](/zh/docs/guide/migration-and-unload)。
+或者在同一线程的两个 World 之间直接用 `MoveEntities`。组内的链接会改成新的 id。记录只保存需要持久化的部分：`SaveEntities` 配一个 `ComponentSet` 写出，再用 `LoadEntitiesInto`
+放到已有的实体上（`markWritten: false` 让恢复的值不算变更）。见[迁移与卸载](/zh/docs/guide/migration-and-unload)。
 
 ## 可回收的 ALC（Collectible ALC） [#collectible-alc]
 

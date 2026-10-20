@@ -32,6 +32,13 @@ major or minor version that needs code changes? The
   parallel `[ForEach]` method, [EECS013](/en/docs/guide/analyzer#eecs013) and
   [EECS014](/en/docs/guide/analyzer#eecs014) check it like `Set`.
 
+### Fixes [#v4-5-0-fixes]
+
+- The analyzer treats `world.LoadEntitiesInto` as a structural call, like `LoadEntities`: it was missing from the
+  members [EECS010](/en/docs/guide/analyzer#eecs010), [EECS013](/en/docs/guide/analyzer#eecs013) and
+  [EECS014](/en/docs/guide/analyzer#eecs014) check, so a call in a parallel `[ForEach]` method, in a method that
+  promises no structural change or on another thread compiled without an error.
+
 ## 4.4.0 [#v4-4-0]
 
 ### New [#v4-4-0-new]

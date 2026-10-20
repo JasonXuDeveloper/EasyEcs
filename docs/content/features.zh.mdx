@@ -19,13 +19,13 @@ EasyEcs 的全部功能都在这一页，按它在服务器上承担的工作分
 
 | 用途 | 功能 |
 | --- | --- |
-| [模拟](#simulate) | [World 与实体](#worlds-and-entities)、[组件与标签](#components-and-tags)、[生成成员](#generated-members)、[系统与 `[ForEach]`](#systems-and-foreach)、[过滤条件](#filters)、[可选组件](#optional-components)、[批量方法](#batch-methods)、[单例](#singletons)、[排序、分组与间隔](#system-groups-and-intervals)、[立即生效的结构变更](#immediate-structural-changes)、[临时查询](#ad-hoc-queries) |
+| [模拟](#simulate) | [World 与实体](#worlds-and-entities)、[组件与标签](#components-and-tags)、[生成成员](#generated-members)、[系统与 `[ForEach]`](#systems-and-foreach)、[泛型系统](#generic-systems)、[过滤条件](#filters)、[可选组件](#optional-components)、[批量方法](#batch-methods)、[单例](#singletons)、[排序、分组与间隔](#system-groups-and-intervals)、[立即生效的结构变更](#immediate-structural-changes)、[临时查询](#ad-hoc-queries) |
 | [响应变化](#react) | [变更追踪](#change-tracking)、[移除检测](#removal-detection)、[清理组件](#cleanup-components)、[禁用与启用](#disable-and-enable) |
 | [查找](#find) | [值索引](#value-indexes)、[有序区间](#ordered-ranges)、[按值分表](#table-groups) |
 | [组织](#structure) | [关系](#relations)、[层级](#hierarchy)、[动态缓冲](#dynamic-buffers)、[预制体与克隆](#prefabs-and-cloning) |
 | [持久化](#persist) | [快照](#snapshots)、[存档](#saves)、[迁移](#migration)、[卸载插件类型](#unloading) |
 | [扩展](#scale) | [每个线程一个 World](#threading-model)、[并行系统](#parallel-systems)、[并行 `[ForEach]`](#parallel-foreach)、[批量操作](#bulk-operations) |
-| [构建与运维](#operate) | [分析器与代码修复](#analyzer)、[系统耗时统计](#per-system-timing)、[异常处理](#errors)、[运行时自省](#introspection)、[Native AOT](#native-aot)、[模板与示例程序](#templates) |
+| [构建与运维](#operate) | [分析器与代码修复](#analyzer)、[系统耗时统计](#per-system-timing)、[异常处理](#errors)、[运行时自省](#introspection)、[Native AOT](#native-aot)、[托管与测试](#hosting-and-testing)、[模板与示例程序](#templates) |
 
 ## 模拟 [#simulate]
 
@@ -59,7 +59,7 @@ public class MovementSystem : EcsSystem
 
 ### 组件与标签 [#components-and-tags]
 
-组件是结构体（`IComponent`），存放在原型（archetype）表里：每种组件组合一张表，每种组件一列，每个实体一行。非托管列被固定在内存里，
+组件是结构体（`IComponent`），存放在原型（archetype）表里：每种组件组合一张表，每种组件一列，每个实体一行。非托管列固定在内存里，
 并从 64 字节边界开始。空结构体就是标签。移除组件只清一个存在位、保留这一行，再加回来同样便宜。
 
 - **适合：** 每个实体的数据，按系统会一起读的内容拆分；来来去去的状态用标签。
@@ -80,21 +80,33 @@ public class MovementSystem : EcsSystem
 ### 系统与 [ForEach] [#systems-and-foreach]
 
 系统继承 `EcsSystem`，只做一件事。`[ForEach]` 方法就是它的整个循环，参数可以是组件（`ref` 写、`in` 读）、单例、`Entity` 和 `World`。
-生成器把每个方法编译成结构体 job，JIT 把它内联进行循环。`OnCreate`、`OnUpdate` 和 `OnDestroy` 负责初始化和每次更新的额外工作。
+生成器把每个方法编译成结构体 job，JIT 把它内联到行循环里。`OnCreate`、`OnUpdate` 和 `OnDestroy` 负责初始化和每次更新的额外工作。
 
 - **适合：** 一个 tick 里所有逐实体的逻辑。
 - **开销：** 把 `Velocity` 加到 `Position` 的 `[ForEach]` 系统，每个实体 <BenchValue k="forEach.perEntity" />；同样的循环手写在两个普通数组上是
   <BenchValue k="rawArray.perEntity" />。每个系统每次更新：三次虚调用，加每个方法一次查询缓存查找。
 - **指南：** [系统](/zh/docs/guide/systems)、[ECS 设计原则](/zh/docs/ecs-principles)
 
+### 泛型系统 [#generic-systems]
+
+系统类可以是泛型的：每个闭合类型（`CountOf<Position>`、`CountOf<Health>`）都是一个独立的系统，有自己生成的 job 和读写集合，
+各自添加、排序、调度。闭合的泛型系统也可以当基类。
+
+- **适合：** 同一条规则作用于几种组件类型（计数、衰减、按资源种类清理）。
+- **别用于：** 泛型的 `[ForEach]` 方法：没人能给它提供类型实参（[EECS004](/zh/docs/guide/analyzer#eecs004)）；把类做成泛型。
+- **开销：** 除了闭合出来的系统本身没有额外开销；靠反射构造的类型在第一次用到时才闭合代码。
+- **指南：** [系统](/zh/docs/guide/systems#generic-systems)
+
 ### 过滤条件 [#filters]
 
 `[With<T>]` 要求有某个不作为参数传入的组件，`[Without<T>]` 排除一个组件，`[WithAny<T>]` 要求几个里至少有一个，
-`[Changed<T>]` 和 `[Removed<T>]` 按变更 tick 选择。临时代码里有同样的 `QueryFilter`，写在系统分组上则对分组里的所有系统生效。
+`[Changed<T>]` 和 `[Removed<T>]` 按变更 tick 选择。临时代码里有同样的 `QueryFilter`。系统分组上可以写 `[With<T>]`、`[Without<T>]`、
+`[WithAny<T>]`，对分组里的所有系统生效；也可以让分组自己或它实现的接口实现 `IGroupWith<T>` / `IGroupWithout<T>`。
+这样一个泛型接口就能给每种 actor 类型各配一个带过滤的分组，特性做不到这一点，因为特性里不能写类型参数。
 
 - **适合：** 状态（`[Without<Dead>]`）、角色（`[With<Player>]`）、多选一（`[WithAny<Frozen>, WithAny<Stunned>]`）。
 - **开销：** 匹配结果按查询形状缓存；不可能匹配的表只跳过一次，部分行缺组件的表按位字一次检测 64 行。
-- **指南：** [查询与过滤](/zh/docs/guide/queries)
+- **指南：** [查询与过滤](/zh/docs/guide/queries)、[分组过滤](/zh/docs/guide/systems#group-filters)
 
 ### 可选组件 [#optional-components]
 
@@ -122,7 +134,7 @@ public class MovementSystem : EcsSystem
 系统之外的代码用稳定句柄 `SingletonRef<T>`。
 
 - **适合：** 所有 World 级状态。系统自身不存状态。
-- **别用于：** 用静态字段代替它：静态字段会被所有 World 共享。
+- **别用静态字段代替：** 静态字段由所有 World 共享。
 - **开销：** 作为参数时每次遍历查找一次。
 - **指南：** [单例](/zh/docs/guide/singletons)
 
@@ -130,32 +142,36 @@ public class MovementSystem : EcsSystem
 
 系统按注册顺序执行，可以用 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 调整。`[UpdateInGroup<G>]` 把系统放进一个分组，只在
 `world.Update<G>()` 时执行。`UpdateInterval` 和 `UpdatePhase` 让系统每 N 次更新执行一次，并分散到不同相位；`Enabled` 关掉它。
+分组的过滤条件（`[Without<Frozen>]`，或分组自己、它实现的接口上的 `IGroupWith<T>` / `IGroupWithout<T>`）作用于分组里所有系统的 `[ForEach]` 方法。
 
-- **适合：** 不同的节奏：输入每次唤醒都处理，模拟按固定 tick 跑，存盘每隔几秒一次。
+- **适合：** 不同的节奏：输入每次唤醒都处理，模拟按固定 tick 跑，存盘每隔几秒一次；每种 actor 一个分组，用一个泛型接口统一声明。
 - **开销：** 除了系统本身没有额外开销；空分组的更新什么都不做。排序成环会编译失败（[EECS019](/zh/docs/guide/analyzer#eecs019)）。
 - **指南：** [系统](/zh/docs/guide/systems)
 
 ### 立即生效的结构变更 [#immediate-structural-changes]
 
-创建、销毁、添加、移除都立即生效，在遍历同一批表的过程中也一样。一次遍历里每个实体最多访问一次：轮到之前就离开的实体被跳过，
+创建、销毁、添加、移除都立即生效，在遍历同一批表的过程中也一样。一次遍历里每个实体最多访问一次：还没轮到就离开的实体直接跳过，
 中途加入的实体留到下一次遍历；方法体搬动了自己的实体，`[ForEach]` 方法的 `ref` 参数依然有效。
 
 - **适合：** 任何时候。在做出决定的地方直接写变更，同一次更新里后面的代码和系统都能看到。
 - **和命令缓冲相比：** 把变更推迟到缓冲里的库，会让系统看到一个马上就要变的状态，效果的先后还取决于缓冲何时回放。
   EasyEcs 没有需要回放的缓冲。
 - **开销：** 可能做结构变更的遍历，每个实体之后检查一个计数器；不可能做结构变更的方法连这一步都省了。
-- **指南：** [结构变更](/zh/docs/guide/structural-changes)
+- **指南：** [结构变更](/zh/docs/guide/structural-changes)、[ref 与 await](/zh/docs/guide/refs-and-await)
 
 ### 临时查询 [#ad-hoc-queries]
 
 在任何代码里遍历：`foreach (var item in world.Query<T…>(filter))`、结构体 job（`world.ForEach`、`ForEachEntity`）、
 `world.Count` 和 `world.Any`。系统之外的静态 `[ForEach]` 方法会生成一个入口（`Reports.CountAlive(world, ref alive)`），
-带着调用方传入的值，以结构体 job 的方式执行。
+带着调用方传入的值，当作结构体 job 执行。`entity.Run<Health, TakeHit>(ref job, filter)` 在单个实体上跑一个结构体 job，
+拿到的 `ref` 和遍历时一样：实体已销毁、缺组件或不满足过滤条件时返回 `false`。job 的 `static int Writes` 指明哪些组件算作写入（默认全部）；
+实现 `INoStructuralChanges` 的 job 省掉结构变更的簿记。
 
-- **适合：** 工具、测试、两次更新之间的请求处理、一次性的遍历。
+- **适合：** 工具、测试、两次更新之间的请求处理、一次性的遍历；发给单个实体的请求或消息用 `entity.Run`。
 - **别用于：** 每个 tick 都要跑的逻辑：系统有排序、有调度、有耗时统计。
 - **开销：** 零分配。`Count` 只是把表的行数加起来；`Any` 找到第一个就停；结构体 job 是最快的临时遍历。
-- **指南：** [查询与过滤](/zh/docs/guide/queries)
+  `entity.Run` 是 O(1)，过滤条件每多一个组件多 O(1)。
+- **指南：** [查询与过滤](/zh/docs/guide/queries)、[单个实体：`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)
 
 ## 响应变化 [#react]
 
@@ -293,12 +309,14 @@ world.Instantiate(goblin, wave);
 
 ### 层级 [#hierarchy]
 
-内置的 `ChildOf(EntityId Parent)` 组件把子实体链接到父实体。`world.Children(parent)` 列出子实体，`Set(new ChildOf(other))` 换父节点，
+内置的 `ChildOf(EntityId Parent)` 组件把子实体链接到父实体。`world.Children(parent)` 列出子实体，
+`world.Descendants(root)` 深度优先走完整棵子树（每个实体排在它的子实体之前，不含根），`Set(new ChildOf(other))` 换父节点，
 销毁父实体会连带销毁所有后代。
 
 - **适合：** 一艘船和它的炮塔、一个玩家和挂在身上的物品、一个小队和它的成员。
 - **别用于：** 变换传播：没有内置的世界坐标变换，需要的话自己写系统。
-- **开销：** 第一次调用为所有 `ChildOf` 建一次索引之后，`Children` O(1) 起步、每个子实体 O(1)；级联销毁每条链接 O(1)。
+- **开销：** 第一次调用为所有 `ChildOf` 建一次索引之后，`Children` O(1) 起步、每个子实体 O(1)；`Descendants` 每个实体 O(1)，
+  预热后不分配内存；级联销毁每条链接 O(1)。
 - **指南：** [层级](/zh/docs/guide/hierarchy)
 
 ### 动态缓冲 [#dynamic-buffers]
@@ -360,11 +378,13 @@ restarted.Load(bytes.WrittenSpan);
 ### 迁移 [#migration]
 
 `SaveEntities` 和 `LoadEntities` 经由字节把一组实体（一个玩家和他拥有的东西）搬到另一个 World，换上新 id，组内的链接随之改写。
-`MoveEntities` 在同一线程的两个 World 之间直接搬，不经过编码。
+`MoveEntities` 在同一线程的两个 World 之间直接搬，不经过编码。记录只保存需要持久化的部分：`SaveEntities(writer, ids, set)`
+配一个 `ComponentSet`，只写出集合里的组件；`LoadEntitiesInto(bytes, entities)` 把它们放到已经存在的实体上。
+加上 `markWritten: false`，恢复的值不算变更，按变更存盘的系统就不会立刻把它写回去。
 
-- **适合：** 玩家换场景或换服，对局结束把幸存者交给大厅。
+- **适合：** 玩家换场景或换服，对局结束把幸存者交给大厅（用 `Descendants` 收集整组）；实体先于存储数据出现的 actor 用记录。
 - **开销：** O(给出的实体数 × 组件数)；`MoveEntities` 直接拷贝行。
-- **指南：** [迁移与卸载](/zh/docs/guide/migration-and-unload)
+- **指南：** [迁移与卸载](/zh/docs/guide/migration-and-unload)、[记录](/zh/docs/guide/migration-and-unload#records)
 
 ### 卸载插件类型 [#unloading]
 
@@ -401,7 +421,7 @@ restarted.Load(bytes.WrittenSpan);
 
 ### 并行 [ForEach] [#parallel-foreach]
 
-`[ForEach(Parallel = true)]` 把一个方法要处理的行切成块，由调用线程和线程池线程同时执行。可能产生竞争的方法会被分析器拒绝
+`[ForEach(Parallel = true)]` 把一个方法要处理的行切成块，由调用线程和线程池线程同时执行。分析器拒绝可能竞争的方法
 （[EECS010](/zh/docs/guide/analyzer#eecs010)）：结构变更、批量方法、以 `ref` 接收单例。`world.ForEachParallel` 和
 `ForEachEntityParallel` 对结构体 job 做同样的事。
 
@@ -440,7 +460,7 @@ restarted.Load(bytes.WrittenSpan);
 
 ### 异常处理 [#errors]
 
-默认情况下，系统抛出的异常会传出 `Update()`。设置 `WorldOptions.SystemErrors = SystemErrorPolicy.Disable` 后，出错的系统被停用，
+默认情况下，系统抛出的异常会传出 `Update()`。设置 `WorldOptions.SystemErrors = SystemErrorPolicy.Disable` 后，出错的系统会停用，
 异常保存在 `system.Error` 里，更新继续执行；把 `Enabled` 设回 `true` 就会重试。
 
 - **适合：** 在线服务器用 `Disable`，故障变成健康检查能读到的数据；测试里用 `Throw`。
@@ -462,15 +482,24 @@ restarted.Load(bytes.WrittenSpan);
 
 - **适合：** 体积小、启动快的服务器容器。
 
+### 托管与测试 [#hosting-and-testing]
+
+World 跑在 ASP.NET Core 应用或 Worker Service 里，由一个托管服务独占：它创建 World、驱动 tick、从 channel 接收请求、停机时存盘。
+测试一个系统就给它一个自己的 World：准备实体和单例，调用 `world.Update()`，断言数据。
+
+- **适合：** 每个真实的服务器、每个系统。
+- **开销：** EasyEcs 这边没有：不需要托管包或测试包，这个模式就是你自己的几个类。
+- **指南：** [托管](/zh/docs/guide/hosting)、[测试系统](/zh/docs/guide/testing)
+
 ### 模板与示例程序 [#templates]
 
 `dotnet new easyecs` 创建一个按固定 tick 运行的控制台服务器：`Components/`、每个系统一个文件的 `Systems/`（其中有一个
 用预制体刷怪的系统），`Program.cs` 只负责托管 World（加 `--tests` 多一个 NUnit 项目，每个系统一个测试文件）；
 `dotnet new easyecs-system` 添加一个系统。[`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples)
-按学习顺序收录完整程序（Hello World、游戏循环、存档与加载、每线程一个 World、热重载）；指南里
+按学习顺序收录完整程序（Hello World、游戏循环、存档与加载、每线程一个 World、热重载、actor）；指南里
 [变更追踪](/zh/docs/guide/change-tracking#full-example)等功能页的“怎么用”部分最后都有一个完整例子。
 
-- **指南：** [快速开始](/zh/docs/getting-started)
+- **指南：** [快速开始](/zh/docs/getting-started)、[项目结构](/zh/docs/guide/project-structure)
 
 ## 和其他库的对比 [#compared]
 

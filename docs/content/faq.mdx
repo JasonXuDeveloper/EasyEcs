@@ -63,7 +63,10 @@ Never keep a `ref` across an `await`: keep the `Entity` and get the component ag
 Give the world one owner: a `BackgroundService` that builds it, calls `world.Update()` on a `PeriodicTimer` and saves
 it when the host stops. Request handlers never touch the world: they write requests into a bounded `Channel<T>` that a
 system drains each tick (with a `TaskCompletionSource` for the reply), and read an immutable status the world
-publishes. No hosting package is needed; [Hosting in a .NET server](/en/docs/guide/hosting) has the whole server.
+publishes. A request for one entity (an actor, a player) is handled on that entity, on the owner thread, with
+`entity.Run(ref job, filter)`: one lookup for all the components the job needs, and `false` when the entity is gone
+or does not match ([One entity: `entity.Run`](/en/docs/guide/queries#run-on-one-entity)). No hosting package is
+needed; [Hosting in a .NET server](/en/docs/guide/hosting) has the whole server.
 
 ## How do I test a system? [#testing]
 
@@ -123,6 +126,7 @@ Three tools, for three needs:
 | Undo, rollback, prediction, replays in memory | `world.Capture()` / `world.Restore(snapshot)` | [Snapshots](/en/docs/guide/snapshots) |
 | A whole world to disk, a database or another process | `world.Save(output)` / `world.Load(bytes)` | [Saves](/en/docs/guide/saves) |
 | A group of entities (a player and what it owns) to another world or server | `SaveEntities` / `LoadEntities`, `MoveEntities` | [Migration and unloading](/en/docs/guide/migration-and-unload) |
+| The durable part of an actor, restored onto its entity without counting as a change | `SaveEntities(output, ids, set)` / `LoadEntitiesInto(bytes, entities, markWritten: false)` | [Records](/en/docs/guide/migration-and-unload#records) |
 
 ```csharp
 using System.Buffers;
@@ -133,8 +137,9 @@ world.Load(output.WrittenSpan);  // EntityIds stored in components still point a
 ```
 
 Saves are built in from 4.1 ([D9](/en/docs/decisions#d9-saves-are-built-in-with-nino)): unmanaged components are
-written as their raw rows with a hash of their fields, so a changed struct is detected at load; managed components
-and singletons go through [Nino](https://github.com/JasonXuDeveloper/Nino) (`[NinoType]`).
+written as their raw rows with a hash of their fields, so a changed struct is detected at load; managed components,
+singletons and the unmanaged components marked `[NinoType]` go through [Nino](https://github.com/JasonXuDeveloper/Nino).
+Types are recorded by their Nino type id, so a load skips a component the process no longer has.
 
 ## Can I hot-reload game logic? [#hot-reload]
 
@@ -231,9 +236,9 @@ public class PoisonSystem : EcsSystem
 Outside systems:
 
 ```csharp
-entity.Health.Value -= 10;                                   // the generated property is a ref: this writes it
-ref var hp = ref entity.Health;                              // keep the ref for several writes
-hp.Value = 100;
+entity.Mana.Value -= 10;                                     // untracked: the generated property is a ref
+ref var poison = ref entity.Poison;                          // keep the ref for several writes
+poison.DamagePerTick = 3;
 ref var mana = ref entity.TryGetRef<Mana>(out bool found);   // when the entity may not have it
 if (found) mana.Value += 5;
 entity.Set(new Position(0, 0), new Velocity(1, 0));          // add or replace several in one call: shorter, same cost

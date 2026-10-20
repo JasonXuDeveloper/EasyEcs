@@ -22,13 +22,13 @@ after warm-up, and is covered by the unit tests and a BenchmarkDotNet benchmark.
 
 | Job | Features |
 | --- | --- |
-| [Simulate](#simulate) | [worlds and entities](#worlds-and-entities), [components and tags](#components-and-tags), [generated members](#generated-members), [systems and `[ForEach]`](#systems-and-foreach), [filters](#filters), [optional components](#optional-components), [batch methods](#batch-methods), [singletons](#singletons), [ordering, groups and intervals](#system-groups-and-intervals), [immediate structural changes](#immediate-structural-changes), [ad-hoc queries](#ad-hoc-queries) |
+| [Simulate](#simulate) | [worlds and entities](#worlds-and-entities), [components and tags](#components-and-tags), [generated members](#generated-members), [systems and `[ForEach]`](#systems-and-foreach), [generic systems](#generic-systems), [filters](#filters), [optional components](#optional-components), [batch methods](#batch-methods), [singletons](#singletons), [ordering, groups and intervals](#system-groups-and-intervals), [immediate structural changes](#immediate-structural-changes), [ad-hoc queries](#ad-hoc-queries) |
 | [React to changes](#react) | [change tracking](#change-tracking), [removal detection](#removal-detection), [cleanup components](#cleanup-components), [disable and enable](#disable-and-enable) |
 | [Find](#find) | [value indexes](#value-indexes), [ordered ranges](#ordered-ranges), [table groups](#table-groups) |
 | [Structure](#structure) | [relations](#relations), [hierarchy](#hierarchy), [dynamic buffers](#dynamic-buffers), [prefabs and cloning](#prefabs-and-cloning) |
 | [Persist](#persist) | [snapshots](#snapshots), [saves](#saves), [migration](#migration), [unloading plugin types](#unloading) |
 | [Scale](#scale) | [one world per thread](#threading-model), [parallel systems](#parallel-systems), [parallel `[ForEach]`](#parallel-foreach), [bulk operations](#bulk-operations) |
-| [Build and operate](#operate) | [analyzer and code fixes](#analyzer), [per-system timing](#per-system-timing), [errors](#errors), [introspection](#introspection), [Native AOT](#native-aot), [templates and samples](#templates) |
+| [Build and operate](#operate) | [analyzer and code fixes](#analyzer), [per-system timing](#per-system-timing), [errors](#errors), [introspection](#introspection), [Native AOT](#native-aot), [hosting and testing](#hosting-and-testing), [templates and samples](#templates) |
 
 ## Simulate [#simulate]
 
@@ -101,17 +101,31 @@ that the JIT inlines into the row loop. `OnCreate`, `OnUpdate` and `OnDestroy` c
   update: three virtual calls plus one query-cache lookup per method.
 - **Guide:** [Systems](/en/docs/guide/systems), [ECS principles](/en/docs/ecs-principles)
 
+### Generic systems [#generic-systems]
+
+A system class can be generic: each closed type (`CountOf<Position>`, `CountOf<Health>`) is a system of its own, with
+its own generated job and access set, added, ordered and scheduled on its own. A closed generic system can also be a
+base class.
+
+- **Use it for:** one rule applied to several component types (a counter, a decay, a cleanup per kind of resource).
+- **Skip it for:** a generic `[ForEach]` method: nothing would supply its type arguments
+  ([EECS004](/en/docs/guide/analyzer#eecs004)); make the class generic instead.
+- **Cost:** none beyond the closed systems; a type built by reflection has its code closed on first use.
+- **Guide:** [Systems](/en/docs/guide/systems#generic-systems)
+
 ### Filters [#filters]
 
 `[With<T>]` requires a component that is not passed in, `[Without<T>]` excludes one, `[WithAny<T>]` requires one of
 several, `[Changed<T>]` and `[Removed<T>]` select by change tick. The same filters exist as a `QueryFilter` for
-ad-hoc code, and on a system group for all its systems.
+ad-hoc code. A system group carries `[With<T>]`, `[Without<T>]` and `[WithAny<T>]` for all its systems, or
+implements `IGroupWith<T>` / `IGroupWithout<T>`, itself or through an interface it implements: a generic interface
+then gives each actor type its own filtered group, where an attribute could not name the type parameter.
 
 - **Use it for:** states (`[Without<Dead>]`), roles (`[With<Player>]`), alternatives
   (`[WithAny<Frozen>, WithAny<Stunned>]`).
 - **Cost:** matching is cached per query shape; a table that cannot match is skipped once, a table where some rows
   lack a component is tested 64 rows per bit word.
-- **Guide:** [Queries and filters](/en/docs/guide/queries)
+- **Guide:** [Queries and filters](/en/docs/guide/queries), [Group filters](/en/docs/guide/systems#group-filters)
 
 ### Optional components [#optional-components]
 
@@ -140,7 +154,7 @@ One struct per world (`ISingletonComponent`): clock, configuration, counters, a 
 takes it as a `ref` or `in` parameter; `SingletonRef<T>` is a stable handle for code outside systems.
 
 - **Use it for:** all world-level state. Systems keep none.
-- **Skip it for:** a static field instead of one: it would be shared by every world.
+- **Instead of:** a static field, which every world would share.
 - **Cost:** one lookup per pass for a parameter.
 - **Guide:** [Singletons](/en/docs/guide/singletons)
 
@@ -148,9 +162,11 @@ takes it as a `ref` or `in` parameter; `SingletonRef<T>` is a stable handle for 
 
 Systems run in registration order, moved by `[UpdateBefore<T>]` / `[UpdateAfter<T>]`. `[UpdateInGroup<G>]` puts a
 system in a group that runs on `world.Update<G>()` only. `UpdateInterval` and `UpdatePhase` run a system every N-th
-update, spread over phases; `Enabled` switches it off.
+update, spread over phases; `Enabled` switches it off. A group's filters (`[Without<Frozen>]`, or `IGroupWith<T>` /
+`IGroupWithout<T>` on the group or an interface it implements) apply to every `[ForEach]` method of its systems.
 
-- **Use it for:** different cadences: input on every wake-up, simulation on a fixed tick, saving every few seconds.
+- **Use it for:** different cadences: input on every wake-up, simulation on a fixed tick, saving every few seconds;
+  one group per kind of actor, declared once through a generic interface.
 - **Cost:** none beyond the systems; an empty group is a no-op. Cycles fail the build
   ([EECS019](/en/docs/guide/analyzer#eecs019)).
 - **Guide:** [Systems](/en/docs/guide/systems)
@@ -167,19 +183,24 @@ most once: entities that leave before their turn are skipped, entities that join
   change, and the order of effects depends on when the buffer is played back. EasyEcs has no buffer to flush.
 - **Cost:** a pass that may change structure checks one counter after each entity; methods that cannot change
   structure skip even that.
-- **Guide:** [Structural changes](/en/docs/guide/structural-changes)
+- **Guide:** [Structural changes](/en/docs/guide/structural-changes), [ref and await](/en/docs/guide/refs-and-await)
 
 ### Ad-hoc queries [#ad-hoc-queries]
 
 Iteration from any code: `foreach (var item in world.Query<T…>(filter))`, struct jobs (`world.ForEach`,
 `ForEachEntity`), `world.Count` and `world.Any`. A static `[ForEach]` method outside a system gets a generated entry
 point (`Reports.CountAlive(world, ref alive)`) that runs it as a struct job with the caller's values.
+`entity.Run<Health, TakeHit>(ref job, filter)` runs a struct job on one entity, with the refs a pass would give it:
+`false` when the entity is not alive, lacks a component or fails the filter. A job's `static int Writes` names the
+components that count as written (default: all); a job implementing `INoStructuralChanges` skips the structural
+bookkeeping.
 
-- **Use it for:** tools, tests, request handlers between updates, one-off passes.
+- **Use it for:** tools, tests, request handlers between updates, one-off passes; `entity.Run` for a request or a
+  message to one entity.
 - **Skip it for:** per-tick logic: a system is ordered, scheduled and measured.
 - **Cost:** allocation-free. `Count` sums table counts; `Any` stops at the first match; a struct job is the fastest
-  ad-hoc pass.
-- **Guide:** [Queries and filters](/en/docs/guide/queries)
+  ad-hoc pass. `entity.Run` is O(1), plus O(1) per component its filter names.
+- **Guide:** [Queries and filters](/en/docs/guide/queries), [One entity: `entity.Run`](/en/docs/guide/queries#run-on-one-entity)
 
 ## React to changes [#react]
 
@@ -335,12 +356,13 @@ parties) through `AddRelation` / `RemoveRelation`, with `world.Relations<T>()` f
 ### Hierarchy [#hierarchy]
 
 The built-in `ChildOf(EntityId Parent)` component links a child to its parent. `world.Children(parent)` lists the
-children, `Set(new ChildOf(other))` re-parents, and destroying a parent destroys its descendants.
+children, `world.Descendants(root)` walks the whole subtree depth first (each entity before its children, the root
+excluded), `Set(new ChildOf(other))` re-parents, and destroying a parent destroys its descendants.
 
 - **Use it for:** a ship and its turrets, a player and the items attached to them, a squad and its members.
 - **Skip it for:** transform propagation: there is no built-in world transform; write the system that needs it.
-- **Cost:** `Children` is O(1) to start and O(1) per child, after the first call indexes every `ChildOf`; a cascade
-  is O(1) per link.
+- **Cost:** `Children` is O(1) to start and O(1) per child, after the first call indexes every `ChildOf`;
+  `Descendants` is O(1) per entity and allocates nothing once warm; a cascade is O(1) per link.
 - **Guide:** [Hierarchy](/en/docs/guide/hierarchy)
 
 ### Dynamic buffers [#dynamic-buffers]
@@ -412,11 +434,15 @@ components the process no longer has, and `[NinoFormerName]` keeps a renamed one
 
 `SaveEntities` and `LoadEntities` move a group of entities (a player and what they own) to another world through
 bytes, with new ids and the links inside the group rewritten. `MoveEntities` does it between two worlds of the same
-thread without encoding.
+thread without encoding. A record saves only what persists: `SaveEntities(writer, ids, set)` with a `ComponentSet`
+writes the components of the set, and `LoadEntitiesInto(bytes, entities)` puts them onto entities that exist already;
+with `markWritten: false` the restored values do not count as changed, so a saver of changed rows does not write them
+straight back.
 
-- **Use it for:** a player changing zone or server, a match handing its survivors to a lobby.
+- **Use it for:** a player changing zone or server, a match handing its survivors to a lobby (collect the group with
+  `Descendants`); records for actors whose entity exists before its stored state arrives.
 - **Cost:** O(entities given × components); `MoveEntities` copies rows directly.
-- **Guide:** [Migration and unloading](/en/docs/guide/migration-and-unload)
+- **Guide:** [Migration and unloading](/en/docs/guide/migration-and-unload), [Records](/en/docs/guide/migration-and-unload#records)
 
 ### Unloading plugin types [#unloading]
 
@@ -525,17 +551,27 @@ built with the trimming and AOT analyzers on, so `<PublishAot>true</PublishAot>`
 
 - **Use it for:** small, fast-starting server containers.
 
+### Hosting and testing [#hosting-and-testing]
+
+A world runs in an ASP.NET Core app or a Worker Service as one hosted service that owns it: it builds the world,
+runs its tick, takes requests through a channel and saves on shutdown. A system is tested with a world of its own:
+arrange entities and singletons, call `world.Update()`, assert on the data.
+
+- **Use it for:** every real server and every system.
+- **Cost:** none from EasyEcs: no hosting or test package, the pattern is a few classes of your own.
+- **Guide:** [Hosting](/en/docs/guide/hosting), [Testing systems](/en/docs/guide/testing)
+
 ### Templates and samples [#templates]
 
 `dotnet new easyecs` creates a console server with a fixed tick: `Components/`, `Systems/` with one system per file
 (a prefab spawner among them) and a `Program.cs` that only hosts the world (`--tests` adds an NUnit project with a
 test file per system); `dotnet new easyecs-system` adds a system.
 [`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples) has complete programs in learning
-order (hello world, a game loop, saving and loading, one world per thread, hot reload), and the guide pages of
+order (hello world, a game loop, saving and loading, one world per thread, hot reload, actors), and the guide pages of
 features such as [change tracking](/en/docs/guide/change-tracking#full-example) end their "How to use it" part with a
 full example.
 
-- **Guide:** [Getting started](/en/docs/getting-started)
+- **Guide:** [Getting started](/en/docs/getting-started), [Structuring a real project](/en/docs/guide/project-structure)
 
 ## Compared with other libraries [#compared]
 

@@ -13,9 +13,9 @@ icon: RotateCcwClock
 
 ### 新功能 [#v4-5-0-new]
 
-- `entity.Run(ref job)` 在单个实体上运行结构体作业（`IForEachEntity<T1..T9>`）：实体已失效或缺少组件时返回 false；
+- `entity.Run(ref job)` 在单个实体上运行结构体 job（`IForEachEntity<T1..T9>`）：实体已失效或缺少组件时返回 false；
   `entity.Run(ref job, filter)` 在 `QueryFilter`（`With`、`Without`、`WithAny`、`Changed`、`Removed`、分组）不通过时也返回 false。
-  作业的 `Writes` 会像遍历时一样打变更戳；作业自己做结构变更后，`ref` 参数依然有效；作业抛异常时，写入也会带到搬走后的行。
+  job 的 `Writes` 会像遍历时一样打上变更 tick；job 自己做结构变更后，`ref` 参数依然有效；job 抛异常时，写入也会带到搬走后的行。
   见[单个实体：`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)。
 - 系统分组可以通过接口加过滤条件：分组本身或它实现的接口上的 `IGroupWith<T>` / `IGroupWithout<T>`，作用等同于
   `[With<T>]` / `[Without<T>]`。泛型接口能给每种类型各配一个分组（`IActorGroup<TActor> : IGroupWith<Inbox<TActor>>`），这是特性做不到的。
@@ -26,6 +26,12 @@ icon: RotateCcwClock
   见[只存需要持久化的部分](/zh/docs/guide/migration-and-unload#records)。
 - 分析器把 `entity.Run` 视为结构变更调用：[EECS010](/zh/docs/guide/analyzer#eecs010) 在并行 `[ForEach]` 方法里拒绝它，
   [EECS013](/zh/docs/guide/analyzer#eecs013) 和 [EECS014](/zh/docs/guide/analyzer#eecs014) 像检查 `Set` 一样检查它。
+
+### 修复 [#v4-5-0-fixes]
+
+- 分析器像对待 `LoadEntities` 一样，把 `world.LoadEntitiesInto` 视为结构变更调用。之前 [EECS010](/zh/docs/guide/analyzer#eecs010)、
+  [EECS013](/zh/docs/guide/analyzer#eecs013) 和 [EECS014](/zh/docs/guide/analyzer#eecs014) 检查的成员里漏了它，
+  在并行 `[ForEach]` 方法里、在声称不做结构变更的方法里或在其他线程上调用它，编译时都不报错。
 
 ## 4.4.0 [#v4-4-0]
 

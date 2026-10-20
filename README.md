@@ -45,7 +45,8 @@ dotnet add package EasyEcs        # net10.0 · source generator and analyzer inc
   (`[With<T>]`, `[Without<T>]`, `[WithAny<T>]`), singletons are parameters.
 - **Built-in change tracking, removal detection, indexes and relations.** `[Changed<T>]` visits only the rows written
   since a system last ran, including writes through `ref`, and `[Removed<T>]` the entities that lost a component;
-  `IIndexed<TKey>` components are found by value, and an `Entity` key makes a relation, kept current by every `Set`.
+  `IIndexed<TKey>` components are found by value, and an `IIndexed<EntityId>` component or an `IRelation` buffer
+  (`AddRelation`) makes a relation, kept current by every `Set`.
   No events and nothing to keep in sync by hand.
 - **Prefabs that stay out of your queries.** A `Prefab` is a recipe of component values that belongs to no world:
   `world.Instantiate(prefab)` spawns from it (a whole wave in one pass), and no system ever has to filter templates
@@ -76,22 +77,35 @@ costs and when to use it).
 | [Immediate structural changes](https://ecs.xgamedev.net/docs/guide/structural-changes) | any `Set` / `Remove` / create / `Instantiate` / destroy | Applied at once, even in the middle of a pass; no command buffer to flush. |
 | [Systems and `[ForEach]`](https://ecs.xgamedev.net/docs/guide/systems) | `EcsSystem`, `[ForEach]`, `[UpdateBefore<T>]` / `[UpdateAfter<T>]`, `OnCreate` / `OnUpdate` / `OnDestroy`, `AddSystem` / `RemoveSystem` / `GetSystem` | A method is the whole loop, compiled to an inlined struct job; `in` reads, `ref` writes, `Entity` and singletons as parameters. |
 | [Filters](https://ecs.xgamedev.net/docs/guide/queries) | `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `QueryFilter` | Narrow a system or query by presence, absence, any-of, recent writes or recent removals. |
+| [Group filters](https://ecs.xgamedev.net/docs/guide/systems#group-filters) | `[With<T>]` / `[Without<T>]` / `[WithAny<T>]` on an `ISystemGroup`, `IGroupWith<T>`, `IGroupWithout<T>` | One filter for every system of a group; through an interface, a generic group gives each actor type its own. |
+| [Optional components](https://ecs.xgamedev.net/docs/guide/systems) | `Maybe<T>` parameter, `HasValue`, `Value` | One method for entities with and without a small optional part. |
 | [Ad-hoc queries](https://ecs.xgamedev.net/docs/guide/queries) | `world.Query`, `Count`, `Any` | Iterate from any code (tools, tests, request handlers), allocation-free. |
 | [Struct jobs](https://ecs.xgamedev.net/docs/guide/queries#foreach-a-struct-job) | `IForEach`, `IForEachEntity`, `IForEachBatch`, `world.ForEach` / `ForEachEntity` / `ForEachBatch`, `INoStructuralChanges` | Ad-hoc loops with no delegate, inlined like a system; a job declares `Writes`. |
+| [One entity](https://ecs.xgamedev.net/en/docs/guide/queries#run-on-one-entity) | `entity.Run(ref job)`, `Run(ref job, filter)` | A struct job on one entity (a request, a message to an actor) with the refs and guarantees of a pass; `false` when it does not match. |
 | [Batch methods](https://ecs.xgamedev.net/docs/guide/systems#batch-methods) | `ForEachBatch`, span parameters | Contiguous runs of rows as spans, for SIMD. |
 | [System groups and intervals](https://ecs.xgamedev.net/docs/guide/systems) | `ISystemGroup`, `[UpdateInGroup<T>]`, `Update<TGroup>()`, `UpdateInterval`, `Enabled` | Separate cadences (input on every wake, simulation on a fixed tick), throttled and switchable systems. |
+| [Generic systems](https://ecs.xgamedev.net/docs/guide/systems#generic-systems) | `class CountOf<T> : EcsSystem` | Each closed type is a system of its own, scheduled on its own. |
 | [Singletons](https://ecs.xgamedev.net/docs/guide/singletons) | `ISingletonComponent`, `AddSingleton`, `GetSingleton`, `SingletonRef<T>` | One value per world, passed to systems as `ref` / `in` parameters. |
 | [Parallel systems](https://ecs.xgamedev.net/docs/guide/threading) | `WorldOptions.ParallelSystems` | Systems with no order and no conflict between them run at once, with the sequential result. |
 | [Parallel `[ForEach]`](https://ecs.xgamedev.net/docs/guide/systems#parallel-methods) | `[ForEach(Parallel = true)]`, `ForEachParallel`, `ForEachEntityParallel`, `ParallelChunkRows` | One heavy method's rows split across cores. |
 | [Change tracking](https://ecs.xgamedev.net/docs/guide/change-tracking) | `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>(since)`, `Since(tick)` | Visit only the rows written since a system last ran; `ref` access counts as a write. |
 | [Removal detection](https://ecs.xgamedev.net/docs/guide/change-tracking#removal-detection) | `[Removed<T>]`, `QueryFilter.Removed<T>(since)` | Visit only the entities that lost a tracked component since a system last ran (replicate what went away). |
+| [Cleanup components](https://ecs.xgamedev.net/docs/guide/cleanup-and-disable) | `ICleanupComponent`, `Destroyed` | An entity outlives `Destroy` until a system releases its external resource (a socket, a seat). |
+| [Disable and enable](https://ecs.xgamedev.net/docs/guide/cleanup-and-disable#disable-a-component) | `entity.Disable<T>()`, `Enable<T>()`, `Disabled<T>`, `DisableAll` / `EnableAll` | Hide a component from queries and keep its value. |
 | [Dynamic buffers](https://ecs.xgamedev.net/docs/guide/dynamic-buffers) | `DynamicBuffer<T>`, `Add`, `RemoveAt`, `AsSpan`, `[Changed<DynamicBuffer<T>>]` | A list per entity as a component: written only through `ref`, so every change is tracked; copied by snapshots. |
 | [Value indexes](https://ecs.xgamedev.net/docs/guide/indexes-and-relations) | `IIndexed<TKey>`, `world.Index<T, TKey>()`, `Find`, `TryFind`, `Count` | Find entities by a component's value, kept in sync with every write. |
-| [Relations](https://ecs.xgamedev.net/docs/guide/indexes-and-relations) | an `IIndexed<Entity>` component | Entity-to-entity links with reverse lookup; a destroyed source leaves the index, a destroyed target matches no later entity (handles carry their version). |
+| [Ordered ranges](https://ecs.xgamedev.net/docs/guide/indexes-and-relations) | `index.Range(min, max)`, `RangeDescending`, `Ascending()`, `Descending()` | Walk a comparable key in order: leaderboards, rating brackets. |
+| [Relations](https://ecs.xgamedev.net/docs/guide/indexes-and-relations) | an `IIndexed<EntityId>` component; `IRelation` elements with `AddRelation` / `RemoveRelation`, `world.Relations<T>()`; `WhenTargetDestroyed` | One or many entity-to-entity links with reverse lookup; what a link does when its target dies (keep, remove, destroy). |
+| [Hierarchy](https://ecs.xgamedev.net/docs/guide/hierarchy) | `ChildOf`, `world.Children(parent)`, `world.Descendants(root)` | Parents and children; destroying a parent destroys its subtree; a whole subtree in one walk. |
+| [Table groups](https://ecs.xgamedev.net/docs/guide/groups) | `IGroup`, `world.GroupBy<T>()`, `QueryFilter.InGroup<T>(group)` | Split tables by a value (zone, map, match), so a query walks one group's rows only. |
 | [Snapshots](https://ecs.xgamedev.net/docs/guide/snapshots) | `world.Capture()`, `world.Restore(snapshot)` | Copy a world in memory and roll it back (replays, tests, rollback). |
+| [Saves](https://ecs.xgamedev.net/docs/guide/saves) | `world.Save(writer)`, `world.Load(bytes)` | A whole world as bytes through Nino, for restarts and other processes. |
+| [Migration and records](https://ecs.xgamedev.net/docs/guide/migration-and-unload) | `SaveEntities` (with a `ComponentSet`), `LoadEntities`, `LoadEntitiesInto` (`markWritten: false`), `MoveEntities` | A group of entities to another world or server, links rewritten; a record of what persists, restored onto existing entities. |
+| [Unloading plugin types](https://ecs.xgamedev.net/docs/guide/migration-and-unload#remove-types) | `world.RemoveTypes(assembly or context)` | Remove a plugin's types so its `AssemblyLoadContext` unloads: hot reload on a live server. |
 | [Bulk create and destroy](https://ecs.xgamedev.net/docs/guide/entities-and-components#entities) | `CreateEntities`, `Instantiate(prefab, span)`, `DestroyEntities`, `EnsureEntityCapacity` | Spawn and clear waves in one pass through the structural gate. |
 | [Per-system timing](https://ecs.xgamedev.net/docs/guide/systems#measuring-systems) | `WorldOptions.MeasureSystems`, `system.Stats` | Run counts and times of every system. |
 | [Errors](https://ecs.xgamedev.net/docs/guide/systems#errors) | `WorldOptions.SystemErrors`, `system.Error` | A failing system throws out of the update, or is switched off with its exception kept while the tick goes on. |
+| [Introspection](https://ecs.xgamedev.net/docs/guide/diagnostics) | `world.Describe()`, `entity.Describe()` | Tables, columns, rows and bytes; an entity's component values, for tools and debuggers. |
 | [Analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) | EECS002-EECS034 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
 | [Threading and Native AOT](https://ecs.xgamedev.net/docs/guide/threading) | one owner thread per world; no reflection on hot paths | Many worlds per process, one per thread; AOT works with nothing to configure. |
 
@@ -285,7 +299,8 @@ What each library has built in:
 | Systems, groups, parallel systems | ✅ | ✅ (no parallel systems) | ❌ core | ✅ |
 | Source-generated systems + analyzer | ✅ | ❌ | ❌ | ❌ |
 | 0 B per tick | ✅ | ✅ | ❌ | ❌ |
-| Events, serialization | ❌ (state is data) | ✅ | events | ✅ |
+| Events | ❌ (state is data) | ✅ | ✅ | ✅ |
+| Serialization | ✅ `Save` / `Load` (Nino) | ✅ JSON | ❌ | ✅ text, binary |
 | Unity / netstandard | ❌ net10.0 | ✅ | ✅ | ✅ |
 
 The full matrix, the per-operation numbers and when to pick which library are in
@@ -303,9 +318,10 @@ The documentation lives at **[ecs.xgamedev.net](https://ecs.xgamedev.net)**; its
 | [Getting started](https://ecs.xgamedev.net/docs/getting-started) | Step-by-step tutorial: entities, components, tags, queries, systems, singletons, groups, the update loop. |
 | [Features](https://ecs.xgamedev.net/docs/features) | Every feature: what it does, when to use it, when not, what it costs, which scenarios it serves. |
 | [Comparison](https://ecs.xgamedev.net/docs/comparison) | Features and benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs. |
-| [Guide](https://ecs.xgamedev.net/docs#guide) | One page per concept: entities and components, prefabs and cloning, queries, systems, singletons, structural changes, change tracking and removal detection, dynamic buffers, indexes and relations, snapshots, `ref` and `await`, threading, analyzer rules. |
+| [Guide](https://ecs.xgamedev.net/docs#guide) | One page per concept: entities and components, prefabs and cloning, queries, systems, singletons, structural changes, change tracking and removal detection, dynamic buffers, indexes and relations, hierarchy, groups, cleanup and disable, bulk changes, snapshots, saves, migration and unloading, `ref` and `await`, threading, hosting, testing, troubleshooting, analyzer rules. |
 | [ECS principles](https://ecs.xgamedev.net/docs/ecs-principles) | How to design features with entities, components, singletons and systems. |
-| [Design questions](https://ecs.xgamedev.net/docs/faq) | Why there are no events and no serialization, what is thread-safe, how to change a component. |
+| [Design questions](https://ecs.xgamedev.net/docs/faq) | Why there are no events, what is thread-safe, how to change a component. |
+| [Samples](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples) | Runnable programs in learning order: hello world, a game loop, saving and loading, one world per thread, hot reload, actors. |
 | [API reference](https://ecs.xgamedev.net/docs/api) | Every public API with its complexity. |
 | [Performance guide](https://ecs.xgamedev.net/docs/performance) | Which API to use when, do's and don'ts, benchmarks. |
 | [Architecture](https://ecs.xgamedev.net/docs/architecture) | Storage, memory layout, archetypes, id recycling, iteration safety, generators. |
@@ -316,12 +332,17 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
 ## What's new in 4.5
 
 - **One entity, one job.** `entity.Run(ref job)` (and `Run(ref job, filter)`) runs an `IForEachEntity` job on a
-  single entity with the guarantees of a pass: change ticks, refs that survive structural changes, a filter tested
-  in O(1) ([one entity](https://ecs.xgamedev.net/en/docs/guide/queries#run-on-one-entity)).
+  single entity with the guarantees of a pass: change ticks, refs that survive structural changes, in O(1) plus O(1)
+  per component the filter names ([one entity](https://ecs.xgamedev.net/en/docs/guide/queries#run-on-one-entity)).
 - **Group filters through interfaces.** `IGroupWith<T>` / `IGroupWithout<T>` give generic groups their filters
   (`IActorGroup<TActor> : IGroupWith<Inbox<TActor>>`) ([group filters](https://ecs.xgamedev.net/en/docs/guide/systems#group-filters)).
-- **`world.Descendants(root)`** walks a whole subtree, and `LoadEntitiesInto(..., markWritten: false)` restores a
-  record without counting it as a change.
+- **`world.Descendants(root)`** walks a whole subtree, and `LoadEntitiesInto(input, entities, markWritten: false)`
+  restores a record without counting it as a change.
+- **The analyzer knows the new calls.** `entity.Run` and `LoadEntitiesInto` are structural: rejected in parallel
+  `[ForEach]` methods (EECS010), in methods that promise no structural change (EECS013) and on other threads (EECS014).
+- **An actors sample.** [`samples/Actors`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors):
+  one type per kind of actor that is its key component, its system group and the group's filter, with requests run
+  on their entity by `entity.Run`.
 
 ## What's new in 4.4
 

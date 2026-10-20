@@ -19,13 +19,14 @@ faq: true
 | `The entity has no X (check HasValue)` | [空的 `Maybe<T>`](#maybe-empty) |
 | `X already belongs to a world` | [系统被添加了两次](#system-in-a-world) |
 | `[UpdateBefore] / [UpdateAfter] form a cycle` | [顺序成环](#ordering-cycle) |
+| `The ChildOf links form a cycle` | [`Descendants` 遇到 `ChildOf` 成环](#childof-cycle) |
 | `X cannot be disabled: remove it instead` | [禁用清理组件或 `ChildOf`](#cannot-disable) |
 | `Snapshots cannot be captured or restored while a query iterates`、`Types cannot be removed during a pass` | [要等遍历结束的调用](#during-a-pass) |
 | `Not an EasyEcs save`、`The size of X changed`、`The fields of X changed`、`X was saved as`、`Types of this process share the save id`、`A damaged save` | [存档加载不了](#save-refused) |
 
 不抛异常的问题：[系统从不运行](#system-does-not-run)、[系统没有并行](#not-parallel)、[生成成员缺失](#member-missing)、
-[通过 `ref` 写的值丢了](#ref-lost)、[加载后组件不见了](#save-dropped-data)、
-[另一个生成器加上的接口](#other-generators)。
+[`entity.Run` 返回 `false`](#run-false)、[通过 `ref` 写的值丢了](#ref-lost)、[加载后组件不见了](#save-dropped-data)、
+[另一个生成器加上的接口](#other-generators)、[actor 键的 `ToString` 栈溢出](#key-tostring-overflow)。
 
 ## 为什么结构变更报 “started while another one was running”？ [#structural-change-running]
 
@@ -49,7 +50,7 @@ InvalidOperationException: A structural change was made while the world's struct
 ```
 
 变更发生时，有别的代码正把表固定住：`ParallelSystems` 的并行阶段、`[ForEach(Parallel = true)]` 方法、批处理方法或
-`ForEachBatch` 作业（span 指向列内部），或者标记了 `INoStructuralChanges` 的作业。分析器能看到的变更它会报
+`ForEachBatch` job（span 指向列内部），或者标记了 `INoStructuralChanges` 的 job。分析器能看到的变更它会报
 （[EECS010](/zh/docs/guide/analyzer#eecs010)、[EECS013](/zh/docs/guide/analyzer#eecs013)）；这一个是经由它跟踪不到的辅助
 方法或句柄发生的。
 
@@ -118,6 +119,18 @@ InvalidOperationException: [UpdateBefore] / [UpdateAfter] form a cycle among A, 
 列出的这些系统之间的顺序无法同时满足。分析器会报它在一次编译里看到的环（[EECS019](/zh/docs/guide/analyzer#eecs019)）；这个环跨了
 程序集。**修法：**去掉其中一条顺序。
 
+## 为什么 `Descendants` 报 “The ChildOf links form a cycle”？ [#childof-cycle]
+
+```text
+InvalidOperationException: The ChildOf links form a cycle
+```
+
+`world.Descendants(root)` 遇到了已经访问过的实体：某个实体成了自己的祖先，因为一次 `Set(new ChildOf(…))` 把父实体挂到了它自己的
+某个后代下面。EasyEcs 不在换父时检查（那样每次 `Set` 都要往上走一遍），所以遍历走到环的时候才发现。
+
+**修法：**把 `child` 挂到 `parent` 下之前，从 `parent` 沿 `ChildOf` 往上走，碰到 `child` 就拒绝。实体要挂到自己的后代下面时，
+先解除挂接（`Remove<ChildOf>()`）（[换父实体、解除挂接](/zh/docs/guide/hierarchy#reparent)）。
+
 ## 为什么有的组件不能禁用？ [#cannot-disable]
 
 ```text
@@ -168,12 +181,25 @@ InvalidDataException: A damaged save: …
    `Enabled = true` 会清掉错误并重试。
 3. **它的分组被更新了：**带 `[UpdateInGroup<G>]` 的系统只在 `world.Update<G>()` 时运行，`world.Update()` 永远不会跑它。
 4. **它的间隔到了：**`UpdateInterval => N` 时，它在所属分组每第 N 次更新时运行，第一次是第 N 次，再按 `UpdatePhase` 偏移。
-5. **它的过滤条件能匹配：**用 `world.Count<T…>(filter)` 数一数方法需要的实体。系统分组上的 `[Without<T>]` 对分组里所有方法都
-   生效，被禁用的组件算不存在。
+5. **它的过滤条件能匹配：**用 `world.Count<T…>(filter)` 数一数方法需要的实体。分组的过滤条件对分组里所有方法都生效：分组结构体上的
+   `[With<T>]`、`[Without<T>]`、`[WithAny<T>]`，以及分组自己或它实现的任何接口带来的 `IGroupWith<T>` / `IGroupWithout<T>`
+   （泛型 actor 接口就带着它们）。被禁用的组件算不存在。
 6. **确实有东西可看：**`[Changed<T>]` 方法只访问它的系统上次运行以来被写过的行，`[Removed<T>]` 方法只访问那之后失去 `T` 的实体
    （[变更追踪](/zh/docs/guide/change-tracking#ticks)）。
 
 `WorldOptions.MeasureSystems` 会在 `system.Stats.Runs` 里统计每次运行，能分清“从没跑过”和“跑了但什么都没做”。
+
+## 为什么 `entity.Run` 返回 `false`？ [#run-false]
+
+`entity.Run<T…, TJob>(ref job, filter)` 只在实体接得住时才跑 job，以下情况不跑，返回 `false`：
+
+1. **实体已经不在了：**拿到句柄之后被销毁了，或者是 `default(Entity)`。`Run` 不会像 `Get` 那样抛异常。
+2. **缺少 job 要的组件：**`TJob` 之前的每个类型实参都必须存在（被禁用的组件算不存在）。用 `entity.Has<T1, T2>()` 检查。
+3. **不满足过滤条件：**有 `Without<T>` 排除的组件、缺 `WithAny` 要的组件、`Changed<T>(tick)` 之后没被写过、不在指定的分组里。
+   去掉过滤条件再跑一次，就能和前两种情况分开。
+
+**修法：**把 `false` 当成请求的结果（actor 没了、单位死了），而不是错误；实体可能已被替换时，按 `EntityId` 重新查找
+（[单个实体：`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)）。
 
 ## 为什么我的系统没有并行？ [#not-parallel]
 
@@ -213,6 +239,15 @@ InvalidDataException: A damaged save: …
 组件、单例和系统的 EasyEcs 接口（`IComponent`、`ITrackChanges`、`IIndexed<TKey>` 等）必须写在你自己的代码里。所有源生成器读的是
 同一份输入，谁也看不到别人的输出，所以另一个生成器给 partial 类型加上 `IComponent` 时，EasyEcs 的生成器并不知道它是组件：不会为它
 生成成员，加载存档时也要等进程用过这个类型才找得到它。把接口写在你自己的声明上；另一个生成器照样可以往同一个 partial 类型里加成员。
+
+## 为什么 actor 键在 `ToString` 里栈溢出？ [#key-tostring-overflow]
+
+record struct 自己就是自己的键（`IIndexed<TSelf>`，actor 写法），又把 `Key` 写成公开属性 `public Shop Key => this;` 时，
+`ToString()` 会打印所有公开属性：`Key` 打印 record，record 又打印 `Key`，直到栈溢出。写一行日志、做一次字符串插值，或者在调试器里看一眼这个值，
+都会触发。
+
+**修法：**显式实现 `Key`：`Shop IIndexed<Shop>.Key => this;`。索引照样找得到它，`ToString()` 却看不到它了
+（[常见错误](/zh/docs/guide/common-mistakes#public-key)）。
 
 ## 相关页面 [#related]
 

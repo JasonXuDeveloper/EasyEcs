@@ -276,7 +276,7 @@ public class DriftAllSystem : EcsSystem
 
 **`[ForEach(Parallel = true)]` 不能在多个线程上跑。** 错误。代码修复：去掉 `Parallel = true`。
 
-并行方法会同时在多个线程上跑一块块的行，所以它不能做结构变更（static、不接收 `World`、`Entity` 只用来读：`Id`、`Has`、`Get` 等；不能调 `entity.Run`，它的作业用普通写入），
+并行方法会同时在多个线程上跑一块块的行，所以它不能做结构变更（static、不接收 `World`、`Entity` 只用来读：`Id`、`Has`、`Get` 等；不能调 `entity.Run`，它要做所有者线程上遍历的簿记，它的 job 也可能改结构），
 必须逐实体运行（不能是批量方法），也不能写单例（`ref` 单例会在块之间产生竞争）。
 
 ```csharp doccheck=expect-EECS010
@@ -383,8 +383,8 @@ public static class Bags
 World 改了结构，两件事都会出错：遍历还拿着指向已移动行的引用，并行阶段里的变更会抛异常。
 
 在这样的方法里，规则会报出对 `Entity` 结构成员（`Set`、`Remove`、`Destroy`、`GetOrAdd`、`Clone`、`Disable`、`Enable`、
-`AddRelation`、`RemoveRelation`、`Run`（它的作业可能改结构），以及生成的 `SetX`、`GetOrAddX`、`RemoveX`）或 `World` 结构成员（`CreateEntity`、`CreateEntities`、
-`Instantiate`、`DestroyEntities`、`SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`、`Load`、`LoadEntities`、`MoveEntities`、
+`AddRelation`、`RemoveRelation`、`Run`（它的 job 可能改结构），以及生成的 `SetX`、`GetOrAddX`、`RemoveX`）或 `World` 结构成员（`CreateEntity`、`CreateEntities`、
+`Instantiate`、`DestroyEntities`、`SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`、`Load`、`LoadEntities`、`LoadEntitiesInto`、`MoveEntities`、
 `GroupBy`、`RemoveTypes`、单例、系统、`Update`、`Capture`、`Restore` 等）的调用。方法自己创建的 World（局部变量里的 `new World()`）
 不算。
 
@@ -477,7 +477,7 @@ public static class WorldThreads
 
 - 在实体上调用 `Get<T>()`、`GetOrAdd<T>()` 或 `TryGetRef<T>()`；
 - 绑定到它的 `ref` 局部变量，或者通过查询项给它（或它的字段）赋值；
-- `[ForEach]` 方法或 `IForEach*` 作业里它的 `ref` 或 `Span<T>` 参数。
+- `[ForEach]` 方法或 `IForEach*` job 里它的 `ref` 或 `Span<T>` 参数。
 
 ```csharp
 public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
@@ -658,13 +658,13 @@ public static class Healing
 **生成的代码访问不到某个类型。** 错误。代码修复：把这个类型，连同包含它的所有 private 或 protected 类型，改成 internal；分部类型里
 每个声明了可访问性的部分都会改。
 
-生成器把 `[ForEach]` 方法的作业写在用户类型之外，通过 `UnsafeAccessor` 调用这些方法，所以私有方法和私有系统都没问题。但参数（和返回值）
+生成器把 `[ForEach]` 方法的 job 写在用户类型之外，通过 `UnsafeAccessor` 调用这些方法，所以私有方法和私有系统都没问题。但参数（和返回值）
 的类型，以及系统之外 `[ForEach]` 方法所在的类型，必须是 internal 或 public，包含它们的每一层类型也一样；`file` 类型在其他文件里访问不到。
 
 ```csharp doccheck=expect-EECS022
 public class HealSystem : EcsSystem
 {
-    private struct Regen : IComponent { public int Amount; }      // 生成的作业访问不到它
+    private struct Regen : IComponent { public int Amount; }      // 生成的 job 访问不到它
     [ForEach] static void Heal(ref Health hp, in Regen r) => hp.Value += r.Amount;
 }
 ```
@@ -699,7 +699,7 @@ public struct Armor : IComponent, IClamped { public int Value { get; set; } }
 
 **局部函数上的 `[ForEach]`。** 错误。没有代码修复。
 
-生成器为每个 `[ForEach]` 方法写一个作业，并从类型外面调用它；局部函数在所在方法之外没有名字。
+生成器为每个 `[ForEach]` 方法写一个 job，并从类型外面调用它；局部函数在所在方法之外没有名字。
 
 ```csharp doccheck=expect-EECS024
 public static class Report

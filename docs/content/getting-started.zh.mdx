@@ -146,7 +146,7 @@ public class BurnSystem : EcsSystem
 }
 ```
 
-生成器把每个方法编译成结构体 job，JIT 把它内联进行循环：每个实体既没有委托调用，也没有虚调用。`ref` 和 `in` 同时告诉调度器
+生成器把每个方法编译成结构体 job，JIT 把它内联到行循环里：每个实体既没有委托调用，也没有虚调用。`ref` 和 `in` 同时告诉调度器
 系统碰了哪些数据，[并行系统](/zh/docs/guide/threading)靠的就是这个。详见[系统](/zh/docs/guide/systems)。
 
 </Step>

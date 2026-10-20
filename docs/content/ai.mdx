@@ -38,14 +38,17 @@ attached.
 ## A rules file for your project [#rules-file]
 
 [`easyecs-rules.md`](https://ecs.xgamedev.net/easyecs-rules.md)
-is a short file of the rules that matter when writing EasyEcs code: components and systems, filters, structural
-changes, threads and refs, performance, what EasyEcs does not do, project layout and debugging, and an example. It is
+is a short file of the rules that matter when writing EasyEcs code: components and systems, method and group filters,
+structural changes, `entity.Run` for a request on one entity, threads and refs, performance, persistence (snapshots,
+saves, records with `LoadEntitiesInto`), what EasyEcs does not do (including the actor pattern it leaves to you),
+project layout and debugging, and an example. It is
 drawn from the [ECS principles](/en/docs/ecs-principles), the [analyzer rules](/en/docs/guide/analyzer), the
 [performance guide](/en/docs/performance), [project structure](/en/docs/guide/project-structure) and
-[diagnostics](/en/docs/guide/diagnostics). Download it into your repository:
+[diagnostics](/en/docs/guide/diagnostics). Download it into the `docs/` folder of your repository, where the snippets
+below look for it:
 
 ```bash
-curl -fsSL -o easyecs-rules.md https://ecs.xgamedev.net/easyecs-rules.md
+curl -fsSL --create-dirs -o docs/easyecs-rules.md https://ecs.xgamedev.net/easyecs-rules.md
 ```
 
 Then point your assistant at it. The analyzer still checks every build, so a rule the assistant misses becomes a
