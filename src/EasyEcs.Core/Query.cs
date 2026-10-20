@@ -571,6 +571,9 @@ internal sealed class RowPlan(short[] require, short[] exclude, short[] anyOf, s
     /// <summary>Rows are selected by change ticks: a Changed or Removed column, or a ChangedAny or RemovedAny group.</summary>
     public readonly bool Ticked = changed.Length + anyChanged.Length + anyRemoved.Length != 0;
 
+    /// <summary>The plan has a ChangedAny or RemovedAny group (one test keeps the common plans' table checks lean).</summary>
+    public readonly bool Grouped = anyChanged.Length + anyRemoved.Length != 0;
+
     /// <summary>
     /// The tick column whose summaries skip words (-1 without Changed columns): a removed component's when there is one
     /// (removals are sparser than writes, and its summaries leave writes out), else the first changed one.
@@ -625,9 +628,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         // A table not written since the pass's tick has no changed row.
         for (int i = 0; i < changed.Length; i++)
             if (archetype.LastWrite[changed[i]] < _since) return None;
-        // A group none of whose columns was written (or had a removal: it stamps) since the tick has no passing row.
-        if (plan.AnyChanged.Length != 0 && !AnyNewer(archetype, plan.AnyChanged)) return None;
-        if (plan.AnyRemoved.Length != 0 && !AnyNewer(archetype, plan.AnyRemoved)) return None;
+        if (plan.Grouped && GroupsUnwritten(archetype)) return None;
         bool test = plan.Ticked;
         var exclude = plan.Exclude;
         for (int i = 0; i < exclude.Length; i++)
@@ -658,6 +659,15 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
 
         return test ? Test : All;
     }
+
+    /// <summary>
+    /// Whether a ChangedAny or RemovedAny group of the plan has no column written (or with a removal: it stamps) since
+    /// the pass's tick: then no row of the table passes. Out of line: plans without groups pay one test in Mode.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private bool GroupsUnwritten(Archetype archetype) =>
+        (_plan.AnyChanged.Length != 0 && !AnyNewer(archetype, _plan.AnyChanged))
+        || (_plan.AnyRemoved.Length != 0 && !AnyNewer(archetype, _plan.AnyRemoved));
 
     /// <summary>Whether a tick column of <paramref name="pairs"/> (a ChangedAny or RemovedAny group) was stamped since the pass's tick.</summary>
     private bool AnyNewer(Archetype archetype, short[] pairs)
@@ -741,8 +751,17 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
 
         var changed = plan.Changed;
         for (int i = 0; i < changed.Length && bits != 0; i++) bits &= Newer(archetype, changed[i], word, _since);
-        if (plan.AnyChanged.Length != 0 && bits != 0) bits &= AnyNewer(archetype, plan.AnyChanged, word, true);
-        if (plan.AnyRemoved.Length != 0 && bits != 0) bits &= AnyNewer(archetype, plan.AnyRemoved, word, false);
+        if (plan.Grouped && bits != 0) bits &= GroupRows(archetype, word);
+        return bits;
+    }
+
+    /// <summary>Rows of word <paramref name="word"/> that pass the plan's ChangedAny and RemovedAny groups (out of line, as <see cref="GroupsUnwritten"/>).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private ulong GroupRows(Archetype archetype, int word)
+    {
+        ulong bits = ulong.MaxValue;
+        if (_plan.AnyChanged.Length != 0) bits &= AnyNewer(archetype, _plan.AnyChanged, word, true);
+        if (_plan.AnyRemoved.Length != 0 && bits != 0) bits &= AnyNewer(archetype, _plan.AnyRemoved, word, false);
         return bits;
     }
 
@@ -842,7 +861,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     public int NextWord(Archetype archetype, int word, int words)
     {
         var plan = _plan;
-        if (plan.Lead < 0) return plan.AnyChanged.Length + plan.AnyRemoved.Length == 0 ? word : NextOfGroup(archetype, word, words);
+        if (plan.Lead < 0) return plan.Grouped ? NextOfGroup(archetype, word, words) : word;
         return NextWritten(plan.LeadRemoved ? archetype.Removals[plan.Lead] : archetype.Blocks[plan.Lead],
             archetype.Words[plan.Lead], plan.LeadRemoved, word, words, _since);
     }

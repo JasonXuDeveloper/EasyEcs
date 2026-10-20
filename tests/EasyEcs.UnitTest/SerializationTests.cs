@@ -510,6 +510,21 @@ public class SerializationTests
     }
 
     [Test]
+    public void TheCallsOfEarlierVersionsBindAsBefore()
+    {
+        var bytes = OldProcess();
+        using var resumed = new World();
+        resumed.AddSingleton<Config>() = new Config { Rate = 2 };
+        resumed.Load(bytes, default);                                       // markWritten: false, not an empty set
+        Assert.That(resumed.Count<Balance>(QueryFilter.Create().Changed<Balance>(1)), Is.Zero);
+        Assert.That(resumed.HasSingleton<Config>(), Is.False);              // nothing kept: the save has none
+        resumed.Load(bytes, false);
+        Assert.That(resumed.Count<Balance>(QueryFilter.Create().Changed<Balance>(1)), Is.Zero);
+        resumed.Load(bytes);
+        Assert.That(resumed.Count<Balance>(QueryFilter.Create().Changed<Balance>(1)), Is.EqualTo(10));
+    }
+
+    [Test]
     public void ASetOfTheWrongKindIsRefused()
     {
         using var world = new World();
