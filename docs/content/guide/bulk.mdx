@@ -63,7 +63,7 @@ int paused = world.DisableAll<Regen>(Rounds.Fighters);     // pause systems that
 int resumed = world.EnableAll<Regen>();                    // restore the kept Regen(2) value
 ```
 
-Disabling regeneration leaves `Health` available to damage and display systems. The [full example](#full-example) below runs a regeneration system and checks that health stays unchanged while paused, then rises again after resuming.
+Disabling regeneration leaves `Health` available to damage and display systems. The [full example](/en/docs/guide/bulk#full-example) below runs a regeneration system and checks that health stays unchanged while paused, then rises again after resuming.
 
 ### Spawn and clear waves [#spawn-and-clear]
 
