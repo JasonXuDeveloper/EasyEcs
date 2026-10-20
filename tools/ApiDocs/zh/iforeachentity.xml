@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+
 <doc>
   <member name="T:EasyEcs.IForEachEntity`1" source="a03122c6a5c5">
     <summary>
@@ -8,5 +9,12 @@
   </member>
   <member name="M:EasyEcs.IForEachEntity`1.Execute(EasyEcs.Entity,`0@)" source="e61c1f32f0d1">
     <summary>一个匹配的实体：它的句柄和组件，组件按引用传入。</summary>
+  </member>
+  <member name="P:EasyEcs.IForEachEntity`1.OwnStamps" source="2ae37caafd7f">
+    <summary>
+      <see cref="P:EasyEcs.IForEachEntity`1.Writes" /> 里由 job 自己打 tick、而且只在它写的行上打 tick 的组件（位的含义同
+      <see cref="P:EasyEcs.IForEachEntity`1.Writes" />；默认没有）：循环不给这些组件的行打 tick。生成的 job 标出它们的
+      <see cref="T:EasyEcs.Mut`1" /> 参数。
+    </summary>
   </member>
 </doc>

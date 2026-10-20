@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+
 <doc>
   <member name="T:EasyEcs.RelationIndex`1" source="7491e0416521">
     <summary>
@@ -22,5 +23,8 @@
       <see cref="F:EasyEcs.TargetPolicy.Keep" />（默认）保留链接。每次销毁时都会执行（索引一直保持建好的状态）；每个销毁的实体 O(1)，
       每条链接 O(它的来源实体的链接数)。只能在所有者线程调用。
     </summary>
+  </member>
+  <member name="P:EasyEcs.RelationIndex`1.TargetCount" source="369c307b36e8">
+    <summary>有链接指向的不同实体的个数（有多少个公会有成员）：O(1)，随链接的增减维护。</summary>
   </member>
 </doc>

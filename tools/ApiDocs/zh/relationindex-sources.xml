@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+
 <doc>
   <member name="T:EasyEcs.RelationIndex`1.Sources" source="853f79a98a18">
     <summary>枚举链接到某个目标的实体（<c>foreach</c>），每条链接一次。</summary>
@@ -8,5 +9,10 @@
   </member>
   <member name="M:EasyEcs.RelationIndex`1.Sources.MoveNext" source="128456cad61e">
     <summary>移到下一条链接。每条链接 O(1)。</summary>
+  </member>
+  <member name="P:EasyEcs.RelationIndex`1.Sources.Count" source="3b8beddea91f">
+    <summary>
+      查找时有多少条链接指向这个目标：O(1)，不用遍历。循环中去掉的链接，循环会跳过，但这里仍然计入。
+    </summary>
   </member>
 </doc>

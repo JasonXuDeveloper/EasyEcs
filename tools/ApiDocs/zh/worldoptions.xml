@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+
 <doc>
   <member name="T:EasyEcs.WorldOptions" source="4b663d539d6b">
     <summary><see cref="T:EasyEcs.World" /> 的配置。</summary>
@@ -28,6 +29,14 @@
     <summary>
       系统抛出异常时怎么处理（默认 <see cref="F:EasyEcs.SystemErrorPolicy.Throw" />）：抛出 <see cref="M:EasyEcs.World.Update" />，
       或者停掉这个系统，把异常记进 <see cref="P:EasyEcs.EcsSystem.Error" />。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.WorldOptions.DestroyLog" source="40aaf33ab2fd">
+    <summary>
+      销毁日志的容量（默认 0：关闭）：最近销毁的这么多个实体，每个带着它被销毁时的变更 tick，
+      <see cref="M:EasyEcs.World.DestroyedSince(System.UInt64,System.Span{EasyEcs.EntityId},System.Int32@)" /> 把它们报告给各自保留自己 tick 的读者
+      （每个客户端一个同步标记）。预先分配（每条记录 16 字节）；之后一次销毁写一条记录，日志关闭时没有任何开销。容量按读者两次读取之间
+      可能留下的最长间隔里的销毁数来定：更旧的读者会被告知要重新同步（<see cref="P:EasyEcs.World.DestroyLogOldestTick" />）。
     </summary>
   </member>
 </doc>

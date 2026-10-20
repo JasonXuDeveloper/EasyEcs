@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.StageInfo" source="800548d7eac6">
+    <summary>分组里的一个阶段：彼此之间没有先后约束、也没有冲突的系统。</summary>
+    <param name="Systems">阶段里的系统，按执行顺序（阶段在一个线程上运行时）。</param>
+  </member>
+  <member name="P:EasyEcs.StageInfo.Systems" source="5d8ca102ae4e">
+    <summary>阶段里的系统，按执行顺序（阶段在一个线程上运行时）。</summary>
+  </member>
+</doc>

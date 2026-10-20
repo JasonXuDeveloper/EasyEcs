@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+
 <doc>
   <member name="T:EasyEcs.Entity" source="bf0c37b176e1">
     <summary>
@@ -152,6 +153,14 @@
     <summary>
       实体还通过 <paramref name="filter" /> 时才执行的 <see cref="M:EasyEcs.Entity.Run``3(``2@)" />，按查询检查一行的方式检查
       （<c>Without</c>、<c>WithAny</c>、<c>Changed</c>、分组）：不通过就不运行 job，返回 false。O(过滤条件涉及的组件数)。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Entity.SetIfChanged``1(``0@)" source="a6b8ab233ced">
+    <summary>
+      把组件 <typeparamref name="T" /> 设为 <paramref name="value" />，除非实体已经是这个值：设了就返回 true（和 <c>Set</c> 一样：
+      没有就添加、打 tick、更新索引），值相等就返回 false（什么都不写，不打 tick，不碰索引）。相等的判定和
+      <see cref="M:EasyEcs.Mut`1.SetIfChanged(`0@)" /> 相同。实体不存活时抛异常。相等时 O(1) 加一次比较，否则是 <c>Set</c> 的开销。
+      只能在所有者线程调用。
     </summary>
   </member>
 </doc>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.ChangedAnyAttribute`2" source="c516abff365e">
+    <summary>
+      <see cref="T:EasyEcs.ForEachAttribute" /> 方法只访问 <c>T1, T2</c> 中至少一个在系统上次运行之后写过的实体
+      （<see cref="P:EasyEcs.EcsSystem.LastRunTick" />；第一次运行时是所有拥有其中一个的实体）：即
+      <see cref="M:EasyEcs.QueryFilter.ChangedAny``2(System.UInt64)" />。多个这种特性合成一组；和 <c>[Changed&lt;T&gt;]</c>
+      以及其他过滤条件按 AND 组合。
+    </summary>
+  </member>
+</doc>

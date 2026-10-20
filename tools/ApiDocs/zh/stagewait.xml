@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.StageWait" source="f05e054b7da5">
+    <summary>后面的系统要等待的一个系统（<see cref="P:EasyEcs.SystemInfo.After" />）。</summary>
+    <param name="System">前一个系统的名字。</param>
+    <param name="Ordered">两者之间有 <see cref="T:EasyEcs.UpdateBeforeAttribute`1" /> / <see cref="T:EasyEcs.UpdateAfterAttribute`1" />
+    规定先后。</param>
+    <param name="Conflicts">它们冲突的数据：组件名、标注 "(singleton)" 的单例名，或者 "runs alone"。</param>
+  </member>
+  <member name="P:EasyEcs.StageWait.Conflicts" source="16fff486566a">
+    <summary>它们冲突的数据：组件名、标注 "(singleton)" 的单例名，或者 "runs alone"。</summary>
+  </member>
+  <member name="P:EasyEcs.StageWait.Ordered" source="6c87e80cfadc">
+    <summary>
+      两者之间有 <see cref="T:EasyEcs.UpdateBeforeAttribute`1" /> / <see cref="T:EasyEcs.UpdateAfterAttribute`1" /> 规定先后。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.StageWait.System" source="25cd0bcd326a">
+    <summary>前一个系统的名字。</summary>
+  </member>
+</doc>

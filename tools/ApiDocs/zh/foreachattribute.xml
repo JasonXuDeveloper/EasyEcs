@@ -1,14 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+
 <doc>
-  <member name="T:EasyEcs.ForEachAttribute" source="e00d3dbc7e60">
+  <member name="T:EasyEcs.ForEachAttribute" source="90f530ee53c1">
     <summary>
       对每个匹配组件参数（以及 <see cref="T:EasyEcs.WithAttribute`1" /> / <see cref="T:EasyEcs.WithoutAttribute`1" /> /
       <see cref="T:EasyEcs.WithAnyAttribute`1" /> 过滤条件）的实体，执行 <see cref="T:EasyEcs.EcsSystem" /> 的一个方法
       （或者通过生成的入口点，执行任何其他类型的静态方法）。每次更新执行一次，在 <see cref="M:EasyEcs.EcsSystem.OnUpdate" />
       之后，按声明顺序。
-      <para>参数：1 到 9 个组件（<c>ref</c> 表示写，<c>in</c> 表示读；按段接收行的批处理方法用 <c>Span&lt;T&gt;</c> /
-      <c>ReadOnlySpan&lt;T&gt;</c>）、单例（<c>ref</c> / <c>in</c>），还可以加上 <see cref="T:EasyEcs.Entity" /> 和
-      <see cref="T:EasyEcs.World" />。静态方法和实例方法都支持。</para>
+      <para>参数：1 到 9 个组件（<c>ref</c> 表示写，<c>in</c> 表示读，<see cref="T:EasyEcs.Mut`1" /> 表示只写其中一部分行；
+      按段接收行的批处理方法用 <c>Span&lt;T&gt;</c> / <c>ReadOnlySpan&lt;T&gt;</c>）、单例（<c>ref</c> / <c>in</c>），还可以加上
+      <see cref="T:EasyEcs.Entity" /> 和 <see cref="T:EasyEcs.World" />。静态方法和实例方法都支持。</para>
       <code>
       public class MovementSystem : EcsSystem
       {
@@ -24,6 +25,17 @@
     <summary>
       把匹配的行分块，放到多个线程上执行（<c>World.ForEachParallel</c>）。方法不能做结构变更，必须逐实体执行，也不能写单例（EECS010）；
       每行工作量大、行数上万时才划算。默认 false。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.ForEachAttribute.Slices" source="4879cae4241b">
+    <summary>
+      把方法的行分摊到系统的 N 次运行上：每次运行访问一片，约为每个匹配表行数的 1 / N（第 <see cref="P:EasyEcs.EcsSystem.RunCount" /> mod N 片，
+      见 <see cref="M:EasyEcs.QueryFilter.Slice(System.Int32,System.Int32)" />），所以每 N 次运行每行访问一次，处理大量实体的系统每次更新只花约 1 / N，
+      而不是集中在某一次更新上出现尖峰。配合 <see cref="P:EasyEcs.EcsSystem.UpdateInterval" /> M，每行每 N * M 次更新访问一次。
+      两次运行之间移动了的行（交换删除、结构变更、表扩容或缩小）在一轮里可能被跳过，也可能被访问两次。
+      逐实体、批处理和 <see cref="P:EasyEcs.ForEachAttribute.Parallel" /> 都能用（这一片再切成块）。不能和
+      <c>[Changed&lt;T&gt;]</c> / <c>[Removed&lt;T&gt;]</c> 一起用（EECS035）：其他片的行会丢掉系统上次运行之后的变更。
+      默认 1：每次运行访问每一行。
     </summary>
   </member>
 </doc>

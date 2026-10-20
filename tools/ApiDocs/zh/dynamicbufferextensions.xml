@@ -9,8 +9,8 @@
   <member name="M:EasyEcs.DynamicBufferExtensions.Add``1(EasyEcs.DynamicBuffer{``0}@,``0@)" source="245441155d3e">
     <summary>追加 <paramref name="item" />。均摊 O(1)；只有列表扩容时才分配内存。</summary>
   </member>
-  <member name="M:EasyEcs.DynamicBufferExtensions.AddRange``1(EasyEcs.DynamicBuffer{``0}@,System.ReadOnlySpan{``0})" source="3058097f3b53">
-    <summary>追加 <paramref name="items" />。O(items)。</summary>
+  <member name="M:EasyEcs.DynamicBufferExtensions.AddRange``1(EasyEcs.DynamicBuffer{``0}@,System.ReadOnlySpan{``0})" source="07c63fff4b39">
+    <summary>追加 <paramref name="items" />（列表写成 <c>CollectionsMarshal.AsSpan(list)</c>，不复制）。O(items)。</summary>
   </member>
   <member name="M:EasyEcs.DynamicBufferExtensions.AsSpan``1(EasyEcs.DynamicBuffer{``0}@)" source="11418799f778">
     <summary>全部元素，可写。</summary>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.UniqueIndexExtensions" source="71397b4ca940">
+    <summary>唯一索引（<see cref="T:EasyEcs.IUniqueIndexed`1" />）的查找：一个键对应的那一个实体。</summary>
+  </member>
+  <member name="M:EasyEcs.UniqueIndexExtensions.&lt;G&gt;$9C3B3AD7FF637E7BF666FFDB0B51A514`2.Get(`1)" source="eec3c6d8b9dc">
+    <summary>
+      <typeparamref name="T" /> 的键为 <paramref name="key" /> 的实体；没有实体有这个键时抛
+      <see cref="T:System.InvalidOperationException" />。O(1)：一次哈希探测。只能在所有者线程调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.UniqueIndexExtensions.&lt;G&gt;$9C3B3AD7FF637E7BF666FFDB0B51A514`2.TryGet(`1,EasyEcs.Entity@)" source="6325f4d763bb">
+    <summary>
+      <typeparamref name="T" /> 的键为 <paramref name="key" /> 的实体（如果有）。O(1)：一次哈希探测。只能在所有者线程调用。
+    </summary>
+  </member>
+</doc>

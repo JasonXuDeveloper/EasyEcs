@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.Mut`1" source="45d1ac1f7de2">
+    <summary>
+      <c>[ForEach]</c> 方法所访问实体的一个组件，只有方法真的写了它才算写入：
+      <c>static void Aim(Mut&lt;Target&gt; target, in Position p) =&gt; target.SetIfChanged(new Target(Nearest(p)))</c>。
+      被追踪组件（<see cref="T:EasyEcs.ITrackChanges" />）的 <c>ref</c> 参数会给方法访问的每一行打 tick，于是
+      <c>[Changed&lt;T&gt;]</c> 的读者会访问值从没变过的行；通过 <see cref="T:EasyEcs.Mut`1" />，只有方法写过的行
+      （<see cref="M:EasyEcs.Mut`1.Write" />、改变了值的 <see cref="M:EasyEcs.Mut`1.SetIfChanged(`0@)" />）才打 tick，每行的 tick 和
+      <see cref="M:EasyEcs.Entity.Get``1" /> 打的完全一样。读 <see cref="P:EasyEcs.Mut`1.Value" /> 不打 tick。
+      <para>调度器把这个参数当作写 <typeparamref name="T" />（并行阶段不会让这个系统和读它的系统同时运行）。逐实体方法都能用，
+      包括 <c>[ForEach(Parallel = true)]</c> 方法和会做结构变更的方法（实体移动之后的写入给它的新行打 tick）；批处理方法接收 span，
+      按段打 tick。对不追踪变更的组件，它就是普通的 <c>ref</c>。只在传入的那次调用内有效（ref struct）。被索引或分组的组件不能通过
+      ref 写（EECS015）。</para>
+    </summary>
+  </member>
+  <member name="P:EasyEcs.Mut`1.Value" source="8c2ed22aafca">
+    <summary>组件，只读：不算写入，不打 tick。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.Mut`1.SetIfChanged(`0@)" source="b47ca91b77b3">
+    <summary>
+      只有 <paramref name="value" /> 和组件当前的值不同时，才存入它并给这一行打 tick：存了就返回 true。<typeparamref name="T" /> 实现了
+      <see cref="T:System.IEquatable`1" /> 时（record struct 都实现了）用它判定相等，否则比较非托管 <typeparamref name="T" /> 的字节；
+      没有实现 <see cref="T:System.IEquatable`1" /> 的托管 <typeparamref name="T" /> 抛 <see cref="T:System.NotSupportedException" />。
+      O(T 的大小)，零分配。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Mut`1.Write" source="ec0d2e6d8c3c">
+    <summary>
+      按 <c>ref</c> 返回组件，并记为写入（被追踪组件：给它的行打 tick；方法可能移动实体时，这一行要查一次实体记录才能找到）。
+      方法确定要写时，每次写入调用一次。O(1)。
+    </summary>
+  </member>
+</doc>

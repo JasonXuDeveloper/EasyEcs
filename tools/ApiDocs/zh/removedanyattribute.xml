@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.RemovedAnyAttribute`2" source="be10ee29aec4">
+    <summary>
+      <see cref="T:EasyEcs.ForEachAttribute" /> 方法只访问在系统上次运行之后失去 <c>T1, T2</c> 中至少一个、而且没有再拿回来的实体：
+      即 <see cref="M:EasyEcs.QueryFilter.RemovedAny``2(System.UInt64)" />。多个这种特性合成一组；和其他过滤条件按 AND 组合。
+    </summary>
+  </member>
+</doc>

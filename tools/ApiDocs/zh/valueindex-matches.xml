@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+
 <doc>
   <member name="T:EasyEcs.ValueIndex`2.Matches" source="c058dc187a84">
     <summary>枚举一个键对应的实体（<c>foreach</c>）。</summary>
@@ -8,5 +9,10 @@
   </member>
   <member name="M:EasyEcs.ValueIndex`2.Matches.MoveNext" source="db24aefd5117">
     <summary>移到下一个拥有这个键的实体。每个实体 O(1)。</summary>
+  </member>
+  <member name="P:EasyEcs.ValueIndex`2.Matches.Count" source="3a132d62c7c6">
+    <summary>
+      查找时有多少个实体拥有这个键：O(1)，不用遍历（在循环之前确定缓冲区大小）。循环中被销毁的实体，循环会跳过，但这里仍然计入。
+    </summary>
   </member>
 </doc>

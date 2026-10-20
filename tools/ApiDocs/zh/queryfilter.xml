@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+
 <doc>
   <member name="T:EasyEcs.QueryFilter" source="3dab23def4fb">
     <summary>
@@ -35,11 +36,11 @@
     </summary>
     <exception cref="T:System.ArgumentException">前面的 <c>Changed</c> 或 <c>Removed</c> 用了另一个 tick。</exception>
   </member>
-  <member name="M:EasyEcs.QueryFilter.Since(System.UInt64)" source="d2ef8d72b133">
+  <member name="M:EasyEcs.QueryFilter.Since(System.UInt64)" source="797fe87ff714">
     <summary>
       返回同一个过滤条件，只是把它的 <see cref="M:EasyEcs.QueryFilter.Changed``1(System.UInt64)" /> 和
-      <see cref="M:EasyEcs.QueryFilter.Removed``1(System.UInt64)" /> 挪到 tick <paramref name="since" />，不用重建：
-      适合存在字段里、每次更新后再用一次的过滤条件。
+      <see cref="M:EasyEcs.QueryFilter.Removed``1(System.UInt64)" /> 过滤条件（以及 <c>ChangedAny</c> 和 <c>RemovedAny</c>）挪到 tick
+      <paramref name="since" />，不用重建：适合存在字段里、每次更新后再用一次的过滤条件，或者每个客户端用各自确认过的 tick 各用一次。
     </summary>
   </member>
   <member name="M:EasyEcs.QueryFilter.With``1" source="89d1b7efddd4">
@@ -53,5 +54,40 @@
   </member>
   <member name="M:EasyEcs.QueryFilter.Without``1" source="7c4a52182b9c">
     <summary>要求 <typeparamref name="T" /> 不存在。</summary>
+  </member>
+  <member name="M:EasyEcs.QueryFilter.ChangedAny``2(System.UInt64)" source="e53547a5a137">
+    <summary>
+      只选 <c>T1, T2</c> 中至少一个在变更 tick <paramref name="since" /> 或之后写过的行：即 <c>Changed&lt;T1&gt;(since)</c> OR ... OR
+      <c>Changed&lt;T2&gt;(since)</c>（行要有它所对应的那个组件；其他组件可以没有）。一个过滤条件的所有 <c>ChangedAny</c> 调用合成一组；
+      这一组、<c>Changed</c> 和 <c>Removed</c> 过滤条件、一组 <c>RemovedAny</c> 以及其他过滤条件按 AND 组合。tick 之后没有任何一列写过的表整张跳过，
+      没有任何一列写过的行字和行块也跳过。一个过滤条件只有一个 tick（用 <see cref="M:EasyEcs.QueryFilter.Since(System.UInt64)" /> 移动）：
+      每个客户端各留一个，用各自的 tick 运行。
+    </summary>
+    <exception cref="T:System.ArgumentException">前面的变更过滤条件用了另一个 tick。</exception>
+  </member>
+  <member name="M:EasyEcs.QueryFilter.RemovedAny``2(System.UInt64)" source="7576ad211b45">
+    <summary>
+      只选在变更 tick <paramref name="since" /> 或之后失去 <c>T1, T2</c> 中至少一个、而且没有再拿回来的行：即
+      <c>Removed&lt;T1&gt;(since)</c> OR ... OR <c>Removed&lt;T2&gt;(since)</c>。所有 <c>RemovedAny</c> 调用合成一组，和其他过滤条件按 AND 组合；
+      一个过滤条件只有一个 tick，同 <see cref="M:EasyEcs.QueryFilter.ChangedAny``2(System.UInt64)" />。
+    </summary>
+    <exception cref="T:System.ArgumentException">前面的变更过滤条件用了另一个 tick。</exception>
+  </member>
+  <member name="M:EasyEcs.QueryFilter.Slice(System.Int32,System.Int32)" source="011de5999015">
+    <summary>
+      只访问每个匹配表的 <paramref name="count" /> 片行中的第 <paramref name="index" /> 片：index 从 0 依次到
+      <paramref name="count" /> - 1 的这些遍历把每行访问一次，每次约为 1 / <paramref name="count" /> 的行。<c>[ForEach(Slices = N)]</c>
+      方法传入系统这次运行对应的那一片（<see cref="P:EasyEcs.EcsSystem.RunCount" /> mod N）。O(1)。
+      <para>表按 64 行的倍数切分（它的存在位字），按遍历开始时的行数切，所以少于 64 行的表只有一块；匹配中的第 i 张表从第
+      (<paramref name="index" /> + i) mod <paramref name="count" /> 片开始切，所以很多张小表也会分散到各片上。两次遍历之间移动了的行
+      （交换删除用表的最后一行填空洞、结构变更把实体移到另一张表、表扩容或缩小跨过切分点）在 <paramref name="count" /> 次遍历的一轮里
+      可能被跳过，也可能被访问两次；下一轮会再看到它们。</para>
+      <para><c>ForEach</c>、<c>ForEachEntity</c>、<c>ForEachBatch</c> 以及它们的 <c>Parallel</c> 形式支持分片；需要所有匹配行的调用
+      （<c>Query</c>、<c>Count</c>、<c>Any</c>、<c>DestroyEntities</c>、<c>entity.Run</c>、<c>SetAll</c> 和其他批量调用）遇到分片的过滤条件会抛
+      <see cref="T:System.ArgumentException" />。count 为 1 就是整张表。</para>
+    </summary>
+    <exception cref="T:System.ArgumentOutOfRangeException">
+      <paramref name="count" /> 小于 1，或者 <paramref name="index" /> 不在 [0, <paramref name="count" />) 内。
+    </exception>
   </member>
 </doc>

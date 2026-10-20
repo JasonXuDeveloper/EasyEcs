@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.SystemInfo" source="45daed00eff9">
+    <summary>调度里的一个系统，以及它声明的数据（<see cref="T:EasyEcs.SystemAccess" />）。</summary>
+    <param name="Name">系统类型的名字。</param>
+    <param name="Reads">它的 [ForEach] 方法读的组件（<c>in</c> 参数、[Changed&lt;T&gt;] 的过滤条件）。</param>
+    <param name="Writes">它的 [ForEach] 方法写的组件（<c>ref</c> 参数）。</param>
+    <param name="ReadsSingletons">它读的单例。</param>
+    <param name="WritesSingletons">它写的单例。</param>
+    <param name="RunsAlone">它可能碰任何数据（重写了 OnUpdate、有 Entity 或 World 参数……）：永远不和别的系统共用一个阶段。</param>
+    <param name="After">它为什么不在更早的阶段：紧挨在它前面的那个阶段里它必须排在后面的系统（第一个阶段为空）。</param>
+  </member>
+  <member name="P:EasyEcs.SystemInfo.After" source="d9abdbd0a7c3">
+    <summary>它为什么不在更早的阶段：紧挨在它前面的那个阶段里它必须排在后面的系统（第一个阶段为空）。</summary>
+  </member>
+  <member name="P:EasyEcs.SystemInfo.Name" source="ac2723d1a717">
+    <summary>系统类型的名字。</summary>
+  </member>
+  <member name="P:EasyEcs.SystemInfo.Reads" source="84d3f473e290">
+    <summary>它的 [ForEach] 方法读的组件（<c>in</c> 参数、[Changed&lt;T&gt;] 的过滤条件）。</summary>
+  </member>
+  <member name="P:EasyEcs.SystemInfo.ReadsSingletons" source="1e8d740925ec">
+    <summary>它读的单例。</summary>
+  </member>
+  <member name="P:EasyEcs.SystemInfo.RunsAlone" source="20ffafc75f05">
+    <summary>它可能碰任何数据（重写了 OnUpdate、有 Entity 或 World 参数……）：永远不和别的系统共用一个阶段。</summary>
+  </member>
+  <member name="P:EasyEcs.SystemInfo.Writes" source="5241a1ada99f">
+    <summary>它的 [ForEach] 方法写的组件（<c>ref</c> 参数）。</summary>
+  </member>
+  <member name="P:EasyEcs.SystemInfo.WritesSingletons" source="f39a9cfdebe7">
+    <summary>它写的单例。</summary>
+  </member>
+</doc>

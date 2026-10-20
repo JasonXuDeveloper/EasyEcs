@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+
 <doc>
   <member name="T:EasyEcs.World.Subtree" source="a9f03fe35978">
     <summary>一个实体的后代（<see cref="M:EasyEcs.World.Descendants(EasyEcs.EntityId)" />）：每次 <c>foreach</c> 都重新遍历。</summary>
@@ -6,5 +7,13 @@
   <member name="M:EasyEcs.World.Subtree.GetEnumerator" source="05718e6e6093">
     <summary>遍历后代（支持 <c>foreach</c>，预热后不分配内存）。</summary>
     <exception cref="T:System.InvalidOperationException"><see cref="T:EasyEcs.ChildOf" /> 链接成环（遍历走到环时）。</exception>
+  </member>
+  <member name="M:EasyEcs.World.Subtree.AddTo(System.Collections.Generic.List{EasyEcs.EntityId},System.Boolean)" source="a8697ee6a9b2">
+    <summary>
+      按遍历顺序把子树追加到 <paramref name="ids" />：<paramref name="includeRoot" /> 为 true（且根存活）时根排第一，每个父实体都在它的子实体之前：
+      正是 <c>MoveEntities</c> 和 <c>SaveEntities</c> 要的那组实体，以 <c>CollectionsMarshal.AsSpan(ids)</c> 传入。返回追加的 id 数。每个实体 O(1)；
+      只有列表扩容时才分配内存。
+    </summary>
+    <exception cref="T:System.InvalidOperationException"><see cref="T:EasyEcs.ChildOf" /> 链接形成了环。</exception>
   </member>
 </doc>

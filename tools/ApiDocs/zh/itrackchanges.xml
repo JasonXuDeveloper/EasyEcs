@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.ITrackChanges" source="7baeae4ea218">
+  <member name="T:EasyEcs.ITrackChanges" source="fad271268f66">
     <summary>
       标记一个追踪变更的组件：每一行都记下最后一次写入时 World 的 <see cref="P:EasyEcs.World.ChangeTick" />，
       <c>[Changed&lt;T&gt;]</c> / <c>QueryFilter.Changed&lt;T&gt;(since)</c> 选出系统上次运行以来写过的行。任何 <c>ref</c>
       访问都算写入：<c>[ForEach]</c> 方法和 job 的 <c>ref</c> 参数、<c>Query</c> 的元素、<c>Entity.Get</c> / <c>Add</c> /
-      <c>GetOrAdd</c> / <c>Set</c>，以及创建实体、添加组件。每行多 8 字节，每次写入多一次存储；不追踪的组件没有任何开销。
+      <c>GetOrAdd</c> / <c>Set</c>，以及创建实体、添加组件。<see cref="T:EasyEcs.Mut`1" /> 参数只算它写过的行，
+      <c>SetIfChanged</c> 只算值不同的写入。每行多 8 字节，每次写入多一次存储；不追踪的组件没有任何开销。
     </summary>
   </member>
 </doc>

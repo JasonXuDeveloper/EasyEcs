@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.IUniqueIndexed" source="74a0bd21fbd8">
+    <summary>
+      所有 <see cref="T:EasyEcs.IUniqueIndexed`1" /> 共同的标记，不用反射就能知道一个组件类型是唯一的（JIT 会折叠掉的类型测试）。
+      实现 <see cref="T:EasyEcs.IUniqueIndexed`1" />，不要实现这个接口。
+    </summary>
+  </member>
+</doc>

@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+
 <doc>
   <member name="T:EasyEcs.EcsSystem" source="8ecd51d11255">
     <summary>
@@ -27,8 +28,10 @@
       <c>[Changed&lt;T&gt;]</c> 方法选出这个 tick 之后写入的行，所以不包括它们自己在那一轮的写入。
     </summary>
   </member>
-  <member name="P:EasyEcs.EcsSystem.Stats" source="54e5b229d5fe">
-    <summary>这个系统的运行次数和耗时；只有打开 <see cref="P:EasyEcs.WorldOptions.MeasureSystems" /> 才记录。</summary>
+  <member name="P:EasyEcs.EcsSystem.Stats" source="99c56f432239">
+    <summary>
+      这个系统的运行次数、耗时、分配的字节数和访问的实体数；只有打开 <see cref="P:EasyEcs.WorldOptions.MeasureSystems" /> 才记录。
+    </summary>
   </member>
   <member name="P:EasyEcs.EcsSystem.UpdateInterval" source="27ca4f84e26b">
     <summary>每 N 次 World 更新运行一次（1 表示每次都运行）；另见 <see cref="P:EasyEcs.EcsSystem.UpdatePhase" />。</summary>
@@ -50,5 +53,12 @@
   </member>
   <member name="M:EasyEcs.EcsSystem.OnUpdate" source="9530f911ae8c">
     <summary>每次更新时调用，在系统的 [ForEach] 方法之前。</summary>
+  </member>
+  <member name="P:EasyEcs.EcsSystem.RunCount" source="cd4568e8736c">
+    <summary>
+      当前这次运行之前，系统已经运行过多少次（第一次运行时为 0；被 <see cref="P:EasyEcs.EcsSystem.UpdateInterval" /> 跳过的、
+      禁用期间的运行不算，抛出异常的运行算）。<c>[ForEach(Slices = N)]</c> 方法访问它的第 <c>RunCount % N</c> 片行，所以
+      <see cref="M:EasyEcs.EcsSystem.OnUpdate" /> 能知道这次运行访问哪一片。
+    </summary>
   </member>
 </doc>

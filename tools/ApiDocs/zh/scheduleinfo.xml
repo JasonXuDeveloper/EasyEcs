@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.ScheduleInfo" source="558bffffac07">
+    <summary>
+      World 怎样运行它的系统（<see cref="M:EasyEcs.World.DescribeSchedule" />）：每个分组的阶段、每个系统读写什么、一个系统为什么要等前面的阶段，
+      以及哪些冲突的系统只靠注册顺序排先后。这是一份用名字写成的描述，用来阅读（<see cref="M:EasyEcs.ScheduleInfo.ToString" />）或画图
+      （<see cref="M:EasyEcs.ScheduleInfo.ToMermaid" />）；调度器不会再读它。
+    </summary>
+    <param name="Groups">含有系统的分组，默认分组排第一。</param>
+  </member>
+  <member name="P:EasyEcs.ScheduleInfo.Groups" source="71c542f613ae">
+    <summary>含有系统的分组，默认分组排第一。</summary>
+  </member>
+  <member name="M:EasyEcs.ScheduleInfo.ToMermaid" source="4f855e6ac5bf">
+    <summary>
+      把调度画成 mermaid 流程图：每个分组一个子图，里面每个阶段一个子图，每个系统一个节点（写着它的读写），每次等待一条实线箭头
+      （标注冲突的数据，或 "ordered"），每对只靠注册顺序排先后的系统一条虚线箭头。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.ScheduleInfo.ToString" source="782d19431c5e">
+    <summary>缩进文本形式的调度：每个分组列出它的阶段和系统，然后是只靠注册顺序排先后的系统对。</summary>
+  </member>
+</doc>

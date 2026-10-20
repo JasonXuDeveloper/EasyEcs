@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.GroupSchedule" source="0a1288209b67">
+    <summary>一个分组的系统，按阶段排列（<see cref="T:EasyEcs.ScheduleInfo" />）。</summary>
+    <param name="Name">分组类型的名字；默认分组为 "Default"。</param>
+    <param name="Stages">按执行顺序排列的阶段：同一阶段的系统可以同时运行
+    （<see cref="P:EasyEcs.WorldOptions.ParallelSystems" />）。</param>
+    <param name="RegistrationOrdered">读写冲突、又没有任何一串 <see cref="T:EasyEcs.UpdateBeforeAttribute`1" /> /
+    <see cref="T:EasyEcs.UpdateAfterAttribute`1" /> 规定先后的系统对：它们按注册顺序运行，所以反过来注册会改变后一个系统看到的数据。</param>
+  </member>
+  <member name="P:EasyEcs.GroupSchedule.Name" source="4fa081ad3909">
+    <summary>分组类型的名字；默认分组为 "Default"。</summary>
+  </member>
+  <member name="P:EasyEcs.GroupSchedule.RegistrationOrdered" source="88809f2b9322">
+    <summary>
+      读写冲突、又没有任何一串 <see cref="T:EasyEcs.UpdateBeforeAttribute`1" /> / <see cref="T:EasyEcs.UpdateAfterAttribute`1" />
+      规定先后的系统对：它们按注册顺序运行，所以反过来注册会改变后一个系统看到的数据。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.GroupSchedule.Stages" source="546d713792e5">
+    <summary>按执行顺序排列的阶段：同一阶段的系统可以同时运行（<see cref="P:EasyEcs.WorldOptions.ParallelSystems" />）。</summary>
+  </member>
+</doc>
