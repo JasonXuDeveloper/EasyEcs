@@ -1141,8 +1141,11 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             var rows = new RowFilter(match.Filters[a], filter.Tick);
                             if (archetype.AliveCount == 0 || rows.Mode(archetype) == RowFilter.None) continue;
                             var (first, end) = filter.Rows(a, archetype.Count); // all rows, or a slice's (from a word's first row)
-                            for (int start = first; start < end; start += size)
+                            // Chunks end on multiples of size, not size rows after a slice's start: a slice starts at any
+                            // word, and two chunks of one 4,096-row block would race on its change-tick summary.
+                            for (int start = first, stop; start < end; start = stop)
                             {
+                                stop = Math.Min(start - start % size + size, end);
                                 if (chunks == _starts.Length)
                                 {
                                     int grown = Math.Max(8, chunks * 2);
@@ -1154,7 +1157,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                                 _tables[chunks] = archetype;
                                 _filters[chunks] = rows;
-                                _ends[chunks] = Math.Min(start + size, end);
+                                _ends[chunks] = stop;
                                 _starts[chunks++] = start;
                             }
                         }
