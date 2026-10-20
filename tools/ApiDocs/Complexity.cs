@@ -12,10 +12,10 @@ public static partial class Complexity
     private static readonly Dictionary<string, string[]> Receivers = new()
     {
         ["world"] = ["World"], ["World"] = ["World"], ["entity"] = ["Entity"], ["prefab"] = ["Prefab"],
-        ["bag"] = ["DynamicBuffer", "DynamicBufferExtensions"], ["index"] = ["ValueIndex", "OrderedIndexExtensions"],
+        ["bag"] = ["DynamicBuffer", "DynamicBufferExtensions"], ["index"] = ["ValueIndex", "OrderedIndexExtensions", "UniqueIndexExtensions"],
         ["filter"] = ["QueryFilter"], ["QueryFilter"] = ["QueryFilter"], ["system"] = ["EcsSystem"],
         ["snapshot"] = ["WorldSnapshot"], ["singletonRef"] = ["SingletonRef"], ["relations"] = ["RelationIndex"],
-        ["id"] = ["EntityId"],
+        ["id"] = ["EntityId"], ["mut"] = ["Mut"], ["schedule"] = ["ScheduleInfo"], ["ComponentSet"] = ["ComponentSet"],
     };
 
     /// <summary>(type name, member name) to the table's rows for it: (the call as the table writes it, complexity).</summary>
