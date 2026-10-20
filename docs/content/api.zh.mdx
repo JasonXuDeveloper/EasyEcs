@@ -131,7 +131,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | --- | --- | --- |
 | `[ForEach]` 方法 / `world.ForEach<T1..Tn, TJob>(ref job, filter)` | O(M + S) | 最快：结构体 job，没有委托 |
 | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` | O(M + S) | job 还会拿到 `Entity` |
-| `entity.Run<T1..Tn, TJob>(ref job)` / `Run(ref job, filter)` | O(n)，过滤条件每个组件再加 O(1) | 单个实体；实体失效、缺组件或被过滤掉时返回 false；作业做结构变更后 ref 仍然有效 |
+| `entity.Run<T1..Tn, TJob>(ref job)` / `Run(ref job, filter)` | O(n)，过滤条件每个组件再加 O(1) | 单个实体；实体失效、缺组件或被过滤掉时返回 false；job 做结构变更后 ref 仍然有效 |
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数) | 连续行的 span；不能做结构变更 |
 | `world.ForEachParallel<T1..Tn, TJob>(ref job, filter)` / `ForEachEntityParallel` | O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | `INoStructuralChanges` job；每块 1,024 到 `World.ParallelChunkRows` 行，每块一个 job 副本；只在划算时唤醒助手线程 |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | 指向行内的 ref：被追踪组件的每个被访问行都算写入；循环里不能 `await` |

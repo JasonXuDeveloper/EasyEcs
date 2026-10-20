@@ -59,7 +59,7 @@ EasyEcs' features to their place in this file.
 | `Maybe<T>` | `RegenerationSystem` heals burning players less |
 | [Disabling components](/en/docs/guide/cleanup-and-disable) | a frozen unit's `Attack` and `Velocity`; `NewRound` enables them all in bulk |
 | [Cleanup components](/en/docs/guide/cleanup-and-disable) (`ICleanupComponent`, `Destroyed`) | `Spawn`: a destroyed NPC leaves it behind for `RespawnSystem.Revive` |
-| [Hierarchy](/en/docs/guide/hierarchy) (`ChildOf`, `Children`) | projectiles are children of their player |
+| [Hierarchy](/en/docs/guide/hierarchy) (`ChildOf`, `Children`, `Descendants`) | projectiles are children of their player; `Transfer` collects the subtree |
 | [Structural changes during passes](/en/docs/guide/structural-changes) | statuses, deaths, respawns, projectiles spawned and destroyed mid-pass |
 | [Prefabs](/en/docs/guide/prefabs) (`Prefab`, `Instantiate`, `EnsureCapacity`), cloning | `Hero`, `Grunt`, `Brute` (a variant of `Grunt`); `Mirror` clones a living unit |
 | [Change tracking](/en/docs/guide/change-tracking) and removal detection | `ReplicationSystem`; `WrittenSinceCheckpoint` |
@@ -67,7 +67,7 @@ EasyEcs' features to their place in this file.
 | [Groups](/en/docs/guide/groups) (`IGroup`, `GroupBy`, `InGroup`) | `Zone`: a table per zone |
 | [Ordered index, relations, target policies](/en/docs/guide/indexes-and-relations) | `Kills` leaderboard; `Friend` links, dropped when a player leaves |
 | System groups, `UpdateInterval`, `UpdatePhase`, ordering, lifecycle | `Replication`; `ManaSystem`, `RegenerationSystem`; `ClockSystem`; `SteeringSystem.OnCreate` |
-| [Queries](/en/docs/guide/queries) and handles | `NearestPlayer`, `Census`, `ShotsLeft`, `Hit` |
+| [Queries](/en/docs/guide/queries), handles and [one-entity jobs](/en/docs/guide/queries#run-on-one-entity) | `NearestPlayer`, `Census`, `ShotsLeft`; `Hit` runs the `TakeHit` job with `entity.Run` |
 | [Bulk operations](/en/docs/guide/bulk) | `Instantiate(prefab, span)`, `DestroyEntities`, `RemoveAll`, `EnableAll` |
 | [Snapshots](/en/docs/guide/snapshots), [saves and moves](/en/docs/guide/saves) | `Checkpoint` / `Rewind`, `Save` / `Load`, `Transfer` |
 | Introspection, diagnostics, error policy | `Tables`, `Slowest`, `Failure` |
@@ -190,9 +190,13 @@ that threw: under `SystemErrorPolicy.Disable` the exception is data in `system.E
 ### Questions between ticks [#queries]
 
 `PlayersIn` counts one group's table. `Any` stops at the first match. `ShotsLeft` and `Hit` start from a handle or an
-id a client sent: a stale one answers false, and `TryGetRef` takes `Health` by `ref` only if the unit has it.
+id a client sent: a stale one answers false. `Hit` is a request on one unit, so it runs a job with `entity.Run`: one
+lookup for the job's components, and the `Alive` filter turns a dead unit away. The job declares that it writes
+`Health`, so the hit is stamped for the next replication.
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#queries</include>
+
+<include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#requests</include>
 
 ### Bags, clones, leaderboards and friends [#buffers-and-indexes]
 
@@ -206,8 +210,8 @@ player.
 ### Leaving and changing battles [#leave-and-transfer]
 
 A player who leaves is destroyed: its projectiles go with it (children), and the target policy removes it from every
-friend list. `Transfer` moves a player and its projectiles to another battle of the same thread with `MoveEntities`:
-they arrive as new entities, the shots still its children.
+friend list. `Transfer` collects the player's whole subtree with `Descendants` and moves it to another battle of the same
+thread with `MoveEntities`: they arrive as new entities, the shots still its children.
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#leave-and-transfer</include>
 

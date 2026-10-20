@@ -13,10 +13,10 @@
       键为 <paramref name="key" /> 的实体数：O(1)（一次哈希探测；键是指向本 World 实体的关系时，是一次数组访问；第一次查找会把每一行索引一遍）。
     </summary>
   </member>
-  <member name="M:EasyEcs.ValueIndex`2.Find(`1)" source="2e03fa9132e3">
+  <member name="M:EasyEcs.ValueIndex`2.Find(`1)" source="20b4d4b8585d">
     <summary>
       <typeparamref name="T" /> 的键为 <paramref name="key" /> 的实体（键为 null 时一个都没有）：开始 O(1)，之后每个实体 O(1)
-      （第一次查找会把每一行索引一遍）。只能在所有者线程调用。循环里可以销毁实体，但不能改 <typeparamref name="T" />。
+      （第一次查找会把每一行索引一遍）。只能在所有者线程调用。循环里可以销毁实体，但不能改 <typeparamref name="T" />（键清空后，它的列表会交给接下来增长的键）：先收集实体，再修改。
     </summary>
   </member>
   <member name="M:EasyEcs.ValueIndex`2.TryFind(`1,EasyEcs.Entity@)" source="eac8fcf57893">

@@ -555,22 +555,22 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 - **释放行时回收**：搬行时会先拷贝引用，那时列表还在用。
 - **固定数量的池**（256 个）：超过这个数的反复创建销毁又会分配，而峰值本来就受持有这些列表的实体数限制。
 
-## D33. 单个实体运行遍历的作业：`entity.Run` [#d33-one-entity-runs-a-passs-job]
+## D33. 单个实体运行遍历的 job：`entity.Run` [#d33-one-entity-runs-a-passs-job]
 
-**决定。** `entity.Run<T1..Tn, TJob>(ref job)` 和 `Run(ref job, filter)` 在单个实体上运行 `IForEachEntity` 作业，保证和遍历一样：
-`Writes` 打变更戳；作业自己做结构变更后 ref 依然有效（写过的组件会带到新行，作业抛异常时也一样）；`INoStructuralChanges` 冻结结构。
+**决定。** `entity.Run<T1..Tn, TJob>(ref job)` 和 `Run(ref job, filter)` 在单个实体上运行 `IForEachEntity` job，保证和遍历一样：
+`Writes` 打上变更 tick；job 自己做结构变更后 ref 依然有效（写过的组件会带到新行，job 抛异常时也一样）；`INoStructuralChanges` 冻结结构。
 过滤条件直接在这一行上检查。
 
 **原因。**
 - **一次处理一个实体的代码**（一个请求、一条发给 Actor 的消息），否则要通过句柄逐个查组件，每次结构变更后再重新取 ref。
-  用作业，所有组件只查一次表，规则也和系统一样。
+  用 job，所有组件只查一次表，规则也和系统一样。
 - **不比它替代的代码慢。** 在 10,000 个实体上调用 1,000 次，1、3 或 5 个组件，有无过滤、有无结构变更，对照通过句柄手写的同样工作
   （`SingleEntityBenchmark`）：耗时是手写的 0.69 到 1.06 倍，0 B。1.04 和 1.06 的两组（有过滤又有结构变更，3 和 5 个组件）在误差范围内。
 - **线程规则仍归所有者线程。** 结构门空闲时（所有者线程不在任何区域里），用普通的标志写入冻结结构；在并行区域里，区域的冻结已经持有；
   分析器把 `Run` 当作结构变更调用报出（[EECS010](/zh/docs/guide/analyzer#eecs010)、EECS013、EECS014）。
 
 **比较过。**
-- **通过查询缓存检查过滤条件：** 每次调用都要按过滤条件查一次表集合，比作业本身还贵；检查这一行所在表的掩码和存在位，过滤条件每个组件 O(1)。
+- **通过查询缓存检查过滤条件：** 每次调用都要按过滤条件查一次表集合，比 job 本身还贵；检查这一行所在表的掩码和存在位，过滤条件每个组件 O(1)。
 - **像遍历一样用 Interlocked 冻结和计数：** 每次调用约 12 ns；结构门空闲时只有所有者线程会碰它们。
 
 ## D34. 通过接口给分组加过滤条件 [#d34-group-filters-through-interfaces]
@@ -603,14 +603,14 @@ tick 为 0（从未写过）。默认仍是 `true`。
 - **读完再清掉 tick**：行原来的 tick 也没了，读档之前做过的写入会从 `Changed<T>` 里消失。
 - **单独的 `RestoreEntitiesInto`：** 和原调用只差一点；用参数在调用处写明更清楚。
 
-## D36. 不加：并行批处理作业、行的最后写入 tick、公开读写集、多个 World 共享并行预算 [#d36-not-added]
+## D36. 不加：并行批处理 job、行的最后写入 tick、公开读写集、多个 World 共享并行预算 [#d36-not-added]
 
 **决定。** 权衡了四个需求，都没有加。
 
 **原因。**
-- **并行批处理作业**（`ForEachBatchParallel`，以及 span 方法上的 `[ForEach(Parallel = true)]`）。10 万个实体，`ParallelForEachBenchmark`：
+- **并行批处理 job**（`ForEachBatchParallel`，以及 span 方法上的 `[ForEach(Parallel = true)]`）。10 万个实体，`ParallelForEachBenchmark`：
   重的转向计算，并行批处理 766 µs，逐实体并行 727 µs；轻的漂移计算分别是 54.5 µs 和 55.6 µs（单线程 107 µs）。多线程时逐实体遍历已经
-  跑满内存带宽，批处理形式多出一个 API、一种作业类型和几条生成器路径，却没有收益。
+  跑满内存带宽，批处理形式多出一个 API、一种 job 类型和几条生成器路径，却没有收益。
 - **`entity.LastWriteTick<T>()`。** `entity.Run(ref job, QueryFilter.Create().Changed<T>(tick))` 就能回答单个实体“之后有没有写过”，
   不用公开 tick 列。
 - **公开 `SystemAccess`。** 读写集是调度器做决定的依据；公开就把它的形状冻结进了 API，而调度器之外已经没有用处。

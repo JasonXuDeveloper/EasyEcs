@@ -143,15 +143,15 @@
   <member name="M:EasyEcs.Entity.Run``3(``2@)" source="7805fc26ee81">
     <summary>
       实体有 <c>T1, T2</c> 全部组件时，在它上面运行 <paramref name="job" />，传入的 ref 和 <c>World.ForEachEntity</c> 给的一样：
-      作业运行了返回 true，实体缺组件或已不存活返回 false。作业写入的组件（<c>IForEachEntity.Writes</c>）算作写入；作业做的结构变更
-      立即生效，这些写入会带到实体的新行上（作业抛异常时也一样）。实现了 <see cref="T:EasyEcs.INoStructuralChanges" /> 的作业省掉这些
+      job 运行了返回 true，实体缺组件或已不存活返回 false。job 写入的组件（<c>IForEachEntity.Writes</c>）算作写入；job 做的结构变更
+      立即生效，这些写入会带到实体的新行上（job 抛异常时也一样）。实现了 <see cref="T:EasyEcs.INoStructuralChanges" /> 的 job 省掉这些
       簿记。O(1)，零分配。
     </summary>
   </member>
   <member name="M:EasyEcs.Entity.Run``3(``2@,EasyEcs.QueryFilter@)" source="d11bd3667042">
     <summary>
       实体还通过 <paramref name="filter" /> 时才执行的 <see cref="M:EasyEcs.Entity.Run``3(``2@)" />，按查询检查一行的方式检查
-      （<c>Without</c>、<c>WithAny</c>、<c>Changed</c>、分组）：不通过就不运行作业，返回 false。O(过滤条件涉及的组件数)。
+      （<c>Without</c>、<c>WithAny</c>、<c>Changed</c>、分组）：不通过就不运行 job，返回 false。O(过滤条件涉及的组件数)。
     </summary>
   </member>
 </doc>

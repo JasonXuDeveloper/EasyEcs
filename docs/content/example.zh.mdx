@@ -54,7 +54,7 @@ flowchart LR
 | `Maybe<T>` | `RegenerationSystem`：着火的玩家回血更少 |
 | [禁用组件](/zh/docs/guide/cleanup-and-disable) | 被冻住单位的 `Attack` 和 `Velocity`；`NewRound` 批量重新启用 |
 | [清理组件](/zh/docs/guide/cleanup-and-disable)（`ICleanupComponent`、`Destroyed`） | `Spawn`：NPC 销毁后留下它，交给 `RespawnSystem.Revive` |
-| [层级](/zh/docs/guide/hierarchy)（`ChildOf`、`Children`） | 投射物是玩家的子实体 |
+| [层级](/zh/docs/guide/hierarchy)（`ChildOf`、`Children`、`Descendants`） | 投射物是玩家的子实体；`Transfer` 收集整棵子树 |
 | [遍历中的结构变更](/zh/docs/guide/structural-changes) | 遍历途中增删状态、死亡、复活、生成和销毁投射物 |
 | [预制体](/zh/docs/guide/prefabs)（`Prefab`、`Instantiate`、`EnsureCapacity`）与克隆 | `Hero`、`Grunt`、`Brute`（`Grunt` 的变体）；`Mirror` 克隆一个活着的单位 |
 | [变更追踪](/zh/docs/guide/change-tracking)与移除检测 | `ReplicationSystem`；`WrittenSinceCheckpoint` |
@@ -62,7 +62,7 @@ flowchart LR
 | [分组](/zh/docs/guide/groups)（`IGroup`、`GroupBy`、`InGroup`） | `Zone`：每个区域一组表 |
 | [有序索引、关系、目标策略](/zh/docs/guide/indexes-and-relations) | `Kills` 击杀榜；`Friend` 好友关系，玩家离开时自动清掉 |
 | 系统分组、`UpdateInterval`、`UpdatePhase`、排序、生命周期 | `Replication`；`ManaSystem`、`RegenerationSystem`；`ClockSystem`；`SteeringSystem.OnCreate` |
-| [查询](/zh/docs/guide/queries)与实体句柄 | `NearestPlayer`、`Census`、`ShotsLeft`、`Hit` |
+| [查询](/zh/docs/guide/queries)、实体句柄与[单实体 job](/zh/docs/guide/queries#run-on-one-entity) | `NearestPlayer`、`Census`、`ShotsLeft`；`Hit` 用 `entity.Run` 运行 `TakeHit` job |
 | [批量操作](/zh/docs/guide/bulk) | `Instantiate(prefab, span)`、`DestroyEntities`、`RemoveAll`、`EnableAll` |
 | [快照](/zh/docs/guide/snapshots)、[存档与迁移](/zh/docs/guide/saves) | `Checkpoint` / `Rewind`、`Save` / `Load`、`Transfer` |
 | 内省、诊断、错误策略 | `Tables`、`Slowest`、`Failure` |
@@ -171,10 +171,13 @@ World 的配方，查询看不到它们：`Hero` 既可以一次设置多个组�
 
 ### tick 之间的查询 [#queries]
 
-`PlayersIn` 只数一个分组的表。`Any` 找到第一个就停。`ShotsLeft` 和 `Hit` 从客户端发来的句柄或 id 出发：失效的直接返回 false，
-`TryGetRef` 只在单位确实有 `Health` 时才按 `ref` 拿到它。
+`PlayersIn` 只数一个分组的表。`Any` 找到第一个就停。`ShotsLeft` 和 `Hit` 从客户端发来的句柄或 id 出发：失效的直接返回 false。
+`Hit` 是作用在单个单位上的请求，所以用 `entity.Run` 运行一个 job：job 要的组件只查一次表，`Alive` 过滤条件把死掉的单位挡在外面。
+job 声明了它写 `Health`，所以这次命中会打上变更 tick，随下一次同步发出去。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#queries</include>
+
+<include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#requests</include>
 
 ### 背包、克隆、击杀榜和好友 [#buffers-and-indexes]
 
@@ -185,8 +188,8 @@ World 的配方，查询看不到它们：`Hero` 既可以一次设置多个组�
 
 ### 离开与换场 [#leave-and-transfer]
 
-玩家离开就是被销毁：投射物（子实体）随之销毁，目标策略把它从所有好友列表里移除。`Transfer` 用 `MoveEntities`
-把玩家和它的投射物搬到同一线程上的另一场战斗：它们在那边是新实体，投射物仍是它的子实体。
+玩家离开就是被销毁：投射物（子实体）随之销毁，目标策略把它从所有好友列表里移除。`Transfer` 用 `Descendants`
+收集玩家的整棵子树，再用 `MoveEntities` 搬到同一线程上的另一场战斗：它们在那边是新实体，投射物仍是它的子实体。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#leave-and-transfer</include>
 
