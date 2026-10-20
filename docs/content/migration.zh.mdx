@@ -9,6 +9,83 @@ icon: CircleArrowUp
 要跨好几个版本升级，就从最旧的一节开始，按顺序往下改。每个版本新增了什么见[更新日志](/zh/docs/changelog)；当前的 API
 见 [API 参考](/zh/docs/api)。
 
+## v4.6 → v4.7 [#v4-6-to-v4-7]
+
+为 4.6 写的代码不用改就能编译，除非某个系统声明了名为 `RunCount` 的成员，或者某个文件引入的其他命名空间里有和新类型同名的类型。
+有两个调用的行为变了；写被追踪组件的并行遍历切分行的方式也变了。
+
+### `SaveEntities` 拒绝含单例的集合 [#v4-7-save-entities]
+
+`ComponentSet` 现在也能放单例（`WithSingleton<T>()`），`With(Type)` 遇到单例类型也不再抛异常，而是加进去。实体组存档不写单例，
+所以集合里有单例时，`SaveEntities(output, ids, set)` 抛 `ArgumentException`。从一组类型里用 `With(typeof(...))` 建集合、又混进了单例的，
+现在在存档时报错，而不是在 `With` 时。记录里的组件单独放一个集合：
+
+**4.6**
+
+```csharp doccheck=skip
+static readonly ComponentSet Record = ComponentSet.Create().With(typeof(Bank)).With(typeof(Rates));  // Rates 是单例，With 会拒绝
+```
+
+**4.7**
+
+```csharp
+public record struct Bank(long Gold) : IComponent;
+
+private static readonly ComponentSet Record = ComponentSet.Create().With<Bank>();
+```
+
+含单例的集合用在整个 World 的 `Save(output, in exclude)` 和 `Load(input, in keep)` 上（[重启](/zh/docs/guide/saves#restart)）。
+
+### `EcsSystem.RunCount` [#v4-7-run-count]
+
+`EcsSystem` 新增公开的 `long RunCount`（本次之前已经运行的次数，`[ForEach(Slices = N)]` 靠它选片）。系统里同名的成员会隐藏它：
+警告 CS0108，在“警告即错误”的构建里就是错误。给成员改个名；意思相同的话，直接读基类的属性。
+
+**4.6**
+
+```csharp doccheck=skip
+public class Spawner : EcsSystem
+{
+    private static long RunCount;                    // 4.7 里会隐藏 EcsSystem.RunCount
+    protected override void OnUpdate() => RunCount++;
+}
+```
+
+**4.7**
+
+```csharp
+public class Spawner : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        if (RunCount % 10 == 0) { /* 每十次运行一次 */ }
+    }
+}
+```
+
+### 写被追踪组件的并行遍历 [#v4-7-parallel-chunks]
+
+写被追踪组件的并行 `[ForEach]` 方法（或 `ForEachParallel` job）按 4,096 行的整数倍切块，最少 4,096 行，不再是最少 1,024 行：
+同一个 4,096 行块里的两个分块会争用它的变更摘要，可能丢失变更戳（[D48](/zh/docs/decisions#d48-parallel-tracked-chunks)）。代码不用改；
+不超过 4,096 行的表现在只切成一块，所以小的并行遍历用到的线程可能比以前少。不写被追踪组件的遍历照旧切块。
+
+### 带 `keep` 集合的 `Load` [#v4-7-load-overloads]
+
+在 `Load(input, markWritten = true)` 之外新增了 `Load(input, in keep, markWritten = true)`。4.6 的调用照旧绑定：`Load(bytes)`、
+`Load(bytes, false)` 和 `Load(bytes, markWritten: false)` 都走不带 `keep` 的重载，`Load(bytes, default)` 也是，意思是 `markWritten: false`，
+而不是空集合。要保留单例，传一个 `ComponentSet`（`static readonly` 字段）。集合里有组件时抛 `ArgumentException`：读档会替换所有实体。
+
+### `MeasureSystems` 统计得更多 [#v4-7-measure-systems]
+
+打开 `WorldOptions.MeasureSystems` 后，为了新的 `SystemStats` 字段，每次运行还要读两次线程的分配计数（并行 `[ForEach]` 的每个辅助块也一样），
+每个 `[ForEach]` 遍历开始时还要数一次匹配数。开着统计的 World 每次更新都要付这笔开销；没开 `MeasureSystems` 的什么都没变。
+
+### 新的公开类型 [#v4-7-new-types]
+
+`namespace EasyEcs` 里新增了 `Mut<T>`、`IUniqueIndexed` / `IUniqueIndexed<TKey>`、`UniqueIndexExtensions`、`ChangedAnyAttribute<…>`、
+`RemovedAnyAttribute<…>`、`ScheduleInfo`、`GroupSchedule`、`StageInfo`、`SystemInfo`、`StageWait` 和 `SystemPair`。某个文件引入的其他命名空间里
+有同名类型时，会报 CS0104（引用不明确）：写全限定名，或者用 `using` 起个别名。
+
 ## v4.3 → v4.4 [#v4-3-to-v4-4]
 
 存档格式变了，EasyEcs 也改为基于 Nino 4.0.0-rc.6。为 4.3 写的代码不用改就能编译；要注意的是已经存下的数据和 Nino 的包引用。

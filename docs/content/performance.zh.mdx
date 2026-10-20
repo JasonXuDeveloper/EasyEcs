@@ -478,10 +478,10 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 | 结构变更、存在位 | `EntityTests`、`ComponentTests`、`PresenceTests` | `MicroBenchmarks`（`Churn`、`ToggleComponent`）、`SparseBenchmark`、`CountBenchmark` | [`StructuralChangeComparison`](/zh/docs/comparison#structural-changes) |
 | 批量变更和生成 | `BulkTests` | `BulkBenchmark`、`MicroBenchmarks.ChurnBatch` | [`BulkChangeComparison`、`BulkSpawnComparison`](/zh/docs/comparison#bulk) |
 | 预制体和克隆 | `InstantiateTests` | `PrefabBenchmark` | [`OperationBenchmark`（`Instantiate`）](/zh/docs/comparison#operations) |
-| 变更追踪 | `ChangedTests` | `ChangeTrackingBenchmark` | [`ChangeTrackingComparison`](/zh/docs/comparison#change-tracking) |
-| 移除检测 | `RemovedTests` | `BattleServerBenchmark` | [`RemovalComparison`](/zh/docs/comparison#removal-detection) |
+| 变更追踪、`Mut<T>` | `ChangedTests` | `ChangeTrackingBenchmark`、`ChangeTrackingWriteBenchmark` | [`ChangeTrackingComparison`](/zh/docs/comparison#change-tracking) |
+| 移除检测、销毁日志 | `RemovedTests` | `BattleServerBenchmark`、`DestroyLogBenchmark` | [`RemovalComparison`](/zh/docs/comparison#removal-detection) |
 | 禁用 | `DisableTests` | `BulkBenchmark`（`DisableAll`） | [`DisableComparison`](/zh/docs/comparison#disabling) |
-| 值索引、有序索引 | `IndexTests`、`OrderedIndexTests` | `IndexBenchmark`、`OrderedIndexBenchmark` | [`IndexComparison`、`ValueQueryComparison`](/zh/docs/comparison#indexes-and-relations) |
+| 值索引、唯一键、有序索引 | `IndexTests`、`OrderedIndexTests` | `IndexBenchmark`、`OrderedIndexBenchmark` | [`IndexComparison`、`ValueQueryComparison`](/zh/docs/comparison#indexes-and-relations) |
 | 关系 | `RelationTests`、`TargetPolicyTests` | `RelationBenchmark` | [`RelationComparison`](/zh/docs/comparison#indexes-and-relations) |
 | 层级 | `HierarchyTests` | `HierarchyBenchmark` | [`HierarchyComparison`](/zh/docs/comparison#hierarchy) |
 | 分组 | `GroupTests` | `GroupBenchmark` | [`ValueQueryComparison`](/zh/docs/comparison#indexes-and-relations) |
@@ -490,12 +490,14 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 | 动态缓冲 | `DynamicBufferTests` | `DynamicBufferBenchmark` | — |
 | 清理组件 | `CleanupTests` | `CleanupBenchmark` | — |
 | 系统顺序和分组 | `SystemTests` | `OrderingBenchmark` | — |
+| 分片（`[ForEach(Slices = N)]`） | `ForEachSystemTests` | `SlicesBenchmark` | — |
 | 并行系统和 `[ForEach(Parallel = true)]` | `ParallelTests`、`ConcurrencyTests` | `ParallelSystemsBenchmark`、`ParallelForEachBenchmark` | [`ParallelSystemsComparison`、`ParallelQueryComparison`](/zh/docs/comparison#parallel) |
 | 快照 | `SnapshotTests` | `SnapshotBenchmark`（`Capture`、`Restore`） | — |
-| 存档 | `SerializationTests` | `SnapshotBenchmark`（`Save`、`Load`） | [`SaveComparison`](/zh/docs/comparison#saves) |
+| 存档 | `SerializationTests` | `SnapshotBenchmark`（`Save`、`Load`、`SaveWithout`、`LoadKeeping`） | [`SaveComparison`](/zh/docs/comparison#saves) |
 | 在 World 之间搬实体 | `MoveTests` | `MigrationBenchmark` | — |
 | 卸载插件的类型 | `UnloadTests` | `UnloadBenchmark` | — |
-| 内省 | `IntrospectionTests` | `IntrospectionBenchmark` | — |
+| 内省、系统统计和调度 | `IntrospectionTests`、`SystemTests` | `IntrospectionBenchmark`、`ParallelSystemsBenchmark`（`Measure`） | — |
+| 还回内存（`TrimExcess`） | `IntrospectionTests`、`AllocationTests` | `TrimBenchmark` | — |
 | 泛型系统 | `GenericTests` | — | — |
 | 生成器、分析器、代码修复 | `GeneratorTests`、`CodeFixTests` | — | — |
 | 零分配 | `AllocationTests`（每次测试运行，预算 0 B） | 每个跑分的 Allocated 列 | 每项对比 |
@@ -557,7 +559,10 @@ tick 一次、用 `[Changed<T>]` 和 `[Removed<T>]` 做的同步。`BattleServer
 `ChangeTrackingBenchmark` 同步血量：每个 tick 写 100,000 个实体里的 10 个（安静的 tick）或 1,000 个，然后一个系统用
 `[Changed<Health>]`（`Changed=True`）或访问每一行，把血量复制到副本。`QueryTick` 用临时 `Query` 做同样的事。
 `DynamicBufferBenchmark` 同步 100,000 个背包里变了的 1,000 个，背包分别存为 `DynamicBuffer<int>` 和被追踪组件里的
-`List<int>`。
+`List<int>`。`ChangeTrackingWriteBenchmark` 每个 tick 重算 100,000 个瞄准方向，其中十分之一会变：通过 `ref Aim` 写
+（`Mut=False`，访问到的每一行都打戳），或者通过 `Mut<Aim>.SetIfChanged` 写（`Mut=True`，只给变了的行打戳）。`Write` 只有写入方，
+`WriteAndRead` 在后面加上 `[Changed<Aim>]` 的同步。`DestroyLogBenchmark` 把 1,000 个实体创建再销毁十轮，分别逐个销毁和整表销毁，
+销毁日志关闭（`DestroyLog=0`）和打开（4,096 条记录的环），以及再加上 16 个客户端在不同 tick 上的读取。
 
 <Tabs items={['写 10 个', '写 1,000 个']}>
 <Tab value="写 10 个">
@@ -573,12 +578,16 @@ tick 一次、用 `[Changed<T>]` 和 `[Removed<T>]` 做的同步。`BattleServer
 </Tabs>
 
 <BenchChart bench="DynamicBufferBenchmark" />
+<BenchChart bench="ChangeTrackingWriteBenchmark" />
+<BenchChart bench="DestroyLogBenchmark" />
 
 “每一行”那几项在参考虚拟机上每次运行都有波动（取决于 100,000 行落在物理内存的哪里）；`[Changed]` 那几项是稳定的。
 
 ### 索引、关系、分组和层级 [#index-benchmarks]
 
-`IndexBenchmark` 把关系当背包用：100,000 件物品指向 1,000 个主人之一；100 次交易，然后统计 100 个背包。
+`IndexBenchmark` 把关系当背包用：100,000 件物品指向 1,000 个主人之一；100 次交易，然后统计 100 个背包。它的
+`RekeyAndLookup` 用例给 100,000 个玩家里的 100 个换会话令牌，再按令牌找出 100 个，令牌分别用 `IIndexed<long>` 和
+`IUniqueIndexed<long>`（每次写入先认领键）建索引：两者之差就是检查的代价。
 `OrderedIndexBenchmark` 维护一个 100,000 个分数的排行榜（变 1,000 个，然后读前 10 名和一个分段），对比扫描。
 `GroupBenchmark` 对 16 个区中 4 个区的玩家求和，分别用分组（每区一张表）、值索引和扫描。`RelationBenchmark` 改写 10,000
 个好友列表里的 100 个，遍历 100 个关注者集合。`HierarchyBenchmark` 连同队员一起销毁 1,000 个小队队长（`ChildOf`，级联），
@@ -600,12 +609,22 @@ tick 一次、用 `[Changed<T>]` 和 `[Removed<T>]` 做的同步。`BattleServer
 <BenchChart bench="ParallelSystemsBenchmark" />
 <BenchChart bench="ParallelForEachBenchmark" />
 
-参考机器只有 4 核，这次运行的并行数字误差很大：把它们理解为“多核下更快”，不要当成精确的加速比。
+参考机器只有 4 核，这次运行的并行数字误差很大：把它们理解为“多核下更快”，不要当成精确的加速比。`ParallelSystemsBenchmark`
+还分别在关闭和打开 `MeasureSystems` 时各跑一次（`Measure`）：这就是按系统统计耗时、字节和实体数的代价。
+
+### 分片 [#slices-benchmarks]
+
+`SlicesBenchmark` 在 100,000 个 NPC 上跑一个 AI 思考步骤，分别写成 `[ForEach]`（`Slices=1`）和 `[ForEach(Slices = 4)]`，
+有逐实体的（`Stable`）、带实体句柄的（`Entity`，一种可能改结构的遍历）和并行的。`Update` 是一次更新，也就是一个 tick 要付的峰值；
+`Cycle` 是四次更新，两种写法都把每一行访问一遍，所以能看出分片本身的开销。
+
+<BenchChart bench="SlicesBenchmark" />
 
 ### 快照、存档、迁移和卸载 [#state-benchmarks]
 
 `SnapshotBenchmark` 把一个 100,000 实体的 World（两张表，三分之一的 id 被回收过，一个单例）捕获成一个新快照，原地恢复
-一个快照，存成字节写进复用的缓冲，再加载回来。`Capture` 会分配它返回的快照；要复用，就捕获到已有的快照里。
+一个快照，存成字节写进复用的缓冲，再加载回来。`Capture` 会分配它返回的快照；要复用，就捕获到已有的快照里。`SaveWithout` 存档时去掉一个组件和那个单例（重启时的存档），
+`LoadKeeping` 加载时保留 World 自己的单例（重启时的加载）。
 `MigrationBenchmark` 把 10 个各带 99 件物品的玩家搬到另一个 World 再搬回来，分别经过字节（`SaveEntities` /
 `LoadEntities`）和在内存里（`MoveEntities`）；`SaveAndLoadOne` 是一次存档的固定开销。`UnloadBenchmark` 从一个 10,000 或
 100,000 个玩家的 World 里移除一个插件的类型（`RemoveTypes`），这是重新加载游戏逻辑之前的一步。
@@ -614,12 +633,15 @@ tick 一次、用 `[Changed<T>]` 和 `[Removed<T>]` 做的同步。`BattleServer
 <BenchChart bench="MigrationBenchmark" />
 <BenchChart bench="UnloadBenchmark" />
 
-### 内省 [#introspection-benchmarks]
+### 内省与修剪 [#introspection-benchmarks]
 
-`IntrospectionBenchmark` 为仪表盘描述战斗服务器的 World（`world.Describe()`：每张表及其列、行数和字节），并为调试器描述
-一个实体（`entity.Describe()`，值会装箱）。两者都会分配它们返回的描述：它们是工具，不在 tick 路径上。
+`IntrospectionBenchmark` 为仪表盘描述战斗服务器的 World（`world.Describe()`：每张表及其列、行数和字节），为调试器描述
+一个实体（`entity.Describe()`，值会装箱），再描述它的系统调度（`world.DescribeSchedule()`）。每一项都会分配它返回的描述：
+它们是工具，不在 tick 路径上。`TrimBenchmark` 在高峰过后还回内存：100,000 个实体分布在 16 或 256 张表里，销毁到只剩百分之一，
+再调 `TrimExcess`；`TrimTrimmed` 是在已经没什么可还的 World 上调用，也就是它的固定开销。
 
 <BenchTable bench="IntrospectionBenchmark" />
+<BenchTable bench="TrimBenchmark" />
 
 ## 如何复现 [#measuring]
 

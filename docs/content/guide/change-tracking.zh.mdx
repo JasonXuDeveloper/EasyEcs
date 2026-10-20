@@ -6,7 +6,7 @@ icon: Radar
 
 很多系统只关心“变了什么”：把状态同步给客户端、把脏实体存盘、给移动过的单位重建空间索引。给组件加上
 `ITrackChanges`，再给方法加上 `[Changed<T>]`，这个方法就只会访问自系统上次运行以来 `T` 被写过的实体。
-`[Removed<T>]` 则反过来，专门找出这段时间里失去了 `T` 的实体。
+`[Removed<T>]` 则反过来，专门找出这段时间里失去了 `T` 的实体；被销毁的实体由[销毁日志](#destroy-log)报告。
 
 ## 什么时候用 [#when-to-use-it]
 
@@ -15,8 +15,9 @@ icon: Radar
 </Callout>
 
 <Callout type="warn" title="不适合">
-  每个 tick 每一行都会重写的组件，比如一直在移动的单位的 `Position`：没有可跳过的行，每次写入还要多记一个 tick。
-  只追踪有人消费的组件，不要什么都追踪。
+  每个 tick 每一行的值都真的会变的组件，比如一直在飞的子弹的 `Position`：没有可跳过的行，每次写入还要多记一个 tick。
+  代码每个 tick 都重写、但值大多不变的组件，反而值得追踪：[值变了才写](#set-if-changed)。只追踪有人消费的组件，
+  不要什么都追踪。
 </Callout>
 
 ## 怎么用 [#how-to-use-it]
@@ -73,8 +74,9 @@ world.Update();
 | 算写入 | 不算写入 |
 | --- | --- |
 | `[ForEach]` 方法和结构体 job（`Writes`）的 `ref T` 参数（批处理方法是 `Span<T>`） | `in T` 参数、`ReadOnlySpan<T>` |
+| [`Mut<T>`](#set-if-changed) 参数：`Write()`，以及值不同时的 `SetIfChanged(value)`（只算这一行） | `Mut<T>.Value`，以及值相等时的 `SetIfChanged(value)` |
 | `Query` 的元素（枚举器会给访问到的每一行打上 tick） | `TryGet<T>(out T)`（拿到的是副本）、`Read<T>()`（只读） |
-| `entity.Get<T>()`、找到时的 `TryGetRef<T>(out found)`、`GetOrAdd<T>()`、`Set(...)` | `Has<T>()` |
+| `entity.Get<T>()`、找到时的 `TryGetRef<T>(out found)`、`GetOrAdd<T>()`、`Set(...)`，值不同时的 `SetIfChanged(value)` 和 `SetXIfChanged(…)` | `Has<T>()`，值相等时的 `SetIfChanged(value)` 和 `SetXIfChanged(…)` |
 | 带着该组件的 `CreateEntity(...)`、`CreateEntities(...)`、`Instantiate(...)`、`Clone()` | 移除组件（属于[移除](#removal-detection)） |
 | `entity.Enable<T>()`、`world.EnableAll<T>()`（保留的值回来了） | `entity.Disable<T>()`（算作移除） |
 | `world.Restore(snapshot)`、`world.Load(bytes)`、`LoadEntities(...)`、`LoadEntitiesInto(...)`（恢复或加载的每一行） | `LoadEntitiesInto(..., markWritten: false)`：记录里的每个组件 tick 都为 0，不管是覆盖的还是新加的。用于恢复持久化的记录，又不想把它再存一遍或再发一遍（[恢复记录](/zh/docs/guide/migration-and-unload#records)）。`world.Load(bytes, markWritten: false)`：加载的每一行 tick 都为 0，也没有哪一行算作移除，用于重启后接着跑存下的 World（[重启](/zh/docs/guide/saves#restart)） |
@@ -104,6 +106,75 @@ foreach (var item in world.Query<Health>(changed))                  // 元素会
 
 tick 之所以是调用参数，是因为“变化”总是相对于某个人上次看的时间点：`[Changed<T>]` 方法用的是自己系统的上次运行，
 临时查询用的是调用方记下的 mark。tick 为 0 时会选中所有拥有 `T` 的行。
+
+## 值变了才写 [#set-if-changed]
+
+很多系统每个 tick 都重新算一个很少变化的值：已经站在目的地的 NPC 再走一步，AI 选出的还是原来那个目标，没人换过的装备
+再汇总一遍属性。用 `ref` 参数的话，方法访问到的每一行都算作写入，下游每个 `[Changed<T>]` 读取方都得把所有行过一遍。
+换成 `Mut<T>` 参数，只有方法真正写过的行才会打上 tick：
+
+| `Mut<T>` 的成员 | 作用 |
+| --- | --- |
+| `Value` | 以 `ref readonly` 拿到组件：只是读取，不打 tick |
+| `Write()` | 以 `ref` 拿到组件，并给这一行打上 tick：方法确定要写时调用 |
+| `SetIfChanged(in value)` | 只有 `value` 和当前值不同时才存入并打 tick；返回是否写了 |
+
+```csharp title="Patrol.cs"
+public record struct Position(float X, float Y) : IComponent, ITrackChanges;
+public record struct Destination(float X, float Y) : IComponent;
+public record struct PositionReplica(float X, float Y) : IComponent;
+
+public class StepSystem : EcsSystem
+{
+    // 每个 tick 处理每个 NPC：其中大多数已经站在目的地上。
+    [ForEach]
+    static void Step(Mut<Position> position, in Destination destination)
+    {
+        ref readonly var p = ref position.Value;                    // 只读：不打 tick
+        float x = p.X + Math.Clamp(destination.X - p.X, -1f, 1f);
+        float y = p.Y + Math.Clamp(destination.Y - p.Y, -1f, 1f);
+        position.SetIfChanged(new Position(x, y));                  // NPC 真的动了才打 tick // [!code highlight]
+    }
+}
+
+[UpdateAfter<StepSystem>]
+public class ReplicatePositionSystem : EcsSystem
+{
+    // 只访问位置变了的 NPC，而不是 StepSystem 访问过的每一个。
+    [ForEach, Changed<Position>]
+    static void Send(in Position position, ref PositionReplica replica) =>
+        replica = new PositionReplica(position.X, position.Y);
+}
+```
+
+```csharp
+world.AddSystem<StepSystem>();
+world.AddSystem<ReplicatePositionSystem>();
+var npcs = new Entity[1000];
+world.CreateEntities(npcs, new Position(0, 0), new Destination(0, 0), new PositionReplica(0, 0));
+world.Update();                     // 同步系统第一次运行发送全部 1,000 个：对它来说都是新的
+npcs[7].SetDestination(5, 0);       // 一个 NPC 开始走动
+world.Update();                     // StepSystem 访问 1,000 个 NPC；同步只发 1 个
+```
+
+系统外的代码也有同样的选择：`entity.SetIfChanged(value)` 和 `Set` 一样设置组件（没有就添加），但实体已经是这个值时
+什么都不做，返回 false：不写入、不打 tick、不动索引。被追踪、[建了索引](/zh/docs/guide/indexes-and-relations)或
+[分组](/zh/docs/guide/groups)的有字段组件，生成器还会给它生成 `SetXIfChanged(…)`，参数和 `SetX` 一样是构造函数的参数：
+
+```csharp
+bool moved = npcs[7].SetPositionIfChanged(1, 0);   // false：走了一步，已经在那儿了
+```
+
+- **怎么判断相等：** 组件实现了 `IEquatable<T>`（record struct 都实现了）就用它，不装箱；否则非托管组件逐字节比较
+  （字节相同就是值相同；`-0.0` 和 `0.0` 算不同，最多多打一次 tick，绝不会漏打）；再否则 `SetIfChanged` 抛
+  `NotSupportedException`，也不会生成 `SetXIfChanged`。带托管字段的组件请实现 `IEquatable<T>`，或者改成 record struct。
+- **`Mut<T>` 能用在哪：** 逐实体的方法，包括并行方法和会做结构变更的方法（实体挪了行之后再写，打的是新行）。批处理方法
+  拿的是 span，不能用（[EECS009](/zh/docs/guide/analyzer#eecs009)）。建了索引或分组的组件从不通过 ref 写入
+  （[EECS015](/zh/docs/guide/analyzer#eecs015)），请用 `entity.SetXIfChanged(…)`。没有 `ITrackChanges` 的组件，
+  `Mut<T>` 就是普通的 `ref`。
+- **对调度器来说**，`Mut<T>` 参数就是对 `T` 的写入：这个系统不会和读 `T` 的系统排进同一个并行阶段。
+- **开销：** `Value` 零开销。每次 `Write()`，以及每次真正改了值的 `SetIfChanged`，都要找到实体所在的行（查一次实体记录）
+  再打 tick：每写一行比 `ref` 略贵，没写的行不花钱。每次 `SetIfChanged` 都要比较两个值，O(`T` 的大小)。
 
 ## 移除检测 [#removal-detection]
 
@@ -135,8 +206,8 @@ tick。被移除的行和普通行没有区别，方法照样能读写实体的�
     在系统运行之前移除又加回，不算移除（实体身上有 `T`）。这种情况由 `[Changed<T>]` 看到，因为添加组件本身就是一次写入。
   </Accordion>
   <Accordion title="被销毁的实体">
-    被销毁的实体不会被报告，因为它已经没有行了。如果客户端必须知道某个实体离开了，先给它打个标记（比如同步系统会读的
-    `Despawned` 标签），等同步跑完再销毁。
+    被销毁的实体已经没有行了，所以 `[Removed<T>]` 不会访问它。它们由[销毁日志](#destroy-log)报告：
+    `world.DestroyedSince(tick, …)` 列出某个 tick 以来被销毁的实体，读取方有多少个都行。
   </Accordion>
   <Accordion title="没有不等于失去">
     创建时就没有 `T`、从[预制体](/zh/docs/guide/prefabs)实例化或克隆出来时就没有 `T` 的实体，从来没有失去过它，所以不会被报告。
@@ -158,6 +229,140 @@ world.Update();
 int extinguished = world.Count<FireReplica>(FireOut.Since(mark));
 foreach (var item in world.Query<FireReplica>(FireOut.Since(mark))) item.FireReplica.Burning = false;
 ```
+
+## 几个组件任意一个：`ChangedAny` 和 `RemovedAny` [#changed-any]
+
+客户端看到的一个单位由好几个组件组成（血量、护甲、位置），其中任何一个变了，都要把这个单位发出去。写几个
+`[Changed<T>]` 要求的是它们全都变了；`[ChangedAny<T1, …, Tn>]` 只要求至少一个变了。`[RemovedAny<T1, …, Tn>]` 是
+对应的移除版本：失去了其中至少一个、而且还没补回来的行。
+
+```csharp
+public record struct Armor(int Value) : IComponent, ITrackChanges;
+public record struct Poisoned(int Ticks) : IComponent, ITrackChanges;
+public record struct UnitReplica(int Health, int Armor, float X, float Y) : IComponent;
+public record struct StatusReplica(bool Burning, bool Poisoned) : IComponent;
+
+public class ReplicateUnitSystem : EcsSystem
+{
+    // 上次运行后血量、护甲或位置被写过：不管变了几个，每个单位只访问一次。
+    [ForEach, ChangedAny<Health, Armor, Position>] // [!code highlight]
+    static void Send(in Health health, in Armor armor, in Position position, ref UnitReplica replica) =>
+        replica = new UnitReplica(health.Value, armor.Value, position.X, position.Y);
+
+    // 某个状态结束了：上次运行后着火或中毒（或者两个都）没了。
+    [ForEach, RemovedAny<Burning, Poisoned>]
+    static void Clear(ref StatusReplica status, Maybe<Burning> burning, Maybe<Poisoned> poisoned) =>
+        status = new StatusReplica(burning.HasValue, poisoned.HasValue);
+}
+```
+
+- **每一行是“或”：** 一行只要有一个自己拥有的组件在这个 tick 之后被写过（或被移除），就通过；其他组件不必都有。
+  一张表至少要有这一组里的一列才会参与；这几列在这个 tick 之后都没人写过，整张表直接跳过。
+- **和其他条件是“与”：** 一个方法或过滤器里所有的 `ChangedAny` 特性或调用并成一组，所有的 `RemovedAny` 并成另一组，
+  这些组再和 `With`、`Without`、`Changed`、`Removed` 等其他条件取“与”。
+- **一个过滤器只有一个 tick：** 过滤器里的 `Changed`、`Removed`、`ChangedAny` 和 `RemovedAny` 都从同一个 tick 往后看
+  （否则抛 `ArgumentException`），`Since(tick)` 会一起移动它们。
+- 每组 2 到 9 个组件，每个都要实现 `ITrackChanges`。和 `[Changed<T>]` 一样，方法会声明对每个组件的读取。
+
+### 所有客户端共用一个过滤器 [#per-client]
+
+每个客户端确认到的 tick 都不一样：有的是最新的，有的丢了几个包，有的刚连上。一个过滤器就能服务所有客户端：建一次，
+放进字段，对每个客户端用它确认到的 tick 调一次 `Since(ackTick)`：
+
+```csharp
+// 不被追踪：它的查询元素不会打 tick。
+public record struct NetId(int Value) : IComponent;
+
+public static class Replication
+{
+    // 单位的同步副本里任何一部分在客户端的 tick 之后被写过，这个单位对该客户端就是脏的。
+    public static readonly QueryFilter Dirty = QueryFilter.Create().ChangedAny<Health, Armor, Position>(0);
+}
+```
+
+```csharp
+world.CreateEntity(new NetId(1), new Health(100), new Armor(5), new Position(0, 0));
+var knight = world.CreateEntity(new NetId(2), new Health(100), new Armor(5), new Position(0, 0));
+var archer = world.CreateEntity(new NetId(3), new Health(100), new Armor(5), new Position(0, 0));
+world.Update();
+ulong before = world.ChangeTick;
+knight.SetArmor(8);
+world.Update();
+ulong after = world.ChangeTick;
+archer.SetPositionIfChanged(3, 4);
+
+// 每个客户端确认到的 tick：一个刚连上，一个落后，一个是最新的。
+ulong[] acked = [0, before, after];
+for (int client = 0; client < acked.Length; client++)
+{
+    ulong mark = world.ChangeTick;   // 这次打包时的 mark
+    // 查询 NetId，被追踪的部分用 Read<T>() 读：发送不会打 tick。
+    foreach (var item in world.Query<NetId>(Replication.Dirty.Since(acked[client])))
+    {
+        ref readonly var position = ref item.Entity.Read<Position>();
+        Console.WriteLine($"client {client}: unit {item.NetId.Value} at ({position.X}, {position.Y})");
+    }
+
+    acked[client] = mark;            // 实际服务器里：等客户端确认这个包之后再更新
+}
+```
+
+刚连上的客户端拿到全部三个单位，落后的拿到骑士和弓箭手，最新的只拿到弓箭手。被追踪组件的查询元素算作写入，所以循环
+查询的是不被追踪的 `NetId`，被追踪的部分用 `Read<T>()` 读。每种同步副本一个过滤器就够了，不必每个客户端一个：过滤器
+是值，换个 tick 再用不分配任何内存。
+
+## 被销毁的实体：销毁日志 [#destroy-log]
+
+被销毁的实体没有行，任何过滤器都找不到它，可客户端还是得知道它离开了。把 `WorldOptions.DestroyLog` 设成一个容量，
+World 就会用一个环形缓冲记下最近被销毁的实体，以及各自被销毁时的变更 tick；`world.DestroyedSince(since, into, out count)`
+列出在 `since` 及之后被销毁的实体。规则和 `Since(tick)` 一样，所以客户端确认到的那个 tick，既用来取变化，也用来取
+销毁。每个读取方各记各的 tick，多少个客户端都共用同一份日志。
+
+```csharp
+public static class Despawns
+{
+    // 告诉每个客户端：它确认的 tick 之后，有哪些实体离开了。
+    public static void Send(World world, ReadOnlySpan<ulong> acked, Span<EntityId> gone)
+    {
+        for (int client = 0; client < acked.Length; client++)
+        {
+            if (!world.DestroyedSince(acked[client], gone, out int count))
+            {
+                // 这个客户端需要的记录已经被环形缓冲覆盖了：只能把完整状态重新发一遍。
+                Console.WriteLine($"client {client}: too far behind, resend everything");
+                continue;
+            }
+
+            for (int i = 0; i < count; i++)
+                Console.WriteLine($"client {client}: despawn {gone[i]}");
+        }
+    }
+}
+```
+
+```csharp
+// 容量要装得下客户端两次读取之间最长间隔里的销毁数。
+using var zone = new World(new WorldOptions { DestroyLog = 4096 });
+var gone = new EntityId[4096];                  // 所有客户端共用一个缓冲：4,096 个 id 装得下任何一次结果
+var goblin = zone.CreateEntity(new Health(30));
+ulong[] zoneAcks = [zone.ChangeTick];
+goblin.Destroy();
+Despawns.Send(zone, zoneAcks, gone);            // client 0: despawn 0v1
+```
+
+- **容量怎么定：** 读取方两次读取之间最长间隔里的销毁数，也就是每秒销毁数乘以允许客户端落后的最长时间。环形缓冲在
+  `new World` 时一次分配好，每条记录 16 字节；日志关闭时（0，默认值），销毁不为它付任何代价。
+- **返回 `false` 就要全量重发：** 读取方需要的记录被覆盖了。`DestroyedSince` 什么都不写，读取方把完整状态重新发一遍。
+  `world.DestroyLogOldestTick` 是日志还能回答的最早 tick（环形缓冲第一次覆盖记录之前是 0）。日志容量撑不住真实客户端的
+  延迟，客户端就会一遍又一遍地全量重发。
+- **`count`** 是被销毁的实体数，写进 `into` 的是最早的 `min(count, into.Length)` 个，从旧到新。长度为 `DestroyLog`
+  的 span 总能装下全部。
+- **id 带着版本：** 每个 id 都是死掉的那一代实体，索引被复用后，新实体的版本不同，客户端那边的 id 映射不会错。
+- **什么算销毁：** `IsAlive` 变成 false 的那一刻。`Destroy`、`DestroyEntities`、[层级](/zh/docs/guide/hierarchy)或
+  [关系](/zh/docs/guide/indexes-and-relations#target-policies)的级联销毁、`MoveEntities` 移出这个 World；带着
+  [清理组件](/zh/docs/guide/cleanup-and-disable)的实体在最后一个清理组件被移除时（在那之前它还活着，带着 `Destroyed`
+  标签）；`Restore` 和 `Load` 时，之前活着、之后不在了的每个实体。`Dispose` 不记录任何东西，日志本身也不进快照和存档。
+- **线程：** 在所有者线程上调用，或者在并行阶段的系统里调用。日志关闭时调用会抛 `InvalidOperationException`。
 
 ## 完整例子 [#full-example]
 
@@ -291,6 +496,9 @@ written since the mark: 2
 ## 怎么用得快 [#how-to-use-it-fast]
 
 - **只读就用 `in`。** 只读不写的 `ref` 参数会把访问到的每一行都标记成已变化，下游所有 `[Changed<T>]` 读取方都得把它们全部过一遍。
+- **值大多不变时，用 `Mut<T>` 写。** `SetIfChanged` 只给值真的变了的行打 tick，下游读取方只访问真正的变化，而不是写入方
+  访问过的每一行。
+- **所有客户端共用一个 `ChangedAny` 过滤器**，用 `Since(ackTick)` 移动 tick，不要每个客户端、每个组件各跑一遍。
 - **优先写成系统，而不是查询。** `[Changed<T>]` 方法在碰到任何一行之前，会先跳过没人写过的表、4,096 行的块和 64 行的字。
   `Query` 会交出 ref，所以访问到的行都会被打上 tick；不能留下标记的读取方（存盘、发包）用 `Writes => 0` 的结构体 job，
   或者 `entity.Read<T>()`。
@@ -315,6 +523,11 @@ written since the mark: 2
 - **每次写入：** 记一个 tick，并更新所在 64 行字的摘要；成段的行用一次向量化填充写完。
 - **每次遍历：** 用一次加载跳过没人写过的表，再跳过没写过的 4,096 行块和 64 行字（每次 SIMD 比较 4 个），直接从摘要里取出一个字中被写过的行。
 - **一次移除：** 和一次写入开销相同，一个 tick 加上所在字的摘要。
+- **一次 `Mut<T>` 写入：** 先找到实体所在的行（查一次实体记录）再打 tick；`Value` 和值没变的 `SetIfChanged` 不打 tick，
+  `SetIfChanged` 要比较两个值，O(`T` 的大小)。
+- **一组 `ChangedAny` / `RemovedAny`：** 组里的列在这个 tick 之后都没人写过的表直接跳过，之后和 `Changed` 一样按字和块跳过。
+- **销毁日志：** `new World` 时一次分配，每条记录 16 字节；每次销毁写一条记录。`DestroyedSince` 是 O(报告的实体数)，
+  不分配内存。关闭时（默认），销毁不为它付任何代价。
 - **没有 `ITrackChanges` 的组件零开销：** 这些检查是 JIT 期常量。
 
 所有功能的开销汇总在[性能指南](/zh/docs/performance#the-few-rows-that-changed-changedt)。
@@ -328,8 +541,12 @@ written since the mark: 2
 | `[Removed<T>]` 方法既没有组件参数也没有 `[With<U>]` | 没有任何东西说明方法要遍历什么 | [EECS003](/zh/docs/guide/analyzer#eecs003) |
 | 只读的参数写成了 `ref` | 访问到的每一行都算作已变化 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
 | 接收方还没有这些值，却用 `LoadEntitiesInto(..., markWritten: false)` 加载 | 加载的行不算变化，靠 `[Changed<T>]` 的同步永远不会发出去 | 代码审查：给新客户端同步时，自己发送完整状态 |
-| 指望 `[Removed<T>]` 报告被销毁的实体 | 它们没有行，永远不会被报告 | 先打标签，同步完再销毁 |
-| 一个过滤器里的多个 `Changed` / `Removed` 用了不同的 tick | 抛 `ArgumentException`：一个过滤器只有一个 tick | 运行时 |
+| 指望 `[Removed<T>]` 报告被销毁的实体 | 它们没有行，任何过滤器都访问不到 | 从[销毁日志](#destroy-log)读（`WorldOptions.DestroyLog`、`DestroyedSince`） |
+| 销毁日志的容量小于客户端最长延迟内的销毁数 | 这个客户端每次读 `DestroyedSince` 都返回 false，一遍又一遍地全量重发 | 代码审查：容量按每秒销毁数乘以允许的延迟来定；关注 `DestroyLogOldestTick` |
+| 每个 tick 都重算、但很少变的值用 `ref` 参数写 | 访问到的每一行都算作已变化，下游每个 `[Changed<T>]` 读取方都要全部过一遍 | 代码审查：改用 [`Mut<T>`](#set-if-changed) 参数加 `SetIfChanged` |
+| 对带托管字段、又没实现 `IEquatable<T>` 的组件调 `SetIfChanged` | 抛 `NotSupportedException`；也不会生成 `SetXIfChanged` | 运行时：改成 record struct 或实现 `IEquatable<T>` |
+| 想要“任意一个变了就算”，却写了好几个 `[Changed<T>]` | 只有每个都变了的行才通过 | 代码审查：用 `[ChangedAny<T1, …, Tn>]` |
+| 一个过滤器里的 `Changed`、`Removed`、`ChangedAny`、`RemovedAny` 用了不同的 tick | 抛 `ArgumentException`：一个过滤器只有一个 tick | 运行时 |
 
 ## 和其他库的对比 [#compared]
 

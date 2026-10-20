@@ -7,7 +7,8 @@ icon: Radar
 Some systems only care about what changed: replicating state to clients, saving dirty entities, rebuilding a
 spatial index for the units that moved. Mark the component `ITrackChanges` and give the method `[Changed<T>]`: it
 visits only the entities whose `T` was written since its system last ran. `[Removed<T>]` is the counterpart for
-what went away: it visits the entities that lost `T` since then.
+what went away: it visits the entities that lost `T` since then, and the [destroy log](#destroy-log) reports the
+entities that were destroyed.
 
 ## When to use it [#when-to-use-it]
 
@@ -17,8 +18,10 @@ what went away: it visits the entities that lost `T` since then.
 </Callout>
 
 <Callout type="warn" title="Skip it for">
-  Components rewritten on every row every tick, such as `Position` of units that always move: there is nothing to
-  skip, and each write pays for its tick. Track the component a consumer reads, not every component.
+  Components whose value really changes on every row every tick, such as `Position` of projectiles that always
+  fly: there is nothing to skip, and each write pays for its tick. A component that code rewrites every tick but
+  whose value mostly stays the same is worth tracking: write it [only when the value changed](#set-if-changed).
+  Track the components a consumer reads, not every component.
 </Callout>
 
 ## How to use it [#how-to-use-it]
@@ -76,8 +79,9 @@ hands out a `ref`, whether or not the code stores through it:
 | Write | Not a write |
 | --- | --- |
 | `ref T` parameters of `[ForEach]` methods (`Span<T>` for batch methods) and of struct jobs (`Writes`) | `in T` parameters, `ReadOnlySpan<T>` |
+| A [`Mut<T>`](#set-if-changed) parameter: `Write()`, and `SetIfChanged(value)` when the value differs (that row only) | `Mut<T>.Value`, and `SetIfChanged(value)` with an equal value |
 | `Query` items (the enumerator stamps every row it visits) | `TryGet<T>(out T)` (a copy), `Read<T>()` (read-only) |
-| `entity.Get<T>()`, `TryGetRef<T>(out found)` when found, `GetOrAdd<T>()`, `Set(...)` | `Has<T>()` |
+| `entity.Get<T>()`, `TryGetRef<T>(out found)` when found, `GetOrAdd<T>()`, `Set(...)`, `SetIfChanged(value)` and `SetXIfChanged(…)` when the value differs | `Has<T>()`, `SetIfChanged(value)` and `SetXIfChanged(…)` with an equal value |
 | `CreateEntity(...)`, `CreateEntities(...)`, `Instantiate(...)`, `Clone()` with the component | removing the component (a [removal](#removal-detection)) |
 | `entity.Enable<T>()`, `world.EnableAll<T>()` (the kept value comes back) | `entity.Disable<T>()` (a removal) |
 | `world.Restore(snapshot)`, `world.Load(bytes)`, `LoadEntities(...)`, `LoadEntitiesInto(...)` (every restored or loaded row) | `LoadEntitiesInto(..., markWritten: false)`: every component the record holds gets tick 0, replaced or added. For restoring a persisted record without saving or sending it back ([a restored record](/en/docs/guide/migration-and-unload#records)). `world.Load(bytes, markWritten: false)`: every loaded row gets tick 0 and no row counts as removed, for a restart that resumes a saved world ([restart](/en/docs/guide/saves#restart)) |
@@ -110,6 +114,81 @@ foreach (var item in world.Query<Health>(changed))                  // items han
 
 The tick is part of the call because a change is relative to someone's last look: `[Changed<T>]` methods use their
 system's last run, ad-hoc queries the mark the caller took. Tick 0 selects every row that has `T`.
+
+## Write only when the value changed [#set-if-changed]
+
+Many systems recompute a value every tick that rarely changes: the step of an NPC that already stands at its
+destination, the target of an AI that keeps the same one, a stat summed from equipment nobody changed. Through a `ref`
+parameter, every row the method visits counts as written, so every `[Changed<T>]` reader downstream visits every row.
+A `Mut<T>` parameter stamps only the rows the method really writes:
+
+| Member of `Mut<T>` | Does |
+| --- | --- |
+| `Value` | the component as a `ref readonly`: a read, nothing stamped |
+| `Write()` | the component as a `ref`, the row stamped: call it when the method knows it writes |
+| `SetIfChanged(in value)` | stores `value` and stamps the row only when it differs from the current value; returns whether it did |
+
+```csharp title="Patrol.cs"
+public record struct Position(float X, float Y) : IComponent, ITrackChanges;
+public record struct Destination(float X, float Y) : IComponent;
+public record struct PositionReplica(float X, float Y) : IComponent;
+
+public class StepSystem : EcsSystem
+{
+    // Every NPC, every tick: most of them already stand at their destination.
+    [ForEach]
+    static void Step(Mut<Position> position, in Destination destination)
+    {
+        ref readonly var p = ref position.Value;                    // a read: nothing stamped
+        float x = p.X + Math.Clamp(destination.X - p.X, -1f, 1f);
+        float y = p.Y + Math.Clamp(destination.Y - p.Y, -1f, 1f);
+        position.SetIfChanged(new Position(x, y));                  // stamped only if the NPC moved // [!code highlight]
+    }
+}
+
+[UpdateAfter<StepSystem>]
+public class ReplicatePositionSystem : EcsSystem
+{
+    // Visits only the NPCs whose position changed, not every NPC the step visited.
+    [ForEach, Changed<Position>]
+    static void Send(in Position position, ref PositionReplica replica) =>
+        replica = new PositionReplica(position.X, position.Y);
+}
+```
+
+```csharp
+world.AddSystem<StepSystem>();
+world.AddSystem<ReplicatePositionSystem>();
+var npcs = new Entity[1000];
+world.CreateEntities(npcs, new Position(0, 0), new Destination(0, 0), new PositionReplica(0, 0));
+world.Update();                     // the first run of the replication sends all 1,000: they are new to it
+npcs[7].SetDestination(5, 0);       // one NPC starts walking
+world.Update();                     // the step visits 1,000 NPCs; the replication sends 1
+```
+
+Code outside systems has the same choice: `entity.SetIfChanged(value)` sets the component like `Set` (added when
+missing) unless the entity already has that value, and returns false then, with nothing written, stamped or indexed.
+The generator gives every tracked, [indexed](/en/docs/guide/indexes-and-relations) or
+[grouped](/en/docs/guide/groups) component with fields its own form, `SetXIfChanged(…)`, which takes the
+constructor's arguments like `SetX`:
+
+```csharp
+bool moved = npcs[7].SetPositionIfChanged(1, 0);   // false: one step taken, it stands there already
+```
+
+- **Equality** is `IEquatable<T>` when the component implements it (record structs do), called without boxing; else,
+  for an unmanaged component, its bytes (equal bytes are equal values; `-0.0` and `0.0` differ, which costs one stamp
+  too many, never one too few); else `SetIfChanged` throws `NotSupportedException` and no `SetXIfChanged` is
+  generated. Give a component with managed fields `IEquatable<T>`, or make it a record struct.
+- **Where `Mut<T>` works:** per-entity methods, also parallel ones and ones that change structure (a write after the
+  entity moved stamps its new row). Batch methods take spans instead ([EECS009](/en/docs/guide/analyzer#eecs009)).
+  An indexed or grouped component is never written through a ref ([EECS015](/en/docs/guide/analyzer#eecs015)):
+  use `entity.SetXIfChanged(…)` for it. For a component without `ITrackChanges`, `Mut<T>` is a plain `ref`.
+- **For the scheduler**, a `Mut<T>` parameter is a write of `T`: the system never shares a parallel stage with a
+  reader of `T`.
+- **The cost:** `Value` is free. Each `Write()`, and each `SetIfChanged` that changes the value, finds the entity's
+  row (one record lookup) and stamps it: a little more than a `ref` per row written, nothing per row left alone. Each
+  `SetIfChanged` compares the two values, O(size of `T`).
 
 ## Removal detection [#removal-detection]
 
@@ -144,8 +223,8 @@ writes the entity's other components, and a batch method receives removed rows i
     instead, since adding writes the component.
   </Accordion>
   <Accordion title="Destroyed entities">
-    Destroyed entities are not reported: they have no row. If clients must learn that an entity left, mark it (a
-    `Despawned` tag the replication reads) and destroy it after the replication has run.
+    A destroyed entity has no row, so `[Removed<T>]` does not visit it. The [destroy log](#destroy-log) reports it
+    instead: `world.DestroyedSince(tick, …)` lists the entities destroyed since a tick, for any number of readers.
   </Accordion>
   <Accordion title="Lacking is not losing">
     An entity created, instantiated from a [prefab](/en/docs/guide/prefabs) or cloned without `T` never lost it,
@@ -169,6 +248,151 @@ world.Update();
 int extinguished = world.Count<FireReplica>(FireOut.Since(mark));
 foreach (var item in world.Query<FireReplica>(FireOut.Since(mark))) item.FireReplica.Burning = false;
 ```
+
+## Any of several components: `ChangedAny` and `RemovedAny` [#changed-any]
+
+A client's copy of a unit is made of several components (health, armor, position), and the unit must be sent when
+any of them changed. Several `[Changed<T>]` attributes ask for rows where all of them changed;
+`[ChangedAny<T1, …, Tn>]` asks for rows where at least one did. `[RemovedAny<T1, …, Tn>]` is its counterpart for
+removals: the rows that lost at least one of them and have not got it back.
+
+```csharp
+public record struct Armor(int Value) : IComponent, ITrackChanges;
+public record struct Poisoned(int Ticks) : IComponent, ITrackChanges;
+public record struct UnitReplica(int Health, int Armor, float X, float Y) : IComponent;
+public record struct StatusReplica(bool Burning, bool Poisoned) : IComponent;
+
+public class ReplicateUnitSystem : EcsSystem
+{
+    // Health, armor or position written since the last run: one visit per unit, however many changed.
+    [ForEach, ChangedAny<Health, Armor, Position>] // [!code highlight]
+    static void Send(in Health health, in Armor armor, in Position position, ref UnitReplica replica) =>
+        replica = new UnitReplica(health.Value, armor.Value, position.X, position.Y);
+
+    // A status ended: the burning or the poison (or both) went away since the last run.
+    [ForEach, RemovedAny<Burning, Poisoned>]
+    static void Clear(ref StatusReplica status, Maybe<Burning> burning, Maybe<Poisoned> poisoned) =>
+        status = new StatusReplica(burning.HasValue, poisoned.HasValue);
+}
+```
+
+- **OR per row:** a row passes through a component it has, written (or removed) since the tick; it need not have the
+  others. A table passes only when it has a column of the group, and is skipped at once when none of those columns was
+  written since the tick.
+- **AND with the rest:** every `ChangedAny` attribute or call of a method or filter joins one group, every
+  `RemovedAny` another, and the groups combine with `With`, `Without`, `Changed`, `Removed` and the other filters with
+  AND.
+- **One tick per filter:** the `Changed`, `Removed`, `ChangedAny` and `RemovedAny` parts of a filter look back from the
+  same tick (else `ArgumentException`), and `Since(tick)` moves them all.
+- 2 to 9 components, each `ITrackChanges`. The method declares a read of each, like `[Changed<T>]`.
+
+### One filter for every client [#per-client]
+
+Each client acknowledges a different tick: one is up to date, another lost a few packets, a third just joined. One
+filter serves them all. Build it once, keep it in a field, and run it with `Since(ackTick)` for each client's
+acknowledged tick:
+
+```csharp
+// Not tracked: a query item of it stamps nothing.
+public record struct NetId(int Value) : IComponent;
+
+public static class Replication
+{
+    // A unit is dirty for a client when any part of its replica was written since the client's tick.
+    public static readonly QueryFilter Dirty = QueryFilter.Create().ChangedAny<Health, Armor, Position>(0);
+}
+```
+
+```csharp
+world.CreateEntity(new NetId(1), new Health(100), new Armor(5), new Position(0, 0));
+var knight = world.CreateEntity(new NetId(2), new Health(100), new Armor(5), new Position(0, 0));
+var archer = world.CreateEntity(new NetId(3), new Health(100), new Armor(5), new Position(0, 0));
+world.Update();
+ulong before = world.ChangeTick;
+knight.SetArmor(8);
+world.Update();
+ulong after = world.ChangeTick;
+archer.SetPositionIfChanged(3, 4);
+
+// The tick each client acknowledged: a client that just joined, one behind, one up to date.
+ulong[] acked = [0, before, after];
+for (int client = 0; client < acked.Length; client++)
+{
+    ulong mark = world.ChangeTick;   // the mark of the packet built now
+    // Query NetId, read the tracked parts with Read<T>(): sending stamps nothing.
+    foreach (var item in world.Query<NetId>(Replication.Dirty.Since(acked[client])))
+    {
+        ref readonly var position = ref item.Entity.Read<Position>();
+        Console.WriteLine($"client {client}: unit {item.NetId.Value} at ({position.X}, {position.Y})");
+    }
+
+    acked[client] = mark;            // in a server: when the client acknowledges the packet
+}
+```
+
+The client that just joined gets all three units, the one behind gets the knight and the archer, the one up to date
+only the archer. A query item of a tracked component counts as a write, so the loop queries the untracked `NetId` and
+reads the tracked parts with `Read<T>()`. Keep one filter per kind of replica, not one per client: the filter is a value, and the same
+one moved to another tick allocates nothing.
+
+## Destroyed entities: the destroy log [#destroy-log]
+
+A destroyed entity has no row, so no filter can find it. Clients still have to learn that it left. With
+`WorldOptions.DestroyLog` set to a capacity, the world keeps a ring of the last destroyed entities, each with the
+change tick of its destruction, and `world.DestroyedSince(since, into, out count)` lists the ones destroyed at
+`since` or later: the rule of `Since(tick)`, so the tick a client acknowledged serves its changes and its despawns.
+Each reader keeps its own tick, so any number of clients share one log.
+
+```csharp
+public static class Despawns
+{
+    // Tells each client which entities left since the tick it acknowledged.
+    public static void Send(World world, ReadOnlySpan<ulong> acked, Span<EntityId> gone)
+    {
+        for (int client = 0; client < acked.Length; client++)
+        {
+            if (!world.DestroyedSince(acked[client], gone, out int count))
+            {
+                // The ring overwrote records this client needs: it must get the whole state again.
+                Console.WriteLine($"client {client}: too far behind, resend everything");
+                continue;
+            }
+
+            for (int i = 0; i < count; i++)
+                Console.WriteLine($"client {client}: despawn {gone[i]}");
+        }
+    }
+}
+```
+
+```csharp
+// Room for the destroys of the longest gap a client may leave between two reads.
+using var zone = new World(new WorldOptions { DestroyLog = 4096 });
+var gone = new EntityId[4096];                  // one buffer for every client: 4,096 ids hold any answer
+var goblin = zone.CreateEntity(new Health(30));
+ulong[] zoneAcks = [zone.ChangeTick];
+goblin.Destroy();
+Despawns.Send(zone, zoneAcks, gone);            // client 0: despawn 0v1
+```
+
+- **Size it** to the destroys of the longest gap a reader may leave between two reads: destroys per second times the
+  longest lag a client is allowed. The ring is allocated at `new World`, 16 bytes per record; with the log off (0, the
+  default) a destroy pays nothing for it.
+- **`false` means resync:** the records the reader needs were overwritten. `DestroyedSince` writes nothing and the
+  reader sends the whole state again. `world.DestroyLogOldestTick` is the oldest tick the log can still answer for
+  (0 until the ring first overwrites a record). A log too small for the lag of real clients makes them resync over and
+  over.
+- **`count`** is how many entities were destroyed; the first `min(count, into.Length)` are written, oldest first. A
+  span of `DestroyLog` ids always holds them all.
+- **Ids keep their version:** each id is the incarnation that died, so a recycled index names the new entity with
+  another version and the client's map of ids stays right.
+- **What counts as destroyed:** the moment `IsAlive` turns false. `Destroy`, `DestroyEntities`, a
+  [hierarchy](/en/docs/guide/hierarchy) or [relation](/en/docs/guide/indexes-and-relations#target-policies) cascade, `MoveEntities` out of this world; an entity holding
+  [cleanup components](/en/docs/guide/cleanup-and-disable) when its last one is removed (until then it is alive,
+  tagged `Destroyed`); `Restore` and `Load` for every entity alive before and not after. `Dispose` records nothing,
+  and the log itself is not part of a snapshot or a save.
+- **Threads:** call it on the owner thread or from a system of a parallel stage. With the log off it throws
+  `InvalidOperationException`.
 
 ## Full example [#full-example]
 
@@ -305,6 +529,10 @@ nothing was written and nothing is visited.
 
 - **Read with `in`.** A `ref` parameter that only reads marks every row it visits as changed, and every
   `[Changed<T>]` reader downstream then visits them all.
+- **Write through `Mut<T>` when most values stay the same.** `SetIfChanged` stamps only the rows whose value
+  differs, so the readers downstream visit the real changes instead of every row the writer visited.
+- **One `ChangedAny` filter for all clients**, moved with `Since(ackTick)`, instead of one pass per client and per
+  component.
 - **Prefer a system to a query.** A `[Changed<T>]` method skips unwritten tables, 4,096-row blocks and 64-row words
   before it touches a row. A `Query` hands out refs, so it stamps what it visits; a reader that must not mark what
   it reads (a save, a send) uses a struct job with `Writes => 0` or `entity.Read<T>()`.
@@ -333,6 +561,12 @@ rows touch most 64-row words, and then the saving is mostly the method calls tha
 - **Each pass** skips a table nobody wrote with one load, then unwritten 4,096-row blocks and 64-row words (four per
   SIMD compare), and takes the written rows of a word from its summary.
 - **A removal** costs the same as a write: one tick and its word's summary.
+- **A `Mut<T>` write** finds the entity's row (one record lookup) before it stamps; `Value` and an unchanged
+  `SetIfChanged` stamp nothing, and `SetIfChanged` compares the values, O(size of `T`).
+- **A `ChangedAny` / `RemovedAny` group** skips a table none of whose group columns was written since the tick, then
+  words and blocks like a `Changed` filter.
+- **The destroy log** is allocated once at `new World`, 16 bytes per record; each destroy writes one record.
+  `DestroyedSince` is O(entities reported) and allocates nothing. Off (the default), a destroy pays nothing.
 - **Components without `ITrackChanges` pay nothing:** the checks are JIT-time constants.
 
 All of it on one page with the other features: [Performance guide](/en/docs/performance#the-few-rows-that-changed-changedt).
@@ -346,8 +580,12 @@ All of it on one page with the other features: [Performance guide](/en/docs/perf
 | `[Removed<T>]` with no component parameter or `[With<U>]` | Nothing names what the method iterates | [EECS003](/en/docs/guide/analyzer#eecs003) |
 | `ref` parameter that only reads | Every visited row counts as changed | [EECS025](/en/docs/guide/analyzer#eecs025) |
 | `LoadEntitiesInto(..., markWritten: false)` for values the receivers do not have yet | The loaded rows are not changes, so `[Changed<T>]` replication never sends them | Code review: a replicator to new clients sends the full state itself |
-| Expecting destroyed entities in `[Removed<T>]` | They have no row and are never reported | Mark with a tag, destroy after replicating |
-| Several `Changed` / `Removed` filters with different ticks | `ArgumentException`: a filter has one tick | At run time |
+| Expecting destroyed entities in `[Removed<T>]` | They have no row: no filter visits them | Read them from the [destroy log](#destroy-log) (`WorldOptions.DestroyLog`, `DestroyedSince`) |
+| A destroy log smaller than the destroys of a client's longest lag | `DestroyedSince` returns false for that client on every read: it resyncs over and over | Code review: size it to destroys per second times the allowed lag; watch `DestroyLogOldestTick` |
+| A `ref` parameter on a value recomputed every tick that rarely changes | Every visited row counts as changed, so every `[Changed<T>]` reader visits them all | Code review: a [`Mut<T>`](#set-if-changed) parameter with `SetIfChanged` |
+| `SetIfChanged` on a component with managed fields and no `IEquatable<T>` | `NotSupportedException`; no `SetXIfChanged` is generated | At run time: make it a record struct or implement `IEquatable<T>` |
+| Several `[Changed<T>]` attributes where any change should count | Only rows where every one changed pass | Code review: `[ChangedAny<T1, …, Tn>]` |
+| `Changed`, `Removed`, `ChangedAny` or `RemovedAny` parts of one filter with different ticks | `ArgumentException`: a filter has one tick | At run time |
 
 ## Compared with other libraries [#compared]
 

@@ -150,6 +150,10 @@ world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
 - `LoadEntitiesInto` is a structural change: owner thread only ([EECS014](/en/docs/guide/analyzer#eecs014)), not while a pass iterates
   (`InvalidOperationException`), never in a parallel method ([EECS010](/en/docs/guide/analyzer#eecs010)), and in a
   `[ForEach]` method only when it takes `Entity` or `World` ([EECS013](/en/docs/guide/analyzer#eecs013)).
+- A set names components for a group save. It can also name singletons (`WithSingleton<T>()`, or `With(typeof(...))`,
+  which takes either kind) for a whole-world [restart](/en/docs/guide/saves#restart): `Save(output, in exclude)` leaves
+  its types out, `Load(input, in keep)` keeps its singletons. A group save writes no singletons, so `SaveEntities`
+  with a set that names one throws `ArgumentException`.
 - A framework that learns its types at run time builds the set by `Type`:
 
 ```csharp
@@ -172,6 +176,24 @@ structs included. When a group arrives:
 
 Ids inside collections (a `List<EntityId>` in a component) are not rewritten. Indexes and groups learn the arrivals,
 and their tracked components count as written.
+
+### Unique keys on arrival [#unique-keys]
+
+A [unique key](/en/docs/guide/indexes-and-relations#unique-keys) (an account id) names one entity per world, and a
+group that arrives must not bring a key the world has given already. `LoadEntities`, `LoadEntitiesInto` and
+`MoveEntities` check every unique key of the group against the target world before the first row arrives:
+
+- A key another entity of the target holds: `InvalidOperationException`, and nothing arrives. `MoveEntities` then
+  leaves the originals alive in the source, so the player is still where it was.
+- A key the bytes give to two entities (a damaged or hand-built save): `InvalidDataException`.
+- `LoadEntitiesInto` onto an entity that holds the key itself is fine: it gets the key it has. Keys swapped between
+  the entities given are refused, like any key given to a second entity.
+
+A player who comes back to a world that still holds an old copy of them (a stale session, a ghost left by a crash)
+is refused until that copy is destroyed or loses its key: destroy it first, then load or move the player in.
+
+The [destroy log](/en/docs/guide/change-tracking#destroy-log) records the originals `MoveEntities` destroys in the
+source world, so readers there see the group leave.
 
 ### Unloading a plugin's types [#remove-types]
 
@@ -219,6 +241,15 @@ your own to the old version's types (systems, plugin objects), or the context ca
 
 The [HotReload sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload) runs the whole cycle
 and checks that the old context was collected and that the plugin's data carried over.
+
+A reload leaves memory behind: the save and load buffers grown to the whole world, and tables that the entities left.
+Once the new version runs, `world.TrimExcess()` gives it back, at a quiet moment rather than in a tick
+([give memory back after a peak](/en/docs/guide/diagnostics#trim)).
+
+A restart of the whole process goes through bytes the same way, with two differences: the old process leaves out
+what it must not bring back (runtime state, its configuration), and the new process keeps the configuration it set
+before the load. `Save(output, in exclude)` and `Load(input, in keep, markWritten: false)` do both: see
+[Restart](/en/docs/guide/saves#restart).
 
 ## Full example [#full-example]
 
@@ -393,6 +424,7 @@ deposit is.
 | `SaveEntities` of whole entities when only some components persist | A `ComponentSet` | The runtime components are not written, and need no formatter |
 | A `ComponentSet` built for every save | One `static readonly` set | Each `With` copies the set |
 | A reload that rebuilds the world | `RemoveTypes`, then `Load` | The host's entities and components stay where they are |
+| Living with the buffers a reload grew | `TrimExcess()` once the new version runs | The save and load buffers and empty tables are released |
 
 10 players with 99 items each, moved to another world and back through bytes and in memory, and one entity of four
 components through bytes, and a record of two of its components saved and loaded onto an entity that holds the
@@ -424,6 +456,8 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
 | `RemoveTypes` during an update or a pass | `InvalidOperationException` | At run time |
 | Restoring a snapshot taken before `RemoveTypes` | `InvalidOperationException` | At run time |
 | Migrating from another thread | Both worlds belong to their owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |
+| Moving or loading a player whose unique key the target holds | `InvalidOperationException`; nothing arrives, the originals stay | Destroy the stale holder first ([unique keys](#unique-keys)) |
+| A singleton in the set of `SaveEntities` | `ArgumentException`: a group save writes no singletons | Singletons go in a whole-world [restart](/en/docs/guide/saves#restart) save |
 | A component that persists left out of the record's set | Not saved: the loaded entity keeps its own value, or has none | Build the set from the persisting components, in one place |
 | A record loaded with `LoadEntities` | New entities beside the live ones | `LoadEntitiesInto` with the live entities |
 | `LoadEntitiesInto` with another number of entities than the save holds, or a stale one | `ArgumentException`; nothing changes | One live entity per saved entity, in save order |

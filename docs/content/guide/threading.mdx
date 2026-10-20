@@ -88,15 +88,20 @@ Each system's access comes from its `[ForEach]` parameters:
 | `[ForEach]` parameter | Declares |
 | --- | --- |
 | `ref T` component or singleton | writes `T` |
+| `Mut<T>` component | writes `T` (even on the rows it leaves alone) |
 | `in T` component or singleton | reads `T` |
 | `[With<T>]`, `[Without<T>]`, `[WithAny<T>]` | nothing (filters read presence, which no parallel system changes) |
 | `[Changed<T>]`, `[Removed<T>]` | reads `T` (its change ticks) |
+| `[ChangedAny<T1, …, Tn>]`, `[RemovedAny<T1, …, Tn>]` | reads each of `T1` to `Tn` |
 | `Entity` or `World`, an instance method, an `OnUpdate` override | runs alone |
 | no `[ForEach]` method at all | runs alone |
 
 Two systems conflict when one writes something the other reads or writes, or when either runs alone. A system goes to
 the stage after the latest one holding a system it must follow (by an ordering, or by an earlier system it conflicts
-with). Stages run one after another; the systems of a stage run at once.
+with). Stages run one after another; the systems of a stage run at once. `world.DescribeSchedule()` shows the stages
+the world built, each system's reads and writes, and why a system waits for the stage before its own; it reads the
+schedule published by the last `AddSystem` / `RemoveSystem`, so a diagnostics endpoint may call it from any thread
+([Debugging and diagnostics](/en/docs/guide/diagnostics#schedule)).
 
 ```csharp
 public record struct Body(float X, float Y, float Vx, float Vy) : IComponent;
@@ -169,6 +174,17 @@ public class RegenerateAll : EcsSystem
 
 Parallel systems and parallel methods compose: inside a parallel stage, a parallel method whose runner is busy with
 another system's method runs on its own thread instead of waiting.
+
+A parallel method may write a tracked component, through a `ref` or a
+[`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) parameter: each chunk stamps only its own rows, and the
+chunks of such a method are cut at multiples of 4,096 rows (at least 4,096), the blocks whose change-tick summary
+their rows share, so no two threads update one summary. `Mut<T>.Write()` and `SetIfChanged` are as safe in a chunk as
+a `ref`. A table of 4,096 rows or fewer is then a single chunk.
+
+With `WorldOptions.MeasureSystems`, `system.Stats` covers the threads that helped: `LastAllocated` and
+`TotalAllocated` sum the bytes allocated on the thread that ran the system and on every thread that ran a chunk of its
+parallel methods, and the time is that of the whole run. With `ParallelSystems`, each system of a stage records its
+own runs.
 
 ### Input from other threads [#input-from-other-threads]
 

@@ -27,7 +27,7 @@ EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 
 - 覆盖每个功能的 BenchmarkDotNet 基准，以及与 Friflo.Engine.ECS、Arch、DefaultEcs 的对比，每项结果都在 setup 里校验
   （[性能指南](/zh/docs/performance)）。
 - CI 会构建、测试、运行所有 sample 和 example，编译本文档里的 C# 代码片段，并检查自动生成的 API 参考是否最新。
-- 分析器会拒绝 ECS 里常见的设计错误（EECS002 到 EECS034），并提供代码修复。
+- 分析器会拒绝 ECS 里常见的设计错误（EECS002 到 EECS036），并提供代码修复。
 
 需要权衡的地方：它只面向 `net10.0`；在走向成熟的过程中，小版本之间 API 会有变化（4.0 到 4.1 改名、删除了几个成员，4.2 起读取没添加过的单例会抛异常，
 [迁移指南](/zh/docs/migration)逐条列出）；每个版本改了什么见[更新日志](/zh/docs/changelog)。
@@ -41,7 +41,15 @@ EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 
 
 有意保留的分配：创建 World、第一个拥有新组件组合的实体（新建一张表）、某种查询形状的第一次使用、表或 `DynamicBuffer<T>`
 超出容量时扩容，以及 `Describe` 这类冷路径工具。`InitialEntityCapacity`、`EnsureCapacity<T1, …, Tn>(count)`、`EnsureCapacity(prefab, count)`
-和 `bag.EnsureCapacity(n)` 可以把扩容挪到 tick 之外。
+和 `bag.EnsureCapacity(n)` 可以把扩容挪到 tick 之外。打开 `WorldOptions.MeasureSystems` 后，`system.Stats.LastAllocated`
+能指出是哪个系统在分配（[诊断](/zh/docs/guide/diagnostics#timing)）。
+
+## 高峰过后，World 会把内存还回去吗？ [#memory-after-a-peak]
+
+只在你要求时。表满了翻倍，实体走了行还留着，下一波实体来了直接复用、不用分配；所以一个装过一百万实体的 World 会一直留着这些行。
+`world.TrimExcess()` 丢掉空表，把其余的表缩到现在装着的大小（向上取整到 2 的幂），并释放存档、加载和迁移用的缓冲。句柄、查询、
+索引和快照照常可用。在所有者线程上、安静的时候调（一局比赛之后、维护任务里），不要每个 tick 都调：它丢掉的东西下次用时还要再分配
+（[还回内存](/zh/docs/guide/diagnostics#trim)）。
 
 ## 它是线程安全的吗？ [#is-it-thread-safe]
 
@@ -81,8 +89,8 @@ job 要的组件一次查找全部拿到，实体已经没了或不匹配时返�
 ## 怎么调试一个 ECS World？ [#debugging]
 
 直接问 World：`world.Describe()` 列出每张表的组件、实体数和字节数，`entity.Describe()` 返回实体的组件值（调试器里展开 `Entity`
-也能看到），打开 `WorldOptions.MeasureSystems` 后 `system.Stats` 记录每个系统的耗时，`SystemErrorPolicy.Disable` 停掉的系统，
-异常留在 `system.Error` 里。在所有者线程上、两次更新之间读这些数据（[调试与诊断](/zh/docs/guide/diagnostics)）。
+也能看到），打开 `WorldOptions.MeasureSystems` 后 `system.Stats` 记录每个系统的耗时、分配的字节和访问的实体数，`world.DescribeSchedule()`
+列出各个阶段以及每个系统为什么要等，`SystemErrorPolicy.Disable` 停掉的系统，异常留在 `system.Error` 里。在所有者线程上、两次更新之间读这些数据（[调试与诊断](/zh/docs/guide/diagnostics)）。
 
 ## 能在 Unity 或 Godot 里用 EasyEcs 吗？ [#unity-godot]
 
@@ -154,6 +162,7 @@ world.Load(output.WrittenSpan);  // 组件里存的 EntityId 仍然指向同样�
 | 实体死亡，其他系统要响应 | 一个 `Dead` 标签；关心的系统用 `[With<Dead>]` 过滤 |
 | 组件被修改 | 标上 `ITrackChanges`；消费方用 `[Changed<T>]` |
 | 组件被移除（buff 到期） | 标上 `ITrackChanges`；消费方用 `[Removed<T>]` |
+| 实体被销毁（要发一条消失通知） | 打开 `WorldOptions.DestroyLog`；每个消费方用自己的 tick 读 `world.DestroyedSince(itsTick, …)` |
 | 一次性的消息（一次命中、一次玩家输入） | 一个承载消息的实体，读者都跑完后销毁 |
 | 来自其他线程的输入 | 一个队列，由某个系统在所有者线程上取出 |
 
@@ -226,7 +235,8 @@ foreach (var item in world.Query<Position, Velocity>())
 
 - `var hp = entity.Health; hp.Value--;` 改的是副本。要用 `ref var`。
 - 只读时用 `in`，不要用 `ref`：对 `ITrackChanges` 组件的每次 `ref` 访问都算一次修改，同步时会把没人改过的行也发出去。
-  所以被追踪组件的生成属性是只读的，写入用 `entity.WriteX()`。
+  所以被追踪组件的生成属性是只读的，写入用 `entity.WriteX()`。只写访问到的部分行的方法用 `Mut<T>`，它只给写了的行打戳；
+  `SetIfChanged`（以及生成的 `entity.SetXIfChanged(...)`）只在值不同时才写（[什么算写入](/zh/docs/guide/change-tracking#what-counts-as-a-write)）。
 - 组件里的集合要通过组件的 `ref` 修改，不能通过 `in`：否则变更追踪和调度器都发现不了（[EECS011](/zh/docs/guide/analyzer)）。
   每个实体需要一个列表时，用 [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers)。
 

@@ -95,52 +95,94 @@ long tick = restarted.Clock.Tick;                                      // 1234
 | Every component, unmanaged as raw rows, managed through Nino | Indexes (they rebuild on the next lookup) |
 | Disabled components, with their kept values | Groupings (`Load` follows this world's `GroupBy` calls) |
 | [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) elements | Change ticks (every loaded row counts as written, or none with `markWritten: false`: [restart](#restart)) |
-| Every singleton | |
+| Every singleton | Components and singletons left out with `Save(output, in exclude)` ([restart](#restart)) |
 
 Types are recorded by their Nino type id (a hash of the namespace-qualified name), and each column is a
 length-prefixed slice, so a load skips the components this process has no type for. A type is found when the process
 used it, or when the generator registered it: every component and singleton of a compilation that uses EasyEcs is
 registered when its module loads.
 
-### Restart without counting the load as changes [#restart]
+### Restart: leave the runtime out, keep the new configuration [#restart]
 
 A restart resumes the world of the previous process: it saves between two ticks, the new process loads the save,
-adds its systems and goes on. By default every loaded row counts as written, so a `[Changed<T>]` system that writes
-records or replicates would send the whole world again on its first run. `Load(bytes, markWritten: false)` loads the
-rows without a change tick: no row counts as written or removed, also for the systems added after the load, and
-what code writes from then on is seen as usual.
+adds its systems and goes on. Three things in the old world must not come back:
+
+- **Runtime state** that means nothing in another process: a connection, a socket, a cache of handles. Often it has
+  no Nino formatter at all, so a plain `Save` would throw.
+- **Configuration** the new version brings anew: rates, limits, feature switches. The save holds the old values.
+- **Change ticks:** by default every loaded row counts as written, so a `[Changed<T>]` system that writes records or
+  replicates would send the whole world again on its first run.
+
+A `ComponentSet` names the types. `Save(output, in exclude)` writes the world without the components and singletons
+of the set; `Load(input, in keep, markWritten: false)` keeps the singletons of its set as the new process set them,
+and loads the rows without a change tick.
 
 ```csharp
-public record struct Balance(int Gold) : IComponent, ITrackChanges;   // tracked: written records are saved
-public record struct Outbox(int Records) : ISingletonComponent;
+public record struct Balance(int Gold) : IComponent, ITrackChanges;     // persists; written balances are recorded
+public record struct Connection(Stream Socket) : IComponent;              // runtime only, no Nino formatter
+public record struct Rates(int Interest) : ISingletonComponent;           // configuration of each version
+public record struct Outbox(int Records) : ISingletonComponent;           // records waiting for the database
+
+public static class Restart
+{
+    // What each process sets at startup: a load keeps them as they are.
+    public static readonly ComponentSet Startup = ComponentSet.Create().WithSingleton<Rates>().WithSingleton<Outbox>();
+
+    // What a save leaves out: those singletons and the runtime components.
+    public static readonly ComponentSet Runtime = Startup.With<Connection>();
+}
 
 public class SaveBalances : EcsSystem
 {
     [ForEach, Changed<Balance>]
-    private static void Save(ref Outbox outbox) => outbox.Records++;  // one record per changed balance
+    private static void Save(ref Outbox outbox) => outbox.Records++;   // one record per changed balance
 }
 ```
 
 ```csharp
-var bank = new World();                                                // the old process
+using var bank = new World();                                          // the old process
+bank.SetRates(5);
 bank.SetOutbox(0);
-bank.CreateEntity(new Balance(100));
+bank.CreateEntity(new Balance(100), new Connection(Stream.Null));
 var previous = new NinoArrayBufferWriter();
-bank.Save(previous);                                                   // between two ticks
+bank.Save(previous, in Restart.Runtime);                               // no Connection, no Rates, no Outbox // [!code highlight]
 
 using var resumed = new World();                                       // the new process
-resumed.Load(previous.WrittenSpan, markWritten: false);                // the records hold these values // [!code highlight]
+resumed.SetRates(7);                                                   // the new version's configuration
+resumed.SetOutbox(0);
+resumed.Load(previous.WrittenSpan, in Restart.Startup, markWritten: false);   // keeps both // [!code highlight]
 resumed.AddSystem<SaveBalances>();
 resumed.Update();
 int records = resumed.Outbox.Records;                                  // 0: no loaded balance is a change
+int interest = resumed.Rates.Interest;                                 // 7: the new configuration
 ```
 
-The singletons come from the save (`Outbox` here), so the new process adds only those the save did not hold, as at
-[startup](/en/docs/guide/hosting#persistence).
+Follow the singletons: `Rates` and `Outbox` are not in the save, and the new process sets them before the load, so
+the load keeps them and `SaveBalances` finds its `Outbox` on its first run. The balance comes back without its
+`Connection`, which the new process opens again for each client. No balance counts as written, so the first update
+records nothing; the next deposit is recorded as usual.
+
+- **Excluded types need no formatter.** Their slices are never written, so a managed component without
+  `[NinoType]` (a `Stream`, a cache object) is fine in a save that leaves it out. A `Disabled<T>` tag goes with its
+  component, and an entity whose components are all left out is still saved, without them.
+- **Keep means singletons only.** A kept singleton stays exactly as the world has it: the same storage (a
+  `SingletonRef<T>` taken before the load still works) and the same value; the save's value of it is skipped,
+  never read. A kept singleton the save lacks is not removed, and one the world lacks stays absent. Components in
+  the keep set throw `ArgumentException`: the load replaces every entity, so leave a component out of the save
+  instead.
+- **Without keep, the save's singletons replace the world's**, and a singleton the save lacks is removed: a plain
+  `Load` of this save would leave the new process without `Rates`.
+- **`markWritten: false` applies to the loaded rows only:** no row counts as written or removed, also for the
+  systems added after the load, and what code writes from then on is seen as usual.
+- **Build the sets once,** in `static readonly` fields: a set is a value, each `With` or `WithSingleton` returns a new
+  one. A framework that learns its types at run time adds them with `With(typeof(...))`, which takes a component or a
+  singleton type.
+- **A group save takes no singletons.** `SaveEntities(output, ids, set)` with a set that names one throws
+  `ArgumentException` ([records](/en/docs/guide/migration-and-unload#records)).
 
 A system added later to a world that already holds its state, whatever wrote it, can start from the current tick
 instead: `world.AddSystem<T>(changesFromNow: true)` makes its first run visit only what is written after the call
-([ticks](/en/docs/guide/change-tracking#ticks)).
+([ticks](/en/docs/guide/change-tracking#ticks)). Where a hosted server saves and loads: [hosting](/en/docs/guide/hosting#persistence).
 
 ### When the code changed [#versioning]
 
@@ -300,10 +342,13 @@ Bob's `Follows` still names Alice without any rewriting.
 | Managed components where values would do | Unmanaged components (ids, numbers, fixed arrays) | Raw rows are one block per column; Nino encodes value by value |
 | `[NinoType]` on unmanaged components that never change | Raw rows for those, `[NinoType]` where the shape will change | A raw column is one copy |
 | Your own serializer over a `Query` | `Save` / `Load` | Ids, versions, buffers, disabled values and singletons come along |
+| Formatters for runtime state only to make `Save` work | `Save(output, in exclude)` | Left-out types are never written, and need no formatter |
+| Setting the new configuration again after `Load` | `Load(input, in keep)` | Kept singletons are skipped in the save, never deserialized |
 
-100,000 entities in two tables, saved into a reused buffer and loaded back (`SnapshotBenchmark`):
+100,000 entities in two tables, saved into a reused buffer and loaded back, and the same without a component and
+loaded keeping a singleton (`SnapshotBenchmark`):
 
-<BenchTable bench="SnapshotBenchmark" methods="Save,Load" />
+<BenchTable bench="SnapshotBenchmark" methods="Save,Load,SaveWithout,LoadKeeping" />
 
 ## What it costs [#what-it-costs]
 
@@ -318,7 +363,10 @@ Bob's `Follows` still names Alice without any rewriting.
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| A managed component without `[NinoType]` | `Save` throws `InvalidOperationException` (no formatter) | At run time |
+| A managed component without `[NinoType]` | `Save` throws `InvalidOperationException` (no formatter) | At run time; leave runtime-only types out with `Save(output, in exclude)` |
+| A plain `Load` after setting the new configuration | The save's singletons replace it, and one the save lacks is removed | `Load(input, in keep)` with the configuration's singletons |
+| A component in the keep set of `Load` | `ArgumentException` | Leave it out of the save instead |
+| A singleton a system needs, left out of the save and never set again | The system throws on its first run | Set it before the load and keep it, or set it after |
 | A `Nino.Generator` reference older than the Nino of EasyEcs | A package downgrade: remove the reference, the EasyEcs package brings the generator | Restore (`NU1605`) |
 | An `Entity` handle in a component | A managed column Nino cannot write | [EECS017](/en/docs/guide/analyzer#eecs017) |
 | Editing the fields of a saved raw component | Old saves are refused | `[NinoType(format: NinoFormat.VersionTolerant)]` from the first save, or a new component type |

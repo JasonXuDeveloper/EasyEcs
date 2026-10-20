@@ -19,13 +19,13 @@ EasyEcs 的全部功能都在这一页，按它在服务器上承担的工作分
 
 | 用途 | 功能 |
 | --- | --- |
-| [模拟](#simulate) | [World 与实体](#worlds-and-entities)、[组件与标签](#components-and-tags)、[生成成员](#generated-members)、[系统与 `[ForEach]`](#systems-and-foreach)、[泛型系统](#generic-systems)、[过滤条件](#filters)、[可选组件](#optional-components)、[批量方法](#batch-methods)、[单例](#singletons)、[排序、分组与间隔](#system-groups-and-intervals)、[立即生效的结构变更](#immediate-structural-changes)、[临时查询](#ad-hoc-queries) |
-| [响应变化](#react) | [变更追踪](#change-tracking)、[移除检测](#removal-detection)、[清理组件](#cleanup-components)、[禁用与启用](#disable-and-enable) |
-| [查找](#find) | [值索引](#value-indexes)、[有序区间](#ordered-ranges)、[按值分表](#table-groups) |
+| [模拟](#simulate) | [World 与实体](#worlds-and-entities)、[组件与标签](#components-and-tags)、[生成成员](#generated-members)、[系统与 `[ForEach]`](#systems-and-foreach)、[泛型系统](#generic-systems)、[过滤条件](#filters)、[可选组件](#optional-components)、[批量方法](#batch-methods)、[单例](#singletons)、[排序、分组与间隔](#system-groups-and-intervals)、[分片](#slices)、[立即生效的结构变更](#immediate-structural-changes)、[临时查询](#ad-hoc-queries) |
+| [响应变化](#react) | [变更追踪](#change-tracking)、[值变了才算写入](#write-only-when-changed)、[移除检测](#removal-detection)、[销毁日志](#destroy-log)、[清理组件](#cleanup-components)、[禁用与启用](#disable-and-enable) |
+| [查找](#find) | [值索引](#value-indexes)、[唯一键](#unique-keys)、[有序区间](#ordered-ranges)、[按值分表](#table-groups) |
 | [组织](#structure) | [关系](#relations)、[层级](#hierarchy)、[动态缓冲](#dynamic-buffers)、[预制体与克隆](#prefabs-and-cloning) |
 | [持久化](#persist) | [快照](#snapshots)、[存档](#saves)、[迁移](#migration)、[卸载插件类型](#unloading) |
 | [扩展](#scale) | [每个线程一个 World](#threading-model)、[并行系统](#parallel-systems)、[并行 `[ForEach]`](#parallel-foreach)、[批量操作](#bulk-operations) |
-| [构建与运维](#operate) | [分析器与代码修复](#analyzer)、[系统耗时统计](#per-system-timing)、[异常处理](#errors)、[运行时自省](#introspection)、[Native AOT](#native-aot)、[托管与测试](#hosting-and-testing)、[模板与示例程序](#templates) |
+| [构建与运维](#operate) | [分析器与代码修复](#analyzer)、[系统耗时统计](#per-system-timing)、[调度](#schedule)、[异常处理](#errors)、[运行时自省](#introspection)、[归还内存](#trim-excess)、[Native AOT](#native-aot)、[托管与测试](#hosting-and-testing)、[模板与示例程序](#templates) |
 
 ## 模拟 [#simulate]
 
@@ -148,6 +148,19 @@ public class MovementSystem : EcsSystem
 - **开销：** 除了系统本身没有额外开销；空分组的更新什么都不做。排序成环会编译失败（[EECS019](/zh/docs/guide/analyzer#eecs019)）。
 - **指南：** [系统](/zh/docs/guide/systems)
 
+### 分片 [#slices]
+
+`[ForEach(Slices = N)]` 把一个方法要处理的行分摊到系统的 N 次运行里：每次只访问一片，约占每张匹配表的 1/N，按 64 行的位字切分，
+所以每 N 次运行每行恰好访问一次。`system.RunCount` 表示这是第几次运行（这次的分片是 `RunCount % N`）；结构体 job 用
+`QueryFilter.Slice(index, count)` 做同样的事。
+
+- **适合：** 晚一点也无妨、但一个 tick 做完太贵的工作：重新给 AI 目标打分、扫描空闲会话、给大量实体做数值衰减。
+- **别用于：** `[Changed<T>]` / `[Removed<T>]` 方法，它们必须看到每一次变更（[EECS035](/zh/docs/guide/analyzer#eecs035)）；
+  每个 tick 必须处理每一行的逻辑。两次运行之间搬动过的行，在一轮里可能被跳过或访问两次。
+- **开销：** 每次运行处理约 1/N 的行，外加遍历表的开销；配合 `UpdateInterval` M，每行每 N × M 次更新访问一次。
+  `Query`、`Count` 和批量调用不接受分片过的过滤器。
+- **指南：** [系统](/zh/docs/guide/systems)
+
 ### 立即生效的结构变更 [#immediate-structural-changes]
 
 创建、销毁、添加、移除都立即生效，在遍历同一批表的过程中也一样。一次遍历里每个实体最多访问一次：还没轮到就离开的实体直接跳过，
@@ -190,22 +203,48 @@ public class ReplicationSystem : EcsSystem
 ### 变更追踪 [#change-tracking]
 
 标了 `ITrackChanges` 的组件，每行记录最后一次写入时的变更 tick（任何给出 `ref` 的访问都算写入）。`[Changed<T>]` 方法只访问本系统上次执行后
-被写过的行；`QueryFilter.Changed<T>(since)` 在查询里做同样的事。
+被写过的行，`[ChangedAny<A, B>]` 访问几个组件里至少有一个被写过的行。查询里用 `QueryFilter.Changed<T>(since)` 和
+`ChangedAny<A, B>(since)`：一个过滤器存一份，每个客户端带着自己确认过的 tick 跑一遍（`filter.Since(ack)`），各自拿到自己上次确认以来的变化。
 
-- **适合：** 向客户端同步、保存脏数据、为移动过的单位更新空间结构。
-- **别用于：** 每个 tick 每行都会写的组件（没有可跳过的）。
+- **适合：** 向客户端同步、保存脏数据、为移动过的单位更新空间结构；`ChangedAny` 适合“任何一部分变了就整体下发”的快照（血量、法力、护甲）。
+- **别用于：** 大多数行每个 tick 真的都在变的组件（移动中单位的位置），没有可跳过的。每个 tick 都重算、但值很少变的组件不一样：
+  只在值变了时写入（[见下](#write-only-when-changed)），照样追踪。
 - **开销：** 每行 8 字节，每次写入一次存储；不追踪的组件没有任何开销。10 万实体里同步 10 个变化的实体耗时 <BenchValue k="changed.10" />，
-  扫描全部行是 <BenchValue k="changed.10.scan" />。
+  扫描全部行是 <BenchValue k="changed.10.scan" />。自 tick 以来没有任何列被写过的表整张跳过，`ChangedAny` 也一样。
+- **指南：** [变更追踪](/zh/docs/guide/change-tracking)
+
+### 值变了才算写入 [#write-only-when-changed]
+
+被追踪组件的 `ref` 参数会给方法访问到的每一行打戳，不管写没写。`Mut<T>` 参数只给方法真正写了的行打戳：`Value` 只读，
+`Write()` 给出 `ref` 并打戳，`SetIfChanged(value)` 只在值不同时存入并打戳。遍历之外，`entity.SetIfChanged(value)` 和生成的
+`SetHealthIfChanged(…)` 也是这样。
+
+- **适合：** 每个 tick 都重算、偶尔才变的值：单位的目标、所在的格子、推导出来的属性。`[Changed<T>]` 的读取方只会访问值真变了的行。
+- **别用于：** 大多数行反正都会写的值：普通 `ref` 更便宜。
+- **开销：** `Value` 就是一次普通读取；每次写入多一次实体查找和一次打戳；`SetIfChanged` 先比较值（`IEquatable<T>`，record struct 自带；
+  否则按非托管结构体的字节比较）。调度器把 `Mut<T>` 参数算作对 `T` 的写入。
 - **指南：** [变更追踪](/zh/docs/guide/change-tracking)
 
 ### 移除检测 [#removal-detection]
 
 `[Removed<T>]` 方法访问本系统上次执行后失去了被追踪 `T` 的实体，每次移除访问一次，还能读写它们的其他组件：移除时行被保留，并打上 tick。
+`[RemovedAny<A, B>]` 和 `QueryFilter.RemovedAny<A, B>(since)` 选出失去了几个组件之一的实体。
 
 - **适合：** 告诉客户端什么没了（火灭了、护盾碎了），释放组件代表的东西（预留的格子）。
-- **别用于：** 已销毁的实体，它们没有行：用一个同步系统会读的标签标记，同步之后再销毁。
+- **别用于：** 已销毁的实体，它们没有行：由[销毁日志](#destroy-log)报告。
 - **开销：** 除了组件本来就有的 tick 列，不占额外存储。10 万实体里找出 10 次移除耗时 <BenchValue k="removed.10" />。
 - **指南：** [变更追踪](/zh/docs/guide/change-tracking#removal-detection)
+
+### 销毁日志 [#destroy-log]
+
+设置 `WorldOptions.DestroyLog = n` 后，World 记下最近销毁的 n 个实体，以及各自被销毁时的变更 tick。
+`world.DestroyedSince(since, into, out count)` 列出某个读取方的 tick 以来销毁的实体，所以每个客户端都能按自己确认过的 tick 知道该删哪些实体。
+读取方比日志还旧（早于 `DestroyLogOldestTick`）时返回 false：这个客户端需要重新下发全量状态。
+
+- **适合：** 把实体的消失同步给很多客户端，而它们确认到的 tick 各不相同。
+- **别用于：** 只有一个读取方、而且必须在实体消失前处理它（释放座位、关闭连接）：那是[清理组件](#cleanup-components)的事。
+- **开销：** 每条记录 16 字节，一次性分配；每次销毁一次存储；关闭时（默认）没有开销。`DestroyedSince` 是 O(报告的记录数)，不分配内存。
+- **指南：** [变更追踪](/zh/docs/guide/change-tracking)
 
 ### 清理组件 [#cleanup-components]
 
@@ -234,15 +273,17 @@ public class ReplicationSystem : EcsSystem
 ```csharp
 public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
 public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }
+public record struct Account(int Id) : IComponent, IUniqueIndexed<int> { public int Key => Id; }
 ```
 
 ```csharp
 using var world = new World();
 world.GroupBy<Zone>();                                          // 初始化时调用
-world.CreateEntity(new Team(1), new Zone(3), new Position(0, 0));
+world.CreateEntity(new Team(1), new Zone(3), new Position(0, 0), new Account(7));
 
 int red = world.TeamIndex.Count(1);                             // 一次哈希查找
 int inZone = world.Count<Position>(QueryFilter.Create().InZone(3));   // 只遍历 3 号场景的行
+Entity owner = world.AccountIndex.Get(7);                       // 唯一键对应的那一个实体
 ```
 
 ### 值索引 [#value-indexes]
@@ -253,6 +294,18 @@ int inZone = world.Count<Position>(QueryFilter.Create().InZone(3));   // 只遍�
 - **适合：** 按名字找玩家、找公会里的单位、找某个网格格子里的实体。
 - **别用于：** 大多数行每个 tick 都在变、又很少查找的值：每次变化都要重新挂链。
 - **开销：** 每个被索引的实体一个节点，只有用到索引的 World 才付出。`Count` 是一次哈希查找，`Find` 每个匹配一步。
+- **指南：** [索引与关系](/zh/docs/guide/indexes-and-relations)
+
+### 唯一键 [#unique-keys]
+
+实现 `IUniqueIndexed<TKey>` 的组件，一个键只对应一个实体：`index.Get(key)` 返回它（没有就抛异常），`TryGet(key, out e)` 试着取。
+任何会让第二个实体拿到别人已有的键的写入（`Set`、创建、`Instantiate`、`Clone`、`SetAll`、`Enable`、读档和搬移），都会在改动任何东西之前抛出
+`InvalidOperationException`。引用类型键为 null 时视为没有键。
+
+- **适合：** 账号 id、玩家名、会话令牌、格子的占用者：绝不能对应两个实体的键。
+- **别用于：** `EntityId` 键（[EECS036](/zh/docs/guide/analyzer#eecs036)）；几个实体共用的键（用普通的 `IIndexed<TKey>`）。
+- **开销：** 第一张含该组件的表出现时索引就建好了，所以每次写入都会检查：每个变了的键一次哈希查找，批量调用和读档多遍历一遍行。
+  `Get` 和 `TryGet` 是一次哈希查找。
 - **指南：** [索引与关系](/zh/docs/guide/indexes-and-relations)
 
 ### 有序区间 [#ordered-ranges]
@@ -294,6 +347,7 @@ archer.WriteLoot().Add(new Loot(7));                                // 一次被
 var goblin = new Prefab().SetPosition(0, 0).SetHealth(30);
 var wave = new Entity[100];
 world.Instantiate(goblin, wave);
+var guard = world.Instantiate(goblin, new ChildOf(archer));          // 自带父实体，只拷贝一次行
 ```
 
 ### 关系 [#relations]
@@ -333,11 +387,12 @@ world.Instantiate(goblin, wave);
 
 `Prefab` 是一份不属于任何 World 的组件值配方，所以没有查询能看到它，也没有系统需要过滤它。`world.Instantiate(prefab)` 创建一个实体，
 `Instantiate(prefab, span)` 创建一整波；`new Prefab(base)` 生成变体，`AddMember()` 组成一组（首领带着小怪和坐骑）。
+`Instantiate(prefab, new ChildOf(boss), new Position(x, y))` 在同一次调用里给实例最多九个自己的组件：覆盖预制体里的值，或者新加上去。
 `entity.Clone()` 复制一个活着的实体。
 
-- **适合：** 反复刷出的实体种类：NPC 类型、投射物、掉落物，写在代码里或启动时从配置加载。
+- **适合：** 反复刷出的实体种类：NPC 类型、投射物、掉落物，写在代码里或启动时从配置加载；带组件的形式适合父实体、位置或主人每个实例都不同的刷怪。
 - **别用于：** 每个值都不一样的实体：直接带值创建。
-- **开销：** 每个实例一次行拷贝；一整波只过一次结构闸门，表最多扩容一次。
+- **开销：** 每个实例一次行拷贝，带组件也一样（拷贝之后不再搬行）；一整波只过一次结构闸门，表最多扩容一次。
 - **指南：** [预制体](/zh/docs/guide/prefabs)
 
 ## 持久化 [#persist]
@@ -369,6 +424,9 @@ restarted.Load(bytes.WrittenSpan);
 
 `world.Save(writer)` 把整个 World 写成字节，`world.Load(bytes)` 在本进程或另一个进程的 World 里读回来：id、组件和单例都一样。
 非托管组件按原始行写出；托管组件、单例和标了 `[NinoType]` 的非托管组件由 Nino 写出。类型按 Nino 类型 id 记录，所以加载时会跳过进程里已经不存在的组件，改了名的组件用 `[NinoFormerName]` 就能留住。
+
+重启时，`Save(writer, in exclude)` 不写 `ComponentSet` 里的组件和单例（运行时状态、缓存、配置），这些类型也就不需要格式化器；
+`Load(bytes, in keep, markWritten: false)` 保留新进程已经设好的单例，比如它的配置。
 
 - **适合：** 跨重启持久化、落盘的回放、把一个 World 发到另一台机器。
 - **别用于：** 原地修改非托管组件的内存布局：请新增一个组件类型，否则旧存档加载不了。
@@ -426,7 +484,8 @@ restarted.Load(bytes.WrittenSpan);
 `ForEachEntityParallel` 对结构体 job 做同样的事。
 
 - **适合：** 几万个实体以上、每个实体计算量大的工作：转向、寻路跟随、AI 打分。
-- **开销：** 每块 1,024 到 16,384 行，大约每个线程四块，零分配。
+- **开销：** 每块 1,024 到 16,384 行，大约每个线程四块，零分配。写被追踪组件的方法按 4,096 行的整数倍切块（变更摘要覆盖的块大小），
+  所以表要更大才会被拆开。
 - **指南：** [线程模型](/zh/docs/guide/threading)
 
 ### 批量操作 [#bulk-operations]
@@ -444,7 +503,7 @@ restarted.Load(bytes.WrittenSpan);
 
 ### 分析器与代码修复 [#analyzer]
 
-包里在生成器旁边附带了分析器（EECS002 到 EECS034）和代码修复。不合法的 `[ForEach]` 方法、类组件、有状态的系统、引用系统的系统、
+包里在生成器旁边附带了分析器（EECS002 到 EECS036）和代码修复。不合法的 `[ForEach]` 方法、类组件、有状态的系统、引用系统的系统、
 经 `in` 的写入、可能竞争的并行方法、跨线程的结构变更、经 `ref` 写入的被索引组件、成环的排序，都会编译失败；还有几条警告标出能跑但有代价的写法。
 
 - **适合：** 一直开着；默认就是开的，它让系统保持解耦。
@@ -452,11 +511,22 @@ restarted.Load(bytes.WrittenSpan);
 
 ### 系统耗时统计 [#per-system-timing]
 
-打开 `WorldOptions.MeasureSystems` 后，系统的每次执行都会计时：`system.Stats` 里有 `Runs`、`Last`、`Total` 和 `Average`。
+打开 `WorldOptions.MeasureSystems` 后，系统的每次执行都会被统计：`system.Stats` 里有 `Runs`、`Last`、`Total` 和 `Average`，
+这次执行分配的字节数（`LastAllocated`、`TotalAllocated`，包括它的并行 `[ForEach]` 方法在辅助线程上的分配），以及它的 `[ForEach]`
+方法访问的实体数（`LastEntities`、`TotalEntities`）。
 
-- **适合：** 在线服务器上的诊断接口或日志，看哪个系统越来越慢。
-- **开销：** 打开时每次执行读两次时间戳；关闭时没有开销。
+- **适合：** 在线服务器上的诊断接口、指标导出或日志，看哪个系统越来越慢、哪个在分配内存、耗时是不是跟着实体数涨。
+- **开销：** 打开时每次执行读两次时间戳、两次分配计数，每个 `[ForEach]` 遍历再数一次匹配数；关闭时没有开销。
 - **指南：** [调试与诊断](/zh/docs/guide/diagnostics#timing)、[系统](/zh/docs/guide/systems#measuring-systems)
+
+### 调度 [#schedule]
+
+`world.DescribeSchedule()` 描述 World 怎样运行它的系统：每个分组有哪些阶段，每个系统读写什么，某个系统为什么要等前一个阶段，
+以及哪些冲突的系统之间只靠注册顺序分先后。`ToString()` 输出文本，`ToMermaid()` 输出流程图。
+
+- **适合：** 启动时打一行日志；排查两个系统为什么没有并行；找出需要用 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 写明顺序的系统对。
+- **开销：** 冷调用，会为描述分配内存；任何线程都能调用。
+- **指南：** [调试与诊断](/zh/docs/guide/diagnostics)
 
 ### 异常处理 [#errors]
 
@@ -473,6 +543,16 @@ restarted.Load(bytes.WrittenSpan);
 
 - **适合：** 管理后台、内存报告、调试。
 - **开销：** 生成描述时分配内存（冷路径），不碰热路径。
+- **指南：** [调试与诊断](/zh/docs/guide/diagnostics)
+
+### 归还内存 [#trim-excess]
+
+表满了就翻倍，之后容量一直保留，所以峰值占的内存不会自己回来。`world.TrimExcess()` 把它还回去：删掉空表，把其他表缩到行数向上取整的 2 的幂
+（至少 64），并释放存档、读档和迁移用的缓冲。句柄、查询、系统、索引和快照照常可用。
+
+- **适合：** 峰值过后的空闲时刻：一波怪清完、一局对战结束、`world.EntityCount` 远低于峰值时的维护任务。
+- **别用于：** 每个 tick 调用：它删掉的东西，之后的结构变更又要重新分配。
+- **开销：** O(表数 × (缓存的查询数 + 快照数) + 被缩小的表的行数 × 列数)；会分配内存（冷路径）。实体记录的长度不变。
 - **指南：** [调试与诊断](/zh/docs/guide/diagnostics)
 
 ### Native AOT [#native-aot]

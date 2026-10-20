@@ -82,6 +82,23 @@ public class AssignSeats : EcsSystem
 - A retired entity leaves its indexes, and its children go with it.
 - A cleanup component cannot be disabled (`Disable<T>()` throws): it must stay to be released.
 
+### Cleanup component or destroy log [#cleanup-or-destroy-log]
+
+The [destroy log](/en/docs/guide/change-tracking#destroy-log) (`WorldOptions.DestroyLog`, `world.DestroyedSince`) also
+reacts to entities going away. The two answer different questions:
+
+| | Cleanup component | Destroy log |
+| --- | --- | --- |
+| Use it to | Run code with the component's last value before the entity goes: close its socket, free its seat | Tell readers which entities went: replication to clients, an index of your own outside the world |
+| What the reader gets | The entity itself, alive and tagged `Destroyed`, with its cleanup components | `EntityId`s only: the entities are gone, their values with them |
+| Readers | One release path: the entity is freed when its last cleanup component is removed | Any number, each from its own tick (every client at the tick it acknowledged) |
+| Missed? | Never: the entity waits for its system | A reader older than the ring is told to resynchronize (`DestroyedSince` returns `false`) |
+| Cost | A retired row until released | A fixed ring of 16-byte records, off by default |
+
+Use both when a session holds a socket and clients replicate it: the cleanup component closes the socket, the log
+tells every client the session is gone. An entity with cleanup components is logged when it is freed (its last
+cleanup component removed), not when it is retired, since until then it is still alive.
+
 ### Disabling a component [#disable-a-component]
 
 `Disable<T>()` keeps the value of `T` but hides it: queries, `Has` and `Get` act as if the entity lacked `T`, until
@@ -330,6 +347,8 @@ and enabled in bulk and one by one (`BulkBenchmark`):
 | `Set` on a disabled component expecting it to stay disabled | `Set` enables it with the new value; use `Enable` to get the kept value back | By design |
 | Forgetting `Without<Inactive>` on a system | Pooled entities keep moving | Code review |
 | Expecting `[Changed<T>]` to tell new from written | Both are writes | Use a `Spawned` tag |
+| A cleanup component only to tell clients an entity went | Every destroyed entity waits for a system, and only one reader sees it | The [destroy log](/en/docs/guide/change-tracking#destroy-log): many readers, ids only |
+| Expecting the destroy log to hold a retired entity's values | It holds ids only, and logs the entity when it is freed | A cleanup component reads the values first |
 
 ## Related [#related]
 

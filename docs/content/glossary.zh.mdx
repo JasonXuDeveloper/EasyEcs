@@ -106,7 +106,13 @@ World 用来跑并行工作的部件：一个阶段里的系统，或者一个�
 ## 块（Chunk） [#chunk]
 
 并行方法（`[ForEach(Parallel = true)]`、`ForEachParallel`）把匹配的行切成的一段：行数是 64 的倍数，每个线程大约四块，
-在 1,024 到 16,384 行之间。[执行器](#runner)把块分给各个线程；不足两块时只在调用线程上跑。见[系统](/zh/docs/guide/systems#parallel-methods)。
+在 1,024 到 16,384 行之间（方法写被追踪组件时是 4,096 的倍数）。[执行器](#runner)把块分给各个线程；不足两块时只在调用线程上跑。
+见[系统](/zh/docs/guide/systems#parallel-methods)。
+
+## 分片（Slice） [#slice]
+
+`[ForEach(Slices = N)]` 方法一次运行访问的那部分行：每张匹配表约 1/N 的行，按 64 行的位字切分，取系统运行次数的第 `RunCount % N` 片。
+每 N 次运行，每行恰好访问一次。见[系统](/zh/docs/guide/systems)。
 
 ## 结构体 job（Struct job） [#struct-job]
 
@@ -135,6 +141,11 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 
 同时实现了 `ITrackChanges` 的组件。它的行会记录何时被写入或移除，所以 `[Changed<T>]` 和 `[Removed<T>]` 只访问这些行。
 每行多 8 字节；不追踪的组件没有任何开销。见[变更追踪](/zh/docs/guide/change-tracking)。
+
+## 销毁日志（Destroy log） [#destroy-log]
+
+设置了 `WorldOptions.DestroyLog` 时，World 保存的一个环形缓冲：最近销毁的实体，以及各自被销毁时的变更 tick。
+`world.DestroyedSince(since, …)` 列出某个读取方的 tick 以来销毁的实体，所以每个客户端各自保存自己的标记。见[变更追踪](/zh/docs/guide/change-tracking)。
 
 ## 结构变更（Structural change） [#structural-change]
 
@@ -195,7 +206,8 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 ## 值索引（Value index） [#value-index]
 
 从键到实体的查找表：组件实现 `IIndexed<TKey>`，用 `world.Index<T, TKey>()` 查询。每次 `Set` 索引都会跟着更新；
-键可比较时还能按区间有序遍历。见[索引与关系](/zh/docs/guide/indexes-and-relations)。
+键可比较时还能按区间有序遍历。唯一索引（`IUniqueIndexed<TKey>`）一个键只对应一个实体，用 `Get` 查找，并拒绝会让键重复的写入。
+见[索引与关系](/zh/docs/guide/indexes-and-relations)。
 
 ## 关系（Relation） [#relation]
 

@@ -1,7 +1,7 @@
 ---
 title: Common mistakes
 seoTitle: "Common EasyEcs mistakes in C# and how to fix them"
-description: "Twenty-four mistakes people make with EasyEcs in C#, each with the code you might write, why it is wrong and the fix, plus the analyzer rule behind it."
+description: "Thirty-two mistakes people make with EasyEcs in C#, each with the code you might write, why it is wrong and the fix, plus the analyzer rule behind it."
 icon: TriangleAlert
 ---
 
@@ -283,6 +283,43 @@ int amount = player.Gold.Amount;             // ref readonly: no stamp
 Caught by [EECS025](/en/docs/guide/analyzer#eecs025) (warning, with a code fix). More in
 [what counts as a write](/en/docs/guide/change-tracking#what-counts-as-a-write).
 
+### A tracked component written only sometimes through a `ref` [#ref-writes-every-row]
+
+```csharp
+public record struct Facing(int Direction) : IComponent, ITrackChanges;   // sent to clients when it changes
+```
+
+```csharp
+public class Face : EcsSystem
+{
+    [ForEach]
+    static void Turn(ref Facing facing, in Velocity velocity)      // every visited row is stamped
+    {
+        int direction = velocity.X >= 0 ? 0 : 4;
+        if (facing.Direction != direction) facing = new Facing(direction);
+    }
+}
+```
+
+A `ref` parameter of a tracked component is a write whether or not the method stores through it, and so is a `Query`
+item (its enumerator stamps every row it visits): every `[Changed<Facing>]` reader then visits every entity, and
+replication sends values nobody changed. The analyzer cannot tell, because the method does write some rows. Take a
+`Mut<T>`: it stamps only the rows it writes, and `SetIfChanged` writes only when the value differs:
+
+```csharp
+public class Face : EcsSystem
+{
+    [ForEach]
+    static void Turn(Mut<Facing> facing, in Velocity velocity) =>
+        facing.SetIfChanged(new Facing(velocity.X >= 0 ? 0 : 4));
+}
+```
+
+Outside systems, read through `in` parameters, `Read<T>()` or the generated property, and write with
+`entity.SetIfChanged(...)` (or the generated `SetFacingIfChanged(...)`). No rule catches the `ref` writer that writes
+sometimes; [EECS025](/en/docs/guide/analyzer#eecs025) catches the one that never writes. More in
+[what counts as a write](/en/docs/guide/change-tracking#what-counts-as-a-write).
+
 ### `[Removed<T>]` that takes `T` [#removed-takes-t]
 
 ```csharp
@@ -309,6 +346,89 @@ public class Extinguish : EcsSystem
 
 Caught by [EECS016](/en/docs/guide/analyzer#eecs016). More in
 [removal detection](/en/docs/guide/change-tracking#removal-detection).
+
+### Expecting `[Removed<T>]` to report destroyed entities [#removed-destroyed]
+
+```csharp
+public record struct Avatar(int Skin) : IComponent, ITrackChanges;
+public record struct Despawns(int Count) : ISingletonComponent;
+```
+
+```csharp
+public class CountDespawns : EcsSystem
+{
+    [ForEach, With<Position>, Removed<Avatar>]       // removals only: a destroyed entity has no row left
+    static void Count(ref Despawns despawns) => despawns = new Despawns(despawns.Count + 1);
+}
+```
+
+`[Removed<T>]` visits entities that still exist and lost `T`. A destroyed entity has no row to visit, so a client is
+never told it is gone. Turn on the world's destroy log and read it with each client's own acknowledged tick:
+
+```csharp
+using var server = new World(new WorldOptions { DestroyLog = 4_096 });   // the destroys a client may lag behind
+var gone = new EntityId[4_096];                                          // allocated once, reused for every client
+ulong acked = server.ChangeTick;                                          // the client's last acknowledged tick
+server.Update();
+if (server.DestroyedSince(acked, gone, out int destroyed))
+{
+    for (int i = 0; i < destroyed; i++) Console.WriteLine($"despawn {gone[i]}");
+}
+else
+{
+    Console.WriteLine("too far behind: send the whole state");
+}
+```
+
+No rule catches it. More in [removal detection](/en/docs/guide/change-tracking#removal-detection).
+
+### Expecting `Count` or `Query` to honour a slice [#count-a-slice]
+
+```csharp
+public struct Npc : IComponent;
+```
+
+```csharp
+var quarter = QueryFilter.Create().With<Npc>().Slice(0, 4);
+int thinking = world.Count<Position>(quarter);   // ArgumentException: Count needs every matching row
+```
+
+A slice is a cut of each table that only `[ForEach]` passes (`ForEach`, `ForEachEntity`, `ForEachBatch` and their
+parallel forms) take. `Query`, `Count`, `Any`, `DestroyEntities`, `entity.Run` and the bulk calls need every matching
+row, so they throw for a sliced filter instead of answering for part of the world. Count without the slice, and read
+what a sliced system visited from its stats:
+
+```csharp
+int npcs = world.Count<Position>(QueryFilter.Create().With<Npc>());   // all of them; a slice holds about npcs / 4
+```
+
+With `MeasureSystems`, `system.Stats.LastEntities` of a `[ForEach(Slices = N)]` method is its share. Caught at run
+time. More in [slices](/en/docs/guide/systems#update-interval).
+
+### Slicing a `[Changed<T>]` method [#slice-changed]
+
+```csharp doccheck=expect-EECS035
+public class SendGold : EcsSystem
+{
+    [ForEach(Slices = 4), Changed<Gold>]
+    static void Send(in Gold gold, ref Hud hud) => hud = new Hud(gold.Amount);
+}
+```
+
+A `[Changed<T>]` method visits the rows written since its system last ran, and each run moves that mark: the three
+slices a run skips would lose their changes. It already visits only the rows that changed; drop `Slices`. When the
+work a change causes is what is heavy, record it as data and spread that with a sliced method without a change
+filter:
+
+```csharp
+public class SendGold : EcsSystem
+{
+    [ForEach, Changed<Gold>]
+    static void Send(in Gold gold, ref Hud hud) => hud = new Hud(gold.Amount);
+}
+```
+
+Caught by [EECS035](/en/docs/guide/analyzer#eecs035).
 
 ### One hand-written group per actor type [#group-per-actor]
 
@@ -401,6 +521,78 @@ public static class Portals
 
 Caught by [EECS015](/en/docs/guide/analyzer#eecs015). More in
 [value indexes](/en/docs/guide/indexes-and-relations#value-indexes).
+
+### Moving a unique key to its new holder first [#rekey-order]
+
+```csharp
+public record struct Seat(int Number) : IComponent, IUniqueIndexed<int> { public int Key => Number; }
+```
+
+```csharp
+var alice = world.CreateEntity(new Seat(1));
+var bob = world.CreateEntity(new Seat(2));
+bob.SetSeat(1);       // InvalidOperationException: alice still holds seat 1
+alice.SetSeat(2);
+```
+
+A unique index checks each write before it stores it, so at no moment do two entities hold one key. Free the key
+first, then give it away: change (or remove) the current holder before the new one. A swap goes through a free key:
+
+```csharp
+var carol = world.CreateEntity(new Seat(11));
+var dave = world.CreateEntity(new Seat(12));
+carol.SetSeat(-1);    // a key nobody holds
+dave.SetSeat(11);
+carol.SetSeat(12);
+```
+
+The refused write changes nothing: the entity keeps its old key and the world is as it was. Caught at run time. More
+in [value indexes](/en/docs/guide/indexes-and-relations#value-indexes).
+
+### Copying an entity or prefab that holds a unique key [#unique-copies]
+
+```csharp
+var usher = new Prefab().Set(new Seat(0), new Health(100));
+var ushers = new Entity[10];
+world.Instantiate(usher, ushers);   // InvalidOperationException: ten entities, one key
+```
+
+Every copy of a unique key is a second holder. `Clone()` of an entity with a key throws, and so do
+`Instantiate(prefab)` a second time and `Instantiate(prefab, entities)` of more than one, when the prefab holds a key.
+Keep the key out of the prefab and give each instance its own:
+
+```csharp
+var guest = new Prefab().Set(new Health(100));
+var guests = new Entity[10];
+for (int i = 0; i < guests.Length; i++)
+    guests[i] = world.Instantiate(guest, new Seat(100 + i));   // one key per instance
+```
+
+A null key (the default of a `string` key) is no key: a prefab may hold it and every instance gets it. Caught at run
+time. More in [prefabs](/en/docs/guide/prefabs).
+
+### Enabling a unique key someone else took [#disabled-unique]
+
+```csharp
+var regular = world.CreateEntity(new Seat(5));
+regular.DisableSeat();                   // a disabled key is no key: seat 5 is free
+var walkIn = world.CreateEntity(new Seat(5));
+regular.EnableSeat();                    // InvalidOperationException: walkIn holds seat 5
+```
+
+A disabled component keeps its value but leaves the index, so its key can be taken while it is off. Enabling it
+claims the key again, and the claim fails when another entity holds it; the component stays disabled. `EnableAll`
+checks every row first and fails the same way. Look the key up before enabling, and give one of them another key:
+`Set` stores a free key and enables the component in one call:
+
+```csharp
+if (world.SeatIndex.TryGet(5, out var holder) && holder != regular)
+    regular.SetSeat(6);                  // another key, enabled
+else
+    regular.EnableSeat();
+```
+
+Caught at run time. More in [disable a component](/en/docs/guide/cleanup-and-disable#disable-a-component).
 
 ### Copying a `DynamicBuffer<T>` [#buffer-copy]
 
@@ -520,6 +712,28 @@ static Entity Restore(World world, ReadOnlySpan<byte> record)
 
 No rule catches it. More in [records](/en/docs/guide/migration-and-unload#records).
 
+### Calling `TrimExcess` every tick [#trim-every-tick]
+
+```csharp
+while (running)
+{
+    world.Update();
+    world.TrimExcess();   // drops the tables the next tick creates again
+}
+```
+
+`TrimExcess` drops the empty tables and shrinks the rest to what they hold now. A running world empties and refills
+tables every tick (deaths, spawns, statuses), so the next tick allocates them again: the zero-allocation steady state
+becomes churn, and each call also walks every table and cached query. Call it after a peak, at a quiet moment:
+
+```csharp
+world.Update();
+if (world.UpdateCount % 12_000 == 0 && world.EntityCount < 10_000)   // every ten minutes at 20 Hz, once quiet
+    world.TrimExcess();
+```
+
+No rule catches it. More in [give memory back after a peak](/en/docs/guide/diagnostics#trim).
+
 ## Threads [#threads]
 
 ### Changing a world from another thread [#other-thread]
@@ -607,7 +821,7 @@ Caught by [EECS010](/en/docs/guide/analyzer#eecs010). More in
 
 <Cards>
   <Card title="Analyzer rules" href="/en/docs/guide/analyzer">
-    Every rule, EECS002 to EECS034.
+    Every rule, EECS002 to EECS036.
   </Card>
   <Card title="ECS principles" href="/en/docs/ecs-principles">
     The rules these mistakes break.

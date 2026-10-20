@@ -135,6 +135,9 @@ world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
 - `LoadEntitiesInto` 是结构变更：只能在所有者线程调用（[EECS014](/zh/docs/guide/analyzer#eecs014)），遍历进行中不能调用
   （抛 `InvalidOperationException`），不能放进并行方法（[EECS010](/zh/docs/guide/analyzer#eecs010)），`[ForEach]` 方法要接收
   `Entity` 或 `World` 才能调用（[EECS013](/zh/docs/guide/analyzer#eecs013)）。
+- 集合在分组存档里列的是组件。它也能列单例（`WithSingleton<T>()`，或者两种类型都接受的 `With(typeof(...))`），用于整个 World 的
+  [重启](/zh/docs/guide/saves#restart)：`Save(output, in exclude)` 不写这些类型，`Load(input, in keep)` 保留这些单例。分组存档不写单例，
+  所以集合里有单例时 `SaveEntities` 抛 `ArgumentException`。
 - 运行时才知道类型的框架按 `Type` 构建集合：
 
 ```csharp
@@ -155,6 +158,20 @@ public static class RuntimeRecords
 | 留在原地的父实体（`ChildOf`） | 移除 `ChildOf`：实体在这边成为根 |
 
 集合里的 id（组件里的 `List<EntityId>`）不会改写。索引和分组会认识新到的实体，被追踪组件算作写入。
+
+### 到达时的唯一键 [#unique-keys]
+
+[唯一键](/zh/docs/guide/indexes-and-relations#unique-keys)（比如账号 id）在每个 World 里只对应一个实体，新到的一组实体不能带来目标
+World 已经分出去的键。`LoadEntities`、`LoadEntitiesInto` 和 `MoveEntities` 在第一行到达之前，就拿这组实体的每个唯一键和目标 World 比对：
+
+- 键已被目标 World 的另一个实体持有：抛 `InvalidOperationException`，什么也不进来。此时 `MoveEntities` 不动源 World 里的原实体，
+  玩家还在原地。
+- 字节里同一个键给了两个实体（存档损坏或是手工拼的）：抛 `InvalidDataException`。
+- `LoadEntitiesInto` 写到本来就持有这个键的实体上没问题：它拿到的就是自己的键。在给定的实体之间互换键会被拒绝，和把键给第二个实体一样。
+
+玩家回到一个还留着他旧副本的 World（过期的会话、崩溃留下的残影）时，在旧副本被销毁或去掉键之前都会被拒绝：先销毁它，再加载或迁移玩家。
+
+[销毁日志](/zh/docs/guide/change-tracking#destroy-log)会记下 `MoveEntities` 在源 World 里销毁的原实体，源 World 的读者能看到这组实体离开。
 
 ### 卸载插件的类型 [#remove-types]
 
@@ -197,6 +214,12 @@ public static class Plugins
 
 [HotReload 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload)完整跑一遍这个流程，并校验旧上下文已被回收、
 插件数据已经带过来。
+
+重载会留下一些内存：存档和加载用的缓冲已经长到能装下整个 World，实体离开后还有空表。新版本跑起来以后，在空闲的时候（不要在 tick 里）调用
+`world.TrimExcess()` 把它们还回去（见[高峰过后还回内存](/zh/docs/guide/diagnostics#trim)）。
+
+整个进程重启也是这样走字节，只有两点不同：旧进程不写不该带回来的东西（运行时状态、它自己的配置），新进程保留它在加载之前设好的配置。
+`Save(output, in exclude)` 和 `Load(input, in keep, markWritten: false)` 正好做这两件事：见[重启](/zh/docs/guide/saves#restart)。
 
 ## 完整例子 [#full-example]
 
@@ -368,6 +391,7 @@ saving 0v1: 650 gold
 | 只有部分组件需要持久化，却用 `SaveEntities` 存整个实体 | 用 `ComponentSet` | 运行时组件不写入，也不需要格式化器 |
 | 每次存档都新建 `ComponentSet` | 一个 `static readonly` 集合 | 每次 `With` 都会复制集合 |
 | 重载时重建整个 World | 先 `RemoveTypes`，再 `Load` | 宿主的实体和组件原地不动 |
+| 重载之后一直背着长大的缓冲 | 新版本跑起来后调一次 `TrimExcess()` | 释放存档、加载用的缓冲和空表 |
 
 10 个玩家各带 99 件物品，通过字节和在内存中迁到另一个 World 再迁回来，以及一个带四个组件的实体通过字节迁移，再加上只存其中两个组件的记录、读回到带着另外两个组件的实体上
 （`MigrationBenchmark`）；
@@ -397,6 +421,8 @@ saving 0v1: 650 gold
 | 在更新或遍历期间调用 `RemoveTypes` | 抛 `InvalidOperationException` | 运行时 |
 | 恢复 `RemoveTypes` 之前拍的快照 | 抛 `InvalidOperationException` | 运行时 |
 | 在其他线程迁移 | 两个 World 都只属于各自的所有者线程 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+| 迁移或加载的玩家，唯一键已被目标 World 持有 | 抛 `InvalidOperationException`；什么也不进来，原实体不动 | 先销毁过期的持有者（[唯一键](#unique-keys)） |
+| `SaveEntities` 的集合里有单例 | 抛 `ArgumentException`：分组存档不写单例 | 单例放进整个 World 的[重启](/zh/docs/guide/saves#restart)存档 |
 | 需要持久化的组件没放进记录的集合 | 不会存档：读回后实体保留自己原来的值，或者根本没有这个组件 | 在一个地方、按需要持久化的组件建集合 |
 | 用 `LoadEntities` 读记录 | 在已有实体之外又建了新实体 | 对已有实体用 `LoadEntitiesInto` |
 | `LoadEntitiesInto` 传入的实体数和存档不一致，或者有失效的实体 | `ArgumentException`；什么都不改 | 按存档顺序，每个存档实体对应一个存活实体 |

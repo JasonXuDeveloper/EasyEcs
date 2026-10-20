@@ -15,7 +15,8 @@ writes, which the source generator compiles into a struct job as fast as a hand-
 <Callout type="idea" title="Use it for">
   All per-tick behavior: one responsibility per system, one `[ForEach]` method per loop, ordering with
   `[UpdateAfter<T>]`, groups for different cadences (input whenever it arrives, simulation at a fixed tick),
-  `UpdateInterval` for work that runs every N-th tick. [Group filters](#group-filters) keep a whole group to one kind
+  `UpdateInterval` for work that runs every N-th tick, [`Slices`](#slices) for work spread over several ticks.
+  [Group filters](#group-filters) keep a whole group to one kind
   of entity, and a generic group interface gives each type its own group (one group per actor type).
 </Callout>
 
@@ -91,6 +92,7 @@ int dealt = world.BurnTotals.Damage;               // 10
 | `World` | the owning world, set before `OnCreate` |
 | `Enabled` | `false` skips the system in `Update()` and `Update<TGroup>()` |
 | `LastRunTick` | the change tick of its last run ([change tracking](/en/docs/guide/change-tracking#ticks)) |
+| `RunCount` | how many times it ran before the current run (0 during the first); a [sliced](#slices) method visits slice `RunCount % N` |
 | `Stats`, `Error` | [measurements](#measuring-systems) and the [exception that switched it off](#errors) |
 
 `AddSystem<T>()` returns the system; `GetSystem<T>()` finds one (for tools and tests, never from another system:
@@ -118,7 +120,10 @@ flowchart TB
 Systems run in registration order unless ordered. Structural changes apply at once, so later methods and systems of
 the same update see them. Everything runs on the thread that calls `Update()`, unless
 `WorldOptions.ParallelSystems` runs systems with no order and no conflict between them at the same time
-([Threading](/en/docs/guide/threading#parallel-systems)); the result is the same as running them in order.
+([Threading](/en/docs/guide/threading#parallel-systems)); the result is the same as running them in order. To see
+the stages the world built, what each system reads and writes and why a system waits for another, print
+`world.DescribeSchedule()` (text, or `ToMermaid()` for a diagram:
+[Debugging and diagnostics](/en/docs/guide/diagnostics#schedule)).
 
 ### Ordering [#ordering]
 
@@ -147,6 +152,46 @@ public class SaveSystem : EcsSystem
 }
 ```
 
+### Slices: part of the rows per run [#slices]
+
+`UpdateInterval` runs a system over all its rows on every N-th update, so its work comes in spikes.
+`[ForEach(Slices = N)]` runs the method on every run of its system over about 1 / N of the rows of every matching
+table: each row is visited once per N runs, and the cost per update stays flat. It suits upkeep that every entity
+needs now and then but not every tick: AI that re-plans, needs that decay, sessions swept for idleness.
+
+```csharp
+public record struct Hunger(float Value) : IComponent;
+
+public class HungerSystem : EcsSystem
+{
+    // A quarter of the NPCs per update: each one once every four updates, with four updates' worth of hunger.
+    [ForEach(Slices = 4)]
+    static void Starve(ref Hunger hunger) => hunger.Value = MathF.Min(hunger.Value + 0.04f, 1f);
+}
+```
+
+- **Which slice:** a run visits slice `RunCount % N`. `RunCount` counts the system's runs before the current one (0
+  during the first); runs skipped by `UpdateInterval` or while the system is disabled do not count, a run that throws
+  does. `OnUpdate` reads it to know which slice the run visits.
+- **Where a table is cut:** at multiples of 64 rows (its presence words), from its row count when the pass starts:
+  of a table's w words, slice k takes words w × k / N to w × (k + 1) / N, and the last slice ends at the last row. A
+  table of fewer than 64 rows is one piece, visited by one run of the N.
+- **Tables rotate:** table i of the match starts its cut at slice (k + i) mod N, so many small tables spread over
+  the N runs instead of all landing in one.
+- **Rows that move:** a row that moves between runs (a swap-remove fills a hole with the table's last row, a
+  structural change moves the entity to another table, a table grows or shrinks across a cut) may be skipped or
+  visited twice in one cycle of N runs; the next cycle sees it again. Slice work that tolerates this, not work that
+  must happen exactly once per cycle.
+- **With an interval:** `UpdateInterval => M` and `Slices = N` visit each row once per N × M updates.
+- **Every form:** per-entity methods, [batch methods](#batch-methods) (runs of rows inside the slice) and
+  [parallel methods](#parallel-methods) (the slice is cut into chunks).
+- **Not with change filters:** `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<…>]` and `[RemovedAny<…>]` cannot be
+  sliced, and `Slices` must be at least 1 ([EECS035](/en/docs/guide/analyzer#eecs035)): every run moves the system's
+  `LastRunTick`, so the changes made in the rows of the other slices would be lost.
+
+Outside systems, [`QueryFilter.Slice(index, count)`](/en/docs/guide/queries#filters) does the same for a `ForEach`
+call; a [runner](#foreach-outside-systems) with `Slices = N` takes the slice to visit after the world.
+
 ### `[ForEach]` methods [#foreach-methods]
 
 A `[ForEach]` method is declared in a class that derives from `EcsSystem` (no `partial` needed). It may be static or
@@ -155,6 +200,7 @@ an instance method. Its parameters say what it runs over:
 | Parameter | Meaning |
 | --- | --- |
 | `ref T` / `in T` / `ref readonly T`, `T : IComponent` | 1 to 9 components: `ref` to write, `in` to read |
+| [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed), `T : IComponent` | a component the method writes on some rows: `Value` reads, `Write()` and `SetIfChanged(value)` write, and only the rows written are stamped |
 | `ref T` / `in T`, `T : ISingletonComponent` | the world's singleton, resolved once per pass; throws if it was not added |
 | `Entity` | the current entity, for structural changes and lookups |
 | `World` | the world (for creating entities, other singletons) |
@@ -163,12 +209,14 @@ an instance method. Its parameters say what it runs over:
 
 | Attribute | Meaning |
 | --- | --- |
-| `[ForEach]` | run the method for every matching entity; `Parallel = true` for [several threads](#parallel-methods) |
+| `[ForEach]` | run the method for every matching entity; `Parallel = true` for [several threads](#parallel-methods), `Slices = N` for [part of the rows per run](#slices) |
 | `[With<T>]` | the entity must have `T`, not passed in; repeatable |
 | `[Without<T>]` | the entity must not have `T`; repeatable |
 | `[WithAny<T>]` | the entity must have at least one of the method's `[WithAny<T>]` components |
 | `[Changed<T>]` | `T` (`ITrackChanges`) was written since the system last ran ([change tracking](/en/docs/guide/change-tracking)) |
 | `[Removed<T>]` | the entity lost `T` (`ITrackChanges`) since the system last ran ([removal detection](/en/docs/guide/change-tracking#removal-detection)) |
+| `[ChangedAny<T1, …, Tn>]` | at least one of the components (2 to 9, `ITrackChanges`) was written since the system last ran ([any of several](/en/docs/guide/change-tracking#changed-any)) |
+| `[RemovedAny<T1, …, Tn>]` | the entity lost at least one of the components since the system last ran |
 
 With no component parameter, the first `[With<T>]` (else the first `[Changed<T>]`) names the queried component:
 
@@ -263,6 +311,11 @@ The method must be able to run on several threads at once ([EECS010](/en/docs/gu
 structural change, per entity (not a batch method), singletons only as `in`. It also must not write what another
 row's run reads, such as another entity through `Get`. Fewer than two chunks run on the calling thread. It allocates
 nothing after its first update.
+
+A method that writes a tracked component (a `ref` or a [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed)
+parameter) is cut at multiples of 4,096 rows, at least 4,096: each block of 4,096 rows shares one change-tick summary
+per column, and two chunks of one block would race on it. A table of 4,096 rows or fewer is then one chunk, on one
+thread.
 
 ### System groups [#system-groups]
 
@@ -418,8 +471,8 @@ Census.CountAlive<Health>(world, ref alive);      // a generic runner: the type 
 
 - The method must be static ([EECS005](/en/docs/guide/analyzer#eecs005)); it may be private, and the entry point is
   public when the types it names are public.
-- With `[Changed<T>]` or `[Removed<T>]` the entry point takes the tick to look back from, since a runner has no last
-  run of its own.
+- With `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<…>]` or `[RemovedAny<…>]` the entry point takes the tick to
+  look back from, since a runner has no last run of its own; with `Slices = N` it takes the slice (0 to N - 1).
 - Runners may be generic, or members of a generic type: the entry point takes the type arguments.
 - No [group filter](#group-filters) applies to a runner: it belongs to no group.
 - Batch and parallel runners follow the rules of [batch methods](#batch-methods) and [parallel methods](#parallel-methods).
@@ -579,6 +632,8 @@ move although it was added second, so the grounded unit loses half its speed bef
 | `Parallel = true` on light work | A plain `[ForEach]` | The hand-off costs more than it saves |
 | A filter repeated on every method of a cadence | A [group filter](#group-filters) | Written once |
 | Work every tick that could wait | `UpdateInterval` and `UpdatePhase` | Spread over ticks |
+| Upkeep over every entity on every N-th tick | [`Slices = N`](#slices) | A flat cost per update instead of a spike |
+| A `ref` on a tracked value recomputed every tick that rarely changes | [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) with `SetIfChanged` | Only real changes are stamped: `[Changed<T>]` readers visit fewer rows |
 
 A `[ForEach]` system against two plain arrays, `Position += Velocity` over 10,000 entities (`MicroBenchmarks`):
 
@@ -633,6 +688,9 @@ needed, and a method that writes a singleton:
 | Writing a collection through an `in` parameter | Scheduled as a read, never stamped | [EECS011](/en/docs/guide/analyzer#eecs011) |
 | A structural change through a component's link in a method without `Entity` / `World` | The pass keeps refs into moved rows | [EECS013](/en/docs/guide/analyzer#eecs013) |
 | `UpdateInterval` that changes | Skipped or repeated runs | [EECS018](/en/docs/guide/analyzer#eecs018) |
+| `Slices` below 1, or with `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<…>]`, `[RemovedAny<…>]` | The changes in the other slices' rows are lost | [EECS035](/en/docs/guide/analyzer#eecs035) |
+| A sliced method relied on to visit each row exactly once per cycle | Rows that move between runs can be skipped or visited twice | Code review: slice only work that tolerates it |
+| A `Mut<T>` parameter in a batch method | Batch methods take spans | [EECS009](/en/docs/guide/analyzer#eecs009) |
 | Orderings in a cycle, or across groups | Throws on `AddSystem`; never applies | [EECS019](/en/docs/guide/analyzer#eecs019), [EECS020](/en/docs/guide/analyzer#eecs020) |
 | A private type in a method's parameters | The generated job cannot name it | [EECS022](/en/docs/guide/analyzer#eecs022) |
 | `[With<T>]`, `[Without<T>]` or `[WithAny<T>]` on a struct that is not a group | Compile error: the filter would do nothing | [EECS023](/en/docs/guide/analyzer#eecs023) |

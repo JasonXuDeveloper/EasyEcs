@@ -1,7 +1,7 @@
 ---
 title: 示例：战斗服
 seoTitle: "C# ECS 示例：用上 EasyEcs 全部功能的战斗服"
-description: "用 EasyEcs 写的一个完整战斗服，逐段讲解：组件、预制体、系统、靠变更追踪做同步、索引、关系、快照与存档。"
+description: "用 EasyEcs 写的一个完整战斗服，逐段讲解：组件、预制体、系统、靠变更追踪做同步、客户端补发、索引、关系、快照与存档。"
 icon: Swords
 ---
 
@@ -18,25 +18,27 @@ import { FlaskConical, Gauge, Rocket, Shapes } from 'lucide-react';
 
 一场有 `units` 个实体的战斗，三分之一是玩家，其余是 NPC，地图 4,096 × 4,096，分成四个区域：
 
-- NPC 朝路点移动；所有单位都会移动、按冷却攻击，还可能着火或被冻住。
+- NPC 先规划要去哪个路点，再朝它移动；所有单位都会移动、按冷却攻击，还可能着火或被冻住。
 - 血量归零即死亡。玩家在活着的好友身边复活；NPC 把掉落交给同区域的一名玩家，之后由一个新 NPC 顶替。
 - 玩家消耗法力发射投射物，投射物飞行二十个 tick，归属于发射它的玩家。
-- 每三个 tick 同步一次变化：血量、刚着火或刚熄灭的状态、背包。
+- 开局时的玩家都是机器人；客户端用账号登录，拿到一个属于自己的英雄。
+- 每三个 tick 同步一次变化：血量、刚着火或刚熄灭的状态、NPC 的目标、背包。断开一阵后回来的客户端，从它最后确认的
+  tick 开始补发。
 - 两次 tick 之间，宿主回答查询：人口统计、最近的玩家、击杀榜、存档、回滚。
 
 每次 `Tick()` 按下面的顺序跑默认分组的系统，每三个 tick 再跑一次 `Replication` 分组：
 
 ```mermaid
 flowchart LR
-    M["转向、移动、<br/>法力、区域"] --> F["战斗、状态、<br/>异常统计、死亡"]
+    M["规划、转向、<br/>移动、法力、区域"] --> F["战斗、状态、<br/>异常统计、死亡"]
     F --> R["复活、移除、<br/>重生"]
     R --> P["投射物、<br/>回血"]
     P --> C[时钟]
     C -->|每三个 tick| Rep["Replication 分组"]
 ```
 
-打开 `ParallelSystems` 后，彼此没有顺序约束、访问也不冲突的系统会进同一个阶段同时运行（`MovementSystem` 和
-`ManaSystem` 碰的是不同组件），结果和逐个运行完全一样。
+打开 `ParallelSystems` 后，彼此没有顺序约束、访问也不冲突的系统会进同一个阶段同时运行（`ManaSystem` 碰的数据
+`PlanningSystem` 一样都不碰，两者就并排跑），结果和逐个运行完全一样。`Schedule()` 能打印出各个阶段，以及每个系统为什么要等。
 
 ## 每个功能在哪里 [#feature-map]
 
@@ -45,10 +47,12 @@ flowchart LR
 | 功能 | 位置 |
 | --- | --- |
 | [组件、标签、单例](/zh/docs/guide/entities-and-components) | `Position`、`Health`、`Player`、`Dead`；单例 `Battle`、`Rules`、`Waypoints` |
-| 生成的成员 | `players[i].Position = …`、`SetZone`、`SetFrozen`、`RemoveBurning`、`SetDead`、`IsDead`、`TryGetMana`、`WriteHealth()`、`World.Battle`、`KillsIndex`；缓冲 `player.Loot`、`WriteLoot()`；`DisableAttack` / `EnableAttack`；预制体上的 `SetHealth`、`SetNpc` |
+| 生成的成员 | `players[i].Position = …`、`SetZone`、`SetFrozen`、`RemoveBurning`、`SetDead`、`IsDead`、`HasAccount`、`TryGetMana`、`WriteHealth()`、`World.Battle`、`KillsIndex`、`AccountIndex`；缓冲 `player.Loot`、`WriteLoot()`；`DisableAttack` / `EnableAttack`；预制体上的 `SetHealth`、`SetNpc`、`SetLifetime` |
 | [系统](/zh/docs/guide/systems)与过滤（`With`、`Without`、`WithAny`） | 所有系统；`AfflictionSystem` 用 `World.Count` 统计着火**或**冻住的单位 |
 | [并行 `[ForEach]`](/zh/docs/guide/threading) | `SteeringSystem`；`NewRound` 里的 `Reports.HealFully` 和 `Reports.Scatter` |
-| 并行系统（`WorldOptions.ParallelSystems`） | `MovementSystem` 和 `ManaSystem`：数据互不相交 |
+| 并行系统（`WorldOptions.ParallelSystems`）、[`DescribeSchedule`](/zh/docs/guide/diagnostics#schedule) | `PlanningSystem` 和 `ManaSystem`：数据互不相交；`Schedule()` 能看到这一点 |
+| [分片](/zh/docs/guide/systems#slices)（`[ForEach(Slices = N)]`、`RunCount`） | `PlanningSystem` 每次只规划四分之一的 NPC |
+| [`Mut<T>` 与 `SetIfChanged`](/zh/docs/guide/change-tracking#set-if-changed) | `PlanningSystem.Plan` 只在目标变了时才写 |
 | 批处理方法（`Span<T>`）、SIMD | `MovementSystem`；`Reports.SumHealth` |
 | 系统之外的 `[ForEach]` runner | `Reports` |
 | `Maybe<T>` | `RegenerationSystem`：着火的玩家回血更少 |
@@ -57,29 +61,32 @@ flowchart LR
 | [层级](/zh/docs/guide/hierarchy)（`ChildOf`、`Children`、`Descendants`） | 投射物是玩家的子实体；`Transfer` 收集整棵子树 |
 | [遍历中的结构变更](/zh/docs/guide/structural-changes) | 遍历途中增删状态、死亡、复活、生成和销毁投射物 |
 | [预制体](/zh/docs/guide/prefabs)（`Prefab`、`Instantiate`、`EnsureCapacity`）与克隆 | `Hero`、`Grunt`、`Brute`（`Grunt` 的变体）；`Mirror` 克隆一个活着的单位 |
+| [实例化时直接给值](/zh/docs/guide/prefabs#instantiate-with-values) | `Shot` 连同位置、速度和 `ChildOf` 一起生成；`SpawnNpc`；`Join` |
 | [变更追踪](/zh/docs/guide/change-tracking)与移除检测 | `ReplicationSystem`；`WrittenSinceCheckpoint` |
+| 每个客户端一份 tick 的 [`ChangedAny`](/zh/docs/guide/change-tracking#changed-any)、[销毁日志](/zh/docs/guide/change-tracking#destroy-log) | `CatchUp`：过滤器只存一个，每个客户端用自己的 tick；`DestroyedSince` |
 | [动态缓冲](/zh/docs/guide/dynamic-buffers) | 每个玩家的 `Loot` 背包 |
 | [分组](/zh/docs/guide/groups)（`IGroup`、`GroupBy`、`InGroup`） | `Zone`：每个区域一组表 |
 | [有序索引、关系、目标策略](/zh/docs/guide/indexes-and-relations) | `Kills` 击杀榜；`Friend` 好友关系，玩家离开时自动清掉 |
-| 系统分组、`UpdateInterval`、`UpdatePhase`、排序、生命周期 | `Replication`；`ManaSystem`、`RegenerationSystem`；`ClockSystem`；`SteeringSystem.OnCreate` |
+| [唯一键](/zh/docs/guide/indexes-and-relations#unique-keys)（`IUniqueIndexed`、`Get` / `TryGet`） | `Account`：`Join` 和 `Kick` 按账号找到英雄 |
+| 系统分组、`UpdateInterval`、`UpdatePhase`、排序、生命周期 | `Replication`；`ManaSystem`、`RegenerationSystem`；`ClockSystem`；`PlanningSystem.OnCreate` |
 | [查询](/zh/docs/guide/queries)、实体句柄与[单实体 job](/zh/docs/guide/queries#run-on-one-entity) | `NearestPlayer`、`Census`、`ShotsLeft`；`Hit` 用 `entity.Run` 运行 `TakeHit` job |
 | [批量操作](/zh/docs/guide/bulk) | `Instantiate(prefab, span)`、`DestroyEntities`、`RemoveAll`、`EnableAll` |
 | [快照](/zh/docs/guide/snapshots)、[存档与迁移](/zh/docs/guide/saves) | `Checkpoint` / `Rewind`、`Save` / `Load`、`Transfer` |
-| 内省、诊断、错误策略 | `Tables`、`Slowest`、`Failure` |
+| 内省、诊断、错误策略 | `Tables`、`Schedule`、`Slowest`、`Failure` |
 
 ## 数据 [#data]
 
 ### 组件 [#components]
 
-所有组件都是普通的 `record struct`。有三个标记接口会改变组件的存储方式：`ITrackChanges` 会给组件加一列隐藏的变更 tick
-（`Health` 和 `Burning` 需要同步）；`IGroup` 按值拆分表（每个 `Zone` 一组表）；`IIndexed<TKey>` 为它维护一个值索引
-（击杀榜 `Kills`）。`Spawn` 是清理组件，`Loot` 和 `Friend` 是动态缓冲的元素，空结构体就是标签。
+所有组件都是普通的 `record struct`。有四个标记接口会改变组件的存储方式：`ITrackChanges` 会给组件加一列隐藏的变更 tick
+（`Health`、`Burning` 和 `Goal` 需要同步）；`IGroup` 按值拆分表（每个 `Zone` 一组表）；`IIndexed<TKey>` 为它维护一个值索引
+（击杀榜 `Kills`）；`IUniqueIndexed<TKey>` 让一个键只对应一个实体（`Account`：一个账号只有一个英雄）。`Spawn` 是清理组件，`Loot` 和 `Friend` 是动态缓冲的元素，空结构体就是标签。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#components</include>
 
 ### 单例与系统分组 [#singletons]
 
-整场战斗只有一份的状态做成单例：`Battle` 记录各种计数，`Rules` 把战斗规则写成数据，`Waypoints` 是转向系统读取的定长数组。
+整场战斗只有一份的状态做成单例：`Battle` 记录各种计数，`Rules` 把战斗规则写成数据，`Waypoints` 是规划和转向都要读的定长数组。
 `Replication` 是一个空结构体，作为系统分组的名字，由单独的调用来更新。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#singletons</include>
@@ -90,8 +97,12 @@ flowchart LR
 
 ### 移动 [#moving]
 
-`SteeringSystem` 每个实体的计算量大，所以跑在所有核心上（`Parallel = true`）；它读的 `Waypoints` 单例在 `OnCreate` 里创建，
-在 `OnDestroy` 里移除。`MovementSystem` 接收 span，把整段连续行当作 `Vector<float>` 相加。`ManaSystem` 每十次更新跑一次，
+`PlanningSystem` 给每个 NPC 选要去的路点：离它最近、而且还没到过的那个。它规划时用的 `Waypoints` 单例在 `OnCreate`
+里创建，在 `OnDestroy` 里移除。规划不必每个 tick 都是最新的，所以 `[ForEach(Slices = 4)]` 把它摊到四次运行上：每次只规划
+四分之一的 NPC，每个 NPC 每四个 tick 规划一次，哪个 tick 都不会出现尖峰。大多数时候规划出来的还是原来的目标，而 `Goal`
+要同步，所以方法收的是 `Mut<Goal>` 而不是 `ref Goal`：被追踪组件的 `ref` 参数会把方法经过的每一行都算作写入，
+`SetIfChanged` 却只给真正变了的目标打戳，同步也就只发这些。`SteeringSystem` 每个实体的计算量大，所以跑在所有核心上
+（`Parallel = true`），朝着目标转向。`MovementSystem` 接收 span，把整段连续行当作 `Vector<float>` 相加。`ManaSystem` 每十次更新跑一次，
 比 `RegenerationSystem` 晚五次，两者的开销落在不同的 tick 上。`ZoneSystem` 只在单位真的换了区域时才写 `Zone`，
 这一写会把它的行搬到新区域的表里。
 
@@ -117,7 +128,9 @@ NPC 死亡时，把下一个 NPC 的出生点写进 `Spawn` 清理组件，把�
 
 ### 投射物、回血和时钟 [#projectiles]
 
-投射物是一个带 `ChildOf` 的实体，指向发射它的玩家，玩家被销毁时投射物随之销毁。`RegenerationSystem` 用一个方法处理两种情况：
+投射物是一个带 `ChildOf` 的实体，指向发射它的玩家，玩家被销毁时投射物随之销毁。
+`Instantiate(Shot, p, velocity, new ChildOf(player))` 复制 `Shot` 预制体，同时写入这三个值：投射物一次行拷贝就落进最终的表，
+生成时就已经挂在玩家下面。`RegenerationSystem` 用一个方法处理两种情况：
 `Maybe<Burning>` 告诉它这个实体有没有着火，着火的玩家回血更少。`ClockSystem` 最先注册，却因为
 `[UpdateAfter<RegenerationSystem>]` 排到了最后。
 
@@ -127,10 +140,21 @@ NPC 死亡时，把下一个 NPC 的出生点写进 `Spawn` 清理组件，把�
 
 `ReplicationSystem` 属于 `Replication` 分组，宿主每三个 tick 更新一次。每个方法只访问系统上次运行以来变了的东西：
 被写过的血量（`[Changed<Health>]`）、刚着火的单位（`[Changed<Burning>]`）、火已熄灭的单位（`[Removed<Burning>]`，
-即失去了这个组件且现在仍没有它的实体），以及通过 `ref` 写过的背包（`[Changed<DynamicBuffer<Loot>>]`）。
-没有任何地方手动标脏：通过 `ref` 写入本身就是标记。
+即失去了这个组件且现在仍没有它的实体）、变了的目标（`[Changed<Goal>]`：只有 `Plan` 真正写过的那几个，而不是它经过的每个
+NPC），以及通过 `ref` 写过的背包（`[Changed<DynamicBuffer<Loot>>]`）。没有任何地方手动标脏：通过 `ref` 写入本身就是标记。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#replication</include>
+
+### 客户端补发 [#catch-up]
+
+`ReplicationSystem` 面向每次同步都收到了的客户端。断开一阵再回来的客户端（重连、丢包）确认过的是更早的 tick，而且每个客户端
+各不相同。`CatchUp` 只凭这个 tick 就能回答，服务端不用给每个客户端存状态：`ChangedAny<Health, Burning, Goal>`
+只存一个过滤器，选出三者任一变过的单位，`Since(acked)` 换上这个客户端的 tick 来跑；`Removed<Burning>` 再补上熄灭的火。
+客户端还得知道哪些单位没了，而被销毁的实体已经没有行可找，所以 World 开了销毁日志（`WorldOptions.DestroyLog`，一个环形缓冲，
+记着最近销毁的 id）：`DestroyedSince` 列出这个 tick 以来销毁的 id。客户端落后得比环形缓冲还远时，它返回 false，
+客户端就重新拿一遍整场战斗。
+
+<include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#catch-up</include>
 
 为什么划算、哪些操作算写入，见[变更追踪](/zh/docs/guide/change-tracking)和[移除检测](/zh/docs/guide/change-tracking#removal-detection)。
 
@@ -148,16 +172,17 @@ NPC 死亡时，把下一个 NPC 的出生点写进 `Spawn` 清理组件，把�
 
 ### 过滤器与预制体 [#prefabs]
 
-过滤器只建一次，放在 `static readonly` 字段里；`WrittenPlayers` 每次调用时用 `Since` 换上新的 tick。预制体是不属于任何
-World 的配方，查询看不到它们：`Hero` 既可以一次设置多个组件，也可以用生成的方法逐个设置；`Brute` 是变体，复制自 `Grunt`
-并改了三个值。
+过滤器只建一次，放在 `static readonly` 字段里；`WrittenPlayers`、`ClientChanges` 和 `FiresOut` 每次调用时用 `Since`
+换上新的 tick。预制体是不属于任何 World 的配方，查询看不到它们：`Hero` 既可以一次设置多个组件，也可以用生成的方法逐个设置；
+`Brute` 是变体，复制自 `Grunt` 并改了三个值；`Shot` 只放每颗投射物都一样的部分，其余的在发射时给出。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#prefabs</include>
 
 ### 搭建 World [#setup]
 
-构造函数配置 World（并行系统、计时、出错的系统直接关掉而不是抛异常），按 `Zone` 分组建表，设置好友关系的目标策略，
-按 tick 顺序注册系统，再批量生成单位：每一波只扩容一次表。`EnsureCapacity` 为 NPC 的重生波次预留空间，tick 中表不会再扩容。
+构造函数配置 World（并行系统、计时、出错的系统直接关掉而不是抛异常、每个单位一条的销毁日志），按 `Zone` 分组建表，
+设置好友关系的目标策略，按 tick 顺序注册系统，再批量生成单位：每一波只扩容一次表。`EnsureCapacity` 为 NPC 的重生波次预留空间，
+tick 中表不会再扩容。`SpawnNpc` 实例化重生的 NPC 时直接给出位置。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#setup</include>
 
@@ -168,6 +193,15 @@ World 的配方，查询看不到它们：`Hero` 既可以一次设置多个组�
 而不是调用某个系统。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#tick</include>
+
+### 用账号加入 [#accounts]
+
+客户端用账号登录。`Account` 实现了 `IUniqueIndexed<int>`：一个键只对应一个实体，所以 `TryGet` 一次哈希查找就能找到账号的英雄；
+要是某次写入会让第二个英雄拿到已被占用的账号，它会在改动任何东西之前抛异常。`Join` 用
+`Instantiate(Hero, at, new Account(account))` 给新账号生成英雄，位置和账号跟预制体的组件在同一次行拷贝里写入；
+已经有英雄的账号拿回原来那个（重连）。`Kick` 也这样找英雄。`Get` 也是查找，只是没有实体持有这个键时会抛异常。
+
+<include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#accounts</include>
 
 ### tick 之间的查询 [#queries]
 
@@ -181,7 +215,8 @@ job 声明了它写 `Health`，所以这次命中会打上变更 tick，随下�
 
 ### 背包、克隆、击杀榜和好友 [#buffers-and-indexes]
 
-`Mirror` 原样克隆一个活着的单位，索引、分组和下一次同步都会知道这个副本。`LootValue` 读背包，不算写入；`Give` 先用读操作校验，
+`Mirror` 原样克隆一个活着的单位，索引、分组和下一次同步都会知道这个副本。英雄的副本会和它共用账号，唯一键不允许这样
+（`Clone` 会抛异常），所以只克隆机器人和 NPC。`LootValue` 读背包，不算写入；`Give` 先用读操作校验，
 再同时写两个背包。`TopKillers` 从顶部遍历有序的 `Kills` 索引，`FriendsOf` 向关系索引查询有谁把这个玩家加为好友。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#buffers-and-indexes</include>
@@ -214,8 +249,9 @@ job 声明了它写 `Health`，所以这次命中会打上变更 tick，随下�
 
 ### 诊断 [#diagnostics]
 
-`Describe` 列出每张表的列、行数和字节数，可以直接放进监控面板。打开 `MeasureSystems` 后，每个系统的运行时间都记在
-`system.Stats` 里。
+`Describe` 列出每张表的列、行数和字节数，可以直接放进监控面板。`Schedule` 描述系统怎么跑：每个分组的阶段、每个系统读写什么、
+为什么要等前一个阶段；服务器启动时打一次日志。打开 `MeasureSystems` 后，每个系统的运行时间都记在 `system.Stats` 里，
+还有它分配的字节数和访问过的实体数。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#diagnostics</include>
 
@@ -226,13 +262,19 @@ using System.Buffers;
 using EasyEcs.Benchmark.Showcase;
 
 using var server = new BattleServer(100_000);
+Console.WriteLine(server.Schedule());                     // 启动时打一次：阶段、访问、等待
 server.Checkpoint();                                      // 比如执行一条有风险的管理命令之前
+var hero = server.Join(1001, new Position(2048, 2048));   // 客户端用账号登录
 
 while (running)
 {
     server.Tick();                                        // 表达到峰值规模后不再分配
     if (server.WrittenSinceCheckpoint > 1_000) server.Checkpoint();
 }
+
+var gone = new EntityId[100_000];                         // WorldOptions.DestroyLog 个 id：一定装得下
+if (!server.CatchUp(acked, gone, out int updates, out int destroyed))   // acked：客户端确认过的 tick
+    SendWholeBattle();                                    // 客户端落后得比日志还远
 
 var census = server.Census();                             // tick 之间：runner、Count、分组
 Console.WriteLine($"{census.Alive}/{census.Players} alive, {server.PlayersIn(0)} in zone 0, slowest {server.Slowest()}");

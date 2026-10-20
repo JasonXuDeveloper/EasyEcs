@@ -1,12 +1,12 @@
 ---
 title: 分析器规则
-seoTitle: "EasyEcs 分析器规则 EECS002-EECS034：每条 C# 诊断的含义与修法"
-description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS034：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
+seoTitle: "EasyEcs 分析器规则 EECS002-EECS036：每条 C# 诊断的含义与修法"
+description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS036：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
 icon: ShieldCheck
 ---
 
-EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/docs/ecs-principles)的代码编译不过。正确性规则（EECS002 到 EECS024）
-除了三条警告都是错误；这三条针对的是能跑、但有代价的写法（EECS017、EECS018、EECS020）。生成器会跳过无效输入，由分析器报出来，
+EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/docs/ecs-principles)的代码编译不过。正确性规则（EECS002 到 EECS024，以及
+EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑、但有代价的写法（EECS017、EECS018、EECS020）。生成器会跳过无效输入，由分析器报出来，
 所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034）找的是能跑、但做了多余工作的代码，级别说明是哪一种
 （[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）：警告表示这样写有代价
 （EECS025 到 EECS032）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033）；错误表示代码根本不能这样写（EECS034，在系统里执行世界更新）。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
@@ -60,6 +60,8 @@ EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/doc
 | [EECS032](#eecs032) | 警告 | 计数和过滤交给世界 | `Any`、`Count` |
 | [EECS033](#eecs033) | 信息 | 生成的成员写起来更短 | 生成的成员 |
 | [EECS034](#eecs034) | 错误 | 系统里不执行世界更新 | |
+| [EECS035](#eecs035) | 错误 | `[ForEach(Slices = N)]` 至少为 1，且不能和变更过滤器一起用 | |
+| [EECS036](#eecs036) | 错误 | 唯一组件按它唯一的键建索引 | |
 
 ## EECS002 [#eecs002]
 
@@ -245,8 +247,9 @@ public sealed class ScoreSystem : EcsSystem
 
 **批量 `[ForEach]` 混用了 span 和逐实体参数。** 错误。没有代码修复。
 
-接收组件 span 的方法拿到的是整段连续的行，所以逐实体参数（`ref` / `in` 组件、`Entity`）在这次调用里没有唯一的值；`World` 也可能在
-span 还指着行的时候改动它们。没有组件 span 的 `EntitySpan` 则没有可描述的那段行。
+接收组件 span 的方法拿到的是整段连续的行，所以逐实体参数（`ref` / `in` 组件、`Mut<T>`、`Maybe<T>`、`Entity`）在这次调用里没有
+唯一的值；`World` 也可能在 span 还指着行的时候改动它们。没有组件 span 的 `EntitySpan` 则没有可描述的那段行。批量方法写入时按整段
+打戳：`Span<T>` 就是它的写入方式。
 
 ```csharp doccheck=expect-EECS009
 public class DriftAllSystem : EcsSystem
@@ -477,7 +480,7 @@ public static class WorldThreads
 
 - 在实体上调用 `Get<T>()`、`GetOrAdd<T>()` 或 `TryGetRef<T>()`；
 - 绑定到它的 `ref` 局部变量，或者通过查询项给它（或它的字段）赋值；
-- `[ForEach]` 方法或 `IForEach*` job 里它的 `ref` 或 `Span<T>` 参数。
+- `[ForEach]` 方法或 `IForEach*` job 里它的 `ref`、`Span<T>`、`Mut<T>` 或 `Maybe<T>` 参数。
 
 ```csharp
 public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
@@ -769,8 +772,8 @@ public class ArmorBonus : EcsSystem
 
 每个参数在每一行或每一遍上都有开销：组件的列要加载、要前进，单例要解析、要作为一次访问参与调度，`Entity` 每行都要构造句柄，
 而且和 `World` 一样会让系统[单独运行](/zh/docs/guide/threading#parallel-systems)。方法只要求实体有某个组件时，用过滤器表达。
-没用到的追踪组件 `ref` 参数会报告，但不提供修复：它会给访问到的每一行打戳，换成 `[With<T>]` 就不会了。方法体为空时视为
-还在编写中，不报告。
+没用到的追踪组件 `ref` 参数会报告，但不提供修复：它会给访问到的每一行打戳，换成 `[With<T>]` 就不会了。没用到的 `Mut<T>`
+在写入之前不打戳，所以和 `in` 参数一样提供 `[With<T>]` 修复。方法体为空时视为还在编写中，不报告。
 
 ```csharp
 public record struct Survivors(int Count) : ISingletonComponent;
@@ -916,7 +919,8 @@ world.DestroyEntities<Health>(QueryFilter.Create().With<Dead>());
 （[D28](/zh/docs/decisions#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)）。`CreateEntities` 和
 `Instantiate(prefab, span)` 一遍就能创建完；每个实体的值各不相同时，先用 `EnsureCapacity` 预留空间。规则不报告这些循环：
 次数是小于 4,096 的常量，或者遍历的是用这样的常量创建的数组（没有数组会进入大对象堆）；前面已经预留过容量；只在分支里或内层循环里创建；
-在系统里（运行中的世界会复用已有的行）。
+在系统里（运行中的世界会复用已有的行）。这样的循环里用相同的值调用 `Instantiate(prefab)` 或 `Instantiate(prefab, in c1..cn)`
+也会报告，修复是改成批量形式 `Instantiate(prefab, entities, in c1..cn)`。
 
 ```csharp doccheck=expect-EECS031
 var wave = new Entity[50_000];
@@ -967,6 +971,7 @@ foreach (var item in world.Query<Health>(QueryFilter.Create().With<Burning>())) 
 | `entity.Has<Health>()`、`entity.Has<Dead>()` | `entity.HasHealth`、`entity.IsDead` |
 | `entity.TryGet<Health>(out h)`、`entity.GetOrAdd<Health>()` | `entity.TryGetHealth(out h)`、`entity.GetOrAddHealth()` |
 | `entity.Set(new Health(100))`、`entity.Set(new Dead())` | `entity.SetHealth(100)`、`entity.SetDead()` |
+| `entity.SetIfChanged(new Armor(5))` | `entity.SetArmorIfChanged(5)`（World 关注的组件：追踪、索引或分组的组件） |
 | `entity.Remove<Health>()`、`Disable<T>()`、`Enable<T>()`、`IsDisabled<T>()` | `entity.RemoveHealth()`、`DisableHealth()`、`EnableHealth()`、`IsHealthDisabled` |
 | `world.GetSingleton<Clock>()`、`HasSingleton`、`GetOrAddSingleton`、`RemoveSingleton` | `world.Clock`、`HasClock`、`GetOrAddClock()`、`RemoveClock()` |
 | `world.Index<Zone, int>()`、`world.Relations<Friend>()` | `world.ZoneIndex`、`world.FriendIndex` |
@@ -1000,6 +1005,56 @@ public class CatchUp : EcsSystem
 ```csharp
 while (running) world.Update();
 ```
+
+## EECS035 [#eecs035]
+
+**无效的 `[ForEach(Slices = N)]`。** 错误。没有代码修复。
+
+分片的方法每次系统运行只访问每张匹配表的一片，所以每一行每 N 次运行被访问一次。`Slices` 至少为 1。`[Changed<T>]`、
+`[Removed<T>]`、`[ChangedAny<…>]` 或 `[RemovedAny<…>]` 方法选的是系统上次运行以来变过的行，而每次运行都会把这个 tick 往前推：
+这次没访问到的那几片里的行，变更就永远丢了。
+
+```csharp doccheck=expect-EECS035
+public class SendFire : EcsSystem
+{
+    [ForEach(Slices = 4), Changed<Burning>]
+    static void Send(in Burning burning, ref Replica replica) => replica.Burning = burning.Ticks > 0;   // three slices in four lose their changes
+}
+```
+
+每次运行都读变更：变更过滤器本来就只访问写过的行。要分片的是没有变更过滤器、对每个实体都很重的逐行工作：
+
+```csharp
+public class SendFire : EcsSystem
+{
+    [ForEach, Changed<Burning>]
+    static void Send(in Burning burning, ref Replica replica) => replica.Burning = burning.Ticks > 0;
+}
+```
+
+切法和节奏见[分片](/zh/docs/guide/systems#update-interval)。
+
+## EECS036 [#eecs036]
+
+**无法按键建索引的唯一组件。** 错误。没有代码修复。
+
+World 从第一张装着 `IUniqueIndexed<TKey>` 组件的表开始，就按它的键建索引，并用这个索引检查每一次写入。规则报出两种行不通的声明：
+
+- **`EntityId` 键。** 加载和迁移会在拷完行之后才改写 `EntityId` 的值，来不及先检查，所以关系键不能是唯一的。
+- **第二个键。** 一个组件只建一个索引：它身上的另一个 `IIndexed<TKey>` 或 `IUniqueIndexed<TKey>` 永远建不了索引，
+  `world.Index` 会为它抛异常。
+
+```csharp doccheck=expect-EECS036
+public record struct Mount(EntityId Rider) : IComponent, IUniqueIndexed<EntityId> { public EntityId Key => Rider; }
+```
+
+关系用 `IIndexed<EntityId>` 建索引；第二个键放到单独的组件里：
+
+```csharp
+public record struct Mount(EntityId Rider) : IComponent, IIndexed<EntityId> { public EntityId Key => Rider; }
+```
+
+唯一索引检查什么，见[唯一键](/zh/docs/guide/indexes-and-relations#value-indexes)。
 
 ## 相关页面 [#related]
 

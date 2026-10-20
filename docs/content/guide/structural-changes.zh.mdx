@@ -152,6 +152,28 @@ for (int i = 0; i < 100_000; i++) world.CreateEntity(new Position(i, 0), new Lif
 `CreateEntities` 自己会预留。预制体的实例用 `EnsureCapacity(prefab, count)`（见[预制体](/zh/docs/guide/prefabs)）；实体分散在很多张表里时，
 用 `EnsureEntityCapacity(n)` 只扩实体存储。被[分组](/zh/docs/guide/groups)放进别的表的实体，扩的是那张表。
 
+### 什么会搬动行 [#row-moves]
+
+行移动要把实体的每个组件都复制到另一张表，结构变更真正花钱的就是这一步。大多数变更用不着它：
+
+| 变更 | 行移动 |
+| --- | --- |
+| `Set` 实体已有的组件 | 没有：只是一次写入（[分组](/zh/docs/guide/groups)组件换了新值时，会搬到对应分组的表） |
+| `SetIfChanged` 传入实体现有的值 | 没有，也不写入：不打戳，不重新索引 |
+| `SetIfChanged` 传入不同的值 | 和 `Set` 一样 |
+| 添加表里已有列的组件（之前移除过的，或时有时无的标签） | 没有：一个存在位 |
+| 添加表里没有列的组件 | 一次，搬到有这一列的表 |
+| `Set(a, b, …)` 一次加多个表里没有的组件 | 最多一次，不管有几个 |
+| `Instantiate(prefab)`、`Instantiate(prefab, in c1, …, in cn)` | 没有：一次行复制，直接进最终的表 |
+| 先 `Instantiate(prefab)`，再 `Set` 预制体没有的组件 | 一次复制，再加一次移动 |
+
+所以从预制体生成时，把每个实例需要的值（位置、`ChildOf`）一起交给 `Instantiate`，代价就只有那次复制（见[预制体](/zh/docs/guide/prefabs#instantiate-with-values)）。
+
+`SetIfChanged` 只有在添加组件时（或者像 `Set` 那样处理分组组件、已禁用的组件时）才是结构变更。分析器无法预知是哪种情况，所以和 `Set`
+一样把 `SetIfChanged` 算作可能改结构的调用：在 `[ForEach]` 方法里对实体调用它，方法要带 `Entity` 或 `World` 参数
+（[EECS013](/zh/docs/guide/analyzer#eecs013)）。只想在值变了的时候才写当前实体的追踪组件，改用 `Mut<T>` 参数
+（见[变更追踪](/zh/docs/guide/change-tracking)）。
+
 ## 完整例子 [#full-example]
 
 一座炮塔每隔一个 tick 开一次火，血量不断下降直到死亡：子弹在遍历途中创建、销毁，`Dead` 标签在判定死亡的地方打上。把这几个
@@ -291,6 +313,7 @@ tick，`WearSystem` 给炮塔打上 `Dead`，紧接着运行的 `FireSystem` 就
 | 录进命令缓冲，之后回放 | 在做决定的地方直接改 | 不用录制、不用回放、不分配 |
 | 每个 tick 加一次、删一次组件 | 用字段；持续几个 tick 的状态用标签 | 表的掩码里已有的标签只翻转一个存在位 |
 | `Set(a)` 后再 `Set(b)` | `Set(a, b)` | 写法更简洁，性能相同 |
+| 先 `Instantiate(prefab)`，再 `Set` 预制体没有的组件 | `Instantiate(prefab, in c1, …, in cn)` | 一次行复制直接进最终的表，不移动 |
 | 逐个创建已知数量的实体 | `CreateEntities`，或循环前调用 `EnsureCapacity<T1, …, Tn>(count)` | 只扩容一次，不用表满一次翻一倍（[EECS031](/zh/docs/guide/analyzer#eecs031)） |
 | 按过滤条件逐个修改 | [批量操作](/zh/docs/guide/bulk)、`DestroyEntities<T>(filter)` | 只过一次闸门，按整字（64 行）处理（[EECS030](/zh/docs/guide/analyzer#eecs030)） |
 | 方法只读 `Entity` 参数 | 保持只读（`Id`、`Has`、`Get`） | 遍历跳过结构变更簿记 |
@@ -310,6 +333,7 @@ tick，`WearSystem` 给炮塔打上 `Dead`，紧接着运行的 `FireSystem` 就
 
 - **可能改结构的遍历**每个实体检查一次存储版本，以便察觉变更；不可能改结构的方法连这一步都省了。
 - **移除组件再加回：** 一个存在位。**获得表里没有对应列的组件：** 复制一次行，每种新组合只发生一次（搬运方案会缓存）。
+- **带给定组件的 `Instantiate`：** 一次行复制，目标表按“预制体的表 + 给定的组件”缓存。**传入相同值的 `SetIfChanged`：** 一次比较，什么也不改。
 - **销毁：** O(组件数)；不在遍历中时立即补洞，否则在最后一个遍历结束时清理。
 - **扩容：** 表满了就翻倍，复制一遍已有的行；预留（`EnsureCapacity`、`CreateEntities`）只扩一次，正好扩到需要的行数。
 - **预热之后不分配内存**：没有需要扩容的缓冲。

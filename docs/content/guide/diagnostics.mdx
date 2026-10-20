@@ -1,22 +1,23 @@
 ---
 title: Debugging and diagnostics
 seoTitle: "Debugging an ECS world in C#: Describe, Stats, Error"
-description: "Debug a running EasyEcs world: tables and memory with Describe, an entity's components in the debugger, per-system timing and the systems that failed."
+description: "Debug a running EasyEcs world: tables and memory, an entity's components, per-system time, bytes and entities, the schedule, and the systems that failed."
 icon: Stethoscope
 ---
 
 An entity is an id, and its data is spread over table columns, so a debugger watch on a handle shows little by
 itself, and a server that slows down does not say which system grew. EasyEcs answers both from data the world already
 has: `world.Describe()` lists the tables with their rows and bytes, `entity.Describe()` (and the debugger) shows an
-entity's component values, `system.Stats` times every system, and `system.Error` keeps the exception of a system that
-failed.
+entity's component values, `system.Stats` times every system and counts what it allocated and visited,
+`world.DescribeSchedule()` shows which systems run together and why, and `system.Error` keeps the exception of a
+system that failed. When a peak has passed, `world.TrimExcess()` gives its memory back.
 
 ## When to use it [#when-to-use-it]
 
 <Callout type="idea" title="Use it for">
-  An admin or health endpoint of a live server (entity counts, memory per table, the slowest system, the systems
-  that failed), a log line when a tick runs long, a breakpoint on an entity in the IDE, and a memory report after a
-  load test.
+  An admin or health endpoint of a live server (entity counts, memory per table, the slowest system, the system
+  that allocates, the systems that failed), metrics exported to OpenTelemetry, a log line when a tick runs long, the
+  schedule logged at startup, a breakpoint on an entity in the IDE, and a memory report after a load test.
 </Callout>
 
 <Callout type="warn" title="Skip it for">
@@ -62,12 +63,13 @@ foreach (var table in world.Describe())
 What to read in it:
 
 - **Where the memory is:** `Bytes` per table, which grows with `Capacity`, not with `Entities`: a table that once
-  held a wave keeps its rows for the next one.
+  held a wave keeps its rows for the next one, until [`TrimExcess`](#trim) shrinks it.
 - **Removed components:** a column's `Without` counts the rows that removed or disabled it, since
   [removing keeps the row](/en/docs/guide/entities-and-components#storage). A large share means most entities of the
   table no longer have it.
 - **Combinations:** each distinct set of components is a table. Hundreds of small tables mean the code adds many
-  different combinations; a [group](/en/docs/guide/groups) splits tables on purpose.
+  different combinations; a [group](/en/docs/guide/groups) splits tables on purpose. Tables with `Entities` 0 are
+  combinations that held entities once: `TrimExcess` drops them.
 - **Holes:** `Rows` above `Entities` is a pass in progress that left holes; they close when it ends.
 
 `world.EntityCount` is the total (O(1)), and `world.Count<T>(filter)` counts the entities a query would visit by
@@ -95,6 +97,222 @@ foreach (var system in measured.Systems)
     Console.WriteLine($"{system.GetType().Name}: last {system.Stats.Last.TotalMicroseconds} μs");
 ```
 
+Each run also records what it allocated and how many entities it visited, so a status page can name the system that
+creates garbage or the one whose population grew, not only the slow one:
+
+| Field | What it holds |
+| --- | --- |
+| `LastAllocated`, `TotalAllocated` | Bytes allocated on the managed heap by the latest run, and by all runs: on the thread that ran the system, plus on the helper threads that ran chunks of its [parallel `[ForEach]`](/en/docs/guide/systems#parallel-methods) methods. Another system of the same parallel stage never adds to it. |
+| `LastEntities`, `TotalEntities` | Entities the latest run's `[ForEach]` methods matched, and all runs: each method's query counted when its pass starts (with its filters, and for `[Changed<T>]` / `[Removed<T>]` only the rows written or removed since the system last ran), summed over the methods. |
+
+What the entity count means:
+
+- **Matched at the start, not visited one by one.** For a pass that changes structure it is an upper bound: an entity
+  destroyed or moved out before its turn is counted but not visited.
+- **`[ForEach]` methods only.** Queries and loops in `OnUpdate` are not counted.
+- **A sliced method reports its share.** A `[ForEach(Slices = N)]` method counts the matching entities divided by N
+  ([slices](/en/docs/guide/systems#update-interval)).
+
+```csharp
+foreach (var system in measured.Systems)
+{
+    var stats = system.Stats;
+    Console.WriteLine($"{system.GetType().Name}: {stats.Last.TotalMicroseconds} μs, " +
+                      $"{stats.LastAllocated} B, {stats.LastEntities} entities");
+}
+```
+
+All of it is off by default: with `MeasureSystems` false, a system run costs one field test and a parallel chunk one
+branch, and nothing is counted. Measuring, each run reads the allocation counter twice (per helper chunk too) and
+each `[ForEach]` pass counts its matches once, as `world.Count` would.
+
+### See the schedule [#schedule]
+
+`world.DescribeSchedule()` returns how the world runs its systems: per group its stages (systems that may run at
+once under `ParallelSystems`), what each system reads and writes, why a system waits for the stage before its own,
+and the pairs of conflicting systems that nothing but their registration order orders. `ToString()` prints it as
+indented text; `ToMermaid()` as a mermaid flowchart for a docs page or a dashboard.
+
+```csharp
+public record struct Poisoned(int DamagePerTick) : IComponent;
+public record struct NetPosition(float X, float Y) : IComponent;   // the position last sent to clients
+
+public class MoveSystem : EcsSystem
+{
+    [ForEach]
+    static void Move(ref Position position, in Velocity velocity)
+    {
+        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+    }
+}
+
+[UpdateAfter<RegenSystem>]
+public class PoisonSystem : EcsSystem
+{
+    [ForEach]
+    static void Hurt(ref Health health, in Poisoned poisoned) => health.Value -= poisoned.DamagePerTick;
+}
+
+public class ReplicateSystem : EcsSystem
+{
+    [ForEach]
+    static void Copy(in Position position, ref NetPosition sent) => sent = new NetPosition(position.X, position.Y);
+}
+```
+
+```csharp
+using var server = new World(new WorldOptions { ParallelSystems = true });
+server.AddSystem<MoveSystem>();
+server.AddSystem<RegenSystem>();
+server.AddSystem<PoisonSystem>();
+server.AddSystem<ReplicateSystem>();
+Console.Write(server.DescribeSchedule());
+```
+
+It prints:
+
+```text
+Group Default
+  Stage 1
+    MoveSystem, reads Velocity, writes Position
+    RegenSystem, writes Health
+  Stage 2
+    PoisonSystem, reads Poisoned, writes Health
+      after RegenSystem: ordered, Health
+    ReplicateSystem, reads Position, writes NetPosition
+      after MoveSystem: Position
+  Registration order only: MoveSystem before ReplicateSystem (Position)
+```
+
+`MoveSystem` and `RegenSystem` share nothing, so they share the first stage. `PoisonSystem` waits for `RegenSystem`
+because `[UpdateAfter<RegenSystem>]` says so (`ordered`) and both write `Health`. `ReplicateSystem` waits for
+`MoveSystem` only because it reads the `Position` that `MoveSystem` writes: no attribute orders them, so the order
+they were added in decides whether replication sends this tick's positions or last tick's. That is what a
+**registration-only pair** is: two systems that conflict and that no chain of `[UpdateBefore]` / `[UpdateAfter]`
+orders. Registering them the other way round changes what the later one sees, so give each such pair the order it
+needs, here `[UpdateAfter<MoveSystem>]` on `ReplicateSystem`. A system that `RunsAlone` (an `OnUpdate`, an `Entity` or
+`World` parameter) conflicts with every other one and shows as `runs alone`.
+
+`server.DescribeSchedule().ToMermaid()` returns the same schedule as a flowchart, a subgraph per group and per stage,
+a solid arrow per wait labelled with the data, and a dotted arrow per registration-only pair:
+
+```text
+flowchart TD
+  subgraph g0["Default"]
+    subgraph g0s0["Stage 1"]
+      g0n0["MoveSystem<br/>reads: Velocity<br/>writes: Position"]
+      g0n1["RegenSystem<br/>writes: Health"]
+    end
+    subgraph g0s1["Stage 2"]
+      g0n2["PoisonSystem<br/>reads: Poisoned<br/>writes: Health"]
+      g0n3["ReplicateSystem<br/>reads: Position<br/>writes: NetPosition"]
+    end
+  end
+  g0n1 -->|"Health"| g0n2
+  g0n0 -->|"Position"| g0n3
+  g0n0 -. "registration order" .-> g0n3
+```
+
+Log the schedule once at startup, after the last `AddSystem`: the log of every deployment then says how its systems
+ran, and a new registration-only pair shows up in review before it shows up as a bug. `DescribeSchedule` is cold
+(it allocates its answer and is O(systems³) per group) and may be called from any thread: it reads the schedule the
+latest `AddSystem` or `RemoveSystem` published.
+
+### Publish the stats as metrics [#metrics]
+
+`System.Diagnostics.Metrics` is what OpenTelemetry, `dotnet-counters` and Prometheus exporters read. EasyEcs needs no
+package for it: a `Meter` with observable instruments, fed by a copy of the stats that the world's thread makes after
+each update. The exporter's thread reads the copy when it collects (every few seconds), never the world, and the tick
+copies 56 bytes per system without allocating:
+
+```csharp
+using System.Diagnostics.Metrics;
+
+public sealed class SystemMetrics : IDisposable
+{
+    private readonly Meter _meter = new("Game.World");
+    private readonly Lock _gate = new();
+    private readonly SystemStats[] _stats;
+    private readonly KeyValuePair<string, object>[][] _tags;   // one "system" tag per system, built once
+
+    public SystemMetrics(World world)
+    {
+        _stats = new SystemStats[world.Systems.Count];
+        _tags = new KeyValuePair<string, object>[_stats.Length][];
+        int i = 0;
+        foreach (var system in world.Systems)
+            _tags[i++] = [new KeyValuePair<string, object>("system", system.GetType().Name)];
+
+        _meter.CreateObservableGauge<double>("ecs.system.duration",
+            () => Read(static stats => stats.Last.TotalMilliseconds), unit: "ms");
+        _meter.CreateObservableGauge<long>("ecs.system.entities",
+            () => Read(static stats => stats.LastEntities), unit: "{entity}");
+        _meter.CreateObservableCounter<long>("ecs.system.allocated",
+            () => Read(static stats => stats.TotalAllocated), unit: "By");
+    }
+
+    // The world's thread, after world.Update(): a copy of every system's stats.
+    public void Publish(World world)
+    {
+        lock (_gate)
+        {
+            int i = 0;
+            foreach (var system in world.Systems) _stats[i++] = system.Stats;
+        }
+    }
+
+    // The exporter's thread, once per collection.
+    private Measurement<T>[] Read<T>(Func<SystemStats, T> value) where T : struct
+    {
+        lock (_gate)
+        {
+            var measurements = new Measurement<T>[_stats.Length];
+            for (int i = 0; i < _stats.Length; i++)
+                measurements[i] = new Measurement<T>(value(_stats[i]), _tags[i]);
+            return measurements;
+        }
+    }
+
+    public void Dispose() => _meter.Dispose();
+}
+```
+
+Create it after the last `AddSystem` (it sizes its arrays from `world.Systems`), on a world with `MeasureSystems`,
+and call `Publish` after `world.Update()` in the loop that owns the world ([hosting](/en/docs/guide/hosting#operations)).
+OpenTelemetry picks it up with `AddMeter("Game.World")` in `WithMetrics`; `dotnet-counters monitor --counters
+Game.World` shows it without any setup. The measurements are allocated per collection, on the exporter's thread, not
+per tick.
+
+### Give memory back after a peak [#trim]
+
+Tables double when they fill and keep their rows when entities leave, so the next wave reuses them without
+allocating. After a peak that will not come back soon (an event ended, a match emptied a zone), the rows stay
+allocated. `world.TrimExcess()` gives them back:
+
+- **Drops every empty table**: it leaves the world and the match of every cached query, and a later change that needs
+  it creates it again.
+- **Shrinks the other tables** to their entities rounded up to a power of two, 64 rows at least: columns, presence
+  bits and change-tick summaries.
+- **Releases reusable buffers**: those of saves, loads, migrations and prefab lookups, rebuilt on demand.
+
+What stays: the world's empty table, every table a `WorldSnapshot` of the world holds rows of (snapshots keep
+restoring as before), the entity records (handles index them unchecked), indexes, relations, singletons and pooled
+`DynamicBuffer<T>` lists. Handles, queries, systems, groupings and change tracking are unaffected.
+
+```csharp
+long before = 0;
+foreach (var table in world.Describe()) before += table.Bytes;
+world.TrimExcess();
+long after = 0;
+foreach (var table in world.Describe()) after += table.Bytes;
+Console.WriteLine($"gave back {before - after:N0} bytes of tables");
+```
+
+Call it at a quiet moment, on the owner thread between updates: after a wave despawned, between two matches, from a
+maintenance task that runs when `EntityCount` is well below its peak. Never every tick: what it drops, the next
+structural changes allocate again, so a trimmed world pays growth it had already paid. It throws
+`InvalidOperationException` during a pass (a `Query` loop or a `[ForEach]` method).
+
 ### Find the systems that failed [#errors]
 
 By default an exception a system throws leaves `Update()`. With `SystemErrors = SystemErrorPolicy.Disable`, the
@@ -115,7 +333,8 @@ foreach (var system in guarded.Systems)
 Read diagnostics on the world's owner thread between two updates, like the [hosting guide](/en/docs/guide/hosting#reads)
 publishes a status: the numbers then describe one finished tick. `world.Describe()` may also be called from another
 thread for a rough picture (it never corrupts the world), but a table changed at the same time may be read half-way.
-`entity.Describe()` and `system.Stats` belong to the owner thread.
+`world.DescribeSchedule()` is safe from any thread. `entity.Describe()`, `system.Stats` and `TrimExcess()` belong to
+the owner thread: another thread reads the stats through a copy, as [the metrics](#metrics) do.
 
 ## Full example [#full-example]
 
@@ -277,17 +496,30 @@ the third update did not stop at the bug.
 | `Describe()` on every tick | On a request or a timer, between updates | It allocates its answer |
 | `entity.Describe()` to test for a component | `HasX`, `TryGetX`, a filter | No boxing, no allocation |
 | A stopwatch around `world.Update()` | `MeasureSystems` and `system.Stats` | Per system, two timestamp reads per run |
+| `GC.GetAllocatedBytesForCurrentThread()` around the whole tick | `system.Stats.LastAllocated` | Names the system, counts its parallel chunks too |
+| Reading `system.Stats` from the exporter's thread | A copy published after each update | The stats belong to the owner thread |
+| Guessing which systems run together | `world.DescribeSchedule()`, logged at startup | Shows the stages and the registration-only pairs |
+| `TrimExcess()` every tick or after every despawn | After a peak, from a maintenance task | What it drops is allocated again on next use |
 | A try/catch around `Update()` on a live server | `SystemErrorPolicy.Disable` and `system.Error` | The other systems keep running |
 
-Describing the battle server's world for a dashboard and one entity for a debugger (`IntrospectionBenchmark`):
+Describing the battle server's world for a dashboard, one entity for a debugger and the schedule of its systems
+(`IntrospectionBenchmark`), and trimming a world after a peak (`TrimBenchmark`):
 
 <BenchTable bench="IntrospectionBenchmark" />
+<BenchTable bench="TrimBenchmark" />
 
 ## What it costs [#what-it-costs]
 
 - **`world.Describe()`:** O(tables + columns); allocates one `TableInfo` per table and its columns.
 - **`entity.Describe()`:** O(components of the entity); boxes each value.
-- **`MeasureSystems`:** two timestamp reads per system run when on; nothing when off.
+- **`MeasureSystems`:** per system run, two timestamp reads and two reads of the thread's allocation counter (two
+  more per chunk a helper thread runs), and one `Count` per `[ForEach]` pass (O(matching tables), plus the row
+  words a filter must test). Off: one field test per run and one branch per chunk. `SystemStats` is 56 bytes per
+  system.
+- **`world.DescribeSchedule()`:** O(groups × systems³); allocates its answer. `ToString()` and `ToMermaid()` are
+  O(systems + waits + pairs) and allocate the text.
+- **`world.TrimExcess()`:** O(tables × (cached queries + snapshots) + rows of the shrunk tables × columns); allocates
+  the shrunk arrays (cold). The tables and edges it dropped allocate once more when they are next needed.
 - **`SystemErrorPolicy.Disable`:** nothing until a system throws.
 - **The debugger view** costs nothing at run time: it is read only when a debugger asks.
 
@@ -297,7 +529,12 @@ Describing the battle server's world for a dashboard and one entity for a debugg
 | --- | --- | --- |
 | `Describe()` in a system or every tick | Allocations on the hot path | Code review |
 | Reading `Describe()` from another thread during an update | Counts of a table caught half-way through a change | Read between updates on the owner thread |
-| Expecting `Bytes` to drop when entities leave | Tables keep their capacity for the next wave | Read `Entities` against `Capacity` |
+| Expecting `Bytes` to drop when entities leave | Tables keep their capacity for the next wave | Call `TrimExcess()` after the peak |
+| `TrimExcess()` every tick | Tables dropped and rebuilt, growth paid again: allocations on the tick | Call it from a maintenance task ([common mistakes](/en/docs/guide/common-mistakes#trim-every-tick)) |
+| `TrimExcess()` inside a `Query` loop or a `[ForEach]` method | `InvalidOperationException` | Call it between updates |
+| Reading `system.Stats` on the exporter's thread | A struct read while the tick writes it | Publish a copy from the owner thread |
+| Expecting `LastEntities` to count `OnUpdate` queries | Only `[ForEach]` passes are counted | Count in `OnUpdate` yourself if it matters |
+| Leaving a registration-only pair in the schedule | Reordering `AddSystem` calls changes what a system sees | Add `[UpdateBefore<T>]` / `[UpdateAfter<T>]` |
 | Leaving `SystemErrorPolicy.Disable` on in tests | A failing system is silently off and the test checks other things | Keep the default `Throw` in tests ([testing](/en/docs/guide/testing#errors)) |
 | Logging `entity.Id.Index` alone | The index is reused by later entities | Log the entity or its `EntityId` (`1000v1`) |
 

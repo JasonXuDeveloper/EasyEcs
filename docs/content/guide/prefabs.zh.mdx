@@ -75,6 +75,49 @@ for (int i = 0; i < wave.Length; i++) wave[i].Position = new Position(i * 8, 0);
 </Step>
 </Steps>
 
+### 每个实例带上自己的值 [#instantiate-with-values]
+
+大多数生成和配方只差几个值：怪物站在哪，属于哪个巢穴。`Instantiate(prefab, in c1, …, in cn)` 最多接收九个这样的值：
+预制体里有同类型的就替换，没有的就加进副本。实体直接放进“预制体的组件 + 给定组件”的那张表，代价是一次行复制，没有行移动。
+先 `Instantiate` 再 `Set` 一个预制体没有的组件，则要先复制一行，再把它搬到带新列的表。
+
+```csharp
+public record struct Spawner(int Every, int Countdown) : IComponent;
+
+public class SpawnSystem : EcsSystem
+{
+    [ForEach]
+    static void Spawn(Entity den, ref Spawner spawner, in Position at, World world)
+    {
+        if (--spawner.Countdown > 0) return;
+        spawner.Countdown = spawner.Every;
+        world.Instantiate(Kinds.Goblin, at, new ChildOf(den));   // 自己的位置，并作为巢穴的子实体 // [!code highlight]
+    }
+}
+```
+
+```csharp
+world.AddSystem<SpawnSystem>();
+var den = world.CreateEntity(new Position(30, 12), new Spawner(Every: 5, Countdown: 1));
+world.Update();                                      // 一只哥布林出现在 (30, 12)，是巢穴的子实体
+
+var pack = new Entity[6];
+world.Instantiate(Kinds.Goblin, pack, new Position(30, 12), new ChildOf(den));   // 每个实体拿到同样的值
+den.Destroy();                                       // ChildOf：巢穴的哥布林跟着一起销毁
+```
+
+批量形式 `Instantiate(prefab, span, in c1, …, in cn)` 给 span 里每个实体同样的值：只过一次结构闸门，每个给定的列一次填满。
+每个实体都不一样的值（各自的位置），在批量生成之后再写，或者逐个 `Instantiate`。
+
+- **没给的保持预制体的样子。** 预制体里处于[禁用](/zh/docs/guide/cleanup-and-disable#disable-a-component)状态的组件，
+  如果给了值，就和 `Set` 一样以新值出现并启用；没给的仍然禁用。
+- **其余行为和 `Set` 一致。** 被追踪的组件（复制来的和给定的）都算此刻写入，[索引](/zh/docs/guide/indexes-and-relations)
+  和关系收录新实体，给定的 `ChildOf` 把它挂进[层级](/zh/docs/guide/hierarchy)。
+- **[分组](/zh/docs/guide/groups)：** 给定的分组组件值在放置之前就选好了分组的表，所以仍然没有移动。
+- **[预制体编组](#prefab-groups)：** 整个编组照常创建，再把这些值设到你传入的那个成员的实体上，这个实体要多一次行移动。
+- **[唯一键](/zh/docs/guide/indexes-and-relations#unique-keys)** 在任何改动之前检查：给定的键，或者预制体里没被替换的键，
+  已经被别的实体占用时抛 `InvalidOperationException`；多于一个实体的批量生成会让同一个键重复，同样抛异常。
+
 ### `Prefab` API [#prefab-api]
 
 | 成员 | 效果 |
@@ -195,7 +238,8 @@ world.Instantiate(Kinds.Troll, army);                // 不扩容，不分配
 
 - **值**按普通结构体复制。组件里的托管引用（`string`、数组、`List<T>`）复制的是引用，副本之间共享它指向的对象。
 - **`DynamicBuffer<T>`** 是例外：每个副本都有自己的列表，元素相同。
-- **[值索引](/zh/docs/guide/indexes-and-relations)**立即收录新实体。
+- **[值索引](/zh/docs/guide/indexes-and-relations)**立即收录新实体。副本不能重复[唯一键](/zh/docs/guide/indexes-and-relations#unique-keys)：
+  实例化一个键已被别的实体占用的预制体，或者克隆一个带唯一键的实体，都会抛 `InvalidOperationException`（null 键不算键）。
 - **[被追踪的组件](/zh/docs/guide/change-tracking)**算作此刻写入：`[Changed<T>]` 方法能看到每个新实例。副本没有的组件不算移除，`[Removed<T>]` 不会报告。
 - **不存在的组件仍然不存在。** 一个 `Burning` 已被移除的实体，克隆出来也没有 `Burning`。
 - **`Entity` 字段**按它保存的句柄原样复制。预制体里的句柄不指向目标 World 的任何实体，所以要在实例化之后给每个实例建立链接，
@@ -306,12 +350,15 @@ boss 50 hp, twin 50 hp
 | 别这样 | 这样做 | 原因 |
 | --- | --- | --- |
 | 循环调用 `Instantiate` 生成一波 | `Instantiate(prefab, span)` | 只过一次闸门，连续的行一次复制 |
+| 先 `Instantiate`，再 `Set` 预制体没有的组件 | `Instantiate(prefab, in c1, …, in cn)` | 一次行复制直接进最终的表，不移动 |
+| 循环调用 `Instantiate(prefab, 相同的值)` | `Instantiate(prefab, span, in c1, …, in cn)` | 只过一次闸门，每个给定的列一次填满 |
 | 在生成的那个 tick 里扩容 | 提前 `EnsureCapacity(prefab, count)` | 这波生成不分配内存 |
 | 先 `CreateEntity`，再逐个 `Set` 同一类实体的组件 | 用预制体 | 一次行复制，目标表按预制体缓存 |
 | 每次生成都 new 一个 `Prefab` | 每类一个预制体，放在字段里 | 第一次实例化后，表查找就缓存了 |
 | 把模板做成隐藏实体 | 用 `Prefab` | 查询不用付跳过它们的代价 |
 
-生成并销毁 1,000 个有四个组件（其中一个被追踪）的实体，逐个 `Instantiate` 对比一次 `Instantiate(prefab, span)`（`PrefabBenchmark`）：
+生成并销毁 1,000 个有四个组件（其中一个被追踪）的实体，逐个 `Instantiate` 对比一次 `Instantiate(prefab, span)`；再加上每个实体带一个
+`ChildOf` 的三种写法：`Instantiate` 之后再设、直接交给 `Instantiate`、交给批量形式（`PrefabBenchmark`）：
 
 <BenchTable bench="PrefabBenchmark" />
 
@@ -324,6 +371,8 @@ boss 50 hp, twin 50 hp
 - **一个预制体**是一个很小的私有 World，每个成员一行，构建时分配一次。
 - **`Instantiate`：** 一次行复制，O(组件数)。第一个实例负责找到目标表，World 按预制体的表缓存结果，之后的实例直接进表。
 - **`Instantiate(prefab, span)`：** O(数量 × 组件数)，只过一次闸门，表最多扩容一次。
+- **给定的值：** 除了写入它们，没有额外开销。World 按“预制体的表 + 给定的组件”缓存目标表，之后的实例直接进表。预制体编组要为传入的成员多付一次行移动。
+- **唯一键：** 副本的每个唯一组件一次哈希探测；表里没有唯一组件就没有这笔开销。
 - **编组：** 每个实例 O(成员数 × 组件数)，外加改写成员 id。
 - **`Clone`：** 在实体自己的表里复制一次行。
 - **内存分配：** 预热之后没有，唯一的例外是每个 `DynamicBuffer<T>` 副本拿到的列表。
@@ -336,6 +385,9 @@ boss 50 hp, twin 50 hp
 | 预制体里放 World 中某个实体的 `EntityId` | 在每个实例里都变成 `EntityId.Null` | 实例化之后再建立链接 |
 | 先填好 `DynamicBuffer<T>` 值再 `Set` | 所有实例共用这个列表 | [EECS012](/zh/docs/guide/analyzer#eecs012)；改用 `SetLoot(...)` |
 | 在计数循环里 `Instantiate(prefab)` | 每次调用复制一个，而不是一次复制一整波 | [EECS031](/zh/docs/guide/analyzer#eecs031)：`Instantiate(prefab, span)` |
+| 在计数循环里用相同的值 `Instantiate(prefab, values)` | 每次调用复制一个 | [EECS031](/zh/docs/guide/analyzer#eecs031)：带值的批量形式 |
+| 先 `Instantiate`，再 `Set` 一个缺少的组件 | 一次行复制，再加一次行移动 | 代码审查：把值直接交给 `Instantiate` |
+| 带唯一键的预制体实例化两次，或批量生成多于一个 | 抛 `InvalidOperationException`，什么也没创建 | 每个实例给自己的键 |
 | 在不拥有 World 的线程上 `Instantiate` | 和所有者线程发生竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 | 在不带 `Entity` 或 `World` 参数的 `[ForEach]` 方法里 `Instantiate` | 遍历以为不会有结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
 | 其他线程正在实例化时修改预制体 | 复制出残缺的数据 | 启动时建好预制体，之后只读 |

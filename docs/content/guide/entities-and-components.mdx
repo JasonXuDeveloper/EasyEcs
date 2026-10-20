@@ -99,6 +99,9 @@ int cleared = world.DestroyEntities<Health, Dead>();                 // every de
 
 Kinds of entities spawned again and again (an NPC type, a projectile) are best defined once as a
 [prefab](/en/docs/guide/prefabs): `world.Instantiate(prefab)` creates one, `entity.Clone()` copies a living one.
+`world.Instantiate(prefab, new Position(x, y))` creates one with 1 to 9 components given as well, which replace the
+prefab's or join them, in one row copy; the batch form `Instantiate(prefab, span, …)` gives a whole wave the same
+values ([prefabs](/en/docs/guide/prefabs#instantiate-with-values)).
 
 The world counts and lists its entities:
 
@@ -166,6 +169,28 @@ public class Chase : EcsSystem
 To find every entity that points at a target, make the link an indexed component or a relation:
 [Indexes and relations](/en/docs/guide/indexes-and-relations).
 
+#### Find an entity by a unique key [#unique-key]
+
+A key that names one entity (an account id, a session token) is a component that implements `IUniqueIndexed<TKey>`.
+Its index exists from the first entity that has it, a write that would give a second entity the same key throws
+before it changes anything, and the generated `world.XIndex` finds the one entity:
+
+```csharp
+public record struct Account(long Id) : IComponent, IUniqueIndexed<long>
+{
+    public long Key => Id;
+}
+```
+
+```csharp
+var ayla = world.CreateEntity(new Account(1001), new Health(100));
+Entity owner = world.AccountIndex.Get(1001);                     // throws when no entity has the key
+bool known = world.AccountIndex.TryGet(2002, out var other);     // false: nobody has it
+```
+
+The rules (re-keying, null keys, what each write checks) are in
+[Indexes and relations](/en/docs/guide/indexes-and-relations#unique-keys).
+
 ### Components [#components]
 
 The generic API works for any component type; the [generated members](#generated-members) are shorthands for it.
@@ -178,6 +203,7 @@ The generic API works for any component type; the [generated members](#generated
 | `bool TryGet<T>(out T value)` | A **copy** if present. Never a write. |
 | `bool Has<T1..Tn>()` | Whether the entity has all of them. |
 | `Entity Set(in T1 … in Tn)` | Adds or replaces 1 to 9 values, with at most one row move; chainable. |
+| `bool SetIfChanged<T>(in T value)` | Sets `value` like `Set` unless the entity already has it: false then, with nothing written, stamped or indexed ([only when the value changed](/en/docs/guide/change-tracking#set-if-changed)). |
 | `ref T GetOrAdd<T>()` | A ref, adding `default` first if missing; an existing value is kept. |
 | `Entity Remove<T1..Tn>()` | Removes 1 to 9 components; missing ones are ignored; chainable. |
 
@@ -203,9 +229,10 @@ the same.
 | Declared | Generated | Same as |
 | --- | --- | --- |
 | `record struct Position(float X, float Y) : IComponent` | `e.Position` (`ref`), `e.HasPosition`, `e.TryGetPosition(out p)`, `e.GetOrAddPosition()`, `e.SetPosition(x, y)`, `e.RemovePosition()` | `Get`, `Has`, `TryGet`, `GetOrAdd`, `Set(new Position(x, y))`, `Remove` |
-| a tracked component (`Armor : ITrackChanges`) | `e.Armor` is `ref readonly`; `e.WriteArmor()` returns the `ref` | `Read`; `Get` (stamped as written) |
-| an indexed component (`Zone : IIndexed<int>`) | `e.Zone` is `ref readonly`, no `GetOrAddZone` or `WriteZone`; `world.ZoneIndex` | `Read`; `world.Index<Zone, int>()` |
-| a grouped component (`Team : IGroup`) | `e.Team` is `ref readonly`, no `GetOrAddTeam` or `WriteTeam`; `filter.InTeam(group)` | `Read`; `filter.InGroup<Team>(group)` ([groups](/en/docs/guide/groups)) |
+| a tracked component (`Armor : ITrackChanges`) | `e.Armor` is `ref readonly`; `e.WriteArmor()` returns the `ref`; `e.SetArmorIfChanged(v)` | `Read`; `Get` (stamped as written); `SetIfChanged(new Armor(v))` |
+| an indexed component (`Zone : IIndexed<int>`) | `e.Zone` is `ref readonly`, no `GetOrAddZone` or `WriteZone`; `e.SetZoneIfChanged(id)`; `world.ZoneIndex` | `Read`; `SetIfChanged(new Zone(id))`; `world.Index<Zone, int>()` |
+| a unique component (`Account : IUniqueIndexed<long>`) | as an indexed one; `world.AccountIndex.Get(key)`, `world.AccountIndex.TryGet(key, out e)` | the [one entity of a key](#unique-key) |
+| a grouped component (`Team : IGroup`) | `e.Team` is `ref readonly`, no `GetOrAddTeam` or `WriteTeam`; `e.SetTeamIfChanged(…)`; `filter.InTeam(group)` | `Read`; `SetIfChanged`; `filter.InGroup<Team>(group)` ([groups](/en/docs/guide/groups)) |
 | a tag (`struct Dead : IComponent`) | `e.IsDead`, `e.SetDead()`, `e.RemoveDead()` | `Has`, `Set(new Dead())`, `Remove` |
 | any component with fields, except a cleanup component | `e.DisableHealth()`, `e.EnableHealth()`, `e.IsHealthDisabled` | [`Disable` / `Enable`](/en/docs/guide/cleanup-and-disable) |
 | a buffer element some code names as `DynamicBuffer<Loot>` | `e.Loot` (`ref readonly`), `e.HasLoot`, `e.WriteLoot()`, `e.GetOrAddLoot()`, `e.RemoveLoot()` | `Read`, `Has`, `Get`, `GetOrAdd`, `Remove` of `DynamicBuffer<Loot>` ([dynamic buffers](/en/docs/guide/dynamic-buffers)) |
@@ -220,12 +247,15 @@ if (hero.TryGetHealth(out var copy)) Console.WriteLine(copy.Value);
 hero.SetArmor(5).SetDead();                                // constructor arguments; a tag; chainable
 int value = hero.Armor.Value;                              // tracked: a read, never stamped
 hero.WriteArmor().Value += 1;                              // an explicit write: stamped
+bool changed = hero.SetArmorIfChanged(6);                  // false: Armor is 6 already, nothing stamped
 ```
 
 - The property is `Get` (or `Read`), so it throws when the component is missing: check `HasX`, or use `TryGetX` /
   `TryGetRef<T>(out found)` when it is optional.
 - `SetX` has one overload per public constructor (a record struct's primary constructor), or one that takes every
-  field when the struct has no constructor and only public, writable fields.
+  field when the struct has no constructor and only public, writable fields. `SetXIfChanged` takes the same
+  arguments; it exists for tracked, indexed and grouped components that are not tags and can be compared
+  (`IEquatable<T>`, or unmanaged).
 - Writes are methods, not property setters: C# rejects a setter on a handle that is not a variable, such as a
   `foreach` variable.
 - The analyzer knows these members: `SetX`, `GetOrAddX` and `RemoveX` are structural changes, the rest are reads or
@@ -340,7 +370,8 @@ with `false` instead of throwing. After `Destroy` the stored id names nothing: t
 
 | Instead of | Do | Why |
 | --- | --- | --- |
-| `CreateEntity()` then `Set` per component | `CreateEntity(a, b, c)`, or `Instantiate(prefab)` | One placement instead of one row move per component |
+| `CreateEntity()` then `Set` per component | `CreateEntity(a, b, c)`, `Instantiate(prefab)`, or `Instantiate(prefab, a, b)` | One placement instead of one row move per component |
+| `SetX(…)` on a tracked value that rarely changes | `SetXIfChanged(…)` | An equal value is not stamped: `[Changed<T>]` readers skip it |
 | `Set(a)` then `Set(b)` | `Set(a, b)`, `Remove<A, B>()` | Shorter, the same cost |
 | A loop of `CreateEntity` / `Destroy` | `CreateEntities(span, …)`, `DestroyEntities<T>(filter)` ([EECS031](/en/docs/guide/analyzer#eecs031)) | One pass through the structural gate per wave |
 | `Get<T>()` to read a tracked component | `Read<T>()`, the generated property, `TryGet<T>()` | A `ref` access stamps the row as written |

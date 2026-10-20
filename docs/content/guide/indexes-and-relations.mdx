@@ -137,6 +137,68 @@ An `EntityId` carries the entity's version, so a link to a destroyed entity neve
 its index. To turn an id back into a handle, `world.TryGetEntity(id, out var entity)` also says whether it still lives.
 The parent-child link is built in: see [Hierarchy](/en/docs/guide/hierarchy).
 
+### Unique keys: one entity per key [#unique-keys]
+
+Some keys name one entity and must never name two: an account id, a session token, the occupant of a grid cell.
+Implement `IUniqueIndexed<TKey>` instead of `IIndexed<TKey>`, and the world refuses every write that would give a key
+to a second entity. `Get(key)` returns the one entity of a key (and throws when none has it), `TryGet(key, out
+entity)` says whether one has it; `Find`, `Count`, `TryFind` and the ordered walks work as on any index.
+
+```csharp
+public record struct Account(long Id) : IComponent, IUniqueIndexed<long>
+{
+    public long Key => Id;
+}
+```
+
+```csharp
+var ada = world.CreateEntity(new Account(1001));
+var bo = world.CreateEntity(new Account(2002));
+
+var accounts = world.AccountIndex;                      // world.Index<Account, long>()
+Entity holder = accounts.Get(1001);                     // ada: O(1), throws when no entity has the key
+bool taken = accounts.TryGet(3003, out _);              // false: nobody has 3003
+
+try
+{
+    bo.SetAccount(1001);                                // ada holds 1001 // [!code highlight]
+}
+catch (InvalidOperationException)
+{
+    // refused before anything changed: bo still has 2002, ada still has 1001
+}
+```
+
+- **Every write is checked**, before it changes anything: `Set` and the generated `SetX`, `CreateEntity`,
+  `CreateEntities`, `GetOrAdd` (it claims the default value's key), `Enable` / `EnableAll`, `SetAll`, `Instantiate`
+  (with or without [given components](/en/docs/guide/prefabs#instantiate-with-values)), `Clone`, and the arrivals of
+  `LoadEntities`, `LoadEntitiesInto` and `MoveEntities` ([migration](/en/docs/guide/migration-and-unload#unique-keys)).
+  A write that would repeat a key throws `InvalidOperationException` naming the component, the key and the entity
+  that holds it. A `Load` of a save that gives one key to two entities throws `InvalidDataException`.
+- **A refused write leaves the world as it was.** The entity keeps its value and its table, a call with several
+  components writes none of them, and a batch (`CreateEntities`, `SetAll`, `EnableAll`, a load) creates or changes
+  no entity.
+- **Batches cannot repeat a key.** `CreateEntities`, `SetAll` over more than one entity, `Instantiate(prefab, span)`
+  of more than one entity, and `Clone` would give every copy the same key: they throw unless the key is null.
+- **Writing an entity's own key again is fine.** `ada.SetAccount(1001)` changes nothing.
+- **Moving a key: change its holder first.** Give `ada` another key, then give `bo` hers. To swap two keys, go
+  through a free one: `ada` to a spare key, `bo` to 1001, `ada` to 2002.
+- **Destroy, `Remove` and `Disable` free the key.** A disabled component holds no key while disabled, and enabling it
+  again throws if another entity took the key meanwhile (the component stays disabled).
+- **A null key is no key.** Any number of entities may hold a `string` key that is null; no lookup finds them, and
+  `TryGet(null, out _)` is false. A default value key (`0`) is a key like any other.
+- **`EntityId` keys cannot be unique.** Loads and moves rewrite `EntityId`s after they copy the rows, too late to check
+  them first, so `IUniqueIndexed<EntityId>` is rejected ([EECS036](/en/docs/guide/analyzer#eecs036)): index such a
+  link with `IIndexed<EntityId>`. EECS036 also rejects a unique component with a second key type.
+- **Each world has its own keys.** Two worlds may each have an entity with account 1001.
+
+The index of a unique component is eager: each world creates it with the first table that holds the component, so
+the first write is already checked. An `IIndexed` index is built by its first lookup, which is free for a world that
+never looks; a unique index cannot wait, since every write before that lookup could let a duplicate in. The
+generator registers how to create each unique component's index when its assembly loads. For a unique component
+it cannot see (a generic one, closed at run time), the first write throws `InvalidOperationException` until one
+`world.Index<T, TKey>()` call, in any world, registers it.
+
 ### Relations: many links per entity [#relations]
 
 An entity holds one component of each type, so an `EntityId` key gives each entity one link. A relation gives it any
@@ -215,6 +277,50 @@ int arrowsLeft = world.Count<Arrow>();                              // 0
 `WhenTargetDestroyed` is set per world and per index. `ChildOf`, the [hierarchy](/en/docs/guide/hierarchy) link, is
 `Destroy` from the start.
 
+### Symmetric relations: one link on each side [#symmetric-relations]
+
+A friendship, a trade, a duel: some links are the same seen from either end. A relation is one-way (its owner links
+to its target), so a symmetric one is two links, one on each side, written together. Keep both writes in one place,
+and let `TargetPolicy.Remove` clean up when one side is destroyed: the destroyed entity's own links go with it, and
+the index drops the other side's link to it.
+
+```csharp
+public record struct Friend(EntityId Target) : IRelation;
+
+public static class Friendships
+{
+    // A friendship is two links, one on each player, so both sides change together.
+    public static void Befriend(Entity a, Entity b)
+    {
+        if (a.HasRelation<Friend>(b)) return;
+        a.AddRelation(new Friend(b));
+        b.AddRelation(new Friend(a));
+    }
+
+    public static void Unfriend(Entity a, Entity b)
+    {
+        a.RemoveRelation<Friend>(b);
+        b.RemoveRelation<Friend>(a);
+    }
+}
+```
+
+```csharp
+var friends = world.Relations<Friend>();
+friends.WhenTargetDestroyed(TargetPolicy.Remove);          // a player who leaves leaves no links behind
+
+var ana = world.CreateEntity();
+var ben = world.CreateEntity();
+Friendships.Befriend(ana, ben);
+int bensFriends = friends.Count(ben);                      // 1: ana links to ben
+
+ana.Destroy();                                             // ana's link goes with her, ben's link to her is dropped
+bool stillLinked = ben.HasRelation<Friend>(ana);           // false
+```
+
+Each side reads its own friends from its buffer, and since every link has its mirror, `friends.Count(player)` (the
+links to the player) is also the number of friends the player has. `Unfriend` removes both links the same way.
+
 ### Driving a system from an index [#index-driven-foreach]
 
 A `[ForEach]` method can walk an index for each entity it visits: a hazard hurts the units of its zone, a guild totals
@@ -260,7 +366,8 @@ public record struct Team(int Id) : IComponent, IIndexed<int>
     public int Key => Id;
 }
 
-public record struct PlayerName(string Value) : IComponent, IIndexed<string>
+// A unique key: no two players have one name.
+public record struct PlayerName(string Value) : IComponent, IUniqueIndexed<string>
 {
     public string Key => Value;
 }
@@ -320,7 +427,7 @@ foreach (var unit in moving)
 Console.WriteLine($"team 1: {teams.Count(1)} units, team 2: {teams.Count(2)} units");
 
 // A unique key finds one entity.
-if (world.PlayerNameIndex.TryFind("alice", out var alice))
+if (world.PlayerNameIndex.TryGet("alice", out var alice))
 {
     Console.WriteLine($"alice is level {alice.Level.Value}");
 }
@@ -389,8 +496,9 @@ entity.
 | Instead of | Do | Why |
 | --- | --- | --- |
 | `world.Index<T, TKey>()` in a hot loop | Keep the index in a local or a field (or use `world.XIndex`) | Creation is cold; the property is O(1) but still a lookup |
-| `Set` with the key the entity already has | Compare first: `if (unit.Zone.Id != id) unit.SetZone(id);` | A `Set` that keeps the key re-links nothing, but it is still a write |
+| `Set` with the key the entity already has | `unit.SetZoneIfChanged(id)`, or compare first | A `Set` that keeps the key re-links nothing, but it is still a write |
 | A scan comparing a key | `Find(key)` / `Count(key)` | O(1), then O(1) per match |
+| A dictionary from key to entity checked by hand before each write | `IUniqueIndexed<TKey>`, `Get` / `TryGet` | One hash probe per write, checked on every path that writes |
 | Sorting a query's results each tick | `Range` / `Descending` | The keys stay sorted as they change |
 | Walking many big keys whole | [`GroupBy`](/en/docs/guide/groups) | A group's rows are contiguous in their own tables |
 
@@ -407,7 +515,12 @@ follow, then the followers of 100 players counted and walked (`RelationBenchmark
 ## What it costs [#what-it-costs]
 
 - **Nothing until you ask.** The index is built by its first lookup (one walk of the matching tables); a world that
-  never calls `Index` or `Relations` pays nothing.
+  never calls `Index` or `Relations` pays nothing. A [unique](#unique-keys) index is the exception: it exists from
+  the first table holding its component.
+- **Unique keys:** `Get` and `TryGet` are one hash probe; a write of a unique component adds one probe before it
+  changes anything. `SetAll`, `EnableAll` and `Load` add one claiming pass over their rows; `Clone`, `Instantiate`,
+  `LoadEntities`, `LoadEntitiesInto` and `MoveEntities` one probe per row and unique component. None of it allocates
+  once warm.
 - **Memory:** one node per indexed entity, and one array of ids per key. A relation keeps one 20-byte link per element,
   recycled, and 8 bytes in its target's list.
 - **`Count`** is a hash probe, or an array access for an `EntityId` key; **`Find`** adds one step per entity.
@@ -427,6 +540,11 @@ follow, then the followers of 100 players counted and walked (`RelationBenchmark
 | Using an index from another thread | Indexes belong to the owner thread | [Threading](/en/docs/guide/threading#what-the-world-synchronizes) |
 | Indexing one component by two key types | `InvalidOperationException`: one index per component | At run time |
 | A `null` key (the default of a `string`) | The entity is indexed nowhere | By design |
+| A unique key another entity holds | `InvalidOperationException`; nothing changes | At run time: `TryGet` first, or move the key from its holder first |
+| Moving a unique key to its new holder before taking it from the old one | `InvalidOperationException` | Change the old holder first |
+| `Clone`, `CreateEntities` or `Instantiate(prefab, span)` of several entities with a unique key | `InvalidOperationException`: the copies would share it | Give each entity its own key |
+| `IUniqueIndexed<EntityId>`, or a unique component with a second key type | Compile error | [EECS036](/en/docs/guide/analyzer#eecs036): `IIndexed<EntityId>` for links |
+| A symmetric link written on one side only | One player is the other's friend, not the reverse | One helper writes both sides ([symmetric relations](#symmetric-relations)) |
 
 ## Compared with other libraries [#compared]
 

@@ -124,8 +124,15 @@ faster; a busy runner leaves the items to the calling thread. See
 ## Chunk [#chunk]
 
 A slice of the matching rows of a parallel method (`[ForEach(Parallel = true)]`, `ForEachParallel`): a multiple of 64
-rows, about four per thread, between 1,024 and 16,384 rows. The [runner](#runner) hands the chunks to its threads;
-fewer than two chunks run on the calling thread alone. See [Systems](/en/docs/guide/systems#parallel-methods).
+rows, about four per thread, between 1,024 and 16,384 rows (a multiple of 4,096 when the method writes a tracked
+component). The [runner](#runner) hands the chunks to its threads; fewer than two chunks run on the calling thread
+alone. See [Systems](/en/docs/guide/systems#parallel-methods).
+
+## Slice [#slice]
+
+The part of each matching table one run of a `[ForEach(Slices = N)]` method visits: about 1 / N of its rows, cut at
+64-row words, slice `RunCount % N` of the system's runs. Every row is visited once per N runs. See
+[Systems](/en/docs/guide/systems).
 
 ## Struct job [#struct-job]
 
@@ -159,6 +166,12 @@ the tick of their last write, and each system records the tick it last ran at (`
 A component that also implements `ITrackChanges`. Its rows record when they were written or removed, so
 `[Changed<T>]` and `[Removed<T>]` visit only those rows. It costs 8 bytes per row; untracked components pay nothing.
 See [Change tracking](/en/docs/guide/change-tracking).
+
+## Destroy log [#destroy-log]
+
+The ring of the last destroyed entities a world keeps when `WorldOptions.DestroyLog` is set, each with the change tick
+of its destruction. `world.DestroyedSince(since, …)` lists those destroyed since a reader's tick, so each client keeps
+its own mark. See [Change tracking](/en/docs/guide/change-tracking).
 
 ## Structural change [#structural-change]
 
@@ -232,8 +245,9 @@ a `ref`, so every change is tracked, and snapshots copy its elements. See
 ## Value index [#value-index]
 
 A lookup from a key to the entities whose component has that key: `IIndexed<TKey>` on the component,
-`world.Index<T, TKey>()` to query it. The index follows every `Set`; a comparable key also gives sorted ranges. See
-[Indexes and relations](/en/docs/guide/indexes-and-relations).
+`world.Index<T, TKey>()` to query it. The index follows every `Set`; a comparable key also gives sorted ranges. A
+unique index (`IUniqueIndexed<TKey>`) holds one entity per key, found with `Get`, and refuses a write that would
+duplicate a key. See [Indexes and relations](/en/docs/guide/indexes-and-relations).
 
 ## Relation [#relation]
 

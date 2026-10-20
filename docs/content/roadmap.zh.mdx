@@ -15,7 +15,7 @@ import { RotateCcwClock, Lightbulb } from 'lucide-react';
 
 ### 让生成器替用户少写代码 [#less-code-through-the-generator]
 
-生成器已经会写 `entity.Health`、`HasHealth`、`SetHealth(…)`、`IsDead`、单例组件成员、`world.XIndex`、缓冲成员、
+生成器已经会写 `entity.Health`、`HasHealth`、`SetHealth(…)`、`SetHealthIfChanged(…)`、`IsDead`、单例组件成员、`world.XIndex`、缓冲成员、
 命名的查询元素、预制体的缓冲写方法，以及 job 和访问集。每次发布前都会重新过一遍 API、[战斗服示例](/zh/docs/example)和各篇指南：
 用户写了两遍的代码都是生成成员的候选，没人用的生成成员就删掉。候选能在真实代码里省下代码、又不给每次调用加开销才会加入；
 只是换个写法的会被否决（[D26](/zh/docs/decisions#d26-generated-members-and-a-suggestion-to-use-them)）。
@@ -47,6 +47,17 @@ import { RotateCcwClock, Lightbulb } from 'lucide-react';
 - 由特性生成缓存过滤器、按组件生成计数成员（`world.CountPlayer()`）、命名的 `TryGetXRef`：省不下代码，API 面却更大。
 - 并行批处理 job、`entity.LastWriteTick<T>()`、公开读写集、多个 World 共享并行预算
   （[D36](/zh/docs/decisions#d36-not-added)）。
+- 运行条件（`[RunIf]`）：什么时候跑哪个分组，系统分组和宿主已经能决定；每个系统一个谓词，是调度器看不见的代码
+  （[D51](/zh/docs/decisions#d51-not-added)）。
+- `UpdatePeriod` 和系统时间：时间归宿主的固定步长循环管，`UpdateInterval` 数的是更新次数，结果可复现
+  （[D51](/zh/docs/decisions#d51-not-added)）。
+- `[Requires<B>]`：每种实体一个预制体，一次拷贝就带齐整套组件，没有隐式的结构变更（[D51](/zh/docs/decisions#d51-not-added)）。
+- 外部键到实体的映射表：`IUniqueIndexed<TKey>` 就是这张表，每次写入都会维护（[D51](/zh/docs/decisions#d51-not-added)）。
+- 内置 `Meter`：数据都在 `SystemStats` 里，发布出去是文档里给出的宿主写法，EasyEcs 不必依赖指标库
+  （[D51](/zh/docs/decisions#d51-not-added)）。
+- World 校验和：对 `world.Save` 的输出做哈希，用户代码里就能做，不必给所有人定死一种算法（[D51](/zh/docs/decisions#d51-not-added)）。
+- 部分快照 API：用一个系统把需要的值拷进单例里的环形缓冲（延迟补偿的写法），只拷需要的东西
+  （[D51](/zh/docs/decisions#d51-not-added)）。
 
 ## 相关页面 [#related]
 

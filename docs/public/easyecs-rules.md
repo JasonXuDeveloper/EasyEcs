@@ -16,6 +16,10 @@ available as Markdown: add `.md` to its URL.
   `entity.Read<T>()` reads without counting as a write. Prefer them to the generic calls (EECS033).
 - Components marked `ITrackChanges` record writes; indexed components (`IIndexed<TKey>`) are written with `Set` or
   `SetX(…)`, never through a `ref` (EECS015).
+- A key that must name one entity (an account id, a session token, a cell's occupant) is `IUniqueIndexed<TKey>`: look
+  it up with `world.XIndex.Get(key)` / `TryGet(key, out e)`, never with a hand-kept dictionary. A write that would give
+  a second entity a taken key throws `InvalidOperationException`; to move a key, change the old holder first. Not for
+  `EntityId` keys (EECS036).
 - A list per entity is a `DynamicBuffer<T>` component; never copy it by value (EECS012). Call
   `EnsureCapacity(n)` on it (and `world.EnsureCapacity<T…>(n)` on the world) before a wave of known size.
 - An external resource (a socket, a seat) lives in an `ICleanupComponent`: destroying the entity keeps it with the
@@ -39,6 +43,20 @@ available as Markdown: add `.md` to its URL.
   by the group or an interface it implements; a generic group interface needs the interfaces, as an attribute cannot
   name a type parameter. `[Changed<T>]` / `[Removed<T>]` go on methods only.
 - React to changes with `[Changed<T>]` / `[Removed<T>]` on an `ITrackChanges` component, not with dirty flags.
+  For "any of these changed" use `[ChangedAny<A, B>]` / `[RemovedAny<A, B>]` (one attribute, not several `Changed`,
+  which mean all of them).
+- A system that recomputes a tracked component every tick takes it as `Mut<T>` and writes with
+  `target.SetIfChanged(value)` (or `Write()` when it knows it writes): a `ref` parameter stamps every visited row.
+  Outside a pass, `entity.SetHealthIfChanged(…)`. Keep a plain `ref` where most rows really change.
+- Per-client replication: keep one `static readonly QueryFilter` (`QueryFilter.Create().ChangedAny<A, B>(0)`) and run
+  it with each client's acknowledged tick, `filter.Since(client.Ack)`; never one filter per client per tick.
+- Despawns for replication: set `WorldOptions.DestroyLog` to at least the destroys of the longest gap between two
+  reads of a client, and call `world.DestroyedSince(client.Ack, buffer, out count)`; on `false`, send that client the
+  whole state. `[Removed<T>]` does not see destroyed entities. A resource to release exactly once is a cleanup
+  component, not the log.
+- Spread heavy per-row work that may lag over runs with `[ForEach(Slices = N)]`; never on `[Changed<T>]` /
+  `[Removed<T>]` methods (EECS035). `system.RunCount % N` is the current slice; `Query`, `Count` and bulk calls refuse
+  a sliced filter.
 - To change structure (add, remove, create, destroy) in a `[ForEach]` method, take `Entity` or `World`
   (EECS013). Changes apply at once; the pass stays safe.
 - Order systems with `[UpdateBefore<T>]` / `[UpdateAfter<T>]` inside the same group; no cycles (EECS019, EECS020).
@@ -75,7 +93,10 @@ available as Markdown: add `.md` to its URL.
 - Removing a component keeps the row (one bit flips), so status components that come and go are cheap; adding a new
   kind of component moves the row once.
 - Use `Prefab` + `world.Instantiate` for repeated spawns, `GroupBy<T>()` to split tables by zone or team, and value
-  indexes for lookups by key.
+  indexes for lookups by key. Give an instance its own values in the same call, `world.Instantiate(prefab, new
+  ChildOf(parent), new Position(x, y))`, not `Instantiate` then `Set` (two row copies).
+- Call `world.TrimExcess()` only at a quiet moment after a peak (a wave cleared, a match ended), never every tick:
+  what it drops is allocated again by the next structural changes.
 
 ## What EasyEcs does not do
 
@@ -104,6 +125,10 @@ available as Markdown: add `.md` to its URL.
 - Resume a saved world after a restart with `world.Load(bytes, markWritten: false)`: no loaded row counts as written
   or removed, also for systems added after it. A system added to a world that already holds its state starts with
   `world.AddSystem<T>(changesFromNow: true)`.
+- A restart save leaves runtime state out: `world.Save(writer, Runtime)` with a `static readonly ComponentSet` of the
+  runtime components and singletons (`.With<Session>().WithSingleton<Config>()`). The new process sets its
+  configuration first, then `world.Load(bytes, ComponentSet.Create().WithSingleton<Config>(), markWritten: false)`,
+  which keeps it. A `keep` set holds singletons only; a `SaveEntities` set holds components only.
 
 ## Project layout and debugging
 
@@ -112,8 +137,11 @@ available as Markdown: add `.md` to its URL.
   update and adds the systems in one method the tests share. Input from other threads goes through a queue held in a
   singleton. https://ecs.xgamedev.net/en/docs/guide/project-structure
 - To look inside a world: `world.Describe()` (tables, rows, bytes), `entity.Describe()`, `system.Stats` with
-  `WorldOptions.MeasureSystems`, `system.Error` with `SystemErrorPolicy.Disable`; on the owner thread between updates,
-  never in game logic. https://ecs.xgamedev.net/en/docs/guide/diagnostics
+  `WorldOptions.MeasureSystems` (times, `LastAllocated` bytes, `LastEntities` visited), `system.Error` with
+  `SystemErrorPolicy.Disable`; on the owner thread between updates, never in game logic.
+  https://ecs.xgamedev.net/en/docs/guide/diagnostics
+- Log `world.DescribeSchedule()` at startup (or `.ToMermaid()` for a chart) to see stages and why systems wait; a
+  pair listed as ordered only by registration needs `[UpdateBefore<T>]` / `[UpdateAfter<T>]` if its order matters.
 
 ## Example
 

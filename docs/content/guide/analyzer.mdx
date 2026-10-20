@@ -1,13 +1,13 @@
 ---
 title: Analyzer rules
-seoTitle: "EasyEcs analyzer rules EECS002-EECS034 for C# ECS code"
-description: Every EasyEcs analyzer rule, EECS002 to EECS034, with its severity, its code fix, the code it rejects and the code to write instead.
+seoTitle: "EasyEcs analyzer rules EECS002-EECS036 for C# ECS code"
+description: Every EasyEcs analyzer rule, EECS002 to EECS036, with its severity, its code fix, the code it rejects and the code to write instead.
 icon: ShieldCheck
 ---
 
 The EasyEcs analyzer ships in the package next to the source generator, so code that breaks the
-[ECS principles](/en/docs/ecs-principles) does not build. The correctness rules (EECS002 to EECS024) are errors except
-three warnings for code that works but costs (EECS017, EECS018, EECS020). The generator skips invalid input and the
+[ECS principles](/en/docs/ecs-principles) does not build. The correctness rules (EECS002 to EECS024, EECS035 and
+EECS036) are errors except three warnings for code that works but costs (EECS017, EECS018, EECS020). The generator skips invalid input and the
 analyzer reports it, so "not generated" always means "reported". The performance rules (EECS025 to EECS034) find code
 that works and does more than it needs, and the severity says what kind
 ([D29](/en/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)): a warning
@@ -65,6 +65,8 @@ same package), and only when the result compiles.
 | [EECS032](#eecs032) | Warning | The world counts and filters | `Any`, `Count` |
 | [EECS033](#eecs033) | Info | A generated member says it shorter | The generated member |
 | [EECS034](#eecs034) | Error | A system does not run a world update | |
+| [EECS035](#eecs035) | Error | `[ForEach(Slices = N)]` is 1 or more, and not on a change filter | |
+| [EECS036](#eecs036) | Error | A unique component is indexed by its one key | |
 
 ## EECS002 [#eecs002]
 
@@ -263,8 +265,9 @@ public sealed class ScoreSystem : EcsSystem
 **Batch `[ForEach]` mixes spans and per-entity parameters.** Error. No code fix.
 
 A method that takes component spans receives whole runs of rows, so a per-entity parameter (a `ref` / `in` component,
-an `Entity`) has no single value for the call, and the `World` could change rows while the spans point into them. An
-`EntitySpan` without component spans has no run to describe.
+a `Mut<T>`, a `Maybe<T>`, an `Entity`) has no single value for the call, and the `World` could change rows while the
+spans point into them. An `EntitySpan` without component spans has no run to describe. A batch method stamps the runs
+it writes as a whole: `Span<T>` is its write.
 
 ```csharp doccheck=expect-EECS009
 public class DriftAllSystem : EcsSystem
@@ -514,7 +517,7 @@ A [value index](/en/docs/guide/indexes-and-relations#value-indexes) follows `Set
 
 - `Get<T>()`, `GetOrAdd<T>()` or `TryGetRef<T>()` on an entity;
 - a `ref` local bound to it, or an assignment to it (or a field of it) through a query item;
-- a `ref` or `Span<T>` parameter of it in a `[ForEach]` method or an `IForEach*` job.
+- a `ref`, `Span<T>`, `Mut<T>` or `Maybe<T>` parameter of it in a `[ForEach]` method or an `IForEach*` job.
 
 ```csharp
 public record struct Zone(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
@@ -820,7 +823,8 @@ goes, when a `[With<T>]` or `[Changed<T>]` already requires it); an `Entity`, `W
 Each parameter costs something on every row or every pass: a component's column is loaded and advanced, a singleton is
 resolved and scheduled as an access, an `Entity` builds a handle for every row and, like the `World`, makes the system
 [run alone](/en/docs/guide/threading#parallel-systems). A component the method only requires is a filter. An unused
-`ref` of a tracked component is reported without a fix: it stamps every row it visits, and `[With<T>]` would not.
+`ref` of a tracked component is reported without a fix: it stamps every row it visits, and `[With<T>]` would not. An
+unused `Mut<T>` stamps nothing until it is written, so it gets the `[With<T>]` fix like an `in` parameter.
 A method with an empty body is left alone while it is being written.
 
 ```csharp
@@ -975,7 +979,9 @@ discarded arrays can set off a full garbage collection ([D28](/en/docs/decisions
 `CreateEntities` and `Instantiate(prefab, span)` create them in one pass; `EnsureCapacity` reserves room when each
 entity gets values of its own. The rule leaves out loops of a constant count under 4,096, or over an array created
 with one (no array reaches the large object heap), loops after a reservation, loops that create only under a branch or
-in an inner loop, and loops in a system (a running world reuses its rows).
+in an inner loop, and loops in a system (a running world reuses its rows). `Instantiate(prefab)` and
+`Instantiate(prefab, in c1..cn)` with the same values in such a loop are reported too; the fix is the batch form,
+`Instantiate(prefab, entities, in c1..cn)`.
 
 ```csharp doccheck=expect-EECS031
 var wave = new Entity[50_000];
@@ -1029,6 +1035,7 @@ still names `DynamicBuffer<T>` (the generator writes buffer members for the elem
 | `entity.Has<Health>()`, `entity.Has<Dead>()` | `entity.HasHealth`, `entity.IsDead` |
 | `entity.TryGet<Health>(out h)`, `entity.GetOrAdd<Health>()` | `entity.TryGetHealth(out h)`, `entity.GetOrAddHealth()` |
 | `entity.Set(new Health(100))`, `entity.Set(new Dead())` | `entity.SetHealth(100)`, `entity.SetDead()` |
+| `entity.SetIfChanged(new Armor(5))` | `entity.SetArmorIfChanged(5)` (a component a world watches: tracked, indexed or grouped) |
 | `entity.Remove<Health>()`, `Disable<T>()`, `Enable<T>()`, `IsDisabled<T>()` | `entity.RemoveHealth()`, `DisableHealth()`, `EnableHealth()`, `IsHealthDisabled` |
 | `world.GetSingleton<Clock>()`, `HasSingleton`, `GetOrAddSingleton`, `RemoveSingleton` | `world.Clock`, `HasClock`, `GetOrAddClock()`, `RemoveClock()` |
 | `world.Index<Zone, int>()`, `world.Relations<Friend>()` | `world.ZoneIndex`, `world.FriendIndex` |
@@ -1062,6 +1069,60 @@ The code that hosts the world runs its updates and groups, in the order they bel
 ```csharp
 while (running) world.Update();
 ```
+
+## EECS035 [#eecs035]
+
+**Invalid `[ForEach(Slices = N)]`.** Error. No code fix.
+
+A sliced method visits one slice of each matching table per run of its system, so every row once per N runs. `Slices`
+is 1 or more. A `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<…>]` or `[RemovedAny<…>]` method selects the rows changed
+since its system last ran, and every run moves that tick forward: the rows of the slices a run did not visit would
+lose their changes for good.
+
+```csharp doccheck=expect-EECS035
+public class SendFire : EcsSystem
+{
+    [ForEach(Slices = 4), Changed<Burning>]
+    static void Send(in Burning burning, ref Replica replica) => replica.Burning = burning.Ticks > 0;   // three slices in four lose their changes
+}
+```
+
+Read the changes every run: a change filter already visits only the written rows. Slice the work that has no change
+filter, the per-row work that is heavy for every entity:
+
+```csharp
+public class SendFire : EcsSystem
+{
+    [ForEach, Changed<Burning>]
+    static void Send(in Burning burning, ref Replica replica) => replica.Burning = burning.Ticks > 0;
+}
+```
+
+[Slices](/en/docs/guide/systems#update-interval) describes the cut and the cadence.
+
+## EECS036 [#eecs036]
+
+**A unique component that cannot be indexed by its key.** Error. No code fix.
+
+A world indexes an `IUniqueIndexed<TKey>` component by its key from the first table that holds it, and checks every
+write against that index. The rule reports two declarations that cannot work:
+
+- **An `EntityId` key.** Loads and moves rewrite `EntityId` values after they copy the rows, too late to check them
+  first, so a relation key cannot be unique.
+- **A second key.** A component is indexed once: another `IIndexed<TKey>` or `IUniqueIndexed<TKey>` on it could never
+  be indexed, and `world.Index` throws for it.
+
+```csharp doccheck=expect-EECS036
+public record struct Mount(EntityId Rider) : IComponent, IUniqueIndexed<EntityId> { public EntityId Key => Rider; }
+```
+
+Index a relation with `IIndexed<EntityId>`, and give a second key a component of its own:
+
+```csharp
+public record struct Mount(EntityId Rider) : IComponent, IIndexed<EntityId> { public EntityId Key => Rider; }
+```
+
+[Unique keys](/en/docs/guide/indexes-and-relations#value-indexes) explains what a unique index checks.
 
 ## Related [#related]
 

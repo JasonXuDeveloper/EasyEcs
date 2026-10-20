@@ -22,8 +22,11 @@ page for the first words of your message.
 | `[UpdateBefore] / [UpdateAfter] form a cycle` | [An ordering cycle](#ordering-cycle) |
 | `The ChildOf links form a cycle` | [A `ChildOf` cycle in `Descendants`](#childof-cycle) |
 | `X cannot be disabled: remove it instead` | [Disabling a cleanup component or `ChildOf`](#cannot-disable) |
-| `Snapshots cannot be captured or restored while a query iterates`, `Types cannot be removed during a pass` | [Calls that wait for the end of a pass](#during-a-pass) |
+| `Snapshots cannot be captured or restored while a query iterates`, `Types cannot be removed during a pass`, `A world cannot be trimmed during a pass` | [Calls that wait for the end of a pass](#during-a-pass) |
 | `Not an EasyEcs save`, `The size of X changed`, `The fields of X changed`, `X was saved as`, `Types of this process share the save id`, `A damaged save` | [A save that does not load](#save-refused) |
+| `X is unique: entity … has key … already`, `X is unique: key … would be given to several entities at once`, `The save holds key … of unique X twice`, `X is unique, but its module registered no index` | [A unique key that is taken](#unique-key-taken) |
+| `A sliced filter (QueryFilter.Slice) applies to ForEach passes only` | [A sliced filter outside a `ForEach`](#sliced-filter) |
+| `The world keeps no destroy log` | [Reading a destroy log that is off](#no-destroy-log) |
 
 The problems that throw nothing: [a system that never runs](#system-does-not-run),
 [systems that do not run in parallel](#not-parallel), [a missing generated member](#member-missing),
@@ -154,16 +157,17 @@ InvalidOperationException: ChildOf cannot be disabled: remove it instead
 `ChildOf` cannot be hidden that way: the world must keep seeing them to finish a destroy and keep a hierarchy. **Fix:**
 remove the component, or disable another component that systems filter on.
 
-## Why must `Capture`, `Restore` or `RemoveTypes` wait for a pass? [#during-a-pass]
+## Why must `Capture`, `Restore`, `RemoveTypes` or `TrimExcess` wait for a pass? [#during-a-pass]
 
 ```text
 InvalidOperationException: Snapshots cannot be captured or restored while a query iterates
 InvalidOperationException: Types cannot be removed during a pass
+InvalidOperationException: A world cannot be trimmed during a pass
 ```
 
 They rewrite or drop whole tables, which a `foreach` over a query or a running system is walking. **Fix:** call them
 between updates, outside any query loop ([snapshots](/en/docs/guide/snapshots),
-[unloading](/en/docs/guide/migration-and-unload#remove-types)). `Restore` also refuses a snapshot of another world
+[unloading](/en/docs/guide/migration-and-unload#remove-types), [trimming](/en/docs/guide/diagnostics#trim)). `Restore` also refuses a snapshot of another world
 (`ArgumentException`) and one taken before `RemoveTypes` dropped some of its tables.
 
 ## Why does a save not load? [#save-refused]
@@ -190,6 +194,52 @@ A load checks every component against the code that reads it, and a refused load
   plugin loaded at once), or a `[NinoFormerName]` that is another type's name. Unload the old version first, or rename
   one of them.
 - **A damaged save:** a count or an id is out of range, or a buffer is longer than its bytes: the bytes are corrupt.
+
+## Why does a write say a unique key is taken? [#unique-key-taken]
+
+```text
+InvalidOperationException: Seat is unique: entity … has key 5 already (change that entity's key first)
+InvalidOperationException: Seat is unique: key 0 would be given to several entities at once
+InvalidDataException: The save holds key 5 of unique Seat twice
+InvalidOperationException: Seat is unique, but its module registered no index (…): call world.Index<T, TKey>() once before writing it
+```
+
+The component implements `IUniqueIndexed<TKey>`, and the write would give a second entity a key that one already has.
+The write is checked before it changes anything, so the entity and the world are as they were.
+
+- **Has key already:** another entity holds the key. To move a key, change the holder first, then the new one; a
+  swap goes through a free key ([moving a unique key](/en/docs/guide/common-mistakes#rekey-order)). Enabling a
+  disabled component claims its key again and fails the same way when someone took it meanwhile.
+- **Several entities at once:** one call would write the same key into many rows: `CreateEntities` or `SetAll` with a
+  key, `Instantiate(prefab, entities)` of a prefab that holds one, or `Clone()`. Give each entity its own key
+  ([copies of a unique key](/en/docs/guide/common-mistakes#unique-copies)).
+- **The save holds a key twice:** the save was written by code without the unique constraint, or edited. Load it
+  into a world of the old code and fix the keys there, or remove the constraint for the migration.
+- **No index registered:** the generator registers the index of every unique component it can name. A type it
+  cannot see (built by reflection, or in an assembly compiled without the generator) needs one
+  `world.Index<T, TKey>()` per world before its first write.
+
+## Why does `Count` or `Query` throw for a sliced filter? [#sliced-filter]
+
+```text
+ArgumentException: A sliced filter (QueryFilter.Slice) applies to ForEach passes only: this call needs every matching row. (Parameter 'filter')
+```
+
+`QueryFilter.Slice(index, count)` cuts each table into parts that only `ForEach`, `ForEachEntity`, `ForEachBatch` and
+their parallel forms visit. `Query`, `Count`, `Any`, `DestroyEntities`, `entity.Run`, `SetAll` and the other bulk
+calls need every matching row and refuse it. **Fix:** pass those calls the filter without `Slice`; read the share a
+sliced system visited from `system.Stats.LastEntities` ([slices](/en/docs/guide/systems#update-interval)).
+
+## Why does `DestroyedSince` say there is no destroy log? [#no-destroy-log]
+
+```text
+InvalidOperationException: The world keeps no destroy log: set WorldOptions.DestroyLog to its capacity
+```
+
+The destroy log is off by default: it costs 16 bytes per record, allocated with the world. **Fix:** create the world
+with `new WorldOptions { DestroyLog = n }`, `n` the destroys that may happen between two reads of the slowest reader.
+When `DestroyedSince` returns `false`, the reader fell further behind than the log holds: send it the whole state
+([removal detection](/en/docs/guide/change-tracking#removal-detection)).
 
 ## Why does my system never run? [#system-does-not-run]
 

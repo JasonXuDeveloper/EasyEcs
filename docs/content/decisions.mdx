@@ -57,6 +57,18 @@ after the change on the machine of the time; they are history, not the current r
 | [D37](#d37-the-easyecs-package-brings-ninos-generator) | The EasyEcs package brings Nino's generator |
 | [D38](#d38-the-hidden-columns-are-not-generic-over-their-component) | The hidden columns are not generic over their component |
 | [D39](#d39-a-whole-load-can-leave-the-change-ticks-alone) | A whole load can leave the change ticks alone, and a system can start now |
+| [D40](#d40-a-destroy-log-read-by-tick) | Destroyed entities go to a log each reader reads by its own tick |
+| [D41](#d41-instantiate-with-components) | Instantiating with components lands in the final table in one copy |
+| [D42](#d42-trimexcess-on-request-only) | Memory is given back on request only: `TrimExcess` |
+| [D43](#d43-stats-and-schedule) | Systems report what they allocate and visit; the schedule is a description |
+| [D44](#d44-slices) | Slices: a filter cut at 64-row words, chosen by the system's run count |
+| [D45](#d45-unique-keys) | Unique keys: a marker interface, an eager index, a claim before the write |
+| [D46](#d46-mut-stamps-per-write) | `Mut<T>` stamps the row it writes, found through the entity |
+| [D47](#d47-setifchanged-equality) | `SetIfChanged` compares with `IEquatable<T>`, else the bytes |
+| [D48](#d48-parallel-tracked-chunks) | Parallel writers of tracked components cut chunks at 4,096 rows |
+| [D49](#d49-changedany-semantics) | `ChangedAny`: one OR group per kind, one tick per filter |
+| [D50](#d50-restart-saves) | A restart save leaves types out; a restart load keeps singletons |
+| [D51](#d51-not-added) | Not added: run conditions, time-based intervals, required components, an entity map, a meter, a checksum, partial snapshots |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -810,6 +822,286 @@ writes. Both defaults stay as they were.
 **Considered.**
 - **Only `changesFromNow`:** systems that already ran before the load would still see every loaded row.
 - **Setting the last run without moving the tick:** writes made later in the same tick would be missed.
+
+## D40. Destroyed entities go to a log each reader reads by its own tick [#d40-a-destroy-log-read-by-tick]
+
+**Decision.** `WorldOptions.DestroyLog = n` keeps a ring of the last n destroyed entities, each an `EntityId` and the
+change tick of its destruction (16 bytes), allocated once at `new World`. A record is written when an id stops being
+alive: `Destroy`, `DestroyEntities`, cascades, `MoveEntities` out of the world, the removal of an entity's last cleanup
+component, and the entities a `Restore` or `Load` takes away. `world.DestroyedSince(since, into, out count)` reports
+those at or after `since`; when the ring has overwritten records the reader needs, it returns false and the reader
+resynchronizes. Off by default.
+
+**Why.**
+- **Despawns are the one change replication could not see.** A destroyed entity has no row, so `[Removed<T>]` cannot
+  report it; the workaround (a tag replication reads, destroy after it ran) works for one reader, not for clients
+  that acknowledge at different ticks.
+- **The reader keeps its mark, the world keeps nothing per reader.** One tick per client is the same mark
+  `QueryFilter.Since` takes, so one log serves any number of clients, and a client that connects or leaves changes
+  nothing in the world.
+- **Bounded and honest.** A long-running server cannot keep every destroy; a reader that fell behind the ring is told
+  so (`DestroyLogOldestTick`) instead of getting a partial list.
+- **It follows `IsAlive`.** A handle that reports "not alive" and a log that says "destroyed" never disagree, also for
+  an entity kept by cleanup components (logged when the last one goes).
+- **Measured** (`DestroyLogBenchmark`, `DestroyLog` 0 and 4,096): TODO-NUMBERS.
+
+**Considered.**
+- **A cursor per reader inside the world:** state per client in the world, to create and release with connections.
+- **An unbounded list:** memory that grows with the uptime.
+- **Keeping destroyed rows as tombstones a filter can see:** every query would pay for rows that are gone.
+- **Logging at destroy time for entities held by cleanup components:** the log would report entities that are still
+  alive (`Destroyed`-tagged).
+- **Clearing the log on `Restore` and `Load`:** every reader would resynchronize after each rollback; logging what
+  they take away keeps readers exact.
+
+## D41. Instantiating with components lands in the final table in one copy [#d41-instantiate-with-components]
+
+**Decision.** `world.Instantiate(prefab, in c1 … in cn)` (and the form for a wave) copies the prefab's row and the
+given components straight into the table of their union: one row copy, no intermediate table. The target table is
+cached per (prefab table, component signature). Given values replace the prefab's or add to them; a given component
+the prefab holds disabled comes enabled, as with `Set`. Group prefabs are supported: the group is created, then the
+entity of the prefab passed gets the components (one more move).
+
+**Why.**
+- **A spawn that differs per instance is the common case:** a child with its parent, a projectile with its owner, a
+  unit at its position. `Instantiate` then `Set` copies the row twice and may create a table nothing else uses.
+- **One lookup per spawn after the first.** The cache gives the target table and the column copy plan at once.
+- **Measured** (`PrefabBenchmark`, `InstantiateThenSetChild` against `InstantiateWithChild` and
+  `InstantiateBatchWithChild`): TODO-NUMBERS.
+
+**Considered.**
+- **Following the `AddBits` transition edges from the prefab's table:** it would create the prefab-only table in the
+  world, unused, and walk one edge per component.
+- **Refusing group prefabs:** a group spawn with a parent is common (a boss and its guards under a squad); one move
+  for the one entity is cheaper than a second API.
+
+## D42. Memory is given back on request only: `TrimExcess` [#d42-trimexcess-on-request-only]
+
+**Decision.** Tables double when they fill and never shrink on their own. `world.TrimExcess()` drops every empty table
+(except the empty-mask table and those a live `WorldSnapshot` holds rows of), compacts the table registry, forgets
+the transition edges and cached matches of the dropped tables, shrinks the other tables to their rows rounded up to a
+power of two (64 at least), and releases the buffers of saves, loads, migrations and prefab lookups. Snapshots are
+renumbered to the new table order and keep restoring. The entity records (`Meta`) and value-index nodes keep their
+length.
+
+**Why.**
+- **A peak is not the steady state.** A world that held 100,000 entities for one event keeps their rows and the empty
+  tables in every query's match list; a long-running server needs a way to give that back.
+- **Shrinking is a decision only the host can make.** It knows when a quiet moment comes (after a wave, between
+  matches); a shrink the world made on its own would allocate in a tick when the entities return.
+- **Power-of-two capacities** keep the growth rule of every other table: the next additions do not reallocate at
+  once.
+- **`Meta` stays.** Handles index the entity records without a bounds check; shrinking them would cost every access.
+- **Measured** (`TrimBenchmark`, 16 and 256 tables): TODO-NUMBERS.
+
+**Considered.**
+- **Automatic shrinking below a fill ratio:** churn around the threshold and allocations no one asked for.
+- **Leaving holes in the registry:** every walk over tables would test for them.
+- **Clearing every transition edge:** the next structural change of every kept table would search again.
+- **Invalidating snapshots:** a rollback ring would break on each trim.
+- **Exact sizes, or a "keep N updates' worth" parameter:** the first addition after a trim would grow again; a
+  parameter would encode a policy the host already decides.
+
+## D43. Systems report what they allocate and visit; the schedule is a description [#d43-stats-and-schedule]
+
+**Decision.** With `MeasureSystems`, `SystemStats` adds `LastAllocated` / `TotalAllocated` (bytes the run allocated on
+its thread, plus the helper threads of its parallel `[ForEach]` chunks) and `LastEntities` / `TotalEntities` (the
+matches of each `[ForEach]` pass, counted with the pass's filter when it starts). `world.DescribeSchedule()` returns
+records of names (groups, stages, systems with their reads and writes, waits, registration-only pairs) with
+`ToString()` and `ToMermaid()`.
+
+**Why.**
+- **A slow system is either doing more or allocating.** Time alone does not say which; bytes and entities do, per
+  system, on a live server.
+- **The loops stay as they are.** The entity count is one `Count` per pass at its start; a counter in the row loop
+  would cost every row, measured or not. Off, the stats cost one field test per pass.
+- **Bytes where they are made.** `GC.GetAllocatedBytesForCurrentThread` around each run and each helper chunk counts
+  exactly the system's work, also with parallel stages.
+- **A description, not the access sets.** The scheduler's `SystemAccess` stays internal
+  ([D36](#d36-not-added)); names and stages are what a reader needs, and the records can change shape without
+  changing the scheduler.
+- **Measured** (`ParallelSystemsBenchmark` with `Measure` false and true, `IntrospectionBenchmark.Schedule`):
+  TODO-NUMBERS.
+
+**Considered.**
+- **Counting visited rows in the loop:** a cost on every row of every pass.
+- **Summing the rows of matching tables:** wrong for filters that test rows (`Without`, `Changed`).
+- **The calling thread only, or the process-wide counter:** the first misses parallel helpers, the second counts
+  other systems and other worlds.
+
+## D44. Slices: a filter cut at 64-row words, chosen by the system's run count [#d44-slices]
+
+**Decision.** `[ForEach(Slices = N)]` passes `QueryFilter.Slice(RunCount % N, N)`, where `EcsSystem.RunCount` counts
+the system's completed runs. A table is cut at multiples of 64 rows from its row count when the pass starts; table i
+of the match starts at slice (index + i) mod N. The `ForEach` family honours a slice; `Query`, `Count`, `Any`,
+`DestroyEntities`, `entity.Run` and the bulk calls throw for one. `[Changed<T>]` / `[Removed<T>]` methods cannot be
+sliced (EECS035).
+
+**Why.**
+- **A spike becomes a slope.** A system over a large population (re-scoring targets, scanning sessions) costs about
+  1 / N per update instead of everything on one.
+- **Words keep the fast paths.** A cut on a presence word never splits the 64-row tests and summaries a pass skips by;
+  a table under 64 rows is one piece, and the rotation spreads many small tables over the slices.
+- **The state is data the system already has.** The run count lives on the system as the scheduler's bookkeeping,
+  not in user code or the world.
+- **A slice of a count is rarely meant.** The calls that need every row throw instead of answering for a slice.
+- **Measured** (`SlicesBenchmark`, Slices 1 and 4, per-entity, structural and parallel forms): TODO-NUMBERS.
+
+**Considered.**
+- **Row-exact cuts:** words split between slices, tested row by row.
+- **An overload with a slice argument on every `ForEach`:** twice the API for one filter field.
+- **Slice state in the world:** shared by systems that slice differently.
+- **Honouring slices in `Count` and `Query`:** silently partial answers.
+- **Allowing `Changed` / `Removed`:** each run moves the system's last-run tick, so the rows of the other slices would
+  lose their changes.
+
+## D45. Unique keys: a marker interface, an eager index, a claim before the write [#d45-unique-keys]
+
+**Decision.** A component implementing `IUniqueIndexed<TKey>` is indexed from the first table holding it, in every
+world, and every write that would give a second entity a key another one holds throws `InvalidOperationException`
+before anything changes (a save holding a key twice: `InvalidDataException`). The index factory is registered by the
+generated module initializer (or by the first `world.Index<T, TKey>()`). A null reference key is no key. `EntityId`
+keys cannot be unique (EECS036).
+
+**Why.**
+- **Uniqueness belongs to the type.** An account id or a session token is unique in every world; a per-world option
+  would let one world accept duplicates.
+- **Checked before, never rolled back.** Each path (Set, create, `Instantiate`, `Clone`, `SetAll`, `Enable`, loads,
+  moves) claims the keys before it stores or moves, so indexes, groups and change ticks never see a half-done write.
+- **Eager, because a lazy index cannot check.** A plain index is built by its first lookup; a unique one must see the
+  first write.
+- **No reflection.** The marker is a type test the JIT folds, and the factory is generated, so Native AOT needs
+  nothing.
+- **Measured** (`IndexBenchmark`, `RekeyAndLookup` against `RekeyAndLookupUnique`): TODO-NUMBERS.
+
+**Considered.**
+- **Reflection over the key type:** AOT warnings and a cold start per type.
+- **A default interface method or a visitor to reach the key:** a virtual call per write.
+- **Writing, then rolling back on a collision:** partial changes visible to indexes and groups.
+- **`EntityId` keys:** loads and moves rewrite them after the rows are copied, too late to check first.
+
+## D46. `Mut<T>` stamps the row it writes, found through the entity [#d46-mut-stamps-per-write]
+
+**Decision.** A `Mut<T>` parameter is a write of `T` for the scheduler and the carry-over of change ticks, but the row
+loop does not stamp its column: `Write()` (and a `SetIfChanged` that stores) looks up the entity's current row and
+stamps it, one lookup per write. It works per entity, in parallel and in methods that change structure; batch methods
+keep spans (EECS009), indexed and grouped components keep `Set` (EECS015). The analyzer does not suggest `Mut<T>` for
+a `ref` parameter (EECS025 is unchanged).
+
+**Why.**
+- **A recomputed value is not a changed value.** A system that writes a target every tick through `ref` stamps every
+  row, so every `[Changed<T>]` reader visits every row; `Mut<T>` stamps only the rows whose value changed.
+- **The row is looked up, not assumed.** A structural change in the body moves the entity; stamping the visited row
+  index would mark another entity.
+- **A write costs what it does.** A lookup per write is cheap where writes are rare, which is where `Mut<T>` is meant;
+  where most rows are written, the plain `ref` is cheaper, and only the data tells which applies, so the analyzer
+  stays silent.
+- **Measured** (`ChangeTrackingWriteBenchmark`, `Mut` false and true, `Write` and `WriteAndRead`): TODO-NUMBERS.
+
+**Considered.**
+- **Stamping the visited row:** wrong after the entity moved.
+- **A per-row "written" mask merged after the pass:** storage per row and a second pass.
+- **An EECS025 suggestion from `ref` to `Mut<T>`:** a slower fix wherever most rows are written.
+
+## D47. `SetIfChanged` compares with `IEquatable<T>`, else the bytes [#d47-setifchanged-equality]
+
+**Decision.** `entity.SetIfChanged(value)`, `Mut<T>.SetIfChanged(value)` and the generated `SetXIfChanged(…)` compare
+with `IEquatable<T>` when the component implements it (record structs do), else the bytes of an unmanaged component; a
+managed component without `IEquatable<T>` throws `NotSupportedException`. The generator writes `SetXIfChanged` only
+for components it can compare that are tracked, indexed or grouped, and not tags.
+
+**Why.**
+- **No boxing.** `IEquatable<T>` is devirtualized for a struct; the type tests are JIT-time constants.
+- **Bytes are safe in one direction.** Equal bytes are equal values; values equal under other rules (`-0.0` and
+  `0.0`) count as a change: one stamp too many, never one missed.
+- **Only where it means something.** For an untracked, unindexed component, skipping an equal write saves nothing.
+
+**Considered.**
+- **`EqualityComparer<T>.Default` for every struct:** `ValueType.Equals` boxes and reflects for a struct without
+  `IEquatable<T>`.
+- **Bytes for every type:** wrong for references and for types with their own equality.
+- **Requiring `IEquatable<T>`:** plain unmanaged structs could not use it.
+
+## D48. Parallel writers of tracked components cut chunks at 4,096 rows [#d48-parallel-tracked-chunks]
+
+**Decision.** A parallel `[ForEach]` (or `ForEachParallel` job) that writes a tracked component cuts its chunks at
+multiples of 4,096 rows, 4,096 at least, each chunk ending on a multiple of its size in the table (also in a slice,
+which may start at any 64-row word); other parallel passes keep 64-row-aligned chunks of 1,024 rows or more.
+
+**Why.**
+- **The block summary is shared.** Each 4,096-row block of a tracked column has one change-tick summary, updated with
+  a plain read-modify-write. Two chunks inside one block could race on it and lose a raise, so a `[Changed<T>]`
+  reader could skip rows that were written. Aligned chunks give each block one writer.
+- **Fewer chunks for small tables is the price.** A table needs more rows before it is split across threads.
+- **Measured** (`ParallelForEachBenchmark`): TODO-NUMBERS.
+
+**Considered.**
+- **Atomic updates of the summaries:** an interlocked operation on every write of every pass, parallel or not.
+- **Per-chunk summaries merged after the pass:** memory per chunk and a merge on every parallel pass.
+
+## D49. `ChangedAny`: one OR group per kind, one tick per filter [#d49-changedany-semantics]
+
+**Decision.** `QueryFilter.ChangedAny<T1..Tn>(since)` selects rows where at least one of its components was written
+at or after `since`; a row qualifies through a component it has. Every `ChangedAny` call of a filter joins one group,
+every `RemovedAny` call another, and the groups combine with each other and with the other filters by AND. A filter
+has one tick, which `Since` moves for all its change filters. A table none of whose group columns was stamped since
+the tick is skipped whole, and words and blocks no column wrote.
+
+**Why.**
+- **Replication sends a unit when any of its parts changed.** Several `[Changed<T>]` filters mean all of them; a
+  second query per component would visit a row twice and need a deduplication.
+- **One tick is enough.** The filter is kept once per purpose and run with each client's acknowledged tick.
+- **One group per kind keeps the filter small.** The two groups cost the filter 64 bytes (two 256-bit masks); more
+  groups would grow every filter for a case no request needed.
+- **Measured** (`ChangeTrackingBenchmark`, `CountBenchmark`, `SparseBenchmark`): TODO-NUMBERS.
+
+**Considered.**
+- **Several independent OR groups:** more state per filter, no use found.
+- **A tick per component:** a filter per client per component, where the client has one acknowledgement.
+- **Running one query per component and merging:** rows visited twice.
+
+## D50. A restart save leaves types out; a restart load keeps singletons [#d50-restart-saves]
+
+**Decision.** `world.Save(output, in exclude)` writes the whole world without the components and singletons of a
+`ComponentSet`; `world.Load(input, in keep, markWritten)` keeps the singletons of `keep` exactly as the world has them
+(the save's values are skipped). A `ComponentSet` holds singletons as a second mask (`WithSingleton<T>()`;
+`With(Type)` takes either kind). `SaveEntities` refuses a set that names a singleton; `Load` refuses a `keep` that names
+a component.
+
+**Why.**
+- **A restart carries the state, not the runtime around it.** Connections, caches and the old version's configuration
+  must not come back, and often have no formatter.
+- **The new process sets its configuration first.** Loading the old world over it would bring the old configuration
+  back; keeping the singleton is one set, built once.
+- **Each set says what its call can do.** A group save writes no singletons and a load replaces every entity, so a set
+  naming what the call cannot honour is refused instead of ignored.
+- **Measured** (`SnapshotBenchmark`, `SaveWithout` against `Save`, `LoadKeeping` against `Load`): TODO-NUMBERS.
+
+**Considered.**
+- **A separate `SingletonSet` type:** two sets to build for one restart.
+- **Kept components meaning "not loaded":** the load replaces the entities, so a kept component would belong to none.
+- **Ignoring singletons in `SaveEntities`:** a set that silently does less than it says.
+
+## D51. Not added: run conditions, time-based intervals, required components, an entity map, a meter, a checksum, partial snapshots [#d51-not-added]
+
+**Decision.** Seven requests were weighed for 4.7 and left out.
+
+**Why.**
+- **Run conditions** (`[RunIf]`, a predicate per system). System groups give each cadence its `Update<TGroup>()`, and
+  the host decides when a group runs; inside a system, `Enabled` and an early return in `OnUpdate` cover the rest. A
+  predicate per system would be code the scheduler cannot see.
+- **`UpdatePeriod` / a system time** (intervals in seconds). The host's fixed-step loop owns time; `UpdateInterval`
+  counts updates, which keeps runs deterministic, and a clock singleton gives systems the time.
+- **`[Requires<B>]`** (adding B whenever A is added). A prefab per kind of entity gives the full set in one copy;
+  hidden additions would be structural changes no reader of the code sees.
+- **An entity map** (an external key to an entity). `IUniqueIndexed<TKey>` is that map, kept by every write.
+- **A built-in `Meter`.** `SystemStats` holds the numbers; publishing them to OpenTelemetry is a few lines of the host's
+  own ([diagnostics](/en/docs/guide/diagnostics)), and EasyEcs stays free of a metrics dependency.
+- **A world checksum** (for lockstep desync checks). A hash of `world.Save` output does it in user code; a built-in
+  one would fix an algorithm and an order for every user.
+- **A partial-snapshot API** (capture some components only). A system that copies the needed values into a ring held
+  by a singleton (the lag-compensation pattern of [snapshots](/en/docs/guide/snapshots)) copies exactly what is
+  needed, with no new storage path.
 
 ## Related [#related]
 

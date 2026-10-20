@@ -9,6 +9,54 @@ icon: RotateCcwClock
 [迁移指南](/zh/docs/migration)。每个
 [GitHub Release](https://github.com/JasonXuDeveloper/EasyEcs/releases) 也会列出它包含的全部 pull request。
 
+## 4.7.0 [#v4-7-0]
+
+### 新功能 [#v4-7-0-new]
+
+- `Mut<T>`：`[ForEach]` 参数，用于方法只在部分行上写的组件。`Value` 只读，`Write()` 和 `SetIfChanged(value)` 只给真正写了的行打戳，
+  所以 `[Changed<T>]` 的读取方只访问值真变了的行。遍历之外，`entity.SetIfChanged(value)` 和生成的 `SetHealthIfChanged(…)` 遇到相同的值直接跳过。
+  见[变更追踪](/zh/docs/guide/change-tracking)。
+- `[ChangedAny<T1..Tn>]` / `[RemovedAny<T1..Tn>]` 以及 `QueryFilter.ChangedAny<T1..Tn>(since)` / `RemovedAny`：2 到 9 个被追踪组件里
+  至少有一个被写过、或被移除的行。一个过滤器存在字段里，用 `filter.Since(ack)` 服务每个客户端。见[变更追踪](/zh/docs/guide/change-tracking)。
+- `WorldOptions.DestroyLog` 和 `world.DestroyedSince(since, into, out count)`：某个读取方的 tick 以来销毁的实体，用来把实体的消失同步给确认 tick
+  各不相同的客户端；读取方比日志还旧（`DestroyLogOldestTick`）时返回 false，需要重新同步。见[变更追踪](/zh/docs/guide/change-tracking)。
+- `IUniqueIndexed<TKey>`：一个键只对应一个实体，用 `index.Get(key)` / `TryGet(key, out e)` 查找；会让第二个实体拿到已被占用的键的写入，
+  在改动任何东西之前就抛异常。见[索引与关系](/zh/docs/guide/indexes-and-relations)。
+- `world.Instantiate(prefab, in c1 … in cn)` 和 `Instantiate(prefab, entities, in c1 … in cn)`：实例带上最多九个自己的组件（父实体、位置、主人），
+  只拷贝一次行。见[预制体](/zh/docs/guide/prefabs)。
+- `world.TrimExcess()` 把峰值留下的内存还回去：删掉空表，缩小其他表，释放存档、读档和迁移用的缓冲。见[调试与诊断](/zh/docs/guide/diagnostics)。
+- `[ForEach(Slices = N)]` 把一个方法要处理的行分摊到系统的 N 次运行里；结构体 job 用 `QueryFilter.Slice(index, count)`，
+  `EcsSystem.RunCount` 表示当前是第几次运行。见[系统](/zh/docs/guide/systems)。
+- `SystemStats` 记录每次运行分配的字节数（`LastAllocated`、`TotalAllocated`）和 `[ForEach]` 方法访问的实体数（`LastEntities`、`TotalEntities`）；
+  `world.DescribeSchedule()` 描述各个阶段、等待关系和只靠注册顺序的系统对，可以输出文本或 mermaid 流程图。见[调试与诊断](/zh/docs/guide/diagnostics)。
+- 重启存档：`world.Save(output, in exclude)` 不写 `ComponentSet` 里的组件和单例，`world.Load(input, in keep, markWritten)` 保留新进程设好的单例，
+  `ComponentSet.WithSingleton<T>()` / `With(Type)` 可以加入单例。见[重启](/zh/docs/guide/saves#restart)。
+- 分析器：[EECS035](/zh/docs/guide/analyzer#eecs035) 拒绝不合法的 `Slices`（小于 1，或者和 `Changed` / `Removed` 过滤一起用）；
+  [EECS036](/zh/docs/guide/analyzer#eecs036) 拒绝无法按键建索引的唯一组件（`EntityId` 键，或者还有第二个索引键）；
+  [EECS031](/zh/docs/guide/analyzer#eecs031) 也覆盖用相同值循环调用 `Instantiate`；[EECS033](/zh/docs/guide/analyzer#eecs033) 建议改用生成的 `SetXIfChanged(…)`。
+
+### 性能 [#v4-7-0-performance]
+
+- 带组件刷出实体只拷贝一次行，不再是先 `Instantiate` 再 `Set`（TODO-NUMBERS）。见[决策 D41](/zh/docs/decisions#d41-instantiate-with-components)。
+- 每个 tick 重算被追踪值的系统，不再让每个 `[Changed<T>]` 读取方访问每一行：用 `Mut<T>` 时只有值真变了的行才打戳（TODO-NUMBERS）。
+  见[决策 D46](/zh/docs/decisions#d46-mut-stamps-per-write)。
+- `ChangedAny` 跳过它的组件都没写过的表、4,096 行的块和 64 行的位字（TODO-NUMBERS）。见[决策 D49](/zh/docs/decisions#d49-changedany-semantics)。
+
+### 需要修改代码的变更 [#v4-7-0-breaking]
+
+- 集合里有单例时，`SaveEntities(output, ids, set)` 抛 `ArgumentException`（实体组存档不写单例）。见[迁移指南](/zh/docs/migration#v4-7-save-entities)。
+- `EcsSystem` 新增公开的 `RunCount`：系统里同名的成员会隐藏它（警告 CS0108）。见[迁移指南](/zh/docs/migration#v4-7-run-count)。
+
+### 修复 [#v4-7-0-fixes]
+
+- 写被追踪组件的并行 `[ForEach]` 可能丢失变更戳：同一个 4,096 行块里的两个分块会争用这个块的变更摘要，`[Changed<T>]` 读取方可能跳过被写过的行。
+  这类遍历现在按 4,096 行的整数倍切块。见[决策 D48](/zh/docs/decisions#d48-parallel-tracked-chunks)。
+- `RemoveTypes` 删掉表之后，往旧快照里 `Capture(into)`，或者之后再 `Load`，可能复用另一张表（列不同）的副本。现在副本只给它自己的表复用。
+  见[快照](/zh/docs/guide/snapshots)。
+- 对实体还没有的被索引组件调用 `entity.GetOrAdd<T>()` 时不会通知值索引，`Find` 和 `Count` 要等下一次 `Set` 才能找到这个实体；
+  现在默认值的键会进索引。见[索引与关系](/zh/docs/guide/indexes-and-relations)。
+- 带组件的 `Instantiate` 和其他写入一样，在创建实体之前检查唯一组件的键（给定的和预制体里的都查）。见[索引与关系](/zh/docs/guide/indexes-and-relations)。
+
 ## 4.6.0 [#v4-6-0]
 
 ### 新功能 [#v4-6-0-new]

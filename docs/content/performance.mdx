@@ -518,10 +518,10 @@ the feature, a head-to-head comparison that checks every library computes the sa
 | Structural changes, presence bits | `EntityTests`, `ComponentTests`, `PresenceTests` | `MicroBenchmarks` (`Churn`, `ToggleComponent`), `SparseBenchmark`, `CountBenchmark` | [`StructuralChangeComparison`](/en/docs/comparison#structural-changes) |
 | Bulk changes and spawns | `BulkTests` | `BulkBenchmark`, `MicroBenchmarks.ChurnBatch` | [`BulkChangeComparison`, `BulkSpawnComparison`](/en/docs/comparison#bulk) |
 | Prefabs and clones | `InstantiateTests` | `PrefabBenchmark` | [`OperationBenchmark` (`Instantiate`)](/en/docs/comparison#operations) |
-| Change tracking | `ChangedTests` | `ChangeTrackingBenchmark` | [`ChangeTrackingComparison`](/en/docs/comparison#change-tracking) |
-| Removal detection | `RemovedTests` | `BattleServerBenchmark` | [`RemovalComparison`](/en/docs/comparison#removal-detection) |
+| Change tracking, `Mut<T>` | `ChangedTests` | `ChangeTrackingBenchmark`, `ChangeTrackingWriteBenchmark` | [`ChangeTrackingComparison`](/en/docs/comparison#change-tracking) |
+| Removal detection, the destroy log | `RemovedTests` | `BattleServerBenchmark`, `DestroyLogBenchmark` | [`RemovalComparison`](/en/docs/comparison#removal-detection) |
 | Disabling | `DisableTests` | `BulkBenchmark` (`DisableAll`) | [`DisableComparison`](/en/docs/comparison#disabling) |
-| Value indexes, ordered indexes | `IndexTests`, `OrderedIndexTests` | `IndexBenchmark`, `OrderedIndexBenchmark` | [`IndexComparison`, `ValueQueryComparison`](/en/docs/comparison#indexes-and-relations) |
+| Value indexes, unique keys, ordered indexes | `IndexTests`, `OrderedIndexTests` | `IndexBenchmark`, `OrderedIndexBenchmark` | [`IndexComparison`, `ValueQueryComparison`](/en/docs/comparison#indexes-and-relations) |
 | Relations | `RelationTests`, `TargetPolicyTests` | `RelationBenchmark` | [`RelationComparison`](/en/docs/comparison#indexes-and-relations) |
 | Hierarchy | `HierarchyTests` | `HierarchyBenchmark` | [`HierarchyComparison`](/en/docs/comparison#hierarchy) |
 | Groups | `GroupTests` | `GroupBenchmark` | [`ValueQueryComparison`](/en/docs/comparison#indexes-and-relations) |
@@ -530,12 +530,14 @@ the feature, a head-to-head comparison that checks every library computes the sa
 | Dynamic buffers | `DynamicBufferTests` | `DynamicBufferBenchmark` | — |
 | Cleanup components | `CleanupTests` | `CleanupBenchmark` | — |
 | System ordering and groups | `SystemTests` | `OrderingBenchmark` | — |
+| Slices (`[ForEach(Slices = N)]`) | `ForEachSystemTests` | `SlicesBenchmark` | — |
 | Parallel systems and `[ForEach(Parallel = true)]` | `ParallelTests`, `ConcurrencyTests` | `ParallelSystemsBenchmark`, `ParallelForEachBenchmark` | [`ParallelSystemsComparison`, `ParallelQueryComparison`](/en/docs/comparison#parallel) |
 | Snapshots | `SnapshotTests` | `SnapshotBenchmark` (`Capture`, `Restore`) | — |
-| Saves | `SerializationTests` | `SnapshotBenchmark` (`Save`, `Load`) | [`SaveComparison`](/en/docs/comparison#saves) |
+| Saves | `SerializationTests` | `SnapshotBenchmark` (`Save`, `Load`, `SaveWithout`, `LoadKeeping`) | [`SaveComparison`](/en/docs/comparison#saves) |
 | Moving entities between worlds | `MoveTests` | `MigrationBenchmark` | — |
 | Unloading a plugin's types | `UnloadTests` | `UnloadBenchmark` | — |
-| Introspection | `IntrospectionTests` | `IntrospectionBenchmark` | — |
+| Introspection, system stats and the schedule | `IntrospectionTests`, `SystemTests` | `IntrospectionBenchmark`, `ParallelSystemsBenchmark` (`Measure`) | — |
+| Giving memory back (`TrimExcess`) | `IntrospectionTests`, `AllocationTests` | `TrimBenchmark` | — |
 | Generic systems | `GenericTests` | — | — |
 | Generator, analyzer, code fixes | `GeneratorTests`, `CodeFixTests` | — | — |
 | Zero allocation | `AllocationTests` (0 B budget on every test run) | the Allocated column of every benchmark | every comparison |
@@ -605,6 +607,11 @@ a cleanup component against a plain component released by hand.
 then one system copies health into a replica with `[Changed<Health>]` (`Changed=True`) or by visiting every row.
 `QueryTick` does the same with an ad-hoc `Query`. `DynamicBufferBenchmark` replicates 1,000 changed bags of 100,000,
 held as a `DynamicBuffer<int>` or as a `List<int>` in a tracked component.
+`ChangeTrackingWriteBenchmark` recomputes 100,000 aims every tick while a tenth of them change: written through
+`ref Aim` (`Mut=False`, every visited row stamped) or through `Mut<Aim>.SetIfChanged` (`Mut=True`, only the changed
+rows stamped). `Write` is the writer alone, `WriteAndRead` adds the `[Changed<Aim>]` replication after it.
+`DestroyLogBenchmark` creates and destroys 1,000 entities ten times, one by one and as a table, with the destroy log
+off (`DestroyLog=0`) and on (a ring of 4,096 records), and with the reads of 16 clients at different ticks.
 
 <Tabs items={['10 written', '1,000 written']}>
 <Tab value="10 written">
@@ -620,6 +627,8 @@ held as a `DynamicBuffer<int>` or as a `List<int>` in a tracked component.
 </Tabs>
 
 <BenchChart bench="DynamicBufferBenchmark" />
+<BenchChart bench="ChangeTrackingWriteBenchmark" />
+<BenchChart bench="DestroyLogBenchmark" />
 
 The "every row" cases vary from run to run on the reference VM (they depend on how 100,000 rows land in physical
 memory); the `[Changed]` cases are stable.
@@ -627,7 +636,9 @@ memory); the `[Changed]` cases are stable.
 ### Indexes, relations, groups and hierarchies [#index-benchmarks]
 
 `IndexBenchmark` uses a relation as an inventory: 100,000 items point at one of 1,000 owners; 100 trades, then 100
-inventories counted. `OrderedIndexBenchmark` keeps a leaderboard of 100,000 scores (1,000 change, then the top 10 and
+inventories counted. Its `RekeyAndLookup` cases give 100 of 100,000 players a new session token and find 100 by
+theirs, with the token indexed as `IIndexed<long>` and as `IUniqueIndexed<long>` (each write claims its key first):
+the difference is the price of the check. `OrderedIndexBenchmark` keeps a leaderboard of 100,000 scores (1,000 change, then the top 10 and
 one bracket read) against a scan. `GroupBenchmark` sums the players of 4 of 16 zones as a group (a table per zone), a
 value index and a scan. `RelationBenchmark` rewires 100 of 10,000 friend lists and walks 100 follower sets.
 `HierarchyBenchmark` destroys 1,000 squad leaders with their members (`ChildOf`, cascade) against links that are only
@@ -650,13 +661,24 @@ ad-hoc job with entity handles (`ForEachEntity` / `ForEachEntityParallel`).
 <BenchChart bench="ParallelForEachBenchmark" />
 
 The reference machine has 4 cores and the parallel rows carry a large error in this run: read them as "faster on
-several cores", not as a precise speed-up.
+several cores", not as a precise speed-up. `ParallelSystemsBenchmark` also runs with `MeasureSystems` off and on
+(`Measure`): the price of per-system timings, bytes and entity counts.
+
+### Slices [#slices-benchmarks]
+
+`SlicesBenchmark` runs one AI think step over 100,000 NPCs as `[ForEach]` (`Slices=1`) and as
+`[ForEach(Slices = 4)]`, per entity (`Stable`), with the entity handle (`Entity`, a pass that may change structure)
+and in parallel. `Update` is one update, the spike a tick pays; `Cycle` is four updates, every row once in both forms,
+so it shows what slicing itself costs.
+
+<BenchChart bench="SlicesBenchmark" />
 
 ### Snapshots, saves, migration and unloading [#state-benchmarks]
 
 `SnapshotBenchmark` captures a world of 100,000 entities (two tables, a third of the ids recycled, a singleton) into a
 new snapshot, restores one in place, saves it as bytes into a reused buffer and loads it back. `Capture` allocates
-the snapshot it returns; capture into an existing snapshot to reuse it. `MigrationBenchmark` moves 10 players with 99
+the snapshot it returns; capture into an existing snapshot to reuse it. `SaveWithout` leaves a component and the
+singleton out (a restart's save) and `LoadKeeping` loads while keeping the world's singleton (a restart's load). `MigrationBenchmark` moves 10 players with 99
 items each to another world and back, through bytes (`SaveEntities` / `LoadEntities`) and in memory
 (`MoveEntities`); `SaveAndLoadOne` is the fixed cost of a save. `UnloadBenchmark` removes a plugin's types from a world
 of 10,000 or 100,000 players (`RemoveTypes`), the step before reloading game logic.
@@ -665,13 +687,16 @@ of 10,000 or 100,000 players (`RemoveTypes`), the step before reloading game log
 <BenchChart bench="MigrationBenchmark" />
 <BenchChart bench="UnloadBenchmark" />
 
-### Introspection [#introspection-benchmarks]
+### Introspection and trimming [#introspection-benchmarks]
 
 `IntrospectionBenchmark` describes the battle server's world for a dashboard (`world.Describe()`: every table with
-its columns, rows and bytes) and one entity for a debugger (`entity.Describe()`, values boxed). Both allocate the
-description they return: they are tools, not tick paths.
+its columns, rows and bytes), one entity for a debugger (`entity.Describe()`, values boxed) and the schedule of its
+systems (`world.DescribeSchedule()`). Each allocates the description it returns: they are tools, not tick paths.
+`TrimBenchmark` gives memory back after a peak: 100,000 entities over 16 or 256 tables, all but one in a hundred
+destroyed, then `TrimExcess`; `TrimTrimmed` is the call on a world with nothing left to give back, its fixed cost.
 
 <BenchTable bench="IntrospectionBenchmark" />
+<BenchTable bench="TrimBenchmark" />
 
 ## How to reproduce [#measuring]
 

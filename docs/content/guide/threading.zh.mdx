@@ -79,14 +79,18 @@ public static class Zones
 | `[ForEach]` 参数 | 声明的访问 |
 | --- | --- |
 | `ref T` 组件或单例 | 写 `T` |
+| `Mut<T>` 组件 | 写 `T`（没写的行也算） |
 | `in T` 组件或单例 | 读 `T` |
 | `[With<T>]`、`[Without<T>]`、`[WithAny<T>]` | 无（过滤器读的是存在性，没有哪个并行系统会改它） |
 | `[Changed<T>]`、`[Removed<T>]` | 读 `T`（它的变更 tick） |
+| `[ChangedAny<T1, …, Tn>]`、`[RemovedAny<T1, …, Tn>]` | 读 `T1` 到 `Tn` 中的每一个 |
 | `Entity` 或 `World`、实例方法、重写 `OnUpdate` | 单独运行 |
 | 没有任何 `[ForEach]` 方法 | 单独运行 |
 
 一个系统写了另一个系统读或写的东西，或者其中一个要单独运行，两者就冲突。系统放在哪个阶段：先找出它必须排在后面的系统（有顺序约束的，
-或与它冲突、注册更早的），再放进其中最晚那个阶段的下一个阶段。阶段依次运行，同一阶段的系统同时运行。
+或与它冲突、注册更早的），再放进其中最晚那个阶段的下一个阶段。阶段依次运行，同一阶段的系统同时运行。`world.DescribeSchedule()` 能列出 World 排出的阶段、每个系统读写了什么、
+某个系统为什么要等上一个阶段；它读的是最近一次 `AddSystem` / `RemoveSystem` 发布的调度，所以诊断接口可以在任何线程上调用
+（[调试与诊断](/zh/docs/guide/diagnostics#schedule)）。
 
 ```csharp
 public record struct Body(float X, float Y, float Vx, float Vy) : IComponent;
@@ -156,6 +160,14 @@ public class RegenerateAll : EcsSystem
 ```
 
 并行系统和并行方法可以叠加：在并行阶段里，如果调度器正忙着跑另一个系统的方法，这个并行方法就在自己的线程上运行，不会干等。
+
+并行方法可以通过 `ref` 或 [`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 参数写被追踪组件：每块只给自己的行
+打 tick，而且这类方法按 4,096 行的倍数切块（每块至少 4,096 行），正好对齐共用一份变更 tick 摘要的区块，不会有两个线程
+更新同一份摘要。在块里调 `Mut<T>.Write()` 和 `SetIfChanged`，和用 `ref` 一样安全。这样一来，不超过 4,096 行的表只有一块。
+
+开启 `WorldOptions.MeasureSystems` 后，`system.Stats` 会把帮忙的线程也算进去：`LastAllocated` 和 `TotalAllocated` 是
+运行这个系统的线程，加上跑过它并行方法分块的每个线程上分配的字节数之和；时间是整次运行的耗时。开启 `ParallelSystems`
+时，同一阶段的每个系统各自记录自己的运行。
 
 ### 来自其他线程的输入 [#input-from-other-threads]
 

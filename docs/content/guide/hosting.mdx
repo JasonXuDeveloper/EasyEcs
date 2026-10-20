@@ -71,6 +71,97 @@ world, one at a time, and each `await` orders one tick after the other. Use a de
 `Task.Factory.StartNew` with `TaskCreationOptions.LongRunning`) when the tick needs steadier timing than a busy thread
 pool gives.
 
+### A fixed step that catches up [#fixed-step]
+
+A `PeriodicTimer` that falls behind (a garbage collection, a slow tick, a busy thread pool) does not queue the ticks it
+missed: the next wait completes at once, and the rest are lost. When game time must follow wall time, as with
+cooldowns in ticks or a `Clock` singleton with a fixed `DeltaTime`, accumulate the time that passed and run one
+update per step of it. Cap the catch-up: each extra update takes time too, so a world that is slower than its tick
+would fall further behind with every frame. Past the cap, drop the rest and log it:
+
+```csharp
+using System.Diagnostics;
+
+public sealed class FixedStepLoop(World world)
+{
+    private static readonly TimeSpan Step = TimeSpan.FromMilliseconds(50);   // 20 ticks per second
+    private const int MaxCatchUp = 4;                                         // updates per wake-up, at most
+
+    private readonly World _world = world;
+
+    public async Task RunAsync(CancellationToken stop)
+    {
+        using var timer = new PeriodicTimer(Step);
+        long last = Stopwatch.GetTimestamp();
+        var due = TimeSpan.Zero;
+        try
+        {
+            while (await timer.WaitForNextTickAsync(stop))
+            {
+                long now = Stopwatch.GetTimestamp();
+                due += Stopwatch.GetElapsedTime(last, now);
+                last = now;
+
+                int ran = 0;
+                while (due >= Step && ran < MaxCatchUp)
+                {
+                    _world.Update();
+                    due -= Step;
+                    ran++;
+                }
+
+                if (due >= Step)
+                {
+                    // Too far behind: game time slows down instead of the server spiralling.
+                    long dropped = due.Ticks / Step.Ticks;
+                    Console.Error.WriteLine($"world behind: {dropped} ticks dropped");
+                    due = TimeSpan.FromTicks(due.Ticks % Step.Ticks);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // the host is stopping
+        }
+    }
+}
+```
+
+Systems keep a fixed step (a `DeltaTime` in a singleton, or counts of ticks), so the same inputs give the same
+result however the updates were spread over frames. The log line is the signal to look at
+[`system.Stats`](/en/docs/guide/diagnostics#timing): a world that drops ticks often needs less work per tick, more
+cores, or fewer entities per world.
+
+### Flatten the spikes of large populations [#slices]
+
+A system whose work per entity is heavy (a think step of an AI, a path request, a visibility scan) does not need to
+run for every entity on every tick. `[ForEach(Slices = N)]` visits about one N-th of each matching table per run,
+taking the next slice on the next run, so every entity is visited once every N updates and each tick pays a quarter
+of the spike for `Slices = 4`:
+
+```csharp
+public record struct Wander(float TargetX, float TargetY) : IComponent;
+
+public class ThinkSystem : EcsSystem
+{
+    // 100,000 NPCs: a quarter of them think per tick, each one every fourth tick.
+    [ForEach(Slices = 4)]
+    static void Think(in Position position, in Wander wander, ref Velocity velocity)
+    {
+        float dx = wander.TargetX - position.X;
+        float dy = wander.TargetY - position.Y;
+        float length = MathF.Sqrt(dx * dx + dy * dy) + 0.001f;
+        velocity = new Velocity(dx / length, dy / length);
+    }
+}
+```
+
+Tables are cut at 64-row words and many small tables spread over the slices, so the work per tick stays even
+without a round-robin of your own. With `UpdateInterval = M` as well, each entity is visited once every N × M updates.
+A slice is not exact under churn (an entity that moves between tables may be skipped or visited twice in one cycle),
+and `[Changed<T>]` / `[Removed<T>]` methods cannot be sliced ([EECS035](/en/docs/guide/analyzer#eecs035)); the
+rules are in [systems](/en/docs/guide/systems#update-interval).
+
 ### Start and stop with the host [#hosted-service]
 
 A `BackgroundService` runs the loop for the life of the app. On Ctrl+C or `SIGTERM` the host cancels the token and
@@ -249,15 +340,50 @@ For autosaves while the server runs, call `Save` on the owner between two ticks,
 for the disk write: the world is only needed while it encodes. What a save holds and what survives a code change are
 in [saves](/en/docs/guide/saves#versioning).
 
+A restart (a deploy, a rolling update) resumes the game but not the process: the new process has its own
+configuration, and connections did not survive. Save without what belongs to the process, and load while keeping
+the configuration the new process set:
+
+```csharp
+using Nino.Core;
+
+public record struct ServerConfig(int MaxPlayers) : ISingletonComponent;   // from this process's settings
+public record struct Session(int Socket) : IComponent;                     // a connection: gone with the process
+
+public static class Restart
+{
+    // What belongs to the process, not to the game.
+    private static readonly ComponentSet Runtime = ComponentSet.Create().WithSingleton<ServerConfig>().With<Session>();
+    private static readonly ComponentSet Configuration = ComponentSet.Create().WithSingleton<ServerConfig>();
+
+    public static void Save(World world, NinoArrayBufferWriter output) => world.Save(output, in Runtime);
+
+    public static void Resume(World world, ReadOnlySpan<byte> save, int maxPlayers)
+    {
+        world.SetServerConfig(maxPlayers);                        // this process's configuration
+        world.Load(save, in Configuration, markWritten: false);   // the game as saved, the configuration kept
+    }
+}
+```
+
+`Load` keeps the singletons in the set exactly as the world holds them, and `markWritten: false` keeps the first tick
+from replicating or saving the whole world again ([restart](/en/docs/guide/saves#restart)).
+
 ### Several worlds, health and metrics [#operations]
 
 - **Several worlds:** one loop per world, each its own owner (one hosted service per zone, or one service that starts
   a loop per world). They share nothing, so they need no locks
   ([one world per thread](/en/docs/guide/threading#recommended-one-world-per-thread)). Lower
   `WorldOptions.MaxDegreeOfParallelism` when `ParallelSystems` worlds and Kestrel share the cores.
-- **Metrics:** with `WorldOptions.MeasureSystems`, read `system.Stats` (`Runs`, `Last`, `Average`) for each system of
-  `world.Systems` on the loop, between two updates, and publish the numbers with the status
-  ([measuring systems](/en/docs/guide/systems#measuring-systems)).
+- **Metrics:** with `WorldOptions.MeasureSystems`, read `system.Stats` (`Last`, `LastAllocated`, `LastEntities` and
+  their totals) for each system of `world.Systems` on the loop, between two updates, and publish a copy: as a status,
+  or as a `Meter` that OpenTelemetry collects ([metrics](/en/docs/guide/diagnostics#metrics)). Log
+  `world.DescribeSchedule()` once at startup, so each deployment's log says which systems ran together
+  ([schedule](/en/docs/guide/diagnostics#schedule)).
+- **Memory after a peak:** a world keeps the rows of its largest wave. After a match ends, or from a maintenance
+  timer when `world.EntityCount` is well below its peak, call `world.TrimExcess()` on the loop between two updates:
+  it drops the empty tables and shrinks the others ([give memory back](/en/docs/guide/diagnostics#trim)). Not every
+  tick: what it drops is allocated again by the next wave.
 - **Health:** under `SystemErrorPolicy.Disable`, a system with a non-null `Error` is switched off; publish that list
   and let the health check report it.
 
@@ -538,6 +664,8 @@ a second old, and reading it never waits for the world.
 | Publishing every tick | `UpdateInterval` on the publishing system | The copy is made only when it is due |
 | Writing the save file on the tick | `Save` on the owner, the file write on another thread | The tick waits for encoding only |
 | One world for every zone | One world and loop per zone | Worlds share nothing and scale across cores |
+| A heavy system over every entity every tick | `[ForEach(Slices = N)]` | Each tick pays about 1 / N of the work |
+| A timer that silently skips ticks | A fixed step with a catch-up cap | Game time follows wall time; overload is logged |
 
 The tick itself is the cost that matters. A world of 100,000 entities updates in <BenchValue k="tick.oneWorld" /> per
 tick, allocating <BenchValue k="tick.oneWorld.alloc" /> (`WorldSimulationBenchmark`), so a 20 Hz tick leaves the
@@ -552,6 +680,9 @@ rest of each 50 ms to request handlers.
   handler's side).
 - **A status:** one immutable object per publish, read with a volatile load.
 - **Shutdown:** one `Save` and one file write, within `HostOptions.ShutdownTimeout`.
+- **A fixed step:** two timestamp reads per wake-up; the updates it catches up are ordinary updates.
+- **Maintenance:** `TrimExcess` is cold and allocates; run it at a quiet moment, not on a schedule shorter than the
+  waves it gives memory back from.
 
 ## Pitfalls [#pitfalls]
 
@@ -565,6 +696,9 @@ rest of each 50 ms to request handlers.
 | An unbounded channel | A world that falls behind fills memory | Use `Channel.CreateBounded` |
 | The channel left open on shutdown | A handler that writes after the last drain, or waits on a full channel, never gets its reply | `requests.Writer.TryComplete()` after the last tick, then answer what is left |
 | `await` or blocking IO in a system | The whole tick waits | Hand the IO to the host as data |
+| Catching up every missed tick | A slow world falls further behind with each frame | Cap the catch-up and log the dropped ticks |
+| `TrimExcess()` every tick | Tables dropped and rebuilt, allocations on the tick | A maintenance task after a peak |
+| Saving the process's configuration with the game | The new process starts with the old settings | `Save(output, in exclude)`, then `Load(input, in keep)` |
 
 ## Related [#related]
 

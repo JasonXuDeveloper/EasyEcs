@@ -68,6 +68,92 @@ public sealed class WorldLoop(World world)
 前后两个 tick 排好了先后。tick 需要比繁忙的线程池更稳定的节奏时，改用专用线程（`new Thread`，或带
 `TaskCreationOptions.LongRunning` 的 `Task.Factory.StartNew`）。
 
+### 固定步长与追帧 [#fixed-step]
+
+`PeriodicTimer` 落后了（一次 GC、一个慢 tick、线程池太忙），错过的 tick 不会排队补上：下一次等待立刻返回，其余的就没了。如果
+游戏时间必须跟着墙上时间走，比如按 tick 计的冷却，或者 `Clock` 单例里固定的 `DeltaTime`，就把流逝的时间累加起来，每够一个步长
+跑一次更新。追帧要设上限：多跑的每次更新也要花时间，World 本来就比 tick 慢的话，每一帧都会落后得更多。超过上限就把剩下的丢掉，
+记一行日志：
+
+```csharp
+using System.Diagnostics;
+
+public sealed class FixedStepLoop(World world)
+{
+    private static readonly TimeSpan Step = TimeSpan.FromMilliseconds(50);   // 20 ticks per second
+    private const int MaxCatchUp = 4;                                         // updates per wake-up, at most
+
+    private readonly World _world = world;
+
+    public async Task RunAsync(CancellationToken stop)
+    {
+        using var timer = new PeriodicTimer(Step);
+        long last = Stopwatch.GetTimestamp();
+        var due = TimeSpan.Zero;
+        try
+        {
+            while (await timer.WaitForNextTickAsync(stop))
+            {
+                long now = Stopwatch.GetTimestamp();
+                due += Stopwatch.GetElapsedTime(last, now);
+                last = now;
+
+                int ran = 0;
+                while (due >= Step && ran < MaxCatchUp)
+                {
+                    _world.Update();
+                    due -= Step;
+                    ran++;
+                }
+
+                if (due >= Step)
+                {
+                    // Too far behind: game time slows down instead of the server spiralling.
+                    long dropped = due.Ticks / Step.Ticks;
+                    Console.Error.WriteLine($"world behind: {dropped} ticks dropped");
+                    due = TimeSpan.FromTicks(due.Ticks % Step.Ticks);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // the host is stopping
+        }
+    }
+}
+```
+
+系统保持固定步长（单例里的 `DeltaTime`，或者按 tick 计数），所以同样的输入不管更新怎么分布在各帧里，结果都一样。那行日志就是
+该去看 [`system.Stats`](/zh/docs/guide/diagnostics#timing) 的信号：经常丢 tick 的 World，要么每个 tick 的活要减，要么要更多核，
+要么每个 World 的实体要少一些。
+
+### 摊平大量实体带来的峰值 [#slices]
+
+每个实体活很重的系统（AI 的思考、寻路请求、视野扫描），不必每个 tick 对每个实体都跑一遍。`[ForEach(Slices = N)]` 每次运行只访问
+每张匹配表的大约 N 分之一，下一次运行接着访问下一片，所以每个实体每 N 次更新被访问一次；`Slices = 4` 时每个 tick 只付四分之一的
+峰值：
+
+```csharp
+public record struct Wander(float TargetX, float TargetY) : IComponent;
+
+public class ThinkSystem : EcsSystem
+{
+    // 100,000 NPCs: a quarter of them think per tick, each one every fourth tick.
+    [ForEach(Slices = 4)]
+    static void Think(in Position position, in Wander wander, ref Velocity velocity)
+    {
+        float dx = wander.TargetX - position.X;
+        float dy = wander.TargetY - position.Y;
+        float length = MathF.Sqrt(dx * dx + dy * dy) + 0.001f;
+        velocity = new Velocity(dx / length, dy / length);
+    }
+}
+```
+
+表按 64 行的字切开，很多小表也会分散到各片里，不用自己写轮转，每个 tick 的工作量就是均匀的。再加上 `UpdateInterval = M`，每个
+实体每 N × M 次更新被访问一次。实体频繁变动时分片不是精确的（在表之间移动的实体，一轮里可能被跳过或访问两次）；
+`[Changed<T>]` / `[Removed<T>]` 方法不能分片（[EECS035](/zh/docs/guide/analyzer#eecs035)）。规则见[系统](/zh/docs/guide/systems#update-interval)。
+
 ### 跟随主机启动和停止 [#hosted-service]
 
 `BackgroundService` 在应用的整个生命周期里跑这个循环。收到 Ctrl+C 或 `SIGTERM` 时，主机取消令牌，并等待 `ExecuteAsync` 结束，
@@ -233,13 +319,46 @@ public record struct Clock(long Tick) : ISingletonComponent;
 服务器运行中的自动存档：在所有者线程上、两个 tick 之间调用 `Save`，再把字节交给另一个线程写盘：只有编码时才需要 World。存档包含
 什么、代码改了之后哪些还能加载，见[存档](/zh/docs/guide/saves#versioning)。
 
+重启（发版、滚动更新）延续的是游戏，不是进程：新进程有自己的配置，连接也活不过重启。存档时去掉属于进程的东西，加载时保留新进程
+设好的配置：
+
+```csharp
+using Nino.Core;
+
+public record struct ServerConfig(int MaxPlayers) : ISingletonComponent;   // from this process's settings
+public record struct Session(int Socket) : IComponent;                     // a connection: gone with the process
+
+public static class Restart
+{
+    // What belongs to the process, not to the game.
+    private static readonly ComponentSet Runtime = ComponentSet.Create().WithSingleton<ServerConfig>().With<Session>();
+    private static readonly ComponentSet Configuration = ComponentSet.Create().WithSingleton<ServerConfig>();
+
+    public static void Save(World world, NinoArrayBufferWriter output) => world.Save(output, in Runtime);
+
+    public static void Resume(World world, ReadOnlySpan<byte> save, int maxPlayers)
+    {
+        world.SetServerConfig(maxPlayers);                        // this process's configuration
+        world.Load(save, in Configuration, markWritten: false);   // the game as saved, the configuration kept
+    }
+}
+```
+
+`Load` 会让集合里的单例保持 World 现有的样子，`markWritten: false` 让第一个 tick 不会把整个 World 再复制或存一遍
+（[重启](/zh/docs/guide/saves#restart)）。
+
 ### 多个 World、健康检查和指标 [#operations]
 
 - **多个 World：**每个 World 一个循环，各自是所有者（每个区域一个托管服务，或一个服务为每个 World 启动一个循环）。它们什么都不共享，
   不需要锁（[每线程一个 World](/zh/docs/guide/threading#recommended-one-world-per-thread)）。开了 `ParallelSystems` 的 World
   和 Kestrel 共用核心时，调低 `WorldOptions.MaxDegreeOfParallelism`。
 - **指标：**开启 `WorldOptions.MeasureSystems` 后，在循环里、两次更新之间，读 `world.Systems` 中每个系统的 `system.Stats`
-  （`Runs`、`Last`、`Average`），随状态一起发布（[测量系统](/zh/docs/guide/systems#measuring-systems)）。
+  （`Last`、`LastAllocated`、`LastEntities` 和它们的累计值），发布一份拷贝：随状态一起发布，或者做成一个 `Meter` 交给
+  OpenTelemetry 采集（[指标](/zh/docs/guide/diagnostics#metrics)）。启动时把 `world.DescribeSchedule()` 写一次日志，每次部署的
+  日志里就记着哪些系统一起跑（[调度](/zh/docs/guide/diagnostics#schedule)）。
+- **高峰过后的内存：**World 会留着最大那一波实体的行。一局比赛结束后，或者维护定时器发现 `world.EntityCount` 远低于峰值时，在循环里、
+  两次更新之间调 `world.TrimExcess()`：它丢掉空表，缩小其余的表（[还回内存](/zh/docs/guide/diagnostics#trim)）。别每个 tick 都调：
+  它丢掉的东西，下一波实体还要再分配。
 - **健康检查：**`SystemErrorPolicy.Disable` 下，`Error` 不为 null 的系统已被关掉；把这份列表发布出去，交给健康检查报告。
 
 ### 部署 [#deploy]
@@ -514,6 +633,8 @@ $ curl localhost:5000/status
 | 每个 tick 都发布 | 发布系统设 `UpdateInterval` | 只在到期时拷贝 |
 | 在 tick 里写存档文件 | 所有者上 `Save`，写文件交给别的线程 | tick 只等编码 |
 | 所有区域共用一个 World | 每个区域一个 World 和循环 | World 互不共享，能铺满多个核 |
+| 很重的系统每个 tick 访问所有实体 | `[ForEach(Slices = N)]` | 每个 tick 只付大约 1 / N 的工作 |
+| 定时器悄悄跳过 tick | 固定步长加追帧上限 | 游戏时间跟着墙上时间走，过载会记日志 |
 
 真正要紧的开销是 tick 本身。10 万个实体的 World 每个 tick 耗时 <BenchValue k="tick.oneWorld" />，分配
 <BenchValue k="tick.oneWorld.alloc" />（`WorldSimulationBenchmark`），所以 20 Hz 的 tick 把每 50 ms 的大部分留给了请求处理。
@@ -526,6 +647,8 @@ $ curl localhost:5000/status
 - **请求：**一次通道写和读，加上回复用的 `TaskCompletionSource`（每个请求分配一次，在处理代码那一侧）。
 - **状态：**每次发布一个不可变对象，读取是一次 volatile 读。
 - **停机：**一次 `Save` 和一次写文件，要在 `HostOptions.ShutdownTimeout` 之内完成。
+- **固定步长：**每次唤醒读两次时间戳；追帧跑的就是普通的更新。
+- **维护：**`TrimExcess` 是冷路径，会分配；在安静的时候跑，间隔不要比它要回收的那些波次还短。
 
 ## 常见陷阱 [#pitfalls]
 
@@ -539,6 +662,9 @@ $ curl localhost:5000/status
 | 无界通道 | World 跟不上时内存被塞满 | 用 `Channel.CreateBounded` |
 | 停机时通道没关 | 最后一次收取之后才写入、或者在满的通道上等待的处理代码，永远等不到答复 | 最后一个 tick 之后 `requests.Writer.TryComplete()`，再答复剩下的请求 |
 | 系统里 `await` 或阻塞 IO | 整个 tick 都在等 | 把 IO 作为数据交给主机 |
+| 错过的 tick 全部补跑 | 慢的 World 每一帧都落后得更多 | 给追帧设上限，记下丢掉的 tick |
+| 每个 tick 都调 `TrimExcess()` | 表被丢掉又重建，tick 上出现分配 | 高峰过后放在维护任务里调 |
+| 进程的配置和游戏一起存档 | 新进程用的还是旧配置 | 先 `Save(output, in exclude)`，再 `Load(input, in keep)` |
 
 ## 相关页面 [#related]
 

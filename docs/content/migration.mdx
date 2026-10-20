@@ -10,6 +10,92 @@ lists every rename, removal and behavior change of its step, with the code to wr
 [changelog](/en/docs/changelog) lists everything each release added; the [API reference](/en/docs/api) is the
 current API.
 
+## v4.6 → v4.7 [#v4-6-to-v4-7]
+
+Code written for 4.6 compiles unchanged unless a system declares a member named `RunCount` or a file imports another
+namespace with a type of the same name as one of the new ones. Two calls behave differently, and parallel passes that
+write tracked components cut their rows differently.
+
+### `SaveEntities` refuses a set that names a singleton [#v4-7-save-entities]
+
+A `ComponentSet` holds singletons too (`WithSingleton<T>()`), and `With(Type)` now accepts a singleton type instead of
+throwing. A group save writes no singletons, so `SaveEntities(output, ids, set)` throws `ArgumentException` for a set
+that names one. A set built with `With(typeof(...))` from a list of types that mixes components and singletons now
+fails at the save, not at `With`. Keep the components of a record in a set of their own:
+
+**4.6**
+
+```csharp doccheck=skip
+static readonly ComponentSet Record = ComponentSet.Create().With(typeof(Bank)).With(typeof(Rates));  // Rates: a singleton, refused by With
+```
+
+**4.7**
+
+```csharp
+public record struct Bank(long Gold) : IComponent;
+
+private static readonly ComponentSet Record = ComponentSet.Create().With<Bank>();
+```
+
+A whole-world `Save(output, in exclude)` and `Load(input, in keep)` are where sets with singletons go
+([restart](/en/docs/guide/saves#restart)).
+
+### `EcsSystem.RunCount` [#v4-7-run-count]
+
+`EcsSystem` has a public `long RunCount` (the runs before the current one, which `[ForEach(Slices = N)]` uses). A
+member of that name in a system hides it: warning CS0108, an error where warnings are errors. Rename the member, or
+read the base property where it means the same.
+
+**4.6**
+
+```csharp doccheck=skip
+public class Spawner : EcsSystem
+{
+    private static long RunCount;                    // hides EcsSystem.RunCount in 4.7
+    protected override void OnUpdate() => RunCount++;
+}
+```
+
+**4.7**
+
+```csharp
+public class Spawner : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        if (RunCount % 10 == 0) { /* every tenth run */ }
+    }
+}
+```
+
+### Parallel passes that write tracked components [#v4-7-parallel-chunks]
+
+A parallel `[ForEach]` method (or a `ForEachParallel` job) that writes a tracked component cuts its rows into chunks
+of a multiple of 4,096 rows, 4,096 at least, instead of 1,024 at least: two chunks inside one 4,096-row block raced on
+its change summary and could drop stamps ([D48](/en/docs/decisions#d48-parallel-tracked-chunks)). Nothing to change in
+code; a table of 4,096 rows or fewer now runs as one chunk, so a small parallel pass may use fewer threads than
+before. Passes that write no tracked component chunk as before.
+
+### `Load` with a `keep` set [#v4-7-load-overloads]
+
+`Load(input, in keep, markWritten = true)` joins `Load(input, markWritten = true)`. The calls of 4.6 bind as before:
+`Load(bytes)`, `Load(bytes, false)` and `Load(bytes, markWritten: false)` take the overload without `keep`, and so does
+`Load(bytes, default)`, which means `markWritten: false`, not an empty set. Pass a `ComponentSet` (a `static readonly`
+field) to keep singletons. A set naming a component throws `ArgumentException`: the load replaces the entities.
+
+### `MeasureSystems` measures more [#v4-7-measure-systems]
+
+With `WorldOptions.MeasureSystems`, every run also reads the thread's allocation counter twice (and every helper chunk
+of a parallel `[ForEach]`), and each `[ForEach]` pass counts its matches once when it starts, for the new `SystemStats`
+fields. A world that measures pays that on every update; without `MeasureSystems` nothing changed.
+
+### New public types [#v4-7-new-types]
+
+`Mut<T>`, `IUniqueIndexed` / `IUniqueIndexed<TKey>`, `UniqueIndexExtensions`, `ChangedAnyAttribute<…>`,
+`RemovedAnyAttribute<…>`, `ScheduleInfo`, `GroupSchedule`, `StageInfo`, `SystemInfo`, `StageWait` and `SystemPair` are
+new in `namespace EasyEcs`. A file that imports another namespace with a type of one of these names gets CS0104
+(ambiguous reference): qualify the name, or alias it with a `using` directive.
+
 ## v4.3 → v4.4 [#v4-3-to-v4-4]
 
 The save format changed, and EasyEcs builds on Nino 4.0.0-rc.6. Code written for 4.3 compiles unchanged; what needs

@@ -1,7 +1,7 @@
 ---
 title: 常见错误
 seoTitle: "EasyEcs 常见错误：ref 失效、系统存状态、跨线程"
-description: 使用 EasyEcs 时最常犯的二十四个错误：每个都给出你可能会写的代码、错在哪里、应该怎么写，以及对应的分析器规则或指南页面。
+description: 使用 EasyEcs 时最常犯的三十二个错误：每个都给出你可能会写的代码、错在哪里、应该怎么写，以及对应的分析器规则或指南页面。
 icon: TriangleAlert
 ---
 
@@ -267,6 +267,41 @@ int amount = player.Gold.Amount;             // ref readonly：不打标记
 
 由 [EECS025](/zh/docs/guide/analyzer#eecs025) 发现（警告，带代码修复）。详见[什么算写入](/zh/docs/guide/change-tracking#what-counts-as-a-write)。
 
+### 只偶尔写入，却用 `ref` 拿追踪组件 [#ref-writes-every-row]
+
+```csharp
+public record struct Facing(int Direction) : IComponent, ITrackChanges;   // sent to clients when it changes
+```
+
+```csharp
+public class Face : EcsSystem
+{
+    [ForEach]
+    static void Turn(ref Facing facing, in Velocity velocity)      // every visited row is stamped
+    {
+        int direction = velocity.X >= 0 ? 0 : 4;
+        if (facing.Direction != direction) facing = new Facing(direction);
+    }
+}
+```
+
+追踪组件的 `ref` 参数不管方法有没有真的写，都算一次写入；`Query` 的查询项也一样（枚举器会给访问到的每一行打戳）。结果每个
+`[Changed<Facing>]` 读者都要访问所有实体，复制时把没人改过的值也发了出去。分析器看不出来，因为方法确实写了其中一些行。改用
+`Mut<T>`：它只给写入的行打戳，`SetIfChanged` 只在值不同时才写：
+
+```csharp
+public class Face : EcsSystem
+{
+    [ForEach]
+    static void Turn(Mut<Facing> facing, in Velocity velocity) =>
+        facing.SetIfChanged(new Facing(velocity.X >= 0 ? 0 : 4));
+}
+```
+
+在系统外面，用 `in` 参数、`Read<T>()` 或生成的属性读，用 `entity.SetIfChanged(...)`（或生成的 `SetFacingIfChanged(...)`）写。
+“有时写”的 `ref` 没有规则能发现；从来不写的那种由 [EECS025](/zh/docs/guide/analyzer#eecs025) 发现。详见
+[什么算写入](/zh/docs/guide/change-tracking#what-counts-as-a-write)。
+
 ### `[Removed<T>]` 方法接收了 `T` [#removed-takes-t]
 
 ```csharp
@@ -291,6 +326,86 @@ public class Extinguish : EcsSystem
 ```
 
 由 [EECS016](/zh/docs/guide/analyzer#eecs016) 发现。详见[移除检测](/zh/docs/guide/change-tracking#removal-detection)。
+
+### 以为 `[Removed<T>]` 能报告被销毁的实体 [#removed-destroyed]
+
+```csharp
+public record struct Avatar(int Skin) : IComponent, ITrackChanges;
+public record struct Despawns(int Count) : ISingletonComponent;
+```
+
+```csharp
+public class CountDespawns : EcsSystem
+{
+    [ForEach, With<Position>, Removed<Avatar>]       // removals only: a destroyed entity has no row left
+    static void Count(ref Despawns despawns) => despawns = new Despawns(despawns.Count + 1);
+}
+```
+
+`[Removed<T>]` 访问的是还活着、但失去了 `T` 的实体。被销毁的实体已经没有行可访问，客户端永远收不到它消失的消息。打开 World 的
+销毁日志，每个客户端用自己确认过的 tick 去读：
+
+```csharp
+using var server = new World(new WorldOptions { DestroyLog = 4_096 });   // the destroys a client may lag behind
+var gone = new EntityId[4_096];                                          // allocated once, reused for every client
+ulong acked = server.ChangeTick;                                          // the client's last acknowledged tick
+server.Update();
+if (server.DestroyedSince(acked, gone, out int destroyed))
+{
+    for (int i = 0; i < destroyed; i++) Console.WriteLine($"despawn {gone[i]}");
+}
+else
+{
+    Console.WriteLine("too far behind: send the whole state");
+}
+```
+
+没有规则能发现。详见[移除检测](/zh/docs/guide/change-tracking#removal-detection)。
+
+### 以为 `Count` 或 `Query` 会照顾分片 [#count-a-slice]
+
+```csharp
+public struct Npc : IComponent;
+```
+
+```csharp
+var quarter = QueryFilter.Create().With<Npc>().Slice(0, 4);
+int thinking = world.Count<Position>(quarter);   // ArgumentException: Count needs every matching row
+```
+
+分片是对每张表的切分，只有 `[ForEach]` 那类遍历（`ForEach`、`ForEachEntity`、`ForEachBatch` 及其并行形式）认它。`Query`、
+`Count`、`Any`、`DestroyEntities`、`entity.Run` 和批量调用需要所有匹配的行，遇到分片的过滤条件会直接抛异常，而不是只回答一部分。
+计数时去掉分片；分片系统访问了多少，看它的统计：
+
+```csharp
+int npcs = world.Count<Position>(QueryFilter.Create().With<Npc>());   // all of them; a slice holds about npcs / 4
+```
+
+打开 `MeasureSystems` 后，`[ForEach(Slices = N)]` 方法的 `system.Stats.LastEntities` 就是它那一份。运行时报错。详见
+[分片](/zh/docs/guide/systems#update-interval)。
+
+### 给 `[Changed<T>]` 方法分片 [#slice-changed]
+
+```csharp doccheck=expect-EECS035
+public class SendGold : EcsSystem
+{
+    [ForEach(Slices = 4), Changed<Gold>]
+    static void Send(in Gold gold, ref Hud hud) => hud = new Hud(gold.Amount);
+}
+```
+
+`[Changed<T>]` 方法访问系统上次运行以来写过的行，而每次运行都会把这个标记往前推：一次运行跳过的那三片，变更就丢了。它本来就只访问
+变过的行，去掉 `Slices` 即可。如果重的是变更引发的工作，就把这份工作记成数据，再用一个没有变更过滤器的分片方法去摊开：
+
+```csharp
+public class SendGold : EcsSystem
+{
+    [ForEach, Changed<Gold>]
+    static void Send(in Gold gold, ref Hud hud) => hud = new Hud(gold.Amount);
+}
+```
+
+由 [EECS035](/zh/docs/guide/analyzer#eecs035) 发现。
 
 ### 每种 actor 手写一个分组 [#group-per-actor]
 
@@ -377,6 +492,73 @@ public static class Portals
 ```
 
 由 [EECS015](/zh/docs/guide/analyzer#eecs015) 发现。详见[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)。
+
+### 唯一键先给了新主人 [#rekey-order]
+
+```csharp
+public record struct Seat(int Number) : IComponent, IUniqueIndexed<int> { public int Key => Number; }
+```
+
+```csharp
+var alice = world.CreateEntity(new Seat(1));
+var bob = world.CreateEntity(new Seat(2));
+bob.SetSeat(1);       // InvalidOperationException: alice still holds seat 1
+alice.SetSeat(2);
+```
+
+唯一索引在存入之前就检查每一次写入，所以任何时刻都不会有两个实体持有同一个键。先把键空出来，再交出去：先改（或移除）当前的持有者，
+再改新的那个。互换要经过一个空闲的键：
+
+```csharp
+var carol = world.CreateEntity(new Seat(11));
+var dave = world.CreateEntity(new Seat(12));
+carol.SetSeat(-1);    // a key nobody holds
+dave.SetSeat(11);
+carol.SetSeat(12);
+```
+
+被拒绝的写入什么都不改：实体保留原来的键，World 保持原样。运行时报错。详见[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)。
+
+### 复制带唯一键的实体或预制体 [#unique-copies]
+
+```csharp
+var usher = new Prefab().Set(new Seat(0), new Health(100));
+var ushers = new Entity[10];
+world.Instantiate(usher, ushers);   // InvalidOperationException: ten entities, one key
+```
+
+唯一键每复制一份，就多一个持有者。带键实体的 `Clone()` 会抛异常；预制体带着键时，第二次 `Instantiate(prefab)`、以及一次实例化多个的
+`Instantiate(prefab, entities)` 也会。键不要放进预制体，每个实例各给一个：
+
+```csharp
+var guest = new Prefab().Set(new Health(100));
+var guests = new Entity[10];
+for (int i = 0; i < guests.Length; i++)
+    guests[i] = world.Instantiate(guest, new Seat(100 + i));   // one key per instance
+```
+
+null 键（`string` 键的默认值）不算键：预制体可以带着它，每个实例都拿到它。运行时报错。详见[预制体](/zh/docs/guide/prefabs)。
+
+### 启用一个已被别人拿走的唯一键 [#disabled-unique]
+
+```csharp
+var regular = world.CreateEntity(new Seat(5));
+regular.DisableSeat();                   // a disabled key is no key: seat 5 is free
+var walkIn = world.CreateEntity(new Seat(5));
+regular.EnableSeat();                    // InvalidOperationException: walkIn holds seat 5
+```
+
+被禁用的组件保留值，但会离开索引，所以它关着的时候键可能被别人拿走。启用时要重新认领这个键，别的实体持有它就会失败，组件保持禁用。
+`EnableAll` 先检查所有行，失败的方式一样。启用前先查一下这个键；冲突时给其中一个换个键：`Set` 一次调用就存入空闲的键并启用组件：
+
+```csharp
+if (world.SeatIndex.TryGet(5, out var holder) && holder != regular)
+    regular.SetSeat(6);                  // another key, enabled
+else
+    regular.EnableSeat();
+```
+
+运行时报错。详见[禁用组件](/zh/docs/guide/cleanup-and-disable#disable-a-component)。
 
 ### 复制 `DynamicBuffer<T>` [#buffer-copy]
 
@@ -491,6 +673,27 @@ static Entity Restore(World world, ReadOnlySpan<byte> record)
 
 没有规则能发现。详见[记录](/zh/docs/guide/migration-and-unload#records)。
 
+### 每个 tick 都调 `TrimExcess` [#trim-every-tick]
+
+```csharp
+while (running)
+{
+    world.Update();
+    world.TrimExcess();   // drops the tables the next tick creates again
+}
+```
+
+`TrimExcess` 丢掉空表，把其余的表缩到现在装着的大小。运行中的 World 每个 tick 都在清空、填满表（死亡、出生、状态），下一个 tick
+又得重新分配：零分配的稳态变成了反复分配，而且每次调用还要走一遍所有的表和缓存的查询。高峰过后、在安静的时候再调：
+
+```csharp
+world.Update();
+if (world.UpdateCount % 12_000 == 0 && world.EntityCount < 10_000)   // every ten minutes at 20 Hz, once quiet
+    world.TrimExcess();
+```
+
+没有规则能发现。详见[高峰过后还回内存](/zh/docs/guide/diagnostics#trim)。
+
 ## 线程 [#threads]
 
 ### 在其他线程上改 World [#other-thread]
@@ -573,7 +776,7 @@ public class HealAll : EcsSystem
 
 <Cards>
   <Card title="分析器规则" href="/zh/docs/guide/analyzer">
-    从 EECS002 到 EECS034 的每一条规则。
+    从 EECS002 到 EECS036 的每一条规则。
   </Card>
   <Card title="ECS 设计原则" href="/zh/docs/ecs-principles">
     这些错误违反的规则。

@@ -78,7 +78,7 @@ whose 16-byte entries hold the column and its presence bits) and one indexed loa
 
 - Ids are recycled last in, first out: a freed id's cache lines are still warm when it comes back, and the records
   stay bounded by the peak number of live entities.
-- The records never shrink, which lets handles index them without bounds checks.
+- The records never shrink, not even in `TrimExcess`, which lets handles index them without bounds checks.
 
 <BenchTable
   bench="MicroBenchmarks"
@@ -198,6 +198,13 @@ component stamps the row's tick while the row clears its presence bit, so `[Remo
 its own block summaries keep writes of `T` from making it visit their words. Components without `ITrackChanges` have
 no column and no stamping code: the checks are JIT-time constants.
 
+What a writer stamps decides what a reader visits. A `ref` parameter stamps every row its pass visits, with one fill
+per run of rows. A `Mut<T>` parameter stamps per write, not per row: only the rows the method writes, each with one
+lookup of its entity record, and `SetIfChanged` stamps only when the value differs. A system that recomputes a value
+every tick but changes it on a tenth of the rows then sends a tenth of them downstream:
+
+<BenchChart bench="ChangeTrackingWriteBenchmark" />
+
 <BenchChart
   bench="ChangeTrackingBenchmark"
   param="Written=10"
@@ -246,7 +253,8 @@ What makes it hold:
   level.
 - **Caches built once**: transition edges, query entries, prefab target tables and overflow masks are allocated when
   first needed, never on the steady path.
-- **Bounded growth**: tables double when full and never shrink, ids are recycled, buffers are reused.
+- **Bounded growth**: tables double when full and shrink only when you call `TrimExcess`, ids are recycled, buffers
+  are reused.
 - **The parallel runner** uses reusable thread-pool work items, not `Parallel.For` (a closure and state per call).
 
 The same tick in other libraries, with what each allocates per tick:
@@ -285,7 +293,9 @@ helpers ([D22](/en/docs/decisions)). Two kinds of work use it:
 - **Parallel stages**: with `WorldOptions.ParallelSystems`, consecutive systems with no order between them and no
   conflicting access (from the generated access sets) form one stage and run at once.
 - **`[ForEach(Parallel = true)]`**: a method's rows run in chunks, a multiple of 64 rows (so presence-bit words never
-  straddle chunks), about four per thread, between 1,024 and 16,384 rows.
+  straddle chunks), about four per thread, between 1,024 and 16,384 rows. A method that writes a tracked component
+  gets chunks of a multiple of 4,096 rows, 4,096 at least: each block of 4,096 rows shares one change-tick summary per
+  column, updated without atomics, so two threads never write into one block.
 
 ```mermaid
 flowchart LR
@@ -313,7 +323,9 @@ The same choices have prices, and they are deliberate:
 
 - **Gaining a new component copies the row** to another table. The first time a state appears on an entity it moves;
   after that it flips a bit.
-- **Tables never shrink.** Memory is bounded by the peak number of entities each table held.
+- **Tables do not shrink on their own.** Memory is bounded by the peak number of entities each table held, until
+  `world.TrimExcess()` gives it back; what it drops is allocated again on next use, so it belongs after a peak, not
+  in the tick ([give memory back](/en/docs/guide/diagnostics#trim)).
 - **One owner thread per world.** Structural changes and component writes belong to it ([D13](/en/docs/decisions));
   parallelism comes from parallel stages, parallel methods and one world per thread.
 - **.NET 10 only** ([D15](/en/docs/decisions)): no Unity, no older runtimes.

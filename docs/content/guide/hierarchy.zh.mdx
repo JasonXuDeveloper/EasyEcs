@@ -99,6 +99,68 @@ bool gunAlive = gun.IsAlive;               // false
 </Step>
 </Steps>
 
+### 用预制体生成子实体 [#instantiate-children]
+
+从[预制体](/zh/docs/guide/prefabs)生成的子实体，可以在同一次调用里拿到父实体：`world.Instantiate(minion, new ChildOf(boss))`
+把 `ChildOf` 直接写进副本所在的最终表，一次行复制就挂好，不用再移动（见[每个实例带上自己的值](/zh/docs/guide/prefabs#instantiate-with-values)）。
+批量形式 `world.Instantiate(minion, span, new ChildOf(boss))` 把一整波挂到同一个父实体下。
+
+### 向上找祖先 [#ancestors]
+
+`Children` 和 `Descendants` 往下走。往上走不需要索引：读实体的 `ChildOf`，跟着 `Parent` 走一步，重复下去，直到遇到带目标组件的实体，
+或者走到根（没有 `ChildOf` 的实体）。炮找它装在哪艘船上，物品找带着它的玩家，都是这样。
+
+```csharp
+public struct Vessel : IComponent;                 // 部件要找的那个祖先
+
+public static class Ancestors
+{
+    // part 最近的带 T 的祖先；没有就返回 default。
+    public static Entity Nearest<T>(Entity part) where T : struct, IComponent
+    {
+        var world = part.World;
+        // 链比 World 的实体数还长，说明 ChildOf 成了环：停下来，不要死循环。
+        for (int steps = world.EntityCount; steps > 0; steps--)
+        {
+            if (!part.TryGet<ChildOf>(out var link)) return default;              // 到根了：没有这样的祖先
+            if (!world.TryGetEntity(link.Parent, out var parent)) return default; // 父实体已经没了（Keep）
+            if (parent.Has<T>()) return parent;
+            part = parent;
+        }
+
+        throw new InvalidOperationException("The ChildOf links form a cycle");
+    }
+
+    // part 之上的根：沿链往上第一个没有活着的父实体的实体（part 本身是根就返回它自己）。
+    public static Entity Root(Entity part)
+    {
+        var world = part.World;
+        for (int steps = world.EntityCount; steps > 0; steps--)
+        {
+            if (!part.TryGet<ChildOf>(out var link) || !world.TryGetEntity(link.Parent, out var parent)) return part;
+            part = parent;
+        }
+
+        throw new InvalidOperationException("The ChildOf links form a cycle");
+    }
+}
+```
+
+```csharp
+var frigate = world.CreateEntity(new Name("frigate"), new Vessel());
+var deck = world.CreateEntity(new Name("deck"), new ChildOf(frigate));
+var cannon = world.CreateEntity(new Name("cannon"), new ChildOf(deck));
+Entity carrier = Ancestors.Nearest<Vessel>(cannon);   // 护卫舰，往上两层
+Entity top = Ancestors.Root(cannon);                  // 也是护卫舰：它没有父实体
+```
+
+- **开销：** 每一层一步，每步读一次组件、查一次 id：O(深度)，不分配内存，不用索引。浅层级（船和它的炮塔）一两步就到。
+- **在遍历大量实体的 `[ForEach]` 里，** 这相当于每个 tick 每行多几次查找。如果结果只在换父实体时才变，就把它存进子实体的一个组件
+  （船的 `EntityId`），在设置 `ChildOf` 的地方一起设置。
+- **环：** `Set` 不会拒绝让链首尾相接的 `ChildOf`（实体成了自己的祖先），所以向上走要像 `Descendants` 那样用 `world.EntityCount`
+  限制步数，超过就抛异常。
+- **指向已销毁父实体的链接**只在 `TargetPolicy.Keep` 下存在（[见下文](#cascade-policy)）：`TryGetEntity` 会告诉你父实体没了，遍历就停在那里。
+
 ### 改变销毁的行为 [#cascade-policy]
 
 `ChildOf` 的初始策略是 `TargetPolicy.Destroy`。和其他[目标策略](/zh/docs/guide/indexes-and-relations#target-policies)一样，
@@ -300,6 +362,9 @@ turret alive: True, gun alive: False
   做的事一样，只是调用更多。
 - **做传播时层级尽量浅。** 上面的遍历每个实体查一次 `Children`；扁平的层级（船和它的炮塔）走得最快。
 - **`DestroyEntities<T>()`** 一次销毁整张表，级联照样生效。
+- **预制体生成的子实体直接带上父实体：** `Instantiate(prefab, new ChildOf(parent))` 一步放进最终的表；先 `Instantiate` 再
+  `Set(new ChildOf(...))` 要复制一行，再移动一次。
+- **很多实体每个 tick 都要向上找时，把结果存下来：** 一次[向上找祖先](#ancestors)是 O(深度)。
 
 创建 1,000 支小队（一个队长加 10 个队员），然后销毁队长：队员用 `ChildOf` 挂在队长下（`Cascade`），以及用自己的链接配
 `TargetPolicy.Remove`（`RemoveLinks`，`HierarchyBenchmark`）：
@@ -323,6 +388,7 @@ turret alive: True, gun alive: False
 | 只迁移父实体，不带子实体 | 子实体留在原地，随原实体一起被销毁 | 用 `Descendants` 收集整组 |
 | 只用 `Children` 收集整棵树 | 漏掉孙实体 | `Descendants` 会走完每一层 |
 | 用 `Descendants` 遍历成环的 `ChildOf` | 走到环上时抛 `InvalidOperationException` | 运行时 |
+| 沿 `ChildOf` 向上走却不限制步数 | `ChildOf` 成环时死循环 | 用 `world.EntityCount` 限制步数（[向上找祖先](#ancestors)） |
 | 在 `Descendants` 循环里换父实体或解除挂接 | 遍历读的子实体列表正在被改写 | 代码审查：先收集，再修改 |
 | `Disable<ChildOf>()` | 抛 `InvalidOperationException` | 运行时 |
 | 没写系统却指望有世界坐标 | 没有内置变换 | 写一个[传播系统](#transform-propagation) |

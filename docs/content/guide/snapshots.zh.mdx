@@ -88,10 +88,108 @@ world.Restore(history[(100 - 3) % Rollback.Ticks]);                             
   [同步](/zh/docs/guide/change-tracking#removal-detection)会把恢复后的状态重新发一遍。
 - **索引** 在下一次查找时从头重建。
 - **关系** 也一样重建。
+- **[销毁日志](/zh/docs/guide/change-tracking#destroy-log)** 开启时，会记下这次恢复去掉的实体（恢复前活着、快照里没有的）。日志本身不在快照里。
 
 两个调用都会进入结构闸门，查询遍历期间调用会抛异常：在两次更新之间调用，或者在系统的 `OnUpdate` 里、`[ForEach]` 方法之外调用。
 快照只属于拍它的那个 World（否则抛 `ArgumentException`）；[`RemoveTypes`](/zh/docs/guide/migration-and-unload#remove-types) 之前拍的
-快照，之后不能再恢复（抛 `InvalidOperationException`）。
+快照，之后不能再恢复（抛 `InvalidOperationException`）。但可以往里重新拍：`world.Capture(snapshot)` 会替换掉所有属于被 `RemoveTypes`
+删掉的表的副本，所以跨过一次重载保留下来的快照环，每个快照重新拍过一次之后就能接着用。
+
+### 用于延迟补偿的历史记录 [#lag-compensation]
+
+射击游戏的服务器判定命中时，要看目标在射手眼里的位置：客户端落后若干个 tick，服务器就把目标倒回这么多 tick。这只需要最近几个 tick
+的位置，不需要整个 World。把它们放进一个单例环形缓冲：一个系统每个 tick 把每个命中盒的 `Position` 拷进当前帧，命中判定读射手那个 tick 的帧。
+
+```csharp
+public record struct Hitbox(float Radius) : IComponent;
+
+// 客户端的命中声明：它在 Lag 个 tick 之前打中了站在 At 的 Target。
+public record struct Shot(EntityId Target, Position At, int Lag) : IComponent;
+
+// 一条位置记录：是谁的、在哪个 tick 记的、当时站在哪。
+public record struct Sample(EntityId Entity, long Tick, Position At);
+
+// 最近 Frames 个 tick 的位置，每个 tick 一帧，在环里循环覆盖。
+public struct PositionHistory : ISingletonComponent
+{
+    public const int Frames = 32;          // 最多补偿多少个 tick 的延迟
+    public const int Capacity = 4_096;     // 记录的实体下标数：World 的峰值实体数
+    public long Tick;                      // 正在记录的 tick
+    public Sample[] Samples;               // Frames × Capacity：第 f 帧实体下标 i 在 f * Capacity + i
+}
+```
+
+```csharp
+// 把这个 tick 的命中盒位置拷进环里。
+public class RecordPositions : EcsSystem
+{
+    // 每个 tick 一次，在下面的方法之前：换到环里的下一帧。
+    protected override void OnUpdate() => World.PositionHistory.Tick++;
+
+    [ForEach, With<Hitbox>]
+    static void Record(Entity entity, in Position at, ref PositionHistory history)
+    {
+        int index = entity.Id.Index;
+        if (index >= PositionHistory.Capacity) return;            // 超出环的容量：不做补偿
+        int frame = (int)(history.Tick % PositionHistory.Frames);
+        history.Samples[frame * PositionHistory.Capacity + index] = new Sample(entity.Id, history.Tick, at);
+    }
+}
+
+// 拿射手那个 tick 目标所在的位置判定每一发。
+[UpdateAfter<RecordPositions>]
+public class ResolveShots : EcsSystem
+{
+    [ForEach]
+    static void Resolve(Entity shot, in Shot claim, in PositionHistory history, World world)
+    {
+        if (Rewind(in history, claim.Target, claim.Lag, out var then)
+            && world.TryGetEntity(claim.Target, out var target)
+            && target.TryGetHitbox(out var box))
+        {
+            float dx = then.X - claim.At.X;
+            float dy = then.Y - claim.At.Y;
+            if (dx * dx + dy * dy <= box.Radius * box.Radius)
+            {
+                ref var health = ref target.TryGetRef<Health>(out bool found);
+                if (found) health.Value -= 10;
+            }
+        }
+
+        shot.Destroy();
+    }
+
+    // target 在 lag 个 tick 之前站在哪，前提是环里还留着那个 tick。
+    static bool Rewind(in PositionHistory history, EntityId target, int lag, out Position at)
+    {
+        at = default;
+        long tick = history.Tick - lag;
+        if (lag < 0 || lag >= PositionHistory.Frames || tick < 1) return false;   // 比环里最老的还早
+        if (target.Index >= PositionHistory.Capacity) return false;
+        int frame = (int)(tick % PositionHistory.Frames);
+        Sample sample = history.Samples[frame * PositionHistory.Capacity + target.Index];
+        if (sample.Entity != target || sample.Tick != tick) return false;         // 那个 tick 没有记录
+        at = sample.At;
+        return true;
+    }
+}
+```
+
+```csharp
+world.AddSingleton<PositionHistory>() = new PositionHistory
+{
+    Samples = new Sample[PositionHistory.Frames * PositionHistory.Capacity],
+};
+world.AddSystem<RecordPositions>();
+world.AddSystem<ResolveShots>();
+```
+
+每条记录都带着实体和 tick，所以一个槽位即使被同一下标的另一个实体、或者上一圈的记录写过，也不会答错人。记录是每个 tick 每个命中盒一次
+24 字节的写入，倒带是一次数组读取，环建好之后不再分配内存。
+
+为什么不每个 tick 拍一个 World 快照：`Capture` 要复制每个组件的每一行和每个单例，每个 tick O(实体数 × 组件数)，只为了留下几个位置。
+而且快照的用法是恢复，恢复会把整个 World 倒回去：血量、背包、之后创建的实体，每一行还都算作变更。命中判定要的是把过去和现在放在一起读，
+再把命中结果作用到现在。环只复制一列，读它不改变任何东西。快照留给回滚：整个状态退回去，再重新模拟。
 
 ## 完整例子 [#full-example]
 
@@ -196,7 +294,8 @@ capture 的分配就是新建的那个快照本身；`Capture(into)` 会复用�
 | 以为组件里的 `List<T>` 会回滚 | 它是共享的：恢复后还是现在的样子 | 改用 `DynamicBuffer<T>` |
 | 查询遍历期间 capture 或 restore | 抛 `InvalidOperationException` | 运行时 |
 | 把快照恢复到另一个 World | 抛 `ArgumentException` | 运行时 |
-| 恢复 [`RemoveTypes`](/zh/docs/guide/migration-and-unload#remove-types) 之前拍的快照 | 抛 `InvalidOperationException`：它的表已经没了 | 运行时：`RemoveTypes` 之后重新拍 |
+| 恢复 [`RemoveTypes`](/zh/docs/guide/migration-and-unload#remove-types) 之前拍的快照 | 抛 `InvalidOperationException`：它的表已经没了 | 运行时：`RemoveTypes` 之后往里重新拍 |
+| 每个 tick 拍一个快照，用来倒带判定命中 | 每个 tick 复制每一行，而且一恢复就全部倒回 | 只记位置的[历史环](#lag-compensation) |
 | 继续使用 capture 之后创建的实体的句柄 | 恢复后它们失效 | `IsAlive` |
 | 把快照写到磁盘 | 快照是对象图，不是字节 | 用[存档](/zh/docs/guide/saves) |
 | 在其他线程 capture 或 restore | 结构变更只属于所有者线程 | [EECS014](/zh/docs/guide/analyzer#eecs014) |

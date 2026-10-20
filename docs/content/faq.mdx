@@ -33,7 +33,7 @@ long-running .NET servers. What backs it up, in the repository:
   in setup ([Performance](/en/docs/performance)).
 - CI that builds, tests, runs every sample and example, compiles the C# snippets of these docs and checks the
   generated API reference.
-- An analyzer that rejects the design mistakes an ECS makes easy (EECS002 to EECS034), with code fixes.
+- An analyzer that rejects the design mistakes an ECS makes easy (EECS002 to EECS036), with code fixes.
 
 What to weigh: it targets `net10.0` only, the API changes between minor versions while it matures (4.0 to 4.1 renamed
 and removed a few members, and in 4.2 reading a singleton that was never added throws; the [migration guide](/en/docs/migration)
@@ -51,7 +51,17 @@ The headline server tick of 100,000 entities takes <BenchValue k="tick.oneWorld"
 What allocates, on purpose: creating a world, the first entity of a new component set (a new table), the first use
 of a query shape, a table or a `DynamicBuffer<T>` growing past its capacity, and cold tools such as `Describe`.
 `InitialEntityCapacity`, `EnsureCapacity<T1, …, Tn>(count)`, `EnsureCapacity(prefab, count)` and
-`bag.EnsureCapacity(n)` move growth out of the tick.
+`bag.EnsureCapacity(n)` move growth out of the tick. With `WorldOptions.MeasureSystems`, `system.Stats.LastAllocated`
+names the system that allocates ([diagnostics](/en/docs/guide/diagnostics#timing)).
+
+## Does a world give memory back after a peak? [#memory-after-a-peak]
+
+Only when you ask. Tables double when they fill and keep their rows when entities leave, so the next wave reuses them
+without allocating, and a world that once held a million entities keeps their rows. `world.TrimExcess()` drops the
+empty tables, shrinks the others to what they hold (rounded up to a power of two) and releases the buffers of saves,
+loads and migrations. Handles, queries, indexes and snapshots keep working. Call it on the owner thread at a quiet
+moment (after a match, from a maintenance task), not every tick: what it drops is allocated again on next use
+([give memory back](/en/docs/guide/diagnostics#trim)).
 
 ## Is it thread-safe? [#is-it-thread-safe]
 
@@ -100,8 +110,9 @@ threads goes through a mailbox (a queue in a singleton), and `--tests` adds one 
 
 Ask the world: `world.Describe()` lists the tables with their components, entities and bytes, `entity.Describe()`
 returns an entity's component values (the debugger shows them too when you expand an `Entity`), `system.Stats` times
-every system with `WorldOptions.MeasureSystems`, and `system.Error` keeps the exception of a system switched off by
-`SystemErrorPolicy.Disable`. Read them on the owner thread between updates
+every system with `WorldOptions.MeasureSystems` and counts the bytes it allocated and the entities it visited,
+`world.DescribeSchedule()` shows the stages and why each system waits, and `system.Error` keeps the exception of a
+system switched off by `SystemErrorPolicy.Disable`. Read them on the owner thread between updates
 ([Debugging and diagnostics](/en/docs/guide/diagnostics)).
 
 ## Can I use EasyEcs with Unity or Godot? [#unity-godot]
@@ -185,6 +196,7 @@ scheduler, so systems could not run in parallel safely. What an event would say 
 | An entity died, others should react | a `Dead` tag; the systems that care filter `[With<Dead>]` |
 | A component was changed | mark it `ITrackChanges`; the consumer takes `[Changed<T>]` |
 | A component was removed (a buff expired) | mark it `ITrackChanges`; the consumer takes `[Removed<T>]` |
+| An entity was destroyed (a despawn to send) | turn on `WorldOptions.DestroyLog`; each consumer reads `world.DestroyedSince(itsTick, …)` |
 | A one-off message (a hit, a player input) | an entity holding the message, destroyed after its readers ran |
 | Input from another thread | a queue that one system drains on the owner thread |
 
@@ -263,7 +275,9 @@ Three mistakes to avoid:
 - `var hp = entity.Health; hp.Value--;` changes a copy. Keep a `ref var`.
 - Read with `in`, not `ref`: every `ref` access to an `ITrackChanges` component counts as a change, so replication
   would send rows nobody changed. The generated property of a tracked component is read-only for this reason;
-  `entity.WriteX()` is the write.
+  `entity.WriteX()` is the write. A method that writes only some of the rows it visits takes `Mut<T>`, which stamps
+  only the rows it writes; `SetIfChanged` (and the generated `entity.SetXIfChanged(...)`) writes only when the value
+  differs ([what counts as a write](/en/docs/guide/change-tracking#what-counts-as-a-write)).
 - Change a collection inside a component through a `ref` to the component, never through `in`: change tracking and
   the scheduler would miss it ([EECS011](/en/docs/guide/analyzer)). For a list per entity, use a
   [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers).

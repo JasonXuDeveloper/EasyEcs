@@ -12,7 +12,8 @@ the library ([Getting started](/en/docs/getting-started) is the place for that);
 anyone who wants to know what a call costs before making it. Every change to EasyEcs must keep four guarantees:
 
 - **No allocation on hot paths**: queries, iteration, component access and structural changes after warm-up.
-- **Bounded memory under churn**: ids, rows and buffers are recycled, so memory follows the peak population.
+- **Bounded memory under churn**: ids, rows and buffers are recycled, so memory follows the peak population, and
+  `TrimExcess` gives back what a past peak left when the owner asks.
 - **Cache-friendly layouts**: 64-byte lines, columns that SIMD can walk front to back.
 - **Immediate structural changes**: adding, removing, creating and destroying take effect at once, also while a
   pass iterates.
@@ -47,7 +48,12 @@ flowchart TB
   - A [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) column holds one reference per row to that row's own
     list, created by its first write. Moving the row moves the reference; snapshots and clones copy the elements into
     new lists.
-  - Tables double when full and never shrink: each is bounded by the most entities it ever held.
+  - Tables double when full and never shrink on their own: each is bounded by the most entities it ever held.
+    `world.TrimExcess()` is the one call that gives memory back: it drops the empty tables (from the registry,
+    their edges and every cached query match; a later change creates them again) and shrinks the others to their
+    entities rounded up to a power of two, 64 rows at least, with their presence bits and change-tick summaries. It
+    bumps `StorageVersion` once and keeps every table a live snapshot holds rows of
+    ([give memory back](/en/docs/guide/diagnostics#trim)).
 - **Presence bits.** Removing a component keeps the entity in its table and clears the row's bit for that
   component (one bit per row, 64 rows per `ulong`). A column gets its bits on its first removal; until then every row
   has the component and the column carries no bits. Each column also counts its living rows that lack the component,
@@ -68,7 +74,9 @@ flowchart TB
 
 A component marked `ITrackChanges` brings a hidden column of 8-byte ticks into every table that has it: the world's
 change tick of each row's last write. Writes stamp it (a run of rows with one vectorized fill) and keep summaries at
-three levels, so a pass can skip what nobody wrote:
+three levels, so a pass can skip what nobody wrote. A `ref` parameter of a `[ForEach]` method stamps every row the pass
+visits; a `Mut<T>` parameter stamps per write instead, only the rows it writes (one entity-record lookup each), and
+its `SetIfChanged` only when the value differs:
 
 | Level | Summary | Lets a `Changed<T>` pass |
 | --- | --- | --- |
@@ -148,6 +156,11 @@ stateDiagram-v2
   without bounds checks.
 - An entity destroyed while it holds an [`ICleanupComponent`](/en/docs/guide/cleanup-and-disable) loses its other
   components and keeps a `Destroyed` tag until a system removes its last cleanup component.
+- With `WorldOptions.DestroyLog`, the world records every id when it stops being alive (a destroy, a cascade, a move
+  out, the last cleanup component removed, an entity a `Restore` or `Load` takes away) in a fixed ring of 16-byte
+  records (`EntityId` and change tick), preallocated with the world. Readers keep their own tick and read with
+  `DestroyedSince`; a reader older than the ring's oldest record is told to resynchronize. Off, a destroy costs
+  nothing more.
 
 ## Archetype transitions and row removal [#transitions]
 
@@ -297,7 +310,9 @@ flowchart TB
   (EECS014).
 - Parallel runs use the calling thread plus reusable `IThreadPoolWorkItem` helpers that claim items through one
   `Interlocked` cursor (the run's epoch in the high 32 bits, so a helper that starts late never touches the next
-  run). Each job and stage measures its runs and wakes helpers only while they make a run at least a fifth faster
+  run). The chunks of a parallel `[ForEach]` are multiples of 64 rows, so no two threads share a presence-bit word;
+  a job that writes a tracked component cuts at multiples of 4,096 rows, so no two threads share a block's
+  change-tick summary, which its writes update without an atomic instruction. Each job and stage measures its runs and wakes helpers only while they make a run at least a fifth faster
   ([D22](/en/docs/decisions#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)). Nothing is
   allocated per update.
 

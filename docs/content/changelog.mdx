@@ -10,6 +10,75 @@ major or minor version that needs code changes? The
 [migration guide](/en/docs/migration) has the steps. Each
 [GitHub release](https://github.com/JasonXuDeveloper/EasyEcs/releases) also lists every pull request it contains.
 
+## 4.7.0 [#v4-7-0]
+
+### New [#v4-7-0-new]
+
+- `Mut<T>`, a `[ForEach]` parameter of a component the method writes on some rows only: `Value` reads, `Write()` and
+  `SetIfChanged(value)` stamp the row they write, so `[Changed<T>]` readers visit only the rows whose value changed.
+  `entity.SetIfChanged(value)` and the generated `SetHealthIfChanged(…)` skip an equal value outside a pass. See
+  [change tracking](/en/docs/guide/change-tracking).
+- `[ChangedAny<T1..Tn>]` / `[RemovedAny<T1..Tn>]` and `QueryFilter.ChangedAny<T1..Tn>(since)` / `RemovedAny`: rows
+  where at least one of 2 to 9 tracked components was written, or lost. One filter kept in a field serves every
+  client with `filter.Since(ack)`. See [change tracking](/en/docs/guide/change-tracking).
+- `WorldOptions.DestroyLog` and `world.DestroyedSince(since, into, out count)`: the entities destroyed since a reader's
+  tick, for replicating despawns to clients that acknowledge at different ticks; false (resynchronize) when the reader
+  is older than the log (`DestroyLogOldestTick`). See [change tracking](/en/docs/guide/change-tracking).
+- `IUniqueIndexed<TKey>`: a key that names one entity, found with `index.Get(key)` / `TryGet(key, out e)`; every write
+  that would give a second entity a taken key throws before it changes anything. See
+  [indexes and relations](/en/docs/guide/indexes-and-relations).
+- `world.Instantiate(prefab, in c1 … in cn)` and `Instantiate(prefab, entities, in c1 … in cn)`: an instance with up
+  to nine components of its own (a parent, a position, an owner) in one row copy. See
+  [prefabs](/en/docs/guide/prefabs).
+- `world.TrimExcess()` gives back the memory a peak left: empty tables go, the others shrink, the buffers of saves,
+  loads and migrations are released. See [debugging and diagnostics](/en/docs/guide/diagnostics).
+- `[ForEach(Slices = N)]` spreads a method's rows over N runs of its system; `QueryFilter.Slice(index, count)` does it
+  for a struct job, and `EcsSystem.RunCount` says which run is current. See [systems](/en/docs/guide/systems).
+- `SystemStats` records the bytes each run allocated (`LastAllocated`, `TotalAllocated`) and the entities its
+  `[ForEach]` methods visited (`LastEntities`, `TotalEntities`); `world.DescribeSchedule()` describes the stages, the
+  waits and the pairs only registration orders, as text or a mermaid flowchart. See
+  [debugging and diagnostics](/en/docs/guide/diagnostics).
+- Restart saves: `world.Save(output, in exclude)` leaves the components and singletons of a `ComponentSet` out,
+  `world.Load(input, in keep, markWritten)` keeps the singletons the new process set, and
+  `ComponentSet.WithSingleton<T>()` / `With(Type)` name singletons. See [restart](/en/docs/guide/saves#restart).
+- The analyzer: [EECS035](/en/docs/guide/analyzer#eecs035) rejects an invalid `Slices` (below 1, or with a
+  `Changed` / `Removed` filter); [EECS036](/en/docs/guide/analyzer#eecs036) a unique component that cannot be indexed by
+  its key (an `EntityId` key, or a second index key); [EECS031](/en/docs/guide/analyzer#eecs031) covers a loop of
+  `Instantiate` calls with the same values; [EECS033](/en/docs/guide/analyzer#eecs033) suggests the generated
+  `SetXIfChanged(…)`.
+
+### Performance [#v4-7-0-performance]
+
+- Spawning with components is one row copy instead of `Instantiate` and then `Set` (TODO-NUMBERS). See
+  [decision D41](/en/docs/decisions#d41-instantiate-with-components).
+- A system that recomputes a tracked value every tick no longer makes every `[Changed<T>]` reader visit every row:
+  with `Mut<T>`, only the rows whose value changed are stamped (TODO-NUMBERS). See
+  [decision D46](/en/docs/decisions#d46-mut-stamps-per-write).
+- `ChangedAny` skips the tables, 4,096-row blocks and 64-row words none of its components wrote (TODO-NUMBERS). See
+  [decision D49](/en/docs/decisions#d49-changedany-semantics).
+
+### Changes that need code changes [#v4-7-0-breaking]
+
+- `SaveEntities(output, ids, set)` throws `ArgumentException` when the set names a singleton (a group save writes
+  none). See the [migration guide](/en/docs/migration#v4-7-save-entities).
+- `EcsSystem` has a public `RunCount`: a member of that name in a system hides it (warning CS0108). See the
+  [migration guide](/en/docs/migration#v4-7-run-count).
+
+### Fixes [#v4-7-0-fixes]
+
+- A parallel `[ForEach]` that writes a tracked component could lose change stamps: two chunks inside one 4,096-row
+  block raced on the block's change summary, so a `[Changed<T>]` reader could skip rows that were written. Such passes
+  now cut their chunks at multiples of 4,096 rows. See
+  [decision D48](/en/docs/decisions#d48-parallel-tracked-chunks).
+- After `RemoveTypes` dropped tables, a `Capture(into)` into an older snapshot, or a later `Load`, could reuse the
+  copy of another table (other columns). A copy is now reused only for its own table. See
+  [snapshots](/en/docs/guide/snapshots).
+- `entity.GetOrAdd<T>()` of an indexed component that the entity lacked did not tell the value index, so `Find` and
+  `Count` missed the entity until its next `Set`; the default value's key is now indexed. See
+  [indexes and relations](/en/docs/guide/indexes-and-relations).
+- `Instantiate` with components checks the keys of unique components, the given ones and the prefab's, before it
+  creates the entity, as every other write does. See [indexes and relations](/en/docs/guide/indexes-and-relations).
+
 ## 4.6.0 [#v4-6-0]
 
 ### New [#v4-6-0-new]

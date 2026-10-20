@@ -91,7 +91,9 @@ int cleared = world.DestroyEntities<Health, Dead>();                 // 所有�
 ```
 
 反复生成的同类实体（某种 NPC、某种子弹）最好定义成[预制体](/zh/docs/guide/prefabs)：`world.Instantiate(prefab)` 生成一个，
-`entity.Clone()` 复制一个活着的实体。
+`entity.Clone()` 复制一个活着的实体。`world.Instantiate(prefab, new Position(x, y))` 在生成时再带上 1 到 9 个组件，替换
+预制体里的同类组件或者新加进去，只拷贝一次行；批量版本 `Instantiate(prefab, span, …)` 给一整波实体相同的值
+（[预制体](/zh/docs/guide/prefabs#instantiate-with-values)）。
 
 World 能统计和列出它的实体：
 
@@ -155,6 +157,26 @@ public class Chase : EcsSystem
 
 要找出所有指向某个目标的实体，把这个链接做成索引组件或关系：[索引与关系](/zh/docs/guide/indexes-and-relations)。
 
+#### 按唯一键找实体 [#unique-key]
+
+只对应一个实体的键（账号 id、会话令牌），做成实现 `IUniqueIndexed<TKey>` 的组件。第一个拥有它的实体出现时索引就建好了；
+任何会让第二个实体拿到同一个键的写入，都会在改动任何东西之前抛异常；生成的 `world.XIndex` 直接找到那一个实体：
+
+```csharp
+public record struct Account(long Id) : IComponent, IUniqueIndexed<long>
+{
+    public long Key => Id;
+}
+```
+
+```csharp
+var ayla = world.CreateEntity(new Account(1001), new Health(100));
+Entity owner = world.AccountIndex.Get(1001);                     // 没有实体拥有这个键时抛异常
+bool known = world.AccountIndex.TryGet(2002, out var other);     // false：没人拥有它
+```
+
+换键的顺序、空键、每种写入检查什么，详见[索引与关系](/zh/docs/guide/indexes-and-relations#unique-keys)。
+
 ### 组件 [#components]
 
 泛型 API 适用于任何组件类型，[生成成员](#generated-members)只是它的简写。
@@ -167,6 +189,7 @@ public class Chase : EcsSystem
 | `bool TryGet<T>(out T value)` | 有就拿到一份**副本**。不算写入。 |
 | `bool Has<T1..Tn>()` | 是否全都有。 |
 | `Entity Set(in T1 … in Tn)` | 添加或替换 1 到 9 个值，最多搬一次行；可链式调用。 |
+| `bool SetIfChanged<T>(in T value)` | 和 `Set` 一样设置 `value`，但实体已经是这个值时返回 false，不写入、不记 tick、不动索引（[值变了才写](/zh/docs/guide/change-tracking#set-if-changed)）。 |
 | `ref T GetOrAdd<T>()` | 返回 ref，没有就先加一个 `default`；已有的值保持不变。 |
 | `Entity Remove<T1..Tn>()` | 移除 1 到 9 个组件，没有的忽略；可链式调用。 |
 
@@ -190,9 +213,10 @@ bool both = hero.Has<Position, Health>();
 | 声明 | 生成 | 等价于 |
 | --- | --- | --- |
 | `record struct Position(float X, float Y) : IComponent` | `e.Position`（`ref`）、`e.HasPosition`、`e.TryGetPosition(out p)`、`e.GetOrAddPosition()`、`e.SetPosition(x, y)`、`e.RemovePosition()` | `Get`、`Has`、`TryGet`、`GetOrAdd`、`Set(new Position(x, y))`、`Remove` |
-| 被追踪的组件（`Armor : ITrackChanges`） | `e.Armor` 是 `ref readonly`；`e.WriteArmor()` 返回 `ref` | `Read`；`Get`（记为写入） |
-| 索引组件（`Zone : IIndexed<int>`） | `e.Zone` 是 `ref readonly`，没有 `GetOrAddZone` 和 `WriteZone`；`world.ZoneIndex` | `Read`；`world.Index<Zone, int>()` |
-| 分组组件（`Team : IGroup`） | `e.Team` 是 `ref readonly`，没有 `GetOrAddTeam` 和 `WriteTeam`；`filter.InTeam(group)` | `Read`；`filter.InGroup<Team>(group)`（[分组](/zh/docs/guide/groups)） |
+| 被追踪的组件（`Armor : ITrackChanges`） | `e.Armor` 是 `ref readonly`；`e.WriteArmor()` 返回 `ref`；`e.SetArmorIfChanged(v)` | `Read`；`Get`（记为写入）；`SetIfChanged(new Armor(v))` |
+| 索引组件（`Zone : IIndexed<int>`） | `e.Zone` 是 `ref readonly`，没有 `GetOrAddZone` 和 `WriteZone`；`e.SetZoneIfChanged(id)`；`world.ZoneIndex` | `Read`；`SetIfChanged(new Zone(id))`；`world.Index<Zone, int>()` |
+| 唯一组件（`Account : IUniqueIndexed<long>`） | 同索引组件；外加 `world.AccountIndex.Get(key)`、`world.AccountIndex.TryGet(key, out e)` | [一个键对应的那个实体](#unique-key) |
+| 分组组件（`Team : IGroup`） | `e.Team` 是 `ref readonly`，没有 `GetOrAddTeam` 和 `WriteTeam`；`e.SetTeamIfChanged(…)`；`filter.InTeam(group)` | `Read`；`SetIfChanged`；`filter.InGroup<Team>(group)`（[分组](/zh/docs/guide/groups)） |
 | 标签（`struct Dead : IComponent`） | `e.IsDead`、`e.SetDead()`、`e.RemoveDead()` | `Has`、`Set(new Dead())`、`Remove` |
 | 任何带字段的组件（清理组件除外） | `e.DisableHealth()`、`e.EnableHealth()`、`e.IsHealthDisabled` | [`Disable` / `Enable`](/zh/docs/guide/cleanup-and-disable) |
 | 代码里写到 `DynamicBuffer<Loot>` 的缓冲元素 | `e.Loot`（`ref readonly`）、`e.HasLoot`、`e.WriteLoot()`、`e.GetOrAddLoot()`、`e.RemoveLoot()` | `DynamicBuffer<Loot>` 的 `Read`、`Has`、`Get`、`GetOrAdd`、`Remove`（[动态缓冲](/zh/docs/guide/dynamic-buffers)） |
@@ -207,10 +231,12 @@ if (hero.TryGetHealth(out var copy)) Console.WriteLine(copy.Value);
 hero.SetArmor(5).SetDead();                                // 构造参数；标签；可链式调用
 int value = hero.Armor.Value;                              // 被追踪：只是读，不会记 tick
 hero.WriteArmor().Value += 1;                              // 显式写入：会记 tick
+bool changed = hero.SetArmorIfChanged(6);                  // false：Armor 已经是 6，不记 tick
 ```
 
 - 属性就是 `Get`（或 `Read`），组件不存在时会抛异常：可选的组件先用 `HasX` 判断，或者用 `TryGetX` / `TryGetRef<T>(out found)`。
 - `SetX` 每个公开构造函数生成一个重载（record struct 就是主构造函数）；没有构造函数、且字段全是公开可写时，生成一个接收全部字段的重载。
+  `SetXIfChanged` 的参数和它一样，只为能比较（实现了 `IEquatable<T>`，或者是非托管类型）的被追踪、索引、分组组件生成，标签没有。
 - 写入是方法而不是属性 setter：句柄不是变量时（比如 `foreach` 变量），C# 不允许调用 setter。
 - 分析器认识这些成员：`SetX`、`GetOrAddX`、`RemoveX` 算结构变更，其余算对值的读写。
 - 泛型组件、嵌套在别处看不见的类型里的组件，以及和接收者已有成员重名的（`Entity.Id`、`World.Update`），不生成成员；泛型 API 照样能用。
@@ -316,7 +342,8 @@ id 不再指向任何实体：World 说它已经不存活。
 
 | 别这样 | 这样做 | 原因 |
 | --- | --- | --- |
-| 先 `CreateEntity()`，再逐个 `Set` | `CreateEntity(a, b, c)`，或 `Instantiate(prefab)` | 一次放置，而不是每个组件搬一次行 |
+| 先 `CreateEntity()`，再逐个 `Set` | `CreateEntity(a, b, c)`、`Instantiate(prefab)`，或 `Instantiate(prefab, a, b)` | 一次放置，而不是每个组件搬一次行 |
+| 对很少变化的被追踪值调 `SetX(…)` | `SetXIfChanged(…)` | 值相同就不记 tick：`[Changed<T>]` 读取方会跳过它 |
 | `Set(a)` 后再 `Set(b)` | `Set(a, b)`、`Remove<A, B>()` | 写法更简洁，性能相同 |
 | 循环调用 `CreateEntity` / `Destroy` | `CreateEntities(span, …)`、`DestroyEntities<T>(filter)`（[EECS031](/zh/docs/guide/analyzer#eecs031)） | 每波只过一次结构闸门 |
 | 用 `Get<T>()` 读被追踪的组件 | `Read<T>()`、生成的属性、`TryGet<T>()` | `ref` 访问会把这一行记成已写入 |

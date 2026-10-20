@@ -16,7 +16,7 @@ ships only as a net win in time and allocations.
 
 ### Less code through the generator [#less-code-through-the-generator]
 
-The generator already writes `entity.Health`, `HasHealth`, `SetHealth(…)`, `IsDead`, singleton members,
+The generator already writes `entity.Health`, `HasHealth`, `SetHealth(…)`, `SetHealthIfChanged(…)`, `IsDead`, singleton members,
 `world.XIndex`, buffer members, named query items, prefab buffer writers, jobs and access sets. Before each release
 the API, the [battle server](/en/docs/example) and the guides are scanned again: every line users write twice is a
 candidate for a generated member, and every generated member nobody uses goes. A candidate ships when it saves lines
@@ -54,6 +54,20 @@ feature only where it measures ([D21](/en/docs/decisions#d21-net-10-features-onl
   no line saved, more surface.
 - Parallel batch jobs, `entity.LastWriteTick<T>()`, public access sets and one parallelism budget for several worlds
   ([D36](/en/docs/decisions#d36-not-added)).
+- Run conditions (`[RunIf]`): system groups and the host already decide when a group runs, and a predicate per
+  system is code the scheduler cannot see ([D51](/en/docs/decisions#d51-not-added)).
+- `UpdatePeriod` and a system time: the host's fixed-step loop owns time, `UpdateInterval` counts updates and stays
+  deterministic ([D51](/en/docs/decisions#d51-not-added)).
+- `[Requires<B>]`: a prefab per kind of entity brings the full set in one copy, without hidden structural changes
+  ([D51](/en/docs/decisions#d51-not-added)).
+- An entity map from an external key: `IUniqueIndexed<TKey>` is that map, kept by every write
+  ([D51](/en/docs/decisions#d51-not-added)).
+- A built-in `Meter`: `SystemStats` holds the numbers, and publishing them is a documented pattern of the host's own,
+  with no metrics dependency in EasyEcs ([D51](/en/docs/decisions#d51-not-added)).
+- A world checksum: a hash of `world.Save` output does it in user code, without fixing an algorithm for everyone
+  ([D51](/en/docs/decisions#d51-not-added)).
+- A partial-snapshot API: a system that copies the needed values into a ring held by a singleton (the
+  lag-compensation pattern) copies exactly what is needed ([D51](/en/docs/decisions#d51-not-added)).
 
 ## Related [#related]
 

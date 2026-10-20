@@ -14,14 +14,18 @@ The examples on this page share these declarations:
 public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
 public record struct Health(int Value) : IComponent, ITrackChanges;          // tracked: writes are recorded
+public record struct Mana(int Value) : IComponent, ITrackChanges;
 public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+public record struct Account(int Id) : IComponent, IUniqueIndexed<int> { public int Key => Id; }   // one entity per key
 public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }
 public record struct OwnedBy(EntityId Owner) : IComponent, IIndexed<EntityId> { public EntityId Key => Owner; }
 public record struct MemberOf(EntityId Target) : IRelation;                   // many links per entity
 public record struct Loot(int Item);                                          // a DynamicBuffer element
 public record struct Seat(int Number) : ICleanupComponent;                    // released after destroy
 public struct Dead : IComponent;                                              // a tag
+public record struct Session(int Connection) : IComponent;                   // runtime state, not saved
 public record struct Clock(long Tick) : ISingletonComponent;                  // one per world
+public record struct Config(int MaxPlayers) : ISingletonComponent;
 ```
 
 ## Declare data [#declare-data]
@@ -33,6 +37,7 @@ public record struct Clock(long Tick) : ISingletonComponent;                  //
 | `struct X : ISingletonComponent` | One value per world | [Singletons](/en/docs/guide/singletons) |
 | `: ITrackChanges` | Rows record the tick of their last write and removal | [Change tracking](/en/docs/guide/change-tracking) |
 | `: IIndexed<TKey>` with `Key` | Found by value through `world.Index<T, TKey>()` | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
+| `: IUniqueIndexed<TKey>` with `Key` | A key that names one entity: `index.Get(key)`; a write that would give a second entity the key throws | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `: IIndexed<EntityId>` | A link to one entity, found from the target | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `: IRelation` with `Target` | Many links per entity, kept in a buffer | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `: IGroup` with `Group` | Splits tables by value after `world.GroupBy<T>()` | [Groups](/en/docs/guide/groups) |
@@ -62,6 +67,14 @@ Components are structs ([EECS006](/en/docs/guide/analyzer#eecs006)). Keep an ent
 | `world.EnsureCapacity<T1, …, Tn>(n)` / `EnsureCapacity(prefab, n)` / `EnsureEntityCapacity(n)` | Pre-size before a known peak or a wave |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` / `IsAlive(id)` | From an `EntityId` back to a checked handle |
 | `world.Describe()` | Tables, columns, rows and bytes, for tools |
+| `world.DescribeSchedule()` | Every group's stages, each system's reads and writes, why it waits, the pairs only registration orders; `ToString()` / `ToMermaid()` |
+| `world.TrimExcess()` | Drops empty tables and shrinks the others after a peak, at a quiet moment |
+| `world.DestroyedSince(since, into, out count)` / `DestroyLogOldestTick` | Entities destroyed since a tick, with `WorldOptions.DestroyLog`; `false`: the reader is older than the log |
+
+```csharp
+Console.WriteLine(world.DescribeSchedule());        // stages, waits, registration-only pairs
+world.TrimExcess();                                 // after a wave despawned: memory back, nothing breaks
+```
 
 ## Entities [#entities]
 
@@ -77,6 +90,7 @@ members (`unit.Velocity`, `SetHealth(50)`, `RemoveDead()`), as in the example un
 | --- | --- | --- |
 | `world.CreateEntity(a, b, …)` | Creates with up to 9 components, straight into the final table | yes |
 | `entity.Set(a, b, …)` | Adds or overwrites up to 9 components in one move; returns the entity | yes |
+| `entity.SetIfChanged(value)` | `Set` unless the entity already has this value; `true` when it set it (an equal value is not stamped or re-indexed) | when added |
 | `entity.Remove<A, B>()` | Removes components it has; returns the entity | yes |
 | `entity.GetOrAdd<T>()` | `ref T`, added with the default value if missing | when added |
 | `entity.Get<T>()` | `ref T` for writing (a write for change tracking) | no |
@@ -126,9 +140,10 @@ inlined call to the generic API above.
 | Declared | Generated |
 | --- | --- |
 | Component `Position` | `e.Position` (`ref`), `HasPosition`, `TryGetPosition(out p)`, `GetOrAddPosition()`, `SetPosition(x, y)`, `RemovePosition()`, `DisablePosition()`, `EnablePosition()`, `IsPositionDisabled` |
-| Tracked or indexed `Health` | `e.Health` is `ref readonly`; write with `SetHealth(…)` or `WriteHealth()` (`ref`, tracked only) |
+| Tracked or indexed `Health` | `e.Health` is `ref readonly`; write with `SetHealth(…)` or `WriteHealth()` (`ref`, tracked only); `SetHealthIfChanged(…)` writes only a different value |
 | Tag `Dead` | `e.IsDead`, `SetDead()`, `RemoveDead()` |
 | Indexed `Team` | `world.TeamIndex` (`world.Index<Team, int>()`) |
+| Unique `Account` | `world.AccountIndex.Get(id)` / `TryGet(id, out e)` |
 | Grouped `Zone` | `filter.InZone(id)` (`InGroup<Zone>(id)`) |
 | Buffer element `Loot` | `e.Loot` (`ref readonly DynamicBuffer<Loot>`), `HasLoot`, `WriteLoot()`, `GetOrAddLoot()`, `RemoveLoot()` |
 | Relation `MemberOf` | `e.AddMemberOf(target)`, `RemoveMemberOf(target)`, `LinksMemberOf(target)`, `world.MemberOfIndex` |
@@ -140,6 +155,7 @@ inlined call to the generic API above.
 unit.SetPosition(3, 4).SetDead();                   // setters return the entity
 unit.Position.X += 1;                               // untracked: a ref
 unit.SetHealth(80);                                 // tracked: written with Set, stamped
+bool rewritten = unit.SetHealthIfChanged(80);       // false: the value is already 80, nothing stamped
 bool dead = unit.IsDead;
 ```
 
@@ -167,6 +183,7 @@ public class MovementSystem : EcsSystem
 | `World` | The world | For creating entities from a static method |
 | `EntitySpan` | The entities of a batch method's run | Batch methods only |
 | `Maybe<T>` | A component the entity may lack | `HasValue`, `Value` |
+| `Mut<T>` | A component the method writes on some rows | `Value` reads; `Write()` and a `SetIfChanged(value)` that changed it stamp the row; a write for the scheduler |
 | Any other type (outside a system) | A value the caller passes to the entry point | `ref int count`, `in Settings s` |
 
 ### Attributes [#attributes]
@@ -174,13 +191,23 @@ public class MovementSystem : EcsSystem
 | Attribute | On | Does |
 | --- | --- | --- |
 | `[ForEach]` / `[ForEach(Parallel = true)]` | Method | The method is the loop; `Parallel` splits rows across threads ([EECS010](/en/docs/guide/analyzer#eecs010)) |
+| `[ForEach(Slices = N)]` | Method | Each run visits one slice, about 1 / N of the rows: every row once per N runs (not with `Changed` / `Removed`: [EECS035](/en/docs/guide/analyzer#eecs035)) |
 | `[With<T>]` | Method, system group | Requires `T` without passing it |
 | `[Without<T>]` | Method, system group | Excludes entities with `T` |
 | `[WithAny<A>, WithAny<B>]` | Method, system group | Requires at least one of them |
 | `[Changed<T>]` | Method | Rows whose tracked `T` was written since the system last ran |
 | `[Removed<T>]` | Method | Entities that lost tracked `T` since the system last ran |
+| `[ChangedAny<A, B>]` / `[RemovedAny<A, B>]` | Method | Rows where at least one of 2 to 9 tracked components was written, or lost |
 | `[UpdateBefore<S>]` / `[UpdateAfter<S>]` | System | Ordering ([EECS019](/en/docs/guide/analyzer#eecs019) rejects cycles) |
 | `[UpdateInGroup<G>]` | System | Runs on `world.Update<G>()` only |
+
+```csharp
+public class DecaySystem : EcsSystem
+{
+    [ForEach(Slices = 4)]                            // a quarter of the rows per run, every row once per 4 runs
+    static void Decay(ref Velocity v) => v = new Velocity(v.X * 0.9f, v.Y * 0.9f);
+}
+```
 
 `[Changed<T>]` and `[Removed<T>]` go on methods only. A system group takes `[With<T>]`, `[Without<T>]` and
 `[WithAny<T>]` ([EECS023](/en/docs/guide/analyzer#eecs023) flags them on any other struct), or `IGroupWith<T>` /
@@ -202,7 +229,8 @@ public struct Shop : IActorGroup<Shop>;             // the systems of [UpdateInG
 | `Enabled` | Skip the system; setting `true` clears `Error` |
 | `Error` | The exception that disabled it under `SystemErrorPolicy.Disable` |
 | `LastRunTick` | The change tick of its last run |
-| `Stats` | `Runs`, `Last`, `Total`, `Average` with `MeasureSystems` |
+| `RunCount` | Runs before the current one (a sliced method visits slice `RunCount % N`) |
+| `Stats` | `Runs`, `Last`, `Total`, `Average`, `LastAllocated` / `TotalAllocated` (bytes), `LastEntities` / `TotalEntities` (visited) with `MeasureSystems` |
 
 Systems keep no state ([EECS007](/en/docs/guide/analyzer#eecs007)) and never reference each other
 ([EECS008](/en/docs/guide/analyzer#eecs008)). Guide: [Systems](/en/docs/guide/systems).
@@ -238,7 +266,9 @@ bool anyDead = world.Any<Dead>();
 | --- | --- |
 | `.With<T>()` / `.Without<T>()` / `.WithAny<T>()` | Presence, as the attributes |
 | `.Changed<T>(since)` / `.Removed<T>(since)` | Written, or lost, at or after tick `since` |
-| `.Since(tick)` | The same filter with a new tick |
+| `.ChangedAny<A, B>(since)` / `.RemovedAny<A, B>(since)` | At least one of them written, or lost, at or after `since` |
+| `.Since(tick)` | The same filter with a new tick: one filter, run with each client's tick |
+| `.Slice(index, count)` | Slice `index` of `count` of every table, for the `ForEach` calls only |
 | `.InGroup<T>(group)` | One group of a grouped component |
 
 Guide: [Queries and filters](/en/docs/guide/queries).
@@ -264,6 +294,7 @@ Guide: [Singletons](/en/docs/guide/singletons).
 | Is a write | Is not a write |
 | --- | --- |
 | `ref` parameters, `Span<T>`, `Query` items | `in` parameters, `ReadOnlySpan<T>` |
+| `Mut<T>.Write()`, a `SetIfChanged(value)` with a new value | `Mut<T>.Value`, a `SetIfChanged(value)` with the same value |
 | `Get<T>()`, `TryGetRef<T>` when found, `GetOrAdd<T>()`, `Set(…)`, `WriteX()` | `Read<T>()`, `TryGet<T>(out copy)`, `Has<T>()`, `e.X` of a tracked `X` |
 | Creating, instantiating, cloning, `Restore`, `Load`, `LoadEntitiesInto` | Removing (that is a removal, for `[Removed<T>]`) |
 | `entity.Run`: the components in the job's `Writes` | `LoadEntitiesInto(…, markWritten: false)` |
@@ -274,6 +305,34 @@ world.Update();
 int changed = world.Count<Health>(QueryFilter.Create().Changed<Health>(mark));
 ```
 
+```csharp
+public class ClampSystem : EcsSystem
+{
+    [ForEach]                                        // stamps only the rows it writes
+    static void Clamp(Mut<Health> hp)
+    {
+        if (hp.Value.Value > 100) hp.Write() = new Health(100);
+    }
+}
+```
+
+```csharp
+// One filter, kept in a field, run with each client's acknowledged tick.
+private static readonly QueryFilter Dirty = QueryFilter.Create().ChangedAny<Health, Mana>(0);
+```
+
+```csharp
+ulong ack = world.ChangeTick;                       // a client's acknowledged tick
+world.Update();
+int toSend = world.Count<Health>(Dirty.Since(ack));
+
+using var replicated = new World(new WorldOptions { DestroyLog = 4096 });
+ulong seen = replicated.ChangeTick;
+replicated.Update();
+var gone = new EntityId[4096];
+if (!replicated.DestroyedSince(seen, gone, out int goneCount)) { /* older than the log: send everything */ }
+```
+
 Guide: [Change tracking](/en/docs/guide/change-tracking).
 
 ## Indexes, relations, hierarchy, groups [#indexes]
@@ -282,6 +341,7 @@ Guide: [Change tracking](/en/docs/guide/change-tracking).
 | --- | --- |
 | `world.Index<T, TKey>()` (`world.TIndex`) | The value index of `T` |
 | `index.Find(key)` / `TryFind(key, out e)` / `Count(key)` | Matching entities, one, how many |
+| `index.Get(key)` / `TryGet(key, out e)` | The one entity of a unique key (`IUniqueIndexed<TKey>`); `Get` throws when none has it |
 | `index.Range(min, max)` / `RangeDescending` / `Ascending()` / `Descending()` | Sorted walks, for a comparable key |
 | `index.WhenTargetDestroyed(TargetPolicy.Keep / Remove / Destroy)` | What an `EntityId` link does when its target dies |
 | `entity.AddRelation(r)` / `RemoveRelation<T>(target)` / `HasRelation<T>(target)` | Many-to-many links |
@@ -297,6 +357,8 @@ var ship = world.CreateEntity();
 world.CreateEntity(new ChildOf(ship));
 foreach (var child in world.Children(ship)) { }
 foreach (var part in world.Descendants(ship)) { }  // children, grandchildren, ...
+var account = world.CreateEntity(new Account(42));
+Entity holder = world.AccountIndex.Get(42);        // the same entity; a second Account(42) would throw
 ```
 
 Indexed and grouped components are written with `Set`, never through a `ref`
@@ -311,6 +373,7 @@ Indexed and grouped components are written with `Set`, never through a `ref`
 | `prefab.AddMember()` / `prefab.Id` | A group of entities instantiated together; `Id` names a member in links |
 | `prefab.SetBuffer(items)` | A `DynamicBuffer<T>` each instance gets a copy of |
 | `world.Instantiate(prefab)` / `Instantiate(prefab, span)` | One entity, or a wave in one pass |
+| `world.Instantiate(prefab, a, b, …)` / `Instantiate(prefab, span, a, b, …)` | The same with up to 9 components of its own, replacing or adding to the prefab's: one row copy |
 | `world.CreateEntities(span, a, b, …)` | A wave with the same values |
 | `world.DestroyEntities<T…>(filter)` | Destroys every match; returns how many |
 | `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | One component set or removed on every match |
@@ -320,6 +383,7 @@ Indexed and grouped components are written with `Set`, never through a `ref`
 var goblin = new Prefab().SetPosition(0, 0).SetHealth(30);
 var wave = new Entity[100];
 world.Instantiate(goblin, wave);
+var scout = world.Instantiate(goblin, new Velocity(2, 0));   // the prefab's values plus its own
 world.SetAll(new Velocity(0, 0), QueryFilter.Create().With<Health>());
 world.DestroyEntities<Dead>();
 ```
@@ -356,8 +420,9 @@ Guide: [Dynamic buffers](/en/docs/guide/dynamic-buffers).
 | `world.Capture()` / `Capture(into)` | An in-memory copy; `into` reuses a snapshot's arrays |
 | `world.Restore(snapshot)` | Back to the copy; handles from then are valid again |
 | `world.Save(writer)` / `Load(bytes)` | A whole world as bytes (managed components need `[NinoType]`); `Load` throws `InvalidDataException` when an unmanaged component's layout changed since the save |
+| `world.Save(writer, exclude)` / `Load(bytes, keep, markWritten: false)` | A restart: the save leaves out the components and singletons of a set, the load keeps the singletons of a set as the new process set them |
 | `world.SaveEntities(writer, ids)` / `LoadEntities(bytes, handles)` | A group of entities to another world or process |
-| `ComponentSet.Create().With<T>()…` | The components of a record, built once in a `static readonly` field |
+| `ComponentSet.Create().With<T>()….WithSingleton<S>()` | Components (and, for whole-world saves, singletons), built once in a `static readonly` field |
 | `world.SaveEntities(writer, ids, set)` | A record: only the components of the set |
 | `world.LoadEntitiesInto(bytes, entities, markWritten: false)` | A record onto entities that exist; `markWritten: false` keeps it from counting as changed |
 | `world.MoveEntities(target, ids, moved)` | A group to another world of the thread, no encoding |
@@ -374,6 +439,20 @@ using var copy = new World();
 copy.Load(bytes.WrittenSpan);
 ```
 
+```csharp
+// A restart: the runtime state and the configuration are not saved; the new process brings its own.
+private static readonly ComponentSet Runtime = ComponentSet.Create().WithSingleton<Config>().With<Session>();
+private static readonly ComponentSet NewConfig = ComponentSet.Create().WithSingleton<Config>();
+```
+
+```csharp
+var restart = new System.Buffers.ArrayBufferWriter<byte>();
+world.Save(restart, Runtime);                       // the old process, at shutdown
+using var next = new World();
+next.SetConfig(64);                                 // the new version's configuration
+next.Load(restart.WrittenSpan, NewConfig, markWritten: false);   // Config stays as set
+```
+
 Guides: [Snapshots](/en/docs/guide/snapshots), [Saves](/en/docs/guide/saves),
 [Migration and unloading](/en/docs/guide/migration-and-unload#records).
 
@@ -386,6 +465,7 @@ Guides: [Snapshots](/en/docs/guide/snapshots), [Saves](/en/docs/guide/saves),
 | `MaxDegreeOfParallelism` | processor count | Threads one parallel run uses at most |
 | `MeasureSystems` | `false` | Records `system.Stats` |
 | `SystemErrors` | `SystemErrorPolicy.Throw` | `Disable` switches a failing system off and goes on |
+| `DestroyLog` | 0 (off) | Capacity of the destroy log `DestroyedSince` reads, 16 bytes per record |
 
 ```csharp
 using var server = new World(new WorldOptions { ParallelSystems = true, SystemErrors = SystemErrorPolicy.Disable });

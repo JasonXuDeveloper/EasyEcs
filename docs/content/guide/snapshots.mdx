@@ -94,11 +94,116 @@ world.Restore(history[(100 - 3) % Rollback.Ticks]);                             
   counts as removed, so [replication](/en/docs/guide/change-tracking#removal-detection) re-sends the restored state.
 - **Indexes** re-index from scratch on their next lookup.
 - **Relations** re-index too.
+- **The [destroy log](/en/docs/guide/change-tracking#destroy-log)**, when it is on, records the entities the restore
+  takes away (alive before it, not in the snapshot). The log itself is not part of a snapshot.
 
 Both calls take the structural gate and throw while a query iterates: call them between updates, or from a system's
 `OnUpdate` outside its `[ForEach]` methods. A snapshot belongs to the world it was taken from (`ArgumentException`
 otherwise), and one taken before [`RemoveTypes`](/en/docs/guide/migration-and-unload#remove-types) cannot be restored
-after it (`InvalidOperationException`).
+after it (`InvalidOperationException`). It can be captured into again: `world.Capture(snapshot)` replaces every copy
+that belonged to a table `RemoveTypes` dropped, so a ring of snapshots kept across a reload goes on working once each
+of them is captured anew.
+
+### A history for lag compensation [#lag-compensation]
+
+A shooter server checks a hit where the target was when the shooter saw it: the client is some ticks behind, so the
+server rewinds the target by that lag. That needs the positions of the last few ticks, not the whole world. Keep them
+in a singleton ring buffer: a system copies each hitbox's `Position` into this tick's frame, and the hit check reads
+the frame of the shooter's tick.
+
+```csharp
+public record struct Hitbox(float Radius) : IComponent;
+
+// A client's claim: it hit Target, standing at At, Lag ticks ago.
+public record struct Shot(EntityId Target, Position At, int Lag) : IComponent;
+
+// One recorded position: whose it is, the tick it was taken at, where the entity stood.
+public record struct Sample(EntityId Entity, long Tick, Position At);
+
+// The positions of the last Frames ticks, one frame per tick, overwritten in a ring.
+public struct PositionHistory : ISingletonComponent
+{
+    public const int Frames = 32;          // the longest lag compensated, in ticks
+    public const int Capacity = 4_096;     // entity indexes recorded: the world's peak population
+    public long Tick;                      // the tick being recorded
+    public Sample[] Samples;               // Frames × Capacity: entity index i of frame f at f * Capacity + i
+}
+```
+
+```csharp
+// Copies this tick's hitbox positions into the ring.
+public class RecordPositions : EcsSystem
+{
+    // Once per tick, before the method below: the next frame of the ring.
+    protected override void OnUpdate() => World.PositionHistory.Tick++;
+
+    [ForEach, With<Hitbox>]
+    static void Record(Entity entity, in Position at, ref PositionHistory history)
+    {
+        int index = entity.Id.Index;
+        if (index >= PositionHistory.Capacity) return;            // past the ring's capacity: not compensated
+        int frame = (int)(history.Tick % PositionHistory.Frames);
+        history.Samples[frame * PositionHistory.Capacity + index] = new Sample(entity.Id, history.Tick, at);
+    }
+}
+
+// Checks each shot against where its target stood at the shooter's tick.
+[UpdateAfter<RecordPositions>]
+public class ResolveShots : EcsSystem
+{
+    [ForEach]
+    static void Resolve(Entity shot, in Shot claim, in PositionHistory history, World world)
+    {
+        if (Rewind(in history, claim.Target, claim.Lag, out var then)
+            && world.TryGetEntity(claim.Target, out var target)
+            && target.TryGetHitbox(out var box))
+        {
+            float dx = then.X - claim.At.X;
+            float dy = then.Y - claim.At.Y;
+            if (dx * dx + dy * dy <= box.Radius * box.Radius)
+            {
+                ref var health = ref target.TryGetRef<Health>(out bool found);
+                if (found) health.Value -= 10;
+            }
+        }
+
+        shot.Destroy();
+    }
+
+    // Where target stood lag ticks ago, if the ring still holds that tick.
+    static bool Rewind(in PositionHistory history, EntityId target, int lag, out Position at)
+    {
+        at = default;
+        long tick = history.Tick - lag;
+        if (lag < 0 || lag >= PositionHistory.Frames || tick < 1) return false;   // older than the ring
+        if (target.Index >= PositionHistory.Capacity) return false;
+        int frame = (int)(tick % PositionHistory.Frames);
+        Sample sample = history.Samples[frame * PositionHistory.Capacity + target.Index];
+        if (sample.Entity != target || sample.Tick != tick) return false;         // not recorded at that tick
+        at = sample.At;
+        return true;
+    }
+}
+```
+
+```csharp
+world.AddSingleton<PositionHistory>() = new PositionHistory
+{
+    Samples = new Sample[PositionHistory.Frames * PositionHistory.Capacity],
+};
+world.AddSystem<RecordPositions>();
+world.AddSystem<ResolveShots>();
+```
+
+Each sample carries its entity and its tick, so a slot that an entity of another incarnation or an older lap wrote
+never answers for the wrong one. Recording is one 24-byte store per hitbox per tick, a rewind one array read, and
+nothing allocates after the ring is created.
+
+Why not a world snapshot per tick: `Capture` copies every row of every component and every singleton, O(entities ×
+components) per tick, to keep a few positions. And a snapshot is used by restoring it, which rewinds the whole world:
+health, inventories, entities created since, every row counted as changed. A hit check needs to read the past next
+to the present, then apply the hit to the present. The ring copies one column, and reading it changes nothing.
+Snapshots are for rollback, where the whole state goes back and is simulated again.
 
 ## Full example [#full-example]
 
@@ -206,7 +311,8 @@ The capture's allocation is the new snapshot itself; `Capture(into)` reuses one.
 | Expecting a `List<T>` in a component to roll back | It is shared: it comes back as it is now | Use `DynamicBuffer<T>` |
 | Capturing or restoring while a query iterates | `InvalidOperationException` | At run time |
 | Restoring a snapshot into another world | `ArgumentException` | At run time |
-| Restoring a snapshot taken before [`RemoveTypes`](/en/docs/guide/migration-and-unload#remove-types) | `InvalidOperationException`: its tables are gone | At run time: capture again after `RemoveTypes` |
+| Restoring a snapshot taken before [`RemoveTypes`](/en/docs/guide/migration-and-unload#remove-types) | `InvalidOperationException`: its tables are gone | At run time: capture into it again after `RemoveTypes` |
+| A snapshot every tick to rewind hit checks | A copy of every row each tick, and a restore rewinds everything | A [history ring](#lag-compensation) of the positions only |
 | Keeping handles of entities created after the capture | They are stale after the restore | `IsAlive` |
 | Writing snapshots to disk | They are object graphs, not bytes | Use [saves](/en/docs/guide/saves) |
 | Capturing or restoring from another thread | Structural changes belong to the owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |

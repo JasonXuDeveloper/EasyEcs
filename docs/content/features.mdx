@@ -22,13 +22,13 @@ after warm-up, and is covered by the unit tests and a BenchmarkDotNet benchmark.
 
 | Job | Features |
 | --- | --- |
-| [Simulate](#simulate) | [worlds and entities](#worlds-and-entities), [components and tags](#components-and-tags), [generated members](#generated-members), [systems and `[ForEach]`](#systems-and-foreach), [generic systems](#generic-systems), [filters](#filters), [optional components](#optional-components), [batch methods](#batch-methods), [singletons](#singletons), [ordering, groups and intervals](#system-groups-and-intervals), [immediate structural changes](#immediate-structural-changes), [ad-hoc queries](#ad-hoc-queries) |
-| [React to changes](#react) | [change tracking](#change-tracking), [removal detection](#removal-detection), [cleanup components](#cleanup-components), [disable and enable](#disable-and-enable) |
-| [Find](#find) | [value indexes](#value-indexes), [ordered ranges](#ordered-ranges), [table groups](#table-groups) |
+| [Simulate](#simulate) | [worlds and entities](#worlds-and-entities), [components and tags](#components-and-tags), [generated members](#generated-members), [systems and `[ForEach]`](#systems-and-foreach), [generic systems](#generic-systems), [filters](#filters), [optional components](#optional-components), [batch methods](#batch-methods), [singletons](#singletons), [ordering, groups and intervals](#system-groups-and-intervals), [slices](#slices), [immediate structural changes](#immediate-structural-changes), [ad-hoc queries](#ad-hoc-queries) |
+| [React to changes](#react) | [change tracking](#change-tracking), [writes that count only when the value changed](#write-only-when-changed), [removal detection](#removal-detection), [destroy log](#destroy-log), [cleanup components](#cleanup-components), [disable and enable](#disable-and-enable) |
+| [Find](#find) | [value indexes](#value-indexes), [unique keys](#unique-keys), [ordered ranges](#ordered-ranges), [table groups](#table-groups) |
 | [Structure](#structure) | [relations](#relations), [hierarchy](#hierarchy), [dynamic buffers](#dynamic-buffers), [prefabs and cloning](#prefabs-and-cloning) |
 | [Persist](#persist) | [snapshots](#snapshots), [saves](#saves), [migration](#migration), [unloading plugin types](#unloading) |
 | [Scale](#scale) | [one world per thread](#threading-model), [parallel systems](#parallel-systems), [parallel `[ForEach]`](#parallel-foreach), [bulk operations](#bulk-operations) |
-| [Build and operate](#operate) | [analyzer and code fixes](#analyzer), [per-system timing](#per-system-timing), [errors](#errors), [introspection](#introspection), [Native AOT](#native-aot), [hosting and testing](#hosting-and-testing), [templates and samples](#templates) |
+| [Build and operate](#operate) | [analyzer and code fixes](#analyzer), [per-system timing](#per-system-timing), [the schedule](#schedule), [errors](#errors), [introspection](#introspection), [giving memory back](#trim-excess), [Native AOT](#native-aot), [hosting and testing](#hosting-and-testing), [templates and samples](#templates) |
 
 ## Simulate [#simulate]
 
@@ -171,6 +171,21 @@ update, spread over phases; `Enabled` switches it off. A group's filters (`[With
   ([EECS019](/en/docs/guide/analyzer#eecs019)).
 - **Guide:** [Systems](/en/docs/guide/systems)
 
+### Slices [#slices]
+
+`[ForEach(Slices = N)]` spreads a method's rows over N runs of its system: each run visits one slice, about 1 / N of
+every matching table, cut at 64-row words, so every row is visited once per N runs. `system.RunCount` says which run
+this is (the slice is `RunCount % N`); `QueryFilter.Slice(index, count)` does the same for a struct job.
+
+- **Use it for:** work that may lag a little but costs too much on one tick: re-scoring AI targets, scanning for
+  idle sessions, decaying values of a large population.
+- **Skip it for:** `[Changed<T>]` / `[Removed<T>]` methods, which must see every change
+  ([EECS035](/en/docs/guide/analyzer#eecs035)), and logic that must touch every row every tick. Rows that move
+  between runs may be skipped or visited twice in one cycle.
+- **Cost:** about 1 / N of the rows per run, plus the table walk; with `UpdateInterval` M, a row is visited once per
+  N × M updates. `Query`, `Count` and the bulk calls refuse a sliced filter.
+- **Guide:** [Systems](/en/docs/guide/systems)
+
 ### Immediate structural changes [#immediate-structural-changes]
 
 Create, destroy, add and remove apply at once, also inside a pass over the same tables. A pass visits each entity at
@@ -220,29 +235,62 @@ public class ReplicationSystem : EcsSystem
 ### Change tracking [#change-tracking]
 
 A component marked `ITrackChanges` records the change tick of each row's last write (any access that hands out a
-`ref`). A `[Changed<T>]` method visits only the rows written since its system last ran;
-`QueryFilter.Changed<T>(since)` does the same for queries.
+`ref`). A `[Changed<T>]` method visits only the rows written since its system last ran, and
+`[ChangedAny<A, B>]` the rows where at least one of several components was written. `QueryFilter.Changed<T>(since)`
+and `ChangedAny<A, B>(since)` do the same for queries: keep one filter and run it with each client's acknowledged
+tick (`filter.Since(ack)`), so every client gets exactly what changed since its own last acknowledgement.
 
 - **Use it for:** replication to clients, saving dirty entities, updating a spatial structure for the units that
-  moved.
-- **Skip it for:** components written on every row every tick (there is nothing to skip).
+  moved; `ChangedAny` for a snapshot that goes out when any of its parts changed (health, mana or armor).
+- **Skip it for:** components that really change on most rows every tick (positions of moving units): there is
+  nothing to skip. A component a system *recomputes* every tick but that rarely changes value is different: write it
+  only when the value changed ([below](#write-only-when-changed)) and track it.
 - **Cost:** 8 bytes per row and one store per write; untracked components pay nothing. Replicating 10 changed
   entities of 100,000 takes <BenchValue k="changed.10" />, against <BenchValue k="changed.10.scan" /> for a scan of
-  every row.
+  every row. A table none of whose columns was written since the tick is skipped whole, for `ChangedAny` too.
+- **Guide:** [Change tracking](/en/docs/guide/change-tracking)
+
+### Writes that count only when the value changed [#write-only-when-changed]
+
+A `ref` parameter of a tracked component stamps every row its method visits, written or not. A `Mut<T>` parameter
+stamps only the rows the method writes: `Value` reads, `Write()` hands out the `ref` and stamps, `SetIfChanged(value)`
+stores and stamps only a value that differs. Outside a pass, `entity.SetIfChanged(value)` and the generated
+`SetHealthIfChanged(…)` do the same.
+
+- **Use it for:** a value recomputed every tick that changes now and then: a unit's target, its grid cell, a
+  derived stat. `[Changed<T>]` readers then visit only the rows whose value really changed.
+- **Skip it for:** a value written on most rows anyway: a plain `ref` is cheaper.
+- **Cost:** `Value` is a plain read; each write is one entity lookup and one stamp; `SetIfChanged` compares the value
+  first (`IEquatable<T>`, which record structs implement, or the bytes of an unmanaged struct). The scheduler counts
+  a `Mut<T>` parameter as a write of `T`.
 - **Guide:** [Change tracking](/en/docs/guide/change-tracking)
 
 ### Removal detection [#removal-detection]
 
 A `[Removed<T>]` method visits the entities that lost a tracked `T` since its system last ran, once per removal,
-with their other components: removing keeps the row and stamps its tick.
+with their other components: removing keeps the row and stamps its tick. `[RemovedAny<A, B>]` and
+`QueryFilter.RemovedAny<A, B>(since)` select the entities that lost any of several.
 
 - **Use it for:** telling clients what went away (a fire went out, a shield broke), releasing what a component stood
   for (a reserved cell).
-- **Skip it for:** destroyed entities, which have no row: mark them with a tag that replication reads, and destroy
-  them after it ran.
+- **Skip it for:** destroyed entities, which have no row: the [destroy log](#destroy-log) reports them.
 - **Cost:** no storage beyond the tick column the component already has. Finding 10 removals among 100,000 entities
   takes <BenchValue k="removed.10" />.
 - **Guide:** [Change tracking](/en/docs/guide/change-tracking#removal-detection)
+
+### Destroy log [#destroy-log]
+
+With `WorldOptions.DestroyLog = n`, the world keeps the last n destroyed entities, each with the change tick of its
+destruction. `world.DestroyedSince(since, into, out count)` lists those destroyed since a reader's tick, so every
+client, each with its own acknowledged tick, learns which entities to delete. It returns false when the reader is
+older than the log (`DestroyLogOldestTick`): that client needs the whole state again.
+
+- **Use it for:** replicating despawns to many clients that acknowledge at different ticks.
+- **Skip it for:** one reader that must act on each destroyed entity before it goes (release a seat, close a
+  socket): that is a [cleanup component](#cleanup-components).
+- **Cost:** 16 bytes per record, allocated once; one store per destroy; nothing when off (the default).
+  `DestroyedSince` is O(records it reports) and allocates nothing.
+- **Guide:** [Change tracking](/en/docs/guide/change-tracking)
 
 ### Cleanup components [#cleanup-components]
 
@@ -273,15 +321,17 @@ Lookups by value without a dictionary kept in sync by hand.
 ```csharp
 public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
 public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }
+public record struct Account(int Id) : IComponent, IUniqueIndexed<int> { public int Key => Id; }
 ```
 
 ```csharp
 using var world = new World();
 world.GroupBy<Zone>();                                          // at setup
-world.CreateEntity(new Team(1), new Zone(3), new Position(0, 0));
+world.CreateEntity(new Team(1), new Zone(3), new Position(0, 0), new Account(7));
 
 int red = world.TeamIndex.Count(1);                             // a hash probe
 int inZone = world.Count<Position>(QueryFilter.Create().InZone(3));   // walks zone 3's rows only
+Entity owner = world.AccountIndex.Get(7);                       // the one entity of a unique key
 ```
 
 ### Value indexes [#value-indexes]
@@ -294,6 +344,21 @@ which the index could not see, fail the build ([EECS015](/en/docs/guide/analyzer
 - **Skip it for:** values that change on most rows every tick and are looked up rarely: every change is a re-link.
 - **Cost:** one node per indexed entity, paid only by worlds that use the index. `Count` is a hash probe, `Find` one
   step per match.
+- **Guide:** [Indexes and relations](/en/docs/guide/indexes-and-relations)
+
+### Unique keys [#unique-keys]
+
+A component implementing `IUniqueIndexed<TKey>` names one entity per key: `index.Get(key)` returns it (and throws
+when none has it), `TryGet(key, out e)` asks. Every write that would give a second entity a key that another one
+holds (`Set`, create, `Instantiate`, `Clone`, `SetAll`, `Enable`, loads and moves) throws
+`InvalidOperationException` before it changes anything. A null reference key is no key.
+
+- **Use it for:** an account id, a player name, a session token, the occupant of a grid cell: keys that must never
+  name two entities.
+- **Skip it for:** `EntityId` keys ([EECS036](/en/docs/guide/analyzer#eecs036)); keys several entities share (a plain
+  `IIndexed<TKey>`).
+- **Cost:** the index exists from the first table holding the component, so every write is checked: one hash probe
+  per changed key, an extra pass over the rows for the bulk calls and loads. `Get` and `TryGet` are a hash probe.
 - **Guide:** [Indexes and relations](/en/docs/guide/indexes-and-relations)
 
 ### Ordered ranges [#ordered-ranges]
@@ -337,6 +402,7 @@ archer.WriteLoot().Add(new Loot(7));                                // a tracked
 var goblin = new Prefab().SetPosition(0, 0).SetHealth(30);
 var wave = new Entity[100];
 world.Instantiate(goblin, wave);
+var guard = world.Instantiate(goblin, new ChildOf(archer));          // its own parent, one row copy
 ```
 
 ### Relations [#relations]
@@ -383,12 +449,15 @@ write through `in` does not compile. Snapshots copy the elements.
 
 A `Prefab` is a recipe of component values that belongs to no world, so no query sees it and no system filters it
 out. `world.Instantiate(prefab)` creates an entity, `Instantiate(prefab, span)` a wave; `new Prefab(base)` makes a
-variant, `AddMember()` a group (a boss with its minions). `entity.Clone()` copies a living entity.
+variant, `AddMember()` a group (a boss with its minions). `Instantiate(prefab, new ChildOf(boss), new Position(x, y))`
+gives the instance up to nine components of its own in the same call: they replace the prefab's values or add to them.
+`entity.Clone()` copies a living entity.
 
 - **Use it for:** kinds of entities spawned again and again: NPC types, projectiles, loot, defined in code or
-  loaded from configuration.
+  loaded from configuration; with components, a spawn whose parent, position or owner differs per instance.
 - **Skip it for:** entities whose values all differ: create them with their values.
-- **Cost:** one row copy per instance; a wave passes the structural gate once and grows its table at most once.
+- **Cost:** one row copy per instance, also with components (no move after the copy); a wave passes the structural
+  gate once and grows its table at most once.
 - **Guide:** [Prefabs](/en/docs/guide/prefabs)
 
 ## Persist [#persist]
@@ -423,6 +492,10 @@ them back, any number of times. `Capture(into)` reuses a snapshot's arrays.
 process: same ids, components and singletons. Unmanaged components are their raw rows; managed components, singletons and
 the unmanaged components marked `[NinoType]` are written by Nino. Types are recorded by Nino type id, so a load skips
 components the process no longer has, and `[NinoFormerName]` keeps a renamed one.
+
+For a restart, `Save(writer, in exclude)` leaves out the components and singletons of a `ComponentSet` (runtime
+state, caches, configuration), which then need no formatter, and `Load(bytes, in keep, markWritten: false)` keeps the
+singletons the new process has already set, such as its configuration.
 
 - **Use it for:** persistence across restarts, replays on disk, shipping a world to another machine.
 - **Skip it for:** changing an unmanaged component's layout in place: add a new component type, or old saves will
@@ -489,7 +562,9 @@ changes, batch methods, singletons taken by `ref`. `world.ForEachParallel` and `
 for struct jobs.
 
 - **Use it for:** heavy per-entity work over tens of thousands of entities: steering, path following, AI scoring.
-- **Cost:** chunks of 1,024 to 16,384 rows, about four per thread, allocation-free.
+- **Cost:** chunks of 1,024 to 16,384 rows, about four per thread, allocation-free. A method that writes a tracked
+  component cuts at multiples of 4,096 rows (the blocks its change summaries cover), so a table needs more rows
+  before it is split.
 - **Guide:** [Threading](/en/docs/guide/threading)
 
 ### Bulk operations [#bulk-operations]
@@ -508,7 +583,7 @@ What keeps a code base correct as it grows, and a server observable while it run
 
 ### Analyzer and code fixes [#analyzer]
 
-The package bundles an analyzer (EECS002 to EECS034) and code fixes next to the generator. Invalid `[ForEach]`
+The package bundles an analyzer (EECS002 to EECS036) and code fixes next to the generator. Invalid `[ForEach]`
 methods, class components, stateful systems, systems that reference systems, writes through `in`, unsafe parallel
 methods, off-thread structural changes, indexed components written through a `ref` and ordering cycles fail the
 build; a few warnings flag code that works but costs.
@@ -518,12 +593,26 @@ build; a few warnings flag code that works but costs.
 
 ### Per-system timing [#per-system-timing]
 
-With `WorldOptions.MeasureSystems`, every run of a system is timed: `system.Stats` holds `Runs`, `Last`, `Total` and
-`Average`.
+With `WorldOptions.MeasureSystems`, every run of a system is measured: `system.Stats` holds `Runs`, `Last`, `Total`
+and `Average`, the bytes the run allocated (`LastAllocated`, `TotalAllocated`, helper threads of its parallel
+`[ForEach]` methods included) and the entities its `[ForEach]` methods visited (`LastEntities`, `TotalEntities`).
 
-- **Use it for:** a diagnostics endpoint or a log line on a live server, to see which system grows.
-- **Cost:** two timestamp reads per system run when on; nothing when off.
+- **Use it for:** a diagnostics endpoint, a metrics exporter or a log line on a live server, to see which system
+  grows, which one allocates, and whether its cost follows its entity count.
+- **Cost:** per run, two timestamp reads and two allocation-counter reads, plus one count of each `[ForEach]` pass's
+  matches; nothing when off.
 - **Guide:** [Debugging and diagnostics](/en/docs/guide/diagnostics#timing), [Systems](/en/docs/guide/systems#measuring-systems)
+
+### The schedule [#schedule]
+
+`world.DescribeSchedule()` describes how the world runs its systems: per group, its stages, what each system reads
+and writes, why a system waits for an earlier stage, and the conflicting pairs that only their registration order
+keeps apart. `ToString()` prints it as text, `ToMermaid()` as a flowchart.
+
+- **Use it for:** a log line at startup, a review of why two systems do not run in parallel, finding the pairs that
+  need an `[UpdateBefore<T>]` / `[UpdateAfter<T>]` to say what is meant.
+- **Cost:** a cold call that allocates its description; callable from any thread.
+- **Guide:** [Debugging and diagnostics](/en/docs/guide/diagnostics)
 
 ### Errors [#errors]
 
@@ -542,6 +631,19 @@ component values. A debugger shows an entity's components directly.
 
 - **Use it for:** admin tools, memory reports, debugging.
 - **Cost:** allocates the description (a cold path), never touches the hot paths.
+- **Guide:** [Debugging and diagnostics](/en/docs/guide/diagnostics)
+
+### Giving memory back [#trim-excess]
+
+Tables double when they fill and keep their capacity, so a peak stays allocated. `world.TrimExcess()` gives it back:
+it drops the empty tables, shrinks the others to their rows rounded up to a power of two (64 at least) and releases
+the buffers of saves, loads and migrations. Handles, queries, systems, indexes and snapshots keep working.
+
+- **Use it for:** a quiet moment after a peak: a wave despawned, a match ended, a maintenance task when
+  `world.EntityCount` is far below its high mark.
+- **Skip it for:** every tick: what it drops, the next structural changes allocate again.
+- **Cost:** O(tables × (cached queries + snapshots) + rows of the shrunk tables × columns); allocates (cold). The
+  entity records keep their length.
 - **Guide:** [Debugging and diagnostics](/en/docs/guide/diagnostics)
 
 ### Native AOT [#native-aot]

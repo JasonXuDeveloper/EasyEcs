@@ -173,6 +173,31 @@ for (int i = 0; i < 100_000; i++) world.CreateEntity(new Position(i, 0), new Lif
 ([Prefabs](/en/docs/guide/prefabs)), and `EnsureEntityCapacity(n)` sizes only the entity storage, for entities spread
 over many tables. Entities that a [group](/en/docs/guide/groups) puts in another table grow that one.
 
+### What moves a row [#row-moves]
+
+A row move copies every component of the entity to another table, so it is the part of a structural change that
+costs. Most changes need none:
+
+| Change | Row moves |
+| --- | --- |
+| `Set` of a component the entity has | None: a write (a [grouped](/en/docs/guide/groups) component with a new value moves to its group's table) |
+| `SetIfChanged` with the value the entity has | None, and no write: nothing is stamped or re-indexed |
+| `SetIfChanged` with another value | As `Set` |
+| Adding a component the table has a column for (removed earlier, or a tag that comes and goes) | None: a presence bit |
+| Adding a component the table has no column for | One, to the table that has it |
+| `Set(a, b, …)` of several components the table lacks | At most one, whatever their number |
+| `Instantiate(prefab)`, `Instantiate(prefab, in c1, …, in cn)` | None: one row copy into the final table |
+| `Instantiate(prefab)`, then `Set` of a component the prefab lacks | The copy, then one move |
+
+So spawning from a prefab with the values each instance needs (its position, its `ChildOf`) costs the copy and
+nothing more ([prefabs](/en/docs/guide/prefabs#instantiate-with-values)).
+
+`SetIfChanged` is a structural change only when it adds the component (or does what `Set` does to a grouped or a
+disabled one). The analyzer cannot know which, so it counts `SetIfChanged`, like `Set`, as a call that may change
+structure: a `[ForEach]` method that calls it on an entity takes the `Entity` or the `World`
+([EECS013](/en/docs/guide/analyzer#eecs013)). To write a tracked component of the visited entity only when its value
+changes, take it as `Mut<T>` instead ([change tracking](/en/docs/guide/change-tracking)).
+
 ## Full example [#full-example]
 
 A turret that fires every other tick and wears down until it dies: the shots are created and destroyed in the middle
@@ -313,6 +338,7 @@ On tick 4 the turret is tagged `Dead` in `WearSystem`, and `FireSystem`, which r
 | A command buffer played back later | The change, where it is decided | No recording, no playback, no allocation |
 | Adding and removing a component each tick | A field, or a tag for a state that lasts several ticks | A tag the table's mask already has only flips a presence bit |
 | `Set(a)` then `Set(b)` | `Set(a, b)` | Shorter, the same cost |
+| `Instantiate(prefab)` then `Set` of what the prefab lacks | `Instantiate(prefab, in c1, …, in cn)` | One row copy into the final table, no move |
 | Creating a known number of entities one by one | `CreateEntities`, or `EnsureCapacity<T1, …, Tn>(count)` before the loop | One growth instead of a doubling per full table ([EECS031](/en/docs/guide/analyzer#eecs031)) |
 | A loop of single changes over a filter | [Bulk changes](/en/docs/guide/bulk), `DestroyEntities<T>(filter)` | One gate pass, whole 64-row words at once ([EECS030](/en/docs/guide/analyzer#eecs030)) |
 | An `Entity` parameter the method only reads | Keep it read-only (`Id`, `Has`, `Get`) | The pass skips structural bookkeeping |
@@ -336,6 +362,8 @@ The comparison with 10 changes per pass: [Comparison](/en/docs/comparison).
   cannot change structure skips even that.
 - **Removing a component and adding it back:** one presence bit. **Gaining a component the table has no column for:**
   one row copy, once per new combination (the move plan is cached).
+- **`Instantiate` with given components:** one row copy, the target table cached per prefab table and set of given
+  components. **`SetIfChanged` with an equal value:** a comparison, no change at all.
 - **Destroying:** O(components); the hole is filled at once outside a pass, or closed when the last pass ends.
 - **Growing:** a full table doubles, copying its rows; a reservation (`EnsureCapacity`, `CreateEntities`) grows it
   once, to the rows it needs.

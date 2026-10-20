@@ -104,6 +104,73 @@ bool gunAlive = gun.IsAlive;               // false
 </Step>
 </Steps>
 
+### Spawn children from a prefab [#instantiate-children]
+
+A child made from a [prefab](/en/docs/guide/prefabs) gets its parent in the same call:
+`world.Instantiate(minion, new ChildOf(boss))` writes the `ChildOf` over the copy in its final table, so the child is
+linked with one row copy and no move ([Give each instance its own values](/en/docs/guide/prefabs#instantiate-with-values)).
+The batch form `world.Instantiate(minion, span, new ChildOf(boss))` hangs a whole wave on one parent.
+
+### Walk up to an ancestor [#ancestors]
+
+`Children` and `Descendants` go down. Going up needs no index: read the entity's `ChildOf`, follow its `Parent`, and
+repeat until you reach an entity with the component you look for, or a root (an entity without `ChildOf`). A gun
+finds the ship it is mounted on, an item the player that carries it.
+
+```csharp
+public struct Vessel : IComponent;                 // the ancestor a part looks for
+
+public static class Ancestors
+{
+    // The nearest ancestor of part that has T, or default when none has.
+    public static Entity Nearest<T>(Entity part) where T : struct, IComponent
+    {
+        var world = part.World;
+        // A chain longer than the world's entities is a ChildOf cycle: stop instead of looping forever.
+        for (int steps = world.EntityCount; steps > 0; steps--)
+        {
+            if (!part.TryGet<ChildOf>(out var link)) return default;              // a root: no such ancestor
+            if (!world.TryGetEntity(link.Parent, out var parent)) return default; // the parent is gone (Keep)
+            if (parent.Has<T>()) return parent;
+            part = parent;
+        }
+
+        throw new InvalidOperationException("The ChildOf links form a cycle");
+    }
+
+    // The root above part: the first entity up the chain without a living parent (part itself for a root).
+    public static Entity Root(Entity part)
+    {
+        var world = part.World;
+        for (int steps = world.EntityCount; steps > 0; steps--)
+        {
+            if (!part.TryGet<ChildOf>(out var link) || !world.TryGetEntity(link.Parent, out var parent)) return part;
+            part = parent;
+        }
+
+        throw new InvalidOperationException("The ChildOf links form a cycle");
+    }
+}
+```
+
+```csharp
+var frigate = world.CreateEntity(new Name("frigate"), new Vessel());
+var deck = world.CreateEntity(new Name("deck"), new ChildOf(frigate));
+var cannon = world.CreateEntity(new Name("cannon"), new ChildOf(deck));
+Entity carrier = Ancestors.Nearest<Vessel>(cannon);   // the frigate, two levels up
+Entity top = Ancestors.Root(cannon);                  // the frigate too: it has no parent
+```
+
+- **Cost:** one step per level, each a component read and an id lookup: O(depth), no allocation, no index. Shallow
+  hierarchies (a ship and its turrets) cost a step or two.
+- **In a `[ForEach]` over many entities,** that is a few lookups per row every tick. When the answer changes only when
+  the entity is re-parented, keep it in a component of the child (the vessel's `EntityId`) and set it where the
+  `ChildOf` is set.
+- **Cycles:** `Set` does not refuse a `ChildOf` that closes a loop (an entity that becomes its own ancestor), so the
+  walk bounds its steps by `world.EntityCount`, as `Descendants` does, and throws past it.
+- **Links to destroyed parents** exist only under `TargetPolicy.Keep` ([below](#cascade-policy)): `TryGetEntity` says
+  the parent is gone, and the walk stops there.
+
 ### Changing what a destroy does [#cascade-policy]
 
 `ChildOf` starts with `TargetPolicy.Destroy`. Like any [target policy](/en/docs/guide/indexes-and-relations#target-policies)
@@ -311,6 +378,10 @@ ship, does not.
 - **Keep depth shallow when you propagate.** The walk above costs one `Children` lookup per entity; flat hierarchies
   (a ship and its turrets) walk fastest.
 - **`DestroyEntities<T>()`** destroys a whole table at once and still applies the cascade.
+- **Give a prefab's child its parent at once:** `Instantiate(prefab, new ChildOf(parent))` places it in its final
+  table; `Instantiate` then `Set(new ChildOf(...))` copies the row, then moves it.
+- **Store what a walk up finds** when many entities need it every tick: an [ancestor walk](#ancestors) is O(depth)
+  per call.
 
 1,000 squads (a leader and 10 members) created, then the leaders destroyed: with members as `ChildOf` their leader
 (`Cascade`), and with a link of your own under `TargetPolicy.Remove` (`RemoveLinks`, `HierarchyBenchmark`):
@@ -335,6 +406,7 @@ ship, does not.
 | Moving a parent without its children | The children stay and die with the destroyed original | Collect the group with `Descendants` |
 | Collecting a tree with `Children` alone | Grandchildren are left out | `Descendants` walks every level |
 | A `ChildOf` cycle walked with `Descendants` | `InvalidOperationException` when the walk reaches it | At run time |
+| Walking up `ChildOf` without a bound on the steps | A `ChildOf` cycle loops forever | Bound the walk by `world.EntityCount` ([ancestors](#ancestors)) |
 | Re-parenting or detaching inside a `Descendants` loop | The walk reads child lists that are being rewritten | Code review: collect first, then change |
 | `Disable<ChildOf>()` | `InvalidOperationException` | At run time |
 | Expecting world positions without a system | There is no built-in transform | Write the [propagation system](#transform-propagation) |

@@ -14,14 +14,18 @@ EasyEcs 日常用到的全部 API，用表格加短代码排在一页里，每�
 public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
 public record struct Health(int Value) : IComponent, ITrackChanges;          // 被追踪：写入会被记录
+public record struct Mana(int Value) : IComponent, ITrackChanges;
 public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+public record struct Account(int Id) : IComponent, IUniqueIndexed<int> { public int Key => Id; }   // 一个键一个实体
 public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }
 public record struct OwnedBy(EntityId Owner) : IComponent, IIndexed<EntityId> { public EntityId Key => Owner; }
 public record struct MemberOf(EntityId Target) : IRelation;                   // 每个实体可以有多条
 public record struct Loot(int Item);                                          // DynamicBuffer 的元素
 public record struct Seat(int Number) : ICleanupComponent;                    // 销毁后再释放
 public struct Dead : IComponent;                                              // 标签
+public record struct Session(int Connection) : IComponent;                   // 运行时状态，不进存档
 public record struct Clock(long Tick) : ISingletonComponent;                  // 每个 World 一份
+public record struct Config(int MaxPlayers) : ISingletonComponent;
 ```
 
 ## 声明数据 [#declare-data]
@@ -33,6 +37,7 @@ public record struct Clock(long Tick) : ISingletonComponent;                  //
 | `struct X : ISingletonComponent` | 每个 World 一份 | [单例](/zh/docs/guide/singletons) |
 | `: ITrackChanges` | 每行记录最后一次写入和移除的 tick | [变更追踪](/zh/docs/guide/change-tracking) |
 | `: IIndexed<TKey>` 加 `Key` | 通过 `world.Index<T, TKey>()` 按值查找 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
+| `: IUniqueIndexed<TKey>` 加 `Key` | 一个键只对应一个实体：`index.Get(key)`；会让第二个实体拿到这个键的写入直接抛异常 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
 | `: IIndexed<EntityId>` | 指向一个实体的链接，可以从目标反查 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
 | `: IRelation` 加 `Target` | 每个实体多条链接，存放在缓冲里 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
 | `: IGroup` 加 `Group` | 调用 `world.GroupBy<T>()` 后按值拆表 | [分组](/zh/docs/guide/groups) |
@@ -62,6 +67,14 @@ public record struct Clock(long Tick) : ISingletonComponent;                  //
 | `world.EnsureCapacity<T1, …, Tn>(n)` / `EnsureCapacity(prefab, n)` / `EnsureEntityCapacity(n)` | 在已知峰值或一波刷怪之前预分配 |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` / `IsAlive(id)` | 从 `EntityId` 换回经过校验的句柄 |
 | `world.Describe()` | 表、列、行数和字节数，供工具使用 |
+| `world.DescribeSchedule()` | 每个分组的阶段、每个系统读写什么、为什么要等、哪些系统对只靠注册顺序；`ToString()` / `ToMermaid()` |
+| `world.TrimExcess()` | 峰值过后、空闲时删掉空表并缩小其他表 |
+| `world.DestroyedSince(since, into, out count)` / `DestroyLogOldestTick` | 开了 `WorldOptions.DestroyLog` 时，某个 tick 以来销毁的实体；返回 `false` 表示读取方比日志还旧 |
+
+```csharp
+Console.WriteLine(world.DescribeSchedule());        // 阶段、等待关系、只靠注册顺序的系统对
+world.TrimExcess();                                 // 一波怪清完之后：内存还回去，什么都不会坏
+```
 
 ## 实体 [#entities]
 
@@ -77,6 +90,7 @@ Entity unit = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Hea
 | --- | --- | --- |
 | `world.CreateEntity(a, b, …)` | 带最多 9 个组件创建，直接放进最终的表 | 是 |
 | `entity.Set(a, b, …)` | 一次搬迁里添加或覆盖最多 9 个组件；返回实体 | 是 |
+| `entity.SetIfChanged(value)` | 实体已经是这个值就不写，否则 `Set`；写了返回 `true`（相同的值不打戳、不重建索引） | 新加时是 |
 | `entity.Remove<A, B>()` | 移除已有的组件；返回实体 | 是 |
 | `entity.GetOrAdd<T>()` | `ref T`，没有时先以默认值添加 | 添加时是 |
 | `entity.Get<T>()` | 用于写入的 `ref T`（对变更追踪算一次写入） | 否 |
@@ -124,9 +138,10 @@ bool applied = unit.Run<Health, TakeHit>(ref hit);   // 在请求对应的实体
 | 声明 | 生成 |
 | --- | --- |
 | 组件 `Position` | `e.Position`（`ref`）、`HasPosition`、`TryGetPosition(out p)`、`GetOrAddPosition()`、`SetPosition(x, y)`、`RemovePosition()`、`DisablePosition()`、`EnablePosition()`、`IsPositionDisabled` |
-| 被追踪或被索引的 `Health` | `e.Health` 是 `ref readonly`；用 `SetHealth(…)` 写，或者用 `WriteHealth()`（`ref`，仅被追踪的组件） |
+| 被追踪或被索引的 `Health` | `e.Health` 是 `ref readonly`；用 `SetHealth(…)` 写，或者用 `WriteHealth()`（`ref`，仅被追踪的组件）；`SetHealthIfChanged(…)` 只写不同的值 |
 | 标签 `Dead` | `e.IsDead`、`SetDead()`、`RemoveDead()` |
 | 被索引的 `Team` | `world.TeamIndex`（即 `world.Index<Team, int>()`） |
+| 唯一键 `Account` | `world.AccountIndex.Get(id)` / `TryGet(id, out e)` |
 | 分组组件 `Zone` | `filter.InZone(id)`（即 `InGroup<Zone>(id)`） |
 | 缓冲元素 `Loot` | `e.Loot`（`ref readonly DynamicBuffer<Loot>`）、`HasLoot`、`WriteLoot()`、`GetOrAddLoot()`、`RemoveLoot()` |
 | 关系 `MemberOf` | `e.AddMemberOf(target)`、`RemoveMemberOf(target)`、`LinksMemberOf(target)`、`world.MemberOfIndex` |
@@ -138,6 +153,7 @@ bool applied = unit.Run<Health, TakeHit>(ref hit);   // 在请求对应的实体
 unit.SetPosition(3, 4).SetDead();                   // setter 返回实体，可以链式调用
 unit.Position.X += 1;                               // 不追踪的组件：ref
 unit.SetHealth(80);                                 // 被追踪的组件：用 Set 写，会打上 tick
+bool rewritten = unit.SetHealthIfChanged(80);       // false：值已经是 80，不打戳
 bool dead = unit.IsDead;
 ```
 
@@ -165,6 +181,7 @@ public class MovementSystem : EcsSystem
 | `World` | 当前 World | 在静态方法里创建实体时用 |
 | `EntitySpan` | 批量方法这一段行对应的实体 | 仅批量方法 |
 | `Maybe<T>` | 实体可能没有的组件 | `HasValue`、`Value` |
+| `Mut<T>` | 方法只在部分行上写的组件 | `Value` 只读；`Write()` 和改了值的 `SetIfChanged(value)` 才给这一行打戳；对调度器来说算写入 |
 | 其他任意类型（系统之外） | 调用方传给入口方法的值 | `ref int count`、`in Settings s` |
 
 ### 特性 [#attributes]
@@ -172,13 +189,23 @@ public class MovementSystem : EcsSystem
 | 特性 | 用在 | 作用 |
 | --- | --- | --- |
 | `[ForEach]` / `[ForEach(Parallel = true)]` | 方法 | 方法就是循环；`Parallel` 把行分给多个线程（[EECS010](/zh/docs/guide/analyzer#eecs010)） |
+| `[ForEach(Slices = N)]` | 方法 | 每次运行只访问一片，约 1/N 的行：每 N 次运行每行一次（不能和 `Changed` / `Removed` 一起用：[EECS035](/zh/docs/guide/analyzer#eecs035)） |
 | `[With<T>]` | 方法、系统分组 | 要求有 `T`，但不作为参数传入 |
 | `[Without<T>]` | 方法、系统分组 | 排除有 `T` 的实体 |
 | `[WithAny<A>, WithAny<B>]` | 方法、系统分组 | 至少有其中一个 |
 | `[Changed<T>]` | 方法 | 系统上次执行后、被追踪的 `T` 被写过的行 |
 | `[Removed<T>]` | 方法 | 系统上次执行后失去了被追踪 `T` 的实体 |
+| `[ChangedAny<A, B>]` / `[RemovedAny<A, B>]` | 方法 | 2 到 9 个被追踪组件里至少有一个被写过、或被移除的行 |
 | `[UpdateBefore<S>]` / `[UpdateAfter<S>]` | 系统 | 排序（成环由 [EECS019](/zh/docs/guide/analyzer#eecs019) 拒绝） |
 | `[UpdateInGroup<G>]` | 系统 | 只在 `world.Update<G>()` 时执行 |
+
+```csharp
+public class DecaySystem : EcsSystem
+{
+    [ForEach(Slices = 4)]                            // 每次运行四分之一的行，每 4 次运行每行一次
+    static void Decay(ref Velocity v) => v = new Velocity(v.X * 0.9f, v.Y * 0.9f);
+}
+```
 
 `[Changed<T>]` 和 `[Removed<T>]` 只能写在方法上。系统分组上可以写 `[With<T>]`、`[Without<T>]`、`[WithAny<T>]`
 （写在其他结构体上由 [EECS023](/zh/docs/guide/analyzer#eecs023) 报错），也可以实现 `IGroupWith<T>` / `IGroupWithout<T>`。
@@ -200,7 +227,8 @@ public struct Shop : IActorGroup<Shop>;             // [UpdateInGroup<Shop>] 的
 | `Enabled` | 跳过这个系统；设回 `true` 会清掉 `Error` |
 | `Error` | 在 `SystemErrorPolicy.Disable` 下让它停用的那个异常 |
 | `LastRunTick` | 上次执行时的变更 tick |
-| `Stats` | 打开 `MeasureSystems` 后的 `Runs`、`Last`、`Total`、`Average` |
+| `RunCount` | 本次之前已经运行的次数（分片方法访问第 `RunCount % N` 片） |
+| `Stats` | 打开 `MeasureSystems` 后的 `Runs`、`Last`、`Total`、`Average`、`LastAllocated` / `TotalAllocated`（字节）、`LastEntities` / `TotalEntities`（访问的实体数） |
 
 系统不保存状态（[EECS007](/zh/docs/guide/analyzer#eecs007)），也从不引用别的系统
 （[EECS008](/zh/docs/guide/analyzer#eecs008)）。指南：[系统](/zh/docs/guide/systems)。
@@ -236,7 +264,9 @@ bool anyDead = world.Any<Dead>();
 | --- | --- |
 | `.With<T>()` / `.Without<T>()` / `.WithAny<T>()` | 按有无组件，和特性相同 |
 | `.Changed<T>(since)` / `.Removed<T>(since)` | 在 tick `since` 及之后被写过、或失去了 `T` |
-| `.Since(tick)` | 同一个过滤条件换一个 tick |
+| `.ChangedAny<A, B>(since)` / `.RemovedAny<A, B>(since)` | `since` 及之后至少有一个被写过、或被移除 |
+| `.Since(tick)` | 同一个过滤条件换一个 tick：一个过滤器，带着每个客户端的 tick 跑 |
+| `.Slice(index, count)` | 每张表 `count` 片里的第 `index` 片，只用于 `ForEach` 系列调用 |
 | `.InGroup<T>(group)` | 分组组件的某一组 |
 
 指南：[查询与过滤](/zh/docs/guide/queries)。
@@ -262,6 +292,7 @@ world.Clock.Tick++;
 | 算写入 | 不算写入 |
 | --- | --- |
 | `ref` 参数、`Span<T>`、`Query` 元素 | `in` 参数、`ReadOnlySpan<T>` |
+| `Mut<T>.Write()`、写入新值的 `SetIfChanged(value)` | `Mut<T>.Value`、值相同的 `SetIfChanged(value)` |
 | `Get<T>()`、找到时的 `TryGetRef<T>`、`GetOrAdd<T>()`、`Set(…)`、`WriteX()` | `Read<T>()`、`TryGet<T>(out copy)`、`Has<T>()`、被追踪组件的 `e.X` |
 | 创建、实例化、克隆、`Restore`、`Load`、`LoadEntitiesInto` | 移除（那是一次移除，供 `[Removed<T>]` 使用） |
 | `entity.Run`：job `Writes` 里的组件 | `LoadEntitiesInto(…, markWritten: false)` |
@@ -272,6 +303,34 @@ world.Update();
 int changed = world.Count<Health>(QueryFilter.Create().Changed<Health>(mark));
 ```
 
+```csharp
+public class ClampSystem : EcsSystem
+{
+    [ForEach]                                        // 只给真正写了的行打戳
+    static void Clamp(Mut<Health> hp)
+    {
+        if (hp.Value.Value > 100) hp.Write() = new Health(100);
+    }
+}
+```
+
+```csharp
+// 一个过滤器存在字段里，带着每个客户端确认过的 tick 跑。
+private static readonly QueryFilter Dirty = QueryFilter.Create().ChangedAny<Health, Mana>(0);
+```
+
+```csharp
+ulong ack = world.ChangeTick;                       // 某个客户端确认过的 tick
+world.Update();
+int toSend = world.Count<Health>(Dirty.Since(ack));
+
+using var replicated = new World(new WorldOptions { DestroyLog = 4096 });
+ulong seen = replicated.ChangeTick;
+replicated.Update();
+var gone = new EntityId[4096];
+if (!replicated.DestroyedSince(seen, gone, out int goneCount)) { /* 比日志还旧：全量下发 */ }
+```
+
 指南：[变更追踪](/zh/docs/guide/change-tracking)。
 
 ## 索引、关系、层级、分组 [#indexes]
@@ -280,6 +339,7 @@ int changed = world.Count<Health>(QueryFilter.Create().Changed<Health>(mark));
 | --- | --- |
 | `world.Index<T, TKey>()`（`world.TIndex`） | `T` 的值索引 |
 | `index.Find(key)` / `TryFind(key, out e)` / `Count(key)` | 所有匹配、唯一一个、数量 |
+| `index.Get(key)` / `TryGet(key, out e)` | 唯一键（`IUniqueIndexed<TKey>`）对应的那个实体；没有时 `Get` 抛异常 |
 | `index.Range(min, max)` / `RangeDescending` / `Ascending()` / `Descending()` | 键可比较时的有序遍历 |
 | `index.WhenTargetDestroyed(TargetPolicy.Keep / Remove / Destroy)` | 目标销毁时 `EntityId` 链接怎么处理 |
 | `entity.AddRelation(r)` / `RemoveRelation<T>(target)` / `HasRelation<T>(target)` | 多对多链接 |
@@ -295,6 +355,8 @@ var ship = world.CreateEntity();
 world.CreateEntity(new ChildOf(ship));
 foreach (var child in world.Children(ship)) { }
 foreach (var part in world.Descendants(ship)) { }  // 子实体、孙实体……
+var account = world.CreateEntity(new Account(42));
+Entity holder = world.AccountIndex.Get(42);        // 就是它；再来一个 Account(42) 会抛异常
 ```
 
 被索引和分组的组件只能用 `Set` 写，不能经 `ref` 写（[EECS015](/zh/docs/guide/analyzer#eecs015)）。指南：
@@ -308,6 +370,7 @@ foreach (var part in world.Descendants(ship)) { }  // 子实体、孙实体…�
 | `prefab.AddMember()` / `prefab.Id` | 一起实例化的一组实体；`Id` 在链接里代表某个成员 |
 | `prefab.SetBuffer(items)` | 每个实例各拿一份拷贝的 `DynamicBuffer<T>` |
 | `world.Instantiate(prefab)` / `Instantiate(prefab, span)` | 一个实体，或者一次遍历刷出一整波 |
+| `world.Instantiate(prefab, a, b, …)` / `Instantiate(prefab, span, a, b, …)` | 同上，外加最多 9 个自己的组件，覆盖或补充预制体里的值：只拷贝一次行 |
 | `world.CreateEntities(span, a, b, …)` | 一波取值相同的实体 |
 | `world.DestroyEntities<T…>(filter)` | 销毁所有匹配的实体，返回数量 |
 | `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | 给所有匹配的实体设置或移除一个组件 |
@@ -317,6 +380,7 @@ foreach (var part in world.Descendants(ship)) { }  // 子实体、孙实体…�
 var goblin = new Prefab().SetPosition(0, 0).SetHealth(30);
 var wave = new Entity[100];
 world.Instantiate(goblin, wave);
+var scout = world.Instantiate(goblin, new Velocity(2, 0));   // 预制体的值，再加上自己的
 world.SetAll(new Velocity(0, 0), QueryFilter.Create().With<Health>());
 world.DestroyEntities<Dead>();
 ```
@@ -353,8 +417,9 @@ loot.RemoveAtSwapBack(0);
 | `world.Capture()` / `Capture(into)` | 内存里的一份拷贝；`into` 复用已有快照的数组 |
 | `world.Restore(snapshot)` | 回到拷贝时的状态，那时的句柄重新有效 |
 | `world.Save(writer)` / `Load(bytes)` | 把整个 World 写成字节（托管组件需要 `[NinoType]`）；非托管组件的内存布局在存档之后变了，`Load` 抛 `InvalidDataException` |
+| `world.Save(writer, exclude)` / `Load(bytes, keep, markWritten: false)` | 重启：存档不写一个集合里的组件和单例，读档保留另一个集合里新进程已经设好的单例 |
 | `world.SaveEntities(writer, ids)` / `LoadEntities(bytes, handles)` | 把一组实体搬到另一个 World 或进程 |
-| `ComponentSet.Create().With<T>()…` | 一条记录包含的组件，在 `static readonly` 字段里构建一次 |
+| `ComponentSet.Create().With<T>()….WithSingleton<S>()` | 组件（整个 World 的存档还可以有单例），在 `static readonly` 字段里构建一次 |
 | `world.SaveEntities(writer, ids, set)` | 一条记录：只写集合里的组件 |
 | `world.LoadEntitiesInto(bytes, entities, markWritten: false)` | 把记录放到已有的实体上；`markWritten: false` 让它不算变更 |
 | `world.MoveEntities(target, ids, moved)` | 在同一线程的两个 World 之间直接搬，不编码 |
@@ -371,6 +436,20 @@ using var copy = new World();
 copy.Load(bytes.WrittenSpan);
 ```
 
+```csharp
+// 重启：运行时状态和配置不进存档，新进程带自己的。
+private static readonly ComponentSet Runtime = ComponentSet.Create().WithSingleton<Config>().With<Session>();
+private static readonly ComponentSet NewConfig = ComponentSet.Create().WithSingleton<Config>();
+```
+
+```csharp
+var restart = new System.Buffers.ArrayBufferWriter<byte>();
+world.Save(restart, Runtime);                       // 旧进程关闭时
+using var next = new World();
+next.SetConfig(64);                                 // 新版本的配置
+next.Load(restart.WrittenSpan, NewConfig, markWritten: false);   // Config 保持刚设的值
+```
+
 指南：[快照](/zh/docs/guide/snapshots)、[存档](/zh/docs/guide/saves)、[迁移与卸载](/zh/docs/guide/migration-and-unload#records)。
 
 ## World 选项 [#world-options]
@@ -382,6 +461,7 @@ copy.Load(bytes.WrittenSpan);
 | `MaxDegreeOfParallelism` | 处理器数量 | 一次并行最多使用的线程数 |
 | `MeasureSystems` | `false` | 记录 `system.Stats` |
 | `SystemErrors` | `SystemErrorPolicy.Throw` | 设为 `Disable` 时，出错的系统会停用，更新继续 |
+| `DestroyLog` | 0（关闭） | `DestroyedSince` 读取的销毁日志容量，每条记录 16 字节 |
 
 ```csharp
 using var server = new World(new WorldOptions { ParallelSystems = true, SystemErrors = SystemErrorPolicy.Disable });

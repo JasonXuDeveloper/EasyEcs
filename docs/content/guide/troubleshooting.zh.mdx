@@ -21,8 +21,11 @@ faq: true
 | `[UpdateBefore] / [UpdateAfter] form a cycle` | [顺序成环](#ordering-cycle) |
 | `The ChildOf links form a cycle` | [`Descendants` 遇到 `ChildOf` 成环](#childof-cycle) |
 | `X cannot be disabled: remove it instead` | [禁用清理组件或 `ChildOf`](#cannot-disable) |
-| `Snapshots cannot be captured or restored while a query iterates`、`Types cannot be removed during a pass` | [要等遍历结束的调用](#during-a-pass) |
+| `Snapshots cannot be captured or restored while a query iterates`、`Types cannot be removed during a pass`、`A world cannot be trimmed during a pass` | [要等遍历结束的调用](#during-a-pass) |
 | `Not an EasyEcs save`、`The size of X changed`、`The fields of X changed`、`X was saved as`、`Types of this process share the save id`、`A damaged save` | [存档加载不了](#save-refused) |
+| `X is unique: entity … has key … already`、`X is unique: key … would be given to several entities at once`、`The save holds key … of unique X twice`、`X is unique, but its module registered no index` | [唯一键已被占用](#unique-key-taken) |
+| `A sliced filter (QueryFilter.Slice) applies to ForEach passes only` | [在 `ForEach` 之外用了分片过滤条件](#sliced-filter) |
+| `The world keeps no destroy log` | [销毁日志没开就去读](#no-destroy-log) |
 
 不抛异常的问题：[系统从不运行](#system-does-not-run)、[系统没有并行](#not-parallel)、[生成成员缺失](#member-missing)、
 [`entity.Run` 返回 `false`](#run-false)、[通过 `ref` 写的值丢了](#ref-lost)、[加载后组件不见了](#save-dropped-data)、
@@ -140,15 +143,16 @@ InvalidOperationException: ChildOf cannot be disabled: remove it instead
 `Disable<T>()` 让值保留、但对查询隐藏。[清理组件](/zh/docs/guide/cleanup-and-disable)和 `ChildOf` 不能这样隐藏：World 要一直看到
 它们，才能完成销毁、维持层级。**修法：**移除这个组件，或者禁用另一个系统会过滤的组件。
 
-## 为什么 `Capture`、`Restore`、`RemoveTypes` 要等遍历结束？ [#during-a-pass]
+## 为什么 `Capture`、`Restore`、`RemoveTypes`、`TrimExcess` 要等遍历结束？ [#during-a-pass]
 
 ```text
 InvalidOperationException: Snapshots cannot be captured or restored while a query iterates
 InvalidOperationException: Types cannot be removed during a pass
+InvalidOperationException: A world cannot be trimmed during a pass
 ```
 
 它们会重写或丢弃整张表，而查询的 `foreach` 或正在运行的系统正在遍历这些表。**修法：**在两次更新之间、任何查询循环之外调用它们
-（[快照](/zh/docs/guide/snapshots)、[卸载](/zh/docs/guide/migration-and-unload#remove-types)）。`Restore` 也会拒绝另一个 World
+（[快照](/zh/docs/guide/snapshots)、[卸载](/zh/docs/guide/migration-and-unload#remove-types)、[修剪](/zh/docs/guide/diagnostics#trim)）。`Restore` 也会拒绝另一个 World
 的快照（`ArgumentException`），以及 `RemoveTypes` 丢掉其中某些表之前拍的快照。
 
 ## 为什么存档加载不了？ [#save-refused]
@@ -171,6 +175,46 @@ InvalidDataException: A damaged save: …
 - **存档 id 冲突：**进程里两个类型的 id 相同：带命名空间的全名相同（同一插件的两个版本同时加载），或者某个 `[NinoFormerName]` 正好是
   另一个类型的名字。先卸载旧版本，或者给其中一个改名。
 - **A damaged save：**某个计数或 id 越界，或者缓冲比它的字节还长：字节已损坏。
+
+## 为什么写入时说唯一键已被占用？ [#unique-key-taken]
+
+```text
+InvalidOperationException: Seat is unique: entity … has key 5 already (change that entity's key first)
+InvalidOperationException: Seat is unique: key 0 would be given to several entities at once
+InvalidDataException: The save holds key 5 of unique Seat twice
+InvalidOperationException: Seat is unique, but its module registered no index (…): call world.Index<T, TKey>() once before writing it
+```
+
+这个组件实现了 `IUniqueIndexed<TKey>`，而这次写入会让第二个实体拿到别人已有的键。写入在改动任何东西之前就做了检查，所以实体和
+World 都保持原样。
+
+- **已经有这个键：**另一个实体持有这个键。要转移一个键，先改持有者，再改新的那个；互换要经过一个空闲的键
+  （[转移唯一键](/zh/docs/guide/common-mistakes#rekey-order)）。启用一个被禁用的组件会重新认领它的键，期间键被别人拿走了，也会这样失败。
+- **一次给多个实体：**一次调用会把同一个键写进很多行：带键的 `CreateEntities` 或 `SetAll`、预制体带着键时的
+  `Instantiate(prefab, entities)`，或者 `Clone()`。给每个实体各自的键（[复制唯一键](/zh/docs/guide/common-mistakes#unique-copies)）。
+- **存档里有重复的键：**存档是没有唯一约束的代码写的，或者被改过。先用旧代码的 World 加载并把键修好，或者迁移期间先去掉约束。
+- **没有注册索引：**生成器会为它能看到的每个唯一组件注册索引。它看不到的类型（反射创建的，或者在没用生成器编译的程序集里）需要
+  每个 World 在第一次写入前调一次 `world.Index<T, TKey>()`。
+
+## 为什么 `Count` 或 `Query` 遇到分片过滤条件会抛异常？ [#sliced-filter]
+
+```text
+ArgumentException: A sliced filter (QueryFilter.Slice) applies to ForEach passes only: this call needs every matching row. (Parameter 'filter')
+```
+
+`QueryFilter.Slice(index, count)` 把每张表切成几份，只有 `ForEach`、`ForEachEntity`、`ForEachBatch` 及其并行形式会按份访问。
+`Query`、`Count`、`Any`、`DestroyEntities`、`entity.Run`、`SetAll` 和其他批量调用需要所有匹配的行，所以拒绝它。**修法：**给这些
+调用传不带 `Slice` 的过滤条件；分片系统访问了多少，看 `system.Stats.LastEntities`（[分片](/zh/docs/guide/systems#update-interval)）。
+
+## 为什么 `DestroyedSince` 说没有销毁日志？ [#no-destroy-log]
+
+```text
+InvalidOperationException: The world keeps no destroy log: set WorldOptions.DestroyLog to its capacity
+```
+
+销毁日志默认是关的：每条记录 16 字节，和 World 一起分配。**修法：**用 `new WorldOptions { DestroyLog = n }` 创建 World，`n` 是最慢的
+读者两次读取之间可能发生的销毁次数。`DestroyedSince` 返回 `false`，说明这个读者落后的比日志装得下的还多：把完整状态重新发给它
+（[移除检测](/zh/docs/guide/change-tracking#removal-detection)）。
 
 ## 为什么我的系统从不运行？ [#system-does-not-run]
 
