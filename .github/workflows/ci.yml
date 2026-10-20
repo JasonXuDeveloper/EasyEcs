@@ -32,6 +32,7 @@ jobs:
           dotnet run --no-build -c Release --project samples/SaveLoad
           dotnet run --no-build -c Release --project samples/MultiWorld -- --updates 50
           dotnet run --no-build -c Release --project samples/HotReload/HotReload.Host
+          dotnet run --no-build -c Release --project samples/Actors
       - name: Install the wasm-tools workload (the live demo is published with Mono AOT)
         run: dotnet workload install wasm-tools
       - name: Publish the docs site's live demo (demo/EasyEcs.Demo, WebAssembly, Mono AOT)
