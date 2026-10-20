@@ -368,7 +368,9 @@ internal sealed class Reference
 
     private static IEnumerable<ISymbol> Members(INamedTypeSymbol type)
     {
+        // A record class's <Clone>$ is public in metadata but unspeakable: no C# code calls it.
         var members = type.GetMembers().Where(m => Visible(m) && !m.IsImplicitlyDeclared && m is not INamedTypeSymbol &&
+                                                   !(m is IMethodSymbol { MethodKind: MethodKind.Ordinary, CanBeReferencedByName: false }) &&
                                                    m is not IMethodSymbol { MethodKind: MethodKind.PropertyGet or MethodKind.PropertySet or MethodKind.EventAdd or MethodKind.EventRemove } &&
                                                    !(m is IMethodSymbol { IsExtensionMethod: false, IsStatic: true } impl && type.GetTypeMembers().Any(t => t.IsExtension && t.GetMembers(impl.Name).Length != 0)));
         foreach (var block in type.GetTypeMembers().Where(t => t.IsExtension))
