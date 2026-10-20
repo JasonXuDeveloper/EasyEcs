@@ -57,6 +57,18 @@ jobs:
       - name: Compile the C# snippets of the docs (tools/DocCheck)
         run: dotnet run -c Release --project tools/DocCheck
 
+  native-aot:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Publish the battle server with Native AOT (tracked components, saves; warnings are errors)
+        run: dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -o artifacts/aot
+      - name: Run the native executable
+        run: artifacts/aot/EasyEcs.Aot
+
   templates:
     runs-on: ubuntu-26.04
     steps:
