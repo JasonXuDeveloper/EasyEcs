@@ -14,7 +14,7 @@ public interface IUniqueIndexed : IIndexed;
 /// occupant of a grid cell. A write that would give a second entity a key another entity has throws
 /// <see cref="InvalidOperationException"/> before it changes anything (Set, CreateEntity / CreateEntities, GetOrAdd,
 /// Instantiate, Clone, SetAll, Enable / EnableAll, LoadEntities / LoadEntitiesInto, MoveEntities), and a
-/// <see cref="World.Load"/> of a save holding a key twice throws <see cref="System.IO.InvalidDataException"/>; the world
+/// <see cref="World.Load(System.ReadOnlySpan{byte}, bool)"/> of a save holding a key twice throws <see cref="System.IO.InvalidDataException"/>; the world
 /// is then as it was. Writing an entity's own key again is fine; to move a key from one entity to another, change the
 /// first one before the second. A null key (the default of a reference-type key) is no key: any number of entities may
 /// have it, and no lookup finds them. <see cref="EntityId"/> keys (relations) cannot be unique.

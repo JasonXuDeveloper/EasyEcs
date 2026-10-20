@@ -136,7 +136,7 @@ public sealed partial class World
         void BeginBatch();
 
         /// <summary>
-        /// Loaded rows of column <paramref name="column"/> are about to replace the world's (<see cref="Load"/>): keys
+        /// Loaded rows of column <paramref name="column"/> are about to replace the world's (<see cref="Load(System.ReadOnlySpan{byte}, bool)"/>): keys
         /// may repeat neither within them nor across the batch's other tables. Throws
         /// <see cref="System.IO.InvalidDataException"/>.
         /// </summary>
@@ -159,12 +159,16 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Entity <paramref name="id"/> now holds <paramref name="value"/> of unique <typeparamref name="T"/>, added by
-    /// <c>GetOrAdd</c>: its index learns the key (only the index: the caller holds a ref into the row, which a group must
-    /// not move). Inside the structural gate.
+    /// Entity <paramref name="id"/> now holds <paramref name="value"/> of indexed <typeparamref name="T"/>, added by
+    /// <c>GetOrAdd</c>: its index learns the key if this world has one (only the index: the caller holds a ref into the
+    /// row, which a group must not move). Inside the structural gate.
     /// </summary>
-    internal void IndexUnique<T>(int id, int version, in T value) where T : struct, IComponent =>
-        Unsafe.As<IIndexOf<T>>(_indexByBit[ComponentType<T>.Bit]).Put(id, version, in value);
+    internal void IndexAdded<T>(int id, int version, in T value) where T : struct, IComponent
+    {
+        int bit = ComponentType<T>.Bit;
+        var byBit = _indexByBit;
+        if (byBit != null && bit < byBit.Length && byBit[bit] is { } index) Unsafe.As<IIndexOf<T>>(index).Put(id, version, in value);
+    }
 
     /// <summary><see cref="Claim{T}"/> for <paramref name="count"/> new entities all holding <paramref name="value"/> (CreateEntities).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -183,7 +187,7 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// The rows a <see cref="Load"/> read (<paramref name="snapshot"/>, by table of this world) are about to replace the
+    /// The rows a <see cref="Load(System.ReadOnlySpan{byte}, bool)"/> read (<paramref name="snapshot"/>, by table of this world) are about to replace the
     /// world's: each unique component's keys must be distinct across them (<see cref="IUniqueIndex.ClaimLoaded"/>).
     /// Throws <see cref="System.IO.InvalidDataException"/> before anything changes. Cold.
     /// </summary>

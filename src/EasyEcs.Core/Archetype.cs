@@ -962,23 +962,26 @@ internal sealed class Archetype
     /// The rows of a table at one moment (<see cref="Capture"/>): entities, columns (unmanaged ones as plain bytes),
     /// presence bits. The arrays may be longer than <see cref="Count"/> rows: a capture into an older copy reuses them.
     /// </summary>
-    internal sealed class Rows(int columns)
+    internal sealed class Rows(Archetype table)
     {
+        /// <summary>The table the copy is of: a copy is reused for no other (tables shift when RemoveTypes drops some).</summary>
+        public readonly Archetype Table = table;
         public int Count;
         public EntityId[] Slots = [];
-        public readonly Array[] Columns = new Array[columns];
-        public readonly ulong[][] Present = new ulong[columns][];
-        public readonly int[] Absent = new int[columns];
+        public readonly Array[] Columns = new Array[table.Columns.Length];
+        public readonly ulong[][] Present = new ulong[table.Columns.Length][];
+        public readonly int[] Absent = new int[table.Columns.Length];
     }
 
     /// <summary>
-    /// Copy the rows (a dense table: outside passes) into <paramref name="into"/> (an earlier copy of this table, its
-    /// arrays reused when large enough) or a new copy. O(rows × columns). Inside the structural gate.
+    /// Copy the rows (a dense table: outside passes) into <paramref name="into"/> (an earlier copy, its arrays reused
+    /// when large enough, if it is of this table) or a new copy. O(rows × columns). Inside the structural gate.
     /// </summary>
     public Rows Capture(Rows into)
     {
         int count = Count;
-        var rows = into ?? new Rows(Columns.Length);
+        if (into?.Table != this) into = null;
+        var rows = into ?? new Rows(this);
         if (rows.Slots.Length < count) rows.Slots = new EntityId[count];
         Slots.AsSpan(0, count).CopyTo(rows.Slots);
         for (int c = 0; c < Columns.Length; c++)

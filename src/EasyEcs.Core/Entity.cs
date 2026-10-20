@@ -253,7 +253,7 @@ public readonly partial struct Entity : IEquatable<Entity>
             ref T value = ref World.Row<T>(ref meta, bit);
             value = default;
             meta.Archetype.Stamp<T>(meta.Slot, world.ChangeTick);
-            if (ComponentType<T>.Unique) world.IndexUnique(id, version, in value); // a unique index knows every key
+            if (ComponentType<T>.Indexed) world.IndexAdded(id, version, in value); // the default's key
             return ref value;
         }
     }

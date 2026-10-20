@@ -368,6 +368,7 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach(Slices = 2), Changed<T>] static void A(ref P p) { } }", "EECS035")]
     [TestCase("public class S : EcsSystem { [ForEach(Slices = 4), Removed<T>] static void A(ref P p) { } }", "EECS035")]
     [TestCase("public class S : EcsSystem { [ForEach(Slices = 0)] static void A(ref P p) { } }", "EECS035")]
+    [TestCase("public class S : EcsSystem { [ForEach(Slices = 2), ChangedAny<T, T>] static void A(ref P p) { } }", "EECS035")]
     [TestCase("public static class R { [ForEach(Slices = -1)] static void A(ref P p) { } }", "EECS035")]
     [TestCase("public static class R { [ForEach(Slices = 2)] static void A(ref P p) { } static void A(World w, int slice) { } }", "EECS021")]
     [TestCase("public struct Mount : IComponent, IUniqueIndexed<EntityId> { public EntityId Rider; public EntityId Key => Rider; }", "EECS036")]

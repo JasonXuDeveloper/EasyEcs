@@ -549,7 +549,8 @@ public sealed partial class World
         foreach (var component in table.Components) mask.ClearBit(component);
         int index = Array.LastIndexOf(_allArchetypes, table); // few tables: a scan, no map
         if (snapshot.Tables.Length <= index) Array.Resize(ref snapshot.Tables, _allArchetypes.Length);
-        var rows = snapshot.Tables[index] ??= new Archetype.Rows(table.Columns.Length);
+        ref var rows = ref snapshot.Tables[index];
+        if (rows?.Table != table) rows = new Archetype.Rows(table); // a copy of the table this index held before
 
         int count = Count(ref reader, Unsafe.SizeOf<EntityId>());
         int start = rows.Count;

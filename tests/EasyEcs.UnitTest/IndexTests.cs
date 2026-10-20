@@ -85,6 +85,19 @@ public class IndexTests
     }
 
     [Test]
+    public void AComponentAddedByGetOrAddIsFoundByItsDefaultKey()
+    {
+        using var world = new World();
+        var index = world.Index<Rating, int>();
+        var a = world.CreateEntity(new Health(1));
+        Add<Rating>(a);
+        Assert.That(index.TryFind(0, out var found) && found == a, Is.True);
+    }
+
+    // Generic: a ref of an indexed component is EECS015 where its type is known.
+    private static void Add<T>(Entity entity) where T : struct, IComponent => entity.GetOrAdd<T>();
+
+    [Test]
     public void DestroyedEntitiesAndRemovedComponentsAreNotFound()
     {
         using var world = new World();

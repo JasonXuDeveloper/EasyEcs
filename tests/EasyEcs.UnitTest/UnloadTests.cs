@@ -152,5 +152,13 @@ public class UnloadTests
         Assert.That(world.Count<Position, Velocity>(), Is.EqualTo(1));
         Assert.That(players[0].Get<Health>(), Is.EqualTo(new Health(10)));
         world.Update();                                          // no system left
+
+        // The old snapshot captured again: its copies were of other tables (the dropped ones shifted the rest), so
+        // none is reused for a table it does not belong to.
+        world.Capture(snapshot);
+        players[1].Set(new Health(3));
+        world.Restore(snapshot);
+        Assert.That((players[0].Get<Health>(), players[0].Has<Velocity>(), players[1].Has<Health>()),
+            Is.EqualTo((new Health(10), true, false)));
     }
 }
