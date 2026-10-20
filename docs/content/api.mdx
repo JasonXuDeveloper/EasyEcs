@@ -167,7 +167,7 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 | API | Complexity | Notes |
 | --- | --- | --- |
 | `mut.Value` | O(1) | `ref readonly T`; stamps nothing |
-| `mut.Write()` | O(1): one entity lookup and one stamp | `ref T`, the row stamped as written (a tracked `T`); call it once per write |
+| `mut.Write()` | O(1): one stamp (plus one entity lookup in a method that changes structure or runs in parallel) | `ref T`, the row stamped as written (a tracked `T`); call it once per write |
 | `mut.SetIfChanged(in T value)` | O(size of `T`), plus a `Write()` when it differs | true when it stored the value; equality is `IEquatable<T>`, else the bytes of an unmanaged `T`; a managed `T` without `IEquatable<T>` throws `NotSupportedException` |
 
 ## Disable and bulk changes [#bulk]

@@ -13,7 +13,7 @@ icon: RotateCcwClock
 
 ### 新功能 [#v4-7-0-new]
 
-- `Mut<T>`：`[ForEach]` 参数，用于方法只在部分行上写的组件。`Value` 只读，`Write()` 和 `SetIfChanged(value)` 只给真正写了的行打戳，
+- `Mut<T>`：`[ForEach]` 参数，用于方法只在部分行上写的组件。`Value` 只读，`Write()` 和 `SetIfChanged(value)` 只给真正写了的行打 tick，
   所以 `[Changed<T>]` 的读取方只访问值真变了的行。遍历之外，`entity.SetIfChanged(value)` 和生成的 `SetHealthIfChanged(…)` 遇到相同的值直接跳过。
   见[变更追踪](/zh/docs/guide/change-tracking)。
 - `[ChangedAny<T1..Tn>]` / `[RemovedAny<T1..Tn>]` 以及 `QueryFilter.ChangedAny<T1..Tn>(since)` / `RemovedAny`：2 到 9 个被追踪组件里
@@ -23,7 +23,7 @@ icon: RotateCcwClock
 - `IUniqueIndexed<TKey>`：一个键只对应一个实体，用 `index.Get(key)` / `TryGet(key, out e)` 查找；会让第二个实体拿到已被占用的键的写入，
   在改动任何东西之前就抛异常。见[索引与关系](/zh/docs/guide/indexes-and-relations)。
 - `world.Instantiate(prefab, in c1 … in cn)` 和 `Instantiate(prefab, entities, in c1 … in cn)`：实例带上最多九个自己的组件（父实体、位置、主人），
-  只拷贝一次行。见[预制体](/zh/docs/guide/prefabs)。
+  只拷贝一次行。创建任何实体之前先检查唯一组件的键，给定的和预制体里的都查。见[预制体](/zh/docs/guide/prefabs)。
 - `world.TrimExcess()` 把峰值留下的内存还回去：删掉空表，缩小其他表，释放存档、读档和迁移用的缓冲。见[调试与诊断](/zh/docs/guide/diagnostics)。
 - `[ForEach(Slices = N)]` 把一个方法要处理的行分摊到系统的 N 次运行里；结构体 job 用 `QueryFilter.Slice(index, count)`，
   `EcsSystem.RunCount` 表示当前是第几次运行。见[系统](/zh/docs/guide/systems)。
@@ -37,10 +37,10 @@ icon: RotateCcwClock
 
 ### 性能 [#v4-7-0-performance]
 
-- 带组件刷出实体只拷贝一次行，不再是先 `Instantiate` 再 `Set`（TODO-NUMBERS）。见[决策 D41](/zh/docs/decisions#d41-instantiate-with-components)。
-- 每个 tick 重算被追踪值的系统，不再让每个 `[Changed<T>]` 读取方访问每一行：用 `Mut<T>` 时只有值真变了的行才打戳（TODO-NUMBERS）。
+- 带组件刷出实体只拷贝一次行，不再是先 `Instantiate` 再 `Set`。见[决策 D41](/zh/docs/decisions#d41-instantiate-with-components)。
+- 每个 tick 重算被追踪值的系统，不再让每个 `[Changed<T>]` 读取方访问每一行：用 `Mut<T>` 时只有值真变了的行才打 tick。
   见[决策 D46](/zh/docs/decisions#d46-mut-stamps-per-write)。
-- `ChangedAny` 跳过它的组件都没写过的表、4,096 行的块和 64 行的位字（TODO-NUMBERS）。见[决策 D49](/zh/docs/decisions#d49-changedany-semantics)。
+- `ChangedAny` 跳过它的组件都没写过的表、4,096 行的块和 64 行的位字。见[决策 D49](/zh/docs/decisions#d49-changedany-semantics)。
 
 ### 需要修改代码的变更 [#v4-7-0-breaking]
 
@@ -55,7 +55,6 @@ icon: RotateCcwClock
   见[快照](/zh/docs/guide/snapshots)。
 - 对实体还没有的被索引组件调用 `entity.GetOrAdd<T>()` 时不会通知值索引，`Find` 和 `Count` 要等下一次 `Set` 才能找到这个实体；
   现在默认值的键会进索引。见[索引与关系](/zh/docs/guide/indexes-and-relations)。
-- 带组件的 `Instantiate` 和其他写入一样，在创建实体之前检查唯一组件的键（给定的和预制体里的都查）。见[索引与关系](/zh/docs/guide/indexes-and-relations)。
 
 ## 4.6.0 [#v4-6-0]
 

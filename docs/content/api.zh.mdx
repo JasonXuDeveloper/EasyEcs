@@ -88,7 +88,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `entity.Has<T>()` / `TryGet<T>(out T)` | O(1) | 缺失或不存活时返回 false；`TryGet` 返回副本（不算写入） |
 | `entity.Has<T1..Tn>()` | O(n) | 全部都有才为 true，只查一次记录 |
 | `entity.Set(in T1 … in Tn)` | O(n)，需要搬行时均摊 O(c) | 添加或覆盖，最多一次行复制，返回实体；表里已有这一列的组件只置存在位；键变了就重新索引（O(1)）；唯一键已被别的实体占用时，改动任何东西之前就抛异常 |
-| `entity.SetIfChanged(in T value)` | O(1) 加一次比较（O(`T` 的大小)）；值不同时同 `Set` | 实体已经是这个值时返回 false，不写、不打戳、不重建索引；缺失时添加 `T`；按 `IEquatable<T>` 比较，没有就按非托管 `T` 的字节比较 |
+| `entity.SetIfChanged(in T value)` | O(1) 加一次比较（O(`T` 的大小)）；值不同时同 `Set` | 实体已经是这个值时返回 false，不写、不打 tick、不重建索引；缺失时添加 `T`；按 `IEquatable<T>` 比较，没有就按非托管 `T` 的字节比较 |
 | `entity.GetOrAdd<T>()` | O(1)；缺失时，表里有 `T` 的列为 O(1)，否则均摊 O(c) | `ref T`；只在缺失时添加默认值；对被追踪组件算一次写入；新加的被索引 `T` 按默认值的键进索引（唯一键则占用这个键） |
 | `entity.Remove<T1..Tn>()` | O(n) | 清存在位，行留在原处；缺失的组件忽略；被追踪组件的移除会打 tick（`[Removed<T>]`）；返回实体 |
 | `entity.Disable<T>()` / `Enable<T>()` | O(1)；一张表第一次禁用时搬一次行 | 值保留，但查询、`Has` 和 `Get` 都当它不存在；禁用算移除，启用算写入；无事可做时返回 false |
@@ -160,8 +160,8 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 
 | API | 复杂度 | 说明 |
 | --- | --- | --- |
-| `mut.Value` | O(1) | `ref readonly T`；不打戳 |
-| `mut.Write()` | O(1)：一次实体查找加一次打戳 | `ref T`，这一行记为写入（被追踪的 `T`）；每次写入调用一次 |
+| `mut.Value` | O(1) | `ref readonly T`；不打 tick |
+| `mut.Write()` | O(1)：一次打 tick（方法会做结构变更或并行运行时，再加一次实体查找） | `ref T`，这一行记为写入（被追踪的 `T`）；每次写入调用一次 |
 | `mut.SetIfChanged(in T value)` | O(`T` 的大小)，值不同时再加一次 `Write()` | 存入了就返回 true；按 `IEquatable<T>` 比较，没有就按非托管 `T` 的字节比较；没实现 `IEquatable<T>` 的托管 `T` 抛 `NotSupportedException` |
 
 ## 禁用与批量修改 [#bulk]

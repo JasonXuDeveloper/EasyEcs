@@ -79,8 +79,9 @@ world.Restore(history[(100 - 3) % Rollback.Ticks]);                             
 - **单例，按值复制。** `Restore` 之后，每个单例在原来的存储里换成快照里的值，所以之前拿到的 `SingletonRef<T>` 继续有效；
   capture 之后新加的单例会被移除。
 - **句柄。** 快照里存活实体的句柄重新有效。其他句柄全部失效，包括 capture 之后创建的实体的句柄，哪怕之后有新实体复用了它们的 id。
-- **不包括系统、选项和 `GroupBy` 设置。** 系统照常按注册的样子运行，World 保留自己的 `GroupBy` 调用；capture 之后新建的表
-  保留下来，但是空的。快照保存的是每一行所在的[分组](/zh/docs/guide/groups)：每个实体都回到拍快照时所在的那张分组表。
+- **不包括系统、选项和 `GroupBy` 设置。** 系统照常按注册的样子运行，计数也是自己的：`RunCount` 接着往下数，所以
+  [分片](/zh/docs/guide/systems#slices)的方法访问的是上次运行之后的那一片，不是拍快照时那一片。World 保留自己的
+  `GroupBy` 调用；拍快照之后新建的表保留下来，但是空的。快照保存的是每一行所在的[分组](/zh/docs/guide/groups)：每个实体都回到拍快照时所在的那张分组表。
 
 ### 恢复之后，其他部分会看到什么 [#after-restore]
 

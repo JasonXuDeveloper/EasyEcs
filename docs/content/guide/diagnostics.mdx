@@ -111,7 +111,7 @@ What the entity count means:
   destroyed or moved out before its turn is counted but not visited.
 - **`[ForEach]` methods only.** Queries and loops in `OnUpdate` are not counted.
 - **A sliced method reports its share.** A `[ForEach(Slices = N)]` method counts the matching entities divided by N
-  ([slices](/en/docs/guide/systems#update-interval)).
+  ([slices](/en/docs/guide/systems#slices)).
 
 ```csharp
 foreach (var system in measured.Systems)

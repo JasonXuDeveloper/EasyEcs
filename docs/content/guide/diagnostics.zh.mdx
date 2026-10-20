@@ -99,7 +99,7 @@ foreach (var system in measured.Systems)
 
 - **开始时匹配的数量，不是逐个访问的数量。** 会改结构的遍历里，这是个上限：轮到之前就被销毁或移走的实体算进去了，但没被访问。
 - **只算 `[ForEach]` 方法。** `OnUpdate` 里的查询和循环不算。
-- **分片的方法只报自己那一份。** `[ForEach(Slices = N)]` 方法报的是匹配数除以 N（[分片](/zh/docs/guide/systems#update-interval)）。
+- **分片的方法只报自己那一份。** `[ForEach(Slices = N)]` 方法报的是匹配数除以 N（[分片](/zh/docs/guide/systems#slices)）。
 
 ```csharp
 foreach (var system in measured.Systems)
@@ -121,7 +121,7 @@ foreach (var system in measured.Systems)
 
 ```csharp
 public record struct Poisoned(int DamagePerTick) : IComponent;
-public record struct NetPosition(float X, float Y) : IComponent;   // the position last sent to clients
+public record struct NetPosition(float X, float Y) : IComponent;   // 上次发给客户端的位置
 
 public class MoveSystem : EcsSystem
 {
@@ -215,7 +215,7 @@ public sealed class SystemMetrics : IDisposable
     private readonly Meter _meter = new("Game.World");
     private readonly Lock _gate = new();
     private readonly SystemStats[] _stats;
-    private readonly KeyValuePair<string, object>[][] _tags;   // one "system" tag per system, built once
+    private readonly KeyValuePair<string, object>[][] _tags;   // 每个系统一个 "system" 标签，只建一次
 
     public SystemMetrics(World world)
     {
@@ -233,7 +233,7 @@ public sealed class SystemMetrics : IDisposable
             () => Read(static stats => stats.TotalAllocated), unit: "By");
     }
 
-    // The world's thread, after world.Update(): a copy of every system's stats.
+    // World 的线程，world.Update() 之后：拷一份每个系统的统计。
     public void Publish(World world)
     {
         lock (_gate)
@@ -243,7 +243,7 @@ public sealed class SystemMetrics : IDisposable
         }
     }
 
-    // The exporter's thread, once per collection.
+    // 导出器的线程，每次采集一次。
     private Measurement<T>[] Read<T>(Func<SystemStats, T> value) where T : struct
     {
         lock (_gate)

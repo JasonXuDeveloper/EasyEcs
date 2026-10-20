@@ -63,7 +63,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D43](#d43-stats-and-schedule) | Systems report what they allocate and visit; the schedule is a description |
 | [D44](#d44-slices) | Slices: a filter cut at 64-row words, chosen by the system's run count |
 | [D45](#d45-unique-keys) | Unique keys: a marker interface, an eager index, a claim before the write |
-| [D46](#d46-mut-stamps-per-write) | `Mut<T>` stamps the row it writes, found through the entity |
+| [D46](#d46-mut-stamps-per-write) | `Mut<T>` stamps the row it writes, by row where rows cannot move |
 | [D47](#d47-setifchanged-equality) | `SetIfChanged` compares with `IEquatable<T>`, else the bytes |
 | [D48](#d48-parallel-tracked-chunks) | Parallel writers of tracked components cut chunks at 4,096 rows |
 | [D49](#d49-changedany-semantics) | `ChangedAny`: one OR group per kind, one tick per filter |
@@ -980,26 +980,29 @@ keys cannot be unique (EECS036).
 - **Writing, then rolling back on a collision:** partial changes visible to indexes and groups.
 - **`EntityId` keys:** loads and moves rewrite them after the rows are copied, too late to check first.
 
-## D46. `Mut<T>` stamps the row it writes, found through the entity [#d46-mut-stamps-per-write]
+## D46. `Mut<T>` stamps the row it writes, by row where rows cannot move [#d46-mut-stamps-per-write]
 
 **Decision.** A `Mut<T>` parameter is a write of `T` for the scheduler and the carry-over of change ticks, but the row
-loop does not stamp its column: `Write()` (and a `SetIfChanged` that stores) looks up the entity's current row and
-stamps it, one lookup per write. It works per entity, in parallel and in methods that change structure; batch methods
-keep spans (EECS009), indexed and grouped components keep `Set` (EECS015). The analyzer does not suggest `Mut<T>` for
-a `ref` parameter (EECS025 is unchanged).
+loop does not stamp its column: `Write()` (and a `SetIfChanged` that stores) stamps the row it writes. A method that
+changes no structure and runs on one thread walks runs of rows, and each `Mut<T>` knows its table and row, so a write
+stamps the row directly; in a method that changes structure, or a parallel per-entity method, a write looks up the
+entity's current row first. Batch methods keep spans (EECS009), indexed and grouped components keep `Set` (EECS015).
+The analyzer does not suggest `Mut<T>` for a `ref` parameter (EECS025 is unchanged).
 
 **Why.**
 - **A recomputed value is not a changed value.** A system that writes a target every tick through `ref` stamps every
   row, so every `[Changed<T>]` reader visits every row; `Mut<T>` stamps only the rows whose value changed.
-- **The row is looked up, not assumed.** A structural change in the body moves the entity; stamping the visited row
-  index would mark another entity.
-- **A write costs what it does.** A lookup per write is cheap where writes are rare, which is where `Mut<T>` is meant;
-  where most rows are written, the plain `ref` is cheaper, and only the data tells which applies, so the analyzer
-  stays silent.
-- **Measured** (`ChangeTrackingWriteBenchmark`, `Mut` false and true, `Write` and `WriteAndRead`): TODO-NUMBERS.
+- **The row is known where it cannot move.** In a pass that changes no structure the visited row is the entity's row
+  for the whole call; a structural change in the body moves the entity, so there the row is looked up.
+- **A write costs what it does.** Where most rows are written, the plain `ref` (one bulk stamp per run) is cheaper; only
+  the data tells which applies, so the analyzer stays silent.
+- **Measured** (`ChangeTrackingWriteBenchmark`, 100,000 aims recomputed per tick, 10% of them changing): the writer
+  alone takes 110 µs through `ref` and 135 µs through `Mut<T>` (a comparison per row against a bulk stamp); with the
+  downstream `[Changed<T>]` reader, 162 µs and 172 µs, the reader dropping from 52 µs to 37 µs. Looking the entity up
+  on every write took the writer to 348 µs.
 
 **Considered.**
-- **Stamping the visited row:** wrong after the entity moved.
+- **Looking the entity up on every write:** 2.6 times the cost of the writer by row in the benchmark above.
 - **A per-row "written" mask merged after the pass:** storage per row and a second pass.
 - **An EECS025 suggestion from `ref` to `Mut<T>`:** a slower fix wherever most rows are written.
 

@@ -159,7 +159,7 @@ for (int i = 0; i < 100_000; i++) world.CreateEntity(new Position(i, 0), new Lif
 | 变更 | 行移动 |
 | --- | --- |
 | `Set` 实体已有的组件 | 没有：只是一次写入（[分组](/zh/docs/guide/groups)组件换了新值时，会搬到对应分组的表） |
-| `SetIfChanged` 传入实体现有的值 | 没有，也不写入：不打戳，不重新索引 |
+| `SetIfChanged` 传入实体现有的值 | 没有，也不写入：不打 tick，不重新索引 |
 | `SetIfChanged` 传入不同的值 | 和 `Set` 一样 |
 | 添加表里已有列的组件（之前移除过的，或时有时无的标签） | 没有：一个存在位 |
 | 添加表里没有列的组件 | 一次，搬到有这一列的表 |

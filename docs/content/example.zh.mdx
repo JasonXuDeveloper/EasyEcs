@@ -101,7 +101,7 @@ flowchart LR
 里创建，在 `OnDestroy` 里移除。规划不必每个 tick 都是最新的，所以 `[ForEach(Slices = 4)]` 把它摊到四次运行上：每次只规划
 四分之一的 NPC，每个 NPC 每四个 tick 规划一次，哪个 tick 都不会出现尖峰。大多数时候规划出来的还是原来的目标，而 `Goal`
 要同步，所以方法收的是 `Mut<Goal>` 而不是 `ref Goal`：被追踪组件的 `ref` 参数会把方法经过的每一行都算作写入，
-`SetIfChanged` 却只给真正变了的目标打戳，同步也就只发这些。`SteeringSystem` 每个实体的计算量大，所以跑在所有核心上
+`SetIfChanged` 却只给真正变了的目标打 tick，同步也就只发这些。`SteeringSystem` 每个实体的计算量大，所以跑在所有核心上
 （`Parallel = true`），朝着目标转向。`MovementSystem` 接收 span，把整段连续行当作 `Vector<float>` 相加。`ManaSystem` 每十次更新跑一次，
 比 `RegenerationSystem` 晚五次，两者的开销落在不同的 tick 上。`ZoneSystem` 只在单位真的换了区域时才写 `Zone`，
 这一写会把它的行搬到新区域的表里。

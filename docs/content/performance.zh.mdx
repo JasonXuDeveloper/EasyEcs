@@ -560,7 +560,7 @@ tick 一次、用 `[Changed<T>]` 和 `[Removed<T>]` 做的同步。`BattleServer
 `[Changed<Health>]`（`Changed=True`）或访问每一行，把血量复制到副本。`QueryTick` 用临时 `Query` 做同样的事。
 `DynamicBufferBenchmark` 同步 100,000 个背包里变了的 1,000 个，背包分别存为 `DynamicBuffer<int>` 和被追踪组件里的
 `List<int>`。`ChangeTrackingWriteBenchmark` 每个 tick 重算 100,000 个瞄准方向，其中十分之一会变：通过 `ref Aim` 写
-（`Mut=False`，访问到的每一行都打戳），或者通过 `Mut<Aim>.SetIfChanged` 写（`Mut=True`，只给变了的行打戳）。`Write` 只有写入方，
+（`Mut=False`，访问到的每一行都打 tick），或者通过 `Mut<Aim>.SetIfChanged` 写（`Mut=True`，只给变了的行打 tick）。`Write` 只有写入方，
 `WriteAndRead` 在后面加上 `[Changed<Aim>]` 的同步。`DestroyLogBenchmark` 把 1,000 个实体创建再销毁十轮，分别逐个销毁和整表销毁，
 销毁日志关闭（`DestroyLog=0`）和打开（4,096 条记录的环），以及再加上 16 个客户端在不同 tick 上的读取。
 

@@ -28,8 +28,8 @@ major or minor version that needs code changes? The
   that would give a second entity a taken key throws before it changes anything. See
   [indexes and relations](/en/docs/guide/indexes-and-relations).
 - `world.Instantiate(prefab, in c1 … in cn)` and `Instantiate(prefab, entities, in c1 … in cn)`: an instance with up
-  to nine components of its own (a parent, a position, an owner) in one row copy. See
-  [prefabs](/en/docs/guide/prefabs).
+  to nine components of its own (a parent, a position, an owner) in one row copy. The keys of unique components, the
+  given ones and the prefab's, are checked before any entity is created. See [prefabs](/en/docs/guide/prefabs).
 - `world.TrimExcess()` gives back the memory a peak left: empty tables go, the others shrink, the buffers of saves,
   loads and migrations are released. See [debugging and diagnostics](/en/docs/guide/diagnostics).
 - `[ForEach(Slices = N)]` spreads a method's rows over N runs of its system; `QueryFilter.Slice(index, count)` does it
@@ -49,12 +49,12 @@ major or minor version that needs code changes? The
 
 ### Performance [#v4-7-0-performance]
 
-- Spawning with components is one row copy instead of `Instantiate` and then `Set` (TODO-NUMBERS). See
+- Spawning with components is one row copy instead of `Instantiate` and then `Set`. See
   [decision D41](/en/docs/decisions#d41-instantiate-with-components).
 - A system that recomputes a tracked value every tick no longer makes every `[Changed<T>]` reader visit every row:
-  with `Mut<T>`, only the rows whose value changed are stamped (TODO-NUMBERS). See
+  with `Mut<T>`, only the rows whose value changed are stamped. See
   [decision D46](/en/docs/decisions#d46-mut-stamps-per-write).
-- `ChangedAny` skips the tables, 4,096-row blocks and 64-row words none of its components wrote (TODO-NUMBERS). See
+- `ChangedAny` skips the tables, 4,096-row blocks and 64-row words none of its components wrote. See
   [decision D49](/en/docs/decisions#d49-changedany-semantics).
 
 ### Changes that need code changes [#v4-7-0-breaking]
@@ -76,8 +76,6 @@ major or minor version that needs code changes? The
 - `entity.GetOrAdd<T>()` of an indexed component that the entity lacked did not tell the value index, so `Find` and
   `Count` missed the entity until its next `Set`; the default value's key is now indexed. See
   [indexes and relations](/en/docs/guide/indexes-and-relations).
-- `Instantiate` with components checks the keys of unique components, the given ones and the prefab's, before it
-  creates the entity, as every other write does. See [indexes and relations](/en/docs/guide/indexes-and-relations).
 
 ## 4.6.0 [#v4-6-0]
 

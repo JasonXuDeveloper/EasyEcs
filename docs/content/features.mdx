@@ -260,7 +260,7 @@ stores and stamps only a value that differs. Outside a pass, `entity.SetIfChange
 - **Use it for:** a value recomputed every tick that changes now and then: a unit's target, its grid cell, a
   derived stat. `[Changed<T>]` readers then visit only the rows whose value really changed.
 - **Skip it for:** a value written on most rows anyway: a plain `ref` is cheaper.
-- **Cost:** `Value` is a plain read; each write is one entity lookup and one stamp; `SetIfChanged` compares the value
+- **Cost:** `Value` is a plain read; each write is one stamp (plus one entity lookup in a method that changes structure or runs in parallel); `SetIfChanged` compares the value
   first (`IEquatable<T>`, which record structs implement, or the bytes of an unmanaged struct). The scheduler counts
   a `Mut<T>` parameter as a write of `T`.
 - **Guide:** [Change tracking](/en/docs/guide/change-tracking)

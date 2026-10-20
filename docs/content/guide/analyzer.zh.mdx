@@ -249,7 +249,7 @@ public sealed class ScoreSystem : EcsSystem
 
 接收组件 span 的方法拿到的是整段连续的行，所以逐实体参数（`ref` / `in` 组件、`Mut<T>`、`Maybe<T>`、`Entity`）在这次调用里没有
 唯一的值；`World` 也可能在 span 还指着行的时候改动它们。没有组件 span 的 `EntitySpan` 则没有可描述的那段行。批量方法写入时按整段
-打戳：`Span<T>` 就是它的写入方式。
+打 tick：`Span<T>` 就是它的写入方式。
 
 ```csharp doccheck=expect-EECS009
 public class DriftAllSystem : EcsSystem
@@ -739,7 +739,7 @@ public static class Report
 
 `ref` 参数（批量方法里的 `Span<T>`）会把它的类型放进系统的写集合：任何[并行阶段](/zh/docs/guide/threading#parallel-systems)
 都不会让这个系统和读该类型的系统同时运行。如果是[追踪变化的组件](/zh/docs/guide/change-tracking)，方法访问的每一行还会被打上
-变化戳，`[Changed<T>]` 系统就会去处理没人改过的行。`entity.Get<T>()` 和生成的 `entity.WriteX()` 同样会给行打戳。
+变化戳，`[Changed<T>]` 系统就会去处理没人改过的行。`entity.Get<T>()` 和生成的 `entity.WriteX()` 同样会给行打 tick。
 规则会逐个检查用法：赋值、`++`、`ref` 或 `out` 实参、非 `readonly` 方法、`ref` 局部变量、`this ref` 扩展方法
 （`DynamicBuffer<T>.Add`）都算写入，遇到这些就保留写访问。
 
@@ -772,8 +772,8 @@ public class ArmorBonus : EcsSystem
 
 每个参数在每一行或每一遍上都有开销：组件的列要加载、要前进，单例要解析、要作为一次访问参与调度，`Entity` 每行都要构造句柄，
 而且和 `World` 一样会让系统[单独运行](/zh/docs/guide/threading#parallel-systems)。方法只要求实体有某个组件时，用过滤器表达。
-没用到的追踪组件 `ref` 参数会报告，但不提供修复：它会给访问到的每一行打戳，换成 `[With<T>]` 就不会了。没用到的 `Mut<T>`
-在写入之前不打戳，所以和 `in` 参数一样提供 `[With<T>]` 修复。方法体为空时视为还在编写中，不报告。
+没用到的追踪组件 `ref` 参数会报告，但不提供修复：它会给访问到的每一行打 tick，换成 `[With<T>]` 就不会了。没用到的 `Mut<T>`
+在写入之前不打 tick，所以和 `in` 参数一样提供 `[With<T>]` 修复。方法体为空时视为还在编写中，不报告。
 
 ```csharp
 public record struct Survivors(int Count) : ISingletonComponent;
@@ -1018,7 +1018,7 @@ while (running) world.Update();
 public class SendFire : EcsSystem
 {
     [ForEach(Slices = 4), Changed<Burning>]
-    static void Send(in Burning burning, ref Replica replica) => replica.Burning = burning.Ticks > 0;   // three slices in four lose their changes
+    static void Send(in Burning burning, ref Replica replica) => replica.Burning = burning.Ticks > 0;   // 四个分片里有三个会丢掉变化
 }
 ```
 
@@ -1032,7 +1032,7 @@ public class SendFire : EcsSystem
 }
 ```
 
-切法和节奏见[分片](/zh/docs/guide/systems#update-interval)。
+切法和节奏见[分片](/zh/docs/guide/systems#slices)。
 
 ## EECS036 [#eecs036]
 
@@ -1054,7 +1054,7 @@ public record struct Mount(EntityId Rider) : IComponent, IUniqueIndexed<EntityId
 public record struct Mount(EntityId Rider) : IComponent, IIndexed<EntityId> { public EntityId Key => Rider; }
 ```
 
-唯一索引检查什么，见[唯一键](/zh/docs/guide/indexes-and-relations#value-indexes)。
+唯一索引检查什么，见[唯一键](/zh/docs/guide/indexes-and-relations#unique-keys)。
 
 ## 相关页面 [#related]
 

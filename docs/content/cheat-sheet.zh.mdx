@@ -90,7 +90,7 @@ Entity unit = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Hea
 | --- | --- | --- |
 | `world.CreateEntity(a, b, …)` | 带最多 9 个组件创建，直接放进最终的表 | 是 |
 | `entity.Set(a, b, …)` | 一次搬迁里添加或覆盖最多 9 个组件；返回实体 | 是 |
-| `entity.SetIfChanged(value)` | 实体已经是这个值就不写，否则 `Set`；写了返回 `true`（相同的值不打戳、不重建索引） | 新加时是 |
+| `entity.SetIfChanged(value)` | 实体已经是这个值就不写，否则 `Set`；写了返回 `true`（相同的值不打 tick、不重建索引） | 新加时是 |
 | `entity.Remove<A, B>()` | 移除已有的组件；返回实体 | 是 |
 | `entity.GetOrAdd<T>()` | `ref T`，没有时先以默认值添加 | 添加时是 |
 | `entity.Get<T>()` | 用于写入的 `ref T`（对变更追踪算一次写入） | 否 |
@@ -153,7 +153,7 @@ bool applied = unit.Run<Health, TakeHit>(ref hit);   // 在请求对应的实体
 unit.SetPosition(3, 4).SetDead();                   // setter 返回实体，可以链式调用
 unit.Position.X += 1;                               // 不追踪的组件：ref
 unit.SetHealth(80);                                 // 被追踪的组件：用 Set 写，会打上 tick
-bool rewritten = unit.SetHealthIfChanged(80);       // false：值已经是 80，不打戳
+bool rewritten = unit.SetHealthIfChanged(80);       // false：值已经是 80，不打 tick
 bool dead = unit.IsDead;
 ```
 
@@ -181,7 +181,7 @@ public class MovementSystem : EcsSystem
 | `World` | 当前 World | 在静态方法里创建实体时用 |
 | `EntitySpan` | 批量方法这一段行对应的实体 | 仅批量方法 |
 | `Maybe<T>` | 实体可能没有的组件 | `HasValue`、`Value` |
-| `Mut<T>` | 方法只在部分行上写的组件 | `Value` 只读；`Write()` 和改了值的 `SetIfChanged(value)` 才给这一行打戳；对调度器来说算写入 |
+| `Mut<T>` | 方法只在部分行上写的组件 | `Value` 只读；`Write()` 和改了值的 `SetIfChanged(value)` 才给这一行打 tick；对调度器来说算写入 |
 | 其他任意类型（系统之外） | 调用方传给入口方法的值 | `ref int count`、`in Settings s` |
 
 ### 特性 [#attributes]
@@ -306,7 +306,7 @@ int changed = world.Count<Health>(QueryFilter.Create().Changed<Health>(mark));
 ```csharp
 public class ClampSystem : EcsSystem
 {
-    [ForEach]                                        // 只给真正写了的行打戳
+    [ForEach]                                        // 只给真正写了的行打 tick
     static void Clamp(Mut<Health> hp)
     {
         if (hp.Value.Value > 100) hp.Write() = new Health(100);

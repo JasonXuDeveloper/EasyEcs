@@ -215,13 +215,13 @@ public class ReplicationSystem : EcsSystem
 
 ### 值变了才算写入 [#write-only-when-changed]
 
-被追踪组件的 `ref` 参数会给方法访问到的每一行打戳，不管写没写。`Mut<T>` 参数只给方法真正写了的行打戳：`Value` 只读，
-`Write()` 给出 `ref` 并打戳，`SetIfChanged(value)` 只在值不同时存入并打戳。遍历之外，`entity.SetIfChanged(value)` 和生成的
+被追踪组件的 `ref` 参数会给方法访问到的每一行打 tick，不管写没写。`Mut<T>` 参数只给方法真正写了的行打 tick：`Value` 只读，
+`Write()` 给出 `ref` 并打 tick，`SetIfChanged(value)` 只在值不同时存入并打 tick。遍历之外，`entity.SetIfChanged(value)` 和生成的
 `SetHealthIfChanged(…)` 也是这样。
 
 - **适合：** 每个 tick 都重算、偶尔才变的值：单位的目标、所在的格子、推导出来的属性。`[Changed<T>]` 的读取方只会访问值真变了的行。
 - **别用于：** 大多数行反正都会写的值：普通 `ref` 更便宜。
-- **开销：** `Value` 就是一次普通读取；每次写入多一次实体查找和一次打戳；`SetIfChanged` 先比较值（`IEquatable<T>`，record struct 自带；
+- **开销：** `Value` 就是一次普通读取；每次写入打一次 tick（方法会做结构变更或并行运行时，再加一次实体查找）；`SetIfChanged` 先比较值（`IEquatable<T>`，record struct 自带；
   否则按非托管结构体的字节比较）。调度器把 `Mut<T>` 参数算作对 `T` 的写入。
 - **指南：** [变更追踪](/zh/docs/guide/change-tracking)
 

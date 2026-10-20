@@ -235,7 +235,7 @@ foreach (var item in world.Query<Position, Velocity>())
 
 - `var hp = entity.Health; hp.Value--;` 改的是副本。要用 `ref var`。
 - 只读时用 `in`，不要用 `ref`：对 `ITrackChanges` 组件的每次 `ref` 访问都算一次修改，同步时会把没人改过的行也发出去。
-  所以被追踪组件的生成属性是只读的，写入用 `entity.WriteX()`。只写访问到的部分行的方法用 `Mut<T>`，它只给写了的行打戳；
+  所以被追踪组件的生成属性是只读的，写入用 `entity.WriteX()`。只写访问到的部分行的方法用 `Mut<T>`，它只给写了的行打 tick；
   `SetIfChanged`（以及生成的 `entity.SetXIfChanged(...)`）只在值不同时才写（[什么算写入](/zh/docs/guide/change-tracking#what-counts-as-a-write)）。
 - 组件里的集合要通过组件的 `ref` 修改，不能通过 `in`：否则变更追踪和调度器都发现不了（[EECS011](/zh/docs/guide/analyzer)）。
   每个实体需要一个列表时，用 [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers)。

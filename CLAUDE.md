@@ -32,7 +32,8 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
   Entity.Relations.cs          entity.AddRelation / RemoveRelation / HasRelation (IRelation buffers + their index)
   EntityId.cs                  index + incarnation (8 bytes, unmanaged): how data refers to an entity
   EntityMeta.cs                16-byte per-entity record (archetype, version, slot)
-  EntitySpan.cs                the entities of a batch job's run of rows (lazy handles over the run's EntitySlots)
+  EntitySpan.cs                the entities of a batch job's run of rows (lazy handles over the run's EntitySlots; its
+                               table and first row, through which a Mut<T> of the run stamps its row)
   EntityDebugView.cs           what a debugger shows for an entity (Entity.Describe)
   EcsSystem.cs                 OnCreate/OnUpdate/OnDestroy, RunCount (completed runs: the slice of a sliced method);
                                SystemCode.cs: the generated jobs and access of a system type, registered by a module
@@ -104,7 +105,8 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
                                ticks, skipping unwritten blocks and words), Tombstones / NoTombstones (the two compiled
                                forms of a structural loop), QueryWalk (the cold state of a walk, pooled per thread)
   QuerySlice.cs                QueryFilter.Slice: the rows of a table one slice visits (64-row words, rotated per table)
-  FilterOverflow.cs            interned filter bits past 255 (a QueryFilter holds no object reference)
+  FilterOverflow.cs            interned filter bits past 255, and FilterGroups: the ChangedAny / RemovedAny groups
+                               interned whole (a QueryFilter holds ids, no object reference)
   TypeIndex.cs                 dense per-type index families (ComponentType bit, SingletonType slot, SystemGroup
                                index, ComponentSignature of multi-component calls) + SingletonBox; a tracked
                                component's TicksBit: its hidden ChangeTick column (Query.cs), non-generic so Native

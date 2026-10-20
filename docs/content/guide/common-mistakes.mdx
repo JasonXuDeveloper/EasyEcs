@@ -380,7 +380,7 @@ else
 }
 ```
 
-No rule catches it. More in [removal detection](/en/docs/guide/change-tracking#removal-detection).
+No rule catches it. More in [the destroy log](/en/docs/guide/change-tracking#destroy-log).
 
 ### Expecting `Count` or `Query` to honour a slice [#count-a-slice]
 
@@ -403,7 +403,7 @@ int npcs = world.Count<Position>(QueryFilter.Create().With<Npc>());   // all of 
 ```
 
 With `MeasureSystems`, `system.Stats.LastEntities` of a `[ForEach(Slices = N)]` method is its share. Caught at run
-time. More in [slices](/en/docs/guide/systems#update-interval).
+time. More in [slices](/en/docs/guide/systems#slices).
 
 ### Slicing a `[Changed<T>]` method [#slice-changed]
 
@@ -547,7 +547,7 @@ carol.SetSeat(12);
 ```
 
 The refused write changes nothing: the entity keeps its old key and the world is as it was. Caught at run time. More
-in [value indexes](/en/docs/guide/indexes-and-relations#value-indexes).
+in [unique keys](/en/docs/guide/indexes-and-relations#unique-keys).
 
 ### Copying an entity or prefab that holds a unique key [#unique-copies]
 

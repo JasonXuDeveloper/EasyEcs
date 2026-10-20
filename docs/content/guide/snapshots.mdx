@@ -84,8 +84,10 @@ world.Restore(history[(100 - 3) % Rollback.Ticks]);                             
   so a `SingletonRef<T>` taken before keeps working; singletons added after the capture are removed.
 - **Handles.** Handles to entities alive in the snapshot are valid again. Every other handle is stale, including
   handles to entities created after the capture, even when a later entity reuses their id.
-- **Not systems, options or the `GroupBy` configuration.** Systems keep running as registered, and the world keeps
-  its `GroupBy` calls; tables created after the capture stay, empty. What a snapshot does hold is each row's
+- **Not systems, options or the `GroupBy` configuration.** Systems keep running as registered, with their own
+  counters: `RunCount` goes on from where it is, so a [sliced](/en/docs/guide/systems#slices) method visits the slice
+  after the last one it ran, not the one it ran at the capture. The world keeps its `GroupBy` calls; tables created
+  after the capture stay, empty. What a snapshot does hold is each row's
   [group](/en/docs/guide/groups): every entity comes back in the group table it was in at the capture.
 
 ### What a restore tells the rest of the world [#after-restore]

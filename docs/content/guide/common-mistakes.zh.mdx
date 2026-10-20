@@ -270,14 +270,14 @@ int amount = player.Gold.Amount;             // ref readonly：不打标记
 ### 只偶尔写入，却用 `ref` 拿追踪组件 [#ref-writes-every-row]
 
 ```csharp
-public record struct Facing(int Direction) : IComponent, ITrackChanges;   // sent to clients when it changes
+public record struct Facing(int Direction) : IComponent, ITrackChanges;   // 值变了才发给客户端
 ```
 
 ```csharp
 public class Face : EcsSystem
 {
     [ForEach]
-    static void Turn(ref Facing facing, in Velocity velocity)      // every visited row is stamped
+    static void Turn(ref Facing facing, in Velocity velocity)      // 访问到的每一行都打 tick
     {
         int direction = velocity.X >= 0 ? 0 : 4;
         if (facing.Direction != direction) facing = new Facing(direction);
@@ -285,9 +285,9 @@ public class Face : EcsSystem
 }
 ```
 
-追踪组件的 `ref` 参数不管方法有没有真的写，都算一次写入；`Query` 的查询项也一样（枚举器会给访问到的每一行打戳）。结果每个
+追踪组件的 `ref` 参数不管方法有没有真的写，都算一次写入；`Query` 的查询项也一样（枚举器会给访问到的每一行打 tick）。结果每个
 `[Changed<Facing>]` 读者都要访问所有实体，复制时把没人改过的值也发了出去。分析器看不出来，因为方法确实写了其中一些行。改用
-`Mut<T>`：它只给写入的行打戳，`SetIfChanged` 只在值不同时才写：
+`Mut<T>`：它只给写入的行打 tick，`SetIfChanged` 只在值不同时才写：
 
 ```csharp
 public class Face : EcsSystem
@@ -337,7 +337,7 @@ public record struct Despawns(int Count) : ISingletonComponent;
 ```csharp
 public class CountDespawns : EcsSystem
 {
-    [ForEach, With<Position>, Removed<Avatar>]       // removals only: a destroyed entity has no row left
+    [ForEach, With<Position>, Removed<Avatar>]       // 只有移除：被销毁的实体已经没有行了
     static void Count(ref Despawns despawns) => despawns = new Despawns(despawns.Count + 1);
 }
 ```
@@ -346,9 +346,9 @@ public class CountDespawns : EcsSystem
 销毁日志，每个客户端用自己确认过的 tick 去读：
 
 ```csharp
-using var server = new World(new WorldOptions { DestroyLog = 4_096 });   // the destroys a client may lag behind
-var gone = new EntityId[4_096];                                          // allocated once, reused for every client
-ulong acked = server.ChangeTick;                                          // the client's last acknowledged tick
+using var server = new World(new WorldOptions { DestroyLog = 4_096 });   // 客户端最多可能落后这么多次销毁
+var gone = new EntityId[4_096];                                          // 只分配一次，所有客户端共用
+ulong acked = server.ChangeTick;                                          // 客户端最后确认的 tick
 server.Update();
 if (server.DestroyedSince(acked, gone, out int destroyed))
 {
@@ -360,7 +360,7 @@ else
 }
 ```
 
-没有规则能发现。详见[移除检测](/zh/docs/guide/change-tracking#removal-detection)。
+没有规则能发现。详见[销毁日志](/zh/docs/guide/change-tracking#destroy-log)。
 
 ### 以为 `Count` 或 `Query` 会照顾分片 [#count-a-slice]
 
@@ -370,7 +370,7 @@ public struct Npc : IComponent;
 
 ```csharp
 var quarter = QueryFilter.Create().With<Npc>().Slice(0, 4);
-int thinking = world.Count<Position>(quarter);   // ArgumentException: Count needs every matching row
+int thinking = world.Count<Position>(quarter);   // ArgumentException：Count 需要所有匹配的行
 ```
 
 分片是对每张表的切分，只有 `[ForEach]` 那类遍历（`ForEach`、`ForEachEntity`、`ForEachBatch` 及其并行形式）认它。`Query`、
@@ -378,11 +378,11 @@ int thinking = world.Count<Position>(quarter);   // ArgumentException: Count nee
 计数时去掉分片；分片系统访问了多少，看它的统计：
 
 ```csharp
-int npcs = world.Count<Position>(QueryFilter.Create().With<Npc>());   // all of them; a slice holds about npcs / 4
+int npcs = world.Count<Position>(QueryFilter.Create().With<Npc>());   // 全部；一个分片大约 npcs / 4 个
 ```
 
 打开 `MeasureSystems` 后，`[ForEach(Slices = N)]` 方法的 `system.Stats.LastEntities` 就是它那一份。运行时报错。详见
-[分片](/zh/docs/guide/systems#update-interval)。
+[分片](/zh/docs/guide/systems#slices)。
 
 ### 给 `[Changed<T>]` 方法分片 [#slice-changed]
 
@@ -502,7 +502,7 @@ public record struct Seat(int Number) : IComponent, IUniqueIndexed<int> { public
 ```csharp
 var alice = world.CreateEntity(new Seat(1));
 var bob = world.CreateEntity(new Seat(2));
-bob.SetSeat(1);       // InvalidOperationException: alice still holds seat 1
+bob.SetSeat(1);       // InvalidOperationException：alice 还占着 1 号座位
 alice.SetSeat(2);
 ```
 
@@ -512,19 +512,19 @@ alice.SetSeat(2);
 ```csharp
 var carol = world.CreateEntity(new Seat(11));
 var dave = world.CreateEntity(new Seat(12));
-carol.SetSeat(-1);    // a key nobody holds
+carol.SetSeat(-1);    // 没人占用的键
 dave.SetSeat(11);
 carol.SetSeat(12);
 ```
 
-被拒绝的写入什么都不改：实体保留原来的键，World 保持原样。运行时报错。详见[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)。
+被拒绝的写入什么都不改：实体保留原来的键，World 保持原样。运行时报错。详见[唯一键](/zh/docs/guide/indexes-and-relations#unique-keys)。
 
 ### 复制带唯一键的实体或预制体 [#unique-copies]
 
 ```csharp
 var usher = new Prefab().Set(new Seat(0), new Health(100));
 var ushers = new Entity[10];
-world.Instantiate(usher, ushers);   // InvalidOperationException: ten entities, one key
+world.Instantiate(usher, ushers);   // InvalidOperationException：十个实体，一个键
 ```
 
 唯一键每复制一份，就多一个持有者。带键实体的 `Clone()` 会抛异常；预制体带着键时，第二次 `Instantiate(prefab)`、以及一次实例化多个的
@@ -534,7 +534,7 @@ world.Instantiate(usher, ushers);   // InvalidOperationException: ten entities, 
 var guest = new Prefab().Set(new Health(100));
 var guests = new Entity[10];
 for (int i = 0; i < guests.Length; i++)
-    guests[i] = world.Instantiate(guest, new Seat(100 + i));   // one key per instance
+    guests[i] = world.Instantiate(guest, new Seat(100 + i));   // 每个实例一个键
 ```
 
 null 键（`string` 键的默认值）不算键：预制体可以带着它，每个实例都拿到它。运行时报错。详见[预制体](/zh/docs/guide/prefabs)。
@@ -543,9 +543,9 @@ null 键（`string` 键的默认值）不算键：预制体可以带着它，每
 
 ```csharp
 var regular = world.CreateEntity(new Seat(5));
-regular.DisableSeat();                   // a disabled key is no key: seat 5 is free
+regular.DisableSeat();                   // 禁用的键不算键：5 号座位空出来了
 var walkIn = world.CreateEntity(new Seat(5));
-regular.EnableSeat();                    // InvalidOperationException: walkIn holds seat 5
+regular.EnableSeat();                    // InvalidOperationException：walkIn 占着 5 号座位
 ```
 
 被禁用的组件保留值，但会离开索引，所以它关着的时候键可能被别人拿走。启用时要重新认领这个键，别的实体持有它就会失败，组件保持禁用。
@@ -553,7 +553,7 @@ regular.EnableSeat();                    // InvalidOperationException: walkIn ho
 
 ```csharp
 if (world.SeatIndex.TryGet(5, out var holder) && holder != regular)
-    regular.SetSeat(6);                  // another key, enabled
+    regular.SetSeat(6);                  // 换一个键，启用
 else
     regular.EnableSeat();
 ```
@@ -679,7 +679,7 @@ static Entity Restore(World world, ReadOnlySpan<byte> record)
 while (running)
 {
     world.Update();
-    world.TrimExcess();   // drops the tables the next tick creates again
+    world.TrimExcess();   // 丢掉的表下一个 tick 又会建回来
 }
 ```
 
@@ -688,7 +688,7 @@ while (running)
 
 ```csharp
 world.Update();
-if (world.UpdateCount % 12_000 == 0 && world.EntityCount < 10_000)   // every ten minutes at 20 Hz, once quiet
+if (world.UpdateCount % 12_000 == 0 && world.EntityCount < 10_000)   // 20 Hz 下每十分钟一次，而且要等空闲时
     world.TrimExcess();
 ```
 

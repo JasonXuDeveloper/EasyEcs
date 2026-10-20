@@ -80,8 +80,8 @@ using System.Diagnostics;
 
 public sealed class FixedStepLoop(World world)
 {
-    private static readonly TimeSpan Step = TimeSpan.FromMilliseconds(50);   // 20 ticks per second
-    private const int MaxCatchUp = 4;                                         // updates per wake-up, at most
+    private static readonly TimeSpan Step = TimeSpan.FromMilliseconds(50);   // 每秒 20 个 tick
+    private const int MaxCatchUp = 4;                                         // 每次唤醒最多跑几次更新
 
     private readonly World _world = world;
 
@@ -108,7 +108,7 @@ public sealed class FixedStepLoop(World world)
 
                 if (due >= Step)
                 {
-                    // Too far behind: game time slows down instead of the server spiralling.
+                    // 落后太多：让游戏时间变慢，而不是让服务器越追越慢。
                     long dropped = due.Ticks / Step.Ticks;
                     Console.Error.WriteLine($"world behind: {dropped} ticks dropped");
                     due = TimeSpan.FromTicks(due.Ticks % Step.Ticks);
@@ -117,7 +117,7 @@ public sealed class FixedStepLoop(World world)
         }
         catch (OperationCanceledException)
         {
-            // the host is stopping
+            // 宿主正在停止
         }
     }
 }
@@ -138,7 +138,7 @@ public record struct Wander(float TargetX, float TargetY) : IComponent;
 
 public class ThinkSystem : EcsSystem
 {
-    // 100,000 NPCs: a quarter of them think per tick, each one every fourth tick.
+    // 100,000 个 NPC：每个 tick 四分之一在思考，每个 NPC 每四个 tick 思考一次。
     [ForEach(Slices = 4)]
     static void Think(in Position position, in Wander wander, ref Velocity velocity)
     {
@@ -325,12 +325,12 @@ public record struct Clock(long Tick) : ISingletonComponent;
 ```csharp
 using Nino.Core;
 
-public record struct ServerConfig(int MaxPlayers) : ISingletonComponent;   // from this process's settings
-public record struct Session(int Socket) : IComponent;                     // a connection: gone with the process
+public record struct ServerConfig(int MaxPlayers) : ISingletonComponent;   // 来自这个进程的配置
+public record struct Session(int Socket) : IComponent;                     // 一个连接：进程没了它就没了
 
 public static class Restart
 {
-    // What belongs to the process, not to the game.
+    // 属于进程、不属于游戏的数据。
     private static readonly ComponentSet Runtime = ComponentSet.Create().WithSingleton<ServerConfig>().With<Session>();
     private static readonly ComponentSet Configuration = ComponentSet.Create().WithSingleton<ServerConfig>();
 
@@ -338,8 +338,8 @@ public static class Restart
 
     public static void Resume(World world, ReadOnlySpan<byte> save, int maxPlayers)
     {
-        world.SetServerConfig(maxPlayers);                        // this process's configuration
-        world.Load(save, in Configuration, markWritten: false);   // the game as saved, the configuration kept
+        world.SetServerConfig(maxPlayers);                        // 这个进程的配置
+        world.Load(save, in Configuration, markWritten: false);   // 游戏按存档恢复，配置保留
     }
 }
 ```

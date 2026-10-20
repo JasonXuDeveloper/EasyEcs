@@ -1098,7 +1098,7 @@ public class SendFire : EcsSystem
 }
 ```
 
-[Slices](/en/docs/guide/systems#update-interval) describes the cut and the cadence.
+[Slices](/en/docs/guide/systems#slices) describes the cut and the cadence.
 
 ## EECS036 [#eecs036]
 
@@ -1122,7 +1122,7 @@ Index a relation with `IIndexed<EntityId>`, and give a second key a component of
 public record struct Mount(EntityId Rider) : IComponent, IIndexed<EntityId> { public EntityId Key => Rider; }
 ```
 
-[Unique keys](/en/docs/guide/indexes-and-relations#value-indexes) explains what a unique index checks.
+[Unique keys](/en/docs/guide/indexes-and-relations#unique-keys) explains what a unique index checks.
 
 ## Related [#related]
 
