@@ -228,9 +228,16 @@ public sealed partial class World
     /// entity <paramref name="into"/>: claim the keys of their unique components (<see cref="IUniqueIndex.ClaimRows"/>).
     /// Throws before anything changes. Inside the structural gate.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ClaimRows(Archetype table, int first, int count, int copies, int into = -1)
     {
-        if (!table.Unique || count == 0 || copies == 0) return;
+        if (table.Unique) ClaimUniqueRows(table, first, count, copies, into);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)] // tables with unique components only
+    private void ClaimUniqueRows(Archetype table, int first, int count, int copies, int into)
+    {
+        if (count == 0 || copies == 0) return;
         var components = table.Components;
         for (int c = 0; c < components.Length; c++)
             if (ComponentInfo.Of(components[c]).Unique)

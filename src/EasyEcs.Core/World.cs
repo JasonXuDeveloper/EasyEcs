@@ -265,8 +265,8 @@ public sealed partial class World : IDisposable
     private Archetype TableFor(Archetype source)
     {
         _prefabTables ??= new();
-        if (!_prefabTables.TryGetValue((source, -1), out var target))
-            _prefabTables[(source, -1)] = target = GetOrCreateArchetype(source.ComponentMask.Clone(), source);
+        if (!_prefabTables.TryGetValue(new PrefabKey(source, -1), out var target))
+            _prefabTables[new PrefabKey(source, -1)] = target = GetOrCreateArchetype(source.ComponentMask.Clone(), source);
         return target;
     }
 
@@ -277,18 +277,29 @@ public sealed partial class World : IDisposable
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private Archetype TableFor(Archetype source, int signature, ReadOnlySpan<ushort> bits) =>
-        _prefabTables != null && _prefabTables.TryGetValue((source, signature), out var target) ? target : NewTableFor(source, signature, bits);
+        _prefabTables != null && _prefabTables.TryGetValue(new PrefabKey(source, signature), out var target) ? target : NewTableFor(source, signature, bits);
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private Archetype NewTableFor(Archetype source, int signature, ReadOnlySpan<ushort> bits)
     {
         var mask = source.ComponentMask.Clone();
         for (int i = 0; i < bits.Length; i++) mask.SetBit(bits[i]);
-        return (_prefabTables ??= new())[(source, signature)] = GetOrCreateArchetype(in mask, source);
+        return (_prefabTables ??= new())[new PrefabKey(source, signature)] = GetOrCreateArchetype(in mask, source);
     }
 
     // (A prefab's table, a signature of given components or -1) -> this world's table with all of them, found once.
-    private System.Collections.Generic.Dictionary<(Archetype Source, int Signature), Archetype> _prefabTables;
+    private System.Collections.Generic.Dictionary<PrefabKey, Archetype> _prefabTables;
+
+    /// <summary>A key of <see cref="_prefabTables"/>: compared by reference, hashed by table id (no ValueTuple comparer).</summary>
+    internal readonly struct PrefabKey(Archetype source, int signature) : IEquatable<PrefabKey>
+    {
+        public readonly Archetype Source = source;
+        public readonly int Signature = signature;
+
+        public bool Equals(PrefabKey other) => ReferenceEquals(Source, other.Source) && Signature == other.Signature;
+        public override bool Equals(object obj) => obj is PrefabKey other && Equals(other);
+        public override int GetHashCode() => RuntimeHelpers.GetHashCode(Source) * 31 + Signature;
+    }
 
     /// <summary>
     /// Destroy <paramref name="entity"/> (a handle of this world; <c>Entity.Destroy</c> is the public call); a stale

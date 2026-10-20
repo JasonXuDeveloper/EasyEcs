@@ -123,7 +123,7 @@ public sealed partial class World
         lock (_memoLock) _queryMemo = []; // refilled by the next queries
 
         if (_prefabTables != null)
-            foreach (var pair in new List<KeyValuePair<(Archetype Source, int Signature), Archetype>>(_prefabTables))
+            foreach (var pair in new List<KeyValuePair<PrefabKey, Archetype>>(_prefabTables))
                 if (pair.Key.Source.ComponentMask.Intersects(in mask) || dropped.Contains(pair.Value))
                     _prefabTables.Remove(pair.Key);
     }
