@@ -194,7 +194,8 @@ internal abstract class ComponentInfo
 
     public abstract Array Create(int capacity);
 
-    public abstract Array Grow(Array column, int capacity);
+    /// <summary>A copy of <paramref name="column"/> with <paramref name="capacity"/> rows: grown, or shrunk to rows that hold no value any more.</summary>
+    public abstract Array Resize(Array column, int capacity);
 
     public abstract void CopyManaged(Array source, int sourceSlot, Array target, int targetSlot);
 
@@ -342,7 +343,7 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
     public override Array Create(int capacity) =>
         Managed ? new T[capacity] : GC.AllocateArray<byte>(capacity * Size + Archetype.CacheLine, pinned: true);
 
-    public override Array Grow(Array column, int capacity)
+    public override Array Resize(Array column, int capacity)
     {
         if (Managed)
         {
@@ -351,10 +352,11 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
             return typed;
         }
 
-        var grown = Create(capacity);
-        int bytes = Unsafe.As<byte[]>(column).Length - Archetype.CacheLine; // the old capacity in bytes
-        Unsafe.CopyBlockUnaligned(ref Archetype.Aligned(grown), ref Archetype.Aligned(column), (uint)bytes);
-        return grown;
+        var resized = Create(capacity);
+        // The smaller capacity in bytes: both arrays have a line of slack before their aligned rows.
+        int bytes = Math.Min(Unsafe.As<byte[]>(column).Length, Unsafe.As<byte[]>(resized).Length) - Archetype.CacheLine;
+        Unsafe.CopyBlockUnaligned(ref Archetype.Aligned(resized), ref Archetype.Aligned(column), (uint)bytes);
+        return resized;
     }
 
     public override void CopyManaged(Array source, int sourceSlot, Array target, int targetSlot) =>

@@ -28,7 +28,7 @@ public sealed partial class World
         {
             ThrowIfIterating();
             FillDirtyTables(); // left by a pass an exception interrupted: tables are dense from here
-            var snapshot = into ?? new WorldSnapshot(this);
+            var snapshot = into ?? NewSnapshot();
             Fit(ref snapshot.Meta, _nextId);
             Meta.AsSpan(0, _nextId).CopyTo(snapshot.Meta);
             snapshot.NextId = _nextId;

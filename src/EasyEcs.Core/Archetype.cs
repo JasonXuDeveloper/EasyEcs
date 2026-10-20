@@ -138,7 +138,10 @@ internal sealed class Archetype
 
     private const int Tombstone = -1;
 
-    public Archetype(in BitMask componentMask, int[] groups = null, int initialCapacity = 64)
+    /// <summary>Rows of a new table, and the fewest a trimmed one keeps (<see cref="Trim"/>).</summary>
+    public const int InitialCapacity = 64;
+
+    public Archetype(in BitMask componentMask, int[] groups = null, int initialCapacity = InitialCapacity)
     {
         ComponentMask = componentMask;
         Groups = groups;
@@ -210,7 +213,7 @@ internal sealed class Archetype
 
     /// <summary>
     /// The presence word of row <paramref name="slot"/> in <paramref name="bits"/> (a column's presence bits). No bounds
-    /// check: presence bits cover the table's capacity (allocated for Slots.Length rows, resized with it in Grow),
+    /// check: presence bits cover the table's capacity (allocated for Slots.Length rows, resized with it in Resize),
     /// and a slot is a row of the table.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -455,7 +458,7 @@ internal sealed class Archetype
     /// <summary>
     /// Entry <paramref name="index"/> of the summaries of change-tick column <paramref name="column"/>, without bounds
     /// checks. Invariant: the column comes from <see cref="ColumnIndex"/> of a change-tick bit the table has (so its
-    /// summaries exist), and the index is of a row below the capacity (summaries grow with the rows, <c>Grow</c>).
+    /// summaries exist), and the index is of a row below the capacity (summaries are resized with the rows, <c>Resize</c>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ref TSummary Summary<TSummary>(TSummary[][] summaries, int column, int index) =>
@@ -786,7 +789,7 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int Add(int entityId, int version)
     {
-        if (Count >= Slots.Length) Grow(Slots.Length * 2);
+        if (Count >= Slots.Length) Resize(Slots.Length * 2);
         int slot = Count++;
         // slot < Slots.Length (grown above): no bounds check.
         ref var row = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Slots), slot);
@@ -834,16 +837,35 @@ internal sealed class Archetype
     /// </summary>
     public void Reserve(int rows)
     {
-        if (rows > Slots.Length) Grow(Math.Max((rows + 63) & ~63, Slots.Length * 2));
+        if (rows > Slots.Length) Resize(Math.Max((rows + 63) & ~63, Slots.Length * 2));
     }
 
-    /// <summary>Grow the entity rows (<see cref="Slots"/>) and every column to <paramref name="capacity"/> rows (cold path).</summary>
+    /// <summary>
+    /// Give up the capacity a peak left: shrink the entity rows, the columns, presence bits and change-tick summaries
+    /// to <see cref="Count"/> rows rounded up to a power of two (at least <see cref="InitialCapacity"/>), when that is
+    /// less than the capacity, and the tombstone list. Returns whether the rows shrank. Rows past the count hold nothing
+    /// a reader uses (presence bits and summaries past it are meaningless, a new row sets its own), so they go. Inside the
+    /// structural gate, outside passes (the table is dense). Cold path.
+    /// </summary>
+    public bool Trim()
+    {
+        if (_holeCount == 0) _holes = [];
+        long capacity = Math.Max(InitialCapacity, (long)BitOperations.RoundUpToPowerOf2((ulong)Count));
+        if (capacity >= Slots.Length) return false;
+        Resize((int)capacity);
+        return true;
+    }
+
+    /// <summary>
+    /// Resize the entity rows (<see cref="Slots"/>) and every column to <paramref name="capacity"/> rows, at least
+    /// <see cref="Count"/> (cold path: growth, <see cref="Trim"/>).
+    /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void Grow(int capacity)
+    private void Resize(int capacity)
     {
         Array.Resize(ref Slots, capacity);
         for (int i = 0; i < Columns.Length; i++)
-            ByBit[Components[i]].Set(Columns[i] = _infos[i].Grow(Columns[i], capacity), _infos[i].Managed);
+            ByBit[Components[i]].Set(Columns[i] = _infos[i].Resize(Columns[i], capacity), _infos[i].Managed);
         foreach (short c in _bitColumns)
         {
             Array.Resize(ref Present[c], (capacity + 63) >> 6);
@@ -1120,6 +1142,27 @@ internal sealed class Archetype
         _addEdges = [];
         _addSetEdges = [];
         _regroupEdges = null;
+    }
+
+    /// <summary>
+    /// Forget the cached transitions that lead to a table of <paramref name="dropped"/> (World.TrimExcess): the next
+    /// change resolves them again, to a new table. Inside the gate.
+    /// </summary>
+    public void ForgetEdges(System.Collections.Generic.HashSet<Archetype> dropped)
+    {
+        Forget(_addEdges, dropped);
+        Forget(_addSetEdges, dropped);
+        if (_regroupEdges == null) return;
+        foreach (var pair in new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<long, Transition>>(_regroupEdges))
+            if (dropped.Contains(pair.Value.Target))
+                _regroupEdges.Remove(pair.Key);
+
+        static void Forget(Transition[] edges, System.Collections.Generic.HashSet<Archetype> dropped)
+        {
+            for (int i = 0; i < edges.Length; i++)
+                if (edges[i] != null && dropped.Contains(edges[i].Target))
+                    edges[i] = null;
+        }
     }
 
     public void SetAddEdge(int bit, Transition target) => SetEdge(ref _addEdges, bit, target);

@@ -60,6 +60,37 @@ public class AllocationTests
     }
 
     [Test]
+    public void TicksAfterTrimExcessDoNotAllocate()
+    {
+        using var world = new World();
+        world.AddSystem<Movement>();
+        world.AddSystem<ChangedTests.Wear>();
+        var crowd = new Entity[20_000];
+        world.CreateEntities(crowd, new Position(), new Velocity(1, 1), new Armor(1_000_000), new Seen());
+        for (int i = 0; i < crowd.Length; i++)
+            if (i % 10 != 0) crowd[i].Destroy();
+        var churned = new Entity[50];
+        var probe = world.CreateEntity(new Health(1));
+
+        void Frame()
+        {
+            world.Update();
+            _ = world.Count<Armor>(QueryFilter.Create().Changed<Armor>(world.ChangeTick));
+            world.CreateEntities(churned, new Churned(), new Health(1));
+            world.DestroyEntities<Churned>();
+            probe.Set(new Frozen());
+            probe.Remove<Frozen>();
+        }
+
+        for (int i = 0; i < 10; i++) Frame();
+        world.TrimExcess();
+        for (int i = 0; i < 10; i++) Frame(); // the dropped tables and edges come back once
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++) Frame();
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+    }
+
+    [Test]
     public void IndexLookupsChangedQueriesAndIndexedChurnDoNotAllocate()
     {
         using var world = new World();

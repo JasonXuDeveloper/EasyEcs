@@ -108,22 +108,9 @@ public sealed partial class World
     /// </summary>
     private void Drop(HashSet<Archetype> dropped, List<ushort> bits, in BitMask mask)
     {
-        foreach (var pair in new List<KeyValuePair<BitMask, Archetype>>(_archetypes))
-            if (dropped.Contains(pair.Value))
-                _archetypes.Remove(pair.Key);
-        foreach (var pair in new List<KeyValuePair<GroupedTable, Archetype>>(_groupedTables))
-            if (dropped.Contains(pair.Value))
-                _groupedTables.Remove(pair.Key);
-
-        var kept = new List<Archetype>();
+        Unregister(dropped);
         foreach (var table in _allArchetypes)
-            if (!dropped.Contains(table))
-            {
-                table.ClearEdges(); // caches: rebuilt by the next change, never towards a dropped table
-                kept.Add(table);
-            }
-
-        Volatile.Write(ref _allArchetypes, kept.ToArray());
+            table.ClearEdges(); // caches: rebuilt by the next change, never towards a dropped table
 
         foreach (var pair in _queryCache)
         {
