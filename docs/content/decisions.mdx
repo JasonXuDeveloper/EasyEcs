@@ -55,6 +55,8 @@ after the change on the machine of the time; they are history, not the current r
 | [D35](#d35-a-record-can-load-without-counting-as-a-change) | A record can load without counting as a change |
 | [D36](#d36-not-added) | Not added: parallel batch jobs, a row's last write tick, public access sets, a shared parallelism budget |
 | [D37](#d37-the-easyecs-package-brings-ninos-generator) | The EasyEcs package brings Nino's generator |
+| [D38](#d38-the-hidden-columns-are-not-generic-over-their-component) | The hidden columns are not generic over their component |
+| [D39](#d39-a-whole-load-can-leave-the-change-ticks-alone) | A whole load can leave the change ticks alone, and a system can start now |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -771,6 +773,43 @@ the formatters of its `[NinoType]` components without a package of its own.
 - **Keeping `Nino.Serialization` and documenting the second reference:** the step users missed.
 - **Bundling Nino's generator inside the EasyEcs package:** a copy of another project's analyzer to keep in sync by
   hand.
+
+## D38. The hidden columns are not generic over their component [#d38-the-hidden-columns-are-not-generic-over-their-component]
+
+**Decision.** The change-tick column of a tracked component and the tag of a disabled one are non-generic types
+(`ChangeTick`, `DisabledTag`), one bit per owner, each described by its owner's `Type` (released with it when its
+context unloads). The public `Disabled<T>` stays: its bit is the tag bit of `T`.
+
+**Why.**
+- **Native AOT without warnings.** Registering `ChangeTicks<T>` through the same generic path as a component made the
+  AOT compiler see `ChangeTicks<ChangeTicks<...>>` (and `Disabled<Disabled<...>>`) without end: IL3054 in every
+  program with a tracked component, the built-in `ChildOf` included, which fails a build with warnings as errors.
+- **Nothing changes at run time.** A tick column was already 8-byte unmanaged rows found by a bit; the bit now comes
+  from a static field of the component's own registration.
+
+**Considered.**
+- **Suppressing IL3054 in the package:** a warning in users' builds cannot be suppressed from a library, and the
+  recursion is real for the compiler.
+- **A separate tick array per table outside the columns:** a second storage path for moves, snapshots and saves.
+
+## D39. A whole load can leave the change ticks alone, and a system can start now [#d39-a-whole-load-can-leave-the-change-ticks-alone]
+
+**Decision.** `world.Load(input, markWritten: false)` clears the change ticks of every loaded row (no write, no
+removal), as `LoadEntitiesInto(..., markWritten: false)` does for a record. `AddSystem(system, changesFromNow: true)`
+sets the new system's last run to the current tick and moves the world's tick on, so its first run sees only later
+writes. Both defaults stay as they were.
+
+**Why.**
+- **A restart is not news.** A process that resumes a saved world would otherwise save or replicate everything on the
+  first tick of every `[Changed<T>]` system.
+- **Systems added after the load need nothing more.** A new system's first run looks at ticks from 1; cleared rows
+  have tick 0.
+- **`changesFromNow` covers the other case:** a system switched on in a world whose rows were written by code (or a
+  default load), which should not treat that history as changes.
+
+**Considered.**
+- **Only `changesFromNow`:** systems that already ran before the load would still see every loaded row.
+- **Setting the last run without moving the tick:** writes made later in the same tick would be missed.
 
 ## Related [#related]
 

@@ -10,6 +10,23 @@ major or minor version that needs code changes? The
 [migration guide](/en/docs/migration) has the steps. Each
 [GitHub release](https://github.com/JasonXuDeveloper/EasyEcs/releases) also lists every pull request it contains.
 
+## 4.6.0 [#v4-6-0]
+
+### New [#v4-6-0-new]
+
+- `world.Load(input, markWritten: false)` loads a whole save without change ticks: no loaded row counts as written
+  or removed, also for systems added after the load, so a restart that resumes a saved world does not send every
+  record again. See [restart](/en/docs/guide/saves#restart).
+- `world.AddSystem<T>(changesFromNow: true)` (and `AddSystem(system, changesFromNow: true)`) starts a system at the
+  current tick: the first run of its `[Changed<T>]` and `[Removed<T>]` methods visits only what is written or removed
+  after the call. See [ticks](/en/docs/guide/change-tracking#ticks).
+
+### Fixes [#v4-6-0-fixes]
+
+- Native AOT publishes without warnings: a program with tracked components (`ITrackChanges`, also the built-in
+  `ChildOf`) or disabled components got an IL3054 warning (generic recursion), which fails a build that treats
+  warnings as errors. See [Native AOT](/en/docs/faq#native-aot).
+
 ## 4.5.0 [#v4-5-0]
 
 ### New [#v4-5-0-new]

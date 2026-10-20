@@ -200,7 +200,8 @@ public sealed class PublishStatus(StatusBoard board) : EcsSystem
 ### 启动时加载，停止时存档 [#persistence]
 
 第一个 tick 之前加载上一次的存档，然后只补上存档里没有的单例：`Load` 会替换 World 的单例，`AddSingleton` 会把刚加载的单例重置。
-循环结束后存档，先写临时文件再覆盖旧文件，写到一半崩溃也不会留下半个存档：
+循环结束后存档，先写临时文件再覆盖旧文件，写到一半崩溃也不会留下半个存档。如果有系统按 `[Changed<T>]` 存档或同步，
+读档时传 `markWritten: false`，第一个 tick 就不会把读进来的 World 再发一遍（[重启](/zh/docs/guide/saves#restart)）：
 
 ```csharp
 using Nino.Core;
@@ -242,8 +243,7 @@ public record struct Clock(long Tick) : ISingletonComponent;
 ### 部署 [#deploy]
 
 - **Native AOT：**`<PublishAot>true</PublishAot>` 把 World 和系统发布成原生可执行文件：`EasyEcs.Core` 标记了
-  `IsAotCompatible`，生成的代码直接调用你的方法。程序里有被追踪的组件时，AOT 编译器会报一个 IL3054 警告（变更 tick 列类型上的泛型
-  递归）；只由另一个程序集闭合的泛型系统需要 `MakeGenericType`，Native AOT 做不到（[FAQ](/zh/docs/faq#native-aot)）。ASP.NET
+  `IsAotCompatible`，生成的代码直接调用你的方法，发布没有警告。只由另一个程序集闭合的泛型系统需要 `MakeGenericType`，Native AOT 做不到（[FAQ](/zh/docs/faq#native-aot)）。ASP.NET
   Core 有自己的 AOT 规则（`WebApplication.CreateSlimBuilder`、JSON 源生成）：见微软的
   [ASP.NET Core Native AOT 指南](https://learn.microsoft.com/aspnet/core/fundamentals/native-aot)。
 - **容器：**`docker stop` 和 Kubernetes 发送 `SIGTERM`，主机把它变成上面的停机流程。容器的宽限期要比最后一次存档长。

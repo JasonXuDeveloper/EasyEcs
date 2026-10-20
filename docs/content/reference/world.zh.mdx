@@ -101,28 +101,37 @@ public ref T AddSingleton<T>() where T : struct, ISingletonComponent;
 ### `AddSystem` [#addsystem]
 
 ```csharp
-public void AddSystem(EcsSystem system);
+public void AddSystem(EcsSystem system, bool changesFromNow = false);
 ```
 
 把 `system` 挂到它的分组（[`UpdateInGroupAttribute`](/zh/docs/reference/updateingroupattribute) 指定的分组，没有就是默认分组），然后调用它的 [`EcsSystem.OnCreate`](/zh/docs/reference/ecssystem#oncreate)。
 
+**参数**
+
+- `system`：要挂上的系统，还不属于任何 World。
+- `changesFromNow`：为 false（默认）时，它的 `[Changed<T>]` 和 `[Removed<T>]` 方法第一次运行会访问 World 创建以来写过或移除过的每一行。为 true 时只看这次调用之后的写入和移除，就像这个系统刚刚运行过一样（[`EcsSystem.LastRunTick`](/zh/docs/reference/ecssystem#lastruntick)）；适合加到已经有状态的 World 上的系统（[`World.Load`](/zh/docs/reference/world#load) 之后的重启、之后才打开的系统）。
+
 **复杂度**（[API 表](/zh/docs/api)）：
 
-- `world.AddSystem<T>()`：O(s²)，s 为所在分组的系统数
-- `AddSystem(system)`：O(s²)，s 为所在分组的系统数
+- `world.AddSystem<T>(changesFromNow)`：O(s²)，s 为所在分组的系统数
+- `AddSystem(system, changesFromNow)`：O(s²)，s 为所在分组的系统数
 
 ### `AddSystem` [#addsystem-2]
 
 ```csharp
-public T AddSystem<T>() where T : EcsSystem, new();
+public T AddSystem<T>(bool changesFromNow = false) where T : EcsSystem, new();
 ```
 
 创建一个系统，挂到这个 World 上，然后调用它的 [`EcsSystem.OnCreate`](/zh/docs/reference/ecssystem#oncreate)。
 
+**参数**
+
+- `changesFromNow`：见 [`World.AddSystem`](/zh/docs/reference/world#addsystem)。
+
 **复杂度**（[API 表](/zh/docs/api)）：
 
-- `world.AddSystem<T>()`：O(s²)，s 为所在分组的系统数
-- `AddSystem(system)`：O(s²)，s 为所在分组的系统数
+- `world.AddSystem<T>(changesFromNow)`：O(s²)，s 为所在分组的系统数
+- `AddSystem(system, changesFromNow)`：O(s²)，s 为所在分组的系统数
 
 ### `Any` [#any]
 
@@ -581,10 +590,15 @@ public bool IsAlive(EntityId id);
 ### `Load` [#load]
 
 ```csharp
-public void Load(ReadOnlySpan<byte> input);
+public void Load(ReadOnlySpan<byte> input, bool markWritten = true);
 ```
 
-用 [`World.Save`](/zh/docs/reference/world#save) 写出的数据（本进程或别的进程写的）替换这个 World 的实体、组件和单例。实体保留原来的 id 和版本号，所以组件里存的 [`EntityId`](/zh/docs/reference/entityid) 仍然指向原来的实体，存档前拿到的句柄也重新可用。本进程没有对应类型的组件和单例直接跳过（跳过它们那段数据）；进程用过某个类型，或者生成器登记过它（使用 EasyEcs 的程序集里的每个组件和单例都会登记），就能按类型 id 找到它。索引重建；分组按这个 World 自己的 [`World.GroupBy`](/zh/docs/reference/world#groupby) 来。加载的每一行都算写入（`[Changed<T>]`）。O(实体数 × 组件数)。遍历进行中不能调用。
+用 [`World.Save`](/zh/docs/reference/world#save) 写出的数据（本进程或别的进程写的）替换这个 World 的实体、组件和单例。实体保留原来的 id 和版本号，所以组件里存的 [`EntityId`](/zh/docs/reference/entityid) 仍然指向原来的实体，存档前拿到的句柄也重新可用。本进程没有对应类型的组件和单例直接跳过（跳过它们那段数据）；进程用过某个类型，或者生成器登记过它（使用 EasyEcs 的程序集里的每个组件和单例都会登记），就能按类型 id 找到它。索引重建；分组按这个 World 自己的 [`World.GroupBy`](/zh/docs/reference/world#groupby) 来。O(实体数 × 组件数)。遍历进行中不能调用。
+
+**参数**
+
+- `input`：存档的字节。
+- `markWritten`：为 true（默认）时，加载的每一行都算刚写入，`[Changed<T>]` 系统和 `Changed<T>(since)` 查询都会看到它。为 false 时，加载的组件没有变更 tick，如同从未写过，也没有哪一行算作移除；加载之后才加进来的系统第一次运行时同样跳过它们（它的 `[Changed<T>]` 从 tick 1 开始看）。用于重启后接着跑另一个进程存下的 World：存储里的记录已经是这些值。
 
 **异常**
 

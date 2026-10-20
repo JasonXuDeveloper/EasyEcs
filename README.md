@@ -329,6 +329,15 @@ The documentation lives at **[ecs.xgamedev.net](https://ecs.xgamedev.net)**; its
 
 The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading order.
 
+## What's new in 4.6
+
+- **Restarts that resume a world.** `world.Load(bytes, markWritten: false)` loads a save without change ticks, so
+  `[Changed<T>]` savers and replicators do not send the whole world again
+  ([restart](https://ecs.xgamedev.net/en/docs/guide/saves#restart)); `world.AddSystem<T>(changesFromNow: true)`
+  starts a system at the current tick.
+- **Native AOT without warnings**, also with tracked and disabled components: CI publishes the battle server natively
+  with warnings as errors and runs it.
+
 ## What's new in 4.5
 
 - **One entity, one job.** `entity.Run(ref job)` (and `Run(ref job, filter)`) runs an `IForEachEntity` job on a

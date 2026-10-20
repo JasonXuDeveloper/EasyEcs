@@ -94,13 +94,46 @@ long tick = restarted.Clock.Tick;                                      // 1234
 | Every alive entity, with its id and version | Systems, `WorldOptions` |
 | Every component, unmanaged as raw rows, managed through Nino | Indexes (they rebuild on the next lookup) |
 | Disabled components, with their kept values | Groupings (`Load` follows this world's `GroupBy` calls) |
-| [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) elements | Change ticks (every loaded row counts as written) |
+| [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) elements | Change ticks (every loaded row counts as written, or none with `markWritten: false`: [restart](#restart)) |
 | Every singleton | |
 
 Types are recorded by their Nino type id (a hash of the namespace-qualified name), and each column is a
 length-prefixed slice, so a load skips the components this process has no type for. A type is found when the process
 used it, or when the generator registered it: every component and singleton of a compilation that uses EasyEcs is
 registered when its module loads.
+
+### Restart without counting the load as changes [#restart]
+
+A restart resumes the world of the previous process: it saves between two ticks, the new process loads the save,
+adds its systems and goes on. By default every loaded row counts as written, so a `[Changed<T>]` system that writes
+records or replicates would send the whole world again on its first run. `Load(bytes, markWritten: false)` loads the
+rows without a change tick: no row counts as written or removed, also for the systems added after the load, and
+what code writes from then on is seen as usual.
+
+```csharp
+public record struct Balance(int Gold) : IComponent, ITrackChanges;   // tracked: written records are saved
+public record struct Outbox(int Records) : ISingletonComponent;
+
+public class SaveBalances : EcsSystem
+{
+    [ForEach, Changed<Balance>]
+    private static void Save(ref Outbox outbox) => outbox.Records++;  // one record per changed balance
+}
+```
+
+```csharp
+var previous = new NinoArrayBufferWriter();
+world.Save(previous);                                                  // the old process, between two ticks
+
+using var resumed = new World();                                       // the new process
+resumed.Load(previous.WrittenSpan, markWritten: false);                // the records hold these values // [!code highlight]
+resumed.AddSystem<SaveBalances>();
+resumed.Update();                                                      // nothing to save: no row is a change
+```
+
+A system added later to a world that already holds its state, whatever wrote it, can start from the current tick
+instead: `world.AddSystem<T>(changesFromNow: true)` makes its first run visit only what is written after the call
+([ticks](/en/docs/guide/change-tracking#ticks)).
 
 ### When the code changed [#versioning]
 

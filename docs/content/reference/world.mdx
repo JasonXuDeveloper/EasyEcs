@@ -101,28 +101,37 @@ Add (or reset to default) singleton `T` and return a ref to it. A reset keeps th
 ### `AddSystem` [#addsystem]
 
 ```csharp
-public void AddSystem(EcsSystem system);
+public void AddSystem(EcsSystem system, bool changesFromNow = false);
 ```
 
 Attach `system` to its group ([`UpdateInGroupAttribute`](/en/docs/reference/updateingroupattribute), default otherwise) and call its [`EcsSystem.OnCreate`](/en/docs/reference/ecssystem#oncreate).
 
+**Parameters**
+
+- `system`: The system, not attached to a world yet.
+- `changesFromNow`: False (the default): the first run of its `[Changed<T>]` and `[Removed<T>]` methods visits every row written or removed since the world began. True: only what is written or removed after this call, as if the system had run just now ([`EcsSystem.LastRunTick`](/en/docs/reference/ecssystem#lastruntick)); for a system added to a world that already holds its state (a restart after [`World.Load`](/en/docs/reference/world#load), a system switched on later).
+
 **Complexity** ([API table](/en/docs/api)):
 
-- `world.AddSystem<T>()`: O(s²), s = systems of its group
-- `AddSystem(system)`: O(s²), s = systems of its group
+- `world.AddSystem<T>(changesFromNow)`: O(s²), s = systems of its group
+- `AddSystem(system, changesFromNow)`: O(s²), s = systems of its group
 
 ### `AddSystem` [#addsystem-2]
 
 ```csharp
-public T AddSystem<T>() where T : EcsSystem, new();
+public T AddSystem<T>(bool changesFromNow = false) where T : EcsSystem, new();
 ```
 
 Create a system, attach it to this world and call its [`EcsSystem.OnCreate`](/en/docs/reference/ecssystem#oncreate).
 
+**Parameters**
+
+- `changesFromNow`: See [`World.AddSystem`](/en/docs/reference/world#addsystem).
+
 **Complexity** ([API table](/en/docs/api)):
 
-- `world.AddSystem<T>()`: O(s²), s = systems of its group
-- `AddSystem(system)`: O(s²), s = systems of its group
+- `world.AddSystem<T>(changesFromNow)`: O(s²), s = systems of its group
+- `AddSystem(system, changesFromNow)`: O(s²), s = systems of its group
 
 ### `Any` [#any]
 
@@ -581,10 +590,15 @@ Whether entity `id` (that incarnation) is alive. O(1).
 ### `Load` [#load]
 
 ```csharp
-public void Load(ReadOnlySpan<byte> input);
+public void Load(ReadOnlySpan<byte> input, bool markWritten = true);
 ```
 
-Replace this world's entities, components and singletons with those [`World.Save`](/en/docs/reference/world#save) wrote (in this process or another). Entities keep their ids and versions, so [`EntityId`](/en/docs/reference/entityid)s stored in components still point at the same entities, and handles made before the save work again. Components and singletons this process has no type for are skipped (their slices); a type is found by its type id when the process used it or the generator registered it (every component and singleton of a compilation using EasyEcs). Indexes rebuild; groups follow this world's [`World.GroupBy`](/en/docs/reference/world#groupby). Every loaded row counts as written (`[Changed<T>]`). O(entities × components). Not while a pass iterates.
+Replace this world's entities, components and singletons with those [`World.Save`](/en/docs/reference/world#save) wrote (in this process or another). Entities keep their ids and versions, so [`EntityId`](/en/docs/reference/entityid)s stored in components still point at the same entities, and handles made before the save work again. Components and singletons this process has no type for are skipped (their slices); a type is found by its type id when the process used it or the generator registered it (every component and singleton of a compilation using EasyEcs). Indexes rebuild; groups follow this world's [`World.GroupBy`](/en/docs/reference/world#groupby). O(entities × components). Not while a pass iterates.
+
+**Parameters**
+
+- `input`: The bytes of the save.
+- `markWritten`: True (the default): every loaded row counts as written now, so `[Changed<T>]` systems and `Changed<T>(since)` queries see it. False: the loaded components have no change tick, as if never written, and no row counts as removed; a system added after the load skips them on its first run too (its `[Changed<T>]` looks at ticks from 1). For a restart that resumes a world saved by another process, whose records already hold the loaded values.
 
 **Exceptions**
 

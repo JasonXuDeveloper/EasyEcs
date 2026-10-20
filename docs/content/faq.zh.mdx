@@ -130,10 +130,9 @@ world.Load(output.WrittenSpan);  // 组件里存的 EntityId 仍然指向同样�
 ## 支持 Native AOT 吗？ [#native-aot]
 
 支持。`EasyEcs.Core` 标记了 `IsAotCompatible`，库的每次构建都会跑裁剪和 AOT 分析器；生成的代码直接调用你的方法，热路径上没有反射
-（[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。基于它的程序可以用 `PublishAot` 发布并正常运行。
-两点限制：在别的程序集里才闭合（给出类型实参）的泛型系统会退回 `MakeGenericType`，Native AOT 做不到
-（[D20](/zh/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names)）；另外，编译带被追踪组件的程序时，
-AOT 编译器目前会报一条 IL3054 警告（经由变更 tick 列类型的泛型递归）。服务器部署见[托管](/zh/docs/guide/hosting#deploy)。
+（[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。基于它的程序可以用 `PublishAot` 无警告地发布并正常运行：CI 把战斗服务器示例（含被追踪组件、
+禁用组件和存档）以“警告即错误”发布成原生可执行文件并运行它。一点限制：在别的程序集里才闭合（给出类型实参）的泛型系统会退回
+`MakeGenericType`，Native AOT 做不到（[D20](/zh/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names)）。服务器部署见[托管](/zh/docs/guide/hosting#deploy)。
 
 ## 为什么没有事件？ [#why-are-there-no-events]
 

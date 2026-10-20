@@ -9,6 +9,20 @@ icon: RotateCcwClock
 [迁移指南](/zh/docs/migration)。每个
 [GitHub Release](https://github.com/JasonXuDeveloper/EasyEcs/releases) 也会列出它包含的全部 pull request。
 
+## 4.6.0 [#v4-6-0]
+
+### 新功能 [#v4-6-0-new]
+
+- `world.Load(input, markWritten: false)` 加载整个存档时不打变更 tick：加载的行都不算写入或移除，加载之后才加上的系统也一样，
+  所以重启后接着跑存下的 World 时，不会把每条记录再发一遍。见[重启](/zh/docs/guide/saves#restart)。
+- `world.AddSystem<T>(changesFromNow: true)`（以及 `AddSystem(system, changesFromNow: true)`）让系统从当前 tick 开始算：
+  它的 `[Changed<T>]` 和 `[Removed<T>]` 方法第一次运行只访问调用之后的写入和移除。见 [tick](/zh/docs/guide/change-tracking#ticks)。
+
+### 修复 [#v4-6-0-fixes]
+
+- Native AOT 发布不再有警告：带被追踪组件（`ITrackChanges`，包括内置的 `ChildOf`）或禁用组件的程序会报 IL3054 警告（泛型递归），
+  在“警告即错误”的构建里直接失败。见 [Native AOT](/zh/docs/faq#native-aot)。
+
 ## 4.5.0 [#v4-5-0]
 
 ### 新功能 [#v4-5-0-new]

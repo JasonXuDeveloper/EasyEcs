@@ -199,7 +199,7 @@ Details: [bulk changes](/en/docs/guide/bulk), [cleanup and disable](/en/docs/gui
 | `world.Capture()` / `Capture(into)` | O(entities × components + tables + singletons) | copies by value; `Capture(into)` reuses an earlier snapshot's arrays and allocates nothing once they are large enough; not while a pass iterates |
 | `world.Restore(snapshot)` | O(entities × components + tables + singletons) | snapshot handles are valid again, later ones stale; every restored row counts as written (or removed) |
 | `world.Save(output)` | O(entities × components) | the world as bytes: unmanaged rows raw, managed values through Nino; allocates nothing once its buffers are large enough |
-| `world.Load(input)` | O(entities × components) | entities keep their ids; a changed component layout throws `InvalidDataException` and leaves the world as it was |
+| `world.Load(input, markWritten)` | O(entities × components) | entities keep their ids; a changed component layout throws `InvalidDataException` and leaves the world as it was; `markWritten: false`: the loaded rows count as never written |
 | `world.SaveEntities(output, ids)` | O(entities given × components) | a group of entities, for another world or process |
 | `world.SaveEntities(output, ids, set)` | O(entities given × components) | only the components of a `ComponentSet` (built once: `ComponentSet.Create().With<T>()`, O(1) per type) |
 | `world.LoadEntities(input, entities)` | O(entities × components) | new ids; `EntityId` fields naming the group are rewritten, others become `EntityId.Null` |
@@ -213,7 +213,7 @@ Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
 
 | API | Complexity | Notes |
 | --- | --- | --- |
-| `world.AddSystem<T>()` / `AddSystem(system)` | O(s²), s = systems of its group | calls `OnCreate`; rebuilds the order and stages (cold); throws if the system already belongs to a world, or on an ordering cycle |
+| `world.AddSystem<T>(changesFromNow)` / `AddSystem(system, changesFromNow)` | O(s²), s = systems of its group | calls `OnCreate`; rebuilds the order and stages (cold); throws if the system already belongs to a world, or on an ordering cycle; `changesFromNow: true`: its first run sees only what is written after the call |
 | `world.RemoveSystem<T>()` | O(s²) | calls `OnDestroy`; returns whether a system was removed |
 | `world.GetSystem<T>()` | O(systems) | null when absent |
 | `world.Update()` / `world.Update<TGroup>()` | Σ systems of the group | synchronous, allocation-free; throws `ObjectDisposedException` after `Dispose` |

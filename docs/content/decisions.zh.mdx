@@ -53,6 +53,8 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D35](#d35-a-record-can-load-without-counting-as-a-change) | 读记录时可以不算变更 |
 | [D36](#d36-not-added) | 不加：并行批处理 job、行的最后写入 tick、公开读写集、多个 World 共享并行预算 |
 | [D37](#d37-the-easyecs-package-brings-ninos-generator) | EasyEcs 包自带 Nino 的生成器 |
+| [D38](#d38-the-hidden-columns-are-not-generic-over-their-component) | 隐藏列不再按组件泛型 |
+| [D39](#d39-a-whole-load-can-leave-the-change-ticks-alone) | 整个读档可以不打变更 tick，系统可以从现在开始算 |
 
 ## D1. 状态变化即数据：没有事件和回调 [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -638,6 +640,36 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 **比较过。**
 - **继续用 `Nino.Serialization`，在文档里说明要再加一个包**：用户正是在这一步漏掉的。
 - **把 Nino 的生成器打进 EasyEcs 包**：等于复制别人的分析器，还要手动保持同步。
+
+## D38. 隐藏列不再按组件泛型 [#d38-the-hidden-columns-are-not-generic-over-their-component]
+
+**决定。** 被追踪组件的变更 tick 列和禁用组件的标记，改用非泛型类型（`ChangeTick`、`DisabledTag`），每个所属组件一个位，
+用所属组件的 `Type` 描述（它的上下文卸载时一起释放）。公开的 `Disabled<T>` 保留：它的位就是 `T` 的禁用标记位。
+
+**原因。**
+- **Native AOT 零警告。** 以前 `ChangeTicks<T>` 和组件走同一条泛型注册路径，AOT 编译器会看到没有尽头的
+  `ChangeTicks<ChangeTicks<...>>`（以及 `Disabled<Disabled<...>>`）：凡是有被追踪组件的程序都会报 IL3054，内置的 `ChildOf` 也算，
+  “警告即错误”的构建直接失败。
+- **运行时没有变化。** tick 列本来就是按位找到的 8 字节非托管行；现在这个位来自组件自己注册时的静态字段。
+
+**比较过。**
+- **在包里压掉 IL3054：** 库压不掉用户构建里的警告，而且对编译器来说这个递归是真的。
+- **每张表在列之外另放一个 tick 数组：** 搬行、快照、存档都要多一条存储路径。
+
+## D39. 整个读档可以不打变更 tick，系统可以从现在开始算 [#d39-a-whole-load-can-leave-the-change-ticks-alone]
+
+**决定。** `world.Load(input, markWritten: false)` 清掉每个加载行的变更 tick（不算写入，也不算移除），和
+`LoadEntitiesInto(..., markWritten: false)` 对一条记录的做法一样。`AddSystem(system, changesFromNow: true)` 把新系统的上次运行设为当前 tick，
+并把 World 的 tick 往前推一格，所以它第一次运行只看到之后的写入。两者的默认行为都不变。
+
+**原因。**
+- **重启不是新消息。** 否则接着跑存档的进程，每个 `[Changed<T>]` 系统在第一个 tick 都会把所有东西存一遍或同步一遍。
+- **读档之后才加的系统不需要别的处理。** 新系统第一次运行从 tick 1 开始看，清掉的行 tick 为 0。
+- **`changesFromNow` 管另一种情况：** 系统加到一个行已经被代码写过（或者按默认方式读档）的 World 上，不该把这些历史当成变化。
+
+**比较过。**
+- **只做 `changesFromNow`：** 读档前就跑过的系统仍然会看到每个加载的行。
+- **只设上次运行、不推进 tick：** 同一个 tick 里之后的写入会被漏掉。
 
 ## 相关页面 [#related]
 

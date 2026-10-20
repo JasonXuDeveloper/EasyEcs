@@ -67,7 +67,8 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
                                TargetRules (what happens to links when their target is destroyed)
   World.Groups.cs              GroupBy: tables split by the value of an IGroup component
   Cleanup.cs                   ICleanupComponent + Destroyed tag (entities kept until their cleanup components go)
-  Disabled.cs                  Disabled<T> tag (the value kept, the component hidden from queries)
+  Disabled.cs                  Disabled<T> tag (the value kept, the component hidden from queries); its bit is a
+                               non-generic DisabledTag per component (ComponentInfo.DisablerOf)
   DynamicBuffer.cs             DynamicBuffer<T> (a list per entity as a tracked component; writes are ref-this extensions)
                                and its BufferStore
   Prefab.cs                    a recipe of component values outside any world (one row of a private world)
@@ -84,8 +85,9 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
                                forms of a structural loop), QueryWalk (the cold state of a walk, pooled per thread)
   FilterOverflow.cs            interned filter bits past 255 (a QueryFilter holds no object reference)
   TypeIndex.cs                 dense per-type index families (ComponentType bit, SingletonType slot, SystemGroup
-                               index, ComponentSignature of multi-component calls) + SingletonBox + ChangeTicks<T>
-                               (the hidden change-tick column of an ITrackChanges component)
+                               index, ComponentSignature of multi-component calls) + SingletonBox; a tracked
+                               component's TicksBit: its hidden ChangeTick column (Query.cs), non-generic so Native
+                               AOT sees no generic recursion (IL3054)
   Archetype.cs                 a table: mask, EntitySlot rows (version + id), one column per component (unmanaged
                                columns pinned and 64-byte aligned), presence bits + absent counts per column,
                                per-bit and per-signature add transitions (copy plans); swap-remove / tombstones,
@@ -127,6 +129,8 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                Generator (diagnostics + caching), CodeFix, BattleServer (the world of
                                docs/content/example.mdx as a whole, linked from EasyEcs.Benchmark); Fixtures.cs holds
                                the shared test components
+tests/EasyEcs.Aot/             the battle server (BattleServer.cs) published with Native AOT, warnings as errors, and
+                               run by CI: no AOT warning and the native binary passes its checks
 benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / MultiWorldBenchmark (headline, realistic
                                server tick; the world itself is WorldSimulation.cs), BattleServerBenchmark
                                (BattleServer.cs, every feature; docs/content/example.mdx includes its regions), one

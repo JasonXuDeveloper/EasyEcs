@@ -77,7 +77,7 @@ world.Update();
 | `entity.Get<T>()`、找到时的 `TryGetRef<T>(out found)`、`GetOrAdd<T>()`、`Set(...)` | `Has<T>()` |
 | 带着该组件的 `CreateEntity(...)`、`CreateEntities(...)`、`Instantiate(...)`、`Clone()` | 移除组件（属于[移除](#removal-detection)） |
 | `entity.Enable<T>()`、`world.EnableAll<T>()`（保留的值回来了） | `entity.Disable<T>()`（算作移除） |
-| `world.Restore(snapshot)`、`world.Load(bytes)`、`LoadEntities(...)`、`LoadEntitiesInto(...)`（恢复或加载的每一行） | `LoadEntitiesInto(..., markWritten: false)`：记录里的每个组件 tick 都为 0，不管是覆盖的还是新加的。用于恢复持久化的记录，又不想把它再存一遍或再发一遍（[恢复记录](/zh/docs/guide/migration-and-unload#records)） |
+| `world.Restore(snapshot)`、`world.Load(bytes)`、`LoadEntities(...)`、`LoadEntitiesInto(...)`（恢复或加载的每一行） | `LoadEntitiesInto(..., markWritten: false)`：记录里的每个组件 tick 都为 0，不管是覆盖的还是新加的。用于恢复持久化的记录，又不想把它再存一遍或再发一遍（[恢复记录](/zh/docs/guide/migration-and-unload#records)）。`world.Load(bytes, markWritten: false)`：加载的每一行 tick 都为 0，也没有哪一行算作移除，用于重启后接着跑存下的 World（[重启](/zh/docs/guide/saves#restart)） |
 | `entity.Run<…>(ref job)`（[单个实体](/zh/docs/guide/queries#run-on-one-entity)）：结构体 job 的 `Writes` 里的组件（job 没有重写 `Writes` 时是全部组件；只读的 job 声明 `Writes => 0`），只在 `Run` 返回 true 时打 tick | 返回 false 的 `entity.Run`：job 没有运行 |
 
 [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers) 只能通过 `ref` 修改，所以它的写入总会被追踪到。
@@ -86,7 +86,9 @@ world.Update();
 
 `world.ChangeTick` 每过一个系统阶段加一（阶段是指彼此没有顺序约束、也没有冲突、可以同时跑的一组系统，或者单个系统），
 每次更新结束后再加一，所以两次更新之间的写入一定比所有系统的上次运行更新。`system.LastRunTick` 是系统上次运行时的
-tick。`[Changed<T>]` 方法选的是在它之后写入的行，因此系统这一轮自己写的东西，不会在下一轮被当成变化。写 `T` 的系统
+tick。`[Changed<T>]` 方法选的是在它之后写入的行，因此系统这一轮自己写的东西，不会在下一轮被当成变化。新系统从 0 开始：
+第一次运行会访问 World 创建以来写过的每一行（tick 为 0、从未写过的行除外）。`world.AddSystem<T>(changesFromNow: true)`
+改为从当前 tick 开始，第一次运行只访问它加进来之后写入的行：适合加到已经有状态的 World 上的系统。写 `T` 的系统
 不会和读 `T` 变化的 `[Changed<T>]`、`[Removed<T>]` 方法排进同一个并行阶段，因为这类方法声明了对 `T` 的读取。
 
 在系统之外，用之前记下的 tick 来过滤：

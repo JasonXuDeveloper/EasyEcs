@@ -86,11 +86,41 @@ long tick = restarted.Clock.Tick;                                      // 1234
 | 每个存活实体，连同 id 和版本号 | 系统、`WorldOptions` |
 | 每个组件：非托管的按原始行，托管的走 Nino | 索引（下次查找时重建） |
 | 被禁用的组件及其保留的值 | 分组设置（`Load` 按本 World 的 `GroupBy` 调用分组） |
-| [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers) 的元素 | 变更 tick（每个加载的行都算作被写入） |
+| [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers) 的元素 | 变更 tick（每个加载的行都算作被写入；`markWritten: false` 时都不算，见[重启](#restart)） |
 | 每个单例 | |
 
 类型按 Nino 类型 id 记录（带命名空间的完整名字的哈希），每列是一个带长度前缀的片段，所以加载时会跳过当前进程没有的组件类型。当前进程
 用过的类型、或者生成器注册过的类型都能找到：使用 EasyEcs 的程序集，其中每个组件和单例都会在模块加载时注册。
+
+### 重启时不把加载算作变更 [#restart]
+
+重启是接着上一个进程的 World 往下跑：旧进程在两个 tick 之间存档，新进程读档、加上系统、继续运行。默认情况下加载的每一行都算写入，
+所以写记录或做同步的 `[Changed<T>]` 系统第一次运行就会把整个 World 再发一遍。`Load(bytes, markWritten: false)` 加载的行没有变更 tick：
+没有哪一行算作写入或移除，加载之后才加上的系统也一样；之后代码再写入的内容照常能看到。
+
+```csharp
+public record struct Balance(int Gold) : IComponent, ITrackChanges;   // 被追踪：写过的记录要存
+public record struct Outbox(int Records) : ISingletonComponent;
+
+public class SaveBalances : EcsSystem
+{
+    [ForEach, Changed<Balance>]
+    private static void Save(ref Outbox outbox) => outbox.Records++;  // 每个变了的余额一条记录
+}
+```
+
+```csharp
+var previous = new NinoArrayBufferWriter();
+world.Save(previous);                                                  // 旧进程，两个 tick 之间
+
+using var resumed = new World();                                       // 新进程
+resumed.Load(previous.WrittenSpan, markWritten: false);                // 记录里已经是这些值 // [!code highlight]
+resumed.AddSystem<SaveBalances>();
+resumed.Update();                                                      // 没有要存的：没有一行算变更
+```
+
+之后才加到已经有状态的 World 上的系统（不管状态是谁写的），也可以从当前 tick 开始算：`world.AddSystem<T>(changesFromNow: true)`
+让它第一次运行只访问调用之后写入的行（[tick](/zh/docs/guide/change-tracking#ticks)）。
 
 ### 代码改了之后 [#versioning]
 

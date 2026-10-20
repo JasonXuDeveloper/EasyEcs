@@ -101,6 +101,9 @@ available as Markdown: add `.md` to its URL.
 - Restore a record with `LoadEntitiesInto(bytes, entities, markWritten: false)`, so a system that saves or
   replicates changed components does not send it straight back; the values it replaces (a prefab's defaults) count as
   never written too, so one prefab per kind serves new and restored entities. `LoadEntitiesInto` is structural (EECS010, EECS013, EECS014).
+- Resume a saved world after a restart with `world.Load(bytes, markWritten: false)`: no loaded row counts as written
+  or removed, also for systems added after it. A system added to a world that already holds its state starts with
+  `world.AddSystem<T>(changesFromNow: true)`.
 
 ## Project layout and debugging
 

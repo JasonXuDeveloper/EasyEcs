@@ -214,7 +214,9 @@ goes through the channel as a request with a reply, like a write.
 
 Load the last save before the first tick, then add only the singletons the save did not hold: `Load` replaces the
 world's singletons, and `AddSingleton` would reset one that was loaded. Save after the loop ends, into a temporary
-file moved over the old one, so a crash during the write never leaves half a save:
+file moved over the old one, so a crash during the write never leaves half a save. When systems save or replicate
+`[Changed<T>]` rows, load with `markWritten: false`, so the first tick does not send the loaded world again
+([restart](/en/docs/guide/saves#restart)):
 
 ```csharp
 using Nino.Core;
@@ -260,9 +262,8 @@ in [saves](/en/docs/guide/saves#versioning).
 ### Deploy [#deploy]
 
 - **Native AOT:** `<PublishAot>true</PublishAot>` publishes the world and its systems as a native executable:
-  `EasyEcs.Core` is marked `IsAotCompatible` and the generated code calls your methods directly. The AOT compiler
-  reports one IL3054 warning (generic recursion through the change-tick column type) in programs with tracked
-  components, and a generic system closed only by another assembly needs `MakeGenericType`, which Native AOT cannot do
+  `EasyEcs.Core` is marked `IsAotCompatible` and the generated code calls your methods directly, and the publish has no
+  warnings. A generic system closed only by another assembly needs `MakeGenericType`, which Native AOT cannot do
   ([FAQ](/en/docs/faq#native-aot)). ASP.NET Core has AOT rules of its own (`WebApplication.CreateSlimBuilder`, JSON
   source generation): see Microsoft's
   [Native AOT guide for ASP.NET Core](https://learn.microsoft.com/aspnet/core/fundamentals/native-aot).

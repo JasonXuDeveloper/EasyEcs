@@ -193,7 +193,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.Capture()` / `Capture(into)` | O(实体数 × 组件数 + 表数 + 单例数) | 按值复制；`Capture(into)` 复用之前快照的数组，够大之后不再分配；遍历进行时不可用 |
 | `world.Restore(snapshot)` | O(实体数 × 组件数 + 表数 + 单例数) | 快照里的句柄重新有效，之后创建的句柄失效；每个恢复的行都算写入（或移除） |
 | `world.Save(output)` | O(实体数 × 组件数) | 把 World 写成字节：非托管行原样写出，托管值走 Nino；缓冲够大之后不再分配 |
-| `world.Load(input)` | O(实体数 × 组件数) | 实体保留原 id；组件布局变了会抛 `InvalidDataException`，World 保持原样 |
+| `world.Load(input, markWritten)` | O(实体数 × 组件数) | 实体保留原 id；组件布局变了会抛 `InvalidDataException`，World 保持原样；`markWritten: false`：加载的行算作从未写过 |
 | `world.SaveEntities(output, ids)` | O(给定实体数 × 组件数) | 一组实体，交给另一个 World 或进程 |
 | `world.SaveEntities(output, ids, set)` | O(给定实体数 × 组件数) | 只写 `ComponentSet` 里的组件（建一次：`ComponentSet.Create().With<T>()`，每个类型 O(1)） |
 | `world.LoadEntities(input, entities)` | O(实体数 × 组件数) | 新 id；指向组内实体的 `EntityId` 字段会改写，其他的变成 `EntityId.Null` |
@@ -206,7 +206,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 
 | API | 复杂度 | 说明 |
 | --- | --- | --- |
-| `world.AddSystem<T>()` / `AddSystem(system)` | O(s²)，s 为所在分组的系统数 | 调用 `OnCreate`；重建顺序和阶段（冷路径）；系统已属于某个 World，或排序出现环时抛异常 |
+| `world.AddSystem<T>(changesFromNow)` / `AddSystem(system, changesFromNow)` | O(s²)，s 为所在分组的系统数 | 调用 `OnCreate`；重建顺序和阶段（冷路径）；系统已属于某个 World，或排序出现环时抛异常；`changesFromNow: true`：第一次运行只看调用之后的写入 |
 | `world.RemoveSystem<T>()` | O(s²) | 调用 `OnDestroy`；返回是否移除了系统 |
 | `world.GetSystem<T>()` | O(系统数) | 不存在时返回 null |
 | `world.Update()` / `world.Update<TGroup>()` | 分组内所有系统之和 | 同步、零分配；`Dispose` 之后调用抛 `ObjectDisposedException` |
