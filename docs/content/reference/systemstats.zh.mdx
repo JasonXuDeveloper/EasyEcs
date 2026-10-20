@@ -44,7 +44,7 @@ public long LastAllocated { get; }
 public long LastEntities { get; }
 ```
 
-最近一次运行的 `[ForEach]` 方法访问的实体数：每个方法的遍历开始时它的查询匹配的实体（通过过滤条件的行；`[Changed<T>]` / `[Removed<T>]` 还要求在系统上次运行之后写过或移除过），各方法相加。[`EcsSystem.OnUpdate`](/zh/docs/reference/ecssystem#onupdate) 里做的查询不算。
+最近一次运行的 `[ForEach]` 方法访问的实体数：每个方法的遍历开始时它的查询匹配的实体（通过过滤条件的行；`[Changed<T>]` / `[Removed<T>]` 还要求在系统上次运行之后写过或移除过），各方法相加；`[ForEach(Slices = N)]` 方法只算它这次访问的那一片的行。[`EcsSystem.OnUpdate`](/zh/docs/reference/ecssystem#onupdate) 里做的查询不算。
 
 ### `Runs` [#runs]
 

@@ -26,10 +26,10 @@
       （每段前后各取一次 <c>GC.GetAllocatedBytesForCurrentThread</c>）。
     </summary>
   </member>
-  <member name="P:EasyEcs.SystemStats.LastEntities" source="da0aab4edf21">
+  <member name="P:EasyEcs.SystemStats.LastEntities" source="e869b2134c1b">
     <summary>
       最近一次运行的 <c>[ForEach]</c> 方法访问的实体数：每个方法的遍历开始时它的查询匹配的实体（通过过滤条件的行；
-      <c>[Changed&lt;T&gt;]</c> / <c>[Removed&lt;T&gt;]</c> 还要求在系统上次运行之后写过或移除过），各方法相加。
+      <c>[Changed&lt;T&gt;]</c> / <c>[Removed&lt;T&gt;]</c> 还要求在系统上次运行之后写过或移除过），各方法相加；<c>[ForEach(Slices = N)]</c> 方法只算它这次访问的那一片的行。
       <see cref="M:EasyEcs.EcsSystem.OnUpdate" /> 里做的查询不算。
     </summary>
   </member>
