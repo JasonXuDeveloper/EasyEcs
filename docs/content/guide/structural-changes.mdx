@@ -108,6 +108,9 @@ flowchart LR
   before the change.
 - **Any other `ref`** (from `entity.Get<T>()`, a `Query` item, or another entity) is guaranteed only until the next
   structural change: write through it before the change, or get it again afterwards.
+- **Code that handles one entity** (a request, a message) gets the same guarantee as a method's own `ref` parameters
+  from [`entity.Run`](/en/docs/guide/queries#run-on-one-entity): the job's refs stay the entity's values across its
+  own structural changes, and the components in its `Writes` are carried to the new row when it returns.
 
 ```csharp
 public class HitSystem : EcsSystem
@@ -170,15 +173,148 @@ for (int i = 0; i < 100_000; i++) world.CreateEntity(new Position(i, 0), new Lif
 ([Prefabs](/en/docs/guide/prefabs)), and `EnsureEntityCapacity(n)` sizes only the entity storage, for entities spread
 over many tables. Entities that a [group](/en/docs/guide/groups) puts in another table grow that one.
 
+## Full example [#full-example]
+
+A turret that fires every other tick and wears down until it dies: the shots are created and destroyed in the middle
+of passes, and the `Dead` tag is set where the death is decided. Put the files in a console project that references
+EasyEcs (`dotnet add package EasyEcs`) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+// A turret: a weapon on a cooldown, and health that wears down every tick.
+public record struct Weapon(int Cooldown) : IComponent;
+public record struct Health(int Value) : IComponent;
+
+// A shot: who fired it, and how many ticks it has left.
+public record struct Projectile(EntityId Owner) : IComponent;
+public record struct Lifetime(int Ticks) : IComponent;
+
+// A tag: the turret is out of health.
+public struct Dead : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// The turret loses 30 health a tick, and is tagged Dead where that is decided.
+public class WearSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Wear(Entity turret, ref Health hp)
+    {
+        hp.Value -= 30;
+        if (hp.Value <= 0)
+        {
+            // The row moves to the table with Dead, now.
+            turret.SetDead();
+            // hp is still this turret's Health: the write is carried to its new row.
+            hp.Value = 0;
+            Console.WriteLine($"  {turret} is dead");
+        }
+    }
+}
+
+// Fires every other tick. A turret tagged Dead earlier in this update no longer matches.
+[UpdateAfter<WearSystem>]
+public class FireSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Fire(Entity turret, ref Weapon weapon, World world)
+    {
+        if (weapon.Cooldown > 0)
+        {
+            weapon.Cooldown--;
+            return;
+        }
+
+        weapon.Cooldown = 1;
+        var shot = world.CreateEntity(new Projectile(turret.Id), new Lifetime(3));
+        Console.WriteLine($"  {turret} fires {shot}");
+    }
+}
+
+// Counts down every shot, including the ones fired earlier in this update,
+// and destroys a shot in the middle of its own pass.
+[UpdateAfter<FireSystem>]
+public class ExpireSystem : EcsSystem
+{
+    [ForEach]
+    static void Expire(Entity shot, ref Lifetime life)
+    {
+        life.Ticks--;
+        if (life.Ticks == 0)
+        {
+            Console.WriteLine($"  {shot} expires");
+            shot.Destroy();
+        }
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSystem<WearSystem>();
+world.AddSystem<FireSystem>();
+world.AddSystem<ExpireSystem>();
+
+var turret = world.CreateEntity(new Weapon(0), new Health(100));
+
+for (int tick = 1; tick <= 5; tick++)
+{
+    Console.WriteLine($"tick {tick}");
+    world.Update();
+    int shots = world.Count<Projectile>();
+    Console.WriteLine($"  hp {turret.Health.Value}, shots in flight {shots}");
+}
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+tick 1
+  Entity 0v1 fires Entity 1v1
+  hp 70, shots in flight 1
+tick 2
+  hp 40, shots in flight 1
+tick 3
+  Entity 0v1 fires Entity 2v1
+  Entity 1v1 expires
+  hp 10, shots in flight 1
+tick 4
+  Entity 0v1 is dead
+  hp 0, shots in flight 1
+tick 5
+  Entity 2v1 expires
+  hp 0, shots in flight 0
+```
+
+A shot fired on tick 1 is already counted down by `ExpireSystem` in the same update, so it expires on tick 3, not 4.
+On tick 4 the turret is tagged `Dead` in `WearSystem`, and `FireSystem`, which runs next, no longer visits it.
+
 ## How to use it fast [#how-to-use-it-fast]
 
 | Instead of | Do | Why |
 | --- | --- | --- |
 | A command buffer played back later | The change, where it is decided | No recording, no playback, no allocation |
-| Adding and removing a component each tick | A field, or a tag for a state that lasts several ticks | A tag the table has a column for only flips a bit |
+| Adding and removing a component each tick | A field, or a tag for a state that lasts several ticks | A tag the table's mask already has only flips a presence bit |
 | `Set(a)` then `Set(b)` | `Set(a, b)` | Shorter, the same cost |
-| Creating a known number of entities one by one | `EnsureCapacity<T1, …, Tn>(count)` before the loop | One growth instead of a doubling per full table |
-| A loop of single changes over a filter | [Bulk changes](/en/docs/guide/bulk), `DestroyEntities<T>(filter)` | One gate pass, whole words at once |
+| Creating a known number of entities one by one | `CreateEntities`, or `EnsureCapacity<T1, …, Tn>(count)` before the loop | One growth instead of a doubling per full table ([EECS031](/en/docs/guide/analyzer#eecs031)) |
+| A loop of single changes over a filter | [Bulk changes](/en/docs/guide/bulk), `DestroyEntities<T>(filter)` | One gate pass, whole 64-row words at once ([EECS030](/en/docs/guide/analyzer#eecs030)) |
 | An `Entity` parameter the method only reads | Keep it read-only (`Id`, `Has`, `Get`) | The pass skips structural bookkeeping |
 
 10,000 entities whose `Health` is removed and added back inside a query loop (`ToggleComponent`), against moving three
@@ -211,11 +347,12 @@ The comparison with 10 changes per pass: [Comparison](/en/docs/comparison).
 | --- | --- | --- |
 | A change through a component's link in a method with no `Entity` or `World` | The pass keeps refs into moved rows | [EECS013](/en/docs/guide/analyzer#eecs013) |
 | A change in a batch method | `InvalidOperationException`: the spans point into the tables | [EECS013](/en/docs/guide/analyzer#eecs013), and at run time |
-| A change in a parallel method | Races between chunks | [EECS010](/en/docs/guide/analyzer#eecs010) |
+| A change in a parallel method | `InvalidOperationException`: the structure is frozen while chunks run | [EECS010](/en/docs/guide/analyzer#eecs010), and at run time |
 | A change from another thread | Races with the owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |
 | `INoStructuralChanges` on a job that changes structure | `InvalidOperationException` at the change | At run time |
 | A `ref` from `Get<T>()` used after a change | It may point at a stale copy or another entity's row | Code review: get it again |
 | Expecting a new entity in the pass that created it | It is visited by the next pass | By design |
+| `World.Update()` inside a system | The system runs again inside its own run, until the stack overflows | [EECS034](/en/docs/guide/analyzer#eecs034) |
 | `Update()` while a query of the same world iterates | Undefined order of passes | Code review |
 
 ## Related [#related]

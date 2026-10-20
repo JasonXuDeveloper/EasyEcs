@@ -119,13 +119,133 @@ clock.Value.Tick++;                          // 之后：直接是 ref，不用�
 - `[ForEach(Parallel = true)]` 方法只能用 `in` 接收单例组件：用 `ref` 的话每个块都会抢着写（[EECS010](/zh/docs/guide/analyzer#eecs010)）。
 - 单例组件里有集合（格子网格、队列），又通过 `in` 参数修改它，会被当成读来调度：[EECS011](/zh/docs/guide/analyzer#eecs011) 要求改成 `ref`。
 
+## 完整例子 [#full-example]
+
+时钟、配置和分数都是单例：毒每个 tick 伤害三个单位，死亡系统统计死亡数。把这几个文件放进一个引用了 EasyEcs 的控制台项目
+（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Health(int Value) : IComponent;
+public struct Dead : IComponent;
+
+// 属于整个 World 的状态：每个 World 一份。
+public record struct Clock(long Tick) : ISingletonComponent;
+public record struct Poison(int DamagePerTick) : ISingletonComponent;
+public record struct Score(int Deaths) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// 每次更新通过系统的 World 把时钟推进一格。
+public class ClockSystem : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        World.Clock.Tick++;
+    }
+}
+
+// 用 `in` 读配置：每次遍历解析一次，而不是每个单位一次。
+[UpdateAfter<ClockSystem>]
+public class PoisonSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Hurt(ref Health hp, in Poison poison)
+    {
+        hp.Value -= poison.DamagePerTick;
+    }
+}
+
+// 用 `ref` 写分数，用 `in` 读时钟。
+[UpdateAfter<PoisonSystem>]
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health hp, ref Score score, in Clock clock)
+    {
+        if (hp.Value > 0)
+        {
+            return;
+        }
+
+        unit.SetDead();
+        score.Deaths++;
+        Console.WriteLine($"  tick {clock.Tick}: {unit} dies");
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+
+// 在构建 World 的地方加好单例：
+// 否则用到它的系统第一次运行就会抛异常。
+world.SetClock(0);
+world.SetPoison(25);
+world.SetScore(0);
+
+world.AddSystem<ClockSystem>();
+world.AddSystem<PoisonSystem>();
+world.AddSystem<DeathSystem>();
+
+world.CreateEntity(new Health(50));
+world.CreateEntity(new Health(75));
+world.CreateEntity(new Health(100));
+
+// 宿主保存的句柄：Value 是一个 ref，不用查找。
+var score = world.SingletonRef<Score>();
+
+for (int i = 0; i < 2; i++)
+{
+    world.Update();
+}
+
+Console.WriteLine($"after tick {world.Clock.Tick}: {score.Value.Deaths} dead");
+
+// 从外部修改配置：下一次遍历读到新值。
+world.Poison.DamagePerTick = 50;
+world.Update();
+
+Console.WriteLine($"after tick {world.Clock.Tick}: {score.Value.Deaths} dead");
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+  tick 2: Entity 0v1 dies
+after tick 2: 1 dead
+  tick 3: Entity 2v1 dies
+  tick 3: Entity 1v1 dies
+after tick 3: 3 dead
+```
+
+宿主通过一开始取好的 `SingletonRef<Score>` 读分数；宿主改了配置，系统下一次更新就能看到：毒伤翻倍后，剩下的两个单位都在第 3
+个 tick 死亡。
+
 ## 怎么用得快 [#how-to-use-it-fast]
 
 | 别这样 | 这样做 | 原因 |
 | --- | --- | --- |
-| 循环里每个实体都调用 `GetSingleton<T>()` | 把它作为 `[ForEach]` 方法的参数 | 每次遍历只解析一次 |
+| 循环里每个实体都调用 `GetSingleton<T>()`（或 `World.X`） | 把它作为 `[ForEach]` 方法的参数 | 每次遍历只解析一次（`[ForEach]` 方法里由 [EECS027](/zh/docs/guide/analyzer#eecs027) 报告） |
 | 宿主代码每次调用都查找 | 初始化时保存一个 `SingletonRef<T>` | 不用查找 |
-| 系统只读单例组件却写成 `ref` | 改成 `in` | 系统可以共享并行阶段 |
+| 系统只读单例组件却写成 `ref` | 改成 `in` | 系统可以共享并行阶段（[EECS025](/zh/docs/guide/analyzer#eecs025)） |
 | 静态字段 | 单例组件 | 按 World 隔离，跟着 World 一起存档和快照 |
 
 通过 `GetSingleton<T>()` 读写单例组件 1,000 次，旁边是通过实体句柄写组件 1,000 次（`MicroBenchmarks`）：
@@ -139,7 +259,7 @@ clock.Value.Tick++;                          // 之后：直接是 ref，不用�
 ## 开销 [#what-it-costs]
 
 - **存储：** 每个拥有该单例的 World 里，每种单例类型一个小盒子；和实体数量无关。
-- **`GetSingleton`、`HasSingleton`：** 一次数组读取加一次类型检查，O(1)。
+- **`GetSingleton`、`HasSingleton`：** 一次边界检查、一次数组读取和一次判空，不做类型检查，O(1)。
 - **`SingletonRef<T>.Value`：** 读一个字段。
 - **`[ForEach]` 参数：** 每次遍历解析一次。
 - **添加或移除**单例组件和其他结构变更一样，要经过 World 的结构闸门。
@@ -152,6 +272,7 @@ clock.Value.Tick++;                          // 之后：直接是 ref，不用�
 | 用 class 实现 `ISingletonComponent` | 编译不过 | [EECS006](/zh/docs/guide/analyzer#eecs006) |
 | 单例还没添加就读取（`world.X`、`GetSingleton<T>()`、`[ForEach]` 参数） | 抛 `InvalidOperationException`，信息里写明该用哪个调用添加 | 初始化时添加；默认值合适的地方用 `GetOrAddX()` |
 | 并行方法里用 `ref` 接收单例组件 | 块之间发生竞争 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
+| 在批处理方法、并行方法或并行阶段里调用 `AddSingleton`、`RemoveSingleton` | 抛 `InvalidOperationException`：两者都要过结构闸门，而这些地方的结构是冻结的 | [EECS010](/zh/docs/guide/analyzer#eecs010)、[EECS013](/zh/docs/guide/analyzer#eecs013)，运行时也会抛 |
 | 通过 `in` 修改单例组件里的集合 | 被当成读来调度 | [EECS011](/zh/docs/guide/analyzer#eecs011) |
 | `RemoveSingleton` 之后还通过旧的 `SingletonRef<T>` 写入 | 写入不会到达任何地方 | 重新添加后取新句柄 |
 | 在单例组件里放一个玩家列表 | 和实体、查询能做的事重复 | 把玩家做成带标签的实体 |

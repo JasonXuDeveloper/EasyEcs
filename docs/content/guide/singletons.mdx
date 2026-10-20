@@ -130,13 +130,134 @@ clock.Value.Tick++;                          // later: a ref, no lookup
 - A singleton that holds a collection (a grid of cells, a queue) and is changed through an `in` parameter is scheduled
   as a read: [EECS011](/en/docs/guide/analyzer#eecs011) asks for `ref`.
 
+## Full example [#full-example]
+
+A clock, a configuration and a score as singletons: poison hurts three units each tick, and the death system counts
+the dead. Put the files in a console project that references EasyEcs (`dotnet add package EasyEcs`) and run it with
+`dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Health(int Value) : IComponent;
+public struct Dead : IComponent;
+
+// World-level state: one value per world.
+public record struct Clock(long Tick) : ISingletonComponent;
+public record struct Poison(int DamagePerTick) : ISingletonComponent;
+public record struct Score(int Deaths) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// Advances the clock once per update, through the system's World.
+public class ClockSystem : EcsSystem
+{
+    protected override void OnUpdate()
+    {
+        World.Clock.Tick++;
+    }
+}
+
+// Reads the configuration by `in`: resolved once per pass, not once per unit.
+[UpdateAfter<ClockSystem>]
+public class PoisonSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Hurt(ref Health hp, in Poison poison)
+    {
+        hp.Value -= poison.DamagePerTick;
+    }
+}
+
+// Writes the score by `ref`, reads the clock by `in`.
+[UpdateAfter<PoisonSystem>]
+public class DeathSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Die(Entity unit, in Health hp, ref Score score, in Clock clock)
+    {
+        if (hp.Value > 0)
+        {
+            return;
+        }
+
+        unit.SetDead();
+        score.Deaths++;
+        Console.WriteLine($"  tick {clock.Tick}: {unit} dies");
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+
+// Add the singletons where the world is built:
+// a system that takes one throws on its first run otherwise.
+world.SetClock(0);
+world.SetPoison(25);
+world.SetScore(0);
+
+world.AddSystem<ClockSystem>();
+world.AddSystem<PoisonSystem>();
+world.AddSystem<DeathSystem>();
+
+world.CreateEntity(new Health(50));
+world.CreateEntity(new Health(75));
+world.CreateEntity(new Health(100));
+
+// A handle the host keeps: its Value is a ref, with no lookup.
+var score = world.SingletonRef<Score>();
+
+for (int i = 0; i < 2; i++)
+{
+    world.Update();
+}
+
+Console.WriteLine($"after tick {world.Clock.Tick}: {score.Value.Deaths} dead");
+
+// Configuration changed from outside: the next pass reads the new value.
+world.Poison.DamagePerTick = 50;
+world.Update();
+
+Console.WriteLine($"after tick {world.Clock.Tick}: {score.Value.Deaths} dead");
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+  tick 2: Entity 0v1 dies
+after tick 2: 1 dead
+  tick 3: Entity 2v1 dies
+  tick 3: Entity 1v1 dies
+after tick 3: 3 dead
+```
+
+The host reads the score through the `SingletonRef<Score>` it took once, and the systems see the configuration it
+changes on the next update: with the poison doubled, both remaining units die on tick 3.
+
 ## How to use it fast [#how-to-use-it-fast]
 
 | Instead of | Do | Why |
 | --- | --- | --- |
-| `GetSingleton<T>()` per entity inside a loop | A singleton parameter of the `[ForEach]` method | Resolved once per pass |
+| `GetSingleton<T>()` (or `World.X`) per entity inside a loop | A singleton parameter of the `[ForEach]` method | Resolved once per pass ([EECS027](/en/docs/guide/analyzer#eecs027) in a `[ForEach]` method) |
 | A lookup on every call from host code | A `SingletonRef<T>` kept from setup | No lookup |
-| `ref` for a singleton the system only reads | `in` | Lets the system share a parallel stage |
+| `ref` for a singleton the system only reads | `in` | Lets the system share a parallel stage ([EECS025](/en/docs/guide/analyzer#eecs025)) |
 | A static field | A singleton | Per world, saved and snapshotted with it |
 
 1,000 singleton reads and writes through `GetSingleton<T>()`, next to 1,000 component writes through entity handles
@@ -151,7 +272,7 @@ A pass that writes a singleton for each of 100,000 entities, against Friflo.Engi
 ## What it costs [#what-it-costs]
 
 - **Storage:** one small box per singleton type in each world that has it; nothing per entity.
-- **`GetSingleton`, `HasSingleton`:** one array load and a type check; O(1).
+- **`GetSingleton`, `HasSingleton`:** a bounds check, one array load and a null check, with no type check; O(1).
 - **`SingletonRef<T>.Value`:** one field load.
 - **A `[ForEach]` parameter:** resolved once per pass.
 - **Adding or removing** a singleton goes through the world's structural gate, like any structural change.
@@ -164,6 +285,7 @@ A pass that writes a singleton for each of 100,000 entities, against Friflo.Engi
 | A class implementing `ISingletonComponent` | Does not compile | [EECS006](/en/docs/guide/analyzer#eecs006) |
 | Reading a singleton before it was added (`world.X`, `GetSingleton<T>()`, a `[ForEach]` parameter) | `InvalidOperationException`, naming the call that adds it | Add it at setup, or use `GetOrAddX()` where the default is right |
 | A `ref` singleton in a parallel method | Races between chunks | [EECS010](/en/docs/guide/analyzer#eecs010) |
+| `AddSingleton` or `RemoveSingleton` in a batch method, a parallel method or a parallel stage | `InvalidOperationException`: both go through the structural gate, and the structure is frozen there | [EECS010](/en/docs/guide/analyzer#eecs010), [EECS013](/en/docs/guide/analyzer#eecs013), and at run time |
 | Changing a collection in a singleton through `in` | Scheduled as a read | [EECS011](/en/docs/guide/analyzer#eecs011) |
 | Writing through a `SingletonRef<T>` after `RemoveSingleton` | The write reaches nothing | Take a new handle after re-adding |
 | A list of players in a singleton | Duplicates what entities and queries give | Make them entities with a tag |

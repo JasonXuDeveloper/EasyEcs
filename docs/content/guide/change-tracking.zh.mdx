@@ -77,8 +77,8 @@ world.Update();
 | `entity.Get<T>()`、找到时的 `TryGetRef<T>(out found)`、`GetOrAdd<T>()`、`Set(...)` | `Has<T>()` |
 | 带着该组件的 `CreateEntity(...)`、`CreateEntities(...)`、`Instantiate(...)`、`Clone()` | 移除组件（属于[移除](#removal-detection)） |
 | `entity.Enable<T>()`、`world.EnableAll<T>()`（保留的值回来了） | `entity.Disable<T>()`（算作移除） |
-| `world.Restore(snapshot)`、`world.Load(bytes)`、`LoadEntities(...)`、`LoadEntitiesInto(...)`（恢复或加载的每一行） | `LoadEntitiesInto(..., markWritten: false)`（[恢复记录](/zh/docs/guide/migration-and-unload#records)） |
-| `entity.Run<…>(ref job)`，作业 `Writes` 里的组件（[单个实体](/zh/docs/guide/queries#run-on-one-entity)） | |
+| `world.Restore(snapshot)`、`world.Load(bytes)`、`LoadEntities(...)`、`LoadEntitiesInto(...)`（恢复或加载的每一行） | `LoadEntitiesInto(..., markWritten: false)`：被替换的值保留原来的 tick，新加的组件 tick 为 0。用于恢复持久化的记录，又不想把它再存一遍或再发一遍（[恢复记录](/zh/docs/guide/migration-and-unload#records)） |
+| `entity.Run<…>(ref job)`（[单个实体](/zh/docs/guide/queries#run-on-one-entity)）：结构体 job 的 `Writes` 里的组件（job 没有重写 `Writes` 时是全部组件；只读的 job 声明 `Writes => 0`），只在 `Run` 返回 true 时打 tick | 返回 false 的 `entity.Run`：job 没有运行 |
 
 [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers) 只能通过 `ref` 修改，所以它的写入总会被追踪到。
 
@@ -93,10 +93,11 @@ tick。`[Changed<T>]` 方法选的是在它之后写入的行，因此系统这�
 
 ```csharp
 ulong mark = world.ChangeTick;
-// ... 写入 ...
+unit.SetHealth(40);                                                 // mark 之后的一次写入
 var changed = QueryFilter.Create().Changed<Health>(mark);           // mark 及之后写入的行
 int count = world.Count<Health>(changed);
-foreach (var item in world.Query<Health>(changed)) { /* ... */ }    // 元素会交出 ref：这些行会被算作写入
+foreach (var item in world.Query<Health>(changed))                  // 元素会交出 ref：这些行算作写入
+    Console.WriteLine($"{item.Entity}: {item.Health.Value} hp");
 ```
 
 tick 之所以是调用参数，是因为“变化”总是相对于某个人上次看的时间点：`[Changed<T>]` 方法用的是自己系统的上次运行，
@@ -109,15 +110,15 @@ tick 之所以是调用参数，是因为“变化”总是相对于某个人上
 
 ```csharp title="ReplicateFire.cs"
 public record struct Burning(int Ticks) : IComponent, ITrackChanges;   // 被追踪：移除也会被记录
-public record struct Replica(int Health, bool Burning) : IComponent;
+public record struct FireReplica(bool Burning) : IComponent;              // 客户端知道的着火状态
 
 public class ReplicateFire : EcsSystem
 {
     [ForEach, Changed<Burning>]                     // 上次运行后被点燃（或火势被改写）
-    static void Lit(ref Replica replica) => replica.Burning = true;
+    static void Lit(ref FireReplica replica) => replica.Burning = true;
 
     [ForEach, Removed<Burning>]                     // 上次运行后火灭了 // [!code highlight]
-    static void Out(ref Replica replica) => replica.Burning = false;
+    static void Out(ref FireReplica replica) => replica.Burning = false;
 }
 ```
 
@@ -152,13 +153,13 @@ private static readonly QueryFilter FireOut = QueryFilter.Create().Removed<Burni
 
 ulong mark = world.ChangeTick;
 world.Update();
-int extinguished = world.Count<Replica>(FireOut.Since(mark));
-foreach (var item in world.Query<Replica>(FireOut.Since(mark))) item.Replica.Burning = false;
+int extinguished = world.Count<FireReplica>(FireOut.Since(mark));
+foreach (var item in world.Query<FireReplica>(FireOut.Since(mark))) item.FireReplica.Burning = false;
 ```
 
 ## 完整例子 [#full-example]
 
-一千个单位，复制它们的血量和熄灭的火：第一次更新发送所有行，之后只发送被写过的行，`Burning` 被移除时只报告一次。把这几个
+一千个单位，把血量和熄灭的火同步给客户端：第一次更新发送所有行，之后只发送被写过的行，`Burning` 被移除时只报告一次。把这几个
 文件放进一个引用了 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
 
 <Accordions>
@@ -176,7 +177,7 @@ public record struct Burning(int Ticks) : IComponent, ITrackChanges;
 // 上一次告诉客户端的单位状态。
 public record struct Replica(int Health) : IComponent;
 
-// 上一次更新里复制发送了多少行。
+// 上一次更新里同步了多少行。
 public record struct Sent(int Rows) : ISingletonComponent;
 ```
 
@@ -316,14 +317,15 @@ written since the mark: 2
 
 所有功能的开销汇总在[性能指南](/zh/docs/performance#the-few-rows-that-changed-changedt)。
 
-## 常见坑 [#pitfalls]
+## 常见陷阱 [#pitfalls]
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
 | 通过 `in` 修改组件里的集合 | 这一行没被打上 tick，`[Changed<T>]` 漏掉它 | [EECS011](/zh/docs/guide/analyzer#eecs011) |
 | `[Removed<T>]` 方法同时要求有 `T` | 要求一行既有 `T` 又没有 `T`，没有行能满足 | [EECS016](/zh/docs/guide/analyzer#eecs016) |
 | `[Removed<T>]` 方法既没有组件参数也没有 `[With<U>]` | 没有任何东西说明方法要遍历什么 | [EECS003](/zh/docs/guide/analyzer#eecs003) |
-| 只读的参数写成了 `ref` | 访问到的每一行都算作已变化 | 代码审查：改成 `in` |
+| 只读的参数写成了 `ref` | 访问到的每一行都算作已变化 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
+| 接收方还没有这些值，却用 `LoadEntitiesInto(..., markWritten: false)` 加载 | 加载的行不算变化，靠 `[Changed<T>]` 的同步永远不会发出去 | 代码审查：给新客户端同步时，自己发送完整状态 |
 | 指望 `[Removed<T>]` 报告被销毁的实体 | 它们没有行，永远不会被报告 | 先打标签，同步完再销毁 |
 | 一个过滤器里的多个 `Changed` / `Removed` 用了不同的 tick | 抛 `ArgumentException`：一个过滤器只有一个 tick | 运行时 |
 

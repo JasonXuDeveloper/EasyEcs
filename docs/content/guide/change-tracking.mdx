@@ -80,8 +80,8 @@ hands out a `ref`, whether or not the code stores through it:
 | `entity.Get<T>()`, `TryGetRef<T>(out found)` when found, `GetOrAdd<T>()`, `Set(...)` | `Has<T>()` |
 | `CreateEntity(...)`, `CreateEntities(...)`, `Instantiate(...)`, `Clone()` with the component | removing the component (a [removal](#removal-detection)) |
 | `entity.Enable<T>()`, `world.EnableAll<T>()` (the kept value comes back) | `entity.Disable<T>()` (a removal) |
-| `world.Restore(snapshot)`, `world.Load(bytes)`, `LoadEntities(...)`, `LoadEntitiesInto(...)` (every restored or loaded row) | `LoadEntitiesInto(..., markWritten: false)` ([a restored record](/en/docs/guide/migration-and-unload#records)) |
-| `entity.Run<…>(ref job)` for the components in the job's `Writes` ([one entity](/en/docs/guide/queries#run-on-one-entity)) | |
+| `world.Restore(snapshot)`, `world.Load(bytes)`, `LoadEntities(...)`, `LoadEntitiesInto(...)` (every restored or loaded row) | `LoadEntitiesInto(..., markWritten: false)`: a replaced value keeps its old tick, an added component gets tick 0. For restoring a persisted record without saving or sending it back ([a restored record](/en/docs/guide/migration-and-unload#records)) |
+| `entity.Run<…>(ref job)` ([one entity](/en/docs/guide/queries#run-on-one-entity)): the components in the job's `Writes` (all of them unless the job overrides `Writes`; declare `Writes => 0` for a read-only job), stamped only when `Run` returns true | `entity.Run` that returns false: the job did not run |
 
 A [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) is a list that can only change through a `ref`, so its
 writes are always tracked.
@@ -98,10 +98,11 @@ Outside systems, filter by a tick you read earlier:
 
 ```csharp
 ulong mark = world.ChangeTick;
-// ... writes ...
+unit.SetHealth(40);                                                 // a write after the mark
 var changed = QueryFilter.Create().Changed<Health>(mark);           // rows written at or after mark
 int count = world.Count<Health>(changed);
-foreach (var item in world.Query<Health>(changed)) { /* ... */ }    // items hand out refs: rows count as written
+foreach (var item in world.Query<Health>(changed))                  // items hand out refs: rows count as written
+    Console.WriteLine($"{item.Entity}: {item.Health.Value} hp");
 ```
 
 The tick is part of the call because a change is relative to someone's last look: `[Changed<T>]` methods use their
@@ -114,15 +115,15 @@ Replication has to tell clients when something goes away too: a fire went out, a
 
 ```csharp title="ReplicateFire.cs"
 public record struct Burning(int Ticks) : IComponent, ITrackChanges;   // tracked: removals are recorded too
-public record struct Replica(int Health, bool Burning) : IComponent;
+public record struct FireReplica(bool Burning) : IComponent;              // what the clients know of the fire
 
 public class ReplicateFire : EcsSystem
 {
     [ForEach, Changed<Burning>]                     // set on fire (or the fire written) since the last run
-    static void Lit(ref Replica replica) => replica.Burning = true;
+    static void Lit(ref FireReplica replica) => replica.Burning = true;
 
     [ForEach, Removed<Burning>]                     // the fire went out since the last run // [!code highlight]
-    static void Out(ref Replica replica) => replica.Burning = false;
+    static void Out(ref FireReplica replica) => replica.Burning = false;
 }
 ```
 
@@ -162,8 +163,8 @@ private static readonly QueryFilter FireOut = QueryFilter.Create().Removed<Burni
 
 ulong mark = world.ChangeTick;
 world.Update();
-int extinguished = world.Count<Replica>(FireOut.Since(mark));
-foreach (var item in world.Query<Replica>(FireOut.Since(mark))) item.Replica.Burning = false;
+int extinguished = world.Count<FireReplica>(FireOut.Since(mark));
+foreach (var item in world.Query<FireReplica>(FireOut.Since(mark))) item.FireReplica.Burning = false;
 ```
 
 ## Full example [#full-example]
@@ -340,7 +341,8 @@ All of it on one page with the other features: [Performance guide](/en/docs/perf
 | Changing a collection inside a component through `in` | The row is not stamped, so `[Changed<T>]` misses it | [EECS011](/en/docs/guide/analyzer#eecs011) |
 | `[Removed<T>]` on a method that also requires `T` | Asks for rows that have and lack `T` at once: no row passes | [EECS016](/en/docs/guide/analyzer#eecs016) |
 | `[Removed<T>]` with no component parameter or `[With<U>]` | Nothing names what the method iterates | [EECS003](/en/docs/guide/analyzer#eecs003) |
-| `ref` parameter that only reads | Every visited row counts as changed | Code review: declare it `in` |
+| `ref` parameter that only reads | Every visited row counts as changed | [EECS025](/en/docs/guide/analyzer#eecs025) |
+| `LoadEntitiesInto(..., markWritten: false)` for values the receivers do not have yet | The loaded rows are not changes, so `[Changed<T>]` replication never sends them | Code review: a replicator to new clients sends the full state itself |
 | Expecting destroyed entities in `[Removed<T>]` | They have no row and are never reported | Mark with a tag, destroy after replicating |
 | Several `Changed` / `Removed` filters with different ticks | `ArgumentException`: a filter has one tick | At run time |
 

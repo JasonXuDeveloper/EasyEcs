@@ -54,8 +54,11 @@ change as one that may invalidate your refs.
 Use `ref` freely inside `[ForEach]` methods, `ForEach` jobs and `Query` loops: each entity gets fresh refs.
 
 - The **`ref` parameters of a `[ForEach]` method** (or a `ForEach` job) stay writable even when the body changes
-  the archetype of the entity it visits: the pass copies those writes to the entity's new row after the body returns.
-  `in` parameters keep showing the values from before the change.
+  the archetype of the entity it visits: the pass copies those writes (for a job, the components in its `Writes`)
+  to the entity's new row after the body returns. `in` parameters keep showing the values from before the change.
+- **A job run on one entity** with [`entity.Run`](/en/docs/guide/queries#run-on-one-entity) gets the same guarantee:
+  its refs stay the entity's values across its own structural changes, and the components in its `Writes` are
+  carried to the new row when it returns.
 - **Any other `ref`** (from `entity.Get<T>()`, an item of a `Query` loop, or into another entity) is guaranteed only
   until the next structural change. Write through it before the change, or get it again afterwards.
 
@@ -116,6 +119,8 @@ using System.Collections.Concurrent;
 
 public record struct PotionRedeemed(EntityId Player, int Heal);   // a message, not a component
 
+// The queue is a dependency in a readonly field, which EECS007 allows. A managed queue in a singleton
+// would make World.Save need a formatter for it.
 public sealed class ApplyRedemptions(ConcurrentQueue<PotionRedeemed> inbox) : EcsSystem
 {
     private readonly ConcurrentQueue<PotionRedeemed> _inbox = inbox;   // filled by async code on any thread
@@ -129,6 +134,26 @@ public sealed class ApplyRedemptions(ConcurrentQueue<PotionRedeemed> inbox) : Ec
 }
 ```
 
+The system takes the queue through its constructor, so `AddSystem<T>()` cannot create it: add an instance. The
+async side reads what it needs on the owner thread, then only enqueues:
+
+```csharp
+var inbox = new ConcurrentQueue<PotionRedeemed>();
+world.AddSystem(new ApplyRedemptions(inbox));
+```
+
+```csharp
+public static class PotionOrders
+{
+    public static async ValueTask RedeemAsync(
+        EntityId player, long accountId, IShop shop, ConcurrentQueue<PotionRedeemed> inbox)
+    {
+        int heal = await shop.RedeemPotionAsync(accountId);   // may resume on any thread
+        inbox.Enqueue(new PotionRedeemed(player, heal));      // data for the owner thread, nothing else
+    }
+}
+```
+
 More on owner threads and input from other threads: [Threading](/en/docs/guide/threading#input-from-other-threads).
 
 ### The exception: singletons [#singletons]
@@ -136,6 +161,150 @@ More on owner threads and input from other threads: [Threading](/en/docs/guide/t
 A singleton's storage never moves, so `world.SingletonRef<T>()` returns a handle you can keep, in a field of your
 host or across ticks ([Singletons](/en/docs/guide/singletons#stable-handles)). It is still owner-thread data: keep it,
 but only touch it on the owner thread.
+
+## Full example [#full-example]
+
+Two players redeem a potion from a remote shop. While the shop answers, one of them leaves and a new entity reuses
+his index; the system that applies the answers on the owner thread tells them apart by the `EntityId`'s version. Put
+the files in a console project that references EasyEcs (`dotnet add package EasyEcs`) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Health(int Value) : IComponent;
+public record struct Account(long Id) : IComponent;
+
+// A message from async code to the world, not a component.
+public record struct PotionRedeemed(EntityId Player, int Heal);
+```
+
+</Accordion>
+<Accordion title="Shop.cs">
+
+```csharp title="Shop.cs" doccheck=example
+// A remote store: it answers later, on a thread-pool thread.
+public interface IShop
+{
+    ValueTask<int> RedeemPotionAsync(long accountId);
+}
+
+public sealed class Shop : IShop
+{
+    public async ValueTask<int> RedeemPotionAsync(long accountId)
+    {
+        await Task.Delay(10);
+        return 25;
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Redemptions.cs">
+
+```csharp title="Redemptions.cs" doccheck=example
+using System.Collections.Concurrent;
+using EasyEcs;
+
+public static class Redemptions
+{
+    // Starts on the world's owner thread: reads what it needs before the first await.
+    public static async Task RedeemAsync(
+        Entity player, IShop shop, ConcurrentQueue<PotionRedeemed> inbox)
+    {
+        EntityId id = player.Id;
+        long account = player.Account.Id;
+
+        // Resumes on a thread-pool thread: from here on it must not touch the world.
+        int heal = await shop.RedeemPotionAsync(account);
+        inbox.Enqueue(new PotionRedeemed(id, heal));
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using System.Collections.Concurrent;
+using EasyEcs;
+
+// Applies the redemptions on the owner thread, during the update.
+// The queue is a dependency in a readonly field (EECS007 allows it); a managed queue in a singleton
+// would make World.Save need a formatter for it.
+public sealed class ApplyRedemptions(ConcurrentQueue<PotionRedeemed> inbox) : EcsSystem
+{
+    private readonly ConcurrentQueue<PotionRedeemed> _inbox = inbox;
+
+    protected override void OnUpdate()
+    {
+        while (_inbox.TryDequeue(out var done))
+        {
+            // The EntityId carries a version: a destroyed player fails here,
+            // and so does a new entity on its index.
+            if (World.TryGetEntity(done.Player, out var player) && player.HasHealth)
+            {
+                player.Health.Value += done.Heal;
+            }
+            else
+            {
+                Console.WriteLine($"  dropped: {done.Player} is gone");
+            }
+        }
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using System.Collections.Concurrent;
+using EasyEcs;
+
+var inbox = new ConcurrentQueue<PotionRedeemed>();
+var shop = new Shop();
+
+using var world = new World();
+// The system takes the queue through its constructor, so it is added as an instance.
+world.AddSystem(new ApplyRedemptions(inbox));
+
+var alice = world.CreateEntity(new Health(40), new Account(1));
+var bob = world.CreateEntity(new Health(60), new Account(2));
+
+var orders = new[]
+{
+    Redemptions.RedeemAsync(alice, shop, inbox),
+    Redemptions.RedeemAsync(bob, shop, inbox),
+};
+
+// While the shop works, Bob leaves, and a new entity reuses his index.
+bob.Destroy();
+var carol = world.CreateEntity(new Health(10), new Account(3));
+Console.WriteLine($"bob was {bob.Id}, carol is {carol.Id}");
+
+// Waiting here only makes the output reproducible: a server keeps updating meanwhile.
+Task.WaitAll(orders);
+world.Update();
+
+Console.WriteLine($"alice {alice.Health.Value} hp, carol {carol.Health.Value} hp");
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+bob was 1v1, carol is 1v2
+  dropped: 1v1 is gone
+alice 65 hp, carol 10 hp
+```
+
+Bob's answer names `1v1`, and the entity on index 1 is now `1v2`, so `TryGetEntity` fails and Carol keeps her 10 hp:
+an id kept across the `await` never reaches the wrong entity, and only the system, on the owner thread, writes.
 
 ## How to use it fast [#how-to-use-it-fast]
 
@@ -170,7 +339,7 @@ singleton accesses (`MicroBenchmarks`):
 | A raw index stored instead of the `EntityId` | Names whichever entity reuses the index | Store the `EntityId`; `TryGetEntity` checks the version |
 | An `Entity` stored in a component | A managed column | [EECS017](/en/docs/guide/analyzer#eecs017) (warning) |
 | A `DynamicBuffer<T>` taken by value | Writes go to a shared list, unstamped | [EECS012](/en/docs/guide/analyzer#eecs012) |
-| Touching the world after an `await` that resumed on the thread pool | Races with the owner thread | Hand the result over as data; [EECS014](/en/docs/guide/analyzer#eecs014) catches `Task.Run` lambdas |
+| Touching the world after an `await` that resumed on the thread pool | Races with the owner thread | Code review: hand the result over as data. [EECS014](/en/docs/guide/analyzer#eecs014) catches only structural changes in a delegate handed to another thread (`Task.Run`, `Parallel.*`), not value writes or code after an `await` |
 
 ## Related [#related]
 

@@ -96,6 +96,7 @@ flowchart LR
 
 - **方法自己的 `ref` 参数仍然可写**：方法体改变了当前实体所在的表时，遍历会在方法返回后把这些写入复制到实体的新行。`in` 参数看到的仍是变更前的值。
 - **其他任何 `ref`**（来自 `entity.Get<T>()`、`Query` 元素或别的实体）只保证在下一次结构变更之前有效：要么在变更之前写完，要么变更之后重新获取。
+- **处理单个实体的代码**（一个请求、一条消息）用 [`entity.Run`](/zh/docs/guide/queries#run-on-one-entity) 得到和方法自己的 `ref` 参数同样的保证：job 的 ref 跨过它自己做的结构变更仍指向这个实体的值，job 返回时，`Writes` 里的组件会被带到新行。
 
 ```csharp
 public class HitSystem : EcsSystem
@@ -114,7 +115,7 @@ public class HitSystem : EcsSystem
 
 ### 冻结结构的遍历 [#frozen-passes]
 
-有些遍历持有指向表的 ref 或 span 的时间超过一次调用，所以运行期间会冻结 World 的结构，此时做变更会抛 `InvalidOperationException`，而不是把行写坏：
+有些遍历会跨多次调用持有指向表的 ref 或 span，所以运行期间会冻结 World 的结构，此时做变更会抛 `InvalidOperationException`，而不是把行写坏：
 
 - **批处理方法**（`Span<T>` 参数）和 `ForEachBatch` job；
 - **实现了 `INoStructuralChanges` 的 job**，包括生成器为不带 `Entity`、`World` 的方法写的 job；
@@ -130,7 +131,7 @@ public class HitSystem : EcsSystem
 
 ### 一次改很多实体 [#bulk]
 
-要整批修改实体，用批量接口，只过一次结构闸门：
+要整批修改实体，用批量操作，只过一次结构闸门：
 
 ```csharp
 var wave = new Entity[1_000];
@@ -138,7 +139,7 @@ world.CreateEntities(wave, new Position(0, 0), new Lifetime(60));
 int expired = world.DestroyEntities<Lifetime>(QueryFilter.Create().With<Dead>());
 ```
 
-`SetAll`、`RemoveAll`、`DisableAll`、`EnableAll` 对每个匹配的实体修改一个组件，每次处理一整个 64 行的字：见[批量变更](/zh/docs/guide/bulk)。
+`SetAll`、`RemoveAll`、`DisableAll`、`EnableAll` 对每个匹配的实体修改一个组件，每次处理一整个 64 行的字：见[批量操作](/zh/docs/guide/bulk)。
 
 一个一个创建的实体（启动时加载、按数据逐个构造）会让表成倍扩容。先预留：`EnsureCapacity<T1, …, Tn>(count)` 把正好有这些组件的表和实体存储一次扩到循环要用的大小，
 接下来 `count` 次带这些组件的创建都不再扩容：
@@ -151,15 +152,147 @@ for (int i = 0; i < 100_000; i++) world.CreateEntity(new Position(i, 0), new Lif
 `CreateEntities` 自己会预留。预制体的实例用 `EnsureCapacity(prefab, count)`（见[预制体](/zh/docs/guide/prefabs)）；实体分散在很多张表里时，
 用 `EnsureEntityCapacity(n)` 只扩实体存储。被[分组](/zh/docs/guide/groups)放进别的表的实体，扩的是那张表。
 
+## 完整例子 [#full-example]
+
+一座炮塔每隔一个 tick 开一次火，血量不断下降直到死亡：子弹在遍历途中创建、销毁，`Dead` 标签在判定死亡的地方打上。把这几个
+文件放进一个引用了 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+// 炮塔：一把有冷却的武器，和每个 tick 都在下降的血量。
+public record struct Weapon(int Cooldown) : IComponent;
+public record struct Health(int Value) : IComponent;
+
+// 子弹：谁打出的，还能飞几个 tick。
+public record struct Projectile(EntityId Owner) : IComponent;
+public record struct Lifetime(int Ticks) : IComponent;
+
+// 标签：炮塔没血了。
+public struct Dead : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// 炮塔每个 tick 掉 30 点血，在做出判断的地方打上 Dead。
+public class WearSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Wear(Entity turret, ref Health hp)
+    {
+        hp.Value -= 30;
+        if (hp.Value <= 0)
+        {
+            // 这一行立刻搬到带 Dead 的表。
+            turret.SetDead();
+            // hp 仍然是这座炮塔的 Health：这次写入会被带到新行。
+            hp.Value = 0;
+            Console.WriteLine($"  {turret} is dead");
+        }
+    }
+}
+
+// 每隔一个 tick 开一次火。本次更新里早先打上 Dead 的炮塔不再匹配。
+[UpdateAfter<WearSystem>]
+public class FireSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void Fire(Entity turret, ref Weapon weapon, World world)
+    {
+        if (weapon.Cooldown > 0)
+        {
+            weapon.Cooldown--;
+            return;
+        }
+
+        weapon.Cooldown = 1;
+        var shot = world.CreateEntity(new Projectile(turret.Id), new Lifetime(3));
+        Console.WriteLine($"  {turret} fires {shot}");
+    }
+}
+
+// 给每颗子弹倒计时，包括本次更新里刚打出的，
+// 并在子弹自己的遍历途中销毁它。
+[UpdateAfter<FireSystem>]
+public class ExpireSystem : EcsSystem
+{
+    [ForEach]
+    static void Expire(Entity shot, ref Lifetime life)
+    {
+        life.Ticks--;
+        if (life.Ticks == 0)
+        {
+            Console.WriteLine($"  {shot} expires");
+            shot.Destroy();
+        }
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSystem<WearSystem>();
+world.AddSystem<FireSystem>();
+world.AddSystem<ExpireSystem>();
+
+var turret = world.CreateEntity(new Weapon(0), new Health(100));
+
+for (int tick = 1; tick <= 5; tick++)
+{
+    Console.WriteLine($"tick {tick}");
+    world.Update();
+    int shots = world.Count<Projectile>();
+    Console.WriteLine($"  hp {turret.Health.Value}, shots in flight {shots}");
+}
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+tick 1
+  Entity 0v1 fires Entity 1v1
+  hp 70, shots in flight 1
+tick 2
+  hp 40, shots in flight 1
+tick 3
+  Entity 0v1 fires Entity 2v1
+  Entity 1v1 expires
+  hp 10, shots in flight 1
+tick 4
+  Entity 0v1 is dead
+  hp 0, shots in flight 1
+tick 5
+  Entity 2v1 expires
+  hp 0, shots in flight 0
+```
+
+第 1 个 tick 打出的子弹，同一次更新里就被 `ExpireSystem` 倒计时了一次，所以在第 3 个 tick 而不是第 4 个 tick 消失。第 4 个
+tick，`WearSystem` 给炮塔打上 `Dead`，紧接着运行的 `FireSystem` 就不再访问它。
+
 ## 怎么用得快 [#how-to-use-it-fast]
 
 | 别这样 | 这样做 | 原因 |
 | --- | --- | --- |
 | 录进命令缓冲，之后回放 | 在做决定的地方直接改 | 不用录制、不用回放、不分配 |
-| 每个 tick 加一次、删一次组件 | 用字段；持续几个 tick 的状态用标签 | 表里已有列的标签只翻转一个位 |
+| 每个 tick 加一次、删一次组件 | 用字段；持续几个 tick 的状态用标签 | 表的掩码里已有的标签只翻转一个存在位 |
 | `Set(a)` 后再 `Set(b)` | `Set(a, b)` | 写法更简洁，性能相同 |
-| 逐个创建已知数量的实体 | 循环前调用 `EnsureCapacity<T1, …, Tn>(count)` | 只扩容一次，不用表满一次翻一倍 |
-| 按过滤条件逐个修改 | [批量变更](/zh/docs/guide/bulk)、`DestroyEntities<T>(filter)` | 一次闸门，一次处理整个字 |
+| 逐个创建已知数量的实体 | `CreateEntities`，或循环前调用 `EnsureCapacity<T1, …, Tn>(count)` | 只扩容一次，不用表满一次翻一倍（[EECS031](/zh/docs/guide/analyzer#eecs031)） |
+| 按过滤条件逐个修改 | [批量操作](/zh/docs/guide/bulk)、`DestroyEntities<T>(filter)` | 只过一次闸门，按整字（64 行）处理（[EECS030](/zh/docs/guide/analyzer#eecs030)） |
 | 方法只读 `Entity` 参数 | 保持只读（`Id`、`Has`、`Get`） | 遍历跳过结构变更簿记 |
 
 在查询循环里对 1 万个实体移除再加回 `Health`（`ToggleComponent`），对比一次调用移出三个组件、再一次调用加回（`RemoveMany`，1,000 个实体）：
@@ -187,11 +320,12 @@ for (int i = 0; i < 100_000; i++) world.CreateEntity(new Position(i, 0), new Lif
 | --- | --- | --- |
 | 不带 `Entity` 或 `World` 的方法通过组件里的链接改结构 | 遍历拿着指向已搬走行的 ref | [EECS013](/zh/docs/guide/analyzer#eecs013) |
 | 批处理方法里改结构 | 抛 `InvalidOperationException`：span 指向表 | [EECS013](/zh/docs/guide/analyzer#eecs013)，运行时也会抛 |
-| 并行方法里改结构 | 块之间发生竞争 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
+| 并行方法里改结构 | 抛 `InvalidOperationException`：各块运行期间结构是冻结的 | [EECS010](/zh/docs/guide/analyzer#eecs010)，运行时也会抛 |
 | 从其他线程改结构 | 和所有者线程发生竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 | 会改结构的 job 却实现了 `INoStructuralChanges` | 变更处抛 `InvalidOperationException` | 运行时 |
 | 变更之后还在用 `Get<T>()` 拿到的 `ref` | 可能指向过期的副本或别的实体的行 | 代码审查：重新获取 |
 | 指望创建实体的那次遍历访问到它 | 下一次遍历才会访问 | 设计如此 |
+| 在系统里调用 `World.Update()` | 系统在自己的运行里再跑一遍，直到栈溢出 | [EECS034](/zh/docs/guide/analyzer#eecs034) |
 | 同一个 World 的查询还在遍历时调用 `Update()` | 遍历顺序不确定 | 代码审查 |
 
 ## 相关页面 [#related]
