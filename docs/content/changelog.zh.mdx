@@ -22,6 +22,10 @@ icon: RotateCcwClock
   各不相同的客户端；读取方比日志还旧（`DestroyLogOldestTick`）时返回 false，需要重新同步。见[变更追踪](/zh/docs/guide/change-tracking)。
 - `IUniqueIndexed<TKey>`：一个键只对应一个实体，用 `index.Get(key)` / `TryGet(key, out e)` 查找；会让第二个实体拿到已被占用的键的写入，
   在改动任何东西之前就抛异常。见[索引与关系](/zh/docs/guide/indexes-and-relations)。
+- `index.Find(key).Count`、`world.Children(parent).Count`，以及关系的 `relations.Find(target).Count`：查找时拥有这个键的实体数（或指向目标的链接数），O(1)，不用把匹配遍历两遍就能确定缓冲区大小。
+  `index.KeyCount` 和 `relations.TargetCount` 以 O(1) 给出不同键（或目标）的个数。见[索引与关系](/zh/docs/guide/indexes-and-relations#value-indexes)。
+- `world.Descendants(root).AddTo(ids, includeRoot)` 把一棵子树追加到 `List<EntityId>`，每个父实体在它的子实体之前：正是 `MoveEntities` 和
+  `SaveEntities` 要的那组实体，不用再写收集循环。见[层级](/zh/docs/guide/hierarchy#moving)。
 - `world.Instantiate(prefab, in c1 … in cn)` 和 `Instantiate(prefab, entities, in c1 … in cn)`：实例带上最多九个自己的组件（父实体、位置、主人），
   只拷贝一次行。创建任何实体之前先检查唯一组件的键，给定的和预制体里的都查。见[预制体](/zh/docs/guide/prefabs)。
 - `world.TrimExcess()` 把峰值留下的内存还回去：删掉空表，缩小其他表，释放存档、读档和迁移用的缓冲。见[调试与诊断](/zh/docs/guide/diagnostics)。

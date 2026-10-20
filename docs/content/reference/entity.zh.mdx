@@ -304,6 +304,16 @@ public Entity Set<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in T1 c1, in T2 c2, in T3 
 
 **复杂度**（[API 表](/zh/docs/api)）：O(n)，需要搬行时均摊 O(c)
 
+### `SetIfChanged` [#setifchanged]
+
+```csharp
+public bool SetIfChanged<T>(in T value) where T : struct, IComponent;
+```
+
+把组件 `T` 设为 `value`，除非实体已经是这个值：设了就返回 true（和 `Set` 一样：没有就添加、打 tick、更新索引），值相等就返回 false（什么都不写，不打 tick，不碰索引）。相等的判定和 [`Mut.SetIfChanged`](/zh/docs/reference/mut#setifchanged) 相同。实体不存活时抛异常。相等时 O(1) 加一次比较，否则是 `Set` 的开销。只能在所有者线程调用。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(1) 加一次比较（O(`T` 的大小)）；值不同时同 `Set`
+
 ### `ToString` [#tostring]
 
 ```csharp

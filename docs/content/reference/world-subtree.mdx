@@ -16,6 +16,18 @@ The descendants of an entity ([`World.Descendants`](/en/docs/reference/world#des
 
 ## Methods
 
+### `AddTo` [#addto]
+
+```csharp
+public int AddTo(List<EntityId> ids, bool includeRoot);
+```
+
+Append the subtree to `ids` in walk order, the root first when `includeRoot` (and alive), each parent before its children: the group `MoveEntities` and `SaveEntities` take, as `CollectionsMarshal.AsSpan(ids)`. Returns how many ids were added. O(1) per entity; allocates only when the list grows.
+
+**Exceptions**
+
+- `InvalidOperationException`: The [`ChildOf`](/en/docs/reference/childof) links form a cycle.
+
 ### `GetEnumerator` [#getenumerator]
 
 ```csharp

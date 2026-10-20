@@ -304,6 +304,16 @@ Add or overwrite 2 components with the given values, with at most one row copy. 
 
 **Complexity** ([API table](/en/docs/api)): O(n), or O(c) amortized when it moves
 
+### `SetIfChanged` [#setifchanged]
+
+```csharp
+public bool SetIfChanged<T>(in T value) where T : struct, IComponent;
+```
+
+Set component `T` to `value` unless the entity already has that value: true when it set it (as `Set` does: added if missing, stamped, indexed), false when the value was equal (nothing written, nothing stamped, no index touched). Equality as [`Mut.SetIfChanged`](/en/docs/reference/mut#setifchanged). Throws if the entity is not alive. O(1) plus the comparison when equal, `Set`'s cost otherwise. Owner thread only.
+
+**Complexity** ([API table](/en/docs/api)): O(1) plus a comparison (O(size of `T`)); as `Set` when the value differs
+
 ### `ToString` [#tostring]
 
 ```csharp

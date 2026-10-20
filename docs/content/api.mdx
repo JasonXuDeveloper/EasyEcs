@@ -186,7 +186,9 @@ Details: [bulk changes](/en/docs/guide/bulk), [cleanup and disable](/en/docs/gui
 | --- | --- | --- |
 | `world.Index<T, TKey>()` | O(1); the first call creates it | one per world and indexed component; a second key type throws |
 | `index.Count(key)` / `TryFind(key, out Entity)` | O(1) | a hash probe (an array access for a key that is an entity); the first lookup indexes every row once |
+| `index.KeyCount` | O(1) | distinct keys some entity has (how many guilds have a member), kept as entities join and leave keys |
 | `index.Find(key)` | O(1), then O(1) per entity | a `ref struct` for `foreach`; destroying entities during the loop is allowed, changing `T` is not |
+| `index.Find(key).Count` / `world.Children(parent).Count` | O(1) | how many entities had the key when found (size a buffer without walking twice); entities destroyed during the loop are skipped by it but still counted |
 | `index.Ascending()` / `Descending()` | O(keys log keys) for the first walk, then O(1) per entity | ordered walks for a comparable key (leaderboards, timers); after the first walk the index keeps its keys sorted: O(log keys) plus a block move per key that appears or disappears |
 | `index.Range(min, max)` / `RangeDescending(min, max)` | O(keys log keys) for the first walk, then O(log keys) to find `min` and O(1) per entity | inclusive bounds |
 | `index.WhenTargetDestroyed(policy)` | O(1); then O(1) per destroyed entity | an `EntityId` key: `Keep` (default), `Remove` or `Destroy` the components pointing at a destroyed entity |
@@ -204,11 +206,14 @@ columns); `Load` O(rows). A taken key throws `InvalidOperationException` (a save
 | --- | --- | --- |
 | `world.Children(parent)` | O(1), then O(1) per child | the entities whose `ChildOf` points at `parent`; destroying a parent destroys them, and theirs |
 | `world.Descendants(root)` | O(1) per entity of the subtree | depth first, every level below `root`; 0 B once warm |
+| `world.Descendants(root).AddTo(ids, includeRoot)` | O(1) per entity of the subtree | appends the subtree to a `List<EntityId>`, the root first when asked, each parent before its children (the group `MoveEntities` / `SaveEntities` take as `CollectionsMarshal.AsSpan(ids)`); returns how many were added; allocates only when the list grows |
 | `entity.AddRelation(in T relation)` | O(1) amortized | appends to the entity's `DynamicBuffer<T>` (added first if missing) and to the relation index |
 | `entity.RemoveRelation<T>(target)` / `HasRelation<T>(target)` | O(L) | `RemoveRelation` returns how many links went |
 | `world.Relations<T>()` | O(1); the first call creates it | the relation index; generated as `world.XIndex` for a relation `X` |
 | `relations.Count(target)` | O(1) | links to `target` |
+| `relations.TargetCount` | O(1) | distinct entities some link points at (how many guilds have a member), kept as links come and go |
 | `relations.Find(target)` | O(1), then O(1) per link | the entities linking to `target` |
+| `relations.Find(target).Count` | O(1) | how many links pointed at `target` when found; links dropped during the loop are skipped by it but still counted |
 | `relations.WhenTargetDestroyed(policy)` | O(1); then O(1) per destroyed entity and O(L) per link | `Remove` drops the links, `Destroy` destroys the linking entities |
 
 ## Groups [#groups]

@@ -46,13 +46,21 @@ public ulong LastRunTick { get; }
 
 这个系统上次运行时 World 的 [`World.ChangeTick`](/zh/docs/reference/world#changetick)（第一次运行前为 0）：它的 `[Changed<T>]` 方法选出这个 tick 之后写入的行，所以不包括它们自己在那一轮的写入。
 
+### `RunCount` [#runcount]
+
+```csharp
+public long RunCount { get; }
+```
+
+当前这次运行之前，系统已经运行过多少次（第一次运行时为 0；被 [`EcsSystem.UpdateInterval`](/zh/docs/reference/ecssystem#updateinterval) 跳过的、禁用期间的运行不算，抛出异常的运行算）。`[ForEach(Slices = N)]` 方法访问它的第 `RunCount % N` 片行，所以 [`EcsSystem.OnUpdate`](/zh/docs/reference/ecssystem#onupdate) 能知道这次运行访问哪一片。
+
 ### `Stats` [#stats]
 
 ```csharp
 public SystemStats Stats { get; }
 ```
 
-这个系统的运行次数和耗时；只有打开 [`WorldOptions.MeasureSystems`](/zh/docs/reference/worldoptions#measuresystems) 才记录。
+这个系统的运行次数、耗时、分配的字节数和访问的实体数；只有打开 [`WorldOptions.MeasureSystems`](/zh/docs/reference/worldoptions#measuresystems) 才记录。
 
 ### `UpdateInterval` [#updateinterval]
 

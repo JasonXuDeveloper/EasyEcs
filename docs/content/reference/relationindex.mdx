@@ -12,6 +12,18 @@ public sealed class RelationIndex<T> where T : struct, IRelation
 
 The links of relation `T` in one world, by target ([`World.Relations`](/en/docs/reference/world#relations)): which entities link to an entity, O(1) to start and O(1) per link. Kept current as links are written and as their entities are destroyed or lose the buffer; the first lookup (and the first after [`World.Restore`](/en/docs/reference/world#restore)) indexes every buffer once. Links to a destroyed target stay findable by its id, which no later entity has. Owner thread only. Memory: one 20-byte link per element, recycled, and 8 bytes in its target's list.
 
+## Properties
+
+### `TargetCount` [#targetcount]
+
+```csharp
+public int TargetCount { get; }
+```
+
+Number of distinct entities some link points at (how many guilds have a member): O(1), kept as links come and go.
+
+**Complexity** ([API table](/en/docs/api)): O(1)
+
 ## Methods
 
 ### `Count` [#count]
@@ -32,7 +44,10 @@ public RelationIndex<T>.Sources Find(EntityId target);
 
 The entities linking to `target`, once per link. Destroying entities during the loop is allowed, changing links is not.
 
-**Complexity** ([API table](/en/docs/api)): O(1), then O(1) per link
+**Complexity** ([API table](/en/docs/api)):
+
+- `relations.Find(target)`: O(1), then O(1) per link
+- `relations.Find(target).Count`: O(1)
 
 ### `WhenTargetDestroyed` [#whentargetdestroyed]
 

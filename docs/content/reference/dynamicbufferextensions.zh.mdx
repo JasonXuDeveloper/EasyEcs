@@ -27,10 +27,10 @@ public static void Add<T>(this ref DynamicBuffer<T> buffer, in T item);
 ### `AddRange` [#addrange]
 
 ```csharp
-public static void AddRange<T>(this ref DynamicBuffer<T> buffer, ReadOnlySpan<T> items);
+public static void AddRange<T>(this ref DynamicBuffer<T> buffer, params ReadOnlySpan<T> items);
 ```
 
-追加 `items`。O(items)。
+追加 `items`（列表写成 `CollectionsMarshal.AsSpan(list)`，不复制）。O(items)。
 
 **复杂度**（[API 表](/zh/docs/api)）：均摊 O(1) / O(items)
 

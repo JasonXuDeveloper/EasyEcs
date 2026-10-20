@@ -24,6 +24,14 @@ One type per number of components, 1 to 9 (generated from one template); the mem
 
 ## Properties
 
+### `OwnStamps` [#ownstamps]
+
+```csharp
+static virtual int OwnStamps { get; }
+```
+
+Components among [`IForEachEntity.Writes`](/en/docs/reference/iforeachentity#writes) that the job stamps itself, only in the rows it writes (bits like [`IForEachEntity.Writes`](/en/docs/reference/iforeachentity#writes); default none): the loop leaves their rows unstamped. Generated jobs set their [`Mut`](/en/docs/reference/mut) parameters.
+
 ### `Writes` [#writes]
 
 ```csharp

@@ -16,6 +16,18 @@ public readonly ref struct Subtree
 
 ## 方法 [#methods]
 
+### `AddTo` [#addto]
+
+```csharp
+public int AddTo(List<EntityId> ids, bool includeRoot);
+```
+
+按遍历顺序把子树追加到 `ids`：`includeRoot` 为 true（且根存活）时根排第一，每个父实体都在它的子实体之前：正是 `MoveEntities` 和 `SaveEntities` 要的那组实体，以 `CollectionsMarshal.AsSpan(ids)` 传入。返回追加的 id 数。每个实体 O(1)；只有列表扩容时才分配内存。
+
+**异常**
+
+- `InvalidOperationException`：[`ChildOf`](/zh/docs/reference/childof) 链接形成了环。
+
 ### `GetEnumerator` [#getenumerator]
 
 ```csharp

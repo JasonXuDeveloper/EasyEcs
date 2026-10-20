@@ -32,6 +32,27 @@ public QueryFilter Changed<T>(ulong since) where T : struct, IComponent, ITrackC
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)；遍历跳过 `since` 之前写过的表、4,096 行的块和 64 行的字
 
+### `ChangedAny` [#changedany]
+
+```csharp
+public QueryFilter ChangedAny<T1, T2>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges;
+public QueryFilter ChangedAny<T1, T2, T3>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges;
+public QueryFilter ChangedAny<T1, T2, T3, T4>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges;
+public QueryFilter ChangedAny<T1, T2, T3, T4, T5>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges;
+public QueryFilter ChangedAny<T1, T2, T3, T4, T5, T6>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges where T6 : struct, IComponent, ITrackChanges;
+public QueryFilter ChangedAny<T1, T2, T3, T4, T5, T6, T7>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges where T6 : struct, IComponent, ITrackChanges where T7 : struct, IComponent, ITrackChanges;
+public QueryFilter ChangedAny<T1, T2, T3, T4, T5, T6, T7, T8>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges where T6 : struct, IComponent, ITrackChanges where T7 : struct, IComponent, ITrackChanges where T8 : struct, IComponent, ITrackChanges;
+public QueryFilter ChangedAny<T1, T2, T3, T4, T5, T6, T7, T8, T9>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges where T6 : struct, IComponent, ITrackChanges where T7 : struct, IComponent, ITrackChanges where T8 : struct, IComponent, ITrackChanges where T9 : struct, IComponent, ITrackChanges;
+```
+
+只选 `T1, T2` 中至少一个在变更 tick `since` 或之后写过的行：即 `Changed<T1>(since)` OR ... OR `Changed<T2>(since)`（行要有它所对应的那个组件；其他组件可以没有）。一个过滤条件的所有 `ChangedAny` 调用合成一组；这一组、`Changed` 和 `Removed` 过滤条件、一组 `RemovedAny` 以及其他过滤条件按 AND 组合。tick 之后没有任何一列写过的表整张跳过，没有任何一列写过的行字和行块也跳过。一个过滤条件只有一个 tick（用 [`QueryFilter.Since`](/zh/docs/reference/queryfilter#since) 移动）：每个客户端各留一个，用各自的 tick 运行。
+
+**异常**
+
+- `ArgumentException`：前面的变更过滤条件用了另一个 tick。
+
+**复杂度**（[API 表](/zh/docs/api)）：构建 O(n)；遍历时跳过这一组列自 `since` 以来都没被写过的表，以及没有任何列写过的块和位字
+
 ### `Create` [#create]
 
 ```csharp
@@ -66,15 +87,54 @@ public QueryFilter Removed<T>(ulong since) where T : struct, IComponent, ITrackC
 
 **复杂度**（[API 表](/zh/docs/api)）：同 `Changed`
 
+### `RemovedAny` [#removedany]
+
+```csharp
+public QueryFilter RemovedAny<T1, T2>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges;
+public QueryFilter RemovedAny<T1, T2, T3>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges;
+public QueryFilter RemovedAny<T1, T2, T3, T4>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges;
+public QueryFilter RemovedAny<T1, T2, T3, T4, T5>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges;
+public QueryFilter RemovedAny<T1, T2, T3, T4, T5, T6>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges where T6 : struct, IComponent, ITrackChanges;
+public QueryFilter RemovedAny<T1, T2, T3, T4, T5, T6, T7>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges where T6 : struct, IComponent, ITrackChanges where T7 : struct, IComponent, ITrackChanges;
+public QueryFilter RemovedAny<T1, T2, T3, T4, T5, T6, T7, T8>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges where T6 : struct, IComponent, ITrackChanges where T7 : struct, IComponent, ITrackChanges where T8 : struct, IComponent, ITrackChanges;
+public QueryFilter RemovedAny<T1, T2, T3, T4, T5, T6, T7, T8, T9>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges where T6 : struct, IComponent, ITrackChanges where T7 : struct, IComponent, ITrackChanges where T8 : struct, IComponent, ITrackChanges where T9 : struct, IComponent, ITrackChanges;
+```
+
+只选在变更 tick `since` 或之后失去 `T1, T2` 中至少一个、而且没有再拿回来的行：即 `Removed<T1>(since)` OR ... OR `Removed<T2>(since)`。所有 `RemovedAny` 调用合成一组，和其他过滤条件按 AND 组合；一个过滤条件只有一个 tick，同 [`QueryFilter.ChangedAny`](/zh/docs/reference/queryfilter#changedany)。
+
+**异常**
+
+- `ArgumentException`：前面的变更过滤条件用了另一个 tick。
+
+**复杂度**（[API 表](/zh/docs/api)）：同 `ChangedAny`
+
 ### `Since` [#since]
 
 ```csharp
 public QueryFilter Since(ulong since);
 ```
 
-返回同一个过滤条件，只是把它的 [`QueryFilter.Changed`](/zh/docs/reference/queryfilter#changed) 和 [`QueryFilter.Removed`](/zh/docs/reference/queryfilter#removed) 挪到 tick `since`，不用重建：适合存在字段里、每次更新后再用一次的过滤条件。
+返回同一个过滤条件，只是把它的 [`QueryFilter.Changed`](/zh/docs/reference/queryfilter#changed) 和 [`QueryFilter.Removed`](/zh/docs/reference/queryfilter#removed) 过滤条件（以及 `ChangedAny` 和 `RemovedAny`）挪到 tick `since`，不用重建：适合存在字段里、每次更新后再用一次的过滤条件，或者每个客户端用各自确认过的 tick 各用一次。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
+
+### `Slice` [#slice]
+
+```csharp
+public QueryFilter Slice(int index, int count);
+```
+
+只访问每个匹配表的 `count` 片行中的第 `index` 片：index 从 0 依次到 `count` - 1 的这些遍历把每行访问一次，每次约为 1 / `count` 的行。`[ForEach(Slices = N)]` 方法传入系统这次运行对应的那一片（[`EcsSystem.RunCount`](/zh/docs/reference/ecssystem#runcount) mod N）。O(1)。
+
+表按 64 行的倍数切分（它的存在位字），按遍历开始时的行数切，所以少于 64 行的表只有一块；匹配中的第 i 张表从第 (`index` + i) mod `count` 片开始切，所以很多张小表也会分散到各片上。两次遍历之间移动了的行（交换删除用表的最后一行填空洞、结构变更把实体移到另一张表、表扩容或缩小跨过切分点）在 `count` 次遍历的一轮里可能被跳过，也可能被访问两次；下一轮会再看到它们。
+
+`ForEach`、`ForEachEntity`、`ForEachBatch` 以及它们的 `Parallel` 形式支持分片；需要所有匹配行的调用（`Query`、`Count`、`Any`、`DestroyEntities`、`entity.Run`、`SetAll` 和其他批量调用）遇到分片的过滤条件会抛 `ArgumentException`。count 为 1 就是整张表。
+
+**异常**
+
+- `ArgumentOutOfRangeException`：`count` 小于 1，或者 `index` 不在 [0, `count`) 内。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(1)；一次遍历约访问 S / N 行，按 64 行位字切分
 
 ### `With` [#with]
 

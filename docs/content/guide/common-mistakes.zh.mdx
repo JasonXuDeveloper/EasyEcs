@@ -637,8 +637,8 @@ foreach (var child in world.Children(hero)) subtree.Add(child.Id);   // 孙实�
 `Children` 只列一层。按这个组存档或搬走，孙实体会留在原地，跟着原来的实体一起销毁。`Descendants` 深度优先走完每一层：
 
 ```csharp
-var group = new List<EntityId> { hero.Id };
-foreach (var part in world.Descendants(hero)) group.Add(part.Id);   // 子实体、孙实体……
+var group = new List<EntityId>();
+world.Descendants(hero).AddTo(group, includeRoot: true);   // 英雄，然后是子实体、孙实体……
 ```
 
 没有规则能发现。详见[迁移层级](/zh/docs/guide/hierarchy#moving)。

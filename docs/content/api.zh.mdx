@@ -180,7 +180,9 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | --- | --- | --- |
 | `world.Index<T, TKey>()` | O(1)；第一次调用时创建 | 每个 World、每个被索引组件一个；换另一种键类型会抛异常 |
 | `index.Count(key)` / `TryFind(key, out Entity)` | O(1) | 一次哈希探测（键是实体时是一次数组访问）；第一次查找时把每行索引一遍 |
+| `index.KeyCount` | O(1) | 有实体持有的不同键的个数（有多少个公会有成员），随实体加入和离开各个键维护 |
 | `index.Find(key)` | O(1)，然后每个实体 O(1) | 用于 `foreach` 的 `ref struct`；循环中可以销毁实体，不能修改 `T` |
+| `index.Find(key).Count` / `world.Children(parent).Count` | O(1) | 查找时拥有这个键的实体数（不用遍历两次就能确定缓冲区大小）；循环中销毁的实体会被循环跳过，但仍计入 |
 | `index.Ascending()` / `Descending()` | 第一次遍历 O(键数 log 键数)，之后每个实体 O(1) | 键可比较时的有序遍历（排行榜、计时器）；第一次遍历之后索引保持键有序：每出现或消失一个键 O(log 键数) 加一次块移动 |
 | `index.Range(min, max)` / `RangeDescending(min, max)` | 第一次遍历 O(键数 log 键数)，之后 O(log 键数) 定位 `min`，每个实体 O(1) | 闭区间 |
 | `index.WhenTargetDestroyed(policy)` | O(1)；之后每个被销毁的实体 O(1) | `EntityId` 键：目标被销毁时，指向它的组件 `Keep`（默认）、`Remove` 或 `Destroy` |
@@ -197,11 +199,14 @@ World 保持原样。
 | --- | --- | --- |
 | `world.Children(parent)` | O(1)，然后每个子实体 O(1) | `ChildOf` 指向 `parent` 的实体；销毁父实体会销毁它们，以及它们的子实体 |
 | `world.Descendants(root)` | 子树里每个实体 O(1) | 深度优先，`root` 以下的每一层；预热后 0 B |
+| `world.Descendants(root).AddTo(ids, includeRoot)` | 子树里每个实体 O(1) | 把子树追加到 `List<EntityId>`，需要时根排第一，每个父实体在它的子实体之前（正是 `MoveEntities` / `SaveEntities` 以 `CollectionsMarshal.AsSpan(ids)` 接收的那组）；返回追加的个数；只有列表扩容时才分配 |
 | `entity.AddRelation(in T relation)` | 均摊 O(1) | 追加到实体的 `DynamicBuffer<T>`（缺失时先添加）和关系索引 |
 | `entity.RemoveRelation<T>(target)` / `HasRelation<T>(target)` | O(L) | `RemoveRelation` 返回删掉了几条 |
 | `world.Relations<T>()` | O(1)；第一次调用时创建 | 关系索引；对关系 `X` 会生成 `world.XIndex` |
 | `relations.Count(target)` | O(1) | 指向 `target` 的链接数 |
+| `relations.TargetCount` | O(1) | 有链接指向的不同实体数（有多少个公会有成员），随链接增减维护 |
 | `relations.Find(target)` | O(1)，然后每条链接 O(1) | 链接到 `target` 的实体 |
+| `relations.Find(target).Count` | O(1) | 查找时指向 `target` 的链接数；循环中去掉的链接会被循环跳过，但仍计入 |
 | `relations.WhenTargetDestroyed(policy)` | O(1)；之后每个被销毁的实体 O(1)，每条链接 O(L) | `Remove` 删除链接，`Destroy` 销毁发起链接的实体 |
 
 ## 分组 [#groups]

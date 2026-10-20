@@ -59,8 +59,8 @@ world.CreateEntity(new Sword(10), new ChildOf(hero));
 world.CreateEntity(new Pet(hero), new Health(20));
 
 // Collect the group: the hero, what hangs on it, what points at it.
-var group = new List<EntityId> { hero.Id };
-foreach (var part in world.Descendants(hero)) group.Add(part.Id);       // children, grandchildren and so on
+var group = new List<EntityId>();
+world.Descendants(hero).AddTo(group, includeRoot: true);                // the hero, then children, grandchildren and so on
 foreach (var pet in world.PetIndex.Find(hero.Id)) group.Add(pet.Id);    // the index, not a scan of every Pet
 
 var bytes = new NinoArrayBufferWriter();
@@ -88,8 +88,9 @@ id).
 using System.Runtime.InteropServices;
 
 using var nextZone = new World();
-var moved = new Entity[group.Count];
-int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), moved);   // hero, sword and pet leave this world
+var moved = new List<Entity>();                    // Reused across moves: no allocation once it is large enough.
+CollectionsMarshal.SetCount(moved, group.Count);
+int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), CollectionsMarshal.AsSpan(moved));   // hero, sword and pet leave this world
 ```
 
 - The originals are destroyed with their children, so move a [hierarchy](/en/docs/guide/hierarchy#moving) together.
@@ -318,11 +319,8 @@ public static class Groups
     // The hero, what hangs on it (each parent before its children), and its pets.
     public static List<EntityId> Collect(World world, Entity hero)
     {
-        var group = new List<EntityId> { hero.Id };
-        foreach (var part in world.Descendants(hero))
-        {
-            group.Add(part.Id);
-        }
+        var group = new List<EntityId>();
+        world.Descendants(hero).AddTo(group, includeRoot: true);
 
         foreach (var pet in world.PetIndex.Find(hero.Id))
         {

@@ -22,6 +22,14 @@ public WorldOptions();
 
 ## 属性 [#properties]
 
+### `DestroyLog` [#destroylog]
+
+```csharp
+public int DestroyLog { get; init; }
+```
+
+销毁日志的容量（默认 0：关闭）：最近销毁的这么多个实体，每个带着它被销毁时的变更 tick，[`World.DestroyedSince`](/zh/docs/reference/world#destroyedsince) 把它们报告给各自保留自己 tick 的读者（每个客户端一个同步标记）。预先分配（每条记录 16 字节）；之后一次销毁写一条记录，日志关闭时没有任何开销。容量按读者两次读取之间可能留下的最长间隔里的销毁数来定：更旧的读者会被告知要重新同步（[`World.DestroyLogOldestTick`](/zh/docs/reference/world#destroylogoldesttick)）。
+
 ### `InitialEntityCapacity` [#initialentitycapacity]
 
 ```csharp

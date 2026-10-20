@@ -222,7 +222,9 @@ world.Update();                            // barrel：WorldPosition(11, 2)
 
 ### 迁移层级 [#moving]
 
-`MoveEntities` 和 `SaveEntities` 只处理你列出的实体，不会顺带它们的子实体。用 `Descendants` 收集整棵层级再一起迁移：父实体
+`MoveEntities` 和 `SaveEntities` 只处理你列出的实体，不会顺带它们的子实体。用 `world.Descendants(root).AddTo(ids, includeRoot: true)`
+收集整棵层级：它先追加根，再追加每个后代，每个父实体都在它的子实体之前（每个实体 O(1)，只有列表扩容时才分配；复用列表时先清空），
+然后一起迁移：父实体
 没跟过去的子实体，到了那边会去掉 `ChildOf`（成为根）；而 `MoveEntities` 销毁原实体时会连同子实体一起销毁，没列出的子实体
 就丢了。两者都接收 `ReadOnlySpan<EntityId>`：直接传列表的 span（`CollectionsMarshal.AsSpan`），不必复制一份数组。
 详见[迁移](/zh/docs/guide/migration-and-unload#move-entities)。
@@ -233,8 +235,8 @@ using System.Runtime.InteropServices;
 var player = world.CreateEntity(new Name("bob"));
 world.CreateEntity(new Name("sword"), new ChildOf(player));
 
-var group = new List<EntityId> { player.Id };
-foreach (var part in world.Descendants(player)) group.Add(part.Id);   // 子实体、孙实体……
+var group = new List<EntityId>();
+world.Descendants(player).AddTo(group, includeRoot: true);   // bob，然后是子实体、孙实体……
 using var other = new World();
 world.MoveEntities(other, CollectionsMarshal.AsSpan(group));   // bob 和他的剑，链接保持不变
 ```

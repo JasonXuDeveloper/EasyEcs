@@ -32,6 +32,27 @@ Require `T` and only rows whose `T` was written at or after change tick `since`:
 
 **Complexity** ([API table](/en/docs/api)): O(1); a pass skips tables, 4,096-row blocks and 64-row words written before `since`
 
+### `ChangedAny` [#changedany]
+
+```csharp
+public QueryFilter ChangedAny<T1, T2>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges;
+public QueryFilter ChangedAny<T1, T2, T3>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges;
+public QueryFilter ChangedAny<T1, T2, T3, T4>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges;
+public QueryFilter ChangedAny<T1, T2, T3, T4, T5>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges;
+public QueryFilter ChangedAny<T1, T2, T3, T4, T5, T6>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges where T6 : struct, IComponent, ITrackChanges;
+public QueryFilter ChangedAny<T1, T2, T3, T4, T5, T6, T7>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges where T6 : struct, IComponent, ITrackChanges where T7 : struct, IComponent, ITrackChanges;
+public QueryFilter ChangedAny<T1, T2, T3, T4, T5, T6, T7, T8>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges where T6 : struct, IComponent, ITrackChanges where T7 : struct, IComponent, ITrackChanges where T8 : struct, IComponent, ITrackChanges;
+public QueryFilter ChangedAny<T1, T2, T3, T4, T5, T6, T7, T8, T9>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges where T6 : struct, IComponent, ITrackChanges where T7 : struct, IComponent, ITrackChanges where T8 : struct, IComponent, ITrackChanges where T9 : struct, IComponent, ITrackChanges;
+```
+
+Only rows where at least one of `T1, T2` was written at or after change tick `since`: `Changed<T1>(since)` OR ... OR `Changed<T2>(since)` (a row has the component it counts for; the others need not be there). Every `ChangedAny` call of a filter joins one group; the group, the `Changed` and `Removed` filters, a `RemovedAny` group and the other filters combine with AND. A table none of whose columns was written since the tick is skipped whole, and words and blocks of rows no column wrote. A filter has one tick ([`QueryFilter.Since`](/en/docs/reference/queryfilter#since) moves it): keep one per client, run it with each client's tick.
+
+**Exceptions**
+
+- `ArgumentException`: An earlier change filter named another tick.
+
+**Complexity** ([API table](/en/docs/api)): O(n) to build; a pass skips tables none of whose columns of the group was written since `since`, and blocks and words no column wrote
+
 ### `Create` [#create]
 
 ```csharp
@@ -66,15 +87,54 @@ Only entities that lost `T` at or after change tick `since` and have not got it 
 
 **Complexity** ([API table](/en/docs/api)): as `Changed`
 
+### `RemovedAny` [#removedany]
+
+```csharp
+public QueryFilter RemovedAny<T1, T2>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges;
+public QueryFilter RemovedAny<T1, T2, T3>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges;
+public QueryFilter RemovedAny<T1, T2, T3, T4>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges;
+public QueryFilter RemovedAny<T1, T2, T3, T4, T5>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges;
+public QueryFilter RemovedAny<T1, T2, T3, T4, T5, T6>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges where T6 : struct, IComponent, ITrackChanges;
+public QueryFilter RemovedAny<T1, T2, T3, T4, T5, T6, T7>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges where T6 : struct, IComponent, ITrackChanges where T7 : struct, IComponent, ITrackChanges;
+public QueryFilter RemovedAny<T1, T2, T3, T4, T5, T6, T7, T8>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges where T6 : struct, IComponent, ITrackChanges where T7 : struct, IComponent, ITrackChanges where T8 : struct, IComponent, ITrackChanges;
+public QueryFilter RemovedAny<T1, T2, T3, T4, T5, T6, T7, T8, T9>(ulong since) where T1 : struct, IComponent, ITrackChanges where T2 : struct, IComponent, ITrackChanges where T3 : struct, IComponent, ITrackChanges where T4 : struct, IComponent, ITrackChanges where T5 : struct, IComponent, ITrackChanges where T6 : struct, IComponent, ITrackChanges where T7 : struct, IComponent, ITrackChanges where T8 : struct, IComponent, ITrackChanges where T9 : struct, IComponent, ITrackChanges;
+```
+
+Only rows that lost at least one of `T1, T2` at or after change tick `since` and have not got it back: `Removed<T1>(since)` OR ... OR `Removed<T2>(since)`. Every `RemovedAny` call joins one group, combined with the other filters with AND; one tick per filter, as [`QueryFilter.ChangedAny`](/en/docs/reference/queryfilter#changedany).
+
+**Exceptions**
+
+- `ArgumentException`: An earlier change filter named another tick.
+
+**Complexity** ([API table](/en/docs/api)): as `ChangedAny`
+
 ### `Since` [#since]
 
 ```csharp
 public QueryFilter Since(ulong since);
 ```
 
-The same filter with its [`QueryFilter.Changed`](/en/docs/reference/queryfilter#changed) and [`QueryFilter.Removed`](/en/docs/reference/queryfilter#removed) filters moved to tick `since`, without rebuilding it: a filter kept in a field, used again after each update.
+The same filter with its [`QueryFilter.Changed`](/en/docs/reference/queryfilter#changed) and [`QueryFilter.Removed`](/en/docs/reference/queryfilter#removed) filters (and its `ChangedAny` and `RemovedAny` ones) moved to tick `since`, without rebuilding it: a filter kept in a field, used again after each update, or once per client with each client's acknowledged tick.
 
 **Complexity** ([API table](/en/docs/api)): O(1)
+
+### `Slice` [#slice]
+
+```csharp
+public QueryFilter Slice(int index, int count);
+```
+
+Visit only slice `index` of `count` of every matching table's rows: passes with each index from 0 to `count` - 1 in turn visit every row once, each about 1 / `count` of the rows. `[ForEach(Slices = N)]` methods pass the slice of their system's run ([`EcsSystem.RunCount`](/en/docs/reference/ecssystem#runcount) mod N). O(1).
+
+A table is cut at multiples of 64 rows (its presence words), from its row count when the pass starts, so a table of fewer than 64 rows is one piece; table i of the match starts its cut at slice (`index` + i) mod `count`, so many small tables spread over the slices too. Rows that move between passes (a swap-remove fills a hole with the table's last row, a structural change moves an entity to another table, the table grows or shrinks across a cut) may be skipped or visited twice in one cycle of `count` passes; the next cycle sees them again.
+
+Honoured by `ForEach`, `ForEachEntity`, `ForEachBatch` and their `Parallel` forms; the calls that need every matching row (`Query`, `Count`, `Any`, `DestroyEntities`, `entity.Run`, `SetAll` and the other bulk calls) throw `ArgumentException` for a sliced filter. A count of 1 is the whole tables.
+
+**Exceptions**
+
+- `ArgumentOutOfRangeException`: `count` is below 1, or `index` is not in [0, `count`).
+
+**Complexity** ([API table](/en/docs/api)): O(1); a pass visits about S / N rows, cut at 64-row words
 
 ### `With` [#with]
 

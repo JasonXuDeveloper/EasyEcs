@@ -16,6 +16,14 @@ Enumerates the entities of one key (`foreach`).
 
 ## Properties
 
+### `Count` [#count]
+
+```csharp
+public readonly int Count { get; }
+```
+
+How many entities had the key when it was found: O(1), no walk (size a buffer before the loop). Entities destroyed during the loop are skipped by it but still counted here.
+
 ### `Current` [#current]
 
 ```csharp

@@ -49,6 +49,8 @@ world.CreateEntity(new Callsign("bravo"), new Zone(1));
 var zones = world.ZoneIndex;                        // world.Index<Zone, int>(): keep it in a local or a field
 int inOne = zones.Count(1);                         // O(1)
 foreach (var e in zones.Find(1)) { /* every entity in zone 1 */ }
+int toVisit = zones.Find(1).Count;                  // O(1): how many the loop sees, to size a buffer first
+int occupied = zones.KeyCount;                      // O(1): how many zones hold an entity (an admin metric)
 if (world.CallsignIndex.TryFind("alpha", out var found)) { /* any entity with that key */ }
 
 alpha.SetZone(2);                                   // a Set: the index moves alpha at once // [!code highlight]
@@ -58,6 +60,11 @@ int inTwo = zones.Count(2);                         // 1
 Read an indexed component with `in`, `Read<T>()` or the generated property (`alpha.Zone`, a `ref readonly`), and write
 it with `Set` or the generated `SetX`. A write through a `ref` would change the key behind the index's back, so the
 analyzer rejects it ([EECS015](/en/docs/guide/analyzer#eecs015)). A component has one index, with one key type.
+
+`Find(key).Count` (also on `world.Children(parent)`) is how many entities had the key when the lookup ran, without a
+walk: size a buffer from it rather than walking the matches twice. An entity destroyed during the loop is skipped by the
+walk but still counted. `KeyCount` is how many distinct keys some entity holds (how many cells of a map are
+occupied), kept as entities come and go; a relation index has `TargetCount`, the distinct targets its links point at.
 
 ### A component as its own key [#self-key]
 
@@ -217,6 +224,8 @@ var knight = world.CreateEntity().AddRelation(new MemberOf(red)).AddRelation(new
 var parties = world.Relations<MemberOf>();                    // keep it in a local or a field
 int members = parties.Count(red);                             // O(1)
 foreach (var member in parties.Find(red)) { /* each member of red */ }
+int links = parties.Find(red).Count;                          // O(1): the links the loop walks, to size a buffer
+int withMembers = parties.TargetCount;                        // O(1): how many parties have a member
 bool inBlue = knight.HasRelation<MemberOf>(blue);
 knight.RemoveRelation<MemberOf>(blue);                         // leaves blue
 ```
@@ -523,7 +532,8 @@ follow, then the followers of 100 players counted and walked (`RelationBenchmark
   once warm.
 - **Memory:** one node per indexed entity, and one array of ids per key. A relation keeps one 20-byte link per element,
   recycled, and 8 bytes in its target's list.
-- **`Count`** is a hash probe, or an array access for an `EntityId` key; **`Find`** adds one step per entity.
+- **`Count`** is a hash probe, or an array access for an `EntityId` key; **`Find`** adds one step per entity, and its
+  `.Count` none.
 - **A `Set` that changes the key** unlinks and links the entity (a few array writes; a hash probe for non-entity keys).
 - **Ordered walks:** the first one sorts the keys; then each new or vanished key costs O(log keys) plus a block move.
 - **Allocation:** only when the index sees a new key or a larger entity id, never per lookup.

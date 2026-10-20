@@ -27,10 +27,10 @@ Append `item`. O(1) amortized; allocates only when the list grows.
 ### `AddRange` [#addrange]
 
 ```csharp
-public static void AddRange<T>(this ref DynamicBuffer<T> buffer, ReadOnlySpan<T> items);
+public static void AddRange<T>(this ref DynamicBuffer<T> buffer, params ReadOnlySpan<T> items);
 ```
 
-Append `items`. O(items).
+Append `items` (a list: `CollectionsMarshal.AsSpan(list)`, no copy). O(items).
 
 **Complexity** ([API table](/en/docs/api)): O(1) amortized / O(items)
 

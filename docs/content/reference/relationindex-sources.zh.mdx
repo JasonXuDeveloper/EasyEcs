@@ -16,6 +16,14 @@ public ref struct Sources
 
 ## 属性 [#properties]
 
+### `Count` [#count]
+
+```csharp
+public readonly int Count { get; }
+```
+
+查找时有多少条链接指向这个目标：O(1)，不用遍历。循环中去掉的链接，循环会跳过，但这里仍然计入。
+
 ### `Current` [#current]
 
 ```csharp

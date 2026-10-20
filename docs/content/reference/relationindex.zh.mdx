@@ -12,6 +12,18 @@ public sealed class RelationIndex<T> where T : struct, IRelation
 
 一个 World 里关系 `T` 的链接，按目标组织（[`World.Relations`](/zh/docs/reference/world#relations)）：哪些实体链接到某个实体，开始 O(1)，之后每条链接 O(1)。写入链接时，以及来源实体销毁或失去缓冲时，索引都会跟着更新；第一次查找（以及 [`World.Restore`](/zh/docs/reference/world#restore) 之后的第一次）会把所有缓冲索引一遍。指向已销毁目标的链接，仍然能按目标的 id 找到，之后的实体不会再用这个 id。只能在所有者线程使用。内存：每个元素一条 20 字节的链接（回收复用），目标的列表里再占 8 字节。
 
+## 属性 [#properties]
+
+### `TargetCount` [#targetcount]
+
+```csharp
+public int TargetCount { get; }
+```
+
+有链接指向的不同实体的个数（有多少个公会有成员）：O(1)，随链接的增减维护。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(1)
+
 ## 方法 [#methods]
 
 ### `Count` [#count]
@@ -32,7 +44,10 @@ public RelationIndex<T>.Sources Find(EntityId target);
 
 链接到 `target` 的实体，每条链接一次。循环里可以销毁实体，但不能改链接。
 
-**复杂度**（[API 表](/zh/docs/api)）：O(1)，然后每条链接 O(1)
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `relations.Find(target)`：O(1)，然后每条链接 O(1)
+- `relations.Find(target).Count`：O(1)
 
 ### `WhenTargetDestroyed` [#whentargetdestroyed]
 

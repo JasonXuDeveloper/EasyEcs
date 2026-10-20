@@ -235,7 +235,9 @@ here allocates.
 ### Moving a hierarchy [#moving]
 
 `MoveEntities` and `SaveEntities` take the entities you list, not their children. Collect a hierarchy with
-`Descendants` and move it together: a child whose parent stays behind arrives without its `ChildOf` (a root there), and
+`world.Descendants(root).AddTo(ids, includeRoot: true)`, which appends the root and then every descendant, each parent
+before its children (O(1) per entity, allocating only when the list grows; clear a reused list first), and move it
+together: a child whose parent stays behind arrives without its `ChildOf` (a root there), and
 `MoveEntities` destroys the originals with their children, so a child you did not list is lost. Both take a
 `ReadOnlySpan<EntityId>`: pass the list's span (`CollectionsMarshal.AsSpan`) rather than a copy of it. See
 [migration](/en/docs/guide/migration-and-unload#move-entities).
@@ -246,8 +248,8 @@ using System.Runtime.InteropServices;
 var player = world.CreateEntity(new Name("bob"));
 world.CreateEntity(new Name("sword"), new ChildOf(player));
 
-var group = new List<EntityId> { player.Id };
-foreach (var part in world.Descendants(player)) group.Add(part.Id);   // children, grandchildren, ...
+var group = new List<EntityId>();
+world.Descendants(player).AddTo(group, includeRoot: true);   // bob, then children, grandchildren, ...
 using var other = new World();
 world.MoveEntities(other, CollectionsMarshal.AsSpan(group));   // bob and his sword, still linked
 ```

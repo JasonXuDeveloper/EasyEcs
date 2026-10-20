@@ -223,8 +223,8 @@ job 声明了它写 `Health`，所以这次命中会打上变更 tick，随下�
 
 ### 离开与换场 [#leave-and-transfer]
 
-玩家离开就是被销毁：投射物（子实体）随之销毁，目标策略把它从所有好友列表里移除。`Transfer` 用 `Descendants`
-收集玩家的整棵子树，再用 `MoveEntities` 搬到同一线程上的另一场战斗：它们在那边是新实体，投射物仍是它的子实体。
+玩家离开就是被销毁：投射物（子实体）随之销毁，目标策略把它从所有好友列表里移除。`Transfer` 用 `Descendants(player).AddTo`
+把玩家的整棵子树收进一个复用的列表，再用 `MoveEntities` 搬到同一线程上的另一场战斗：它们在那边是新实体，投射物仍是它的子实体。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#leave-and-transfer</include>
 

@@ -12,7 +12,7 @@ public sealed class ForEachAttribute : Attribute
 
 Runs a method of an [`EcsSystem`](/en/docs/reference/ecssystem) (or a static method of any other type, through a generated entry point) for every entity matching its component parameters (and the [`WithAttribute`](/en/docs/reference/withattribute) / [`WithoutAttribute`](/en/docs/reference/withoutattribute) / [`WithAnyAttribute`](/en/docs/reference/withanyattribute) filters), each update, after [`EcsSystem.OnUpdate`](/en/docs/reference/ecssystem#onupdate), in declaration order.
 
-Parameters: 1..9 components (`ref` to write, `in` to read; or `Span<T>` / `ReadOnlySpan<T>` for a batch method that receives runs of rows), singletons (`ref` / `in`), and optionally [`Entity`](/en/docs/reference/entity) and [`World`](/en/docs/reference/world). Static and instance methods are supported.
+Parameters: 1..9 components (`ref` to write, `in` to read, [`Mut`](/en/docs/reference/mut) to write some rows; or `Span<T>` / `ReadOnlySpan<T>` for a batch method that receives runs of rows), singletons (`ref` / `in`), and optionally [`Entity`](/en/docs/reference/entity) and [`World`](/en/docs/reference/world). Static and instance methods are supported.
 
 ```csharp
 public class MovementSystem : EcsSystem
@@ -41,3 +41,11 @@ public bool Parallel { get; init; }
 ```
 
 Run chunks of the matching rows on several threads (`World.ForEachParallel`). The method must make no structural change, run per entity and write no singleton (EECS010); it pays off for heavy per-row work over tens of thousands of rows. Default false.
+
+### `Slices` [#slices]
+
+```csharp
+public int Slices { get; init; }
+```
+
+Spread the method's rows over N runs of its system: each run visits one slice, about 1 / N of the rows of every matching table (slice [`EcsSystem.RunCount`](/en/docs/reference/ecssystem#runcount) mod N, [`QueryFilter.Slice`](/en/docs/reference/queryfilter#slice)), so every row is visited once per N runs and a system over many entities costs about 1 / N per update instead of a spike on one. With [`EcsSystem.UpdateInterval`](/en/docs/reference/ecssystem#updateinterval) M, a row is visited once per N \* M updates. Rows that move between runs (swap-removes, structural changes, tables that grow or shrink) may be skipped or visited twice in one cycle. Works per entity, in batches and with [`ForEachAttribute.Parallel`](/en/docs/reference/foreachattribute#parallel) (the slice is cut into chunks). Not with `[Changed<T>]` / `[Removed<T>]` (EECS035): the rows of the other slices would lose the changes made since the system last ran. Default 1: every row on every run.

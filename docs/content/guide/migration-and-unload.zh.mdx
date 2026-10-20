@@ -54,8 +54,8 @@ world.CreateEntity(new Sword(10), new ChildOf(hero));
 world.CreateEntity(new Pet(hero), new Health(20));
 
 // 收集这一组：英雄、挂在他身上的、指向他的
-var group = new List<EntityId> { hero.Id };
-foreach (var part in world.Descendants(hero)) group.Add(part.Id);       // 子实体、孙实体，一层层往下
+var group = new List<EntityId>();
+world.Descendants(hero).AddTo(group, includeRoot: true);                // 英雄，然后是子实体、孙实体，一层层往下
 foreach (var pet in world.PetIndex.Find(hero.Id)) group.Add(pet.Id);    // 走索引，不扫描所有 Pet
 
 var bytes = new NinoArrayBufferWriter();
@@ -80,8 +80,9 @@ int created = otherServer.LoadEntities(bytes.WrittenSpan, arrived);   // 新 id�
 using System.Runtime.InteropServices;
 
 using var nextZone = new World();
-var moved = new Entity[group.Count];
-int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), moved);   // 英雄、剑和宠物离开这个 World
+var moved = new List<Entity>();                    // 每次搬迁都复用它：容量够大之后不再分配内存。
+CollectionsMarshal.SetCount(moved, group.Count);
+int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), CollectionsMarshal.AsSpan(moved));   // 英雄、剑和宠物离开这个 World
 ```
 
 - 原实体销毁时会连同子实体一起销毁，所以[层级](/zh/docs/guide/hierarchy#moving)要整体迁移。
@@ -285,11 +286,8 @@ public static class Groups
     // 英雄、挂在他身上的实体（父实体总在子实体之前），以及他的宠物。
     public static List<EntityId> Collect(World world, Entity hero)
     {
-        var group = new List<EntityId> { hero.Id };
-        foreach (var part in world.Descendants(hero))
-        {
-            group.Add(part.Id);
-        }
+        var group = new List<EntityId>();
+        world.Descendants(hero).AddTo(group, includeRoot: true);
 
         foreach (var pet in world.PetIndex.Find(hero.Id))
         {

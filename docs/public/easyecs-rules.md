@@ -115,8 +115,10 @@ available as Markdown: add `.md` to its URL.
 
 - `world.Capture()` / `Restore(snapshot)` copy a world in memory (undo, rollback, tests); `world.Save` / `Load` write
   bytes that survive a restart or go to another process.
-- Collect a subtree with `world.Descendants(root)` (not only `Children`) before `SaveEntities` or `MoveEntities`:
-  a child left behind dies with the original.
+- Collect a subtree with `world.Descendants(root).AddTo(ids, includeRoot: true)` (not only `Children`) before
+  `SaveEntities` or `MoveEntities`, and pass `CollectionsMarshal.AsSpan(ids)`: a child left behind dies with the original.
+- Size a buffer from `index.Find(key).Count` (O(1)), never by walking the matches twice; `index.KeyCount` /
+  `relations.TargetCount` count distinct keys / targets in O(1).
 - Durable state is a record: `SaveEntities(writer, ids, Persistent)` with a `static readonly ComponentSet` of the
   durable components only, never the runtime ones (connections, timers, caches).
 - Restore a record with `LoadEntitiesInto(bytes, entities, markWritten: false)`, so a system that saves or

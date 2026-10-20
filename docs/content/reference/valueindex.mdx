@@ -10,7 +10,19 @@ description: "The value index of component T in one world (World.Index). The Val
 public sealed class ValueIndex<T, TKey> where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>
 ```
 
-The value index of component `T` in one world ([`World.Index`](/en/docs/reference/world#index)). It is kept current as values are written: `Set` and `CreateEntity` re-index the entity at once (O(1)), and entities leave it as soon as they are destroyed or lose the component, so a lookup does no catching up. The first lookup (and the first after [`World.Restore`](/en/docs/reference/world#restore)) indexes every row once. Lookups allocate nothing once every key has been seen; the index belongs to the world's owner thread, like component values (systems that look up from `OnUpdate` or instance methods run alone).
+The value index of component `T` in one world ([`World.Index`](/en/docs/reference/world#index)). It is kept current as values are written: `Set` and `CreateEntity` re-index the entity at once (O(1)), and entities leave it as soon as they are destroyed or lose the component, so a lookup does no catching up. The first lookup (and the first after [`World.Restore`](/en/docs/reference/world#restore)) indexes every row once; the index of a unique component ([`IUniqueIndexed`](/en/docs/reference/iuniqueindexed)) is current from the world's first table holding it instead, and refuses a write that would give a key to a second entity. Lookups allocate nothing once every key has been seen; the index belongs to the world's owner thread, like component values (systems that look up from `OnUpdate` or instance methods run alone).
+
+## Properties
+
+### `KeyCount` [#keycount]
+
+```csharp
+public int KeyCount { get; }
+```
+
+Number of distinct keys some entity has (how many guilds have a member): O(1), kept as entities join and leave keys (the first lookup indexes every row once).
+
+**Complexity** ([API table](/en/docs/api)): O(1)
 
 ## Methods
 
@@ -32,7 +44,10 @@ public ValueIndex<T, TKey>.Matches Find(TKey key);
 
 The entities whose `T` has key `key` (none for a null key): O(1), then O(1) per entity (the first lookup indexes every row once). Owner thread only. Destroying entities during the loop is allowed; changing `T` is not (an emptied key hands its list to the keys that grow next): collect the entities first, then change them.
 
-**Complexity** ([API table](/en/docs/api)): O(1), then O(1) per entity
+**Complexity** ([API table](/en/docs/api)):
+
+- `index.Find(key)`: O(1), then O(1) per entity
+- `index.Find(key).Count`: O(1)
 
 ### `TryFind` [#tryfind]
 

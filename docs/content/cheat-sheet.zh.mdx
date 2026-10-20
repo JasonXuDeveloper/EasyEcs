@@ -339,6 +339,8 @@ if (!replicated.DestroyedSince(seen, gone, out int goneCount)) { /* 比日志还
 | --- | --- |
 | `world.Index<T, TKey>()`（`world.TIndex`） | `T` 的值索引 |
 | `index.Find(key)` / `TryFind(key, out e)` / `Count(key)` | 所有匹配、唯一一个、数量 |
+| `index.Find(key).Count` / `relations.Find(target).Count` | 循环会走过多少个，O(1)，用来确定缓冲区大小 |
+| `index.KeyCount` / `relations.TargetCount` | 有多少个不同的键 / 目标被持有，O(1)（被占用的格子、有成员的公会） |
 | `index.Get(key)` / `TryGet(key, out e)` | 唯一键（`IUniqueIndexed<TKey>`）对应的那个实体；没有时 `Get` 抛异常 |
 | `index.Range(min, max)` / `RangeDescending` / `Ascending()` / `Descending()` | 键可比较时的有序遍历 |
 | `index.WhenTargetDestroyed(TargetPolicy.Keep / Remove / Destroy)` | 目标销毁时 `EntityId` 链接怎么处理 |
@@ -346,6 +348,7 @@ if (!replicated.DestroyedSince(seen, gone, out int goneCount)) { /* 比日志还
 | `world.Relations<T>()` 再 `Find(target)` / `Count(target)` | 谁链接到了某个目标 |
 | `world.Children(parent)` | `ChildOf` 指向这个父实体的所有实体；销毁父实体会连带销毁它们（`ChildOf` 一开始就是 `TargetPolicy.Destroy`） |
 | `world.Descendants(root)` | 整棵子树，深度优先，每个实体排在它的子实体之前，不含根；`ChildOf` 成环时抛 `InvalidOperationException` |
+| `world.Descendants(root).AddTo(ids, includeRoot: true)` | 把根和整棵子树追加到 `List<EntityId>`：`MoveEntities` / `SaveEntities` 要的那组实体 |
 | `world.GroupBy<T>()` | 按 `IGroup` 的值拆表 |
 
 ```csharp

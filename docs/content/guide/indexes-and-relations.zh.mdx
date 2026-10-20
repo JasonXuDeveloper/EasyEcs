@@ -46,6 +46,8 @@ world.CreateEntity(new Callsign("bravo"), new Zone(1));
 var zones = world.ZoneIndex;                        // world.Index<Zone, int>()：存到局部变量或字段里
 int inOne = zones.Count(1);                         // O(1)
 foreach (var e in zones.Find(1)) { /* 1 号区域里的每个实体 */ }
+int toVisit = zones.Find(1).Count;                  // O(1)：循环会看到多少个，先按它确定缓冲区大小
+int occupied = zones.KeyCount;                      // O(1)：有实体的区域有几个（管理后台的指标）
 if (world.CallsignIndex.TryFind("alpha", out var found)) { /* 拥有这个键的任一实体 */ }
 
 alpha.SetZone(2);                                   // 一次 Set：索引立即把 alpha 挪过去 // [!code highlight]
@@ -55,6 +57,10 @@ int inTwo = zones.Count(2);                         // 1
 被索引的组件用 `in`、`Read<T>()` 或生成的属性（`alpha.Zone`，`ref readonly`）读取，用 `Set` 或生成的 `SetX` 写入。
 通过 `ref` 写入会在索引不知情时改掉键，所以分析器直接拒绝（[EECS015](/zh/docs/guide/analyzer#eecs015)）。一个组件只有一个索引、
 一种键类型。
+
+`Find(key).Count`（`world.Children(parent)` 也有）是查找时拥有这个键的实体数，不用遍历：按它确定缓冲区大小，不要把匹配遍历两遍。
+循环中被销毁的实体，遍历会跳过，但仍然计入。`KeyCount` 是有实体持有的不同键的个数（地图上有多少格子被占用），随实体进出维护；
+关系索引有 `TargetCount`：它的链接指向的不同目标的个数。
 
 ### 组件本身就是键 [#self-key]
 
@@ -202,6 +208,8 @@ var knight = world.CreateEntity().AddRelation(new MemberOf(red)).AddRelation(new
 var parties = world.Relations<MemberOf>();                    // 存到局部变量或字段里
 int members = parties.Count(red);                             // O(1)
 foreach (var member in parties.Find(red)) { /* red 的每个成员 */ }
+int links = parties.Find(red).Count;                          // O(1)：循环会走过的链接数，先按它确定缓冲区大小
+int withMembers = parties.TargetCount;                        // O(1)：有成员的队伍有几个
 bool inBlue = knight.HasRelation<MemberOf>(blue);
 knight.RemoveRelation<MemberOf>(blue);                         // 退出 blue
 ```
@@ -495,7 +503,7 @@ arrows left after the archer died: 0
 - **唯一键：** `Get` 和 `TryGet` 是一次哈希探测；写唯一组件时，改动之前多一次探测。`SetAll`、`EnableAll` 和 `Load` 对它们的行多走一遍占键；
   `Clone`、`Instantiate`、`LoadEntities`、`LoadEntitiesInto` 和 `MoveEntities` 每行每个唯一组件一次探测。预热之后都不分配内存。
 - **内存：** 每个被索引的实体一个节点，每个键一个 id 数组。关系的每个元素一个 20 字节的链接（可回收），外加目标列表里的 8 字节。
-- **`Count`** 是一次哈希探测，`EntityId` 键则是一次数组访问；**`Find`** 每个实体多一步。
+- **`Count`** 是一次哈希探测，`EntityId` 键则是一次数组访问；**`Find`** 每个实体多一步，它的 `.Count` 不多花一步。
 - **改了键的 `Set`** 会把实体从旧键摘下、挂到新键上（几次数组写入；非实体键多一次哈希探测）。
 - **有序遍历：** 第一次排序；之后每出现或消失一个键，开销是 O(log 键数) 加一次块移动。
 - **分配：** 只在索引遇到新键或更大的实体 id 时发生，查找本身从不分配。

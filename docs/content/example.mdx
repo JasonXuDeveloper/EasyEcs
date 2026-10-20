@@ -254,7 +254,7 @@ player.
 ### Leaving and changing battles [#leave-and-transfer]
 
 A player who leaves is destroyed: its projectiles go with it (children), and the target policy removes it from every
-friend list. `Transfer` collects the player's whole subtree with `Descendants` and moves it to another battle of the same
+friend list. `Transfer` collects the player's whole subtree into a reused list with `Descendants(player).AddTo` and moves it to another battle of the same
 thread with `MoveEntities`: they arrive as new entities, the shots still its children.
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#leave-and-transfer</include>

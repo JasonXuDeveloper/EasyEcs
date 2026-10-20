@@ -675,8 +675,8 @@ foreach (var child in world.Children(hero)) subtree.Add(child.Id);   // grandchi
 original. `Descendants` walks every level, depth first:
 
 ```csharp
-var group = new List<EntityId> { hero.Id };
-foreach (var part in world.Descendants(hero)) group.Add(part.Id);   // children, grandchildren, ...
+var group = new List<EntityId>();
+world.Descendants(hero).AddTo(group, includeRoot: true);   // the hero, then children, grandchildren, ...
 ```
 
 No rule catches it. More in [moving a hierarchy](/en/docs/guide/hierarchy#moving).

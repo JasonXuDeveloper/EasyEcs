@@ -10,7 +10,19 @@ description: "一个 World 里组件 T 的值索引（World.Index）。EasyEcs�
 public sealed class ValueIndex<T, TKey> where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>
 ```
 
-一个 World 里组件 `T` 的值索引（[`World.Index`](/zh/docs/reference/world#index)）。写入值时索引立即更新：`Set` 和 `CreateEntity` 当场重新索引实体（O(1)），实体一销毁或失去这个组件就离开索引，所以查找时没有欠账要补。第一次查找（以及 [`World.Restore`](/zh/docs/reference/world#restore) 之后的第一次）会把每一行索引一遍。所有键都出现过之后，查找不再分配内存；索引和组件值一样，属于 World 的所有者线程（在 `OnUpdate` 或实例方法里查找的系统会独占运行）。
+一个 World 里组件 `T` 的值索引（[`World.Index`](/zh/docs/reference/world#index)）。写入值时索引立即更新：`Set` 和 `CreateEntity` 当场重新索引实体（O(1)），实体一销毁或失去这个组件就离开索引，所以查找时没有欠账要补。第一次查找（以及 [`World.Restore`](/zh/docs/reference/world#restore) 之后的第一次）会把每一行索引一遍；唯一组件（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)）的索引则从 World 里第一张含有它的表起就是最新的，并且拒绝会让第二个实体拿到同一个键的写入。所有键都出现过之后，查找不再分配内存；索引和组件值一样，属于 World 的所有者线程（在 `OnUpdate` 或实例方法里查找的系统会独占运行）。
+
+## 属性 [#properties]
+
+### `KeyCount` [#keycount]
+
+```csharp
+public int KeyCount { get; }
+```
+
+有实体持有的不同键的个数（有多少个公会有成员）：O(1)，随实体加入和离开各个键维护（第一次查找会把每一行索引一遍）。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(1)
 
 ## 方法 [#methods]
 
@@ -32,7 +44,10 @@ public ValueIndex<T, TKey>.Matches Find(TKey key);
 
 `T` 的键为 `key` 的实体（键为 null 时一个都没有）：开始 O(1)，之后每个实体 O(1)（第一次查找会把每一行索引一遍）。只能在所有者线程调用。循环里可以销毁实体，但不能改 `T`（键清空后，它的列表会交给接下来增长的键）：先收集实体，再修改。
 
-**复杂度**（[API 表](/zh/docs/api)）：O(1)，然后每个实体 O(1)
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `index.Find(key)`：O(1)，然后每个实体 O(1)
+- `index.Find(key).Count`：O(1)
 
 ### `TryFind` [#tryfind]
 

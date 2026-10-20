@@ -357,6 +357,10 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
 - **Unique keys.** `IUniqueIndexed<TKey>` names one entity per key (`index.Get(key)`); a write that would duplicate a
   key throws before it changes anything
   ([indexes and relations](https://ecs.xgamedev.net/en/docs/guide/indexes-and-relations)).
+- **Counts without a walk, groups without a loop.** `index.Find(key).Count` sizes a buffer in O(1), `KeyCount` /
+  `TargetCount` count distinct keys and targets, and `world.Descendants(root).AddTo(ids, includeRoot: true)` collects
+  the group `MoveEntities` and `SaveEntities` take
+  ([hierarchy](https://ecs.xgamedev.net/en/docs/guide/hierarchy#moving)).
 - **Spawns with their own components.** `world.Instantiate(prefab, new ChildOf(parent), …)` in one row copy
   ([prefabs](https://ecs.xgamedev.net/en/docs/guide/prefabs)).
 - **Work spread over updates.** `[ForEach(Slices = N)]` visits about 1 / N of the rows per run

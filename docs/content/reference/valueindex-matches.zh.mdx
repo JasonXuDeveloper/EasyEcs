@@ -16,6 +16,14 @@ public ref struct Matches
 
 ## 属性 [#properties]
 
+### `Count` [#count]
+
+```csharp
+public readonly int Count { get; }
+```
+
+查找时有多少个实体拥有这个键：O(1)，不用遍历（在循环之前确定缓冲区大小）。循环中被销毁的实体，循环会跳过，但这里仍然计入。
+
 ### `Current` [#current]
 
 ```csharp

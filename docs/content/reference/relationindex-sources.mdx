@@ -16,6 +16,14 @@ Enumerates the entities linking to one target (`foreach`), once per link.
 
 ## Properties
 
+### `Count` [#count]
+
+```csharp
+public readonly int Count { get; }
+```
+
+How many links pointed at the target when it was found: O(1), no walk. Links dropped during the loop are skipped by it but still counted here.
+
 ### `Current` [#current]
 
 ```csharp

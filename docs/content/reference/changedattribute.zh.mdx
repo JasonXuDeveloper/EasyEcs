@@ -10,7 +10,7 @@ description: "ForEachAttribute 方法只访问 T 在系统上次运行之后写�
 public sealed class ChangedAttribute<T> : Attribute where T : struct, IComponent, ITrackChanges
 ```
 
-[`ForEachAttribute`](/zh/docs/reference/foreachattribute) 方法只访问 `T` 在系统上次运行之后写过的实体（[`EcsSystem.LastRunTick`](/zh/docs/reference/ecssystem#lastruntick)；第一次运行时是所有拥有它的实体）。和 [`WithAttribute`](/zh/docs/reference/withattribute) 一样要求有 `T`；`T` 要追踪变更（[`ITrackChanges`](/zh/docs/reference/itrackchanges)）。加了多个这种特性，就要求这些组件全都变过。
+[`ForEachAttribute`](/zh/docs/reference/foreachattribute) 方法只访问 `T` 在系统上次运行之后写过的实体（[`EcsSystem.LastRunTick`](/zh/docs/reference/ecssystem#lastruntick)；第一次运行时是所有拥有它的实体）。和 [`WithAttribute`](/zh/docs/reference/withattribute) 一样要求有 `T`；`T` 要追踪变更（[`ITrackChanges`](/zh/docs/reference/itrackchanges)）。加了多个这种特性，就要求这些组件全都变过；只要其中任意一个变过，用 `[ChangedAny<T1, T2>]`。
 
 ## 构造函数 [#constructors]
 

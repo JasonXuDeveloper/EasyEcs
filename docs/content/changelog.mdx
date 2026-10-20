@@ -27,6 +27,13 @@ major or minor version that needs code changes? The
 - `IUniqueIndexed<TKey>`: a key that names one entity, found with `index.Get(key)` / `TryGet(key, out e)`; every write
   that would give a second entity a taken key throws before it changes anything. See
   [indexes and relations](/en/docs/guide/indexes-and-relations).
+- `index.Find(key).Count`, `world.Children(parent).Count` and, for a relation, `relations.Find(target).Count`: how many
+  entities had the key (or links pointed at the target) when found, in O(1), so a buffer is sized without walking the
+  matches twice. `index.KeyCount` and `relations.TargetCount` count the distinct keys (or targets) in O(1). See
+  [indexes and relations](/en/docs/guide/indexes-and-relations#value-indexes).
+- `world.Descendants(root).AddTo(ids, includeRoot)` appends a subtree to a `List<EntityId>`, each parent before its
+  children: the group `MoveEntities` and `SaveEntities` take, without a collecting loop. See
+  [hierarchy](/en/docs/guide/hierarchy#moving).
 - `world.Instantiate(prefab, in c1 … in cn)` and `Instantiate(prefab, entities, in c1 … in cn)`: an instance with up
   to nine components of its own (a parent, a position, an owner) in one row copy. The keys of unique components, the
   given ones and the prefab's, are checked before any entity is created. See [prefabs](/en/docs/guide/prefabs).
