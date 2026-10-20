@@ -55,6 +55,9 @@ icon: RotateCcwClock
 
 ### 修复 [#v4-7-0-fixes]
 
+- 并行 pass（并行 `[ForEach]`、`ForEachParallel`，或者并行系统的一个阶段）可能卡死，调用方一直自旋，同时某一块（或某个系统）被执行两次：
+  上一轮还没收尾的 helper 线程，会在下一轮任务更多时领走下一轮的任务。分片的并行 pass 每次运行的块数都不同，几秒内就会触发。
+  现在每一轮开始前先关闭上一轮的领取。见[多线程](/zh/docs/guide/threading#parallel-foreach-methods)。
 - 写被追踪组件的并行 `[ForEach]` 可能漏打变更 tick：同一个 4,096 行块里的两个分块会争用这个块的变更摘要，`[Changed<T>]` 读取方可能跳过被写过的行。
   这类遍历现在按 4,096 行的整数倍切块。见[决策 D48](/zh/docs/decisions#d48-parallel-tracked-chunks)。
 - `RemoveTypes` 删掉表之后，往旧快照里 `Capture(into)`，或者之后再 `Load`，可能复用另一张表（列不同）的副本。现在副本只给它自己的表复用。
