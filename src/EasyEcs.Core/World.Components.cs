@@ -345,6 +345,7 @@ public sealed partial class World
     internal void SetRow<T>(ref EntityMeta meta, int id, int version, in T value) where T : struct, IComponent
     {
         ushort bit = ComponentType<T>.Bit;
+        Claim(id, in value); // a unique key: free, or the entity's own (before the row moves)
         AddBit(ref meta, id, bit);
         Row<T>(ref meta, bit) = value;
         meta.Archetype.Stamp<T>(meta.Slot, ChangeTick);
@@ -358,10 +359,20 @@ public sealed partial class World
     internal bool EnableRow<T>(ref EntityMeta meta, int id, int version) where T : struct, IComponent
     {
         ushort bit = ComponentType<T>.Bit;
+        if (ComponentType<T>.Unique) ClaimKept<T>(ref meta, id);
         if (!EnableBit(ref meta, bit, DisabledType<T>.Bit)) return false;
         meta.Archetype.Stamp<T>(meta.Slot, ChangeTick);
         Written(id, version, in Row<T>(ref meta, bit));
         return true;
+    }
+
+    /// <summary>The kept value of disabled unique <typeparamref name="T"/> is about to come back: claim its key (cold).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ClaimKept<T>(ref EntityMeta meta, int id) where T : struct, IComponent
+    {
+        var table = meta.Archetype;
+        if (table.ColumnIndex(DisabledType<T>.Bit) is var tag and >= 0 && table.Has(tag, meta.Slot))
+            Claim(id, in Row<T>(ref meta, ComponentType<T>.Bit));
     }
 
     /// <summary>

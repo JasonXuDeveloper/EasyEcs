@@ -127,6 +127,9 @@ public sealed partial class World : IDisposable
     {
         if (prefab.IsGroup)
         {
+            if (entities.Length > 1) // before the first copy: a member's key, given twice
+                using (Structural())
+                    ClaimGroup(prefab.Store, entities.Length);
             for (int i = 0; i < entities.Length; i++) entities[i] = InstantiateGroup(prefab);
             return;
         }
@@ -135,6 +138,7 @@ public sealed partial class World : IDisposable
         {
             if (entities.IsEmpty) return;
             var (source, from) = Source(prefab.Row);
+            ClaimRows(source, from, 1, entities.Length);
             var target = TableFor(source);
             int first = PlaceRows(target, entities);
             target.CloneRows(source, from, first, entities.Length, _changeTick);
@@ -201,6 +205,7 @@ public sealed partial class World : IDisposable
         using (Structural())
         {
             var (source, from) = Source(original);
+            ClaimRows(source, from, 1, 1); // a clone's unique keys are its original's: taken (null keys aside)
             var target = sameWorld ? source : TableFor(source);
             int id = AllocateId(); // may grow Meta: the original's row was read first
             int slot = Place(id, target);

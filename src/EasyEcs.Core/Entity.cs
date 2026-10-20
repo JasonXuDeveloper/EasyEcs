@@ -248,10 +248,12 @@ public readonly partial struct Entity : IEquatable<Entity>
         {
             ref var meta = ref world.Live(new Entity(world, id, version));
             ushort bit = ComponentType<T>.Bit;
+            if (ComponentType<T>.Unique) world.Claim(id, default(T)); // the default's key, before the row moves
             world.AddBit(ref meta, id, bit);
             ref T value = ref World.Row<T>(ref meta, bit);
             value = default;
             meta.Archetype.Stamp<T>(meta.Slot, world.ChangeTick);
+            if (ComponentType<T>.Unique) world.IndexUnique(id, version, in value); // a unique index knows every key
             return ref value;
         }
     }

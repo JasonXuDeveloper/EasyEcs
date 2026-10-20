@@ -127,17 +127,10 @@ public sealed partial class World
 
         // A new table owns its mask: a caller's reused mask (Load) keeps changing its bits past 256.
         var componentMask = mask.Clone();
-        if (groups == null)
-        {
-            archetype = new Archetype(in componentMask);
-            _archetypes[componentMask] = archetype;
-        }
-        else
-        {
-            var key = new GroupedTable(componentMask, groupsKey);
-            archetype = new Archetype(in componentMask, groups);
-            _groupedTables[key] = archetype;
-        }
+        archetype = new Archetype(in componentMask, groups);
+        if (archetype.Unique) IndexUnique(archetype); // before the table is registered: throws when no index can be made
+        if (groups == null) _archetypes[componentMask] = archetype;
+        else _groupedTables[new GroupedTable(componentMask, groupsKey)] = archetype;
 
         Volatile.Write(ref _allArchetypes, Append(_allArchetypes, archetype));
         _hierarchy |= componentMask.HasBit(ChildOfBit); // destroys look for children from now on

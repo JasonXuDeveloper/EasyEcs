@@ -31,7 +31,8 @@ public sealed partial class World
     /// the entity is a root here. Indexes and groups learn the entities; tracked components count as written.
     /// O(entities × components). Not while a pass iterates.
     /// </summary>
-    /// <exception cref="System.IO.InvalidDataException">The bytes are not a save.</exception>
+    /// <exception cref="System.IO.InvalidDataException">The bytes are not a save, or give a unique key to several entities.</exception>
+    /// <exception cref="InvalidOperationException">An entity of the save has a unique key (<see cref="IUniqueIndexed{TKey}"/>) an entity of this world has: nothing is created.</exception>
     public int LoadEntities(ReadOnlySpan<byte> input, Span<Entity> entities = default)
     {
         var source = _arrivals ??= new World(new WorldOptions { InitialEntityCapacity = 16 });
@@ -60,7 +61,11 @@ public sealed partial class World
     /// Components the save does not hold keep their ticks.
     /// </summary>
     /// <exception cref="ArgumentException"><paramref name="into"/> does not hold one living entity of this world per saved entity.</exception>
-    /// <exception cref="System.IO.InvalidDataException">The bytes are not a save.</exception>
+    /// <exception cref="System.IO.InvalidDataException">The bytes are not a save, or give a unique key to several entities.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// A loaded unique key (<see cref="IUniqueIndexed{TKey}"/>) is held by another entity than the one it is loaded onto
+    /// (checked against the world before the load): nothing is written.
+    /// </exception>
     public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into, bool markWritten = true)
     {
         var source = _arrivals ??= new World(new WorldOptions { InitialEntityCapacity = 16 });
@@ -74,6 +79,13 @@ public sealed partial class World
             foreach (var entity in into)
                 if (entity.World != this || !IsAlive(entity.Id))
                     throw new ArgumentException("An entity to load into is stale or of another world", nameof(into));
+            // Unique keys first, against the world as it is before the load: nothing is written when one is taken.
+            if (ComponentInfo.AnyUnique)
+                for (int i = 0; i < count; i++)
+                {
+                    ref var saved = ref source.MetaRef(source._loadOrder[i].Index);
+                    ClaimRows(saved.Archetype, saved.Slot, 1, 1, into[i].Index);
+                }
 
             // Every saved entity maps to its entity of into: the loaded values' references are rewritten in the source
             // first, then copied.
@@ -172,7 +184,9 @@ public sealed partial class World
     /// them from a save of the group, without encoding it; then they are destroyed here (their children with them, so
     /// move a hierarchy together; cleanup components stay behind for their systems). The new handles are written in
     /// order into <paramref name="moved"/> (as many as fit, <see cref="Entity"/> default for a skipped id); returns how
-    /// many moved. O(entities × components). Owner thread of both worlds; not while a pass iterates in either.
+    /// many moved. O(entities × components). Owner thread of both worlds; not while a pass iterates in either. Throws
+    /// <see cref="InvalidOperationException"/>, moving nothing, when a moving entity has a unique key
+    /// (<see cref="IUniqueIndexed{TKey}"/>) an entity of <paramref name="target"/> has.
     /// </summary>
     public int MoveEntities(World target, ReadOnlySpan<EntityId> entities, Span<Entity> moved = default)
     {
@@ -187,6 +201,10 @@ public sealed partial class World
             using (target.Structural())
             {
                 target.ThrowIfIterating();
+                if (ComponentInfo.AnyUnique) // the moving entities' unique keys, before the first row moves
+                    foreach (var id in entities)
+                        if ((uint)id.Index < (uint)Meta.Length && Meta[id.Index] is { Archetype: { } table } meta && meta.Version == id.Version)
+                            target.ClaimRows(table, meta.Slot, 1, 1);
                 target.BeginArrival(this);
                 Archetype run = null;
                 int first = 0, length = 0;
@@ -234,6 +252,7 @@ public sealed partial class World
         using (Structural())
         {
             ThrowIfIterating();
+            ClaimGroup(source, 1);
             BeginArrival(source);
             foreach (var table in source._allArchetypes)
             {
@@ -247,6 +266,17 @@ public sealed partial class World
 
         RootOrphans();
         return created;
+    }
+
+    /// <summary>
+    /// Every entity of <paramref name="source"/> (a prefab's store, a loaded save) is about to arrive
+    /// <paramref name="copies"/> times: claim their unique keys before any row is copied (<see cref="ClaimRows"/>).
+    /// Inside the structural gate.
+    /// </summary>
+    private void ClaimGroup(World source, int copies)
+    {
+        if (!ComponentInfo.AnyUnique) return;
+        foreach (var table in source._allArchetypes) ClaimRows(table, 0, table.Count, copies);
     }
 
     /// <summary>The entity <paramref name="id"/> of the last arrival's source became (<see cref="HasArrived"/>).</summary>

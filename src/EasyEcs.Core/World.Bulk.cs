@@ -21,7 +21,12 @@ public sealed partial class World
         var match = Volatile.Read(ref GetQueryEntry([], in filter).Match);
         int count = match.CountAlive(filter.Tick); // a moved row can be visited again in its new table: count first
         var op = new SetOp<T> { Value = value, Bit = ComponentType<T>.Bit };
-        using (Structural()) WalkDown(match, filter.Tick, ref op);
+        using (Structural())
+        {
+            if (ComponentType<T>.Unique) ClaimBulk(match, filter.Tick, in value, kept: false);
+            WalkDown(match, filter.Tick, ref op);
+        }
+
         return count;
     }
 
@@ -63,8 +68,29 @@ public sealed partial class World
     public int EnableAll<T>(in QueryFilter filter = default) where T : struct, IComponent
     {
         var op = new EnableOp<T> { Bit = ComponentType<T>.Bit, Tag = DisabledType<T>.Bit };
-        using (Structural()) WalkDown(Bulk<Disabled<T>>(in filter), filter.Tick, ref op);
+        using (Structural())
+        {
+            var match = Bulk<Disabled<T>>(in filter);
+            if (ComponentType<T>.Unique) ClaimBulk(match, filter.Tick, default(T), kept: true);
+            WalkDown(match, filter.Tick, ref op);
+        }
+
         return op.Count;
+    }
+
+    /// <summary>
+    /// Before a bulk write of unique <typeparamref name="T"/>: every row of <paramref name="match"/> passing the filter
+    /// claims the key it is about to hold (<paramref name="value"/>, or with <paramref name="kept"/> the value its
+    /// disabled <typeparamref name="T"/> kept), each key once, so a taken or repeated key throws before any row changes.
+    /// Cold: unique components only. Inside the structural gate.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ClaimBulk<T>(QueryMatch match, ulong since, in T value, bool kept) where T : struct, IComponent
+    {
+        var index = UniqueIndex(ComponentType<T>.Bit);
+        index.BeginBatch();
+        var op = new ClaimOp<T> { Index = Unsafe.As<IUniqueOf<T>>(index), Value = value, Bit = ComponentType<T>.Bit, Kept = kept };
+        WalkDown(match, since, ref op);
     }
 
     private QueryMatch Bulk<T>(in QueryFilter filter) where T : struct, IComponent
@@ -235,6 +261,32 @@ public sealed partial class World
         public void Apply(World world, Archetype table, int slot, EntityId entity)
         {
             if (world.EnableRow<T>(ref world.MetaRef(entity.Index), entity.Index, entity.Version)) Count++;
+        }
+    }
+
+    /// <summary>The claims of a bulk write (<see cref="ClaimBulk{T}"/>): changes no row.</summary>
+    private struct ClaimOp<T> : IRowOp where T : struct, IComponent
+    {
+        public IUniqueOf<T> Index;
+        public T Value;
+        public ushort Bit;
+        public bool Kept;
+
+        public readonly bool Words(World world, Archetype table) => true;
+
+        public readonly void ApplyWord(World world, Archetype table, int word, ulong rows)
+        {
+            for (ulong r = rows; r != 0; r &= r - 1)
+            {
+                int slot = (word << 6) + BitOperations.TrailingZeroCount(r);
+                Apply(world, table, slot, table.Slots[slot]);
+            }
+        }
+
+        public readonly void Apply(World world, Archetype table, int slot, EntityId entity)
+        {
+            if (Kept) Index.ClaimBatch(entity.Index, in table.Ref<T>(Bit, slot));
+            else Index.ClaimBatch(entity.Index, in Value);
         }
     }
 

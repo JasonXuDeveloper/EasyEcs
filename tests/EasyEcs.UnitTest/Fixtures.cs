@@ -21,6 +21,14 @@ public record struct Callsign(string Value) : IComponent, IIndexed<string> // a 
 {
     public string Key => Value;
 }
+public record struct Login(int Id) : IComponent, IUniqueIndexed<int> // unique: one entity per login
+{
+    public int Key => Id;
+}
+public record struct Handle(string Value) : IComponent, IUniqueIndexed<string> // unique, a managed key (null: none)
+{
+    public string Key => Value;
+}
 public struct Marked : IComponent;                        // tag
 public record struct C1(int V) : IComponent;
 public record struct C2(int V) : IComponent;

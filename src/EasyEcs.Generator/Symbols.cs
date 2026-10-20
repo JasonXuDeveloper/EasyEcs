@@ -30,6 +30,7 @@ internal static class Symbols
     public const string DynamicBuffer = "EasyEcs.DynamicBuffer<T>";
     public const string TrackChanges = "EasyEcs.ITrackChanges";
     public const string Indexed = "EasyEcs.IIndexed<TKey>";
+    public const string UniqueIndexed = "EasyEcs.IUniqueIndexed<TKey>";
     public const string Group = "EasyEcs.IGroup";
     public const string Cleanup = "EasyEcs.ICleanupComponent";
     public const string EntityId = "EasyEcs.EntityId";

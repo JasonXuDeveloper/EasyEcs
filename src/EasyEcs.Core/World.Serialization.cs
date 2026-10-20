@@ -323,7 +323,8 @@ public sealed partial class World
     /// </param>
     /// <exception cref="InvalidDataException">
     /// The bytes are not a save or are damaged, or a component's fields changed since the save (an unmanaged one's
-    /// size or layout, a managed one's Nino layout). The world is then left as it was.
+    /// size or layout, a managed one's Nino layout), or the save gives one key of a unique component
+    /// (<see cref="IUniqueIndexed{TKey}"/>) to several entities. The world is then left as it was.
     /// </exception>
     public void Load(ReadOnlySpan<byte> input, bool markWritten = true)
     {
@@ -337,6 +338,7 @@ public sealed partial class World
             throw new InvalidDataException("A damaged save: " + e.Message, e);
         }
 
+        if (ComponentInfo.AnyUnique) ClaimLoaded(_loadSnapshot); // a key twice: the world stays as it was
         Restore(_loadSnapshot, true, markWritten);
         if (_groupByBit == null) return;
         using (Structural())

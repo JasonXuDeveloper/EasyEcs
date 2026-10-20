@@ -104,6 +104,9 @@ internal sealed class Archetype
     /// <summary>Whether the table has an <see cref="ICleanupComponent"/> column (destroying a row may keep it).</summary>
     public readonly bool HasCleanup;
 
+    /// <summary>Whether a column is a unique component (<see cref="IUniqueIndexed{TKey}"/>): copies of its rows claim their keys.</summary>
+    public readonly bool Unique;
+
     /// <summary>
     /// The group of each <see cref="IGroup"/> column (by column; 0 for other columns), or null when the table has none
     /// set: every row's grouped component is in this group (<see cref="World.GroupBy{T}"/>).
@@ -176,6 +179,7 @@ internal sealed class Archetype
             _tracked |= info.Owner >= 0;
             HasDisabled |= info.DisabledOf >= 0;
             HasCleanup |= info.Cleanup;
+            Unique |= info.Unique;
             _columnOf[Components[i]] = (short)i;
             ByBit[Components[i]].Set(Columns[i], info.Managed);
         }

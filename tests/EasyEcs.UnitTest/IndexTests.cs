@@ -46,6 +46,14 @@ public class IndexTests
         readonly string IIndexed<string>.Key => Name;
     }
 
+    /// <summary>A unique component the generator registers nothing for (generic): its index waits for a first Index call.</summary>
+    private record struct Ticket<TOf>(int Id) : IComponent, IUniqueIndexed<int>
+    {
+        public readonly int Key => Id;
+    }
+
+    private struct Unregistered;
+
     private static List<Entity> All<T, TKey>(ValueIndex<T, TKey>.Matches matches)
         where T : struct, IComponent, IIndexed<TKey> where TKey : System.IEquatable<TKey>
     {
@@ -408,5 +416,337 @@ public class IndexTests
         Assert.That(index.Count("a"), Is.Zero);
         world.Update();
         Assert.That(index.Count("a!!"), Is.EqualTo(200));
+    }
+
+    [Test]
+    public void AUniqueIndexFindsTheOneEntityOfAKey()
+    {
+        using var world = new World();
+        var a = world.CreateEntity(new Login(1));
+        var b = world.CreateEntity(new Login(2), new Health(5));
+        var accounts = world.LoginIndex;                     // the generated member: Index<Login, int>()
+        Assert.That(accounts, Is.SameAs(world.Index<Login, int>()));
+        Assert.That(accounts.Get(1), Is.EqualTo(a));
+        Assert.That(accounts.TryGet(2, out var found) && found == b, Is.True);
+        Assert.That(accounts.TryGet(3, out _), Is.False);
+        Assert.That(() => accounts.Get(3), Throws.InvalidOperationException.With.Message.Contains("3"));
+        Assert.That(accounts.Count(1), Is.EqualTo(1));        // the multi-value API works too
+        Assert.That(All(accounts.Find(2)), Is.EqualTo(new[] { b }));
+        Assert.That(accounts.Ascending().MoveNext(), Is.True);
+    }
+
+    [Test]
+    public void SetRejectsAKeyAnotherEntityHas()
+    {
+        using var world = new World();
+        var accounts = world.Index<Login, int>();
+        var a = world.CreateEntity(new Login(1));
+        var b = world.CreateEntity(new Login(2));
+        var c = world.CreateEntity(new Health(3));
+
+        Assert.That(() => b.Set(new Login(1)),
+            Throws.InvalidOperationException.With.Message.Contains(nameof(Login)).And.Message.Contains("key 1"));
+        Assert.That(b.Read<Login>().Id, Is.EqualTo(2));      // unchanged, still indexed under its key
+        Assert.That(accounts.Get(2), Is.EqualTo(b));
+        Assert.That(accounts.Get(1), Is.EqualTo(a));
+
+        Assert.That(() => c.Set(new Login(1)), Throws.InvalidOperationException);
+        Assert.That(c.Has<Login>(), Is.False);              // the row did not move
+        Assert.That(() => c.Set(new Login(1), new Frozen()), Throws.InvalidOperationException);
+        Assert.That(c.Has<Frozen>(), Is.False);               // several components: none is written
+        Assert.That(c.Read<Health>().Value, Is.EqualTo(3));
+
+        a.Set(new Login(1));                                 // its own key again
+        a.Set(new Login(1), new Health(1));
+        a.Set(new Login(3));                                 // a key moves: the holder changes first
+        b.Set(new Login(1));
+        Assert.That((accounts.Get(1), accounts.Get(3), accounts.Count(2)), Is.EqualTo((b, a, 0)));
+    }
+
+    [Test]
+    public void CreatingEntitiesRejectsTakenAndRepeatedKeys()
+    {
+        using var world = new World();
+        var accounts = world.Index<Login, int>();
+        world.CreateEntity(new Login(1));
+        Assert.That(() => world.CreateEntity(new Login(1)), Throws.InvalidOperationException);
+        Assert.That(() => world.CreateEntity(new Health(1), new Login(1)), Throws.InvalidOperationException);
+        Assert.That(() => world.CreateEntities(new Entity[2], new Login(2)),
+            Throws.InvalidOperationException.With.Message.Contains("several"));
+        Assert.That(() => world.CreateEntities(new Entity[1], new Login(1)), Throws.InvalidOperationException);
+        Assert.That((world.EntityCount, accounts.Count(2)), Is.EqualTo((1, 0)));
+
+        var one = new Entity[1];
+        world.CreateEntities(one, new Login(2));             // one entity: a free key is fine
+        Assert.That(accounts.Get(2), Is.EqualTo(one[0]));
+        world.CreateEntities(System.Span<Entity>.Empty, new Login(1));
+        Assert.That(world.EntityCount, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void GetOrAddClaimsTheDefaultKey()
+    {
+        using var world = new World();
+        var accounts = world.Index<Login, int>();
+        var a = world.CreateEntity(new Health(1));
+        var b = world.CreateEntity(new Health(2));
+#pragma warning disable EECS015 // GetOrAdd of an indexed component is what this tests
+        a.GetOrAdd<Login>();
+        Assert.That(accounts.Get(0), Is.EqualTo(a));           // indexed under the default's key
+        Assert.That(() => b.GetOrAdd<Login>(), Throws.InvalidOperationException);
+#pragma warning restore EECS015
+        Assert.That(b.Has<Login>(), Is.False);
+    }
+
+    [Test]
+    public void DestroyRemoveAndDisableFreeTheKey()
+    {
+        using var world = new World();
+        var accounts = world.Index<Login, int>();
+        var a = world.CreateEntity(new Login(1));
+        a.Destroy();
+        var b = world.CreateEntity(new Login(1));
+        b.Remove<Login>();
+        var c = world.CreateEntity(new Login(1));
+        Assert.That(c.Disable<Login>(), Is.True);            // a disabled key is no key
+        var d = world.CreateEntity(new Login(1));
+        Assert.That(accounts.Get(1), Is.EqualTo(d));
+
+        // Enabling it again would give the key twice: refused, the component stays disabled.
+        Assert.That(() => c.Enable<Login>(), Throws.InvalidOperationException);
+        Assert.That(c.IsDisabled<Login>(), Is.True);
+        d.Set(new Login(2));
+        Assert.That(c.Enable<Login>(), Is.True);
+        Assert.That(accounts.Get(1), Is.EqualTo(c));
+    }
+
+    [Test]
+    public void BulkWritesClaimEveryKeyFirst()
+    {
+        using var world = new World();
+        var accounts = world.Index<Login, int>();
+        var a = world.CreateEntity(new Login(1), new Health(1));
+        var b = world.CreateEntity(new Login(2), new Health(2));
+        Assert.That(() => world.SetAll(new Login(7), QueryFilter.Create().With<Health>()), Throws.InvalidOperationException);
+        Assert.That((a.Read<Login>().Id, b.Read<Login>().Id, accounts.Count(7)), Is.EqualTo((1, 2, 0)));
+
+        b.Set(new Frozen());
+        Assert.That(world.SetAll(new Login(7), QueryFilter.Create().Without<Frozen>()), Is.EqualTo(1)); // one entity: fine
+        Assert.That(accounts.Get(7), Is.EqualTo(a));
+        Assert.That(world.SetAll(new Login(7), QueryFilter.Create().Without<Frozen>()), Is.EqualTo(1)); // its own key
+        Assert.That(() => world.SetAll(new Login(7), QueryFilter.Create().With<Frozen>()), Throws.InvalidOperationException);
+
+        // Two kept values with one key: enabling both would give it twice.
+        b.Set(new Login(9));
+        b.Disable<Login>();
+        a.Set(new Login(9));
+        a.Disable<Login>();
+        Assert.That(() => world.EnableAll<Login>(), Throws.InvalidOperationException);
+        Assert.That(a.IsDisabled<Login>() && b.IsDisabled<Login>(), Is.True);
+        Assert.That(accounts.Count(9), Is.Zero);
+        a.Enable<Login>();
+        a.Set(new Login(4));
+        a.Disable<Login>();
+        Assert.That(world.EnableAll<Login>(), Is.EqualTo(2));
+        Assert.That((accounts.Get(4), accounts.Get(9)), Is.EqualTo((a, b)));
+    }
+
+    [Test]
+    public void ClonesAndPrefabsCannotRepeatAKey()
+    {
+        using var world = new World();
+        var accounts = world.Index<Login, int>();
+        var a = world.CreateEntity(new Login(1), new Health(1));
+        Assert.That(() => a.Clone(), Throws.InvalidOperationException);
+        Assert.That(world.EntityCount, Is.EqualTo(1));
+        var named = world.CreateEntity(new Handle(null), new Health(1));
+        Assert.That(named.Clone().Has<Handle>(), Is.True);     // a null key is no key
+
+        var prefab = new Prefab().Set(new Login(2), new Health(10));
+        var first = world.Instantiate(prefab);
+        Assert.That(accounts.Get(2), Is.EqualTo(first));
+        Assert.That(() => world.Instantiate(prefab), Throws.InvalidOperationException);
+        first.Destroy();
+        Assert.That(() => world.Instantiate(prefab, new Entity[2]), Throws.InvalidOperationException);
+        Assert.That(world.EntityCount, Is.EqualTo(3));
+        world.Instantiate(prefab, new Entity[1]);
+
+        // A group: its members' keys are distinct (the prefab's own index), but two instances repeat them.
+        var boss = new Prefab().Set(new Login(10));
+        boss.AddMember().Set(new Login(11));
+        Assert.That(() => boss.AddMember().Set(new Login(10)), Throws.InvalidOperationException);
+        Assert.That(() => world.Instantiate(boss, new Entity[2]), Throws.InvalidOperationException);
+        Assert.That(world.EntityCount, Is.EqualTo(4));
+        world.Instantiate(boss);
+        Assert.That(() => world.Instantiate(boss), Throws.InvalidOperationException);
+        Assert.That((world.EntityCount, accounts.Get(11).Has<Login>()), Is.EqualTo((7, true)));
+    }
+
+    [Test]
+    public void NullKeysAreNoKeys()
+    {
+        using var world = new World();
+        var handles = world.Index<Handle, string>();
+        var a = world.CreateEntity(new Handle(null));
+        var b = world.CreateEntity(new Handle(null));
+        world.CreateEntities(new Entity[3], new Handle(null));
+        world.SetAll(new Handle(null));
+        Assert.That(handles.TryGet(null, out _), Is.False);
+        a.Set(new Handle("a"));
+        Assert.That(() => b.Set(new Handle("a")), Throws.InvalidOperationException);
+        Assert.That(handles.Get("a"), Is.EqualTo(a));
+    }
+
+    [Test]
+    public void LoadsRejectRepeatedAndTakenKeys()
+    {
+        using var source = new World();
+        var first = source.CreateEntity(new Login(0x1234567), new Health(1));
+        var second = source.CreateEntity(new Login(0x7654321), new Health(2));
+        var save = Save(source);
+        var twice = Repeat(save, 0x7654321, 0x1234567);       // the same save with the first key twice
+        var group = SaveEntities(source, first.Id, second.Id);
+        var groupTwice = Repeat(group, 0x7654321, 0x1234567);
+
+        using var world = new World();
+        var kept = world.CreateEntity(new Login(5));
+        Assert.That(() => world.Load(twice), Throws.TypeOf<System.IO.InvalidDataException>().With.Message.Contains(nameof(Login)));
+        Assert.That((world.EntityCount, world.LoginIndex.Get(5)), Is.EqualTo((1, kept)));
+        Assert.That(() => world.LoadEntities(groupTwice), Throws.TypeOf<System.IO.InvalidDataException>());
+        Assert.That(world.EntityCount, Is.EqualTo(1));
+
+        world.Load(save);                                      // replaces the world: its keys go
+        Assert.That((world.EntityCount, world.LoginIndex.TryGet(5, out _)), Is.EqualTo((2, false)));
+        var loaded = world.LoginIndex.Get(0x1234567);
+        Assert.That(loaded.Read<Health>().Value, Is.EqualTo(1));
+        Assert.That(() => loaded.Set(new Login(0x7654321)), Throws.InvalidOperationException); // indexed at once
+
+        // LoadEntities, LoadEntitiesInto, MoveEntities: a key the world has already is refused before anything arrives.
+        Assert.That(() => world.LoadEntities(group), Throws.InvalidOperationException);
+        Assert.That(world.EntityCount, Is.EqualTo(2));
+        var into = new[] { world.CreateEntity(new Health(7)), world.CreateEntity(new Health(8)) };
+        Assert.That(() => world.LoadEntitiesInto(group, into), Throws.InvalidOperationException);
+        Assert.That(into[0].Has<Login>() || into[1].Has<Login>(), Is.False);
+        Assert.That(() => source.MoveEntities(world, [first.Id]), Throws.InvalidOperationException);
+        Assert.That((source.EntityCount, world.EntityCount, first.IsAlive), Is.EqualTo((2, 4, true)));
+
+        using var empty = new World();
+        Assert.That(empty.LoadEntities(group), Is.EqualTo(2));
+        using var other = new World();
+        var targets = new[] { other.CreateEntity(), other.CreateEntity(new Login(0x7654321)) };
+        other.LoadEntitiesInto(group, targets);                // targets[1] gets the key it holds
+        Assert.That((other.LoginIndex.Get(0x1234567), other.LoginIndex.Get(0x7654321)), Is.EqualTo((targets[0], targets[1])));
+        using var moved = new World();
+        Assert.That(source.MoveEntities(moved, [first.Id]), Is.EqualTo(1));
+        Assert.That(moved.LoginIndex.Get(0x1234567).Read<Health>().Value, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void GroupMovesKeepUniqueKeys()
+    {
+        using var world = new World();
+        var a = world.CreateEntity(new Login(1), new Zone(1));
+        var b = world.CreateEntity(new Login(2), new Zone(2));
+        world.GroupBy<Zone>();                                 // the rows move to their groups' tables: no key changes
+        a.Set(new Zone(2));                                    // a row move between group tables: the key goes along
+        Assert.That(() => b.Set(new Login(1), new Zone(1)), Throws.InvalidOperationException);
+        Assert.That((b.Read<Zone>().Id, b.Read<Login>().Id), Is.EqualTo((2, 2)));
+        Assert.That((world.LoginIndex.Get(1), world.LoginIndex.Get(2)), Is.EqualTo((a, b)));
+        Assert.That(() => world.CreateEntity(new Login(2), new Zone(3)), Throws.InvalidOperationException);
+        Assert.That(world.EntityCount, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void RestoreIndexesUniqueKeysAtOnce()
+    {
+        using var world = new World();
+        var a = world.CreateEntity(new Login(1));
+        var snapshot = world.Capture();
+        a.Set(new Login(2));
+        world.CreateEntity(new Login(1));
+        world.Restore(snapshot);
+        Assert.That(() => world.CreateEntity(new Login(1)), Throws.InvalidOperationException); // before any lookup
+        Assert.That((world.EntityCount, world.LoginIndex.Get(1), world.LoginIndex.TryGet(2, out _)), Is.EqualTo((1, a, false)));
+    }
+
+    [Test]
+    public void EachWorldHasItsOwnKeys()
+    {
+        using var one = new World();
+        using var two = new World();
+        var a = one.CreateEntity(new Login(1));
+        var b = two.CreateEntity(new Login(1));
+        Assert.That((one.LoginIndex.Get(1), two.LoginIndex.Get(1)), Is.EqualTo((a, b)));
+    }
+
+    [Test]
+    public void AUniqueComponentWithoutARegisteredIndexWaitsForOne()
+    {
+        using var world = new World();
+        Assert.That(() => world.CreateEntity(new Ticket<Unregistered>(1)), Throws.InvalidOperationException.With.Message.Contains("Index"));
+        Assert.That(world.EntityCount, Is.Zero);              // nothing was created
+        var tickets = world.Index<Ticket<Unregistered>, int>();
+        var a = world.CreateEntity(new Ticket<Unregistered>(1));
+        Assert.That(() => world.CreateEntity(new Ticket<Unregistered>(1)), Throws.InvalidOperationException);
+        Assert.That(tickets.Get(1), Is.EqualTo(a));
+        using var other = new World();                         // known to every world from now on
+        other.CreateEntity(new Ticket<Unregistered>(1));
+        Assert.That(() => other.CreateEntity(new Ticket<Unregistered>(1)), Throws.InvalidOperationException);
+    }
+
+    [Test]
+    public void UniqueWritesAndLookupsDoNotAllocate()
+    {
+        using var world = new World();
+        var accounts = world.LoginIndex;
+        var players = new Entity[64];
+        world.CreateEntities(players, new Health(1));
+        for (int i = 0; i < players.Length; i++) players[i].Set(new Login(i));
+        int Churn()
+        {
+            int found = 0;
+            for (int i = 0; i < players.Length; i++) players[i].Set(new Login(i + 1000)); // every key moves
+            for (int i = 0; i < players.Length; i++) players[i].Set(new Login(i));
+            for (int i = 0; i < players.Length; i++)
+            {
+                if (accounts.Get(i) == players[i]) found++;
+                if (accounts.TryGet(i + 1000, out _)) found--;
+            }
+
+            world.CreateEntity(new Login(-1)).Destroy();
+            return found;
+        }
+
+        Churn();
+        long before = System.GC.GetAllocatedBytesForCurrentThread();
+        int result = Churn();
+        Assert.That(System.GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(result, Is.EqualTo(players.Length));
+    }
+
+    private static byte[] Save(World world)
+    {
+        var buffer = new System.Buffers.ArrayBufferWriter<byte>();
+        world.Save(buffer);
+        return buffer.WrittenSpan.ToArray();
+    }
+
+    private static byte[] SaveEntities(World world, params EntityId[] ids)
+    {
+        var buffer = new System.Buffers.ArrayBufferWriter<byte>();
+        world.SaveEntities(buffer, ids);
+        return buffer.WrittenSpan.ToArray();
+    }
+
+    /// <summary><paramref name="save"/> with the int <paramref name="find"/> (found once) replaced by <paramref name="with"/>.</summary>
+    private static byte[] Repeat(byte[] save, int find, int with)
+    {
+        var copy = (byte[])save.Clone();
+        var pattern = System.BitConverter.GetBytes(find);
+        int at = System.MemoryExtensions.IndexOf(System.MemoryExtensions.AsSpan(copy), pattern);
+        Assert.That(at, Is.GreaterThanOrEqualTo(0));
+        Assert.That(System.MemoryExtensions.IndexOf(System.MemoryExtensions.AsSpan(copy, at + 1), pattern), Is.LessThan(0));
+        System.BitConverter.GetBytes(with).CopyTo(copy, at);
+        return copy;
     }
 }

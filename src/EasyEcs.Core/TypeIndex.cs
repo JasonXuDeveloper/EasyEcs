@@ -43,6 +43,12 @@ internal static class ComponentType<T> where T : struct, IComponent
     /// </summary>
     internal static readonly bool Indexed = default(T) is IIndexed || default(T) is IBuffer buffer && buffer.Relational; // a buffer of relations: by its targets
 
+    /// <summary>
+    /// <typeparamref name="T"/> implements <see cref="IUniqueIndexed{TKey}"/>: a write claims its key first
+    /// (<see cref="World.Claim{T}"/>), folded like <see cref="Indexed"/>.
+    /// </summary>
+    internal static readonly bool Unique = default(T) is IUniqueIndexed;
+
     /// <summary><typeparamref name="T"/> implements <see cref="IGroup"/>: a written value may move its row (folded like <see cref="Indexed"/>).</summary>
     internal static readonly bool Grouped = default(T) is IGroup;
 

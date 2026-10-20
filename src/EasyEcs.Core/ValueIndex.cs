@@ -196,14 +196,23 @@ internal struct TargetSlots
 /// The value index of component <typeparamref name="T"/> in one world (<see cref="World.Index{T,TKey}"/>). It is kept
 /// current as values are written: <c>Set</c> and <c>CreateEntity</c> re-index the entity at once (O(1)), and entities
 /// leave it as soon as they are destroyed or lose the component, so a lookup does no catching up. The first lookup
-/// (and the first after <see cref="World.Restore(WorldSnapshot)"/>) indexes every row once. Lookups allocate nothing once every key has
+/// (and the first after <see cref="World.Restore(WorldSnapshot)"/>) indexes every row once; the index of a unique
+/// component (<see cref="IUniqueIndexed{TKey}"/>) is current from the world's first table holding it instead, and
+/// refuses a write that would give a key to a second entity. Lookups allocate nothing once every key has
 /// been seen; the index belongs to the world's owner thread, like component values (systems that look up from
 /// <c>OnUpdate</c> or instance methods run alone).
 /// </summary>
-public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
+public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, World.IUniqueOf<T>, World.IUniqueIndex
     where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>
 {
+    // A unique component (IUniqueIndexed<TKey>): its world creates the index with its first table holding T, so the
+    // index is built from the start (no row to catch up on) and every write claims its key before it is stored.
+    private static readonly bool Unique = default(T) is IUniqueIndexed<TKey>;
+
     private readonly World _world;
+
+    // The keys a batch of a unique index claimed (SetAll, EnableAll, Load), emptied when the next batch begins.
+    private HashSet<TKey> _batch;
 
     // Key -> its list (IndexHead: the entities in one array, read in order by a lookup). _nodes (indexed by entity id)
     // knows each entity's key and place in its list, so moving it between keys and dropping it are O(1).
@@ -230,7 +239,11 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
         public bool Linked;
     }
 
-    internal ValueIndex(World world) => _world = world;
+    internal ValueIndex(World world)
+    {
+        _world = world;
+        _built = Unique; // created before any row of T (World.IndexUnique)
+    }
 
     /// <summary>The world the index belongs to.</summary>
     internal World World => _world;
@@ -295,8 +308,85 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
         _sorted = null; // sorted again by the next ordered walk (one sort instead of one insertion per key)
         _sortedCount = 0;
         _keysVersion++;
-        _built = !rebuild;
+        _built = !rebuild || Unique; // a unique index is given the restored rows at once (World.ResetIndexes)
     }
+
+    /// <inheritdoc cref="World.IUniqueOf{T}.Claim"/>
+    void World.IUniqueOf<T>.Claim(int id, in T value) => Claim(id, value.Key);
+
+    /// <inheritdoc cref="World.IUniqueOf{T}.ClaimAll"/>
+    void World.IUniqueOf<T>.ClaimAll(int count, in T value)
+    {
+        var key = value.Key;
+        if (count > 1 && !IsNull(key)) throw Twice(key);
+        Claim(-1, key);
+    }
+
+    /// <inheritdoc cref="World.IUniqueOf{T}.ClaimBatch"/>
+    void World.IUniqueOf<T>.ClaimBatch(int id, in T value)
+    {
+        var key = value.Key;
+        Claim(id, key);
+        if (!IsNull(key) && !_batch.Add(key)) throw Twice(key);
+    }
+
+    /// <inheritdoc cref="World.IUniqueIndex.BeginBatch"/>
+    void World.IUniqueIndex.BeginBatch() => (_batch ??= new()).Clear();
+
+    /// <inheritdoc cref="World.IUniqueIndex.ClaimRows"/>
+    void World.IUniqueIndex.ClaimRows(Archetype table, int column, int first, int count, int copies, int into)
+    {
+        ref var values = ref table.Data<T>(column);
+        for (int r = first; r < first + count; r++)
+        {
+            if (!table.Has(column, r)) continue; // absent or disabled: not indexed
+            var key = Unsafe.Add(ref values, r).Key;
+            if (copies > 1 && !IsNull(key)) throw Twice(key);
+            Claim(into, key);
+        }
+    }
+
+    /// <inheritdoc cref="World.IUniqueIndex.ClaimLoaded"/>
+    void World.IUniqueIndex.ClaimLoaded(Archetype.Rows rows, int column)
+    {
+        var values = rows.Columns[column];
+        var present = rows.Present[column];
+        for (int r = 0; r < rows.Count; r++)
+        {
+            if (present != null && (present[r >> 6] & (1UL << r)) == 0) continue; // absent or disabled
+            // A load's rows are plain arrays: T[] for a managed T, unaligned bytes for the others.
+            var key = (RuntimeHelpers.IsReferenceOrContainsReferences<T>()
+                ? Unsafe.As<T[]>(values)[r]
+                : Unsafe.ReadUnaligned<T>(ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Unsafe.As<byte[]>(values)), r * Unsafe.SizeOf<T>()))).Key;
+            if (!IsNull(key) && !_batch.Add(key))
+                throw new System.IO.InvalidDataException($"The save holds key {key} of unique {typeof(T).Name} twice");
+        }
+    }
+
+    /// <summary>
+    /// Entity <paramref name="id"/> (-1: a new one) is about to hold <paramref name="key"/>: throws when another entity
+    /// holds it. O(1): a hash probe (and the entity's node, when it is the holder).
+    /// </summary>
+    private void Claim(int id, TKey key)
+    {
+        if (IsNull(key)) return;
+        ref var head = ref CollectionsMarshal.GetValueRefOrNullRef(_heads, key); // unique keys are never EntityIds
+        if (Unsafe.IsNullRef(ref head)) return;
+        if ((uint)id < (uint)_nodes.Length && _nodes[id].Linked && _nodes[id].Key.Equals(key)) return; // its own key
+        throw Taken(key, head.Walk());
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static InvalidOperationException Taken(TKey key, ListWalk holders)
+    {
+        holders.Next(out var holder);
+        return new InvalidOperationException(
+            $"{typeof(T).Name} is unique: entity {holder} has key {key} already (change that entity's key first)");
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static InvalidOperationException Twice(TKey key) =>
+        new($"{typeof(T).Name} is unique: key {key} would be given to several entities at once");
 
     /// <summary>Entity <paramref name="id"/> was given <paramref name="value"/> (Set, CreateEntity). Inside the structural gate.</summary>
     void World.IIndexOf<T>.Put(int id, int version, in T value)

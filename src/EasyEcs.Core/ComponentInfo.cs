@@ -87,11 +87,27 @@ internal abstract class ComponentInfo
     /// <summary>Whether the type is an <see cref="IGroup"/> (its value may split tables, see <see cref="World.GroupBy{T}"/>).</summary>
     public readonly bool Grouped;
 
-    protected ComponentInfo(int size, bool cleanup, bool grouped) : this(size)
+    /// <summary>Whether the type is an <see cref="IUniqueIndexed{TKey}"/> (each world indexes it from its first table).</summary>
+    public readonly bool Unique;
+
+    /// <summary>Whether any unique component type was registered (new tables then look for their unique columns).</summary>
+    public static bool AnyUnique => _anyUnique;
+
+    private static volatile bool _anyUnique;
+
+    protected ComponentInfo(int size, bool cleanup, bool grouped, bool unique = false) : this(size)
     {
         Cleanup = cleanup;
         Grouped = grouped;
+        Unique = unique;
+        if (unique) _anyUnique = true;
     }
+
+    /// <summary>
+    /// A new index of this unique component for <paramref name="world"/> (<see cref="Unique"/> types only); throws when
+    /// no module registered how to create it (<see cref="SavedTypes.UniqueIndex{T,TKey}"/>). Cold.
+    /// </summary>
+    public virtual World.IValueIndex CreateUniqueIndex(World world) => null;
 
     /// <summary>Whether the type holds managed references (cleared when its row dies, copied by type).</summary>
     public bool Managed => Size < 0;
@@ -272,9 +288,14 @@ internal abstract class ComponentInfo
 /// (<see cref="ComponentInfo.Release"/>). Else null.
 /// </param>
 internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(RuntimeHelpers.IsReferenceOrContainsReferences<T>() ? -1 : Unsafe.SizeOf<T>(),
-    default(T) is ICleanupComponent, default(T) is IGroup)
+    default(T) is ICleanupComponent, default(T) is IGroup, default(T) is IUniqueIndexed)
     where T : struct, IComponent
 {
+    public override World.IValueIndex CreateUniqueIndex(World world) =>
+        UniqueIndexOf<T>.Create is { } create ? create(world) : throw new InvalidOperationException(
+            $"{typeof(T).Name} is unique, but its module registered no index (the EasyEcs generator does it from C# 14 on, " +
+            "for types it can name; a key type of EntityId cannot be unique): call world.Index<T, TKey>() once before writing it");
+
     // Unmanaged columns are pinned byte arrays (pinned object heap, never moved by the GC) with one cache line of
     // slack, so their rows can start on a 64-byte boundary (Archetype.Aligned): SIMD loads and power-of-two sized
     // components then never straddle two lines. Managed columns are plain T[] (the GC must see their references).

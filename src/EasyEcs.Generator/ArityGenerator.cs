@@ -169,12 +169,13 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     {
                         using (Structural())
                         {
-                            int id = AllocateId();
+                {{Lines(n, i => $"            Claim(-1, in c{i});")}}
                 {{Lines(n, i => $"            ushort b{i} = ComponentType<T{i}>.Bit;")}}
                             // Straight into the final archetype through an edge cached on the empty archetype (no mask hashing).
                             var target = ({{(n == 1 ? "_emptyArchetype.GetAddEdge(b1) ?? CreateEdge(_emptyArchetype, b1)"
                                 : $"_emptyArchetype.GetAddSetEdge({signature}) ?? CreateSetEdge(_emptyArchetype, [{List(n, i => $"b{i}")}], {signature})")}}).Target;
                 {{Lines(n, i => $"            target = GroupTarget(target, b{i}, in c{i});")}}
+                            int id = AllocateId(); // after the tables: creating one may throw (a unique component without an index)
                             int slot = Place(id, target);
                 {{Lines(n, i => $"            Unsafe.Add(ref target.Base<T{i}>(b{i}), slot) = c{i};")}}
                 {{Lines(n, i => $"            target.Stamp<T{i}>(slot, _changeTick);")}}
@@ -257,6 +258,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             var target = ({{(n == 1 ? "_emptyArchetype.GetAddEdge(b1) ?? CreateEdge(_emptyArchetype, b1)"
                                 : $"_emptyArchetype.GetAddSetEdge({signature}) ?? CreateSetEdge(_emptyArchetype, [{List(n, i => $"b{i}")}], {signature})")}}).Target;
                             if (entities.IsEmpty) return;
+                {{Lines(n, i => $"            ClaimAll(entities.Length, in c{i});")}}
                 {{Lines(n, i => $"            target = GroupTarget(target, b{i}, in c{i});")}}
                             int first = PlaceRows(target, entities); // consecutive rows: each column is filled at once
                 {{Lines(n, i => $"            MemoryMarshal.CreateSpan(ref Unsafe.Add(ref target.Base<T{i}>(b{i}), first), entities.Length).Fill(c{i});")}}
@@ -587,6 +589,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
     /// <summary>The body of SetCore for several components: one move adds every bit, then each value is written.</summary>
     private static string SetRows(int n, string signature) =>
+        Lines(n, i => $"            world.Claim(id, in c{i});") + "\n" +
         Lines(n, i => $"            ushort b{i} = ComponentType<T{i}>.Bit;") + "\n" +
         $"            world.AddBits(ref meta, id, [{List(n, i => $"b{i}")}], {signature});\n" +
         Lines(n, i => $"            World.Row<T{i}>(ref meta, b{i}) = c{i};") + "\n" +

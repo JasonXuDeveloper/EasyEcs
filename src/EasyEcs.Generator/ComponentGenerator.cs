@@ -96,8 +96,15 @@ public sealed class ComponentGenerator : IIncrementalGenerator
 
         // Saves name types: every component, singleton and DynamicBuffer<T> of the compilation is registered when the
         // module loads (World.Load resolves names through SavedTypes). C# 14, like the extension members.
+        // A unique component also tells worlds how to create its index (they create it with their first table holding it).
         var saved = components
-            .Select(static (m, _) => new SavedType((m!.Singleton ? "Singleton" : "Component") + "<" + m.Type + ">", m.Type, m.EntityIds, m.Singleton ? "" : m.Layout))
+            .SelectMany(static (m, _) => m!.Unique
+                ? new[]
+                {
+                    new SavedType("Component<" + m.Type + ">", m.Type, m.EntityIds, m.Layout),
+                    new SavedType("UniqueIndex<" + m.Type + ", " + m.IndexKey + ">", m.Type, new EquatableArray<string>([]), ""),
+                }
+                : [new SavedType((m.Singleton ? "Singleton" : "Component") + "<" + m.Type + ">", m.Type, m.EntityIds, m.Singleton ? "" : m.Layout)])
             .WithTrackingName("SavedComponents");
         var buffers = bufferUses
             .Where(static b => b.Saved is not null)
@@ -514,8 +521,8 @@ public sealed class ComponentGenerator : IIncrementalGenerator
     /// <summary>One component or singleton, symbol-free so the pipeline caches between edits.</summary>
     private sealed record ComponentModel(
         string Namespace, string Type, string Name, string Path, string HintName, bool IsPublic, bool Singleton, bool Tag,
-        bool Watched, bool Writable, bool Grouped, bool Cleanup, string IndexKey, bool WorldTaken, EquatableArray<Setter> Setters, EquatableArray<string> Taken,
-        EquatableArray<string> EntityIds, string Layout)
+        bool Watched, bool Writable, bool Grouped, bool Cleanup, string IndexKey, bool Unique, bool WorldTaken, EquatableArray<Setter> Setters,
+        EquatableArray<string> Taken, EquatableArray<string> EntityIds, string Layout)
     {
         private static readonly SymbolDisplayFormat TypeName = Symbols.Fqn
             .AddMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
@@ -554,7 +561,9 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             // wherever the namespace is imported, so the nested one gets no members (the generic API still works).
             var taken = type.ContainingType != null && HasNamesake(type.ContainingNamespace, type)
                 ? members : members.Where(n => receiver.GetMembers(n).Length > 0).ToArray();
-            var key = type.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.ToDisplayString() == Symbols.Indexed)?.TypeArguments[0];
+            // A unique component's index is by its unique key (another IIndexed key is EECS036).
+            var unique = type.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.ToDisplayString() == Symbols.UniqueIndexed)?.TypeArguments[0];
+            var key = unique ?? type.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.ToDisplayString() == Symbols.Indexed)?.TypeArguments[0];
             bool grouped = Symbols.Implements(type, Symbols.Group);
             bool tracked = Symbols.Implements(type, Symbols.TrackChanges);
 
@@ -562,7 +571,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             return new ComponentModel(ns, fqn, name, Symbols.FlatName(type), Symbols.HintName(type), isPublic, singleton,
                 tag, tracked || key != null || grouped, tracked && key == null && !grouped, grouped,
                 Symbols.Implements(type, Symbols.Cleanup), key?.ToDisplayString(Symbols.Fqn) ?? "",
-                world.GetMembers(name + "Index").Length > 0, new EquatableArray<Setter>(setters), new EquatableArray<string>(taken),
+                unique != null && unique.ToDisplayString() != Symbols.EntityId && unique is not ITypeParameterSymbol, world.GetMembers(name + "Index").Length > 0, new EquatableArray<Setter>(setters), new EquatableArray<string>(taken),
                 new EquatableArray<string>(singleton ? [] : Symbols.EntityIdPaths(type, compilation)), Symbols.LayoutHash(type) ?? "");
         }
 

@@ -31,15 +31,30 @@ public sealed partial class World
 
     /// <summary>
     /// The value index of <typeparamref name="T"/>: find entities by <typeparamref name="T"/>'s key, or by the entity a
-    /// relation component points at. Created on the first call (cold), O(1) after; keep it in a local or field. Throws
-    /// <see cref="InvalidOperationException"/> when <typeparamref name="T"/> is already indexed by another key type.
+    /// relation component points at. Created on the first call (cold), O(1) after; keep it in a local or field. The
+    /// index of a unique component (<see cref="IUniqueIndexed{TKey}"/>) exists from the world's first table holding it.
+    /// Throws <see cref="InvalidOperationException"/> when <typeparamref name="T"/> is already indexed by another key
+    /// type, or is unique by another key; <see cref="NotSupportedException"/> for a unique <see cref="EntityId"/> key (a
+    /// load or a move rewrites such keys after it copies the rows, too late to check them first).
     /// </summary>
     public ValueIndex<T, TKey> Index<T, TKey>() where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>
     {
         int slot = TypeIndex<ValueIndexFamily, T>.Value;
         if (slot < _indexes.Length && _indexes[slot] is { } existing)
             return existing as ValueIndex<T, TKey> ?? throw OtherKey(typeof(T), existing);
+        if (ComponentType<T>.Unique) Unique<T, TKey>();
         return Register(slot, ComponentType<T>.Bit, new ValueIndex<T, TKey>(this));
+    }
+
+    /// <summary>Checks the key of unique <typeparamref name="T"/> and tells every world how to index it (cold).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void Unique<T, TKey>() where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>
+    {
+        if (default(T) is not IUniqueIndexed<TKey>)
+            throw new InvalidOperationException($"{typeof(T).Name} is unique by another key than {typeof(TKey).Name}: one index per component");
+        if (typeof(TKey) == typeof(EntityId))
+            throw new NotSupportedException($"{typeof(T).Name}: an EntityId key cannot be unique (index it with IIndexed<EntityId>)");
+        UniqueIndexOf<T>.Create ??= static world => world.Index<T, TKey>();
     }
 
     /// <summary>
@@ -83,6 +98,139 @@ public sealed partial class World
 
         /// <summary>New <paramref name="entities"/> were all given <paramref name="value"/> (CreateEntities).</summary>
         void PutAll(ReadOnlySpan<Entity> entities, in T value);
+    }
+
+    /// <summary>
+    /// The index of a unique component (<see cref="IUniqueIndexed{TKey}"/>), asked before every write whether its key is
+    /// free. Each claim throws <see cref="InvalidOperationException"/> when the key is another entity's (or a batch's
+    /// twice), and changes nothing.
+    /// </summary>
+    internal interface IUniqueOf<T> where T : struct, IComponent
+    {
+        /// <summary>Entity <paramref name="id"/> (-1: one about to be created) is about to hold <paramref name="value"/>.</summary>
+        void Claim(int id, in T value);
+
+        /// <summary><paramref name="count"/> new entities are about to hold <paramref name="value"/> (CreateEntities).</summary>
+        void ClaimAll(int count, in T value);
+
+        /// <summary>
+        /// Entity <paramref name="id"/> is about to hold <paramref name="value"/> in a batch that began with
+        /// <see cref="IUniqueIndex.BeginBatch"/>: its key must be free and not claimed by the batch already.
+        /// </summary>
+        void ClaimBatch(int id, in T value);
+    }
+
+    /// <summary>A unique index seen through a component bit: the claims of row copies (prefabs, clones, arrivals, loads).</summary>
+    internal interface IUniqueIndex
+    {
+        /// <summary>
+        /// Rows [<paramref name="first"/>, +<paramref name="count"/>) of column <paramref name="column"/> of
+        /// <paramref name="table"/> (of any world) are about to be copied <paramref name="copies"/> times each, to new
+        /// entities (<paramref name="into"/> -1) or onto entity <paramref name="into"/>: the keys of the rows having the
+        /// component must be free (and, copied more than once, null). The rows' own keys are distinct (their world's
+        /// index saw to it).
+        /// </summary>
+        void ClaimRows(Archetype table, int column, int first, int count, int copies, int into);
+
+        /// <summary>Start a batch of claims (<see cref="IUniqueOf{T}.ClaimBatch"/>, <see cref="ClaimLoaded"/>).</summary>
+        void BeginBatch();
+
+        /// <summary>
+        /// Loaded rows of column <paramref name="column"/> are about to replace the world's (<see cref="Load"/>): keys
+        /// may repeat neither within them nor across the batch's other tables. Throws
+        /// <see cref="System.IO.InvalidDataException"/>.
+        /// </summary>
+        void ClaimLoaded(Archetype.Rows rows, int column);
+    }
+
+    /// <summary>
+    /// Before entity <paramref name="id"/> (-1: one about to be created) holds <paramref name="value"/>: a unique
+    /// component's key must be free (<see cref="IUniqueOf{T}.Claim"/>). Folded away for other components. Throws before
+    /// anything changes, so call it before the row moves. Inside the structural gate.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void Claim<T>(int id, in T value) where T : struct, IComponent
+    {
+        if (!ComponentType<T>.Unique) return;
+        int bit = ComponentType<T>.Bit;
+        var byBit = _indexByBit;
+        // No index yet: no table holds T, so no entity has a key to collide with.
+        if (byBit != null && bit < byBit.Length && byBit[bit] is { } index) Unsafe.As<IUniqueOf<T>>(index).Claim(id, in value);
+    }
+
+    /// <summary>
+    /// Entity <paramref name="id"/> now holds <paramref name="value"/> of unique <typeparamref name="T"/>, added by
+    /// <c>GetOrAdd</c>: its index learns the key (only the index: the caller holds a ref into the row, which a group must
+    /// not move). Inside the structural gate.
+    /// </summary>
+    internal void IndexUnique<T>(int id, int version, in T value) where T : struct, IComponent =>
+        Unsafe.As<IIndexOf<T>>(_indexByBit[ComponentType<T>.Bit]).Put(id, version, in value);
+
+    /// <summary><see cref="Claim{T}"/> for <paramref name="count"/> new entities all holding <paramref name="value"/> (CreateEntities).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void ClaimAll<T>(int count, in T value) where T : struct, IComponent
+    {
+        if (ComponentType<T>.Unique) Unsafe.As<IUniqueOf<T>>(UniqueIndex(ComponentType<T>.Bit)).ClaimAll(count, in value);
+    }
+
+    /// <summary>The index of unique component <paramref name="bit"/>, created (empty) when this world has none yet. Cold.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal IUniqueIndex UniqueIndex(int bit)
+    {
+        var byBit = _indexByBit;
+        if (byBit != null && bit < byBit.Length && byBit[bit] is { } index) return (IUniqueIndex)index;
+        return (IUniqueIndex)ComponentInfo.Of(bit).CreateUniqueIndex(this);
+    }
+
+    /// <summary>
+    /// The rows a <see cref="Load"/> read (<paramref name="snapshot"/>, by table of this world) are about to replace the
+    /// world's: each unique component's keys must be distinct across them (<see cref="IUniqueIndex.ClaimLoaded"/>).
+    /// Throws <see cref="System.IO.InvalidDataException"/> before anything changes. Cold.
+    /// </summary>
+    private void ClaimLoaded(WorldSnapshot snapshot)
+    {
+        using (Structural())
+        {
+            var tables = _allArchetypes; // the load created the tables its rows go to: their indexes exist
+            if (_indexByBit == null) return;
+            for (int bit = 0; bit < _indexByBit.Length; bit++)
+                if (_indexByBit[bit] is IUniqueIndex index && ComponentInfo.Of(bit).Unique)
+                    index.BeginBatch();
+            for (int i = 0; i < snapshot.TableCount; i++)
+            {
+                if (snapshot.Tables[i] is not { Count: > 0 } rows || !tables[i].Unique) continue;
+                var components = tables[i].Components;
+                for (int c = 0; c < components.Length; c++)
+                    if (ComponentInfo.Of(components[c]).Unique)
+                        UniqueIndex(components[c]).ClaimLoaded(rows, c);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A new table: the unique components it holds get their index now, before any row, so every write of them is
+    /// claimed (cold: once per table, and only once a unique type exists). Inside the structural gate.
+    /// </summary>
+    private void IndexUnique(Archetype table)
+    {
+        foreach (var bit in table.Components)
+            if (ComponentInfo.Of(bit).Unique)
+                UniqueIndex(bit);
+    }
+
+    /// <summary>
+    /// Rows [<paramref name="first"/>, +<paramref name="count"/>) of <paramref name="table"/> (of any world) are about to
+    /// be copied <paramref name="copies"/> times each into new entities of this world (<paramref name="into"/> -1) or onto
+    /// entity <paramref name="into"/>: claim the keys of their unique components (<see cref="IUniqueIndex.ClaimRows"/>).
+    /// Throws before anything changes. Inside the structural gate.
+    /// </summary>
+    private void ClaimRows(Archetype table, int first, int count, int copies, int into = -1)
+    {
+        if (!table.Unique || count == 0 || copies == 0) return;
+        var components = table.Components;
+        for (int c = 0; c < components.Length; c++)
+            if (ComponentInfo.Of(components[c]).Unique)
+                UniqueIndex(components[c]).ClaimRows(table, c, first, count, copies, into);
     }
 
     /// <summary>
@@ -146,5 +294,12 @@ public sealed partial class World
     private void ResetIndexes(bool rebuild)
     {
         foreach (var index in _indexes) index?.Reset(rebuild);
+        if (!rebuild || _indexByBit == null || !ComponentInfo.AnyUnique) return;
+        // Unique indexes stay eager: they index the restored rows now (no lookup may come before the next write).
+        foreach (var table in _allArchetypes)
+            if (table.Unique && table.Count != 0)
+                for (int c = 0; c < table.Components.Length; c++)
+                    if (ComponentInfo.Of(table.Components[c]).Unique && _indexByBit[table.Components[c]] is { } index)
+                        index.AddedRows(table, c, 0, table.Count);
     }
 }

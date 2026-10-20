@@ -46,6 +46,16 @@ public static class SavedTypes
     }
 
     /// <summary>
+    /// Tell worlds how to create the index of unique component <typeparamref name="T"/> (<see cref="IUniqueIndexed{TKey}"/>):
+    /// a world creates it with its first table holding <typeparamref name="T"/>, knowing only the component's bit.
+    /// <see cref="EntityId"/> keys are not registered (they cannot be unique: <see cref="World.Index{T,TKey}"/> says why).
+    /// </summary>
+    public static void UniqueIndex<T, TKey>() where T : struct, IComponent, IUniqueIndexed<TKey> where TKey : IEquatable<TKey>
+    {
+        if (typeof(TKey) != typeof(EntityId)) UniqueIndexOf<T>.Create ??= static world => world.Index<T, TKey>();
+    }
+
+    /// <summary>
     /// Tell <see cref="World.LoadEntities"/> where the <see cref="EntityId"/> fields of <typeparamref name="T"/> (a
     /// component or a buffer's element) are, so a migration points them at the moved entities. Each accessor returns
     /// one field of the value it is given (generated with <c>UnsafeAccessor</c>, private fields too).

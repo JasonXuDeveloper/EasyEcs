@@ -359,6 +359,8 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach(Slices = 0)] static void A(ref P p) { } }", "EECS035")]
     [TestCase("public static class R { [ForEach(Slices = -1)] static void A(ref P p) { } }", "EECS035")]
     [TestCase("public static class R { [ForEach(Slices = 2)] static void A(ref P p) { } static void A(World w, int slice) { } }", "EECS021")]
+    [TestCase("public struct Mount : IComponent, IUniqueIndexed<EntityId> { public EntityId Rider; public EntityId Key => Rider; }", "EECS036")]
+    [TestCase("public struct Seat : IComponent, IUniqueIndexed<int>, IIndexed<string> { public int Id; readonly int IIndexed<int>.Key => Id; readonly string IIndexed<string>.Key => \"\"; }", "EECS036")]
     public async Task MisuseIsReported(string source, string id)
     {
         var errors = await Diagnose(Components, source);
@@ -372,6 +374,7 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach] static void C(in P p) { using var w = new World(); w.CreateEntity(new Q()); } }")]
     [TestCase("public class S(int n) : EcsSystem { public int N => n; }")]
     [TestCase("public class S : EcsSystem { [ForEach(Slices = 1), Changed<T>] static void A(ref P p) { } [ForEach(Slices = 8, Parallel = true)] static void B(ref Q q) { } }")]
+    [TestCase("public record struct Account(int Id) : IComponent, IUniqueIndexed<int> { public int Key => Id; } public static class U { public static Entity F(World w) => w.AccountIndex.Get(1); }")]
     public async Task ValidCodeIsNotReported(string source)
     {
         var errors = await Diagnose(Components, source);
@@ -405,6 +408,21 @@ public class GeneratorTests
     {
         var errors = await Diagnose(Components, "public partial class S : EcsSystem { [ForEach] static void A(in DynamicBuffer<int> b) => b.Add(1); }");
         Assert.That(errors.Any(e => e.StartsWith("CS")), Is.True, string.Join(", ", errors));
+    }
+
+    [Test]
+    public void TheModuleTellsWorldsHowToIndexItsUniqueComponents()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
+            public record struct Account(int Id) : IComponent, IUniqueIndexed<int> { public int Key => Id; }
+            public record struct Mount(EntityId Rider) : IComponent, IUniqueIndexed<EntityId> { public EntityId Key => Rider; }
+            """), out var output, out _);
+        var source = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("EasyEcs.SavedTypes.g.cs")).ToString();
+        Assert.That(source, Does.Contain("global::EasyEcs.SavedTypes.Component<global::Account>()"));
+        Assert.That(source, Does.Contain("global::EasyEcs.SavedTypes.UniqueIndex<global::Account, int>()"));
+        Assert.That(source, Does.Not.Contain("UniqueIndex<global::Mount"));            // an EntityId key cannot be unique (EECS036)
+        Assert.That(source, Does.Not.Contain("UniqueIndex<global::Owned"));            // IIndexed only
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
     }
 
     [Test]

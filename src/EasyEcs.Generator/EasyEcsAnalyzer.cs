@@ -166,6 +166,14 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         "that tick: the rows of the slices not visited would lose their changes. Drop Slices, or read the changes " +
         "every run and spread the work they cause.", helpLinkUri: Help("EECS035"));
 
+    public static readonly DiagnosticDescriptor BadUniqueKey = new("EECS036", "A unique component that cannot be indexed by its key",
+        "'{0}' is IUniqueIndexed<{1}>, {2}",
+        Category, DiagnosticSeverity.Error, true,
+        "A world indexes a unique component by its unique key from its first table holding the component, and checks " +
+        "every write against that index. A second key (another IIndexed<TKey> or IUniqueIndexed<TKey>) can then never " +
+        "be indexed: World.Index throws for it. An EntityId key cannot be unique: loads and moves rewrite such keys after " +
+        "they copy the rows, too late to check them first; index the relation with IIndexed<EntityId>.", helpLinkUri: Help("EECS036"));
+
     // EECS002's property for its code fix (EasyEcs.CodeFixes): a component or singleton taken by value.
     public const string ByValue = "ByValue";
 
@@ -177,7 +185,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
         RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups, RunnerCollision, Unnameable, FilterOutsideGroup, LocalForEach,
         ReadOnlyWriteAccess, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
-        GeneratedMember, UpdateInSystem, BadSlices);
+        GeneratedMember, UpdateInSystem, BadSlices, BadUniqueKey);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -448,6 +456,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
 
         if (type.TypeKind == TypeKind.Struct && (Symbols.Implements(type, Symbols.Component) || Symbols.Implements(type, Symbols.Singleton)))
             AnalyzeDataFields(context, type);
+        if (type.TypeKind == TypeKind.Struct) AnalyzeUniqueKey(context, type, location);
 
         if (type.TypeKind == TypeKind.Struct && !Symbols.Implements(type, "EasyEcs.ISystemGroup"))
             foreach (var attribute in type.GetAttributes())
@@ -459,6 +468,23 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
 
         if (type.TypeKind != TypeKind.Class) return;
         if (Symbols.IsSystem(type)) AnalyzeSystemFields(context, type);
+    }
+
+    /// <summary>EECS036: a unique component with an EntityId key, or with a second index key.</summary>
+    private static void AnalyzeUniqueKey(SymbolAnalysisContext context, INamedTypeSymbol type, Location? location)
+    {
+        var unique = type.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.ToDisplayString() == Symbols.UniqueIndexed);
+        if (unique == null) return;
+        var key = unique.TypeArguments[0];
+        string keyName = key.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+        if (key.ToDisplayString() == Symbols.EntityId)
+            context.ReportDiagnostic(Diagnostic.Create(BadUniqueKey, location, type.Name, keyName,
+                "but an EntityId key cannot be unique: index the relation with IIndexed<EntityId>"));
+        foreach (var other in type.AllInterfaces)
+            if (other.OriginalDefinition.ToDisplayString() is Symbols.Indexed or Symbols.UniqueIndexed
+                && !SymbolEqualityComparer.Default.Equals(other.TypeArguments[0], key))
+                context.ReportDiagnostic(Diagnostic.Create(BadUniqueKey, location, type.Name, keyName,
+                    $"so its key {other.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} can never be indexed: one index per component"));
     }
 
     /// <summary>EECS017: an instance field (or a record's positional property) of a component or singleton holding an Entity.</summary>
