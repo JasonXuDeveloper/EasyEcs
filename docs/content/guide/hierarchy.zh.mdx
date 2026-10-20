@@ -1,7 +1,7 @@
 ---
 title: 层级
-seoTitle: "C# ECS 的父子层级：ChildOf、Children 与级联销毁"
-description: 用 ChildOf 把实体挂到父实体下，用 world.Children 列出子实体，销毁父实体时连同后代一起销毁，在 World 之间整体迁移层级，并实现变换传播。
+seoTitle: "C# ECS 层级：ChildOf、Children 与 Descendants"
+description: 用 ChildOf 把实体挂到父实体下，用 Children 列出子实体，用 Descendants 遍历整棵子树，销毁父实体时连同子树一起销毁。
 icon: GitFork
 ---
 
@@ -53,14 +53,24 @@ var gun = world.CreateEntity(new Name("gun"), new ChildOf(turret));
 foreach (var child in world.Children(ship)) { /* 炮塔 */ }
 ```
 
-`world.Descendants(root)` 遍历根下面的整棵子树：深度优先，每个实体都排在它自己的子实体前面（根本身不算在内）。每个实体
+</Step>
+<Step>
+
+### 遍历整棵子树：Descendants [#descendants]
+
+`world.Descendants(root)` 遍历根下面的整棵子树：深度优先，每个实体都排在它自己的子实体前面，根本身不算在内。每个实体
 O(1)，热身后不分配内存。整棵树作为一个整体处理时（保存、迁移、计数）用它；需要先拿到父实体结果的传播，按
 [`Children` 一层层走](#transform-propagation)。
 
 ```csharp
 int parts = 0;
-foreach (var part in world.Descendants(ship)) parts++;   // 炮塔、炮塔的炮管……
+foreach (var part in world.Descendants(ship)) parts++;   // 先是炮塔，再是它的炮管
 ```
+
+- **遍历途中可以销毁实体**：遍历还没走到就被销毁的实体会跳过。
+- **遍历里可以再套一层遍历**：内层自己分配一个栈（外层占着 World 保留的那个）。
+- **`ChildOf` 成环**（实体是自己的祖先）时，遍历走到环上就抛 `InvalidOperationException`。
+- **遍历途中不能改 `ChildOf`**（换父实体、解除挂接）：这会改写遍历正在读的子实体列表。先收集，再修改。
 
 </Step>
 <Step>
@@ -152,22 +162,25 @@ world.Update();                            // barrel：WorldPosition(11, 2)
 
 `MoveEntities` 和 `SaveEntities` 只处理你列出的实体，不会顺带它们的子实体。用 `Descendants` 收集整棵层级再一起迁移：父实体
 没跟过去的子实体，到了那边会去掉 `ChildOf`（成为根）；而 `MoveEntities` 销毁原实体时会连同子实体一起销毁，没列出的子实体
-就丢了。详见[迁移](/zh/docs/guide/migration-and-unload#move-entities)。
+就丢了。`MoveEntities` 接收 `ReadOnlySpan<EntityId>`：直接传列表的 span（`CollectionsMarshal.AsSpan`），不必复制一份数组。
+详见[迁移](/zh/docs/guide/migration-and-unload#move-entities)。
 
 ```csharp
+using System.Runtime.InteropServices;
+
 var player = world.CreateEntity(new Name("bob"));
 world.CreateEntity(new Name("sword"), new ChildOf(player));
 
 var group = new List<EntityId> { player.Id };
 foreach (var part in world.Descendants(player)) group.Add(part.Id);   // 子实体、孙实体……
 using var other = new World();
-world.MoveEntities(other, group.ToArray());   // bob 和他的剑，链接保持不变
+world.MoveEntities(other, CollectionsMarshal.AsSpan(group));   // bob 和他的剑，链接保持不变
 ```
 
 ## 完整例子 [#full-example]
 
-一艘船，上面有炮塔，炮塔上有炮：世界坐标跟着父实体走；然后把炮挂到别的父实体上，把炮塔摘下来，最后销毁船和还挂在它上面的
-东西。把这几个文件放进一个引用了 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+一艘船，上面有炮塔，炮塔上有炮管：世界坐标跟着父实体走，再列出船的整棵子树；然后把炮管挂到别的父实体上，把炮塔摘下来，
+最后销毁船和还挂在它上面的东西。把这几个文件放进一个引用了 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
 
 <Accordions>
 <Accordion title="Components.cs">
@@ -241,6 +254,15 @@ foreach (var child in world.Children(ship))
     Console.WriteLine($"ship > {child.Name.Value}");
 }
 
+// Descendants 深度优先走完整棵子树：每个实体都排在它自己的子实体前面。
+Console.Write("ship's subtree:");
+foreach (var part in world.Descendants(ship))
+{
+    Console.Write($" {part.Name.Value}");
+}
+
+Console.WriteLine();
+
 // 换父实体：设一个新的 ChildOf。摘下来：移除它，实体就成了根。
 gun.Set(new ChildOf(ship));
 turret.Remove<ChildOf>();
@@ -249,7 +271,7 @@ turret.Remove<ChildOf>();
 var children = world.Index<ChildOf, EntityId>();
 Console.WriteLine($"ship: {children.Count(ship)} child, turret: {children.Count(turret)} children");
 
-// 销毁父实体会连带销毁子实体：炮跟着船一起没了。
+// 销毁父实体会连带销毁子实体：炮管跟着船一起没了。
 ship.Destroy();
 Console.WriteLine($"turret alive: {turret.IsAlive}, gun alive: {gun.IsAlive}");
 Console.WriteLine($"{world.EntityCount} entity left");
@@ -263,13 +285,14 @@ Console.WriteLine($"{world.EntityCount} entity left");
 ```text
 gun at WorldPosition { X = 11, Y = 2 }
 ship > turret
+ship's subtree: turret gun
 ship: 1 child, turret: 0 children
 turret alive: True, gun alive: False
 1 entity left
 ```
 
-炮的世界坐标是它和各级父实体偏移的和：10 + 0 + 1 和 0 + 2 + 0。炮塔被摘下来以后，船销毁了它还在；炮被挂到了船上，就跟着船
-一起销毁了。
+炮管的世界坐标是它和各级父实体偏移的和：10 + 0 + 1 和 0 + 2 + 0。`Children` 只列出炮塔，`Descendants` 还能走到下面的
+炮管。炮塔被摘下来以后，船销毁了它还在；炮管被挂到了船上，就跟着船一起销毁了。
 
 ## 怎么用得快 [#how-to-use-it-fast]
 
@@ -299,6 +322,8 @@ turret alive: True, gun alive: False
 | 自己用 `Entity` 字段存父指针 | 托管列，存不了盘，也没有级联 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
 | 只迁移父实体，不带子实体 | 子实体留在原地，随原实体一起被销毁 | 用 `Descendants` 收集整组 |
 | 只用 `Children` 收集整棵树 | 漏掉孙实体 | `Descendants` 会走完每一层 |
+| 用 `Descendants` 遍历成环的 `ChildOf` | 走到环上时抛 `InvalidOperationException` | 运行时 |
+| 在 `Descendants` 循环里换父实体或解除挂接 | 遍历读的子实体列表正在被改写 | 代码审查：先收集，再修改 |
 | `Disable<ChildOf>()` | 抛 `InvalidOperationException` | 运行时 |
 | 没写系统却指望有世界坐标 | 没有内置变换 | 写一个[传播系统](#transform-propagation) |
 

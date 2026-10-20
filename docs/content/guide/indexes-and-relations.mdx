@@ -21,7 +21,7 @@ an `IRelation` buffer links one entity to many.
 <Callout type="warn" title="Skip it for">
   A key you only filter by in a full pass: a plain `[ForEach]` reads it anyway. Few keys holding many entities each
   that you walk whole (16 zones of 100,000 players): [groups](/en/docs/guide/groups) put each key in its own tables
-  and walk them at full speed. Dictionaries kept in sync by hand: the index already is one.
+  and walk them at full speed. A dictionary you would keep in sync by hand: the index is that dictionary.
 </Callout>
 
 ## How to use it [#how-to-use-it]
@@ -58,6 +58,28 @@ int inTwo = zones.Count(2);                         // 1
 Read an indexed component with `in`, `Read<T>()` or the generated property (`alpha.Zone`, a `ref readonly`), and write
 it with `Set` or the generated `SetX`. A write through a `ref` would change the key behind the index's back, so the
 analyzer rejects it ([EECS015](/en/docs/guide/analyzer#eecs015)). A component has one index, with one key type.
+
+### A component as its own key [#self-key]
+
+A key can be the whole component: a shop found by its id, an actor found by its address. Make the component
+`IIndexed` of itself and implement `Key` explicitly:
+
+```csharp
+public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop>
+{
+    Shop IIndexed<Shop>.Key => this;          // explicit: a public Key property would recurse in ToString()
+}
+```
+
+```csharp
+var shop = world.CreateEntity(new Shop(7));
+if (world.ShopIndex.TryFind(new Shop(7), out var found)) { /* the shop with id 7 */ }
+```
+
+On a record struct, a public `Key => this` property joins the generated `ToString()`, which prints `Key`, which prints
+`Key` again, until the stack overflows. The explicit implementation keeps `Key` out of the record's members. The
+[Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) builds on this: one type per
+kind of actor is its key, its system group and the group's filter.
 
 ### Ordered walks and ranges [#ordered-index]
 
@@ -141,6 +163,37 @@ knight.RemoveRelation<MemberOf>(blue);                         // leaves blue
 `Read<DynamicBuffer<T>>()` or an `in` parameter; write them with `AddRelation`, `RemoveRelation` or a `Set` of a whole
 buffer, so the index follows (a `ref` write is [EECS015](/en/docs/guide/analyzer#eecs015)).
 
+Once some code names `DynamicBuffer<MemberOf>` (a `[ForEach]` parameter, a `Read`), the generator adds named members
+for the relation:
+
+| Generated | Same as |
+| --- | --- |
+| `e.AddMemberOf(target)` | `e.AddRelation(new MemberOf(target))`, returns the entity |
+| `e.RemoveMemberOf(target)` | `e.RemoveRelation<MemberOf>(target)`, returns how many links went |
+| `e.LinksMemberOf(target)` | `e.HasRelation<MemberOf>(target)` |
+| `e.MemberOf` / `e.HasMemberOf` / `e.RemoveMemberOf()` | the links (`ref readonly DynamicBuffer<MemberOf>`), whether it has any, drop them all |
+| `world.MemberOfIndex` | `world.Relations<MemberOf>()` |
+
+```csharp
+public record struct PartyCount(int Parties) : IComponent;
+
+public class CountParties : EcsSystem
+{
+    [ForEach]
+    static void Count(in DynamicBuffer<MemberOf> parties, ref PartyCount count) => count = new PartyCount(parties.Count);
+}
+```
+
+```csharp
+var paladin = world.CreateEntity(new PartyCount()).AddMemberOf(red).AddMemberOf(blue);
+bool withBlue = paladin.LinksMemberOf(blue);                  // true
+paladin.RemoveMemberOf(blue);                                 // 1 link went
+int linked = paladin.MemberOf.Count;                          // 1
+int inRed = world.MemberOfIndex.Count(red);                   // the knight and the paladin
+```
+
+A relation gets no `WriteX()` or `GetOrAddX()`: its links are indexed, so they change only through the calls above.
+
 ### When the target is destroyed [#target-policies]
 
 What happens to links when their target dies is a rule of your game, and the index can apply it inside every destroy:
@@ -177,13 +230,17 @@ public class BurnZones : EcsSystem
     static void Burn(in Hazard hazard, World world)
     {
         foreach (var unit in world.ZoneIndex.Find(hazard.Zone)) // [!code highlight]
-            if (unit.HasHealth) unit.Health.Value -= hazard.Damage;
+        {
+            ref var health = ref unit.TryGetRef<Health>(out bool found);   // one lookup
+            if (found) health.Value -= hazard.Damage;
+        }
     }
 }
 ```
 
 The walk visits only the units of that zone, however many units the world holds. Destroying entities during a `Find`
-loop is allowed; changing the indexed component of that index during the loop is not.
+loop is allowed. Changing the indexed component of that index during the loop is not: a key that empties hands its id
+array to the next key that grows, so the walk could read another key's entities. Collect first, then change.
 
 ## Full example [#full-example]
 
@@ -246,8 +303,16 @@ world.CreateEntity(new PlayerName("alice"), new Level(42));
 var teams = world.TeamIndex;
 Console.WriteLine($"team 0: {teams.Count(0)} units");
 
-// Moving an entity to another key is a Set: the index follows at once.
+// Changing Team inside a loop over the team index is not allowed:
+// collect the units first, then change them.
+var moving = new List<Entity>();
 foreach (var unit in teams.Find(1))
+{
+    moving.Add(unit);
+}
+
+// A Set moves the entity to its new key at once.
+foreach (var unit in moving)
 {
     unit.SetTeam(2);
 }
@@ -315,8 +380,9 @@ after the hero left: blue has 0
 arrows left after the archer died: 0
 ```
 
-Changing the team inside the `Find` loop is safe: the walk follows the index as entities leave the key. The arrows
-go with the archer because of `TargetPolicy.Destroy`; without it they would keep a link to a destroyed entity.
+The units of team 1 are collected before their team changes, so the walk never reads a key that is being emptied.
+The arrows go with the archer because of `TargetPolicy.Destroy`; without it they would keep a link to a destroyed
+entity.
 
 ## How to use it fast [#how-to-use-it-fast]
 
@@ -356,7 +422,8 @@ follow, then the followers of 100 players counted and walked (`RelationBenchmark
 | --- | --- | --- |
 | Writing an indexed component through `ref`, `Get<T>()` or a query item | The index keeps the old key | [EECS015](/en/docs/guide/analyzer#eecs015) |
 | Storing an `Entity` handle in a component | A managed column, write barriers, not saved | [EECS017](/en/docs/guide/analyzer#eecs017) |
-| Changing the indexed component inside a `Find` loop over it | Not supported (destroying entities is) | Code review |
+| Changing the indexed component inside a `Find` loop over it | The walk can read another key's entities (destroying entities is fine) | Code review: collect first, then change |
+| A public `Key => this` on a record struct | `ToString()` prints `Key` forever: a stack overflow | Code review: `Shop IIndexed<Shop>.Key => this;` |
 | Using an index from another thread | Indexes belong to the owner thread | [Threading](/en/docs/guide/threading#what-the-world-synchronizes) |
 | Indexing one component by two key types | `InvalidOperationException`: one index per component | At run time |
 | A `null` key (the default of a `string`) | The entity is indexed nowhere | By design |

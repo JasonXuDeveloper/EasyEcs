@@ -70,6 +70,7 @@ tables are walked. Keep filters in `static readonly` fields; a filter holds one 
 public struct SumHealth : IForEach<Health>
 {
     public int Total;
+    public static int Writes => 0;                             // reads only: no row counts as written
     public void Execute(ref Health health) => Total += health.Value;
 }
 
@@ -187,6 +188,9 @@ public struct SumHealth : IForEach<Health>
 {
     public int Total;
 
+    // The job only reads: no component counts as written (the default, -1, is all of them).
+    public static int Writes => 0;
+
     public void Execute(ref Health health)
     {
         Total += health.Value;
@@ -299,7 +303,9 @@ group, as a value index and as a plain component a scan compares (`GroupBenchmar
   tiny groups fragment the world: that is a job for an index.
 - **Changing group:** one row copy (like adding a component the table has no column for).
 - **Walking a group:** the group's own rows only; no per-row test of the value.
-- **Worlds that never call `GroupBy`** pay nothing: the check is folded away for components that are not `IGroup`.
+- **Without `GroupBy`:** a `Set` of an `IGroup` component in a world that never grouped by it costs one null check
+  more; components that are not `IGroup` skip even that (the test is a constant the JIT folds away). The component is
+  still written only with `Set`, grouped or not.
 
 ## Pitfalls [#pitfalls]
 
@@ -308,7 +314,7 @@ group, as a value index and as a plain component a scan compares (`GroupBenchmar
 | Writing the grouped component through a `ref` | The row stays in its old group | [EECS015](/en/docs/guide/analyzer#eecs015) |
 | A group per player, guild or owner | A table per key: memory and fragmentation | Use a [value index](/en/docs/guide/indexes-and-relations#value-indexes) |
 | A value that changes every tick | A row copy per change | Keep it a plain component |
-| Two `InGroup` calls in one filter | A filter holds one group: the last one counts | Code review |
+| Two `InGroup` calls in one filter | A filter holds one group: the last one counts, and both components are still required | Code review |
 | `GroupBy` during a pass | Throws: it moves rows | Call it at setup |
 
 ## Compared with other libraries [#compared]

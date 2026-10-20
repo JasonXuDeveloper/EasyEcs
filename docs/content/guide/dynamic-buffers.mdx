@@ -50,7 +50,7 @@ a whole wave of entities.
 ```csharp
 var players = new Entity[1_000];
 world.CreateEntities(players, new DynamicBuffer<Loot>(), new Sent(), new Player());
-foreach (var p in players) p.Get<DynamicBuffer<Loot>>().EnsureCapacity(8);   // room for a full bag: no growth later
+foreach (var p in players) p.WriteLoot().EnsureCapacity(8);   // room for a full bag: no growth later
 ```
 
 </Step>
@@ -124,13 +124,33 @@ owner. The full table, with read-mostly and immutable data, is in
 The writes are extension methods on `ref DynamicBuffer<T>`, so the compiler rejects them on an `in` parameter or on
 `Read<T>()`: a list cannot change without a tracked write.
 
-Outside systems, reach the buffer through its entity:
+Outside systems, reach the buffer through its entity. For an element that some code names as `DynamicBuffer<Loot>`,
+the generator writes named members:
+
+| Generated | Same as |
+| --- | --- |
+| `e.Loot` | `e.Read<DynamicBuffer<Loot>>()`: a `ref readonly`, not stamped |
+| `e.HasLoot` | `e.Has<DynamicBuffer<Loot>>()` |
+| `e.WriteLoot()` | `e.Get<DynamicBuffer<Loot>>()`: a `ref`, stamped as written |
+| `e.GetOrAddLoot()` | `e.GetOrAdd<DynamicBuffer<Loot>>()`: adds an empty buffer first if missing |
+| `e.RemoveLoot()` | `e.Remove<DynamicBuffer<Loot>>()` |
 
 ```csharp
-ref var bag = ref player.Get<DynamicBuffer<Loot>>();          // a ref local: a tracked write
+ref var bag = ref player.WriteLoot();                          // a ref local: a tracked write
 bag.Add(new Loot(7));
-int held = player.Read<DynamicBuffer<Loot>>().Count;          // a read: not stamped
+bag.Insert(0, new Loot(1));                                    // at the front: the rest shift by one
+bag.AddRange([new Loot(2), new Loot(3)]);                      // a span: one copy, one growth at most
+bag.RemoveAtSwapBack(1);                                       // O(1): the last element fills the hole
+foreach (ref var loot in bag.AsSpan()) loot = new Loot(loot.Item * 10);   // change elements in place
+bag.TrimExcess();                                              // give back the room a big bag no longer needs
+
+int held = player.Loot.Count;                                  // a read: not stamped
+ReadOnlySpan<Loot> items = player.Loot.AsReadOnlySpan();       // the elements, read-only
+ref var stash = ref hero.GetOrAddLoot();                       // an empty buffer if the hero had none
 ```
+
+A relation's buffer gets no `WriteX()` or `GetOrAddX()`: its links are indexed and change only through
+[`AddRelation` / `RemoveRelation`](/en/docs/guide/indexes-and-relations#relations).
 
 ### Copies [#copies]
 
@@ -247,22 +267,22 @@ Entity hero = world.CreateEntity(new DynamicBuffer<Loot>(), new Collector());
 Entity chest = world.CreateEntity(new DynamicBuffer<Loot>());
 
 // Make room for a full bag now, so the list never grows later.
-hero.Get<DynamicBuffer<Loot>>().EnsureCapacity(4);
+hero.WriteLoot().EnsureCapacity(4);
 
 for (int i = 0; i < 6; i++)
 {
     world.Update();
 }
 
-// Read<T> is a read, not a change.
+// hero.Loot is a read (Read<T>), not a change.
 Console.Write("hero's bag:");
-foreach (var loot in hero.Read<DynamicBuffer<Loot>>())
+foreach (var loot in hero.Loot)
 {
     Console.Write($" {loot.Item}");
 }
 
 Console.WriteLine();
-Console.WriteLine($"the chest holds {chest.Read<DynamicBuffer<Loot>>().Count} items");
+Console.WriteLine($"the chest holds {chest.Loot.Count} items");
 Console.WriteLine($"bags synced: {world.Synced.Bags}");
 ```
 
@@ -287,7 +307,7 @@ written, once in each of the five updates that follow.
 | Letting a list grow from empty | `EnsureCapacity(n)` once where the size is known | Adding within the capacity allocates nothing |
 | A new list per tick | `Clear()` and refill | `Clear` keeps the capacity: a list refilled every tick allocates nothing once it reached its size |
 | `RemoveAt(i)` when the order does not matter | `RemoveAtSwapBack(i)` | O(1) instead of O(count) |
-| Reading through a `ref` parameter | An `in` parameter | A `ref` stamps the row, and every `[Changed<T>]` reader visits it |
+| Reading through a `ref` parameter | An `in` parameter | A `ref` stamps the row, and every `[Changed<T>]` reader visits it ([EECS025](/en/docs/guide/analyzer#eecs025)) |
 | Keeping a span across `Add` | Take a new span after any call that may grow the list | `Add`, `AddRange`, `Insert`, `EnsureCapacity` and `TrimExcess` may reallocate the array |
 
 Measured on 100,000 bags of 8 items, of which 1,000 trade an item per tick and one `[Changed]` system sends the
@@ -295,7 +315,8 @@ changed bags (`DynamicBufferBenchmark`), against the same bag as a `List<T>` in 
 
 <BenchTable bench="DynamicBufferBenchmark" />
 
-The buffer is at least as fast as the list it replaces, and the bag cannot change without the change being tracked.
+The buffer and the list it replaces are measured side by side above, and the bag cannot change without the change
+being tracked.
 
 1,000 actors with a mailbox of four messages unloaded and loaded again each operation (`BufferChurnBenchmark`): the
 new buffers take the lists of the dead ones.
@@ -322,7 +343,7 @@ new buffers take the lists of the dead ones.
 | Copying the buffer into a local, a field or another entity | Two owners of one list; writes through the copy are not tracked | [EECS012](/en/docs/guide/analyzer#eecs012) |
 | Calling `Add` on an `in` parameter or on `Read<T>()` | Does not compile: the writes need a `ref` | The compiler |
 | Keeping an `AsSpan()` across an `Add` | The span still points at the old array | Code review: take a new span |
-| Reading the buffer through a `ref` parameter | Every visited row counts as changed | Code review: declare it `in` |
+| Reading the buffer through a `ref` parameter | Every visited row counts as changed | [EECS025](/en/docs/guide/analyzer#eecs025) |
 | One entity per element of a plain list | An entity, a row and an index entry per item | Use a buffer for plain values |
 
 ## Related [#related]

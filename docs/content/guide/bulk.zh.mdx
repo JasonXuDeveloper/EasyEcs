@@ -82,10 +82,131 @@ int cleared = world.DestroyEntities<Shot>();                     // 所有子弹
 | [变更追踪](/zh/docs/guide/change-tracking) | 每行一次写入 | 每行一次移除（被追踪的 `T`） | 每行一次移除 | 每行一次写入 |
 | [索引](/zh/docs/guide/indexes-and-relations) | 重新索引 | 摘除 | 摘除 | 重新挂上 |
 | [分组](/zh/docs/guide/groups) | 挪到值所在的分组 | | | |
+| 遇到被禁用的 `T` | 替换：重新启用，换成新值 | | | |
 | [清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components) | | 移除最后一个时释放退休实体 | 拒绝（抛异常） | |
 
 四个调用都是所有者线程上的结构变更：在两次更新之间、系统的 `OnUpdate` 里，或者接收 `Entity` 或 `World` 的 `[ForEach]` 方法里调用
 （两者都不接收的方法，承诺了不做结构变更）。
+
+## 完整例子 [#full-example]
+
+一回合战斗：1,000 名战士被眩晕又解除，回血在过场动画期间暂停又恢复，然后生成一轮齐射再全部清掉，每一步都只要一次调用。
+一个系统给既没被眩晕、回血也没暂停的战士回血。把这几个文件放进一个引用了 EasyEcs 的控制台项目
+（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Fighter(int Team) : IComponent;
+
+public record struct Health(int Value) : IComponent;
+
+// 每次更新回的血。过场动画期间用 DisableAll 暂停。
+public record struct Regen(int PerTick) : IComponent;
+
+// 被眩晕的战士不回血。
+public record struct Stun(int Ticks) : IComponent;
+
+public record struct Shot(int Damage) : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// 没被眩晕的战士回血。被禁用的 Regen 对查询不可见，所以也会暂停。
+public class RegenerateSystem : EcsSystem
+{
+    [ForEach, Without<Stun>]
+    static void Heal(ref Health health, in Regen regen)
+    {
+        health.Value += regen.PerTick;
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Filters.cs">
+
+```csharp title="Filters.cs" doccheck=example
+using EasyEcs;
+
+public static class Rounds
+{
+    // 过滤条件是值：只建一次，存在字段里。
+    public static readonly QueryFilter Fighters = QueryFilter.Create().With<Fighter>();
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSystem<RegenerateSystem>();
+
+// 一次调用在一张表里建好全部战士。
+var fighters = new Entity[1_000];
+world.CreateEntities(fighters, new Fighter(1), new Health(100), new Regen(2));
+Entity first = fighters[0];
+
+// 回合结束：一趟遍历眩晕所有战士。
+int stunned = world.SetAll(new Stun(3), Rounds.Fighters);
+world.Update();
+Console.WriteLine($"stunned {stunned}: health {first.Health.Value}");
+
+// 所有人解除眩晕。
+int lifted = world.RemoveAll<Stun>(Rounds.Fighters);
+world.Update();
+Console.WriteLine($"lifted {lifted}: health {first.Health.Value}");
+
+// 过场动画：所有人暂停回血，数值保留。
+int paused = world.DisableAll<Regen>(Rounds.Fighters);
+world.Update();
+Console.WriteLine($"paused {paused}: health {first.Health.Value}");
+
+// 过场结束：保留的数值全部回来。
+int resumed = world.EnableAll<Regen>(Rounds.Fighters);
+world.Update();
+Console.WriteLine($"resumed {resumed}: health {first.Health.Value}");
+
+// 对被禁用的组件 SetAll 会替换它：重新启用，换成新值。
+world.DisableAll<Regen>(Rounds.Fighters);
+world.SetAll(new Regen(5), Rounds.Fighters);
+world.Update();
+int stillPaused = world.Count<Disabled<Regen>>();
+Console.WriteLine($"set while paused: health {first.Health.Value}, still paused {stillPaused}");
+
+// 一次调用生成一轮齐射，一趟遍历全部清掉。
+var volley = new Entity[10_000];
+world.CreateEntities(volley, new Shot(5));
+int cleared = world.DestroyEntities<Shot>();
+Console.WriteLine($"shots cleared: {cleared}, entities left: {world.EntityCount}");
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+stunned 1000: health 100
+lifted 1000: health 102
+paused 1000: health 102
+resumed 1000: health 104
+set while paused: health 109, still paused 0
+shots cleared: 10000, entities left: 1000
+```
+
+眩晕期间的那次更新谁都没回血（100），暂停期间那次也没有（102 保持不变）。对暂停中的 `Regen` 调用 `SetAll`，它立刻带着新值
+回来：下一次更新回 5 点血，`Disabled<Regen>` 一个都不剩。
 
 ## 怎么用得快 [#how-to-use-it-fast]
 
@@ -112,7 +233,8 @@ int cleared = world.DestroyEntities<Shot>();                     // 所有子弹
 | 在其他线程调用批量操作 | 和所有者线程竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 | 对清理组件或 `ChildOf` 调用 `DisableAll` | 抛 `InvalidOperationException` | 运行时 |
 | 值本该因实体而异却用了 `SetAll` | 所有实体拿到同一个值 | 改用 `[ForEach]` 系统 |
-| 对成千上万个实体循环 `Set` / `Remove` | 结果相同，慢很多倍 | 代码审查：改用批量调用 |
+| 遍历查询逐个实体 `Set` / `Remove` | 结果相同，但每个实体一次结构变更 | [EECS030](/zh/docs/guide/analyzer#eecs030) |
+| 在计数循环里 `CreateEntity` 或 `Instantiate(prefab)` | 每个实体创建一次，而不是一整波一次 | [EECS031](/zh/docs/guide/analyzer#eecs031)：`CreateEntities`、`Instantiate(prefab, span)` |
 
 ## 和其他库的对比 [#compared]
 

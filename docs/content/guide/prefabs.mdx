@@ -356,6 +356,7 @@ destroyed:
 | An `Entity` field in a prefab's component | Every instance points at the same handle, of no world | [EECS017](/en/docs/guide/analyzer#eecs017) (warning); use an `EntityId` to a member |
 | An `EntityId` of a world's entity in a prefab | Becomes `EntityId.Null` in every instance | Set links after instantiating |
 | Filling a `DynamicBuffer<T>` value before `Set` | Every instance shares that list | [EECS012](/en/docs/guide/analyzer#eecs012); use `SetLoot(...)` |
+| `Instantiate(prefab)` in a counted loop | One copy per call instead of one wave | [EECS031](/en/docs/guide/analyzer#eecs031): `Instantiate(prefab, span)` |
 | `Instantiate` on a thread that does not own the world | Races with the owner | [EECS014](/en/docs/guide/analyzer#eecs014) |
 | `Instantiate` in a `[ForEach]` method without `Entity` or `World` | The pass assumes no structural change | [EECS013](/en/docs/guide/analyzer#eecs013) |
 | Changing a prefab while other threads instantiate it | Torn copies | Build prefabs at startup, then only read them |

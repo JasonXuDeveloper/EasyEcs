@@ -18,7 +18,7 @@ icon: Network
 
 <Callout type="warn" title="不适合">
   只在全量遍历里顺带判断的键：普通 `[ForEach]` 反正要读它。键很少、每个键下实体很多、而且要整组遍历（16 个区域、10 万玩家）：
-  用[分组](/zh/docs/guide/groups)，每个键独占自己的表，遍历是满速的。手动同步的字典：索引本身就是。
+  用[分组](/zh/docs/guide/groups)，每个键独占自己的表，遍历是满速的。不必手写字典再手动同步：索引就是这张字典。
 </Callout>
 
 ## 怎么用 [#how-to-use-it]
@@ -55,6 +55,26 @@ int inTwo = zones.Count(2);                         // 1
 被索引的组件用 `in`、`Read<T>()` 或生成的属性（`alpha.Zone`，`ref readonly`）读取，用 `Set` 或生成的 `SetX` 写入。
 通过 `ref` 写入会在索引不知情时改掉键，所以分析器直接拒绝（[EECS015](/zh/docs/guide/analyzer#eecs015)）。一个组件只有一个索引、
 一种键类型。
+
+### 组件本身就是键 [#self-key]
+
+键可以是整个组件：按 id 找商店，按地址找 actor。让组件以自己为键实现 `IIndexed`，并显式实现 `Key`：
+
+```csharp
+public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop>
+{
+    Shop IIndexed<Shop>.Key => this;          // 显式实现：公开的 Key 属性会让 ToString() 无限递归
+}
+```
+
+```csharp
+var shop = world.CreateEntity(new Shop(7));
+if (world.ShopIndex.TryFind(new Shop(7), out var found)) { /* id 为 7 的商店 */ }
+```
+
+record struct 上如果写公开的 `Key => this`，生成的 `ToString()` 会打印 `Key`，`Key` 又打印 `Key`，直到栈溢出。显式实现让
+`Key` 不算 record 的成员。[Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)就建立在这个
+写法上：每类 actor 一个类型，它同时是键、系统组和组的过滤条件。
 
 ### 有序遍历和范围查询 [#ordered-index]
 
@@ -135,6 +155,36 @@ knight.RemoveRelation<MemberOf>(blue);                         // 退出 blue
 修改链接用 `AddRelation`、`RemoveRelation` 或整个缓冲的 `Set`，这样索引才能跟上（通过 `ref` 写入属于
 [EECS015](/zh/docs/guide/analyzer#eecs015)）。
 
+只要有代码写出 `DynamicBuffer<MemberOf>`（`[ForEach]` 参数、一次 `Read`），生成器就会为这个关系生成具名成员：
+
+| 生成的成员 | 等价于 |
+| --- | --- |
+| `e.AddMemberOf(target)` | `e.AddRelation(new MemberOf(target))`，返回实体 |
+| `e.RemoveMemberOf(target)` | `e.RemoveRelation<MemberOf>(target)`，返回删掉了几条链接 |
+| `e.LinksMemberOf(target)` | `e.HasRelation<MemberOf>(target)` |
+| `e.MemberOf` / `e.HasMemberOf` / `e.RemoveMemberOf()` | 全部链接（`ref readonly DynamicBuffer<MemberOf>`）、是否有链接、全部删掉 |
+| `world.MemberOfIndex` | `world.Relations<MemberOf>()` |
+
+```csharp
+public record struct PartyCount(int Parties) : IComponent;
+
+public class CountParties : EcsSystem
+{
+    [ForEach]
+    static void Count(in DynamicBuffer<MemberOf> parties, ref PartyCount count) => count = new PartyCount(parties.Count);
+}
+```
+
+```csharp
+var paladin = world.CreateEntity(new PartyCount()).AddMemberOf(red).AddMemberOf(blue);
+bool withBlue = paladin.LinksMemberOf(blue);                  // true
+paladin.RemoveMemberOf(blue);                                 // 删掉 1 条链接
+int linked = paladin.MemberOf.Count;                          // 1
+int inRed = world.MemberOfIndex.Count(red);                   // 骑士和圣骑士
+```
+
+关系没有 `WriteX()` 和 `GetOrAddX()`：链接带索引，只能通过上面这些调用修改。
+
 ### 目标被销毁时 [#target-policies]
 
 目标死了，指向它的链接怎么办，是游戏规则的一部分。索引可以在每次销毁时直接执行这条规则：
@@ -169,12 +219,16 @@ public class BurnZones : EcsSystem
     static void Burn(in Hazard hazard, World world)
     {
         foreach (var unit in world.ZoneIndex.Find(hazard.Zone)) // [!code highlight]
-            if (unit.HasHealth) unit.Health.Value -= hazard.Damage;
+        {
+            ref var health = ref unit.TryGetRef<Health>(out bool found);   // 只查一次
+            if (found) health.Value -= hazard.Damage;
+        }
     }
 }
 ```
 
-无论 World 里有多少单位，遍历只碰这个区域里的那些。`Find` 循环里可以销毁实体，但不能修改这个索引对应的组件。
+无论 World 里有多少单位，遍历只碰这个区域里的那些。`Find` 循环里可以销毁实体，但不能修改这个索引对应的组件：某个键清空后，
+它的 id 数组会交给下一个变大的键，遍历可能读到别的键的实体。先收集，再修改。
 
 ## 完整例子 [#full-example]
 
@@ -236,8 +290,15 @@ world.CreateEntity(new PlayerName("alice"), new Level(42));
 var teams = world.TeamIndex;
 Console.WriteLine($"team 0: {teams.Count(0)} units");
 
-// 把实体换到另一个键上要用 Set：索引立刻跟着更新。
+// 遍历队伍索引时不能修改 Team：先收集单位，再修改。
+var moving = new List<Entity>();
 foreach (var unit in teams.Find(1))
+{
+    moving.Add(unit);
+}
+
+// 一次 Set 立刻把实体挪到新键下。
+foreach (var unit in moving)
 {
     unit.SetTeam(2);
 }
@@ -305,7 +366,7 @@ after the hero left: blue has 0
 arrows left after the archer died: 0
 ```
 
-在 `Find` 循环里改队伍是安全的：实体离开这个键时，遍历会跟着索引走。箭跟着弓箭手一起销毁，是因为设了
+1 队的单位先收集起来再改队伍，遍历就不会读到正在清空的键。箭跟着弓箭手一起销毁，是因为设了
 `TargetPolicy.Destroy`；不设的话，它们会留着一条指向已销毁实体的链接。
 
 ## 怎么用得快 [#how-to-use-it-fast]
@@ -344,7 +405,8 @@ arrows left after the archer died: 0
 | --- | --- | --- |
 | 通过 `ref`、`Get<T>()` 或查询元素写入被索引的组件 | 索引还停在旧键上 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
 | 组件里存 `Entity` 句柄 | 变成托管列，有写屏障，存不了盘 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
-| 在 `Find` 循环里修改同一索引的组件 | 不支持（销毁实体可以） | 代码审查 |
+| 在 `Find` 循环里修改同一索引的组件 | 遍历可能读到别的键的实体（销毁实体没问题） | 代码审查：先收集，再修改 |
+| record struct 上写公开的 `Key => this` | `ToString()` 无限打印 `Key`，栈溢出 | 代码审查：`Shop IIndexed<Shop>.Key => this;` |
 | 在其他线程使用索引 | 索引属于所有者线程 | [线程](/zh/docs/guide/threading#what-the-world-synchronizes) |
 | 同一个组件用两种键类型建索引 | 抛 `InvalidOperationException`：每个组件一个索引 | 运行时 |
 | 键是 `null`（`string` 的默认值） | 实体不会出现在任何键下 | 设计如此 |

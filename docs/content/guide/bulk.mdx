@@ -85,10 +85,132 @@ int cleared = world.DestroyEntities<Shot>();                     // every shot, 
 | [Change tracking](/en/docs/guide/change-tracking) | a write per row | a removal per row (tracked `T`) | a removal per row | a write per row |
 | [Indexes](/en/docs/guide/indexes-and-relations) | re-indexed | unlinked | unlinked | re-linked |
 | [Groups](/en/docs/guide/groups) | moved to the value's group | | | |
+| On a disabled `T` | replaced: enabled, with the new value | | | |
 | [Cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components) | | the last one frees a retired entity | refused (throws) | |
 
 All four are structural changes of the owner thread: call them between updates, from a system's `OnUpdate`, or from a
 `[ForEach]` method that takes an `Entity` or the `World` (a method that takes neither promises no structural change).
+
+## Full example [#full-example]
+
+A round of a fight: 1,000 fighters are stunned and released, their regeneration paused for a cutscene and resumed,
+then a volley of shots is spawned and cleared, each with one call. A system heals the fighters that are neither
+stunned nor paused. Put the files in a console project that references EasyEcs (`dotnet add package EasyEcs`) and run
+it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Fighter(int Team) : IComponent;
+
+public record struct Health(int Value) : IComponent;
+
+// Health regained per update. A cutscene pauses it with DisableAll.
+public record struct Regen(int PerTick) : IComponent;
+
+// A stunned fighter does not regenerate.
+public record struct Stun(int Ticks) : IComponent;
+
+public record struct Shot(int Damage) : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// Fighters that are not stunned regain health. A disabled Regen is hidden, so it pauses too.
+public class RegenerateSystem : EcsSystem
+{
+    [ForEach, Without<Stun>]
+    static void Heal(ref Health health, in Regen regen)
+    {
+        health.Value += regen.PerTick;
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Filters.cs">
+
+```csharp title="Filters.cs" doccheck=example
+using EasyEcs;
+
+public static class Rounds
+{
+    // Filters are values: build them once and keep them in fields.
+    public static readonly QueryFilter Fighters = QueryFilter.Create().With<Fighter>();
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSystem<RegenerateSystem>();
+
+// One call creates the whole roster in one table.
+var fighters = new Entity[1_000];
+world.CreateEntities(fighters, new Fighter(1), new Health(100), new Regen(2));
+Entity first = fighters[0];
+
+// The round ends: every fighter is stunned, in one pass.
+int stunned = world.SetAll(new Stun(3), Rounds.Fighters);
+world.Update();
+Console.WriteLine($"stunned {stunned}: health {first.Health.Value}");
+
+// The stun lifts from everyone.
+int lifted = world.RemoveAll<Stun>(Rounds.Fighters);
+world.Update();
+Console.WriteLine($"lifted {lifted}: health {first.Health.Value}");
+
+// A cutscene: regeneration pauses everywhere and keeps its values.
+int paused = world.DisableAll<Regen>(Rounds.Fighters);
+world.Update();
+Console.WriteLine($"paused {paused}: health {first.Health.Value}");
+
+// The cutscene ends: every kept value comes back.
+int resumed = world.EnableAll<Regen>(Rounds.Fighters);
+world.Update();
+Console.WriteLine($"resumed {resumed}: health {first.Health.Value}");
+
+// SetAll on a disabled component replaces it: enabled again, with the new value.
+world.DisableAll<Regen>(Rounds.Fighters);
+world.SetAll(new Regen(5), Rounds.Fighters);
+world.Update();
+int stillPaused = world.Count<Disabled<Regen>>();
+Console.WriteLine($"set while paused: health {first.Health.Value}, still paused {stillPaused}");
+
+// A volley is spawned in one call and cleared in one pass.
+var volley = new Entity[10_000];
+world.CreateEntities(volley, new Shot(5));
+int cleared = world.DestroyEntities<Shot>();
+Console.WriteLine($"shots cleared: {cleared}, entities left: {world.EntityCount}");
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+stunned 1000: health 100
+lifted 1000: health 102
+paused 1000: health 102
+resumed 1000: health 104
+set while paused: health 109, still paused 0
+shots cleared: 10000, entities left: 1000
+```
+
+The stunned update heals nobody (100), the paused one neither (102 stays 102). `SetAll` on the paused `Regen` gives
+it back with the new value at once: the next update heals 5, and no `Disabled<Regen>` is left.
 
 ## How to use it fast [#how-to-use-it-fast]
 
@@ -118,7 +240,8 @@ and entity by entity (`BulkBenchmark`):
 | A bulk call from another thread | Races with the owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |
 | `DisableAll` of a cleanup component or `ChildOf` | `InvalidOperationException` | At run time |
 | `SetAll` with a value that should differ per entity | Every entity gets the same value | Use a `[ForEach]` system |
-| A per-entity loop of `Set` / `Remove` over thousands | The same result, many times slower | Code review: use the bulk call |
+| `Set` / `Remove` entity by entity over a query | The same result, one structural change per entity | [EECS030](/en/docs/guide/analyzer#eecs030) |
+| `CreateEntity` or `Instantiate(prefab)` in a counted loop | One creation per entity instead of one per wave | [EECS031](/en/docs/guide/analyzer#eecs031): `CreateEntities`, `Instantiate(prefab, span)` |
 
 ## Compared with other libraries [#compared]
 

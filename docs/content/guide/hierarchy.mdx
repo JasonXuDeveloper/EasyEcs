@@ -1,7 +1,7 @@
 ---
 title: Hierarchy
-seoTitle: "Parent-child hierarchy in a C# ECS: ChildOf and Children"
-description: "Link entities to a parent with ChildOf, list children with world.Children, destroy a parent with its descendants and move hierarchies between worlds."
+seoTitle: "C# ECS hierarchy: ChildOf, Children, Descendants"
+description: "Link entities to a parent with ChildOf, list children with Children, walk a subtree with Descendants, destroy a parent with its subtree."
 icon: GitFork
 ---
 
@@ -55,15 +55,27 @@ first call indexes every `ChildOf` once.
 foreach (var child in world.Children(ship)) { /* the turret */ }
 ```
 
-`world.Descendants(root)` walks the whole subtree below the root, depth first, each entity before its own children
-(the root itself is not one of them): O(1) per entity, nothing allocated once warm. Use it where a whole tree is the
-unit (saving, moving or counting it); propagation that needs each parent's result goes through
+</Step>
+<Step>
+
+### Walk a subtree: Descendants [#descendants]
+
+`world.Descendants(root)` walks the whole subtree below the root, depth first, each entity before its own children;
+the root itself is not one of them. It costs O(1) per entity and allocates nothing once warm. Use it where a whole tree
+is the unit (saving, moving or counting it); propagation that needs each parent's result goes through
 [`Children` level by level](#transform-propagation).
 
 ```csharp
 int parts = 0;
-foreach (var part in world.Descendants(ship)) parts++;   // turrets, their barrels, ...
+foreach (var part in world.Descendants(ship)) parts++;   // the turret, then its gun
 ```
+
+- **Destroying during the walk** is allowed: an entity destroyed before the walk reaches it is skipped.
+- **A walk inside a walk** works: the inner one allocates a stack of its own (the outer one holds the world's).
+- **A `ChildOf` cycle** (an entity that is its own ancestor) throws `InvalidOperationException` when the walk reaches
+  it.
+- **Changing `ChildOf` during the walk** (re-parenting, detaching) is not allowed: it rewrites the child lists the
+  walk is reading. Collect first, then change.
 
 </Step>
 <Step>
@@ -157,24 +169,27 @@ here allocates.
 
 `MoveEntities` and `SaveEntities` take the entities you list, not their children. Collect a hierarchy with
 `Descendants` and move it together: a child whose parent stays behind arrives without its `ChildOf` (a root there), and
-`MoveEntities` destroys the originals with their children, so a child you did not list is lost. See
+`MoveEntities` destroys the originals with their children, so a child you did not list is lost. `MoveEntities` takes a
+`ReadOnlySpan<EntityId>`: pass the list's span (`CollectionsMarshal.AsSpan`) rather than a copy of it. See
 [migration](/en/docs/guide/migration-and-unload#move-entities).
 
 ```csharp
+using System.Runtime.InteropServices;
+
 var player = world.CreateEntity(new Name("bob"));
 world.CreateEntity(new Name("sword"), new ChildOf(player));
 
 var group = new List<EntityId> { player.Id };
 foreach (var part in world.Descendants(player)) group.Add(part.Id);   // children, grandchildren, ...
 using var other = new World();
-world.MoveEntities(other, group.ToArray());   // bob and his sword, still linked
+world.MoveEntities(other, CollectionsMarshal.AsSpan(group));   // bob and his sword, still linked
 ```
 
 ## Full example [#full-example]
 
-A ship with a turret and a gun: world positions follow the parents, then the gun is re-parented, the turret
-detached, and the ship destroyed with what still hangs on it. Put the files in a console project that references
-EasyEcs (`dotnet add package EasyEcs`) and run it with `dotnet run`.
+A ship with a turret and a gun: world positions follow the parents, the ship's subtree is listed, then the gun is
+re-parented, the turret detached, and the ship destroyed with what still hangs on it. Put the files in a console
+project that references EasyEcs (`dotnet add package EasyEcs`) and run it with `dotnet run`.
 
 <Accordions>
 <Accordion title="Components.cs">
@@ -248,6 +263,15 @@ foreach (var child in world.Children(ship))
     Console.WriteLine($"ship > {child.Name.Value}");
 }
 
+// Descendants walks the whole subtree, depth first: each entity before its own children.
+Console.Write("ship's subtree:");
+foreach (var part in world.Descendants(ship))
+{
+    Console.Write($" {part.Name.Value}");
+}
+
+Console.WriteLine();
+
 // Re-parent: set a new ChildOf. Detach: remove it, and the entity is a root.
 gun.Set(new ChildOf(ship));
 turret.Remove<ChildOf>();
@@ -270,13 +294,15 @@ It prints:
 ```text
 gun at WorldPosition { X = 11, Y = 2 }
 ship > turret
+ship's subtree: turret gun
 ship: 1 child, turret: 0 children
 turret alive: True, gun alive: False
 1 entity left
 ```
 
-The gun's world position adds its parents' offsets: 10 + 0 + 1 and 0 + 2 + 0. After the turret is detached it
-survives the ship; the gun, re-parented to the ship, does not.
+The gun's world position adds its parents' offsets: 10 + 0 + 1 and 0 + 2 + 0. `Children` lists only the turret;
+`Descendants` reaches the gun below it. After the turret is detached it survives the ship; the gun, re-parented to the
+ship, does not.
 
 ## How to use it fast [#how-to-use-it-fast]
 
@@ -308,6 +334,8 @@ survives the ship; the gun, re-parented to the ship, does not.
 | A parent pointer of your own as an `Entity` field | A managed column, not saved, no cascade | [EECS017](/en/docs/guide/analyzer#eecs017) |
 | Moving a parent without its children | The children stay and die with the destroyed original | Collect the group with `Descendants` |
 | Collecting a tree with `Children` alone | Grandchildren are left out | `Descendants` walks every level |
+| A `ChildOf` cycle walked with `Descendants` | `InvalidOperationException` when the walk reaches it | At run time |
+| Re-parenting or detaching inside a `Descendants` loop | The walk reads child lists that are being rewritten | Code review: collect first, then change |
 | `Disable<ChildOf>()` | `InvalidOperationException` | At run time |
 | Expecting world positions without a system | There is no built-in transform | Write the [propagation system](#transform-propagation) |
 

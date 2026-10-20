@@ -46,7 +46,7 @@ public struct Player : IComponent;
 ```csharp
 var players = new Entity[1_000];
 world.CreateEntities(players, new DynamicBuffer<Loot>(), new Sent(), new Player());
-foreach (var p in players) p.Get<DynamicBuffer<Loot>>().EnsureCapacity(8);   // 预留满背包的空间：之后不再扩容
+foreach (var p in players) p.WriteLoot().EnsureCapacity(8);   // 预留满背包的空间：之后不再扩容
 ```
 
 </Step>
@@ -119,11 +119,32 @@ world.Update();
 
 在系统之外，通过实体拿到缓冲：
 
+只要有代码写出 `DynamicBuffer<Loot>`，生成器就会给这个元素生成具名成员：
+
+| 生成的成员 | 等价于 |
+| --- | --- |
+| `e.Loot` | `e.Read<DynamicBuffer<Loot>>()`：`ref readonly`，不打 tick |
+| `e.HasLoot` | `e.Has<DynamicBuffer<Loot>>()` |
+| `e.WriteLoot()` | `e.Get<DynamicBuffer<Loot>>()`：`ref`，算一次写入 |
+| `e.GetOrAddLoot()` | `e.GetOrAdd<DynamicBuffer<Loot>>()`：没有就先加一个空缓冲 |
+| `e.RemoveLoot()` | `e.Remove<DynamicBuffer<Loot>>()` |
+
 ```csharp
-ref var bag = ref player.Get<DynamicBuffer<Loot>>();          // ref 局部变量：一次被追踪的写入
+ref var bag = ref player.WriteLoot();                          // ref 局部变量：一次被追踪的写入
 bag.Add(new Loot(7));
-int held = player.Read<DynamicBuffer<Loot>>().Count;          // 只读：不打 tick
+bag.Insert(0, new Loot(1));                                    // 插到最前面：后面的元素各后移一位
+bag.AddRange([new Loot(2), new Loot(3)]);                      // 传一个 span：一次复制，最多扩容一次
+bag.RemoveAtSwapBack(1);                                       // O(1)：用最后一个元素填空位
+foreach (ref var loot in bag.AsSpan()) loot = new Loot(loot.Item * 10);   // 原地修改元素
+bag.TrimExcess();                                              // 背包缩小后，把多余的容量还回去
+
+int held = player.Loot.Count;                                  // 只读：不打 tick
+ReadOnlySpan<Loot> items = player.Loot.AsReadOnlySpan();       // 只读地拿到所有元素
+ref var stash = ref hero.GetOrAddLoot();                       // 英雄没有缓冲时先加一个空的
 ```
+
+关系的缓冲没有 `WriteX()` 和 `GetOrAddX()`：链接带索引，只能通过
+[`AddRelation` / `RemoveRelation`](/zh/docs/guide/indexes-and-relations#relations) 修改。
 
 ### 不要复制 [#copies]
 
@@ -236,22 +257,22 @@ Entity hero = world.CreateEntity(new DynamicBuffer<Loot>(), new Collector());
 Entity chest = world.CreateEntity(new DynamicBuffer<Loot>());
 
 // 现在就留够一整包的容量，之后列表不会再扩容。
-hero.Get<DynamicBuffer<Loot>>().EnsureCapacity(4);
+hero.WriteLoot().EnsureCapacity(4);
 
 for (int i = 0; i < 6; i++)
 {
     world.Update();
 }
 
-// Read<T> 是读取，不算变更。
+// hero.Loot 是读取（Read<T>），不算变更。
 Console.Write("hero's bag:");
-foreach (var loot in hero.Read<DynamicBuffer<Loot>>())
+foreach (var loot in hero.Loot)
 {
     Console.Write($" {loot.Item}");
 }
 
 Console.WriteLine();
-Console.WriteLine($"the chest holds {chest.Read<DynamicBuffer<Loot>>().Count} items");
+Console.WriteLine($"the chest holds {chest.Loot.Count} items");
 Console.WriteLine($"bags synced: {world.Synced.Bags}");
 ```
 
@@ -275,7 +296,7 @@ bags synced: 7
 | 让列表从空开始慢慢长 | 知道大小时调用一次 `EnsureCapacity(n)` | 容量之内的 `Add` 不分配 |
 | 每个 tick 新建列表 | `Clear()` 后重新填充 | `Clear` 保留容量：每 tick 重填的列表长到稳定大小后不再分配 |
 | 不在乎顺序还用 `RemoveAt(i)` | `RemoveAtSwapBack(i)` | O(1)，而不是 O(count) |
-| 用 `ref` 参数只读 | 改成 `in` 参数 | `ref` 会给行打 tick，下游每个 `[Changed<T>]` 读取方都要访问它 |
+| 用 `ref` 参数只读 | 改成 `in` 参数 | `ref` 会给行打 tick，下游每个 `[Changed<T>]` 读取方都要访问它（[EECS025](/zh/docs/guide/analyzer#eecs025)） |
 | `Add` 之后还用之前的 span | 可能扩容的调用之后重新取 span | `Add`、`AddRange`、`Insert`、`EnsureCapacity`、`TrimExcess` 都可能换数组 |
 
 10 万个装 8 件物品的背包，每 tick 有 1,000 个交易一件物品，再由一个 `[Changed]` 系统发送变化的背包
@@ -283,7 +304,7 @@ bags synced: 7
 
 <BenchTable bench="DynamicBufferBenchmark" />
 
-缓冲不比它替代的列表慢，而且背包的任何改动都逃不过追踪。
+缓冲和它替代的列表在上表里并排实测，而且背包的任何改动都逃不过追踪。
 
 1,000 个 Actor 各带一个装 4 条消息的信箱，每次操作先卸载再重新加载（`BufferChurnBenchmark`）：新缓冲直接接过已销毁缓冲的列表。
 
@@ -306,7 +327,7 @@ bags synced: 7
 | 把缓冲复制到局部变量、字段或另一个实体 | 一个列表两个主人；通过副本的写入不被追踪 | [EECS012](/zh/docs/guide/analyzer#eecs012) |
 | 在 `in` 参数或 `Read<T>()` 上调用 `Add` | 编译不过：写入需要 `ref` | 编译器 |
 | `Add` 之后继续用之前的 `AsSpan()` | span 还指着旧数组 | 代码审查：重新取 span |
-| 用 `ref` 参数读取缓冲 | 访问到的每一行都算作已变化 | 代码审查：改成 `in` |
+| 用 `ref` 参数读取缓冲 | 访问到的每一行都算作已变化 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
 | 纯值列表的每个元素都建一个实体 | 每件物品一个实体、一行、一条索引 | 纯值用缓冲 |
 
 ## 相关页面 [#related]

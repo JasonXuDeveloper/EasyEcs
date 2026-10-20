@@ -57,7 +57,23 @@ world.Update();                        // ReleaseSeats 释放它：guest.IsAlive
 
 - 所有销毁途径都会让这类实体“退休”：`Destroy`、`DestroyEntities<T>()`、[层级](/zh/docs/guide/hierarchy)级联、
   [目标策略](/zh/docs/guide/indexes-and-relations#target-policies)。
-- 给新实体申请资源的系统用 `Without<Destroyed>` 过滤。
+- 申请资源的系统用 `Without<Destroyed>` 过滤：退役的实体还留着清理组件，不过滤的话，它离开以后还可能再申请一次：
+
+```csharp
+public record struct NextSeat(int Number) : ISingletonComponent;
+
+public class AssignSeats : EcsSystem
+{
+    [ForEach, Without<Destroyed>]                            // 已经离开的实体不再分配座位 // [!code highlight]
+    static void Assign(ref Seat seat, ref NextSeat next)
+    {
+        if (seat.Number != 0) return;                        // 已经有座位
+        next.Number++;
+        seat = new Seat(next.Number);                        // 在这里占座
+    }
+}
+```
+
 - 再次销毁已退休的实体没有任何效果。从存活实体上移除清理组件，就只是移除而已。
 - 退休的实体会离开它所在的索引，它的子实体也随之而去。
 - 清理组件不能被禁用（`Disable<T>()` 会抛异常）：它必须留着等待释放。
@@ -118,7 +134,7 @@ public class MoveBullets : EcsSystem
 
 ```csharp
 var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Bullet());
-bullet.SetInactive();                                        // 回到对象池：翻转一个位，不挪行
+bullet.SetInactive();                                        // 回到对象池：第一次之后只翻转一个位
 bullet.SetPosition(5, 5).RemoveInactive();                   // 重新使用
 int pooled = world.Count<Bullet>(QueryFilter.Create().With<Inactive>());   // 存档、清理、统计都能看到所有实体
 ```
@@ -275,7 +291,7 @@ after the update: alive False, seats released 1
 | --- | --- | --- |
 | 在每个销毁的地方各自释放资源 | 一个清理组件加一个系统 | 只有一条释放路径，批量销毁和级联也覆盖 |
 | 移除再加回组件来暂停它 | `Disable<T>()` / `Enable<T>()` | 值保留下来；用 `Set` 得先把值存到别处 |
-| 对大量实体循环调用 `Disable` | `world.DisableAll<T>(filter)` | 一次处理整字的行（[批量操作](/zh/docs/guide/bulk)） |
+| 对大量实体循环调用 `Disable` | `world.DisableAll<T>(filter)` | 按 64 行一批（一个存在位字）整块处理（[批量操作](/zh/docs/guide/bulk)） |
 | 每个系统都判断的标志字段 | 标签加 `Without<T>` | 没有这个标签的表完全不用判断 |
 
 1 万个持有外部资源的会话，每次操作 1,000 个断开、1,000 个连入，对比用清理组件和在销毁前手动释放普通组件（`CleanupBenchmark`）；
@@ -299,7 +315,7 @@ after the update: alive False, seats released 1
 | 清理系统没写 `With<Destroyed>` | 把存活实体的资源也释放了 | 代码审查 |
 | 从不移除最后一个清理组件 | 退休的实体永远留着 | 在统计里看 `world.Count<Destroyed>()` |
 | 对清理组件或 `ChildOf` 调用 `Disable<T>()` | 抛 `InvalidOperationException` | 运行时 |
-| 对被禁用的组件 `Set`，以为它还是禁用状态 | `Set` 会用新值重新启用它 | 设计如此：要保留旧值用 `Enable` |
+| 对被禁用的组件 `Set`，以为它还是禁用状态 | `Set` 会用新值重新启用它；要拿回保留的值用 `Enable` | 设计如此 |
 | 系统忘了写 `Without<Inactive>` | 池里的实体还在动 | 代码审查 |
 | 指望 `[Changed<T>]` 区分新建和写入 | 两者都算写入 | 用 `Spawned` 标签 |
 

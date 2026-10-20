@@ -60,7 +60,24 @@ world.Update();                        // ReleaseSeats frees it: guest.IsAlive i
 
 - Every destroy path retires such entities: `Destroy`, `DestroyEntities<T>()`, a [hierarchy](/en/docs/guide/hierarchy)
   cascade or a [target policy](/en/docs/guide/indexes-and-relations#target-policies).
-- A system that acquires the resource for new entities filters `Without<Destroyed>`.
+- A system that acquires the resource filters `Without<Destroyed>`: a retired entity still holds its cleanup
+  component, so without the filter it could acquire again after it left:
+
+```csharp
+public record struct NextSeat(int Number) : ISingletonComponent;
+
+public class AssignSeats : EcsSystem
+{
+    [ForEach, Without<Destroyed>]                            // never seat an entity that already left // [!code highlight]
+    static void Assign(ref Seat seat, ref NextSeat next)
+    {
+        if (seat.Number != 0) return;                        // already seated
+        next.Number++;
+        seat = new Seat(next.Number);                        // take the seat here
+    }
+}
+```
+
 - Destroying a retired entity again does nothing. Removing a cleanup component from a live entity just removes it.
 - A retired entity leaves its indexes, and its children go with it.
 - A cleanup component cannot be disabled (`Disable<T>()` throws): it must stay to be released.
@@ -122,7 +139,7 @@ public class MoveBullets : EcsSystem
 
 ```csharp
 var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Bullet());
-bullet.SetInactive();                                        // back to the pool: a bit flip, no row moves
+bullet.SetInactive();                                        // back to the pool: after the first time, a bit flip
 bullet.SetPosition(5, 5).RemoveInactive();                   // reused
 int pooled = world.Count<Bullet>(QueryFilter.Create().With<Inactive>());   // saves, cleanup and stats see everything
 ```
@@ -283,7 +300,7 @@ player is still alive, but only `ReleaseSeatsSystem` sees it, because it asks fo
 | --- | --- | --- |
 | Releasing a resource in every place that destroys | A cleanup component and one system | One release path, also for bulk destroys and cascades |
 | Removing and re-adding a component to pause it | `Disable<T>()` / `Enable<T>()` | The value stays; `Set` would need it stored elsewhere |
-| A loop of `Disable` over many entities | `world.DisableAll<T>(filter)` | Whole words of rows at once ([bulk](/en/docs/guide/bulk)) |
+| A loop of `Disable` over many entities | `world.DisableAll<T>(filter)` | 64 rows at a time, one word of presence bits ([bulk](/en/docs/guide/bulk)) |
 | A flag field every system tests | A tag and `Without<T>` | Tables without the tag skip the test entirely |
 
 10,000 sessions with an outside resource, 1,000 disconnecting and 1,000 connecting per operation, with a cleanup
@@ -310,7 +327,7 @@ and enabled in bulk and one by one (`BulkBenchmark`):
 | A cleanup system without `With<Destroyed>` | It releases resources of live entities | Code review |
 | Never removing the last cleanup component | The retired entity stays forever | `world.Count<Destroyed>()` in your stats |
 | `Disable<T>()` on a cleanup component or `ChildOf` | `InvalidOperationException` | At run time |
-| `Set` on a disabled component expecting it to stay disabled | `Set` enables it with the new value | By design: use `Enable` to keep the old value |
+| `Set` on a disabled component expecting it to stay disabled | `Set` enables it with the new value; use `Enable` to get the kept value back | By design |
 | Forgetting `Without<Inactive>` on a system | Pooled entities keep moving | Code review |
 | Expecting `[Changed<T>]` to tell new from written | Both are writes | Use a `Spawned` tag |
 

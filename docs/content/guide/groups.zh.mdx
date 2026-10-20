@@ -67,6 +67,7 @@ for (int i = 0; i < 9; i++) world.CreateEntity(new Zone(i % 3), new Health(10 * 
 public struct SumHealth : IForEach<Health>
 {
     public int Total;
+    public static int Writes => 0;                             // 只读：没有哪一行算作被写过
     public void Execute(ref Health health) => Total += health.Value;
 }
 
@@ -140,7 +141,7 @@ public class RegenerateActiveZone : EcsSystem
 
 ## 完整例子 [#full-example]
 
-九个单位分在三个区域里。一个系统只给当前活跃区域的单位回血，一个 struct job 统计某个区域的总血量，然后三个单位从区域 2 走进
+九个单位分在三个区域里。一个系统只给当前活跃区域的单位回血，一个结构体 job 统计某个区域的总血量，然后三个单位从区域 2 走进
 区域 1。把这几个文件放进一个引用了 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
 
 <Accordions>
@@ -167,7 +168,7 @@ public record struct ActiveZone(int Id) : ISingletonComponent;
 ```csharp title="Jobs.cs" doccheck=example
 using EasyEcs;
 
-// struct job：遍历过滤条件选出的行，没有委托。
+// 结构体 job：遍历过滤条件选出的行，没有委托。
 public struct Regenerate : IForEach<Health>
 {
     public void Execute(ref Health health)
@@ -179,6 +180,9 @@ public struct Regenerate : IForEach<Health>
 public struct SumHealth : IForEach<Health>
 {
     public int Total;
+
+    // 这个 job 只读：不把任何组件算作被写过（默认值 -1 表示全部算写入）。
+    public static int Writes => 0;
 
     public void Execute(ref Health health)
     {
@@ -194,7 +198,7 @@ public struct SumHealth : IForEach<Health>
 using EasyEcs;
 
 // 只给活跃区域的单位回血。[ForEach] 的特性没法写出分组的值，
-// 所以系统在 OnUpdate 里用带 InGroup 过滤条件的 struct job 来跑。
+// 所以系统在 OnUpdate 里用带 InGroup 过滤条件的结构体 job 来跑。
 public class RegenerateActiveZone : EcsSystem
 {
     protected override void OnUpdate()
@@ -289,7 +293,8 @@ zone 2: 0 units, 0 hp
 - **内存：** 每种组件组合、每个分组各一张表，各带列的富余容量。成千上万个小分组会把 World 切得很碎，这种情况该用索引。
 - **换分组：** 一次行拷贝（和添加一个表里没有列的组件一样）。
 - **遍历分组：** 只碰这个分组自己的行，不用逐行比较值。
-- **从不调用 `GroupBy` 的 World** 零开销：对不是 `IGroup` 的组件，这个检查在 JIT 时就被消掉了。
+- **没调用 `GroupBy` 时：** World 没按某个 `IGroup` 组件分组，对它 `Set` 只多一次判空；不是 `IGroup` 的组件连这一步都省了
+  （这个判断是常量，JIT 直接消掉）。不管分没分组，这个组件都只能用 `Set` 写。
 
 ## 常见陷阱 [#pitfalls]
 
@@ -298,7 +303,7 @@ zone 2: 0 units, 0 hp
 | 通过 `ref` 写分组组件 | 行还留在旧分组 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
 | 每个玩家、公会或主人一个分组 | 每个键一张表：浪费内存，World 碎片化 | 改用[值索引](/zh/docs/guide/indexes-and-relations#value-indexes) |
 | 值每个 tick 都变 | 每次变化一次行拷贝 | 保持普通组件 |
-| 一个过滤器里调用两次 `InGroup` | 一个过滤器只有一个分组，以最后一次为准 | 代码审查 |
+| 一个过滤器里调用两次 `InGroup` | 一个过滤器只有一个分组，以最后一次为准，两个组件却都成了必需 | 代码审查 |
 | 遍历途中调用 `GroupBy` | 抛异常：它要挪行 | 初始化时调用 |
 
 ## 和其他库的对比 [#compared]
@@ -321,6 +326,6 @@ Friflo、Arch 和 DefaultEcs 都没有按值分组，最接近的是值索引。
     每个线程一个 World：互不往来的分区。
   </Card>
   <Card title="示例：GameLoop" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop">
-    另一种分组，系统组：输入、tick 和复制各按自己的节奏运行。
+    另一种分组，系统组：输入、tick 和同步各按自己的节奏运行。
   </Card>
 </Cards>
