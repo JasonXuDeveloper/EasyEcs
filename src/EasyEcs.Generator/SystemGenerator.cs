@@ -241,8 +241,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
             sb.Append($"            access.{(p.RefKind == "ref" ? "Write" : "Read")}{kind}<{p.Type}>();\n");
         }
 
-        // [Changed<T>] and [Removed<T>] read T's change ticks, which writers and removers of T stamp.
-        foreach (var type in model.Methods.SelectMany(m => m.Changed.Concat(m.Removed)).Distinct())
+        // [Changed<T>], [Removed<T>] and the ChangedAny / RemovedAny groups read T's change ticks, which writers and
+        // removers of T stamp.
+        foreach (var type in model.Methods.SelectMany(m => m.Changed.Concat(m.Removed).Concat(m.ChangedAny).Concat(m.RemovedAny)).Distinct())
             sb.Append($"            access.Read<{type}>();\n");
 
         sb.Append("        }\n");
@@ -347,9 +348,25 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
         if (!method.HasFilter) return;
         var chain = method.With.Select(t => $".With<{t}>()").Concat(method.Without.Select(t => $".Without<{t}>()"))
-            .Concat(method.WithAny.Select(t => $".WithAny<{t}>()")).Concat(method.Changed.Select(t => $".Changed<{t}>(0)")).Concat(method.Removed.Select(t => $".Removed<{t}>(0)"));
+            .Concat(method.WithAny.Select(t => $".WithAny<{t}>()")).Concat(method.Changed.Select(t => $".Changed<{t}>(0)")).Concat(method.Removed.Select(t => $".Removed<{t}>(0)"))
+            .Concat(AnyCalls("ChangedAny", method.ChangedAny)).Concat(AnyCalls("RemovedAny", method.RemovedAny));
         // Attribute type arguments cannot name type parameters (CS8968): the filter is one field, even for a generic method.
         sb.Append($"    internal static readonly global::EasyEcs.QueryFilter {method.Name}Filter{number} = global::EasyEcs.QueryFilter.Create(){string.Concat(chain)};\n\n");
+    }
+
+    /// <summary>
+    /// A ChangedAny / RemovedAny group as calls of at most 9 components each (calls join one group): a group of one
+    /// (several attributes naming the same type) names it twice.
+    /// </summary>
+    private static IEnumerable<string> AnyCalls(string kind, EquatableArray<string> types)
+    {
+        const int max = 9;
+        for (int at = 0; at < types.Length; at += max)
+        {
+            var call = types.Skip(at).Take(max).ToList();
+            if (call.Count == 1) call.Add(call[0]);
+            yield return $".{kind}<{string.Join(", ", call)}>(0)";
+        }
     }
 
     // ---------------- models (equatable, symbol-free) ----------------
@@ -401,16 +418,16 @@ public sealed class SystemGenerator : IIncrementalGenerator
     private sealed record ForEachModel(OwnerModel Owner, string Name, bool IsStatic, bool Stable, bool Parallel, int Order,
         EquatableArray<string> Query, EquatableArray<ParamModel> Parameters, EquatableArray<string> With,
         EquatableArray<string> Without, EquatableArray<string> WithAny, EquatableArray<string> Changed,
-        EquatableArray<string> Removed, string Returns, string TypeParameters, string Constraints,
+        EquatableArray<string> Removed, EquatableArray<string> ChangedAny, EquatableArray<string> RemovedAny, string Returns, string TypeParameters, string Constraints,
         EquatableArray<string> TypeParameterNames, bool PublicEntry)
     {
         /// <summary>The World method that runs the job.</summary>
         public string ForEach => Loop + (Parallel ? "Parallel" : "");
 
-        public bool HasFilter => With.Length + Without.Length + WithAny.Length + Changed.Length + Removed.Length > 0;
+        public bool HasFilter => With.Length + Without.Length + WithAny.Length > 0 || Since;
 
-        /// <summary>Filters rows by change tick ([Changed&lt;T&gt;] / [Removed&lt;T&gt;]).</summary>
-        public bool Since => Changed.Length + Removed.Length > 0;
+        /// <summary>Filters rows by change tick ([Changed&lt;T&gt;] / [Removed&lt;T&gt;] / [ChangedAny&lt;…&gt;] / [RemovedAny&lt;…&gt;]).</summary>
+        public bool Since => Changed.Length + Removed.Length + ChangedAny.Length + RemovedAny.Length > 0;
 
         /// <summary>[ForEach(Slices = N)]: visits one of N slices of its rows per run (1: all of them).</summary>
         public int Slices { get; init; } = 1;
@@ -473,11 +490,21 @@ public sealed class SystemGenerator : IIncrementalGenerator
             var withAny = new List<string>();
             var changed = new List<string>();
             var removed = new List<string>();
+            var changedAny = new List<string>();
+            var removedAny = new List<string>();
             void Filters(ISymbol symbol)
             {
                 foreach (var attribute in symbol.GetAttributes())
                 {
                     if (attribute.AttributeClass is not { IsGenericType: true } cls) continue;
+                    if (Symbols.AnyFilter(cls) is { } any) // every attribute of a kind joins its one group
+                    {
+                        var group = any == "ChangedAny" ? changedAny : removedAny;
+                        foreach (var argument in cls.TypeArguments)
+                            if (argument.ToDisplayString(Symbols.Fqn) is var t && !group.Contains(t)) group.Add(t);
+                        continue;
+                    }
+
                     string name = cls.ConstructedFrom.ToDisplayString(), type = cls.TypeArguments[0].ToDisplayString(Symbols.Fqn);
                     var list = name == Symbols.WithAttribute ? with : name == Symbols.WithoutAttribute ? without
                         : name == Symbols.WithAnyAttribute ? withAny : name == Symbols.ChangedAttribute ? changed
@@ -524,6 +551,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 new EquatableArray<ParamModel>(parameters), new EquatableArray<string>(with.ToArray()),
                 new EquatableArray<string>(without.ToArray()), new EquatableArray<string>(withAny.ToArray()),
                 new EquatableArray<string>(changed.ToArray()), new EquatableArray<string>(removed.ToArray()),
+                new EquatableArray<string>(changedAny.ToArray()), new EquatableArray<string>(removedAny.ToArray()),
                 (method.ReturnsByRef ? "ref " : method.ReturnsByRefReadonly ? "ref readonly " : "")
                     + (method.ReturnsVoid ? "void" : method.ReturnType.ToDisplayString(Symbols.Fqn)),
                 Symbols.TypeParameterList(method.TypeParameters), Symbols.Constraints(method.TypeParameters),

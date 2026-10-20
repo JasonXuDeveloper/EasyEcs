@@ -28,7 +28,81 @@ public sealed class ArityGenerator : IIncrementalGenerator
             spc.AddSource("Entity.Structural.g.cs", SourceText.From(Structural(), Encoding.UTF8));
             spc.AddSource("World.Queries.g.cs", SourceText.From(Queries(), Encoding.UTF8));
             spc.AddSource("QueryItems.g.cs", SourceText.From(QueryItems(), Encoding.UTF8));
+            spc.AddSource("Filters.g.cs", SourceText.From(Filters(), Encoding.UTF8));
         });
+    }
+
+    // ---------------- ChangedAny / RemovedAny ----------------
+
+    /// <summary>
+    /// The "any of these" change filters, 2..9 components: <c>QueryFilter.ChangedAny&lt;T1..Tn&gt;(since)</c> /
+    /// <c>RemovedAny</c> and the <c>[ChangedAny&lt;T1..Tn&gt;]</c> / <c>[RemovedAny&lt;T1..Tn&gt;]</c> attributes of
+    /// [ForEach] methods (one component is <c>Changed</c> / <c>Removed</c>).
+    /// </summary>
+    private static string Filters()
+    {
+        var filter = new StringBuilder(Header).Append(
+            "using System;\n\nnamespace EasyEcs;\n\npublic readonly partial struct QueryFilter\n{\n");
+        var attributes = new StringBuilder();
+        for (int n = 2; n <= MaxArity; n++)
+        {
+            string tps = TypeParams(n);
+            string cons = Lines(n, i => $"        where T{i} : struct, IComponent, ITrackChanges");
+            string bits = List(n, i => $"ComponentType<T{i}>.Bit");
+            filter.Append($$"""
+                    /// <summary>
+                    /// Only rows where at least one of <c>{{tps}}</c> was written at or after change tick
+                    /// <paramref name="since"/>: <c>Changed&lt;T1&gt;(since)</c> OR ... OR <c>Changed&lt;T{{n}}&gt;(since)</c>
+                    /// (a row has the component it counts for; the others need not be there). Every <c>ChangedAny</c> call
+                    /// of a filter joins one group; the group, the <c>Changed</c> and <c>Removed</c> filters, a
+                    /// <c>RemovedAny</c> group and the other filters combine with AND. A table none of whose columns was
+                    /// written since the tick is skipped whole, and words and blocks of rows no column wrote. A filter has
+                    /// one tick (<see cref="Since"/> moves it): keep one per client, run it with each client's tick.
+                    /// </summary>
+                    /// <exception cref="ArgumentException">An earlier change filter named another tick.</exception>
+                    public QueryFilter ChangedAny<{{tps}}>(ulong since)
+                {{cons}}
+                        => AddingAny(5, since, [{{bits}}]);
+
+                    /// <summary>
+                    /// Only rows that lost at least one of <c>{{tps}}</c> at or after change tick <paramref name="since"/>
+                    /// and have not got it back: <c>Removed&lt;T1&gt;(since)</c> OR ... OR <c>Removed&lt;T{{n}}&gt;(since)</c>.
+                    /// Every <c>RemovedAny</c> call joins one group, combined with the other filters with AND; one tick
+                    /// per filter, as <see cref="ChangedAny{{{tps}}}(ulong)"/>.
+                    /// </summary>
+                    /// <exception cref="ArgumentException">An earlier change filter named another tick.</exception>
+                    public QueryFilter RemovedAny<{{tps}}>(ulong since)
+                {{cons}}
+                        => AddingAny(6, since, [{{bits}}]);
+
+
+                """);
+            string attributeCons = Lines(n, i => $"    where T{i} : struct, IComponent, ITrackChanges");
+            attributes.Append($$"""
+                /// <summary>
+                /// The <see cref="ForEachAttribute"/> method visits only entities where at least one of <c>{{tps}}</c> was
+                /// written since its system last ran (<see cref="EcsSystem.LastRunTick"/>; on the first run, every entity
+                /// having one): <see cref="QueryFilter.ChangedAny{{{tps}}}(ulong)"/>. Several attributes join one group;
+                /// combined with <c>[Changed&lt;T&gt;]</c> and the other filters with AND.
+                /// </summary>
+                [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
+                public sealed class ChangedAnyAttribute<{{tps}}> : Attribute
+                {{attributeCons}};
+
+                /// <summary>
+                /// The <see cref="ForEachAttribute"/> method visits only entities that lost at least one of <c>{{tps}}</c>
+                /// since its system last ran and have not got it back: <see cref="QueryFilter.RemovedAny{{{tps}}}(ulong)"/>.
+                /// Several attributes join one group; combined with the other filters with AND.
+                /// </summary>
+                [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
+                public sealed class RemovedAnyAttribute<{{tps}}> : Attribute
+                {{attributeCons}};
+
+
+                """);
+        }
+
+        return filter.Append("}\n\n").Append(attributes).ToString();
     }
 
     // ---------------- Entity.Set / Entity.Remove / World.CreateEntity ----------------

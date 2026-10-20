@@ -206,6 +206,45 @@ public class AllocationTests
     }
 
     [Test]
+    public void PerClientChangedAnyFiltersDoNotAllocate()
+    {
+        using var world = new World();
+        world.AddSystem<ChangedTests.ArmorOrShieldWatch>();
+        world.AddSystem<ChangedTests.ArmorOrShieldWatchBatch>();
+        world.AddSystem<RemovedTests.ArmorOrShieldLoss>();
+        var entities = new Entity[5_000];
+        world.CreateEntities(entities, new Armor(1), new Shield(1), new ChangedTests.Ward(1), new Seen());
+        var dirty = QueryFilter.Create().ChangedAny<Armor, Shield, ChangedTests.Ward>(0).Without<Dead>();
+        var lost = QueryFilter.Create().RemovedAny<Armor, Shield>(0);
+        var acked = new ulong[8]; // one acknowledged tick per client
+        int next = 0;
+
+        void Frame()
+        {
+            int k = next++;
+            entities[k * 7 % entities.Length].Get<Armor>().Value++;
+            ref var shield = ref entities[k * 13 % entities.Length].TryGetRef<Shield>(out bool has);
+            if (has) shield.Value++;
+            var e = entities[k * 17 % entities.Length];
+            if (e.Has<Shield>()) e.Remove<Shield>();
+            else e.Set(new Shield(1));
+            world.Update();
+            for (int c = 0; c < acked.Length; c++)
+            {
+                if ((k + c) % 3 != 0) continue; // clients acknowledge at different ticks
+                foreach (var item in world.Query<Seen>(dirty.Since(acked[c]))) item.Component1.Count++;
+                _ = world.Count<Seen>(lost.Since(acked[c]));
+                acked[c] = world.ChangeTick;
+            }
+        }
+
+        for (int i = 0; i < 50; i++) Frame(); // warm-up: query caches, JIT
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 300; i++) Frame();
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+    }
+
+    [Test]
     public void ParallelForEachDoesNotAllocateAfterItsFirstCall()
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });

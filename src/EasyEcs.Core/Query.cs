@@ -14,9 +14,9 @@ namespace EasyEcs;
 [StructLayout(LayoutKind.Sequential)] // Add steps from _all to the other sets: they must stay adjacent, in this order
 public readonly partial struct QueryFilter
 {
-    // The five sets' first 256 bits, inline. No object reference: a filter is copied by plain moves (no write barrier,
+    // The seven sets' first 256 bits, inline. No object reference: a filter is copied by plain moves (no write barrier,
     // no zeroed frame), so building one at the call costs little more than holding one in a field.
-    private readonly Vector256<long> _all, _none, _any, _tracked, _removals;
+    private readonly Vector256<long> _all, _none, _any, _tracked, _removals, _changedAny, _removedAny;
 
     /// <summary>The change tick <see cref="Changed{T}"/> and <see cref="Removed{T}"/> rows must have reached.</summary>
     internal readonly ulong Tick;
@@ -35,6 +35,8 @@ public readonly partial struct QueryFilter
     internal BitMask Any => new(_any, FilterOverflow.Of(_overflow, 2));
     internal BitMask Tracked => new(_tracked, FilterOverflow.Of(_overflow, 3));
     internal BitMask Removals => new(_removals, FilterOverflow.Of(_overflow, 4));
+    internal BitMask ChangedAnyOf => new(_changedAny, FilterOverflow.Of(_overflow, 5));
+    internal BitMask RemovedAnyOf => new(_removedAny, FilterOverflow.Of(_overflow, 6));
 
     /// <summary>Whether any set names a component bit past 255.</summary>
     internal bool HasOverflow => _overflow != 0;
@@ -45,7 +47,8 @@ public readonly partial struct QueryFilter
     /// <summary>Whether <paramref name="other"/> selects the same rows (its tick aside): one query key.</summary>
     internal bool SameQuery(in QueryFilter other) =>
         _all.Equals(other._all) && _none.Equals(other._none) && _any.Equals(other._any) && _tracked.Equals(other._tracked)
-        && _removals.Equals(other._removals) && _overflow == other._overflow && GroupBit == other.GroupBit && Group == other.Group;
+        && _removals.Equals(other._removals) && _changedAny.Equals(other._changedAny) && _removedAny.Equals(other._removedAny)
+        && _overflow == other._overflow && GroupBit == other.GroupBit && Group == other.Group;
 
     /// <summary>Require <typeparamref name="T"/> to be present (not passed to the query callback).</summary>
     public QueryFilter With<T>() where T : struct, IComponent => Adding(0, ComponentType<T>.Bit);
@@ -106,8 +109,23 @@ public readonly partial struct QueryFilter
     }
 
     /// <summary>
-    /// The same filter with its <see cref="Changed{T}"/> and <see cref="Removed{T}"/> filters moved to tick
-    /// <paramref name="since"/>, without rebuilding it: a filter kept in a field, used again after each update.
+    /// The shared core of the generated <c>ChangedAny&lt;T1..Tn&gt;</c> (<paramref name="set"/> 5) and
+    /// <c>RemovedAny&lt;T1..Tn&gt;</c> (set 6): the components join the filter's one group of that kind, at tick
+    /// <paramref name="since"/>.
+    /// </summary>
+    private QueryFilter AddingAny(int set, ulong since, ReadOnlySpan<ushort> bits)
+    {
+        CheckTick(since);
+        var filter = this;
+        for (int i = 0; i < bits.Length; i++) Add(ref filter, set, bits[i]);
+        Unsafe.AsRef(in filter.Tick) = since;
+        return filter;
+    }
+
+    /// <summary>
+    /// The same filter with its <see cref="Changed{T}"/> and <see cref="Removed{T}"/> filters (and its <c>ChangedAny</c> and
+    /// <c>RemovedAny</c> ones) moved to tick <paramref name="since"/>, without rebuilding it: a filter kept in a field,
+    /// used again after each update, or once per client with each client's acknowledged tick.
     /// </summary>
     public QueryFilter Since(ulong since)
     {
@@ -127,7 +145,7 @@ public readonly partial struct QueryFilter
         if (GroupBit != 0 && archetype.GroupOf(GroupBit - 1) != Group) return false;
         if (_all != Vector256<long>.Zero && !Each(_all, archetype, slot, true)) return false;
         if (_none != Vector256<long>.Zero && !Each(_none, archetype, slot, false)) return false;
-        if ((_tracked | _removals) != Vector256<long>.Zero && !Ticked(archetype, slot)) return false;
+        if ((_tracked | _removals | _changedAny | _removedAny) != Vector256<long>.Zero && !Ticked(archetype, slot)) return false;
         if (_any == Vector256<long>.Zero) return true;
         for (int w = 0; w < 4; w++)
             for (ulong bits = (ulong)_any.GetElement(w); bits != 0; bits &= bits - 1)
@@ -161,7 +179,24 @@ public readonly partial struct QueryFilter
             }
         }
 
-        return true;
+        return (_changedAny == Vector256<long>.Zero || AnyTicked(_changedAny, archetype, slot, since, true))
+               && (_removedAny == Vector256<long>.Zero || AnyTicked(_removedAny, archetype, slot, since, false));
+    }
+
+    /// <summary>
+    /// Whether one component of <paramref name="set"/> was written (<paramref name="written"/>: present with a new tick)
+    /// or removed (its column kept, absent with a new tick) at or after <paramref name="since"/>.
+    /// </summary>
+    private static bool AnyTicked(Vector256<long> set, Archetype archetype, int slot, ulong since, bool written)
+    {
+        for (int w = 0; w < 4; w++)
+            for (ulong bits = (ulong)set.GetElement(w); bits != 0; bits &= bits - 1)
+            {
+                int bit = (w << 6) + BitOperations.TrailingZeroCount(bits);
+                if (archetype.ColumnIndex(bit) >= 0 && Present(archetype, bit, slot) == written && TickOf(archetype, bit, slot) >= since) return true;
+            }
+
+        return false;
     }
 
     private static bool Present(Archetype archetype, int bit, int slot) =>
@@ -174,7 +209,8 @@ public readonly partial struct QueryFilter
             : 0;
 
     /// <summary>
-    /// Sets <paramref name="bit"/> in set <paramref name="set"/> (0 All, 1 None, 2 Any, 3 Tracked, 4 Removals) of a
+    /// Sets <paramref name="bit"/> in set <paramref name="set"/> (0 All, 1 None, 2 Any, 3 Tracked, 4 Removals, 5 ChangedAny,
+    /// 6 RemovedAny) of a
     /// filter copy being built: its fields are readonly to users, not to the builder, so each builder call copies the
     /// filter once. A bit past 255 interns the new overflow sets (cold: worlds with more than 256 component types).
     /// </summary>
@@ -201,12 +237,12 @@ public readonly partial struct QueryFilter
 
     private void CheckTick(ulong since)
     {
-        if (since != Tick && (!Tracked.IsEmpty || !Removals.IsEmpty)) ThrowTwoTicks();
+        if (since != Tick && (!Tracked.IsEmpty || !Removals.IsEmpty || !ChangedAnyOf.IsEmpty || !RemovedAnyOf.IsEmpty)) ThrowTwoTicks();
     }
 
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
     private static void ThrowTwoTicks() =>
-        throw new ArgumentException("Changed and Removed filters of one QueryFilter must name the same tick", "since");
+        throw new ArgumentException("Changed, Removed, ChangedAny and RemovedAny filters of one QueryFilter must name the same tick", "since");
 }
 
 /// <summary>Cache key of a query: required bits, excluded bits and the bits of which one is required.</summary>
@@ -217,6 +253,8 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
     private readonly BitMask _any;
     private readonly BitMask _changed;
     private readonly BitMask _removed;
+    private readonly BitMask _changedAny;
+    private readonly BitMask _removedAny;
     private readonly int _groupBit, _group; // QueryFilter.GroupBit / Group
 
     // Detached keys only (not part of equality): the required and excluded bits as arrays, for the per-archetype
@@ -226,41 +264,49 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
     private readonly ushort[] _anyOf;
     private readonly ushort[] _changedOf;
     private readonly ushort[] _removedOf;
+    private readonly ushort[] _changedAnyOf;
+    private readonly ushort[] _removedAnyOf;
 
     // Lookup keys of queries on component bits >= 256 keep their overflow here instead of allocating it per query.
     [ThreadStatic] private static Vector256<long>[] _scratch;
 
     /// <summary>Whether the query names component <paramref name="bit"/> (in any of its sets, or as its group's component).</summary>
     public bool Mentions(int bit) => _all.HasBit(bit) || _none.HasBit(bit) || _any.HasBit(bit) || _changed.HasBit(bit)
-                                     || _removed.HasBit(bit) || _groupBit == bit;
+                                     || _removed.HasBit(bit) || _changedAny.HasBit(bit) || _removedAny.HasBit(bit) || _groupBit == bit;
 
-    public QueryKey(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed, int groupBit, int group)
+    public QueryKey(in BitMask all, in QueryFilter filter)
     {
         _all = all;
-        _none = none;
-        _any = any;
-        _changed = changed;
-        _removed = removed;
-        _groupBit = groupBit;
-        _group = group;
-        _required = _excluded = _anyOf = _changedOf = _removedOf = [];
+        _none = filter.None;
+        _any = filter.Any;
+        _changed = filter.Tracked;
+        _removed = filter.Removals;
+        _changedAny = filter.ChangedAnyOf;
+        _removedAny = filter.RemovedAnyOf;
+        _groupBit = filter.GroupBit;
+        _group = filter.Group;
+        _required = _excluded = _anyOf = _changedOf = _removedOf = _changedAnyOf = _removedAnyOf = [];
     }
 
-    private QueryKey(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed, int groupBit, int group,
-        ushort[] required, ushort[] excluded, ushort[] anyOf, ushort[] changedOf, ushort[] removedOf)
+    private QueryKey(in QueryKey key, in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed,
+        in BitMask changedAny, in BitMask removedAny)
     {
-        _groupBit = groupBit;
-        _group = group;
+        _groupBit = key._groupBit;
+        _group = key._group;
         _all = all;
         _none = none;
         _any = any;
         _changed = changed;
         _removed = removed;
-        _required = required;
-        _excluded = excluded;
-        _anyOf = anyOf;
-        _changedOf = changedOf;
-        _removedOf = removedOf;
+        _changedAny = changedAny;
+        _removedAny = removedAny;
+        _required = all.ToBitArray();
+        _excluded = none.ToBitArray();
+        _anyOf = any.ToBitArray();
+        _changedOf = changed.ToBitArray();
+        _removedOf = removed.ToBitArray();
+        _changedAnyOf = changedAny.ToBitArray();
+        _removedAnyOf = removedAny.ToBitArray();
     }
 
     /// <summary>
@@ -270,7 +316,7 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
     public static QueryKey ForLookup(ReadOnlySpan<ushort> bits, in QueryFilter filter)
     {
         var all = Required(bits, in filter);
-        return new QueryKey(in all, filter.None, filter.Any, filter.Tracked, filter.Removals, filter.GroupBit, filter.Group);
+        return new QueryKey(in all, in filter);
     }
 
     /// <summary>
@@ -314,19 +360,22 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
         var any = _any.Clone();
         var changed = _changed.Clone();
         var removed = _removed.Clone();
-        return new QueryKey(in all, in none, in any, in changed, in removed, _groupBit, _group, all.ToBitArray(), none.ToBitArray(),
-            any.ToBitArray(), changed.ToBitArray(), removed.ToBitArray());
+        var changedAny = _changedAny.Clone();
+        var removedAny = _removedAny.Clone();
+        return new QueryKey(in this, in all, in none, in any, in changed, in removed, in changedAny, in removedAny);
     }
 
     /// <summary>
     /// Whether <paramref name="archetype"/> can hold matching rows (detached keys only): they have
     /// every required column, the column of every <c>Removed</c> component (a removal keeps the row) and, with
-    /// <c>WithAny</c>, at least one of those columns. Excluded columns do not rule a table out, its rows may lack those
-    /// components.
+    /// <c>WithAny</c>, <c>ChangedAny</c> or <c>RemovedAny</c>, at least one column of each of those groups. Excluded
+    /// columns do not rule a table out, its rows may lack those components.
     /// </summary>
     public bool Matches(Archetype archetype) =>
         archetype.ComponentMask.ContainsAll(in _all) && archetype.ComponentMask.ContainsAll(in _removed)
         && (_anyOf.Length == 0 || archetype.ComponentMask.Intersects(in _any))
+        && (_changedAnyOf.Length == 0 || archetype.ComponentMask.Intersects(in _changedAny))
+        && (_removedAnyOf.Length == 0 || archetype.ComponentMask.Intersects(in _removedAny))
         && (_groupBit == 0 || archetype.GroupOf(_groupBit - 1) == _group);
 
     /// <summary>The presence tests of a matching <paramref name="archetype"/>: its required and excluded columns.</summary>
@@ -359,34 +408,54 @@ internal readonly struct QueryKey : IEquatable<QueryKey>
             changed.Add((short)archetype.ColumnIndex(ComponentInfo.Of(bit).Companion));
         }
 
-        return new RowPlan(require, exclude.ToArray(), any.ToArray(), changed.ToArray(), _changedOf.Length);
+        return new RowPlan(require, exclude.ToArray(), any.ToArray(), changed.ToArray(), _changedOf.Length,
+            Pairs(archetype, _changedAnyOf), Pairs(archetype, _removedAnyOf));
+    }
+
+    /// <summary>The (component column, change-tick column) pairs of the components of a group the table has.</summary>
+    private static short[] Pairs(Archetype archetype, ushort[] bits)
+    {
+        var pairs = new System.Collections.Generic.List<short>();
+        foreach (ushort bit in bits)
+        {
+            int column = archetype.ColumnIndex(bit);
+            if (column < 0) continue; // the table never had it: no row of it can have written or removed it
+            pairs.Add((short)column);
+            pairs.Add((short)archetype.ColumnIndex(ComponentInfo.Of(bit).Companion));
+        }
+
+        return pairs.ToArray();
     }
 
     public bool Equals(QueryKey other) =>
         _all.Equals(in other._all) && _none.Equals(in other._none) && _any.Equals(in other._any) &&
-        _changed.Equals(in other._changed) && _removed.Equals(in other._removed) && _groupBit == other._groupBit && _group == other._group;
+        _changed.Equals(in other._changed) && _removed.Equals(in other._removed) && _changedAny.Equals(in other._changedAny)
+        && _removedAny.Equals(in other._removedAny) && _groupBit == other._groupBit && _group == other._group;
 
     public override bool Equals(object obj) => obj is QueryKey other && Equals(other);
 
-    public override int GetHashCode() => Hash(in _all, in _none, in _any, in _changed, in _removed, _groupBit, _group);
+    public override int GetHashCode() => Hash(in _all, in _none, in _any, in _changed, in _removed, in _changedAny, _groupBit, _group);
 
     /// <summary>Whether this is the key of <paramref name="lookup"/> (no key is built).</summary>
     public bool Is(in QueryLookup lookup)
     {
         ref readonly var filter = ref lookup.Filter;
         return _all.Equals(in lookup.All) && _groupBit == filter.GroupBit && _group == filter.Group && _none.Equals(filter.None)
-               && _any.Equals(filter.Any) && _changed.Equals(filter.Tracked) && _removed.Equals(filter.Removals);
+               && _any.Equals(filter.Any) && _changed.Equals(filter.Tracked) && _removed.Equals(filter.Removals)
+               && _changedAny.Equals(filter.ChangedAnyOf) && _removedAny.Equals(filter.RemovedAnyOf);
     }
 
     public static int Hash(in QueryLookup lookup)
     {
         ref readonly var filter = ref lookup.Filter;
-        return Hash(in lookup.All, filter.None, filter.Any, filter.Tracked, filter.Removals, filter.GroupBit, filter.Group);
+        return Hash(in lookup.All, filter.None, filter.Any, filter.Tracked, filter.Removals, filter.ChangedAnyOf, filter.GroupBit, filter.Group);
     }
 
-    private static int Hash(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed, int groupBit, int group) =>
-        (((all.GetHashCode() * 31 + none.GetHashCode()) * 31 + any.GetHashCode()) * 31 + changed.GetHashCode()) * 31
-        + removed.GetHashCode() + groupBit * 397 + group * 7919;
+    // RemovedAny is left out of the hash (equality compares it): rare, and one more mask per probe.
+    private static int Hash(in BitMask all, in BitMask none, in BitMask any, in BitMask changed, in BitMask removed, in BitMask changedAny,
+        int groupBit, int group) =>
+        ((((all.GetHashCode() * 31 + none.GetHashCode()) * 31 + any.GetHashCode()) * 31 + changed.GetHashCode()) * 31
+         + removed.GetHashCode()) * 31 + changedAny.GetHashCode() + groupBit * 397 + group * 7919;
 }
 
 /// <summary>
@@ -416,7 +485,7 @@ internal sealed class QueryKeyComparer : System.Collections.Generic.IEqualityCom
     public QueryKey Create(QueryLookup lookup)
     {
         ref readonly var filter = ref lookup.Filter;
-        return new QueryKey(in lookup.All, filter.None, filter.Any, filter.Tracked, filter.Removals, filter.GroupBit, filter.Group).Detached();
+        return new QueryKey(in lookup.All, in filter).Detached();
     }
 }
 
@@ -486,16 +555,30 @@ internal struct ChangeTick : IComponent
 
 /// <summary>
 /// What a query tests on the rows of one archetype (cached with the query): the presence bits of <see cref="Require"/>
-/// must be set, those of <see cref="Exclude"/> clear, at least one of <see cref="AnyOf"/> set when it is not empty, and
-/// the change ticks in the <see cref="Changed"/> columns newer than the pass's tick (column indices of the archetype; a
-/// column without presence bits is full).
+/// must be set, those of <see cref="Exclude"/> clear, at least one of <see cref="AnyOf"/> set when it is not empty, the
+/// change ticks in the <see cref="Changed"/> columns newer than the pass's tick, and, for each of the
+/// <see cref="AnyChanged"/> and <see cref="AnyRemoved"/> groups that is not empty, one of its components written (or
+/// removed) since that tick (column indices of the archetype; a column without presence bits is full). The parts
+/// combine with AND; inside a group, its components with OR.
 /// </summary>
-internal sealed class RowPlan(short[] require, short[] exclude, short[] anyOf, short[] changed, int removed)
+internal sealed class RowPlan(short[] require, short[] exclude, short[] anyOf, short[] changed, int removed, short[] anyChanged, short[] anyRemoved)
 {
     public readonly short[] Require = require;
     public readonly short[] Exclude = exclude;
     public readonly short[] AnyOf = anyOf;
     public readonly short[] Changed = changed;
+
+    /// <summary>
+    /// <c>ChangedAny</c>: (component column, change-tick column) pairs; a row passes when one component is present with a
+    /// tick at or after the pass's. Only the components the table has.
+    /// </summary>
+    public readonly short[] AnyChanged = anyChanged;
+
+    /// <summary><c>RemovedAny</c>: pairs like <see cref="AnyChanged"/>; a row passes when one component is absent with a new tick.</summary>
+    public readonly short[] AnyRemoved = anyRemoved;
+
+    /// <summary>Rows are selected by change ticks: a Changed or Removed column, or a ChangedAny or RemovedAny group.</summary>
+    public readonly bool Ticked = changed.Length + anyChanged.Length + anyRemoved.Length != 0;
 
     /// <summary>
     /// The tick column whose summaries skip words (-1 without Changed columns): a removed component's when there is one
@@ -551,7 +634,10 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         // A table not written since the pass's tick has no changed row.
         for (int i = 0; i < changed.Length; i++)
             if (archetype.LastWrite[changed[i]] < _since) return None;
-        bool test = changed.Length != 0;
+        // A group none of whose columns was written (or had a removal: it stamps) since the tick has no passing row.
+        if (plan.AnyChanged.Length != 0 && !AnyNewer(archetype, plan.AnyChanged)) return None;
+        if (plan.AnyRemoved.Length != 0 && !AnyNewer(archetype, plan.AnyRemoved)) return None;
+        bool test = plan.Ticked;
         var exclude = plan.Exclude;
         for (int i = 0; i < exclude.Length; i++)
         {
@@ -582,6 +668,14 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         return test ? Test : All;
     }
 
+    /// <summary>Whether a tick column of <paramref name="pairs"/> (a ChangedAny or RemovedAny group) was stamped since the pass's tick.</summary>
+    private bool AnyNewer(Archetype archetype, short[] pairs)
+    {
+        for (int i = 1; i < pairs.Length; i += 2)
+            if (archetype.LastWrite[pairs[i]] >= _since) return true;
+        return false;
+    }
+
     /// <summary>Alive rows of <paramref name="archetype"/> that pass.</summary>
     public int CountAlive(Archetype archetype) => Mode(archetype) switch
     {
@@ -606,7 +700,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     private int Counted(Archetype archetype)
     {
         var plan = _plan;
-        if (plan.Changed.Length != 0 || plan.AnyOf.Length != 0) return -1;
+        if (plan.Ticked || plan.AnyOf.Length != 0) return -1;
         var absent = archetype.Absent;
         int alive = archetype.AliveCount, counted = alive, varying = 0;
         var require = plan.Require;
@@ -656,7 +750,28 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
 
         var changed = plan.Changed;
         for (int i = 0; i < changed.Length && bits != 0; i++) bits &= Newer(archetype, changed[i], word, _since);
+        if (plan.AnyChanged.Length != 0 && bits != 0) bits &= AnyNewer(archetype, plan.AnyChanged, word, true);
+        if (plan.AnyRemoved.Length != 0 && bits != 0) bits &= AnyNewer(archetype, plan.AnyRemoved, word, false);
         return bits;
+    }
+
+    /// <summary>
+    /// Rows of word <paramref name="word"/> for which one component of group <paramref name="pairs"/> is present
+    /// (<paramref name="written"/>) or absent (a removal) with a tick at or after the pass's: the OR of the group.
+    /// </summary>
+    private ulong AnyNewer(Archetype archetype, short[] pairs, int word, bool written)
+    {
+        ulong any = 0;
+        for (int i = 0; i < pairs.Length; i += 2)
+        {
+            ulong newer = Newer(archetype, pairs[i + 1], word, _since);
+            if (newer == 0) continue;
+            // Without presence bits every row has the component: it was written, never removed.
+            ulong present = archetype.Bits(pairs[i]) is { } bits ? At(bits, word) : ulong.MaxValue;
+            any |= newer & (written ? present : ~present);
+        }
+
+        return any;
     }
 
     /// <summary>Word <paramref name="word"/> of presence bits, which cover the table's capacity (words of rows are below it).</summary>
@@ -705,7 +820,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     {
         excluded = false;
         var plan = _plan;
-        if (plan.AnyOf.Length != 0 || plan.Changed.Length != 0) return null;
+        if (plan.AnyOf.Length != 0 || plan.Ticked) return null;
         ulong[] decider = null;
         foreach (short column in plan.Require)
         {
@@ -728,16 +843,36 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     /// The first word at or after <paramref name="word"/> (below <paramref name="words"/>) that may have passing rows:
     /// for a <c>Changed</c> or <c>Removed</c> filter, blocks of 64 words, then words, whose <see cref="RowPlan.Lead"/>
     /// column was not written (or had no removal) since the pass's tick are skipped (one bit scan per block when its other
-    /// words are older, else one compare per word); otherwise <paramref name="word"/>. Returns <paramref name="words"/>
-    /// when none is left.
+    /// words are older, else one compare per word); without one, those that no column of a <c>RemovedAny</c> (else
+    /// <c>ChangedAny</c>) group reaches (the nearest of the columns' next words: the group is an OR); otherwise
+    /// <paramref name="word"/>. Returns <paramref name="words"/> when none is left.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int NextWord(Archetype archetype, int word, int words)
     {
         var plan = _plan;
-        if (plan.Lead < 0) return word;
+        if (plan.Lead < 0) return plan.AnyChanged.Length + plan.AnyRemoved.Length == 0 ? word : NextOfGroup(archetype, word, words);
         return NextWritten(plan.LeadRemoved ? archetype.Removals[plan.Lead] : archetype.Blocks[plan.Lead],
             archetype.Words[plan.Lead], plan.LeadRemoved, word, words, _since);
+    }
+
+    /// <summary>
+    /// <see cref="NextWord"/> for a plan whose only tick tests are ChangedAny / RemovedAny groups: the first word one
+    /// column of the group reaches (removals are sparser than writes, so a RemovedAny group decides when there is one).
+    /// </summary>
+    private int NextOfGroup(Archetype archetype, int word, int words)
+    {
+        var plan = _plan;
+        bool removed = plan.AnyRemoved.Length != 0;
+        var pairs = removed ? plan.AnyRemoved : plan.AnyChanged;
+        int next = words;
+        for (int i = 1; i < pairs.Length && next > word; i += 2)
+        {
+            int column = pairs[i];
+            next = NextWritten(removed ? archetype.Removals[column] : archetype.Blocks[column], archetype.Words[column], removed, word, next, _since);
+        }
+
+        return next;
     }
 
     private static int NextWritten(BlockTicks[] blocks, WordTicks[] summary, bool removed, int word, int words, ulong since)
@@ -831,7 +966,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     public int Count(Archetype archetype)
     {
         int rows = archetype.Count;
-        if (rows == archetype.AliveCount && _plan.Changed.Length == 0 && _plan.AnyOf.Length == 0) return CountDense(archetype, rows);
+        if (rows == archetype.AliveCount && !_plan.Ticked && _plan.AnyOf.Length == 0) return CountDense(archetype, rows);
         int count = 0;
         var slots = archetype.Slots;
         int words = (rows + 63) >> 6;

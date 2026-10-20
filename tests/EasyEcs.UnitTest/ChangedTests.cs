@@ -139,6 +139,40 @@ public class ChangedTests
         }
     }
 
+    /// <summary>A third tracked component, for the ChangedAny groups.</summary>
+    public record struct Ward(int Value) : IComponent, ITrackChanges;
+
+    /// <summary>Visits the entities whose armor or shield changed (or both).</summary>
+    public class ArmorOrShieldWatch : EcsSystem
+    {
+        [ForEach, ChangedAny<Armor, Shield>]
+        private static void Count(ref Seen seen) => seen.Count++;
+    }
+
+    /// <summary>ChangedAny combined with Changed and Without: armor changed AND (shield OR ward changed) AND not dead.</summary>
+    public class MixedWatch : EcsSystem
+    {
+        [ForEach, Changed<Armor>, ChangedAny<Shield, Ward>, Without<Dead>]
+        private static void Count(ref Seen seen) => seen.Count++;
+    }
+
+    /// <summary>The parallel form of <see cref="ArmorOrShieldWatch"/>.</summary>
+    public class ArmorOrShieldWatchParallel : EcsSystem
+    {
+        [ForEach(Parallel = true), ChangedAny<Armor, Shield>]
+        private static void Count(ref Seen seen) => seen.Count++;
+    }
+
+    /// <summary>The batch form, two attributes joining one group.</summary>
+    public class ArmorOrShieldWatchBatch : EcsSystem
+    {
+        [ForEach, ChangedAny<Armor, Shield>, ChangedAny<Shield, Ward>]
+        private static void Count(System.Span<Seen> seen)
+        {
+            for (int i = 0; i < seen.Length; i++) seen[i].Count++;
+        }
+    }
+
     /// <summary>A struct job that writes armor through a ref.</summary>
     private struct Polish : IForEach<Armor>
     {
@@ -781,5 +815,133 @@ public class ChangedTests
         Assert.That(bare.SetIfChanged(new Health(1)), Is.False); // untracked works too
         e.Destroy();
         Assert.Throws<InvalidOperationException>(() => e.SetIfChanged(new Armor(3)));
+    }
+
+    [Test]
+    public void ChangedAnyVisitsRowsWhereOneOfTheComponentsChanged()
+    {
+        using var world = new World();
+        world.AddSystem<ArmorOrShieldWatch>();
+        var armor = world.CreateEntity(new Armor(1), new Shield(1), new Seen());
+        var shield = world.CreateEntity(new Armor(1), new Shield(1), new Seen());
+        var both = world.CreateEntity(new Armor(1), new Shield(1), new Seen());
+        var none = world.CreateEntity(new Armor(1), new Shield(1), new Seen());
+        var armorOnly = world.CreateEntity(new Armor(1), new Seen());   // no Shield at all: its armor counts
+        var neither = world.CreateEntity(new Health(1), new Seen());    // a table with neither column
+        world.Update();
+        var all = new[] { armor, shield, both, none, armorOnly, neither };
+        Assert.That(Array.ConvertAll(all, SeenCount), Is.EqualTo(new[] { 1, 1, 1, 1, 1, 0 }));
+
+        armor.SetArmor(2);
+        shield.SetShield(2);
+        both.SetArmor(2);
+        both.SetShield(2);
+        armorOnly.SetArmor(2);
+        world.Update();
+        world.Update(); // nothing new
+        Assert.That(Array.ConvertAll(all, SeenCount), Is.EqualTo(new[] { 2, 2, 2, 1, 2, 0 }));
+
+        shield.RemoveShield(); // a removal is not a write of a present component
+        world.Update();
+        Assert.That(SeenCount(shield), Is.EqualTo(2));
+    }
+
+    [Test]
+    public void ChangedAnyCombinesWithChangedAndOtherFiltersWithAnd()
+    {
+        using var world = new World();
+        world.AddSystem<MixedWatch>();
+        var armorAndWard = world.CreateEntity(new Armor(1), new Shield(1), new Ward(1), new Seen());
+        var armorAlone = world.CreateEntity(new Armor(1), new Shield(1), new Ward(1), new Seen());
+        var shieldAlone = world.CreateEntity(new Armor(1), new Shield(1), new Ward(1), new Seen());
+        var dead = world.CreateEntity(new Armor(1), new Shield(1), new Seen(), new Dead());
+        world.Update();
+        var all = new[] { armorAndWard, armorAlone, shieldAlone, dead };
+        Assert.That(Array.ConvertAll(all, SeenCount), Is.EqualTo(new[] { 1, 1, 1, 0 }));
+
+        armorAndWard.SetArmor(2);
+        armorAndWard.SetWard(2);
+        armorAlone.SetArmor(2);
+        shieldAlone.SetShield(2);
+        dead.SetArmor(2);
+        dead.SetShield(2);
+        world.Update();
+        Assert.That(Array.ConvertAll(all, SeenCount), Is.EqualTo(new[] { 2, 1, 1, 0 }));
+    }
+
+    [Test]
+    public void ChangedAnyFormsAgreeAcrossTablesWordsAndBlocks()
+    {
+        foreach (var form in new[] { 0, 1, 2 })
+        {
+            using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+            if (form == 0) world.AddSystem<ArmorOrShieldWatch>();
+            else if (form == 1) world.AddSystem<ArmorOrShieldWatchParallel>();
+            else world.AddSystem<ArmorOrShieldWatchBatch>();
+            var entities = new Entity[20_000]; // five blocks of 4,096 rows
+            world.CreateEntities(entities, new Armor(1), new Shield(1), new Ward(1), new Seen());
+            world.Update();
+            // Armor writes in one block, shield writes in another, a word of each, and rows apart.
+            int[] armor = [5, 70, 9_000, 9_001], shield = [12_000, 12_063, 19_999, 9_001];
+            foreach (int i in armor) entities[i].Get<Armor>().Value++;
+            foreach (int i in shield) entities[i].Get<Shield>().Value++;
+            entities[15_000].Get<Ward>().Value++; // only the batch form's group has Ward
+            world.Update();
+            for (int i = 0; i < entities.Length; i++)
+            {
+                bool changed = Array.IndexOf(armor, i) >= 0 || Array.IndexOf(shield, i) >= 0 || form == 2 && i == 15_000;
+                Assert.That(SeenCount(entities[i]), Is.EqualTo(changed ? 2 : 1), $"form {form}, entity {i}");
+            }
+        }
+    }
+
+    [Test]
+    public void OneChangedAnyFilterServesClientsAtDifferentTicks()
+    {
+        using var world = new World(new WorldOptions { InitialEntityCapacity = 4 });
+        var entities = new Entity[300];
+        world.CreateEntities(entities, new Armor(1), new Shield(1), new Ward(1), new Health(0));
+        var dirty = QueryFilter.Create().ChangedAny<Armor, Shield, Ward>(0); // kept once, run per client
+        world.Update();
+        ulong slow = world.ChangeTick;   // the client that acknowledged long ago
+        entities[3].Get<Armor>().Value++;
+        entities[100].Get<Ward>().Value++;
+        world.Update();
+        ulong fast = world.ChangeTick;   // the client that acknowledged just now
+        entities[200].Get<Shield>().Value++;
+        entities[3].Get<Shield>().Value++;
+
+        int Dirty(ulong since)
+        {
+            int sum = 0;
+            foreach (var item in world.Query<Health>(dirty.Since(since))) // Health: a query item of Armor would be a write of it
+                sum += item.Entity.Id.Index + 1;
+            return sum;
+        }
+
+        int Count(ulong since) => world.Count<Health>(dirty.Since(since));
+        Assert.That(Count(slow), Is.EqualTo(3));
+        Assert.That(Count(fast), Is.EqualTo(2));
+        Assert.That(Dirty(slow), Is.EqualTo(entities[3].Id.Index + entities[100].Id.Index + entities[200].Id.Index + 3));
+        Assert.That(Dirty(fast), Is.EqualTo(entities[3].Id.Index + entities[200].Id.Index + 2));
+        Assert.That(Count(0), Is.EqualTo(entities.Length));
+
+        // One tick per filter: every change filter of it names the same one.
+        Assert.Throws<ArgumentException>(() => QueryFilter.Create().Changed<Armor>(fast).ChangedAny<Shield, Ward>(slow));
+        Assert.Throws<ArgumentException>(() => QueryFilter.Create().ChangedAny<Shield, Ward>(slow).Removed<Armor>(fast));
+        Assert.That(world.Count<Health>(QueryFilter.Create().ChangedAny<Shield, Ward>(slow).ChangedAny<Armor, Ward>(slow).Since(fast)), Is.EqualTo(2));
+        Assert.That(world.Any<Health>(dirty.Since(world.ChangeTick + 1)), Is.False);
+
+        // entity.Run tests one row like a query.
+        var job = new Polish2();
+        Assert.That(entities[100].Run<Armor, Polish2>(ref job, dirty.Since(slow)), Is.True);
+        Assert.That(entities[100].Run<Armor, Polish2>(ref job, dirty.Since(fast)), Is.False);
+    }
+
+    private struct Polish2 : IForEachEntity<Armor>
+    {
+        public void Execute(Entity entity, ref Armor armor) { }
+
+        static int IForEachEntity<Armor>.Writes => 0;
     }
 }

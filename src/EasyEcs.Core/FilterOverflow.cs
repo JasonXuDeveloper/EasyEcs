@@ -6,14 +6,14 @@ using System.Threading;
 namespace EasyEcs;
 
 /// <summary>
-/// The bits past 255 of query filters, interned: a <see cref="QueryFilter"/> holds an id instead of five arrays, so it
+/// The bits past 255 of query filters, interned: a <see cref="QueryFilter"/> holds an id instead of seven arrays, so it
 /// carries no object reference, and equal sets have one id (filters compare ids). Only worlds with more than 256
 /// component types reach it, when a filter names one of the later types; ids live for the process, one per distinct
 /// combination a program builds.
 /// </summary>
 internal static class FilterOverflow
 {
-    private const int Sets = 5; // All, None, Any, Tracked, Removals
+    private const int Sets = 7; // All, None, Any, Tracked, Removals, ChangedAny, RemovedAny
 
     private static readonly Lock Gate = new();
     private static readonly Dictionary<Key, int> Ids = new();
@@ -44,7 +44,7 @@ internal static class FilterOverflow
         }
     }
 
-    /// <summary>Five overflow arrays compared by content (trailing empty vectors aside).</summary>
+    /// <summary>Seven overflow arrays compared by content (trailing empty vectors aside).</summary>
     private readonly struct Key(Vector256<long>[][] sets) : IEquatable<Key>
     {
         private readonly Vector256<long>[][] _sets = sets;

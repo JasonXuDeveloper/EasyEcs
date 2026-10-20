@@ -394,7 +394,13 @@ internal static class Symbols
 
     /// <summary>The method has [Changed&lt;T&gt;] or [Removed&lt;T&gt;] filters: outside a system its entry point takes the tick.</summary>
     public static bool TracksSince(IMethodSymbol method) => method.GetAttributes().Any(a =>
-        a.AttributeClass is { IsGenericType: true } cls && cls.ConstructedFrom.ToDisplayString() is ChangedAttribute or RemovedAttribute);
+        a.AttributeClass is { IsGenericType: true } cls && (cls.ConstructedFrom.ToDisplayString() is ChangedAttribute or RemovedAttribute || AnyFilter(cls) != null));
+
+    /// <summary>"ChangedAny" or "RemovedAny" for a <c>[ChangedAny&lt;T1..Tn&gt;]</c> / <c>[RemovedAny&lt;T1..Tn&gt;]</c> attribute class, else null.</summary>
+    public static string? AnyFilter(INamedTypeSymbol attribute) =>
+        attribute is { Arity: >= 2, Name: "ChangedAnyAttribute" or "RemovedAnyAttribute" } && attribute.ContainingNamespace?.ToDisplayString() == "EasyEcs"
+            ? attribute.Name.Substring(0, attribute.Name.Length - "Attribute".Length)
+            : null;
 
     /// <summary>The N of [ForEach(Slices = N)] (1 without it).</summary>
     public static int Slices(IMethodSymbol method)

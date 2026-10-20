@@ -374,4 +374,41 @@ public class RemovedTests
         for (int i = 0; i < 100; i++) Frame();
         Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, wrong), Is.EqualTo((0L, 0)));
     }
+
+    /// <summary>Visits the entities that lost their armor or their shield.</summary>
+    public class ArmorOrShieldLoss : EcsSystem
+    {
+        [ForEach, RemovedAny<Armor, Shield>]
+        private static void Count(ref Seen seen) => seen.Count++;
+    }
+
+    [Test]
+    public void RemovedAnyVisitsEntitiesThatLostOneOfTheComponents()
+    {
+        using var world = new World();
+        var armor = world.CreateEntity(new Armor(1), new Shield(1), new Seen());
+        var shield = world.CreateEntity(new Armor(1), new Shield(1), new Seen());
+        var kept = world.CreateEntity(new Armor(1), new Shield(1), new Seen());
+        var back = world.CreateEntity(new Armor(1), new Shield(1), new Seen());
+        var armorOnly = world.CreateEntity(new Armor(1), new Seen());      // a table without a Shield column
+        var never = world.CreateEntity(new Seen());
+        world.AddSystem<ArmorOrShieldLoss>();
+        world.Update();
+        var all = new[] { armor, shield, kept, back, armorOnly, never };
+        Assert.That(Array.ConvertAll(all, e => e.Get<Seen>().Count), Is.EqualTo(new[] { 0, 0, 0, 0, 0, 0 }));
+
+        armor.Remove<Armor>();
+        shield.Remove<Shield>();
+        kept.Get<Armor>().Value++;                                          // a write is not a removal
+        back.Remove<Shield>();
+        back.Set(new Shield(2));                                            // back again: not removed
+        armorOnly.Remove<Armor>();
+        world.Update();
+        world.Update();
+        Assert.That(Array.ConvertAll(all, e => e.Get<Seen>().Count), Is.EqualTo(new[] { 1, 1, 0, 0, 1, 0 }));
+
+        var lost = QueryFilter.Create().RemovedAny<Armor, Shield>(0);
+        Assert.That(world.Count<Seen>(lost), Is.EqualTo(3));
+        Assert.That(world.Count<Seen>(lost.With<Shield>()), Is.EqualTo(1));                  // AND with the other filters
+    }
 }
