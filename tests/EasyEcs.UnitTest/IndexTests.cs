@@ -74,14 +74,18 @@ public class IndexTests
         Assert.That(found, Is.EqualTo(a));
         Assert.That(index.Count("bravo"), Is.EqualTo(1));
         Assert.That(index.TryFind("charlie", out _), Is.False);
+        Assert.That(index.KeyCount, Is.EqualTo(2));
 
         b.Set(new Callsign("alpha"));                // a write moves b to its new key
         Assert.That(index.Count("alpha"), Is.EqualTo(2));
-        Assert.That(index.Count("bravo"), Is.Zero);
+        Assert.That((index.Count("bravo"), index.KeyCount), Is.EqualTo((0, 1)));
 
         foreach (var item in world.Query<Callsign>()) item.Entity.Set(new Callsign("delta"));
         Assert.That(index.Count("alpha"), Is.Zero);
-        Assert.That(index.Count("delta"), Is.EqualTo(2));
+        Assert.That((index.Count("delta"), index.KeyCount), Is.EqualTo((2, 1)));
+        a.Destroy();
+        b.Destroy();
+        Assert.That(index.KeyCount, Is.Zero);
     }
 
     [Test]
@@ -136,6 +140,7 @@ public class IndexTests
         Assert.That(All(children.Find(parent)), Is.EquivalentTo(new[] { kids[1], kids[2] }));
         Assert.That(All(children.Find(other)), Is.EqualTo(new[] { kids[0] }));
         Assert.That((children.Find(parent).Count, children.Find(other).Count, world.Children(other).Count), Is.EqualTo((2, 1, 0)));
+        Assert.That(children.KeyCount, Is.EqualTo(2));                  // entity keys live in slots, counted all the same
 
         // Destroying the parent leaves the links: the handle keeps its version, so they never match a later entity.
         parent.Destroy();
@@ -160,6 +165,20 @@ public class IndexTests
         world.Restore(snapshot);
         Assert.That(index.Count("after"), Is.Zero);
         Assert.That(index.TryFind("before", out var e) && e == a, Is.True);
+        Assert.That(index.KeyCount, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void AUniqueIndexCountsItsKeysAcrossARestore()
+    {
+        using var world = new World();
+        var logins = world.Index<Login, int>();
+        world.CreateEntity(new Login(1));
+        var snapshot = world.Capture();
+        world.CreateEntity(new Login(2));
+        Assert.That(logins.KeyCount, Is.EqualTo(2));
+        world.Restore(snapshot);                                       // a unique index is given the restored rows at once
+        Assert.That(logins.KeyCount, Is.EqualTo(1));
     }
 
     [Test]

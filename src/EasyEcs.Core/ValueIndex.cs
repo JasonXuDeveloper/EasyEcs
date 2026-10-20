@@ -299,11 +299,28 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
         return Unsafe.IsNullRef(ref head) ? 0 : head.Count;
     }
 
+    /// <summary>
+    /// Number of distinct keys some entity has (how many guilds have a member): O(1), kept as entities join and leave
+    /// keys (the first lookup indexes every row once).
+    /// </summary>
+    public int KeyCount
+    {
+        get
+        {
+            if (!_built) Build();
+            return _keyCount;
+        }
+    }
+
+    // Keys with at least one entity: _heads entries are removed when emptied, _byTarget slots are not, so it is counted.
+    private int _keyCount;
+
     /// <summary>Forget everything; after <see cref="World.Restore(WorldSnapshot)"/> the next lookup re-indexes every row, after <see cref="World.Dispose"/> it finds nothing.</summary>
     void World.IValueIndex.Reset(bool rebuild)
     {
         _heads.Clear();
         _byTarget.Clear();
+        _keyCount = 0;
         Array.Clear(_nodes);
         _sorted = null; // sorted again by the next ordered walk (one sort instead of one insertion per key)
         _sortedCount = 0;
@@ -538,6 +555,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
     private void Link(int id, int version, TKey key, ref IndexHead head)
     {
         ref var node = ref _nodes[id];
+        if (head.Count == 0) _keyCount++; // the key's first entity
         node.Place = head.Add(new EntityId(id, version), _spares);
         node.Key = key;
         node.Linked = true;
@@ -557,7 +575,9 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
 
         if (!inSlot) head = ref CollectionsMarshal.GetValueRefOrNullRef(_heads, node.Key);
         // An emptied _byTarget slot just stays (Count 0 marks it free); a dictionary entry goes.
-        if (head.Remove(node.Place, _spares) && !inSlot)
+        bool emptied = head.Remove(node.Place, _spares);
+        if (emptied) _keyCount--;
+        if (emptied && !inSlot)
         {
             _heads.Remove(node.Key);
             if (_sorted != null) RemoveSorted(node.Key);

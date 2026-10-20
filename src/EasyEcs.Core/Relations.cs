@@ -70,6 +70,19 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
         return Unsafe.IsNullRef(ref head) ? 0 : head.Count;
     }
 
+    /// <summary>Number of distinct entities some link points at (how many guilds have a member): O(1), kept as links come and go.</summary>
+    public int TargetCount
+    {
+        get
+        {
+            if (!_built) Build();
+            return _targetCount;
+        }
+    }
+
+    // Targets with at least one link: _older entries go when emptied, _byTarget slots stay, so it is counted.
+    private int _targetCount;
+
     /// <summary>
     /// Decide what destroying an entity does to the links to it: <see cref="TargetPolicy.Remove"/> drops them (a party
     /// forgets a member that left the world), <see cref="TargetPolicy.Destroy"/> destroys the linking entities (the
@@ -102,7 +115,9 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
         if (source >= _bySource.Length) Array.Resize(ref _bySource, Math.Max(source + 1, _bySource.Length * 2));
 
         ref var node = ref _links[link];
-        node.Place = AddHead(target).Add(new EntityId(source, version), _spares);
+        ref var head = ref AddHead(target);
+        if (head.Count == 0) _targetCount++; // the target's first link
+        node.Place = head.Add(new EntityId(source, version), _spares);
         node.Target = target;
         node.Source = source;
         node.NextOfSource = _bySource[source] - 1;
@@ -137,7 +152,9 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
         ref var head = ref SlotOf(node.Target);
         bool older = Unsafe.IsNullRef(ref head);
         if (older) head = ref System.Runtime.InteropServices.CollectionsMarshal.GetValueRefOrNullRef(_older, node.Target);
-        if (head.Remove(node.Place, _spares) && older) _older.Remove(node.Target);
+        bool emptied = head.Remove(node.Place, _spares);
+        if (emptied) _targetCount--;
+        if (emptied && older) _older.Remove(node.Target);
         node.Source = -1;
         node.NextOfSource = _free;
         _free = link;
@@ -179,6 +196,7 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
         Array.Clear(_bySource);
         _byTarget.Clear();
         _older.Clear();
+        _targetCount = 0;
         _built = !rebuild;
     }
 

@@ -25,18 +25,18 @@ public class RelationTests
         var parties = world.Relations<MemberOf>();
         Assert.That(All(parties.Find(red)), Is.EquivalentTo(new[] { a, b }));
         Assert.That(All(parties.Find(blue)), Is.EqualTo(new[] { a }));
-        Assert.That((parties.Find(red).Count, parties.Find(blue).Count), Is.EqualTo((2, 1)));
+        Assert.That((parties.Find(red).Count, parties.Find(blue).Count, parties.TargetCount), Is.EqualTo((2, 1, 2)));
         Assert.That((a.HasRelation<MemberOf>(blue), b.HasRelation<MemberOf>(blue)), Is.EqualTo((true, false)));
 
         a.AddRelation(new MemberOf(blue));                                // links are counted, like buffer elements
         Assert.That(parties.Count(blue), Is.EqualTo(2));
         Assert.That(a.RemoveRelation<MemberOf>(blue), Is.EqualTo(2));
-        Assert.That((parties.Count(blue), a.Read<DynamicBuffer<MemberOf>>().Count), Is.EqualTo((0, 1)));
+        Assert.That((parties.Count(blue), a.Read<DynamicBuffer<MemberOf>>().Count, parties.TargetCount), Is.EqualTo((0, 1, 1)));
 
         b.Destroy();                                                      // a destroyed source leaves
         Assert.That(All(parties.Find(red)), Is.EqualTo(new[] { a }));
         a.Remove<DynamicBuffer<MemberOf>>();                              // so does a removed buffer
-        Assert.That(parties.Count(red), Is.Zero);
+        Assert.That((parties.Count(red), parties.TargetCount), Is.EqualTo((0, 0)));
     }
 
     [Test]
