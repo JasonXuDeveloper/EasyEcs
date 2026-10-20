@@ -1,12 +1,22 @@
 ---
 title: 常见问题
-seoTitle: "EasyEcs 常见问题：生产可用性、分配、线程、Unity"
-description: "EasyEcs 常见问题：能否用于生产、会不会分配内存、线程安全、Unity 与 Godot、Native AOT、存档、热重载，以及和其他库比怎么样。"
+seoTitle: "EasyEcs 常见问题：.NET 服务端、仿真、零分配与 AOT"
+description: "EasyEcs 常见问题：游戏服务端之外能否用于仿真和实时后端、会不会分配内存、线程模型、Unity、Native AOT、存档及横向对比。"
 icon: CircleQuestionMark
 faq: true
 ---
 
 import { Lightbulb, Scale, Shapes } from 'lucide-react';
+
+## EasyEcs 只能用于游戏服务端吗？ [#beyond-games]
+
+不是。EasyEcs 是面向 C#/.NET 10 的 ECS 库，适合反复更新大量实体的任务：游戏服务端、仿真，以及其他长时间运行的实时后端。
+World 保存组件数据，系统按 tick 处理匹配的实体；库不要求实体一定是玩家，也不要求 tick 来自游戏。例如，服务可以把车辆、设备或
+工作单元建模为实体，让移动、状态变化和过期处理分别由系统执行。
+
+是否适合，取决于工作负载。大量对象需要执行相同的更新、而且热路径成本需要稳定时，ECS 值得考虑；若只是普通的数据库增删改查，
+几乎没有针对大量对象的共同处理，就没必要引入 ECS。EasyEcs 负责 World、查询、系统和状态管理，网络传输与宿主由应用提供。
+[ASP.NET Core 和 Worker 托管指南](/zh/docs/guide/hosting)展示了如何让 HTTP 请求通过通道进入 World，避免请求线程直接修改它。
 
 ## EasyEcs 能用于生产吗？ [#production-ready]
 

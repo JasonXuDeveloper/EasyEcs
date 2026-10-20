@@ -1,12 +1,25 @@
 ---
 title: FAQ
-seoTitle: "EasyEcs FAQ: production, allocations, threads, Unity, AOT"
-description: "Short answers about EasyEcs: production use, allocations, thread safety, Unity and Godot, Native AOT, saves, hot reload, events and how it compares."
+seoTitle: "EasyEcs FAQ: .NET servers, simulations, allocations, AOT"
+description: "Short answers about using EasyEcs in game servers, simulations and real-time .NET backends: allocations, threading, Unity, Native AOT, saves and comparisons."
 icon: CircleQuestionMark
 faq: true
 ---
 
 import { Lightbulb, Scale, Shapes } from 'lucide-react';
+
+## Is EasyEcs only for game servers? [#beyond-games]
+
+No. EasyEcs is a C#/.NET 10 ECS library for workloads that repeatedly update many entities: game servers, simulations
+and other long-running real-time backends. A world holds plain component data; systems process matching entities on a
+tick. The library does not assume that an entity is a player or that a tick comes from a game. For example, a service
+can model moving vehicles, devices or workers as entities and run movement, status and expiry systems over them.
+
+The architectural fit matters more than the label. Use an ECS when the same operations run over many changing items
+and predictable hot-path costs matter. A conventional database-backed CRUD service with little shared per-item work
+usually has no need for an ECS. EasyEcs supplies the world, queries, systems and state management; you supply the
+transport and host. The [ASP.NET Core and Worker hosting guide](/en/docs/guide/hosting) shows one way to connect HTTP
+requests to a world without touching it from request threads.
 
 ## Is EasyEcs production ready? [#production-ready]
 
