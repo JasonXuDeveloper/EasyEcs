@@ -13,7 +13,8 @@ is allocation-free.
 ## When to use it [#when-to-use-it]
 
 <Callout type="idea" title="Use it for">
-  Iteration outside systems: request handlers between updates, tools, tests, one-off passes. Counts and existence
+  Iteration outside systems: request handlers between updates, tools, tests, one-off passes. Jobs on one entity
+  ([`entity.Run`](#run-on-one-entity)): the handler of a request or of a message to an actor. Counts and existence
   checks (`Count`, `Any`). Bulk destroys (`DestroyEntities<T>(filter)`). The filters themselves, which `[ForEach]`
   methods take as attributes.
 </Callout>
@@ -227,12 +228,18 @@ world.ForEachBatch<Position, Velocity, Drift>(ref drift, Filters.Active);
 
 ### One entity: `entity.Run` [#run-on-one-entity]
 
-Code that handles one entity at a time (a request, a message to an actor, a command) runs a job on it with
-`entity.Run<T1..Tn, TJob>(ref job, filter)`. The job is an `IForEachEntity` job, the same type a pass over the world
-takes, and gets the refs a pass gives it: one table lookup for all its components instead of one per `Get`.
+Code that handles one entity at a time runs a job on it with `entity.Run<T1..Tn, TJob>(ref job, filter)`: a request
+or a message to an actor, a command from a client. The job is an `IForEachEntity` job, the same type a pass over the
+world takes, and gets the refs a pass gives it: one table lookup for all its components instead of one per `Get`.
 It returns `false`, without running the job, when the entity lacks a component, fails the filter or is not alive.
 
 ```csharp
+public static class Hits
+{
+    // Built once: the filter is a value, kept in a field.
+    public static readonly QueryFilter Alive = QueryFilter.Create().Without<Dead>();
+}
+
 public struct TakeHit : IForEachEntity<Health>
 {
     public int Damage;
@@ -248,17 +255,47 @@ public struct TakeHit : IForEachEntity<Health>
 
 ```csharp
 var hit = new TakeHit { Damage = 30 };
-bool applied = unit.Run<Health, TakeHit>(ref hit, QueryFilter.Create().Without<Dead>());   // false: dead, or no Health
+bool applied = unit.Run<Health, TakeHit>(ref hit, Hits.Alive);   // false: dead, no Health, or not alive
+```
+
+Without a filter, `entity.Run<T1..Tn, TJob>(ref job)` checks only that the entity is alive and has the components.
+A job that only reads declares `Writes => 0`:
+
+```csharp
+public struct ReadHealth : IForEachEntity<Health>
+{
+    public int Value;
+    public static int Writes => 0;          // reads only: nothing counts as written
+
+    public void Execute(Entity unit, ref Health hp) => Value = hp.Value;
+}
+```
+
+```csharp
+var read = new ReadHealth();
+if (unit.Run<Health, ReadHealth>(ref read)) Console.WriteLine(read.Value);
 ```
 
 - **The refs survive the job's own structural changes**, as in `ForEachEntity`: the components in `Writes` are copied
   to the entity's new row after `Execute`, also when it throws, so what was written before the exception stays.
-- **Only `Writes` count as written** for [change tracking](/en/docs/guide/change-tracking); a job that writes nothing
+- **Only `Writes` count as written** for [change tracking](/en/docs/guide/change-tracking), and only when `Run`
+  returns `true`. The default, `Writes => -1`, stamps every component the job takes; a job that writes nothing
   declares `Writes => 0`.
-- **`INoStructuralChanges`** skips the bookkeeping and freezes the structure while the job runs, like a pass.
-- **O(1), plus O(1) per component the filter names.** A filter tests the row the way a query does (`Without`,
-  `WithAny`, `Changed<T>(tick)`, groups), with no lookup of the query's tables; build it once, in a `static readonly`
-  field.
+- **`false` is not "dead"**: it also means a missing component or a filter that failed. Test `entity.IsAlive` when
+  the reason matters.
+- **`INoStructuralChanges`** skips the bookkeeping and freezes the structure while the job runs, like a pass: a
+  structural change made anyway throws `InvalidOperationException`.
+- **O(1), plus O(1) per component the filter names**, unless the filter names a type past the first 256 (then it goes
+  through the query cache). A filter tests the row the way a query does (`Without`, `WithAny`, `Changed<T>(tick)`,
+  groups), with no lookup of the query's tables; build it once, in a `static readonly` field.
+- **For the analyzer, `Run` is a structural change** (its job may make one), rejected where those are: in a
+  parallel `[ForEach]` method ([EECS010](/en/docs/guide/analyzer#eecs010)), in a `[ForEach]` method that takes no
+  `Entity` or `World` ([EECS013](/en/docs/guide/analyzer#eecs013)) and off the world's owner thread
+  ([EECS014](/en/docs/guide/analyzer#eecs014)).
+
+An actor is the typical user: each message handler finds the actor's entity (through a
+[value index](/en/docs/guide/indexes-and-relations)) and runs one job on it. The
+[Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) is a whole program built this way.
 
 1,000 calls, each on another of 10,000 entities, with 1, 3 or 5 components, with or without a `Without<Dead>` filter
 and a structural change in the middle, against the same work written through the handle (`Has<Dead>()`, a
@@ -430,7 +467,8 @@ not a mover, but the job over `Position` alone counts it.
 | A `Query` that only reads tracked components | A job with `Writes => 0`, or `in` parameters | Items stamp what they hand out |
 | `ForEachEntity` when the entity is rarely used | A batch job with `EntitySpan` | Handles built only for the rows that need one |
 | A scalar loop over many rows | A batch job with `Vector<T>` | The JIT does not vectorize on its own |
-| `Count(...) > 0` | `Any(...)` | Stops at the first match |
+| `Count(...) > 0` | `Any(...)` | Stops at the first match ([EECS032](/en/docs/guide/analyzer#eecs032)) |
+| Several `Get` / `TryGetRef` and a `Has<Dead>()` per request | [`entity.Run`](#run-on-one-entity) with a `static readonly` filter | One lookup; the refs are carried across structural changes |
 | Scanning for a key | A [value index](/en/docs/guide/indexes-and-relations) | O(matches) instead of O(rows) |
 
 The same write, `Position += Velocity` over 10,000 entities: two plain arrays (`RawArrayWrite`), a `[ForEach]`
@@ -480,7 +518,12 @@ Against Friflo.Engine.ECS on the same world: one component, two components scala
 | Structural change in a batch job | `InvalidOperationException`: the spans point into the tables | At run time ([EECS013](/en/docs/guide/analyzer#eecs013) for `[ForEach]` methods) |
 | A parallel job that writes a singleton or another entity | Races between chunks | Code review ([EECS010](/en/docs/guide/analyzer#eecs010) for `[ForEach]` methods) |
 | `Changed` and `Removed` with different ticks in one filter | `ArgumentException` | At run time |
-| `Update()` called from inside a query loop of the same world | Undefined order of passes | Code review |
+| `Update()` called from inside a query loop of the same world | Undefined order of passes | Code review; [EECS034](/en/docs/guide/analyzer#eecs034) when called from a system |
+| An `entity.Run` job without `Writes` | The default (-1) stamps every tracked component the job takes | Declare `Writes` (`0` for a job that only reads) |
+| `INoStructuralChanges` on a `Run` job that changes structure | `InvalidOperationException` at the change | At run time |
+| Treating `false` from `Run` as "dead" | It also means a missing component or a filter that failed | Code review: test `IsAlive` |
+| `QueryFilter.Create()…` built at every `Run` or query call | The filter is rebuilt and looked up at every call | Code review: a `static readonly` field |
+| `entity.Run` inside a parallel `[ForEach]` method | Its job may change structure from several threads | [EECS010](/en/docs/guide/analyzer#eecs010) |
 
 ## Related [#related]
 

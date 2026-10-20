@@ -109,7 +109,13 @@ foreach (var e in world.Entities)         // diagnostics: walks the whole id ran
     Console.WriteLine(e);
 ```
 
-`WorldOptions.InitialEntityCapacity` does the same at construction. Tables grow on their own; to size a table too,
+`WorldOptions.InitialEntityCapacity` does the same at construction:
+
+```csharp
+var sized = new World(new WorldOptions { InitialEntityCapacity = 10_000 });
+```
+
+Tables grow on their own; to size a table too,
 use [`EnsureCapacity<T1, …, Tn>(count)`](/en/docs/guide/structural-changes#bulk) for entities created with exactly
 those components, or [`EnsureCapacity(prefab, count)`](/en/docs/guide/prefabs#ensure-capacity) for a prefab's instances.
 
@@ -199,8 +205,11 @@ the same.
 | `record struct Position(float X, float Y) : IComponent` | `e.Position` (`ref`), `e.HasPosition`, `e.TryGetPosition(out p)`, `e.GetOrAddPosition()`, `e.SetPosition(x, y)`, `e.RemovePosition()` | `Get`, `Has`, `TryGet`, `GetOrAdd`, `Set(new Position(x, y))`, `Remove` |
 | a tracked component (`Armor : ITrackChanges`) | `e.Armor` is `ref readonly`; `e.WriteArmor()` returns the `ref` | `Read`; `Get` (stamped as written) |
 | an indexed component (`Zone : IIndexed<int>`) | `e.Zone` is `ref readonly`, no `GetOrAddZone` or `WriteZone`; `world.ZoneIndex` | `Read`; `world.Index<Zone, int>()` |
+| a grouped component (`Team : IGroup`) | `e.Team` is `ref readonly`, no `GetOrAddTeam` or `WriteTeam`; `filter.InTeam(group)` | `Read`; `filter.InGroup<Team>(group)` ([groups](/en/docs/guide/groups)) |
 | a tag (`struct Dead : IComponent`) | `e.IsDead`, `e.SetDead()`, `e.RemoveDead()` | `Has`, `Set(new Dead())`, `Remove` |
 | any component with fields, except a cleanup component | `e.DisableHealth()`, `e.EnableHealth()`, `e.IsHealthDisabled` | [`Disable` / `Enable`](/en/docs/guide/cleanup-and-disable) |
+| a buffer element some code names as `DynamicBuffer<Loot>` | `e.Loot` (`ref readonly`), `e.HasLoot`, `e.WriteLoot()`, `e.GetOrAddLoot()`, `e.RemoveLoot()` | `Read`, `Has`, `Get`, `GetOrAdd`, `Remove` of `DynamicBuffer<Loot>` ([dynamic buffers](/en/docs/guide/dynamic-buffers)) |
+| a relation (`MemberOf : IRelation`), once code names `DynamicBuffer<MemberOf>` | `e.AddMemberOf(target)`, `e.RemoveMemberOf(target)`, `e.LinksMemberOf(target)`, `e.MemberOf` (`ref readonly`), `e.HasMemberOf`, `e.RemoveMemberOf()`, `world.MemberOfIndex` | `AddRelation`, `RemoveRelation`, `HasRelation`, `Read`, `Has`, `Remove`, `world.Relations<MemberOf>()` ([relations](/en/docs/guide/indexes-and-relations#relations)) |
 | a singleton (`Clock : ISingletonComponent`) | `world.Clock` (`ref`), `world.HasClock`, `world.GetOrAddClock()`, `world.SetClock(…)`, `world.RemoveClock()` | [`GetSingleton`](/en/docs/guide/singletons), `HasSingleton`, `GetOrAddSingleton`, `GetOrAddSingleton() = …`, `RemoveSingleton` |
 | each `world.Query<Position, Velocity>()` the code calls | `item.Position`, `item.Velocity` | `item.Component1`, `item.Component2` |
 | any component, on a [prefab](/en/docs/guide/prefabs#generated-members) | `prefab.Position` (`ref readonly`), `HasPosition`, `SetPosition(x, y)`, `RemovePosition()`, `IsDead`, `SetDead()` | `Read`, `Has`, `Set`, `Remove` |
@@ -245,15 +254,98 @@ Components live in archetype tables, one row per entity and one column per compo
 - Up to 65,536 component types per process. The first 256 fit in each table's mask inline; past that, a mask carries
   an overflow array.
 
+## Full example [#full-example]
+
+A goblin and a chest: create them, write through the generated members, mark a state with a tag, read an optional
+component, then destroy the goblin and check its id. Put the files in a console project that references EasyEcs
+(`dotnet add package EasyEcs`) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Position(float X, float Y) : IComponent;
+
+public record struct Health(int Value) : IComponent;
+
+// Tracked: the generated property is read-only, and a write is explicit.
+public record struct Armor(int Value) : IComponent, ITrackChanges;
+
+// A tag: no fields, only filtered on.
+public struct Dead : IComponent;
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+
+// Each entity is placed in its final table in one step.
+var goblin = world.CreateEntity(new Position(0, 0), new Health(30), new Armor(2));
+var chest = world.CreateEntity(new Position(5, 5));
+
+// Generated members: a ref to write in place, SetX to add or replace, WriteX for a tracked write.
+goblin.Position.X += 3;
+goblin.SetHealth(goblin.Health.Value - 40);
+goblin.WriteArmor().Value += 1;
+
+// goblin.Armor is Read<Armor>(): a tracked component read without counting as a write.
+Console.WriteLine($"goblin: {goblin.Position}, {goblin.Health}, armor {goblin.Armor.Value}");
+
+// A tag is a state: set it, test it.
+if (goblin.Health.Value <= 0)
+{
+    goblin.SetDead();
+}
+
+Console.WriteLine($"goblin dead: {goblin.IsDead}, chest dead: {chest.IsDead}");
+
+// An optional component: TryGetX copies the value when the entity has it.
+if (chest.TryGetHealth(out var chestHealth))
+{
+    Console.WriteLine($"chest: {chestHealth}");
+}
+else
+{
+    Console.WriteLine("chest: no health, nothing to hit");
+}
+
+// The id outlives the entity: after Destroy it names nothing.
+EntityId id = goblin.Id;
+goblin.Destroy();
+Console.WriteLine($"{id} alive: {world.IsAlive(id)}, entities left: {world.EntityCount}");
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+goblin: Position { X = 3, Y = 0 }, Health { Value = -10 }, armor 3
+goblin dead: True, chest dead: False
+chest: no health, nothing to hit
+0v1 alive: False, entities left: 1
+```
+
+`goblin.Position.X += 3` wrote the table in place, while the chest, which has no `Health`, answered `TryGetHealth`
+with `false` instead of throwing. After `Destroy` the stored id names nothing: the world says it is not alive.
+
 ## How to use it fast [#how-to-use-it-fast]
 
 | Instead of | Do | Why |
 | --- | --- | --- |
 | `CreateEntity()` then `Set` per component | `CreateEntity(a, b, c)`, or `Instantiate(prefab)` | One placement instead of one row move per component |
 | `Set(a)` then `Set(b)` | `Set(a, b)`, `Remove<A, B>()` | Shorter, the same cost |
-| A loop of `CreateEntity` / `Destroy` | `CreateEntities(span, …)`, `DestroyEntities<T>(filter)` | One pass through the structural gate per wave |
+| A loop of `CreateEntity` / `Destroy` | `CreateEntities(span, …)`, `DestroyEntities<T>(filter)` ([EECS031](/en/docs/guide/analyzer#eecs031)) | One pass through the structural gate per wave |
 | `Get<T>()` to read a tracked component | `Read<T>()`, the generated property, `TryGet<T>()` | A `ref` access stamps the row as written |
 | `Has<T>()` then `Get<T>()` | `TryGetRef<T>(out found)` | One lookup |
+| Several `Get` / `TryGetRef` and a `Has<Dead>()` per request | [`entity.Run`](/en/docs/guide/queries#run-on-one-entity) with a `static readonly` filter | One lookup for every component; the refs survive structural changes |
 | An `Entity` field in a component | An `EntityId` field | Unmanaged column: no GC scan, block copies |
 
 Per-entity access through handles, 1,000 handles each (`MicroBenchmarks`: `HandleAccess` writes `Position` through
@@ -292,7 +384,7 @@ fighters then lifting it (two structural changes each):
 | An `Entity` field in a component | A managed column, scanned by the GC, not saved | [EECS017](/en/docs/guide/analyzer#eecs017) (warning) |
 | Changing a copy: `var hp = e.Get<Health>(); hp.Value--;` | The table is unchanged | Code review: `ref var hp = ref …` |
 | Storing `id.Index` alone | Names whichever entity reuses the index | Store the `EntityId`; `TryGetEntity` checks the version |
-| Reading a tracked component with `Get<T>()` | The row counts as written, every `[Changed<T>]` reader visits it | The generated property is `ref readonly` |
+| Reading a tracked component with `Get<T>()` | The row counts as written, every `[Changed<T>]` reader visits it | [EECS025](/en/docs/guide/analyzer#eecs025); the generated property is `ref readonly` |
 | Writing an indexed component through `Get<T>()` | The index keeps the old key | [EECS015](/en/docs/guide/analyzer#eecs015) |
 | A `DynamicBuffer<T>` copied out of an entity | Two entities share one list | [EECS012](/en/docs/guide/analyzer#eecs012) |
 | `Get<T>()` on a component the entity may lack | `InvalidOperationException` | Use `HasX`, `TryGetX` or `TryGetRef` |

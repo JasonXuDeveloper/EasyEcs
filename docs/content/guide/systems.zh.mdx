@@ -13,7 +13,8 @@ icon: Cog
 
 <Callout type="idea" title="适合">
   所有每个 tick 都要跑的行为：一个系统负责一件事，一个 `[ForEach]` 方法对应一个循环，用 `[UpdateAfter<T>]` 排顺序，用分组区分节奏
-  （输入随到随处理，模拟按固定 tick 跑），用 `UpdateInterval` 处理每 N 个 tick 才做一次的工作。
+  （输入随到随处理，模拟按固定 tick 跑），用 `UpdateInterval` 处理每 N 个 tick 才做一次的工作。用[分组过滤](#group-filters)
+  把整组系统限定在一种实体上；用泛型分组接口给每个类型各配一个分组（每种 actor 一个分组）。
 </Callout>
 
 <Callout type="warn" title="不适合">
@@ -269,8 +270,10 @@ world.Update();               // 固定 tick：默认分组
 
 #### 分组过滤 [#group-filters]
 
-写在分组结构体上的 `[With<T>]`、`[Without<T>]`、`[WithAny<T>]` 会加到分组里所有系统的每个 `[ForEach]` 方法上：整个节奏都能排除
-被冻结或未激活的实体，不用在每个方法上重复写。系统在 `OnUpdate` 里自己做的查询不受影响。写在其他结构体上的过滤没有任何作用
+写在分组结构体上的 `[With<T>]`、`[Without<T>]`、`[WithAny<T>]` 会加到分组里所有系统的每个 `[ForEach]` 方法上：整组系统都能排除
+被冻结或未激活的实体，不用在每个方法上重复写。分组的 `[WithAny<T>]` 并入方法自己的 `[WithAny<T>]` 集合，放宽的是“至少有一个”
+这个条件：分组写 `[WithAny<A>]`、方法写 `[WithAny<B>]`，选出的是有 `A` 或有 `B` 的实体。系统在 `OnUpdate` 里自己做的查询不受影响；
+[`[ForEach]` runner](#foreach-outside-systems) 不属于任何分组，分组过滤也管不到它。过滤特性写在不是分组的结构体上会编译报错
 （[EECS023](/zh/docs/guide/analyzer#eecs023)）。
 
 ```csharp
@@ -285,25 +288,45 @@ public class MoveSystem : EcsSystem
 }
 ```
 
-用泛型接口描述的分组没法用特性写出过滤条件：C# 不允许类型参数做特性的类型实参（在 `IActorGroup<TActor>` 上写
-`[With<Inbox<TActor>>]` 会报 CS8968）。这时让分组实现 `IGroupWith<T>` 或 `IGroupWithout<T>`，直接实现或通过接口继承都行，
+用泛型接口描述的分组没法用特性写出过滤条件：C# 不允许类型参数做特性的类型实参（在 `IActor<TActor>` 上写
+`[With<In<TActor>>]` 会报 CS8968）。这时让分组实现 `IGroupWith<T>` 或 `IGroupWithout<T>`，直接实现或通过接口继承都行，
 效果和特性一样：一个接口就能给每种 actor 类型各配一个分组。
 
+actor 模式再往前走一步：每种 actor 用一个类型，它同时是 actor 的键组件（建了索引，消息能找到自己的 actor）、actor 的系统分组，
+并通过接口带上分组的过滤：
+
 ```csharp
-public record struct Inbox<TActor>(int Pending) : IComponent;   // 某一种 actor 的消息
+public struct In<TActor> : IComponent;             // 某一种 actor 的标签
+
+public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, IGroupWith<In<TSelf>>
+    where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;   // IIndexed 要求 IEquatable
+
+// 键组件、索引键、系统分组都是这一个类型。Key 显式实现：公开的 Key 属性会被 record 的
+// ToString() 打印，而打印 Key 又会调用同一个 ToString()，没有尽头。
+public readonly record struct Shop(long Id) : IActor<Shop>
+{
+    Shop IIndexed<Shop>.Key => this;
+}
+
 public record struct Stock(int Items) : IComponent;
-
-public interface IActorGroup<TActor> : IGroupWith<Inbox<TActor>>, IGroupWithout<Frozen> where TActor : struct;
-
-public struct Shop : IActorGroup<Shop>;             // 商店 actor：拥有 Inbox<Shop> 且未被冻结的实体
 
 [UpdateInGroup<Shop>]
 public class RestockSystem : EcsSystem
 {
-    [ForEach]
+    [ForEach]                                       // 只有带 In<Shop> 标签的实体
     static void Restock(ref Stock stock) => stock.Items = Math.Max(stock.Items, 10);
 }
 ```
+
+```csharp
+world.AddSystem<RestockSystem>();
+world.CreateEntity(new Shop(7), new In<Shop>(), new Stock(0));
+world.Update<Shop>();                               // 商店的系统，只遍历商店 actor
+bool open = world.ShopIndex.TryFind(new Shop(7), out var shop);   // 消息找到它的 actor
+```
+
+完整程序见 [Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)：两种 actor、
+用 [`entity.Run`](/zh/docs/guide/queries#run-on-one-entity) 处理消息、激活和保存。
 
 ### 泛型系统 [#generic-systems]
 
@@ -344,17 +367,30 @@ public static class Reports
 }
 ```
 
+泛型 runner 可以统计拥有任意组件的存活实体：
+
+```csharp
+public static class Census
+{
+    [ForEach, Without<Dead>]
+    static void CountAlive<T>(in T component, ref int count) where T : struct, IComponent => count++;
+}
+```
+
 ```csharp
 long total = 0;
 Reports.SumHealth(world, ref total);              // 生成的入口
 ulong mark = world.ChangeTick;
 int rich = 0;
 Reports.Rich(world, mark, ref rich, 1_000);       // [Changed<T>]：tick 紧跟在 world 后面
+int alive = 0;
+Census.CountAlive<Health>(world, ref alive);      // 泛型 runner：先写类型参数
 ```
 
 - 方法必须是静态的（[EECS005](/zh/docs/guide/analyzer#eecs005)）；它可以是 private，入口在它引用的类型都公开时也是公开的。
 - 带 `[Changed<T>]` 或 `[Removed<T>]` 时，入口要接收一个回看的起点 tick，因为 runner 没有自己的“上次运行”。
-- runner 可以是泛型方法，也可以是泛型类型的成员：入口会接收类型参数（`Census.CountAlive<Health>(world, ref count)`）。
+- runner 可以是泛型方法，也可以是泛型类型的成员：入口会接收类型参数。
+- [分组过滤](#group-filters)对 runner 不起作用：它不属于任何分组。
 - 批处理和并行 runner 遵循[批处理方法](#batch-methods)和[并行方法](#parallel-methods)的规则。
 - 入口不能和类型里已有的方法冲突（[EECS021](/zh/docs/guide/analyzer#eecs021)），局部函数也不能当 runner（[EECS024](/zh/docs/guide/analyzer#eecs024)）。
 - 和其他结构变更代码一样，要在 World 的所有者线程上调用。
@@ -378,7 +414,7 @@ Console.WriteLine($"burn: {stats.Last.TotalMicroseconds} μs, average {stats.Ave
 默认情况下，系统抛出的异常会从 `Update()` 传出去（`OnDestroy` 的异常从 `Dispose()` 传出）。设置
 `SystemErrors = SystemErrorPolicy.Disable` 后，出错的系统会被停用，异常保存在 `system.Error` 里，这次更新接着跑下一个系统。
 失败也是数据：在两次更新之间读取。把 `Enabled` 设回 `true` 会清掉 `Error` 并重试。失败的系统仍算运行过：它的 `LastRunTick`
-照常前进，失败那次之前写入的行不会被再次投递。
+照常前进，它的 `[Changed<T>]` 方法不会再访问失败那次之前写入的行。
 
 ```csharp
 var guarded = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
@@ -393,12 +429,114 @@ foreach (var system in guarded.Systems)                   // 健康检查，在�
 
 运行中的 World 还能告诉你什么（表、实体的组件、内存）：见[调试与诊断](/zh/docs/guide/diagnostics)。
 
+## 完整例子 [#full-example]
+
+一个带过滤的分组，组里两个排好顺序的系统，外加一个方法上的过滤：三个单位在移动，其中一个在地面上，一个被冻住。把这几个文件
+放进一个引用了 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Position(float X, float Y) : IComponent;
+
+public record struct Velocity(float X, float Y) : IComponent;
+
+// 地面上的单位会减速；被冻住的单位完全不动。
+public struct Grounded : IComponent;
+
+public struct Frozen : IComponent;
+
+// 模拟分组：组里的方法都看不到被冻住的单位。
+[Without<Frozen>]
+public struct Simulation : ISystemGroup;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// 按速度移动每个单位。
+[UpdateInGroup<Simulation>]
+public class MoveSystem : EcsSystem
+{
+    [ForEach]
+    static void Move(ref Position position, in Velocity velocity)
+    {
+        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+    }
+}
+
+// 移动之前，把地面单位的速度减半。
+[UpdateInGroup<Simulation>, UpdateBefore<MoveSystem>]
+public class FrictionSystem : EcsSystem
+{
+    [ForEach, With<Grounded>]
+    static void Slow(ref Velocity velocity)
+    {
+        velocity = new Velocity(velocity.X / 2, velocity.Y / 2);
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+// 故意按错误的顺序添加：[UpdateBefore] 仍然让摩擦先跑。
+world.AddSystem<MoveSystem>();
+world.AddSystem<FrictionSystem>();
+
+var flying = world.CreateEntity(new Position(0, 0), new Velocity(8, 0));
+var walking = world.CreateEntity(new Position(0, 0), new Velocity(8, 0), new Grounded());
+var frozen = world.CreateEntity(new Position(0, 0), new Velocity(8, 0), new Frozen());
+
+for (int tick = 1; tick <= 2; tick++)
+{
+    // 只运行 Simulation 分组里的系统。
+    world.Update<Simulation>();
+    float x1 = flying.Position.X;
+    float x2 = walking.Position.X;
+    float x3 = frozen.Position.X;
+    Console.WriteLine($"tick {tick}: flying at {x1}, walking at {x2}, frozen at {x3}");
+}
+
+// World.Systems 按运行顺序列出系统。
+foreach (var system in world.Systems)
+{
+    Console.WriteLine($"run order: {system.GetType().Name}");
+}
+```
+
+</Accordion>
+</Accordions>
+
+它会打印：
+
+```text
+tick 1: flying at 8, walking at 4, frozen at 0
+tick 2: flying at 16, walking at 6, frozen at 0
+run order: FrictionSystem
+run order: MoveSystem
+```
+
+被冻住的单位一直没动：分组上的 `[Without<Frozen>]` 把它挡在每个方法之外。摩擦系统虽然后添加，却在移动之前运行，所以地面上的单位
+每走一步之前速度都先减半。
+
 ## 怎么用得快 [#how-to-use-it-fast]
 
 | 别这样 | 这样做 | 原因 |
 | --- | --- | --- |
-| 只读的组件写成 `ref` | 改成 `in` | 系统能共享并行阶段；被追踪的组件不会被记 tick |
-| 方法用不到却带了 `Entity` 或 `World` 参数 | 去掉 | job 跳过结构变更簿记，还能并行 |
+| 只读的组件写成 `ref` | 改成 `in`（[EECS025](/zh/docs/guide/analyzer#eecs025)） | 系统能共享并行阶段；被追踪的组件不会被记 tick |
+| 方法用不到却带了 `Entity` 或 `World` 参数 | 去掉（[EECS026](/zh/docs/guide/analyzer#eecs026)） | job 跳过结构变更簿记，还能并行 |
+| 实例 `[ForEach]` 方法 | 改成静态方法（[EECS029](/zh/docs/guide/analyzer#eecs029)） | 能证明不改结构：可以共享阶段，每行不用检查 |
 | 对大量行写标量循环 | 用 `Vector<T>` 的批处理方法 | 对整段行做 SIMD |
 | 最热的循环里用 `Maybe<T>` | 用 `[With<T>]` / `[Without<T>]` 拆成两个方法 | 每行不用判断存在位 |
 | 很轻的计算也 `Parallel = true` | 普通 `[ForEach]` | 分发的开销比省下的多 |
@@ -429,8 +567,9 @@ foreach (var system in guarded.Systems)                   // 健康检查，在�
 
 - **`[ForEach]` 方法**是一个结构体 job，JIT 把它内联进行循环：没有委托，不分配内存。
 - **每个系统每次更新：** 一次 `OnUpdate` 调用，每个生成的 job 一次调用，每个方法一次查询缓存查找。
-- **分组上的过滤条件**（分组类型上的 `[With<T>]`、`[Without<T>]`）在每次更新时对它排除的表没有任何开销：查询缓存里只有匹配的表，所以
-  World 里其他种类实体的表（其他类型的 Actor）再多，也不会给这个分组的系统增加工作。
+- **分组上的过滤条件**（分组类型上的 `[With<T>]`、`[Without<T>]`、`[WithAny<T>]`，以及 `IGroupWith<T>`、`IGroupWithout<T>`）
+  由生成器读取，运行时没有开销。被它排除的表每次更新也不花任何代价：查询缓存里只有匹配的表，World 里其他种类实体的表
+  （其他类型的 actor）不会被这个分组的系统遍历。
 - **单例组件参数**每次遍历只解析一次，不是每个实体一次。
 - **执行顺序**在添加系统时确定：更新时不付任何代价。
 - **`MeasureSystems`** 每次系统运行多读两次时间戳；关闭时零开销。
@@ -453,6 +592,16 @@ foreach (var system in guarded.Systems)                   // 健康检查，在�
 | `UpdateInterval` 的值会变 | 跳过或重复运行 | [EECS018](/zh/docs/guide/analyzer#eecs018) |
 | 排序形成环，或跨分组排序 | `AddSystem` 时抛异常；排序不生效 | [EECS019](/zh/docs/guide/analyzer#eecs019)、[EECS020](/zh/docs/guide/analyzer#eecs020) |
 | 方法参数用了 private 类型 | 生成的 job 引用不到它 | [EECS022](/zh/docs/guide/analyzer#eecs022) |
+| `[With<T>]`、`[Without<T>]` 或 `[WithAny<T>]` 写在不是分组的结构体上 | 编译报错：这个过滤不会起任何作用 | [EECS023](/zh/docs/guide/analyzer#eecs023) |
+| 分组的 `[With<T>]` 或 `IGroupWith<T>` 碰上方法的 `[Removed<T>]` | 要求一行既有 `T` 又没有 `T`：方法永远不会运行 | [EECS016](/zh/docs/guide/analyzer#eecs016) |
+| 分组的 `[With<X>]` 碰上方法的 `[Without<X>]` | 没有实体能满足：方法永远不会运行 | 没有规则报告：靠代码审查 |
+| 分组的 `[WithAny<A>]` 加方法的 `[WithAny<B>]`，当成“A 且 B” | 两个集合合并：选出有 `A` 或有 `B` 的实体 | 代码审查 |
+| record struct 的 actor 键上写公开的 `Key => this` | `ToString()` 无限打印 `Key`：栈溢出 | 代码审查：显式实现 `IIndexed<T>.Key` |
+| 只读的组件写成 `ref` | 被追踪的组件被记 tick，系统也没法共享阶段 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
+| 方法从不使用的 `Entity` 或 `World` 参数 | job 保留结构变更簿记 | [EECS026](/zh/docs/guide/analyzer#eecs026) |
+| `OnUpdate` 或 `[ForEach]` 方法里分配内存 | 每次更新都产生垃圾 | [EECS028](/zh/docs/guide/analyzer#eecs028) |
+| 实例 `[ForEach]` 方法没用到系统的任何成员 | 被当作可能改结构：单独运行，每行都要检查 | [EECS029](/zh/docs/guide/analyzer#eecs029) |
+| 在系统里调用 `World.Update()` | 系统在自己的运行里再次运行 | [EECS034](/zh/docs/guide/analyzer#eecs034) |
 
 ## 相关页面 [#related]
 

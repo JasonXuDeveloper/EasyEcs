@@ -15,7 +15,8 @@ writes, which the source generator compiles into a struct job as fast as a hand-
 <Callout type="idea" title="Use it for">
   All per-tick behavior: one responsibility per system, one `[ForEach]` method per loop, ordering with
   `[UpdateAfter<T>]`, groups for different cadences (input whenever it arrives, simulation at a fixed tick),
-  `UpdateInterval` for work that runs every N-th tick.
+  `UpdateInterval` for work that runs every N-th tick. [Group filters](#group-filters) keep a whole group to one kind
+  of entity, and a generic group interface gives each type its own group (one group per actor type).
 </Callout>
 
 <Callout type="warn" title="Skip it for">
@@ -292,8 +293,12 @@ Updating a group with no systems does nothing.
 #### Group filters [#group-filters]
 
 `[With<T>]`, `[Without<T>]` and `[WithAny<T>]` on the group struct join every `[ForEach]` method of its systems: a
-whole cadence can leave frozen or inactive entities out without repeating the filter on each method. Queries a system
-makes in `OnUpdate` are its own. A filter on any other struct does nothing ([EECS023](/en/docs/guide/analyzer#eecs023)).
+whole group can leave frozen or inactive entities out without repeating the filter on each method. A group's
+`[WithAny<T>]` joins the method's own `[WithAny<T>]` set, so it widens the "at least one of" test: a group with
+`[WithAny<A>]` and a method with `[WithAny<B>]` select entities with `A` or `B`. Queries a system makes in `OnUpdate`
+are its own, and [`[ForEach]` runners](#foreach-outside-systems) belong to no group, so no group filter applies to
+them. A filter attribute on a struct that is not a group is a compile error
+([EECS023](/en/docs/guide/analyzer#eecs023)).
 
 ```csharp
 [Without<Frozen>]
@@ -308,25 +313,46 @@ public class MoveSystem : EcsSystem
 ```
 
 A group that a generic interface describes cannot name its filter in an attribute: C# refuses a type parameter as the
-type argument of an attribute (`[With<Inbox<TActor>>]` on `IActorGroup<TActor>` is CS8968). The group implements
+type argument of an attribute (`[With<In<TActor>>]` on `IActor<TActor>` is CS8968). The group implements
 `IGroupWith<T>` or `IGroupWithout<T>` instead, here or through an interface, and gets the same filter: one interface
 then gives every actor type its group.
 
+The actor pattern goes one step further: one type per kind of actor is at once its key component (indexed, so a
+message finds its actor), its system group and, through the interface, the group's filter:
+
 ```csharp
-public record struct Inbox<TActor>(int Pending) : IComponent;   // the messages of one actor type
+public struct In<TActor> : IComponent;             // the tag of one kind of actor
+
+public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, IGroupWith<In<TSelf>>
+    where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;   // IIndexed requires IEquatable
+
+// Key component, index key and system group in one type. Key is implemented explicitly: a public
+// Key property would be printed by the record's ToString(), which would print Key again, forever.
+public readonly record struct Shop(long Id) : IActor<Shop>
+{
+    Shop IIndexed<Shop>.Key => this;
+}
+
 public record struct Stock(int Items) : IComponent;
-
-public interface IActorGroup<TActor> : IGroupWith<Inbox<TActor>>, IGroupWithout<Frozen> where TActor : struct;
-
-public struct Shop : IActorGroup<Shop>;             // the shop actors: entities with Inbox<Shop>, none frozen
 
 [UpdateInGroup<Shop>]
 public class RestockSystem : EcsSystem
 {
-    [ForEach]
+    [ForEach]                                       // only entities tagged In<Shop>
     static void Restock(ref Stock stock) => stock.Items = Math.Max(stock.Items, 10);
 }
 ```
+
+```csharp
+world.AddSystem<RestockSystem>();
+world.CreateEntity(new Shop(7), new In<Shop>(), new Stock(0));
+world.Update<Shop>();                               // the shop systems, over the shop actors only
+bool open = world.ShopIndex.TryFind(new Shop(7), out var shop);   // a message finds its actor
+```
+
+The [Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) is the whole program:
+two kinds of actors, messages handled with [`entity.Run`](/en/docs/guide/queries#run-on-one-entity), activation and
+saving.
 
 ### Generic systems [#generic-systems]
 
@@ -370,20 +396,32 @@ public static class Reports
 }
 ```
 
+A generic runner counts the living entities that have any component:
+
+```csharp
+public static class Census
+{
+    [ForEach, Without<Dead>]
+    static void CountAlive<T>(in T component, ref int count) where T : struct, IComponent => count++;
+}
+```
+
 ```csharp
 long total = 0;
 Reports.SumHealth(world, ref total);              // the generated entry point
 ulong mark = world.ChangeTick;
 int rich = 0;
 Reports.Rich(world, mark, ref rich, 1_000);       // [Changed<T>]: the tick comes after the world
+int alive = 0;
+Census.CountAlive<Health>(world, ref alive);      // a generic runner: the type arguments first
 ```
 
 - The method must be static ([EECS005](/en/docs/guide/analyzer#eecs005)); it may be private, and the entry point is
   public when the types it names are public.
 - With `[Changed<T>]` or `[Removed<T>]` the entry point takes the tick to look back from, since a runner has no last
   run of its own.
-- Runners may be generic, or members of a generic type: the entry point takes the type arguments
-  (`Census.CountAlive<Health>(world, ref count)`).
+- Runners may be generic, or members of a generic type: the entry point takes the type arguments.
+- No [group filter](#group-filters) applies to a runner: it belongs to no group.
 - Batch and parallel runners follow the rules of [batch methods](#batch-methods) and [parallel methods](#parallel-methods).
 - The entry point must not collide with another method of the type ([EECS021](/en/docs/guide/analyzer#eecs021)), and
   a local function cannot be a runner ([EECS024](/en/docs/guide/analyzer#eecs024)).
@@ -410,7 +448,8 @@ By default an exception thrown by a system propagates out of `Update()` (and out
 With `SystemErrors = SystemErrorPolicy.Disable`, the failing system is switched off, its exception is kept in
 `system.Error`, and the update goes on with the next system. A failure is data: read it between updates. Setting
 `Enabled = true` clears `Error` and retries the system. A system that failed still counts as run: its
-`LastRunTick` moves on, so the rows written before the failed run are not delivered again.
+`LastRunTick` moves on, so its `[Changed<T>]` methods do not visit again the rows written before the failed
+run.
 
 ```csharp
 var guarded = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
@@ -426,12 +465,115 @@ foreach (var system in guarded.Systems)                   // a health check, bet
 What else a running world can tell you (its tables, an entity's components, memory):
 [Debugging and diagnostics](/en/docs/guide/diagnostics).
 
+## Full example [#full-example]
+
+A group with a filter, two systems ordered inside it, and a method filter: three units move, one of them on the
+ground and one frozen. Put the files in a console project that references EasyEcs (`dotnet add package EasyEcs`)
+and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Position(float X, float Y) : IComponent;
+
+public record struct Velocity(float X, float Y) : IComponent;
+
+// A unit on the ground slows down; a frozen unit does not move at all.
+public struct Grounded : IComponent;
+
+public struct Frozen : IComponent;
+
+// The simulation group: none of its methods sees a frozen unit.
+[Without<Frozen>]
+public struct Simulation : ISystemGroup;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// Moves every unit by its velocity.
+[UpdateInGroup<Simulation>]
+public class MoveSystem : EcsSystem
+{
+    [ForEach]
+    static void Move(ref Position position, in Velocity velocity)
+    {
+        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
+    }
+}
+
+// Halves the velocity of grounded units, before they move.
+[UpdateInGroup<Simulation>, UpdateBefore<MoveSystem>]
+public class FrictionSystem : EcsSystem
+{
+    [ForEach, With<Grounded>]
+    static void Slow(ref Velocity velocity)
+    {
+        velocity = new Velocity(velocity.X / 2, velocity.Y / 2);
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+// Added in the wrong order on purpose: [UpdateBefore] still runs friction first.
+world.AddSystem<MoveSystem>();
+world.AddSystem<FrictionSystem>();
+
+var flying = world.CreateEntity(new Position(0, 0), new Velocity(8, 0));
+var walking = world.CreateEntity(new Position(0, 0), new Velocity(8, 0), new Grounded());
+var frozen = world.CreateEntity(new Position(0, 0), new Velocity(8, 0), new Frozen());
+
+for (int tick = 1; tick <= 2; tick++)
+{
+    // Runs the systems of the Simulation group only.
+    world.Update<Simulation>();
+    float x1 = flying.Position.X;
+    float x2 = walking.Position.X;
+    float x3 = frozen.Position.X;
+    Console.WriteLine($"tick {tick}: flying at {x1}, walking at {x2}, frozen at {x3}");
+}
+
+// World.Systems lists the systems in the order they run.
+foreach (var system in world.Systems)
+{
+    Console.WriteLine($"run order: {system.GetType().Name}");
+}
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+tick 1: flying at 8, walking at 4, frozen at 0
+tick 2: flying at 16, walking at 6, frozen at 0
+run order: FrictionSystem
+run order: MoveSystem
+```
+
+The frozen unit never moves: the group's `[Without<Frozen>]` keeps it out of every method. Friction runs before the
+move although it was added second, so the grounded unit loses half its speed before each step.
+
 ## How to use it fast [#how-to-use-it-fast]
 
 | Instead of | Do | Why |
 | --- | --- | --- |
-| `ref` on a component the method only reads | `in` | The system can share a stage; a tracked component is not stamped |
-| An `Entity` or `World` parameter the method does not need | Drop it | The job skips structural bookkeeping and may run in parallel |
+| `ref` on a component the method only reads | `in` ([EECS025](/en/docs/guide/analyzer#eecs025)) | The system can share a stage; a tracked component is not stamped |
+| An `Entity` or `World` parameter the method does not need | Drop it ([EECS026](/en/docs/guide/analyzer#eecs026)) | The job skips structural bookkeeping and may run in parallel |
+| An instance `[ForEach]` method | A static one ([EECS029](/en/docs/guide/analyzer#eecs029)) | Proven not to change structure: may share a stage, no per-row checks |
 | A scalar loop over many rows | A batch method with `Vector<T>` | SIMD over whole runs of rows |
 | `Maybe<T>` in the hottest loop | Two methods with `[With<T>]` / `[Without<T>]` | No presence test per row |
 | `Parallel = true` on light work | A plain `[ForEach]` | The hand-off costs more than it saves |
@@ -466,9 +608,10 @@ needed, and a method that writes a singleton:
 
 - **A `[ForEach]` method** is a struct job the JIT inlines into the row loop: no delegate, no allocation.
 - **Per system and update:** the `OnUpdate` call, one call per generated job, and one query-cache lookup per method.
-- **A group's filters** (`[With<T>]`, `[Without<T>]` on the group type) cost nothing per update for the tables they exclude: a query's
-  cache holds only the tables that match, so the tables of other kinds of entities in the world (other actor types)
-  add no work to the group's systems, however many there are.
+- **A group's filters** (`[With<T>]`, `[Without<T>]`, `[WithAny<T>]` on the group type, `IGroupWith<T>`,
+  `IGroupWithout<T>`) are read by the generator, so they cost nothing at run time. The tables they exclude cost
+  nothing per update: a query's cache holds only the tables that match, so the tables of other kinds of entities in
+  the world (other actor types) are never walked by the group's systems.
 - **Singleton parameters** are resolved once per pass, not per entity.
 - **Ordering** is resolved when systems are added: an update pays nothing for it.
 - **`MeasureSystems`** costs two timestamp reads per system run; nothing when off.
@@ -492,6 +635,16 @@ needed, and a method that writes a singleton:
 | `UpdateInterval` that changes | Skipped or repeated runs | [EECS018](/en/docs/guide/analyzer#eecs018) |
 | Orderings in a cycle, or across groups | Throws on `AddSystem`; never applies | [EECS019](/en/docs/guide/analyzer#eecs019), [EECS020](/en/docs/guide/analyzer#eecs020) |
 | A private type in a method's parameters | The generated job cannot name it | [EECS022](/en/docs/guide/analyzer#eecs022) |
+| `[With<T>]`, `[Without<T>]` or `[WithAny<T>]` on a struct that is not a group | Compile error: the filter would do nothing | [EECS023](/en/docs/guide/analyzer#eecs023) |
+| A group's `[With<T>]` or `IGroupWith<T>` with a method's `[Removed<T>]` | Asks for rows that have and lack `T`: the method never runs | [EECS016](/en/docs/guide/analyzer#eecs016) |
+| A group's `[With<X>]` with a method's `[Without<X>]` | No entity matches: the method never runs | Nothing reports it: code review |
+| A group's `[WithAny<A>]` with a method's `[WithAny<B>]`, read as "A and B" | The sets merge: entities with `A` or `B` | Code review |
+| A public `Key => this` on a record struct actor key | `ToString()` prints `Key` forever: stack overflow | Code review: implement `IIndexed<T>.Key` explicitly |
+| `ref` on a component the method only reads | Stamps a tracked component, keeps the system out of shared stages | [EECS025](/en/docs/guide/analyzer#eecs025) |
+| An `Entity` or `World` parameter the method never uses | The job keeps its structural bookkeeping | [EECS026](/en/docs/guide/analyzer#eecs026) |
+| An allocation in `OnUpdate` or a `[ForEach]` method | Garbage every update | [EECS028](/en/docs/guide/analyzer#eecs028) |
+| An instance `[ForEach]` method that uses nothing of its system | Treated as one that may change structure: runs alone, with per-row checks | [EECS029](/en/docs/guide/analyzer#eecs029) |
+| `World.Update()` called from a system | The system runs again inside its own run | [EECS034](/en/docs/guide/analyzer#eecs034) |
 
 ## Related [#related]
 
