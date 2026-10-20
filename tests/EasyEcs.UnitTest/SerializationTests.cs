@@ -28,6 +28,13 @@ public partial struct Vitals : IComponent { public int Hp; public int Mana; }
 [NinoFormerName("EasyEcs.UnitTest.Stats")]
 public struct RawStats : IComponent { public int Hp; }
 
+// A restart's types: configuration the new version brings, a world-local cache Nino cannot write, persisted balances.
+[NinoType]
+public partial struct Config : ISingletonComponent { public int Rate; }
+public record struct Cache(object Handle) : ISingletonComponent;     // no formatter: a save that writes it throws
+public record struct Balance(int Gold) : IComponent, ITrackChanges;
+public record struct Session(object Socket) : IComponent;             // runtime only, no formatter
+
 public class SerializationTests
 {
     private static byte[] Save(World world)
@@ -417,5 +424,127 @@ public class SerializationTests
     {
         using var world = new World();
         Assert.Throws<InvalidDataException>(() => world.Load(new byte[16]));
+    }
+
+    private static readonly ComponentSet Runtime = ComponentSet.Create().WithSingleton<Config>().WithSingleton<Cache>().With<Session>();
+    private static readonly ComponentSet NewConfig = ComponentSet.Create().WithSingleton<Config>();
+
+    private static byte[] OldProcess()
+    {
+        using var world = new World();
+        world.AddSingleton<Config>() = new Config { Rate = 1 };
+        world.AddSingleton<Cache>() = new Cache(new object());
+        world.AddSingleton<Score>() = new Score(1, 2);
+        for (int i = 0; i < 10; i++) world.CreateEntity(new Balance(i), new Session(new object()));
+        world.CreateEntity(new Session(new object()));                     // only runtime state: written empty
+        Assert.Catch(() => world.Save(new NinoArrayBufferWriter()));         // the cache and the sessions cannot be written
+        var output = new NinoArrayBufferWriter();
+        world.Save(output, in Runtime);                                     // never touched: no formatter needed
+        return output.WrittenSpan.ToArray();
+    }
+
+    [Test]
+    public void ARestartLeavesTheRuntimeTypesOutAndKeepsTheNewConfiguration()
+    {
+        var bytes = OldProcess();
+        using var resumed = new World();                                    // the new process
+        resumed.AddSingleton<Config>() = new Config { Rate = 2 };
+        var config = resumed.SingletonRef<Config>();
+        resumed.Load(bytes, in NewConfig);
+
+        Assert.That((resumed.GetSingleton<Config>().Rate, config.Value.Rate), Is.EqualTo((2, 2)));   // the same box
+        config.Value.Rate = 3;
+        Assert.That(resumed.GetSingleton<Config>().Rate, Is.EqualTo(3));
+        Assert.That((resumed.HasSingleton<Cache>(), resumed.GetSingleton<Score>()), Is.EqualTo((false, new Score(1, 2))));
+        Assert.That((resumed.EntityCount, resumed.Count<Balance>(), resumed.Count<Session>()), Is.EqualTo((11, 10, 0)));
+        int gold = 0;
+        foreach (var item in resumed.Query<Balance>()) gold += item.Component1.Gold;
+        Assert.That(gold, Is.EqualTo(45));
+
+        resumed.Load(bytes);                                                // without keep: the save lacks Config
+        Assert.That(resumed.HasSingleton<Config>(), Is.False);
+    }
+
+    [Test]
+    public void AKeptSingletonIsLeftAsTheWorldHasIt()
+    {
+        byte[] withConfig, without;
+        using (var world = new World())
+        {
+            world.AddSingleton<Config>() = new Config { Rate = 1 };
+            world.CreateEntity(new Balance(5));
+            withConfig = Save(world);
+            world.RemoveSingleton<Config>();
+            without = Save(world);
+        }
+
+        using var loaded = new World();
+        loaded.AddSingleton<Config>() = new Config { Rate = 7 };
+        var config = loaded.SingletonRef<Config>();
+        loaded.Load(without, in NewConfig);                                 // the save lacks it: not removed
+        Assert.That(loaded.GetSingleton<Config>().Rate, Is.EqualTo(7));
+        loaded.Load(withConfig, in NewConfig);                              // the save has it: its value is skipped
+        Assert.That((loaded.GetSingleton<Config>().Rate, config.Value.Rate), Is.EqualTo((7, 7)));
+
+        using var bare = new World();                                       // a kept singleton the world lacks stays absent
+        bare.Load(withConfig, in NewConfig);
+        Assert.That((bare.HasSingleton<Config>(), bare.EntityCount), Is.EqualTo((false, 1)));
+        bare.Load(withConfig);
+        Assert.That(bare.GetSingleton<Config>().Rate, Is.EqualTo(1));
+        bare.Load(withConfig, in NewConfig);                                // kept as the last load left it
+        Assert.That(bare.GetSingleton<Config>().Rate, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void MarkWrittenAppliesToTheLoadedRowsOnly()
+    {
+        var bytes = OldProcess();
+        using var resumed = new World();
+        resumed.AddSingleton<Config>() = new Config { Rate = 2 };
+        resumed.Load(bytes, in NewConfig, markWritten: false);
+        Assert.That(resumed.Count<Balance>(QueryFilter.Create().Changed<Balance>(1)), Is.Zero);
+        Assert.That(resumed.GetSingleton<Config>().Rate, Is.EqualTo(2));
+        resumed.Load(bytes, in NewConfig);                                  // the default: loaded rows are written
+        Assert.That(resumed.Count<Balance>(QueryFilter.Create().Changed<Balance>(1)), Is.EqualTo(10));
+        Assert.That(resumed.GetSingleton<Config>().Rate, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void ASetOfTheWrongKindIsRefused()
+    {
+        using var world = new World();
+        world.CreateEntity(new Balance(1));
+        var bytes = Save(world);
+        Assert.Throws<ArgumentException>(() => world.Load(bytes, ComponentSet.Create().With<Balance>()));   // entities are replaced
+        Assert.Throws<ArgumentException>(() => world.SaveEntities(new NinoArrayBufferWriter(), [], in NewConfig)); // no singletons there
+        Assert.That(world.EntityCount, Is.EqualTo(1));
+
+        var set = ComponentSet.Create().With(typeof(Config)).With(typeof(Balance));
+        Assert.That((set.ContainsSingleton<Config>(), set.Contains<Balance>(), set.ContainsSingleton<Cache>(), set.Contains<Session>()),
+            Is.EqualTo((true, true, false, false)));
+    }
+
+    [Test]
+    public void SavingWithoutAndLoadingKeepingAgainAllocateNothing()
+    {
+        using var world = new World();
+        world.AddSingleton<Config>() = new Config { Rate = 1 };
+        world.AddSingleton<Cache>() = new Cache(new object());
+        world.AddSingleton<Score>() = new Score(1, 2);
+        for (int i = 0; i < 1000; i++) world.CreateEntity(new Balance(i), new Session(null));
+        var output = new NinoArrayBufferWriter();
+        for (int i = 0; i < 3; i++)
+        {
+            output.ResetWrittenCount();
+            world.Save(output, in Runtime);
+            world.Load(output.WrittenSpan, in NewConfig);
+        }
+
+        output.ResetWrittenCount();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        world.Save(output, in Runtime);
+        world.Load(output.WrittenSpan, in NewConfig);
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That((world.Count<Balance>(), world.GetSingleton<Config>().Rate, world.HasSingleton<Cache>()), Is.EqualTo((1000, 1, false)));
     }
 }

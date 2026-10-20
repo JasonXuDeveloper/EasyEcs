@@ -10,7 +10,7 @@ using System.Threading;
 namespace EasyEcs;
 
 /// <summary>
-/// The component and singleton types a save can name (<see cref="World.Save(System.Buffers.IBufferWriter{byte})"/>, <see cref="World.Load"/>): a save
+/// The component and singleton types a save can name (<see cref="World.Save(System.Buffers.IBufferWriter{byte})"/>, <see cref="World.Load(System.ReadOnlySpan{byte}, bool)"/>): a save
 /// records each type by its Nino type id (<see cref="NinoTypeId"/>: a hash of its full name, or of the name its
 /// <c>[NinoFormerName]</c> gives, so a renamed type keeps loading its rows), and loading resolves each id to a type
 /// of this process. The generator registers every component and singleton of a compilation (and every
@@ -27,6 +27,8 @@ public static class SavedTypes
     private static readonly Dictionary<int, List<(Type Type, Func<SingletonBox> Box)>> Singletons = new();
     // The components by type, for sets built from types a framework learns at run time (ComponentSet.With(Type)).
     private static readonly Dictionary<Type, Func<ushort>> ComponentsByType = new();
+    // The singletons by type, to their slots (ComponentSet.With(Type)).
+    private static readonly Dictionary<Type, Func<int>> SingletonsByType = new();
 
     /// <summary>Make component <typeparamref name="T"/> loadable by its type id (no bit is assigned yet).</summary>
     public static void Component<T>() where T : struct, IComponent
@@ -42,7 +44,11 @@ public static class SavedTypes
     /// <summary>Make singleton <typeparamref name="T"/> loadable by its type id.</summary>
     public static void Singleton<T>() where T : struct, ISingletonComponent
     {
-        lock (Gate) Add(Singletons, TypeId<T>.Value, typeof(T), static () => new SingletonBox<T>());
+        lock (Gate)
+        {
+            Add(Singletons, TypeId<T>.Value, typeof(T), static () => new SingletonBox<T>());
+            SingletonsByType.TryAdd(typeof(T), static () => SingletonType<T>.Index);
+        }
     }
 
     /// <summary>
@@ -164,13 +170,19 @@ public static class SavedTypes
         {
             Forget(Components, unloading);
             Forget(Singletons, unloading);
-            List<Type> gone = null;
-            foreach (var type in ComponentsByType.Keys)
-                if (unloading(type)) (gone ??= []).Add(type);
-            if (gone != null)
-                foreach (var type in gone)
-                    ComponentsByType.Remove(type);
+            Forget(ComponentsByType, unloading);
+            Forget(SingletonsByType, unloading);
         }
+    }
+
+    private static void Forget<TValue>(Dictionary<Type, TValue> types, Func<Type, bool> unloading)
+    {
+        List<Type> gone = null;
+        foreach (var type in types.Keys)
+            if (unloading(type)) (gone ??= []).Add(type);
+        if (gone != null)
+            foreach (var type in gone)
+                types.Remove(type);
     }
 
     private static void Forget<TValue>(Dictionary<int, List<(Type Type, TValue Value)>> types, Func<Type, bool> unloading)
@@ -217,6 +229,16 @@ public static class SavedTypes
             if (!ComponentsByType.TryGetValue(type, out bit))
                 return -1;
         return bit();
+    }
+
+    /// <summary>The slot of singleton type <paramref name="type"/>, or -1 when it is not a registered singleton type.</summary>
+    internal static int SlotOf(Type type)
+    {
+        Func<int> slot;
+        lock (Gate)
+            if (!SingletonsByType.TryGetValue(type, out slot))
+                return -1;
+        return slot();
     }
 
     /// <summary>A new box of the singleton saved as type <paramref name="id"/>, or null when this process has no such type.</summary>

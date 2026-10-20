@@ -70,11 +70,12 @@ public sealed partial class World
     /// still works) and get the snapshot's values; singletons added after the capture are removed.
     /// O(entities × components + archetypes + singletons). Not while a pass iterates.
     /// </summary>
-    public void Restore(WorldSnapshot snapshot) => Restore(snapshot, false, true);
+    public void Restore(WorldSnapshot snapshot) => Restore(snapshot, false, true, default);
 
     // swap: the snapshot is Load's own, its buffer lists move into the world and the world's old ones into it.
     // markWritten: every restored row counts as written now (Changed<T> sees it), else as never written.
-    private void Restore(WorldSnapshot snapshot, bool swap, bool markWritten)
+    // keep: the singletons left as the world has them (Load's keep set).
+    private void Restore(WorldSnapshot snapshot, bool swap, bool markWritten, in ComponentSet keep)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         if (!ReferenceEquals(snapshot.World, this))
@@ -126,13 +127,14 @@ public sealed partial class World
             for (int i = 0; i < _singletons.Length; i++)
             {
                 var recorded = i < snapshot.Singletons.Length ? snapshot.Singletons[i] : null;
+                if (keep.ContainsSingleton(i)) continue;
                 if (recorded == null) Volatile.Write(ref _singletons[i], null);
                 else if (_singletons[i] is SingletonBox box) box.CopyFrom(recorded);
                 else Volatile.Write(ref _singletons[i], recorded.Clone());
             }
 
             for (int i = _singletons.Length; i < snapshot.Singletons.Length; i++)
-                if (snapshot.Singletons[i] is { } recorded)
+                if (snapshot.Singletons[i] is { } recorded && !keep.ContainsSingleton(i))
                 {
                     Array.Resize(ref _singletons, snapshot.Singletons.Length);
                     Volatile.Write(ref _singletons[i], recorded.Clone());

@@ -38,7 +38,7 @@ public sealed partial class World
     /// False (the default): the first run of its <c>[Changed&lt;T&gt;]</c> and <c>[Removed&lt;T&gt;]</c> methods visits
     /// every row written or removed since the world began. True: only what is written or removed after this call, as if
     /// the system had run just now (<see cref="EcsSystem.LastRunTick"/>); for a system added to a world that already
-    /// holds its state (a restart after <see cref="Load"/>, a system switched on later).
+    /// holds its state (a restart after <see cref="Load(System.ReadOnlySpan{byte}, bool)"/>, a system switched on later).
     /// </param>
     public void AddSystem(EcsSystem system, bool changesFromNow = false)
     {

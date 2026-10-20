@@ -20,7 +20,7 @@ public sealed partial class World
     /// EasyEcs reuses its component bits.
     /// <br/>
     /// To reload game logic and keep its data: <see cref="Save(System.Buffers.IBufferWriter{byte})"/>, remove the types, unload the old context, load the
-    /// new version, then <see cref="Load"/> (types are saved by type id, so the new version's components take the
+    /// new version, then <see cref="Load(System.ReadOnlySpan{byte}, bool)"/> (types are saved by type id, so the new version's components take the
     /// values). Owner thread only, not during a pass or an update. O(entities with such components + tables + cached
     /// queries); allocates (cold).
     /// </summary>

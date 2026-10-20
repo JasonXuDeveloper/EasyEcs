@@ -31,14 +31,24 @@ public sealed partial class World
 
     /// <summary>
     /// Write the entities (ids and versions), their components and the singletons into <paramref name="output"/>, for
-    /// <see cref="Load"/>. Unmanaged components are their raw rows (a layout change makes old saves unloadable) unless
+    /// <see cref="Load(ReadOnlySpan{byte}, bool)"/>. Unmanaged components are their raw rows (a layout change makes old saves unloadable) unless
     /// they are <c>[NinoType]</c>s, whose formatter writes them (its format decides what a type may change: fields
     /// appended with <c>VersionTolerant</c>, any change of members with <c>Keyed</c>); managed components and
     /// singletons need a Nino formatter. Types are recorded by Nino type id: a type renamed with
     /// <c>[NinoFormerName]</c> loads its old rows.
     /// Allocates nothing once its buffers are large enough. O(entities × components). Not while a pass iterates.
     /// </summary>
-    public void Save(IBufferWriter<byte> output) => Save(output, default, true, default, false);
+    public void Save(IBufferWriter<byte> output) => Save(output, default, true, default, SaveFilter.None);
+
+    /// <summary>
+    /// <see cref="Save(IBufferWriter{byte})"/> without the components and singletons of <paramref name="exclude"/>:
+    /// their slices are not written and they need no Nino formatter (a world-local cache that cannot be serialized,
+    /// configuration the next version brings anew). A Disabled tag goes with its component; an entity whose
+    /// components are all left out is written without them. For a restart, with
+    /// <see cref="Load(ReadOnlySpan{byte}, in ComponentSet, bool)"/>. Allocates nothing once its buffers are large
+    /// enough. O(entities × components). Not while a pass iterates.
+    /// </summary>
+    public void Save(IBufferWriter<byte> output, in ComponentSet exclude) => Save(output, default, true, in exclude, SaveFilter.Exclude);
 
     /// <summary>
     /// Write <paramref name="entities"/> (stale ids and repeats are skipped) and their components into
@@ -47,7 +57,7 @@ public sealed partial class World
     /// are not written; collect a hierarchy with <see cref="Descendants"/>. Allocates nothing once its buffers are large
     /// enough. O(entities given × components). Not while a pass iterates.
     /// </summary>
-    public void SaveEntities(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities) => Save(output, entities, false, default, false);
+    public void SaveEntities(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities) => Save(output, entities, false, default, SaveFilter.None);
 
     /// <summary>
     /// <see cref="SaveEntities(IBufferWriter{byte}, ReadOnlySpan{EntityId})"/> of the components in
@@ -56,10 +66,18 @@ public sealed partial class World
     /// with its kept value. Entities without any of them are written too, empty. Allocates nothing once its buffers
     /// are large enough. O(entities given × components). Not while a pass iterates.
     /// </summary>
-    public void SaveEntities(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, in ComponentSet components) =>
-        Save(output, entities, false, in components, true);
+    /// <exception cref="ArgumentException"><paramref name="components"/> holds a singleton type: a group save writes no singletons.</exception>
+    public void SaveEntities(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, in ComponentSet components)
+    {
+        if (components.HasSingletons)
+            throw new ArgumentException("A group save writes no singletons: its set names components only", nameof(components));
+        Save(output, entities, false, in components, SaveFilter.Include);
+    }
 
-    private void Save(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, bool all, in ComponentSet components, bool filtered)
+    // How a save reads its ComponentSet: not at all, as the types it writes, or as the types it leaves out.
+    private enum SaveFilter : byte { None, Include, Exclude }
+
+    private void Save(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, bool all, in ComponentSet components, SaveFilter filter)
     {
         ArgumentNullException.ThrowIfNull(output);
         using (Structural())
@@ -73,7 +91,7 @@ public sealed partial class World
             var writer = new Writer(buffer);
             try
             {
-                WriteSave(ref writer, all, in components, filtered);
+                WriteSave(ref writer, all, in components, filter);
             }
             finally
             {
@@ -178,12 +196,17 @@ public sealed partial class World
         }
     }
 
-    /// <summary>Whether a save writes column <paramref name="bit"/> (<paramref name="info"/>): data, and in the set when there is one.</summary>
-    private static bool Saves(ComponentInfo info, int bit, in ComponentSet components, bool filtered) =>
+    /// <summary>Whether a save writes column <paramref name="bit"/> (<paramref name="info"/>): data, and kept by the set when there is one.</summary>
+    private static bool Saves(ComponentInfo info, int bit, in ComponentSet components, SaveFilter filter) =>
         info.Owner < 0 // a change-tick column is not data
-        && (!filtered || components.Contains(info.DisabledOf >= 0 ? info.DisabledOf : bit)); // a Disabled<T> tag goes with T
+        && (filter == SaveFilter.None
+            || components.Contains(info.DisabledOf >= 0 ? info.DisabledOf : bit) == (filter == SaveFilter.Include)); // a Disabled<T> tag goes with T
 
-    private void WriteSave(ref Writer writer, bool all, in ComponentSet components, bool filtered)
+    /// <summary>Whether a whole-world save writes the singleton in <paramref name="slot"/>: unless the set excludes it.</summary>
+    private static bool SavesSingleton(int slot, in ComponentSet components, SaveFilter filter) =>
+        filter != SaveFilter.Exclude || !components.ContainsSingleton(slot);
+
+    private void WriteSave(ref Writer writer, bool all, in ComponentSet components, SaveFilter filter)
     {
         writer.Write(SaveMagic);
         writer.Write(SaveFormat);
@@ -204,7 +227,7 @@ public sealed partial class World
             {
                 if (_saveTypes[bit] >= 0) continue;
                 var info = ComponentInfo.Of(bit);
-                if (!Saves(info, bit, in components, filtered)) continue;
+                if (!Saves(info, bit, in components, filter)) continue;
                 _saveTypes[bit] = types++;
                 bool disabled = info.DisabledOf >= 0;
                 var named = disabled ? ComponentInfo.Of(info.DisabledOf) : info;
@@ -255,13 +278,14 @@ public sealed partial class World
             }
         }
 
-        // The singletons, by type id, each a slice (a group has none).
+        // The singletons, by type id, each a slice (a group has none; an excluded one is left out).
         int singletons = 0;
-        foreach (var box in _singletons) if (all && box != null) singletons++;
+        for (int slot = 0; all && slot < _singletons.Length; slot++)
+            if (_singletons[slot] != null && SavesSingleton(slot, in components, filter)) singletons++;
         writer.Write(singletons);
-        foreach (var value in _singletons)
+        for (int slot = 0; all && slot < _singletons.Length; slot++)
         {
-            if (!all || value is not SingletonBox box) continue;
+            if (_singletons[slot] is not SingletonBox box || !SavesSingleton(slot, in components, filter)) continue;
             writer.Write(box.TypeId);
             int slice = writer.ReserveInt32();
             box.Write(ref writer);
@@ -326,12 +350,37 @@ public sealed partial class World
     /// size or layout, a managed one's Nino layout), or the save gives one key of a unique component
     /// (<see cref="IUniqueIndexed{TKey}"/>) to several entities. The world is then left as it was.
     /// </exception>
-    public void Load(ReadOnlySpan<byte> input, bool markWritten = true)
+    public void Load(ReadOnlySpan<byte> input, bool markWritten = true) => Load(input, markWritten, default);
+
+    /// <summary>
+    /// <see cref="Load(ReadOnlySpan{byte}, bool)"/> that keeps the singletons of <paramref name="keep"/> as this world
+    /// has them: the save's values of them are skipped (their slices, never deserialized), a kept singleton keeps
+    /// its box (a <see cref="SingletonRef{T}"/> still works) and its value, and one this world lacks stays absent,
+    /// one the save lacks is not removed. For a restart: the new version sets its configuration, then loads the
+    /// previous process's world (saved with <see cref="Save(IBufferWriter{byte}, in ComponentSet)"/> without what
+    /// it must not bring back). O(entities × components). Not while a pass iterates.
+    /// </summary>
+    /// <param name="input">The bytes of the save.</param>
+    /// <param name="keep">The singletons to keep. Components are not kept: the load replaces the entities.</param>
+    /// <param name="markWritten">As <see cref="Load(ReadOnlySpan{byte}, bool)"/>; for the loaded rows only.</param>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="keep"/> holds a component type (leave a component out of the save with
+    /// <see cref="Save(IBufferWriter{byte}, in ComponentSet)"/> instead).
+    /// </exception>
+    /// <exception cref="InvalidDataException">As <see cref="Load(ReadOnlySpan{byte}, bool)"/>.</exception>
+    public void Load(ReadOnlySpan<byte> input, in ComponentSet keep, bool markWritten = true)
+    {
+        if (keep.HasComponents)
+            throw new ArgumentException("A load replaces the entities: it keeps singletons only (leave components out of the save instead)", nameof(keep));
+        Load(input, markWritten, in keep);
+    }
+
+    private void Load(ReadOnlySpan<byte> input, bool markWritten, in ComponentSet keep)
     {
         using (Structural()) ThrowIfIterating(); // before reading: a failure below is the bytes'
         try
         {
-            Read(input);
+            Read(input, in keep);
         }
         catch (InvalidOperationException e) when (e.Message.StartsWith("Nino:", StringComparison.Ordinal))
         {
@@ -339,7 +388,7 @@ public sealed partial class World
         }
 
         if (ComponentInfo.AnyUnique) ClaimLoaded(_loadSnapshot); // a key twice: the world stays as it was
-        Restore(_loadSnapshot, true, markWritten);
+        Restore(_loadSnapshot, true, markWritten, in keep);
         if (_groupByBit == null) return;
         using (Structural())
             for (int bit = 0; bit < _groupByBit.Length; bit++)
@@ -350,8 +399,11 @@ public sealed partial class World
     private int[] _loadBits = [];
     private BitMask _loadMask;
 
-    /// <summary>Read a save into <see cref="_loadSnapshot"/> (the world itself is not touched).</summary>
-    private void Read(ReadOnlySpan<byte> input)
+    /// <summary>
+    /// Read a save into <see cref="_loadSnapshot"/> (the world itself is not touched), without the values of the
+    /// singletons in <paramref name="keep"/>.
+    /// </summary>
+    private void Read(ReadOnlySpan<byte> input, in ComponentSet keep)
     {
         var reader = new Reader(input);
         if (input.Length < 8 || reader.Read<int>() != SaveMagic || reader.Read<int>() != SaveFormat)
@@ -414,8 +466,12 @@ public sealed partial class World
                 var box = Find(loaded, id) ?? SavedTypes.NewSingleton(id);
                 if (box == null) continue;
                 box.Clear();
-                box.Read(ref slice);
-                Ends(ref slice, box.Name);
+                if (!keep.ContainsSingleton(box.Slot)) // a kept one's box stays in the snapshot, empty: Restore skips it
+                {
+                    box.Read(ref slice);
+                    Ends(ref slice, box.Name);
+                }
+
                 if (loaded.Length <= box.Slot) Array.Resize(ref loaded, box.Slot + 1);
                 loaded[box.Slot] = box;
                 read[found++] = box.Slot;
