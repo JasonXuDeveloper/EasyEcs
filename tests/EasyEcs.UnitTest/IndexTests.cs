@@ -135,6 +135,7 @@ public class IndexTests
         kids[0].Set(new Follows(other));                       // re-parent
         Assert.That(All(children.Find(parent)), Is.EquivalentTo(new[] { kids[1], kids[2] }));
         Assert.That(All(children.Find(other)), Is.EqualTo(new[] { kids[0] }));
+        Assert.That((children.Find(parent).Count, children.Find(other).Count, world.Children(other).Count), Is.EqualTo((2, 1, 0)));
 
         // Destroying the parent leaves the links: the handle keeps its version, so they never match a later entity.
         parent.Destroy();

@@ -258,7 +258,7 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
     {
         if (!_built) Build();
         ref var head = ref HeadOf(key);
-        return new Matches(_world, Unsafe.IsNullRef(ref head) ? default : head.Walk());
+        return Unsafe.IsNullRef(ref head) ? new Matches(_world, default, 0) : new Matches(_world, head.Walk(), head.Count);
     }
 
     /// <summary>The walk of <paramref name="key"/>'s entities (an empty one when it has none), as <see cref="Find"/> takes it.</summary>
@@ -704,12 +704,19 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>, 
         private readonly World _world;
         private ListWalk _walk;
 
-        internal Matches(World world, ListWalk walk)
+        internal Matches(World world, ListWalk walk, int count)
         {
             _world = world;
             _walk = walk;
+            Count = count;
             Current = default;
         }
+
+        /// <summary>
+        /// How many entities had the key when it was found: O(1), no walk (size a buffer before the loop). Entities
+        /// destroyed during the loop are skipped by it but still counted here.
+        /// </summary>
+        public int Count { get; }
 
         /// <summary>The current matching entity.</summary>
         public Entity Current { get; private set; }
