@@ -189,28 +189,31 @@ flowchart LR
 ### 输入走邮箱 [#input]
 
 网络、定时器、数据库都跑在别的线程上，而 World 只属于更新它的那一个线程。两边在一个由你持有的队列里交接：别的线程投递消息，
-World 所在线程上的一个系统取出消息，把每条变成数据。队列放在单例里，系统就不用保存状态：
+World 所在线程上的一个系统取出消息，把每条变成数据。队列是这个系统的 `readonly` 字段，添加系统时传进去：它是依赖，不是状态，
+所以 [EECS007](/zh/docs/guide/analyzer#eecs007) 允许。不要放进单例：`World.Save` 会写出每个单例，而队列没有格式化器。
 
 ```csharp
 using System.Collections.Concurrent;
 
 public readonly record struct FireCommand(float Vx, float Vy);   // 消息，不是组件
-public record struct Inbox(ConcurrentQueue<FireCommand> Commands) : ISingletonComponent;
 public record struct FireRequest(float Vx, float Vy) : IComponent;
 
 public struct InputGroup : ISystemGroup;
 
 [UpdateInGroup<InputGroup>]
-public class ReceiveCommandsSystem : EcsSystem
+public class ReceiveCommandsSystem(ConcurrentQueue<FireCommand> inbox) : EcsSystem
 {
+    private readonly ConcurrentQueue<FireCommand> _inbox = inbox;   // 由网络线程填充
+
     protected override void OnUpdate()
     {
-        var commands = World.Inbox.Commands;
-        while (commands.TryDequeue(out var command))
+        while (_inbox.TryDequeue(out var command))
             World.CreateEntity(new FireRequest(command.Vx, command.Vy));
     }
 }
 ```
+
+用 `world.AddSystem(new ReceiveCommandsSystem(inbox))` 添加，同一个队列交给网络代码。
 
 队列的容量上限、满了怎么办，都由你决定。细节见[来自其他线程的输入](/zh/docs/guide/threading#input-from-other-threads)；
 处理请求的服务器见[托管](/zh/docs/guide/hosting#requests)。
@@ -310,17 +313,12 @@ public record struct Spawner(Prefab Bullet, int Wave, int Interval) : ISingleton
 <Accordion title="Components/Input.cs（新增）">
 
 ```csharp title="Components/Input.cs" doccheck=example
-using System.Collections.Concurrent;
 using EasyEcs;
 
 namespace MyServer;
 
 // 客户端发来的东西。它是消息，不是组件：ReceiveCommandsSystem 把它变成数据。
 public readonly record struct FireCommand(float Vx, float Vy);
-
-// 从网络线程到 World 所在线程的邮箱。放在单例里，
-// 取消息的系统自己就不用保存状态。
-public record struct Inbox(ConcurrentQueue<FireCommand> Commands) : ISingletonComponent;
 
 // 变成数据的指令：FireSystem 在下一个 tick 处理它，然后销毁。
 public record struct FireRequest(float Vx, float Vy) : IComponent;
@@ -343,6 +341,7 @@ public struct InputGroup : ISystemGroup;
 <Accordion title="Systems/ReceiveCommandsSystem.cs（新增）">
 
 ```csharp title="Systems/ReceiveCommandsSystem.cs" doccheck=example
+using System.Collections.Concurrent;
 using EasyEcs;
 
 namespace MyServer;
@@ -351,12 +350,15 @@ namespace MyServer;
 // 它跑在 World 所在的线程上，所以在这里创建实体是安全的；
 // 网络线程只碰队列。
 [UpdateInGroup<InputGroup>]
-public class ReceiveCommandsSystem : EcsSystem
+public class ReceiveCommandsSystem(ConcurrentQueue<FireCommand> inbox) : EcsSystem
 {
+    // 来自网络线程的邮箱。readonly 字段是依赖，不是状态（EECS007 允许）；
+    // 放进单例不行，因为 World.Save 会写出每个单例。
+    private readonly ConcurrentQueue<FireCommand> _inbox = inbox;
+
     protected override void OnUpdate()
     {
-        var commands = World.Inbox.Commands;
-        while (commands.TryDequeue(out var command))
+        while (_inbox.TryDequeue(out var command))
         {
             World.CreateEntity(new FireRequest(command.Vx, command.Vy));
         }
@@ -484,6 +486,7 @@ public class ClockSystem : EcsSystem
 <Accordion title="Game.cs（新增）">
 
 ```csharp title="Game.cs" doccheck=example
+using System.Collections.Concurrent;
 using EasyEcs;
 
 namespace MyServer;
@@ -492,10 +495,10 @@ namespace MyServer;
 // 所以整个 tick 的测试跑的就是服务器跑的那个 tick。
 public static class Game
 {
-    public static void AddSystems(World world)
+    public static void AddSystems(World world, ConcurrentQueue<FireCommand> inbox)
     {
         // 输入分组：宿主读输入时，通过 world.Update<InputGroup>() 执行。
-        world.AddSystem<ReceiveCommandsSystem>();
+        world.AddSystem(new ReceiveCommandsSystem(inbox));
 
         // 默认分组：模拟本身，每次 world.Update() 按这个顺序执行一遍。
         world.AddSystem<FireSystem>();
@@ -573,9 +576,8 @@ world.SetSpawner(
     Bullet: new Prefab().SetPosition(0, 0).SetVelocity(10, 0).SetLifetime(3 * TicksPerSecond),
     Wave: 100,
     Interval: TicksPerSecond);
-world.SetInbox(Commands: inbox);
 
-Game.AddSystems(world);
+Game.AddSystems(world, inbox);
 
 // 网络：另一个线程，只往收件箱里投消息。
 FakeClient.Start(inbox);
@@ -631,8 +633,7 @@ public class TickTests
             Bullet: new Prefab().SetPosition(0, 0).SetVelocity(0, 0).SetLifetime(10),
             Wave: 100,
             Interval: 20);
-        world.SetInbox(Commands: inbox);
-        Game.AddSystems(world);
+        Game.AddSystems(world, inbox);
         inbox.Enqueue(new FireCommand(Vx: 0, Vy: 20));
 
         world.Update<InputGroup>();
@@ -658,6 +659,16 @@ stopped after 60 ticks
 
 五条指令在前半秒内到达，变成五颗子弹，和第一波的 100 发一起飞。到第 60 个 tick，第一波寿命用完，第三波刚刷出来；打出去的子弹晚了几个
 tick 才出生，所以还活着。`Program.cs` 没有一行知道子弹的存在：宿主只设置数据、添加系统、掌握时间。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+目录结构本身没有什么可调的：项目编译完，文件和文件夹就不存在了。tick 的快慢取决于系统：只读的参数用 `in`，不必每个 tick 都跑的
+用分组或 `UpdateInterval`，其余的选择见[性能指南](/zh/docs/performance)里的实测。
+
+## 开销 [#what-it-costs]
+
+运行时零开销：一个文件一个系统，和所有系统写在一个文件里编译出的代码一样；分组只是宿主调用的一个方法。tick 的开销就是其中系统的
+开销，各功能的数字见[性能](/zh/docs/performance)。
 
 ## 常见陷阱 [#pitfalls]
 

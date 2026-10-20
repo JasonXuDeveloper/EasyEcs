@@ -30,12 +30,19 @@ into a snapshot you keep reuses its arrays, so capturing every tick allocates no
 ### Capture and restore [#capture-and-restore]
 
 ```csharp
-var before = world.Capture();          // O(entities × components)
-int held = before.EntityCount;         // the entities it holds
+var before = world.Capture();               // O(entities × components)
+int held = before.EntityCount;              // the alive entities it holds: log it, or size a ring by it
 
-world.Update();                        // simulate a turn
-if (!running) world.Restore(before);   // undo it: same entities, same values, same singletons // [!code highlight]
-world.Restore(before);                 // a snapshot can be restored any number of times
+world.Update();                             // simulate a turn
+bool turnAccepted = hero.Health.Value > 0;  // the game's rule: a turn that kills the hero is undone
+if (!turnAccepted) world.Restore(before);   // same entities, same values, same singletons // [!code highlight]
+```
+
+A snapshot stays as it was after a restore, so it can be restored again:
+
+```csharp
+world.Update();
+world.Restore(before);                      // back to the same state a second time
 ```
 
 </Step>
@@ -77,8 +84,9 @@ world.Restore(history[(100 - 3) % Rollback.Ticks]);                             
   so a `SingletonRef<T>` taken before keeps working; singletons added after the capture are removed.
 - **Handles.** Handles to entities alive in the snapshot are valid again. Every other handle is stale, including
   handles to entities created after the capture, even when a later entity reuses their id.
-- **Not systems, options or groupings.** Systems keep running as registered; tables created after the capture stay,
-  empty; [groups](/en/docs/guide/groups) are restored as captured.
+- **Not systems, options or the `GroupBy` configuration.** Systems keep running as registered, and the world keeps
+  its `GroupBy` calls; tables created after the capture stay, empty. What a snapshot does hold is each row's
+  [group](/en/docs/guide/groups): every entity comes back in the group table it was in at the capture.
 
 ### What a restore tells the rest of the world [#after-restore]
 
@@ -172,7 +180,7 @@ entity reuses its id.
 
 | Instead of | Do | Why |
 | --- | --- | --- |
-| `Capture()` every tick | `Capture(snapshot)` into a kept snapshot | Reuses its arrays: 0 B once large enough |
+| `Capture()` every tick | `Capture(snapshot)` into a kept snapshot | Reuses its arrays: nothing allocated once large enough |
 | A snapshot every tick of a huge world | Every few ticks, or a smaller world per zone | Capture is O(entities × components) |
 | A snapshot for disk | `Save` / `Load` | Bytes, field hashes, other processes |
 | Collections in components you roll back | `DynamicBuffer<T>` | Buffers are copied; other collections are shared |
@@ -198,6 +206,7 @@ The capture's allocation is the new snapshot itself; `Capture(into)` reuses one.
 | Expecting a `List<T>` in a component to roll back | It is shared: it comes back as it is now | Use `DynamicBuffer<T>` |
 | Capturing or restoring while a query iterates | `InvalidOperationException` | At run time |
 | Restoring a snapshot into another world | `ArgumentException` | At run time |
+| Restoring a snapshot taken before [`RemoveTypes`](/en/docs/guide/migration-and-unload#remove-types) | `InvalidOperationException`: its tables are gone | At run time: capture again after `RemoveTypes` |
 | Keeping handles of entities created after the capture | They are stale after the restore | `IsAlive` |
 | Writing snapshots to disk | They are object graphs, not bytes | Use [saves](/en/docs/guide/saves) |
 | Capturing or restoring from another thread | Structural changes belong to the owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |

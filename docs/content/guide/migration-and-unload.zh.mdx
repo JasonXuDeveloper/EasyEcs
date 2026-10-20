@@ -13,9 +13,11 @@ icon: ArrowRightLeft
 ## 什么时候用 [#when-to-use-it]
 
 <Callout type="idea" title="适合">
-  同一进程内 World 之间切换区域或地图（`MoveEntities`），把玩家交给另一台服务器、或保存离线玩家（`SaveEntities` / `LoadEntities`），
-  只持久化实体的一部分（比如 Actor 的余额，不带它的连接）、再读回到它已有的实体上（[记录](#records)：`ComponentSet` 加
-  `LoadEntitiesInto`），不能重启的服务器热重载游戏逻辑（`RemoveTypes`）。
+  - **切换区域或地图**，在同一线程的 World 之间：`MoveEntities`。
+  - **把玩家交给另一台服务器**，或保存离线玩家：`SaveEntities` / `LoadEntities`。
+  - **记录**实体的一部分（比如 Actor 的余额，不带它的连接），再读回到它已有的实体上：`ComponentSet` 加
+    `LoadEntitiesInto`（[记录](#records)）。
+  - **热重载**不能重启的服务器里的游戏逻辑：`RemoveTypes`。
 </Callout>
 
 <Callout type="warn" title="不适合">
@@ -35,7 +37,12 @@ World（本进程或其他进程）里用新 id 创建它们，并按存档顺�
 using Nino.Core;
 
 public record struct Sword(int Damage) : IComponent;
-public record struct Pet(EntityId Owner) : IComponent;
+
+// 按主人建索引：找英雄的宠物不用把所有宠物扫一遍。
+public record struct Pet(EntityId Owner) : IComponent, IIndexed<EntityId>
+{
+    EntityId IIndexed<EntityId>.Key => Owner;
+}
 ```
 
 ```csharp
@@ -45,8 +52,8 @@ world.CreateEntity(new Pet(hero), new Health(20));
 
 // 收集这一组：英雄、挂在他身上的、指向他的
 var group = new List<EntityId> { hero.Id };
-foreach (var part in world.Descendants(hero)) group.Add(part.Id);       // 子实体、孙实体……
-foreach (var item in world.Query<Pet>()) if (item.Pet.Owner == hero.Id) group.Add(item.Entity.Id);
+foreach (var part in world.Descendants(hero)) group.Add(part.Id);       // 子实体、孙实体，一层层往下
+foreach (var pet in world.PetIndex.Find(hero.Id)) group.Add(pet.Id);    // 走索引，不扫描所有 Pet
 
 var bytes = new NinoArrayBufferWriter();
 world.SaveEntities(bytes, group.ToArray());                  // 只写这一组 // [!code highlight]
@@ -55,6 +62,11 @@ using var otherServer = new World();
 var arrived = new Entity[group.Count];
 int created = otherServer.LoadEntities(bytes.WrittenSpan, arrived);   // 新 id，链接已改写 // [!code highlight]
 ```
+
+`Descendants` 深度优先遍历，每个实体都排在它的子实体前面，所以收集到的组里父实体总在挂在它身上的实体之前。`MoveEntities`
+要的正是这个顺序：它从后往前销毁原实体，子实体就会先于父实体销毁。`Children` 只列出一层。`ChildOf` 成环时，遍历抛
+`InvalidOperationException`。指向英雄的实体（宠物、随从）通过字段上的索引来找（如上），或者用[关系](/zh/docs/guide/indexes-and-relations#relations)：
+逐个检查 `Pet` 的查询随整个 World 变大，而不是随这一组变大。
 
 ### 迁到同一线程的另一个 World [#move-entities]
 
@@ -68,7 +80,7 @@ int count = world.MoveEntities(nextZone, group.ToArray(), moved);   // 英雄、
 ```
 
 - 原实体销毁时会连同子实体一起销毁，所以[层级](/zh/docs/guide/hierarchy#moving)要整体迁移。
-- 清理组件留在原地、跟着退休的原实体，等它们的系统来释放。
+- 清理组件留在已销毁的原实体上，由各自的系统释放。
 - 两个 World 都必须属于调用线程；把 World 迁到自己身上会被拒绝（`ArgumentException`）。
 
 ### 只存需要持久化的部分 [#records]
@@ -102,8 +114,9 @@ world.LoadEntitiesInto(record.WrittenSpan, [activated]);               // 加上
 ```
 
 ```csharp
-// 同一份记录，恢复时不算变更：按 Changed<T> 保存的系统不会把它写回去
-world.LoadEntitiesInto(record.WrittenSpan, [activated], markWritten: false);
+var restored = world.CreateEntity(new Connection(10));
+// 替代上面那次调用：恢复同一份记录，但不算变更。
+world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
 ```
 
 - 存档里第 i 个实体读到传入的第 i 个实体上；数量必须一致，每个实体都必须在本 World 里存活，否则在改动任何东西之前抛
@@ -112,8 +125,23 @@ world.LoadEntitiesInto(record.WrittenSpan, [activated], markWritten: false);
 - 索引、分组和变更追踪的表现和 `Set` 一样。被禁用的组件读进来仍是禁用的，值也保留。
 - 加载也算写入：`[Changed<T>]` 方法会看到读进来的组件。如果记录只是恢复原本就有的数据（actor 从数据库重新加载），传
   `markWritten: false`：被替换的值保留原来的变更 tick，新加的值没有 tick，这样按变更保存或同步组件的系统就不会把记录原样写回去。
+- `markWritten: false` 的代价：恢复的组件在代码写它之前，所有 `[Changed<T>]` 方法和 `Since` 过滤器都看不到。按变更同步给客户端的
+  系统，遇到还没见过这个实体的客户端，要自己发送完整状态。
+- `markWritten: false` 只是不给这次加载写入的值打 tick。实体在加载前就有的持久化组件（比如来自带默认值的预制体）保留创建时的
+  tick，仍然算作写入过。创建实体时不要带持久化组件，让记录把它们加上，[Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)就是这么做的。
+- 带集合的 `SaveEntities` 也会写出一个集合组件都没有的实体，作为空条目，这样存档里第 i 个实体仍对应传入的第 i 个实体。
 - `EntityId` 字段按下文的规则改写，指向传入的实体；父实体不在记录里的 `ChildOf` 不会被设置。
-- 运行时才知道类型的框架用 `With(typeof(Bank))` 构建集合。
+- `LoadEntitiesInto` 是结构变更：只能在所有者线程调用（[EECS014](/zh/docs/guide/analyzer#eecs014)），遍历进行中不能调用
+  （抛 `InvalidOperationException`），不能放进并行方法（[EECS010](/zh/docs/guide/analyzer#eecs010)），`[ForEach]` 方法要接收
+  `Entity` 或 `World` 才能调用（[EECS013](/zh/docs/guide/analyzer#eecs013)）。
+- 运行时才知道类型的框架按 `Type` 构建集合：
+
+```csharp
+public static class RuntimeRecords
+{
+    public static readonly ComponentSet Persistent = ComponentSet.Create().With(typeof(Bank));
+}
+```
 
 ### id 怎么改写 [#entityid-rewriting]
 
@@ -163,15 +191,175 @@ public static class Plugins
 }
 ```
 
-顺序很重要：两个版本同时加载时类型 id 相同，读档会以歧义拒绝。宿主自己的组件（位置、id）放在一个永远不会重载的程序集里；自己也不要
+顺序很重要：两个版本同时加载时类型 id 相同，读档会因为类型 id 有歧义而拒绝加载。宿主自己的组件（位置、id）放在一个永远不会重载的程序集里；自己也不要
 持有旧版本类型的引用（系统、插件对象），否则上下文无法回收。`RemoveTypes` 之前拍的[快照](/zh/docs/guide/snapshots)，之后不能再恢复。
 
 [HotReload 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload)完整跑一遍这个流程，并校验旧上下文已被回收、
 插件数据已经带过来。
 
+## 完整例子 [#full-example]
+
+一个英雄带着剑（剑上镶着宝石）和宠物走进另一个区域：用 `Descendants` 和宠物索引收集这一组，用 `MoveEntities` 迁过去，宠物仍然
+指向它的英雄。接着，一个 Actor 的银行作为记录从之前的运行里取回来，用 `markWritten: false` 读入，按 `[Changed<Bank>]` 保存的系统
+在存款之前什么都找不到。把这几个文件放进一个引用了 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Health(int Value) : IComponent;
+
+// 通过 ChildOf 挂在英雄身上；宝石又挂在剑上。
+public record struct Sword(int Damage) : IComponent;
+
+public record struct Gem(int Bonus) : IComponent;
+
+// 指向主人。按主人建索引，找某人的宠物不用扫描。
+public record struct Pet(EntityId Owner) : IComponent, IIndexed<EntityId>
+{
+    EntityId IIndexed<EntityId>.Key => Owner;
+}
+
+// Actor 上需要持久化的部分，和不需要的部分。
+public record struct Bank(long Gold) : IComponent, ITrackChanges;
+
+public record struct Connection(int Socket) : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// 把上次运行之后被写过的 Bank 存进存储。
+public class SaveChangedBanks : EcsSystem
+{
+    [ForEach, Changed<Bank>]
+    static void Save(Entity actor, in Bank bank)
+    {
+        Console.WriteLine($"saving {actor.Id}: {bank.Gold} gold");
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Groups.cs">
+
+```csharp title="Groups.cs" doccheck=example
+using EasyEcs;
+
+public static class Groups
+{
+    // 英雄、挂在他身上的实体（父实体总在子实体之前），以及他的宠物。
+    public static EntityId[] Collect(World world, Entity hero)
+    {
+        var group = new List<EntityId> { hero.Id };
+        foreach (var part in world.Descendants(hero))
+        {
+            group.Add(part.Id);
+        }
+
+        foreach (var pet in world.PetIndex.Find(hero.Id))
+        {
+            group.Add(pet.Id);
+        }
+
+        return group.ToArray();
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Records.cs">
+
+```csharp title="Records.cs" doccheck=example
+using EasyEcs;
+
+public static class Records
+{
+    // Actor 上要撑过进程重启的组件。只建一次。
+    public static readonly ComponentSet Persistent = ComponentSet.Create().With<Bank>();
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+using Nino.Core;
+
+// 同一进程里的两个区域。下一个区域已经有实体，所以那边的 id 不同。
+using var zone = new World();
+using var nextZone = new World();
+nextZone.CreateEntity(new Health(50));
+nextZone.CreateEntity(new Health(50));
+
+var hero = zone.CreateEntity(new Health(100));
+var sword = zone.CreateEntity(new Sword(10), new ChildOf(hero));
+zone.CreateEntity(new Gem(3), new ChildOf(sword));
+zone.CreateEntity(new Pet(hero.Id), new Health(20));
+
+// 英雄走进传送门：整组迁过去，id 随之改写。
+EntityId[] group = Groups.Collect(zone, hero);
+var moved = new Entity[group.Length];
+zone.MoveEntities(nextZone, group, moved);
+for (int i = 0; i < group.Length; i++)
+{
+    Console.WriteLine($"{group[i]} -> {moved[i].Id}");
+}
+
+Entity pet = moved[^1];
+Console.WriteLine($"pet owner: {pet.Pet.Owner}, hero: {moved[0].Id}");
+Console.WriteLine($"left behind: {zone.EntityCount} entities");
+
+// 一份记录：之前某次运行存下的 Actor 银行，不带连接。
+using var earlier = new World();
+var saved = earlier.CreateEntity(new Bank(500), new Connection(7));
+var record = new NinoArrayBufferWriter();
+earlier.SaveEntities(record, [saved.Id], Records.Persistent);
+
+using var world = new World();
+world.AddSystem<SaveChangedBanks>();
+
+// Actor 激活时不带 Bank：由记录加上，而且不算写入。
+var actor = world.CreateEntity(new Connection(9));
+world.LoadEntitiesInto(record.WrittenSpan, [actor], markWritten: false);
+Console.WriteLine($"update after the load ({actor.Bank.Gold} gold):");
+world.Update();
+
+actor.SetBank(Gold: 650);
+Console.WriteLine("update after a deposit:");
+world.Update();
+```
+
+</Accordion>
+</Accordions>
+
+
+输出：
+
+```text
+0v1 -> 2v1
+1v1 -> 3v1
+2v1 -> 4v1
+3v1 -> 5v1
+pet owner: 2v1, hero: 2v1
+left behind: 0 entities
+update after the load (500 gold):
+update after a deposit:
+saving 0v1: 650 gold
+```
+
+这一组的每个实体在下一个区域都拿到新 id（那边已经占了两个 id），宠物的 `Owner` 指向英雄的新 id，原区域什么都没留下。加载后的那次
+更新没有把恢复的银行再存一遍，存款之后才存。
+
 ## 怎么用得快 [#how-to-use-it-fast]
 
-| 别这样 | 这样做 | 原因 |
+| 别这样 | 这样做 | 为什么 |
 | --- | --- | --- |
 | 同一进程的 World 之间用 `SaveEntities` + `LoadEntities` | `MoveEntities` | 直接拷行，不编码 |
 | 每次迁移新建缓冲区 | 复用一个 `NinoArrayBufferWriter`，每次 `ResetWrittenCount()` | 足够大之后不分配 |
@@ -200,6 +388,7 @@ public static class Plugins
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
 | 只迁移父实体，不带子实体 | 子实体随原实体一起被销毁 | 用 `Descendants` 收集整组 |
+| 只用 `Children` 收集这一组 | 漏掉孙实体，它们随父实体一起销毁 | `Descendants` 会遍历每一层 |
 | 组件里的 `List<T>` 存着 `EntityId` | 不会改写：仍指向旧 World 的实体 | 用字段、缓冲或关系 |
 | 组件里存了 `Entity` 句柄 | 不能存档，也不会改写 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
 | 先加载新插件，再卸载旧插件 | 类型 id 歧义：`InvalidDataException` | 按上面的重载顺序 |
@@ -211,6 +400,8 @@ public static class Plugins
 | 用 `LoadEntities` 读记录 | 在已有实体之外又建了新实体 | 对已有实体用 `LoadEntitiesInto` |
 | `LoadEntitiesInto` 传入的实体数和存档不一致，或者有失效的实体 | `ArgumentException`；什么都不改 | 按存档顺序，每个存档实体对应一个存活实体 |
 | 恢复的记录被当成变更 | 按 `Changed<T>` 保存或同步的系统又把它发回去 | `markWritten: false` |
+| 实体加载前已经有持久化组件（来自带默认值的预制体），再用 `markWritten: false` 加载 | 这个组件保留创建时的 tick：保存系统照样看到它 | 创建实体时不带持久化组件，让记录加上 |
+| `markWritten: false` 加载后只同步 `[Changed<T>]` 的行 | 没见过这个实体的客户端永远收不到恢复的值 | 给新客户端发送完整状态 |
 
 ## 相关页面 [#related]
 

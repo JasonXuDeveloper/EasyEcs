@@ -70,8 +70,16 @@ foreach (var table in world.Describe())
 （[统计系统耗时](/zh/docs/guide/systems#measuring-systems)）。
 
 ```csharp
+public class RegenSystem : EcsSystem
+{
+    [ForEach]
+    static void Regen(ref Health health) => health.Value++;
+}
+```
+
+```csharp
 using var measured = new World(new WorldOptions { MeasureSystems = true });
-// AddSystem，然后照常更新
+measured.AddSystem<RegenSystem>();
 measured.Update();
 foreach (var system in measured.Systems)
     Console.WriteLine($"{system.GetType().Name}: last {system.Stats.Last.TotalMicroseconds} μs");
@@ -85,7 +93,7 @@ foreach (var system in measured.Systems)
 
 ```csharp
 using var guarded = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
-// AddSystem，然后照常更新
+guarded.AddSystem<RegenSystem>();
 guarded.Update();
 foreach (var system in guarded.Systems)
     if (system.Error is { } error) Console.Error.WriteLine($"{system.GetType().Name} is off: {error.Message}");
@@ -251,7 +259,7 @@ CooldownSystem: 3 runs, off: a cooldown went below zero
 
 ## 怎么用得快 [#how-to-use-it-fast]
 
-| 不要 | 要 | 原因 |
+| 别这样 | 这样做 | 为什么 |
 | --- | --- | --- |
 | 每个 tick 都调 `Describe()` | 在请求或定时器里调，放在两次更新之间 | 它会分配返回值 |
 | 用 `entity.Describe()` 判断有没有某个组件 | `HasX`、`TryGetX`、过滤条件 | 不装箱，不分配 |
@@ -272,7 +280,7 @@ CooldownSystem: 3 runs, off: a cooldown went below zero
 
 ## 常见陷阱 [#pitfalls]
 
-| 错误 | 后果 | 怎么发现 |
+| 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
 | 在系统里或每个 tick 调 `Describe()` | 热路径上分配内存 | 代码审查 |
 | 更新进行中从别的线程读 `Describe()` | 读到正在变的表的中间状态 | 在所有者线程上、两次更新之间读 |

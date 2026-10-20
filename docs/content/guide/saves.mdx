@@ -174,13 +174,89 @@ a load refuses them as ambiguous. Unload the old version first (the [hot reload]
 order: save, `RemoveTypes`, unload, load the new version, `Load`), or keep the components you save in an assembly
 that is never reloaded, such as a contracts assembly shared by the host and the plugins.
 
+## Full example [#full-example]
+
+Two players, one following the other, and a clock: the world is saved into a buffer and loaded into a new world, as a
+restarted process would do. Put the files in a console project that references EasyEcs and `Nino.Generator`
+([declare the components](#declare)) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+using Nino.Core;
+
+// Unmanaged: saved as raw rows, one block per column.
+public record struct Position(float X, float Y) : IComponent;
+
+// An EntityId keeps its meaning: a load keeps every id and version.
+public record struct Follows(EntityId Leader) : IComponent;
+
+// Managed (a string): Nino writes it, so it is a partial [NinoType].
+[NinoType]
+public partial record struct PlayerName(string Value) : IComponent;
+
+// Singletons are saved too.
+public record struct Clock(long Tick) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+using Nino.Core;
+
+using var world = new World();
+world.SetClock(Tick: 1234);
+var alice = world.CreateEntity(new PlayerName("alice"), new Position(3, 4));
+world.CreateEntity(new PlayerName("bob"), new Position(5, 6), new Follows(alice.Id));
+
+// Entities, components and singletons, into a buffer that can be reused for the next save.
+var output = new NinoArrayBufferWriter();
+world.Save(output);
+
+// Another world, as a restarted process would make it.
+using var restarted = new World();
+restarted.Load(output.WrittenSpan);
+
+Console.WriteLine($"clock: {restarted.Clock.Tick}");
+foreach (var item in restarted.Query<PlayerName, Position>())
+{
+    Console.WriteLine($"{item.Entity.Id} {item.PlayerName.Value} at ({item.Position.X}, {item.Position.Y})");
+}
+
+foreach (var item in restarted.Query<PlayerName, Follows>())
+{
+    var leader = restarted.GetEntity(item.Follows.Leader);
+    Console.WriteLine($"{item.PlayerName.Value} follows {leader.PlayerName.Value}");
+}
+```
+
+</Accordion>
+</Accordions>
+
+
+It prints:
+
+```text
+clock: 1234
+0v1 alice at (3, 4)
+1v1 bob at (5, 6)
+bob follows alice
+```
+
+The new world has the same ids, the managed names came back through Nino, the singleton clock kept its tick, and
+Bob's `Follows` still names Alice without any rewriting.
+
 ## How to use it fast [#how-to-use-it-fast]
 
 | Instead of | Do | Why |
 | --- | --- | --- |
 | A new buffer per save | One `NinoArrayBufferWriter`, `ResetWrittenCount()` before each save | Save allocates nothing once its buffers are large enough |
 | Another `IBufferWriter<byte>` | `NinoArrayBufferWriter` | Written directly, without the copy from the world's buffer |
-| A new world per load | `Load` into the same world | Its rows are reused: 0 B once warm |
+| A new world per load | `Load` into the same world | Its rows are reused: nothing allocated once warm |
 | Managed components where values would do | Unmanaged components (ids, numbers, fixed arrays) | Raw rows are one block per column; Nino encodes value by value |
 | `[NinoType]` on unmanaged components that never change | Raw rows for those, `[NinoType]` where the shape will change | A raw column is one copy |
 | Your own serializer over a `Query` | `Save` / `Load` | Ids, versions, buffers, disabled values and singletons come along |

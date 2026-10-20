@@ -52,7 +52,7 @@ public partial record struct PlayerName(string Value) : IComponent;    // 托管
 
 ### 存档 [#save]
 
-`Save` 可以写进任何 `IBufferWriter<byte>`。`NinoArrayBufferWriter` 会被直接写入；其他 writer 则从 World 自己的缓冲区拷贝一份。
+`Save` 可以写进任何 `IBufferWriter<byte>`。写进 `NinoArrayBufferWriter` 时直接写入，其他 writer 要从 World 自己的缓冲区拷一份。
 
 ```csharp
 world.CreateEntity(new PlayerName("alice"), new Stock(10, 3));
@@ -155,17 +155,91 @@ catch (InvalidDataException)
 
 ### 插件里的组件 [#plugins]
 
-按 id 查找类型是进程级的。插件的旧版本和新版本同时加载时，它们的类型 id 相同，加载会以歧义拒绝。先卸载旧版本（按
+按 id 查找类型是进程级的。插件的旧版本和新版本同时加载时，它们的类型 id 相同，读档会因为类型 id 有歧义而拒绝加载。先卸载旧版本（按
 [热重载](/zh/docs/guide/migration-and-unload#hot-reload)的顺序：存档、`RemoveTypes`、卸载、加载新版本、`Load`），或者把要存档的组件
 放进一个永远不会重载的程序集，比如宿主和插件共用的契约程序集。
 
+## 完整例子 [#full-example]
+
+两个玩家（一个跟着另一个）和一个时钟：World 存进缓冲区，再读进一个新的 World，就像进程重启后那样。把这几个文件放进一个引用了
+EasyEcs 和 `Nino.Generator` 的控制台项目（见[声明组件](#declare)），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+using Nino.Core;
+
+// 非托管：按原始行存，每列一块。
+public record struct Position(float X, float Y) : IComponent;
+
+// EntityId 读档后仍然有效：读档保留每个 id 和版本。
+public record struct Follows(EntityId Leader) : IComponent;
+
+// 托管（含 string）：由 Nino 写入，所以是 partial 的 [NinoType]。
+[NinoType]
+public partial record struct PlayerName(string Value) : IComponent;
+
+// 单例也会存。
+public record struct Clock(long Tick) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+using Nino.Core;
+
+using var world = new World();
+world.SetClock(Tick: 1234);
+var alice = world.CreateEntity(new PlayerName("alice"), new Position(3, 4));
+world.CreateEntity(new PlayerName("bob"), new Position(5, 6), new Follows(alice.Id));
+
+// 实体、组件和单例，写进一个下次存档还能复用的缓冲区。
+var output = new NinoArrayBufferWriter();
+world.Save(output);
+
+// 另一个 World，就像重启后的进程新建的那样。
+using var restarted = new World();
+restarted.Load(output.WrittenSpan);
+
+Console.WriteLine($"clock: {restarted.Clock.Tick}");
+foreach (var item in restarted.Query<PlayerName, Position>())
+{
+    Console.WriteLine($"{item.Entity.Id} {item.PlayerName.Value} at ({item.Position.X}, {item.Position.Y})");
+}
+
+foreach (var item in restarted.Query<PlayerName, Follows>())
+{
+    var leader = restarted.GetEntity(item.Follows.Leader);
+    Console.WriteLine($"{item.PlayerName.Value} follows {leader.PlayerName.Value}");
+}
+```
+
+</Accordion>
+</Accordions>
+
+
+输出：
+
+```text
+clock: 1234
+0v1 alice at (3, 4)
+1v1 bob at (5, 6)
+bob follows alice
+```
+
+新 World 里的 id 和原来一样，托管的名字经由 Nino 读了回来，单例时钟保留了它的 tick，Bob 的 `Follows` 不用任何改写，仍然指向 Alice。
+
 ## 怎么用得快 [#how-to-use-it-fast]
 
-| 别这样 | 这样做 | 原因 |
+| 别这样 | 这样做 | 为什么 |
 | --- | --- | --- |
 | 每次存档新建缓冲区 | 复用一个 `NinoArrayBufferWriter`，每次存档前 `ResetWrittenCount()` | 缓冲区足够大之后，存档不分配 |
 | 用其他 `IBufferWriter<byte>` | 用 `NinoArrayBufferWriter` | 直接写入，省掉从 World 缓冲区的拷贝 |
-| 每次读档新建 World | `Load` 进同一个 World | 复用已有的行：预热后 0 B |
+| 每次读档新建 World | `Load` 进同一个 World | 复用已有的行：预热后不再分配 |
 | 能用值的地方用了托管组件 | 非托管组件（id、数字、定长数组） | 原始行每列一个块；Nino 要逐个值编码 |
 | 结构从不变化的非托管组件也标 `[NinoType]` | 这些按原始行写，结构会变的才标 `[NinoType]` | 原始行一列只拷贝一次 |
 | 自己在 `Query` 上写序列化 | `Save` / `Load` | id、版本号、缓冲、禁用值和单例都一起带上 |

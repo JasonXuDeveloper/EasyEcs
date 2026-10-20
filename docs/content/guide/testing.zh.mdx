@@ -186,7 +186,7 @@ public void ABattleSurvivesARestart()
 
 ## 完整例子 [#full-example]
 
-会消退的毒、会计分的死亡，以及五个测试：单个系统、整个 tick、零字节预算和存档。游戏是一个类库；测试是引用它的 NUnit 项目
+会消退的毒、会计分的死亡，以及五个测试：两个只测单个系统，整个 tick、零字节预算和存档各一个。游戏是一个类库；测试是引用它的 NUnit 项目
 （`dotnet new nunit`，再 `dotnet add reference` 引用游戏项目，`dotnet add package EasyEcs`）。
 
 <Accordions>
@@ -364,7 +364,7 @@ public class BattleTests
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageReference Include="NUnit" Version="4.6.1" />
     <PackageReference Include="NUnit3TestAdapter" Version="5.2.0" />
-    <PackageReference Include="EasyEcs" Version="4.2.0" />
+    <PackageReference Include="EasyEcs" Version="4.*" />
     <ProjectReference Include="..\Battle\Battle.csproj" />
   </ItemGroup>
 </Project>
@@ -389,7 +389,7 @@ Total tests: 5
 
 ## 怎么用得快 [#how-to-use-it-fast]
 
-| 别这样 | 这样做 | 原因 |
+| 别这样 | 这样做 | 为什么 |
 | --- | --- | --- |
 | 所有测试共用一个 World | 每个测试一个 World，放在 `using` 里 | 测试互不影响，可以并行 |
 | 每个测试手写添加系统 | 调用服务器自己的初始化方法 | 测试跑的就是 tick 真实的顺序 |
@@ -403,7 +403,7 @@ Total tests: 5
 - **分析器：**它也在测试项目上运行，所以测试里带状态或有竞争的系统同样编译不过（[分析器规则](/zh/docs/guide/analyzer)）。
 - **游戏代码零开销：**测试只用公开 API；没有要打开的测试模式。
 
-## 常见坑 [#pitfalls]
+## 常见陷阱 [#pitfalls]
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |

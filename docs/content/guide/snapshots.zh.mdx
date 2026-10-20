@@ -28,12 +28,19 @@ icon: Camera
 ### 拍快照和恢复 [#capture-and-restore]
 
 ```csharp
-var before = world.Capture();          // O(实体数 × 组件数)
-int held = before.EntityCount;         // 快照里的实体数
+var before = world.Capture();               // O(实体数 × 组件数)
+int held = before.EntityCount;              // 快照里存活的实体数：可以记日志，或据此决定环形缓冲的大小
 
-world.Update();                        // 模拟一个回合
-if (!running) world.Restore(before);   // 撤销：同样的实体、同样的值、同样的单例 // [!code highlight]
-world.Restore(before);                 // 同一个快照可以恢复任意多次
+world.Update();                             // 模拟一个回合
+bool turnAccepted = hero.Health.Value > 0;  // 游戏规则：英雄死掉的回合要撤销
+if (!turnAccepted) world.Restore(before);   // 同样的实体、同样的值、同样的单例 // [!code highlight]
+```
+
+恢复之后快照本身不变，所以还能再恢复一次：
+
+```csharp
+world.Update();
+world.Restore(before);                      // 第二次回到同一个状态
 ```
 
 </Step>
@@ -72,8 +79,8 @@ world.Restore(history[(100 - 3) % Rollback.Ticks]);                             
 - **单例，按值复制。** `Restore` 之后，每个单例在原来的存储里换成快照里的值，所以之前拿到的 `SingletonRef<T>` 继续有效；
   capture 之后新加的单例会被移除。
 - **句柄。** 快照里存活实体的句柄重新有效。其他句柄全部失效，包括 capture 之后创建的实体的句柄，哪怕之后有新实体复用了它们的 id。
-- **不包括系统、选项和分组设置。** 系统照常按注册的样子运行；capture 之后新建的表保留下来，但是空的；
-  [分组](/zh/docs/guide/groups)按快照时的状态恢复。
+- **不包括系统、选项和 `GroupBy` 设置。** 系统照常按注册的样子运行，World 保留自己的 `GroupBy` 调用；capture 之后新建的表
+  保留下来，但是空的。快照保存的是每一行所在的[分组](/zh/docs/guide/groups)：每个实体都回到拍快照时所在的那张分组表。
 
 ### 恢复之后，其他部分会看到什么 [#after-restore]
 
@@ -162,9 +169,9 @@ minion alive: False
 
 ## 怎么用得快 [#how-to-use-it-fast]
 
-| 别这样 | 这样做 | 原因 |
+| 别这样 | 这样做 | 为什么 |
 | --- | --- | --- |
-| 每个 tick 调用 `Capture()` | `Capture(snapshot)` 写进保留的快照 | 复用数组：足够大之后 0 B |
+| 每个 tick 调用 `Capture()` | `Capture(snapshot)` 写进保留的快照 | 复用数组：足够大之后不再分配 |
 | 巨大的 World 每个 tick 拍一次 | 隔几个 tick 拍一次，或每个区域一个更小的 World | capture 是 O(实体数 × 组件数) |
 | 用快照写盘 | `Save` / `Load` | 字节流、字段哈希、跨进程 |
 | 需要回滚的集合放在组件里 | 用 `DynamicBuffer<T>` | 缓冲会被复制；其他集合是共享的 |
@@ -189,6 +196,7 @@ capture 的分配就是新建的那个快照本身；`Capture(into)` 会复用�
 | 以为组件里的 `List<T>` 会回滚 | 它是共享的：恢复后还是现在的样子 | 改用 `DynamicBuffer<T>` |
 | 查询遍历期间 capture 或 restore | 抛 `InvalidOperationException` | 运行时 |
 | 把快照恢复到另一个 World | 抛 `ArgumentException` | 运行时 |
+| 恢复 [`RemoveTypes`](/zh/docs/guide/migration-and-unload#remove-types) 之前拍的快照 | 抛 `InvalidOperationException`：它的表已经没了 | 运行时：`RemoveTypes` 之后重新拍 |
 | 继续使用 capture 之后创建的实体的句柄 | 恢复后它们失效 | `IsAlive` |
 | 把快照写到磁盘 | 快照是对象图，不是字节 | 用[存档](/zh/docs/guide/saves) |
 | 在其他线程 capture 或 restore | 结构变更只属于所有者线程 | [EECS014](/zh/docs/guide/analyzer#eecs014) |

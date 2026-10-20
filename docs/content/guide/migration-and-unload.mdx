@@ -15,10 +15,11 @@ unload and a new version can load the saved data.
 ## When to use it [#when-to-use-it]
 
 <Callout type="idea" title="Use it for">
-  Zone or map changes between worlds of one process (`MoveEntities`), handing a player to another server or storing
-  an offline player (`SaveEntities` / `LoadEntities`), persisting part of an entity, such as an actor's balance
-  without its connection, and loading it onto the entity it already has (a [record](#records): a `ComponentSet` and
-  `LoadEntitiesInto`), hot reload of game logic in a server that must not restart (`RemoveTypes`).
+  - **Zone or map changes** between worlds of one thread: `MoveEntities`.
+  - **Handing a player to another server**, or storing an offline player: `SaveEntities` / `LoadEntities`.
+  - **A record** of part of an entity, such as an actor's balance without its connection, loaded onto the entity it
+    already has: a `ComponentSet` and `LoadEntitiesInto` ([records](#records)).
+  - **Hot reload** of game logic in a server that must not restart: `RemoveTypes`.
 </Callout>
 
 <Callout type="warn" title="Skip it for">
@@ -40,7 +41,12 @@ and writes their handles in save order.
 using Nino.Core;
 
 public record struct Sword(int Damage) : IComponent;
-public record struct Pet(EntityId Owner) : IComponent;
+
+// Indexed by its owner: a hero's pets are found without a scan of every pet.
+public record struct Pet(EntityId Owner) : IComponent, IIndexed<EntityId>
+{
+    EntityId IIndexed<EntityId>.Key => Owner;
+}
 ```
 
 ```csharp
@@ -50,8 +56,8 @@ world.CreateEntity(new Pet(hero), new Health(20));
 
 // Collect the group: the hero, what hangs on it, what points at it.
 var group = new List<EntityId> { hero.Id };
-foreach (var part in world.Descendants(hero)) group.Add(part.Id);       // children, grandchildren, ...
-foreach (var item in world.Query<Pet>()) if (item.Pet.Owner == hero.Id) group.Add(item.Entity.Id);
+foreach (var part in world.Descendants(hero)) group.Add(part.Id);       // children, grandchildren and so on
+foreach (var pet in world.PetIndex.Find(hero.Id)) group.Add(pet.Id);    // the index, not a scan of every Pet
 
 var bytes = new NinoArrayBufferWriter();
 world.SaveEntities(bytes, group.ToArray());                  // the group only // [!code highlight]
@@ -60,6 +66,13 @@ using var otherServer = new World();
 var arrived = new Entity[group.Count];
 int created = otherServer.LoadEntities(bytes.WrittenSpan, arrived);   // new ids, links rewritten // [!code highlight]
 ```
+
+`Descendants` walks depth first and lists each entity before its children, so the group holds every parent ahead of
+what hangs on it: the order `MoveEntities` wants, since it destroys the originals last first and a child then goes
+before its parent. `Children` lists one level only. A `ChildOf` cycle makes the walk throw
+`InvalidOperationException`. Find what points at the hero (pets, followers) through an index on the field, as above,
+or through a [relation](/en/docs/guide/indexes-and-relations#relations): a query that tests every `Pet` grows with the world, not with the
+group.
 
 ### A group to another world of the thread [#move-entities]
 
@@ -74,7 +87,7 @@ int count = world.MoveEntities(nextZone, group.ToArray(), moved);   // hero, swo
 ```
 
 - The originals are destroyed with their children, so move a [hierarchy](/en/docs/guide/hierarchy#moving) together.
-- Cleanup components stay behind with the retired originals, for their systems to release.
+- Cleanup components stay on the destroyed originals, for their systems to release.
 - Both worlds must be owned by the calling thread; moving a world into itself is refused (`ArgumentException`).
 
 ### A record of what persists [#records]
@@ -110,8 +123,9 @@ world.LoadEntitiesInto(record.WrittenSpan, [activated]);               // Bank a
 ```
 
 ```csharp
-// The same record, restored without counting as a change: a saver of Changed<T> rows does not write it back.
-world.LoadEntitiesInto(record.WrittenSpan, [activated], markWritten: false);
+var restored = world.CreateEntity(new Connection(10));
+// Instead of the call above: the record restored without counting as a change.
+world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
 ```
 
 - The i-th saved entity loads onto the i-th entity given; the counts must match and every entity must be alive in
@@ -122,9 +136,28 @@ world.LoadEntitiesInto(record.WrittenSpan, [activated], markWritten: false);
 - A load is a write: `[Changed<T>]` methods see the loaded components. When the record only restores what was there
   (an actor coming back from its database), pass `markWritten: false`: a replaced value keeps its change tick and a
   new one has none, so a system that saves or replicates changed components does not send the record straight back.
+- The price of `markWritten: false`: the restored components are invisible to every `[Changed<T>]` method and
+  `Since` filter until code writes them. A replicator that sends changes to clients must send the full state itself
+  to a client that has not seen the entity yet.
+- `markWritten: false` only skips stamping what the load writes. A persistent component the entity had before the
+  load (from a prefab with defaults, say) keeps the tick of that creation and still counts as written. Create the
+  entity without its persistent components and let the record add them, as the
+  [Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) does.
+- `SaveEntities` with a set also writes an entity that holds none of the set's components, as an empty entry, so the
+  i-th saved entity still matches the i-th entity given.
 - `EntityId` fields are rewritten as below, onto the entities given; a `ChildOf` whose parent is not in the record is
   not set.
-- A framework that learns its types at run time builds the set with `With(typeof(Bank))`.
+- `LoadEntitiesInto` is a structural change: owner thread only ([EECS014](/en/docs/guide/analyzer#eecs014)), not while a pass iterates
+  (`InvalidOperationException`), never in a parallel method ([EECS010](/en/docs/guide/analyzer#eecs010)), and in a
+  `[ForEach]` method only when it takes `Entity` or `World` ([EECS013](/en/docs/guide/analyzer#eecs013)).
+- A framework that learns its types at run time builds the set by `Type`:
+
+```csharp
+public static class RuntimeRecords
+{
+    public static readonly ComponentSet Persistent = ComponentSet.Create().With(typeof(Bank));
+}
+```
 
 ### How ids are rewritten [#entityid-rewriting]
 
@@ -187,6 +220,169 @@ your own to the old version's types (systems, plugin objects), or the context ca
 The [HotReload sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload) runs the whole cycle
 and checks that the old context was collected and that the plugin's data carried over.
 
+## Full example [#full-example]
+
+A hero with a sword (and a gem in the sword) and a pet walks into another zone: the group is collected with
+`Descendants` and the pet index, moved with `MoveEntities`, and the pet still points at its hero. Then an actor's bank
+comes back from an earlier run as a record, loaded with `markWritten: false`, and a `[Changed<Bank>]` saver finds
+nothing to save until a deposit. Put the files in a console project that references EasyEcs
+(`dotnet add package EasyEcs`) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Health(int Value) : IComponent;
+
+// Hangs on the hero through ChildOf; a gem hangs on the sword.
+public record struct Sword(int Damage) : IComponent;
+
+public record struct Gem(int Bonus) : IComponent;
+
+// Points at its owner. Indexed by the owner, so the owner's pets are found without a scan.
+public record struct Pet(EntityId Owner) : IComponent, IIndexed<EntityId>
+{
+    EntityId IIndexed<EntityId>.Key => Owner;
+}
+
+// What persists of an actor, and what does not.
+public record struct Bank(long Gold) : IComponent, ITrackChanges;
+
+public record struct Connection(int Socket) : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// Writes to storage the banks written since its last run.
+public class SaveChangedBanks : EcsSystem
+{
+    [ForEach, Changed<Bank>]
+    static void Save(Entity actor, in Bank bank)
+    {
+        Console.WriteLine($"saving {actor.Id}: {bank.Gold} gold");
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Groups.cs">
+
+```csharp title="Groups.cs" doccheck=example
+using EasyEcs;
+
+public static class Groups
+{
+    // The hero, what hangs on it (each parent before its children), and its pets.
+    public static EntityId[] Collect(World world, Entity hero)
+    {
+        var group = new List<EntityId> { hero.Id };
+        foreach (var part in world.Descendants(hero))
+        {
+            group.Add(part.Id);
+        }
+
+        foreach (var pet in world.PetIndex.Find(hero.Id))
+        {
+            group.Add(pet.Id);
+        }
+
+        return group.ToArray();
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Records.cs">
+
+```csharp title="Records.cs" doccheck=example
+using EasyEcs;
+
+public static class Records
+{
+    // The components of an actor that outlive the process. Built once.
+    public static readonly ComponentSet Persistent = ComponentSet.Create().With<Bank>();
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+using Nino.Core;
+
+// Two zones of one process. The next zone has entities already, so ids differ there.
+using var zone = new World();
+using var nextZone = new World();
+nextZone.CreateEntity(new Health(50));
+nextZone.CreateEntity(new Health(50));
+
+var hero = zone.CreateEntity(new Health(100));
+var sword = zone.CreateEntity(new Sword(10), new ChildOf(hero));
+zone.CreateEntity(new Gem(3), new ChildOf(sword));
+zone.CreateEntity(new Pet(hero.Id), new Health(20));
+
+// The hero walks through a portal: the group moves, its ids are rewritten.
+EntityId[] group = Groups.Collect(zone, hero);
+var moved = new Entity[group.Length];
+zone.MoveEntities(nextZone, group, moved);
+for (int i = 0; i < group.Length; i++)
+{
+    Console.WriteLine($"{group[i]} -> {moved[i].Id}");
+}
+
+Entity pet = moved[^1];
+Console.WriteLine($"pet owner: {pet.Pet.Owner}, hero: {moved[0].Id}");
+Console.WriteLine($"left behind: {zone.EntityCount} entities");
+
+// A record: an actor's bank, saved by an earlier run without its connection.
+using var earlier = new World();
+var saved = earlier.CreateEntity(new Bank(500), new Connection(7));
+var record = new NinoArrayBufferWriter();
+earlier.SaveEntities(record, [saved.Id], Records.Persistent);
+
+using var world = new World();
+world.AddSystem<SaveChangedBanks>();
+
+// The actor is activated without a Bank: the record adds it, not marked as written.
+var actor = world.CreateEntity(new Connection(9));
+world.LoadEntitiesInto(record.WrittenSpan, [actor], markWritten: false);
+Console.WriteLine($"update after the load ({actor.Bank.Gold} gold):");
+world.Update();
+
+actor.SetBank(Gold: 650);
+Console.WriteLine("update after a deposit:");
+world.Update();
+```
+
+</Accordion>
+</Accordions>
+
+
+It prints:
+
+```text
+0v1 -> 2v1
+1v1 -> 3v1
+2v1 -> 4v1
+3v1 -> 5v1
+pet owner: 2v1, hero: 2v1
+left behind: 0 entities
+update after the load (500 gold):
+update after a deposit:
+saving 0v1: 650 gold
+```
+
+Every entity of the group gets a new id in the next zone (two ids were taken there), the pet's `Owner` names the
+hero's new id, and nothing stays behind. The restored bank is not saved again on the update after the load; the
+deposit is.
+
 ## How to use it fast [#how-to-use-it-fast]
 
 | Instead of | Do | Why |
@@ -220,6 +416,7 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
 | Moving a parent without its children | The children are destroyed with the original | Collect the group with `Descendants` |
+| Collecting the group with `Children` only | Grandchildren are left out, and destroyed with their parent | `Descendants` walks every level |
 | `EntityId`s in a `List<T>` inside a component | Not rewritten: they name entities of the old world | Use fields, a buffer or a relation |
 | An `Entity` handle in a component | Not saved, not rewritten | [EECS017](/en/docs/guide/analyzer#eecs017) |
 | Loading the new plugin before unloading the old one | Ambiguous type ids: `InvalidDataException` | The reload order above |
@@ -231,6 +428,8 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
 | A record loaded with `LoadEntities` | New entities beside the live ones | `LoadEntitiesInto` with the live entities |
 | `LoadEntitiesInto` with another number of entities than the save holds, or a stale one | `ArgumentException`; nothing changes | One live entity per saved entity, in save order |
 | A restored record seen as changed | A `Changed<T>` saver or replicator sends it straight back | `markWritten: false` |
+| `markWritten: false` on an entity that already had the persistent component (from a prefab with defaults) | That component keeps the tick of its creation: the saver still sees it | Create the entity without its persistent components and let the record add them |
+| Replicating only `[Changed<T>]` rows after a `markWritten: false` load | A client that has not seen the entity never gets the restored values | Send the full state to a new client |
 
 ## Related [#related]
 

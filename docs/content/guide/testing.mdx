@@ -199,8 +199,8 @@ make old saves fail to load ([saves](/en/docs/guide/saves#versioning)).
 
 ## Full example [#full-example]
 
-A poison that wears off, a death that scores, and five tests: one system alone, the whole tick, a zero-byte budget and
-a save. The game is a class library; the tests are an NUnit project that references it
+A poison that wears off, a death that scores, and five tests: two of one system alone, then one each for the whole
+tick, a zero-byte budget and a save. The game is a class library; the tests are an NUnit project that references it
 (`dotnet new nunit`, then `dotnet add reference` to the game and `dotnet add package EasyEcs`).
 
 <Accordions>
@@ -378,7 +378,7 @@ public class BattleTests
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageReference Include="NUnit" Version="4.6.1" />
     <PackageReference Include="NUnit3TestAdapter" Version="5.2.0" />
-    <PackageReference Include="EasyEcs" Version="4.2.0" />
+    <PackageReference Include="EasyEcs" Version="4.*" />
     <ProjectReference Include="..\Battle\Battle.csproj" />
   </ItemGroup>
 </Project>

@@ -80,8 +80,16 @@ With `WorldOptions.MeasureSystems`, every run of a system (its `OnUpdate` and it
 a status page can show the slowest one ([measuring systems](/en/docs/guide/systems#measuring-systems)).
 
 ```csharp
+public class RegenSystem : EcsSystem
+{
+    [ForEach]
+    static void Regen(ref Health health) => health.Value++;
+}
+```
+
+```csharp
 using var measured = new World(new WorldOptions { MeasureSystems = true });
-// AddSystem, then update as usual
+measured.AddSystem<RegenSystem>();
 measured.Update();
 foreach (var system in measured.Systems)
     Console.WriteLine($"{system.GetType().Name}: last {system.Stats.Last.TotalMicroseconds} μs");
@@ -96,7 +104,7 @@ data a health check reads. Setting `Enabled = true` clears `Error` and tries the
 
 ```csharp
 using var guarded = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
-// AddSystem, then update as usual
+guarded.AddSystem<RegenSystem>();
 guarded.Update();
 foreach (var system in guarded.Systems)
     if (system.Error is { } error) Console.Error.WriteLine($"{system.GetType().Name} is off: {error.Message}");

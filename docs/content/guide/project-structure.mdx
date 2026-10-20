@@ -200,28 +200,32 @@ flowchart LR
 
 The network, timers and the database run on other threads; the world belongs to the one thread that updates it.
 They meet in a queue you own: other threads post messages, and a system on the world's thread takes them and turns
-each into data. Keep the queue in a singleton, so the system stays stateless:
+each into data. The queue is a `readonly` field of that system, handed in when it is added: a dependency, not state,
+so [EECS007](/en/docs/guide/analyzer#eecs007) allows it. Not a singleton: `World.Save` writes every singleton, and a
+queue has no formatter.
 
 ```csharp
 using System.Collections.Concurrent;
 
 public readonly record struct FireCommand(float Vx, float Vy);   // a message, not a component
-public record struct Inbox(ConcurrentQueue<FireCommand> Commands) : ISingletonComponent;
 public record struct FireRequest(float Vx, float Vy) : IComponent;
 
 public struct InputGroup : ISystemGroup;
 
 [UpdateInGroup<InputGroup>]
-public class ReceiveCommandsSystem : EcsSystem
+public class ReceiveCommandsSystem(ConcurrentQueue<FireCommand> inbox) : EcsSystem
 {
+    private readonly ConcurrentQueue<FireCommand> _inbox = inbox;   // filled by the network threads
+
     protected override void OnUpdate()
     {
-        var commands = World.Inbox.Commands;
-        while (commands.TryDequeue(out var command))
+        while (_inbox.TryDequeue(out var command))
             World.CreateEntity(new FireRequest(command.Vx, command.Vy));
     }
 }
 ```
+
+Add it with `world.AddSystem(new ReceiveCommandsSystem(inbox))`, and give the same queue to the network code.
 
 The queue's bound and what happens when it is full are yours to choose. The details are in
 [input from other threads](/en/docs/guide/threading#input-from-other-threads); a server that answers requests is in
@@ -327,17 +331,12 @@ public record struct Spawner(Prefab Bullet, int Wave, int Interval) : ISingleton
 <Accordion title="Components/Input.cs (new)">
 
 ```csharp title="Components/Input.cs" doccheck=example
-using System.Collections.Concurrent;
 using EasyEcs;
 
 namespace MyServer;
 
 // What a client sends. A message, not a component: ReceiveCommandsSystem turns it into data.
 public readonly record struct FireCommand(float Vx, float Vy);
-
-// The mailbox from the network threads to the world's thread. A singleton holds it,
-// so the system that drains it keeps no state of its own.
-public record struct Inbox(ConcurrentQueue<FireCommand> Commands) : ISingletonComponent;
 
 // A command as data: FireSystem handles it on the next tick, then destroys it.
 public record struct FireRequest(float Vx, float Vy) : IComponent;
@@ -360,6 +359,7 @@ public struct InputGroup : ISystemGroup;
 <Accordion title="Systems/ReceiveCommandsSystem.cs (new)">
 
 ```csharp title="Systems/ReceiveCommandsSystem.cs" doccheck=example
+using System.Collections.Concurrent;
 using EasyEcs;
 
 namespace MyServer;
@@ -368,12 +368,15 @@ namespace MyServer;
 // It runs on the world's thread, so creating entities here is safe; the network
 // threads only ever touch the queue.
 [UpdateInGroup<InputGroup>]
-public class ReceiveCommandsSystem : EcsSystem
+public class ReceiveCommandsSystem(ConcurrentQueue<FireCommand> inbox) : EcsSystem
 {
+    // The mailbox from the network threads. A readonly field is a dependency, not state
+    // (EECS007 allows it); a singleton would not do, since World.Save writes every singleton.
+    private readonly ConcurrentQueue<FireCommand> _inbox = inbox;
+
     protected override void OnUpdate()
     {
-        var commands = World.Inbox.Commands;
-        while (commands.TryDequeue(out var command))
+        while (_inbox.TryDequeue(out var command))
         {
             World.CreateEntity(new FireRequest(command.Vx, command.Vy));
         }
@@ -501,6 +504,7 @@ public class ClockSystem : EcsSystem
 <Accordion title="Game.cs (new)">
 
 ```csharp title="Game.cs" doccheck=example
+using System.Collections.Concurrent;
 using EasyEcs;
 
 namespace MyServer;
@@ -509,10 +513,10 @@ namespace MyServer;
 // so a test of the whole tick runs the tick the server runs.
 public static class Game
 {
-    public static void AddSystems(World world)
+    public static void AddSystems(World world, ConcurrentQueue<FireCommand> inbox)
     {
         // Input group: runs on world.Update<InputGroup>(), when the host reads input.
-        world.AddSystem<ReceiveCommandsSystem>();
+        world.AddSystem(new ReceiveCommandsSystem(inbox));
 
         // Default group: the simulation, once per world.Update(), in this order.
         world.AddSystem<FireSystem>();
@@ -590,9 +594,8 @@ world.SetSpawner(
     Bullet: new Prefab().SetPosition(0, 0).SetVelocity(10, 0).SetLifetime(3 * TicksPerSecond),
     Wave: 100,
     Interval: TicksPerSecond);
-world.SetInbox(Commands: inbox);
 
-Game.AddSystems(world);
+Game.AddSystems(world, inbox);
 
 // The network: another thread, which only posts to the inbox.
 FakeClient.Start(inbox);
@@ -648,8 +651,7 @@ public class TickTests
             Bullet: new Prefab().SetPosition(0, 0).SetVelocity(0, 0).SetLifetime(10),
             Wave: 100,
             Interval: 20);
-        world.SetInbox(Commands: inbox);
-        Game.AddSystems(world);
+        Game.AddSystems(world, inbox);
         inbox.Enqueue(new FireCommand(Vx: 0, Vy: 20));
 
         world.Update<InputGroup>();
@@ -676,6 +678,18 @@ stopped after 60 ticks
 The five commands arrive during the first half second and become five bullets next to the first wave of 100. At
 tick 60 the first wave has run out of time while the third one appears; the fired bullets, a few ticks younger,
 are still alive. No line of `Program.cs` knows about bullets: the host only sets data, adds systems and keeps time.
+
+## How to use it fast [#how-to-use-it-fast]
+
+The layout itself has no cost to tune: folders and files are gone once the project compiles. What decides the speed
+of the tick is in the systems: `in` for what a method only reads, a group or `UpdateInterval` for what does not run
+every tick, and the choices the [performance guide](/en/docs/performance) measures.
+
+## What it costs [#what-it-costs]
+
+Nothing at run time: one system per file compiles to the same code as one file of systems, and a group is a call
+the host makes. The tick costs what its systems cost; [performance](/en/docs/performance) has the numbers per
+feature.
 
 ## Pitfalls [#pitfalls]
 
