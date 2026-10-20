@@ -91,9 +91,13 @@ public sealed partial class World
             var saved = snapshot.Meta.AsSpan(0, snapshot.NextId);
             if (Meta.Length < saved.Length) Grow(saved.Length, true);
             int used = Math.Max(_nextId, snapshot.NextId);
+            var log = _destroyLog;
             for (int id = 0; id < used; id++)
             {
                 ref var meta = ref Meta[id];
+                // An entity alive now that the snapshot does not hold (that incarnation) is destroyed by the restore.
+                if (log != null && meta.Archetype != null && (id >= saved.Length || saved[id].Archetype == null || saved[id].Version != meta.Version))
+                    LogDestroy(log, new EntityId(id, meta.Version));
                 if (id < saved.Length && saved[id].Archetype != null) meta = saved[id];
                 else meta = new EntityMeta { Version = Math.Max(meta.Version, id < saved.Length ? saved[id].Version : 0) + 1 };
             }

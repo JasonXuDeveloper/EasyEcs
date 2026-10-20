@@ -44,6 +44,8 @@ public sealed partial class World : IDisposable
         Meta = AllocateMeta(Math.Max(1, _options.InitialEntityCapacity), true);
         _queryLookup = _queryCache.GetAlternateLookup<QueryLookup>();
         _emptyArchetype = GetOrCreateArchetype(default);
+        ArgumentOutOfRangeException.ThrowIfNegative(_options.DestroyLog, nameof(options));
+        if (_options.DestroyLog > 0) _destroyLog = new DestroyRecord[_options.DestroyLog];
         Collectible.Track(this); // held weakly: a world nobody holds stops mentioning its bits
     }
 
@@ -275,6 +277,7 @@ public sealed partial class World : IDisposable
     {
         var archetype = meta.Archetype;
         if (_indexByBit != null) Unindex(archetype, id);
+        if (_destroyLog != null) LogDestroy(_destroyLog, new EntityId(id, meta.Version));
         meta.Version++; // invalidates every outstanding handle
         meta.Archetype = null;
         archetype.ReleaseBuffers(meta.Slot, 1);
@@ -335,11 +338,13 @@ public sealed partial class World : IDisposable
         if (_freeIds.Length < _freeIdCount + count)
             Array.Resize(ref _freeIds, (int)BitOperations.RoundUpToPowerOf2((uint)(_freeIdCount + count)));
         var rows = archetype.Slots.AsSpan(0, count);
+        var log = _destroyLog;
         for (int slot = count - 1; slot >= 0; slot--) // the order Free would push them in
         {
             int id = rows[slot].Index;
             Orphaned(rows[slot]);
             if (_indexByBit != null) Unindex(archetype, id);
+            if (log != null) LogDestroy(log, rows[slot]);
             ref var meta = ref MetaRef(id);
             meta.Version++; // invalidates every outstanding handle
             meta.Archetype = null;

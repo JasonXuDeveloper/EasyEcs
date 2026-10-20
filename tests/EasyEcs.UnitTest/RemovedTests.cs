@@ -204,4 +204,174 @@ public class RemovedTests
             }
         }
     }
+
+    // ---- The destroy log (WorldOptions.DestroyLog, world.DestroyedSince) ----
+
+    private static EntityId[] DestroyedSince(World world, ulong since)
+    {
+        var into = new EntityId[64];
+        Assert.That(world.DestroyedSince(since, into, out int count), Is.True);
+        return into.AsSpan(0, count).ToArray();
+    }
+
+    [Test]
+    public void ReadersAtDifferentTicksEachSeeTheirDestroys()
+    {
+        using var world = new World(new WorldOptions { DestroyLog = 16 });
+        var units = new Entity[6];
+        world.CreateEntities(units, new Health(1));
+        ulong first = world.ChangeTick;                              // reader A acknowledged here
+        units[0].Destroy();
+        world.Update();
+        ulong second = world.ChangeTick;                             // reader B acknowledged here
+        units[1].Destroy();
+        units[2].Destroy();
+        world.Update();
+        ulong now = world.ChangeTick;
+
+        Assert.That(DestroyedSince(world, first), Is.EqualTo(new[] { units[0].Id, units[1].Id, units[2].Id }));
+        Assert.That(DestroyedSince(world, second), Is.EqualTo(new[] { units[1].Id, units[2].Id }));
+        Assert.That(DestroyedSince(world, now), Is.Empty);           // nothing since
+        Assert.That(world.DestroyLogOldestTick, Is.Zero);            // nothing overwritten: every reader is served
+
+        var recycled = world.CreateEntity(new Health(2));            // the index comes back with another version
+        recycled.Destroy();
+        var ids = DestroyedSince(world, now);
+        Assert.That((ids.Length, ids[0], ids[0] == units[2].Id), Is.EqualTo((1, recycled.Id, false)));
+
+        Span<EntityId> small = stackalloc EntityId[2];               // too small: the oldest that fit, the full count
+        Assert.That((world.DestroyedSince(first, small, out int count), count, small[1]), Is.EqualTo((true, 4, units[1].Id)));
+    }
+
+    [Test]
+    public void AnOverwrittenLogTellsOldReadersToResync()
+    {
+        using var world = new World(new WorldOptions { DestroyLog = 4 });
+        var units = new Entity[6];
+        world.CreateEntities(units, new Health(1));
+        ulong old = world.ChangeTick;
+        units[0].Destroy();
+        units[1].Destroy();
+        world.Update();
+        ulong recent = world.ChangeTick;
+        for (int i = 2; i < 6; i++) units[i].Destroy();              // the ring of 4 drops units 0 and 1
+
+        Assert.That(world.DestroyLogOldestTick, Is.EqualTo(old + 1));
+        var into = new EntityId[4];
+        Assert.That((world.DestroyedSince(old, into, out int count), count), Is.EqualTo((false, 0)));
+        Assert.That(DestroyedSince(world, recent), Is.EqualTo(new[] { units[2].Id, units[3].Id, units[4].Id, units[5].Id }));
+    }
+
+    [Test]
+    public void BulkDestroysCascadesAndMovesAreLogged()
+    {
+        using var world = new World(new WorldOptions { DestroyLog = 64 });
+        using var other = new World();
+        var shots = new Entity[3];
+        world.CreateEntities(shots, new Stun(1));                    // a whole table: freed at once
+        var tracked = world.CreateEntity(new Stun(1), new Armor(1)); // a table destroyed by a Changed filter
+        var parent = world.CreateEntity(new Health(1));
+        var child = world.CreateEntity(new ChildOf(parent));
+        var grandchild = world.CreateEntity(new ChildOf(child));
+        var traveller = world.CreateEntity(new Health(2));
+        ulong mark = world.ChangeTick;
+
+        Assert.That(world.DestroyEntities<Stun>(), Is.EqualTo(4));
+        Assert.That(DestroyedSince(world, mark), Is.EquivalentTo(new[] { shots[0].Id, shots[1].Id, shots[2].Id, tracked.Id }));
+
+        mark = world.ChangeTick + 1;
+        world.Update();
+        parent.Destroy();                                            // the children follow
+        Assert.That(DestroyedSince(world, mark), Is.EquivalentTo(new[] { parent.Id, child.Id, grandchild.Id }));
+
+        mark = world.ChangeTick + 1;
+        world.Update();
+        world.MoveEntities(other, [traveller.Id]);                   // gone from this world
+        Assert.That(DestroyedSince(world, mark), Is.EqualTo(new[] { traveller.Id }));
+    }
+
+    [Test]
+    public void ARetiredEntityIsLoggedWhenItsLastCleanupComponentGoes()
+    {
+        using var world = new World(new WorldOptions { DestroyLog = 8 });
+        var session = world.CreateEntity(new Lease(1), new Ticket(2), new Health(1));
+        ulong mark = world.ChangeTick;
+        session.Destroy();                                           // retired: still alive, Destroyed tag
+        Assert.That(DestroyedSince(world, mark), Is.Empty);
+        session.Remove<Lease>();
+        Assert.That(DestroyedSince(world, mark), Is.Empty);          // a cleanup component is left
+        world.Update();
+        session.Remove<Ticket>();                                    // the last one: the id dies now
+        var ids = DestroyedSince(world, mark);
+        Assert.That((ids.Length, ids[0], DestroyedSince(world, world.ChangeTick).Length), Is.EqualTo((1, session.Id, 1)));
+    }
+
+    [Test]
+    public void RestoreAndLoadLogTheEntitiesTheyTakeAway()
+    {
+        using var world = new World(new WorldOptions { DestroyLog = 16 });
+        var kept = world.CreateEntity(new Health(1));
+        var gone = world.CreateEntity(new Health(2));
+        var snapshot = world.Capture();
+        var later = world.CreateEntity(new Health(3));               // not in the snapshot
+        gone.Destroy();
+        var reborn = world.CreateEntity(new Health(4));              // gone's index, another version
+        ulong mark = world.ChangeTick + 1;
+        world.Update();
+
+        world.Restore(snapshot);                                     // gone alive again, later and reborn not
+        Assert.That(DestroyedSince(world, mark), Is.EquivalentTo(new[] { later.Id, reborn.Id }));
+        Assert.That((kept.IsAlive, gone.IsAlive), Is.EqualTo((true, true)));
+
+        var save = new System.Buffers.ArrayBufferWriter<byte>();
+        using (var source = new World())
+        {
+            source.CreateEntity(new Health(8)).Destroy();
+            source.CreateEntity(new Health(9));                      // 0v2: not kept (0v1)
+            source.Save(save);
+        }
+
+        mark = world.ChangeTick + 1;
+        world.Update();
+        world.Load(save.WrittenSpan);                                // a replacement: what was alive is gone
+        Assert.That(DestroyedSince(world, mark), Is.EquivalentTo(new[] { kept.Id, gone.Id }));
+    }
+
+    [Test]
+    public void TheLogIsOffByDefault()
+    {
+        using var world = new World();
+        world.CreateEntity(new Health(1)).Destroy();
+        Assert.That(world.DestroyLogOldestTick, Is.EqualTo(ulong.MaxValue));
+        Assert.Throws<InvalidOperationException>(() => world.DestroyedSince(0, default, out _));
+        Assert.Throws<ArgumentOutOfRangeException>(() => _ = new World(new WorldOptions { DestroyLog = -1 }));
+    }
+
+    [Test]
+    public void DestroysAndReadsOfTheLogDoNotAllocate()
+    {
+        using var world = new World(new WorldOptions { DestroyLog = 256 });
+        var churned = new Entity[64];
+        var into = new EntityId[256];
+        var parent = world.CreateEntity(new Health(1));
+        int wrong = 0;
+        void Frame()
+        {
+            ulong mark = world.ChangeTick;
+            for (int i = 0; i < churned.Length; i++) churned[i] = world.CreateEntity(new Position(), new Health(1));
+            for (int i = 0; i < churned.Length / 2; i++) churned[i].Destroy();
+            world.DestroyEntities<Position>();
+            var child = world.CreateEntity(new ChildOf(parent));
+            world.CreateEntity(new ChildOf(child));
+            parent.Destroy();                                        // a cascade of three
+            parent = world.CreateEntity(new Health(1));
+            world.Update();
+            if (!world.DestroyedSince(mark, into, out int count) || count != churned.Length + 3) wrong++;
+        }
+
+        for (int i = 0; i < 10; i++) Frame(); // warm-up: tables, edges, JIT
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++) Frame();
+        Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, wrong), Is.EqualTo((0L, 0)));
+    }
 }
