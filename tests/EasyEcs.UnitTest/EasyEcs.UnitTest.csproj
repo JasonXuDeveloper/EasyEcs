@@ -16,8 +16,6 @@
         <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0"/>
         <!-- code fix tests apply EasyEcs.CodeFixes in a workspace -->
         <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.0.0"/>
-        <!-- [NinoType] components in SerializationTests -->
-        <PackageReference Include="Nino.Generator" Version="4.0.0-rc.6"/>
     </ItemGroup>
 
     <ItemGroup>
