@@ -313,6 +313,16 @@ The documentation lives at **[ecs.xgamedev.net](https://ecs.xgamedev.net)**; its
 
 The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading order.
 
+## What's new in 4.5
+
+- **One entity, one job.** `entity.Run(ref job)` (and `Run(ref job, filter)`) runs an `IForEachEntity` job on a
+  single entity with the guarantees of a pass: change ticks, refs that survive structural changes, a filter tested
+  in O(1) ([one entity](https://ecs.xgamedev.net/en/docs/guide/queries#run-on-one-entity)).
+- **Group filters through interfaces.** `IGroupWith<T>` / `IGroupWithout<T>` give generic groups their filters
+  (`IActorGroup<TActor> : IGroupWith<Inbox<TActor>>`) ([group filters](https://ecs.xgamedev.net/en/docs/guide/systems#group-filters)).
+- **`world.Descendants(root)`** walks a whole subtree, and `LoadEntitiesInto(..., markWritten: false)` restores a
+  record without counting it as a change.
+
 ## What's new in 4.4
 
 - **Records of what persists.** `SaveEntities(output, ids, set)` saves only the components of a `ComponentSet`

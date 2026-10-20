@@ -238,6 +238,52 @@ Drop the entity's links of kind `T` to `target` (every element with that target)
 
 **Complexity** ([API table](/en/docs/api)): O(L)
 
+### `Run` [#run]
+
+```csharp
+public bool Run<T1, TJob>(ref TJob job) where T1 : struct, IComponent where TJob : struct, IForEachEntity<T1>, allows ref struct;
+public bool Run<T1, T2, TJob>(ref TJob job) where T1 : struct, IComponent where T2 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2>, allows ref struct;
+public bool Run<T1, T2, T3, TJob>(ref TJob job) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3>, allows ref struct;
+public bool Run<T1, T2, T3, T4, TJob>(ref TJob job) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, TJob>(ref TJob job) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, T6, TJob>(ref TJob job) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, T6, T7, TJob>(ref TJob job) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6, T7>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, T6, T7, T8, TJob>(ref TJob job) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6, T7, T8>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6, T7, T8, T9>, allows ref struct;
+```
+
+One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
+
+Run `job` on this entity when it has all of `T1, T2`, with the refs `World.ForEachEntity` would give it: true when the job ran, false when the entity lacks a component or is not alive. The components the job writes (`IForEachEntity.Writes`) count as written; a structural change the job makes takes effect at once, and those writes are carried over to the entity's new row (also when the job throws). A job implementing [`INoStructuralChanges`](/en/docs/reference/inostructuralchanges) skips that bookkeeping. O(1), allocation-free.
+
+**Complexity** ([API table](/en/docs/api)):
+
+- `entity.Run<T1..Tn, TJob>(ref job)`: O(n), plus O(1) per filter component
+- `Run(ref job, filter)`: O(n), plus O(1) per filter component
+
+### `Run` [#run-2]
+
+```csharp
+public bool Run<T1, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where TJob : struct, IForEachEntity<T1>, allows ref struct;
+public bool Run<T1, T2, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where T2 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2>, allows ref struct;
+public bool Run<T1, T2, T3, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3>, allows ref struct;
+public bool Run<T1, T2, T3, T4, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, T6, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, T6, T7, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6, T7>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, T6, T7, T8, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6, T7, T8>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6, T7, T8, T9>, allows ref struct;
+```
+
+One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
+
+[`Entity.Run`](/en/docs/reference/entity#run) when the entity also passes `filter`, tested as a query tests a row (`Without`, `WithAny`, `Changed`, groups): false, without running the job, when it does not. O(components the filter names).
+
+**Complexity** ([API table](/en/docs/api)):
+
+- `entity.Run<T1..Tn, TJob>(ref job)`: O(n), plus O(1) per filter component
+- `Run(ref job, filter)`: O(n), plus O(1) per filter component
+
 ### `Set` [#set]
 
 ```csharp

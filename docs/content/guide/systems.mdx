@@ -307,6 +307,27 @@ public class MoveSystem : EcsSystem
 }
 ```
 
+A group that a generic interface describes cannot name its filter in an attribute: C# refuses a type parameter as the
+type argument of an attribute (`[With<Inbox<TActor>>]` on `IActorGroup<TActor>` is CS8968). The group implements
+`IGroupWith<T>` or `IGroupWithout<T>` instead, here or through an interface, and gets the same filter: one interface
+then gives every actor type its group.
+
+```csharp
+public record struct Inbox<TActor>(int Pending) : IComponent;   // the messages of one actor type
+public record struct Stock(int Items) : IComponent;
+
+public interface IActorGroup<TActor> : IGroupWith<Inbox<TActor>>, IGroupWithout<Frozen> where TActor : struct;
+
+public struct Shop : IActorGroup<Shop>;             // the shop actors: entities with Inbox<Shop>, none frozen
+
+[UpdateInGroup<Shop>]
+public class RestockSystem : EcsSystem
+{
+    [ForEach]
+    static void Restock(ref Stock stock) => stock.Items = Math.Max(stock.Items, 10);
+}
+```
+
 ### Generic systems [#generic-systems]
 
 A system can be generic. Each closed type is a system of its own, with its own generated job and access set, so

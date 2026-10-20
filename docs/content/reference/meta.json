@@ -23,6 +23,8 @@
     "iforeachbatch",
     "iforeachentity",
     "igroup",
+    "igroupwith",
+    "igroupwithout",
     "iindexed",
     "inostructuralchanges",
     "irelation",
@@ -57,7 +59,9 @@
     "withattribute",
     "withoutattribute",
     "world",
+    "world-descendantwalk",
     "world-entityenumerator",
+    "world-subtree",
     "worldoptions",
     "worldsnapshot"
   ]

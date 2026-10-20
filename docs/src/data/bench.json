@@ -1,6 +1,6 @@
 {
   "source": "BenchmarkDotNet *-report.csv (scripts/sync-benchmarks.ts)",
-  "generatedAt": "2026-10-19T15:10:59.035Z",
+  "generatedAt": "2026-10-20T06:41:54.449Z",
   "environment": {
     "benchmarkDotNet": "0.15.2",
     "os": "Linux Ubuntu 24.04.5 LTS (Noble Numbat)",
@@ -2551,6 +2551,324 @@
           "errorNs": 2439,
           "stdDevNs": 2395,
           "ratio": null,
+          "allocatedBytes": 0
+        }
+      ]
+    },
+    "SingleEntityBenchmark": {
+      "namespace": "EasyEcs.Benchmark",
+      "job": "EnvironmentVariables=DOTNET_TC_CallCountingDelayMs=0 IterationCount=8 IterationTime=250ms LaunchCount=2 WarmupCount=6",
+      "rows": [
+        {
+          "method": "Handwritten",
+          "params": {
+            "Components": "1",
+            "Filtered": "False",
+            "Structural": "False"
+          },
+          "meanNs": 15870,
+          "errorNs": 894,
+          "stdDevNs": 792,
+          "ratio": 1,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Run",
+          "params": {
+            "Components": "1",
+            "Filtered": "False",
+            "Structural": "False"
+          },
+          "meanNs": 13990,
+          "errorNs": 640,
+          "stdDevNs": 599,
+          "ratio": 0.88,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Handwritten",
+          "params": {
+            "Components": "1",
+            "Filtered": "False",
+            "Structural": "True"
+          },
+          "meanNs": 33470,
+          "errorNs": 1097,
+          "stdDevNs": 973,
+          "ratio": 1,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Run",
+          "params": {
+            "Components": "1",
+            "Filtered": "False",
+            "Structural": "True"
+          },
+          "meanNs": 27940,
+          "errorNs": 789,
+          "stdDevNs": 700,
+          "ratio": 0.84,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Handwritten",
+          "params": {
+            "Components": "1",
+            "Filtered": "True",
+            "Structural": "False"
+          },
+          "meanNs": 16190,
+          "errorNs": 700,
+          "stdDevNs": 687,
+          "ratio": 1,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Run",
+          "params": {
+            "Components": "1",
+            "Filtered": "True",
+            "Structural": "False"
+          },
+          "meanNs": 14750,
+          "errorNs": 592,
+          "stdDevNs": 524,
+          "ratio": 0.91,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Handwritten",
+          "params": {
+            "Components": "1",
+            "Filtered": "True",
+            "Structural": "True"
+          },
+          "meanNs": 32750,
+          "errorNs": 1655,
+          "stdDevNs": 1548,
+          "ratio": 1,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Run",
+          "params": {
+            "Components": "1",
+            "Filtered": "True",
+            "Structural": "True"
+          },
+          "meanNs": 28100,
+          "errorNs": 1384,
+          "stdDevNs": 1295,
+          "ratio": 0.86,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Handwritten",
+          "params": {
+            "Components": "3",
+            "Filtered": "False",
+            "Structural": "False"
+          },
+          "meanNs": 23440,
+          "errorNs": 1207,
+          "stdDevNs": 1186,
+          "ratio": 1,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Run",
+          "params": {
+            "Components": "3",
+            "Filtered": "False",
+            "Structural": "False"
+          },
+          "meanNs": 16130,
+          "errorNs": 299,
+          "stdDevNs": 280,
+          "ratio": 0.69,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Handwritten",
+          "params": {
+            "Components": "3",
+            "Filtered": "False",
+            "Structural": "True"
+          },
+          "meanNs": 34070,
+          "errorNs": 2780,
+          "stdDevNs": 2730,
+          "ratio": 1.01,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Run",
+          "params": {
+            "Components": "3",
+            "Filtered": "False",
+            "Structural": "True"
+          },
+          "meanNs": 33450,
+          "errorNs": 3124,
+          "stdDevNs": 2922,
+          "ratio": 0.99,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Handwritten",
+          "params": {
+            "Components": "3",
+            "Filtered": "True",
+            "Structural": "False"
+          },
+          "meanNs": 21560,
+          "errorNs": 1490,
+          "stdDevNs": 1321,
+          "ratio": 1,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Run",
+          "params": {
+            "Components": "3",
+            "Filtered": "True",
+            "Structural": "False"
+          },
+          "meanNs": 20930,
+          "errorNs": 3580,
+          "stdDevNs": 3516,
+          "ratio": 0.97,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Handwritten",
+          "params": {
+            "Components": "3",
+            "Filtered": "True",
+            "Structural": "True"
+          },
+          "meanNs": 31200,
+          "errorNs": 1267,
+          "stdDevNs": 1185,
+          "ratio": 1,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Run",
+          "params": {
+            "Components": "3",
+            "Filtered": "True",
+            "Structural": "True"
+          },
+          "meanNs": 32430,
+          "errorNs": 1683,
+          "stdDevNs": 1574,
+          "ratio": 1.04,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Handwritten",
+          "params": {
+            "Components": "5",
+            "Filtered": "False",
+            "Structural": "False"
+          },
+          "meanNs": 27540,
+          "errorNs": 1694,
+          "stdDevNs": 1584,
+          "ratio": 1,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Run",
+          "params": {
+            "Components": "5",
+            "Filtered": "False",
+            "Structural": "False"
+          },
+          "meanNs": 24370,
+          "errorNs": 716,
+          "stdDevNs": 670,
+          "ratio": 0.89,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Handwritten",
+          "params": {
+            "Components": "5",
+            "Filtered": "False",
+            "Structural": "True"
+          },
+          "meanNs": 35630,
+          "errorNs": 1038,
+          "stdDevNs": 920,
+          "ratio": 1,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Run",
+          "params": {
+            "Components": "5",
+            "Filtered": "False",
+            "Structural": "True"
+          },
+          "meanNs": 37730,
+          "errorNs": 2895,
+          "stdDevNs": 2843,
+          "ratio": 1.06,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Handwritten",
+          "params": {
+            "Components": "5",
+            "Filtered": "True",
+            "Structural": "False"
+          },
+          "meanNs": 28190,
+          "errorNs": 1994,
+          "stdDevNs": 1865,
+          "ratio": 1,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Run",
+          "params": {
+            "Components": "5",
+            "Filtered": "True",
+            "Structural": "False"
+          },
+          "meanNs": 24270,
+          "errorNs": 941,
+          "stdDevNs": 785,
+          "ratio": 0.86,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Handwritten",
+          "params": {
+            "Components": "5",
+            "Filtered": "True",
+            "Structural": "True"
+          },
+          "meanNs": 35200,
+          "errorNs": 2859,
+          "stdDevNs": 2674,
+          "ratio": 1.01,
+          "allocatedBytes": 0
+        },
+        {
+          "method": "Run",
+          "params": {
+            "Components": "5",
+            "Filtered": "True",
+            "Structural": "True"
+          },
+          "meanNs": 37000,
+          "errorNs": 1699,
+          "stdDevNs": 1590,
+          "ratio": 1.06,
           "allocatedBytes": 0
         }
       ]

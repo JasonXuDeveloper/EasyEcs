@@ -46,7 +46,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `EcsSystem` | abstract class | `World`、`UpdateInterval`、`UpdatePhase`、`Enabled`、`Error`、`Stats`、`LastRunTick`；`OnCreate` / `OnUpdate` / `OnDestroy`（[系统](/zh/docs/guide/systems)）。 |
 | `ForEachAttribute` 及其过滤特性 | 特性 | `[ForEach]`（`Parallel = true`）、`[With<T>]`、`[Without<T>]`、`[WithAny<T>]`、`[Changed<T>]`、`[Removed<T>]`。 |
 | `Maybe<T>` | ref struct | `[ForEach]` 方法的可选组件参数：`HasValue`、`Value`。 |
-| `ISystemGroup`、`[UpdateInGroup<T>]`、`[UpdateBefore<T>]`、`[UpdateAfter<T>]` | 接口、特性 | 系统分组与排序。 |
+| `ISystemGroup`、`IGroupWith<T>`、`IGroupWithout<T>`、`[UpdateInGroup<T>]`、`[UpdateBefore<T>]`、`[UpdateAfter<T>]` | 接口、特性 | 系统分组（可通过接口加过滤条件）与排序。 |
 | `SystemErrorPolicy` | 枚举 | `Throw`（默认）或 `Disable`：系统抛异常时怎么办。 |
 | `SystemStats`、`SystemList` | readonly struct | 系统的运行次数和耗时；`world.Systems`，零分配。 |
 | `SystemAccess` | struct | 系统读写了哪些数据；只由生成的代码填写。 |
@@ -131,6 +131,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | --- | --- | --- |
 | `[ForEach]` 方法 / `world.ForEach<T1..Tn, TJob>(ref job, filter)` | O(M + S) | 最快：结构体 job，没有委托 |
 | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` | O(M + S) | job 还会拿到 `Entity` |
+| `entity.Run<T1..Tn, TJob>(ref job)` / `Run(ref job, filter)` | O(n)，过滤条件每个组件再加 O(1) | 单个实体；实体失效、缺组件或被过滤掉时返回 false；作业做结构变更后 ref 仍然有效 |
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数) | 连续行的 span；不能做结构变更 |
 | `world.ForEachParallel<T1..Tn, TJob>(ref job, filter)` / `ForEachEntityParallel` | O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | `INoStructuralChanges` job；每块 1,024 到 `World.ParallelChunkRows` 行，每块一个 job 副本；只在划算时唤醒助手线程 |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | 指向行内的 ref：被追踪组件的每个被访问行都算写入；循环里不能 `await` |
@@ -171,6 +172,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | API | 复杂度 | 说明 |
 | --- | --- | --- |
 | `world.Children(parent)` | O(1)，然后每个子实体 O(1) | `ChildOf` 指向 `parent` 的实体；销毁父实体会销毁它们，以及它们的子实体 |
+| `world.Descendants(root)` | 子树里每个实体 O(1) | 深度优先，`root` 以下的每一层；预热后 0 B |
 | `entity.AddRelation(in T relation)` | 均摊 O(1) | 追加到实体的 `DynamicBuffer<T>`（缺失时先添加）和关系索引 |
 | `entity.RemoveRelation<T>(target)` / `HasRelation<T>(target)` | O(L) | `RemoveRelation` 返回删掉了几条 |
 | `world.Relations<T>()` | O(1)；第一次调用时创建 | 关系索引；对关系 `X` 会生成 `world.XIndex` |
@@ -195,7 +197,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.SaveEntities(output, ids)` | O(给定实体数 × 组件数) | 一组实体，交给另一个 World 或进程 |
 | `world.SaveEntities(output, ids, set)` | O(给定实体数 × 组件数) | 只写 `ComponentSet` 里的组件（建一次：`ComponentSet.Create().With<T>()`，每个类型 O(1)） |
 | `world.LoadEntities(input, entities)` | O(实体数 × 组件数) | 新 id；指向组内实体的 `EntityId` 字段会改写，其他的变成 `EntityId.Null` |
-| `world.LoadEntitiesInto(input, entities)` | O(实体数 × 组件数) | 读到已经存在的实体上：每个实体最多换一次表，存档里没有的组件保持不变 |
+| `world.LoadEntitiesInto(input, entities, markWritten)` | O(实体数 × 组件数) | 读到已经存在的实体上：每个实体最多换一次表，存档里没有的组件保持不变；`markWritten: false` 不改变更 tick |
 | `world.MoveEntities(target, ids, moved)` | O(实体数 × 组件数) | 搬到本线程的另一个 World，不经过编码；原实体被销毁 |
 
 细节见[快照](/zh/docs/guide/snapshots)、[存档](/zh/docs/guide/saves)、[迁移与卸载](/zh/docs/guide/migration-and-unload)。

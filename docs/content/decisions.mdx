@@ -669,6 +669,82 @@ drops a list of more than 4 KB.
 - **A fixed number of pooled lists** (256): churn above it allocated again, and a peak is already bounded by the
   entities that held the lists.
 
+## D33. One entity runs a pass's job: `entity.Run` [#d33-one-entity-runs-a-passs-job]
+
+**Decision.** `entity.Run<T1..Tn, TJob>(ref job)` and `Run(ref job, filter)` run an `IForEachEntity` job on one
+entity with what a pass guarantees: `Writes` stamp change ticks, the refs stay valid across the job's own structural
+changes (written components are carried to the new row, also when the job throws), `INoStructuralChanges` freezes
+the structure. The filter is tested on the row itself.
+
+**Why.**
+- **Code that handles one entity at a time** (a request, an actor's message) otherwise looks each component up
+  through the handle and takes its refs again after every structural change. One job gets one lookup for all its
+  components and the same rules as the systems.
+- **No slower than the code it replaces.** 1,000 calls on 10,000 entities with 1, 3 or 5 components, with and without
+  a filter and a structural change, against the same work through the handle (`SingleEntityBenchmark`): 0.69 to
+  1.06 times the handwritten time, 0 B. The cases at 1.04 and 1.06 (a filter and a structural change, 3 and 5
+  components) are within the run's error.
+- **The thread rule stays the owner's.** A plain flag store freezes the structure when the gate is free (the owner
+  outside any region); inside a parallel region the region's freeze is already held, and the analyzer reports `Run`
+  as a structural call ([EECS010](/en/docs/guide/analyzer#eecs010), EECS013, EECS014).
+
+**Considered.**
+- **A filter tested through the query cache:** a lookup of the filter's table set per call, which cost more than the
+  job; testing the row's table mask and presence bits is O(1) per filter component.
+- **Interlocked freeze and pass counters, as passes use:** about 12 ns per call; the owner thread alone touches them
+  when the gate is free.
+
+## D34. Group filters through interfaces [#d34-group-filters-through-interfaces]
+
+**Decision.** A system group that implements `IGroupWith<T>` or `IGroupWithout<T>`, itself or through one of its
+interfaces, gets the same filter as `[With<T>]` / `[Without<T>]` on the group. The generator reads the interfaces with
+the attributes; nothing changes at run time.
+
+**Why.**
+- **A generic group cannot name its filter in an attribute.** C# refuses a type parameter as the type argument of an
+  attribute (CS8968), so `[With<Inbox<TActor>>]` cannot sit on `IActorGroup<TActor>`. Interfaces take type
+  parameters, and one interface then gives every actor type a group of its own.
+- **The same filter, the same cost.** The interfaces become the same `With` / `Without` of every `[ForEach]` method
+  of the group, built once per method; a pass does not know where they came from.
+- **Types from another assembly work.** A framework can ship the tag and the interface; the closed types are the
+  user's (`struct Map : IActor<Map>` filters by `In<Map>`).
+
+**Considered.**
+- **A `Type` argument in the attribute** (`[GroupWith(typeof(Inbox<>))]` closed over the group): attributes cannot
+  take open generic types bound to the group's arguments either, and the binding rule would be ours to invent.
+- **Filters in a static member of the group:** the generator would have to evaluate code; interfaces are symbols.
+
+## D35. A record can load without counting as a change [#d35-a-record-can-load-without-counting-as-a-change]
+
+**Decision.** `LoadEntitiesInto(input, entities, markWritten: false)` loads the record without stamping it: a value it
+replaces keeps its change tick, a component it adds gets tick 0 (never written). The default stays `true`.
+
+**Why.**
+- **A restored record is not news.** A system that saves or replicates `[Changed<T>]` rows would otherwise send what
+  was just read from the database straight back.
+- **The load already decides the ticks** (one move per entity, then the values); leaving them costs nothing.
+
+**Considered.**
+- **Clearing the ticks after the load** (`world.Since`-style): the row's earlier tick is lost, so a write made before
+  the load would vanish from `Changed<T>` too.
+- **A separate `RestoreEntitiesInto`:** the same call with one difference; a parameter says it where it is used.
+
+## D36. Not added: parallel batch jobs, a row's last write tick, public access sets, a shared parallelism budget [#d36-not-added]
+
+**Decision.** Four requests were weighed and left out.
+
+**Why.**
+- **Parallel batch jobs** (`ForEachBatchParallel`, `[ForEach(Parallel = true)]` on span methods). 100,000 entities,
+  `ParallelForEachBenchmark`: a heavy steering pass took 766 µs as a parallel batch and 727 µs per entity in
+  parallel; a light drift took 54.5 µs and 55.6 µs (107 µs on one thread). On several threads the per-entity pass
+  already reaches memory's speed, so the batch form added an API, a job type and generator paths for no gain.
+- **`entity.LastWriteTick<T>()`.** `entity.Run(ref job, QueryFilter.Create().Changed<T>(tick))` answers "was it
+  written since?" for one entity without exposing the tick column.
+- **Public `SystemAccess`.** The read and write sets are how the scheduler decides; publishing them freezes that shape
+  into the API, and no use outside the scheduler remained.
+- **One parallelism budget for several worlds.** The host sets `WorldOptions.MaxDegreeOfParallelism` per world;
+  a shared budget would be state shared across worlds, which each belong to one owner thread.
+
 ## Related [#related]
 
 <Cards>

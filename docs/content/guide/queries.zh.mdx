@@ -84,6 +84,7 @@ int cleared = world.DestroyEntities<Position>(QueryFilter.Create().With<Dead>())
 | 最快的临时循环 | `world.ForEach<T1..Tn, TJob>(ref job, filter)` 加[结构体 job](#foreach-a-struct-job) |
 | 需要 `Entity` 的临时循环 | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` |
 | 对成段的行做临时算术 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` |
+| 在单个实体上跑作业（一个请求、一条消息） | [`entity.Run<T1..Tn, TJob>(ref job, filter)`](#run-on-one-entity) |
 | 临时的重计算，多线程 | [`ForEachParallel` / `ForEachEntityParallel`](#on-several-threads-foreachparallel-and-foreachentityparallel) |
 | 写起来方便的循环（工具、测试、请求处理） | `foreach (var item in world.Query<T1..Tn>(filter))` |
 | “有多少个……？” / “有没有……？” | `world.Count<T1..Tn>(filter)` / `world.Any<T1..Tn>(filter)` |
@@ -208,6 +209,43 @@ world.ForEachEntity<Health, KillTheWounded>(ref kill, QueryFilter.Create().Witho
 var drift = new Drift();
 world.ForEachBatch<Position, Velocity, Drift>(ref drift, Filters.Active);
 ```
+
+### 单个实体：`entity.Run` [#run-on-one-entity]
+
+一次只处理一个实体的代码（一个请求、发给 actor 的一条消息、一个命令），用 `entity.Run<T1..Tn, TJob>(ref job, filter)` 在这个实体上
+跑作业。作业是 `IForEachEntity` 作业，和遍历整个 World 用的是同一种类型，拿到的 ref 也和遍历时一样：所有组件只查一次表，
+不用每个 `Get` 查一次。实体缺少某个组件、不满足过滤条件或已经不存活时，它返回 `false`，不执行作业。
+
+```csharp
+public struct TakeHit : IForEachEntity<Health>
+{
+    public int Damage;
+    public static int Writes => 1;
+
+    public void Execute(Entity unit, ref Health hp)
+    {
+        if (hp.Value <= Damage) unit.SetDead();   // 结构变更：hp 仍然指向这个实体的值
+        hp.Value -= Damage;                       // 作业返回时搬到实体的新行
+    }
+}
+```
+
+```csharp
+var hit = new TakeHit { Damage = 30 };
+bool applied = unit.Run<Health, TakeHit>(ref hit, QueryFilter.Create().Without<Dead>());   // false：已死亡，或没有 Health
+```
+
+- **作业自己做结构变更后，ref 依然有效**，和 `ForEachEntity` 一样：`Execute` 结束后，`Writes` 里的组件会复制到实体的新行；
+  抛异常时也照样复制，异常之前写进去的值不会丢。
+- **只有 `Writes` 里的组件算写入**，参与[变更追踪](/zh/docs/guide/change-tracking)；什么都不写的作业声明 `Writes => 0`。
+- **`INoStructuralChanges`** 省掉这些簿记，作业运行期间冻结结构，和遍历一样。
+- **O(1)，过滤条件里每提到一个组件再加 O(1)。** 过滤条件像查询一样检查这一行（`Without`、`WithAny`、`Changed<T>(tick)`、分组），
+  不查查询对应的表；过滤条件建一次，放在 `static readonly` 字段里。
+
+在 10,000 个实体上调用 1,000 次，每次换一个实体，带 1、3 或 5 个组件，有没有 `Without<Dead>` 过滤、中途有没有结构变更，
+对照通过句柄手写的同样工作（`Has<Dead>()`、每个组件一次 `TryGetRef`、变更后重新取 ref）（`SingleEntityBenchmark`）：
+
+<BenchTable bench="SingleEntityBenchmark" />
 
 ### 多线程：`ForEachParallel` 和 `ForEachEntityParallel` [#on-several-threads-foreachparallel-and-foreachentityparallel]
 

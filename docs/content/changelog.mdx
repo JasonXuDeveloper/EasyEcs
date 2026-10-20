@@ -10,6 +10,28 @@ major or minor version that needs code changes? The
 [migration guide](/en/docs/migration) has the steps. Each
 [GitHub release](https://github.com/JasonXuDeveloper/EasyEcs/releases) also lists every pull request it contains.
 
+## 4.5.0 [#v4-5-0]
+
+### New [#v4-5-0-new]
+
+- `entity.Run(ref job)` runs a struct job (`IForEachEntity<T1..T9>`) on one entity: it returns false when the entity
+  is stale or lacks a component, and `entity.Run(ref job, filter)` also when a `QueryFilter` (`With`, `Without`,
+  `WithAny`, `Changed`, `Removed`, a group) rejects it. The job's `Writes` stamp change ticks as in a pass, its `ref`
+  parameters stay valid across its own structural changes, and its writes reach the moved row even when it throws.
+  See [one entity: `entity.Run`](/en/docs/guide/queries#run-on-one-entity).
+- A system group can filter through interfaces: `IGroupWith<T>` / `IGroupWithout<T>` on the group, or on an interface
+  it implements, act as `[With<T>]` / `[Without<T>]`. A generic interface gives each type its own group
+  (`IActorGroup<TActor> : IGroupWith<Inbox<TActor>>`), which attributes cannot express. See
+  [group filters](/en/docs/guide/systems#group-filters).
+- `world.Descendants(root)` walks a whole subtree, depth first, allocation-free once warm: collect a group with every
+  level of children before moving or saving it. See [list them](/en/docs/guide/hierarchy#children).
+- `world.LoadEntitiesInto(input, entities, markWritten: false)` restores a record without counting it as a change, so
+  `[Changed<T>]` savers and replicators do not send it back. See
+  [a record of what persists](/en/docs/guide/migration-and-unload#records).
+- The analyzer treats `entity.Run` as a structural call: [EECS010](/en/docs/guide/analyzer#eecs010) rejects it in a
+  parallel `[ForEach]` method, [EECS013](/en/docs/guide/analyzer#eecs013) and
+  [EECS014](/en/docs/guide/analyzer#eecs014) check it like `Set`.
+
 ## 4.4.0 [#v4-4-0]
 
 ### New [#v4-4-0-new]

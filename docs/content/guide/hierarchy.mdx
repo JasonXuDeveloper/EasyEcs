@@ -55,6 +55,16 @@ first call indexes every `ChildOf` once.
 foreach (var child in world.Children(ship)) { /* the turret */ }
 ```
 
+`world.Descendants(root)` walks the whole subtree below the root, depth first, each entity before its own children
+(the root itself is not one of them): O(1) per entity, nothing allocated once warm. Use it where a whole tree is the
+unit (saving, moving or counting it); propagation that needs each parent's result goes through
+[`Children` level by level](#transform-propagation).
+
+```csharp
+int parts = 0;
+foreach (var part in world.Descendants(ship)) parts++;   // turrets, their barrels, ...
+```
+
 </Step>
 <Step>
 
@@ -145,8 +155,8 @@ here allocates.
 
 ### Moving a hierarchy [#moving]
 
-`MoveEntities` and `SaveEntities` take the entities you list, not their children. Collect a hierarchy with `Children`
-and move it together: a child whose parent stays behind arrives without its `ChildOf` (a root there), and
+`MoveEntities` and `SaveEntities` take the entities you list, not their children. Collect a hierarchy with
+`Descendants` and move it together: a child whose parent stays behind arrives without its `ChildOf` (a root there), and
 `MoveEntities` destroys the originals with their children, so a child you did not list is lost. See
 [migration](/en/docs/guide/migration-and-unload#move-entities).
 
@@ -155,7 +165,7 @@ var player = world.CreateEntity(new Name("bob"));
 world.CreateEntity(new Name("sword"), new ChildOf(player));
 
 var group = new List<EntityId> { player.Id };
-foreach (var child in world.Children(player)) group.Add(child.Id);
+foreach (var part in world.Descendants(player)) group.Add(part.Id);   // children, grandchildren, ...
 using var other = new World();
 world.MoveEntities(other, group.ToArray());   // bob and his sword, still linked
 ```
@@ -287,6 +297,7 @@ survives the ship; the gun, re-parented to the ship, does not.
   destroys an entity.
 - **Memory:** the `ChildOf` column (8 bytes per row) and the index of an `EntityId` key (one node per child).
 - **`Children`:** O(1), then O(1) per child; the first call indexes every `ChildOf`.
+- **`Descendants`:** O(1) per entity of the subtree, on a stack the world keeps (0 B once warm).
 - **A cascade:** O(1) per destroyed entity, plus O(1) per child it had.
 
 ## Pitfalls [#pitfalls]
@@ -295,7 +306,8 @@ survives the ship; the gun, re-parented to the ship, does not.
 | --- | --- | --- |
 | Writing `ChildOf` through a `ref` | The index keeps the old parent | [EECS015](/en/docs/guide/analyzer#eecs015) |
 | A parent pointer of your own as an `Entity` field | A managed column, not saved, no cascade | [EECS017](/en/docs/guide/analyzer#eecs017) |
-| Moving a parent without its children | The children stay and die with the destroyed original | Collect the group with `Children` |
+| Moving a parent without its children | The children stay and die with the destroyed original | Collect the group with `Descendants` |
+| Collecting a tree with `Children` alone | Grandchildren are left out | `Descendants` walks every level |
 | `Disable<ChildOf>()` | `InvalidOperationException` | At run time |
 | Expecting world positions without a system | There is no built-in transform | Write the [propagation system](#transform-propagation) |
 

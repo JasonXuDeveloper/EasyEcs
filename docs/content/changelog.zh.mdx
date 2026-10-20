@@ -9,6 +9,24 @@ icon: RotateCcwClock
 [迁移指南](/zh/docs/migration)。每个
 [GitHub Release](https://github.com/JasonXuDeveloper/EasyEcs/releases) 也会列出它包含的全部 pull request。
 
+## 4.5.0 [#v4-5-0]
+
+### 新功能 [#v4-5-0-new]
+
+- `entity.Run(ref job)` 在单个实体上运行结构体作业（`IForEachEntity<T1..T9>`）：实体已失效或缺少组件时返回 false；
+  `entity.Run(ref job, filter)` 在 `QueryFilter`（`With`、`Without`、`WithAny`、`Changed`、`Removed`、分组）不通过时也返回 false。
+  作业的 `Writes` 会像遍历时一样打变更戳；作业自己做结构变更后，`ref` 参数依然有效；作业抛异常时，写入也会带到搬走后的行。
+  见[单个实体：`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)。
+- 系统分组可以通过接口加过滤条件：分组本身或它实现的接口上的 `IGroupWith<T>` / `IGroupWithout<T>`，作用等同于
+  `[With<T>]` / `[Without<T>]`。泛型接口能给每种类型各配一个分组（`IActorGroup<TActor> : IGroupWith<Inbox<TActor>>`），这是特性做不到的。
+  见[分组过滤](/zh/docs/guide/systems#group-filters)。
+- `world.Descendants(root)` 按深度优先遍历整棵子树，预热后不分配内存：搬移或保存之前，用它把各层子实体都收进一组。
+  见[列出子实体](/zh/docs/guide/hierarchy#children)。
+- `world.LoadEntitiesInto(input, entities, markWritten: false)` 恢复记录时不算变更，按 `[Changed<T>]` 保存或同步的系统不会再把它送回去。
+  见[只存需要持久化的部分](/zh/docs/guide/migration-and-unload#records)。
+- 分析器把 `entity.Run` 视为结构变更调用：[EECS010](/zh/docs/guide/analyzer#eecs010) 在并行 `[ForEach]` 方法里拒绝它，
+  [EECS013](/zh/docs/guide/analyzer#eecs013) 和 [EECS014](/zh/docs/guide/analyzer#eecs014) 像检查 `Set` 一样检查它。
+
 ## 4.4.0 [#v4-4-0]
 
 ### 新功能 [#v4-4-0-new]

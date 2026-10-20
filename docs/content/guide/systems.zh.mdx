@@ -285,6 +285,26 @@ public class MoveSystem : EcsSystem
 }
 ```
 
+用泛型接口描述的分组没法用特性写出过滤条件：C# 不允许类型参数做特性的类型实参（在 `IActorGroup<TActor>` 上写
+`[With<Inbox<TActor>>]` 会报 CS8968）。这时让分组实现 `IGroupWith<T>` 或 `IGroupWithout<T>`，直接实现或通过接口继承都行，
+效果和特性一样：一个接口就能给每种 actor 类型各配一个分组。
+
+```csharp
+public record struct Inbox<TActor>(int Pending) : IComponent;   // 某一种 actor 的消息
+public record struct Stock(int Items) : IComponent;
+
+public interface IActorGroup<TActor> : IGroupWith<Inbox<TActor>>, IGroupWithout<Frozen> where TActor : struct;
+
+public struct Shop : IActorGroup<Shop>;             // 商店 actor：拥有 Inbox<Shop> 且未被冻结的实体
+
+[UpdateInGroup<Shop>]
+public class RestockSystem : EcsSystem
+{
+    [ForEach]
+    static void Restock(ref Stock stock) => stock.Items = Math.Max(stock.Items, 10);
+}
+```
+
 ### 泛型系统 [#generic-systems]
 
 系统可以是泛型的。每个封闭类型都是一个独立的系统，有自己生成的 job 和访问集合，所以 `CountOf<Position>` 和 `CountOf<Health>`

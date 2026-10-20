@@ -45,7 +45,7 @@ world.CreateEntity(new Pet(hero), new Health(20));
 
 // 收集这一组：英雄、挂在他身上的、指向他的
 var group = new List<EntityId> { hero.Id };
-foreach (var child in world.Children(hero)) group.Add(child.Id);
+foreach (var part in world.Descendants(hero)) group.Add(part.Id);       // 子实体、孙实体……
 foreach (var item in world.Query<Pet>()) if (item.Pet.Owner == hero.Id) group.Add(item.Entity.Id);
 
 var bytes = new NinoArrayBufferWriter();
@@ -101,10 +101,17 @@ var activated = world.CreateEntity(new Connection(9));
 world.LoadEntitiesInto(record.WrittenSpan, [activated]);               // 加上 Bank，Connection 保留 // [!code highlight]
 ```
 
+```csharp
+// 同一份记录，恢复时不算变更：按 Changed<T> 保存的系统不会把它写回去
+world.LoadEntitiesInto(record.WrittenSpan, [activated], markWritten: false);
+```
+
 - 存档里第 i 个实体读到传入的第 i 个实体上；数量必须一致，每个实体都必须在本 World 里存活，否则在改动任何东西之前抛
   `ArgumentException`。
 - 不管收到几个组件，每个实体最多换一次表。记录里有的组件会被加上或覆盖原值，没有的保持不变。
 - 索引、分组和变更追踪的表现和 `Set` 一样。被禁用的组件读进来仍是禁用的，值也保留。
+- 加载也算写入：`[Changed<T>]` 方法会看到读进来的组件。如果记录只是恢复原本就有的数据（actor 从数据库重新加载），传
+  `markWritten: false`：被替换的值保留原来的变更 tick，新加的值没有 tick，这样按变更保存或同步组件的系统就不会把记录原样写回去。
 - `EntityId` 字段按下文的规则改写，指向传入的实体；父实体不在记录里的 `ChildOf` 不会被设置。
 - 运行时才知道类型的框架用 `With(typeof(Bank))` 构建集合。
 
@@ -192,7 +199,7 @@ public static class Plugins
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
-| 只迁移父实体，不带子实体 | 子实体随原实体一起被销毁 | 用 `Children` 收集整组 |
+| 只迁移父实体，不带子实体 | 子实体随原实体一起被销毁 | 用 `Descendants` 收集整组 |
 | 组件里的 `List<T>` 存着 `EntityId` | 不会改写：仍指向旧 World 的实体 | 用字段、缓冲或关系 |
 | 组件里存了 `Entity` 句柄 | 不能存档，也不会改写 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
 | 先加载新插件，再卸载旧插件 | 类型 id 歧义：`InvalidDataException` | 按上面的重载顺序 |
@@ -203,6 +210,7 @@ public static class Plugins
 | 需要持久化的组件没放进记录的集合 | 不会存档：读回后实体保留自己原来的值，或者根本没有这个组件 | 在一个地方、按需要持久化的组件建集合 |
 | 用 `LoadEntities` 读记录 | 在已有实体之外又建了新实体 | 对已有实体用 `LoadEntitiesInto` |
 | `LoadEntitiesInto` 传入的实体数和存档不一致，或者有失效的实体 | `ArgumentException`；什么都不改 | 按存档顺序，每个存档实体对应一个存活实体 |
+| 恢复的记录被当成变更 | 按 `Changed<T>` 保存或同步的系统又把它发回去 | `markWritten: false` |
 
 ## 相关页面 [#related]
 
@@ -211,7 +219,7 @@ public static class Plugins
     整个 World 写成字节、版本兼容和 Nino。
   </Card>
   <Card title="层级" href="/zh/docs/guide/hierarchy">
-    用 `Children` 收集一组实体。
+    用 `Descendants` 收集一组实体。
   </Card>
   <Card title="示例：SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">
     `SaveEntities`、`LoadEntities` 和 `MoveEntities`，每一步都有校验。

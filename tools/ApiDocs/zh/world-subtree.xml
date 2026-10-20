@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.World.Subtree" source="a9f03fe35978">
+    <summary>一个实体的后代（<see cref="M:EasyEcs.World.Descendants(EasyEcs.EntityId)" />）：每次 <c>foreach</c> 都重新遍历。</summary>
+  </member>
+  <member name="M:EasyEcs.World.Subtree.GetEnumerator" source="05718e6e6093">
+    <summary>遍历后代（支持 <c>foreach</c>，预热后不分配内存）。</summary>
+    <exception cref="T:System.InvalidOperationException"><see cref="T:EasyEcs.ChildOf" /> 链接成环（遍历走到环时）。</exception>
+  </member>
+</doc>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.World.DescendantWalk" source="9091cb57c842">
+    <summary>
+      <see cref="M:EasyEcs.World.Descendants(EasyEcs.EntityId)" /> 的深度优先遍历：一个栈，存着还没读完的子实体列表，由
+      <see cref="M:EasyEcs.World.DescendantWalk.Dispose" /> 还给 World（<c>foreach</c> 会调用它）。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.World.DescendantWalk.Current" source="e11826d908a7">
+    <summary>当前的后代实体。</summary>
+  </member>
+  <member name="M:EasyEcs.World.DescendantWalk.Dispose" source="2e2fef66991c">
+    <summary>把栈还给 World，留给下一次遍历。</summary>
+  </member>
+  <member name="M:EasyEcs.World.DescendantWalk.MoveNext" source="36d6772d22a2">
+    <summary>移到下一个后代。每个实体 O(1)，每读完一个列表多一步。</summary>
+    <exception cref="T:System.InvalidOperationException"><see cref="T:EasyEcs.ChildOf" /> 链接成环。</exception>
+  </member>
+</doc>

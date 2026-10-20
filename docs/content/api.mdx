@@ -49,7 +49,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `EcsSystem` | abstract class | `World`, `UpdateInterval`, `UpdatePhase`, `Enabled`, `Error`, `Stats`, `LastRunTick`; `OnCreate` / `OnUpdate` / `OnDestroy` ([systems](/en/docs/guide/systems)). |
 | `ForEachAttribute` and its filters | attributes | `[ForEach]` (`Parallel = true`), `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`. |
 | `Maybe<T>` | ref struct | An optional component parameter of a `[ForEach]` method: `HasValue`, `Value`. |
-| `ISystemGroup`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]` | interface, attributes | System groups and ordering. |
+| `ISystemGroup`, `IGroupWith<T>`, `IGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]` | interfaces, attributes | System groups (with filters through interfaces) and ordering. |
 | `SystemErrorPolicy` | enum | `Throw` (default) or `Disable`: what an exception in a system does. |
 | `SystemStats`, `SystemList` | readonly structs | A system's run count and times; `world.Systems`, allocation-free. |
 | `SystemAccess` | struct | What a system reads and writes; filled only by generated code. |
@@ -136,6 +136,7 @@ A snapshot, a save or a clone of a buffer column copies the elements: O(elements
 | --- | --- | --- |
 | `[ForEach]` method / `world.ForEach<T1..Tn, TJob>(ref job, filter)` | O(M + S) | fastest: a struct job, no delegate |
 | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` | O(M + S) | the job also receives the `Entity` |
+| `entity.Run<T1..Tn, TJob>(ref job)` / `Run(ref job, filter)` | O(n), plus O(1) per filter component | one entity; false when stale, missing a component or rejected by the filter; refs survive the job's structural changes |
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + runs) | spans of consecutive rows; no structural changes |
 | `world.ForEachParallel<T1..Tn, TJob>(ref job, filter)` / `ForEachEntityParallel` | O(M + S), divided over up to `MaxDegreeOfParallelism` threads | `INoStructuralChanges` jobs; chunks of 1,024 to `World.ParallelChunkRows` rows, one job copy per chunk; helpers are woken only when they pay |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | refs into the row: every visited row of a tracked component counts as written; no `await` in the loop |
@@ -177,6 +178,7 @@ Details: [bulk changes](/en/docs/guide/bulk), [cleanup and disable](/en/docs/gui
 | API | Complexity | Notes |
 | --- | --- | --- |
 | `world.Children(parent)` | O(1), then O(1) per child | the entities whose `ChildOf` points at `parent`; destroying a parent destroys them, and theirs |
+| `world.Descendants(root)` | O(1) per entity of the subtree | depth first, every level below `root`; 0 B once warm |
 | `entity.AddRelation(in T relation)` | O(1) amortized | appends to the entity's `DynamicBuffer<T>` (added first if missing) and to the relation index |
 | `entity.RemoveRelation<T>(target)` / `HasRelation<T>(target)` | O(L) | `RemoveRelation` returns how many links went |
 | `world.Relations<T>()` | O(1); the first call creates it | the relation index; generated as `world.XIndex` for a relation `X` |
@@ -201,7 +203,7 @@ Details: [bulk changes](/en/docs/guide/bulk), [cleanup and disable](/en/docs/gui
 | `world.SaveEntities(output, ids)` | O(entities given × components) | a group of entities, for another world or process |
 | `world.SaveEntities(output, ids, set)` | O(entities given × components) | only the components of a `ComponentSet` (built once: `ComponentSet.Create().With<T>()`, O(1) per type) |
 | `world.LoadEntities(input, entities)` | O(entities × components) | new ids; `EntityId` fields naming the group are rewritten, others become `EntityId.Null` |
-| `world.LoadEntitiesInto(input, entities)` | O(entities × components) | onto entities that exist: each moves table at most once, the components the save lacks stay |
+| `world.LoadEntitiesInto(input, entities, markWritten)` | O(entities × components) | onto entities that exist: each moves table at most once, the components the save lacks stay; `markWritten: false` leaves the change ticks |
 | `world.MoveEntities(target, ids, moved)` | O(entities × components) | to another world of this thread, without encoding; the originals are destroyed |
 
 Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),

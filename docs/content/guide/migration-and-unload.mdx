@@ -50,7 +50,7 @@ world.CreateEntity(new Pet(hero), new Health(20));
 
 // Collect the group: the hero, what hangs on it, what points at it.
 var group = new List<EntityId> { hero.Id };
-foreach (var child in world.Children(hero)) group.Add(child.Id);
+foreach (var part in world.Descendants(hero)) group.Add(part.Id);       // children, grandchildren, ...
 foreach (var item in world.Query<Pet>()) if (item.Pet.Owner == hero.Id) group.Add(item.Entity.Id);
 
 var bytes = new NinoArrayBufferWriter();
@@ -109,11 +109,19 @@ var activated = world.CreateEntity(new Connection(9));
 world.LoadEntitiesInto(record.WrittenSpan, [activated]);               // Bank added, Connection kept // [!code highlight]
 ```
 
+```csharp
+// The same record, restored without counting as a change: a saver of Changed<T> rows does not write it back.
+world.LoadEntitiesInto(record.WrittenSpan, [activated], markWritten: false);
+```
+
 - The i-th saved entity loads onto the i-th entity given; the counts must match and every entity must be alive in
   this world, or the call throws `ArgumentException` before changing anything.
 - Each entity moves table at most once, whatever the number of components it receives. Components the record holds
   are added or replace the entity's values; the others stay.
 - Indexes, groups and change tracking follow as with `Set`. A disabled component arrives disabled with its value.
+- A load is a write: `[Changed<T>]` methods see the loaded components. When the record only restores what was there
+  (an actor coming back from its database), pass `markWritten: false`: a replaced value keeps its change tick and a
+  new one has none, so a system that saves or replicates changed components does not send the record straight back.
 - `EntityId` fields are rewritten as below, onto the entities given; a `ChildOf` whose parent is not in the record is
   not set.
 - A framework that learns its types at run time builds the set with `With(typeof(Bank))`.
@@ -211,7 +219,7 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| Moving a parent without its children | The children are destroyed with the original | Collect the group with `Children` |
+| Moving a parent without its children | The children are destroyed with the original | Collect the group with `Descendants` |
 | `EntityId`s in a `List<T>` inside a component | Not rewritten: they name entities of the old world | Use fields, a buffer or a relation |
 | An `Entity` handle in a component | Not saved, not rewritten | [EECS017](/en/docs/guide/analyzer#eecs017) |
 | Loading the new plugin before unloading the old one | Ambiguous type ids: `InvalidDataException` | The reload order above |
@@ -222,6 +230,7 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
 | A component that persists left out of the record's set | Not saved: the loaded entity keeps its own value, or has none | Build the set from the persisting components, in one place |
 | A record loaded with `LoadEntities` | New entities beside the live ones | `LoadEntitiesInto` with the live entities |
 | `LoadEntitiesInto` with another number of entities than the save holds, or a stale one | `ArgumentException`; nothing changes | One live entity per saved entity, in save order |
+| A restored record seen as changed | A `Changed<T>` saver or replicator sends it straight back | `markWritten: false` |
 
 ## Related [#related]
 
@@ -230,7 +239,7 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
     The whole world as bytes, versioning and Nino.
   </Card>
   <Card title="Hierarchy" href="/en/docs/guide/hierarchy">
-    Collect a group with `Children`.
+    Collect a group with `Descendants`.
   </Card>
   <Card title="Sample: SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">
     `SaveEntities`, `LoadEntities` and `MoveEntities`, verified step by step.

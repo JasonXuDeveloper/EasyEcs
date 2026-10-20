@@ -58,7 +58,9 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`TableInfo`](/zh/docs/reference/tableinfo) | 一张表：拥有同一组组件列的实体（World.Describe）。 |
 | [`ValueIndex<T, TKey>.Matches`](/zh/docs/reference/valueindex-matches) | 枚举一个键对应的实体（foreach）。 |
 | [`ValueIndex<T, TKey>.Ordered`](/zh/docs/reference/valueindex-ordered) | 按键的顺序枚举实体（foreach）：先是一个键的所有实体，再到下一个键。 |
+| [`World.DescendantWalk`](/zh/docs/reference/world-descendantwalk) | World.Descendants 的深度优先遍历：一个栈，存着还没读完的子实体列表，由 World.DescendantWalk.Dispose 还给 World（foreach 会调用它）。 |
 | [`World.EntityEnumerator`](/zh/docs/reference/world-entityenumerator) | 按 id 顺序枚举存活实体；超出开始时容量的 id 不会访问到。 |
+| [`World.Subtree`](/zh/docs/reference/world-subtree) | 一个实体的后代（World.Descendants）：每次 foreach 都重新遍历。 |
 
 ## 接口 [#interfaces]
 
@@ -70,6 +72,8 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`IForEachBatch<T1..T9>`](/zh/docs/reference/iforeachbatch) | World.ForEachBatch 的结构体回调：一次接收一整段行，每个组件一个 span，job 可以用 SIMD 处理（System.Numerics.Vector、MemoryMarshal.Cast），还能拿到这些行的实体（按下标访问时才构造）。 |
 | [`IForEachEntity<T1..T9>`](/zh/docs/reference/iforeachentity) | 和 IForEach 一样，但还接收 Entity 句柄。 |
 | [`IGroup`](/zh/docs/reference/igroup) | 标记一个按值拆分表的组件：在调用过 World.GroupBy 的 World 里，IGroup.Group 不同的实体放在不同的表，所以只查询一组（QueryFilter.InGroup）时只遍历这一组的行，这些行在内存里是连续的（一个区域、一张地图、一场对局、一支队伍）。 |
+| [`IGroupWith<T>`](/zh/docs/reference/igroupwith) | 系统分组：其中的 [ForEach] 方法只访问有 T 的实体，效果和在分组上写 WithAttribute 一样。 |
+| [`IGroupWithout<T>`](/zh/docs/reference/igroupwithout) | 系统分组：其中的 [ForEach] 方法跳过有 T 的实体，效果和在分组上写 WithoutAttribute 一样（见 IGroupWith）。 |
 | [`IIndexed, IIndexed<TKey>`](/zh/docs/reference/iindexed) | 所有 IIndexed 共同实现的接口：不用反射，就能知道一个组件类型建了索引（JIT 会把这个类型检测折叠掉）。 |
 | [`INoStructuralChanges`](/zh/docs/reference/inostructuralchanges) | 标记一个不做结构变更的 ForEach job：不在它遍历的 World 里创建或销毁实体，也不增删、设置任何组件。 |
 | [`IRelation`](/zh/docs/reference/irelation) | DynamicBuffer 的元素，把所在实体链接到 IRelation.Target：一个实体可以有任意多条同一种链接（队伍的成员、商人卖的物品、一个 buff 作用的单位），World.Relations 能找出链接到某个目标的实体。 |

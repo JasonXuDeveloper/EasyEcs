@@ -45,6 +45,8 @@ import { RotateCcwClock, Lightbulb } from 'lucide-react';
   （步长为零的时钟），所以所有读取都抛异常；确实要默认值的地方用 `GetOrAddX()`
   （[D27](/zh/docs/decisions#d27-reading-a-missing-singleton-throws-everywhere)）。
 - 由特性生成缓存过滤器、按组件生成计数成员（`world.CountPlayer()`）、命名的 `TryGetXRef`：省不下代码，API 面却更大。
+- 并行批处理作业、`entity.LastWriteTick<T>()`、公开读写集、多个 World 共享并行预算
+  （[D36](/zh/docs/decisions#d36-not-added)）。
 
 ## 相关页面 [#related]
 

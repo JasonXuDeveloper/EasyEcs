@@ -256,6 +256,16 @@ public Entity CreateEntity<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in T1 c1, in T2 c
 - `world.CreateEntity()`：均摊 O(1)
 - `world.CreateEntity(in T1 … in Tn)`：均摊 O(n)
 
+### `Descendants` [#descendants]
+
+```csharp
+public World.Subtree Descendants(EntityId root);
+```
+
+`root` 的后代，深度优先，每个实体排在它自己的子实体之前：它的子实体、子实体的子实体，依此类推（`root` 本身不算）。保存一棵子树时这样收集：`ids.Add(root.Id); foreach (var e in world.Descendants(root.Id)) ids.Add(e.Id);`。每个实体 O(1)；第一次遍历会把每个 [`ChildOf`](/zh/docs/reference/childof) 索引一次。预热后不分配内存（遍历用的栈由 World 保留）。遍历中被销毁的实体会跳过。只能在所有者线程调用。
+
+**复杂度**（[API 表](/zh/docs/api)）：子树里每个实体 O(1)
+
 ### `Describe` [#describe]
 
 ```csharp
@@ -599,10 +609,12 @@ public int LoadEntities(ReadOnlySpan<byte> input, Span<Entity> entities = defaul
 ### `LoadEntitiesInto` [#loadentitiesinto]
 
 ```csharp
-public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into);
+public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into, bool markWritten = true);
 ```
 
 把 [`World.SaveEntities`](/zh/docs/reference/world#saveentities) 写出的组件放到已经存在的实体上（Actor 的实体先建好、记录后到的情形）：存档里第 i 个实体的组件设到 `into`[i] 上，没有的加上，已有的覆盖，每个实体最多换一次表；存档里没有的组件保持不变。索引、分组和变更 tick 的表现和 `Set` 一样（加载的每个组件都算写入）；被禁用的组件读进来仍是禁用的，值也保留。[`EntityId`](/zh/docs/reference/entityid) 字段原来指向组内实体的，改为指向它在 `into` 里对应的实体，其余的一律变成 [`EntityId.Null`](/zh/docs/reference/entityid#null)；父实体不在组内的 [`ChildOf`](/zh/docs/reference/childof) 不会被设置。返回加载的实体数。O(实体数 × 组件数)。遍历进行中不能调用。
+
+`markWritten` 为 false 时，加载的组件不算写入：覆盖的值保留被覆盖那个值的变更 tick，实体原来没有的组件没有 tick，所以 `[Changed<T>]` 系统和 `Since` 过滤器不会因为这次加载访问该实体（从存储恢复的 Actor 内容和存储一致，“保存变化的部分”在代码写入之前不会保存它的任何东西）。
 
 **异常**
 
@@ -733,7 +745,7 @@ public void Save(IBufferWriter<byte> output);
 public void SaveEntities(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities);
 ```
 
-把 `entities`（失效的 id 和重复的 id 跳过）和它们的组件写进 `output`，供 [`World.LoadEntities`](/zh/docs/reference/world#loadentities) 或 [`World.LoadEntitiesInto`](/zh/docs/reference/world#loadentitiesinto) 读取：一组要搬去另一个 World 的实体（一个玩家和他拥有的东西，搬到另一台服务器）。单例和组外的实体不写；整棵层级用 [`World.Children`](/zh/docs/reference/world#children) 收集。缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。遍历进行中不能调用。
+把 `entities`（失效的 id 和重复的 id 跳过）和它们的组件写进 `output`，供 [`World.LoadEntities`](/zh/docs/reference/world#loadentities) 或 [`World.LoadEntitiesInto`](/zh/docs/reference/world#loadentitiesinto) 读取：一组要搬去另一个 World 的实体（一个玩家和他拥有的东西，搬到另一台服务器）。单例和组外的实体不写；整棵层级用 [`World.Descendants`](/zh/docs/reference/world#descendants) 收集。缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。遍历进行中不能调用。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 

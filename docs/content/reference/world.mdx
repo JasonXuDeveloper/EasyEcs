@@ -256,6 +256,16 @@ Create an entity with 2 components placed directly in its final archetype (no in
 - `world.CreateEntity()`: O(1) amortized
 - `world.CreateEntity(in T1 … in Tn)`: O(n) amortized
 
+### `Descendants` [#descendants]
+
+```csharp
+public World.Subtree Descendants(EntityId root);
+```
+
+The descendants of `root`, depth first, each before its own children: its children, their children, and so on (`root` itself is not one). What a save of a subtree collects: `ids.Add(root.Id); foreach (var e in world.Descendants(root.Id)) ids.Add(e.Id);`. O(1) per entity; the first walk indexes every [`ChildOf`](/en/docs/reference/childof) once. Allocates nothing once warm (the walk's stack is kept by the world). An entity destroyed during the walk is skipped. Owner thread only.
+
+**Complexity** ([API table](/en/docs/api)): O(1) per entity of the subtree
+
 ### `Describe` [#describe]
 
 ```csharp
@@ -599,10 +609,12 @@ Create the entities `SaveEntities` wrote (in this process or another), with new 
 ### `LoadEntitiesInto` [#loadentitiesinto]
 
 ```csharp
-public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into);
+public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into, bool markWritten = true);
 ```
 
 Put the components [`World.SaveEntities`](/en/docs/reference/world#saveentities) wrote onto entities that exist already (an actor whose entity was made before its record arrived): the components of the i-th saved entity are set on `into`[i], added or replacing the values it has, each entity moving table at most once; components the save does not hold stay as they are. Indexes, groups and change ticks follow as with `Set` (every loaded component counts as written); a disabled component arrives disabled with its value. [`EntityId`](/en/docs/reference/entityid) fields that named an entity of the group name the entity of `into` it became, every other one is [`EntityId.Null`](/en/docs/reference/entityid#null), and a [`ChildOf`](/en/docs/reference/childof) whose parent stayed behind is not set. Returns how many entities were loaded. O(entities × components). Not while a pass iterates.
+
+With `markWritten` false, the loaded components do not count as written: a value that replaces one keeps that one's change tick, a component the entity did not have gets none, so `[Changed<T>]` systems and `Since` filters do not visit the entity for the load (an actor restored from storage holds what storage has, and "save what changed" saves nothing of it until code writes it).
 
 **Exceptions**
 
@@ -733,7 +745,7 @@ Write the entities (ids and versions), their components and the singletons into 
 public void SaveEntities(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities);
 ```
 
-Write `entities` (stale ids and repeats are skipped) and their components into `output`, for [`World.LoadEntities`](/en/docs/reference/world#loadentities) or [`World.LoadEntitiesInto`](/en/docs/reference/world#loadentitiesinto): a group of entities that moves to another world (a player and what it owns, to another server). Singletons and the other entities are not written; collect a hierarchy with [`World.Children`](/en/docs/reference/world#children). Allocates nothing once its buffers are large enough. O(entities given × components). Not while a pass iterates.
+Write `entities` (stale ids and repeats are skipped) and their components into `output`, for [`World.LoadEntities`](/en/docs/reference/world#loadentities) or [`World.LoadEntitiesInto`](/en/docs/reference/world#loadentitiesinto): a group of entities that moves to another world (a player and what it owns, to another server). Singletons and the other entities are not written; collect a hierarchy with [`World.Descendants`](/en/docs/reference/world#descendants). Allocates nothing once its buffers are large enough. O(entities given × components). Not while a pass iterates.
 
 **Complexity** ([API table](/en/docs/api)):
 

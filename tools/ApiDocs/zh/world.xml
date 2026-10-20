@@ -324,12 +324,12 @@
       缓冲区够大之后不分配内存。O(实体数 × 组件数)。遍历进行中不能调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.SaveEntities(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId})" source="788b13d9114b">
+  <member name="M:EasyEcs.World.SaveEntities(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId})" source="297f9e431123">
     <summary>
       把 <paramref name="entities" />（失效的 id 和重复的 id 跳过）和它们的组件写进 <paramref name="output" />，供
-      <see cref="M:EasyEcs.World.LoadEntities(System.ReadOnlySpan{System.Byte},System.Span{EasyEcs.Entity})" /> 或 <see cref="M:EasyEcs.World.LoadEntitiesInto(System.ReadOnlySpan{System.Byte},System.ReadOnlySpan{EasyEcs.Entity})" /> 读取：
+      <see cref="M:EasyEcs.World.LoadEntities(System.ReadOnlySpan{System.Byte},System.Span{EasyEcs.Entity})" /> 或 <see cref="M:EasyEcs.World.LoadEntitiesInto(System.ReadOnlySpan{System.Byte},System.ReadOnlySpan{EasyEcs.Entity},System.Boolean)" /> 读取：
       一组要搬去另一个 World 的实体（一个玩家和他拥有的东西，搬到另一台服务器）。单例和组外的实体不写；整棵层级用
-      <see cref="M:EasyEcs.World.Children(EasyEcs.EntityId)" /> 收集。缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。
+      <see cref="M:EasyEcs.World.Descendants(EasyEcs.EntityId)" /> 收集。缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。
       遍历进行中不能调用。
     </summary>
   </member>
@@ -365,7 +365,7 @@
     </summary>
   </member>
 
-  <member name="M:EasyEcs.World.LoadEntitiesInto(System.ReadOnlySpan{System.Byte},System.ReadOnlySpan{EasyEcs.Entity})" source="548836577a61">
+  <member name="M:EasyEcs.World.LoadEntitiesInto(System.ReadOnlySpan{System.Byte},System.ReadOnlySpan{EasyEcs.Entity},System.Boolean)" source="4bfbaa371242">
     <summary>
       把 <see cref="M:EasyEcs.World.SaveEntities(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId})" /> 写出的组件放到已经存在的实体上（Actor 的实体先建好、记录后到的情形）：存档里第 i 个实体的组件
       设到 <paramref name="into" />[i] 上，没有的加上，已有的覆盖，每个实体最多换一次表；存档里没有的组件保持不变。索引、分组和
@@ -373,6 +373,10 @@
       <see cref="T:EasyEcs.EntityId" /> 字段原来指向组内实体的，改为指向它在 <paramref name="into" /> 里对应的实体，其余的一律变成
       <see cref="P:EasyEcs.EntityId.Null" />；父实体不在组内的 <see cref="T:EasyEcs.ChildOf" /> 不会被设置。返回加载的实体数。
       O(实体数 × 组件数)。遍历进行中不能调用。
+      <br />
+      <paramref name="markWritten" /> 为 false 时，加载的组件不算写入：覆盖的值保留被覆盖那个值的变更 tick，实体原来没有的组件没有
+      tick，所以 <c>[Changed&lt;T&gt;]</c> 系统和 <c>Since</c> 过滤器不会因为这次加载访问该实体（从存储恢复的 Actor 内容和存储一致，
+      “保存变化的部分”在代码写入之前不会保存它的任何东西）。
     </summary>
     <exception cref="T:System.ArgumentException"><paramref name="into" /> 没有按存档里的每个实体各给出一个本 World 的存活实体。</exception>
     <exception cref="T:System.IO.InvalidDataException">字节不是存档。</exception>
@@ -382,6 +386,14 @@
       只写 <paramref name="components" /> 里的组件的 <see cref="M:EasyEcs.World.SaveEntities(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId})" />（只记录需要持久化的组件，不带运行时组件）：
       其余组件不写，也不需要 Nino 格式化器；标签只记有没有，被禁用的组件连同保留的值一起写。一个这些组件都没有的实体也会写出，
       只是是空的。缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。遍历进行中不能调用。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.Descendants(EasyEcs.EntityId)" source="ddb14fe91655">
+    <summary>
+      <paramref name="root" /> 的后代，深度优先，每个实体排在它自己的子实体之前：它的子实体、子实体的子实体，依此类推
+      （<paramref name="root" /> 本身不算）。保存一棵子树时这样收集：
+      <c>ids.Add(root.Id); foreach (var e in world.Descendants(root.Id)) ids.Add(e.Id);</c>。每个实体 O(1)；第一次遍历会把每个
+      <see cref="T:EasyEcs.ChildOf" /> 索引一次。预热后不分配内存（遍历用的栈由 World 保留）。遍历中被销毁的实体会跳过。只能在所有者线程调用。
     </summary>
   </member>
 </doc>

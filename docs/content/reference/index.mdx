@@ -58,7 +58,9 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`TableInfo`](/en/docs/reference/tableinfo) | A table: the entities with one set of component columns (World.Describe). |
 | [`ValueIndex<T, TKey>.Matches`](/en/docs/reference/valueindex-matches) | Enumerates the entities of one key (foreach). |
 | [`ValueIndex<T, TKey>.Ordered`](/en/docs/reference/valueindex-ordered) | Enumerates entities in key order (foreach): every entity of a key, then the next key. |
+| [`World.DescendantWalk`](/en/docs/reference/world-descendantwalk) | A depth-first walk of World.Descendants: a stack of the child lists still being read, given back to the world by World.DescendantWalk.Dispose (foreach calls it). |
 | [`World.EntityEnumerator`](/en/docs/reference/world-entityenumerator) | Enumerates alive entities in id order; ids beyond the capacity captured at start are not visited. |
+| [`World.Subtree`](/en/docs/reference/world-subtree) | The descendants of an entity (World.Descendants): each foreach walks them anew. |
 
 ## Interfaces
 
@@ -70,6 +72,8 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`IForEachBatch<T1..T9>`](/en/docs/reference/iforeachbatch) | Struct callback for World.ForEachBatch: receives whole runs of rows as spans, one per component, so the job can process them with SIMD (System.Numerics.Vector, MemoryMarshal.Cast), and their entities (built only when indexed). |
 | [`IForEachEntity<T1..T9>`](/en/docs/reference/iforeachentity) | Like IForEach but also receives the Entity handle, built from the archetype's entity rows (id and version side by side) without a per-entity lookup. |
 | [`IGroup`](/en/docs/reference/igroup) | Marks a component whose value splits tables: in a world that called World.GroupBy, entities with different IGroup.Groups live in different tables, so a query of one group (QueryFilter.InGroup) walks only its own rows, contiguous in memory (a zone, a map, a match, a team). |
+| [`IGroupWith<T>`](/en/docs/reference/igroupwith) | A system group whose [ForEach] methods visit only entities with T, as WithAttribute on the group would. |
+| [`IGroupWithout<T>`](/en/docs/reference/igroupwithout) | A system group whose [ForEach] methods skip entities with T, as WithoutAttribute on the group would (see IGroupWith). |
 | [`IIndexed, IIndexed<TKey>`](/en/docs/reference/iindexed) | What every IIndexed is, so a component type is known to be indexed without reflection (a type test the JIT folds). |
 | [`INoStructuralChanges`](/en/docs/reference/inostructuralchanges) | Marks a ForEach job that makes no structural change (no create/destroy/add/remove/set on any entity of the world it iterates). |
 | [`IRelation`](/en/docs/reference/irelation) | An element of a DynamicBuffer that links its entity to IRelation.Target: an entity holds any number of links of one kind (the members of a party, the items a merchant offers, the units a buff applies to), and World.Relations finds the entities linking to a target. |

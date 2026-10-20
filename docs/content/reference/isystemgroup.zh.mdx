@@ -22,4 +22,4 @@ world.Update<NetworkGroup>();   // whenever packets arrive
 world.Update();                     // fixed tick: default group
 ```
 
-分组上可以加 [`WithAttribute`](/zh/docs/reference/withattribute)、[`WithoutAttribute`](/zh/docs/reference/withoutattribute) 和 [`WithAnyAttribute`](/zh/docs/reference/withanyattribute) 过滤条件：生成器把它们加到分组里所有系统的每个 [ForEach] 方法上（`[Without<Inactive>] public struct Gameplay : ISystemGroup;` 让整个分组都不处理不活跃的实体）。系统在 OnUpdate 里自己发起的查询不受影响。
+分组上可以加 [`WithAttribute`](/zh/docs/reference/withattribute)、[`WithoutAttribute`](/zh/docs/reference/withoutattribute) 和 [`WithAnyAttribute`](/zh/docs/reference/withanyattribute) 过滤条件：生成器把它们加到分组里所有系统的每个 [ForEach] 方法上（`[Without<Inactive>] public struct Gameplay : ISystemGroup;` 让整个分组都不处理不活跃的实体）；它实现的接口也可以带过滤条件：[`IGroupWith`](/zh/docs/reference/igroupwith)、[`IGroupWithout`](/zh/docs/reference/igroupwithout)。系统在 OnUpdate 里自己发起的查询不受影响。

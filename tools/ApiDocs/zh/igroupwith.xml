@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.IGroupWith`1" source="c2062e78c156">
+    <summary>
+      系统分组：其中的 [ForEach] 方法只访问有 <typeparamref name="T" /> 的实体，效果和在分组上写 <see cref="T:EasyEcs.WithAttribute`1" />
+      一样。接口可以用自己的类型参数，特性不行，所以框架的泛型分组接口能给实现它的每个分组带上过滤条件：
+      <c>interface IActor&lt;TSelf&gt; : IGroupWith&lt;In&lt;TSelf&gt;&gt;</c>，之后
+      <c>struct Map : IActor&lt;Map&gt;</c> 的系统只处理 <c>In&lt;Map&gt;</c>。由生成器读取，运行时没有开销。
+    </summary>
+  </member>
+</doc>

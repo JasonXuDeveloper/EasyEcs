@@ -276,7 +276,7 @@ public class DriftAllSystem : EcsSystem
 
 **`[ForEach(Parallel = true)]` 不能在多个线程上跑。** 错误。代码修复：去掉 `Parallel = true`。
 
-并行方法会同时在多个线程上跑一块块的行，所以它不能做结构变更（static、不接收 `World`、`Entity` 只用来读：`Id`、`Has`、`Get` 等），
+并行方法会同时在多个线程上跑一块块的行，所以它不能做结构变更（static、不接收 `World`、`Entity` 只用来读：`Id`、`Has`、`Get` 等；不能调 `entity.Run`，它的作业用普通写入），
 必须逐实体运行（不能是批量方法），也不能写单例（`ref` 单例会在块之间产生竞争）。
 
 ```csharp doccheck=expect-EECS010
@@ -383,7 +383,7 @@ public static class Bags
 World 改了结构，两件事都会出错：遍历还拿着指向已移动行的引用，并行阶段里的变更会抛异常。
 
 在这样的方法里，规则会报出对 `Entity` 结构成员（`Set`、`Remove`、`Destroy`、`GetOrAdd`、`Clone`、`Disable`、`Enable`、
-`AddRelation`、`RemoveRelation`，以及生成的 `SetX`、`GetOrAddX`、`RemoveX`）或 `World` 结构成员（`CreateEntity`、`CreateEntities`、
+`AddRelation`、`RemoveRelation`、`Run`（它的作业可能改结构），以及生成的 `SetX`、`GetOrAddX`、`RemoveX`）或 `World` 结构成员（`CreateEntity`、`CreateEntities`、
 `Instantiate`、`DestroyEntities`、`SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`、`Load`、`LoadEntities`、`MoveEntities`、
 `GroupBy`、`RemoveTypes`、单例、系统、`Update`、`Capture`、`Restore` 等）的调用。方法自己创建的 World（局部变量里的 `new World()`）
 不算。

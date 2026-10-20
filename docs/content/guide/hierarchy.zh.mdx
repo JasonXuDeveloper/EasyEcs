@@ -53,6 +53,15 @@ var gun = world.CreateEntity(new Name("gun"), new ChildOf(turret));
 foreach (var child in world.Children(ship)) { /* 炮塔 */ }
 ```
 
+`world.Descendants(root)` 遍历根下面的整棵子树：深度优先，每个实体都排在它自己的子实体前面（根本身不算在内）。每个实体
+O(1)，热身后不分配内存。整棵树作为一个整体处理时（保存、迁移、计数）用它；需要先拿到父实体结果的传播，按
+[`Children` 一层层走](#transform-propagation)。
+
+```csharp
+int parts = 0;
+foreach (var part in world.Descendants(ship)) parts++;   // 炮塔、炮塔的炮管……
+```
+
 </Step>
 <Step>
 
@@ -141,7 +150,7 @@ world.Update();                            // barrel：WorldPosition(11, 2)
 
 ### 迁移层级 [#moving]
 
-`MoveEntities` 和 `SaveEntities` 只处理你列出的实体，不会顺带它们的子实体。用 `Children` 收集整棵层级再一起迁移：父实体
+`MoveEntities` 和 `SaveEntities` 只处理你列出的实体，不会顺带它们的子实体。用 `Descendants` 收集整棵层级再一起迁移：父实体
 没跟过去的子实体，到了那边会去掉 `ChildOf`（成为根）；而 `MoveEntities` 销毁原实体时会连同子实体一起销毁，没列出的子实体
 就丢了。详见[迁移](/zh/docs/guide/migration-and-unload#move-entities)。
 
@@ -150,7 +159,7 @@ var player = world.CreateEntity(new Name("bob"));
 world.CreateEntity(new Name("sword"), new ChildOf(player));
 
 var group = new List<EntityId> { player.Id };
-foreach (var child in world.Children(player)) group.Add(child.Id);
+foreach (var part in world.Descendants(player)) group.Add(part.Id);   // 子实体、孙实体……
 using var other = new World();
 world.MoveEntities(other, group.ToArray());   // bob 和他的剑，链接保持不变
 ```
@@ -279,6 +288,7 @@ turret alive: True, gun alive: False
 - **出现第一个 `ChildOf` 之前零开销。** 没有任何表包含 `ChildOf` 的 World，销毁实体时根本不去找子实体。
 - **内存：** `ChildOf` 列（每行 8 字节），外加 `EntityId` 键的索引（每个子实体一个节点）。
 - **`Children`：** O(1)，之后每个子实体 O(1)；第一次调用会索引所有 `ChildOf`。
+- **`Descendants`：** 子树里每个实体 O(1)，用的栈由 World 保留（热身后 0 B）。
 - **一次级联：** 每个被销毁的实体 O(1)，再加上它的每个子实体 O(1)。
 
 ## 常见陷阱 [#pitfalls]
@@ -287,7 +297,8 @@ turret alive: True, gun alive: False
 | --- | --- | --- |
 | 通过 `ref` 写 `ChildOf` | 索引还记着旧的父实体 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
 | 自己用 `Entity` 字段存父指针 | 托管列，存不了盘，也没有级联 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
-| 只迁移父实体，不带子实体 | 子实体留在原地，随原实体一起被销毁 | 用 `Children` 收集整组 |
+| 只迁移父实体，不带子实体 | 子实体留在原地，随原实体一起被销毁 | 用 `Descendants` 收集整组 |
+| 只用 `Children` 收集整棵树 | 漏掉孙实体 | `Descendants` 会走完每一层 |
 | `Disable<ChildOf>()` | 抛 `InvalidOperationException` | 运行时 |
 | 没写系统却指望有世界坐标 | 没有内置变换 | 写一个[传播系统](#transform-propagation) |
 

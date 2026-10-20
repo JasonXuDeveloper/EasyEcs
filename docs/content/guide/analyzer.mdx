@@ -296,7 +296,7 @@ public class DriftAllSystem : EcsSystem
 **`[ForEach(Parallel = true)]` cannot run on several threads.** Error. Code fix: removes `Parallel = true`.
 
 A parallel method runs chunks of rows on several threads at once, so it must make no structural change (static, no
-`World`, its `Entity` used only to read: `Id`, `Has`, `Get`, ...), run per entity (not a batch method) and write no
+`World`, its `Entity` used only to read: `Id`, `Has`, `Get`, ...; not `entity.Run`, whose job writes with plain stores), run per entity (not a batch method) and write no
 singleton (a `ref` singleton would race between chunks).
 
 ```csharp doccheck=expect-EECS010
@@ -411,7 +411,7 @@ made anyway, through a handle or a world kept elsewhere, breaks both: the pass k
 change inside a parallel stage throws.
 
 The rule reports a call to a structural member of `Entity` (`Set`, `Remove`, `Destroy`, `GetOrAdd`, `Clone`,
-`Disable`, `Enable`, `AddRelation`, `RemoveRelation`, and the generated `SetX`, `GetOrAddX`, `RemoveX`) or `World`
+`Disable`, `Enable`, `AddRelation`, `RemoveRelation`, `Run` (its job may change structure), and the generated `SetX`, `GetOrAddX`, `RemoveX`) or `World`
 (`CreateEntity`, `CreateEntities`, `Instantiate`, `DestroyEntities`, `SetAll`, `RemoveAll`, `DisableAll`,
 `EnableAll`, `Load`, `LoadEntities`, `MoveEntities`, `GroupBy`, `RemoveTypes`, singletons, systems, `Update`,
 `Capture`, `Restore`, ...) in such a method. A world the method creates itself (`new World()` in a local) is its own.

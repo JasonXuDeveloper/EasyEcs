@@ -238,6 +238,52 @@ public int RemoveRelation<T>(EntityId target) where T : struct, IRelation;
 
 **复杂度**（[API 表](/zh/docs/api)）：O(L)
 
+### `Run` [#run]
+
+```csharp
+public bool Run<T1, TJob>(ref TJob job) where T1 : struct, IComponent where TJob : struct, IForEachEntity<T1>, allows ref struct;
+public bool Run<T1, T2, TJob>(ref TJob job) where T1 : struct, IComponent where T2 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2>, allows ref struct;
+public bool Run<T1, T2, T3, TJob>(ref TJob job) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3>, allows ref struct;
+public bool Run<T1, T2, T3, T4, TJob>(ref TJob job) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, TJob>(ref TJob job) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, T6, TJob>(ref TJob job) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, T6, T7, TJob>(ref TJob job) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6, T7>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, T6, T7, T8, TJob>(ref TJob job) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6, T7, T8>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6, T7, T8, T9>, allows ref struct;
+```
+
+组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
+
+实体有 `T1, T2` 全部组件时，在它上面运行 `job`，传入的 ref 和 `World.ForEachEntity` 给的一样：作业运行了返回 true，实体缺组件或已不存活返回 false。作业写入的组件（`IForEachEntity.Writes`）算作写入；作业做的结构变更立即生效，这些写入会带到实体的新行上（作业抛异常时也一样）。实现了 [`INoStructuralChanges`](/zh/docs/reference/inostructuralchanges) 的作业省掉这些簿记。O(1)，零分配。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `entity.Run<T1..Tn, TJob>(ref job)`：O(n)，过滤条件每个组件再加 O(1)
+- `Run(ref job, filter)`：O(n)，过滤条件每个组件再加 O(1)
+
+### `Run` [#run-2]
+
+```csharp
+public bool Run<T1, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where TJob : struct, IForEachEntity<T1>, allows ref struct;
+public bool Run<T1, T2, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where T2 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2>, allows ref struct;
+public bool Run<T1, T2, T3, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3>, allows ref struct;
+public bool Run<T1, T2, T3, T4, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, T6, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, T6, T7, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6, T7>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, T6, T7, T8, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6, T7, T8>, allows ref struct;
+public bool Run<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job, in QueryFilter filter) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6, T7, T8, T9>, allows ref struct;
+```
+
+组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
+
+实体还通过 `filter` 时才执行的 [`Entity.Run`](/zh/docs/reference/entity#run)，按查询检查一行的方式检查（`Without`、`WithAny`、`Changed`、分组）：不通过就不运行作业，返回 false。O(过滤条件涉及的组件数)。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `entity.Run<T1..Tn, TJob>(ref job)`：O(n)，过滤条件每个组件再加 O(1)
+- `Run(ref job, filter)`：O(n)，过滤条件每个组件再加 O(1)
+
 ### `Set` [#set]
 
 ```csharp

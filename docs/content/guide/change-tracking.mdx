@@ -80,7 +80,8 @@ hands out a `ref`, whether or not the code stores through it:
 | `entity.Get<T>()`, `TryGetRef<T>(out found)` when found, `GetOrAdd<T>()`, `Set(...)` | `Has<T>()` |
 | `CreateEntity(...)`, `CreateEntities(...)`, `Instantiate(...)`, `Clone()` with the component | removing the component (a [removal](#removal-detection)) |
 | `entity.Enable<T>()`, `world.EnableAll<T>()` (the kept value comes back) | `entity.Disable<T>()` (a removal) |
-| `world.Restore(snapshot)`, `world.Load(bytes)` (every restored or loaded row) | |
+| `world.Restore(snapshot)`, `world.Load(bytes)`, `LoadEntities(...)`, `LoadEntitiesInto(...)` (every restored or loaded row) | `LoadEntitiesInto(..., markWritten: false)` ([a restored record](/en/docs/guide/migration-and-unload#records)) |
+| `entity.Run<…>(ref job)` for the components in the job's `Writes` ([one entity](/en/docs/guide/queries#run-on-one-entity)) | |
 
 A [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) is a list that can only change through a `ref`, so its
 writes are always tracked.
