@@ -128,7 +128,7 @@ need a `ref` and are tracked writes.
 | API | Complexity | Notes |
 | --- | --- | --- |
 | `bag.Count`, `bag.Capacity`, `bag[i]`, `AsReadOnlySpan()`, `GetEnumerator()` | O(1) | read-only; out-of-range indexes throw |
-| `bag.Add(item)` / `AddRange(span)` | O(1) amortized / O(items) | allocates only when the list grows |
+| `bag.Add(item)` / `AddRange(items)` | O(1) amortized / O(items) | `items`: a span, several values (`params`) or `CollectionsMarshal.AsSpan(list)`; allocates only when the buffer grows |
 | `bag.Insert(i, item)` / `RemoveAt(i)` | O(count) | keep the order |
 | `bag.RemoveAtSwapBack(i)` | O(1) | the last element moves into `i` |
 | `bag.Clear()` | O(1), O(count) for elements with references | keeps the capacity |
@@ -233,6 +233,7 @@ columns); `Load` O(rows). A taken key throws `InvalidOperationException` (a save
 | `world.LoadEntities(input, entities)` | O(entities × components) | new ids; `EntityId` fields naming the group are rewritten, others become `EntityId.Null` |
 | `world.LoadEntitiesInto(input, entities, markWritten)` | O(entities × components) | onto entities that exist: each moves table at most once, the components the save lacks stay; `markWritten: false`: the loaded components count as never written |
 | `world.MoveEntities(target, ids, moved)` | O(entities × components) | to another world of this thread, without encoding; the originals are destroyed |
+| the `ids` / `entities` of these calls | O(1) to pass | spans: an array, `[a.Id, b.Id]` or `SaveEntities(output, a.Id, b.Id)` (built on the stack), a list as `CollectionsMarshal.AsSpan(list)`: no copy, no allocation |
 
 Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
 [migration and unloading](/en/docs/guide/migration-and-unload).

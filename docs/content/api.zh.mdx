@@ -123,7 +123,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | API | 复杂度 | 说明 |
 | --- | --- | --- |
 | `bag.Count`、`bag.Capacity`、`bag[i]`、`AsReadOnlySpan()`、`GetEnumerator()` | O(1) | 只读；下标越界抛异常 |
-| `bag.Add(item)` / `AddRange(span)` | 均摊 O(1) / O(items) | 只在列表扩容时分配 |
+| `bag.Add(item)` / `AddRange(items)` | 均摊 O(1) / O(items) | `items`：span、多个值（`params`）或 `CollectionsMarshal.AsSpan(list)`；只在缓冲区扩容时分配 |
 | `bag.Insert(i, item)` / `RemoveAt(i)` | O(count) | 保持顺序 |
 | `bag.RemoveAtSwapBack(i)` | O(1) | 最后一个元素移到 `i` |
 | `bag.Clear()` | O(1)，元素含引用时 O(count) | 保留容量 |
@@ -226,6 +226,7 @@ World 保持原样。
 | `world.LoadEntities(input, entities)` | O(实体数 × 组件数) | 新 id；指向组内实体的 `EntityId` 字段会改写，其他的变成 `EntityId.Null` |
 | `world.LoadEntitiesInto(input, entities, markWritten)` | O(实体数 × 组件数) | 读到已经存在的实体上：每个实体最多换一次表，存档里没有的组件保持不变；`markWritten: false`：加载的组件算作从未写过 |
 | `world.MoveEntities(target, ids, moved)` | O(实体数 × 组件数) | 搬到本线程的另一个 World，不经过编码；原实体被销毁 |
+| 这些调用的 `ids` / `entities` | 传参 O(1) | span：数组、`[a.Id, b.Id]` 或 `SaveEntities(output, a.Id, b.Id)`（在栈上构造），列表写成 `CollectionsMarshal.AsSpan(list)`：不复制、不分配 |
 
 细节见[快照](/zh/docs/guide/snapshots)、[存档](/zh/docs/guide/saves)、[迁移与卸载](/zh/docs/guide/migration-and-unload)。
 

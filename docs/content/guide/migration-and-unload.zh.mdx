@@ -31,7 +31,8 @@ icon: ArrowRightLeft
 ### 通过字节传送一组实体 [#save-entities]
 
 `SaveEntities(output, ids)` 写出列出的实体和它们的组件（跳过失效的 id 和重复项；不写单例）。`LoadEntities(bytes, handles)` 在另一个
-World（本进程或其他进程）里用新 id 创建它们，并按存档顺序写回句柄。
+World（本进程或其他进程）里用新 id 创建它们，并按存档顺序写回句柄。`ids` 是一个 span：数组、`[a.Id, b.Id]`（在栈上构造）、直接传 id
+（`SaveEntities(output, a.Id, b.Id)`），或者把收集好的列表写成 `CollectionsMarshal.AsSpan(list)`，原地读取，不用 `ToArray()` 复制。
 
 ```csharp
 using Nino.Core;
@@ -46,6 +47,8 @@ public record struct Pet(EntityId Owner) : IComponent, IIndexed<EntityId>
 ```
 
 ```csharp
+using System.Runtime.InteropServices;
+
 var hero = world.CreateEntity(new Health(100));
 world.CreateEntity(new Sword(10), new ChildOf(hero));
 world.CreateEntity(new Pet(hero), new Health(20));
@@ -56,7 +59,7 @@ foreach (var part in world.Descendants(hero)) group.Add(part.Id);       // 子�
 foreach (var pet in world.PetIndex.Find(hero.Id)) group.Add(pet.Id);    // 走索引，不扫描所有 Pet
 
 var bytes = new NinoArrayBufferWriter();
-world.SaveEntities(bytes, group.ToArray());                  // 只写这一组 // [!code highlight]
+world.SaveEntities(bytes, CollectionsMarshal.AsSpan(group));                  // 只写这一组 // [!code highlight]
 
 using var otherServer = new World();
 var arrived = new Entity[group.Count];
@@ -74,9 +77,11 @@ int created = otherServer.LoadEntities(bytes.WrittenSpan, arrived);   // 新 id�
 按顺序接收新句柄（跳过的 id 对应 `default`）。
 
 ```csharp
+using System.Runtime.InteropServices;
+
 using var nextZone = new World();
 var moved = new Entity[group.Count];
-int count = world.MoveEntities(nextZone, group.ToArray(), moved);   // 英雄、剑和宠物离开这个 World
+int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), moved);   // 英雄、剑和宠物离开这个 World
 ```
 
 - 原实体销毁时会连同子实体一起销毁，所以[层级](/zh/docs/guide/hierarchy#moving)要整体迁移。
@@ -278,7 +283,7 @@ using EasyEcs;
 public static class Groups
 {
     // 英雄、挂在他身上的实体（父实体总在子实体之前），以及他的宠物。
-    public static EntityId[] Collect(World world, Entity hero)
+    public static List<EntityId> Collect(World world, Entity hero)
     {
         var group = new List<EntityId> { hero.Id };
         foreach (var part in world.Descendants(hero))
@@ -291,7 +296,7 @@ public static class Groups
             group.Add(pet.Id);
         }
 
-        return group.ToArray();
+        return group;
     }
 }
 ```
@@ -313,6 +318,7 @@ public static class Records
 <Accordion title="Program.cs">
 
 ```csharp title="Program.cs" doccheck=example
+using System.Runtime.InteropServices;
 using EasyEcs;
 using Nino.Core;
 
@@ -328,10 +334,10 @@ zone.CreateEntity(new Gem(3), new ChildOf(sword));
 zone.CreateEntity(new Pet(hero.Id), new Health(20));
 
 // 英雄走进传送门：整组迁过去，id 随之改写。
-EntityId[] group = Groups.Collect(zone, hero);
-var moved = new Entity[group.Length];
-zone.MoveEntities(nextZone, group, moved);
-for (int i = 0; i < group.Length; i++)
+List<EntityId> group = Groups.Collect(zone, hero);
+var moved = new Entity[group.Count];
+zone.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), moved);
+for (int i = 0; i < group.Count; i++)
 {
     Console.WriteLine($"{group[i]} -> {moved[i].Id}");
 }

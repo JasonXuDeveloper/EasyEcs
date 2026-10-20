@@ -224,7 +224,7 @@ world.Update();                            // barrel：WorldPosition(11, 2)
 
 `MoveEntities` 和 `SaveEntities` 只处理你列出的实体，不会顺带它们的子实体。用 `Descendants` 收集整棵层级再一起迁移：父实体
 没跟过去的子实体，到了那边会去掉 `ChildOf`（成为根）；而 `MoveEntities` 销毁原实体时会连同子实体一起销毁，没列出的子实体
-就丢了。`MoveEntities` 接收 `ReadOnlySpan<EntityId>`：直接传列表的 span（`CollectionsMarshal.AsSpan`），不必复制一份数组。
+就丢了。两者都接收 `ReadOnlySpan<EntityId>`：直接传列表的 span（`CollectionsMarshal.AsSpan`），不必复制一份数组。
 详见[迁移](/zh/docs/guide/migration-and-unload#move-entities)。
 
 ```csharp

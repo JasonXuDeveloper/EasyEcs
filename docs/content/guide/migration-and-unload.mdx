@@ -35,7 +35,9 @@ unload and a new version can load the saved data.
 
 `SaveEntities(output, ids)` writes the listed entities and their components (stale ids and repeats are skipped; no
 singletons). `LoadEntities(bytes, handles)` creates them in another world, in this or another process, with new ids,
-and writes their handles in save order.
+and writes their handles in save order. `ids` is a span: an array, `[a.Id, b.Id]` (built on the stack), the ids
+themselves (`SaveEntities(output, a.Id, b.Id)`), or the list you collected as `CollectionsMarshal.AsSpan(list)`,
+read in place rather than copied by `ToArray()`.
 
 ```csharp
 using Nino.Core;
@@ -50,6 +52,8 @@ public record struct Pet(EntityId Owner) : IComponent, IIndexed<EntityId>
 ```
 
 ```csharp
+using System.Runtime.InteropServices;
+
 var hero = world.CreateEntity(new Health(100));
 world.CreateEntity(new Sword(10), new ChildOf(hero));
 world.CreateEntity(new Pet(hero), new Health(20));
@@ -60,7 +64,7 @@ foreach (var part in world.Descendants(hero)) group.Add(part.Id);       // child
 foreach (var pet in world.PetIndex.Find(hero.Id)) group.Add(pet.Id);    // the index, not a scan of every Pet
 
 var bytes = new NinoArrayBufferWriter();
-world.SaveEntities(bytes, group.ToArray());                  // the group only // [!code highlight]
+world.SaveEntities(bytes, CollectionsMarshal.AsSpan(group));                  // the group only // [!code highlight]
 
 using var otherServer = new World();
 var arrived = new Entity[group.Count];
@@ -81,9 +85,11 @@ ids rewritten, then the originals are destroyed. `moved` receives the new handle
 id).
 
 ```csharp
+using System.Runtime.InteropServices;
+
 using var nextZone = new World();
 var moved = new Entity[group.Count];
-int count = world.MoveEntities(nextZone, group.ToArray(), moved);   // hero, sword and pet leave this world
+int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), moved);   // hero, sword and pet leave this world
 ```
 
 - The originals are destroyed with their children, so move a [hierarchy](/en/docs/guide/hierarchy#moving) together.
@@ -310,7 +316,7 @@ using EasyEcs;
 public static class Groups
 {
     // The hero, what hangs on it (each parent before its children), and its pets.
-    public static EntityId[] Collect(World world, Entity hero)
+    public static List<EntityId> Collect(World world, Entity hero)
     {
         var group = new List<EntityId> { hero.Id };
         foreach (var part in world.Descendants(hero))
@@ -323,7 +329,7 @@ public static class Groups
             group.Add(pet.Id);
         }
 
-        return group.ToArray();
+        return group;
     }
 }
 ```
@@ -345,6 +351,7 @@ public static class Records
 <Accordion title="Program.cs">
 
 ```csharp title="Program.cs" doccheck=example
+using System.Runtime.InteropServices;
 using EasyEcs;
 using Nino.Core;
 
@@ -360,10 +367,10 @@ zone.CreateEntity(new Gem(3), new ChildOf(sword));
 zone.CreateEntity(new Pet(hero.Id), new Health(20));
 
 // The hero walks through a portal: the group moves, its ids are rewritten.
-EntityId[] group = Groups.Collect(zone, hero);
-var moved = new Entity[group.Length];
-zone.MoveEntities(nextZone, group, moved);
-for (int i = 0; i < group.Length; i++)
+List<EntityId> group = Groups.Collect(zone, hero);
+var moved = new Entity[group.Count];
+zone.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), moved);
+for (int i = 0; i < group.Count; i++)
 {
     Console.WriteLine($"{group[i]} -> {moved[i].Id}");
 }

@@ -34,6 +34,8 @@ icon: RotateCcwClock
 - 分析器：[EECS035](/zh/docs/guide/analyzer#eecs035) 拒绝不合法的 `Slices`（小于 1，或者和 `Changed` / `Removed` 过滤一起用）；
   [EECS036](/zh/docs/guide/analyzer#eecs036) 拒绝无法按键建索引的唯一组件（`EntityId` 键，或者还有第二个索引键）；
   [EECS031](/zh/docs/guide/analyzer#eecs031) 也覆盖用相同值循环调用 `Instantiate`；[EECS033](/zh/docs/guide/analyzer#eecs033) 建议改用生成的 `SetXIfChanged(…)`。
+- `SaveEntities(output, a.Id, b.Id)` 和 `bag.AddRange(x, y)` 可以直接传值（`params` span，在栈上构造）。指南里收集好的列表改用
+  `CollectionsMarshal.AsSpan(list)` 传入，不再 `ToArray()` 复制。见[迁移](/zh/docs/guide/migration-and-unload#save-entities)。
 
 ### 性能 [#v4-7-0-performance]
 

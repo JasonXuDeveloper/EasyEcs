@@ -236,7 +236,7 @@ here allocates.
 
 `MoveEntities` and `SaveEntities` take the entities you list, not their children. Collect a hierarchy with
 `Descendants` and move it together: a child whose parent stays behind arrives without its `ChildOf` (a root there), and
-`MoveEntities` destroys the originals with their children, so a child you did not list is lost. `MoveEntities` takes a
+`MoveEntities` destroys the originals with their children, so a child you did not list is lost. Both take a
 `ReadOnlySpan<EntityId>`: pass the list's span (`CollectionsMarshal.AsSpan`) rather than a copy of it. See
 [migration](/en/docs/guide/migration-and-unload#move-entities).
 

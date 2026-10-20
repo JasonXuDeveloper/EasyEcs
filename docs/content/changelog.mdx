@@ -46,6 +46,9 @@ major or minor version that needs code changes? The
   its key (an `EntityId` key, or a second index key); [EECS031](/en/docs/guide/analyzer#eecs031) covers a loop of
   `Instantiate` calls with the same values; [EECS033](/en/docs/guide/analyzer#eecs033) suggests the generated
   `SetXIfChanged(…)`.
+- `SaveEntities(output, a.Id, b.Id)` and `bag.AddRange(x, y)` take the values directly (`params` spans, built on the
+  stack). The guides pass a collected list as `CollectionsMarshal.AsSpan(list)` instead of a `ToArray()` copy. See
+  [migration](/en/docs/guide/migration-and-unload#save-entities).
 
 ### Performance [#v4-7-0-performance]
 
