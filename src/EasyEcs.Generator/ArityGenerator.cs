@@ -203,6 +203,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         {
                 {{Lines(n, i => $"            ushort b{i} = ComponentType<T{i}>.Bit;")}}
                             var target = PrefabTable(prefab, {{(n == 1 ? "TypeIndex<ComponentSignature, T1>.Value" : signature)}}, [{{List(n, i => $"b{i}")}}], out var source, out int from);
+                            ClaimPrefab(source, from, 1, [{{List(n, i => $"b{i}")}}]); // before anything changes
+                {{Lines(n, i => $"            ClaimAll(1, in c{i});")}}
                 {{Lines(n, i => $"            target = GroupTarget(target, b{i}, in c{i});")}}
                             int id = AllocateId();
                             int slot = Place(id, target);
@@ -235,6 +237,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 {{Lines(n, i => $"            ushort b{i} = ComponentType<T{i}>.Bit;")}}
                             var target = PrefabTable(prefab, {{(n == 1 ? "TypeIndex<ComponentSignature, T1>.Value" : signature)}}, [{{List(n, i => $"b{i}")}}], out var source, out int from);
                             if (entities.IsEmpty) return;
+                            ClaimPrefab(source, from, entities.Length, [{{List(n, i => $"b{i}")}}]); // before anything changes
+                {{Lines(n, i => $"            ClaimAll(entities.Length, in c{i});")}}
                 {{Lines(n, i => $"            target = GroupTarget(target, b{i}, in c{i});")}}
                             int first = PlaceRows(target, entities); // consecutive rows: each column is filled at once
                             target.CloneRows(source, from, first, entities.Length, _changeTick);

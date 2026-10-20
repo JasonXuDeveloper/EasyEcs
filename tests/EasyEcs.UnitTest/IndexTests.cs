@@ -583,6 +583,25 @@ public class IndexTests
     }
 
     [Test]
+    public void InstantiateWithComponentsClaimsTheKeysItWrites()
+    {
+        using var world = new World();
+        var accounts = world.Index<Login, int>();
+        var prefab = new Prefab().Set(new Login(2), new Health(10));
+        var first = world.Instantiate(prefab, new Health(1));                          // the prefab's key
+        Assert.That(() => world.Instantiate(prefab, new Health(2)), Throws.InvalidOperationException);
+        var second = world.Instantiate(prefab, new Login(3));                          // a given key replaces the prefab's
+        Assert.That((accounts.Get(2), accounts.Get(3)), Is.EqualTo((first, second)));
+        Assert.That(() => world.Instantiate(prefab, new Login(3)), Throws.InvalidOperationException);
+        Assert.That(() => world.Instantiate(new Prefab().Set(new Health(1)), new Entity[2], new Login(4)), Throws.InvalidOperationException);
+        Assert.That(() => world.Instantiate(prefab, new Entity[2], new Health(3)), Throws.InvalidOperationException);
+        Assert.That(world.EntityCount, Is.EqualTo(2));                                 // refused before anything changed
+        var batch = new Entity[1];
+        world.Instantiate(new Prefab().Set(new Health(1)), batch, new Login(4));
+        Assert.That(accounts.Get(4), Is.EqualTo(batch[0]));
+    }
+
+    [Test]
     public void NullKeysAreNoKeys()
     {
         using var world = new World();

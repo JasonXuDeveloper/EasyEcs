@@ -183,11 +183,14 @@ public sealed class SystemGenerator : IIncrementalGenerator
             var method = model.Methods[i];
             // [Changed<T>] / [Removed<T>]: rows written (or that lost T) since this system last ran.
             string filter = method.Since ? $", {method.Name}Filter{i}.Since(system.LastRunTick + 1)" : method.HasFilter ? $", in {method.Name}Filter{i}" : "";
+            string whole = filter;
             if (method.Slices > 1) filter = method.Sliced($"{method.Name}Filter{i}", $"(int)(system.RunCount % {method.Slices})"); // this run's slice
             sb.Append($"            var job{i} = new {method.Name}Job{i}{Fields(method, "world", "system")};\n");
             // WorldOptions.MeasureSystems: the entities the pass matches as it starts (SystemStats.LastEntities); one
-            // field test per pass otherwise, nothing in the row loop.
-            sb.Append($"            if (Measuring(world)) Visit(system, world.Count<{method.ComponentTypes}>({(filter.Length == 0 ? "" : filter.Substring(2))}));\n");
+            // field test per pass otherwise, nothing in the row loop. Count takes no slice: a sliced pass reports its share.
+            string count = $"world.Count<{method.ComponentTypes}>({(whole.Length == 0 ? "" : whole.Substring(2))})";
+            if (method.Slices > 1) count = $"{count} / {method.Slices}";
+            sb.Append($"            if (Measuring(world)) Visit(system, {count});\n");
             sb.Append($"            world.{method.ForEach}<{method.ComponentTypes}, {method.Name}Job{i}>(ref job{i}{filter});\n");
         }
 

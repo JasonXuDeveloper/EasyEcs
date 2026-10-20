@@ -445,6 +445,16 @@ public class ForEachSystemTests
     }
 
     [Test]
+    public void MeasuredSlicedSystemsReportTheirShare()
+    {
+        using var world = new World(new WorldOptions { MeasureSystems = true });
+        for (int i = 0; i < 1000; i++) world.CreateEntity(new Health(0));
+        var system = world.AddSystem<SlicedVisit>();
+        world.Update();
+        Assert.That(system.Stats.LastEntities, Is.EqualTo(250));                       // 1,000 matched, one slice of four
+    }
+
+    [Test]
     public void SlicedMethodsVisitEveryRowOncePerSliceCount()
     {
         using var world = new World();

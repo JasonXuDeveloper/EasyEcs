@@ -163,6 +163,21 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>
+    /// Before <paramref name="count"/> copies of prefab row <paramref name="from"/> of <paramref name="source"/> are placed
+    /// with <paramref name="given"/> written over them: the prefab's unique keys other than the given ones must be free
+    /// (the given values claim theirs, ClaimAll). Folded to one test for tables without unique components. Inside the
+    /// structural gate.
+    /// </summary>
+    private void ClaimPrefab(Archetype source, int from, int count, ReadOnlySpan<ushort> given)
+    {
+        if (!source.Unique || count == 0) return;
+        var components = source.Components;
+        for (int c = 0; c < components.Length; c++)
+            if (ComponentInfo.Of(components[c]).Unique && !given.Contains(components[c]))
+                UniqueIndex(components[c]).ClaimRows(source, c, from, 1, count, -1);
+    }
+
+    /// <summary>
     /// Finish new rows [<paramref name="first"/>, +<paramref name="count"/>) of <paramref name="target"/>: a prefab's
     /// copy whose given components (<paramref name="bits"/>) were written over it. Those the prefab lacked or kept
     /// disabled are present now and lose their <see cref="Disabled{T}"/> tag (as Set does), then indexes learn the rows
