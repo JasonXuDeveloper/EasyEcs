@@ -25,6 +25,7 @@ public class RelationTests
         var parties = world.Relations<MemberOf>();
         Assert.That(All(parties.Find(red)), Is.EquivalentTo(new[] { a, b }));
         Assert.That(All(parties.Find(blue)), Is.EqualTo(new[] { a }));
+        Assert.That((parties.Find(red).Count, parties.Find(blue).Count), Is.EqualTo((2, 1)));
         Assert.That((a.HasRelation<MemberOf>(blue), b.HasRelation<MemberOf>(blue)), Is.EqualTo((true, false)));
 
         a.AddRelation(new MemberOf(blue));                                // links are counted, like buffer elements

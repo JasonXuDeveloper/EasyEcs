@@ -59,7 +59,7 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
     {
         if (!_built) Build();
         ref var head = ref HeadOf(target);
-        return new Sources(_world, Unsafe.IsNullRef(ref head) ? default : head.Walk());
+        return Unsafe.IsNullRef(ref head) ? new Sources(_world, default, 0) : new Sources(_world, head.Walk(), head.Count);
     }
 
     /// <summary>Number of links to <paramref name="target"/>. O(1).</summary>
@@ -229,12 +229,19 @@ public sealed class RelationIndex<T> : World.IValueIndex, World.IIndexOf<Dynamic
         private readonly World _world;
         private ListWalk _walk;
 
-        internal Sources(World world, ListWalk walk)
+        internal Sources(World world, ListWalk walk, int count)
         {
             _world = world;
             _walk = walk;
+            Count = count;
             Current = default;
         }
+
+        /// <summary>
+        /// How many links pointed at the target when it was found: O(1), no walk. Links dropped during the loop are
+        /// skipped by it but still counted here.
+        /// </summary>
+        public int Count { get; }
 
         /// <summary>The current linking entity.</summary>
         public Entity Current { get; private set; }
