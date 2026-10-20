@@ -1054,8 +1054,11 @@ the tick is skipped whole, and words and blocks no column wrote.
 - **Replication sends a unit when any of its parts changed.** Several `[Changed<T>]` filters mean all of them; a
   second query per component would visit a row twice and need a deduplication.
 - **One tick is enough.** The filter is kept once per purpose and run with each client's acknowledged tick.
-- **One group per kind keeps the filter small.** The two groups cost the filter 64 bytes (two 256-bit masks); more
-  groups would grow every filter for a case no request needed.
+- **The groups live outside the filter.** A filter holds one interned id of its pair of groups (4 bytes, 0 without
+  groups), found once per new pair and allocation-free after: filters without groups, the common case, keep their
+  size, and table checks test one flag of the row plan before any group work.
+- **One group per kind is enough.** Several independent OR groups would need a list per filter for a case no request
+  needed.
 - **Measured** (`ChangeTrackingBenchmark`, `CountBenchmark`, `SparseBenchmark`): TODO-NUMBERS.
 
 **Considered.**
