@@ -55,7 +55,7 @@ icon: RotateCcwClock
 
 ### 修复 [#v4-7-0-fixes]
 
-- 写被追踪组件的并行 `[ForEach]` 可能丢失变更戳：同一个 4,096 行块里的两个分块会争用这个块的变更摘要，`[Changed<T>]` 读取方可能跳过被写过的行。
+- 写被追踪组件的并行 `[ForEach]` 可能漏打变更 tick：同一个 4,096 行块里的两个分块会争用这个块的变更摘要，`[Changed<T>]` 读取方可能跳过被写过的行。
   这类遍历现在按 4,096 行的整数倍切块。见[决策 D48](/zh/docs/decisions#d48-parallel-tracked-chunks)。
 - `RemoveTypes` 删掉表之后，往旧快照里 `Capture(into)`，或者之后再 `Load`，可能复用另一张表（列不同）的副本。现在副本只给它自己的表复用。
   见[快照](/zh/docs/guide/snapshots)。

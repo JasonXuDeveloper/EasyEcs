@@ -738,8 +738,8 @@ public static class Report
 `WriteX()` 改成 `.X`。
 
 `ref` 参数（批量方法里的 `Span<T>`）会把它的类型放进系统的写集合：任何[并行阶段](/zh/docs/guide/threading#parallel-systems)
-都不会让这个系统和读该类型的系统同时运行。如果是[追踪变化的组件](/zh/docs/guide/change-tracking)，方法访问的每一行还会被打上
-变化戳，`[Changed<T>]` 系统就会去处理没人改过的行。`entity.Get<T>()` 和生成的 `entity.WriteX()` 同样会给行打 tick。
+都不会让这个系统和读该类型的系统同时运行。如果是[追踪变化的组件](/zh/docs/guide/change-tracking)，方法访问的每一行还会
+被打 tick，`[Changed<T>]` 系统就会去处理没人改过的行。`entity.Get<T>()` 和生成的 `entity.WriteX()` 同样会给行打 tick。
 规则会逐个检查用法：赋值、`++`、`ref` 或 `out` 实参、非 `readonly` 方法、`ref` 局部变量、`this ref` 扩展方法
 （`DynamicBuffer<T>.Add`）都算写入，遇到这些就保留写访问。
 
