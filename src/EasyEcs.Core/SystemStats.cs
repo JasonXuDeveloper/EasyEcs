@@ -48,8 +48,8 @@ public readonly struct SystemStats
     /// <summary>
     /// Entities the latest run's <c>[ForEach]</c> methods visited: the entities each method's query matched when its
     /// pass started (rows passing its filters and, for <c>[Changed&lt;T&gt;]</c> / <c>[Removed&lt;T&gt;]</c>, written or
-    /// removed since the system last ran), summed over the methods. Queries made in <see cref="EcsSystem.OnUpdate"/>
-    /// are not counted.
+    /// removed since the system last ran), summed over the methods; a <c>[ForEach(Slices = N)]</c> method counts the
+    /// rows of the slice it visited. Queries made in <see cref="EcsSystem.OnUpdate"/> are not counted.
     /// </summary>
     public long LastEntities { get; }
 
