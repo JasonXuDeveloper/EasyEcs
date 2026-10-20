@@ -30,7 +30,7 @@ plain arrays.
 [Details](https://ecs.xgamedev.net/docs/performance#benchmarks).</sub>
 
 ```bash
-dotnet add package EasyEcs        # net10.0 · source generator and analyzer included
+dotnet add package EasyEcs        # net10.0 · source generator, analyzer and Nino included
 ```
 
 ## Why EasyEcs
@@ -338,6 +338,8 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   (`IActorGroup<TActor> : IGroupWith<Inbox<TActor>>`) ([group filters](https://ecs.xgamedev.net/en/docs/guide/systems#group-filters)).
 - **`world.Descendants(root)`** walks a whole subtree, and `LoadEntitiesInto(input, entities, markWritten: false)`
   restores a record without counting it as a change.
+- **No Nino package to add.** The EasyEcs package brings Nino with its generator: `[NinoType]` components get their
+  formatters from the EasyEcs reference alone ([saves](https://ecs.xgamedev.net/en/docs/guide/saves#declare)).
 - **The analyzer knows the new calls.** `entity.Run` and `LoadEntitiesInto` are structural: rejected in parallel
   `[ForEach]` methods (EECS010), in methods that promise no structural change (EECS013) and on other threads (EECS014).
 - **An actors sample.** [`samples/Actors`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors):

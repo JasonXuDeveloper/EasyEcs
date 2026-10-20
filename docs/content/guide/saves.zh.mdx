@@ -29,12 +29,11 @@ icon: Save
 
 ### 声明组件 [#declare]
 
-非托管组件什么都不用做。托管组件（含 `string`、数组或类）需要 Nino 格式化器：标上 `[NinoType]`、声明为 `partial`，并在 EasyEcs
-旁边引用 `Nino.Generator` 包。结构会在版本之间变化的非托管组件也标上 `[NinoType]`（见[下文](#versioning)）。
+非托管组件什么都不用做。托管组件（含 `string`、数组或类）需要 Nino 格式化器：标上 `[NinoType]`、声明为 `partial` 即可。EasyEcs 包自带 Nino
+和它的生成器，项目不用再引用别的包。结构会在版本之间变化的非托管组件也标上 `[NinoType]`（见[下文](#versioning)）。
 
 ```xml title="Game.csproj"
 <PackageReference Include="EasyEcs" Version="4.*" />
-<PackageReference Include="Nino.Generator" Version="4.0.0-rc.6" />
 ```
 
 ```csharp
@@ -162,7 +161,7 @@ catch (InvalidDataException)
 ## 完整例子 [#full-example]
 
 两个玩家（一个跟着另一个）和一个时钟：World 存进缓冲区，再读进一个新的 World，就像进程重启后那样。把这几个文件放进一个引用了
-EasyEcs 和 `Nino.Generator` 的控制台项目（见[声明组件](#declare)），用 `dotnet run` 运行。
+EasyEcs 的控制台项目（见[声明组件](#declare)），用 `dotnet run` 运行。
 
 <Accordions>
 <Accordion title="Components.cs">
@@ -261,7 +260,7 @@ bob follows alice
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
 | 托管组件没有 `[NinoType]` | `Save` 抛 `InvalidOperationException`（没有格式化器） | 运行时 |
-| 写了 `[NinoType]` 却没引用 `Nino.Generator` | 不会生成格式化器 | 运行时 |
+| 引用的 `Nino.Generator` 比 EasyEcs 用的 Nino 旧 | 包降级：删掉这个引用，EasyEcs 包已经带了生成器 | 还原（`NU1605`） |
 | 组件里存了 `Entity` 句柄 | 托管列，Nino 写不了 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
 | 修改已存档的原始行组件的字段 | 旧存档被拒绝 | 从第一次存档起用 `[NinoType(format: NinoFormat.VersionTolerant)]`，或加一个新组件类型 |
 | 重命名组件或换了命名空间 | 旧存档加载时丢掉它 | 用 `[NinoFormerName]` 标上旧的完整名字 |

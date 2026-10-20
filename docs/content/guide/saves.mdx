@@ -34,12 +34,12 @@ loading again into the same buffers allocates nothing.
 ### Declare the components [#declare]
 
 Unmanaged components need nothing. A managed component (one with a `string`, an array, a class) needs a Nino formatter:
-mark it `[NinoType]` and make it `partial`, with the `Nino.Generator` package referenced next to EasyEcs. Mark an
-unmanaged component `[NinoType]` too when its shape will change between builds ([below](#versioning)).
+mark it `[NinoType]` and make it `partial`. The EasyEcs package brings Nino with its generator, so the project
+references nothing else. Mark an unmanaged component `[NinoType]` too when its shape will change between builds
+([below](#versioning)).
 
 ```xml title="Game.csproj"
 <PackageReference Include="EasyEcs" Version="4.*" />
-<PackageReference Include="Nino.Generator" Version="4.0.0-rc.6" />
 ```
 
 ```csharp
@@ -177,7 +177,7 @@ that is never reloaded, such as a contracts assembly shared by the host and the 
 ## Full example [#full-example]
 
 Two players, one following the other, and a clock: the world is saved into a buffer and loaded into a new world, as a
-restarted process would do. Put the files in a console project that references EasyEcs and `Nino.Generator`
+restarted process would do. Put the files in a console project that references EasyEcs
 ([declare the components](#declare)) and run it with `dotnet run`.
 
 <Accordions>
@@ -279,7 +279,7 @@ Bob's `Follows` still names Alice without any rewriting.
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
 | A managed component without `[NinoType]` | `Save` throws `InvalidOperationException` (no formatter) | At run time |
-| `[NinoType]` without the `Nino.Generator` package | No formatter is generated | At run time |
+| A `Nino.Generator` reference older than the Nino of EasyEcs | A package downgrade: remove the reference, the EasyEcs package brings the generator | Restore (`NU1605`) |
 | An `Entity` handle in a component | A managed column Nino cannot write | [EECS017](/en/docs/guide/analyzer#eecs017) |
 | Editing the fields of a saved raw component | Old saves are refused | `[NinoType(format: NinoFormat.VersionTolerant)]` from the first save, or a new component type |
 | Renaming a component or moving its namespace | Old saves load without it | `[NinoFormerName]` with the old full name |

@@ -24,6 +24,8 @@ icon: RotateCcwClock
   见[列出子实体](/zh/docs/guide/hierarchy#children)。
 - `world.LoadEntitiesInto(input, entities, markWritten: false)` 恢复记录时不算变更，按 `[Changed<T>]` 保存或同步的系统不会再把它送回去；覆盖的值（比如预制体的默认值）也一样。
   见[只存需要持久化的部分](/zh/docs/guide/migration-and-unload#records)。
+- EasyEcs 包自带 Nino 的生成器：`[NinoType]` 组件不用再引用别的包就有格式化器，项目可以删掉对 `Nino.Generator` 的引用（保留也行，
+  但版本不能比 EasyEcs 用的 Nino 旧）。见[声明组件](/zh/docs/guide/saves#declare)。
 - 分析器把 `entity.Run` 视为结构变更调用：[EECS010](/zh/docs/guide/analyzer#eecs010) 在并行 `[ForEach]` 方法里拒绝它，
   [EECS013](/zh/docs/guide/analyzer#eecs013) 和 [EECS014](/zh/docs/guide/analyzer#eecs014) 像检查 `Set` 一样检查它。
 

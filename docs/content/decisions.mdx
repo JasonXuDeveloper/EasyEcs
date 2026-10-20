@@ -50,6 +50,11 @@ after the change on the machine of the time; they are history, not the current r
 | [D30](#d30-saves-record-types-by-nino-type-id) | Saves record types by Nino type id; Nino writes the unmanaged components marked `[NinoType]` |
 | [D31](#d31-a-record-of-what-persists) | A record of what persists: a component set to save, loading onto existing entities |
 | [D32](#d32-the-lists-of-dead-buffers-are-pooled-per-thread) | The lists of dead buffers are pooled per thread |
+| [D33](#d33-one-entity-runs-a-passs-job) | One entity runs a pass's job: `entity.Run` |
+| [D34](#d34-group-filters-through-interfaces) | Group filters through interfaces |
+| [D35](#d35-a-record-can-load-without-counting-as-a-change) | A record can load without counting as a change |
+| [D36](#d36-not-added) | Not added: parallel batch jobs, a row's last write tick, public access sets, a shared parallelism budget |
+| [D37](#d37-the-easyecs-package-brings-ninos-generator) | The EasyEcs package brings Nino's generator |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -748,6 +753,24 @@ it does not hold keep their ticks. The default stays `true`.
   into the API, and no use outside the scheduler remained.
 - **One parallelism budget for several worlds.** The host sets `WorldOptions.MaxDegreeOfParallelism` per world;
   a shared budget would be state shared across worlds, which each belong to one owner thread.
+
+## D37. The EasyEcs package brings Nino's generator [#d37-the-easyecs-package-brings-ninos-generator]
+
+**Decision.** EasyEcs references the `Nino` package (runtime and generator) instead of `Nino.Serialization` (runtime
+only). `Nino.Generator` ships its analyzer through `buildTransitive`, so every project that references EasyEcs gets
+the formatters of its `[NinoType]` components without a package of its own.
+
+**Why.**
+- **One package to install.** Saves are built in; a managed component needed a second reference, at the same version
+  as the Nino of EasyEcs, or `Save` threw at run time.
+- **No drift.** The generator always matches the runtime EasyEcs was built with; an older explicit reference fails
+  restore with `NU1605` instead of compiling against another Nino.
+- **Little cost.** In a project without `[NinoType]` types the generator writes one empty internal registry.
+
+**Considered.**
+- **Keeping `Nino.Serialization` and documenting the second reference:** the step users missed.
+- **Bundling Nino's generator inside the EasyEcs package:** a copy of another project's analyzer to keep in sync by
+  hand.
 
 ## Related [#related]
 

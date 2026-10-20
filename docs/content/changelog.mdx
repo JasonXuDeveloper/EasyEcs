@@ -29,6 +29,9 @@ major or minor version that needs code changes? The
   `[Changed<T>]` savers and replicators do not send it back; that holds for a value it replaces too, such as a
   prefab's default. See
   [a record of what persists](/en/docs/guide/migration-and-unload#records).
+- The EasyEcs package brings Nino's generator: a `[NinoType]` component gets its formatter with no other package
+  reference, so a project can drop its `Nino.Generator` reference (a kept one must not be older than the Nino of EasyEcs). See
+  [declare the components](/en/docs/guide/saves#declare).
 - The analyzer treats `entity.Run` as a structural call: [EECS010](/en/docs/guide/analyzer#eecs010) rejects it in a
   parallel `[ForEach]` method, [EECS013](/en/docs/guide/analyzer#eecs013) and
   [EECS014](/en/docs/guide/analyzer#eecs014) check it like `Set`.

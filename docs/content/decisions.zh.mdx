@@ -48,6 +48,11 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D30](#d30-saves-record-types-by-nino-type-id) | 存档按 Nino 类型 id 记录类型；标了 `[NinoType]` 的非托管组件由 Nino 写出 |
 | [D31](#d31-a-record-of-what-persists) | 只存需要持久化的部分：存档时用组件集合，读档时读到已有实体上 |
 | [D32](#d32-the-lists-of-dead-buffers-are-pooled-per-thread) | 已销毁缓冲的列表按线程池化 |
+| [D33](#d33-one-entity-runs-a-passs-job) | 单个实体运行遍历的 job：`entity.Run` |
+| [D34](#d34-group-filters-through-interfaces) | 通过接口给分组加过滤条件 |
+| [D35](#d35-a-record-can-load-without-counting-as-a-change) | 读记录时可以不算变更 |
+| [D36](#d36-not-added) | 不加：并行批处理 job、行的最后写入 tick、公开读写集、多个 World 共享并行预算 |
+| [D37](#d37-the-easyecs-package-brings-ninos-generator) | EasyEcs 包自带 Nino 的生成器 |
 
 ## D1. 状态变化即数据：没有事件和回调 [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -619,6 +624,20 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 - **公开 `SystemAccess`。** 读写集是调度器做决定的依据；公开就把它的形状冻结进了 API，而调度器之外已经没有用处。
 - **多个 World 共享一个并行预算。** 宿主给每个 World 设 `WorldOptions.MaxDegreeOfParallelism` 即可；共享预算意味着跨 World 共享状态，
   而每个 World 只属于一个所有者线程。
+
+## D37. EasyEcs 包自带 Nino 的生成器 [#d37-the-easyecs-package-brings-ninos-generator]
+
+**决定。** EasyEcs 引用 `Nino` 包（运行时加生成器），不再只引用 `Nino.Serialization`（只有运行时）。`Nino.Generator` 通过
+`buildTransitive` 提供分析器，所以引用了 EasyEcs 的项目，`[NinoType]` 组件不用自己加包就能生成格式化器。
+
+**原因。**
+- **只装一个包。** 存档是内置功能；以前托管组件还要再引用一个包，版本要和 EasyEcs 用的 Nino 一致，漏了就在运行时 `Save` 抛异常。
+- **版本不会错开。** 生成器总是和 EasyEcs 构建时的运行时一致；手动引用更旧的版本会在还原时报 `NU1605`，而不是悄悄用另一个 Nino 编译。
+- **代价很小。** 没有 `[NinoType]` 类型的项目里，生成器只写一个空的 internal 注册类。
+
+**比较过。**
+- **继续用 `Nino.Serialization`，在文档里说明要再加一个包**：用户正是在这一步漏掉的。
+- **把 Nino 的生成器打进 EasyEcs 包**：等于复制别人的分析器，还要手动保持同步。
 
 ## 相关页面 [#related]
 
