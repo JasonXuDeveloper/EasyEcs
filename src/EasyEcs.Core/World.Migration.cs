@@ -53,10 +53,11 @@ public sealed partial class World
     /// whose parent stayed behind is not set. Returns how many entities were loaded. O(entities × components). Not
     /// while a pass iterates.
     /// <br/>
-    /// With <paramref name="markWritten"/> false, the loaded components do not count as written: a value that replaces
-    /// one keeps that one's change tick, a component the entity did not have gets none, so <c>[Changed&lt;T&gt;]</c>
-    /// systems and <c>Since</c> filters do not visit the entity for the load (an actor restored from storage holds what
-    /// storage has, and "save what changed" saves nothing of it until code writes it).
+    /// With <paramref name="markWritten"/> false, the loaded components do not count as written: each one the save holds
+    /// has no change tick afterwards, also when it replaces a value written before (a default from a prefab), so
+    /// <c>[Changed&lt;T&gt;]</c> systems and <c>Since</c> filters do not visit the entity for the load (an actor restored
+    /// from storage holds what storage has, and "save what changed" saves nothing of it until code writes it).
+    /// Components the save does not hold keep their ticks.
     /// </summary>
     /// <exception cref="ArgumentException"><paramref name="into"/> does not hold one living entity of this world per saved entity.</exception>
     /// <exception cref="System.IO.InvalidDataException">The bytes are not a save.</exception>
@@ -132,7 +133,6 @@ public sealed partial class World
             }
 
             bool present = source.Has(sc, row);
-            bool had = before.ColumnIndex(bit) >= 0 && table.Has(c, slot); // the move kept its presence: a value is replaced
             if (info.Managed)
             {
                 info.Discard(table.Columns[c], slot, 1); // the value it replaces (a buffer's list goes back to its pool)
@@ -148,7 +148,7 @@ public sealed partial class World
             }
             else table.MarkAbsent(c, slot, keep: true); // disabled: its tag is a column of the source too
 
-            if (table.Tracked && info.Companion is var ticks and >= 0 && (markWritten || !had)) // unmarked: a replaced value keeps its tick
+            if (table.Tracked && info.Companion is var ticks and >= 0) // unmarked: no tick, the value is the record's
                 table.SetTick(table.ColumnIndex(ticks), slot, markWritten ? _changeTick : 0);
             if (present && _indexByBit != null && bit < _indexByBit.Length && _indexByBit[bit] is { } index) index.AddedRows(table, c, slot, 1);
         }

@@ -113,15 +113,16 @@ public class MoveTests
         }
 
         using var to = new World();
-        var a = to.CreateEntity(new Armor(1));                                   // written when it was made
+        var a = to.CreateEntity(new Armor(1), new Shield(3));                   // written when it was made (a prefab default)
         var b = to.CreateEntity(new Position());
         to.Update();
         ulong tick = to.ChangeTick;
         Assert.That(to.LoadEntitiesInto(output.WrittenSpan, [a, b], markWritten: false), Is.EqualTo(2));
 
         Assert.That((a.Read<Armor>().Value, b.Read<Armor>().Value), Is.EqualTo((5, 5)));
-        Assert.That(to.Count<Armor>(QueryFilter.Create().Changed<Armor>(tick)), Is.Zero);   // nothing reads as a write
-        Assert.That(to.Count<Armor>(QueryFilter.Create().Changed<Armor>(1)), Is.EqualTo(1)); // a keeps its tick, b's is never
+        Assert.That(to.Count<Armor>(QueryFilter.Create().Changed<Armor>(tick)), Is.Zero); // nothing reads as a write
+        Assert.That(to.Count<Armor>(QueryFilter.Create().Changed<Armor>(1)), Is.Zero);    // a's replaced default lost its tick
+        Assert.That(to.Count<Shield>(QueryFilter.Create().Changed<Shield>(1)), Is.EqualTo(1)); // what the save lacks keeps its tick
     }
 
     [Test]
