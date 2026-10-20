@@ -62,7 +62,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// <exception cref="ArgumentException">An earlier change filter named another tick.</exception>
                     public QueryFilter ChangedAny<{{tps}}>(ulong since)
                 {{cons}}
-                        => AddingAny(5, since, [{{bits}}]);
+                        => AddingAny(false, since, [{{bits}}]);
 
                     /// <summary>
                     /// Only rows that lost at least one of <c>{{tps}}</c> at or after change tick <paramref name="since"/>
@@ -73,7 +73,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// <exception cref="ArgumentException">An earlier change filter named another tick.</exception>
                     public QueryFilter RemovedAny<{{tps}}>(ulong since)
                 {{cons}}
-                        => AddingAny(6, since, [{{bits}}]);
+                        => AddingAny(true, since, [{{bits}}]);
 
 
                 """);

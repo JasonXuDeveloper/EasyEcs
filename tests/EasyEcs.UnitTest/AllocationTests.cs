@@ -234,6 +234,7 @@ public class AllocationTests
                 if ((k + c) % 3 != 0) continue; // clients acknowledge at different ticks
                 foreach (var item in world.Query<Seen>(dirty.Since(acked[c]))) item.Component1.Count++;
                 _ = world.Count<Seen>(lost.Since(acked[c]));
+                _ = world.Count<Seen>(QueryFilter.Create().ChangedAny<Armor, Shield>(acked[c])); // built at the call: interned
                 acked[c] = world.ChangeTick;
             }
         }
