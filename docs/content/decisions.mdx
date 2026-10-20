@@ -843,7 +843,10 @@ resynchronizes. Off by default.
   so (`DestroyLogOldestTick`) instead of getting a partial list.
 - **It follows `IsAlive`.** A handle that reports "not alive" and a log that says "destroyed" never disagree, also for
   an entity kept by cleanup components (logged when the last one goes).
-- **Measured** (`DestroyLogBenchmark`, `DestroyLog` 0 and 4,096): TODO-NUMBERS.
+- **Measured** (`DestroyLogBenchmark`, `DestroyLog` 0 and 4,096, 0 B either way): 10 rounds of 1,000
+  creates and destroys take 219 µs without the log and 250 µs with it one by one, 124 and 144 µs a whole table at
+  once. Reading the records for 16 clients every round (868 µs against 215) is the replication itself: up to 4,000
+  records copied per client.
 
 **Considered.**
 - **A cursor per reader inside the world:** state per client in the world, to create and release with connections.
@@ -867,7 +870,8 @@ entity of the prefab passed gets the components (one more move).
   unit at its position. `Instantiate` then `Set` copies the row twice and may create a table nothing else uses.
 - **One lookup per spawn after the first.** The cache gives the target table and the column copy plan at once.
 - **Measured** (`PrefabBenchmark`, `InstantiateThenSetChild` against `InstantiateWithChild` and
-  `InstantiateBatchWithChild`): TODO-NUMBERS.
+  `InstantiateBatchWithChild`, 1,000 spawns with a parent, 0 B): 109–115 µs to instantiate and then set
+  `ChildOf`, 85–93 µs with `ChildOf` given, 46–47 µs for the batch form.
 
 **Considered.**
 - **Following the `AddBits` transition edges from the prefab's table:** it would create the prefab-only table in the
@@ -892,7 +896,8 @@ length.
 - **Power-of-two capacities** keep the growth rule of every other table: the next additions do not reallocate at
   once.
 - **`Meta` stays.** Handles index the entity records without a bounds check; shrinking them would cost every access.
-- **Measured** (`TrimBenchmark`, 16 and 256 tables): TODO-NUMBERS.
+- **Measured** (`TrimBenchmark`, 16 and 256 tables): 47 µs and 199 µs (31 KB and 181 KB: the smaller arrays) to
+  give back what a peak of 100,000 entities left; 54 ns and 145 ns when there is nothing left to give back.
 
 **Considered.**
 - **Automatic shrinking below a fill ratio:** churn around the threshold and allocations no one asked for.
@@ -920,8 +925,9 @@ records of names (groups, stages, systems with their reads and writes, waits, re
 - **A description, not the access sets.** The scheduler's `SystemAccess` stays internal
   ([D36](#d36-not-added)); names and stages are what a reader needs, and the records can change shape without
   changing the scheduler.
-- **Measured** (`ParallelSystemsBenchmark` with `Measure` false and true, `IntrospectionBenchmark.Schedule`):
-  TODO-NUMBERS.
+- **Measured** (`ParallelSystemsBenchmark` with `Measure` false and true, `IntrospectionBenchmark.Schedule`, 0 B
+  per update): one update of 100,000 entities takes 349–358 µs unmeasured and 369–372 µs measured on one thread
+  (+4–6%), 232–257 µs and 275 µs with parallel stages. `DescribeSchedule` takes 94 µs and 26 KB: a call for tools.
 
 **Considered.**
 - **Counting visited rows in the loop:** a cost on every row of every pass.
@@ -945,7 +951,9 @@ sliced (EECS035).
 - **The state is data the system already has.** The run count lives on the system as the scheduler's bookkeeping,
   not in user code or the world.
 - **A slice of a count is rarely meant.** The calls that need every row throw instead of answering for a slice.
-- **Measured** (`SlicesBenchmark`, Slices 1 and 4, per-entity, structural and parallel forms): TODO-NUMBERS.
+- **Measured** (`SlicesBenchmark`, 100,000 entities, Slices 1 and 4, 0 B): one sliced update takes 72 µs against 287 µs
+  (stable pass), 83 against 322 µs (with the entity) and 36 against 113 µs (parallel). The four updates that visit
+  every row once take 295, 319 and 127 µs: cutting costs 3%, nothing and 12%.
 
 **Considered.**
 - **Row-exact cuts:** words split between slices, tested row by row.
@@ -972,7 +980,8 @@ keys cannot be unique (EECS036).
   first write.
 - **No reflection.** The marker is a type test the JIT folds, and the factory is generated, so Native AOT needs
   nothing.
-- **Measured** (`IndexBenchmark`, `RekeyAndLookup` against `RekeyAndLookupUnique`): TODO-NUMBERS.
+- **Measured** (`IndexBenchmark`, 100 new keys and 100 lookups, 0 B): 24.6–24.9 µs with `IIndexed<long>`,
+  25.2–25.4 µs with `IUniqueIndexed<long>`: the claim costs about 6 ns per write.
 
 **Considered.**
 - **Reflection over the key type:** AOT warnings and a cold start per type.
@@ -1036,7 +1045,8 @@ which may start at any 64-row word); other parallel passes keep 64-row-aligned c
   a plain read-modify-write. Two chunks inside one block could race on it and lose a raise, so a `[Changed<T>]`
   reader could skip rows that were written. Aligned chunks give each block one writer.
 - **Fewer chunks for small tables is the price.** A table needs more rows before it is split across threads.
-- **Measured** (`ParallelForEachBenchmark`): TODO-NUMBERS.
+- **Measured** (`ParallelForEachBenchmark`, 100,000 entities, 0 B): passes that write no tracked component keep
+  their chunks, and their times match 4.6 within noise (623–666 µs in parallel, 742–783 µs before).
 
 **Considered.**
 - **Atomic updates of the summaries:** an interlocked operation on every write of every pass, parallel or not.
@@ -1059,7 +1069,8 @@ the tick is skipped whole, and words and blocks no column wrote.
   size, and table checks test one flag of the row plan before any group work.
 - **One group per kind is enough.** Several independent OR groups would need a list per filter for a case no request
   needed.
-- **Measured** (`ChangeTrackingBenchmark`, `CountBenchmark`, `SparseBenchmark`): TODO-NUMBERS.
+- **Measured** (`ChangeTrackingBenchmark`, `CountBenchmark`, `SparseBenchmark`, against 4.6): filters without a
+  group cost what they did, every case within 7% either way, the run-to-run noise of these measurements.
 
 **Considered.**
 - **Several independent OR groups:** more state per filter, no use found.
@@ -1081,7 +1092,10 @@ a component.
   back; keeping the singleton is one set, built once.
 - **Each set says what its call can do.** A group save writes no singletons and a load replaces every entity, so a set
   naming what the call cannot honour is refused instead of ignored.
-- **Measured** (`SnapshotBenchmark`, `SaveWithout` against `Save`, `LoadKeeping` against `Load`): TODO-NUMBERS.
+- **Measured** (`SnapshotBenchmark`, `SaveWithout` against `Save`, `LoadKeeping` against `Load`, 100,000 entities over two
+  runs): a save that leaves a component and the singleton out takes 225–250 µs against 232–235 µs for the whole
+  world, and a load that keeps the singleton 906–934 µs against 954–969 µs. Choosing what to leave out costs nothing
+  measurable.
 
 **Considered.**
 - **A separate `SingletonSet` type:** two sets to build for one restart.
