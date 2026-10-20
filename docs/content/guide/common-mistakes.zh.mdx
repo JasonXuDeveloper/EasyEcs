@@ -471,19 +471,19 @@ public record struct Connection(int Socket) : IComponent;           // 只在运
 ```csharp
 static Entity Activate(World world, ReadOnlySpan<byte> record)
 {
-    var actor = world.CreateEntity(new Connection(9), new Bank(0));  // 记录到之前先猜一个 Bank
+    var actor = world.CreateEntity(new Connection(9), new Bank(0));  // 新 actor 的默认值
     world.LoadEntitiesInto(record, [actor]);                         // 算一次写入：存盘系统把 Bank 写回去
     return actor;
 }
 ```
 
-加载算写入，所以保存或同步 `[Changed<Bank>]` 行的系统会把记录原样写回它的来处。先猜的 `Bank(0)` 更糟：记录里没有 `Bank` 时，
-存下去的就是这个猜测。需要持久化的组件只从记录来，加载时传 `markWritten: false`：
+加载算写入，所以保存或同步 `[Changed<Bank>]` 行的系统每次激活都会把记录原样写回它的来处。加载时传 `markWritten: false`：存储里的
+`Bank` 覆盖默认值，并且算作从未写过，代码改它之前保存系统都会跳过这个 actor：
 
 ```csharp
 static Entity Restore(World world, ReadOnlySpan<byte> record)
 {
-    var actor = world.CreateEntity(new Connection(9));               // 只放运行时状态
+    var actor = world.CreateEntity(new Connection(9), new Bank(0));  // 和新 actor 一样的默认值
     world.LoadEntitiesInto(record, [actor], markWritten: false);     // Bank 是存储里的值，不算变更
     return actor;
 }

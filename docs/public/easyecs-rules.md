@@ -99,8 +99,8 @@ available as Markdown: add `.md` to its URL.
 - Durable state is a record: `SaveEntities(writer, ids, Persistent)` with a `static readonly ComponentSet` of the
   durable components only, never the runtime ones (connections, timers, caches).
 - Restore a record with `LoadEntitiesInto(bytes, entities, markWritten: false)`, so a system that saves or
-  replicates changed components does not send it straight back. The persistent components come only from the record:
-  do not create them on the entity before it arrives. `LoadEntitiesInto` is structural (EECS010, EECS013, EECS014).
+  replicates changed components does not send it straight back; the values it replaces (a prefab's defaults) count as
+  never written too, so one prefab per kind serves new and restored entities. `LoadEntitiesInto` is structural (EECS010, EECS013, EECS014).
 
 ## Project layout and debugging
 

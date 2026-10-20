@@ -499,20 +499,20 @@ public record struct Connection(int Socket) : IComponent;           // runtime o
 ```csharp
 static Entity Activate(World world, ReadOnlySpan<byte> record)
 {
-    var actor = world.CreateEntity(new Connection(9), new Bank(0));  // a guessed Bank before the record
+    var actor = world.CreateEntity(new Connection(9), new Bank(0));  // a new actor's default
     world.LoadEntitiesInto(record, [actor]);                         // a write: the saver sends Bank back
     return actor;
 }
 ```
 
 A load counts as a write, so the system that saves or replicates `[Changed<Bank>]` rows writes the record straight
-back to where it came from. The guessed `Bank(0)` is worse: if the record lacks it, the guess is what persists. Let
-the persistent components come only from the record, and load it with `markWritten: false`:
+back to where it came from, on every activation. Load it with `markWritten: false`: the stored `Bank` replaces the
+default and counts as never written, so the saver skips the actor until code changes it:
 
 ```csharp
 static Entity Restore(World world, ReadOnlySpan<byte> record)
 {
-    var actor = world.CreateEntity(new Connection(9));               // runtime state only
+    var actor = world.CreateEntity(new Connection(9), new Bank(0));  // the same default as a new actor
     world.LoadEntitiesInto(record, [actor], markWritten: false);     // Bank as stored, not a change
     return actor;
 }
