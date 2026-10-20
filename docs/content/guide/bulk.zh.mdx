@@ -31,6 +31,7 @@ icon: Layers
 ```csharp
 public record struct Fighter(int Team) : IComponent;
 public record struct Stun(int Ticks) : IComponent;
+public record struct Regen(int PerTick) : IComponent;
 
 public static class Rounds
 {
@@ -40,7 +41,7 @@ public static class Rounds
 
 ```csharp
 var fighters = new Entity[1_000];
-world.CreateEntities(fighters, new Fighter(1), new Health(100));
+world.CreateEntities(fighters, new Fighter(1), new Health(100), new Regen(2));
 
 int stunned = world.SetAll(new Stun(3), Rounds.Fighters);   // 回合结束：所有人被眩晕 // [!code highlight]
 int lifted = world.RemoveAll<Stun>();                        // 所有人解除眩晕
@@ -55,9 +56,11 @@ int lifted = world.RemoveAll<Stun>();                        // 所有人解除�
 [`Disable<T>()` 和 `Enable<T>()`](/zh/docs/guide/cleanup-and-disable#disable-a-component)：值保留，之后原样还回来。
 
 ```csharp
-int paused = world.DisableAll<Health>(Rounds.Fighters);     // 过场期间谁也不回血
-int resumed = world.EnableAll<Health>();                     // 保留的值全部回来
+int paused = world.DisableAll<Regen>(Rounds.Fighters);     // 暂停依赖 Regen 的回血系统
+int resumed = world.EnableAll<Regen>();                    // 保留的 Regen(2) 值回来
 ```
+
+这里禁用的是回血能力，`Health` 仍可供伤害和显示系统读取。[下方的完整例子](#full-example)会实际运行回血系统，检查血量在暂停期间不变、恢复后继续增长。
 
 ### 刷出和清理一波实体 [#spawn-and-clear]
 
