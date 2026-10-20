@@ -56,6 +56,123 @@ public partial class World
         return new TableInfo(columns.ToArray(), table.AliveCount, table.Count, capacity, bytes);
     }
 
+    /// <summary>
+    /// How the world runs its systems, for diagnostics (a startup log, a dashboard, a docs diagram): per group its stages,
+    /// each system's reads and writes by name, why a system waits for the stage before its own (an ordering, or the
+    /// data it conflicts on), and the conflicting pairs that only registration order orders, whose order flips when they
+    /// are registered the other way round. Cold: allocates the result, O(systems³) per group; any thread (it reads the
+    /// schedule published by the latest <see cref="AddSystem(EcsSystem, bool)"/> / <see cref="RemoveSystem{T}"/>).
+    /// </summary>
+    public ScheduleInfo DescribeSchedule()
+    {
+        var groups = new List<GroupSchedule>();
+        foreach (var group in _groups)
+            if (group != null && group.Systems.Length > 0) groups.Add(DescribeGroup(group));
+        return new ScheduleInfo(groups.ToArray());
+    }
+
+    private static GroupSchedule DescribeGroup(SystemSchedule group)
+    {
+        var stages = group.Stages;
+        var order = group.Systems; // the stages' systems, stage after stage
+        int n = order.Length;
+
+        // Names, unique within the group (the same type may be added twice).
+        var names = new string[n];
+        var seen = new Dictionary<string, int>();
+        for (int i = 0; i < n; i++)
+        {
+            string name = ScheduleInfo.NameOf(order[i].GetType());
+            int count = seen.GetValueOrDefault(name) + 1;
+            seen[name] = count;
+            names[i] = count == 1 ? name : name + " #" + count;
+        }
+
+        // Orderings, transitively: reach[i, j] when a chain of [UpdateBefore] / [UpdateAfter] puts i before j.
+        var reach = new bool[n, n];
+        for (int i = 0; i < n; i++)
+        for (int j = 0; j < n; j++)
+            reach[i, j] = i != j && SystemSchedule.Precedes(order[i], order[j]);
+        for (int k = 0; k < n; k++)
+        for (int i = 0; i < n; i++)
+            if (reach[i, k])
+                for (int j = 0; j < n; j++)
+                    reach[i, j] |= reach[k, j];
+
+        var level = new int[n];
+        for (int s = 0, at = 0; s < stages.Length; s++)
+            for (int i = 0; i < stages[s].Systems.Length; i++) level[at++] = s;
+
+        var infos = new StageInfo[stages.Length];
+        for (int s = 0, at = 0; s < stages.Length; s++)
+        {
+            var systems = new SystemInfo[stages[s].Systems.Length];
+            for (int i = 0; i < systems.Length; i++, at++)
+            {
+                var waits = new List<StageWait>();
+                for (int j = 0; j < at; j++)
+                {
+                    if (level[j] != s - 1) continue;
+                    bool ordered = SystemSchedule.Precedes(order[j], order[at]);
+                    var conflicts = Conflicts(in order[j].Access, in order[at].Access);
+                    if (ordered || conflicts.Length > 0) waits.Add(new StageWait(names[j], ordered, conflicts));
+                }
+
+                ref readonly var access = ref order[at].Access;
+                systems[i] = new SystemInfo(names[at], ComponentNames(access.ReadComponents), ComponentNames(access.WriteComponents),
+                    SingletonNamesOf(access.ReadSingletons), SingletonNamesOf(access.WriteSingletons), access.Alone, waits.ToArray());
+            }
+
+            infos[s] = new StageInfo(systems);
+        }
+
+        var pairs = new List<SystemPair>();
+        for (int i = 0; i < n; i++)
+        for (int j = i + 1; j < n; j++)
+        {
+            if (reach[i, j] || reach[j, i]) continue;
+            var conflicts = Conflicts(in order[i].Access, in order[j].Access);
+            if (conflicts.Length > 0) pairs.Add(new SystemPair(names[i], names[j], conflicts));
+        }
+
+        return new GroupSchedule(group.Name, infos, pairs.ToArray());
+    }
+
+    /// <summary>What two systems conflict on (<see cref="SystemAccess.ConflictsWith"/>), by name.</summary>
+    private static string[] Conflicts(in SystemAccess first, in SystemAccess second)
+    {
+        var names = new List<string>();
+        if (first.Alone || second.Alone) names.Add("runs alone");
+        Shared(names, first.WriteComponents, first.ReadComponents, second.WriteComponents, second.ReadComponents, false);
+        Shared(names, first.WriteSingletons, first.ReadSingletons, second.WriteSingletons, second.ReadSingletons, true);
+        return names.ToArray();
+    }
+
+    // The bits one side writes and the other reads or writes.
+    private static void Shared(List<string> names, in BitMask writes, in BitMask reads, in BitMask otherWrites, in BitMask otherReads, bool singletons)
+    {
+        int capacity = Math.Max(Math.Max(writes.Capacity, reads.Capacity), Math.Max(otherWrites.Capacity, otherReads.Capacity));
+        for (int bit = 0; bit < capacity; bit++)
+            if ((writes.HasBit(bit) && (otherWrites.HasBit(bit) || otherReads.HasBit(bit))) || (reads.HasBit(bit) && otherWrites.HasBit(bit)))
+                names.Add(singletons ? EasyEcs.SingletonNames.Of(bit) + " (singleton)" : ScheduleInfo.NameOf(ComponentInfo.Of(bit).Type));
+    }
+
+    private static string[] ComponentNames(in BitMask components)
+    {
+        var bits = components.ToBitArray();
+        var names = new string[bits.Length];
+        for (int i = 0; i < bits.Length; i++) names[i] = ScheduleInfo.NameOf(ComponentInfo.Of(bits[i]).Type);
+        return names;
+    }
+
+    private static string[] SingletonNamesOf(in BitMask singletons)
+    {
+        var slots = singletons.ToBitArray();
+        var names = new string[slots.Length];
+        for (int i = 0; i < slots.Length; i++) names[i] = EasyEcs.SingletonNames.Of(slots[i]);
+        return names;
+    }
+
     /// <summary>The components of <paramref name="entity"/>, boxed (disabled ones marked); none when it is stale.</summary>
     internal static ComponentValue[] Describe(Entity entity)
     {

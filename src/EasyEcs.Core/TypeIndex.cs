@@ -73,7 +73,36 @@ internal static class SingletonType<T> where T : struct, ISingletonComponent
     {
         Collectible.Watch(typeof(T)); // its save id is forgotten when its context unloads
         SavedTypes.Singleton<T>(); // a type the process uses can be loaded
-        return TypeIndex<ISingletonComponent, T>.Value;
+        int index = TypeIndex<ISingletonComponent, T>.Value;
+        SingletonNames.Set(index, ScheduleInfo.NameOf(typeof(T)));
+        return index;
+    }
+}
+
+/// <summary>
+/// The names of the singleton types by slot, for reports (<see cref="World.DescribeSchedule"/>): names, not types, so an
+/// unloaded plugin's types are not kept.
+/// </summary>
+internal static class SingletonNames
+{
+    private static string[] _names = [];
+    private static readonly Lock Gate = new();
+
+    public static void Set(int slot, string name)
+    {
+        lock (Gate)
+        {
+            var names = _names;
+            if (slot >= names.Length) Array.Resize(ref names, Math.Max(slot + 1, names.Length * 2));
+            names[slot] = name;
+            Volatile.Write(ref _names, names);
+        }
+    }
+
+    public static string Of(int slot)
+    {
+        var names = Volatile.Read(ref _names);
+        return slot < names.Length && names[slot] != null ? names[slot] : "singleton " + slot;
     }
 }
 

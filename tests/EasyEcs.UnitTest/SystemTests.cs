@@ -241,4 +241,109 @@ public class SystemTests
         world.Dispose();
         Assert.That(failing.Error.Message, Is.EqualTo("bad.destroy"));          // OnDestroy during Dispose
     }
+
+    // ---------------- SystemStats: allocated bytes and visited entities ----------------
+
+    internal sealed class Moves : EcsSystem
+    {
+        [ForEach]
+        private static void Move(ref Position position, in Velocity velocity) => position.X += velocity.X;
+    }
+
+#pragma warning disable EECS028 // the allocation the stats measure
+    private sealed class Renames : EcsSystem
+    {
+        [ForEach]
+        private static void Rename(ref Name name) => name.Value = new string('x', 1000);
+    }
+
+    private sealed class RenamesInParallel : EcsSystem
+    {
+        [ForEach(Parallel = true)]
+        private static void Rename(ref Name name) => name.Value = new string('x', 64);
+    }
+#pragma warning restore EECS028
+
+    private sealed class SeesArmor : EcsSystem
+    {
+        [ForEach, Changed<Armor>]
+        private static void See(ref Seen seen) => seen.Count++;
+    }
+
+    [Test]
+    public void StatsCountTheBytesARunAllocatesAndTheEntitiesItVisits()
+    {
+        using var world = new World(new WorldOptions { MeasureSystems = true });
+        for (int i = 0; i < 10; i++) world.CreateEntity(new Position(0, 0), new Velocity(1, 0));
+        for (int i = 0; i < 5; i++) world.CreateEntity(new Position(0, 0));                  // no Velocity: not visited
+        for (int i = 0; i < 4; i++) world.CreateEntity(new Name("a"));
+        var moves = world.AddSystem<Moves>();
+        var renames = world.AddSystem<Renames>();
+        for (int i = 0; i < 3; i++) world.Update();
+
+        Assert.That(moves.Stats.LastEntities, Is.EqualTo(10));
+        Assert.That(moves.Stats.TotalEntities, Is.EqualTo(30));
+        Assert.That(moves.Stats.LastAllocated, Is.Zero);                                     // warmed up: queries cached
+        Assert.That(renames.Stats.LastEntities, Is.EqualTo(4));
+        Assert.That(renames.Stats.LastAllocated, Is.GreaterThanOrEqualTo(4 * 2000));         // four 1,000-char strings
+        Assert.That(renames.Stats.TotalAllocated, Is.GreaterThanOrEqualTo(3 * 4 * 2000));
+        Assert.That(renames.Stats.TotalAllocated, Is.GreaterThanOrEqualTo(renames.Stats.LastAllocated * 3));
+    }
+
+    [Test]
+    public void StatsCountOnlyTheChangedEntitiesAChangedMethodVisits()
+    {
+        using var world = new World(new WorldOptions { MeasureSystems = true });
+        var entities = new Entity[10];
+        for (int i = 0; i < entities.Length; i++) entities[i] = world.CreateEntity(new Armor(1), new Seen(0));
+        var sees = world.AddSystem<SeesArmor>();
+        world.Update();
+        Assert.That(sees.Stats.LastEntities, Is.EqualTo(10));                               // all written since the start
+        for (int i = 0; i < 3; i++) entities[i].Set(new Armor(2));
+        world.Update();
+        Assert.That(sees.Stats.LastEntities, Is.EqualTo(3));
+        world.Update();
+        Assert.That(sees.Stats.LastEntities, Is.Zero);
+        Assert.That(sees.Stats.TotalEntities, Is.EqualTo(13));
+    }
+
+    [Test]
+    public void StatsOfAParallelForEachSumTheBytesOfEveryThread()
+    {
+        using var world = new World(new WorldOptions { MeasureSystems = true, MaxDegreeOfParallelism = 4 });
+        const int count = 40_000;
+        world.CreateEntities(new Entity[count], new Name(""));
+        var renames = world.AddSystem<RenamesInParallel>();
+        for (int i = 0; i < 4; i++) world.Update();
+        Assert.That(renames.Stats.LastEntities, Is.EqualTo(count));
+        // A 64-char string is at least 128 bytes of characters, whichever thread ran its chunk.
+        Assert.That(renames.Stats.LastAllocated, Is.GreaterThanOrEqualTo(count * 128L));
+        Assert.That(renames.Stats.TotalAllocated, Is.GreaterThanOrEqualTo(4 * count * 128L));
+    }
+
+    [Test]
+    public void StatsOfSystemsInAParallelStageAreTheirOwn()
+    {
+        using var world = new World(new WorldOptions { MeasureSystems = true, ParallelSystems = true, MaxDegreeOfParallelism = 4 });
+        for (int i = 0; i < 6; i++) world.CreateEntity(new Position(0, 0), new Velocity(1, 0));
+        for (int i = 0; i < 3; i++) world.CreateEntity(new Name(""));
+        var moves = world.AddSystem<Moves>();
+        var renames = world.AddSystem<Renames>();
+        Assert.That(world.DescribeSchedule().Groups[0].Stages, Has.Length.EqualTo(1));       // one stage: no conflict
+        for (int i = 0; i < 3; i++) world.Update();
+        Assert.That((moves.Stats.Runs, renames.Stats.Runs), Is.EqualTo((3L, 3L)));
+        Assert.That((moves.Stats.LastEntities, renames.Stats.LastEntities), Is.EqualTo((6L, 3L)));
+        Assert.That(moves.Stats.LastAllocated, Is.Zero);                                     // the other one's bytes are not its own
+        Assert.That(renames.Stats.LastAllocated, Is.GreaterThanOrEqualTo(3 * 2000));
+    }
+
+    [Test]
+    public void StatsStayEmptyWithoutMeasureSystems()
+    {
+        using var world = new World();
+        for (int i = 0; i < 4; i++) world.CreateEntity(new Name("a"));
+        var renames = world.AddSystem<Renames>();
+        world.Update();
+        Assert.That((renames.Stats.Runs, renames.Stats.TotalEntities, renames.Stats.TotalAllocated), Is.EqualTo((0L, 0L, 0L)));
+    }
 }

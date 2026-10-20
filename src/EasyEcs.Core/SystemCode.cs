@@ -31,6 +31,16 @@ public abstract class SystemCode
     /// <summary>Declares what the type's [ForEach] methods read and write (parallel stages).</summary>
     protected abstract void Access(ref SystemAccess access);
 
+    /// <summary>
+    /// Whether <paramref name="world"/> measures its systems (<see cref="WorldOptions.MeasureSystems"/>): the generated
+    /// code then counts the entities each [ForEach] pass matches (<see cref="Visit"/>). One field read per pass.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    protected static bool Measuring(World world) => world.MeasuresSystems;
+
+    /// <summary>Count <paramref name="entities"/> visited by a [ForEach] pass of <paramref name="system"/> (<see cref="SystemStats.LastEntities"/>).</summary>
+    protected static void Visit(EcsSystem system, int entities) => system.Visited += entities;
+
     // Protected, not protected internal: generated overrides are then the same in every assembly, friends included.
     internal void Run(EcsSystem system) => Update(system);
 

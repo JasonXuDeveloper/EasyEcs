@@ -65,8 +65,15 @@ public abstract class EcsSystem
     /// </summary>
     public ulong LastRunTick { get; internal set; }
 
-    /// <summary>Run count and time of this system; recorded only with <see cref="WorldOptions.MeasureSystems"/>.</summary>
+    /// <summary>
+    /// Run count, time, allocated bytes and visited entities of this system; recorded only with
+    /// <see cref="WorldOptions.MeasureSystems"/>.
+    /// </summary>
     public SystemStats Stats { get; internal set; }
+
+    // Entities the [ForEach] methods of the current measured run visited (SystemCode.Visit); one system runs on one
+    // thread at a time, so a plain field.
+    internal long Visited;
 
     /// <summary>Called once when the system is added to a world.</summary>
     protected virtual void OnCreate()

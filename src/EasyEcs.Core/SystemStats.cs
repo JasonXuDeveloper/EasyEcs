@@ -5,19 +5,23 @@ namespace EasyEcs;
 
 /// <summary>
 /// How often and how long a system ran (<see cref="WorldOptions.MeasureSystems"/>): <see cref="EcsSystem.OnUpdate"/> plus its
-/// <c>[ForEach]</c> methods, per run. Read it between updates; with <see cref="WorldOptions.ParallelSystems"/> each
-/// system records its own runs.
+/// <c>[ForEach]</c> methods, per run, with the bytes it allocated and the entities its <c>[ForEach]</c> methods visited.
+/// Read it between updates; with <see cref="WorldOptions.ParallelSystems"/> each system records its own runs.
 /// </summary>
 public readonly struct SystemStats
 {
     private readonly long _total;
     private readonly long _last;
 
-    private SystemStats(long runs, long total, long last)
+    private SystemStats(long runs, long total, long last, long allocated, long totalAllocated, long entities, long totalEntities)
     {
         Runs = runs;
         _total = total;
         _last = last;
+        LastAllocated = allocated;
+        TotalAllocated = totalAllocated;
+        LastEntities = entities;
+        TotalEntities = totalEntities;
     }
 
     /// <summary>Runs measured so far.</summary>
@@ -32,5 +36,26 @@ public readonly struct SystemStats
     /// <summary>Average time per run (zero before the first).</summary>
     public TimeSpan Average => Runs == 0 ? TimeSpan.Zero : Stopwatch.GetElapsedTime(0, _total / Runs);
 
-    internal SystemStats Add(long ticks) => new(Runs + 1, _total + ticks, ticks);
+    /// <summary>
+    /// Bytes the latest run allocated on the managed heap: on the thread that ran the system, plus on the threads that
+    /// ran chunks of its parallel <c>[ForEach]</c> methods (<c>GC.GetAllocatedBytesForCurrentThread</c> around each).
+    /// </summary>
+    public long LastAllocated { get; }
+
+    /// <summary>Bytes all measured runs allocated (see <see cref="LastAllocated"/>).</summary>
+    public long TotalAllocated { get; }
+
+    /// <summary>
+    /// Entities the latest run's <c>[ForEach]</c> methods visited: the entities each method's query matched when its
+    /// pass started (rows passing its filters and, for <c>[Changed&lt;T&gt;]</c> / <c>[Removed&lt;T&gt;]</c>, written or
+    /// removed since the system last ran), summed over the methods. Queries made in <see cref="EcsSystem.OnUpdate"/>
+    /// are not counted.
+    /// </summary>
+    public long LastEntities { get; }
+
+    /// <summary>Entities all measured runs visited (see <see cref="LastEntities"/>).</summary>
+    public long TotalEntities { get; }
+
+    internal SystemStats Add(long ticks, long allocated, long entities) =>
+        new(Runs + 1, _total + ticks, ticks, allocated, TotalAllocated + allocated, entities, TotalEntities + entities);
 }

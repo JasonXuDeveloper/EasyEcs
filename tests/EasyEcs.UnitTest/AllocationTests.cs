@@ -213,6 +213,22 @@ public class AllocationTests
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
 
+    [Test]
+    public void MeasuredSystemsDoNotAllocate()
+    {
+        // Timing, bytes and entity counts of every run, in parallel stages and parallel [ForEach] passes too.
+        using var world = new World(new WorldOptions { MeasureSystems = true, ParallelSystems = true, MaxDegreeOfParallelism = 4 });
+        world.CreateEntities(new Entity[World.ParallelChunkRows * 4], new ParallelTests.Counter(0), new ParallelTests.Seen(1));
+        world.CreateEntities(new Entity[100], new Position(0, 0), new Velocity(1, 1));
+        world.AddSystem<ParallelTests.ChunkedIncrement>();
+        world.AddSystem<SystemTests.Moves>();
+        for (int i = 0; i < 10; i++) world.Update();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 500; i++) world.Update();
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(world.GetSystem<SystemTests.Moves>().Stats.LastEntities, Is.EqualTo(100));
+    }
+
     private struct Churned : IComponent;
 
     // Toggles a tag on the entity it runs on: entity.Run with a structural change inside.

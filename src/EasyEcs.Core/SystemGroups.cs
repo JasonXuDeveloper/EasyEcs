@@ -44,11 +44,13 @@ public interface IGroupWithout<T> : ISystemGroup where T : struct, IComponent;
 public sealed class UpdateInGroupAttribute<TGroup> : Attribute, ISystemGroupAttribute where TGroup : struct, ISystemGroup
 {
     int ISystemGroupAttribute.Index => SystemGroup<TGroup>.Index;
+    string ISystemGroupAttribute.Name => ScheduleInfo.NameOf(typeof(TGroup));
 }
 
 internal interface ISystemGroupAttribute
 {
     int Index { get; }
+    string Name { get; } // of the group type, for World.DescribeSchedule
 }
 
 /// <summary>Index of group <typeparamref name="T"/> in every world (0 is the default group).</summary>

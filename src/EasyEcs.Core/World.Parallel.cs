@@ -13,6 +13,13 @@ public sealed partial class World
     private Runner _systemRunner;
     private Runner _chunkRunner;
 
+    /// <summary>
+    /// Bytes the helper threads of this thread's parallel [ForEach] passes allocated, summed (only with
+    /// <see cref="WorldOptions.MeasureSystems"/>): a measured run adds what grew during it to its system's
+    /// <see cref="SystemStats.LastAllocated"/>. Per thread: two systems of a stage may run passes at once.
+    /// </summary>
+    [ThreadStatic] private static long HelperAllocated;
+
     // Chunked jobs, one cached instance per job type (TypeIndex<ParallelWork, TWork>): allocated on first use only.
     private ParallelWork[] _parallelWork = [];
     private readonly Lock _parallelWorkLock = new();
@@ -44,11 +51,12 @@ public sealed partial class World
         var systems = stage.Systems;
         stage.World = this;
         stage.Update = update;
-        var runner = _systemRunner ??= new Runner(Helpers);
+        // Each system of the stage measures its own allocations (RunMeasured, on the thread that runs it).
+        var runner = _systemRunner ??= new Runner(Helpers, false);
         Gate.Freeze(); // the stage's systems never change structure (they do not run alone): a change throws
         try
         {
-            if (runner.TryRun(stage, systems.Length)) return;
+            if (runner.TryRun(stage, systems.Length, out _)) return;
             for (int i = 0; i < systems.Length; i++) RunSystem(systems[i], update); // an update from inside a running stage
         }
         finally
@@ -69,11 +77,14 @@ public sealed partial class World
         var runner = _chunkRunner;
         if (runner == null)
         {
-            Interlocked.CompareExchange(ref _chunkRunner, new Runner(helpers), null);
+            // Measuring, the helpers count what they allocate for the system running the pass (HelperAllocated).
+            Interlocked.CompareExchange(ref _chunkRunner, new Runner(helpers, _options.MeasureSystems), null);
             runner = _chunkRunner;
         }
 
-        return runner.TryRun(work, count);
+        if (!runner.TryRun(work, count, out long allocated)) return false;
+        if (allocated != 0) HelperAllocated += allocated;
+        return true;
     }
 
     /// <summary>The cached instance of <typeparamref name="TWork"/> for this world.</summary>
@@ -205,6 +216,7 @@ public sealed partial class World
     private sealed class Runner
     {
         private readonly Helper[] _helpers;
+        private readonly bool _measure; // helpers sum what they allocate running items (_allocated)
         private int _busy;
 
         // Written by the caller before the epoch is published, read by participants after claiming in that epoch.
@@ -213,20 +225,29 @@ public sealed partial class World
         private long _cursor;
         private int _remaining;
         private long _spent; // the items' summed thread time
+        private long _allocated; // bytes helpers allocated running items (_measure)
         private Exception _error;
 
-        public Runner(int helpers)
+        public Runner(int helpers, bool measure)
         {
+            _measure = measure;
             _helpers = new Helper[helpers];
             for (int i = 0; i < helpers; i++) _helpers[i] = new Helper(this);
         }
 
-        public bool TryRun(ParallelWork work, int count)
+        /// <summary>
+        /// Run items 0 .. <paramref name="count"/> - 1 of <paramref name="work"/>; false when the runner is busy.
+        /// <paramref name="allocated"/>: the bytes helper threads allocated running items (a measuring runner only: the
+        /// caller's own items allocate on its thread, which its system measures).
+        /// </summary>
+        public bool TryRun(ParallelWork work, int count, out long allocated)
         {
+            allocated = 0;
             if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) return false;
             try
             {
                 Run(work, count);
+                allocated = _allocated; // read while the runner is still this run's
             }
             finally
             {
@@ -244,6 +265,7 @@ public sealed partial class World
             _error = null;
             _remaining = count;
             _spent = 0;
+            _allocated = 0;
             int epoch = (int)(_cursor >> 32) + 1;
             // Publishes the fields above: a participant reads them only after a successful claim in this epoch.
             Interlocked.Exchange(ref _cursor, (long)epoch << 32);
@@ -260,7 +282,7 @@ public sealed partial class World
                 wanted--;
             }
 
-            Work(epoch);
+            Work(epoch, false);
             // Every item is claimed: at most one item per helper is still running. Spin and yield (never sleep, never
             // block): a blocking event allocates its lock the first time it waits.
             var spinner = new SpinWait();
@@ -269,8 +291,9 @@ public sealed partial class World
             if (_error != null) ExceptionDispatchInfo.Throw(_error);
         }
 
-        private void Work(int epoch)
+        private void Work(int epoch, bool helper)
         {
+            bool measure = helper && _measure;
             while (true)
             {
                 long cursor = Volatile.Read(ref _cursor);
@@ -279,6 +302,7 @@ public sealed partial class World
                 if (Interlocked.CompareExchange(ref _cursor, cursor + 1, cursor) != cursor) continue;
 
                 long start = Stopwatch.GetTimestamp();
+                long allocated = measure ? GC.GetAllocatedBytesForCurrentThread() : 0;
                 try
                 {
                     _work.Run(index);
@@ -288,8 +312,9 @@ public sealed partial class World
                     Interlocked.CompareExchange(ref _error, e, null);
                 }
 
-                // Added before the item counts as done: the caller reads the sum once the last one is.
+                // Added before the item counts as done: the caller reads the sums once the last one is.
                 Interlocked.Add(ref _spent, Stopwatch.GetTimestamp() - start);
+                if (measure) Interlocked.Add(ref _allocated, GC.GetAllocatedBytesForCurrentThread() - allocated);
                 Interlocked.Decrement(ref _remaining);
             }
         }
@@ -303,7 +328,7 @@ public sealed partial class World
             {
                 int epoch = Epoch;
                 Volatile.Write(ref Queued, 0);
-                runner.Work(epoch);
+                runner.Work(epoch, true);
             }
         }
     }

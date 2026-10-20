@@ -45,12 +45,12 @@ public sealed partial class World
         if (system.World != null)
             throw new InvalidOperationException($"{system.GetType().Name} already belongs to a world");
 
-        system.Group = GroupOf(system.GetType(), out system.RunsBefore, out system.RunsAfter);
+        system.Group = GroupOf(system.GetType(), out string group, out system.RunsBefore, out system.RunsAfter);
         system.DeclareAccess();
         using (Structural())
         {
             if (system.Group >= _groups.Length) Array.Resize(ref _groups, system.Group + 1);
-            (_groups[system.Group] ??= new SystemSchedule()).Insert(system); // throws on a cycle: the system stays out
+            (_groups[system.Group] ??= new SystemSchedule { Name = group }).Insert(system); // throws on a cycle: the system stays out
             if (changesFromNow) system.LastRunTick = _changeTick++; // writes from here on are newer than its "last run"
         }
 
@@ -160,6 +160,11 @@ public sealed partial class World
             return;
         }
 
+        // The thread's own allocations, plus those of the threads that ran chunks of its parallel [ForEach] passes
+        // (TryRunChunks adds them to HelperAllocated of this thread).
+        system.Visited = 0;
+        long helpers = HelperAllocated;
+        long allocated = GC.GetAllocatedBytesForCurrentThread();
         long start = Stopwatch.GetTimestamp();
         try
         {
@@ -167,22 +172,28 @@ public sealed partial class World
         }
         finally
         {
-            system.Stats = system.Stats.Add(Stopwatch.GetTimestamp() - start);
+            long ticks = Stopwatch.GetTimestamp() - start;
+            allocated = GC.GetAllocatedBytesForCurrentThread() - allocated + (HelperAllocated - helpers);
+            system.Stats = system.Stats.Add(ticks, allocated, system.Visited);
         }
     }
 
+    /// <summary>Whether this world measures its systems (<see cref="WorldOptions.MeasureSystems"/>).</summary>
+    internal bool MeasuresSystems => _options.MeasureSystems;
+
     /// <summary>
-    /// Group index of a system type (its inherited [UpdateInGroup] attribute, or the default group) and the system types
-    /// it runs before and after.
+    /// Group index of a system type (its inherited [UpdateInGroup] attribute, or the default group), the group's name and
+    /// the system types it runs before and after.
     /// </summary>
-    private static int GroupOf(Type type, out Type[] before, out Type[] after)
+    private static int GroupOf(Type type, out string name, out Type[] before, out Type[] after)
     {
         // Cold path (once per AddSystem); the attribute instance knows its group index, so no MakeGenericType.
         int group = 0;
+        name = SystemSchedule.DefaultName;
         List<Type> runsBefore = null, runsAfter = null;
         foreach (var attribute in Attribute.GetCustomAttributes(type, typeof(Attribute), inherit: true))
         {
-            if (attribute is ISystemGroupAttribute grouping) group = grouping.Index;
+            if (attribute is ISystemGroupAttribute grouping) (group, name) = (grouping.Index, grouping.Name);
             else if (attribute is ISystemOrder order) ((order.Before ? runsBefore ??= [] : runsAfter ??= [])).Add(order.Other);
         }
 
@@ -243,7 +254,10 @@ public sealed partial class World
         public EcsSystem[] Systems = []; // execution order
         public SystemStage[] Stages = [];
         public long Updates;
+        public string Name = DefaultName; // the group type's (World.DescribeSchedule)
         private EcsSystem[] _registered = [];
+
+        public const string DefaultName = "Default";
 
         public void Insert(EcsSystem system) => Publish([.. _registered, system]);
 
@@ -358,7 +372,7 @@ public sealed partial class World
         }
 
         /// <summary>Whether <paramref name="first"/> must run before <paramref name="second"/> by an ordering of either.</summary>
-        private static bool Precedes(EcsSystem first, EcsSystem second) => Names(first.RunsBefore, second) || Names(second.RunsAfter, first);
+        internal static bool Precedes(EcsSystem first, EcsSystem second) => Names(first.RunsBefore, second) || Names(second.RunsAfter, first);
 
         private static bool Names(Type[] types, EcsSystem system)
         {

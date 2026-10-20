@@ -214,4 +214,134 @@ public class IntrospectionTests
         world.TrimExcess(); // the pass ended
         Assert.That(world.Count<Health>(), Is.EqualTo(1));
     }
+
+    // ---------------- DescribeSchedule ----------------
+
+    private sealed class Move : EcsSystem
+    {
+        [ForEach] private static void Run(ref Position position, in Velocity velocity) => position.X += velocity.X;
+    }
+
+    private sealed class Heal : EcsSystem
+    {
+        [ForEach] private static void Run(ref Health health) => health.Value++;
+    }
+
+    private sealed class Watch : EcsSystem // reads what Move writes, ordered by nothing: registration order decides
+    {
+        [ForEach] private static void Run(in Position position, ref Seen seen) => seen.Count += (int)position.X;
+    }
+
+    [UpdateAfter<Heal>]
+    private sealed class Wake : EcsSystem // disjoint from Heal, but ordered after it
+    {
+        [ForEach] private static void Run(ref Stun stun) => stun.Ticks--;
+    }
+
+    [UpdateAfter<Move>]
+    private sealed class Follow : EcsSystem // ordered after Move and reads what it writes
+    {
+        [ForEach] private static void Run(in Position position, ref C3 trail) => trail.V = (int)position.X;
+    }
+
+    private sealed class Tick : EcsSystem
+    {
+        [ForEach] private static void Run(ref C1 c, ref Clock clock) => clock.Tick += ++c.V;
+    }
+
+    private sealed class Read : EcsSystem
+    {
+        [ForEach] private static void Run(ref C2 c, in Clock clock) => c.V = (int)clock.Tick;
+    }
+
+    private struct LateGroup : ISystemGroup;
+
+    [UpdateInGroup<LateGroup>]
+    private sealed class Late : EcsSystem
+    {
+        protected override void OnUpdate() { } // runs alone
+    }
+
+    private static World Scheduled()
+    {
+        var world = new World();
+        world.AddSystem<Move>();
+        world.AddSystem<Heal>();
+        world.AddSystem<Watch>();
+        world.AddSystem<Wake>();
+        world.AddSystem<Follow>();
+        world.AddSystem<Tick>();
+        world.AddSystem<Read>();
+        world.AddSystem<Late>();
+        return world;
+    }
+
+    [Test]
+    public void AScheduleShowsStagesAccessAndWhyASystemWaits()
+    {
+        using var world = Scheduled();
+        var schedule = world.DescribeSchedule();
+        Assert.That(schedule.Groups.Select(g => g.Name), Is.EqualTo(new[] { "Default", "LateGroup" }));
+        var stages = schedule.Groups[0].Stages;
+        Assert.That(stages.Select(s => s.Systems.Select(x => x.Name)), Is.EqualTo(new[]
+        {
+            new[] { "Move", "Heal", "Tick" },
+            new[] { "Watch", "Wake", "Follow", "Read" },
+        }));
+
+        var move = stages[0].Systems[0];
+        Assert.That((move.Reads, move.Writes, move.RunsAlone, move.After.Length), Is.EqualTo((new[] { "Velocity" }, new[] { "Position" }, false, 0)));
+        var tick = stages[0].Systems[2];
+        Assert.That((tick.Writes, tick.WritesSingletons, tick.ReadsSingletons), Is.EqualTo((new[] { "C1" }, new[] { "Clock" }, Array.Empty<string>())));
+
+        var waits = stages[1].Systems.ToDictionary(s => s.Name, s => s.After.Single());
+        Assert.That(waits["Watch"], Has.Property("System").EqualTo("Move").And.Property("Ordered").False);
+        Assert.That(waits["Watch"].Conflicts, Is.EqualTo(new[] { "Position" }));
+        Assert.That(waits["Wake"], Has.Property("System").EqualTo("Heal").And.Property("Ordered").True);
+        Assert.That(waits["Wake"].Conflicts, Is.Empty);                                         // ordered, nothing shared
+        Assert.That(waits["Follow"], Has.Property("System").EqualTo("Move").And.Property("Ordered").True);
+        Assert.That(waits["Follow"].Conflicts, Is.EqualTo(new[] { "Position" }));
+        Assert.That(waits["Read"].Conflicts, Is.EqualTo(new[] { "Clock (singleton)" }));
+
+        // Conflicting and ordered by nothing: Move / Watch and Tick / Read (Move / Follow have an ordering).
+        Assert.That(schedule.Groups[0].RegistrationOrdered.Select(p => (p.First, p.Second, string.Join(", ", p.Conflicts))),
+            Is.EqualTo(new[] { ("Move", "Watch", "Position"), ("Tick", "Read", "Clock (singleton)") }));
+        Assert.That(schedule.Groups[1].Stages.Single().Systems.Single().RunsAlone, Is.True);
+    }
+
+    [Test]
+    public void AScheduleReadsAsTextAndAsAMermaidFlowchart()
+    {
+        using var world = Scheduled();
+        var schedule = world.DescribeSchedule();
+        string text = schedule.ToString();
+        Assert.That(text, Does.Contain("Group Default\n  Stage 1\n    Move, reads Velocity, writes Position\n"));
+        Assert.That(text, Does.Contain("      after Move: Position\n"));
+        Assert.That(text, Does.Contain("      after Heal: ordered\n"));
+        Assert.That(text, Does.Contain("  Registration order only: Move before Watch (Position)\n"));
+        Assert.That(text, Does.Contain("Group LateGroup\n  Stage 1\n    Late (runs alone)\n"));
+
+        var lines = schedule.ToMermaid().Split('\n');
+        Assert.That(lines[0], Is.EqualTo("flowchart TD"));
+        Assert.That(lines, Does.Contain("  subgraph g0[\"Default\"]").And.Contain("    subgraph g0s1[\"Stage 2\"]"));
+        Assert.That(lines, Does.Contain("      g0n0[\"Move<br/>reads: Velocity<br/>writes: Position\"]"));
+        Assert.That(lines, Does.Contain("      g0n2[\"Tick<br/>writes: C1, Clock (singleton)\"]"));
+        Assert.That(lines, Does.Contain("  g0n0 -->|\"Position\"| g0n3"));                         // Move -> Watch
+        Assert.That(lines, Does.Contain("  g0n1 -->|\"ordered\"| g0n4"));                          // Heal -> Wake
+        Assert.That(lines, Does.Contain("  g0n0 -. \"registration order\" .-> g0n3"));
+        Assert.That(lines, Does.Contain("  subgraph g1[\"LateGroup\"]"));
+        Assert.That(lines.Count(l => l.Trim() == "end"), Is.EqualTo(3 + 2));                        // 3 stages, 2 groups
+    }
+
+    [Test]
+    public void AScheduleNamesGenericAndRepeatedSystems()
+    {
+        Assert.That(ScheduleInfo.NameOf(typeof(System.Collections.Generic.Dictionary<int, Position>)), Is.EqualTo("Dictionary<Int32, Position>"));
+        using var world = new World();
+        world.AddSystem(new Heal());
+        world.AddSystem(new Heal());                                                               // the same type twice
+        var stages = world.DescribeSchedule().Groups.Single().Stages;
+        Assert.That(stages.Select(s => s.Systems.Single().Name), Is.EqualTo(new[] { "Heal", "Heal #2" }));
+        Assert.That(stages[1].Systems[0].After.Single().System, Is.EqualTo("Heal"));
+    }
 }
