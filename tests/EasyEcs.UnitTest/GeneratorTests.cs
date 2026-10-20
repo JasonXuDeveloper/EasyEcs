@@ -175,7 +175,8 @@ public class GeneratorTests
                 using EasyEcs;
                 namespace Framework;
                 public struct In<TActor> : IComponent;
-                public interface IActor<TSelf> : ISystemGroup, IGroupWith<In<TSelf>> where TSelf : struct;
+                public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, IGroupWith<In<TSelf>>
+                    where TSelf : struct, IActor<TSelf>, System.IEquatable<TSelf>;
                 """, Parse)],
             Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
@@ -186,17 +187,19 @@ public class GeneratorTests
         var user = Compile("""
             using Framework;
             public record struct Tiles(int Count) : IComponent;
-            public struct Map : IActor<Map>;
+            public readonly partial record struct Map(long Id) : IActor<Map> { public Map Key => this; }
             [UpdateInGroup<Map>]
             public class Grow : EcsSystem { [ForEach] static void A(ref Tiles t) => t.Count++; }
             public static class Spawn
             {
-                public static bool Activate(World world)
+                public static long Activate(World world)
                 {
-                    var map = world.CreateEntity(new Tiles(1));
+                    var map = world.CreateEntity(new Tiles(1), new Map(7));
                     map.Set(new In<Map>());
                     world.Update<Map>();
-                    return map.Has<In<Map>>();
+                    map.SetMap(8);
+                    foreach (var e in world.MapIndex.Find(new Map(8))) return e.Map.Id * 10 + e.Read<Tiles>().Count;
+                    return -1;
                 }
             }
             """).AddReferences(MetadataReference.CreateFromImage(image.ToArray()));
@@ -204,6 +207,22 @@ public class GeneratorTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity >= DiagnosticSeverity.Warning), Is.Empty);
         string generated = string.Concat(output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")).Select(t => t.ToString()));
         Assert.That(generated, Does.Contain(".With<global::Framework.In<global::Map>>()"), generated);
+        string members = string.Concat(output.SyntaxTrees.Where(t => t.ToString().Contains("MapIndex")).Select(t => t.ToString()));
+        Assert.That(members, Does.Contain("ValueIndex<global::Map, global::Map> MapIndex"), members);
+
+        // Run it: the group sees the actor, the key component keeps its index.
+        using var userImage = new System.IO.MemoryStream();
+        Assert.That(output.Emit(userImage).Success, Is.True);
+        var context = new System.Runtime.Loader.AssemblyLoadContext("actors", isCollectible: true);
+        try
+        {
+            context.LoadFromStream(new System.IO.MemoryStream(image.ToArray()));
+            var spawn = context.LoadFromStream(new System.IO.MemoryStream(userImage.ToArray())).GetType("Spawn")!;
+            using var world = new World();
+            world.AddSystem((EcsSystem)System.Activator.CreateInstance(spawn.Assembly.GetType("Grow")!)!);
+            Assert.That(spawn.GetMethod("Activate")!.Invoke(null, [world]), Is.EqualTo(82L));   // key 8, Tiles grown once
+        }
+        finally { context.Unload(); }
     }
 
     [TestCase("[ForEach] static void A(ref P p, ref int n, in int floor, int add) { }",

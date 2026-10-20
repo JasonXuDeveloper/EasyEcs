@@ -27,11 +27,15 @@ public static class Census
     private static void CountAlive<T>(in T component, ref int count) where T : struct, IComponent => count++;
 }
 
-/// <summary>The actor of a type: one tag type per actor type, one group per actor type through one interface.</summary>
+/// <summary>
+/// The actor of a type, as a server framework declares it: one tag type per actor type, and one type that is at once
+/// the actor's key component (indexed by itself) and the system group of its type, through one interface.
+/// </summary>
 public struct In<TActor> : IComponent;
-public interface IActor<TSelf> : ISystemGroup, IGroupWith<In<TSelf>> where TSelf : struct;
-public struct MapActor : IActor<MapActor>;
-public struct ShopActor : IActor<ShopActor>;
+public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, IGroupWith<In<TSelf>>
+    where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;
+public readonly partial record struct MapActor(long Id) : IActor<MapActor> { public MapActor Key => this; }
+public readonly partial record struct ShopActor(long Id) : IActor<ShopActor> { public ShopActor Key => this; }
 
 [UpdateInGroup<MapActor>]
 public class TickMaps : EcsSystem
@@ -70,13 +74,21 @@ public class GenericTests
     {
         using var world = new World();
         world.AddSystem<TickMaps>();
-        var map = world.CreateEntity(new Health(0));
+        var map = world.CreateEntity(new Health(0), new MapActor(7));
         map.Set(new In<MapActor>());
-        var shop = world.CreateEntity(new Health(0));
+        var shop = world.CreateEntity(new Health(0), new ShopActor(7));
         shop.Set(new In<ShopActor>());
+        var stray = world.CreateEntity(new Health(0), new MapActor(8));   // a key without the actor tag
         world.Update<MapActor>();
         world.Update<ShopActor>();
-        Assert.That((map.Has<In<MapActor>>(), map.Read<Health>().Value, shop.Read<Health>().Value), Is.EqualTo((true, 1, 0)));
+        Assert.That((map.Read<Health>().Value, shop.Read<Health>().Value, stray.Read<Health>().Value), Is.EqualTo((1, 0, 0)));
+
+        // The group type is also the actor's key component, with its generated members and index.
+        int found = 0;
+        foreach (var e in world.MapActorIndex.Find(new MapActor(7))) found += e == map ? 1 : 100;
+        Assert.That((map.MapActor.Id, map.HasMapActor, shop.HasMapActor, found), Is.EqualTo((7L, true, false, 1)));
+        map.SetMapActor(9);
+        Assert.That((world.MapActorIndex.Count(new MapActor(7)), world.MapActorIndex.Count(new MapActor(9))), Is.EqualTo((0, 1)));
     }
 
     [Test]
