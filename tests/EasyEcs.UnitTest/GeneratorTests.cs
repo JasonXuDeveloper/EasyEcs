@@ -876,6 +876,9 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(World w) { for (int i = 0; i < 10_000; i++) w.CreateEntity(new P()); } }", "EECS031")]
     [TestCase("public static class U { public static void F(World w) { var all = new Entity[10_000]; for (int i = 0; i < all.Length; i++) all[i] = w.CreateEntity(new P { V = i }); } }", "EECS031")]
     [TestCase("public static class U { public static void F(World w, Entity[] more) { var all = new Entity[64]; all = more; for (int i = 0; i < all.Length; i++) all[i] = w.CreateEntity(new P { V = i }); } }", "EECS031")]
+    [TestCase("public static class U { public static void F(World w, Prefab p, Entity[] all) { for (int i = 0; i < all.Length; i++) all[i] = w.Instantiate(p, new P()); } }", "EECS031")]
+    [TestCase("public static class U { public static void F(World w, Prefab p, int n) { for (int i = 0; i < n; i++) w.Instantiate(p, new P { V = i }); } }")] // no table to reserve
+    [TestCase("public static class U { public static void F(World w, Prefab p, Entity[] all, int n) { for (int i = 0; i < n; i++) w.Instantiate(p, all, new P()); } }")] // batches
     // EECS032: query work the world does in one call.
     [TestCase("public static class U { public static bool F(World w) => w.Count<P>() > 0; }", "EECS032")]
     [TestCase("public static class U { public static bool F(World w) => 0 == w.Count<P>(); }", "EECS032")]

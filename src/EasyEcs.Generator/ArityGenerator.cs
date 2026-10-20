@@ -185,6 +185,65 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
 
                     /// <summary>
+                    /// <see cref="Instantiate(Prefab)"/> with {{what}} given as well: a copy of every component of
+                    /// <paramref name="prefab"/>, then the given value{{(n == 1 ? "" : "s")}} (replacing the prefab's, a disabled one enabled
+                    /// as <c>Set</c> does), the entity placed directly in the table of both (no intermediate moves, one row
+                    /// copy). Tracked components count as written now, indexes and groups learn the values, a given
+                    /// <see cref="ChildOf"/> links the hierarchy. O(components) amortized, allocation-free once the table exists.
+                    /// A prefab with members creates them all and sets the components on the entity of the one passed after
+                    /// (one row move for it). Owner thread only (see docs/content/guide/threading.md).
+                    /// </summary>
+                    [MethodImpl(MethodImplOptions.NoInlining)] // keeps the loops that call it lean
+                    public Entity Instantiate<{{tps}}>(Prefab prefab, {{values}})
+                {{cons}}
+                    {
+                        if (prefab.IsGroup) return InstantiateGroup(prefab).Set({{List(n, i => $"in c{i}")}});
+                        using (Structural())
+                        {
+                {{Lines(n, i => $"            ushort b{i} = ComponentType<T{i}>.Bit;")}}
+                            var target = PrefabTable(prefab, {{(n == 1 ? "TypeIndex<ComponentSignature, T1>.Value" : signature)}}, [{{List(n, i => $"b{i}")}}], out var source, out int from);
+                {{Lines(n, i => $"            target = GroupTarget(target, b{i}, in c{i});")}}
+                            int id = AllocateId();
+                            int slot = Place(id, target);
+                            target.CloneRows(source, from, slot, 1, _changeTick);
+                {{Lines(n, i => $"            Unsafe.Add(ref target.Base<T{i}>(b{i}), slot) = c{i};")}}
+                {{Lines(n, i => $"            target.Stamp<T{i}>(slot, _changeTick);")}}
+                            int version = MetaRef(id).Version;
+                            Instantiated(target, slot, 1, [{{List(n, i => $"b{i}")}}]);
+                            return new Entity(this, id, version);
+                        }
+                    }
+
+                    /// <summary>
+                    /// <see cref="Instantiate(Prefab, Span{Entity})"/> with {{what}} given as well (the same value{{(n == 1 ? "" : "s")}} for each
+                    /// entity), as the single-entity overload does for one: the entities placed directly in their final table,
+                    /// their handles written to <paramref name="entities"/>. One pass through the structural gate and at most one
+                    /// table growth: O(count × components). Owner thread only.
+                    /// </summary>
+                    public void Instantiate<{{tps}}>(Prefab prefab, Span<Entity> entities, {{values}})
+                {{cons}}
+                    {
+                        if (prefab.IsGroup)
+                        {
+                            for (int i = 0; i < entities.Length; i++) entities[i] = InstantiateGroup(prefab).Set({{List(n, i => $"in c{i}")}});
+                            return;
+                        }
+
+                        using (Structural())
+                        {
+                {{Lines(n, i => $"            ushort b{i} = ComponentType<T{i}>.Bit;")}}
+                            var target = PrefabTable(prefab, {{(n == 1 ? "TypeIndex<ComponentSignature, T1>.Value" : signature)}}, [{{List(n, i => $"b{i}")}}], out var source, out int from);
+                            if (entities.IsEmpty) return;
+                {{Lines(n, i => $"            target = GroupTarget(target, b{i}, in c{i});")}}
+                            int first = PlaceRows(target, entities); // consecutive rows: each column is filled at once
+                            target.CloneRows(source, from, first, entities.Length, _changeTick);
+                {{Lines(n, i => $"            MemoryMarshal.CreateSpan(ref Unsafe.Add(ref target.Base<T{i}>(b{i}), first), entities.Length).Fill(c{i});")}}
+                {{Lines(n, i => $"            target.StampRows<T{i}>(first, entities.Length, _changeTick);")}}
+                            Instantiated(target, first, entities.Length, [{{List(n, i => $"b{i}")}}]);
+                        }
+                    }
+
+                    /// <summary>
                     /// Create <c>entities.Length</c> entities with {{what}} (the same value{{(n == 1 ? "" : "s")}} for each), placed directly in
                     /// their final archetype, and write their handles to <paramref name="entities"/>. One pass through the
                     /// structural gate and at most one table growth: O(count × {{n}}). Owner thread only (see docs/content/guide/threading.md).

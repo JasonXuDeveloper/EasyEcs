@@ -248,4 +248,111 @@ public class InstantiateTests
         Assert.That(world.Index<ChildOf, EntityId>().Count(leaders[3]), Is.EqualTo(1));
         Assert.That(world.Instantiate(squad).Read<Health>().Value, Is.EqualTo(1)); // the base kept its values
     }
+
+    [Test]
+    public void GivenComponentsJoinTheCopyInItsFinalTable()
+    {
+        using var world = new World();
+        var orc = new Prefab().Set(new Position(1, 2)).Set(new Health(30)).Set(new Armor(5));
+        world.Update();
+        ulong now = world.ChangeTick;
+        var e = world.Instantiate(orc, new Health(50), new Shield(3));  // one replaced, one added
+        Assert.That((e.Read<Position>(), e.Read<Health>(), e.Read<Armor>(), e.Read<Shield>()),
+            Is.EqualTo((new Position(1, 2), new Health(50), new Armor(5), new Shield(3))));
+        Assert.That(orc.Read<Health>(), Is.EqualTo(new Health(30)));       // the prefab keeps its value
+        var tables = world.Describe();                                    // the empty table and the final one: no table
+        Assert.That(tables.Length, Is.EqualTo(2));                        // of the prefab's components alone
+        Assert.That(Array.Find(tables, t => t.Entities == 1).Rows, Is.EqualTo(1));
+        var since = QueryFilter.Create().Changed<Armor>(now);             // copied and given values count as written
+        Assert.That((world.Count<Armor>(since), world.Count<Shield>(QueryFilter.Create().Changed<Shield>(now))), Is.EqualTo((1, 1)));
+        Assert.That(world.Instantiate(orc, new Velocity(1, 1)).Read<Health>(), Is.EqualTo(new Health(30)));
+        Assert.That(world.Describe().Length, Is.EqualTo(3));               // another signature, another final table
+    }
+
+    [Test]
+    public void AGivenChildOfLinksTheHierarchy()
+    {
+        using var world = new World();
+        var parent = world.CreateEntity(new Health(1));
+        var minion = new Prefab().Set(new Health(20));
+        var children = world.Index<ChildOf, EntityId>();
+        Assert.That(children.Count(parent), Is.Zero);                     // builds the index
+        var one = world.Instantiate(minion, new ChildOf(parent), new Armor(1));
+        world.Instantiate(minion, new Entity[4], new ChildOf(parent), new Armor(1));
+        Assert.That((children.Count(parent), one.Read<ChildOf>().Parent), Is.EqualTo((5, parent.Id)));
+        parent.Destroy();                                                  // the cascade takes them all
+        Assert.That(world.EntityCount, Is.Zero);
+    }
+
+    [Test]
+    public void GivenComponentsReachIndexesRelationsAndGroups()
+    {
+        using var world = new World();
+        world.GroupBy<Zone>();
+        var red = world.CreateEntity();
+        var callsigns = world.Index<Callsign, string>();
+        var members = world.Relations<MemberOf>();
+        Assert.That((callsigns.Count("a"), members.Count(red)), Is.EqualTo((0, 0))); // builds the indexes
+        var scout = new Prefab().Set(new Callsign("a")).Set(new Zone(1)).SetBuffer(new MemberOf(red));
+        var e = world.Instantiate(scout, new Callsign("b"), new Zone(2));
+        world.Instantiate(scout, new Entity[3], new Health(1));            // the prefab's values, in its zone
+        Assert.That((callsigns.Count("a"), callsigns.Count("b"), members.Count(red)), Is.EqualTo((3, 1, 4)));
+        Assert.That(callsigns.TryFind("b", out var found) && found == e, Is.True);
+        Assert.That(world.Count<Callsign>(QueryFilter.Create().InGroup<Zone>(2)), Is.EqualTo(1));
+        Assert.That(world.Count<Health>(QueryFilter.Create().InGroup<Zone>(1)), Is.EqualTo(3));
+        e.RemoveRelation<MemberOf>(red);                                   // a list of its own
+        Assert.That((scout.Read<DynamicBuffer<MemberOf>>().Count, members.Count(red)), Is.EqualTo((1, 3)));
+    }
+
+    [Test]
+    public void AGivenComponentTheRecipeLacksOrKeepsDisabledIsPresentAndEnabled()
+    {
+        using var world = new World();
+        var orc = new Prefab().Set(new Health(30)).Set(new Position(1, 1)).Remove<Position>();
+        orc.Row.Disable<Health>();
+        var given = world.Instantiate(orc, new Health(9), new Position(2, 2));
+        Assert.That((given.Read<Health>().Value, given.IsDisabled<Health>(), given.Read<Position>()),
+            Is.EqualTo((9, false, new Position(2, 2))));
+        var kept = world.Instantiate(orc, new Armor(1));                   // what it does not give stays as it is
+        Assert.That((kept.Has<Health>(), kept.IsDisabled<Health>(), kept.Has<Position>()), Is.EqualTo((false, true, false)));
+        Assert.That(kept.Enable<Health>() && kept.Read<Health>().Value == 30, Is.True);
+        var batch = new Entity[70];                                        // more than a word of presence bits
+        world.Instantiate(orc, batch, new Health(4));
+        Assert.That((world.Count<Health>(), batch[69].IsDisabled<Health>()), Is.EqualTo((72, false)));
+    }
+
+    [Test]
+    public void APrefabWithMembersGetsTheGivenComponentsOnTheMemberPassed()
+    {
+        using var world = new World();
+        var boss = new Prefab().Set(new Health(500));
+        var minion = boss.AddMember().Set(new Health(20)).Set(new ChildOf(boss.Id));
+        var e = world.Instantiate(minion, new Armor(7));
+        Assert.That((world.EntityCount, world.Count<Armor>(), e.Read<Armor>().Value, e.Read<Health>().Value), Is.EqualTo((2, 1, 7, 20)));
+        var leaders = new Entity[3];
+        world.Instantiate(boss, leaders, new Health(9));
+        Assert.That((world.EntityCount, leaders[2].Read<Health>().Value, world.Index<ChildOf, EntityId>().Count(leaders[2])),
+            Is.EqualTo((8, 9, 1)));
+    }
+
+    [Test]
+    public void InstantiatingWithGivenComponentsAllocatesNothingOnceWarm()
+    {
+        using var world = new World();
+        var parent = world.CreateEntity();
+        var minion = new Prefab().Set(new Health(20)).Set(new Armor(1));
+        var batch = new Entity[100];
+        world.Index<ChildOf, EntityId>().Count(parent);                    // the index learns every instance
+        for (int i = 0; i < 100; i++) world.Instantiate(minion, new ChildOf(parent), new Position(i, 0)); // JIT and caches
+        world.DestroyEntities<Health>();
+        world.Instantiate(minion, batch, new ChildOf(parent), new Position(1, 1));
+        world.DestroyEntities<Health>();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++) world.Instantiate(minion, new ChildOf(parent), new Position(i, 0));
+        world.DestroyEntities<Health>();
+        world.Instantiate(minion, batch, new ChildOf(parent), new Position(1, 1));
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.That(allocated, Is.Zero);
+        Assert.That((world.Index<ChildOf, EntityId>().Count(parent), batch[9].Read<Position>().X), Is.EqualTo((100, 1f)));
+    }
 }

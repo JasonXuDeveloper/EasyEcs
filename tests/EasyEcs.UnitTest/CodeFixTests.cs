@@ -133,6 +133,9 @@ public class CodeFixTests
     [TestCase("EECS031", "Create them in one call",
         "public static class U { public static void F(World w, Entity[] all) { for (int i = 0; i < all.Length; i++) all[i] = w.CreateEntity(new P()); } }",
         "{ w.CreateEntities(all, new P()); }")]
+    [TestCase("EECS031", "Create them in one call",
+        "public static class U { public static void F(World w, Prefab p, Entity[] all) { for (int i = 0; i < all.Length; i++) all[i] = w.Instantiate(p, new P(), new Q { V = 1 }); } }",
+        "{ w.Instantiate(p, all, new P(), new Q { V = 1 }); }")]
     [TestCase("EECS031", "Reserve room first",
         "public static class U { public static void F(World w, int n)\n    {\n        for (int i = 0; i < n; i++) w.CreateEntity(new P { V = i });\n    }\n}",
         "    {\n        w.EnsureCapacity<P>(n);\n        for (int i = 0; i < n; i++)")]

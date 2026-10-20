@@ -143,6 +143,53 @@ public sealed partial class World : IDisposable
         }
     }
 
+    // Instantiate(prefab, in T1..Tn) and Instantiate(prefab, entities, in T1..Tn) are generated (World.Structural.g.cs):
+    // the table of the prefab's and the given components, found once per (prefab table, signature), one row copy, no moves.
+
+    /// <summary>
+    /// This world's table for instances of <paramref name="prefab"/> (not a group) with <paramref name="bits"/> given
+    /// (the components of <paramref name="signature"/>), and the prefab's <paramref name="source"/> table and row.
+    /// Inside the structural gate.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private Archetype PrefabTable(Prefab prefab, int signature, ReadOnlySpan<ushort> bits, out Archetype source, out int from)
+    {
+        (source, from) = Source(prefab.Row);
+        return TableFor(source, signature, bits);
+    }
+
+    /// <summary>
+    /// Finish new rows [<paramref name="first"/>, +<paramref name="count"/>) of <paramref name="target"/>: a prefab's
+    /// copy whose given components (<paramref name="bits"/>) were written over it. Those the prefab lacked or kept
+    /// disabled are present now and lose their <see cref="Disabled{T}"/> tag (as Set does), then indexes learn the rows
+    /// and the prefab's values find their groups. Inside the structural gate.
+    /// </summary>
+    private void Instantiated(Archetype target, int first, int count, ReadOnlySpan<ushort> bits)
+    {
+        if (target.HasAbsent) Restore(target, first, count, bits);
+        IndexRows(target, first, count);
+        RegroupRows(target, first, count); // the given values chose their groups already: only the prefab's move
+    }
+
+    /// <summary>The given <paramref name="bits"/> of rows a prefab lacked or kept disabled come back (cold: such prefabs only).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void Restore(Archetype target, int first, int count, ReadOnlySpan<ushort> bits)
+    {
+        bool restored = false;
+        for (int i = 0; i < bits.Length; i++)
+        {
+            int column = target.ColumnIndex(bits[i]);
+            for (int row = first; row < first + count; row++)
+            {
+                if (!target.MarkPresent(column, row)) continue;
+                restored = true;
+                if (target.HasDisabled) Undisable(target, column, row);
+            }
+        }
+
+        if (restored) StorageVersion++; // passes re-read presence bits
+    }
+
     /// <summary>
     /// A new entity of this world with a copy of <paramref name="original"/>'s components: an entity of this world
     /// (<paramref name="sameWorld"/>, <c>Entity.Clone</c> is the public call) or a prefab's row. Inside the structural
@@ -198,13 +245,30 @@ public sealed partial class World : IDisposable
     private Archetype TableFor(Archetype source)
     {
         _prefabTables ??= new();
-        if (!_prefabTables.TryGetValue(source, out var target))
-            _prefabTables[source] = target = GetOrCreateArchetype(source.ComponentMask.Clone(), source);
+        if (!_prefabTables.TryGetValue((source, -1), out var target))
+            _prefabTables[(source, -1)] = target = GetOrCreateArchetype(source.ComponentMask.Clone(), source);
         return target;
     }
 
-    // A prefab's table -> this world's table with its components, found once.
-    private System.Collections.Generic.Dictionary<Archetype, Archetype> _prefabTables;
+    /// <summary>
+    /// This world's table with the components of <paramref name="source"/>, a prefab's table, and <paramref name="bits"/>
+    /// (the components of <paramref name="signature"/>), cached per both: an instance with given components goes
+    /// straight there, no table of the prefab's components alone is made.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private Archetype TableFor(Archetype source, int signature, ReadOnlySpan<ushort> bits) =>
+        _prefabTables != null && _prefabTables.TryGetValue((source, signature), out var target) ? target : NewTableFor(source, signature, bits);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private Archetype NewTableFor(Archetype source, int signature, ReadOnlySpan<ushort> bits)
+    {
+        var mask = source.ComponentMask.Clone();
+        for (int i = 0; i < bits.Length; i++) mask.SetBit(bits[i]);
+        return (_prefabTables ??= new())[(source, signature)] = GetOrCreateArchetype(in mask, source);
+    }
+
+    // (A prefab's table, a signature of given components or -1) -> this world's table with all of them, found once.
+    private System.Collections.Generic.Dictionary<(Archetype Source, int Signature), Archetype> _prefabTables;
 
     /// <summary>
     /// Destroy <paramref name="entity"/> (a handle of this world; <c>Entity.Destroy</c> is the public call); a stale

@@ -978,7 +978,8 @@ public sealed partial class EasyEcsAnalyzer
 
         var creations = loop.Body.Descendants().OfType<IInvocationOperation>().Where(c => core.Is(c.TargetMethod.ContainingType, core.World)
             && (c.TargetMethod.Name == "CreateEntity" && c.TargetMethod.TypeArguments.Length > 0
-                || c.TargetMethod.Name == "Instantiate" && c.Arguments.Length == 1) && c.Instance != null).ToArray();
+                || c.TargetMethod.Name == "Instantiate" && (c.Arguments.Length == 1 || c.TargetMethod.Parameters[1].RefKind == RefKind.In))
+            && c.Instance != null).ToArray(); // Instantiate(prefab) or Instantiate(prefab, in values), not a batch
         if (creations.Length != 1 || loop.Body.Descendants().Any(o => o is IAnonymousFunctionOperation)) return;
         var create = creations[0];
         // Only a creation on every pass of this loop creates its count: one under a branch or in an inner loop replaces
@@ -1010,7 +1011,7 @@ public sealed partial class EasyEcsAnalyzer
         {
             string handles = array.Syntax.ToString();
             string text = instantiate
-                ? $"{world}.Instantiate({create.Arguments[0].Value.Syntax}, {handles})"
+                ? $"{world}.Instantiate({string.Join(", ", create.Arguments.Select((a, k) => k == 0 ? $"{a.Value.Syntax}, {handles}" : a.Value.Syntax.ToString()))})"
                 : $"{world}.CreateEntities({handles}, {string.Join(", ", create.Arguments.Select(a => a.Value.Syntax.ToString()))})";
             context.ReportDiagnostic(Diagnostic.Create(CreateInLoop, loop.Syntax.GetLocation(),
                 Binds(model, loop.Syntax, text, out _) ? Fix(text + ";", "Create them in one call") : null,
@@ -1018,7 +1019,9 @@ public sealed partial class EasyEcsAnalyzer
             return;
         }
 
-        // Each entity its own values: reserve the table first.
+        // Each entity its own values: reserve the table first (EnsureCapacity of a prefab reserves the table of its
+        // components alone, not the one an instance with given components goes to).
+        if (instantiate && create.Arguments.Length > 1) return;
         string reserve = instantiate
             ? Invariant([create.Arguments[0].Value], loop.Body, index) ? $"{world}.EnsureCapacity({create.Arguments[0].Value.Syntax}, {count})" : ""
             : $"{world}.EnsureCapacity<{string.Join(", ", create.TargetMethod.TypeArguments.Select(t => t.ToMinimalDisplayString(model, at)))}>({count})";

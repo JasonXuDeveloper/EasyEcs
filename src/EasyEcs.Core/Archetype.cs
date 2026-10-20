@@ -678,37 +678,43 @@ internal sealed class Archetype
     }
 
     /// <summary>
-    /// Copy row <paramref name="from"/> of <paramref name="source"/>, a table with the same components (of this world or
-    /// a prefab's), into the <paramref name="count"/> (at least one) new rows from <paramref name="to"/>: values (each
-    /// dynamic buffer gets a list of its own), the components the row lacks, and change ticks: a component the row has
-    /// counts as written at <paramref name="tick"/>, one it lacks was never removed here. Unmanaged values are copied
-    /// into the first row, then into the others by doubling copies. Inside the structural gate.
+    /// Copy row <paramref name="from"/> of <paramref name="source"/>, a table with the same components or a subset of
+    /// them (of this world or a prefab's), into the <paramref name="count"/> (at least one) new rows from
+    /// <paramref name="to"/>: values (each dynamic buffer gets a list of its own), the components the row lacks, and
+    /// change ticks: a component the row has counts as written at <paramref name="tick"/>, one it lacks was never removed
+    /// here. Columns <paramref name="source"/> does not have (and their change ticks) are left for the caller to write
+    /// (Instantiate with values). Unmanaged values are copied into the first row, then into the others by doubling
+    /// copies. Inside the structural gate.
     /// </summary>
     public void CloneRows(Archetype source, int from, int to, int count, ulong tick)
     {
+        // Same column count: the same components, so the same columns (both sorted by bit); else map by bit.
+        bool same = source.Columns.Length == Columns.Length;
         for (int c = 0; c < Columns.Length; c++)
         {
+            int s = same ? c : source.ColumnIndex(Components[c]);
+            if (s < 0) continue; // a component the caller gives
             var info = Info(c);
             if (info.Owner >= 0)
             {
-                if (source.Has(ColumnIndex(info.Owner), from)) StampRange(c, to, count, tick);
+                if (source.Has(same ? ColumnIndex(info.Owner) : source.ColumnIndex(info.Owner), from)) StampRange(c, to, count, tick);
                 else ClearTicks(c, to, count);
                 continue;
             }
 
-            bool present = source.Has(c, from);
-            if (!present && !(source.HasDisabled && source.Keeps(c, from)))
+            bool present = source.Has(s, from);
+            if (!present && !(source.HasDisabled && source.Keeps(s, from)))
             {
                 for (int row = to; row < to + count; row++) MarkAbsent(c, row);
                 continue;
             }
 
             if (info.Managed)
-                for (int row = to; row < to + count; row++) info.CloneManaged(source.Columns[c], from, Columns[c], row);
+                for (int row = to; row < to + count; row++) info.CloneManaged(source.Columns[s], from, Columns[c], row);
             else
             {
                 ref byte first = ref Unsafe.Add(ref Aligned(Columns[c]), (nint)to * info.Size);
-                CopyBytes(ref Unsafe.Add(ref Aligned(source.Columns[c]), (nint)from * info.Size), ref first, info.Size);
+                CopyBytes(ref Unsafe.Add(ref Aligned(source.Columns[s]), (nint)from * info.Size), ref first, info.Size);
                 // Rows [to, to + done) hold the value: copy them after themselves until every row does
                 for (nint done = info.Size, total = (nint)count * info.Size; done < total; done *= 2)
                     Unsafe.CopyBlockUnaligned(ref Unsafe.Add(ref first, done), ref first, (uint)Math.Min(done, total - done));
