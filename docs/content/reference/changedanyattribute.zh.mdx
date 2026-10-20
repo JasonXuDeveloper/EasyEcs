@@ -1,6 +1,6 @@
 ---
-title: "ChangedAnyAttribute<T1, T2>, ChangedAnyAttribute<T1, T2, T3>, ChangedAnyAttribute<T1, T2, T3, T4>, ChangedAnyAttribute<T1, T2, T3, T4, T5>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7, T8>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7, T8, T9>"
-seoTitle: "ChangedAnyAttribute<T1, T2>, ChangedAnyAttribute<T1, T2, T3>, ChangedAnyAttribute<T1, T2, T3, T4>, ChangedAnyAttribute<T1, T2, T3, T4, T5>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7, T8>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7, T8, T9> 类 – EasyEcs C# API"
+title: "ChangedAnyAttribute<T2..T9>"
+seoTitle: "ChangedAnyAttribute 类 – EasyEcs C# API"
 description: "ForEachAttribute 方法只访问 T1, T2 中至少一个在系统上次运行之后写过的实体（EcsSystem.LastRunTick…"
 ---
 
@@ -18,6 +18,8 @@ public sealed class ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7, T8, T9> : At
 ```
 
 [`ForEachAttribute`](/zh/docs/reference/foreachattribute) 方法只访问 `T1, T2` 中至少一个在系统上次运行之后写过的实体（[`EcsSystem.LastRunTick`](/zh/docs/reference/ecssystem#lastruntick)；第一次运行时是所有拥有其中一个的实体）：即 [`QueryFilter.ChangedAny`](/zh/docs/reference/queryfilter#changedany)。多个这种特性合成一组；和 `[Changed<T>]` 以及其他过滤条件按 AND 组合。
+
+组件数量从 2 到 9，每个数量一个类型，都由同一个模板生成；下面的成员每个类型都有，以 `ChangedAnyAttribute<T1, T2>` 为例。
 
 ## 构造函数 [#constructors]
 

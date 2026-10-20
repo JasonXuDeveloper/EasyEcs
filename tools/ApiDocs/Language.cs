@@ -15,7 +15,7 @@ public sealed record Language
     public required Dictionary<string, string> Sections { get; init; }   // Constructors, Fields... -> heading
     public required Dictionary<string, string> Labels { get; init; }     // Parameters, Returns... -> label
     public required Func<string, string> NestedIn { get; init; }
-    public required Func<int, string, string> Arities { get; init; }     // count, the type shown
+    public required Func<int, int, string, string> Arities { get; init; } // first arity, last arity, shown type
     public required Func<int, string> Overloads { get; init; }
     public required string ComplexityLabel { get; init; }        // followed by the cost
     public required Func<string, string> Inline { get; init; }   // a bold label before its text: Returns, Value
@@ -50,7 +50,7 @@ public sealed record Language
             ["Remarks"] = "Remarks", ["Exceptions"] = "Exceptions",
         },
         NestedIn = type => $"Nested in {type}.",
-        Arities = (count, shown) => $"One type per number of components, 1 to {count} (generated from one template); the members below are those of each, shown for {shown}.",
+        Arities = (first, last, shown) => $"One type per number of components, {first} to {last} (generated from one template); the members below are those of each, shown for {shown}.",
         Overloads = count => $"One overload per number of components, 1 to {count} (generated from one template); this is the text of the two-component one.",
         ComplexityLabel = "**Complexity** ([API table](/en/docs/api)): ",
         Inline = label => $"**{label}** ",
@@ -83,7 +83,7 @@ public sealed record Language
             ["Remarks"] = "备注", ["Exceptions"] = "异常",
         },
         NestedIn = type => $"嵌套在 {type} 里。",
-        Arities = (count, shown) => $"组件数量从 1 到 {count}，每个数量一个类型，都由同一个模板生成；下面的成员每个类型都有，以 {shown} 为例。",
+        Arities = (first, last, shown) => $"组件数量从 {first} 到 {last}，每个数量一个类型，都由同一个模板生成；下面的成员每个类型都有，以 {shown} 为例。",
         Overloads = count => $"组件数量从 1 到 {count}，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。",
         ComplexityLabel = "**复杂度**（[API 表](/zh/docs/api)）：",
         Inline = label => $"**{label}**：",

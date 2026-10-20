@@ -1,6 +1,6 @@
 ---
-title: "ChangedAnyAttribute<T1, T2>, ChangedAnyAttribute<T1, T2, T3>, ChangedAnyAttribute<T1, T2, T3, T4>, ChangedAnyAttribute<T1, T2, T3, T4, T5>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7, T8>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7, T8, T9>"
-seoTitle: "ChangedAnyAttribute<T1, T2>, ChangedAnyAttribute<T1, T2, T3>, ChangedAnyAttribute<T1, T2, T3, T4>, ChangedAnyAttribute<T1, T2, T3, T4, T5>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7, T8>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7, T8, T9> class – EasyEcs C# API"
+title: "ChangedAnyAttribute<T2..T9>"
+seoTitle: "ChangedAnyAttribute class – EasyEcs C# API"
 description: "The ForEachAttribute method visits only entities where at least one of T1, T2 was written since its system last ran (EcsSystem.LastRunTick…"
 ---
 
@@ -18,6 +18,8 @@ public sealed class ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7, T8, T9> : At
 ```
 
 The [`ForEachAttribute`](/en/docs/reference/foreachattribute) method visits only entities where at least one of `T1, T2` was written since its system last ran ([`EcsSystem.LastRunTick`](/en/docs/reference/ecssystem#lastruntick); on the first run, every entity having one): [`QueryFilter.ChangedAny`](/en/docs/reference/queryfilter#changedany). Several attributes join one group; combined with `[Changed<T>]` and the other filters with AND.
+
+One type per number of components, 2 to 9 (generated from one template); the members below are those of each, shown for `ChangedAnyAttribute<T1, T2>`.
 
 ## Constructors
 
