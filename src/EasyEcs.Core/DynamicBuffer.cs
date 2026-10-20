@@ -88,8 +88,8 @@ public static class DynamicBufferExtensions
         store.Items[store.Count++] = item;
     }
 
-    /// <summary>Append <paramref name="items"/>. O(items).</summary>
-    public static void AddRange<T>(this ref DynamicBuffer<T> buffer, ReadOnlySpan<T> items)
+    /// <summary>Append <paramref name="items"/> (a list: <c>CollectionsMarshal.AsSpan(list)</c>, no copy). O(items).</summary>
+    public static void AddRange<T>(this ref DynamicBuffer<T> buffer, params ReadOnlySpan<T> items)
     {
         var store = buffer.Store ??= BufferStore<T>.Rent();
         if (store.Count + items.Length > store.Items.Length) store.Grow(store.Count + items.Length);

@@ -184,7 +184,7 @@ public sealed partial class World
     /// them from a save of the group, without encoding it; then they are destroyed here (their children with them, so
     /// move a hierarchy together; cleanup components stay behind for their systems). The new handles are written in
     /// order into <paramref name="moved"/> (as many as fit, <see cref="Entity"/> default for a skipped id); returns how
-    /// many moved. O(entities × components). Owner thread of both worlds; not while a pass iterates in either. Throws
+    /// many moved. A list of ids goes as <c>CollectionsMarshal.AsSpan(list)</c>, no copy. O(entities × components). Owner thread of both worlds; not while a pass iterates in either. Throws
     /// <see cref="InvalidOperationException"/>, moving nothing, when a moving entity has a unique key
     /// (<see cref="IUniqueIndexed{TKey}"/>) an entity of <paramref name="target"/> has.
     /// </summary>

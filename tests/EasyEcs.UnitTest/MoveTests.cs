@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Nino.Core;
 using NUnit.Framework;
 
@@ -33,6 +35,40 @@ public class MoveTests
         Assert.That(to.Index<Follows, EntityId>().Count(p), Is.EqualTo(1));
         Assert.That((player.IsAlive, sword.IsAlive, guild.IsAlive), Is.EqualTo((false, false, true)));
         Assert.That((from.EntityCount, to.EntityCount), Is.EqualTo((1, 3)));
+    }
+
+    [Test]
+    public void AListOfIdsGoesAsItsSpanWithoutAllocating()
+    {
+        using var a = new World();
+        using var b = new World();
+        var group = new List<EntityId>();
+        var moved = new Entity[2];
+        var parent = a.CreateEntity(new Health(7));
+        a.CreateEntity(new ChildOf(parent), new Position(1, 2));
+        group.Add(parent.Id);
+        foreach (var part in a.Descendants(parent)) group.Add(part.Id);
+        var output = new NinoArrayBufferWriter();
+        var (from, to) = (a, b);
+
+        int arrived = 0;
+        void Round() // the group goes there and back: saved, moved, loaded onto the moved entities
+        {
+            output.ResetWrittenCount();
+            from.SaveEntities(output, CollectionsMarshal.AsSpan(group));
+            arrived += from.MoveEntities(to, CollectionsMarshal.AsSpan(group), moved);
+            group.Clear();
+            foreach (var e in moved) group.Add(e.Id);
+            arrived += to.LoadEntitiesInto(output.WrittenSpan, [moved[0], moved[1]]);
+            (from, to) = (to, from);
+        }
+
+        for (int i = 0; i < 10; i++) Round(); // warm-up: tables, edges, buffers, JIT
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++) Round();
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(arrived, Is.EqualTo(110 * 4));
+        Assert.That((moved[0].Read<Health>().Value, moved[1].Read<ChildOf>().Parent), Is.EqualTo((7, moved[0].Id)));
     }
 
     [Test]

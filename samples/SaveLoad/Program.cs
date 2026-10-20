@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.InteropServices;
 using EasyEcs;
 using SaveLoad;
 
@@ -54,7 +55,7 @@ foreach (var sword in zone.Children(bob.Id))
 }
 
 bytes.ResetWrittenCount();
-zone.SaveEntities(bytes, group.ToArray());
+zone.SaveEntities(bytes, CollectionsMarshal.AsSpan(group));
 var arrived = new Entity[group.Count];
 other.LoadEntities(bytes.WrittenSpan, arrived);
 

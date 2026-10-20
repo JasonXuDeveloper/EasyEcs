@@ -62,6 +62,10 @@ public class DynamicBufferTests
         bag.AddRange([new Loot(2, 2), new Loot(3, 3)]);
         bag.Insert(0, new Loot(0, 0));
         Assert.That(bag.AsReadOnlySpan().ToArray(), Is.EqualTo(new[] { new Loot(0, 0), new Loot(1, 1), new Loot(2, 2), new Loot(3, 3) }));
+        bag.AddRange(new Loot(4, 4), new Loot(5, 5));                       // params: a span on the stack
+        bag.AddRange(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(new System.Collections.Generic.List<Loot> { new(6, 6) })); // a list: its span
+        Assert.That(bag.AsReadOnlySpan()[4..].ToArray(), Is.EqualTo(new[] { new Loot(4, 4), new Loot(5, 5), new Loot(6, 6) }));
+        for (int i = 0; i < 3; i++) bag.RemoveAt(4);
         Assert.That(bag.Capacity, Is.GreaterThanOrEqualTo(4));
 
         bag.RemoveAt(1);                          // keeps the order
