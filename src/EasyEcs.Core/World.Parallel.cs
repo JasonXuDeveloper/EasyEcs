@@ -266,6 +266,11 @@ public sealed partial class World
 
         private void Run(ParallelWork work, int count)
         {
+            // Close the last run's claims first: a late participant of it that read its cursor before this can no longer
+            // claim (its compare-exchange fails), and one reading after it finds no item. Without this, one that read
+            // the cursor at its end and then the larger _count of this run would claim an item of this run under the
+            // old epoch: that item would run twice and _remaining never reach zero.
+            Interlocked.Exchange(ref _cursor, (_cursor & ~0xFFFFFFFFL) | int.MaxValue);
             _work = work;
             _count = count;
             _error = null;

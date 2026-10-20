@@ -261,9 +261,44 @@ public class ParallelTests
         public void Execute(ref Counter counter) => counter.N++;   // from -1 to 0: visited once
     }
 
+    private struct CountUp : IForEach<Counter>, INoStructuralChanges
+    {
+        public void Execute(ref Counter counter) => counter.N++;
+    }
+
     private struct StampHandle : IForEachEntity<Seen>, INoStructuralChanges
     {
         public void Execute(Entity entity, ref Seen seen) => seen.N = entity.Id.Index + entity.Id.Version;
+    }
+
+    [Test]
+    public void PassesOfGrowingChunkCountsRunEachChunkOnce()
+    {
+        // 12 chunks, then 16, in turn (two job types: each keeps its own record of whether helpers pay): a helper still in
+        // the last pass must not claim a chunk of the next, larger one (that chunk would run twice and the caller wait
+        // forever for it).
+        const int passes = 100_000;
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        world.CreateEntities(new Entity[12_288], new Counter(0));
+        world.CreateEntities(new Entity[65_536], new Counter(0), new Dead());
+        var small = QueryFilter.Create().Without<Dead>();
+        var large = QueryFilter.Create().With<Dead>();
+        var thread = new Thread(() =>
+        {
+            var ids = new StampId();
+            var counts = new CountUp();
+            for (int i = 0; i < passes; i++)
+            {
+                world.ForEachParallel<Counter, StampId>(ref ids, small);
+                world.ForEachParallel<Counter, CountUp>(ref counts, large);
+            }
+        }) { IsBackground = true };
+        thread.Start();
+
+        Assert.That(thread.Join(TimeSpan.FromSeconds(60)), Is.True, "a pass never ended");
+        int wrong = 0;
+        foreach (var item in world.Query<Counter>()) wrong += item.Component1.N == passes ? 0 : 1;
+        Assert.That(wrong, Is.Zero);
     }
 
     [Test]
