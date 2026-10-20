@@ -628,7 +628,6 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
         // A table not written since the pass's tick has no changed row.
         for (int i = 0; i < changed.Length; i++)
             if (archetype.LastWrite[changed[i]] < _since) return None;
-        if (plan.Grouped && GroupsUnwritten(archetype)) return None;
         bool test = plan.Ticked;
         var exclude = plan.Exclude;
         for (int i = 0; i < exclude.Length; i++)
@@ -657,7 +656,9 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
             test |= !full;
         }
 
-        return test ? Test : All;
+        if (!test) return All;
+        // Groups imply a test: plans without them never reach this check.
+        return plan.Grouped && GroupsUnwritten(archetype) ? None : Test;
     }
 
     /// <summary>
