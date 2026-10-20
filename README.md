@@ -1,11 +1,11 @@
 # EasyEcs
 
-**EasyEcs is a high-performance, allocation-free archetype Entity Component System (ECS) for C# and .NET 10
-servers.** In 37 head-to-head benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs it is faster in 24 and within
-the measurement error in 11, with saves 30× and bulk changes 15× faster than the next-fastest library
-([comparison](https://ecs.xgamedev.net/en/docs/comparison#feature-by-feature)); a full server tick allocates 0 bytes. Write plain data and
-`[ForEach]` methods; the source generator turns them into inlined struct jobs and the analyzer catches design mistakes
-at compile time. It is built for game servers, simulations and other long-running real-time backends.
+**EasyEcs is a high-performance archetype Entity Component System (ECS) for C# and .NET 10 game servers,
+simulations and other long-running real-time backends.** A warmed-up world of 100,000 entities runs nine simulation
+systems in 1.72 ms with 0 B allocated. Across 37 head-to-head benchmarks against Friflo.Engine.ECS, Arch and
+DefaultEcs, EasyEcs leads in 24, is within measurement error in 11 and trails in 2
+([full comparison](https://ecs.xgamedev.net/en/docs/comparison#feature-by-feature)). Write plain structs and
+`[ForEach]` methods; a source generator builds the iteration jobs and an analyzer catches mistakes at compile time.
 
 **Documentation: [ecs.xgamedev.net](https://ecs.xgamedev.net)** (English · [中文](https://ecs.xgamedev.net/zh))
 
@@ -14,6 +14,14 @@ at compile time. It is built for game servers, simulations and other long-runnin
 [![CI](https://img.shields.io/github/actions/workflow/status/JasonXuDeveloper/EasyEcs/ci.yml?branch=master&logo=github&label=CI)](https://github.com/JasonXuDeveloper/EasyEcs/actions/workflows/ci.yml)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![License: MIT](https://img.shields.io/github/license/JasonXuDeveloper/EasyEcs)](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/LICENSE)
+
+**Try it in your browser:** set the [live particle demo](https://ecs.xgamedev.net/en/docs/demo) to **100k**, then
+move your pointer across the particles. The demo's C# runs through Mono AOT to WebAssembly; its batched drag and
+movement systems took about 0.1 ms on an M4 during this capture. The rest of the systems and rendering are separate
+from that reading. The [batch system source](demo/EasyEcs.Demo/Systems/MovementBatchSystem.cs) shows the
+`[ForEach]` + Span + SIMD path.
+
+<a href="https://ecs.xgamedev.net/en/docs/demo"><img src="docs/public/demo-vortex-100k.png" alt="EasyEcs browser demo with 100k particles forming a vortex and live ECS timings" width="560"></a>
 
 One server tick of 9 systems (movement, AOI, combat, status effects, death, respawn, projectiles):
 
