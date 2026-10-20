@@ -238,7 +238,8 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
     /// <summary>
     /// The entities whose <typeparamref name="T"/> has key <paramref name="key"/> (none for a null key): O(1), then O(1)
     /// per entity (the first lookup indexes every row once). Owner thread only. Destroying entities during the loop is
-    /// allowed, changing <typeparamref name="T"/> is not.
+    /// allowed; changing <typeparamref name="T"/> is not (an emptied key hands its list to the keys that grow next):
+    /// collect the entities first, then change them.
     /// </summary>
     public Matches Find(TKey key)
     {

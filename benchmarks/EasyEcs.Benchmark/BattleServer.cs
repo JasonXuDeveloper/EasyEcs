@@ -297,6 +297,16 @@ public class ReplicationSystem : EcsSystem                                    //
 }
 // #endregion replication
 
+// #region requests
+/// <summary>A hit a client asked for, on one unit (<c>entity.Run</c>): the write is replicated with the next send.</summary>
+public readonly record struct TakeHit(int Damage) : IForEachEntity<Health>, INoStructuralChanges
+{
+    public static int Writes => 1;
+
+    public void Execute(Entity unit, ref Health hp) => hp.Value -= Damage;
+}
+// #endregion requests
+
 // #region reports
 public static class Dice
 {
@@ -488,14 +498,15 @@ public sealed class BattleServer : IDisposable
 
     public int ShotsLeft(Entity player) => player.IsAlive && player.TryGetMana(out var mana) ? mana.Value / ShotCost : 0;
 
-    /// <summary>A client's hit on the unit it names by id: the id turns back into a handle if that unit still lives.</summary>
+    /// <summary>
+    /// A client's hit on the unit it names by id: the id turns back into a handle if that unit still lives, and the hit
+    /// runs as a job on that one unit.
+    /// </summary>
     public bool Hit(EntityId target, int damage)
     {
-        if (!World.TryGetEntity(target, out var unit) || unit.IsDead) return false;
-        ref var hp = ref unit.TryGetRef<Health>(out bool found);             // optional access by ref
-        if (!found) return false;
-        hp.Value -= damage;                                                   // a write: replicated with the next send
-        return true;
+        var hit = new TakeHit(damage);
+        return World.TryGetEntity(target, out var unit)
+            && unit.Run<Health, TakeHit>(ref hit, Alive);                     // false: dead, or no Health
     }
     // #endregion queries
 
@@ -560,7 +571,7 @@ public sealed class BattleServer : IDisposable
         if (!player.IsAlive || !player.IsPlayer) return default;
         _group.Clear();
         _group.Add(player);
-        foreach (var shot in World.Children(player)) _group.Add(shot);        // a hierarchy moves together
+        foreach (var part in World.Descendants(player)) _group.Add(part);     // the whole subtree moves together
         Entity arrived = default;
         World.MoveEntities(to.World, CollectionsMarshal.AsSpan(_group), new Span<Entity>(ref arrived));
         return arrived;

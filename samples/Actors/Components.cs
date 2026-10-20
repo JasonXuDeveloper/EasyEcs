@@ -1,0 +1,40 @@
+using EasyEcs;
+
+namespace Actors;
+
+// An actor is an entity that answers messages addressed to its key. Each kind of actor (a shop, a bank) is one type
+// that does three jobs at once, through one interface:
+//   - its key component: the entity's address, indexed, so a message finds its actor in O(1);
+//   - the system group of its kind: world.Update<Shop>() runs the shop systems;
+//   - the filter of that group: those systems see only the entities tagged In<Shop>.
+// Nothing here is an EasyEcs feature of its own: an index, a group and a tag, declared once for every kind.
+
+/// <summary>The tag of a kind of actor: In&lt;Shop&gt; marks the shop actors.</summary>
+public struct In<TActor> : IComponent;
+
+/// <summary>What every kind of actor is: key component, index key, system group, and the group's filter.</summary>
+public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, IGroupWith<In<TSelf>>
+    where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;
+
+// The key is the actor itself. Implemented explicitly: a public Key property would be printed by the record's
+// ToString(), which would print Key again, forever.
+public readonly record struct Shop(long Id) : IActor<Shop>
+{
+    Shop IIndexed<Shop>.Key => this;
+}
+
+public readonly record struct Bank(long Id) : IActor<Bank>
+{
+    Bank IIndexed<Bank>.Key => this;
+}
+
+// State that persists: tracked, so the host saves only the actors whose state changed.
+public record struct Stock(int Items) : IComponent, ITrackChanges;
+
+public record struct Balance(long Coins) : IComponent, ITrackChanges;
+
+// State that lives only while the actor is active: not in the saved record.
+public record struct Sales(int Count) : IComponent;
+
+/// <summary>A shop that sold out takes no orders until it restocks.</summary>
+public struct Closed : IComponent;
