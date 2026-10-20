@@ -244,6 +244,23 @@ public class AllocationTests
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
 
+    // The fewest bytes one of three windows of `updates` updates allocated on this thread. Waking helpers queues thread
+    // pool work, and the pool may start a worker thread from the queuing thread (its Thread object counts here) when an
+    // idle one retired: an allocation of the runtime, not of the world, which a window without it leaves out. An
+    // allocation per update shows in every window.
+    private static long LeastAllocated(World world, int updates)
+    {
+        long least = long.MaxValue;
+        for (int window = 0; window < 3 && least != 0; window++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < updates; i++) world.Update();
+            least = Math.Min(least, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
+
+        return least;
+    }
+
     [Test]
     public void ParallelForEachDoesNotAllocateAfterItsFirstCall()
     {
@@ -251,9 +268,7 @@ public class AllocationTests
         world.CreateEntities(new Entity[World.ParallelChunkRows * 4], new ParallelTests.Counter(0), new ParallelTests.Seen(1));
         world.AddSystem<ParallelTests.ChunkedIncrement>();
         for (int i = 0; i < 10; i++) world.Update();
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 500; i++) world.Update();
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(LeastAllocated(world, 500), Is.Zero);
     }
 
     [Test]
@@ -266,9 +281,7 @@ public class AllocationTests
         world.AddSystem<ParallelTests.ChunkedIncrement>();
         world.AddSystem<SystemTests.Moves>();
         for (int i = 0; i < 10; i++) world.Update();
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 500; i++) world.Update();
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(LeastAllocated(world, 500), Is.Zero);
         Assert.That(world.GetSystem<SystemTests.Moves>().Stats.LastEntities, Is.EqualTo(100));
     }
 
