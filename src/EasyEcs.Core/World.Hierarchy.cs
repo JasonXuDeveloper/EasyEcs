@@ -97,6 +97,22 @@ public sealed partial class World
         /// <summary>A walk over the descendants (<c>foreach</c> support, no allocation once warm).</summary>
         /// <exception cref="InvalidOperationException">The <see cref="ChildOf"/> links form a cycle (when the walk reaches it).</exception>
         public DescendantWalk GetEnumerator() => new(_world, _root);
+
+        /// <summary>
+        /// Append the subtree to <paramref name="ids"/> in walk order, the root first when <paramref name="includeRoot"/>
+        /// (and alive), each parent before its children: the group <c>MoveEntities</c> and <c>SaveEntities</c> take,
+        /// as <c>CollectionsMarshal.AsSpan(ids)</c>. Returns how many ids were added. O(1) per entity; allocates only
+        /// when the list grows.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">The <see cref="ChildOf"/> links form a cycle.</exception>
+        public int AddTo(System.Collections.Generic.List<EntityId> ids, bool includeRoot)
+        {
+            ArgumentNullException.ThrowIfNull(ids);
+            int before = ids.Count;
+            if (includeRoot && _world.IsAlive(_root)) ids.Add(_root);
+            foreach (var entity in this) ids.Add(entity.Id);
+            return ids.Count - before;
+        }
     }
 
     /// <summary>

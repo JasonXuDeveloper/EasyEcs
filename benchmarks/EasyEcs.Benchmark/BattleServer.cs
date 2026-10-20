@@ -642,8 +642,7 @@ public sealed class BattleServer : IDisposable
     {
         if (!player.IsAlive || !player.IsPlayer) return default;
         _group.Clear();
-        _group.Add(player);
-        foreach (var part in World.Descendants(player)) _group.Add(part);     // the whole subtree moves together
+        World.Descendants(player).AddTo(_group, includeRoot: true);           // the whole subtree moves together
         Entity arrived = default;
         World.MoveEntities(to.World, CollectionsMarshal.AsSpan(_group), new Span<Entity>(ref arrived));
         return arrived;

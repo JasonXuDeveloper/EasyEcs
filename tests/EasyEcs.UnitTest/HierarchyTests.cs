@@ -53,6 +53,32 @@ public class HierarchyTests
     }
 
     [Test]
+    public void ASubtreeIsAddedToAListRootFirstWithoutAllocating()
+    {
+        using var world = new World();
+        var root = world.CreateEntity();
+        var a = world.CreateEntity(new ChildOf(root));
+        var a1 = world.CreateEntity(new ChildOf(a));
+        var ids = new List<EntityId> { default };                          // added after what the list holds
+        Assert.That(world.Descendants(root).AddTo(ids, includeRoot: true), Is.EqualTo(3));
+        Assert.That(ids, Is.EqualTo(new[] { default, root.Id, a.Id, a1.Id }));
+        Assert.That(world.Descendants(a).AddTo(ids, includeRoot: false), Is.EqualTo(1));
+
+        var dead = world.CreateEntity();
+        dead.Destroy();
+        Assert.That(world.Descendants(dead).AddTo(ids, includeRoot: true), Is.Zero); // a stale root adds nothing
+
+        long before = System.GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 100; i++)
+        {
+            ids.Clear();
+            world.Descendants(root).AddTo(ids, includeRoot: true);
+        }
+
+        Assert.That(System.GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+    }
+
+    [Test]
     public void DescendantsSkipWhatTheWalkDestroysAndRefuseCycles()
     {
         using var world = new World();

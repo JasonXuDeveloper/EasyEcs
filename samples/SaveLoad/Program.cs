@@ -48,11 +48,8 @@ using var other = new World();
 other.CreateEntity(new Name("someone already there"));
 
 // The group: bob and the swords he holds (his children).
-var group = new List<EntityId> { bob.Id };
-foreach (var sword in zone.Children(bob.Id))
-{
-    group.Add(sword.Id);
-}
+var group = new List<EntityId>();
+zone.Descendants(bob).AddTo(group, includeRoot: true); // bob first, then his swords
 
 bytes.ResetWrittenCount();
 zone.SaveEntities(bytes, CollectionsMarshal.AsSpan(group));
