@@ -124,11 +124,12 @@ world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
 - 不管收到几个组件，每个实体最多换一次表。记录里有的组件会被加上或覆盖原值，没有的保持不变。
 - 索引、分组和变更追踪的表现和 `Set` 一样。被禁用的组件读进来仍是禁用的，值也保留。
 - 加载也算写入：`[Changed<T>]` 方法会看到读进来的组件。如果记录只是恢复原本就有的数据（actor 从数据库重新加载），传
-  `markWritten: false`：被替换的值保留原来的变更 tick，新加的值没有 tick，这样按变更保存或同步组件的系统就不会把记录原样写回去。
+  `markWritten: false`：记录里的每个组件加载后都没有变更 tick，覆盖了默认值（比如来自预制体）的也一样，这样按变更保存或同步组件的
+  系统就不会把记录原样写回去。记录里没有的组件保留各自的 tick。
 - `markWritten: false` 的代价：恢复的组件在代码写它之前，所有 `[Changed<T>]` 方法和 `Since` 过滤器都看不到。按变更同步给客户端的
   系统，遇到还没见过这个实体的客户端，要自己发送完整状态。
-- `markWritten: false` 只是不给这次加载写入的值打 tick。实体在加载前就有的持久化组件（比如来自带默认值的预制体）保留创建时的
-  tick，仍然算作写入过。创建实体时不要带持久化组件，让记录把它们加上，[Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)就是这么做的。
+- 所以每类 actor 一个预制体就够了：新 actor 用预制体的默认值作为初始状态（算写入，下次保存会存下来），恢复的 actor 由记录覆盖
+  默认值（不算写入）。[Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)就是这么做的。
 - 带集合的 `SaveEntities` 也会写出一个集合组件都没有的实体，作为空条目，这样存档里第 i 个实体仍对应传入的第 i 个实体。
 - `EntityId` 字段按下文的规则改写，指向传入的实体；父实体不在记录里的 `ChildOf` 不会被设置。
 - `LoadEntitiesInto` 是结构变更：只能在所有者线程调用（[EECS014](/zh/docs/guide/analyzer#eecs014)），遍历进行中不能调用
@@ -400,7 +401,6 @@ saving 0v1: 650 gold
 | 用 `LoadEntities` 读记录 | 在已有实体之外又建了新实体 | 对已有实体用 `LoadEntitiesInto` |
 | `LoadEntitiesInto` 传入的实体数和存档不一致，或者有失效的实体 | `ArgumentException`；什么都不改 | 按存档顺序，每个存档实体对应一个存活实体 |
 | 恢复的记录被当成变更 | 按 `Changed<T>` 保存或同步的系统又把它发回去 | `markWritten: false` |
-| 实体加载前已经有持久化组件（来自带默认值的预制体），再用 `markWritten: false` 加载 | 这个组件保留创建时的 tick：保存系统照样看到它 | 创建实体时不带持久化组件，让记录加上 |
 | `markWritten: false` 加载后只同步 `[Changed<T>]` 的行 | 没见过这个实体的客户端永远收不到恢复的值 | 给新客户端发送完整状态 |
 
 ## 相关页面 [#related]

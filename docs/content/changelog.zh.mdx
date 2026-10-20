@@ -22,7 +22,7 @@ icon: RotateCcwClock
   见[分组过滤](/zh/docs/guide/systems#group-filters)。
 - `world.Descendants(root)` 按深度优先遍历整棵子树，预热后不分配内存：搬移或保存之前，用它把各层子实体都收进一组。
   见[列出子实体](/zh/docs/guide/hierarchy#children)。
-- `world.LoadEntitiesInto(input, entities, markWritten: false)` 恢复记录时不算变更，按 `[Changed<T>]` 保存或同步的系统不会再把它送回去。
+- `world.LoadEntitiesInto(input, entities, markWritten: false)` 恢复记录时不算变更，按 `[Changed<T>]` 保存或同步的系统不会再把它送回去；覆盖的值（比如预制体的默认值）也一样。
   见[只存需要持久化的部分](/zh/docs/guide/migration-and-unload#records)。
 - 分析器把 `entity.Run` 视为结构变更调用：[EECS010](/zh/docs/guide/analyzer#eecs010) 在并行 `[ForEach]` 方法里拒绝它，
   [EECS013](/zh/docs/guide/analyzer#eecs013) 和 [EECS014](/zh/docs/guide/analyzer#eecs014) 像检查 `Set` 一样检查它。

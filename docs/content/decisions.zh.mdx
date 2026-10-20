@@ -592,15 +592,18 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 
 ## D35. 读记录时可以不算变更 [#d35-a-record-can-load-without-counting-as-a-change]
 
-**决定。** `LoadEntitiesInto(input, entities, markWritten: false)` 读记录时不打变更戳：被替换的值保留原来的变更 tick，新加的组件
-tick 为 0（从未写过）。默认仍是 `true`。
+**决定。** `LoadEntitiesInto(input, entities, markWritten: false)` 读记录时不打变更戳：记录里的每个组件加载后 tick 都为 0（从未写过），
+不管是覆盖原值还是新加的；记录里没有的组件保留各自的 tick。默认仍是 `true`。
 
 **原因。**
 - **恢复出来的记录不是新变化。** 否则按 `[Changed<T>]` 保存或同步的系统，会把刚从数据库读出来的数据原样写回去。
-- **读档本来就要决定 tick**（每个实体搬一次表，再写值）；不打戳没有额外开销。
+- **被覆盖的值的 tick 描述的是一个已经不存在的值。** 保留它，预制体的默认值就算写入过，按预制体创建的 actor 每次激活都会把刚读到的
+  记录再存一遍。
+- **读档本来就要决定 tick**（每个实体搬一次表，再写值）；清掉它们没有额外开销。
 
 **比较过。**
-- **读完再清掉 tick**：行原来的 tick 也没了，读档之前做过的写入会从 `Changed<T>` 里消失。
+- **保留被覆盖值的 tick**：恢复的 actor 每类就得多一个不带持久化组件的预制体。
+- **读完再清掉整行的 tick**：记录里没有的组件，之前的写入也会一起丢掉。
 - **单独的 `RestoreEntitiesInto`：** 和原调用只差一点；用参数在调用处写明更清楚。
 
 ## D36. 不加：并行批处理 job、行的最后写入 tick、公开读写集、多个 World 共享并行预算 [#d36-not-added]

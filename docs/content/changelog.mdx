@@ -26,7 +26,8 @@ major or minor version that needs code changes? The
 - `world.Descendants(root)` walks a whole subtree, depth first, allocation-free once warm: collect a group with every
   level of children before moving or saving it. See [list them](/en/docs/guide/hierarchy#children).
 - `world.LoadEntitiesInto(input, entities, markWritten: false)` restores a record without counting it as a change, so
-  `[Changed<T>]` savers and replicators do not send it back. See
+  `[Changed<T>]` savers and replicators do not send it back; that holds for a value it replaces too, such as a
+  prefab's default. See
   [a record of what persists](/en/docs/guide/migration-and-unload#records).
 - The analyzer treats `entity.Run` as a structural call: [EECS010](/en/docs/guide/analyzer#eecs010) rejects it in a
   parallel `[ForEach]` method, [EECS013](/en/docs/guide/analyzer#eecs013) and

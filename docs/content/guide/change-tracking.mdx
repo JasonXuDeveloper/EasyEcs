@@ -80,7 +80,7 @@ hands out a `ref`, whether or not the code stores through it:
 | `entity.Get<T>()`, `TryGetRef<T>(out found)` when found, `GetOrAdd<T>()`, `Set(...)` | `Has<T>()` |
 | `CreateEntity(...)`, `CreateEntities(...)`, `Instantiate(...)`, `Clone()` with the component | removing the component (a [removal](#removal-detection)) |
 | `entity.Enable<T>()`, `world.EnableAll<T>()` (the kept value comes back) | `entity.Disable<T>()` (a removal) |
-| `world.Restore(snapshot)`, `world.Load(bytes)`, `LoadEntities(...)`, `LoadEntitiesInto(...)` (every restored or loaded row) | `LoadEntitiesInto(..., markWritten: false)`: a replaced value keeps its old tick, an added component gets tick 0. For restoring a persisted record without saving or sending it back ([a restored record](/en/docs/guide/migration-and-unload#records)) |
+| `world.Restore(snapshot)`, `world.Load(bytes)`, `LoadEntities(...)`, `LoadEntitiesInto(...)` (every restored or loaded row) | `LoadEntitiesInto(..., markWritten: false)`: every component the record holds gets tick 0, replaced or added. For restoring a persisted record without saving or sending it back ([a restored record](/en/docs/guide/migration-and-unload#records)) |
 | `entity.Run<…>(ref job)` ([one entity](/en/docs/guide/queries#run-on-one-entity)): the components in the job's `Writes` (all of them unless the job overrides `Writes`; declare `Writes => 0` for a read-only job), stamped only when `Run` returns true | `entity.Run` that returns false: the job did not run |
 
 A [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) is a list that can only change through a `ref`, so its

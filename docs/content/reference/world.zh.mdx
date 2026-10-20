@@ -614,7 +614,7 @@ public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into,
 
 把 [`World.SaveEntities`](/zh/docs/reference/world#saveentities) 写出的组件放到已经存在的实体上（Actor 的实体先建好、记录后到的情形）：存档里第 i 个实体的组件设到 `into`[i] 上，没有的加上，已有的覆盖，每个实体最多换一次表；存档里没有的组件保持不变。索引、分组和变更 tick 的表现和 `Set` 一样（加载的每个组件都算写入）；被禁用的组件读进来仍是禁用的，值也保留。[`EntityId`](/zh/docs/reference/entityid) 字段原来指向组内实体的，改为指向它在 `into` 里对应的实体，其余的一律变成 [`EntityId.Null`](/zh/docs/reference/entityid#null)；父实体不在组内的 [`ChildOf`](/zh/docs/reference/childof) 不会被设置。返回加载的实体数。O(实体数 × 组件数)。遍历进行中不能调用。
 
-`markWritten` 为 false 时，加载的组件不算写入：覆盖的值保留被覆盖那个值的变更 tick，实体原来没有的组件没有 tick，所以 `[Changed<T>]` 系统和 `Since` 过滤器不会因为这次加载访问该实体（从存储恢复的 Actor 内容和存储一致，“保存变化的部分”在代码写入之前不会保存它的任何东西）。
+`markWritten` 为 false 时，加载的组件不算写入：存档里的每个组件加载后都没有变更 tick，覆盖了之前写过的值（预制体的默认值）的也一样，所以 `[Changed<T>]` 系统和 `Since` 过滤器不会因为这次加载访问该实体（从存储恢复的 Actor 内容和存储一致，“保存变化的部分”在代码写入之前不会保存它的任何东西）。存档里没有的组件保留各自的 tick。
 
 **异常**
 

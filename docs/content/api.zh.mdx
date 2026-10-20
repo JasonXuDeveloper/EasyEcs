@@ -197,7 +197,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.SaveEntities(output, ids)` | O(给定实体数 × 组件数) | 一组实体，交给另一个 World 或进程 |
 | `world.SaveEntities(output, ids, set)` | O(给定实体数 × 组件数) | 只写 `ComponentSet` 里的组件（建一次：`ComponentSet.Create().With<T>()`，每个类型 O(1)） |
 | `world.LoadEntities(input, entities)` | O(实体数 × 组件数) | 新 id；指向组内实体的 `EntityId` 字段会改写，其他的变成 `EntityId.Null` |
-| `world.LoadEntitiesInto(input, entities, markWritten)` | O(实体数 × 组件数) | 读到已经存在的实体上：每个实体最多换一次表，存档里没有的组件保持不变；`markWritten: false` 不改变更 tick |
+| `world.LoadEntitiesInto(input, entities, markWritten)` | O(实体数 × 组件数) | 读到已经存在的实体上：每个实体最多换一次表，存档里没有的组件保持不变；`markWritten: false`：加载的组件算作从未写过 |
 | `world.MoveEntities(target, ids, moved)` | O(实体数 × 组件数) | 搬到本线程的另一个 World，不经过编码；原实体被销毁 |
 
 细节见[快照](/zh/docs/guide/snapshots)、[存档](/zh/docs/guide/saves)、[迁移与卸载](/zh/docs/guide/migration-and-unload)。

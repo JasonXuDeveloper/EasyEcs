@@ -134,15 +134,15 @@ world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
   are added or replace the entity's values; the others stay.
 - Indexes, groups and change tracking follow as with `Set`. A disabled component arrives disabled with its value.
 - A load is a write: `[Changed<T>]` methods see the loaded components. When the record only restores what was there
-  (an actor coming back from its database), pass `markWritten: false`: a replaced value keeps its change tick and a
-  new one has none, so a system that saves or replicates changed components does not send the record straight back.
+  (an actor coming back from its database), pass `markWritten: false`: every component the record holds ends with no
+  change tick, also one that replaces a default (from a prefab, say), so a system that saves or replicates changed
+  components does not send the record straight back. Components the record does not hold keep their ticks.
 - The price of `markWritten: false`: the restored components are invisible to every `[Changed<T>]` method and
   `Since` filter until code writes them. A replicator that sends changes to clients must send the full state itself
   to a client that has not seen the entity yet.
-- `markWritten: false` only skips stamping what the load writes. A persistent component the entity had before the
-  load (from a prefab with defaults, say) keeps the tick of that creation and still counts as written. Create the
-  entity without its persistent components and let the record add them, as the
-  [Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) does.
+- So one prefab per kind of actor serves both cases: a new actor keeps the prefab's defaults as its first state
+  (written, so the next save stores them), and a restored one gets its record over them (not written). The
+  [Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) does this.
 - `SaveEntities` with a set also writes an entity that holds none of the set's components, as an empty entry, so the
   i-th saved entity still matches the i-th entity given.
 - `EntityId` fields are rewritten as below, onto the entities given; a `ChildOf` whose parent is not in the record is
@@ -428,7 +428,6 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
 | A record loaded with `LoadEntities` | New entities beside the live ones | `LoadEntitiesInto` with the live entities |
 | `LoadEntitiesInto` with another number of entities than the save holds, or a stale one | `ArgumentException`; nothing changes | One live entity per saved entity, in save order |
 | A restored record seen as changed | A `Changed<T>` saver or replicator sends it straight back | `markWritten: false` |
-| `markWritten: false` on an entity that already had the persistent component (from a prefab with defaults) | That component keeps the tick of its creation: the saver still sees it | Create the entity without its persistent components and let the record add them |
 | Replicating only `[Changed<T>]` rows after a `markWritten: false` load | A client that has not seen the entity never gets the restored values | Send the full state to a new client |
 
 ## Related [#related]

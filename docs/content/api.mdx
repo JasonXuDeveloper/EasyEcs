@@ -203,7 +203,7 @@ Details: [bulk changes](/en/docs/guide/bulk), [cleanup and disable](/en/docs/gui
 | `world.SaveEntities(output, ids)` | O(entities given × components) | a group of entities, for another world or process |
 | `world.SaveEntities(output, ids, set)` | O(entities given × components) | only the components of a `ComponentSet` (built once: `ComponentSet.Create().With<T>()`, O(1) per type) |
 | `world.LoadEntities(input, entities)` | O(entities × components) | new ids; `EntityId` fields naming the group are rewritten, others become `EntityId.Null` |
-| `world.LoadEntitiesInto(input, entities, markWritten)` | O(entities × components) | onto entities that exist: each moves table at most once, the components the save lacks stay; `markWritten: false` leaves the change ticks |
+| `world.LoadEntitiesInto(input, entities, markWritten)` | O(entities × components) | onto entities that exist: each moves table at most once, the components the save lacks stay; `markWritten: false`: the loaded components count as never written |
 | `world.MoveEntities(target, ids, moved)` | O(entities × components) | to another world of this thread, without encoding; the originals are destroyed |
 
 Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),

@@ -716,17 +716,21 @@ the attributes; nothing changes at run time.
 
 ## D35. A record can load without counting as a change [#d35-a-record-can-load-without-counting-as-a-change]
 
-**Decision.** `LoadEntitiesInto(input, entities, markWritten: false)` loads the record without stamping it: a value it
-replaces keeps its change tick, a component it adds gets tick 0 (never written). The default stays `true`.
+**Decision.** `LoadEntitiesInto(input, entities, markWritten: false)` loads the record without stamping it: every
+component the record holds ends with tick 0 (never written), whether it replaces a value or adds one; the components
+it does not hold keep their ticks. The default stays `true`.
 
 **Why.**
 - **A restored record is not news.** A system that saves or replicates `[Changed<T>]` rows would otherwise send what
   was just read from the database straight back.
-- **The load already decides the ticks** (one move per entity, then the values); leaving them costs nothing.
+- **A replaced value's tick describes a value that is gone.** Keeping it would make a default from a prefab count as
+  written, so every activation of an actor made from its prefab would save the record it just read.
+- **The load already decides the ticks** (one move per entity, then the values); clearing them costs nothing.
 
 **Considered.**
-- **Clearing the ticks after the load** (`world.Since`-style): the row's earlier tick is lost, so a write made before
-  the load would vanish from `Changed<T>` too.
+- **Keeping the tick of a replaced value:** restored actors would need a second prefab per kind, one without the
+  persistent components.
+- **Clearing the row's ticks after the load:** components the record does not hold would lose their writes too.
 - **A separate `RestoreEntitiesInto`:** the same call with one difference; a parameter says it where it is used.
 
 ## D36. Not added: parallel batch jobs, a row's last write tick, public access sets, a shared parallelism budget [#d36-not-added]
