@@ -311,14 +311,21 @@ public sealed partial class World
     /// at the same entities, and handles made before the save work again. Components and singletons this process
     /// has no type for are skipped (their slices); a type is found by its type id when the process used it or the generator
     /// registered it (every component and singleton of a compilation using EasyEcs). Indexes rebuild; groups follow
-    /// this world's <see cref="GroupBy{T}"/>. Every loaded row counts as written (<c>[Changed&lt;T&gt;]</c>).
-    /// O(entities × components). Not while a pass iterates.
+    /// this world's <see cref="GroupBy{T}"/>. O(entities × components). Not while a pass iterates.
     /// </summary>
+    /// <param name="input">The bytes of the save.</param>
+    /// <param name="markWritten">
+    /// True (the default): every loaded row counts as written now, so <c>[Changed&lt;T&gt;]</c> systems and
+    /// <c>Changed&lt;T&gt;(since)</c> queries see it. False: the loaded components have no change tick, as if never
+    /// written, and no row counts as removed; a system added after the load skips them on its first run too (its
+    /// <c>[Changed&lt;T&gt;]</c> looks at ticks from 1). For a restart that resumes a world saved by another process, whose
+    /// records already hold the loaded values.
+    /// </param>
     /// <exception cref="InvalidDataException">
     /// The bytes are not a save or are damaged, or a component's fields changed since the save (an unmanaged one's
     /// size or layout, a managed one's Nino layout). The world is then left as it was.
     /// </exception>
-    public void Load(ReadOnlySpan<byte> input)
+    public void Load(ReadOnlySpan<byte> input, bool markWritten = true)
     {
         using (Structural()) ThrowIfIterating(); // before reading: a failure below is the bytes'
         try
@@ -330,7 +337,7 @@ public sealed partial class World
             throw new InvalidDataException("A damaged save: " + e.Message, e);
         }
 
-        Restore(_loadSnapshot, true);
+        Restore(_loadSnapshot, true, markWritten);
         if (_groupByBit == null) return;
         using (Structural())
             for (int bit = 0; bit < _groupByBit.Length; bit++)

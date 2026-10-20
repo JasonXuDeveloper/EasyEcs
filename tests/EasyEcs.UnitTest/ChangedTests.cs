@@ -133,6 +133,24 @@ public class ChangedTests
     }
 
     [Test]
+    public void ASystemAddedForChangesFromNowSkipsWhatWasWrittenBefore()
+    {
+        using var world = new World();
+        var a = world.CreateEntity(new Armor(5), new Seen());
+        var b = world.CreateEntity(new Armor(5), new Seen());
+        world.Update();
+        b.Set(new Armor(4));                                       // written at the tick the system is added in
+        world.AddSystem<ArmorWatch>(changesFromNow: true);
+
+        world.Update(); // first run: nothing written since it was added
+        Assert.That((SeenCount(a), SeenCount(b)), Is.EqualTo((0, 0)));
+
+        a.Set(new Armor(3));                                       // right after: seen
+        world.Update();
+        Assert.That((SeenCount(a), SeenCount(b)), Is.EqualTo((1, 0)));
+    }
+
+    [Test]
     public void WriteXStampsAndTheReadPropertyDoesNot()
     {
         using var world = new World();

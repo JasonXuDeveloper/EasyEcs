@@ -83,7 +83,7 @@ public abstract class EcsSystem
     {
     }
 
-    /// <summary>What the system reads and writes, declared once by <see cref="World.AddSystem(EcsSystem)"/>.</summary>
+    /// <summary>What the system reads and writes, declared once by <see cref="World.AddSystem(EcsSystem, bool)"/>.</summary>
     internal SystemAccess Access;
 
     // The generated code of the system's type and its base types, base first (SystemCode.For).

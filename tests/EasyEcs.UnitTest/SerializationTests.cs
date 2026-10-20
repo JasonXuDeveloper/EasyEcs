@@ -118,6 +118,47 @@ public class SerializationTests
     }
 
     [Test]
+    public void ALoadCanLeaveTheChangeTicksAlone()
+    {
+        byte[] saved;
+        using (var world = new World())
+        {
+            for (int i = 0; i < 200; i++) world.CreateEntity(new Armor(i), new Seen());
+            for (int i = 0; i < 100; i++) world.CreateEntity(new Seen()).Set(new Armor(1)).Remove<Armor>(); // removed before the save
+            saved = Save(world);
+        }
+
+        using var restarted = new World();                                    // the next process: written ticks before the load
+        restarted.AddSystem<ChangedTests.ArmorWatch>();
+        for (int i = 0; i < 300; i++) restarted.CreateEntity(new Armor(i), new Seen());
+        restarted.Update();
+        restarted.Update();
+        restarted.Load(saved, markWritten: false);
+        restarted.AddSystem<RemovedTests.ArmorLoss>();                         // added after the load: its first run
+        restarted.Update();
+        Assert.That(SeenCount(restarted), Is.Zero);                            // nothing counts as written or removed
+        Assert.That(restarted.Count<Armor>(QueryFilter.Create().Changed<Armor>(1)), Is.Zero);
+
+        Entity written = default;
+        foreach (var item in restarted.Query<Seen>())
+            if (item.Entity.TryGet(out Armor armor) && armor.Value == 7) written = item.Entity;
+        written.Set(new Armor(8));
+        restarted.Update();
+        Assert.That(SeenCount(restarted), Is.EqualTo(1));                      // a write after the load is seen
+
+        restarted.Load(saved);                                                 // the default: every loaded row is written
+        restarted.Update();
+        Assert.That(SeenCount(restarted), Is.EqualTo(300));                    // 200 changed, 100 removed
+
+        static int SeenCount(World world)
+        {
+            int sum = 0;
+            foreach (var item in world.Query<Seen>()) sum += item.Component1.Count;
+            return sum;
+        }
+    }
+
+    [Test]
     public void LoadingAgainReusesItsRowsAndDropsWhatTheBytesLack()
     {
         byte[] full, empty;

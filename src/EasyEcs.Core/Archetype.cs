@@ -640,6 +640,17 @@ internal sealed class Archetype
         return upTo & (ulong.MaxValue << first);
     }
 
+    /// <summary>
+    /// Clear every row of every change-tick column (after a load that leaves the ticks alone): no row counts as written
+    /// or removed, at any tick. Cold path.
+    /// </summary>
+    public void ClearTracked()
+    {
+        if (Count == 0) return;
+        for (int c = 0; c < Components.Length; c++)
+            if (_infos[c].Owner >= 0) ClearTicks(c, 0, Count);
+    }
+
     /// <summary>Stamp every row of every change-tick column at <paramref name="tick"/> (after a restore). Cold path.</summary>
     public void StampTracked(ulong tick)
     {

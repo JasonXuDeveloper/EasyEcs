@@ -70,10 +70,11 @@ public sealed partial class World
     /// still works) and get the snapshot's values; singletons added after the capture are removed.
     /// O(entities × components + archetypes + singletons). Not while a pass iterates.
     /// </summary>
-    public void Restore(WorldSnapshot snapshot) => Restore(snapshot, false);
+    public void Restore(WorldSnapshot snapshot) => Restore(snapshot, false, true);
 
     // swap: the snapshot is Load's own, its buffer lists move into the world and the world's old ones into it.
-    private void Restore(WorldSnapshot snapshot, bool swap)
+    // markWritten: every restored row counts as written now (Changed<T> sees it), else as never written.
+    private void Restore(WorldSnapshot snapshot, bool swap, bool markWritten)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         if (!ReferenceEquals(snapshot.World, this))
@@ -110,7 +111,8 @@ public sealed partial class World
             for (int i = 0; i < tables.Length; i++)
             {
                 tables[i].Restore(i < snapshot.TableCount ? snapshot.Tables[i] : null, swap);
-                tables[i].StampTracked(_changeTick); // every restored row is written: Changed<T> sees it
+                if (markWritten) tables[i].StampTracked(_changeTick);
+                else tables[i].ClearTracked();
             }
 
             ResetIndexes(true);

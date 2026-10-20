@@ -21,10 +21,11 @@ public sealed partial class World
     public SystemList Systems => new(_groups);
 
     /// <summary>Create a system, attach it to this world and call its <see cref="EcsSystem.OnCreate"/>.</summary>
-    public T AddSystem<T>() where T : EcsSystem, new()
+    /// <param name="changesFromNow">See <see cref="AddSystem(EcsSystem, bool)"/>.</param>
+    public T AddSystem<T>(bool changesFromNow = false) where T : EcsSystem, new()
     {
         var system = new T();
-        AddSystem(system);
+        AddSystem(system, changesFromNow);
         return system;
     }
 
@@ -32,7 +33,14 @@ public sealed partial class World
     /// Attach <paramref name="system"/> to its group (<see cref="UpdateInGroupAttribute{TGroup}"/>, default otherwise)
     /// and call its <see cref="EcsSystem.OnCreate"/>.
     /// </summary>
-    public void AddSystem(EcsSystem system)
+    /// <param name="system">The system, not attached to a world yet.</param>
+    /// <param name="changesFromNow">
+    /// False (the default): the first run of its <c>[Changed&lt;T&gt;]</c> and <c>[Removed&lt;T&gt;]</c> methods visits
+    /// every row written or removed since the world began. True: only what is written or removed after this call, as if
+    /// the system had run just now (<see cref="EcsSystem.LastRunTick"/>); for a system added to a world that already
+    /// holds its state (a restart after <see cref="Load"/>, a system switched on later).
+    /// </param>
+    public void AddSystem(EcsSystem system, bool changesFromNow = false)
     {
         if (system.World != null)
             throw new InvalidOperationException($"{system.GetType().Name} already belongs to a world");
@@ -43,6 +51,7 @@ public sealed partial class World
         {
             if (system.Group >= _groups.Length) Array.Resize(ref _groups, system.Group + 1);
             (_groups[system.Group] ??= new SystemSchedule()).Insert(system); // throws on a cycle: the system stays out
+            if (changesFromNow) system.LastRunTick = _changeTick++; // writes from here on are newer than its "last run"
         }
 
         system.World = this;
