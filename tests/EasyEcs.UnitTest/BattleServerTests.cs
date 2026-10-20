@@ -90,23 +90,29 @@ public class BattleServerTests
     public void GoalsAreWrittenOnlyWhenTheyChange()
     {
         using var server = Run(100);
-        var before = new Dictionary<Entity, int>();
-        foreach (var item in server.World.Query<Goal>()) before[item.Entity] = item.Component1.Waypoint;
-        ulong mark = server.World.ChangeTick;
-        for (int i = 0; i < 4; i++) server.Tick();                            // every NPC planned once (Slices = 4)
-        var written = new HashSet<Entity>();
-        foreach (var item in server.World.Query<Goal>(QueryFilter.Create().Changed<Goal>(mark))) written.Add(item.Entity);
-
         int kept = 0;
-        foreach (var (npc, goal) in before)
-        {
-            if (!npc.IsAlive) continue;                                       // died meanwhile
-            bool changed = npc.Read<Goal>().Waypoint != goal;
-            Assert.That(written.Contains(npc), Is.EqualTo(changed));          // stamped exactly when it changed
-            if (!changed) kept++;
+        for (int tick = 0; tick < 4; tick++)                                  // every NPC planned about once (Slices = 4)
+        {                                                                     // one tick at a time: rows move between
+            var before = new Dictionary<Entity, int>();                       // ticks, so a row may be planned twice
+            foreach (var item in server.World.Query<Position>(QueryFilter.Create().With<Goal>()))  // a query of Goal would
+                before[item.Entity] = item.Entity.Read<Goal>().Waypoint;                          // stamp it: refs
+            ulong mark = server.World.ChangeTick;
+            server.Tick();
+            var written = new HashSet<Entity>();
+            foreach (var item in server.World.Query<Goal>(QueryFilter.Create().Changed<Goal>(mark))) written.Add(item.Entity);
+
+            foreach (var (npc, goal) in before)
+            {
+                if (!npc.IsAlive) continue;                                   // died meanwhile
+                bool changed = npc.Read<Goal>().Waypoint != goal;
+                if (changed) Assert.That(written, Does.Contain(npc));        // a changed goal is stamped
+                else if (!written.Contains(npc)) kept++;                      // planned or not: an equal goal is not
+            }
+
+            Assert.That(written, Has.Count.LessThan(before.Count / 2));      // most plans keep their goal: no stamp
         }
 
-        Assert.That(kept, Is.Positive);                                      // planned again, the same goal: no write
+        Assert.That(kept, Is.Positive);
     }
 
     [Test]

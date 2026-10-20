@@ -24,6 +24,8 @@ public readonly ref struct Mut<T> where T : struct, IComponent
 {
     private readonly ref T _value;
     private readonly Entity _entity; // the visited entity: a write finds its row (it may have moved) and stamps it
+    private readonly Archetype _table; // set when the row cannot move during the call: a write stamps it directly
+    private readonly int _row;
 
     /// <summary>
     /// Wraps <paramref name="value"/>, the component of <paramref name="entity"/> a pass hands out (its row in the table
@@ -36,6 +38,20 @@ public readonly ref struct Mut<T> where T : struct, IComponent
         _entity = entity;
     }
 
+    /// <summary>
+    /// Wraps <paramref name="value"/>, the component of row <paramref name="index"/> of <paramref name="entities"/>, a
+    /// run of rows of a pass that changes no structure: a write stamps the row without looking the entity up. Generated
+    /// code calls this.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Mut(ref T value, in EntitySpan entities, int index)
+    {
+        _value = ref value;
+        _entity = new Entity(entities.World, default(EntityId)); // only its world: the row is known
+        _table = entities.Table;
+        _row = entities.First + index;
+    }
+
     /// <summary>The component, read-only: not a write, nothing is stamped. O(1).</summary>
     public ref readonly T Value
     {
@@ -44,13 +60,18 @@ public readonly ref struct Mut<T> where T : struct, IComponent
     }
 
     /// <summary>
-    /// The component by <c>ref</c>, stamped as written (a tracked component: the row of the entity, one meta lookup).
+    /// The component by <c>ref</c>, stamped as written (a tracked component: its row, found by one meta lookup when the
+    /// method may move the entity).
     /// Call it once per write, when the method knows it writes. O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T Write()
     {
-        if (default(T) is ITrackChanges) Entity.Stamp<T>(_entity); // a JIT-time constant: nothing for other components
+        if (default(T) is ITrackChanges) // a JIT-time constant: nothing for other components
+        {
+            if (_table != null) _table.Stamp<T>(_row, _entity.World.ChangeTick);
+            else Entity.Stamp<T>(_entity);
+        }
         return ref _value;
     }
 

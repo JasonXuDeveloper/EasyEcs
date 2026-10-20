@@ -264,7 +264,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Component when runs => $"{p.RefKind} global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++index}, i)",
             Symbols.ParamKind.Entity when runs => "entities[(int)i]",
             Symbols.ParamKind.Optional when runs => $"m{i}[(int)i]",
-            Symbols.ParamKind.Mutable when runs => $"new global::EasyEcs.Mut<{p.Type}>(ref global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++index}, i), entities[(int)i])",
+            Symbols.ParamKind.Mutable when runs => $"new global::EasyEcs.Mut<{p.Type}>(ref global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++index}, i), in entities, (int)i)",
             Symbols.ParamKind.Component => $"{p.RefKind} c{++index}",
             Symbols.ParamKind.Mutable => $"new global::EasyEcs.Mut<{p.Type}>(ref c{++index}, entity)",
             Symbols.ParamKind.ComponentSpan => $"c{++index}", // Span<T> converts to ReadOnlySpan<T> for read-only parameters
@@ -451,12 +451,12 @@ public sealed class SystemGenerator : IIncrementalGenerator
         public bool IsBatch => Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) || Runs;
 
         /// <summary>
-        /// Changes no structure (on one thread) and takes a Maybe or a caller's value by ref: its job walks runs of rows,
-        /// finding each optional column once per run (a presence bit per row) and keeping the caller's values in locals
-        /// for the run.
+        /// Changes no structure (on one thread) and takes a Maybe, a Mut or a caller's value by ref: its job walks runs of
+        /// rows, finding each optional column once per run (a presence bit per row), stamping a Mut's writes by row (no
+        /// entity lookup) and keeping the caller's values in locals for the run.
         /// </summary>
         public bool Runs => Stable && !Parallel && !Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan)
-            && Parameters.Any(p => p.Kind == Symbols.ParamKind.Optional || p is { Kind: Symbols.ParamKind.Context, RefKind: "ref" });
+            && Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable || p is { Kind: Symbols.ParamKind.Context, RefKind: "ref" });
 
         public static ForEachModel? Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
         {

@@ -498,7 +498,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 for (int start = first; rows.NextRun(archetype, ref start, count, out int length); start += length)
                                 {
                 {{StampRows(n, "                    ", "start", "length")}}
-                                    job.Execute(new EntitySpan(this, ref Unsafe.Add(ref slots, start), length), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), length)")}});
+                                    job.Execute(new EntitySpan(this, archetype, start, ref Unsafe.Add(ref slots, start), length), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), length)")}});
                                 }
 
                                 continue;
@@ -508,14 +508,14 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             {
                                 int rowCount = count - first;
                 {{StampRows(n, "                ", "first", "rowCount")}}
-                                job.Execute(new EntitySpan(this, ref Unsafe.Add(ref slots, first), rowCount), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, first), rowCount)")}});
+                                job.Execute(new EntitySpan(this, archetype, first, ref Unsafe.Add(ref slots, first), rowCount), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, first), rowCount)")}});
                                 continue;
                             }
 
                             for (int start = first; archetype.NextRun(ref start, count, out int length); start += length)
                             {
                 {{StampRows(n, "                ", "start", "length")}}
-                                job.Execute(new EntitySpan(this, ref Unsafe.Add(ref slots, start), length), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), length)")}});
+                                job.Execute(new EntitySpan(this, archetype, start, ref Unsafe.Add(ref slots, start), length), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), length)")}});
                             }
                         }
                     }

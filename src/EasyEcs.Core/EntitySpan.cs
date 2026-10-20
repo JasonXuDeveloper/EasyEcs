@@ -13,15 +13,21 @@ public readonly ref struct EntitySpan
 {
     private readonly World _world;
     private readonly ReadOnlySpan<EntityId> _slots;
+    private readonly Archetype _table; // the table of the run and its first row: a Mut of a row stamps it directly
+    private readonly int _first;
 
     internal World World => _world;
     internal ReadOnlySpan<EntityId> Slots => _slots;
+    internal Archetype Table => _table;
+    internal int First => _first;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal EntitySpan(World world, ref EntityId first, int length)
+    internal EntitySpan(World world, Archetype table, int first, ref EntityId slots, int length)
     {
         _world = world;
-        _slots = MemoryMarshal.CreateReadOnlySpan(ref first, length);
+        _table = table;
+        _first = first;
+        _slots = MemoryMarshal.CreateReadOnlySpan(ref slots, length);
     }
 
     /// <summary>Number of entities (the length of the run's spans).</summary>
