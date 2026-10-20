@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- The battle server (every feature of EasyEcs) published with Native AOT: the AOT compiler must warn about
+         nothing (warnings are errors) and the native binary must play the battle and pass its checks. CI publishes and
+         runs it (dotnet publish tests/EasyEcs.Aot -r linux-x64). -->
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <IsPackable>false</IsPackable>
+        <PublishAot>true</PublishAot>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\EasyEcs.Core\EasyEcs.Core.csproj"/>
+        <ProjectReference Include="..\..\src\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+        <!-- compiled unchanged, as in the unit tests -->
+        <Compile Include="..\..\benchmarks\EasyEcs.Benchmark\BattleServer.cs" Link="BattleServer.cs"/>
+    </ItemGroup>
+
+</Project>

@@ -364,7 +364,7 @@ public sealed partial class World
             {
                 var info = ComponentInfo.Of(bit);
                 if (!disabled) Writes(info, size, layout);
-                bits[t] = disabled ? info.DisabledBit : bit;
+                bits[t] = disabled ? ComponentInfo.DisablerOf(bit) : bit;
             }
         }
 

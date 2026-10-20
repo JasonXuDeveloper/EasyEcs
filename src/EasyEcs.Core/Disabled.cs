@@ -6,17 +6,25 @@ namespace EasyEcs;
 /// <see cref="Entity.Enable{T}"/> gives it back. Query it like any tag (<c>[With&lt;Disabled&lt;Cooldown&gt;&gt;]</c>) to find
 /// the entities whose <typeparamref name="T"/> is paused. Change it only through <c>Disable</c> and <c>Enable</c>.
 /// </summary>
-public struct Disabled<T> : IComponent where T : struct, IComponent;
+public struct Disabled<T> : IComponent, IDisabledTag where T : struct, IComponent
+{
+    readonly ushort IDisabledTag.Component => ComponentType<T>.Bit;
+}
 
-/// <summary>Bit of <see cref="Disabled{T}"/>, linked to <typeparamref name="T"/>'s info the first time it is used.</summary>
+/// <summary>
+/// A <see cref="Disabled{T}"/> tag: the bit of the component it disables. Lets <c>ComponentType</c> give the tag
+/// its component's tag bit (<see cref="ComponentInfo.DisablerOf"/>) without code generic over the tag's own tag.
+/// </summary>
+internal interface IDisabledTag
+{
+    ushort Component { get; }
+}
+
+/// <summary>The row layout of every <see cref="Disabled{T}"/> column (an empty tag), described without its <c>T</c>.</summary>
+internal struct DisabledTag : IComponent;
+
+/// <summary>Bit of <see cref="Disabled{T}"/>, linked to <typeparamref name="T"/>'s info.</summary>
 internal static class DisabledType<T> where T : struct, IComponent
 {
-    internal static readonly ushort Bit = Link();
-
-    private static ushort Link()
-    {
-        ushort bit = ComponentType<Disabled<T>>.Bit;
-        ComponentInfo.LinkDisabled(ComponentType<T>.Bit, bit);
-        return bit;
-    }
+    internal static readonly ushort Bit = ComponentType<Disabled<T>>.Bit;
 }

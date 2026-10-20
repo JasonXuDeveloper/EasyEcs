@@ -26,19 +26,16 @@ internal static class TypeIndex<TFamily, T>
 /// </summary>
 internal readonly struct ComponentSignature;
 
-/// <summary>
-/// The hidden column of a tracked component <typeparamref name="T"/> (<see cref="ITrackChanges"/>): the
-/// <see cref="World.ChangeTick"/> of each row's last write. Archetypes having <typeparamref name="T"/> always have it.
-/// </summary>
-internal struct ChangeTicks<T> : IComponent where T : struct, IComponent
-{
-    public ulong Tick;
-}
-
 /// <summary>Bit of component type <typeparamref name="T"/> in archetype masks (registers its <see cref="ComponentInfo"/>).</summary>
 internal static class ComponentType<T> where T : struct, IComponent
 {
     internal static readonly ushort Bit = Register();
+
+    /// <summary>
+    /// Bit of the hidden change-tick column of a tracked <typeparamref name="T"/> (<see cref="ITrackChanges"/>); not
+    /// meaningful for other components. Archetypes having <typeparamref name="T"/> always have it.
+    /// </summary>
+    internal static readonly ushort TicksBit = (ushort)ComponentInfo.Of(Bit).Companion;
 
     /// <summary>
     /// <typeparamref name="T"/> implements <see cref="IIndexed{TKey}"/>: writes of a value (Set, CreateEntity) tell its
@@ -54,11 +51,15 @@ internal static class ComponentType<T> where T : struct, IComponent
 
     private static ushort Register()
     {
+        if (default(T) is IDisabledTag tag) return ComponentInfo.DisablerOf(tag.Component); // Disabled<U>: U's tag bit
         int index = ComponentInfo.Allocate(new ComponentInfo<T>());
         Collectible.Watch(typeof(T)); // its bit is released when its context unloads
         SavedTypes.Component<T>(); // a type the process uses can be loaded
-        // A tracked component brings a hidden column of change ticks into every archetype that has it.
-        if (default(T) is ITrackChanges) ComponentInfo.Pair(index, ComponentType<ChangeTicks<T>>.Bit);
+        // A tracked component brings a hidden column of change ticks into every archetype that has it: a ChangeTick
+        // column with a bit of its own, described by the component's type so it is released with it. Not a generic
+        // ChangeTicks<T> registered through ComponentType: the AOT compiler cannot see that such a registration stops
+        // (ComponentType<ChangeTicks<ChangeTicks<...>>>) and warns IL3054 for every program with a tracked component.
+        if (default(T) is ITrackChanges) ComponentInfo.Pair(index, ComponentInfo.Allocate(new ComponentInfo<ChangeTick>(typeof(T))));
         return (ushort)index;
     }
 }

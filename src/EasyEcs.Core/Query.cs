@@ -470,10 +470,13 @@ internal sealed class QueryMatch(Archetype[] archetypes, RowPlan[] filters)
     }
 }
 
-/// <summary>Layout of a <c>ChangeTicks&lt;T&gt;</c> row, to read any of those columns (never registered).</summary>
+/// <summary>
+/// A row of the hidden change-tick column of a tracked component: the <see cref="World.ChangeTick"/> of the row's last
+/// write. Each tracked type has its own column (bit) of these, never registered through <c>ComponentType</c>.
+/// </summary>
 internal struct ChangeTick : IComponent
 {
-#pragma warning disable CS0649 // only read through refs into ChangeTicks<T> columns
+#pragma warning disable CS0649 // only written through refs into the columns
     public ulong Value;
 #pragma warning restore CS0649
 }
@@ -775,7 +778,7 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     }
 
     /// <summary>
-    /// Rows of word <paramref name="word"/> whose tick in column <paramref name="column"/> (a <c>ChangeTicks</c>
+    /// Rows of word <paramref name="word"/> whose tick in column <paramref name="column"/> (a change-tick
     /// column: 8-byte unmanaged rows, 64-byte aligned) is at least <paramref name="since"/>.
     /// </summary>
     private static ulong Newer(Archetype archetype, int column, int word, ulong since)

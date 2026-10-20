@@ -348,7 +348,7 @@ internal sealed class Archetype
 
     /// <summary>The change-tick column of tracked component <typeparamref name="T"/>, or -1.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int TicksColumn<T>() where T : struct, IComponent => ColumnIndex(ComponentType<ChangeTicks<T>>.Bit);
+    private int TicksColumn<T>() where T : struct, IComponent => ColumnIndex(ComponentType<T>.TicksBit);
 
     /// <summary>Index of the column of component <paramref name="bit"/>, or -1 when the archetype does not have it.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -406,7 +406,7 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Stamp<T>(int slot, ulong tick) where T : struct, IComponent
     {
-        if (default(T) is ITrackChanges) Ticks<T>(tick, slot, 1UL << slot).Tick = tick; // shift is mod 64
+        if (default(T) is ITrackChanges) Ticks<T>(tick, slot, 1UL << slot).Value = tick; // shift is mod 64
     }
 
     /// <summary>
@@ -420,7 +420,7 @@ internal sealed class Archetype
         {
             int column = TicksColumn<T>();
             NoteVisited(column, slot, tick);
-            Unsafe.Add(ref Data<ChangeTicks<T>>(column), slot).Tick = tick;
+            Unsafe.Add(ref Data<ChangeTick>(column), slot).Value = tick;
         }
     }
 
@@ -466,7 +466,7 @@ internal sealed class Archetype
     public void StampTick<T>(int slot, ulong tick) where T : struct, IComponent
     {
         if (default(T) is ITrackChanges)
-            Unsafe.Add(ref Data<ChangeTicks<T>>(TicksColumn<T>()), slot).Tick = tick;
+            Unsafe.Add(ref Data<ChangeTick>(TicksColumn<T>()), slot).Value = tick;
     }
 
     /// <summary>
@@ -474,7 +474,7 @@ internal sealed class Archetype
     /// <paramref name="tick"/> of rows <paramref name="rows"/> of the row's word.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ref ChangeTicks<T> Ticks<T>(ulong tick, int slot, ulong rows) where T : struct, IComponent
+    private ref ChangeTick Ticks<T>(ulong tick, int slot, ulong rows) where T : struct, IComponent
     {
         int column = TicksColumn<T>();
         // Summaries only grow (LastWrite >= the block's Latest >= Write) and no row holds a later tick than the world's: a
@@ -482,7 +482,7 @@ internal sealed class Archetype
         ref var word = ref Summary(Words, column, slot >> 6);
         if (word.Write == tick) word.Rows |= rows;
         else NoteWord(column, slot, rows, tick);
-        return ref Unsafe.Add(ref Data<ChangeTicks<T>>(column), slot);
+        return ref Unsafe.Add(ref Data<ChangeTick>(column), slot);
     }
 
     /// <summary>
@@ -663,7 +663,7 @@ internal sealed class Archetype
     {
         if (default(T) is not ITrackChanges || rows == 0) return;
         ref var ticks = ref Ticks<T>(tick, word << 6, rows);
-        for (; rows != 0; rows &= rows - 1) Unsafe.Add(ref ticks, BitOperations.TrailingZeroCount(rows)).Tick = tick;
+        for (; rows != 0; rows &= rows - 1) Unsafe.Add(ref ticks, BitOperations.TrailingZeroCount(rows)).Value = tick;
     }
 
     /// <summary>

@@ -54,11 +54,26 @@ internal abstract class ComponentInfo
     /// <summary>For a <see cref="Disabled{T}"/> tag: bit of the component it disables, or -1.</summary>
     public int DisabledOf { get; private set; } = -1;
 
-    /// <summary>Link component <paramref name="component"/> with its <see cref="Disabled{T}"/> tag <paramref name="tag"/>.</summary>
-    public static void LinkDisabled(int component, int tag)
+    /// <summary>
+    /// The bit of the <see cref="Disabled{T}"/> tag of component <paramref name="component"/>, assigned the first time
+    /// it is needed: a <c>Disable</c>, a query naming the tag, a load of a disabled column. Its info is a
+    /// <c>ComponentInfo&lt;DisabledTag&gt;</c> described by the component's type (released with it), never a
+    /// <c>ComponentInfo&lt;Disabled&lt;T&gt;&gt;</c>: code generic over every component that names its tag's type makes the
+    /// AOT compiler expand <c>Disabled&lt;Disabled&lt;...&gt;&gt;</c> without end (IL3054).
+    /// </summary>
+    public static ushort DisablerOf(int component)
     {
-        Of(component).Disabler = tag;
-        Of(tag).DisabledOf = component;
+        var info = Of(component);
+        if (info.Disabler < 0)
+            lock (RegisterLock)
+                if (info.Disabler < 0)
+                {
+                    int tag = Allocate(new ComponentInfo<DisabledTag>(info.Type));
+                    Of(tag).DisabledOf = component;
+                    info.Disabler = tag;
+                }
+
+        return (ushort)info.Disabler;
     }
 
     /// <summary>Whether any tracked component type was registered (archetype masks then get companion bits).</summary>
@@ -218,8 +233,6 @@ internal abstract class ComponentInfo
     /// <summary>The id a save records the type by (<see cref="SavedTypes.IdOf"/>).</summary>
     public abstract int TypeId { get; }
 
-    /// <summary>Bit of <see cref="Disabled{T}"/> of this component (registered on first use).</summary>
-    public abstract ushort DisabledBit { get; }
 
     /// <summary>
     /// Write rows [<paramref name="start"/>, +<paramref name="count"/>) of managed column <paramref name="column"/> with
@@ -252,14 +265,19 @@ internal abstract class ComponentInfo
     public abstract void Read(ref Reader reader, Array column, int start, int count);
 }
 
-internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsReferenceOrContainsReferences<T>() ? -1 : Unsafe.SizeOf<T>(),
+/// <param name="owner">
+/// For a change-tick column or a <see cref="Disabled{T}"/> tag (<typeparamref name="T"/> is <see cref="ChangeTick"/> or
+/// <see cref="DisabledTag"/>): the component it belongs to, whose context's unloading releases its bit too
+/// (<see cref="ComponentInfo.Release"/>). Else null.
+/// </param>
+internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(RuntimeHelpers.IsReferenceOrContainsReferences<T>() ? -1 : Unsafe.SizeOf<T>(),
     default(T) is ICleanupComponent, default(T) is IGroup)
     where T : struct, IComponent
 {
     // Unmanaged columns are pinned byte arrays (pinned object heap, never moved by the GC) with one cache line of
     // slack, so their rows can start on a 64-byte boundary (Archetype.Aligned): SIMD loads and power-of-two sized
     // components then never straddle two lines. Managed columns are plain T[] (the GC must see their references).
-    public override Type Type => typeof(T);
+    public override Type Type => owner ?? typeof(T);
 
     public override string Name => SavedTypes.NameOf<T>.Value;
 
@@ -267,7 +285,6 @@ internal sealed class ComponentInfo<T>() : ComponentInfo(RuntimeHelpers.IsRefere
 
     public override int Stride => Unsafe.SizeOf<T>();
 
-    public override ushort DisabledBit => DisabledType<T>.Bit;
 
     // A boxed default buffer (null for other types): reads and writes the elements of a DynamicBuffer<TElement> column
     // without knowing TElement. Boxed once per type.
