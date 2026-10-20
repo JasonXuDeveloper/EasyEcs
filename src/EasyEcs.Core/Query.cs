@@ -114,6 +114,63 @@ public readonly struct QueryFilter
     }
 
     /// <summary>
+    /// Whether row <paramref name="slot"/> of <paramref name="archetype"/> passes the filter, tested as a query tests a
+    /// row (<c>entity.Run</c>): its <c>With</c> components present, its <c>Without</c> ones absent, one of its
+    /// <c>WithAny</c> ones present, its <c>Changed</c> ones written and its <c>Removed</c> ones removed at or after
+    /// <see cref="Tick"/>, its group. O(components named). Filters without bits past 255 only (<see cref="HasOverflow"/>).
+    /// </summary>
+    internal bool Passes(Archetype archetype, int slot)
+    {
+        if (GroupBit != 0 && archetype.GroupOf(GroupBit - 1) != Group) return false;
+        if (_all != Vector256<long>.Zero && !Each(_all, archetype, slot, true)) return false;
+        if (_none != Vector256<long>.Zero && !Each(_none, archetype, slot, false)) return false;
+        if ((_tracked | _removals) != Vector256<long>.Zero && !Ticked(archetype, slot)) return false;
+        if (_any == Vector256<long>.Zero) return true;
+        for (int w = 0; w < 4; w++)
+            for (ulong bits = (ulong)_any.GetElement(w); bits != 0; bits &= bits - 1)
+                if (Present(archetype, (w << 6) + BitOperations.TrailingZeroCount(bits), slot)) return true;
+        return false;
+    }
+
+    /// <summary>Whether every component of <paramref name="set"/> is present in the row (or every one absent).</summary>
+    private static bool Each(Vector256<long> set, Archetype archetype, int slot, bool present)
+    {
+        for (int w = 0; w < 4; w++)
+            for (ulong bits = (ulong)set.GetElement(w); bits != 0; bits &= bits - 1)
+                if (Present(archetype, (w << 6) + BitOperations.TrailingZeroCount(bits), slot) != present) return false;
+        return true;
+    }
+
+    /// <summary>The <c>Changed</c> components written, the <c>Removed</c> ones removed, at or after <see cref="Tick"/>.</summary>
+    private bool Ticked(Archetype archetype, int slot)
+    {
+        ulong since = Math.Max(Tick, 1); // tick 0: never written nor removed (see RowFilter)
+        for (int w = 0; w < 4; w++)
+        {
+            int at = w << 6;
+            for (ulong bits = (ulong)_tracked.GetElement(w); bits != 0; bits &= bits - 1)
+                if (TickOf(archetype, at + BitOperations.TrailingZeroCount(bits), slot) < since) return false;
+            for (ulong bits = (ulong)_removals.GetElement(w); bits != 0; bits &= bits - 1)
+            {
+                int bit = at + BitOperations.TrailingZeroCount(bits);
+                // A removal keeps the column (a table without it never had the component) and stamps the row.
+                if (archetype.ColumnIndex(bit) < 0 || Present(archetype, bit, slot) || TickOf(archetype, bit, slot) < since) return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool Present(Archetype archetype, int bit, int slot) =>
+        archetype.ColumnIndex(bit) is var column and >= 0 && archetype.Has(column, slot);
+
+    /// <summary>The change tick of row <paramref name="slot"/> of tracked component <paramref name="bit"/> (0 when the table lacks it).</summary>
+    private static ulong TickOf(Archetype archetype, int bit, int slot) =>
+        archetype.ColumnIndex(ComponentInfo.Of(bit).Companion) is var column and >= 0
+            ? Unsafe.Add(ref archetype.Data<ChangeTick>(column), slot).Value
+            : 0;
+
+    /// <summary>
     /// Sets <paramref name="bit"/> in set <paramref name="set"/> (0 All, 1 None, 2 Any, 3 Tracked, 4 Removals) of a
     /// filter copy being built: its fields are readonly to users, not to the builder, so each builder call copies the
     /// filter once. A bit past 255 interns the new overflow sets (cold: worlds with more than 256 component types).

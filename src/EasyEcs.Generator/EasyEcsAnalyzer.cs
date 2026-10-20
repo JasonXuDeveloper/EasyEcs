@@ -581,7 +581,14 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         }
 
         Required(method, "");
-        if (!outside && Symbols.GroupOf(method.ContainingType) is { } group) Required(group, " on its group " + group.Name); // its filters join the method's
+        if (!outside && Symbols.GroupOf(method.ContainingType) is { } group)
+        {
+            Required(group, " on its group " + group.Name); // its filters join the method's
+            foreach (var (isWith, filter) in Symbols.GroupInterfaceFilters(group))
+                if (isWith && removed.Any(r => SymbolEqualityComparer.Default.Equals(r, filter)))
+                    context.ReportDiagnostic(Diagnostic.Create(RemovedRequired, location, method.Name, filter.Name,
+                        $"IGroupWith<{filter.Name}> on its group {group.Name} requires it"));
+        }
 
         int components = 0;
         bool valid = true;

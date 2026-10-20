@@ -300,7 +300,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             sb.Append($$"""
                     /// <summary>Resolve the archetypes matching <c>{{tps}}</c> plus <paramref name="filter"/>.</summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                    private QueryMatch Match<{{tps}}>(in QueryFilter filter, {{List(n, i => $"out ushort b{i}")}})
+                    internal QueryMatch Match<{{tps}}>(in QueryFilter filter, {{List(n, i => $"out ushort b{i}")}})
                 {{cons}}
                     {
                 {{Lines(n, i => $"        b{i} = ComponentType<T{i}>.Bit;")}}
@@ -406,7 +406,112 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 """);
         }
 
+        sb.Append("}\n\npublic readonly partial struct Entity\n{\n");
+        for (int n = 1; n <= MaxArity; n++) sb.Append(RunOne(n));
         return sb.Append("}\n").ToString();
+    }
+
+    /// <summary>
+    /// <c>entity.Run</c>: one entity's job, with the refs a pass gives it (a structural change made by the job moves
+    /// the components it writes to the entity's new row, like <c>ForEachEntity</c>).
+    /// </summary>
+    private static string RunOne(int n)
+    {
+        string tps = TypeParams(n);
+        string refs = Lines(n, i => $"        ref T{i} r{i} = ref At<T{i}>(archetype, slot);\n        if (Unsafe.IsNullRef(ref r{i})) return false;");
+        string args = List(n, i => $"ref r{i}");
+        string cons = Constraints(n, "        ");
+        return $$"""
+                /// <summary>
+                /// Run <paramref name="job"/> on this entity when it has all of <c>{{tps}}</c>, with the refs
+                /// <c>World.ForEachEntity</c> would give it: true when the job ran, false when the entity lacks a
+                /// component or is not alive. The components the job writes (<c>IForEachEntity.Writes</c>) count as
+                /// written; a structural change the job makes takes effect at once, and those writes are carried over to
+                /// the entity's new row (also when the job throws). A job implementing <see cref="INoStructuralChanges"/>
+                /// skips that bookkeeping. O(1), allocation-free.
+                /// </summary>
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                public bool Run<{{tps}}, TJob>(ref TJob job)
+            {{cons}}
+                    where TJob : struct, IForEachEntity<{{tps}}>, allows ref struct
+                {
+                    var archetype = LocateArchetype(out int slot, false);
+                    if (archetype == null) return false;
+            {{refs}}
+                    RunJob<{{tps}}, TJob>(ref job, archetype, slot, {{args}});
+                    return true;
+                }
+
+                /// <summary>
+                /// <see cref="Run{{{tps}}, TJob}(ref TJob)"/> when the entity also passes <paramref name="filter"/>, tested
+                /// as a query tests a row (<c>Without</c>, <c>WithAny</c>, <c>Changed</c>, groups): false, without running
+                /// the job, when it does not. O(components the filter names).
+                /// </summary>
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                public bool Run<{{tps}}, TJob>(ref TJob job, in QueryFilter filter)
+            {{cons}}
+                    where TJob : struct, IForEachEntity<{{tps}}>, allows ref struct
+                {
+                    var archetype = LocateArchetype(out int slot, false);
+                    if (archetype == null) return false;
+                    // The filter first: it rules out an entity (a dead one) before any column is looked up.
+                    if (filter.HasOverflow ? !World.RowPasses(_world.Match<{{tps}}>(in filter, {{List(n, i => "out _")}}), archetype, slot, filter.Tick) : !filter.Passes(archetype, slot))
+                        return false;
+            {{refs}}
+                    RunJob<{{tps}}, TJob>(ref job, archetype, slot, {{args}});
+                    return true;
+                }
+
+                /// <summary>The job of <c>Run</c> on row <paramref name="slot"/>, whose refs are given.</summary>
+                private void RunJob<{{tps}}, TJob>(ref TJob job, Archetype archetype, int slot, {{List(n, i => $"ref T{i} r{i}")}})
+            {{cons}}
+                    where TJob : struct, IForEachEntity<{{tps}}>, allows ref struct
+                {
+                    var world = _world;
+            {{Lines(n, i => $"        if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.Stamp<T{i}>(slot, world.ChangeTick);")}}
+                    if (typeof(INoStructuralChanges).IsAssignableFrom(typeof(TJob))) // a JIT-time constant
+                    {
+                        // A broken promise throws instead of moving the row under the refs. The owner's plain freeze:
+                        // an atomic one would cost more than the rest of the call.
+                        bool froze = world.Gate.FreezeAlone();
+                        try
+                        {
+                            job.Execute(this, {{args}});
+                        }
+                        finally
+                        {
+                            if (froze) world.Gate.ThawAlone();
+                        }
+
+                        return;
+                    }
+
+                    // Inside a pass a structural change leaves the row where it is (a tombstone): the refs stay valid.
+                    int seen = world.StorageVersion;
+                    bool alone = world.BeginPassAlone();
+                    try
+                    {
+                        job.Execute(this, {{args}});
+                    }
+                    finally
+                    {
+                        if (seen != world.StorageVersion && archetype.Slots[slot].Index < 0)
+                        {
+                            // The entity moved (or died): its old row is a tombstone that holds the job's writes, which
+                            // go to the new row, typed (a component the job removed is not there).
+                            ref var meta = ref world.MetaRef(Index);
+                            if (meta.Version == Version && meta.Archetype is { } moved)
+                            {
+            {{Lines(n, i => $"                    if ((TJob.Writes & {1 << (i - 1)}) != 0) CarryTo(moved, meta.Slot, in r{i});")}}
+                            }
+                        }
+
+                        world.EndPassAlone(alone);
+                    }
+                }
+
+
+            """;
     }
 
     /// <summary>The body of SetCore for several components: one move adds every bit, then each value is written.</summary>

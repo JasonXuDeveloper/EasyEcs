@@ -16,6 +16,8 @@ internal static class Symbols
     public const string ForEachAttribute = "EasyEcs.ForEachAttribute";
     public const string WithAttribute = "EasyEcs.WithAttribute<T>";
     public const string WithoutAttribute = "EasyEcs.WithoutAttribute<T>";
+    public const string GroupWith = "EasyEcs.IGroupWith<T>";
+    public const string GroupWithout = "EasyEcs.IGroupWithout<T>";
     public const string WithAnyAttribute = "EasyEcs.WithAnyAttribute<T>";
     public const string ChangedAttribute = "EasyEcs.ChangedAttribute<T>";
     public const string RemovedAttribute = "EasyEcs.RemovedAttribute<T>";
@@ -62,6 +64,18 @@ internal static class Symbols
             foreach (var attribute in type.GetAttributes())
                 if (Is(attribute.AttributeClass, UpdateInGroupAttribute)) return attribute.AttributeClass!.TypeArguments[0];
         return null;
+    }
+
+    /// <summary>
+    /// The filters a group type declares through the interfaces it implements (<c>IGroupWith&lt;T&gt;</c>,
+    /// <c>IGroupWithout&lt;T&gt;</c>, also inherited from its own interfaces): as <c>[With&lt;T&gt;]</c> (true) or
+    /// <c>[Without&lt;T&gt;]</c> (false) on the group.
+    /// </summary>
+    public static IEnumerable<(bool With, ITypeSymbol Type)> GroupInterfaceFilters(ITypeSymbol group)
+    {
+        foreach (var face in group.AllInterfaces)
+            if (Is(face, GroupWith)) yield return (true, face.TypeArguments[0]);
+            else if (Is(face, GroupWithout)) yield return (false, face.TypeArguments[0]);
     }
 
     public static bool IsSystem(INamedTypeSymbol type)
@@ -514,12 +528,13 @@ internal static class Symbols
     }
 
     /// <summary>
-    /// The members of <c>Entity</c> and <c>World</c> that change the world's structure (or copy it, or run its systems):
+    /// The members of <c>Entity</c> and <c>World</c> that change the world's structure (or copy it, or run its systems, or
+    /// run a job that may: <c>entity.Run</c>, whose pass bookkeeping is the owner's):
     /// they enter the owner's structural gate, so they belong to the world's owner thread and to code that may change
     /// structure.
     /// </summary>
     private static readonly HashSet<string> StructuralEntityMembers =
-        ["Set", "Remove", "Destroy", "GetOrAdd", "Clone", "Disable", "Enable", "AddRelation", "RemoveRelation"];
+        ["Set", "Remove", "Destroy", "GetOrAdd", "Clone", "Disable", "Enable", "AddRelation", "RemoveRelation", "Run"];
 
     private static readonly HashSet<string> StructuralWorldMembers =
     [

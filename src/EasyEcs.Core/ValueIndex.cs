@@ -247,6 +247,14 @@ public sealed class ValueIndex<T, TKey> : World.IValueIndex, World.IIndexOf<T>
         return new Matches(_world, Unsafe.IsNullRef(ref head) ? default : head.Walk());
     }
 
+    /// <summary>The walk of <paramref name="key"/>'s entities (an empty one when it has none), as <see cref="Find"/> takes it.</summary>
+    internal ListWalk WalkOf(TKey key)
+    {
+        if (!_built) Build();
+        ref var head = ref HeadOf(key);
+        return Unsafe.IsNullRef(ref head) ? default : head.Walk();
+    }
+
     /// <summary>Index every row now if the index is not built (before entering the structural gate).</summary>
     internal void Prepare()
     {

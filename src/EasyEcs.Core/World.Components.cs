@@ -93,6 +93,31 @@ public sealed partial class World
         if (Interlocked.Decrement(ref Passes) == 0 && _dirtyCount > 0) CloseTombstones();
     }
 
+    /// <summary>
+    /// <see cref="BeginPass"/> on the owner thread: a plain increment while the gate is free (no other thread touches
+    /// the count then, see <see cref="StructuralGate.FreezeAlone"/>), else the atomic one. Returns which.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool BeginPassAlone()
+    {
+        if (!Gate.Free)
+        {
+            BeginPass();
+            return false;
+        }
+
+        Passes++;
+        return true;
+    }
+
+    /// <summary>Ends a pass of <see cref="BeginPassAlone"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void EndPassAlone(bool alone)
+    {
+        if (!alone) EndPass();
+        else if (--Passes == 0 && _dirtyCount > 0) CloseTombstones();
+    }
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void CloseTombstones()
     {

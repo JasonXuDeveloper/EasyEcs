@@ -102,6 +102,29 @@ public class MoveTests
     }
 
     [Test]
+    public void ALoadCanLeaveTheChangeTicksAlone()
+    {
+        var output = new NinoArrayBufferWriter();
+        using (var from = new World())
+        {
+            var first = from.CreateEntity(new Armor(5), new Health(1));
+            var second = from.CreateEntity(new Armor(5), new Health(2));
+            from.SaveEntities(output, [first.Id, second.Id], ComponentSet.Create().With<Armor>().With<Health>());
+        }
+
+        using var to = new World();
+        var a = to.CreateEntity(new Armor(1));                                   // written when it was made
+        var b = to.CreateEntity(new Position());
+        to.Update();
+        ulong tick = to.ChangeTick;
+        Assert.That(to.LoadEntitiesInto(output.WrittenSpan, [a, b], markWritten: false), Is.EqualTo(2));
+
+        Assert.That((a.Read<Armor>().Value, b.Read<Armor>().Value), Is.EqualTo((5, 5)));
+        Assert.That(to.Count<Armor>(QueryFilter.Create().Changed<Armor>(tick)), Is.Zero);   // nothing reads as a write
+        Assert.That(to.Count<Armor>(QueryFilter.Create().Changed<Armor>(1)), Is.EqualTo(1)); // a keeps its tick, b's is never
+    }
+
+    [Test]
     public void ARecordKeepsWhatItDoesNotHoldAndBringsItsDisabledValues()
     {
         var output = new NinoArrayBufferWriter();

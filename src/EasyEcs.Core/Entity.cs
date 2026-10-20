@@ -142,10 +142,33 @@ public readonly partial struct Entity : IEquatable<Entity>
     /// archetype's lookup.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal unsafe ref T Find<T>(bool strict) where T : struct, IComponent
+    internal ref T Find<T>(bool strict) where T : struct, IComponent
     {
         ref var lookup = ref Locate(ComponentType<T>.Bit, out int slot, strict);
         if (!strict && Unsafe.IsNullRef(ref lookup)) return ref Unsafe.NullRef<T>();
+        return ref Row<T>(ref lookup, slot);
+    }
+
+    /// <summary>Row <paramref name="slot"/> of component <typeparamref name="T"/> in <paramref name="archetype"/>, or a null ref when the row lacks it.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static ref T At<T>(Archetype archetype, int slot) where T : struct, IComponent
+    {
+        ref var lookup = ref Column(archetype, ComponentType<T>.Bit, slot, false);
+        if (Unsafe.IsNullRef(ref lookup)) return ref Unsafe.NullRef<T>();
+        return ref Row<T>(ref lookup, slot);
+    }
+
+    /// <summary><paramref name="value"/> into row <paramref name="slot"/> of <paramref name="archetype"/>, when the row has <typeparamref name="T"/> (<c>Run</c> after a move).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static void CarryTo<T>(Archetype archetype, int slot, in T value) where T : struct, IComponent
+    {
+        ref T row = ref At<T>(archetype, slot);
+        if (!Unsafe.IsNullRef(ref row)) row = value;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static unsafe ref T Row<T>(ref Archetype.Lookup lookup, int slot) where T : struct, IComponent
+    {
         // A JIT-time constant: an unmanaged column's row 0 is cached in the entry (pinned, see Lookup.Rows).
         if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>())
             return ref Unsafe.Add(ref Unsafe.AsRef<T>((void*)lookup.Rows), slot);
@@ -170,7 +193,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     /// a throw).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private Archetype LocateArchetype(out int slot, bool strict)
+    internal Archetype LocateArchetype(out int slot, bool strict)
     {
         var world = _world;
         if (world == null)

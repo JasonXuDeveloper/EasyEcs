@@ -27,6 +27,19 @@ public static class Census
     private static void CountAlive<T>(in T component, ref int count) where T : struct, IComponent => count++;
 }
 
+/// <summary>The actor of a type: one tag type per actor type, one group per actor type through one interface.</summary>
+public struct In<TActor> : IComponent;
+public interface IActor<TSelf> : ISystemGroup, IGroupWith<In<TSelf>> where TSelf : struct;
+public struct MapActor : IActor<MapActor>;
+public struct ShopActor : IActor<ShopActor>;
+
+[UpdateInGroup<MapActor>]
+public class TickMaps : EcsSystem
+{
+    [ForEach]
+    private static void Tick(ref Health health) => health.Value++;
+}
+
 /// <summary>A generic runner type: its entry points are members of each closed type.</summary>
 public static class Census<T> where T : struct, IComponent
 {
@@ -51,6 +64,20 @@ public class GenericTests
 
     [TearDown]
     public void TearDown() => _world.Dispose();
+
+    [Test]
+    public void AnActorGroupSeesOnlyTheEntitiesOfItsActorType()
+    {
+        using var world = new World();
+        world.AddSystem<TickMaps>();
+        var map = world.CreateEntity(new Health(0));
+        map.Set(new In<MapActor>());
+        var shop = world.CreateEntity(new Health(0));
+        shop.Set(new In<ShopActor>());
+        world.Update<MapActor>();
+        world.Update<ShopActor>();
+        Assert.That((map.Has<In<MapActor>>(), map.Read<Health>().Value, shop.Read<Health>().Value), Is.EqualTo((true, 1, 0)));
+    }
 
     [Test]
     public void AGenericSystemRunsForItsClosedType()

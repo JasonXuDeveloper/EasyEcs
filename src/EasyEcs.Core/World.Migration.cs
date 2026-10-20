@@ -52,10 +52,15 @@ public sealed partial class World
     /// <paramref name="into"/> it became, every other one is <see cref="EntityId.Null"/>, and a <see cref="ChildOf"/>
     /// whose parent stayed behind is not set. Returns how many entities were loaded. O(entities × components). Not
     /// while a pass iterates.
+    /// <br/>
+    /// With <paramref name="markWritten"/> false, the loaded components do not count as written: a value that replaces
+    /// one keeps that one's change tick, a component the entity did not have gets none, so <c>[Changed&lt;T&gt;]</c>
+    /// systems and <c>Since</c> filters do not visit the entity for the load (an actor restored from storage holds what
+    /// storage has, and "save what changed" saves nothing of it until code writes it).
     /// </summary>
     /// <exception cref="ArgumentException"><paramref name="into"/> does not hold one living entity of this world per saved entity.</exception>
     /// <exception cref="System.IO.InvalidDataException">The bytes are not a save.</exception>
-    public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into)
+    public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into, bool markWritten = true)
     {
         var source = _arrivals ??= new World(new WorldOptions { InitialEntityCapacity = 16 });
         source.Load(input);
@@ -86,7 +91,7 @@ public sealed partial class World
             for (int i = 0; i < count; i++)
             {
                 ref var from = ref source.MetaRef(source._loadOrder[i].Index);
-                LoadInto(from.Archetype, from.Slot, into[i].Index);
+                LoadInto(from.Archetype, from.Slot, into[i].Index, markWritten);
             }
 
             StorageVersion++;
@@ -98,9 +103,10 @@ public sealed partial class World
     /// <summary>
     /// Set the components of row <paramref name="row"/> of <paramref name="source"/> (a loaded table, references
     /// rewritten) on entity <paramref name="id"/>: one move to the table with both sets of components, then each value
-    /// as <c>Set</c> writes it. Inside the structural gate.
+    /// as <c>Set</c> writes it (stamped as written unless <paramref name="markWritten"/> is false). Inside the
+    /// structural gate.
     /// </summary>
-    private void LoadInto(Archetype source, int row, int id)
+    private void LoadInto(Archetype source, int row, int id, bool markWritten)
     {
         ref var meta = ref MetaRef(id);
         var before = meta.Archetype;
@@ -126,6 +132,7 @@ public sealed partial class World
             }
 
             bool present = source.Has(sc, row);
+            bool had = before.ColumnIndex(bit) >= 0 && table.Has(c, slot); // the move kept its presence: a value is replaced
             if (info.Managed)
             {
                 info.Discard(table.Columns[c], slot, 1); // the value it replaces (a buffer's list goes back to its pool)
@@ -141,7 +148,8 @@ public sealed partial class World
             }
             else table.MarkAbsent(c, slot, keep: true); // disabled: its tag is a column of the source too
 
-            if (table.Tracked && info.Companion is var ticks and >= 0) table.SetTick(table.ColumnIndex(ticks), slot, _changeTick);
+            if (table.Tracked && info.Companion is var ticks and >= 0 && (markWritten || !had)) // unmarked: a replaced value keeps its tick
+                table.SetTick(table.ColumnIndex(ticks), slot, markWritten ? _changeTick : 0);
             if (present && _indexByBit != null && bit < _indexByBit.Length && _indexByBit[bit] is { } index) index.AddedRows(table, c, slot, 1);
         }
 

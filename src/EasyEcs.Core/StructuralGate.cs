@@ -45,6 +45,31 @@ internal struct StructuralGate
 
     public void Thaw() => Interlocked.Add(ref _held, -FrozenRegion);
 
+    /// <summary>Nothing holds the gate: no structural change, no frozen region (so no thread but the owner's runs).</summary>
+    public bool Free
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _held == 0;
+    }
+
+    /// <summary>
+    /// A frozen region on the owner thread while nothing holds the gate (<c>entity.Run</c> of a job without structural
+    /// changes): no other thread touches the flag then (threads of a stage or of parallel chunks only run inside a
+    /// region), so a plain store does. Returns false, freezing nothing, when the gate is held or frozen already: a
+    /// structural change throws then anyway.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool FreezeAlone()
+    {
+        if (!Free) return false;
+        _held = FrozenRegion;
+        return true;
+    }
+
+    /// <summary>Ends the region of <see cref="FreezeAlone"/> (when it froze).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void ThawAlone() => _held = 0;
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void EnterShared()
     {

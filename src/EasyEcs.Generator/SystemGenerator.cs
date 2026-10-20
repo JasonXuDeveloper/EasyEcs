@@ -475,7 +475,16 @@ public sealed class SystemGenerator : IIncrementalGenerator
             }
             // The system group's filters ([Without<Inactive>] public struct Gameplay : ISystemGroup) join every method's
             // (after the queried component is chosen: a group's [With<T>] only filters).
-            if (!outside && Symbols.GroupOf(method.ContainingType) is { } group) Filters(group);
+            if (!outside && Symbols.GroupOf(method.ContainingType) is { } group)
+            {
+                Filters(group);
+                foreach (var (isWith, filter) in Symbols.GroupInterfaceFilters(group)) // IGroupWith<T> / IGroupWithout<T>
+                {
+                    var list = isWith ? with : without;
+                    string type = filter.ToDisplayString(Symbols.Fqn);
+                    if (!list.Contains(type)) list.Add(type);
+                }
+            }
             if (query.Count > 0) with.RemoveAll(query.Contains); // a group's [With<T>] the method already queries
 
             bool stable = Symbols.IsStable(method, syntax, model);

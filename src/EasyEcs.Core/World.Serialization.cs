@@ -44,7 +44,7 @@ public sealed partial class World
     /// Write <paramref name="entities"/> (stale ids and repeats are skipped) and their components into
     /// <paramref name="output"/>, for <see cref="LoadEntities"/> or <see cref="LoadEntitiesInto"/>: a group of entities
     /// that moves to another world (a player and what it owns, to another server). Singletons and the other entities
-    /// are not written; collect a hierarchy with <see cref="Children"/>. Allocates nothing once its buffers are large
+    /// are not written; collect a hierarchy with <see cref="Descendants"/>. Allocates nothing once its buffers are large
     /// enough. O(entities given × components). Not while a pass iterates.
     /// </summary>
     public void SaveEntities(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities) => Save(output, entities, false, default, false);

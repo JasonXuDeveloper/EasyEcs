@@ -49,6 +49,8 @@ public class AllocationTests
             probe.Set(new Armor(1));
             probe.Remove<Armor>();                                            // a tracked removal
             _ = world.Count<Health>(QueryFilter.Create().Removed<Armor>(world.ChangeTick));
+            var heal = new Heal();
+            _ = probe.Run<Health, Heal>(ref heal) && probe.Run<Health, Heal>(ref heal, QueryFilter.Create().With<Frozen>());
         }
 
         for (int i = 0; i < 10; i++) Frame(); // warm-up: query caches, edges, JIT
@@ -157,6 +159,7 @@ public class AllocationTests
             var root = world.CreateEntity(new Health(1));
             var child = world.CreateEntity(new ChildOf(root));
             var leaf = world.CreateEntity(new ChildOf(child), new Lease(1));
+            foreach (var _ in world.Descendants(root.Id)) seen++;              // the subtree a save would collect
             root.Destroy();
             leaf.Remove<Lease>();
         }
@@ -180,4 +183,15 @@ public class AllocationTests
     }
 
     private struct Churned : IComponent;
+
+    // Toggles a tag on the entity it runs on: entity.Run with a structural change inside.
+    private struct Heal : IForEachEntity<Health>
+    {
+        public void Execute(Entity entity, ref Health health)
+        {
+            health.Value++;
+            if (entity.Has<Stun>()) entity.Remove<Stun>();
+            else entity.Set(new Stun(1));
+        }
+    }
 }

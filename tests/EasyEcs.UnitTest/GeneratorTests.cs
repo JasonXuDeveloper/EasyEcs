@@ -152,6 +152,9 @@ public class GeneratorTests
     [TestCase("[Without<Q>, WithAny<T>] public struct G : ISystemGroup; [UpdateInGroup<G>] public class S : EcsSystem { [ForEach, Without<Q>] static void A(ref P p) { } [ForEach, With<P>] static void B() { } }",
         "AFilter0 = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T>();", // once, though both name it
         "BFilter1 = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T>();", "world.ForEach<global::P, BJob1>")]
+    [TestCase("public record struct In<T>(int X) : IComponent; public interface IActor<TSelf> : IGroupWith<In<TSelf>>, IGroupWithout<Q> where TSelf : struct; "
+        + "public struct Map : IActor<Map>; [UpdateInGroup<Map>] public class S : EcsSystem { [ForEach] static void A(ref P p) { } }",
+        ".With<global::In<global::Map>>()", ".Without<global::Q>()")] // the group's filters through a generic interface
     [TestCase("public static class R<T> where T : struct, IComponent { [ForEach] static void A(in T t, ref int n) { } }",
         "extension<T>(global::R<T>) where T : struct, global::EasyEcs.IComponent", "new __ForEach<T>.AJob0 { x1 = ref n }", "public static class R_1ForEach")]
     public void GenericSystemsAndRunnersAreGenerated(string source, params string[] expected)
@@ -160,6 +163,47 @@ public class GeneratorTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Concat(output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")).Select(t => t.ToString()));
         foreach (var line in expected) Assert.That(generated, Does.Contain(line), generated);
+    }
+
+    [Test]
+    public void AGenericComponentOfAnotherAssemblyFiltersAGroupThroughItsInterface()
+    {
+        // A framework assembly defines a generic tag and a group interface over it; a user assembly closes both per
+        // actor type: In<Map> through the generic API, IActor<Map> as the group whose systems see only In<Map>.
+        var framework = CSharpCompilation.Create("Framework",
+            [CSharpSyntaxTree.ParseText("""
+                using EasyEcs;
+                namespace Framework;
+                public struct In<TActor> : IComponent;
+                public interface IActor<TSelf> : ISystemGroup, IGroupWith<In<TSelf>> where TSelf : struct;
+                """, Parse)],
+            Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        Driver().RunGeneratorsAndUpdateCompilation(framework, out var built, out _);
+        using var image = new System.IO.MemoryStream();
+        Assert.That(built.Emit(image).Success, Is.True);
+
+        var user = Compile("""
+            using Framework;
+            public record struct Tiles(int Count) : IComponent;
+            public struct Map : IActor<Map>;
+            [UpdateInGroup<Map>]
+            public class Grow : EcsSystem { [ForEach] static void A(ref Tiles t) => t.Count++; }
+            public static class Spawn
+            {
+                public static bool Activate(World world)
+                {
+                    var map = world.CreateEntity(new Tiles(1));
+                    map.Set(new In<Map>());
+                    world.Update<Map>();
+                    return map.Has<In<Map>>();
+                }
+            }
+            """).AddReferences(MetadataReference.CreateFromImage(image.ToArray()));
+        Driver().RunGeneratorsAndUpdateCompilation(user, out var output, out _);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity >= DiagnosticSeverity.Warning), Is.Empty);
+        string generated = string.Concat(output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".ForEach.g.cs")).Select(t => t.ToString()));
+        Assert.That(generated, Does.Contain(".With<global::Framework.In<global::Map>>()"), generated);
     }
 
     [TestCase("[ForEach] static void A(ref P p, ref int n, in int floor, int add) { }",
@@ -213,6 +257,8 @@ public class GeneratorTests
     [TestCase("public partial class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, ref Clock c) { } }", "EECS010")]
     [TestCase("public partial class S : EcsSystem { [ForEach(Parallel = true)] static void A(System.Span<P> p) { } }", "EECS010")]
     [TestCase("public partial class S : EcsSystem { [ForEach(Parallel = true)] static void A(Entity e, ref P p) => e.Destroy(); }", "EECS010")]
+    [TestCase("public struct J : IForEachEntity<P>, INoStructuralChanges { public void Execute(Entity e, ref P p) { } } "
+        + "public partial class S : EcsSystem { [ForEach(Parallel = true)] static void A(Entity e, ref P p) { var j = new J(); e.Run<P, J>(ref j); } }", "EECS010")]
     [TestCase("public class S : EcsSystem { int _kills; void K() => _kills++; }", "EECS007")]
     [TestCase("public class S : EcsSystem { public int Kills { get; set; } }", "EECS007")]
     [TestCase("public class A : EcsSystem { } public class S : EcsSystem { private readonly A _a = new(); }", "EECS008")]
@@ -234,6 +280,7 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(Entity e) { for (int i = 0; i < 4; i++) System.Threading.ThreadPool.QueueUserWorkItem(_ => e.Remove<P>()); } }", "EECS014")]
     [TestCase("public partial class S : EcsSystem { [ForEach, Removed<T>] static void A(in T t, ref P p) { } }", "EECS016")]
     [TestCase("[With<T>] public struct G : ISystemGroup; [UpdateInGroup<G>] public class S : EcsSystem { [ForEach, Removed<T>] static void A(ref P p) { } }", "EECS016")] // the group's filter
+    [TestCase("public struct G : IGroupWith<T>; [UpdateInGroup<G>] public class S : EcsSystem { [ForEach, Removed<T>] static void A(ref P p) { } }", "EECS016")] // through IGroupWith<T>
     [TestCase("[Without<Q>] public struct NotAGroup : IComponent;", "EECS023")]
     [TestCase("public partial class S : EcsSystem { [ForEach, Removed<T>, With<T>] static void A(ref P p) { } }", "EECS016")]
     [TestCase("public partial class S : EcsSystem { [ForEach, Removed<T>] static void A(Entity e) { } }", "EECS003")]       // T is no query anchor

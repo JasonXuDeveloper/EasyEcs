@@ -18,9 +18,26 @@ namespace EasyEcs;
 /// A group may carry <see cref="WithAttribute{T}"/>, <see cref="WithoutAttribute{T}"/> and
 /// <see cref="WithAnyAttribute{T}"/> filters: the generator adds them to every [ForEach] method of its systems
 /// (<c>[Without&lt;Inactive&gt;] public struct Gameplay : ISystemGroup;</c> keeps inactive entities out of the whole
-/// group). Queries a system makes in OnUpdate are its own.
+/// group), and so may the interfaces it implements: <see cref="IGroupWith{T}"/>, <see cref="IGroupWithout{T}"/>.
+/// Queries a system makes in OnUpdate are its own.
 /// </summary>
 public interface ISystemGroup;
+
+/// <summary>
+/// A system group whose [ForEach] methods visit only entities with <typeparamref name="T"/>, as
+/// <see cref="WithAttribute{T}"/> on the group would. An interface can name its own type parameter where an attribute
+/// cannot, so a framework's generic group interface carries the filter for every group that implements it:
+/// <c>interface IActor&lt;TSelf&gt; : IGroupWith&lt;In&lt;TSelf&gt;&gt;</c>, then
+/// <c>struct Map : IActor&lt;Map&gt;</c> filters its systems to <c>In&lt;Map&gt;</c>. Read by the generator: no cost at
+/// run time.
+/// </summary>
+public interface IGroupWith<T> : ISystemGroup where T : struct, IComponent;
+
+/// <summary>
+/// A system group whose [ForEach] methods skip entities with <typeparamref name="T"/>, as
+/// <see cref="WithoutAttribute{T}"/> on the group would (see <see cref="IGroupWith{T}"/>).
+/// </summary>
+public interface IGroupWithout<T> : ISystemGroup where T : struct, IComponent;
 
 /// <summary>Puts the system (and derived systems) into group <typeparamref name="TGroup"/>.</summary>
 [AttributeUsage(AttributeTargets.Class, Inherited = true)]

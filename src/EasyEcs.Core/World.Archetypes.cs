@@ -240,6 +240,20 @@ public sealed partial class World
         return MatchAndMemo(signature, bits, in filter);
     }
 
+    /// <summary>
+    /// Whether row <paramref name="slot"/> of <paramref name="archetype"/> passes a query (<c>entity.Run</c> with a
+    /// filter): the table must be one of the query's and the row must pass its row test. O(matching tables).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal static bool RowPasses(QueryMatch match, Archetype archetype, int slot, ulong since)
+    {
+        var archetypes = match.Archetypes;
+        for (int i = 0; i < archetypes.Length; i++)
+            if (ReferenceEquals(archetypes[i], archetype))
+                return new RowFilter(match.Filters[i], since).Passes(archetype, slot);
+        return false;
+    }
+
     /// <summary>A filter the signature's ways do not hold yet: look it up and give it a way (cold path).</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private QueryMatch MatchAndMemo(int signature, ReadOnlySpan<ushort> bits, in QueryFilter filter)

@@ -70,6 +70,94 @@ public sealed partial class World
     public ValueIndex<ChildOf, EntityId>.Matches Children(EntityId parent) =>
         (_children ??= Index<ChildOf, EntityId>()).Find(parent);
 
+    /// <summary>
+    /// The descendants of <paramref name="root"/>, depth first, each before its own children: its children, their
+    /// children, and so on (<paramref name="root"/> itself is not one). What a save of a subtree collects:
+    /// <c>ids.Add(root.Id); foreach (var e in world.Descendants(root.Id)) ids.Add(e.Id);</c>. O(1) per entity; the first
+    /// walk indexes every <see cref="ChildOf"/> once. Allocates nothing once warm (the walk's stack is kept by the
+    /// world). An entity destroyed during the walk is skipped. Owner thread only.
+    /// </summary>
+    public Subtree Descendants(EntityId root) => new(this, root);
+
+    // The stack of the last finished descendant walk, taken by the next one (a nested walk makes its own).
+    private ListWalk[] _walkStack;
+
+    /// <summary>The descendants of an entity (<see cref="Descendants"/>): each <c>foreach</c> walks them anew.</summary>
+    public readonly ref struct Subtree
+    {
+        private readonly World _world;
+        private readonly EntityId _root;
+
+        internal Subtree(World world, EntityId root)
+        {
+            _world = world;
+            _root = root;
+        }
+
+        /// <summary>A walk over the descendants (<c>foreach</c> support, no allocation once warm).</summary>
+        /// <exception cref="InvalidOperationException">The <see cref="ChildOf"/> links form a cycle (when the walk reaches it).</exception>
+        public DescendantWalk GetEnumerator() => new(_world, _root);
+    }
+
+    /// <summary>
+    /// A depth-first walk of <see cref="Descendants"/>: a stack of the child lists still being read, given back to the
+    /// world by <see cref="Dispose"/> (<c>foreach</c> calls it).
+    /// </summary>
+    public ref struct DescendantWalk
+    {
+        private readonly World _world;
+        private readonly ValueIndex<ChildOf, EntityId> _children;
+        private ListWalk[] _stack;
+        private int _depth, _visited;
+
+        internal DescendantWalk(World world, EntityId root)
+        {
+            _world = world;
+            _children = world._children ??= world.Index<ChildOf, EntityId>();
+            _stack = world._walkStack ?? new ListWalk[16];
+            world._walkStack = null;
+            _stack[0] = _children.WalkOf(root);
+            _depth = 1;
+            _visited = 0;
+            Current = default;
+        }
+
+        /// <summary>The current descendant.</summary>
+        public Entity Current { get; private set; }
+
+        /// <summary>Move to the next descendant. O(1) per entity, plus one step per list it finishes.</summary>
+        /// <exception cref="InvalidOperationException">The <see cref="ChildOf"/> links form a cycle.</exception>
+        public bool MoveNext()
+        {
+            while (_depth > 0)
+            {
+                if (!_stack[_depth - 1].Next(out var id))
+                {
+                    _depth--;
+                    continue;
+                }
+
+                // More entities than the world holds means a link points back up: the walk would never end.
+                if (++_visited > _world.EntityCount) throw new InvalidOperationException("The ChildOf links form a cycle");
+                if (_depth == _stack.Length) Array.Resize(ref _stack, _stack.Length * 2);
+                _stack[_depth++] = _children.WalkOf(id);
+                Current = new Entity(_world, id);
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>Give the stack back to the world for the next walk.</summary>
+        public void Dispose()
+        {
+            if (_stack == null) return;
+            Array.Clear(_stack); // no child list outlives the walk
+            if (_world._walkStack == null || _world._walkStack.Length < _stack.Length) _world._walkStack = _stack;
+            _stack = null;
+        }
+    }
+
     /// <summary>Have the rules' indexes ready before a destroy enters the structural gate (building one reads tables).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void PrepareCascade()
