@@ -1,14 +1,16 @@
 ---
-title: Hosting in a .NET server
-seoTitle: "Host a C# ECS world in ASP.NET Core or a Worker"
-description: "Run an EasyEcs world in ASP.NET Core or the .NET Generic Host: one owner loop on a fixed tick, requests through a channel, replies, saves on shutdown."
+title: Hosting a C# ECS in .NET services
+seoTitle: "Host a C# ECS in ASP.NET Core or a Worker"
+description: "Host EasyEcs in ASP.NET Core or a Worker for game servers, simulations and real-time backends: one owner runs the tick and bounded channels carry requests."
 icon: Server
 ---
 
-A real server is an ASP.NET Core app or a Worker Service: request handlers, sockets and timers run on the thread pool,
+An ECS-powered game server, simulation or real-time backend can host EasyEcs in ASP.NET Core or a Worker Service:
+request handlers, sockets and timers run on the thread pool,
 while a world takes structural changes from one thread at a time. Give the world one owner, a hosted service that
 builds it, runs its tick and saves it when the host stops, and let everything else talk to it through a channel.
-EasyEcs needs no hosting package for this: the pattern is a few classes of your own.
+EasyEcs provides the ECS world, not network transport or a complete application framework. It needs no hosting package
+for this pattern: the host and channel are a few classes of your own.
 
 ## When to use it [#when-to-use-it]
 

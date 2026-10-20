@@ -1,13 +1,15 @@
 ---
-title: 在 .NET 服务器里托管
-seoTitle: "在 ASP.NET Core 或 Worker 里托管 C# ECS World"
-description: "在 ASP.NET Core 或 .NET 通用主机里运行 EasyEcs World：一个所有者循环跑固定 tick，请求走通道，带回复，停机时存档。"
+title: 在 .NET 服务中托管 C# ECS
+seoTitle: "C# ECS 托管指南：ASP.NET Core、Worker 与模拟程序"
+description: "用 EasyEcs 在 ASP.NET Core 或 Worker 中运行游戏服务端、模拟及实时后端：一个所有者跑 tick，有界通道接收请求。"
 icon: Server
 ---
 
-真实的服务器是一个 ASP.NET Core 应用或 Worker Service：请求处理、socket、定时器都跑在线程池上，而一个 World 同一时刻只接受一个
-线程的结构变更。给 World 指定唯一的所有者：一个托管服务（hosted service）负责建 World、跑 tick、主机停止时存档；其他代码都通过
-通道（channel）和它打交道。EasyEcs 不需要专门的托管包，这套做法就是你自己的几个类。
+游戏服务端、模拟程序或实时后端可以把 EasyEcs 托管在 ASP.NET Core 或 Worker Service：请求处理、socket、定时器都跑在线程池上，
+而一个 World 同一时刻只接受一个线程的结构变更。给 World 指定唯一的所有者：一个托管服务（hosted service）负责建 World、跑 tick、
+主机停止时存档；其他代码都通过
+通道（channel）和它打交道。EasyEcs 提供 ECS World，不提供网络传输或完整的应用框架。这个模式不需要专门的托管包：
+主机和通道就是你自己的几个类。
 
 ## 什么时候用 [#when-to-use-it]
 
