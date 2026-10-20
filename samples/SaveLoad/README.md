@@ -14,7 +14,7 @@ walking into the next zone. Read [GameLoop](../GameLoop) first.
    call, without encoding anything.
 
 Unmanaged components are saved as their bytes. A managed component (`Name` holds a string) is a `[NinoType]`,
-serialized by [Nino](https://github.com/JasonXuDeveloper/Nino); the project references `Nino.Generator`.
+serialized by [Nino](https://github.com/JasonXuDeveloper/Nino), whose generator comes with the EasyEcs package.
 
 ## Files, in reading order
 

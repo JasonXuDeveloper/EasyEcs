@@ -15,9 +15,4 @@
         <ProjectReference Include="..\..\src\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
     </ItemGroup>
 
-    <!-- [NinoType] components: the formatters World.Save writes managed components with -->
-    <ItemGroup>
-        <PackageReference Include="Nino.Generator" Version="4.0.0-rc.6"/>
-    </ItemGroup>
-
 </Project>

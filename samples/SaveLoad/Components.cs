@@ -18,6 +18,6 @@ public record struct Item(int Kind, int Count);
 public record struct Clock(long Tick) : ISingletonComponent;
 
 // A managed component (it holds a string) needs a serializer. [NinoType] lets Nino
-// generate one; the project references Nino.Generator for it.
+// generate one; the EasyEcs package brings Nino's generator.
 [NinoType]
 public partial record struct Name(string Value) : IComponent;
