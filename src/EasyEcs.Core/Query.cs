@@ -12,7 +12,7 @@ namespace EasyEcs;
 /// <code>static readonly QueryFilter Alive = QueryFilter.Create().Without&lt;Dead&gt;();</code>
 /// </summary>
 [StructLayout(LayoutKind.Sequential)] // Add steps from _all to the other sets: they must stay adjacent, in this order
-public readonly struct QueryFilter
+public readonly partial struct QueryFilter
 {
     // The five sets' first 256 bits, inline. No object reference: a filter is copied by plain moves (no write barrier,
     // no zeroed frame), so building one at the call costs little more than holding one in a field.
@@ -26,6 +26,9 @@ public readonly struct QueryFilter
 
     /// <summary>The sets' bits past 255: an interned <see cref="FilterOverflow"/> id (0: none).</summary>
     private readonly int _overflow;
+
+    /// <summary><see cref="Slice"/>: the slice to visit and how many there are (0: the whole tables).</summary>
+    internal readonly int SliceIndex, SliceCount;
 
     internal BitMask All => new(_all, FilterOverflow.Of(_overflow, 0));
     internal BitMask None => new(_none, FilterOverflow.Of(_overflow, 1));

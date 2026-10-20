@@ -66,6 +66,14 @@ public abstract class EcsSystem
     public ulong LastRunTick { get; internal set; }
 
     /// <summary>
+    /// How many times the system has run before the current run (0 during its first run; runs skipped by
+    /// <see cref="UpdateInterval"/> or while disabled do not count, a run that throws does). A
+    /// <c>[ForEach(Slices = N)]</c> method visits slice <c>RunCount % N</c> of its rows, so <see cref="OnUpdate"/> can
+    /// tell which slice this run visits.
+    /// </summary>
+    public long RunCount { get; internal set; }
+
+    /// <summary>
     /// Run count, time, allocated bytes and visited entities of this system; recorded only with
     /// <see cref="WorldOptions.MeasureSystems"/>.
     /// </summary>

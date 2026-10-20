@@ -400,15 +400,15 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         {
                             var archetype = archetypes[ai];
                             var rows = new RowFilter(match.Filters[ai], filter.Tick);
-                            int count = archetype.Count;
+                            var (first, count) = filter.Rows(ai, archetype.Count); // all rows, or a slice's
                             int mode = rows.Mode(archetype);
-                            if (archetype.AliveCount == 0 || mode == RowFilter.None) continue;
+                            if (archetype.AliveCount == 0 || mode == RowFilter.None || first >= count) continue;
                             ref EntityId slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
                 {{Lines(n, i => $"            ref T{i} r{i} = ref archetype.Base<T{i}>(b{i});")}}
                             if (mode == RowFilter.Test)
                             {
                                 // Rows without some component: runs of rows whose presence bits pass.
-                                for (int start = 0; rows.NextRun(archetype, ref start, count, out int length); start += length)
+                                for (int start = first; rows.NextRun(archetype, ref start, count, out int length); start += length)
                                 {
                 {{StampRows(n, "                    ", "start", "length")}}
                                     job.Execute(new EntitySpan(this, ref Unsafe.Add(ref slots, start), length), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), length)")}});
@@ -417,14 +417,15 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 continue;
                             }
 
-                            if (count == archetype.AliveCount)
+                            if (archetype.Count == archetype.AliveCount)
                             {
-                {{StampRows(n, "                ", "0", "count")}}
-                                job.Execute(new EntitySpan(this, ref slots, count), {{List(n, i => $"MemoryMarshal.CreateSpan(ref r{i}, count)")}});
+                                int rowCount = count - first;
+                {{StampRows(n, "                ", "first", "rowCount")}}
+                                job.Execute(new EntitySpan(this, ref Unsafe.Add(ref slots, first), rowCount), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, first), rowCount)")}});
                                 continue;
                             }
 
-                            for (int start = 0; archetype.NextRun(ref start, count, out int length); start += length)
+                            for (int start = first; archetype.NextRun(ref start, count, out int length); start += length)
                             {
                 {{StampRows(n, "                ", "start", "length")}}
                                 job.Execute(new EntitySpan(this, ref Unsafe.Add(ref slots, start), length), {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, start), length)")}});
@@ -437,6 +438,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     public QueryEnumerator<{{tps}}> Query<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}
                     {
+                        filter.Whole(); // a slice is for passes: a query sees every matching row
                         var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
                         return new QueryEnumerator<{{tps}}>(this, match, filter.Tick, {{bits}});
                     }
@@ -445,13 +447,19 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public int Count<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}
-                        => Match<{{tps}}>(in filter, {{List(n, i => "out _")}}).CountAlive(filter.Tick);
+                    {
+                        filter.Whole();
+                        return Match<{{tps}}>(in filter, {{List(n, i => "out _")}}).CountAlive(filter.Tick);
+                    }
 
                     /// <summary>Whether any alive entity has all of <c>{{tps}}</c>. O(matching archetypes), plus O(rows / 64) for tables with rows to test; early exit.</summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public bool Any<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}
-                        => Match<{{tps}}>(in filter, {{List(n, i => "out _")}}).AnyAlive(filter.Tick);
+                    {
+                        filter.Whole();
+                        return Match<{{tps}}>(in filter, {{List(n, i => "out _")}}).AnyAlive(filter.Tick);
+                    }
 
                     /// <summary>
                     /// Destroy every alive entity having all of <c>{{tps}}</c> (and matching <paramref name="filter"/>) and return
@@ -459,7 +467,10 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// </summary>
                     public int DestroyEntities<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}
-                        => DestroyMatching(Match<{{tps}}>(in filter, {{List(n, i => "out _")}}), filter.Tick);
+                    {
+                        filter.Whole();
+                        return DestroyMatching(Match<{{tps}}>(in filter, {{List(n, i => "out _")}}), filter.Tick);
+                    }
 
 
                 """);
@@ -511,6 +522,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{cons}}
                     where TJob : struct, IForEachEntity<{{tps}}>, allows ref struct
                 {
+                    filter.Whole();
                     var archetype = LocateArchetype(out int slot, false);
                     if (archetype == null) return false;
                     // The filter first: it rules out an entity (a dead one) before any column is looked up.
@@ -686,13 +698,13 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         {
                             var archetype = archetypes[ai];
                             var rows = new RowFilter(filters[ai], since);
-                            int count = counts[ai];
+                            var (first, count) = filter.Rows(ai, counts[ai]); // all rows, or a slice's
                             int mode = rows.Mode(archetype);
                             if (archetype.AliveCount == 0 || mode == RowFilter.None) continue;
                             // The row loops return after a structural change (the next row and the visited entity): the
                             // refs are re-read and the visited entity's writes carried over here, so the loops keep only
                             // their row state live across the job. A table whose rows all pass takes the lean loop.
-                            for (int at = 0; at < count && mode != RowFilter.None;)
+                            for (int at = first; at < count && mode != RowFilter.None;)
                             {
                                 job = mode == RowFilter.All
                                     ? (archetype.Count == archetype.AliveCount ? {{name}}Live<{{tps}}, TJob, NoTombstones>(job, archetype, at, count, {{bits}}) : {{name}}Live<{{tps}}, TJob, Tombstones>(job, archetype, at, count, {{bits}}))
@@ -873,15 +885,15 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     {
                         var archetype = archetypes[ai];
                         var rows = new RowFilter(match.Filters[ai], filter.Tick);
-                        int count = archetype.Count;
+                        var (first, count) = filter.Rows(ai, archetype.Count); // all rows, or a slice's (from a word's first row)
                         int mode = rows.Mode(archetype);
-                        if (archetype.AliveCount == 0 || mode == RowFilter.None) continue;
+                        if (archetype.AliveCount == 0 || mode == RowFilter.None || first >= count) continue;
                         if (mode == RowFilter.Test)
-                            job = {{name}}Filtered<{{tps}}, TJob>(job, archetype, rows, 0, count, {{bits}});
-                        else if (count == archetype.AliveCount)
-                            job = {{name}}Rows<{{tps}}, TJob>(job, archetype, 0, count, {{bits}}); // dense table
+                            job = {{name}}Filtered<{{tps}}, TJob>(job, archetype, rows, first, count, {{bits}});
+                        else if (archetype.Count == archetype.AliveCount)
+                            job = {{name}}Rows<{{tps}}, TJob>(job, archetype, first, count, {{bits}}); // dense table
                         else // tombstones: runs of alive rows, found with vectorized scans
-                            for (int start = 0; archetype.NextRun(ref start, count, out int length); start += length)
+                            for (int start = first; archetype.NextRun(ref start, count, out int length); start += length)
                                 job = {{name}}Rows<{{tps}}, TJob>(job, archetype, start, start + length, {{bits}});
                     }
 
@@ -987,7 +999,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 {
                     var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
                     var work = WorkOf<{{name}}Chunks<{{tps}}, TJob>>();
-                    int chunks = work.Cut(this, match, filter.Tick, ref job, {{bits}});
+                    int chunks = work.Cut(this, match, in filter, ref job, {{bits}});
                     Gate.Freeze(); // the chunks may run on several threads: a structural change throws
                     try
                     {
@@ -1026,20 +1038,21 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{Lines(n, i => $"            private ushort _b{i};")}}
 
                     /// <summary>Cut the matching rows into chunks; returns how many.</summary>
-                    public int Cut(World world, QueryMatch match, ulong since, ref TJob job, {{ushorts}})
+                    public int Cut(World world, QueryMatch match, in QueryFilter filter, ref TJob job, {{ushorts}})
                     {
                         _world = world;
                         Job = job;
             {{Lines(n, i => $"            _b{i} = b{i};")}}
                         int chunks = 0;
                         var archetypes = match.Archetypes;
-                        int size = world.ChunkRows(archetypes);
+                        int size = world.ChunkRows(archetypes, filter.SliceCount);
                         for (int a = 0; a < archetypes.Length; a++)
                         {
                             var archetype = archetypes[a];
-                            var rows = new RowFilter(match.Filters[a], since);
+                            var rows = new RowFilter(match.Filters[a], filter.Tick);
                             if (archetype.AliveCount == 0 || rows.Mode(archetype) == RowFilter.None) continue;
-                            for (int start = 0; start < archetype.Count; start += size)
+                            var (first, end) = filter.Rows(a, archetype.Count); // all rows, or a slice's (from a word's first row)
+                            for (int start = first; start < end; start += size)
                             {
                                 if (chunks == _starts.Length)
                                 {
@@ -1052,7 +1065,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                                 _tables[chunks] = archetype;
                                 _filters[chunks] = rows;
-                                _ends[chunks] = Math.Min(start + size, archetype.Count);
+                                _ends[chunks] = Math.Min(start + size, end);
                                 _starts[chunks++] = start;
                             }
                         }

@@ -28,6 +28,18 @@ public sealed class ForEachAttribute : Attribute
     /// of thousands of rows. Default false.
     /// </summary>
     public bool Parallel { get; init; }
+
+    /// <summary>
+    /// Spread the method's rows over N runs of its system: each run visits one slice, about 1 / N of the rows of every
+    /// matching table (slice <see cref="EcsSystem.RunCount"/> mod N, <see cref="QueryFilter.Slice"/>), so every row is
+    /// visited once per N runs and a system over many entities costs about 1 / N per update instead of a spike on one.
+    /// With <see cref="EcsSystem.UpdateInterval"/> M, a row is visited once per N * M updates. Rows that move between
+    /// runs (swap-removes, structural changes, tables that grow or shrink) may be skipped or visited twice in one cycle.
+    /// Works per entity, in batches and with <see cref="Parallel"/> (the slice is cut into chunks). Not with
+    /// <c>[Changed&lt;T&gt;]</c> / <c>[Removed&lt;T&gt;]</c> (EECS035): the rows of the other slices would lose the
+    /// changes made since the system last ran. Default 1: every row on every run.
+    /// </summary>
+    public int Slices { get; init; } = 1;
 }
 
 /// <summary>

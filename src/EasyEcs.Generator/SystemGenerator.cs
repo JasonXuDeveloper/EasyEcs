@@ -119,14 +119,18 @@ public sealed class SystemGenerator : IIncrementalGenerator
             var method = model.Methods[m];
             var contexts = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Context).ToArray();
             var names = new HashSet<string>(contexts.Select(p => p.Name).Concat(method.TypeParameterNames));
-            string world = Free("world"), since = Free("since"), local = Free("job");
+            string world = Free("world"), since = Free("since"), slice = Free("slice"), local = Free("job");
             var signature = new List<string> { $"global::EasyEcs.World {world}" };
             if (method.Since) signature.Add($"ulong {since}");
+            if (method.Slices > 1) signature.Add($"int {slice}");
             signature.AddRange(contexts.Select(p => $"{p.Declared} {Escape(p.Name)}"));
 
             string forEach = "__ForEach" + owner.TypeParameters, job = $"{forEach}.{method.Name}Job{m}{method.TypeParameters}";
             string filter = method.Since ? $", {forEach}.{method.Name}Filter{m}.Since({since})" : method.HasFilter ? $", in {forEach}.{method.Name}Filter{m}" : "";
-            sb.Append($"        /// <summary>Runs <c>{method.Name}</c> for every matching entity of <paramref name=\"{world}\"/>{(method.Since ? $" whose filtered components changed (or went) at or after tick <paramref name=\"{since}\"/>" : "")}. Owner thread only.</summary>\n");
+            if (method.Slices > 1) filter = method.Sliced($"{forEach}.{method.Name}Filter{m}", slice);
+            string which = method.Since ? $" whose filtered components changed (or went) at or after tick <paramref name=\"{since}\"/>"
+                : method.Slices > 1 ? $" in slice <paramref name=\"{slice}\"/> (0 to {method.Slices - 1}) of each matching table's rows" : "";
+            sb.Append($"        /// <summary>Runs <c>{method.Name}</c> for every matching entity of <paramref name=\"{world}\"/>{which}. Owner thread only.</summary>\n");
             sb.Append($"        [global::System.CodeDom.Compiler.GeneratedCode(\"{Symbols.GeneratorName}\", \"{ComponentGenerator.Version}\")]\n");
             sb.Append($"        {(method.PublicEntry ? "public" : "internal")} static void {Escape(method.Name)}{method.TypeParameters}({string.Join(", ", signature)}){method.Constraints}\n        {{\n");
             sb.Append($"            var {local} = new {job}{Fields(method, world, null)};\n");
@@ -179,6 +183,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             var method = model.Methods[i];
             // [Changed<T>] / [Removed<T>]: rows written (or that lost T) since this system last ran.
             string filter = method.Since ? $", {method.Name}Filter{i}.Since(system.LastRunTick + 1)" : method.HasFilter ? $", in {method.Name}Filter{i}" : "";
+            if (method.Slices > 1) filter = method.Sliced($"{method.Name}Filter{i}", $"(int)(system.RunCount % {method.Slices})"); // this run's slice
             sb.Append($"            var job{i} = new {method.Name}Job{i}{Fields(method, "world", "system")};\n");
             // WorldOptions.MeasureSystems: the entities the pass matches as it starts (SystemStats.LastEntities); one
             // field test per pass otherwise, nothing in the row loop.
@@ -397,6 +402,13 @@ public sealed class SystemGenerator : IIncrementalGenerator
         /// <summary>Filters rows by change tick ([Changed&lt;T&gt;] / [Removed&lt;T&gt;]).</summary>
         public bool Since => Changed.Length + Removed.Length > 0;
 
+        /// <summary>[ForEach(Slices = N)]: visits one of N slices of its rows per run (1: all of them).</summary>
+        public int Slices { get; init; } = 1;
+
+        /// <summary>The filter argument of a sliced method: its filter (or none) cut to slice <paramref name="slice"/>.</summary>
+        public string Sliced(string filter, string slice) =>
+            $", {(HasFilter ? filter : "global::EasyEcs.QueryFilter.Create()")}.Slice({slice}, {Slices})";
+
         /// <summary>The queried component types, as type arguments of World.ForEach / IForEach.</summary>
         public string ComponentTypes => string.Join(", ", Query);
 
@@ -505,7 +517,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 new EquatableArray<string>(method.TypeParameters.Select(t => t.Name).ToArray()),
                 // A public entry point names only public types: its context parameters' and its constraints'.
                 method.Parameters.Where(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Context).All(p => Symbols.IsPublic(p.Type))
-                    && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic));
+                    && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) { Slices = Symbols.Slices(method) };
         }
     }
 

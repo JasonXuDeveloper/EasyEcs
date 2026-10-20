@@ -134,6 +134,64 @@ public class CountHalted : EcsSystem
     static void Count(ref Score score) => score.Points++;
 }
 
+/// <summary>[ForEach(Slices = 4)]: one of four slices of every matching table's rows per run (a stable pass).</summary>
+public class SlicedVisit : EcsSystem
+{
+    [ForEach(Slices = 4)]
+    private static void Visit(ref Health health) => health.Value++;
+}
+
+/// <summary>A sliced pass that may change structure: it destroys the entities it finds below zero.</summary>
+public class SlicedStructural : EcsSystem
+{
+    [ForEach(Slices = 3)]
+    private static void Visit(Entity entity, ref Health health)
+    {
+        if (health.Value < 0) entity.Destroy();
+        else health.Value++;
+    }
+}
+
+/// <summary>A sliced batch method with a filter: runs of the slice's rows.</summary>
+public class SlicedBatch : EcsSystem
+{
+    [ForEach(Slices = 4), Without<Dead>]
+    private static void Visit(System.Span<Health> health)
+    {
+        for (int i = 0; i < health.Length; i++) health[i].Value++;
+    }
+}
+
+/// <summary>A sliced parallel method: the slice is cut into chunks.</summary>
+public class SlicedParallel : EcsSystem
+{
+    [ForEach(Parallel = true, Slices = 4)]
+    private static void Visit(ref Health health) => health.Value++;
+}
+
+/// <summary>A sliced method over a tracked component whose removals leave rows without it (presence bits).</summary>
+public class SlicedArmor : EcsSystem
+{
+    [ForEach(Slices = 4)]
+    private static void Visit(ref Armor armor) => armor.Value++;
+}
+
+/// <summary>Slices and UpdateInterval: a slice per run, a run every other update.</summary>
+public class SlicedEveryOther : EcsSystem
+{
+    public override int UpdateInterval => 2;
+
+    [ForEach(Slices = 2)]
+    private static void Visit(ref Health health) => health.Value++;
+}
+
+/// <summary>A sliced method outside a system: its entry point takes the slice.</summary>
+public static class SlicedReports
+{
+    [ForEach(Slices = 2)]
+    private static void Bump(ref Health health) => health.Value++;
+}
+
 public class ForEachSystemTests
 {
     [Test]
@@ -349,5 +407,181 @@ public class ForEachSystemTests
         world.Update(); // Move (y = -1), then Fall (v = -2)
         Assert.That(e.Get<Position>().Y, Is.EqualTo(-1));
         Assert.That(e.Get<Velocity>().Y, Is.EqualTo(-2));
+    }
+
+    /// <summary>Tables of 1,000, 37 and 130 rows (sizes that are no multiple of the slice count or of 64).</summary>
+    private static Entity[] UnevenTables(World world)
+    {
+        var entities = new Entity[1000 + 37 + 130];
+        for (int i = 0; i < 1000; i++) entities[i] = world.CreateEntity(new Health(0));
+        for (int i = 1000; i < 1037; i++) entities[i] = world.CreateEntity(new Health(0), new Frozen());
+        for (int i = 1037; i < entities.Length; i++) entities[i] = world.CreateEntity(new Health(0), new Velocity());
+        return entities;
+    }
+
+    /// <summary>
+    /// Runs <paramref name="update"/> <paramref name="runs"/> times: each run visits some rows and about 1 / runs of
+    /// the largest table, no row twice, and every row once at the end.
+    /// </summary>
+    private static void EachRowOncePer(int runs, Entity[] entities, System.Action update, int largest = 1000)
+    {
+        int previous = 0;
+        for (int run = 0; run < runs; run++)
+        {
+            update();
+            int visited = 0;
+            foreach (var e in entities)
+            {
+                Assert.That(e.Read<Health>().Value, Is.InRange(0, 1), $"run {run}: a row visited twice");
+                visited += e.Read<Health>().Value;
+            }
+
+            Assert.That(visited, Is.GreaterThan(previous), $"run {run} visited nothing");
+            Assert.That(visited - previous, Is.LessThanOrEqualTo(largest / runs + 64 + 37 + 130), $"run {run} visited too much");
+            previous = visited;
+        }
+
+        foreach (var e in entities) Assert.That(e.Read<Health>().Value, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void SlicedMethodsVisitEveryRowOncePerSliceCount()
+    {
+        using var world = new World();
+        var entities = UnevenTables(world);
+        var system = world.AddSystem<SlicedVisit>();
+        EachRowOncePer(4, entities, world.Update);
+        Assert.That(system.RunCount, Is.EqualTo(4));
+
+        world.Update();                                              // the next cycle starts again at slice 0
+        Assert.That(entities[0].Read<Health>().Value, Is.EqualTo(2));
+        Assert.That(entities[999].Read<Health>().Value, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void SlicesCutATableAtWholeWords()
+    {
+        using var world = new World();
+        var entities = new Entity[1000];
+        for (int i = 0; i < entities.Length; i++) entities[i] = world.CreateEntity(new Health(0));
+        world.AddSystem<SlicedVisit>();
+        world.Update();                                              // 16 words: 4 per slice
+
+        for (int i = 0; i < entities.Length; i++) Assert.That(entities[i].Read<Health>().Value, Is.EqualTo(i < 256 ? 1 : 0));
+    }
+
+    [Test]
+    public void SlicedStructuralPassesVisitEveryRowOnce()
+    {
+        using var world = new World();
+        var entities = UnevenTables(world);
+        world.AddSystem<SlicedStructural>();
+        EachRowOncePer(3, entities, world.Update);
+
+        entities[5].Set(new Health(-1));                             // destroyed by its slice's run
+        for (int i = 0; i < 3; i++) world.Update();
+        Assert.That(entities[5].IsAlive, Is.False);
+        Assert.That(entities[6].Read<Health>().Value, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void SlicedBatchMethodsVisitEveryRowOnce()
+    {
+        using var world = new World();
+        var entities = UnevenTables(world);
+        for (int i = 0; i < 1000; i += 3) world.CreateEntity(new Health(0), new Dead()); // filtered out
+        for (int i = 10; i < 1000; i += 7) entities[i].Destroy();   // tombstones inside a slice: several runs
+        world.AddSystem<SlicedBatch>();
+        var alive = System.Array.FindAll(entities, e => e.IsAlive);
+        EachRowOncePer(4, alive, world.Update);
+    }
+
+    [Test]
+    public void SlicedParallelMethodsVisitEveryRowOnce()
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        var entities = new Entity[100_000];
+        world.CreateEntities(entities, new Health(0));
+        world.AddSystem<SlicedParallel>();
+        EachRowOncePer(4, entities, world.Update, entities.Length);
+    }
+
+    [Test]
+    public void SlicedMethodsSkipRowsWithoutTheComponent()
+    {
+        using var world = new World();
+        var entities = new Entity[500];
+        for (int i = 0; i < entities.Length; i++) entities[i] = world.CreateEntity(new Armor(0), new Health(0));
+        for (int i = 0; i < entities.Length; i += 5) entities[i].Remove<Armor>(); // rows that stay, without Armor
+        world.AddSystem<SlicedArmor>();
+        for (int run = 0; run < 4; run++) world.Update();
+
+        for (int i = 0; i < entities.Length; i++)
+            if (i % 5 != 0) Assert.That(entities[i].Read<Armor>().Value, Is.EqualTo(1));
+            else Assert.That(entities[i].Has<Armor>(), Is.False);
+    }
+
+    [Test]
+    public void SlicesAdvancePerRunNotPerUpdate()
+    {
+        using var world = new World();
+        var entities = UnevenTables(world);
+        var system = world.AddSystem<SlicedEveryOther>();
+        // A run every other update, a slice per run: every row once per 2 * 2 updates.
+        EachRowOncePer(2, entities, () =>
+        {
+            world.Update();
+            world.Update();
+        });
+        Assert.That(system.RunCount, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void SlicedEntryPointsTakeTheSlice()
+    {
+        using var world = new World();
+        var entities = UnevenTables(world);
+        int slice = 0;
+        EachRowOncePer(2, entities, () => SlicedReports.Bump(world, slice++));
+        Assert.Throws<System.ArgumentOutOfRangeException>(() => SlicedReports.Bump(world, 2));
+    }
+
+    [Test]
+    public void SlicedFiltersApplyToPassesOnly()
+    {
+        using var world = new World();
+        world.CreateEntity(new Health(1));
+        var sliced = QueryFilter.Create().Slice(1, 2);
+        Assert.Throws<System.ArgumentException>(() => world.Count<Health>(sliced));
+        Assert.Throws<System.ArgumentException>(() => world.Any<Health>(sliced));
+        Assert.Throws<System.ArgumentException>(() => world.Query<Health>(sliced));
+        Assert.Throws<System.ArgumentException>(() => world.DestroyEntities<Health>(sliced));
+        Assert.Throws<System.ArgumentException>(() => world.SetAll(new Health(2), sliced));
+        Assert.Throws<System.ArgumentOutOfRangeException>(() => QueryFilter.Create().Slice(2, 2));
+        Assert.Throws<System.ArgumentOutOfRangeException>(() => QueryFilter.Create().Slice(0, 0));
+        Assert.That(world.Count<Health>(QueryFilter.Create().Slice(0, 1)), Is.EqualTo(1)); // one slice: the whole tables
+    }
+
+    [Test]
+    public void SlicedPassesDoNotAllocate()
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        world.EnsureCapacity<Health, Armor>(20_000);
+        for (int i = 0; i < 20_000; i++)
+        {
+            var e = world.CreateEntity(new Health(0), new Armor(0));
+            if (i % 3 == 0) e.Set(new Frozen());
+            if (i % 7 == 0) e.Remove<Armor>();
+        }
+
+        world.AddSystem<SlicedVisit>();
+        world.AddSystem<SlicedStructural>();
+        world.AddSystem<SlicedBatch>();
+        world.AddSystem<SlicedParallel>();
+        world.AddSystem<SlicedArmor>();
+        for (int i = 0; i < 24; i++) world.Update(); // warm-up: every slice of every system, query caches, JIT
+        long before = System.GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 120; i++) world.Update();
+        Assert.That(System.GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
 }

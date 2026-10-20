@@ -31,14 +31,16 @@ public sealed partial class World
     public const int ParallelChunkRows = 16384;
 
     /// <summary>
-    /// Rows per chunk for a pass over <paramref name="tables"/>: a multiple of 64 (presence-bit words never straddle
+    /// Rows per chunk for a pass over <paramref name="tables"/> (over one of <paramref name="slices"/> slices of each,
+    /// <see cref="QueryFilter.Slice"/>): a multiple of 64 (presence-bit words never straddle
     /// chunks), about four chunks per thread, between 1,024 and <see cref="ParallelChunkRows"/>. With fixed 16,384-row
     /// chunks, 100,000 rows made 7 chunks for 4 threads: the second round ran 3 of them and left a thread idle.
     /// </summary>
-    internal int ChunkRows(Archetype[] tables)
+    internal int ChunkRows(Archetype[] tables, int slices = 0)
     {
         long rows = 0;
         for (int i = 0; i < tables.Length; i++) rows += tables[i].Count;
+        if (slices > 1) rows /= slices; // a sliced pass visits about 1 / slices of them
         long share = rows / ((Helpers + 1) * 4L);
         return (int)Math.Clamp((share + 63) & ~63L, 1024, ParallelChunkRows);
     }

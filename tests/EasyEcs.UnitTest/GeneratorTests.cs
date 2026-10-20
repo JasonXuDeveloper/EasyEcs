@@ -131,6 +131,9 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref P p, Maybe<T> t) { if (t.HasValue) t.Value = default; }", "access.Write<global::T>();", "MaybeColumn<global::T>(in entities, true)")]  // tracked: stamped
     [TestCase("[ForEach] void A(in P p) { }", "access.RunsAlone();")]
     [TestCase("[ForEach] static void A(in P p) { } protected override void OnUpdate() { }", "access.RunsAlone();")]
+    [TestCase("[ForEach(Slices = 3)] static void A(ref P p) { }", "access.Write<global::P>();", "global::EasyEcs.QueryFilter.Create().Slice((int)(system.RunCount % 3), 3)")]
+    [TestCase("[ForEach(Slices = 2, Parallel = true), Without<Q>] static void A(ref P p) { }", "ForEachParallel<", "AFilter0.Slice((int)(system.RunCount % 2), 2)")]
+    [TestCase("[ForEach(Slices = 4)] static void A(System.Span<P> p) { }", "ForEachBatch<", "Slice((int)(system.RunCount % 4), 4)")]
     public void AccessIsDeclaredFromParameters(string members, params string[] expected)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, $"public partial class S : EcsSystem {{ {members} }}"),
@@ -230,6 +233,8 @@ public class GeneratorTests
     [TestCase("[ForEach, Changed<T>] static void A(ref P p, ref Clock c, int world) { }",
         "public static void A(global::EasyEcs.World _world, ulong since, int world)", "__ForEach.AFilter0.Since(since)", "s1 = ref _world.SingletonRef")]
     [TestCase("[ForEach(Parallel = true)] static void A(ref P p, in int k) { }", "public int x1;", "x1 = k }", "ForEachParallel<")]
+    [TestCase("[ForEach(Slices = 3), Without<Q>] static void A(ref P p, int slice) { }",
+        "public static void A(global::EasyEcs.World world, int _slice, int slice)", "__ForEach.AFilter0.Slice(_slice, 3)")]
     public void RunnersGetAnEntryPoint(string members, params string[] expected)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, $"public static partial class R {{ {members} }}"),
@@ -349,6 +354,11 @@ public class GeneratorTests
     [TestCase("public class K : EcsSystem; public class S : EcsSystem { private readonly K[] _all = []; }", "EECS008")]
     [TestCase("public class S : EcsSystem { private readonly EcsSystem _base; }", "EECS008")]
     [TestCase("file class S7 : EcsSystem { [ForEach] static void A(ref P p) { } }", "EECS022")]
+    [TestCase("public class S : EcsSystem { [ForEach(Slices = 2), Changed<T>] static void A(ref P p) { } }", "EECS035")]
+    [TestCase("public class S : EcsSystem { [ForEach(Slices = 4), Removed<T>] static void A(ref P p) { } }", "EECS035")]
+    [TestCase("public class S : EcsSystem { [ForEach(Slices = 0)] static void A(ref P p) { } }", "EECS035")]
+    [TestCase("public static class R { [ForEach(Slices = -1)] static void A(ref P p) { } }", "EECS035")]
+    [TestCase("public static class R { [ForEach(Slices = 2)] static void A(ref P p) { } static void A(World w, int slice) { } }", "EECS021")]
     public async Task MisuseIsReported(string source, string id)
     {
         var errors = await Diagnose(Components, source);
@@ -361,6 +371,7 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(World world) { System.Threading.Tasks.Task.Run(() => world.CreateEntity(new P())).Wait(); world.CreateEntity(new P()); } }")]
     [TestCase("public class S : EcsSystem { [ForEach] static void C(in P p) { using var w = new World(); w.CreateEntity(new Q()); } }")]
     [TestCase("public class S(int n) : EcsSystem { public int N => n; }")]
+    [TestCase("public class S : EcsSystem { [ForEach(Slices = 1), Changed<T>] static void A(ref P p) { } [ForEach(Slices = 8, Parallel = true)] static void B(ref Q q) { } }")]
     public async Task ValidCodeIsNotReported(string source)
     {
         var errors = await Diagnose(Components, source);
@@ -436,7 +447,7 @@ public class GeneratorTests
     public void UnrelatedEditsHitTheCache()
     {
         var system = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components +
-            "public struct L; public partial class S : EcsSystem { [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { } }" +
+            "public struct L; public partial class S : EcsSystem { [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { } [ForEach(Slices = 4)] static void D(ref Q q) { } }" +
             "public class G<T> : EcsSystem where T : struct, IComponent { [ForEach] static void B(ref T t) { } } public class H : G<P>;" +
             "public static class U { static void C(World w) { foreach (var i in w.Query<P>()) i.P.V++; } }", Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
@@ -573,6 +584,23 @@ public class GeneratorTests
     {
         var diagnostics = Diagnose(Components, "public static class R { [ForEach] static void A(ref P p) { } [ForEach] static void A(ref Q q) { } }").Result;
         Assert.That(diagnostics, Does.Contain("EECS021"));
+    }
+
+    [Test]
+    public void AnotherSliceCountReemitsOnlyItsSystem()
+    {
+        var sliced = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components + "public class S : EcsSystem { [ForEach(Slices = 2)] static void A(ref P p) { } }", Parse);
+        var other = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic class O : EcsSystem { [ForEach(Slices = 2)] static void B(ref Q q) { } }", Parse);
+        var compilation = Compile().AddSyntaxTrees(sliced, other);
+        var driver = Driver().RunGenerators(compilation);
+        driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(sliced, CSharpSyntaxTree.ParseText(
+            "using EasyEcs;\n" + Components + "public class S : EcsSystem { [ForEach(Slices = 3)] static void A(ref P p) { } }", Parse)));
+
+        var reasons = Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
+        Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
+        string generated = driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
+        Assert.That(generated, Does.Contain("Slice((int)(system.RunCount % 3), 3)"));
     }
 
     [Test]

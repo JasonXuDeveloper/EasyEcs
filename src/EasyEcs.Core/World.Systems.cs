@@ -149,6 +149,7 @@ public sealed partial class World
         finally
         {
             system.LastRunTick = _changeTick; // its own writes of this run are not changes for its next run
+            system.RunCount++; // the next run visits the next slice of its [ForEach(Slices = N)] methods
         }
     }
 

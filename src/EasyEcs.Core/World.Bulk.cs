@@ -17,6 +17,7 @@ public sealed partial class World
     /// </summary>
     public int SetAll<T>(in T value, in QueryFilter filter = default) where T : struct, IComponent
     {
+        filter.Whole(); // a bulk call changes every matching row
         var match = Volatile.Read(ref GetQueryEntry([], in filter).Match);
         int count = match.CountAlive(filter.Tick); // a moved row can be visited again in its new table: count first
         var op = new SetOp<T> { Value = value, Bit = ComponentType<T>.Bit };
@@ -66,8 +67,11 @@ public sealed partial class World
         return op.Count;
     }
 
-    private QueryMatch Bulk<T>(in QueryFilter filter) where T : struct, IComponent =>
-        GetMatchingArchetypes(TypeIndex<ComponentSignature, T>.Value, [ComponentType<T>.Bit], in filter);
+    private QueryMatch Bulk<T>(in QueryFilter filter) where T : struct, IComponent
+    {
+        filter.Whole(); // a bulk call changes every matching row
+        return GetMatchingArchetypes(TypeIndex<ComponentSignature, T>.Value, [ComponentType<T>.Bit], in filter);
+    }
 
     /// <summary>
     /// A change a bulk walk makes (<see cref="WalkDown"/>), to one row or, where a table allows it, to the rows of one

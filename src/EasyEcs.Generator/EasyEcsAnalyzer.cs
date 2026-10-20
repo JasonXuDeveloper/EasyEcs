@@ -158,6 +158,14 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         Category, DiagnosticSeverity.Error, true,
         "The generator writes a job for each [ForEach] method and calls it from outside its type; a local function has no name outside its method.", helpLinkUri: Help("EECS024"));
 
+    public static readonly DiagnosticDescriptor BadSlices = new("EECS035", "Invalid [ForEach(Slices = N)]",
+        "[ForEach] method '{0}' cannot be sliced: {1}",
+        Category, DiagnosticSeverity.Error, true,
+        "A sliced method visits one slice of its rows per run of its system, so every row once per N runs. Slices is 1 or " +
+        "more. A [Changed<T>] or [Removed<T>] method selects the rows changed since its system last ran, and each run moves " +
+        "that tick: the rows of the slices not visited would lose their changes. Drop Slices, or read the changes " +
+        "every run and spread the work they cause.", helpLinkUri: Help("EECS035"));
+
     // EECS002's property for its code fix (EasyEcs.CodeFixes): a component or singleton taken by value.
     public const string ByValue = "ByValue";
 
@@ -169,7 +177,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         MixedBatch, NotParallel, ReadOnlyWrite, BufferCopy, HiddenStructuralChange, OffThreadStructuralChange, IndexedByRef,
         RemovedRequired, EntityInData, ScheduleNotConstant, OrderCycle, OrderAcrossGroups, RunnerCollision, Unnameable, FilterOutsideGroup, LocalForEach,
         ReadOnlyWriteAccess, UnusedParameter, RowLookup, Allocation, InstanceForEach, PerEntityChange, CreateInLoop, QueryByHand,
-        GeneratedMember, UpdateInSystem);
+        GeneratedMember, UpdateInSystem, BadSlices);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -557,9 +565,12 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (outside && !method.IsStatic)
             context.ReportDiagnostic(Diagnostic.Create(NotASystem, location, method.Name, method.ContainingType.Name));
         else if (outside && Symbols.RunnerCollides(method))
-            context.ReportDiagnostic(Diagnostic.Create(RunnerCollision, location, method.Name, Symbols.TracksSince(method) ? "the tick, " : ""));
+            context.ReportDiagnostic(Diagnostic.Create(RunnerCollision, location, method.Name,
+                Symbols.TracksSince(method) ? "the tick, " : Symbols.Slices(method) > 1 ? "the slice, " : ""));
         if (method.IsGenericMethod && !outside)
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, method.Name));
+        if (Symbols.SlicesProblem(method) is { } slices)
+            context.ReportDiagnostic(Diagnostic.Create(BadSlices, location, method.Name, slices));
         if (Symbols.Unnameable(method) is { } unnameable)
             context.ReportDiagnostic(Diagnostic.Create(Unnameable, location, // the type its code fix makes internal, with its containers
                 Symbols.Hidden(unnameable)?.Locations.Where(l => l.IsInSource) ?? [],

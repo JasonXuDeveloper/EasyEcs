@@ -383,6 +383,7 @@ internal static class Symbols
     {
         var parameters = new List<(string, RefKind)> { (World, RefKind.None) };
         if (TracksSince(method)) parameters.Add(("ulong", RefKind.None));
+        if (Slices(method) > 1) parameters.Add(("int", RefKind.None));
         foreach (var p in method.Parameters)
             if (Classify(p, true) == ParamKind.Context) parameters.Add((p.Type.ToDisplayString(), p.RefKind));
         return parameters;
@@ -391,6 +392,29 @@ internal static class Symbols
     /// <summary>The method has [Changed&lt;T&gt;] or [Removed&lt;T&gt;] filters: outside a system its entry point takes the tick.</summary>
     public static bool TracksSince(IMethodSymbol method) => method.GetAttributes().Any(a =>
         a.AttributeClass is { IsGenericType: true } cls && cls.ConstructedFrom.ToDisplayString() is ChangedAttribute or RemovedAttribute);
+
+    /// <summary>The N of [ForEach(Slices = N)] (1 without it).</summary>
+    public static int Slices(IMethodSymbol method)
+    {
+        foreach (var attribute in method.GetAttributes())
+            if (attribute.AttributeClass?.ToDisplayString() == ForEachAttribute)
+                foreach (var named in attribute.NamedArguments)
+                    if (named.Key == "Slices" && named.Value.Value is int slices) return slices;
+        return 1;
+    }
+
+    /// <summary>
+    /// Why a method's [ForEach(Slices = N)] is invalid (EECS035), or null: N below 1, or slices of a method that selects
+    /// rows changed since its system last ran (the rows of the other slices would lose those changes).
+    /// </summary>
+    public static string? SlicesProblem(IMethodSymbol method)
+    {
+        int slices = Slices(method);
+        if (slices < 1) return $"Slices = {slices} must be 1 or more";
+        if (slices > 1 && TracksSince(method))
+            return "it selects rows by change tick ([Changed<T>] / [Removed<T>]), and a slice's run would move the system's last run past the changes of the other slices' rows";
+        return null;
+    }
 
     public static ParamKind Classify(IParameterSymbol p)
     {
@@ -437,6 +461,7 @@ internal static class Symbols
         bool outside = IsRunner(method);
         if (outside && (!method.IsStatic || RunnerCollides(method))) return false;
         if (method.IsGenericMethod && !outside || Unnameable(method) != null) return false; // a system's method gets no type arguments
+        if (SlicesProblem(method) != null) return false;
         int components = 0;
         foreach (var p in method.Parameters)
         {
