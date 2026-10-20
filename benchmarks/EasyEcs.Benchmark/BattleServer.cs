@@ -15,16 +15,19 @@ namespace EasyEcs.Benchmark.Showcase;
 public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
 public record struct Health(int Value, int Max) : IComponent, ITrackChanges;    // replicated: writes are tracked
-public record struct Replica(int Health, bool Burning) : IComponent;          // what clients last received
+public record struct Replica(int Health, bool Burning, int Waypoint) : IComponent;  // what clients last received
 public record struct Mana(int Value, int Max) : IComponent;
 public record struct Attack(int Damage, int Interval, int Cooldown) : IComponent;
 public record struct Burning(int Ticks) : IComponent, ITrackChanges;          // status effects come and go; clients
                                                                               // see fires start and go out
 public record struct Frozen(int Ticks) : IComponent;                          // while it lasts, Attack and Velocity
                                                                               // are disabled: no query sees them
+public record struct Goal(int Waypoint) : IComponent, ITrackChanges;         // where an NPC heads: replicated,
+                                                                              // re-planned often, rarely different
 public record struct Lifetime(int Ticks) : IComponent;
 public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }  // a table per zone
 public record struct Kills(int Count) : IComponent, IIndexed<int> { public int Key => Count; } // ordered: a leaderboard
+public record struct Account(int Id) : IComponent, IUniqueIndexed<int> { public int Key => Id; } // one hero per account
 public record struct Spawn(Position At, int Seed) : ICleanupComponent;        // outlives its NPC: where the next appears
 public record struct Loot(int Item);                                          // players carry a DynamicBuffer<Loot>
 public record struct Friend(EntityId Target) : IRelation;                     // and a DynamicBuffer<Friend> of links
@@ -51,9 +54,9 @@ public struct Replication : ISystemGroup;                                     //
 // #endregion singletons
 
 // #region movement
-public class SteeringSystem : EcsSystem                                       // heavy per-entity math: on all cores
+public class PlanningSystem : EcsSystem                                       // where each NPC heads next
 {
-    protected override void OnCreate()                                        // the system sets up the data it steers by
+    protected override void OnCreate()                                        // the system sets up the data it plans with
     {
         ref var waypoints = ref World.GetOrAddWaypoints();
         for (int i = 0; i < Waypoints.Count; i++) waypoints.Points[i] = new Position(512 + i * 400, 512 + i * 1777 % 3000);
@@ -61,10 +64,28 @@ public class SteeringSystem : EcsSystem                                       //
 
     protected override void OnDestroy() => World.RemoveWaypoints();
 
-    [ForEach(Parallel = true), With<Npc>, Without<Dead>, Without<Frozen>]
-    static void Steer(in Position p, ref Velocity v, in Waypoints waypoints)
+    // A plan need not be fresh every tick: each run plans a quarter of the NPCs, so each one every fourth tick
+    [ForEach(Slices = 4), Without<Dead>]
+    static void Plan(in Position p, Mut<Goal> goal, in Waypoints waypoints)
     {
-        var target = waypoints.Points[(int)(p.X + p.Y) & (Waypoints.Count - 1)];
+        int next = goal.Value.Waypoint;                                       // Value: a read, not a write
+        float nearest = float.MaxValue;
+        for (int i = 0; i < Waypoints.Count; i++)                             // the nearest waypoint not reached yet
+        {
+            float dx = waypoints.Points[i].X - p.X, dy = waypoints.Points[i].Y - p.Y, distance = dx * dx + dy * dy;
+            if (distance > 64 * 64 && distance < nearest) (nearest, next) = (distance, i);
+        }
+
+        goal.SetIfChanged(new Goal(next));                                    // mostly the same goal: no stamp, no send
+    }
+}
+
+public class SteeringSystem : EcsSystem                                       // heavy per-entity math: on all cores
+{
+    [ForEach(Parallel = true), With<Npc>, Without<Dead>, Without<Frozen>]
+    static void Steer(in Position p, in Goal goal, ref Velocity v, in Waypoints waypoints)
+    {
+        var target = waypoints.Points[goal.Waypoint];
         float dx = target.X - p.X, dy = target.Y - p.Y, length = MathF.Sqrt(dx * dx + dy * dy) + 1;
         v = new Velocity(dx / length * 2, dy / length * 2);
     }
@@ -86,8 +107,8 @@ public class MovementSystem : EcsSystem
     }
 }
 
-public class ManaSystem : EcsSystem                                           // other data than MovementSystem: both
-{                                                                             // run at once
+public class ManaSystem : EcsSystem                                           // data no earlier system touches: it
+{                                                                             // runs beside PlanningSystem
     public override int UpdateInterval => 10;                                 // every 10th update, five updates after
     public override int UpdatePhase => 5;                                     // RegenerationSystem: their work spreads
 
@@ -236,8 +257,8 @@ public class ProjectileSystem : EcsSystem
         if (rules.Ceasefire || mana.Value < rules.ShotCost || Dice.Roll(battle.Tick, player.Id.Index) % 20 != 0) return;
         mana.Value -= rules.ShotCost;
         battle.Shots++;
-        world.CreateEntity(p, new Velocity(v.X * 4, v.Y * 4), new Lifetime(20), new ChildOf(player));  // a child: gone
-    }                                                                         // with its player
+        world.Instantiate(BattleServer.Shot, p, new Velocity(v.X * 4, v.Y * 4), new ChildOf(player));  // one row copy;
+    }                                                                         // a child: gone with its player
 
     [ForEach]
     static void Expire(Entity shot, ref Lifetime life)
@@ -289,6 +310,13 @@ public class ReplicationSystem : EcsSystem                                    //
     {
         if (!replica.Burning) return;                                         // lit and out between two sends
         replica.Burning = false;
+        battle.Replicated++;
+    }
+
+    [ForEach, Changed<Goal>]                                                  // the goals PlanningSystem changed, not
+    static void SendGoal(in Goal goal, ref Replica replica, ref Battle battle)  // every goal it planned
+    {
+        replica.Waypoint = goal.Waypoint;
         battle.Replicated++;
     }
 
@@ -376,16 +404,20 @@ public sealed class BattleServer : IDisposable
     private static readonly QueryFilter WrittenPlayers = Players.Changed<Health>(0);    // the tick is set per call
     internal static readonly QueryFilter[] Zones =                                        // one table each
         [Players.InZone(0), Players.InZone(1), Players.InZone(2), Players.InZone(3)];
+    private static readonly QueryFilter ClientChanges =                           // any of three: one filter, a client's
+        QueryFilter.Create().ChangedAny<Health, Burning, Goal>(0);                // tick set per call
+    private static readonly QueryFilter FiresOut = QueryFilter.Create().Removed<Burning>(0);
 
     // Unit kinds: recipes that belong to no world (no query sees them), copied by Instantiate
     private static readonly Prefab Hero = new Prefab().Set(new Position(), new Velocity(1, 0))   // several at once
-        .SetHealth(500, 500).SetReplica(500, false).SetMana(100, 100).SetAttack(8, 6, 0)        // or one by name
+        .SetHealth(500, 500).SetReplica(500, false, 0).SetMana(100, 100).SetAttack(8, 6, 0)     // or one by name
         .SetZone(0).SetKills(0).SetPlayer().Set(new DynamicBuffer<Friend>())
         .SetLoot(new Loot(0));                                    // a starter item: each hero gets a bag of its own
     private static readonly Prefab Grunt = new Prefab().Set(new Position(), new Velocity())
-        .SetHealth(120, 120).SetReplica(120, false).SetAttack(6, 8, 0).SetSpawn(default, 0).SetNpc();
+        .SetHealth(120, 120).SetReplica(120, false, 0).SetAttack(6, 8, 0).SetGoal(0).SetSpawn(default, 0).SetNpc();
     private static readonly Prefab Brute = new Prefab(Grunt)                                    // a variant: a copy
-        .SetHealth(200, 200).SetReplica(200, false).SetAttack(9, 12, 0);
+        .SetHealth(200, 200).SetReplica(200, false, 0).SetAttack(9, 12, 0);
+    internal static readonly Prefab Shot = new Prefab().SetLifetime(20);  // the rest is given per shot (Instantiate)
     // #endregion prefabs
 
     // #region setup
@@ -395,7 +427,10 @@ public sealed class BattleServer : IDisposable
     private WorldSnapshot _checkpoint;
     private ulong _checkpointAt;
 
-    /// <summary>A battle of <paramref name="units"/> units, a third of them players.</summary>
+    /// <summary>
+    /// A battle of <paramref name="units"/> units, a third of them players: bots, beside the heroes clients bring
+    /// (<see cref="Join"/>).
+    /// </summary>
     public BattleServer(int units)
     {
         World = new World(new WorldOptions
@@ -404,12 +439,14 @@ public sealed class BattleServer : IDisposable
             ParallelSystems = true,                                           // unordered systems with disjoint data side by side
             MeasureSystems = true,                                            // per-system timings in system.Stats
             SystemErrors = SystemErrorPolicy.Disable,                         // a failing system goes off, the battle goes on
+            DestroyLog = units,                                               // the ids gone while a client lags (CatchUp)
         });
         World.GroupBy<Zone>();                                                // a zone's players contiguous, in its table
         World.FriendIndex.WhenTargetDestroyed(TargetPolicy.Remove);   // a player who leaves leaves friend lists
         World.SetRules(ShotCost, BagSize, false);
 
         World.AddSystem<ClockSystem>();                                       // OnCreate adds the Battle singleton
+        World.AddSystem<PlanningSystem>();                                    // and this one the Waypoints
         World.AddSystem<SteeringSystem>();
         World.AddSystem<MovementSystem>();
         World.AddSystem<ManaSystem>();
@@ -454,9 +491,8 @@ public sealed class BattleServer : IDisposable
     public static void SpawnNpc(World world, Position at, int seed)
     {
         uint r = Dice.Roll(seed, seed);
-        var npc = world.Instantiate((r & 1) == 0 ? Grunt : Brute);            // then only what differs is written
-        npc.Position = at;
-        npc.Attack.Cooldown = (int)(r % 10);
+        var npc = world.Instantiate((r & 1) == 0 ? Grunt : Brute, at);        // a copy with its position: one row copy
+        npc.Attack.Cooldown = (int)(r % 10);                                  // then only what differs is written
     }
     // #endregion setup
 
@@ -489,6 +525,23 @@ public sealed class BattleServer : IDisposable
     }
     // #endregion tick
 
+    // #region accounts
+    /// <summary>
+    /// A client logs in with its account: a hero of its own at <paramref name="at"/>, or the hero it already has (a
+    /// reconnect). An account is a unique key: two heroes never share one.
+    /// </summary>
+    public Entity Join(int account, Position at)
+    {
+        if (World.AccountIndex.TryGet(account, out var hero)) return hero;    // one hash probe
+        hero = World.Instantiate(Hero, at, new Account(account));             // the given values in the same row copy
+        hero.WriteLoot().EnsureCapacity(BagSize);
+        return hero;
+    }
+
+    /// <summary>An admin kicks an account out: its hero leaves (<see cref="Leave"/>).</summary>
+    public bool Kick(int account) => World.AccountIndex.TryGet(account, out var hero) && Leave(hero);
+    // #endregion accounts
+
     // #region queries
     public int PlayersIn(int zone) => World.Count<Player>(Zones[zone]);    // one table: its rows, not a scan
 
@@ -510,12 +563,31 @@ public sealed class BattleServer : IDisposable
     }
     // #endregion queries
 
+    // #region catch-up
+    /// <summary>
+    /// What a client that acknowledged change tick <paramref name="acked"/> (the <see cref="World.ChangeTick"/> of the
+    /// update it received) has missed: <paramref name="updates"/> units whose health, fire or goal was written plus
+    /// fires that went out, and in <paramref name="gone"/> the ids destroyed since (room for
+    /// <see cref="WorldOptions.DestroyLog"/> ids holds them all). False: the client lags further back than the destroy
+    /// log reaches, and gets the whole battle again.
+    /// </summary>
+    public bool CatchUp(ulong acked, Span<EntityId> gone, out int updates, out int destroyed)
+    {
+        updates = 0;
+        if (!World.DestroyedSince(acked, gone, out destroyed)) return false;  // too far behind: resynchronize
+        updates = World.Count<Replica>(ClientChanges.Since(acked))            // each client its own tick, one filter
+            + World.Count<Replica>(FiresOut.Since(acked));
+        return true;
+    }
+    // #endregion catch-up
+
     // #region buffers-and-indexes
     /// <summary>
     /// A mirror image of a living unit as it is now (health, statuses, bag, zone): a copy of the entity, which the
-    /// indexes, groups and the next send learn about.
+    /// indexes, groups and the next send learn about. A client's hero is one of a kind (no copy may share its account):
+    /// only bots and NPCs are mirrored.
     /// </summary>
-    public Entity Mirror(Entity unit) => unit.IsAlive ? unit.Clone() : default;
+    public Entity Mirror(Entity unit) => unit.IsAlive && !unit.HasAccount ? unit.Clone() : default;
 
     /// <summary>The items in a player's bag, summed: a read, never a change.</summary>
     public int LootValue(Entity player)
@@ -645,6 +717,12 @@ public sealed class BattleServer : IDisposable
     // #region diagnostics
     /// <summary>The world's tables: their components, rows and bytes, for a dashboard.</summary>
     public TableInfo[] Tables() => World.Describe();
+
+    /// <summary>
+    /// How the systems run: every group's stages, what each system reads and writes, why it waits. Log it once at
+    /// startup (<c>ToString</c>) or draw it (<c>ToMermaid</c>).
+    /// </summary>
+    public ScheduleInfo Schedule() => World.DescribeSchedule();
 
     /// <summary>The system that took the most time per run so far (<see cref="WorldOptions.MeasureSystems"/>).</summary>
     public EcsSystem Slowest()

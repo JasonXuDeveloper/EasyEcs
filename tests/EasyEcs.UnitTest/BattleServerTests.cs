@@ -81,8 +81,114 @@ public class BattleServerTests
             {
                 Assert.That(item.Replica.Health, Is.EqualTo(item.Health.Value));
                 Assert.That(item.Component2.Burning, Is.EqualTo(item.Entity.Has<Burning>()));  // fires lit and gone out
+                if (item.Entity.TryGet<Goal>(out var goal)) Assert.That(item.Component2.Waypoint, Is.EqualTo(goal.Waypoint));
             }
         }
+    }
+
+    [Test]
+    public void GoalsAreWrittenOnlyWhenTheyChange()
+    {
+        using var server = Run(100);
+        var before = new Dictionary<Entity, int>();
+        foreach (var item in server.World.Query<Goal>()) before[item.Entity] = item.Component1.Waypoint;
+        ulong mark = server.World.ChangeTick;
+        for (int i = 0; i < 4; i++) server.Tick();                            // every NPC planned once (Slices = 4)
+        var written = new HashSet<Entity>();
+        foreach (var item in server.World.Query<Goal>(QueryFilter.Create().Changed<Goal>(mark))) written.Add(item.Entity);
+
+        int kept = 0;
+        foreach (var (npc, goal) in before)
+        {
+            if (!npc.IsAlive) continue;                                       // died meanwhile
+            bool changed = npc.Read<Goal>().Waypoint != goal;
+            Assert.That(written.Contains(npc), Is.EqualTo(changed));          // stamped exactly when it changed
+            if (!changed) kept++;
+        }
+
+        Assert.That(kept, Is.Positive);                                      // planned again, the same goal: no write
+    }
+
+    [Test]
+    public void AnAccountHasOneHeroFoundByItsKey()
+    {
+        using var server = Run(30);
+        using var other = new BattleServer(30);
+        int players = server.World.Count<Player>();
+        var hero = server.Join(42, new Position(100, 200));
+        Assert.That(hero.Account.Id, Is.EqualTo(42));
+        Assert.That(hero.Position, Is.EqualTo(new Position(100, 200)));      // the given value, in the same copy
+        Assert.That(hero.Read<Health>(), Is.EqualTo(new Health(500, 500)));  // the rest from the prefab
+        Assert.That(server.Join(42, default), Is.EqualTo(hero));             // a reconnect: the same hero
+        Assert.That(server.World.Count<Player>(), Is.EqualTo(players + 1));
+        Assert.That(server.World.AccountIndex.Get(42), Is.EqualTo(hero));
+        Assert.That(server.Mirror(hero), Is.EqualTo(default(Entity)));       // a copy cannot share the account
+
+        var second = server.Join(43, default);
+        Assert.Throws<InvalidOperationException>(() => second.SetAccount(42));  // taken: refused, nothing changed
+        Assert.That(second.Account.Id, Is.EqualTo(43));
+        for (int i = 0; i < 10; i++) server.Tick();
+        Assert.That(server.Failure, Is.Null);
+
+        var arrived = server.Transfer(hero, other);                          // the key moves with the hero
+        Assert.That(other.World.AccountIndex.Get(42), Is.EqualTo(arrived));
+        Assert.That(server.World.AccountIndex.TryGet(42, out _), Is.False);
+        Assert.That(server.Kick(43), Is.True);
+        Assert.That((second.IsAlive, server.World.AccountIndex.TryGet(43, out _), server.Kick(43)), Is.EqualTo((false, false, false)));
+        Assert.That(server.World.Count<Player>(), Is.EqualTo(players));
+    }
+
+    [Test]
+    public void AClientCatchesUpFromTheTickItAcknowledged()
+    {
+        using var server = Run(100);
+        ulong acked = server.World.ChangeTick;                                // the client received this update
+        var alive = new List<EntityId>();
+        foreach (var e in server.World.Entities) alive.Add(e.Id);
+        for (int i = 0; i < 10; i++) server.Tick();
+
+        var gone = new EntityId[Units];                                       // WorldOptions.DestroyLog ids
+        Assert.That(server.CatchUp(acked, gone, out int updates, out int destroyed), Is.True);
+        var changed = new HashSet<Entity>();                                  // any of three changed: a union
+        foreach (var item in server.World.Query<Replica>(QueryFilter.Create().Changed<Health>(acked))) changed.Add(item.Entity);
+        foreach (var item in server.World.Query<Replica>(QueryFilter.Create().Changed<Burning>(acked))) changed.Add(item.Entity);
+        foreach (var item in server.World.Query<Replica>(QueryFilter.Create().Changed<Goal>(acked))) changed.Add(item.Entity);
+        int firesOut = server.World.Count<Replica>(QueryFilter.Create().Removed<Burning>(acked));
+        Assert.That(updates, Is.EqualTo(changed.Count + firesOut));
+
+        var reported = new HashSet<EntityId>(gone.AsSpan(0, destroyed).ToArray());
+        Assert.That(reported, Has.Count.EqualTo(destroyed));                 // each once
+        foreach (var id in reported) Assert.That(server.World.IsAlive(id), Is.False);
+        int died = 0;
+        foreach (var id in alive)
+            if (!server.World.IsAlive(id))
+            {
+                died++;
+                Assert.That(reported, Does.Contain(id));                     // everyone who went away is reported
+            }
+        Assert.That(died, Is.Positive);
+
+        Assert.That(server.CatchUp(server.World.ChangeTick, gone, out updates, out destroyed), Is.True);
+        Assert.That((updates, destroyed), Is.EqualTo((0, 0)));                // a client up to date has nothing to get
+        for (int i = 0; i < 200; i++) server.Tick();                         // more shots expired than the log holds
+        Assert.That(server.World.DestroyLogOldestTick, Is.GreaterThan(acked));
+        Assert.That(server.CatchUp(acked, gone, out updates, out destroyed), Is.False);  // resynchronize
+        Assert.That((updates, destroyed), Is.EqualTo((0, 0)));
+    }
+
+    [Test]
+    public void TheScheduleShowsWhichSystemsShareAStage()
+    {
+        using var server = new BattleServer(Units);
+        var schedule = server.Schedule();
+        Assert.That(Array.ConvertAll(schedule.Groups, group => group.Name), Is.EqualTo(new[] { "Default", "Replication" }));
+        string[] beside = null;
+        foreach (var stage in schedule.Groups[0].Stages)
+            if (Array.Exists(stage.Systems, system => system.Name == nameof(ManaSystem)))
+                beside = Array.ConvertAll(stage.Systems, system => system.Name);
+        Assert.That(beside, Is.EqualTo(new[] { nameof(PlanningSystem), nameof(ManaSystem) }));  // disjoint data
+        Assert.That(schedule.Groups[0].Stages[^1].Systems[0].Name, Is.EqualTo(nameof(ClockSystem)));  // [UpdateAfter]
+        Assert.That(schedule.ToString(), Does.Contain(nameof(ReplicationSystem)));
     }
 
     [Test]
@@ -116,6 +222,7 @@ public class BattleServerTests
     {
         using var server = Run(200);
         var owned = new Dictionary<Entity, int>();
+        Assert.That(server.World.Count<ChildOf>(), Is.EqualTo(server.World.Count<Lifetime>()));  // each shot made a child
         foreach (var item in server.World.Query<ChildOf>())
         {
             Assert.That(server.World.TryGetEntity(item.Component1.Parent, out var owner), Is.True);
@@ -299,9 +406,14 @@ public class BattleServerTests
         Assert.That(server.Slowest().Stats.Runs, Is.Positive);
         Assert.That(server.World.GetSystem<RegenerationSystem>().Stats.Runs, Is.EqualTo(2));   // every 10th update
         Assert.That(server.World.GetSystem<ManaSystem>().Stats.Runs, Is.EqualTo(2));           // the same, phase 5
-        Assert.That(server.World.HasSingleton<Waypoints>(), Is.True);         // SteeringSystem.OnCreate
-        server.World.RemoveSystem<SteeringSystem>();
-        Assert.That(server.World.HasSingleton<Waypoints>(), Is.False);        // SteeringSystem.OnDestroy
+        int npcs = server.World.Count<Goal>(QueryFilter.Create().Without<Dead>());
+        server.Tick();
+        var planning = server.World.GetSystem<PlanningSystem>();
+        Assert.That(planning.RunCount, Is.EqualTo(21));
+        Assert.That(planning.Stats.LastEntities, Is.EqualTo(npcs / 4));      // Slices = 4: a quarter per run
+        Assert.That(server.World.HasSingleton<Waypoints>(), Is.True);         // PlanningSystem.OnCreate
+        server.World.RemoveSystem<PlanningSystem>();
+        Assert.That(server.World.HasSingleton<Waypoints>(), Is.False);        // PlanningSystem.OnDestroy
     }
 
     [Test]
