@@ -10,11 +10,10 @@ public static class Activation
     public static readonly ComponentSet Persisted = ComponentSet.Create().With<Stock>().With<Balance>();
 
     /// <summary>
-    /// The entity of <paramref name="key"/>. When it is not active: made from <paramref name="kind"/> (the state that
-    /// lives in memory) plus its record, or from <paramref name="fresh"/> (the same, plus the persistent state of an
-    /// actor that has never been saved).
+    /// The entity of <paramref name="key"/>. When it is not active: made from <paramref name="kind"/> (what an actor of
+    /// that kind starts with), then given its record when storage has one.
     /// </summary>
-    public static Entity Activate<TActor>(World world, TActor key, Prefab kind, Prefab fresh, Storage storage)
+    public static Entity Activate<TActor>(World world, TActor key, Prefab kind, Storage storage)
         where TActor : struct, IActor<TActor>, IEquatable<TActor>
     {
         if (world.Index<TActor, TActor>().TryFind(key, out var active))
@@ -22,20 +21,16 @@ public static class Activation
             return active;
         }
 
-        if (!storage.TryGet(key, out var record))
-        {
-            // A new actor: its first state is new data, so the next save writes it.
-            var created = world.Instantiate(fresh);
-            created.Set(key, new In<TActor>());
-            return created;
-        }
-
-        // The persistent components come only from the record, with markWritten: false. What came from storage is
-        // not a change: the next save skips this actor until a message writes it. (A value made here first and then
-        // replaced would keep its own change tick, and count as written.)
         var actor = world.Instantiate(kind);
         actor.Set(key, new In<TActor>());
-        world.LoadEntitiesInto(record, [actor], markWritten: false);
+        if (storage.TryGet(key, out var record))
+        {
+            // The record replaces the prefab's defaults, with markWritten: false: what came from storage is not a
+            // change, so the next save skips this actor until a message writes it. A new actor has no record: its
+            // defaults are new data, and the next save writes them.
+            world.LoadEntitiesInto(record, [actor], markWritten: false);
+        }
+
         return actor;
     }
 }

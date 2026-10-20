@@ -14,9 +14,9 @@ systems, loaded from storage when first needed and saved only when they change. 
   lookup, refuses a closed shop through a `static readonly` filter, and keeps the job's refs valid when the job
   closes the shop in the middle (a structural change).
 - **Activation and records.** An actor's entity is made when it is first needed; its record, a `ComponentSet` of the
-  persistent components, is loaded onto it with `LoadEntitiesInto(..., markWritten: false)`, so loading is not a
-  change. The persistent components come only from the record: a value created first and then replaced would keep
-  its own change tick.
+  persistent components, is loaded onto it with `LoadEntitiesInto(..., markWritten: false)`: it replaces the
+  prefab's defaults and loading is not a change. A new actor has no record, so its defaults are its first state and
+  the next save writes them.
 - **Save what changed.** The persistent components are `ITrackChanges`; the host saves the actors written since its
   last save, and an actor nobody wrote costs nothing.
 

@@ -8,15 +8,13 @@ using var world = new World();
 world.AddSystem<RestockSystem>();
 world.AddSystem<InterestSystem>();
 
-// Each kind: what an active actor holds in memory, and the same plus the first state of a new actor.
-var shopKind = new Prefab().SetSales(0);
-var newShop = new Prefab().SetSales(0).SetStock(5);
-var bankKind = new Prefab();
-var newBank = new Prefab().SetBalance(0);
+// Each kind: what an actor starts with. A record from storage replaces the persistent part.
+var shopKind = new Prefab().SetSales(0).SetStock(5);
+var bankKind = new Prefab().SetBalance(0);
 
-var shop = Activation.Activate(world, new Shop(1), shopKind, newShop, storage);
-var bank = Activation.Activate(world, new Bank(7), bankKind, newBank, storage);
-var shop2 = Activation.Activate(world, new Shop(2), shopKind, newShop, storage);
+var shop = Activation.Activate(world, new Shop(1), shopKind, storage);
+var bank = Activation.Activate(world, new Bank(7), bankKind, storage);
+var shop2 = Activation.Activate(world, new Shop(2), shopKind, storage);
 Console.WriteLine($"activated: shop 1 has {shop.Stock.Items}, shop 2 (new) has {shop2.Stock.Items}, bank 7 has {bank.Balance.Coins}");
 
 ulong lastSave = world.ChangeTick;
@@ -40,8 +38,8 @@ Console.WriteLine($"saved after the messages: {storage.SaveChanged(world, ref la
 
 // A second world, as after a restart: the actors come back with what was saved.
 using var restarted = new World();
-var shopAgain = Activation.Activate(restarted, new Shop(1), shopKind, newShop, storage);
-var bankAgain = Activation.Activate(restarted, new Bank(7), bankKind, newBank, storage);
+var shopAgain = Activation.Activate(restarted, new Shop(1), shopKind, storage);
+var bankAgain = Activation.Activate(restarted, new Bank(7), bankKind, storage);
 Console.WriteLine($"restarted: shop 1 has {shopAgain.Stock.Items} (sold {shopAgain.Sales.Count}), bank 7 has {bankAgain.Balance.Coins}");
 
 // CI runs the samples: fail when the restart did not bring back what was saved.
