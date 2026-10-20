@@ -163,6 +163,9 @@ public class CodeFixTests
     [TestCase("EECS033", "Use .SetBoss",
         "public static class U { public static void F(Entity e) => e.Set(new Boss()); }",
         "=> e.SetBoss();")]
+    [TestCase("EECS033", "Use .SetHpIfChanged",
+        "public record struct Hp(int V) : IComponent, ITrackChanges; public static class U { public static bool F(Entity e) => e.SetIfChanged(new Hp(3)); }",
+        "=> e.SetHpIfChanged(3);")]
     [TestCase("EECS033", "Use .Clock",
         "public static class U { public static int F(World w) => w.GetSingleton<Clock>().Ticks; }",
         "=> w.Clock.Ticks;")]

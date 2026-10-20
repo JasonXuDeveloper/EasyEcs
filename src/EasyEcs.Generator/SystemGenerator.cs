@@ -263,7 +263,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Component when runs => $"{p.RefKind} global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++index}, i)",
             Symbols.ParamKind.Entity when runs => "entities[(int)i]",
             Symbols.ParamKind.Optional when runs => $"m{i}[(int)i]",
+            Symbols.ParamKind.Mutable when runs => $"new global::EasyEcs.Mut<{p.Type}>(ref global::System.Runtime.CompilerServices.Unsafe.Add(ref r{++index}, i), entities[(int)i])",
             Symbols.ParamKind.Component => $"{p.RefKind} c{++index}",
+            Symbols.ParamKind.Mutable => $"new global::EasyEcs.Mut<{p.Type}>(ref c{++index}, entity)",
             Symbols.ParamKind.ComponentSpan => $"c{++index}", // Span<T> converts to ReadOnlySpan<T> for read-only parameters
             Symbols.ParamKind.Singleton => method.Parallel ? $"{p.RefKind} s{i}.Value" : $"{p.RefKind} s{i}",
             Symbols.ParamKind.Entity => "entity",
@@ -328,13 +330,18 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 if (local[i]) sb.Append($"            x{i} = l{i};\n");
             sb.Append("        }\n");
         }
-        // Its ref parameters (Span<T> for a batch): carried over when the method moves the entity it visits, and
-        // stamped when the component tracks changes. The queried [With<T>] component of a method without one is read.
-        var queried = method.Parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan).ToArray();
-        int writes = 0;
+        // Its ref parameters (Span<T> for a batch, Mut<T>): carried over when the method moves the entity it visits,
+        // and stamped when the component tracks changes: by the loop, every row it visits, except a Mut's, which
+        // stamps the rows it writes. The queried [With<T>] component of a method without one is read.
+        var queried = method.Parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan or Symbols.ParamKind.Mutable).ToArray();
+        int writes = 0, own = 0;
         for (int k = 0; k < components.Length; k++)
+        {
             if (queried.Any(p => p.Type == components[k] && p.RefKind == "ref")) writes |= 1 << k;
+            if (queried.Any(p => p.Type == components[k] && p.Kind == Symbols.ParamKind.Mutable)) own |= 1 << k;
+        }
         sb.Append($"\n        static int global::EasyEcs.{iface}<{method.ComponentTypes}>.Writes => {writes};\n");
+        if (own != 0) sb.Append($"        static int global::EasyEcs.{iface}<{method.ComponentTypes}>.OwnStamps => {own};\n");
 
         sb.Append("    }\n\n");
 
@@ -383,7 +390,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
     /// <param name="Type">The component, singleton or value type (a span's or Maybe's element).</param>
     /// <param name="RefKind">"ref" or "in" ("" for a context parameter passed by value).</param>
     /// <param name="Declared">The parameter as declared, with its modifier (<c>in global::Health</c>), for the accessor.</param>
-    /// <param name="Tracked">A Maybe's element tracks changes (a write through it is stamped).</param>
+    /// <param name="Tracked">A Maybe's or Mut's element tracks changes (a write through it is stamped).</param>
     private sealed record ParamModel(Symbols.ParamKind Kind, string Type, string RefKind, string Name, string Declared, bool Tracked = false);
 
     /// <param name="Stable">
@@ -415,8 +422,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
         /// <summary>The queried component types, as type arguments of World.ForEach / IForEach.</summary>
         public string ComponentTypes => string.Join(", ", Query);
 
-        /// <summary>Runs per entity with its handle: it takes the Entity, or a Maybe looked up through it.</summary>
-        public bool TakesEntity => Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.Optional);
+        /// <summary>Runs per entity with its handle: it takes the Entity, a Maybe looked up through it, or a Mut that stamps through it.</summary>
+        public bool TakesEntity => Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable);
 
         public bool TakesWorld => Parameters.Any(p => p.Kind == Symbols.ParamKind.World);
 
@@ -453,6 +460,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     Symbols.ParamKind.Optional => new ParamModel(Symbols.ParamKind.Optional, // a write unless it only reads Value
                         Symbols.MaybeElement(p.Type)!.ToDisplayString(Symbols.Fqn), Symbols.OnlyReadsValue(Symbols.WithBody(method, syntax, model).Item1, p.Name) ? "in" : "ref", p.Name, declared,
                         Symbols.Implements(Symbols.MaybeElement(p.Type)!, Symbols.TrackChanges)),
+                    Symbols.ParamKind.Mutable => new ParamModel(Symbols.ParamKind.Mutable, // a write: the scheduler sees its writer
+                        Symbols.MutElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared,
+                        Symbols.Implements(Symbols.MutElement(p.Type)!, Symbols.TrackChanges)),
                     Symbols.ParamKind.Context => new ParamModel(Symbols.ParamKind.Context, p.Type.ToDisplayString(Symbols.Fqn),
                         p.RefKind switch { RefKind.Ref => "ref", RefKind.In => "in", _ => "" }, p.Name, declared),
                     var kind => new ParamModel(kind, p.Type.ToDisplayString(Symbols.Fqn), p.RefKind == RefKind.Ref ? "ref" : "in", p.Name, declared),
@@ -478,7 +488,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
             Filters(method);
 
-            var query = parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan)
+            var query = parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan or Symbols.ParamKind.Mutable)
                 .Select(p => p.Type).ToList();
             // No component parameter: the first [With<T>] (else [Changed<T>]) becomes the queried component (passed to the
             // job, not the method).

@@ -6,7 +6,7 @@ namespace EasyEcs;
 /// Runs a method of an <see cref="EcsSystem"/> (or a static method of any other type, through a generated entry point) for every entity matching its component parameters (and
 /// the <see cref="WithAttribute{T}"/> / <see cref="WithoutAttribute{T}"/> / <see cref="WithAnyAttribute{T}"/> filters), each update, after
 /// <see cref="EcsSystem.OnUpdate"/>, in declaration order.
-/// <para>Parameters: 1..9 components (<c>ref</c> to write, <c>in</c> to read; or <c>Span&lt;T&gt;</c> /
+/// <para>Parameters: 1..9 components (<c>ref</c> to write, <c>in</c> to read, <see cref="Mut{T}"/> to write some rows; or <c>Span&lt;T&gt;</c> /
 /// <c>ReadOnlySpan&lt;T&gt;</c> for a batch method that receives runs of rows), singletons (<c>ref</c> / <c>in</c>), and
 /// optionally <see cref="Entity"/> and <see cref="World"/>. Static and instance methods are supported.</para>
 /// <code>

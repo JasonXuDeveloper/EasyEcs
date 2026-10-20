@@ -642,12 +642,16 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             else if (kind == Symbols.ParamKind.Optional && Symbols.MaybeElement(p.Type) is { } optional && Symbols.IsIndexed(optional))
                 context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, p.Locations.FirstOrDefault(), optional.Name,
                     $"parameter '{p.Name}' hands out a ref to it (read it from the Entity instead)"));
-            else if (kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan)
+            else if (kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan or Symbols.ParamKind.Mutable)
             {
                 components++;
-                var component = kind == Symbols.ParamKind.Component ? p.Type : Symbols.SpanElement(p.Type);
-                bool writable = kind == Symbols.ParamKind.Component ? p.RefKind == RefKind.Ref
-                    : p.Type.OriginalDefinition.ToDisplayString() == "System.Span<T>";
+                var component = Symbols.QueriedComponent(p);
+                bool writable = kind switch
+                {
+                    Symbols.ParamKind.Component => p.RefKind == RefKind.Ref,
+                    Symbols.ParamKind.Mutable => true,
+                    _ => p.Type.OriginalDefinition.ToDisplayString() == "System.Span<T>",
+                };
                 if (writable && component != null && Symbols.IsIndexed(component))
                     context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, p.Locations.FirstOrDefault(), component.Name,
                         $"parameter '{p.Name}' can write it (take it as 'in' or ReadOnlySpan)"));

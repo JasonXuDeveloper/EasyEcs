@@ -280,6 +280,33 @@ public readonly partial struct Entity : IEquatable<Entity>
         meta.Archetype.Stamp<T>(meta.Slot, world.ChangeTick);
     }
 
+    /// <summary>
+    /// Stamp tracked component <typeparamref name="T"/> of <paramref name="entity"/> where it is now (a write through a
+    /// <see cref="Mut{T}"/>): nothing when the entity is gone or lacks the component. Rows of one table are stamped by
+    /// one thread at a time (parallel chunks own whole blocks of rows, <see cref="World.ChunkRows"/>).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)] // per write, not per row: keeps the row loops lean
+    internal static void Stamp<T>(Entity entity) where T : struct, IComponent
+    {
+        var archetype = entity.LocateArchetype(out int slot, false);
+        if (archetype == null || Unsafe.IsNullRef(ref Column(archetype, ComponentType<T>.Bit, slot, false))) return;
+        archetype.Stamp<T>(slot, entity._world.ChangeTick);
+    }
+
+    /// <summary>
+    /// Set component <typeparamref name="T"/> to <paramref name="value"/> unless the entity already has that value: true
+    /// when it set it (as <c>Set</c> does: added if missing, stamped, indexed), false when the value was equal (nothing
+    /// written, nothing stamped, no index touched). Equality as <see cref="Mut{T}.SetIfChanged"/>. Throws if the entity is
+    /// not alive. O(1) plus the comparison when equal, <c>Set</c>'s cost otherwise. Owner thread only.
+    /// </summary>
+    public bool SetIfChanged<T>(in T value) where T : struct, IComponent
+    {
+        ref T current = ref Find<T>(false);
+        if (!Unsafe.IsNullRef(ref current) && Values.Same(in current, in value)) return false;
+        Set(in value); // throws for a handle that is not alive
+        return true;
+    }
+
     // Set(in T1..Tn) and Remove<T1..Tn>() are generated (Entity.Structural.g.cs).
 
     /// <summary>

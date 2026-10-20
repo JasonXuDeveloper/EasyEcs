@@ -101,3 +101,88 @@ public class ChangeTrackingBenchmark
         }
     }
 }
+
+/// <summary>
+/// A system that recomputes a tracked component every tick while only some values actually change: 100,000 aims, of
+/// which 10% move each tick (each entity's aim steps every tenth tick, the phases spread evenly). <c>Mut = false</c>
+/// writes through <c>ref Aim</c>, which stamps every visited row; <c>Mut = true</c> writes through
+/// <c>Mut&lt;Aim&gt;.SetIfChanged</c>, which compares and stamps only the 10% that changed. <c>Write</c> is the writer
+/// alone (the price of the comparison against the bulk stamp), <c>WriteAndRead</c> adds the downstream
+/// <c>[Changed&lt;Aim&gt;]</c> replication, which visits every row after the ref writer and a tenth of them after the
+/// Mut writer. Steady state allocates 0 bytes either way.
+/// </summary>
+[MemoryDiagnoser]
+public class ChangeTrackingWriteBenchmark
+{
+    [Params(100_000)] public int Entities;
+    [Params(false, true)] public bool Mut;
+
+    private World _world;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _world = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _world.AddSingleton<Clock>();
+        var entities = new Entity[Entities];
+        _world.CreateEntities(entities, new Phase(0), new Aim(0), new Sent(0));
+        for (int i = 0; i < entities.Length; i++) entities[i].Get<Phase>() = new Phase(i % 10);
+        if (Mut) _world.AddSystem<AimIfChanged>();
+        else _world.AddSystem<AimByRef>();
+        _world.AddSystem<SendChanged>();
+        for (int i = 0; i < 20; i++) WriteAndRead();
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => _world.Dispose();
+
+    [Benchmark]
+    public void Write()
+    {
+        _world.GetSingleton<Clock>().Tick++;
+        _world.Update<Aiming>();
+    }
+
+    [Benchmark]
+    public void WriteAndRead()
+    {
+        _world.GetSingleton<Clock>().Tick++;
+        _world.Update<Aiming>();
+        _world.Update<Sending>();
+    }
+
+    public struct Aiming : ISystemGroup;
+
+    public struct Sending : ISystemGroup;
+
+    public record struct Clock(int Tick) : ISingletonComponent;
+
+    /// <summary>When in a cycle of ten ticks the entity's aim steps.</summary>
+    public record struct Phase(int Value) : IComponent;
+
+    public record struct Aim(int Value) : IComponent, ITrackChanges;
+
+    /// <summary>The aim last sent to clients.</summary>
+    public record struct Sent(int Value) : IComponent;
+
+    [UpdateInGroup<Aiming>]
+    public class AimByRef : EcsSystem
+    {
+        [ForEach]
+        private static void Recompute(in Phase phase, ref Aim aim, in Clock clock) => aim = new Aim((clock.Tick + phase.Value) / 10);
+    }
+
+    [UpdateInGroup<Aiming>]
+    public class AimIfChanged : EcsSystem
+    {
+        [ForEach]
+        private static void Recompute(in Phase phase, Mut<Aim> aim, in Clock clock) => aim.SetIfChanged(new Aim((clock.Tick + phase.Value) / 10));
+    }
+
+    [UpdateInGroup<Sending>]
+    public class SendChanged : EcsSystem
+    {
+        [ForEach, Changed<Aim>]
+        private static void Send(in Aim aim, ref Sent sent) => sent = new Sent(aim.Value);
+    }
+}

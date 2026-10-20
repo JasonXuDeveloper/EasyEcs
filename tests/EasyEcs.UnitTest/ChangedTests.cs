@@ -95,6 +95,50 @@ public class ChangedTests
         private static void Count(ref Seen seen) => seen.Count++;
     }
 
+    /// <summary>Caps armor at 3 through a Mut: only the rows whose value changes are written (and stamped).</summary>
+    public class CapArmor : EcsSystem
+    {
+        [ForEach]
+        private static void Cap(Mut<Armor> armor) => armor.SetIfChanged(new Armor(Math.Min(armor.Value.Value, 3)));
+    }
+
+    /// <summary>The same cap through a ref: every visited row is stamped, changed or not.</summary>
+    public class CapArmorByRef : EcsSystem
+    {
+        [ForEach]
+        private static void Cap(ref Armor armor) => armor = new Armor(Math.Min(armor.Value, 3));
+    }
+
+    /// <summary>The cap on several threads.</summary>
+    public class CapArmorParallel : EcsSystem
+    {
+        [ForEach(Parallel = true)]
+        private static void Cap(Mut<Armor> armor) => armor.SetIfChanged(new Armor(Math.Min(armor.Value.Value, 3)));
+    }
+
+    /// <summary>Reads armor through a Mut and writes the stunned rows' with Write().</summary>
+    public class PeekAndHit : EcsSystem
+    {
+        [ForEach]
+        private static void Apply(Mut<Armor> armor, ref Health health, Maybe<Stun> stun)
+        {
+            health = new Health(armor.Value.Value);
+            if (stun.HasValue) armor.Write().Value--;
+        }
+    }
+
+    /// <summary>A Mut in a method that changes structure: the shield moves the row, then the armor is written.</summary>
+    public class ShieldUp : EcsSystem
+    {
+        [ForEach]
+        private static void Raise(Entity entity, Mut<Armor> armor)
+        {
+            if (entity.Has<Shield>()) return;
+            entity.Set(new Shield(1));
+            armor.Write() = new Armor(9);
+        }
+    }
+
     /// <summary>A struct job that writes armor through a ref.</summary>
     private struct Polish : IForEach<Armor>
     {
@@ -630,5 +674,112 @@ public class ChangedTests
         }
 
         Assert.That(Run(parallel: true), Is.EqualTo(Run(parallel: false)));
+    }
+
+    [Test]
+    public void MutStampsOnlyTheRowsItWrites()
+    {
+        using var world = new World();
+        world.AddSystem<CapArmor>();
+        world.AddSystem<ArmorWatch>();
+        var high = world.CreateEntity(new Armor(5), new Seen());
+        var low = world.CreateEntity(new Armor(2), new Seen());
+        world.Update(); // the cap writes high only; the watch's first run sees both
+        Assert.That((high.Armor.Value, low.Armor.Value), Is.EqualTo((3, 2)));
+        Assert.That((SeenCount(high), SeenCount(low)), Is.EqualTo((1, 1)));
+
+        ulong mark = world.ChangeTick;
+        world.Update(); // nothing changes: no row is stamped
+        world.Update();
+        Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(mark)), Is.Zero);
+        Assert.That((SeenCount(high), SeenCount(low)), Is.EqualTo((1, 1)));
+
+        low.SetArmor(8);
+        world.Update(); // the external write and the cap's: one change for the watch
+        Assert.That((low.Armor.Value, SeenCount(high), SeenCount(low)), Is.EqualTo((3, 1, 2)));
+
+        // A ref parameter stamps every row it visits.
+        world.RemoveSystem<CapArmor>();
+        world.AddSystem<CapArmorByRef>();
+        world.Update(); // the watch runs first now, the cap after it
+        world.Update();
+        Assert.That((SeenCount(high), SeenCount(low)), Is.EqualTo((2, 3)));
+    }
+
+    [Test]
+    public void MutReadsDoNotStampAndWritesDo()
+    {
+        using var world = new World();
+        world.AddSystem<PeekAndHit>();
+        var calm = world.CreateEntity(new Armor(5), new Health(0));
+        var stunned = world.CreateEntity(new Armor(5), new Health(0), new Stun());
+        world.Update();
+        ulong mark = world.ChangeTick;
+        world.Update();
+        Assert.That((calm.Health.Value, stunned.Health.Value, stunned.Armor.Value), Is.EqualTo((5, 4, 3)));
+        int changed = 0;
+        foreach (var item in world.Query<Armor>(QueryFilter.Create().Changed<Armor>(mark)))
+        {
+            Assert.That(item.Entity, Is.EqualTo(stunned));
+            changed++;
+        }
+
+        Assert.That(changed, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void ParallelMutStampsOnlyTheRowsItWrites()
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        world.AddSystem<CapArmorParallel>();
+        var entities = new Entity[20_000];
+        world.CreateEntities(entities, new Armor(1), new Seen());
+        world.Update();
+        ulong mark = world.ChangeTick;
+        for (int i = 0; i < entities.Length; i += 7) entities[i].Get<Armor>() = new Armor(9);
+        world.Update(); // each changed row only, written from the chunk that holds it
+        var changed = QueryFilter.Create().Changed<Armor>(mark);
+        Assert.That(world.Count<Armor>(changed), Is.EqualTo((entities.Length + 6) / 7));
+        world.Update();
+        mark = world.ChangeTick;
+        world.Update();
+        Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(mark)), Is.Zero);
+        for (int i = 0; i < entities.Length; i++) Assert.That(entities[i].Armor.Value, Is.EqualTo(i % 7 == 0 ? 3 : 1));
+    }
+
+    [Test]
+    public void MutWritesAfterAMoveReachTheEntitysNewRow()
+    {
+        using var world = new World();
+        world.AddSystem<ArmorWatch>();
+        var bare = world.CreateEntity(new Armor(1), new Seen());
+        var shielded = world.CreateEntity(new Armor(1), new Seen(), new Shield(1));
+        world.Update(); // the watch's first run
+        world.AddSystem<ShieldUp>();
+        world.Update(); // the watch runs first; ShieldUp moves bare, then writes its armor
+        world.Update();
+        Assert.That((bare.Armor.Value, bare.Has<Shield>()), Is.EqualTo((9, true)));
+        Assert.That((SeenCount(bare), SeenCount(shielded)), Is.EqualTo((2, 1)));
+    }
+
+    [Test]
+    public void SetIfChangedWritesOnlyANewValue()
+    {
+        using var world = new World();
+        var e = world.CreateEntity(new Armor(1));
+        var bare = world.CreateEntity(new Health(1));
+        world.Update();
+        ulong mark = world.ChangeTick;
+        var changed = QueryFilter.Create().Changed<Armor>(mark);
+        Assert.That(e.SetIfChanged(new Armor(1)), Is.False);
+        Assert.That(e.SetArmorIfChanged(1), Is.False);
+        Assert.That(world.Count<Armor>(changed), Is.Zero);
+        Assert.That(e.SetArmorIfChanged(2), Is.True);
+        Assert.That((e.Armor.Value, world.Count<Armor>(changed)), Is.EqualTo((2, 1)));
+        Assert.That(bare.SetIfChanged(new Armor(0)), Is.True); // missing: added
+        Assert.That(world.Count<Armor>(changed), Is.EqualTo(2));
+        Assert.That(bare.SetIfChanged(new Health(1)), Is.False); // untracked works too
+        e.Destroy();
+        Assert.Throws<InvalidOperationException>(() => e.SetIfChanged(new Armor(3)));
     }
 }

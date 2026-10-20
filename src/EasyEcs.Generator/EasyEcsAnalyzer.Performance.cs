@@ -222,12 +222,7 @@ public sealed partial class EasyEcsAnalyzer
             var kind = Symbols.Classify(p, outside);
             if (kind is Symbols.ParamKind.Invalid or Symbols.ParamKind.Context) continue;
             var location = p.Locations.FirstOrDefault();
-            var component = kind switch
-            {
-                Symbols.ParamKind.Component => p.Type,
-                Symbols.ParamKind.ComponentSpan => Symbols.SpanElement(p.Type),
-                _ => null,
-            };
+            var component = Symbols.QueriedComponent(p);
 
             if (!uses.TryGetValue(p, out var references))
             {
@@ -439,6 +434,7 @@ public sealed partial class EasyEcsAnalyzer
         if (holder?.ContainingNamespace is not { } ns) return null;
         string name = member.Name;
         if (name.StartsWith("Is") && name.EndsWith("Disabled") && name.Length > "IsDisabled".Length) name = name.Substring(2, name.Length - 10);
+        if (name.StartsWith("Set") && name.EndsWith("IfChanged") && name.Length > "SetIfChanged".Length) name = name.Substring(0, name.Length - 9);
         foreach (var prefix in new[] { "", "Has", "Is", "TryGet", "Write", "GetOrAdd", "Set", "Remove", "Disable", "Enable", "Add", "Links" })
         {
             if (!name.StartsWith(prefix) || name.Length == prefix.Length) continue;
@@ -682,6 +678,7 @@ public sealed partial class EasyEcsAnalyzer
                 (true, "Enable") => ("Enable" + name, false),
                 (true, "IsDisabled") => ("Is" + name + "Disabled", true),
                 (true, "Set") => SetCandidate(call, name, tag, out args),
+                (true, "SetIfChanged") when !tag && SetCandidate(call, name, tag, out args) is ({ } set, _) => (set + "IfChanged", false),
                 (false, "GetSingleton") => (name, true),
                 (false, "HasSingleton") => ("Has" + name, true),
                 (false, "GetOrAddSingleton") => ("GetOrAdd" + name, false),

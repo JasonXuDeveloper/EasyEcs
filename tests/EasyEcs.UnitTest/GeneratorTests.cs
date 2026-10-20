@@ -129,6 +129,12 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Read<global::Q>();", "IForEachBatch<global::P>", "new global::EasyEcs.MaybeColumn<global::Q>(in entities, false)", "ref global::System.Runtime.CompilerServices.Unsafe.Add(")]
     [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) q.Value.V++; }", "access.Write<global::Q>();", "MaybeColumn<global::Q>(in entities, false)")]  // untracked: no stamp
     [TestCase("[ForEach] static void A(ref P p, Maybe<T> t) { if (t.HasValue) t.Value = default; }", "access.Write<global::T>();", "MaybeColumn<global::T>(in entities, true)")]  // tracked: stamped
+    [TestCase("[ForEach] static void A(Mut<T> t, in P p) => t.SetIfChanged(new T { V = p.V });", "access.Write<global::T>();", "access.Read<global::P>();",
+        "IForEachEntity<global::T, global::P>", "new global::EasyEcs.Mut<global::T>(ref c1, entity)", "Writes => 1;", "OwnStamps => 1;", "INoStructuralChanges")]
+    [TestCase("[ForEach] static void A(in P p, Mut<Q> q) { if (p.V > 0) q.Write().V = p.V; }", "access.Write<global::Q>();", "Writes => 2;", "OwnStamps => 2;")]   // untracked: a plain ref
+    [TestCase("[ForEach] static void A(Mut<T> t, Maybe<Q> q) { if (q.HasValue) t.Write().V = q.Value.V; }", "IForEachBatch<global::T>",
+        "new global::EasyEcs.Mut<global::T>(ref global::System.Runtime.CompilerServices.Unsafe.Add(ref r1, i), entities[(int)i])", "OwnStamps => 1;")]
+    [TestCase("[ForEach(Parallel = true)] static void A(Mut<T> t) => t.SetIfChanged(default);", "ForEachEntityParallel<global::T,", "OwnStamps => 1;")]
     [TestCase("[ForEach] void A(in P p) { }", "access.RunsAlone();")]
     [TestCase("[ForEach] static void A(in P p) { } protected override void OnUpdate() { }", "access.RunsAlone();")]
     [TestCase("[ForEach(Slices = 3)] static void A(ref P p) { }", "access.Write<global::P>();", "global::EasyEcs.QueryFilter.Create().Slice((int)(system.RunCount % 3), 3)")]
@@ -328,6 +334,8 @@ public class GeneratorTests
     [TestCase("public struct Link : IRelation { public EntityId Target { get; set; } } public static class U { public static void F(Entity e, Link l) => e.Get<DynamicBuffer<Link>>().Add(l); }", "EECS015")]
     [TestCase("public struct Link : IRelation { public EntityId Target { get; set; } } public partial class S : EcsSystem { [ForEach] static void A(ref DynamicBuffer<Link> links) { } }", "EECS015")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, Maybe<Owned> o) { } }", "EECS015")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(Mut<Owned> o) { } }", "EECS015")]
+    [TestCase("public partial class S : EcsSystem { [ForEach] static void A(System.Span<P> p, Mut<T> t) { } }", "EECS009")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Cells.Add(1); }", "EECS011")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Cells.Clear(); }", "EECS011")]
     [TestCase("public partial class S : EcsSystem { [ForEach] static void A(ref P p, in Grid g) => g.Slots[0] += 1; }", "EECS011")]
@@ -754,6 +762,9 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("public global::EasyEcs.Entity RemoveP()"));
         Assert.That(generated, Does.Contain("public ref readonly global::T T"));                            // tracked: read-only
         Assert.That(generated, Does.Contain("public ref global::T WriteT()"));                              // and a ref write
+        Assert.That(generated, Does.Contain("public bool SetTIfChanged(int v) => @this.SetIfChanged(new global::T { V = v })")); // only a new value
+        Assert.That(generated, Does.Contain("public bool SetOwnedIfChanged("));                              // indexed: no index update when equal
+        Assert.That(generated, Does.Not.Contain("SetPIfChanged"));                                         // not watched: a plain write is as cheap
         Assert.That(generated, Does.Not.Contain("WriteOwned"));                                            // indexed: Set only
         Assert.That(generated, Does.Contain("public ref readonly global::Owned Owned"));                    // indexed: read-only
         Assert.That(generated, Does.Contain("ValueIndex<global::Owned, global::EasyEcs.EntityId> OwnedIndex"));

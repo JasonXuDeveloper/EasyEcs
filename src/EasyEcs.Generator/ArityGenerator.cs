@@ -287,6 +287,13 @@ public sealed class ArityGenerator : IIncrementalGenerator
             /// into to the entity's new row after the job returns. Generated jobs set only their <c>ref</c> parameters.
             /// </summary>
             static virtual int Writes => -1;
+
+            /// <summary>
+            /// Components among <see cref="Writes"/> that the job stamps itself, only in the rows it writes (bits like
+            /// <see cref="Writes"/>; default none): the loop leaves their rows unstamped. Generated jobs set their
+            /// <see cref="Mut{T}"/> parameters.
+            /// </summary>
+            static virtual int OwnStamps => 0;
         """;
 
     private static string Queries()
@@ -545,7 +552,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     where TJob : struct, IForEachEntity<{{tps}}>, allows ref struct
                 {
                     var world = _world;
-            {{Lines(n, i => $"        if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.Stamp<T{i}>(slot, world.ChangeTick);")}}
+            {{Lines(n, i => $"        if ((TJob.Writes & ~TJob.OwnStamps & {1 << (i - 1)}) != 0) archetype.Stamp<T{i}>(slot, world.ChangeTick);")}}
                     if (typeof(INoStructuralChanges).IsAssignableFrom(typeof(TJob))) // a JIT-time constant
                     {
                         // A broken promise throws instead of moving the row under the refs. The owner's plain freeze:
@@ -602,11 +609,11 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
     /// <summary>Stamp row <paramref name="row"/> of every component the job writes (only tracked ones emit code).</summary>
     private static string StampRow(int n, string indent, string row) =>
-        Lines(n, i => $"{indent}    if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.StampVisited<T{i}>({row}, _changeTick);");
+        Lines(n, i => $"{indent}    if ((TJob.Writes & ~TJob.OwnStamps & {1 << (i - 1)}) != 0) archetype.StampVisited<T{i}>({row}, _changeTick);");
 
     /// <summary>Stamp a run of rows of every component the job writes.</summary>
     private static string StampRows(int n, string indent, string start, string count) =>
-        Lines(n, i => $"{indent}    if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.StampRows<T{i}>({start}, {count}, _changeTick);");
+        Lines(n, i => $"{indent}    if ((TJob.Writes & ~TJob.OwnStamps & {1 << (i - 1)}) != 0) archetype.StampRows<T{i}>({start}, {count}, _changeTick);");
 
     /// <summary>
     /// Drop the per-row advance of the entity rows when the job does not receive the entity (the step becomes 0): a
@@ -971,7 +978,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         }
 
                         if (tombstones) bits &= AliveRows(ref ids, left); // rare: the run loops then test nothing
-            {{Lines(n, i => $"                if ((TJob.Writes & {1 << (i - 1)}) != 0) archetype.StampWord<T{i}>(w, bits, _changeTick);")}}
+            {{Lines(n, i => $"                if ((TJob.Writes & ~TJob.OwnStamps & {1 << (i - 1)}) != 0) archetype.StampWord<T{i}>(w, bits, _changeTick);")}}
                         while (bits != 0)
                         {
                             int k = BitOperations.TrailingZeroCount(bits);
@@ -1052,7 +1059,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
             {{Lines(n, i => $"            _b{i} = b{i};")}}
                         int chunks = 0;
                         var archetypes = match.Archetypes;
-                        int size = world.ChunkRows(archetypes, filter.SliceCount);
+                        // A job writing a tracked component stamps change-tick summaries shared by 4,096 rows (a JIT-time constant).
+                        int size = world.ChunkRows(archetypes, {{List(n, i => $"(TJob.Writes & {1 << (i - 1)}) != 0 && default(T{i}) is ITrackChanges", " || ")}}, filter.SliceCount);
                         for (int a = 0; a < archetypes.Length; a++)
                         {
                             var archetype = archetypes[a];

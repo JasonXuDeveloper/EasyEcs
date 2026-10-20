@@ -336,6 +336,8 @@ internal static class Symbols
         Entities,
         /// <summary><c>Maybe&lt;T&gt;</c>: a component the entity may lack (looked up per entity, a write when present).</summary>
         Optional,
+        /// <summary><c>Mut&lt;T&gt;</c>: a queried component written only where the method writes it (stamped per write).</summary>
+        Mutable,
         /// <summary>
         /// A value the caller passes to the entry point of a [ForEach] method outside a system (<c>ref int dead</c>, a
         /// configuration): any type but a component, a singleton or the framework's own, by value, <c>ref</c> or <c>in</c>.
@@ -351,7 +353,7 @@ internal static class Symbols
     {
         var kind = Classify(p);
         if (kind != ParamKind.Invalid || !outside || p.RefKind is not (RefKind.None or RefKind.Ref or RefKind.In)) return kind;
-        var element = SpanElement(p.Type) ?? MaybeElement(p.Type) ?? p.Type;
+        var element = SpanElement(p.Type) ?? MaybeElement(p.Type) ?? MutElement(p.Type) ?? p.Type;
         if (IsA(element, Component) || IsA(element, Singleton)) return ParamKind.Invalid; // a component by value
         // A span or other ref struct goes into the job by value: a job holds no ref field to a ref struct.
         if (p.Type.IsRefLikeType && p.RefKind != RefKind.None) return ParamKind.Invalid;
@@ -429,6 +431,8 @@ internal static class Symbols
             return element.IsValueType && IsA(element, Component) ? ParamKind.ComponentSpan : ParamKind.Invalid;
         if (MaybeElement(p.Type) is { } optional)
             return optional.IsValueType && IsA(optional, Component) ? ParamKind.Optional : ParamKind.Invalid;
+        if (MutElement(p.Type) is { } mutable)
+            return mutable.IsValueType && IsA(mutable, Component) ? ParamKind.Mutable : ParamKind.Invalid;
         return p.Type.ToDisplayString() switch
         {
             Entity => ParamKind.Entity,
@@ -455,6 +459,21 @@ internal static class Symbols
             ? named.TypeArguments[0]
             : null;
 
+    /// <summary>Component type of a <c>Mut&lt;T&gt;</c>, else null.</summary>
+    public static ITypeSymbol? MutElement(ITypeSymbol type) =>
+        type is INamedTypeSymbol { IsGenericType: true } named && named.ConstructedFrom.ToDisplayString() == "EasyEcs.Mut<T>"
+            ? named.TypeArguments[0]
+            : null;
+
+    /// <summary>The queried component of a parameter: a <c>ref</c> / <c>in</c> component, a span's element or a <c>Mut</c>'s; else null.</summary>
+    public static ITypeSymbol? QueriedComponent(IParameterSymbol p) => Classify(p) switch
+    {
+        ParamKind.Component => p.Type,
+        ParamKind.ComponentSpan => SpanElement(p.Type),
+        ParamKind.Mutable => MutElement(p.Type),
+        _ => null,
+    };
+
     /// <summary>Whether a [ForEach] method can be generated (all errors are reported by the analyzer).</summary>
     public static bool IsValidForEach(IMethodSymbol method)
     {
@@ -468,7 +487,7 @@ internal static class Symbols
         {
             var kind = Classify(p, outside);
             if (kind == ParamKind.Invalid) return false;
-            if (kind is ParamKind.Component or ParamKind.ComponentSpan) components++;
+            if (kind is ParamKind.Component or ParamKind.ComponentSpan or ParamKind.Mutable) components++;
         }
 
         return ComponentCountValid(method, components) && !MixesBatch(method);
@@ -476,7 +495,7 @@ internal static class Symbols
 
     /// <summary>
     /// A batch method (component spans) takes only spans, its <c>EntitySpan</c> and singletons: per-entity parameters
-    /// (ref/in components, Maybe, Entity, World) have no meaning for a run of rows, and the World could change rows under the
+    /// (ref/in components, Maybe, Mut, Entity, World) have no meaning for a run of rows, and the World could change rows under the
     /// spans. An <c>EntitySpan</c> belongs to a batch method only.
     /// </summary>
     public static bool MixesBatch(IMethodSymbol method)
@@ -487,7 +506,7 @@ internal static class Symbols
             var kind = Classify(p);
             spans |= kind == ParamKind.ComponentSpan;
             entities |= kind == ParamKind.Entities;
-            perEntity |= kind is ParamKind.Component or ParamKind.Entity or ParamKind.World or ParamKind.Optional;
+            perEntity |= kind is ParamKind.Component or ParamKind.Entity or ParamKind.World or ParamKind.Optional or ParamKind.Mutable;
         }
 
         return spans ? perEntity : entities;
@@ -560,7 +579,7 @@ internal static class Symbols
     /// structure.
     /// </summary>
     private static readonly HashSet<string> StructuralEntityMembers =
-        ["Set", "Remove", "Destroy", "GetOrAdd", "Clone", "Disable", "Enable", "AddRelation", "RemoveRelation", "Run"];
+        ["Set", "SetIfChanged", "Remove", "Destroy", "GetOrAdd", "Clone", "Disable", "Enable", "AddRelation", "RemoveRelation", "Run"];
 
     private static readonly HashSet<string> StructuralWorldMembers =
     [

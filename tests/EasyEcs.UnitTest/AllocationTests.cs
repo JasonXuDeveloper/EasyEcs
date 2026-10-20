@@ -21,6 +21,9 @@ public class AllocationTests
         world.AddSystem<Damage>();
         world.AddSystem<ChangedTests.Wear>();
         world.AddSystem<ChangedTests.ArmorWatch>();
+        world.AddSystem<ChangedTests.CapArmor>();          // Mut<T>: stamps per write
+        world.AddSystem<ChangedTests.CapArmorParallel>();
+        world.AddSystem<ChangedTests.PeekAndHit>();        // Mut<T> beside a Maybe<T>: runs of rows
         world.CreateEntities(new Entity[100], new Armor(1_000_000), new Seen(), new Stun(1)); // tracked changes
         var probe = world.CreateEntity(new Health(1));
         var callsigns = world.Index<Callsign, string>();
@@ -37,6 +40,7 @@ public class AllocationTests
             named.Set(new Callsign(named.Callsign.Value == "a" ? "b" : "a")); // re-keyed every frame
             _ = callsigns.Count("a") + callsigns.Count("b");
             probe.Get<Health>().Value++;
+            _ = probe.SetIfChanged(new Health(7)) | probe.SetIfChanged(new Health(7)); // a new value, then an equal one
             probe.Remove<Frozen>();
             probe.Set(new Frozen()); // archetype transitions on cached edges
             for (int i = 0; i < churned.Length; i++) churned[i] = world.CreateEntity(new Position(), new Health(1));

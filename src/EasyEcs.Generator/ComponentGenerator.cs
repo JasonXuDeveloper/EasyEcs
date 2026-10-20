@@ -18,7 +18,7 @@ namespace EasyEcs.Generator;
 /// <c>RemovePosition()</c>. A component the world watches (<c>ITrackChanges</c>, <c>IIndexed&lt;TKey&gt;</c>) gets a
 /// <c>ref readonly</c> property (<c>Read</c>): reading it never counts as a write, and writes are <c>Set…</c> calls; a
 /// tracked one that is neither indexed nor grouped also gets <c>WriteHealth()</c> (<c>ref</c>, <c>Get</c>: stamped as
-/// changed).</item>
+/// changed); a watched one also gets <c>SetHealthIfChanged(…)</c> (<c>SetIfChanged</c>: an equal value is not written).</item>
 /// <item>buffer element <c>Loot</c> (a struct of this compilation some code names in <c>DynamicBuffer&lt;Loot&gt;</c>):
 /// <c>entity.Loot</c> (<c>ref readonly DynamicBuffer&lt;Loot&gt;</c>), <c>HasLoot</c>, <c>WriteLoot()</c>,
 /// <c>GetOrAddLoot()</c>, <c>RemoveLoot()</c> (a relation's links, indexed, get no <c>ref</c> members: they are
@@ -296,6 +296,11 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 foreach (var s in m.Setters)
                     Member($"Adds or overwrites the entity's <see cref=\"{t}\"/> (<c>Set</c>); returns the entity.",
                         $"global::EasyEcs.Entity Set{n}({s.Parameters}) => @this.Set({s.Value});");
+            // A watched component's writer that skips equal values: no stamp, no index update (a value it can compare).
+            if (m.Watched && !m.Tag && m.Comparable && Free("Set" + n + "IfChanged"))
+                foreach (var s in m.Setters)
+                    Member($"Sets the entity's <see cref=\"{t}\"/> unless it already has this value (<c>SetIfChanged</c>): true when it set it; an equal value is not written, stamped or indexed.",
+                        $"bool Set{n}IfChanged({s.Parameters}) => @this.SetIfChanged({s.Value});");
             if (Free("Remove" + n))
                 Member($"Removes the entity's <see cref=\"{t}\"/> if it has one; returns the entity.",
                     $"global::EasyEcs.Entity Remove{n}() => @this.Remove<{t}>();");
@@ -522,7 +527,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
     private sealed record ComponentModel(
         string Namespace, string Type, string Name, string Path, string HintName, bool IsPublic, bool Singleton, bool Tag,
         bool Watched, bool Writable, bool Grouped, bool Cleanup, string IndexKey, bool Unique, bool WorldTaken, EquatableArray<Setter> Setters,
-        EquatableArray<string> Taken, EquatableArray<string> EntityIds, string Layout)
+        EquatableArray<string> Taken, EquatableArray<string> EntityIds, string Layout, bool Comparable)
     {
         private static readonly SymbolDisplayFormat TypeName = Symbols.Fqn
             .AddMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
@@ -556,7 +561,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             var setters = SettersOf(type, fqn, fields);
             string name = type.Name;
             var receiver = singleton ? world : entity;
-            var members = new[] { name, "Has" + name, "Is" + name, "TryGet" + name, "GetOrAdd" + name, "Set" + name, "Remove" + name, "Write" + name };
+            var members = new[] { name, "Has" + name, "Is" + name, "TryGet" + name, "GetOrAdd" + name, "Set" + name, "Remove" + name, "Write" + name, "Set" + name + "IfChanged" };
             // A nested component named like another component of its namespace: both would get entity.X, ambiguous
             // wherever the namespace is imported, so the nested one gets no members (the generic API still works).
             var taken = type.ContainingType != null && HasNamesake(type.ContainingNamespace, type)
@@ -572,7 +577,11 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 tag, tracked || key != null || grouped, tracked && key == null && !grouped, grouped,
                 Symbols.Implements(type, Symbols.Cleanup), key?.ToDisplayString(Symbols.Fqn) ?? "",
                 unique != null && unique.ToDisplayString() != Symbols.EntityId && unique is not ITypeParameterSymbol, world.GetMembers(name + "Index").Length > 0, new EquatableArray<Setter>(setters), new EquatableArray<string>(taken),
-                new EquatableArray<string>(singleton ? [] : Symbols.EntityIdPaths(type, compilation)), Symbols.LayoutHash(type) ?? "");
+                new EquatableArray<string>(singleton ? [] : Symbols.EntityIdPaths(type, compilation)), Symbols.LayoutHash(type) ?? "",
+                // SetIfChanged compares through IEquatable<T>, or the bytes of an unmanaged type (Values.Same).
+                type.IsUnmanagedType || type.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == "System.IEquatable<T>"
+                    && SymbolEqualityComparer.Default.Equals(i.TypeArguments[0], type)));
+
         }
 
         /// <summary>
