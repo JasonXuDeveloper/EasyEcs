@@ -1,0 +1,19 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+
+    <!-- A Godot 4 .NET project: Godot loads this assembly into its own .NET runtime. EasyEcs needs net10.0, so the
+         project targets it (projects made by older editors say net8.0; change that line). -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <EnableDynamicLoading>true</EnableDynamicLoading>
+        <Nullable>enable</Nullable>
+        <RootNamespace>GodotSample</RootNamespace>
+    </PropertyGroup>
+
+    <!-- With the NuGet package this is one line: <PackageReference Include="EasyEcs" Version="..."/> (the package
+         carries the generator). A reference to the sources adds the generator as an analyzer itself. -->
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\EasyEcs.Core\EasyEcs.Core.csproj"/>
+        <ProjectReference Include="..\..\src\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+    </ItemGroup>
+
+</Project>
