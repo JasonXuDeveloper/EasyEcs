@@ -1,5 +1,6 @@
 {
   "title": "API 参考",
+  "icon": "Library",
   "pages": [
     "index",
     "changedanyattribute",

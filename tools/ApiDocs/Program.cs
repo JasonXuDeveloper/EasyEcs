@@ -187,7 +187,7 @@ internal sealed class Reference
 
         if (_translations != null) _translations.Page = "index";
         pages["index" + _lang.Suffix + ".mdx"] = Index();
-        pages["meta" + _lang.Suffix + ".json"] = $"{{\n  \"title\": \"{_lang.ReferenceTitle}\",\n  \"pages\": [\n    \"index\",\n" +
+        pages["meta" + _lang.Suffix + ".json"] = $"{{\n  \"title\": \"{_lang.ReferenceTitle}\",\n  \"icon\": \"Library\",\n  \"pages\": [\n    \"index\",\n" +
                                                  string.Join(",\n", _families.Select(f => $"    \"{f.Slug}\"")) + "\n  ]\n}\n";
         return pages;
     }
