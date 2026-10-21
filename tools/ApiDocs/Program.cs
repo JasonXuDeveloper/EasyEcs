@@ -250,8 +250,8 @@ internal sealed class Reference
     [
         ("Constructors", m => m is IMethodSymbol { MethodKind: MethodKind.Constructor }),
         ("Fields", m => m is IFieldSymbol),
-        ("Properties", m => m is IPropertySymbol { IsIndexer: false }),
-        ("Indexers", m => m is IPropertySymbol { IsIndexer: true }),
+        ("Properties", m => m is IPropertySymbol { IsIndexer: false } && !m.ContainingType.IsExtension), // an extension block's: below
+        ("Indexers", m => m is IPropertySymbol { IsIndexer: true } && !m.ContainingType.IsExtension),
         ("Methods", m => m is IMethodSymbol { MethodKind: MethodKind.Ordinary } method && !method.ContainingType.IsExtension),
         ("Extension members", m => m.ContainingType.IsExtension),
         ("Operators", m => m is IMethodSymbol { MethodKind: MethodKind.UserDefinedOperator or MethodKind.Conversion }),
@@ -372,7 +372,7 @@ internal sealed class Reference
         var members = type.GetMembers().Where(m => Visible(m) && !m.IsImplicitlyDeclared && m is not INamedTypeSymbol &&
                                                    !(m is IMethodSymbol { MethodKind: MethodKind.Ordinary, CanBeReferencedByName: false }) &&
                                                    m is not IMethodSymbol { MethodKind: MethodKind.PropertyGet or MethodKind.PropertySet or MethodKind.EventAdd or MethodKind.EventRemove } &&
-                                                   !(m is IMethodSymbol { IsExtensionMethod: false, IsStatic: true } impl && type.GetTypeMembers().Any(t => t.IsExtension && t.GetMembers(impl.Name).Length != 0)));
+                                                   !(m is IMethodSymbol { IsStatic: true } impl && type.GetTypeMembers().Any(t => t.IsExtension && t.GetMembers(impl.Name).Length != 0)));
         foreach (var block in type.GetTypeMembers().Where(t => t.IsExtension))
             members = members.Concat(block.GetMembers().Where(m => Visible(m) && m is not IMethodSymbol { MethodKind: MethodKind.PropertyGet or MethodKind.PropertySet }));
         // By name, then by shape: metadata order depends on the order the compiler saw the files in.
