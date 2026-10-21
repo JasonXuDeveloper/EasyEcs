@@ -172,6 +172,54 @@ public class CodeFixTests
     [TestCase("EECS033", "Use .P",
         "public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<P>()) n += item.Component1.V; return n; } }",
         "n += item.P.V;")]
+    [TestCase("EECS037", "Declare Writes => 0",
+        "public struct J : IForEach<T> { public int N; public void Execute(ref T t) => N += t.V; }",
+        "public struct J : IForEach<T> { public static int Writes => 0; public int N;")]
+    [TestCase("EECS037", "Declare Writes => 0b1",
+        "public struct J : IForEach<T>\n{\n    public void Execute(ref T t) => t.V++;\n    public static int Writes => 0;\n}",
+        "    public static int Writes => 0b1;\n}")]
+    [TestCase("EECS038", "Keep the ref",
+        "public static class U { public static void F(Entity e) { var p = e.Get<P>(); p.V = 1; } }",
+        "{ ref var p = ref e.Get<P>(); p.V = 1; }")]
+    [TestCase("EECS038", "Keep the ref",
+        "public static class U { public static void F(Entity e) { T t = e.Read<T>(); t.V = 1; } }",
+        "{ ref T t = ref e.Get<T>(); t.V = 1; }")]
+    [TestCase("EECS038", "Keep the ref",
+        "public static class U { public static void F(Entity e) { var t = e.T; t.V++; } }",
+        "{ ref var t = ref e.WriteT(); t.V++; }")]
+    [TestCase("EECS039", "Take it by 'ref'",
+        "public class S : EcsSystem { [ForEach] static void A(Mut<P> p, in Q q) { if (q.V > p.Value.V) p.Write().V = q.V; } }",
+        "static void A(ref P p, in Q q) { if (q.V > p.V) p.V = q.V; }")]
+    [TestCase("EECS025", "Take it by 'in'",
+        "public class S : EcsSystem { [ForEach] static void A(Mut<T> t, ref P p) => p.V = t.Value.V; }",
+        "static void A(in T t, ref P p) => p.V = t.V;")]
+    [TestCase("EECS015", "Read it with Read<T>()",
+        "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } public static class U { public static int F(Entity e) => e.Get<Owned>().K; }",
+        "=> e.Read<Owned>().K;")]
+    [TestCase("EECS015", "Bind it 'ref readonly'",
+        "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<Owned>()) { ref var o = ref item.Component1; n += o.K; } return n; } }",
+        "ref readonly var o = ref item.Component1;")]
+    [TestCase("EECS015", "Take it by 'in'",
+        "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } public class S : EcsSystem { [ForEach] static void A(ref Owned o, ref Clock c) => c.Ticks += o.K; }",
+        "static void A(in Owned o, ref Clock c)")]
+    [TestCase("EECS015", "Take it as a ReadOnlySpan",
+        "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } public class S : EcsSystem { [ForEach] static void A(System.Span<Owned> o, ref Clock c) => c.Ticks += o[0].K; }",
+        "static void A(System.ReadOnlySpan<Owned> o, ref Clock c)")]
+    [TestCase("EECS007", "Make it readonly",
+        "public class S : EcsSystem { private System.Collections.Generic.List<int> _scratch = new(); public int Count => _scratch.Count; }",
+        "private readonly System.Collections.Generic.List<int> _scratch = new();")]
+    [TestCase("EECS007", "Make it readonly",
+        "public class S : EcsSystem { private int _limit; public S(int limit) { _limit = limit; } public int Limit => _limit; }",
+        "private readonly int _limit;")]
+    [TestCase("EECS018", "Return the constant",
+        "public class S : EcsSystem { public override int UpdateInterval { get; } = 5; }",
+        "public override int UpdateInterval => 5;")]
+    [TestCase("EECS017", "Store its EntityId",
+        "public struct Target : IComponent { public Entity Of; }\npublic static class U { public static bool F(Entity e, Entity other) { e.Set(new Target { Of = other }); return e.Read<Target>().Of.Id == other.Id; } }",
+        "public struct Target : IComponent { public EntityId Of; }")]
+    [TestCase("EECS043", "Implement it explicitly",
+        "public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop> { public Shop Key => this; }",
+        "{ Shop IIndexed<Shop>.Key => this; }")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
         var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);
@@ -208,6 +256,15 @@ public class CodeFixTests
     [TestCase("EECS025", "public static class R { [ForEach] static void A(ref P p, ref int n) => n += p.V;\n"
                          + "  public static int Call() { P p = default; int n = 0; A(ref p, ref n); return n; } }")]       // a caller passes 'ref'
     [TestCase("EECS032", "public static class U { public static bool F(World w) => w.Count<P>(QueryFilter.Create().With<Q>()) > 0; }", "Use Any")]
+    [TestCase("EECS017", "public struct Target : IComponent { public Entity Of; } public static class U { public static void F(Entity e) => e.Read<Target>().Of.Destroy(); }")]
+    [TestCase("EECS007", "public class S : EcsSystem { int _kills; void K() => _kills++; }")]
+    [TestCase("EECS007", "public class S : EcsSystem { private int _limit; public S(int limit) { System.Action a = () => _limit = limit; a(); } }")]
+    [TestCase("EECS043", "public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop> { public Shop Key => this; } public static class U { public static long F(Shop s) => s.Key.Id; }")]
+    [TestCase("EECS015", "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } public static class U { public static void F(Entity e) => e.Get<Owned>().K = 1; }")]
+    [TestCase("EECS015", "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } public class S : EcsSystem { [ForEach] static void A(ref Owned o) => o.K++; }")]
+    [TestCase("EECS038", "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } public static class U { public static void F(Entity e) { var o = e.Read<Owned>(); o.K = 1; } }")]
+    [TestCase("EECS039", "public static class R { [ForEach] public static void B(Mut<P> p, in Q q) { if (q.V > 0) p.Write().V = q.V; }\n"
+                         + "  public static void Call() { P p = default; B(new Mut<P>(ref p, default), default); } }")]                 // a caller passes a Mut
     public async Task OffersNoFixThatBreaksTheCode(string id, string source, string only = null)
     {
         var document = Document(Data + source);

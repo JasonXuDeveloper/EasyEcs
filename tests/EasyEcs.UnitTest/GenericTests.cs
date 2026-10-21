@@ -34,8 +34,8 @@ public static class Census
 public struct In<TActor> : IComponent;
 public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, IGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;
-public readonly partial record struct MapActor(long Id) : IActor<MapActor> { public MapActor Key => this; }
-public readonly partial record struct ShopActor(long Id) : IActor<ShopActor> { public ShopActor Key => this; }
+public readonly partial record struct MapActor(long Id) : IActor<MapActor> { MapActor IIndexed<MapActor>.Key => this; }
+public readonly partial record struct ShopActor(long Id) : IActor<ShopActor> { ShopActor IIndexed<ShopActor>.Key => this; }
 
 [UpdateInGroup<MapActor>]
 public class TickMaps : EcsSystem

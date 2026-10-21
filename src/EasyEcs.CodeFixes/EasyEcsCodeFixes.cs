@@ -23,8 +23,9 @@ namespace EasyEcs.CodeFixes;
 public sealed class EasyEcsCodeFixes : CodeFixProvider
 {
     public override ImmutableArray<string> FixableDiagnosticIds { get; } =
-        ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS010", "EECS011", "EECS012", "EECS022", "EECS023",
-            "EECS025", "EECS026", "EECS029", "EECS030", "EECS031", "EECS032", "EECS033");
+        ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
+            "EECS018", "EECS022", "EECS023", "EECS025", "EECS026", "EECS029", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
+            "EECS038", "EECS039", "EECS043");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 
@@ -44,14 +45,47 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
                 continue;
             }
 
+            diagnostic.Properties.TryGetValue("Fix", out var kind);
             switch (diagnostic.Id)
             {
-                case "EECS025" when node.FirstAncestorOrSelf<ParameterSyntax>() is { } p
+                case "EECS025" or "EECS039" when kind is "MutIn" or "MutRef" && node.FirstAncestorOrSelf<ParameterSyntax>() is { Parent.Parent: MethodDeclarationSyntax method } p
+                                                 && FromMut(method, p, kind == "MutIn") is { } plain
+                                                 && !await HasCallers(context.Document, p, context.CancellationToken).ConfigureAwait(false):
+                    Register(context, diagnostic, kind == "MutIn" ? "Take it by 'in'" : "Take it by 'ref'", root, method, plain);
+                    break;
+                case "EECS025" or "EECS015" when kind is "In" or "ReadOnlySpan" && node.FirstAncestorOrSelf<ParameterSyntax>() is { } p
                                     && !await HasCallers(context.Document, p, context.CancellationToken).ConfigureAwait(false):
-                    if (diagnostic.Properties.TryGetValue("Fix", out var kind) && kind == "ReadOnlySpan")
+                    if (kind == "ReadOnlySpan")
                         Register(context, diagnostic, "Take it as a ReadOnlySpan", root, p, ReadOnly(p));
                     else
                         Register(context, diagnostic, "Take it by 'in'", root, p, Modify(p, SyntaxKind.InKeyword));
+                    break;
+                case "EECS015" when kind == "RefReadOnly" && node.FirstAncestorOrSelf<VariableDeclarationSyntax>() is { Type: RefTypeSyntax { ReadOnlyKeyword.RawKind: 0 } type }:
+                    Register(context, diagnostic, "Bind it 'ref readonly'", root, type,
+                        type.WithReadOnlyKeyword(SyntaxFactory.Token(SyntaxKind.ReadOnlyKeyword).WithTrailingTrivia(SyntaxFactory.Space)));
+                    break;
+                case "EECS007" when kind == "Readonly" && node.FirstAncestorOrSelf<FieldDeclarationSyntax>() is { } field:
+                    Register(context, diagnostic, "Make it readonly", root, field,
+                        generator.WithModifiers(field, generator.GetModifiers(field).WithIsReadOnly(true)));
+                    break;
+                case "EECS018" when kind == "ExpressionBody" && node.FirstAncestorOrSelf<PropertyDeclarationSyntax>() is { Initializer.Value: { } value } property:
+                    Register(context, diagnostic, "Return the constant", root, property, property.WithAccessorList(null).WithInitializer(null)
+                        .WithIdentifier(property.Identifier.WithTrailingTrivia(SyntaxFactory.Space))
+                        .WithExpressionBody(SyntaxFactory.ArrowExpressionClause(value.WithoutTrivia()).WithArrowToken(
+                            SyntaxFactory.Token(SyntaxKind.EqualsGreaterThanToken).WithTrailingTrivia(SyntaxFactory.Space))));
+                    break;
+                case "EECS037" when kind == "Writes" && diagnostic.Properties.TryGetValue("Writes", out var writes) && writes != null:
+                    if (Writes(root, node, writes) is { } withWrites)
+                        context.RegisterCodeFix(CodeAction.Create($"Declare Writes => {writes}", _ => Task.FromResult(context.Document.WithSyntaxRoot(withWrites)),
+                            diagnostic.Id), diagnostic);
+                    break;
+                case "EECS043" when node.FirstAncestorOrSelf<PropertyDeclarationSyntax>() is { } key
+                                    && await ExplicitKey(context.Document, key, context.CancellationToken).ConfigureAwait(false) is { } explicitKey:
+                    Register(context, diagnostic, "Implement it explicitly", root, key, explicitKey);
+                    break;
+                case "EECS017" when kind == "EntityId" && node.FirstAncestorOrSelf<FieldDeclarationSyntax>() is { } field:
+                    if (await ToEntityId(context.Document, field, context.CancellationToken).ConfigureAwait(false) is { } ids)
+                        context.RegisterCodeFix(CodeAction.Create("Store its EntityId", _ => Task.FromResult(ids), diagnostic.Id), diagnostic);
                     break;
                 case "EECS026" when diagnostic.Properties.ContainsKey("Fix") && node.FirstAncestorOrSelf<ParameterSyntax>() is { Parent.Parent: MethodDeclarationSyntax method } p
                                     && method.Modifiers.All(m => !m.IsKind(SyntaxKind.PartialKeyword))
@@ -134,6 +168,125 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
         tracked = tracked.ReplaceNode(tracked.GetCurrentNode(node)!, replacement);
         tracked = tracked.RemoveNodes(others.Select(o => tracked.GetCurrentNode(o)!), SyntaxRemoveOptions.KeepNoTrivia)!;
         return document.WithSyntaxRoot(tracked);
+    }
+
+    /// <summary>
+    /// EECS025 / EECS039: a <c>Mut&lt;T&gt;</c> parameter becomes <c>in T</c> (<paramref name="read"/>) or <c>ref T</c>, and
+    /// its uses <c>p.Value</c> and <c>p.Write()</c> become <c>p</c>; null when the type cannot be read off the syntax.
+    /// </summary>
+    private static MethodDeclarationSyntax? FromMut(MethodDeclarationSyntax method, ParameterSyntax parameter, bool read)
+    {
+        var mut = parameter.Type as GenericNameSyntax ?? (parameter.Type as QualifiedNameSyntax)?.Right as GenericNameSyntax;
+        if (mut is not { Identifier.Text: "Mut", TypeArgumentList.Arguments.Count: 1 }) return null;
+        string name = parameter.Identifier.ValueText;
+        var uses = method.DescendantNodes().Where(n =>
+            n is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax w, Name.Identifier.ValueText: "Write" }, ArgumentList.Arguments.Count: 0 }
+                && w.Identifier.ValueText == name
+            || n is MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax v, Name.Identifier.ValueText: "Value" } && v.Identifier.ValueText == name);
+        var plain = SyntaxFactory.Parameter(parameter.AttributeLists, SyntaxFactory.TokenList(), mut.TypeArgumentList.Arguments[0].WithTrailingTrivia(SyntaxFactory.Space),
+            parameter.Identifier, parameter.Default);
+        plain = Modify(plain.WithLeadingTrivia(parameter.GetLeadingTrivia()), read ? SyntaxKind.InKeyword : SyntaxKind.RefKeyword);
+        return method.ReplaceNodes(uses.Append(parameter), (original, _) => original == parameter ? plain
+            : SyntaxFactory.IdentifierName(name).WithTriviaFrom(original));
+    }
+
+    /// <summary>EECS037: the job's Writes declared as <paramref name="value"/>, replacing its declaration or as its first member.</summary>
+    private static SyntaxNode? Writes(SyntaxNode root, SyntaxNode node, string value)
+    {
+        var member = (MemberDeclarationSyntax)SyntaxFactory.ParseMemberDeclaration($"public static int Writes => {value};")!;
+        if (node.FirstAncestorOrSelf<PropertyDeclarationSyntax>() is { Identifier.ValueText: "Writes" } declared)
+            return root.ReplaceNode(declared, member.WithTriviaFrom(declared));
+        if (node.FirstAncestorOrSelf<TypeDeclarationSyntax>() is not { } type) return null;
+        var first = type.Members.FirstOrDefault();
+        var indent = first?.GetLeadingTrivia().Where(t => t.IsKind(SyntaxKind.WhitespaceTrivia)).LastOrDefault() ?? default;
+        var eol = root.DescendantTrivia().FirstOrDefault(t => t.IsKind(SyntaxKind.EndOfLineTrivia));
+        // One line ({ public int N; ... }): the member joins it; one member per line: it gets a line of its own.
+        bool lines = type.OpenBraceToken.TrailingTrivia.Any(t => t.IsKind(SyntaxKind.EndOfLineTrivia))
+                     || first?.GetLeadingTrivia().Any(t => t.IsKind(SyntaxKind.EndOfLineTrivia)) == true;
+        member = lines
+            ? member.WithLeadingTrivia(indent).WithTrailingTrivia(eol.IsKind(SyntaxKind.EndOfLineTrivia) ? eol : SyntaxFactory.LineFeed)
+            : member.WithTrailingTrivia(SyntaxFactory.Space);
+        return root.ReplaceNode(type, type.WithMembers(type.Members.Insert(0, member)));
+    }
+
+    /// <summary>
+    /// EECS043: <c>public Self Key => this;</c> becomes <c>Self IIndexed&lt;Self&gt;.Key => this;</c>, unless code reads
+    /// <c>.Key</c> through the type (an explicit implementation is reached through the interface only).
+    /// </summary>
+    private static async Task<PropertyDeclarationSyntax?> ExplicitKey(Document document, PropertyDeclarationSyntax key, CancellationToken token)
+    {
+        var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
+        if (model?.GetDeclaredSymbol(key, token) is not IPropertySymbol property || key.ExplicitInterfaceSpecifier != null) return null;
+        var face = property.ContainingType.AllInterfaces.FirstOrDefault(i => i.OriginalDefinition.ToDisplayString() == "EasyEcs.IIndexed<TKey>"
+                                                                            && SymbolEqualityComparer.Default.Equals(i.TypeArguments[0], property.ContainingType));
+        if (face == null) return null;
+        // A read of .Key through the type (not the interface) would no longer compile.
+        foreach (var other in document.Project.Documents)
+        {
+            var otherRoot = await other.GetSyntaxRootAsync(token).ConfigureAwait(false);
+            if (otherRoot == null) continue;
+            SemanticModel? otherModel = null;
+            foreach (var name in otherRoot.DescendantNodes().OfType<IdentifierNameSyntax>())
+            {
+                if (name.Identifier.ValueText != "Key" || name.Parent == key) continue;
+                otherModel ??= await other.GetSemanticModelAsync(token).ConfigureAwait(false);
+                if (SymbolEqualityComparer.Default.Equals(otherModel?.GetSymbolInfo(name, token).Symbol, property)) return null;
+            }
+        }
+
+        var modifiers = SyntaxFactory.TokenList(key.Modifiers.Where(m => !SyntaxFacts.IsAccessibilityModifier(m.Kind())));
+        return key.WithModifiers(modifiers)
+            .WithExplicitInterfaceSpecifier(SyntaxFactory.ExplicitInterfaceSpecifier(SyntaxFactory.ParseName(face.ToMinimalDisplayString(model, key.SpanStart))))
+            .WithLeadingTrivia(key.GetLeadingTrivia());
+    }
+
+    /// <summary>
+    /// EECS017: an <c>Entity</c> field becomes an <c>EntityId</c> when every use still compiles: <c>x.Field.Id</c> (which
+    /// becomes <c>x.Field</c>), a comparison, an assignment to it, or a use as an <c>EntityId</c> (a conversion); null
+    /// otherwise (a member of the handle, the handle passed on).
+    /// </summary>
+    private static async Task<Solution?> ToEntityId(Document document, FieldDeclarationSyntax field, CancellationToken token)
+    {
+        var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
+        if (model == null || field.Declaration.Variables.Count != 1
+            || model.GetDeclaredSymbol(field.Declaration.Variables[0], token) is not IFieldSymbol symbol
+            || model.Compilation.GetTypeByMetadataName("EasyEcs.EntityId") is not { } entityId) return null;
+        var solution = document.Project.Solution;
+        var edits = new System.Collections.Generic.Dictionary<DocumentId, System.Collections.Generic.List<(SyntaxNode Old, SyntaxNode New)>>();
+        foreach (var found in await Microsoft.CodeAnalysis.FindSymbols.SymbolFinder.FindReferencesAsync(symbol, solution, token).ConfigureAwait(false))
+        foreach (var location in found.Locations)
+        {
+            if (location.IsImplicit || location.IsCandidateLocation) return null;
+            var useRoot = await location.Document.GetSyntaxRootAsync(token).ConfigureAwait(false);
+            var useModel = await location.Document.GetSemanticModelAsync(token).ConfigureAwait(false);
+            if (useRoot?.FindNode(location.Location.SourceSpan, getInnermostNodeForTie: true) is not SimpleNameSyntax name || useModel == null) return null;
+            ExpressionSyntax use = name.Parent is MemberAccessExpressionSyntax access && access.Name == name ? access : name;
+            if (!edits.TryGetValue(location.Document.Id, out var list)) edits[location.Document.Id] = list = new();
+            switch (use.Parent)
+            {
+                case MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Id" } id when id.Expression == use:
+                    list.Add((id, use.WithTriviaFrom(id)));
+                    break;
+                case BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.EqualsExpression) || binary.IsKind(SyntaxKind.NotEqualsExpression):
+                case AssignmentExpressionSyntax assignment when assignment.Left == use && assignment.IsKind(SyntaxKind.SimpleAssignmentExpression):
+                    break;
+                default:
+                    if (!SymbolEqualityComparer.Default.Equals(useModel.GetTypeInfo(use, token).ConvertedType, entityId)) return null;
+                    break;
+            }
+        }
+
+        var type = SyntaxFactory.ParseTypeName(entityId.ToMinimalDisplayString(model, field.SpanStart)).WithTriviaFrom(field.Declaration.Type);
+        if (!edits.TryGetValue(document.Id, out var own)) edits[document.Id] = own = new();
+        own.Add((field.Declaration.Type, type));
+        foreach (var edit in edits)
+        {
+            var root = await solution.GetDocument(edit.Key)!.GetSyntaxRootAsync(token).ConfigureAwait(false);
+            var map = edit.Value.ToDictionary(e => e.Old, e => e.New);
+            solution = solution.WithDocumentSyntaxRoot(edit.Key, root!.ReplaceNodes(map.Keys, (original, _) => map[original]));
+        }
+
+        return solution;
     }
 
     /// <summary>EECS025: <c>Span&lt;T&gt;</c> (however it is spelled) becomes <c>ReadOnlySpan&lt;T&gt;</c>.</summary>

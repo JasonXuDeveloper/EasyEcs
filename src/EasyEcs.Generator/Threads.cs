@@ -15,18 +15,20 @@ namespace EasyEcs.Generator;
 /// </summary>
 internal static class Threads
 {
-    public static bool Concurrent(IInvocationOperation call, IOperation function, IOperation handoff, IMethodSymbol starter,
+    /// <param name="function">The code the thread runs: a lambda's or anonymous method's syntax, or the declaration of
+    /// the method a method group hands off.</param>
+    public static bool Concurrent(IInvocationOperation call, SyntaxNode function, IOperation handoff, IMethodSymbol starter,
         CancellationToken token)
     {
         var (root, throughElement) = Root(Symbols.Receiver(call));
-        if (root == null || !Captured(root, function.Syntax)) return false;
+        if (root == null || !Captured(root, function)) return false;
         bool world = Symbols.OnWorld(call);
         if (world && throughElement) return false; // worlds[i]: a world per item, each with one owner
 
         if (starter.ContainingType.ToDisplayString() == "System.Threading.Tasks.Parallel") return true; // runs at once
         if (Awaited(handoff.Syntax)) return false;                    // the caller waits for it: one change after the other
         if (InLoop(handoff.Syntax, root)) return true;                                                 // handed off again
-        return ChangedOutside(root, function.Syntax, handoff, token);
+        return ChangedOutside(root, function, handoff, token);
     }
 
     /// <summary>The variable, parameter, field or property a receiver comes from, and whether an element of it is used.</summary>

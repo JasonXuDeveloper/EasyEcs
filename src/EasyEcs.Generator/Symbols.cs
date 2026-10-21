@@ -671,16 +671,17 @@ internal static class Symbols
     }
 
     /// <summary>
-    /// The thread-starting calls (Task.Run, TaskFactory.StartNew, Parallel.*, ThreadPool.*, new Thread / Task / Timer)
-    /// that run a delegate argument on another thread.
+    /// The thread-starting calls (Task.Run, Task.ContinueWith, TaskFactory.StartNew, Parallel.*, ThreadPool.*, new Thread /
+    /// Task / Timer) that run a delegate argument on another thread.
     /// </summary>
     public static bool StartsThread(IMethodSymbol method)
     {
         string type = method.ContainingType?.ToDisplayString() ?? "";
         return type switch
         {
-            "System.Threading.Tasks.Task" => method.Name is "Run" || method.MethodKind == MethodKind.Constructor,
-            "System.Threading.Tasks.Task<TResult>" => method.MethodKind == MethodKind.Constructor,
+            // ContinueWith runs its continuation on the thread pool when the task completes
+            "System.Threading.Tasks.Task" => method.Name is "Run" or "ContinueWith" || method.MethodKind == MethodKind.Constructor,
+            "System.Threading.Tasks.Task<TResult>" => method.Name == "ContinueWith" || method.MethodKind == MethodKind.Constructor,
             "System.Threading.Tasks.TaskFactory" or "System.Threading.Tasks.TaskFactory<TResult>" => method.Name == "StartNew",
             "System.Threading.Tasks.Parallel" => true,
             "System.Threading.ThreadPool" => method.Name is "QueueUserWorkItem" or "UnsafeQueueUserWorkItem"

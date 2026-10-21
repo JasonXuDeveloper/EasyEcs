@@ -7,6 +7,7 @@ namespace EasyEcs.UnitTest;
 public class RunTests
 {
     // Heals by its amount and, once healthy, takes armor (a structural change in the middle of the job).
+#pragma warning disable EECS037 // Armor left out of Writes on purpose: the test checks it is neither carried over nor stamped
     private struct Heal(int amount) : IForEachEntity<Health, Armor>
     {
         public int Runs;
@@ -22,6 +23,7 @@ public class RunTests
 
         public static int Writes => 1; // Health only: Armor is read (its writes are not carried over nor stamped)
     }
+#pragma warning restore EECS037
 
     private struct Read : IForEachEntity<Health>, INoStructuralChanges
     {

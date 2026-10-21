@@ -40,11 +40,14 @@ public class IndexTests
 #pragma warning restore EECS028
 
     /// <summary>A component with two key types: only one of them can be indexed.</summary>
+#pragma warning disable EECS036 // the second key World.Index refuses is what these tests cover
     private record struct TwoKeys(int Number, string Name) : IComponent, IIndexed<int>, IIndexed<string>
     {
         readonly int IIndexed<int>.Key => Number;
         readonly string IIndexed<string>.Key => Name;
     }
+#pragma warning restore EECS036
+
 
     /// <summary>A unique component the generator registers nothing for (generic): its index waits for a first Index call.</summary>
     private record struct Ticket<TOf>(int Id) : IComponent, IUniqueIndexed<int>
