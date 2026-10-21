@@ -60,7 +60,7 @@ Entity bobThere = arrived[0];
 bool sameValues = bobThere.Name.Value == "bob" && bobThere.Health.Value == 100;
 checks.That("the copy has bob's values", sameValues);
 // ChildOf is an indexed component: its index counts the children of a parent.
-int swordsThere = other.Index<ChildOf, EntityId>().Count(bobThere.Id);
+int swordsThere = other.ChildOfIndex.Count(bobThere.Id);
 bool linksFollow = swordsThere == 2 && bobThere.Id != bob.Id;
 checks.That("his swords point at his new id", linksFollow);
 
@@ -75,7 +75,7 @@ checks.That("carol left the zone", !carol.IsAlive && zone.Count<Name>() == 1);
 checks.That("and arrived with her values", moved[0].Position == new Position(-3, 7));
 Console.WriteLine($"zone:     {WorldText.Describe(zone)}");
 Console.WriteLine($"other:    {WorldText.Describe(other)}");
-int aliceSwords = zone.Index<ChildOf, EntityId>().Count(alice.Id);
+int aliceSwords = zone.ChildOfIndex.Count(alice.Id);
 checks.That("alice stayed", alice.IsAlive && aliceSwords == 1);
 
 Console.WriteLine(checks.AllPassed ? "all checks passed" : "a check failed");
