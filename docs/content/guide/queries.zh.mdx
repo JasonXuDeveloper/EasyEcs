@@ -14,7 +14,7 @@ icon: Funnel
 <Callout type="idea" title="适合">
   系统之外的遍历：两次更新之间的请求处理、工具、测试、一次性的遍历。单个实体上的 job（[`entity.Run`](#run-on-one-entity)）：
   请求的处理函数、发给 actor 的消息的处理函数。计数和存在性判断（`Count`、`Any`）。批量销毁
-  （`DestroyEntities<T>(filter)`）。以及过滤器本身：`[ForEach]` 方法用特性的形式使用同样的过滤。
+  （`DestroyEntities<T>(filter)`）。以及过滤条件本身：`[ForEach]` 方法用特性的形式使用同样的过滤。
 </Callout>
 
 <Callout type="warn" title="不适合">
@@ -27,7 +27,7 @@ icon: Funnel
 <Steps>
 <Step>
 
-### 过滤器只建一次 [#build-the-filter]
+### 过滤条件只建一次 [#build-the-filter]
 
 `QueryFilter` 是一个用链式调用构建的值，每个都放进 `static readonly` 字段。
 
@@ -95,7 +95,7 @@ int cleared = world.DestroyEntities<Position>(QueryFilter.Create().With<Dead>())
 | 每次只处理一部分行，N 次遍历把每行各过一遍 | `ForEach` 系列调用配 `Slice(index, count)`，或 [`[ForEach(Slices = N)]`](/zh/docs/guide/systems#slices) |
 | 按值查找，或找指向某实体的实体 | `world.Index<T, TKey>().Find(key)`（[索引](/zh/docs/guide/indexes-and-relations)） |
 
-### 过滤器 [#filters]
+### 过滤条件 [#filters]
 
 | 过滤 | 选出 | 对应的 `[ForEach]` 特性 |
 | --- | --- | --- |
@@ -108,11 +108,11 @@ int cleared = world.DestroyEntities<Position>(QueryFilter.Create().With<Dead>())
 | `RemovedAny<T1..Tn>(since)` | 在 `since` 及之后至少失去其中一个被追踪组件、且至今没有补回的实体 | `[RemovedAny<T1, …, Tn>]` |
 | `InGroup<T>(group)` | `T` 属于某一个[分组](/zh/docs/guide/groups)的实体 | 无；`IGroup` 组件 `Team` 会生成 `filter.InTeam(group)` |
 | `Slice(index, count)` | 每张匹配表的行切成 `count` 片，只取第 `index` 片，按 64 行的字切；只对 `ForEach`、`ForEachEntity`、`ForEachBatch` 及其 `Parallel` 版本有效 | `[ForEach(Slices = N)]`（[分片](/zh/docs/guide/systems#slices)） |
-| `Since(tick)` | 同一个过滤器，把其中的 `Changed`、`Removed`、`ChangedAny`、`RemovedAny` 换到另一个 tick | |
+| `Since(tick)` | 同一个过滤条件，把其中的 `Changed`、`Removed`、`ChangedAny`、`RemovedAny` 换到另一个 tick | |
 
-所有过滤都可以重复、可以组合。一个过滤器里的 `ChangedAny` 并成一组，组里任意一个组件满足就算通过（`RemovedAny`
-另成一组）；这些组再和其他条件取“与”。一个过滤器只有一个 tick：其中的 `Changed`、`Removed`、`ChangedAny` 和
-`RemovedAny` 必须用同一个（否则抛 `ArgumentException`），`Since(tick)` 会同时移动它们，所以放在字段里的过滤器每次更新后
+所有过滤都可以重复、可以组合。一个过滤条件里的 `ChangedAny` 并成一组，组里任意一个组件满足就算通过（`RemovedAny`
+另成一组）；这些组再和其他条件取“与”。一个过滤条件只有一个 tick：其中的 `Changed`、`Removed`、`ChangedAny` 和
+`RemovedAny` 必须用同一个（否则抛 `ArgumentException`），`Since(tick)` 会同时移动它们，所以放在字段里的过滤条件每次更新后
 都能接着用，也能[给每个客户端](/zh/docs/guide/change-tracking#per-client)各用一次它确认到的 tick：
 
 ```csharp
@@ -132,7 +132,7 @@ int dirty = world.Count<Armor>(Replication.Dirty.Since(mark));
 
 `Slice(index, count)` 让一次遍历只处理每张表的一部分：index 从 0 到 `count - 1` 轮流跑一遍，每一行正好过一次。只有
 `ForEach` 系列认它；`Query`、`Count`、`Any`、`DestroyEntities`、`entity.Run` 和批量调用（`SetAll`、`RemoveAll` 等）需要
-所有匹配的行，遇到分片过滤器会抛 `ArgumentException`。在系统里，[`[ForEach(Slices = N)]`](/zh/docs/guide/systems#slices)
+所有匹配的行，遇到分片过滤条件会抛 `ArgumentException`。在系统里，[`[ForEach(Slices = N)]`](/zh/docs/guide/systems#slices)
 会替你选好这一次的分片。
 
 ### `Query`：foreach 循环 [#query-loop]
@@ -232,7 +232,7 @@ world.ForEachBatch<Position, Velocity, Drift>(ref drift, Filters.Active);
 ```csharp
 public static class Hits
 {
-    // 只建一次：过滤器是值，放在字段里。
+    // 只建一次：过滤条件是值，放在字段里。
     public static readonly QueryFilter Alive = QueryFilter.Create().Without<Dead>();
 }
 
@@ -254,7 +254,7 @@ var hit = new TakeHit { Damage = 30 };
 bool applied = unit.Run<Health, TakeHit>(ref hit, Hits.Alive);   // false：已死亡、没有 Health，或已不存活
 ```
 
-不带过滤器的 `entity.Run<T1..Tn, TJob>(ref job)` 只检查实体是否存活、是否有这些组件。只读的 job 声明 `Writes => 0`：
+不带过滤条件的 `entity.Run<T1..Tn, TJob>(ref job)` 只检查实体是否存活、是否有这些组件。只读的 job 声明 `Writes => 0`：
 
 ```csharp
 public struct ReadHealth : IForEachEntity<Health>
@@ -281,7 +281,7 @@ if (unit.Run<Health, ReadHealth>(ref read)) Console.WriteLine(read.Value);
   （`Without`、`WithAny`、`Changed<T>(tick)`、分组），不用去查询缓存里找表；过滤条件建一次，放在 `static readonly` 字段里。
 - **在分析器眼里，`Run` 是结构变更**（它的 job 可能改结构），结构变更不允许的地方它也不允许：并行 `[ForEach]` 方法里
   （[EECS010](/zh/docs/guide/analyzer#eecs010)）、不接收 `Entity` 或 `World` 的 `[ForEach]` 方法里
-  （[EECS013](/zh/docs/guide/analyzer#eecs013)）、World 所属线程之外（[EECS014](/zh/docs/guide/analyzer#eecs014)）。
+  （[EECS013](/zh/docs/guide/analyzer#eecs013)）、World 的所有者线程之外（[EECS014](/zh/docs/guide/analyzer#eecs014)）。
 
 最典型的用法是 actor：每个消息处理函数通过[值索引](/zh/docs/guide/indexes-and-relations)找到 actor 的实体，在它身上跑一个 job。
 [Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)就是这样写成的完整程序。
@@ -446,12 +446,12 @@ sum of X: 11
 | 别这样 | 这样做 | 原因 |
 | --- | --- | --- |
 | 每个 tick 跑一个 `Query` 循环 | 系统里的 `[ForEach]` 方法 | 生成的结构体 job，参与排序和调度 |
-| 每次调用都 `QueryFilter.Create()…` | `static readonly` 过滤器 | 缓存键只建一次 |
+| 每次调用都 `QueryFilter.Create()…` | `static readonly` 过滤条件 | 缓存键只建一次 |
 | 只读被追踪组件的 `Query` | `Writes => 0` 的 job，或 `in` 参数 | 元素会给交出的行打 tick |
 | 很少用到实体却用 `ForEachEntity` | 带 `EntitySpan` 的批处理 job | 只给需要的行构造句柄 |
 | 对大量行写标量循环 | 用 `Vector<T>` 的批处理 job | JIT 不会自己向量化 |
 | `Count(...) > 0` | `Any(...)` | 找到第一个就停（[EECS032](/zh/docs/guide/analyzer#eecs032)） |
-| 每个请求几次 `Get` / `TryGetRef` 再加一次 `Has<Dead>()` | 用 `static readonly` 过滤器调 [`entity.Run`](#run-on-one-entity) | 只查一次；ref 跨结构变更依然有效 |
+| 每个请求几次 `Get` / `TryGetRef` 再加一次 `Has<Dead>()` | 用 `static readonly` 过滤条件调 [`entity.Run`](#run-on-one-entity) | 只查一次；ref 跨结构变更依然有效 |
 | 扫描查找某个键 | [值索引](/zh/docs/guide/indexes-and-relations) | O(匹配数)，而不是 O(行数) |
 
 同样的写入：对 1 万个实体做 `Position += Velocity`。两个普通数组（`RawArrayWrite`）、`[ForEach]` 系统（`ForEachSystemWrite`）、
@@ -463,7 +463,7 @@ sum of X: 11
 
 <BenchTable bench="RunnerBenchmark" />
 
-调用本身的开销，统计 16 个实体：调用时现建过滤器、过滤器放在字段里、不带过滤器、以及超出按签名缓存范围的过滤器（`CallSiteBenchmark`）：
+调用本身的开销，统计 16 个实体：调用时现建过滤条件、过滤条件放在字段里、不带过滤条件、以及超出按签名缓存范围的过滤条件（`CallSiteBenchmark`）：
 
 <BenchTable bench="CallSiteBenchmark" />
 
@@ -477,11 +477,11 @@ sum of X: 11
 
 ## 开销 [#what-it-costs]
 
-- **某个查询形状**（组件加过滤器）**第一次使用时**会把所有表过一遍，建好缓存项。之后新建的表会自动加入它匹配的缓存项。
+- **某个查询形状**（组件加过滤条件）**第一次使用时**会把所有表过一遍，建好缓存项。之后新建的表会自动加入它匹配的缓存项。
 - **之后每次调用**通过一个按签名的小缓存找到缓存项，超出时做一次哈希查找，然后遍历 O(匹配表数 + 行数)。
 - **带过滤的行**按存在位每次测 64 行；全部通过的字每次 SIMD 比较跨过四个，没有匹配的字直接跳过。
 - **`Count`** 是 O(匹配表数)，行状态不一致的表再加上每个字一次 popcount。
-- **不分配内存**：过滤器是不含对象引用的值，枚举器和元素是 ref struct，job 是结构体。
+- **不分配内存**：过滤条件是不含对象引用的值，枚举器和元素是 ref struct，job 是结构体。
 
 ## 常见陷阱 [#pitfalls]
 
@@ -493,13 +493,13 @@ sum of X: 11
 | 会改结构的 job 却实现了 `INoStructuralChanges` | 变更处抛 `InvalidOperationException` | 运行时 |
 | 批处理 job 里做结构变更 | 抛 `InvalidOperationException`：span 指向表 | 运行时（`[ForEach]` 方法由 [EECS013](/zh/docs/guide/analyzer#eecs013) 检查） |
 | 并行 job 写单例组件或别的实体 | 块之间发生竞争 | 代码审查（`[ForEach]` 方法由 [EECS010](/zh/docs/guide/analyzer#eecs010) 检查） |
-| 一个过滤器里 `Changed`、`Removed`、`ChangedAny` 或 `RemovedAny` 用了不同的 tick | 抛 `ArgumentException` | 运行时 |
-| 把分片过滤器（`Slice`）传给 `Query`、`Count`、`Any`、`DestroyEntities`、`entity.Run` 或批量调用 | 抛 `ArgumentException`：这些调用需要所有匹配的行 | 运行时 |
+| 一个过滤条件里 `Changed`、`Removed`、`ChangedAny` 或 `RemovedAny` 用了不同的 tick | 抛 `ArgumentException` | 运行时 |
+| 把分片过滤条件（`Slice`）传给 `Query`、`Count`、`Any`、`DestroyEntities`、`entity.Run` 或批量调用 | 抛 `ArgumentException`：这些调用需要所有匹配的行 | 运行时 |
 | 在同一个 World 的查询循环里调用 `Update()` | 遍历顺序不确定 | 代码审查；在系统里调用时由 [EECS034](/zh/docs/guide/analyzer#eecs034) 检查 |
 | `entity.Run` 的 job 没声明 `Writes` | 默认值 -1 会给 job 拿到的每个被追踪组件打 tick | 声明 `Writes`（只读的 job 写 `0`） |
 | 会改结构的 `Run` job 却实现了 `INoStructuralChanges` | 变更处抛 `InvalidOperationException` | 运行时 |
 | 把 `Run` 返回 `false` 当成“死了” | 缺组件、过滤条件不满足也返回 `false` | 代码审查：查 `IsAlive` |
-| 每次调 `Run` 或查询都现建 `QueryFilter.Create()…` | 每次都重建过滤器、重新查找 | 代码审查：放进 `static readonly` 字段 |
+| 每次调 `Run` 或查询都现建 `QueryFilter.Create()…` | 每次都重建过滤条件、重新查找 | 代码审查：放进 `static readonly` 字段 |
 | 在并行 `[ForEach]` 方法里调 `entity.Run` | 它的 job 可能在多个线程上改结构 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
 
 ## 相关页面 [#related]

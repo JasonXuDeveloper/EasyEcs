@@ -43,10 +43,11 @@ public class BurstSystem : EcsSystem
             float v = speed * (0.75f + 0.25f * Units.Unit(tick, n + 1));
             float life = MinLife + Units.Unit(tick, n + 2) * (MaxLife - MinLife);
 
-            var spark = world.Instantiate(Units.Spark);
-            spark.Position = at;
-            spark.Velocity = new Velocity(MathF.Cos(angle) * v, MathF.Sin(angle) * v);
-            spark.Lifetime = new Lifetime(life, life);
+            world.Instantiate(
+                Units.Spark,
+                at,
+                new Velocity(MathF.Cos(angle) * v, MathF.Sin(angle) * v),
+                new Lifetime(life, life));
         }
     }
 }

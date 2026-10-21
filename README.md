@@ -230,8 +230,8 @@ Against v4.0.1 (4.33 ms, measured in an earlier run on the same VM; v4.0.1 is no
 2.5x faster.
 
 A `[ForEach]` system adding `Velocity` to `Position` over 10,000 entities (one archetype) takes 9.1 μs, against
-12.8 μs for two plain arrays with no ECS at all (its columns are 64-byte aligned). Micro benchmarks (with v3.1.1 and
-v4.0.1 numbers for comparison) and the per-operation comparison are in
+12.8 μs for two plain arrays with no ECS at all (its columns are 64-byte aligned). Micro benchmarks and the
+per-operation comparison are in
 [Performance](https://ecs.xgamedev.net/docs/performance); their `ForEach` and
 `Query` rows run on a world with two archetypes, so they are not directly comparable to the `[ForEach]` row.
 
@@ -525,8 +525,8 @@ v4 is a rewrite for .NET 10 with standard ECS vocabulary in a single `EasyEcs` n
 - Systems are synchronous `EcsSystem`s with source-generated `[ForEach]` methods (no UniTask dependency).
 - Entity ids are recycled; singletons are per world; system groups with `[UpdateInGroup<T>]`.
 - The analyzer enforces the ECS principles (EECS006-EECS008); events were replaced by state-as-data.
-- `WorldOptions.Parallel` (`ParallelSystems` since 4.1) runs systems of one priority together only when their generated read/write access does
-  not conflict: parallel with the same result as sequential, allocation-free.
+- `WorldOptions.Parallel` (`ParallelSystems` since 4.1) runs consecutive systems of a group that no `[UpdateBefore<T>]` /
+  `[UpdateAfter<T>]` ordering separates together, only when their generated read/write access does not conflict: parallel with the same result as sequential, allocation-free.
 - A `[ForEach]` method may take no component when a `[With<T>]` names what to query
   (`[ForEach, With<Dead>] static void Remove(Entity e)`).
 

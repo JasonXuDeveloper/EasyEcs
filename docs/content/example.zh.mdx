@@ -63,7 +63,7 @@ flowchart LR
 | [预制体](/zh/docs/guide/prefabs)（`Prefab`、`Instantiate`、`EnsureCapacity`）与克隆 | `Hero`、`Grunt`、`Brute`（`Grunt` 的变体）；`Mirror` 克隆一个活着的单位 |
 | [实例化时直接给值](/zh/docs/guide/prefabs#instantiate-with-values) | `Shot` 连同位置、速度和 `ChildOf` 一起生成；`SpawnNpc`；`Join` |
 | [变更追踪](/zh/docs/guide/change-tracking)与移除检测 | `ReplicationSystem`；`WrittenSinceCheckpoint` |
-| 每个客户端一份 tick 的 [`ChangedAny`](/zh/docs/guide/change-tracking#changed-any)、[销毁日志](/zh/docs/guide/change-tracking#destroy-log) | `CatchUp`：过滤器只存一个，每个客户端用自己的 tick；`DestroyedSince` |
+| 每个客户端一份 tick 的 [`ChangedAny`](/zh/docs/guide/change-tracking#changed-any)、[销毁日志](/zh/docs/guide/change-tracking#destroy-log) | `CatchUp`：过滤条件只存一个，每个客户端用自己的 tick；`DestroyedSince` |
 | [动态缓冲](/zh/docs/guide/dynamic-buffers) | 每个玩家的 `Loot` 背包 |
 | [分组](/zh/docs/guide/groups)（`IGroup`、`GroupBy`、`InGroup`） | `Zone`：每个区域一组表 |
 | [有序索引、关系、目标策略](/zh/docs/guide/indexes-and-relations) | `Kills` 击杀榜；`Friend` 好友关系，玩家离开时自动清掉 |
@@ -149,7 +149,7 @@ NPC），以及通过 `ref` 写过的背包（`[Changed<DynamicBuffer<Loot>>]`�
 
 `ReplicationSystem` 面向每次同步都收到了的客户端。断开一阵再回来的客户端（重连、丢包）确认过的是更早的 tick，而且每个客户端
 各不相同。`CatchUp` 只凭这个 tick 就能回答，服务端不用给每个客户端存状态：`ChangedAny<Health, Burning, Goal>`
-只存一个过滤器，选出三者任一变过的单位，`Since(acked)` 换上这个客户端的 tick 来跑；`Removed<Burning>` 再补上熄灭的火。
+只存一个过滤条件，选出三者任一变过的单位，`Since(acked)` 换上这个客户端的 tick 来跑；`Removed<Burning>` 再补上熄灭的火。
 客户端还得知道哪些单位没了，而被销毁的实体已经没有行可找，所以 World 开了销毁日志（`WorldOptions.DestroyLog`，一个环形缓冲，
 记着最近销毁的 id）：`DestroyedSince` 列出这个 tick 以来销毁的 id。客户端落后得比环形缓冲还远时，它返回 false，
 客户端就重新拿一遍整场战斗。
@@ -170,9 +170,9 @@ NPC），以及通过 `ref` 写过的背包（`[Changed<DynamicBuffer<Loot>>]`�
 
 `BattleServer` 在一个线程上独占一个 World，负责 tick，并在两次 tick 之间回答查询。
 
-### 过滤器与预制体 [#prefabs]
+### 过滤条件与预制体 [#prefabs]
 
-过滤器只建一次，放在 `static readonly` 字段里；`WrittenPlayers`、`ClientChanges` 和 `FiresOut` 每次调用时用 `Since`
+过滤条件只建一次，放在 `static readonly` 字段里；`WrittenPlayers`、`ClientChanges` 和 `FiresOut` 每次调用时用 `Since`
 换上新的 tick。预制体是不属于任何 World 的配方，查询看不到它们：`Hero` 既可以一次设置多个组件，也可以用生成的方法逐个设置；
 `Brute` 是变体，复制自 `Grunt` 并改了三个值；`Shot` 只放每颗投射物都一样的部分，其余的在发射时给出。
 

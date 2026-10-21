@@ -37,16 +37,16 @@ The process exits with 0 when every check passes and with 1 otherwise.
 
 ```text
 zone:     [alice@(1,2) hp 100 item1x3 item2x1 sword+10; bob@(5,5) hp 100 item1x3 item2x1 sword+11 sword+10; carol@(-3,7) hp 100 item1x3 item2x1] clock 1234
-reloaded: [alice@(1,2) hp 100 item1x3 item2x1 sword+10; bob@(5,5) hp 100 item1x3 item2x1 sword+11 sword+10; carol@(-3,7) hp 100 item1x3 item2x1] clock 1234 (690 bytes on disk)
+reloaded: [alice@(1,2) hp 100 item1x3 item2x1 sword+10; bob@(5,5) hp 100 item1x3 item2x1 sword+11 sword+10; carol@(-3,7) hp 100 item1x3 item2x1] clock 1234 (425 bytes on disk)
   ok   a reload has the same entities, values and clock
   ok   a handle's id names the same entity after a reload
   ok   the copy has bob's values
   ok   his swords point at his new id
-other:    [bob@(5,5) hp 100 item1x3 item2x1 sword+11 sword+10] clock 0
+other:    [bob@(5,5) hp 100 item1x3 item2x1 sword+10 sword+11] clock 0
   ok   carol left the zone
   ok   and arrived with her values
 zone:     [alice@(1,2) hp 100 item1x3 item2x1 sword+10] clock 1234
-other:    [bob@(5,5) hp 100 item1x3 item2x1 sword+11 sword+10; carol@(-3,7) hp 100 item1x3 item2x1] clock 0
+other:    [bob@(5,5) hp 100 item1x3 item2x1 sword+10 sword+11; carol@(-3,7) hp 100 item1x3 item2x1] clock 0
   ok   alice stayed
 all checks passed
 ```

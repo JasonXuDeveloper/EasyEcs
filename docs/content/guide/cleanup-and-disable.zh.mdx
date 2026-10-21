@@ -176,7 +176,7 @@ int pooled = world.Count<Bullet>(QueryFilter.Create().With<Inactive>());   // �
 
 ### 区分新实体：`Spawned` 标签 [#spawned-tag]
 
-EasyEcs 没有 `Added<T>` 过滤器。`[Changed<T>]` 已经会选中新得到 `T` 的行（添加和写入一样会打 tick）。如果系统必须区分新实体
+EasyEcs 没有 `Added<T>` 过滤条件。`[Changed<T>]` 已经会选中新得到 `T` 的行（添加和写入一样会打 tick）。如果系统必须区分新实体
 和被写过的实体，就让创建方加一个标签，响应的系统再把它去掉（[决策 D4](/zh/docs/decisions#d4-no-addedt-filter)）：
 
 ```csharp

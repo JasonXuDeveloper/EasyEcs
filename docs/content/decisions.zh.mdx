@@ -8,8 +8,7 @@ icon: Lightbulb
 import { Cpu, Milestone, Shapes } from 'lucide-react';
 
 EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为什么，以及和哪些方案比较过（由测量拍板的，附上 BenchmarkDotNet 数据）。
-决定改了，记录就重写；放弃的功能连同理由留在这里，没有新的事实就不必再提。本页是英文版的忠实摘要，完整论证与全部数据见
-[英文原文](/en/docs/decisions)。
+决定改了，记录就重写；放弃的功能连同理由留在这里，没有新的事实就不必再提。
 
 记录里的数字是当时做决定所依据的测量：在当时的机器上用 BenchmarkDotNet 测改动前后，属于历史数据，不是当前结果。
 当前数据见[性能指南](/zh/docs/performance)和[横向对比](/zh/docs/comparison)；接下来的计划见[路线图](/zh/docs/roadmap)。
@@ -33,7 +32,7 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D15](#d15-net-10-only) | 只支持 .NET 10 |
 | [D16](#d16-no-partial-generated-code-lives-outside-the-users-type) | 不需要 `partial`：生成的代码不放进用户的类型 |
 | [D17](#d17-unloading-removes-types-from-worlds-bits-are-reused) | 卸载时把类型移出 World，组件位复用 |
-| [D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references) | 查询调用不用拦截器；过滤器不持有引用 |
+| [D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references) | 查询调用不用拦截器；过滤条件不持有引用 |
 | [D19](#d19-no-settable-tag-properties) | 标签属性不可赋值 |
 | [D20](#d20-generic-systems-register-the-closed-types-their-assembly-names) | 泛型系统注册所在程序集用到的封闭类型 |
 | [D21](#d21-net-10-features-only-where-they-measure) | .NET 10 新特性，测得出收益才用 |
@@ -59,12 +58,12 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D41](#d41-instantiate-with-components) | 带组件的实例化一次拷贝直接落到最终的表 |
 | [D42](#d42-trimexcess-on-request-only) | 内存只在要求时归还：`TrimExcess` |
 | [D43](#d43-stats-and-schedule) | 系统报告分配了多少、访问了多少；调度是一份描述 |
-| [D44](#d44-slices) | 分片：按 64 行位字切分的过滤器，由系统的运行次数选片 |
+| [D44](#d44-slices) | 分片：按 64 行位字切分的过滤条件，由系统的运行次数选片 |
 | [D45](#d45-unique-keys) | 唯一键：标记接口、预先建好的索引、写入前先占键 |
 | [D46](#d46-mut-stamps-per-write) | `Mut<T>` 只给写了的行打 tick，行不会动时直接按行打 |
 | [D47](#d47-setifchanged-equality) | `SetIfChanged` 用 `IEquatable<T>` 比较，没有就比字节 |
 | [D48](#d48-parallel-tracked-chunks) | 并行写被追踪组件时按 4,096 行切块 |
-| [D49](#d49-changedany-semantics) | `ChangedAny`：每种一个 OR 组，每个过滤器一个 tick |
+| [D49](#d49-changedany-semantics) | `ChangedAny`：每种一个 OR 组，每个过滤条件一个 tick |
 | [D50](#d50-restart-saves) | 重启存档可以不写某些类型，重启读档可以保留单例 |
 | [D51](#d51-not-added) | 不加：运行条件、按时间的间隔、必需组件、实体映射表、Meter、校验和、部分快照 |
 
@@ -247,7 +246,7 @@ int pooled = world.Count<Bullet>(QueryFilter.Create().With<Inactive>()); // 存�
 **决定。** World 的系统、查询和结构变更都在它的所有者线程上执行；并行阶段和并行 `[ForEach]` 是仅有的并行，由生成器证明安全。
 其他线程把工作投递给所有者线程。
 
-**原因。** 任何热路径上都没有锁；规则三行就能说清（[线程模型](/zh/docs/guide/threading)）。
+**原因。** 任何热路径上都没有锁；规则三行就能说清（[多线程与并行](/zh/docs/guide/threading)）。
 
 ## D14. 没有共享组件 [#d14-no-shared-components]
 
@@ -284,17 +283,17 @@ C# 14 静态扩展成员。生成的代码无法引用的类型（私有组件�
 **比较过。** 在内存里把旧类型的行迁移成新类型（每个字段都需要类型映射；`Save` / `Load` 已经按类型 id 和字段哈希做了映射）；从不复用位
 （每重载一次，掩码就多出一批组件）。
 
-## D18. 查询调用不用拦截器；过滤器不持有引用 [#d18-no-interceptors-for-query-calls-filters-carry-no-references]
+## D18. 查询调用不用拦截器；过滤条件不持有引用 [#d18-no-interceptors-for-query-calls-filters-carry-no-references]
 
 **决定。** 查询调用不做拦截。`QueryFilter` 把五个集合的前 256 位内联存放，255 之后的位存成一个驻留 id，因此不持有任何对象引用，
 构建器每次调用只复制一次。
 
-**原因。** 拦截器只替换调用绑定的方法，调用参数照样要求值，在调用处构建的过滤器怎么都会被构建；按调用点缓存查询项省下的只是调用本来就有的那次备忘查找。
-真正的开销在过滤器本身：五个各带溢出引用的掩码让每次构建器调用都经过 `BulkMoveWithWriteBarrier` 复制两次，还要清零调用方栈帧。
+**原因。** 拦截器只替换调用绑定的方法，调用参数照样要求值，在调用处构建的过滤条件怎么都会被构建；按调用点缓存查询项省下的只是调用本来就有的那次备忘查找。
+真正的开销在过滤条件本身：五个各带溢出引用的掩码让每次构建器调用都经过 `BulkMoveWithWriteBarrier` 复制两次，还要清零调用方栈帧。
 去掉引用后，用调用处构建的 `QueryFilter.Create().With<Npc>().Without<Dead>().Without<Frozen>()` 统计 16 个实体从 124 ns 降到 76 ns，
-过滤器放在静态字段里仍是 24 ns（`CallSiteBenchmark`）。热调用仍然建议把过滤器提出去。
+过滤条件放在静态字段里仍是 24 ns（`CallSiteBenchmark`）。热调用仍然建议把过滤条件提出去。
 
-**比较过。** 拦截器配静态过滤器、每个调用点缓存查询项（参数求值让它失去意义）；对在调用处构建过滤器给出分析器警告
+**比较过。** 拦截器配静态过滤条件、每个调用点缓存查询项（参数求值让它失去意义）；对在调用处构建过滤条件给出分析器警告
 （大多数调用是冷的；文档已经教了静态字段的写法）。
 
 ## D19. 标签属性不可赋值 [#d19-no-settable-tag-properties]
@@ -326,8 +325,8 @@ Native AOT 能保留它们；只在其他程序集里出现的封闭类型在 JI
 | 特性 | 结论 | 数据 |
 | --- | --- | --- |
 | `Vector512`（和 `Vector<T>`） | 保留：没有墓碑的表统计行字里的置位数，AVX-512 下每步 8 个字，否则用 `Vector<T>`（AVX2 4 个，Arm64 2 个） | CountBenchmark，10 万需要测位的行：48.9-54.5 μs -> 1.21-1.27 μs；只用 `Vector<T>` 2.4 μs，逐字 5.2 μs；对 `Vector512` 按下标循环 7.6 μs（改为展开） |
-| 查询缓存的 `GetAlternateLookup` | 保留：用调用自己的位和过滤器的 ref 探测，不构建也不复制键 | 超出备忘的过滤器 92-106 ns -> 86-90 ns |
-| 备忘的各路改为一个数组里的结构体 | 保留 | 静态过滤器 21.6-21.9 -> 19.0-19.8 ns，无过滤器 36.8-39.1 -> 35.3-35.5 ns |
+| 查询缓存的 `GetAlternateLookup` | 保留：用调用自己的位和过滤条件的 ref 探测，不构建也不复制键 | 超出备忘的过滤条件 92-106 ns -> 86-90 ns |
+| 备忘的各路改为一个数组里的结构体 | 保留 | 静态过滤条件 21.6-21.9 -> 19.0-19.8 ns，无过滤条件 36.8-39.1 -> 35.3-35.5 ns |
 | 备忘用 `[InlineArray]`（所有签名的各路内联在一个扁平数组里） | 放弃 | 快 1-2 ns（20.3-20.6 / 38.9-39.5 ns），但签名下标是进程级的，每个 World 要为进程里的每个签名占约 750 字节（200 个签名 150 KB），每新增一路还要整体复制 |
 | 存档类型表用 `FrozenDictionary`（无锁查找，变更后第一次加载时冻结） | 放弃 | 一个实体的存档加载 2.32-2.33 μs -> 2.23-2.34 μs：在误差范围内；加载时每种类型只解析一次，而不是每个实体一次 |
 | `System.Threading.Lock`、`params ReadOnlySpan`、空条件赋值 | 保留 | 冷路径 |
@@ -336,7 +335,7 @@ Native AOT 能保留它们；只在其他程序集里出现的封闭类型在 JI
 | `OverloadResolutionPriority`、`field` | 用不上：它们改变的是重载选择和语法，不是 IL；API 里没有同一方法的数组与 span 重载，候选的后备字段也都在属性之外写入 | |
 | first-class span 转换、`nameof(List<>)` | 用不上：剩下的 `.AsSpan()` 调用是 `Fill` 和 `foreach (ref ...)`，转换管不到；生成器面向 netstandard2.0，比较的是类型名 | |
 
-**比较过。** 把内联组件掩码扩到 512 位（每个过滤器、键和表掩码都要为 256-511 号组件多 32 字节，而溢出区已经覆盖了它们）。
+**比较过。** 把内联组件掩码扩到 512 位（每个过滤条件、键和表掩码都要为 256-511 号组件多 32 字节，而溢出区已经覆盖了它们）。
 
 ## D22. 并行运行用线程池，划算时才唤醒助手线程 [#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay]
 
@@ -484,9 +483,9 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 | EECS029 实例 `[ForEach]` 方法 | 警告 | 实例方法 104 µs，静态方法 41 µs |
 | EECS030 对查询结果逐个实体做结构变化 | 警告 | `BulkBenchmark`：逐个实体的耗时是 `SetAll` / `RemoveAll` 的 19.1 倍，是 `DisableAll` / `EnableAll` 的约 99 倍 |
 | EECS031 计数循环里逐个创建 | 警告 | 只对新 World 有效（[D28](#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap)）；`MicroBenchmarks.Churn` 的耗时是 `ChurnBatch` 的 2.1 倍 |
-| EECS032 手写计数和判断 | 警告 | `Count() > 0` 429 ns，`Any()` 18.6 ns；循环里判断 `Has<T>()` 332 µs，过滤器 59.5 µs |
+| EECS032 手写计数和判断 | 警告 | `Count() > 0` 429 ns，`Any()` 18.6 ns；循环里判断 `Has<T>()` 332 µs，过滤条件 59.5 µs |
 | EECS033 生成的成员 | 信息 | 同一个调用，代价相同（[D26](#d26-generated-members-and-a-suggestion-to-use-them)） |
-| EECS034 系统里执行世界更新 | 错误 | 递归，或者在阶段进行到一半时运行系统 |
+| EECS034 系统里执行 World 更新 | 错误 | 递归，或者在阶段进行到一半时运行系统 |
 
 每一对都由 `AccessBenchmark` 测量（BenchmarkDotNet，共享的 4 核 2.1 GHz Xeon，.NET 10.0.13）；所有写法都零分配。
 
@@ -497,10 +496,10 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
   的系统的 `OnUpdate`；EECS030 不报告覆盖查询已要求组件的 `Set`，也不报告分组组件的 `Set`（在 `SetAll` 里它的行同样逐个移动）；
   EECS031 不报告小于 4,096 的常量次数和用这样的常量创建的数组（没有数组会进入大对象堆），也不报告预留过容量之后的循环、只在分支里或内层循环里的创建，
   以及系统里的循环（运行中的 World 会复用已有的行）；EECS032 只报告和 0 或 1 比较的 `Count`、只计数的循环，以及作为循环第一条语句的判断。
-- **只要有代价就是警告，不论大小。** 预留容量在 World 第一次长到这么大时收益最大，`Any` 和过滤器的收益与循环本来要访问的行数成正比；
+- **只要有代价就是警告，不论大小。** 预留容量在 World 第一次长到这么大时收益最大，`Any` 和过滤条件的收益与循环本来要访问的行数成正比；
   但在规则触发的地方，原来的写法都比修复后的慢，所以和其他规则一样是警告。只有 EECS033 是建议：生成的成员调用的就是泛型 API，
   改的只是代码长短，不是代价。
-- **修复就是规则的证明。** 每个替换在提供之前都会在原位置绑定一遍：成员没有生成、过滤器编译不过、或者有调用方按 `ref` 传参给这个方法，
+- **修复就是规则的证明。** 每个替换在提供之前都会在原位置绑定一遍：成员没有生成、过滤条件编译不过、或者有调用方按 `ref` 传参给这个方法，
   就不提供修复。
 
 **比较过。**
@@ -513,7 +512,7 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 - **从别的线程调用 `World.Update`**：World 可以在拥有它的任意一个线程上运行（每个线程一个 World），和所有者线程竞争的结构调用由 EECS014 报告。
 - **`OnUpdate` 里手写的 `Query` 循环、热路径上的 `Capture` 或 `Describe`、循环里的值索引查询**：`Query` 是正式支持的 API，
   它的代价 EECS030 和 EECS032 已经指出；每个 tick 拍快照正是回滚的做法；索引查询是 O(1)，`[ForEach]` 方法也没法把它提到循环外。不加规则。
-- **每次调用都构建 `QueryFilter`，而不是放进 `static readonly` 字段**：过滤器是不含引用的小结构体
+- **每次调用都构建 `QueryFilter`，而不是放进 `static readonly` 字段**：过滤条件是不含引用的小结构体
   （[D18](#d18-no-interceptors-for-query-calls-filters-carry-no-references)）；测不出代价。不加规则。
 
 ## D30. 存档按 Nino 类型 id 记录类型；标了 `[NinoType]` 的非托管组件由 Nino 写出 [#d30-saves-record-types-by-nino-type-id]
@@ -585,12 +584,12 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
   用 job，所有组件只查一次表，规则也和系统一样。
 - **不比它替代的代码慢。** 在 10,000 个实体上调用 1,000 次，1、3 或 5 个组件，有无过滤、有无结构变更，对照通过句柄手写的同样工作
   （`SingleEntityBenchmark`）：耗时是手写的 0.69 到 1.06 倍，0 B。1.04 和 1.06 的两组（有过滤又有结构变更，3 和 5 个组件）在误差范围内。
-- **线程规则仍归所有者线程。** 结构门空闲时（所有者线程不在任何区域里），用普通的标志写入冻结结构；在并行区域里，区域的冻结已经持有；
+- **线程规则仍归所有者线程。** 结构闸门空闲时（所有者线程不在任何区域里），用普通的标志写入冻结结构；在并行区域里，区域的冻结已经持有；
   分析器把 `Run` 当作结构变更调用报出（[EECS010](/zh/docs/guide/analyzer#eecs010)、EECS013、EECS014）。
 
 **比较过。**
 - **通过查询缓存检查过滤条件：** 每次调用都要按过滤条件查一次表集合，比 job 本身还贵；检查这一行所在表的掩码和存在位，过滤条件每个组件 O(1)。
-- **像遍历一样用 Interlocked 冻结和计数：** 每次调用约 12 ns；结构门空闲时只有所有者线程会碰它们。
+- **像遍历一样用 Interlocked 冻结和计数：** 每次调用约 12 ns；结构闸门空闲时只有所有者线程会碰它们。
 
 ## D34. 通过接口给分组加过滤条件 [#d34-group-filters-through-interfaces]
 
@@ -703,7 +702,7 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 **比较过。**
 - **World 里给每个读取方存一个游标：** World 里多了每个客户端的状态，要跟着连接创建和释放。
 - **无界列表：** 内存随运行时长增长。
-- **把销毁的行留成过滤器能看到的墓碑：** 每个查询都要为已经不在的行买单。
+- **把销毁的行留成过滤条件能看到的墓碑：** 每个查询都要为已经不在的行买单。
 - **持有清理组件的实体在销毁时就记录：** 日志会报告还活着（带 `Destroyed` 标签）的实体。
 - **`Restore` 和 `Load` 时清空日志：** 每次回滚后所有读取方都要重新同步；记下它们去掉的实体，读取方就能保持精确。
 
@@ -748,7 +747,7 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 ## D43. 系统报告分配了多少、访问了多少；调度是一份描述 [#d43-stats-and-schedule]
 
 **决定。** 打开 `MeasureSystems` 后，`SystemStats` 新增 `LastAllocated` / `TotalAllocated`（这次运行在自己线程上分配的字节数，
-加上它的并行 `[ForEach]` 在辅助线程上跑的块）和 `LastEntities` / `TotalEntities`（每个 `[ForEach]` 遍历开始时按它的过滤器数出的匹配数）。
+加上它的并行 `[ForEach]` 在辅助线程上跑的块）和 `LastEntities` / `TotalEntities`（每个 `[ForEach]` 遍历开始时按它的过滤条件数出的匹配数）。
 `world.DescribeSchedule()` 返回一组以名字表示的记录（分组、阶段、系统及其读写集、等待关系、只靠注册顺序的系统对），带 `ToString()` 和 `ToMermaid()`。
 
 **原因。**
@@ -764,11 +763,11 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 - **把匹配表的行数加起来：** 逐行测试的过滤条件（`Without`、`Changed`）下是错的。
 - **只数调用线程，或者用进程级计数器：** 前者漏掉并行辅助线程，后者把别的系统、别的 World 也算进来。
 
-## D44. 分片：按 64 行位字切分的过滤器，由系统的运行次数选片 [#d44-slices]
+## D44. 分片：按 64 行位字切分的过滤条件，由系统的运行次数选片 [#d44-slices]
 
 **决定。** `[ForEach(Slices = N)]` 传入 `QueryFilter.Slice(RunCount % N, N)`，其中 `EcsSystem.RunCount` 是系统已完成的运行次数。
 每张表从遍历开始时的行数出发，按 64 行的整数倍切分；匹配结果里的第 i 张表从第 (index + i) mod N 片开始。`ForEach` 系列调用遵守分片；
-`Query`、`Count`、`Any`、`DestroyEntities`、`entity.Run` 和批量调用遇到分片过的过滤器直接抛异常。`[Changed<T>]` / `[Removed<T>]` 方法不能分片（EECS035）。
+`Query`、`Count`、`Any`、`DestroyEntities`、`entity.Run` 和批量调用遇到分片过的过滤条件直接抛异常。`[Changed<T>]` / `[Removed<T>]` 方法不能分片（EECS035）。
 
 **原因。**
 - **尖峰变成缓坡。** 处理大量实体的系统（重新给目标打分、扫描会话）每次更新只花约 1/N，而不是全压在一次更新上。
@@ -780,7 +779,7 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 
 **比较过。**
 - **精确到行的切分：** 位字被拆到两片里，只能逐行测试。
-- **每个 `ForEach` 加一个带分片参数的重载：** 为一个过滤器字段多出一倍 API。
+- **每个 `ForEach` 加一个带分片参数的重载：** 为一个过滤条件字段多出一倍 API。
 - **把分片状态放在 World 里：** 分片方式不同的系统会共用它。
 - **让 `Count` 和 `Query` 也遵守分片：** 悄悄地只回答一部分。
 - **允许 `Changed` / `Removed`：** 每次运行都推进系统的上次运行 tick，其他片的行会丢掉它们的变更。
@@ -859,24 +858,24 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 - **原子更新摘要：** 每次遍历的每次写入都多一次 interlocked 操作，不管是不是并行。
 - **每个分块各自一份摘要，遍历后合并：** 每块多占内存，每次并行遍历多一次合并。
 
-## D49. `ChangedAny`：每种一个 OR 组，每个过滤器一个 tick [#d49-changedany-semantics]
+## D49. `ChangedAny`：每种一个 OR 组，每个过滤条件一个 tick [#d49-changedany-semantics]
 
 **决定。** `QueryFilter.ChangedAny<T1..Tn>(since)` 选出其中至少一个组件在 `since` 及之后被写过的行；一行凭它自己有的组件入选。
-一个过滤器的所有 `ChangedAny` 调用合成一组，所有 `RemovedAny` 调用合成另一组，各组之间、以及和其他过滤条件之间都是 AND。
-一个过滤器只有一个 tick，`Since` 一次挪动它的全部变更过滤条件。这一组列自 tick 以来都没被打过 tick 的表整张跳过，没有任何列写过的位字和块也跳过。
+一个过滤条件的所有 `ChangedAny` 调用合成一组，所有 `RemovedAny` 调用合成另一组，各组之间、以及和其他过滤条件之间都是 AND。
+一个过滤条件只有一个 tick，`Since` 一次挪动它的全部变更过滤条件。这一组列自 tick 以来都没被打过 tick 的表整张跳过，没有任何列写过的位字和块也跳过。
 
 **原因。**
 - **同步时，一个单位的任何一部分变了就要发。** 几个 `[Changed<T>]` 的意思是全部都变；每个组件各查一次，同一行会访问两次，还得去重。
-- **一个 tick 就够了。** 过滤器按用途存一份，带着每个客户端确认过的 tick 跑。
-- **组放在过滤器外面。** 过滤器只存这对组的一个驻留 id（4 字节，没有组时为 0），每对新组查找一次，之后不分配：
-  没有组的过滤器（最常见的情况）大小不变，检查表时先看行计划的一个标志，再做组的工作。
-- **每种一组就够了。** 多个独立的 OR 组要让每个过滤器带一个列表，而没有需求用得上。
-- **测量**（`ChangeTrackingBenchmark`、`CountBenchmark`、`SparseBenchmark`，对比 4.6）：没有组的过滤器开销不变，
+- **一个 tick 就够了。** 过滤条件按用途存一份，带着每个客户端确认过的 tick 跑。
+- **组放在过滤条件外面。** 过滤条件只存这对组的一个驻留 id（4 字节，没有组时为 0），每对新组查找一次，之后不分配：
+  没有组的过滤条件（最常见的情况）大小不变，检查表时先看行计划的一个标志，再做组的工作。
+- **每种一组就够了。** 多个独立的 OR 组要让每个过滤条件带一个列表，而没有需求用得上。
+- **测量**（`ChangeTrackingBenchmark`、`CountBenchmark`、`SparseBenchmark`，对比 4.6）：没有组的过滤条件开销不变，
   每个用例的差异都在 ±7% 以内，也就是这些测量本身的波动。
 
 **比较过。**
-- **多个独立的 OR 组：** 每个过滤器状态更多，找不到用处。
-- **每个组件一个 tick：** 每个客户端每个组件一个过滤器，而客户端只有一个确认 tick。
+- **多个独立的 OR 组：** 每个过滤条件状态更多，找不到用处。
+- **每个组件一个 tick：** 每个客户端每个组件一个过滤条件，而客户端只有一个确认 tick。
 - **每个组件跑一次查询再合并：** 同一行访问两次。
 
 ## D50. 重启存档可以不写某些类型，重启读档可以保留单例 [#d50-restart-saves]

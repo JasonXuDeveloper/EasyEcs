@@ -89,18 +89,18 @@
     <summary>
       创建 <c>entities.Length</c> 个带 2 个组件的实体（每个实体的值都一样），直接放进最终的原型，并把句柄写进
       <paramref name="entities" />。整批只过一次结构闸门，表最多扩容一次：O(数量 × 2)。只能在所有者线程调用
-      （见<see href="/zh/docs/guide/threading">线程模型</see>）。
+      （见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.World.CreateEntity" source="90176613439e">
     <summary>
-      创建一个没有组件的实体。均摊 O(1)。只能在所有者线程调用（见<see href="/zh/docs/guide/threading">线程模型</see>）。
+      创建一个没有组件的实体。均摊 O(1)。只能在所有者线程调用（见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.World.CreateEntity``2(``0@,``1@)" source="de28b17e3931">
     <summary>
       创建一个带 2 个组件的实体，直接放进最终的原型（中途不搬行）。均摊 O(2)。只能在所有者线程调用
-      （见<see href="/zh/docs/guide/threading">线程模型</see>）。
+      （见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.World.Describe" source="9cbe4fd505c8">
@@ -112,7 +112,7 @@
   <member name="M:EasyEcs.World.DestroyEntities``2(EasyEcs.QueryFilter@)" source="d186184a7d2f">
     <summary>
       销毁所有同时拥有 <c>T1, T2</c>（并匹配 <paramref name="filter" />）的存活实体，返回销毁的数量。只过一次结构闸门：
-      O(匹配的原型数 + 行数)。只能在所有者线程调用（见<see href="/zh/docs/guide/threading">线程模型</see>）。
+      O(匹配的原型数 + 行数)。只能在所有者线程调用（见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.World.DisableAll``1(EasyEcs.QueryFilter@)" source="9aa4775b72ed">
@@ -149,7 +149,7 @@
       预先扩好正好有 <c>T1, T2</c> 的实体所在的表和实体存储，接下来 <paramref name="count" /> 次带这些组件的
       <c>CreateEntity</c> / <c>CreateEntities</c> 都不会再扩容：启动或一波刷怪的扩容开销在循环之前一次付掉。分组
       （<see cref="M:EasyEcs.World.GroupBy``1" />）把实体放进别的表时，扩的是那张表；之后再加组件会把实体搬到别的表，那些表照常自己扩容。
-      O(2) 加一次扩容。只能在所有者线程调用（见<see href="/zh/docs/guide/threading">线程模型</see>）。
+      O(2) 加一次扩容。只能在所有者线程调用（见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.World.EnsureEntityCapacity(System.Int32)" source="c27f427b4f09">
@@ -237,7 +237,7 @@
       创建一个实体，带上 <paramref name="prefab" /> 每个组件的副本。值原样复制：<see cref="T:EasyEcs.DynamicBuffer`1" />
       拿到自己的一份列表，索引收录新实体，被追踪组件算作刚刚写入。O(组件数)：一次行复制，第一个实例之后不再查找表。
       带成员的预制体会创建所有成员，返回传入的那个预制体对应的实体（O(成员数 × 组件数)）。只能在所有者线程调用
-      （见<see href="/zh/docs/guide/threading">线程模型</see>）。
+      （见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.World.Instantiate(EasyEcs.Prefab,System.Span{EasyEcs.Entity})" source="18e7b388f5be">
@@ -466,7 +466,7 @@
       （覆盖预制体的值，被禁用的组件像 <c>Set</c> 一样启用），实体直接放进两者合起来的那张表（没有中间的移动，一次行复制）。
       被追踪组件算作刚刚写入，索引和分组收录这些值，给出的 <see cref="T:EasyEcs.ChildOf" /> 链入层级。均摊 O(组件数)，表存在之后零分配。
       带成员的预制体会创建所有成员，并把这些组件设到传入的那个预制体对应的实体上（它多一次行移动）。只能在所有者线程调用
-      （见<see href="/zh/docs/guide/threading">线程模型</see>）。
+      （见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.World.Instantiate``2(EasyEcs.Prefab,System.Span{EasyEcs.Entity},``0@,``1@)" source="79c32601355c">

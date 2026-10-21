@@ -5,8 +5,8 @@ namespace EasyEcs.Demo;
 // The recipes and tuning of the demo, shared by the systems.
 public static class Units
 {
-    // The recipe of a spark: a row outside the world that Instantiate copies. A burst fills in the
-    // values.
+    // The recipe of a spark: a row outside the world that Instantiate copies. A burst passes each
+    // spark's own values to Instantiate, which writes them in the same row copy.
     public static readonly Prefab Spark =
         new Prefab().Set(new Position(), new Velocity(), new Lifetime(1, 1));
 

@@ -388,7 +388,7 @@ DefaultEcs 用配 `DefaultParallelRunner` 的 `AEntitySetSystem`。
 | 它们的功能 | 出自 | EasyEcs |
 | --- | --- | --- |
 | 查询期间变更用的命令缓冲 | Friflo、Arch、DefaultEcs | 不需要：变更当场生效，遍历途中也一样 |
-| 线程安全的命令缓冲 | Friflo | 自己持有的队列，由 World 线程上的系统消费（[线程](/zh/docs/guide/threading)） |
+| 线程安全的命令缓冲 | Friflo | 自己持有的队列，由 World 线程上的系统消费（[多线程与并行](/zh/docs/guide/threading)） |
 | 组件添加 / 移除 / 设置事件 | Friflo、Arch、DefaultEcs | 状态变化就是数据：下一个系统去查询的组件 |
 | `WhenChanged` 集合和 `NotifyChanged` | DefaultEcs | `[Changed<T>]`、`QueryFilter.Changed<T>(since)`：`ref` 写入就是变更 |
 | `WhenRemoved` 集合、移除事件 | DefaultEcs、Friflo、Arch | `[Removed<T>]`、`QueryFilter.Removed<T>(since)` |

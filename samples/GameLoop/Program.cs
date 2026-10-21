@@ -27,15 +27,14 @@ var world = new World(new WorldOptions { InitialEntityCapacity = 4096, MeasureSy
 
 // Singletons first: the systems read them.
 world.SetSimulation(DeltaTime: 1f / TicksPerSecond, Tick: 0);
-world.SetInbox(Messages: mailbox);
 world.SetPrefabs(
     Player: new Prefab().SetPosition(0, 0).SetVelocity(0, 0),
     Bullet: new Prefab().SetPosition(0, 0).SetVelocity(0, 0).SetLifetime(TicksPerSecond));
 world.SetOutbox(Bytes: new ArrayBufferWriter<byte>(64 * 1024), Updates: 0);
 world.AddSingleton<Stats>();
 
-// Input group: runs whenever the host wakes up.
-world.AddSystem<ReceiveInputSystem>();
+// Input group: runs whenever the host wakes up. The system keeps the mailbox it drains.
+world.AddSystem(new ReceiveInputSystem(mailbox));
 
 // Default group: the fixed simulation tick, in this order.
 world.AddSystem<LeaveSystem>();
@@ -86,5 +85,22 @@ while (tick < ticksToRun && !stop.IsCancellationRequested)
 stop.Cancel();
 network.Join();
 Report.Summary(world, tick, fixedTick.Elapsed, mailbox.Refused);
+
+// Every run is checked; the process exits with 1 if a check fails.
+var checks = new Checks();
+checks.That("players have the prefab's components and their client id",
+    world.Count<Client, Position, Velocity>() == world.Count<Client>());
+checks.That("bullets have the prefab's components and their lifetime",
+    world.Count<Lifetime, Position, Velocity>() == world.Count<Lifetime>());
+bool onePlayerPerClient = true;
+foreach (var item in world.Query<Client>())
+{
+    onePlayerPerClient &= world.ClientIndex.Count(item.Client.Id) == 1;
+}
+
+checks.That("no client has two players", onePlayerPerClient);
+checks.That("the mailbox refused no message", mailbox.Refused == 0);
+
 world.Dispose();
 Console.WriteLine("stopped");
+return checks.AllPassed ? 0 : 1;

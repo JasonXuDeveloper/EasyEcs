@@ -107,7 +107,7 @@
   <member name="M:EasyEcs.Entity.Remove``2" source="3ce16bab43f0">
     <summary>
       移除 2 个组件；没有的组件忽略。实体的行留在原处（不搬行）。返回实体，方便链式调用。O(2)。只能在所有者线程调用
-      （见<see href="/zh/docs/guide/threading">线程模型</see>）。
+      （见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.Entity.RemoveRelation``1(EasyEcs.EntityId)" source="c917b0bb4689">
@@ -119,7 +119,7 @@
   <member name="M:EasyEcs.Entity.Set``2(``0@,``1@)" source="b45aadfbd436">
     <summary>
       用传入的值添加或覆盖 2 个组件，最多一次行复制。返回实体，方便链式调用。均摊 O(2)。只能在所有者线程调用
-      （见<see href="/zh/docs/guide/threading">线程模型</see>）。
+      （见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.Entity.ToString" source="5512d3ae8701">

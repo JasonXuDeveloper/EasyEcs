@@ -24,7 +24,7 @@ icon: Boxes
 <Callout type="warn" title="不适合">
   每个键下实体很少（公会 id、物品主人）：每个分组都有自己的表，应该用[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)。
   每个 tick 都在变的值：每次变化都要挪行。分区之间完全没有交互：[每个线程一个 World](/zh/docs/guide/threading#recommended-one-world-per-thread)
-  连过滤器都不需要。
+  连过滤条件都不需要。
 </Callout>
 
 ## 怎么用 [#how-to-use-it]
@@ -60,7 +60,7 @@ for (int i = 0; i < 9; i++) world.CreateEntity(new Zone(i % 3), new Health(10 * 
 
 ### 遍历一个分组 [#in-group]
 
-`InGroup<T>(group)`（`Zone` 生成的是 `InZone(group)`）要求实体有 `T` 且属于这个分组，只遍历该分组的表。过滤器放进 `static readonly` 字段；一个过滤器只能
+`InGroup<T>(group)`（`Zone` 生成的是 `InZone(group)`）要求实体有 `T` 且属于这个分组，只遍历该分组的表。过滤条件放进 `static readonly` 字段；一个过滤条件只能
 指定一个分组。
 
 ```csharp
@@ -104,7 +104,7 @@ walker.SetZone(2);                                             // 之后由 InGr
 
 ### 在系统里使用分组 [#in-systems]
 
-`[ForEach]` 的过滤器是特性，写不进分组的值。一次只处理一个分组的系统，在 `OnUpdate` 里跑一个结构体 job，分组号从单例里读：
+`[ForEach]` 的过滤条件是特性，写不进分组的值。一次只处理一个分组的系统，在 `OnUpdate` 里跑一个结构体 job，分组号从单例里读：
 
 ```csharp
 public record struct ActiveZone(int Id) : ISingletonComponent;
@@ -125,7 +125,7 @@ public class RegenerateActiveZone : EcsSystem
 }
 ```
 
-重写了 `OnUpdate` 的系统会单独占一个阶段。每次更新都新建过滤器也很便宜：`QueryFilter` 不持有任何对象引用。
+重写了 `OnUpdate` 的系统会单独占一个阶段。每次更新都新建过滤条件也很便宜：`QueryFilter` 不持有任何对象引用。
 
 ### 哪些操作会遵守分组 [#what-follows]
 
@@ -280,7 +280,7 @@ zone 2: 0 units, 0 hp
 ## 怎么用得快 [#how-to-use-it-fast]
 
 - **初始化时分组。** 在满的 World 上调用 `GroupBy<T>()` 要把每个实体挪一次；在空 World 上没有开销。
-- **把过滤器提出来。** 每个热点分组一个 `static readonly` 过滤器，或者像上面那样每次更新建一个。
+- **把过滤条件提出来。** 每个热点分组一个 `static readonly` 过滤条件，或者像上面那样每次更新建一个。
 - **要整组遍历就分组，要按键查找就建索引。** 整组遍历一个大分组时分组更快；一个键下只有几个实体时索引更快。
 
 10 万玩家分布在 16 个区域；100 个玩家换区域，然后汇总 4 个区域玩家的生命值。分别用分组、值索引和普通组件加扫描比较实现
@@ -303,7 +303,7 @@ zone 2: 0 units, 0 hp
 | 通过 `ref` 写分组组件 | 行还留在旧分组 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
 | 每个玩家、公会或主人一个分组 | 每个键一张表：浪费内存，World 碎片化 | 改用[值索引](/zh/docs/guide/indexes-and-relations#value-indexes) |
 | 值每个 tick 都变 | 每次变化一次行拷贝 | 保持普通组件 |
-| 一个过滤器里调用两次 `InGroup` | 一个过滤器只有一个分组，以最后一次为准，两个组件却都成了必需 | 代码审查 |
+| 一个过滤条件里调用两次 `InGroup` | 一个过滤条件只有一个分组，以最后一次为准，两个组件却都成了必需 | 代码审查 |
 | 遍历途中调用 `GroupBy` | 抛异常：它要挪行 | 初始化时调用 |
 
 ## 和其他库的对比 [#compared]
@@ -322,7 +322,7 @@ Friflo、Arch 和 DefaultEcs 都没有按值分组，最接近的是值索引。
   <Card title="查询与过滤" href="/zh/docs/guide/queries">
     `QueryFilter`、`Count`、`Query` 和结构体 job。
   </Card>
-  <Card title="多线程" href="/zh/docs/guide/threading">
+  <Card title="多线程与并行" href="/zh/docs/guide/threading">
     每个线程一个 World：互不往来的分区。
   </Card>
   <Card title="示例：GameLoop" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop">

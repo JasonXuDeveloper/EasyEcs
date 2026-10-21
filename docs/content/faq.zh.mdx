@@ -63,7 +63,7 @@ EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 
   `[ForEach(Parallel = true)]` 方法不能做结构变更，也不能写单例（EECS010）。
 - **来自其他线程的输入**（网络、IO）放进你自己的队列，由一个系统在所有者线程上取出处理。
 
-不要跨 `await` 持有 `ref`：保留 `Entity`，`await` 之后重新取组件。详见[线程模型](/zh/docs/guide/threading)和
+不要跨 `await` 持有 `ref`：保留 `Entity`，`await` 之后重新取组件。详见[多线程与并行](/zh/docs/guide/threading)和
 [`ref` 与 `await`](/zh/docs/guide/refs-and-await)。
 
 ## 怎么在 ASP.NET Core 或 Worker Service 里运行 EasyEcs？ [#hosting]
@@ -84,7 +84,7 @@ job 要的组件一次查找全部拿到，实体已经没了或不匹配时返�
 
 照 `dotnet new easyecs` 的结构来：组件放 `Components/`（按描述的东西一个文件，只放数据），`Systems/` 里一个文件一个系统、
 每个系统只做一件事，`Program.cs` 只做宿主：建 World、设单例、在一个地方按顺序加系统、跑循环。不同的更新频率各用一个分组，其他线程
-的输入走放在单例里的邮箱，`--tests` 会给每个系统生成一个测试文件（[项目结构](/zh/docs/guide/project-structure)）。
+的输入走邮箱（一个队列，放在消费它的系统的 `readonly` 字段里），`--tests` 会给每个系统生成一个测试文件（[项目结构](/zh/docs/guide/project-structure)）。
 
 ## 怎么调试一个 ECS World？ [#debugging]
 

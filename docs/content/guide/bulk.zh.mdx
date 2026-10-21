@@ -1,12 +1,12 @@
 ---
 title: 批量操作
 seoTitle: "C# ECS 批量组件变更：SetAll、RemoveAll"
-description: 对过滤器选中的所有实体一次性设置、移除、禁用或启用某个组件，用于回合重置、整区状态和刷怪，零分配。
+description: 对过滤条件选中的所有实体一次性设置、移除、禁用或启用某个组件，用于回合重置、整区状态和刷怪，零分配。
 icon: Layers
 ---
 
 回合结束，所有战士被眩晕；眩晕从所有人身上解除；某个区域冻结；一波怪物刷出来，过一会儿再清掉。逐个实体写，每一件都是一个
-结构变更的循环。`SetAll`、`RemoveAll`、`DisableAll` 和 `EnableAll` 只经过一次结构闸门，就能对过滤器选中的所有实体修改同一个组件，
+结构变更的循环。`SetAll`、`RemoveAll`、`DisableAll` 和 `EnableAll` 只经过一次结构闸门，就能对过滤条件选中的所有实体修改同一个组件，
 能整字处理时一次处理 64 行，结果和循环完全一样：被追踪组件算作写入，索引和分组都会跟上。
 
 ## 什么时候用 [#when-to-use-it]
@@ -46,7 +46,7 @@ int stunned = world.SetAll(new Stun(3), Rounds.Fighters);   // 回合结束：�
 int lifted = world.RemoveAll<Stun>();                        // 所有人解除眩晕
 ```
 
-不带过滤器时，`RemoveAll<T>()` 从所有拥有 `T` 的实体上移除它，而 `SetAll` 会给每个存活实体都加上，所以要写明选谁
+不带过滤条件时，`RemoveAll<T>()` 从所有拥有 `T` 的实体上移除它，而 `SetAll` 会给每个存活实体都加上，所以要写明选谁
 （`With<Fighter>()`）。任何 `QueryFilter` 都可以用，包括 `Without`、`WithAny`、`Changed` 和 [`InGroup`](/zh/docs/guide/groups)。
 
 ### 对所有匹配实体禁用和启用 [#disable-all]
@@ -212,7 +212,7 @@ shots cleared: 10000, entities left: 1000
 
 - **让列留下来。** 第一回合之后，眩晕的列会留在战士的表里：之后的 `SetAll` 和 `RemoveAll` 只是翻转存在位，每个字 64 行，
   不挪行。
-- **过滤器放进 `static readonly` 字段**，和所有热点过滤器一样。
+- **过滤条件放进 `static readonly` 字段**，和所有热点过滤条件一样。
 - **一次调用代替循环。** 批量调用只进一次结构闸门，按表逐张处理。
 
 10 万个战士的回合重置（全员眩晕、再解除），以及给所有人禁用再启用一个状态，批量与逐个对比（`BulkBenchmark`）：

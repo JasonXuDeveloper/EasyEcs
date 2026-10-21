@@ -197,7 +197,9 @@ still cheaper than a structural change:
 - a countdown field (`Burning.Ticks`) instead of re-adding a component every tick;
 - change detection by change ticks: mark the component `ITrackChanges` and give the consumer `[Changed<T>]`, instead
   of adding and removing a `Changed` tag or scanning every row ([change tracking](/en/docs/guide/change-tracking)).
-  A write is any `ref` access, so compare values when a write may leave the value as it was;
+  A write is any `ref` access, so a writer that may leave the value as it was writes through a `Mut<T>` parameter
+  and `SetIfChanged` (`entity.SetIfChanged` / `SetXIfChanged` outside a `[ForEach]`), which stamps only a value that
+  differs: readers then never compare ([write only when the value changed](/en/docs/guide/change-tracking#set-if-changed));
 - removal detection the same way: `[Removed<T>]` visits the entities that lost a tracked `T`, instead of a `Lost` tag
   added next to every removal ([removal detection](/en/docs/guide/change-tracking#removal-detection));
 - pausing with `Disable<T>()`, which hides a component and keeps its value, instead of removing it and storing the
@@ -210,14 +212,22 @@ public record struct Facing(float Angle) : IComponent, ITrackChanges;  // tracke
 public record struct NetSync(Facing Sent) : IComponent;               // what clients last heard
 public record struct Outbox(int Updates) : ISingletonComponent;
 
+public class FacingSystem : EcsSystem
+{
+    // Recomputed every tick, rarely different: only a new angle stamps the row.
+    [ForEach]
+    static void Face(Mut<Facing> facing, in Velocity v) =>
+        facing.SetIfChanged(new Facing(MathF.Atan2(v.Y, v.X)));
+}
+
+[UpdateAfter<FacingSystem>]
 public class SyncSystem : EcsSystem
 {
-    [ForEach, Changed<Facing>]   // only entities whose Facing was written since this system last ran
+    [ForEach, Changed<Facing>]   // only entities whose Facing changed since this system last ran
     static void Sync(in Facing facing, ref NetSync sync, ref Outbox outbox)
     {
-        if (facing == sync.Sent) return;   // written but unchanged: nothing to send
         sync = new NetSync(facing);
-        outbox.Updates++;                  // a real server queues the update here
+        outbox.Updates++;          // a real server queues the update here
     }
 }
 ```

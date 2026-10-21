@@ -237,7 +237,7 @@ for (int tick = 1; tick <= 100; tick++)
     world.Update();                                                    // every system, synchronously
 }
 
-Console.WriteLine($"{world.Arena.Deaths} dead, the scout is at {scout.Position.X}");
+Console.WriteLine($"the scout is at {scout.Position.X}, the others at {units[2].Position.X}");
 ```
 
 `Update()` runs every enabled system once, in registration order adjusted by `[UpdateBefore<T>]` /
@@ -266,15 +266,21 @@ public class ReportSystem : EcsSystem
 }
 ```
 
-Register it with the others (`world.AddSystem<ReportSystem>();`) and call its group every twentieth tick:
+Register it with the others and call its group every twentieth tick. In `Program.cs`, the update loop becomes:
 
-```csharp
-world.AddSystem<ReportSystem>();
+```csharp title="Program.cs"
+world.AddSystem<ClockSystem>();
+world.AddSystem<ReportSystem>();                                       // [!code ++]
+
+using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50));   // 20 ticks per second
 for (int tick = 1; tick <= 100; tick++)
 {
-    world.Update();
-    if (tick % 20 == 0) world.Update<Report>();                        // once a second at 20 Hz
+    await timer.WaitForNextTickAsync();
+    world.Update();                                                    // the default group: the simulation
+    if (tick % 20 == 0) world.Update<Report>();                        // once a second: the report [!code ++]
 }
+
+Console.WriteLine($"the scout is at {scout.Position.X}, the others at {units[2].Position.X}");
 ```
 
 On a real server, one group handles input whenever it arrives and another runs the simulation on its fixed tick.

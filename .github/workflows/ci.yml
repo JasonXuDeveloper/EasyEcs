@@ -25,14 +25,16 @@ jobs:
         run: dotnet test --no-build --configuration Release --verbosity normal
       - name: Pack (verify the package builds)
         run: dotnet pack src/EasyEcs.Core/EasyEcs.Core.csproj --no-build --configuration Release --output artifacts
-      - name: Run the samples
+      - name: Run the samples (the deterministic ones must print their README's expected output)
+        env:
+          DOTNET_RUN_OPTIONS: --no-build
         run: |
-          dotnet run --no-build -c Release --project samples/HelloWorld
+          .github/scripts/check-sample.sh samples/HelloWorld
           dotnet run --no-build -c Release --project samples/GameLoop -- --ticks 30
-          dotnet run --no-build -c Release --project samples/SaveLoad
+          .github/scripts/check-sample.sh samples/SaveLoad
           dotnet run --no-build -c Release --project samples/MultiWorld -- --updates 50
-          dotnet run --no-build -c Release --project samples/HotReload/HotReload.Host
-          dotnet run --no-build -c Release --project samples/Actors
+          .github/scripts/check-sample.sh samples/HotReload
+          .github/scripts/check-sample.sh samples/Actors
       - name: Install the wasm-tools workload (the live demo is published with Mono AOT)
         run: dotnet workload install wasm-tools
       - name: Publish the docs site's live demo (demo/EasyEcs.Demo, WebAssembly, Mono AOT)

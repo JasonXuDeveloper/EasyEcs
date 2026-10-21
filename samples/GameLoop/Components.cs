@@ -1,6 +1,5 @@
 using System.Buffers;
 using EasyEcs;
-using GameLoop.Host;
 
 namespace GameLoop;
 
@@ -36,9 +35,6 @@ public record struct Lifetime(int Ticks) : IComponent;
 
 // The fixed time step and the number of ticks simulated so far.
 public record struct Simulation(float DeltaTime, long Tick) : ISingletonComponent;
-
-// The messages the network thread posts. ReceiveInputSystem drains it.
-public record struct Inbox(Mailbox<ClientMessage> Messages) : ISingletonComponent;
 
 // The recipes that players and bullets are created from.
 public record struct Prefabs(Prefab Player, Prefab Bullet) : ISingletonComponent;

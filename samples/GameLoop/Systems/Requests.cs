@@ -36,10 +36,12 @@ public sealed class JoinSystem : EcsSystem
         bool alreadyJoined = world.ClientIndex.TryFind(join.Client, out _);
         if (!alreadyJoined)
         {
-            Entity player = world.Instantiate(prefabs.Player);
-            player.SetClient(join.Client);
-            // Spread the players out along the X axis.
-            player.SetPosition(join.Client * 10, 0);
+            // The prefab's components plus the client id, with the players spread out along
+            // the X axis: given values land in the final table in one row copy.
+            world.Instantiate(
+                prefabs.Player,
+                new Client(join.Client),
+                new Position(join.Client * 10, 0));
             stats.Joined++;
         }
 
@@ -79,9 +81,10 @@ public sealed class FireSystem : EcsSystem
         {
             Position from = player.Position;
             Velocity aim = player.Velocity;
-            Entity bullet = world.Instantiate(prefabs.Bullet);
-            bullet.SetPosition(from.X, from.Y);
-            bullet.SetVelocity(aim.X * BulletSpeed, aim.Y * BulletSpeed);
+            world.Instantiate(
+                prefabs.Bullet,
+                from,
+                new Velocity(aim.X * BulletSpeed, aim.Y * BulletSpeed));
             stats.Fired++;
         }
 

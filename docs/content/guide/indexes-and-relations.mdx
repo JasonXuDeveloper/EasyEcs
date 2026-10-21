@@ -559,7 +559,7 @@ follow, then the followers of 100 players counted and walked (`RelationBenchmark
 ## Compared with other libraries [#compared]
 
 Friflo indexes components (`IIndexedComponent`) and links (`ILinkComponent`, `ILinkRelation`); DefaultEcs has
-`EntityMultiMap<T>`; Arch keeps relations in a separate package. Each runs its own built-in index here:
+`EntityMultiMap<TKey>`; Arch keeps relations in a separate package. Each runs its own built-in index here:
 
 <BenchChart bench="IndexComparison" param="Trades=100" title="100 items change hands among 100,000, then 100 inventories are counted" />
 

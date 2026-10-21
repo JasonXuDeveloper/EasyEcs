@@ -162,7 +162,7 @@ EasyEcs 的结构变更立即生效，遍历途中也一样。一次遍历里每
 （`WorldOptions.ParallelSystems`）。单个重系统还可以用 `[ForEach(Parallel = true)]` 把行分给多个核。
 
 对服务器来说，最简单的并行往往是每个线程一个 World，比如每张地图或每个场景一个：World 之间什么都不共享，完全不需要同步。
-详见[线程模型](/zh/docs/guide/threading)。
+详见[多线程与并行](/zh/docs/guide/threading)。
 
 ## ECS 比面向对象更快吗？ [#ecs-vs-oop]
 

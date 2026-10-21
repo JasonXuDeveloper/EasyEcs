@@ -11,7 +11,7 @@ icon: Radar
 ## 什么时候用 [#when-to-use-it]
 
 <Callout type="idea" title="适合">
-  只需要跟踪少数变化的实体：同步给客户端、脏数据存盘、移动后重建索引，以及通知某样东西没了（状态结束、护盾破了）。
+  只需要追踪少数变化的实体：同步给客户端、脏数据存盘、移动后重建索引，以及通知某样东西没了（状态结束、护盾破了）。
 </Callout>
 
 <Callout type="warn" title="不适合">
@@ -56,7 +56,7 @@ public class Replicate : EcsSystem
 
 ### 照常写入 [#write-as-usual]
 
-任何系统或外部代码只要通过 `ref` 写了 `Health`，这一行就会被标记，别的什么都不用改。
+任何系统或外部代码只要通过 `ref` 写了 `Health`，这一行就会被打上 tick，别的什么都不用改。
 
 ```csharp
 world.AddSystem<Replicate>();
@@ -97,7 +97,7 @@ tick。`[Changed<T>]` 方法选的是在它之后写入的行，因此系统这�
 
 ```csharp
 ulong mark = world.ChangeTick;
-unit.SetHealth(40);                                                 // mark 之后的一次写入
+unit.SetHealth(40);                                                 // 记下 tick 之后的一次写入
 var changed = QueryFilter.Create().Changed<Health>(mark);           // mark 及之后写入的行
 int count = world.Count<Health>(changed);
 foreach (var item in world.Query<Health>(changed))                  // 元素会交出 ref：这些行算作写入
@@ -105,7 +105,7 @@ foreach (var item in world.Query<Health>(changed))                  // 元素会
 ```
 
 tick 之所以是调用参数，是因为“变化”总是相对于某个人上次看的时间点：`[Changed<T>]` 方法用的是自己系统的上次运行，
-临时查询用的是调用方记下的 mark。tick 为 0 时会选中所有拥有 `T` 的行。
+临时查询用的是调用方记下的 tick。tick 为 0 时会选中所有拥有 `T` 的行。
 
 ## 值变了才写 [#set-if-changed]
 
@@ -217,7 +217,7 @@ tick。被移除的行和普通行没有区别，方法照样能读写实体的�
   </Accordion>
 </Accordions>
 
-在系统之外，`QueryFilter.Removed<T>(since)` 用调用方记下的 tick 做同样的事，并且和过滤器里的 `Changed` 共用同一个
+在系统之外，`QueryFilter.Removed<T>(since)` 用调用方记下的 tick 做同样的事，并且和过滤条件里的 `Changed` 共用同一个
 tick（`Since(tick)` 会同时移动它们）：
 
 ```csharp
@@ -258,15 +258,15 @@ public class ReplicateUnitSystem : EcsSystem
 
 - **每一行是“或”：** 一行只要有一个自己拥有的组件在这个 tick 之后被写过（或被移除），就通过；其他组件不必都有。
   一张表至少要有这一组里的一列才会参与；这几列在这个 tick 之后都没人写过，整张表直接跳过。
-- **和其他条件是“与”：** 一个方法或过滤器里所有的 `ChangedAny` 特性或调用并成一组，所有的 `RemovedAny` 并成另一组，
+- **和其他条件是“与”：** 一个方法或过滤条件里所有的 `ChangedAny` 特性或调用并成一组，所有的 `RemovedAny` 并成另一组，
   这些组再和 `With`、`Without`、`Changed`、`Removed` 等其他条件取“与”。
-- **一个过滤器只有一个 tick：** 过滤器里的 `Changed`、`Removed`、`ChangedAny` 和 `RemovedAny` 都从同一个 tick 往后看
+- **一个过滤条件只有一个 tick：** 过滤条件里的 `Changed`、`Removed`、`ChangedAny` 和 `RemovedAny` 都从同一个 tick 往后看
   （否则抛 `ArgumentException`），`Since(tick)` 会一起移动它们。
 - 每组 2 到 9 个组件，每个都要实现 `ITrackChanges`。和 `[Changed<T>]` 一样，方法会声明对每个组件的读取。
 
-### 所有客户端共用一个过滤器 [#per-client]
+### 所有客户端共用一个过滤条件 [#per-client]
 
-每个客户端确认到的 tick 都不一样：有的是最新的，有的丢了几个包，有的刚连上。一个过滤器就能服务所有客户端：建一次，
+每个客户端确认到的 tick 都不一样：有的是最新的，有的丢了几个包，有的刚连上。一个过滤条件就能服务所有客户端：建一次，
 放进字段，对每个客户端用它确认到的 tick 调一次 `Since(ackTick)`：
 
 ```csharp
@@ -295,7 +295,7 @@ archer.SetPositionIfChanged(3, 4);
 ulong[] acked = [0, before, after];
 for (int client = 0; client < acked.Length; client++)
 {
-    ulong mark = world.ChangeTick;   // 这次打包时的 mark
+    ulong mark = world.ChangeTick;   // 这次打包时的 tick
     // 查询 NetId，被追踪的部分用 Read<T>() 读：发送不会打 tick。
     foreach (var item in world.Query<NetId>(Replication.Dirty.Since(acked[client])))
     {
@@ -308,12 +308,12 @@ for (int client = 0; client < acked.Length; client++)
 ```
 
 刚连上的客户端拿到全部三个单位，落后的拿到骑士和弓箭手，最新的只拿到弓箭手。被追踪组件的查询元素算作写入，所以循环
-查询的是不被追踪的 `NetId`，被追踪的部分用 `Read<T>()` 读。每种同步副本一个过滤器就够了，不必每个客户端一个：过滤器
+查询的是不被追踪的 `NetId`，被追踪的部分用 `Read<T>()` 读。每种同步副本一个过滤条件就够了，不必每个客户端一个：过滤条件
 是值，换个 tick 再用不分配任何内存。
 
 ## 被销毁的实体：销毁日志 [#destroy-log]
 
-被销毁的实体没有行，任何过滤器都找不到它，可客户端还是得知道它离开了。把 `WorldOptions.DestroyLog` 设成一个容量，
+被销毁的实体没有行，任何过滤条件都找不到它，可客户端还是得知道它离开了。把 `WorldOptions.DestroyLog` 设成一个容量，
 World 就会用一个环形缓冲记下最近被销毁的实体，以及各自被销毁时的变更 tick；`world.DestroyedSince(since, into, out count)`
 列出在 `since` 及之后被销毁的实体。规则和 `Since(tick)` 一样，所以客户端确认到的那个 tick，既用来取变化，也用来取
 销毁。每个读取方各记各的 tick，多少个客户端都共用同一份日志。
@@ -498,12 +498,12 @@ written since the mark: 2
 - **只读就用 `in`。** 只读不写的 `ref` 参数会把访问到的每一行都标记成已变化，下游所有 `[Changed<T>]` 读取方都得把它们全部过一遍。
 - **值大多不变时，用 `Mut<T>` 写。** `SetIfChanged` 只给值真的变了的行打 tick，下游读取方只访问真正的变化，而不是写入方
   访问过的每一行。
-- **所有客户端共用一个 `ChangedAny` 过滤器**，用 `Since(ackTick)` 移动 tick，不要每个客户端、每个组件各跑一遍。
+- **所有客户端共用一个 `ChangedAny` 过滤条件**，用 `Since(ackTick)` 移动 tick，不要每个客户端、每个组件各跑一遍。
 - **优先写成系统，而不是查询。** `[Changed<T>]` 方法在碰到任何一行之前，会先跳过没人写过的表、4,096 行的块和 64 行的字。
   `Query` 会交出 ref，所以访问到的行都会被打上 tick；不能留下标记的读取方（存盘、发包）用 `Writes => 0` 的结构体 job，
   或者 `entity.Read<T>()`。
-- **过滤器放进 `static readonly` 字段**，用 `Since(mark)` 移动它的 tick，不要每次调用都新建一个。
-- **mark 要在一次更新刚结束时取。** 两次更新之间的写入共用一个 tick，在中间取的 mark 会把它之前的写入也一起选进来。
+- **过滤条件放进 `static readonly` 字段**，用 `Since(mark)` 移动它的 tick，不要每次调用都新建一个。
+- **tick 要在一次更新刚结束时取。** 两次更新之间的写入共用一个 tick，在中间取的 tick 会把它之前的写入也一起选进来。
 
 一个系统遍历 10 万行被追踪组件时的实测（`ChangeTrackingBenchmark`）：
 
@@ -542,12 +542,12 @@ written since the mark: 2
 | `[Removed<T>]` 方法既没有组件参数也没有 `[With<U>]` | 没有任何东西说明方法要遍历什么 | [EECS003](/zh/docs/guide/analyzer#eecs003) |
 | 只读的参数写成了 `ref` | 访问到的每一行都算作已变化 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
 | 接收方还没有这些值，却用 `LoadEntitiesInto(..., markWritten: false)` 加载 | 加载的行不算变化，靠 `[Changed<T>]` 的同步永远不会发出去 | 代码审查：给新客户端同步时，自己发送完整状态 |
-| 指望 `[Removed<T>]` 报告被销毁的实体 | 它们没有行，任何过滤器都访问不到 | 从[销毁日志](#destroy-log)读（`WorldOptions.DestroyLog`、`DestroyedSince`） |
+| 指望 `[Removed<T>]` 报告被销毁的实体 | 它们没有行，任何过滤条件都访问不到 | 从[销毁日志](#destroy-log)读（`WorldOptions.DestroyLog`、`DestroyedSince`） |
 | 销毁日志的容量小于客户端最长延迟内的销毁数 | 这个客户端每次读 `DestroyedSince` 都返回 false，一遍又一遍地全量重发 | 代码审查：容量按每秒销毁数乘以允许的延迟来定；关注 `DestroyLogOldestTick` |
 | 每个 tick 都重算、但很少变的值用 `ref` 参数写 | 访问到的每一行都算作已变化，下游每个 `[Changed<T>]` 读取方都要全部过一遍 | 代码审查：改用 [`Mut<T>`](#set-if-changed) 参数加 `SetIfChanged` |
 | 对带托管字段、又没实现 `IEquatable<T>` 的组件调 `SetIfChanged` | 抛 `NotSupportedException`；也不会生成 `SetXIfChanged` | 运行时：改成 record struct 或实现 `IEquatable<T>` |
 | 想要“任意一个变了就算”，却写了好几个 `[Changed<T>]` | 只有每个都变了的行才通过 | 代码审查：用 `[ChangedAny<T1, …, Tn>]` |
-| 一个过滤器里的 `Changed`、`Removed`、`ChangedAny`、`RemovedAny` 用了不同的 tick | 抛 `ArgumentException`：一个过滤器只有一个 tick | 运行时 |
+| 一个过滤条件里的 `Changed`、`Removed`、`ChangedAny`、`RemovedAny` 用了不同的 tick | 抛 `ArgumentException`：一个过滤条件只有一个 tick | 运行时 |
 
 ## 和其他库的对比 [#compared]
 

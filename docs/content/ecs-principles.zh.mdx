@@ -187,7 +187,9 @@ flowchart LR
 
 - 用倒计时字段（`Burning.Ticks`），不要每个 tick 重新添加组件；
 - 用变更 tick 检测变化：给组件加上 `ITrackChanges`，让消费方用 `[Changed<T>]`，不要增删一个 `Changed` 标签，也不要扫描每一行
-  （[变更追踪](/zh/docs/guide/change-tracking)）。任何 `ref` 访问都算写入，所以写入可能没改值的地方要比较一下；
+  （[变更追踪](/zh/docs/guide/change-tracking)）。任何 `ref` 访问都算写入，所以可能写入原值的一方改用 `Mut<T>`
+  参数和 `SetIfChanged`（`[ForEach]` 之外用 `entity.SetIfChanged` / `SetXIfChanged`），值不同才打上 tick，读的一方就不用再比较
+  （[值变了才写](/zh/docs/guide/change-tracking#set-if-changed)）；
 - 移除检测同理：`[Removed<T>]` 访问失去了被追踪 `T` 的实体，不要每次移除都顺手加一个 `Lost` 标签
   （[移除检测](/zh/docs/guide/change-tracking#removal-detection)）；
 - 暂停用 `Disable<T>()`：隐藏组件、保留它的值，不要先移除、再把值存到别处（[清理与禁用](/zh/docs/guide/cleanup-and-disable)）；
@@ -198,14 +200,22 @@ public record struct Facing(float Angle) : IComponent, ITrackChanges;  // 被追
 public record struct NetSync(Facing Sent) : IComponent;               // 客户端上次收到的值
 public record struct Outbox(int Updates) : ISingletonComponent;
 
+public class FacingSystem : EcsSystem
+{
+    // 每个 tick 都重算，但很少变：只有新的角度才给这一行打上 tick。
+    [ForEach]
+    static void Face(Mut<Facing> facing, in Velocity v) =>
+        facing.SetIfChanged(new Facing(MathF.Atan2(v.Y, v.X)));
+}
+
+[UpdateAfter<FacingSystem>]
 public class SyncSystem : EcsSystem
 {
-    [ForEach, Changed<Facing>]   // 只访问本系统上次执行后 Facing 被写过的实体
+    [ForEach, Changed<Facing>]   // 只访问本系统上次执行后 Facing 变过的实体
     static void Sync(in Facing facing, ref NetSync sync, ref Outbox outbox)
     {
-        if (facing == sync.Sent) return;   // 写过但值没变：不用发
         sync = new NetSync(facing);
-        outbox.Updates++;                  // 真实的服务器在这里把更新放进发送队列
+        outbox.Updates++;          // 真实的服务器在这里把更新放进发送队列
     }
 }
 ```

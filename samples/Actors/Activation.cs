@@ -21,8 +21,8 @@ public static class Activation
             return active;
         }
 
-        var actor = world.Instantiate(kind);
-        actor.Set(key, new In<TActor>());
+        // The key and the inbox tag land with the prefab's components in one row copy.
+        var actor = world.Instantiate(kind, key, new In<TActor>());
         if (storage.TryGet(key, out var record))
         {
             // The record replaces the prefab's defaults, with markWritten: false: what came from storage is not a

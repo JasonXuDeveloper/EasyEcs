@@ -74,7 +74,7 @@ public static class Program
         string status = scoring.Status(world);
         Console.WriteLine($"plugin loaded, {updates} updates: {status}, {systems} systems");
 
-        // The save holds the plugin's components too, by type name.
+        // The save holds the plugin's components too, each by its type id: a hash of its full name.
         var output = new ArrayBufferWriter<byte>();
         world.Save(output);
         saved = output.WrittenSpan.ToArray();

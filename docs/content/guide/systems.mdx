@@ -482,9 +482,11 @@ Census.CountAlive<Health>(world, ref alive);      // a generic runner: the type 
 
 ### Measuring systems [#measuring-systems]
 
-With `WorldOptions.MeasureSystems`, every run of a system (its `OnUpdate` plus its `[ForEach]` methods) is timed, and
-`system.Stats` holds `Runs`, `Last`, `Total` and `Average`. It costs two timestamp reads per system run, and nothing
-when off. Read it between updates, for example from a diagnostics endpoint:
+With `WorldOptions.MeasureSystems`, every run of a system (its `OnUpdate` plus its `[ForEach]` methods) is measured:
+`system.Stats` holds `Runs`, `Last`, `Total` and `Average`, the bytes the run allocated (`LastAllocated`,
+`TotalAllocated`) and the entities its `[ForEach]` methods matched (`LastEntities`, `TotalEntities`). Each run reads
+the clock and the thread's allocation counter twice, and each `[ForEach]` pass counts its matches once; off, it costs
+one field test per run. Read it between updates, for example from a diagnostics endpoint:
 
 ```csharp
 var measured = new World(new WorldOptions { MeasureSystems = true });
@@ -669,7 +671,8 @@ needed, and a method that writes a singleton:
   the world (other actor types) are never walked by the group's systems.
 - **Singleton parameters** are resolved once per pass, not per entity.
 - **Ordering** is resolved when systems are added: an update pays nothing for it.
-- **`MeasureSystems`** costs two timestamp reads per system run; nothing when off.
+- **`MeasureSystems`** costs, per system run, two clock reads, two allocation counter reads and one `Count` per
+  `[ForEach]` pass ([diagnostics](/en/docs/guide/diagnostics#what-it-costs)); one field test per run when off.
 - **Parallel methods** allocate nothing after their first update; the runner's work items are reused.
 - **Generated code** is registered by a module initializer: systems need no `partial`, no registration call and no
   reflection at update time.

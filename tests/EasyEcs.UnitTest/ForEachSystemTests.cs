@@ -560,8 +560,10 @@ public class ForEachSystemTests
     public void SlicedFiltersApplyToPassesOnly()
     {
         using var world = new World();
-        world.CreateEntity(new Health(1));
+        var entity = world.CreateEntity(new Health(1));
         var sliced = QueryFilter.Create().Slice(1, 2);
+        var job = new DestroyDespitePromise();
+        Assert.Throws<System.ArgumentException>(() => entity.Run<Health, DestroyDespitePromise>(ref job, sliced));
         Assert.Throws<System.ArgumentException>(() => world.Count<Health>(sliced));
         Assert.Throws<System.ArgumentException>(() => world.Any<Health>(sliced));
         Assert.Throws<System.ArgumentException>(() => world.Query<Health>(sliced));
@@ -570,6 +572,7 @@ public class ForEachSystemTests
         Assert.Throws<System.ArgumentOutOfRangeException>(() => QueryFilter.Create().Slice(2, 2));
         Assert.Throws<System.ArgumentOutOfRangeException>(() => QueryFilter.Create().Slice(0, 0));
         Assert.That(world.Count<Health>(QueryFilter.Create().Slice(0, 1)), Is.EqualTo(1)); // one slice: the whole tables
+        Assert.That(entity.IsAlive, Is.True);                                                // no refused call ran
     }
 
     [Test]

@@ -8,9 +8,10 @@ deployed to Cloudflare Pages. English and Chinese. How to write a page: `WRITING
 ```bash
 bun install
 bun run dev              # http://localhost:5173
-bun run check            # tsc, Biome, links + anchors + icons (scripts/lint-links.ts)
+bun run check            # tsc, Biome, links + anchors + icons (scripts/lint-links.ts), Chinese terms (lint-terms.ts)
 bun run build            # Chromium check, git history, benchmark sync, prerender, static files -> build/client, then lint:seo, lint:search
 bun run lint:seo         # titles, descriptions, canonical, hreflang, cards, JSON-LD, sitemap, robots, llms files
+bun run lint:terms       # the Chinese pages use the glossary's terms (tools/ApiDocs/zh/README.md)
 bun run lint:search      # each query of scripts/search-expectations.json finds its page in the built search index
 bun run sync:benchmarks  # src/data/bench.json from BenchmarkDotNet reports (see Benchmarks)
 bun run og:default       # redraw the default social card (public/og.png, the card of /en)
