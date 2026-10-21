@@ -35,19 +35,19 @@ public static class Server
         ref readonly var clock = ref world.Clock;
         Console.WriteLine(
             $"tick {clock.Tick,5} ({(Rules.IsNight(clock) ? "night" : "day  ")}): {world.Count<Player>()} players, " +
-            $"{world.Count<Chunk>()} chunks, {world.Count<Water>()} water, {world.Count<Zombie>()} zombies, " +
+            $"{world.Count<Chunk>()} chunks, {Terrain.WaterIn(world)} water, {world.Count<Zombie>()} zombies, " +
             $"{world.Count<Item>()} items");
     }
 
     static void Totals(World world)
     {
         ref readonly var s = ref world.Stats;
-        Console.WriteLine($"chunks: {s.ChunksLoaded} loaded, {s.ChunksUnloaded} unloaded, {s.ChunkUpdates} sent");
+        Console.WriteLine($"chunks: {s.ChunksGenerated} generated, {s.ChunksUnloaded} unloaded, {s.ChunksLoaded} loaded back");
         Console.WriteLine($"blocks dug: {s.BlocksDug}; items: {s.ItemsPickedUp} picked up, {s.ItemsExpired} expired");
         Console.WriteLine($"zombies: {s.ZombiesSpawned} spawned, {s.ZombiesBurned} burned, {s.Hits} hits; player deaths: {s.PlayerDeaths}");
-        Console.WriteLine($"water: {s.WaterCells} cells poured, {s.Drifts} ticks of humanoids carried");
-        Console.WriteLine($"view: {s.CameIntoView} entities came into view, {s.LeftView} left it");
-        Console.WriteLine($"sent: {s.EntityUpdates} entity updates ({s.BytesSent / 1024} KiB), {s.Despawns} despawns");
+        Console.WriteLine($"water: {s.WaterCells} cells filled, {s.Drifts} ticks of bodies carried");
+        Console.WriteLine($"view: {s.ChunksSent} chunks sent, {s.ChunksForgotten} forgotten; {s.CameIntoView} entities came into view, {s.LeftView} left it, {s.Despawns} despawned");
+        Console.WriteLine($"sent: {s.BlockUpdates} block updates, {s.EntityUpdates} entity updates ({s.BytesSent / 1024} KiB)");
     }
 
     // WorldOptions.MeasureSystems keeps the time and the allocations of every system.

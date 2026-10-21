@@ -1,3 +1,4 @@
+using System.Numerics;
 using EasyEcs;
 
 namespace VoxelServer;
@@ -52,8 +53,8 @@ public static class Terrain
         return chunk.Block[IndexOf(x, y, z)];
     }
 
-    // Water and air let a body through.
-    public static bool IsSolid(Block block) => block is not (Block.Air or Block.Water);
+    // Only air lets a body through; water is not a block but the chunk's Fluid grid beside the blocks.
+    public static bool IsSolid(Block block) => block != Block.Air;
 
     public static bool IsSolid(World world, float x, float y, float z) => IsSolid(BlockAt(world, Cell(x, y, z)));
 
@@ -63,18 +64,66 @@ public static class Terrain
     public static BlockPos Cell(float x, float y, float z) =>
         new((int)MathF.Floor(x), (int)MathF.Floor(y), (int)MathF.Floor(z));
 
-    // Fills an air block with water: the chunk's buffer gets Block.Water (a tracked write, so the chunk is sent again)
-    // and the cell becomes an entity that will flow FlowDelay ticks from now.
-    public static void PourWater(World world, BlockPos at, BlockPos source, int level, long tick, ref Stats stats)
+    // The chunk a point is in.
+    public static ChunkPos ChunkOf(Vector3 p) => ChunkOf((int)MathF.Floor(p.X), (int)MathF.Floor(p.Z));
+
+    // The chunks a view of `range` blocks reaches around `center`: foreach (var chunk in Terrain.ChunksAround(...)).
+    public static ChunkSquare ChunksAround(ChunkPos center, float range) => new(center, Rules.ChunksIn(range));
+
+    // The highest solid block of a column, -1 if its chunk is not loaded.
+    public static int TopAt(World world, int x, int z)
     {
-        if (BlockAt(world, at) != Block.Air) return;   // a chunk that is not loaded reads as stone
-        PourWater(world, world.ChunkIndex.Get(ChunkOf(at.X, at.Z)), at, source, level, tick, ref stats);
+        if (!world.ChunkIndex.TryGet(ChunkOf(x, z), out var chunk)) return -1;
+        var blocks = chunk.Block.AsReadOnlySpan();
+        int y = Height - 1;
+        while (y > 0 && blocks[IndexOf(x, y, z)] == Block.Air) y--;
+        return y;
     }
 
-    public static void PourWater(World world, Entity chunk, BlockPos at, BlockPos source, int level, long tick, ref Stats stats)
+    // Whether nothing solid is above a block: the sky reaches it.
+    public static bool UnderSky(World world, BlockPos at) => TopAt(world, at.X, at.Z) < at.Y;
+
+    // The water level at a block, 0 where there is none or the chunk is not loaded.
+    public static int WaterAt(World world, BlockPos at)
     {
-        chunk.WriteBlock().AsSpan()[IndexOf(at.X, at.Y, at.Z)] = Block.Water;
-        world.CreateEntity(new Water(at, source, level), new Flowing(tick + Rules.FlowDelay), new ChildOf(chunk));
-        stats.WaterCells++;
+        if (at.Y < 0 || at.Y >= Height || !world.ChunkIndex.TryGet(ChunkOf(at.X, at.Z), out var chunk)) return 0;
+        return chunk.Fluid[IndexOf(at.X, at.Y, at.Z)].Level;
+    }
+
+    // The water of a chunk and of its four neighbours may move again: a block changed at `pos`, or water beside it.
+    public static void Wake(World world, ChunkPos pos)
+    {
+        foreach (var near in ChunksAround(pos, Size))
+            if (near.X == pos.X || near.Z == pos.Z)
+                if (world.ChunkIndex.TryGet(near, out var chunk)) chunk.Set(new Flowing());
+    }
+
+    // The blocks of water in the world, for the report.
+    public static int WaterIn(World world)
+    {
+        int count = 0;
+        foreach (var chunk in world.Read<DynamicBuffer<Fluid>>())
+        {
+            var levels = System.Runtime.InteropServices.MemoryMarshal.Cast<Fluid, byte>(chunk.Component1.AsReadOnlySpan());
+            count += levels.Length - levels.Count((byte)0);   // Count is vectorized
+        }
+        return count;
+    }
+}
+
+// The chunks of a square around a center, walked row by row with no allocation.
+public ref struct ChunkSquare(ChunkPos center, int reach)
+{
+    int _dx = -reach - 1, _dz = -reach;
+
+    public readonly ChunkSquare GetEnumerator() => this;
+
+    public readonly ChunkPos Current => new(center.X + _dx, center.Z + _dz);
+
+    public bool MoveNext()
+    {
+        if (++_dx <= reach) return true;
+        _dx = -reach;
+        return ++_dz <= reach;
     }
 }

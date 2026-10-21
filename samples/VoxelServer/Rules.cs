@@ -8,7 +8,7 @@ public static class Rules
     public const int TicksPerSecond = 20;
     public const int DayLength = 600;          // 30 seconds a day, so a short run sees a night
     public const float PlayerVision = 32;      // blocks a player sees: two chunks each way, 5 x 5 chunks loaded
-    public const float ZombieVision = 16;      // blocks a zombie sees a player from
+    public const float ZombieVision = 35;      // blocks a zombie sees a player from: its follow range in Minecraft
     public const int LoadEvery = TicksPerSecond / 2;   // ticks between two passes of ChunkLoadSystem
     public const int UnloadAfter = 100;        // ticks a chunk stays loaded after the last player saw it
     public const float Gravity = 0.08f;
@@ -18,14 +18,19 @@ public static class Rules
     public const int ZombieDamage = 3;
     public const int PlayerHealth = 20;
     public const int SpawnEvery = 100;         // ticks between two zombies per player at night
-    public const int ItemLifetime = 300;
+    public const int SpawnMin = 24, SpawnMax = 32;   // blocks from the player a zombie rises (24 at least, as in Minecraft)
+    public const int BurnEvery = 5;            // ticks between two points of fire damage (Minecraft: 20; days are short here)
+    public const int BurnFor = 40;             // ticks a zombie burns on after it found shade
+    public const int ItemLifetime = 300;       // ticks an item lies on the ground (Minecraft: 6000; the run is a minute)
+    public const int PickupDelay = 10;         // ticks before a dropped item can be picked up, as in Minecraft
     public const float PickupRange = 1.5f;
-    public const int WaterReach = 7;           // blocks water runs from its spring on flat ground, as in Minecraft
+    public const int StackSize = 64, InventorySlots = 36;
     public const int FlowDelay = 5;            // ticks before water spreads one block further
     public const float FloatSpeed = 0.1f;      // the upward speed water gives a humanoid; gravity takes 0.08 back
     public const float Current = 0.15f;        // the push of the water next to a spring, in blocks per tick
     public const int PositionBytes = 16;       // an entity update: the entity's id and its position
     public const int HealthBytes = 2;          // the health bar an update carries for a player or a zombie
+    public const int MaxRequests = 256;        // chunks read or unloaded in one tick at most; the others wait a tick
     public const int MaxSeen = 256;            // entities a client shows at most; the others wait for room
 
     // The chunks a view reaches in each direction.
@@ -40,7 +45,7 @@ public static class Rules
     // One chunk in four has a spring in its middle.
     public static bool HasSpring(ChunkPos chunk) => Hash(chunk.X, chunk.Z + 1000) % 4 == 0;
 
-    // Players start on a line through the origin, three blocks apart, standing on the ground.
+    // Players start on a grid 16 wide from the origin, three blocks apart, standing on the ground.
     public static Vector3 SpawnPoint(int client)
     {
         int x = client % 16 * 3, z = client / 16 * 3;

@@ -9,16 +9,18 @@ int players = Support.Option(args, "--players", 50);
 int ticks = Support.Option(args, "--ticks", 1200);
 
 // #region options
-// A chunk's blocks are 8 KB, more than a buffer's pool keeps by default: let each loaded chunk reuse the list of one
-// that was unloaded.
+// A chunk's blocks and its water are 8 KB each, more than a buffer's pool keeps by default: let each loaded chunk
+// reuse the lists of one that was unloaded.
 DynamicBuffer<Block>.PoolCapacity = Terrain.BlocksPerChunk;
+DynamicBuffer<Fluid>.PoolCapacity = Terrain.BlocksPerChunk;
 
-// The destroy log keeps the last 64k destroyed ids with their ticks, for SendDespawnsSystem.
-using var world = new World(new WorldOptions { MeasureSystems = true, DestroyLogCapacity = 1 << 16 });
+using var world = new World(new WorldOptions { MeasureSystems = true });
 // #endregion options
 
 world.SetClock(Tick: 0, DayLength: Rules.DayLength);
 world.AddSingleton<Stats>();
+var regions = new RegionFiles();
+world.SetRegions(regions);
 SetPrefabs(world);
 
 // #region systems
@@ -26,25 +28,33 @@ SetPrefabs(world);
 // is sent back.
 world.AddSystem<FakeClientsSystem>();
 world.AddSystem<ChunkLoadSystem>();
+world.AddSystem<ChunkReadSystem>();
+world.AddSystem<BlockUpdateSystem>();
 world.AddSystem<WaterFlowSystem>();
 world.AddSystem<PlayerMoveSystem>();
-world.AddSystem<ZombieSightSystem>();
+world.AddSystem<SightSystem>();
+world.AddSystem<ZombieTargetSystem>();
 world.AddSystem<ZombieChaseSystem>();
+world.AddSystem<ZombieAttackSystem>();
+world.AddSystem<CooldownSystem>();
+world.AddSystem<PlayerRespawnSystem>();
 world.AddSystem<FloatSystem>();
 world.AddSystem<PhysicsSystem>();
 world.AddSystem<GridSystem>();
 world.AddSystem<DigSystem>();
+world.AddSystem<ItemAgeSystem>();
 world.AddSystem<PickupSystem>();
 world.AddSystem<ItemExpirySystem>();
 world.AddSystem<NightSpawnSystem>();
-world.AddSystem<SunburnSystem>();
+world.AddSystem<SunlightSystem>();
+world.AddSystem<BurnSystem>();
+world.AddSystem<ExtinguishSystem>();
 world.AddSystem<ZombieDeathSystem>();
-world.AddSystem<PlayerRespawnSystem>();
 world.AddSystem<ChunkUnloadSystem>();
-world.AddSystem<PlayerSightSystem>();
+world.AddSystem<ChunkSaveSystem>();
+world.AddSystem<ChunkViewSystem>();
 world.AddSystem<SendChunksSystem>();
 world.AddSystem<SendEntitiesSystem>();
-world.AddSystem<SendDespawnsSystem>();
 world.AddSystem<ClockSystem>();
 // #endregion systems
 
@@ -78,17 +88,19 @@ Console.WriteLine();
 // #endregion leaderboard
 
 // #region save
-// Stop the way a vanilla server does: save the world. The prefabs are not in the save: every start builds them, and a
-// Prefab has no serialized form. A restart builds them, then loads the save beside them.
-var startup = ComponentSet.Create().WithSingleton<Prefabs>();
+// Stop the way a vanilla server does: save the world; the unloaded chunks are in the region files already. The prefabs
+// and the region files are not in the save: every start builds the prefabs (a Prefab has no serialized form) and
+// opens the files. A restart does both, then loads the save beside them.
+var startup = ComponentSet.Create().WithSingleton<Prefabs>().WithSingleton<Regions>();
 var save = new ArrayBufferWriter<byte>();
 world.SaveWithout(save, in startup);
 
-using var restarted = new World(new WorldOptions { DestroyLogCapacity = 1 << 16 });
+using var restarted = new World();
+restarted.SetRegions(regions);
 SetPrefabs(restarted);
 restarted.LoadKeeping(save.WrittenSpan, in startup, markWritten: false);   // a client that reconnects gets it all anyway
 Console.WriteLine($"restarted from the save: {restarted.Count<Player>()} players, {restarted.Count<Chunk>()} chunks, " +
-                  $"{restarted.Count<Water>()} water, {restarted.Count<Zombie>()} zombies");
+                  $"{Terrain.WaterIn(restarted)} water, {restarted.Count<Zombie>()} zombies; {regions.Count} chunks in the region files");
 Console.Error.WriteLine($"save: {save.WrittenCount / 1024} KiB");
 // #endregion save
 
@@ -98,14 +110,14 @@ Console.Error.WriteLine($"save: {save.WrittenCount / 1024} KiB");
 static void SetPrefabs(World world) =>
     world.SetPrefabs(
         Player: new Prefab()
-            .SetPlayer(0).Set(new Humanoid()).SetVision(Rules.PlayerVision).SetInChunk(default).SetScore(0).SetBuffer<Seen>()
+            .SetPlayer(0).SetVision(Rules.PlayerVision).SetInChunk(default).SetScore(0).SetBuffer<Seen>().SetBuffer<InView>()
             .SetPosition(default).SetVelocity(default).SetBody(false, false)
             .SetHealth(Rules.PlayerHealth).SetInput(default, false).SetBuffer<ItemStack>(),
         Zombie: new Prefab()
-            .Set(new Zombie()).Set(new Humanoid()).SetVision(Rules.ZombieVision).SetInChunk(default).SetTarget(default)
+            .Set(new Zombie()).SetVision(Rules.ZombieVision).SetBuffer<Seen>().SetInChunk(default).SetTarget(default)
             .SetPosition(default).SetVelocity(default).SetBody(false, false)
             .SetHealth(Rules.ZombieHealth).SetCooldown(0),
         Item: new Prefab()
-            .SetItem(default, default).SetInChunk(default).SetPosition(default).SetVelocity(new System.Numerics.Vector3(0, 0.2f, 0))
-            .SetBody(false, false).SetLifetime(Rules.ItemLifetime));
+            .SetItem(default, 1).SetInChunk(default).SetPosition(default).SetVelocity(new System.Numerics.Vector3(0, 0.2f, 0))
+            .SetBody(false, false).SetAge(0));
 // #endregion prefabs

@@ -20,10 +20,11 @@ public class PlayerMoveSystem : EcsSystem
 
 // #region physics
 // Moves everything with a velocity through the blocks. Walking onto a block one high steps up onto it (from the
-// ground, with room for the head); a higher wall stops the walk. Then gravity: fall onto the block below, or stop at
-// the one above the head. The position is a Mut<Position>, written only when it changes, so a player standing still
-// is not sent again.It stays on one thread: the
-// block lookups go through World (the chunk index), and a parallel method may not hold the World (EECS010).
+// ground, with room for the head: the auto-jump of Bedrock Edition); a higher wall stops the walk. Then gravity, one
+// block at a time so a fast fall cannot pass through the ground: land on the block below, or stop at the one above the
+// head. The position is a Mut<Position>, written only when it changes, so a body standing still is not sent again. It
+// stays on one thread: the block lookups go through World (the chunk index), and a parallel method may not hold the
+// World (EECS010).
 [UpdateInGroup<Simulation>]
 public class PhysicsSystem : EcsSystem
 {
@@ -48,18 +49,25 @@ public class PhysicsSystem : EcsSystem
             }
         }
 
-        y += v.Y;
         bool onGround = false;
-        if (v.Y <= 0 && Terrain.IsSolid(World, x, y, z))
+        int steps = (int)MathF.Ceiling(MathF.Abs(v.Y));
+        float step = steps == 0 ? 0 : v.Y / steps;
+        for (int i = 0; i < steps; i++)
         {
-            y = MathF.Floor(y) + 1;
-            v.Y = 0;
-            onGround = true;
-        }
-        else if (v.Y > 0 && Terrain.IsSolid(World, x, y + 1.8f, z))
-        {
-            y = p.Y;
-            v.Y = 0;
+            float next = y + step;
+            if (step < 0 && Terrain.IsSolid(World, x, next, z))
+            {
+                y = MathF.Floor(next) + 1;
+                v.Y = 0;
+                onGround = true;
+                break;
+            }
+            if (step > 0 && Terrain.IsSolid(World, x, next + 1.8f, z))
+            {
+                v.Y = 0;
+                break;
+            }
+            y = next;
         }
 
         position.SetIfChanged(new Position(new Vector3(x, y, z)));
@@ -79,8 +87,7 @@ public class GridSystem : EcsSystem
     [ForEach, With<InChunk>]
     static void Track(Entity entity, in Position position)
     {
-        var p = position.Value;
-        entity.SetInChunkIfChanged(Terrain.ChunkOf((int)MathF.Floor(p.X), (int)MathF.Floor(p.Z)));
+        entity.SetInChunkIfChanged(Terrain.ChunkOf(position.Value));
     }
 }
 // #endregion grid

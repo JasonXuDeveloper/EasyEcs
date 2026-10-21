@@ -6,7 +6,7 @@ namespace VoxelServer;
 // ---- Blocks and chunks ----
 
 // One block of the world. A chunk holds 16 x 16 x 32 of them (Terrain.cs has the layout).
-public enum Block : byte { Air, Grass, Dirt, Stone, Bedrock, Water }
+public enum Block : byte { Air, Grass, Dirt, Stone, Bedrock }
 
 public record struct ChunkPos(int X, int Z);
 
@@ -20,24 +20,32 @@ public record struct Chunk(ChunkPos Pos) : IComponent, IUniqueIndexed<ChunkPos>
     ChunkPos IIndexed<ChunkPos>.Key => Pos;
 }
 
+// A chunk a player needs that is not loaded: ChunkLoadSystem records it as an entity, ChunkReadSystem reads or
+// generates it after the pass (a pass may not load entities, EECS041).
+public record struct LoadRequest(ChunkPos Pos, long Tick) : IComponent;
+
+// A tag on a chunk nobody saw for a while: ChunkSaveSystem writes it and what is in it to the region files and
+// destroys them, after the pass.
+public struct Unloading : IComponent;
+
 // The players that had the chunk in view at the last load pass (Tick): who is sent what happens in it.
 // ChunkUnloadSystem frees the chunks nobody has seen for a while.
 public record struct Viewers(long Tick, int Count) : IComponent;
 
 // ---- Water ----
 
-// A block of water: an entity beside the Block.Water in its chunk's buffer, for what the buffer cannot hold. Level is
-// how far the water ran from its spring (0 at the spring, Rules.WaterReach at the edge); Source is that spring. The
-// unique index finds the water at a block (world.WaterIndex). Each cell is a child of its chunk (ChildOf), so
-// unloading a chunk takes its water with it.
-public record struct Water(BlockPos Pos, BlockPos Source, int Level) : IComponent, IUniqueIndexed<BlockPos>
+// The water in one block of a chunk: a DynamicBuffer<Fluid> beside the blocks, one byte per block in the same layout,
+// so a chunk's water is a grid that WaterFlowSystem steps 16 blocks at a time. Level 0 is no water, Spring (9) a
+// spring that never dries, Falling (8) water with water above it, and 7 down to 1 water running sideways, one less
+// per block from where it came, as in Minecraft (which counts the other way: 0 for a source, 7 at the edge).
+public record struct Fluid(byte Level)
 {
-    BlockPos IIndexed<BlockPos>.Key => Pos;
+    public const byte Spring = 9, Falling = 8;
 }
 
-// Water that will spread at tick At. WaterFlowSystem removes it once the cell has spread: settled water costs nothing.
-// Digging next to water adds it back (a block update).
-public record struct Flowing(long At) : IComponent;
+// A tag on a chunk whose water may still move: WaterFlowSystem visits only these. A chunk loses it when a step changed
+// nothing, and gets it back when a block is dug in it or the water of a neighbour changed.
+public struct Flowing : IComponent;
 
 // ---- Everything that moves: players, zombies, dropped items ----
 
@@ -52,11 +60,9 @@ public record struct Body(bool OnGround, bool Blocked) : IComponent;
 
 public record struct Health(int Value) : IComponent;
 
-// A tag: players and zombies. Humanoids float in water and drift with it; dropped items sink.
-public struct Humanoid : IComponent;
-
-// How far a player or a zombie sees, in blocks: each prefab sets its own. A player's view decides which chunks are
-// loaded around it and what it is sent (its area of interest); a zombie's, which player it hunts.
+// How far a player or a zombie sees, in blocks: each prefab sets its own. One area of interest for both: SightSystem
+// fills the Seen buffer of each, the player's client shows what it holds and a zombie hunts from it. A player's view
+// also decides which chunks are loaded around it.
 public record struct Vision(float Range) : IComponent;
 
 // The chunk an entity that moves is in: players, zombies and items. An index of them by chunk
@@ -78,9 +84,18 @@ public record struct Score(int BlocksDug) : IComponent, IIndexed<int>
     int IIndexed<int>.Key => BlocksDug;
 }
 
-// One entity a player's client shows: a DynamicBuffer<Seen> on the player, what PlayerSightSystem found in its view
-// the last time it looked.
-public record struct Seen(EntityId Entity);
+// One entity in view: a DynamicBuffer<Seen> on everything with a Vision, what SightSystem found the last time it
+// looked, sorted by id so two looks compare in one walk. A player's client shows these; a zombie picks its target
+// among them.
+public record struct Seen(EntityId Entity) : IComparable<Seen>
+{
+    public int CompareTo(Seen other) =>
+        Entity.Index != other.Entity.Index ? Entity.Index.CompareTo(other.Entity.Index) : Entity.Version.CompareTo(other.Entity.Version);
+}
+
+// One chunk a player's client has: a DynamicBuffer<InView> on the player, the chunks of its view at the last load
+// pass. A chunk that comes into view is sent whole; one that leaves it is forgotten by the client.
+public record struct InView(ChunkPos Chunk);
 
 // What the client asked for this tick: a direction to walk in (x, z) and a dig of the block underfoot.
 public record struct Input(Vector2 Walk, bool Dig) : IComponent;
@@ -99,11 +114,15 @@ public record struct Target(EntityId Player) : IComponent;
 // Ticks until a zombie may hit again.
 public record struct Cooldown(int Ticks) : IComponent;
 
-// A dug block lying on the ground, waiting for the player who dug it.
-public record struct Item(Block Kind, EntityId Owner) : IComponent;
+// A zombie in daylight is on fire for this many more ticks, as in Minecraft: the fire hurts every Rules.BurnEvery
+// ticks and goes on burning for a while after the zombie found shade.
+public record struct Burning(int Ticks) : IComponent;
 
-// Ticks until an item nobody picked up disappears.
-public record struct Lifetime(int Ticks) : IComponent;
+// A stack of dug blocks lying on the ground, for any player who walks over it.
+public record struct Item(Block Kind, int Count) : IComponent;
+
+// Ticks since an item was dropped: it can be picked up after Rules.PickupDelay and is gone after Rules.ItemLifetime.
+public record struct Age(int Ticks) : IComponent;
 
 // ---- Singletons: one value per world ----
 
@@ -113,10 +132,16 @@ public record struct Clock(long Tick, int DayLength) : ISingletonComponent;
 // The recipes players, zombies and items are created from.
 public record struct Prefabs(Prefab Player, Prefab Zombie, Prefab Item) : ISingletonComponent;
 
+// Where unloaded chunks are kept: the region files of a vanilla server. Host/RegionFiles.cs stands in for the disk.
+public record struct Regions(RegionFiles Files) : ISingletonComponent;
+
 // What happened, for the report.
 public record struct Stats(
+    long ChunksGenerated,
     long ChunksLoaded,
     long ChunksUnloaded,
+    long ChunksSent,
+    long ChunksForgotten,
     long BlocksDug,
     long ItemsPickedUp,
     long ItemsExpired,
@@ -126,9 +151,9 @@ public record struct Stats(
     long PlayerDeaths,
     long WaterCells,
     long Drifts,
-    long ChunkUpdates,
+    long BlockUpdates,
     long EntityUpdates,
     long BytesSent,
-    long Despawns,
     long CameIntoView,
-    long LeftView) : ISingletonComponent;
+    long LeftView,
+    long Despawns) : ISingletonComponent;
