@@ -282,6 +282,39 @@ public class MoveTests
     }
 
     [Test]
+    public void ACallRefusedDuringAPassIsNamed()
+    {
+        using var from = new World();
+        using var to = new World();
+        var player = from.CreateEntity(new Health(1));
+        var bytes = new NinoArrayBufferWriter();
+        from.SaveEntities(bytes, player.Id);
+        foreach (var item in to.Query<Health>()) { }                    // warms the query: no table is created below
+        string Refused(Action call)
+        {
+            to.CreateEntity(new Health(2));
+            try
+            {
+                foreach (var item in to.Query<Health>()) call();
+            }
+            catch (InvalidOperationException e)
+            {
+                return e.Message;
+            }
+
+            return null;
+        }
+
+        // Each names itself, not another call (a move, a load or a save once read as a snapshot's refusal).
+        Assert.That(Refused(() => from.MoveEntities(to, [player.Id])), Does.StartWith("MoveEntities "));
+        Assert.That(Refused(() => to.LoadEntities(bytes.WrittenSpan)), Does.StartWith("LoadEntities "));
+        Assert.That(Refused(() => to.Save(new NinoArrayBufferWriter())), Does.StartWith("Save "));
+        Assert.That(Refused(() => to.Capture()), Does.StartWith("Capture "));
+        Assert.That(player.IsAlive, Is.True);                           // nothing moved
+        Assert.That(from.MoveEntities(to, [player.Id]), Is.EqualTo(1)); // the passes ended
+    }
+
+    [Test]
     public void MovingIntoItselfIsRefused() =>
         Assert.Throws<ArgumentException>(() => { using var world = new World(); world.MoveEntities(world, []); });
 }

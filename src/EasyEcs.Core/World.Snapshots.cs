@@ -1,4 +1,6 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Threading;
 
 namespace EasyEcs;
@@ -26,7 +28,7 @@ public sealed partial class World
             throw new ArgumentException("The snapshot was taken from another world", nameof(into));
         using (Structural())
         {
-            ThrowIfIterating();
+            ThrowIfIterating(nameof(Capture));
             FillDirtyTables(); // left by a pass an exception interrupted: tables are dense from here
             var snapshot = into ?? NewSnapshot();
             Fit(ref snapshot.Meta, _nextId);
@@ -70,12 +72,13 @@ public sealed partial class World
     /// still works) and get the snapshot's values; singletons added after the capture are removed.
     /// O(entities × components + archetypes + singletons). Not while a pass iterates.
     /// </summary>
-    public void Restore(WorldSnapshot snapshot) => Restore(snapshot, false, true, default);
+    public void Restore(WorldSnapshot snapshot) => Restore(snapshot, false, true, default, nameof(Restore));
 
     // swap: the snapshot is Load's own, its buffer lists move into the world and the world's old ones into it.
     // markWritten: every restored row counts as written now (Changed<T> sees it), else as never written.
     // keep: the singletons left as the world has them (Load's keep set).
-    private void Restore(WorldSnapshot snapshot, bool swap, bool markWritten, in ComponentSet keep)
+    // call: the public call, named when a pass refuses it.
+    private void Restore(WorldSnapshot snapshot, bool swap, bool markWritten, in ComponentSet keep, string call)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         if (!ReferenceEquals(snapshot.World, this))
@@ -85,7 +88,7 @@ public sealed partial class World
 
         using (Structural())
         {
-            ThrowIfIterating();
+            ThrowIfIterating(call);
             // Entity records. Versions only grow: a recorded id keeps the snapshot's version if its entity was alive
             // then (its old handles work again), else it moves past every version it ever had, so no handle made after
             // the capture can match a later incarnation.
@@ -144,9 +147,16 @@ public sealed partial class World
         }
     }
 
-    private void ThrowIfIterating()
+    /// <summary>
+    /// Throws when a pass iterates this world: <paramref name="call"/> (named in the message) rewrites or drops whole
+    /// tables, or reads them dense (Capture, Restore, the saves and loads, MoveEntities, GroupBy, RemoveTypes, TrimExcess).
+    /// </summary>
+    private void ThrowIfIterating(string call)
     {
-        if (Volatile.Read(ref Passes) != 0)
-            throw new InvalidOperationException("Snapshots cannot be captured or restored while a query iterates");
+        if (Volatile.Read(ref Passes) != 0) ThrowIterating(call);
     }
+
+    [DoesNotReturn, MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowIterating(string call) =>
+        throw new InvalidOperationException($"{call} cannot run while a query or system iterates the world: call it between updates");
 }

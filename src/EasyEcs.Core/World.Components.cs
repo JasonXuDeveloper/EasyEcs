@@ -199,15 +199,27 @@ public sealed partial class World
     {
         var from = meta.Archetype;
         MoveTo(ref meta, id, from.GetAddSetEdge(signature) ?? CreateSetEdge(from, bits, signature));
-        var archetype = meta.Archetype;
-        if (!archetype.HasAbsent) return;
+        if (meta.Archetype.HasAbsent) GiveBack(meta.Archetype, meta.Slot, 1, bits);
+    }
+
+    /// <summary>
+    /// Components <paramref name="bits"/>, which <paramref name="table"/> has columns for, are given to rows
+    /// [<paramref name="first"/>, +<paramref name="count"/>) (Set of several components, Instantiate with given
+    /// components): rows that lacked one or kept it disabled have it now and lose its <see cref="Disabled{T}"/> tag (the
+    /// given value replaces the kept one). Inside the structural gate.
+    /// </summary>
+    private void GiveBack(Archetype table, int first, int count, ReadOnlySpan<ushort> bits)
+    {
         bool restored = false;
         for (int i = 0; i < bits.Length; i++)
         {
-            int column = archetype.ColumnIndex(bits[i]);
-            if (!archetype.MarkPresent(column, meta.Slot)) continue;
-            restored = true;
-            if (archetype.HasDisabled) Undisable(archetype, column, meta.Slot);
+            int column = table.ColumnIndex(bits[i]);
+            for (int row = first; row < first + count; row++)
+            {
+                if (!table.MarkPresent(column, row)) continue;
+                restored = true;
+                if (table.HasDisabled) Undisable(table, column, row);
+            }
         }
 
         if (restored) StorageVersion++; // passes re-read presence bits
@@ -297,8 +309,7 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void Gone(Archetype archetype, int column, int slot, ushort bit)
     {
-        if (archetype.Tracked && archetype.Info(column).Companion is var ticks and >= 0)
-            archetype.SetTick(archetype.ColumnIndex(ticks), slot, _changeTick);
+        if (TicksOf(archetype, column) is var ticks and >= 0) archetype.SetTick(ticks, slot, _changeTick);
         if (_indexByBit != null) Unindex(bit, archetype.Slots[slot].Index);
     }
 

@@ -170,9 +170,6 @@ public sealed partial class World
         StorageVersion++; // passes re-read presence bits
     }
 
-    /// <summary>Whether this world has a value index or relation index of component <paramref name="bit"/>.</summary>
-    private bool IndexedBit(int bit) => _indexByBit is { } byBit && (uint)bit < (uint)byBit.Length && byBit[bit] != null;
-
     /// <summary>The tick column of the tracked component of <paramref name="column"/> in <paramref name="table"/>, or -1.</summary>
     private static int TicksOf(Archetype table, int column) =>
         table.Tracked && table.Info(column).Companion is var ticks and >= 0 ? table.ColumnIndex(ticks) : -1;
@@ -324,7 +321,7 @@ public sealed partial class World
     private void GoneWord(Archetype table, int column, int word, ulong rows, ushort bit)
     {
         int ticks = TicksOf(table, column);
-        if (ticks < 0 && !IndexedBit(bit)) return;
+        if (ticks < 0 && IndexOf(bit) == null) return;
         for (ulong r = rows; r != 0; r &= r - 1) Gone(table, column, (word << 6) + BitOperations.TrailingZeroCount(r), bit);
     }
 }

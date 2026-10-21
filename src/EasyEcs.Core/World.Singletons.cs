@@ -41,12 +41,7 @@ public sealed partial class World
 
     /// <summary>Ref to singleton <typeparamref name="T"/>; throws if it was not added. O(1).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ref T GetSingleton<T>() where T : struct, ISingletonComponent
-    {
-        var box = Box<T>();
-        if (box == null) ThrowSingletonMissing(typeof(T));
-        return ref box!.Value;
-    }
+    public ref T GetSingleton<T>() where T : struct, ISingletonComponent => ref AddedBox<T>().Value;
 
     /// <summary>Ref to singleton <typeparamref name="T"/>, adding it (default) first if missing. O(1).</summary>
     public ref T GetOrAddSingleton<T>() where T : struct, ISingletonComponent
@@ -61,12 +56,7 @@ public sealed partial class World
     /// parameters through it once per pass, so a system whose singleton was never set fails on its first run. O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent
-    {
-        var box = Box<T>();
-        if (box == null) ThrowSingletonMissing(typeof(T));
-        return new(box!);
-    }
+    public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent => new(AddedBox<T>());
 
     /// <summary>
     /// Add <typeparamref name="T"/> unless another thread did first (systems of one parallel stage may resolve the same
@@ -112,6 +102,15 @@ public sealed partial class World
         int index = SingletonType<T>.Index;
         var singletons = _singletons;
         return (uint)index < (uint)singletons.Length ? Unsafe.As<SingletonBox<T>>(singletons[index]) : null;
+    }
+
+    /// <summary>The box of singleton <typeparamref name="T"/>, which must have been added (throws otherwise).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private SingletonBox<T> AddedBox<T>() where T : struct, ISingletonComponent
+    {
+        var box = Box<T>();
+        if (box == null) ThrowSingletonMissing(typeof(T));
+        return box!;
     }
 
     private void ClearSingletons() => _singletons = [];

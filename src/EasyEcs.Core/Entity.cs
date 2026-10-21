@@ -64,8 +64,7 @@ public readonly partial struct Entity : IEquatable<Entity>
     public World World => _world;
 
     /// <summary>Whether this incarnation is alive. O(1).</summary>
-    public bool IsAlive => _world != null && (uint)Index < (uint)_world.Meta.Length && _world.Meta[Index].Version == Version &&
-                           _world.Meta[Index].Archetype != null;
+    public bool IsAlive => _world != null && _world.IsAlive(Id);
 
     /// <summary>
     /// Whether the entity has component <typeparamref name="T"/>; false for a destroyed or default handle. O(1).

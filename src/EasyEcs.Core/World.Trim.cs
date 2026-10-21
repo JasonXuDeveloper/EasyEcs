@@ -48,7 +48,7 @@ public sealed partial class World
     public void TrimExcess()
     {
         if (_disposed) throw new ObjectDisposedException(nameof(World));
-        if (Volatile.Read(ref Passes) != 0) throw new InvalidOperationException("A world cannot be trimmed during a pass");
+        ThrowIfIterating(nameof(TrimExcess));
 
         using (Structural())
         {

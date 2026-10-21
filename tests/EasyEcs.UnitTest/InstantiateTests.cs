@@ -231,6 +231,32 @@ public class InstantiateTests
     }
 
     [Test]
+    public void APrefabWithMembersIsInstantiatedDuringAPass()
+    {
+        using var world = new World();
+        var boss = new Prefab().Set(new Health(500));
+        boss.AddMember().Set(new ChildOf(boss.Id), new Health(20));
+        for (int i = 0; i < 3; i++) world.Instantiate(boss);
+        int visited = 0;
+        foreach (var item in world.Query<Health>())                     // a spawner reacting to what it walks
+        {
+            if (item.Health.Value == 500) world.Instantiate(boss);
+            visited++;
+        }
+
+        Assert.That((visited, world.EntityCount, world.Count<ChildOf>()), Is.EqualTo((6, 12, 6)));
+        var spawned = new Entity[2];
+        foreach (var item in world.Query<Health>())
+            if (item.Health.Value == 500)
+            {
+                world.Instantiate(boss, spawned);
+                break;
+            }
+
+        Assert.That(world.Index<ChildOf, EntityId>().Count(spawned[1]), Is.EqualTo(1));
+    }
+
+    [Test]
     public void ADerivedGroupCopiesEveryMemberAndReservingCoversThem()
     {
         using var world = new World();

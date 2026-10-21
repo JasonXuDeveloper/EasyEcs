@@ -185,28 +185,9 @@ public sealed partial class World : IDisposable
     /// </summary>
     private void Instantiated(Archetype target, int first, int count, ReadOnlySpan<ushort> bits)
     {
-        if (target.HasAbsent) Restore(target, first, count, bits);
+        if (target.HasAbsent) GiveBack(target, first, count, bits);
         IndexRows(target, first, count);
         RegroupRows(target, first, count); // the given values chose their groups already: only the prefab's move
-    }
-
-    /// <summary>The given <paramref name="bits"/> of rows a prefab lacked or kept disabled come back (cold: such prefabs only).</summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private void Restore(Archetype target, int first, int count, ReadOnlySpan<ushort> bits)
-    {
-        bool restored = false;
-        for (int i = 0; i < bits.Length; i++)
-        {
-            int column = target.ColumnIndex(bits[i]);
-            for (int row = first; row < first + count; row++)
-            {
-                if (!target.MarkPresent(column, row)) continue;
-                restored = true;
-                if (target.HasDisabled) Undisable(target, column, row);
-            }
-        }
-
-        if (restored) StorageVersion++; // passes re-read presence bits
     }
 
     /// <summary>
@@ -548,6 +529,7 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>Whether entity <paramref name="id"/> (that incarnation) is alive. O(1).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool IsAlive(EntityId id) => TryGetEntity(id, out _);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -38,7 +38,7 @@ public sealed partial class World
         int bit = ComponentType<T>.Bit;
         using (Structural())
         {
-            ThrowIfIterating(); // the existing rows move
+            ThrowIfIterating(nameof(GroupBy)); // the existing rows move
             _groupByBit ??= [];
             if (bit >= _groupByBit.Length) Array.Resize(ref _groupByBit, bit + 1);
             if (_groupByBit[bit] != null) return;

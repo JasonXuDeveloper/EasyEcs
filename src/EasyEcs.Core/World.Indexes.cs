@@ -72,10 +72,15 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal RelationIndex<T> LiveRelations<T>() where T : struct, IRelation
     {
-        int bit = ComponentType<DynamicBuffer<T>>.Bit;
-        var byBit = _indexByBit;
-        return byBit != null && bit < byBit.Length && byBit[bit] is RelationIndex<T> { Live: true } index ? index : null;
+        return IndexOf(ComponentType<DynamicBuffer<T>>.Bit) is RelationIndex<T> { Live: true } index ? index : null;
     }
+
+    /// <summary>
+    /// The index of component <paramref name="bit"/> in this world (a value, unique or relation index), or null when it
+    /// has none: the one lookup every write, removal and copy of an indexed component makes.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private IValueIndex IndexOf(int bit) => _indexByBit is { } byBit && (uint)bit < (uint)byBit.Length ? byBit[bit] : null;
 
     private TIndex Register<TIndex>(int slot, int bit, TIndex index) where TIndex : IValueIndex
     {
@@ -152,22 +157,19 @@ public sealed partial class World
     internal void Claim<T>(int id, in T value) where T : struct, IComponent
     {
         if (!ComponentType<T>.Unique) return;
-        int bit = ComponentType<T>.Bit;
-        var byBit = _indexByBit;
         // No index yet: no table holds T, so no entity has a key to collide with.
-        if (byBit != null && bit < byBit.Length && byBit[bit] is { } index) Unsafe.As<IUniqueOf<T>>(index).Claim(id, in value);
+        if (IndexOf(ComponentType<T>.Bit) is { } index) Unsafe.As<IUniqueOf<T>>(index).Claim(id, in value);
     }
 
     /// <summary>
-    /// Entity <paramref name="id"/> now holds <paramref name="value"/> of indexed <typeparamref name="T"/>, added by
-    /// <c>GetOrAdd</c>: its index learns the key if this world has one (only the index: the caller holds a ref into the
-    /// row, which a group must not move). Inside the structural gate.
+    /// Entity <paramref name="id"/> now holds <paramref name="value"/> of indexed <typeparamref name="T"/>: its index
+    /// learns the key if this world has one. Only the index: <c>GetOrAdd</c> calls it alone (the caller holds a ref into
+    /// the row, which a group must not move), <see cref="Written{T}"/> with the groups. Inside the structural gate.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void IndexAdded<T>(int id, int version, in T value) where T : struct, IComponent
     {
-        int bit = ComponentType<T>.Bit;
-        var byBit = _indexByBit;
-        if (byBit != null && bit < byBit.Length && byBit[bit] is { } index) Unsafe.As<IIndexOf<T>>(index).Put(id, version, in value);
+        if (IndexOf(ComponentType<T>.Bit) is { } index) Unsafe.As<IIndexOf<T>>(index).Put(id, version, in value);
     }
 
     /// <summary><see cref="Claim{T}"/> for <paramref name="count"/> new entities all holding <paramref name="value"/> (CreateEntities).</summary>
@@ -181,9 +183,7 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.NoInlining)]
     internal IUniqueIndex UniqueIndex(int bit)
     {
-        var byBit = _indexByBit;
-        if (byBit != null && bit < byBit.Length && byBit[bit] is { } index) return (IUniqueIndex)index;
-        return (IUniqueIndex)ComponentInfo.Of(bit).CreateUniqueIndex(this);
+        return (IUniqueIndex)(IndexOf(bit) ?? ComponentInfo.Of(bit).CreateUniqueIndex(this));
     }
 
     /// <summary>
@@ -254,15 +254,8 @@ public sealed partial class World
     internal void Written<T>(int id, int version, in T value) where T : struct, IComponent
     {
         if (!ComponentType<T>.Watched) return;
-        int bit = ComponentType<T>.Bit;
-        if (ComponentType<T>.Indexed)
-        {
-            var byBit = _indexByBit;
-            if (byBit != null && bit < byBit.Length && byBit[bit] is { } index)
-                Unsafe.As<IIndexOf<T>>(index).Put(id, version, in value);
-        }
-
-        if (ComponentType<T>.Grouped && _groupByBit != null) Regroup(id, bit, in value);
+        if (ComponentType<T>.Indexed) IndexAdded(id, version, in value);
+        if (ComponentType<T>.Grouped && _groupByBit != null) Regroup(id, ComponentType<T>.Bit, in value);
     }
 
     /// <summary>
@@ -272,17 +265,12 @@ public sealed partial class World
     /// </summary>
     internal void WrittenAll<T>(ReadOnlySpan<Entity> entities, in T value) where T : struct, IComponent
     {
-        int bit = ComponentType<T>.Bit;
-        var byBit = _indexByBit;
-        if (byBit != null && bit < byBit.Length && byBit[bit] is { } index) Unsafe.As<IIndexOf<T>>(index).PutAll(entities, in value);
+        if (IndexOf(ComponentType<T>.Bit) is { } index) Unsafe.As<IIndexOf<T>>(index).PutAll(entities, in value);
     }
 
     /// <summary>Tell the index of <paramref name="bit"/>, if any, that entity <paramref name="id"/> lost it (cold).</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void Unindex(ushort bit, int id)
-    {
-        if (bit < _indexByBit.Length) _indexByBit[bit]?.Removed(id);
-    }
+    private void Unindex(ushort bit, int id) => IndexOf(bit)?.Removed(id);
 
     /// <summary>Tell the indexes about the entities of copied rows [<paramref name="first"/>, +<paramref name="count"/>) of <paramref name="table"/>.</summary>
     private void IndexRows(Archetype table, int first, int count)
@@ -290,7 +278,7 @@ public sealed partial class World
         if (_indexByBit == null) return;
         var components = table.Components;
         for (int c = 0; c < components.Length; c++) // per indexed column, every row at once
-            if (components[c] < _indexByBit.Length && _indexByBit[components[c]] is { } index)
+            if (IndexOf(components[c]) is { } index)
                 index.AddedRows(table, c, first, count);
     }
 
@@ -311,7 +299,7 @@ public sealed partial class World
         foreach (var table in _allArchetypes)
             if (table.Unique && table.Count != 0)
                 for (int c = 0; c < table.Components.Length; c++)
-                    if (ComponentInfo.Of(table.Components[c]).Unique && _indexByBit[table.Components[c]] is { } index)
+                    if (ComponentInfo.Of(table.Components[c]).Unique && IndexOf(table.Components[c]) is { } index)
                         index.AddedRows(table, c, 0, table.Count);
     }
 }

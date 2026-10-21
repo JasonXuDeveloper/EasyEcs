@@ -43,7 +43,7 @@ public sealed partial class World
     private void RemoveTypes(Func<Type, bool> doomed)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(World));
-        if (Volatile.Read(ref Passes) != 0) throw new InvalidOperationException("Types cannot be removed during a pass");
+        ThrowIfIterating(nameof(RemoveTypes));
 
         // Systems first: their OnDestroy may still use the types (remove a singleton, destroy entities).
         foreach (var group in _groups)
@@ -72,7 +72,7 @@ public sealed partial class World
             foreach (var table in dropped) Strip(table, bits);
 
             Drop(dropped, bits, in mask);
-            Forget(doomed, bits);
+            ForgetTypes(doomed, bits);
             TypesRemoved++;
             StorageVersion++;
         }
@@ -129,7 +129,7 @@ public sealed partial class World
     }
 
     /// <summary>The singletons, indexes, groupings, target rules and parallel work of the types. Inside the gate.</summary>
-    private void Forget(Func<Type, bool> doomed, List<ushort> bits)
+    private void ForgetTypes(Func<Type, bool> doomed, List<ushort> bits)
     {
         for (int i = 0; i < _singletons.Length; i++)
             if (_singletons[i] != null && doomed(_singletons[i].GetType()))
@@ -179,9 +179,6 @@ public sealed partial class World
         foreach (var key in _queryCache.Keys)
             if (key.Mentions(bit))
                 return true;
-        var groups = _groupByBit;
-        var indexes = _indexByBit;
-        return groups != null && bit < groups.Length && groups[bit] != null
-               || indexes != null && bit < indexes.Length && indexes[bit] != null;
+        return GroupingOf(bit) != null || IndexOf(bit) != null;
     }
 }

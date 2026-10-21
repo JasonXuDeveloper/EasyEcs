@@ -35,8 +35,7 @@ public sealed partial class World
     /// <exception cref="InvalidOperationException">An entity of the save has a unique key (<see cref="IUniqueIndexed{TKey}"/>) an entity of this world has: nothing is created.</exception>
     public int LoadEntities(ReadOnlySpan<byte> input, Span<Entity> entities = default)
     {
-        var source = _arrivals ??= new World(new WorldOptions { InitialEntityCapacity = 16 });
-        source.Load(input);
+        var source = LoadArrivals(input, nameof(LoadEntities));
         int created = ArriveAll(source);
         int order = Math.Min(entities.Length, source._loadOrderCount);
         for (int i = 0; i < order; i++) entities[i] = Arrived(source._loadOrder[i]);
@@ -68,14 +67,12 @@ public sealed partial class World
     /// </exception>
     public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into, bool markWritten = true)
     {
-        var source = _arrivals ??= new World(new WorldOptions { InitialEntityCapacity = 16 });
-        source.Load(input);
+        var source = LoadArrivals(input, nameof(LoadEntitiesInto));
         int count = source._loadOrderCount;
         if (into.Length != count)
             throw new ArgumentException($"The save holds {count} entities and {into.Length} were given", nameof(into));
         using (Structural())
         {
-            ThrowIfIterating();
             foreach (var entity in into)
                 if (entity.World != this || !IsAlive(entity.Id))
                     throw new ArgumentException("An entity to load into is stale or of another world", nameof(into));
@@ -131,6 +128,18 @@ public sealed partial class World
     }
 
     /// <summary>
+    /// The world of the arrivals of <paramref name="call"/> (reused), holding the group the bytes of a
+    /// <c>SaveEntities</c> wrote. Throws, before reading them, while a pass iterates this world.
+    /// </summary>
+    private World LoadArrivals(ReadOnlySpan<byte> input, string call)
+    {
+        ThrowIfIterating(call);
+        var source = _arrivals ??= new World(new WorldOptions { InitialEntityCapacity = 16 });
+        source.Load(input);
+        return source;
+    }
+
+    /// <summary>
     /// Set the components of row <paramref name="row"/> of <paramref name="source"/> (a loaded table, references
     /// rewritten) on entity <paramref name="id"/>: one move to the table with both sets of components, then each value
     /// as <c>Set</c> writes it (stamped as written unless <paramref name="markWritten"/> is false). Inside the
@@ -142,7 +151,7 @@ public sealed partial class World
         var before = meta.Archetype;
         if (_indexByBit != null) // the values the load replaces leave their indexes (they come back with the new ones)
             for (int sc = 0; sc < source.Columns.Length; sc++)
-                if (source.Components[sc] < _indexByBit.Length && _indexByBit[source.Components[sc]] is { } index && Loads(source, sc, row))
+                if (IndexOf(source.Components[sc]) is { } index && Loads(source, sc, row))
                     index.Removed(id);
 
         if (source.LoadSignature < 0) source.LoadSignature = Interlocked.Increment(ref TypeIndex<ComponentSignature>.Count) - 1;
@@ -179,7 +188,7 @@ public sealed partial class World
 
             if (table.Tracked && info.Companion is var ticks and >= 0) // unmarked: no tick, the value is the record's
                 table.SetTick(table.ColumnIndex(ticks), slot, markWritten ? _changeTick : 0);
-            if (present && _indexByBit != null && bit < _indexByBit.Length && _indexByBit[bit] is { } index) index.AddedRows(table, c, slot, 1);
+            if (present && IndexOf(bit) is { } index) index.AddedRows(table, c, slot, 1);
         }
 
         if (_groupByBit != null) RegroupRow(id);
@@ -215,11 +224,11 @@ public sealed partial class World
         PrepareCascade();
         using (Structural())
         {
-            ThrowIfIterating();
+            ThrowIfIterating(nameof(MoveEntities));
             FillDirtyTables();
             using (target.Structural())
             {
-                target.ThrowIfIterating();
+                target.ThrowIfIterating(nameof(MoveEntities));
                 if (ComponentInfo.AnyUnique) // the moving entities' unique keys, before the first row moves
                     foreach (var id in entities)
                         if (Moves(id, out var table, out int slot))
@@ -276,13 +285,16 @@ public sealed partial class World
         return !table.HasCleanup || !Retired(table, slot);
     }
 
-    /// <summary>Copy every entity of <paramref name="source"/>, a world without tombstones, into this one; returns how many.</summary>
+    /// <summary>
+    /// Copy every entity of <paramref name="source"/>, a world without tombstones, into this one; returns how many. The
+    /// copies are new rows, as <c>CreateEntities</c> makes them: a pass may be iterating this world (a group prefab
+    /// instantiated by a system).
+    /// </summary>
     internal int ArriveAll(World source)
     {
         int created = 0;
         using (Structural())
         {
-            ThrowIfIterating();
             ClaimGroup(source, 1);
             BeginArrival(source);
             foreach (var table in source._allArchetypes)

@@ -38,7 +38,7 @@ public sealed partial class World
     /// <c>[NinoFormerName]</c> loads its old rows.
     /// Allocates nothing once its buffers are large enough. O(entities × components). Not while a pass iterates.
     /// </summary>
-    public void Save(IBufferWriter<byte> output) => Save(output, default, true, default, SaveFilter.None);
+    public void Save(IBufferWriter<byte> output) => Save(output, default, true, default, SaveFilter.None, nameof(Save));
 
     /// <summary>
     /// <see cref="Save(IBufferWriter{byte})"/> without the components and singletons of <paramref name="exclude"/>:
@@ -48,7 +48,7 @@ public sealed partial class World
     /// <see cref="LoadKeeping"/>. Allocates nothing once its buffers are large enough. O(entities × components). Not
     /// while a pass iterates.
     /// </summary>
-    public void SaveWithout(IBufferWriter<byte> output, in ComponentSet exclude) => Save(output, default, true, in exclude, SaveFilter.Exclude);
+    public void SaveWithout(IBufferWriter<byte> output, in ComponentSet exclude) => Save(output, default, true, in exclude, SaveFilter.Exclude, nameof(SaveWithout));
 
     /// <summary>
     /// Write <paramref name="entities"/> (stale ids and repeats are skipped) and their components into
@@ -58,7 +58,8 @@ public sealed partial class World
     /// <c>CollectionsMarshal.AsSpan(list)</c>, no copy). Allocates nothing once its buffers are large enough.
     /// O(entities given × components). Not while a pass iterates.
     /// </summary>
-    public void SaveEntities(IBufferWriter<byte> output, params ReadOnlySpan<EntityId> entities) => Save(output, entities, false, default, SaveFilter.None);
+    public void SaveEntities(IBufferWriter<byte> output, params ReadOnlySpan<EntityId> entities) =>
+        Save(output, entities, false, default, SaveFilter.None, nameof(SaveEntities));
 
     /// <summary>
     /// <see cref="SaveEntities(IBufferWriter{byte}, ReadOnlySpan{EntityId})"/> of the components in
@@ -72,18 +73,19 @@ public sealed partial class World
     {
         if (components.HasSingletons)
             throw new ArgumentException("A group save writes no singletons: its set names components only", nameof(components));
-        Save(output, entities, false, in components, SaveFilter.Include);
+        Save(output, entities, false, in components, SaveFilter.Include, nameof(SaveEntitiesWith));
     }
 
     // How a save reads its ComponentSet: not at all, as the types it writes, or as the types it leaves out.
     private enum SaveFilter : byte { None, Include, Exclude }
 
-    private void Save(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, bool all, in ComponentSet components, SaveFilter filter)
+    private void Save(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, bool all, in ComponentSet components, SaveFilter filter,
+        string call)
     {
         ArgumentNullException.ThrowIfNull(output);
         using (Structural())
         {
-            ThrowIfIterating();
+            ThrowIfIterating(call);
             FillDirtyTables(); // tables are dense from here
             if (all) SelectAll();
             else Select(entities);
@@ -351,7 +353,7 @@ public sealed partial class World
     /// size or layout, a managed one's Nino layout), or the save gives one key of a unique component
     /// (<see cref="IUniqueIndexed{TKey}"/>) to several entities. The world is then left as it was.
     /// </exception>
-    public void Load(ReadOnlySpan<byte> input, bool markWritten = true) => Load(input, markWritten, default);
+    public void Load(ReadOnlySpan<byte> input, bool markWritten = true) => Load(input, markWritten, default, nameof(Load));
 
     /// <summary>
     /// <see cref="Load(ReadOnlySpan{byte}, bool)"/> that keeps the singletons of <paramref name="keep"/> as this world
@@ -373,12 +375,12 @@ public sealed partial class World
     {
         if (keep.HasComponents)
             throw new ArgumentException("A load replaces the entities: it keeps singletons only (leave components out of the save instead)", nameof(keep));
-        Load(input, markWritten, in keep);
+        Load(input, markWritten, in keep, nameof(LoadKeeping));
     }
 
-    private void Load(ReadOnlySpan<byte> input, bool markWritten, in ComponentSet keep)
+    private void Load(ReadOnlySpan<byte> input, bool markWritten, in ComponentSet keep, string call)
     {
-        using (Structural()) ThrowIfIterating(); // before reading: a failure below is the bytes'
+        using (Structural()) ThrowIfIterating(call); // before reading: a failure below is the bytes'
         try
         {
             Read(input, in keep);
@@ -389,7 +391,7 @@ public sealed partial class World
         }
 
         if (ComponentInfo.AnyUnique) ClaimLoaded(_loadSnapshot); // a key twice: the world stays as it was
-        Restore(_loadSnapshot, true, markWritten, in keep);
+        Restore(_loadSnapshot, true, markWritten, in keep, call);
         if (_groupByBit == null) return;
         using (Structural())
             for (int bit = 0; bit < _groupByBit.Length; bit++)
