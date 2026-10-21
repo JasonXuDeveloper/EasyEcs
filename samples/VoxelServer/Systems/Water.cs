@@ -42,19 +42,23 @@ public class WaterFlowSystem : EcsSystem
         var levels = MemoryMarshal.Cast<Fluid, byte>(fluid.Value.AsReadOnlySpan());
         var solid = MemoryMarshal.Cast<Block, byte>(blocks.AsReadOnlySpan());
 
-        // What each block hands to its sides: one level less than its own, if it stands on something solid.
+        // What each block hands to its sides: one level less than its own, if it stands on something solid. Only the
+        // layers holding water give anything, so only they are filled in, here and in the halo.
         Span<byte> spread = stackalloc byte[Height * Layer];
         spread.Clear();
-        for (int y = 1; y < Height; y++)
+        var (low, high) = Layers(levels);
+        for (int y = Math.Max(low, 1); y <= high; y++)
         for (int z = 0; z < Size; z++)
             Gives(levels, solid, Terrain.IndexOf(0, y, z)).CopyTo(spread.Slice(y * Layer + (z + 1) * Row + 1, Size));
-        Halo(World, key.Pos, spread);
+        Halo(World, key.Pos, spread, ref low, ref high);
 
+        // Water can change only on the layers some water reaches: those with water here or beside, and the one under
+        // the lowest, which water falls into. The others stay as they are, empty.
         Span<byte> next = stackalloc byte[levels.Length];
-        levels.Slice(0, Size * Size).CopyTo(next);                       // the bedrock layer holds no water
+        levels.CopyTo(next);
         var changed = Vector128<byte>.Zero;
         int filled = 0;
-        for (int y = 1; y < Height; y++)
+        for (int y = Math.Max(low - 1, 1); y <= high; y++)
         for (int z = 0; z < Size; z++)
         {
             int at = Terrain.IndexOf(0, y, z), padded = y * Layer + (z + 1) * Row + 1;
@@ -92,33 +96,52 @@ public class WaterFlowSystem : EcsSystem
     }
 
     // Copies what the neighbouring chunks hand across the edges into the halo of `spread`: a whole row of a chunk to
-    // the north or south, one block per row of a chunk to the west or east. A chunk that is not loaded hands nothing.
-    static void Halo(World world, ChunkPos pos, Span<byte> spread)
+    // the north or south, one block per row of a chunk to the west or east, on the layers holding their water, which
+    // widen [low, high]. A chunk that is not loaded hands nothing.
+    static void Halo(World world, ChunkPos pos, Span<byte> spread, ref int low, ref int high)
     {
-        if (Grids(world, pos with { Z = pos.Z - 1 }, out var levels, out var solid))
-            for (int y = 1; y < Height; y++)
+        if (Grids(world, pos with { Z = pos.Z - 1 }, out var levels, out var solid, ref low, ref high, out int from, out int to))
+            for (int y = from; y <= to; y++)
                 Gives(levels, solid, Terrain.IndexOf(0, y, Size - 1)).CopyTo(spread.Slice(y * Layer + 1, Size));
-        if (Grids(world, pos with { Z = pos.Z + 1 }, out levels, out solid))
-            for (int y = 1; y < Height; y++)
+        if (Grids(world, pos with { Z = pos.Z + 1 }, out levels, out solid, ref low, ref high, out from, out to))
+            for (int y = from; y <= to; y++)
                 Gives(levels, solid, Terrain.IndexOf(0, y, 0)).CopyTo(spread.Slice(y * Layer + (Row - 1) * Row + 1, Size));
-        if (Grids(world, pos with { X = pos.X - 1 }, out levels, out solid)) Column(levels, solid, spread, Size - 1, 0);
-        if (Grids(world, pos with { X = pos.X + 1 }, out levels, out solid)) Column(levels, solid, spread, 0, Row - 1);
+        if (Grids(world, pos with { X = pos.X - 1 }, out levels, out solid, ref low, ref high, out from, out to))
+            Column(levels, solid, spread, Size - 1, 0, from, to);
+        if (Grids(world, pos with { X = pos.X + 1 }, out levels, out solid, ref low, ref high, out from, out to))
+            Column(levels, solid, spread, 0, Row - 1, from, to);
     }
 
-    // The water and the blocks of a loaded chunk as bytes.
-    static bool Grids(World world, ChunkPos pos, out ReadOnlySpan<byte> levels, out ReadOnlySpan<byte> solid)
+    // The lowest and the highest layer holding water, low > high if none: two vectorized searches for a non-zero byte.
+    static (int Low, int High) Layers(ReadOnlySpan<byte> levels)
+    {
+        int first = levels.IndexOfAnyExcept((byte)0);
+        return first < 0 ? (Height, 0) : (first / (Size * Size), levels.LastIndexOfAnyExcept((byte)0) / (Size * Size));
+    }
+
+    // The water and the blocks of a loaded neighbour as bytes, and the layers [from, to] holding its water; false if
+    // it is not loaded or holds none.
+    static bool Grids(World world, ChunkPos pos, out ReadOnlySpan<byte> levels, out ReadOnlySpan<byte> solid,
+        ref int low, ref int high, out int from, out int to)
     {
         levels = solid = default;
+        from = to = 0;
         if (!world.ChunkIndex.TryGet(pos, out var chunk)) return false;
         levels = MemoryMarshal.Cast<Fluid, byte>(chunk.Fluid.AsReadOnlySpan());
         solid = MemoryMarshal.Cast<Block, byte>(chunk.Block.AsReadOnlySpan());
+        (from, to) = Layers(levels);
+        if (from > to) return false;
+        from = Math.Max(from, 1);
+        low = Math.Min(low, from);
+        high = Math.Max(high, to);
         return true;
     }
 
     // The column x of a neighbour to the west or east, into column haloX of the halo: one block per row, 16 apart.
-    static void Column(ReadOnlySpan<byte> levels, ReadOnlySpan<byte> solid, Span<byte> spread, int x, int haloX)
+    static void Column(ReadOnlySpan<byte> levels, ReadOnlySpan<byte> solid, Span<byte> spread, int x, int haloX,
+        int from, int to)
     {
-        for (int y = 1; y < Height; y++)
+        for (int y = from; y <= to; y++)
         for (int z = 0; z < Size; z++)
         {
             int at = Terrain.IndexOf(x, y, z);
@@ -139,7 +162,7 @@ public class FloatSystem : EcsSystem
     void Float(in Position position, ref Velocity velocity, ref Stats stats)
     {
         var p = position.Value;
-        var at = Terrain.Cell(p.X, p.Y, p.Z);
+        var at = Terrain.Cell(p);
         int here = Math.Min(Terrain.WaterAt(World, at), Fluid.Falling);
         if (here == 0) return;
 

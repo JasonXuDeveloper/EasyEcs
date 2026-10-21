@@ -5,7 +5,9 @@ namespace VoxelServer;
 
 // #region walk
 // Turns a player's input into a horizontal velocity; gravity keeps the vertical one. Each row depends on nothing
-// but itself, so the rows are split across threads (Parallel = true).
+// but itself, so the rows are split across threads (Parallel = true). A row this cheap pays for the split only from
+// tens of thousands of players; below that the threads cost about what they save, and a server of a few thousand
+// would leave it on one thread.
 [UpdateInGroup<Simulation>]
 public class PlayerMoveSystem : EcsSystem
 {

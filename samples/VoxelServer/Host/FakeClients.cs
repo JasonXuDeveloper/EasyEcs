@@ -13,7 +13,7 @@ public class FakeClientsSystem : EcsSystem
     static readonly Vector2[] Directions =
         [Vector2.Zero, new(1, 0), new(D, D), new(0, 1), new(-D, D), new(-1, 0), new(-D, -D), new(0, -1), new(D, -D)];
 
-    [ForEach(Parallel = true)]
+    [ForEach]
     static void Play(in Player player, in Body body, in Clock clock, ref Input input)
     {
         var walk = Directions[Rules.Hash(player.Client, (int)(clock.Tick / 100)) % Directions.Length];

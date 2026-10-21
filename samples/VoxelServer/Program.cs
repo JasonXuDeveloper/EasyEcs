@@ -69,7 +69,7 @@ var player = world.Prefabs.Player;
 for (int i = 0; i < players; i++)
 {
     var at = Rules.SpawnPoint(i);
-    world.Instantiate(player, new Player(i), new Position(at), new InChunk(Terrain.ChunkOf((int)at.X, (int)at.Z)));
+    world.Instantiate(player, new Player(i), new Position(at), new InChunk(Terrain.ChunkOf(at)));
 }
 // #endregion players
 

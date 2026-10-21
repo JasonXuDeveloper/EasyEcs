@@ -64,6 +64,8 @@ public static class Terrain
     public static BlockPos Cell(float x, float y, float z) =>
         new((int)MathF.Floor(x), (int)MathF.Floor(y), (int)MathF.Floor(z));
 
+    public static BlockPos Cell(Vector3 p) => Cell(p.X, p.Y, p.Z);
+
     // The chunk a point is in.
     public static ChunkPos ChunkOf(Vector3 p) => ChunkOf((int)MathF.Floor(p.X), (int)MathF.Floor(p.Z));
 
