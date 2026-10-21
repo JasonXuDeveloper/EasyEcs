@@ -198,3 +198,153 @@ public class ChunkChurnBenchmark
 
     public record struct Chunk(int X, int Z) : IComponent;
 }
+
+/// <summary>
+/// Actors spawned from a prefab whose mailbox starts empty (<c>SetBuffer&lt;long&gt;()</c>), posted
+/// <see cref="Mail"/> messages and destroyed, <see cref="Actors"/> at a time: an empty buffer of a prefab gives its
+/// instances no list of their own, so their first message takes a list a destroyed actor gave back.
+/// </summary>
+[MemoryDiagnoser]
+public class PrefabBufferChurnBenchmark
+{
+    public const int Mail = 4;
+
+    [Params(1_000)] public int Actors;
+
+    private World _world;
+    private Prefab _prefab;
+    private Entity[] _actors;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _world = new World(new WorldOptions { InitialEntityCapacity = Actors });
+        _prefab = new Prefab().Set(new Actor()).SetBuffer<long>();
+        _actors = new Entity[Actors];
+        for (int i = 0; i < 20; i++) SpawnAndUnload();
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => _world.Dispose();
+
+    [Benchmark]
+    public int SpawnAndUnload()
+    {
+        _world.Instantiate(_prefab, _actors);
+        foreach (var actor in _actors)
+        {
+            ref var mailbox = ref actor.Get<DynamicBuffer<long>>();
+            for (int m = 0; m < Mail; m++) mailbox.Add(m);
+        }
+
+        return _world.DestroyAll<Actor>();
+    }
+
+    public record struct Actor(int Shard) : IComponent;
+}
+
+/// <summary>
+/// Mailboxes filled by a parallel <c>[ForEach]</c>: <see cref="Actors"/> actors are created with empty mailboxes, a
+/// parallel system posts <see cref="Mail"/> messages to each (the first write of each mailbox, on whichever thread
+/// runs its rows), and the actors are destroyed on the owner thread, which takes their lists back.
+/// </summary>
+[MemoryDiagnoser]
+public class ParallelBufferChurnBenchmark
+{
+    public const int Mail = 4;
+
+    [Params(100_000)] public int Actors;
+
+    private World _world;
+    private Entity[] _actors;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _world = new World(new WorldOptions { InitialEntityCapacity = Actors });
+        _world.AddSystem<PostSystem>();
+        _actors = new Entity[Actors];
+        for (int i = 0; i < 20; i++) LoadPostUnload();
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => _world.Dispose();
+
+    [Benchmark]
+    public int LoadPostUnload()
+    {
+        _world.CreateEntities(_actors, new DynamicBuffer<long>(), new Actor());
+        _world.Update();
+        return _world.DestroyAll<Actor>();
+    }
+
+    public record struct Actor(int Shard) : IComponent;
+
+    public class PostSystem : EcsSystem
+    {
+        [ForEach(Parallel = true), With<Actor>]
+        static void Post(Mut<DynamicBuffer<long>> mailbox)
+        {
+            ref var posted = ref mailbox.Write();
+            for (int m = 0; m < Mail; m++) posted.Add(m);
+        }
+    }
+}
+
+/// <summary>
+/// Chunks unloaded to bytes and loaded back, as a voxel server does around its players: <see cref="Chunks"/>
+/// entities with 8,192 blocks each (a <see cref="DynamicBuffer{T}"/> of a byte-sized enum) are saved with
+/// <c>SaveEntities</c>, destroyed, and created again by <c>LoadEntities</c>. A loaded chunk takes the list of an unloaded one.
+/// </summary>
+[MemoryDiagnoser]
+public class ChunkReloadBenchmark
+{
+    public const int Blocks = 8192;
+
+    [Params(64)] public int Chunks;
+
+    private World _world;
+    private EntityId[] _ids;
+    private Entity[] _loaded;
+    private readonly Nino.Core.NinoArrayBufferWriter _bytes = new();
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        DynamicBuffer<Block>.PoolCapacity = Blocks;
+        _world = new World(new WorldOptions { InitialEntityCapacity = Chunks });
+        _ids = new EntityId[Chunks];
+        _loaded = new Entity[Chunks];
+        var blocks = new Block[Blocks];
+        _world.CreateEntities(_loaded, new Chunk(), new DynamicBuffer<Block>());
+        for (int i = 0; i < Chunks; i++)
+        {
+            _loaded[i].Get<DynamicBuffer<Block>>().AddRange(blocks);
+            _ids[i] = _loaded[i].Id;
+        }
+
+        for (int i = 0; i < 20; i++) UnloadAndLoad();
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        _world.Dispose();
+        DynamicBuffer<Block>.PoolCapacity = 4096;
+    }
+
+    [Benchmark]
+    public int UnloadAndLoad()
+    {
+        _bytes.ResetWrittenCount();
+        _world.SaveEntities(_bytes, _ids);
+        _world.DestroyEntities(_ids);
+        int loaded = _world.LoadEntities(_bytes.WrittenSpan, _loaded);
+        for (int i = 0; i < loaded; i++) _ids[i] = _loaded[i].Id;
+        return loaded;
+    }
+
+    public enum Block : byte { Air, Stone }
+
+    public record struct Chunk(int X, int Z) : IComponent;
+}
