@@ -14,7 +14,7 @@ namespace VoxelServer;
 [UpdateInGroup<Simulation>]
 public class SightSystem : EcsSystem
 {
-    [ForEach(Slices = Rules.LoadEvery)]
+    [ForEach(Slices = Rules.LookEvery)]
     void Look(Entity viewer, in Position position, in Vision vision, Mut<DynamicBuffer<Seen>> seen,
         Maybe<Player> client, ref Stats stats)
     {

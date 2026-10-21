@@ -102,7 +102,7 @@ public class ZombieAttackSystem : EcsSystem
         if (cooldown.Ticks > 0 || !World.TryGetEntity(target.Player, out var player) || player.Health.Value <= 0) return;
         var to = player.Position.Value - position.Value;
         if (new Vector2(to.X, to.Z).LengthSquared() >= 1.2f * 1.2f || MathF.Abs(to.Y) >= 1.5f) return;
-        player.Health = new Health(player.Health.Value - Rules.ZombieDamage);
+        player.SetHealth(player.Health.Value - Rules.ZombieDamage);
         cooldown = new Cooldown(Rules.TicksPerSecond);
         stats.Hits++;
     }

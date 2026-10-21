@@ -13,8 +13,7 @@ namespace VoxelServer;
 public class SendChunksSystem : EcsSystem
 {
     [ForEach, With<Chunk>, Without<Fresh>, ChangedAny<DynamicBuffer<Block>, DynamicBuffer<Fluid>>]
-    static void Send(in Viewers viewers, in Clock clock, ref Stats stats) =>
-        stats.BlockUpdates += Rules.Watching(viewers, clock);
+    static void Send(in Viewers viewers, ref Stats stats) => stats.BlockUpdates += viewers.Count;
 
     // From the next tick on, its changes are block changes.
     [ForEach, With<Fresh>]
@@ -31,10 +30,10 @@ public class SendChunksSystem : EcsSystem
 public class SendEntitiesSystem : EcsSystem
 {
     [ForEach, Changed<Position>]
-    void Send(in Position position, Maybe<Health> health, in Clock clock, ref Stats stats)
+    void Send(in Position position, Maybe<Health> health, ref Stats stats)
     {
         if (!World.ChunkIndex.TryGet(Terrain.ChunkOf(position.Value), out var chunk)) return;
-        int watching = Rules.Watching(chunk.Viewers, clock);
+        int watching = chunk.Viewers.Count;
         stats.EntityUpdates += watching;
         stats.BytesSent += watching * (Rules.PositionBytes + (health.HasValue ? Rules.HealthBytes : 0));
     }

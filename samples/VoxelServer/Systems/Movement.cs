@@ -80,13 +80,13 @@ public class PhysicsSystem : EcsSystem
 // #endregion physics
 
 // #region grid
-// Keeps the InChunk of everything that moves on the chunk it is in: players, zombies, items. SetInChunkIfChanged
-// writes only when the entity crossed into another chunk, so the index is touched a few times a second, not every
-// tick.
+// Keeps the InChunk of everything that moves on the chunk it is in: players, zombies, items. [Changed<Position>] visits
+// only what moved this tick (physics writes a position only when it changes), and SetInChunkIfChanged writes only when
+// the entity crossed into another chunk, so the index is touched a few times a second, not every tick.
 [UpdateInGroup<Simulation>]
 public class GridSystem : EcsSystem
 {
-    [ForEach, With<InChunk>]
+    [ForEach, With<InChunk>, Changed<Position>]
     static void Track(Entity entity, in Position position)
     {
         entity.SetInChunkIfChanged(Terrain.ChunkOf(position.Value));

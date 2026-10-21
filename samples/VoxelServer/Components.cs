@@ -20,10 +20,9 @@ public record struct Chunk(ChunkPos Pos) : IComponent, IUniqueIndexed<ChunkPos>
     ChunkPos IIndexed<ChunkPos>.Key => Pos;
 }
 
-// A chunk players need that is not loaded, and how many of them asked at the load pass of Tick: ChunkLoadSystem
-// records it as an entity, one per chunk (the unique index), and ChunkReadSystem reads or generates it after the pass
-// (a pass may not load entities, EECS041).
-public record struct LoadRequest(ChunkPos Pos, long Tick, int Viewers) : IComponent, IUniqueIndexed<ChunkPos>
+// A chunk a player needs that is not loaded: ChunkLoadSystem records it as an entity, one per chunk (the unique index),
+// and ChunkReadSystem reads or generates it after the pass (a pass may not load entities, EECS041).
+public record struct LoadRequest(ChunkPos Pos) : IComponent, IUniqueIndexed<ChunkPos>
 {
     ChunkPos IIndexed<ChunkPos>.Key => Pos;
 }
@@ -36,9 +35,10 @@ public struct Fresh : IComponent;
 // destroys them, after the pass.
 public struct Unloading : IComponent;
 
-// The players that had the chunk in view at the last load pass (Tick): who is sent what happens in it.
-// ChunkUnloadSystem frees the chunks nobody has seen for a while.
-public record struct Viewers(long Tick, int Count) : IComponent;
+// The players that have the chunk in view, and since when none has: who is sent what happens in it, and whether it can
+// be unloaded. ChunkViewSystem keeps it as the players' views change; ChunkUnloadSystem frees the chunks nobody has
+// seen for a while.
+public record struct Viewers(int Count, long EmptySince) : IComponent;
 
 // ---- Water ----
 
@@ -71,7 +71,8 @@ public record struct Velocity(Vector3 Value) : IComponent;
 // What PhysicsSystem found: standing on a block, walking into a wall higher than a step.
 public record struct Body(bool OnGround, bool Blocked) : IComponent;
 
-public record struct Health(int Value) : IComponent;
+// ITracked: the systems that handle a death visit only the healths written ([Changed<Health>]).
+public record struct Health(int Value) : IComponent, ITracked;
 
 // How far a player or a zombie sees, in blocks: each prefab sets its own. One area of interest for both: SightSystem
 // fills the Seen buffer of each, the player's client shows what it holds and a zombie hunts from it. A player's view

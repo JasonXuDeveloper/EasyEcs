@@ -9,7 +9,7 @@ public static class Rules
     public const int DayLength = 600;          // 30 seconds a day, so a short run sees a night
     public const float PlayerVision = 32;      // blocks a player sees: two chunks each way, 5 x 5 chunks loaded
     public const float ZombieVision = 35;      // blocks a zombie sees a player from: its follow range in Minecraft
-    public const int LoadEvery = TicksPerSecond / 2;   // ticks between two passes of ChunkLoadSystem
+    public const int LookEvery = TicksPerSecond / 2;   // ticks between two looks of a viewer (SightSystem)
     public const int UnloadAfter = 100;        // ticks a chunk stays loaded after the last player saw it
     public const float Gravity = 0.08f;
     public const float WalkSpeed = 0.2f;
@@ -37,10 +37,6 @@ public static class Rules
 
     // The chunks a view reaches in each direction.
     public static int ChunksIn(float range) => (int)MathF.Ceiling(range / Terrain.Size);
-
-    // The players a chunk's changes go to: its viewers at the last load pass, none if nobody had it in view then.
-    public static int Watching(in Viewers viewers, in Clock clock) =>
-        clock.Tick - viewers.Tick < LoadEvery ? viewers.Count : 0;
 
     public static bool IsNight(in Clock clock) => clock.Tick % clock.DayLength >= clock.DayLength / 2;
 
