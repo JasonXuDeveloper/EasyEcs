@@ -21,6 +21,12 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/CLAUDE.md` first.
 6. **Changelog**: user-facing items only, no numbers.
 7. **zh**: says the same as en; glossary in `tools/ApiDocs/zh/README.md` (stamp = 打 tick, filter = 过滤条件,
    tracking = 追踪, parent = 父实体, World stays World); `bun run check` runs `lint:terms`.
+8. **One meaning per word**: "group" is a system group (`ISystemGroup`) or a table group (`IGroup` / `GroupBy`); the
+   `ChangedAny` / `RemovedAny` OR is a set (zh 集合), and what `SaveEntities` writes is "a save of entities" (zh
+   实体存档; never "group save" / 分组存档, which reads as an `IGroup`). "Destroyed" means freed; an entity kept for its
+   cleanup components is retired (zh 退休). The public XML docs generated from `src/EasyEcs.Generator` templates
+   count too (zh entry + ApiDocs).
+9. **Renames leave code ragged**: realign the trailing `//` comments of fence lines whose names got shorter or longer.
 
 ## Across pages
 
