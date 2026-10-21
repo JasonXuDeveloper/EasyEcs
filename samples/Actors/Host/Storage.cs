@@ -3,7 +3,7 @@ using EasyEcs;
 
 namespace Actors;
 
-// Plumbing, not ECS: a database stand-in that keeps one record per actor key, and the host's "save what changed".
+// Plumbing, not ECS: a database stand-in that keeps one record per actor key, and the host's save of changed actors.
 public sealed class Storage
 {
     // Keyed by the actor's key (Shop(1), Bank(7)): records compare by value.
@@ -22,29 +22,20 @@ public sealed class Storage
     }
 
     /// <summary>
-    /// Save the actors whose persistent state was written since <paramref name="since"/>, then move the mark: the
-    /// tracked components tell which, so an actor nobody wrote costs nothing.
+    /// Save the actors the save group listed (world.Update&lt;Saving&gt;()), then empty the list: the tracked components
+    /// told which actors changed, so an actor nobody wrote costs nothing.
     /// </summary>
-    public int SaveChanged(World world, ref ulong since)
+    public int Save(World world, List<EntityId> actors)
     {
-        int saved = SaveChanged<Shop, Stock>(world, since) + SaveChanged<Bank, Balance>(world, since);
-        since = world.ChangeTick;
-        return saved;
-    }
-
-    private int SaveChanged<TActor, TState>(World world, ulong since)
-        where TActor : struct, IActor<TActor>, IEquatable<TActor>
-        where TState : struct, IComponent, ITracked
-    {
-        var changed = QueryFilter.Create().With<In<TActor>>().Changed<TState>(since);
-        var found = new Collect<TState> { Actors = new List<Entity>() };
-        world.ForEachEntity<TState, Collect<TState>>(ref found, changed);
-        foreach (var actor in found.Actors)
+        foreach (var id in actors)
         {
-            Save(actor, actor.Read<TActor>());
+            var actor = world.GetEntity(id);
+            Save(actor, actor.HasShop ? actor.Shop : actor.Bank);
         }
 
-        return found.Actors.Count;
+        int saved = actors.Count;
+        actors.Clear();
+        return saved;
     }
 
     private void Save(Entity actor, object key)
@@ -52,16 +43,5 @@ public sealed class Storage
         var output = new ArrayBufferWriter<byte>();
         actor.World.SaveEntitiesWith(output, [actor.Id], Activation.Persisted);
         _records[key] = output.WrittenSpan.ToArray();
-    }
-
-    // Lists the actors a filter selects, reading nothing (WriteMask => 0: listing them is not a change).
-    private struct Collect<TState> : IForEachEntity<TState>
-        where TState : struct, IComponent
-    {
-        public List<Entity> Actors;
-
-        public static int WriteMask => 0;
-
-        public void Execute(Entity actor, ref TState state) => Actors.Add(actor);
     }
 }

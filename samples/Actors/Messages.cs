@@ -9,18 +9,13 @@ namespace Actors;
 public struct Buy : IForEachEntity<Stock, Sales>
 {
     public int Quantity;
-    public bool Sold;
 
-    // WriteMask: Stock (bit 0) and Sales (bit 1), both are stamped and both follow the shop if it moves table.
+    // WriteMask: Stock (bit 0) and Sales (bit 1), both are stamped and both follow the shop if it moves table. The job
+    // runs only for an order it fills (Mailman checks the stock first): a refused order would still stamp Stock.
     public static int WriteMask => 0b11;
 
     public void Execute(Entity shop, ref Stock stock, ref Sales sales)
     {
-        if (stock.Items < Quantity)
-        {
-            return;
-        }
-
         stock.Items -= Quantity;
         if (stock.Items == 0)
         {
@@ -30,7 +25,6 @@ public struct Buy : IForEachEntity<Stock, Sales>
         }
 
         sales.Count += Quantity;
-        Sold = true;
     }
 }
 
@@ -53,13 +47,14 @@ public static class Mailman
     /// <summary>False when the shop is not active, has closed, or has too few items.</summary>
     public static bool Buy(World world, Shop to, int quantity)
     {
-        if (!world.ShopIndex.TryFind(to, out var shop))
+        // Read first: a refused order writes nothing, so the next save does not store an unchanged shop.
+        if (!world.ShopIndex.TryFind(to, out var shop) || shop.Stock.Items < quantity)
         {
             return false;
         }
 
         var buy = new Buy { Quantity = quantity };
-        return shop.Run<Stock, Sales, Buy>(ref buy, Open) && buy.Sold;
+        return shop.Run<Stock, Sales, Buy>(ref buy, Open);
     }
 
     /// <summary>False when the bank is not active.</summary>

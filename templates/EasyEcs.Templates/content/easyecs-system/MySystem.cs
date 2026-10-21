@@ -12,7 +12,7 @@ public class MySystem : EcsSystem
     // parameter too, and filters are attributes. Replace this sketch with your components:
     //
     // [ForEach, Without<Dead>]
-    // static void Run(Entity entity, ref Health health, in Regeneration regeneration)
+    // static void Run(ref Health health, in Regeneration regeneration)
     // {
     // }
     //

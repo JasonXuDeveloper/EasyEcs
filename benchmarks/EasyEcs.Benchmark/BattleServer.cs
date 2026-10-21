@@ -131,12 +131,12 @@ public class ZoneSystem : EcsSystem                                           //
 public class CombatSystem : EcsSystem                                         // damage only: statuses are StatusSystem's
 {
     [ForEach, Without<Dead>]                                                  // a frozen unit's Attack is disabled
-    static void Fight(Entity unit, ref Attack attack, ref Battle battle)
+    static void Fight(ref Attack attack, Mut<Health> hp, ref Battle battle)
     {
         if (--attack.Cooldown > 0) return;
         attack.Cooldown = attack.Interval;
-        unit.WriteHealth().Value -= attack.Damage;                            // a hit is a change of Health
-        battle.Hits++;
+        hp.Write().Value -= attack.Damage;                                    // a hit is a change of Health: only the
+        battle.Hits++;                                                        // units hit this tick are stamped
     }
 }
 
@@ -272,9 +272,10 @@ public class RegenerationSystem : EcsSystem
     public override int UpdateInterval => 10;                                 // every 10th update
 
     [ForEach, With<Player>, Without<Dead>]
-    static void Regenerate(Entity player, in Health hp, Maybe<Burning> burning)  // burning or not: one method
+    static void Regenerate(Mut<Health> hp, Maybe<Burning> burning)            // burning or not: one method
     {
-        if (hp.Value < hp.Max) player.WriteHealth().Value = Math.Min(hp.Max, hp.Value + (burning.HasValue ? 5 : 20));
+        var (value, max) = hp.Value;                                          // a read: nothing stamped
+        if (value < max) hp.Write().Value = Math.Min(max, value + (burning.HasValue ? 5 : 20));
     }
 }
 

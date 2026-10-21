@@ -7,6 +7,8 @@ var storage = Storage.FromEarlierRun();
 using var world = new World();
 world.AddSystem<RestockSystem>();
 world.AddSystem<InterestSystem>();
+world.AddSystem<ListUnsavedSystem>();
+world.SetUnsaved(new List<EntityId>());
 
 // Each kind: what an actor starts with. A record from storage replaces the persistent part.
 var shopKind = new Prefab().SetSales(0).SetStock(5);
@@ -17,9 +19,9 @@ var bank = Activation.Activate(world, new Bank(7), bankKind, storage);
 var shop2 = Activation.Activate(world, new Shop(2), shopKind, storage);
 Console.WriteLine($"activated: shop 1 has {shop.Stock.Items}, shop 2 (new) has {shop2.Stock.Items}, bank 7 has {bank.Balance.Coins}");
 
-ulong lastSave = world.ChangeTick;
 // Only shop 2, which is new: the records loaded with markWritten: false are not changes.
-Console.WriteLine($"saved after activation: {storage.SaveChanged(world, ref lastSave)}");
+world.Update<Saving>();
+Console.WriteLine($"saved after activation: {storage.Save(world, world.Unsaved.Actors)}");
 
 for (int i = 0; i < 3; i++)
 {
@@ -34,7 +36,9 @@ world.Update<Shop>();
 world.Update<Bank>();
 Console.WriteLine($"after the updates: shop 1 has {shop.Stock.Items} (sold {shop.Sales.Count}), bank 7 has {bank.Balance.Coins}");
 
-Console.WriteLine($"saved after the messages: {storage.SaveChanged(world, ref lastSave)}");
+// Shop 1 and bank 7: shop 2 was saved after activation, and nothing wrote it since.
+world.Update<Saving>();
+Console.WriteLine($"saved after the messages: {storage.Save(world, world.Unsaved.Actors)}");
 
 // A second world, as after a restart: the actors come back with what was saved.
 using var restarted = new World();

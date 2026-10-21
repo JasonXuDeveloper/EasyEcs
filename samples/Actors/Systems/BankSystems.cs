@@ -8,6 +8,8 @@ namespace Actors;
 [UpdateInGroup<Bank>]
 public class InterestSystem : EcsSystem
 {
+    // Mut<Balance>: only a balance that grew is stamped, so an account too small to earn interest is not saved again.
     [ForEach]
-    static void PayInterest(ref Balance balance) => balance.Coins += balance.Coins / 100;
+    static void PayInterest(Mut<Balance> balance) =>
+        balance.SetIfChanged(new Balance(balance.Value.Coins + balance.Value.Coins / 100));
 }

@@ -3,13 +3,16 @@ using EasyEcs;
 namespace GameLoop;
 
 // Moves players and bullets by their velocity over one fixed time step.
+// Mut<Position> stamps only the positions that changed: a player standing still is not
+// replicated (a ref parameter would stamp every row the method visits).
 public sealed class MovementSystem : EcsSystem
 {
     [ForEach]
-    static void Move(ref Position position, in Velocity velocity, in Simulation simulation)
+    static void Move(Mut<Position> position, in Velocity velocity, in Simulation simulation)
     {
         float dt = simulation.DeltaTime;
-        position = new Position(position.X + velocity.X * dt, position.Y + velocity.Y * dt);
+        Position from = position.Value;
+        position.SetIfChanged(new Position(from.X + velocity.X * dt, from.Y + velocity.Y * dt));
     }
 }
 
