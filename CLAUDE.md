@@ -1,6 +1,6 @@
 # EasyEcs
 
-Allocation-free archetype ECS for long-running .NET servers. Library: `EasyEcs.Core` (targets `net10.0` only),
+Allocation-free archetype ECS for long-running .NET servers (it also runs in Godot 4 .NET projects: `samples/Godot`). Library: `EasyEcs.Core` (targets `net10.0` only),
 published to NuGet as `EasyEcs`. Public API and code comments are in English.
 
 ## Commands

@@ -333,7 +333,7 @@ const copy: Record<Locale, Copy> = {
       {
         term: 'Runs on',
         detail:
-          '.NET 10 (net10.0): game servers, simulations and other long-running backends. Not Unity.',
+          '.NET 10 (net10.0): game servers, simulations and other long-running backends, and Godot 4 .NET projects. Not Unity yet.',
       },
       {
         term: 'Compared with',
@@ -547,9 +547,10 @@ const copy: Record<Locale, Copy> = {
         more: { text: 'Performance guide', href: 'performance' },
       },
       {
-        question: 'Does EasyEcs work with Unity?',
+        question: 'Does EasyEcs work with Unity or Godot?',
         answer:
-          'No. EasyEcs targets net10.0 only and is built for servers: game servers, simulations and other long-running .NET backends. For Unity or older runtimes, Friflo.Engine.ECS, Arch and DefaultEcs are the alternatives.',
+          'Godot, yes: a Godot 4 .NET project that targets net10.0 runs EasyEcs, generator and analyzer included, and a Godot sample in the repository runs in CI. Unity, not yet: it runs C# on Mono and IL2CPP, which lack the .NET 10 features EasyEcs is built on, and Unity support is on the roadmap. For Unity or older runtimes today, Friflo.Engine.ECS, Arch and DefaultEcs are the alternatives.',
+        more: { text: 'Unity and Godot', href: 'faq#unity-godot' },
       },
       {
         question: 'How do I install EasyEcs?',
@@ -593,7 +594,7 @@ const copy: Record<Locale, Copy> = {
       {
         term: '运行环境',
         detail:
-          '.NET 10（net10.0）：游戏服务器、模拟以及其他长时间运行的后端。不支持 Unity。',
+          '.NET 10（net10.0）：游戏服务器、模拟以及其他长时间运行的后端，以及 Godot 4 .NET 项目。暂不支持 Unity。',
       },
       {
         term: '对比',
@@ -805,9 +806,10 @@ const copy: Record<Locale, Copy> = {
         more: { text: '性能指南', href: 'performance' },
       },
       {
-        question: 'EasyEcs 能在 Unity 里用吗？',
+        question: 'EasyEcs 能在 Unity 或 Godot 里用吗？',
         answer:
-          '不能。EasyEcs 只面向 net10.0，专为服务端打造：游戏服务器、模拟以及其他长时间运行的 .NET 后端。Unity 或更老的运行时可以选择 Friflo.Engine.ECS、Arch 或 DefaultEcs。',
+          'Godot 可以：面向 net10.0 的 Godot 4 .NET 项目就能运行 EasyEcs，生成器和分析器照常工作，仓库里的 Godot 示例在 CI 中运行。Unity 暂时不行：它用 Mono 和 IL2CPP 运行 C#，缺少 EasyEcs 依赖的 .NET 10 特性，Unity 支持已列入路线图。现在要用 Unity 或更老的运行时，可以选择 Friflo.Engine.ECS、Arch 或 DefaultEcs。',
+        more: { text: 'Unity 与 Godot', href: 'faq#unity-godot' },
       },
       {
         question: '怎么安装 EasyEcs？',

@@ -185,7 +185,7 @@ export function homeMeta({
         author: { '@id': ids.author },
         runtimePlatform: ['.NET 10'],
         keywords:
-          'ECS, Entity Component System, C# ECS, .NET ECS, archetype ECS, game server, simulation, zero allocation, source generator, Roslyn analyzer, change tracking, data-oriented design, Arch alternative, Friflo.Engine.ECS alternative, DefaultEcs alternative, NativeAOT',
+          'ECS, Entity Component System, C# ECS, .NET ECS, archetype ECS, game server, simulation, Godot ECS, zero allocation, source generator, Roslyn analyzer, change tracking, data-oriented design, Arch alternative, Friflo.Engine.ECS alternative, DefaultEcs alternative, NativeAOT',
         sameAs: [githubUrl, nugetUrl],
         targetProduct: {
           '@type': 'SoftwareApplication',

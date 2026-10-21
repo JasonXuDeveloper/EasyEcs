@@ -1,7 +1,7 @@
 # EasyEcs
 
 **EasyEcs is a high-performance archetype Entity Component System (ECS) for C# and .NET 10 game servers,
-simulations and other long-running real-time backends.** A warmed-up world of 100,000 entities runs nine simulation
+simulations and other long-running real-time backends, and runs in Godot 4 .NET projects too.** A warmed-up world of 100,000 entities runs nine simulation
 systems in 1.72 ms with 0 B allocated. Across 37 head-to-head benchmarks against Friflo.Engine.ECS, Arch and
 DefaultEcs, EasyEcs leads in 24, is within measurement error in 11 and trails in 2
 ([full comparison](https://ecs.xgamedev.net/en/docs/comparison#feature-by-feature)). Write plain structs and
