@@ -67,8 +67,9 @@ flowchart LR
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/VoxelServer/Components.cs</include>
 
-规则是常量和几个纯函数；地形负责方块的位置、区块的生成，以及所有系统共用的读取：`BlockAt`（未加载的区块读出来是石头，
-所以什么都不会掉出世界）、`WaterAt`、`TopAt` 和一个点周围的区块。
+规则是常量和几个纯函数；地形负责方块的位置、区块的生成，以及所有系统共用的读取。`Nearby` 读取一个物体周围的方块和水：
+它在唯一索引里查一次物体所在的区块，之后同一区块的方块直接从缓冲读，所以物理每个物体只查一次，而不是每个方块查一次。
+未加载的区块读出来是石头，所以什么都不会掉出世界。
 
 <include lang="csharp" meta='tab="Rules.cs"'>../../../samples/VoxelServer/Rules.cs</include>
 

@@ -18,7 +18,7 @@ What each file teaches, with its code, is on the docs site:
 | [Components.cs](Components.cs) | blocks, chunks and their water, bodies, players with their `Input`, `Score`, inventory and `InView`, `Visible`, zombies, items, the singletons |
 | [Groups.cs](Groups.cs) | the three parts of a tick: `ClientInput`, `Simulation`, `Replication` |
 | [Rules.cs](Rules.cs) | the numbers of the game (ticks, speeds, damage, ranges) and the spawn points |
-| [Terrain.cs](Terrain.cs) | chunk coordinates, terrain generation, `BlockAt`, `WaterAt`, `TopAt`, the chunks around a point, `Wake` |
+| [Terrain.cs](Terrain.cs) | chunk coordinates, terrain generation, `Nearby` (the blocks and water around a body, one chunk lookup), the chunks around a point, `Wake` |
 | [Systems/Chunks.cs](Systems/Chunks.cs) | `ChunkLoadSystem`, `ChunkReadSystem`, `ChunkUnloadSystem`, `ChunkSaveSystem`, `ChunkViewSystem` |
 | [Systems/Water.cs](Systems/Water.cs) | `BlockUpdateSystem`, `WaterFlowSystem` (the stencil), `WaterCommitSystem`, `FloatSystem` |
 | [Systems/Movement.cs](Systems/Movement.cs) | `PlayerMoveSystem`, `PhysicsSystem` (steps, walls, gravity), `GridSystem` (the entities by chunk) |

@@ -74,8 +74,9 @@ byte buffers.
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/VoxelServer/Components.cs</include>
 
 The rules are constants and a few pure functions; the terrain is where a block lives, how a chunk is generated, and
-the reads every system shares: `BlockAt` (an unloaded chunk reads as stone, so nothing falls out of the world),
-`WaterAt`, `TopAt` and the chunks around a point.
+the reads every system shares. `Nearby` reads the blocks and the water around one body: it looks up the body's chunk
+in the unique index once and reads the next blocks of that chunk straight from its buffers, so physics pays one
+lookup a body, not one per block. An unloaded chunk reads as stone, so nothing falls out of the world.
 
 <include lang="csharp" meta='tab="Rules.cs"'>../../../samples/VoxelServer/Rules.cs</include>
 
