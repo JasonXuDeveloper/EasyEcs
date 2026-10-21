@@ -2,16 +2,8 @@
 
 Game logic in a plugin that is replaced while the world keeps running. Read [MultiWorld](../MultiWorld) first.
 
-## What you learn
-
-- **Logic in a collectible plugin.** The plugin's systems, components and singletons live in an assembly the host
-  loads into a collectible `AssemblyLoadContext`.
-- **Unloading cleanly.** `world.RemoveTypes(assembly)` takes the plugin's systems, components and singletons out
-  of the world, so nothing in it roots the plugin and the context can be collected. The host's own entities,
-  components and systems stay.
-- **Keeping the data.** Saving before the unload and loading after the reload carries the plugin's component
-  values over: a save names types by their type id (a hash of the full name), not by the assembly that loaded them.
-- **Bulk changes.** `World.SetAll` gives a whole table of units a component in one call.
+What each file teaches, with its code, is on the docs site: [HotReload](https://ecs.xgamedev.net/en/docs/samples/hot-reload)
+([中文](https://ecs.xgamedev.net/zh/docs/samples/hot-reload)).
 
 ## Projects and files, in reading order
 

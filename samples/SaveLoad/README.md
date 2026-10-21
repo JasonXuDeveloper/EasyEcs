@@ -3,18 +3,8 @@
 Taking entities out of a world and putting them into another: a restart, a player changing servers, a player
 walking into the next zone. Read [GameLoop](../GameLoop) first.
 
-## What you learn
-
-1. **A whole world**: `world.Save(writer)` to a file and `world.Load(bytes)` into a new world. Ids, components,
-   dynamic buffers and singletons come back as they were.
-2. **A group of entities**: `SaveEntities` of a player with the swords that are its children (`ChildOf`), then
-   `LoadEntities` into another world, as another server would. The arrivals get new ids, and the links between
-   them follow.
-3. **Moving live entities**: `MoveEntities` hands a player from one world to another of the same thread in one
-   call, without encoding anything.
-
-Unmanaged components are saved as their bytes. A managed component (`Name` holds a string) is a `[NinoType]`,
-serialized by [Nino](https://github.com/JasonXuDeveloper/Nino), whose generator comes with the EasyEcs package.
+What each file teaches, with its code, is on the docs site: [SaveLoad](https://ecs.xgamedev.net/en/docs/samples/save-load)
+([中文](https://ecs.xgamedev.net/zh/docs/samples/save-load)).
 
 ## Files, in reading order
 

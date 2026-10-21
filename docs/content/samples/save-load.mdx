@@ -13,19 +13,6 @@ into the next zone. Three players with bags and swords go through all three. Eve
 included from [`samples/SaveLoad`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad), which CI
 builds and runs, comparing its output with the one shown below. Read [GameLoop](/en/docs/samples/game-loop) first.
 
-## What you learn [#what-you-learn]
-
-- **A whole world**: [`world.Save(writer)`](/en/docs/guide/saves#save) to a file and
-  [`world.Load(bytes)`](/en/docs/guide/saves#load) into a new world. Ids, components, dynamic buffers and singletons
-  come back as they were.
-- **A group of entities**: [`SaveEntities`](/en/docs/guide/migration-and-unload#save-entities) of a player with the
-  swords that are its [children](/en/docs/guide/hierarchy) (`ChildOf`), then `LoadEntities` into another world, as
-  another server would. The arrivals get new ids, and the links between them follow.
-- **Moving live entities**: [`MoveEntities`](/en/docs/guide/migration-and-unload#move-entities) hands a player from one
-  world to another of the same thread in one call, without encoding anything.
-- **What gets serialized how**: unmanaged components are saved as their bytes; a managed one (`Name` holds a string)
-  is a [`[NinoType]`](/en/docs/guide/saves#declare), serialized by Nino, whose generator comes with the EasyEcs package.
-
 ## Run it [#run-it]
 
 ```bash
@@ -35,21 +22,33 @@ dotnet run --project samples/SaveLoad
 ## The data [#data]
 
 Numbers-only components, a sword that is an entity of its own, a bag element for a
-[dynamic buffer](/en/docs/guide/dynamic-buffers), a singleton, and the one managed component.
+[dynamic buffer](/en/docs/guide/dynamic-buffers), a singleton, and the one managed component. A save writes the
+unmanaged components as their bytes; `Name` holds a string, so it is a [`[NinoType]`](/en/docs/guide/saves#declare),
+serialized by Nino, whose generator comes with the EasyEcs package.
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/SaveLoad/Components.cs</include>
 
 ## The players [#players]
 
-`Players.Spawn` creates a player with a bag of three potions and a map, and its swords as children. `Reserve` makes
-room for the swords before the loop that creates them.
+`Players.Spawn` creates a player with a bag of three potions and a map, and its swords as
+[children](/en/docs/guide/hierarchy) (`ChildOf`). `Reserve` makes room for the swords before the loop that creates
+them.
 
 <include lang="csharp" meta='title="Players.cs"'>../../../samples/SaveLoad/Players.cs</include>
 
 ## The program [#program]
 
-The three steps, each checked: the whole world to a file and back, bob through bytes to another world, carol moved
-there directly. `Checks` and `WorldText`, which print the checks and a world, are in
+Three steps, each checked:
+
+1. The whole world: [`world.Save(writer)`](/en/docs/guide/saves#save) to a file and
+   [`world.Load(bytes)`](/en/docs/guide/saves#load) into a new world. Ids, components, dynamic buffers and singletons
+   come back as they were.
+2. Bob and his swords: [`SaveEntities`](/en/docs/guide/migration-and-unload#save-entities), then `LoadEntities` into
+   another world, as another server would. The arrivals get new ids, and the links between them follow.
+3. Carol: [`MoveEntities`](/en/docs/guide/migration-and-unload#move-entities) hands her to another world of the same
+   thread in one call, without encoding anything.
+
+`Checks` and `WorldText`, which print the checks and a world, are in
 [`Support.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/SaveLoad/Support.cs): plumbing, not the
 lesson.
 

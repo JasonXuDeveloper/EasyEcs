@@ -12,20 +12,6 @@ import { FlaskConical, Server, Save, Workflow } from 'lucide-react';
 本页的代码块全部引自 [`samples/GameLoop`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop)，
 CI 会构建并运行它。建议先读 [HelloWorld](/zh/docs/samples/hello-world)。
 
-## 你会学到 [#what-you-learn]
-
-- **输入就是数据**：网络线程把消息投进邮箱，`ReceiveInputSystem` 把每条消息变成一个请求实体（`JoinRequest`、`MoveRequest` 等）。
-  每种请求由一个系统处理，并在同一 tick 内销毁（[来自其他线程的输入](/zh/docs/guide/threading#input-from-other-threads)）。
-- **[系统分组](/zh/docs/guide/systems#system-groups)**（`ISystemGroup`、`[UpdateInGroup<T>]`）让系统各有节奏：输入每次唤醒都跑，
-  模拟跟着固定 tick，同步每三个 tick 一次。
-- **[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)**（`Client` 上的 `IIndexed<int>`）按客户端 id 找玩家：
-  `world.ClientIndex.TryFind(...)`。
-- **单例里的[预制体](/zh/docs/guide/prefabs)**：系统用每个实例各自的值实例化 `prefabs.Player` 和 `prefabs.Bullet`，每个只拷贝一行。
-- **[变更追踪](/zh/docs/guide/change-tracking)**（`Position` 上的 `ITracked`、`[Changed<Position>]`）：同步只访问上次运行以来移动过的实体。`MovementSystem`
-  通过 `Mut<Position>` 和 `SetIfChanged` 写入，站着不动的玩家不会被打 tick。
-- **运维**：`--ticks N`、每秒一行状态、Ctrl+C 干净退出、[`WorldOptions.MeasureSystems`](/zh/docs/guide/diagnostics#timing)
-  给出每个系统的运行次数和耗时。
-
 ## 运行 [#run-it]
 
 ```bash
@@ -35,20 +21,24 @@ dotnet run --project samples/GameLoop -- --ticks 30     # 1 秒
 
 ## 数据 [#data]
 
-请求是输入，每种一个组件；然后是模拟状态、单例和两个系统分组。
+请求是输入，每种一个组件；然后是模拟状态、单例和两个[系统分组](/zh/docs/guide/systems#system-groups)。`Client` 是
+[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)（`IIndexed<int>`），`world.ClientIndex` 按客户端 id 找玩家；`Position`
+是 `ITracked`，同步才能只访问动过的实体；单例 `Prefabs` 存着玩家和子弹的[预制体](/zh/docs/guide/prefabs)。
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/GameLoop/Components.cs</include>
 
 ## 输入 [#input]
 
-`ReceiveInputSystem` 在 `InputGroup` 里，所以宿主每次唤醒都跑它，不只在 tick 上。邮箱是宿主给它的 `readonly` 字段：
-它是系统连到网络的通道，不是 World 状态。
+输入就是数据：网络线程把消息投进邮箱，`ReceiveInputSystem` 把每条消息变成一个请求实体
+（[来自其他线程的输入](/zh/docs/guide/threading#input-from-other-threads)）。它在 `InputGroup` 里，所以宿主每次唤醒都跑它，不只在 tick 上。
+邮箱是宿主给它的 `readonly` 字段：它是系统连到网络的通道，不是 World 状态。
 
 <include lang="csharp" meta='title="Systems/Input.cs"'>../../../samples/GameLoop/Systems/Input.cs</include>
 
 ## 请求 [#requests]
 
-每种请求一个系统。各自按客户端 id 找到玩家，处理，再销毁请求：一个请求只活一个 tick。
+每种请求一个系统。各自用 `world.ClientIndex.TryFind` 找到玩家，处理，再销毁请求：一个请求只活一个 tick。加入和开火用每个实例各自的值
+实例化 `prefabs.Player` 和 `prefabs.Bullet`，每个只拷贝一行。
 
 <include lang="csharp" meta='title="Systems/Requests.cs"'>../../../samples/GameLoop/Systems/Requests.cs</include>
 
@@ -61,13 +51,15 @@ dotnet run --project samples/GameLoop -- --ticks 30     # 1 秒
 
 ## 同步 [#replication]
 
-`[Changed<Position>]` 跳过没动的实体；动了的每个往发件箱写 16 字节，由宿主发出并清空。
+[变更追踪](/zh/docs/guide/change-tracking)：`[Changed<Position>]` 跳过系统上次运行以来没动的实体；动了的每个往发件箱写 16 字节，
+由宿主发出并清空。
 
 <include lang="csharp" meta='title="Systems/Replication.cs"'>../../../samples/GameLoop/Systems/Replication.cs</include>
 
 ## 程序 [#program]
 
-先设单例，再按分组加系统，然后是主循环：每次唤醒处理输入，到点跑一个模拟 tick，每三个 tick 同步一次。邮箱、假客户端、
+先设单例，再按分组加系统，然后是主循环：每次唤醒处理输入，到点跑一个模拟 tick，每三个 tick 同步一次。`--ticks N` 决定跑多久，Ctrl+C 干净退出，
+[`WorldOptions.MeasureSystems`](/zh/docs/guide/diagnostics#timing) 给出报告里每个系统的运行次数和耗时。邮箱、假客户端、
 固定 tick 计时器、网络和报告都在 [`Host/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop/Host)：
 是必要的管道代码，不是本课重点。
 

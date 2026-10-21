@@ -15,23 +15,6 @@ closes; a bank pays interest. Every code block on this page is included from
 comparing its output with the one shown below. Read the [GameLoop](/en/docs/samples/game-loop) and
 [SaveLoad](/en/docs/samples/save-load) samples first.
 
-## What you learn [#what-you-learn]
-
-- **One type per kind of actor**: `Shop` and `Bank` implement one interface, `IActor<TSelf>`, and so are at once the
-  actor's key component ([value index](/en/docs/guide/indexes-and-relations#value-indexes)), the
-  [system group](/en/docs/guide/systems#system-groups) of the kind and that group's
-  [filter](/en/docs/guide/systems#group-filters) (`ISystemGroupWith<In<Shop>>`).
-- **A message is a job on one entity**: [`entity.Run(ref job, filter)`](/en/docs/guide/queries#run-on-one-entity)
-  gives the job its components in one lookup, refuses a closed shop through a `static readonly` filter, and keeps
-  the job's refs valid when the job closes the shop in the middle.
-- **Activation and records**: an actor's entity is made when it is first needed, and its
-  [record](/en/docs/guide/migration-and-unload#records) is loaded onto it with
-  `LoadEntitiesInto(..., markWritten: false)`, so loading is not a change.
-- **Save what changed**: the persistent components are `ITracked`
-  ([change tracking](/en/docs/guide/change-tracking)); a system in a save group lists the actors written since it
-  last ran, and the host saves them after the update, so a saved actor is not saved again until something writes it. Writers stamp only what they change:
-  `InterestSystem` writes through `Mut<Balance>`, and `Mailman` reads the stock before it runs a `Buy`.
-
 ## Run it [#run-it]
 
 ```bash
@@ -40,17 +23,24 @@ dotnet run --project samples/Actors
 
 ## The data [#data]
 
-An actor kind is one type that does three jobs through one interface. The key is implemented explicitly
+An actor kind is one type that does three jobs through one interface: `Shop` and `Bank` implement `IActor<TSelf>`, and
+so are at once the actor's key component ([value index](/en/docs/guide/indexes-and-relations#value-indexes)), the
+[system group](/en/docs/guide/systems#system-groups) of the kind and that group's
+[filter](/en/docs/guide/systems#group-filters) (`ISystemGroupWith<In<Shop>>`): an attribute cannot name a type
+parameter, so the interface declares the filter once for every kind. The key is implemented explicitly
 (`Shop IIndexed<Shop>.Key => this;`): a public `Key => this` property on a record struct would make its
-`ToString()` print `Key` forever. `Stock` and `Balance` persist; `Sales` and `Closed` live only in memory.
+`ToString()` print `Key` forever. `Stock` and `Balance` persist and are `ITracked` ([change tracking](/en/docs/guide/change-tracking)); `Sales` and
+`Closed` live only in memory.
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/Actors/Components.cs</include>
 
 ## Messages [#messages]
 
-`Buy` and `Deposit` are jobs; `Mailman` finds the actor by key in its index and runs the job on it. A `Buy` that
-sells the last item adds `Closed` in the middle of the job: a structural change, and the job's refs still point at
-the shop's values. `Mailman` reads the stock before it runs a `Buy`: the job's `WriteMask` stamps `Stock` whenever
+A message is a job on one entity: `Buy` and `Deposit` are jobs, and `Mailman` finds the actor by key in its index and
+runs the job on it with [`entity.Run(ref job, filter)`](/en/docs/guide/queries#run-on-one-entity), which gives the job
+its components in one lookup and refuses a closed shop through a `static readonly` filter. A `Buy` that sells the
+last item adds `Closed` in the middle of the job: a structural change, and the job's refs still point at the shop's
+values. `Mailman` reads the stock before it runs a `Buy`: the job's `WriteMask` stamps `Stock` whenever
 the job runs, so a refused order that ran it would make the next save store an unchanged shop.
 
 <include lang="csharp" meta='title="Messages.cs"'>../../../samples/Actors/Messages.cs</include>
@@ -76,7 +66,9 @@ the `Unsaved` singleton and the host saves them after `world.Update<Saving>()`.
 
 ## Activation [#activation]
 
-`Activate` returns the active actor, or makes one from the kind's prefab and loads its record. A new actor has no
+`Activate` returns the active actor, or makes one from the kind's prefab and loads its
+[record](/en/docs/guide/migration-and-unload#records) (a `ComponentSet` of the persistent components) onto it with
+`LoadEntitiesInto(..., markWritten: false)`, so loading is not a change. A new actor has no
 record: its defaults are its first state, and the next save writes them.
 
 <include lang="csharp" meta='title="Activation.cs"'>../../../samples/Actors/Activation.cs</include>

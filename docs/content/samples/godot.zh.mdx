@@ -13,17 +13,6 @@ import { Clock, CircleQuestionMark, Rocket, Sprout } from 'lucide-react';
 [`samples/Godot`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Godot)，CI 用 Godot 4.7.2 无窗口构建并运行
 它，把输出和下面给出的对比。建议先读 [HelloWorld](/zh/docs/samples/hello-world) 示例。
 
-## 你会学到 [#what-you-learn]
-
-- **项目目标框架是 net10.0**：Godot 把 C# 项目的程序集加载进项目指定的 .NET 运行时。旧版编辑器建的项目写的是 `net8.0`，
-  改成 `net10.0` 并装好 .NET 10 SDK 即可（[快速上手](/zh/docs/getting-started#create-a-project)、
-  [Unity 和 Godot](/zh/docs/faq#unity-godot)）。
-- **节点是宿主，系统才是游戏**：`Main` 在 `_Ready` 里创建 World，在 `_PhysicsProcess`（Godot 的固定 tick）里调用
-  `world.Update()`，在 `_ExitTree` 里释放它（[托管 World](/zh/docs/guide/hosting#owner)）。
-- **Godot 类型直接做组件字段**：`Position` 和 `Velocity` 存的是 `Vector2`；场地大小和 tick 时长是[单例](/zh/docs/guide/singletons)。
-- **一次调用画出全部数据**：更新完后，节点把所有位置拷进一个 float 缓冲，交给 `RenderingServer.MultimeshSetBuffer`：所有实体
-  一次绘制，不用每个实体一个节点。
-
 ## 运行 [#run-it]
 
 用 Godot 4 编辑器（.NET 版）打开这个目录，点运行；或者不开窗口直接跑：
@@ -37,13 +26,15 @@ godot --headless --path samples/Godot -- --ticks 120
 
 就是普通的 Godot 4 .NET 项目：[`project.godot`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Godot/project.godot)
 和场景 [`Main.tscn`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Godot/Main.tscn)，根节点是 `Main`。
-真正要改的只有目标框架这一行。
+真正要改的只有目标框架这一行：Godot 把 C# 项目的程序集加载进项目指定的 .NET 运行时。旧版编辑器建的项目写的是 `net8.0`，
+改成 `net10.0` 并装好 .NET 10 SDK 即可（[Unity 和 Godot](/zh/docs/faq#unity-godot)）。别的都不用配：包里的生成器和分析器在
+`dotnet build` 和编辑器的构建里一样运行。
 
 <include lang="xml" meta='title="Godot.csproj"'>../../../samples/Godot/Godot.csproj</include>
 
 ## 数据与系统 [#data]
 
-组件直接用 Godot 的 `Vector2`；系统负责移动和反弹，完全不知道场景的存在。
+组件直接用 Godot 的 `Vector2`，场地大小和 tick 时长是[单例](/zh/docs/guide/singletons)。系统负责移动和反弹，完全不知道场景的存在。
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/Godot/Components.cs</include>
 
@@ -51,8 +42,9 @@ godot --headless --path samples/Godot -- --ticks 120
 
 ## 节点 [#node]
 
-`Main` 只在 Godot 和 World 之间搬数据：创建实体，每个物理 tick 更新一次 World，把位置写进 multimesh，离开场景树时释放自己
-创建的东西。`--ticks` 参数和 CI 检查的报告在
+节点是宿主，系统才是游戏。`Main` 只在 Godot 和 World 之间搬数据：在 `_Ready` 里创建 World 和实体，在 `_PhysicsProcess`
+（Godot 的固定 tick）里调用 `world.Update()`，在 `_ExitTree` 里释放自己创建的东西（[托管 World](/zh/docs/guide/hosting#owner)）。
+每次更新后，它把所有位置拷进一个 float 缓冲，交给 `RenderingServer.MultimeshSetBuffer`：所有实体一次绘制，不用每个实体一个节点。`--ticks` 参数和 CI 检查的报告在
 [`Support.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Godot/Support.cs) 里：这是周边代码，不是本课重点。
 
 <include lang="csharp" meta='title="Main.cs"'>../../../samples/Godot/Main.cs</include>

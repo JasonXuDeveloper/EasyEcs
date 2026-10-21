@@ -3,18 +3,8 @@
 EasyEcs inside a Godot 4 .NET project: the scene's root node owns a world, steps it once per physics tick and draws
 the entities with one multimesh. Read [HelloWorld](../HelloWorld) first.
 
-## What you learn
-
-- **The project targets net10.0.** Godot loads a C# project's assembly into the .NET runtime the project targets.
-  A project made by an older editor says `net8.0`; change it to `net10.0` and install the .NET 10 SDK. Nothing else
-  is needed: the package's generator and analyzer run in `dotnet build` and in the editor's build alike.
-- **The node is the host, the systems are the game.** `Main` creates the world in `_Ready`, calls `world.Update()`
-  in `_PhysicsProcess` (Godot's fixed tick) and disposes it in `_ExitTree`. Moving and bouncing are systems; the node
-  holds no game state.
-- **Godot types are component fields.** `Position` and `Velocity` hold a `Vector2`; the arena and the tick length
-  are singletons.
-- **Draw from the data in one call.** After the update the node copies every position into one float buffer and
-  hands it to `RenderingServer.MultimeshSetBuffer`: one draw for every entity, no node per entity.
+What each file teaches, with its code, is on the docs site: [Godot](https://ecs.xgamedev.net/en/docs/samples/godot)
+([中文](https://ecs.xgamedev.net/zh/docs/samples/godot)).
 
 ## Files, in reading order
 

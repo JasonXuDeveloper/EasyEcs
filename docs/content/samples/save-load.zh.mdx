@@ -12,17 +12,6 @@ import { ArrowRightLeft, Globe, Network, Save } from 'lucide-react';
 本页的代码块全部引自 [`samples/SaveLoad`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad)，
 CI 会构建并运行它，把输出和下面列出的比对。建议先读 [GameLoop](/zh/docs/samples/game-loop)。
 
-## 你会学到 [#what-you-learn]
-
-- **整个 World**：[`world.Save(writer)`](/zh/docs/guide/saves#save) 写到文件，再用 [`world.Load(bytes)`](/zh/docs/guide/saves#load)
-  读进新 World。id、组件、动态缓冲和单例都原样回来。
-- **一组实体**：用 [`SaveEntities`](/zh/docs/guide/migration-and-unload#save-entities) 保存一个玩家和作为其[子实体](/zh/docs/guide/hierarchy)
-  （`ChildOf`）的剑，再像另一台服务器那样 `LoadEntities` 进另一个 World。到达的实体拿到新 id，彼此之间的链接跟着改过来。
-- **迁移活实体**：[`MoveEntities`](/zh/docs/guide/migration-and-unload#move-entities) 一次调用把玩家交给同一线程上的另一个
-  World，中间不做任何编码。
-- **各类组件怎么序列化**：非托管组件按原始字节保存；托管组件（`Name` 里有字符串）标成
-  [`[NinoType]`](/zh/docs/guide/saves#declare)，由 Nino 序列化，Nino 的生成器随 EasyEcs 包一起提供。
-
 ## 运行 [#run-it]
 
 ```bash
@@ -31,19 +20,28 @@ dotnet run --project samples/SaveLoad
 
 ## 数据 [#data]
 
-只含数字的组件、本身就是实体的剑、[动态缓冲](/zh/docs/guide/dynamic-buffers)用的背包元素、一个单例，以及唯一的托管组件。
+只含数字的组件、本身就是实体的剑、[动态缓冲](/zh/docs/guide/dynamic-buffers)用的背包元素、一个单例，以及唯一的托管组件。存档把非托管组件
+按原始字节写出；`Name` 里有字符串，所以标成 [`[NinoType]`](/zh/docs/guide/saves#declare)，由 Nino 序列化，Nino 的生成器随 EasyEcs 包一起提供。
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/SaveLoad/Components.cs</include>
 
 ## 玩家 [#players]
 
-`Players.Spawn` 创建一个玩家，背包里放三瓶药水和一张地图，剑作为它的子实体。`Reserve` 在创建剑的循环之前先留好空间。
+`Players.Spawn` 创建一个玩家，背包里放三瓶药水和一张地图，剑作为它的[子实体](/zh/docs/guide/hierarchy)（`ChildOf`）。`Reserve` 在创建剑的循环之前先留好空间。
 
 <include lang="csharp" meta='title="Players.cs"'>../../../samples/SaveLoad/Players.cs</include>
 
 ## 程序 [#program]
 
-三步，每步都有检查：整个 World 写文件再读回，bob 通过字节去另一个 World，carol 直接迁过去。打印检查结果和 World 的
+三步，每步都有检查：
+
+1. 整个 World：[`world.Save(writer)`](/zh/docs/guide/saves#save) 写到文件，再用 [`world.Load(bytes)`](/zh/docs/guide/saves#load)
+   读进新 World。id、组件、动态缓冲和单例都原样回来。
+2. bob 和他的剑：[`SaveEntities`](/zh/docs/guide/migration-and-unload#save-entities)，再像另一台服务器那样 `LoadEntities` 进另一个 World。
+   到达的实体拿到新 id，彼此之间的链接跟着改过来。
+3. carol：[`MoveEntities`](/zh/docs/guide/migration-and-unload#move-entities) 一次调用把她交给同一线程上的另一个 World，中间不做任何编码。
+
+打印检查结果和 World 的
 `Checks`、`WorldText` 在 [`Support.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/SaveLoad/Support.cs)：
 是管道代码，不是本课重点。
 

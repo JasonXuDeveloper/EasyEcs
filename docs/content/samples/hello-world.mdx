@@ -2,7 +2,7 @@
 title: "HelloWorld: the smallest program"
 navTitle: HelloWorld
 seoTitle: "C# ECS Hello World: the Smallest EasyEcs Program"
-description: "The smallest complete C# ECS program with EasyEcs: two components, a tag, a singleton, three [ForEach] systems and world.Update(), with its real output."
+description: "The smallest complete C# ECS program with EasyEcs: two components, a tag, a singleton, three one-job systems and world.Update(), with its output."
 icon: Hand
 ---
 
@@ -13,16 +13,6 @@ as a player, a clock that counts the ticks, and three systems with one job each.
 included from [`samples/HelloWorld`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HelloWorld),
 which CI builds and runs, comparing its output with the one shown below.
 
-## What you learn [#what-you-learn]
-
-- **Components are plain data** on entities (`Position`, `Velocity`); a component with no fields is a
-  [tag](/en/docs/guide/entities-and-components#tags) (`Player`) that systems filter on.
-- **A [singleton](/en/docs/guide/singletons)** (`Clock`) holds one value per world.
-- **[Systems](/en/docs/guide/systems)** have one job each and no state of their own. A `[ForEach]` method runs once
-  per entity that has its component parameters: `ref` for what it writes, `in` for what it reads.
-  `[With<Player>]` adds a [filter](/en/docs/guide/queries#filters).
-- **`world.Update()`** runs every system once, in the order they were added.
-
 ## Run it [#run-it]
 
 ```bash
@@ -31,20 +21,26 @@ dotnet run --project samples/HelloWorld
 
 ## The data [#data]
 
-Two components, a tag and a singleton: fields and no logic.
+Components are plain data: fields and no logic. `Position` and `Velocity` are on both entities; `Player`, a
+component with no fields, is a [tag](/en/docs/guide/entities-and-components#tags) that systems filter on; `Clock` is
+a [singleton](/en/docs/guide/singletons), one value per world.
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/HelloWorld/Components.cs</include>
 
 ## The systems [#systems]
 
-`MoveSystem` moves every entity with a position and a velocity, `ReportSystem` prints the players only, and
-`ClockSystem` advances the clock once per update in `OnUpdate`, not once per entity.
+[Systems](/en/docs/guide/systems) have one job each and no state of their own. A `[ForEach]` method runs once per
+entity that has its component parameters, `ref` for what it writes and `in` for what it reads. `MoveSystem` moves
+every entity with a position and a velocity, `ReportSystem` prints the players only (`[With<Player>]` is a
+[filter](/en/docs/guide/queries#filters)), and `ClockSystem` advances the clock once per update in `OnUpdate`, not
+once per entity.
 
 <include lang="csharp" meta='title="Systems.cs"'>../../../samples/HelloWorld/Systems.cs</include>
 
 ## The program [#program]
 
-Create the world, add the singleton and the systems, create two entities, run three updates.
+Create the world, add the singleton and the systems, create two entities, run three updates. `world.Update()` runs
+every system once, in the order they were added.
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/HelloWorld/Program.cs</include>
 

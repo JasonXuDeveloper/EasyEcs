@@ -12,16 +12,6 @@ import { Cpu, RefreshCw, Server, Workflow } from 'lucide-react';
 2 万个单位；有几个处理器就开几个区，同时更新。本页每段代码都直接引用自
 [`samples/MultiWorld`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/MultiWorld)，CI 会构建并运行它。
 
-## 你会学到 [#what-you-learn]
-
-- **World 归一个线程所有**：哪个线程建的 World，就由它更新、由它释放；不加锁，也不共享
-  （[每个线程一个 World](/zh/docs/guide/threading#recommended-one-world-per-thread)）。
-- **单例按 World 隔离**：每个区的 `Tally` 只统计自己 World 里的死亡数（[单例](/zh/docs/guide/singletons)）。
-- **一次创建大量实体**：`world.CreateEntities(units, …)` 一次调用填满一个句柄数组
-  （[结构变更](/zh/docs/guide/structural-changes)）。
-- **一个系统只做一件事**：移动、扣血、复活，各是一个 `[ForEach]` 方法（[系统](/zh/docs/guide/systems)）。
-  移动是一个[批处理方法](/zh/docs/guide/systems#batch-methods)：以 span 接收整段连续的行，按 `Vector<float>` 相加。
-
 ## 运行 [#run-it]
 
 ```bash
@@ -31,21 +21,21 @@ dotnet run -c Release --project samples/MultiWorld -- --updates 200
 
 ## 数据 [#data]
 
-单位的三个组件，加上区的 `Tally` 单例。
+单位的三个组件，加上区的 `Tally` [单例](/zh/docs/guide/singletons)：单例按 World 隔离，每个区只统计自己 World 里的死亡数。
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/MultiWorld/Components.cs</include>
 
 ## 系统 [#systems]
 
-单位按速度移动；离中心超过安全半径的单位每 tick 掉 1 点血，死了就在中心复活。系统只读写组件，所以同样三个系统
-能用在每个区。`MoveSystem` 是每个区最热的循环，所以写成批处理方法：每段连续的行调用一次，位置和速度按 `Vector<float>` 的通道读写。
+单位按速度移动；离中心超过安全半径的单位每 tick 掉 1 点血，死了就在中心复活。每个[系统](/zh/docs/guide/systems)只做一件事，只读写组件，
+所以同样三个系统能用在每个区。`MoveSystem` 是每个区最热的循环，所以写成[批处理方法](/zh/docs/guide/systems#batch-methods)：每段连续的行调用一次，位置和速度按 `Vector<float>` 的通道读写。
 
 <include lang="csharp" meta='title="Systems.cs"'>../../../samples/MultiWorld/Systems.cs</include>
 
 ## 一个区 [#zone]
 
-`Zone.Run` 就是一个线程要做的全部事情：建 World、创建单位、更新、返回 `ZoneResult`，再释放 World。别的线程从来
-看不到它。
+`Zone.Run` 就是一个线程要做的全部事情：建 World、用一次 `world.CreateEntities` 调用创建单位、更新、返回 `ZoneResult`，再释放 World。
+别的线程从来看不到它，所以不加锁，也不共享（[每个线程一个 World](/zh/docs/guide/threading#recommended-one-world-per-thread)）。
 
 <include lang="csharp" meta='title="Zone.cs"'>../../../samples/MultiWorld/Zone.cs</include>
 

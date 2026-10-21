@@ -4,27 +4,8 @@ Actors on an ECS world: entities that answer messages addressed to their key, ea
 systems, loaded from storage when first needed and saved only when they change. Read [GameLoop](../GameLoop) and
 [SaveLoad](../SaveLoad) first.
 
-## What you learn
-
-- **One type per kind of actor.** `Shop` and `Bank` each implement one generic interface, `IActor<TSelf>`, and so are
-  at once the actor's key component (indexed: `world.ShopIndex.TryFind(key, ...)`), the system group of the kind
-  (`world.Update<Shop>()`), and that group's filter (`ISystemGroupWith<In<Shop>>`: the shop systems see only shops).
-  Attributes cannot name a type parameter; the interface does it once for every kind.
-- **A message is a job on one entity.** `entity.Run(ref job, filter)` gives the job all its components in one
-  lookup, refuses a closed shop through a `static readonly` filter, and keeps the job's refs valid when the job
-  closes the shop in the middle (a structural change).
-- **Activation and records.** An actor's entity is made when it is first needed; its record, a `ComponentSet` of the
-  persistent components, is loaded onto it with `LoadEntitiesInto(..., markWritten: false)`: it replaces the
-  prefab's defaults and loading is not a change. A new actor has no record, so its defaults are its first state and
-  the next save writes them.
-- **Save what changed.** The persistent components are `ITracked`. A system in a group of its own
-  (`world.Update<Saving>()`) lists the actors written since it last ran (`[ForEach, Changed<Stock>]` and `[ForEach, Changed<Balance>]`), and the host
-  saves that list after the update: an actor nobody wrote costs nothing, and a saved actor is not saved again until
-  something writes it. Writers stamp only what they change: `InterestSystem` writes through `Mut<Balance>` and
-  `SetIfChanged`, and `Mailman` reads the stock before it runs a `Buy`, so a refused order writes nothing.
-
-The key is implemented explicitly (`Shop IIndexed<Shop>.Key => this;`): a public `Key => this` property on a record
-struct makes its `ToString()` print `Key` forever.
+What each file teaches, with its code, is on the docs site: [Actors](https://ecs.xgamedev.net/en/docs/samples/actors)
+([中文](https://ecs.xgamedev.net/zh/docs/samples/actors)).
 
 ## Files, in reading order
 
