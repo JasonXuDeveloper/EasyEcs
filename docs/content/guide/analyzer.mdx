@@ -211,11 +211,11 @@ class and no member a struct cannot have (`protected`, `virtual`, `abstract`, a 
 Components and singletons are stored by value in columns. Interfaces may extend the markers; classes may not
 implement them.
 
-```csharp doccheck=expect-EECS006
+```csharp tab="Reported" doccheck=expect-EECS006
 public class Wallet : IComponent { public int Gold; }
 ```
 
-```csharp
+```csharp tab="Fixed"
 public record struct Wallet(int Gold) : IComponent;
 ```
 
@@ -365,7 +365,7 @@ holds by reference: it calls a mutating method on a collection (`Add`, `Remove`,
 a read (parallel systems that read the same data race with it) and never stamped, so `[Changed<T>]` systems and value
 indexes miss it.
 
-```csharp doccheck=expect-EECS011
+```csharp tab="Reported" doccheck=expect-EECS011
 public record struct Grid(List<int> Cells) : ISingletonComponent;
 
 public class GridSystem : EcsSystem
@@ -374,7 +374,7 @@ public class GridSystem : EcsSystem
 }
 ```
 
-```csharp
+```csharp tab="Fixed"
 public record struct Grid(List<int> Cells) : ISingletonComponent;
 
 public class GridSystem : EcsSystem
@@ -745,7 +745,7 @@ The generator writes the jobs of `[ForEach]` methods outside the user's type and
 type of a `[ForEach]` method outside a system, must be internal or public, as must every type containing them; a
 `file` type is out of reach of any other file.
 
-```csharp doccheck=expect-EECS022
+```csharp tab="Reported" doccheck=expect-EECS022
 public class HealSystem : EcsSystem
 {
     private struct Regen : IComponent { public int Amount; }      // the generated job cannot name it
@@ -753,7 +753,7 @@ public class HealSystem : EcsSystem
 }
 ```
 
-```csharp
+```csharp tab="Fixed"
 public class HealSystem : EcsSystem
 {
     internal struct Regen : IComponent { public int Amount; }
@@ -1049,11 +1049,11 @@ row. A filter skips whole tables and words of rows that a test in the loop visit
 `Count<...>()` compared with 0 or 1 as a presence test, a `foreach` over a query that only counts, and a loop whose
 first statement skips rows by a component test of the item's entity (no fix: the filter goes where the query is made).
 
-```csharp doccheck=expect-EECS032
+```csharp tab="Reported" doccheck=expect-EECS032
 bool anyDead = world.Count<Dead>() > 0;
 ```
 
-```csharp
+```csharp tab="Fixed"
 bool someoneDied = world.Any<Dead>();
 foreach (var item in world.Query<Health>(QueryFilter.Create().With<Burning>())) { }   // the filter, not a test in the loop
 ```
@@ -1081,11 +1081,11 @@ still names `DynamicBuffer<T>` (the generator writes buffer members for the elem
 | `world.Index<Zone, int>()`, `world.Relations<Friend>()` | `world.ZoneIndex`, `world.FriendIndex` |
 | `item.Component1` | `item.Health` |
 
-```csharp doccheck=expect-EECS033
+```csharp tab="Reported" doccheck=expect-EECS033
 int hpGeneric = player.Get<Health>().Value;
 ```
 
-```csharp
+```csharp tab="Fixed"
 int hp = player.Health.Value;
 ```
 

@@ -201,9 +201,12 @@ benchmarks measure:
 
 ### Arithmetic over many rows: vectorize a batch method [#arithmetic-over-many-rows-vectorize-a-batch-method]
 
-The JIT does not vectorize this loop, and the bounce branches mispredict on many rows. The regular system:
+The JIT does not vectorize the loop of the regular system, and the bounce branches mispredict on many rows.
+The fastest one takes spans (runs of consecutive rows; a table whose rows all match is one call), reads the
+two-float components as one float span (X, Y, X, Y, ...) so every lane of a `Vector<float>` is one coordinate, and
+turns the branches into a mask:
 
-```csharp title="BounceSystem.cs"
+```csharp tab="BounceSystem.cs"
 public class BounceSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
@@ -216,11 +219,7 @@ public class BounceSystem : EcsSystem
 }
 ```
 
-The fastest one takes spans (runs of consecutive rows; a table whose rows all match is one call), reads the
-two-float components as one float span (X, Y, X, Y, ...) so every lane of a `Vector<float>` is one coordinate, and
-turns the branches into a mask:
-
-```csharp title="BounceSimdSystem.cs"
+```csharp tab="BounceSimdSystem.cs"
 using System.Numerics;
 using System.Runtime.InteropServices;
 
@@ -326,7 +325,7 @@ Census.CountWounded(world, ref wounded);   // generated entry point: the job run
 A flag costs a load and a branch in every row of every system that checks it. A tag is a filter: rows without it are
 skipped 64 at a time, and adding or removing it flips a presence bit while the entity keeps its row.
 
-```csharp title="Stun.cs"
+```csharp tab="Flag"
 public record struct Unit(int Hp, bool Stunned) : IComponent;   // regular: every system tests the flag
 
 public class StunnedFlagSystem : EcsSystem
@@ -338,7 +337,9 @@ public class StunnedFlagSystem : EcsSystem
         unit.Hp++;
     }
 }
+```
 
+```csharp tab="Tag"
 public class StunnedTagSystem : EcsSystem   // fastest: the filter does the test
 {
     [ForEach, Without<Stunned>]

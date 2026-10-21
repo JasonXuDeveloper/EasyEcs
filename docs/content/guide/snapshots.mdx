@@ -113,7 +113,7 @@ server rewinds the target by that lag. That needs the positions of the last few 
 in a singleton ring buffer: a system copies each hitbox's `Position` into this tick's frame, and the hit check reads
 the frame of the shooter's tick.
 
-```csharp
+```csharp tab="Components.cs"
 public record struct Hitbox(float Radius) : IComponent;
 
 // A client's claim: it hit Target, standing at At, Lag ticks ago.
@@ -132,7 +132,7 @@ public struct PositionHistory : ISingletonComponent
 }
 ```
 
-```csharp
+```csharp tab="Systems.cs"
 // Copies this tick's hitbox positions into the ring.
 public class RecordPositions : EcsSystem
 {
@@ -188,7 +188,7 @@ public class ResolveShots : EcsSystem
 }
 ```
 
-```csharp
+```csharp tab="Program.cs"
 world.AddSingleton<PositionHistory>() = new PositionHistory
 {
     Samples = new Sample[PositionHistory.Frames * PositionHistory.Capacity],

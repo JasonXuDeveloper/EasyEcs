@@ -106,7 +106,7 @@ Entity unit = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Hea
 | `entity.Describe()` | 实体的组件值，给调试器和日志用 | 否 |
 | `EntityId` / `EntityId.Null` / `id.IsNull` / `id.Index` / `id.Version` | 存进组件的 8 字节 id；`Null` 就是默认值 | 否 |
 
-```csharp
+```csharp tab="组件"
 unit.Velocity.X = 2;                                // 通过 ref 原地写入
 float x = unit.Position.X;                          // 读（被追踪的组件是 ref readonly）
 unit.Set(new Health(50), new Dead());               // 一次设置两个：写法更简洁，性能相同
@@ -114,7 +114,7 @@ unit.RemoveDead();                                  // 只翻一个存在位，�
 if (unit.TryGetHealth(out var hp)) { /* hp 是拷贝 */ }
 ```
 
-```csharp
+```csharp tab="entity.Run"
 public struct TakeHit : IForEachEntity<Health>
 {
     public int Damage;
@@ -124,7 +124,7 @@ public struct TakeHit : IForEachEntity<Health>
 }
 ```
 
-```csharp
+```csharp tab="entity.Run"
 var hit = new TakeHit { Damage = 30 };
 bool applied = unit.Run<Health, TakeHit>(ref hit);   // 在请求对应的实体上处理它
 ```
@@ -298,13 +298,13 @@ world.Clock.Tick++;
 | 创建、实例化、克隆、`Enable<T>()`、`Restore`、`Load`、`LoadEntitiesInto` | 移除或 `Disable<T>()`（那是一次移除，供 `[Removed<T>]` 使用） |
 | `entity.Run`：job `WriteMask` 里的组件 | `Load(…, markWritten: false)`、`LoadEntitiesInto(…, markWritten: false)` |
 
-```csharp
+```csharp tab="Changed<T>"
 ulong mark = world.ChangeTick;
 world.Update();
 int changed = world.Count<Health>(QueryFilter.Create().Changed<Health>(mark));
 ```
 
-```csharp
+```csharp tab="Mut<T>"
 public class ClampSystem : EcsSystem
 {
     [ForEach]                                        // 只给真正写了的行打 tick
@@ -315,12 +315,12 @@ public class ClampSystem : EcsSystem
 }
 ```
 
-```csharp
+```csharp tab="按客户端"
 // 一个过滤条件存在字段里，带着每个客户端确认过的 tick 跑。
 private static readonly QueryFilter Dirty = QueryFilter.Create().ChangedAny<Health, Mana>(0);
 ```
 
-```csharp
+```csharp tab="按客户端"
 ulong ack = world.ChangeTick;                       // 某个客户端确认过的 tick
 world.Update();
 int toSend = world.Count<Health>(Dirty.Since(ack));
@@ -432,7 +432,7 @@ loot.RemoveAtSwapBack(0);
 | `world.MoveEntities(target, ids, moved)` | 在同一线程的两个 World 之间直接搬，不编码；跳过已退休、只为清理留着的实体，清理组件留在原处 |
 | `world.RemoveTypes(assembly or context)` | 插件的上下文卸载之前，先移除它的类型 |
 
-```csharp
+```csharp tab="快照与存档"
 var save = world.Capture();
 world.Update();
 world.Restore(save);
@@ -443,13 +443,13 @@ using var copy = new World();
 copy.Load(bytes.WrittenSpan);
 ```
 
-```csharp
+```csharp tab="重启"
 // 重启：运行时状态和配置不进存档，新进程带自己的。
 private static readonly ComponentSet Runtime = ComponentSet.Create().WithSingleton<Config>().With<Session>();
 private static readonly ComponentSet NewConfig = ComponentSet.Create().WithSingleton<Config>();
 ```
 
-```csharp
+```csharp tab="重启"
 var restart = new System.Buffers.ArrayBufferWriter<byte>();
 world.SaveWithout(restart, Runtime);                       // 旧进程关闭时
 using var next = new World();

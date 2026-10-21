@@ -101,7 +101,7 @@ world.Restore(history[(100 - 3) % Rollback.Ticks]);                             
 射击游戏的服务器判定命中时，要看目标在射手眼里的位置：客户端落后若干个 tick，服务器就把目标倒回这么多 tick。这只需要最近几个 tick
 的位置，不需要整个 World。把它们放进一个单例环形缓冲：一个系统每个 tick 把每个命中盒的 `Position` 拷进当前帧，命中判定读射手那个 tick 的帧。
 
-```csharp
+```csharp tab="Components.cs"
 public record struct Hitbox(float Radius) : IComponent;
 
 // 客户端的命中声明：它在 Lag 个 tick 之前打中了站在 At 的 Target。
@@ -120,7 +120,7 @@ public struct PositionHistory : ISingletonComponent
 }
 ```
 
-```csharp
+```csharp tab="Systems.cs"
 // 把这个 tick 的命中盒位置拷进环里。
 public class RecordPositions : EcsSystem
 {
@@ -176,7 +176,7 @@ public class ResolveShots : EcsSystem
 }
 ```
 
-```csharp
+```csharp tab="Program.cs"
 world.AddSingleton<PositionHistory>() = new PositionHistory
 {
     Samples = new Sample[PositionHistory.Frames * PositionHistory.Capacity],

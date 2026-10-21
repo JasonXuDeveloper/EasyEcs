@@ -52,9 +52,9 @@ dotnet run --project samples/Actors
 每个系统属于它那一类的组，所以 `world.Update<Shop>()` 只在商店上跑商店的系统。`InterestSystem` 通过
 [`Mut<Balance>`](/zh/docs/guide/change-tracking#set-if-changed) 写入：`SetIfChanged` 只给真正增长了的余额打 tick。
 
-<include lang="csharp" meta='title="Systems/ShopSystems.cs"'>../../../samples/Actors/Systems/ShopSystems.cs</include>
+<include lang="csharp" meta='tab="Systems/ShopSystems.cs"'>../../../samples/Actors/Systems/ShopSystems.cs</include>
 
-<include lang="csharp" meta='title="Systems/BankSystems.cs"'>../../../samples/Actors/Systems/BankSystems.cs</include>
+<include lang="csharp" meta='tab="Systems/BankSystems.cs"'>../../../samples/Actors/Systems/BankSystems.cs</include>
 
 ## 保存变过的 [#saving]
 

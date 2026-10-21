@@ -255,11 +255,11 @@ switched off with `Enabled = false`.
 Not everything runs every tick. A **system group** is a struct implementing `ISystemGroup`; systems marked
 `[UpdateInGroup<G>]` run only when you call `world.Update<G>()`. Add a report that prints once a second:
 
-```csharp title="Components.cs"
+```csharp tab="Components.cs"
 public struct Report : ISystemGroup;
 ```
 
-```csharp title="Systems.cs"
+```csharp tab="Systems.cs"
 [UpdateInGroup<Report>]
 public class ReportSystem : EcsSystem
 {

@@ -168,14 +168,14 @@ A `BackgroundService` runs the loop for the life of the app. On Ctrl+C or `SIGTE
 waits for `ExecuteAsync` to finish, up to `HostOptions.ShutdownTimeout` (30 seconds by default), so a final save
 fits there.
 
-```csharp title="WorldService.cs" doccheck=skip
+```csharp tab="WorldService.cs" doccheck=skip
 public sealed class WorldService(WorldLoop loop) : BackgroundService
 {
     protected override Task ExecuteAsync(CancellationToken stoppingToken) => loop.RunAsync(stoppingToken);
 }
 ```
 
-```csharp title="Program.cs" doccheck=skip
+```csharp tab="Program.cs" doccheck=skip
 using EasyEcs;
 
 var builder = Host.CreateApplicationBuilder(args);

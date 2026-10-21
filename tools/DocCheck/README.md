@@ -57,7 +57,8 @@ Flags go after the language, as `doccheck=` with comma-separated values. MDX and
 | `system` | the fence is a fragment of a system (`[ForEach]` methods, an `OnUpdate` override): compiled inside an `EcsSystem` |
 | `expect-ID` | a bad example: the fence must report diagnostic `ID` (`expect-EECS007`, `expect-CS0029`) and nothing else; it compiles on its own with the page's declarations |
 
-Flags combine: `doccheck=system,expect-EECS003`.
+Flags combine: `doccheck=system,expect-EECS003`. They sit among the fence's other attributes in any order
+(` ```csharp tab="After" title="Systems.cs" doccheck=example `): a fence in a tab is read and compiled like any other.
 
 ## Writing snippets that compile
 

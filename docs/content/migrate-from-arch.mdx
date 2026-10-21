@@ -126,24 +126,9 @@ public struct WorldStats : ISingletonComponent
 
 ### A query and its job become one method [#query-and-job]
 
-Arch:
-
-```csharp doccheck=skip
-private static readonly QueryDescription Moving =
-    new QueryDescription().WithAll<Position, Velocity>().WithNone<Stunned, Dead>();
-
-private struct Move : IForEach<Position, Velocity>
-{
-    public void Update(ref Position p, ref Velocity v) { /* ... */ }
-}
-
-var move = new Move();
-world.InlineQuery<Move, Position, Velocity>(in Moving, ref move);
-```
-
 EasyEcs: the filter goes on the method, the parameters are the components.
 
-```csharp title="MovementSystem.cs"
+```csharp tab="EasyEcs" title="MovementSystem.cs"
 public class MovementSystem : EcsSystem
 {
     [ForEach, Without<Stunned>, Without<Dead>]
@@ -157,30 +142,28 @@ public class MovementSystem : EcsSystem
 }
 ```
 
+```csharp tab="Arch" doccheck=skip
+private static readonly QueryDescription Moving =
+    new QueryDescription().WithAll<Position, Velocity>().WithNone<Stunned, Dead>();
+
+private struct Move : IForEach<Position, Velocity>
+{
+    public void Update(ref Position p, ref Velocity v) { /* ... */ }
+}
+
+var move = new Move();
+world.InlineQuery<Move, Position, Velocity>(in Moving, ref move);
+```
+
 </Step>
 <Step>
 
 ### The command buffer goes [#command-buffer]
 
-Arch records the status change and plays it back after the query:
-
-```csharp doccheck=skip
-public void Update(Entity e, ref Attack attack, ref Health health)
-{
-    if (--attack.Cooldown > 0) return;
-    attack.Cooldown = attack.Interval;
-    C.Hits++;
-    health.Value -= attack.Damage;
-    if (Rng.Chance(C.Tick, e.Id, 1, 50) && !W.Has<Burning>(e))
-        B.Add(e, new Burning { Ticks = 10, DamagePerTick = 3 });
-}
-// ...
-_buffer.Playback(_world);
-```
-
+Arch records the status change and plays it back after the query.
 EasyEcs applies it on the spot. The counters are a `ref` singleton parameter.
 
-```csharp title="CombatSystem.cs"
+```csharp tab="EasyEcs" title="CombatSystem.cs"
 public class CombatSystem : EcsSystem
 {
     [ForEach, Without<Dead>, Without<Stunned>]
@@ -216,6 +199,20 @@ public class DeathSystem : EcsSystem
         if (entity.HasNpc) stats.NpcKills++;
     }
 }
+```
+
+```csharp tab="Arch" doccheck=skip
+public void Update(Entity e, ref Attack attack, ref Health health)
+{
+    if (--attack.Cooldown > 0) return;
+    attack.Cooldown = attack.Interval;
+    C.Hits++;
+    health.Value -= attack.Damage;
+    if (Rng.Chance(C.Tick, e.Id, 1, 50) && !W.Has<Burning>(e))
+        B.Add(e, new Burning { Ticks = 10, DamagePerTick = 3 });
+}
+// ...
+_buffer.Playback(_world);
 ```
 
 </Step>

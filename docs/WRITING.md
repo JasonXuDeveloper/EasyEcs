@@ -79,6 +79,12 @@ readers search for, one `##` per question.
 ## Code
 
 - C# blocks have a title when they are a file: ` ```csharp title="Program.cs" `.
+- Blocks that are alternatives, not steps of one story, go in tabs: before and after, the old version and the new
+  one, the other library and EasyEcs, the files of one step. Give each fence a `tab="…"` (a file name or a short
+  term; Chinese pages may translate a term that is not a file or type name): consecutive fences with a `tab` form
+  one tab bar, and fences with the same label share a tab. A tab named after its file needs no `title`. The fences
+  stay plain for DocCheck, and the Markdown copy prints each tab's label above its fences. `<include>` takes it in
+  its `meta`. Keep a block that is read top to bottom, a declaration followed by its use, out of tabs.
 - Mark what the reader should look at with Shiki notation comments: `// [!code highlight]`, `// [!code ++]` /
   `// [!code --]` for a change, `// [!code focus]`. Do not use them in more than a few lines per block.
 - Examples follow the ECS principles (`content/ecs-principles.md`): components are plain data, systems are stateless

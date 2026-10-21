@@ -255,7 +255,7 @@ priorities: `Priority` was removed in 4.1. Systems that run on a different caden
 
 Through a `ref`. In a `[ForEach]` method, a `ref` parameter is a write and `in` is a read:
 
-```csharp
+```csharp tab="In a system"
 public record struct Poison(int DamagePerTick) : IComponent;
 public record struct Mana(int Value) : IComponent;
 
@@ -266,9 +266,7 @@ public class PoisonSystem : EcsSystem
 }
 ```
 
-Outside systems:
-
-```csharp
+```csharp tab="Outside systems"
 entity.Mana.Value -= 10;                                     // untracked: the generated property is a ref
 ref var poison = ref entity.Poison;                          // keep the ref for several writes
 poison.DamagePerTick = 3;

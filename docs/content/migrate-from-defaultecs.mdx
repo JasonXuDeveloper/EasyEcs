@@ -114,9 +114,21 @@ public struct WorldStats : ISingletonComponent
 
 ### A set system becomes a method [#set-system]
 
-DefaultEcs:
+EasyEcs: the attributes become filters, the component lookups become parameters.
 
-```csharp doccheck=skip
+```csharp tab="EasyEcs" title="MovementSystem.cs"
+public class MovementSystem : EcsSystem
+{
+    [ForEach, Without<Stunned>, Without<Dead>]
+    static void Move(ref Position p, in Velocity v)
+    {
+        p.X += v.X;
+        p.Y += v.Y;
+    }
+}
+```
+
+```csharp tab="DefaultEcs" doccheck=skip
 [With(typeof(Position), typeof(Velocity)), Without(typeof(Stunned), typeof(Dead))]
 public sealed class MovementSystem(World world) : AEntitySetSystem<Counters>(world, false)
 {
@@ -131,20 +143,6 @@ public sealed class MovementSystem(World world) : AEntitySetSystem<Counters>(wor
             p.X += v.X;
             p.Y += v.Y;
         }
-    }
-}
-```
-
-EasyEcs: the attributes become filters, the component lookups become parameters.
-
-```csharp title="MovementSystem.cs"
-public class MovementSystem : EcsSystem
-{
-    [ForEach, Without<Stunned>, Without<Dead>]
-    static void Move(ref Position p, in Velocity v)
-    {
-        p.X += v.X;
-        p.Y += v.Y;
     }
 }
 ```
@@ -186,21 +184,10 @@ public class ShootingSystem : EcsSystem
 
 ### `WhenChanged` becomes `[Changed<T>]` [#when-changed]
 
-DefaultEcs needs a `NotifyChanged<T>()` next to every write and a `Complete()` after reading the set:
-
-```csharp doccheck=skip
-var changed = world.GetEntities().With<Replica>().WhenChanged<Hp>().AsSet();
-
-entity.Get<Hp>().Value--;
-entity.NotifyChanged<Hp>();
-
-foreach (ref readonly var e in changed.GetEntities()) replicas[e].Value = hps[e].Value;
-changed.Complete();
-```
-
+DefaultEcs needs a `NotifyChanged<T>()` next to every write and a `Complete()` after reading the set.
 EasyEcs: mark the component tracked; every write through a `ref` is the change.
 
-```csharp title="Replication.cs"
+```csharp tab="EasyEcs" title="Replication.cs"
 public record struct Hp(int Value) : IComponent, ITracked;
 public record struct Replica(int Value) : IComponent;
 
@@ -209,6 +196,16 @@ public class Replication : EcsSystem
     [ForEach, Changed<Hp>]
     static void Copy(in Hp hp, ref Replica replica) => replica = new Replica(hp.Value);
 }
+```
+
+```csharp tab="DefaultEcs" doccheck=skip
+var changed = world.GetEntities().With<Replica>().WhenChanged<Hp>().AsSet();
+
+entity.Get<Hp>().Value--;
+entity.NotifyChanged<Hp>();
+
+foreach (ref readonly var e in changed.GetEntities()) replicas[e].Value = hps[e].Value;
+changed.Complete();
 ```
 
 </Step>

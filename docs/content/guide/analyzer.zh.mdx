@@ -195,11 +195,11 @@ public static class Physics                                   // Physics.Move(wo
 
 组件和单例按值存在列里。接口可以继承这些标记接口，类不能实现它们。
 
-```csharp doccheck=expect-EECS006
+```csharp tab="报告" doccheck=expect-EECS006
 public class Wallet : IComponent { public int Gold; }
 ```
 
-```csharp
+```csharp tab="修正"
 public record struct Wallet(int Gold) : IComponent;
 ```
 
@@ -335,7 +335,7 @@ public class RegenSystem : EcsSystem
 （`holder.Owner.Gold++`）。编译器允许，因为只读的只是引用本身；但这次写入被当成读来调度（读同一份数据的并行系统会和它竞争），也不会
 打上变更标记，`[Changed<T>]` 系统和值索引都看不到它。
 
-```csharp doccheck=expect-EECS011
+```csharp tab="报告" doccheck=expect-EECS011
 public record struct Grid(List<int> Cells) : ISingletonComponent;
 
 public class GridSystem : EcsSystem
@@ -344,7 +344,7 @@ public class GridSystem : EcsSystem
 }
 ```
 
-```csharp
+```csharp tab="修正"
 public record struct Grid(List<int> Cells) : ISingletonComponent;
 
 public class GridSystem : EcsSystem
@@ -691,7 +691,7 @@ public static class Healing
 生成器把 `[ForEach]` 方法的 job 写在用户类型之外，通过 `UnsafeAccessor` 调用这些方法，所以私有方法和私有系统都没问题。但参数（和返回值）
 的类型，以及系统之外 `[ForEach]` 方法所在的类型，必须是 internal 或 public，包含它们的每一层类型也一样；`file` 类型在其他文件里访问不到。
 
-```csharp doccheck=expect-EECS022
+```csharp tab="报告" doccheck=expect-EECS022
 public class HealSystem : EcsSystem
 {
     private struct Regen : IComponent { public int Amount; }      // 生成的 job 访问不到它
@@ -699,7 +699,7 @@ public class HealSystem : EcsSystem
 }
 ```
 
-```csharp
+```csharp tab="修正"
 public class HealSystem : EcsSystem
 {
     internal struct Regen : IComponent { public int Amount; }
@@ -977,11 +977,11 @@ for (int i = 0; i < spawned.Length; i++)
 要一行一行地看。规则报告：把 `Count<...>()` 和 0 或 1 比较来判断有没有；只计数的查询 `foreach`；以及第一条语句按 item 实体的
 组件判断来跳过行的循环（这种没有修复：过滤条件要写在构造查询的地方）。
 
-```csharp doccheck=expect-EECS032
+```csharp tab="报告" doccheck=expect-EECS032
 bool anyDead = world.Count<Dead>() > 0;
 ```
 
-```csharp
+```csharp tab="修正"
 bool someoneDied = world.Any<Dead>();
 foreach (var item in world.Query<Health>(QueryFilter.Create().With<Burning>())) { }   // 用过滤条件，而不是在循环里判断
 ```
@@ -1007,11 +1007,11 @@ foreach (var item in world.Query<Health>(QueryFilter.Create().With<Burning>())) 
 | `world.Index<Zone, int>()`、`world.Relations<Friend>()` | `world.ZoneIndex`、`world.FriendIndex` |
 | `item.Component1` | `item.Health` |
 
-```csharp doccheck=expect-EECS033
+```csharp tab="报告" doccheck=expect-EECS033
 int hpGeneric = player.Get<Health>().Value;
 ```
 
-```csharp
+```csharp tab="修正"
 int hp = player.Health.Value;
 ```
 

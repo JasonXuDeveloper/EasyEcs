@@ -57,7 +57,7 @@ public struct Dead : IComponent;                                           // a 
 
 Name a system after the one thing it does. If its description needs "and", split it.
 
-```csharp
+```csharp tab="Before"
 // Before: burning AND death in one system. Death is noticed only for burning units:
 // a unit killed by anything else is never marked Dead.
 public class StatusSystem : EcsSystem
@@ -72,7 +72,7 @@ public class StatusSystem : EcsSystem
 }
 ```
 
-```csharp
+```csharp tab="After"
 // After: each concern can be removed, reordered or tested alone, and death covers every damage source.
 public class BurnSystem : EcsSystem
 {
@@ -111,7 +111,7 @@ when the system is removed or added twice. Put it in data:
 | Lookups by value (a player by name, the items of an owner) | An indexed component ([indexes and relations](/en/docs/guide/indexes-and-relations)), not a dictionary kept in sync by hand |
 | Derived and rebuildable (a scratch list reused every update) | A `readonly` field on the system is fine |
 
-```csharp doccheck=expect-EECS007
+```csharp tab="Before" doccheck=expect-EECS007
 // Before (EECS007): the count lives in the system, where no query, test or other system can see it.
 public class DeathSystem : EcsSystem
 {
@@ -127,7 +127,7 @@ public class DeathSystem : EcsSystem
 }
 ```
 
-```csharp
+```csharp tab="After"
 // After: the count is world state; anyone can read it (world.Score.Deaths).
 public record struct Score(int Deaths) : ISingletonComponent;
 

@@ -111,9 +111,21 @@ public struct WorldStats : ISingletonComponent
 
 ### 集合系统变成一个方法 [#set-system]
 
-DefaultEcs：
+EasyEcs：特性变成过滤，取组件变成参数。
 
-```csharp doccheck=skip
+```csharp tab="EasyEcs" title="MovementSystem.cs"
+public class MovementSystem : EcsSystem
+{
+    [ForEach, Without<Stunned>, Without<Dead>]
+    static void Move(ref Position p, in Velocity v)
+    {
+        p.X += v.X;
+        p.Y += v.Y;
+    }
+}
+```
+
+```csharp tab="DefaultEcs" doccheck=skip
 [With(typeof(Position), typeof(Velocity)), Without(typeof(Stunned), typeof(Dead))]
 public sealed class MovementSystem(World world) : AEntitySetSystem<Counters>(world, false)
 {
@@ -128,20 +140,6 @@ public sealed class MovementSystem(World world) : AEntitySetSystem<Counters>(wor
             p.X += v.X;
             p.Y += v.Y;
         }
-    }
-}
-```
-
-EasyEcs：特性变成过滤，取组件变成参数。
-
-```csharp title="MovementSystem.cs"
-public class MovementSystem : EcsSystem
-{
-    [ForEach, Without<Stunned>, Without<Dead>]
-    static void Move(ref Position p, in Velocity v)
-    {
-        p.X += v.X;
-        p.Y += v.Y;
     }
 }
 ```
@@ -182,21 +180,9 @@ public class ShootingSystem : EcsSystem
 
 ### `WhenChanged` 变成 `[Changed<T>]` [#when-changed]
 
-DefaultEcs 每次写入后都要调 `NotifyChanged<T>()`，读完集合还要 `Complete()`：
+DefaultEcs 每次写入后都要调 `NotifyChanged<T>()`，读完集合还要 `Complete()`。EasyEcs：把组件标成被追踪，每次通过 `ref` 写入就是变更。
 
-```csharp doccheck=skip
-var changed = world.GetEntities().With<Replica>().WhenChanged<Hp>().AsSet();
-
-entity.Get<Hp>().Value--;
-entity.NotifyChanged<Hp>();
-
-foreach (ref readonly var e in changed.GetEntities()) replicas[e].Value = hps[e].Value;
-changed.Complete();
-```
-
-EasyEcs：把组件标成被追踪，每次通过 `ref` 写入就是变更。
-
-```csharp title="Replication.cs"
+```csharp tab="EasyEcs" title="Replication.cs"
 public record struct Hp(int Value) : IComponent, ITracked;
 public record struct Replica(int Value) : IComponent;
 
@@ -205,6 +191,16 @@ public class Replication : EcsSystem
     [ForEach, Changed<Hp>]
     static void Copy(in Hp hp, ref Replica replica) => replica = new Replica(hp.Value);
 }
+```
+
+```csharp tab="DefaultEcs" doccheck=skip
+var changed = world.GetEntities().With<Replica>().WhenChanged<Hp>().AsSet();
+
+entity.Get<Hp>().Value--;
+entity.NotifyChanged<Hp>();
+
+foreach (ref readonly var e in changed.GetEntities()) replicas[e].Value = hps[e].Value;
+changed.Complete();
 ```
 
 </Step>
