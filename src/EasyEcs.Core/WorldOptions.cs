@@ -22,7 +22,9 @@ public sealed class WorldOptions
     public int InitialEntityCapacity { get; init; } = 1024;
 
     /// <summary>
-    /// Time every system run into <see cref="EcsSystem.Stats"/> (two timestamp reads per run). Default false.
+    /// Measure every system run into <see cref="EcsSystem.Stats"/>: its time and allocated bytes (two timestamp and two
+    /// allocation-counter reads per run, and per helper chunk of a parallel <c>[ForEach]</c>), and the entities its
+    /// <c>[ForEach]</c> methods visited (one count per pass when it starts). Default false.
     /// </summary>
     public bool MeasureSystems { get; init; }
 

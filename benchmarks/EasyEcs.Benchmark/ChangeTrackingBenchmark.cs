@@ -186,3 +186,59 @@ public class ChangeTrackingWriteBenchmark
         private static void Send(in Aim aim, ref Sent sent) => sent = new Sent(aim.Value);
     }
 }
+
+/// <summary>
+/// A loop that only reads a tracked component, next to the <c>[Changed&lt;Health&gt;]</c> replication of the same
+/// world: 100,000 entities, 10 written per tick, and a read of every health (a total for a status page) between the
+/// writes and the replication. <c>Read = false</c> walks <c>Query&lt;Health&gt;</c>, whose items stamp every row they
+/// visit, so the replication visits every row; <c>Read = true</c> walks <c>Read&lt;Health&gt;</c>, which stamps nothing,
+/// so the replication visits the 10 written rows. Steady state allocates 0 bytes either way.
+/// </summary>
+[MemoryDiagnoser]
+public class ChangeTrackingReadBenchmark
+{
+    [Params(100_000)] public int Entities;
+    [Params(false, true)] public bool Read;
+
+    private World _world;
+    private Entity[] _entities;
+    private int _next;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _world = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _entities = new Entity[Entities];
+        _world.CreateEntities(_entities, new ChangeTrackingBenchmark.Health(100), new ChangeTrackingBenchmark.Replica(100));
+        _world.AddSystem<ChangeTrackingBenchmark.ReplicateChanged>();
+        for (int i = 0; i < 20; i++) Tick();
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => _world.Dispose();
+
+    [Benchmark]
+    public long Tick()
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            _next = (_next + 97) % _entities.Length;
+            _entities[_next].Get<ChangeTrackingBenchmark.Health>().Value--;
+        }
+
+        long total = 0;
+        if (Read)
+        {
+            foreach (var item in _world.Read<ChangeTrackingBenchmark.Health>()) total += item.Component1.Value;
+        }
+        else
+        {
+#pragma warning disable EECS046 // the stamping of a loop that only reads is what this case measures
+            foreach (var item in _world.Query<ChangeTrackingBenchmark.Health>()) total += item.Component1.Value;
+#pragma warning restore EECS046
+        }
+
+        _world.Update<ChangeTrackingBenchmark.Replication>();
+        return total;
+    }
+}

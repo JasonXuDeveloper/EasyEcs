@@ -20,7 +20,7 @@ public readonly partial struct QueryFilter
     /// an entity to another table, the table grows or shrinks across a cut) may be skipped or visited twice in one
     /// cycle of <paramref name="count"/> passes; the next cycle sees them again.</para>
     /// <para>Honoured by <c>ForEach</c>, <c>ForEachEntity</c>, <c>ForEachBatch</c> and their <c>Parallel</c> forms;
-    /// the calls that need every matching row (<c>Query</c>, <c>Count</c>, <c>Any</c>, <c>DestroyAll</c>,
+    /// the calls that need every matching row (<c>Query</c>, <c>Read</c>, <c>Count</c>, <c>Any</c>, <c>DestroyAll</c>,
     /// <c>entity.Run</c>, <c>SetAll</c> and the other bulk calls) throw <see cref="ArgumentException"/> for a sliced
     /// filter. A count of 1 is the whole tables.</para>
     /// </summary>
