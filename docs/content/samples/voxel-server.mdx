@@ -104,9 +104,9 @@ The rules are constants and a few pure functions; the terrain is where a block l
 the reads every system shares: `BlockAt` (an unloaded chunk reads as stone, so nothing falls out of the world),
 `WaterAt`, `TopAt` and the chunks around a point.
 
-<include lang="csharp" meta='title="Rules.cs"'>../../../samples/VoxelServer/Rules.cs</include>
+<include lang="csharp" meta='tab="Rules.cs"'>../../../samples/VoxelServer/Rules.cs</include>
 
-<include lang="csharp" meta='title="Terrain.cs"'>../../../samples/VoxelServer/Terrain.cs</include>
+<include lang="csharp" meta='tab="Terrain.cs"'>../../../samples/VoxelServer/Terrain.cs</include>
 
 ## Chunks around the players [#chunks]
 
@@ -245,9 +245,9 @@ After the pickup delay an item goes to any player standing on it, found through 
 grow, free slots take the rest, and what does not fit stays on the ground. The inventory is read before it is written,
 so a full inventory is not stamped.
 
-<include lang="csharp" meta='title="Systems/Items.cs"'>../../../samples/VoxelServer/Systems/Items.cs#pickup</include>
+<include lang="csharp" meta='tab="Pickup"'>../../../samples/VoxelServer/Systems/Items.cs#pickup</include>
 
-<include lang="csharp" meta='title="Systems/Items.cs"'>../../../samples/VoxelServer/Systems/Items.cs#expiry</include>
+<include lang="csharp" meta='tab="Expiry"'>../../../samples/VoxelServer/Systems/Items.cs#expiry</include>
 
 ## Zombies and death [#zombies]
 
@@ -259,9 +259,9 @@ column and out of the water: an instance of the zombie prefab with its own `Posi
 A zombie walks toward the player it hunts and hits it when close; a player who left is noticed because
 `TryGetEntity` fails on the stale id. The chase, the attack and the cooldown are three systems, each one job.
 
-<include lang="csharp" meta='title="Systems/Zombies.cs"'>../../../samples/VoxelServer/Systems/Zombies.cs#chase</include>
+<include lang="csharp" meta='tab="Chase"'>../../../samples/VoxelServer/Systems/Zombies.cs#chase</include>
 
-<include lang="csharp" meta='title="Systems/Zombies.cs"'>../../../samples/VoxelServer/Systems/Zombies.cs#attack</include>
+<include lang="csharp" meta='tab="Attack"'>../../../samples/VoxelServer/Systems/Zombies.cs#attack</include>
 
 Fire is data: `SunlightSystem` adds `Burning` to a zombie under the open sky by day and removes it in water;
 `BurnSystem` burns it down, `FireDamageSystem` hurts every `Rules.BurnEvery` ticks (its `UpdateInterval`), and
@@ -269,9 +269,9 @@ Fire is data: `SunlightSystem` adds `Burning` to a zombie under the open sky by 
 batch method stamps the whole run it writes: written only on the ticks that hurt, the death systems below find nothing
 to do on the others.
 
-<include lang="csharp" meta='title="Systems/Zombies.cs"'>../../../samples/VoxelServer/Systems/Zombies.cs#sunlight</include>
+<include lang="csharp" meta='tab="Sunlight"'>../../../samples/VoxelServer/Systems/Zombies.cs#sunlight</include>
 
-<include lang="csharp" meta='title="Systems/Zombies.cs"'>../../../samples/VoxelServer/Systems/Zombies.cs#burn</include>
+<include lang="csharp" meta='tab="Burn"'>../../../samples/VoxelServer/Systems/Zombies.cs#burn</include>
 
 Dying is a `Health` of zero, handled by one system per kind: zombies go, players drop their inventory where they
 died and respawn. `Health` is `ITracked`, so both systems take `[Changed<Health>]` and visit only the healths written
@@ -318,9 +318,9 @@ of the entities that have one: `Maybe<Health>` reads it where the entity has a `
 items are sent by one method, and the query does not require `Health`. The clock is the first system of the
 simulation, not of the replication, so a server that replicates less often keeps game time.
 
-<include lang="csharp" meta='title="Systems/Replication.cs"'>../../../samples/VoxelServer/Systems/Replication.cs#entities</include>
+<include lang="csharp" meta='tab="Entities"'>../../../samples/VoxelServer/Systems/Replication.cs#entities</include>
 
-<include lang="csharp" meta='title="Systems/Replication.cs"'>../../../samples/VoxelServer/Systems/Replication.cs#clock</include>
+<include lang="csharp" meta='tab="Clock"'>../../../samples/VoxelServer/Systems/Replication.cs#clock</include>
 
 ## The program [#program]
 

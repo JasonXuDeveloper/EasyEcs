@@ -91,9 +91,9 @@ flowchart LR
 规则是常量和几个纯函数；地形负责方块的位置、区块的生成，以及所有系统共用的读取：`BlockAt`（未加载的区块读出来是石头，
 所以什么都不会掉出世界）、`WaterAt`、`TopAt` 和一个点周围的区块。
 
-<include lang="csharp" meta='title="Rules.cs"'>../../../samples/VoxelServer/Rules.cs</include>
+<include lang="csharp" meta='tab="Rules.cs"'>../../../samples/VoxelServer/Rules.cs</include>
 
-<include lang="csharp" meta='title="Terrain.cs"'>../../../samples/VoxelServer/Terrain.cs</include>
+<include lang="csharp" meta='tab="Terrain.cs"'>../../../samples/VoxelServer/Terrain.cs</include>
 
 ## 玩家周围的区块 [#chunks]
 
@@ -205,9 +205,9 @@ flowchart LR
 过了拾取延迟，掉落物归站在它上面的任何玩家，同样通过网格找到。同类的堆先长满，空格子装剩下的，装不下的留在地上。
 先读背包再写，所以背包满了不会被打 tick。
 
-<include lang="csharp" meta='title="Systems/Items.cs"'>../../../samples/VoxelServer/Systems/Items.cs#pickup</include>
+<include lang="csharp" meta='tab="拾取"'>../../../samples/VoxelServer/Systems/Items.cs#pickup</include>
 
-<include lang="csharp" meta='title="Systems/Items.cs"'>../../../samples/VoxelServer/Systems/Items.cs#expiry</include>
+<include lang="csharp" meta='tab="过期"'>../../../samples/VoxelServer/Systems/Items.cs#expiry</include>
 
 ## 僵尸与死亡 [#zombies]
 
@@ -218,17 +218,17 @@ flowchart LR
 
 僵尸走向它追的玩家，靠近了就打；玩家离开了也能发现，因为 `TryGetEntity` 对过期的 id 返回 false。追、打和冷却是三个系统，各管一件事。
 
-<include lang="csharp" meta='title="Systems/Zombies.cs"'>../../../samples/VoxelServer/Systems/Zombies.cs#chase</include>
+<include lang="csharp" meta='tab="追击"'>../../../samples/VoxelServer/Systems/Zombies.cs#chase</include>
 
-<include lang="csharp" meta='title="Systems/Zombies.cs"'>../../../samples/VoxelServer/Systems/Zombies.cs#attack</include>
+<include lang="csharp" meta='tab="攻击"'>../../../samples/VoxelServer/Systems/Zombies.cs#attack</include>
 
 着火也是数据：`SunlightSystem` 给白天露天的僵尸加上 `Burning`，在水里则去掉；`BurnSystem` 让火烧下去，
 `FireDamageSystem` 每 `Rules.BurnEvery` 个 tick 扣一次血（它的 `UpdateInterval`），`ExtinguishSystem` 去掉烧完的火。
 扣血单独成一个系统，是因为 `Health` 被追踪，而批量方法会给它写的整段行打 tick：只在扣血的 tick 写，下面的死亡系统在其他 tick 就无事可做。
 
-<include lang="csharp" meta='title="Systems/Zombies.cs"'>../../../samples/VoxelServer/Systems/Zombies.cs#sunlight</include>
+<include lang="csharp" meta='tab="日照"'>../../../samples/VoxelServer/Systems/Zombies.cs#sunlight</include>
 
-<include lang="csharp" meta='title="Systems/Zombies.cs"'>../../../samples/VoxelServer/Systems/Zombies.cs#burn</include>
+<include lang="csharp" meta='tab="燃烧"'>../../../samples/VoxelServer/Systems/Zombies.cs#burn</include>
 
 死亡就是 `Health` 归零，每种实体一个系统处理：僵尸消失，玩家把背包掉在原地然后重生。`Health` 是 `ITracked`，所以两个系统都用
 `[Changed<Health>]`，只访问上次运行以来被写过的血量，也就是刚被打或被烧的实体，而不是每个 tick 遍历所有实体。`Mut<T>` 只为重生的玩家写血量、位置和背包。
@@ -265,9 +265,9 @@ flowchart LR
 移动过的实体来自 `[Changed<Position>]`，由上面的 `Mut<Position>` 打 tick。更新里带着有血条的实体的血量：`Maybe<Health>`
 在实体有 `Health` 时读它，所以玩家、僵尸和掉落物由一个方法下发，查询也不要求 `Health`。时钟是模拟组的第一个系统，而不在同步组里，所以同步频率较低的服务器，游戏时间照样正常走。
 
-<include lang="csharp" meta='title="Systems/Replication.cs"'>../../../samples/VoxelServer/Systems/Replication.cs#entities</include>
+<include lang="csharp" meta='tab="实体"'>../../../samples/VoxelServer/Systems/Replication.cs#entities</include>
 
-<include lang="csharp" meta='title="Systems/Replication.cs"'>../../../samples/VoxelServer/Systems/Replication.cs#clock</include>
+<include lang="csharp" meta='tab="时钟"'>../../../samples/VoxelServer/Systems/Replication.cs#clock</include>
 
 ## 程序 [#program]
 
