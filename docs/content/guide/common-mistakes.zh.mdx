@@ -1,7 +1,7 @@
 ---
 title: 常见错误
 seoTitle: "EasyEcs 常见错误：ref 失效、系统存状态、跨线程"
-description: 使用 EasyEcs 时最常犯的三十二个错误：每个都给出你可能会写的代码、错在哪里、应该怎么写，以及对应的分析器规则或指南页面。
+description: 使用 EasyEcs 时最常犯的错误：每个都给出你可能会写的代码、错在哪里、应该怎么写，以及对应的分析器规则或指南页面。
 icon: TriangleAlert
 ---
 
@@ -137,6 +137,26 @@ public readonly record struct Market(long Id) : IActor<Market>
 ```
 
 由 [EECS043](/zh/docs/guide/analyzer#eecs043) 发现（带代码修复）。完整的写法见 [Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)。
+
+### 用 `AddSingleton` 重置单例 [#add-singleton-reset]
+
+```csharp
+public record struct Round(int Number, int Tick) : ISingletonComponent;
+```
+
+```csharp
+world.SetRound(1, 0);
+world.AddSingleton<Round>();       // 抛异常：World 里已经有 Round
+```
+
+`AddSingleton<T>()` 只添加 World 里还没有的单例。已经有时它会抛 `InvalidOperationException`，不会悄悄换回默认值、
+让所有系统读到一个没人设置过的值。要换值就直接替换：
+
+```csharp
+world.SetRound(2, 0);              // 下一回合，从 tick 0 开始
+```
+
+没有规则能发现；异常信息里写明了该用哪个调用。详见[添加、读、写](/zh/docs/guide/singletons#add-read-write)。
 
 ## 系统 [#systems]
 
@@ -301,6 +321,30 @@ public class Face : EcsSystem
 在系统外面，用 `in` 参数、`Read<T>()` 或生成的属性读，用 `entity.SetIfChanged(...)`（或生成的 `SetFacingIfChanged(...)`）写。
 “有时写”的 `ref` 没有规则能发现；从来不写的那种由 [EECS025](/zh/docs/guide/analyzer#eecs025) 发现。详见
 [什么算写入](/zh/docs/guide/change-tracking#what-counts-as-a-write)。
+
+### 只读追踪组件的 `Query` 循环 [#query-that-reads]
+
+```csharp
+public record struct Rating(int Value) : IComponent, ITrackChanges;   // 变了就同步给客户端
+```
+
+```csharp doccheck=expect-EECS046
+int total = 0;
+foreach (var item in world.Query<Rating>())
+    total += item.Rating.Value;    // 每一行 Rating 都被打 tick，当作写过
+```
+
+`Query` 的元素给出的是 `ref`，枚举器会给走过的每一行打 tick：求个总数、找个实体、发一次同步，都会让每个
+`[Changed<Rating>]` 读者去访问没人改过的行。`world.Read<…>()` 只读地走同样的行，不打 tick：
+
+```csharp
+int total = 0;
+foreach (var item in world.Read<Rating>())
+    total += item.Rating.Value;
+```
+
+由 [EECS046](/zh/docs/guide/analyzer#eecs046) 发现（警告，带代码修复）。详见
+[`Read`：只读的循环](/zh/docs/guide/queries#read)。
 
 ### `[Removed<T>]` 方法接收了 `T` [#removed-takes-t]
 
@@ -627,6 +671,46 @@ int frozen = world.SetAll(new Frozen(), QueryFilter.Create().With<Fighter>());
 ```
 
 由 [EECS030](/zh/docs/guide/analyzer#eecs030) 发现（警告，带代码修复）。详见[批量变更](/zh/docs/guide/bulk)。
+
+### `CreateEntity` 之后紧接着 `Set` [#set-after-create]
+
+```csharp doccheck=expect-EECS052
+var bullet = world.CreateEntity(new Position(0, 0));
+bullet.Set(new Velocity(1, 0));    // 新实体又被搬了一次
+```
+
+`CreateEntity` 把实体放进它拿到的那些组件对应的表；下一行的 `Set` 又把它搬到另一张表，如果那张表没有别人用，还要顺路建出来。
+把所有组件都交给创建调用：
+
+```csharp
+var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0));
+```
+
+`Instantiate(prefab)` 之后再 `Set` 也一样：把实例自己的组件直接传给 `Instantiate`。由
+[EECS052](/zh/docs/guide/analyzer#eecs052) 发现（警告，带代码修复）。详见
+[创建实体](/zh/docs/guide/entities-and-components#create-entities)。
+
+### 在查询循环里更新 World [#update-in-loop]
+
+```csharp doccheck=expect-EECS051
+foreach (var item in world.Query<Health>())
+{
+    item.Health.Value -= 1;
+    world.Update();                // 循环还在走表，所有系统就跑了一遍
+}
+```
+
+`world.Update()` 假定没有循环在走这个 World：它会跑所有系统，还会填掉循环里结构变更留下的空洞，把循环还没走到的行挪进已经走过的位置，
+循环就漏掉了这些行。循环结束后再更新：
+
+```csharp
+foreach (var item in world.Query<Health>())
+    item.Health.Value -= 1;
+world.Update();
+```
+
+由 [EECS051](/zh/docs/guide/analyzer#eecs051) 发现；在系统里由 [EECS034](/zh/docs/guide/analyzer#eecs034) 发现。详见
+[遍历时增删实体和组件](/zh/docs/guide/structural-changes#during-a-pass)。
 
 ### 只用 `Children` 收集子树 [#children-only]
 

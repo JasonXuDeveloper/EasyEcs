@@ -411,7 +411,7 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 
 每个 tick 都跑的代码的检查清单。先找出值得花力气的系统：`WorldOptions.MeasureSystems` 会给每次系统运行计时。
 
-- **通过 ref 修改**：`ref var hp = ref item.Component1;`、`ref var hp = ref entity.Get<Health>();`。
+- **通过 ref 修改**：`ref var hp = ref item.Health;`、`ref var hp = ref entity.Health;`。
 - **生成时一次带齐组件**：`world.CreateEntity(a, b, c)` 直接把实体放进最终的表；定义一次的类型用
   `world.Instantiate(prefab)`。一次改多个组件可以用 `entity.Set(a, b)` / `entity.Remove<A, B>()`：写法更简洁，性能相同。
 - **用 `in` 读，用 `ref` 写**：`in` 参数、`entity.Read<T>()` 或生成的属性读取；`ref` 参数和 `entity.Get<T>()` 是写。对被

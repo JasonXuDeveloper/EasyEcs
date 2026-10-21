@@ -199,7 +199,8 @@ still cheaper than a structural change:
   of adding and removing a `Changed` tag or scanning every row ([change tracking](/en/docs/guide/change-tracking)).
   A write is any `ref` access, so a writer that may leave the value as it was writes through a `Mut<T>` parameter
   and `SetIfChanged` (`entity.SetIfChanged` / `SetXIfChanged` outside a `[ForEach]`), which stamps only a value that
-  differs: readers then never compare ([write only when the value changed](/en/docs/guide/change-tracking#set-if-changed));
+  differs: readers then never compare ([write only when the value changed](/en/docs/guide/change-tracking#set-if-changed)),
+  and a loop that only reads walks `world.Read<T…>()`, which stamps nothing;
 - removal detection the same way: `[Removed<T>]` visits the entities that lost a tracked `T`, instead of a `Lost` tag
   added next to every removal ([removal detection](/en/docs/guide/change-tracking#removal-detection));
 - pausing with `Disable<T>()`, which hides a component and keeps its value, instead of removing it and storing the
@@ -336,8 +337,9 @@ them:
 | Components are data | A class implementing `IComponent` | [EECS006](/en/docs/guide/analyzer#eecs006) |
 | [2. Systems are stateless](#2-systems-are-stateless) | A mutable field, settable property or event on a system | [EECS007](/en/docs/guide/analyzer#eecs007) |
 | [3. Systems never reference systems](#3-systems-never-reference-systems) | A system-typed member, `GetSystem<T>()` inside a system | [EECS008](/en/docs/guide/analyzer#eecs008) |
+| [5. Choose the cheapest representation](#5-choose-the-cheapest-representation-for-frequent-changes) | A `Query` loop that only reads tracked components (every row stamped) | [EECS046](/en/docs/guide/analyzer#eecs046) (warning) |
 | [6. Let the schedule order effects](#6-let-the-schedule-order-effects) | `[UpdateBefore<T>]` / `[UpdateAfter<T>]` in a cycle | [EECS019](/en/docs/guide/analyzer#eecs019) |
-| [7. Keep handles, not refs](#7-keep-entity-handles-never-refs-across-boundaries) | An `Entity` field in a component | [EECS017](/en/docs/guide/analyzer#eecs017) (warning) |
+| [7. Keep handles, not refs](#7-keep-entity-handles-never-refs-across-boundaries) | An `Entity` field in a component; a `ref` used after a structural change | [EECS017](/en/docs/guide/analyzer#eecs017), [EECS047](/en/docs/guide/analyzer#eecs047) (warnings) |
 | [8. Choose how to hold a collection](#8-choose-how-to-hold-a-collection) | Changing a collection through `in` | [EECS011](/en/docs/guide/analyzer#eecs011) |
 
 The full list, with a fix for each rule, is in [Analyzer rules](/en/docs/guide/analyzer).

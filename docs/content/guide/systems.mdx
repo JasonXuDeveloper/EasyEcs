@@ -317,9 +317,8 @@ row's run reads, such as another entity through `Get`. Fewer than two chunks run
 nothing after its first update.
 
 A method that writes a tracked component (a `ref` or a [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed)
-parameter) is cut at multiples of 4,096 rows, at least 4,096: each block of 4,096 rows shares one change-tick summary
-per column, and two chunks of one block would race on it. A table of 4,096 rows or fewer is then one chunk, on one
-thread.
+parameter) is cut at multiples of 4,096 rows, so a table of 4,096 rows or fewer runs on one thread
+([why](/en/docs/guide/threading#parallel-foreach-methods)).
 
 ### System groups [#system-groups]
 

@@ -99,7 +99,7 @@ members (`unit.Velocity`, `SetHealth(50)`, `RemoveDead()`), as in the example un
 | `entity.TryGetRef<T>(out bool found)` | `ref T` or a null ref | no |
 | `entity.Has<T>()` / `Has<A, B>()` | Presence of one or all | no |
 | `entity.Disable<T>()` / `Enable<T>()` / `IsDisabled<T>()` | Hides a component, keeping its value | yes |
-| `entity.Clone()` | A copy of the entity in its world | yes |
+| `entity.Clone()` | A copy of the entity in its world; throws for a destroyed entity kept for its cleanup components | yes |
 | `entity.Run<T1..T9, TJob>(ref job)` / `Run(ref job, filter)` | Runs an `IForEachEntity` job on this entity with the refs a pass gives; `false` when it is not alive, lacks a component or fails the filter | when the job makes one |
 | `entity.Destroy()` | Destroys it; its id is recycled with a new version | yes |
 | `entity.IsAlive` / `Id` / `World` | Handle state; every access checks the version | no |
@@ -294,11 +294,11 @@ Guide: [Singletons](/en/docs/guide/singletons).
 
 | Is a write | Is not a write |
 | --- | --- |
-| `ref` parameters, `Span<T>`, `Query` items | `in` parameters, `ReadOnlySpan<T>` |
+| `ref` parameters, `Span<T>`, `Query` items | `in` parameters, `ReadOnlySpan<T>`, `world.Read<…>` items |
 | `Mut<T>.Write()`, a `SetIfChanged(value)` with a new value | `Mut<T>.Value`, a `SetIfChanged(value)` with the same value |
 | `Get<T>()`, `TryGetRef<T>` when found, `GetOrAdd<T>()`, `Set(…)`, `WriteX()` | `Read<T>()`, `TryGet<T>(out copy)`, `Has<T>()`, `e.X` of a tracked `X` |
-| Creating, instantiating, cloning, `Restore`, `Load`, `LoadEntitiesInto` | Removing (that is a removal, for `[Removed<T>]`) |
-| `entity.Run`: the components in the job's `Writes` | `LoadEntitiesInto(…, markWritten: false)` |
+| Creating, instantiating, cloning, `Enable<T>()`, `Restore`, `Load`, `LoadEntitiesInto` | Removing or `Disable<T>()` (that is a removal, for `[Removed<T>]`) |
+| `entity.Run`: the components in the job's `Writes` | `Load(…, markWritten: false)`, `LoadEntitiesInto(…, markWritten: false)` |
 
 ```csharp
 ulong mark = world.ChangeTick;
@@ -334,7 +334,8 @@ var gone = new EntityId[4096];
 if (!replicated.DestroyedSince(seen, gone, out int goneCount)) { /* older than the log: send everything */ }
 ```
 
-Guide: [Change tracking](/en/docs/guide/change-tracking).
+Guide: [Change tracking](/en/docs/guide/change-tracking), with the
+[whole table of writes](/en/docs/guide/change-tracking#what-counts-as-a-write).
 
 ## Indexes, relations, hierarchy, groups [#indexes]
 
@@ -384,7 +385,7 @@ Indexed and grouped components are written with `Set`, never through a `ref`
 | `world.CreateEntities(span, a, b, …)` | A wave with the same values |
 | `world.DestroyAll<T…>(filter)` | Destroys every match; returns how many |
 | `world.DestroyEntities(ids)` | Destroys a list of ids in one pass; returns how many |
-| `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | One component set or removed on every match |
+| `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | One component set or removed on every match; `SetAll` skips entities tagged `Destroyed` unless the filter names it |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | One component disabled or enabled on every match |
 
 ```csharp
@@ -433,7 +434,7 @@ Guide: [Dynamic buffers](/en/docs/guide/dynamic-buffers).
 | `ComponentSet.Create().With<T>()….WithSingleton<S>()` | Components (and, for whole-world saves, singletons), built once in a `static readonly` field |
 | `world.SaveEntitiesWith(writer, ids, set)` | A record: only the components of the set |
 | `world.LoadEntitiesInto(bytes, entities, markWritten: false)` | A record onto entities that exist; `markWritten: false` keeps it from counting as changed |
-| `world.MoveEntities(target, ids, moved)` | A group to another world of the thread, no encoding |
+| `world.MoveEntities(target, ids, moved)` | A group to another world of the thread, no encoding; skips destroyed entities kept for cleanup, and leaves cleanup components behind |
 | `world.RemoveTypes(assembly or context)` | Drops a plugin's types before its context unloads |
 
 ```csharp

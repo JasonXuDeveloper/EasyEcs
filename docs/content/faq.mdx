@@ -36,7 +36,8 @@ long-running .NET servers. What backs it up, in the repository:
 - An analyzer that rejects the design mistakes an ECS makes easy (EECS002 to EECS052), with code fixes.
 
 What to weigh: it targets `net10.0` only, the API changes between minor versions while it matures (4.0 to 4.1 renamed
-and removed a few members, and in 4.2 reading a singleton that was never added throws; the [migration guide](/en/docs/migration)
+and removed a few members, in 4.2 reading a singleton that was never added throws, and 4.7 renamed a few calls so each name says what it
+does; the [migration guide](/en/docs/migration)
 lists each change), and the [changelog](/en/docs/changelog) shows what each release changed.
 
 ## Does EasyEcs allocate? [#allocations]
@@ -143,7 +144,7 @@ and the pages
 
 ## How do I save a world? [#save-a-world]
 
-Three tools, for three needs:
+One tool per need:
 
 | Need | Call | Page |
 | --- | --- | --- |
@@ -275,11 +276,12 @@ Three mistakes to avoid:
 - `var hp = entity.Health; hp.Value--;` changes a copy. Keep a `ref var`.
 - Read with `in`, not `ref`: every `ref` access to an `ITrackChanges` component counts as a change, so replication
   would send rows nobody changed. The generated property of a tracked component is read-only for this reason;
-  `entity.WriteX()` is the write. A method that writes only some of the rows it visits takes `Mut<T>`, which stamps
+  `entity.WriteX()` is the write, and a loop that only reads walks `world.Read<…>()` instead of `Query`
+  ([EECS046](/en/docs/guide/analyzer#eecs046)). A method that writes only some of the rows it visits takes `Mut<T>`, which stamps
   only the rows it writes; `SetIfChanged` (and the generated `entity.SetXIfChanged(...)`) writes only when the value
   differs ([what counts as a write](/en/docs/guide/change-tracking#what-counts-as-a-write)).
 - Change a collection inside a component through a `ref` to the component, never through `in`: change tracking and
-  the scheduler would miss it ([EECS011](/en/docs/guide/analyzer)). For a list per entity, use a
+  the scheduler would miss it ([EECS011](/en/docs/guide/analyzer#eecs011)). For a list per entity, use a
   [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers).
 
 ## How many component types can a world have? [#component-limit]

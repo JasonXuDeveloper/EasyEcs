@@ -284,6 +284,7 @@ A pass that writes a singleton for each of 100,000 entities, against Friflo.Engi
 | --- | --- | --- |
 | State kept in a system field instead | Invisible to other systems, lost on remove, shared by worlds if static | [EECS007](/en/docs/guide/analyzer#eecs007) |
 | A class implementing `ISingletonComponent` | Does not compile | [EECS006](/en/docs/guide/analyzer#eecs006) |
+| `AddSingleton<T>()` to reset a singleton the world has | `InvalidOperationException`; the value stays | Replace it with `world.SetX(…)` |
 | Reading a singleton before it was added (`world.X`, `GetSingleton<T>()`, a `[ForEach]` parameter) | `InvalidOperationException`, naming the call that adds it | Add it at setup, or use `GetOrAddX()` where the default is right |
 | A `ref` singleton in a parallel method | Races between chunks | [EECS010](/en/docs/guide/analyzer#eecs010) |
 | `AddSingleton` or `RemoveSingleton` in a batch method, a parallel method or a parallel stage | `InvalidOperationException`: both go through the structural gate, and the structure is frozen there | [EECS010](/en/docs/guide/analyzer#eecs010), [EECS013](/en/docs/guide/analyzer#eecs013), and at run time |

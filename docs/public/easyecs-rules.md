@@ -8,7 +8,9 @@ available as Markdown: add `.md` to its URL.
 
 - Components are structs implementing `IComponent`: `public record struct Health(int Value) : IComponent;`.
   A tag is a struct with no fields: `public struct Dead : IComponent;`. Never a class (EECS006).
-- Singletons are structs implementing `ISingletonComponent`, one per world: `world.Arena.Tick++`.
+- Singletons are structs implementing `ISingletonComponent`, one per world: set it with `world.SetArena(…)` before the
+  first update, then `world.Arena.Tick++`. `AddSingleton<T>()` throws when the world has `T` already; replace a value
+  with `SetArena(…)`.
 - Store `EntityId`, not `Entity`, in components and buffers (EECS017).
 - `var hp = entity.Health;` copies the value: write through the `ref` (`ref var hp = ref entity.Health;`,
   `entity.Health.Value -= 10`), never a copy you then drop (EECS038).
@@ -28,7 +30,8 @@ available as Markdown: add `.md` to its URL.
 - An external resource (a socket, a seat) lives in an `ICleanupComponent`: destroying the entity keeps it with the
   `Destroyed` tag until a system releases the resource and removes the component. Never set or remove `Destroyed` or
   `Disabled<T>` yourself (EECS045): `Destroy`, `Disable<T>()` and `Enable<T>()` do. A cleanup component and `ChildOf`
-  are never disabled (EECS048).
+  are never disabled (EECS048). A destroyed entity stays destroyed: `MoveEntities` skips it (and a moved entity leaves
+  its cleanup components behind), `Clone()` throws, and `SetAll` reaches it only when the filter names `Destroyed`.
 - An optional component is a `Maybe<T>` parameter, but not in the hottest loops: there, write two methods with
   `[With<T>]` and `[Without<T>]`.
 
@@ -42,6 +45,9 @@ available as Markdown: add `.md` to its URL.
   what an `in` parameter holds (EECS011). Take only what the method uses: a component it only requires is a
   `[With<T>]` filter (EECS026), and a component or singleton it reads is a parameter, not a lookup through the
   `Entity` or `World` on every row (EECS027). A method that uses nothing of its system is `static` (EECS029).
+  A `[ForEach]` method takes 1 to 9 components (or none with a `[With<T>]` / `[Changed<T>]`, EECS003), is not generic
+  (EECS004) nor a local function (EECS024), and its types are visible to the generated code (EECS022); a batch method
+  takes spans, singletons and an `EntitySpan` only (EECS009).
 - Filters on a `[ForEach]` method: `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`.
   A `[Removed<T>]` method does not take `T` (EECS016). On a system group struct, for all its systems: `[With<T>]`,
   `[Without<T>]`, `[WithAny<T>]` (on any other struct: EECS023), or `IGroupWith<T>` / `IGroupWithout<T>` implemented

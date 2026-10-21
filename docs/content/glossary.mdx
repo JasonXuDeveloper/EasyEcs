@@ -59,7 +59,8 @@ at a time. See [Architecture](/en/docs/architecture).
 ## Query [#query]
 
 The question "which entities have these components and pass this filter?". A `[ForEach]` method is a query; outside
-systems, `world.Query<T…>()`, `Count`, `Any` and struct jobs ask it. See [Queries and filters](/en/docs/guide/queries).
+systems, `world.Query<T…>()` (`world.Read<T…>()` for a loop that only reads), `Count`, `Any` and struct jobs ask
+it. See [Queries and filters](/en/docs/guide/queries).
 
 ## Filter [#filter]
 
@@ -286,7 +287,7 @@ map or match share tables, so a query of that group walks only its rows. Not to 
 
 A component implementing `ICleanupComponent`. Destroying its entity removes the other components and adds the
 `Destroyed` tag; the entity stays until a system releases the resource (a socket, a seat) and removes the component.
-See [Cleanup and disable](/en/docs/guide/cleanup-and-disable#cleanup-components).
+Until then it is not moved, cloned or brought back by `SetAll`. See [Cleanup and disable](/en/docs/guide/cleanup-and-disable#cleanup-components).
 
 ## Disabled component [#disabled-component]
 

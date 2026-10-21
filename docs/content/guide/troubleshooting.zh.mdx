@@ -16,6 +16,8 @@ faq: true
 | `Entity is not alive` | [失效或默认的句柄](#entity-not-alive) |
 | `Entity has no X component` | [缺少组件](#no-component) |
 | `Singleton X was not added to this world` | [缺少单例](#singleton-not-added) |
+| `Singleton X was added to this world already` | [对已有的单例调 `AddSingleton`](#singleton-exists) |
+| `The entity was destroyed: it is only kept (tagged Destroyed)` | [克隆已销毁的实体](#clone-destroyed) |
 | `The entity has no X (check HasValue)` | [空的 `Maybe<T>`](#maybe-empty) |
 | `X already belongs to a world` | [系统被添加了两次](#system-in-a-world) |
 | `[UpdateBefore] / [UpdateAfter] form a cycle` | [顺序成环](#ordering-cycle) |
@@ -28,7 +30,7 @@ faq: true
 | `The world keeps no destroy log` | [销毁日志没开就去读](#no-destroy-log) |
 
 不抛异常的问题：[系统从不运行](#system-does-not-run)、[系统没有并行](#not-parallel)、[生成成员缺失](#member-missing)、
-[`entity.Run` 返回 `false`](#run-false)、[通过 `ref` 写的值丢了](#ref-lost)、[加载后组件不见了](#save-dropped-data)、
+[`entity.Run` 返回 `false`](#run-false)、[通过 `ref` 写的值丢了](#ref-lost)、[加载后组件不见了](#save-dropped-data)、[`MoveEntities` 没搬走的实体](#move-skipped)、
 [另一个生成器加上的接口](#other-generators)、[actor 键的 `ToString` 栈溢出](#key-tostring-overflow)。
 
 ## 为什么结构变更报 “started while another one was running”？ [#structural-change-running]
@@ -73,6 +75,19 @@ InvalidOperationException: Entity is not alive (destroyed, or a default handle)
 **修法：**实体可能在你拿到句柄之后死掉的地方，先查 `entity.IsAlive`；组件里存 `EntityId`，用
 `world.TryGetEntity(id, out var entity)` 解析（[实体与组件](/zh/docs/guide/entities-and-components)）。
 
+## 为什么 `Clone` 说实体 “was destroyed”？ [#clone-destroyed]
+
+```text
+InvalidOperationException: The entity was destroyed: it is only kept (tagged Destroyed) until its cleanup components
+are removed, and cannot be cloned
+```
+
+带[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)的实体 `Destroy` 之后仍然活着，带上 `Destroyed` 标签，
+直到某个系统释放了这些组件持有的资源。它还活着，`IsAlive` 为 true，但不会再被带回来：`Clone()` 拒绝它，`MoveEntities` 跳过它，
+过滤条件里没写 `Destroyed` 时 `SetAll` 也不碰它。
+
+**修法：** 在销毁之前克隆；句柄可能指向这种已销毁实体的地方，先看 `entity.IsDestroyed`。
+
 ## 为什么 `Get<T>()` 说实体没有这个组件？ [#no-component]
 
 ```text
@@ -96,6 +111,18 @@ InvalidOperationException: Singleton Clock was not added to this world: set it b
 
 **修法：**在建 World 的地方、第一次 `Update()` 之前添加它（`world.SetClock(…)`、`world.AddSingleton<Clock>()`），
 默认值合适的地方用 `GetOrAddSingleton<T>()` / `GetOrAddClock()`。
+
+## 为什么 `AddSingleton` 说单例 “was added to this world already”？ [#singleton-exists]
+
+```text
+InvalidOperationException: Singleton Clock was added to this world already: replace its value with
+world.SetClock(...) or world.Clock = ..., or use GetOrAddClock() to take it as it is
+```
+
+`AddSingleton<T>()` 只添加 World 里还没有的单例。已经有时它拒绝执行，不会把所有系统都在读的值重置成 `default`
+（[单例](/zh/docs/guide/singletons#api)）。
+
+**修法：** 用 `world.SetClock(…)`（或 `world.Clock = …`）替换值；代码只需要它存在时，用 `GetOrAddClock()` 原样取用。
 
 ## 为什么 `Maybe<T>.Value` 会抛异常？ [#maybe-empty]
 
@@ -144,7 +171,7 @@ InvalidOperationException: ChildOf cannot be disabled: remove it instead
 `Disable<T>()` 让值保留、但对查询隐藏。[清理组件](/zh/docs/guide/cleanup-and-disable)和 `ChildOf` 不能这样隐藏：World 要一直看到
 它们，才能完成销毁、维持层级。**修法：**移除这个组件，或者禁用另一个系统会过滤的组件。
 
-## 为什么 `Capture`、`Restore`、`RemoveTypes`、`TrimExcess` 要等遍历结束？ [#during-a-pass]
+## 为什么 `Capture`、`Save`、`MoveEntities`、`RemoveTypes`、`TrimExcess` 要等遍历结束？ [#during-a-pass]
 
 ```text
 InvalidOperationException: Snapshots cannot be captured or restored while a query iterates
@@ -152,7 +179,9 @@ InvalidOperationException: Types cannot be removed during a pass
 InvalidOperationException: A world cannot be trimmed during a pass
 ```
 
-它们会重写或丢弃整张表，而查询的 `foreach` 或正在运行的系统正在遍历这些表。**修法：**在两次更新之间、任何查询循环之外调用它们
+它们要读、重写或丢弃整张表，而查询的 `foreach` 或正在运行的系统正在遍历这些表。存档、加载和搬迁（`Save`、`SaveWithout`、
+`SaveEntities`、`SaveEntitiesWith`、`Load`、`LoadKeeping`、`LoadEntities`、`LoadEntitiesInto`、`MoveEntities`）以及 `GroupBy`
+也会抛第一条信息；分析器在它看得到的遍历里会报出所有这些调用（[EECS041](/zh/docs/guide/analyzer#eecs041)）。**修法：**在两次更新之间、任何查询循环之外调用它们
 （[快照](/zh/docs/guide/snapshots)、[卸载](/zh/docs/guide/migration-and-unload#remove-types)、[修剪](/zh/docs/guide/diagnostics#trim)）。`Restore` 也会拒绝另一个 World
 的快照（`ArgumentException`），以及 `RemoveTypes` 丢掉其中某些表之前拍的快照。
 
@@ -278,6 +307,15 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
 存档按 Nino 类型 id（带命名空间的全名的哈希）记录每个类型，加载时跳过这个进程里没有的类型。存档之后被改名或挪了命名空间的组件，加载时
 就当作不存在：数据被丢弃，也不报错。给改了名的类型标上 `[NinoFormerName("旧命名空间.旧名字")]`，旧的行就能读回来
 （[代码改了之后](/zh/docs/guide/saves#versioning)）。
+
+## 为什么 `MoveEntities` 留下了某个实体？ [#move-skipped]
+
+`MoveEntities` 会跳过搬不了的 id，返回值只数搬走的：失效的 id、重复给出的 id，以及已经销毁、只为[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)
+留着的实体（带 `Destroyed` 标签）。被跳过的 id 在 `moved` 里对应的位置是 `default`。没放进这组的子实体不算跳过：它会随搬走的父实体一起被销毁。
+搬走的实体还会把清理组件留在原处、留在已销毁的原实体上，让这个 World 的系统只释放一次资源；新实体没有这些组件。
+
+**修法：** 拿返回值和 id 个数比较；用 `world.Descendants(root).AddTo(ids, includeRoot: true)` 收集整棵子树
+（[迁移层级](/zh/docs/guide/hierarchy#moving)）；搬完之后在目标 World 里给它加上自己的资源组件。
 
 ## 为什么生成器看不到另一个生成器加上的接口？ [#other-generators]
 

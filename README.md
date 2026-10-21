@@ -163,15 +163,15 @@ The host owns the world and ticks it:
 
 ```csharp
 using var world = new World();
-world.AddSingleton<Clock>() = new Clock(1 / 30f);
+world.SetClock(1 / 30f);                                               // singletons before the first update
 world.AddSystem<MovementSystem>();
 world.AddSystem<DeathSystem>();
 
 var hero = world.CreateEntity(new Position(0, 0), new Velocity(1, 0), new Health(100));
 world.Update();                                                        // 0 B per update once warmed up
-hero.Get<Health>().Value = 0;                                          // a write through a ref: tracked
+hero.SetHealth(0);                                                     // a tracked write: DeathSystem sees it
 world.Update();
-System.Console.WriteLine(hero.Has<Dead>());                            // True
+System.Console.WriteLine(hero.IsDead);                                 // True
 ```
 
 [A full battle server](https://ecs.xgamedev.net/docs/example) uses every feature
