@@ -272,7 +272,7 @@ World 在内存里的一份拷贝：`world.Capture()` 拍下，`world.Restore(sn
 
 ## 迁移（Migration） [#migration]
 
-把一组实体（比如一个玩家和他拥有的东西）搬到另一个 World：经由字节用 `SaveEntities` 和 `LoadEntities`（可以跨进程），
+把相关的实体（比如一个玩家和他拥有的东西）搬到另一个 World：经由字节用 `SaveEntities` 和 `LoadEntities`（可以跨进程），
 或者在同一线程的两个 World 之间直接用 `MoveEntities`。组内的链接会改成新的 id。记录只保存需要持久化的部分：`SaveEntities` 配一个 `ComponentSet` 写出，再用 `LoadEntitiesInto`
 放到已有的实体上（`markWritten: false` 让恢复的值不算变更）。见[迁移与卸载](/zh/docs/guide/migration-and-unload)。
 

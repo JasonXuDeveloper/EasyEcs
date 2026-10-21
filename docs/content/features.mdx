@@ -506,7 +506,7 @@ singletons the new process has already set, such as its configuration.
 
 ### Migration [#migration]
 
-`SaveEntities` and `LoadEntities` move a group of entities (a player and what they own) to another world through
+`SaveEntities` and `LoadEntities` move related entities (a player and what they own) to another world through
 bytes, with new ids and the links inside the group rewritten. `MoveEntities` does it between two worlds of the same
 thread without encoding. A record saves only what persists: `SaveEntitiesWith(writer, ids, set)` with a `ComponentSet`
 writes the components of the set, and `LoadEntitiesInto(bytes, entities)` puts them onto entities that exist already;

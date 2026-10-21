@@ -227,7 +227,7 @@ World 保持原样。
 | `world.SaveWithout(output, in ComponentSet exclude)` | O(实体数 × 组件数) | 不写 `exclude` 里的组件和单例（`Disabled<T>` 跟着 `T` 一起不写），这些类型不需要格式化器；缓冲够大之后不再分配 |
 | `world.Load(input, markWritten)` | O(实体数 × 组件数) | 实体保留原 id；组件布局变了会抛 `InvalidDataException`，World 保持原样；`markWritten: false`：加载的行算作从未写过 |
 | `world.LoadKeeping(input, in ComponentSet keep, markWritten)` | O(实体数 × 组件数) | `keep` 里的单例保持 World 现在的样子（跳过存档里的值）；`keep` 里有组件时抛 `ArgumentException`；`markWritten` 只作用于加载的行 |
-| `world.SaveEntities(output, ids)` | O(给定实体数 × 组件数) | 一组实体，交给另一个 World 或进程 |
+| `world.SaveEntities(output, ids)` | O(给定实体数 × 组件数) | 相关的实体（一个玩家和它拥有的东西），交给另一个 World 或进程 |
 | `world.SaveEntitiesWith(output, ids, set)` | O(给定实体数 × 组件数) | 只写 `ComponentSet` 里的组件（建一次：`ComponentSet.Create().With<T>()`，每个类型 O(1)）；集合里有单例时抛 `ArgumentException` |
 | `ComponentSet.Create().With<T>()` / `WithSingleton<T>()` / `With(type)` | 每次 O(1)；`With(type)` 一次查找（冷路径） | `With(type)` 接受组件或单例类型；`Contains<T>()` / `ContainsSingleton<T>()` 为 O(1) |
 | `world.LoadEntities(input, entities)` | O(实体数 × 组件数) | 新 id；指向组内实体的 `EntityId` 字段会改写，其他的变成 `EntityId.Null` |

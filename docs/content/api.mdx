@@ -234,7 +234,7 @@ columns); `Load` O(rows). A taken key throws `InvalidOperationException` (a save
 | `world.SaveWithout(output, in ComponentSet exclude)` | O(entities × components) | without the components and singletons of `exclude` (a `Disabled<T>` goes with its `T`), which need no formatter; allocates nothing once its buffers are large enough |
 | `world.Load(input, markWritten)` | O(entities × components) | entities keep their ids; a changed component layout throws `InvalidDataException` and leaves the world as it was; `markWritten: false`: the loaded rows count as never written |
 | `world.LoadKeeping(input, in ComponentSet keep, markWritten)` | O(entities × components) | the singletons of `keep` stay exactly as the world has them (the save's values are skipped); a component in `keep` throws `ArgumentException`; `markWritten` applies to the loaded rows |
-| `world.SaveEntities(output, ids)` | O(entities given × components) | a group of entities, for another world or process |
+| `world.SaveEntities(output, ids)` | O(entities given × components) | related entities (a player and what it owns), for another world or process |
 | `world.SaveEntitiesWith(output, ids, set)` | O(entities given × components) | only the components of a `ComponentSet` (built once: `ComponentSet.Create().With<T>()`, O(1) per type); a set naming a singleton throws `ArgumentException` |
 | `ComponentSet.Create().With<T>()` / `WithSingleton<T>()` / `With(type)` | O(1) each; `With(type)` one lookup (cold) | `With(type)` takes a component or a singleton type; `Contains<T>()` / `ContainsSingleton<T>()` O(1) |
 | `world.LoadEntities(input, entities)` | O(entities × components) | new ids; `EntityId` fields naming the group are rewritten, others become `EntityId.Null` |

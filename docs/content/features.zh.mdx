@@ -436,7 +436,7 @@ restarted.Load(bytes.WrittenSpan);
 
 ### 迁移 [#migration]
 
-`SaveEntities` 和 `LoadEntities` 经由字节把一组实体（一个玩家和他拥有的东西）搬到另一个 World，换上新 id，组内的链接随之改写。
+`SaveEntities` 和 `LoadEntities` 经由字节把相关的实体（一个玩家和他拥有的东西）搬到另一个 World，换上新 id，组内的链接随之改写。
 `MoveEntities` 在同一线程的两个 World 之间直接搬，不经过编码。记录只保存需要持久化的部分：`SaveEntitiesWith(writer, ids, set)`
 配一个 `ComponentSet`，只写出集合里的组件；`LoadEntitiesInto(bytes, entities)` 把它们放到已经存在的实体上。
 加上 `markWritten: false`，恢复的值不算变更，按变更存盘的系统就不会立刻把它写回去。

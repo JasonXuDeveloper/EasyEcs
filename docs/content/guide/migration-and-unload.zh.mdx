@@ -6,7 +6,7 @@ icon: ArrowRightLeft
 ---
 
 玩家穿过传送门进入另一个区域的 World，或者被交给另一台服务器。他的实体、物品和宠物必须一起过去，彼此之间的指向也不能断。
-`SaveEntities` / `LoadEntities` 通过字节传送这样一组实体，`MoveEntities` 直接把它拷进同一线程的另一个 World，两者都会把组内的
+`SaveEntities` / `LoadEntities` 通过字节传送这些实体，`MoveEntities` 直接把它拷进同一线程的另一个 World，两者都会把组内的
 `EntityId` 改写成新实体的 id。长期运行的服务器还要在不重启的情况下替换游戏逻辑：`RemoveTypes` 把插件的系统和组件从 World 中移除，
 它所在的可回收 `AssemblyLoadContext` 就能卸载，新版本再加载存下来的数据。
 
@@ -28,7 +28,7 @@ icon: ArrowRightLeft
 
 ## 怎么用 [#how-to-use-it]
 
-### 通过字节传送一组实体 [#save-entities]
+### 通过字节传送实体 [#save-entities]
 
 `SaveEntities(output, ids)` 写出列出的实体和它们的组件（跳过失效的 id 和重复项；不写单例）。`LoadEntities(bytes, handles)` 在另一个
 World（本进程或其他进程）里用新 id 创建它们，并按存档顺序写回句柄。`ids` 是一个 span：数组、`[a.Id, b.Id]`（在栈上构造）、直接传 id

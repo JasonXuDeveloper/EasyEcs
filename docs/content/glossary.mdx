@@ -321,7 +321,7 @@ keeps. See [Saves](/en/docs/guide/saves#restart).
 
 ## Migration [#migration]
 
-Moving a group of entities, such as a player and what it owns, to another world: `SaveEntities` and `LoadEntities`
+Moving related entities, such as a player and what it owns, to another world: `SaveEntities` and `LoadEntities`
 through bytes (another process), or `MoveEntities` directly (another world of the thread). Links inside the group
 follow the new ids. A record saves only what persists: `SaveEntities` with a `ComponentSet`, loaded onto entities
 that exist already with `LoadEntitiesInto` (`markWritten: false` keeps the restored values from counting as changed).
