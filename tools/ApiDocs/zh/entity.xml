@@ -153,10 +153,10 @@
       簿记。O(1)，零分配。
     </summary>
   </member>
-  <member name="M:EasyEcs.Entity.Run``3(``2@,EasyEcs.QueryFilter@)" source="d11bd3667042">
+  <member name="M:EasyEcs.Entity.Run``3(``2@,EasyEcs.QueryFilter@)" source="81d1bd1ea042">
     <summary>
       实体还通过 <paramref name="filter" /> 时才执行的 <see cref="M:EasyEcs.Entity.Run``3(``2@)" />，按查询检查一行的方式检查
-      （<c>Without</c>、<c>WithAny</c>、<c>Changed</c>、分组）：不通过就不运行 job，返回 false。O(过滤条件涉及的组件数)。
+      （<c>Without</c>、<c>WithAny</c>、<c>Changed</c>、<c>InGroup</c>）：不通过就不运行 job，返回 false。O(过滤条件涉及的组件数)。
     </summary>
   </member>
   <member name="M:EasyEcs.Entity.SetIfChanged``1(``0@)" source="a6b8ab233ced">

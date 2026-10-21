@@ -17,7 +17,7 @@ public sealed class RemovedAnyAttribute<T1, T2, T3, T4, T5, T6, T7, T8> : Attrib
 public sealed class RemovedAnyAttribute<T1, T2, T3, T4, T5, T6, T7, T8, T9> : Attribute where T1 : struct, IComponent, ITracked where T2 : struct, IComponent, ITracked where T3 : struct, IComponent, ITracked where T4 : struct, IComponent, ITracked where T5 : struct, IComponent, ITracked where T6 : struct, IComponent, ITracked where T7 : struct, IComponent, ITracked where T8 : struct, IComponent, ITracked where T9 : struct, IComponent, ITracked
 ```
 
-[`ForEachAttribute`](/zh/docs/reference/foreachattribute) 方法只访问在系统上次运行之后失去 `T1, T2` 中至少一个、而且没有再拿回来的实体：即 [`QueryFilter.RemovedAny`](/zh/docs/reference/queryfilter#removedany)。多个这种特性合成一组；和其他过滤条件按 AND 组合。
+[`ForEachAttribute`](/zh/docs/reference/foreachattribute) 方法只访问在系统上次运行之后失去 `T1, T2` 中至少一个、而且没有再拿回来的实体：即 [`QueryFilter.RemovedAny`](/zh/docs/reference/queryfilter#removedany)。多个这种特性合成一个集合；和其他过滤条件按 AND 组合。
 
 组件数量从 2 到 9，每个数量一个类型，都由同一个模板生成；下面的成员每个类型都有，以 `RemovedAnyAttribute<T1, T2>` 为例。
 

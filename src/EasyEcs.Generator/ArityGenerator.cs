@@ -54,8 +54,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// Only rows where at least one of <c>{{tps}}</c> was written at or after change tick
                     /// <paramref name="since"/>: <c>Changed&lt;T1&gt;(since)</c> OR ... OR <c>Changed&lt;T{{n}}&gt;(since)</c>
                     /// (a row has the component it counts for; the others need not be there). Every <c>ChangedAny</c> call
-                    /// of a filter joins one group; the group, the <c>Changed</c> and <c>Removed</c> filters, a
-                    /// <c>RemovedAny</c> group and the other filters combine with AND. A table none of whose columns was
+                    /// of a filter joins one set; the set, the <c>Changed</c> and <c>Removed</c> filters, a
+                    /// <c>RemovedAny</c> set and the other filters combine with AND. A table none of whose columns was
                     /// written since the tick is skipped whole, and words and blocks of rows no column wrote. A filter has
                     /// one tick (<see cref="Since"/> moves it): keep one per client, run it with each client's tick.
                     /// </summary>
@@ -67,7 +67,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// <summary>
                     /// Only rows that lost at least one of <c>{{tps}}</c> at or after change tick <paramref name="since"/>
                     /// and have not got it back: <c>Removed&lt;T1&gt;(since)</c> OR ... OR <c>Removed&lt;T{{n}}&gt;(since)</c>.
-                    /// Every <c>RemovedAny</c> call joins one group, combined with the other filters with AND; one tick
+                    /// Every <c>RemovedAny</c> call joins one set, combined with the other filters with AND; one tick
                     /// per filter, as <see cref="ChangedAny{{{tps}}}(ulong)"/>.
                     /// </summary>
                     /// <exception cref="ArgumentException">An earlier change filter named another tick.</exception>
@@ -82,7 +82,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 /// <summary>
                 /// The <see cref="ForEachAttribute"/> method visits only entities where at least one of <c>{{tps}}</c> was
                 /// written since its system last ran (<see cref="EcsSystem.LastRunTick"/>; on the first run, every entity
-                /// having one): <see cref="QueryFilter.ChangedAny{{{tps}}}(ulong)"/>. Several attributes join one group;
+                /// having one): <see cref="QueryFilter.ChangedAny{{{tps}}}(ulong)"/>. Several attributes join one set;
                 /// combined with <c>[Changed&lt;T&gt;]</c> and the other filters with AND.
                 /// </summary>
                 [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
@@ -92,7 +92,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 /// <summary>
                 /// The <see cref="ForEachAttribute"/> method visits only entities that lost at least one of <c>{{tps}}</c>
                 /// since its system last ran and have not got it back: <see cref="QueryFilter.RemovedAny{{{tps}}}(ulong)"/>.
-                /// Several attributes join one group; combined with the other filters with AND.
+                /// Several attributes join one set; combined with the other filters with AND.
                 /// </summary>
                 [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
                 public sealed class RemovedAnyAttribute<{{tps}}> : Attribute
@@ -616,7 +616,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                 /// <summary>
                 /// <see cref="Run{{{tps}}, TJob}(ref TJob)"/> when the entity also passes <paramref name="filter"/>, tested
-                /// as a query tests a row (<c>Without</c>, <c>WithAny</c>, <c>Changed</c>, groups): false, without running
+                /// as a query tests a row (<c>Without</c>, <c>WithAny</c>, <c>Changed</c>, <c>InGroup</c>): false, without running
                 /// the job, when it does not. O(components the filter names).
                 /// </summary>
                 [MethodImpl(MethodImplOptions.AggressiveInlining)]

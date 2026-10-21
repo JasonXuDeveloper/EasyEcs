@@ -55,20 +55,20 @@
   <member name="M:EasyEcs.QueryFilter.Without``1" source="7c4a52182b9c">
     <summary>要求 <typeparamref name="T" /> 不存在。</summary>
   </member>
-  <member name="M:EasyEcs.QueryFilter.ChangedAny``2(System.UInt64)" source="e53547a5a137">
+  <member name="M:EasyEcs.QueryFilter.ChangedAny``2(System.UInt64)" source="ec14461e39eb">
     <summary>
       只选 <c>T1, T2</c> 中至少一个在变更 tick <paramref name="since" /> 或之后写过的行：即 <c>Changed&lt;T1&gt;(since)</c> OR ... OR
-      <c>Changed&lt;T2&gt;(since)</c>（行要有它所对应的那个组件；其他组件可以没有）。一个过滤条件的所有 <c>ChangedAny</c> 调用合成一组；
-      这一组、<c>Changed</c> 和 <c>Removed</c> 过滤条件、一组 <c>RemovedAny</c> 以及其他过滤条件按 AND 组合。tick 之后没有任何一列写过的表整张跳过，
+      <c>Changed&lt;T2&gt;(since)</c>（行要有它所对应的那个组件；其他组件可以没有）。一个过滤条件的所有 <c>ChangedAny</c> 调用合成一个集合；
+      这个集合、<c>Changed</c> 和 <c>Removed</c> 过滤条件、<c>RemovedAny</c> 的集合 以及其他过滤条件按 AND 组合。tick 之后没有任何一列写过的表整张跳过，
       没有任何一列写过的行字和行块也跳过。一个过滤条件只有一个 tick（用 <see cref="M:EasyEcs.QueryFilter.Since(System.UInt64)" /> 移动）：
       每个客户端各留一个，用各自的 tick 运行。
     </summary>
     <exception cref="T:System.ArgumentException">前面的变更过滤条件用了另一个 tick。</exception>
   </member>
-  <member name="M:EasyEcs.QueryFilter.RemovedAny``2(System.UInt64)" source="7576ad211b45">
+  <member name="M:EasyEcs.QueryFilter.RemovedAny``2(System.UInt64)" source="cf60b77f1f1a">
     <summary>
       只选在变更 tick <paramref name="since" /> 或之后失去 <c>T1, T2</c> 中至少一个、而且没有再拿回来的行：即
-      <c>Removed&lt;T1&gt;(since)</c> OR ... OR <c>Removed&lt;T2&gt;(since)</c>。所有 <c>RemovedAny</c> 调用合成一组，和其他过滤条件按 AND 组合；
+      <c>Removed&lt;T1&gt;(since)</c> OR ... OR <c>Removed&lt;T2&gt;(since)</c>。所有 <c>RemovedAny</c> 调用合成一个集合，和其他过滤条件按 AND 组合；
       一个过滤条件只有一个 tick，同 <see cref="M:EasyEcs.QueryFilter.ChangedAny``2(System.UInt64)" />。
     </summary>
     <exception cref="T:System.ArgumentException">前面的变更过滤条件用了另一个 tick。</exception>
