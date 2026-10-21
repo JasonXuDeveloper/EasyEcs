@@ -2,9 +2,11 @@ using EasyEcs;
 
 namespace VoxelServer;
 
+// #region dig
 // Digs the block under a player who asked to: the chunk's buffer loses the block (a tracked write, so the chunk is
 // sent again) and an item pops out of the hole. Water beside or above the hole flows again (a block update: it gets
 // its Flowing back), so a pit dug next to a lake fills.
+[UpdateInGroup<Simulation>]
 public class DigSystem : EcsSystem
 {
     [ForEach]
@@ -27,6 +29,7 @@ public class DigSystem : EcsSystem
 
         var center = new System.Numerics.Vector3(x + 0.5f, y + 0.5f, z + 0.5f);
         World.Instantiate(prefabs.Item, new Position(center), new Item(kind, player));
+        player.SetScore(player.Score.BlocksDug + 1);
         stats.BlocksDug++;
     }
 
@@ -35,9 +38,12 @@ public class DigSystem : EcsSystem
         if (World.WaterIndex.TryGet(at, out var water) && !water.HasFlowing) water.SetFlowing(tick + Rules.FlowDelay);
     }
 }
+// #endregion dig
 
+// #region pickup
 // Puts an item into the inventory of the player who dug it once that player is close: the stack of its kind grows,
 // or a new stack starts.
+[UpdateInGroup<Simulation>]
 public class PickupSystem : EcsSystem
 {
     [ForEach]
@@ -58,8 +64,11 @@ public class PickupSystem : EcsSystem
         stats.ItemsPickedUp++;
     }
 }
+// #endregion pickup
 
+// #region expiry
 // Removes the items nobody picked up in time.
+[UpdateInGroup<Simulation>]
 public class ItemExpirySystem : EcsSystem
 {
     [ForEach, With<Item>]
@@ -71,3 +80,4 @@ public class ItemExpirySystem : EcsSystem
         stats.ItemsExpired++;
     }
 }
+// #endregion expiry

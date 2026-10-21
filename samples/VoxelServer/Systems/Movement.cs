@@ -3,8 +3,10 @@ using EasyEcs;
 
 namespace VoxelServer;
 
+// #region walk
 // Turns a player's input into a horizontal velocity; gravity keeps the vertical one. Each row depends on nothing
 // but itself, so the rows are split across threads (Parallel = true).
+[UpdateInGroup<Simulation>]
 public class PlayerMoveSystem : EcsSystem
 {
     [ForEach(Parallel = true)]
@@ -14,11 +16,15 @@ public class PlayerMoveSystem : EcsSystem
         velocity = new Velocity(new Vector3(input.Walk.X * Rules.WalkSpeed, v.Y, input.Walk.Y * Rules.WalkSpeed));
     }
 }
+// #endregion walk
 
+// #region physics
 // Moves everything with a velocity through the blocks. Walking onto a block one high steps up onto it (from the
 // ground, with room for the head); a higher wall stops the walk. Then gravity: fall onto the block below, or stop at
 // the one above the head. The position is a Mut<Position>, written only when it changes, so a player standing still
-// is not sent again.
+// is not sent again.It stays on one thread: the
+// block lookups go through World (the chunk index), and a parallel method may not hold the World (EECS010).
+[UpdateInGroup<Simulation>]
 public class PhysicsSystem : EcsSystem
 {
     [ForEach]
@@ -61,9 +67,12 @@ public class PhysicsSystem : EcsSystem
         body = new Body(onGround, blocked);
     }
 }
+// #endregion physics
 
+// #region grid
 // Keeps each player's InChunk on the chunk its feet are in. SetInChunkIfChanged writes only when the player crossed
 // into another chunk, so the index is touched a few times a second, not every tick.
+[UpdateInGroup<Simulation>]
 public class GridSystem : EcsSystem
 {
     [ForEach, With<Player>]
@@ -73,3 +82,4 @@ public class GridSystem : EcsSystem
         player.SetInChunkIfChanged(Terrain.ChunkOf((int)MathF.Floor(p.X), (int)MathF.Floor(p.Z)));
     }
 }
+// #endregion grid

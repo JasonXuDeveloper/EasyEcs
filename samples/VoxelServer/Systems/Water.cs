@@ -2,9 +2,11 @@ using EasyEcs;
 
 namespace VoxelServer;
 
+// #region flow
 // Spreads water the way Minecraft does: a cell with air below pours down at its own level; otherwise it runs into the
 // air beside it one level further from its spring, up to Rules.WaterReach. A cell spreads once, FlowDelay ticks
 // after it appeared, and then settles (its Flowing is removed), so a lake that stopped growing is not visited again.
+[UpdateInGroup<Simulation>]
 public class WaterFlowSystem : EcsSystem
 {
     [ForEach]
@@ -29,10 +31,13 @@ public class WaterFlowSystem : EcsSystem
         Terrain.PourWater(World, p with { Z = p.Z - 1 }, water.Source, level, clock.Tick, ref stats);
     }
 }
+// #endregion flow
 
+// #region float
 // Lifts a humanoid standing in water and carries it with the current: away from the spring, hardest next to it and
 // weaker the farther the water ran (a cell's Level is its distance from the spring). Runs after the walk set the
 // velocity and before physics moves the body.
+[UpdateInGroup<Simulation>]
 public class FloatSystem : EcsSystem
 {
     [ForEach, With<Humanoid>]
@@ -53,3 +58,4 @@ public class FloatSystem : EcsSystem
         stats.Drifts++;
     }
 }
+// #endregion float

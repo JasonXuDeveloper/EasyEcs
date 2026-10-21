@@ -24,6 +24,8 @@ public static class Rules
     public const int FlowDelay = 5;            // ticks before water spreads one block further
     public const float FloatSpeed = 0.1f;      // the upward speed water gives a humanoid; gravity takes 0.08 back
     public const float Current = 0.15f;        // the push of the water next to a spring, in blocks per tick
+    public const int PositionBytes = 16;       // an entity update: the entity's id and its position
+    public const int HealthBytes = 2;          // the health bar an update carries for a player or a zombie
 
     // The chunks a view reaches in each direction.
     public static int ChunksIn(float range) => (int)MathF.Ceiling(range / Terrain.Size);

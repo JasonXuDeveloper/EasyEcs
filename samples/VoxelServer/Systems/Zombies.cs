@@ -1,9 +1,13 @@
+using System.Numerics;
+using System.Runtime.InteropServices;
 using EasyEcs;
 
 namespace VoxelServer;
 
+// #region spawn
 // At night, every few seconds, a zombie rises 8 to 15 blocks from each player. What it hunts is up to its eyes
 // (ZombieSightSystem).
+[UpdateInGroup<Simulation>]
 public class NightSpawnSystem : EcsSystem
 {
     public override int UpdateInterval => Rules.SpawnEvery;
@@ -20,10 +24,13 @@ public class NightSpawnSystem : EcsSystem
         stats.ZombiesSpawned++;
     }
 }
+// #endregion spawn
 
+// #region sight
 // Twice a second, a zombie looks for the nearest player within its Vision: it walks the players of the chunks its view
 // reaches through the InChunk index, not every player of the world. None in sight: it has no target and stands. A
 // tenth of the zombies look each tick (Slices), so a horde costs the same every tick instead of a spike twice a second.
+[UpdateInGroup<Simulation>]
 public class ZombieSightSystem : EcsSystem
 {
     [ForEach(Slices = Rules.LoadEvery), With<Zombie>]
@@ -48,8 +55,11 @@ public class ZombieSightSystem : EcsSystem
         target = new Target(seen);
     }
 }
+// #endregion sight
 
+// #region chase
 // Walks a zombie toward its player and hits when close enough.
+[UpdateInGroup<Simulation>]
 public class ZombieChaseSystem : EcsSystem
 {
     [ForEach, With<Zombie>]
@@ -87,14 +97,24 @@ public class ZombieChaseSystem : EcsSystem
         }
     }
 }
+// #endregion chase
 
-// Zombies burn in daylight: one point a tick, so a zombie lasts a second after sunrise. One row at a time, on as many
-// threads as there are zombies to keep busy.
+// #region sunburn
+// Zombies burn in daylight: one point a tick, so a zombie lasts a second after sunrise. A batch method: the health of
+// a run of zombies is one span, and Vector<int> takes away a point from 8 of them per instruction (4 on Arm); the
+// JIT does not vectorize the loop by itself. Integer lanes give the same result on every machine. A batch method
+// runs on one thread (EECS010): the vector loop is the speed-up.
+[UpdateInGroup<Simulation>]
 public class SunburnSystem : EcsSystem
 {
-    [ForEach(Parallel = true), With<Zombie>]
-    static void Burn(ref Health health, in Clock clock)
+    [ForEach, With<Zombie>]
+    static void Burn(Span<Health> health, in Clock clock)
     {
-        if (!Rules.IsNight(clock)) health = new Health(health.Value - 1);
+        if (Rules.IsNight(clock)) return;
+        var values = MemoryMarshal.Cast<Health, int>(health);
+        var lanes = MemoryMarshal.Cast<int, Vector<int>>(values);
+        for (int i = 0; i < lanes.Length; i++) lanes[i] -= Vector<int>.One;
+        for (int i = lanes.Length * Vector<int>.Count; i < values.Length; i++) values[i]--;   // the zombies left over
     }
 }
+// #endregion sunburn

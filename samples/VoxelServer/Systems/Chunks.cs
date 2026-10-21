@@ -3,10 +3,12 @@ using EasyEcs;
 
 namespace VoxelServer;
 
+// #region load
 // Loads the chunks in every player's view and counts who sees each one: the area of interest. A chunk seen first in
 // this pass starts its count again; a missing chunk is generated on the spot: an entity with its Chunk key, its
 // Viewers and a buffer of 8,192 blocks, and, in one chunk in four, a spring of water that starts to flow. Twice a
 // second is enough: a player walks four blocks a second and the view reaches two chunks ahead.
+[UpdateInGroup<Simulation>]
 public class ChunkLoadSystem : EcsSystem
 {
     public override int UpdateInterval => Rules.LoadEvery;
@@ -47,11 +49,14 @@ public class ChunkLoadSystem : EcsSystem
         Terrain.PourWater(world, chunk, spring, spring, level: 0, tick, ref stats);
     }
 }
+// #endregion load
 
+// #region unload
 // Frees the chunks no player has seen for a while; their water goes with them (each cell is a child of its chunk).
 // Slices = 20 spreads the check over a second: each tick visits a twentieth of the chunks, so the server never pays
 // for all of them in one tick. Destroying an entity in the middle of the loop is fine: structural changes apply at
 // once.
+[UpdateInGroup<Simulation>]
 public class ChunkUnloadSystem : EcsSystem
 {
     [ForEach(Slices = Rules.TicksPerSecond), With<Chunk>]
@@ -62,3 +67,4 @@ public class ChunkUnloadSystem : EcsSystem
         stats.ChunksUnloaded++;
     }
 }
+// #endregion unload

@@ -13,7 +13,11 @@ public static class Server
         long start = Stopwatch.GetTimestamp();
         for (int i = 1; i <= ticks; i++)
         {
-            world.Update();
+            // #region tick
+            world.Update<ClientInput>();
+            world.Update<Simulation>();
+            world.Update<Replication>();
+            // #endregion tick
             if (i % (10 * Rules.TicksPerSecond) == 0) Report(world);
             // A vanilla server sleeps until the next 50 ms boundary; without --realtime the run goes flat out.
             if (realtime)
@@ -42,7 +46,7 @@ public static class Server
         Console.WriteLine($"blocks dug: {s.BlocksDug}; items: {s.ItemsPickedUp} picked up, {s.ItemsExpired} expired");
         Console.WriteLine($"zombies: {s.ZombiesSpawned} spawned, {s.ZombiesBurned} burned, {s.Hits} hits; player deaths: {s.PlayerDeaths}");
         Console.WriteLine($"water: {s.WaterCells} cells poured, {s.Drifts} ticks of humanoids carried");
-        Console.WriteLine($"sent: {s.PositionUpdates} position updates, {s.Despawns} despawns");
+        Console.WriteLine($"sent: {s.EntityUpdates} entity updates ({s.BytesSent / 1024} KiB), {s.Despawns} despawns");
     }
 
     // WorldOptions.MeasureSystems keeps the time and the allocations of every system.

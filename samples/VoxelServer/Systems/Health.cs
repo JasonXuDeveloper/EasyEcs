@@ -3,6 +3,7 @@ using EasyEcs;
 namespace VoxelServer;
 
 // A zombie with no health left is gone.
+[UpdateInGroup<Simulation>]
 public class ZombieDeathSystem : EcsSystem
 {
     [ForEach, With<Zombie>]
@@ -15,6 +16,7 @@ public class ZombieDeathSystem : EcsSystem
 }
 
 // A player with no health left drops everything and starts again at the spawn point.
+[UpdateInGroup<Simulation>]
 public class PlayerRespawnSystem : EcsSystem
 {
     [ForEach]

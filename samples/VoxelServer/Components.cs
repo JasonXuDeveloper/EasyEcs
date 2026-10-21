@@ -63,6 +63,13 @@ public record struct Vision(float Range) : IComponent;
 
 public record struct Player(int Client) : IComponent;
 
+// The blocks a player dug: the scoreboard. An ordered index (world.ScoreIndex.Descending()) walks the players from
+// the best digger down, kept sorted as the scores change, so the top of the board is never a sort.
+public record struct Score(int BlocksDug) : IComponent, IIndexed<int>
+{
+    int IIndexed<int>.Key => BlocksDug;
+}
+
 // The chunk a player is in: an index (world.InChunkIndex.Find(chunk)) of the players by chunk, the grid a zombie looks
 // through for the nearest player. GridSystem keeps it current.
 public record struct InChunk(ChunkPos Pos) : IComponent, IIndexed<ChunkPos>
@@ -115,5 +122,6 @@ public record struct Stats(
     long WaterCells,
     long Drifts,
     long ChunkUpdates,
-    long PositionUpdates,
+    long EntityUpdates,
+    long BytesSent,
     long Despawns) : ISingletonComponent;
