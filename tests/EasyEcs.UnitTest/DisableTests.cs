@@ -94,8 +94,10 @@ public class DisableTests
         var parent = world.CreateEntity(new Health(1));
         var entity = world.CreateEntity(new Lease(1), new ChildOf(parent));
 
+#pragma warning disable EECS048 // the refused calls themselves
         Assert.Throws<System.InvalidOperationException>(() => entity.Disable<Lease>());  // it must stay to be released
         Assert.Throws<System.InvalidOperationException>(() => entity.Disable<ChildOf>()); // the cascade must find it
+#pragma warning restore EECS048
         Assert.That(entity.Has<Lease>() && entity.Has<ChildOf>(), Is.True);
     }
 

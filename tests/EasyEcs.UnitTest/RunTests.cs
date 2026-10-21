@@ -118,6 +118,7 @@ public class RunTests
         var job = new RunFromChunks();
         for (int i = 0; i < 20; i++) world.ForEachEntityParallel<Health, RunFromChunks>(ref job);
         var bare = world.CreateEntity(new Health(1));
+        Assert.That(bare.Has<Frozen>(), Is.False);
         bare.Set(new Frozen());                                   // the gate is free again after the passes
         Assert.That(bare.Has<Frozen>(), Is.True);
     }

@@ -613,7 +613,9 @@ public class ChangedTests
         {
             if (++visited == 10)
             {
+#pragma warning disable EECS051 // a tick inside the loop is what this checks
                 world.Update(); // a new tick in the middle of a word
+#pragma warning restore EECS051
                 tick = world.ChangeTick;
             }
 

@@ -15,7 +15,7 @@ internal static class Uses
     /// <summary>
     /// Whether <paramref name="use"/> (a reference to the variable, or a call returning its ref) may write it or data
     /// it holds by reference: an assignment, <c>++</c> / <c>--</c>, a <c>ref</c> / <c>out</c> argument (a <c>this ref</c>
-    /// extension too), a <c>ref</c> local or return, a call of a member that is not <c>readonly</c>, or a mutable
+    /// extension too), a <c>ref</c> local (not <c>ref readonly</c>) or return, a call of a member that is not <c>readonly</c>, or a mutable
     /// reference (a class, a span, a struct holding one) that escapes, reached through any chain of members.
     /// </summary>
     public static bool MayWrite(IOperation use)
@@ -62,7 +62,9 @@ internal static class Uses
                 case IAssignmentOperation assignment when assignment.Target == current:
                     return true;
                 case ISimpleAssignmentOperation assignment:
-                    return assignment.IsRef || Mutable(current.Type, 0);
+                    // 'x = ref value' binds a ref local: a write only when the local can write ('ref', not 'ref readonly').
+                    return assignment.IsRef && assignment.Target is not ILocalReferenceOperation { Local.RefKind: RefKind.RefReadOnly }
+                           || Mutable(current.Type, 0);
                 case IAssignmentOperation:                                          // the value of a compound assignment
                     return Mutable(current.Type, 0);
                 case IIncrementOrDecrementOperation or IAddressOfOperation:
@@ -72,7 +74,8 @@ internal static class Uses
                     current = tuple;
                     continue;
                 case IVariableInitializerOperation { Parent: IVariableDeclaratorOperation declarator }:
-                    return declarator.Symbol.IsRef || Mutable(current.Type, 0);
+                    // A 'ref' local can write it; a 'ref readonly' one reads, like 'in' (what it holds by reference aside).
+                    return declarator.Symbol.RefKind == RefKind.Ref || Mutable(current.Type, 0);
                 case IReturnOperation:
                     return ReturnsByRef(current) || Mutable(current.Type, 0);
                 case IExpressionStatementOperation or IUnaryOperation or IBinaryOperation or ITupleBinaryOperation
@@ -131,7 +134,7 @@ internal static class Uses
     /// <summary>A <c>foreach</c> over data the variable holds: a write if it takes elements by ref or may change them.</summary>
     private static bool Enumerates(IForEachLoopOperation loop, ITypeSymbol? collection)
     {
-        if (loop.LoopControlVariable is IVariableDeclaratorOperation { Symbol.IsRef: true }) return true;
+        if (loop.LoopControlVariable is IVariableDeclaratorOperation { Symbol.RefKind: RefKind.Ref }) return true;
         if (collection is { IsValueType: true } && !IsSpan(collection) && !IsReadOnlyView(collection)
             && !collection.GetMembers("GetEnumerator").OfType<IMethodSymbol>().Any(m => m.Parameters.Length == 0 && ReadOnlyMember(m, collection)))
             return true;

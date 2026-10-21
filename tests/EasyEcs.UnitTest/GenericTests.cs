@@ -74,10 +74,8 @@ public class GenericTests
     {
         using var world = new World();
         world.AddSystem<TickMaps>();
-        var map = world.CreateEntity(new Health(0), new MapActor(7));
-        map.Set(new In<MapActor>());
-        var shop = world.CreateEntity(new Health(0), new ShopActor(7));
-        shop.Set(new In<ShopActor>());
+        var map = world.CreateEntity(new Health(0), new MapActor(7), new In<MapActor>());
+        var shop = world.CreateEntity(new Health(0), new ShopActor(7), new In<ShopActor>());
         var stray = world.CreateEntity(new Health(0), new MapActor(8));   // a key without the actor tag
         world.Update<MapActor>();
         world.Update<ShopActor>();

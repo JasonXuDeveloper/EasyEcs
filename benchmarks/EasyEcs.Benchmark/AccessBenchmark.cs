@@ -5,8 +5,9 @@ namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// What a [ForEach] method's declarations cost, one world update over 100,000 entities per case: the pairs the
-/// analyzer's performance rules choose between (EECS025-EECS029). Each pair does the same work; the first of a category
-/// is the declaration the analyzer reports, the baseline the one it suggests. 0 bytes.
+/// analyzer's performance rules choose between (EECS025-EECS029; EECS052: 1,000 entities created and destroyed). Each
+/// pair does the same work; the first of a category is the declaration the analyzer reports, the baseline the one it
+/// suggests. 0 bytes.
 /// </summary>
 [MemoryDiagnoser]
 [GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory)]
@@ -32,7 +33,9 @@ public class AccessBenchmark
         _entityRead, _parameter, _entityHas, _maybe, _worldSingleton, _singleton, _instance, _static, _mixed;
 
     private Entity[] _handles, _wide;
-    private World _wideWorld;
+    private World _wideWorld, _spawn;
+    private const int Spawns = 1_000;
+    private readonly EntityId[] _spawned = new EntityId[Spawns];
     private static readonly QueryFilter Bosses = QueryFilter.Create().With<Boss>();
 
 #pragma warning disable EECS025, EECS026, EECS027, EECS029 // the reported side of each pair
@@ -158,6 +161,9 @@ public class AccessBenchmark
         int n = 0;
         foreach (var item in _wideWorld.Query<Speed>())
             if (n < _wide.Length) _wide[n++] = item.Entity;
+        _spawn = new World();
+        CreateThenSet();
+        CreateWithComponent();
         SetOneByOne();
         SetTogether();
         WideOneByOne();
@@ -181,7 +187,7 @@ public class AccessBenchmark
     public void Cleanup()
     {
         foreach (var world in new[] { _trackedRef, _trackedIn, _untrackedRef, _untrackedIn, _unused, _with, _tag, _withTag,
-                     _entityRead, _parameter, _entityHas, _maybe, _worldSingleton, _singleton, _instance, _static, _mixed, _wideWorld })
+                     _entityRead, _parameter, _entityHas, _maybe, _worldSingleton, _singleton, _instance, _static, _mixed, _wideWorld, _spawn })
             world.Dispose();
     }
 
@@ -261,6 +267,28 @@ public class AccessBenchmark
         long sum = 0;
         foreach (var item in _mixed.Query<Speed>(Bosses)) sum += item.Component1.V;
         return sum;
+    }
+
+    [Benchmark, BenchmarkCategory("CreateThenSet")]
+    public int CreateThenSet()
+    {
+        for (int i = 0; i < Spawns; i++)
+        {
+#pragma warning disable EECS052 // the reported side
+            var e = _spawn.CreateEntity(new Speed { V = i });
+#pragma warning restore EECS052
+            e.Set(new Armor { V = 1 });
+            _spawned[i] = e;
+        }
+
+        return _spawn.DestroyEntities(_spawned);
+    }
+
+    [Benchmark(Baseline = true), BenchmarkCategory("CreateThenSet")]
+    public int CreateWithComponent()
+    {
+        for (int i = 0; i < Spawns; i++) _spawned[i] = _spawn.CreateEntity(new Speed { V = i }, new Armor { V = 1 });
+        return _spawn.DestroyEntities(_spawned);
     }
 
     [Benchmark, BenchmarkCategory("SeveralComponentsWide")]

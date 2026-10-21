@@ -223,6 +223,15 @@ public class CodeFixTests
     [TestCase("EECS043", "Implement it explicitly",
         "public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop> { public Shop Key => this; }",
         "{ Shop IIndexed<Shop>.Key => this; }")]
+    [TestCase("EECS052", "Create it with the component",
+        "public static class U { public static void F(World w) { var e = w.CreateEntity(new P()); e.Set(new Q { V = 1 }); } }",
+        "{ var e = w.CreateEntity(new P(), new Q { V = 1 }); }")]
+    [TestCase("EECS052", "Create it with the component",
+        "public static class U { public static Entity F(World w)\n    {\n        var e = w.CreateEntity<P>(new P());\n        e.SetBoss();\n        return e;\n    }\n}",
+        "        var e = w.CreateEntity(new P(), new Boss());\n        return e;\n")]
+    [TestCase("EECS052", "Create it with the component",
+        "public static class U { public static Entity F(World w, Prefab p) { Entity e = w.Instantiate(p); e.Set(new Q()); return e; } }",
+        "{ Entity e = w.Instantiate(p, new Q()); return e; }")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
         var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);
@@ -268,6 +277,7 @@ public class CodeFixTests
     [TestCase("EECS038", "public struct Owned : IComponent, IIndexed<int> { public int K; public readonly int Key => K; } public static class U { public static void F(Entity e) { var o = e.Read<Owned>(); o.K = 1; } }")]
     [TestCase("EECS039", "public static class R { [ForEach] public static void B(Mut<P> p, in Q q) { if (q.V > 0) p.Write().V = q.V; }\n"
                          + "  public static void Call() { P p = default; B(new Mut<P>(ref p, default), default); } }")]                 // a caller passes a Mut
+    [TestCase("EECS046", "public static class U { public static int F(World w) { int n = 0; foreach (QueryItem<T> item in w.Query<T>()) n += item.Component1.V; return n; } }")] // typed by hand
     public async Task OffersNoFixThatBreaksTheCode(string id, string source, string only = null)
     {
         var document = Document(Data + source);

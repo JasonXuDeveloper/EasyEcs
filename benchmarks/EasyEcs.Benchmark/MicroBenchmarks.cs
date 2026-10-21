@@ -93,7 +93,9 @@ public class MicroBenchmarks
         var entities = new Entity[N];
         for (int i = 0; i < N; i++)
         {
+#pragma warning disable EECS052 // the add after the creation is what this measures
             var e = world.CreateEntity();
+#pragma warning restore EECS052
             e.Set(new Position());
             e.Set(new Velocity());
             entities[i] = e;
