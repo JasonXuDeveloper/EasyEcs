@@ -13,7 +13,7 @@ is the code you might write, why it is wrong, and what to write instead.
 
 ### Changing a copy of a component [#copy]
 
-```csharp
+```csharp doccheck=expect-EECS038
 var hp = hero.Health;             // a copy of the row
 hp.Value -= 10;                   // the table still holds the old value
 ```
@@ -27,7 +27,8 @@ health.Value -= 10;
 hero.Health.Value -= 10;          // the same, inline
 ```
 
-No rule catches it. More in [copies and refs](/en/docs/guide/refs-and-await#copies-and-refs).
+Caught by [EECS038](/en/docs/guide/analyzer#eecs038) (warning, with a code fix) when nothing reads the copy afterwards.
+More in [copies and refs](/en/docs/guide/refs-and-await#copies-and-refs).
 
 ### Storing an `Entity` in a component [#entity-in-component]
 
@@ -126,7 +127,7 @@ No rule catches it. More in [disable a component](/en/docs/guide/cleanup-and-dis
 
 ### A public `Key => this` on a record struct key [#public-key]
 
-```csharp
+```csharp doccheck=expect-EECS043
 public readonly record struct Market(long Id) : IActor<Market>
 {
     public Market Key => this;          // a public property: part of the record's ToString()
@@ -144,7 +145,7 @@ public readonly record struct Market(long Id) : IActor<Market>
 }
 ```
 
-No rule catches it. The [Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) shows
+Caught by [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix). The [Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) shows
 the whole pattern.
 
 ## Systems [#systems]
@@ -388,7 +389,7 @@ No rule catches it. More in [the destroy log](/en/docs/guide/change-tracking#des
 public struct Npc : IComponent;
 ```
 
-```csharp
+```csharp doccheck=expect-EECS044
 var quarter = QueryFilter.Create().With<Npc>().Slice(0, 4);
 int thinking = world.Count<Position>(quarter);   // ArgumentException: Count needs every matching row
 ```
@@ -402,8 +403,8 @@ what a sliced system visited from its stats:
 int npcs = world.Count<Position>(QueryFilter.Create().With<Npc>());   // all of them; a slice holds about npcs / 4
 ```
 
-With `MeasureSystems`, `system.Stats.LastEntities` of a `[ForEach(Slices = N)]` method is its share. Caught at run
-time. More in [slices](/en/docs/guide/systems#slices).
+With `MeasureSystems`, `system.Stats.LastEntities` of a `[ForEach(Slices = N)]` method is its share. Caught by
+[EECS044](/en/docs/guide/analyzer#eecs044) when the filter is built in the same method or type, at run time otherwise. More in [slices](/en/docs/guide/systems#slices).
 
 ### Slicing a `[Changed<T>]` method [#slice-changed]
 
@@ -732,7 +733,8 @@ if (world.UpdateCount % 12_000 == 0 && world.EntityCount < 10_000)   // every te
     world.TrimExcess();
 ```
 
-No rule catches it. More in [give memory back after a peak](/en/docs/guide/diagnostics#trim).
+Caught by [EECS028](/en/docs/guide/analyzer#eecs028) (warning) in an `OnUpdate` or a `[ForEach]` method; no rule
+catches it in the host's loop. More in [give memory back after a peak](/en/docs/guide/diagnostics#trim).
 
 ## Threads [#threads]
 
@@ -821,7 +823,7 @@ Caught by [EECS010](/en/docs/guide/analyzer#eecs010). More in
 
 <Cards>
   <Card title="Analyzer rules" href="/en/docs/guide/analyzer">
-    Every rule, EECS002 to EECS036.
+    Every rule, EECS002 to EECS045.
   </Card>
   <Card title="ECS principles" href="/en/docs/ecs-principles">
     The rules these mistakes break.

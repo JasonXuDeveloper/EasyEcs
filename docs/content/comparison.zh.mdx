@@ -65,7 +65,7 @@ EasyEcs 领先，但不到上面的幅度；完整服务器 tick 就在这里。
 | 系统、顺序、分组 | ✅ `EcsSystem`、`[UpdateBefore<T>]` / `[UpdateAfter<T>]`、`ISystemGroup`、`UpdateInterval` | ✅ `SystemRoot`、`SystemGroup`、`QuerySystem` | ❌ 核心里没有（Arch.Extended） | ✅ `ISystem<T>`、`SequentialSystem`、`AEntitySetSystem` |
 | 源生成的系统 | ✅ `[ForEach]` → 内联的 struct job | ❌ | ❌ 核心里没有 | ❌ |
 | 每个组件生成具名 API | ✅ `e.Position`、`HasX`、`SetX(...)`、`IsDead`、`world.Battle` | ❌ | ❌ | ❌ |
-| 编译期分析器 | ✅ EECS002-EECS036，附代码修复 | ❌ | ❌ | ❌ |
+| 编译期分析器 | ✅ EECS002-EECS045，附代码修复 | ❌ | ❌ | ❌ |
 | chunk / span 遍历 | ✅ 批量 `[ForEach]` 方法、`ForEachBatch` | ✅ `Chunks` | ✅ chunk | ✅ 每个系统一个 `ReadOnlySpan<Entity>` |
 | struct 查询 job | ✅ `IForEach`、`IForEachEntity`、`IForEachBatch` | ✅ | ✅ `IForEach`、`InlineQuery` | – |
 | 批量变更 | ✅ `SetAll`、`RemoveAll`、`DisableAll`、`EnableAll` | ✅ `EntityBatch`、`ApplyBatch` | ✅ 按查询加 / 删 | ❌ |

@@ -9,21 +9,25 @@ available as Markdown: add `.md` to its URL.
 - Components are structs implementing `IComponent`: `public record struct Health(int Value) : IComponent;`.
   A tag is a struct with no fields: `public struct Dead : IComponent;`. Never a class (EECS006).
 - Singletons are structs implementing `ISingletonComponent`, one per world: `world.Arena.Tick++`.
-- Store `EntityId`, not `Entity`, in components (EECS017).
+- Store `EntityId`, not `Entity`, in components and buffers (EECS017).
+- `var hp = entity.Health;` copies the value: write through the `ref` (`ref var hp = ref entity.Health;`,
+  `entity.Health.Value -= 10`), never a copy you then drop (EECS038).
 - Use the generated members: `entity.Health` (a `ref`; `ref readonly` for an `ITrackChanges` or indexed component,
   written with `SetHealth(…)` or, for a tracked one, `WriteHealth()`), `HasHealth`, `SetHealth(100)`, `RemoveHealth()`,
   `IsDead` / `SetDead()` / `RemoveDead()` for tags, `world.Arena` for singletons, `item.Position` on query items.
   `entity.Read<T>()` reads without counting as a write. Prefer them to the generic calls (EECS033).
 - Components marked `ITrackChanges` record writes; indexed components (`IIndexed<TKey>`) are written with `Set` or
-  `SetX(…)`, never through a `ref` (EECS015).
+  `SetX(…)`, never through a `ref` (EECS015), and never while a `foreach` walks their index (`Find`, `Children`,
+  `Range`): collect the entities first (EECS042).
 - A key that must name one entity (an account id, a session token, a cell's occupant) is `IUniqueIndexed<TKey>`: look
   it up with `world.XIndex.Get(key)` / `TryGet(key, out e)`, never with a hand-kept dictionary. A write that would give
   a second entity a taken key throws `InvalidOperationException`; to move a key, change the old holder first. Not for
-  `EntityId` keys (EECS036).
+  `EntityId` keys (EECS036). A component has one index key: never two `IIndexed<TKey>` (EECS036).
 - A list per entity is a `DynamicBuffer<T>` component; never copy it by value (EECS012). Call
   `EnsureCapacity(n)` on it (and `world.EnsureCapacity<T…>(n)` on the world) before a wave of known size.
 - An external resource (a socket, a seat) lives in an `ICleanupComponent`: destroying the entity keeps it with the
-  `Destroyed` tag until a system releases the resource and removes the component.
+  `Destroyed` tag until a system releases the resource and removes the component. Never set or remove `Destroyed` or
+  `Disabled<T>` yourself (EECS045): `Destroy`, `Disable<T>()` and `Enable<T>()` do.
 - An optional component is a `Maybe<T>` parameter, but not in the hottest loops: there, write two methods with
   `[With<T>]` and `[Without<T>]`.
 
@@ -47,7 +51,9 @@ available as Markdown: add `.md` to its URL.
   which mean all of them).
 - A system that recomputes a tracked component every tick takes it as `Mut<T>` and writes with
   `target.SetIfChanged(value)` (or `Write()` when it knows it writes): a `ref` parameter stamps every visited row.
-  Outside a pass, `entity.SetHealthIfChanged(…)`. Keep a plain `ref` where most rows really change.
+  Outside a pass, `entity.SetHealthIfChanged(…)`. Keep a plain `ref` where most rows really change. A `Mut<T>` that
+  is never written is `in T` (EECS025); one of an untracked component is `ref T` (EECS039). `SetIfChanged` needs a
+  record struct, an `IEquatable<T>` or an unmanaged `T` (EECS040).
 - Per-client replication: keep one `static readonly QueryFilter` (`QueryFilter.Create().ChangedAny<A, B>(0)`) and run
   it with each client's acknowledged tick, `filter.Since(client.Ack)`; never one filter per client per tick.
 - Despawns for replication: set `WorldOptions.DestroyLog` to at least the destroys of the longest gap between two
@@ -55,8 +61,8 @@ available as Markdown: add `.md` to its URL.
   whole state. `[Removed<T>]` does not see destroyed entities. A resource to release exactly once is a cleanup
   component, not the log.
 - Spread heavy per-row work that may lag over runs with `[ForEach(Slices = N)]`; never on `[Changed<T>]` /
-  `[Removed<T>]` methods (EECS035). `system.RunCount % N` is the current slice; `Query`, `Count` and bulk calls refuse
-  a sliced filter.
+  `[Removed<T>]` methods (EECS035). `system.RunCount % N` is the current slice; `Query`, `Count`, `Any`,
+  `DestroyEntities`, `entity.Run` and bulk calls refuse a sliced filter (EECS044).
 - To change structure (add, remove, create, destroy) in a `[ForEach]` method, take `Entity` or `World`
   (EECS013). Changes apply at once; the pass stays safe.
 - Order systems with `[UpdateBefore<T>]` / `[UpdateAfter<T>]` inside the same group; no cycles (EECS019, EECS020).
@@ -69,7 +75,8 @@ available as Markdown: add `.md` to its URL.
   `IForEachEntity` job and a `static readonly` `QueryFilter`; it returns `false` when the entity is gone, lacks a
   component or fails the filter. It is structural: never inside a parallel `[ForEach]` (EECS010), never in a
   `[ForEach]` method without `Entity` or `World` (EECS013), never off the owner thread (EECS014). A job that makes no
-  structural change implements `INoStructuralChanges`; `static int Writes` names the components it writes.
+  structural change implements `INoStructuralChanges`; `static int Writes` names the components it writes, no more
+  and no fewer (EECS037).
 - No events or callbacks: a state change is data (a tag, a component, a message entity, a tracked write). There is no
   command buffer and no `Added<T>`: add a tag such as `Spawned` and remove it in the system that reacts.
 
@@ -79,11 +86,15 @@ available as Markdown: add `.md` to its URL.
   it (EECS014). Use one world per thread for more cores, or `ParallelSystems` / parallel `[ForEach]`.
 - Never keep a `ref` to a component across an `await` or a structural change of another entity; read it again.
 - `Query` results are ref structs: no `await` inside the loop, no storing items, no LINQ over them.
+- During a pass (a `foreach` over `Query`, a `[ForEach]` method, a job's `Execute`) never call `TrimExcess`,
+  `Capture`, `Restore`, `Save`, `Load`, `SaveEntities`, `LoadEntities`, `LoadEntitiesInto`, `MoveEntities`, `GroupBy`
+  or `RemoveTypes` on its world: they throw (EECS041). Record the request as data and call them after the pass.
 
 ## Performance
 
-- An `EECS` warning (EECS025 to EECS032, and EECS017, EECS018, EECS020) means the code costs: apply its fix. The one
-  suggestion, EECS033, is the same cost written shorter. An `EECS` error means the code cannot work.
+- An `EECS` warning means the code costs (EECS025 to EECS032, and EECS017, EECS018, EECS020) or loses a write
+  (EECS037, EECS038): apply its fix. The suggestions, EECS033 and EECS039, are the same cost written shorter. An
+  `EECS` error means the code cannot work.
 - Hot paths allocate nothing: no LINQ, closures, boxing, string formatting or `params object[]` in systems (EECS028).
 - Keep a `QueryFilter` in a `static readonly` field when a query runs every tick.
 - Prefer `[ForEach]` methods over hand-written `Query` loops; use bulk calls (`SetAll`, `RemoveAll`, `DisableAll`,
@@ -96,7 +107,7 @@ available as Markdown: add `.md` to its URL.
   indexes for lookups by key. Give an instance its own values in the same call, `world.Instantiate(prefab, new
   ChildOf(parent), new Position(x, y))`, not `Instantiate` then `Set` (two row copies).
 - Call `world.TrimExcess()` only at a quiet moment after a peak (a wave cleared, a match ended), never every tick:
-  what it drops is allocated again by the next structural changes.
+  what it drops is allocated again by the next structural changes (EECS028 in `OnUpdate` and `[ForEach]` methods).
 
 ## What EasyEcs does not do
 
@@ -107,7 +118,7 @@ available as Markdown: add `.md` to its URL.
   (`IIndexed<TSelf>`), its system group and the group's filter (`IGroupWith<In<TSelf>>`), declared once through a
   generic interface (`interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, IGroupWith<In<TSelf>>`).
   Implement `Key` explicitly on a record struct (`Shop IIndexed<Shop>.Key => this;`): a public `Key => this` makes
-  the record's `ToString()` recurse until the stack overflows.
+  the record's `ToString()` recurse until the stack overflows (EECS043).
   https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors
 - It has no shared components: put shared data in a singleton and store an id.
 

@@ -1,18 +1,20 @@
 ---
 title: Analyzer rules
-seoTitle: "EasyEcs analyzer rules EECS002-EECS036 for C# ECS code"
-description: Every EasyEcs analyzer rule, EECS002 to EECS036, with its severity, its code fix, the code it rejects and the code to write instead.
+seoTitle: "EasyEcs analyzer rules EECS002-EECS045 for C# ECS code"
+description: Every EasyEcs analyzer rule, EECS002 to EECS045, with its severity, its code fix, the code it rejects and the code to write instead.
 icon: ShieldCheck
 ---
 
 The EasyEcs analyzer ships in the package next to the source generator, so code that breaks the
 [ECS principles](/en/docs/ecs-principles) does not build. The correctness rules (EECS002 to EECS024, EECS035 and
 EECS036) are errors except three warnings for code that works but costs (EECS017, EECS018, EECS020). The generator skips invalid input and the
-analyzer reports it, so "not generated" always means "reported". The performance rules (EECS025 to EECS034) find code
+analyzer reports it, so "not generated" always means "reported". The performance rules (EECS025 to EECS034, EECS039) find code
 that works and does more than it needs, and the severity says what kind
 ([D29](/en/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)): a warning
-means the code costs (EECS025 to EECS032), a suggestion (Info) means the same cost written shorter (EECS033), and an
-error means code that cannot work (EECS034, a world update inside a system). Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
+means the code costs (EECS025 to EECS032), a suggestion (Info) means the same cost written shorter (EECS033, EECS039), and an
+error means code that cannot work (EECS034, a world update inside a system). The usage rules (EECS037, EECS038 and
+EECS040 to EECS045) find calls and declarations that compile but do not do what they say: an error where the runtime
+throws or the code cannot work, a warning where a write is lost. Where a rule has one mechanical answer, the IDE offers it as a code fix (EasyEcs.CodeFixes, in the
 same package), and only when the result compiles.
 
 ## When to read it [#when-to-use-it]
@@ -25,7 +27,9 @@ same package), and only when the result compiles.
 <Callout type="warn" title="Do not">
   Suppress an `EECS` error with `#pragma`: the generator skipped the method or type the rule names, so the code it
   needs does not exist. The warnings can be suppressed, at the cost they describe; a suggestion (Info) shows in the
-  IDE only, and `dotnet_diagnostic.EECS033.severity = warning` in `.editorconfig` raises one for a whole project.
+  IDE only, and `dotnet_diagnostic.EECS033.severity = warning` in `.editorconfig` raises one for a whole project. A
+  usage error (EECS040 to EECS045) names a call the runtime refuses: a `#pragma` only belongs around a test of that
+  refusal.
 </Callout>
 
 ## All rules [#rules]
@@ -37,7 +41,7 @@ same package), and only when the result compiles.
 | [EECS004](#eecs004) | Error | A system's `[ForEach]` method is not generic | |
 | [EECS005](#eecs005) | Error | An instance `[ForEach]` method belongs to a system | Make it static |
 | [EECS006](#eecs006) | Error | Components and singletons are structs | Make it a struct |
-| [EECS007](#eecs007) | Error | Systems are stateless | |
+| [EECS007](#eecs007) | Error | Systems are stateless | `readonly` for a field set only at construction |
 | [EECS008](#eecs008) | Error | Systems do not reference systems | |
 | [EECS009](#eecs009) | Error | A batch `[ForEach]` method takes only spans, singletons and an `EntitySpan` | |
 | [EECS010](#eecs010) | Error | A `[ForEach(Parallel = true)]` method can run on several threads | Run it on one thread |
@@ -45,17 +49,17 @@ same package), and only when the result compiles.
 | [EECS012](#eecs012) | Error | A `DynamicBuffer<T>` is never copied | `in`, or `ref` with the callers |
 | [EECS013](#eecs013) | Error | A `[ForEach]` method that takes no `Entity` or `World` changes no structure | |
 | [EECS014](#eecs014) | Error | Structural changes stay on the world's owner thread | |
-| [EECS015](#eecs015) | Error | An indexed component is written with `Set` | |
+| [EECS015](#eecs015) | Error | An indexed component is written with `Set` | `Read<T>()`, `ref readonly`, `in`, `ReadOnlySpan<T>` |
 | [EECS016](#eecs016) | Error | A `[Removed<T>]` method does not require `T` | |
-| [EECS017](#eecs017) | Warning | Components store an `EntityId`, not an `Entity` | |
-| [EECS018](#eecs018) | Warning | `UpdateInterval` and `UpdatePhase` are constants | |
+| [EECS017](#eecs017) | Warning | Components store an `EntityId`, not an `Entity` | `EntityId` for a field |
+| [EECS018](#eecs018) | Warning | `UpdateInterval` and `UpdatePhase` are constants | `=> constant` for `{ get; } = constant` |
 | [EECS019](#eecs019) | Error | Systems are not ordered in a cycle | |
 | [EECS020](#eecs020) | Warning | Systems are ordered within their group | |
 | [EECS021](#eecs021) | Error | A `[ForEach]` entry point does not collide with a method | |
 | [EECS022](#eecs022) | Error | The generated code can name a `[ForEach]` method's types | Make it internal |
 | [EECS023](#eecs023) | Error | Filters go on `[ForEach]` methods and system groups | Remove the filter |
 | [EECS024](#eecs024) | Error | `[ForEach]` is not on a local function | |
-| [EECS025](#eecs025) | Warning | A write access only reads | `in`, `ReadOnlySpan<T>`, `Read<T>()` |
+| [EECS025](#eecs025) | Warning | A write access only reads | `in`, `ReadOnlySpan<T>`, `Read<T>()`, `in T` for a `Mut<T>` |
 | [EECS026](#eecs026) | Warning | A `[ForEach]` method uses its parameters | `[With<T>]`, or remove the parameter |
 | [EECS027](#eecs027) | Warning | A `[ForEach]` method takes what it looks up on every row | |
 | [EECS028](#eecs028) | Warning | Code that runs every update does not allocate | |
@@ -66,7 +70,16 @@ same package), and only when the result compiles.
 | [EECS033](#eecs033) | Info | A generated member says it shorter | The generated member |
 | [EECS034](#eecs034) | Error | A system does not run a world update | |
 | [EECS035](#eecs035) | Error | `[ForEach(Slices = N)]` is 1 or more, and not on a change filter | |
-| [EECS036](#eecs036) | Error | A unique component is indexed by its one key | |
+| [EECS036](#eecs036) | Error | A component is indexed by its one key | |
+| [EECS037](#eecs037) | Warning | A job's `Writes` names what `Execute` writes | The `Writes` it needs |
+| [EECS038](#eecs038) | Warning | A changed copy of a component is not dropped | `ref var` |
+| [EECS039](#eecs039) | Info | A `Mut<T>` is of a tracked component | `ref T` |
+| [EECS040](#eecs040) | Error | `SetIfChanged` can compare its type | |
+| [EECS041](#eecs041) | Error | A pass does not run the calls it refuses | |
+| [EECS042](#eecs042) | Error | An indexed component is not changed while its index is walked | |
+| [EECS043](#eecs043) | Error | A record struct key does not print itself | Implement `Key` explicitly |
+| [EECS044](#eecs044) | Error | A sliced filter goes to passes only | |
+| [EECS045](#eecs045) | Error | `Destroyed` and `Disabled<T>` are the world's to write | |
 
 ## EECS002 [#eecs002]
 
@@ -195,7 +208,8 @@ public record struct Wallet(int Gold) : IComponent;
 
 ## EECS007 [#eecs007]
 
-**Systems must be stateless.** Error. No code fix.
+**Systems must be stateless.** Error. Code fix: `readonly` for a private field that only its initializer and the
+constructors write.
 
 A system has a mutable field, a settable auto-property or a field-like event (static ones included), or a member
 writes a primary-constructor parameter (a hidden field). State in a system is invisible to other systems, queries and
@@ -457,9 +471,10 @@ stage or a parallel `[ForEach]` the runtime still throws for it
 **Structural change on another thread.** Error. No code fix.
 
 A world's structure belongs to its owner thread. The rule reports a structural call (the members EECS013 lists) in a
-lambda or anonymous method handed to `Task.Run`, `TaskFactory.StartNew`, `new Task`, `Parallel.*`,
-`ThreadPool.QueueUserWorkItem` (and its relatives), `new Thread` or `new Timer`, when the world or entity it changes
-can be changed by another thread at the same time:
+lambda or anonymous method handed to `Task.Run`, `Task.ContinueWith`, `TaskFactory.StartNew`, `new Task`,
+`Parallel.*`, `ThreadPool.QueueUserWorkItem` (and its relatives), `new Thread` or `new Timer`, or subscribed to
+`System.Timers.Timer.Elapsed`, and in a method of the same type handed to one of them as a method group
+(`Task.Run(Spawn)`), when the world or entity it changes can be changed by another thread at the same time:
 
 - `Parallel.*` runs the delegate on several threads at once, so any world or entity captured from outside it races
   (`worlds[i]`, a world per item, does not);
@@ -504,12 +519,13 @@ public static class WorldThreads
 }
 ```
 
-Like EECS013, the rule sees the delegate's own body, and a receiver it cannot follow (a method's result) is not
-reported.
+Like EECS013, the rule sees the delegate's own body (a method group's method, one level down), and a receiver it
+cannot follow (a method's result) is not reported.
 
 ## EECS015 [#eecs015]
 
-**Indexed component written through a ref.** Error. No code fix.
+**Indexed component written through a ref.** Error. Code fix, where the code only reads: `Read<T>()` for
+`Get<T>()`, `ref readonly` for a `ref` local, `in` / `ReadOnlySpan<T>` for a `[ForEach]` parameter.
 
 A [value index](/en/docs/guide/indexes-and-relations#value-indexes) follows `Set`, `CreateEntity` and
 `CreateEntities`; a write through a `ref` changes the key behind its back. For a component implementing
@@ -582,9 +598,11 @@ public class ReplicateFire : EcsSystem
 
 ## EECS017 [#eecs017]
 
-**A component stores an `Entity` handle.** Warning. No code fix.
+**A component stores an `Entity` handle.** Warning. Code fix: an `Entity` field becomes an `EntityId` when every use
+still compiles (`.Id`, a comparison, an assignment).
 
-An `Entity` holds a reference to its world, so a component or singleton with an `Entity` field is managed: its column
+An `Entity` holds a reference to its world, so a component or singleton with an `Entity` field (or a field of a struct
+that holds one, from this assembly or another), and a `DynamicBuffer<T>` whose elements hold one, are managed: the column
 is scanned by the garbage collector, every store pays a write barrier, rows are not copied as blocks,
 [saves](/en/docs/guide/saves) cannot write it and [migration](/en/docs/guide/migration-and-unload#entityid-rewriting)
 does not rewrite it.
@@ -611,10 +629,11 @@ public class ChaseSystem : EcsSystem
 
 ## EECS018 [#eecs018]
 
-**A system's schedule is not a constant.** Warning. No code fix.
+**A system's schedule is not a constant.** Warning. Code fix: `=> 5` for an auto-property `{ get; } = 5`.
 
 `UpdateInterval` and `UpdatePhase` are read every update, so a value that changes makes the system skip or repeat
-runs.
+runs. An auto-property with a constant initializer is reported too: it reads a field set when the system is built,
+and `=> 5` says the constant.
 
 ```csharp doccheck=expect-EECS018
 public class SaveSystem : EcsSystem
@@ -783,14 +802,15 @@ public static class Report
 ## EECS025 [#eecs025]
 
 **A write access that only reads.** Warning. Code fix: `in` for a component or singleton, `ReadOnlySpan<T>` for a
-span, `Read<T>()` for `Get<T>()`, `.X` for `WriteX()`.
+span, `Read<T>()` for `Get<T>()`, `.X` for `WriteX()`, `in T` for a `Mut<T>` the method never writes.
 
 A `ref` parameter (a `Span<T>` in a batch method) puts its type in the system's write set: no
 [parallel stage](/en/docs/guide/threading#parallel-systems) runs the system beside one that reads the type. On a
 [tracked component](/en/docs/guide/change-tracking) it also stamps every row the method visits, so `[Changed<T>]`
 systems visit rows nobody changed. `entity.Get<T>()` and the generated `entity.WriteX()` stamp the row the same way.
 The rule looks at every use: an assignment, `++`, a `ref` or `out` argument, a method that is not `readonly`, a `ref`
-local or a `this ref` extension (`DynamicBuffer<T>.Add`) is a write, and keeps the access.
+local or a `this ref` extension (`DynamicBuffer<T>.Add`) is a write, and keeps the access. A `Mut<T>` parameter used
+only through `.Value` reads, and is reported the same way.
 
 ```csharp
 public record struct Armor(int Value) : IComponent, ITrackChanges;
@@ -853,6 +873,9 @@ public class CountSurvivors : EcsSystem
 
 **A lookup per row that a parameter makes once.** Warning. No code fix.
 
+The rule covers `[ForEach]` methods and the `Execute` of a hand-written job; a job takes the component as another
+type argument of its interface.
+
 A `[ForEach]` method's parameters are resolved once per table or per pass: a component is a column the loop walks, a
 singleton a `ref` taken before the loop. The same data looked up through the visited `Entity` (`entity.Velocity`,
 `entity.Has<T>()`, `entity.TryGet<T>(...)`) or through the `World` (`World.Clock`) repeats the search on every row:
@@ -890,7 +913,9 @@ of every tick, and the collections it causes pause the world. The rule names eac
 array, a lambda that captures, a method group of an instance, LINQ, a string built at run time (`$"..."`, `+`,
 `string.Format`, `ToString()`), boxing, and `foreach` over an interface. Left out: code inside a `throw`, calls the
 compiler removes (`[Conditional]`, such as `Debug.Assert`), console output (the write costs more than its string),
-and the `OnUpdate` of a system that overrides `UpdateInterval` (its author chose that cadence).
+and the `OnUpdate` of a system that overrides `UpdateInterval` (its author chose that cadence). The rule also covers
+the `Execute` of a hand-written job, and the cold calls that allocate by design: `TrimExcess`, `Capture()`,
+`Describe` and `DescribeSchedule` belong to a timer, a command or a test, not to every update.
 
 ```csharp doccheck=expect-EECS028
 public class Steer : EcsSystem
@@ -1102,15 +1127,15 @@ public class SendFire : EcsSystem
 
 ## EECS036 [#eecs036]
 
-**A unique component that cannot be indexed by its key.** Error. No code fix.
+**A component that cannot be indexed by its key.** Error. No code fix.
 
-A world indexes an `IUniqueIndexed<TKey>` component by its key from the first table that holds it, and checks every
-write against that index. The rule reports two declarations that cannot work:
+A world indexes an `IIndexed<TKey>` or `IUniqueIndexed<TKey>` component by its key, and checks every write of a
+unique one against that index. The rule reports two declarations that cannot work:
 
 - **An `EntityId` key.** Loads and moves rewrite `EntityId` values after they copy the rows, too late to check them
   first, so a relation key cannot be unique.
-- **A second key.** A component is indexed once: another `IIndexed<TKey>` or `IUniqueIndexed<TKey>` on it could never
-  be indexed, and `world.Index` throws for it.
+- **A second key.** A component is indexed once: a second `IIndexed<TKey>` or `IUniqueIndexed<TKey>` on it, unique or
+  not, could never be indexed, and `world.Index` throws for it.
 
 ```csharp doccheck=expect-EECS036
 public record struct Mount(EntityId Rider) : IComponent, IUniqueIndexed<EntityId> { public EntityId Key => Rider; }
@@ -1123,6 +1148,243 @@ public record struct Mount(EntityId Rider) : IComponent, IIndexed<EntityId> { pu
 ```
 
 [Unique keys](/en/docs/guide/indexes-and-relations#unique-keys) explains what a unique index checks.
+
+## EECS037 [#eecs037]
+
+**A job's `Writes` does not match what `Execute` writes.** Warning. Code fix: the `Writes` that `Execute` needs.
+
+A hand-written job (`IForEach<...>`, `IForEachEntity<...>`, `IForEachBatch<...>`) says which components it writes with
+`static int Writes` (bit `k - 1` for component `k`, `-1` for all of them, the default). The loop stamps the
+[tracked](/en/docs/guide/change-tracking) components it names on every row it visits, and carries the others over
+when `Execute` moves the entity. A tracked component that `Execute` writes and `Writes` leaves out is never stamped,
+so `[Changed<T>]` systems miss the change; one that `Execute` only reads is stamped on every row anyway, so they visit
+rows nobody changed. The rule compares a constant `Writes` (or the default) with the writes it sees in `Execute`, by
+the same test as EECS025, and leaves a computed `Writes` and the bits of `OwnStamps` alone.
+
+```csharp
+public record struct Shield(int Value) : IComponent, ITrackChanges;
+```
+
+```csharp doccheck=expect-EECS037
+public struct Recharge : IForEach<Shield>
+{
+    public void Execute(ref Shield shield) => shield = new Shield(shield.Value + 1);
+    public static int Writes => 0;   // Shield is written and never stamped
+}
+```
+
+Name what `Execute` writes:
+
+```csharp
+public struct Recharge : IForEach<Shield>
+{
+    public void Execute(ref Shield shield) => shield = new Shield(shield.Value + 1);
+    public static int Writes => 0b1;
+}
+```
+
+A `[ForEach]` method needs none of this: the generator writes its job from the parameters.
+
+## EECS038 [#eecs038]
+
+**A changed copy of a component is dropped.** Warning. Code fix: `ref var` (`Get<T>()`, a generated property, a
+singleton).
+
+`entity.Get<T>()`, the generated `entity.X`, a singleton `world.X` and a query item's component return a `ref`, and
+`var` copies what it points at; `TryGet` hands out a copy too. A field written on that copy and never read again is
+a change that reaches no table: the entity keeps its old value. The rule reports a local initialized from one of
+these and written afterwards (an assignment, `++`, a compound assignment), when no later code reads, returns,
+captures or passes it.
+
+```csharp
+public struct Mana : IComponent { public int Value; }
+```
+
+```csharp doccheck=expect-EECS038
+var mana = hero.Get<Mana>();   // a copy of the row
+mana.Value -= 10;              // lost
+```
+
+Keep the `ref`:
+
+```csharp
+ref var mana = ref hero.Get<Mana>();
+mana.Value -= 10;
+```
+
+## EECS039 [#eecs039]
+
+**A `Mut<T>` of a component that is not tracked.** Suggestion (Info). Code fix: `ref T`.
+
+[`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) stamps only the rows a `[ForEach]` method writes, which only means
+something for a component with `ITrackChanges`. For any other component it is the same write as a `ref` parameter,
+written longer (`.Value`, `.Write()`). The rule reports a `Mut<T>` of an untracked `T` used only through `.Value`
+and `.Write()`; one that calls `SetIfChanged` keeps its comparison.
+
+```csharp doccheck=expect-EECS039
+public class Clamp : EcsSystem
+{
+    [ForEach]
+    static void Apply(Mut<Health> health)
+    {
+        if (health.Value.Value > 100) health.Write() = new Health(100);
+    }
+}
+```
+
+Take it by `ref`:
+
+```csharp
+public class Clamp : EcsSystem
+{
+    [ForEach]
+    static void Apply(ref Health health)
+    {
+        if (health.Value > 100) health = new Health(100);
+    }
+}
+```
+
+A `Mut<T>` that the method never writes is reported by [EECS025](#eecs025), with `in T` as its fix.
+
+## EECS040 [#eecs040]
+
+**`SetIfChanged` on a type it cannot compare.** Error. No code fix.
+
+`entity.SetIfChanged(value)` and `Mut<T>.SetIfChanged(value)` compare the new value with the stored one, without
+boxing: an unmanaged type by its bytes, any other type through `IEquatable<T>`. A managed struct that is neither
+throws `NotSupportedException` on the first call; the generated `SetXIfChanged` exists only for types it can compare.
+
+```csharp
+public struct Nickname : IComponent, ITrackChanges { public string Text; }
+```
+
+```csharp doccheck=expect-EECS040
+hero.SetIfChanged(new Nickname { Text = "Ada" });   // NotSupportedException: no way to compare
+```
+
+Make it a `record struct` (records implement `IEquatable<T>`), or implement `IEquatable<T>`:
+
+```csharp
+public record struct Callsign(string Text) : IComponent, ITrackChanges;   // compared through IEquatable<Callsign>
+```
+
+```csharp
+hero.SetIfChanged(new Callsign("Ada"));
+```
+
+## EECS041 [#eecs041]
+
+**A call a pass refuses.** Error. No code fix.
+
+While a query or `[ForEach]` pass walks a world's tables, the calls that rebuild or replace them throw
+`InvalidOperationException`: `TrimExcess`, `Capture`, `Restore`, `Save`, `Load`, `SaveEntities`, `LoadEntities`,
+`MoveEntities` (of the world walked, as source or target), `GroupBy` and `RemoveTypes`. The rule reports one of them
+on the world a `foreach` over its `Query` walks, and on the world of a `[ForEach]` method or a job's `Execute`.
+
+```csharp doccheck=expect-EECS041
+foreach (var item in world.Query<Health>())
+{
+    if (item.Component1.Value <= 0) world.TrimExcess();   // throws: a pass is walking the tables
+}
+```
+
+Decide in the pass and act after it:
+
+```csharp
+bool trim = false;
+foreach (var item in world.Query<Health>())
+    trim |= item.Component1.Value <= 0;
+if (trim) world.TrimExcess();
+```
+
+## EECS042 [#eecs042]
+
+**An indexed component changed while its index is walked.** Error. No code fix.
+
+`index.Find(key)`, the ordered walks of an index (`Ascending`, `Descending`, `Range`, ...) and `world.Children(parent)`
+walk the index's own arrays. Setting, removing or disabling the indexed component of an entity in the walk, or
+destroying it, changes those arrays under the walk: entities are skipped or visited twice. The rule reports such a
+change inside a `foreach` over a walk of the same component's index.
+
+```csharp
+public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
+```
+
+```csharp doccheck=expect-EECS042
+foreach (var member in world.TeamIndex.Find(1))
+    member.SetTeam(2);   // moves the entity out of the array being walked
+```
+
+Collect first, then change:
+
+```csharp
+var moving = new List<Entity>();
+foreach (var member in world.TeamIndex.Find(1)) moving.Add(member);
+foreach (var member in moving) member.SetTeam(2);
+```
+
+## EECS043 [#eecs043]
+
+**A record struct key that prints itself.** Error. Code fix: implement `Key` explicitly.
+
+A component that is its own key (`IIndexed<TSelf>` or `IUniqueIndexed<TSelf>` with `Key => this`) works, but on a
+`record struct` a public `Key` is one of the properties `ToString()` prints. `Key` returns the record, which prints
+its `Key`, which prints its `Key`: the first log line or debugger view overflows the stack.
+
+```csharp doccheck=expect-EECS043
+public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { public Market Key => this; }
+```
+
+Implement `Key` explicitly, so it belongs to the interface only (the fix also rewrites `.Key` reads):
+
+```csharp
+public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { Market IIndexed<Market>.Key => this; }
+```
+
+## EECS044 [#eecs044]
+
+**A sliced filter where every row is needed.** Error. No code fix.
+
+[`QueryFilter.Slice(index, count)`](/en/docs/guide/systems#slices) cuts each table into `count` parts, and only
+passes (`ForEach`, `ForEachEntity`, `ForEachBatch` and their parallel forms) take one. `Query`, `Count`, `Any`,
+`DestroyEntities`, `entity.Run` and the bulk calls need every matching row, so they throw `ArgumentException` for a
+sliced filter. The rule follows the filter through locals and `static readonly` fields, and also reports a constant
+`Slice` call that throws `ArgumentOutOfRangeException` (`count` below 1, `index` outside `0..count - 1`).
+`Slice(0, 1)` is the whole table and is not sliced.
+
+```csharp doccheck=expect-EECS044
+var half = QueryFilter.Create().Slice(0, 2);
+int count = world.Count<Health>(half);   // ArgumentException
+```
+
+Count without the slice:
+
+```csharp
+int count = world.Count<Health>();
+```
+
+## EECS045 [#eecs045]
+
+**A tag the world keeps, written by hand.** Error. No code fix.
+
+`Destroyed` marks an entity kept for its [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components), and `Disabled<T>` marks a
+component [hidden from queries](/en/docs/guide/cleanup-and-disable#disable-a-component). The world adds and removes them in `Destroy`,
+`Disable<T>()` and `Enable<T>()`, together with what they stand for: `Destroyed` with the destroy hooks and the
+destroy log, `Disabled<T>` with the hidden value. Written directly (`Set`, `GetOrAdd`, `Remove`, `SetIfChanged`,
+`Disable` and `Enable` of the tag itself, `CreateEntity`, `CreateEntities`, `Instantiate`, `SetAll`, `RemoveAll`,
+`DisableAll`, `EnableAll`, `Prefab.Set`), the tag says something the world never did. Reading them (`Has`,
+`IsDisabled`, `With` / `Without` filters, `[With<Destroyed>]`) is how they are meant to be used.
+
+```csharp doccheck=expect-EECS045
+hero.Remove<Disabled<Health>>();   // the tag goes, the value stays hidden
+```
+
+Call the world's own operation:
+
+```csharp
+hero.Enable<Health>();
+```
 
 ## Related [#related]
 
