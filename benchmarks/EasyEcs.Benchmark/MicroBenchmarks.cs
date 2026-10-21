@@ -123,7 +123,7 @@ public class MicroBenchmarks
         return _churn.EntityCount;
     }
 
-    /// <summary>Churn through the batch API: CreateEntities and DestroyEntities, one gate pass each per round.</summary>
+    /// <summary>Churn through the batch API: CreateEntities and DestroyAll, one gate pass each per round.</summary>
     [Benchmark]
     public int ChurnBatch()
     {
