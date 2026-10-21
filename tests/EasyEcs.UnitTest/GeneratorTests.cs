@@ -663,9 +663,37 @@ public class GeneratorTests
             namespace N { public struct A_B : IComponent { public int V; } public static class A { public struct B : IComponent { public int V; } } }
             public struct HP : IComponent { public int V; }
             public struct Hp : IComponent { public int V; }                           // file names ignore case
+            namespace Shared
+            {
+                // Members two types of a namespace would both get: each gives them up, and keeps the others.
+                public struct Dead : IComponent;                                       // entity.IsDead
+                public struct IsDead : IComponent { public bool V; }                   // entity.IsDead
+                public struct Target : IComponent { public int V; }                    // entity.HasTarget
+                public struct HasTarget : IComponent { public int V; }                 // entity.HasTarget
+                public struct Shield : IComponent { public int V; }                    // entity.IsShieldDisabled
+                public struct ShieldDisabled : IComponent;                             // entity.IsShieldDisabled
+                public struct Zone : IComponent, IIndexed<int> { public int V; public int Key => V; }  // world.ZoneIndex
+                public struct ZoneIndex : ISingletonComponent { public int V; }        // world.ZoneIndex
+                public struct Loot { public int V; }                                    // LootEcsPrefabBufferExtensions
+                public struct LootPrefab { public int V; }                              // LootPrefabEcsBufferExtensions
+                public static class Use
+                {
+                    public static bool F(Entity e, World w, ref DynamicBuffer<Loot> a, ref DynamicBuffer<LootPrefab> b) =>
+                        e.Has<Dead>() && e.Has<IsDead>() && e.SetDead().HasIsDead && e.Has<Target>() && e.Get<HasTarget>().V > 0 && e.Target.V > 0
+                        && e.IsDisabled<Shield>() && e.SetShieldDisabled().HasShield && w.Index<Zone, int>().Count(1) > 0
+                        && w.HasZoneIndex && e.HasLoot && e.HasLootPrefab;
+                }
+            }
             """), out var output, out var problems);
         Assert.That(problems, Is.Empty);
-        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
+        string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.Contains("Shared.")).Select(t => t.ToString()));
+        foreach (var member in new[] { "bool IsDead\n", "bool HasTarget\n", " ZoneIndex\n" })
+            Assert.That(generated, Does.Not.Contain(member), member);
+        // A prefab has IsShieldDisabled once (the tag's), so it keeps it; the entity would have it twice.
+        var classes = generated.Split("[global::System.CodeDom.Compiler.GeneratedCode(");
+        Assert.That(classes.Where(c => c.Contains("bool IsShieldDisabled")).Select(c => c.Split('"')[1]), Is.EqualTo(new[] { "EasyEcs.Generator.Prefab" }));
+        Assert.That(generated, Does.Contain("class LootEcsPrefabBufferExtensions").And.Contain("class LootPrefabEcsBufferExtensions"));
     }
 
     [Test]
@@ -693,6 +721,11 @@ public class GeneratorTests
             public static class O2 { public struct State : IComponent { public int V; } }
             public struct Unsafe : IComponent { public int V; }                                     // a CompilerServices name
             internal struct Cfg { public int V; }
+            public struct Buffer : IComponent { public int V; }                                     // Prefab.SetBuffer takes SetBuffer
+            public struct Props : IComponent { public int Hp { get; set; } public float Speed { get; init; } }  // auto-properties
+            public struct Locked : IComponent { public int Hp { get; private set; } }              // not settable: no SetLocked
+            public struct Ally : IRelation { public EntityId Target { get; init; } public int Weight; }
+            public record struct Bag : IRelation { public EntityId Target { get; set; } public string Name { get; set; } }  // a record's own members
             public static class R
             {
                 [ForEach] static void @default(ref P p) { }
@@ -713,11 +746,60 @@ public class GeneratorTests
                 {
                     e.SetDefaults(); e.SetDefaults(2f, Color.Red); e.SetThis(1); e.SetSelf(2); e.SetSets(3); _ = e.@class; _ = w.@event;
                     e.Set(new O1.State()); e.Set(new O2.State());
+                    e.SetBuffer(1).SetProps(hp: 1, speed: 2f).AddAlly(e, 3).AddBag(e, "bag").Set(new Locked());
+                    _ = new Prefab().SetProps(1, 2f).Set(new Buffer { V = 5 }).HasBuffer;
                 }
+                static void Links(in DynamicBuffer<Ally> allies, in DynamicBuffer<Bag> bags) { }
             }
             """), out var output, out var problems);
         Assert.That(problems, Is.Empty);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
+        string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.Contains(".g.cs")).Select(t => t.ToString()));
+        Assert.That(generated, Does.Contain("Entity SetBuffer(int v)").And.Not.Contain("Prefab SetBuffer("));   // the prefab's own SetBuffer<T> would win
+        Assert.That(generated, Does.Contain("SetProps(int hp, float speed) => @this.Set(new global::Props { Hp = hp, Speed = speed })")
+            .And.Contain("AddAlly(global::EasyEcs.EntityId target, int weight) => @this.AddRelation(new global::Ally { Target = target, Weight = weight })")
+            .And.Not.Contain("SetLocked("));
+    }
+
+    [Test]
+    public void AFriendAssemblyUsesTheMembersOfItsLibrary()
+    {
+        // A library and a friend (InternalsVisibleTo) both iterating Read<P>: one class for the shape, the library's.
+        // The friend reads an internal component through its generated properties too (CS0570 on internal ones).
+        var library = Compile("""
+            [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Test")]
+            namespace L;
+            public struct P : IComponent { public int V; }
+            internal struct Q : IComponent { public int V; }
+            internal struct Clock : ISingletonComponent { public int Ticks; }
+            internal struct Zone : IComponent, IIndexed<int> { public int V; public int Key => V; }
+            internal struct Dead : IComponent;
+            public static class LU { public static int F(World w) { int s = 0; foreach (var i in w.Read<P>()) s += i.P.V; foreach (var i in w.Query<Q>()) i.Q.V++; return s; } }
+            """).WithAssemblyName("Lib");
+        Driver().RunGeneratorsAndUpdateCompilation(library, out var built, out _);
+        using var image = new System.IO.MemoryStream();
+        var emitted = built.Emit(image);
+        Assert.That(emitted.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
+
+        var friend = Compile("""
+            using L;
+            public static class TU
+            {
+                public static int F(World w, Entity e)
+                {
+                    int s = 0;
+                    foreach (var i in w.Read<P>()) s += i.P.V;
+                    foreach (var i in w.Query<Q>()) i.Q.V++;
+                    e.SetQ(1).SetZone(2).SetDead();
+                    w.SetClock(3);
+                    return e.HasQ && e.IsDead && e.Q.V + e.Zone.V + w.Clock.Ticks + w.ZoneIndex.Count(2) > s ? 1 : 0;
+                }
+            }
+            """).AddReferences(MetadataReference.CreateFromImage(image.ToArray()));
+        Driver().RunGeneratorsAndUpdateCompilation(friend, out var output, out var problems);
+        Assert.That(problems, Is.Empty);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
+        Assert.That(output.SyntaxTrees.Where(t => t.FilePath.Contains("EasyEcs.QueryItem.")), Is.Empty);   // both shapes are the library's
     }
 
     [Test]
@@ -933,8 +1015,11 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("SetSpeed(float V) => @this.Set(new global::Game.Speed(V))"));  // from the constructor
         Assert.That(generated, Does.Contain("public bool IsTagged"));
         Assert.That(generated, Does.Contain("SetTagged() => @this.Set(default(global::Tagged))"));
-        Assert.That(generated, Does.Contain("internal ref global::Game.Hidden Hidden"));
-        Assert.That(generated, Does.Not.Contain("World World"));
+        // An internal component's class is internal, its members public: an internal extension property is unusable
+        // from a friend assembly (AFriendAssemblyUsesTheMembersOfItsLibrary).
+        Assert.That(generated, Does.Contain("internal static class HiddenEcsExtensions").And.Contain("public ref global::Game.Hidden Hidden")
+            .And.Not.Contain("internal ref"));
+        Assert.That(generated, Does.Not.Contain("public ref global::World World").And.Contain("public ref readonly global::World World")); // Entity.World; a prefab has none
         Assert.That(generated, Does.Contain("public bool HasWorld"));
         Assert.That(generated, Does.Not.Contain("SetFixed"));
         Assert.That(generated, Does.Not.Contain("Secret"));
@@ -1011,8 +1096,8 @@ public class GeneratorTests
 
         // What the world refuses is not offered: ChildOf is never disabled, Destroyed is the world's to add and remove.
         var extensions = typeof(World).Assembly.GetExportedTypes().Where(t => t.Name is "ChildOfEcsExtensions" or "DestroyedEcsExtensions"
-            or "ChildOfPrefabExtensions" or "DestroyedPrefabExtensions").ToArray();
-        Assert.That(extensions.Select(t => t.Name), Is.EquivalentTo(new[] { "ChildOfEcsExtensions", "ChildOfPrefabExtensions", "DestroyedEcsExtensions" }));
+            or "ChildOfEcsPrefabExtensions" or "DestroyedEcsPrefabExtensions").ToArray();
+        Assert.That(extensions.Select(t => t.Name), Is.EquivalentTo(new[] { "ChildOfEcsExtensions", "ChildOfEcsPrefabExtensions", "DestroyedEcsExtensions" }));
         var names = extensions.SelectMany(t => t.GetMethods()).Select(m => m.Name).ToArray();
         Assert.That(names, Has.None.Contains("DisableChildOf").And.None.Contains("EnableChildOf").And.None.Contains("IsChildOfDisabled")
             .And.None.Contains("SetDestroyed").And.None.Contains("RemoveDestroyed"));
@@ -1066,7 +1151,7 @@ public class GeneratorTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Buffer.g.cs")).Select(t => t.ToString()));
         Assert.That(generated, Does.Contain("public ref readonly global::EasyEcs.DynamicBuffer<global::Game.Loot> Loot"));
-        Assert.That(generated, Does.Contain("internal ref global::EasyEcs.DynamicBuffer<global::Game.Note> WriteNote()"));
+        Assert.That(generated, Does.Contain("internal static class NoteEcsBufferExtensions").And.Contain("public ref global::EasyEcs.DynamicBuffer<global::Game.Note> WriteNote()"));
         Assert.That(generated, Does.Contain("public global::EasyEcs.Entity AddFriend(global::EasyEcs.EntityId Target) => @this.AddRelation(new global::Game.Friend(Target));")
             .And.Contain("public int UnlinkFriend(global::EasyEcs.EntityId target)").And.Contain("public bool LinksFriend(global::EasyEcs.EntityId target)")
             .And.Contain("public global::EasyEcs.RelationIndex<global::Game.Friend> FriendIndex"));

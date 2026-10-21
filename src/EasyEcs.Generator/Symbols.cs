@@ -125,9 +125,7 @@ internal static class Symbols
         if (!type.IsUnmanagedType || type.TypeKind != TypeKind.Struct) return null;
         var text = new System.Text.StringBuilder();
         Describe(type, 0);
-        uint hash = 2166136261;
-        foreach (char c in text.ToString()) hash = (hash ^ c) * 16777619;
-        return "unchecked((int)0x" + hash.ToString("X8") + ")";
+        return "unchecked((int)0x" + Code.Fnv(text.ToString()).ToString("X8") + ")";
 
         void Describe(ITypeSymbol declaring, int depth)
         {
@@ -182,6 +180,33 @@ internal static class Symbols
         INamedTypeSymbol named => IsVisible(named) && named.TypeArguments.All(IsNameable),
         _ => true,
     };
+
+    /// <summary>Whether <paramref name="type"/> is or holds a type parameter (an element, a type argument, a containing type's).</summary>
+    public static bool ContainsTypeParameter(ITypeSymbol type) => type switch
+    {
+        ITypeParameterSymbol => true,
+        INamedTypeSymbol named => named.TypeArguments.Any(ContainsTypeParameter) || named.ContainingType is { } outer && ContainsTypeParameter(outer),
+        IArrayTypeSymbol array => ContainsTypeParameter(array.ElementType),
+        _ => false,
+    };
+
+    /// <summary>
+    /// Whether another file can name the non-generic <paramref name="type"/> with members of its own beside it: it and
+    /// its containing types are public or internal, none generic or <c>file</c>-local. <paramref name="isPublic"/>:
+    /// every level is public, so other assemblies see it too.
+    /// </summary>
+    public static bool IsExtensible(INamedTypeSymbol type, out bool isPublic)
+    {
+        isPublic = true;
+        for (var t = type; t != null; t = t.ContainingType)
+        {
+            if (t.TypeParameters.Length > 0 || t.IsFileLocal) return false; // a file type: no other file can name it
+            if (t.DeclaredAccessibility == Accessibility.Internal) isPublic = false;
+            else if (t.DeclaredAccessibility != Accessibility.Public) return false;
+        }
+
+        return true;
+    }
 
     /// <summary>A type every assembly can name: public, as are its containing types, elements and type arguments.</summary>
     public static bool IsPublic(ITypeSymbol type) => type switch
@@ -283,9 +308,7 @@ internal static class Symbols
         for (var t = type.ContainingType; t != null; t = t.ContainingType) name = t.MetadataName + "+" + name;
         if (!type.ContainingNamespace.IsGlobalNamespace) name = type.ContainingNamespace.ToDisplayString() + "." + name;
         // Roslyn compares hint names ignoring case (Hp and HP would be one file): the exact name's hash tells them apart.
-        uint hash = 2166136261;
-        foreach (char c in name) hash = (hash ^ c) * 16777619;
-        return name.Replace("@", "") + "." + hash.ToString("x8");
+        return name.Replace("@", "") + "." + Code.Fnv(name).ToString("x8");
     }
 
     /// <summary>

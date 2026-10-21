@@ -518,8 +518,9 @@ public sealed partial class EasyEcsAnalyzer
             // The class is named after the type's flat name (Outer__Inner): its type is the one whose flat name it carries.
             foreach (var candidate in TypesNamed(ns, type))
             {
-                if (holder.Name != Symbols.FlatName(candidate) + "EcsExtensions" && holder.Name != Symbols.FlatName(candidate) + "BufferExtensions") continue;
-                if (holder.Name.EndsWith("BufferExtensions"))
+                bool buffer = holder.Name == Symbols.FlatName(candidate) + ComponentGenerator.Classes.Buffer;
+                if (!buffer && holder.Name != Symbols.FlatName(candidate) + ComponentGenerator.Classes.Members) continue;
+                if (buffer)
                     return core.Entity.ContainingNamespace.GetTypeMembers("DynamicBuffer", 1).FirstOrDefault()?.Construct(candidate);
                 return candidate;
             }

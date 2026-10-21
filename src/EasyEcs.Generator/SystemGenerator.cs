@@ -167,8 +167,6 @@ public sealed class SystemGenerator : IIncrementalGenerator
         return fields.Count == 0 ? "()" : $" {{ {string.Join(", ", fields)} }}";
     }
 
-    private static string Escape(string name) => SyntaxFacts.IsKeywordKind(SyntaxFacts.GetKeywordKind(name)) ? "@" + name : name;
-
     /// <summary>
     /// The system type's code: Update runs the [ForEach] methods in declaration order (after OnUpdate), Access declares
     /// what they read and write. The runtime runs the code of base types first.
@@ -609,7 +607,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             {
                 var arguments = Symbols.ChainTypeArguments(t);
                 if (arguments.Count == 0 || !SymbolEqualityComparer.Default.Equals(t.ContainingAssembly, assembly)
-                    || !Symbols.IsVisible(t) || arguments.Any(a => !Symbols.IsNameable(a) || ContainsTypeParameter(a))
+                    || !Symbols.IsVisible(t) || arguments.Any(a => !Symbols.IsNameable(a) || Symbols.ContainsTypeParameter(a))
                     || !t.OriginalDefinition.GetMembers().OfType<IMethodSymbol>().Any(Symbols.IsForEach))
                     continue;
                 uses.Add(new ClosedUse(t.OriginalDefinition.ToDisplayString(Symbols.Fqn), t.ToDisplayString(Symbols.Fqn),
@@ -618,13 +616,5 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
             return new(uses.ToArray());
         }
-
-        private static bool ContainsTypeParameter(ITypeSymbol type) => type switch
-        {
-            ITypeParameterSymbol => true,
-            INamedTypeSymbol named => named.TypeArguments.Any(ContainsTypeParameter) || named.ContainingType is { } outer && ContainsTypeParameter(outer),
-            IArrayTypeSymbol array => ContainsTypeParameter(array.ElementType),
-            _ => false,
-        };
     }
 }
