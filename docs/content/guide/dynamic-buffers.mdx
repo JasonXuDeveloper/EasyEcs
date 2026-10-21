@@ -31,7 +31,8 @@ change, so `[Changed<DynamicBuffer<T>>]` finds exactly the bags to send or save.
 
 ### Declare the element [#declare-the-element]
 
-The element is a plain struct; it does not implement `IComponent`. `DynamicBuffer<Loot>` is the component.
+The element is a plain struct or an enum (`DynamicBuffer<Block>` for the blocks of a chunk); it does not implement
+`IComponent`. `DynamicBuffer<Loot>` is the component.
 
 ```csharp
 public record struct Loot(int Item);

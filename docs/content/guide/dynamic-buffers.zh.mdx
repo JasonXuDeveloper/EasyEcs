@@ -28,7 +28,7 @@ icon: ListOrdered
 
 ### 声明元素类型 [#declare-the-element]
 
-元素是普通结构体，不实现 `IComponent`；`DynamicBuffer<Loot>` 才是组件。
+元素是普通结构体或枚举（比如区块的方块 `DynamicBuffer<Block>`），不实现 `IComponent`；`DynamicBuffer<Loot>` 才是组件。
 
 ```csharp
 public record struct Loot(int Item);
