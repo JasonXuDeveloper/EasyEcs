@@ -78,11 +78,11 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             if (pair.Right) spc.AddSource($"{pair.Left.HintName}.Buffer.g.cs", SourceText.From(EmitBuffer(pair.Left), Encoding.UTF8));
         });
 
-        // Query<T1..Tn> calls: each shape's items get named refs (item.Position for item.Component1), one file per shape
-        // however many loops use it, each cached on its own.
+        // Query<T1..Tn> and Read<T1..Tn> calls: each shape's items get named refs (item.Position for item.Component1),
+        // one file per shape however many loops use it, each cached on its own.
         var shapes = context.SyntaxProvider
             .CreateSyntaxProvider(
-                static (node, _) => node is GenericNameSyntax { Identifier.ValueText: "Query", TypeArgumentList.Arguments.Count: > 0 and <= 9 },
+                static (node, _) => node is GenericNameSyntax { Identifier.ValueText: "Query" or "Read", TypeArgumentList.Arguments.Count: > 0 and <= 9 },
                 static (ctx, ct) => QueryShape.Create(ctx.SemanticModel, (GenericNameSyntax)ctx.Node, ct))
             .Where(static q => q is not null)
             .Select(static (q, _) => q!)
@@ -394,9 +394,9 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 foreach (var s in m.Setters)
                     Member($"Links the entity with a <see cref=\"{e}\"/> (<c>AddRelation</c>: the buffer, added if missing, and the index); returns the entity.",
                         $"global::EasyEcs.Entity Add{n}({s.Parameters}) => @this.AddRelation({s.Value});");
-            if (Free("Remove" + n))
-                Member($"Drops the entity's <see cref=\"{e}\"/> links to <paramref name=\"target\"/> (<c>RemoveRelation</c>); returns how many went.",
-                    $"int Remove{n}(global::EasyEcs.EntityId target) => @this.RemoveRelation<{e}>(target);");
+            if (Free("Unlink" + n))
+                Member($"Drops the entity's <see cref=\"{e}\"/> links to <paramref name=\"target\"/> (<c>RemoveRelation</c>; <c>Remove{n}()</c> drops the whole buffer); returns how many went.",
+                    $"int Unlink{n}(global::EasyEcs.EntityId target) => @this.RemoveRelation<{e}>(target);");
             if (Free("Links" + n))
                 Member($"Whether the entity links to <paramref name=\"target\"/> with a <see cref=\"{e}\"/> (<c>HasRelation</c>).",
                     $"bool Links{n}(global::EasyEcs.EntityId target) => @this.HasRelation<{e}>(target);");
@@ -464,7 +464,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             string name = type.Name, fqn = type.ToDisplayString(Symbols.Fqn);
             // Every name the element's members take, on the entity, the world (its index) and the prefab: a nested element
             // named like another struct of its namespace gets none (see ComponentModel.Taken).
-            var members = new[] { name, "Has" + name, "Write" + name, "GetOrAdd" + name, "Remove" + name, "Add" + name, "Links" + name, "Set" + name };
+            var members = new[] { name, "Has" + name, "Write" + name, "GetOrAdd" + name, "Remove" + name, "Add" + name, "Unlink" + name, "Links" + name, "Set" + name };
             var taken = type.ContainingType != null && ComponentModel.HasNamesake(type.ContainingNamespace, type)
                 ? members.Append(name + "Index").ToArray()
                 : members.Where(n => entity.GetMembers(n).Length > 0).Concat(world.GetMembers(name + "Index").Length > 0 ? [name + "Index"] : []).ToArray();
@@ -479,16 +479,18 @@ public sealed class ComponentGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// The components of a <c>world.Query&lt;T1..Tn&gt;()</c> call (closed, nameable from a generated file of this
-    /// assembly): what its items' named members return. <paramref name="Hash"/> names the file and the class.
+    /// The components of a <c>world.Query&lt;T1..Tn&gt;()</c> or <c>world.Read&lt;T1..Tn&gt;()</c> call (closed, nameable
+    /// from a generated file of this assembly): what its items' named members return. <paramref name="Hash"/> names the
+    /// file and the class; <paramref name="Read"/>: the items of a Read, whose members are all read-only.
     /// </summary>
-    private sealed record QueryShape(string Hash, string Item, EquatableArray<QueryMember> Members)
+    private sealed record QueryShape(string Hash, string Item, bool Read, EquatableArray<QueryMember> Members)
     {
         public static QueryShape? Create(SemanticModel model, GenericNameSyntax name, CancellationToken token)
         {
             if (model.GetSymbolInfo(name, token).Symbol is not IMethodSymbol { ContainingType: { } world } query
                 || world.ToDisplayString() != "EasyEcs.World" || query.ReturnType is not INamedTypeSymbol enumerator)
                 return null;
+            bool read = query.Name == "Read";
             var types = query.TypeArguments;
             foreach (var t in types)
                 if (t is not INamedTypeSymbol named || ContainsTypeParameter(named) || !Symbols.IsNameable(named)
@@ -507,10 +509,10 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             }
 
             if (members.Count == 0) return null;
-            string item = "global::EasyEcs.QueryItem<" + string.Join(", ", types.Select(t => t.ToDisplayString(Symbols.Fqn))) + ">";
+            string item = (read ? "global::EasyEcs.ReadItem<" : "global::EasyEcs.QueryItem<") + string.Join(", ", types.Select(t => t.ToDisplayString(Symbols.Fqn))) + ">";
             uint hash = 2166136261;
             foreach (char c in item) hash = (hash ^ c) * 16777619;
-            return new QueryShape(hash.ToString("x8"), item, new EquatableArray<QueryMember>(members.ToArray()));
+            return new QueryShape(hash.ToString("x8"), item, read, new EquatableArray<QueryMember>(members.ToArray()));
         }
     }
 
@@ -523,8 +525,8 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         sb.Append($"[global::System.CodeDom.Compiler.GeneratedCode(\"{Symbols.GeneratorName}\", \"{Version}\")]\n");
         sb.Append($"internal static class QueryItemExtensions_{q.Hash}\n{{\n    extension({q.Item} @this)\n    {{\n");
         foreach (var m in q.Members)
-            sb.Append(m.ReadOnly
-                    ? $"        /// <summary>The row's <see cref=\"{m.Type}\"/> (<c>Component{m.Position}</c>), read-only: it is indexed, so it is written with <c>Set</c>.</summary>\n" +
+            sb.Append(q.Read || m.ReadOnly
+                    ? $"        /// <summary>The row's <see cref=\"{m.Type}\"/> (<c>Component{m.Position}</c>), read-only: {(q.Read ? "a <c>Read</c> stamps nothing" : "it is indexed, so it is written with <c>Set</c>")}.</summary>\n" +
                       $"        public ref readonly {m.Type} {m.Name}\n        {{\n    {Inline}            get => ref @this.Component{m.Position};\n        }}\n"
                     : $"        /// <summary>The row's <see cref=\"{m.Type}\"/> (<c>Component{m.Position}</c>), by <c>ref</c>.</summary>\n" +
                       $"        public ref {m.Type} {m.Name}\n        {{\n    {Inline}            get => ref @this.Component{m.Position};\n        }}\n");

@@ -920,7 +920,7 @@ public class GeneratorTests
                 public static int ChestSize(Prefab chest) => chest.HasLoot ? chest.Loot.Count : 0;
                 public static bool Friends(Entity e) => e.HasFriend && e.Friend.Count > 0 && e.RemoveFriend().IsAlive;
                 public static int Befriend(World w, Entity e, Entity f) =>
-                    e.AddFriend(f).LinksFriend(f) ? w.FriendIndex.Count(f) + e.RemoveFriend(f) : 0;
+                    e.AddFriend(f).LinksFriend(f) ? w.FriendIndex.Count(f) + e.UnlinkFriend(f) : 0;
                 static void Links(in DynamicBuffer<Friend> friends) { }
                 static void Notes(ref DynamicBuffer<Note> notes, in DynamicBuffer<int> ints, in DynamicBuffer<P> components) { }
             }
@@ -932,10 +932,10 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("public ref readonly global::EasyEcs.DynamicBuffer<global::Game.Loot> Loot"));
         Assert.That(generated, Does.Contain("internal ref global::EasyEcs.DynamicBuffer<global::Game.Note> WriteNote()"));
         Assert.That(generated, Does.Contain("public global::EasyEcs.Entity AddFriend(global::EasyEcs.EntityId Target) => @this.AddRelation(new global::Game.Friend(Target));")
-            .And.Contain("public int RemoveFriend(global::EasyEcs.EntityId target)").And.Contain("public bool LinksFriend(global::EasyEcs.EntityId target)")
+            .And.Contain("public int UnlinkFriend(global::EasyEcs.EntityId target)").And.Contain("public bool LinksFriend(global::EasyEcs.EntityId target)")
             .And.Contain("public global::EasyEcs.RelationIndex<global::Game.Friend> FriendIndex"));
         Assert.That(output.SyntaxTrees.Count(t => t.FilePath.EndsWith(".Buffer.g.cs")), Is.EqualTo(3)); // not int, not a component
-        Assert.That(generated, Does.Not.Contain("WriteFriend").And.Not.Contain("GetOrAddFriend"));    // links: AddRelation only
+        Assert.That(generated, Does.Not.Contain("WriteFriend").And.Not.Contain("int RemoveFriend(")); // links: AddRelation / UnlinkFriend
         Assert.That(generated, Does.Contain("public global::EasyEcs.Prefab SetLoot(params global::System.ReadOnlySpan<global::Game.Loot> items)")
             .And.Not.Contain("Prefab SetFriend"));                                                     // a recipe holds no links
         Assert.That(await Diagnose(Components, source), Is.Empty);                                    // no EECS012 on the members
@@ -955,6 +955,7 @@ public class GeneratorTests
                     foreach (var item in w.Query<Owned>()) sum += item.Owned.Owner.Index;                     // read-only
                     foreach (var item in w.Query<P, Game.P>()) sum += item.Component1.V + item.Component2.V;  // one name, two types
                     foreach (var item in w.Query<P, Q>(QueryFilter.Create().With<T>())) sum += item.Q.V;       // the same shape
+                    foreach (var item in w.Read<P, Q>()) sum += item.P.V + item.Q.V;                         // read-only, stamps nothing
                     return sum;
                 }
             }
@@ -963,10 +964,12 @@ public class GeneratorTests
         Assert.That(diagnostics, Is.Empty);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         var files = output.SyntaxTrees.Where(t => t.FilePath.Contains("EasyEcs.QueryItem.")).Select(t => t.ToString()).ToArray();
-        Assert.That(files, Has.Length.EqualTo(2), "one file per shape; P with Game.P has no names to give");
+        Assert.That(files, Has.Length.EqualTo(3), "one file per shape; P with Game.P has no names to give");
         string generated = string.Join("\n", files);
         Assert.That(generated, Does.Contain("public ref global::P P").And.Contain("get => ref @this.Component2;")
             .And.Contain("public ref readonly global::Owned Owned"));
+        string read = files.Single(f => f.Contains("extension(global::EasyEcs.ReadItem<global::P, global::Q> @this)"));
+        Assert.That(read, Does.Contain("public ref readonly global::P P").And.Not.Contain("public ref global::"));
         Assert.That(await Diagnose(Components, source), Is.Empty);
     }
 

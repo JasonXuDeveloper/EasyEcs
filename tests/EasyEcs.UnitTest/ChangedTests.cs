@@ -304,7 +304,7 @@ public class ChangedTests
         var changed = QueryFilter.Create().Changed<Armor>(mark);
 
         int sum = 0;
-        foreach (var item in world.Read<Armor>()) sum += item.Component1.Value;
+        foreach (var item in world.Read<Armor>()) sum += item.Armor.Value;
         foreach (var item in world.Read<Armor, DynamicBuffer<DynamicBufferTests.Loot>>(QueryFilter.Create().With<Seen>())) sum += item.Component2.Count;
         Assert.That(sum, Is.EqualTo(10));
         Assert.That(world.Count<Armor>(changed), Is.Zero);                    // reading wrote nothing

@@ -36,7 +36,7 @@ public class AllocationTests
         {
             world.Update();
             foreach (var item in world.Query<Position, Velocity>()) item.Position.X += item.Velocity.X;
-            foreach (var item in world.Read<Armor, Seen>()) _ = item.Component1.Value + item.Component2.Count;
+            foreach (var item in world.Read<Armor, Seen>()) _ = item.Armor.Value + item.Seen.Count;
             _ = world.Count<Position, Velocity>(QueryFilter.Create());
             _ = world.Count<Armor>(QueryFilter.Create().Changed<Armor>(world.ChangeTick));
             named.Set(new Callsign(named.Callsign.Value == "a" ? "b" : "a")); // re-keyed every frame
