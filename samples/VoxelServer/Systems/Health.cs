@@ -24,7 +24,7 @@ public class PlayerRespawnSystem : EcsSystem
 {
     [ForEach, Changed<Health>]
     void Respawn(in Player player, Mut<Health> health, Mut<Position> position, ref Velocity velocity,
-        Mut<DynamicBuffer<ItemStack>> inventory, in Prefabs prefabs, ref Stats stats)
+        Mut<DynamicBuffer<ItemStack>> inventory, in Prefabs prefabs, in Clock clock, ref Stats stats)
     {
         if (health.Value.Value > 0) return;
         var died = position.Value.Value;
@@ -40,7 +40,8 @@ public class PlayerRespawnSystem : EcsSystem
 
         // Last: creating the items is a structural change, after which the refs into this row are not used again.
         var chunk = new InChunk(Terrain.ChunkOf(died));
+        var now = new Dropped(clock.Tick);
         foreach (var stack in dropped)
-            World.Instantiate(prefabs.Item, new Position(died), chunk, new Item(stack.Kind, stack.Count));
+            World.Instantiate(prefabs.Item, new Position(died), chunk, new Item(stack.Kind, stack.Count), now);
     }
 }

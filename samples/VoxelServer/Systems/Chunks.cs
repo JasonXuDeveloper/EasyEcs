@@ -4,27 +4,11 @@ using EasyEcs;
 namespace VoxelServer;
 
 // #region load
-// Asks for the chunks missing around a player who crossed into another chunk: one LoadRequest per chunk, found by its
-// unique index, so two players asking for the same chunk make one request. [Changed<InChunk>] visits only the players
-// that crossed (GridSystem writes InChunk only then) and the players just created: the view changes only there, so a
-// player who stays in its chunk asks for nothing.
-[UpdateInGroup<Simulation>]
-public class ChunkLoadSystem : EcsSystem
-{
-    [ForEach, With<Player>, Changed<InChunk>]
-    void Load(in InChunk center, in Vision vision)
-    {
-        foreach (var pos in Terrain.ChunksAround(center.Pos, vision.Range))
-            if (!World.ChunkIndex.TryGet(pos, out _) && !World.LoadRequestIndex.TryGet(pos, out _))
-                World.CreateEntity(new LoadRequest(pos));
-    }
-}
-
 // Brings in the chunks asked for: read back from the region files if one was unloaded before, or else generated: an
 // entity with its Chunk key and two buffers of 8,192 bytes, its blocks and its water (a spring in one chunk in four).
 // An OnUpdate, not a [ForEach]: LoadEntities may not run while a pass walks the world, so the requests are collected
 // first, then served, Rules.MaxRequests a tick at most; the others stay and are served the next tick. A new chunk is
-// Fresh: ChunkViewSystem sends it whole to the players near it, who become its viewers.
+// Fresh: InterestSystem sends it whole to the players near it, who become its viewers.
 [UpdateInGroup<Simulation>]
 public class ChunkReadSystem : EcsSystem
 {
@@ -59,8 +43,8 @@ public class ChunkReadSystem : EcsSystem
                 chunk = Generate(World, request.Pos);
                 stats.ChunksGenerated++;
             }
-            chunk.SetViewers(0, tick);
-            chunk.Set(new Fresh());
+            // What a chunk has from now on, read or generated, in one move: the save leaves out what it computes again.
+            chunk.Set(new Viewers(0, tick), new Fresh(), new Flowing(), new DynamicBuffer<Surface>(), new DynamicBuffer<Current>());
         }
     }
 
@@ -77,7 +61,7 @@ public class ChunkReadSystem : EcsSystem
             water[Terrain.IndexOf(x, Terrain.SurfaceHeight(x, z) + 1, z)] = new Fluid(Fluid.Spring);
         }
         var chunk = world.CreateEntity(new Chunk(pos), new DynamicBuffer<Block>(), new DynamicBuffer<Fluid>(),
-            new DynamicBuffer<NextFluid>());
+            new DynamicBuffer<NextFluid>(), new FluidCount(Rules.HasSpring(pos) ? 1 : 0));
         chunk.WriteBlock().AddRange(blocks);
         chunk.WriteFluid().AddRange(water);
         return chunk;
@@ -134,7 +118,7 @@ public class ChunkSaveSystem : EcsSystem
                 group[size++] = entity;
             }
             if (keep) continue;
-            World.SaveEntities(files.Buffer, group[..size]);
+            World.SaveEntitiesWithout(files.Buffer, group[..size], Derived);
             files.Write(pos);
             World.DestroyEntities(group[..size]);
             World.Stats.ChunksUnloaded++;
@@ -142,72 +126,9 @@ public class ChunkSaveSystem : EcsSystem
     }
 
     static readonly QueryFilter Unload = QueryFilter.Create().With<Unloading>();
+
+    // What a chunk computes again after a load, left out of its save: its height map and its current.
+    static readonly ComponentSet Derived = ComponentSet.Create().With<DynamicBuffer<Surface>>().With<DynamicBuffer<Current>>();
 }
 // #endregion unload
 
-// #region view
-// The chunks each player's client has, as a vanilla server tracks them: a loaded chunk that comes into the view is sent
-// whole and one that leaves it is forgotten. The set is a DynamicBuffer<InView> on the player. It changes only when the
-// player crosses into another chunk or a chunk near it finishes loading, and both are data: [Changed<InChunk>] visits
-// the players that crossed (GridSystem writes InChunk only then), [With<Fresh>] the chunks loaded this tick. A player
-// who stays in its chunk costs nothing, however many ticks go by. The chunks' Viewers follow the sets: a chunk that
-// comes into a view counts one more viewer, one that leaves it one less, and a chunk left with none notes since when.
-// The entities come and go with their chunk (spawn and despawn packets): the grid counts them (InChunkIndex.Count).
-[UpdateInGroup<Replication>]
-public class ChunkViewSystem : EcsSystem
-{
-    [ForEach, Changed<InChunk>]
-    void Moved(in InChunk center, in Vision vision, Mut<DynamicBuffer<InView>> view, in Clock clock, ref Stats stats)
-    {
-        Span<InView> now = stackalloc InView[Rules.ViewChunks];
-        int count = 0;
-        foreach (var chunk in Terrain.ChunksAround(center.Pos, vision.Range))
-            if (World.ChunkIndex.TryGet(chunk, out _) && count < now.Length) now[count++] = new InView(chunk);
-        now = now[..count];
-
-        var before = view.Value.AsReadOnlySpan();
-        int came = 0, left = 0;
-        foreach (var chunk in now)
-            if (!before.Contains(chunk))
-            {
-                World.ChunkIndex.Get(chunk.Chunk).Viewers.Count++;
-                stats.CameIntoView += World.InChunkIndex.Count(chunk.Chunk);
-                came++;
-            }
-        foreach (var chunk in before)
-            if (!now.Contains(chunk))
-            {
-                // Still loaded: a chunk is unloaded only when no view holds it.
-                ref var viewers = ref World.ChunkIndex.Get(chunk.Chunk).Viewers;
-                if (--viewers.Count == 0) viewers.EmptySince = clock.Tick;
-                stats.LeftView += World.InChunkIndex.Count(chunk.Chunk);
-                left++;
-            }
-        if (came == 0 && left == 0) return;
-
-        ref var buffer = ref view.Write();
-        buffer.Clear();
-        buffer.AddRange(now);
-        stats.ChunksSent += came;
-        stats.ChunksForgotten += left;
-    }
-
-    // A chunk loaded this tick joins the view of the players near it, through the grid. A player that crossed this
-    // tick has it already (Moved ran first).
-    [ForEach, With<Fresh>]
-    void Loaded(in Chunk key, ref Viewers viewers, ref Stats stats)
-    {
-        var item = new InView(key.Pos);
-        foreach (var near in Terrain.ChunksAround(key.Pos, Rules.PlayerVision))
-        foreach (var player in World.InChunkIndex.Find(near))
-        {
-            if (!player.HasPlayer || !Terrain.InReach(player.InChunk.Pos, key.Pos, player.Vision.Range)) continue;
-            if (player.InView.AsReadOnlySpan().Contains(item)) continue;
-            player.WriteInView().Add(item);
-            viewers.Count++;
-            stats.CameIntoView += World.InChunkIndex.Count(key.Pos);
-            stats.ChunksSent++;
-        }
-    }
-}
-// #endregion view

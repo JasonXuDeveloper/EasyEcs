@@ -15,16 +15,16 @@ What each file teaches, with its code, is on the docs site:
 
 | File | What it holds |
 |---|---|
-| [Components.cs](Components.cs) | blocks, chunks and their water, bodies, players with their `Input`, `Score`, inventory and `InView`, `Visible`, zombies, items, the singletons |
+| [Components.cs](Components.cs) | blocks, chunks with their water, height map and current, bodies, players with their `Input`, `Score`, inventory and `ViewCenter`, `Visible`, zombies, items, the singletons |
 | [Groups.cs](Groups.cs) | the three parts of a tick: `ClientInput`, `Simulation`, `Replication` |
 | [Rules.cs](Rules.cs) | the numbers of the game (ticks, speeds, damage, ranges) and the spawn points |
-| [Terrain.cs](Terrain.cs) | chunk coordinates, terrain generation, `Nearby` (the blocks and water around a body, one chunk lookup), the chunks around a point, `Wake` |
-| [Systems/Chunks.cs](Systems/Chunks.cs) | `ChunkLoadSystem`, `ChunkReadSystem`, `ChunkUnloadSystem`, `ChunkSaveSystem`, `ChunkViewSystem` |
-| [Systems/Water.cs](Systems/Water.cs) | `BlockUpdateSystem`, `WaterFlowSystem` (the stencil), `WaterCommitSystem`, `FloatSystem` |
+| [Terrain.cs](Terrain.cs) | chunk coordinates, terrain generation, `Nearby` (the blocks, water and height map around a body, one chunk lookup), the square of chunks around a point and the strip a view gains, `Wake` |
+| [Systems/Chunks.cs](Systems/Chunks.cs) | `ChunkReadSystem`, `ChunkUnloadSystem`, `ChunkSaveSystem` |
+| [Systems/Water.cs](Systems/Water.cs) | `BlockUpdateSystem` (the height map), `WaterFlowSystem` (the shader and the current), `WaterCommitSystem`, `FloatSystem` |
 | [Systems/Movement.cs](Systems/Movement.cs) | `PlayerMoveSystem`, `PhysicsSystem` (steps, walls, gravity), `GridSystem` (the entities by chunk) |
-| [Systems/Sight.cs](Systems/Sight.cs) | `SightSystem`: spawns and despawns of the entities that cross, appear and go |
-| [Systems/Zombies.cs](Systems/Zombies.cs) | `NightSpawnSystem`, `ZombieTargetSystem`, `ZombieChaseSystem`, `ZombieAttackSystem`, `CooldownSystem`, `SunlightSystem`, `BurnSystem`, `FireDamageSystem`, `ExtinguishSystem` |
-| [Systems/Items.cs](Systems/Items.cs) | `DigSystem`, `ItemAgeSystem`, `PickupSystem` and the inventory, `ItemExpirySystem` |
+| [Systems/Interest.cs](Systems/Interest.cs) | `InterestSystem`: what each client has, the chunks of its view and the entities in them, as players and entities cross, appear and go |
+| [Systems/Zombies.cs](Systems/Zombies.cs) | `NightSpawnSystem`, `ZombieTargetSystem`, `ZombieChaseSystem`, `ZombieAttackSystem`, `SunlightSystem`, `FireDamageSystem`, `ExtinguishSystem` |
+| [Systems/Items.cs](Systems/Items.cs) | `DigSystem`, `PickupSystem` and the inventory, `ItemExpirySystem` (the ordered index of drop ticks) |
 | [Systems/Health.cs](Systems/Health.cs) | `ZombieDeathSystem`, `PlayerRespawnSystem` |
 | [Systems/Replication.cs](Systems/Replication.cs) | `ClockSystem` (the first system of the simulation), `SendChunksSystem`, `SendEntitiesSystem` |
 | [Program.cs](Program.cs) | the world and its options, the prefabs, the systems in tick order, the players, the top diggers, the save on stop |
@@ -42,20 +42,20 @@ dotnet run -c Release --project samples/VoxelServer -- --schedule        # the o
 ## Expected output
 
 ```text
-tick   200 (day  ): 50 players, 84 chunks, 3481 water, 0 zombies, 59 items
-tick   400 (night): 50 players, 118 chunks, 6481 water, 43 zombies, 103 items
-tick   600 (day  ): 50 players, 146 chunks, 11142 water, 123 zombies, 103 items
-tick   800 (day  ): 50 players, 159 chunks, 12865 water, 13 zombies, 100 items
-tick  1000 (night): 50 players, 152 chunks, 12156 water, 50 zombies, 82 items
-tick  1200 (day  ): 50 players, 154 chunks, 12145 water, 131 zombies, 79 items
-chunks: 181 generated, 54 unloaded, 27 loaded back
-blocks dug: 585; items: 376 picked up, 230 expired
-zombies: 247 spawned, 116 burned, 411 hits; player deaths: 48
-water: 15813 cells filled, 17994 ticks of bodies carried
-view: 3928 chunks sent, 2678 forgotten; 43490 entities came into view, 11981 left it, 21249 despawned
-sent: 34218 block updates, 2790081 entity updates (48523 KiB)
-top diggers: player 8 (22) player 37 (21) player 35 (21)
-restarted from the save: 50 players, 154 chunks, 12145 water, 131 zombies; 27 chunks in the region files
+tick   200 (day  ): 50 players, 84 chunks, 3482 water, 0 zombies, 68 items
+tick   400 (night): 50 players, 109 chunks, 4679 water, 45 zombies, 120 items
+tick   600 (day  ): 50 players, 138 chunks, 9356 water, 131 zombies, 141 items
+tick   800 (day  ): 50 players, 123 chunks, 8975 water, 9 zombies, 114 items
+tick  1000 (night): 50 players, 138 chunks, 10207 water, 45 zombies, 102 items
+tick  1200 (day  ): 50 players, 135 chunks, 10088 water, 124 zombies, 92 items
+chunks: 166 generated, 67 unloaded, 36 loaded back
+blocks dug: 646; items: 374 picked up, 251 expired
+zombies: 252 spawned, 126 burned, 422 hits; player deaths: 46
+water: 13925 cells filled, 15974 ticks of bodies carried
+view: 4250 chunks sent, 3000 forgotten; 44386 entities came into view, 13223 left it, 23077 despawned
+sent: 36135 block updates, 2953644 entity updates (51340 KiB)
+top diggers: player 37 (24) player 34 (20) player 26 (20)
+restarted from the save: 50 players, 135 chunks, 10088 water, 124 zombies; 31 chunks in the region files
 ```
 
 The world, the springs, the bots and the spawns come from integer hashes, so every run prints the same. The chunks
@@ -65,8 +65,8 @@ spreads from the springs and fills the pits the bots dig; zombies rise each nigh
 stderr gets the timings, which depend on the machine: the average tick against the 50 ms budget, each system's
 average run and its allocations, and the size of the save. The allocations are the chunks' buffers while the pool has
 none to give back, the region files, and the tables and indexes growing to their peak. On a 4-core VM, 50 players
-take about 1 ms a tick and 2,000 players with 4,600 zombies about 5 ms, most of it in the water, the physics and the
-night spawns: the bots start packed on a strip 48 blocks wide, so every view is full.
+take under 1 ms a tick and 2,000 players with 4,600 zombies about 3.5 ms, most of it in the physics, the water and the
+pickups: the bots start packed on a strip 48 blocks wide, so every view is full.
 
 ## How it differs from a vanilla server
 

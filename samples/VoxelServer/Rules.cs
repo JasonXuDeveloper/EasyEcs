@@ -7,7 +7,7 @@ public static class Rules
 {
     public const int TicksPerSecond = 20;
     public const int DayLength = 600;          // 30 seconds a day, so a short run sees a night
-    public const float PlayerVision = 32;      // blocks a player sees: two chunks each way, 5 x 5 chunks loaded
+    public const float PlayerVision = 32;      // blocks every player sees: two chunks each way, 5 x 5 chunks loaded
     public const float ZombieVision = 35;      // blocks a zombie sees a player from: its follow range in Minecraft
     public const int LookEvery = TicksPerSecond / 2;   // ticks between two looks of a zombie for a player to hunt
     public const int UnloadAfter = 100;        // ticks a chunk stays loaded after the last player saw it
@@ -27,12 +27,11 @@ public static class Rules
     public const int StackSize = 64, InventorySlots = 36;
     public const int FlowDelay = 5;            // ticks before water spreads one block further
     public const float FloatSpeed = 0.1f;      // the upward speed water gives a humanoid; gravity takes 0.08 back
-    public const float Current = 0.15f;        // the push of the water next to a spring, in blocks per tick
+    public const float CurrentSpeed = 0.15f;   // the push of the water next to a spring, in blocks per tick
     public const int PositionBytes = 16;       // an entity update: the entity's id and its position
     public const int HealthBytes = 2;          // the health bar an update carries for a player or a zombie
     public const int MaxRequests = 256;        // chunks read or saved in one tick at most; the others wait a tick
     public const int MaxSaved = 512;           // entities a chunk takes to the region files at most, itself included
-    public const int ViewChunks = 81;          // chunks a view holds at most: 9 x 9, a vision of up to 64 blocks
 
     // The chunks a view reaches in each direction.
     public static int ChunksIn(float range) => (int)MathF.Ceiling(range / Terrain.Size);

@@ -1,10 +1,14 @@
+using System.Buffers;
+
 namespace VoxelServer;
 
 // Not part of the lesson: the disk. A vanilla server writes an unloaded chunk into a region file and reads it back
-// when a player comes near again; here the bytes of each chunk stay in memory, keyed by its position.
+// when a player comes near again; here the bytes of each chunk stay in memory, keyed by its position, in arrays rented
+// from the shared ArrayPool: a chunk read back gives its array back for the next chunk written.
 public sealed class RegionFiles
 {
-    readonly Dictionary<ChunkPos, byte[]> _chunks = new();
+    readonly Dictionary<ChunkPos, (byte[] Bytes, int Length)> _chunks = new();
+    byte[]? _read;                                   // the array of the last chunk read, returned on the next read
 
     // The bytes of the chunk being written, reused for every chunk.
     public Nino.Core.NinoArrayBufferWriter Buffer { get; } = new(16 * 1024);
@@ -14,9 +18,22 @@ public sealed class RegionFiles
     // Keeps what Buffer holds as the chunk at `pos`, and empties Buffer for the next one.
     public void Write(ChunkPos pos)
     {
-        _chunks[pos] = Buffer.WrittenSpan.ToArray();
+        var written = Buffer.WrittenSpan;
+        var bytes = ArrayPool<byte>.Shared.Rent(written.Length);
+        written.CopyTo(bytes);
+        _chunks[pos] = (bytes, written.Length);
         Buffer.ResetWrittenCount();
     }
 
-    public bool TryRead(ChunkPos pos, out byte[] bytes) => _chunks.Remove(pos, out bytes!);
+    // Takes the chunk at `pos` out of the files. The bytes stay valid until the next read.
+    public bool TryRead(ChunkPos pos, out ReadOnlySpan<byte> bytes)
+    {
+        if (_read != null) ArrayPool<byte>.Shared.Return(_read);
+        _read = null;
+        bytes = default;
+        if (!_chunks.Remove(pos, out var saved)) return false;
+        _read = saved.Bytes;
+        bytes = saved.Bytes.AsSpan(0, saved.Length);
+        return true;
+    }
 }

@@ -41,9 +41,10 @@ public class NightSpawnSystem : EcsSystem
 // #endregion spawn
 
 // #region target
-// A zombie hunts the nearest player within its Vision, found through the grid, and keeps hunting it while it stays
-// within reach, as a vanilla mob keeps its target. It looks twice a second, a tenth of the zombies each tick (Slices),
-// so a horde costs the same every tick; none in reach, it has no target and stands.
+// A zombie hunts the nearest player within its Vision, found through the index of the players' view centers (players
+// only: the zombies and items of a chunk are not walked), and keeps hunting it while it stays within reach, as a
+// vanilla mob keeps its target. It looks twice a second, a tenth of the zombies each tick (Slices), so a horde costs
+// the same every tick; none in reach, it has no target and stands.
 [UpdateInGroup<Simulation>]
 public class ZombieTargetSystem : EcsSystem
 {
@@ -55,9 +56,8 @@ public class ZombieTargetSystem : EcsSystem
             && (hunting.Position.Value - position.Value).LengthSquared() <= nearest) return;   // still in reach
         EntityId hunted = default;
         foreach (var chunk in Terrain.ChunksAround(at.Pos, vision.Range))
-        foreach (var other in World.InChunkIndex.Find(chunk))
+        foreach (var other in World.ViewCenterIndex.Find(chunk))
         {
-            if (!other.HasPlayer) continue;
             float distance = (other.Position.Value - position.Value).LengthSquared();
             if (distance >= nearest) continue;
             nearest = distance;
@@ -97,36 +97,23 @@ public class ZombieChaseSystem : EcsSystem
 // #endregion chase
 
 // #region attack
-// A zombie close to the player it hunts hits it, then waits a second. The cooldown counts down in its own system
-// (CooldownSystem), whatever the zombie does meanwhile.
+// A zombie close to the player it hunts hits it, then waits a second: its Cooldown is the tick it may hit again, so a
+// zombie that waits costs one comparison and no system counts the cooldowns down.
 [UpdateInGroup<Simulation>]
 public class ZombieAttackSystem : EcsSystem
 {
     [ForEach, With<Zombie>]
-    void Attack(in Position position, in Target target, ref Cooldown cooldown, ref Stats stats)
+    void Attack(in Position position, in Target target, ref Cooldown cooldown, in Clock clock, ref Stats stats)
     {
-        if (cooldown.Ticks > 0 || !World.TryGetEntity(target.Player, out var player) || player.Health.Value <= 0) return;
+        if (clock.Tick < cooldown.Until || !World.TryGetEntity(target.Player, out var player) || player.Health.Value <= 0) return;
         var to = player.Position.Value - position.Value;
         if (new Vector2(to.X, to.Z).LengthSquared() >= 1.2f * 1.2f || MathF.Abs(to.Y) >= 1.5f) return;
         player.SetHealth(player.Health.Value - Rules.ZombieDamage);
-        cooldown = new Cooldown(Rules.TicksPerSecond);
+        cooldown = new Cooldown(clock.Tick + Rules.TicksPerSecond);
         stats.Hits++;
     }
 }
 
-// Counts every cooldown down to zero: the same arithmetic over a column, 8 per instruction (4 on Arm).
-[UpdateInGroup<Simulation>]
-public class CooldownSystem : EcsSystem
-{
-    [ForEach]
-    static void Tick(Span<Cooldown> cooldowns)
-    {
-        var values = MemoryMarshal.Cast<Cooldown, int>(cooldowns);
-        var lanes = MemoryMarshal.Cast<int, Vector<int>>(values);
-        for (int i = 0; i < lanes.Length; i++) lanes[i] = Vector.Max(lanes[i] - Vector<int>.One, Vector<int>.Zero);
-        for (int i = lanes.Length * Vector<int>.Count; i < values.Length; i++) values[i] = Math.Max(values[i] - 1, 0);
-    }
-}
 // #endregion attack
 
 // #region sunlight
@@ -145,32 +132,18 @@ public class SunlightSystem : EcsSystem
             if (zombie.HasBurning) zombie.RemoveBurning();
             return;
         }
-        if (!Rules.IsNight(clock) && near.UnderSky(feet)) zombie.SetBurning(Rules.BurnFor);
+        if (!Rules.IsNight(clock) && near.UnderSky(feet)) zombie.SetBurning(clock.Tick + Rules.BurnFor);
     }
 }
 // #endregion sunlight
 
 // #region burn
-// Fire burns down by one tick, and every Rules.BurnEvery ticks it hurts: two systems, each a batch method over one
-// column, 8 rows per instruction with Vector<int> (4 on Arm; the JIT does not vectorize the loops by itself, and
-// integer lanes give the same result on every machine). The hurt has its own system so that the cadence is the
-// system's (UpdateInterval), not a branch per tick: Health is tracked, and a batch method writing it stamps its whole
-// run, so it is written only on the ticks that hurt and the death systems ([Changed<Health>]) find nothing to do on
-// the others. Putting the fire out is a structural change, which a batch method may not make (its spans point into
-// the table), so it is the next system's job.
-[UpdateInGroup<Simulation>]
-public class BurnSystem : EcsSystem
-{
-    [ForEach]
-    static void Burn(Span<Burning> fire)
-    {
-        var ticks = MemoryMarshal.Cast<Burning, int>(fire);
-        var lanes = MemoryMarshal.Cast<int, Vector<int>>(ticks);
-        for (int i = 0; i < lanes.Length; i++) lanes[i] -= Vector<int>.One;
-        for (int i = lanes.Length * Vector<int>.Count; i < ticks.Length; i++) ticks[i]--;   // the rows left over
-    }
-}
-
+// Every Rules.BurnEvery ticks the fire hurts: a batch method over the Health column of the burning zombies, 8 rows per
+// instruction with Vector<int> (4 on Arm; the JIT does not vectorize the loop by itself, and integer lanes give the
+// same result on every machine). The cadence is the system's (UpdateInterval), not a branch per tick: Health is
+// tracked, and a batch method writing it stamps its whole run, so it is written only on the ticks that hurt and the
+// death systems ([Changed<Health>]) find nothing to do on the others. Putting the fire out is a structural change,
+// which a batch method may not make (its spans point into the table), so it is the next system's job.
 [UpdateInGroup<Simulation>]
 public class FireDamageSystem : EcsSystem
 {
@@ -182,7 +155,7 @@ public class FireDamageSystem : EcsSystem
         var points = MemoryMarshal.Cast<Health, int>(health);
         var lanes = MemoryMarshal.Cast<int, Vector<int>>(points);
         for (int i = 0; i < lanes.Length; i++) lanes[i] -= Vector<int>.One;
-        for (int i = lanes.Length * Vector<int>.Count; i < points.Length; i++) points[i]--;
+        for (int i = lanes.Length * Vector<int>.Count; i < points.Length; i++) points[i]--;   // the rows left over
     }
 }
 
@@ -191,9 +164,9 @@ public class FireDamageSystem : EcsSystem
 public class ExtinguishSystem : EcsSystem
 {
     [ForEach]
-    static void Out(Entity entity, in Burning fire)
+    static void Out(Entity entity, in Burning fire, in Clock clock)
     {
-        if (fire.Ticks <= 0) entity.RemoveBurning();
+        if (clock.Tick >= fire.Until) entity.RemoveBurning();
     }
 }
 // #endregion burn

@@ -20,15 +20,15 @@ public record struct Chunk(ChunkPos Pos) : IComponent, IUniqueIndexed<ChunkPos>
     ChunkPos IIndexed<ChunkPos>.Key => Pos;
 }
 
-// A chunk a player needs that is not loaded: ChunkLoadSystem records it as an entity, one per chunk (the unique index),
+// A chunk a player needs that is not loaded: InterestSystem records it as an entity, one per chunk (the unique index),
 // and ChunkReadSystem reads or generates it after the pass (a pass may not load entities, EECS041).
 public record struct LoadRequest(ChunkPos Pos) : IComponent, IUniqueIndexed<ChunkPos>
 {
     ChunkPos IIndexed<ChunkPos>.Key => Pos;
 }
 
-// A tag on a chunk loaded this tick: its clients get it whole (ChunkViewSystem), so SendChunksSystem does not send its
-// blocks as changes. SendChunksSystem removes it.
+// A tag on a chunk loaded this tick: its clients get it whole, with what is in it (InterestSystem), so neither its
+// blocks (SendChunksSystem) nor its entities (a spawn per entity) are sent as changes. SendChunksSystem removes it.
 public struct Fresh : IComponent;
 
 // A tag on a chunk nobody saw for a while: ChunkSaveSystem writes it and what is in it to the region files and
@@ -36,8 +36,8 @@ public struct Fresh : IComponent;
 public struct Unloading : IComponent;
 
 // The players that have the chunk in view, and since when none has: who is sent what happens in it, and whether it can
-// be unloaded. ChunkViewSystem keeps it as the players' views change; ChunkUnloadSystem frees the chunks nobody has
-// seen for a while.
+// be unloaded. InterestSystem keeps it as the players' views move; ChunkUnloadSystem frees the chunks nobody has seen
+// for a while.
 public record struct Viewers(int Count, long EmptySince) : IComponent;
 
 // ---- Water ----
@@ -56,8 +56,25 @@ public record struct Fluid(byte Level)
 // step, as a GPU ping-pongs two buffers. Empty between two steps.
 public record struct NextFluid(byte Level);
 
+// The height map of a chunk, as Minecraft keeps one: a DynamicBuffer<Surface> of 256, the highest solid block of each
+// column (x + 16 z). BlockUpdateSystem computes it when the blocks change; whatever asks whether the sky reaches a
+// block, or where the ground of a column is, reads one byte instead of scanning the column. Not saved, like the
+// current: a loaded chunk computes it again.
+public record struct Surface(byte Top);
+
+// The current of a chunk's water: a DynamicBuffer<Current> of two planes in the layout of Fluid, the slope toward x
+// for every block, then toward z. WaterFlowSystem writes it with each step, FloatSystem pushes bodies along it.
+// Derived from the water, so it is not saved with the chunk: a loaded chunk gets it back with its first step.
+public record struct Current(sbyte Value);
+
+// The blocks of water a chunk holds: WaterFlowSystem counts them with each step (one vectorized count), FloatSystem
+// skips the dry chunks, and the report sums the column.
+public record struct FluidCount(int Blocks) : IComponent;
+
 // A tag on a chunk whose water may still move: WaterFlowSystem visits only these. A chunk loses it when a step changed
-// nothing, and gets it back when a block is dug in it or the water of a neighbour changed.
+// nothing, and gets it back when a block is dug in it or the water of a neighbour changed. Every chunk is created with
+// it (its water steps once), so its table has the column: losing it and getting it back flips a presence bit, the
+// chunk stays in its table, and a pass that wakes the chunks beside it still visits them.
 public struct Flowing : IComponent;
 
 // ---- Everything that moves: players, zombies, dropped items ----
@@ -74,15 +91,14 @@ public record struct Body(bool OnGround, bool Blocked) : IComponent;
 // ITracked: the systems that handle a death visit only the healths written ([Changed<Health>]).
 public record struct Health(int Value) : IComponent, ITracked;
 
-// How far a player or a zombie sees, in blocks: each prefab sets its own. A player's view is the square of chunks it
-// reaches: the chunks loaded around it and sent to its client, with the entities in them. A zombie hunts the players
-// within it.
+// How far a zombie sees a player from, in blocks: it hunts the players within it. (A player's view is not a component:
+// every player sees Rules.PlayerVision around its ViewCenter.)
 public record struct Vision(float Range) : IComponent;
 
 // The chunk an entity that moves is in: players, zombies and items. An index of them by chunk
 // (world.InChunkIndex.Find(chunk)), the grid through which players and zombies see who is near. GridSystem keeps it
-// current and writes it only when the entity crosses into another chunk; ITracked, so ChunkViewSystem visits only the
-// players that crossed.
+// current and writes it only when the entity crosses into another chunk; ITracked, so InterestSystem visits only the
+// entities that crossed.
 public record struct InChunk(ChunkPos Pos) : IComponent, IIndexed<ChunkPos>, ITracked
 {
     ChunkPos IIndexed<ChunkPos>.Key => Pos;
@@ -99,14 +115,20 @@ public record struct Score(int BlocksDug) : IComponent, IIndexed<int>
     int IIndexed<int>.Key => BlocksDug;
 }
 
-// The chunk the clients see an entity in (Placed once it has one): what SightSystem compares a crossing with. A
-// cleanup component: a destroyed entity keeps it, Retired, until SightSystem has despawned it for that chunk's
+// The chunk the clients see an entity in (Placed once it has one): what InterestSystem compares a crossing with. A
+// cleanup component: a destroyed entity keeps it, Retired, until InterestSystem has despawned it for that chunk's
 // viewers.
 public record struct Visible(ChunkPos Chunk, bool Placed) : ICleanupComponent;
 
-// One chunk a player's client has: a DynamicBuffer<InView> on the player, the loaded chunks of its view. A chunk that
-// comes into view is sent whole; one that leaves it is forgotten by the client.
-public record struct InView(ChunkPos Chunk);
+// The chunk a player's view is centered on: its client has the loaded chunks of the square of Rules.PlayerVision around
+// it, so the view is this one value, not a list of chunks. InterestSystem moves it when the player crosses into another
+// chunk, after sending what the step brings into view and forgetting what it takes out. An index of the players by it
+// (world.ViewCenterIndex) counts the players of a chunk in O(1): who sees a chunk, who a zombie can hunt, who picks up
+// an item. A cleanup component: a player who leaves keeps it, Retired, until InterestSystem has released its view.
+public record struct ViewCenter(ChunkPos Chunk) : ICleanupComponent, IIndexed<ChunkPos>
+{
+    ChunkPos IIndexed<ChunkPos>.Key => Chunk;
+}
 
 // What the client asked for this tick: a direction to walk in (x, z) and a dig of the block underfoot.
 public record struct Input(Vector2 Walk, bool Dig) : IComponent;
@@ -122,18 +144,23 @@ public struct Zombie : IComponent;
 // (TryGetEntity fails).
 public record struct Target(EntityId Player) : IComponent;
 
-// Ticks until a zombie may hit again.
-public record struct Cooldown(int Ticks) : IComponent;
+// The tick from which a zombie may hit again. A time, not a count of ticks left: nothing has to count it down.
+public record struct Cooldown(long Until) : IComponent;
 
-// A zombie in daylight is on fire for this many more ticks, as in Minecraft: the fire hurts every Rules.BurnEvery
-// ticks and goes on burning for a while after the zombie found shade.
-public record struct Burning(int Ticks) : IComponent;
+// A zombie in daylight is on fire until this tick, as in Minecraft: the fire hurts every Rules.BurnEvery ticks and
+// goes on burning for a while after the zombie found shade. A time too: the sun moves it on, nothing counts it down.
+public record struct Burning(long Until) : IComponent;
 
 // A stack of dug blocks lying on the ground, for any player who walks over it.
 public record struct Item(Block Kind, int Count) : IComponent;
 
-// Ticks since an item was dropped: it can be picked up after Rules.PickupDelay and is gone after Rules.ItemLifetime.
-public record struct Age(int Ticks) : IComponent;
+// The tick an item was dropped: it can be picked up Rules.PickupDelay ticks later and is gone Rules.ItemLifetime ticks
+// later. An ordered index of the items by it (world.DroppedIndex.Range) finds the items that expire without visiting
+// the others: the oldest come first.
+public record struct Dropped(long Tick) : IComponent, IIndexed<long>
+{
+    long IIndexed<long>.Key => Tick;
+}
 
 // ---- Singletons: one value per world ----
 

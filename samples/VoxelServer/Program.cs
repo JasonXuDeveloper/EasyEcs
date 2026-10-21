@@ -9,11 +9,13 @@ int players = Support.Option(args, "--players", 50);
 int ticks = Support.Option(args, "--ticks", 1200);
 
 // #region options
-// A chunk's blocks, its water and the water's next step are 8 KB each, more than a buffer's pool keeps by default: let each loaded chunk
+// A chunk's blocks, its water and the water's next step are 8 KB each (its current 16 KB), more than a buffer's pool keeps by default: let each loaded chunk
 // reuse the lists of one that was unloaded.
 DynamicBuffer<Block>.PoolCapacity = Terrain.BlocksPerChunk;
 DynamicBuffer<Fluid>.PoolCapacity = Terrain.BlocksPerChunk;
 DynamicBuffer<NextFluid>.PoolCapacity = Terrain.BlocksPerChunk;
+DynamicBuffer<Current>.PoolCapacity = 2 * Terrain.BlocksPerChunk;
+DynamicBuffer<Surface>.PoolCapacity = Terrain.Size * Terrain.Size;
 
 using var world = new World(new WorldOptions { MeasureSystems = true });
 // #endregion options
@@ -29,7 +31,6 @@ SetPrefabs(world);
 // is sent back.
 world.AddSystem<FakeClientsSystem>();
 world.AddSystem<ClockSystem>();
-world.AddSystem<ChunkLoadSystem>();
 world.AddSystem<ChunkReadSystem>();
 world.AddSystem<BlockUpdateSystem>();
 world.AddSystem<WaterFlowSystem>();
@@ -38,25 +39,21 @@ world.AddSystem<PlayerMoveSystem>();
 world.AddSystem<ZombieTargetSystem>();
 world.AddSystem<ZombieChaseSystem>();
 world.AddSystem<ZombieAttackSystem>();
-world.AddSystem<CooldownSystem>();
 world.AddSystem<PlayerRespawnSystem>();
 world.AddSystem<FloatSystem>();
 world.AddSystem<PhysicsSystem>();
 world.AddSystem<GridSystem>();
 world.AddSystem<DigSystem>();
-world.AddSystem<ItemAgeSystem>();
 world.AddSystem<PickupSystem>();
 world.AddSystem<ItemExpirySystem>();
 world.AddSystem<NightSpawnSystem>();
 world.AddSystem<SunlightSystem>();
-world.AddSystem<BurnSystem>();
 world.AddSystem<FireDamageSystem>();
 world.AddSystem<ExtinguishSystem>();
 world.AddSystem<ZombieDeathSystem>();
 world.AddSystem<ChunkUnloadSystem>();
 world.AddSystem<ChunkSaveSystem>();
-world.AddSystem<ChunkViewSystem>();
-world.AddSystem<SightSystem>();
+world.AddSystem<InterestSystem>();
 world.AddSystem<SendChunksSystem>();
 world.AddSystem<SendEntitiesSystem>();
 // #endregion systems
@@ -108,12 +105,12 @@ Console.Error.WriteLine($"save: {save.WrittenCount / 1024} KiB");
 // #endregion save
 
 // #region prefabs
-// The recipes players, zombies and items are created from: every start builds them. Players and zombies differ in
-// what they see: each prefab carries its own Vision.
+// The recipes players, zombies and items are created from: every start builds them. A zombie carries the Vision it
+// hunts within; a player's view is Rules.PlayerVision, the same for every player (InterestSystem).
 static void SetPrefabs(World world) =>
     world.SetPrefabs(
         Player: new Prefab()
-            .SetPlayer(0).SetVision(Rules.PlayerVision).SetInChunk(default).SetVisible(default, false).SetScore(0).SetBuffer<InView>()
+            .SetPlayer(0).SetInChunk(default).SetVisible(default, false).SetScore(0)
             .SetPosition(default).SetVelocity(default).SetBody(false, false)
             .SetHealth(Rules.PlayerHealth).SetInput(default, false).SetBuffer<ItemStack>(),
         Zombie: new Prefab()
@@ -122,5 +119,5 @@ static void SetPrefabs(World world) =>
             .SetHealth(Rules.ZombieHealth).SetCooldown(0),
         Item: new Prefab()
             .SetItem(default, 1).SetInChunk(default).SetVisible(default, false).SetPosition(default).SetVelocity(new System.Numerics.Vector3(0, 0.2f, 0))
-            .SetBody(false, false).SetAge(0));
+            .SetBody(false, false).SetDropped(0));
 // #endregion prefabs

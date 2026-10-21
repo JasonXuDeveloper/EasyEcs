@@ -66,24 +66,23 @@ public static class Terrain
     // The chunks a view of `range` blocks reaches around `center`: foreach (var chunk in Terrain.ChunksAround(...)).
     public static ChunkSquare ChunksAround(ChunkPos center, float range) => new(center, Rules.ChunksIn(range));
 
+    // The chunks a view of `range` blocks around `center` reaches and one around `other` does not.
+    public static ChunkStrip Gained(ChunkPos center, ChunkPos other, float range) => new(center, other, true, range);
+
 
     // The water of a chunk and of its four neighbours may move again: a block changed at `pos`, or water beside it.
     public static void Wake(World world, ChunkPos pos)
     {
-        foreach (var near in ChunksAround(pos, Size))
-            if (near.X == pos.X || near.Z == pos.Z)
-                if (world.ChunkIndex.TryGet(near, out var chunk)) chunk.Set(new Flowing());
+        ReadOnlySpan<(int Dx, int Dz)> sides = [(0, 0), (0, -1), (0, 1), (-1, 0), (1, 0)];
+        foreach (var (dx, dz) in sides)
+            if (world.ChunkIndex.TryGet(new ChunkPos(pos.X + dx, pos.Z + dz), out var chunk)) chunk.Set(new Flowing());
     }
 
     // The blocks of water in the world, for the report.
     public static int WaterIn(World world)
     {
         int count = 0;
-        foreach (var chunk in world.Read<DynamicBuffer<Fluid>>())
-        {
-            var levels = System.Runtime.InteropServices.MemoryMarshal.Cast<Fluid, byte>(chunk.Component1.AsReadOnlySpan());
-            count += levels.Length - levels.Count((byte)0);   // Count is vectorized
-        }
+        foreach (var chunk in world.Read<FluidCount>()) count += chunk.FluidCount.Blocks;
         return count;
     }
 }
@@ -100,6 +99,7 @@ public ref struct Nearby(World world)
     Entity _chunk;                     // default when the chunk is not loaded
     ReadOnlySpan<Block> _blocks;       // empty until read: a loaded chunk's buffers never are
     ReadOnlySpan<Fluid> _water;
+    ReadOnlySpan<Surface> _surface;
 
     // The block at a position. A chunk that is not loaded counts as stone, so nothing falls out of the world.
     public Block Block(int x, int y, int z)
@@ -121,14 +121,12 @@ public ref struct Nearby(World world)
         return _water[Terrain.IndexOf(at.X, at.Y, at.Z)].Level;
     }
 
-    // The highest solid block of a column, -1 if its chunk is not loaded.
+    // The highest solid block of a column, from the chunk's height map; -1 if its chunk is not loaded.
     public int Top(int x, int z)
     {
         if (!Look(x, z)) return -1;
-        var blocks = Blocks();
-        int y = Terrain.Height - 1;
-        while (y > 0 && blocks[Terrain.IndexOf(x, y, z)] == VoxelServer.Block.Air) y--;
-        return y;
+        if (_surface.IsEmpty) _surface = _chunk.Surface.AsReadOnlySpan();
+        return _surface[(z & 15) * Terrain.Size + (x & 15)].Top;
     }
 
     // Whether nothing solid is above a block: the sky reaches it.
@@ -149,8 +147,28 @@ public ref struct Nearby(World world)
         _pos = pos;
         _blocks = default;
         _water = default;
+        _surface = default;
         if (!world.ChunkIndex.TryGet(pos, out _chunk)) _chunk = default;
         return _chunk != default;
+    }
+}
+
+// The chunks of the square around `center` that the square around `other` does not hold (all of them without an
+// other): what a view gains when it moves from `other` to `center`, and, the other way round, what it loses. A step
+// into the next chunk is a strip of one row of the square; a jump (a respawn) is the whole square.
+public ref struct ChunkStrip(ChunkPos center, ChunkPos other, bool hasOther, float range)
+{
+    ChunkSquare _square = Terrain.ChunksAround(center, range);
+
+    public readonly ChunkStrip GetEnumerator() => this;
+
+    public readonly ChunkPos Current => _square.Current;
+
+    public bool MoveNext()
+    {
+        while (_square.MoveNext())
+            if (!hasOther || !Terrain.InReach(other, _square.Current, range)) return true;
+        return false;
     }
 }
 
