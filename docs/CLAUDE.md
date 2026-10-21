@@ -9,8 +9,9 @@ deployed to Cloudflare Pages. English and Chinese. How to write a page: `WRITING
 bun install
 bun run dev              # http://localhost:5173
 bun run check            # tsc, Biome, links + anchors + icons (scripts/lint-links.ts), Chinese terms (lint-terms.ts)
-bun run build            # Chromium check, git history, benchmark sync, prerender, then scripts/after-build.ts (static files
-                         # -> build/client and lint:seo in one process: the pages compile once), lint:search
+bun run build            # Chromium check, git history, benchmark sync, prerender with scripts/after-build.ts (an entry of
+                         # the server build, on the pages the prerender compiled: social cards drawn during the
+                         # prerender, then the static files -> build/client and lint:seo), lint:search
 bun run lint:seo         # titles, descriptions, canonical, hreflang, cards, JSON-LD, sitemap, robots, llms files
 bun run lint:terms       # the Chinese pages use the glossary's terms (tools/ApiDocs/zh/README.md)
 bun run lint:search      # each query of scripts/search-expectations.json finds its page in the built search index
@@ -159,10 +160,11 @@ scripts/                 generate-static.ts, og.ts, lint-links.ts, lint-seo.ts, 
 
 ## Diagrams and page weight
 
-- ```mermaid fences are drawn at build time by `rehypeMermaid` (`src/lib/mermaid.ts`: mermaid-isomorphic, Mermaid in a
-  headless Chromium through Playwright): the prerendered page holds the SVG, the browser loads no Mermaid. A page's
-  SVGs are cached by its diagrams and the Mermaid version, in memory (the build's second environment) and in
-  `node_modules/.cache/mermaid` (later builds); the scripts (`--mode scripts`) skip drawing. One drawing in
+- ```mermaid fences are drawn at build time by `rehypeMermaid` (`src/lib/mermaid.ts`: Mermaid in a headless Chromium
+  through Playwright, on mermaid-isomorphic's page, a few tabs that load Mermaid once and draw page after page): the
+  prerendered page holds the SVG, the browser loads no Mermaid. A page's SVGs are cached by its diagrams and the
+  Mermaid version, in memory (the build's second environment) and in `node_modules/.cache/mermaid` (later local
+  builds; Cloudflare keeps no `node_modules` between builds); the scripts (`--mode scripts`) skip drawing. One drawing in
   Mermaid's grayscale `neutral` theme; the dark site shows it inverted (`src/components/mermaid.tsx`). The `chart`
   attribute keeps the source for the Markdown copies. `bun run dev` and `bun run build` need a Chromium:
   `scripts/chromium.ts` (first step of the build) installs Playwright's headless shell when none starts.
