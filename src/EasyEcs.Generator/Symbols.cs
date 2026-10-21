@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
 
@@ -695,22 +696,63 @@ internal static class Symbols
         ["Id", "Version", "IsAlive", "Has", "Get", "Read", "TryGet", "TryGetRef", "IsDisabled"];
 
     /// <summary>
-    /// Whether every use of parameter <paramref name="name"/> in the method body is a read-only member access
-    /// (<c>entity.Id</c>, <c>entity.Has&lt;T&gt;()</c>, ...). Syntax only and conservative: any other use (passing the
-    /// entity on, <c>entity.World</c>, a structural change) answers false.
+    /// Entity members that read the handle and its entity's record only, no component: <c>Get</c> writes, <c>Has</c>
+    /// reads a table another system may change in the same stage.
     /// </summary>
-    private static bool OnlyReads(MethodDeclarationSyntax method, string name, SemanticModel model)
+    private static readonly HashSet<string> IdentityEntityMembers = ["Id", "Version", "IsAlive"];
+
+    /// <summary>
+    /// Whether every use of parameter <paramref name="name"/> in the method body is a read-only member access
+    /// (<c>entity.Id</c>, <c>entity.Has&lt;T&gt;()</c>, ...) or an identity use (<see cref="IsIdentityUse"/>). Syntax
+    /// first and conservative: any other use (passing the entity on, <c>entity.World</c>, a structural change) answers false.
+    /// </summary>
+    private static bool OnlyReads(MethodDeclarationSyntax method, string name, SemanticModel model) =>
+        EveryUse(method, name, use => use.Parent is MemberAccessExpressionSyntax access && access.Expression == use
+            && (ReadOnlyEntityMembers.Contains(MemberName(access)) || GeneratedRead(model, access, MemberName(access)))
+            || IsIdentityUse(model, use));
+
+    /// <summary>
+    /// Whether the method uses its <c>Entity</c> parameters only as identities: <c>Id</c>, <c>Version</c>,
+    /// <c>IsAlive</c>, <c>==</c> / <c>!=</c>, or converted to an <c>EntityId</c>. Such a method reaches no component
+    /// through them, so its system is scheduled by its other parameters instead of running alone. Conservative: any
+    /// other use (a method call on the entity, passing the handle on) answers false.
+    /// </summary>
+    public static bool OnlyIdentifies(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model)
+    {
+        (syntax, model) = WithBody(method, syntax, model);
+        foreach (var p in method.Parameters)
+            if (Classify(p) == ParamKind.Entity && !EveryUse(syntax, p.Name, use => IsIdentityUse(model, use)))
+                return false;
+        return true;
+    }
+
+    /// <summary>
+    /// An identity use of an entity handle: <c>e.Id</c>, <c>e.Version</c>, <c>e.IsAlive</c>, an operand of Entity's or
+    /// EntityId's <c>==</c> / <c>!=</c>, or the handle converted to an <c>EntityId</c> (its implicit conversion: a
+    /// copy of the id, passed or stored).
+    /// </summary>
+    private static bool IsIdentityUse(SemanticModel model, IdentifierNameSyntax use)
+    {
+        if (use.Parent is MemberAccessExpressionSyntax access && access.Expression == use)
+            return access.Name is IdentifierNameSyntax && IdentityEntityMembers.Contains(MemberName(access)); // properties: never called
+        if (use.Parent is BinaryExpressionSyntax binary && binary.Kind() is SyntaxKind.EqualsExpression or SyntaxKind.NotEqualsExpression)
+            return model.GetSymbolInfo(binary).Symbol is IMethodSymbol { MethodKind: MethodKind.UserDefinedOperator, ContainingType: { } op }
+                && op.ToDisplayString() is Entity or EntityId;
+        var type = model.GetTypeInfo(use);
+        return type.Type?.ToDisplayString() == Entity && type.ConvertedType?.ToDisplayString() == EntityId;
+    }
+
+    private static string MemberName(MemberAccessExpressionSyntax access) =>
+        access.Name is GenericNameSyntax generic ? generic.Identifier.ValueText : access.Name.Identifier.ValueText;
+
+    /// <summary>Whether <paramref name="test"/> holds for every use of <paramref name="name"/> in the method's body (false without one).</summary>
+    private static bool EveryUse(MethodDeclarationSyntax method, string name, System.Func<IdentifierNameSyntax, bool> test)
     {
         SyntaxNode? body = (SyntaxNode?)method.Body ?? method.ExpressionBody;
         if (body == null) return false;
         foreach (var identifier in body.DescendantNodes().OfType<IdentifierNameSyntax>())
-        {
-            if (identifier.Identifier.ValueText != name) continue;
-            if (identifier.Parent is not MemberAccessExpressionSyntax access || access.Expression != identifier) return false;
-            var member = access.Name is GenericNameSyntax generic ? generic.Identifier.ValueText : access.Name.Identifier.ValueText;
-            if (!ReadOnlyEntityMembers.Contains(member) && !GeneratedRead(model, access, member)) return false;
-        }
-
+            if (identifier.Identifier.ValueText == name && !test(identifier))
+                return false;
         return true;
     }
 

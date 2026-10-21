@@ -221,21 +221,23 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
     /// <summary>
     /// <c>ref</c> parameters are writes, <c>in</c> parameters reads. Anything that can reach the world beyond its
-    /// parameters (Entity / EntitySpan / World parameters, instance methods that see <c>World</c>, an OnUpdate override)
-    /// runs alone.
+    /// parameters (EntitySpan / World parameters, an Entity parameter used for more than its identity, instance methods
+    /// that see <c>World</c>, an OnUpdate override) runs alone.
     /// </summary>
     private static void EmitAccess(StringBuilder sb, UpdateModel model)
     {
         sb.Append("        protected override void Access(ref global::EasyEcs.SystemAccess access)\n        {\n");
         bool alone = model.Owner.OverridesOnUpdate || model.Methods.Any(m => !m.IsStatic
-            || m.Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.Entities or Symbols.ParamKind.World));
+            || m.Parameters.Any(p => p.Kind is Symbols.ParamKind.Entities or Symbols.ParamKind.World
+                || p.Kind == Symbols.ParamKind.Entity && !m.Identifies));
         if (alone)
         {
             sb.Append("            access.RunsAlone();\n        }\n");
             return;
         }
 
-        foreach (var p in model.Methods.SelectMany(m => m.Parameters).Select(p => (p.Kind, p.Type, p.RefKind)).Distinct())
+        foreach (var p in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind != Symbols.ParamKind.Entity)
+                     .Select(p => (p.Kind, p.Type, p.RefKind)).Distinct())
         {
             string kind = p.Kind == Symbols.ParamKind.Singleton ? "Singleton" : "";
             sb.Append($"            access.{(p.RefKind == "ref" ? "Write" : "Read")}{kind}<{p.Type}>();\n");
@@ -432,6 +434,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
         /// <summary>[ForEach(Slices = N)]: visits one of N slices of its rows per run (1: all of them).</summary>
         public int Slices { get; init; } = 1;
 
+        /// <summary>Uses its Entity parameters (if any) only as identities (<see cref="Symbols.OnlyIdentifies"/>).</summary>
+        public bool Identifies { get; init; }
+
         /// <summary>The filter argument of a sliced method: its filter (or none) cut to slice <paramref name="slice"/>.</summary>
         public string Sliced(string filter, string slice) =>
             $", {(HasFilter ? filter : "global::EasyEcs.QueryFilter.Create()")}.Slice({slice}, {Slices})";
@@ -558,7 +563,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
                 new EquatableArray<string>(method.TypeParameters.Select(t => t.Name).ToArray()),
                 // A public entry point names only public types: its context parameters' and its constraints'.
                 method.Parameters.Where(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Context).All(p => Symbols.IsPublic(p.Type))
-                    && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) { Slices = Symbols.Slices(method) };
+                    && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) { Slices = Symbols.Slices(method), Identifies = Symbols.OnlyIdentifies(method, syntax, model) };
         }
     }
 
@@ -571,7 +576,8 @@ public sealed class SystemGenerator : IIncrementalGenerator
 
     /// <summary>
     /// A closed type of a generic system with [ForEach] methods, named in this assembly: <c>AddSystem&lt;Regen&lt;Health&gt;&gt;()</c>,
-    /// <c>new Regen&lt;Health&gt;()</c>, or a base type (<c>class X : Regen&lt;Health&gt;</c>), and each generic base system of it.
+    /// <c>new Regen&lt;Health&gt;()</c>, a target-typed <c>Regen&lt;Health&gt; r = new()</c> (local, field or property),
+    /// <c>typeof(Regen&lt;Health&gt;)</c>, or a base type (<c>class X : Regen&lt;Health&gt;</c>), and each generic base system of it.
     /// </summary>
     /// <param name="Owner">The generic definition as its OwnerModel names it (<c>global::Ns.Regen&lt;T&gt;</c>).</param>
     /// <param name="Closed">The closed type (<c>global::Ns.Regen&lt;global::Health&gt;</c>).</param>
@@ -582,9 +588,14 @@ public sealed class SystemGenerator : IIncrementalGenerator
         {
             if (node is not GenericNameSyntax name) return false;
             SyntaxNode type = name;
-            while (type.Parent is QualifiedNameSyntax qualified && qualified.Right == type) type = qualified;
-            return type.Parent is ObjectCreationExpressionSyntax or SimpleBaseTypeSyntax
-                || type.Parent is TypeArgumentListSyntax { Parent: GenericNameSyntax { Identifier.ValueText: "AddSystem" } };
+            while (type.Parent is QualifiedNameSyntax qualified && qualified.Right == type
+                   || type.Parent is AliasQualifiedNameSyntax alias && alias.Name == type || type.Parent is NullableTypeSyntax)
+                type = type.Parent;
+            return type.Parent is ObjectCreationExpressionSyntax or SimpleBaseTypeSyntax or TypeOfExpressionSyntax
+                || type.Parent is TypeArgumentListSyntax { Parent: GenericNameSyntax { Identifier.ValueText: "AddSystem" } }
+                // Target-typed: Regen<Health> r = new(); (locals and fields) and Regen<Health> P { get; } = new();
+                || type.Parent is VariableDeclarationSyntax { Variables: var variables } && variables.Any(v => v.Initializer?.Value is ImplicitObjectCreationExpressionSyntax)
+                || type.Parent is PropertyDeclarationSyntax { Initializer.Value: ImplicitObjectCreationExpressionSyntax };
         }
 
         public static EquatableArray<ClosedUse> Create(GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
