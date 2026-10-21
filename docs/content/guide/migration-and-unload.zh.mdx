@@ -96,6 +96,8 @@ Actor 的实体上，运行时状态和需要持久化的数据放在一起：�
 的组件，`SaveEntitiesWith(output, ids, set)` 只写这些（其余组件不需要 Nino 格式化器），`LoadEntitiesInto(bytes, entities)` 把它们放到
 已经存在的实体上，比如 Actor 激活时就有了、记录还没从数据库取回来的那个实体。
 
+反过来，`SaveEntitiesWithout(output, ids, set)` 写集合以外的一切：实体加载后会重新算出来的数据（高度图、缓存、流场）不写进去，存档就小。
+
 只有实体的一部分需要撑过进程重启（其余部分由激活它的代码重建），或者实体比数据先创建出来，就用记录。集合只建一次，放在
 `static readonly` 字段里，列出需要持久化的组件；存进一个复用的 `NinoArrayBufferWriter`，写出的字节放到数据该在的地方（数据库的一行、
 文件、发给另一台服务器的消息）。

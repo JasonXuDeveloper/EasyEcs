@@ -112,6 +112,9 @@ when the entity is created before its data arrives. Build the set once, in a `st
 components that persist; save into a reused `NinoArrayBufferWriter` and store the written bytes wherever the data
 lives (a database row, a file, a message to another server).
 
+The other way round, `SaveEntitiesWithout(output, ids, set)` writes everything but the set: the data an entity computes
+again after a load (a height map, a cache, a flow field), left out so the save stays small.
+
 ```csharp
 public record struct Bank(long Gold) : IComponent;
 public record struct Connection(int Socket) : IComponent;              // runtime only: never saved

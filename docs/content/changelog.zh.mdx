@@ -15,11 +15,22 @@ icon: RotateCcwClock
 
 - 枚举元素的 `DynamicBuffer`（`DynamicBuffer<Block>`）现在和结构体元素一样有生成的具名成员：`chunk.Block`、`HasBlock`、
   `WriteBlock()`、`GetOrAddBlock()`、`RemoveBlock()`，以及预制体的 `SetBlock(…)`。见[动态缓冲](/zh/docs/guide/dynamic-buffers)。
-- `DynamicBuffer<T>.PoolCapacity` 按元素类型设置：缓冲被销毁或移除时，最长多少个元素的列表还给本线程的回收池（默认是 4 KB 能放下的个数）。
+- `DynamicBuffer<T>.PoolCapacity` 按元素类型设置：缓冲被销毁或移除时，最长多少个元素的列表还给回收池（默认是 4 KB 能放下的个数）。
   大缓冲反复出现又消失时调高它，比如玩家周围加载又卸载的区块，新缓冲就会重用旧列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#what-it-costs)。
 - 分析器规则 [EECS053](/zh/docs/guide/analyzer#eecs053)（警告，有代码修复）：`[ForEach]` 方法以 `ref` 传入追踪变化的组件（`ITracked`、
   `DynamicBuffer<T>`），却有路径不写它（提前 `return`、写在 `if` 里），访问到的每一行都会被打 tick，`[Changed<T>]` 系统就会看到它根本没改过的行。
   修复改成 `Mut<T>`（写入改成 `x.Write()`，读取改成 `x.Value`），只给写过的行打 tick。
+- `buffer.SetCount(n)` 设置 `DynamicBuffer<T>` 的元素个数，新增的元素为 `default`，于是整个缓冲可以通过 `AsSpan()` 直接写，不用先在栈上填好再用
+  `AddRange` 复制进去。见[动态缓冲](/zh/docs/guide/dynamic-buffers)。
+- `world.SaveEntitiesWithout(output, ids, set)` 保存一组实体，写 `ComponentSet` 以外的所有组件：加载后会重新算出的数据不进存档。见
+  [迁移与卸载](/zh/docs/guide/migration-and-unload#records)。
+
+### 性能 [#v4-8-0-performance]
+
+- 缓冲回收池在线程之间共享：每个线程自己留几个列表，其余的按批和所有线程都能取用的池交换，所以拥有者线程从销毁的缓冲收回的列表，也能给并行
+  `[ForEach]` 的第一次写入用，以前那里要分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#what-it-costs)。
+- 预制体上的空缓冲（不带元素的 `SetBuffer<T>()`）不再给实例一个列表：实例写入第一个元素时从池里取，不再新建一个再扩容。
+- `LoadEntities` 把缓冲读进来的那个列表直接交给加载出的实体，不再复制到另一个列表。
 
 ## 4.7.0 [#v4-7-0]
 

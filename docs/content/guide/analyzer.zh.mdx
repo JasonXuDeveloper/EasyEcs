@@ -410,7 +410,7 @@ World 改了结构，两件事都会出错：遍历还拿着指向已移动行�
 
 在这样的方法里，规则会报出对 `Entity` 结构成员（`Set`、`Remove`、`Destroy`、`GetOrAdd`、`Clone`、`Disable`、`Enable`、
 `Link`、`Unlink`、`Run`（它的 job 可能改结构），以及生成的 `SetX`、`GetOrAddX`、`RemoveX`）或 `World` 结构成员（`CreateEntity`、`CreateEntities`、
-`Instantiate`、`Reserve`、`DestroyEntities`、`DestroyAll`、`SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`、`Load`、`LoadKeeping`、`SaveWithout`、`SaveEntitiesWith`、`LoadEntities`、`LoadEntitiesInto`、`MoveEntities`、
+`Instantiate`、`Reserve`、`DestroyEntities`、`DestroyAll`、`SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`、`Load`、`LoadKeeping`、`SaveWithout`、`SaveEntitiesWith`、`SaveEntitiesWithout`、`LoadEntities`、`LoadEntitiesInto`、`MoveEntities`、
 `GroupBy`、`RemoveTypes`、单例、系统、`Update`、`Capture`、`Restore` 等）的调用。方法自己创建的 World（局部变量里的 `new World()`）
 不算。
 
@@ -1209,7 +1209,7 @@ hero.SetIfChanged(new Callsign("Ada"));
 **遍历期间调用了它会拒绝的方法。** 错误。没有代码修复。
 
 查询或 `[ForEach]` 遍历正在走一个 World 的表时，重建或替换这些表的调用会抛 `InvalidOperationException`：`TrimExcess`、`Capture`、
-`Restore`、`Save`、`SaveWithout`、`Load`、`LoadKeeping`、`SaveEntities`、`SaveEntitiesWith`、`LoadEntities`、`LoadEntitiesInto`、
+`Restore`、`Save`、`SaveWithout`、`Load`、`LoadKeeping`、`SaveEntities`、`SaveEntitiesWith`、`SaveEntitiesWithout`、`LoadEntities`、`LoadEntitiesInto`、
 `MoveEntities`（被遍历的 World 作为来源或目标）、`GroupBy` 和 `RemoveTypes`。
 规则报出在 `foreach` 遍历其 `Query` 的那个 World 上的这些调用，以及在 `[ForEach]` 方法或 job 的 `Execute` 所在 World 上的这些调用。
 

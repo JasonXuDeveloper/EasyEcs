@@ -129,6 +129,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `bag.RemoveAtSwapBack(i)` | O(1) | 最后一个元素移到 `i` |
 | `bag.Clear()` | O(1)，元素含引用时 O(count) | 保留容量 |
 | `bag.EnsureCapacity(n)` / `AsSpan()` | 扩容时 O(count) / O(1) | `AsSpan()` 可写 |
+| `bag.SetCount(n)` | O(增加或去掉的元素数) | 增加的元素为 `default`；只有缓冲扩容时分配 |
 | `bag.TrimExcess()` | O(count) | 重新分配到 count 大小；空列表不持有数组 |
 | `DynamicBuffer<T>.PoolCapacity` | O(1) | 销毁的 `T` 缓冲还给本线程回收池的列表最长多少个元素（默认 4 KB 能放下的个数）；按元素类型、整个进程生效，启动时设置 |
 
@@ -230,6 +231,7 @@ World 保持原样。
 | `world.LoadKeeping(input, in ComponentSet keep, markWritten)` | O(实体数 × 组件数) | `keep` 里的单例保持 World 现在的样子（跳过存档里的值）；`keep` 里有组件时抛 `ArgumentException`；`markWritten` 只作用于加载的行 |
 | `world.SaveEntities(output, ids)` | O(给定实体数 × 组件数) | 相关的实体（一个玩家和它拥有的东西），交给另一个 World 或进程 |
 | `world.SaveEntitiesWith(output, ids, set)` | O(给定实体数 × 组件数) | 只写 `ComponentSet` 里的组件（建一次：`ComponentSet.Create().With<T>()`，每个类型 O(1)）；集合里有单例时抛 `ArgumentException` |
+| `world.SaveEntitiesWithout(output, ids, set)` | O(给定实体数 × 组件数) | 写集合以外的所有组件（加载后会重新算出的数据）；集合里有单例时抛 `ArgumentException` |
 | `ComponentSet.Create().With<T>()` / `WithSingleton<T>()` / `With(type)` | 每次 O(1)；`With(type)` 一次查找（冷路径） | `With(type)` 接受组件或单例类型；`Contains<T>()` / `ContainsSingleton<T>()` 为 O(1) |
 | `world.LoadEntities(input, entities)` | O(实体数 × 组件数) | 新 id；指向组内实体的 `EntityId` 字段会改写，其他的变成 `EntityId.Null` |
 | `world.LoadEntitiesInto(input, targets, markWritten)` | O(实体数 × 组件数) | 读到已经存在的实体上：每个实体最多换一次表，存档里没有的组件保持不变；`markWritten: false`：加载的组件算作从未写过 |

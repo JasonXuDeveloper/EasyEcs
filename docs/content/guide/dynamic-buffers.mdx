@@ -120,7 +120,7 @@ owner. The full table, with read-mostly and immutable data, is in
 
 | Read (`in`, `Read<T>()`, or a `ref`) | Write (a `ref` only: a `ref` parameter, `Get<T>()`, `TryGetRef<T>`) |
 | --- | --- |
-| `Count`, `Capacity`, `bag[i]` (read-only), `AsReadOnlySpan()`, `foreach` | `Add`, `AddRange`, `Insert`, `RemoveAt`, `RemoveAtSwapBack`, `Clear`, `EnsureCapacity`, `TrimExcess`, `AsSpan()` (writable) |
+| `Count`, `Capacity`, `bag[i]` (read-only), `AsReadOnlySpan()`, `foreach` | `Add`, `AddRange`, `Insert`, `RemoveAt`, `RemoveAtSwapBack`, `Clear`, `SetCount`, `EnsureCapacity`, `TrimExcess`, `AsSpan()` (writable) |
 
 The writes are extension methods on `ref DynamicBuffer<T>`, so the compiler rejects them on an `in` parameter or on
 `Read<T>()`: a list cannot change without a tracked write.
@@ -306,10 +306,11 @@ written, once in each of the five updates that follow.
 | Instead of | Do | Why |
 | --- | --- | --- |
 | Letting a list grow from empty | `EnsureCapacity(n)` once where the size is known | Adding within the capacity allocates nothing |
+| Filling a span on the stack, then `AddRange` of it, to write a whole buffer | `SetCount(n)`, then write `AsSpan()` in place | One pass over the elements instead of two, and no stack the size of the buffer |
 | A new list per tick | `Clear()` and refill | `Clear` keeps the capacity: a list refilled every tick allocates nothing once it reached its size |
 | `RemoveAt(i)` when the order does not matter | `RemoveAtSwapBack(i)` | O(1) instead of O(count) |
 | Reading through a `ref` parameter | An `in` parameter | A `ref` stamps the row, and every `[Changed<T>]` reader visits it ([EECS025](/en/docs/guide/analyzer#eecs025)) |
-| Keeping a span across `Add` | Take a new span after any call that may grow the list | `Add`, `AddRange`, `Insert`, `EnsureCapacity` and `TrimExcess` may reallocate the array |
+| Keeping a span across `Add` | Take a new span after any call that may grow the list | `Add`, `AddRange`, `Insert`, `SetCount`, `EnsureCapacity` and `TrimExcess` may reallocate the array |
 
 Measured on 100,000 bags of 8 items, of which 1,000 trade an item per tick and one `[Changed]` system sends the
 changed bags (`DynamicBufferBenchmark`), against the same bag as a `List<T>` in a tracked component:
@@ -331,9 +332,14 @@ new buffers take the lists of the dead ones.
 - **A write** stamps the row once, like any [tracked component](/en/docs/guide/change-tracking#what-it-costs).
 - **Adding within the capacity** allocates nothing; growing doubles the array (at least 4 elements).
 - **A buffer that dies** (its entity destroyed, the component removed) hands its list, emptied, to the next buffer of
-  its element type that the thread creates, so entities that come and go with buffers (actors loaded and unloaded,
-  units spawned and killed) allocate nothing once warm. Only lists that died while none were taken wait there, and a
-  list longer than `DynamicBuffer<T>.PoolCapacity` elements (4 KB of them by default) is left to the GC.
+  its element type that takes its first element, on any thread: entities that come and go with buffers (actors loaded
+  and unloaded, units spawned and killed) allocate nothing once warm, and the lists the owner thread gets back serve
+  the first writes of a parallel `[ForEach]` too. Each thread keeps a few lists of its own and trades the rest in
+  batches with a pool all threads share, one lock per batch. Only lists that died while none were taken wait there, and
+  a list longer than `DynamicBuffer<T>.PoolCapacity` elements (4 KB of them by default) is left to the GC.
+- **An empty buffer holds no list**, also one a prefab gives its instances (`SetBuffer<T>()` with no elements): its
+  first element takes a list from the pool. `LoadEntities` and `Load` read each buffer into a list from the pool and
+  hand that list to the entity, without copying it again.
 - **Large buffers that come and go**, such as the 8,192 blocks of a chunk loaded and unloaded around players: raise
   the capacity once at startup, `DynamicBuffer<Block>.PoolCapacity = 8192;`, and each loaded chunk reuses the list of
   one that was unloaded. The setting is per element type and process-wide; the pool keeps at most the lists of its

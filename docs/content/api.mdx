@@ -134,6 +134,7 @@ need a `ref` and are tracked writes.
 | `bag.RemoveAtSwapBack(i)` | O(1) | the last element moves into `i` |
 | `bag.Clear()` | O(1), O(count) for elements with references | keeps the capacity |
 | `bag.EnsureCapacity(n)` / `AsSpan()` | O(count) when it grows / O(1) | `AsSpan()` is writable |
+| `bag.SetCount(n)` | O(elements added or removed) | added elements are `default`; allocates only when the buffer grows |
 | `bag.TrimExcess()` | O(count) | reallocates to the count; an empty list holds no array |
 | `DynamicBuffer<T>.PoolCapacity` | O(1) | the longest list a dead buffer of `T` gives back to its thread's pool (default 4 KB of elements); per element type, process-wide, set at startup |
 
@@ -237,6 +238,7 @@ columns); `Load` O(rows). A taken key throws `InvalidOperationException` (a save
 | `world.LoadKeeping(input, in ComponentSet keep, markWritten)` | O(entities × components) | the singletons of `keep` stay exactly as the world has them (the save's values are skipped); a component in `keep` throws `ArgumentException`; `markWritten` applies to the loaded rows |
 | `world.SaveEntities(output, ids)` | O(entities given × components) | related entities (a player and what it owns), for another world or process |
 | `world.SaveEntitiesWith(output, ids, set)` | O(entities given × components) | only the components of a `ComponentSet` (built once: `ComponentSet.Create().With<T>()`, O(1) per type); a set naming a singleton throws `ArgumentException` |
+| `world.SaveEntitiesWithout(output, ids, set)` | O(entities given × components) | every component but those of the set (data computed again after a load); a set naming a singleton throws `ArgumentException` |
 | `ComponentSet.Create().With<T>()` / `WithSingleton<T>()` / `With(type)` | O(1) each; `With(type)` one lookup (cold) | `With(type)` takes a component or a singleton type; `Contains<T>()` / `ContainsSingleton<T>()` O(1) |
 | `world.LoadEntities(input, entities)` | O(entities × components) | new ids; `EntityId` fields naming the group are rewritten, others become `EntityId.Null` |
 | `world.LoadEntitiesInto(input, targets, markWritten)` | O(entities × components) | onto entities that exist: each moves table at most once, the components the save lacks stay; `markWritten: false`: the loaded components count as never written |

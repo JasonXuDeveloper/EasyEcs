@@ -178,7 +178,7 @@ InvalidOperationException: Capture cannot run while a query or system iterates t
 InvalidOperationException: MoveEntities cannot run while a query or system iterates the world: call it between updates
 ```
 
-消息里写着被拒绝的调用：`Capture`、`Restore`、存档和加载（`Save`、`SaveWithout`、`SaveEntities`、`SaveEntitiesWith`、`Load`、
+消息里写着被拒绝的调用：`Capture`、`Restore`、存档和加载（`Save`、`SaveWithout`、`SaveEntities`、`SaveEntitiesWith`、`SaveEntitiesWithout`、`Load`、
 `LoadKeeping`、`LoadEntities`、`LoadEntitiesInto`）、`MoveEntities`、`GroupBy`、`RemoveTypes` 或 `TrimExcess`。它们要读、重写或丢弃整张表，
 而查询的 `foreach` 或正在运行的系统正在遍历这些表；分析器在它看得到的遍历里会报出这些调用（[EECS041](/zh/docs/guide/analyzer#eecs041)）。
 **修法：**在两次更新之间、任何查询循环之外调用它们（[快照](/zh/docs/guide/snapshots)、[存档](/zh/docs/guide/saves)、

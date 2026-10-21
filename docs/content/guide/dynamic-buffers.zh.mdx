@@ -113,7 +113,7 @@ world.Update();
 
 | 读（`in`、`Read<T>()` 或 `ref`） | 写（只能用 `ref`：`ref` 参数、`Get<T>()`、`TryGetRef<T>`） |
 | --- | --- |
-| `Count`、`Capacity`、`bag[i]`（只读）、`AsReadOnlySpan()`、`foreach` | `Add`、`AddRange`、`Insert`、`RemoveAt`、`RemoveAtSwapBack`、`Clear`、`EnsureCapacity`、`TrimExcess`、`AsSpan()`（可写） |
+| `Count`、`Capacity`、`bag[i]`（只读）、`AsReadOnlySpan()`、`foreach` | `Add`、`AddRange`、`Insert`、`RemoveAt`、`RemoveAtSwapBack`、`Clear`、`SetCount`、`EnsureCapacity`、`TrimExcess`、`AsSpan()`（可写） |
 
 写入方法是 `ref DynamicBuffer<T>` 上的扩展方法，在 `in` 参数或 `Read<T>()` 上调用会直接编译失败：列表不可能绕过追踪被修改。
 
@@ -297,7 +297,8 @@ bags synced: 7
 | 每个 tick 新建列表 | `Clear()` 后重新填充 | `Clear` 保留容量：每 tick 重填的列表长到稳定大小后不再分配 |
 | 不在乎顺序还用 `RemoveAt(i)` | `RemoveAtSwapBack(i)` | O(1)，而不是 O(count) |
 | 用 `ref` 参数只读 | 改成 `in` 参数 | `ref` 会给行打 tick，下游每个 `[Changed<T>]` 读取方都要访问它（[EECS025](/zh/docs/guide/analyzer#eecs025)） |
-| `Add` 之后还用之前的 span | 可能扩容的调用之后重新取 span | `Add`、`AddRange`、`Insert`、`EnsureCapacity`、`TrimExcess` 都可能换数组 |
+| 为了写整个缓冲，先在栈上填好一个 span 再 `AddRange` | `SetCount(n)`，然后直接写 `AsSpan()` | 元素只过一遍，也不用在栈上开一个缓冲那么大的空间 |
+| `Add` 之后还用之前的 span | 可能扩容的调用之后重新取 span | `Add`、`AddRange`、`Insert`、`SetCount`、`EnsureCapacity`、`TrimExcess` 都可能换数组 |
 
 10 万个装 8 件物品的背包，每 tick 有 1,000 个交易一件物品，再由一个 `[Changed]` 系统发送变化的背包
 （`DynamicBufferBenchmark`），对比把背包存成被追踪组件里的 `List<T>`：
@@ -315,8 +316,12 @@ bags synced: 7
 - **内存：** 列中每行一个引用，外加每个实体一个对象和一个数组，第一次写入时才创建。没有内联容量，每个列表都在堆上。
 - **每次写入：** 给这一行打一次 tick，和其他[被追踪组件](/zh/docs/guide/change-tracking#what-it-costs)一样。
 - **容量之内的添加** 不分配；扩容时数组翻倍（至少 4 个元素）。
-- **缓冲销毁时**（实体被销毁、组件被移除），它的列表清空后交给本线程之后创建的、同一元素类型的下一个缓冲，所以带缓冲的实体反复
-  出现又消失（Actor 加载又卸载、单位生成又被击杀），预热后不分配。只有在没人取用期间销毁的列表才会在那里等着，长度超过 `DynamicBuffer<T>.PoolCapacity` 个元素（默认是 4 KB 能放下的个数）的列表交给 GC。
+- **缓冲销毁时**（实体被销毁、组件被移除），它的列表清空后交给同一元素类型、下一个写入第一个元素的缓冲，不论在哪个线程：带缓冲的实体
+  反复出现又消失（Actor 加载又卸载、单位生成又被击杀），预热后不分配；拥有者线程收回的列表，也能给并行 `[ForEach]` 的第一次写入用。
+  每个线程自己留几个列表，其余的按批和所有线程共享的池交换，每批加一次锁。只有在没人取用期间销毁的列表才会在那里等着，长度超过
+  `DynamicBuffer<T>.PoolCapacity` 个元素（默认是 4 KB 能放下的个数）的列表交给 GC。
+- **空缓冲不持有列表**，预制体给实例的空缓冲（不带元素的 `SetBuffer<T>()`）也一样：写入第一个元素时才从池里取列表。`LoadEntities`
+  和 `Load` 把每个缓冲读进池里取来的列表，再把这个列表直接交给实体，不再复制一遍。
 - **大缓冲反复出现又消失**，比如玩家周围加载又卸载的区块，每个 8,192 个方块：启动时调高一次上限，
   `DynamicBuffer<Block>.PoolCapacity = 8192;`，新加载的区块就会重用已卸载区块的列表。这个设置按元素类型区分、对整个进程生效；
   池里最多保留峰值数量的列表，所以占用的内存是峰值乘以这个容量。

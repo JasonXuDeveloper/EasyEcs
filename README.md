@@ -291,7 +291,10 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
 
 - **Large buffers that come and go allocate nothing.** `DynamicBuffer<T>.PoolCapacity` sets, per element type, how long
   a list the buffer pool keeps, so the blocks of chunks loaded and unloaded around players reuse one another's lists
-  ([dynamic buffers](https://ecs.xgamedev.net/en/docs/guide/dynamic-buffers#what-it-costs)).
+  ([dynamic buffers](https://ecs.xgamedev.net/en/docs/guide/dynamic-buffers#what-it-costs)). The pool is shared across
+  threads, a prefab's empty buffer takes its list from it, and `LoadEntities` keeps the lists it reads.
+- **Write a buffer in place, save without derived data.** `buffer.SetCount(n)` sizes a `DynamicBuffer<T>` for writing
+  through `AsSpan()`; `SaveEntitiesWithout(output, ids, set)` leaves out what entities compute again after a load.
 - **Enum elements get named members.** A `DynamicBuffer<Block>` of an enum gets `chunk.Block`, `WriteBlock()` and the
   rest, like a buffer of a struct.
 - **A Minecraft-style sample and a Samples section.** [VoxelServer](https://ecs.xgamedev.net/en/docs/samples/voxel-server)

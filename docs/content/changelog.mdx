@@ -18,13 +18,28 @@ major or minor version that needs code changes? The
   `chunk.Block`, `HasBlock`, `WriteBlock()`, `GetOrAddBlock()`, `RemoveBlock()` and the prefab's `SetBlock(…)`. See
   [dynamic buffers](/en/docs/guide/dynamic-buffers).
 - `DynamicBuffer<T>.PoolCapacity` sets, per element type, the longest list a destroyed or removed buffer gives back
-  to its thread's pool (4 KB of elements by default). Raise it for large buffers that come and go, such as the blocks
+  to the pool (4 KB of elements by default). Raise it for large buffers that come and go, such as the blocks
   of chunks loaded and unloaded around players, and each new buffer reuses a dead one's list instead of allocating. See
   [dynamic buffers](/en/docs/guide/dynamic-buffers#what-it-costs).
 - Analyzer rule [EECS053](/en/docs/guide/analyzer#eecs053) (warning, with a code fix): a `[ForEach]` method that takes
   a tracked component (`ITracked`, `DynamicBuffer<T>`) by `ref` and leaves it unwritten on some path (an early
   `return`, a write inside an `if`) stamps every row it visits, so `[Changed<T>]` systems see rows it never changed.
   The fix takes it as a `Mut<T>` (writes `x.Write()`, reads `x.Value`), which stamps only the rows written.
+- `buffer.SetCount(n)` sets the number of elements of a `DynamicBuffer<T>`, the added ones `default`, so a whole buffer
+  is written in place through `AsSpan()` instead of filled on the stack and copied in with `AddRange`. See
+  [dynamic buffers](/en/docs/guide/dynamic-buffers).
+- `world.SaveEntitiesWithout(output, ids, set)` saves a group of entities with every component but those of a
+  `ComponentSet`: the data they compute again after a load stays out of the save. See
+  [migration and unloading](/en/docs/guide/migration-and-unload#records).
+
+### Performance [#v4-8-0-performance]
+
+- The buffer pool is shared across threads: each thread keeps a few lists and trades the rest in batches with a pool
+  every thread takes from, so the lists the owner thread gets back from destroyed buffers serve the first writes of a
+  parallel `[ForEach]`, which used to allocate. See [dynamic buffers](/en/docs/guide/dynamic-buffers#what-it-costs).
+- An empty buffer of a prefab (`SetBuffer<T>()` with no elements) gives its instances no list: their first element
+  takes one from the pool instead of growing a new one.
+- `LoadEntities` hands each loaded entity the list its buffer was read into, instead of copying it into another.
 
 ## 4.7.0 [#v4-7-0]
 

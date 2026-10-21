@@ -195,7 +195,7 @@ InvalidOperationException: MoveEntities cannot run while a query or system itera
 ```
 
 The message names the call: `Capture`, `Restore`, the saves and loads (`Save`, `SaveWithout`, `SaveEntities`,
-`SaveEntitiesWith`, `Load`, `LoadKeeping`, `LoadEntities`, `LoadEntitiesInto`), `MoveEntities`, `GroupBy`,
+`SaveEntitiesWith`, `SaveEntitiesWithout`, `Load`, `LoadKeeping`, `LoadEntities`, `LoadEntitiesInto`), `MoveEntities`, `GroupBy`,
 `RemoveTypes` or `TrimExcess`. They read, rewrite or drop whole tables, which a `foreach` over a query or a running
 system is walking; the analyzer reports them inside a pass it can see ([EECS041](/en/docs/guide/analyzer#eecs041)).
 **Fix:** call them between updates, outside any query loop ([snapshots](/en/docs/guide/snapshots),

@@ -155,7 +155,7 @@ int interest = resumed.Rates.Interest;                                 // 7：�
 - **`markWritten: false` 只作用于加载进来的行：** 没有哪一行算作写入或移除，加载之后才加上的系统也一样；之后代码再写入的内容照常能看到。
 - **集合只建一次**，放在 `static readonly` 字段里：集合是值类型，每次 `With` 或 `WithSingleton` 都返回一个新集合。运行时才知道类型的框架用
   `With(typeof(...))` 添加，组件类型和单例类型都接受。
-- **实体存档不接受单例。** `SaveEntitiesWith(output, ids, set)` 的集合里有单例时抛 `ArgumentException`
+- **实体存档不接受单例。** `SaveEntitiesWith(output, ids, set)` 或 `SaveEntitiesWithout(output, ids, set)` 的集合里有单例时抛 `ArgumentException`
   （见[记录](/zh/docs/guide/migration-and-unload#records)）。
 
 之后才加到已经有状态的 World 上的系统（不管状态是谁写的），也可以从当前 tick 开始算：`world.AddSystem<T>(changesFromNow: true)`

@@ -2,7 +2,7 @@
 title: "VoxelServer: a Minecraft-style server"
 navTitle: VoxelServer
 seoTitle: "Minecraft-Style Voxel Server in C# with EasyEcs"
-description: "A Minecraft-style voxel server in C# with EasyEcs: chunks saved and loaded around players, water as a SIMD stencil, one area of interest, zombies, 20 TPS."
+description: "A Minecraft-style voxel server in C# with EasyEcs: chunks loaded around players, water as a SIMD shader, one interest system, zombies, 20 TPS."
 icon: Box
 ---
 
@@ -69,14 +69,19 @@ components, and the next one sees what the last one wrote.
 Blocks and chunks, their water, what moves, players, zombies and items, then the singletons. Comments say what each
 value means and who writes it. A chunk is an entity: its `Chunk` key is a
 [unique index](/en/docs/guide/indexes-and-relations#unique-keys) (`world.ChunkIndex`), its 8,192 blocks and their water two
-byte buffers.
+byte buffers, its height map and the current of its water two more that it computes from them.
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/VoxelServer/Components.cs</include>
 
+Time is data too: a zombie's `Cooldown` and `Burning` hold the tick they end, an item's `Dropped` the tick it fell,
+so nothing counts them down each tick. A value that changes by one every tick for every entity is work a system does
+for nothing; the tick it ends is written once and compared when it matters.
+
 The rules are constants and a few pure functions; the terrain is where a block lives, how a chunk is generated, and
-the reads every system shares. `Nearby` reads the blocks and the water around one body: it looks up the body's chunk
-in the unique index once and reads the next blocks of that chunk straight from its buffers, so physics pays one
-lookup a body, not one per block. An unloaded chunk reads as stone, so nothing falls out of the world.
+the reads every system shares. `Nearby` reads the blocks, the water and the height map around one body: it looks up
+the body's chunk in the unique index once and reads the next blocks of that chunk straight from its buffers, so
+physics pays one lookup a body, not one per block, and "is the sky above this block" is one byte of the height map,
+not a scan of the column. An unloaded chunk reads as stone, so nothing falls out of the world.
 
 <include lang="csharp" meta='tab="Rules.cs"'>../../../samples/VoxelServer/Rules.cs</include>
 
@@ -84,107 +89,120 @@ lookup a body, not one per block. An unloaded chunk reads as stone, so nothing f
 
 ## Chunks around the players [#chunks]
 
-`ChunkLoadSystem` looks at a player's view only when it changes: `[Changed<InChunk>]` visits the players who crossed
-into another chunk this tick (and the players just created), and it records the chunks missing around them as
-`LoadRequest` entities, one per chunk: the request is `IUniqueIndexed`, so a second player asking finds it and asks
-nothing more. A player who stays in its chunk asks for nothing, so nothing polls the views. It does not load them:
-a pass may not load or save entities (EECS041), so `ChunkReadSystem` serves the requests in its `OnUpdate`, after the
-pass, as many as `Rules.MaxRequests` a tick, destroying only those it served; the others wait a tick. A chunk that
-was unloaded comes back from the region files with `LoadEntities`, and with it the zombies and
-items that were in it; a chunk never seen is generated, its blocks and its water written into the buffers in one
-`AddRange` each. Either way it is tagged `Fresh` for the tick: its clients get it whole (below), not as block changes.
+The chunks a player needs are asked for by [`InterestSystem`](#interest) below, as `LoadRequest` entities, one per
+chunk: the request is `IUniqueIndexed`, so a second player asking finds it and asks nothing more. A pass may not load
+or save entities (EECS041), so `ChunkReadSystem` serves the requests in its `OnUpdate`, after the pass, as many as
+`Rules.MaxRequests` a tick, destroying only those it served; the others wait a tick. A chunk that was unloaded comes
+back from the region files with `LoadEntities`, and with it the zombies and items that were in it; a chunk never seen
+is generated, its blocks and its water written into the buffers in one `AddRange` each. Either way it gets in one move
+what every chunk has from then on: its `Viewers`, the `Fresh` tag for the tick (its clients get it whole, not as block
+changes), `Flowing` (its water steps once), and the height map and the current, which the save left out.
 
 <include lang="csharp" meta='title="Systems/Chunks.cs"'>../../../samples/VoxelServer/Systems/Chunks.cs#load</include>
 
+A chunk is created with every component and tag it will ever have, `Flowing` included, for a reason: a component its
+table already has a column for comes and goes as a [presence bit](/en/docs/guide/structural-changes#during-a-pass),
+and the chunk stays in its table. A tag added for the first time moves the entity to another table, and a pass does
+not visit an entity that joined a matching table after it started: a system that wakes the chunks beside the one it
+is visiting would make the pass skip some of them.
+
 Unloading is the same in reverse. A chunk's `Viewers` counts the players that have it in view, kept by
-`ChunkViewSystem` below as the views change, with the tick it last went to zero. With `Slices = 20` each tick checks a
-twentieth of the chunks and tags the ones nobody has had in view for five seconds `Unloading`; `ChunkSaveSystem` then writes each with the entities of its grid cell into
-one record (`SaveEntities`) and destroys them, so nothing ticks where no player is. A chunk a player stands in (one
-who just respawned there) stays loaded. The region files are a singleton
-that holds a class; [`Host/RegionFiles.cs`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/VoxelServer/Host/RegionFiles.cs)
-stands in for the disk.
+`InterestSystem` as the views change, with the tick it last went to zero. With `Slices = 20` each tick checks a
+twentieth of the chunks and tags the ones nobody has had in view for five seconds `Unloading`; `ChunkSaveSystem` then
+writes each with the entities in it into one record and destroys them, so nothing ticks where no player is.
+`SaveEntitiesWithout` leaves out the height map and the current, which a loaded chunk computes again. A chunk a
+player stands in (one who just respawned there) stays loaded. The region files are a singleton that holds a class;
+[`Host/RegionFiles.cs`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/VoxelServer/Host/RegionFiles.cs)
+stands in for the disk, in arrays rented from the shared `ArrayPool`.
 
 <include lang="csharp" meta='title="Systems/Chunks.cs"'>../../../samples/VoxelServer/Systems/Chunks.cs#unload</include>
 
-A client keeps the chunks it was sent. `ChunkViewSystem` keeps the same set on the player, a `DynamicBuffer<InView>`:
-a loaded chunk that comes into view is sent whole, one that leaves is forgotten. The set changes only when the player
-crosses into another chunk or a chunk near it finishes loading, and both are already data: `GridSystem` writes
-`InChunk` only on a crossing, and `InChunk` is `ITracked`, so `[Changed<InChunk>]` visits the players that crossed;
-`[With<Fresh>]` visits the chunks loaded this tick, which join the sets of the players near them. Nothing polls: a
-player who stays in its chunk costs nothing, and a crossing is seen the tick it happens. Each chunk that comes into a
-set counts one more viewer and each that leaves one less, so a chunk's `Viewers` is exact at every tick, not a count
-taken now and then.
+## What each client has [#interest]
 
-<include lang="csharp" meta='title="Systems/Chunks.cs"'>../../../samples/VoxelServer/Systems/Chunks.cs#view</include>
+A client has the loaded chunks of the square around its player, and the entities in them. Both are one thing,
+interest, and one system keeps it: `InterestSystem`. A view is a square of chunks around the player's `ViewCenter`,
+so it is one value, not a list of chunks, and whatever changes, what a client gains or loses is the difference of two
+squares: a strip of one row of chunks for a step into the next chunk, the whole square for a respawn.
 
-## Areas of interest [#aoi]
-
-What a player sees is the square of chunks its `Vision` reaches: the chunks loaded around it and sent to its client
-(`InView`, above), and the entities in them. Nothing keeps a list of entities per player. A view of entities changes in
-three ways, and each is already data:
-
-| What happens | What the client gets | Where it is counted |
+| What happens | What the client gets | Method |
 | --- | --- | --- |
-| A chunk comes into or leaves a player's view | spawns or despawns for the entities in it | `ChunkViewSystem` (the grid counts them) |
-| An entity crosses into another chunk, or is created | a spawn for the players that see its new chunk and not its old one, a despawn for the reverse | `SightSystem.Moved`, `[Changed<InChunk>]` |
-| An entity is destroyed | a despawn for the players that see its chunk | `SightSystem.Gone`, `[With<Retired>]` |
+| A player crosses into another chunk, or appears | the chunks of the strip it gains, whole with their entities (or a `LoadRequest` for those not loaded); the strip it loses is forgotten | `Look`, `[With<Player>, Changed<InChunk>]` |
+| An entity crosses into another chunk, or is created | a spawn for the players that see its new chunk and not its old one, a despawn for the reverse | `Moved`, `[Changed<InChunk>]` |
+| A chunk finishes loading | the chunk and its entities, for the players around it | `Loaded`, `[With<Fresh>]` |
+| An entity is destroyed, a player leaves | a despawn for the players that see its chunk; the view of the one who left is released | `Gone` and `Left`, `[With<Retired>]` |
 
-The grid is `InChunk`, an indexed component on everything that moves, so `world.InChunkIndex.Find(chunk)` lists the
-entities of a chunk. `GridSystem` keeps it current: `[Changed<Position>]` visits only what moved this tick, and
-`SetInChunkIfChanged` writes only when an entity crosses into another chunk, so the index and every system that
-reacts to `[Changed<InChunk>]` see a few crossings a second, not every tick.
+Who sees a chunk is counted, never searched: every player sees `Rules.PlayerVision`, so the players that see a chunk
+are the view centers in the square around it, and `ViewCenter` is indexed, so `world.ViewCenterIndex.Count(chunk)`
+counts the players centered on a chunk in O(1). A crossing visits the strip between two squares, five chunks, and
+each chunk's `Viewers` follows, exact at every tick. An entity that stays in its chunk and a player who does cost
+nothing here, however many ticks go by.
+
+<include lang="csharp" meta='title="Systems/Interest.cs"'>../../../samples/VoxelServer/Systems/Interest.cs#interest</include>
+
+Every change is already data. `InChunk` is an indexed component on everything that moves, so
+`world.InChunkIndex.Find(chunk)` lists the entities of a chunk and `Count(chunk)` counts them. `GridSystem` keeps it
+current: `[Changed<Position>]` visits only what moved this tick, and `SetInChunkIfChanged` writes only when an entity
+crosses into another chunk, so `InterestSystem` and every system that reacts to `[Changed<InChunk>]` see a few
+crossings a second, not every tick.
 
 <include lang="csharp" meta='title="Systems/Movement.cs"'>../../../samples/VoxelServer/Systems/Movement.cs#grid</include>
 
 A crossing needs the chunk the clients knew the entity in, and a destroyed entity needs it too: by then its
-components are gone. `Visible` holds it, and it is a [cleanup component](/en/docs/guide/cleanup-and-disable): destroying an entity
-that has one retires it instead, keeping only its cleanup components, until a system removes the last of them.
-`SightSystem` sends the despawns from it, then removes it, and the entity is freed. The players a crossing concerns
-are the ones whose view reaches one chunk and not the other, a strip of chunks between the two squares; for a
-creation or a destruction they are the chunk's `Viewers`, one lookup. An entity that stays in its chunk costs nothing,
-however many ticks go by.
-
-<include lang="csharp" meta='title="Systems/Sight.cs"'>../../../samples/VoxelServer/Systems/Sight.cs#sight</include>
+components are gone. `Visible` holds it, and it is a [cleanup component](/en/docs/guide/cleanup-and-disable):
+destroying an entity that has one retires it instead, keeping only its cleanup components, until a system removes the
+last of them. `ViewCenter` is one as well, so a player who leaves is retired until its view is released.
 
 A zombie hunts within its own `Vision`, 35 blocks (its follow range in Minecraft): each prefab sets its own, so a boss
 with a longer view is one more prefab, not new code.
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#prefabs</include>
 
-`ZombieTargetSystem` finds the nearest player through the same grid and keeps it while it stays in reach, as a
-vanilla mob keeps its target. It looks twice a second, a tenth of the zombies each tick (`Slices`), so a horde costs
-the same every tick.
+`ZombieTargetSystem` finds the nearest player through the index of view centers, which holds players only, and keeps
+it while it stays in reach, as a vanilla mob keeps its target. It looks twice a second, a tenth of the zombies each
+tick (`Slices`), so a horde costs the same every tick.
 
 <include lang="csharp" meta='title="Systems/Zombies.cs"'>../../../samples/VoxelServer/Systems/Zombies.cs#target</include>
 
-The grid is the usual answer to "who is near whom" in an ECS: an index from a cell to the entities in it, kept by
-the system that moves them, read by the systems that need neighbours. The cell here is a chunk because chunks are
-already the unit of loading and of what a client has.
+An index from a cell to the entities in it, kept by the system that moves them and read by the systems that need
+neighbours, is the usual answer to "who is near whom" in an ECS. The cell here is a chunk because chunks are already
+the unit of loading and of what a client has.
 
 ## Water [#water]
 
 Water is not a block but a second grid beside the blocks: a `DynamicBuffer<Fluid>` of one byte per block. A block
-change wakes the water of the chunk and its four neighbours (`Flowing`), whatever changed it: `BlockUpdateSystem`
-reacts to the change of the block buffer, so the dig knows nothing of water.
+change, whatever made it, is seen by `BlockUpdateSystem` through the change of the block buffer, so the dig knows
+nothing of water or of the sky. It computes the chunk's height map, 16 vectors of 16 columns: each layer from the
+bottom up overwrites the lanes whose block is solid with its height, so after the 32 layers each lane holds the top
+of its column, with no branch. Then it wakes the water of the chunk and its four neighbours (`Flowing`).
 
 <include lang="csharp" meta='title="Systems/Water.cs"'>../../../samples/VoxelServer/Systems/Water.cs#wake</include>
 
 The rule is a simplified version of Minecraft's (no new sources between two springs, and water spreads every way
-rather than toward the nearest drop): an open block under water fills as falling water; an open block beside water that stands on
-something solid fills one level below it; everything else empties, so water recedes when its spring goes. It is a
-stencil: the same arithmetic for every block from its six neighbours, which is what a GPU runs over a grid. A row of
-the chunk is 16 blocks, one `Vector128<byte>`, and its neighbours are the rows next to it in the same buffer. The
-neighbours across the chunk's edges are copied into a halo around a padded copy first, so the vector loop has no edge
-cases, and two vectorized searches (`IndexOfAnyExcept`) limit the step to the layers that hold water. Byte lanes are
-integer arithmetic: the same water on every machine. The step is written into a second buffer, `NextFluid`, and
-`WaterCommitSystem` copies it into the water once every chunk has stepped, as a GPU ping-pongs two buffers: each chunk
-steps from its neighbours' water before the step, whatever order the chunks are visited in. A step that changed
-nothing removes `Flowing`, and a settled lake is not visited again.
+rather than toward the nearest drop): an open block under water fills as falling water; an open block beside water
+that stands on something solid fills one level below it; everything else empties, so water recedes when its spring
+goes. It is written as a fragment shader is: `Shade` computes one block's next level from its own and its six
+neighbours', nothing else, and runs on 16 blocks at once, a row of the chunk in one `Vector128<byte>`.
+
+Why per chunk, and not one grid of the world? The water loads, saves and replicates with its chunk, and only the
+chunks that may still move step: a settled lake is not visited again. So before the shader runs, the chunk is copied
+into a padded texture, its water and blocks with a ring of one block from the four chunks around it, and the shader
+samples that texture with no edge case. Only the layers the water reaches are copied and shaded (two vectorized
+searches, `IndexOfAnyExcept`, find them). Byte lanes are integer arithmetic: the same water on every machine.
+
+The step goes into a second buffer, `NextFluid`, as a GPU ping-pongs two buffers, and `WaterCommitSystem` copies it
+into the water once every chunk has stepped: each chunk steps from its neighbours' water before the step, whatever
+order the chunks are visited in. The same pass writes the `Current` of each block, the slope of the water toward the
+lower water around it, as two planes of bytes, and counts the water of the chunk (`FluidCount`, one vectorized
+`Count`). Both buffers are written in place: `SetCount` sizes them and the shader writes `AsSpan()`, with no copy
+from the stack. A step that changed nothing removes `Flowing`.
 
 <include lang="csharp" meta='title="Systems/Water.cs"'>../../../samples/VoxelServer/Systems/Water.cs#flow</include>
 
-`FloatSystem` lifts whatever stands in water, players, zombies and items, and pushes it toward the lower water
-around it, as Minecraft's current does.
+`FloatSystem` lifts whatever stands in water, players, zombies and items, and carries it along the current of its
+block, weaker the lower the water: full next to the spring or under falling water, an eighth at the edge of a run.
+It visits the chunks, skips the dry ones by their `FluidCount`, and finds the bodies of the others through the index
+of entities by chunk, so the water of a body's chunk is the loop's own row: one read for the level, one for the
+current, no lookup.
 
 <include lang="csharp" meta='title="Systems/Water.cs"'>../../../samples/VoxelServer/Systems/Water.cs#float</include>
 
@@ -199,7 +217,7 @@ Physics moves every body through the blocks and writes the position through `Mut
 the row only when the position changed, so a body standing still is not sent. A body at rest, on the ground with no
 velocity and the ground still under it, is left as it is after one block lookup. It stays on one thread because it
 reads the blocks through `World` (the chunk index), and a parallel method may not hold the world (EECS010). The same
-goes for the water and the float.
+goes for the water and the float, which read the chunks around them.
 
 <include lang="csharp" meta='title="Systems/Movement.cs"'>../../../samples/VoxelServer/Systems/Movement.cs#physics</include>
 
@@ -211,13 +229,11 @@ so only a dig stamps the chunk, and the water around it wakes through that stamp
 
 <include lang="csharp" meta='title="Systems/Items.cs"'>../../../samples/VoxelServer/Systems/Items.cs#dig</include>
 
-An item ages one tick per tick: a batch method adds one to 8 ages per instruction (see [SIMD](#simd)).
-
-<include lang="csharp" meta='title="Systems/Items.cs"'>../../../samples/VoxelServer/Systems/Items.cs#age</include>
-
-After the pickup delay an item goes to any player standing on it, found through the same grid. The stacks of its kind
-grow, free slots take the rest, and what does not fit stays on the ground. The inventory is read before it is written,
-so a full inventory is not stamped.
+After the pickup delay an item goes to any player standing on it, found through the index of view centers. The
+stacks of its kind grow, free slots take the rest, and what does not fit stays on the ground. The inventory is read
+before it is written, so a full inventory is not stamped. An item knows the tick it was dropped (`Dropped`), indexed
+in order, so `ItemExpirySystem` walks the items from the oldest with `DroppedIndex.Range(...)` and stops at the first
+with time left: a tick visits the items that expire, not every item.
 
 <include lang="csharp" meta='tab="Pickup"'>../../../samples/VoxelServer/Systems/Items.cs#pickup</include>
 
@@ -231,17 +247,18 @@ column and out of the water: an instance of the zombie prefab with its own `Posi
 <include lang="csharp" meta='title="Systems/Zombies.cs"'>../../../samples/VoxelServer/Systems/Zombies.cs#spawn</include>
 
 A zombie walks toward the player it hunts and hits it when close; a player who left is noticed because
-`TryGetEntity` fails on the stale id. The chase, the attack and the cooldown are three systems, each one job.
+`TryGetEntity` fails on the stale id. Its `Cooldown` is the tick it may hit again, so a zombie that waits costs one
+comparison.
 
 <include lang="csharp" meta='tab="Chase"'>../../../samples/VoxelServer/Systems/Zombies.cs#chase</include>
 
 <include lang="csharp" meta='tab="Attack"'>../../../samples/VoxelServer/Systems/Zombies.cs#attack</include>
 
-Fire is data: `SunlightSystem` adds `Burning` to a zombie under the open sky by day and removes it in water;
-`BurnSystem` burns it down, `FireDamageSystem` hurts every `Rules.BurnEvery` ticks (its `UpdateInterval`), and
-`ExtinguishSystem` removes the fires that burned out. The hurt is its own system because `Health` is tracked and a
-batch method stamps the whole run it writes: written only on the ticks that hurt, the death systems below find nothing
-to do on the others.
+Fire is data: `SunlightSystem` sets `Burning` on a zombie under the open sky by day, until a tick a little later
+(the height map says whether the sky is above it), and removes it in water; `FireDamageSystem` hurts every
+`Rules.BurnEvery` ticks (its `UpdateInterval`), and `ExtinguishSystem` removes the fires whose tick has come. The hurt
+is its own system because `Health` is tracked and a batch method stamps the whole run it writes: written only on the
+ticks that hurt, the death systems below find nothing to do on the others.
 
 <include lang="csharp" meta='tab="Sunlight"'>../../../samples/VoxelServer/Systems/Zombies.cs#sunlight</include>
 
@@ -254,16 +271,22 @@ and the inventory only for the players who respawn.
 
 <include lang="csharp" meta='title="Systems/Health.cs"'>../../../samples/VoxelServer/Systems/Health.cs</include>
 
-## SIMD where the data is a column [#simd]
+## SIMD where the data is a grid or a column [#simd]
 
-Two shapes of data in this server suit SIMD:
+Three shapes of data in this server suit SIMD:
 
-- **A grid with a stencil**: the water, above. Each block's next level is the same function of its neighbours, and
-  the grid is a byte buffer, so 16 blocks go through each instruction.
-- **A column of counters**: cooldowns, item ages, fire and fire damage (at its own [`UpdateInterval`](/en/docs/guide/systems#update-interval)) change the same way on every
-  entity. A [batch method](/en/docs/guide/systems#batch-methods) gets
-  a run of rows as spans, and `Vector<int>` changes 8 of them per instruction on AVX2 (4 on Arm). The JIT does not
-  vectorize these loops by itself, so the methods do it; integer lanes give the same result on every machine.
+- **A grid with a shader**: the water, above. Each block's next level and its current are the same function of its
+  neighbours, and the grid is a byte buffer, so 16 blocks go through each instruction.
+- **A grid reduced along an axis**: the height map, the top of each of 256 columns, 16 columns per instruction and one
+  `ConditionalSelect` per layer, no branch.
+- **A column of the same change**: fire damage (at its own [`UpdateInterval`](/en/docs/guide/systems#update-interval))
+  takes one point from every burning zombie. A [batch method](/en/docs/guide/systems#batch-methods) gets a run of rows
+  as spans, and `Vector<int>` changes 8 of them per instruction on AVX2 (4 on Arm). The JIT does not vectorize these
+  loops by itself, so the method does it; integer lanes give the same result on every machine.
+
+Searching and counting bytes are vectorized by .NET itself: `IndexOfAnyExcept` finds the layers with water,
+`Count` counts the water of a chunk. Timers are not here: a cooldown, an item's age and a fire are the tick they end,
+so there is no column to count down at all, vectorized or not.
 
 The other systems do something different per entity: physics looks up the blocks around each body, the hunt walks
 an index, the chase reads another entity's position. A vector does not help a loop of lookups and branches, and the
@@ -301,8 +324,8 @@ simulation, not of the replication, so a server that replicates less often keeps
 ## The program [#program]
 
 The world with its options: [`MeasureSystems`](/en/docs/guide/diagnostics) for the timings (`--schedule` prints
-`DescribeSchedule`), and a buffer pool big enough for a chunk's blocks and
-water, so a loaded chunk reuses the lists of one that was unloaded.
+`DescribeSchedule`), and a buffer pool big enough for a chunk's blocks, water, height map and
+current, so a loaded chunk reuses the lists of one that was unloaded.
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#options</include>
 
@@ -320,20 +343,20 @@ On stop the world is saved without its prefabs and region files, which every sta
 ## Output [#output]
 
 ```text
-tick   200 (day  ): 50 players, 84 chunks, 3481 water, 0 zombies, 59 items
-tick   400 (night): 50 players, 118 chunks, 6481 water, 43 zombies, 103 items
-tick   600 (day  ): 50 players, 146 chunks, 11142 water, 123 zombies, 103 items
-tick   800 (day  ): 50 players, 159 chunks, 12865 water, 13 zombies, 100 items
-tick  1000 (night): 50 players, 152 chunks, 12156 water, 50 zombies, 82 items
-tick  1200 (day  ): 50 players, 154 chunks, 12145 water, 131 zombies, 79 items
-chunks: 181 generated, 54 unloaded, 27 loaded back
-blocks dug: 585; items: 376 picked up, 230 expired
-zombies: 247 spawned, 116 burned, 411 hits; player deaths: 48
-water: 15813 cells filled, 17994 ticks of bodies carried
-view: 3928 chunks sent, 2678 forgotten; 43490 entities came into view, 11981 left it, 21249 despawned
-sent: 34218 block updates, 2790081 entity updates (48523 KiB)
-top diggers: player 8 (22) player 37 (21) player 35 (21)
-restarted from the save: 50 players, 154 chunks, 12145 water, 131 zombies; 27 chunks in the region files
+tick   200 (day  ): 50 players, 84 chunks, 3482 water, 0 zombies, 68 items
+tick   400 (night): 50 players, 109 chunks, 4679 water, 45 zombies, 120 items
+tick   600 (day  ): 50 players, 138 chunks, 9356 water, 131 zombies, 141 items
+tick   800 (day  ): 50 players, 123 chunks, 8975 water, 9 zombies, 114 items
+tick  1000 (night): 50 players, 138 chunks, 10207 water, 45 zombies, 102 items
+tick  1200 (day  ): 50 players, 135 chunks, 10088 water, 124 zombies, 92 items
+chunks: 166 generated, 67 unloaded, 36 loaded back
+blocks dug: 646; items: 374 picked up, 251 expired
+zombies: 252 spawned, 126 burned, 422 hits; player deaths: 46
+water: 13925 cells filled, 15974 ticks of bodies carried
+view: 4250 chunks sent, 3000 forgotten; 44386 entities came into view, 13223 left it, 23077 despawned
+sent: 36135 block updates, 2953644 entity updates (51340 KiB)
+top diggers: player 37 (24) player 34 (20) player 26 (20)
+restarted from the save: 50 players, 135 chunks, 10088 water, 124 zombies; 31 chunks in the region files
 ```
 
 The world, the springs, the bots and the spawns come from integer hashes, so every run prints the same. The chunks
@@ -358,8 +381,11 @@ go to stderr: the average tick against the 50 ms budget and each system's time a
   component does carry the despawns, `Visible`: what it keeps is one chunk position.)
 - **The destroy log for despawns.** The log holds the ids of destroyed entities and when, not where they were, and a
   despawn goes to the players that saw the entity's chunk. `Visible` keeps the chunk for exactly as long as needed.
-- **A set of entities per player.** A client sees the entities of its chunks, so a set per player would repeat the
-  grid and be written on every crossing near it: in a crowd of a thousand, a thousand sets per crossing.
+- **A set of chunks or entities per player.** A client has the chunks of the square around its view center and the
+  entities in them, so a set per player would repeat the square and the grid and be written on every crossing near
+  it: in a crowd of a thousand, a thousand sets per crossing. The view center and the index count the same in O(1).
+- **A counter per timer.** A cooldown, a fire or an item's age counted down each tick is a write per entity per tick;
+  the tick it ends is one write, and the ordered index finds the items that expire without visiting the others.
 - **Parallel physics, water and the hunt.** They read the world through its indexes; see [movement](#movement).
 
 ## The client and the server [#client-and-server]
@@ -368,7 +394,7 @@ The split is the usual one for a networked game: the server owns the world and s
 it. Both sides can be this ECS:
 
 - **On the server**, as here: the systems compute the world each tick, and the `Send` systems turn what changed
-  (`[Changed<T>]`, the `InView` diffs, crossings and retired entities) into packets.
+  (`[Changed<T>]`, the strips a view gains and loses, crossings and retired entities) into packets.
 - **On the client**, the packets are written into a world of the same components. The same `PhysicsSystem` and
   `FloatSystem` predict the local player between two packets, and a render system reads `Position` and the chunks'
   blocks to draw them: in [Godot](/en/docs/samples/godot), the node draws right after `World.Update()` in `_PhysicsProcess`.

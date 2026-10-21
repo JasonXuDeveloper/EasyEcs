@@ -177,8 +177,9 @@ records nothing; the next deposit is recorded as usual.
 - **Build the sets once,** in `static readonly` fields: a set is a value, each `With` or `WithSingleton` returns a new
   one. A framework that learns its types at run time adds them with `With(typeof(...))`, which takes a component or a
   singleton type.
-- **A save of entities takes no singletons.** `SaveEntitiesWith(output, ids, set)` with a set that names one throws
-  `ArgumentException` ([records](/en/docs/guide/migration-and-unload#records)).
+- **A save of entities takes no singletons.** `SaveEntitiesWith(output, ids, set)` or
+  `SaveEntitiesWithout(output, ids, set)` with a set that names one throws `ArgumentException`
+  ([records](/en/docs/guide/migration-and-unload#records)).
 
 A system added later to a world that already holds its state, whatever wrote it, can start from the current tick
 instead: `world.AddSystem<T>(changesFromNow: true)` makes its first run visit only what is written after the call

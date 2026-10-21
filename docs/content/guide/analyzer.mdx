@@ -446,7 +446,7 @@ change inside a parallel stage throws.
 The rule reports a call to a structural member of `Entity` (`Set`, `Remove`, `Destroy`, `GetOrAdd`, `Clone`,
 `Disable`, `Enable`, `Link`, `Unlink`, `Run` (its job may change structure), and the generated `SetX`, `GetOrAddX`, `RemoveX`) or `World`
 (`CreateEntity`, `CreateEntities`, `Instantiate`, `Reserve`, `DestroyEntities`, `DestroyAll`, `SetAll`, `RemoveAll`, `DisableAll`,
-`EnableAll`, `Load`, `LoadKeeping`, `SaveWithout`, `SaveEntitiesWith`, `LoadEntities`, `LoadEntitiesInto`, `MoveEntities`, `GroupBy`, `RemoveTypes`, singletons, systems, `Update`,
+`EnableAll`, `Load`, `LoadKeeping`, `SaveWithout`, `SaveEntitiesWith`, `SaveEntitiesWithout`, `LoadEntities`, `LoadEntitiesInto`, `MoveEntities`, `GroupBy`, `RemoveTypes`, singletons, systems, `Update`,
 `Capture`, `Restore`, ...) in such a method. A world the method creates itself (`new World()` in a local) is its own.
 
 ```csharp
@@ -1293,7 +1293,7 @@ hero.SetIfChanged(new Callsign("Ada"));
 **A call a pass refuses.** Error. No code fix.
 
 While a query or `[ForEach]` pass walks a world's tables, the calls that rebuild or replace them throw
-`InvalidOperationException`: `TrimExcess`, `Capture`, `Restore`, `Save`, `SaveWithout`, `Load`, `LoadKeeping`, `SaveEntities`, `SaveEntitiesWith`, `LoadEntities`, `LoadEntitiesInto`,
+`InvalidOperationException`: `TrimExcess`, `Capture`, `Restore`, `Save`, `SaveWithout`, `Load`, `LoadKeeping`, `SaveEntities`, `SaveEntitiesWith`, `SaveEntitiesWithout`, `LoadEntities`, `LoadEntitiesInto`,
 `MoveEntities` (of the world walked, as source or target), `GroupBy` and `RemoveTypes`. The rule reports one of them
 on the world a `foreach` over its `Query` walks, and on the world of a `[ForEach]` method or a job's `Execute`.
 
