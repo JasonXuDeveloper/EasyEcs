@@ -64,7 +64,7 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 | `world.EntityCount` / `Entities` | 存活实体数，以及零分配的遍历 |
 | `world.ChangeTick` | 当前的变更 tick |
 | `world.UpdateCount` | 默认分组已完成的 `Update()` 次数 |
-| `world.EnsureCapacity<T1, …, Tn>(n)` / `EnsureCapacity(prefab, n)` / `EnsureEntityCapacity(n)` | 在已知峰值或一波刷怪之前预分配 |
+| `world.Reserve<T1, …, Tn>(n)` / `Reserve(prefab, n)` / `EnsureEntityCapacity(n)` | 在已知峰值或一波刷怪之前预分配 |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` / `IsAlive(id)` | 从 `EntityId` 换回经过校验的句柄 |
 | `world.Describe()` | 表、列、行数和字节数，供工具使用 |
 | `world.DescribeSchedule()` | 每个分组的阶段、每个系统读写什么、为什么要等、哪些系统对只靠注册顺序；`ToString()` / `ToMermaid()` |
@@ -144,7 +144,7 @@ bool applied = unit.Run<Health, TakeHit>(ref hit);   // 在请求对应的实体
 | 唯一键 `Account` | `world.AccountIndex.Get(id)` / `TryGet(id, out e)` |
 | 分组组件 `Zone` | `filter.InZone(id)`（即 `InGroup<Zone>(id)`） |
 | 缓冲元素 `Loot` | `e.Loot`（`ref readonly DynamicBuffer<Loot>`）、`HasLoot`、`WriteLoot()`、`GetOrAddLoot()`、`RemoveLoot()` |
-| 关系 `MemberOf` | `e.AddMemberOf(target)`、`RemoveMemberOf(target)`、`LinksMemberOf(target)`、`world.MemberOfIndex` |
+| 关系 `MemberOf` | `e.AddMemberOf(target)`、`UnlinkMemberOf(target)`、`LinksMemberOf(target)`、`world.MemberOfIndex` |
 | 单例 `Clock` | `world.Clock`（`ref`）、`HasClock`、`GetOrAddClock()`、`SetClock(…)`、`RemoveClock()` |
 | `Prefab` 上 | `SetPosition(…)`、`RemovePosition()` 返回预制体本身；`prefab.Position`（只读）、`HasPosition`、`IsDead` |
 | `world.Query<Position, Velocity>()` 的元素 | `item.Position`、`item.Velocity` |
@@ -251,6 +251,7 @@ bool anyDead = world.Any<Dead>();
 | 调用 | 作用 |
 | --- | --- |
 | `world.Query<T1..T9>(filter)` | 用 `foreach` 遍历：组件的 `ref` 和 `Entity` |
+| `world.Read<T1..T9>(filter)` | 同上，`ref readonly`：不打 tick（存盘、发包） |
 | `world.Count<T1..T9>(filter)` / `Any<…>(filter)` | 计数，或者找到第一个就停 |
 | `world.ForEach<T1..T9, TJob>(ref job, filter)` | 结构体 job `IForEach<T…>`：`Execute(ref T1 …)` |
 | `world.ForEachEntity<…>(ref job, filter)` | `IForEachEntity<T…>`：`Execute(Entity e, ref T1 …)` |
@@ -377,7 +378,8 @@ Entity holder = world.AccountIndex.Get(42);        // 就是它；再来一个 A
 | `world.Instantiate(prefab)` / `Instantiate(prefab, span)` | 一个实体，或者一次遍历刷出一整波 |
 | `world.Instantiate(prefab, a, b, …)` / `Instantiate(prefab, span, a, b, …)` | 同上，外加最多 9 个自己的组件，覆盖或补充预制体里的值：只拷贝一次行 |
 | `world.CreateEntities(span, a, b, …)` | 一波取值相同的实体 |
-| `world.DestroyEntities<T…>(filter)` | 销毁所有匹配的实体，返回数量 |
+| `world.DestroyAll<T…>(filter)` | 销毁所有匹配的实体，返回数量 |
+| `world.DestroyEntities(ids)` | 一次销毁一组 id，返回数量 |
 | `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | 给所有匹配的实体设置或移除一个组件 |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | 给所有匹配的实体禁用或启用一个组件 |
 
@@ -387,7 +389,7 @@ var wave = new Entity[100];
 world.Instantiate(goblin, wave);
 var scout = world.Instantiate(goblin, new Velocity(2, 0));   // 预制体的值，再加上自己的
 world.SetAll(new Velocity(0, 0), QueryFilter.Create().With<Health>());
-world.DestroyEntities<Dead>();
+world.DestroyAll<Dead>();
 ```
 
 指南：[预制体](/zh/docs/guide/prefabs)、[批量操作](/zh/docs/guide/bulk)。
@@ -422,10 +424,10 @@ loot.RemoveAtSwapBack(0);
 | `world.Capture()` / `Capture(into)` | 内存里的一份拷贝；`into` 复用已有快照的数组 |
 | `world.Restore(snapshot)` | 回到拷贝时的状态，那时的句柄重新有效 |
 | `world.Save(writer)` / `Load(bytes)` | 把整个 World 写成字节（托管组件需要 `[NinoType]`）；非托管组件的内存布局在存档之后变了，`Load` 抛 `InvalidDataException` |
-| `world.Save(writer, exclude)` / `Load(bytes, keep, markWritten: false)` | 重启：存档不写一个集合里的组件和单例，读档保留另一个集合里新进程已经设好的单例 |
+| `world.SaveWithout(writer, exclude)` / `Load(bytes, keep, markWritten: false)` | 重启：存档不写一个集合里的组件和单例，读档保留另一个集合里新进程已经设好的单例 |
 | `world.SaveEntities(writer, ids)` / `LoadEntities(bytes, handles)` | 把一组实体搬到另一个 World 或进程 |
 | `ComponentSet.Create().With<T>()….WithSingleton<S>()` | 组件（整个 World 的存档还可以有单例），在 `static readonly` 字段里构建一次 |
-| `world.SaveEntities(writer, ids, set)` | 一条记录：只写集合里的组件 |
+| `world.SaveEntitiesWith(writer, ids, set)` | 一条记录：只写集合里的组件 |
 | `world.LoadEntitiesInto(bytes, entities, markWritten: false)` | 把记录放到已有的实体上；`markWritten: false` 让它不算变更 |
 | `world.MoveEntities(target, ids, moved)` | 在同一线程的两个 World 之间直接搬，不编码 |
 | `world.RemoveTypes(assembly or context)` | 插件的上下文卸载之前，先移除它的类型 |
@@ -449,10 +451,10 @@ private static readonly ComponentSet NewConfig = ComponentSet.Create().WithSingl
 
 ```csharp
 var restart = new System.Buffers.ArrayBufferWriter<byte>();
-world.Save(restart, Runtime);                       // 旧进程关闭时
+world.SaveWithout(restart, Runtime);                       // 旧进程关闭时
 using var next = new World();
 next.SetConfig(64);                                 // 新版本的配置
-next.Load(restart.WrittenSpan, NewConfig, markWritten: false);   // Config 保持刚设的值
+next.LoadKeeping(restart.WrittenSpan, NewConfig, markWritten: false);   // Config 保持刚设的值
 ```
 
 指南：[快照](/zh/docs/guide/snapshots)、[存档](/zh/docs/guide/saves)、[迁移与卸载](/zh/docs/guide/migration-and-unload#records)。

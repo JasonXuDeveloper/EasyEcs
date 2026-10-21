@@ -73,13 +73,14 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `world.CreateEntity(in T1 … in Tn)` | O(n) amortized | placed directly in its final table |
 | `world.CreateEntities(Span<Entity> entities, in T1 … in Tn)` | O(count × n) amortized | one gate pass and at most one table growth for the wave; writes the handles |
 | `entity.Destroy()` | O(c) | the table's last row fills the hole (a tombstone during a pass); recycles the id; a stale handle is ignored; unlinks indexed components; cascades to `ChildOf` children and applies target policies; with `WorldOptions.DestroyLog`, one 16-byte record |
-| `world.DestroyEntities<T1..Tn>(filter)` | O(M + S) | destroys every match in one gate pass and returns how many; safe during a pass |
+| `world.DestroyAll<T1..Tn>(filter)` | O(M + S) | destroys every match in one gate pass and returns how many; safe during a pass |
+| `world.DestroyEntities(ids)` | O(ids × c) | destroys a list of ids in one gate pass and one cascade and returns how many; stale ids and repeats are skipped; safe during a pass |
 | `entity.IsAlive` / `world.IsAlive(id)` | O(1) | |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` | O(1) | false (or a throw) when that incarnation is not alive |
 | `world.EntityCount` | O(1) | |
 | `world.Entities` | O(capacity) | living entities in id order, for diagnostics |
 | `world.EnsureEntityCapacity(capacity)` | O(capacity) | pre-size the entity array; a no-op when large enough |
-| `world.EnsureCapacity<T1..Tn>(count)` | O(n), plus one growth | pre-sizes the table of exactly `T1..Tn` and the entity array, so the next `count` creations with those components never grow them |
+| `world.Reserve<T1..Tn>(count)` | O(n), plus one growth | pre-sizes the table of exactly `T1..Tn` and the entity array, so the next `count` creations with those components never grow them |
 
 ## Components [#components]
 
@@ -117,7 +118,7 @@ component it has; components the source lacks stay absent and are not removals.
 | `world.Instantiate(prefab, Span<Entity> entities)` | O(count × c) | one gate pass and at most one table growth for the wave |
 | `world.Instantiate(prefab, in T1 … in Tn)` | O(c + n) amortized | the prefab's values plus the given ones (replacing the prefab's, or added; a disabled one given is enabled), in one row copy into the final table, no intermediate table; a given `ChildOf` links the hierarchy, a unique key is checked first; O(members × c) plus one move for a group, whose entity of the prefab passed gets the components |
 | `world.Instantiate(prefab, Span<Entity> entities, in T1 … in Tn)` | O(count × (c + n)) | the same values for every instance; one gate pass, at most one table growth, each given column filled at once |
-| `world.EnsureCapacity(prefab, count)` | O(c), plus one growth | pre-sizes the tables the next `count` instances go to, so a spawn wave never grows them during a tick |
+| `world.Reserve(prefab, count)` | O(c), plus one growth | pre-sizes the tables the next `count` instances go to, so a spawn wave never grows them during a tick |
 | `entity.Clone()` | O(c) | a new entity of the same world and table with a copy of every component; throws if not alive |
 
 ## Dynamic buffers [#dynamic-buffers]
@@ -147,6 +148,7 @@ A snapshot, a save or a clone of a buffer column copies the elements: O(elements
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + runs) | spans of consecutive rows; no structural changes |
 | `world.ForEachParallel<T1..Tn, TJob>(ref job, filter)` / `ForEachEntityParallel` | O(M + S), divided over up to `MaxDegreeOfParallelism` threads | `INoStructuralChanges` jobs; chunks of 1,024 to `World.ParallelChunkRows` rows (multiples of 4,096 when the job writes a tracked component), one job copy per chunk; helpers are woken only when they pay |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | refs into the row: every visited row of a tracked component counts as written; no `await` in the loop |
+| `foreach (var item in world.Read<T1..Tn>(filter))` | O(M + S) | `ref readonly` into the row: nothing is stamped; otherwise as `Query` |
 | `world.Count<T1..Tn>(filter)` | O(M), + S / 64 for tables whose rows must be tested | sums table counts, or counts presence bits (and ticks), 8 words per step with AVX-512 |
 | `world.Any<T1..Tn>(filter)` | O(M + S / 64) worst | stops at the first match |
 | `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1) | build once, keep in a `static readonly` field; `WithAny` calls form one "at least one of" group |
@@ -154,7 +156,7 @@ A snapshot, a save or a clone of a buffer column copies the elements: O(elements
 | `filter.Removed<T>(since)` / `[Removed<T>]` | as `Changed` | entities that lost a tracked `T` at or after `since` and still lack it; destroyed entities are not reported (the destroy log reports them) |
 | `filter.ChangedAny<T1..Tn>(since)` / `[ChangedAny<T1..Tn>]` | O(n) to build; a pass skips tables none of whose columns of the group was written since `since`, and blocks and words no column wrote | rows where at least one of 2 to 9 tracked components was written at or after `since`; all `ChangedAny` calls of a filter form one group, combined with the other filters by AND; one tick per filter |
 | `filter.RemovedAny<T1..Tn>(since)` / `[RemovedAny<T1..Tn>]` | as `ChangedAny` | entities that lost at least one of them at or after `since` and still lack it |
-| `filter.Slice(index, count)` / `[ForEach(Slices = N)]` | O(1); a pass visits about S / N rows, cut at 64-row words | the `ForEach` calls only (`Query`, `Count`, `Any`, `DestroyEntities`, `entity.Run(ref job, filter)` and the bulk calls throw `ArgumentException`); a sliced method visits slice `RunCount % N`; not with `[Changed<T>]` / `[Removed<T>]` (EECS035) |
+| `filter.Slice(index, count)` / `[ForEach(Slices = N)]` | O(1); a pass visits about S / N rows, cut at 64-row words | the `ForEach` calls only (`Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run(ref job, filter)` and the bulk calls throw `ArgumentException`); a sliced method visits slice `RunCount % N`; not with `[Changed<T>]` / `[Removed<T>]` (EECS035) |
 | `filter.InGroup<T>(group)` | O(1); a pass walks only that group's tables | [groups](/en/docs/guide/groups) |
 | `filter.Since(since)` | O(1) | the filter with its `Changed`, `Removed`, `ChangedAny` and `RemovedAny` ticks moved, without rebuilding it: one filter, run with each client's tick |
 
@@ -208,7 +210,7 @@ columns); `Load` O(rows). A taken key throws `InvalidOperationException` (a save
 | `world.Descendants(root)` | O(1) per entity of the subtree | depth first, every level below `root`; 0 B once warm |
 | `world.Descendants(root).AddTo(ids, includeRoot)` | O(1) per entity of the subtree | appends the subtree to a `List<EntityId>`, the root first when asked, each parent before its children (the group `MoveEntities` / `SaveEntities` take as `CollectionsMarshal.AsSpan(ids)`); returns how many were added; allocates only when the list grows |
 | `entity.AddRelation(in T relation)` | O(1) amortized | appends to the entity's `DynamicBuffer<T>` (added first if missing) and to the relation index |
-| `entity.RemoveRelation<T>(target)` / `HasRelation<T>(target)` | O(L) | `RemoveRelation` returns how many links went |
+| `entity.RemoveRelation<T>(target)` / `HasRelation<T>(target)` | O(L) | `RemoveRelation` returns how many links went; generated as `e.UnlinkX(target)` / `e.LinksX(target)` for a relation `X` |
 | `world.Relations<T>()` | O(1); the first call creates it | the relation index; generated as `world.XIndex` for a relation `X` |
 | `relations.Count(target)` | O(1) | links to `target` |
 | `relations.TargetCount` | O(1) | distinct entities some link points at (how many guilds have a member), kept as links come and go |
@@ -229,11 +231,11 @@ columns); `Load` O(rows). A taken key throws `InvalidOperationException` (a save
 | `world.Capture()` / `Capture(into)` | O(entities × components + tables + singletons) | copies by value; `Capture(into)` reuses an earlier snapshot's arrays and allocates nothing once they are large enough; not while a pass iterates |
 | `world.Restore(snapshot)` | O(entities × components + tables + singletons) | snapshot handles are valid again, later ones stale; every restored row counts as written (or removed) |
 | `world.Save(output)` | O(entities × components) | the world as bytes: unmanaged rows raw, managed values through Nino; allocates nothing once its buffers are large enough |
-| `world.Save(output, in ComponentSet exclude)` | O(entities × components) | without the components and singletons of `exclude` (a `Disabled<T>` goes with its `T`), which need no formatter; allocates nothing once its buffers are large enough |
+| `world.SaveWithout(output, in ComponentSet exclude)` | O(entities × components) | without the components and singletons of `exclude` (a `Disabled<T>` goes with its `T`), which need no formatter; allocates nothing once its buffers are large enough |
 | `world.Load(input, markWritten)` | O(entities × components) | entities keep their ids; a changed component layout throws `InvalidDataException` and leaves the world as it was; `markWritten: false`: the loaded rows count as never written |
 | `world.Load(input, in ComponentSet keep, markWritten)` | O(entities × components) | the singletons of `keep` stay exactly as the world has them (the save's values are skipped); a component in `keep` throws `ArgumentException`; `markWritten` applies to the loaded rows |
 | `world.SaveEntities(output, ids)` | O(entities given × components) | a group of entities, for another world or process |
-| `world.SaveEntities(output, ids, set)` | O(entities given × components) | only the components of a `ComponentSet` (built once: `ComponentSet.Create().With<T>()`, O(1) per type); a set naming a singleton throws `ArgumentException` |
+| `world.SaveEntitiesWith(output, ids, set)` | O(entities given × components) | only the components of a `ComponentSet` (built once: `ComponentSet.Create().With<T>()`, O(1) per type); a set naming a singleton throws `ArgumentException` |
 | `ComponentSet.Create().With<T>()` / `WithSingleton<T>()` / `With(type)` | O(1) each; `With(type)` one lookup (cold) | `With(type)` takes a component or a singleton type; `Contains<T>()` / `ContainsSingleton<T>()` O(1) |
 | `world.LoadEntities(input, entities)` | O(entities × components) | new ids; `EntityId` fields naming the group are rewritten, others become `EntityId.Null` |
 | `world.LoadEntitiesInto(input, entities, markWritten)` | O(entities × components) | onto entities that exist: each moves table at most once, the components the save lacks stay; `markWritten: false`: the loaded components count as never written |

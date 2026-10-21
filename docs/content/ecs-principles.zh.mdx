@@ -157,7 +157,7 @@ public class DeathSystem : EcsSystem
 [UpdateAfter<DeathSystem>]
 public sealed class CorpseSystem : EcsSystem
 {
-    protected override void OnUpdate() => World.DestroyEntities<Dead>();   // 一次遍历清掉所有尸体
+    protected override void OnUpdate() => World.DestroyAll<Dead>();   // 一次遍历清掉所有尸体
 }
 ```
 

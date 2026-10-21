@@ -60,7 +60,7 @@ throws instead of reaching the entity that reuses its id.
   code and `EntityId`s in components.
 - **Cost:** a 16-byte record per entity id. Creating with its components is one placement in the final table;
   destroying fills the hole with the table's last row. `WorldOptions.InitialEntityCapacity`,
-  `EnsureEntityCapacity(n)` and `EnsureCapacity<T1, …, Tn>(n)` (the table too) pre-size for a known peak, so a
+  `EnsureEntityCapacity(n)` and `Reserve<T1, …, Tn>(n)` (the table too) pre-size for a known peak, so a
   long-running server never grows at run time.
 - **Guide:** [Entities and components](/en/docs/guide/entities-and-components)
 
@@ -494,7 +494,7 @@ process: same ids, components and singletons. Unmanaged components are their raw
 the unmanaged components marked `[NinoType]` are written by Nino. Types are recorded by Nino type id, so a load skips
 components the process no longer has, and `[NinoFormerName]` keeps a renamed one.
 
-For a restart, `Save(writer, in exclude)` leaves out the components and singletons of a `ComponentSet` (runtime
+For a restart, `SaveWithout(writer, in exclude)` leaves out the components and singletons of a `ComponentSet` (runtime
 state, caches, configuration), which then need no formatter, and `Load(bytes, in keep, markWritten: false)` keeps the
 singletons the new process has already set, such as its configuration.
 
@@ -508,7 +508,7 @@ singletons the new process has already set, such as its configuration.
 
 `SaveEntities` and `LoadEntities` move a group of entities (a player and what they own) to another world through
 bytes, with new ids and the links inside the group rewritten. `MoveEntities` does it between two worlds of the same
-thread without encoding. A record saves only what persists: `SaveEntities(writer, ids, set)` with a `ComponentSet`
+thread without encoding. A record saves only what persists: `SaveEntitiesWith(writer, ids, set)` with a `ComponentSet`
 writes the components of the set, and `LoadEntitiesInto(bytes, entities)` puts them onto entities that exist already;
 with `markWritten: false` the restored values do not count as changed, so a saver of changed rows does not write them
 straight back.
@@ -571,7 +571,7 @@ for struct jobs.
 ### Bulk operations [#bulk-operations]
 
 `world.CreateEntities(span, a, b)` spawns a wave with the same values, `Instantiate(prefab, span)` a wave of a
-prefab, `DestroyEntities<T>(filter)` destroys every match. `SetAll`, `RemoveAll`, `DisableAll` and `EnableAll`
+prefab, `DestroyAll<T>(filter)` destroys every match. `SetAll`, `RemoveAll`, `DisableAll` and `EnableAll`
 change one component on every match, whole 64-row words at a time.
 
 - **Use it for:** waves of monsters, clearing a zone, a round reset, a status lifted from everyone.

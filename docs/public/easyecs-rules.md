@@ -21,7 +21,7 @@ available as Markdown: add `.md` to its URL.
   a second entity a taken key throws `InvalidOperationException`; to move a key, change the old holder first. Not for
   `EntityId` keys (EECS036).
 - A list per entity is a `DynamicBuffer<T>` component; never copy it by value (EECS012). Call
-  `EnsureCapacity(n)` on it (and `world.EnsureCapacity<T…>(n)` on the world) before a wave of known size.
+  `EnsureCapacity(n)` on it (and `world.Reserve<T…>(n)` on the world) before a wave of known size.
 - An external resource (a socket, a seat) lives in an `ICleanupComponent`: destroying the entity keeps it with the
   `Destroyed` tag until a system releases the resource and removes the component.
 - An optional component is a `Maybe<T>` parameter, but not in the hottest loops: there, write two methods with
@@ -119,7 +119,7 @@ available as Markdown: add `.md` to its URL.
   `SaveEntities` or `MoveEntities`, and pass `CollectionsMarshal.AsSpan(ids)`: a child left behind dies with the original.
 - Size a buffer from `index.Find(key).Count` (O(1)), never by walking the matches twice; `index.KeyCount` /
   `relations.TargetCount` count distinct keys / targets in O(1).
-- Durable state is a record: `SaveEntities(writer, ids, Persistent)` with a `static readonly ComponentSet` of the
+- Durable state is a record: `SaveEntitiesWith(writer, ids, Persistent)` with a `static readonly ComponentSet` of the
   durable components only, never the runtime ones (connections, timers, caches).
 - Restore a record with `LoadEntitiesInto(bytes, entities, markWritten: false)`, so a system that saves or
   replicates changed components does not send it straight back; the values it replaces (a prefab's defaults) count as

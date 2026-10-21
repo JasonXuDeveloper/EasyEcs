@@ -55,7 +55,7 @@ Arch runs on more runtimes (netstandard2.1, net6.0, net8.0 and Unity); EasyEcs n
 | System | Arch.Extended `BaseSystem` | `EcsSystem` with `[ForEach]` methods |
 | Command buffer | `CommandBuffer`, `Playback(world)` | none: `entity.SetFire(10)`, `RemoveFire()`, `Destroy()` apply at once |
 | Bulk change | `world.Add(in query, value)`, `world.Remove<T>(in query)` | `world.SetAll(value, filter)`, `world.RemoveAll<T>(filter)` |
-| Reserve before creating | `world.EnsureCapacity(in signature, n)` | `world.EnsureCapacity<A, B>(n)`, or `world.CreateEntities(span, a, b)` at once |
+| Reserve before creating | `world.EnsureCapacity(in signature, n)` | `world.Reserve<A, B>(n)`, or `world.CreateEntities(span, a, b)` at once |
 | Parallel query | `World.SharedJobScheduler`, `InlineParallelQuery` | `[ForEach(Parallel = true)]` |
 | Events | `SubscribeComponentAdded` / `Removed` / `Set` | none: `[Changed<T>]`, `[Removed<T>]`, tags queried by later systems |
 
@@ -195,7 +195,7 @@ Every other result, including the ones without Arch (Arch has no value index, hi
 - **Filling a fresh world without a reservation.** Created one by one in a new world, Arch's entities take
   <BenchValue k="cold.perEntity.arch" /> against EasyEcs' <BenchValue k="cold.perEntity" />: EasyEcs' doubling arrays
   reach the large object heap and start a full collection, Arch's 16 KB chunks never do. Reserve the table first
-  (`EnsureCapacity<T1, …, Tn>(n)`) or create in one call, and EasyEcs is ahead
+  (`Reserve<T1, …, Tn>(n)`) or create in one call, and EasyEcs is ahead
   ([creating entities in a fresh world](/en/docs/performance#cold-create)).
 - **Reach.** Arch runs on netstandard2.1, net6.0 and net8.0, and in Unity. EasyEcs needs .NET 10.
 - **A small core.** If you want queries and storage and nothing else, Arch's core is smaller; systems, relations and

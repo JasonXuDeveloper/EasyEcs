@@ -64,7 +64,7 @@ Components are structs ([EECS006](/en/docs/guide/analyzer#eecs006)). Keep an ent
 | `world.EntityCount` / `Entities` | Live entities and an allocation-free walk over them |
 | `world.ChangeTick` | The current change tick |
 | `world.UpdateCount` | Completed `Update()` calls of the default group |
-| `world.EnsureCapacity<T1, …, Tn>(n)` / `EnsureCapacity(prefab, n)` / `EnsureEntityCapacity(n)` | Pre-size before a known peak or a wave |
+| `world.Reserve<T1, …, Tn>(n)` / `Reserve(prefab, n)` / `EnsureEntityCapacity(n)` | Pre-size before a known peak or a wave |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` / `IsAlive(id)` | From an `EntityId` back to a checked handle |
 | `world.Describe()` | Tables, columns, rows and bytes, for tools |
 | `world.DescribeSchedule()` | Every group's stages, each system's reads and writes, why it waits, the pairs only registration orders; `ToString()` / `ToMermaid()` |
@@ -146,7 +146,7 @@ inlined call to the generic API above.
 | Unique `Account` | `world.AccountIndex.Get(id)` / `TryGet(id, out e)` |
 | Grouped `Zone` | `filter.InZone(id)` (`InGroup<Zone>(id)`) |
 | Buffer element `Loot` | `e.Loot` (`ref readonly DynamicBuffer<Loot>`), `HasLoot`, `WriteLoot()`, `GetOrAddLoot()`, `RemoveLoot()` |
-| Relation `MemberOf` | `e.AddMemberOf(target)`, `RemoveMemberOf(target)`, `LinksMemberOf(target)`, `world.MemberOfIndex` |
+| Relation `MemberOf` | `e.AddMemberOf(target)`, `UnlinkMemberOf(target)`, `LinksMemberOf(target)`, `world.MemberOfIndex` |
 | Singleton `Clock` | `world.Clock` (`ref`), `HasClock`, `GetOrAddClock()`, `SetClock(…)`, `RemoveClock()` |
 | On a `Prefab` | `SetPosition(…)`, `RemovePosition()` return the prefab; `prefab.Position` (read-only), `HasPosition`, `IsDead` |
 | `world.Query<Position, Velocity>()` items | `item.Position`, `item.Velocity` |
@@ -253,6 +253,7 @@ bool anyDead = world.Any<Dead>();
 | Call | Does |
 | --- | --- |
 | `world.Query<T1..T9>(filter)` | `foreach` over items: `ref` components and `Entity` |
+| `world.Read<T1..T9>(filter)` | The same, `ref readonly`: stamps nothing (a save, a send) |
 | `world.Count<T1..T9>(filter)` / `Any<…>(filter)` | Counts, or stops at the first match |
 | `world.ForEach<T1..T9, TJob>(ref job, filter)` | A struct job `IForEach<T…>`: `Execute(ref T1 …)` |
 | `world.ForEachEntity<…>(ref job, filter)` | `IForEachEntity<T…>`: `Execute(Entity e, ref T1 …)` |
@@ -380,7 +381,8 @@ Indexed and grouped components are written with `Set`, never through a `ref`
 | `world.Instantiate(prefab)` / `Instantiate(prefab, span)` | One entity, or a wave in one pass |
 | `world.Instantiate(prefab, a, b, …)` / `Instantiate(prefab, span, a, b, …)` | The same with up to 9 components of its own, replacing or adding to the prefab's: one row copy |
 | `world.CreateEntities(span, a, b, …)` | A wave with the same values |
-| `world.DestroyEntities<T…>(filter)` | Destroys every match; returns how many |
+| `world.DestroyAll<T…>(filter)` | Destroys every match; returns how many |
+| `world.DestroyEntities(ids)` | Destroys a list of ids in one pass; returns how many |
 | `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | One component set or removed on every match |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | One component disabled or enabled on every match |
 
@@ -390,7 +392,7 @@ var wave = new Entity[100];
 world.Instantiate(goblin, wave);
 var scout = world.Instantiate(goblin, new Velocity(2, 0));   // the prefab's values plus its own
 world.SetAll(new Velocity(0, 0), QueryFilter.Create().With<Health>());
-world.DestroyEntities<Dead>();
+world.DestroyAll<Dead>();
 ```
 
 Guides: [Prefabs](/en/docs/guide/prefabs), [Bulk operations](/en/docs/guide/bulk).
@@ -425,10 +427,10 @@ Guide: [Dynamic buffers](/en/docs/guide/dynamic-buffers).
 | `world.Capture()` / `Capture(into)` | An in-memory copy; `into` reuses a snapshot's arrays |
 | `world.Restore(snapshot)` | Back to the copy; handles from then are valid again |
 | `world.Save(writer)` / `Load(bytes)` | A whole world as bytes (managed components need `[NinoType]`); `Load` throws `InvalidDataException` when an unmanaged component's layout changed since the save |
-| `world.Save(writer, exclude)` / `Load(bytes, keep, markWritten: false)` | A restart: the save leaves out the components and singletons of a set, the load keeps the singletons of a set as the new process set them |
+| `world.SaveWithout(writer, exclude)` / `Load(bytes, keep, markWritten: false)` | A restart: the save leaves out the components and singletons of a set, the load keeps the singletons of a set as the new process set them |
 | `world.SaveEntities(writer, ids)` / `LoadEntities(bytes, handles)` | A group of entities to another world or process |
 | `ComponentSet.Create().With<T>()….WithSingleton<S>()` | Components (and, for whole-world saves, singletons), built once in a `static readonly` field |
-| `world.SaveEntities(writer, ids, set)` | A record: only the components of the set |
+| `world.SaveEntitiesWith(writer, ids, set)` | A record: only the components of the set |
 | `world.LoadEntitiesInto(bytes, entities, markWritten: false)` | A record onto entities that exist; `markWritten: false` keeps it from counting as changed |
 | `world.MoveEntities(target, ids, moved)` | A group to another world of the thread, no encoding |
 | `world.RemoveTypes(assembly or context)` | Drops a plugin's types before its context unloads |
@@ -452,10 +454,10 @@ private static readonly ComponentSet NewConfig = ComponentSet.Create().WithSingl
 
 ```csharp
 var restart = new System.Buffers.ArrayBufferWriter<byte>();
-world.Save(restart, Runtime);                       // the old process, at shutdown
+world.SaveWithout(restart, Runtime);                       // the old process, at shutdown
 using var next = new World();
 next.SetConfig(64);                                 // the new version's configuration
-next.Load(restart.WrittenSpan, NewConfig, markWritten: false);   // Config stays as set
+next.LoadKeeping(restart.WrittenSpan, NewConfig, markWritten: false);   // Config stays as set
 ```
 
 Guides: [Snapshots](/en/docs/guide/snapshots), [Saves](/en/docs/guide/saves),

@@ -113,7 +113,7 @@ costs and when to use it).
 | [Hierarchy](https://ecs.xgamedev.net/docs/guide/hierarchy) | `ChildOf`, `world.Children(parent)`, `world.Descendants(root)` | Parents and children; destroying a parent destroys its subtree; a whole subtree in one walk. |
 | [Table groups](https://ecs.xgamedev.net/docs/guide/groups) | `IGroup`, `world.GroupBy<T>()`, `QueryFilter.InGroup<T>(group)` | Split tables by a value (zone, map, match), so a query walks one group's rows only. |
 | [Snapshots](https://ecs.xgamedev.net/docs/guide/snapshots) | `world.Capture()`, `world.Restore(snapshot)` | Copy a world in memory and roll it back (replays, tests, rollback). |
-| [Saves](https://ecs.xgamedev.net/docs/guide/saves) | `world.Save(writer)`, `world.Load(bytes)`; `Save(writer, exclude)`, `Load(bytes, keep, markWritten: false)` | A whole world as bytes through Nino, for restarts and other processes; a restart leaves runtime state out and keeps the new configuration. |
+| [Saves](https://ecs.xgamedev.net/docs/guide/saves) | `world.Save(writer)`, `world.Load(bytes)`; `SaveWithout(writer, exclude)`, `Load(bytes, keep, markWritten: false)` | A whole world as bytes through Nino, for restarts and other processes; a restart leaves runtime state out and keeps the new configuration. |
 | [Migration and records](https://ecs.xgamedev.net/docs/guide/migration-and-unload) | `SaveEntities` (with a `ComponentSet`), `LoadEntities`, `LoadEntitiesInto` (`markWritten: false`), `MoveEntities` | A group of entities to another world or server, links rewritten; a record of what persists, restored onto existing entities. |
 | [Unloading plugin types](https://ecs.xgamedev.net/docs/guide/migration-and-unload#remove-types) | `world.RemoveTypes(assembly or context)` | Remove a plugin's types so its `AssemblyLoadContext` unloads: hot reload on a live server. |
 | [Bulk create and destroy](https://ecs.xgamedev.net/docs/guide/entities-and-components#entities) | `CreateEntities`, `Instantiate(prefab, span)`, `DestroyEntities`, `EnsureEntityCapacity` | Spawn and clear waves in one pass through the structural gate. |
@@ -299,7 +299,7 @@ and allocate 535 KB and 61 KB per tick (EasyEcs and Friflo: 0 B):
 | [Steer 100,000 agents on all cores (parallel query)](https://ecs.xgamedev.net/docs/comparison#parallel) | 766 μs | Arch 685 μs | 0.89× (within error) | Arch's and Friflo's runners keep worker threads of their own, which win when passes run back to back, as BenchmarkDotNet runs them. EasyEcs wakes thread-pool helpers only while they pay: in a real server tick a dedicated crew measured worse tail latency and more CPU per tick (D22). |
 | [Scan 100,000 entities for the 1,000 written, without a change filter](https://ecs.xgamedev.net/docs/comparison#change-tracking) | 61.4 μs | Friflo.Engine.ECS 53.7 μs | 0.88× | Not the way to do it in EasyEcs: the component is `ITrackChanges`, so each of the 1,000 writes also stamps its row's change tick, which `[Changed<T>]` needs and the scan ignores; Friflo's component is not tracked. `[Changed<T>]` does the same job faster than every library's scan. |
 | [Find the 10 of 100,000 entities that lost a component](https://ecs.xgamedev.net/docs/comparison#removal-detection) | 830 ns | Friflo.Engine.ECS 697 ns | 0.84× (within error) | Friflo's `OnComponentRemoved` event pushes each id into a list you keep as the removal happens, a cost per removal; `[Removed<T>]` finds the removals through per-block summaries, a fixed cost per pass that 10 removals do not cover. From 1,000 removals on, EasyEcs leads, with no subscription to write. |
-| [Create 100,000 three-component entities one by one in a fresh world, nothing reserved](https://ecs.xgamedev.net/docs/comparison#cold-create) | 7.13 ms | Arch 4.77 ms | 0.67× | A fresh EasyEcs world grows its table and entity storage by doubling, and the arrays past 85,000 bytes land on the large object heap; together they pass the budget that sets off a full collection, once per new world (D28). Arch keeps entities in 16 KB chunks, which never reach that heap. Reserve the table with `EnsureCapacity<T1..Tn>(count)` or create the entities with `CreateEntities`, and EasyEcs is the fastest of the four. |
+| [Create 100,000 three-component entities one by one in a fresh world, nothing reserved](https://ecs.xgamedev.net/docs/comparison#cold-create) | 7.13 ms | Arch 4.77 ms | 0.67× | A fresh EasyEcs world grows its table and entity storage by doubling, and the arrays past 85,000 bytes land on the large object heap; together they pass the budget that sets off a full collection, once per new world (D28). Arch keeps entities in 16 KB chunks, which never reach that heap. Reserve the table with `Reserve<T1..Tn>(count)` or create the entities with `CreateEntities`, and EasyEcs is the fastest of the four. |
 
 What each library has built in:
 
@@ -368,7 +368,7 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
 - **Operating a long-running server.** `world.TrimExcess()` gives a peak's memory back; `SystemStats` adds allocated
   bytes and visited entities; `world.DescribeSchedule()` shows the stages and why each system waits
   ([diagnostics](https://ecs.xgamedev.net/en/docs/guide/diagnostics)).
-- **Restarts that leave runtime state behind.** `Save(writer, exclude)` and `Load(bytes, keep, markWritten: false)`
+- **Restarts that leave runtime state behind.** `SaveWithout(writer, exclude)` and `Load(bytes, keep, markWritten: false)`
   ([restart](https://ecs.xgamedev.net/en/docs/guide/saves#restart)).
 - **Generated members for `ChildOf`** (`entity.SetChildOf(parent)`, `world.ChildOfIndex`, …) and
   `entity.IsDestroyed`; a `[ForEach]` method that uses its `Entity` only as an identity no longer runs alone.
@@ -403,7 +403,7 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
 
 ## What's new in 4.4
 
-- **Records of what persists.** `SaveEntities(output, ids, set)` saves only the components of a `ComponentSet`
+- **Records of what persists.** `SaveEntitiesWith(output, ids, set)` saves only the components of a `ComponentSet`
   (runtime components need no formatter), and `LoadEntitiesInto` loads them onto entities that exist already, each
   moving table once ([a record of what persists](https://ecs.xgamedev.net/en/docs/guide/migration-and-unload#records)).
 - **Saved components can evolve.** Saves record types by Nino type id, so `[NinoFormerName]` keeps a renamed

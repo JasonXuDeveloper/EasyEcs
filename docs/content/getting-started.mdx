@@ -208,7 +208,7 @@ public class DeathSystem : EcsSystem
 [UpdateAfter<DeathSystem>]
 public class CorpseSystem : EcsSystem
 {
-    protected override void OnUpdate() => World.DestroyEntities<Dead>();   // every corpse in one pass
+    protected override void OnUpdate() => World.DestroyAll<Dead>();   // every corpse in one pass
 }
 ```
 
@@ -363,7 +363,7 @@ public class DeathSystem : EcsSystem
 [UpdateAfter<DeathSystem>]
 public class CorpseSystem : EcsSystem
 {
-    protected override void OnUpdate() => World.DestroyEntities<Dead>();
+    protected override void OnUpdate() => World.DestroyAll<Dead>();
 }
 
 public class ClockSystem : EcsSystem

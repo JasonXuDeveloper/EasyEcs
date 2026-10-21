@@ -11,13 +11,14 @@ icon: CircleArrowUp
 
 ## v4.6 → v4.7 [#v4-6-to-v4-7]
 
-为 4.6 写的代码不用改就能编译，除非某个系统声明了名为 `RunCount` 的成员，或者某个文件引入的其他命名空间里有和新类型同名的类型。
+四个调用和一个生成成员[改了名](#v4-7-renames)，编译器会找出每一处调用。除此之外，为 4.6 写的代码不用改就能编译，除非某个系统声明了名为
+`RunCount` 的成员，或者某个文件引入的其他命名空间里有和新类型同名的类型。
 有两个调用的行为变了；写被追踪组件的并行遍历切分行的方式也变了。
 
 ### `SaveEntities` 拒绝含单例的集合 [#v4-7-save-entities]
 
 `ComponentSet` 现在也能放单例（`WithSingleton<T>()`），`With(Type)` 遇到单例类型也不再抛异常，而是加进去。实体组存档不写单例，
-所以集合里有单例时，`SaveEntities(output, ids, set)` 抛 `ArgumentException`。从一组类型里用 `With(typeof(...))` 建集合、又混进了单例的，
+所以集合里有单例时，`SaveEntitiesWith(output, ids, set)` 抛 `ArgumentException`。从一组类型里用 `With(typeof(...))` 建集合、又混进了单例的，
 现在在存档时报错，而不是在 `With` 时。记录里的组件单独放一个集合：
 
 **4.6**
@@ -34,7 +35,7 @@ public record struct Bank(long Gold) : IComponent;
 private static readonly ComponentSet Record = ComponentSet.Create().With<Bank>();
 ```
 
-含单例的集合用在整个 World 的 `Save(output, in exclude)` 和 `Load(input, in keep)` 上（[重启](/zh/docs/guide/saves#restart)）。
+含单例的集合用在整个 World 的 `SaveWithout(output, in exclude)` 和 `LoadKeeping(input, in keep)` 上（[重启](/zh/docs/guide/saves#restart)）。
 
 ### `EcsSystem.RunCount` [#v4-7-run-count]
 
@@ -69,11 +70,23 @@ public class Spawner : EcsSystem
 同一个 4,096 行块里的两个分块会争用它的变更摘要，可能漏打变更 tick（[D48](/zh/docs/decisions#d48-parallel-tracked-chunks)）。代码不用改；
 不超过 4,096 行的表现在只切成一块，所以小的并行遍历用到的线程可能比以前少。不写被追踪组件的遍历照旧切块。
 
-### 带 `keep` 集合的 `Load` [#v4-7-load-overloads]
+### 改名的调用 [#v4-7-renames]
 
-在 `Load(input, markWritten = true)` 之外新增了 `Load(input, in keep, markWritten = true)`。4.6 的调用照旧绑定：`Load(bytes)`、
-`Load(bytes, false)` 和 `Load(bytes, markWritten: false)` 都走不带 `keep` 的重载，`Load(bytes, default)` 也是，意思是 `markWritten: false`，
-而不是空集合。要保留单例，传一个 `ComponentSet`（`static readonly` 字段）。集合里有组件时抛 `ArgumentException`：读档会替换所有实体。
+4.6 的四个调用和一个生成成员改了名，名字直接说明它做什么。旧名字已删除，编译器会指出每一处要改的调用：
+
+| 4.6 | 4.7 | 原因 |
+|---|---|---|
+| `world.SaveEntities(output, ids, set)` | `world.SaveEntitiesWith(output, ids, set)` | 集合是这条记录要写的内容；不带集合的 `SaveEntities(output, ids)` 不变 |
+| `world.EnsureCapacity<T1, …, Tn>(count)` | `world.Reserve<T1, …, Tn>(count)` | `count` 是再创建多少个，不是总数；`EnsureEntityCapacity(total)` 和 `DynamicBuffer.EnsureCapacity(capacity)` 是总数，不变 |
+| `world.EnsureCapacity(prefab, count)` | `world.Reserve(prefab, count)` | 同上 |
+| `world.DestroyEntities<T1, …, Tn>(filter)` | `world.DestroyAll<T1, …, Tn>(filter)` | 按过滤条件的调用以 `All` 结尾，和 `SetAll`、`RemoveAll` 一致 |
+| `e.RemoveMemberOf(target)`（关系的生成成员） | `e.UnlinkMemberOf(target)` | `e.RemoveMemberOf()` 删掉整个缓冲区；少写一个参数不会再把所有链接删光 |
+
+`world.DestroyEntities(ids)` 现在一次销毁一组 id，和 `SaveEntities`、`MoveEntities` 一样。4.6 带类型参数的调用对它编译不过，
+所以不会有调用悄悄换了意思。
+
+4.7 新增的重启调用一开始就是新名字：`world.SaveWithout(output, in exclude)` 和
+`world.LoadKeeping(input, in keep, markWritten)`（见[重启](/zh/docs/guide/saves#restart)）。
 
 ### `MeasureSystems` 统计得更多 [#v4-7-measure-systems]
 
@@ -255,7 +268,7 @@ world.Update();
 - **`UpdateInterval` 和新增的 `UpdatePhase` 应该是常量**：每次更新都会读它们，警告 [EECS018](/zh/docs/guide/analyzer#eecs018)
   会指出计算出值的重写。要停下和恢复一个系统，设置 `Enabled`。
 - **`world.DestroyEntity(entity)` 删掉了**：它做的就是 `entity.Destroy()` 做的事。调用 `entity.Destroy()`，或者用
-  `world.DestroyEntities<T…>(filter)` 一次销毁所有匹配的实体。
+  `world.DestroyAll<T…>(filter)` 一次销毁所有匹配的实体。
 - **`IForEach` job 只收组件。** `Execute(int entityId, ref T1 c1, …)` 变成 `Execute(ref T1 c1, …)`，遍历不必为它们加载实体行。需要实体的
   job 实现 `IForEachEntity<…>`（`Execute(Entity entity, ref T1 c1, …)`），用 `world.ForEachEntity` 运行。
 - **`CompactArchetypes()` 和 `GetFragmentationStats()` 删掉了。** 表自己保持紧凑，job 抛异常时遍历也会正常结束，没什么要压缩、也没什么要监控的（两次更新之间这个比例一直是
@@ -306,7 +319,7 @@ world.Update();
 - `world.ForEachEntity` 配 `IForEachEntity<T1..Tn>` job，收到的是 `Entity` 句柄而不是 id。
 - `INoStructuralChanges` 标记不做结构变更的 job；生成器会给不可能改变结构的 `[ForEach]` 方法加上它，这些方法遍历时省掉逐个实体的簿记。
 - `QueryFilter.WithAny<T>()` 和 `[WithAny<T>]`：实体至少要有其中一个组件。
-- `world.CreateEntities(span, components…)` 和 `world.DestroyEntities<T…>(filter)`：成批生成和清除，只过一次结构闸门。
+- `world.CreateEntities(span, components…)` 和 `world.DestroyAll<T…>(filter)`：成批生成和清除，只过一次结构闸门。
 - `WorldOptions.MeasureSystems` 把每次系统运行的耗时记进 `system.Stats`（`SystemStats`）。
 - `[ForEach(Parallel = true)]`（以及 `world.ForEachParallel` / `ForEachEntityParallel`）把行按 `World.ParallelChunkRows`
   分块，在多个线程上运行；[EECS010](/zh/docs/guide/analyzer#eecs010) 报告可能有竞争的方法。

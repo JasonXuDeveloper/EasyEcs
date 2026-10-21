@@ -70,13 +70,14 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.CreateEntity(in T1 … in Tn)` | 均摊 O(n) | 直接放进最终的表 |
 | `world.CreateEntities(Span<Entity> entities, in T1 … in Tn)` | 均摊 O(count × n) | 整波只过一次闸门，表最多扩容一次；写回句柄 |
 | `entity.Destroy()` | O(c) | 表的最后一行补上空位（遍历期间变成墓碑）；回收 id；失效句柄直接忽略；从索引里摘掉；级联销毁 `ChildOf` 子实体并执行目标策略；开了 `WorldOptions.DestroyLog` 时多写一条 16 字节的记录 |
-| `world.DestroyEntities<T1..Tn>(filter)` | O(M + S) | 一次过闸门销毁所有匹配并返回数量；遍历期间也安全 |
+| `world.DestroyAll<T1..Tn>(filter)` | O(M + S) | 一次过闸门销毁所有匹配并返回数量；遍历期间也安全 |
+| `world.DestroyEntities(ids)` | O(ids × c) | 一次过闸门、一次级联销毁一组 id 并返回数量；失效的和重复的 id 会跳过；遍历期间也安全 |
 | `entity.IsAlive` / `world.IsAlive(id)` | O(1) | |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` | O(1) | 这个版本的实体不存活时返回 false（或抛异常） |
 | `world.EntityCount` | O(1) | |
 | `world.Entities` | O(容量) | 按 id 顺序列出存活实体，用于诊断 |
 | `world.EnsureEntityCapacity(capacity)` | O(容量) | 预先分配实体数组；已经够大时什么都不做 |
-| `world.EnsureCapacity<T1..Tn>(count)` | O(n)，外加一次扩容 | 为正好有 `T1..Tn` 的表和实体数组预留空间，接下来 `count` 次带这些组件的创建都不再扩容 |
+| `world.Reserve<T1..Tn>(count)` | O(n)，外加一次扩容 | 为正好有 `T1..Tn` 的表和实体数组预留空间，接下来 `count` 次带这些组件的创建都不再扩容 |
 
 ## 组件 [#components]
 
@@ -113,7 +114,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.Instantiate(prefab, Span<Entity> entities)` | O(count × c) | 整波只过一次闸门，表最多扩容一次 |
 | `world.Instantiate(prefab, in T1 … in Tn)` | 均摊 O(c + n) | 预制体的值加上给定的值（覆盖预制体里的，或者新加；给定的组件若在预制体里被禁用则启用），一次行复制直接进最终的表，不经过中间表；给定的 `ChildOf` 会挂上层级，唯一键先检查；预制体组为 O(成员数 × c) 再加一次搬行，组件给传入的那个预制体对应的实体 |
 | `world.Instantiate(prefab, Span<Entity> entities, in T1 … in Tn)` | O(count × (c + n)) | 每个实例都是同样的值；只过一次闸门，表最多扩容一次，每个给定的列一次填满 |
-| `world.EnsureCapacity(prefab, count)` | O(c)，外加一次扩容 | 为接下来 `count` 个实例要进的表预留空间，生成波次在 tick 中不再扩容 |
+| `world.Reserve(prefab, count)` | O(c)，外加一次扩容 | 为接下来 `count` 个实例要进的表预留空间，生成波次在 tick 中不再扩容 |
 | `entity.Clone()` | O(c) | 同一 World、同一张表里的新实体，复制全部组件；实体不存活时抛异常 |
 
 ## 动态缓冲 [#dynamic-buffers]
@@ -142,6 +143,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数) | 连续行的 span；不能做结构变更 |
 | `world.ForEachParallel<T1..Tn, TJob>(ref job, filter)` / `ForEachEntityParallel` | O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | `INoStructuralChanges` job；每块 1,024 到 `World.ParallelChunkRows` 行（job 写被追踪组件时为 4,096 的整数倍），每块一个 job 副本；只在划算时唤醒助手线程 |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | 指向行内的 ref：被追踪组件的每个被访问行都算写入；循环里不能 `await` |
+| `foreach (var item in world.Read<T1..Tn>(filter))` | O(M + S) | 指向行内的 `ref readonly`：不打 tick；其余同 `Query` |
 | `world.Count<T1..Tn>(filter)` | O(M)，需要测位的表再加 S / 64 | 累加表计数，或数存在位（和 tick），AVX-512 下每步 8 个字 |
 | `world.Any<T1..Tn>(filter)` | 最坏 O(M + S / 64) | 找到第一个就停 |
 | `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1) | 只建一次，放在 `static readonly` 字段里；多个 `WithAny` 组成“至少有一个”的一组 |
@@ -149,7 +151,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `filter.Removed<T>(since)` / `[Removed<T>]` | 同 `Changed` | 在 `since` 及之后失去被追踪的 `T`、且现在仍没有它的实体；已销毁的实体不报告（由销毁日志报告） |
 | `filter.ChangedAny<T1..Tn>(since)` / `[ChangedAny<T1..Tn>]` | 构建 O(n)；遍历时跳过这一组列自 `since` 以来都没被写过的表，以及没有任何列写过的块和位字 | 2 到 9 个被追踪组件里至少有一个在 `since` 及之后被写过的行；一个过滤条件的所有 `ChangedAny` 调用合成一组，和其他条件按 AND 组合；每个过滤条件一个 tick |
 | `filter.RemovedAny<T1..Tn>(since)` / `[RemovedAny<T1..Tn>]` | 同 `ChangedAny` | 在 `since` 及之后至少失去其中一个、且现在仍没有它的实体 |
-| `filter.Slice(index, count)` / `[ForEach(Slices = N)]` | O(1)；一次遍历约访问 S / N 行，按 64 行位字切分 | 只用于 `ForEach` 系列调用（`Query`、`Count`、`Any`、`DestroyEntities`、`entity.Run(ref job, filter)` 和批量调用会抛 `ArgumentException`）；分片方法访问第 `RunCount % N` 片；不能和 `[Changed<T>]` / `[Removed<T>]` 一起用（EECS035） |
+| `filter.Slice(index, count)` / `[ForEach(Slices = N)]` | O(1)；一次遍历约访问 S / N 行，按 64 行位字切分 | 只用于 `ForEach` 系列调用（`Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run(ref job, filter)` 和批量调用会抛 `ArgumentException`）；分片方法访问第 `RunCount % N` 片；不能和 `[Changed<T>]` / `[Removed<T>]` 一起用（EECS035） |
 | `filter.InGroup<T>(group)` | O(1)；遍历只走这个分组的表 | [分组](/zh/docs/guide/groups) |
 | `filter.Since(since)` | O(1) | 把 `Changed`、`Removed`、`ChangedAny` 和 `RemovedAny` 的 tick 换掉，不用重建过滤条件：一个过滤条件，带着每个客户端的 tick 跑 |
 
@@ -201,7 +203,7 @@ World 保持原样。
 | `world.Descendants(root)` | 子树里每个实体 O(1) | 深度优先，`root` 以下的每一层；预热后 0 B |
 | `world.Descendants(root).AddTo(ids, includeRoot)` | 子树里每个实体 O(1) | 把子树追加到 `List<EntityId>`，需要时根排第一，每个父实体在它的子实体之前（正是 `MoveEntities` / `SaveEntities` 以 `CollectionsMarshal.AsSpan(ids)` 接收的那组）；返回追加的个数；只有列表扩容时才分配 |
 | `entity.AddRelation(in T relation)` | 均摊 O(1) | 追加到实体的 `DynamicBuffer<T>`（缺失时先添加）和关系索引 |
-| `entity.RemoveRelation<T>(target)` / `HasRelation<T>(target)` | O(L) | `RemoveRelation` 返回删掉了几条 |
+| `entity.RemoveRelation<T>(target)` / `HasRelation<T>(target)` | O(L) | `RemoveRelation` 返回删掉了几条；关系 `X` 生成 `e.UnlinkX(target)` / `e.LinksX(target)` |
 | `world.Relations<T>()` | O(1)；第一次调用时创建 | 关系索引；对关系 `X` 会生成 `world.XIndex` |
 | `relations.Count(target)` | O(1) | 指向 `target` 的链接数 |
 | `relations.TargetCount` | O(1) | 有链接指向的不同实体数（有多少个公会有成员），随链接增减维护 |
@@ -222,11 +224,11 @@ World 保持原样。
 | `world.Capture()` / `Capture(into)` | O(实体数 × 组件数 + 表数 + 单例数) | 按值复制；`Capture(into)` 复用之前快照的数组，够大之后不再分配；遍历进行时不可用 |
 | `world.Restore(snapshot)` | O(实体数 × 组件数 + 表数 + 单例数) | 快照里的句柄重新有效，之后创建的句柄失效；每个恢复的行都算写入（或移除） |
 | `world.Save(output)` | O(实体数 × 组件数) | 把 World 写成字节：非托管行原样写出，托管值走 Nino；缓冲够大之后不再分配 |
-| `world.Save(output, in ComponentSet exclude)` | O(实体数 × 组件数) | 不写 `exclude` 里的组件和单例（`Disabled<T>` 跟着 `T` 一起不写），这些类型不需要格式化器；缓冲够大之后不再分配 |
+| `world.SaveWithout(output, in ComponentSet exclude)` | O(实体数 × 组件数) | 不写 `exclude` 里的组件和单例（`Disabled<T>` 跟着 `T` 一起不写），这些类型不需要格式化器；缓冲够大之后不再分配 |
 | `world.Load(input, markWritten)` | O(实体数 × 组件数) | 实体保留原 id；组件布局变了会抛 `InvalidDataException`，World 保持原样；`markWritten: false`：加载的行算作从未写过 |
 | `world.Load(input, in ComponentSet keep, markWritten)` | O(实体数 × 组件数) | `keep` 里的单例保持 World 现在的样子（跳过存档里的值）；`keep` 里有组件时抛 `ArgumentException`；`markWritten` 只作用于加载的行 |
 | `world.SaveEntities(output, ids)` | O(给定实体数 × 组件数) | 一组实体，交给另一个 World 或进程 |
-| `world.SaveEntities(output, ids, set)` | O(给定实体数 × 组件数) | 只写 `ComponentSet` 里的组件（建一次：`ComponentSet.Create().With<T>()`，每个类型 O(1)）；集合里有单例时抛 `ArgumentException` |
+| `world.SaveEntitiesWith(output, ids, set)` | O(给定实体数 × 组件数) | 只写 `ComponentSet` 里的组件（建一次：`ComponentSet.Create().With<T>()`，每个类型 O(1)）；集合里有单例时抛 `ArgumentException` |
 | `ComponentSet.Create().With<T>()` / `WithSingleton<T>()` / `With(type)` | 每次 O(1)；`With(type)` 一次查找（冷路径） | `With(type)` 接受组件或单例类型；`Contains<T>()` / `ContainsSingleton<T>()` 为 O(1) |
 | `world.LoadEntities(input, entities)` | O(实体数 × 组件数) | 新 id；指向组内实体的 `EntityId` 字段会改写，其他的变成 `EntityId.Null` |
 | `world.LoadEntitiesInto(input, entities, markWritten)` | O(实体数 × 组件数) | 读到已经存在的实体上：每个实体最多换一次表，存档里没有的组件保持不变；`markWritten: false`：加载的组件算作从未写过 |

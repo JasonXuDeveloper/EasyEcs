@@ -75,7 +75,7 @@ From each package's public API and the comparison ports, which compile against t
 | Struct query jobs | ✅ `IForEach`, `IForEachEntity`, `IForEachBatch` | ✅ | ✅ `IForEach`, `InlineQuery` | – |
 | Bulk changes | ✅ `SetAll`, `RemoveAll`, `DisableAll`, `EnableAll` | ✅ `EntityBatch`, `ApplyBatch` | ✅ add / remove by query | ❌ |
 | Bulk create and destroy | ✅ `CreateEntities`, `DestroyEntities(filter)`, `Instantiate(prefab, span)` | ⚠️ `CreateEntityBatch`; delete per entity | ⚠️ destroy by query | ❌ |
-| Reserve a table before creating into it | ✅ `EnsureCapacity<T1, …, Tn>(n)` | ✅ `EnsureCapacity` on the store and the archetype | ✅ `EnsureCapacity(signature, n)` | – |
+| Reserve a table before creating into it | ✅ `Reserve<T1, …, Tn>(n)` | ✅ `EnsureCapacity` on the store and the archetype | ✅ `EnsureCapacity(signature, n)` | – |
 | Prefabs | ✅ `Prefab`: data outside every world | ⚠️ an entity of the store, copied with `CloneEntity` | ❌ | ⚠️ an entity copied with `CopyTo(world)` |
 | Change tracking (rows written since a tick) | ✅ `ITrackChanges`, `[Changed<T>]`, every `ref` write | ❌ | ❌ (events) | ✅ `WhenChanged<T>()` after `NotifyChanged<T>()` |
 | Removal detection | ✅ `[Removed<T>]` | ⚠️ `OnComponentRemoved` events | ⚠️ `SubscribeComponentRemoved` events | ✅ `WhenRemoved<T>()` sets |
@@ -325,7 +325,7 @@ and sets per entity.
 <BenchChart bench="BulkChangeComparison" title="Stun 100,000 fighters, then lift the stun" />
 
 `BulkSpawnComparison`: 10,000 shots are spawned beside 100,000 fighters, then all cleared. EasyEcs uses
-`CreateEntities` (one table, rows placed at once) and `DestroyEntities<Fuse>()`; Friflo and DefaultEcs create and
+`CreateEntities` (one table, rows placed at once) and `DestroyAll<Fuse>()`; Friflo and DefaultEcs create and
 delete per entity; Arch creates per entity after `EnsureCapacity` and destroys by query.
 
 <BenchChart bench="BulkSpawnComparison" title="Spawn 10,000 shots, then clear them" />
@@ -334,7 +334,7 @@ delete per entity; Arch creates per entity after `EnsureCapacity` and destroys b
 
 `ColdCreateComparison`: 100,000 entities of one, two or three components created in a world that has never held any,
 a new world for every call: one by one (`PerEntity`), one by one after reserving room (`PerEntity_Reserved`:
-`EnsureCapacity<T1, …, Tn>(n)` in EasyEcs, `EnsureCapacity` on Friflo's store and archetype and on Arch's world;
+`Reserve<T1, …, Tn>(n)` in EasyEcs, `EnsureCapacity` on Friflo's store and archetype and on Arch's world;
 DefaultEcs has no tables to reserve), and in one `CreateEntities` call (`Bulk`, EasyEcs only). The comparisons above
 count three components: reserved against reserved, the bulk call against each library's fastest way, and one by one
 against one by one.

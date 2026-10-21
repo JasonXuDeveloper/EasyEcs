@@ -256,7 +256,7 @@ public class KillSystem : EcsSystem
 public sealed class ScoreSystem : EcsSystem
 {
     // One pass destroys the corpses and says how many there were: each is counted once.
-    protected override void OnUpdate() => World.GetOrAddScore().Deaths += World.DestroyEntities<Dead>();
+    protected override void OnUpdate() => World.GetOrAddScore().Deaths += World.DestroyAll<Dead>();
 }
 ```
 
@@ -967,7 +967,7 @@ foreach (var item in world.Query<Health>(QueryFilter.Create().With<Dead>()))
 One call:
 
 ```csharp
-world.DestroyEntities<Health>(QueryFilter.Create().With<Dead>());
+world.DestroyAll<Health>(QueryFilter.Create().With<Dead>());
 ```
 
 ## EECS031 [#eecs031]
@@ -995,7 +995,7 @@ One call when the values are the same; a reservation when they are not:
 var spawned = new Entity[50_000];
 world.CreateEntities(spawned, new Position(0, 0), new Health(100));
 
-world.EnsureCapacity<Position, Health>(spawned.Length);
+world.Reserve<Position, Health>(spawned.Length);
 for (int i = 0; i < spawned.Length; i++)
     world.CreateEntity(new Position(i, 0), new Health(100));
 ```

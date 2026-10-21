@@ -223,11 +223,11 @@ warlord.Destroy();                                   // ChildOf：销毁父实�
 
 ### 生成前先预留：`EnsureCapacity` [#ensure-capacity]
 
-`world.EnsureCapacity(prefab, count)` 先扩好预制体实例要进的表和实体记录，接下来 `count` 个实例都不再扩容。编组会预留每个成员的表。
+`world.Reserve(prefab, count)` 先扩好预制体实例要进的表和实体记录，接下来 `count` 个实例都不再扩容。编组会预留每个成员的表。
 在生成的那个 tick 之前调用，这波生成就不用在 tick 里付扩容的代价。
 
 ```csharp
-world.EnsureCapacity(Kinds.Troll, 5_000);
+world.Reserve(Kinds.Troll, 5_000);
 var army = new Entity[5_000];
 world.Instantiate(Kinds.Troll, army);                // 不扩容，不分配
 ```
@@ -352,7 +352,7 @@ boss 50 hp, twin 50 hp
 | 循环调用 `Instantiate` 生成一波 | `Instantiate(prefab, span)` | 只过一次闸门，连续的行一次复制 |
 | 先 `Instantiate`，再 `Set` 预制体没有的组件 | `Instantiate(prefab, in c1, …, in cn)` | 一次行复制直接进最终的表，不移动 |
 | 循环调用 `Instantiate(prefab, 相同的值)` | `Instantiate(prefab, span, in c1, …, in cn)` | 只过一次闸门，每个给定的列一次填满 |
-| 在生成的那个 tick 里扩容 | 提前 `EnsureCapacity(prefab, count)` | 这波生成不分配内存 |
+| 在生成的那个 tick 里扩容 | 提前 `Reserve(prefab, count)` | 这波生成不分配内存 |
 | 先 `CreateEntity`，再逐个 `Set` 同一类实体的组件 | 用预制体 | 一次行复制，目标表按预制体缓存 |
 | 每次生成都 new 一个 `Prefab` | 每类一个预制体，放在字段里 | 第一次实例化后，表查找就缓存了 |
 | 把模板做成隐藏实体 | 用 `Prefab` | 查询不用付跳过它们的代价 |

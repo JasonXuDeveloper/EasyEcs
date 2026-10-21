@@ -366,7 +366,7 @@ turret alive: True, gun alive: False
 - **销毁根。** 一次 `Destroy` 在结构闸门内顺着整棵子树走完，不递归（用一个目标栈）。先一个个销毁子实体再销毁父实体，
   做的事一样，只是调用更多。
 - **做传播时层级尽量浅。** 上面的遍历每个实体查一次 `Children`；扁平的层级（船和它的炮塔）走得最快。
-- **`DestroyEntities<T>()`** 一次销毁整张表，级联照样生效。
+- **`DestroyAll<T>()`** 一次销毁整张表，级联照样生效。
 - **预制体生成的子实体直接带上父实体：** `Instantiate(prefab, new ChildOf(parent))` 一步放进最终的表；先 `Instantiate` 再
   `SetChildOf(...)` 要复制一行，再移动一次。
 - **很多实体每个 tick 都要向上找时，把结果存下来：** 一次[向上找祖先](#ancestors)是 O(深度)。

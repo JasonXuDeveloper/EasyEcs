@@ -440,7 +440,7 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 ## D28. 预留只扩到需要的大小；实体存储放在固定对象堆 [#d28-reservations-grow-to-what-they-need-entity-storage-on-the-pinned-heap]
 
 **决定。** 预留把表扩到需要的行数（向上取整到整个存在位字，即 64 行），把实体存储扩到需要的 id 数；如果容量翻倍更大，就按翻倍扩。
-不再扩到下一个 2 的幂。预留包括 `EnsureCapacity<T1..Tn>(count)`（正好有这些组件的那张表）、`EnsureCapacity(prefab, count)`、
+不再扩到下一个 2 的幂。预留包括 `Reserve<T1..Tn>(count)`（正好有这些组件的那张表）、`Reserve(prefab, count)`、
 `EnsureEntityCapacity`、`CreateEntities`、`InitialEntityCapacity` 和恢复快照。由预留定下大小、不小于 85,000 字节的实体存储数组分配在
 固定对象堆（POH）上，和非托管列放在一起；翻倍扩容的中间数组仍然放在大对象堆（LOH）。
 
@@ -454,7 +454,7 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 - **两处改动让两边都不超预算。** 按预留的大小分配，10 万个实体省下 0.6 MB；实体记录放到 POH，把 1.6 MB 挪到另一份预算：LOH 上只剩
   句柄和实体行（2.4 MB），POH 上是实体记录加一到三个 int 列（2.0 到 2.8 MB），不再触发回收。批量创建（一、二、三个组件）从
   11.8 / 12.6 / 12.6 ms 降到 2.7 / 2.5 / 2.7 ms，分配从 5.03 / 5.53 / 6.03 MB 降到 4.20 / 4.58 / 4.96 MB。
-- **逐个创建的实体用 `EnsureCapacity<T1..Tn>`。** `EnsureEntityCapacity` 只扩实体记录，表还是从 64 行开始翻倍，分配了最终大小的两倍：
+- **逐个创建的实体用 `Reserve<T1..Tn>`。** `EnsureEntityCapacity` 只扩实体记录，表还是从 64 行开始翻倍，分配了最终大小的两倍：
   以前 2.67 / 3.32 / 3.99 ms、4.53 / 5.53 / 6.53 MB，预留好表之后 1.94 / 2.71 / 2.60 ms、2.67 / 3.05 / 3.44 MB（Friflo 对 store 和
   archetype 都调 `EnsureCapacity`：11 到 12 ms；Arch 调 `EnsureCapacity`：3.4 到 4.2 ms）。
 - **固定住的数组本来也不会移动。** 两个堆默认都不压缩；句柄不做边界检查直接按下标访问实体记录，这个数组从来不搬；GC 扫描固定数组里的
@@ -540,7 +540,7 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 
 ## D31. 只存需要持久化的部分：存档时用组件集合，读档时读到已有实体上 [#d31-a-record-of-what-persists]
 
-**决定。** `SaveEntities(output, ids, set)` 只写 `ComponentSet` 里的组件，`LoadEntitiesInto(input, entities)` 把一组实体的存档读到
+**决定。** `SaveEntitiesWith(output, ids, set)` 只写 `ComponentSet` 里的组件，`LoadEntitiesInto(input, entities)` 把一组实体的存档读到
 已经存在的实体上，存档里第 i 个实体读到传入的第 i 个实体上，每个实体最多换一次表。`ComponentSet` 是建一次就留着的位掩码
 （`With<T>()`、`With(Type)`）；存档时每张表的行按 O(组内实体数) 选出。
 
@@ -882,7 +882,7 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 
 ## D50. 重启存档可以不写某些类型，重启读档可以保留单例 [#d50-restart-saves]
 
-**决定。** `world.Save(output, in exclude)` 写出整个 World，但不写 `ComponentSet` 里的组件和单例；`world.Load(input, in keep, markWritten)`
+**决定。** `world.SaveWithout(output, in exclude)` 写出整个 World，但不写 `ComponentSet` 里的组件和单例；`world.LoadKeeping(input, in keep, markWritten)`
 让 `keep` 里的单例保持 World 现在的样子（跳过存档里的值）。`ComponentSet` 用第二个掩码存单例（`WithSingleton<T>()`；`With(Type)` 两种都接受）。
 `SaveEntities` 拒绝含单例的集合；`Load` 拒绝含组件的 `keep`。
 

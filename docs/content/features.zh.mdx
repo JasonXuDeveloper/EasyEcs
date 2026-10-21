@@ -54,7 +54,7 @@ public class MovementSystem : EcsSystem
 
 - **适合：** 每个独立的模拟一个 World（一张地图、一个场景、一局对战、一个测试）。代码里存 `Entity` 句柄，组件里存 `EntityId`。
 - **开销：** 每个实体 id 一条 16 字节的记录。带组件创建时一次放进最终的表；销毁时用表的最后一行填洞。
-  `WorldOptions.InitialEntityCapacity`、`EnsureEntityCapacity(n)` 和 `EnsureCapacity<T1, …, Tn>(n)`（连表一起）按已知峰值预分配，长期运行的服务器运行时不会再扩容。
+  `WorldOptions.InitialEntityCapacity`、`EnsureEntityCapacity(n)` 和 `Reserve<T1, …, Tn>(n)`（连表一起）按已知峰值预分配，长期运行的服务器运行时不会再扩容。
 - **指南：** [实体与组件](/zh/docs/guide/entities-and-components)
 
 ### 组件与标签 [#components-and-tags]
@@ -426,7 +426,7 @@ restarted.Load(bytes.WrittenSpan);
 `world.Save(writer)` 把整个 World 写成字节，`world.Load(bytes)` 在本进程或另一个进程的 World 里读回来：id、组件和单例都一样。
 非托管组件按原始行写出；托管组件、单例和标了 `[NinoType]` 的非托管组件由 Nino 写出。类型按 Nino 类型 id 记录，所以加载时会跳过进程里已经不存在的组件，改了名的组件用 `[NinoFormerName]` 就能留住。
 
-重启时，`Save(writer, in exclude)` 不写 `ComponentSet` 里的组件和单例（运行时状态、缓存、配置），这些类型也就不需要格式化器；
+重启时，`SaveWithout(writer, in exclude)` 不写 `ComponentSet` 里的组件和单例（运行时状态、缓存、配置），这些类型也就不需要格式化器；
 `Load(bytes, in keep, markWritten: false)` 保留新进程已经设好的单例，比如它的配置。
 
 - **适合：** 跨重启持久化、落盘的回放、把一个 World 发到另一台机器。
@@ -437,7 +437,7 @@ restarted.Load(bytes.WrittenSpan);
 ### 迁移 [#migration]
 
 `SaveEntities` 和 `LoadEntities` 经由字节把一组实体（一个玩家和他拥有的东西）搬到另一个 World，换上新 id，组内的链接随之改写。
-`MoveEntities` 在同一线程的两个 World 之间直接搬，不经过编码。记录只保存需要持久化的部分：`SaveEntities(writer, ids, set)`
+`MoveEntities` 在同一线程的两个 World 之间直接搬，不经过编码。记录只保存需要持久化的部分：`SaveEntitiesWith(writer, ids, set)`
 配一个 `ComponentSet`，只写出集合里的组件；`LoadEntitiesInto(bytes, entities)` 把它们放到已经存在的实体上。
 加上 `markWritten: false`，恢复的值不算变更，按变更存盘的系统就不会立刻把它写回去。
 
@@ -491,7 +491,7 @@ restarted.Load(bytes.WrittenSpan);
 
 ### 批量操作 [#bulk-operations]
 
-`world.CreateEntities(span, a, b)` 刷出一波取值相同的实体，`Instantiate(prefab, span)` 按预制体刷一波，`DestroyEntities<T>(filter)`
+`world.CreateEntities(span, a, b)` 刷出一波取值相同的实体，`Instantiate(prefab, span)` 按预制体刷一波，`DestroyAll<T>(filter)`
 销毁所有匹配的实体。`SetAll`、`RemoveAll`、`DisableAll` 和 `EnableAll` 对所有匹配的实体改同一个组件，每次处理整个 64 行位字。
 
 - **适合：** 一波怪物、清空一个场景、回合重置、给所有人解除一个状态。

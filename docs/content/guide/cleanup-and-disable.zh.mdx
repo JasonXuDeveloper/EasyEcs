@@ -55,7 +55,7 @@ guest.Destroy();                       // 仍然存活，带 Destroyed 标签，
 world.Update();                        // ReleaseSeats 释放它：guest.IsAlive 为 false
 ```
 
-- 所有销毁途径都会让这类实体“退休”：`Destroy`、`DestroyEntities<T>()`、[层级](/zh/docs/guide/hierarchy)级联、
+- 所有销毁途径都会让这类实体“退休”：`Destroy`、`DestroyAll<T>()`、[层级](/zh/docs/guide/hierarchy)级联、
   [目标策略](/zh/docs/guide/indexes-and-relations#target-policies)。
 - 申请资源的系统用 `Without<Destroyed>` 过滤：退役的实体还留着清理组件，不过滤的话，它离开以后还可能再申请一次：
 

@@ -223,7 +223,7 @@ knight.RemoveRelation<MemberOf>(blue);                         // 退出 blue
 | 生成的成员 | 等价于 |
 | --- | --- |
 | `e.AddMemberOf(target)` | `e.AddRelation(new MemberOf(target))`，返回实体 |
-| `e.RemoveMemberOf(target)` | `e.RemoveRelation<MemberOf>(target)`，返回删掉了几条链接 |
+| `e.UnlinkMemberOf(target)` | `e.RemoveRelation<MemberOf>(target)`，返回删掉了几条链接 |
 | `e.LinksMemberOf(target)` | `e.HasRelation<MemberOf>(target)` |
 | `e.MemberOf` / `e.HasMemberOf` / `e.RemoveMemberOf()` | 全部链接（`ref readonly DynamicBuffer<MemberOf>`）、是否有链接、全部删掉 |
 | `world.MemberOfIndex` | `world.Relations<MemberOf>()` |
@@ -241,7 +241,7 @@ public class CountParties : EcsSystem
 ```csharp
 var paladin = world.CreateEntity(new PartyCount()).AddMemberOf(red).AddMemberOf(blue);
 bool withBlue = paladin.LinksMemberOf(blue);                  // true
-paladin.RemoveMemberOf(blue);                                 // 删掉 1 条链接
+paladin.UnlinkMemberOf(blue);                                 // 删掉 1 条链接
 int linked = paladin.MemberOf.Count;                          // 1
 int inRed = world.MemberOfIndex.Count(red);                   // 骑士和圣骑士
 ```

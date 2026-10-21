@@ -80,7 +80,7 @@ hands out a `ref`, whether or not the code stores through it:
 | --- | --- |
 | `ref T` parameters of `[ForEach]` methods (`Span<T>` for batch methods) and of struct jobs (`Writes`) | `in T` parameters, `ReadOnlySpan<T>` |
 | A [`Mut<T>`](#set-if-changed) parameter: `Write()`, and `SetIfChanged(value)` when the value differs (that row only) | `Mut<T>.Value`, and `SetIfChanged(value)` with an equal value |
-| `Query` items (the enumerator stamps every row it visits) | `TryGet<T>(out T)` (a copy), `Read<T>()` (read-only) |
+| `Query` items (the enumerator stamps every row it visits) | [`world.Read<T1..Tn>`](/en/docs/guide/queries#read) items, `TryGet<T>(out T)` (a copy), `entity.Read<T>()` (read-only) |
 | `entity.Get<T>()`, `TryGetRef<T>(out found)` when found, `GetOrAdd<T>()`, `Set(...)`, `SetIfChanged(value)` and `SetXIfChanged(…)` when the value differs | `Has<T>()`, `SetIfChanged(value)` and `SetXIfChanged(…)` with an equal value |
 | `CreateEntity(...)`, `CreateEntities(...)`, `Instantiate(...)`, `Clone()` with the component | removing the component (a [removal](#removal-detection)) |
 | `entity.Enable<T>()`, `world.EnableAll<T>()` (the kept value comes back) | `entity.Disable<T>()` (a removal) |
@@ -319,20 +319,17 @@ ulong[] acked = [0, before, after];
 for (int client = 0; client < acked.Length; client++)
 {
     ulong mark = world.ChangeTick;   // the mark of the packet built now
-    // Query NetId, read the tracked parts with Read<T>(): sending stamps nothing.
-    foreach (var item in world.Query<NetId>(Replication.Dirty.Since(acked[client])))
-    {
-        ref readonly var position = ref item.Entity.Read<Position>();
-        Console.WriteLine($"client {client}: unit {item.NetId.Value} at ({position.X}, {position.Y})");
-    }
+    // Read, not Query: sending stamps nothing.
+    foreach (var item in world.Read<NetId, Position>(Replication.Dirty.Since(acked[client])))
+        Console.WriteLine($"client {client}: unit {item.NetId.Value} at ({item.Position.X}, {item.Position.Y})");
 
     acked[client] = mark;            // in a server: when the client acknowledges the packet
 }
 ```
 
 The client that just joined gets all three units, the one behind gets the knight and the archer, the one up to date
-only the archer. A query item of a tracked component counts as a write, so the loop queries the untracked `NetId` and
-reads the tracked parts with `Read<T>()`. Keep one filter per kind of replica, not one per client: the filter is a value, and the same
+only the archer. A `Query` item of a tracked component counts as a write, so the loop reads with `Read`, whose items
+stamp nothing. Keep one filter per kind of replica, not one per client: the filter is a value, and the same
 one moved to another tick allocates nothing.
 
 ## Destroyed entities: the destroy log [#destroy-log]
@@ -534,8 +531,8 @@ nothing was written and nothing is visited.
 - **One `ChangedAny` filter for all clients**, moved with `Since(ackTick)`, instead of one pass per client and per
   component.
 - **Prefer a system to a query.** A `[Changed<T>]` method skips unwritten tables, 4,096-row blocks and 64-row words
-  before it touches a row. A `Query` hands out refs, so it stamps what it visits; a reader that must not mark what
-  it reads (a save, a send) uses a struct job with `Writes => 0` or `entity.Read<T>()`.
+  before it touches a row. A `Query` hands out refs, so it stamps what it visits; a reader that must not stamp what
+  it reads (a save, a send) loops over `world.Read<T1..Tn>`, or uses a struct job with `Writes => 0`.
 - **Keep filters in `static readonly` fields** and move their tick with `Since(mark)` instead of building a filter
   per call.
 - **Take marks right after an update.** Writes between two updates share one tick, so a mark taken in the middle of

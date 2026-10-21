@@ -109,7 +109,7 @@
       任何线程都能调用（正在变更的表可能读到一半）。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.DestroyEntities``2(EasyEcs.QueryFilter@)" source="d186184a7d2f">
+  <member name="M:EasyEcs.World.DestroyAll``2(EasyEcs.QueryFilter@)" source="d186184a7d2f">
     <summary>
       销毁所有同时拥有 <c>T1, T2</c>（并匹配 <paramref name="filter" />）的存活实体，返回销毁的数量。只过一次结构闸门：
       O(匹配的原型数 + 行数)。只能在所有者线程调用（见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
@@ -136,7 +136,7 @@
       O(匹配的表数 + 行数)。只能在所有者线程调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.EnsureCapacity(EasyEcs.Prefab,System.Int32)" source="c90e6f3ca262">
+  <member name="M:EasyEcs.World.Reserve(EasyEcs.Prefab,System.Int32)" source="c90e6f3ca262">
     <summary>
       预先扩好 <paramref name="prefab" /> 的实例要进的表和实体存储，接下来 <paramref name="count" /> 次
       <see cref="M:EasyEcs.World.Instantiate(EasyEcs.Prefab)" /> 都不会再扩容：一波刷怪的扩容开销在 tick 之前就付掉了。
@@ -144,7 +144,7 @@
       O(组件数) 加一次扩容。只能在所有者线程调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.EnsureCapacity``2(System.Int32)" source="8708299b293c">
+  <member name="M:EasyEcs.World.Reserve``2(System.Int32)" source="8708299b293c">
     <summary>
       预先扩好正好有 <c>T1, T2</c> 的实体所在的表和实体存储，接下来 <paramref name="count" /> 次带这些组件的
       <c>CreateEntity</c> / <c>CreateEntities</c> 都不会再扩容：启动或一波刷怪的扩容开销在循环之前一次付掉。分组
@@ -410,7 +410,7 @@
       什么都不写。
     </exception>
   </member>
-  <member name="M:EasyEcs.World.SaveEntities(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId},EasyEcs.ComponentSet@)" source="4a08c571211f">
+  <member name="M:EasyEcs.World.SaveEntitiesWith(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId},EasyEcs.ComponentSet@)" source="4a08c571211f">
     <summary>
       只写 <paramref name="components" /> 里的组件的 <see cref="M:EasyEcs.World.SaveEntities(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId})" />（只记录需要持久化的组件，不带运行时组件）：
       其余组件不写，也不需要 Nino 格式化器；标签只记有没有，被禁用的组件连同保留的值一起写。一个这些组件都没有的实体也会写出，
@@ -449,7 +449,7 @@
       每个带着它当时的版本号（下标被回收后，新实体用的是另一个版本号）。长度为 <see cref="P:EasyEcs.WorldOptions.DestroyLog" /> 的 span
       总能放下全部。
       <br />
-      实体的 id 不再存活（<see cref="M:EasyEcs.World.IsAlive(EasyEcs.EntityId)" /> 变成 false）时就算销毁：<c>Destroy</c>、<c>DestroyEntities</c>、
+      实体的 id 不再存活（<see cref="M:EasyEcs.World.IsAlive(EasyEcs.EntityId)" /> 变成 false）时就算销毁：<c>Destroy</c>、<c>DestroyAll</c>、
       层级或关系的级联、用 <c>MoveEntities</c> 移出这个 World；带有 <see cref="T:EasyEcs.ICleanupComponent" /> 的实体在最后一个清理组件被移除时
       （在那之前它仍存活，带着 <see cref="T:EasyEcs.Destroyed" /> 标签）；<see cref="M:EasyEcs.World.Restore(EasyEcs.WorldSnapshot)" /> 或 <c>Load</c>
       时，之前存活、之后不再存活（版本号相同）的每个实体。<see cref="M:EasyEcs.World.Dispose" /> 不记录。
@@ -476,12 +476,12 @@
       O(数量 × 组件数)。只能在所有者线程调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.Load(System.ReadOnlySpan{System.Byte},EasyEcs.ComponentSet@,System.Boolean)" source="5951e9483f90">
+  <member name="M:EasyEcs.World.LoadKeeping(System.ReadOnlySpan{System.Byte},EasyEcs.ComponentSet@,System.Boolean)" source="5951e9483f90">
     <summary>
       保留 <paramref name="keep" /> 里的单例、维持这个 World 现有状态的 <see cref="M:EasyEcs.World.Load(System.ReadOnlySpan{System.Byte},System.Boolean)" />：
       存档里这些单例的值被跳过（跳过它们那段数据，从不反序列化），保留的单例留着原来的盒子（<see cref="M:EasyEcs.World.SingletonRef``1" />
       仍然可用）和值；这个 World 没有的单例仍然没有，存档里没有的单例也不会被移除。用于重启：新版本先设置自己的配置，再加载上一个进程的
-      World（用 <see cref="M:EasyEcs.World.Save(System.Buffers.IBufferWriter{System.Byte},EasyEcs.ComponentSet@)" /> 存档，排除不能带回来的东西）。
+      World（用 <see cref="M:EasyEcs.World.SaveWithout(System.Buffers.IBufferWriter{System.Byte},EasyEcs.ComponentSet@)" /> 存档，排除不能带回来的东西）。
       O(实体数 × 组件数)。遍历进行中不能调用。
     </summary>
     <param name="input">存档的字节。</param>
@@ -489,15 +489,15 @@
     <param name="markWritten">同 <see cref="M:EasyEcs.World.Load(System.ReadOnlySpan{System.Byte},System.Boolean)" />；只作用于加载的行。</param>
     <exception cref="T:System.ArgumentException">
       <paramref name="keep" /> 里有组件类型（要把组件排除在存档之外，改用
-      <see cref="M:EasyEcs.World.Save(System.Buffers.IBufferWriter{System.Byte},EasyEcs.ComponentSet@)" />）。
+      <see cref="M:EasyEcs.World.SaveWithout(System.Buffers.IBufferWriter{System.Byte},EasyEcs.ComponentSet@)" />）。
     </exception>
     <exception cref="T:System.IO.InvalidDataException">同 <see cref="M:EasyEcs.World.Load(System.ReadOnlySpan{System.Byte},System.Boolean)" />。</exception>
   </member>
-  <member name="M:EasyEcs.World.Save(System.Buffers.IBufferWriter{System.Byte},EasyEcs.ComponentSet@)" source="01cbc51aed85">
+  <member name="M:EasyEcs.World.SaveWithout(System.Buffers.IBufferWriter{System.Byte},EasyEcs.ComponentSet@)" source="01cbc51aed85">
     <summary>
       不含 <paramref name="exclude" /> 里的组件和单例的 <see cref="M:EasyEcs.World.Save(System.Buffers.IBufferWriter{System.Byte})" />：它们那段数据不写，
       也不需要 Nino 格式化器（不能序列化的 World 本地缓存、下一个版本会重新带来的配置）。Disabled 标签跟着它的组件走；组件全被排除的实体
-      照样写出，只是不带它们。用于重启，配合 <see cref="M:EasyEcs.World.Load(System.ReadOnlySpan{System.Byte},EasyEcs.ComponentSet@,System.Boolean)" />。
+      照样写出，只是不带它们。用于重启，配合 <see cref="M:EasyEcs.World.LoadKeeping(System.ReadOnlySpan{System.Byte},EasyEcs.ComponentSet@,System.Boolean)" />。
       缓冲区够大之后不分配内存。O(实体数 × 组件数)。遍历进行中不能调用。
     </summary>
   </member>

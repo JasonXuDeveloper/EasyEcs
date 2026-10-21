@@ -414,7 +414,7 @@ export const keys: Record<string, KeyDef> = {
     field: 'allocated',
   },
   // Creating 100,000 entities of three components in a fresh world: one by
-  // one, one by one after EnsureCapacity<T1..Tn>, and in one CreateEntities call
+  // one, one by one after Reserve<T1..Tn>, and in one CreateEntities call
   'cold.perEntity': {
     bench: 'ColdCreateComparison',
     method: 'EasyEcs_PerEntity',

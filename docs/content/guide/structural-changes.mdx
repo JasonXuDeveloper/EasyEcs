@@ -154,22 +154,30 @@ For changes to whole sets of entities, the bulk forms take the structural gate o
 ```csharp
 var wave = new Entity[1_000];
 world.CreateEntities(wave, new Position(0, 0), new Lifetime(60));
-int expired = world.DestroyEntities<Lifetime>(QueryFilter.Create().With<Dead>());
+int expired = world.DestroyAll<Lifetime>(QueryFilter.Create().With<Dead>());
 ```
 
 `SetAll`, `RemoveAll`, `DisableAll` and `EnableAll` change a component on every match a whole 64-row word at a time:
-[Bulk changes](/en/docs/guide/bulk).
+[Bulk changes](/en/docs/guide/bulk). The calls that take a filter end in `All`; the ones that take a list of ids end in
+`Entities`. `DestroyEntities(ids)` destroys a list you collected (stale ids and repeats are skipped) with one gate pass
+and one cascade:
+
+```csharp
+var ids = new List<EntityId>();
+foreach (var item in world.Read<Lifetime>()) if (item.Lifetime.Ticks == 0) ids.Add(item.Entity.Id);
+int gone = world.DestroyEntities(CollectionsMarshal.AsSpan(ids));
+```
 
 Entities created one at a time (a start-up that loads them, a loop that builds each from data) grow their table by
-doubling. Reserve it first: `EnsureCapacity<T1, …, Tn>(count)` grows the table of exactly those components and the
+doubling. Reserve it first: `Reserve<T1, …, Tn>(count)` grows the table of exactly those components and the
 entity storage once, to what the loop needs, so the next `count` creations with those components grow nothing:
 
 ```csharp
-world.EnsureCapacity<Position, Lifetime>(100_000);
+world.Reserve<Position, Lifetime>(100_000);
 for (int i = 0; i < 100_000; i++) world.CreateEntity(new Position(i, 0), new Lifetime(60));
 ```
 
-`CreateEntities` reserves on its own. `EnsureCapacity(prefab, count)` does the same for a prefab's instances
+`CreateEntities` reserves on its own. `Reserve(prefab, count)` does the same for a prefab's instances
 ([Prefabs](/en/docs/guide/prefabs)), and `EnsureEntityCapacity(n)` sizes only the entity storage, for entities spread
 over many tables. Entities that a [group](/en/docs/guide/groups) puts in another table grow that one.
 
@@ -339,8 +347,8 @@ On tick 4 the turret is tagged `Dead` in `WearSystem`, and `FireSystem`, which r
 | Adding and removing a component each tick | A field, or a tag for a state that lasts several ticks | A tag the table's mask already has only flips a presence bit |
 | `Set(a)` then `Set(b)` | `Set(a, b)` | Shorter, the same cost |
 | `Instantiate(prefab)` then `Set` of what the prefab lacks | `Instantiate(prefab, in c1, …, in cn)` | One row copy into the final table, no move |
-| Creating a known number of entities one by one | `CreateEntities`, or `EnsureCapacity<T1, …, Tn>(count)` before the loop | One growth instead of a doubling per full table ([EECS031](/en/docs/guide/analyzer#eecs031)) |
-| A loop of single changes over a filter | [Bulk changes](/en/docs/guide/bulk), `DestroyEntities<T>(filter)` | One gate pass, whole 64-row words at once ([EECS030](/en/docs/guide/analyzer#eecs030)) |
+| Creating a known number of entities one by one | `CreateEntities`, or `Reserve<T1, …, Tn>(count)` before the loop | One growth instead of a doubling per full table ([EECS031](/en/docs/guide/analyzer#eecs031)) |
+| A loop of single changes over a filter | [Bulk changes](/en/docs/guide/bulk), `DestroyAll<T>(filter)` | One gate pass, whole 64-row words at once ([EECS030](/en/docs/guide/analyzer#eecs030)) |
 | An `Entity` parameter the method only reads | Keep it read-only (`Id`, `Has`, `Get`) | The pass skips structural bookkeeping |
 
 10,000 entities whose `Health` is removed and added back inside a query loop (`ToggleComponent`), against moving three

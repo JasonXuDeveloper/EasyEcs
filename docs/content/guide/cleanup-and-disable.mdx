@@ -58,7 +58,7 @@ guest.Destroy();                       // alive, tagged Destroyed, Health gone
 world.Update();                        // ReleaseSeats frees it: guest.IsAlive is false
 ```
 
-- Every destroy path retires such entities: `Destroy`, `DestroyEntities<T>()`, a [hierarchy](/en/docs/guide/hierarchy)
+- Every destroy path retires such entities: `Destroy`, `DestroyAll<T>()`, a [hierarchy](/en/docs/guide/hierarchy)
   cascade or a [target policy](/en/docs/guide/indexes-and-relations#target-policies).
 - A system that acquires the resource filters `Without<Destroyed>`: a retired entity still holds its cleanup
   component, so without the filter it could acquire again after it left:

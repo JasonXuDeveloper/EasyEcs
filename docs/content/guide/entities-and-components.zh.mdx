@@ -87,7 +87,7 @@ goblin.Destroy();
 ```csharp
 var wave = new Entity[500];
 world.CreateEntities(wave, new Position(0, 0), new Health(100));   // 每个实体同样的值，句柄写进 wave
-int cleared = world.DestroyEntities<Health, Dead>();                 // 所有带 Health 的死亡实体
+int cleared = world.DestroyAll<Health, Dead>();                 // 所有带 Health 的死亡实体
 ```
 
 反复生成的同类实体（某种 NPC、某种子弹）最好定义成[预制体](/zh/docs/guide/prefabs)：`world.Instantiate(prefab)` 生成一个，
@@ -111,8 +111,8 @@ var sized = new World(new WorldOptions { InitialEntityCapacity = 10_000 });
 ```
 
 表会自己扩容；要连表一起预留：实体恰好带这几个组件时用
-[`EnsureCapacity<T1, …, Tn>(count)`](/zh/docs/guide/structural-changes#bulk)，预制体实例用
-[`EnsureCapacity(prefab, count)`](/zh/docs/guide/prefabs#ensure-capacity)。
+[`Reserve<T1, …, Tn>(count)`](/zh/docs/guide/structural-changes#bulk)，预制体实例用
+[`Reserve(prefab, count)`](/zh/docs/guide/prefabs#ensure-capacity)。
 
 ### Id、版本与复用 [#entityid]
 
@@ -220,7 +220,7 @@ bool both = hero.Has<Position, Health>();
 | 标签（`struct Dead : IComponent`） | `e.IsDead`、`e.SetDead()`、`e.RemoveDead()` | `Has`、`Set(new Dead())`、`Remove` |
 | 任何带字段的组件（清理组件除外） | `e.DisableHealth()`、`e.EnableHealth()`、`e.IsHealthDisabled` | [`Disable` / `Enable`](/zh/docs/guide/cleanup-and-disable) |
 | 代码里写到 `DynamicBuffer<Loot>` 的缓冲元素 | `e.Loot`（`ref readonly`）、`e.HasLoot`、`e.WriteLoot()`、`e.GetOrAddLoot()`、`e.RemoveLoot()` | `DynamicBuffer<Loot>` 的 `Read`、`Has`、`Get`、`GetOrAdd`、`Remove`（[动态缓冲](/zh/docs/guide/dynamic-buffers)） |
-| 关系（`MemberOf : IRelation`），代码里写到 `DynamicBuffer<MemberOf>` 之后 | `e.AddMemberOf(target)`、`e.RemoveMemberOf(target)`、`e.LinksMemberOf(target)`、`e.MemberOf`（`ref readonly`）、`e.HasMemberOf`、`e.RemoveMemberOf()`、`world.MemberOfIndex` | `AddRelation`、`RemoveRelation`、`HasRelation`、`Read`、`Has`、`Remove`、`world.Relations<MemberOf>()`（[关系](/zh/docs/guide/indexes-and-relations#relations)） |
+| 关系（`MemberOf : IRelation`），代码里写到 `DynamicBuffer<MemberOf>` 之后 | `e.AddMemberOf(target)`、`e.UnlinkMemberOf(target)`、`e.LinksMemberOf(target)`、`e.MemberOf`（`ref readonly`）、`e.HasMemberOf`、`e.RemoveMemberOf()`、`world.MemberOfIndex` | `AddRelation`、`RemoveRelation`、`HasRelation`、`Read`、`Has`、`Remove`、`world.Relations<MemberOf>()`（[关系](/zh/docs/guide/indexes-and-relations#relations)） |
 | 单例组件（`Clock : ISingletonComponent`） | `world.Clock`（`ref`）、`world.HasClock`、`world.GetOrAddClock()`、`world.SetClock(…)`、`world.RemoveClock()` | [`GetSingleton`](/zh/docs/guide/singletons)、`HasSingleton`、`GetOrAddSingleton`、`GetOrAddSingleton() = …`、`RemoveSingleton` |
 | 代码里调用过的每个 `world.Query<Position, Velocity>()` | `item.Position`、`item.Velocity` | `item.Component1`、`item.Component2` |
 | [预制体](/zh/docs/guide/prefabs#generated-members)上的任何组件 | `prefab.Position`（`ref readonly`）、`HasPosition`、`SetPosition(x, y)`、`RemovePosition()`、`IsDead`、`SetDead()` | `Read`、`Has`、`Set`、`Remove` |
@@ -349,7 +349,7 @@ id 不再指向任何实体：World 说它已经不存活。
 | 先 `CreateEntity()`，再逐个 `Set` | `CreateEntity(a, b, c)`、`Instantiate(prefab)`，或 `Instantiate(prefab, a, b)` | 一次放置，而不是每个组件搬一次行 |
 | 对很少变化的被追踪值调 `SetX(…)` | `SetXIfChanged(…)` | 值相同就不记 tick：`[Changed<T>]` 读取方会跳过它 |
 | `Set(a)` 后再 `Set(b)` | `Set(a, b)`、`Remove<A, B>()` | 写法更简洁，性能相同 |
-| 循环调用 `CreateEntity` / `Destroy` | `CreateEntities(span, …)`、`DestroyEntities<T>(filter)`（[EECS031](/zh/docs/guide/analyzer#eecs031)） | 每波只过一次结构闸门 |
+| 循环调用 `CreateEntity` / `Destroy` | `CreateEntities(span, …)`、`DestroyAll<T>(filter)`（[EECS031](/zh/docs/guide/analyzer#eecs031)） | 每波只过一次结构闸门 |
 | 用 `Get<T>()` 读被追踪的组件 | `Read<T>()`、生成的属性、`TryGet<T>()` | `ref` 访问会把这一行记成已写入 |
 | 先 `Has<T>()` 再 `Get<T>()` | `TryGetRef<T>(out found)` | 只查一次 |
 | 每个请求几次 `Get` / `TryGetRef` 再加一次 `Has<Dead>()` | 用 `static readonly` 过滤条件调 [`entity.Run`](/zh/docs/guide/queries#run-on-one-entity) | 所有组件只查一次；ref 跨结构变更依然有效 |

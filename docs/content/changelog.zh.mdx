@@ -17,7 +17,7 @@ icon: RotateCcwClock
   所以 `[Changed<T>]` 的读取方只访问值真变了的行。遍历之外，`entity.SetIfChanged(value)` 和生成的 `SetHealthIfChanged(…)` 遇到相同的值直接跳过。
   见[变更追踪](/zh/docs/guide/change-tracking)。
 - `[ChangedAny<T1..Tn>]` / `[RemovedAny<T1..Tn>]` 以及 `QueryFilter.ChangedAny<T1..Tn>(since)` / `RemovedAny`：2 到 9 个被追踪组件里
-  至少有一个被写过、或被移除的行。一个过滤器存在字段里，用 `filter.Since(ack)` 服务每个客户端。见[变更追踪](/zh/docs/guide/change-tracking)。
+  至少有一个被写过、或被移除的行。一个过滤条件存在字段里，用 `filter.Since(ack)` 服务每个客户端。见[变更追踪](/zh/docs/guide/change-tracking)。
 - `WorldOptions.DestroyLog` 和 `world.DestroyedSince(since, into, out count)`：某个读取方的 tick 以来销毁的实体，用来把实体的消失同步给确认 tick
   各不相同的客户端；读取方比日志还旧（`DestroyLogOldestTick`）时返回 false，需要重新同步。见[变更追踪](/zh/docs/guide/change-tracking)。
 - `IUniqueIndexed<TKey>`：一个键只对应一个实体，用 `index.Get(key)` / `TryGet(key, out e)` 查找；会让第二个实体拿到已被占用的键的写入，
@@ -33,14 +33,17 @@ icon: RotateCcwClock
   `EcsSystem.RunCount` 表示当前是第几次运行。见[系统](/zh/docs/guide/systems)。
 - `SystemStats` 记录每次运行分配的字节数（`LastAllocated`、`TotalAllocated`）和 `[ForEach]` 方法访问的实体数（`LastEntities`、`TotalEntities`）；
   `world.DescribeSchedule()` 描述各个阶段、等待关系和只靠注册顺序的系统对，可以输出文本或 mermaid 流程图。见[调试与诊断](/zh/docs/guide/diagnostics)。
-- 重启存档：`world.Save(output, in exclude)` 不写 `ComponentSet` 里的组件和单例，`world.Load(input, in keep, markWritten)` 保留新进程设好的单例，
+- 重启存档：`world.SaveWithout(output, in exclude)` 不写 `ComponentSet` 里的组件和单例，`world.LoadKeeping(input, in keep, markWritten)` 保留新进程设好的单例，
   `ComponentSet.WithSingleton<T>()` / `With(Type)` 可以加入单例。见[重启](/zh/docs/guide/saves#restart)。
 - 分析器：[EECS035](/zh/docs/guide/analyzer#eecs035) 拒绝不合法的 `Slices`（小于 1，或者和 `Changed` / `Removed` 过滤一起用）；
   [EECS036](/zh/docs/guide/analyzer#eecs036) 拒绝无法按键建索引的唯一组件（`EntityId` 键，或者还有第二个索引键）；
   [EECS031](/zh/docs/guide/analyzer#eecs031) 也覆盖用相同值循环调用 `Instantiate`；[EECS033](/zh/docs/guide/analyzer#eecs033) 建议改用生成的 `SetXIfChanged(…)`。
-- `SaveEntities(output, a.Id, b.Id)` 和 `bag.AddRange(x, y)` 可以直接传值（`params` span，在栈上构造）。指南里收集好的列表改用
-  `CollectionsMarshal.AsSpan(list)` 传入，不再 `ToArray()` 复制。见[迁移](/zh/docs/guide/migration-and-unload#save-entities)。
-
+- `SaveEntities(output, a.Id, b.Id)` 和 `bag.AddRange(x, y)` 可以直接传值（`params` span，在栈上构造）。
+  见[迁移](/zh/docs/guide/migration-and-unload#save-entities)。
+- `world.Read<T1..Tn>(filter)` 遍历查询的行，只读不写：条目是 `ref readonly`，不打 tick，所以工具或请求处理函数读过的行，
+  `[Changed<T>]` 的读取方不会当成写过。`Query` 照旧给它访问的被追踪组件的行打 tick。见[查询](/zh/docs/guide/queries#read)。
+- `world.DestroyEntities(ids)` 销毁一组 id，只过一次结构闸门、只处理一次级联；失效的 id 和重复的 id 会跳过。
+  见[结构变更](/zh/docs/guide/structural-changes#bulk)。
 - `ChildOf` 和 `Destroyed` 像你自己的组件一样有生成成员：`entity.ChildOf`、`HasChildOf`、`TryGetChildOf`、`SetChildOf(parent)`、
   `SetChildOfIfChanged(parent)`、`RemoveChildOf()`、`world.ChildOfIndex`、预制体上的写入方法，以及 `entity.IsDestroyed`。
   见[层级](/zh/docs/guide/hierarchy#reparent)。
@@ -56,7 +59,10 @@ icon: RotateCcwClock
 
 ### 需要修改代码的变更 [#v4-7-0-breaking]
 
-- 集合里有单例时，`SaveEntities(output, ids, set)` 抛 `ArgumentException`（实体组存档不写单例）。见[迁移指南](/zh/docs/migration#v4-7-save-entities)。
+- 改名，让名字说明调用做什么：`SaveEntities(output, ids, set)` 改为 `SaveEntitiesWith`，`EnsureCapacity<T1..Tn>(count)` 和
+  `EnsureCapacity(prefab, count)` 改为 `Reserve`，`DestroyEntities<T1..Tn>(filter)` 改为 `DestroyAll`，关系生成的 `RemoveX(target)`
+  改为 `UnlinkX(target)`（`RemoveX()` 仍然删掉整个缓冲区）。见[迁移指南](/zh/docs/migration#v4-7-renames)。
+- 集合里有单例时，`SaveEntitiesWith(output, ids, set)` 抛 `ArgumentException`（实体组存档不写单例）。见[迁移指南](/zh/docs/migration#v4-7-save-entities)。
 - `EcsSystem` 新增公开的 `RunCount`：系统里同名的成员会隐藏它（警告 CS0108）。见[迁移指南](/zh/docs/migration#v4-7-run-count)。
 
 ### 修复 [#v4-7-0-fixes]
@@ -66,10 +72,9 @@ icon: RotateCcwClock
 - 关系的名字恰好是某个 `Entity` 成员的后缀（`Relation`，对应 `HasRelation`）时，会丢掉 `LinksX(target)`。
 - 只通过目标类型推断的创建（`Regen<Health> regen = new();`）或 `typeof` 闭合的泛型系统，代码要在运行时靠反射生成，
   Native AOT 下会失败；这两种写法现在在编译期就注册。
-
 - 并行 pass（并行 `[ForEach]`、`ForEachParallel`，或者并行系统的一个阶段）可能卡死，调用方一直自旋，同时某一块（或某个系统）被执行两次：
   上一轮还没收尾的 helper 线程，会在下一轮任务更多时领走下一轮的任务。分片的并行 pass 每次运行的块数都不同，几秒内就会触发。
-  现在每一轮开始前先关闭上一轮的领取。见[多线程](/zh/docs/guide/threading#parallel-foreach-methods)。
+  现在每一轮开始前先关闭上一轮的领取。见[多线程与并行](/zh/docs/guide/threading#parallel-foreach-methods)。
 - 写被追踪组件的并行 `[ForEach]` 可能漏打变更 tick：同一个 4,096 行块里的两个分块会争用这个块的变更摘要，`[Changed<T>]` 读取方可能跳过被写过的行。
   这类遍历现在按 4,096 行的整数倍切块。见[决策 D48](/zh/docs/decisions#d48-parallel-tracked-chunks)。
 - `RemoveTypes` 删掉表之后，往旧快照里 `Capture(into)`，或者之后再 `Load`，可能复用另一张表（列不同）的副本。现在副本只给它自己的表复用。
@@ -213,8 +218,8 @@ icon: RotateCcwClock
 - 结构变更立即生效，遍历规则更严格：一次遍历最多访问每个实体一次，`[ForEach]` 方法通过 `ref` 写入的值在方法体自己做结构变更之后仍然有效。
   见[结构变更](/zh/docs/guide/structural-changes)。
 - 接收 `Span<T>` / `ReadOnlySpan<T>` 的批量 `[ForEach]` 方法（整段连续行，附带 `EntitySpan`），以及把一个方法的行分给多个线程、
-  不产生分配的 `[ForEach(Parallel = true)]`。见[系统](/zh/docs/guide/systems)和[线程模型](/zh/docs/guide/threading)。
-- 系统之外的静态 `[ForEach]` 方法、泛型系统和 runner、系统分组上的过滤器、`Maybe<T>` 参数、`UpdatePhase`，系统也不再需要 `partial`。
+  不产生分配的 `[ForEach(Parallel = true)]`。见[系统](/zh/docs/guide/systems)和[多线程与并行](/zh/docs/guide/threading)。
+- 系统之外的静态 `[ForEach]` 方法、泛型系统和 runner、系统分组上的过滤条件、`Maybe<T>` 参数、`UpdatePhase`，系统也不再需要 `partial`。
   见[系统](/zh/docs/guide/systems)。
 - 用 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 按依赖排序；用 `SystemErrorPolicy.Disable` 和 `system.Error` 把错误当作数据；
   用 `WorldOptions.MeasureSystems` 和 `system.Stats` 统计每个系统的耗时。见[系统](/zh/docs/guide/systems)。
@@ -270,7 +275,7 @@ icon: RotateCcwClock
 - `IForEach` job 只接收组件：需要实体时改用 `IForEachEntity`。
 - `Query` 的结果是 ref struct：循环里不能 `await`，元素不能存进字段、lambda 或 LINQ。
 - 结构变更属于 World 的所有者线程；在并行阶段或并行 `[ForEach]` 里做结构变更会抛 `InvalidOperationException`。
-  见[线程模型](/zh/docs/guide/threading)。
+  见[多线程与并行](/zh/docs/guide/threading)。
 - EECS007（系统里有状态）和 EECS008（系统引用系统）改为错误，它们在 4.0 里是警告。把状态移进组件或单例，系统之间通过数据
   通信。
 - `QueryEnumerator.Count` 和 `IsEmpty` 删除了：改用 `world.Count<…>(filter)` / `world.Any<…>(filter)`。
@@ -287,7 +292,7 @@ icon: RotateCcwClock
 
 ### 新功能 [#v4-0-1-new]
 
-- 系统生成的读写集不冲突时，`WorldOptions.Parallel` 让它们并排运行，结果与按顺序运行相同。见[线程模型](/zh/docs/guide/threading)。
+- 系统生成的读写集不冲突时，`WorldOptions.Parallel` 让它们并排运行，结果与按顺序运行相同。见[多线程与并行](/zh/docs/guide/threading)。
 - `[With<T>]` 已经写明要查询什么时，`[ForEach]` 方法可以不接收任何组件：`[ForEach, With<Dead>] static void Remove(Entity e)`。
   见[系统](/zh/docs/guide/systems)。
 

@@ -395,7 +395,7 @@ public class SendGold : EcsSystem
 ```
 
 `[Changed<T>]` 方法访问系统上次运行以来写过的行，而每次运行都会把这个标记往前推：一次运行跳过的那三片，变更就丢了。它本来就只访问
-变过的行，去掉 `Slices` 即可。如果重的是变更引发的工作，就把这份工作记成数据，再用一个没有变更过滤器的分片方法去摊开：
+变过的行，去掉 `Slices` 即可。如果重的是变更引发的工作，就把这份工作记成数据，再用一个没有变更过滤条件的分片方法去摊开：
 
 ```csharp
 public class SendGold : EcsSystem
@@ -482,7 +482,7 @@ public static class Portals
 }
 ```
 
-索引跟踪的是 `Set`；通过 `ref` 写会背着它改掉键，查找时玩家还在旧区域。用 `Set` 或生成的 `SetX` 写：
+索引追踪的是 `Set`；通过 `ref` 写会背着它改掉键，查找时玩家还在旧区域。用 `Set` 或生成的 `SetX` 写：
 
 ```csharp
 public static class Portals

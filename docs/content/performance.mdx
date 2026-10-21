@@ -76,7 +76,7 @@ match. `ColdCreateComparison` measures that moment: 100,000 entities of one, two
 world of each library, a new world for every call, three ways:
 
 - **`PerEntity`**: one `CreateEntity` per entity, nothing reserved.
-- **`PerEntity_Reserved`**: the same loop after reserving room for all of them: `world.EnsureCapacity<T1, …, Tn>(n)` in
+- **`PerEntity_Reserved`**: the same loop after reserving room for all of them: `world.Reserve<T1, …, Tn>(n)` in
   EasyEcs, `EnsureCapacity` on the store and the archetype in Friflo, `EnsureCapacity` with the signature in Arch.
   DefaultEcs has no reservation per component set.
 - **`Bulk`**: one `world.CreateEntities(span, values)` call. Only EasyEcs runs this case; the comparisons count each
@@ -137,7 +137,7 @@ get, say so:
 
 ```csharp
 // The table of exactly these components, sized for the whole start-up
-world.EnsureCapacity<Position, Velocity, Health>(100_000);
+world.Reserve<Position, Velocity, Health>(100_000);
 for (int i = 0; i < 100_000; i++)
     world.CreateEntity(new Position(i, 0), new Velocity(1, 0), new Health(100));
 ```
@@ -424,7 +424,7 @@ private static readonly Prefab Goblin = new Prefab().SetPosition(0, 0).SetHealth
 var wave = new Entity[1_000];
 world.CreateEntities(wave, new Position(0, 0), new Velocity(1, 0));   // one pass through the structural gate
 world.Instantiate(Goblin, wave);                                      // a wave of a prefab, the same way
-int removed = world.DestroyEntities<Dead>();                          // every dead entity, one pass
+int removed = world.DestroyAll<Dead>();                          // every dead entity, one pass
 int lifted = world.RemoveAll<Stunned>();                              // every stun lifted, whole words of rows
 ```
 
@@ -459,7 +459,7 @@ times every system run.
 - **Ask `world.Count` / `world.Any`** instead of looping to count or to find one match.
 - **Reserve room** in a `DynamicBuffer<T>` whose size is known (`EnsureCapacity`), and pre-size the world with
   `WorldOptions.InitialEntityCapacity` or `world.EnsureEntityCapacity(n)`, and a table before creating its entities
-  one by one with `world.EnsureCapacity<T1, …, Tn>(n)`.
+  one by one with `world.Reserve<T1, …, Tn>(n)`.
 - **Keep `QueryFilter`s in `static readonly` fields** (the generator does this for `[ForEach]`).
 - **Look entities up with a value index** (`IIndexed<TKey>`) instead of a dictionary kept in sync by hand, and write an
   indexed component only when its key changes.
@@ -502,7 +502,7 @@ times every system run.
 | A closure or LINQ in per-update code | Garbage every tick | [EECS028](/en/docs/guide/analyzer#eecs028) (warning), and `AllocationTests`-style checks in your own tests |
 | A lookup through the visited `Entity` in a `[ForEach]` method | A search per row | [EECS027](/en/docs/guide/analyzer#eecs027) (warning) |
 | A structural change entity by entity over a query | One row moved per call | [EECS030](/en/docs/guide/analyzer#eecs030) (warning, code fix: the bulk call) |
-| Filling a fresh world one entity at a time, nothing reserved | Doubling arrays on the large object heap start a full collection ([above](#cold-create)) | [EECS031](/en/docs/guide/analyzer#eecs031) (warning, code fix: `CreateEntities` or `EnsureCapacity<T1, …, Tn>(n)`) |
+| Filling a fresh world one entity at a time, nothing reserved | Doubling arrays on the large object heap start a full collection ([above](#cold-create)) | [EECS031](/en/docs/guide/analyzer#eecs031) (warning, code fix: `CreateEntities` or `Reserve<T1, …, Tn>(n)`) |
 
 ## What is covered [#coverage]
 

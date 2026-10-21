@@ -63,7 +63,7 @@ in your code. The generic calls after them (`Get<T>()`, `Set(c)`, `Remove<T>()`)
 | `ref var c = ref world.Get<Health>(entity)` | `ref var hp = ref entity.Health`, `entity.Get<T>()` |
 | `world.Size` | `world.EntityCount` |
 | `entity.Id` | `entity.Id.Index`; store `entity.Id` (an `EntityId`) in data |
-| `world.EnsureCapacity(in signature, n)` | `world.EnsureCapacity<T1, …, Tn>(n)`, `world.EnsureCapacity(prefab, n)` |
+| `world.EnsureCapacity(in signature, n)` | `world.Reserve<T1, …, Tn>(n)`, `world.Reserve(prefab, n)` |
 
 ### Queries and iteration [#queries-and-iteration]
 
@@ -89,7 +89,7 @@ in your code. The generic calls after them (`Get<T>()`, `Set(c)`, `Remove<T>()`)
 | `var n = buffer.Create(types); buffer.Set(n, c);` | `world.CreateEntity(a, b, c)` (a `World` parameter in a `[ForEach]` method) |
 | `world.Add(in q, value)` | `world.SetAll(value, filter)` |
 | `world.Remove<T>(in q)` | `world.RemoveAll<T>(filter)` |
-| `world.Destroy(in q)` | `world.DestroyEntities<T>(filter)` |
+| `world.Destroy(in q)` | `world.DestroyAll<T>(filter)` |
 
 ## A worked example: the headline simulation [#worked-example]
 
@@ -274,7 +274,7 @@ sim.AddSystem<LifetimeSystem>();
 sim.AddSystem<ShootingSystem>();
 sim.AddSystem<ClockSystem>();
 
-sim.EnsureCapacity<Position, Velocity, Health, Attack, Player>(100_000);
+sim.Reserve<Position, Velocity, Health, Attack, Player>(100_000);
 for (int i = 0; i < 100_000; i++)
     sim.CreateEntity(new Position { X = i % 4096, Y = i / 25 }, new Velocity { X = 1, Y = -1 },
         new Health { Value = 150, Max = 150 }, new Attack { Damage = 5, Cooldown = i % 10, Interval = 8 },

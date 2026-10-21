@@ -15,7 +15,7 @@ is allocation-free.
 <Callout type="idea" title="Use it for">
   Iteration outside systems: request handlers between updates, tools, tests, one-off passes. Jobs on one entity
   ([`entity.Run`](#run-on-one-entity)): the handler of a request or of a message to an actor. Counts and existence
-  checks (`Count`, `Any`). Bulk destroys (`DestroyEntities<T>(filter)`). The filters themselves, which `[ForEach]`
+  checks (`Count`, `Any`). Bulk destroys (`DestroyAll<T>(filter)`). The filters themselves, which `[ForEach]`
   methods take as attributes.
 </Callout>
 
@@ -72,7 +72,7 @@ foreach (var item in world.Query<Position, Velocity>(Filters.Active))
 ```csharp
 int moving = world.Count<Position, Velocity>(Filters.Active);
 bool anyImpaired = world.Any<Position>(Filters.Impaired);   // stops at the first match
-int cleared = world.DestroyEntities<Position>(QueryFilter.Create().With<Dead>());
+int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 ```
 
 </Step>
@@ -93,8 +93,9 @@ int cleared = world.DestroyEntities<Position>(QueryFilter.Create().With<Dead>())
 | A job on one entity (a request, a message) | [`entity.Run<T1..Tn, TJob>(ref job, filter)`](#run-on-one-entity) |
 | Ad-hoc heavy work on several threads | [`ForEachParallel` / `ForEachEntityParallel`](#on-several-threads-foreachparallel-and-foreachentityparallel) |
 | A convenient loop (tools, tests, handlers) | `foreach (var item in world.Query<T1..Tn>(filter))` |
+| A loop that only reads (a save, a send, a report) | [`foreach (var item in world.Read<T1..Tn>(filter))`](#read): nothing stamped |
 | "How many …?" / "Is there any …?" | `world.Count<T1..Tn>(filter)` / `world.Any<T1..Tn>(filter)` |
-| Destroy every match | `world.DestroyEntities<T1..Tn>(filter)` |
+| Destroy every match | `world.DestroyAll<T1..Tn>(filter)` |
 | Only rows written or removed since a tick | `Changed<T>(tick)` / `Removed<T>(tick)`, `ChangedAny<T1..Tn>(tick)` / `RemovedAny<T1..Tn>(tick)` for any of several ([change tracking](/en/docs/guide/change-tracking)) |
 | A pass that writes only the rows whose value changed | a [`Mut<T>` parameter](/en/docs/guide/change-tracking#set-if-changed) of a `[ForEach]` method |
 | A share of the rows per pass, every row once per N passes | `Slice(index, count)` with a `ForEach` call, or [`[ForEach(Slices = N)]`](/en/docs/guide/systems#slices) |
@@ -137,7 +138,7 @@ int dirty = world.Count<Armor>(Replication.Dirty.Since(mark));
 ```
 
 `Slice(index, count)` keeps a pass to part of each table: passes with each index from 0 to `count - 1` in turn visit
-every row once. Only the `ForEach` family honours it; `Query`, `Count`, `Any`, `DestroyEntities`, `entity.Run` and
+every row once. Only the `ForEach` family honours it; `Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run` and
 the bulk calls (`SetAll`, `RemoveAll`, …) need every matching row and throw `ArgumentException` for a sliced filter.
 In a system, [`[ForEach(Slices = N)]`](/en/docs/guide/systems#slices) picks the slice for you.
 
@@ -149,11 +150,25 @@ The enumerator and its items are ref structs holding refs into the current table
 - `item.Position` (named after the component) and `item.Component1` are the same ref; named members are generated
   for each `Query<...>` shape your code calls;
 - items count as a write of every tracked (`ITrackChanges`) component they hand out, whether or not the loop stores
-  through them. To read tracked components without marking them (a save, a send), use a struct job with
-  `Writes => 0`, a `[ForEach]` method with `in` parameters, or `entity.Read<T>()`
-  ([what counts as a write](/en/docs/guide/change-tracking#what-counts-as-a-write)).
+  through them. To read tracked components without stamping them (a save, a send), loop over
+  [`Read`](#read) instead, or use a struct job with `Writes => 0`, a `[ForEach]` method with `in` parameters, or
+  `entity.Read<T>()` ([what counts as a write](/en/docs/guide/change-tracking#what-counts-as-a-write)).
 
 A loop may create, destroy, add and remove; the rules are in [Structural changes](/en/docs/guide/structural-changes).
+
+### `Read`: a loop that only reads [#read]
+
+`world.Read<T1..Tn>(filter)` walks the same rows as `Query`, but its items hand out `ref readonly` refs and stamp
+nothing. A `[Changed<T>]` reader that runs after it does not see the rows as written because a report or a send read
+them. The pair is the one entities have: `entity.Get<T>()` counts as a write, `entity.Read<T>()` does not.
+
+```csharp
+int total = 0;
+foreach (var item in world.Read<Armor>()) total += item.Armor.Value;   // ref readonly: nothing stamped
+```
+
+The named members (`item.Armor`) are generated per `Read<...>` shape too, and the same rules hold: a ref struct, no
+`await`, structural changes allowed. An item cannot be written through, so a loop that writes stays a `Query`.
 
 ### `ForEach`: a struct job [#foreach-a-struct-job]
 
@@ -478,7 +493,7 @@ not a mover, but the job over `Position` alone counts it.
 | --- | --- | --- |
 | A `Query` loop every tick | A `[ForEach]` method in a system | Generated struct job, ordered and scheduled |
 | `QueryFilter.Create()…` at every call | A `static readonly` filter | The cache key is built once |
-| A `Query` that only reads tracked components | A job with `Writes => 0`, or `in` parameters | Items stamp what they hand out |
+| A `Query` that only reads tracked components | [`Read<T1..Tn>`](#read), a job with `Writes => 0`, or `in` parameters | `Query` items stamp what they hand out |
 | `ForEachEntity` when the entity is rarely used | A batch job with `EntitySpan` | Handles built only for the rows that need one |
 | A scalar loop over many rows | A batch job with `Vector<T>` | The JIT does not vectorize on its own |
 | `Count(...) > 0` | `Any(...)` | Stops at the first match ([EECS032](/en/docs/guide/analyzer#eecs032)) |
@@ -527,12 +542,12 @@ Against Friflo.Engine.ECS on the same world: one component, two components scala
 | --- | --- | --- |
 | `await` inside a `Query` loop | Does not compile: items are ref structs | The C# compiler |
 | Storing a query item | Does not compile; keep `item.Entity` | The C# compiler |
-| A `Query` loop that only reads tracked components | Every visited row counts as written | Use a job with `Writes => 0` or `Read<T>()` |
+| A `Query` loop that only reads tracked components | Every visited row counts as written | Loop over [`Read<T1..Tn>`](#read) |
 | `INoStructuralChanges` on a job that changes structure | `InvalidOperationException` at the change | At run time |
 | Structural change in a batch job | `InvalidOperationException`: the spans point into the tables | At run time ([EECS013](/en/docs/guide/analyzer#eecs013) for `[ForEach]` methods) |
 | A parallel job that writes a singleton or another entity | Races between chunks | Code review ([EECS010](/en/docs/guide/analyzer#eecs010) for `[ForEach]` methods) |
 | `Changed`, `Removed`, `ChangedAny` or `RemovedAny` with different ticks in one filter | `ArgumentException` | At run time |
-| A sliced filter (`Slice`) passed to `Query`, `Count`, `Any`, `DestroyEntities`, `entity.Run` or a bulk call | `ArgumentException`: the call needs every matching row | At run time |
+| A sliced filter (`Slice`) passed to `Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run` or a bulk call | `ArgumentException`: the call needs every matching row | At run time |
 | `Update()` called from inside a query loop of the same world | Undefined order of passes | Code review; [EECS034](/en/docs/guide/analyzer#eecs034) when called from a system |
 | An `entity.Run` job without `Writes` | The default (-1) stamps every tracked component the job takes | Declare `Writes` (`0` for a job that only reads) |
 | `INoStructuralChanges` on a `Run` job that changes structure | `InvalidOperationException` at the change | At run time |

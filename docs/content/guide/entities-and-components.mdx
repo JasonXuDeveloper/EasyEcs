@@ -94,7 +94,7 @@ Waves of spawns and clean-ups have bulk forms, each one pass through the structu
 ```csharp
 var wave = new Entity[500];
 world.CreateEntities(wave, new Position(0, 0), new Health(100));   // the same values for each; handles written to wave
-int cleared = world.DestroyEntities<Health, Dead>();                 // every dead entity with Health
+int cleared = world.DestroyAll<Health, Dead>();                 // every dead entity with Health
 ```
 
 Kinds of entities spawned again and again (an NPC type, a projectile) are best defined once as a
@@ -119,8 +119,8 @@ var sized = new World(new WorldOptions { InitialEntityCapacity = 10_000 });
 ```
 
 Tables grow on their own; to size a table too,
-use [`EnsureCapacity<T1, …, Tn>(count)`](/en/docs/guide/structural-changes#bulk) for entities created with exactly
-those components, or [`EnsureCapacity(prefab, count)`](/en/docs/guide/prefabs#ensure-capacity) for a prefab's instances.
+use [`Reserve<T1, …, Tn>(count)`](/en/docs/guide/structural-changes#bulk) for entities created with exactly
+those components, or [`Reserve(prefab, count)`](/en/docs/guide/prefabs#ensure-capacity) for a prefab's instances.
 
 ### Ids, versions and recycling [#entityid]
 
@@ -236,7 +236,7 @@ the same.
 | a tag (`struct Dead : IComponent`) | `e.IsDead`, `e.SetDead()`, `e.RemoveDead()` | `Has`, `Set(new Dead())`, `Remove` |
 | any component with fields, except a cleanup component | `e.DisableHealth()`, `e.EnableHealth()`, `e.IsHealthDisabled` | [`Disable` / `Enable`](/en/docs/guide/cleanup-and-disable) |
 | a buffer element some code names as `DynamicBuffer<Loot>` | `e.Loot` (`ref readonly`), `e.HasLoot`, `e.WriteLoot()`, `e.GetOrAddLoot()`, `e.RemoveLoot()` | `Read`, `Has`, `Get`, `GetOrAdd`, `Remove` of `DynamicBuffer<Loot>` ([dynamic buffers](/en/docs/guide/dynamic-buffers)) |
-| a relation (`MemberOf : IRelation`), once code names `DynamicBuffer<MemberOf>` | `e.AddMemberOf(target)`, `e.RemoveMemberOf(target)`, `e.LinksMemberOf(target)`, `e.MemberOf` (`ref readonly`), `e.HasMemberOf`, `e.RemoveMemberOf()`, `world.MemberOfIndex` | `AddRelation`, `RemoveRelation`, `HasRelation`, `Read`, `Has`, `Remove`, `world.Relations<MemberOf>()` ([relations](/en/docs/guide/indexes-and-relations#relations)) |
+| a relation (`MemberOf : IRelation`), once code names `DynamicBuffer<MemberOf>` | `e.AddMemberOf(target)`, `e.UnlinkMemberOf(target)`, `e.LinksMemberOf(target)`, `e.MemberOf` (`ref readonly`), `e.HasMemberOf`, `e.RemoveMemberOf()`, `world.MemberOfIndex` | `AddRelation`, `RemoveRelation`, `HasRelation`, `Read`, `Has`, `Remove`, `world.Relations<MemberOf>()` ([relations](/en/docs/guide/indexes-and-relations#relations)) |
 | a singleton (`Clock : ISingletonComponent`) | `world.Clock` (`ref`), `world.HasClock`, `world.GetOrAddClock()`, `world.SetClock(…)`, `world.RemoveClock()` | [`GetSingleton`](/en/docs/guide/singletons), `HasSingleton`, `GetOrAddSingleton`, `GetOrAddSingleton() = …`, `RemoveSingleton` |
 | each `world.Query<Position, Velocity>()` the code calls | `item.Position`, `item.Velocity` | `item.Component1`, `item.Component2` |
 | any component, on a [prefab](/en/docs/guide/prefabs#generated-members) | `prefab.Position` (`ref readonly`), `HasPosition`, `SetPosition(x, y)`, `RemovePosition()`, `IsDead`, `SetDead()` | `Read`, `Has`, `Set`, `Remove` |
@@ -377,7 +377,7 @@ with `false` instead of throwing. After `Destroy` the stored id names nothing: t
 | `CreateEntity()` then `Set` per component | `CreateEntity(a, b, c)`, `Instantiate(prefab)`, or `Instantiate(prefab, a, b)` | One placement instead of one row move per component |
 | `SetX(…)` on a tracked value that rarely changes | `SetXIfChanged(…)` | An equal value is not stamped: `[Changed<T>]` readers skip it |
 | `Set(a)` then `Set(b)` | `Set(a, b)`, `Remove<A, B>()` | Shorter, the same cost |
-| A loop of `CreateEntity` / `Destroy` | `CreateEntities(span, …)`, `DestroyEntities<T>(filter)` ([EECS031](/en/docs/guide/analyzer#eecs031)) | One pass through the structural gate per wave |
+| A loop of `CreateEntity` / `Destroy` | `CreateEntities(span, …)`, `DestroyAll<T>(filter)` ([EECS031](/en/docs/guide/analyzer#eecs031)) | One pass through the structural gate per wave |
 | `Get<T>()` to read a tracked component | `Read<T>()`, the generated property, `TryGet<T>()` | A `ref` access stamps the row as written |
 | `Has<T>()` then `Get<T>()` | `TryGetRef<T>(out found)` | One lookup |
 | Several `Get` / `TryGetRef` and a `Has<Dead>()` per request | [`entity.Run`](/en/docs/guide/queries#run-on-one-entity) with a `static readonly` filter | One lookup for every component; the refs survive structural changes |

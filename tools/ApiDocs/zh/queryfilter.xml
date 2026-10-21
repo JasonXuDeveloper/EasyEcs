@@ -83,7 +83,7 @@
       （交换删除用表的最后一行填空洞、结构变更把实体移到另一张表、表扩容或缩小跨过切分点）在 <paramref name="count" /> 次遍历的一轮里
       可能被跳过，也可能被访问两次；下一轮会再看到它们。</para>
       <para><c>ForEach</c>、<c>ForEachEntity</c>、<c>ForEachBatch</c> 以及它们的 <c>Parallel</c> 形式支持分片；需要所有匹配行的调用
-      （<c>Query</c>、<c>Count</c>、<c>Any</c>、<c>DestroyEntities</c>、<c>entity.Run</c>、<c>SetAll</c> 和其他批量调用）遇到分片的过滤条件会抛
+      （<c>Query</c>、<c>Count</c>、<c>Any</c>、<c>DestroyAll</c>、<c>entity.Run</c>、<c>SetAll</c> 和其他批量调用）遇到分片的过滤条件会抛
       <see cref="T:System.ArgumentException" />。count 为 1 就是整张表。</para>
     </summary>
     <exception cref="T:System.ArgumentOutOfRangeException">

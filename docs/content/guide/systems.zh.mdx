@@ -113,7 +113,7 @@ flowchart TB
 
 没有排序约束时，系统按注册顺序运行。结构变更立即生效，同一次更新里后面的方法和系统都能看到。所有工作都在调用 `Update()`
 的线程上执行；开启 `WorldOptions.ParallelSystems` 后，彼此没有顺序约束、也没有访问冲突的系统会同时运行
-（见[线程](/zh/docs/guide/threading#parallel-systems)），结果和按顺序运行完全一样。想看 World 排出了哪些阶段、每个系统
+（见[多线程与并行](/zh/docs/guide/threading#parallel-systems)），结果和按顺序运行完全一样。想看 World 排出了哪些阶段、每个系统
 读写了什么、某个系统为什么要等另一个，打印 `world.DescribeSchedule()` 即可（文本，或者用 `ToMermaid()` 画成图：
 [调试与诊断](/zh/docs/guide/diagnostics#schedule)）。
 
@@ -670,7 +670,7 @@ run order: MoveSystem
   <Card title="结构变更" href="/zh/docs/guide/structural-changes">
     在 `[ForEach]` 方法里创建、销毁、添加和移除。
   </Card>
-  <Card title="多线程" href="/zh/docs/guide/threading">
+  <Card title="多线程与并行" href="/zh/docs/guide/threading">
     并行阶段、每线程一个 World、来自其他线程的输入。
   </Card>
   <Card title="分析器规则" href="/zh/docs/guide/analyzer">

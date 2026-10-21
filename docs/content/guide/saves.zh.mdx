@@ -87,7 +87,7 @@ long tick = restarted.Clock.Tick;                                      // 1234
 | 每个组件：非托管的按原始行，托管的走 Nino | 索引（下次查找时重建） |
 | 被禁用的组件及其保留的值 | 分组设置（`Load` 按本 World 的 `GroupBy` 调用分组） |
 | [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers) 的元素 | 变更 tick（每个加载的行都算作被写入；`markWritten: false` 时都不算，见[重启](#restart)） |
-| 每个单例 | 用 `Save(output, in exclude)` 排除的组件和单例（见[重启](#restart)） |
+| 每个单例 | 用 `SaveWithout(output, in exclude)` 排除的组件和单例（见[重启](#restart)） |
 
 类型按 Nino 类型 id 记录（带命名空间的完整名字的哈希），每列是一个带长度前缀的片段，所以加载时会跳过当前进程没有的组件类型。当前进程
 用过的类型、或者生成器注册过的类型都能找到：使用 EasyEcs 的程序集，其中每个组件和单例都会在模块加载时注册。
@@ -100,7 +100,7 @@ long tick = restarted.Clock.Tick;                                      // 1234
 - **配置**，新版本会自带：费率、上限、功能开关。存档里存的是旧值。
 - **变更 tick：** 默认情况下加载的每一行都算写入，写记录或做同步的 `[Changed<T>]` 系统第一次运行就会把整个 World 再发一遍。
 
-用一个 `ComponentSet` 列出这些类型。`Save(output, in exclude)` 存档时不写集合里的组件和单例；`Load(input, in keep, markWritten: false)`
+用一个 `ComponentSet` 列出这些类型。`SaveWithout(output, in exclude)` 存档时不写集合里的组件和单例；`LoadKeeping(input, in keep, markWritten: false)`
 保留集合里的单例，维持新进程设好的样子，加载的行也不带变更 tick。
 
 ```csharp
@@ -131,12 +131,12 @@ bank.SetRates(5);
 bank.SetOutbox(0);
 bank.CreateEntity(new Balance(100), new Connection(Stream.Null));
 var previous = new NinoArrayBufferWriter();
-bank.Save(previous, in Restart.Runtime);                               // 不写 Connection、Rates、Outbox // [!code highlight]
+bank.SaveWithout(previous, in Restart.Runtime);                               // 不写 Connection、Rates、Outbox // [!code highlight]
 
 using var resumed = new World();                                       // 新进程
 resumed.SetRates(7);                                                   // 新版本的配置
 resumed.SetOutbox(0);
-resumed.Load(previous.WrittenSpan, in Restart.Startup, markWritten: false);   // 两个都保留 // [!code highlight]
+resumed.LoadKeeping(previous.WrittenSpan, in Restart.Startup, markWritten: false);   // 两个都保留 // [!code highlight]
 resumed.AddSystem<SaveBalances>();
 resumed.Update();
 int records = resumed.Outbox.Records;                                  // 0：读进来的余额都不算变更
@@ -155,7 +155,7 @@ int interest = resumed.Rates.Interest;                                 // 7：�
 - **`markWritten: false` 只作用于加载进来的行：** 没有哪一行算作写入或移除，加载之后才加上的系统也一样；之后代码再写入的内容照常能看到。
 - **集合只建一次**，放在 `static readonly` 字段里：集合是值类型，每次 `With` 或 `WithSingleton` 都返回一个新集合。运行时才知道类型的框架用
   `With(typeof(...))` 添加，组件类型和单例类型都接受。
-- **分组存档不接受单例。** `SaveEntities(output, ids, set)` 的集合里有单例时抛 `ArgumentException`
+- **分组存档不接受单例。** `SaveEntitiesWith(output, ids, set)` 的集合里有单例时抛 `ArgumentException`
   （见[记录](/zh/docs/guide/migration-and-unload#records)）。
 
 之后才加到已经有状态的 World 上的系统（不管状态是谁写的），也可以从当前 tick 开始算：`world.AddSystem<T>(changesFromNow: true)`
@@ -311,8 +311,8 @@ bob follows alice
 | 能用值的地方用了托管组件 | 非托管组件（id、数字、定长数组） | 原始行每列一个块；Nino 要逐个值编码 |
 | 结构从不变化的非托管组件也标 `[NinoType]` | 这些按原始行写，结构会变的才标 `[NinoType]` | 原始行一列只拷贝一次 |
 | 自己在 `Query` 上写序列化 | `Save` / `Load` | id、版本号、缓冲、禁用值和单例都一起带上 |
-| 为了让 `Save` 能跑，给运行时状态写格式化器 | `Save(output, in exclude)` | 排除的类型根本不写，也不需要格式化器 |
-| `Load` 之后再把新配置设一遍 | `Load(input, in keep)` | 保留的单例在存档里直接跳过，不反序列化 |
+| 为了让 `Save` 能跑，给运行时状态写格式化器 | `SaveWithout(output, in exclude)` | 排除的类型根本不写，也不需要格式化器 |
+| `Load` 之后再把新配置设一遍 | `LoadKeeping(input, in keep)` | 保留的单例在存档里直接跳过，不反序列化 |
 
 10 万个实体分布在两张表，存档到复用的缓冲区再读回；以及排除一个组件存档、保留一个单例读档（`SnapshotBenchmark`）：
 
@@ -330,8 +330,8 @@ bob follows alice
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
-| 托管组件没有 `[NinoType]` | `Save` 抛 `InvalidOperationException`（没有格式化器） | 运行时；只在运行时有意义的类型用 `Save(output, in exclude)` 排除 |
-| 设好新配置之后用普通的 `Load` | 存档里的单例把它替换掉，存档里没有的单例被删掉 | 用 `Load(input, in keep)` 保留配置单例 |
+| 托管组件没有 `[NinoType]` | `Save` 抛 `InvalidOperationException`（没有格式化器） | 运行时；只在运行时有意义的类型用 `SaveWithout(output, in exclude)` 排除 |
+| 设好新配置之后用普通的 `Load` | 存档里的单例把它替换掉，存档里没有的单例被删掉 | 用 `LoadKeeping(input, in keep)` 保留配置单例 |
 | `Load` 的保留集合里放了组件 | 抛 `ArgumentException` | 改为存档时排除它 |
 | 系统要用的单例被排除出存档，之后又没人再设 | 系统第一次运行就抛异常 | 加载前设好并保留，或者加载后再设 |
 | 引用的 `Nino.Generator` 比 EasyEcs 用的 Nino 旧 | 包降级：删掉这个引用，EasyEcs 包已经带了生成器 | 还原（`NU1605`） |

@@ -509,7 +509,7 @@ default, and the code that calls it says so.
 
 **Decision.** A reservation grows a table to the rows it needs, rounded up to whole presence words (64 rows), and the
 entity storage to the ids it needs, or either to twice its capacity when that is more; not to the next power of two.
-The reservations are `EnsureCapacity<T1..Tn>(count)` (the table of exactly those components), `EnsureCapacity(prefab,
+The reservations are `Reserve<T1..Tn>(count)` (the table of exactly those components), `Reserve(prefab,
 count)`, `EnsureEntityCapacity`, `CreateEntities`, `InitialEntityCapacity` and a restore. An entity-storage array of
 85,000 bytes or more that a reservation sizes is allocated on the pinned object heap, beside the unmanaged columns; the
 steps of a doubling stay on the large object heap.
@@ -529,7 +529,7 @@ steps of a doubling stay on the large object heap.
   and the entity rows (2.4 MB), the pinned heap the records and one to three int columns (2.0 to 2.8 MB), and no
   collection runs. Bulk creation went from 11.8 / 12.6 / 12.6 ms to 2.7 / 2.5 / 2.7 ms (one, two, three components),
   5.03 / 5.53 / 6.03 MB to 4.20 / 4.58 / 4.96 MB.
-- **`EnsureCapacity<T1..Tn>` for entities created one by one.** `EnsureEntityCapacity` sized only the records, so the
+- **`Reserve<T1..Tn>` for entities created one by one.** `EnsureEntityCapacity` sized only the records, so the
   table still doubled from 64 rows, allocating twice its final size: 2.67 / 3.32 / 3.99 ms and 4.53 / 5.53 / 6.53 MB
   before, 1.94 / 2.71 / 2.60 ms and 2.67 / 3.05 / 3.44 MB with the table reserved (Friflo with `EnsureCapacity` on its
   store and archetype: 11 to 12 ms; Arch with `EnsureCapacity`: 3.4 to 4.2 ms).
@@ -643,7 +643,7 @@ an id, with a message that names the fix. Format 1 saves (4.3 and earlier) are r
 
 ## D31. A record of what persists: a component set to save, loading onto existing entities [#d31-a-record-of-what-persists]
 
-**Decision.** `SaveEntities(output, ids, set)` writes only the components of a `ComponentSet`, and
+**Decision.** `SaveEntitiesWith(output, ids, set)` writes only the components of a `ComponentSet`, and
 `LoadEntitiesInto(input, entities)` loads a group save onto entities that exist, the i-th saved entity onto the i-th
 given, each moving table at most once. A `ComponentSet` is a bit mask built once (`With<T>()`, `With(Type)`); the save
 selects each table's rows in O(group).
@@ -1081,8 +1081,8 @@ the tick is skipped whole, and words and blocks no column wrote.
 
 ## D50. A restart save leaves types out; a restart load keeps singletons [#d50-restart-saves]
 
-**Decision.** `world.Save(output, in exclude)` writes the whole world without the components and singletons of a
-`ComponentSet`; `world.Load(input, in keep, markWritten)` keeps the singletons of `keep` exactly as the world has them
+**Decision.** `world.SaveWithout(output, in exclude)` writes the whole world without the components and singletons of a
+`ComponentSet`; `world.LoadKeeping(input, in keep, markWritten)` keeps the singletons of `keep` exactly as the world has them
 (the save's values are skipped). A `ComponentSet` holds singletons as a second mask (`WithSingleton<T>()`;
 `With(Type)` takes either kind). `SaveEntities` refuses a set that names a singleton; `Load` refuses a `keep` that names
 a component.

@@ -162,7 +162,7 @@ A system that holds another system ([EECS008](/en/docs/guide/analyzer#eecs008)),
 [UpdateAfter<DeathSystem>]
 public sealed class CorpseSystem : EcsSystem
 {
-    protected override void OnUpdate() => World.DestroyEntities<Dead>();   // every corpse in one pass
+    protected override void OnUpdate() => World.DestroyAll<Dead>();   // every corpse in one pass
 }
 ```
 

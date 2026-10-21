@@ -50,7 +50,7 @@ The headline server tick of 100,000 entities takes <BenchValue k="tick.oneWorld"
 
 What allocates, on purpose: creating a world, the first entity of a new component set (a new table), the first use
 of a query shape, a table or a `DynamicBuffer<T>` growing past its capacity, and cold tools such as `Describe`.
-`InitialEntityCapacity`, `EnsureCapacity<T1, …, Tn>(count)`, `EnsureCapacity(prefab, count)` and
+`InitialEntityCapacity`, `Reserve<T1, …, Tn>(count)`, `Reserve(prefab, count)` and
 `bag.EnsureCapacity(n)` move growth out of the tick. With `WorldOptions.MeasureSystems`, `system.Stats.LastAllocated`
 names the system that allocates ([diagnostics](/en/docs/guide/diagnostics#timing)).
 
@@ -150,7 +150,7 @@ Three tools, for three needs:
 | Undo, rollback, prediction, replays in memory | `world.Capture()` / `world.Restore(snapshot)` | [Snapshots](/en/docs/guide/snapshots) |
 | A whole world to disk, a database or another process | `world.Save(output)` / `world.Load(bytes)` | [Saves](/en/docs/guide/saves) |
 | A group of entities (a player and what it owns) to another world or server | `SaveEntities` / `LoadEntities`, `MoveEntities` | [Migration and unloading](/en/docs/guide/migration-and-unload) |
-| The durable part of an actor, restored onto its entity without counting as a change | `SaveEntities(output, ids, set)` / `LoadEntitiesInto(bytes, entities, markWritten: false)` | [Records](/en/docs/guide/migration-and-unload#records) |
+| The durable part of an actor, restored onto its entity without counting as a change | `SaveEntitiesWith(output, ids, set)` / `LoadEntitiesInto(bytes, entities, markWritten: false)` | [Records](/en/docs/guide/migration-and-unload#records) |
 
 ```csharp
 using System.Buffers;
@@ -217,7 +217,7 @@ public class ApplyHitsSystem : EcsSystem
 [UpdateAfter<ApplyHitsSystem>]                                          // after every reader
 public sealed class ClearHitsSystem : EcsSystem
 {
-    protected override void OnUpdate() => World.DestroyEntities<Hit>(); // every message, one pass
+    protected override void OnUpdate() => World.DestroyAll<Hit>(); // every message, one pass
 }
 ```
 

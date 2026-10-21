@@ -85,7 +85,7 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
                                and its BufferStore
   Prefab.cs                    a recipe of component values outside any world (one row of a private world)
   World.Snapshots.cs           Capture / Restore (WorldSnapshot.cs holds the copies)
-  World.Serialization.cs       Save / Load of a whole world (Save(output, exclude) / Load(input, keep) for a restart);
+  World.Serialization.cs       Save / Load of a whole world (SaveWithout(output, exclude) / LoadKeeping(input, keep) for a restart);
                                SavedTypes.cs: the types a save may name (generated)
   ComponentSet.cs              a set of component bits and singleton slots: what SaveEntities writes, what Save leaves
                                out, which singletons Load keeps

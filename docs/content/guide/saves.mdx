@@ -95,7 +95,7 @@ long tick = restarted.Clock.Tick;                                      // 1234
 | Every component, unmanaged as raw rows, managed through Nino | Indexes (they rebuild on the next lookup) |
 | Disabled components, with their kept values | Groupings (`Load` follows this world's `GroupBy` calls) |
 | [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) elements | Change ticks (every loaded row counts as written, or none with `markWritten: false`: [restart](#restart)) |
-| Every singleton | Components and singletons left out with `Save(output, in exclude)` ([restart](#restart)) |
+| Every singleton | Components and singletons left out with `SaveWithout(output, in exclude)` ([restart](#restart)) |
 
 Types are recorded by their Nino type id (a hash of the namespace-qualified name), and each column is a
 length-prefixed slice, so a load skips the components this process has no type for. A type is found when the process
@@ -113,8 +113,8 @@ adds its systems and goes on. Three things in the old world must not come back:
 - **Change ticks:** by default every loaded row counts as written, so a `[Changed<T>]` system that writes records or
   replicates would send the whole world again on its first run.
 
-A `ComponentSet` names the types. `Save(output, in exclude)` writes the world without the components and singletons
-of the set; `Load(input, in keep, markWritten: false)` keeps the singletons of its set as the new process set them,
+A `ComponentSet` names the types. `SaveWithout(output, in exclude)` writes the world without the components and singletons
+of the set; `LoadKeeping(input, in keep, markWritten: false)` keeps the singletons of its set as the new process set them,
 and loads the rows without a change tick.
 
 ```csharp
@@ -145,12 +145,12 @@ bank.SetRates(5);
 bank.SetOutbox(0);
 bank.CreateEntity(new Balance(100), new Connection(Stream.Null));
 var previous = new NinoArrayBufferWriter();
-bank.Save(previous, in Restart.Runtime);                               // no Connection, no Rates, no Outbox // [!code highlight]
+bank.SaveWithout(previous, in Restart.Runtime);                               // no Connection, no Rates, no Outbox // [!code highlight]
 
 using var resumed = new World();                                       // the new process
 resumed.SetRates(7);                                                   // the new version's configuration
 resumed.SetOutbox(0);
-resumed.Load(previous.WrittenSpan, in Restart.Startup, markWritten: false);   // keeps both // [!code highlight]
+resumed.LoadKeeping(previous.WrittenSpan, in Restart.Startup, markWritten: false);   // keeps both // [!code highlight]
 resumed.AddSystem<SaveBalances>();
 resumed.Update();
 int records = resumed.Outbox.Records;                                  // 0: no loaded balance is a change
@@ -177,7 +177,7 @@ records nothing; the next deposit is recorded as usual.
 - **Build the sets once,** in `static readonly` fields: a set is a value, each `With` or `WithSingleton` returns a new
   one. A framework that learns its types at run time adds them with `With(typeof(...))`, which takes a component or a
   singleton type.
-- **A group save takes no singletons.** `SaveEntities(output, ids, set)` with a set that names one throws
+- **A group save takes no singletons.** `SaveEntitiesWith(output, ids, set)` with a set that names one throws
   `ArgumentException` ([records](/en/docs/guide/migration-and-unload#records)).
 
 A system added later to a world that already holds its state, whatever wrote it, can start from the current tick
@@ -342,8 +342,8 @@ Bob's `Follows` still names Alice without any rewriting.
 | Managed components where values would do | Unmanaged components (ids, numbers, fixed arrays) | Raw rows are one block per column; Nino encodes value by value |
 | `[NinoType]` on unmanaged components that never change | Raw rows for those, `[NinoType]` where the shape will change | A raw column is one copy |
 | Your own serializer over a `Query` | `Save` / `Load` | Ids, versions, buffers, disabled values and singletons come along |
-| Formatters for runtime state only to make `Save` work | `Save(output, in exclude)` | Left-out types are never written, and need no formatter |
-| Setting the new configuration again after `Load` | `Load(input, in keep)` | Kept singletons are skipped in the save, never deserialized |
+| Formatters for runtime state only to make `Save` work | `SaveWithout(output, in exclude)` | Left-out types are never written, and need no formatter |
+| Setting the new configuration again after `Load` | `LoadKeeping(input, in keep)` | Kept singletons are skipped in the save, never deserialized |
 
 100,000 entities in two tables, saved into a reused buffer and loaded back, and the same without a component and
 loaded keeping a singleton (`SnapshotBenchmark`):
@@ -363,8 +363,8 @@ loaded keeping a singleton (`SnapshotBenchmark`):
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| A managed component without `[NinoType]` | `Save` throws `InvalidOperationException` (no formatter) | At run time; leave runtime-only types out with `Save(output, in exclude)` |
-| A plain `Load` after setting the new configuration | The save's singletons replace it, and one the save lacks is removed | `Load(input, in keep)` with the configuration's singletons |
+| A managed component without `[NinoType]` | `Save` throws `InvalidOperationException` (no formatter) | At run time; leave runtime-only types out with `SaveWithout(output, in exclude)` |
+| A plain `Load` after setting the new configuration | The save's singletons replace it, and one the save lacks is removed | `LoadKeeping(input, in keep)` with the configuration's singletons |
 | A component in the keep set of `Load` | `ArgumentException` | Leave it out of the save instead |
 | A singleton a system needs, left out of the save and never set again | The system throws on its first run | Set it before the load and keep it, or set it after |
 | A `Nino.Generator` reference older than the Nino of EasyEcs | A package downgrade: remove the reference, the EasyEcs package brings the generator | Restore (`NU1605`) |

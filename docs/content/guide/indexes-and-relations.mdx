@@ -240,7 +240,7 @@ for the relation:
 | Generated | Same as |
 | --- | --- |
 | `e.AddMemberOf(target)` | `e.AddRelation(new MemberOf(target))`, returns the entity |
-| `e.RemoveMemberOf(target)` | `e.RemoveRelation<MemberOf>(target)`, returns how many links went |
+| `e.UnlinkMemberOf(target)` | `e.RemoveRelation<MemberOf>(target)`, returns how many links went |
 | `e.LinksMemberOf(target)` | `e.HasRelation<MemberOf>(target)` |
 | `e.MemberOf` / `e.HasMemberOf` / `e.RemoveMemberOf()` | the links (`ref readonly DynamicBuffer<MemberOf>`), whether it has any, drop them all |
 | `world.MemberOfIndex` | `world.Relations<MemberOf>()` |
@@ -258,7 +258,7 @@ public class CountParties : EcsSystem
 ```csharp
 var paladin = world.CreateEntity(new PartyCount()).AddMemberOf(red).AddMemberOf(blue);
 bool withBlue = paladin.LinksMemberOf(blue);                  // true
-paladin.RemoveMemberOf(blue);                                 // 1 link went
+paladin.UnlinkMemberOf(blue);                                 // 1 link went
 int linked = paladin.MemberOf.Count;                          // 1
 int inRed = world.MemberOfIndex.Count(red);                   // the knight and the paladin
 ```

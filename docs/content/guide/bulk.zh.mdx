@@ -70,7 +70,7 @@ public record struct Shot(int Damage) : IComponent;
 ```csharp
 var volley = new Entity[10_000];
 world.CreateEntities(volley, new Shot(5), new Position(0, 0));   // 一张表，所有行一次放好
-int cleared = world.DestroyEntities<Shot>();                     // 所有子弹，一次遍历
+int cleared = world.DestroyAll<Shot>();                     // 所有子弹，一次遍历
 ```
 
 `world.Instantiate(prefab, span)` 用[预制体](/zh/docs/guide/prefabs)刷出一波实体。
@@ -187,7 +187,7 @@ Console.WriteLine($"set while paused: health {first.Health.Value}, still paused 
 // 一次调用生成一轮齐射，一趟遍历全部清掉。
 var volley = new Entity[10_000];
 world.CreateEntities(volley, new Shot(5));
-int cleared = world.DestroyEntities<Shot>();
+int cleared = world.DestroyAll<Shot>();
 Console.WriteLine($"shots cleared: {cleared}, entities left: {world.EntityCount}");
 ```
 

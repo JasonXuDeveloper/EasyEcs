@@ -45,8 +45,8 @@ major or minor version that needs code changes? The
   `[ForEach]` methods visited (`LastEntities`, `TotalEntities`); `world.DescribeSchedule()` describes the stages, the
   waits and the pairs only registration orders, as text or a mermaid flowchart. See
   [debugging and diagnostics](/en/docs/guide/diagnostics).
-- Restart saves: `world.Save(output, in exclude)` leaves the components and singletons of a `ComponentSet` out,
-  `world.Load(input, in keep, markWritten)` keeps the singletons the new process set, and
+- Restart saves: `world.SaveWithout(output, in exclude)` leaves the components and singletons of a `ComponentSet` out,
+  `world.LoadKeeping(input, in keep, markWritten)` keeps the singletons the new process set, and
   `ComponentSet.WithSingleton<T>()` / `With(Type)` name singletons. See [restart](/en/docs/guide/saves#restart).
 - The analyzer: [EECS035](/en/docs/guide/analyzer#eecs035) rejects an invalid `Slices` (below 1, or with a
   `Changed` / `Removed` filter); [EECS036](/en/docs/guide/analyzer#eecs036) a unique component that cannot be indexed by
@@ -54,9 +54,12 @@ major or minor version that needs code changes? The
   `Instantiate` calls with the same values; [EECS033](/en/docs/guide/analyzer#eecs033) suggests the generated
   `SetXIfChanged(…)`.
 - `SaveEntities(output, a.Id, b.Id)` and `bag.AddRange(x, y)` take the values directly (`params` spans, built on the
-  stack). The guides pass a collected list as `CollectionsMarshal.AsSpan(list)` instead of a `ToArray()` copy. See
-  [migration](/en/docs/guide/migration-and-unload#save-entities).
-
+  stack). See [migration](/en/docs/guide/migration-and-unload#save-entities).
+- `world.Read<T1..Tn>(filter)` walks the rows of a query to read them: its items are `ref readonly` and stamp nothing,
+  so a `[Changed<T>]` reader does not see a row as written because a tool or a request handler read it. `Query` stamps
+  the rows of tracked components it visits, as before. See [queries](/en/docs/guide/queries#read).
+- `world.DestroyEntities(ids)` destroys a list of ids with one pass through the structural gate and one cascade;
+  stale ids and repeats are skipped. See [structural changes](/en/docs/guide/structural-changes#bulk).
 - `ChildOf` and `Destroyed` have generated members like your own components: `entity.ChildOf`, `HasChildOf`,
   `TryGetChildOf`, `SetChildOf(parent)`, `SetChildOfIfChanged(parent)`, `RemoveChildOf()`, `world.ChildOfIndex`, the
   prefab writers, and `entity.IsDestroyed`. See [hierarchy](/en/docs/guide/hierarchy#reparent).
@@ -76,7 +79,11 @@ major or minor version that needs code changes? The
 
 ### Changes that need code changes [#v4-7-0-breaking]
 
-- `SaveEntities(output, ids, set)` throws `ArgumentException` when the set names a singleton (a group save writes
+- Renamed, so each name says what the call does: `SaveEntities(output, ids, set)` is `SaveEntitiesWith`,
+  `EnsureCapacity<T1..Tn>(count)` and `EnsureCapacity(prefab, count)` are `Reserve`, `DestroyEntities<T1..Tn>(filter)`
+  is `DestroyAll`, and a relation's generated `RemoveX(target)` is `UnlinkX(target)` (`RemoveX()` still drops the
+  whole buffer). See the [migration guide](/en/docs/migration#v4-7-renames).
+- `SaveEntitiesWith(output, ids, set)` throws `ArgumentException` when the set names a singleton (a group save writes
   none). See the [migration guide](/en/docs/migration#v4-7-save-entities).
 - `EcsSystem` has a public `RunCount`: a member of that name in a system hides it (warning CS0108). See the
   [migration guide](/en/docs/migration#v4-7-run-count).
@@ -89,7 +96,6 @@ major or minor version that needs code changes? The
 - A relation named like an `Entity` member's suffix (`Relation`, for `HasRelation`) lost its `LinksX(target)`.
 - A generic system closed only by a target-typed creation (`Regen<Health> regen = new();`) or by `typeof` had its
   code made by reflection at run time, which fails under Native AOT; those forms now register it at compile time.
-
 - A parallel pass (a parallel `[ForEach]` or `ForEachParallel`, or a stage of parallel systems) could hang, its
   caller spinning forever, and run one chunk (or system) twice: a helper thread still finishing the last pass could
   claim an item of the next one when the next one had more. Sliced parallel passes, whose chunk count changes from run

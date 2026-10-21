@@ -12,14 +12,15 @@ current API.
 
 ## v4.6 → v4.7 [#v4-6-to-v4-7]
 
-Code written for 4.6 compiles unchanged unless a system declares a member named `RunCount` or a file imports another
+Four calls and one generated member are [renamed](#v4-7-renames): the compiler finds each call. Beyond that, code
+written for 4.6 compiles unchanged unless a system declares a member named `RunCount` or a file imports another
 namespace with a type of the same name as one of the new ones. Two calls behave differently, and parallel passes that
 write tracked components cut their rows differently.
 
 ### `SaveEntities` refuses a set that names a singleton [#v4-7-save-entities]
 
 A `ComponentSet` holds singletons too (`WithSingleton<T>()`), and `With(Type)` now accepts a singleton type instead of
-throwing. A group save writes no singletons, so `SaveEntities(output, ids, set)` throws `ArgumentException` for a set
+throwing. A group save writes no singletons, so `SaveEntitiesWith(output, ids, set)` throws `ArgumentException` for a set
 that names one. A set built with `With(typeof(...))` from a list of types that mixes components and singletons now
 fails at the save, not at `With`. Keep the components of a record in a set of their own:
 
@@ -37,7 +38,7 @@ public record struct Bank(long Gold) : IComponent;
 private static readonly ComponentSet Record = ComponentSet.Create().With<Bank>();
 ```
 
-A whole-world `Save(output, in exclude)` and `Load(input, in keep)` are where sets with singletons go
+A whole-world `SaveWithout(output, in exclude)` and `LoadKeeping(input, in keep)` are where sets with singletons go
 ([restart](/en/docs/guide/saves#restart)).
 
 ### `EcsSystem.RunCount` [#v4-7-run-count]
@@ -76,12 +77,24 @@ its change summary and could drop stamps ([D48](/en/docs/decisions#d48-parallel-
 code; a table of 4,096 rows or fewer now runs as one chunk, so a small parallel pass may use fewer threads than
 before. Passes that write no tracked component chunk as before.
 
-### `Load` with a `keep` set [#v4-7-load-overloads]
+### Renamed calls [#v4-7-renames]
 
-`Load(input, in keep, markWritten = true)` joins `Load(input, markWritten = true)`. The calls of 4.6 bind as before:
-`Load(bytes)`, `Load(bytes, false)` and `Load(bytes, markWritten: false)` take the overload without `keep`, and so does
-`Load(bytes, default)`, which means `markWritten: false`, not an empty set. Pass a `ComponentSet` (a `static readonly`
-field) to keep singletons. A set naming a component throws `ArgumentException`: the load replaces the entities.
+Four calls of 4.6 say in their names what they do now. The old names are gone, so the compiler points at every call
+to change:
+
+| 4.6 | 4.7 | Why |
+|---|---|---|
+| `world.SaveEntities(output, ids, set)` | `world.SaveEntitiesWith(output, ids, set)` | the set is what the record writes; `SaveEntities(output, ids)` without a set stays |
+| `world.EnsureCapacity<T1, …, Tn>(count)` | `world.Reserve<T1, …, Tn>(count)` | `count` is how many more entities, not a total; `EnsureEntityCapacity(total)` and `DynamicBuffer.EnsureCapacity(capacity)` are totals and stay |
+| `world.EnsureCapacity(prefab, count)` | `world.Reserve(prefab, count)` | the same |
+| `world.DestroyEntities<T1, …, Tn>(filter)` | `world.DestroyAll<T1, …, Tn>(filter)` | the filter's calls end in `All`, like `SetAll` and `RemoveAll` |
+| `e.RemoveMemberOf(target)` (a relation's generated member) | `e.UnlinkMemberOf(target)` | `e.RemoveMemberOf()` drops the whole buffer; one missing argument no longer drops every link |
+
+`world.DestroyEntities(ids)` now destroys a list of ids in one call, like `SaveEntities` and `MoveEntities`. A call of
+4.6 with type arguments does not compile against it, so none changes meaning silently.
+
+The restart calls new in 4.7 have their names from the start: `world.SaveWithout(output, in exclude)` and
+`world.LoadKeeping(input, in keep, markWritten)` ([restart](/en/docs/guide/saves#restart)).
 
 ### `MeasureSystems` measures more [#v4-7-measure-systems]
 
@@ -283,7 +296,7 @@ archetype tables (one row per entity, columns 64-byte aligned), which changes a 
   [EECS018](/en/docs/guide/analyzer#eecs018) points at overrides that compute them. To stop and resume a system, set
   `Enabled`.
 - **`world.DestroyEntity(entity)` is gone**: it did what `entity.Destroy()` does. Call `entity.Destroy()`, or
-  `world.DestroyEntities<T…>(filter)` for every match at once.
+  `world.DestroyAll<T…>(filter)` for every match at once.
 - **`IForEach` jobs receive only the components.** `Execute(int entityId, ref T1 c1, …)` became
   `Execute(ref T1 c1, …)`, so a pass never loads the entity rows for them. A job that needs the entity implements
   `IForEachEntity<…>` (`Execute(Entity entity, ref T1 c1, …)`) and runs with `world.ForEachEntity`.
@@ -362,7 +375,7 @@ archetype tables (one row per entity, columns 64-byte aligned), which changes a 
 - `INoStructuralChanges` marks a job that makes no structural change; the generator adds it to `[ForEach]` methods
   that cannot change structure, which then iterate without per-entity bookkeeping.
 - `QueryFilter.WithAny<T>()` and `[WithAny<T>]`: the entity needs at least one of the named components.
-- `world.CreateEntities(span, components…)` and `world.DestroyEntities<T…>(filter)` spawn and clear waves with one
+- `world.CreateEntities(span, components…)` and `world.DestroyAll<T…>(filter)` spawn and clear waves with one
   pass through the structural gate.
 - `WorldOptions.MeasureSystems` times every system run into `system.Stats` (`SystemStats`).
 - `[ForEach(Parallel = true)]` (and `world.ForEachParallel` / `ForEachEntityParallel`) runs chunks of

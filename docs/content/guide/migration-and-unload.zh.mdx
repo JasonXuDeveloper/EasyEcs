@@ -92,7 +92,7 @@ int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), Colle
 ### 只存需要持久化的部分 [#records]
 
 Actor 的实体上，运行时状态和需要持久化的数据放在一起：连接、计时器、缓存，以及重启后必须还在的银行余额。`ComponentSet` 列出记录里
-的组件，`SaveEntities(output, ids, set)` 只写这些（其余组件不需要 Nino 格式化器），`LoadEntitiesInto(bytes, entities)` 把它们放到
+的组件，`SaveEntitiesWith(output, ids, set)` 只写这些（其余组件不需要 Nino 格式化器），`LoadEntitiesInto(bytes, entities)` 把它们放到
 已经存在的实体上，比如 Actor 激活时就有了、记录还没从数据库取回来的那个实体。
 
 只有实体的一部分需要撑过进程重启（其余部分由激活它的代码重建），或者实体比数据先创建出来，就用记录。集合只建一次，放在
@@ -112,7 +112,7 @@ public static class Records
 ```csharp
 var actor = world.CreateEntity(new Bank(500), new Connection(7));
 var record = new NinoArrayBufferWriter();
-world.SaveEntities(record, [actor.Id], Records.Persistent);            // 只写 Bank // [!code highlight]
+world.SaveEntitiesWith(record, [actor.Id], Records.Persistent);            // 只写 Bank // [!code highlight]
 
 // 之后，可能在另一个进程里：Actor 先激活，记录随后才到。
 var activated = world.CreateEntity(new Connection(9));
@@ -142,7 +142,7 @@ world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
   （抛 `InvalidOperationException`），不能放进并行方法（[EECS010](/zh/docs/guide/analyzer#eecs010)），`[ForEach]` 方法要接收
   `Entity` 或 `World` 才能调用（[EECS013](/zh/docs/guide/analyzer#eecs013)）。
 - 集合在分组存档里列的是组件。它也能列单例（`WithSingleton<T>()`，或者两种类型都接受的 `With(typeof(...))`），用于整个 World 的
-  [重启](/zh/docs/guide/saves#restart)：`Save(output, in exclude)` 不写这些类型，`Load(input, in keep)` 保留这些单例。分组存档不写单例，
+  [重启](/zh/docs/guide/saves#restart)：`SaveWithout(output, in exclude)` 不写这些类型，`LoadKeeping(input, in keep)` 保留这些单例。分组存档不写单例，
   所以集合里有单例时 `SaveEntities` 抛 `ArgumentException`。
 - 运行时才知道类型的框架按 `Type` 构建集合：
 
@@ -225,7 +225,7 @@ public static class Plugins
 `world.TrimExcess()` 把它们还回去（见[高峰过后还回内存](/zh/docs/guide/diagnostics#trim)）。
 
 整个进程重启也是这样走字节，只有两点不同：旧进程不写不该带回来的东西（运行时状态、它自己的配置），新进程保留它在加载之前设好的配置。
-`Save(output, in exclude)` 和 `Load(input, in keep, markWritten: false)` 正好做这两件事：见[重启](/zh/docs/guide/saves#restart)。
+`SaveWithout(output, in exclude)` 和 `LoadKeeping(input, in keep, markWritten: false)` 正好做这两件事：见[重启](/zh/docs/guide/saves#restart)。
 
 ## 完整例子 [#full-example]
 
@@ -348,7 +348,7 @@ Console.WriteLine($"left behind: {zone.EntityCount} entities");
 using var earlier = new World();
 var saved = earlier.CreateEntity(new Bank(500), new Connection(7));
 var record = new NinoArrayBufferWriter();
-earlier.SaveEntities(record, [saved.Id], Records.Persistent);
+earlier.SaveEntitiesWith(record, [saved.Id], Records.Persistent);
 
 using var world = new World();
 world.AddSystem<SaveChangedBanks>();

@@ -59,7 +59,7 @@ dotnet add package EasyEcs
 | `ref var c = ref world.Get<Health>(entity)` | `ref var hp = ref entity.Health`、`entity.Get<T>()` |
 | `world.Size` | `world.EntityCount` |
 | `entity.Id` | `entity.Id.Index`；数据里存 `entity.Id`（`EntityId`） |
-| `world.EnsureCapacity(in signature, n)` | `world.EnsureCapacity<T1, …, Tn>(n)`、`world.EnsureCapacity(prefab, n)` |
+| `world.EnsureCapacity(in signature, n)` | `world.Reserve<T1, …, Tn>(n)`、`world.Reserve(prefab, n)` |
 
 ### 查询和遍历 [#queries-and-iteration]
 
@@ -85,7 +85,7 @@ dotnet add package EasyEcs
 | `var n = buffer.Create(types); buffer.Set(n, c);` | `world.CreateEntity(a, b, c)`（`[ForEach]` 方法里拿一个 `World` 参数） |
 | `world.Add(in q, value)` | `world.SetAll(value, filter)` |
 | `world.Remove<T>(in q)` | `world.RemoveAll<T>(filter)` |
-| `world.Destroy(in q)` | `world.DestroyEntities<T>(filter)` |
+| `world.Destroy(in q)` | `world.DestroyAll<T>(filter)` |
 
 ## 示例：主 tick 的模拟 [#worked-example]
 
@@ -268,7 +268,7 @@ sim.AddSystem<LifetimeSystem>();
 sim.AddSystem<ShootingSystem>();
 sim.AddSystem<ClockSystem>();
 
-sim.EnsureCapacity<Position, Velocity, Health, Attack, Player>(100_000);
+sim.Reserve<Position, Velocity, Health, Attack, Player>(100_000);
 for (int i = 0; i < 100_000; i++)
     sim.CreateEntity(new Position { X = i % 4096, Y = i / 25 }, new Velocity { X = 1, Y = -1 },
         new Health { Value = 150, Max = 150 }, new Attack { Damage = 5, Cooldown = i % 10, Interval = 8 },

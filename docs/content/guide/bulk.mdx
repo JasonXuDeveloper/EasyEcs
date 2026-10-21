@@ -73,7 +73,7 @@ public record struct Shot(int Damage) : IComponent;
 ```csharp
 var volley = new Entity[10_000];
 world.CreateEntities(volley, new Shot(5), new Position(0, 0));   // one table, rows placed at once
-int cleared = world.DestroyEntities<Shot>();                     // every shot, in one pass
+int cleared = world.DestroyAll<Shot>();                     // every shot, in one pass
 ```
 
 `world.Instantiate(prefab, span)` spawns a wave from a [prefab](/en/docs/guide/prefabs).
@@ -191,7 +191,7 @@ Console.WriteLine($"set while paused: health {first.Health.Value}, still paused 
 // A volley is spawned in one call and cleared in one pass.
 var volley = new Entity[10_000];
 world.CreateEntities(volley, new Shot(5));
-int cleared = world.DestroyEntities<Shot>();
+int cleared = world.DestroyAll<Shot>();
 Console.WriteLine($"shots cleared: {cleared}, entities left: {world.EntityCount}");
 ```
 

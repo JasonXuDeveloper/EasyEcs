@@ -261,8 +261,8 @@ World 在内存里的一份拷贝：`world.Capture()` 拍下，`world.Restore(sn
 ## ComponentSet [#component-set]
 
 一组组件和单例类型，建一次，存放在 `static readonly` 字段里：`ComponentSet.Create().With<Bank>().WithSingleton<Rates>()`。
-它指定 `SaveEntities` 写哪些组件（一份只含需要持久化内容的记录），重启时 `Save(output, exclude)` 不写哪些类型，
-以及 `Load(input, keep)` 保留哪些单例。见[存档](/zh/docs/guide/saves#restart)。
+它指定 `SaveEntities` 写哪些组件（一份只含需要持久化内容的记录），重启时 `SaveWithout(output, exclude)` 不写哪些类型，
+以及 `LoadKeeping(input, keep)` 保留哪些单例。见[存档](/zh/docs/guide/saves#restart)。
 
 ## 迁移（Migration） [#migration]
 

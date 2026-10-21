@@ -100,7 +100,7 @@ int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), Colle
 ### A record of what persists [#records]
 
 An actor's entity holds runtime state next to what persists: a connection, timers, a cache, and a bank balance that
-must survive a restart. A `ComponentSet` names the components of the record, `SaveEntities(output, ids, set)` writes
+must survive a restart. A `ComponentSet` names the components of the record, `SaveEntitiesWith(output, ids, set)` writes
 those only (the others need no Nino formatter), and `LoadEntitiesInto(bytes, entities)` puts them onto entities that
 exist already, such as the one the actor got when it was activated, before its record came back from the database.
 
@@ -122,7 +122,7 @@ public static class Records
 ```csharp
 var actor = world.CreateEntity(new Bank(500), new Connection(7));
 var record = new NinoArrayBufferWriter();
-world.SaveEntities(record, [actor.Id], Records.Persistent);            // Bank only // [!code highlight]
+world.SaveEntitiesWith(record, [actor.Id], Records.Persistent);            // Bank only // [!code highlight]
 
 // Later, maybe in another process: the actor is activated, then its record arrives.
 var activated = world.CreateEntity(new Connection(9));
@@ -158,8 +158,8 @@ world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
   (`InvalidOperationException`), never in a parallel method ([EECS010](/en/docs/guide/analyzer#eecs010)), and in a
   `[ForEach]` method only when it takes `Entity` or `World` ([EECS013](/en/docs/guide/analyzer#eecs013)).
 - A set names components for a group save. It can also name singletons (`WithSingleton<T>()`, or `With(typeof(...))`,
-  which takes either kind) for a whole-world [restart](/en/docs/guide/saves#restart): `Save(output, in exclude)` leaves
-  its types out, `Load(input, in keep)` keeps its singletons. A group save writes no singletons, so `SaveEntities`
+  which takes either kind) for a whole-world [restart](/en/docs/guide/saves#restart): `SaveWithout(output, in exclude)` leaves
+  its types out, `LoadKeeping(input, in keep)` keeps its singletons. A group save writes no singletons, so `SaveEntities`
   with a set that names one throws `ArgumentException`.
 - A framework that learns its types at run time builds the set by `Type`:
 
@@ -255,7 +255,7 @@ Once the new version runs, `world.TrimExcess()` gives it back, at a quiet moment
 
 A restart of the whole process goes through bytes the same way, with two differences: the old process leaves out
 what it must not bring back (runtime state, its configuration), and the new process keeps the configuration it set
-before the load. `Save(output, in exclude)` and `Load(input, in keep, markWritten: false)` do both: see
+before the load. `SaveWithout(output, in exclude)` and `LoadKeeping(input, in keep, markWritten: false)` do both: see
 [Restart](/en/docs/guide/saves#restart).
 
 ## Full example [#full-example]
@@ -381,7 +381,7 @@ Console.WriteLine($"left behind: {zone.EntityCount} entities");
 using var earlier = new World();
 var saved = earlier.CreateEntity(new Bank(500), new Connection(7));
 var record = new NinoArrayBufferWriter();
-earlier.SaveEntities(record, [saved.Id], Records.Persistent);
+earlier.SaveEntitiesWith(record, [saved.Id], Records.Persistent);
 
 using var world = new World();
 world.AddSystem<SaveChangedBanks>();

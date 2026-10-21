@@ -45,7 +45,7 @@ EasyEcs and allocates <BenchValue k="peers.defaultecs.alloc" /> per tick, where 
 | World | `new World(capacity)` | `new World(new WorldOptions { InitialEntityCapacity = n })` |
 | Component | any struct | a struct implementing `IComponent` |
 | Create with components | `var e = world.CreateEntity(); e.Set(a); e.Set(b);` | `world.CreateEntity(a, b)` (placed in its final table at once) |
-| Create many | the same per entity | `world.CreateEntities(span, a, b)`, or `world.EnsureCapacity<A, B>(n)` before a loop |
+| Create many | the same per entity | `world.CreateEntities(span, a, b)`, or `world.Reserve<A, B>(n)` before a loop |
 | Read, write | `e.Get<T>()` (ref), `world.GetComponents<T>()[e]` | `entity.Hp` (a `ref`; `ref readonly` for a tracked component); a `[ForEach]` parameter |
 | Tag | `e.Set<Dead>()` | `entity.SetDead()` |
 | Destroy | `e.Dispose()` | `entity.Destroy()` |

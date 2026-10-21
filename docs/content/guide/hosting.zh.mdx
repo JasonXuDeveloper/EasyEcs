@@ -334,12 +334,12 @@ public static class Restart
     private static readonly ComponentSet Runtime = ComponentSet.Create().WithSingleton<ServerConfig>().With<Session>();
     private static readonly ComponentSet Configuration = ComponentSet.Create().WithSingleton<ServerConfig>();
 
-    public static void Save(World world, NinoArrayBufferWriter output) => world.Save(output, in Runtime);
+    public static void Save(World world, NinoArrayBufferWriter output) => world.SaveWithout(output, in Runtime);
 
     public static void Resume(World world, ReadOnlySpan<byte> save, int maxPlayers)
     {
         world.SetServerConfig(maxPlayers);                        // 这个进程的配置
-        world.Load(save, in Configuration, markWritten: false);   // 游戏按存档恢复，配置保留
+        world.LoadKeeping(save, in Configuration, markWritten: false);   // 游戏按存档恢复，配置保留
     }
 }
 ```
@@ -664,7 +664,7 @@ $ curl localhost:5000/status
 | 系统里 `await` 或阻塞 IO | 整个 tick 都在等 | 把 IO 作为数据交给主机 |
 | 错过的 tick 全部补跑 | 慢的 World 每一帧都落后得更多 | 给追帧设上限，记下丢掉的 tick |
 | 每个 tick 都调 `TrimExcess()` | 表被丢掉又重建，tick 上出现分配 | 高峰过后放在维护任务里调 |
-| 进程的配置和游戏一起存档 | 新进程用的还是旧配置 | 先 `Save(output, in exclude)`，再 `Load(input, in keep)` |
+| 进程的配置和游戏一起存档 | 新进程用的还是旧配置 | 先 `SaveWithout(output, in exclude)`，再 `LoadKeeping(input, in keep)` |
 
 ## 相关页面 [#related]
 

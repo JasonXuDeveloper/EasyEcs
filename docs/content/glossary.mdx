@@ -308,7 +308,7 @@ as raw rows, managed ones through Nino (`[NinoType]`). See [Saves](/en/docs/guid
 
 A set of component and singleton types, built once and kept in a `static readonly` field:
 `ComponentSet.Create().With<Bank>().WithSingleton<Rates>()`. It names the components `SaveEntities` writes (a record
-of what persists), the types a restart's `Save(output, exclude)` leaves out and the singletons `Load(input, keep)`
+of what persists), the types a restart's `SaveWithout(output, exclude)` leaves out and the singletons `LoadKeeping(input, keep)`
 keeps. See [Saves](/en/docs/guide/saves#restart).
 
 ## Migration [#migration]

@@ -54,7 +54,7 @@ in your code. The generic calls after them (`Get<T>()`, `Set(c)`, `Remove<T>()`)
 | --- | --- |
 | `var store = new EntityStore();` | `var world = new World();` |
 | `store.EnsureCapacity(n)` | `world.EnsureEntityCapacity(n)` |
-| `archetype.EnsureCapacity(n)` | `world.EnsureCapacity<T1, …, Tn>(n)` (the entity storage too) |
+| `archetype.EnsureCapacity(n)` | `world.Reserve<T1, …, Tn>(n)` (the entity storage too) |
 | `store.CreateEntity(a, b, c)` | `world.CreateEntity(a, b, c)` |
 | `store.Count` | `world.EntityCount` |
 | `entity.AddComponent(c)` | `entity.SetHealth(100, 100)`, `entity.Set(c)` |

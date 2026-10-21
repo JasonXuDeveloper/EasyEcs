@@ -242,12 +242,12 @@ instantiates the group once per element.
 
 ### Reserve before the wave: `EnsureCapacity` [#ensure-capacity]
 
-`world.EnsureCapacity(prefab, count)` grows the table the prefab's instances go to, and the entity records, so the
+`world.Reserve(prefab, count)` grows the table the prefab's instances go to, and the entity records, so the
 next `count` instances grow nothing. For a group, it reserves every member's table. Call it before the tick that
 spawns, so the wave pays no growth inside it.
 
 ```csharp
-world.EnsureCapacity(Kinds.Troll, 5_000);
+world.Reserve(Kinds.Troll, 5_000);
 var army = new Entity[5_000];
 world.Instantiate(Kinds.Troll, army);                // no growth, no allocation
 ```
@@ -379,7 +379,7 @@ are not among the 103 entities.
 | `Instantiate` in a loop for a wave | `Instantiate(prefab, span)` | One gate pass, consecutive rows copied at once |
 | `Instantiate`, then `Set` of a component the prefab lacks | `Instantiate(prefab, in c1, …, in cn)` | One row copy into the final table, no move |
 | A loop of `Instantiate(prefab, sameValues)` | `Instantiate(prefab, span, in c1, …, in cn)` | One gate pass, each given column filled at once |
-| Growing tables during the spawning tick | `EnsureCapacity(prefab, count)` before it | The wave allocates nothing |
+| Growing tables during the spawning tick | `Reserve(prefab, count)` before it | The wave allocates nothing |
 | `CreateEntity` then `Set` per component of a kind | A prefab | One row copy, the target table cached per prefab |
 | A new `Prefab` per spawn | One prefab per kind, kept in a field | Its table lookup is cached after the first instance |
 | Templates as hidden entities | A `Prefab` | No query pays to skip them |

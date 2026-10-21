@@ -40,7 +40,7 @@ EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 
 <BenchSource />
 
 有意保留的分配：创建 World、第一个拥有新组件组合的实体（新建一张表）、某种查询形状的第一次使用、表或 `DynamicBuffer<T>`
-超出容量时扩容，以及 `Describe` 这类冷路径工具。`InitialEntityCapacity`、`EnsureCapacity<T1, …, Tn>(count)`、`EnsureCapacity(prefab, count)`
+超出容量时扩容，以及 `Describe` 这类冷路径工具。`InitialEntityCapacity`、`Reserve<T1, …, Tn>(count)`、`Reserve(prefab, count)`
 和 `bag.EnsureCapacity(n)` 可以把扩容挪到 tick 之外。打开 `WorldOptions.MeasureSystems` 后，`system.Stats.LastAllocated`
 能指出是哪个系统在分配（[诊断](/zh/docs/guide/diagnostics#timing)）。
 
@@ -124,7 +124,7 @@ EasyEcs 在 <FeatureCount k="ahead" /> 项更快，<FeatureCount k="even" /> 项
 | 内存里的撤销、回滚、预测、回放 | `world.Capture()` / `world.Restore(snapshot)` | [快照](/zh/docs/guide/snapshots) |
 | 把整个 World 存盘、存数据库或交给另一个进程 | `world.Save(output)` / `world.Load(bytes)` | [存档](/zh/docs/guide/saves) |
 | 把一组实体（一个玩家和它拥有的东西）交给另一个 World 或服务器 | `SaveEntities` / `LoadEntities`、`MoveEntities` | [迁移与卸载](/zh/docs/guide/migration-and-unload) |
-| actor 需要持久化的部分，恢复到它的实体上且不算变更 | `SaveEntities(output, ids, set)` / `LoadEntitiesInto(bytes, entities, markWritten: false)` | [记录](/zh/docs/guide/migration-and-unload#records) |
+| actor 需要持久化的部分，恢复到它的实体上且不算变更 | `SaveEntitiesWith(output, ids, set)` / `LoadEntitiesInto(bytes, entities, markWritten: false)` | [记录](/zh/docs/guide/migration-and-unload#records) |
 
 ```csharp
 using System.Buffers;
@@ -183,7 +183,7 @@ public class ApplyHitsSystem : EcsSystem
 [UpdateAfter<ApplyHitsSystem>]                                          // 排在所有读者之后
 public sealed class ClearHitsSystem : EcsSystem
 {
-    protected override void OnUpdate() => World.DestroyEntities<Hit>(); // 一次遍历清掉所有消息
+    protected override void OnUpdate() => World.DestroyAll<Hit>(); // 一次遍历清掉所有消息
 }
 ```
 

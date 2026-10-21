@@ -37,20 +37,7 @@ const rules: Rule[] = [
 
 // Pages still being brought in line, with the rules they may break until then. Remove an entry once its page is
 // fixed: the script then holds it to every rule.
-const pending: Record<string, RegExp[]> = {
-  'changelog.zh.mdx': [/过滤器/g, /\[(?:多线程|线程模型|线程)\]/g],
-  'guide/analyzer.zh.mdx': [
-    /过滤器/g,
-    /跟踪/g,
-    /世界更新/g,
-    /title="(?:多线程|线程模型)"/g,
-  ],
-  'guide/common-mistakes.zh.mdx': [/过滤器/g, /跟踪/g],
-  'guide/systems.zh.mdx': [
-    /\[(?:多线程|线程模型|线程)\]/g,
-    /title="(?:多线程|线程模型)"/g,
-  ],
-};
+const pending: Record<string, RegExp[]> = {};
 
 function* pages(dir: string): Generator<string> {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

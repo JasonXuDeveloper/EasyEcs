@@ -51,7 +51,7 @@ dotnet add package EasyEcs
 | --- | --- |
 | `var store = new EntityStore();` | `var world = new World();` |
 | `store.EnsureCapacity(n)` | `world.EnsureEntityCapacity(n)` |
-| `archetype.EnsureCapacity(n)` | `world.EnsureCapacity<T1, …, Tn>(n)`（实体存储也一起扩） |
+| `archetype.EnsureCapacity(n)` | `world.Reserve<T1, …, Tn>(n)`（实体存储也一起扩） |
 | `store.CreateEntity(a, b, c)` | `world.CreateEntity(a, b, c)` |
 | `store.Count` | `world.EntityCount` |
 | `entity.AddComponent(c)` | `entity.SetHealth(100, 100)`、`entity.Set(c)` |

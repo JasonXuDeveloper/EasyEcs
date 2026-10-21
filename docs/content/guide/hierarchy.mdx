@@ -383,7 +383,7 @@ ship, does not.
   of targets). Destroying children one by one before their parent does the same work in more calls.
 - **Keep depth shallow when you propagate.** The walk above costs one `Children` lookup per entity; flat hierarchies
   (a ship and its turrets) walk fastest.
-- **`DestroyEntities<T>()`** destroys a whole table at once and still applies the cascade.
+- **`DestroyAll<T>()`** destroys a whole table at once and still applies the cascade.
 - **Give a prefab's child its parent at once:** `Instantiate(prefab, new ChildOf(parent))` places it in its final
   table; `Instantiate` then `SetChildOf(...)` copies the row, then moves it.
 - **Store what a walk up finds** when many entities need it every tick: an [ancestor walk](#ancestors) is O(depth)

@@ -356,12 +356,12 @@ public static class Restart
     private static readonly ComponentSet Runtime = ComponentSet.Create().WithSingleton<ServerConfig>().With<Session>();
     private static readonly ComponentSet Configuration = ComponentSet.Create().WithSingleton<ServerConfig>();
 
-    public static void Save(World world, NinoArrayBufferWriter output) => world.Save(output, in Runtime);
+    public static void Save(World world, NinoArrayBufferWriter output) => world.SaveWithout(output, in Runtime);
 
     public static void Resume(World world, ReadOnlySpan<byte> save, int maxPlayers)
     {
         world.SetServerConfig(maxPlayers);                        // this process's configuration
-        world.Load(save, in Configuration, markWritten: false);   // the game as saved, the configuration kept
+        world.LoadKeeping(save, in Configuration, markWritten: false);   // the game as saved, the configuration kept
     }
 }
 ```
@@ -698,7 +698,7 @@ rest of each 50 ms to request handlers.
 | `await` or blocking IO in a system | The whole tick waits | Hand the IO to the host as data |
 | Catching up every missed tick | A slow world falls further behind with each frame | Cap the catch-up and log the dropped ticks |
 | `TrimExcess()` every tick | Tables dropped and rebuilt, allocations on the tick | A maintenance task after a peak |
-| Saving the process's configuration with the game | The new process starts with the old settings | `Save(output, in exclude)`, then `Load(input, in keep)` |
+| Saving the process's configuration with the game | The new process starts with the old settings | `SaveWithout(output, in exclude)`, then `LoadKeeping(input, in keep)` |
 
 ## Related [#related]
 
