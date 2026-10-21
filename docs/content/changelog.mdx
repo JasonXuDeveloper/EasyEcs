@@ -168,6 +168,15 @@ major or minor version that needs code changes? The
   [removal detection](/en/docs/guide/change-tracking#removal-detection).
 - `LoadEntitiesInto` accepted the same entity twice in `into`, the second saved entity overwriting the first; it now
   throws `ArgumentException`. See [migration](/en/docs/guide/migration-and-unload#records).
+- `world.Instantiate(prefab)` of a prefab with members threw inside a query loop or a system (`Snapshots cannot be
+  captured or restored while a query iterates`), though a prefab without members could be instantiated there. A
+  group's copies are new rows like any other now, so a spawner system can instantiate it. See
+  [prefabs](/en/docs/guide/prefabs).
+- The calls that must wait for the end of a pass (`Capture`, `Restore`, `Save`, `SaveWithout`, `SaveEntities`,
+  `SaveEntitiesWith`, `Load`, `LoadKeeping`, `LoadEntities`, `LoadEntitiesInto`, `MoveEntities`, `GroupBy`,
+  `RemoveTypes`, `TrimExcess`) refused with one message about
+  snapshots, or with a message of their own: each now names itself (`MoveEntities cannot run while a query or system
+  iterates the world`). See [troubleshooting](/en/docs/guide/troubleshooting#during-a-pass).
 
 ## 4.6.0 [#v4-6-0]
 

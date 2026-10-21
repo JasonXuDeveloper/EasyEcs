@@ -77,6 +77,8 @@ after the change on the machine of the time; they are history, not the current r
 | [D57](#d57-retired-is-destroyed) | A retired entity is a destroyed one |
 | [D58](#d58-add-singleton) | `AddSingleton` refuses an existing singleton |
 | [D59](#d59-analyzer-rules) | Rules for refs across changes, filters that cannot work and creations moved twice |
+| [D60](#d60-one-diagnostic-per-mistake) | One diagnostic per mistake |
+| [D61](#d61-one-pass-guard) | One guard for the calls that wait for a pass; a group prefab is not one |
 
 ## D1. State changes are data: no events or callbacks [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1360,6 +1362,39 @@ other's case. No rule was merged or removed, and the ids stay as they are.
 - **Kept as two diagnostics:** a component's buffer field that holds entities (EECS012 copies a buffer, EECS017 stores
   an `Entity`: two mistakes, two fixes), EECS017 at each place a `DynamicBuffer<Pair>` is named, EECS026 next to
   EECS034, and EECS046 next to EECS032's presence test or EECS033 on another expression (the fixes compose).
+
+## D61. One guard for the calls that wait for a pass; a group prefab is not one [#d61-one-pass-guard]
+
+**Decision.** The calls that cannot run while a pass iterates the world (`Capture`, `Restore`, the saves and loads,
+`MoveEntities`, `GroupBy`, `RemoveTypes`, `TrimExcess`) go through one check, `ThrowIfIterating(call)`, whose message
+names the refused call. Instantiating a prefab with members is not one of them: it appends rows like
+`CreateEntities`, so a system may do it during its pass. `LoadEntities` and `LoadEntitiesInto` keep their refusal.
+
+**Why.**
+- **A refusal says what was refused.** One shared message about snapshots came out of `Save`, `Load`, `MoveEntities`
+  and `GroupBy`, and `RemoveTypes` and `TrimExcess` each had a wording of their own. The name is a constant passed to
+  the check; the message is built only by a `NoInlining` throw helper, so the calls that pass allocate nothing.
+- **The refusal belongs to the calls that need it.** It sat in the shared row copy of arrivals, so a group prefab,
+  which only appends new rows (each placement bumps `StorageVersion`, moves during a pass leave tombstones), was refused
+  where a prefab without members worked. It now sits in the public calls that read or rewrite whole tables.
+- **One core per job.** The same audit replaced the copies of "the index of this component bit, if any" with
+  `IndexOf(bit)` (as `GroupingOf(bit)` is for groups), the two loops that give components back to rows (`Set` of
+  several components, `Instantiate` with components) with `GiveBack`, a private `Restore` overload (a second meaning
+  of the snapshot call) with that name, and the box checks of `GetSingleton` and `SingletonRef` with one helper.
+- **Measured** (BenchmarkDotNet, the branch against its base, interleaved runs of three launches): `RemoveMany` (the
+  `GiveBack` path) 45.8–46.8 µs against 45.2–47.8 µs; `ToggleComponent` 149–158 µs against 148–150 µs;
+  `RekeyAndLookup` 24.0–25.3 µs against 25.6–31.5 µs, `RekeyAndLookupUnique` 26.7–29.9 µs against 26.6–29.4 µs (the
+  `IndexOf` path); `Churn`, `DestroyLog`, `Bulk` and `Relation` within each other's error. Nothing allocates.
+
+**Considered.**
+- **Letting `LoadEntities` and `LoadEntitiesInto` run during a pass** (their arrival is the group prefab's): a load
+  reads network or storage input, which a host handles between updates; widening the contract is a separate change.
+- **Dropping `Capture()` for `Capture(WorldSnapshot into = null)`**: one overload fewer, but a binary break and every
+  cref rewritten for no gain. Kept.
+- **One writer for whole columns and for a group's rows** (`WriteColumn` / `WriteRows`): a whole table is one block
+  copy per column, a group a copy per row. Kept apart.
+- **One target rule class for components and relations**: their `Apply` differ (remove a component, drop a link);
+  the shared part is two one-line members. Kept.
 
 ## Related [#related]
 

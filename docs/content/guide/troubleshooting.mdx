@@ -24,7 +24,7 @@ page for the first words of your message.
 | `[UpdateBefore] / [UpdateAfter] form a cycle` | [An ordering cycle](#ordering-cycle) |
 | `The ChildOf links form a cycle` | [A `ChildOf` cycle in `Descendants`](#childof-cycle) |
 | `X cannot be disabled: remove it instead` | [Disabling a cleanup component or `ChildOf`](#cannot-disable) |
-| `Snapshots cannot be captured or restored while a query iterates`, `Types cannot be removed during a pass`, `A world cannot be trimmed during a pass` | [Calls that wait for the end of a pass](#during-a-pass) |
+| `X cannot run while a query or system iterates the world` | [Calls that wait for the end of a pass](#during-a-pass) |
 | `Not an EasyEcs save`, `The size of X changed`, `The fields of X changed`, `X was saved as`, `Types of this process share the save id`, `A damaged save` | [A save that does not load](#save-refused) |
 | `X is unique: entity … has key … already`, `X is unique: key … would be given to several entities at once`, `The save holds key … of unique X twice`, `X is unique, but its module registered no index` | [A unique key that is taken](#unique-key-taken) |
 | `A sliced filter (QueryFilter.Slice) applies to ForEach passes only` | [A sliced filter outside a `ForEach`](#sliced-filter) |
@@ -187,20 +187,21 @@ InvalidOperationException: ChildOf cannot be disabled: remove it instead
 `ChildOf` cannot be hidden that way: the world must keep seeing them to finish a destroy and keep a hierarchy. **Fix:**
 remove the component, or disable another component that systems filter on.
 
-## Why must `Capture`, `Save`, `MoveEntities`, `RemoveTypes` or `TrimExcess` wait for a pass? [#during-a-pass]
+## Why must `Capture`, `Restore`, `Save`, `Load`, `MoveEntities`, `RemoveTypes` or `TrimExcess` wait for a pass? [#during-a-pass]
 
 ```text
-InvalidOperationException: Snapshots cannot be captured or restored while a query iterates
-InvalidOperationException: Types cannot be removed during a pass
-InvalidOperationException: A world cannot be trimmed during a pass
+InvalidOperationException: Capture cannot run while a query or system iterates the world: call it between updates
+InvalidOperationException: MoveEntities cannot run while a query or system iterates the world: call it between updates
 ```
 
-They read, rewrite or drop whole tables, which a `foreach` over a query or a running system is walking. The first
-message also comes from the saves, loads and moves (`Save`, `SaveWithout`, `SaveEntities`, `SaveEntitiesWith`,
-`Load`, `LoadKeeping`, `LoadEntities`, `LoadEntitiesInto`, `MoveEntities`) and from `GroupBy`; the analyzer reports
-all of them inside a pass it can see ([EECS041](/en/docs/guide/analyzer#eecs041)). **Fix:** call them
-between updates, outside any query loop ([snapshots](/en/docs/guide/snapshots),
-[unloading](/en/docs/guide/migration-and-unload#remove-types), [trimming](/en/docs/guide/diagnostics#trim)). `Restore` also refuses a snapshot of another world
+The message names the call: `Capture`, `Restore`, the saves and loads (`Save`, `SaveWithout`, `SaveEntities`,
+`SaveEntitiesWith`, `Load`, `LoadKeeping`, `LoadEntities`, `LoadEntitiesInto`), `MoveEntities`, `GroupBy`,
+`RemoveTypes` or `TrimExcess`. They read, rewrite or drop whole tables, which a `foreach` over a query or a running
+system is walking; the analyzer reports them inside a pass it can see ([EECS041](/en/docs/guide/analyzer#eecs041)).
+**Fix:** call them between updates, outside any query loop ([snapshots](/en/docs/guide/snapshots),
+[saves](/en/docs/guide/saves), [unloading](/en/docs/guide/migration-and-unload#remove-types),
+[trimming](/en/docs/guide/diagnostics#trim)). Creating entities, instantiating prefabs (with members too) and other
+structural changes are fine during a pass. `Restore` also refuses a snapshot of another world
 (`ArgumentException`) and one taken before `RemoveTypes` dropped some of its tables.
 
 ## Why does a save not load? [#save-refused]

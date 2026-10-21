@@ -23,7 +23,7 @@ faq: true
 | `[UpdateBefore] / [UpdateAfter] form a cycle` | [顺序成环](#ordering-cycle) |
 | `The ChildOf links form a cycle` | [`Descendants` 遇到 `ChildOf` 成环](#childof-cycle) |
 | `X cannot be disabled: remove it instead` | [禁用清理组件或 `ChildOf`](#cannot-disable) |
-| `Snapshots cannot be captured or restored while a query iterates`、`Types cannot be removed during a pass`、`A world cannot be trimmed during a pass` | [要等遍历结束的调用](#during-a-pass) |
+| `X cannot run while a query or system iterates the world` | [要等遍历结束的调用](#during-a-pass) |
 | `Not an EasyEcs save`、`The size of X changed`、`The fields of X changed`、`X was saved as`、`Types of this process share the save id`、`A damaged save` | [存档加载不了](#save-refused) |
 | `X is unique: entity … has key … already`、`X is unique: key … would be given to several entities at once`、`The save holds key … of unique X twice`、`X is unique, but its module registered no index` | [唯一键已被占用](#unique-key-taken) |
 | `A sliced filter (QueryFilter.Slice) applies to ForEach passes only` | [在 `ForEach` 之外用了分片过滤条件](#sliced-filter) |
@@ -171,18 +171,19 @@ InvalidOperationException: ChildOf cannot be disabled: remove it instead
 `Disable<T>()` 让值保留、但对查询隐藏。[清理组件](/zh/docs/guide/cleanup-and-disable)和 `ChildOf` 不能这样隐藏：World 要一直看到
 它们，才能完成销毁、维持层级。**修法：**移除这个组件，或者禁用另一个系统会过滤的组件。
 
-## 为什么 `Capture`、`Save`、`MoveEntities`、`RemoveTypes`、`TrimExcess` 要等遍历结束？ [#during-a-pass]
+## 为什么 `Capture`、`Restore`、`Save`、`Load`、`MoveEntities`、`RemoveTypes`、`TrimExcess` 要等遍历结束？ [#during-a-pass]
 
 ```text
-InvalidOperationException: Snapshots cannot be captured or restored while a query iterates
-InvalidOperationException: Types cannot be removed during a pass
-InvalidOperationException: A world cannot be trimmed during a pass
+InvalidOperationException: Capture cannot run while a query or system iterates the world: call it between updates
+InvalidOperationException: MoveEntities cannot run while a query or system iterates the world: call it between updates
 ```
 
-它们要读、重写或丢弃整张表，而查询的 `foreach` 或正在运行的系统正在遍历这些表。存档、加载和搬迁（`Save`、`SaveWithout`、
-`SaveEntities`、`SaveEntitiesWith`、`Load`、`LoadKeeping`、`LoadEntities`、`LoadEntitiesInto`、`MoveEntities`）以及 `GroupBy`
-也会抛第一条信息；分析器在它看得到的遍历里会报出所有这些调用（[EECS041](/zh/docs/guide/analyzer#eecs041)）。**修法：**在两次更新之间、任何查询循环之外调用它们
-（[快照](/zh/docs/guide/snapshots)、[卸载](/zh/docs/guide/migration-and-unload#remove-types)、[修剪](/zh/docs/guide/diagnostics#trim)）。`Restore` 也会拒绝另一个 World
+消息里写着被拒绝的调用：`Capture`、`Restore`、存档和加载（`Save`、`SaveWithout`、`SaveEntities`、`SaveEntitiesWith`、`Load`、
+`LoadKeeping`、`LoadEntities`、`LoadEntitiesInto`）、`MoveEntities`、`GroupBy`、`RemoveTypes` 或 `TrimExcess`。它们要读、重写或丢弃整张表，
+而查询的 `foreach` 或正在运行的系统正在遍历这些表；分析器在它看得到的遍历里会报出这些调用（[EECS041](/zh/docs/guide/analyzer#eecs041)）。
+**修法：**在两次更新之间、任何查询循环之外调用它们（[快照](/zh/docs/guide/snapshots)、[存档](/zh/docs/guide/saves)、
+[卸载](/zh/docs/guide/migration-and-unload#remove-types)、[修剪](/zh/docs/guide/diagnostics#trim)）。遍历期间创建实体、实例化预制体（带成员的也可以）
+和其他结构变更都没问题。`Restore` 也会拒绝另一个 World
 的快照（`ArgumentException`），以及 `RemoveTypes` 丢掉其中某些表之前拍的快照。
 
 ## 为什么存档加载不了？ [#save-refused]

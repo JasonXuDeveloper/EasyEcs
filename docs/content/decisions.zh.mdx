@@ -74,6 +74,8 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D57](#d57-retired-is-destroyed) | 退休的实体就是已销毁的实体 |
 | [D58](#d58-add-singleton) | `AddSingleton` 拒绝已存在的单例 |
 | [D59](#d59-analyzer-rules) | 跨结构变更的 ref、行不通的过滤条件、搬两次的创建：对应的规则 |
+| [D60](#d60-one-diagnostic-per-mistake) | 一个错误一条诊断 |
+| [D61](#d61-one-pass-guard) | 要等遍历结束的调用共用一个检查；带成员的预制体不在其中 |
 
 ## D1. 状态变化即数据：没有事件和回调 [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -1106,6 +1108,32 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 - **把 EECS029 并进 EECS010**：EECS029 也管顺序执行的方法，在那里它是代价而不是错误。保留；EECS010 提供它的修法。
 - **保留为两条诊断的：** 组件里存实体的 buffer 字段（EECS012 是复制 buffer，EECS017 是存 `Entity`：两个错误、两个修法），每处写出
   `DynamicBuffer<Pair>` 的 EECS017，EECS034 旁的 EECS026，以及 EECS032 的存在性判断或另一个表达式上 EECS033 旁的 EECS046（修法可以叠加）。
+
+## D61. 要等遍历结束的调用共用一个检查；带成员的预制体不在其中 [#d61-one-pass-guard]
+
+**决定。** 遍历进行中不能运行的调用（`Capture`、`Restore`、各种存档和加载、`MoveEntities`、`GroupBy`、`RemoveTypes`、`TrimExcess`）
+都走同一个检查 `ThrowIfIterating(call)`，异常消息写出被拒绝的调用。实例化带成员的预制体不在其中：它和 `CreateEntities` 一样只是追加行，
+系统可以在自己的遍历里做。`LoadEntities` 和 `LoadEntitiesInto` 仍然拒绝。
+
+**原因。**
+- **拒绝要说清拒绝的是什么。** `Save`、`Load`、`MoveEntities` 和 `GroupBy` 抛的都是同一条关于快照的消息，`RemoveTypes` 和
+  `TrimExcess` 又各有各的说法。调用名是传给检查的常量；消息只在 `NoInlining` 的抛出辅助方法里拼，通过检查的调用不分配。
+- **拒绝放在需要它的调用里。** 它原来在到达（arrival）共用的行拷贝里，于是只追加新行的带成员预制体（每次放置都递增
+  `StorageVersion`，遍历中的搬行留下墓碑）被拒绝，而不带成员的预制体可以。现在它放在要读或重写整张表的公开调用里。
+- **一件事一个核心。** 同一次审查把各处“这个组件位有没有索引”的写法换成 `IndexOf(bit)`（分组有 `GroupingOf(bit)`），把给行补回组件的
+  两个循环（一次 `Set` 多个组件、带组件的 `Instantiate`）合成 `GiveBack`，并用它替掉和快照调用同名的私有 `Restore` 重载；`GetSingleton`
+  和 `SingletonRef` 的单例检查共用一个辅助方法。
+- **测量**（BenchmarkDotNet，分支对比它的基线，交替运行，每次三个进程）：`RemoveMany`（`GiveBack` 路径）45.8–46.8 µs，基线
+  45.2–47.8 µs；`ToggleComponent` 149–158 µs，基线 148–150 µs；`RekeyAndLookup` 24.0–25.3 µs，基线 25.6–31.5 µs；
+  `RekeyAndLookupUnique` 26.7–29.9 µs，基线 26.6–29.4 µs（`IndexOf` 路径）；`Churn`、`DestroyLog`、`Bulk`、`Relation` 都在彼此误差内。
+  都不分配。
+
+**比较过。**
+- **让 `LoadEntities` 和 `LoadEntitiesInto` 在遍历中运行**（它们的到达和带成员预制体一样）：加载读的是网络或存储的输入，宿主在两次更新之间处理；
+  放宽这个约定是另一项变更。
+- **把 `Capture()` 换成 `Capture(WorldSnapshot into = null)`**：少一个重载，但二进制不兼容，所有 cref 都要改，没有收益。保留。
+- **整列和实体组的行用同一个写入方法**（`WriteColumn` / `WriteRows`）：整张表每列一次块拷贝，实体组每行一次拷贝。分开保留。
+- **组件和关系用同一个目标规则类**：它们的 `Apply` 不同（移除组件、去掉链接），共同的只有两个一行的成员。保留。
 
 ## 相关页面 [#related]
 

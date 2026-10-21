@@ -123,6 +123,11 @@ icon: RotateCcwClock
   已销毁实体从不会被访问。现在实体退休不再算移除；它被释放后由销毁日志报告。见[移除检测](/zh/docs/guide/change-tracking#removal-detection)。
 - `LoadEntitiesInto` 接受 `into` 里重复出现的同一个实体，第二个存档实体会覆盖第一个；现在抛 `ArgumentException`。
   见[迁移](/zh/docs/guide/migration-and-unload#records)。
+- 在查询循环或系统里 `world.Instantiate(prefab)` 一个带成员的预制体会抛异常（`Snapshots cannot be captured or restored while a query iterates`），
+  而不带成员的预制体在那里可以实例化。现在一组实体的副本和别的新行一样，生成器系统也能实例化它。见[预制体](/zh/docs/guide/prefabs)。
+- 必须等遍历结束的调用（`Capture`、`Restore`、`Save`、`SaveWithout`、`SaveEntities`、`SaveEntitiesWith`、`Load`、`LoadKeeping`、
+  `LoadEntities`、`LoadEntitiesInto`、`MoveEntities`、`GroupBy`、`RemoveTypes`、`TrimExcess`）拒绝时，要么报同一条关于快照的消息，要么各报各的：现在每个调用都在消息里写出自己的名字
+  （`MoveEntities cannot run while a query or system iterates the world`）。见[排错](/zh/docs/guide/troubleshooting#during-a-pass)。
 
 ## 4.6.0 [#v4-6-0]
 
