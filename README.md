@@ -209,7 +209,8 @@ flowchart LR
 
 | Good fit | Probably not |
 |---|---|
-| Game servers and simulations on .NET 10: MMO maps and zones, AOI, combat | Unity or other runtimes below .NET 10 (`net10.0` only) |
+| Game servers and simulations on .NET 10: MMO maps and zones, AOI, combat | Unity or other runtimes below .NET 10 (`net10.0` only; Unity support is [being evaluated](https://ecs.xgamedev.net/en/docs/roadmap#unity)) |
+| Godot 4 .NET games: the project targets `net10.0` ([sample](samples/Godot)) | |
 | Worlds where state flips constantly (buffs, deaths, spawns): structural changes are immediate and cheap | Code that needs structural changes recorded from many threads at once (use one owner thread and a queue) |
 | Long-running processes where GC pauses and unbounded growth matter | Code that wants objects with behavior, or systems calling each other |
 | One world per thread, many worlds per process; `ParallelSystems` for heavy independent systems | Many threads mutating one world's component values without coordination |
@@ -317,6 +318,7 @@ What each library has built in:
 | 0 B per tick | ✅ | ✅ | ❌ | ❌ |
 | Events | ❌ (state is data) | ✅ | ✅ | ✅ |
 | Serialization | ✅ `Save` / `Load` (Nino) | ✅ JSON | ❌ | ✅ text, binary |
+| Godot 4 (.NET) | ✅ net10.0 project | ✅ | ✅ | ✅ |
 | Unity / netstandard | ❌ net10.0 | ✅ | ✅ | ✅ |
 
 The full matrix, the per-operation numbers and when to pick which library are in
@@ -337,7 +339,7 @@ The documentation lives at **[ecs.xgamedev.net](https://ecs.xgamedev.net)**; its
 | [Guide](https://ecs.xgamedev.net/docs#guide) | One page per concept: entities and components, prefabs and cloning, queries, systems, singletons, structural changes, change tracking and removal detection, dynamic buffers, indexes and relations, hierarchy, groups, cleanup and disable, bulk changes, snapshots, saves, migration and unloading, `ref` and `await`, threading, hosting, testing, troubleshooting, analyzer rules. |
 | [ECS principles](https://ecs.xgamedev.net/docs/ecs-principles) | How to design features with entities, components, singletons and systems. |
 | [Design questions](https://ecs.xgamedev.net/docs/faq) | Why there are no events, what is thread-safe, how to change a component. |
-| [Samples](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples) | Runnable programs in learning order: hello world, a game loop, saving and loading, one world per thread, hot reload, actors. |
+| [Samples](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples) | Runnable programs in learning order: hello world, a game loop, saving and loading, one world per thread, hot reload, actors, a Godot project. |
 | [API reference](https://ecs.xgamedev.net/docs/api) | Every public API with its complexity. |
 | [Performance guide](https://ecs.xgamedev.net/docs/performance) | Which API to use when, do's and don'ts, benchmarks. |
 | [Architecture](https://ecs.xgamedev.net/docs/architecture) | Storage, memory layout, archetypes, id recycling, iteration safety, generators. |

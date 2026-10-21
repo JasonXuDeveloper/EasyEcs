@@ -118,10 +118,18 @@ system switched off by `SystemErrorPolicy.Disable`. Read them on the owner threa
 
 ## Can I use EasyEcs with Unity or Godot? [#unity-godot]
 
-No. EasyEcs targets `net10.0` only: it relies on C# 14 extension members, `Vector256` / `Vector512`, columns on the
-pinned object heap and current JIT behavior ([D15](/en/docs/decisions#d15-net-10-only)), which Unity's runtimes do
-not offer. Godot is not a tested or supported target either: EasyEcs is built for servers and has no engine
-integration. The usual setup is EasyEcs on a .NET 10 game server and the client engine's own tools on the client;
+Godot, yes; Unity, not yet. A Godot 4 .NET project runs its C# on the .NET runtime the project targets, so set
+`<TargetFramework>net10.0</TargetFramework>` in its `.csproj` (projects made by older editors say `net8.0`), install
+the .NET 10 SDK and add the package; the generator and the analyzer work as in any other .NET project. The
+[Godot sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Godot) shows the shape: the scene's root node owns the world, calls `world.Update()` in
+`_PhysicsProcess` and draws every entity with one multimesh. CI runs it headless with Godot 4.7.2 on Linux, and its
+updates after the first allocate nothing. Godot's exports to other platforms use the runtime Godot ships for them and
+are not tested.
+
+Unity runs C# on Mono and IL2CPP, which lack what EasyEcs is built on: C# 14 extension members, `Vector256` /
+`Vector512`, columns on the pinned object heap and current JIT behavior
+([D15](/en/docs/decisions#d15-net-10-only)). Unity support is on the [roadmap](/en/docs/roadmap#unity) as an
+evaluation. Until then the usual setup is EasyEcs on a .NET 10 game server and Unity's own tools on the client;
 [EasyEcs and Unity Entities](/en/docs/vs-unity-entities) says how the two models differ.
 
 ## How does EasyEcs compare with Arch, Friflo.Engine.ECS and DefaultEcs? [#compared]

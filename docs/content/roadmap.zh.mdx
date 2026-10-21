@@ -25,6 +25,13 @@ import { RotateCcwClock, Lightbulb } from 'lucide-react';
 最低要求是 .NET 10 SDK（C# 14、Roslyn 5.0），生成器基于它构建。只有测得出收益，EasyEcs 才会用更新的运行时特性
 （[D21](/zh/docs/decisions#d21-net-10-features-only-where-they-measure)）。
 
+### 评估 Unity 支持 [#unity]
+
+Unity 用 Mono 和 IL2CPP 运行 C#，EasyEcs 依赖的 .NET 10 特性它们一样都没有（[D15](/zh/docs/decisions#d15-net-10-only)）。
+Unity 正在迁移到 CoreCLR；等 Unity 有版本能运行 .NET 10 代码，就评估支持它需要什么：生成器和分析器能否在 Unity 的编译流程里运行，
+player 构建（IL2CPP 及其预先编译的限制），编辑器的域重载与 EasyEcs 启动时注册的类型如何相处，以及在 player 里测一遍主基准。
+Godot 不需要这些：面向 `net10.0` 的 Godot 4 .NET 项目现在就能运行 EasyEcs（[常见问题](/zh/docs/faq#unity-godot)）。
+
 ## 已放弃 [#dropped]
 
 - `Added<T>`：`[Changed<T>]` 也会选出新添加的行；要区分新出现和被写过，用一个由响应系统移除的标签

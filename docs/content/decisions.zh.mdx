@@ -270,9 +270,11 @@ int pooled = world.Count<Bullet>(QueryFilter.Create().With<Inactive>()); // 存�
 
 ## D15. 只支持 .NET 10 [#d15-net-10-only]
 
-**决定。** EasyEcs 面向 `net10.0`，不支持 Unity 或更老的运行时。
+**决定。** EasyEcs 只面向 `net10.0`。凡是 .NET 10 能跑的地方它都能跑，包括面向 `net10.0` 的 Godot 4 .NET 项目
+（[Godot 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Godot)）；不支持 Unity 的 Mono 和 IL2CPP，也不支持更老的运行时。
 
 **原因。** 它依赖 C# 14 扩展成员、`Vector256`、放在 POH 上的列以及当前 JIT 的行为，这些老运行时都没有。
+Unity 支持要等到 Unity 能运行 .NET 10（[路线图](/zh/docs/roadmap#unity)）。
 
 ## D16. 不需要 `partial`：生成的代码不放进用户的类型 [#d16-no-partial-generated-code-lives-outside-the-users-type]
 

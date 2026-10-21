@@ -293,10 +293,11 @@ scheduler could not see.
 
 ## D15. .NET 10 only [#d15-net-10-only]
 
-**Decision.** EasyEcs targets `net10.0`, no Unity or older runtimes.
+**Decision.** EasyEcs targets `net10.0` only. It runs wherever .NET 10 runs, Godot 4 .NET projects that target
+`net10.0` included ([the Godot sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Godot)); not on Unity's Mono and IL2CPP or older runtimes.
 
 **Why.** It relies on C# 14 extension members, `Vector256`, pinned object heap columns and current JIT behavior that
-older runtimes lack.
+older runtimes lack. Unity support waits for a Unity that runs .NET 10 ([roadmap](/en/docs/roadmap#unity)).
 
 ## D16. No `partial`: generated code lives outside the user's type [#d16-no-partial-generated-code-lives-outside-the-users-type]
 

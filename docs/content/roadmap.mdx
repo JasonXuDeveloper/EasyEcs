@@ -28,6 +28,15 @@ in real code at no cost per call; one that only changes style is rejected
 The floor is the .NET 10 SDK (C# 14, Roslyn 5.0), which the generator builds against. EasyEcs moves to a newer runtime
 feature only where it measures ([D21](/en/docs/decisions#d21-net-10-features-only-where-they-measure)).
 
+### Evaluate Unity support [#unity]
+
+Unity runs C# on Mono and IL2CPP, which have none of the .NET 10 features EasyEcs is built on
+([D15](/en/docs/decisions#d15-net-10-only)). Unity is moving to CoreCLR; once a Unity release runs .NET 10 code, the
+evaluation covers what support would take: the generator and the analyzer in Unity's compilation, player builds
+(IL2CPP and its ahead-of-time limits), the editor's domain reload against the types EasyEcs registers at startup,
+and the headline benchmark measured inside a player. Godot needs none of this: a Godot 4 .NET project that targets
+`net10.0` runs EasyEcs already ([FAQ](/en/docs/faq#unity-godot)).
+
 ## Dropped [#dropped]
 
 - `Added<T>`: `[Changed<T>]` selects added rows too; a tag the reacting system removes tells new from written

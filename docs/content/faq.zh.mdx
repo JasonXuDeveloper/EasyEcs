@@ -94,9 +94,15 @@ job 要的组件一次查找全部拿到，实体已经没了或不匹配时返�
 
 ## 能在 Unity 或 Godot 里用 EasyEcs 吗？ [#unity-godot]
 
-不能。EasyEcs 只面向 `net10.0`：它依赖 C# 14 扩展成员、`Vector256` / `Vector512`、放在 POH 上的列以及当前 JIT 的行为
-（[D15](/zh/docs/decisions#d15-net-10-only)），Unity 的运行时都不具备。Godot 也不在测试和支持范围内：EasyEcs 是为服务端打造的，
-没有任何引擎集成。常见做法是服务端用 .NET 10 加 EasyEcs，客户端用引擎自带的方案；
+Godot 可以，Unity 暂时不行。Godot 4 的 .NET 项目在项目所面向的 .NET 运行时上跑 C#，所以把 `.csproj` 里的
+`<TargetFramework>` 设为 `net10.0`（旧版编辑器创建的项目写的是 `net8.0`），装好 .NET 10 SDK，再加上这个包即可；
+生成器和分析器的工作方式与其他 .NET 项目一样。[Godot 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Godot)演示了写法：场景的根节点持有 World，在 `_PhysicsProcess`
+里调用 `world.Update()`，用一个 multimesh 画出所有实体。CI 在 Linux 上用 Godot 4.7.2 无界面运行它，第一次之后的每次更新都不分配内存。
+Godot 导出到其他平台时用的是 Godot 为该平台自带的运行时，这部分没有测试。
+
+Unity 用 Mono 和 IL2CPP 运行 C#，缺少 EasyEcs 所依赖的东西：C# 14 扩展成员、`Vector256` / `Vector512`、放在 POH 上的列以及
+当前 JIT 的行为（[D15](/zh/docs/decisions#d15-net-10-only)）。Unity 支持作为评估项列在[路线图](/zh/docs/roadmap#unity)上。
+在那之前，常见做法是服务端用 .NET 10 加 EasyEcs，客户端用 Unity 自带的方案；
 [EasyEcs 与 Unity Entities](/zh/docs/vs-unity-entities)讲了两种模型的区别。
 
 ## EasyEcs 和 Arch、Friflo.Engine.ECS、DefaultEcs 比怎么样？ [#compared]

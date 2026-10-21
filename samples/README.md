@@ -1,6 +1,7 @@
 # Samples
 
-Complete programs that build on each other. Each is a project in `EasyEcs.slnx` (folder `/samples/`) and reads
+Complete programs that build on each other. Each is a project in `EasyEcs.slnx` (folder `/samples/`; the Godot
+project is built by `dotnet build samples/Godot` and run by Godot) and reads
 top-down: `Components.cs` (the data), then the systems (one job each), then a short `Program.cs` that creates the
 world, adds singletons and systems, runs and prints. Code that a real program needs but that is not the ECS lesson
 (a mailbox between threads, fake clients, checks, printing) is in a file or folder of its own (`Host/`,
@@ -22,9 +23,10 @@ Read them in this order:
 | 4 | [MultiWorld](MultiWorld) | one world per thread (one zone each), no locks | `dotnet run -c Release --project samples/MultiWorld` |
 | 5 | [HotReload](HotReload) | systems and components in a collectible plugin: unload, reload, keep the world's data | `dotnet run --project samples/HotReload/HotReload.Host` |
 | 6 | [Actors](Actors) | actors: one type per kind as key component, index and system group (`ISystemGroupWith`), messages as `entity.Run` jobs, records loaded with `markWritten: false`, saving only what changed | `dotnet run --project samples/Actors` |
+| 7 | [Godot](Godot) | a Godot 4 .NET project: the scene's root node owns the world, steps it per physics tick and draws the entities with one multimesh | open it in the Godot editor, or `godot --headless --path samples/Godot -- --ticks 120` |
 
 Each sample's README lists its files in reading order and the output to expect. CI builds and runs every sample
-(`.github/workflows/ci.yml`).
+(`.github/workflows/ci.yml`), the Godot one headless in Godot 4.7.2.
 
 For one feature at a time, the guide pages of single features (queries, change tracking, prefabs, dynamic buffers,
 indexes and relations, hierarchy, groups, cleanup and disable, snapshots, threading; start from the
