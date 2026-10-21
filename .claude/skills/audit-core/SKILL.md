@@ -17,10 +17,15 @@ Follow AGENTS.md (performance first, zero allocation on hot paths, structural ga
 - **Coupling**: the core depending on an optional feature (indexes, relations, hierarchy, groups, serialization);
   features reaching into each other's internals instead of a hook.
 - **Two names for one concept** across APIs, comments and docs.
+- **One name for two concepts**: a private overload or helper that shares a public call's name but does something else.
+- **Guards in the wrong layer**: a check inside a shared helper that refuses callers it does not concern; it belongs
+  in the public calls that need it.
+- **Dead private helpers** left behind by refactors or merges (a member nothing calls any more).
 - **Lifecycle edges**: stale handles (version checks), retired entities (Destroyed + cleanup components), calls
   during a pass (`ThrowIfIterating`, tombstones, pass count), parallel stages (shared gate), reentrancy,
   exceptions in the middle of a pass. Exception messages name the call that was refused.
-- **Hot paths**: allocations (allocation tests: 0 B), bounds checks, inlining, cache lines.
+- **Hot paths**: allocations (allocation tests: 0 B), bounds checks, inlining, cache lines, a lookup done twice
+  (`Has` then `Get`).
 
 ## Rules for fixes
 
