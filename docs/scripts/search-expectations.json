@@ -3,7 +3,7 @@
     { "query": "singleton", "page": "guide/singletons" },
     { "query": "remove while iterating", "page": "guide/structural-changes" },
     { "query": "parallel", "page": "guide/threading" },
-    { "query": "EnsureCapacity", "page": "guide/prefabs", "top": 3 },
+    { "query": "Reserve", "page": "guide/prefabs", "top": 3 },
     { "query": "ForEach", "page": "guide/systems" },
     { "query": "change tracking", "page": "guide/change-tracking" },
     { "query": "hot reload", "page": "guide/migration-and-unload" },
