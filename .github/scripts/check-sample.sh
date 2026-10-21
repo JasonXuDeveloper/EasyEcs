@@ -2,7 +2,8 @@
 # Runs a sample and compares what it prints with the "## Expected output" block of its README, so the README's real
 # output cannot go stale. Only for samples whose output does not depend on timing or the machine.
 #   .github/scripts/check-sample.sh samples/SaveLoad [-- args...]
-# Pass extra `dotnet run` options (such as --no-build) in DOTNET_RUN_OPTIONS.
+# Pass extra `dotnet run` options (such as --no-build) in DOTNET_RUN_OPTIONS. A Godot project (a project.godot next to
+# the README) is built and run headless by the editor binary in GODOT.
 set -euo pipefail
 
 sample="$1"
@@ -26,8 +27,15 @@ if [ -z "$expected" ]; then
   exit 1
 fi
 
-# shellcheck disable=SC2086
-actual=$(dotnet run ${DOTNET_RUN_OPTIONS:-} -c Release --project "$project" "$@")
+if [ -f "$sample/project.godot" ]; then
+  # Godot runs the Debug build of the project's assembly; its banner line and blank lines are not the sample's output.
+  dotnet build "$sample" -nologo -v q
+  actual=$("${GODOT:?set GODOT to the Godot .NET editor binary}" --headless --path "$sample" -- "$@" \
+    | grep -v -e '^Godot Engine v' -e '^$')
+else
+  # shellcheck disable=SC2086
+  actual=$(dotnet run ${DOTNET_RUN_OPTIONS:-} -c Release --project "$project" "$@")
+fi
 if [ "$actual" != "$expected" ]; then
   echo "::error file=$readme::the output of $sample differs from its README's expected output"
   diff <(echo "$expected") <(echo "$actual") || true
