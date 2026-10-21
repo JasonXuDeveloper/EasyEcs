@@ -123,7 +123,7 @@ public class CodeFixTests
         "[ForEach] static void A(ref P p)")]
     [TestCase("EECS030", "Make it one bulk call",
         "public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Destroy(); } }",
-        "{ w.DestroyEntities<P>(); }")]
+        "{ w.DestroyAll<P>(); }")]
     [TestCase("EECS030", "Make it one bulk call",
         "public static class U { public static void F(World w, QueryFilter f) { foreach (var item in w.Query<P>(f)) item.Entity.Set(new Q { V = 1 }); } }",
         "{ w.SetAll(new Q { V = 1 }, (f).With<P>()); }")]
@@ -138,7 +138,7 @@ public class CodeFixTests
         "{ w.Instantiate(p, all, new P(), new Q { V = 1 }); }")]
     [TestCase("EECS031", "Reserve room first",
         "public static class U { public static void F(World w, int n)\n    {\n        for (int i = 0; i < n; i++) w.CreateEntity(new P { V = i });\n    }\n}",
-        "    {\n        w.EnsureCapacity<P>(n);\n        for (int i = 0; i < n; i++)")]
+        "    {\n        w.Reserve<P>(n);\n        for (int i = 0; i < n; i++)")]
     [TestCase("EECS032", "Use Any",
         "public static class U { public static bool F(World w) => w.Count<P>() > 0; }",
         "=> w.Any<P>();")]

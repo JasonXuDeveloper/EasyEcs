@@ -589,9 +589,9 @@ internal static class Symbols
 
     private static readonly HashSet<string> StructuralWorldMembers =
     [
-        "CreateEntity", "CreateEntities", "Instantiate", "DestroyEntities", "EnsureEntityCapacity", "AddSingleton", "RemoveSingleton",
+        "CreateEntity", "CreateEntities", "Instantiate", "DestroyEntities", "DestroyAll", "EnsureEntityCapacity", "AddSingleton", "RemoveSingleton",
         "AddSystem", "RemoveSystem", "Update", "Capture", "Restore", "Dispose", "SetAll", "RemoveAll", "DisableAll", "EnableAll",
-        "Save", "Load", "SaveEntities", "LoadEntities", "LoadEntitiesInto", "MoveEntities", "GroupBy", "RemoveTypes", "EnsureCapacity", "TrimExcess",
+        "Save", "SaveWithout", "Load", "LoadKeeping", "SaveEntities", "SaveEntitiesWith", "LoadEntities", "LoadEntitiesInto", "MoveEntities", "GroupBy", "RemoveTypes", "Reserve", "TrimExcess",
     ];
 
     /// <summary>

@@ -22,7 +22,7 @@ public static class Players
         items.Add(new Item(PotionKind, 3));
         items.Add(new Item(MapKind, 1));
 
-        world.EnsureCapacity<Sword, ChildOf>(swords); // room for them all before the loop
+        world.Reserve<Sword, ChildOf>(swords); // room for them all before the loop
         for (int i = 0; i < swords; i++)
         {
             world.CreateEntity(new Sword(10 + i), new ChildOf(player));

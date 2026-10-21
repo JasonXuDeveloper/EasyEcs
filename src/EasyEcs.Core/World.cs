@@ -71,7 +71,7 @@ public sealed partial class World : IDisposable
     /// growth before the tick. Instances whose groups put them in another table (<see cref="GroupBy{T}"/>) grow that
     /// one. For a prefab with members, every member's table. O(components) plus one growth. Owner thread only.
     /// </summary>
-    public void EnsureCapacity(Prefab prefab, int count)
+    public void Reserve(Prefab prefab, int count)
     {
         using (Structural())
         {
@@ -320,6 +320,32 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>
+    /// Destroy the entities of <paramref name="entities"/> (stale ids and repeats are skipped; an entity holding cleanup
+    /// components is retired, as <see cref="Entity.Destroy"/> does) and return how many. One pass through the structural
+    /// gate and one cascade for the whole list: a list of ids goes as <c>CollectionsMarshal.AsSpan(list)</c>, no copy.
+    /// Destroy by filter with <c>DestroyAll</c>. O(entities). Owner thread only.
+    /// </summary>
+    public int DestroyEntities(params ReadOnlySpan<EntityId> entities)
+    {
+        int destroyed = 0;
+        PrepareCascade();
+        using (Structural())
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var id = entities[i];
+                if ((uint)id.Index >= (uint)Meta.Length) continue; // an id of a larger world: not one of these
+                ref var meta = ref MetaRef(id.Index);
+                if (meta.Archetype != null && meta.Version == id.Version && Destroy(ref meta, id)) destroyed++;
+            }
+
+            if (_targetCount != 0) FollowLinks();
+        }
+
+        return destroyed;
+    }
+
+    /// <summary>
     /// Destroy alive <paramref name="entity"/> (<paramref name="meta"/> is its record): retire it when it holds cleanup
     /// components (see <see cref="Retire"/>), else free it, then remember it as a parent whose children follow. False
     /// when it was retired already (its children went then). Inside the structural gate.
@@ -536,7 +562,7 @@ public sealed partial class World : IDisposable
 
     /// <summary>
     /// Entity records for <paramref name="length"/> ids. A large array (85,000 bytes and up) sized by a reservation
-    /// (<paramref name="sized"/>: <see cref="EnsureEntityCapacity"/>, <c>EnsureCapacity</c>, <c>CreateEntities</c>, the
+    /// (<paramref name="sized"/>: <see cref="EnsureEntityCapacity"/>, <c>Reserve</c>, <c>CreateEntities</c>, the
     /// initial capacity, a restore) goes to the pinned object heap, beside the unmanaged columns; the steps of a doubling
     /// stay on the large object heap, which can still be compacted when asked to, so the arrays a doubling discards leave
     /// no hole for good. Neither heap compacts by default, so pinning moves nothing that would have moved. Each heap sets

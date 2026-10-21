@@ -65,7 +65,7 @@ public class MicroBenchmarks
         _systemWorld.AddSystem<IntegrateSystem>();
         _tracked = new World();
         _trackedHandles = new Entity[1000];
-        _tracked.EnsureCapacity<Position, Energy>(N);
+        _tracked.Reserve<Position, Energy>(N);
         for (int i = 0; i < N; i++)
         {
             var e = _tracked.CreateEntity(new Position(), new Energy());
@@ -130,7 +130,7 @@ public class MicroBenchmarks
         for (int round = 0; round < 10; round++)
         {
             _churn.CreateEntities(_churned, new Position(), new Health());
-            _churn.DestroyEntities<Position>();
+            _churn.DestroyAll<Position>();
         }
 
         return _churn.EntityCount;

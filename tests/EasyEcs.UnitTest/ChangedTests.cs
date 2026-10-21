@@ -288,7 +288,7 @@ public class ChangedTests
         Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(0)), Is.EqualTo(100));
         Assert.Throws<ArgumentException>(() => QueryFilter.Create().Changed<Armor>(mark).Changed<Shield>(mark + 1));
         Assert.That(world.Count<Armor>(QueryFilter.Create().Changed<Armor>(0).Since(mark)), Is.EqualTo(world.Count<Armor>(changed)));
-        Assert.That(world.DestroyEntities<Armor>(changed), Is.EqualTo(2));
+        Assert.That(world.DestroyAll<Armor>(changed), Is.EqualTo(2));
     }
 
     [Test]

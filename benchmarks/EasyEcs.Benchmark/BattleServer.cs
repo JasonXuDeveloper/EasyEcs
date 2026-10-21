@@ -484,8 +484,8 @@ public sealed class BattleServer : IDisposable
             npcs[i].Attack.Cooldown = (int)(r % 10);
         }
 
-        World.EnsureCapacity(Grunt, npcs.Length / 4);                         // respawn waves never grow the tables
-        World.EnsureCapacity(Brute, npcs.Length / 4);
+        World.Reserve(Grunt, npcs.Length / 4);                         // respawn waves never grow the tables
+        World.Reserve(Brute, npcs.Length / 4);
     }
 
     public static void SpawnNpc(World world, Position at, int seed)
@@ -682,7 +682,7 @@ public sealed class BattleServer : IDisposable
     /// <summary>A new round: projectiles gone, statuses lifted, everyone healed, the NPCs scattered.</summary>
     public int NewRound()
     {
-        int cleared = World.DestroyEntities<Lifetime>();                      // one pass, however many
+        int cleared = World.DestroyAll<Lifetime>();                      // one pass, however many
         World.RemoveAll<Burning>();                                           // in bulk: table by table, not per entity
         World.RemoveAll<Frozen>();
         World.EnableAll<Attack>();

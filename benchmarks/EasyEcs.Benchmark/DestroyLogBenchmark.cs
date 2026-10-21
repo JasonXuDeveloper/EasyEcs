@@ -5,7 +5,7 @@ namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// The cost of the destroy log on the destroys themselves: 10 rounds of creating and destroying 1,000 entities (one by
-/// one, then a whole table at once with <c>DestroyEntities</c>) in a warm world, with the log off (<c>DestroyLog</c> 0,
+/// one, then a whole table at once with <c>DestroyAll</c>) in a warm world, with the log off (<c>DestroyLog</c> 0,
 /// the default) and on (a ring of 4,096 records), and with the log on plus the replication read of 16 clients that
 /// acknowledged one of the last four rounds each (<see cref="World.DestroyedSince"/>). Steady state allocates 0 bytes.
 /// </summary>
@@ -57,7 +57,7 @@ public class DestroyLogBenchmark
         for (int round = 0; round < 10; round++)
         {
             _world.CreateEntities(_entities, new Position(), new Health());
-            _world.DestroyEntities<Position>();
+            _world.DestroyAll<Position>();
         }
 
         return _world.EntityCount;

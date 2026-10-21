@@ -45,10 +45,10 @@ public sealed partial class World
     /// their slices are not written and they need no Nino formatter (a world-local cache that cannot be serialized,
     /// configuration the next version brings anew). A Disabled tag goes with its component; an entity whose
     /// components are all left out is written without them. For a restart, with
-    /// <see cref="Load(ReadOnlySpan{byte}, in ComponentSet, bool)"/>. Allocates nothing once its buffers are large
-    /// enough. O(entities × components). Not while a pass iterates.
+    /// <see cref="LoadKeeping"/>. Allocates nothing once its buffers are large enough. O(entities × components). Not
+    /// while a pass iterates.
     /// </summary>
-    public void Save(IBufferWriter<byte> output, in ComponentSet exclude) => Save(output, default, true, in exclude, SaveFilter.Exclude);
+    public void SaveWithout(IBufferWriter<byte> output, in ComponentSet exclude) => Save(output, default, true, in exclude, SaveFilter.Exclude);
 
     /// <summary>
     /// Write <paramref name="entities"/> (stale ids and repeats are skipped) and their components into
@@ -68,7 +68,7 @@ public sealed partial class World
     /// are large enough. O(entities given × components). Not while a pass iterates.
     /// </summary>
     /// <exception cref="ArgumentException"><paramref name="components"/> holds a singleton type: a group save writes no singletons.</exception>
-    public void SaveEntities(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, in ComponentSet components)
+    public void SaveEntitiesWith(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, in ComponentSet components)
     {
         if (components.HasSingletons)
             throw new ArgumentException("A group save writes no singletons: its set names components only", nameof(components));
@@ -358,7 +358,7 @@ public sealed partial class World
     /// has them: the save's values of them are skipped (their slices, never deserialized), a kept singleton keeps
     /// its box (a <see cref="SingletonRef{T}"/> still works) and its value, and one this world lacks stays absent,
     /// one the save lacks is not removed. For a restart: the new version sets its configuration, then loads the
-    /// previous process's world (saved with <see cref="Save(IBufferWriter{byte}, in ComponentSet)"/> without what
+    /// previous process's world (saved with <see cref="SaveWithout"/> without what
     /// it must not bring back). O(entities × components). Not while a pass iterates.
     /// </summary>
     /// <param name="input">The bytes of the save.</param>
@@ -366,10 +366,10 @@ public sealed partial class World
     /// <param name="markWritten">As <see cref="Load(ReadOnlySpan{byte}, bool)"/>; for the loaded rows only.</param>
     /// <exception cref="ArgumentException">
     /// <paramref name="keep"/> holds a component type (leave a component out of the save with
-    /// <see cref="Save(IBufferWriter{byte}, in ComponentSet)"/> instead).
+    /// <see cref="SaveWithout"/> instead).
     /// </exception>
     /// <exception cref="InvalidDataException">As <see cref="Load(ReadOnlySpan{byte}, bool)"/>.</exception>
-    public void Load(ReadOnlySpan<byte> input, in ComponentSet keep, bool markWritten = true)
+    public void LoadKeeping(ReadOnlySpan<byte> input, in ComponentSet keep, bool markWritten = true)
     {
         if (keep.HasComponents)
             throw new ArgumentException("A load replaces the entities: it keeps singletons only (leave components out of the save instead)", nameof(keep));

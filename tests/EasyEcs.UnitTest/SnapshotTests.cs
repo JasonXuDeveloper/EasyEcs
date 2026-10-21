@@ -68,7 +68,7 @@ public class SnapshotTests
 
         for (int round = 0; round < 3; round++)
         {
-            int destroyed = world.DestroyEntities<Position>(QueryFilter.Create().With<Velocity>());
+            int destroyed = world.DestroyAll<Position>(QueryFilter.Create().With<Velocity>());
             Assert.That(destroyed, Is.EqualTo(100));
             for (int i = 0; i < 50; i++) world.CreateEntity(new Health(i));
             world.Restore(snapshot);
@@ -117,7 +117,7 @@ public class SnapshotTests
         Assert.That((entities[0].IsAlive, entities[49].Get<Health>().Value, world.GetSingleton<Released>().Count),
             Is.EqualTo((true, 59, 0)));
 
-        world.DestroyEntities<Health>();                                        // fewer rows: the copy shrinks to them
+        world.DestroyAll<Health>();                                        // fewer rows: the copy shrinks to them
         world.Capture(snapshot);
         world.CreateEntity(new Health(3));
         world.Restore(snapshot);

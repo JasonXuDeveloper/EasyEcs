@@ -565,7 +565,7 @@ public class ForEachSystemTests
         Assert.Throws<System.ArgumentException>(() => world.Count<Health>(sliced));
         Assert.Throws<System.ArgumentException>(() => world.Any<Health>(sliced));
         Assert.Throws<System.ArgumentException>(() => world.Query<Health>(sliced));
-        Assert.Throws<System.ArgumentException>(() => world.DestroyEntities<Health>(sliced));
+        Assert.Throws<System.ArgumentException>(() => world.DestroyAll<Health>(sliced));
         Assert.Throws<System.ArgumentException>(() => world.SetAll(new Health(2), sliced));
         Assert.Throws<System.ArgumentOutOfRangeException>(() => QueryFilter.Create().Slice(2, 2));
         Assert.Throws<System.ArgumentOutOfRangeException>(() => QueryFilter.Create().Slice(0, 0));
@@ -576,7 +576,7 @@ public class ForEachSystemTests
     public void SlicedPassesDoNotAllocate()
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
-        world.EnsureCapacity<Health, Armor>(20_000);
+        world.Reserve<Health, Armor>(20_000);
         for (int i = 0; i < 20_000; i++)
         {
             var e = world.CreateEntity(new Health(0), new Armor(0));

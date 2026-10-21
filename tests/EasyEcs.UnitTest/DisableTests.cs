@@ -28,7 +28,7 @@ public class DisableTests
     {
         using var world = new World();
         int expected = 0;
-        world.EnsureCapacity<Health, Position, Velocity>(entities);
+        world.Reserve<Health, Position, Velocity>(entities);
         for (int i = 0; i < entities; i++)
         {
             var e = world.CreateEntity(new Health(i), new Position(i, 0), new Velocity(0, i));

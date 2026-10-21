@@ -218,7 +218,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// in another table (<see cref="GroupBy{T}"/>) grow that one; components added later move entities to other
                     /// tables, which grow on their own. O({{n}}) plus one growth. Owner thread only (see docs/content/guide/threading.md).
                     /// </summary>
-                    public void EnsureCapacity<{{tps}}>(int count)
+                    public void Reserve<{{tps}}>(int count)
                 {{cons}}
                     {
                         using (Structural())
@@ -552,7 +552,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// Destroy every alive entity having all of <c>{{tps}}</c> (and matching <paramref name="filter"/>) and return
                     /// how many. One pass through the structural gate: O(matching archetypes + rows). Owner thread only (see docs/content/guide/threading.md).
                     /// </summary>
-                    public int DestroyEntities<{{tps}}>(in QueryFilter filter = default)
+                    public int DestroyAll<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}
                     {
                         filter.Whole();

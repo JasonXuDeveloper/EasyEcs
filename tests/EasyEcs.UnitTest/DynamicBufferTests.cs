@@ -188,7 +188,7 @@ public class DynamicBufferTests
             foreach (var bag in bags) bag.Destroy();                               // and unloads
             world.CreateEntities(bags, new DynamicBuffer<Loot>(), new Frozen());
             foreach (var bag in bags) bag.Get<DynamicBuffer<Loot>>().Add(new Loot(1, 1));
-            world.DestroyEntities<Frozen>();                                      // a whole table at once
+            world.DestroyAll<Frozen>();                                      // a whole table at once
             held.Set(new DynamicBuffer<Loot>());
             held.Get<DynamicBuffer<Loot>>().Add(new Loot(2, 2));
             held.Remove<DynamicBuffer<Loot>>();                                   // a component that goes

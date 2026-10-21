@@ -74,7 +74,7 @@ public class TargetPolicyTests
         var leaders = new Entity[3];
         world.CreateEntities(leaders, new Health(1));
         var follower = world.CreateEntity(new Follows(leaders[1]), new Position(0, 0));
-        Assert.That(world.DestroyEntities<Health>(), Is.EqualTo(3));          // the bulk path frees the table at once
+        Assert.That(world.DestroyAll<Health>(), Is.EqualTo(3));          // the bulk path frees the table at once
         Assert.That(follower.Has<Follows>(), Is.False);
     }
 }

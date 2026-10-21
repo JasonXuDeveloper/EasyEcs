@@ -4,10 +4,10 @@ namespace EasyEcs;
 
 /// <summary>
 /// A set of component and singleton types, built once and kept (a <c>static readonly</c> field): the components a save
-/// writes (<see cref="World.SaveEntities(System.Buffers.IBufferWriter{byte}, ReadOnlySpan{EntityId}, in ComponentSet)"/>), the
+/// writes (<see cref="World.SaveEntitiesWith"/>), the
 /// record of what persists without the runtime state around it; or, for a restart, the types a whole-world save leaves
-/// out (<see cref="World.Save(System.Buffers.IBufferWriter{byte}, in ComponentSet)"/>) and the singletons a load keeps
-/// (<see cref="World.Load(ReadOnlySpan{byte}, in ComponentSet, bool)"/>).
+/// out (<see cref="World.SaveWithout"/>) and the singletons a load keeps
+/// (<see cref="World.LoadKeeping"/>).
 /// <c>ComponentSet.Create().With&lt;Bank&gt;().WithSingleton&lt;Rates&gt;()</c>; a framework that learns its types at
 /// registration adds them by <see cref="Type"/>. Each call returns a new set.
 /// </summary>

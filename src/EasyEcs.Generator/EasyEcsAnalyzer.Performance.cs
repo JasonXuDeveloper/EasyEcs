@@ -66,7 +66,7 @@ public sealed partial class EasyEcsAnalyzer
         "This loop {0} each entity of the query one by one; '{1}' does it for all of them in one call",
         Category, DiagnosticSeverity.Warning, true,
         "A structural change through each entity moves (or flips) one row per call, through the structural gate each " +
-        "time. SetAll, RemoveAll, DisableAll, EnableAll and DestroyEntities change every matching row of a table " +
+        "time. SetAll, RemoveAll, DisableAll, EnableAll and DestroyAll change every matching row of a table " +
         "together, whole words of rows at once.",
         helpLinkUri: Help("EECS030"));
 
@@ -75,7 +75,7 @@ public sealed partial class EasyEcsAnalyzer
         Category, DiagnosticSeverity.Warning, true,
         "Creating entities one by one grows the table and the entity storage by doubling as they fill, and in a world " +
         "that has never held them the discarded arrays can set off a full garbage collection. CreateEntities and " +
-        "Instantiate(prefab, span) create them in one pass; EnsureCapacity reserves room first when each entity gets " +
+        "Instantiate(prefab, span) create them in one pass; Reserve reserves room first when each entity gets " +
         "its own values.",
         helpLinkUri: Help("EECS031"));
 
@@ -854,7 +854,7 @@ public sealed partial class EasyEcsAnalyzer
         switch (name)
         {
             case "Destroy" when !generated:
-                (bulk, call2, verb) = ("DestroyEntities", $"DestroyEntities<{typeList}>({filter})", "destroys");
+                (bulk, call2, verb) = ("DestroyAll", $"DestroyAll<{typeList}>({filter})", "destroys");
                 break;
             // A Set of a component the query requires overwrites a value: no row moves, nothing for SetAll to batch.
             // A grouped component's new value moves each row to its group's table, one by one under SetAll too.
@@ -1016,12 +1016,12 @@ public sealed partial class EasyEcsAnalyzer
             return;
         }
 
-        // Each entity its own values: reserve the table first (EnsureCapacity of a prefab reserves the table of its
+        // Each entity its own values: reserve the table first (Reserve of a prefab reserves the table of its
         // components alone, not the one an instance with given components goes to).
         if (instantiate && create.Arguments.Length > 1) return;
         string reserve = instantiate
-            ? Invariant([create.Arguments[0].Value], loop.Body, index) ? $"{world}.EnsureCapacity({create.Arguments[0].Value.Syntax}, {count})" : ""
-            : $"{world}.EnsureCapacity<{string.Join(", ", create.TargetMethod.TypeArguments.Select(t => t.ToMinimalDisplayString(model, at)))}>({count})";
+            ? Invariant([create.Arguments[0].Value], loop.Body, index) ? $"{world}.Reserve({create.Arguments[0].Value.Syntax}, {count})" : ""
+            : $"{world}.Reserve<{string.Join(", ", create.TargetMethod.TypeArguments.Select(t => t.ToMinimalDisplayString(model, at)))}>({count})";
         if (reserve.Length == 0) return;
         context.ReportDiagnostic(Diagnostic.Create(CreateInLoop, loop.Syntax.GetLocation(),
             Binds(model, loop.Syntax, reserve, out _) ? ImmutableDictionary<string, string?>.Empty.Add(Insert, reserve + ";").Add(FixTitle, "Reserve room first") : null,
@@ -1090,7 +1090,7 @@ public sealed partial class EasyEcsAnalyzer
             if (statement == loop) break;
             foreach (var call in statement.DescendantsAndSelf().OfType<IInvocationOperation>())
                 if (core.Is(call.TargetMethod.ContainingType, core.World) && call.Instance?.Syntax.ToString() == world
-                    && call.TargetMethod.Name is "EnsureCapacity" or "EnsureEntityCapacity" or "CreateEntities")
+                    && call.TargetMethod.Name is "Reserve" or "EnsureEntityCapacity" or "CreateEntities")
                     return true;
         }
 

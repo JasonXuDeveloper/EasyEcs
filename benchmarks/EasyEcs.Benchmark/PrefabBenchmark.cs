@@ -50,14 +50,14 @@ public class PrefabBenchmark
 #pragma warning disable EECS031 // the baseline: one Instantiate per entity is what this case measures
         for (int i = 0; i < _spawned.Length; i++) _spawned[i] = _world.Instantiate(_prefab);
 #pragma warning restore EECS031
-        return _world.DestroyEntities<Health>();
+        return _world.DestroyAll<Health>();
     }
 
     [Benchmark]
     public int InstantiateBatch()
     {
         _world.Instantiate(_prefab, _spawned);
-        return _world.DestroyEntities<Health>();
+        return _world.DestroyAll<Health>();
     }
 
     [Benchmark]
@@ -67,7 +67,7 @@ public class PrefabBenchmark
         for (int i = 0; i < _spawned.Length; i++)
             _spawned[i] = _family.Instantiate(_prefab).Set(new ChildOf(_parent), new Position { X = i, Y = 2 });
 #pragma warning restore EECS031
-        return _family.DestroyEntities<Health>();
+        return _family.DestroyAll<Health>();
     }
 
     [Benchmark]
@@ -75,13 +75,13 @@ public class PrefabBenchmark
     {
         for (int i = 0; i < _spawned.Length; i++)
             _spawned[i] = _family.Instantiate(_prefab, new ChildOf(_parent), new Position { X = i, Y = 2 });
-        return _family.DestroyEntities<Health>();
+        return _family.DestroyAll<Health>();
     }
 
     [Benchmark]
     public int InstantiateBatchWithChild()
     {
         _family.Instantiate(_prefab, _spawned, new ChildOf(_parent), new Position { X = 1, Y = 2 });
-        return _family.DestroyEntities<Health>();
+        return _family.DestroyAll<Health>();
     }
 }

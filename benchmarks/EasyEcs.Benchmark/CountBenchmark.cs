@@ -21,7 +21,7 @@ public class CountBenchmark
     public void Setup()
     {
         _world = new World(new WorldOptions { InitialEntityCapacity = Entities });
-        _world.EnsureCapacity<Health, Npc, Dead>(Entities);
+        _world.Reserve<Health, Npc, Dead>(Entities);
         for (int i = 0; i < Entities; i++)
         {
             // Disabled first, then enabled again: the rows share one table and only their presence bits differ.

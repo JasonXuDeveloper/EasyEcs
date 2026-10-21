@@ -68,10 +68,10 @@ public class CleanupTests
         world.AddSystem<ReleaseLeases>();
         for (int i = 0; i < 100; i++) world.CreateEntity(new Lease(i), new Health(i));
         world.CreateEntity(new Health(-1));
-        Assert.That(world.DestroyEntities<Health>(), Is.EqualTo(101));
-        Assert.That(world.DestroyEntities<Health>(), Is.Zero);
+        Assert.That(world.DestroyAll<Health>(), Is.EqualTo(101));
+        Assert.That(world.DestroyAll<Health>(), Is.Zero);
         Assert.That((world.EntityCount, world.Count<Lease>(QueryFilter.Create().With<Destroyed>())), Is.EqualTo((100, 100)));
-        Assert.That(world.DestroyEntities<Lease>(), Is.Zero);            // retired already
+        Assert.That(world.DestroyAll<Lease>(), Is.Zero);            // retired already
         world.Update();
         Assert.That((world.EntityCount, world.GetSingleton<Released>().Count), Is.EqualTo((0, 100)));
     }

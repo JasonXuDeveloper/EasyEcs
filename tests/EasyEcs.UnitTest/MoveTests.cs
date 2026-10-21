@@ -112,7 +112,7 @@ public class MoveTests
             var vault = from.CreateEntity(new ChildOf(bank), new Health(7), new Follows(guild));
             bank.Set(new Follows(vault)).Set(new DynamicBuffer<DynamicBufferTests.Loot>());
             bank.Get<DynamicBuffer<DynamicBufferTests.Loot>>().Add(new DynamicBufferTests.Loot(1, 1));
-            from.SaveEntities(output, [bank.Id, vault.Id], in Record);
+            from.SaveEntitiesWith(output, [bank.Id, vault.Id], in Record);
         }
 
         using var to = new World();
@@ -145,7 +145,7 @@ public class MoveTests
         {
             var first = from.CreateEntity(new Armor(5), new Health(1));
             var second = from.CreateEntity(new Armor(5), new Health(2));
-            from.SaveEntities(output, [first.Id, second.Id], ComponentSet.Create().With<Armor>().With<Health>());
+            from.SaveEntitiesWith(output, [first.Id, second.Id], ComponentSet.Create().With<Armor>().With<Health>());
         }
 
         using var to = new World();
@@ -170,7 +170,7 @@ public class MoveTests
             var parent = from.CreateEntity(new Health(1));                        // stays behind
             var child = from.CreateEntity(new ChildOf(parent), new Health(5), new Armor(2));
             child.Disable<Health>();
-            from.SaveEntities(output, [child.Id], in Record);
+            from.SaveEntitiesWith(output, [child.Id], in Record);
         }
 
         using var to = new World();
@@ -188,7 +188,7 @@ public class MoveTests
     {
         var output = new NinoArrayBufferWriter();
         using (var from = new World())
-            from.SaveEntities(output, [from.CreateEntity(new Health(5)).Id, from.CreateEntity(new Health(6)).Id], in Record);
+            from.SaveEntitiesWith(output, [from.CreateEntity(new Health(5)).Id, from.CreateEntity(new Health(6)).Id], in Record);
 
         using var to = new World();
         var a = to.CreateEntity(new Health(1));
@@ -207,7 +207,7 @@ public class MoveTests
         {
             var actor = from.CreateEntity(new Health(5), new Armor(1), new Zone(1));   // values without references
             actor.Set(new DynamicBuffer<DynamicBufferTests.Loot>()).Get<DynamicBuffer<DynamicBufferTests.Loot>>().Add(new DynamicBufferTests.Loot(1, 1));
-            from.SaveEntities(output, [actor.Id], in Record);
+            from.SaveEntitiesWith(output, [actor.Id], in Record);
         }
 
         using var to = new World();

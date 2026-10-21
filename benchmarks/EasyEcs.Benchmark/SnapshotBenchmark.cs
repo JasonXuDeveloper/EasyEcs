@@ -63,7 +63,7 @@ public class SnapshotBenchmark
     public int SaveWithout()
     {
         _bytes.ResetWrittenCount();
-        _world.Save(_bytes, in Excluded);
+        _world.SaveWithout(_bytes, in Excluded);
         return _bytes.WrittenCount;
     }
 
@@ -71,5 +71,5 @@ public class SnapshotBenchmark
     public void Load() => _world.Load(_save);
 
     [Benchmark]
-    public void LoadKeeping() => _world.Load(_save, in Kept);
+    public void LoadKeeping() => _world.LoadKeeping(_save, in Kept);
 }

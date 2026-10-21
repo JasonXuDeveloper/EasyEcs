@@ -243,7 +243,7 @@ public class ParallelQueryComparison
     public void SetupEasyEcs()
     {
         _world = new EasyEcs.World(new WorldOptions { InitialEntityCapacity = Agents });
-        _world.EnsureCapacity<Agent>(Agents);
+        _world.Reserve<Agent>(Agents);
         var agents = new EasyEcs.Entity[Agents];
         for (int i = 0; i < Agents; i++) agents[i] = _world.CreateEntity(new Agent { X = i % 10_000, Y = i / 10, Vx = 1 });
         Check(EasyEcs_Parallel, i => (agents[i].Read<Agent>().X, agents[i].Read<Agent>().Y));
@@ -391,7 +391,7 @@ public class SaveComparison
     {
         _world = new EasyEcs.World(new WorldOptions { InitialEntityCapacity = Units });
         _loaded = new EasyEcs.World(new WorldOptions { InitialEntityCapacity = Units });
-        _world.EnsureCapacity<Spot, Stock>(Units);
+        _world.Reserve<Spot, Stock>(Units);
         for (int i = 0; i < Units; i++) _world.CreateEntity(new Spot(i, -i), new Stock(i % 100, i % 7));
         Check(() => EasyEcs_SaveLoad(), () =>
         {

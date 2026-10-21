@@ -288,9 +288,9 @@ public class IndexTests
         Assert.That(callsigns.Count("k"), Is.EqualTo(3));
         Assert.That(children.Count(parent), Is.EqualTo(3));
 
-        Assert.That(world.DestroyEntities<Callsign>(QueryFilter.Create().With<Frozen>()), Is.EqualTo(1));
+        Assert.That(world.DestroyAll<Callsign>(QueryFilter.Create().With<Frozen>()), Is.EqualTo(1));
         Assert.That(All(callsigns.Find("k")), Is.EquivalentTo(new[] { kids[2], kids[3] }));
-        Assert.That(world.DestroyEntities<Follows>(), Is.EqualTo(2));
+        Assert.That(world.DestroyAll<Follows>(), Is.EqualTo(2));
         Assert.That(callsigns.Count("k"), Is.Zero);
         Assert.That(children.Count(parent), Is.Zero);
     }

@@ -329,7 +329,7 @@ public class SerializationTests
 
             output.ResetWrittenCount();
             var stored = ComponentSet.Create().With<Position>().With(typeof(Health)).With<Frozen>();
-            world.SaveEntities(output, [actor.Id, bare.Id], in stored);
+            world.SaveEntitiesWith(output, [actor.Id, bare.Id], in stored);
         }
 
         using var arrival = new World();
@@ -361,12 +361,12 @@ public class SerializationTests
         for (int i = 0; i < 3; i++)
         {
             output.ResetWrittenCount();
-            world.SaveEntities(output, [actor.Id], in stored);
+            world.SaveEntitiesWith(output, [actor.Id], in stored);
         }
 
         output.ResetWrittenCount();
         long before = GC.GetAllocatedBytesForCurrentThread();
-        world.SaveEntities(output, [actor.Id], in stored);
+        world.SaveEntitiesWith(output, [actor.Id], in stored);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
 
@@ -439,7 +439,7 @@ public class SerializationTests
         world.CreateEntity(new Session(new object()));                     // only runtime state: written empty
         Assert.Catch(() => world.Save(new NinoArrayBufferWriter()));         // the cache and the sessions cannot be written
         var output = new NinoArrayBufferWriter();
-        world.Save(output, in Runtime);                                     // never touched: no formatter needed
+        world.SaveWithout(output, in Runtime);                                     // never touched: no formatter needed
         return output.WrittenSpan.ToArray();
     }
 
@@ -450,7 +450,7 @@ public class SerializationTests
         using var resumed = new World();                                    // the new process
         resumed.AddSingleton<Config>() = new Config { Rate = 2 };
         var config = resumed.SingletonRef<Config>();
-        resumed.Load(bytes, in NewConfig);
+        resumed.LoadKeeping(bytes, in NewConfig);
 
         Assert.That((resumed.GetSingleton<Config>().Rate, config.Value.Rate), Is.EqualTo((2, 2)));   // the same box
         config.Value.Rate = 3;
@@ -481,17 +481,17 @@ public class SerializationTests
         using var loaded = new World();
         loaded.AddSingleton<Config>() = new Config { Rate = 7 };
         var config = loaded.SingletonRef<Config>();
-        loaded.Load(without, in NewConfig);                                 // the save lacks it: not removed
+        loaded.LoadKeeping(without, in NewConfig);                                 // the save lacks it: not removed
         Assert.That(loaded.GetSingleton<Config>().Rate, Is.EqualTo(7));
-        loaded.Load(withConfig, in NewConfig);                              // the save has it: its value is skipped
+        loaded.LoadKeeping(withConfig, in NewConfig);                              // the save has it: its value is skipped
         Assert.That((loaded.GetSingleton<Config>().Rate, config.Value.Rate), Is.EqualTo((7, 7)));
 
         using var bare = new World();                                       // a kept singleton the world lacks stays absent
-        bare.Load(withConfig, in NewConfig);
+        bare.LoadKeeping(withConfig, in NewConfig);
         Assert.That((bare.HasSingleton<Config>(), bare.EntityCount), Is.EqualTo((false, 1)));
         bare.Load(withConfig);
         Assert.That(bare.GetSingleton<Config>().Rate, Is.EqualTo(1));
-        bare.Load(withConfig, in NewConfig);                                // kept as the last load left it
+        bare.LoadKeeping(withConfig, in NewConfig);                                // kept as the last load left it
         Assert.That(bare.GetSingleton<Config>().Rate, Is.EqualTo(1));
     }
 
@@ -501,10 +501,10 @@ public class SerializationTests
         var bytes = OldProcess();
         using var resumed = new World();
         resumed.AddSingleton<Config>() = new Config { Rate = 2 };
-        resumed.Load(bytes, in NewConfig, markWritten: false);
+        resumed.LoadKeeping(bytes, in NewConfig, markWritten: false);
         Assert.That(resumed.Count<Balance>(QueryFilter.Create().Changed<Balance>(1)), Is.Zero);
         Assert.That(resumed.GetSingleton<Config>().Rate, Is.EqualTo(2));
-        resumed.Load(bytes, in NewConfig);                                  // the default: loaded rows are written
+        resumed.LoadKeeping(bytes, in NewConfig);                                  // the default: loaded rows are written
         Assert.That(resumed.Count<Balance>(QueryFilter.Create().Changed<Balance>(1)), Is.EqualTo(10));
         Assert.That(resumed.GetSingleton<Config>().Rate, Is.EqualTo(2));
     }
@@ -530,8 +530,8 @@ public class SerializationTests
         using var world = new World();
         world.CreateEntity(new Balance(1));
         var bytes = Save(world);
-        Assert.Throws<ArgumentException>(() => world.Load(bytes, ComponentSet.Create().With<Balance>()));   // entities are replaced
-        Assert.Throws<ArgumentException>(() => world.SaveEntities(new NinoArrayBufferWriter(), [], in NewConfig)); // no singletons there
+        Assert.Throws<ArgumentException>(() => world.LoadKeeping(bytes, ComponentSet.Create().With<Balance>()));   // entities are replaced
+        Assert.Throws<ArgumentException>(() => world.SaveEntitiesWith(new NinoArrayBufferWriter(), [], in NewConfig)); // no singletons there
         Assert.That(world.EntityCount, Is.EqualTo(1));
 
         var set = ComponentSet.Create().With(typeof(Config)).With(typeof(Balance));
@@ -551,14 +551,14 @@ public class SerializationTests
         for (int i = 0; i < 3; i++)
         {
             output.ResetWrittenCount();
-            world.Save(output, in Runtime);
-            world.Load(output.WrittenSpan, in NewConfig);
+            world.SaveWithout(output, in Runtime);
+            world.LoadKeeping(output.WrittenSpan, in NewConfig);
         }
 
         output.ResetWrittenCount();
         long before = GC.GetAllocatedBytesForCurrentThread();
-        world.Save(output, in Runtime);
-        world.Load(output.WrittenSpan, in NewConfig);
+        world.SaveWithout(output, in Runtime);
+        world.LoadKeeping(output.WrittenSpan, in NewConfig);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
         Assert.That((world.Count<Balance>(), world.GetSingleton<Config>().Rate, world.HasSingleton<Cache>()), Is.EqualTo((1000, 1, false)));
     }

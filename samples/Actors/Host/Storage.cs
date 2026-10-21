@@ -50,7 +50,7 @@ public sealed class Storage
     private void Save(Entity actor, object key)
     {
         var output = new ArrayBufferWriter<byte>();
-        actor.World.SaveEntities(output, [actor.Id], Activation.Persisted);
+        actor.World.SaveEntitiesWith(output, [actor.Id], Activation.Persisted);
         _records[key] = output.WrittenSpan.ToArray();
     }
 

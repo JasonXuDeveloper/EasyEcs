@@ -168,7 +168,7 @@ public class AccessBenchmark
     private World Build(EcsSystem system)
     {
         var world = new World(new WorldOptions { InitialEntityCapacity = Entities });
-        world.EnsureCapacity<Speed, Armor, Gold, Boss>(Entities);
+        world.Reserve<Speed, Armor, Gold, Boss>(Entities);
         for (int i = 0; i < Entities; i++)
             world.CreateEntity(new Speed { V = i }, new Armor { V = 1 }, new Gold { V = i }, new Boss());
         world.AddSingleton<Total>();

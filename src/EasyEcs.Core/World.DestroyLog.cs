@@ -42,7 +42,7 @@ public sealed partial class World
     /// ids always holds them all.
     /// <br/>
     /// An entity counts as destroyed when its id stops being alive (<see cref="IsAlive"/> turns false): at
-    /// <c>Destroy</c>, <c>DestroyEntities</c>, a hierarchy or relation cascade, a <c>MoveEntities</c> out of this world;
+    /// <c>Destroy</c>, <c>DestroyEntities</c>, <c>DestroyAll</c>, a hierarchy or relation cascade, a <c>MoveEntities</c> out of this world;
     /// an entity holding <see cref="ICleanupComponent"/>s when its last one is removed (until then it is alive, tagged
     /// <see cref="Destroyed"/>); a <see cref="Restore(WorldSnapshot)"/> or <c>Load</c> for every entity alive before it and not
     /// after it (with the same version). <see cref="Dispose"/> records nothing.

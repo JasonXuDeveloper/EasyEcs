@@ -34,7 +34,7 @@ public class HierarchyBenchmark
     {
         _world.CreateEntities(_leaders, new Health { Value = 100 });
         foreach (var leader in _leaders) _world.CreateEntities(_members, new ChildOf(leader), new Energy { Value = 1 });
-        return _world.DestroyEntities<Health>();
+        return _world.DestroyAll<Health>();
     }
 
     [Benchmark]
@@ -42,8 +42,8 @@ public class HierarchyBenchmark
     {
         _world.CreateEntities(_leaders, new Health { Value = 100 });
         foreach (var leader in _leaders) _world.CreateEntities(_members, new Leader(leader), new Energy { Value = 1 });
-        int destroyed = _world.DestroyEntities<Health>();
-        return destroyed + _world.DestroyEntities<Energy>();
+        int destroyed = _world.DestroyAll<Health>();
+        return destroyed + _world.DestroyAll<Energy>();
     }
 
     public record struct Leader(EntityId Target) : IComponent, IIndexed<EntityId>

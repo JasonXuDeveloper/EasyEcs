@@ -276,7 +276,7 @@ public class RemovedTests
         var traveller = world.CreateEntity(new Health(2));
         ulong mark = world.ChangeTick;
 
-        Assert.That(world.DestroyEntities<Stun>(), Is.EqualTo(4));
+        Assert.That(world.DestroyAll<Stun>(), Is.EqualTo(4));
         Assert.That(DestroyedSince(world, mark), Is.EquivalentTo(new[] { shots[0].Id, shots[1].Id, shots[2].Id, tracked.Id }));
 
         mark = world.ChangeTick + 1;
@@ -360,7 +360,7 @@ public class RemovedTests
             ulong mark = world.ChangeTick;
             for (int i = 0; i < churned.Length; i++) churned[i] = world.CreateEntity(new Position(), new Health(1));
             for (int i = 0; i < churned.Length / 2; i++) churned[i].Destroy();
-            world.DestroyEntities<Position>();
+            world.DestroyAll<Position>();
             var child = world.CreateEntity(new ChildOf(parent));
             world.CreateEntity(new ChildOf(child));
             parent.Destroy();                                        // a cascade of three

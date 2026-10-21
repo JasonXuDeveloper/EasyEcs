@@ -74,7 +74,7 @@ public class MigrationBenchmark
     public int SaveRecord()
     {
         _record.ResetWrittenCount();
-        _c.SaveEntities(_record, _one, Persistent);
+        _c.SaveEntitiesWith(_record, _one, Persistent);
         return _record.WrittenCount;
     }
 

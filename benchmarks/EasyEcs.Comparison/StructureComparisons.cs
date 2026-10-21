@@ -65,7 +65,7 @@ public class HierarchyComparison
     {
         _world.CreateEntities(_leaders, new Squad(100));
         foreach (var leader in _leaders) _world.CreateEntities(_members, new ChildOf(leader), new Member(1));
-        return _world.DestroyEntities<Squad>();
+        return _world.DestroyAll<Squad>();
     }
 
     [Benchmark]
@@ -311,7 +311,7 @@ public class DisableComparison
     private void CreateEasyEcs()
     {
         _world = new EasyEcs.World(new WorldOptions { InitialEntityCapacity = Units });
-        _world.EnsureCapacity<Vigor>(Units);
+        _world.Reserve<Vigor>(Units);
         _units = new EasyEcs.Entity[Units];
         for (int i = 0; i < Units; i++) _units[i] = _world.CreateEntity(new Vigor(i % 100));
     }

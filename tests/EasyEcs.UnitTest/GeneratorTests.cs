@@ -1027,7 +1027,7 @@ public class GeneratorTests
     [TestCase("public static class U { public static void F(World w) { var all = new Entity[100]; for (int i = 0; i < all.Length; i++) all[i] = w.CreateEntity(new P { V = i }); } }")]
     [TestCase("public static class U { public static void F(World w, int n) { for (int i = 0; i < n; i++) if (w.Count<P>() < i) w.CreateEntity(new P { V = i }); } }")]   // now and then
     [TestCase("public static class U { public static void F(World w, int n) { for (int r = 0; r < n; r++) for (int i = 0; i < 8; i++) w.CreateEntity(new P { V = i }); } }")]   // the inner loop's
-    [TestCase("public static class U { public static void F(World w, int n) { w.EnsureCapacity<P>(n); for (int i = 0; i < n; i++) w.CreateEntity(new P { V = i }); } }")]
+    [TestCase("public static class U { public static void F(World w, int n) { w.Reserve<P>(n); for (int i = 0; i < n; i++) w.CreateEntity(new P { V = i }); } }")]
     [TestCase("public class S : EcsSystem { protected override void OnUpdate() { for (int i = 0; i < World.Clock.Ticks; i++) World.CreateEntity(new P()); } }")]
     [TestCase("public static class U { public static bool F(World w) => w.Count<P>() > 2; }")]
     [TestCase("public static class U { public static void F(Entity e) => e.GetOrAdd<DynamicBuffer<Loot>>().Add(new Loot()); }")]          // the only name of the buffer

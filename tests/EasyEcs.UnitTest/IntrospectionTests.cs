@@ -137,7 +137,7 @@ public class IntrospectionTests
             else if (i % 3 != 0) entity.Destroy();
         }
 
-        world.DestroyEntities<Payload>(QueryFilter.Create().Without<ChildOf>()); // only the children stay
+        world.DestroyAll<Payload>(QueryFilter.Create().Without<ChildOf>()); // only the children stay
         world.Update();                                                                       // the creations are older than the mark
         ulong mark = world.ChangeTick;
         for (int i = 0; i < kept.Count; i += 2) kept[i].Set(new Armor(-1));                // written before the trim

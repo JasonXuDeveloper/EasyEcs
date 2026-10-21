@@ -105,7 +105,7 @@ public class InstantiateTests
         var orc = new Prefab().Set(new Health(30)).Set(new Armor(5));
         using (var warm = new World()) warm.Instantiate(orc).Destroy(); // JIT and caches
         using var world = new World(new WorldOptions { InitialEntityCapacity = 16 });
-        world.EnsureCapacity(orc, 5000);
+        world.Reserve(orc, 5000);
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 5000; i++) world.Instantiate(orc);
         Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, world.EntityCount), Is.EqualTo((0L, 5000)));
@@ -121,7 +121,7 @@ public class InstantiateTests
         foreach (var item in world.Query<Health>())
         {
             item.Health.Value = 1; // before the reservation: a ref is valid until the next structural change
-            if (visited++ == 10) world.EnsureCapacity(orc, 10_000); // the columns move under the pass
+            if (visited++ == 10) world.Reserve(orc, 10_000); // the columns move under the pass
         }
 
         int written = 0;
@@ -237,7 +237,7 @@ public class InstantiateTests
         var squad = new Prefab().Set(new Health(1));
         squad.AddMember().Set(new ChildOf(squad.Id), new Armor(3));
         var elite = new Prefab(squad).Set(new Health(9));
-        world.EnsureCapacity(elite, 11);
+        world.Reserve(elite, 11);
         var leaders = new Entity[10];
         world.Instantiate(elite, leaders);                              // warms the copy's buffers
         foreach (var leader in leaders) leader.Destroy();
@@ -344,12 +344,12 @@ public class InstantiateTests
         var batch = new Entity[100];
         world.Index<ChildOf, EntityId>().Count(parent);                    // the index learns every instance
         for (int i = 0; i < 100; i++) world.Instantiate(minion, new ChildOf(parent), new Position(i, 0)); // JIT and caches
-        world.DestroyEntities<Health>();
+        world.DestroyAll<Health>();
         world.Instantiate(minion, batch, new ChildOf(parent), new Position(1, 1));
-        world.DestroyEntities<Health>();
+        world.DestroyAll<Health>();
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 100; i++) world.Instantiate(minion, new ChildOf(parent), new Position(i, 0));
-        world.DestroyEntities<Health>();
+        world.DestroyAll<Health>();
         world.Instantiate(minion, batch, new ChildOf(parent), new Position(1, 1));
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.That(allocated, Is.Zero);

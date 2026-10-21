@@ -29,6 +29,7 @@ public class AllocationTests
         var callsigns = world.Index<Callsign, string>();
         var named = world.CreateEntity(new Callsign("a"));
         var churned = new Entity[50];
+        var churnedIds = new EntityId[50];
         var prefab = new Prefab().Set(new Churned()).Set(new Health(1)).Set(new Armor(2));
 
         void Frame()
@@ -46,9 +47,10 @@ public class AllocationTests
             for (int i = 0; i < churned.Length; i++) churned[i] = world.CreateEntity(new Position(), new Health(1));
             foreach (var e in churned) e.Destroy(); // recycled ids and rows
             world.CreateEntities(churned, new Churned(), new Health(1));
-            world.DestroyEntities<Churned>();
+            world.DestroyAll<Churned>();
             world.Instantiate(prefab, churned);                               // prefab copies, cached table
-            world.DestroyEntities<Churned>();
+            for (int i = 0; i < churned.Length; i++) churnedIds[i] = churned[i].Id;
+            world.DestroyEntities(churnedIds);                                // a list of ids, one gate pass
             probe.Clone().Destroy();                                          // a copy of a live entity
             probe.Set(new Armor(1));
             probe.Remove<Armor>();                                            // a tracked removal
@@ -81,7 +83,7 @@ public class AllocationTests
             world.Update();
             _ = world.Count<Armor>(QueryFilter.Create().Changed<Armor>(world.ChangeTick));
             world.CreateEntities(churned, new Churned(), new Health(1));
-            world.DestroyEntities<Churned>();
+            world.DestroyAll<Churned>();
             probe.Set(new Frozen());
             probe.Remove<Frozen>();
         }

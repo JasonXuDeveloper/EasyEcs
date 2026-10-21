@@ -22,7 +22,7 @@ public class ParallelSystemsBenchmark
     public void Setup()
     {
         _world = new World(new WorldOptions { ParallelSystems = Parallel, MeasureSystems = Measure, InitialEntityCapacity = Entities });
-        _world.EnsureCapacity<Body, Vitals, Mana, Cooldown>(Entities);
+        _world.Reserve<Body, Vitals, Mana, Cooldown>(Entities);
         for (int i = 0; i < Entities; i++)
             _world.CreateEntity(new Body(i, i, 1, 1), new Vitals(i % 100, 100), new Mana(i % 50, 50), new Cooldown(i % 30));
         _world.AddSystem<MoveBodies>();

@@ -154,7 +154,7 @@ public class BulkChangeComparison
 /// <item>EasyEcs: <c>CreateEntities(span, values)</c> (one table, rows placed at once) and
 /// <c>DestroyEntities&lt;Fuse&gt;()</c>.</item>
 /// <item>Friflo: <c>CreateEntity(values)</c> per shot (no bulk create with values), then <c>DeleteEntity</c> per shot.</item>
-/// <item>Arch: <c>EnsureCapacity</c> and <c>Create(values)</c> per shot (its <c>Create(span, signature, count)</c> made one
+/// <item>Arch: <c>Reserve</c> and <c>Create(values)</c> per shot (its <c>Create(span, signature, count)</c> made one
 /// entity in 2.1.0), then <c>world.Destroy(query)</c>.</item>
 /// <item>DefaultEcs: <c>CreateEntity</c> and <c>Set</c> per shot, then <c>Dispose</c> per shot.</item>
 /// </list>
@@ -224,7 +224,7 @@ public class BulkSpawnComparison
     public int EasyEcs_CreateAndDestroyAll()
     {
         _world.CreateEntities(_shots, new Shot(_tick, ++_tick), new Fuse(20));
-        return _world.DestroyEntities<Fuse>();
+        return _world.DestroyAll<Fuse>();
     }
 
     [Benchmark]
@@ -297,7 +297,7 @@ public record struct DCold3(int Value);
 /// <item>EasyEcs: <c>CreateEntity(values)</c> per entity, after <c>EnsureCapacity&lt;T1..Tn&gt;(count)</c> when reserved;
 /// bulk: <c>CreateEntities(new Entity[count], values)</c> (the handle array is part of the cost).</item>
 /// <item>Friflo: <c>archetype.CreateEntity()</c> per entity (default values, as the external suite writes it), after
-/// <c>store.EnsureCapacity</c> and <c>archetype.EnsureCapacity</c> when reserved; no bulk create.</item>
+/// <c>store.Reserve</c> and <c>archetype.Reserve</c> when reserved; no bulk create.</item>
 /// <item>Arch: <c>Create(values)</c> per entity, after <c>EnsureCapacity(signature, count)</c> when reserved (its bulk
 /// <c>Create(span, signature, count)</c> made one entity in 2.1.0).</item>
 /// <item>DefaultEcs: <c>CreateEntity</c> and <c>Set</c> per component; it has no pre-sizing (its world's capacity is a
@@ -379,9 +379,9 @@ public class ColdCreateComparison
         var world = _world;
         switch (Components)
         {
-            case 1: world.EnsureCapacity<Cold1>(Count); break;
-            case 2: world.EnsureCapacity<Cold1, Cold2>(Count); break;
-            default: world.EnsureCapacity<Cold1, Cold2, Cold3>(Count); break;
+            case 1: world.Reserve<Cold1>(Count); break;
+            case 2: world.Reserve<Cold1, Cold2>(Count); break;
+            default: world.Reserve<Cold1, Cold2, Cold3>(Count); break;
         }
 
         EasyEcsLoop(world);

@@ -42,13 +42,58 @@ public class EntityTests
         }
 
         for (int i = 0; i < batch.Length; i += 2) batch[i].Set(new Frozen());
-        Assert.That(_world.DestroyEntities<Position>(QueryFilter.Create().With<Frozen>()), Is.EqualTo(50));
+        Assert.That(_world.DestroyAll<Position>(QueryFilter.Create().With<Frozen>()), Is.EqualTo(50));
         Assert.That(_world.EntityCount, Is.EqualTo(51));
         Assert.That(batch[0].IsAlive, Is.False);
         Assert.That(batch[1].IsAlive, Is.True);
 
-        Assert.That(_world.DestroyEntities<Position>(), Is.EqualTo(51));
+        Assert.That(_world.DestroyAll<Position>(), Is.EqualTo(51));
         Assert.That(existing.IsAlive, Is.False);
+        Assert.That(_world.EntityCount, Is.Zero);
+    }
+
+    [Test]
+    public void DestroyEntitiesByIdSkipsStaleIdsAndRepeats()
+    {
+        var batch = new Entity[4];
+        _world.CreateEntities(batch, new Health(1));
+        var gone = batch[3].Id;
+        batch[3].Destroy();
+        var reused = _world.CreateEntity(new Health(2));                     // may take the destroyed slot
+
+        Assert.That(_world.DestroyEntities(batch[0].Id, batch[1].Id, batch[0].Id, gone, default), Is.EqualTo(2));
+        Assert.That(batch[0].IsAlive || batch[1].IsAlive, Is.False);
+        Assert.That(batch[2].IsAlive && reused.IsAlive, Is.True);             // a stale id never reaches a reused slot
+        Assert.That(_world.DestroyEntities(), Is.Zero);
+    }
+
+    [Test]
+    public void DestroyEntitiesByIdRetiresCleanupAndCascadesOnce()
+    {
+        var parent = _world.CreateEntity(new Health(1));
+        var leased = _world.CreateEntity(new Lease(1));
+        var child = _world.CreateEntity(new ChildOf(parent));
+        var grandchild = _world.CreateEntity(new ChildOf(child));
+
+        Assert.That(_world.DestroyEntities(parent.Id, leased.Id, child.Id), Is.EqualTo(3));
+        Assert.That(parent.IsAlive || child.IsAlive || grandchild.IsAlive, Is.False); // the list and the cascade
+        Assert.That(leased.IsAlive && leased.Has<Destroyed>(), Is.True);              // retired, kept for its cleanup
+        Assert.That(_world.DestroyEntities(leased.Id), Is.Zero);                      // retired already
+    }
+
+    [Test]
+    public void DestroyEntitiesByIdDuringAPassSkipsTheDestroyed()
+    {
+        var batch = new Entity[10];
+        _world.CreateEntities(batch, new Health(1));
+        var ids = new EntityId[10];
+        for (int i = 0; i < ids.Length; i++) ids[i] = batch[i].Id;
+        int visited = 0;
+        foreach (var item in _world.Query<Health>())
+        {
+            if (visited++ == 0) Assert.That(_world.DestroyEntities(ids), Is.EqualTo(10));
+        }
+        Assert.That(visited, Is.EqualTo(1));
         Assert.That(_world.EntityCount, Is.Zero);
     }
 
@@ -60,7 +105,7 @@ public class EntityTests
         int visited = 0;
         foreach (var item in _world.Query<Health>())
         {
-            if (visited++ == 0) Assert.That(_world.DestroyEntities<Health>(), Is.EqualTo(10));
+            if (visited++ == 0) Assert.That(_world.DestroyAll<Health>(), Is.EqualTo(10));
         }
         Assert.That(visited, Is.EqualTo(1));
         Assert.That(_world.EntityCount, Is.Zero);
@@ -192,15 +237,15 @@ public class EntityTests
     {
         using (var warm = new World()) warm.CreateEntity(new Position(), new Velocity()).Destroy(); // JIT and caches
         var kept = _world.CreateEntity(new Position(1, 2), new Velocity(3, 4));
-        _world.EnsureCapacity<Position, Velocity>(5000);
+        _world.Reserve<Position, Velocity>(5000);
         Assert.That(kept.Read<Position>(), Is.EqualTo(new Position(1, 2)));     // its row moved to the grown columns
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 5000; i++) _world.CreateEntity(new Position(i, 0), new Velocity());
         Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, _world.EntityCount), Is.EqualTo((0L, 5001)));
         var table = Array.Find(_world.Describe(), t => t.Entities == 5001);
         Assert.That(table.Capacity, Is.EqualTo(5056)); // 5,001 rows in whole presence words, not the next power of two
-        _world.EnsureCapacity<Position, Velocity>(0); // nothing to reserve
-        _world.EnsureCapacity<Position, Velocity>(-1);
+        _world.Reserve<Position, Velocity>(0); // nothing to reserve
+        _world.Reserve<Position, Velocity>(-1);
         Assert.That(Array.Find(_world.Describe(), t => t.Entities == 5001).Capacity, Is.EqualTo(5056));
     }
 
@@ -213,7 +258,7 @@ public class EntityTests
         foreach (var item in _world.Query<Position>())
         {
             item.Position.Y = 1; // before the reservation: a ref is valid until the next structural change
-            if (visited++ == 10) _world.EnsureCapacity<Position>(10_000); // the columns move under the pass
+            if (visited++ == 10) _world.Reserve<Position>(10_000); // the columns move under the pass
         }
 
         int written = 0;
@@ -281,7 +326,7 @@ public class EntityTests
         world.CreateEntities(spawned, new ChildOf(parent), new Position(), new Callsign("x"));
         spawned[7].Remove<Position>();                                  // a row lacking a component still goes
         Assert.That(children.Count(parent), Is.EqualTo(300));
-        Assert.That(world.DestroyEntities<ChildOf>(), Is.EqualTo(300));
+        Assert.That(world.DestroyAll<ChildOf>(), Is.EqualTo(300));
         Assert.That(spawned, Has.All.Matches<Entity>(e => !e.IsAlive));
         Assert.That(children.Count(parent), Is.Zero);
         Assert.That(world.EntityCount, Is.EqualTo(1));
@@ -300,7 +345,7 @@ public class EntityTests
         int visited = 0;
         foreach (var item in world.Query<Health>())
         {
-            if (visited++ == 0) Assert.That(world.DestroyEntities<Position>(), Is.EqualTo(100));
+            if (visited++ == 0) Assert.That(world.DestroyAll<Position>(), Is.EqualTo(100));
         }
 
         Assert.That(visited, Is.EqualTo(1));                            // destroyed rows are skipped
