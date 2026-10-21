@@ -150,3 +150,51 @@ public class BufferChurnBenchmark
 
     public record struct Actor(int Shard) : IComponent;
 }
+
+/// <summary>
+/// Chunks that load and unload around players: each operation creates <see cref="Chunks"/> entities with 8,192 blocks
+/// (a <see cref="DynamicBuffer{T}"/> of a byte-sized enum, 8 KB) and destroys them. The lists are longer than the pool
+/// keeps by default (4 KB); <see cref="Pooled"/> raises <see cref="DynamicBuffer{T}.PoolCapacity"/> to a chunk, so
+/// each chunk reuses the list of one unloaded before.
+/// </summary>
+[MemoryDiagnoser]
+public class ChunkChurnBenchmark
+{
+    public const int Blocks = 8192;
+
+    [Params(64)] public int Chunks;
+    [Params(false, true)] public bool Pooled;
+
+    private World _world;
+    private Entity[] _chunks;
+    private Block[] _blocks;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        DynamicBuffer<Block>.PoolCapacity = Pooled ? Blocks : 4096;
+        _world = new World(new WorldOptions { InitialEntityCapacity = Chunks });
+        _chunks = new Entity[Chunks];
+        _blocks = new Block[Blocks];
+        for (int i = 0; i < 20; i++) LoadAndUnload();
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        _world.Dispose();
+        DynamicBuffer<Block>.PoolCapacity = 4096;
+    }
+
+    [Benchmark]
+    public void LoadAndUnload()
+    {
+        _world.CreateEntities(_chunks, new DynamicBuffer<Block>(), new Chunk());
+        foreach (var chunk in _chunks) chunk.Get<DynamicBuffer<Block>>().AddRange(_blocks);
+        foreach (var chunk in _chunks) chunk.Destroy(); // one by one, as chunks unload
+    }
+
+    public enum Block : byte { Air, Stone }
+
+    public record struct Chunk(int X, int Z) : IComponent;
+}
