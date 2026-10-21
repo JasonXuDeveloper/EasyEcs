@@ -1,0 +1,87 @@
+---
+title: "MultiWorld：每个线程一个 World"
+seoTitle: "C# ECS 每线程一个 World：MultiWorld 示例"
+description: "把 C# 游戏服务器拆成多个区，每个线程一个 EasyEcs World：每个核都在跑，互不共享，不用锁。"
+icon: Layers
+---
+
+import { Cpu, RefreshCw, Server, Workflow } from 'lucide-react';
+
+服务器常把游戏拆成互不共享的区（地图、房间、对局），每个区一个 World，各占一个线程。这里每个区都是同一个小游戏，
+2 万个单位；有几个处理器就开几个区，同时更新。本页每段代码都直接引用自
+[`samples/MultiWorld`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/MultiWorld)，CI 会构建并运行它。
+
+## 你会学到 [#what-you-learn]
+
+- **World 归一个线程所有**：哪个线程建的 World，就由它更新、由它释放；不加锁，也不共享
+  （[每个线程一个 World](/zh/docs/guide/threading#recommended-one-world-per-thread)）。
+- **单例按 World 隔离**：每个区的 `Tally` 只统计自己 World 里的死亡数（[单例](/zh/docs/guide/singletons)）。
+- **一次创建大量实体**：`world.CreateEntities(units, …)` 一次调用填满一个句柄数组
+  （[结构变更](/zh/docs/guide/structural-changes)）。
+- **一个系统只做一件事**：移动、扣血、复活，各是一个 `[ForEach]` 方法（[系统](/zh/docs/guide/systems)）。
+
+## 运行 [#run-it]
+
+```bash
+dotnet run -c Release --project samples/MultiWorld                    # 每个区更新 1000 次
+dotnet run -c Release --project samples/MultiWorld -- --updates 200
+```
+
+## 数据 [#data]
+
+单位的三个组件，加上区的 `Tally` 单例。
+
+<include lang="csharp" meta='title="Components.cs"'>../../../samples/MultiWorld/Components.cs</include>
+
+## 系统 [#systems]
+
+单位按速度移动；离中心超过安全半径的单位每 tick 掉 1 点血，死了就在中心复活。系统只读写组件，所以同样三个系统
+能用在每个区。
+
+<include lang="csharp" meta='title="Systems.cs"'>../../../samples/MultiWorld/Systems.cs</include>
+
+## 一个区 [#zone]
+
+`Zone.Run` 就是一个线程要做的全部事情：建 World、创建单位、更新、返回 `ZoneResult`，再释放 World。别的线程从来
+看不到它。
+
+<include lang="csharp" meta='title="Zone.cs"'>../../../samples/MultiWorld/Zone.cs</include>
+
+## 程序 [#program]
+
+每个处理器一个线程，各跑一个区，只写结果数组里自己那一格；主线程等它们全部结束再打印。
+
+<include lang="csharp" meta='title="Program.cs"'>../../../samples/MultiWorld/Program.cs</include>
+
+## 输出 [#output]
+
+4 核机器上的一次运行。死亡数每次都一样；耗时和吞吐量取决于机器。
+
+```text
+zone  0: 20,000 units,  51,430 deaths,  169.3 ms
+zone  1: 20,000 units,  51,428 deaths,  188.4 ms
+zone  2: 20,000 units,  51,429 deaths,  165.6 ms
+zone  3: 20,000 units,  51,426 deaths,  150.6 ms
+4 worlds on 4 threads, 80,000 units, 1000 updates each
+253 ms, 316.2 M entity-updates/s
+```
+
+各区只有初始方向不同，所以死亡数差几个；整次运行的耗时接近单个区的耗时，因为各区是并排跑的。这只是演示，不是测量：
+CI 运行它但不比对输出，性能数字以 BenchmarkDotNet 套件为准（`MultiWorldBenchmark`，见[性能指南](/zh/docs/performance)）。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card icon={<Cpu />} title="多线程与并行" href="/zh/docs/guide/threading">
+    每个线程一个 World、并行系统、并行 [ForEach] 方法。
+  </Card>
+  <Card icon={<Server />} title="托管" href="/zh/docs/guide/hosting">
+    在真实服务器里给 World 定一个所有者：固定步长、请求、存档。
+  </Card>
+  <Card icon={<Workflow />} title="迁移与卸载" href="/zh/docs/guide/migration-and-unload">
+    把玩家从一个区的 World 迁到另一个区。
+  </Card>
+  <Card icon={<RefreshCw />} title="HotReload 示例" href="/zh/docs/samples/hot-reload">
+    下一个示例：World 运行时替换游戏逻辑。
+  </Card>
+</Cards>

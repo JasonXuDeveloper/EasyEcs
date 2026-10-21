@@ -1,0 +1,60 @@
+---
+title: 示例
+seoTitle: "EasyEcs 示例：可直接运行的 C# ECS 程序"
+description: "按学习顺序排列的 C# ECS 示例程序：从第一个 World 到存档、热重载、Actor、仿 Minecraft 服务器和 Godot 项目。"
+icon: FolderCode
+---
+
+import { BookOpen, Rocket, Swords } from 'lucide-react';
+
+一组循序渐进的完整程序，从第一个 World 一直到仿 Minecraft 的服务器。每个示例都是仓库
+[`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples) 下的一个项目，这里每一页按文件讲解它，代码直接从源文件引入。
+CI 会构建并运行每个示例，输出固定的示例还会和页面上的输出逐字比对，所以你读到的代码和输出就是实际跑出来的。
+
+## 学习顺序 [#learning-path]
+
+按这个顺序读，每个示例都假设你读过前面的。
+
+| # | 示例 | 讲什么 |
+| --- | --- | --- |
+| 1 | [HelloWorld](/zh/docs/samples/hello-world) | 组件、标签、单例、三个 `[ForEach]` 系统、`world.Update()` |
+| 2 | [GameLoop](/zh/docs/samples/game-loop) | 固定 tick 的服务器：其他线程来的输入作为数据、系统组、客户端索引、预制体、带变更追踪的同步 |
+| 3 | [SaveLoad](/zh/docs/samples/save-load) | 整个 World 的 `Save` / `Load`，一组实体的 `SaveEntities` / `LoadEntities`，World 之间的 `MoveEntities` |
+| 4 | [MultiWorld](/zh/docs/samples/multi-world) | 每个线程一个 World，每个 World 一个区域，不加锁 |
+| 5 | [HotReload](/zh/docs/samples/hot-reload) | 系统和组件放在可回收的插件里：卸载、重新加载，World 的数据保留 |
+| 6 | [Actors](/zh/docs/samples/actors) | Actor 就是实体：每类 Actor 一个键组件、一个索引、一个系统组，消息是 `entity.Run` 任务 |
+| 7 | [VoxelServer](/zh/docs/samples/voxel-server) | 20 TPS 的仿 Minecraft 服务器：区块、水流、挖方块、僵尸、同步、存档 |
+| 8 | [Godot](/zh/docs/samples/godot) | Godot 4 .NET 项目：场景根节点持有 World，推进它并绘制实体 |
+
+## 示例的结构 [#how-a-sample-reads]
+
+从上往下读，和 EasyEcs 项目的布局一致（[项目结构](/zh/docs/guide/project-structure)）：`Components.cs` 放数据，然后是系统，
+每个只做一件事，最后是很短的 `Program.cs`：创建 World，加单例和系统，运行并打印。真实程序需要、但不是本课重点的代码
+（线程间的邮箱、模拟客户端、报告输出）单独放在 `Host/` 或 `Support.cs` 里，并注明这一点。
+
+## 运行一个示例 [#run-one]
+
+克隆仓库，在根目录运行：
+
+```bash
+git clone https://github.com/JasonXuDeveloper/EasyEcs.git
+cd EasyEcs
+dotnet run --project samples/HelloWorld
+```
+
+示例直接引用库的源码和生成器，所以总是和仓库一起构建。自己的项目里一行就够了：
+`<PackageReference Include="EasyEcs" Version="..."/>` 会带上库、生成器和分析器。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card icon={<Rocket />} title="快速开始" href="/zh/docs/getting-started">
+    安装包，一步步搭出第一个 World。
+  </Card>
+  <Card icon={<Swords />} title="示例：战斗服务器" href="/zh/docs/example">
+    一个服务器用上 EasyEcs 的全部功能。
+  </Card>
+  <Card icon={<BookOpen />} title="指南" href="/zh/docs/guide/project-structure">
+    每个功能一页，各带一个完整例子。
+  </Card>
+</Cards>

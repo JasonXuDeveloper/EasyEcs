@@ -1,0 +1,15 @@
+{
+  "title": "Samples",
+  "icon": "FolderCode",
+  "pages": [
+    "index",
+    "hello-world",
+    "game-loop",
+    "save-load",
+    "multi-world",
+    "hot-reload",
+    "actors",
+    "voxel-server",
+    "godot"
+  ]
+}

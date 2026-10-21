@@ -1,0 +1,74 @@
+---
+title: "HelloWorld：最小的程序"
+seoTitle: "C# ECS 入门：最小的 EasyEcs 程序"
+description: "最小的完整 EasyEcs 程序：两个组件、一个标签、一个单例、三个 [ForEach] 系统和 world.Update()，附真实输出。"
+icon: Hand
+---
+
+import { Gamepad2, Layers, Rocket, Workflow } from 'lucide-react';
+
+最小的完整 EasyEcs 程序，也是入门的起点：两个会动的实体，一个把其中之一标成玩家的标签，一个计 tick 的时钟，三个各管一件事的系统。
+本页的代码块全部引自 [`samples/HelloWorld`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HelloWorld)，
+CI 会构建并运行它，把输出和下面列出的比对。
+
+## 你会学到 [#what-you-learn]
+
+- **组件是实体上的普通数据**（`Position`、`Velocity`）；没有字段的组件是[标签](/zh/docs/guide/entities-and-components#tags)
+  （`Player`），系统按它过滤。
+- **[单例](/zh/docs/guide/singletons)**（`Clock`）每个 World 只有一份。
+- **[系统](/zh/docs/guide/systems)**各管一件事，自己不存状态。`[ForEach]` 方法对每个具备其组件参数的实体跑一次：
+  `ref` 表示要写，`in` 表示只读。`[With<Player>]` 再加一个[过滤条件](/zh/docs/guide/queries#filters)。
+- **`world.Update()`** 按添加顺序把每个系统跑一遍。
+
+## 运行 [#run-it]
+
+```bash
+dotnet run --project samples/HelloWorld
+```
+
+## 数据 [#data]
+
+两个组件、一个标签、一个单例：只有字段，没有逻辑。
+
+<include lang="csharp" meta='title="Components.cs"'>../../../samples/HelloWorld/Components.cs</include>
+
+## 系统 [#systems]
+
+`MoveSystem` 移动所有有位置和速度的实体，`ReportSystem` 只打印玩家，`ClockSystem` 在 `OnUpdate` 里每次更新推进一次时钟，
+而不是每个实体一次。
+
+<include lang="csharp" meta='title="Systems.cs"'>../../../samples/HelloWorld/Systems.cs</include>
+
+## 程序 [#program]
+
+创建 World，加入单例和系统，创建两个实体，跑三次更新。
+
+<include lang="csharp" meta='title="Program.cs"'>../../../samples/HelloWorld/Program.cs</include>
+
+## 输出 [#output]
+
+```text
+tick 0: player at (1, 2)
+tick 1: player at (2, 4)
+tick 2: player at (3, 6)
+2 entities after 3 ticks
+```
+
+`ReportSystem` 在 `ClockSystem` 之前运行，所以第一次更新打印的是 tick 0。第二个实体也在动，但它没有 `Player` 标签，所以从不打印。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card icon={<Gamepad2 />} title="GameLoop" href="/zh/docs/samples/game-loop">
+    下一个示例：输入来自另一个线程的小型服务器。
+  </Card>
+  <Card icon={<Rocket />} title="快速开始" href="/zh/docs/getting-started">
+    安装包，一步步写出第一个模拟。
+  </Card>
+  <Card icon={<Layers />} title="实体与组件" href="/zh/docs/guide/entities-and-components">
+    组件、标签、id 和生成的成员。
+  </Card>
+  <Card icon={<Workflow />} title="系统" href="/zh/docs/guide/systems">
+    [ForEach] 方法、顺序、分组和运行频率。
+  </Card>
+</Cards>

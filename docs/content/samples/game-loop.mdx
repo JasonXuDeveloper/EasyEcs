@@ -1,0 +1,126 @@
+---
+title: "GameLoop: a fixed-tick server"
+seoTitle: "C# Game Server Loop with an ECS: GameLoop Sample"
+description: "A small C# game server with EasyEcs: clients on another thread, a fixed 30 Hz tick, input as request entities, system groups and replication of what changed."
+icon: Gamepad2
+---
+
+import { FlaskConical, Server, Save, Workflow } from 'lucide-react';
+
+A small game server: clients on another thread, a fixed 30 Hz simulation tick, and replication of only what changed.
+Sixteen fake clients join, move, fire and leave for a second of game time. Every code block on this page is included
+from [`samples/GameLoop`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop), which CI builds
+and runs. Read [HelloWorld](/en/docs/samples/hello-world) first.
+
+## What you learn [#what-you-learn]
+
+- **Input as data**: the network thread posts messages to a mailbox, and `ReceiveInputSystem` turns each one into a
+  request entity (`JoinRequest`, `MoveRequest`, ...). One system per kind of request handles it and destroys it in
+  the same tick ([input from other threads](/en/docs/guide/threading#input-from-other-threads)).
+- **[System groups](/en/docs/guide/systems#system-groups)** (`ISystemGroup`, `[UpdateInGroup<T>]`) give systems their
+  own cadence: input on every wake-up, the simulation on the fixed tick, replication every third tick.
+- **A [value index](/en/docs/guide/indexes-and-relations#value-indexes)** (`IIndexed<int>` on `Client`) finds a player
+  by client id: `world.ClientIndex.TryFind(...)`.
+- **[Prefabs](/en/docs/guide/prefabs)** in a singleton: systems instantiate `prefabs.Player` and `prefabs.Bullet` with
+  the values that differ per instance, one row copy each.
+- **[Change tracking](/en/docs/guide/change-tracking)** (`ITracked` on `Position`, `[Changed<Position>]`): replication
+  visits only the entities that moved since it last ran.
+- **Operations**: `--ticks N`, a status line per second, Ctrl+C stops cleanly, per-system run counts and times from
+  [`WorldOptions.MeasureSystems`](/en/docs/guide/diagnostics#timing).
+
+## Run it [#run-it]
+
+```bash
+dotnet run --project samples/GameLoop                   # 3 seconds (90 ticks)
+dotnet run --project samples/GameLoop -- --ticks 30     # 1 second
+```
+
+## The data [#data]
+
+Requests are the input, one component per kind; then the simulation state, the singletons and the two system groups.
+
+<include lang="csharp" meta='title="Components.cs"'>../../../samples/GameLoop/Components.cs</include>
+
+## Input [#input]
+
+`ReceiveInputSystem` is in `InputGroup`, so the host runs it on every wake-up, not only on ticks. The mailbox is a
+`readonly` field the host gives it: the system's connection to the network, not world state.
+
+<include lang="csharp" meta='title="Systems/Input.cs"'>../../../samples/GameLoop/Systems/Input.cs</include>
+
+## Requests [#requests]
+
+One system per kind of request. Each finds the player by client id, acts, and destroys the request: a request lives
+for one tick.
+
+<include lang="csharp" meta='title="Systems/Requests.cs"'>../../../samples/GameLoop/Systems/Requests.cs</include>
+
+## The simulation [#simulation]
+
+Movement over one fixed step, bullets that expire, and the clock.
+
+<include lang="csharp" meta='title="Systems/Simulation.cs"'>../../../samples/GameLoop/Systems/Simulation.cs</include>
+
+## Replication [#replication]
+
+`[Changed<Position>]` skips the entities that did not move; each one that did writes 12 bytes into the outbox, which the
+host sends and clears.
+
+<include lang="csharp" meta='title="Systems/Replication.cs"'>../../../samples/GameLoop/Systems/Replication.cs</include>
+
+## The program [#program]
+
+The singletons first, then the systems by group, then the loop: input on every wake-up, a simulation tick when one is
+due, replication every third tick. The mailbox, the fake clients, the fixed-tick timer, the network and the report
+are in [`Host/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop/Host): plumbing, not the
+lesson.
+
+<include lang="csharp" meta='title="Program.cs"'>../../../samples/GameLoop/Program.cs</include>
+
+## Output [#output]
+
+With `-c Release -- --ticks 30`. The fake clients use a fixed seed, so the counts are the same from run to run up to
+timing; the times vary with the machine. The process exits with 0 when every check passes and with 1 otherwise.
+
+```text
+t=1s players=16 bullets=59 entities=75
+30 ticks in 1.0 s
+  220 messages (0 refused)
+  34 joins, 18 leaves
+  59 bullets fired
+  455 position updates replicated (5.3 KB)
+  LeaveSystem             30 runs,      4.7 us last run
+  JoinSystem              30 runs,      2.2 us last run
+  MoveSystem              30 runs,      6.9 us last run
+  FireSystem              30 runs,     71.0 us last run
+  MovementSystem          30 runs,      4.7 us last run
+  LifetimeSystem          30 runs,      4.7 us last run
+  ClockSystem             30 runs,      0.8 us last run
+  ReceiveInputSystem     252 runs,      0.4 us last run
+  ReplicationSystem       10 runs,     15.1 us last run
+  ok   players have the prefab's components and their client id
+  ok   bullets have the prefab's components and their lifetime
+  ok   no client has two players
+  ok   the mailbox refused no message
+stopped
+```
+
+`ReceiveInputSystem` runs far more often than the tick: the loop drains the mailbox every time it wakes up while it
+waits for the next tick, and `ReplicationSystem` runs once every three ticks.
+
+## Related [#related]
+
+<Cards>
+  <Card icon={<Save />} title="SaveLoad" href="/en/docs/samples/save-load">
+    The next sample: saving a world and moving entities between worlds.
+  </Card>
+  <Card icon={<Server />} title="Hosting" href="/en/docs/guide/hosting">
+    The world in a .NET service: owner thread, fixed step, requests.
+  </Card>
+  <Card icon={<Workflow />} title="Systems" href="/en/docs/guide/systems#system-groups">
+    System groups and the cadence of each system.
+  </Card>
+  <Card icon={<FlaskConical />} title="Change tracking" href="/en/docs/guide/change-tracking">
+    What counts as a write and how replication reads it.
+  </Card>
+</Cards>

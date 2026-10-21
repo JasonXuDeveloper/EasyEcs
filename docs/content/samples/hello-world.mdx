@@ -1,0 +1,77 @@
+---
+title: "HelloWorld: the smallest program"
+seoTitle: "C# ECS Hello World: the Smallest EasyEcs Program"
+description: "The smallest complete C# ECS program with EasyEcs: two components, a tag, a singleton, three [ForEach] systems and world.Update(), with its real output."
+icon: Hand
+---
+
+import { Gamepad2, Layers, Rocket, Workflow } from 'lucide-react';
+
+The smallest complete EasyEcs program, and the place to start: two entities that move, a tag that marks one of them
+as a player, a clock that counts the ticks, and three systems with one job each. Every code block on this page is
+included from [`samples/HelloWorld`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HelloWorld),
+which CI builds and runs, comparing its output with the one shown below.
+
+## What you learn [#what-you-learn]
+
+- **Components are plain data** on entities (`Position`, `Velocity`); a component with no fields is a
+  [tag](/en/docs/guide/entities-and-components#tags) (`Player`) that systems filter on.
+- **A [singleton](/en/docs/guide/singletons)** (`Clock`) holds one value per world.
+- **[Systems](/en/docs/guide/systems)** have one job each and no state of their own. A `[ForEach]` method runs once
+  per entity that has its component parameters: `ref` for what it writes, `in` for what it reads.
+  `[With<Player>]` adds a [filter](/en/docs/guide/queries#filters).
+- **`world.Update()`** runs every system once, in the order they were added.
+
+## Run it [#run-it]
+
+```bash
+dotnet run --project samples/HelloWorld
+```
+
+## The data [#data]
+
+Two components, a tag and a singleton: fields and no logic.
+
+<include lang="csharp" meta='title="Components.cs"'>../../../samples/HelloWorld/Components.cs</include>
+
+## The systems [#systems]
+
+`MoveSystem` moves every entity with a position and a velocity, `ReportSystem` prints the players only, and
+`ClockSystem` advances the clock once per update in `OnUpdate`, not once per entity.
+
+<include lang="csharp" meta='title="Systems.cs"'>../../../samples/HelloWorld/Systems.cs</include>
+
+## The program [#program]
+
+Create the world, add the singleton and the systems, create two entities, run three updates.
+
+<include lang="csharp" meta='title="Program.cs"'>../../../samples/HelloWorld/Program.cs</include>
+
+## Output [#output]
+
+```text
+tick 0: player at (1, 2)
+tick 1: player at (2, 4)
+tick 2: player at (3, 6)
+2 entities after 3 ticks
+```
+
+`ReportSystem` runs before `ClockSystem`, so the first update prints tick 0. The second entity moves too, but it has
+no `Player` tag, so it is never printed.
+
+## Related [#related]
+
+<Cards>
+  <Card icon={<Gamepad2 />} title="GameLoop" href="/en/docs/samples/game-loop">
+    The next sample: a small server with input from another thread.
+  </Card>
+  <Card icon={<Rocket />} title="Getting started" href="/en/docs/getting-started">
+    Install the package and build a first simulation step by step.
+  </Card>
+  <Card icon={<Layers />} title="Entities and components" href="/en/docs/guide/entities-and-components">
+    Components, tags, ids and the generated members.
+  </Card>
+  <Card icon={<Workflow />} title="Systems" href="/en/docs/guide/systems">
+    [ForEach] methods, ordering, groups and cadence.
+  </Card>
+</Cards>

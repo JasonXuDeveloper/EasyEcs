@@ -1,0 +1,64 @@
+---
+title: Samples
+seoTitle: "EasyEcs Samples: Runnable C# ECS Programs"
+description: "Runnable C# ECS programs in learning order: hello world, a game loop, saves, a world per thread, hot reload, actors, a Minecraft-style server, Godot."
+icon: FolderCode
+---
+
+import { BookOpen, Rocket, Swords } from 'lucide-react';
+
+Complete programs that build on each other, from a first world to a Minecraft-style server. Each is a project in the
+repository's [`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples) folder, and each page here
+walks through its files with the code included from them. CI builds and runs every sample, and compares what the
+deterministic ones print with the output shown on their pages, so the code and the output you read are the ones that
+run.
+
+## Learning path [#learning-path]
+
+Read them in this order: each one assumes what the ones before it taught.
+
+| # | Sample | What it teaches |
+| --- | --- | --- |
+| 1 | [HelloWorld](/en/docs/samples/hello-world) | components, a tag, a singleton, three `[ForEach]` systems, `world.Update()` |
+| 2 | [GameLoop](/en/docs/samples/game-loop) | a fixed-tick server: input from another thread as data, system groups, an index of clients, prefabs, change-tracked replication |
+| 3 | [SaveLoad](/en/docs/samples/save-load) | `Save` / `Load` of a world, `SaveEntities` / `LoadEntities` of a group, `MoveEntities` between worlds |
+| 4 | [MultiWorld](/en/docs/samples/multi-world) | one world per thread, one zone each, no locks |
+| 5 | [HotReload](/en/docs/samples/hot-reload) | systems and components in a collectible plugin: unload, reload, keep the world's data |
+| 6 | [Actors](/en/docs/samples/actors) | actors as entities: a key component, an index and a system group per kind, messages as `entity.Run` jobs |
+| 7 | [VoxelServer](/en/docs/samples/voxel-server) | a Minecraft-style server at 20 ticks a second: chunks, flowing water, digging, zombies, replication, saves |
+| 8 | [Godot](/en/docs/samples/godot) | a Godot 4 .NET project: the scene's root node owns the world, steps it and draws the entities |
+
+## How a sample reads [#how-a-sample-reads]
+
+Top-down, the way an EasyEcs project is laid out ([project structure](/en/docs/guide/project-structure)):
+`Components.cs` holds the data, then the systems, one job each, then a short `Program.cs` that creates the world,
+adds the singletons and systems, runs and prints. Code a real program needs but that is not the lesson (a mailbox
+between threads, fake clients, the report) is in a file or folder of its own, `Host/` or `Support.cs`, that says so.
+
+## Run one [#run-one]
+
+Clone the repository and run a sample from its root:
+
+```bash
+git clone https://github.com/JasonXuDeveloper/EasyEcs.git
+cd EasyEcs
+dotnet run --project samples/HelloWorld
+```
+
+The samples reference the library's sources and its generator, so they always build against the repository. In a
+project of your own one line does the same: `<PackageReference Include="EasyEcs" Version="..."/>` brings the
+library, the generator and the analyzer.
+
+## Related [#related]
+
+<Cards>
+  <Card icon={<Rocket />} title="Getting started" href="/en/docs/getting-started">
+    Install the package and build a first world step by step.
+  </Card>
+  <Card icon={<Swords />} title="Example: a battle server" href="/en/docs/example">
+    Every feature of EasyEcs in one server.
+  </Card>
+  <Card icon={<BookOpen />} title="Guide" href="/en/docs/guide/project-structure">
+    One page per feature, each with a complete example.
+  </Card>
+</Cards>

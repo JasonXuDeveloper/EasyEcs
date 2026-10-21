@@ -190,7 +190,9 @@ benchmarks/EasyEcs.Comparison/ BenchmarkDotNet against Arch, Friflo.Engine.ECS a
                                spawns); SystemComparisons (parallel systems)
 docs/content/                  the docs (source of https://ecs.xgamedev.net), each page <page>.mdx + <page>.zh.mdx:
                                index, learn pages (what-is-ecs, features, getting-started, ecs-principles, example: the
-                               battle server through regions of BattleServer.cs, cheat-sheet, glossary), guide/ (one
+                               battle server through regions of BattleServer.cs, cheat-sheet, glossary), samples/ (one
+                               page per sample of samples/, its files included, its output checked by
+                               check-sample.sh), guide/ (one
                                page per concept, analyzer lists EECS002-052), compare pages (performance, why-fast,
                                comparison, vs-*, migrate-from-*), reference pages (api: API + complexity, read by
                                tools/ApiDocs; architecture, faq, ai, decisions, roadmap, changelog); reference/ (API

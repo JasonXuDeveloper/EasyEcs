@@ -1,0 +1,102 @@
+---
+title: "HotReload：World 运行时替换逻辑"
+seoTitle: "C# ECS 系统热重载：HotReload 示例"
+description: "游戏逻辑放进可回收插件，World 运行时卸载、重载：RemoveTypes、AssemblyLoadContext，存档保住数据。"
+icon: RefreshCw
+---
+
+import { Boxes, Layers, Save, Workflow } from 'lucide-react';
+
+游戏逻辑放在插件里的服务器：宿主把插件加载进可回收的 `AssemblyLoadContext`，运行它，把它的类型移出 World，卸载，
+再重新加载；这期间宿主自己的实体和系统一直在跑，插件的组件值在重载后也还在。本页每段代码都直接引用自
+[`samples/HotReload`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload)，CI 会构建并运行它，
+并把输出和下面的结果比对。
+
+## 你会学到 [#what-you-learn]
+
+- **逻辑放进可回收插件**：插件的系统、组件和单例都在一个程序集里，宿主把它加载进可回收的 `AssemblyLoadContext`。
+- **干净地卸载**：`world.RemoveTypes(assembly)` 把插件的系统、组件和单例移出 World，World 里不再有东西引用插件，
+  它的上下文就能被回收（[卸载插件的类型](/zh/docs/guide/migration-and-unload#remove-types)）。
+- **保住数据**：卸载前存档、重载后读档，插件的组件值就带过来了。存档按类型全名的哈希记录类型，与加载它的程序集无关
+  （[热重载](/zh/docs/guide/migration-and-unload#hot-reload)、[存档](/zh/docs/guide/saves)）。
+- **批量变更**：`World.SetAll` 一次调用给整张表的单位加上组件（[批量操作](/zh/docs/guide/bulk)）。
+
+## 运行 [#run-it]
+
+```bash
+dotnet run --project samples/HotReload/HotReload.Host
+```
+
+插件项目随宿主一起构建，并复制到宿主的 `plugins/` 目录。
+
+## 契约 [#contracts]
+
+宿主拥有的组件，以及宿主对插件仅有的了解。契约程序集只在默认上下文里加载一次，插件从那里解析它，所以插件看到的
+`Position` 就是宿主的 `Position`。
+
+<include lang="csharp" meta='title="HotReload.Contracts/Components.cs"'>../../../samples/HotReload/HotReload.Contracts/Components.cs</include>
+
+<include lang="csharp" meta='title="HotReload.Contracts/IGamePlugin.cs"'>../../../samples/HotReload/HotReload.Contracts/IGamePlugin.cs</include>
+
+## 插件 [#plugin]
+
+插件的数据挂在宿主的实体上：每个单位一个 `Score`，外加一个 `Bonus` 单例。
+
+<include lang="csharp" meta='title="HotReload.Plugin/Components.cs"'>../../../samples/HotReload/HotReload.Plugin/Components.cs</include>
+
+`JoinScoringSystem` 一次处理一整张表，给还没有分数的单位加上分数；`ScoringSystem` 给每个在动的单位加上奖励分。
+
+<include lang="csharp" meta='title="HotReload.Plugin/Systems.cs"'>../../../samples/HotReload/HotReload.Plugin/Systems.cs</include>
+
+宿主通过 `IGamePlugin` 找到的入口：安装系统；奖励分只在第一次安装时设置，因为重载后存档会把它带回来。
+
+<include lang="csharp" meta='title="HotReload.Plugin/ScoringPlugin.cs"'>../../../samples/HotReload/HotReload.Plugin/ScoringPlugin.cs</include>
+
+## 宿主 [#host]
+
+宿主自己的系统。它不在插件里，所以每次重载都照常运行。
+
+<include lang="csharp" meta='title="HotReload.Host/Systems.cs"'>../../../samples/HotReload/HotReload.Host/Systems.cs</include>
+
+第 1 版：加载、更新 3 次、存档、移出插件类型、卸载。第 2 版：新的上下文、读档、再更新 2 次。`RunAndUnload` 禁止内联，
+这样返回后 `Main` 的栈上不会留下插件的任何东西。可回收上下文、查找 `IGamePlugin`、等待回收都在
+[`Host/Plugins.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/HotReload/HotReload.Host/Host/Plugins.cs)，
+检查在
+[`Support.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/HotReload/HotReload.Host/Support.cs)：
+都是周边代码，不是本课重点。
+
+<include lang="csharp" meta='title="HotReload.Host/Program.cs"'>../../../samples/HotReload/HotReload.Host/Program.cs</include>
+
+## 输出 [#output]
+
+所有检查通过时进程返回 0，否则返回 1。
+
+```text
+plugin loaded, 3 updates: 300 points, 3 systems
+  ok   the plugin's context was collected: nothing in the world roots it
+  ok   its systems left, the host's stayed
+  ok   the host's entities and components stayed
+plugin reloaded, 2 more updates: 500 points, 3 systems
+  ok   the scores carried over the reload (3 + 2 updates of 100 units)
+all checks passed
+```
+
+重载后的 500 分，是 100 个单位先得 3 次分、再得 2 次分：分数从存档里回来了；第一个上下文已被回收，而宿主的 100 个
+单位和它的 `MoveSystem` 一直留在 World 里。
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card icon={<Workflow />} title="迁移与卸载" href="/zh/docs/guide/migration-and-unload">
+    RemoveTypes、热重载，以及在 World 之间迁移实体。
+  </Card>
+  <Card icon={<Save />} title="存档" href="/zh/docs/guide/saves">
+    存档里有什么，类型在存档里怎么命名。
+  </Card>
+  <Card icon={<Boxes />} title="批量操作" href="/zh/docs/guide/bulk">
+    SetAll 以及其他整表变更。
+  </Card>
+  <Card icon={<Layers />} title="MultiWorld 示例" href="/zh/docs/samples/multi-world">
+    上一个示例：每个线程一个 World。
+  </Card>
+</Cards>

@@ -1,0 +1,110 @@
+---
+title: "HotReload: replace logic while the world runs"
+seoTitle: "Hot Reload C# ECS Systems: the HotReload Sample"
+description: "Game logic in a collectible plugin, unloaded and reloaded while the EasyEcs world runs: RemoveTypes, AssemblyLoadContext and a save that keeps the data."
+icon: RefreshCw
+---
+
+import { Boxes, Layers, Save, Workflow } from 'lucide-react';
+
+A server whose game logic lives in a plugin: the host loads it into a collectible `AssemblyLoadContext`, runs it,
+takes its types out of the world, unloads it and loads it again, while the host's own entities and systems keep
+running and the plugin's component values survive the reload. Every code block on this page is included from
+[`samples/HotReload`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload), which CI builds
+and runs, comparing its output with the one shown below.
+
+## What you learn [#what-you-learn]
+
+- **Logic in a collectible plugin**: the plugin's systems, components and singletons live in an assembly the host
+  loads into a collectible `AssemblyLoadContext`.
+- **Unloading cleanly**: `world.RemoveTypes(assembly)` takes the plugin's systems, components and singletons out of
+  the world, so nothing roots the plugin and its context can be collected
+  ([unloading a plugin's types](/en/docs/guide/migration-and-unload#remove-types)).
+- **Keeping the data**: a save before the unload and a load after the reload carry the plugin's component values
+  over, because a save names types by a hash of their full name, not by the assembly that loaded them
+  ([hot reload](/en/docs/guide/migration-and-unload#hot-reload), [saves](/en/docs/guide/saves)).
+- **Bulk changes**: `World.SetAll` gives a whole table of units a component in one call
+  ([bulk operations](/en/docs/guide/bulk)).
+
+## Run it [#run-it]
+
+```bash
+dotnet run --project samples/HotReload/HotReload.Host
+```
+
+The plugin project is built with the host and copied into the host's `plugins/` folder.
+
+## The contracts [#contracts]
+
+What the host owns and the only thing it knows about a plugin. The contracts assembly loads once into the default
+context; the plugin resolves it from there, so its `Position` is the host's.
+
+<include lang="csharp" meta='title="HotReload.Contracts/Components.cs"'>../../../samples/HotReload/HotReload.Contracts/Components.cs</include>
+
+<include lang="csharp" meta='title="HotReload.Contracts/IGamePlugin.cs"'>../../../samples/HotReload/HotReload.Contracts/IGamePlugin.cs</include>
+
+## The plugin [#plugin]
+
+The plugin's data rides on the host's entities: a `Score` per unit and a `Bonus` singleton.
+
+<include lang="csharp" meta='title="HotReload.Plugin/Components.cs"'>../../../samples/HotReload/HotReload.Plugin/Components.cs</include>
+
+`JoinScoringSystem` gives the units without a score one, a whole table at a time; `ScoringSystem` adds the bonus to
+every moving unit.
+
+<include lang="csharp" meta='title="HotReload.Plugin/Systems.cs"'>../../../samples/HotReload/HotReload.Plugin/Systems.cs</include>
+
+The entry point the host finds through `IGamePlugin`: it installs the systems, and sets the bonus only on a first
+install, since after a reload the save brings it back.
+
+<include lang="csharp" meta='title="HotReload.Plugin/ScoringPlugin.cs"'>../../../samples/HotReload/HotReload.Plugin/ScoringPlugin.cs</include>
+
+## The host [#host]
+
+The host's own system, which runs through every reload because it is not in the plugin.
+
+<include lang="csharp" meta='title="HotReload.Host/Systems.cs"'>../../../samples/HotReload/HotReload.Host/Systems.cs</include>
+
+Version 1: load, three updates, save, remove the plugin's types, unload. Version 2: a new context, the save loaded,
+two more updates. `RunAndUnload` is not inlined so that nothing of the plugin is left on `Main`'s stack. The
+collectible context, finding the `IGamePlugin` and waiting for collection are in
+[`Host/Plugins.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/HotReload/HotReload.Host/Host/Plugins.cs),
+and the checks in
+[`Support.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/HotReload/HotReload.Host/Support.cs):
+plumbing, not the lesson.
+
+<include lang="csharp" meta='title="HotReload.Host/Program.cs"'>../../../samples/HotReload/HotReload.Host/Program.cs</include>
+
+## Output [#output]
+
+The process exits with 0 when every check passes and with 1 otherwise.
+
+```text
+plugin loaded, 3 updates: 300 points, 3 systems
+  ok   the plugin's context was collected: nothing in the world roots it
+  ok   its systems left, the host's stayed
+  ok   the host's entities and components stayed
+plugin reloaded, 2 more updates: 500 points, 3 systems
+  ok   the scores carried over the reload (3 + 2 updates of 100 units)
+all checks passed
+```
+
+500 points after the reload is 100 units scoring for 3 updates and then 2 more: the scores came back from the save,
+and the first context was collected while the host's 100 units and its `MoveSystem` stayed in the world.
+
+## Related [#related]
+
+<Cards>
+  <Card icon={<Workflow />} title="Migration and unload" href="/en/docs/guide/migration-and-unload">
+    RemoveTypes, hot reload, and moving entities between worlds.
+  </Card>
+  <Card icon={<Save />} title="Saves" href="/en/docs/guide/saves">
+    What a save holds and how types are named in it.
+  </Card>
+  <Card icon={<Boxes />} title="Bulk operations" href="/en/docs/guide/bulk">
+    SetAll and the other whole-table changes.
+  </Card>
+  <Card icon={<Layers />} title="MultiWorld sample" href="/en/docs/samples/multi-world">
+    The previous sample: one world per thread.
+  </Card>
+</Cards>

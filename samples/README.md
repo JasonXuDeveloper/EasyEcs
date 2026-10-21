@@ -26,8 +26,10 @@ Read them in this order:
 | 7 | [VoxelServer](VoxelServer) | a Minecraft-style server at 20 ticks a second: chunks as entities with a block buffer and a unique index, loaded and unloaded around the players (`UpdateInterval`, `Slices`), water that spreads and carries humanoids (a tag, `ChildOf`), dug blocks as items, zombies by night, `Mut<T>` and `[Changed<T>]` replication with the destroy log, `Parallel` rows, `SaveWithout` / `LoadKeeping` on stop, `MeasureSystems` | `dotnet run -c Release --project samples/VoxelServer` |
 | 8 | [Godot](Godot) | a Godot 4 .NET project: the scene's root node owns the world, steps it per physics tick and draws the entities with one multimesh | open it in the Godot editor, or `godot --headless --path samples/Godot -- --ticks 120` |
 
-Each sample's README lists its files in reading order and the output to expect. CI builds and runs every sample
-(`.github/workflows/ci.yml`), the Godot one headless in Godot 4.7.2.
+Each sample's README lists its files in reading order and the output to expect; the
+[Samples](https://ecs.xgamedev.net/en/docs/samples) section of the docs site walks through each one with its code
+included from these files. CI builds and runs every sample (`.github/workflows/ci.yml`), the Godot one headless in
+Godot 4.7.2, and checks that the deterministic ones print the output of their README and of their docs pages.
 
 For one feature at a time, the guide pages of single features (queries, change tracking, prefabs, dynamic buffers,
 indexes and relations, hierarchy, groups, cleanup and disable, snapshots, threading; start from the

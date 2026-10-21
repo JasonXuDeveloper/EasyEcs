@@ -1,0 +1,94 @@
+---
+title: "MultiWorld: one world per thread"
+seoTitle: "One ECS World per Thread in C#: MultiWorld Sample"
+description: "Split a C# game server into zones, one EasyEcs world per thread: every core busy, nothing shared, no locks. A runnable sample with its output."
+icon: Layers
+---
+
+import { Cpu, RefreshCw, Server, Workflow } from 'lucide-react';
+
+A server splits its game into zones (maps, rooms, matches) that share nothing, and gives each zone a world of its
+own on a thread of its own. Here every zone is the same small game of 20,000 units, and there is one zone per
+processor, all updated at once. Every code block on this page is included from
+[`samples/MultiWorld`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/MultiWorld), which CI builds
+and runs.
+
+## What you learn [#what-you-learn]
+
+- **A world belongs to one thread**: the thread that builds a world updates it and disposes it; nothing is locked
+  and nothing is shared ([one world per thread](/en/docs/guide/threading#recommended-one-world-per-thread)).
+- **Singletons are per world**: each zone's `Tally` counts the deaths of its own world only
+  ([singletons](/en/docs/guide/singletons)).
+- **Creating many entities at once**: `world.CreateEntities(units, …)` fills an array of handles in one call
+  ([structural changes](/en/docs/guide/structural-changes)).
+- **Systems with one job each**: move, hurt, respawn, as `[ForEach]` methods ([systems](/en/docs/guide/systems)).
+
+## Run it [#run-it]
+
+```bash
+dotnet run -c Release --project samples/MultiWorld                    # 1000 updates per zone
+dotnet run -c Release --project samples/MultiWorld -- --updates 200
+```
+
+## The data [#data]
+
+Three components of a unit and the zone's `Tally` singleton.
+
+<include lang="csharp" meta='title="Components.cs"'>../../../samples/MultiWorld/Components.cs</include>
+
+## The systems [#systems]
+
+Units move by their velocity; those farther than the safe radius from the centre lose one health per tick, and the
+dead come back at the centre. Each system reads and writes components only, so the same three systems serve every
+zone.
+
+<include lang="csharp" meta='title="Systems.cs"'>../../../samples/MultiWorld/Systems.cs</include>
+
+## One zone [#zone]
+
+`Zone.Run` is everything one thread does: build a world, create the units, update it, report a `ZoneResult`, and
+dispose the world. No other thread ever sees it.
+
+<include lang="csharp" meta='title="Zone.cs"'>../../../samples/MultiWorld/Zone.cs</include>
+
+## The program [#program]
+
+One thread per processor, each running one zone and writing only its own slot of the results; the main thread waits
+for all of them and prints.
+
+<include lang="csharp" meta='title="Program.cs"'>../../../samples/MultiWorld/Program.cs</include>
+
+## Output [#output]
+
+On a 4-core machine. The deaths are the same on every run; the times and the throughput depend on the machine.
+
+```text
+zone  0: 20,000 units,  51,430 deaths,  169.3 ms
+zone  1: 20,000 units,  51,428 deaths,  188.4 ms
+zone  2: 20,000 units,  51,429 deaths,  165.6 ms
+zone  3: 20,000 units,  51,426 deaths,  150.6 ms
+4 worlds on 4 threads, 80,000 units, 1000 updates each
+253 ms, 316.2 M entity-updates/s
+```
+
+The zones differ only by their starting directions, so their deaths differ by a few; the time of the whole run is
+close to the time of one zone, because the zones run side by side. This is a demonstration, not a measurement: CI
+runs the sample without comparing its output, and the numbers come from the BenchmarkDotNet suite
+(`MultiWorldBenchmark`, see [performance](/en/docs/performance)).
+
+## Related [#related]
+
+<Cards>
+  <Card icon={<Cpu />} title="Threading" href="/en/docs/guide/threading">
+    One world per thread, parallel systems and parallel [ForEach] methods.
+  </Card>
+  <Card icon={<Server />} title="Hosting" href="/en/docs/guide/hosting">
+    Give a world one owner in a real server: a fixed step, requests, saves.
+  </Card>
+  <Card icon={<Workflow />} title="Migration and unload" href="/en/docs/guide/migration-and-unload">
+    Move a player from one zone's world to another.
+  </Card>
+  <Card icon={<RefreshCw />} title="HotReload sample" href="/en/docs/samples/hot-reload">
+    The next sample: replace game logic while the world runs.
+  </Card>
+</Cards>
