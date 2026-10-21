@@ -7,55 +7,9 @@ players they see and catch fire under the sky by day, only what changed sent to 
 when the server stops. Fifty bots play for a minute of game time, a day and a night twice. Read
 [GameLoop](../GameLoop) first.
 
-## What you learn
-
-- **A chunk is an entity, its blocks and its water two buffers.** `Chunk` is the chunk's key, `IUniqueIndexed<ChunkPos>`,
-  so `world.ChunkIndex.TryGet(pos, out chunk)` finds the chunk at a position. Its 8,192 blocks are a
-  `DynamicBuffer<Block>` of a byte enum and its water a `DynamicBuffer<Fluid>` of levels in the same layout, read as
-  `chunk.Block[slot]` and written through `chunk.WriteBlock()`.
-- **The world follows the players, and keeps what they left.** `ChunkLoadSystem` asks for the chunks missing around
-  the players who crossed into another chunk (`[Changed<InChunk>]`), as `LoadRequest` entities, one per chunk (a unique
-  index); `ChunkReadSystem` reads them back from the region files or generates them. Each chunk counts its viewers
-  (`Viewers`, kept by `ChunkViewSystem` as the views change), and `ChunkUnloadSystem` marks the chunks nobody has had
-  in view for five seconds, a twentieth of them each tick (`[ForEach(Slices = 20)]`), and `ChunkSaveSystem` writes each with the
-  zombies and items in it (`SaveEntities`) and destroys them. Loading and saving run in `OnUpdate`, after the pass:
-  a pass may not load or save entities (EECS041), so the pass leaves the work as data.
-- **An area of interest without polling.** A client sees the entities of the chunks it has, so no player keeps a set
-  of entities: the views change only when a chunk comes into or leaves a view (`ChunkViewSystem`), an entity crosses
-  into another chunk (`[Changed<InChunk>]`, from a grid of the entities by chunk, `world.InChunkIndex.Find(chunk)`),
-  appears, or goes. `Visible`, a cleanup component, keeps the chunk a destroyed entity was seen in until
-  `SightSystem` has despawned it (`[With<Retired>]`). A zombie hunts the nearest player within its `Vision` through
-  the same grid, twice a second, a tenth of the zombies each tick (`Slices`), and keeps its target while in reach.
-- **Water as a stencil.** A level depends on the six blocks around it, the same rule for every block, so
-  `WaterFlowSystem` steps a chunk 16 blocks at a time with `Vector128<byte>`, on a padded copy of the grid whose halo
-  holds the neighbours' edges, and only on the layers water reaches. The step goes into a second buffer that `WaterCommitSystem` copies once
-  every chunk has stepped, as a GPU ping-pongs two buffers. A chunk whose step changed nothing loses its
-  `Flowing` tag and is not visited again until a block changes near it (`BlockUpdateSystem`, `[Changed<T>]` on the
-  blocks).
-- **SIMD where the data is a column.** Cooldowns, item ages, fire and fire damage are counters every entity changes
-  the same way: batch methods get them as spans and change 8 per instruction with `Vector<int>`. The damage has its
-  own system with an `UpdateInterval`, so the tracked `Health` is written only on the ticks that hurt. The fire goes
-  out in the next system, since a batch method may not change structure.
-- **State changes are data.** A dig is a flag of the client's `Input`; a dug block becomes an `Item` entity; fire is a
-  `Burning` component that `SunlightSystem` adds and `ExtinguishSystem` removes; dying is a `Health` of zero that one
-  system per kind handles (zombies go, players drop their inventory and respawn), and `Health` is tracked, so those
-  systems visit only the healths written since their last run (`[Changed<Health>]`).
-- **Send only what changed.** The buffers and the `Position` are tracked: `[ChangedAny<DynamicBuffer<Block>,
-  DynamicBuffer<Fluid>>]` visits the chunks dug or flooded since the last tick and `[Changed<Position>]` the bodies that
-  moved. Physics writes the position through `Mut<Position>` with `SetIfChanged`, so a body standing still is not
-  sent; `ChunkViewSystem` keeps the chunks each client has in a `DynamicBuffer<InView>` and sends a chunk whole when
-  it comes into view; it reacts to data instead of polling: `[Changed<InChunk>]` visits the players that crossed into
-  another chunk, `[With<Fresh>]` the chunks just loaded.
-- **One method for several kinds.** `SendEntitiesSystem` reads the health bar through `Maybe<Health>`: players and
-  zombies have one, dropped items do not, and one method sends all three.
-- **A tick in three groups.** `ClientInput`, `Simulation` and `Replication` are system groups
-  (`[UpdateInGroup<T>]`); the host runs each with `world.Update<TGroup>()`.
-- **A scoreboard that stays sorted.** `Score` is `IIndexed<int>`: `world.ScoreIndex.Descending()` walks the players
-  from the best digger down, kept in order as `DigSystem` writes the scores, never sorted.
-- **Save on stop.** The world is saved without its prefabs and region files (`SaveWithout`), and a restarted world
-  builds them and loads the save beside them (`LoadKeeping`).
-- **Measured.** `WorldOptions.MeasureSystems` times every system; the run prints the average tick against the 50 ms
-  budget of a 20 TPS server to stderr. `--schedule` prints the order the systems run in (`world.DescribeSchedule()`).
+What each file teaches, with its code, is on the docs site:
+[VoxelServer](https://ecs.xgamedev.net/en/docs/samples/voxel-server)
+([中文](https://ecs.xgamedev.net/zh/docs/samples/voxel-server)).
 
 ## Files, in reading order
 

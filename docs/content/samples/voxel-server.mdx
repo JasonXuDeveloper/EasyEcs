@@ -20,35 +20,6 @@ The sample is a server, but nothing in it is: the same world serves a client. A 
 and bodies to predict what happens before the server's packets arrive, and a renderer reads the positions and blocks
 after each tick. See [the client and the server](#client-and-server).
 
-## What you learn [#what-you-learn]
-
-Each technique below has its own section, with the code that uses it.
-
-- **A tick in three groups**: [system groups](/en/docs/guide/systems#system-groups) for input, simulation and
-  replication, each run by its own `world.Update<TGroup>()` ([one tick](#one-tick)).
-- **A chunk is an entity, its blocks and water two buffers**: a
-  [unique index](/en/docs/guide/indexes-and-relations#unique-keys) finds the chunk at a position,
-  [dynamic buffers](/en/docs/guide/dynamic-buffers) of bytes hold its 8,192 blocks and their water ([the data](#data)).
-- **Chunks that follow the players and are kept**: loads asked for only by the players who crossed into another chunk
-  ([`[Changed<T>]`](/en/docs/guide/change-tracking)), the chunk with the entities in it saved and loaded back with
-  [`SaveEntities`](/en/docs/guide/migration-and-unload) and `LoadEntities` after the pass ([chunks](#chunks)).
-- **An area of interest without polling**: a client sees the entities of its chunks, so the views change only when
-  something crosses into another chunk, appears or goes; a [cleanup component](/en/docs/guide/cleanup-and-disable) keeps where a
-  destroyed entity was seen until its despawn is sent ([areas of interest](#aoi)).
-- **Water as a SIMD stencil**: the same rule for every block, stepped 16 blocks per instruction with
-  `Vector128<byte>`, only on the chunks that may still move ([water](#water)).
-- **SIMD batch methods**: cooldowns, ages, fire and its damage, 8 per instruction in
-  [batch methods](/en/docs/guide/systems#batch-methods), the damage at its own
-  [`UpdateInterval`](/en/docs/guide/systems#update-interval) ([SIMD](#simd)).
-- **State changes are data**: digging, items, fire and death as components and entities ([items](#items),
-  [zombies](#zombies)).
-- **A sorted scoreboard**: an [ordered index](/en/docs/guide/indexes-and-relations#ordered-index) of the players by
-  blocks dug ([leaderboard](#leaderboard)).
-- **Send only what changed**: [`[Changed<T>]`, `[ChangedAny<..>]`](/en/docs/guide/change-tracking#changed-any) and
-  [`Maybe<T>`](/en/docs/guide/systems#maybe) ([replication](#replication)).
-- **Save on stop**: [`SaveWithout` and `LoadKeeping`](/en/docs/guide/saves#restart), prefabs rebuilt by each start.
-- **Measured**: [`MeasureSystems` and `DescribeSchedule`](/en/docs/guide/diagnostics).
-
 ## Run it [#run-it]
 
 ```bash
@@ -79,7 +50,7 @@ flowchart LR
   unload --> send
 ```
 
-A tick has three parts, and each is a system group: a struct that names it, and `[UpdateInGroup<T>]` on its systems.
+A tick has three parts, and each is a [system group](/en/docs/guide/systems#system-groups): a struct that names it, and `[UpdateInGroup<T>]` on its systems.
 
 <include lang="csharp" meta='title="Groups.cs"'>../../../samples/VoxelServer/Groups.cs</include>
 
@@ -96,7 +67,9 @@ components, and the next one sees what the last one wrote.
 ## The data [#data]
 
 Blocks and chunks, their water, what moves, players, zombies and items, then the singletons. Comments say what each
-value means and who writes it.
+value means and who writes it. A chunk is an entity: its `Chunk` key is a
+[unique index](/en/docs/guide/indexes-and-relations#unique-keys) (`world.ChunkIndex`), its 8,192 blocks and their water two
+byte buffers.
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/VoxelServer/Components.cs</include>
 
@@ -286,7 +259,8 @@ Two shapes of data in this server suit SIMD:
 
 - **A grid with a stencil**: the water, above. Each block's next level is the same function of its neighbours, and
   the grid is a byte buffer, so 16 blocks go through each instruction.
-- **A column of counters**: cooldowns, item ages, fire and fire damage change the same way on every entity. A batch method gets
+- **A column of counters**: cooldowns, item ages, fire and fire damage (at its own [`UpdateInterval`](/en/docs/guide/systems#update-interval)) change the same way on every
+  entity. A [batch method](/en/docs/guide/systems#batch-methods) gets
   a run of rows as spans, and `Vector<int>` changes 8 of them per instruction on AVX2 (4 on Arm). The JIT does not
   vectorize these loops by itself, so the methods do it; integer lanes give the same result on every machine.
 
@@ -297,8 +271,8 @@ positions are `Vector3`s, three floats next to each other, not three columns. A 
 
 ## A scoreboard that stays sorted [#leaderboard]
 
-`Score` is the blocks a player dug, an `IIndexed<int>` (see [the data](#data)), so `world.ScoreIndex` is an index of
-the players by score. Its key is comparable, so the index walks in order: `Descending()` starts at the best digger.
+`Score` is the blocks a player dug, an `IIndexed<int>` (see [the data](#data)), so `world.ScoreIndex` is an
+[ordered index](/en/docs/guide/indexes-and-relations#ordered-index) of the players by score. Its key is comparable, so the index walks in order: `Descending()` starts at the best digger.
 The index is kept sorted as `DigSystem` writes the scores, so the top of the board is a walk of three entries, never a
 sort of every player.
 
@@ -308,13 +282,14 @@ sort of every player.
 
 ## What is sent [#replication]
 
-Changed chunks come from `[ChangedAny<DynamicBuffer<Block>, DynamicBuffer<Fluid>>]`: a chunk whose blocks or water
+Changed chunks come from
+[`[ChangedAny<DynamicBuffer<Block>, DynamicBuffer<Fluid>>]`](/en/docs/guide/change-tracking#changed-any): a chunk whose blocks or water
 changed since the system last ran, and no other, goes to the players that have it in view (its `Viewers`).
 
 <include lang="csharp" meta='title="Systems/Replication.cs"'>../../../samples/VoxelServer/Systems/Replication.cs#chunks</include>
 
 Moved entities come from `[Changed<Position>]`, stamped by `Mut<Position>` above. An update carries the health bar
-of the entities that have one: `Maybe<Health>` reads it where the entity has a `Health`, so players, zombies and
+of the entities that have one: [`Maybe<Health>`](/en/docs/guide/systems#maybe) reads it where the entity has a `Health`, so players, zombies and
 items are sent by one method, and the query does not require `Health`. The clock is the first system of the
 simulation, not of the replication, so a server that replicates less often keeps game time.
 
@@ -324,7 +299,8 @@ simulation, not of the replication, so a server that replicates less often keeps
 
 ## The program [#program]
 
-The world with its options: `MeasureSystems` for the timings, and a buffer pool big enough for a chunk's blocks and
+The world with its options: [`MeasureSystems`](/en/docs/guide/diagnostics) for the timings (`--schedule` prints
+`DescribeSchedule`), and a buffer pool big enough for a chunk's blocks and
 water, so a loaded chunk reuses the lists of one that was unloaded.
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#options</include>
@@ -335,8 +311,8 @@ plumbing, not the lesson.
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#players</include>
 
-On stop the world is saved without its prefabs and region files, which every start sets up; a restarted world sets
-them up, then loads the save beside them.
+On stop the world is saved without its prefabs and region files, which every start sets up
+([`SaveWithout`](/en/docs/guide/saves#restart)); a restarted world sets them up, then loads the save beside them (`LoadKeeping`).
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#save</include>
 

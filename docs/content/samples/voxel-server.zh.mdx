@@ -17,28 +17,6 @@ import { Boxes, FlaskConical, Network, Save } from 'lucide-react';
 它写的是服务器，但里面没有一处只属于服务器：同一个 World 也能放在客户端。客户端跑同样的区块、水和刚体，在服务器的包到达之前先预测；
 每个 tick 之后，渲染层读位置和方块画出来。见[客户端与服务器](#client-and-server)。
 
-## 你会学到 [#what-you-learn]
-
-下面每一项都有自己的一节，附上用到它的代码。
-
-- **一个 tick 分三个组**：输入、模拟、同步各是一个[系统组](/zh/docs/guide/systems#system-groups)，各自由
-  `world.Update<TGroup>()` 运行（[一个 tick](#one-tick)）。
-- **区块是实体，方块和水是两个缓冲**：[唯一索引](/zh/docs/guide/indexes-and-relations#unique-keys)按位置找到区块，
-  字节的[动态缓冲](/zh/docs/guide/dynamic-buffers)装它的 8,192 个方块和对应的水（[数据](#data)）。
-- **区块跟着玩家走，而且会保留**：只有跨了区块的玩家才请求加载（[`[Changed<T>]`](/zh/docs/guide/change-tracking)），
-  区块连同里面的实体用 [`SaveEntities`](/zh/docs/guide/migration-and-unload) 和 `LoadEntities` 在遍历之后存下、读回（[区块](#chunks)）。
-- **不用轮询的视野**：客户端看见的是它那些区块里的实体，所以视野只在有东西跨区块、出现或消失时才变；
-  [清理组件](/zh/docs/guide/cleanup-and-disable)记住被销毁的实体最后在哪里被看见，直到它的消失包发出去（[视野](#aoi)）。
-- **水是 SIMD 模板运算**：每个方块同一条规则，用 `Vector128<byte>` 一条指令算 16 个方块，只算还可能流动的区块（[水](#water)）。
-- **SIMD 批量方法**：冷却、存在时间、着火和火焰伤害在[批量方法](/zh/docs/guide/systems#batch-methods)里一条指令算 8 个，
-  伤害按自己的 [`UpdateInterval`](/zh/docs/guide/systems#update-interval) 运行（[SIMD](#simd)）。
-- **状态变化即数据**：挖掘、掉落物、着火和死亡都是组件和实体（[掉落物](#items)、[僵尸](#zombies)）。
-- **自动排好序的排行榜**：按挖掘数索引玩家的[有序索引](/zh/docs/guide/indexes-and-relations#ordered-index)（[排行榜](#leaderboard)）。
-- **只发变了的**：[`[Changed<T>]`、`[ChangedAny<..>]`](/zh/docs/guide/change-tracking#changed-any) 和
-  [`Maybe<T>`](/zh/docs/guide/systems#maybe)（[下发什么](#replication)）。
-- **停机存档**：[`SaveWithout` 和 `LoadKeeping`](/zh/docs/guide/saves#restart)，预制体每次启动重建。
-- **可度量**：[`MeasureSystems` 和 `DescribeSchedule`](/zh/docs/guide/diagnostics)。
-
 ## 运行 [#run-it]
 
 ```bash
@@ -69,7 +47,7 @@ flowchart LR
   unload --> send
 ```
 
-一个 tick 分三部分，每部分是一个系统组：一个起名用的 struct，加上它的系统上的 `[UpdateInGroup<T>]`。
+一个 tick 分三部分，每部分是一个[系统组](/zh/docs/guide/systems#system-groups)：一个起名用的 struct，加上它的系统上的 `[UpdateInGroup<T>]`。
 
 <include lang="csharp" meta='title="Groups.cs"'>../../../samples/VoxelServer/Groups.cs</include>
 
@@ -84,7 +62,8 @@ flowchart LR
 
 ## 数据 [#data]
 
-先是方块、区块和它的水，然后是会动的东西、玩家、僵尸和掉落物，最后是单例。注释说明每个值的含义和谁来写。
+先是方块、区块和它的水，然后是会动的东西、玩家、僵尸和掉落物，最后是单例。注释说明每个值的含义和谁来写。区块是实体：它的键 `Chunk` 是
+[唯一索引](/zh/docs/guide/indexes-and-relations#unique-keys)（`world.ChunkIndex`），8,192 个方块和对应的水是两个字节缓冲。
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/VoxelServer/Components.cs</include>
 
@@ -240,7 +219,8 @@ flowchart LR
 这个服务器里有两种数据适合 SIMD：
 
 - **带模板运算的网格**：就是上面的水。每个方块的下一个水位是它邻居的同一个函数，网格又是字节缓冲，所以一条指令算 16 个方块。
-- **一列计数器**：冷却、掉落物存在时间、着火和火焰伤害在每个实体上的变化都一样。批量方法把一段行当成 span 拿到，`Vector<int>` 在 AVX2 上一条指令改
+- **一列计数器**：冷却、掉落物存在时间、着火和火焰伤害（按它自己的 [`UpdateInterval`](/zh/docs/guide/systems#update-interval)）在每个实体上的变化都一样。
+  [批量方法](/zh/docs/guide/systems#batch-methods)把一段行当成 span 拿到，`Vector<int>` 在 AVX2 上一条指令改
   8 个（Arm 上 4 个）。JIT 不会自己把这些循环向量化，所以方法里手写；整数通道在每台机器上结果都一样。
 
 其他系统对每个实体做的事都不一样：物理查每个物体周围的方块，找目标遍历索引，追击读另一个实体的位置。查找加分支的循环用向量帮不上忙，
@@ -248,7 +228,7 @@ flowchart LR
 
 ## 自动排好序的排行榜 [#leaderboard]
 
-`Score` 是玩家挖的方块数，一个 `IIndexed<int>`（见[数据](#data)），所以 `world.ScoreIndex` 是按分数索引玩家的索引。键可比较，
+`Score` 是玩家挖的方块数，一个 `IIndexed<int>`（见[数据](#data)），所以 `world.ScoreIndex` 是按分数索引玩家的[有序索引](/zh/docs/guide/indexes-and-relations#ordered-index)。键可比较，
 所以索引能按顺序遍历：`Descending()` 从挖得最多的人开始。`DigSystem` 写分数时索引就保持有序，所以榜首只是走三项，从不对所有玩家排序。
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#leaderboard</include>
@@ -257,12 +237,13 @@ flowchart LR
 
 ## 下发什么 [#replication]
 
-变了的区块来自 `[ChangedAny<DynamicBuffer<Block>, DynamicBuffer<Fluid>>]`：只有自系统上次运行以来方块或水变了的区块，
+变了的区块来自
+[`[ChangedAny<DynamicBuffer<Block>, DynamicBuffer<Fluid>>]`](/zh/docs/guide/change-tracking#changed-any)：只有自系统上次运行以来方块或水变了的区块，
 才会发给视野里有它的玩家（它的 `Viewers`）。
 
 <include lang="csharp" meta='title="Systems/Replication.cs"'>../../../samples/VoxelServer/Systems/Replication.cs#chunks</include>
 
-移动过的实体来自 `[Changed<Position>]`，由上面的 `Mut<Position>` 打 tick。更新里带着有血条的实体的血量：`Maybe<Health>`
+移动过的实体来自 `[Changed<Position>]`，由上面的 `Mut<Position>` 打 tick。更新里带着有血条的实体的血量：[`Maybe<Health>`](/zh/docs/guide/systems#maybe)
 在实体有 `Health` 时读它，所以玩家、僵尸和掉落物由一个方法下发，查询也不要求 `Health`。时钟是模拟组的第一个系统，而不在同步组里，所以同步频率较低的服务器，游戏时间照样正常走。
 
 <include lang="csharp" meta='tab="实体"'>../../../samples/VoxelServer/Systems/Replication.cs#entities</include>
@@ -271,7 +252,7 @@ flowchart LR
 
 ## 程序 [#program]
 
-World 和它的选项：`MeasureSystems` 用来计时；缓冲池大到能放下一个区块的方块和水，所以新加载的区块能复用卸载区块的列表。
+World 和它的选项：[`MeasureSystems`](/zh/docs/guide/diagnostics) 用来计时（`--schedule` 打印 `DescribeSchedule`）；缓冲池大到能放下一个区块的方块和水，所以新加载的区块能复用卸载区块的列表。
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#options</include>
 
@@ -280,7 +261,7 @@ World 和它的选项：`MeasureSystems` 用来计时；缓冲池大到能放下
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#players</include>
 
-停机时存档，但不存预制体和区域文件，它们每次启动都会重新设置；重启的 World 先设置好它们，再把存档读进来。
+停机时存档，但不存预制体和区域文件，它们每次启动都会重新设置（[`SaveWithout`](/zh/docs/guide/saves#restart)）；重启的 World 先设置好它们，再把存档读进来（`LoadKeeping`）。
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#save</include>
 
