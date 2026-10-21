@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
@@ -17,6 +18,18 @@ public class SystemTests
         protected override void OnCreate() => Log.Add($"{name}.create");
         protected override void OnUpdate() => Log.Add($"{name}.update");
         protected override void OnDestroy() => Log.Add($"{name}.destroy");
+    }
+
+    // A run as short as Logged's can take less than a TimeSpan tick (100 ns), so its measured time may round to zero:
+    // this one lasts at least a microsecond.
+    private sealed class Slow(int interval) : Logged("slow", interval)
+    {
+        protected override void OnUpdate()
+        {
+            base.OnUpdate();
+            long start = Stopwatch.GetTimestamp();
+            while (Stopwatch.GetElapsedTime(start) < TimeSpan.FromMicroseconds(1)) { }
+        }
     }
 #pragma warning restore EECS018, EECS028
 
@@ -58,7 +71,7 @@ public class SystemTests
     public void MeasureSystemsRecordsRunsOnlyWhenEnabled()
     {
         using var measured = new World(new WorldOptions { MeasureSystems = true });
-        var a = new Logged("a", interval: 2);
+        var a = new Slow(interval: 2);
         measured.AddSystem(a);
         for (int i = 0; i < 4; i++) measured.Update();
         Assert.That(a.Stats.Runs, Is.EqualTo(2));
