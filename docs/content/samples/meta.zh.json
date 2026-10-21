@@ -3,6 +3,7 @@
   "icon": "FolderCode",
   "pages": [
     "index",
+    "../example",
     "hello-world",
     "game-loop",
     "save-load",
