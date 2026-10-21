@@ -33,6 +33,7 @@ it from every match that has it. Both return how many entities they changed.
 ```csharp
 public record struct Fighter(int Team) : IComponent;
 public record struct Stun(int Ticks) : IComponent;
+public record struct Regen(int PerTick) : IComponent;
 
 public static class Rounds
 {
@@ -42,7 +43,7 @@ public static class Rounds
 
 ```csharp
 var fighters = new Entity[1_000];
-world.CreateEntities(fighters, new Fighter(1), new Health(100));
+world.CreateEntities(fighters, new Fighter(1), new Health(100), new Regen(2));
 
 int stunned = world.SetAll(new Stun(3), Rounds.Fighters);   // the round ends: everyone is stunned // [!code highlight]
 int lifted = world.RemoveAll<Stun>();                        // the stun lifts from everyone
@@ -58,9 +59,11 @@ so name what to select (`With<Fighter>()`). Any `QueryFilter` works, including `
 on every match: values are kept and given back.
 
 ```csharp
-int paused = world.DisableAll<Health>(Rounds.Fighters);     // nobody regenerates during the cutscene
-int resumed = world.EnableAll<Health>();                     // every kept value comes back
+int paused = world.DisableAll<Regen>(Rounds.Fighters);     // pause systems that require Regen
+int resumed = world.EnableAll<Regen>();                    // restore the kept Regen(2) value
 ```
+
+Disabling regeneration leaves `Health` available to damage and display systems. The [full example](/en/docs/guide/bulk#full-example) below runs a regeneration system and checks that health stays unchanged while paused, then rises again after resuming.
 
 ### Spawn and clear waves [#spawn-and-clear]
 
