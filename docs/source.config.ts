@@ -12,13 +12,12 @@ import {
   metaSchema,
 } from 'fumadocs-mdx/config';
 import lastModified from 'fumadocs-mdx/plugins/last-modified';
-import rehypeMermaid from 'rehype-mermaid';
 import remarkCjkFriendly from 'remark-cjk-friendly';
 import remarkCjkFriendlyGfmStrikethrough from 'remark-cjk-friendly-gfm-strikethrough';
 import { z } from 'zod';
 import { remarkCjkLineBreaks } from './src/lib/cjk';
 import { legacyFrontmatter, remarkLegacyPage } from './src/lib/legacy';
-import { mermaidOptions, remarkMermaidSource } from './src/lib/mermaid';
+import { rehypeMermaid, remarkMermaidSource } from './src/lib/mermaid';
 import { remarkSearchSkip } from './src/lib/search-skip';
 
 // "Last updated" dates come from `git log`, but only with the full history:
@@ -39,10 +38,15 @@ function hasFullGitHistory() {
   }
 }
 
+/** Set by vite.config.ts for `--mode scripts`. */
+const contentOnly = process.env.DOCS_CONTENT_ONLY === '1';
+
 /**
  * Frontmatter: Fumadocs' fields plus
  * - `seoTitle`: the <title> and social title when the page title alone is too
  *   generic for search results ("Overview"); the page heading keeps `title`.
+ * - `navTitle`: the sidebar's name for the page when the title is too long
+ *   for it ("VoxelServer" for "VoxelServer: a Minecraft-style server").
  * - `faq`: the page's questions (## headings ending in "?") become FAQPage
  *   structured data.
  * Typed as the base schema: the extended type makes tsc's inference of the
@@ -52,6 +56,7 @@ function hasFullGitHistory() {
 const docSchema = frontmatterSchema.extend({
   seoTitle: frontmatterSchema.shape.description,
   faq: frontmatterSchema.shape.full,
+  navTitle: frontmatterSchema.shape.description,
 }) as unknown as typeof frontmatterSchema;
 
 // One collection for both languages: content/{page}.mdx (English) and
@@ -103,7 +108,7 @@ export default defineConfig({
       remarkLegacyPage,
       [remarkImage, { external: false, publicDir: 'public' }],
       // ```mermaid fences -> <Mermaid chart="...">fence</Mermaid>: the
-      // attribute is the Markdown copy's source, rehype-mermaid below
+      // attribute is the Markdown copy's source, rehypeMermaid below
       // replaces the fence inside with the SVG.
       remarkMdxMermaid,
       remarkMermaidSource,
@@ -114,6 +119,9 @@ export default defineConfig({
       remarkSearchSkip,
     ],
     // Diagrams are drawn at build time, before rehype-code highlights fences.
-    rehypePlugins: (plugins) => [[rehypeMermaid, mermaidOptions], ...plugins],
+    // The scripts (vite.config.ts, `--mode scripts`) read the Markdown form of
+    // a page, which keeps the diagram source: they skip the drawing.
+    rehypePlugins: (plugins) =>
+      contentOnly ? plugins : [rehypeMermaid, ...plugins],
   },
 });

@@ -1,5 +1,5 @@
 /**
- * First step of `bun run build`: rehype-mermaid draws the diagrams in a
+ * First step of `bun run build`: rehypeMermaid draws the diagrams in a
  * headless Chromium (src/lib/mermaid.ts). Where Playwright's browser is not
  * installed yet (Cloudflare's build), install its headless shell.
  */

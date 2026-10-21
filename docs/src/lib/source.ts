@@ -1,4 +1,5 @@
 import { docs } from 'collections/server';
+import type { LoaderPlugin } from 'fumadocs-core/source';
 import { loader } from 'fumadocs-core/source';
 import { lucideIconsPlugin } from 'fumadocs-core/source/plugins/lucide-icons';
 import { i18n } from './i18n';
@@ -10,17 +11,31 @@ import { i18n } from './i18n';
 const files = docs.toFumadocsSource();
 files.files = files.files.filter((file) => file.path !== 'README.md');
 
+/** The sidebar shows a page's `navTitle` when it has one (source.config.ts). */
+const navTitlePlugin: LoaderPlugin = {
+  name: 'nav-title',
+  transformPageTree: {
+    file(node, path) {
+      const file = path ? this.storage.read(path) : undefined;
+      const navTitle =
+        file?.format === 'page' ? (file.data as DocExtras).navTitle : undefined;
+      return navTitle ? { ...node, name: navTitle } : node;
+    },
+  },
+};
+
 // Pages are served at /{lang}/docs/{page}; content/index.mdx is /{lang}/docs.
 export const source = loader({
   baseUrl: '/docs',
   source: files,
   i18n,
-  plugins: [lucideIconsPlugin()],
+  plugins: [lucideIconsPlugin(), navTitlePlugin],
 });
 
 /** Frontmatter fields added in source.config.ts (`docSchema`) */
 export interface DocExtras {
   seoTitle?: string;
+  navTitle?: string;
   faq?: boolean;
 }
 

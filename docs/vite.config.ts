@@ -59,22 +59,31 @@ function analyzerRules() {
   return ids.size;
 }
 
-// `--mode scripts`: the scripts in scripts/ (run with vite-node) only load the content.
-export default defineConfig(({ mode }) => ({
-  plugins:
-    mode === 'scripts'
-      ? [fumadocsMdx()]
-      : [fumadocsMdx(), serverOnlyPageExports(), tailwindcss(), reactRouter()],
-  define: {
-    __DOCS_VERSION__: JSON.stringify(docsVersion()),
-    __ANALYZER_RULES__: JSON.stringify(analyzerRules()),
-  },
-  optimizeDeps:
-    mode === 'scripts' ? { noDiscovery: true, include: [] } : undefined,
-  resolve: {
-    alias: {
-      '@': path.resolve(root, 'src'),
-      collections: path.resolve(root, '.source'),
+// `--mode scripts`: the scripts in scripts/ (run with vite-node) only load the
+// content, compiled without diagrams or highlighting (source.config.ts).
+export default defineConfig(({ mode }) => {
+  if (mode === 'scripts') process.env.DOCS_CONTENT_ONLY = '1';
+  return {
+    plugins:
+      mode === 'scripts'
+        ? [fumadocsMdx()]
+        : [
+            fumadocsMdx(),
+            serverOnlyPageExports(),
+            tailwindcss(),
+            reactRouter(),
+          ],
+    define: {
+      __DOCS_VERSION__: JSON.stringify(docsVersion()),
+      __ANALYZER_RULES__: JSON.stringify(analyzerRules()),
     },
-  },
-}));
+    optimizeDeps:
+      mode === 'scripts' ? { noDiscovery: true, include: [] } : undefined,
+    resolve: {
+      alias: {
+        '@': path.resolve(root, 'src'),
+        collections: path.resolve(root, '.source'),
+      },
+    },
+  };
+});

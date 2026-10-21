@@ -24,6 +24,7 @@ reference page: when in doubt, do what it does.
 ```yaml
 ---
 title: Change tracking                     # the page heading and the sidebar entry
+navTitle: VoxelServer                      # optional, a shorter sidebar entry when the title wraps there
 seoTitle: "Change tracking in C#: [Changed<T>] and [Removed<T>]"   # optional <title> for search results
 description: "Visit only the entities whose component was written…"         # 120-160 characters, says what the page answers
 icon: Radar                                # optional, a name from lucide's `icons` table, not an alias (lint:links checks it)
