@@ -18,7 +18,7 @@ systems, loaded from storage when first needed and saved only when they change. 
   prefab's defaults and loading is not a change. A new actor has no record, so its defaults are its first state and
   the next save writes them.
 - **Save what changed.** The persistent components are `ITracked`. A system in a group of its own
-  (`world.Update<Saving>()`) lists the actors written since it last ran (`[ForEach, Changed<Stock>]`), and the host
+  (`world.Update<Saving>()`) lists the actors written since it last ran (`[ForEach, Changed<Stock>]` and `[ForEach, Changed<Balance>]`), and the host
   saves that list after the update: an actor nobody wrote costs nothing, and a saved actor is not saved again until
   something writes it. Writers stamp only what they change: `InterestSystem` writes through `Mut<Balance>` and
   `SetIfChanged`, and `Mailman` reads the stock before it runs a `Buy`, so a refused order writes nothing.

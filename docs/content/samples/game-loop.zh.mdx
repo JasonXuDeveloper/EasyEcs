@@ -21,7 +21,8 @@ CI 会构建并运行它。建议先读 [HelloWorld](/zh/docs/samples/hello-worl
 - **[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)**（`Client` 上的 `IIndexed<int>`）按客户端 id 找玩家：
   `world.ClientIndex.TryFind(...)`。
 - **单例里的[预制体](/zh/docs/guide/prefabs)**：系统用每个实例各自的值实例化 `prefabs.Player` 和 `prefabs.Bullet`，每个只拷贝一行。
-- **[变更追踪](/zh/docs/guide/change-tracking)**（`Position` 上的 `ITracked`、`[Changed<Position>]`）：同步只访问上次运行以来移动过的实体。
+- **[变更追踪](/zh/docs/guide/change-tracking)**（`Position` 上的 `ITracked`、`[Changed<Position>]`）：同步只访问上次运行以来移动过的实体。`MovementSystem`
+  通过 `Mut<Position>` 和 `SetIfChanged` 写入，站着不动的玩家不会被打 tick。
 - **运维**：`--ticks N`、每秒一行状态、Ctrl+C 干净退出、[`WorldOptions.MeasureSystems`](/zh/docs/guide/diagnostics#timing)
   给出每个系统的运行次数和耗时。
 

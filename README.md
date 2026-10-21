@@ -77,8 +77,27 @@ dotnet add package EasyEcs        # net10.0 · source generator, analyzer and Ni
 
 ## Features
 
-Everything EasyEcs gives you; each row links to its guide page with examples ([all features](https://ecs.xgamedev.net/docs/features): what each
-costs and when to use it).
+Every feature has a guide page with a full example; [Features](https://ecs.xgamedev.net/docs/features) lists them all
+with what each costs and when to use it.
+
+- **Entities and data**: [worlds, entities, components and tags](https://ecs.xgamedev.net/docs/guide/entities-and-components),
+  [prefabs and cloning](https://ecs.xgamedev.net/docs/guide/prefabs), [singletons](https://ecs.xgamedev.net/docs/guide/singletons),
+  [dynamic buffers](https://ecs.xgamedev.net/docs/guide/dynamic-buffers), [immediate structural changes](https://ecs.xgamedev.net/docs/guide/structural-changes),
+  [bulk changes](https://ecs.xgamedev.net/docs/guide/bulk), [cleanup components and disable](https://ecs.xgamedev.net/docs/guide/cleanup-and-disable).
+- **Systems and queries**: [`[ForEach]` systems](https://ecs.xgamedev.net/docs/guide/systems) with filters, `Maybe<T>`,
+  batch methods for SIMD, slices, intervals, groups, ordering and generic systems; [ad-hoc queries and struct jobs](https://ecs.xgamedev.net/docs/guide/queries),
+  `entity.Run` for one entity.
+- **Change tracking**: [`[Changed<T>]`, `[ChangedAny<..>]`, `Mut<T>`, `[Removed<T>]` and the destroy log](https://ecs.xgamedev.net/docs/guide/change-tracking).
+- **Finding entities**: [value and unique indexes, ordered ranges, relations](https://ecs.xgamedev.net/docs/guide/indexes-and-relations),
+  [hierarchy](https://ecs.xgamedev.net/docs/guide/hierarchy), [table groups](https://ecs.xgamedev.net/docs/guide/groups).
+- **State over time**: [snapshots](https://ecs.xgamedev.net/docs/guide/snapshots), [saves and restarts](https://ecs.xgamedev.net/docs/guide/saves),
+  [migration, records and plugin unloading](https://ecs.xgamedev.net/docs/guide/migration-and-unload).
+- **Threads**: [one owner thread per world, parallel systems and parallel `[ForEach]`, Native AOT](https://ecs.xgamedev.net/docs/guide/threading).
+- **Tools**: [per-system timing, schedule, introspection, trimming](https://ecs.xgamedev.net/docs/guide/diagnostics),
+  [the analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) (EECS002-EECS053, with code fixes).
+
+<details>
+<summary><b>Every feature with its API</b> (43 rows)</summary>
 
 | Feature | API | What it does |
 |---|---|---|
@@ -125,6 +144,8 @@ costs and when to use it).
 | [Giving memory back](https://ecs.xgamedev.net/docs/guide/diagnostics) | `world.TrimExcess()` | After a peak: drop empty tables, shrink the others, release save and load buffers. |
 | [Analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) | EECS002-EECS053 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
 | [Threading and Native AOT](https://ecs.xgamedev.net/docs/guide/threading) | one owner thread per world; no reflection on hot paths | Many worlds per process, one per thread; AOT works with nothing to configure. |
+
+</details>
 
 ## Example
 
@@ -180,32 +201,6 @@ System.Console.WriteLine(hero.IsDead);                                 // True
 dynamic buffers, indexes, relations, snapshots, system groups, struct jobs) in one world; it is the battle server benchmark below and the world of the scenario tests. The step-by-step tutorial is
 [Getting started](https://ecs.xgamedev.net/docs/getting-started).
 
-## The model in one picture
-
-```mermaid
-flowchart LR
-    subgraph Data
-        E[Entity<br/>id + version]
-        C[Components<br/>struct : IComponent]
-        S[Singletons<br/>struct : ISingletonComponent]
-    end
-    Y[Systems<br/>EcsSystem: OnUpdate + ForEach]
-    E -.->|has| C
-    Y -->|read / write, in order| C
-    Y -->|read / write| S
-```
-
-| Concept | API | In one line |
-|---|---|---|
-| World | `World` | Owns entities, component storage, singletons and systems. Worlds share nothing. |
-| Entity | `Entity` | A 16-byte, version-checked handle. Stale handles throw instead of touching a recycled id. |
-| Component | `struct : IComponent` | Plain per-entity data. An empty struct is a tag. |
-| Singleton | `struct : ISingletonComponent` | One value per world: clock, configuration, counters, a spatial grid. |
-| System | `EcsSystem` | One responsibility: `OnUpdate` plus `[ForEach]` methods, run in registration order or as `[UpdateBefore<T>]` / `[UpdateAfter<T>]` say. |
-| Query | `[ForEach]`, `ForEach`, `Query`, `Count`, `Any` | Entities that have a set of components, filtered with `With` / `Without` / `WithAny` / `Changed` / `Removed`. |
-| Prefab | `Prefab`, `world.Instantiate` | A recipe of component values outside every world, copied into entities. |
-| Index | `IIndexed<TKey>`, `world.Index<T, TKey>()` | Entities by a component's value, or by the entity a relation component points at. |
-
 ## When to use it
 
 | Good fit | Probably not |
@@ -228,14 +223,7 @@ not a toy loop ([what it simulates](https://ecs.xgamedev.net/docs/performance#be
 | MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 0.92 ms | 0 B |
 | BattleServerBenchmark.Tick (the [battle server example](https://ecs.xgamedev.net/docs/example), every feature) | 100,000 | 2.97 ms | 0 B |
 
-Against v4.0.1 (4.33 ms, measured in an earlier run on the same VM; v4.0.1 is not part of this run) the tick is
-2.5x faster.
-
-A `[ForEach]` system adding `Velocity` to `Position` over 10,000 entities (one archetype) takes 9.1 μs, against
-12.8 μs for two plain arrays with no ECS at all (its columns are 64-byte aligned). Micro benchmarks and the
-per-operation comparison are in
-[Performance](https://ecs.xgamedev.net/docs/performance); their `ForEach` and
-`Query` rows run on a world with two archetypes, so they are not directly comparable to the `[ForEach]` row.
+More benchmarks, the micro benchmarks and how to run them are in [Performance](https://ecs.xgamedev.net/docs/performance):
 
 ```bash
 dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*'
@@ -271,6 +259,9 @@ data live ([feature by feature](https://ecs.xgamedev.net/docs/comparison#feature
 | [Find the 1,000 of 100,000 entities written this tick](https://ecs.xgamedev.net/docs/comparison#change-tracking) | 38.5 μs | Friflo.Engine.ECS 53.7 μs | **1.40×** |
 | [Iterate with the entity handle of each row](https://ecs.xgamedev.net/docs/comparison#operations) | 49.0 μs | Friflo.Engine.ECS 67.2 μs | **1.37×** |
 
+<details>
+<summary><b>The 13 close results and the 7 where another library is faster</b>, with the reason for each</summary>
+
 **Close**, EasyEcs ahead by less than that. The full server tick is one of these: most of a tick is iteration over
 dense columns, bound by memory more than by the library, and Arch and DefaultEcs take 3.42× and 3.71× as long there
 and allocate 535 KB and 61 KB per tick (EasyEcs and Friflo: 0 B):
@@ -303,6 +294,8 @@ and allocate 535 KB and 61 KB per tick (EasyEcs and Friflo: 0 B):
 | [Find the 10 of 100,000 entities that lost a component](https://ecs.xgamedev.net/docs/comparison#removal-detection) | 830 ns | Friflo.Engine.ECS 697 ns | 0.84× (within error) | Friflo's `OnComponentRemoved` event pushes each id into a list you keep as the removal happens, a cost per removal; `[Removed<T>]` finds the removals through per-block summaries, a fixed cost per pass that 10 removals do not cover. From 1,000 removals on, EasyEcs leads, with no subscription to write. |
 | [Create 100,000 three-component entities one by one in a fresh world, nothing reserved](https://ecs.xgamedev.net/docs/comparison#cold-create) | 7.13 ms | Arch 4.77 ms | 0.67× | A fresh EasyEcs world grows its table and entity storage by doubling, and the arrays past 85,000 bytes land on the large object heap; together they pass the budget that sets off a full collection, once per new world (D28). Arch keeps entities in 16 KB chunks, which never reach that heap. Reserve the table with `Reserve<T1..Tn>(count)` or create the entities with `CreateEntities`, and EasyEcs is the fastest of the four. |
 
+</details>
+
 What each library has built in:
 
 | | EasyEcs | Friflo.Engine.ECS | Arch | DefaultEcs |
@@ -321,11 +314,6 @@ What each library has built in:
 | Serialization | ✅ `Save` / `Load` (Nino) | ✅ JSON | ❌ | ✅ text, binary |
 | Godot 4 (.NET) | ✅ net10.0 project | ✅ | ✅ | ✅ |
 | Unity / netstandard | ❌ net10.0 | ✅ | ✅ | ✅ |
-
-The full matrix, the per-operation numbers and when to pick which library are in
-[Comparison](https://ecs.xgamedev.net/docs/comparison); every feature with
-what it does, when to use it and what it costs is in
-[Features](https://ecs.xgamedev.net/docs/features).
 
 ## Documentation
 
@@ -362,207 +350,8 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   leaves unwritten (an early `return`, a write in an `if`), which stamps every visited row; its fix takes it as a
   `Mut<T>` ([analyzer](https://ecs.xgamedev.net/en/docs/guide/analyzer#eecs053)).
 
-## What's new in 4.7
-
-- **Writes that count only when the value changed.** A `Mut<T>` parameter stamps only the rows a method writes, and
-  `SetIfChanged` / the generated `SetHealthIfChanged(…)` skip an equal value, so a value recomputed every tick no
-  longer sends every row to `[Changed<T>]` readers
-  ([change tracking](https://ecs.xgamedev.net/en/docs/guide/change-tracking)).
-- **Replication per client.** `[ChangedAny<A, B>]` / `QueryFilter.ChangedAny<A, B>(since)` select rows where any of
-  several components changed, one filter serving every client with `Since(ack)`; `WorldOptions.DestroyLogCapacity` and
-  `world.DestroyedSince` report the entities destroyed since each client's tick.
-- **Unique keys.** `IUniqueIndexed<TKey>` names one entity per key (`index.Get(key)`); a write that would duplicate a
-  key throws before it changes anything
-  ([indexes and relations](https://ecs.xgamedev.net/en/docs/guide/indexes-and-relations)).
-- **Counts without a walk, subtrees without a loop.** `index.Find(key).Count` sizes a buffer in O(1), `KeyCount` /
-  `TargetCount` count distinct keys and targets, and `world.Descendants(root).AddTo(ids, includeRoot: true)` collects
-  the ids `MoveEntities` and `SaveEntities` take
-  ([hierarchy](https://ecs.xgamedev.net/en/docs/guide/hierarchy#moving)).
-- **Spawns with their own components.** `world.Instantiate(prefab, new ChildOf(parent), …)` in one row copy, and a
-  prefab with members can be instantiated by a system too, during its pass
-  ([prefabs](https://ecs.xgamedev.net/en/docs/guide/prefabs)).
-- **Work spread over updates.** `[ForEach(Slices = N)]` visits about 1 / N of the rows per run
-  ([systems](https://ecs.xgamedev.net/en/docs/guide/systems)).
-- **Operating a long-running server.** `world.TrimExcess()` gives a peak's memory back; `SystemStats` adds allocated
-  bytes and visited entities; `world.DescribeSchedule()` shows the stages and why each system waits
-  ([diagnostics](https://ecs.xgamedev.net/en/docs/guide/diagnostics)).
-- **Restarts that leave runtime state behind.** `SaveWithout(writer, exclude)` and `LoadKeeping(bytes, keep, markWritten: false)`
-  ([restart](https://ecs.xgamedev.net/en/docs/guide/saves#restart)).
-- **Generated members for `ChildOf`** (`entity.SetChildOf(parent)`, `world.ChildOfIndex`, …) and
-  `entity.IsRetired`; a `[ForEach]` method that uses its `Entity` only as an identity no longer runs alone.
-- **Reads that stamp nothing.** `world.Read<T1..Tn>()` walks a query with `ref readonly` items, so a loop that only
-  reads no longer sends rows to `[Changed<T>]` readers; EECS046 points at such `Query` loops
-  ([queries](https://ecs.xgamedev.net/en/docs/guide/queries#read)).
-- **Names that say what a call does**: `Reserve`, `DestroyAll`, `SaveEntitiesWith`, `LoadKeeping`, `UnlinkX(target)`,
-  and `DestroyEntities(ids)` for a list of ids; `entity.Link` / `Unlink` / `Links` and the generated `LinkX(target)`
-  for relations, `ITracked`, `TryGetSystem`, `DescribeTables`, `DestroyLogCapacity`, the `Retired` tag and more
-  ([renames](https://ecs.xgamedev.net/en/docs/migration#v4-7-renames)).
-- **Retired entities stay retired.** An entity kept alive for its cleanup components (tagged `Retired`) is not
-  moved, cloned or brought back by `SetAll`, reports no removals, and a moved entity leaves its cleanup components behind
-  ([cleanup components](https://ecs.xgamedev.net/en/docs/guide/cleanup-and-disable#cleanup-components)).
-- **`AddSingleton` on an existing singleton throws** instead of resetting it; reset with `world.SetX(…)`.
-- **Analyzer rules up to EECS052** (calls that compile but throw, lose writes or keep a ref across a structural
-  change; filters that never match; a `Set` right after a creation), and a fix: parallel `[ForEach]` methods that write tracked components no longer
-  lose change stamps. Upgrading: the [migration guide](https://ecs.xgamedev.net/en/docs/migration#v4-6-to-v4-7).
-
-## What's new in 4.6
-
-- **Restarts that resume a world.** `world.Load(bytes, markWritten: false)` loads a save without change ticks, so
-  `[Changed<T>]` savers and replicators do not send the whole world again
-  ([restart](https://ecs.xgamedev.net/en/docs/guide/saves#restart)); `world.AddSystem<T>(changesFromNow: true)`
-  starts a system at the current tick.
-- **Native AOT without warnings**, also with tracked and disabled components: CI publishes the battle server natively
-  with warnings as errors and runs it.
-
-## What's new in 4.5
-
-- **One entity, one job.** `entity.Run(ref job)` (and `Run(ref job, filter)`) runs an `IForEachEntity` job on a
-  single entity with the guarantees of a pass: change ticks, refs that survive structural changes, in O(1) plus O(1)
-  per component the filter names ([one entity](https://ecs.xgamedev.net/en/docs/guide/queries#run-on-one-entity)).
-- **Group filters through interfaces.** `IGroupWith<T>` / `IGroupWithout<T>` give generic groups their filters
-  (`IActorGroup<TActor> : IGroupWith<Inbox<TActor>>`) ([group filters](https://ecs.xgamedev.net/en/docs/guide/systems#group-filters)).
-- **`world.Descendants(root)`** walks a whole subtree, and `LoadEntitiesInto(input, entities, markWritten: false)`
-  restores a record without counting it as a change.
-- **No Nino package to add.** The EasyEcs package brings Nino with its generator: `[NinoType]` components get their
-  formatters from the EasyEcs reference alone ([saves](https://ecs.xgamedev.net/en/docs/guide/saves#declare)).
-- **The analyzer knows the new calls.** `entity.Run` and `LoadEntitiesInto` are structural: rejected in parallel
-  `[ForEach]` methods (EECS010), in methods that promise no structural change (EECS013) and on other threads (EECS014).
-- **An actors sample.** [`samples/Actors`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors):
-  one type per kind of actor that is its key component, its system group and the group's filter, with requests run
-  on their entity by `entity.Run`.
-
-## What's new in 4.4
-
-- **Records of what persists.** `SaveEntitiesWith(output, ids, set)` saves only the components of a `ComponentSet`
-  (runtime components need no formatter), and `LoadEntitiesInto` loads them onto entities that exist already, each
-  moving table once ([a record of what persists](https://ecs.xgamedev.net/en/docs/guide/migration-and-unload#records)).
-- **Saved components can evolve.** Saves record types by Nino type id, so `[NinoFormerName]` keeps a renamed
-  component's saves, and an unmanaged `[NinoType]` component is written by its formatter, so a `VersionTolerant` one
-  may gain members ([when the code changed](https://ecs.xgamedev.net/en/docs/guide/saves#versioning)).
-- **Buffers that come and go allocate nothing**: a dead `DynamicBuffer<T>`'s list goes to the next buffer of its
-  element type.
-- The save format changed (saves of 4.3 do not load) and EasyEcs builds on Nino 4.0.0-rc.6: see the
-  [migration guide](https://ecs.xgamedev.net/en/docs/migration#v4-3-to-v4-4).
-
-## What's new in 4.3
-
-- **Performance rules in the analyzer** ([EECS025 to EECS034](https://ecs.xgamedev.net/en/docs/guide/analyzer#eecs025)): a `ref` that only reads, an
-  unused `[ForEach]` parameter, a lookup through the visited `Entity` on every row, an allocation in code that runs
-  every update, an instance `[ForEach]` method, a structural change entity by entity over a query, creation one by one
-  in a counted loop, `Count() > 0` instead of `Any()` (warnings: the code costs); the generic call that has a
-  generated member (a suggestion: the same cost, shorter); `World.Update()` inside a system (an error). Most come with a code fix. Builds that treat
-  warnings as errors may need changes: see the
-  [migration guide](https://ecs.xgamedev.net/en/docs/migration#v4-2-to-v4-3).
-
-## What's new in 4.2
-
-- **Reading a missing singleton throws everywhere.** A `[ForEach]` method's singleton parameter (and
-  `world.SingletonRef<T>()`) used to add the default value; it now throws `InvalidOperationException` on the system's
-  first run, like `world.X` and `GetSingleton<T>()`, and the message names the call to add it. A forgotten
-  `world.SetClock(…)` fails at once instead of running on a clock with no step; `world.GetOrAddClock()` is the
-  explicit default. See the [migration guide](https://ecs.xgamedev.net/en/docs/migration#v4-1-to-v4-2).
-- A `[ForEach]` method with a parameter named `owner` builds again (the generated code no longer fails with CS0100).
-
-## What's new in 4.1
-
-- **Archetype tables.** Each archetype stores its components as columns of rows (structure of arrays); unmanaged
-  columns are pinned and start on a 64-byte boundary. Iteration walks columns front to back, and tables stay dense:
-  a removed row is filled by the last one at once, or when the pass that removed it ends.
-- **Removing a component keeps the row.** It only clears a presence bit, so states that come and go (stunned,
-  burning, dead) never move data; queries skip, walk or test 64 rows per bit word per table.
-- **Stricter iteration with immediate changes.** A pass visits each entity at most once, and `[ForEach]` writes
-  through `ref` parameters survive the body's own structural changes. No command buffer, no idempotency filters.
-- **Batch `[ForEach]` methods** take `Span<T>` / `ReadOnlySpan<T>` and receive whole runs of rows for SIMD
-  (`world.ForEachBatch` for ad-hoc jobs), with an `EntitySpan` of the run's entities built only where indexed;
-  `world.ForEachEntity` passes the handle to struct jobs.
-- **Jobs that cannot change structure** (detected by the generator, or `INoStructuralChanges`) iterate with no
-  per-entity bookkeeping and freeze the world's structure (a broken promise throws); structural changes check a plain
-  owner flag instead of a lock or an atomic.
-- **Parallel `[ForEach]`:** `[ForEach(Parallel = true)]` splits one method's rows across threads, allocation-free
-  (`world.ForEachParallel` / `ForEachEntityParallel` for ad-hoc jobs, `World.ParallelChunkRows` rows per chunk); the analyzer
-  rejects methods that could race (EECS010).
-- **Snapshots:** `world.Capture()` / `world.Restore(snapshot)` roll a world back in memory (undo, prediction, tests).
-- **Change tracking:** components marked `ITrackChanges` record each row's last write; `[Changed<T>]` methods visit
-  only the rows written since their system last ran (replication, persistence), and `QueryFilter.Changed<T>(since)`
-  does the same for queries (`Since(tick)` moves a kept filter's tick).
-- **Removal detection:** removing a tracked component stamps its row, which the entity keeps; `[Removed<T>]` methods
-  visit the entities that lost `T` since their system last ran, once per removal and with their other components
-  (replicate a fire that went out), and `QueryFilter.Removed<T>(since)` does the same for queries. Destroyed entities
-  are not reported; **EECS016** rejects a method that also requires `T`.
-- **Prefabs and cloning:** `new Prefab().SetHealth(60, 60).SetNpc()` (generated writers, or `Set(a, b)`) is a recipe
-  of component values that belongs to no world, so no query sees it; `world.Instantiate(prefab)` (or `Instantiate(prefab, span)` for a wave, one gate pass) creates
-  entities from it with one row copy each, and `entity.Clone()` copies a living entity. Copies get their own dynamic
-  buffers, are indexed at once and count as written for change tracking.
-- **Indexes and relations:** components implementing `IIndexed<TKey>` are found by value
-  (`world.Index<T, TKey>().Find(key)`); an `EntityId` key makes a relation (`ChildOf(EntityId Parent)`) whose index
-  lists the children of an entity. `Set` and `CreateEntity` re-index at once; writes through a `ref` are rejected
-  (EECS015).
-- **Generated members:** every component gets named C# 14 extension members, in the spirit of Entitas but for
-  structs, tags, singletons and indexes: `hero.Position.X += 1`, `hero.HasVelocity`, `hero.SetVelocity(1, 0)`,
-  `hero.IsDead` / `hero.SetDead()`, `world.Battle.Tick++`, `world.ZoneIndex.Find(3)`, `item.Position` on the items of each
-  `Query<Position, …>` the code calls, and on prefabs `prefab.SetHealth(60, 60).SetNpc()`. Tracked and indexed components get a read-only property, so reading them never counts as a write; the analyzer treats `SetX` / `RemoveX` as the
-  structural changes they are.
-- **New APIs:** `WithAny<T>` filters (`[WithAny<T>]` on `[ForEach]`), bulk `CreateEntities` / `DestroyEntities`,
-  per-system timing (`WorldOptions.MeasureSystems`, `system.Stats`), `entity.Read<T>()` (read-only, never a write) and
-  `entity.TryGetRef<T>(out found)` (optional access by `ref`); Native AOT compatible.
-- **`DynamicBuffer<T>`**: a list per entity, held as a component. Its writes take the buffer by `ref`, so each one is
-  a tracked change (`[Changed<DynamicBuffer<T>>]` sends only the lists that changed) and a write through `in` does not
-  compile; snapshots copy the elements; writes within the capacity allocate nothing.
-- **Disable, cleanup, hierarchy:** `entity.Disable<T>()` keeps a component's value while queries see it as gone;
-  cleanup components keep a destroyed entity until its resources are released; `ChildOf` parents destroy their
-  children. Bulk `SetAll` / `RemoveAll` / `DisableAll` / `EnableAll` change every match 64 rows at a time.
-- **Relations, ordered indexes, groups:** `IRelation` buffers link an entity to many targets, found back by target;
-  value indexes walk keys in order (`Range`, `Ascending`) for leaderboards and timers; `GroupBy<T>()` splits tables by
-  a value, so a query for one zone or team walks only its own tables.
-- **Saves and moves:** `world.Save` / `Load` (through Nino), and `SaveEntities` / `LoadEntities` / `MoveEntities` hand a
-  group of entities to another world or process with their `EntityId`s rewritten.
-- **Hot-reloaded game logic:** `world.RemoveTypes(assembly)` takes a plugin's systems and components out of a world so
-  its collectible `AssemblyLoadContext` can unload.
-- **Systems:** ordering by dependency (`[UpdateBefore<T>]` / `[UpdateAfter<T>]`), `UpdatePhase`, errors as data
-  (`SystemErrorPolicy.Disable`, `system.Error`), `Maybe<T>` parameters, static `[ForEach]` methods outside systems,
-  generic systems, filters on system groups, and no `partial` needed.
-- **Tools:** `world.Describe()`, a debugger view of entities, and code fixes for the analyzer's diagnostics.
-- **Analyzer rules up to EECS024**, errors except three warnings (EECS017 `Entity` handles in components, EECS018
-  schedules that are not constants, EECS020 orderings across groups); among the new errors: **EECS011** rejects a `[ForEach]` method that changes a
-  collection or class held by an `in` parameter, **EECS012** a `DynamicBuffer<T>` copied by value, **EECS013** a
-  structural change in a `[ForEach]` method that takes no `Entity` or `World`, **EECS014** a structural change in a
-  delegate handed to another thread that races with other changes of the same world, **EECS015** a write of an
-  indexed component through a `ref`, **EECS016** a `[Removed<T>]` method that requires `T`.
-- **Structural changes belong to the owner thread.** They check a plain owner flag instead of a compare-and-swap (a
-  create/destroy pair is about a quarter faster); one made inside a parallel stage of systems or a parallel `[ForEach]`, or
-  reentered, throws `InvalidOperationException` instead of tearing the tables.
-- `Entity.GetHashCode()` is deterministic (`Index ^ (Version << 20)`) and cheaper (relation lookups hash handles).
-- **Renamed:** `WorldOptions.Parallel` is `WorldOptions.ParallelSystems` (apart from `[ForEach(Parallel = true)]`);
-  `Entity.Id` is an `EntityId` (`Id.Index`, `Id.Version`), the id to store in components.
-- **Removed:** `EcsSystem.Priority` (order by dependency instead), the `World.SystemError` event (errors are data),
-  `world.DestroyEntity(entity)`, a second spelling of `entity.Destroy()`; `entity.Add<T>()`, which reset
-  a component the entity already had (write `Set(new T(…))` / the generated `SetX(…)` to add or replace, `GetOrAdd<T>()`
-  to add a default only when missing); `world.CompactArchetypes()` and `world.GetFragmentationStats()` (tables stay
-  dense on their own).
-- **Behavior changes:** `Query` results are ref structs (no `await` in the loop, items cannot be stored); refs can be
-  invalidated by structural changes of other entities; iteration order follows table rows; with `ParallelSystems`, a
-  subclass the generator did not see runs alone; structural changes from several threads at once are no longer
-  serialized (owner thread only); `AddSingleton` resets an existing singleton in place; `IForEach` jobs
-  receive only the components; stale handles answer `Has` / `TryGet` with false. See the
-  [migration guide](https://ecs.xgamedev.net/en/docs/migration#v4-0-to-v4-1).
-- A realistic 100k-entity server tick takes 1.72 ms instead of 4.33 ms; toggling a status component on 10,000
-  entities 158 μs instead of 338 μs; reading a component through 1,000 random handles 3.33 μs instead of 3.56 μs
-  (the v4.0.1 numbers are from an earlier run on the same VM).
-
-## What's new in 4.0
-
-v4 is a rewrite for .NET 10 with standard ECS vocabulary in a single `EasyEcs` namespace:
-
-- `Context` → `World`, `GroupOf` → `Query`, and a single version-checked `Entity` handle whose accessors return `ref T`.
-- Systems are synchronous `EcsSystem`s with source-generated `[ForEach]` methods (no UniTask dependency).
-- Entity ids are recycled; singletons are per world; system groups with `[UpdateInGroup<T>]`.
-- The analyzer enforces the ECS principles (EECS006-EECS008); events were replaced by state-as-data.
-- `WorldOptions.Parallel` (`ParallelSystems` since 4.1) runs consecutive systems of a group that no `[UpdateBefore<T>]` /
-  `[UpdateAfter<T>]` ordering separates together, only when their generated read/write access does not conflict: parallel with the same result as sequential, allocation-free.
-- A `[ForEach]` method may take no component when a `[With<T>]` names what to query
-  (`[ForEach, With<Dead>] static void Remove(Entity e)`).
-
-See the [migration guide](https://ecs.xgamedev.net/en/docs/migration) for every rename and behavioral change.
+Earlier releases are in the [changelog](https://ecs.xgamedev.net/en/docs/changelog), and what to change when upgrading in
+the [migration guide](https://ecs.xgamedev.net/en/docs/migration).
 
 ## License
 

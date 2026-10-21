@@ -94,7 +94,7 @@ flowchart LR
 
 ## 系统 [#systems]
 
-每个系统只做一件事，和其他系统之间只共享组件和单例。`[ForEach]` 方法里 `ref` 表示写、`in` 表示读，生成器据此生成循环和访问集。
+每个系统只做一件事，和其他系统之间只共享组件和单例。`[ForEach]` 方法的参数说明它做什么：`in` 读，`ref` 写它经过的每一行，`Mut<T>` 只写它改了的行，`Span<T>` 一次拿一段行；生成器据此生成循环和访问集。
 
 ### 移动 [#moving]
 
@@ -144,7 +144,7 @@ NPC 死亡时，把下一个 NPC 的出生点写进 `Spawn` 清理组件，把�
 `ReplicationSystem` 属于 `Replication` 分组，宿主每三个 tick 更新一次。每个方法只访问系统上次运行以来变了的东西：
 被写过的血量（`[Changed<Health>]`）、刚着火的单位（`[Changed<Burning>]`）、火已熄灭的单位（`[Removed<Burning>]`，
 即失去了这个组件且现在仍没有它的实体）、变了的目标（`[Changed<Goal>]`：只有 `Plan` 真正写过的那几个，而不是它经过的每个
-NPC），以及通过 `ref` 写过的背包（`[Changed<DynamicBuffer<Loot>>]`）。没有任何地方手动标脏：通过 `ref` 写入本身就是标记。
+NPC），以及通过 `ref` 写过的背包（`[Changed<DynamicBuffer<Loot>>]`）。没有任何地方手动标脏：写入本身就是标记，不管是通过 `ref` 还是 `Mut<T>`。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#replication</include>
 
@@ -313,7 +313,8 @@ for (int i = 0; i < threads.Length; i++)
 ## 更多程序 [#more-programs]
 
 - [`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples)：按学习顺序排列的完整程序：Hello
-  World、由网络线程投递输入的固定帧率游戏循环、存档与 World 之间的迁移、每线程一个 World、热重载游戏逻辑。
+  World、由网络线程投递输入的固定帧率游戏循环、存档与 World 之间的迁移、每线程一个 World、热重载游戏逻辑、带持久化的 actor、仿 Minecraft 的服务器、Godot 游戏。
+  每个都在[示例](/zh/docs/samples)下有讲解。
 - 指南：讲单个功能的页面都有一个只讲这个功能的完整例子，比如[变更追踪](/zh/docs/guide/change-tracking#full-example)。
 - [`templates/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/templates)：新建项目用的 `dotnet new` 模板。
 

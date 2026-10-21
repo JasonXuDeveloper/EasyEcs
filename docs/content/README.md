@@ -17,6 +17,23 @@ its source: each page is `<page>.mdx` (English) and `<page>.zh.mdx` (Chinese), a
 | [Cheat sheet](https://ecs.xgamedev.net/en/docs/cheat-sheet) | [cheat-sheet.mdx](cheat-sheet.mdx) | Look up the common calls. |
 | [Glossary](https://ecs.xgamedev.net/en/docs/glossary) | [glossary.mdx](glossary.mdx) | Look up a term. |
 
+## Samples
+
+One page per runnable project of [samples/](../../samples), its files included, under [samples/](samples):
+
+| Page | Source | Read it to |
+|---|---|---|
+| [Samples](https://ecs.xgamedev.net/en/docs/samples) | [samples/index.mdx](samples/index.mdx) | Pick a runnable sample, in learning order. |
+| [HelloWorld](https://ecs.xgamedev.net/en/docs/samples/hello-world) | [samples/hello-world.mdx](samples/hello-world.mdx) | The smallest program. |
+| [GameLoop](https://ecs.xgamedev.net/en/docs/samples/game-loop) | [samples/game-loop.mdx](samples/game-loop.mdx) | A fixed-tick server fed by a network thread. |
+| [SaveLoad](https://ecs.xgamedev.net/en/docs/samples/save-load) | [samples/save-load.mdx](samples/save-load.mdx) | Saves and migration between worlds. |
+| [MultiWorld](https://ecs.xgamedev.net/en/docs/samples/multi-world) | [samples/multi-world.mdx](samples/multi-world.mdx) | One world per thread. |
+| [HotReload](https://ecs.xgamedev.net/en/docs/samples/hot-reload) | [samples/hot-reload.mdx](samples/hot-reload.mdx) | New logic in a running world. |
+| [Actors](https://ecs.xgamedev.net/en/docs/samples/actors) | [samples/actors.mdx](samples/actors.mdx) | Entities that answer messages, with persistence. |
+| [VoxelServer](https://ecs.xgamedev.net/en/docs/samples/voxel-server) | [samples/voxel-server.mdx](samples/voxel-server.mdx) | A Minecraft-style server. |
+| [Godot](https://ecs.xgamedev.net/en/docs/samples/godot) | [samples/godot.mdx](samples/godot.mdx) | EasyEcs in a Godot 4 game. |
+| [Live demo](https://ecs.xgamedev.net/en/docs/demo) | [demo.mdx](demo.mdx) | Run a world in the browser (WebAssembly). |
+
 ## Guide
 
 One page per concept, under [guide/](guide):

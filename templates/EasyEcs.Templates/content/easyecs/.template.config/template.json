@@ -22,7 +22,7 @@
       "type": "parameter",
       "datatype": "bool",
       "defaultValue": "false",
-      "description": "Add an NUnit test project with a test of a system."
+      "description": "Add an NUnit test project with a test file per system."
     }
   },
   "sources": [

@@ -57,9 +57,9 @@ flowchart LR
     input[Bot 填 Input]
   end
   subgraph Simulation
-    world[加载区块、水流动] --> sight[走、看、追]
+    world[加载区块、水流动] --> sight[走、看、追、重生]
     sight --> move[浮起、物理、网格]
-    move --> rules[挖、捡、刷怪、燃烧、死亡]
+    move --> rules[挖、捡、刷怪、燃烧、僵尸死亡]
     rules --> unload[存盘并卸载区块]
   end
   subgraph Replication

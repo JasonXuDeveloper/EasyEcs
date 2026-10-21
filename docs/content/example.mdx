@@ -103,9 +103,9 @@ group, updated by its own call.
 
 ## The systems [#systems]
 
-Each system does one job and shares nothing with the others but components and singletons. `ref` marks what a
-`[ForEach]` method writes and `in` what it reads; the generator builds the loop and the access set from those two
-words.
+Each system does one job and shares nothing with the others but components and singletons. A `[ForEach]` method's
+parameters say what it does: `in` reads, `ref` writes every row it visits, `Mut<T>` writes only the rows it changes, and
+a `Span<T>` takes a run of rows at once; the generator builds the loop and the access set from them.
 
 ### Moving [#moving]
 
@@ -161,8 +161,8 @@ component, and `Mut<Health>` stamps only the players it heals, not the ones at f
 only what changed since the system last ran: the healths written (`[Changed<Health>]`), the units set on fire
 (`[Changed<Burning>]`), the fires that went out (`[Removed<Burning>]`, the entities that lost the component and
 still lack it), the goals that changed (`[Changed<Goal>]`: the few `Plan` wrote, not every NPC it visited) and the bags
-written through a `ref` (`[Changed<DynamicBuffer<Loot>>]`). Nothing marks rows dirty by hand: a write through a `ref`
-is the mark.
+written through a `ref` (`[Changed<DynamicBuffer<Loot>>]`). Nothing marks rows dirty by hand: a write is the mark, through a `ref`
+or through `Mut<T>`.
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#replication</include>
 
@@ -348,7 +348,8 @@ The other benchmarks, and how to run them: [Performance](/en/docs/performance).
 
 - [`samples/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples): complete programs in learning
   order: hello world, a fixed-tick game loop fed by a network thread, saves and moves between worlds, one world per
-  thread, hot-reloaded game logic.
+  thread, hot-reloaded game logic, actors with persistence, a Minecraft-style server, a Godot game. Each has a
+  walkthrough under [Samples](/en/docs/samples).
 - The guide: the pages of single features have a full example of that feature alone, for instance
   [change tracking](/en/docs/guide/change-tracking#full-example).
 - [`templates/`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/templates): `dotnet new` templates for a

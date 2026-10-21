@@ -29,7 +29,8 @@ comparing its output with the one shown below. Read the [GameLoop](/en/docs/samp
   `LoadEntitiesInto(..., markWritten: false)`, so loading is not a change.
 - **Save what changed**: the persistent components are `ITracked`
   ([change tracking](/en/docs/guide/change-tracking)); a system in a save group lists the actors written since it
-  last ran, and the host saves them after the update, so a saved actor is not saved again until something writes it.
+  last ran, and the host saves them after the update, so a saved actor is not saved again until something writes it. Writers stamp only what they change:
+  `InterestSystem` writes through `Mut<Balance>`, and `Mailman` reads the stock before it runs a `Buy`.
 
 ## Run it [#run-it]
 

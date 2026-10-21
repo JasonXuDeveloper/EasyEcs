@@ -2,7 +2,7 @@
 
 Complete programs that build on each other. Each is a project in `EasyEcs.slnx` (folder `/samples/`; the Godot
 project is built by `dotnet build samples/Godot` and run by Godot) and reads
-top-down: `Components.cs` (the data), then the systems (one job each), then a short `Program.cs` that creates the
+top-down: `Components.cs` (the data), then the systems (one job each), then a short `Program.cs` (`Main.cs` in Godot) that creates the
 world, adds singletons and systems, runs and prints. Code that a real program needs but that is not the ECS lesson
 (a mailbox between threads, fake clients, checks, printing) is in a file or folder of its own (`Host/`,
 `Support.cs`) that says so.

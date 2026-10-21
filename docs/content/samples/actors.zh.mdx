@@ -23,7 +23,8 @@ import { Database, Layers, ListTree, Workflow } from 'lucide-react';
 - **激活与记录**：Actor 的实体在第一次用到时创建，它的[记录](/zh/docs/guide/migration-and-unload#records)用
   `LoadEntitiesInto(..., markWritten: false)` 加载上去，加载不算变更。
 - **只保存变过的**：持久化组件是 `ITracked`（[变更追踪](/zh/docs/guide/change-tracking)）；保存组里的一个系统列出它上次运行后
-  被写过的 Actor，宿主在更新后保存它们，所以保存过的 Actor 在再次被写之前不会再存一遍。
+  被写过的 Actor，宿主在更新后保存它们，所以保存过的 Actor 在再次被写之前不会再存一遍。写入方只给改了的东西打 tick：
+  `InterestSystem` 通过 `Mut<Balance>` 写，`Mailman` 在执行 `Buy` 之前先读库存。
 
 ## 运行 [#run-it]
 

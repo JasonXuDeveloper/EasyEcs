@@ -11,6 +11,7 @@ Game logic in a plugin that is replaced while the world keeps running. Read [Mul
   components and systems stay.
 - **Keeping the data.** Saving before the unload and loading after the reload carries the plugin's component
   values over: a save names types by their type id (a hash of the full name), not by the assembly that loaded them.
+- **Bulk changes.** `World.SetAll` gives a whole table of units a component in one call.
 
 ## Projects and files, in reading order
 

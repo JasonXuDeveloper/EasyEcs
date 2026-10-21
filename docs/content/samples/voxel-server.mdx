@@ -2,7 +2,7 @@
 title: "VoxelServer: a Minecraft-style server"
 navTitle: VoxelServer
 seoTitle: "Minecraft-Style Voxel Server in C# with EasyEcs"
-description: "A Minecraft-style voxel server in C# with EasyEcs: chunks streamed and saved around players, water as a SIMD stencil, one area of interest, digging, zombies, replication at 20 TPS."
+description: "A Minecraft-style voxel server in C# with EasyEcs: chunks saved and loaded around players, water as a SIMD stencil, one area of interest, zombies, 20 TPS."
 icon: Box
 ---
 
@@ -67,9 +67,9 @@ flowchart LR
     input[Bots fill Input]
   end
   subgraph Simulation
-    world[Load chunks, water flows] --> sight[Walk, look, hunt]
+    world[Load chunks, water flows] --> sight[Walk, look, hunt, respawn]
     sight --> move[Float, physics, grid]
-    move --> rules[Dig, pick up, spawn, burn, die]
+    move --> rules[Dig, pick up, spawn, burn, zombies die]
     rules --> unload[Save and unload chunks]
   end
   subgraph Replication
