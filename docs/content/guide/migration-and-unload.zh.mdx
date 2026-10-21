@@ -6,7 +6,7 @@ icon: ArrowRightLeft
 ---
 
 玩家穿过传送门进入另一个区域的 World，或者被交给另一台服务器。他的实体、物品和宠物必须一起过去，彼此之间的指向也不能断。
-`SaveEntities` / `LoadEntities` 通过字节传送这些实体，`MoveEntities` 直接把它拷进同一线程的另一个 World，两者都会把组内的
+`SaveEntities` / `LoadEntities` 通过字节传送这些实体，`MoveEntities` 直接把它拷进同一线程的另一个 World，两者都会把其中的
 `EntityId` 改写成新实体的 id。长期运行的服务器还要在不重启的情况下替换游戏逻辑：`RemoveTypes` 把插件的系统和组件从 World 中移除，
 它所在的可回收 `AssemblyLoadContext` 就能卸载，新版本再加载存下来的数据。
 
@@ -54,15 +54,15 @@ world.CreateEntity(new Sword(10), new ChildOf(hero));
 world.CreateEntity(new Pet(hero), new Health(20));
 
 // 收集这一组：英雄、挂在他身上的、指向他的
-var group = new List<EntityId>();
-world.Descendants(hero).AddTo(group, includeRoot: true);                // 英雄，然后是子实体、孙实体，一层层往下
-foreach (var pet in world.PetIndex.Find(hero.Id)) group.Add(pet.Id);    // 走索引，不扫描所有 Pet
+var party = new List<EntityId>();
+world.Descendants(hero).AddTo(party, includeRoot: true);                // 英雄，然后是子实体、孙实体，一层层往下
+foreach (var pet in world.PetIndex.Find(hero.Id)) party.Add(pet.Id);    // 走索引，不扫描所有 Pet
 
 var bytes = new NinoArrayBufferWriter();
-world.SaveEntities(bytes, CollectionsMarshal.AsSpan(group));                  // 只写这一组 // [!code highlight]
+world.SaveEntities(bytes, CollectionsMarshal.AsSpan(party));                  // 只写这一组 // [!code highlight]
 
 using var otherServer = new World();
-var arrived = new Entity[group.Count];
+var arrived = new Entity[party.Count];
 int created = otherServer.LoadEntities(bytes.WrittenSpan, arrived);   // 新 id，链接已改写 // [!code highlight]
 ```
 
@@ -81,8 +81,8 @@ using System.Runtime.InteropServices;
 
 using var nextZone = new World();
 var moved = new List<Entity>();                    // 每次搬迁都复用它：容量够大之后不再分配内存。
-CollectionsMarshal.SetCount(moved, group.Count);
-int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), CollectionsMarshal.AsSpan(moved));   // 英雄、剑和宠物离开这个 World
+CollectionsMarshal.SetCount(moved, party.Count);
+int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(party), CollectionsMarshal.AsSpan(moved));   // 英雄、剑和宠物离开这个 World
 ```
 
 - 原实体销毁时会连同子实体一起销毁，所以[层级](/zh/docs/guide/hierarchy#moving)要整体迁移。
@@ -160,8 +160,8 @@ public static class RuntimeRecords
 
 | `EntityId` 字段原来指向 | 变成 |
 | --- | --- |
-| 组内的实体 | 它对应新实体的 id |
-| 组外的实体（留在原地） | `EntityId.Null` |
+| 一起到达的实体 | 它对应新实体的 id |
+| 没有一起到达的实体（留在原地） | `EntityId.Null` |
 | 留在原地的父实体（`ChildOf`） | 移除 `ChildOf`：实体在这边成为根 |
 
 集合里的 id（组件里的 `List<EntityId>`）不会改写。索引和分组会认识新到的实体，被追踪组件算作写入。
@@ -277,25 +277,25 @@ public class SaveChangedBanks : EcsSystem
 ```
 
 </Accordion>
-<Accordion title="Groups.cs">
+<Accordion title="Party.cs">
 
-```csharp title="Groups.cs" doccheck=example
+```csharp title="Party.cs" doccheck=example
 using EasyEcs;
 
-public static class Groups
+public static class Party
 {
     // 英雄、挂在他身上的实体（父实体总在子实体之前），以及他的宠物。
     public static List<EntityId> Collect(World world, Entity hero)
     {
-        var group = new List<EntityId>();
-        world.Descendants(hero).AddTo(group, includeRoot: true);
+        var party = new List<EntityId>();
+        world.Descendants(hero).AddTo(party, includeRoot: true);
 
         foreach (var pet in world.PetIndex.Find(hero.Id))
         {
-            group.Add(pet.Id);
+            party.Add(pet.Id);
         }
 
-        return group;
+        return party;
     }
 }
 ```
@@ -333,12 +333,12 @@ zone.CreateEntity(new Gem(3), new ChildOf(sword));
 zone.CreateEntity(new Pet(hero.Id), new Health(20));
 
 // 英雄走进传送门：整组迁过去，id 随之改写。
-List<EntityId> group = Groups.Collect(zone, hero);
-var moved = new Entity[group.Count];
-zone.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), moved);
-for (int i = 0; i < group.Count; i++)
+List<EntityId> party = Party.Collect(zone, hero);
+var moved = new Entity[party.Count];
+zone.MoveEntities(nextZone, CollectionsMarshal.AsSpan(party), moved);
+for (int i = 0; i < party.Count; i++)
 {
-    Console.WriteLine($"{group[i]} -> {moved[i].Id}");
+    Console.WriteLine($"{party[i]} -> {moved[i].Id}");
 }
 
 Entity pet = moved[^1];

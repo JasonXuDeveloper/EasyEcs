@@ -274,10 +274,10 @@
       （<see cref="T:EasyEcs.IUniqueIndexed`1" />）的同一个键给了多个实体。这时 World 保持原样。
     </exception>
   </member>
-  <member name="M:EasyEcs.World.LoadEntities(System.ReadOnlySpan{System.Byte},System.Span{EasyEcs.Entity})" source="076d82ad017e">
+  <member name="M:EasyEcs.World.LoadEntities(System.ReadOnlySpan{System.Byte},System.Span{EasyEcs.Entity})" source="d237d1aa2655">
     <summary>
       创建 <c>SaveEntities</c> 写出的实体（本进程或别的进程写的），分配新的 id，按存档顺序把句柄写进 <paramref name="entities" />（放得下多少写多少）；
-      返回创建的数量。组件和缓冲元素里的 <see cref="T:EasyEcs.EntityId" /> 字段，原来指向组内实体的，改为指向那个实体的新实体；
+      返回创建的数量。组件和缓冲元素里的 <see cref="T:EasyEcs.EntityId" /> 字段，原来指向存档里实体的，改为指向那个实体的新实体；
       其余的一律变成 <see cref="P:EasyEcs.EntityId.Null" />（字段在哪里由生成器告诉 World；集合里的 id 不改写）。
       父实体没有一起过来的，移除它的 <see cref="T:EasyEcs.ChildOf" />：实体在这里成为根。索引和分组收录这些实体；
       被追踪组件算作写入。O(实体数 × 组件数)。遍历进行中不能调用。
@@ -357,11 +357,11 @@
       缓冲区够大之后不分配内存。O(实体数 × 组件数)。遍历进行中不能调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.SaveEntities(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId})" source="6bebcb629945">
+  <member name="M:EasyEcs.World.SaveEntities(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId})" source="959b5765cc93">
     <summary>
       把 <paramref name="entities" />（失效的 id 和重复的 id 跳过）和它们的组件写进 <paramref name="output" />，供
       <see cref="M:EasyEcs.World.LoadEntities(System.ReadOnlySpan{System.Byte},System.Span{EasyEcs.Entity})" /> 或 <see cref="M:EasyEcs.World.LoadEntitiesInto(System.ReadOnlySpan{System.Byte},System.ReadOnlySpan{EasyEcs.Entity},System.Boolean)" /> 读取：
-      一组要搬去另一个 World 的实体（一个玩家和他拥有的东西，搬到另一台服务器）。单例和组外的实体不写；整棵层级用
+      要搬去另一个 World 的实体（一个玩家和他拥有的东西，搬到另一台服务器）。单例和其他实体不写；整棵层级用
       <see cref="M:EasyEcs.World.Descendants(EasyEcs.EntityId)" /> 收集（id 列表写成 <c>CollectionsMarshal.AsSpan(list)</c>，不复制）。
       缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。遍历进行中不能调用。
     </summary>
@@ -399,13 +399,13 @@
       让分组 <typeparamref name="TGroup" /> 里每个启用的系统更新一次（同步执行，零分配）。没有系统的分组什么都不做。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.LoadEntitiesInto(System.ReadOnlySpan{System.Byte},System.ReadOnlySpan{EasyEcs.Entity},System.Boolean)" source="c92c87ad698e">
+  <member name="M:EasyEcs.World.LoadEntitiesInto(System.ReadOnlySpan{System.Byte},System.ReadOnlySpan{EasyEcs.Entity},System.Boolean)" source="6272058d7af4">
     <summary>
       把 <see cref="M:EasyEcs.World.SaveEntities(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId})" /> 写出的组件放到已经存在的实体上（Actor 的实体先建好、记录后到的情形）：存档里第 i 个实体的组件
       设到 <paramref name="targets" />[i] 上，没有的加上，已有的覆盖，每个实体最多换一次表；存档里没有的组件保持不变。索引、分组和
       变更 tick 的表现和 <c>Set</c> 一样（加载的每个组件都算写入）；被禁用的组件读进来仍是禁用的，值也保留。
-      <see cref="T:EasyEcs.EntityId" /> 字段原来指向组内实体的，改为指向它在 <paramref name="targets" /> 里对应的实体，其余的一律变成
-      <see cref="P:EasyEcs.EntityId.Null" />；父实体不在组内的 <see cref="T:EasyEcs.ChildOf" /> 不会被设置。返回加载的实体数。
+      <see cref="T:EasyEcs.EntityId" /> 字段原来指向存档里实体的，改为指向它在 <paramref name="targets" /> 里对应的实体，其余的一律变成
+      <see cref="P:EasyEcs.EntityId.Null" />；父实体不在存档里的 <see cref="T:EasyEcs.ChildOf" /> 不会被设置。返回加载的实体数。
       O(实体数 × 组件数)。遍历进行中不能调用。
       <br />
       <paramref name="markWritten" /> 为 false 时，加载的组件不算写入：存档里的每个组件加载后都没有变更 tick，覆盖了之前写过的值（预制体的
@@ -419,13 +419,13 @@
       什么都不写。
     </exception>
   </member>
-  <member name="M:EasyEcs.World.SaveEntitiesWith(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId},EasyEcs.ComponentSet@)" source="4a08c571211f">
+  <member name="M:EasyEcs.World.SaveEntitiesWith(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId},EasyEcs.ComponentSet@)" source="85bb362ee095">
     <summary>
       只写 <paramref name="components" /> 里的组件的 <see cref="M:EasyEcs.World.SaveEntities(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId})" />（只记录需要持久化的组件，不带运行时组件）：
       其余组件不写，也不需要 Nino 格式化器；标签只记有没有，被禁用的组件连同保留的值一起写。一个这些组件都没有的实体也会写出，
       只是是空的。缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。遍历进行中不能调用。
     </summary>
-    <exception cref="T:System.ArgumentException"><paramref name="components" /> 里有单例类型：一组实体的存档不写单例。</exception>
+    <exception cref="T:System.ArgumentException"><paramref name="components" /> 里有单例类型：实体存档不写单例。</exception>
   </member>
   <member name="M:EasyEcs.World.Descendants(EasyEcs.EntityId)" source="ddb14fe91655">
     <summary>

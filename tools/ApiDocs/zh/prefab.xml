@@ -21,8 +21,8 @@
       之后改其中一个，另一个不受影响（是复制，不是继承）。O(组件数)。
     </summary>
   </member>
-  <member name="P:EasyEcs.Prefab.Id" source="084da4a6df19">
-    <summary>组内的组件用来指代这个成员的 id（每次实例化都改写成新实体的 id）。</summary>
+  <member name="P:EasyEcs.Prefab.Id" source="f01c924cf905">
+    <summary>预制体各实体的组件用来指代这个成员的 id（每次实例化都改写成新实体的 id）。</summary>
   </member>
   <member name="M:EasyEcs.Prefab.AddMember" source="4f15f443dfb7">
     <summary>

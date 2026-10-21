@@ -6,9 +6,9 @@ icon: ArrowRightLeft
 ---
 
 A player walks through a portal into another zone's world, or is handed to another server. Their entity, their items
-and their pets must arrive together, still pointing at each other. `SaveEntities` / `LoadEntities` carry such a group
+and their pets must arrive together, still pointing at each other. `SaveEntities` / `LoadEntities` carry such a party
 through bytes, `MoveEntities` copies it straight into another world of the thread, and both rewrite the `EntityId`s
-inside the group to the new entities. A long-running server also replaces its game logic without a restart:
+inside the party to the new entities. A long-running server also replaces its game logic without a restart:
 `RemoveTypes` takes a plugin's systems and components out of a world, so its collectible `AssemblyLoadContext` can
 unload and a new version can load the saved data.
 
@@ -31,7 +31,7 @@ unload and a new version can load the saved data.
 
 ## How to use it [#how-to-use-it]
 
-### A group through bytes [#save-entities]
+### Entities through bytes [#save-entities]
 
 `SaveEntities(output, ids)` writes the listed entities and their components (stale ids and repeats are skipped; no
 singletons). `LoadEntities(bytes, handles)` creates them in another world, in this or another process, with new ids,
@@ -59,26 +59,26 @@ world.CreateEntity(new Sword(10), new ChildOf(hero));
 world.CreateEntity(new Pet(hero), new Health(20));
 
 // Collect the group: the hero, what hangs on it, what points at it.
-var group = new List<EntityId>();
-world.Descendants(hero).AddTo(group, includeRoot: true);                // the hero, then children, grandchildren and so on
-foreach (var pet in world.PetIndex.Find(hero.Id)) group.Add(pet.Id);    // the index, not a scan of every Pet
+var party = new List<EntityId>();
+world.Descendants(hero).AddTo(party, includeRoot: true);                // the hero, then children, grandchildren and so on
+foreach (var pet in world.PetIndex.Find(hero.Id)) party.Add(pet.Id);    // the index, not a scan of every Pet
 
 var bytes = new NinoArrayBufferWriter();
-world.SaveEntities(bytes, CollectionsMarshal.AsSpan(group));                  // the group only // [!code highlight]
+world.SaveEntities(bytes, CollectionsMarshal.AsSpan(party));                  // the party only // [!code highlight]
 
 using var otherServer = new World();
-var arrived = new Entity[group.Count];
+var arrived = new Entity[party.Count];
 int created = otherServer.LoadEntities(bytes.WrittenSpan, arrived);   // new ids, links rewritten // [!code highlight]
 ```
 
-`Descendants` walks depth first and lists each entity before its children, so the group holds every parent ahead of
+`Descendants` walks depth first and lists each entity before its children, so the party holds every parent ahead of
 what hangs on it: the order `MoveEntities` wants, since it destroys the originals last first and a child then goes
 before its parent. `Children` lists one level only. A `ChildOf` cycle makes the walk throw
 `InvalidOperationException`. Find what points at the hero (pets, followers) through an index on the field, as above,
 or through a [relation](/en/docs/guide/indexes-and-relations#relations): a query that tests every `Pet` grows with the world, not with the
-group.
+party.
 
-### A group to another world of the thread [#move-entities]
+### Entities to another world of the thread [#move-entities]
 
 `MoveEntities(target, ids, moved)` does the same between two worlds of the thread, without encoding: rows are copied,
 ids rewritten, then the originals are destroyed. `moved` receives the new handles in order (`default` for a skipped
@@ -89,8 +89,8 @@ using System.Runtime.InteropServices;
 
 using var nextZone = new World();
 var moved = new List<Entity>();                    // Reused across moves: no allocation once it is large enough.
-CollectionsMarshal.SetCount(moved, group.Count);
-int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), CollectionsMarshal.AsSpan(moved));   // hero, sword and pet leave this world
+CollectionsMarshal.SetCount(moved, party.Count);
+int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(party), CollectionsMarshal.AsSpan(moved));   // hero, sword and pet leave this world
 ```
 
 - The originals are destroyed with their children, so move a [hierarchy](/en/docs/guide/hierarchy#moving) together.
@@ -176,11 +176,11 @@ public static class RuntimeRecords
 ### How ids are rewritten [#entityid-rewriting]
 
 The generator records where every `EntityId` field of a component or buffer element is, private fields and nested
-structs included. When a group arrives:
+structs included. When entities arrive:
 
 | An `EntityId` field that named | Becomes |
 | --- | --- |
-| An entity of the group | The id of its new entity |
+| An entity that arrives | The id of its new entity |
 | Any other entity (it stayed behind) | `EntityId.Null` |
 | The parent of a `ChildOf` that stayed behind | The `ChildOf` is removed: the entity is a root here |
 
@@ -189,9 +189,9 @@ and their tracked components count as written.
 
 ### Unique keys on arrival [#unique-keys]
 
-A [unique key](/en/docs/guide/indexes-and-relations#unique-keys) (an account id) names one entity per world, and a
-group that arrives must not bring a key the world has given already. `LoadEntities`, `LoadEntitiesInto` and
-`MoveEntities` check every unique key of the group against the target world before the first row arrives:
+A [unique key](/en/docs/guide/indexes-and-relations#unique-keys) (an account id) names one entity per world, and
+entities that arrive must not bring a key the world has given already. `LoadEntities`, `LoadEntitiesInto` and
+`MoveEntities` check every unique key of the arrivals against the target world before the first row arrives:
 
 - A key another entity of the target holds: `InvalidOperationException`, and nothing arrives. `MoveEntities` then
   leaves the originals alive in the source, so the player is still where it was.
@@ -203,7 +203,7 @@ A player who comes back to a world that still holds an old copy of them (a stale
 is refused until that copy is destroyed or loses its key: destroy it first, then load or move the player in.
 
 The [destroy log](/en/docs/guide/change-tracking#destroy-log) records the originals `MoveEntities` destroys in the
-source world, so readers there see the group leave.
+source world, so readers there see the entities leave.
 
 ### Unloading a plugin's types [#remove-types]
 
@@ -263,7 +263,7 @@ before the load. `SaveWithout(output, in exclude)` and `LoadKeeping(input, in ke
 
 ## Full example [#full-example]
 
-A hero with a sword (and a gem in the sword) and a pet walks into another zone: the group is collected with
+A hero with a sword (and a gem in the sword) and a pet walks into another zone: the party is collected with
 `Descendants` and the pet index, moved with `MoveEntities`, and the pet still points at its hero. Then an actor's bank
 comes back from an earlier run as a record, loaded with `markWritten: false`, and a `[Changed<Bank>]` saver finds
 nothing to save until a deposit. Put the files in a console project that references EasyEcs
@@ -312,25 +312,25 @@ public class SaveChangedBanks : EcsSystem
 ```
 
 </Accordion>
-<Accordion title="Groups.cs">
+<Accordion title="Party.cs">
 
-```csharp title="Groups.cs" doccheck=example
+```csharp title="Party.cs" doccheck=example
 using EasyEcs;
 
-public static class Groups
+public static class Party
 {
     // The hero, what hangs on it (each parent before its children), and its pets.
     public static List<EntityId> Collect(World world, Entity hero)
     {
-        var group = new List<EntityId>();
-        world.Descendants(hero).AddTo(group, includeRoot: true);
+        var party = new List<EntityId>();
+        world.Descendants(hero).AddTo(party, includeRoot: true);
 
         foreach (var pet in world.PetIndex.Find(hero.Id))
         {
-            group.Add(pet.Id);
+            party.Add(pet.Id);
         }
 
-        return group;
+        return party;
     }
 }
 ```
@@ -367,13 +367,13 @@ var sword = zone.CreateEntity(new Sword(10), new ChildOf(hero));
 zone.CreateEntity(new Gem(3), new ChildOf(sword));
 zone.CreateEntity(new Pet(hero.Id), new Health(20));
 
-// The hero walks through a portal: the group moves, its ids are rewritten.
-List<EntityId> group = Groups.Collect(zone, hero);
-var moved = new Entity[group.Count];
-zone.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), moved);
-for (int i = 0; i < group.Count; i++)
+// The hero walks through a portal: the party moves, its ids are rewritten.
+List<EntityId> party = Party.Collect(zone, hero);
+var moved = new Entity[party.Count];
+zone.MoveEntities(nextZone, CollectionsMarshal.AsSpan(party), moved);
+for (int i = 0; i < party.Count; i++)
 {
-    Console.WriteLine($"{group[i]} -> {moved[i].Id}");
+    Console.WriteLine($"{party[i]} -> {moved[i].Id}");
 }
 
 Entity pet = moved[^1];
@@ -418,7 +418,7 @@ update after a deposit:
 saving 0v1: 650 gold
 ```
 
-Every entity of the group gets a new id in the next zone (two ids were taken there), the pet's `Owner` names the
+Every entity of the party gets a new id in the next zone (two ids were taken there), the pet's `Owner` names the
 hero's new id, and nothing stays behind. The restored bank is not saved again on the update after the load; the
 deposit is.
 
@@ -428,7 +428,7 @@ deposit is.
 | --- | --- | --- |
 | `SaveEntities` + `LoadEntities` between worlds of one process | `MoveEntities` | Rows copied, no encoding |
 | A new buffer per migration | One `NinoArrayBufferWriter`, `ResetWrittenCount()` each time | No allocation once it is large enough |
-| Many small migrations of one entity | One migration of the whole group | A save's fixed cost (the types by id) is paid once |
+| Many small migrations of one entity | One migration of the whole party | A save's fixed cost (the types by id) is paid once |
 | `SaveEntities` of whole entities when only some components persist | A `ComponentSet` | The runtime components are not written, and need no formatter |
 | A `ComponentSet` built for every save | One `static readonly` set | Each `With` copies the set |
 | A reload that rebuilds the world | `RemoveTypes`, then `Load` | The host's entities and components stay where they are |
@@ -455,8 +455,8 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| Moving a parent without its children | The children are destroyed with the original | Collect the group with `Descendants` |
-| Collecting the group with `Children` only | Grandchildren are left out, and destroyed with their parent | `Descendants` walks every level |
+| Moving a parent without its children | The children are destroyed with the original | Collect the party with `Descendants` |
+| Collecting the party with `Children` only | Grandchildren are left out, and destroyed with their parent | `Descendants` walks every level |
 | `EntityId`s in a `List<T>` inside a component | Not rewritten: they name entities of the old world | Use fields, a buffer or a relation |
 | An `Entity` handle in a component | Not saved, not rewritten | [EECS017](/en/docs/guide/analyzer#eecs017) |
 | Loading the new plugin before unloading the old one | Ambiguous type ids: `InvalidDataException` | The reload order above |
@@ -479,7 +479,7 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
     The whole world as bytes, versioning and Nino.
   </Card>
   <Card title="Hierarchy" href="/en/docs/guide/hierarchy">
-    Collect a group with `Descendants`.
+    Collect a party with `Descendants`.
   </Card>
   <Card title="Sample: SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">
     `SaveEntities`, `LoadEntities` and `MoveEntities`, verified step by step.

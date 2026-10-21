@@ -679,7 +679,7 @@ public void Load(ReadOnlySpan<byte> input, bool markWritten = true);
 public int LoadEntities(ReadOnlySpan<byte> input, Span<Entity> entities = default);
 ```
 
-创建 `SaveEntities` 写出的实体（本进程或别的进程写的），分配新的 id，按存档顺序把句柄写进 `entities`（放得下多少写多少）；返回创建的数量。组件和缓冲元素里的 [`EntityId`](/zh/docs/reference/entityid) 字段，原来指向组内实体的，改为指向那个实体的新实体；其余的一律变成 [`EntityId.Null`](/zh/docs/reference/entityid#null)（字段在哪里由生成器告诉 World；集合里的 id 不改写）。父实体没有一起过来的，移除它的 [`ChildOf`](/zh/docs/reference/childof)：实体在这里成为根。索引和分组收录这些实体；被追踪组件算作写入。O(实体数 × 组件数)。遍历进行中不能调用。
+创建 `SaveEntities` 写出的实体（本进程或别的进程写的），分配新的 id，按存档顺序把句柄写进 `entities`（放得下多少写多少）；返回创建的数量。组件和缓冲元素里的 [`EntityId`](/zh/docs/reference/entityid) 字段，原来指向存档里实体的，改为指向那个实体的新实体；其余的一律变成 [`EntityId.Null`](/zh/docs/reference/entityid#null)（字段在哪里由生成器告诉 World；集合里的 id 不改写）。父实体没有一起过来的，移除它的 [`ChildOf`](/zh/docs/reference/childof)：实体在这里成为根。索引和分组收录这些实体；被追踪组件算作写入。O(实体数 × 组件数)。遍历进行中不能调用。
 
 **异常**
 
@@ -694,7 +694,7 @@ public int LoadEntities(ReadOnlySpan<byte> input, Span<Entity> entities = defaul
 public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> targets, bool markWritten = true);
 ```
 
-把 [`World.SaveEntities`](/zh/docs/reference/world#saveentities) 写出的组件放到已经存在的实体上（Actor 的实体先建好、记录后到的情形）：存档里第 i 个实体的组件设到 `targets`[i] 上，没有的加上，已有的覆盖，每个实体最多换一次表；存档里没有的组件保持不变。索引、分组和变更 tick 的表现和 `Set` 一样（加载的每个组件都算写入）；被禁用的组件读进来仍是禁用的，值也保留。[`EntityId`](/zh/docs/reference/entityid) 字段原来指向组内实体的，改为指向它在 `targets` 里对应的实体，其余的一律变成 [`EntityId.Null`](/zh/docs/reference/entityid#null)；父实体不在组内的 [`ChildOf`](/zh/docs/reference/childof) 不会被设置。返回加载的实体数。O(实体数 × 组件数)。遍历进行中不能调用。
+把 [`World.SaveEntities`](/zh/docs/reference/world#saveentities) 写出的组件放到已经存在的实体上（Actor 的实体先建好、记录后到的情形）：存档里第 i 个实体的组件设到 `targets`[i] 上，没有的加上，已有的覆盖，每个实体最多换一次表；存档里没有的组件保持不变。索引、分组和变更 tick 的表现和 `Set` 一样（加载的每个组件都算写入）；被禁用的组件读进来仍是禁用的，值也保留。[`EntityId`](/zh/docs/reference/entityid) 字段原来指向存档里实体的，改为指向它在 `targets` 里对应的实体，其余的一律变成 [`EntityId.Null`](/zh/docs/reference/entityid#null)；父实体不在存档里的 [`ChildOf`](/zh/docs/reference/childof) 不会被设置。返回加载的实体数。O(实体数 × 组件数)。遍历进行中不能调用。
 
 `markWritten` 为 false 时，加载的组件不算写入：存档里的每个组件加载后都没有变更 tick，覆盖了之前写过的值（预制体的默认值）的也一样，所以 `[Changed<T>]` 系统和 `Since` 过滤条件不会因为这次加载访问该实体（从存储恢复的 Actor 内容和存储一致，“保存变化的部分”在代码写入之前不会保存它的任何东西）。存档里没有的组件保留各自的 tick。
 
@@ -903,7 +903,7 @@ public void Save(IBufferWriter<byte> output);
 public void SaveEntities(IBufferWriter<byte> output, params ReadOnlySpan<EntityId> entities);
 ```
 
-把 `entities`（失效的 id 和重复的 id 跳过）和它们的组件写进 `output`，供 [`World.LoadEntities`](/zh/docs/reference/world#loadentities) 或 [`World.LoadEntitiesInto`](/zh/docs/reference/world#loadentitiesinto) 读取：一组要搬去另一个 World 的实体（一个玩家和他拥有的东西，搬到另一台服务器）。单例和组外的实体不写；整棵层级用 [`World.Descendants`](/zh/docs/reference/world#descendants) 收集（id 列表写成 `CollectionsMarshal.AsSpan(list)`，不复制）。缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。遍历进行中不能调用。
+把 `entities`（失效的 id 和重复的 id 跳过）和它们的组件写进 `output`，供 [`World.LoadEntities`](/zh/docs/reference/world#loadentities) 或 [`World.LoadEntitiesInto`](/zh/docs/reference/world#loadentitiesinto) 读取：要搬去另一个 World 的实体（一个玩家和他拥有的东西，搬到另一台服务器）。单例和其他实体不写；整棵层级用 [`World.Descendants`](/zh/docs/reference/world#descendants) 收集（id 列表写成 `CollectionsMarshal.AsSpan(list)`，不复制）。缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。遍历进行中不能调用。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(给定实体数 × 组件数)
 
@@ -917,7 +917,7 @@ public void SaveEntitiesWith(IBufferWriter<byte> output, ReadOnlySpan<EntityId> 
 
 **异常**
 
-- `ArgumentException`：`components` 里有单例类型：一组实体的存档不写单例。
+- `ArgumentException`：`components` 里有单例类型：实体存档不写单例。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(给定实体数 × 组件数)
 

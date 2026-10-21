@@ -679,7 +679,7 @@ Replace this world's entities, components and singletons with those [`World.Save
 public int LoadEntities(ReadOnlySpan<byte> input, Span<Entity> entities = default);
 ```
 
-Create the entities `SaveEntities` wrote (in this process or another), with new ids, and write their handles in save order into `entities` (as many as fit); returns how many were created. [`EntityId`](/en/docs/reference/entityid) fields of their components and buffer elements that named an entity of the group name its new entity, every other one is [`EntityId.Null`](/en/docs/reference/entityid#null) (the generator tells the world where those fields are; ids inside collections are not rewritten). A [`ChildOf`](/en/docs/reference/childof) whose parent stayed behind is removed: the entity is a root here. Indexes and groups learn the entities; tracked components count as written. O(entities × components). Not while a pass iterates.
+Create the entities `SaveEntities` wrote (in this process or another), with new ids, and write their handles in save order into `entities` (as many as fit); returns how many were created. [`EntityId`](/en/docs/reference/entityid) fields of their components and buffer elements that named a saved entity name its new entity, every other one is [`EntityId.Null`](/en/docs/reference/entityid#null) (the generator tells the world where those fields are; ids inside collections are not rewritten). A [`ChildOf`](/en/docs/reference/childof) whose parent stayed behind is removed: the entity is a root here. Indexes and groups learn the entities; tracked components count as written. O(entities × components). Not while a pass iterates.
 
 **Exceptions**
 
@@ -694,7 +694,7 @@ Create the entities `SaveEntities` wrote (in this process or another), with new 
 public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> targets, bool markWritten = true);
 ```
 
-Put the components [`World.SaveEntities`](/en/docs/reference/world#saveentities) wrote onto entities that exist already (an actor whose entity was made before its record arrived): the components of the i-th saved entity are set on `targets`[i], added or replacing the values it has, each entity moving table at most once; components the save does not hold stay as they are. Indexes, groups and change ticks follow as with `Set` (every loaded component counts as written); a disabled component arrives disabled with its value. [`EntityId`](/en/docs/reference/entityid) fields that named an entity of the group name the entity of `targets` it became, every other one is [`EntityId.Null`](/en/docs/reference/entityid#null), and a [`ChildOf`](/en/docs/reference/childof) whose parent stayed behind is not set. Returns how many entities were loaded. O(entities × components). Not while a pass iterates.
+Put the components [`World.SaveEntities`](/en/docs/reference/world#saveentities) wrote onto entities that exist already (an actor whose entity was made before its record arrived): the components of the i-th saved entity are set on `targets`[i], added or replacing the values it has, each entity moving table at most once; components the save does not hold stay as they are. Indexes, groups and change ticks follow as with `Set` (every loaded component counts as written); a disabled component arrives disabled with its value. [`EntityId`](/en/docs/reference/entityid) fields that named a saved entity name the entity of `targets` it became, every other one is [`EntityId.Null`](/en/docs/reference/entityid#null), and a [`ChildOf`](/en/docs/reference/childof) whose parent stayed behind is not set. Returns how many entities were loaded. O(entities × components). Not while a pass iterates.
 
 With `markWritten` false, the loaded components do not count as written: each one the save holds has no change tick afterwards, also when it replaces a value written before (a default from a prefab), so `[Changed<T>]` systems and `Since` filters do not visit the entity for the load (an actor restored from storage holds what storage has, and "save what changed" saves nothing of it until code writes it). Components the save does not hold keep their ticks.
 
@@ -903,7 +903,7 @@ Write the entities (ids and versions), their components and the singletons into 
 public void SaveEntities(IBufferWriter<byte> output, params ReadOnlySpan<EntityId> entities);
 ```
 
-Write `entities` (stale ids and repeats are skipped) and their components into `output`, for [`World.LoadEntities`](/en/docs/reference/world#loadentities) or [`World.LoadEntitiesInto`](/en/docs/reference/world#loadentitiesinto): a group of entities that moves to another world (a player and what it owns, to another server). Singletons and the other entities are not written; collect a hierarchy with [`World.Descendants`](/en/docs/reference/world#descendants) (a list of ids goes as `CollectionsMarshal.AsSpan(list)`, no copy). Allocates nothing once its buffers are large enough. O(entities given × components). Not while a pass iterates.
+Write `entities` (stale ids and repeats are skipped) and their components into `output`, for [`World.LoadEntities`](/en/docs/reference/world#loadentities) or [`World.LoadEntitiesInto`](/en/docs/reference/world#loadentitiesinto): entities that move to another world (a player and what it owns, to another server). Singletons and the other entities are not written; collect a hierarchy with [`World.Descendants`](/en/docs/reference/world#descendants) (a list of ids goes as `CollectionsMarshal.AsSpan(list)`, no copy). Allocates nothing once its buffers are large enough. O(entities given × components). Not while a pass iterates.
 
 **Complexity** ([API table](/en/docs/api)): O(entities given × components)
 
@@ -917,7 +917,7 @@ public void SaveEntitiesWith(IBufferWriter<byte> output, ReadOnlySpan<EntityId> 
 
 **Exceptions**
 
-- `ArgumentException`: `components` holds a singleton type: a group save writes no singletons.
+- `ArgumentException`: `components` holds a singleton type: a save of entities writes no singletons.
 
 **Complexity** ([API table](/en/docs/api)): O(entities given × components)
 
