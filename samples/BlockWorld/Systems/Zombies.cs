@@ -1,0 +1,66 @@
+using EasyEcs;
+
+namespace BlockWorld;
+
+// At night, every few seconds, a zombie rises 8 to 15 blocks from each player and hunts that player.
+public class NightSpawnSystem : EcsSystem
+{
+    public override int UpdateInterval => Rules.SpawnEvery;
+
+    [ForEach]
+    void Spawn(Entity player, in Player client, in Position position, in Clock clock, in Prefabs prefabs, ref Stats stats)
+    {
+        if (!Rules.IsNight(clock)) return;
+        int seed = (int)(clock.Tick / Rules.SpawnEvery);
+        int dx = 8 + Rules.Hash(client.Client, seed) % 8, dz = 8 + Rules.Hash(seed, client.Client) % 8;
+        int x = (int)MathF.Floor(position.Value.X) + dx, z = (int)MathF.Floor(position.Value.Z) - dz;
+        var at = new System.Numerics.Vector3(x + 0.5f, Terrain.SurfaceHeight(x, z) + 1, z + 0.5f);
+        World.Instantiate(prefabs.Zombie, new Position(at), new Target(player));
+        stats.ZombiesSpawned++;
+    }
+}
+
+// Walks a zombie toward its player and hits when close enough.
+public class ZombieChaseSystem : EcsSystem
+{
+    [ForEach, With<Zombie>]
+    void Chase(in Position position, in Target target, ref Velocity velocity, ref Cooldown cooldown,
+        ref Stats stats)
+    {
+        if (!World.TryGetEntity(target.Player, out var player)) return;   // the player left
+        var to = player.Position.Value - position.Value;
+        var flat = new System.Numerics.Vector2(to.X, to.Z);
+        float distance = flat.Length();
+
+        var v = velocity.Value;
+        if (distance > 0.1f)
+        {
+            flat /= distance;
+            v.X = flat.X * Rules.ZombieSpeed;
+            v.Z = flat.Y * Rules.ZombieSpeed;
+        }
+        velocity = new Velocity(v);
+
+        if (cooldown.Ticks > 0)
+        {
+            cooldown = new Cooldown(cooldown.Ticks - 1);
+            return;
+        }
+        if (distance < 1.2f && MathF.Abs(to.Y) < 1.5f)
+        {
+            player.Health = new Health(player.Health.Value - Rules.ZombieDamage);
+            cooldown = new Cooldown(Rules.TicksPerSecond);
+            stats.Hits++;
+        }
+    }
+}
+
+// Zombies burn in daylight: one point a tick, so a zombie lasts a second after sunrise.
+public class SunburnSystem : EcsSystem
+{
+    [ForEach, With<Zombie>]
+    static void Burn(ref Health health, in Clock clock)
+    {
+        if (!Rules.IsNight(clock)) health = new Health(health.Value - 1);
+    }
+}
