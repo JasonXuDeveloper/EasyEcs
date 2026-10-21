@@ -1490,6 +1490,28 @@ generated `LinkX(target)`, a job's `Writes` / `OwnStamps` → `WriteMask` / `Sel
 - **A new save id for `Retired`:** every save holding a retired entity would fail to load.
 - **Renaming `entity.Describe()` and `DescribeSchedule()` too:** each already says what it describes.
 
+## D65. The buffer pool's limit is a setting of each element type [#d65-buffer-pool-capacity]
+
+**Decision.** `DynamicBuffer<T>.PoolCapacity` sets the longest list, in elements, that a destroyed or removed buffer of
+`T` gives back to its thread's pool. It is a static of the element type, process-wide, defaulting to 4,096 bytes of
+elements; 0 pools none.
+
+**Why.**
+- **The pool belongs to the element type.** Freed lists go to a thread-static pool per `T`, shared by every world on
+  that thread, so the limit lives where the pool does.
+- **One size does not fit all.** 4 KB keeps small inventories and paths pooled without holding big lists. Buffers that
+  come and go at one large size, such as the blocks of chunks loaded and unloaded around players, missed the pool
+  and allocated each time. Raising the limit for that one type makes the churn free (`ChunkChurnBenchmark` in
+  `EasyEcs.Benchmark`, pooled against unpooled).
+- **What it keeps is bounded.** The pool holds at most as many lists as died while none were taken, so its memory is
+  that peak times the capacity, for the types that raised it only.
+
+**Considered.**
+- **A `WorldOptions` setting:** the pool is shared by the worlds of a thread, so a per-world value would not say which
+  world's limit applies.
+- **One byte limit for every type:** raising it for chunks would also keep large lists of every other element type.
+- **A larger default:** it would keep big lists for the types that do not need them; the default stays 4 KB.
+
 ## Related [#related]
 
 <Cards>

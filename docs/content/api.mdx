@@ -135,6 +135,7 @@ need a `ref` and are tracked writes.
 | `bag.Clear()` | O(1), O(count) for elements with references | keeps the capacity |
 | `bag.EnsureCapacity(n)` / `AsSpan()` | O(count) when it grows / O(1) | `AsSpan()` is writable |
 | `bag.TrimExcess()` | O(count) | reallocates to the count; an empty list holds no array |
+| `DynamicBuffer<T>.PoolCapacity` | O(1) | the longest list a dead buffer of `T` gives back to its thread's pool (default 4 KB of elements); per element type, process-wide, set at startup |
 
 A snapshot, a save or a clone of a buffer column copies the elements: O(elements), a new list per entity.
 

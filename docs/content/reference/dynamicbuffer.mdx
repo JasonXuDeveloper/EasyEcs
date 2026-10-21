@@ -38,6 +38,18 @@ The number of elements.
 
 **Complexity** ([API table](/en/docs/api)): O(1)
 
+### `PoolCapacity` [#poolcapacity]
+
+```csharp
+public static int PoolCapacity { get; set; }
+```
+
+The longest list, in elements, that a destroyed or removed buffer of `T` gives back to its thread's pool, for the next buffer's first write to reuse instead of allocating one (default: 4,096 bytes of elements, 4,096 for a `byte` or a byte-sized enum). A longer list is left to the GC. Raise it for buffers of one size that come and go in numbers, such as the blocks of chunks loaded and unloaded around players; 0 pools none. The pool holds at most as many lists as died while none were taken, so what it keeps is that peak times this capacity. Process-wide, for every world and thread: set it at startup, before a world uses the type.
+
+**Exceptions**
+
+- `ArgumentOutOfRangeException`: The value is negative.
+
 ## Indexers
 
 ### `this[]` [#indexer]

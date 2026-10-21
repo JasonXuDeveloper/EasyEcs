@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+
 <doc>
   <member name="T:EasyEcs.DynamicBuffer`1" source="1755b030dcd1">
     <summary>
@@ -34,4 +34,14 @@
   <member name="M:EasyEcs.DynamicBuffer`1.GetEnumerator" source="546a0591a584">
     <summary>枚举元素（只读，零分配）。</summary>
   </member>
+
+  <member name="P:EasyEcs.DynamicBuffer`1.PoolCapacity" source="a01fab5792d6">
+            <summary>
+            <typeparamref name="T" /> 的缓冲被销毁或移除时，最长多少个元素的列表会还给本线程的回收池，留给下一个缓冲第一次写入时重用，免得再分配
+            （默认是 4,096 字节能放下的元素个数，<c>byte</c> 或单字节枚举就是 4,096）。更长的列表交给 GC。同样大小、大量反复出现又消失的缓冲可以调高它，
+            比如玩家周围加载又卸载的区块里的方块；设为 0 则什么都不回收。池里最多保留“没人取用期间销毁的列表”那么多个，所以它占用的内存是这个峰值乘以这个容量。
+            对整个进程、所有 World 和线程生效：在启动时、World 用到这个类型之前设置。
+            </summary>
+            <exception cref="T:System.ArgumentOutOfRangeException">值为负数。</exception>
+        </member>
 </doc>

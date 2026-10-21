@@ -348,6 +348,17 @@ The documentation lives at **[ecs.xgamedev.net](https://ecs.xgamedev.net)**; its
 
 The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading order.
 
+## What's new in 4.8
+
+- **Large buffers that come and go allocate nothing.** `DynamicBuffer<T>.PoolCapacity` sets, per element type, how long
+  a list the buffer pool keeps, so the blocks of chunks loaded and unloaded around players reuse one another's lists
+  ([dynamic buffers](https://ecs.xgamedev.net/en/docs/guide/dynamic-buffers#what-it-costs)).
+- **Enum elements get named members.** A `DynamicBuffer<Block>` of an enum gets `chunk.Block`, `WriteBlock()` and the
+  rest, like a buffer of a struct.
+- **A Minecraft-style sample and a Samples section.** [VoxelServer](https://ecs.xgamedev.net/en/docs/samples/voxel-server)
+  runs chunks, flowing water, areas of interest, zombies, replication and saves at 20 ticks a second; the
+  [Samples](https://ecs.xgamedev.net/en/docs/samples) section of the site walks through every sample.
+
 ## What's new in 4.7
 
 - **Writes that count only when the value changed.** A `Mut<T>` parameter stamps only the rows a method writes, and

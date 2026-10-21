@@ -333,7 +333,11 @@ new buffers take the lists of the dead ones.
 - **A buffer that dies** (its entity destroyed, the component removed) hands its list, emptied, to the next buffer of
   its element type that the thread creates, so entities that come and go with buffers (actors loaded and unloaded,
   units spawned and killed) allocate nothing once warm. Only lists that died while none were taken wait there, and a
-  list of more than 4 KB is left to the GC.
+  list longer than `DynamicBuffer<T>.PoolCapacity` elements (4 KB of them by default) is left to the GC.
+- **Large buffers that come and go**, such as the 8,192 blocks of a chunk loaded and unloaded around players: raise
+  the capacity once at startup, `DynamicBuffer<Block>.PoolCapacity = 8192;`, and each loaded chunk reuses the list of
+  one that was unloaded. The setting is per element type and process-wide; the pool keeps at most the lists of its
+  peak, so it holds that peak times the capacity.
 - **`TrimExcess`** gives back what a list that once grew large no longer needs; an empty list then holds no array.
 - **Parallel methods** may take a `ref DynamicBuffer<T>`: each chunk writes only its own entities' lists.
 

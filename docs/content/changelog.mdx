@@ -17,6 +17,10 @@ major or minor version that needs code changes? The
 - A `DynamicBuffer` of an enum (`DynamicBuffer<Block>`) gets the same generated members as one of a struct:
   `chunk.Block`, `HasBlock`, `WriteBlock()`, `GetOrAddBlock()`, `RemoveBlock()` and the prefab's `SetBlock(…)`. See
   [dynamic buffers](/en/docs/guide/dynamic-buffers).
+- `DynamicBuffer<T>.PoolCapacity` sets, per element type, the longest list a destroyed or removed buffer gives back
+  to its thread's pool (4 KB of elements by default). Raise it for large buffers that come and go, such as the blocks
+  of chunks loaded and unloaded around players, and each new buffer reuses a dead one's list instead of allocating. See
+  [dynamic buffers](/en/docs/guide/dynamic-buffers#what-it-costs).
 
 ## 4.7.0 [#v4-7-0]
 
