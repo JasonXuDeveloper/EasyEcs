@@ -13,10 +13,11 @@ when the server stops. Fifty bots play for a minute of game time, a day and a ni
   so `world.ChunkIndex.TryGet(pos, out chunk)` finds the chunk at a position. Its 8,192 blocks are a
   `DynamicBuffer<Block>` of a byte enum and its water a `DynamicBuffer<Fluid>` of levels in the same layout, read as
   `chunk.Block[slot]` and written through `chunk.WriteBlock()`.
-- **The world follows the players, and keeps what they left.** `ChunkLoadSystem` counts the players that see each
-  chunk twice a second (`UpdateInterval`) and records the missing ones as `LoadRequest` entities, one per chunk
-  (a unique index); `ChunkReadSystem` reads them back from the region files or generates them. `ChunkUnloadSystem` marks the chunks nobody saw for five
-  seconds, a twentieth of them each tick (`[ForEach(Slices = 20)]`), and `ChunkSaveSystem` writes each with the
+- **The world follows the players, and keeps what they left.** `ChunkLoadSystem` asks for the chunks missing around
+  the players who crossed into another chunk (`[Changed<InChunk>]`), as `LoadRequest` entities, one per chunk (a unique
+  index); `ChunkReadSystem` reads them back from the region files or generates them. Each chunk counts its viewers
+  (`Viewers`, kept by `ChunkViewSystem` as the views change), and `ChunkUnloadSystem` marks the chunks nobody has had
+  in view for five seconds, a twentieth of them each tick (`[ForEach(Slices = 20)]`), and `ChunkSaveSystem` writes each with the
   zombies and items in it (`SaveEntities`) and destroys them. Loading and saving run in `OnUpdate`, after the pass:
   a pass may not load or save entities (EECS041), so the pass leaves the work as data.
 - **One area of interest for everything that sees.** Players and zombies carry a `Vision`, set by each prefab, and
@@ -36,7 +37,8 @@ when the server stops. Fifty bots play for a minute of game time, a day and a ni
   system, since a batch method may not change structure.
 - **State changes are data.** A dig is a flag of the client's `Input`; a dug block becomes an `Item` entity; fire is a
   `Burning` component that `SunlightSystem` adds and `ExtinguishSystem` removes; dying is a `Health` of zero that one
-  system per kind handles (zombies go, players drop their inventory and respawn).
+  system per kind handles (zombies go, players drop their inventory and respawn), and `Health` is tracked, so those
+  systems visit only the healths written since their last run (`[Changed<Health>]`).
 - **Send only what changed.** The buffers and the `Position` are tracked: `[ChangedAny<DynamicBuffer<Block>,
   DynamicBuffer<Fluid>>]` visits the chunks dug or flooded since the last tick and `[Changed<Position>]` the bodies that
   moved. Physics writes the position through `Mut<Position>` with `SetIfChanged`, so a body standing still is not
@@ -85,20 +87,20 @@ dotnet run -c Release --project samples/VoxelServer -- --schedule        # the o
 ## Expected output
 
 ```text
-tick   200 (day  ): 50 players, 84 chunks, 3324 water, 0 zombies, 59 items
-tick   400 (night): 50 players, 113 chunks, 6364 water, 43 zombies, 103 items
-tick   600 (day  ): 50 players, 146 chunks, 11043 water, 125 zombies, 123 items
-tick   800 (day  ): 50 players, 143 chunks, 12390 water, 13 zombies, 116 items
-tick  1000 (night): 50 players, 127 chunks, 10699 water, 44 zombies, 82 items
-tick  1200 (day  ): 50 players, 141 chunks, 11904 water, 129 zombies, 84 items
-chunks: 166 generated, 66 unloaded, 41 loaded back
+tick   200 (day  ): 50 players, 84 chunks, 3481 water, 0 zombies, 59 items
+tick   400 (night): 50 players, 118 chunks, 6481 water, 43 zombies, 103 items
+tick   600 (day  ): 50 players, 146 chunks, 11143 water, 125 zombies, 123 items
+tick   800 (day  ): 50 players, 143 chunks, 12506 water, 13 zombies, 116 items
+tick  1000 (night): 50 players, 129 chunks, 10822 water, 44 zombies, 82 items
+tick  1200 (day  ): 50 players, 141 chunks, 11914 water, 129 zombies, 84 items
+chunks: 166 generated, 61 unloaded, 36 loaded back
 blocks dug: 606; items: 424 picked up, 241 expired
 zombies: 250 spawned, 121 burned, 803 hits; player deaths: 101
-water: 15144 cells filled, 15647 ticks of bodies carried
-view: 4352 chunks sent, 3102 forgotten; 34187 entities came into view, 10968 left it, 17382 despawned
-sent: 35486 block updates, 3035644 entity updates (52846 KiB)
+water: 15124 cells filled, 15647 ticks of bodies carried
+view: 4353 chunks sent, 3103 forgotten; 34187 entities came into view, 10968 left it, 17382 despawned
+sent: 35349 block updates, 3035871 entity updates (52851 KiB)
 top diggers: player 37 (26) player 8 (22) player 27 (21)
-restarted from the save: 50 players, 141 chunks, 11904 water, 129 zombies; 25 chunks in the region files
+restarted from the save: 50 players, 141 chunks, 11914 water, 129 zombies; 25 chunks in the region files
 ```
 
 The world, the springs, the bots and the spawns come from integer hashes, so every run prints the same. The chunks
