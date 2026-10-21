@@ -1,7 +1,8 @@
 # EasyEcs
 
-**EasyEcs is a high-performance archetype Entity Component System (ECS) for C# and .NET 10 game servers,
-simulations and other long-running real-time backends, and runs in Godot 4 .NET projects too.** A warmed-up world of 100,000 entities runs nine simulation
+**EasyEcs is a high-performance archetype Entity Component System (ECS) for C# and .NET 10,
+for anything that updates many entities every frame or tick: game servers, Godot 4 games, simulations and real-time
+backends.** A warmed-up world of 100,000 entities runs nine simulation
 systems in 1.72 ms with 0 B allocated. Across 37 head-to-head benchmarks against Friflo.Engine.ECS, Arch and
 DefaultEcs, EasyEcs leads in 24, is within measurement error in 11 and trails in 2
 ([full comparison](https://ecs.xgamedev.net/en/docs/comparison#feature-by-feature)). Write plain structs and
@@ -69,7 +70,7 @@ dotnet add package EasyEcs        # net10.0 · source generator, analyzer and Ni
 - **Decoupled by construction.** Systems cooperate only through data, in registration order unless `[UpdateBefore<T>]` /
   `[UpdateAfter<T>]` say otherwise; system groups give you
   separate cadences (input on every wake, simulation on a fixed tick).
-- **Built for servers that run for months.** Ids are recycled behind version-checked handles, memory is bounded by
+- **Built for processes that run for months.** Ids are recycled behind version-checked handles, memory is bounded by
   the peak entity count, a structural change off the owner thread throws or is reported at compile time instead of
   tearing the tables; the supported model is one owner thread per world (see [Threading](https://ecs.xgamedev.net/docs/guide/threading)),
   and one world per thread scales across cores.

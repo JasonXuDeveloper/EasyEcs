@@ -270,8 +270,8 @@ export function docDescription(
 ) {
   if (seo.description) return seo.description;
   return seo.lang === 'zh'
-    ? `${seo.title}：EasyEcs 文档，面向 C# 与 .NET 10 服务端的高性能 ECS。`
-    : `${seo.title}: documentation for EasyEcs, the high-performance ECS for C# and .NET 10 servers.`;
+    ? `${seo.title}：EasyEcs 文档，面向 C# 与 .NET 10 的高性能 ECS。`
+    : `${seo.title}: documentation for EasyEcs, the high-performance ECS for C# and .NET 10.`;
 }
 
 export function docMeta(seo: DocSeo): MetaDescriptor[] {

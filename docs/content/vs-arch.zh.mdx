@@ -8,7 +8,7 @@ icon: GitCompare
 [Arch](https://github.com/genaray/Arch) 和 EasyEcs 都是 C# 的原型（archetype）ECS：组件相同的实体共用一张表，查询顺着
 表的列走。区别在于核心库替你做了多少。Arch 是一个小而快的核心：查询、struct job、chunk 和命令缓冲，系统和源生成器在
 单独的 Arch.Extended 包里。EasyEcs 把系统、生成的 job、变更追踪、索引、关系、存档和快照都放进一个包，面向 .NET 10
-服务器，结构变更当场生效，不走命令缓冲。
+服务器与游戏，结构变更当场生效，不走命令缓冲。
 
 两个库都参与的 <FeatureCount library="Arch" k="total" /> 项正面对比里，EasyEcs 在 <FeatureCount library="Arch" k="ahead" /> 项更快，<FeatureCount library="Arch" k="even" /> 项差距在测量误差之内，
 <FeatureCount library="Arch" k="slower" /> 项更慢。
@@ -194,7 +194,7 @@ buffer.Playback(world);                          // 在这里才生效
 
 ## 什么时候选 Arch [#when-to-choose-arch]
 
-需要 Unity 或比 .NET 10 老的运行时、想要最小的核心、也愿意从 Arch.Extended 拼出系统和工具，就选 Arch。.NET 10 服务器、
+需要 Unity 或比 .NET 10 老的运行时、想要最小的核心、也愿意从 Arch.Extended 拼出系统和工具，就选 Arch。.NET 10 服务器或 Godot 游戏、
 状态每个 tick 都在变，想要在决定的地方就生效的变更、生成且经过分析器检查的系统、变更与移除追踪、每个 tick 零分配，
 就选 EasyEcs。要移植 Arch 项目：[从 Arch 迁移](/zh/docs/migrate-from-arch)。
 

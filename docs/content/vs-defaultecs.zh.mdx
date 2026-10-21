@@ -174,7 +174,7 @@ systems.Update(counters);
 ## 什么时候选 DefaultEcs [#when-to-choose-defaultecs]
 
 需要老运行时或 Unity，想让系统之间用响应式集合或消息沟通，而且 World 小到每 tick 的分配和池查找都无所谓，就选
-DefaultEcs。.NET 10 服务器、每个 tick 要遍历大量实体、不想每次写入都调 `NotifyChanged` 也能追踪变更、每个 tick 不能
+DefaultEcs。.NET 10 服务器或 Godot 游戏、每个 tick 要遍历大量实体、不想每次写入都调 `NotifyChanged` 也能追踪变更、每个 tick 不能
 有分配，就选 EasyEcs。要移植 DefaultEcs 项目：[从 DefaultEcs 迁移](/zh/docs/migrate-from-defaultecs)。
 
 ## 相关页面 [#related]

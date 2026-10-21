@@ -10,7 +10,8 @@ import { Lightbulb, Scale, Shapes } from 'lucide-react';
 
 ## EasyEcs 只能用于游戏服务端吗？ [#beyond-games]
 
-不是。EasyEcs 是面向 C#/.NET 10 的 ECS 库，适合反复更新大量实体的任务：游戏服务端、仿真，以及其他长时间运行的实时后端。
+不是。EasyEcs 是面向 C#/.NET 10 的 ECS 库，适合反复更新大量实体的任务：游戏服务端、用 Godot 4 .NET 做的游戏
+（[Unity 与 Godot](#unity-godot)）、仿真，以及其他实时后端。
 World 保存组件数据，系统按 tick 处理匹配的实体；库不要求实体一定是玩家，也不要求 tick 来自游戏。例如，服务可以把车辆、设备或
 工作单元建模为实体，让移动、状态变化和过期处理分别由系统执行。
 
@@ -20,7 +21,7 @@ World 保存组件数据，系统按 tick 处理匹配的实体；库不要求�
 
 ## EasyEcs 能用于生产吗？ [#production-ready]
 
-EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 上，为长时间运行的 .NET 服务端而设计。仓库里能看到的支撑：
+EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 上，为长时间运行的 .NET 进程而设计，服务端尤其如此。仓库里能看到的支撑：
 
 - 数百个 NUnit 测试，每个功能一个文件，包括分配预算为 0 字节的分配测试、生成器与分析器测试，以及一个同时跑全部功能的战斗服
   （[示例](/zh/docs/example)）。

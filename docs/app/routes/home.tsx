@@ -312,13 +312,13 @@ world.Update();                                // 0 B once warmed up`,
 const copy: Record<Locale, Copy> = {
   en: {
     description: topLeads(false)
-      ? `High-performance ECS for C# and .NET 10 servers: ${leadPhrase(0, false)} and ${leadPhrase(1, false)} than the next-fastest C# ECS, ${tickBytes} allocated per tick.`
-      : `High-performance ECS for C# and .NET 10 servers: a full server tick in ${tickTime}, source-generated systems, change tracking and ${tickBytes} per tick.`,
+      ? `High-performance ECS for C# and .NET 10: ${leadPhrase(0, false)} and ${leadPhrase(1, false)} than the next-fastest C# ECS, ${tickBytes} allocated per tick.`
+      : `High-performance ECS for C# and .NET 10: a full server tick in ${tickTime}, source-generated systems, change tracking and ${tickBytes} per tick.`,
     pill: `EasyEcs ${docsVersion} · C# ECS for .NET 10`,
     headline: fastest ? 'The fastest ECS' : 'High-performance ECS',
-    headlineAccent: 'for .NET\u00a010 servers.',
-    lede: `You write plain data and [ForEach] methods; a source generator turns them into inlined struct jobs. Faster than Friflo, Arch and DefaultEcs in ${counts.ahead} of ${counts.total} head-to-head benchmarks${zeroAlloc ? ', and a server tick allocates nothing' : `, ${tickBytes} allocated per tick`}.`,
-    definition: `EasyEcs is an open-source, high-performance archetype Entity Component System (ECS) for C# and .NET 10 servers. In ${counts.total} head-to-head benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs, each library doing the same work its own way, it is faster in ${counts.ahead}${zeroAlloc ? ', and a full server tick allocates nothing' : ''}. Write plain data and [ForEach] methods; a source generator turns them into inlined struct jobs, and an analyzer catches design mistakes at compile time.`,
+    headlineAccent: 'for performance-critical .NET.',
+    lede: `Your [ForEach] methods become source-generated struct jobs the JIT inlines, over 64-byte-aligned columns, with SIMD for archetype matching, row counts and change detection${zeroAlloc ? ' and nothing allocated per tick' : `, ${tickBytes} per tick`}. Faster than Friflo, Arch and DefaultEcs in ${counts.ahead} of ${counts.total} head-to-head benchmarks, on game servers, in Godot games and anywhere .NET 10 runs.`,
+    definition: `EasyEcs is an open-source, high-performance archetype Entity Component System (ECS) for C# and .NET 10, for anything that updates many entities every frame or tick: game servers, Godot 4 games, simulations and real-time backends. In ${counts.total} head-to-head benchmarks against Friflo.Engine.ECS, Arch and DefaultEcs, each library doing the same work its own way, it is faster in ${counts.ahead}${zeroAlloc ? ', and a full server tick allocates nothing' : ''}. Write plain data and [ForEach] methods; a source generator turns them into inlined struct jobs, and an analyzer catches design mistakes at compile time.`,
     start: 'Get started',
     github: 'View on GitHub',
     demo: 'Try it in the browser',
@@ -333,7 +333,7 @@ const copy: Record<Locale, Copy> = {
       {
         term: 'Runs on',
         detail:
-          '.NET 10 (net10.0): game servers, simulations and other long-running backends, and Godot 4 .NET projects. Not Unity yet.',
+          'Any .NET 10 (net10.0) process: game servers, Godot 4 .NET games, simulations, tools and tests. Not Unity yet.',
       },
       {
         term: 'Compared with',
@@ -573,13 +573,13 @@ const copy: Record<Locale, Copy> = {
   },
   zh: {
     description: topLeads(true)
-      ? `高性能 C# / .NET 10 服务端 ECS 框架：${leads[0].short.zh}比次快的 C# ECS 快 ${formatRatio(leads[0].ratio)}，${leadPhrase(1, true)}，每个 tick 分配 ${tickBytes}。`
-      : `高性能 C# / .NET 10 服务端 ECS 框架：完整服务器 tick 只要 ${tickTime}，源生成系统、变更追踪，每个 tick 分配 ${tickBytes}。`,
+      ? `高性能 C# / .NET 10 ECS 框架：${leads[0].short.zh}比次快的 C# ECS 快 ${formatRatio(leads[0].ratio)}，${leadPhrase(1, true)}，每个 tick 分配 ${tickBytes}。`
+      : `高性能 C# / .NET 10 ECS 框架：完整服务器 tick 只要 ${tickTime}，源生成系统、变更追踪，每个 tick 分配 ${tickBytes}。`,
     pill: `EasyEcs ${docsVersion} · C# 高性能 ECS 框架`,
     headline: fastest ? '最快的 ECS 框架' : '高性能 ECS 框架',
-    headlineAccent: '为 .NET\u00a010 服务端而生。',
-    lede: `你只写普通数据和 [ForEach] 方法，源生成器把它们编译成内联的结构体 job。与 Friflo、Arch、DefaultEcs 正面对比 ${counts.total} 项，${counts.ahead} 项更快${zeroAlloc ? '，服务器 tick 不分配任何内存' : `，每个 tick 分配 ${tickBytes}`}。`,
-    definition: `EasyEcs 是开源、高性能的 archetype（原型）实体组件系统（ECS），面向 C# 与 .NET 10 服务端。与 Friflo.Engine.ECS、Arch、DefaultEcs 的 ${counts.total} 项正面对比里，每个库用自己的写法做同样的事，它在 ${counts.ahead} 项更快${zeroAlloc ? '，完整的服务器 tick 也不分配任何内存' : ''}。你只写普通数据和 [ForEach] 方法：源生成器把它们编译成内联的结构体 job，分析器在编译期拦下设计错误。`,
+    headlineAccent: '为高性能场景而生。',
+    lede: `你写的 [ForEach] 方法由源生成器编译成 JIT 可内联的结构体 job，数据放在 64 字节对齐的列里，原型匹配、计数和变更检测都用 SIMD 加速${zeroAlloc ? '，每个 tick 零分配' : `，每个 tick 分配 ${tickBytes}`}。与 Friflo、Arch、DefaultEcs 正面对比 ${counts.total} 项，${counts.ahead} 项更快；游戏服务器、Godot 游戏，凡是 .NET 10 能跑的地方都能用。`,
+    definition: `EasyEcs 是开源、高性能的 archetype（原型）实体组件系统（ECS），面向 C# 与 .NET 10，适合每帧或每个 tick 都要更新大量实体的程序：游戏服务器、Godot 4 游戏、模拟与实时后端。与 Friflo.Engine.ECS、Arch、DefaultEcs 的 ${counts.total} 项正面对比里，每个库用自己的写法做同样的事，它在 ${counts.ahead} 项更快${zeroAlloc ? '，完整的服务器 tick 也不分配任何内存' : ''}。你只写普通数据和 [ForEach] 方法：源生成器把它们编译成内联的结构体 job，分析器在编译期拦下设计错误。`,
     start: '快速开始',
     github: '在 GitHub 上查看',
     demo: '在浏览器里试试',
@@ -594,7 +594,7 @@ const copy: Record<Locale, Copy> = {
       {
         term: '运行环境',
         detail:
-          '.NET 10（net10.0）：游戏服务器、模拟以及其他长时间运行的后端，以及 Godot 4 .NET 项目。暂不支持 Unity。',
+          '任何 .NET 10（net10.0）进程：游戏服务器、Godot 4 .NET 游戏、模拟、工具与测试。暂不支持 Unity。',
       },
       {
         term: '对比',
@@ -834,8 +834,8 @@ const copy: Record<Locale, Copy> = {
 
 // Search result titles: the product and the category people search for.
 const seoTitle: Record<Locale, string> = {
-  en: 'EasyEcs – High-Performance ECS for C# and .NET 10 Servers',
-  zh: 'EasyEcs – 高性能 C# / .NET 10 服务端 ECS 框架',
+  en: 'EasyEcs – High-Performance ECS for C# and .NET 10',
+  zh: 'EasyEcs – 高性能 C# / .NET 10 ECS 框架',
 };
 
 /** The home FAQ as plain text, for the FAQPage JSON-LD */

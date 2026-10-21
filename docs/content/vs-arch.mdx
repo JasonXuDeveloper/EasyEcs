@@ -9,7 +9,7 @@ icon: GitCompare
 components share a table, and queries walk its columns. They differ in what the core does for you. Arch is a small,
 fast core: queries, struct jobs, chunks and a command buffer, with systems and source generators in the separate
 Arch.Extended packages. EasyEcs puts systems, generated jobs, change tracking, indexes, relations, saves and
-snapshots in one package for .NET 10 servers, and applies structural changes immediately instead of through a
+snapshots in one package for .NET 10 servers and games, and applies structural changes immediately instead of through a
 command buffer.
 
 In the <FeatureCount library="Arch" k="total" /> head-to-head benchmarks both libraries take part in, EasyEcs is faster in
@@ -205,7 +205,7 @@ Every other result, including the ones without Arch (Arch has no value index, hi
 ## When to choose Arch [#when-to-choose-arch]
 
 Choose Arch when you need Unity or a runtime older than .NET 10, want a minimal core and are happy to assemble
-systems and tooling from Arch.Extended. Choose EasyEcs for a .NET 10 server whose state changes every tick: changes
+systems and tooling from Arch.Extended. Choose EasyEcs for a .NET 10 server or Godot game whose state changes every tick: changes
 applied where they are decided, generated and analyzer-checked systems, change and removal tracking, and no
 allocation per tick. Porting an Arch codebase: [Migrate from Arch](/en/docs/migrate-from-arch).
 

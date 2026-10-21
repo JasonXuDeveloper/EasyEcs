@@ -10,8 +10,8 @@ import { Lightbulb, Scale, Shapes } from 'lucide-react';
 
 ## Is EasyEcs only for game servers? [#beyond-games]
 
-No. EasyEcs is a C#/.NET 10 ECS library for workloads that repeatedly update many entities: game servers, simulations
-and other long-running real-time backends. A world holds plain component data; systems process matching entities on a
+No. EasyEcs is a C#/.NET 10 ECS library for workloads that repeatedly update many entities: game servers, games built
+with Godot 4 .NET ([Unity and Godot](#unity-godot)), simulations and other real-time backends. A world holds plain component data; systems process matching entities on a
 tick. The library does not assume that an entity is a player or that a tick comes from a game. For example, a service
 can model moving vehicles, devices or workers as entities and run movement, status and expiry systems over them.
 
@@ -24,7 +24,7 @@ requests to a world without touching it from request threads.
 ## Is EasyEcs production ready? [#production-ready]
 
 EasyEcs is published on [NuGet](https://www.nuget.org/packages/EasyEcs) under the MIT license and built for
-long-running .NET servers. What backs it up, in the repository:
+long-running .NET processes, servers above all. What backs it up, in the repository:
 
 - Hundreds of NUnit tests, one file per feature, including allocation tests with a budget of 0 bytes, generator and
   analyzer tests, and a battle server that runs every feature at once

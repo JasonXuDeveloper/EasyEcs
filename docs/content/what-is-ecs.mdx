@@ -17,7 +17,7 @@ game servers, simulations, digital twins, agent models.
 
 In C# and .NET an ECS comes as a library. EasyEcs, Friflo.Engine.ECS, Arch and DefaultEcs are .NET libraries (the
 last three also run in Unity); Unity Entities (DOTS) is Unity's own. EasyEcs is an allocation-free archetype ECS for
-.NET 10 game servers and simulations: systems are `[ForEach]` methods that a source generator compiles into struct
+.NET 10 game servers, Godot 4 games and simulations: systems are `[ForEach]` methods that a source generator compiles into struct
 jobs, and a server tick of 100,000 entities takes <BenchValue k="tick.oneWorld" /> and allocates
 <BenchValue k="tick.oneWorld.alloc" />.
 
@@ -255,7 +255,7 @@ by lead: [Comparison](/en/docs/comparison#feature-by-feature).
 
 ## What does EasyEcs add? [#easyecs]
 
-EasyEcs is an archetype ECS for C# and .NET 10 servers. On top of the pattern above it gives you:
+EasyEcs is an archetype ECS for C# and .NET 10, on servers and in Godot 4 games. On top of the pattern above it gives you:
 
 - **Systems written as methods.** A `[ForEach]` method is the whole system; a source generator turns it into an
   inlined struct job, and filters are attributes.

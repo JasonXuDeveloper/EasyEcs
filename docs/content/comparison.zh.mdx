@@ -413,7 +413,7 @@ DefaultEcs 用配 `DefaultParallelRunner` 的 `AEntitySetSystem`。
 
 | 选 | 什么时候 |
 | --- | --- |
-| **EasyEcs** | .NET 10 服务器或模拟，状态频繁翻转，想让变更在决定的地方就生效，系统由生成器生成并在编译期检查，内置变更与移除追踪、预制体、索引、关系、存档和快照，每个 tick 零分配。 |
+| **EasyEcs** | .NET 10 服务器、Godot 游戏或模拟，状态频繁翻转，想让变更在决定的地方就生效，系统由生成器生成并在编译期检查，内置变更与移除追踪、预制体、索引、关系、存档和快照，每个 tick 零分配。 |
 | **Friflo.Engine.ECS** | 需要 Unity 或老运行时、事件或 JSON 序列化，能接受遍历期间用命令缓冲改结构，想要一个快速的通用 ECS。 |
 | **Arch** | 需要 Unity 或老运行时，想要基于 chunk 存储的小核心，系统和生成器从 Arch.Extended 里加。 |
 | **DefaultEcs** | 需要低至 netstandard1.1，想要响应式集合和内置序列化器，而且 World 小到每 tick 的分配无所谓。 |

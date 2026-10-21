@@ -14,7 +14,7 @@ faq: true
 游戏服务器、各类模拟、数字孪生、智能体模型。
 
 在 C# 和 .NET 里，ECS 以库的形式出现。EasyEcs、Friflo.Engine.ECS、Arch 和 DefaultEcs 都是 .NET 库（后三个也能在
-Unity 里用），Unity Entities（DOTS）是 Unity 自带的。EasyEcs 是面向 .NET 10 游戏服务器与模拟的零分配原型（archetype）
+Unity 里用），Unity Entities（DOTS）是 Unity 自带的。EasyEcs 是面向 .NET 10 游戏服务器、Godot 4 游戏与模拟的零分配原型（archetype）
 ECS：系统就是 `[ForEach]` 方法，由源生成器编译成结构体 job；10 万实体的服务器 tick 耗时
 <BenchValue k="tick.oneWorld" />，分配 <BenchValue k="tick.oneWorld.alloc" />。
 
@@ -233,7 +233,7 @@ DefaultEcs 是 <BenchValue k="peers.defaultecs.ratio" />；每个 tick 不分配
 
 ## EasyEcs 在此之上提供了什么？ [#easyecs]
 
-EasyEcs 是面向 C# 与 .NET 10 服务端的 archetype ECS。在上面这些基础之上，它还提供：
+EasyEcs 是面向 C# 与 .NET 10 的 archetype ECS，服务端和 Godot 4 游戏都能用。在上面这些基础之上，它还提供：
 
 - **系统就是方法。** 一个 `[ForEach]` 方法就是整个系统，源生成器把它编译成内联的结构体 job，过滤条件写成特性。
 - **结构变更立即生效。** 遍历途中也能增删组件、创建销毁实体，不需要命令缓冲。

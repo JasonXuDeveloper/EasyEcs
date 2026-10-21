@@ -27,7 +27,8 @@ import {
   Zap,
 } from 'lucide-react';
 
-**EasyEcs 是开源、零 GC 分配的 archetype（原型）实体组件系统（ECS），面向 C# 与 .NET 10 服务端。**
+**EasyEcs 是开源、零 GC 分配的 archetype（原型）实体组件系统（ECS），面向 C# 与 .NET 10，
+适合每帧或每个 tick 都要更新大量实体的程序：游戏服务器、Godot 4 游戏、模拟与实时后端。**
 你只写普通数据和 `[ForEach]` 方法：源生成器把它们编译成内联的结构体 job，分析器在编译期拦下设计错误。
 10 万实体的完整服务器 tick 耗时 <BenchValue k="tick.oneWorld" />，分配 <BenchValue k="tick.oneWorld.alloc" />。
 

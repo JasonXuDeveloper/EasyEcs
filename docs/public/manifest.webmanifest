@@ -1,7 +1,7 @@
 {
   "name": "EasyEcs Documentation",
   "short_name": "EasyEcs",
-  "description": "The allocation-free ECS for C# and .NET 10 servers",
+  "description": "The allocation-free ECS for C# and .NET 10",
   "start_url": "/en",
   "display": "standalone",
   "background_color": "#0a0a0a",

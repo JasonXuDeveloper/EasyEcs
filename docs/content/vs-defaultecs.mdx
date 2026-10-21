@@ -180,7 +180,7 @@ run, and the parallel rows carry a large error too.
 ## When to choose DefaultEcs [#when-to-choose-defaultecs]
 
 Choose DefaultEcs when you need old runtimes or Unity, reactive sets or messaging as the way systems talk, and the
-world is small enough that per-tick allocations and pool lookups do not matter. Choose EasyEcs for a .NET 10 server
+world is small enough that per-tick allocations and pool lookups do not matter. Choose EasyEcs for a .NET 10 server or Godot game
 that iterates many entities every tick, wants change tracking without a `NotifyChanged` at every write, and must not
 allocate per tick. Porting a DefaultEcs codebase: [Migrate from DefaultEcs](/en/docs/migrate-from-defaultecs).
 

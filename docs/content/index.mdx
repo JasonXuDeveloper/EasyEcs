@@ -27,7 +27,8 @@ import {
   Zap,
 } from 'lucide-react';
 
-**EasyEcs is an open-source, allocation-free archetype Entity Component System (ECS) for C# and .NET 10 servers.**
+**EasyEcs is an open-source, allocation-free archetype Entity Component System (ECS) for C# and .NET 10,
+for anything that updates many entities every frame or tick: game servers, Godot 4 games, simulations and real-time backends.**
 You write plain data and `[ForEach]` methods. A source generator turns them into inlined struct jobs, an analyzer
 catches design mistakes at compile time, and a full server tick of 100,000 entities takes
 <BenchValue k="tick.oneWorld" /> and allocates <BenchValue k="tick.oneWorld.alloc" />.

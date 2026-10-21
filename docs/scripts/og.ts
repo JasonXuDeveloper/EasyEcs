@@ -321,7 +321,7 @@ export function homeCards(): Card[] {
       description: [
         first && second
           ? `${formatRatio(first.ratio)} faster ${first.short.en} and ${formatRatio(second.ratio)} faster ${second.short.en} than the next-fastest of Friflo.Engine.ECS, Arch and DefaultEcs`
-          : 'Source-generated systems for .NET 10 servers',
+          : 'Source-generated systems for C# and .NET 10',
         alloc ? `, with ${alloc} allocated per tick.` : '.',
       ].join(''),
     },
@@ -333,7 +333,7 @@ export function homeCards(): Card[] {
       description: [
         first && second
           ? `对比 Friflo.Engine.ECS、Arch、DefaultEcs 中次快的库，${first.short.zh}快 ${formatRatio(first.ratio)}，${second.short.zh}快 ${formatRatio(second.ratio)}`
-          : '为 .NET 10 服务端打造的源生成系统',
+          : '面向 C# 与 .NET 10 的源生成系统',
         alloc ? `，每个 tick 分配 ${alloc}。` : '。',
       ].join(''),
     },
