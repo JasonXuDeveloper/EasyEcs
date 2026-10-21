@@ -52,8 +52,8 @@ public sealed partial class World
 
     /// <summary>
     /// Write <paramref name="entities"/> (stale ids and repeats are skipped) and their components into
-    /// <paramref name="output"/>, for <see cref="LoadEntities"/> or <see cref="LoadEntitiesInto"/>: a group of entities
-    /// that moves to another world (a player and what it owns, to another server). Singletons and the other entities
+    /// <paramref name="output"/>, for <see cref="LoadEntities"/> or <see cref="LoadEntitiesInto"/>: entities
+    /// that move to another world (a player and what it owns, to another server). Singletons and the other entities
     /// are not written; collect a hierarchy with <see cref="Descendants"/> (a list of ids goes as
     /// <c>CollectionsMarshal.AsSpan(list)</c>, no copy). Allocates nothing once its buffers are large enough.
     /// O(entities given × components). Not while a pass iterates.
@@ -68,11 +68,11 @@ public sealed partial class World
     /// with its kept value. Entities without any of them are written too, empty. Allocates nothing once its buffers
     /// are large enough. O(entities given × components). Not while a pass iterates.
     /// </summary>
-    /// <exception cref="ArgumentException"><paramref name="components"/> holds a singleton type: a group save writes no singletons.</exception>
+    /// <exception cref="ArgumentException"><paramref name="components"/> holds a singleton type: a save of entities writes no singletons.</exception>
     public void SaveEntitiesWith(IBufferWriter<byte> output, ReadOnlySpan<EntityId> entities, in ComponentSet components)
     {
         if (components.HasSingletons)
-            throw new ArgumentException("A group save writes no singletons: its set names components only", nameof(components));
+            throw new ArgumentException("A save of entities writes no singletons: its set names components only", nameof(components));
         Save(output, entities, false, in components, SaveFilter.Include, nameof(SaveEntitiesWith));
     }
 
@@ -110,7 +110,7 @@ public sealed partial class World
         }
     }
 
-    // A save's tables (_saveTables) and the number of rows each writes (_saveCounts). A group save writes the rows
+    // A save's tables (_saveTables) and the number of rows each writes (_saveCounts). A save of entities writes the rows
     // _saveRows holds from _saveStarts[t] (its entities' rows, table by table, in the order given) and its entities in
     // the order given (_saveOrder); one bit per id of the group (_saveSelected) skips repeats while it is selected.
     private Archetype[] _saveTables = [];
@@ -122,7 +122,7 @@ public sealed partial class World
     private int _saveOrderCount;
     private int[] _saveRows = [];
     private ulong[] _saveBits = [];
-    private int _saveStamp; // marks the tables a group save found (Archetype.SaveMark)
+    private int _saveStamp; // marks the tables a save of entities found (Archetype.SaveMark)
 
     /// <summary>Every table with rows, all of them written. Inside the gate.</summary>
     private void SelectAll()
@@ -149,7 +149,7 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// The living, distinct ids of <paramref name="entities"/> for a group save, and their rows table by table: O(group),
+    /// The living, distinct ids of <paramref name="entities"/> for a save of entities, and their rows table by table: O(entities),
     /// whatever the size of the world. Inside the gate.
     /// </summary>
     private void Select(ReadOnlySpan<EntityId> entities)

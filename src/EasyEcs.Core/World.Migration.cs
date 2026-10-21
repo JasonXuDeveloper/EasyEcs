@@ -25,7 +25,7 @@ public sealed partial class World
     /// <summary>
     /// Create the entities <c>SaveEntities</c> wrote (in this process or another), with new ids, and write their
     /// handles in save order into <paramref name="entities"/> (as many as fit); returns how many were created.
-    /// <see cref="EntityId"/> fields of their components and buffer elements that named an entity of the group name
+    /// <see cref="EntityId"/> fields of their components and buffer elements that named a saved entity name
     /// its new entity, every other one is <see cref="EntityId.Null"/> (the generator tells the world where those fields
     /// are; ids inside collections are not rewritten). A <see cref="ChildOf"/> whose parent stayed behind is removed:
     /// the entity is a root here. Indexes and groups learn the entities; tracked components count as written.
@@ -48,7 +48,7 @@ public sealed partial class World
     /// the i-th saved entity are set on <paramref name="targets"/>[i], added or replacing the values it has, each entity
     /// moving table at most once; components the save does not hold stay as they are. Indexes, groups and change ticks
     /// follow as with <c>Set</c> (every loaded component counts as written); a disabled component arrives disabled
-    /// with its value. <see cref="EntityId"/> fields that named an entity of the group name the entity of
+    /// with its value. <see cref="EntityId"/> fields that named a saved entity name the entity of
     /// <paramref name="targets"/> it became, every other one is <see cref="EntityId.Null"/>, and a <see cref="ChildOf"/>
     /// whose parent stayed behind is not set. Returns how many entities were loaded. O(entities × components). Not
     /// while a pass iterates.
@@ -287,7 +287,7 @@ public sealed partial class World
 
     /// <summary>
     /// Copy every entity of <paramref name="source"/>, a world without tombstones, into this one; returns how many. The
-    /// copies are new rows, as <c>CreateEntities</c> makes them: a pass may be iterating this world (a group prefab
+    /// copies are new rows, as <c>CreateEntities</c> makes them: a pass may be iterating this world (a prefab with members
     /// instantiated by a system).
     /// </summary>
     internal int ArriveAll(World source)

@@ -48,13 +48,13 @@ public sealed partial class Prefab
     /// </summary>
     public Prefab AddMember() => new(_store);
 
-    /// <summary>The id that names this member in the components of the group (rewritten on every instance).</summary>
+    /// <summary>The id that names this member in the components of the prefab's entities (rewritten on every instance).</summary>
     public EntityId Id => Row.Id;
 
     /// <summary>The prefab's world: one row per member.</summary>
     internal World Store => _store;
 
-    /// <summary>Whether the prefab has members (an instance is a group of entities).</summary>
+    /// <summary>Whether the prefab has members (an instance is several entities).</summary>
     internal bool IsGroup => _store.EntityCount > 1;
 
     // Set(in T1..Tn) and Remove<T1..Tn>() are generated (Entity.Structural.g.cs), and ComponentGenerator writes the

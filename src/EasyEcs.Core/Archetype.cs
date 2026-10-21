@@ -49,7 +49,7 @@ internal sealed class Archetype
     /// <summary>Whether any column is a <see cref="DynamicBuffer{T}"/> (its lists go back to their pool when a row dies).</summary>
     private readonly bool _hasBuffers;
 
-    /// <summary>A group save's mark (World._saveStamp when it holds some of the group) and its index among the save's tables.</summary>
+    /// <summary>A save of entities' mark (World._saveStamp when it holds some of them) and its index among the save's tables.</summary>
     internal int SaveMark, SaveIndex;
 
     /// <summary>
