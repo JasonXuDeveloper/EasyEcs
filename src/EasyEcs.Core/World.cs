@@ -201,7 +201,7 @@ public sealed partial class World : IDisposable
         using (Structural())
         {
             var (source, from) = Source(original);
-            if (sameWorld && source.HasCleanup && Retired(source, from)) ThrowCloneRetired();
+            if (sameWorld && source.HasCleanup && IsRetiredRow(source, from)) ThrowCloneRetired();
             ClaimRows(source, from, 1, 1); // a clone's unique keys are its original's: taken (null keys aside)
             var target = sameWorld ? source : TableFor(source);
             int id = AllocateId(); // may grow Meta: the original's row was read first
@@ -363,7 +363,7 @@ public sealed partial class World : IDisposable
             return true;
         }
 
-        bool retired = Retired(meta.Archetype, meta.Slot);
+        bool retired = IsRetiredRow(meta.Archetype, meta.Slot);
         AddBit(ref meta, id, RetiredBit);
         var archetype = meta.Archetype;
         int slot = meta.Slot;
@@ -393,7 +393,7 @@ public sealed partial class World : IDisposable
     /// Whether row <paramref name="slot"/> of <paramref name="table"/> is a retired entity: kept alive by <c>Destroy</c>
     /// for its cleanup components, tagged <see cref="Retired"/> until they go.
     /// </summary>
-    internal static bool Retired(Archetype table, int slot) =>
+    internal static bool IsRetiredRow(Archetype table, int slot) =>
         table.ColumnIndex(RetiredBit) is var tag and >= 0 && table.Has(tag, slot);
 
     /// <summary>Bit of the <see cref="Retired"/> tag.</summary>

@@ -282,7 +282,7 @@ public sealed partial class World
         ref var meta = ref MetaRef(id.Index);
         if (meta.Archetype == null || meta.Version != id.Version) return false;
         (table, slot) = (meta.Archetype, meta.Slot);
-        return !table.HasCleanup || !Retired(table, slot);
+        return !table.HasCleanup || !IsRetiredRow(table, slot);
     }
 
     /// <summary>

@@ -615,7 +615,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
                 return null;
             string fqn = type.ToDisplayString(Symbols.Fqn);
             bool relation = shape.Kind == Kind.Relation;
-            var setters = relation // a link is added from what builds it: AddFriend(target) for Friend(EntityId Target)
+            var setters = relation // a link is added from what builds it: LinkFriend(target) for Friend(EntityId Target)
                 ? ComponentModel.SettersOf(type, fqn, type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray())
                 : [];
             string ns = type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString();
