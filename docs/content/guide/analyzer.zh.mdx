@@ -1,15 +1,15 @@
 ---
 title: 分析器规则
-seoTitle: "EasyEcs 分析器规则 EECS002-EECS052：每条 C# 诊断的含义与修法"
-description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS052：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
+seoTitle: "EasyEcs 分析器规则 EECS002-EECS053：每条 C# 诊断的含义与修法"
+description: EasyEcs 的每一条分析器规则，从 EECS002 到 EECS053：严重级别、代码修复、会被拒绝的写法，以及应该怎么写。
 icon: ShieldCheck
 ---
 
 EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/docs/ecs-principles)的代码编译不过。正确性规则（EECS002 到 EECS024，以及
 EECS035、EECS036）除了三条警告都是错误；这三条针对的是能跑、但有代价的写法（EECS017、EECS018、EECS020）。生成器会跳过无效输入，由分析器报出来，
-所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034，以及 EECS039、EECS046、EECS052）找的是能跑、但做了多余工作的代码，级别说明是哪一种
+所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034，以及 EECS039、EECS046、EECS052、EECS053）找的是能跑、但做了多余工作的代码，级别说明是哪一种
 （[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）：警告表示这样写有代价
-（EECS025 到 EECS032，以及 EECS046、EECS052）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
+（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
 
 ## 什么时候看 [#when-to-use-it]
 
@@ -83,6 +83,7 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS050](#eecs050) | 错误 | 一个过滤条件只指定一个 `InGroup` 分组 | |
 | [EECS051](#eecs051) | 错误 | 遍历进行中不更新 World | |
 | [EECS052](#eecs052) | 警告 | 新实体的组件在创建时就给出 | 创建时带上组件 |
+| [EECS053](#eecs053) | 警告 | 只在部分行上写入的追踪变化组件用 `Mut<T>` | `Mut<T>` |
 
 ## EECS002 [#eecs002]
 
@@ -1475,6 +1476,56 @@ bullet.Set(new Velocity(1, 0));   // 第二次搬动，搬到带 Velocity 的表
 ```csharp
 var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0));
 ```
+
+## EECS053 [#eecs053]
+
+**追踪变化的组件以 `ref` 传入，却只在部分行上写入。** 警告。代码修复：`Mut<T>`。
+
+[追踪变化的组件](/zh/docs/guide/change-tracking)（`ITracked`，以及所有 `DynamicBuffer<T>`）的 `ref` 参数会给方法访问到的每一行打 tick，
+不管写没写。方法只在部分行上写它（提前 `return`、写在 `if` 里、循环可能一次都不执行），没动的行也被打了 tick，于是每个 `[Changed<T>]`
+系统都会再访问它们一遍：同步把它们再发一次，存档把它们再写一次。[`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed)
+参数只给它写过的行打 tick：通过 `Write()`，或者值确实变了的 `SetIfChanged`
+（[D66](/zh/docs/decisions#d66-a-ref-written-on-some-rows)）。
+
+规则沿着方法的控制流检查：逐实体的 `[ForEach]` 方法里，追踪变化的组件的 `ref` 参数，只要有一条从开头出发的路径不写它就走到结尾或
+`return`，就报出来。抛异常的路径不算；在 `finally` 里写这个参数的方法不报。方法从来不写的参数归 [EECS025](#eecs025)。批量方法不报：
+它的 span 按整段行打 tick，而 `Mut<T>` 是逐实体的参数。
+
+```csharp
+public record struct Location(int X, int Y) : IComponent, ITracked;
+```
+
+```csharp doccheck=expect-EECS053
+public class RespawnSystem : EcsSystem
+{
+    [ForEach]
+    static void Respawn(ref Health health, ref Location location)
+    {
+        if (health.Value > 0) return;   // 活着的直接返回，它们的 Location 照样被打 tick
+        health = new Health(100);
+        location = new Location(0, 0);
+    }
+}
+```
+
+改成 `Mut<T>`：
+
+```csharp
+public class RespawnSystem : EcsSystem
+{
+    [ForEach]
+    static void Respawn(ref Health health, Mut<Location> location)
+    {
+        if (health.Value > 0) return;
+        health = new Health(100);
+        location.Write() = new Location(0, 0);
+    }
+}
+```
+
+修复把参数改成 `Mut<T>`，对它的每次写入改成 `x.Write()`，每次读取改成 `x.Value`，方法做的事不变。参数除了 `ref` 还有别的修饰符
+（`scoped ref`）、有代码调用这个方法、方法体在 `nameof` 里用到参数或重新绑定它（`x = ref other`）时，不提供修复。如果几乎每一行都走写入的
+路径，又没有系统读这个组件的 `[Changed<T>]`，`ref` 每段行打一次 tick 反而更便宜：在那里压掉这条警告。
 
 ## 相关页面 [#related]
 

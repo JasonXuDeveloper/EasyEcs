@@ -543,6 +543,7 @@ written since the mark: 2
 | `[Removed<T>]` 方法同时要求有 `T` | 要求一行既有 `T` 又没有 `T`，没有行能满足 | [EECS016](/zh/docs/guide/analyzer#eecs016) |
 | `[Removed<T>]` 方法既没有组件参数也没有 `[With<U>]` | 没有任何东西说明方法要遍历什么 | [EECS003](/zh/docs/guide/analyzer#eecs003) |
 | 只读的参数写成了 `ref` | 访问到的每一行都算作已变化 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
+| `ref` 参数只在部分行上写入（提前 `return`、写在 `if` 里） | 访问到的每一行都算作已变化，没动过的行也一样 | [EECS053](/zh/docs/guide/analyzer#eecs053)：改用 [`Mut<T>`](#set-if-changed) 参数 |
 | 接收方还没有这些值，却用 `LoadEntitiesInto(..., markWritten: false)` 加载 | 加载的行不算变化，靠 `[Changed<T>]` 的同步永远不会发出去 | 代码审查：给新客户端同步时，自己发送完整状态 |
 | 指望 `[Removed<T>]` 报告被销毁的实体 | 它们没有行，任何过滤条件都访问不到 | 从[销毁日志](#destroy-log)读（`WorldOptions.DestroyLogCapacity`、`DestroyedSince`） |
 | 销毁日志的容量小于客户端最长延迟内的销毁数 | 这个客户端每次读 `DestroyedSince` 都返回 false，一遍又一遍地全量重发 | 代码审查：容量按每秒销毁数乘以允许的延迟来定；关注 `DestroyLogOldestTick` |

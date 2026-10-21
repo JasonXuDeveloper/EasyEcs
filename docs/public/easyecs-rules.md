@@ -59,7 +59,8 @@ available as Markdown: add `.md` to its URL.
   which mean all of them).
 - A system that recomputes a tracked component every tick takes it as `Mut<T>` and writes with
   `target.SetIfChanged(value)` (or `Write()` when it knows it writes): a `ref` parameter stamps every visited row.
-  Outside a pass, `entity.SetHealthIfChanged(…)`. Keep a plain `ref` where most rows really change. A `Mut<T>` that
+  Outside a pass, `entity.SetHealthIfChanged(…)`. Keep a plain `ref` where most rows really change. A tracked `ref`
+  that some path leaves unwritten (an early `return`, a write in an `if`) is a `Mut<T>` (EECS053). A `Mut<T>` that
   is never written is `in T` (EECS025); one of an untracked component is `ref T` (EECS039). `SetIfChanged` needs a
   record struct, an `IEquatable<T>` or an unmanaged `T` (EECS040).
 - Per-client replication: keep one `static readonly QueryFilter` (`QueryFilter.Create().ChangedAny<A, B>(0)`) and run
@@ -106,7 +107,7 @@ available as Markdown: add `.md` to its URL.
 ## Performance
 
 - An `EECS` warning means the code costs (EECS025 to EECS032, EECS052, and EECS017, EECS018, EECS020), loses a write
-  (EECS037, EECS038), stamps rows it only reads (EECS046) or uses a ref after a structural change (EECS047): apply
+  (EECS037, EECS038), stamps rows it only reads or leaves alone (EECS046, EECS053) or uses a ref after a structural change (EECS047): apply
   its fix (one mistake gets one diagnostic: where two rules see the same code, one defers). The suggestions, EECS033 and EECS039, are
   the same cost written shorter. An `EECS` error means the code cannot work.
 - Hot paths allocate nothing: no LINQ, closures, boxing, string formatting or `params object[]` in systems (EECS028).

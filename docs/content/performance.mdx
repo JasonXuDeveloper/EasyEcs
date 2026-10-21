@@ -518,7 +518,7 @@ the feature, a head-to-head comparison that checks every library computes the sa
 | Structural changes, presence bits | `EntityTests`, `ComponentTests`, `PresenceTests` | `MicroBenchmarks` (`Churn`, `ToggleComponent`), `SparseBenchmark`, `CountBenchmark` | [`StructuralChangeComparison`](/en/docs/comparison#structural-changes) |
 | Bulk changes and spawns | `BulkTests` | `BulkBenchmark`, `MicroBenchmarks.ChurnBatch` | [`BulkChangeComparison`, `BulkSpawnComparison`](/en/docs/comparison#bulk) |
 | Prefabs and clones | `InstantiateTests` | `PrefabBenchmark` | [`OperationBenchmark` (`Instantiate`)](/en/docs/comparison#operations) |
-| Change tracking, `Mut<T>` | `ChangedTests` | `ChangeTrackingBenchmark`, `ChangeTrackingWriteBenchmark` | [`ChangeTrackingComparison`](/en/docs/comparison#change-tracking) |
+| Change tracking, `Mut<T>` | `ChangedTests` | `ChangeTrackingBenchmark`, `ChangeTrackingWriteBenchmark`, `ChangeTrackingSomeRowsBenchmark` | [`ChangeTrackingComparison`](/en/docs/comparison#change-tracking) |
 | Removal detection, the destroy log | `RemovedTests` | `BattleServerBenchmark`, `DestroyLogBenchmark` | [`RemovalComparison`](/en/docs/comparison#removal-detection) |
 | Disabling | `DisableTests` | `BulkBenchmark` (`DisableAll`) | [`DisableComparison`](/en/docs/comparison#disabling) |
 | Value indexes, unique keys, ordered indexes | `IndexTests`, `OrderedIndexTests` | `IndexBenchmark`, `OrderedIndexBenchmark` | [`IndexComparison`, `ValueQueryComparison`](/en/docs/comparison#indexes-and-relations) |

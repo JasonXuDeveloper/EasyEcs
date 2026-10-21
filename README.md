@@ -62,7 +62,7 @@ dotnet add package EasyEcs        # net10.0 · source generator, analyzer and Ni
 - **Prefabs that stay out of your queries.** A `Prefab` is a recipe of component values that belongs to no world:
   `world.Instantiate(prefab)` spawns from it (a whole wave in one pass), and no system ever has to filter templates
   out. `entity.Clone()` copies a living entity.
-- **Mistakes fail the build.** The bundled analyzer (EECS002-EECS052, with code fixes) reports invalid `[ForEach]`
+- **Mistakes fail the build.** The bundled analyzer (EECS002-EECS053, with code fixes) reports invalid `[ForEach]`
   methods and systems, class components, stateful systems, systems that reference each other, batch methods mixing
   spans with per-entity parameters, parallel methods that would race, writes through read-only parameters, copied
   dynamic buffers, structural changes off the owner thread, indexed components written behind their index's back,
@@ -123,7 +123,7 @@ costs and when to use it).
 | [Errors](https://ecs.xgamedev.net/docs/guide/systems#errors) | `WorldOptions.SystemErrors`, `system.Error` | A failing system throws out of the update, or is switched off with its exception kept while the tick goes on. |
 | [Introspection](https://ecs.xgamedev.net/docs/guide/diagnostics) | `world.DescribeTables()`, `entity.Describe()` | Tables, columns, rows and bytes; an entity's component values, for tools and debuggers. |
 | [Giving memory back](https://ecs.xgamedev.net/docs/guide/diagnostics) | `world.TrimExcess()` | After a peak: drop empty tables, shrink the others, release save and load buffers. |
-| [Analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) | EECS002-EECS052 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
+| [Analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) | EECS002-EECS053 | ECS design mistakes (class components, stateful systems, systems referencing systems, …) fail the build. |
 | [Threading and Native AOT](https://ecs.xgamedev.net/docs/guide/threading) | one owner thread per world; no reflection on hot paths | Many worlds per process, one per thread; AOT works with nothing to configure. |
 
 ## Example
@@ -358,6 +358,9 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
 - **A Minecraft-style sample and a Samples section.** [VoxelServer](https://ecs.xgamedev.net/en/docs/samples/voxel-server)
   runs chunks, flowing water, areas of interest, zombies, replication and saves at 20 ticks a second; the
   [Samples](https://ecs.xgamedev.net/en/docs/samples) section of the site walks through every sample.
+- **Change stamps only where a method writes.** EECS053 reports a tracked component taken by `ref` that some path
+  leaves unwritten (an early `return`, a write in an `if`), which stamps every visited row; its fix takes it as a
+  `Mut<T>` ([analyzer](https://ecs.xgamedev.net/en/docs/guide/analyzer#eecs053)).
 
 ## What's new in 4.7
 

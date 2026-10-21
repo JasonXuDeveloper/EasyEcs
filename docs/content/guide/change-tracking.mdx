@@ -583,6 +583,7 @@ All of it on one page with the other features: [Performance guide](/en/docs/perf
 | `[Removed<T>]` on a method that also requires `T` | Asks for rows that have and lack `T` at once: no row passes | [EECS016](/en/docs/guide/analyzer#eecs016) |
 | `[Removed<T>]` with no component parameter or `[With<U>]` | Nothing names what the method iterates | [EECS003](/en/docs/guide/analyzer#eecs003) |
 | `ref` parameter that only reads | Every visited row counts as changed | [EECS025](/en/docs/guide/analyzer#eecs025) |
+| `ref` parameter written on some rows only (an early `return`, a write in an `if`) | Every visited row counts as changed, also the rows it left alone | [EECS053](/en/docs/guide/analyzer#eecs053): a [`Mut<T>`](#set-if-changed) parameter |
 | `LoadEntitiesInto(..., markWritten: false)` for values the receivers do not have yet | The loaded rows are not changes, so `[Changed<T>]` replication never sends them | Code review: a replicator to new clients sends the full state itself |
 | Expecting destroyed entities in `[Removed<T>]` | They have no row: no filter visits them | Read them from the [destroy log](#destroy-log) (`WorldOptions.DestroyLogCapacity`, `DestroyedSince`) |
 | A destroy log smaller than the destroys of a client's longest lag | `DestroyedSince` returns false for that client on every read: it resyncs over and over | Code review: size it to destroys per second times the allowed lag; watch `DestroyLogOldestTick` |

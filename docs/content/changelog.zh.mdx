@@ -17,6 +17,9 @@ icon: RotateCcwClock
   `WriteBlock()`、`GetOrAddBlock()`、`RemoveBlock()`，以及预制体的 `SetBlock(…)`。见[动态缓冲](/zh/docs/guide/dynamic-buffers)。
 - `DynamicBuffer<T>.PoolCapacity` 按元素类型设置：缓冲被销毁或移除时，最长多少个元素的列表还给本线程的回收池（默认是 4 KB 能放下的个数）。
   大缓冲反复出现又消失时调高它，比如玩家周围加载又卸载的区块，新缓冲就会重用旧列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#what-it-costs)。
+- 分析器规则 [EECS053](/zh/docs/guide/analyzer#eecs053)（警告，有代码修复）：`[ForEach]` 方法以 `ref` 传入追踪变化的组件（`ITracked`、
+  `DynamicBuffer<T>`），却有路径不写它（提前 `return`、写在 `if` 里），访问到的每一行都会被打 tick，`[Changed<T>]` 系统就会看到它根本没改过的行。
+  修复改成 `Mut<T>`（写入改成 `x.Write()`，读取改成 `x.Value`），只给写过的行打 tick。
 
 ## 4.7.0 [#v4-7-0]
 

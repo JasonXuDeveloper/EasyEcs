@@ -1012,7 +1012,8 @@ loop does not stamp its column: `Write()` (and a `SetIfChanged` that stores) sta
 changes no structure and runs on one thread walks runs of rows, and each `Mut<T>` knows its table and row, so a write
 stamps the row directly; in a method that changes structure, or a parallel per-entity method, a write looks up the
 entity's current row first. Batch methods keep spans (EECS009), indexed and grouped components keep `Set` (EECS015).
-The analyzer does not suggest `Mut<T>` for a `ref` parameter (EECS025 is unchanged).
+The analyzer does not suggest `Mut<T>` for a `ref` parameter that every path writes (EECS025 is unchanged); one that
+some path leaves unwritten is EECS053 ([D66](#d66-a-ref-written-on-some-rows)).
 
 **Why.**
 - **A recomputed value is not a changed value.** A system that writes a target every tick through `ref` stamps every
@@ -1511,6 +1512,38 @@ elements; 0 pools none.
   world's limit applies.
 - **One byte limit for every type:** raising it for chunks would also keep large lists of every other element type.
 - **A larger default:** it would keep big lists for the types that do not need them; the default stays 4 KB.
+
+## D66. A tracked component written by `ref` on some rows is a warning [#d66-a-ref-written-on-some-rows]
+
+**Decision.** EECS053 reports a `ref` parameter of a tracked component (`ITracked`, `DynamicBuffer<T>`) in a
+per-entity `[ForEach]` method when a path through the method reaches its end or a `return` without writing it, and
+its fix turns the parameter into a `Mut<T>` (writes `x.Write()`, reads `x.Value`). A `ref` that every path writes stays
+unreported ([D46](#d46-mut-stamps-per-write)); batch methods are left out.
+
+**Why.**
+- **The stamps are wrong, not only costly.** A row the method returned past is stamped as written, so every
+  `[Changed<T>]` reader treats it as a change: our own samples sent every player's position to every client each
+  tick, because the respawn system returned early for the living. `Mut<T>` keeps the stamps true.
+- **The shape of the code says it, not the data.** D46 left `ref` alone because only the data tells whether most rows
+  change. A path that does not write is visible in the method: the rows that take it are never changed by it.
+- **Measured** (`ChangeTrackingSomeRowsBenchmark`, 100,000 players, 100 respawning per tick, then the
+  `[Changed<Position>]` replication): 162 µs through `ref` and 133 µs through `Mut<T>`, the replication dropping from
+  about 90 µs to about 7 µs; the respawn alone takes 72 µs through `ref` and 126 µs through `Mut<T>`, so a component
+  nothing reads by change is cheaper by `ref`, which the rule's page says (suppress it there). 0 B both. Same machine as
+  [D29](#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same).
+- **The detection is the control flow graph, kept conservative.** Roslyn's graph of the method, walked from the entry:
+  a block holding a write stops the walk (a block runs whole), a branch that throws is not followed, a constant
+  condition takes its one branch (`while (true)`), and reaching the exit means a path without a write. Anything
+  `Uses.MayWrite` cannot prove a read counts as a write, and a method that writes the parameter in a `finally` is left
+  out (the walk does not follow a finally on the way out).
+
+**Considered.**
+- **Only straight-line patterns** (an early `return`, one `if`): misses `switch`, `else if` chains and loops that may
+  not run, for no saving; the graph costs one walk of the method's blocks.
+- **Batch methods:** a span stamps a whole run of rows, and there is no per-row `Mut<T>` for spans; a run written on
+  some rows needs a different design. Left out.
+- **`SetIfChanged` in the fix:** it compares, which a write that already knows it changes does not need, and it throws
+  for a managed component without `IEquatable<T>`. The fix keeps the method's writes as writes.
 
 ## Related [#related]
 

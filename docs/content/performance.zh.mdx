@@ -478,7 +478,7 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 | 结构变更、存在位 | `EntityTests`、`ComponentTests`、`PresenceTests` | `MicroBenchmarks`（`Churn`、`ToggleComponent`）、`SparseBenchmark`、`CountBenchmark` | [`StructuralChangeComparison`](/zh/docs/comparison#structural-changes) |
 | 批量变更和生成 | `BulkTests` | `BulkBenchmark`、`MicroBenchmarks.ChurnBatch` | [`BulkChangeComparison`、`BulkSpawnComparison`](/zh/docs/comparison#bulk) |
 | 预制体和克隆 | `InstantiateTests` | `PrefabBenchmark` | [`OperationBenchmark`（`Instantiate`）](/zh/docs/comparison#operations) |
-| 变更追踪、`Mut<T>` | `ChangedTests` | `ChangeTrackingBenchmark`、`ChangeTrackingWriteBenchmark` | [`ChangeTrackingComparison`](/zh/docs/comparison#change-tracking) |
+| 变更追踪、`Mut<T>` | `ChangedTests` | `ChangeTrackingBenchmark`、`ChangeTrackingWriteBenchmark`、`ChangeTrackingSomeRowsBenchmark` | [`ChangeTrackingComparison`](/zh/docs/comparison#change-tracking) |
 | 移除检测、销毁日志 | `RemovedTests` | `BattleServerBenchmark`、`DestroyLogBenchmark` | [`RemovalComparison`](/zh/docs/comparison#removal-detection) |
 | 禁用 | `DisableTests` | `BulkBenchmark`（`DisableAll`） | [`DisableComparison`](/zh/docs/comparison#disabling) |
 | 值索引、唯一键、有序索引 | `IndexTests`、`OrderedIndexTests` | `IndexBenchmark`、`OrderedIndexBenchmark` | [`IndexComparison`、`ValueQueryComparison`](/zh/docs/comparison#indexes-and-relations) |
