@@ -1,7 +1,8 @@
 /**
- * Runs after `react-router build`: rewrites the page files to the URLs the
- * site links to, and writes the files that are not pages (404.html, sitemap,
- * robots.txt, llms.txt, Markdown copies of each page, social cards).
+ * Runs after the prerender (scripts/after-build.ts): rewrites the page files
+ * to the URLs the site links to, and writes the files that are not pages
+ * (404.html, sitemap, robots.txt, llms.txt, Markdown copies of each page,
+ * social cards).
  */
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -462,9 +463,15 @@ function cards(): Card[] {
   return list;
 }
 
+/** The social cards: they need the pages' data only, not the prerendered HTML */
+export function drawCards() {
+  return writeCards(cards(), outDir, path.resolve('public/og.png'));
+}
+
 /* ------------------------------------------------------------------ */
 
-async function main() {
+/** Everything but the social cards, once the pages are prerendered */
+export async function generateStatic() {
   // Cloudflare serves /404.html (status 404) for unknown paths. It is shown at
   // any URL, so it must not hydrate: the router would try to load that URL.
   const notFoundDir = path.join(outDir, '404');
@@ -519,16 +526,18 @@ async function main() {
   }
 
   await Promise.all(tasks);
-  await writeCards(cards(), outDir, path.resolve('public/og.png'));
 
   console.log(
     `Wrote static files to ${path.relative('.', outDir)} (${moved} pages moved to .html)`,
   );
 }
 
-try {
-  await main();
-} catch (error) {
-  console.error(error);
-  process.exit(1);
+// `bun run generate:static` (vite-node --mode scripts), after `react-router build`
+if (import.meta.env.MODE === 'scripts') {
+  try {
+    await Promise.all([generateStatic(), drawCards()]);
+  } catch (error) {
+    console.error(error);
+    process.exit(1);
+  }
 }
