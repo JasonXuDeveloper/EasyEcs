@@ -225,22 +225,23 @@ public sealed partial class World
     /// <summary>
     /// Rows [<paramref name="first"/>, +<paramref name="count"/>) of <paramref name="table"/> (of any world) are about to
     /// be copied <paramref name="copies"/> times each into new entities of this world (<paramref name="into"/> -1) or onto
-    /// entity <paramref name="into"/>: claim the keys of their unique components (<see cref="IUniqueIndex.ClaimRows"/>).
-    /// Throws before anything changes. Inside the structural gate.
+    /// entity <paramref name="into"/>: claim the keys of their unique components (<see cref="IUniqueIndex.ClaimRows"/>),
+    /// without <paramref name="cleanup"/> not those of cleanup components (a move leaves them behind). Throws before
+    /// anything changes. Inside the structural gate.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ClaimRows(Archetype table, int first, int count, int copies, int into = -1)
+    private void ClaimRows(Archetype table, int first, int count, int copies, int into = -1, bool cleanup = true)
     {
-        if (table.Unique) ClaimUniqueRows(table, first, count, copies, into);
+        if (table.Unique) ClaimUniqueRows(table, first, count, copies, into, cleanup);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)] // tables with unique components only
-    private void ClaimUniqueRows(Archetype table, int first, int count, int copies, int into)
+    private void ClaimUniqueRows(Archetype table, int first, int count, int copies, int into, bool cleanup)
     {
         if (count == 0 || copies == 0) return;
         var components = table.Components;
         for (int c = 0; c < components.Length; c++)
-            if (ComponentInfo.Of(components[c]).Unique)
+            if (ComponentInfo.Of(components[c]) is { Unique: true } info && (cleanup || !info.Cleanup))
                 UniqueIndex(components[c]).ClaimRows(table, c, first, count, copies, into);
     }
 

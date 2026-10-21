@@ -80,6 +80,10 @@ public readonly ref struct Mut<T> where T : struct, IComponent
     /// did. Equality is <see cref="IEquatable{T}"/> when <typeparamref name="T"/> implements it (record structs do), else
     /// the bytes of an unmanaged <typeparamref name="T"/>; a managed <typeparamref name="T"/> without
     /// <see cref="IEquatable{T}"/> throws (<see cref="NotSupportedException"/>). O(size of T), allocation-free.
+    /// <para>Bytes compare what is stored, not what it means: padding between fields, <c>-0.0</c> against <c>0.0</c> and
+    /// two NaNs with different payloads count as different, so such a value is written and stamped although it is equal
+    /// (a stamp too many, never a change missed). Make a component with <c>float</c> or <c>double</c> fields a
+    /// <c>record struct</c> (or implement <see cref="IEquatable{T}"/>) to compare its values.</para>
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool SetIfChanged(in T value)
@@ -95,8 +99,9 @@ internal static class Values
 {
     /// <summary>
     /// Whether <paramref name="a"/> and <paramref name="b"/> are equal: <see cref="IEquatable{T}"/> (devirtualized, no
-    /// box), else the bytes of an unmanaged type (equal bytes are equal values; values equal under other rules, such as
-    /// -0.0 and 0.0, count as a change: a stamp too many, never one too few). The type tests are JIT-time constants.
+    /// box), else the bytes of an unmanaged type (equal bytes are equal values; values equal under other rules count as a
+    /// change: padding bytes, -0.0 against 0.0, NaN payloads; a stamp too many, never one too few). The type tests are
+    /// JIT-time constants.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool Same<T>(in T a, in T b) where T : struct

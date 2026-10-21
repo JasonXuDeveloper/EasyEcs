@@ -1,3 +1,4 @@
+using System;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
@@ -86,5 +87,38 @@ public class CleanupTests
         e.Destroy();
         Assert.That(world.Index<ChildOf, EntityId>().Count(parent), Is.Zero);
         Assert.That((e.IsDisabled<Callsign>(), e.Enable<Callsign>()), Is.EqualTo((false, false)));
+    }
+
+    [Test]
+    public void ADestroyedEntityCannotBeCloned()
+    {
+        using var world = new World();
+        var e = world.CreateEntity(new Lease(1), new Health(1));
+        var copy = e.Clone();                                            // alive: cloned with its cleanup component
+        Assert.That(copy.Read<Lease>().Slot, Is.EqualTo(1));
+        e.Destroy();
+        var error = Assert.Throws<InvalidOperationException>(() => e.Clone());
+        Assert.That(error!.Message, Does.Contain("destroyed"));
+        Assert.That((world.EntityCount, world.Count<Lease>(QueryFilter.Create().With<Destroyed>())), Is.EqualTo((2, 1)));
+    }
+
+    [Test]
+    public void BulkWritesLeaveDestroyedEntitiesOut()
+    {
+        using var world = new World();
+        var retired = world.CreateEntity(new Lease(1), new Health(1));
+        var live = world.CreateEntity(new Lease(2), new Health(2));
+        retired.Destroy();
+
+        Assert.That(world.SetAll(new Health(5)), Is.EqualTo(1));        // the retired entity does not come back
+        Assert.That((retired.Has<Health>(), live.Read<Health>().Value, world.Count<Health>()), Is.EqualTo((false, 5, 1)));
+        Assert.That(world.SetAll(new Lease(9)), Is.EqualTo(1));
+        Assert.That((retired.Read<Lease>().Slot, live.Read<Lease>().Slot), Is.EqualTo((1, 9)));
+
+        // Named in the filter, the tag reaches them; RemoveAll always does (removing is how they are released).
+        Assert.That(world.SetAll(new Lease(7), QueryFilter.Create().With<Destroyed>()), Is.EqualTo(1));
+        Assert.That(retired.Read<Lease>().Slot, Is.EqualTo(7));
+        Assert.That(world.RemoveAll<Lease>(), Is.EqualTo(2));
+        Assert.That((retired.IsAlive, live.IsAlive, world.EntityCount), Is.EqualTo((false, true, 1)));
     }
 }

@@ -258,6 +258,23 @@ internal sealed class Archetype
     }
 
     /// <summary>
+    /// Rows [<paramref name="to"/>, +<paramref name="count"/>) lose their cleanup components as if they never had them:
+    /// absent (managed values discarded) and never written, so no removal is reported (cleanup components cannot be
+    /// disabled: no tag goes with them). A moved entity's cleanup components stay behind (<see cref="World.MoveEntities"/>),
+    /// so its copy in the target world does not release the resource a second time. Inside the structural gate.
+    /// </summary>
+    public void DropCleanup(int to, int count)
+    {
+        for (int c = 0; c < _infos.Length; c++)
+        {
+            var info = _infos[c];
+            if (!info.Cleanup) continue;
+            for (int row = to; row < to + count; row++) MarkAbsent(c, row);
+            if (Tracked && info.Companion is var ticks and >= 0) ClearTicks(ColumnIndex(ticks), to, count);
+        }
+    }
+
+    /// <summary>
     /// Give row <paramref name="slot"/> the component of column <paramref name="column"/> back (its column exists).
     /// Returns true when the row lacked it. Inside the structural gate.
     /// </summary>

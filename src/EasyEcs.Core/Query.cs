@@ -142,6 +142,14 @@ public readonly partial struct QueryFilter
     }
 
     /// <summary>
+    /// This filter leaving out retired entities (tag <paramref name="destroyed"/>, <see cref="Destroyed"/>) unless it
+    /// names the tag itself: a bulk write (<see cref="World.SetAll{T}"/>) must not bring a destroyed entity back. One more
+    /// excluded bit: tables without the tag's column test nothing more per row. O(1).
+    /// </summary>
+    internal QueryFilter Living(int destroyed) =>
+        All.HasBit(destroyed) || None.HasBit(destroyed) || Any.HasBit(destroyed) ? this : Adding(1, destroyed);
+
+    /// <summary>
     /// Whether row <paramref name="slot"/> of <paramref name="archetype"/> passes the filter, tested as a query tests a
     /// row (<c>entity.Run</c>): its <c>With</c> components present, its <c>Without</c> ones absent, one of its
     /// <c>WithAny</c> ones present, its <c>Changed</c> ones written and its <c>Removed</c> ones removed at or after
