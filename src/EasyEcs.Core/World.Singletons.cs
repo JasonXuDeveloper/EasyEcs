@@ -11,16 +11,18 @@ public sealed partial class World
     private object[] _singletons = [];
 
     /// <summary>
-    /// Add (or reset to default) singleton <typeparamref name="T"/> and return a ref to it. A reset keeps the storage, so
-    /// <see cref="SingletonRef{T}"/> handles taken before still reach the singleton. O(1).
+    /// Add singleton <typeparamref name="T"/> (default) and return a ref to it. O(1).
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The world has <typeparamref name="T"/> already: replace its value with <c>world.SetX(...)</c> (or
+    /// <c>world.X = ...</c>), or take it as it is with <c>GetOrAddX()</c>.
+    /// </exception>
     public ref T AddSingleton<T>() where T : struct, ISingletonComponent
     {
         using (Structural())
         {
-            var box = Box<T>() ?? Publish<T>();
-            box.Value = default;
-            return ref box.Value;
+            if (Box<T>() != null) ThrowSingletonExists(typeof(T));
+            return ref Publish<T>().Value;
         }
     }
 
@@ -113,6 +115,13 @@ public sealed partial class World
     }
 
     private void ClearSingletons() => _singletons = [];
+
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowSingletonExists(Type type) =>
+        throw new InvalidOperationException(
+            $"Singleton {type.Name} was added to this world already: replace its value with world.Set{type.Name}(...) " +
+            $"or world.{type.Name} = ..., or use GetOrAdd{type.Name}() to take it as it is");
 
     [DoesNotReturn] // no NoInlining: the JIT sees it never returns (Entity.ThrowStale)
     private static void ThrowSingletonMissing(Type type) =>

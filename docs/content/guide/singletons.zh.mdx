@@ -78,7 +78,7 @@ public class ClockSystem : EcsSystem
 
 | 调用 | 生成成员 | 效果 |
 | --- | --- | --- |
-| `ref T AddSingleton<T>()` | | 添加；已存在时原地重置为 `default` |
+| `ref T AddSingleton<T>()` | | 添加（`default`）；World 里已经有它时抛 `InvalidOperationException` |
 | `ref T GetSingleton<T>()` | `world.Clock` | 返回 ref；没添加时抛异常 |
 | `ref T GetOrAddSingleton<T>()` | `world.GetOrAddClock()` | 返回 ref，不存在就先加一个 `default` |
 | `GetOrAddSingleton<T>() = value` | `world.SetClock(tick, deltaTime)` | 设置值，不存在就添加 |
@@ -106,7 +106,8 @@ var clock = world.SingletonRef<Clock>();     // 初始化时取一次
 clock.Value.Tick++;                          // 之后：直接是 ref，不用查找
 ```
 
-- 对已存在的单例组件调用 `AddSingleton<T>()` 会原地重置，句柄看到的就是重置后的值。
+- 重置就是一次写入：`world.SetClock(…)` 或 `world.Clock = default` 保留原来的存储，句柄看到的就是新值。对已存在的单例组件
+  调用 `AddSingleton<T>()` 会抛异常，而不是重置它。
 - `RemoveSingleton<T>()` 会让句柄脱钩：通过旧句柄的写入再也到不了 World，即使之后又把它加回来也一样。这时要重新取句柄。
 - [快照](/zh/docs/guide/snapshots)把单例组件恢复到原来的存储里，`Restore` 之后句柄照样能用。
 - 生成的 `[ForEach]` job 每次遍历只解析一次单例参数；并行 job 会被复制到其他线程，它们持有的是 `SingletonRef<T>`。

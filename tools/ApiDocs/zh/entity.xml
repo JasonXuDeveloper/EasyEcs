@@ -32,12 +32,15 @@
       和关系索引里。返回实体。均摊 O(1)；只有添加缓冲时才是结构变更。实体不存活时抛异常。
     </summary>
   </member>
-  <member name="M:EasyEcs.Entity.Clone" source="139d91b7b854">
+  <member name="M:EasyEcs.Entity.Clone" source="73ff644ec603">
     <summary>
       在同一个 World 里新建一个实体，带上这个实体每个组件的副本（<see cref="T:EasyEcs.DynamicBuffer`1" /> 拿到自己的一份列表，
       索引收录副本，被追踪组件算作刚刚写入）；这个实体不存活时抛异常。要按模板创建实体，用 <see cref="T:EasyEcs.Prefab" />。
       O(组件数)。只能在所有者线程调用。
     </summary>
+    <exception cref="T:System.InvalidOperationException">
+      这个实体已经销毁，只是因为清理组件才保留着（<see cref="T:EasyEcs.Destroyed" />）。
+    </exception>
   </member>
   <member name="M:EasyEcs.Entity.Describe" source="36ddeb3a1f64">
     <summary>

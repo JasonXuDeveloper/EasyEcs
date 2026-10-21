@@ -66,6 +66,10 @@ public Entity Clone();
 
 A new entity of the same world with a copy of every component of this one (a [`DynamicBuffer`](/en/docs/reference/dynamicbuffer) gets a list of its own, indexes learn the copy, tracked components count as written now); throws if this entity is not alive. To create entities from a template, use a [`Prefab`](/en/docs/reference/prefab). O(components). Owner thread only.
 
+**Exceptions**
+
+- `InvalidOperationException`: The entity was destroyed and is kept only for its cleanup components ([`Destroyed`](/en/docs/reference/destroyed)).
+
 **Complexity** ([API table](/en/docs/api)): O(c)
 
 ### `Describe` [#describe]

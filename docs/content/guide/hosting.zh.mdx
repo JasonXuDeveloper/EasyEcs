@@ -287,7 +287,7 @@ public sealed class PublishStatus(StatusBoard board) : EcsSystem
 
 ### 启动时加载，停止时存档 [#persistence]
 
-第一个 tick 之前加载上一次的存档，然后只补上存档里没有的单例：`Load` 会替换 World 的单例，`AddSingleton` 会把刚加载的单例重置。
+第一个 tick 之前加载上一次的存档，然后只补上存档里没有的单例：`Load` 会替换 World 的单例，对刚加载的单例调用 `AddSingleton` 会抛异常。
 循环结束后存档，先写临时文件再覆盖旧文件，写到一半崩溃也不会留下半个存档。如果有系统按 `[Changed<T>]` 存档或同步，
 读档时传 `markWritten: false`，第一个 tick 就不会把读进来的 World 再发一遍（[重启](/zh/docs/guide/saves#restart)）：
 
@@ -658,7 +658,7 @@ $ curl localhost:5000/status
 | 处理代码直接读组件 | tick 搬动行时读到撕裂或过期的值 | 发现不了：发布拷贝 |
 | 回复没加 `RunContinuationsAsynchronously` | 处理代码在 World 的线程上、tick 里面运行 | 代码审查 |
 | 回复 `Entity` 句柄 | 处理代码之后从自己的线程碰 World | 回复 `EntityId` 或拷贝的值 |
-| `Load` 之后 `AddSingleton` | 加载的单例被重置 | 先查 `HasSingleton<T>()`（或生成的 `HasX`） |
+| `Load` 之后 `AddSingleton` | 抛 `InvalidOperationException`：存档里已经有这个单例 | 先查 `HasSingleton<T>()`（或生成的 `HasX`） |
 | 无界通道 | World 跟不上时内存被塞满 | 用 `Channel.CreateBounded` |
 | 停机时通道没关 | 最后一次收取之后才写入、或者在满的通道上等待的处理代码，永远等不到答复 | 最后一个 tick 之后 `requests.Writer.TryComplete()`，再答复剩下的请求 |
 | 系统里 `await` 或阻塞 IO | 整个 tick 都在等 | 把 IO 作为数据交给主机 |

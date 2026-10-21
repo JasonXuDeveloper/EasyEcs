@@ -177,9 +177,12 @@ bool moved = npcs[7].SetPositionIfChanged(1, 0);   // false: one step taken, it 
 ```
 
 - **Equality** is `IEquatable<T>` when the component implements it (record structs do), called without boxing; else,
-  for an unmanaged component, its bytes (equal bytes are equal values; `-0.0` and `0.0` differ, which costs one stamp
-  too many, never one too few); else `SetIfChanged` throws `NotSupportedException` and no `SetXIfChanged` is
+  for an unmanaged component, its bytes; else `SetIfChanged` throws `NotSupportedException` and no `SetXIfChanged` is
   generated. Give a component with managed fields `IEquatable<T>`, or make it a record struct.
+- **Bytes are not values:** equal bytes are equal values, but equal values can have different bytes. Padding between
+  fields, `-0.0` against `0.0` and two NaNs with different payloads all count as a change: the value is written and
+  the row stamped although nothing changed (a stamp too many, never a change missed). Make a component with `float`
+  or `double` fields a record struct, so it compares them as numbers.
 - **Where `Mut<T>` works:** per-entity methods, also parallel ones and ones that change structure (a write after the
   entity moved stamps its new row). Batch methods take spans instead ([EECS009](/en/docs/guide/analyzer#eecs009)).
   An indexed or grouped component is never written through a ref ([EECS015](/en/docs/guide/analyzer#eecs015)):
@@ -224,7 +227,10 @@ writes the entity's other components, and a batch method receives removed rows i
   </Accordion>
   <Accordion title="Destroyed entities">
     A destroyed entity has no row, so `[Removed<T>]` does not visit it. The [destroy log](#destroy-log) reports it
-    instead: `world.DestroyedSince(tick, …)` lists the entities destroyed since a tick, for any number of readers.
+    instead: `world.DestroyedSince(tick, …)` lists the entities destroyed since a tick, for any number of readers. An
+    entity destroyed while it holds [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components) keeps
+    its row until they go, but losing its other components is not a removal either: nothing reports it until the
+    destroy log does, when it is freed.
   </Accordion>
   <Accordion title="Lacking is not losing">
     An entity created, instantiated from a [prefab](/en/docs/guide/prefabs) or cloned without `T` never lost it,

@@ -104,7 +104,11 @@ public long UpdateCount { get; }
 public ref T AddSingleton<T>() where T : struct, ISingletonComponent;
 ```
 
-添加单例 `T`（已存在时重置为默认值），返回它的 ref。重置不换存储，所以之前拿到的 [`World.SingletonRef`](/zh/docs/reference/world#singletonref) 句柄仍然指向这个单例。O(1)。
+添加单例 `T`（默认值），返回它的 ref。O(1)。
+
+**异常**
+
+- `InvalidOperationException`：World 里已经有 `T`：要替换它的值，用 `world.SetX(...)`（或 `world.X = ...`）；要原样取用，用 `GetOrAddX()`。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
 
@@ -706,7 +710,7 @@ public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into,
 
 **异常**
 
-- `ArgumentException`：`into` 没有按存档里的每个实体各给出一个本 World 的存活实体。
+- `ArgumentException`：`into` 没有按存档里的每个实体各给出一个本 World 的存活实体，或者同一个实体出现了不止一次。
 - `InvalidDataException`：字节不是存档，或者把同一个唯一键给了多个实体。
 - `InvalidOperationException`：加载的某个唯一键（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)）被另一个实体持有，而不是它要加载到的那个实体（加载前对照 World 检查）：什么都不写。
 
@@ -739,7 +743,7 @@ public void LoadKeeping(ReadOnlySpan<byte> input, in ComponentSet keep, bool mar
 public int MoveEntities(World target, ReadOnlySpan<EntityId> entities, Span<Entity> moved = default);
 ```
 
-把 `entities`（失效的 id 和重复的 id 跳过）搬到 `target`，即同一线程上的另一个 World：目标 World 新建带着这些组件的实体，结果和 [`World.LoadEntities`](/zh/docs/reference/world#loadentities) 读这组实体的存档一样，只是省掉了编码；然后在这边销毁它们（子实体一起销毁，所以层级要整棵一起搬；清理组件留在这边，交给各自的系统处理）。新句柄按顺序写进 `moved`（放得下多少写多少，跳过的 id 对应 [`Entity`](/zh/docs/reference/entity) 的 default）；返回搬走的数量。id 列表写成 `CollectionsMarshal.AsSpan(list)`，不复制。O(实体数 × 组件数)。调用线程必须同时是两个 World 的所有者线程；任何一个 World 正在遍历时都不能调用。要搬的实体有一个唯一键（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)），而 `target` 里已有实体持有它时，抛 `InvalidOperationException`，什么都不搬。
+把 `entities`（失效的 id、重复的 id 和因清理组件而保留的已销毁实体跳过）搬到 `target`，即同一线程上的另一个 World：目标 World 新建带着这些组件的实体，结果和 [`World.LoadEntities`](/zh/docs/reference/world#loadentities) 读这组实体的存档一样，只是省掉了编码；然后在这边销毁它们（子实体一起销毁，所以层级要整棵一起搬）。清理组件（[`ICleanupComponent`](/zh/docs/reference/icleanupcomponent)）不会搬走：它们留在这边被销毁的实体上，交给本 World 的系统释放它们持有的资源，新实体没有这些组件。新句柄按顺序写进 `moved`（放得下多少写多少，跳过的 id 对应 [`Entity`](/zh/docs/reference/entity) 的 default）；返回搬走的数量。id 列表写成 `CollectionsMarshal.AsSpan(list)`，不复制。O(实体数 × 组件数)。调用线程必须同时是两个 World 的所有者线程；任何一个 World 正在遍历时都不能调用。要搬的实体有一个唯一键（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)），而 `target` 里已有实体持有它时，抛 `InvalidOperationException`，什么都不搬。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(实体数 × 组件数)
 
@@ -795,7 +799,7 @@ public RelationIndex<T> Relations<T>() where T : struct, IRelation;
 public int RemoveAll<T>(in QueryFilter filter = default) where T : struct, IComponent;
 ```
 
-从每个拥有组件 `T` 且匹配 `filter` 的存活实体上移除它，效果和逐个调用 `Remove` 一样（行留在原处，清掉存在位）：`T` 被禁用的实体，保留的值和 [`Disabled`](/zh/docs/reference/disabled) 标签也一起去掉。返回处理的数量。O(匹配的表数 + 行数)。只能在所有者线程调用。
+从每个拥有组件 `T` 且匹配 `filter` 的存活实体上移除它，效果和逐个调用 `Remove` 一样（行留在原处，清掉存在位）：`T` 被禁用的实体，保留的值和 [`Disabled`](/zh/docs/reference/disabled) 标签也一起去掉。因清理组件而保留的已销毁实体也会处理到：移除这些组件正是释放它们的方式（它们没有别的组件）。返回处理的数量。O(匹配的表数 + 行数)。只能在所有者线程调用。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)
 
@@ -943,7 +947,7 @@ public void SaveWithout(IBufferWriter<byte> output, in ComponentSet exclude);
 public int SetAll<T>(in T value, in QueryFilter filter = default) where T : struct, IComponent;
 ```
 
-给每个匹配 `filter` 的存活实体设置组件 `T` = `value`（没有就添加，有就替换），效果和逐个调用 `Set` 一样：被追踪组件算作写入，索引和分组跟着更新。返回实体数量。O(匹配的表数 + 行数)；缺少 `T` 的实体搬一次行。只能在所有者线程调用。
+给每个匹配 `filter` 的存活实体设置组件 `T` = `value`（没有就添加，有就替换），效果和逐个调用 `Set` 一样：被追踪组件算作写入，索引和分组跟着更新。因清理组件而保留的已销毁实体（带 [`Destroyed`](/zh/docs/reference/destroyed) 标签）不会被处理，除非 `filter` 写明了 [`Destroyed`](/zh/docs/reference/destroyed)（`With<Destroyed>()`）：批量写入不会把它带回来。返回实体数量。O(匹配的表数 + 行数)；缺少 `T` 的实体搬一次行。只能在所有者线程调用。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)
 

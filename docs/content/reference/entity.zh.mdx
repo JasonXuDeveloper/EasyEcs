@@ -66,6 +66,10 @@ public Entity Clone();
 
 在同一个 World 里新建一个实体，带上这个实体每个组件的副本（[`DynamicBuffer`](/zh/docs/reference/dynamicbuffer) 拿到自己的一份列表，索引收录副本，被追踪组件算作刚刚写入）；这个实体不存活时抛异常。要按模板创建实体，用 [`Prefab`](/zh/docs/reference/prefab)。O(组件数)。只能在所有者线程调用。
 
+**异常**
+
+- `InvalidOperationException`：这个实体已经销毁，只是因为清理组件才保留着（[`Destroyed`](/zh/docs/reference/destroyed)）。
+
 **复杂度**（[API 表](/zh/docs/api)）：O(c)
 
 ### `Describe` [#describe]

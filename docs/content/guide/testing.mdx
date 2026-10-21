@@ -424,7 +424,7 @@ units allocate nothing once the first tick has run.
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
 | Forgetting a singleton the system reads (a `[ForEach]` parameter, `World.X` or `GetSingleton<T>()`) | `Update()` throws `InvalidOperationException` naming the singleton | The test fails: call the server's setup method, or set the singleton in the test |
-| `AddSingleton` after `Load` in a save test | The loaded value is reset | Add singletons before `Load` |
+| `AddSingleton` after `Load` in a save test | `InvalidOperationException`: the save held the singleton | Add singletons before `Load`, or check `HasX` first |
 | Measuring allocations without a warm-up update | The query caches and new tables count as allocations | Warm up first |
 | A `ref` held across `world.Update()` | The update may move rows: the ref reads stale memory | Read through the handle after the update ([refs](/en/docs/guide/refs-and-await)) |
 

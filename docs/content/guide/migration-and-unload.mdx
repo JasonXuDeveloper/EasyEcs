@@ -94,7 +94,10 @@ int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), Colle
 ```
 
 - The originals are destroyed with their children, so move a [hierarchy](/en/docs/guide/hierarchy#moving) together.
-- Cleanup components stay on the destroyed originals, for their systems to release.
+- Cleanup components do not move: they stay on the destroyed originals, for the systems of this world to release,
+  and the new entities do not have them, so a resource is released once.
+- An entity destroyed already and kept for its cleanup components (tagged `Destroyed`) is skipped like a stale id: it
+  is not copied, not counted, and its `moved` entry is `default`.
 - Both worlds must be owned by the calling thread; moving a world into itself is refused (`ArgumentException`).
 
 ### A record of what persists [#records]
@@ -135,8 +138,8 @@ var restored = world.CreateEntity(new Connection(10));
 world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
 ```
 
-- The i-th saved entity loads onto the i-th entity given; the counts must match and every entity must be alive in
-  this world, or the call throws `ArgumentException` before changing anything.
+- The i-th saved entity loads onto the i-th entity given; the counts must match, every entity must be alive in this
+  world and appear once, or the call throws `ArgumentException` before changing anything.
 - Each entity moves table at most once, whatever the number of components it receives. Components the record holds
   are added or replace the entity's values; the others stay.
 - Indexes, groups and change tracking follow as with `Set`. A disabled component arrives disabled with its value.

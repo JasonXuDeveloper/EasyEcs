@@ -82,7 +82,7 @@ public class ClockSystem : EcsSystem
 
 | Call | Generated member | Effect |
 | --- | --- | --- |
-| `ref T AddSingleton<T>()` | | Adds it, or resets an existing one to `default` in place |
+| `ref T AddSingleton<T>()` | | Adds it (`default`); throws `InvalidOperationException` if the world has it already |
 | `ref T GetSingleton<T>()` | `world.Clock` | A ref; throws if it was not added |
 | `ref T GetOrAddSingleton<T>()` | `world.GetOrAddClock()` | A ref, adding `default` first if missing |
 | `GetOrAddSingleton<T>() = value` | `world.SetClock(tick, deltaTime)` | Sets the value, adding it if missing |
@@ -112,7 +112,8 @@ var clock = world.SingletonRef<Clock>();     // once, at setup
 clock.Value.Tick++;                          // later: a ref, no lookup
 ```
 
-- `AddSingleton<T>()` on an existing singleton resets it in place, so the handle sees the reset value.
+- A reset is a write: `world.SetClock(…)` or `world.Clock = default` keeps the storage, so the handle sees the new
+  value. `AddSingleton<T>()` on an existing singleton throws instead of resetting it.
 - `RemoveSingleton<T>()` detaches it: writes through the old handle no longer reach the world, also after the
   singleton is added again. Take a new handle then.
 - [Snapshots](/en/docs/guide/snapshots) restore singletons into the same storage, so handles keep working after a

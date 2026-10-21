@@ -46,15 +46,17 @@ public class SingletonTests
     }
 
     [Test]
-    public void AddingAgainResetsTheSameStorage()
+    public void AddingAgainThrowsAndKeepsTheValue()
     {
         using var world = new World();
         world.AddSingleton<Clock>();
         var clock = world.SingletonRef<Clock>();
         clock.Value.Tick = 5;
-        world.AddSingleton<Clock>().Tick += 2;   // reset to default, then written
-        Assert.That(clock.Value.Tick, Is.EqualTo(2), "the handle still reaches the singleton");
-        Assert.That(world.GetSingleton<Clock>().Tick, Is.EqualTo(2));
+        var error = Assert.Throws<InvalidOperationException>(() => world.AddSingleton<Clock>());
+        Assert.That(error!.Message, Does.Contain("added to this world already").And.Contain("SetClock").And.Contain("GetOrAddClock"));
+        Assert.That(world.GetSingleton<Clock>().Tick, Is.EqualTo(5), "nothing was reset");
+        world.SetClock(default);                 // a reset says so, in the same storage
+        Assert.That(clock.Value.Tick, Is.Zero, "the handle still reaches the singleton");
     }
 
     [Test]

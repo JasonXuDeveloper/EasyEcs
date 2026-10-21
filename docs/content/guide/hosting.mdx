@@ -306,7 +306,7 @@ goes through the channel as a request with a reply, like a write.
 ### Load at start, save at stop [#persistence]
 
 Load the last save before the first tick, then add only the singletons the save did not hold: `Load` replaces the
-world's singletons, and `AddSingleton` would reset one that was loaded. Save after the loop ends, into a temporary
+world's singletons, and `AddSingleton` throws on one that was loaded. Save after the loop ends, into a temporary
 file moved over the old one, so a crash during the write never leaves half a save. When systems save or replicate
 `[Changed<T>]` rows, load with `markWritten: false`, so the first tick does not send the loaded world again
 ([restart](/en/docs/guide/saves#restart)):
@@ -692,7 +692,7 @@ rest of each 50 ms to request handlers.
 | A handler reads components directly | Values torn or stale while the tick moves rows | Nothing: publish a copy |
 | A reply without `RunContinuationsAsynchronously` | The handler runs inside the tick, on the world's thread | Code review |
 | Replying with an `Entity` handle | The handler later touches the world from its own thread | Reply with an `EntityId` or copied values |
-| `AddSingleton` after `Load` | The loaded singleton is reset | Check `HasSingleton<T>()` (or the generated `HasX`) first |
+| `AddSingleton` after `Load` | `InvalidOperationException`: the save held the singleton | Check `HasSingleton<T>()` (or the generated `HasX`) first |
 | An unbounded channel | A world that falls behind fills memory | Use `Channel.CreateBounded` |
 | The channel left open on shutdown | A handler that writes after the last drain, or waits on a full channel, never gets its reply | `requests.Writer.TryComplete()` after the last tick, then answer what is left |
 | `await` or blocking IO in a system | The whole tick waits | Hand the IO to the host as data |

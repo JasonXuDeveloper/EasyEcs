@@ -92,6 +92,8 @@ major or minor version that needs code changes? The
 - Generated classes are renamed (`HealthPrefabExtensions` is `HealthEcsPrefabExtensions`, `LootBufferExtensions` is
   `LootEcsBufferExtensions`): only code that names them changes. See the
   [migration guide](/en/docs/migration#v4-7-generated-classes).
+- `AddSingleton<T>()` throws `InvalidOperationException` when the world has `T` already, instead of resetting it to
+  `default`; reset a singleton with `world.SetX(…)`. See the [migration guide](/en/docs/migration#v4-7-add-singleton).
 - New analyzer errors ([EECS040](/en/docs/guide/analyzer#eecs040) to [EECS045](/en/docs/guide/analyzer#eecs045), and
   [EECS036](/en/docs/guide/analyzer#eecs036) for a component with two index keys) reject code that throws or cannot
   work, and new warnings ([EECS037](/en/docs/guide/analyzer#eecs037), [EECS038](/en/docs/guide/analyzer#eecs038),
@@ -136,6 +138,24 @@ major or minor version that needs code changes? The
 - `entity.GetOrAdd<T>()` of an indexed component that the entity lacked did not tell the value index, so `Find` and
   `Count` missed the entity until its next `Set`; the default value's key is now indexed. See
   [indexes and relations](/en/docs/guide/indexes-and-relations).
+- `MoveEntities` copied an entity destroyed already and kept for its cleanup components into the target world and
+  counted it as moved, while it stayed in the source: it existed twice. Such entities are now skipped like stale ids.
+  See [migration](/en/docs/guide/migration-and-unload#move-entities).
+- `MoveEntities` of an entity holding cleanup components copied them to the new entity too, while the original kept
+  them to be released, so the resource was released twice. Cleanup components now stay behind only. See
+  [migration](/en/docs/guide/migration-and-unload#move-entities).
+- `SetAll` without a filter naming `Destroyed` reached entities destroyed already and kept for their cleanup
+  components, giving them the component and bringing them back into queries. They are now left out. See
+  [bulk changes](/en/docs/guide/bulk).
+- `Clone()` of an entity destroyed already and kept for its cleanup components made another such entity, with a copy
+  of the cleanup components; it now throws `InvalidOperationException`. See
+  [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components).
+- Destroying an entity that holds cleanup components counted the loss of its other components as removals, so
+  `[Removed<T>]` methods and `Removed<T>(since)` filters visited it, while a destroyed entity without cleanup components
+  is never visited. Retiring an entity is no longer a removal; the destroy log reports it once it is freed. See
+  [removal detection](/en/docs/guide/change-tracking#removal-detection).
+- `LoadEntitiesInto` accepted the same entity twice in `into`, the second saved entity overwriting the first; it now
+  throws `ArgumentException`. See [migration](/en/docs/guide/migration-and-unload#records).
 
 ## 4.6.0 [#v4-6-0]
 

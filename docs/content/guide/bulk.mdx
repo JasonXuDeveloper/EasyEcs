@@ -52,6 +52,11 @@ Without a filter, `RemoveAll<T>()` takes `T` from every entity that has it, and 
 so name what to select (`With<Fighter>()`). Any `QueryFilter` works, including `Without`, `WithAny`, `Changed` and
 [`InGroup`](/en/docs/guide/groups).
 
+An entity destroyed while it holds [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components) stays
+alive, tagged `Destroyed`, until they are released. `SetAll` leaves such entities out, so a bulk write never brings
+one back, unless the filter names the tag (`With<Destroyed>()`). `RemoveAll` reaches them: removing their cleanup
+components is how they are released.
+
 ### Disable and enable on every match [#disable-all]
 
 `DisableAll<T>(filter)` and `EnableAll<T>(filter)` are [`Disable<T>()` and `Enable<T>()`](/en/docs/guide/cleanup-and-disable#disable-a-component)

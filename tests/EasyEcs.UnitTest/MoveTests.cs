@@ -226,6 +226,62 @@ public class MoveTests
     }
 
     [Test]
+    public void ADestroyedEntityKeptForItsCleanupComponentsDoesNotMove()
+    {
+        using var from = new World();
+        using var to = new World();
+        var retired = from.CreateEntity(new Lease(1), new Health(5));
+        retired.Destroy();
+        var live = from.CreateEntity(new Health(7));
+        var moved = new Entity[2];
+        Assert.That(from.MoveEntities(to, [retired.Id, live.Id], moved), Is.EqualTo(1));
+        Assert.That((moved[0], moved[1].Read<Health>().Value), Is.EqualTo((default(Entity), 7)));
+        Assert.That((to.EntityCount, to.Count<Lease>()), Is.EqualTo((1, 0)));               // not copied: it exists once
+        Assert.That((retired.IsAlive, retired.Has<Destroyed>(), retired.Read<Lease>().Slot), Is.EqualTo((true, true, 1)));
+        Assert.That((from.EntityCount, live.IsAlive), Is.EqualTo((1, false)));
+    }
+
+    [Test]
+    public void CleanupComponentsStayBehindOnAMove()
+    {
+        using var from = new World();
+        using var to = new World();
+        var e = from.CreateEntity(new Lease(1), new Ticket(2), new Health(5));
+        var plain = from.CreateEntity(new Lease(3));
+        var moved = new Entity[2];
+        Assert.That(from.MoveEntities(to, [e.Id, plain.Id], moved), Is.EqualTo(2));
+
+        var (m, p) = (moved[0], moved[1]);
+        Assert.That((m.Read<Health>().Value, m.Has<Lease>(), m.Has<Ticket>()), Is.EqualTo((5, false, false)));
+        Assert.That((p.IsAlive, p.Has<Lease>()), Is.EqualTo((true, false)));
+        Assert.That((to.Count<Lease>(), to.Count<Ticket>()), Is.EqualTo((0, 0)));
+        // The originals are retired with their cleanup components: only this world releases them.
+        Assert.That((e.IsAlive, e.Has<Destroyed>(), e.Read<Lease>().Slot, plain.Read<Lease>().Slot), Is.EqualTo((true, true, 1, 3)));
+        m.Destroy();                                                         // nothing to release there: freed at once
+        Assert.That((m.IsAlive, to.EntityCount), Is.EqualTo((false, 1)));
+    }
+
+    [Test]
+    public void LoadingIntoOneEntityTwiceIsRefused()
+    {
+        var output = new NinoArrayBufferWriter();
+        using (var from = new World())
+        {
+            var first = from.CreateEntity(new Health(1));
+            var second = from.CreateEntity(new Health(2));
+            from.SaveEntitiesWith(output, [first.Id, second.Id], ComponentSet.Create().With<Health>());
+        }
+
+        using var to = new World();
+        var a = to.CreateEntity(new Health(0));
+        var b = to.CreateEntity(new Position());
+        Assert.Throws<ArgumentException>(() => to.LoadEntitiesInto(output.WrittenSpan, [a, a]));
+        Assert.That((a.Read<Health>().Value, b.Has<Health>()), Is.EqualTo((0, false)));   // nothing written
+        Assert.That(to.LoadEntitiesInto(output.WrittenSpan, [a, b]), Is.EqualTo(2));
+        Assert.That((a.Read<Health>().Value, b.Read<Health>().Value), Is.EqualTo((1, 2)));
+    }
+
+    [Test]
     public void MovingIntoItselfIsRefused() =>
         Assert.Throws<ArgumentException>(() => { using var world = new World(); world.MoveEntities(world, []); });
 }

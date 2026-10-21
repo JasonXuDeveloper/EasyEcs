@@ -365,6 +365,9 @@ public readonly partial struct Entity : IEquatable<Entity>
     /// a list of its own, indexes learn the copy, tracked components count as written now); throws if this entity is
     /// not alive. To create entities from a template, use a <see cref="Prefab"/>. O(components). Owner thread only.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The entity was destroyed and is kept only for its cleanup components (<see cref="Destroyed"/>).
+    /// </exception>
     public Entity Clone()
     {
         if (_world == null) ThrowStale();

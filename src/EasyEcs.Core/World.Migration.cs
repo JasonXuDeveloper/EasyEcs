@@ -60,7 +60,7 @@ public sealed partial class World
     /// from storage holds what storage has, and "save what changed" saves nothing of it until code writes it).
     /// Components the save does not hold keep their ticks.
     /// </summary>
-    /// <exception cref="ArgumentException"><paramref name="into"/> does not hold one living entity of this world per saved entity.</exception>
+    /// <exception cref="ArgumentException"><paramref name="into"/> does not hold one living entity of this world per saved entity, each once.</exception>
     /// <exception cref="System.IO.InvalidDataException">The bytes are not a save, or give a unique key to several entities.</exception>
     /// <exception cref="InvalidOperationException">
     /// A loaded unique key (<see cref="IUniqueIndexed{TKey}"/>) is held by another entity than the one it is loaded onto
@@ -79,6 +79,7 @@ public sealed partial class World
             foreach (var entity in into)
                 if (entity.World != this || !IsAlive(entity.Id))
                     throw new ArgumentException("An entity to load into is stale or of another world", nameof(into));
+            ThrowIfRepeated(into);
             // Unique keys first, against the world as it is before the load: nothing is written when one is taken.
             if (ComponentInfo.AnyUnique)
                 for (int i = 0; i < count; i++)
@@ -111,6 +112,22 @@ public sealed partial class World
         }
 
         return count;
+    }
+
+    /// <summary>
+    /// Throws when an entity appears twice in <paramref name="into"/>: two saved entities would be written onto one, the
+    /// second overwriting the first. The arrival stamps of this world mark each entity once (no set is allocated).
+    /// Inside the structural gate.
+    /// </summary>
+    private void ThrowIfRepeated(ReadOnlySpan<Entity> into)
+    {
+        if (into.Length < 2) return;
+        BeginArrival(this);
+        foreach (var entity in into)
+        {
+            if (HasArrived(entity.Id)) throw new ArgumentException("An entity to load into is given twice", nameof(into));
+            Stamp(entity.Id);
+        }
     }
 
     /// <summary>
@@ -179,12 +196,14 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Move <paramref name="entities"/> (stale ids and repeats are skipped) into <paramref name="target"/>, another
-    /// world of this thread: the target gets new entities with their components, as <see cref="LoadEntities"/> makes
-    /// them from a save of the group, without encoding it; then they are destroyed here (their children with them, so
-    /// move a hierarchy together; cleanup components stay behind for their systems). The new handles are written in
-    /// order into <paramref name="moved"/> (as many as fit, <see cref="Entity"/> default for a skipped id); returns how
-    /// many moved. A list of ids goes as <c>CollectionsMarshal.AsSpan(list)</c>, no copy. O(entities × components). Owner thread of both worlds; not while a pass iterates in either. Throws
+    /// Move <paramref name="entities"/> (stale ids, repeats and destroyed entities kept for their cleanup components are
+    /// skipped) into <paramref name="target"/>, another world of this thread: the target gets new entities with their
+    /// components, as <see cref="LoadEntities"/> makes them from a save of the group, without encoding it; then they are
+    /// destroyed here (their children with them, so move a hierarchy together). Cleanup components
+    /// (<see cref="ICleanupComponent"/>) do not move: they stay behind on the destroyed entity, for the systems of this
+    /// world to release what they hold, and the new entity does not have them. The new handles are written in order
+    /// into <paramref name="moved"/> (as many as fit, <see cref="Entity"/> default for a skipped id); returns how many
+    /// moved. A list of ids goes as <c>CollectionsMarshal.AsSpan(list)</c>, no copy. O(entities × components). Owner thread of both worlds; not while a pass iterates in either. Throws
     /// <see cref="InvalidOperationException"/>, moving nothing, when a moving entity has a unique key
     /// (<see cref="IUniqueIndexed{TKey}"/>) an entity of <paramref name="target"/> has.
     /// </summary>
@@ -203,20 +222,18 @@ public sealed partial class World
                 target.ThrowIfIterating();
                 if (ComponentInfo.AnyUnique) // the moving entities' unique keys, before the first row moves
                     foreach (var id in entities)
-                        if ((uint)id.Index < (uint)Meta.Length && Meta[id.Index] is { Archetype: { } table } meta && meta.Version == id.Version)
-                            target.ClaimRows(table, meta.Slot, 1, 1);
+                        if (Moves(id, out var table, out int slot))
+                            target.ClaimRows(table, slot, 1, 1, cleanup: false);
                 target.BeginArrival(this);
                 Archetype run = null;
                 int first = 0, length = 0;
                 foreach (var id in entities)
                 {
-                    if ((uint)id.Index >= (uint)Meta.Length || Meta[id.Index] is not { Archetype: { } table } meta ||
-                        meta.Version != id.Version || target.HasArrived(id))
-                        continue;
-                    if (table != run || meta.Slot != first + length) // consecutive rows of one table go as one run
+                    if (!Moves(id, out var table, out int slot) || target.HasArrived(id)) continue;
+                    if (table != run || slot != first + length) // consecutive rows of one table go as one run
                     {
-                        if (length != 0) target.ArriveRows(run, first, length);
-                        (run, first, length) = (table, meta.Slot, 0);
+                        if (length != 0) target.ArriveRows(run, first, length, moving: true);
+                        (run, first, length) = (table, slot, 0);
                     }
 
                     target.Stamp(id); // a repeat later in the list is skipped
@@ -224,7 +241,7 @@ public sealed partial class World
                     count++;
                 }
 
-                if (length != 0) target.ArriveRows(run, first, length);
+                if (length != 0) target.ArriveRows(run, first, length, moving: true);
                 target.EndArrival(this);
             }
 
@@ -235,14 +252,28 @@ public sealed partial class World
             for (int i = entities.Length - 1; i >= 0; i--)
             {
                 var id = entities[i];
-                if ((uint)id.Index < (uint)Meta.Length && MetaRef(id.Index) is { Archetype: not null } meta && meta.Version == id.Version)
-                    Destroy(ref MetaRef(id.Index), id);
+                if (Moves(id, out _, out _)) Destroy(ref MetaRef(id.Index), id);
             }
             if (_targetCount != 0) FollowLinks();
         }
 
         target.RootOrphans();
         return count;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="id"/> names an entity <see cref="MoveEntities"/> moves (alive, not retired), and its
+    /// table and row. Inside the structural gate.
+    /// </summary>
+    private bool Moves(EntityId id, out Archetype table, out int slot)
+    {
+        table = null;
+        slot = 0;
+        if ((uint)id.Index >= (uint)Meta.Length) return false;
+        ref var meta = ref MetaRef(id.Index);
+        if (meta.Archetype == null || meta.Version != id.Version) return false;
+        (table, slot) = (meta.Archetype, meta.Slot);
+        return !table.HasCleanup || !Retired(table, slot);
     }
 
     /// <summary>Copy every entity of <paramref name="source"/>, a world without tombstones, into this one; returns how many.</summary>
@@ -311,8 +342,9 @@ public sealed partial class World
     // Mark source entity id as part of this arrival (its new id is written when its row is copied).
     private void Stamp(EntityId id) => _arrivedStamp[id.Index] = _arrival;
 
-    // Rows [first, +count) of a source table, as one run of new rows.
-    private void ArriveRows(Archetype table, int first, int count)
+    // Rows [first, +count) of a source table, as one run of new rows; moving ones (MoveEntities) leave their cleanup
+    // components behind.
+    private void ArriveRows(Archetype table, int first, int count, bool moving = false)
     {
         var target = TableFor(table);
         target.Reserve(target.Count + count);
@@ -329,6 +361,7 @@ public sealed partial class World
         }
 
         target.CopyRun(table, first, to, count, _changeTick);
+        if (moving && target.HasCleanup) target.DropCleanup(to, count);
         _arrivedRows.Add((target, to, count));
     }
 

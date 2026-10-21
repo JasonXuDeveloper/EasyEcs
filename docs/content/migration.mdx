@@ -14,7 +14,7 @@ current API.
 
 Four calls and one generated member are [renamed](#v4-7-renames): the compiler finds each call. Beyond that, code
 written for 4.6 compiles unchanged unless a system declares a member named `RunCount`, a file imports another
-namespace with a type of the same name as one of the new ones, or code names a [generated class](#v4-7-generated-classes). Two calls behave differently, and parallel passes that
+namespace with a type of the same name as one of the new ones, or code names a [generated class](#v4-7-generated-classes). Three calls behave differently, and parallel passes that
 write tracked components cut their rows differently. The [new analyzer rules](#v4-7-analyzer) report code that throws or
 loses writes.
 
@@ -41,6 +41,31 @@ private static readonly ComponentSet Record = ComponentSet.Create().With<Bank>()
 
 A whole-world `SaveWithout(output, in exclude)` and `LoadKeeping(input, in keep)` are where sets with singletons go
 ([restart](/en/docs/guide/saves#restart)).
+
+### `AddSingleton` throws when the singleton exists [#v4-7-add-singleton]
+
+`world.AddSingleton<T>()` on a world that has `T` already throws `InvalidOperationException` instead of resetting it to
+`default`: a second add was most often a setup run twice, or an add after a `Load` that had brought the singleton,
+and the reset silently lost its value. A reset says so now: write the value with the generated `world.SetX(…)` (or
+`world.X = default`), which keeps the storage, so `SingletonRef<T>` handles still reach it. Where the singleton may
+exist already (after a `Load`), check `world.HasX` first or take it as it is with `GetOrAddX()`.
+
+**4.6**
+
+```csharp doccheck=skip
+world.AddSingleton<RoundClock>();  // a new round: back to tick 0 (and on a world without RoundClock, adds it)
+```
+
+**4.7**
+
+```csharp
+public record struct RoundClock(long Tick) : ISingletonComponent;
+
+public static class Round
+{
+    public static void Restart(World world) => world.SetRoundClock(0);   // adds it if missing, else replaces the value
+}
+```
 
 ### `EcsSystem.RunCount` [#v4-7-run-count]
 

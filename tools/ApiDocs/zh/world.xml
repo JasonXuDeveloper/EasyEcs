@@ -35,11 +35,14 @@
   <member name="P:EasyEcs.World.UpdateCount" source="72b6b197f5e6">
     <summary>已经完成的 <see cref="M:EasyEcs.World.Update" /> 调用次数（默认分组）。</summary>
   </member>
-  <member name="M:EasyEcs.World.AddSingleton``1" source="22b9ca554dd4">
+  <member name="M:EasyEcs.World.AddSingleton``1" source="2795a958722a">
     <summary>
-      添加单例 <typeparamref name="T" />（已存在时重置为默认值），返回它的 ref。重置不换存储，所以之前拿到的
-      <see cref="M:EasyEcs.World.SingletonRef``1" /> 句柄仍然指向这个单例。O(1)。
+      添加单例 <typeparamref name="T" />（默认值），返回它的 ref。O(1)。
     </summary>
+    <exception cref="T:System.InvalidOperationException">
+      World 里已经有 <typeparamref name="T" />：要替换它的值，用 <c>world.SetX(...)</c>（或 <c>world.X = ...</c>）；要原样取用，用
+      <c>GetOrAddX()</c>。
+    </exception>
   </member>
   <member name="M:EasyEcs.World.AddSystem(EasyEcs.EcsSystem,System.Boolean)" source="097ef113bf29">
     <summary>
@@ -281,12 +284,13 @@
       存档里的某个实体有一个唯一键（<see cref="T:EasyEcs.IUniqueIndexed`1" />），而这个 World 里已有实体持有它：什么都不创建。
     </exception>
   </member>
-  <member name="M:EasyEcs.World.MoveEntities(EasyEcs.World,System.ReadOnlySpan{EasyEcs.EntityId},System.Span{EasyEcs.Entity})" source="be72f93fd7e3">
+  <member name="M:EasyEcs.World.MoveEntities(EasyEcs.World,System.ReadOnlySpan{EasyEcs.EntityId},System.Span{EasyEcs.Entity})" source="50f2ad703ac1">
     <summary>
-      把 <paramref name="entities" />（失效的 id 和重复的 id 跳过）搬到 <paramref name="target" />，即同一线程上的另一个 World：
+      把 <paramref name="entities" />（失效的 id、重复的 id 和因清理组件而保留的已销毁实体跳过）搬到 <paramref name="target" />，即同一线程上的另一个 World：
       目标 World 新建带着这些组件的实体，结果和 <see cref="M:EasyEcs.World.LoadEntities(System.ReadOnlySpan{System.Byte},System.Span{EasyEcs.Entity})" />
-      读这组实体的存档一样，只是省掉了编码；然后在这边销毁它们（子实体一起销毁，所以层级要整棵一起搬；清理组件留在这边，
-      交给各自的系统处理）。新句柄按顺序写进 <paramref name="moved" />（放得下多少写多少，跳过的 id 对应
+      读这组实体的存档一样，只是省掉了编码；然后在这边销毁它们（子实体一起销毁，所以层级要整棵一起搬）。清理组件
+      （<see cref="T:EasyEcs.ICleanupComponent" />）不会搬走：它们留在这边被销毁的实体上，交给本 World 的系统释放它们持有的资源，
+      新实体没有这些组件。新句柄按顺序写进 <paramref name="moved" />（放得下多少写多少，跳过的 id 对应
       <see cref="T:EasyEcs.Entity" /> 的 default）；返回搬走的数量。id 列表写成 <c>CollectionsMarshal.AsSpan(list)</c>，不复制。
       O(实体数 × 组件数)。调用线程必须同时是两个 World 的所有者线程；任何一个 World 正在遍历时都不能调用。要搬的实体有一个唯一键
       （<see cref="T:EasyEcs.IUniqueIndexed`1" />），而 <paramref name="target" /> 里已有实体持有它时，抛
@@ -302,11 +306,12 @@
       （冷路径），之后 O(1)；存进局部变量或字段里复用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.RemoveAll``1(EasyEcs.QueryFilter@)" source="3be46f8d616b">
+  <member name="M:EasyEcs.World.RemoveAll``1(EasyEcs.QueryFilter@)" source="a2cfae7f96ca">
     <summary>
       从每个拥有组件 <typeparamref name="T" /> 且匹配 <paramref name="filter" /> 的存活实体上移除它，效果和逐个调用
       <c>Remove</c> 一样（行留在原处，清掉存在位）：<typeparamref name="T" /> 被禁用的实体，保留的值和
-      <see cref="T:EasyEcs.Disabled`1" /> 标签也一起去掉。返回处理的数量。O(匹配的表数 + 行数)。只能在所有者线程调用。
+      <see cref="T:EasyEcs.Disabled`1" /> 标签也一起去掉。因清理组件而保留的已销毁实体也会处理到：移除这些组件正是释放它们的方式
+      （它们没有别的组件）。返回处理的数量。O(匹配的表数 + 行数)。只能在所有者线程调用。
     </summary>
   </member>
   <member name="M:EasyEcs.World.RemoveSingleton``1" source="89c98c21f4b6">
@@ -358,10 +363,12 @@
       缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。遍历进行中不能调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.SetAll``1(``0@,EasyEcs.QueryFilter@)" source="6408357dc4a1">
+  <member name="M:EasyEcs.World.SetAll``1(``0@,EasyEcs.QueryFilter@)" source="f5fb5363f1ca">
     <summary>
       给每个匹配 <paramref name="filter" /> 的存活实体设置组件 <typeparamref name="T" /> = <paramref name="value" />
-      （没有就添加，有就替换），效果和逐个调用 <c>Set</c> 一样：被追踪组件算作写入，索引和分组跟着更新。返回实体数量。
+      （没有就添加，有就替换），效果和逐个调用 <c>Set</c> 一样：被追踪组件算作写入，索引和分组跟着更新。因清理组件而保留的已销毁实体
+      （带 <see cref="T:EasyEcs.Destroyed" /> 标签）不会被处理，除非 <paramref name="filter" /> 写明了 <see cref="T:EasyEcs.Destroyed" />
+      （<c>With&lt;Destroyed&gt;()</c>）：批量写入不会把它带回来。返回实体数量。
       O(匹配的表数 + 行数)；缺少 <typeparamref name="T" /> 的实体搬一次行。只能在所有者线程调用。
     </summary>
   </member>
@@ -389,7 +396,7 @@
       让分组 <typeparamref name="TGroup" /> 里每个启用的系统更新一次（同步执行，零分配）。没有系统的分组什么都不做。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.LoadEntitiesInto(System.ReadOnlySpan{System.Byte},System.ReadOnlySpan{EasyEcs.Entity},System.Boolean)" source="7b3b5ab61881">
+  <member name="M:EasyEcs.World.LoadEntitiesInto(System.ReadOnlySpan{System.Byte},System.ReadOnlySpan{EasyEcs.Entity},System.Boolean)" source="a921182ba73c">
     <summary>
       把 <see cref="M:EasyEcs.World.SaveEntities(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId})" /> 写出的组件放到已经存在的实体上（Actor 的实体先建好、记录后到的情形）：存档里第 i 个实体的组件
       设到 <paramref name="into" />[i] 上，没有的加上，已有的覆盖，每个实体最多换一次表；存档里没有的组件保持不变。索引、分组和
@@ -402,7 +409,7 @@
       默认值）的也一样，所以 <c>[Changed&lt;T&gt;]</c> 系统和 <c>Since</c> 过滤条件不会因为这次加载访问该实体（从存储恢复的 Actor 内容和存储一致，
       “保存变化的部分”在代码写入之前不会保存它的任何东西）。存档里没有的组件保留各自的 tick。
     </summary>
-    <exception cref="T:System.ArgumentException"><paramref name="into" /> 没有按存档里的每个实体各给出一个本 World 的存活实体。</exception>
+    <exception cref="T:System.ArgumentException"><paramref name="into" /> 没有按存档里的每个实体各给出一个本 World 的存活实体，或者同一个实体出现了不止一次。</exception>
     <exception cref="T:System.IO.InvalidDataException">字节不是存档，或者把同一个唯一键给了多个实体。</exception>
     <exception cref="T:System.InvalidOperationException">
       加载的某个唯一键（<see cref="T:EasyEcs.IUniqueIndexed`1" />）被另一个实体持有，而不是它要加载到的那个实体（加载前对照 World 检查）：

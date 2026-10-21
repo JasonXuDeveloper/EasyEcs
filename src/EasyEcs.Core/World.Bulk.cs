@@ -12,13 +12,16 @@ public sealed partial class World
     /// <summary>
     /// Give every alive entity matching <paramref name="filter"/> component <typeparamref name="T"/> =
     /// <paramref name="value"/> (added, or replaced), as <c>Set</c> would one by one: tracked components count as
-    /// written, indexes and groups follow. Returns how many entities. O(matching tables + rows); an entity that lacks
-    /// <typeparamref name="T"/> moves once. Owner thread only.
+    /// written, indexes and groups follow. A destroyed entity kept for its cleanup components (tagged
+    /// <see cref="Destroyed"/>) is left out unless <paramref name="filter"/> names <see cref="Destroyed"/>
+    /// (<c>With&lt;Destroyed&gt;()</c>): a bulk write does not bring it back. Returns how many entities. O(matching
+    /// tables + rows); an entity that lacks <typeparamref name="T"/> moves once. Owner thread only.
     /// </summary>
     public int SetAll<T>(in T value, in QueryFilter filter = default) where T : struct, IComponent
     {
         filter.Whole(); // a bulk call changes every matching row
-        var match = Volatile.Read(ref GetQueryEntry([], in filter).Match);
+        var living = filter.Living(DestroyedBit);
+        var match = Volatile.Read(ref GetQueryEntry([], in living).Match);
         int count = match.CountAlive(filter.Tick); // a moved row can be visited again in its new table: count first
         var op = new SetOp<T> { Value = value, Bit = ComponentType<T>.Bit };
         using (Structural())
@@ -33,8 +36,9 @@ public sealed partial class World
     /// <summary>
     /// Remove component <typeparamref name="T"/> from every alive entity having it and matching
     /// <paramref name="filter"/>, as <c>Remove</c> would one by one (rows stay, presence bits clear): an entity whose
-    /// <typeparamref name="T"/> is disabled loses the kept value and its <see cref="Disabled{T}"/> tag too. Returns how
-    /// many. O(matching tables + rows). Owner thread only.
+    /// <typeparamref name="T"/> is disabled loses the kept value and its <see cref="Disabled{T}"/> tag too. Destroyed
+    /// entities kept for their cleanup components are reached too: removing those components is how they are released
+    /// (they have no other components). Returns how many. O(matching tables + rows). Owner thread only.
     /// </summary>
     public int RemoveAll<T>(in QueryFilter filter = default) where T : struct, IComponent
     {
@@ -102,6 +106,8 @@ public sealed partial class World
         WalkDown(match, since, ref op);
     }
 
+    // The tables of a bulk change of T. Retired entities hold cleanup components and Destroyed only, and cleanup
+    // components cannot be disabled: DisableAll and EnableAll never reach them, and RemoveAll is meant to (a release).
     private QueryMatch Bulk<T>(in QueryFilter filter) where T : struct, IComponent
     {
         filter.Whole(); // a bulk call changes every matching row

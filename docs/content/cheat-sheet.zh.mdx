@@ -276,7 +276,7 @@ bool anyDead = world.Any<Dead>();
 
 | 调用 | 作用 |
 | --- | --- |
-| `world.AddSingleton<T>()` | 添加（或重置为默认值），返回 `ref T` |
+| `world.AddSingleton<T>()` | 添加（默认值），返回 `ref T`；已存在时抛异常 |
 | `world.GetSingleton<T>()` / `GetOrAddSingleton<T>()` | `ref T`；前者在不存在时抛异常 |
 | `world.TryGetSingleton<T>(out copy)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | 拷贝、是否存在、移除 |
 | `world.SingletonRef<T>()` | 稳定的句柄：`.Value` 是 `ref T` |

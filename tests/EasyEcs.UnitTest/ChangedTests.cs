@@ -846,6 +846,22 @@ public class ChangedTests
         Assert.Throws<InvalidOperationException>(() => e.SetIfChanged(new Armor(3)));
     }
 
+    public struct Heading : IComponent, ITrackChanges { public float Angle; }     // compared by its bytes
+    public record struct Bearing(float Angle) : IComponent, ITrackChanges;        // compared as floats
+
+    [Test]
+    public void SetIfChangedComparesTheBytesOfATypeWithoutEquality()
+    {
+        using var world = new World();
+        var e = world.CreateEntity(new Heading { Angle = 0f }, new Bearing(0f));
+        world.Update();
+        // -0.0 equals 0.0 as a float, not as bytes: a stamp too many, never a change missed.
+        Assert.That(e.SetIfChanged(new Heading { Angle = -0f }), Is.True);
+        Assert.That(e.SetIfChanged(new Bearing(-0f)), Is.False);
+        Assert.That(e.SetIfChanged(new Bearing(float.NaN)), Is.True);
+        Assert.That(e.SetIfChanged(new Bearing(float.NaN)), Is.False);  // a record compares NaN with float.Equals
+    }
+
     [Test]
     public void ChangedAnyVisitsRowsWhereOneOfTheComponentsChanged()
     {

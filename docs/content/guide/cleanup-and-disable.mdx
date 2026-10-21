@@ -79,7 +79,14 @@ public class AssignSeats : EcsSystem
 ```
 
 - Destroying a retired entity again does nothing. Removing a cleanup component from a live entity just removes it.
-- A retired entity leaves its indexes, and its children go with it.
+- A retired entity leaves its indexes, and its children go with it. Its other components are gone without a removal:
+  `[Removed<T>]` does not visit it, as it visits no destroyed entity
+  ([removal detection](/en/docs/guide/change-tracking#removal-detection)).
+- A retired entity is not brought back: `SetAll` leaves it out unless the filter names `Destroyed`
+  (`With<Destroyed>()`), `Clone()` throws, and `MoveEntities` skips it. `RemoveAll` of a cleanup component reaches
+  it, since that is how it is released.
+- `MoveEntities` leaves cleanup components behind: the original is retired with them, the entity in the other world
+  does not have them.
 - A cleanup component cannot be disabled (`Disable<T>()` throws): it must stay to be released.
 
 ### Cleanup component or destroy log [#cleanup-or-destroy-log]

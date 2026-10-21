@@ -55,6 +55,32 @@ public class RemovedTests
     }
 
     [Test]
+    public void RetiringIsADespawnNotARemoval()
+    {
+        using var world = new World(new WorldOptions { DestroyLog = 8 });
+        var kept = world.CreateEntity(new Lease(1), new Armor(1));
+        var removedFirst = world.CreateEntity(new Lease(2), new Armor(2));
+        var plain = world.CreateEntity(new Armor(3));
+        ulong tick = world.ChangeTick;
+        removedFirst.Remove<Armor>();                                // a removal, then the destroy
+        Assert.That(world.Count<Lease>(QueryFilter.Create().Removed<Armor>(tick)), Is.EqualTo(1));
+        kept.Destroy();
+        removedFirst.Destroy();
+        plain.Destroy();
+
+        // Retired entities are destroyed ones, as freed ones are: no Removed filter visits them.
+        var removed = QueryFilter.Create().Removed<Armor>(tick);
+        Assert.That((world.Count<Lease>(removed), world.Count<Lease>(removed.With<Destroyed>())), Is.EqualTo((0, 0)));
+        Assert.That(world.Count<Lease>(QueryFilter.Create().RemovedAny<Armor, Shield>(tick)), Is.Zero);
+        Span<EntityId> gone = stackalloc EntityId[8];
+        world.DestroyedSince(tick, gone, out int count);
+        Assert.That(count, Is.EqualTo(1));                           // the freed one; the retired ones once released
+        Assert.That(world.RemoveAll<Lease>(), Is.EqualTo(2));
+        world.DestroyedSince(tick, gone, out count);
+        Assert.That(count, Is.EqualTo(3));
+    }
+
+    [Test]
     public void ARemovalFollowsTheEntityToAnotherTable()
     {
         using var world = new World();

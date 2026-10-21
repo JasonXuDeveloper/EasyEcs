@@ -86,7 +86,8 @@ int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), Colle
 ```
 
 - 原实体销毁时会连同子实体一起销毁，所以[层级](/zh/docs/guide/hierarchy#moving)要整体迁移。
-- 清理组件留在已销毁的原实体上，由各自的系统释放。
+- 清理组件不会移动：它们留在已销毁的原实体上，由本 World 的系统释放；新实体没有这些组件，所以资源只释放一次。
+- 已经销毁、因清理组件而保留的实体（带 `Destroyed` 标签）和失效的 id 一样被跳过：不复制，不计数，它在 `moved` 中的位置为 `default`。
 - 两个 World 都必须属于调用线程；把 World 迁到自己身上会被拒绝（`ArgumentException`）。
 
 ### 只存需要持久化的部分 [#records]
@@ -125,7 +126,7 @@ var restored = world.CreateEntity(new Connection(10));
 world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
 ```
 
-- 存档里第 i 个实体读到传入的第 i 个实体上；数量必须一致，每个实体都必须在本 World 里存活，否则在改动任何东西之前抛
+- 存档里第 i 个实体读到传入的第 i 个实体上；数量必须一致，每个实体都必须在本 World 里存活且只出现一次，否则在改动任何东西之前抛
   `ArgumentException`。
 - 不管收到几个组件，每个实体最多换一次表。记录里有的组件会被加上或覆盖原值，没有的保持不变。
 - 索引、分组和变更追踪的表现和 `Set` 一样。被禁用的组件读进来仍是禁用的，值也保留。
