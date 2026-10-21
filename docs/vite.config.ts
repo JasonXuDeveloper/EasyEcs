@@ -1,6 +1,6 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { reactRouter } from '@react-router/dev/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { fumadocsMdx } from 'fumadocs-mdx/vite';
@@ -70,6 +70,64 @@ function compileOnce(plugins: PluginOption[]): PluginOption[] {
   return plugins;
 }
 
+interface AfterBuild {
+  beforePrerender(): void;
+  afterPrerender(): Promise<void>;
+}
+
+/**
+ * scripts/after-build.ts (the static files, social cards and SEO checks)
+ * becomes an entry of the server build and runs in this process, on the
+ * modules the prerender loads: the pages are compiled once for everything.
+ * React Router prerenders in its server build's writeBundle hook and then
+ * deletes the server build (`ssr: false`), so the entry is loaded before that
+ * hook (Rolldown runs a hook's handlers one after another, in order) and run
+ * after it.
+ *
+ * The entry also splits a chunk off the server build, named after it, with
+ * the CSS of the components it shares with the docs route. React Router moves
+ * server CSS that the client build lacks into the client assets, where no
+ * page links it: those files are removed again.
+ */
+function afterBuild(): Plugin {
+  const entry = 'after-build.js';
+  const client = path.resolve(root, 'build/client');
+  let script: AfterBuild | undefined;
+  let serverOnlyCss: string[] = [];
+  return {
+    name: 'easyecs:after-build',
+    apply: 'build',
+    applyToEnvironment: (environment) => environment.name === 'ssr',
+    buildStart() {
+      this.emitFile({
+        type: 'chunk',
+        id: path.resolve(root, 'scripts/after-build.ts'),
+        fileName: entry,
+      });
+    },
+    generateBundle(_, bundle) {
+      serverOnlyCss = Object.keys(bundle).filter(
+        (file) => file.endsWith('.css') && !existsSync(path.join(client, file)),
+      );
+    },
+    writeBundle: {
+      order: 'pre',
+      async handler({ dir = '' }) {
+        script = await import(pathToFileURL(path.join(dir, entry)).href);
+        script?.beforePrerender();
+      },
+    },
+    closeBundle: {
+      order: 'post',
+      async handler() {
+        for (const file of serverOnlyCss)
+          rmSync(path.join(client, file), { force: true });
+        await script?.afterPrerender();
+      },
+    },
+  };
+}
+
 /**
  * The release the docs describe: the newest "## X.Y.Z" section of the changelog, which is written for the coming
  * release before it is cut (docs/CLAUDE.md), shown as major.minor.
@@ -112,6 +170,7 @@ export default defineConfig(({ command, mode }) => {
             serverOnlyPageExports(),
             tailwindcss(),
             reactRouter(),
+            afterBuild(),
           ],
     define: {
       __DOCS_VERSION__: JSON.stringify(docsVersion()),

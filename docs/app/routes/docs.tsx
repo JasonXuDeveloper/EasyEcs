@@ -97,8 +97,26 @@ export async function loader({ params }: Route.LoaderArgs) {
     // The Markdown copy of a fallback page is the English one.
     markdownUrl: markdownPath(englishUrl ?? page.url),
     seo,
-    pageTree: await source.serializePageTree(source.getPageTree(lang)),
+    pageTree: await serializedTree(source.getPageTree(lang)),
   };
+}
+
+/**
+ * The sidebar of a language, serialized once for all its pages (the prerender
+ * serializes it ~140 times otherwise); keyed by the tree, which a content
+ * change in `dev` replaces.
+ */
+const serializedTrees = new WeakMap<
+  PageTree.Root,
+  ReturnType<typeof source.serializePageTree>
+>();
+function serializedTree(tree: PageTree.Root) {
+  let serialized = serializedTrees.get(tree);
+  if (!serialized) {
+    serialized = source.serializePageTree(tree);
+    serializedTrees.set(tree, serialized);
+  }
+  return serialized;
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {

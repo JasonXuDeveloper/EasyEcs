@@ -1,17 +1,27 @@
 /**
- * Runs after `react-router build` (`bun run build`): generate-static.ts, then
- * lint-seo.ts, in one process, so the pages are compiled once. Loading
- * src/lib/source compiles every MDX file, the slow part of both scripts.
+ * The static files and the SEO checks, run inside `react-router build` by the
+ * `afterBuild` plugin (vite.config.ts): this file is an entry of the server
+ * build, so it shares the compiled pages (src/lib/source) with the prerender
+ * instead of compiling every page a third time.
+ *
+ * - `beforePrerender`: the social cards need only the pages' data, so sharp
+ *   draws them on its own threads while the prerender renders on this one.
+ * - `afterPrerender`: the files made from the prerendered pages, then the
+ *   checks over the finished build/client (they need the cards).
  */
-export {};
+import { drawCards, generateStatic } from './generate-static';
+import { lintSeo } from './lint-seo';
 
-const start = performance.now();
-console.log(
-  '[after-build] Compiling the pages for the static files and checks...',
-);
-await import('../src/lib/source');
-console.log(
-  `[after-build] Pages compiled in ${((performance.now() - start) / 1000).toFixed(1)}s`,
-);
-await import('./generate-static');
-await import('./lint-seo');
+let cards: Promise<void> | undefined;
+
+export function beforePrerender() {
+  cards = drawCards();
+  // Awaited after the prerender; a failure before that is not unhandled.
+  cards.catch(() => {});
+}
+
+export async function afterPrerender() {
+  await generateStatic();
+  await (cards ?? drawCards());
+  lintSeo();
+}

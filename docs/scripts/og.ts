@@ -133,6 +133,25 @@ async function loadFonts(cards: Card[]) {
   return fonts;
 }
 
+/**
+ * A drawn text as raw RGBA pixels, ready to composite: an encoded PNG would
+ * only be decoded again by the composite.
+ */
+interface Text {
+  input: Buffer;
+  raw: { width: number; height: number; channels: 4 };
+  width: number;
+  height: number;
+}
+
+/** Composite layer of a text (or any raw image) at a position */
+const at = ({ input, raw }: Text, left: number, top: number) => ({
+  input,
+  raw,
+  left,
+  top,
+});
+
 async function text(
   content: string,
   options: {
@@ -146,7 +165,7 @@ async function text(
     /** Wrap width, the text column of a page card by default */
     width?: number;
   },
-) {
+): Promise<Text> {
   const { data, info } = await sharp({
     text: {
       text: `<span foreground="${options.color}">${escapeMarkup(content)}</span>`,
@@ -159,15 +178,39 @@ async function text(
       spacing: options.spacing ?? Math.round(options.size * 0.25),
     },
   })
-    .png()
+    .raw()
     .toBuffer({ resolveWithObject: true });
-  if (info.height <= options.maxHeight) return { data, height: info.height };
-  // Too many lines: keep the ones that fit.
-  const cropped = await sharp(data)
-    .extract({ left: 0, top: 0, width: info.width, height: options.maxHeight })
-    .png()
-    .toBuffer();
-  return { data: cropped, height: options.maxHeight };
+  const { width } = info;
+  // Too many lines: keep the ones that fit (whole rows of the buffer).
+  const height = Math.min(info.height, options.maxHeight);
+  return {
+    input: data.subarray(0, width * height * 4),
+    raw: { width, height, channels: 4 },
+    width,
+    height,
+  };
+}
+
+/** The same text on every card (eyebrows, the footer), drawn once */
+const sameText = new Map<string, Promise<Text>>();
+function cachedText(content: string, options: Parameters<typeof text>[1]) {
+  return once(sameText, JSON.stringify([content, options]), () =>
+    text(content, options),
+  );
+}
+
+/** The icon at a size, drawn once */
+const icons = new Map<number, Promise<Buffer>>();
+const icon = (size: number) =>
+  once(icons, size, () => sharp(logo).resize(size, size).png().toBuffer());
+
+function once<K, V>(cache: Map<K, V>, key: K, make: () => V) {
+  let value = cache.get(key);
+  if (value === undefined) {
+    value = make();
+    cache.set(key, value);
+  }
+  return value;
 }
 
 /** Cut to `max` characters; English at a word boundary. */
@@ -184,9 +227,7 @@ async function drawCard(card: Card, fonts: FontSet) {
   const background = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="${width}" height="${height}" fill="${colors.background}"/><rect x="0" y="${height - 12}" width="${width}" height="12" fill="${colors.accent}"/></svg>`,
   );
-  const icon = await sharp(logo).resize(72, 72).png().toBuffer();
-
-  const eyebrow = await text(card.eyebrow, {
+  const eyebrow = await cachedText(card.eyebrow, {
     fonts,
     family,
     weight: 700,
@@ -216,13 +257,9 @@ async function drawCard(card: Card, fonts: FontSet) {
   const titleTop = 200;
   const descriptionTop = titleTop + title.height + 40;
   const layers: Parameters<ReturnType<typeof sharp>['composite']>[0] = [
-    { input: icon, left: margin, top: 64 },
-    {
-      input: eyebrow.data,
-      left: margin + 72 + 24,
-      top: 64 + Math.round((72 - eyebrow.height) / 2),
-    },
-    { input: title.data, left: margin, top: titleTop },
+    { input: await icon(72), left: margin, top: 64 },
+    at(eyebrow, margin + 72 + 24, 64 + Math.round((72 - eyebrow.height) / 2)),
+    at(title, margin, titleTop),
   ];
   const room = height - 110 - descriptionTop;
   if (card.description && room > 40) {
@@ -237,9 +274,9 @@ async function drawCard(card: Card, fonts: FontSet) {
         maxHeight: room,
       },
     );
-    layers.push({ input: description.data, left: margin, top: descriptionTop });
+    layers.push(at(description, margin, descriptionTop));
   }
-  const footer = await text('ecs.xgamedev.net', {
+  const footer = await cachedText('ecs.xgamedev.net', {
     fonts,
     family,
     weight: 400,
@@ -247,7 +284,7 @@ async function drawCard(card: Card, fonts: FontSet) {
     color: colors.footer,
     maxHeight: 40,
   });
-  layers.push({ input: footer.data, left: margin, top: height - 76 });
+  layers.push(at(footer, margin, height - 76));
 
   return sharp(background)
     .composite(layers)
@@ -400,39 +437,32 @@ async function drawGithubPreview() {
       maxHeight: size * 2,
       width: W - 160,
     });
-  const widthOf = async (image: Buffer) =>
-    (await sharp(image).metadata()).width ?? 0;
   const layers: Parameters<ReturnType<typeof sharp>['composite']>[0] = [];
   const shapes: string[] = [];
-  const centred = async (image: Buffer, top: number, centre = W / 2) =>
-    layers.push({
-      input: image,
-      top,
-      left: Math.round(centre - (await widthOf(image)) / 2),
-    });
+  const centred = (image: Text, top: number, centre = W / 2) =>
+    layers.push(at(image, Math.round(centre - image.width / 2), top));
 
   // Icon + name on one line
   const iconSize = 84;
-  const icon = await sharp(logo).resize(iconSize, iconSize).png().toBuffer();
   const name = await draw('EasyEcs', 700, 80, colors.title);
-  const nameWidth = await widthOf(name.data);
+  const nameWidth = name.width;
   const gap = 24;
   const brandLeft = Math.round((W - (iconSize + gap + nameWidth)) / 2);
   const brandTop = 58;
   layers.push(
-    { input: icon, left: brandLeft, top: brandTop },
-    {
-      input: name.data,
-      left: brandLeft + iconSize + gap,
-      top: brandTop + Math.round((iconSize - name.height) / 2) - 4,
-    },
+    { input: await icon(iconSize), left: brandLeft, top: brandTop },
+    at(
+      name,
+      brandLeft + iconSize + gap,
+      brandTop + Math.round((iconSize - name.height) / 2) - 4,
+    ),
   );
   shapes.push(
     `<rect x="${brandLeft - 0.5}" y="${brandTop - 0.5}" width="${iconSize + 1}" height="${iconSize + 1}" rx="${(iconSize * 14) / 64}" fill="none" stroke="#2a2a2a"/>`,
   );
 
   // The claim
-  await centred((await draw(claim.en, 400, 34, colors.description)).data, 172);
+  centred(await draw(claim.en, 400, 34, colors.description), 172);
 
   // Three facts with hairline dividers
   const column = 330;
@@ -440,13 +470,13 @@ async function drawGithubPreview() {
   const factsTop = 240;
   for (let i = 0; i < facts.length; i++) {
     const centre = rowLeft + column * i + column / 2;
-    await centred(
-      (await draw(facts[i].value, 700, 46, colors.title)).data,
+    centred(
+      await draw(facts[i].value, 700, 46, colors.title),
       factsTop,
       centre,
     );
-    await centred(
-      (await draw(facts[i].label, 400, 21, colors.footer)).data,
+    centred(
+      await draw(facts[i].label, 400, 21, colors.footer),
       factsTop + 64,
       centre,
     );
@@ -463,19 +493,18 @@ async function drawGithubPreview() {
   const barMax = 480;
   const rowHeight = 36;
   const longest = Math.log(Math.max(...bars.map((b) => b.ratio)));
-  await centred(
-    (await draw(chartTitle, 400, 20, colors.footer)).data,
-    chartTop,
-  );
+  centred(await draw(chartTitle, 400, 20, colors.footer), chartTop);
   for (let i = 0; i < bars.length; i++) {
     const bar = bars[i];
     const top = chartTop + 36 + rowHeight * i;
     const label = await draw(bar.name, 700, 22, colors.title);
-    layers.push({
-      input: label.data,
-      top: top + Math.round((22 - label.height) / 2) + 1,
-      left: labelRight - (await widthOf(label.data)),
-    });
+    layers.push(
+      at(
+        label,
+        labelRight - label.width,
+        top + Math.round((22 - label.height) / 2) + 1,
+      ),
+    );
     const length = Math.max(
       4,
       Math.round((Math.log(bar.ratio) / longest) * barMax),
@@ -489,14 +518,16 @@ async function drawGithubPreview() {
       20,
       colors.accent,
     );
-    layers.push({
-      input: value.data,
-      top: top + Math.round((22 - value.height) / 2) + 1,
-      left: barLeft + length + 14,
-    });
+    layers.push(
+      at(
+        value,
+        barLeft + length + 14,
+        top + Math.round((22 - value.height) / 2) + 1,
+      ),
+    );
   }
 
-  await centred((await draw(footer, 700, 24, colors.accent)).data, 568);
+  centred(await draw(footer, 700, 24, colors.accent), 568);
 
   const background = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="${colors.background}"/>${shapes.join('')}<rect x="0" y="${H - 10}" width="${W}" height="10" fill="${colors.accent}"/></svg>`,
