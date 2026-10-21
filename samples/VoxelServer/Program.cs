@@ -8,6 +8,10 @@ using VoxelServer;
 int players = Support.Option(args, "--players", 50);
 int ticks = Support.Option(args, "--ticks", 1200);
 
+// A chunk's blocks are 8 KB, more than a buffer's pool keeps by default: let each loaded chunk reuse the list of one
+// that was unloaded.
+DynamicBuffer<Block>.PoolCapacity = Terrain.BlocksPerChunk;
+
 // The destroy log keeps the last 64k destroyed ids with their ticks, for SendDespawnsSystem.
 using var world = new World(new WorldOptions { MeasureSystems = true, DestroyLogCapacity = 1 << 16 });
 

@@ -26,6 +26,25 @@ public struct DynamicBuffer<T> : IComponent, ITracked, IBuffer
     // The only field: snapshots read a column of buffers as a column of BufferStore references (ComponentInfo).
     internal BufferStore<T> Store;
 
+    /// <summary>
+    /// The longest list, in elements, that a destroyed or removed buffer of <typeparamref name="T"/> gives back to its
+    /// thread's pool, for the next buffer's first write to reuse instead of allocating one (default: 4,096 bytes of
+    /// elements, 4,096 for a <c>byte</c> or a byte-sized enum). A longer list is left to the GC. Raise it for buffers of
+    /// one size that come and go in numbers, such as the blocks of chunks loaded and unloaded around players; 0 pools
+    /// none. The pool holds at most as many lists as died while none were taken, so what it keeps is that peak times
+    /// this capacity. Process-wide, for every world and thread: set it at startup, before a world uses the type.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
+    public static int PoolCapacity
+    {
+        get => BufferStore<T>.PoolCapacity;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            BufferStore<T>.PoolCapacity = value;
+        }
+    }
+
     readonly bool IBuffer.Relational => default(T) is IRelation;
 
     readonly int IBuffer.RowSize => SavedTypes.RowSize<T>();
@@ -196,9 +215,9 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     // The emptied stores of this thread, taken by first writes: a world's structural changes (where buffers die) run
     // on its owner thread, so a world's lists come back to the buffers of that world, and an actor loaded after one
     // unloaded reuses its list instead of allocating one. Bounded like a table's rows: the pool holds at most as many
-    // stores as died while none were taken (the peak a table's capacity keeps too), each with at most MaxFreeBytes of
-    // elements (a list that grew larger is left to the GC).
-    private const int MaxFreeBytes = 4096;
+    // stores as died while none were taken (the peak a table's capacity keeps too), each with at most PoolCapacity
+    // elements (a list that grew larger is left to the GC; DynamicBuffer<T>.PoolCapacity sets it).
+    internal static int PoolCapacity = 4096 / Unsafe.SizeOf<T>();
 
     [ThreadStatic] private static BufferStore<T>[] t_free;
     [ThreadStatic] private static int t_freeCount;
@@ -226,7 +245,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     {
         if (RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(Items, 0, Count);
         Count = 0;
-        if ((long)Items.Length * Unsafe.SizeOf<T>() > MaxFreeBytes) return;
+        if (Items.Length > PoolCapacity) return;
         var free = t_free;
         if (free == null || t_freeCount == free.Length) t_free = free = Grown(free);
         free[t_freeCount++] = this;

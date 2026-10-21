@@ -7,6 +7,7 @@ public class DynamicBufferTests
 {
     public record struct Loot(int Item, int Count);
     public enum Tile : byte { Air, Stone }
+    public enum Voxel : byte { Air, Stone }   // PoolCapacity is process-wide: only this test sets it
 
     /// <summary>Counts, per entity, the runs in which its bag had changed since the system's previous run.</summary>
     public class BagWatch : EcsSystem
@@ -269,5 +270,43 @@ public class DynamicBufferTests
         Assert.That(world.Instantiate(column).Tile.Count, Is.EqualTo(2));
         e.RemoveTile();
         Assert.That(e.HasTile, Is.False);
+    }
+
+    [Test]
+    public void PoolCapacityKeepsLongerListsForTheNextBuffer()
+    {
+        Assert.That(DynamicBuffer<Voxel>.PoolCapacity, Is.EqualTo(4096));   // 4,096 bytes of one-byte elements
+        Assert.That(DynamicBuffer<Loot>.PoolCapacity, Is.EqualTo(512));     // of eight-byte ones
+        Assert.Throws<ArgumentOutOfRangeException>(() => DynamicBuffer<Voxel>.PoolCapacity = -1);
+
+        using var world = new World();
+        var chunk = new Voxel[8192];
+        try
+        {
+            DynamicBuffer<Voxel>.PoolCapacity = chunk.Length;
+            Cycle(world, chunk);
+            Cycle(world, chunk);                                             // warm: the table, the pool
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            Cycle(world, chunk);
+            Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);   // the list came back
+
+            DynamicBuffer<Voxel>.PoolCapacity = 4096;
+            Cycle(world, chunk);                                             // takes the pooled list, keeps it not
+            before = GC.GetAllocatedBytesForCurrentThread();
+            Cycle(world, chunk);
+            Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.GreaterThanOrEqualTo(chunk.Length));
+        }
+        finally
+        {
+            DynamicBuffer<Voxel>.PoolCapacity = 4096;
+        }
+    }
+
+    // A chunk loaded and unloaded: a buffer filled to its size, then destroyed with its entity.
+    private static void Cycle(World world, Voxel[] blocks)
+    {
+        var e = world.CreateEntity(new DynamicBuffer<Voxel>());
+        e.Get<DynamicBuffer<Voxel>>().AddRange(blocks);
+        e.Destroy();
     }
 }
