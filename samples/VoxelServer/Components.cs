@@ -74,9 +74,9 @@ public record struct Body(bool OnGround, bool Blocked) : IComponent;
 // ITracked: the systems that handle a death visit only the healths written ([Changed<Health>]).
 public record struct Health(int Value) : IComponent, ITracked;
 
-// How far a player or a zombie sees, in blocks: each prefab sets its own. One area of interest for both: SightSystem
-// fills the Seen buffer of each, the player's client shows what it holds and a zombie hunts from it. A player's view
-// also decides which chunks are loaded around it.
+// How far a player or a zombie sees, in blocks: each prefab sets its own. A player's view is the square of chunks it
+// reaches: the chunks loaded around it and sent to its client, with the entities in them. A zombie hunts the players
+// within it.
 public record struct Vision(float Range) : IComponent;
 
 // The chunk an entity that moves is in: players, zombies and items. An index of them by chunk
@@ -99,14 +99,10 @@ public record struct Score(int BlocksDug) : IComponent, IIndexed<int>
     int IIndexed<int>.Key => BlocksDug;
 }
 
-// One entity in view: a DynamicBuffer<Seen> on everything with a Vision, what SightSystem found the last time it
-// looked, sorted by id so two looks compare in one walk. A player's client shows these; a zombie picks its target
-// among them.
-public record struct Seen(EntityId Entity) : IComparable<Seen>
-{
-    public int CompareTo(Seen other) =>
-        Entity.Index != other.Entity.Index ? Entity.Index.CompareTo(other.Entity.Index) : Entity.Version.CompareTo(other.Entity.Version);
-}
+// The chunk the clients see an entity in (Placed once it has one): what SightSystem compares a crossing with. A
+// cleanup component: a destroyed entity keeps it, Retired, until SightSystem has despawned it for that chunk's
+// viewers.
+public record struct Visible(ChunkPos Chunk, bool Placed) : ICleanupComponent;
 
 // One chunk a player's client has: a DynamicBuffer<InView> on the player, the loaded chunks of its view. A chunk that
 // comes into view is sent whole; one that leaves it is forgotten by the client.

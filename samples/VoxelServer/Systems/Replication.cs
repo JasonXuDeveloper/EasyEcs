@@ -24,8 +24,8 @@ public class SendChunksSystem : EcsSystem
 // #region entities
 // An entity that moved goes out as an update of its position, with its health bar when it has one: players and
 // zombies do, a dropped item does not. Maybe<Health> reads the health where the entity has it, so one method serves
-// all three kinds instead of one per kind. It goes to the players that have the entity's chunk in view: a coarser set
-// than the players whose Seen holds the entity, and one lookup instead of a walk of every viewer.
+// all three kinds instead of one per kind. It goes to the players that have the entity's chunk in view, as the
+// entity's spawn did (SightSystem): the chunk's Viewers, one lookup instead of a walk of every viewer.
 [UpdateInGroup<Replication>]
 public class SendEntitiesSystem : EcsSystem
 {

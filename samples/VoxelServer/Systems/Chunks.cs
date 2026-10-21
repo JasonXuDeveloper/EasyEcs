@@ -152,6 +152,7 @@ public class ChunkSaveSystem : EcsSystem
 // the players that crossed (GridSystem writes InChunk only then), [With<Fresh>] the chunks loaded this tick. A player
 // who stays in its chunk costs nothing, however many ticks go by. The chunks' Viewers follow the sets: a chunk that
 // comes into a view counts one more viewer, one that leaves it one less, and a chunk left with none notes since when.
+// The entities come and go with their chunk (spawn and despawn packets): the grid counts them (InChunkIndex.Count).
 [UpdateInGroup<Replication>]
 public class ChunkViewSystem : EcsSystem
 {
@@ -170,6 +171,7 @@ public class ChunkViewSystem : EcsSystem
             if (!before.Contains(chunk))
             {
                 World.ChunkIndex.Get(chunk.Chunk).Viewers.Count++;
+                stats.CameIntoView += World.InChunkIndex.Count(chunk.Chunk);
                 came++;
             }
         foreach (var chunk in before)
@@ -178,6 +180,7 @@ public class ChunkViewSystem : EcsSystem
                 // Still loaded: a chunk is unloaded only when no view holds it.
                 ref var viewers = ref World.ChunkIndex.Get(chunk.Chunk).Viewers;
                 if (--viewers.Count == 0) viewers.EmptySince = clock.Tick;
+                stats.LeftView += World.InChunkIndex.Count(chunk.Chunk);
                 left++;
             }
         if (came == 0 && left == 0) return;
@@ -202,6 +205,7 @@ public class ChunkViewSystem : EcsSystem
             if (player.InView.AsReadOnlySpan().Contains(item)) continue;
             player.WriteInView().Add(item);
             viewers.Count++;
+            stats.CameIntoView += World.InChunkIndex.Count(key.Pos);
             stats.ChunksSent++;
         }
     }

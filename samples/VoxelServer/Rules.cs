@@ -9,7 +9,7 @@ public static class Rules
     public const int DayLength = 600;          // 30 seconds a day, so a short run sees a night
     public const float PlayerVision = 32;      // blocks a player sees: two chunks each way, 5 x 5 chunks loaded
     public const float ZombieVision = 35;      // blocks a zombie sees a player from: its follow range in Minecraft
-    public const int LookEvery = TicksPerSecond / 2;   // ticks between two looks of a viewer (SightSystem)
+    public const int LookEvery = TicksPerSecond / 2;   // ticks between two looks of a zombie for a player to hunt
     public const int UnloadAfter = 100;        // ticks a chunk stays loaded after the last player saw it
     public const float Gravity = 0.08f;
     public const float WalkSpeed = 0.2f;
@@ -31,7 +31,6 @@ public static class Rules
     public const int PositionBytes = 16;       // an entity update: the entity's id and its position
     public const int HealthBytes = 2;          // the health bar an update carries for a player or a zombie
     public const int MaxRequests = 256;        // chunks read or saved in one tick at most; the others wait a tick
-    public const int MaxSeen = 256;            // entities a client shows at most; the others wait for room
     public const int MaxSaved = 512;           // entities a chunk takes to the region files at most, itself included
     public const int ViewChunks = 81;          // chunks a view holds at most: 9 x 9, a vision of up to 64 blocks
 

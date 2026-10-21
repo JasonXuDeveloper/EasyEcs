@@ -3,58 +3,56 @@ using EasyEcs;
 namespace VoxelServer;
 
 // #region sight
-// The area of interest, one system for every entity with a Vision: twice a second it looks through the grid (the
-// InChunk index) at the chunks its view reaches and keeps what is in range, up to Rules.MaxSeen, in its Seen buffer.
-// A player's client shows that set: what is new came into view (a spawn packet), what is out of range left it and
-// what no longer exists was destroyed (a despawn packet either way, counted apart); between two looks the entity
-// updates keep the client current. A zombie hunts from it
-// (ZombieTargetSystem). Seen is written through Mut<T> only when the set changed, so a viewer whose view stayed the
-// same is not stamped, and [Changed<DynamicBuffer<Seen>>] readers visit only the viewers whose view changed. A tenth
-// of the viewers look each tick (Slices), so a crowd costs the same every tick.
-[UpdateInGroup<Simulation>]
+// What each client is told about the entities, as a vanilla server tracks them: a client sees the entities of the
+// chunks it has (InView, ChunkViewSystem), so no player keeps a set of entities and nothing polls. A chunk that comes
+// into a view brings its entities with it (spawn packets, counted by ChunkViewSystem); here, the other two ways a view
+// changes, both data:
+// - Moved ([Changed<InChunk>]): an entity that crossed into another chunk is spawned for the players that see its new
+//   chunk and not its old one, and despawned for the reverse; one just created is spawned for the viewers of its
+//   chunk (the chunk's Viewers). Visible keeps the chunk the viewers know it in.
+// - Gone ([With<Retired>]): Visible is a cleanup component, so a destroyed entity stays, Retired, with that chunk until
+//   this system has despawned it for the chunk's viewers; then Visible goes and the entity is freed.
+// An entity that stays in its chunk costs nothing here, however many ticks go by.
+[UpdateInGroup<Replication>]
 public class SightSystem : EcsSystem
 {
-    [ForEach(Slices = Rules.LookEvery)]
-    void Look(Entity viewer, in Position position, in Vision vision, Mut<DynamicBuffer<Seen>> seen,
-        Maybe<Player> client, ref Stats stats)
+    [ForEach, Changed<InChunk>]
+    void Moved(in InChunk at, ref Visible visible, ref Stats stats)
     {
-        Span<Seen> now = stackalloc Seen[Rules.MaxSeen];
+        var from = visible;
+        visible = new Visible(at.Pos, true);
+        if (!from.Placed) stats.CameIntoView += ViewersOf(at.Pos);
+        else if (from.Chunk != at.Pos)
+        {
+            stats.CameIntoView += Watching(at.Pos, from.Chunk);
+            stats.LeftView += Watching(from.Chunk, at.Pos);
+        }
+    }
+
+    [ForEach, With<Retired>]
+    void Gone(Entity entity, in Visible visible, ref Stats stats)
+    {
+        if (visible.Placed) stats.Despawns += ViewersOf(visible.Chunk);
+        entity.Remove<Visible>();                                    // its last cleanup component: freed
+    }
+
+    // The players that have `chunk` in view.
+    int ViewersOf(ChunkPos chunk) => World.ChunkIndex.TryGet(chunk, out var loaded) ? loaded.Viewers.Count : 0;
+
+    // The players that have `chunk` in view and not `other`: those standing where their view reaches the one and not
+    // the other. A crossing is one chunk over, so this walks the few chunks of the strip between the two squares.
+    int Watching(ChunkPos chunk, ChunkPos other)
+    {
+        if (!World.ChunkIndex.TryGet(chunk, out _)) return 0;             // not loaded: in no view
+        bool otherLoaded = World.ChunkIndex.TryGet(other, out _);
         int count = 0;
-        var p = position.Value;
-        float range = vision.Range * vision.Range;
-        foreach (var chunk in Terrain.ChunksAround(Terrain.ChunkOf(p), vision.Range))
+        foreach (var at in Terrain.ChunksAround(chunk, Rules.PlayerVision))
         {
-            foreach (var other in World.InChunkIndex.Find(chunk))
-            {
-                if (other == viewer || (other.Position.Value - p).LengthSquared() > range) continue;
-                now[count++] = new Seen(other);
-                if (count == now.Length) goto full;
-            }
+            if (otherLoaded && Terrain.InReach(at, other, Rules.PlayerVision)) continue;
+            foreach (var player in World.InChunkIndex.Find(at))
+                if (player.HasPlayer) count++;
         }
-        full:
-        now = now[..count];
-        now.Sort();
-
-        // Both sets are sorted: one walk finds what came, what left and what was destroyed (not just out of range).
-        var before = seen.Value.AsReadOnlySpan();
-        int came = 0, left = 0, gone = 0, i = 0, j = 0;
-        while (i < now.Length || j < before.Length)
-        {
-            int order = i == now.Length ? 1 : j == before.Length ? -1 : now[i].CompareTo(before[j]);
-            if (order == 0) { i++; j++; continue; }
-            if (order < 0) { came++; i++; continue; }
-            if (World.IsAlive(before[j++].Entity)) left++;
-            else gone++;
-        }
-        if (came == 0 && left == 0 && gone == 0) return;
-
-        ref var buffer = ref seen.Write();
-        buffer.Clear();
-        buffer.AddRange(now);
-        if (!client.HasValue) return;                  // only a player has a client to send spawns and despawns to
-        stats.CameIntoView += came;
-        stats.LeftView += left;
-        stats.Despawns += gone;
+        return count;
     }
 }
 // #endregion sight

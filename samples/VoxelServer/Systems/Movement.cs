@@ -5,9 +5,9 @@ namespace VoxelServer;
 
 // #region walk
 // Turns a player's input into a horizontal velocity; gravity keeps the vertical one. Each row depends on nothing
-// but itself, so the rows are split across threads (Parallel = true). A row this cheap pays for the split only from
-// tens of thousands of players; below that the threads cost about what they save, and a server of a few thousand
-// would leave it on one thread.
+// but itself, so the rows may be split across threads (Parallel = true). The runner times the split against one
+// thread and keeps it only while the helpers make the pass faster: a row this cheap pays from tens of thousands of
+// players, and below that the pass stays on the calling thread at no cost.
 [UpdateInGroup<Simulation>]
 public class PlayerMoveSystem : EcsSystem
 {
@@ -24,8 +24,9 @@ public class PlayerMoveSystem : EcsSystem
 // Moves everything with a velocity through the blocks. Walking onto a block one high steps up onto it (from the
 // ground, with room for the head: the auto-jump of Bedrock Edition); a higher wall stops the walk. Then gravity, one
 // block at a time so a fast fall cannot pass through the ground: land on the block below, or stop at the one above the
-// head. The position is a Mut<Position>, written only when it changes, so a body standing still is not sent again. It
-// stays on one thread: the block lookups go through World (the chunk index), and a parallel method may not hold the
+// head. A body at rest (on the ground, not walking, ground still under it) is left as it is: most items and idle players
+// cost one block lookup. The position is a Mut<Position>, written only when it changes, so a body standing still is
+// not sent again. It stays on one thread: the block lookups go through World (the chunk index), and a parallel method may not hold the
 // World (EECS010).
 [UpdateInGroup<Simulation>]
 public class PhysicsSystem : EcsSystem
@@ -35,6 +36,7 @@ public class PhysicsSystem : EcsSystem
     {
         var p = position.Value.Value;
         var v = velocity.Value;
+        if (body.OnGround && v == Vector3.Zero && Terrain.IsSolid(World, p.X, p.Y - 1, p.Z)) return;   // at rest
         v.Y = MathF.Max(v.Y - Rules.Gravity, -3.9f);
 
         float x = p.X + v.X, y = p.Y, z = p.Z + v.Z;

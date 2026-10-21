@@ -35,7 +35,6 @@ world.AddSystem<BlockUpdateSystem>();
 world.AddSystem<WaterFlowSystem>();
 world.AddSystem<WaterCommitSystem>();
 world.AddSystem<PlayerMoveSystem>();
-world.AddSystem<SightSystem>();
 world.AddSystem<ZombieTargetSystem>();
 world.AddSystem<ZombieChaseSystem>();
 world.AddSystem<ZombieAttackSystem>();
@@ -51,11 +50,13 @@ world.AddSystem<ItemExpirySystem>();
 world.AddSystem<NightSpawnSystem>();
 world.AddSystem<SunlightSystem>();
 world.AddSystem<BurnSystem>();
+world.AddSystem<FireDamageSystem>();
 world.AddSystem<ExtinguishSystem>();
 world.AddSystem<ZombieDeathSystem>();
 world.AddSystem<ChunkUnloadSystem>();
 world.AddSystem<ChunkSaveSystem>();
 world.AddSystem<ChunkViewSystem>();
+world.AddSystem<SightSystem>();
 world.AddSystem<SendChunksSystem>();
 world.AddSystem<SendEntitiesSystem>();
 // #endregion systems
@@ -112,14 +113,14 @@ Console.Error.WriteLine($"save: {save.WrittenCount / 1024} KiB");
 static void SetPrefabs(World world) =>
     world.SetPrefabs(
         Player: new Prefab()
-            .SetPlayer(0).SetVision(Rules.PlayerVision).SetInChunk(default).SetScore(0).SetBuffer<Seen>().SetBuffer<InView>()
+            .SetPlayer(0).SetVision(Rules.PlayerVision).SetInChunk(default).SetVisible(default, false).SetScore(0).SetBuffer<InView>()
             .SetPosition(default).SetVelocity(default).SetBody(false, false)
             .SetHealth(Rules.PlayerHealth).SetInput(default, false).SetBuffer<ItemStack>(),
         Zombie: new Prefab()
-            .Set(new Zombie()).SetVision(Rules.ZombieVision).SetBuffer<Seen>().SetInChunk(default).SetTarget(default)
+            .Set(new Zombie()).SetVision(Rules.ZombieVision).SetInChunk(default).SetVisible(default, false).SetTarget(default)
             .SetPosition(default).SetVelocity(default).SetBody(false, false)
             .SetHealth(Rules.ZombieHealth).SetCooldown(0),
         Item: new Prefab()
-            .SetItem(default, 1).SetInChunk(default).SetPosition(default).SetVelocity(new System.Numerics.Vector3(0, 0.2f, 0))
+            .SetItem(default, 1).SetInChunk(default).SetVisible(default, false).SetPosition(default).SetVelocity(new System.Numerics.Vector3(0, 0.2f, 0))
             .SetBody(false, false).SetAge(0));
 // #endregion prefabs
