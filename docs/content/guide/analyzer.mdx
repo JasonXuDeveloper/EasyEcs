@@ -1292,7 +1292,7 @@ on the world a `foreach` over its `Query` walks, and on the world of a `[ForEach
 ```csharp doccheck=expect-EECS041
 foreach (var item in world.Query<Health>())
 {
-    if (item.Component1.Value <= 0) world.TrimExcess();   // throws: a pass is walking the tables
+    if (item.Health.Value <= 0) world.TrimExcess();   // throws: a pass is walking the tables
 }
 ```
 
@@ -1301,7 +1301,7 @@ Decide in the pass and act after it:
 ```csharp
 bool trim = false;
 foreach (var item in world.Query<Health>())
-    trim |= item.Component1.Value <= 0;
+    trim |= item.Health.Value <= 0;
 if (trim) world.TrimExcess();
 ```
 
@@ -1416,7 +1416,7 @@ public record struct Rating(int Value) : IComponent, ITrackChanges;
 ```csharp doccheck=expect-EECS046
 int total = 0;
 foreach (var item in world.Query<Rating>())
-    total += item.Component1.Value;   // every Rating row is stamped as written
+    total += item.Rating.Value;   // every Rating row is stamped as written
 ```
 
 Read it:
@@ -1424,7 +1424,7 @@ Read it:
 ```csharp
 int total = 0;
 foreach (var item in world.Read<Rating>())
-    total += item.Component1.Value;
+    total += item.Rating.Value;
 ```
 
 ## EECS047 [#eecs047]
@@ -1531,15 +1531,15 @@ int count = world.Count<Health>(QueryFilter.Create().InGroup<Zone>(1))
 **A world update during a pass.** Error. No code fix.
 
 A pass (a `foreach` over `Query` or `Read`, a `[ForEach]` method, a job's `Execute`) counts itself on the world, and
-the structural changes made during it leave holes it closes at its end. `world.Update()` assumes no pass is running:
-it closes the holes, moving the rows the pass is walking, and resets the count, which the end of the pass then takes
-below zero, so the world refuses the next `TrimExcess` until another update. The rule reports an update of the world
+the structural changes made during it leave holes it closes at its end. `world.Update()` assumes no pass is running: it
+runs every system while the loop holds its place in the tables, and it closes the holes, moving rows the loop has not
+reached into rows it has passed, so the loop misses them. The rule reports an update of the world
 a `foreach` walks; inside a system, [EECS034](#eecs034) reports it.
 
 ```csharp doccheck=expect-EECS051
 foreach (var item in world.Query<Health>())
 {
-    item.Component1.Value -= 1;
+    item.Health.Value -= 1;
     world.Update();   // runs every system while this loop walks the tables
 }
 ```
@@ -1548,7 +1548,7 @@ Update after the loop:
 
 ```csharp
 foreach (var item in world.Query<Health>())
-    item.Component1.Value -= 1;
+    item.Health.Value -= 1;
 world.Update();
 ```
 

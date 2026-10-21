@@ -390,7 +390,7 @@ The comparison with 10 changes per pass: [Comparison](/en/docs/comparison).
 | A `ref` from `Get<T>()` used after a change | It may point at a stale copy or another entity's row | [EECS047](/en/docs/guide/analyzer#eecs047) (warning) in one block: get it again |
 | Expecting a new entity in the pass that created it | It is visited by the next pass | By design |
 | `World.Update()` inside a system | The system runs again inside its own run, until the stack overflows | [EECS034](/en/docs/guide/analyzer#eecs034) |
-| `Update()` while a query of the same world iterates | The update moves the rows the query walks and the pass count goes wrong | [EECS051](/en/docs/guide/analyzer#eecs051) |
+| `Update()` while a query of the same world iterates | The update moves rows the query has not reached behind it, so the loop misses them | [EECS051](/en/docs/guide/analyzer#eecs051) |
 
 ## Related [#related]
 

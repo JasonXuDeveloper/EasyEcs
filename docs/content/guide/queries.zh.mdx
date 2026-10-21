@@ -509,7 +509,7 @@ sum of X: 11
 | 并行 job 写单例组件或别的实体 | 块之间发生竞争 | 代码审查（`[ForEach]` 方法由 [EECS010](/zh/docs/guide/analyzer#eecs010) 检查） |
 | 一个过滤条件里 `Changed`、`Removed`、`ChangedAny` 或 `RemovedAny` 用了不同的 tick | 抛 `ArgumentException` | 运行时 |
 | 把分片过滤条件（`Slice`）传给 `Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run` 或批量调用 | 抛 `ArgumentException`：这些调用需要所有匹配的行 | [EECS044](/zh/docs/guide/analyzer#eecs044) |
-| 在同一个 World 的查询循环里调用 `Update()` | 更新在循环底下填掉它的空洞，遍历计数变成负数：下一次更新之前 `TrimExcess` 都会抛异常 | [EECS051](/zh/docs/guide/analyzer#eecs051)；在系统里调用时由 [EECS034](/zh/docs/guide/analyzer#eecs034) 检查 |
+| 在同一个 World 的查询循环里调用 `Update()` | 循环还在走表，所有系统就跑了一遍；更新还在循环底下填掉它的空洞：还没走到的行挪到了它身后，被漏掉 | [EECS051](/zh/docs/guide/analyzer#eecs051)；在系统里调用时由 [EECS034](/zh/docs/guide/analyzer#eecs034) 检查 |
 | `entity.Run` 的 job 没声明 `Writes` | 默认值 -1 会给 job 拿到的每个被追踪组件打 tick | 声明 `Writes`（只读的 job 写 `0`） |
 | 会改结构的 `Run` job 却实现了 `INoStructuralChanges` | 变更处抛 `InvalidOperationException` | 运行时 |
 | 把 `Run` 返回 `false` 当成“死了” | 缺组件、过滤条件不满足也返回 `false` | 代码审查：查 `IsAlive` |

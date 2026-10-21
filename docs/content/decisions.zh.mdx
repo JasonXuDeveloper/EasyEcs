@@ -1049,7 +1049,7 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 | EECS048 对清理组件或 `ChildOf` 调用 `Disable` | 错误 | `Disable<T>()` 和 `DisableAll<T>()` 对它们抛 `InvalidOperationException` |
 | EECS049 没有实体能通过的过滤条件 | 错误 | 一个组件既被要求（参数、`[With<T>]`、`[Changed<T>]`、分组的 `[With<T>]` 或 `IGroupWith<T>`）又被排除（`[Without<T>]`、`IGroupWithout<T>`）：方法永远不会运行 |
 | EECS050 一个过滤条件里的第二个分组 | 错误 | 换一个分组（另一个组件或另一个常量值）时 `InGroup` 抛 `ArgumentException` |
-| EECS051 遍历进行中更新 World | 错误 | 更新会填掉遍历留下的空洞、移动它正在走的行，并把遍历计数清零，循环结束时计数变成 -1：下一次更新之前 `TrimExcess` 都会抛异常 |
+| EECS051 遍历进行中更新 World | 错误 | 循环还在走表，所有系统就跑了一遍；更新还会填掉遍历留下的空洞，把循环还没走到的行挪到它身后，循环就漏掉了它们 |
 | EECS052 创建之后紧跟 `Set` | 警告，有代码修复 | `AccessBenchmark.CreateThenSet`：1,000 次只带一个组件的创建，再 `Set` 另一个组件，加上销毁，44.4 µs；同样的创建直接带两个组件 25.8 µs（1.73 倍），两者都是 0 B |
 
 `AccessBenchmark` 跑在 [D29](#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same) 的那台机器上

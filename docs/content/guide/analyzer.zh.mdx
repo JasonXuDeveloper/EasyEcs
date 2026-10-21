@@ -1209,7 +1209,7 @@ hero.SetIfChanged(new Callsign("Ada"));
 ```csharp doccheck=expect-EECS041
 foreach (var item in world.Query<Health>())
 {
-    if (item.Component1.Value <= 0) world.TrimExcess();   // 抛异常：有遍历正在走这些表
+    if (item.Health.Value <= 0) world.TrimExcess();   // 抛异常：有遍历正在走这些表
 }
 ```
 
@@ -1218,7 +1218,7 @@ foreach (var item in world.Query<Health>())
 ```csharp
 bool trim = false;
 foreach (var item in world.Query<Health>())
-    trim |= item.Component1.Value <= 0;
+    trim |= item.Health.Value <= 0;
 if (trim) world.TrimExcess();
 ```
 
@@ -1323,7 +1323,7 @@ public record struct Rating(int Value) : IComponent, ITrackChanges;
 ```csharp doccheck=expect-EECS046
 int total = 0;
 foreach (var item in world.Query<Rating>())
-    total += item.Component1.Value;   // 每一行 Rating 都被打 tick，当作写过
+    total += item.Rating.Value;   // 每一行 Rating 都被打 tick，当作写过
 ```
 
 改用 Read：
@@ -1331,7 +1331,7 @@ foreach (var item in world.Query<Rating>())
 ```csharp
 int total = 0;
 foreach (var item in world.Read<Rating>())
-    total += item.Component1.Value;
+    total += item.Rating.Value;
 ```
 
 ## EECS047 [#eecs047]
@@ -1431,13 +1431,13 @@ int count = world.Count<Health>(QueryFilter.Create().InGroup<Zone>(1))
 **遍历进行中更新 World。** 错误。没有代码修复。
 
 一次遍历（对 `Query` 或 `Read` 的 `foreach`、`[ForEach]` 方法、job 的 `Execute`）会在 World 上计数，遍历期间的结构变更留下的空洞由它在结束时
-填上。`world.Update()` 假定没有遍历在进行：它会填掉这些空洞，移动遍历正在走的行，并把计数清零，遍历结束时再减一就成了负数，于是在下一次更新之前
-World 会拒绝 `TrimExcess`。规则报出在 `foreach` 遍历某个 World 时对它的更新；在系统里由 [EECS034](#eecs034) 报出。
+填上。`world.Update()` 假定没有遍历在进行：循环还停在表的中间，它就跑完了所有系统，并且填掉这些空洞，把循环还没走到的行挪进已经走过的位置，
+循环就漏掉了这些行。规则报出在 `foreach` 遍历某个 World 时对它的更新；在系统里由 [EECS034](#eecs034) 报出。
 
 ```csharp doccheck=expect-EECS051
 foreach (var item in world.Query<Health>())
 {
-    item.Component1.Value -= 1;
+    item.Health.Value -= 1;
     world.Update();   // 在这个循环遍历表的同时运行所有系统
 }
 ```
@@ -1446,7 +1446,7 @@ foreach (var item in world.Query<Health>())
 
 ```csharp
 foreach (var item in world.Query<Health>())
-    item.Component1.Value -= 1;
+    item.Health.Value -= 1;
 world.Update();
 ```
 
