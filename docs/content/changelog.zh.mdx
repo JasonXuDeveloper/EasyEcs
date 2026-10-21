@@ -80,6 +80,8 @@ icon: RotateCcwClock
 
 ### 修复 [#v4-7-0-fixes]
 
+- 在查询循环里调用 `World.Update`（EECS051）后，循环结束时计数会变成负数，下一次更新前 `TrimExcess` 一直抛异常。
+  现在这样的循环结束时不再留下计数。
 - 嵌套的组件或缓冲元素和所在命名空间里另一个结构体同名时，仍会生成一部分成员（`DisableX`、`InX`、`world.XIndex`、缓冲的成员），
   和另一个类型的成员同名，调用时编译不过（有歧义）。这样的类型现在不生成任何成员，用泛型 API 访问。
 - 关系的名字恰好是某个 `Entity` 成员的后缀（`Relation`，对应 `HasRelation`）时，会丢掉 `LinksX(target)`。

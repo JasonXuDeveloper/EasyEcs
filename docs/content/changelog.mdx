@@ -106,6 +106,8 @@ major or minor version that needs code changes? The
 
 ### Fixes [#v4-7-0-fixes]
 
+- `World.Update` called inside a query loop (EECS051) left the loop counted below zero when it ended, so
+  `TrimExcess` threw until the next update. The loop now ends as no loop.
 - A nested component or buffer element named like another struct of its namespace got some generated members
   (`DisableX`, `InX`, `world.XIndex`, a buffer's members) under the same names as the other type's, so calls to
   them did not compile (ambiguous). Such a type now gets no generated members; the generic API names it.
