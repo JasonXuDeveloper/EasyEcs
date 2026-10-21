@@ -25,15 +25,11 @@ throwing. A save of entities writes no singletons, so `SaveEntitiesWith(output, 
 that names one. A set built with `With(typeof(...))` from a list of types that mixes components and singletons now
 fails at the save, not at `With`. Keep the components of a record in a set of their own:
 
-**4.6**
-
-```csharp doccheck=skip
+```csharp tab="4.6" doccheck=skip
 static readonly ComponentSet Record = ComponentSet.Create().With(typeof(Bank)).With(typeof(Rates));  // Rates: a singleton, refused by With
 ```
 
-**4.7**
-
-```csharp
+```csharp tab="4.7"
 public record struct Bank(long Gold) : IComponent;
 
 private static readonly ComponentSet Record = ComponentSet.Create().With<Bank>();
@@ -50,15 +46,11 @@ and the reset silently lost its value. A reset says so now: write the value with
 `world.X = default`), which keeps the storage, so `SingletonRef<T>` handles still reach it. Where the singleton may
 exist already (after a `Load`), check `world.HasX` first or take it as it is with `GetOrAddX()`.
 
-**4.6**
-
-```csharp doccheck=skip
+```csharp tab="4.6" doccheck=skip
 world.AddSingleton<RoundClock>();  // a new round: back to tick 0 (and on a world without RoundClock, adds it)
 ```
 
-**4.7**
-
-```csharp
+```csharp tab="4.7"
 public record struct RoundClock(long Tick) : ISingletonComponent;
 
 public static class Round
@@ -73,9 +65,7 @@ public static class Round
 member of that name in a system hides it: warning CS0108, an error where warnings are errors. Rename the member, or
 read the base property where it means the same.
 
-**4.6**
-
-```csharp doccheck=skip
+```csharp tab="4.6" doccheck=skip
 public class Spawner : EcsSystem
 {
     private static long RunCount;                    // hides EcsSystem.RunCount in 4.7
@@ -83,9 +73,7 @@ public class Spawner : EcsSystem
 }
 ```
 
-**4.7**
-
-```csharp
+```csharp tab="4.7"
 public class Spawner : EcsSystem
 {
     protected override void OnUpdate()
@@ -202,15 +190,11 @@ handing a player to another server of the same build) need nothing.
 EasyEcs references `Nino.Serialization` 4.0.0-rc.6. A project that generates formatters references the same version
 of `Nino.Generator`:
 
-**4.3**
-
-```xml
+```xml tab="4.3"
 <PackageReference Include="Nino.Generator" Version="4.0.0-rc.4" />
 ```
 
-**4.4**
-
-```xml
+```xml tab="4.4"
 <PackageReference Include="Nino.Generator" Version="4.0.0-rc.6" />
 ```
 
@@ -221,16 +205,12 @@ its Nino formatter, value by value, so its format decides how it may change betw
 ([when the code changed](/en/docs/guide/saves#versioning)). Keep the attribute where the shape will change; remove it
 where raw rows (one block per column) are what you want:
 
-**4.3**
-
-```csharp doccheck=skip
+```csharp tab="4.3" doccheck=skip
 [NinoType]
 public partial record struct Speed(float Value) : IComponent;   // saved as raw rows
 ```
 
-**4.4**
-
-```csharp
+```csharp tab="4.4"
 using Nino.Core;
 
 public record struct Speed(float Value) : IComponent;            // raw rows
@@ -271,18 +251,14 @@ dotnet_diagnostic.EECS028.severity = suggestion
 
 It ran the system again inside its own run. Run updates and groups from the code that hosts the world.
 
-**4.2**
-
-```csharp doccheck=expect-EECS034
+```csharp tab="4.2" doccheck=expect-EECS034
 public class CatchUp : EcsSystem
 {
     protected override void OnUpdate() => World.Update();
 }
 ```
 
-**4.3**
-
-```csharp
+```csharp tab="4.3"
 while (running) world.Update();   // in the host loop
 ```
 
@@ -318,17 +294,16 @@ public class Ticker : EcsSystem
 }
 ```
 
-**4.1**: the first update added a default `Clock`, with no step.
+In 4.1 the first update added a default `Clock`, with no step. In 4.2, set it first, or call
+`world.GetOrAddClock()` where the default is right:
 
-```csharp
+```csharp tab="4.1"
 var world = new World();
 world.AddSystem<Ticker>();
 world.Update();
 ```
 
-**4.2**: set it first, or call `world.GetOrAddClock()` where the default is right.
-
-```csharp
+```csharp tab="4.2"
 var world = new World();
 world.SetClock(Tick: 0, DeltaTime: 1f / 30);
 world.AddSystem<Ticker>();
@@ -548,9 +523,7 @@ Singletons are now **per world** (v3 shared them process-wide). A `[ForEach]` me
 v3 systems implemented `IInitSystem` / `IExecuteSystem` / `IEndSystem` with `UniTask` methods. v4 systems derive
 from `EcsSystem` and override synchronous hooks; the UniTask dependency is gone.
 
-**v3**
-
-```csharp doccheck=skip
+```csharp tab="v3" doccheck=skip
 public class S : SystemBase, IInitSystem, IExecuteSystem
 {
     public UniTask OnInit(Context ctx) { ...; return UniTask.CompletedTask; }
@@ -558,9 +531,7 @@ public class S : SystemBase, IInitSystem, IExecuteSystem
 }
 ```
 
-**v4**
-
-```csharp
+```csharp tab="v4"
 public partial class S : EcsSystem
 {
     // when added to the world
@@ -623,9 +594,7 @@ v2 and v3 code; none of it compiles against v4.
 **No more callbacks.** v2 deferred every operation and handed the result to a callback; v3 executes at once and
 returns it.
 
-**v2**
-
-```csharp doccheck=skip
+```csharp tab="v2" doccheck=skip
 context.CreateEntity(entity => {
     entity.AddComponent<Position>(pos => {
         pos.Value.X = 10;
@@ -636,9 +605,7 @@ context.CreateEntity(entity => {
 });
 ```
 
-**v3**
-
-```csharp doccheck=skip
+```csharp tab="v3" doccheck=skip
 var entity = context.CreateEntity();
 var pos = entity.AddComponent<Position>();
 pos.Value.X = 10;
@@ -680,12 +647,12 @@ public struct Entity
 
 C# 13 is required for ref fields and other performance optimizations.
 
-```xml title="v2"
+```xml tab="v2"
 <TargetFramework>net6.0</TargetFramework>
 <LangVersion>10</LangVersion>
 ```
 
-```xml title="v3"
+```xml tab="v3"
 <TargetFramework>net8.0</TargetFramework>
 <LangVersion>13</LangVersion>
 ```
@@ -697,16 +664,16 @@ C# 13 is required for ref fields and other performance optimizations.
 
 Entity creation, component addition, nested callbacks and the same in systems all become plain statements:
 
-```csharp doccheck=skip
-// v2
+```csharp tab="v2" doccheck=skip
 context.CreateEntity(entity => {
     entity.AddComponent<Position>();
 });
 entity.AddComponent<Health>(health => {
     health.Value.HP = 100;
 });
+```
 
-// v3
+```csharp tab="v3" doccheck=skip
 var entity = context.CreateEntity();
 entity.AddComponent<Position>();
 var health = entity.AddComponent<Health>();
@@ -718,13 +685,13 @@ health.Value.HP = 100;
 
 #### Update singleton components [#v3-0-singletons]
 
-```csharp doccheck=skip
-// v2
+```csharp tab="v2" doccheck=skip
 context.AddSingletonComponent<GameConfig>(config => {
     config.Value.MaxPlayers = 100;
 });
+```
 
-// v3
+```csharp tab="v3" doccheck=skip
 var config = context.AddSingletonComponent<GameConfig>();
 config.Value.MaxPlayers = 100;
 ```

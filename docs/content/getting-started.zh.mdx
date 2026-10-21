@@ -242,11 +242,11 @@ Console.WriteLine($"the scout is at {scout.Position.X}, the others at {units[2].
 不是所有逻辑都要每个 tick 跑。**系统分组**是一个实现 `ISystemGroup` 的结构体；标了 `[UpdateInGroup<G>]` 的系统只在调用
 `world.Update<G>()` 时执行。加一个每秒打印一次的战报：
 
-```csharp title="Components.cs"
+```csharp tab="Components.cs"
 public struct Report : ISystemGroup;
 ```
 
-```csharp title="Systems.cs"
+```csharp tab="Systems.cs"
 [UpdateInGroup<Report>]
 public class ReportSystem : EcsSystem
 {

@@ -212,9 +212,9 @@ tick 中表不会再扩容。`SpawnNpc` 实例化重生的 NPC 时直接给出�
 `Hit` 是作用在单个单位上的请求，所以用 `entity.Run` 运行一个 job：job 要的组件只查一次表，`Alive` 过滤条件把死掉的单位挡在外面。
 job 声明了它写 `Health`，所以这次命中会打上变更 tick，随下一次同步发出去。
 
-<include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#queries</include>
+<include lang="csharp" meta='tab="查询" title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#queries</include>
 
-<include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#requests</include>
+<include lang="csharp" meta='tab="请求" title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#requests</include>
 
 ### 背包、克隆、击杀榜和好友 [#buffers-and-indexes]
 

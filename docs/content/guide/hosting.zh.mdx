@@ -159,14 +159,14 @@ public class ThinkSystem : EcsSystem
 `BackgroundService` 在应用的整个生命周期里跑这个循环。收到 Ctrl+C 或 `SIGTERM` 时，主机取消令牌，并等待 `ExecuteAsync` 结束，
 最长 `HostOptions.ShutdownTimeout`（默认 30 秒），最后一次存档就在这段时间里完成。
 
-```csharp title="WorldService.cs" doccheck=skip
+```csharp tab="WorldService.cs" doccheck=skip
 public sealed class WorldService(WorldLoop loop) : BackgroundService
 {
     protected override Task ExecuteAsync(CancellationToken stoppingToken) => loop.RunAsync(stoppingToken);
 }
 ```
 
-```csharp title="Program.cs" doccheck=skip
+```csharp tab="Program.cs" doccheck=skip
 using EasyEcs;
 
 var builder = Host.CreateApplicationBuilder(args);

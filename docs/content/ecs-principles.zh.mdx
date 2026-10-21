@@ -56,7 +56,7 @@ public struct Dead : IComponent;                                           // �
 
 系统按它做的那一件事命名。描述里需要用“并且”，就拆开。
 
-```csharp
+```csharp tab="之前"
 // 之前：燃烧“并且”死亡写在一个系统里。只有着火的单位才会被判定死亡：
 // 被别的原因打死的单位永远不会被标记为 Dead。
 public class StatusSystem : EcsSystem
@@ -71,7 +71,7 @@ public class StatusSystem : EcsSystem
 }
 ```
 
-```csharp
+```csharp tab="之后"
 // 之后：每块逻辑都能单独移除、调整顺序、单独测试，死亡判定也覆盖了所有伤害来源。
 public class BurnSystem : EcsSystem
 {
@@ -109,7 +109,7 @@ public class DeathSystem : EcsSystem
 | 按值查找（按名字找玩家、找某人拥有的物品） | 被索引的组件（[索引与关系](/zh/docs/guide/indexes-and-relations)），不要手工维护一个字典 |
 | 派生、可重建的数据（每次更新复用的临时列表） | 系统上的 `readonly` 字段即可 |
 
-```csharp doccheck=expect-EECS007
+```csharp tab="之前" doccheck=expect-EECS007
 // 之前（EECS007）：计数放在系统里，查询、测试和其他系统都看不到。
 public class DeathSystem : EcsSystem
 {
@@ -125,7 +125,7 @@ public class DeathSystem : EcsSystem
 }
 ```
 
-```csharp
+```csharp tab="之后"
 // 之后：计数是 World 级状态，谁都能读（world.Score.Deaths）。
 public record struct Score(int Deaths) : ISingletonComponent;
 

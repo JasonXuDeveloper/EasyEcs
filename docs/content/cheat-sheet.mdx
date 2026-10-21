@@ -106,7 +106,7 @@ members (`unit.Velocity`, `SetHealth(50)`, `RemoveDead()`), as in the example un
 | `entity.Describe()` | Its component values, for debuggers and logs | no |
 | `EntityId` / `EntityId.Null` / `id.IsNull` / `id.Index` / `id.Version` | The 8-byte id to keep in components; `Null` is the default value | no |
 
-```csharp
+```csharp tab="Components"
 unit.Velocity.X = 2;                                // write in place through the ref
 float x = unit.Position.X;                          // a read (ref readonly for a tracked component)
 unit.Set(new Health(50), new Dead());               // both in one call: shorter, same cost
@@ -114,7 +114,7 @@ unit.RemoveDead();                                  // flips a presence bit: the
 if (unit.TryGetHealth(out var hp)) { /* hp is a copy */ }
 ```
 
-```csharp
+```csharp tab="entity.Run"
 public struct TakeHit : IForEachEntity<Health>
 {
     public int Damage;
@@ -124,7 +124,7 @@ public struct TakeHit : IForEachEntity<Health>
 }
 ```
 
-```csharp
+```csharp tab="entity.Run"
 var hit = new TakeHit { Damage = 30 };
 bool applied = unit.Run<Health, TakeHit>(ref hit);   // a request handled on its entity
 ```
@@ -300,13 +300,13 @@ Guide: [Singletons](/en/docs/guide/singletons).
 | Creating, instantiating, cloning, `Enable<T>()`, `Restore`, `Load`, `LoadEntitiesInto` | Removing or `Disable<T>()` (that is a removal, for `[Removed<T>]`) |
 | `entity.Run`: the components in the job's `WriteMask` | `Load(…, markWritten: false)`, `LoadEntitiesInto(…, markWritten: false)` |
 
-```csharp
+```csharp tab="Changed<T>"
 ulong mark = world.ChangeTick;
 world.Update();
 int changed = world.Count<Health>(QueryFilter.Create().Changed<Health>(mark));
 ```
 
-```csharp
+```csharp tab="Mut<T>"
 public class ClampSystem : EcsSystem
 {
     [ForEach]                                        // stamps only the rows it writes
@@ -317,12 +317,12 @@ public class ClampSystem : EcsSystem
 }
 ```
 
-```csharp
+```csharp tab="Per client"
 // One filter, kept in a field, run with each client's acknowledged tick.
 private static readonly QueryFilter Dirty = QueryFilter.Create().ChangedAny<Health, Mana>(0);
 ```
 
-```csharp
+```csharp tab="Per client"
 ulong ack = world.ChangeTick;                       // a client's acknowledged tick
 world.Update();
 int toSend = world.Count<Health>(Dirty.Since(ack));
@@ -437,7 +437,7 @@ Guide: [Dynamic buffers](/en/docs/guide/dynamic-buffers).
 | `world.MoveEntities(target, ids, moved)` | A group to another world of the thread, no encoding; skips retired entities (kept for cleanup), and leaves cleanup components behind |
 | `world.RemoveTypes(assembly or context)` | Drops a plugin's types before its context unloads |
 
-```csharp
+```csharp tab="Snapshot and save"
 var save = world.Capture();
 world.Update();
 world.Restore(save);
@@ -448,13 +448,13 @@ using var copy = new World();
 copy.Load(bytes.WrittenSpan);
 ```
 
-```csharp
+```csharp tab="Restart"
 // A restart: the runtime state and the configuration are not saved; the new process brings its own.
 private static readonly ComponentSet Runtime = ComponentSet.Create().WithSingleton<Config>().With<Session>();
 private static readonly ComponentSet NewConfig = ComponentSet.Create().WithSingleton<Config>();
 ```
 
-```csharp
+```csharp tab="Restart"
 var restart = new System.Buffers.ArrayBufferWriter<byte>();
 world.SaveWithout(restart, Runtime);                       // the old process, at shutdown
 using var next = new World();

@@ -185,9 +185,11 @@ world.CreateEntities(garrison, new Position(0, 0), new Velocity(0, 0), new Healt
 
 ### 多行上的算术：向量化批量方法 [#arithmetic-over-many-rows-vectorize-a-batch-method]
 
-JIT 不会把这个循环向量化，而且行一多，反弹的分支就容易预测失败。常规写法：
+JIT 不会把常规写法的循环向量化，而且行一多，反弹的分支就容易预测失败。
+最快的写法接 span（连续的一段行；一张所有行都匹配的表就是一次调用），把两个 float 的组件当作一个 float span 来读
+（X, Y, X, Y, ...），让 `Vector<float>` 的每个通道都是一个坐标，再把分支变成掩码：
 
-```csharp title="BounceSystem.cs"
+```csharp tab="BounceSystem.cs"
 public class BounceSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
@@ -200,10 +202,7 @@ public class BounceSystem : EcsSystem
 }
 ```
 
-最快的写法接 span（连续的一段行；一张所有行都匹配的表就是一次调用），把两个 float 的组件当作一个 float span 来读
-（X, Y, X, Y, ...），让 `Vector<float>` 的每个通道都是一个坐标，再把分支变成掩码：
-
-```csharp title="BounceSimdSystem.cs"
+```csharp tab="BounceSimdSystem.cs"
 using System.Numerics;
 using System.Runtime.InteropServices;
 
@@ -305,7 +304,7 @@ Census.CountWounded(world, ref wounded);   // 生成的入口：job 跑一遍
 标志在每个检查它的系统的每一行上，都要花一次加载和一次分支。标签是过滤：没有标签的行一次跳过 64 行，加减标签只翻一个
 存在位，实体留在原行。
 
-```csharp title="Stun.cs"
+```csharp tab="标志"
 public record struct Unit(int Hp, bool Stunned) : IComponent;   // 常规：每个系统都要测这个标志
 
 public class StunnedFlagSystem : EcsSystem
@@ -317,7 +316,9 @@ public class StunnedFlagSystem : EcsSystem
         unit.Hp++;
     }
 }
+```
 
+```csharp tab="标签"
 public class StunnedTagSystem : EcsSystem   // 最快：让过滤来做判断
 {
     [ForEach, Without<Stunned>]

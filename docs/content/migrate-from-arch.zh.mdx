@@ -121,24 +121,9 @@ public struct WorldStats : ISingletonComponent
 
 ### 查询加 job 合成一个方法 [#query-and-job]
 
-Arch：
-
-```csharp doccheck=skip
-private static readonly QueryDescription Moving =
-    new QueryDescription().WithAll<Position, Velocity>().WithNone<Stunned, Dead>();
-
-private struct Move : IForEach<Position, Velocity>
-{
-    public void Update(ref Position p, ref Velocity v) { /* ... */ }
-}
-
-var move = new Move();
-world.InlineQuery<Move, Position, Velocity>(in Moving, ref move);
-```
-
 EasyEcs：过滤写在方法上，参数就是组件。
 
-```csharp title="MovementSystem.cs"
+```csharp tab="EasyEcs" title="MovementSystem.cs"
 public class MovementSystem : EcsSystem
 {
     [ForEach, Without<Stunned>, Without<Dead>]
@@ -152,30 +137,27 @@ public class MovementSystem : EcsSystem
 }
 ```
 
+```csharp tab="Arch" doccheck=skip
+private static readonly QueryDescription Moving =
+    new QueryDescription().WithAll<Position, Velocity>().WithNone<Stunned, Dead>();
+
+private struct Move : IForEach<Position, Velocity>
+{
+    public void Update(ref Position p, ref Velocity v) { /* ... */ }
+}
+
+var move = new Move();
+world.InlineQuery<Move, Position, Velocity>(in Moving, ref move);
+```
+
 </Step>
 <Step>
 
 ### 去掉命令缓冲 [#command-buffer]
 
-Arch 先记下状态变更，查询结束后再回放：
+Arch 先记下状态变更，查询结束后再回放。EasyEcs 当场生效。计数器是一个 `ref` 单例参数。
 
-```csharp doccheck=skip
-public void Update(Entity e, ref Attack attack, ref Health health)
-{
-    if (--attack.Cooldown > 0) return;
-    attack.Cooldown = attack.Interval;
-    C.Hits++;
-    health.Value -= attack.Damage;
-    if (Rng.Chance(C.Tick, e.Id, 1, 50) && !W.Has<Burning>(e))
-        B.Add(e, new Burning { Ticks = 10, DamagePerTick = 3 });
-}
-// ...
-_buffer.Playback(_world);
-```
-
-EasyEcs 当场生效。计数器是一个 `ref` 单例参数。
-
-```csharp title="CombatSystem.cs"
+```csharp tab="EasyEcs" title="CombatSystem.cs"
 public class CombatSystem : EcsSystem
 {
     [ForEach, Without<Dead>, Without<Stunned>]
@@ -211,6 +193,20 @@ public class DeathSystem : EcsSystem
         if (entity.HasNpc) stats.NpcKills++;
     }
 }
+```
+
+```csharp tab="Arch" doccheck=skip
+public void Update(Entity e, ref Attack attack, ref Health health)
+{
+    if (--attack.Cooldown > 0) return;
+    attack.Cooldown = attack.Interval;
+    C.Hits++;
+    health.Value -= attack.Damage;
+    if (Rng.Chance(C.Tick, e.Id, 1, 50) && !W.Has<Burning>(e))
+        B.Add(e, new Burning { Ticks = 10, DamagePerTick = 3 });
+}
+// ...
+_buffer.Playback(_world);
 ```
 
 </Step>

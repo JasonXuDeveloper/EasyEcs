@@ -214,7 +214,7 @@ public sealed class ClearHitsSystem : EcsSystem
 
 通过 `ref`。在 `[ForEach]` 方法里，`ref` 参数是写，`in` 是读：
 
-```csharp
+```csharp tab="系统里"
 public record struct Poison(int DamagePerTick) : IComponent;
 public record struct Mana(int Value) : IComponent;
 
@@ -225,9 +225,7 @@ public class PoisonSystem : EcsSystem
 }
 ```
 
-在系统之外：
-
-```csharp
+```csharp tab="系统外"
 entity.Mana.Value -= 10;                                     // 不追踪的组件：生成的属性是 ref，直接写
 ref var poison = ref entity.Poison;                          // 要写多次就保留这个 ref
 poison.DamagePerTick = 3;

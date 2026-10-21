@@ -21,15 +21,11 @@ icon: CircleArrowUp
 所以集合里有单例时，`SaveEntitiesWith(output, ids, set)` 抛 `ArgumentException`。从一组类型里用 `With(typeof(...))` 建集合、又混进了单例的，
 现在在存档时报错，而不是在 `With` 时。记录里的组件单独放一个集合：
 
-**4.6**
-
-```csharp doccheck=skip
+```csharp tab="4.6" doccheck=skip
 static readonly ComponentSet Record = ComponentSet.Create().With(typeof(Bank)).With(typeof(Rates));  // Rates 是单例，With 会拒绝
 ```
 
-**4.7**
-
-```csharp
+```csharp tab="4.7"
 public record struct Bank(long Gold) : IComponent;
 
 private static readonly ComponentSet Record = ComponentSet.Create().With<Bank>();
@@ -44,15 +40,11 @@ World 里已经有 `T` 时，`world.AddSingleton<T>()` 抛 `InvalidOperationExce
 `world.SetX(…)`（或 `world.X = default`）写入新值，存储不变，`SingletonRef<T>` 句柄照样能用。单例可能已经存在的地方（`Load` 之后），
 先查 `world.HasX`，或者用 `GetOrAddX()` 原样取用。
 
-**4.6**
-
-```csharp doccheck=skip
+```csharp tab="4.6" doccheck=skip
 world.AddSingleton<RoundClock>();  // 新的一局：回到第 0 个 tick（World 里没有 RoundClock 时就添加）
 ```
 
-**4.7**
-
-```csharp
+```csharp tab="4.7"
 public record struct RoundClock(long Tick) : ISingletonComponent;
 
 public static class Round
@@ -66,9 +58,7 @@ public static class Round
 `EcsSystem` 新增公开的 `long RunCount`（本次之前已经运行的次数，`[ForEach(Slices = N)]` 靠它选片）。系统里同名的成员会隐藏它：
 警告 CS0108，在“警告即错误”的构建里就是错误。给成员改个名；意思相同的话，直接读基类的属性。
 
-**4.6**
-
-```csharp doccheck=skip
+```csharp tab="4.6" doccheck=skip
 public class Spawner : EcsSystem
 {
     private static long RunCount;                    // 4.7 里会隐藏 EcsSystem.RunCount
@@ -76,9 +66,7 @@ public class Spawner : EcsSystem
 }
 ```
 
-**4.7**
-
-```csharp
+```csharp tab="4.7"
 public class Spawner : EcsSystem
 {
     protected override void OnUpdate()
@@ -182,15 +170,11 @@ public class Spawner : EcsSystem
 
 EasyEcs 引用 `Nino.Serialization` 4.0.0-rc.6。生成格式化器的项目，`Nino.Generator` 也要引用同一版本：
 
-**4.3**
-
-```xml
+```xml tab="4.3"
 <PackageReference Include="Nino.Generator" Version="4.0.0-rc.4" />
 ```
 
-**4.4**
-
-```xml
+```xml tab="4.4"
 <PackageReference Include="Nino.Generator" Version="4.0.0-rc.6" />
 ```
 
@@ -199,16 +183,12 @@ EasyEcs 引用 `Nino.Serialization` 4.0.0-rc.6。生成格式化器的项目，`
 标了 `[NinoType]` 的非托管组件，以前和其他非托管组件一样按原始行存档；现在由它的 Nino 格式化器逐个值写出，所以它在版本之间能怎么改，
 由它的格式决定（[代码改了之后](/zh/docs/guide/saves#versioning)）。结构会变的组件保留这个特性；想要原始行（每列一个块）的，去掉它：
 
-**4.3**
-
-```csharp doccheck=skip
+```csharp tab="4.3" doccheck=skip
 [NinoType]
 public partial record struct Speed(float Value) : IComponent;   // 按原始行存档
 ```
 
-**4.4**
-
-```csharp
+```csharp tab="4.4"
 using Nino.Core;
 
 public record struct Speed(float Value) : IComponent;            // 原始行
@@ -248,18 +228,14 @@ dotnet_diagnostic.EECS028.severity = suggestion
 
 它会在系统自己运行的途中把这个系统再跑一遍。更新和分组应该由托管 World 的代码来跑。
 
-**4.2**
-
-```csharp doccheck=expect-EECS034
+```csharp tab="4.2" doccheck=expect-EECS034
 public class CatchUp : EcsSystem
 {
     protected override void OnUpdate() => World.Update();
 }
 ```
 
-**4.3**
-
-```csharp
+```csharp tab="4.3"
 while (running) world.Update();   // 在宿主循环里
 ```
 
@@ -293,17 +269,16 @@ public class Ticker : EcsSystem
 }
 ```
 
-**4.1**：第一次更新会加一个默认值的 `Clock`，步长是 0。
+4.1 的第一次更新会加一个默认值的 `Clock`，步长是 0。4.2 要先设好；默认值确实合适的地方，调用
+`world.GetOrAddClock()`：
 
-```csharp
+```csharp tab="4.1"
 var world = new World();
 world.AddSystem<Ticker>();
 world.Update();
 ```
 
-**4.2**：先设好；默认值确实合适的地方，调用 `world.GetOrAddClock()`。
-
-```csharp
+```csharp tab="4.2"
 var world = new World();
 world.SetClock(Tick: 0, DeltaTime: 1f / 30);
 world.AddSystem<Ticker>();
@@ -468,9 +443,7 @@ v3 有三种句柄类型（`Entity` 值、`EntityRef`、`ComponentRef<T>`），v
 v3 的系统实现 `IInitSystem` / `IExecuteSystem` / `IEndSystem`，方法返回 `UniTask`。v4 的系统继承 `EcsSystem`，重写同步的钩子方法；不再依赖
 UniTask。
 
-**v3**
-
-```csharp doccheck=skip
+```csharp tab="v3" doccheck=skip
 public class S : SystemBase, IInitSystem, IExecuteSystem
 {
     public UniTask OnInit(Context ctx) { ...; return UniTask.CompletedTask; }
@@ -478,9 +451,7 @@ public class S : SystemBase, IInitSystem, IExecuteSystem
 }
 ```
 
-**v4**
-
-```csharp
+```csharp tab="v4"
 public partial class S : EcsSystem
 {
     // 加入 World 时
@@ -533,9 +504,7 @@ v3 的代码，都不能在 v4 上编译。
 
 **不再有回调。** v2 把每个操作推迟执行，再把结果交给回调；v3 当场执行并直接返回。
 
-**v2**
-
-```csharp doccheck=skip
+```csharp tab="v2" doccheck=skip
 context.CreateEntity(entity => {
     entity.AddComponent<Position>(pos => {
         pos.Value.X = 10;
@@ -546,9 +515,7 @@ context.CreateEntity(entity => {
 });
 ```
 
-**v3**
-
-```csharp doccheck=skip
+```csharp tab="v3" doccheck=skip
 var entity = context.CreateEntity();
 var pos = entity.AddComponent<Position>();
 pos.Value.X = 10;
@@ -587,12 +554,12 @@ public struct Entity
 
 ref 字段和其他性能优化需要 C# 13。
 
-```xml title="v2"
+```xml tab="v2"
 <TargetFramework>net6.0</TargetFramework>
 <LangVersion>10</LangVersion>
 ```
 
-```xml title="v3"
+```xml tab="v3"
 <TargetFramework>net8.0</TargetFramework>
 <LangVersion>13</LangVersion>
 ```
@@ -604,16 +571,16 @@ ref 字段和其他性能优化需要 C# 13。
 
 创建实体、添加组件、嵌套回调，以及系统里的同类代码，都变成普通语句：
 
-```csharp doccheck=skip
-// v2
+```csharp tab="v2" doccheck=skip
 context.CreateEntity(entity => {
     entity.AddComponent<Position>();
 });
 entity.AddComponent<Health>(health => {
     health.Value.HP = 100;
 });
+```
 
-// v3
+```csharp tab="v3" doccheck=skip
 var entity = context.CreateEntity();
 entity.AddComponent<Position>();
 var health = entity.AddComponent<Health>();
@@ -625,13 +592,13 @@ health.Value.HP = 100;
 
 #### 改单例组件 [#v3-0-singletons]
 
-```csharp doccheck=skip
-// v2
+```csharp tab="v2" doccheck=skip
 context.AddSingletonComponent<GameConfig>(config => {
     config.Value.MaxPlayers = 100;
 });
+```
 
-// v3
+```csharp tab="v3" doccheck=skip
 var config = context.AddSingletonComponent<GameConfig>();
 config.Value.MaxPlayers = 100;
 ```

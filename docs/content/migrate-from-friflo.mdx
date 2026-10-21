@@ -128,9 +128,23 @@ public struct WorldStats : ISingletonComponent
 
 ### A chunk loop becomes a method [#chunk-loop]
 
-Friflo:
+EasyEcs: one method per row; the counters are a `ref` singleton parameter, resolved once per pass.
 
-```csharp doccheck=skip
+```csharp tab="EasyEcs" title="AoiSystem.cs"
+public class AoiSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void UpdateCell(in Position p, ref AoiCell aoi, ref WorldStats stats)
+    {
+        int cell = (int)(p.Y * (1f / 64f)) * 64 + (int)(p.X * (1f / 64f));
+        if (cell == aoi.Cell) return;
+        aoi.Cell = cell;
+        stats.CellChanges++;
+    }
+}
+```
+
+```csharp tab="Friflo" doccheck=skip
 _cells = _store.Query<Position, AoiCell>().WithoutAnyTags(Tags.Get<Dead>());
 
 foreach (var (positions, cells, _) in _cells.Chunks)
@@ -147,47 +161,15 @@ foreach (var (positions, cells, _) in _cells.Chunks)
 }
 ```
 
-EasyEcs: one method per row; the counters are a `ref` singleton parameter, resolved once per pass.
-
-```csharp title="AoiSystem.cs"
-public class AoiSystem : EcsSystem
-{
-    [ForEach, Without<Dead>]
-    static void UpdateCell(in Position p, ref AoiCell aoi, ref WorldStats stats)
-    {
-        int cell = (int)(p.Y * (1f / 64f)) * 64 + (int)(p.X * (1f / 64f));
-        if (cell == aoi.Cell) return;
-        aoi.Cell = cell;
-        stats.CellChanges++;
-    }
-}
-```
-
 </Step>
 <Step>
 
 ### The command buffer goes [#command-buffer]
 
-Friflo records the tag and plays the buffer back after the loop:
-
-```csharp doccheck=skip
-foreach (var (healths, entities) in _alive.Chunks)
-{
-    var health = healths.Span;
-    for (int i = 0; i < health.Length; i++)
-    {
-        if (health[i].Value > 0) continue;
-        _buffer.AddTag<Dead>(entities.Ids[i]);
-        _c.Deaths++;
-        if (entities.EntityAt(i).HasComponent<Npc>()) _c.NpcKills++;
-    }
-}
-_buffer.Playback();
-```
-
+Friflo records the tag and plays the buffer back after the loop.
 EasyEcs adds it where it is decided, and the respawn system after it already sees the dead:
 
-```csharp title="DeathSystem.cs"
+```csharp tab="EasyEcs" title="DeathSystem.cs"
 public class DeathSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
@@ -209,6 +191,21 @@ public class RespawnSystem : EcsSystem
         entity.RemoveDead();
     }
 }
+```
+
+```csharp tab="Friflo" doccheck=skip
+foreach (var (healths, entities) in _alive.Chunks)
+{
+    var health = healths.Span;
+    for (int i = 0; i < health.Length; i++)
+    {
+        if (health[i].Value > 0) continue;
+        _buffer.AddTag<Dead>(entities.Ids[i]);
+        _c.Deaths++;
+        if (entities.EntityAt(i).HasComponent<Npc>()) _c.NpcKills++;
+    }
+}
+_buffer.Playback();
 ```
 
 </Step>

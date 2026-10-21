@@ -125,9 +125,23 @@ public struct WorldStats : ISingletonComponent
 
 ### chunk 循环变成一个方法 [#chunk-loop]
 
-Friflo：
+EasyEcs：每行调一次方法；计数器是 `ref` 单例参数，每一遍只解析一次。
 
-```csharp doccheck=skip
+```csharp tab="EasyEcs" title="AoiSystem.cs"
+public class AoiSystem : EcsSystem
+{
+    [ForEach, Without<Dead>]
+    static void UpdateCell(in Position p, ref AoiCell aoi, ref WorldStats stats)
+    {
+        int cell = (int)(p.Y * (1f / 64f)) * 64 + (int)(p.X * (1f / 64f));
+        if (cell == aoi.Cell) return;
+        aoi.Cell = cell;
+        stats.CellChanges++;
+    }
+}
+```
+
+```csharp tab="Friflo" doccheck=skip
 _cells = _store.Query<Position, AoiCell>().WithoutAnyTags(Tags.Get<Dead>());
 
 foreach (var (positions, cells, _) in _cells.Chunks)
@@ -144,47 +158,14 @@ foreach (var (positions, cells, _) in _cells.Chunks)
 }
 ```
 
-EasyEcs：每行调一次方法；计数器是 `ref` 单例参数，每一遍只解析一次。
-
-```csharp title="AoiSystem.cs"
-public class AoiSystem : EcsSystem
-{
-    [ForEach, Without<Dead>]
-    static void UpdateCell(in Position p, ref AoiCell aoi, ref WorldStats stats)
-    {
-        int cell = (int)(p.Y * (1f / 64f)) * 64 + (int)(p.X * (1f / 64f));
-        if (cell == aoi.Cell) return;
-        aoi.Cell = cell;
-        stats.CellChanges++;
-    }
-}
-```
-
 </Step>
 <Step>
 
 ### 去掉命令缓冲 [#command-buffer]
 
-Friflo 先记下标签，循环结束后回放缓冲：
+Friflo 先记下标签，循环结束后回放缓冲。EasyEcs 在决定的地方直接加上，紧随其后的复活系统已经能看到死者：
 
-```csharp doccheck=skip
-foreach (var (healths, entities) in _alive.Chunks)
-{
-    var health = healths.Span;
-    for (int i = 0; i < health.Length; i++)
-    {
-        if (health[i].Value > 0) continue;
-        _buffer.AddTag<Dead>(entities.Ids[i]);
-        _c.Deaths++;
-        if (entities.EntityAt(i).HasComponent<Npc>()) _c.NpcKills++;
-    }
-}
-_buffer.Playback();
-```
-
-EasyEcs 在决定的地方直接加上，紧随其后的复活系统已经能看到死者：
-
-```csharp title="DeathSystem.cs"
+```csharp tab="EasyEcs" title="DeathSystem.cs"
 public class DeathSystem : EcsSystem
 {
     [ForEach, Without<Dead>]
@@ -206,6 +187,21 @@ public class RespawnSystem : EcsSystem
         entity.RemoveDead();
     }
 }
+```
+
+```csharp tab="Friflo" doccheck=skip
+foreach (var (healths, entities) in _alive.Chunks)
+{
+    var health = healths.Span;
+    for (int i = 0; i < health.Length; i++)
+    {
+        if (health[i].Value > 0) continue;
+        _buffer.AddTag<Dead>(entities.Ids[i]);
+        _c.Deaths++;
+        if (entities.EntityAt(i).HasComponent<Npc>()) _c.NpcKills++;
+    }
+}
+_buffer.Playback();
 ```
 
 </Step>
