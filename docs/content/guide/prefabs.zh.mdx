@@ -206,7 +206,7 @@ public static class Bosses
     static Prefab Build()
     {
         var warlord = new Prefab().SetHealth(5_000, 5_000).SetNpc();
-        var mount = warlord.AddMember().SetHealth(800, 800).Set(new ChildOf(warlord.Id));
+        var mount = warlord.AddMember().SetHealth(800, 800).SetChildOf(warlord.Id);
         warlord.AddMember().SetHealth(300, 300).Set(new ChildOf(warlord.Id), new Follows(mount.Id));
         return warlord;
     }
@@ -215,7 +215,7 @@ public static class Bosses
 
 ```csharp
 var warlord = world.Instantiate(Bosses.Warlord);     // 三个实体，彼此链接
-int guards = world.Index<ChildOf, EntityId>().Count(warlord);   // 2
+int guards = world.ChildOfIndex.Count(warlord);   // 2
 warlord.Destroy();                                   // ChildOf：销毁父实体会连带销毁子实体
 ```
 

@@ -93,7 +93,8 @@ Each system's access comes from its `[ForEach]` parameters:
 | `[With<T>]`, `[Without<T>]`, `[WithAny<T>]` | nothing (filters read presence, which no parallel system changes) |
 | `[Changed<T>]`, `[Removed<T>]` | reads `T` (its change ticks) |
 | `[ChangedAny<T1, …, Tn>]`, `[RemovedAny<T1, …, Tn>]` | reads each of `T1` to `Tn` |
-| `Entity` or `World`, an instance method, an `OnUpdate` override | runs alone |
+| `Entity` used only as an identity (`Id`, `Version`, `IsAlive`, `==`, an `EntityId`) | nothing |
+| `Entity` used otherwise, `World`, an instance method, an `OnUpdate` override | runs alone |
 | no `[ForEach]` method at all | runs alone |
 
 Two systems conflict when one writes something the other reads or writes, or when either runs alone. A system goes to

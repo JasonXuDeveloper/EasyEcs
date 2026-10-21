@@ -423,7 +423,7 @@ parties) through `AddRelation` / `RemoveRelation`, with `world.Relations<T>()` f
 
 The built-in `ChildOf(EntityId Parent)` component links a child to its parent. `world.Children(parent)` lists the
 children, `world.Descendants(root)` walks the whole subtree depth first (each entity before its children, the root
-excluded) and `.AddTo(ids, includeRoot: true)` collects it into a list for a move or a save, `Set(new ChildOf(other))`
+excluded) and `.AddTo(ids, includeRoot: true)` collects it into a list for a move or a save, `SetChildOf(other)`
 re-parents, and destroying a parent destroys its descendants.
 
 - **Use it for:** a ship and its turrets, a player and the items attached to them, a squad and its members.

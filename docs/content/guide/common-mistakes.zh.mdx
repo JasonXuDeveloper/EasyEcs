@@ -603,7 +603,7 @@ ship.Destroy();                    // 炮塔跟着一起被销毁
 `ChildOf` 默认是 `TargetPolicy.Destroy`：销毁父实体会销毁它的整棵子树。子实体怎么处理，为整个 World 定一次：
 
 ```csharp
-world.Index<ChildOf, EntityId>().WhenTargetDestroyed(TargetPolicy.Remove);   // 孤儿变成根
+world.ChildOfIndex.WhenTargetDestroyed(TargetPolicy.Remove);   // 孤儿变成根
 ```
 
 没有规则能发现。详见[级联策略](/zh/docs/guide/hierarchy#cascade-policy)。

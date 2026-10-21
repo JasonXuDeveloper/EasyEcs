@@ -12,51 +12,9 @@ public static class OrderedIndexExtensions
 
 键可比较（分数、截止时间、等级）的值索引的有序遍历：按区间或按顺序遍历，用于排行榜、计时器和匹配分段。第一次遍历时把键排一次序；之后键出现和消失，索引都保持有序（每次 O(log 键数)，外加一次块移动）。
 
-## 方法 [#methods]
-
-### `Ascending` [#ascending]
-
-```csharp
-public static ValueIndex<T, TKey>.Ordered Ascending<T, TKey>(this ValueIndex<T, TKey> index) where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>, IComparable<TKey>;
-```
-
-按键升序列出所有建了索引的实体。
-
-**复杂度**（[API 表](/zh/docs/api)）：第一次遍历 O(键数 log 键数)，之后每个实体 O(1)
-
-### `Descending` [#descending]
-
-```csharp
-public static ValueIndex<T, TKey>.Ordered Descending<T, TKey>(this ValueIndex<T, TKey> index) where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>, IComparable<TKey>;
-```
-
-按键降序列出所有建了索引的实体（排行榜从第一名开始）。
-
-**复杂度**（[API 表](/zh/docs/api)）：第一次遍历 O(键数 log 键数)，之后每个实体 O(1)
-
-### `Range` [#range]
-
-```csharp
-public static ValueIndex<T, TKey>.Ordered Range<T, TKey>(this ValueIndex<T, TKey> index, TKey min, TKey max) where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>, IComparable<TKey>;
-```
-
-键在 `min` 和 `max` 之间（含两端）的实体，按键升序。
-
-**复杂度**（[API 表](/zh/docs/api)）：第一次遍历 O(键数 log 键数)，之后 O(log 键数) 定位 `min`，每个实体 O(1)
-
-### `RangeDescending` [#rangedescending]
-
-```csharp
-public static ValueIndex<T, TKey>.Ordered RangeDescending<T, TKey>(this ValueIndex<T, TKey> index, TKey min, TKey max) where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>, IComparable<TKey>;
-```
-
-键在 `min` 和 `max` 之间（含两端）的实体，按键降序。
-
-**复杂度**（[API 表](/zh/docs/api)）：第一次遍历 O(键数 log 键数)，之后 O(log 键数) 定位 `min`，每个实体 O(1)
-
 ## 扩展成员 [#extension-members]
 
-### `Ascending` [#ascending-2]
+### `Ascending` [#ascending]
 
 ```csharp
 extension<T, TKey>(ValueIndex<T, TKey> index) public ValueIndex<T, TKey>.Ordered Ascending();
@@ -66,7 +24,7 @@ extension<T, TKey>(ValueIndex<T, TKey> index) public ValueIndex<T, TKey>.Ordered
 
 **复杂度**（[API 表](/zh/docs/api)）：第一次遍历 O(键数 log 键数)，之后每个实体 O(1)
 
-### `Descending` [#descending-2]
+### `Descending` [#descending]
 
 ```csharp
 extension<T, TKey>(ValueIndex<T, TKey> index) public ValueIndex<T, TKey>.Ordered Descending();
@@ -76,7 +34,7 @@ extension<T, TKey>(ValueIndex<T, TKey> index) public ValueIndex<T, TKey>.Ordered
 
 **复杂度**（[API 表](/zh/docs/api)）：第一次遍历 O(键数 log 键数)，之后每个实体 O(1)
 
-### `Range` [#range-2]
+### `Range` [#range]
 
 ```csharp
 extension<T, TKey>(ValueIndex<T, TKey> index) public ValueIndex<T, TKey>.Ordered Range(TKey min, TKey max);
@@ -86,7 +44,7 @@ extension<T, TKey>(ValueIndex<T, TKey> index) public ValueIndex<T, TKey>.Ordered
 
 **复杂度**（[API 表](/zh/docs/api)）：第一次遍历 O(键数 log 键数)，之后 O(log 键数) 定位 `min`，每个实体 O(1)
 
-### `RangeDescending` [#rangedescending-2]
+### `RangeDescending` [#rangedescending]
 
 ```csharp
 extension<T, TKey>(ValueIndex<T, TKey> index) public ValueIndex<T, TKey>.Ordered RangeDescending(TKey min, TKey max);

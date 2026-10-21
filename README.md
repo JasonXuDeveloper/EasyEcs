@@ -370,6 +370,8 @@ The [documentation index](https://ecs.xgamedev.net/docs) suggests a reading orde
   ([diagnostics](https://ecs.xgamedev.net/en/docs/guide/diagnostics)).
 - **Restarts that leave runtime state behind.** `Save(writer, exclude)` and `Load(bytes, keep, markWritten: false)`
   ([restart](https://ecs.xgamedev.net/en/docs/guide/saves#restart)).
+- **Generated members for `ChildOf`** (`entity.SetChildOf(parent)`, `world.ChildOfIndex`, …) and
+  `entity.IsDestroyed`; a `[ForEach]` method that uses its `Entity` only as an identity no longer runs alone.
 - **Analyzer rules up to EECS036**, and a fix: parallel `[ForEach]` methods that write tracked components no longer
   lose change stamps. Upgrading: the [migration guide](https://ecs.xgamedev.net/en/docs/migration#v4-6-to-v4-7).
 

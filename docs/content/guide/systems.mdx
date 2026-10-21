@@ -229,10 +229,14 @@ public class CorpseCleanup : EcsSystem
 ```
 
 A method that is static, takes no `World` and uses its `Entity` (if any) only to read (`Id`, `IsAlive`, `Has`,
-`Get`, `Read`, `TryGet`, `TryGetRef`) cannot change structure: its job implements `INoStructuralChanges`, walks
-each table with no per-entity check, and may share a parallel stage with other systems. A method that may change
-structure runs alone, and each entity is still visited at most once per pass
-([Structural changes](/en/docs/guide/structural-changes)).
+`Get`, `Read`, `TryGet`, `TryGetRef`) cannot change structure: its job implements `INoStructuralChanges` and walks
+each table with no per-entity check. A method that may change structure runs alone, and each entity is still visited
+at most once per pass ([Structural changes](/en/docs/guide/structural-changes)).
+
+An `Entity` used only as an identity (`Id`, `Version`, `IsAlive`, `==` / `!=`, converted to an `EntityId`) reaches no
+component, so it adds nothing to the system's access: the system is scheduled by its other parameters and may share a
+parallel stage. Any other use of the handle (`Has`, `Get`, another call, passing the `Entity` on) can reach any
+component, and the system runs alone ([parallel systems](/en/docs/guide/threading#parallel-systems)).
 
 Methods run in source order, and a derived system runs its base class's `[ForEach]` methods first. Keep a system's
 methods in one file: across the files of a partial class the order is per file.

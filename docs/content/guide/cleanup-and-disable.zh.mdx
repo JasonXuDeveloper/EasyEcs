@@ -27,7 +27,7 @@ icon: Recycle
 
 ### 清理组件 [#cleanup-components]
 
-持有 `ICleanupComponent` 的实体被销毁时不会立即释放。它失去其他所有组件，得到 `Destroyed` 标签，一直活到最后一个清理组件被移除：
+持有 `ICleanupComponent` 的实体被销毁时不会立即释放。它失去其他所有组件，得到 `Destroyed` 标签（`entity.IsDestroyed`），一直活到最后一个清理组件被移除：
 
 ```csharp
 public record struct Seat(int Number) : ICleanupComponent;   // World 之外的资源
@@ -279,7 +279,7 @@ Console.WriteLine($"resumed: {player.Cooldown.Ticks} ticks left");
 
 // 玩家离开。它留着座位并带上 Destroyed 标签，其他组件全部移除。
 player.Destroy();
-Console.WriteLine($"destroyed: alive {player.IsAlive}, tagged {player.Has<Destroyed>()}");
+Console.WriteLine($"destroyed: alive {player.IsAlive}, tagged {player.IsDestroyed}");
 
 world.Update();
 int released = world.Seats.Released;

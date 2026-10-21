@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.DestroyedEcsExtensions" source="a8eff9a0ea38">
+    <summary><see cref="T:EasyEcs.Destroyed" /> 的具名成员（生成）。</summary>
+  </member>
+  <member name="P:EasyEcs.DestroyedEcsExtensions.&lt;G&gt;$84DED1C6BBD34F1223F2730C06F98F0A.IsDestroyed" source="8ae74ace5d3e">
+    <summary>实体是否有标签 <see cref="T:EasyEcs.Destroyed" />。</summary>
+  </member>
+</doc>

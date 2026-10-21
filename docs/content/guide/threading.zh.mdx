@@ -84,7 +84,8 @@ public static class Zones
 | `[With<T>]`、`[Without<T>]`、`[WithAny<T>]` | 无（过滤器读的是存在性，没有哪个并行系统会改它） |
 | `[Changed<T>]`、`[Removed<T>]` | 读 `T`（它的变更 tick） |
 | `[ChangedAny<T1, …, Tn>]`、`[RemovedAny<T1, …, Tn>]` | 读 `T1` 到 `Tn` 中的每一个 |
-| `Entity` 或 `World`、实例方法、重写 `OnUpdate` | 单独运行 |
+| 只当身份用的 `Entity`（`Id`、`Version`、`IsAlive`、`==`、`EntityId`） | 无 |
+| 其他用法的 `Entity`、`World`、实例方法、重写 `OnUpdate` | 单独运行 |
 | 没有任何 `[ForEach]` 方法 | 单独运行 |
 
 一个系统写了另一个系统读或写的东西，或者其中一个要单独运行，两者就冲突。系统放在哪个阶段：先找出它必须排在后面的系统（有顺序约束的，

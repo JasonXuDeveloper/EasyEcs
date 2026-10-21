@@ -128,11 +128,11 @@ InvalidOperationException: [UpdateBefore] / [UpdateAfter] form a cycle among A, 
 InvalidOperationException: The ChildOf links form a cycle
 ```
 
-`world.Descendants(root)` 遇到了已经访问过的实体：某个实体成了自己的祖先，因为一次 `Set(new ChildOf(…))` 把父实体挂到了它自己的
+`world.Descendants(root)` 遇到了已经访问过的实体：某个实体成了自己的祖先，因为一次 `SetChildOf(…)` 把父实体挂到了它自己的
 某个后代下面。EasyEcs 不在换父时检查（那样每次 `Set` 都要往上走一遍），所以遍历走到环的时候才发现。
 
 **修法：**把 `child` 挂到 `parent` 下之前，从 `parent` 沿 `ChildOf` 往上走，碰到 `child` 就拒绝。实体要挂到自己的后代下面时，
-先解除挂接（`Remove<ChildOf>()`）（[换父实体、解除挂接](/zh/docs/guide/hierarchy#reparent)）。
+先解除挂接（`RemoveChildOf()`）（[换父实体、解除挂接](/zh/docs/guide/hierarchy#reparent)）。
 
 ## 为什么有的组件不能禁用？ [#cannot-disable]
 
@@ -247,7 +247,7 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
 
 ## 为什么我的系统没有并行？ [#not-parallel]
 
-开了 `ParallelSystems`，系统只有在访问集已知、且不冲突时才会共享一个阶段。带 `Entity` 或 `World` 参数、有实例 `[ForEach]` 方法、
+开了 `ParallelSystems`，系统只有在访问集已知、且不冲突时才会共享一个阶段。带 `World` 参数或不只当身份用的 `Entity` 参数、有实例 `[ForEach]` 方法、
 重写了 `OnUpdate`，或者一个 `[ForEach]` 方法都没有的系统，都单独运行。一个写另一个读或写的东西，两个系统就冲突；`ref` 参数即使
 方法体只读也算写：改用 `in`（[并行系统](/zh/docs/guide/threading#parallel-systems)）。顺序（`[UpdateAfter<T>]`）也会把后面的
 系统放进后面的阶段。
