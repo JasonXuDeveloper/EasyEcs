@@ -59,6 +59,14 @@ public struct Humanoid : IComponent;
 // loaded around it and what it is sent (its area of interest); a zombie's, which player it hunts.
 public record struct Vision(float Range) : IComponent;
 
+// The chunk an entity that moves is in: players, zombies and items. An index of them by chunk
+// (world.InChunkIndex.Find(chunk)), the grid through which players and zombies see who is near. GridSystem keeps it
+// current.
+public record struct InChunk(ChunkPos Pos) : IComponent, IIndexed<ChunkPos>
+{
+    ChunkPos IIndexed<ChunkPos>.Key => Pos;
+}
+
 // ---- Players ----
 
 public record struct Player(int Client) : IComponent;
@@ -70,12 +78,9 @@ public record struct Score(int BlocksDug) : IComponent, IIndexed<int>
     int IIndexed<int>.Key => BlocksDug;
 }
 
-// The chunk a player is in: an index (world.InChunkIndex.Find(chunk)) of the players by chunk, the grid a zombie looks
-// through for the nearest player. GridSystem keeps it current.
-public record struct InChunk(ChunkPos Pos) : IComponent, IIndexed<ChunkPos>
-{
-    ChunkPos IIndexed<ChunkPos>.Key => Pos;
-}
+// One entity a player's client shows: a DynamicBuffer<Seen> on the player, what PlayerSightSystem found in its view
+// the last time it looked.
+public record struct Seen(EntityId Entity);
 
 // What the client asked for this tick: a direction to walk in (x, z) and a dig of the block underfoot.
 public record struct Input(Vector2 Walk, bool Dig) : IComponent;
@@ -124,4 +129,6 @@ public record struct Stats(
     long ChunkUpdates,
     long EntityUpdates,
     long BytesSent,
-    long Despawns) : ISingletonComponent;
+    long Despawns,
+    long CameIntoView,
+    long LeftView) : ISingletonComponent;

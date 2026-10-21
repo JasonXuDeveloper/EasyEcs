@@ -46,6 +46,7 @@ public static class Server
         Console.WriteLine($"blocks dug: {s.BlocksDug}; items: {s.ItemsPickedUp} picked up, {s.ItemsExpired} expired");
         Console.WriteLine($"zombies: {s.ZombiesSpawned} spawned, {s.ZombiesBurned} burned, {s.Hits} hits; player deaths: {s.PlayerDeaths}");
         Console.WriteLine($"water: {s.WaterCells} cells poured, {s.Drifts} ticks of humanoids carried");
+        Console.WriteLine($"view: {s.CameIntoView} entities came into view, {s.LeftView} left it");
         Console.WriteLine($"sent: {s.EntityUpdates} entity updates ({s.BytesSent / 1024} KiB), {s.Despawns} despawns");
     }
 

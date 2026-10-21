@@ -28,7 +28,7 @@ public class DigSystem : EcsSystem
         Wake(new BlockPos(x, y + 1, z), clock.Tick);
 
         var center = new System.Numerics.Vector3(x + 0.5f, y + 0.5f, z + 0.5f);
-        World.Instantiate(prefabs.Item, new Position(center), new Item(kind, player));
+        World.Instantiate(prefabs.Item, new Position(center), new InChunk(Terrain.ChunkOf(x, z)), new Item(kind, player));
         player.SetScore(player.Score.BlocksDug + 1);
         stats.BlocksDug++;
     }

@@ -26,6 +26,7 @@ public static class Rules
     public const float Current = 0.15f;        // the push of the water next to a spring, in blocks per tick
     public const int PositionBytes = 16;       // an entity update: the entity's id and its position
     public const int HealthBytes = 2;          // the health bar an update carries for a player or a zombie
+    public const int MaxSeen = 256;            // entities a client shows at most; the others wait for room
 
     // The chunks a view reaches in each direction.
     public static int ChunksIn(float range) => (int)MathF.Ceiling(range / Terrain.Size);

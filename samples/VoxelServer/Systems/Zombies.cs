@@ -20,7 +20,7 @@ public class NightSpawnSystem : EcsSystem
         int dx = 8 + Rules.Hash(client.Client, seed) % 8, dz = 8 + Rules.Hash(seed, client.Client) % 8;
         int x = (int)MathF.Floor(position.Value.X) + dx, z = (int)MathF.Floor(position.Value.Z) - dz;
         var at = new System.Numerics.Vector3(x + 0.5f, Terrain.SurfaceHeight(x, z) + 1, z + 0.5f);
-        World.Instantiate(prefabs.Zombie, new Position(at));
+        World.Instantiate(prefabs.Zombie, new Position(at), new InChunk(Terrain.ChunkOf(x, z)));
         stats.ZombiesSpawned++;
     }
 }
@@ -46,6 +46,7 @@ public class ZombieSightSystem : EcsSystem
         {
             foreach (var player in World.InChunkIndex.Find(new ChunkPos(center.X + dx, center.Z + dz)))
             {
+                if (!player.HasPlayer) continue;                  // the grid holds zombies and items too
                 float distance = (player.Position.Value - p).LengthSquared();
                 if (distance >= nearest) continue;
                 nearest = distance;

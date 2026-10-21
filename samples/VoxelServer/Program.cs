@@ -41,6 +41,7 @@ world.AddSystem<SunburnSystem>();
 world.AddSystem<ZombieDeathSystem>();
 world.AddSystem<PlayerRespawnSystem>();
 world.AddSystem<ChunkUnloadSystem>();
+world.AddSystem<PlayerSightSystem>();
 world.AddSystem<SendChunksSystem>();
 world.AddSystem<SendEntitiesSystem>();
 world.AddSystem<SendDespawnsSystem>();
@@ -97,14 +98,14 @@ Console.Error.WriteLine($"save: {save.WrittenCount / 1024} KiB");
 static void SetPrefabs(World world) =>
     world.SetPrefabs(
         Player: new Prefab()
-            .SetPlayer(0).Set(new Humanoid()).SetVision(Rules.PlayerVision).SetInChunk(default).SetScore(0)
+            .SetPlayer(0).Set(new Humanoid()).SetVision(Rules.PlayerVision).SetInChunk(default).SetScore(0).SetBuffer<Seen>()
             .SetPosition(default).SetVelocity(default).SetBody(false, false)
             .SetHealth(Rules.PlayerHealth).SetInput(default, false).SetBuffer<ItemStack>(),
         Zombie: new Prefab()
-            .Set(new Zombie()).Set(new Humanoid()).SetVision(Rules.ZombieVision).SetTarget(default)
+            .Set(new Zombie()).Set(new Humanoid()).SetVision(Rules.ZombieVision).SetInChunk(default).SetTarget(default)
             .SetPosition(default).SetVelocity(default).SetBody(false, false)
             .SetHealth(Rules.ZombieHealth).SetCooldown(0),
         Item: new Prefab()
-            .SetItem(default, default).SetPosition(default).SetVelocity(new System.Numerics.Vector3(0, 0.2f, 0))
+            .SetItem(default, default).SetInChunk(default).SetPosition(default).SetVelocity(new System.Numerics.Vector3(0, 0.2f, 0))
             .SetBody(false, false).SetLifetime(Rules.ItemLifetime));
 // #endregion prefabs
