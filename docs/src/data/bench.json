@@ -1,6 +1,6 @@
 {
   "source": "BenchmarkDotNet *-report.csv (scripts/sync-benchmarks.ts)",
-  "generatedAt": "2026-10-20T06:41:54.449Z",
+  "generatedAt": "2026-10-21T08:29:00.580Z",
   "environment": {
     "benchmarkDotNet": "0.15.2",
     "os": "Linux Ubuntu 24.04.5 LTS (Noble Numbat)",
@@ -90,37 +90,37 @@
         {
           "method": "FilterAtCall",
           "params": {},
-          "meanNs": 74.84,
-          "errorNs": 4.257,
-          "stdDevNs": 3.982,
-          "ratio": 1,
+          "meanNs": 124.1,
+          "errorNs": 22.436,
+          "stdDevNs": 22.035,
+          "ratio": 1.03,
           "allocatedBytes": 0
         },
         {
           "method": "FilterOnce",
           "params": {},
-          "meanNs": 21.65,
-          "errorNs": 0.818,
-          "stdDevNs": 0.765,
-          "ratio": 0.29,
+          "meanNs": 48.71,
+          "errorNs": 3.217,
+          "stdDevNs": 3.159,
+          "ratio": 0.4,
           "allocatedBytes": 0
         },
         {
           "method": "NoFilter",
           "params": {},
-          "meanNs": 42.89,
-          "errorNs": 4.066,
-          "stdDevNs": 3.804,
-          "ratio": 0.57,
+          "meanNs": 41.11,
+          "errorNs": 1.129,
+          "stdDevNs": 1.109,
+          "ratio": 0.34,
           "allocatedBytes": 0
         },
         {
           "method": "PastTheMemo",
           "params": {},
-          "meanNs": 88,
-          "errorNs": 3.872,
-          "stdDevNs": 3.622,
-          "ratio": 1.18,
+          "meanNs": 94.31,
+          "errorNs": 6.245,
+          "stdDevNs": 6.133,
+          "ratio": 0.78,
           "allocatedBytes": 0
         }
       ]
