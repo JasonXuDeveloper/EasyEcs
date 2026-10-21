@@ -495,7 +495,7 @@ the unmanaged components marked `[NinoType]` are written by Nino. Types are reco
 components the process no longer has, and `[NinoFormerName]` keeps a renamed one.
 
 For a restart, `SaveWithout(writer, in exclude)` leaves out the components and singletons of a `ComponentSet` (runtime
-state, caches, configuration), which then need no formatter, and `Load(bytes, in keep, markWritten: false)` keeps the
+state, caches, configuration), which then need no formatter, and `LoadKeeping(bytes, in keep, markWritten: false)` keeps the
 singletons the new process has already set, such as its configuration.
 
 - **Use it for:** persistence across restarts, replays on disk, shipping a world to another machine.

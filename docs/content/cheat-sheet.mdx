@@ -428,7 +428,7 @@ Guide: [Dynamic buffers](/en/docs/guide/dynamic-buffers).
 | `world.Capture()` / `Capture(into)` | An in-memory copy; `into` reuses a snapshot's arrays |
 | `world.Restore(snapshot)` | Back to the copy; handles from then are valid again |
 | `world.Save(writer)` / `Load(bytes)` | A whole world as bytes (managed components need `[NinoType]`); `Load` throws `InvalidDataException` when an unmanaged component's layout changed since the save |
-| `world.SaveWithout(writer, exclude)` / `Load(bytes, keep, markWritten: false)` | A restart: the save leaves out the components and singletons of a set, the load keeps the singletons of a set as the new process set them |
+| `world.SaveWithout(writer, exclude)` / `LoadKeeping(bytes, keep, markWritten: false)` | A restart: the save leaves out the components and singletons of a set, the load keeps the singletons of a set as the new process set them |
 | `world.SaveEntities(writer, ids)` / `LoadEntities(bytes, handles)` | A group of entities to another world or process |
 | `ComponentSet.Create().With<T>()….WithSingleton<S>()` | Components (and, for whole-world saves, singletons), built once in a `static readonly` field |
 | `world.SaveEntitiesWith(writer, ids, set)` | A record: only the components of the set |

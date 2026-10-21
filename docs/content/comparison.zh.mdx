@@ -69,7 +69,7 @@ EasyEcs 领先，但不到上面的幅度；完整服务器 tick 就在这里。
 | chunk / span 遍历 | ✅ 批量 `[ForEach]` 方法、`ForEachBatch` | ✅ `Chunks` | ✅ chunk | ✅ 每个系统一个 `ReadOnlySpan<Entity>` |
 | struct 查询 job | ✅ `IForEach`、`IForEachEntity`、`IForEachBatch` | ✅ | ✅ `IForEach`、`InlineQuery` | – |
 | 批量变更 | ✅ `SetAll`、`RemoveAll`、`DisableAll`、`EnableAll` | ✅ `EntityBatch`、`ApplyBatch` | ✅ 按查询加 / 删 | ❌ |
-| 批量创建和销毁 | ✅ `CreateEntities`、`DestroyEntities(filter)`、`Instantiate(prefab, span)` | ⚠️ `CreateEntityBatch`；逐个删除 | ⚠️ 按查询销毁 | ❌ |
+| 批量创建和销毁 | ✅ `CreateEntities`、`DestroyAll(filter)`、`Instantiate(prefab, span)` | ⚠️ `CreateEntityBatch`；逐个删除 | ⚠️ 按查询销毁 | ❌ |
 | 创建前预留一张表 | ✅ `Reserve<T1, …, Tn>(n)` | ✅ store 和 archetype 上的 `EnsureCapacity` | ✅ `EnsureCapacity(signature, n)` | – |
 | 预制体 | ✅ `Prefab`：不属于任何 World 的数据 | ⚠️ store 里的实体，用 `CloneEntity` 复制 | ❌ | ⚠️ 用 `CopyTo(world)` 复制的实体 |
 | 变更追踪（某 tick 之后写过的行） | ✅ `ITrackChanges`、`[Changed<T>]`，每次 `ref` 写入 | ❌ | ❌（事件） | ✅ `NotifyChanged<T>()` 之后的 `WhenChanged<T>()` |
@@ -244,7 +244,7 @@ Friflo <BenchValue k="relation.friflo" />）。
 ## 层级 [#hierarchy]
 
 `HierarchyComparison`：在预热过的 World 里创建 1,000 个小队（一个队长加 10 个队员），然后连同队员一起销毁队长。EasyEcs
-批量创建 `ChildOf(leader)` 的队员，再用会级联的 `DestroyEntities` 销毁队长；Friflo 的 `DeleteEntity` 会把子实体解绑，所以
+批量创建 `ChildOf(leader)` 的队员，再用会级联的 `DestroyAll` 销毁队长；Friflo 的 `DeleteEntity` 会把子实体解绑，所以
 移植版先删子实体。Arch 和 DefaultEcs 没有层级。
 
 <BenchChart bench="HierarchyComparison" title="创建并销毁 1,000 个 11 人小队" />
@@ -400,7 +400,7 @@ DefaultEcs 用配 `DefaultParallelRunner` 的 `AEntitySetSystem`。
 | struct 查询 job、chunk 遍历 | Arch、Friflo | `IForEach`、`IForEachEntity`、`IForEachBatch`；批量 `[ForEach]` 方法 |
 | 并行查询 | Friflo、Arch、DefaultEcs | `[ForEach(Parallel = true)]`、`ForEachParallel`、`ForEachEntityParallel` |
 | 并行系统 | DefaultEcs | `WorldOptions.ParallelSystems` |
-| 批量变更 | Friflo、Arch | `SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`、`CreateEntities`、`DestroyEntities` |
+| 批量变更 | Friflo、Arch | `SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`、`CreateEntities`、`DestroyAll` |
 | 索引组件 | Friflo、DefaultEcs | `IIndexed<TKey>`：`Find`、`TryFind`、`Count`、有序 `Range` |
 | 链接和关系 | Friflo | 索引的 `EntityId`，多目标用 `IRelation` |
 | 父子层级 | Friflo | `ChildOf`、`world.Children`、级联销毁；不做 transform 传递 |

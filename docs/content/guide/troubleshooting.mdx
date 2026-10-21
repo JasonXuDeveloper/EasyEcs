@@ -226,7 +226,7 @@ ArgumentException: A sliced filter (QueryFilter.Slice) applies to ForEach passes
 ```
 
 `QueryFilter.Slice(index, count)` cuts each table into parts that only `ForEach`, `ForEachEntity`, `ForEachBatch` and
-their parallel forms visit. `Query`, `Count`, `Any`, `DestroyEntities`, `entity.Run`, `SetAll` and the other bulk
+their parallel forms visit. `Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run`, `SetAll` and the other bulk
 calls need every matching row and refuse it. **Fix:** pass those calls the filter without `Slice`; read the share a
 sliced system visited from `system.Stats.LastEntities` ([slices](/en/docs/guide/systems#slices)).
 

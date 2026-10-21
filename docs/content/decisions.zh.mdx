@@ -948,10 +948,10 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 
 ## D54. 调用的名字说明它做什么 [#d54-names]
 
-**决定。** 4.7 改了五个调用的名字：`EnsureCapacity<T1..Tn>(count)` / `EnsureCapacity(prefab, count)` 改为 `Reserve`，
-`DestroyEntities<T1..Tn>(filter)` 改为 `DestroyAll`，`SaveEntities(output, ids, set)` 改为 `SaveEntitiesWith`，
-`Save(output, exclude)` 改为 `SaveWithout`，`Load(input, keep, markWritten)` 改为 `LoadKeeping`，关系生成的 `RemoveX(target)`
-改为 `UnlinkX(target)`。`DestroyEntities(ids)` 销毁一组 id。旧名不保留别名。
+**决定。** 4.7 改了 4.6 的四个调用和一个生成成员的名字：`EnsureCapacity<T1..Tn>(count)` / `EnsureCapacity(prefab, count)` 改为
+`Reserve`，`DestroyEntities<T1..Tn>(filter)` 改为 `DestroyAll`，`SaveEntities(output, ids, set)` 改为 `SaveEntitiesWith`，关系生成的
+`RemoveX(target)` 改为 `UnlinkX(target)`。`DestroyEntities(ids)` 销毁一组 id。4.7 新增的重启调用在发布前是 `Save` 和 `Load` 的重载，
+发布时叫 `SaveWithout` 和 `LoadKeeping`。旧名不保留别名。
 
 **原因。**
 - **改变含义的重载会把含义藏起来。** `Save(output, set)` 读起来像“存这些”，实际是不存它们；`Load(input, set)` 实际是保留单例。

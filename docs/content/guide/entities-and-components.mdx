@@ -389,7 +389,7 @@ the handle, `TryGetEntity` looks the id up first, `TrackedHandleWrite` writes a 
 <BenchTable bench="MicroBenchmarks" methods="HandleAccess,TryGetEntity,TrackedHandleWrite" />
 
 Creating and destroying in a warm world, 1,000 entities ten times over: one call per entity (`Churn`) against
-`CreateEntities` and `DestroyEntities` (`ChurnBatch`); and moving three components out and back in one call each
+`CreateEntities` and `DestroyAll` (`ChurnBatch`); and moving three components out and back in one call each
 (`RemoveMany`, 1,000 entities):
 
 <BenchTable bench="MicroBenchmarks" methods="Churn,ChurnBatch,RemoveMany" />

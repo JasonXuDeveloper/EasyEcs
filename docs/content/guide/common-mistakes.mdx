@@ -395,7 +395,7 @@ int thinking = world.Count<Position>(quarter);   // ArgumentException: Count nee
 ```
 
 A slice is a cut of each table that only `[ForEach]` passes (`ForEach`, `ForEachEntity`, `ForEachBatch` and their
-parallel forms) take. `Query`, `Count`, `Any`, `DestroyEntities`, `entity.Run` and the bulk calls need every matching
+parallel forms) take. `Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run` and the bulk calls need every matching
 row, so they throw for a sliced filter instead of answering for part of the world. Count without the slice, and read
 what a sliced system visited from its stats:
 

@@ -427,7 +427,7 @@ restarted.Load(bytes.WrittenSpan);
 非托管组件按原始行写出；托管组件、单例和标了 `[NinoType]` 的非托管组件由 Nino 写出。类型按 Nino 类型 id 记录，所以加载时会跳过进程里已经不存在的组件，改了名的组件用 `[NinoFormerName]` 就能留住。
 
 重启时，`SaveWithout(writer, in exclude)` 不写 `ComponentSet` 里的组件和单例（运行时状态、缓存、配置），这些类型也就不需要格式化器；
-`Load(bytes, in keep, markWritten: false)` 保留新进程已经设好的单例，比如它的配置。
+`LoadKeeping(bytes, in keep, markWritten: false)` 保留新进程已经设好的单例，比如它的配置。
 
 - **适合：** 跨重启持久化、落盘的回放、把一个 World 发到另一台机器。
 - **别用于：** 原地修改非托管组件的内存布局：请新增一个组件类型，否则旧存档加载不了。

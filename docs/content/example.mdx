@@ -76,7 +76,7 @@ EasyEcs' features to their place in this file.
 | [Unique keys](/en/docs/guide/indexes-and-relations#unique-keys) (`IUniqueIndexed`, `Get` / `TryGet`) | `Account`: `Join` and `Kick` find a hero by account |
 | System groups, `UpdateInterval`, `UpdatePhase`, ordering, lifecycle | `Replication`; `ManaSystem`, `RegenerationSystem`; `ClockSystem`; `PlanningSystem.OnCreate` |
 | [Queries](/en/docs/guide/queries), handles and [one-entity jobs](/en/docs/guide/queries#run-on-one-entity) | `NearestPlayer`, `Census`, `ShotsLeft`; `Hit` runs the `TakeHit` job with `entity.Run` |
-| [Bulk operations](/en/docs/guide/bulk) | `Instantiate(prefab, span)`, `DestroyEntities`, `RemoveAll`, `EnableAll` |
+| [Bulk operations](/en/docs/guide/bulk) | `Instantiate(prefab, span)`, `DestroyAll`, `RemoveAll`, `EnableAll` |
 | [Snapshots](/en/docs/guide/snapshots), [saves and moves](/en/docs/guide/saves) | `Checkpoint` / `Rewind`, `Save` / `Load`, `Transfer` |
 | Introspection, diagnostics, error policy | `Tables`, `Schedule`, `Slowest`, `Failure` |
 

@@ -431,8 +431,8 @@ change inside a parallel stage throws.
 
 The rule reports a call to a structural member of `Entity` (`Set`, `Remove`, `Destroy`, `GetOrAdd`, `Clone`,
 `Disable`, `Enable`, `AddRelation`, `RemoveRelation`, `Run` (its job may change structure), and the generated `SetX`, `GetOrAddX`, `RemoveX`) or `World`
-(`CreateEntity`, `CreateEntities`, `Instantiate`, `DestroyEntities`, `SetAll`, `RemoveAll`, `DisableAll`,
-`EnableAll`, `Load`, `LoadEntities`, `LoadEntitiesInto`, `MoveEntities`, `GroupBy`, `RemoveTypes`, singletons, systems, `Update`,
+(`CreateEntity`, `CreateEntities`, `Instantiate`, `Reserve`, `DestroyEntities`, `DestroyAll`, `SetAll`, `RemoveAll`, `DisableAll`,
+`EnableAll`, `Load`, `LoadKeeping`, `SaveWithout`, `SaveEntitiesWith`, `LoadEntities`, `LoadEntitiesInto`, `MoveEntities`, `GroupBy`, `RemoveTypes`, singletons, systems, `Update`,
 `Capture`, `Restore`, ...) in such a method. A world the method creates itself (`new World()` in a local) is its own.
 
 ```csharp
@@ -980,7 +980,7 @@ public class MoveSystem : EcsSystem
 **A structural change entity by entity over a query.** Warning. Code fix: the bulk call.
 
 A structural change through each entity of a query moves (or flips) one row per call, through the structural gate each
-time. `SetAll`, `RemoveAll`, `DisableAll`, `EnableAll` and `DestroyEntities` change every matching row of a table
+time. `SetAll`, `RemoveAll`, `DisableAll`, `EnableAll` and `DestroyAll` change every matching row of a table
 together, whole words of rows at once ([bulk changes](/en/docs/guide/bulk)). The rule
 reports a `foreach` over `world.Query<...>()` whose body is one such call on the item's entity with the same value for
 every row. A `Set` of a component the query already requires writes a value instead of moving a row, and is left alone.
@@ -1279,7 +1279,7 @@ hero.SetIfChanged(new Callsign("Ada"));
 **A call a pass refuses.** Error. No code fix.
 
 While a query or `[ForEach]` pass walks a world's tables, the calls that rebuild or replace them throw
-`InvalidOperationException`: `TrimExcess`, `Capture`, `Restore`, `Save`, `Load`, `SaveEntities`, `LoadEntities`,
+`InvalidOperationException`: `TrimExcess`, `Capture`, `Restore`, `Save`, `SaveWithout`, `Load`, `LoadKeeping`, `SaveEntities`, `SaveEntitiesWith`, `LoadEntities`, `LoadEntitiesInto`,
 `MoveEntities` (of the world walked, as source or target), `GroupBy` and `RemoveTypes`. The rule reports one of them
 on the world a `foreach` over its `Query` walks, and on the world of a `[ForEach]` method or a job's `Execute`.
 
@@ -1348,8 +1348,8 @@ public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { M
 **A sliced filter where every row is needed.** Error. No code fix.
 
 [`QueryFilter.Slice(index, count)`](/en/docs/guide/systems#slices) cuts each table into `count` parts, and only
-passes (`ForEach`, `ForEachEntity`, `ForEachBatch` and their parallel forms) take one. `Query`, `Count`, `Any`,
-`DestroyEntities`, `entity.Run` and the bulk calls need every matching row, so they throw `ArgumentException` for a
+passes (`ForEach`, `ForEachEntity`, `ForEachBatch` and their parallel forms) take one. `Query`, `Read`, `Count`, `Any`,
+`DestroyAll`, `entity.Run` and the bulk calls need every matching row, so they throw `ArgumentException` for a
 sliced filter. The rule follows the filter through locals and `static readonly` fields, and also reports a constant
 `Slice` call that throws `ArgumentOutOfRangeException` (`count` below 1, `index` outside `0..count - 1`).
 `Slice(0, 1)` is the whole table and is not sliced.

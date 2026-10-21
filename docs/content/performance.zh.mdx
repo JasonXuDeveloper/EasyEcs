@@ -175,7 +175,7 @@ world.CreateEntities(garrison, new Position(0, 0), new Velocity(0, 0), new Healt
 | 热点临时循环里的 `foreach (var item in world.Query<...>())` | 配 `world.ForEach` 的 struct job | <BenchValue k="micro.queryIterate" /> → <BenchValue k="micro.forEachIterate" /> |
 | 每一行都要测的 `bool` 标志 | 配 `[With<T>]` / `[Without<T>]` 的标签 | 没有标签的行一次跳过 64 行；切换只翻一个位 |
 | 为了找少数变化的行扫描每一行 | `ITrackChanges` + `[Changed<T>]` | <BenchValue k="changed.10.scan" /> → <BenchValue k="changed.10" /> |
-| 循环里 `CreateEntity` / `Destroy` | `CreateEntities` / `DestroyEntities`、`Instantiate(prefab, span)` | <BenchValue k="micro.churn" /> → <BenchValue k="micro.churnBatch" /> |
+| 循环里 `CreateEntity` / `Destroy` | `CreateEntities` / `DestroyAll`、`Instantiate(prefab, span)` | <BenchValue k="micro.churn" /> → <BenchValue k="micro.churnBatch" /> |
 | 逐个给每个实体设组件 | `world.SetAll` / `RemoveAll` | <BenchValue k="bulk.each" /> → <BenchValue k="bulk.setAll" /> |
 | 一个接 `Maybe<T>` 的方法 | 用 `[With<T>]` / `[Without<T>]` 拆成两个方法 | <BenchValue k="maybe.one" /> → <BenchValue k="maybe.two" /> |
 | 在调用处构造 `QueryFilter` | `static readonly` 过滤 | 每次调用 <BenchValue k="callsite.atCall" /> → <BenchValue k="callsite.once" /> |
@@ -444,7 +444,7 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
   （[EECS027](/zh/docs/guide/analyzer#eecs027)）。
 - **`[ForEach]` 方法用不到系统的任何成员时，不要写成实例方法**：否则它只能单独运行，还要承担结构变化的检查
   （[EECS029](/zh/docs/guide/analyzer#eecs029)）。
-- **不要遍历查询逐个修改、计数或判断实体**：`SetAll`、`DestroyEntities`、`Count`、`Any` 和过滤条件按表处理
+- **不要遍历查询逐个修改、计数或判断实体**：`SetAll`、`DestroyAll`、`Count`、`Any` 和过滤条件按表处理
   （[EECS030](/zh/docs/guide/analyzer#eecs030)、[EECS032](/zh/docs/guide/analyzer#eecs032)）。
 - **不要在别的线程上使用值索引或销毁实体**：索引在所有者线程上跟随这些变化，没有做同步。
 

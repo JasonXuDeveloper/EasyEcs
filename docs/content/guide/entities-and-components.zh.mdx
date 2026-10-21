@@ -189,7 +189,7 @@ bool known = world.AccountIndex.TryGet(2002, out var other);     // false：没�
 | `bool TryGet<T>(out T value)` | 有就拿到一份**副本**。不算写入。 |
 | `bool Has<T1..Tn>()` | 是否全都有。 |
 | `Entity Set(in T1 … in Tn)` | 添加或替换 1 到 9 个值，最多搬一次行；可链式调用。 |
-| `bool SetIfChanged<T>(in T value)` | 和 `Set` 一样设置 `value`，但实体已经是这个值时返回 false，不写入、不记 tick、不动索引（[值变了才写](/zh/docs/guide/change-tracking#set-if-changed)）。 |
+| `bool SetIfChanged<T>(in T value)` | 和 `Set` 一样设置 `value`，但实体已经是这个值时返回 false，不写入、不打 tick、不动索引（[值变了才写](/zh/docs/guide/change-tracking#set-if-changed)）。 |
 | `ref T GetOrAdd<T>()` | 返回 ref，没有就先加一个 `default`；已有的值保持不变。 |
 | `Entity Remove<T1..Tn>()` | 移除 1 到 9 个组件，没有的忽略；可链式调用。 |
 
@@ -229,9 +229,9 @@ bool both = hero.Has<Position, Health>();
 hero.Position.X += 1;                                      // ref：原地写入
 if (hero.TryGetHealth(out var copy)) Console.WriteLine(copy.Value);
 hero.SetArmor(5).SetDead();                                // 构造参数；标签；可链式调用
-int value = hero.Armor.Value;                              // 被追踪：只是读，不会记 tick
-hero.WriteArmor().Value += 1;                              // 显式写入：会记 tick
-bool changed = hero.SetArmorIfChanged(6);                  // false：Armor 已经是 6，不记 tick
+int value = hero.Armor.Value;                              // 被追踪：只是读，不会打 tick
+hero.WriteArmor().Value += 1;                              // 显式写入：会打 tick
+bool changed = hero.SetArmorIfChanged(6);                  // false：Armor 已经是 6，不打 tick
 ```
 
 - 属性就是 `Get`（或 `Read`），组件不存在时会抛异常：可选的组件先用 `HasX` 判断，或者用 `TryGetX` / `TryGetRef<T>(out found)`。
@@ -347,7 +347,7 @@ id 不再指向任何实体：World 说它已经不存活。
 | 别这样 | 这样做 | 原因 |
 | --- | --- | --- |
 | 先 `CreateEntity()`，再逐个 `Set` | `CreateEntity(a, b, c)`、`Instantiate(prefab)`，或 `Instantiate(prefab, a, b)` | 一次放置，而不是每个组件搬一次行 |
-| 对很少变化的被追踪值调 `SetX(…)` | `SetXIfChanged(…)` | 值相同就不记 tick：`[Changed<T>]` 读取方会跳过它 |
+| 对很少变化的被追踪值调 `SetX(…)` | `SetXIfChanged(…)` | 值相同就不打 tick：`[Changed<T>]` 读取方会跳过它 |
 | `Set(a)` 后再 `Set(b)` | `Set(a, b)`、`Remove<A, B>()` | 写法更简洁，性能相同 |
 | 循环调用 `CreateEntity` / `Destroy` | `CreateEntities(span, …)`、`DestroyAll<T>(filter)`（[EECS031](/zh/docs/guide/analyzer#eecs031)） | 每波只过一次结构闸门 |
 | 用 `Get<T>()` 读被追踪的组件 | `Read<T>()`、生成的属性、`TryGet<T>()` | `ref` 访问会把这一行记成已写入 |
@@ -360,7 +360,7 @@ id 不再指向任何实体：World 说它已经不存活。
 
 <BenchTable bench="MicroBenchmarks" methods="HandleAccess,TryGetEntity,TrackedHandleWrite" />
 
-在已预热的 World 里创建、销毁 1,000 个实体，重复十轮：逐个调用（`Churn`）对比 `CreateEntities` 加 `DestroyEntities`
+在已预热的 World 里创建、销毁 1,000 个实体，重复十轮：逐个调用（`Churn`）对比 `CreateEntities` 加 `DestroyAll`
 （`ChurnBatch`）；以及一次调用移出三个组件、再一次调用加回（`RemoveMany`，1,000 个实体）：
 
 <BenchTable bench="MicroBenchmarks" methods="Churn,ChurnBatch,RemoveMany" />

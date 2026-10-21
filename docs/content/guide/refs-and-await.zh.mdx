@@ -328,7 +328,7 @@ Bob 的结果指向 `1v1`，而索引 1 上现在是 `1v2`，所以 `TryGetEntit
 | 结构变更之后还在用之前的 `ref` | 指向过期副本或别的实体的行 | 代码审查：重新获取 |
 | 只存原始索引，不存 `EntityId` | 会指向之后复用该索引的实体 | 存 `EntityId`，`TryGetEntity` 会校验版本 |
 | 组件里存 `Entity` | 变成托管列 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告） |
-| 按值拿 `DynamicBuffer<T>` | 写进共享的列表，也不记 tick | [EECS012](/zh/docs/guide/analyzer#eecs012) |
+| 按值拿 `DynamicBuffer<T>` | 写进共享的列表，也不打 tick | [EECS012](/zh/docs/guide/analyzer#eecs012) |
 | `await` 在线程池上恢复后还去访问 World | 和所有者线程发生竞争 | 代码审查：把结果当数据交回去。[EECS014](/zh/docs/guide/analyzer#eecs014) 只检查交给其他线程的委托（`Task.Run`、`Parallel.*`）里的结构变更，不管值的写入，也不管 `await` 之后的代码 |
 
 ## 相关页面 [#related]

@@ -204,7 +204,7 @@ ArgumentException: A sliced filter (QueryFilter.Slice) applies to ForEach passes
 ```
 
 `QueryFilter.Slice(index, count)` 把每张表切成几份，只有 `ForEach`、`ForEachEntity`、`ForEachBatch` 及其并行形式会按份访问。
-`Query`、`Count`、`Any`、`DestroyEntities`、`entity.Run`、`SetAll` 和其他批量调用需要所有匹配的行，所以拒绝它。**修法：**给这些
+`Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run`、`SetAll` 和其他批量调用需要所有匹配的行，所以拒绝它。**修法：**给这些
 调用传不带 `Slice` 的过滤条件；分片系统访问了多少，看 `system.Stats.LastEntities`（[分片](/zh/docs/guide/systems#slices)）。
 
 ## 为什么 `DestroyedSince` 说没有销毁日志？ [#no-destroy-log]

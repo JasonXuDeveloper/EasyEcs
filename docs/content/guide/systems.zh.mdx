@@ -224,7 +224,7 @@ public class CorpseCleanup : EcsSystem
 #### 可选组件：`Maybe<T>` [#maybe]
 
 `Maybe<T>` 接收实体可能没有的组件：方法会访问所有拥有其他组件的实体，`HasValue` 告诉你这个实体有没有 `T`。通过 `Value`
-写入就算写 `T`（被追踪的组件会记 tick），只读则算读。
+写入就算写 `T`（被追踪的组件会打 tick），只读则算读。
 
 ```csharp
 public record struct Shield(int Bonus) : IComponent;
@@ -586,7 +586,7 @@ run order: MoveSystem
 
 | 别这样 | 这样做 | 原因 |
 | --- | --- | --- |
-| 只读的组件写成 `ref` | 改成 `in`（[EECS025](/zh/docs/guide/analyzer#eecs025)） | 系统能共享并行阶段；被追踪的组件不会被记 tick |
+| 只读的组件写成 `ref` | 改成 `in`（[EECS025](/zh/docs/guide/analyzer#eecs025)） | 系统能共享并行阶段；被追踪的组件不会被打 tick |
 | 方法用不到却带了 `Entity` 或 `World` 参数 | 去掉（[EECS026](/zh/docs/guide/analyzer#eecs026)） | job 跳过结构变更簿记，还能并行 |
 | 实例 `[ForEach]` 方法 | 改成静态方法（[EECS029](/zh/docs/guide/analyzer#eecs029)） | 能证明不改结构：可以共享阶段，每行不用检查 |
 | 对大量行写标量循环 | 用 `Vector<T>` 的批处理方法 | 对整段行做 SIMD |
@@ -642,7 +642,7 @@ run order: MoveSystem
 | 系统里的泛型 `[ForEach]` 方法 | 没有类型参数 | [EECS004](/zh/docs/guide/analyzer#eecs004)；改成泛型系统 |
 | span 和逐实体参数混用 | 一段行对应不到单个值 | [EECS009](/zh/docs/guide/analyzer#eecs009) |
 | 并行方法改结构或写单例组件 | 块之间发生竞争 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
-| 通过 `in` 参数修改集合 | 被当成读来调度，也不会记 tick | [EECS011](/zh/docs/guide/analyzer#eecs011) |
+| 通过 `in` 参数修改集合 | 被当成读来调度，也不会打 tick | [EECS011](/zh/docs/guide/analyzer#eecs011) |
 | 不带 `Entity` / `World` 的方法通过组件里的链接做结构变更 | 遍历拿着指向已搬走行的 ref | [EECS013](/zh/docs/guide/analyzer#eecs013) |
 | `UpdateInterval` 的值会变 | 跳过或重复运行 | [EECS018](/zh/docs/guide/analyzer#eecs018) |
 | `Slices` 小于 1，或和 `[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<…>]`、`[RemovedAny<…>]` 一起用 | 其他分片里的行发生的变化会丢失 | [EECS035](/zh/docs/guide/analyzer#eecs035) |
@@ -655,7 +655,7 @@ run order: MoveSystem
 | 分组的 `[With<X>]` 碰上方法的 `[Without<X>]` | 没有实体能满足：方法永远不会运行 | 没有规则报告：靠代码审查 |
 | 分组的 `[WithAny<A>]` 加方法的 `[WithAny<B>]`，当成“A 且 B” | 两个集合合并：选出有 `A` 或有 `B` 的实体 | 代码审查 |
 | record struct 的 actor 键上写公开的 `Key => this` | `ToString()` 无限打印 `Key`：栈溢出 | 代码审查：显式实现 `IIndexed<T>.Key` |
-| 只读的组件写成 `ref` | 被追踪的组件被记 tick，系统也没法共享阶段 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
+| 只读的组件写成 `ref` | 被追踪的组件被打 tick，系统也没法共享阶段 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
 | 方法从不使用的 `Entity` 或 `World` 参数 | job 保留结构变更簿记 | [EECS026](/zh/docs/guide/analyzer#eecs026) |
 | `OnUpdate` 或 `[ForEach]` 方法里分配内存 | 每次更新都产生垃圾 | [EECS028](/zh/docs/guide/analyzer#eecs028) |
 | 实例 `[ForEach]` 方法没用到系统的任何成员 | 被当作可能改结构：单独运行，每行都要检查 | [EECS029](/zh/docs/guide/analyzer#eecs029) |

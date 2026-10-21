@@ -119,7 +119,7 @@ Fumadocs' `Callout` (`type="info" | "idea" | "warn" | "error"`), `Cards` / `Card
 ## Search
 
 The site search indexes every heading, paragraph and table row, and ranks a page whose title matches first. Give
-headings the words readers type ("Reserve before the wave: `EnsureCapacity`"). A block that lists many names of
+headings the words readers type ("Reserve before the wave: `Reserve`"). A block that lists many names of
 other features (a table of test or benchmark names, a long index of links) would outrank the pages about them: put
 `{/* search: skip */}` on its own line before it, followed by a blank line. The block still renders and stays in the
 Markdown copy; only search leaves it out. `bun run build` checks the queries in `scripts/search-expectations.json`;

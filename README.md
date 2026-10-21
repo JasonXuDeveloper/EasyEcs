@@ -29,7 +29,7 @@ One server tick of 9 systems (movement, AOI, combat, status effects, death, resp
 |---|---:|---:|---:|
 | One world | 100,000 | **1.72&nbsp;ms** | **0 B** |
 | Four worlds, one per thread | 100,000 | **0.92&nbsp;ms** | **0 B** |
-| [Battle server](https://ecs.xgamedev.net/docs/example), every feature | 100,000 | **3.17&nbsp;ms** | **0 B** |
+| [Battle server](https://ecs.xgamedev.net/docs/example), every feature | 100,000 | **2.97&nbsp;ms** | **0 B** |
 
 <sub>BenchmarkDotNet 0.15.2 (`EasyEcs.Benchmark`), 4-core Intel Xeon VM at 2.1 GHz (Ubuntu 24.04), .NET 10.0.13; entities spawn, die, gain and lose components every tick.
 The battle server turns every feature on: parallel steering and systems, replication, indexes, relations, timings.
@@ -113,10 +113,10 @@ costs and when to use it).
 | [Hierarchy](https://ecs.xgamedev.net/docs/guide/hierarchy) | `ChildOf`, `world.Children(parent)`, `world.Descendants(root)` | Parents and children; destroying a parent destroys its subtree; a whole subtree in one walk. |
 | [Table groups](https://ecs.xgamedev.net/docs/guide/groups) | `IGroup`, `world.GroupBy<T>()`, `QueryFilter.InGroup<T>(group)` | Split tables by a value (zone, map, match), so a query walks one group's rows only. |
 | [Snapshots](https://ecs.xgamedev.net/docs/guide/snapshots) | `world.Capture()`, `world.Restore(snapshot)` | Copy a world in memory and roll it back (replays, tests, rollback). |
-| [Saves](https://ecs.xgamedev.net/docs/guide/saves) | `world.Save(writer)`, `world.Load(bytes)`; `SaveWithout(writer, exclude)`, `Load(bytes, keep, markWritten: false)` | A whole world as bytes through Nino, for restarts and other processes; a restart leaves runtime state out and keeps the new configuration. |
-| [Migration and records](https://ecs.xgamedev.net/docs/guide/migration-and-unload) | `SaveEntities` (with a `ComponentSet`), `LoadEntities`, `LoadEntitiesInto` (`markWritten: false`), `MoveEntities` | A group of entities to another world or server, links rewritten; a record of what persists, restored onto existing entities. |
+| [Saves](https://ecs.xgamedev.net/docs/guide/saves) | `world.Save(writer)`, `world.Load(bytes)`; `SaveWithout(writer, exclude)`, `LoadKeeping(bytes, keep, markWritten: false)` | A whole world as bytes through Nino, for restarts and other processes; a restart leaves runtime state out and keeps the new configuration. |
+| [Migration and records](https://ecs.xgamedev.net/docs/guide/migration-and-unload) | `SaveEntities`, `SaveEntitiesWith` (a `ComponentSet`), `LoadEntities`, `LoadEntitiesInto` (`markWritten: false`), `MoveEntities` | A group of entities to another world or server, links rewritten; a record of what persists, restored onto existing entities. |
 | [Unloading plugin types](https://ecs.xgamedev.net/docs/guide/migration-and-unload#remove-types) | `world.RemoveTypes(assembly or context)` | Remove a plugin's types so its `AssemblyLoadContext` unloads: hot reload on a live server. |
-| [Bulk create and destroy](https://ecs.xgamedev.net/docs/guide/entities-and-components#entities) | `CreateEntities`, `Instantiate(prefab, span)`, `DestroyEntities`, `EnsureEntityCapacity` | Spawn and clear waves in one pass through the structural gate. |
+| [Bulk create and destroy](https://ecs.xgamedev.net/docs/guide/entities-and-components#entities) | `CreateEntities`, `Instantiate(prefab, span)`, `DestroyAll`, `DestroyEntities(ids)`, `Reserve` | Spawn and clear waves in one pass through the structural gate. |
 | [Per-system timing](https://ecs.xgamedev.net/docs/guide/systems#measuring-systems) | `WorldOptions.MeasureSystems`, `system.Stats` | Run counts, times, allocated bytes and visited entities of every system. |
 | [Schedule](https://ecs.xgamedev.net/docs/guide/diagnostics) | `world.DescribeSchedule()`, `ToString()`, `ToMermaid()` | The stages, each system's reads and writes, why it waits, and the pairs only registration orders. |
 | [Errors](https://ecs.xgamedev.net/docs/guide/systems#errors) | `WorldOptions.SystemErrors`, `system.Error` | A failing system throws out of the update, or is switched off with its exception kept while the tick goes on. |
@@ -224,7 +224,7 @@ not a toy loop ([what it simulates](https://ecs.xgamedev.net/docs/performance#be
 | WorldSimulationBenchmark.Tick | 10,000 | 158 μs | 0 B |
 | WorldSimulationBenchmark.Tick | 100,000 | 1.72 ms | 0 B |
 | MultiWorldBenchmark.TickAllWorlds (4 worlds × 25k) | 100,000 | 0.92 ms | 0 B |
-| BattleServerBenchmark.Tick (the [battle server example](https://ecs.xgamedev.net/docs/example), every feature) | 100,000 | 3.17 ms | 0 B |
+| BattleServerBenchmark.Tick (the [battle server example](https://ecs.xgamedev.net/docs/example), every feature) | 100,000 | 2.97 ms | 0 B |
 
 Against v4.0.1 (4.33 ms, measured in an earlier run on the same VM; v4.0.1 is not part of this run) the tick is
 2.5x faster.

@@ -398,7 +398,7 @@ World 改了结构，两件事都会出错：遍历还拿着指向已移动行�
 
 在这样的方法里，规则会报出对 `Entity` 结构成员（`Set`、`Remove`、`Destroy`、`GetOrAdd`、`Clone`、`Disable`、`Enable`、
 `AddRelation`、`RemoveRelation`、`Run`（它的 job 可能改结构），以及生成的 `SetX`、`GetOrAddX`、`RemoveX`）或 `World` 结构成员（`CreateEntity`、`CreateEntities`、
-`Instantiate`、`DestroyEntities`、`SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`、`Load`、`LoadEntities`、`LoadEntitiesInto`、`MoveEntities`、
+`Instantiate`、`Reserve`、`DestroyEntities`、`DestroyAll`、`SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`、`Load`、`LoadKeeping`、`SaveWithout`、`SaveEntitiesWith`、`LoadEntities`、`LoadEntitiesInto`、`MoveEntities`、
 `GroupBy`、`RemoveTypes`、单例、系统、`Update`、`Capture`、`Restore` 等）的调用。方法自己创建的 World（局部变量里的 `new World()`）
 不算。
 
@@ -914,7 +914,7 @@ public class MoveSystem : EcsSystem
 **对查询结果逐个实体做结构变化。** 警告。代码修复：改成批量调用。
 
 逐个实体做结构变化，每次调用只移动（或翻转）一行，每次都要经过结构闸门。`SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`
-和 `DestroyEntities` 会一起修改一张表里所有匹配的行，一次处理整字的行（[批量修改](/zh/docs/guide/bulk)）。规则报告这样的
+和 `DestroyAll` 会一起修改一张表里所有匹配的行，一次处理整字的行（[批量修改](/zh/docs/guide/bulk)）。规则报告这样的
 `foreach`：遍历 `world.Query<...>()`，循环体只有一个这类调用，作用在 item 的实体上，且每一行用的值都一样。对查询已经要求的
 组件做 `Set` 只是写值，不移动行，不报告。
 
@@ -1262,7 +1262,7 @@ public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { M
 **需要全部行的地方用了切片过滤条件。** 错误。没有代码修复。
 
 [`QueryFilter.Slice(index, count)`](/zh/docs/guide/systems#slices) 把每张表切成 `count` 份，只有遍历（`ForEach`、`ForEachEntity`、
-`ForEachBatch` 及其并行形式）接受其中一份。`Query`、`Count`、`Any`、`DestroyEntities`、`entity.Run` 和批量调用需要每一个匹配的行，
+`ForEachBatch` 及其并行形式）接受其中一份。`Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run` 和批量调用需要每一个匹配的行，
 所以遇到切片过滤条件会抛 `ArgumentException`。规则会顺着局部变量和 `static readonly` 字段追踪过滤条件，还会报出会抛
 `ArgumentOutOfRangeException` 的常量 `Slice` 调用（`count` 小于 1，`index` 不在 `0..count - 1` 内）。`Slice(0, 1)` 就是整张表，不算切片。
 

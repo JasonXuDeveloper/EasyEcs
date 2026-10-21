@@ -141,10 +141,10 @@ available as Markdown: add `.md` to its URL.
 - Resume a saved world after a restart with `world.Load(bytes, markWritten: false)`: no loaded row counts as written
   or removed, also for systems added after it. A system added to a world that already holds its state starts with
   `world.AddSystem<T>(changesFromNow: true)`.
-- A restart save leaves runtime state out: `world.Save(writer, Runtime)` with a `static readonly ComponentSet` of the
+- A restart save leaves runtime state out: `world.SaveWithout(writer, Runtime)` with a `static readonly ComponentSet` of the
   runtime components and singletons (`.With<Session>().WithSingleton<Config>()`). The new process sets its
-  configuration first, then `world.Load(bytes, ComponentSet.Create().WithSingleton<Config>(), markWritten: false)`,
-  which keeps it. A `keep` set holds singletons only; a `SaveEntities` set holds components only.
+  configuration first, then `world.LoadKeeping(bytes, ComponentSet.Create().WithSingleton<Config>(), markWritten: false)`,
+  which keeps it. A `keep` set holds singletons only; a `SaveEntitiesWith` set holds components only.
 
 ## Project layout and debugging
 

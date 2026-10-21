@@ -191,7 +191,7 @@ benchmarks measure:
 | `foreach (var item in world.Query<...>())` in a hot ad-hoc loop | A struct job with `world.ForEach` | <BenchValue k="micro.queryIterate" /> → <BenchValue k="micro.forEachIterate" /> |
 | A `bool` flag tested in every row | A tag with `[With<T>]` / `[Without<T>]` | rows without the tag skipped 64 at a time; toggling flips a bit |
 | Scanning every row for the few that changed | `ITrackChanges` + `[Changed<T>]` | <BenchValue k="changed.10.scan" /> → <BenchValue k="changed.10" /> |
-| `CreateEntity` / `Destroy` in a loop | `CreateEntities` / `DestroyEntities`, `Instantiate(prefab, span)` | <BenchValue k="micro.churn" /> → <BenchValue k="micro.churnBatch" /> |
+| `CreateEntity` / `Destroy` in a loop | `CreateEntities` / `DestroyAll`, `Instantiate(prefab, span)` | <BenchValue k="micro.churn" /> → <BenchValue k="micro.churnBatch" /> |
 | Setting a component on every entity one by one | `world.SetAll` / `RemoveAll` | <BenchValue k="bulk.each" /> → <BenchValue k="bulk.setAll" /> |
 | One method taking `Maybe<T>` | Two methods split by `[With<T>]` / `[Without<T>]` | <BenchValue k="maybe.one" /> → <BenchValue k="maybe.two" /> |
 | A `QueryFilter` built at the call | A `static readonly` filter | <BenchValue k="callsite.atCall" /> → <BenchValue k="callsite.once" /> per call |
@@ -482,7 +482,7 @@ times every system run.
   them once per table ([EECS027](/en/docs/guide/analyzer#eecs027)).
 - **Don't make a `[ForEach]` method an instance method when it uses nothing of its system**: it then runs alone and
   pays the checks of a structural change ([EECS029](/en/docs/guide/analyzer#eecs029)).
-- **Don't loop over a query to change, count or test entities one by one**: `SetAll`, `DestroyEntities`, `Count`,
+- **Don't loop over a query to change, count or test entities one by one**: `SetAll`, `DestroyAll`, `Count`,
   `Any` and filters do it per table ([EECS030](/en/docs/guide/analyzer#eecs030),
   [EECS032](/en/docs/guide/analyzer#eecs032)).
 - **Don't use a value index, or destroy entities, from another thread**: the index follows those changes on the

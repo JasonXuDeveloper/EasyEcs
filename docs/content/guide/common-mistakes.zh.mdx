@@ -374,7 +374,7 @@ int thinking = world.Count<Position>(quarter);   // ArgumentException：Count �
 ```
 
 分片是对每张表的切分，只有 `[ForEach]` 那类遍历（`ForEach`、`ForEachEntity`、`ForEachBatch` 及其并行形式）认它。`Query`、
-`Count`、`Any`、`DestroyEntities`、`entity.Run` 和批量调用需要所有匹配的行，遇到分片的过滤条件会直接抛异常，而不是只回答一部分。
+`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run` 和批量调用需要所有匹配的行，遇到分片的过滤条件会直接抛异常，而不是只回答一部分。
 计数时去掉分片；分片系统访问了多少，看它的统计：
 
 ```csharp

@@ -1167,10 +1167,11 @@ named like another struct of its namespace gets no members at all.
 
 ## D54. A call's name says what it does [#d54-names]
 
-**Decision.** 4.7 renames five calls: `EnsureCapacity<T1..Tn>(count)` / `EnsureCapacity(prefab, count)` are
-`Reserve`, `DestroyEntities<T1..Tn>(filter)` is `DestroyAll`, `SaveEntities(output, ids, set)` is `SaveEntitiesWith`,
-`Save(output, exclude)` is `SaveWithout`, `Load(input, keep, markWritten)` is `LoadKeeping`, and a relation's generated
-`RemoveX(target)` is `UnlinkX(target)`. `DestroyEntities(ids)` destroys a list of ids. No alias is kept.
+**Decision.** 4.7 renames four calls of 4.6 and one generated member: `EnsureCapacity<T1..Tn>(count)` /
+`EnsureCapacity(prefab, count)` are `Reserve`, `DestroyEntities<T1..Tn>(filter)` is `DestroyAll`,
+`SaveEntities(output, ids, set)` is `SaveEntitiesWith`, and a relation's generated `RemoveX(target)` is
+`UnlinkX(target)`. `DestroyEntities(ids)` destroys a list of ids. The restart calls new in 4.7 were overloads of
+`Save` and `Load` before the release and ship as `SaveWithout` and `LoadKeeping`. No alias is kept.
 
 **Why.**
 - **An overload that changes the meaning hides it.** `Save(output, set)` read like "save these", and it left them out;

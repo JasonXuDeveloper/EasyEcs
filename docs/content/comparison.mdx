@@ -74,7 +74,7 @@ From each package's public API and the comparison ports, which compile against t
 | Chunk / span iteration | ✅ batch `[ForEach]` methods, `ForEachBatch` | ✅ `Chunks` | ✅ chunks | ✅ `ReadOnlySpan<Entity>` per system |
 | Struct query jobs | ✅ `IForEach`, `IForEachEntity`, `IForEachBatch` | ✅ | ✅ `IForEach`, `InlineQuery` | – |
 | Bulk changes | ✅ `SetAll`, `RemoveAll`, `DisableAll`, `EnableAll` | ✅ `EntityBatch`, `ApplyBatch` | ✅ add / remove by query | ❌ |
-| Bulk create and destroy | ✅ `CreateEntities`, `DestroyEntities(filter)`, `Instantiate(prefab, span)` | ⚠️ `CreateEntityBatch`; delete per entity | ⚠️ destroy by query | ❌ |
+| Bulk create and destroy | ✅ `CreateEntities`, `DestroyAll(filter)`, `Instantiate(prefab, span)` | ⚠️ `CreateEntityBatch`; delete per entity | ⚠️ destroy by query | ❌ |
 | Reserve a table before creating into it | ✅ `Reserve<T1, …, Tn>(n)` | ✅ `EnsureCapacity` on the store and the archetype | ✅ `EnsureCapacity(signature, n)` | – |
 | Prefabs | ✅ `Prefab`: data outside every world | ⚠️ an entity of the store, copied with `CloneEntity` | ❌ | ⚠️ an entity copied with `CopyTo(world)` |
 | Change tracking (rows written since a tick) | ✅ `ITrackChanges`, `[Changed<T>]`, every `ref` write | ❌ | ❌ (events) | ✅ `WhenChanged<T>()` after `NotifyChanged<T>()` |
@@ -265,7 +265,7 @@ Both libraries keep the same structure, a list of links per entity and an index 
 
 `HierarchyComparison`: 1,000 squads (a leader and 10 members) are created, then the leaders are destroyed with their
 members, in a warm world. EasyEcs creates the members in bulk as `ChildOf(leader)` and destroys the leaders with
-`DestroyEntities`, which cascades; Friflo's `DeleteEntity` detaches children, so the port deletes them first. Arch
+`DestroyAll`, which cascades; Friflo's `DeleteEntity` detaches children, so the port deletes them first. Arch
 and DefaultEcs have no hierarchy.
 
 <BenchChart bench="HierarchyComparison" title="Create and destroy 1,000 squads of 11" />
@@ -432,7 +432,7 @@ The [battle server example](/en/docs/example) shows most of them.
 | Struct query jobs, chunk iteration | Arch, Friflo | `IForEach`, `IForEachEntity`, `IForEachBatch`; batch `[ForEach]` methods |
 | Parallel query | Friflo, Arch, DefaultEcs | `[ForEach(Parallel = true)]`, `ForEachParallel`, `ForEachEntityParallel` |
 | Parallel systems | DefaultEcs | `WorldOptions.ParallelSystems` |
-| Bulk changes | Friflo, Arch | `SetAll`, `RemoveAll`, `DisableAll`, `EnableAll`, `CreateEntities`, `DestroyEntities` |
+| Bulk changes | Friflo, Arch | `SetAll`, `RemoveAll`, `DisableAll`, `EnableAll`, `CreateEntities`, `DestroyAll` |
 | Indexed components | Friflo, DefaultEcs | `IIndexed<TKey>`: `Find`, `TryFind`, `Count`, ordered `Range` |
 | Links and relations | Friflo | an indexed `EntityId`, or `IRelation` for many targets |
 | Parent / child hierarchy | Friflo | `ChildOf`, `world.Children`, cascading destroy; no transform propagation |

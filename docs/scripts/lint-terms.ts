@@ -24,6 +24,7 @@ const rules: Rule[] = [
   { wrong: /父节点/g, right: '父实体 (parent)' },
   { wrong: /跟踪/g, right: '追踪 (tracking)' },
   { wrong: /世界更新/g, right: 'World 更新 (the World, not a 世界)' },
+  { wrong: /记 tick/g, right: '打 tick (stamp)' },
   // A link to a page is labelled with the page's title, as its sidebar entry is.
   {
     wrong: /\[(?:多线程|线程模型|线程)\]\(\/zh\/docs\/guide\/threading/g,

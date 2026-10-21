@@ -424,7 +424,7 @@ loot.RemoveAtSwapBack(0);
 | `world.Capture()` / `Capture(into)` | 内存里的一份拷贝；`into` 复用已有快照的数组 |
 | `world.Restore(snapshot)` | 回到拷贝时的状态，那时的句柄重新有效 |
 | `world.Save(writer)` / `Load(bytes)` | 把整个 World 写成字节（托管组件需要 `[NinoType]`）；非托管组件的内存布局在存档之后变了，`Load` 抛 `InvalidDataException` |
-| `world.SaveWithout(writer, exclude)` / `Load(bytes, keep, markWritten: false)` | 重启：存档不写一个集合里的组件和单例，读档保留另一个集合里新进程已经设好的单例 |
+| `world.SaveWithout(writer, exclude)` / `LoadKeeping(bytes, keep, markWritten: false)` | 重启：存档不写一个集合里的组件和单例，读档保留另一个集合里新进程已经设好的单例 |
 | `world.SaveEntities(writer, ids)` / `LoadEntities(bytes, handles)` | 把一组实体搬到另一个 World 或进程 |
 | `ComponentSet.Create().With<T>()….WithSingleton<S>()` | 组件（整个 World 的存档还可以有单例），在 `static readonly` 字段里构建一次 |
 | `world.SaveEntitiesWith(writer, ids, set)` | 一条记录：只写集合里的组件 |

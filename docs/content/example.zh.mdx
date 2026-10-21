@@ -70,7 +70,7 @@ flowchart LR
 | [唯一键](/zh/docs/guide/indexes-and-relations#unique-keys)（`IUniqueIndexed`、`Get` / `TryGet`） | `Account`：`Join` 和 `Kick` 按账号找到英雄 |
 | 系统分组、`UpdateInterval`、`UpdatePhase`、排序、生命周期 | `Replication`；`ManaSystem`、`RegenerationSystem`；`ClockSystem`；`PlanningSystem.OnCreate` |
 | [查询](/zh/docs/guide/queries)、实体句柄与[单实体 job](/zh/docs/guide/queries#run-on-one-entity) | `NearestPlayer`、`Census`、`ShotsLeft`；`Hit` 用 `entity.Run` 运行 `TakeHit` job |
-| [批量操作](/zh/docs/guide/bulk) | `Instantiate(prefab, span)`、`DestroyEntities`、`RemoveAll`、`EnableAll` |
+| [批量操作](/zh/docs/guide/bulk) | `Instantiate(prefab, span)`、`DestroyAll`、`RemoveAll`、`EnableAll` |
 | [快照](/zh/docs/guide/snapshots)、[存档与迁移](/zh/docs/guide/saves) | `Checkpoint` / `Rewind`、`Save` / `Load`、`Transfer` |
 | 内省、诊断、错误策略 | `Tables`、`Schedule`、`Slowest`、`Failure` |
 
