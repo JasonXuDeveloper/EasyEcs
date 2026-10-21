@@ -952,7 +952,7 @@ records of names (groups, stages, systems with their reads and writes, waits, re
 **Decision.** `[ForEach(Slices = N)]` passes `QueryFilter.Slice(RunCount % N, N)`, where `EcsSystem.RunCount` counts
 the system's completed runs. A table is cut at multiples of 64 rows from its row count when the pass starts; table i
 of the match starts at slice (index + i) mod N. The `ForEach` family honours a slice; `Query`, `Count`, `Any`,
-`DestroyEntities`, `entity.Run` and the bulk calls throw for one. `[Changed<T>]` / `[Removed<T>]` methods cannot be
+`DestroyAll`, `entity.Run` and the bulk calls throw for one. `[Changed<T>]` / `[Removed<T>]` methods cannot be
 sliced (EECS035).
 
 **Why.**

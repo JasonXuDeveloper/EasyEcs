@@ -222,7 +222,7 @@ flowchart LR
 
 | 部分 | 做什么 |
 | --- | --- |
-| `ArityGenerator` | 用一个模板生成 `EasyEcs.Core` 里每一族 T1..T9 重载（`Entity.Set` / `Remove`、`World.CreateEntity` / `CreateEntities` / `DestroyEntities`、各个 job 接口、`ForEach` 及其变体、`Query`、`Count`、`Any`）。只对 `EasyEcs.Core` 运行。 |
+| `ArityGenerator` | 用一个模板生成 `EasyEcs.Core` 里每一族 T1..T9 重载（`Entity.Set` / `Remove`、`World.CreateEntity` / `CreateEntities` / `DestroyAll`、各个 job 接口、`ForEach` 及其变体、`Query`、`Count`、`Any`）。只对 `EasyEcs.Core` 运行。 |
 | `SystemGenerator` | 把 `[ForEach]` 方法变成结构体 job（逐实体，或对 span 参数按连续行段），放在单独的 file 类里，通过 `[UnsafeAccessor]` 调用用户方法（[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。每个系统得到一个 `SystemCode`（更新逻辑和访问集），由模块初始化器注册；系统之外的静态方法得到一个入口。`[Changed<T>]` / `[Removed<T>]` 变成 `Since(LastRunTick + 1)` 加一次对 `T` 的读声明；`Parallel = true` 把 job 分块执行。不可能做结构变更的 job 会加上 `INoStructuralChanges`。 |
 | `ComponentGenerator` | 为每个组件和单例生成 C# 14 扩展成员：`entity.Health`、`HasHealth`、`SetHealth(…)`、`IsDead`、`world.Clock`、`world.KillsIndex`、每种查询形状的 `item.Position`、缓冲和预制体的写方法，以及存档可以引用的类型的注册。 |
 | `EasyEcsAnalyzer` | 报告 EECS002–EECS046：生成器跳过的无效输入，以及违反 [ECS 设计原则](/zh/docs/ecs-principles)的代码。生成器从不报诊断，两者共用同一套检查。机械性的修复由 [EasyEcs.CodeFixes](/zh/docs/guide/analyzer) 提供。 |

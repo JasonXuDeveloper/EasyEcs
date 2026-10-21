@@ -124,7 +124,7 @@ src/EasyEcs.Core/              net10.0 library, namespace EasyEcs (hand-written 
   BitMask.cs                   256-bit SIMD bitset with overflow (component masks, query sets)
 src/EasyEcs.Generator/         Roslyn generators + analyzer (netstandard2.0, required by Roslyn hosts)
   ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove, World.CreateEntity/CreateEntities/
-                               DestroyEntities, Instantiate with components, IForEach/IForEachEntity/IForEachBatch,
+                               DestroyAll, Instantiate with components, IForEach/IForEachEntity/IForEachBatch,
                                ForEach/ForEachEntity/ForEachBatch/ForEachParallel/ForEachEntityParallel with their row
                                loops, Query/Count/Any, QueryItem/QueryEnumerator, Filters.g.cs: QueryFilter.ChangedAny /
                                RemovedAny and their attributes), one template each
@@ -233,6 +233,7 @@ person can follow them as checklists). Update a skill when a round teaches somet
 | `audit-core` | redundancy, duplicated logic, coupling, lifecycle edges and hot-path cost in `EasyEcs.Core` |
 | `audit-generator` | generator speed, incremental best practices, caching tests, newer Roslyn features |
 | `audit-analyzer` | overlapping or missing EECS rules, false positives, code fixes, shared `Symbols` checks |
+| `audit-naming` | ambiguous or wrong names in the public API, generated members, analyzer descriptors, internals |
 | `audit-docs` | stale names, exemplary examples, best practices, duplication, en/zh drift |
 
 ## Engineering principles (apply to every change)

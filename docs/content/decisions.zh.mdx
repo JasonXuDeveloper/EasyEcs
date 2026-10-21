@@ -779,7 +779,7 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 
 **决定。** `[ForEach(Slices = N)]` 传入 `QueryFilter.Slice(RunCount % N, N)`，其中 `EcsSystem.RunCount` 是系统已完成的运行次数。
 每张表从遍历开始时的行数出发，按 64 行的整数倍切分；匹配结果里的第 i 张表从第 (index + i) mod N 片开始。`ForEach` 系列调用遵守分片；
-`Query`、`Count`、`Any`、`DestroyEntities`、`entity.Run` 和批量调用遇到分片过的过滤条件直接抛异常。`[Changed<T>]` / `[Removed<T>]` 方法不能分片（EECS035）。
+`Query`、`Count`、`Any`、`DestroyAll`、`entity.Run` 和批量调用遇到分片过的过滤条件直接抛异常。`[Changed<T>]` / `[Removed<T>]` 方法不能分片（EECS035）。
 
 **原因。**
 - **尖峰变成缓坡。** 处理大量实体的系统（重新给目标打分、扫描会话）每次更新只花约 1/N，而不是全压在一次更新上。
