@@ -11,7 +11,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 
 | 类型 | 说明 |
 |---|---|
-| [`ChangedAnyAttribute<T1, T2>, ChangedAnyAttribute<T1, T2, T3>, ChangedAnyAttribute<T1, T2, T3, T4>, ChangedAnyAttribute<T1, T2, T3, T4, T5>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7, T8>, ChangedAnyAttribute<T1, T2, T3, T4, T5, T6, T7, T8, T9>`](/zh/docs/reference/changedanyattribute) | ForEachAttribute 方法只访问 T1, T2 中至少一个在系统上次运行之后写过的实体（EcsSystem.LastRunTick；第一次运行时是所有拥有其中一个的实体）：即 QueryFilter.ChangedAny。 |
+| [`ChangedAnyAttribute<T1..T9>`](/zh/docs/reference/changedanyattribute) | ForEachAttribute 方法只访问 T1, T2 中至少一个在系统上次运行之后写过的实体（EcsSystem.LastRunTick；第一次运行时是所有拥有其中一个的实体）：即 QueryFilter.ChangedAny。 |
 | [`ChangedAttribute<T>`](/zh/docs/reference/changedattribute) | ForEachAttribute 方法只访问 T 在系统上次运行之后写过的实体（EcsSystem.LastRunTick；第一次运行时是所有拥有它的实体）。 |
 | [`DynamicBufferExtensions`](/zh/docs/reference/dynamicbufferextensions) | DynamicBuffer 的写入方法。 |
 | [`EcsSystem`](/zh/docs/reference/ecssystem) | 在 World 上运行的逻辑。 |
@@ -20,7 +20,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`OrderedIndexExtensions`](/zh/docs/reference/orderedindexextensions) | 键可比较（分数、截止时间、等级）的值索引的有序遍历：按区间或按顺序遍历，用于排行榜、计时器和匹配分段。 |
 | [`Prefab`](/zh/docs/reference/prefab) | 实体的配方：一组不属于任何 World 的组件值，所以任何查询都看不到它。 |
 | [`RelationIndex<T>`](/zh/docs/reference/relationindex) | 一个 World 里关系 T 的链接，按目标组织（World.Relations）：哪些实体链接到某个实体，开始 O(1)，之后每条链接 O(1)。 |
-| [`RemovedAnyAttribute<T1, T2>, RemovedAnyAttribute<T1, T2, T3>, RemovedAnyAttribute<T1, T2, T3, T4>, RemovedAnyAttribute<T1, T2, T3, T4, T5>, RemovedAnyAttribute<T1, T2, T3, T4, T5, T6>, RemovedAnyAttribute<T1, T2, T3, T4, T5, T6, T7>, RemovedAnyAttribute<T1, T2, T3, T4, T5, T6, T7, T8>, RemovedAnyAttribute<T1, T2, T3, T4, T5, T6, T7, T8, T9>`](/zh/docs/reference/removedanyattribute) | ForEachAttribute 方法只访问在系统上次运行之后失去 T1, T2 中至少一个、而且没有再拿回来的实体：即 QueryFilter.RemovedAny。 |
+| [`RemovedAnyAttribute<T1..T9>`](/zh/docs/reference/removedanyattribute) | ForEachAttribute 方法只访问在系统上次运行之后失去 T1, T2 中至少一个、而且没有再拿回来的实体：即 QueryFilter.RemovedAny。 |
 | [`RemovedAttribute<T>`](/zh/docs/reference/removedattribute) | ForEachAttribute 方法只访问在系统上次运行之后（EcsSystem.LastRunTick）失去 T、而且没有再拿回来的实体：同步时把移除发出去，清理时释放组件代表的资源。 |
 | [`ScheduleInfo`](/zh/docs/reference/scheduleinfo) | World 怎样运行它的系统（World.DescribeSchedule）：每个分组的阶段、每个系统读写什么、一个系统为什么要等前面的阶段，以及哪些冲突的系统只靠注册顺序排先后。 |
 | [`StageInfo`](/zh/docs/reference/stageinfo) | 分组里的一个阶段：彼此之间没有先后约束、也没有冲突的系统。 |
