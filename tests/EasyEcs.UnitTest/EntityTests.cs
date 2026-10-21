@@ -112,6 +112,7 @@ public class EntityTests
             Assert.Throws<InvalidOperationException>(() => handle.GetOrAdd<Velocity>());
             Assert.Throws<InvalidOperationException>(() => handle.Set(new Velocity()));
             Assert.Throws<InvalidOperationException>(() => handle.Remove<Health>());
+            Assert.Throws<InvalidOperationException>(() => handle.Clone());
             handle.Destroy();                                              // a no-op
         }
 
