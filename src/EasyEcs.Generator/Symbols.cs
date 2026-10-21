@@ -87,6 +87,111 @@ internal static class Symbols
         return false;
     }
 
+    /// <summary>The system whose code <paramref name="symbol"/> is (its type, or a type it is nested in), or null.</summary>
+    public static INamedTypeSymbol? SystemOf(ISymbol? symbol)
+    {
+        for (var type = symbol as INamedTypeSymbol ?? symbol?.ContainingType; type != null; type = type.ContainingType)
+            if (IsSystem(type)) return type;
+        return null;
+    }
+
+    /// <summary>A hand-written job's interface: <c>IForEach</c>, <c>IForEachEntity</c> or <c>IForEachBatch</c> of EasyEcs.</summary>
+    public static bool IsJob(INamedTypeSymbol face) =>
+        face.Name is "IForEach" or "IForEachEntity" or "IForEachBatch" && face.ContainingNamespace?.ToDisplayString() == "EasyEcs";
+
+    /// <summary>The one job interface (<see cref="IsJob"/>) whose Execute <paramref name="method"/> implements, or null.</summary>
+    public static INamedTypeSymbol? JobInterface(IMethodSymbol method)
+    {
+        if (method.Name != "Execute" || method.IsStatic || method.ContainingType is not { } type) return null;
+        INamedTypeSymbol? found = null;
+        foreach (var face in type.AllInterfaces)
+        {
+            if (!IsJob(face)) continue;
+            if (found != null) return null; // several jobs in one type: their Writes is shared, nothing to say per Execute
+            found = face;
+        }
+
+        if (found?.GetMembers("Execute").FirstOrDefault() is not { } execute
+            || !SymbolEqualityComparer.Default.Equals(type.FindImplementationForInterfaceMember(execute), method)) return null;
+        return found;
+    }
+
+    /// <summary>A query item: EasyEcs's <c>QueryItem&lt;…&gt;</c> (refs) or <c>ReadItem&lt;…&gt;</c> (ref readonly).</summary>
+    public static bool IsItem(ITypeSymbol? type) =>
+        type is INamedTypeSymbol { Name: "QueryItem" or "ReadItem" } item && item.ContainingNamespace?.ToDisplayString() == "EasyEcs";
+
+    /// <summary>A query item's positional component, <c>item.Component1</c> … <c>item.Component9</c>.</summary>
+    public static bool IsItemComponent(IPropertySymbol property) => property.Name.StartsWith("Component") && IsItem(property.ContainingType);
+
+    /// <summary>A tag: a component (or a buffer's element) with no instance field.</summary>
+    public static bool IsTag(ITypeSymbol type) => !type.GetMembers().Any(m => m is IFieldSymbol { IsStatic: false });
+
+    /// <summary>
+    /// Whether SetIfChanged can compare <paramref name="type"/>: IEquatable&lt;T&gt;, or unmanaged (its bytes; Values.Same).
+    /// A type parameter or an unresolved type is given the benefit of the doubt.
+    /// </summary>
+    public static bool IsComparable(ITypeSymbol type) =>
+        type is ITypeParameterSymbol or IErrorTypeSymbol || type.IsUnmanagedType
+        || type.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == "System.IEquatable<T>" && SymbolEqualityComparer.Default.Equals(i.TypeArguments[0], type));
+
+    /// <summary>Whether Disable accepts <paramref name="component"/> (Entity.ThrowIfNotDisableable): not ChildOf, not a cleanup component.</summary>
+    public static bool IsDisableable(ITypeSymbol component) =>
+        component is ITypeParameterSymbol || component.ToDisplayString() != "EasyEcs.ChildOf" && !Implements(component, Cleanup);
+
+    /// <summary><c>Destroyed</c> or a <c>Disabled&lt;T&gt;</c>: tags the world adds and removes itself.</summary>
+    public static bool IsWorldTag(ITypeSymbol type) =>
+        type.ToDisplayString() == "EasyEcs.Destroyed" || type is INamedTypeSymbol { IsGenericType: true } named && named.OriginalDefinition.ToDisplayString() == "EasyEcs.Disabled<T>";
+
+    /// <summary><paramref name="operation"/> without the conversions around it.</summary>
+    public static IOperation? Unwrap(IOperation? operation)
+    {
+        while (operation is IConversionOperation conversion) operation = conversion.Operand;
+        return operation;
+    }
+
+    /// <summary>The root of the operation tree <paramref name="operation"/> belongs to (a method's or an initializer's body).</summary>
+    public static IOperation Root(IOperation operation)
+    {
+        while (operation.Parent != null) operation = operation.Parent;
+        return operation;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="operation"/> runs whenever <paramref name="stop"/> (an ancestor) does: no branch between
+    /// them (an if's or a switch's arm, the right of &amp;&amp; / || / ??, <c>?.</c>, a catch), no loop part that may run
+    /// zero times (a body, a for loop's step; a foreach's collection and a for loop's start and condition run), no lambda
+    /// or local function.
+    /// </summary>
+    public static bool AlwaysRuns(IOperation operation, IOperation stop)
+    {
+        for (IOperation current = operation, parent = operation.Parent!; parent != null && current != stop; current = parent, parent = parent.Parent!)
+            switch (parent)
+            {
+                case IConditionalOperation conditional when conditional.Condition != current:
+                case IBinaryOperation { OperatorKind: BinaryOperatorKind.ConditionalAnd or BinaryOperatorKind.ConditionalOr } binary when binary.RightOperand == current:
+                case ICoalesceOperation coalesce when coalesce.WhenNull == current:
+                case ILoopOperation loop when !(loop is IForEachLoopOperation each && each.Collection == current
+                                                || loop is IForLoopOperation forLoop && (forLoop.Condition == current || forLoop.Before.Contains(current))
+                                                || loop is IWhileLoopOperation { ConditionIsTop: true } whileLoop && whileLoop.Condition == current):
+                case ISwitchCaseOperation or ISwitchExpressionArmOperation or ICatchClauseOperation or IConditionalAccessOperation
+                    or IAnonymousFunctionOperation or ILocalFunctionOperation:
+                    return false;
+            }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The expression a property's getter returns, as written: <c>=&gt; x</c>, <c>{ get =&gt; x; }</c> or <c>{ get { return x; } }</c>;
+    /// null for any other body.
+    /// </summary>
+    public static ExpressionSyntax? Returned(PropertyDeclarationSyntax declaration)
+    {
+        var getter = declaration.AccessorList?.Accessors.FirstOrDefault();
+        return declaration.ExpressionBody?.Expression ?? getter?.ExpressionBody?.Expression
+            ?? (getter?.Body?.Statements is { Count: 1 } statements && statements[0] is ReturnStatementSyntax { Expression: { } returned } ? returned : null);
+    }
+
     /// <summary>
     /// The <c>EntityId</c> fields of struct <paramref name="type"/>, directly or inside struct fields (up to four levels),
     /// that code in <paramref name="compilation"/> can name: one path per field, its steps separated by '\n', each step
@@ -417,14 +522,91 @@ internal static class Symbols
     }
 
     /// <summary>The method has [Changed&lt;T&gt;] or [Removed&lt;T&gt;] filters: outside a system its entry point takes the tick.</summary>
-    public static bool TracksSince(IMethodSymbol method) => method.GetAttributes().Any(a =>
-        a.AttributeClass is { IsGenericType: true } cls && (cls.ConstructedFrom.ToDisplayString() is ChangedAttribute or RemovedAttribute || AnyFilter(cls) != null));
+    public static bool TracksSince(IMethodSymbol method) => AttributeFilters(method).Any(f =>
+        f.Kind is FilterKind.Changed or FilterKind.Removed or FilterKind.ChangedAny or FilterKind.RemovedAny);
 
     /// <summary>"ChangedAny" or "RemovedAny" for a <c>[ChangedAny&lt;T1..Tn&gt;]</c> / <c>[RemovedAny&lt;T1..Tn&gt;]</c> attribute class, else null.</summary>
     public static string? AnyFilter(INamedTypeSymbol attribute) =>
         attribute is { Arity: >= 2, Name: "ChangedAnyAttribute" or "RemovedAnyAttribute" } && attribute.ContainingNamespace?.ToDisplayString() == "EasyEcs"
             ? attribute.Name.Substring(0, attribute.Name.Length - "Attribute".Length)
             : null;
+
+    /// <summary>What a filter of a [ForEach] method (or of its system group) does with its component.</summary>
+    public enum FilterKind { With, Without, WithAny, Changed, Removed, ChangedAny, RemovedAny }
+
+    /// <summary>
+    /// The filter attributes of <paramref name="symbol"/> (a [ForEach] method or a system group), one entry per filtered
+    /// type (<c>[ChangedAny&lt;A, B&gt;]</c> gives two), in declaration order: what the generator builds a query filter
+    /// from and the analyzer checks, so both read the same list.
+    /// </summary>
+    public static IEnumerable<(FilterKind Kind, ITypeSymbol Type, AttributeData Attribute)> AttributeFilters(ISymbol symbol)
+    {
+        foreach (var attribute in symbol.GetAttributes())
+        {
+            if (attribute.AttributeClass is not { IsGenericType: true } cls) continue;
+            if (AnyFilter(cls) is { } any)
+            {
+                foreach (var argument in cls.TypeArguments)
+                    yield return (any == "ChangedAny" ? FilterKind.ChangedAny : FilterKind.RemovedAny, argument, attribute);
+                continue;
+            }
+
+            FilterKind? kind = cls.ConstructedFrom.ToDisplayString() switch
+            {
+                WithAttribute => FilterKind.With,
+                WithoutAttribute => FilterKind.Without,
+                WithAnyAttribute => FilterKind.WithAny,
+                ChangedAttribute => FilterKind.Changed,
+                RemovedAttribute => FilterKind.Removed,
+                _ => null,
+            };
+            if (kind != null) yield return (kind.Value, cls.TypeArguments[0], attribute);
+        }
+    }
+
+    /// <summary>
+    /// The filters a system's group adds to each of its [ForEach] methods: the group's filter attributes, then its
+    /// <c>IGroupWith&lt;T&gt;</c> / <c>IGroupWithout&lt;T&gt;</c> (as With / Without, no attribute). None outside a system.
+    /// </summary>
+    public static IEnumerable<(FilterKind Kind, ITypeSymbol Type, AttributeData? Attribute, ITypeSymbol Group)> GroupFilters(IMethodSymbol method)
+    {
+        if (IsRunner(method) || GroupOf(method.ContainingType) is not { } group) yield break;
+        foreach (var (kind, type, attribute) in AttributeFilters(group)) yield return (kind, type, attribute, group);
+        foreach (var (with, type) in GroupInterfaceFilters(group)) yield return (with ? FilterKind.With : FilterKind.Without, type, null, group);
+    }
+
+    /// <summary>A filter as its declaration reads: <c>[With&lt;P&gt;]</c>, <c>IGroupWith&lt;P&gt;</c>.</summary>
+    public static string FilterText(FilterKind kind, ITypeSymbol type, bool attribute) =>
+        attribute ? $"[{kind}<{type.Name}>]" : $"{(kind == FilterKind.With ? "IGroupWith" : "IGroupWithout")}<{type.Name}>";
+
+    /// <summary>
+    /// What a [ForEach] method's entities must have (its queried components, [With&lt;T&gt;], [Changed&lt;T&gt;], its group's
+    /// [With&lt;T&gt;] and IGroupWith&lt;T&gt;) and must lack ([Without&lt;T&gt;], [Removed&lt;T&gt;], its group's
+    /// [Without&lt;T&gt;] and IGroupWithout&lt;T&gt;), each with how its source reads (<c>parameter 'p'</c>,
+    /// <c>[With&lt;P&gt;] on its group G</c>) and where it is declared (a parameter or the method's own attribute; null
+    /// for a group's). EECS016, EECS026 and EECS049 read it.
+    /// </summary>
+    public static List<Requirement> Requirements(IMethodSymbol method, System.Threading.CancellationToken token)
+    {
+        var all = new List<Requirement>();
+        foreach (var (kind, type, attribute) in AttributeFilters(method))
+            if (kind is FilterKind.With or FilterKind.Changed or FilterKind.Without or FilterKind.Removed && type.TypeKind != TypeKind.Error)
+                all.Add(new Requirement(kind, type, FilterText(kind, type, true), attribute.ApplicationSyntaxReference?.GetSyntax(token).GetLocation(), false));
+        foreach (var p in method.Parameters)
+            if (Classify(p) is ParamKind.Component or ParamKind.ComponentSpan or ParamKind.Mutable && QueriedComponent(p) is { TypeKind: not TypeKind.Error } component)
+                all.Add(new Requirement(FilterKind.With, component, $"parameter '{p.Name}'", p.Locations.FirstOrDefault(), true));
+        foreach (var (kind, type, attribute, group) in GroupFilters(method))
+            if (kind is FilterKind.With or FilterKind.Changed or FilterKind.Without or FilterKind.Removed && type.TypeKind != TypeKind.Error)
+                all.Add(new Requirement(kind, type, FilterText(kind, type, attribute != null) + " on its group " + group.Name, null, false));
+        return all;
+    }
+
+    /// <summary>A requirement of a [ForEach] method (<see cref="Requirements"/>).</summary>
+    public sealed record Requirement(FilterKind Kind, ITypeSymbol Type, string Why, Location? Where, bool Parameter)
+    {
+        /// <summary>The entities need the component (a parameter, With, Changed); else they need to lack it.</summary>
+        public bool Has => Kind is FilterKind.With or FilterKind.Changed;
+    }
 
     /// <summary>The N of [ForEach(Slices = N)] (1 without it).</summary>
     public static int Slices(IMethodSymbol method)
@@ -552,18 +734,31 @@ internal static class Symbols
     public static bool ComponentCountValid(IMethodSymbol method, int components) =>
         components is >= 1 and <= MaxComponents || components == 0 && HasWith(method);
 
-    public static bool HasWith(IMethodSymbol method) => method.GetAttributes().Any(a =>
-        a.AttributeClass is { IsGenericType: true } cls &&
-        cls.ConstructedFrom.ToDisplayString() is WithAttribute or ChangedAttribute);
+    public static bool HasWith(IMethodSymbol method) => AttributeFilters(method).Any(f => f.Kind is FilterKind.With or FilterKind.Changed);
 
     /// <summary>
     /// The method cannot make structural changes: it is static, takes no <c>World</c>, and uses its <c>Entity</c>
     /// parameter (if any) only to read (<see cref="ReadOnlyEntityMembers"/>). Its job gets INoStructuralChanges.
     /// </summary>
-    public static bool IsStable(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model)
+    public static bool IsStable(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model) =>
+        method.IsStatic && StableIfStatic(method, syntax, model);
+
+    /// <summary>
+    /// <see cref="IsStable"/> for the method found from its symbol (its first declaration, in <paramref name="model"/>'s
+    /// tree): false for a method declared elsewhere.
+    /// </summary>
+    public static bool IsStable(IMethodSymbol method, SemanticModel model) =>
+        method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is MethodDeclarationSyntax syntax
+        && syntax.SyntaxTree == model.SyntaxTree && IsStable(method, syntax, model);
+
+    /// <summary>
+    /// What <see cref="IsStable"/> asks of the parameters: no <c>World</c>, an <c>Entity</c> used only to read. An
+    /// instance method that passes is stable once it is made static (EECS010 offers that).
+    /// </summary>
+    public static bool StableIfStatic(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model)
     {
         (syntax, model) = WithBody(method, syntax, model);
-        return method.IsStatic && !method.Parameters.Any(p => Classify(p) == ParamKind.World)
+        return !method.Parameters.Any(p => Classify(p) == ParamKind.World)
             && method.Parameters.Where(p => Classify(p) == ParamKind.Entity).All(p => OnlyReads(syntax, p.Name, model));
     }
 
@@ -686,7 +881,7 @@ internal static class Symbols
             // that is neither component nor singleton).
             if (model.LookupNamespacesAndTypes(access.SpanStart, name: type).OfType<INamedTypeSymbol>().Any(t =>
                     t.TypeKind == TypeKind.Struct && (Implements(t, Component)
-                        ? t.GetMembers().Any(f => f is IFieldSymbol { IsStatic: false }) != tag
+                        ? IsTag(t) == tag
                         : !tag && prefix != "TryGet" && !Implements(t, Singleton))))
                 return true;
         }
@@ -841,9 +1036,7 @@ internal static class Symbols
                 case IFieldReferenceOperation f: target = f.Instance; break;
                 case IConversionOperation c: target = c.Operand; break;
                 case IPropertyReferenceOperation { Property.IsIndexer: true } indexer: target = indexer.Instance; break; // span[i]
-                case IPropertyReferenceOperation { Property: { ReturnsByRef: true } property }
-                    when property.Name.StartsWith("Component") && property.ContainingType.Name == "QueryItem"
-                         && property.ContainingNamespace.ToDisplayString() == "EasyEcs":
+                case IPropertyReferenceOperation { Property: { ReturnsByRef: true } property } when IsItemComponent(property):
                     return IsIndexed(property.Type) ? property.Type : null;
                 case IParameterReferenceOperation { Parameter: var p } when IsJobParameter(p):
                     var type = p.RefKind == RefKind.Ref ? p.Type : SpanElement(p.Type);
@@ -857,7 +1050,7 @@ internal static class Symbols
     private static bool IsJobParameter(IParameterSymbol p) =>
         (p.RefKind == RefKind.Ref || p.Type.OriginalDefinition.ToDisplayString() == "System.Span<T>")
         && p.ContainingSymbol is IMethodSymbol { Name: "Execute", ContainingType: { } job }
-        && job.AllInterfaces.Any(i => i.Name.StartsWith("IForEach") && i.ContainingNamespace.ToDisplayString() == "EasyEcs");
+        && job.AllInterfaces.Any(IsJob);
 
     /// <summary>
     /// The [ForEach] parameter a write reaches through a reference held by a read-only parameter: an 'in' component or

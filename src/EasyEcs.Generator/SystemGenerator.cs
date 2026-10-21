@@ -131,7 +131,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
             string which = method.Since ? $" whose filtered components changed (or went) at or after tick <paramref name=\"{since}\"/>"
                 : method.Slices > 1 ? $" in slice <paramref name=\"{slice}\"/> (0 to {method.Slices - 1}) of each matching table's rows" : "";
             sb.Append($"        /// <summary>Runs <c>{method.Name}</c> for every matching entity of <paramref name=\"{world}\"/>{which}. Owner thread only.</summary>\n");
-            sb.Append($"        [global::System.CodeDom.Compiler.GeneratedCode(\"{Symbols.GeneratorName}\", \"{ComponentGenerator.Version}\")]\n");
+            sb.Append($"        {Code.GeneratedCode(Symbols.GeneratorName)}\n");
             sb.Append($"        {(method.PublicEntry ? "public" : "internal")} static void {Escape(method.Name)}{method.TypeParameters}({string.Join(", ", signature)}){method.Constraints}\n        {{\n");
             sb.Append($"            var {local} = new {job}{Fields(method, world, null)};\n");
             sb.Append($"            {world}.{method.ForEach}<{method.ComponentTypes}, {job}>(ref {local}{filter});\n        }}\n\n");
@@ -197,7 +197,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         sb.Append("    }\n");
         if (owner.TypeParameters.Length > 0) return; // registered by EmitGenericRegistration: a module initializer is never generic
         string type = owner.IsVisible ? $"typeof({owner.FullName})" : $"global::System.Type.GetType(\"{owner.MetadataName}\")";
-        sb.Append("\n    [global::System.Runtime.CompilerServices.ModuleInitializer]\n");
+        sb.Append($"\n    {Code.ModuleInitializer}\n");
         sb.Append($"    internal static void Register() => global::EasyEcs.SystemCode.Register({type}, new Code());\n");
     }
 
@@ -210,7 +210,7 @@ public sealed class SystemGenerator : IIncrementalGenerator
         var owner = model.Owner;
         string open = $"__ForEach<{new string(',', owner.Arity - 1)}>.Code";
         string definition = owner.IsVisible ? $"typeof({owner.Definition})" : $"global::System.Type.GetType(\"{owner.MetadataName}\")";
-        sb.Append("\nfile static class __ForEachRegistration\n{\n    [global::System.Runtime.CompilerServices.ModuleInitializer]\n    internal static void Register()\n    {\n");
+        sb.Append($"\nfile static class __ForEachRegistration\n{{\n    {Code.ModuleInitializer}\n    internal static void Register()\n    {{\n");
         sb.Append($"        global::EasyEcs.SystemCode.RegisterGeneric({definition}, typeof({open}));\n");
         foreach (var use in model.Closed)
             sb.Append($"        global::EasyEcs.SystemCode.Register(typeof({use.Closed}), new __ForEach<{use.Arguments}>.Code());\n");
@@ -495,28 +495,20 @@ public sealed class SystemGenerator : IIncrementalGenerator
             var removed = new List<string>();
             var changedAny = new List<string>();
             var removedAny = new List<string>();
-            void Filters(ISymbol symbol)
+            void Add(Symbols.FilterKind kind, ITypeSymbol filtered)
             {
-                foreach (var attribute in symbol.GetAttributes())
+                // every [ChangedAny<..>] / [RemovedAny<..>] of a method joins its one group
+                var list = kind switch
                 {
-                    if (attribute.AttributeClass is not { IsGenericType: true } cls) continue;
-                    if (Symbols.AnyFilter(cls) is { } any) // every attribute of a kind joins its one group
-                    {
-                        var group = any == "ChangedAny" ? changedAny : removedAny;
-                        foreach (var argument in cls.TypeArguments)
-                            if (argument.ToDisplayString(Symbols.Fqn) is var t && !group.Contains(t)) group.Add(t);
-                        continue;
-                    }
-
-                    string name = cls.ConstructedFrom.ToDisplayString(), type = cls.TypeArguments[0].ToDisplayString(Symbols.Fqn);
-                    var list = name == Symbols.WithAttribute ? with : name == Symbols.WithoutAttribute ? without
-                        : name == Symbols.WithAnyAttribute ? withAny : name == Symbols.ChangedAttribute ? changed
-                        : name == Symbols.RemovedAttribute ? removed : null;
-                    if (list != null && !list.Contains(type)) list.Add(type);
-                }
+                    Symbols.FilterKind.With => with, Symbols.FilterKind.Without => without, Symbols.FilterKind.WithAny => withAny,
+                    Symbols.FilterKind.Changed => changed, Symbols.FilterKind.Removed => removed,
+                    Symbols.FilterKind.ChangedAny => changedAny, _ => removedAny,
+                };
+                string type = filtered.ToDisplayString(Symbols.Fqn);
+                if (!list.Contains(type)) list.Add(type);
             }
 
-            Filters(method);
+            foreach (var (kind, type, _) in Symbols.AttributeFilters(method)) Add(kind, type);
 
             var query = parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan or Symbols.ParamKind.Mutable)
                 .Select(p => p.Type).ToList();
@@ -531,18 +523,9 @@ public sealed class SystemGenerator : IIncrementalGenerator
                     with.RemoveAt(0);
                 }
             }
-            // The system group's filters ([Without<Inactive>] public struct Gameplay : ISystemGroup) join every method's
-            // (after the queried component is chosen: a group's [With<T>] only filters).
-            if (!outside && Symbols.GroupOf(method.ContainingType) is { } group)
-            {
-                Filters(group);
-                foreach (var (isWith, filter) in Symbols.GroupInterfaceFilters(group)) // IGroupWith<T> / IGroupWithout<T>
-                {
-                    var list = isWith ? with : without;
-                    string type = filter.ToDisplayString(Symbols.Fqn);
-                    if (!list.Contains(type)) list.Add(type);
-                }
-            }
+            // The system group's filters ([Without<Inactive>] public struct Gameplay : ISystemGroup, IGroupWith<T> /
+            // IGroupWithout<T>) join every method's (after the queried component is chosen: a group's [With<T>] only filters).
+            foreach (var (kind, type, _, _) in Symbols.GroupFilters(method)) Add(kind, type);
             if (query.Count > 0) with.RemoveAll(query.Contains); // a group's [With<T>] the method already queries
 
             bool stable = Symbols.IsStable(method, syntax, model);

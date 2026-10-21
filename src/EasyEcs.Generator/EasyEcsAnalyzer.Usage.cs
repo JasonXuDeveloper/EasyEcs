@@ -122,12 +122,12 @@ public sealed partial class EasyEcsAnalyzer
         "built. Build one filter per group.", helpLinkUri: Help("EECS050"));
 
     public static readonly DiagnosticDescriptor UpdateInPass = new("EECS051", "A world update during a pass",
-        "'{0}' runs the world's systems while {1} iterates it: the update closes the pass's holes under it (rows move) and the pass count goes wrong; update after the loop",
+        "'{0}' runs the world's systems while {1} iterates it: every system runs mid-loop, and closing the pass's holes moves rows the loop has not reached behind it, so the loop misses them; update after the loop",
         Category, DiagnosticSeverity.Error, true,
         "A pass (a foreach over Query or Read, a [ForEach] method, a job's Execute) counts itself on the world, and " +
-        "structural changes during it leave holes it closes at its end. An update assumes no pass is running: it closes " +
-        "the holes, moving the rows the pass is walking, and resets the count, which the pass's end then takes below " +
-        "zero. Record what to do, and update after the loop.", helpLinkUri: Help("EECS051"));
+        "structural changes during it leave holes it closes at its end. An update runs every system in the middle of the loop " +
+        "and closes the holes, which moves rows the loop has not reached yet behind it, so the loop misses them (a loop " +
+        "that outlives the update ends as no pass). Record what to do, and update after the loop.", helpLinkUri: Help("EECS051"));
 
     /// <summary>EECS037's property for its code fix: the Writes value Execute needs (<c>0b101</c>).</summary>
     public const string WritesValue = "Writes";
@@ -173,26 +173,9 @@ public sealed partial class EasyEcsAnalyzer
 
     // ---------------- EECS037: a hand-written job's Writes ----------------
 
-    /// <summary>The one job interface (IForEach, IForEachEntity, IForEachBatch) whose Execute <paramref name="method"/> implements, or null.</summary>
-    internal static INamedTypeSymbol? JobInterface(IMethodSymbol method)
-    {
-        if (method.Name != "Execute" || method.IsStatic || method.ContainingType is not { } type) return null;
-        INamedTypeSymbol? found = null;
-        foreach (var face in type.AllInterfaces)
-        {
-            if (face.Name is not ("IForEach" or "IForEachEntity" or "IForEachBatch") || face.ContainingNamespace?.ToDisplayString() != "EasyEcs") continue;
-            if (found != null) return null; // several jobs in one type: their Writes is shared, nothing to say per Execute
-            found = face;
-        }
-
-        if (found?.GetMembers("Execute").FirstOrDefault() is not { } execute
-            || !SymbolEqualityComparer.Default.Equals(type.FindImplementationForInterfaceMember(execute), method)) return null;
-        return found;
-    }
-
     private static void AnalyzeJob(OperationBlockAnalysisContext context, Core core)
     {
-        if (context.OwningSymbol is not IMethodSymbol method || JobInterface(method) is not { } job) return;
+        if (context.OwningSymbol is not IMethodSymbol method || Symbols.JobInterface(method) is not { } job) return;
         var body = context.OperationBlocks.FirstOrDefault(b => b is IMethodBodyOperation or IBlockOperation);
         if (body == null) return;
         var type = method.ContainingType;
@@ -249,10 +232,7 @@ public sealed partial class EasyEcsAnalyzer
             || implementation.ContainingType.TypeKind == TypeKind.Interface) return fallback;
         if (implementation.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is not PropertyDeclarationSyntax declaration) return null;
         syntax = declaration;
-        var getter = declaration.AccessorList?.Accessors.FirstOrDefault();
-        var expression = declaration.ExpressionBody?.Expression ?? getter?.ExpressionBody?.Expression
-            ?? (getter?.Body?.Statements is { Count: 1 } statements && statements[0] is ReturnStatementSyntax { Expression: { } returned } ? returned : null);
-        return expression switch
+        return Symbols.Returned(declaration) switch
         {
             LiteralExpressionSyntax { Token.Value: int value } => value,
             PrefixUnaryExpressionSyntax { OperatorToken.ValueText: "-", Operand: LiteralExpressionSyntax { Token.Value: int value } } => -value,
@@ -266,8 +246,8 @@ public sealed partial class EasyEcsAnalyzer
     private static void AnalyzeCopy(OperationAnalysisContext context)
     {
         var declarator = (IVariableDeclaratorOperation)context.Operation;
-        if (declarator.Symbol.RefKind != RefKind.None || declarator.Initializer?.Value is not { } value
-            || Accessor(value) is not { } accessor || !DeadAfterWrite(declarator.Symbol, declarator)) return;
+        if (declarator.Initializer?.Value is not { } value || !IsDroppedCopy(value)) return;
+        var accessor = Accessor(value)!.Value;
         string advice = "keep the ref";
         ImmutableDictionary<string, string?>? fix = null;
         if (declarator.Syntax is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Variables.Count: 1, Type: var type, Parent: LocalDeclarationStatementSyntax { UsingKeyword.RawKind: 0, IsConst: false } statement } })
@@ -288,6 +268,15 @@ public sealed partial class EasyEcsAnalyzer
         context.ReportDiagnostic(Diagnostic.Create(DroppedCopy, declarator.Syntax.GetLocation(), declarator.Symbol.Name, accessor.Name,
             accessor.Writer != null || accessor.Writable ? advice : accessor.Advice));
     }
+
+    /// <summary>
+    /// Whether <paramref name="value"/> initializes a by-value local that EECS038 reports: the copy of a ref accessor's
+    /// value, changed and dropped. The rules about the accessor itself (EECS015's Get of an indexed component, EECS025's
+    /// Get or WriteX that only reads) defer to it: the mistake is the copy.
+    /// </summary>
+    internal static bool IsDroppedCopy(IOperation value) =>
+        value.Parent is IVariableInitializerOperation { Parent: IVariableDeclaratorOperation { Symbol.RefKind: RefKind.None } declarator }
+        && Accessor(value) != null && DeadAfterWrite(declarator.Symbol, declarator);
 
     /// <summary>
     /// A ref-returning EasyEcs accessor: its name, whether its ref writes (<c>ref</c>, not <c>ref readonly</c>), the
@@ -313,9 +302,8 @@ public sealed partial class EasyEcsAnalyzer
             }
             case IPropertyReferenceOperation { Property: { IsIndexer: false } property } reference when property.ReturnsByRef || property.ReturnsByRefReadonly:
             {
-                bool core = property.ContainingNamespace?.ToDisplayString() == "EasyEcs"
-                            && (property.ContainingType.Name == "QueryItem" && property.Name.StartsWith("Component")
-                                || property.Name == "Value" && property.ContainingType.Name is "Maybe" or "Mut" or "SingletonRef");
+                bool core = Symbols.IsItemComponent(property)
+                            || property.ContainingNamespace?.ToDisplayString() == "EasyEcs" && property.Name == "Value" && property.ContainingType.Name is "Maybe" or "Mut" or "SingletonRef";
                 if (!core && !Symbols.IsGenerated(property)) return null;
                 string name = (core ? property.ContainingType.Name + "." : "") + property.Name;
                 if (property.ReturnsByRef) return (name, !Symbols.IsIndexed(property.Type), null, set);
@@ -408,14 +396,14 @@ public sealed partial class EasyEcsAnalyzer
         // EECS040: SetIfChanged of a value it cannot compare.
         if (method.Name == "SetIfChanged" && (owner == Symbols.Entity && method.TypeArguments.Length == 1 ? method.TypeArguments[0]
                 : method.ContainingType is { Name: "Mut", TypeArguments.Length: 1 } mut && mut.ContainingNamespace?.ToDisplayString() == "EasyEcs" ? mut.TypeArguments[0]
-                : null) is { } compared && !Comparable(compared))
+                : null) is { } compared && !Symbols.IsComparable(compared))
             context.ReportDiagnostic(Diagnostic.Create(NotComparable, call.Syntax.GetLocation(),
                 Shorten(call.Syntax), compared.Name));
 
         // EECS045: the world's own tags.
         if ((owner == Symbols.Entity && EntityTagWriters.Contains(method.Name) || owner == Symbols.World && WorldTagWriters.Contains(method.Name)
              || owner == "EasyEcs.Prefab" && method.Name is "Set" or "Remove")
-            && method.TypeArguments.FirstOrDefault(IsWorldTag) is { } tag)
+            && method.TypeArguments.FirstOrDefault(Symbols.IsWorldTag) is { } tag)
             context.ReportDiagnostic(Diagnostic.Create(InternalTag, call.Syntax.GetLocation(),
                 method.ContainingType!.Name + "." + method.Name, tag.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
                 tag.Name == "Destroyed"
@@ -426,7 +414,7 @@ public sealed partial class EasyEcsAnalyzer
         var hidden = (owner == Symbols.Entity && method.Name == "Disable" || owner == Symbols.World && method.Name == "DisableAll") && method.TypeArguments.Length == 1
             ? method.TypeArguments[0]
             : Symbols.IsGenerated(method) && Symbols.IsGeneratedWriter(method) && method.Name.StartsWith("Disable") ? Named(method, core) : null;
-        if (hidden != null && !Disableable(hidden))
+        if (hidden != null && !Symbols.IsDisableable(hidden))
             context.ReportDiagnostic(Diagnostic.Create(NotDisableable, call.Syntax.GetLocation(), Shorten(call.Syntax),
                 hidden.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
                 Symbols.Implements(hidden, Symbols.Cleanup)
@@ -435,7 +423,7 @@ public sealed partial class EasyEcsAnalyzer
 
         // EECS050: a second group in one filter.
         if (GroupOfCall(call, core) is { } second && Symbols.Receiver(call) is { } chain)
-            for (var earlier = Unwrap(chain); earlier is IInvocationOperation previous; earlier = Unwrap(Symbols.Receiver(previous)))
+            for (var earlier = Symbols.Unwrap(chain); earlier is IInvocationOperation previous; earlier = Symbols.Unwrap(Symbols.Receiver(previous)))
             {
                 if (previous.Type?.ToDisplayString() != "EasyEcs.QueryFilter") break;
                 if (GroupOfCall(previous, core) is not { } first) continue;
@@ -450,7 +438,7 @@ public sealed partial class EasyEcsAnalyzer
             }
 
         // EECS051: an update during a pass of the same world (from a system, EECS034 says it).
-        if (owner == Symbols.World && method.Name == "Update" && core.SystemOf(context.ContainingSymbol) == null
+        if (owner == Symbols.World && method.Name == "Update" && Symbols.SystemOf(context.ContainingSymbol) == null
             && DuringPass(call, context.ContainingSymbol, core) is { } running)
             context.ReportDiagnostic(Diagnostic.Create(UpdateInPass, call.Syntax.GetLocation(), Shorten(call.Syntax), running));
 
@@ -494,15 +482,6 @@ public sealed partial class EasyEcsAnalyzer
             }
     }
 
-    /// <summary>Whether SetIfChanged can compare <paramref name="type"/>: IEquatable&lt;T&gt;, or unmanaged (its bytes).</summary>
-    private static bool Comparable(ITypeSymbol type) =>
-        type is ITypeParameterSymbol or IErrorTypeSymbol || type.IsUnmanagedType
-        || type.AllInterfaces.Any(i => i.OriginalDefinition.ToDisplayString() == "System.IEquatable<T>" && SymbolEqualityComparer.Default.Equals(i.TypeArguments[0], type));
-
-    /// <summary><c>Destroyed</c> or a <c>Disabled&lt;T&gt;</c>: tags the world adds and removes itself.</summary>
-    private static bool IsWorldTag(ITypeSymbol type) =>
-        type.ToDisplayString() == "EasyEcs.Destroyed" || type is INamedTypeSymbol { IsGenericType: true } named && named.OriginalDefinition.ToDisplayString() == "EasyEcs.Disabled<T>";
-
     /// <summary>
     /// Whether a filter value is sliced: a <c>Slice(i, n)</c> (n not the constant 1) in its chain of QueryFilter calls,
     /// or a local or readonly field whose initializer is one (a local assigned nowhere else).
@@ -525,10 +504,8 @@ public sealed partial class EasyEcsAnalyzer
                     depth++;
                     continue;
                 case ILocalReferenceOperation { Local: var local } reference:
-                    IOperation root = reference;
-                    while (root.Parent != null) root = root.Parent;
                     IOperation? initial = null;
-                    foreach (var operation in root.Descendants())
+                    foreach (var operation in Symbols.Root(reference).Descendants())
                         switch (operation)
                         {
                             case IVariableDeclaratorOperation declarator when SymbolEqualityComparer.Default.Equals(declarator.Symbol, local):
@@ -562,10 +539,10 @@ public sealed partial class EasyEcsAnalyzer
     /// </summary>
     private static string? DuringPass(IInvocationOperation call, ISymbol containing, Core core)
     {
-        var receiver = Unwrap(call.Instance);
+        var receiver = Symbols.Unwrap(call.Instance);
         if (receiver == null) return null;
         var worlds = new List<IOperation> { receiver };
-        if (call.TargetMethod.Name == "MoveEntities" && call.Arguments.Length > 0) worlds.Add(Unwrap(call.Arguments[0].Value)!);
+        if (call.TargetMethod.Name == "MoveEntities" && call.Arguments.Length > 0) worlds.Add(Symbols.Unwrap(call.Arguments[0].Value)!);
 
         for (var node = call.Parent; node != null; node = node.Parent)
         {
@@ -576,7 +553,7 @@ public sealed partial class EasyEcsAnalyzer
         }
 
         if (containing is not IMethodSymbol method) return null;
-        bool forEach = Symbols.IsForEach(method), job = !forEach && JobInterface(method) != null;
+        bool forEach = Symbols.IsForEach(method), job = !forEach && Symbols.JobInterface(method) != null;
         if (!forEach && !job) return null;
         foreach (var world in worlds)
         {
@@ -631,7 +608,7 @@ public sealed partial class EasyEcsAnalyzer
     /// </summary>
     private static ITypeSymbol? Walked(IOperation collection)
     {
-        if (Unwrap(collection) is not IInvocationOperation { Type: INamedTypeSymbol { ContainingType: { } owner } walk } call) return null;
+        if (Symbols.Unwrap(collection) is not IInvocationOperation { Type: INamedTypeSymbol { ContainingType: { } owner } walk } call) return null;
         string definition = owner.OriginalDefinition.ToDisplayString();
         return walk.Name switch
         {
@@ -692,12 +669,7 @@ public sealed partial class EasyEcsAnalyzer
         }
     }
 
-    // ---------------- EECS048, EECS050: helpers ----------------
-
-    /// <summary>Whether Disable accepts <paramref name="component"/>: not ChildOf, not a cleanup component.</summary>
-    internal static bool Disableable(ITypeSymbol component) =>
-        component is ITypeParameterSymbol
-        || component.ToDisplayString() != "EasyEcs.ChildOf" && !Symbols.Implements(component, Symbols.Cleanup);
+    // ---------------- EECS050: helpers ----------------
 
     /// <summary>The group a QueryFilter call names (<c>InGroup&lt;T&gt;(group)</c>, the generated <c>InX(group)</c>): the component and the group value.</summary>
     private static (ITypeSymbol Type, IOperation Value)? GroupOfCall(IInvocationOperation call, Core core)
@@ -718,47 +690,29 @@ public sealed partial class EasyEcsAnalyzer
         call.Syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax access } syntax
             ? access.Name + syntax.ArgumentList.ToString() : Shorten(call.Syntax);
 
-    // ---------------- EECS049: filters no entity passes ----------------
+    // ---------------- EECS016, EECS049: filters no entity passes ----------------
 
+    /// <summary>
+    /// EECS016 for a component a [Removed&lt;T&gt;] method requires, EECS049 for one a method both requires and excludes
+    /// with [Without&lt;T&gt;]: one list of what the method's entities must have and lack (<see cref="Symbols.Requirements"/>).
+    /// </summary>
     private static void AnalyzeFilters(SymbolAnalysisContext context)
     {
         var method = (IMethodSymbol)context.Symbol;
         if (!Symbols.IsForEach(method)) return;
-        var required = new List<(ITypeSymbol Type, string Why, Location? Where)>();
-        var excluded = new List<(ITypeSymbol Type, string Why, Location? Where)>();
-        void Attributes(ISymbol owner, string where, bool own)
+        var all = Symbols.Requirements(method, context.CancellationToken);
+        var location = method.Locations.FirstOrDefault();
+        foreach (var with in all)
+            if (with.Has && all.Any(r => r.Kind == Symbols.FilterKind.Removed && SymbolEqualityComparer.Default.Equals(r.Type, with.Type)))
+                context.ReportDiagnostic(Diagnostic.Create(RemovedRequired, with.Parameter ? with.Where : location, method.Name, with.Type.Name,
+                    with.Why + " requires it"));
+        foreach (var without in all)
         {
-            foreach (var attribute in owner.GetAttributes())
-            {
-                if (attribute.AttributeClass is not { IsGenericType: true } cls || cls.TypeArguments[0].TypeKind == TypeKind.Error) continue;
-                string definition = cls.ConstructedFrom.ToDisplayString();
-                var location = own ? attribute.ApplicationSyntaxReference?.GetSyntax(context.CancellationToken).GetLocation() : null;
-                string text = $"[{cls.Name.Replace("Attribute", "")}<{cls.TypeArguments[0].Name}>]{where}";
-                if (definition is Symbols.WithAttribute or Symbols.ChangedAttribute) required.Add((cls.TypeArguments[0], text, location));
-                else if (definition == Symbols.WithoutAttribute) excluded.Add((cls.TypeArguments[0], text, location));
-            }
+            if (without.Kind != Symbols.FilterKind.Without
+                || all.FirstOrDefault(r => r.Has && SymbolEqualityComparer.Default.Equals(r.Type, without.Type)) is not { } with) continue;
+            context.ReportDiagnostic(Diagnostic.Create(NeverMatches, without.Where ?? with.Where ?? location,
+                method.Name, with.Type.Name, with.Why, without.Why));
         }
-
-        Attributes(method, "", true);
-        foreach (var p in method.Parameters)
-            if (Symbols.Classify(p) is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan or Symbols.ParamKind.Mutable
-                && Symbols.QueriedComponent(p) is { TypeKind: not TypeKind.Error } component)
-                required.Add((component, $"parameter '{p.Name}'", p.Locations.FirstOrDefault()));
-        if (!Symbols.IsRunner(method) && Symbols.GroupOf(method.ContainingType) is { } group)
-        {
-            Attributes(group, " on its group " + group.Name, false);
-            foreach (var (isWith, filter) in Symbols.GroupInterfaceFilters(group))
-                (isWith ? required : excluded).Add((filter, $"{(isWith ? "IGroupWith" : "IGroupWithout")}<{filter.Name}> on its group {group.Name}", null));
-        }
-
-        foreach (var without in excluded)
-            foreach (var with in required)
-            {
-                if (!SymbolEqualityComparer.Default.Equals(with.Type, without.Type)) continue;
-                context.ReportDiagnostic(Diagnostic.Create(NeverMatches, without.Where ?? with.Where ?? method.Locations.FirstOrDefault(),
-                    method.Name, with.Type.Name, with.Why, without.Why));
-                break;
-            }
     }
 
     // ---------------- EECS047: a ref used after a structural change ----------------
@@ -825,7 +779,7 @@ public sealed partial class EasyEcsAnalyzer
                 {
                     change = statement.DescendantsAndSelf().OfType<IInvocationOperation>().FirstOrDefault(c =>
                         Symbols.IsStructural(c.TargetMethod) && !KeepsRows(c.TargetMethod) && c.TargetMethod.Name != "Destroy"
-                        && IsItemEntity(Symbols.Receiver(c), item) && Straight(c, statement));
+                        && IsItemEntity(Symbols.Receiver(c), item) && Symbols.AlwaysRuns(c, statement));
                     continue;
                 }
 
@@ -862,16 +816,13 @@ public sealed partial class EasyEcsAnalyzer
                 return core.Is(call.TargetMethod.ContainingType, core.Entity)
                        || Symbols.IsGenerated(call.TargetMethod) && core.Is(Symbols.Receiver(call)?.Type, core.Entity) ? call : null;
             case IPropertyReferenceOperation { Property: { IsIndexer: false } property } reference when property.ReturnsByRef || property.ReturnsByRefReadonly:
-                if (IsItem(reference.Instance?.Type))
+                if (Symbols.IsItem(reference.Instance?.Type))
                     return property.Name.StartsWith("Component") || Symbols.IsGenerated(property) ? reference : null;
                 return Symbols.IsGenerated(property) && core.Is(reference.Instance?.Type, core.Entity) ? reference : null;
             default:
                 return null;
         }
     }
-
-    private static bool IsItem(ITypeSymbol? type) =>
-        type is INamedTypeSymbol { Name: "QueryItem" or "ReadItem" } item && item.ContainingNamespace?.ToDisplayString() == "EasyEcs";
 
     /// <summary>
     /// The structural change that <paramref name="statement"/> always makes (no branch, loop or lambda around it) that
@@ -881,12 +832,12 @@ public sealed partial class EasyEcsAnalyzer
     private static IInvocationOperation? Change(IOperation statement, IOperation source, Core core)
     {
         var sourceReceiver = source is IInvocationOperation call ? Symbols.Receiver(call) : ((IPropertyReferenceOperation)source).Instance;
-        bool item = IsItem(sourceReceiver?.Type);
+        bool item = Symbols.IsItem(sourceReceiver?.Type);
         var held = source.Type;
         foreach (var candidate in statement.DescendantsAndSelf().OfType<IInvocationOperation>())
         {
             var method = candidate.TargetMethod;
-            if (!Symbols.IsStructural(method) || KeepsRows(method) || OwnWorld(candidate) || !Straight(candidate, statement)) continue;
+            if (!Symbols.IsStructural(method) || KeepsRows(method) || OwnWorld(candidate) || !Symbols.AlwaysRuns(candidate, statement)) continue;
             if (item && method.Name == "Destroy") continue;
             var receiver = Symbols.Receiver(candidate);
             if (!core.Is(receiver?.Type, core.Entity) && !core.Is(receiver?.Type, core.World)) continue;
@@ -898,22 +849,5 @@ public sealed partial class EasyEcsAnalyzer
         }
 
         return null;
-    }
-
-    /// <summary>Whether <paramref name="operation"/> runs whenever <paramref name="statement"/> does: no branch, loop or lambda between them.</summary>
-    private static bool Straight(IOperation operation, IOperation statement)
-    {
-        for (IOperation current = operation, parent = operation.Parent!; parent != null && current != statement; current = parent, parent = parent.Parent!)
-            switch (parent)
-            {
-                case IConditionalOperation conditional when conditional.Condition != current:
-                case IBinaryOperation { OperatorKind: BinaryOperatorKind.ConditionalAnd or BinaryOperatorKind.ConditionalOr } binary when binary.RightOperand == current:
-                case ICoalesceOperation coalesce when coalesce.WhenNull == current:
-                case ILoopOperation or ISwitchCaseOperation or ISwitchExpressionArmOperation or ICatchClauseOperation or IConditionalAccessOperation
-                    or IAnonymousFunctionOperation or ILocalFunctionOperation:
-                    return false;
-            }
-
-        return true;
     }
 }

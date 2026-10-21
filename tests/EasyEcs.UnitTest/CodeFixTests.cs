@@ -52,6 +52,13 @@ public class CodeFixTests
     [TestCase("EECS010", "Run it on one thread",
         "public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, ref Clock c) => c.Ticks += p.V; }",
         "[ForEach] static void A")]
+    // An instance method only 'static' keeps from running in parallel: EECS010 offers EECS029's fix (which defers to it).
+    [TestCase("EECS010", "Make it static",
+        "public class S : EcsSystem { [ForEach(Parallel = true)] void A(ref P p) => p.V++; }",
+        "[ForEach(Parallel = true)] static void A(ref P p)")]
+    [TestCase("EECS010", "Run it on one thread",
+        "public class S : EcsSystem { [ForEach(Parallel = true)] void A(ref P p) => p.V++; }",
+        "[ForEach] void A(ref P p)")]
     [TestCase("EECS011", "Take it by 'ref'",
         "public class S : EcsSystem { [ForEach] static void A(in Holder h) => h.Items.Add(1); }",
         "static void A(ref Holder h)")]
@@ -259,6 +266,8 @@ public class CodeFixTests
     [TestCase("EECS006", "public class R : IComponent { protected int V; }")]
     [TestCase("EECS011", "public struct Grid : ISingletonComponent { public System.Collections.Generic.List<int> Cells; }\n"
                          + "public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, in Grid g) => g.Cells.Add(p.V); }")]
+    [TestCase("EECS010", "public class S : EcsSystem { [ForEach(Parallel = true)] void A(ref P p) => p.V = World.Clock.Ticks; }",
+        "Run it on one thread")]                                                                                    // reads the system: not static
     [TestCase("EECS012", "public interface IUse { int Count(DynamicBuffer<int> items); }\n"
                          + "public class Use : IUse { public int Count(DynamicBuffer<int> items) => items.Count; }")]
     [TestCase("EECS012", "public static class Use { public static int Count(DynamicBuffer<int> items) => items.Count;\n"

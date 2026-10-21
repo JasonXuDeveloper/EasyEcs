@@ -283,13 +283,9 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         var call = (IInvocationOperation)context.Operation;
         if (call.TargetMethod is not { Name: "GetSystem", TypeArguments.Length: 1 } method
             || method.ContainingType?.ToDisplayString() != Symbols.World || method.TypeArguments[0].TypeKind == TypeKind.Error) return;
-        for (var type = context.ContainingSymbol.ContainingType; type != null; type = type.ContainingType)
-            if (Symbols.IsSystem(type))
-            {
-                context.ReportDiagnostic(Diagnostic.Create(SystemReference, call.Syntax.GetLocation(), type.Name,
-                    method.TypeArguments[0].Name, "World.GetSystem"));
-                return;
-            }
+        if (Symbols.SystemOf(context.ContainingSymbol.ContainingType) is { } system)
+            context.ReportDiagnostic(Diagnostic.Create(SystemReference, call.Syntax.GetLocation(), system.Name,
+                method.TypeArguments[0].Name, "World.GetSystem"));
     }
 
     /// <summary>
@@ -303,10 +299,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         var root = property.OverriddenProperty; // up the chain: an override of an override of EcsSystem's
         while (root?.OverriddenProperty != null) root = root.OverriddenProperty;
         if (root?.ContainingType?.ToDisplayString() != Symbols.EcsSystem) return;
-        var getter = declaration.AccessorList?.Accessors.FirstOrDefault();
-        var body = declaration.ExpressionBody?.Expression ?? getter?.ExpressionBody?.Expression
-            ?? (getter?.Body?.Statements is { Count: 1 } statements && statements[0] is ReturnStatementSyntax { Expression: { } returned }
-                ? returned : null);
+        var body = Symbols.Returned(declaration);
         if (body != null && context.SemanticModel.GetConstantValue(body, context.CancellationToken).HasValue) return;
         // { get; } = 5: the constant is there, as an initializer; '=> 5' returns it.
         bool initialized = declaration is { Initializer.Value: { } initial, AccessorList.Accessors: { Count: 1 } accessors }
@@ -326,8 +319,9 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
     {
         switch (context.Operation)
         {
+            // A copy changed and dropped is EECS038's (its advice, Set, is the one that keeps the index).
             case IInvocationOperation { TargetMethod: { ReturnsByRef: true, TypeArguments.Length: 1 } method } call
-                when method.ContainingType?.ToDisplayString() == Symbols.Entity && Symbols.IsIndexed(method.TypeArguments[0]):
+                when method.ContainingType?.ToDisplayString() == Symbols.Entity && Symbols.IsIndexed(method.TypeArguments[0]) && !IsDroppedCopy(call):
                 // Get<T>() that only reads (or binds a 'ref readonly' local): Read<T>() is the same read.
                 bool reads = method.Name == "Get" && (!Uses.MayWrite(call)
                     || call.Parent is IVariableInitializerOperation { Parent: IVariableDeclaratorOperation { Symbol.RefKind: RefKind.RefReadOnly } });
@@ -413,8 +407,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (Symbols.IsBatch(method))
             context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), method.Name, name,
                 "it is a batch method, whose spans point into the tables; record the change as data for a method that runs per entity"));
-        else if (method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is MethodDeclarationSyntax syntax
-                 && Symbols.IsStable(method, syntax, context.Operation.SemanticModel!))
+        else if (Symbols.IsStable(method, context.Operation.SemanticModel!))
             context.ReportDiagnostic(Diagnostic.Create(HiddenStructuralChange, call.Syntax.GetLocation(), method.Name, name,
                 "takes no Entity or World to make it with; take the Entity as a parameter, or record the change as data"));
     }
@@ -455,6 +448,8 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                 break;
             case IMethodSymbol method when method.AssociatedSymbol == null:
                 if (method.RefKind == RefKind.None) Report(method.ReturnType, method, method.Locations.FirstOrDefault());
+                // A [ForEach] method's buffer by value is an invalid parameter: EECS002 says it, with the same fixes.
+                if (Symbols.IsForEach(method)) break;
                 // an override or an interface's method shares its signature: changing one parameter breaks the others
                 var properties = Symbols.SharesSignature(method) ? ImmutableDictionary<string, string?>.Empty.Add(SharedSignature, "") : null;
                 foreach (var p in method.Parameters)
@@ -570,15 +565,35 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         }
     }
 
-    /// <summary>EECS017: a <c>DynamicBuffer&lt;T&gt;</c> named in source whose element holds an Entity (a buffer is a component).</summary>
+    /// <summary>
+    /// EECS017: a <c>DynamicBuffer&lt;T&gt;</c> named in source whose element holds an Entity (a buffer is a component),
+    /// unless it is the type of a component's field, which <see cref="AnalyzeDataFields"/> reports.
+    /// </summary>
     private static void AnalyzeBufferOfEntities(SyntaxNodeAnalysisContext context)
     {
         var name = (GenericNameSyntax)context.Node;
         if (name.Identifier.ValueText != "DynamicBuffer" || name.TypeArgumentList.Arguments.Count != 1
             || context.SemanticModel.GetSymbolInfo(name, context.CancellationToken).Symbol is not INamedTypeSymbol type
-            || Symbols.BufferElement(type) is not { } element || !HoldsEntity(element, 0)) return;
+            || Symbols.BufferElement(type) is not { } element || !HoldsEntity(element, 0) || InDataField(context, name)) return;
         context.ReportDiagnostic(Diagnostic.Create(EntityInData, name.GetLocation(),
             type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), "its elements"));
+    }
+
+    /// <summary>Whether <paramref name="name"/> is in the type of a field (an auto-property, a record's parameter) of a component or singleton.</summary>
+    private static bool InDataField(SyntaxNodeAnalysisContext context, SyntaxNode name)
+    {
+        SyntaxNode? member = name.Ancestors().FirstOrDefault(n => n is FieldDeclarationSyntax or PropertyDeclarationSyntax or ParameterSyntax);
+        bool field = member switch
+        {
+            FieldDeclarationSyntax f => !f.Modifiers.Any(SyntaxKind.StaticKeyword) && !f.Modifiers.Any(SyntaxKind.ConstKeyword),
+            PropertyDeclarationSyntax p => !p.Modifiers.Any(SyntaxKind.StaticKeyword) && p.ExpressionBody == null
+                                           && p.AccessorList?.Accessors.All(a => a.Body == null && a.ExpressionBody == null) == true,
+            ParameterSyntax { Parent.Parent: RecordDeclarationSyntax } => true,
+            _ => false,
+        };
+        return field && member!.FirstAncestorOrSelf<TypeDeclarationSyntax>() is { } owner
+            && context.SemanticModel.GetDeclaredSymbol(owner, context.CancellationToken) is { TypeKind: TypeKind.Struct } data
+            && (Symbols.Implements(data, Symbols.Component) || Symbols.Implements(data, Symbols.Singleton));
     }
 
     /// <summary>Whether <paramref name="type"/> is an Entity or holds one (an array, a type argument, a struct's field).</summary>
@@ -725,6 +740,7 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         var location = method.Locations.FirstOrDefault();
 
         bool outside = Symbols.IsRunner(method);
+        var excluded = Excluded(method, context.CancellationToken);
         if (outside && !method.IsStatic)
             context.ReportDiagnostic(Diagnostic.Create(NotASystem, location, method.Name, method.ContainingType.Name));
         else if (outside && Symbols.RunnerCollides(method))
@@ -738,31 +754,6 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(Unnameable, location, // the type its code fix makes internal, with its containers
                 Symbols.Hidden(unnameable)?.Locations.Where(l => l.IsInSource) ?? [],
                 method.Name, unnameable.ToDisplayString()));
-
-        var removed = new System.Collections.Generic.List<ITypeSymbol>();
-        foreach (var attribute in method.GetAttributes())
-            if (attribute.AttributeClass is { IsGenericType: true } cls && cls.ConstructedFrom.ToDisplayString() == Symbols.RemovedAttribute
-                && cls.TypeArguments[0].TypeKind != TypeKind.Error) // [Removed<>] while typing: the compiler's error suffices
-                removed.Add(cls.TypeArguments[0]);
-        void Required(ISymbol owner, string where)
-        {
-            foreach (var attribute in owner.GetAttributes())
-                if (attribute.AttributeClass is { IsGenericType: true } cls
-                    && cls.ConstructedFrom.ToDisplayString() is Symbols.WithAttribute or Symbols.ChangedAttribute
-                    && removed.Any(r => SymbolEqualityComparer.Default.Equals(r, cls.TypeArguments[0])))
-                    context.ReportDiagnostic(Diagnostic.Create(RemovedRequired, location, method.Name, cls.TypeArguments[0].Name,
-                        $"[{cls.Name.Replace("Attribute", "")}<{cls.TypeArguments[0].Name}>]{where} requires it"));
-        }
-
-        Required(method, "");
-        if (!outside && Symbols.GroupOf(method.ContainingType) is { } group)
-        {
-            Required(group, " on its group " + group.Name); // its filters join the method's
-            foreach (var (isWith, filter) in Symbols.GroupInterfaceFilters(group))
-                if (isWith && removed.Any(r => SymbolEqualityComparer.Default.Equals(r, filter)))
-                    context.ReportDiagnostic(Diagnostic.Create(RemovedRequired, location, method.Name, filter.Name,
-                        $"IGroupWith<{filter.Name}> on its group {group.Name} requires it"));
-        }
 
         int components = 0;
         bool valid = true;
@@ -790,13 +781,12 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
                     _ => p.Type.OriginalDefinition.ToDisplayString() == "System.Span<T>",
                 };
                 // A ref or Span parameter of a method with a body is reported with the body (AnalyzeParameters), which
-                // knows whether the method only reads it (then 'in' / ReadOnlySpan is the fix).
-                if (writable && component != null && Symbols.IsIndexed(component) && (kind == Symbols.ParamKind.Mutable || !HasBody(method)))
+                // knows whether the method only reads it (then 'in' / ReadOnlySpan is the fix). A component the method
+                // also excludes is EECS016's or EECS049's: the method never runs.
+                if (writable && component != null && Symbols.IsIndexed(component) && (kind == Symbols.ParamKind.Mutable || !HasBody(method))
+                    && !excluded.Contains(component))
                     context.ReportDiagnostic(Diagnostic.Create(IndexedByRef, p.Locations.FirstOrDefault(), component.Name,
                         $"parameter '{p.Name}' can write it (take it as 'in' or ReadOnlySpan)"));
-                if (component != null && removed.Any(r => SymbolEqualityComparer.Default.Equals(r, component)))
-                    context.ReportDiagnostic(Diagnostic.Create(RemovedRequired, p.Locations.FirstOrDefault(), method.Name,
-                        component.Name, $"parameter '{p.Name}' requires it"));
             }
         }
 
@@ -819,6 +809,14 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         && value is ObjectCreationExpressionSyntax or ImplicitObjectCreationExpressionSyntax
         && local.Type.ToDisplayString() == Symbols.World;
 
+    /// <summary>
+    /// The components a [ForEach] method's entities must lack ([Without&lt;T&gt;], [Removed&lt;T&gt;], its group's):
+    /// a parameter of one of them is EECS016's or EECS049's (the method never runs), so the rules about what the
+    /// parameter costs or writes leave it out.
+    /// </summary>
+    internal static System.Collections.Generic.HashSet<ITypeSymbol> Excluded(IMethodSymbol method, System.Threading.CancellationToken token) =>
+        new(Symbols.Requirements(method, token).Where(r => !r.Has).Select(r => r.Type), SymbolEqualityComparer.Default);
+
     /// <summary>EECS024: [ForEach] on a local function (a symbol action never sees one).</summary>
     private static void AnalyzeLocalFunction(SyntaxNodeAnalysisContext context)
     {
@@ -836,8 +834,12 @@ public sealed partial class EasyEcsAnalyzer : DiagnosticAnalyzer
         if (context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method
             || !Symbols.IsForEach(method) || !Symbols.IsParallel(method)
             || method.PartialDefinitionPart != null) return; // a partial method: reported once, on its definition
-        if (Symbols.ParallelProblem(method, syntax, context.SemanticModel) is { } problem)
-            context.ReportDiagnostic(Diagnostic.Create(NotParallel, method.Locations.FirstOrDefault(), method.Name, problem));
+        if (Symbols.ParallelProblem(method, syntax, context.SemanticModel) is not { } problem) return;
+        // An instance method that 'static' alone makes stable: the fix EECS029 would offer (it defers to this rule).
+        bool makeStatic = !method.IsStatic && !Symbols.SharesSignature(method) && method.PartialImplementationPart == null
+                          && Symbols.StableIfStatic(method, syntax, context.SemanticModel);
+        context.ReportDiagnostic(Diagnostic.Create(NotParallel, method.Locations.FirstOrDefault(),
+            makeStatic ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Static") : null, method.Name, problem));
     }
 
     private static string Started(IMethodSymbol starter) =>

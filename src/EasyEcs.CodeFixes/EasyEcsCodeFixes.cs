@@ -97,8 +97,7 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
                 case "EECS029" when node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } instance
                                     && !await HasCallers(context.Document, instance.ParameterList.Parameters.FirstOrDefault(), context.CancellationToken, instance)
                                         .ConfigureAwait(false):
-                    Register(context, diagnostic, "Make it static", root, instance,
-                        generator.WithModifiers(instance, generator.GetModifiers(instance).WithIsStatic(true)));
+                    MakeStatic(context, diagnostic, generator, root, instance);
                     break;
                 case "EECS002" when diagnostic.Properties.ContainsKey("ByValue") && node is ParameterSyntax parameter:
                     Register(context, diagnostic, "Take it by 'in' (read)", root, parameter, Modify(parameter, SyntaxKind.InKeyword));
@@ -113,17 +112,21 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
                     break;
                 case "EECS005" when node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method
                                     && !await UsesInstance(context.Document, method, context.CancellationToken).ConfigureAwait(false):
-                    Register(context, diagnostic, "Make it static", root, method,
-                        generator.WithModifiers(method, generator.GetModifiers(method).WithIsStatic(true)));
+                    MakeStatic(context, diagnostic, generator, root, method);
                     break;
                 case "EECS006" when node.FirstAncestorOrSelf<TypeDeclarationSyntax>() is { } type
                                     && await CanBeStruct(context.Document, type, context.CancellationToken).ConfigureAwait(false)
                                     && ToStruct(type) is { } data:
                     Register(context, diagnostic, "Make it a struct", root, type, data);
                     break;
-                case "EECS010" when node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method && Parallel(method) is { } argument:
-                    Register(context, diagnostic, "Run it on one thread", root, argument.Parent!,
-                        ((AttributeArgumentListSyntax)argument.Parent!).Arguments.Count == 1 ? null : ((AttributeArgumentListSyntax)argument.Parent!).RemoveNode(argument, SyntaxRemoveOptions.KeepNoTrivia));
+                case "EECS010" when node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method:
+                    // An instance method 'static' alone makes stable (the analyzer checked): the fix EECS029 would offer.
+                    if (kind == "Static" && !await UsesInstance(context.Document, method, context.CancellationToken).ConfigureAwait(false)
+                        && !await HasCallers(context.Document, null, context.CancellationToken, method).ConfigureAwait(false))
+                        MakeStatic(context, diagnostic, generator, root, method);
+                    if (Parallel(method) is { Parent: AttributeArgumentListSyntax arguments } argument)
+                        Register(context, diagnostic, "Run it on one thread", root, arguments,
+                            arguments.Arguments.Count == 1 ? null : arguments.RemoveNode(argument, SyntaxRemoveOptions.KeepNoTrivia));
                     break;
                 case "EECS011" when diagnostic.AdditionalLocations.FirstOrDefault() is { } where:
                     context.RegisterCodeFix(CodeAction.Create("Take it by 'ref'",
@@ -150,10 +153,7 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
         if (props.TryGetValue("Insert", out var insert) && insert != null && node.FirstAncestorOrSelf<StatementSyntax>() is { } before)
         {
             var indent = before.GetLeadingTrivia().Where(t => t.IsKind(SyntaxKind.WhitespaceTrivia)).LastOrDefault();
-            // The file's own line ending: a CRLF file stays CRLF, an LF file LF.
-            var eol = root.DescendantTrivia().FirstOrDefault(t => t.IsKind(SyntaxKind.EndOfLineTrivia));
-            var statement = SyntaxFactory.ParseStatement(insert).WithLeadingTrivia(indent)
-                .WithTrailingTrivia(eol.IsKind(SyntaxKind.EndOfLineTrivia) ? eol : SyntaxFactory.LineFeed);
+            var statement = SyntaxFactory.ParseStatement(insert).WithLeadingTrivia(indent).WithTrailingTrivia(EndOfLine(root));
             return document.WithSyntaxRoot(root.InsertNodesBefore(before, [statement]));
         }
 
@@ -176,7 +176,7 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
     /// </summary>
     private static MethodDeclarationSyntax? FromMut(MethodDeclarationSyntax method, ParameterSyntax parameter, bool read)
     {
-        var mut = parameter.Type as GenericNameSyntax ?? (parameter.Type as QualifiedNameSyntax)?.Right as GenericNameSyntax;
+        var mut = Generic(parameter.Type);
         if (mut is not { Identifier.Text: "Mut", TypeArgumentList.Arguments.Count: 1 }) return null;
         string name = parameter.Identifier.ValueText;
         var uses = method.DescendantNodes().Where(n =>
@@ -199,12 +199,11 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
         if (node.FirstAncestorOrSelf<TypeDeclarationSyntax>() is not { } type) return null;
         var first = type.Members.FirstOrDefault();
         var indent = first?.GetLeadingTrivia().Where(t => t.IsKind(SyntaxKind.WhitespaceTrivia)).LastOrDefault() ?? default;
-        var eol = root.DescendantTrivia().FirstOrDefault(t => t.IsKind(SyntaxKind.EndOfLineTrivia));
         // One line ({ public int N; ... }): the member joins it; one member per line: it gets a line of its own.
         bool lines = type.OpenBraceToken.TrailingTrivia.Any(t => t.IsKind(SyntaxKind.EndOfLineTrivia))
                      || first?.GetLeadingTrivia().Any(t => t.IsKind(SyntaxKind.EndOfLineTrivia)) == true;
         member = lines
-            ? member.WithLeadingTrivia(indent).WithTrailingTrivia(eol.IsKind(SyntaxKind.EndOfLineTrivia) ? eol : SyntaxFactory.LineFeed)
+            ? member.WithLeadingTrivia(indent).WithTrailingTrivia(EndOfLine(root))
             : member.WithTrailingTrivia(SyntaxFactory.Space);
         return root.ReplaceNode(type, type.WithMembers(type.Members.Insert(0, member)));
     }
@@ -293,8 +292,7 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
     private static ParameterSyntax ReadOnly(ParameterSyntax parameter)
     {
         var type = parameter.Type!;
-        var generic = type as GenericNameSyntax ?? (type as QualifiedNameSyntax)?.Right as GenericNameSyntax;
-        if (generic is { Identifier.Text: "Span" })
+        if (Generic(type) is { Identifier.Text: "Span" } generic)
             return parameter.WithType(type.ReplaceNode(generic, generic.WithIdentifier(SyntaxFactory.Identifier("ReadOnlySpan").WithTriviaFrom(generic.Identifier))));
         return parameter; // an alias: left as it is (the fix then changes nothing)
     }
@@ -306,7 +304,7 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
         if (with == null) return updated;
         foreach (var list in updated.AttributeLists)
             foreach (var attribute in list.Attributes)
-                if (attribute.Name.ToString() is "ForEach" or "ForEachAttribute" or "EasyEcs.ForEach" or "EasyEcs.ForEachAttribute" or "global::EasyEcs.ForEach")
+                if (IsForEach(attribute))
                 {
                     var added = SyntaxFactory.Attribute(SyntaxFactory.ParseName($"With<{with}>"));
                     return updated.ReplaceNode(list, list.WithAttributes(list.Attributes.Insert(list.Attributes.IndexOf(attribute) + 1, added)));
@@ -328,6 +326,10 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
             if (found.Locations.Any()) return true;
         return false;
     }
+
+    /// <summary>EECS005, EECS010, EECS029: the method becomes static (the caller checked that it reads no instance state).</summary>
+    private static void MakeStatic(CodeFixContext context, Diagnostic diagnostic, SyntaxGenerator generator, SyntaxNode root, MethodDeclarationSyntax method) =>
+        Register(context, diagnostic, "Make it static", root, method, generator.WithModifiers(method, generator.GetModifiers(method).WithIsStatic(true)));
 
     private static void Register(CodeFixContext context, Diagnostic diagnostic, string title, SyntaxNode root, SyntaxNode node,
         SyntaxNode? replacement) =>
@@ -361,13 +363,11 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
         ParameterSyntax writable;
         if (model.GetTypeInfo(type, token).Type is INamedTypeSymbol { Name: "ReadOnlySpan", TypeArguments.Length: 1 } span
             && span.ContainingNamespace.ToDisplayString() == "System")
-            writable = type is GenericNameSyntax { Identifier.Text: "ReadOnlySpan" } or QualifiedNameSyntax { Right: GenericNameSyntax { Identifier.Text: "ReadOnlySpan" } }
-                ? parameter.WithType(type.ReplaceNode(Generic(type), Generic(type).WithIdentifier(SyntaxFactory.Identifier("Span").WithTriviaFrom(Generic(type).Identifier))))
+            writable = Generic(type) is { Identifier.Text: "ReadOnlySpan" } generic
+                ? parameter.WithType(type.ReplaceNode(generic, generic.WithIdentifier(SyntaxFactory.Identifier("Span").WithTriviaFrom(generic.Identifier))))
                 : parameter.WithType(SyntaxFactory.ParseTypeName($"System.Span<{span.TypeArguments[0].ToMinimalDisplayString(model, type.SpanStart)}>").WithTriviaFrom(type));
         else writable = Modify(parameter, SyntaxKind.RefKeyword);
         return solution.WithDocumentSyntaxRoot(target.Id, root.ReplaceNode(parameter, writable));
-
-        static GenericNameSyntax Generic(TypeSyntax type) => type as GenericNameSyntax ?? (GenericNameSyntax)((QualifiedNameSyntax)type).Right;
     }
 
     /// <summary>
@@ -546,8 +546,19 @@ public sealed class EasyEcsCodeFixes : CodeFixProvider
 
     /// <summary>EECS010: the <c>Parallel = true</c> argument of the method's [ForEach].</summary>
     private static AttributeArgumentSyntax? Parallel(MethodDeclarationSyntax method) =>
-        method.AttributeLists.SelectMany(l => l.Attributes)
-            .Where(a => a.Name.ToString() is "ForEach" or "ForEachAttribute" or "EasyEcs.ForEach" or "EasyEcs.ForEachAttribute" or "global::EasyEcs.ForEach")
+        method.AttributeLists.SelectMany(l => l.Attributes).Where(IsForEach)
             .SelectMany(a => a.ArgumentList?.Arguments ?? default)
             .FirstOrDefault(a => a.NameEquals?.Name.Identifier.Text == "Parallel");
+
+    /// <summary>Whether <paramref name="attribute"/> is spelled as [ForEach] (the fixes edit its syntax, not its symbol).</summary>
+    private static bool IsForEach(AttributeSyntax attribute) =>
+        attribute.Name.ToString() is "ForEach" or "ForEachAttribute" or "EasyEcs.ForEach" or "EasyEcs.ForEachAttribute" or "global::EasyEcs.ForEach"
+            or "global::EasyEcs.ForEachAttribute";
+
+    /// <summary>The generic name of a type, qualified (<c>System.Span&lt;T&gt;</c>) or not; null for any other type.</summary>
+    private static GenericNameSyntax? Generic(TypeSyntax? type) => type as GenericNameSyntax ?? (type as QualifiedNameSyntax)?.Right as GenericNameSyntax;
+
+    /// <summary>The file's own line ending, for a line a fix adds: a CRLF file stays CRLF, an LF file LF.</summary>
+    private static SyntaxTrivia EndOfLine(SyntaxNode root) =>
+        root.DescendantTrivia().FirstOrDefault(t => t.IsKind(SyntaxKind.EndOfLineTrivia)) is { RawKind: (int)SyntaxKind.EndOfLineTrivia } eol ? eol : SyntaxFactory.LineFeed;
 }

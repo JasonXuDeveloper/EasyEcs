@@ -37,6 +37,8 @@ public class GeneratorTests
 
     private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0 || id is "EECS039" or "EECS046" or "EECS052";
 
+    internal static async Task<Diagnostic[]> All(string source) => (await Analyze([Components, Extra, source])).Where(d => d.Id.StartsWith("EECS") || d.Severity == DiagnosticSeverity.Error).OrderBy(d => d.Location.SourceSpan.Start).ToArray();
+
     private static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(sources), out var output, out _);
@@ -1443,7 +1445,7 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { protected override void OnUpdate() { if (World.Capture() == null) World.Clock.Ticks++; } }", "EECS028")]
     [TestCase("public class S : EcsSystem { protected override void OnUpdate() => World.Instantiate(new Prefab()); }", "EECS028")]
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V = e.Describe().Length; }", "EECS028")]
-    [TestCase("public struct J : IForEachEntity<P> { public void Execute(Entity e, ref P p) => p.V = e.Read<Q>().V; }", "EECS027", "EECS033")]
+    [TestCase("public struct J : IForEachEntity<P> { public void Execute(Entity e, ref P p) => p.V = e.Read<Q>().V; }", "EECS027")] // EECS033 defers
     [TestCase("public struct J : IForEach<P> { public void Execute(ref P p) { var all = new System.Collections.Generic.List<int>(); p.V = all.Count; } }", "EECS028")]
     // EECS046: a query that only reads tracked components.
     [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<T, P>()) n += item.T.V + item.P.V; return n; } }", "EECS046")]
@@ -1461,6 +1463,31 @@ public class GeneratorTests
         Assert.That(costs.Select(d => d.Id).Distinct().OrderBy(x => x), Is.EqualTo(ids),
             string.Join("\n", costs.Select(d => d.GetMessage())));
         Assert.That((await Diagnose(Components, Extra, source)).Where(e => e.StartsWith("CS")), Is.Empty, "the case compiles");
+    }
+
+    // One mistake, one diagnostic: where two rules see the same code, one defers to the other (the one whose fix
+    // removes what the other would report).
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(DynamicBuffer<Loot> items, ref P p) => p.V = items.Count; }", "EECS002")] // not EECS012
+    [TestCase("public static class U { public static void F(Entity e) { var t = e.Get<T>(); t.V = 1; } }", "EECS038")]                       // not EECS025
+    [TestCase("public static class U { public static void F(Entity e) { var t = e.WriteT(); t.V = 1; } }", "EECS038")]                       // not EECS025
+    [TestCase("public static class U { public static void F(Entity e) { var o = e.Get<Owned>(); o.Owner = default; } }", "EECS038")]         // not EECS015
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] static void A(ref P p, ref Clock c) => p.V += c.Ticks; }", "EECS010")] // not EECS025
+    [TestCase("public class S : EcsSystem { [ForEach(Parallel = true)] void A(ref P p) => p.V++; }", "EECS010")]                             // not EECS029
+    [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<T>()) n++; return n; } }", "EECS032")] // not EECS046
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<T>()) item.Entity.Destroy(); } }", "EECS030")]  // not EECS046
+    [TestCase("public class S : EcsSystem { [ForEach, Without<P>] static void A(ref P p, ref Q q) => q.V++; }", "EECS049")]                  // not EECS026
+    [TestCase("public class S : EcsSystem { [ForEach, Without<P>] static void A(ref P p, ref Q q) => q.V = p.V; }", "EECS049")]              // not EECS025
+    [TestCase("public class S : EcsSystem { [ForEach, Removed<T>] static void A(ref T t, ref Q q) => q.V = t.V; }", "EECS016")]              // not EECS025
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(World w, ref P p) { w.TrimExcess(); p.V++; } }", "EECS041")]             // not EECS028
+    [TestCase("public static class G { public static World W = new(); } public class S : EcsSystem { [ForEach] static void A(ref P p) { G.W.TrimExcess(); p.V++; } }", "EECS013")] // not EECS028
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<P>()) item.Entity.Remove<Destroyed>(); } }", "EECS045")] // not EECS030
+    [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V = e.Get<Q>().V; }", "EECS027")]               // not EECS033
+    [TestCase("public static class U { public static void F(World w) { var e = w.CreateEntity(new P()); e.Set(new Boss()); } }", "EECS052")] // not EECS033
+    [TestCase("public struct Pair { public Entity A; } public struct Pairs : IComponent { public int N; public DynamicBuffer<Pair> All; }", "EECS012", "EECS017")] // two mistakes, once each
+    public async Task OneMistakeIsReportedOnce(string source, params string[] ids)
+    {
+        var all = await All(source);
+        Assert.That(all.Select(d => d.Id).OrderBy(x => x), Is.EqualTo(ids), string.Join("\n", all.Select(d => d.Id + " " + d.GetMessage())));
     }
 
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Mut<T> t, in P p) { if (p.V > 0) t.Write().V = p.V; } }")]       // written

@@ -157,21 +157,6 @@ public sealed partial class EasyEcsAnalyzer
         public bool Is(ITypeSymbol? type, INamedTypeSymbol core) => SymbolEqualityComparer.Default.Equals(type, core);
 
         public bool Tracked(ITypeSymbol type) => type.AllInterfaces.Contains(Track, SymbolEqualityComparer.Default);
-
-        public bool IsSystem(INamedTypeSymbol? type)
-        {
-            for (var t = type?.BaseType; t != null; t = t.BaseType)
-                if (Is(t, EcsSystem)) return true;
-            return false;
-        }
-
-        /// <summary>The system whose code this is (the containing type, or one it is nested in), or null.</summary>
-        public INamedTypeSymbol? SystemOf(ISymbol? symbol)
-        {
-            for (var type = symbol as INamedTypeSymbol ?? symbol?.ContainingType; type != null; type = type.ContainingType)
-                if (IsSystem(type)) return type;
-            return null;
-        }
     }
 
     private static void InitializePerformance(AnalysisContext context) =>
@@ -210,21 +195,22 @@ public sealed partial class EasyEcsAnalyzer
 
             AnalyzeParameters(context, method, body, uses);
             AnalyzeLookups(context, core, method, body);
-            AnalyzeAllocations(context, method, body, "for every entity it visits, each update");
-            if (!method.IsStatic && !usesInstance && core.IsSystem(method.ContainingType) && !Symbols.SharesSignature(method)
-                && method.PartialDefinitionPart == null && method.PartialImplementationPart == null)
+            AnalyzeAllocations(context, method, body, "for every entity it visits, each update", true);
+            // A parallel one is EECS010's: it cannot run in parallel until it is static, and offers the same fix.
+            if (!method.IsStatic && !usesInstance && Symbols.IsSystem(method.ContainingType) && !Symbols.SharesSignature(method)
+                && method.PartialDefinitionPart == null && method.PartialImplementationPart == null && !Symbols.IsParallel(method))
                 context.ReportDiagnostic(Diagnostic.Create(InstanceForEach, method.Locations.FirstOrDefault(), method.Name));
         }
-        else if (JobInterface(method) != null)
+        else if (Symbols.JobInterface(method) != null)
         {
             // A hand-written job: its signature is the interface's (EECS037 says what its Writes should be), what it
             // looks up and allocates per row costs as in a [ForEach] method.
             AnalyzeLookups(context, core, method, body);
-            AnalyzeAllocations(context, method, body, "for every entity its loop visits");
+            AnalyzeAllocations(context, method, body, "for every entity its loop visits", true);
         }
-        else if (method is { Name: "OnUpdate", IsOverride: true, Parameters.Length: 0 } && core.IsSystem(method.ContainingType)
+        else if (method is { Name: "OnUpdate", IsOverride: true, Parameters.Length: 0 } && Symbols.IsSystem(method.ContainingType)
                  && !HasCadence(method.ContainingType, core))
-            AnalyzeAllocations(context, method, body, "every update");
+            AnalyzeAllocations(context, method, body, "every update", false);
     }
 
     /// <summary>
@@ -244,8 +230,8 @@ public sealed partial class EasyEcsAnalyzer
     {
         bool empty = body is IMethodBodyOperation { BlockBody.Operations.Length: 0, ExpressionBody: null } or IBlockOperation { Operations.Length: 0 };
         bool outside = Symbols.IsRunner(method);
-        var removed = Filtered(method, Symbols.RemovedAttribute);
-        var required = Filtered(method, Symbols.WithAttribute).Concat(Filtered(method, Symbols.ChangedAttribute)).ToArray();
+        var requirements = Symbols.Requirements(method, context.CancellationToken);
+        var excluded = Excluded(method, context.CancellationToken);
         int spans = method.Parameters.Count(p => Symbols.Classify(p) == Symbols.ParamKind.ComponentSpan);
         bool entitySpan = method.Parameters.Any(p => Symbols.Classify(p) == Symbols.ParamKind.Entities);
 
@@ -255,6 +241,8 @@ public sealed partial class EasyEcsAnalyzer
             if (kind is Symbols.ParamKind.Invalid or Symbols.ParamKind.Context) continue;
             var location = p.Locations.FirstOrDefault();
             var component = Symbols.QueriedComponent(p);
+            // Excluded by the method's filters too: EECS016 or EECS049 says the method never runs, the cost is moot.
+            if (component != null && excluded.Contains(component)) continue;
             uses.TryGetValue(p, out var used);
             bool span = kind == Symbols.ParamKind.ComponentSpan && p.Type.OriginalDefinition.ToDisplayString() == "System.Span<T>";
             bool byRef = kind is Symbols.ParamKind.Component or Symbols.ParamKind.Singleton && p.RefKind == RefKind.Ref;
@@ -272,17 +260,16 @@ public sealed partial class EasyEcsAnalyzer
                 if (component != null)
                 {
                     string shown = component.ToMinimalDisplayString(body.SemanticModel!, location?.SourceSpan.Start ?? 0);
-                    // [With<T>] cannot name a type parameter (CS8968); [Removed<T>] with T is EECS016; an EntitySpan needs a span.
-                    if (component is ITypeParameterSymbol || removed.Contains(component, SymbolEqualityComparer.Default)
-                        || kind == Symbols.ParamKind.ComponentSpan && entitySpan && spans == 1) continue;
+                    // [With<T>] cannot name a type parameter (CS8968); an EntitySpan needs a span.
+                    if (component is ITypeParameterSymbol || kind == Symbols.ParamKind.ComponentSpan && entitySpan && spans == 1) continue;
                     // A write access of a tracked component stamps every row it visits: [With<T>] would not, so the
                     // fix is offered only where it changes nothing but the cost.
                     bool stamps = (p.RefKind == RefKind.Ref || kind == Symbols.ParamKind.ComponentSpan
                                    && p.Type.OriginalDefinition.ToDisplayString() == "System.Span<T>")
                                   && Symbols.Implements(component, Symbols.TrackChanges);
-                    if (!stamps && required.Contains(component, SymbolEqualityComparer.Default))
+                    if (!stamps && requirements.Any(r => r is { Has: true, Parameter: false } && SymbolEqualityComparer.Default.Equals(r.Type, component)))
                     {
-                        // [With<T>] or [Changed<T>] already requires it: the parameter only adds the column's walk.
+                        // [With<T>] or [Changed<T>] (the method's or its group's) already requires it: the parameter only adds the column's walk.
                         context.ReportDiagnostic(Diagnostic.Create(UnusedParameter, location, ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Remove"),
                             method.Name, p.Name, $"its column is still loaded for every row, and a filter already requires {shown}; remove it"));
                         continue;
@@ -317,6 +304,8 @@ public sealed partial class EasyEcsAnalyzer
             var type = component ?? p.Type;
             if (Symbols.IsIndexed(type)) continue; // EECS015 says it
             if (references.Any(Uses.MayWrite)) continue;
+            // A 'ref' singleton of a parallel method is EECS010's ("it writes a singleton ... take it as 'in'").
+            if (kind == Symbols.ParamKind.Singleton && Symbols.IsParallel(method)) continue;
             string cost = kind == Symbols.ParamKind.Singleton
                 ? "the system is scheduled as the singleton's writer, so no parallel stage runs it beside a reader"
                 : Symbols.Implements(type, Symbols.TrackChanges)
@@ -365,23 +354,40 @@ public sealed partial class EasyEcsAnalyzer
                 p.Name, method.Name, component.Name));
     }
 
-    /// <summary>The type arguments of a method's filter attributes of one kind (<c>EasyEcs.WithAttribute&lt;T&gt;</c>, ...).</summary>
-    private static ITypeSymbol[] Filtered(IMethodSymbol method, string attribute) => method.GetAttributes()
-        .Where(a => a.AttributeClass is { IsGenericType: true } c && c.ConstructedFrom.ToDisplayString() == attribute)
-        .Select(a => a.AttributeClass!.TypeArguments[0]).ToArray();
-
     /// <summary>
     /// EECS027: the visited entity's components looked up through its Entity, and singletons through the World, inside
     /// a [ForEach] method. Components the method itself adds or removes through the entity are left out.
     /// </summary>
     private static void AnalyzeLookups(OperationBlockAnalysisContext context, Core core, IMethodSymbol method, IOperation body)
     {
+        foreach (var (operation, type, singleton, presence) in RowLookups(core, method, body))
+        {
+            string name = type.ToMinimalDisplayString(operation.SemanticModel!, operation.Syntax.SpanStart);
+            bool job = !Symbols.IsForEach(method);
+            string advice = job ? (singleton ? $"keep it in a field of the job, set before the loop" : $"add {name} to the job's components")
+                : singleton ? $"take it as a parameter ('in {name}' or 'ref {name}'), resolved once per pass"
+                : presence ? $"take a Maybe<{name}> parameter, or split the method with [With<{name}>] / [Without<{name}>]"
+                : $"take it as a parameter ('in {name}' or 'ref {name}'), or a Maybe<{name}> when some entities lack it";
+            context.ReportDiagnostic(Diagnostic.Create(RowLookup, operation.Syntax.GetLocation(),
+                job ? $"Job '{method.ContainingType.Name}'" : $"[ForEach] method '{method.Name}'", name,
+                Shorten(operation.Syntax), advice));
+        }
+    }
+
+    /// <summary>
+    /// The lookups EECS027 reports in a [ForEach] method's or a job's <paramref name="body"/>: the visited entity's
+    /// components through its Entity, singletons through the World, on every row, of a type the method neither changes
+    /// through the entity nor indexes.
+    /// </summary>
+    private static List<(IOperation Operation, ITypeSymbol Type, bool Singleton, bool Presence)> RowLookups(Core core, IMethodSymbol method, IOperation body)
+    {
+        var found = new List<(IOperation, ITypeSymbol, bool, bool)>();
         var entities = method.Parameters.Where(p => Symbols.Classify(p) is Symbols.ParamKind.Entity or Symbols.ParamKind.Entities).ToArray();
         var worlds = method.Parameters.Where(p => Symbols.Classify(p) == Symbols.ParamKind.World).ToArray();
-        if (entities.Length == 0 && worlds.Length == 0 && method.IsStatic) return;
+        if (entities.Length == 0 && worlds.Length == 0 && method.IsStatic) return found;
 
         var changed = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
-        var lookups = new List<(IOperation Operation, ITypeSymbol Type, string Member, bool Singleton, bool Presence)>();
+        var lookups = new List<(IOperation Operation, ITypeSymbol Type, bool Singleton, bool Presence)>();
         foreach (var operation in body.Descendants())
         {
             ISymbol? member;
@@ -408,25 +414,16 @@ public sealed partial class EasyEcsAnalyzer
                 continue;
             }
 
-            if (Lookup(member, onEntity, core) is not { } found) continue;
-            lookups.Add((operation, found.Type, found.Member, !onEntity, found.Presence));
+            if (Lookup(member, onEntity, core) is not { } lookup) continue;
+            lookups.Add((operation, lookup.Type, !onEntity, lookup.Presence));
         }
 
-        foreach (var (operation, type, member, singleton, presence) in lookups)
-        {
-            // Changed through the entity in the same method, indexed (a Maybe of it would be a write: EECS015), or
-            // looked up only on some rows: a branch, a loop, after an early return.
-            if (changed.Contains(type) || Symbols.IsIndexed(type) || !EveryRow(operation, body)) continue;
-            string name = type.ToMinimalDisplayString(operation.SemanticModel!, operation.Syntax.SpanStart);
-            bool job = !Symbols.IsForEach(method);
-            string advice = job ? (singleton ? $"keep it in a field of the job, set before the loop" : $"add {name} to the job's components")
-                : singleton ? $"take it as a parameter ('in {name}' or 'ref {name}'), resolved once per pass"
-                : presence ? $"take a Maybe<{name}> parameter, or split the method with [With<{name}>] / [Without<{name}>]"
-                : $"take it as a parameter ('in {name}' or 'ref {name}'), or a Maybe<{name}> when some entities lack it";
-            context.ReportDiagnostic(Diagnostic.Create(RowLookup, operation.Syntax.GetLocation(),
-                job ? $"Job '{method.ContainingType.Name}'" : $"[ForEach] method '{method.Name}'", name,
-                Shorten(operation.Syntax), advice));
-        }
+        // Changed through the entity in the same method, indexed (a Maybe of it would be a write: EECS015), or looked up
+        // only on some rows: a branch, a loop, after an early return.
+        foreach (var lookup in lookups)
+            if (!changed.Contains(lookup.Type) && !Symbols.IsIndexed(lookup.Type) && EveryRow(lookup.Operation, body))
+                found.Add(lookup);
+        return found;
     }
 
     /// <summary>
@@ -435,18 +432,7 @@ public sealed partial class EasyEcsAnalyzer
     /// </summary>
     private static bool EveryRow(IOperation operation, IOperation body)
     {
-        for (IOperation current = operation, parent = operation.Parent!; parent != null && current != body; current = parent, parent = parent.Parent!)
-            switch (parent)
-            {
-                case IConditionalOperation conditional when conditional.Condition != current:
-                case IBinaryOperation { OperatorKind: BinaryOperatorKind.ConditionalAnd or BinaryOperatorKind.ConditionalOr } binary when binary.RightOperand == current:
-                case ICoalesceOperation coalesce when coalesce.WhenNull == current:
-                case ILoopOperation loop when loop.Body == current:
-                case ISwitchCaseOperation or ISwitchExpressionArmOperation or ICatchClauseOperation or IConditionalAccessOperation
-                    or IAnonymousFunctionOperation or ILocalFunctionOperation:
-                    return false;
-            }
-
+        if (!Symbols.AlwaysRuns(operation, body)) return false;
         int at = operation.Syntax.SpanStart;
         foreach (var exit in body.Descendants())
             if (exit is IReturnOperation { IsImplicit: false } or IThrowOperation or IBranchOperation { BranchKind: BranchKind.Continue or BranchKind.Break }
@@ -455,29 +441,23 @@ public sealed partial class EasyEcsAnalyzer
         return true;
     }
 
-    private static bool IsVisited(IOperation? receiver, IParameterSymbol[] entities, Core core)
-    {
-        while (receiver is IConversionOperation conversion) receiver = conversion.Operand;
-        return receiver switch
+    private static bool IsVisited(IOperation? receiver, IParameterSymbol[] entities, Core core) =>
+        Symbols.Unwrap(receiver) switch
         {
             IParameterReferenceOperation reference => core.Is(reference.Type, core.Entity) && entities.Contains(reference.Parameter, SymbolEqualityComparer.Default),
             IPropertyReferenceOperation { Property.IsIndexer: true, Instance: IParameterReferenceOperation span } => // entities[i]
                 core.Is(span.Type, core.EntitySpan) && entities.Contains(span.Parameter, SymbolEqualityComparer.Default),
             _ => false,
         };
-    }
 
-    private static bool IsWorld(IOperation? receiver, IParameterSymbol[] worlds, Core core, IMethodSymbol method)
-    {
-        while (receiver is IConversionOperation conversion) receiver = conversion.Operand;
-        return receiver switch
+    private static bool IsWorld(IOperation? receiver, IParameterSymbol[] worlds, Core core, IMethodSymbol method) =>
+        Symbols.Unwrap(receiver) switch
         {
             IParameterReferenceOperation reference => worlds.Contains(reference.Parameter, SymbolEqualityComparer.Default),
             IPropertyReferenceOperation { Property.Name: "World", Instance: IInstanceReferenceOperation } property =>
                 !method.IsStatic && core.Is(property.Type, core.World),
             _ => false,
         };
-    }
 
     /// <summary>The component a structural member changes (Set&lt;T&gt;, Remove&lt;T&gt;, generated SetX / RemoveX ...), or null.</summary>
     private static ITypeSymbol? ComponentOf(IMethodSymbol method, Core core) =>
@@ -551,7 +531,9 @@ public sealed partial class EasyEcsAnalyzer
 
     // ---------------- EECS028: allocations ----------------
 
-    private static void AnalyzeAllocations(OperationBlockAnalysisContext context, IMethodSymbol method, IOperation body, string runs)
+    /// <param name="pass">The code runs during a pass (a [ForEach] method, a job's Execute): a cold call the pass refuses
+    /// (TrimExcess, Capture) throws there, which EECS041 or EECS013 says, so its allocation is not reported.</param>
+    private static void AnalyzeAllocations(OperationBlockAnalysisContext context, IMethodSymbol method, IOperation body, string runs, bool pass)
     {
         var pending = new Stack<IOperation>();
         pending.Push(body);
@@ -563,7 +545,7 @@ public sealed partial class EasyEcsAnalyzer
             if (operation is IThrowOperation
                 || operation is IInvocationOperation call && (Conditional(call.TargetMethod) || call.TargetMethod.ContainingType?.ToDisplayString() == "System.Console"))
                 continue;
-            if (Allocates(operation) is { } what)
+            if (Allocates(operation, pass) is { } what)
             {
                 var where = operation is IForEachLoopOperation loop ? loop.Collection.Syntax : operation.Syntax;
                 context.ReportDiagnostic(Diagnostic.Create(Allocation, where.GetLocation(), Shorten(where), method.Name, runs, what));
@@ -585,7 +567,7 @@ public sealed partial class EasyEcsAnalyzer
         method.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == "System.Diagnostics.ConditionalAttribute");
 
     /// <summary>What <paramref name="operation"/> allocates, or null: the kinds EECS028 names.</summary>
-    private static string? Allocates(IOperation operation)
+    private static string? Allocates(IOperation operation, bool pass)
     {
         switch (operation)
         {
@@ -610,6 +592,7 @@ public sealed partial class EasyEcsAnalyzer
                 when concat.ConstantValue is not { HasValue: true }:
                 return "a string built at run time";
             case IInvocationOperation { TargetMethod: { ContainingType: { } owner } method } when owner.ToDisplayString() is Symbols.World or Symbols.Entity
+                                                                                                && !(pass && PassRefused.Contains(method.Name))
                                                                                                 && Cold(method) is { } cold:
                 return cold;
             case IInvocationOperation call when StringCall(call.TargetMethod):
@@ -689,8 +672,9 @@ public sealed partial class EasyEcsAnalyzer
         bool generated = owner != null && (owner.IsExtension || owner.ContainingType?.IsExtension == true) && Symbols.IsGenerated(method);
         if (owner == null || !core.Is(owner, core.Entity) && !core.Is(owner, core.World) && !generated) return;
 
-        if (core.Is(owner, core.World) && method.Name == "Update" && core.SystemOf(context.ContainingSymbol) is { } system
-            && !StableForEach(context.ContainingSymbol, call.SemanticModel!))
+        // In a stable [ForEach] method EECS013 already reports it (Update is a structural call).
+        if (core.Is(owner, core.World) && method.Name == "Update" && Symbols.SystemOf(context.ContainingSymbol) is { } system
+            && !(context.ContainingSymbol is IMethodSymbol caller && Symbols.IsForEach(caller) && Symbols.IsStable(caller, call.SemanticModel!)))
         {
             context.ReportDiagnostic(Diagnostic.Create(UpdateInSystem, call.Syntax.GetLocation(), system.Name,
                 "World.Update" + (method.TypeArguments.Length == 1 ? "<" + method.TypeArguments[0].Name + ">" : "")));
@@ -698,7 +682,9 @@ public sealed partial class EasyEcsAnalyzer
         }
 
         var model = call.SemanticModel!;
-        // EECS025: a tracked component reached for writing (Get<T>(), the generated WriteX()) and only read.
+        // EECS025: a tracked component reached for writing (Get<T>(), the generated WriteX()) and only read; a copy of
+        // it changed and dropped is EECS038's (keeping the ref is the fix, not Read).
+        if (IsDroppedCopy(call)) return;
         if (core.Is(owner, core.Entity) && method is { Name: "Get", TypeArguments.Length: 1 } && core.Tracked(method.TypeArguments[0])
             && !Symbols.IsIndexed(method.TypeArguments[0]) && call.Syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax access }
             && !Uses.MayWrite(call))
@@ -721,14 +707,22 @@ public sealed partial class EasyEcsAnalyzer
             return;
         }
 
-        if (!generated) GeneratedEquivalent(context, call, core);
+        if (!generated && !RowLookupOf(call, context.ContainingSymbol, core) && !SetAfterCreation(call, core)) GeneratedEquivalent(context, call, core);
     }
 
-    /// <summary>A stable [ForEach] method: EECS013 already reports a structural call (Update is one) in it.</summary>
-    private static bool StableForEach(ISymbol symbol, SemanticModel model) =>
-        symbol is IMethodSymbol method && Symbols.IsForEach(method)
-        && method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is MethodDeclarationSyntax syntax
-        && syntax.SyntaxTree == model.SyntaxTree && Symbols.IsStable(method, syntax, model);
+    /// <summary>
+    /// Whether <paramref name="call"/> is a lookup EECS027 reports (in a [ForEach] method or a job): its fix takes the
+    /// lookup away, so EECS033's shorter spelling of it would only be undone.
+    /// </summary>
+    private static bool RowLookupOf(IInvocationOperation call, ISymbol containing, Core core) =>
+        containing is IMethodSymbol method && (Symbols.IsForEach(method) || Symbols.JobInterface(method) != null)
+        && RowLookups(core, method, Symbols.Root(call)).Any(l => l.Operation == call);
+
+    /// <summary>Whether <paramref name="call"/> is the Set EECS052 folds into the creation before it (and so removes).</summary>
+    private static bool SetAfterCreation(IInvocationOperation call, Core core) =>
+        call.Parent is IExpressionStatementOperation { Parent: IBlockOperation block } statement && block.Operations.IndexOf(statement) is > 0 and var at
+        && block.Operations[at - 1] is IVariableDeclarationGroupOperation group
+        && group.Declarations.SelectMany(d => d.Declarators).Any(d => CreateThenSetOf(d, core)?.Set == call);
 
     private static ImmutableDictionary<string, string?> Fix(string replacement, string title) =>
         ImmutableDictionary<string, string?>.Empty.Add(Replace, replacement).Add(FixTitle, title);
@@ -864,20 +858,13 @@ public sealed partial class EasyEcsAnalyzer
     {
         var reference = (IPropertyReferenceOperation)context.Operation;
         var property = reference.Property;
-        if (!property.Name.StartsWith("Component") || property.ContainingType is not { Name: "QueryItem" or "ReadItem" } item
-            || item.ContainingNamespace?.ToDisplayString() != "EasyEcs" || reference.Syntax is not MemberAccessExpressionSyntax access
+        if (!Symbols.IsItemComponent(property) || reference.Syntax is not MemberAccessExpressionSyntax access
             || property.Type is not INamedTypeSymbol { IsGenericType: false } type) return;
         string replacement = access.Expression + "." + type.Name;
         if (!Binds(reference.SemanticModel!, access, replacement, out var bound) || !Symbols.IsGenerated(bound!)
             || bound is IPropertySymbol { RefKind: not RefKind.Ref } && Uses.MayWrite(reference)) return;
         context.ReportDiagnostic(Diagnostic.Create(GeneratedMember, access.GetLocation(), Fix(replacement, "Use ." + type.Name),
             access.ToString(), replacement));
-    }
-
-    private static IOperation? Unwrap(IOperation? operation)
-    {
-        while (operation is IConversionOperation conversion) operation = conversion.Operand;
-        return operation;
     }
 
     // ---------------- loops: EECS030, EECS031, EECS032 ----------------
@@ -897,7 +884,7 @@ public sealed partial class EasyEcsAnalyzer
 
     /// <summary>The <c>world.Query&lt;…&gt;(filter)</c> or <c>world.Read&lt;…&gt;(filter)</c> a foreach walks, or null.</summary>
     private static IInvocationOperation? Query(IOperation collection, Core core) =>
-        Unwrap(collection) is IInvocationOperation { TargetMethod: { Name: "Query" or "Read", TypeArguments.Length: > 0 } method } call
+        Symbols.Unwrap(collection) is IInvocationOperation { TargetMethod: { Name: "Query" or "Read", TypeArguments.Length: > 0 } method } call
         && core.Is(method.ContainingType, core.World) && call.Instance != null ? call : null;
 
     /// <summary>
@@ -936,18 +923,6 @@ public sealed partial class EasyEcsAnalyzer
         string? filter = query.Arguments.FirstOrDefault(a => !a.IsImplicit)?.Value.Syntax.ToString();
         var statement = Single(loop.Body);
 
-        // EECS046: a query that only reads tracked components. The fix renames the call; a loop variable typed by hand
-        // (QueryItem<...> item) would need its type changed too, so it gets the fix only when declared with 'var'.
-        if (query.TargetMethod.Name == "Query" && item != null && ReadsOnly(loop.Body, item)
-            && types.Where(t => Symbols.Implements(t, Symbols.TrackChanges)).Select(t => t.ToMinimalDisplayString(model, at)).ToArray() is { Length: > 0 } tracked
-            && query.Syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name: GenericNameSyntax queried } })
-        {
-            string read = "Read" + queried.TypeArgumentList;
-            bool implicitlyTyped = loop.Syntax is not ForEachStatementSyntax { Type: { IsVar: false } };
-            context.ReportDiagnostic(Diagnostic.Create(ReadOnlyQuery, queried.GetLocation(), implicitlyTyped ? Fix(read, "Read without stamping") : null,
-                queried.ToString(), string.Join(", ", tracked), $"{world}.{read}"));
-        }
-
         // EECS032: a loop that only counts.
         if (statement is IExpressionStatementOperation { Operation: var step } && Counter(step) is { } counter && item != null && !Mentions(loop.Body, item))
         {
@@ -969,47 +944,72 @@ public sealed partial class EasyEcsAnalyzer
             string attribute = presence.Has ? "Without" : "With";
             context.ReportDiagnostic(Diagnostic.Create(QueryByHand, condition.Syntax.GetLocation(),
                 "This loop skips entities by testing each one", $"filter the query with {attribute}<{presence.Type.Name}>() instead"));
+            ReadOnly();
             return;
         }
 
-        // EECS030: the same structural change through each entity.
-        if (statement is not IExpressionStatementOperation { Operation: IInvocationOperation call } || item == null
-            || !IsItemEntity(Symbols.Receiver(call), item) || !Invariant(call.Arguments.Select(a => a.Value), loop.Body, item)) return;
-        var method = call.TargetMethod;
-        bool generated = Symbols.IsGenerated(method);
-        var component = method.TypeArguments.Length == 1 ? method.TypeArguments[0] : generated ? Named(method, core) : null;
-        string with = (filter != null ? "(" + filter + ")" : "QueryFilter.Create()") + string.Concat(types.Select(t => $".With<{t.ToMinimalDisplayString(model, at)}>()"));
-        string? bulk = null, call2 = null, verb = null;
-        string? name = generated ? Generated(method.Name) : method.Name;
-        string T() => component!.ToMinimalDisplayString(model, at);
-        switch (name)
+        if (!Bulk()) ReadOnly();
+        return;
+
+        // EECS046: a query that only reads tracked components. The fix renames the call; a loop variable typed by hand
+        // (QueryItem<...> item) would need its type changed too, so it gets the fix only when declared with 'var'.
+        // Run only when the loop stays: a loop EECS032 makes a Count or EECS030 a bulk call has nothing left to read.
+        void ReadOnly()
         {
-            case "Destroy" when !generated:
-                (bulk, call2, verb) = ("DestroyAll", $"DestroyAll<{typeList}>({filter})", "destroys");
-                break;
-            // A Set of a component the query requires overwrites a value: no row moves, nothing for SetAll to batch.
-            // A grouped component's new value moves each row to its group's table, one by one under SetAll too.
-            case "Set" when component != null && !types.Contains(component, SymbolEqualityComparer.Default)
-                            && !Symbols.Implements(component, Symbols.Group)
-                            && SetValue(call, component, generated, model, at) is { } value:
-                (bulk, call2, verb) = ("SetAll", $"SetAll({value}, {with})", "adds a component to");
-                break;
-            case "Remove" when component != null && call.Arguments.All(a => a.IsImplicit):
-                (bulk, call2, verb) = ("RemoveAll", $"RemoveAll<{T()}>({with})", "removes a component from");
-                break;
-            // ChildOf and cleanup components cannot be disabled, by one call or by all (EECS048).
-            case "Disable" when component != null && Disableable(component):
-                (bulk, call2, verb) = ("DisableAll", $"DisableAll<{T()}>({with})", "disables a component of");
-                break;
-            case "Enable" when component != null:
-                (bulk, call2, verb) = ("EnableAll", $"EnableAll<{T()}>({with})", "enables a component of");
-                break;
+            if (query.TargetMethod.Name == "Query" && item != null && ReadsOnly(loop.Body, item)
+                && types.Where(t => Symbols.Implements(t, Symbols.TrackChanges)).Select(t => t.ToMinimalDisplayString(model, at)).ToArray() is { Length: > 0 } tracked
+                && query.Syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name: GenericNameSyntax queried } })
+            {
+                string read = "Read" + queried.TypeArgumentList;
+                bool implicitlyTyped = loop.Syntax is not ForEachStatementSyntax { Type: { IsVar: false } };
+                context.ReportDiagnostic(Diagnostic.Create(ReadOnlyQuery, queried.GetLocation(), implicitlyTyped ? Fix(read, "Read without stamping") : null,
+                    queried.ToString(), string.Join(", ", tracked), $"{world}.{read}"));
+            }
         }
 
-        if (bulk == null) return;
-        string text = world + "." + call2;
-        context.ReportDiagnostic(Diagnostic.Create(PerEntityChange, loop.Syntax.GetLocation(),
-            Binds(model, loop.Syntax, text, out _) ? Fix(text + ";", "Make it one bulk call") : null, verb, bulk));
+        // EECS030: the same structural change through each entity.
+        bool Bulk()
+        {
+            if (statement is not IExpressionStatementOperation { Operation: IInvocationOperation call } || item == null
+                || !IsItemEntity(Symbols.Receiver(call), item) || !Invariant(call.Arguments.Select(a => a.Value), loop.Body, item)) return false;
+            var method = call.TargetMethod;
+            bool generated = Symbols.IsGenerated(method);
+            var component = ComponentOf(method, core);
+            if (component != null && Symbols.IsWorldTag(component)) return false; // the world's own tags are EECS045's, by one call or by all
+            string with = (filter != null ? "(" + filter + ")" : "QueryFilter.Create()") + string.Concat(types.Select(t => $".With<{t.ToMinimalDisplayString(model, at)}>()"));
+            string? bulk = null, call2 = null, verb = null;
+            string? name = generated ? Generated(method.Name) : method.Name;
+            string T() => component!.ToMinimalDisplayString(model, at);
+            switch (name)
+            {
+                case "Destroy" when !generated:
+                    (bulk, call2, verb) = ("DestroyAll", $"DestroyAll<{typeList}>({filter})", "destroys");
+                    break;
+                // A Set of a component the query requires overwrites a value: no row moves, nothing for SetAll to batch.
+                // A grouped component's new value moves each row to its group's table, one by one under SetAll too.
+                case "Set" when component != null && !types.Contains(component, SymbolEqualityComparer.Default)
+                                && !Symbols.Implements(component, Symbols.Group)
+                                && SetValue(call, component, generated, model, at) is { } value:
+                    (bulk, call2, verb) = ("SetAll", $"SetAll({value}, {with})", "adds a component to");
+                    break;
+                case "Remove" when component != null && call.Arguments.All(a => a.IsImplicit):
+                    (bulk, call2, verb) = ("RemoveAll", $"RemoveAll<{T()}>({with})", "removes a component from");
+                    break;
+                // ChildOf and cleanup components cannot be disabled, by one call or by all (EECS048).
+                case "Disable" when component != null && Symbols.IsDisableable(component):
+                    (bulk, call2, verb) = ("DisableAll", $"DisableAll<{T()}>({with})", "disables a component of");
+                    break;
+                case "Enable" when component != null:
+                    (bulk, call2, verb) = ("EnableAll", $"EnableAll<{T()}>({with})", "enables a component of");
+                    break;
+            }
+
+            if (bulk == null) return false;
+            string text = world + "." + call2;
+            context.ReportDiagnostic(Diagnostic.Create(PerEntityChange, loop.Syntax.GetLocation(),
+                Binds(model, loop.Syntax, text, out _) ? Fix(text + ";", "Make it one bulk call") : null, verb, bulk));
+            return true;
+        }
 
         static string Generated(string member) =>
             member.StartsWith("Set") ? "Set" : member.StartsWith("Remove") ? "Remove" : member.StartsWith("Disable") ? "Disable" : member.StartsWith("Enable") ? "Enable" : member;
@@ -1064,7 +1064,7 @@ public sealed partial class EasyEcsAnalyzer
     }
 
     private static bool IsItemEntity(IOperation? receiver, ISymbol item) =>
-        Unwrap(receiver) is IPropertyReferenceOperation { Property.Name: "Entity", Instance: ILocalReferenceOperation local }
+        Symbols.Unwrap(receiver) is IPropertyReferenceOperation { Property.Name: "Entity", Instance: ILocalReferenceOperation local }
         && SymbolEqualityComparer.Default.Equals(local.Local, item);
 
     private static bool Mentions(IOperation body, ISymbol variable) =>
@@ -1113,13 +1113,11 @@ public sealed partial class EasyEcsAnalyzer
         var create = creations[0];
         // Only a creation on every pass of this loop creates its count: one under a branch or in an inner loop replaces
         // an entity now and then, or is the inner loop's to report.
-        for (var parent = create.Parent; parent != null && parent != loop; parent = parent.Parent)
-            if (parent is ILoopOperation or IConditionalOperation or ISwitchOperation or ICoalesceOperation or IConditionalAccessOperation)
-                return;
+        if (!Symbols.AlwaysRuns(create, loop.Body)) return;
         string world = create.Instance!.Syntax.ToString();
         // A system creates entities in a world that is running: rows freed by earlier destroys are reused, and a
         // table that grew keeps its size, so the cost is a start-up's, paid once.
-        if (Reserved(loop, world, core) || core.SystemOf(context.ContainingSymbol) != null) return;
+        if (Reserved(loop, world, core) || Symbols.SystemOf(context.ContainingSymbol) != null) return;
         // A count known to be small never sends an array to the large object heap (D28): doubling costs nothing there.
         if ((bound.ConstantValue is { HasValue: true, Value: int end } ? end : FixedLength(bound)) is int known
             && (start.ConstantValue is { HasValue: true, Value: int begin } ? known - begin : known) < SmallCount)
@@ -1134,7 +1132,7 @@ public sealed partial class EasyEcsAnalyzer
         // The whole loop as one call: `handles[i] = world.CreateEntity(values)` over every slot of `handles`, the values the same each time.
         if (zero && Single(loop.Body) is IExpressionStatementOperation { Operation: ISimpleAssignmentOperation { Target: IArrayElementReferenceOperation { ArrayReference: var array, Indices: { Length: 1 } indices }, Value: var assigned } }
             && indices[0] is ILocalReferenceOperation i
-            && Unwrap(assigned) == create && SymbolEqualityComparer.Default.Equals(i.Local, index)
+            && Symbols.Unwrap(assigned) == create && SymbolEqualityComparer.Default.Equals(i.Local, index)
             && bound is IPropertyReferenceOperation { Property.Name: "Length", Instance: { } lengthOf } && lengthOf.Syntax.ToString() == array.Syntax.ToString()
             && Invariant(create.Arguments.Select(a => a.Value), loop.Body, index))
         {
@@ -1166,7 +1164,7 @@ public sealed partial class EasyEcsAnalyzer
     /// </summary>
     private static int? FixedLength(IOperation bound)
     {
-        if (Unwrap(bound) is not IPropertyReferenceOperation { Property.Name: "Length", Instance: ILocalReferenceOperation { Local: { Type: IArrayTypeSymbol } local } } length)
+        if (Symbols.Unwrap(bound) is not IPropertyReferenceOperation { Property.Name: "Length", Instance: ILocalReferenceOperation { Local: { Type: IArrayTypeSymbol } local } } length)
             return null;
         IOperation root = length;
         while (root.Parent != null) root = root.Parent;
@@ -1175,7 +1173,7 @@ public sealed partial class EasyEcsAnalyzer
             switch (operation)
             {
                 case IVariableDeclaratorOperation declarator when SymbolEqualityComparer.Default.Equals(declarator.Symbol, local):
-                    if (Unwrap(declarator.Initializer?.Value) is not IArrayCreationOperation { DimensionSizes: { Length: 1 } sizes }
+                    if (Symbols.Unwrap(declarator.Initializer?.Value) is not IArrayCreationOperation { DimensionSizes: { Length: 1 } sizes }
                         || sizes[0].ConstantValue is not { HasValue: true, Value: int n }) return null;
                     size = n;
                     break;
@@ -1202,7 +1200,7 @@ public sealed partial class EasyEcsAnalyzer
     };
 
     /// <summary>An expression without side effects that can be repeated before the loop: constants, variables, fields, Length / Count.</summary>
-    private static bool Simple(IOperation operation) => Unwrap(operation) switch
+    private static bool Simple(IOperation operation) => Symbols.Unwrap(operation) switch
     {
         { ConstantValue.HasValue: true } => true,
         ILocalReferenceOperation or IParameterReferenceOperation => true,
@@ -1235,7 +1233,7 @@ public sealed partial class EasyEcsAnalyzer
         var binary = (IBinaryOperation)context.Operation;
         bool countLeft = IsCount(binary.LeftOperand, core);
         if (!countLeft && !IsCount(binary.RightOperand, core)) return;
-        var count = (IInvocationOperation)Unwrap(countLeft ? binary.LeftOperand : binary.RightOperand)!;
+        var count = (IInvocationOperation)Symbols.Unwrap(countLeft ? binary.LeftOperand : binary.RightOperand)!;
         var other = countLeft ? binary.RightOperand : binary.LeftOperand;
         if (other.ConstantValue is not { HasValue: true, Value: int value }) return;
         var kind = binary.OperatorKind;
@@ -1261,7 +1259,7 @@ public sealed partial class EasyEcsAnalyzer
     }
 
     private static bool IsCount(IOperation operation, Core core) =>
-        Unwrap(operation) is IInvocationOperation { TargetMethod: { Name: "Count", TypeArguments.Length: > 0 } method, Instance: not null }
+        Symbols.Unwrap(operation) is IInvocationOperation { TargetMethod: { Name: "Count", TypeArguments.Length: > 0 } method, Instance: not null }
         && core.Is(method.ContainingType, core.World);
 
     // ---------------- EECS052: a component added right after the creation ----------------
@@ -1274,34 +1272,47 @@ public sealed partial class EasyEcsAnalyzer
     /// </summary>
     private static void AnalyzeCreation(OperationAnalysisContext context, Core core)
     {
-        var declarator = (IVariableDeclaratorOperation)context.Operation;
-        if (declarator.Symbol.RefKind != RefKind.None || Unwrap(declarator.Initializer?.Value) is not IInvocationOperation create
-            || !core.Is(create.TargetMethod.ContainingType, core.World) || create.TargetMethod.Name is not ("CreateEntity" or "Instantiate")
-            || !core.Is(create.TargetMethod.ReturnType, core.Entity) || create.Instance == null
-            || create.TargetMethod.Name == "Instantiate" && create.Arguments.Skip(1).Any(a => a.Parameter?.RefKind != RefKind.In)
-            || create.Syntax is not InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax created } creation
-            || declarator.Parent?.Parent is not IVariableDeclarationGroupOperation { Parent: IBlockOperation block } statement) return;
-        int at = block.Operations.IndexOf(statement);
-        if (at + 1 >= block.Operations.Length || block.Operations[at + 1] is not IExpressionStatementOperation { Operation: IInvocationOperation set } next
-            || Symbols.Receiver(set) is not ILocalReferenceOperation target || !SymbolEqualityComparer.Default.Equals(target.Local, declarator.Symbol)) return;
-
-        var method = set.TargetMethod;
-        bool generated = Symbols.IsGenerated(method) && Symbols.IsGeneratedWriter(method) && method.Name.StartsWith("Set") && !method.Name.EndsWith("IfChanged");
-        if (!generated && !(core.Is(method.ContainingType, core.Entity) && method is { Name: "Set", TypeArguments.Length: 1 } && set.Arguments.Length == 1)) return;
-        var component = generated ? Named(method, core) : method.TypeArguments[0];
-        var given = create.TargetMethod.TypeArguments;
-        if (component is not INamedTypeSymbol || given.Length >= Symbols.MaxComponents || given.Contains(component, SymbolEqualityComparer.Default)
-            || Symbols.Implements(component, Symbols.Group) || IsWorldTag(component)
-            || !Invariant(set.Arguments.Where(a => !a.IsImplicit).Select(a => a.Value), next, declarator.Symbol)) return;
-
+        if (CreateThenSetOf((IVariableDeclaratorOperation)context.Operation, core) is not { } found) return;
+        var (create, set, next, component, text) = found;
         var model = create.SemanticModel!;
         int position = create.Syntax.SpanStart;
-        if (SetValue(set, component, generated, model, position) is not { } value) return;
-        string name = created.Name is GenericNameSyntax typed ? typed.Identifier.ValueText : created.Name.ToString(); // CreateEntity<P>(…): inferred again
-        string text = $"{created.Expression}.{name}({string.Join(", ", creation.ArgumentList.Arguments.Select(a => a.ToString()).Append(value))})";
         var fix = Binds(model, create.Syntax, text, out var bound) && bound is IMethodSymbol { Name: "CreateEntity" or "Instantiate" }
             ? Fix(text, "Create it with the component").Add(RemoveOthers, "") : null;
         context.ReportDiagnostic(Diagnostic.Create(CreateThenSet, create.Syntax.GetLocation(), fix is null ? null : [next.Syntax.GetLocation()], fix,
             Shorten(set.Syntax), component.ToMinimalDisplayString(model, position), Shorten(SyntaxFactory.ParseExpression(text))));
+    }
+
+    /// <summary>
+    /// The creation <paramref name="declarator"/> declares and the Set right after it that EECS052 folds into it, with
+    /// the text of the creation given the component; null when the rule does not apply.
+    /// </summary>
+    private static (IInvocationOperation Create, IInvocationOperation Set, IOperation Next, ITypeSymbol Component, string Text)?
+        CreateThenSetOf(IVariableDeclaratorOperation declarator, Core core)
+    {
+        if (declarator.Symbol.RefKind != RefKind.None || Symbols.Unwrap(declarator.Initializer?.Value) is not IInvocationOperation create
+            || !core.Is(create.TargetMethod.ContainingType, core.World) || create.TargetMethod.Name is not ("CreateEntity" or "Instantiate")
+            || !core.Is(create.TargetMethod.ReturnType, core.Entity) || create.Instance == null
+            || create.TargetMethod.Name == "Instantiate" && create.Arguments.Skip(1).Any(a => a.Parameter?.RefKind != RefKind.In)
+            || create.Syntax is not InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax created } creation
+            || declarator.Parent?.Parent is not IVariableDeclarationGroupOperation { Parent: IBlockOperation block } statement) return null;
+        int at = block.Operations.IndexOf(statement);
+        if (at + 1 >= block.Operations.Length || block.Operations[at + 1] is not IExpressionStatementOperation { Operation: IInvocationOperation set } next
+            || Symbols.Receiver(set) is not ILocalReferenceOperation target || !SymbolEqualityComparer.Default.Equals(target.Local, declarator.Symbol)) return null;
+
+        var method = set.TargetMethod;
+        bool generated = Symbols.IsGenerated(method) && Symbols.IsGeneratedWriter(method) && method.Name.StartsWith("Set") && !method.Name.EndsWith("IfChanged");
+        if (!generated && !(core.Is(method.ContainingType, core.Entity) && method is { Name: "Set", TypeArguments.Length: 1 } && set.Arguments.Length == 1)) return null;
+        var component = generated ? Named(method, core) : method.TypeArguments[0];
+        var given = create.TargetMethod.TypeArguments;
+        if (component is not INamedTypeSymbol || given.Length >= Symbols.MaxComponents || given.Contains(component, SymbolEqualityComparer.Default)
+            || Symbols.Implements(component, Symbols.Group) || Symbols.IsWorldTag(component)
+            || !Invariant(set.Arguments.Where(a => !a.IsImplicit).Select(a => a.Value), next, declarator.Symbol)) return null;
+
+        var model = create.SemanticModel!;
+        int position = create.Syntax.SpanStart;
+        if (SetValue(set, component, generated, model, position) is not { } value) return null;
+        string name = created.Name is GenericNameSyntax typed ? typed.Identifier.ValueText : created.Name.ToString(); // CreateEntity<P>(…): inferred again
+        string text = $"{created.Expression}.{name}({string.Join(", ", creation.ArgumentList.Arguments.Select(a => a.ToString()).Append(value))})";
+        return (create, set, next, component, text);
     }
 }
