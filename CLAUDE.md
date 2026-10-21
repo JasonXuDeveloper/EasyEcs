@@ -221,6 +221,20 @@ tools/ApiDocs/                 writes docs/content/reference/ from the XML docs 
                                workflow and glossary); missing, stale or orphaned entries fail the tool
 ```
 
+## Workflows
+
+Repeatable procedures live in `.claude/skills/<name>/SKILL.md` (Claude Code loads them as skills; any agent or
+person can follow them as checklists). Update a skill when a round teaches something new.
+
+| Skill | When |
+|---|---|
+| `verify` | before merging to master: build, tests, DocCheck, ApiDocs, docs site, samples, templates, demo |
+| `audit` | a review round: parallel audits in worktrees on the work branch, triage, merge, docs pass, verify |
+| `audit-core` | redundancy, duplicated logic, coupling, lifecycle edges and hot-path cost in `EasyEcs.Core` |
+| `audit-generator` | generator speed, incremental best practices, caching tests, newer Roslyn features |
+| `audit-analyzer` | overlapping or missing EECS rules, false positives, code fixes, shared `Symbols` checks |
+| `audit-docs` | stale names, exemplary examples, best practices, duplication, en/zh drift |
+
 ## Engineering principles (apply to every change)
 
 1. **Performance is the first constraint, and GC is part of performance.** Hot paths (queries, iteration, component

@@ -8,3 +8,6 @@ riderModule.iml
 EasyEcs.sln.DotSettings.user
 BenchmarkDotNet.Artifacts/
 artifacts/
+
+# agent worktrees (audit rounds)
+.claude/worktrees/

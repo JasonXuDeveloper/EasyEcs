@@ -1,0 +1,46 @@
+---
+name: audit
+description: Run an audit round of EasyEcs (core, generators, analyzer, docs) with parallel agents in worktrees, then triage, merge and verify. Use when asked to review the codebase for redundancy, design problems, missing analyzers or doc gaps, or to "do another round".
+---
+
+# Audit round
+
+One round = parallel audits, each in its own worktree and branch, then triage and merge on the work branch.
+
+## Scopes (one agent each, never two on the same files)
+
+| Skill | Owns | Looks for |
+|---|---|---|
+| `audit-core` | `src/EasyEcs.Core`, its tests and benchmarks | redundancy, non-DRY code, coupling, bugs, hot-path cost |
+| `audit-generator` | `src/EasyEcs.Generator` (generators, Shapes, Code) | generator speed, incremental best practices, newer Roslyn features |
+| `audit-analyzer` | `EasyEcsAnalyzer*.cs`, `Symbols.cs`, `Uses.cs`, `Threads.cs`, `src/EasyEcs.CodeFixes` | overlapping rules, missing rules and fixes, false positives |
+| `audit-docs` | `docs/content`, README, `docs/public/easyecs-rules.md`, samples READMEs | stale names, examples, best practices, duplication, en/zh |
+
+`audit-generator` and `audit-analyzer` share `Symbols.cs`: run them in different rounds or give `Symbols.cs` to one.
+
+## Starting an agent
+
+- A new worktree may start on an old commit (`origin/master`), not on the work branch. The prompt must say:
+  `git checkout -B <audit-branch> <work-branch>`, then check `git merge-base --is-ancestor <work-branch-tip> HEAD`.
+- Give each agent: its skill, its owned paths, the paths it must not touch, the commit command (AGENTS.md: author =
+  owner, committer = signing identity, no session links), "commit on your branch, do not push or merge".
+- Decision numbers collide between parallel agents: give each a distinct range (e.g. next free D, next free D + 1).
+- Docs edits from code audits stay minimal (changelog, migration, decisions, the one guide section) so the
+  docs audit does not conflict.
+
+## While they run
+
+- When the work branch moves (another audit merged, master merged), tell the running agents to rebase onto its tip.
+- Findings an agent reports outside its scope (a misleading exception message found by the docs audit) go to the
+  agent that owns the file, not into a second edit.
+
+## Triage and merge
+
+1. Read each report. Reject changes that widen the API without need or regress a benchmark.
+2. Merge one branch at a time onto the work branch; after each: `dotnet build -c Release` (0 warnings), `dotnet test`.
+3. Conflicts are usually in `changelog`, `migration`, `decisions` (both sides appended): keep both, renumber a
+   duplicated D and fix its anchors and links.
+4. After the code audits are merged, run `audit-docs` once more: code changes leave stale pages behind.
+5. Finish with `verify`, then fast-forward `master` (no PR unless asked) and push.
+6. Remove finished worktrees (`git worktree remove`, `git worktree prune`): a stale worktree makes BenchmarkDotNet
+   find two matching projects.
