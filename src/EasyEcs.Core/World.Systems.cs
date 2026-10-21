@@ -203,12 +203,17 @@ public sealed partial class World
         return group;
     }
 
-    /// <summary>Destroy all systems (OnDestroy in reverse order), then release all storage.</summary>
+    /// <summary>
+    /// Destroy all systems (OnDestroy in reverse order), then release all storage. Every system's OnDestroy runs and the
+    /// storage is released even when one throws; under <see cref="SystemErrorPolicy.Throw"/> the first exception is
+    /// rethrown at the end. Afterwards every structural change throws <see cref="ObjectDisposedException"/>.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
 
+        Exception first = null;
         var groups = _groups;
         for (int g = groups.Length - 1; g >= 0; g--)
         {
@@ -222,6 +227,10 @@ public sealed partial class World
                 catch (Exception e) when (_options.SystemErrors == SystemErrorPolicy.Disable)
                 {
                     systems[i].Fail(e);
+                }
+                catch (Exception e)
+                {
+                    first ??= e; // the other systems still get their OnDestroy
                 }
 
                 systems[i].World = null;
@@ -243,6 +252,8 @@ public sealed partial class World
         _entityCount = 0;
         Collectible.Untrack(this);
         ComponentInfo.Reclaim(); // bits of unloaded contexts this world still mentioned
+        Gate.Close(); // the cleared tables take no rows: every later structural change throws
+        if (first != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(first);
     }
 
     /// <summary>

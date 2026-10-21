@@ -73,6 +73,7 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.NoInlining)]
     private SingletonBox<T> AddMissingSingleton<T>() where T : struct, ISingletonComponent
     {
+        if (_disposed) throw new ObjectDisposedException(nameof(World)); // the shared gate does not test the owner's flag
         using (Shared())
         {
             return Box<T>() ?? Publish<T>();
@@ -98,7 +99,7 @@ public sealed partial class World
         {
             int index = SingletonType<T>.Index;
             if (index >= _singletons.Length || _singletons[index] == null) return false;
-            _singletons[index] = null;
+            Volatile.Write(ref _singletons[index], null); // as Publish: a reader on another thread sees it whole
             return true;
         }
     }

@@ -58,15 +58,20 @@ public readonly partial struct QueryFilter
     /// <summary>
     /// Require <typeparamref name="T"/> with group <paramref name="group"/>: only the tables of that group are walked
     /// (<see cref="World.GroupBy{T}"/>; in a world that does not group by <typeparamref name="T"/>, every table holds
-    /// group 0). One group per filter.
+    /// group 0). One group per filter: naming a second one throws <see cref="ArgumentException"/>.
     /// </summary>
     public QueryFilter InGroup<T>(int group) where T : struct, IComponent, IGroup
     {
+        if (GroupBit != 0 && (GroupBit != ComponentType<T>.Bit + 1 || Group != group)) ThrowSecondGroup();
         var filter = Adding(0, ComponentType<T>.Bit);
         Unsafe.AsRef(in filter.GroupBit) = ComponentType<T>.Bit + 1;
         Unsafe.AsRef(in filter.Group) = group;
         return filter;
     }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowSecondGroup() =>
+        throw new ArgumentException("A filter names one group: InGroup was called twice with different groups");
 
     /// <summary>Require <typeparamref name="T"/> to be absent.</summary>
     public QueryFilter Without<T>() where T : struct, IComponent => Adding(1, ComponentType<T>.Bit);

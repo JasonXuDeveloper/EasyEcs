@@ -1,3 +1,4 @@
+using System;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
@@ -84,5 +85,16 @@ public class GroupTests
         e.Set(new Zone(2));
         world.Restore(snapshot);
         Assert.That((Sum(world, 1), Sum(world, 2)), Is.EqualTo((1, 0)));
+    }
+
+    [Test]
+    public void AFilterNamesOneGroupAndGroupByWaitsForPassesToEnd()
+    {
+        Assert.Throws<ArgumentException>(() => QueryFilter.Create().InGroup<Zone>(1).InGroup<Zone>(2));
+        Assert.DoesNotThrow(() => QueryFilter.Create().InGroup<Zone>(1).InGroup<Zone>(1));
+        using var world = new World();
+        world.CreateEntity(new Zone(1));
+        foreach (var _ in world.Query<Zone>())
+            Assert.Throws<InvalidOperationException>(() => world.GroupBy<Zone>());
     }
 }

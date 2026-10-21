@@ -8,7 +8,10 @@ namespace EasyEcs;
 // Archetype registry, entity membership and the query cache.
 //
 // Thread-safety contract:
-// - All mutation (archetype creation, membership changes, cache updates) happens under the structural gate (Structural()).
+// - Structural mutation (archetype creation, membership changes) happens under the owner's gate (Structural()).
+// - The cold paths the threads of a parallel stage reach on their own (a query cache miss, a missing singleton, closing
+//   tombstones) take the shared gate (Shared()) instead. The two flags do not exclude each other: this is safe because
+//   other threads only run while the structure is frozen (a stage or parallel chunks), when the owner's gate throws.
 // - Lock-free readers (queries) only see immutable Archetype[] snapshots: _allArchetypes and every query cache entry
 //   are replaced copy-on-write and published with Volatile.Write, never mutated in place.
 public sealed partial class World

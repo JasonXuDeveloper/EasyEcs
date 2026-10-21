@@ -242,6 +242,22 @@ public class SystemTests
         Assert.That(failing.Error.Message, Is.EqualTo("bad.destroy"));          // OnDestroy during Dispose
     }
 
+    [Test]
+    public void AThrowingOnDestroyStillDestroysTheOtherSystemsAndReleasesTheWorld()
+    {
+        var world = new World();
+        world.AddSystem(new Logged("first"));
+        world.AddSystem(new FailsEverywhere("bad"));
+        var entity = world.CreateEntity(new Position());
+        var error = Assert.Throws<InvalidOperationException>(world.Dispose);
+        Assert.That(error.Message, Is.EqualTo("bad.destroy"));                  // rethrown after the rest ran
+        Assert.That(Log, Has.Member("first.destroy"));
+        Assert.That(entity.IsAlive, Is.False);                                   // the storage was released
+        Assert.DoesNotThrow(world.Dispose);                                      // once
+        Assert.Throws<ObjectDisposedException>(() => world.CreateEntity(new Position()));
+        Assert.Throws<ObjectDisposedException>(() => world.GetOrAddSingleton<Clock>());
+    }
+
     // ---------------- SystemStats: allocated bytes and visited entities ----------------
 
     internal sealed class Moves : EcsSystem
