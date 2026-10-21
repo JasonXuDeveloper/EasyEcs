@@ -67,7 +67,7 @@ so a player standing still is not replicated.
 
 ## Replication [#replication]
 
-`[Changed<Position>]` skips the entities that did not move; each one that did writes 12 bytes into the outbox, which the
+`[Changed<Position>]` skips the entities that did not move; each one that did writes 16 bytes into the outbox, which the
 host sends and clears.
 
 <include lang="csharp" meta='title="Systems/Replication.cs"'>../../../samples/GameLoop/Systems/Replication.cs</include>
@@ -92,7 +92,7 @@ t=1s players=16 bullets=59 entities=75
   220 messages (0 refused)
   34 joins, 18 leaves
   59 bullets fired
-  378 position updates replicated (4.4 KB)
+  378 position updates replicated (5.9 KB)
   LeaveSystem             30 runs,      4.7 us last run
   JoinSystem              30 runs,      2.2 us last run
   MoveSystem              30 runs,      6.9 us last run

@@ -57,13 +57,14 @@ flowchart LR
     input[Bot 填 Input]
   end
   subgraph Simulation
-    world[加载区块、水流动] --> sight[走、看、追、重生]
+    clock[推进时钟] --> world[加载区块、水流动]
+    world --> sight[走、看、追、重生]
     sight --> move[浮起、物理、网格]
     move --> rules[挖、捡、刷怪、燃烧、僵尸死亡]
     rules --> unload[存盘并卸载区块]
   end
   subgraph Replication
-    send[视野内的区块、变化] --> clock[推进时钟]
+    send[视野内的区块、变化]
   end
   input --> world
   unload --> send
@@ -98,21 +99,24 @@ flowchart LR
 ## 玩家周围的区块 [#chunks]
 
 `ChunkLoadSystem` 每秒两次（`UpdateInterval`）遍历每个玩家视野内的区块：在每个区块上数看见它的玩家（`Viewers`），把缺的区块记成
-`LoadRequest` 实体。它不负责加载：遍历期间不能加载或保存实体（EECS041），所以由 `ChunkReadSystem` 在遍历之后的 `OnUpdate`
-里处理这些请求。卸载过的区块用 `LoadEntities` 从区域文件读回，里面的僵尸和掉落物也一起回来；从没见过的区块就生成，方块和水各用一次
-`AddRange` 写进缓冲。
+`LoadRequest` 实体，每个区块一个：请求是 `IUniqueIndexed`，第二个要它的玩家能找到它，给它的计数加一。它不负责加载：遍历期间
+不能加载或保存实体（EECS041），所以由 `ChunkReadSystem` 在遍历之后的 `OnUpdate` 里处理这些请求，每个 tick 最多
+`Rules.MaxRequests` 个，只销毁处理过的，其余的等下一个 tick。卸载过的区块用 `LoadEntities` 从区域文件读回，里面的僵尸和掉落物也一起回来；从没见过的区块就生成，方块和水各用一次
+`AddRange` 写进缓冲。不管哪种，这个 tick 里它都带着 `Fresh` 标签：客户端会整块收到它（见下文），而不是收到方块变化。
 
 <include lang="csharp" meta='title="Systems/Chunks.cs"'>../../../samples/VoxelServer/Systems/Chunks.cs#load</include>
 
 卸载是反过来的同一套做法。`Slices = 20` 让每个 tick 检查二十分之一的区块，五秒没人看见的打上 `Unloading` 标签；
-`ChunkSaveSystem` 再把每个区块连同它网格格子里的实体写成一条记录（`SaveEntities`）并销毁，所以没有玩家的地方什么都不跑。
+`ChunkSaveSystem` 再把每个区块连同它网格格子里的实体写成一条记录（`SaveEntities`）并销毁，所以没有玩家的地方什么都不跑。有玩家站着的区块（比如刚在那里重生的玩家）不会卸载。
 区域文件是一个装着类的单例；[`Host/RegionFiles.cs`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/VoxelServer/Host/RegionFiles.cs)
 代替磁盘。
 
 <include lang="csharp" meta='title="Systems/Chunks.cs"'>../../../samples/VoxelServer/Systems/Chunks.cs#unload</include>
 
-客户端会保留发给它的区块。`ChunkViewSystem` 在玩家身上记着同一个集合，一个 `DynamicBuffer<InView>`：进入视野的区块整块发送，
-离开的就让客户端忘掉。`Mut<T>` 只在集合变化时写缓冲，待在原区块的玩家不会被打 tick。
+客户端会保留发给它的区块。`ChunkViewSystem` 在玩家身上记着同一个集合，一个 `DynamicBuffer<InView>`：进入视野的已加载区块整块发送，
+离开的就让客户端忘掉。这个集合只在玩家跨进另一个区块、或附近有区块加载完时才变，而这两件事本来就是数据：`GridSystem` 只在跨区块时写
+`InChunk`，`InChunk` 又是 `ITracked`，所以 `[Changed<InChunk>]` 只访问跨了区块的玩家；`[With<Fresh>]` 访问这个 tick 加载的区块，
+把它们加进附近玩家的集合。没有任何轮询：待在原区块的玩家什么开销都没有，跨区块当个 tick 就能看到。
 
 <include lang="csharp" meta='title="Systems/Chunks.cs"'>../../../samples/VoxelServer/Systems/Chunks.cs#view</include>
 
@@ -149,10 +153,12 @@ flowchart LR
 
 <include lang="csharp" meta='title="Systems/Water.cs"'>../../../samples/VoxelServer/Systems/Water.cs#wake</include>
 
-规则照搬 Minecraft：水下面的空格变成下落的水；水旁边、脚下踩着实心方块的空格，水位比它低一级；其余的都变空，所以泉眼没了水就会退。
+规则是 Minecraft 的简化版（两个泉眼之间不会生出新水源，水向四面扩散而不是流向最近的落差）：水下面的空格变成下落的水；水旁边、脚下踩着实心方块的空格，水位比它低一级；其余的都变空，所以泉眼没了水就会退。
 这是一个模板运算（stencil）：每个方块都用同一套算术，从它的六个邻居算出下一步，正是 GPU 在网格上做的那种计算。区块的一行是 16 个方块，
 即一个 `Vector128<byte>`，它的邻居就是同一缓冲里相邻的行。先把区块边界外的邻居复制到一个带填充的副本的外圈（halo），向量循环就没有边界情况；
 再用两次向量化搜索（`IndexOfAnyExcept`）把计算限制在有水的那几层。字节通道是整数运算：每台机器上的水都一样。
+这一步写进第二个缓冲 `NextFluid`，等所有区块都算完，`WaterCommitSystem` 再把它拷成水，就像 GPU 交替使用两个缓冲：每个区块都用邻居
+这一步之前的水来算，与区块的访问顺序无关。
 一步下来什么都没变，就去掉 `Flowing`，静止的湖不会再被访问。
 
 <include lang="csharp" meta='title="Systems/Water.cs"'>../../../samples/VoxelServer/Systems/Water.cs#flow</include>
@@ -242,7 +248,7 @@ flowchart LR
 <include lang="csharp" meta='title="Systems/Replication.cs"'>../../../samples/VoxelServer/Systems/Replication.cs#chunks</include>
 
 移动过的实体来自 `[Changed<Position>]`，由上面的 `Mut<Position>` 打 tick。更新里带着有血条的实体的血量：`Maybe<Health>`
-在实体有 `Health` 时读它，所以玩家、僵尸和掉落物由一个方法下发，查询也不要求 `Health`。时钟最后推进。
+在实体有 `Health` 时读它，所以玩家、僵尸和掉落物由一个方法下发，查询也不要求 `Health`。时钟是模拟组的第一个系统，而不在同步组里，所以同步频率较低的服务器，游戏时间照样正常走。
 
 <include lang="csharp" meta='title="Systems/Replication.cs"'>../../../samples/VoxelServer/Systems/Replication.cs#entities</include>
 
@@ -266,20 +272,20 @@ World 和它的选项：`MeasureSystems` 用来计时；缓冲池大到能放下
 ## 输出 [#output]
 
 ```text
-tick   200 (day  ): 50 players, 84 chunks, 3338 water, 0 zombies, 60 items
-tick   400 (night): 50 players, 113 chunks, 6366 water, 42 zombies, 109 items
-tick   600 (day  ): 50 players, 146 chunks, 11071 water, 121 zombies, 132 items
-tick   800 (day  ): 50 players, 139 chunks, 11999 water, 5 zombies, 104 items
-tick  1000 (night): 50 players, 127 chunks, 10938 water, 43 zombies, 84 items
-tick  1200 (day  ): 50 players, 128 chunks, 10864 water, 126 zombies, 84 items
-chunks: 160 generated, 68 unloaded, 36 loaded back
-blocks dug: 622; items: 473 picked up, 232 expired
-zombies: 244 spawned, 118 burned, 712 hits; player deaths: 86
-water: 15443 cells filled, 13723 ticks of bodies carried
-view: 4184 chunks sent, 2934 forgotten; 34896 entities came into view, 10735 left it, 17610 despawned
-sent: 35853 block updates, 2915396 entity updates (50668 KiB)
-top diggers: player 26 (22) player 20 (22) player 35 (21)
-restarted from the save: 50 players, 128 chunks, 10864 water, 126 zombies; 32 chunks in the region files
+tick   200 (day  ): 50 players, 84 chunks, 3324 water, 0 zombies, 59 items
+tick   400 (night): 50 players, 113 chunks, 6364 water, 43 zombies, 103 items
+tick   600 (day  ): 50 players, 146 chunks, 11043 water, 125 zombies, 123 items
+tick   800 (day  ): 50 players, 143 chunks, 12390 water, 13 zombies, 116 items
+tick  1000 (night): 50 players, 127 chunks, 10699 water, 44 zombies, 82 items
+tick  1200 (day  ): 50 players, 141 chunks, 11904 water, 129 zombies, 84 items
+chunks: 166 generated, 66 unloaded, 41 loaded back
+blocks dug: 606; items: 424 picked up, 241 expired
+zombies: 250 spawned, 121 burned, 803 hits; player deaths: 101
+water: 15144 cells filled, 15647 ticks of bodies carried
+view: 4352 chunks sent, 3102 forgotten; 34187 entities came into view, 10968 left it, 17382 despawned
+sent: 35486 block updates, 3035644 entity updates (52846 KiB)
+top diggers: player 37 (26) player 8 (22) player 27 (21)
+restarted from the save: 50 players, 141 chunks, 11904 water, 129 zombies; 25 chunks in the region files
 ```
 
 世界、泉眼、bot 和刷怪都来自整数哈希，所以每次运行输出都一样。bot 往外走，区块越来越多；留在身后的区块存进区域文件，

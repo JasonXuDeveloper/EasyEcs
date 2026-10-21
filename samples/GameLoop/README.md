@@ -27,7 +27,7 @@ changed. Read [HelloWorld](../HelloWorld) first.
 | [Systems/Input.cs](Systems/Input.cs) | `ReceiveInputSystem`: messages from the mailbox it holds to request entities |
 | [Systems/Requests.cs](Systems/Requests.cs) | `LeaveSystem`, `JoinSystem`, `MoveSystem`, `FireSystem`: one kind of request each |
 | [Systems/Simulation.cs](Systems/Simulation.cs) | `MovementSystem`, `LifetimeSystem` (bullets expire), `ClockSystem` |
-| [Systems/Replication.cs](Systems/Replication.cs) | `ReplicationSystem`: 12 bytes per moved entity into the outbox |
+| [Systems/Replication.cs](Systems/Replication.cs) | `ReplicationSystem`: 16 bytes per moved entity into the outbox |
 | [Program.cs](Program.cs) | creates the world, adds singletons and systems, runs the loop, prints the summary and the checks |
 | [Host/](Host) | plumbing a real server has but that is not the ECS lesson: the `Mailbox` between threads, `FakeClients` standing in for the network, `FixedTick` timing, `Network.SendOutbox`, the `Report` lines, `Checks` |
 
@@ -49,7 +49,7 @@ t=1s players=16 bullets=59 entities=75
   220 messages (0 refused)
   34 joins, 18 leaves
   59 bullets fired
-  378 position updates replicated (4.4 KB)
+  378 position updates replicated (5.9 KB)
   LeaveSystem             30 runs,      4.7 us last run
   JoinSystem              30 runs,      2.2 us last run
   MoveSystem              30 runs,      6.9 us last run

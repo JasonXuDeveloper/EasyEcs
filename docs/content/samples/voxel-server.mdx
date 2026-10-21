@@ -67,13 +67,14 @@ flowchart LR
     input[Bots fill Input]
   end
   subgraph Simulation
-    world[Load chunks, water flows] --> sight[Walk, look, hunt, respawn]
+    clock[Advance the clock] --> world[Load chunks, water flows]
+    world --> sight[Walk, look, hunt, respawn]
     sight --> move[Float, physics, grid]
     move --> rules[Dig, pick up, spawn, burn, zombies die]
     rules --> unload[Save and unload chunks]
   end
   subgraph Replication
-    send[Chunks in view, changes] --> clock[Advance the clock]
+    send[Chunks in view, changes]
   end
   input --> world
   unload --> send
@@ -111,25 +112,31 @@ the reads every system shares: `BlockAt` (an unloaded chunk reads as stone, so n
 ## Chunks around the players [#chunks]
 
 `ChunkLoadSystem` walks the chunks in each player's view twice a second (`UpdateInterval`): it counts on each chunk
-the players that see it (`Viewers`) and records the missing ones as `LoadRequest` entities. It does not load them:
+the players that see it (`Viewers`) and records the missing ones as `LoadRequest` entities, one per chunk: the
+request is `IUniqueIndexed`, so a second player asking finds it and adds itself to its count. It does not load them:
 a pass may not load or save entities (EECS041), so `ChunkReadSystem` serves the requests in its `OnUpdate`, after the
-pass. A chunk that was unloaded comes back from the region files with `LoadEntities`, and with it the zombies and
+pass, as many as `Rules.MaxRequests` a tick, destroying only those it served; the others wait a tick. A chunk that
+was unloaded comes back from the region files with `LoadEntities`, and with it the zombies and
 items that were in it; a chunk never seen is generated, its blocks and its water written into the buffers in one
-`AddRange` each.
+`AddRange` each. Either way it is tagged `Fresh` for the tick: its clients get it whole (below), not as block changes.
 
 <include lang="csharp" meta='title="Systems/Chunks.cs"'>../../../samples/VoxelServer/Systems/Chunks.cs#load</include>
 
 Unloading is the same in reverse. With `Slices = 20` each tick checks a twentieth of the chunks and tags the ones
 nobody saw for five seconds `Unloading`; `ChunkSaveSystem` then writes each with the entities of its grid cell into
-one record (`SaveEntities`) and destroys them, so nothing ticks where no player is. The region files are a singleton
+one record (`SaveEntities`) and destroys them, so nothing ticks where no player is. A chunk a player stands in (one
+who just respawned there) stays loaded. The region files are a singleton
 that holds a class; [`Host/RegionFiles.cs`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/VoxelServer/Host/RegionFiles.cs)
 stands in for the disk.
 
 <include lang="csharp" meta='title="Systems/Chunks.cs"'>../../../samples/VoxelServer/Systems/Chunks.cs#unload</include>
 
 A client keeps the chunks it was sent. `ChunkViewSystem` keeps the same set on the player, a `DynamicBuffer<InView>`:
-a chunk that comes into view is sent whole, one that leaves is forgotten. `Mut<T>` writes the buffer only when the set
-changed, so a player who stayed in its chunk is not stamped.
+a loaded chunk that comes into view is sent whole, one that leaves is forgotten. The set changes only when the player
+crosses into another chunk or a chunk near it finishes loading, and both are already data: `GridSystem` writes
+`InChunk` only on a crossing, and `InChunk` is `ITracked`, so `[Changed<InChunk>]` visits the players that crossed;
+`[With<Fresh>]` visits the chunks loaded this tick, which join the sets of the players near them. Nothing polls: a
+player who stays in its chunk costs nothing, and a crossing is seen the tick it happens.
 
 <include lang="csharp" meta='title="Systems/Chunks.cs"'>../../../samples/VoxelServer/Systems/Chunks.cs#view</include>
 
@@ -171,14 +178,17 @@ reacts to the change of the block buffer, so the dig knows nothing of water.
 
 <include lang="csharp" meta='title="Systems/Water.cs"'>../../../samples/VoxelServer/Systems/Water.cs#wake</include>
 
-The rule is Minecraft's: an open block under water fills as falling water; an open block beside water that stands on
+The rule is a simplified version of Minecraft's (no new sources between two springs, and water spreads every way
+rather than toward the nearest drop): an open block under water fills as falling water; an open block beside water that stands on
 something solid fills one level below it; everything else empties, so water recedes when its spring goes. It is a
 stencil: the same arithmetic for every block from its six neighbours, which is what a GPU runs over a grid. A row of
 the chunk is 16 blocks, one `Vector128<byte>`, and its neighbours are the rows next to it in the same buffer. The
 neighbours across the chunk's edges are copied into a halo around a padded copy first, so the vector loop has no edge
 cases, and two vectorized searches (`IndexOfAnyExcept`) limit the step to the layers that hold water. Byte lanes are
-integer arithmetic: the same water on every machine. A step that changed nothing removes `Flowing`, and a settled
-lake is not visited again.
+integer arithmetic: the same water on every machine. The step is written into a second buffer, `NextFluid`, and
+`WaterCommitSystem` copies it into the water once every chunk has stepped, as a GPU ping-pongs two buffers: each chunk
+steps from its neighbours' water before the step, whatever order the chunks are visited in. A step that changed
+nothing removes `Flowing`, and a settled lake is not visited again.
 
 <include lang="csharp" meta='title="Systems/Water.cs"'>../../../samples/VoxelServer/Systems/Water.cs#flow</include>
 
@@ -282,7 +292,8 @@ changed since the system last ran, and no other, goes to the players that have i
 
 Moved entities come from `[Changed<Position>]`, stamped by `Mut<Position>` above. An update carries the health bar
 of the entities that have one: `Maybe<Health>` reads it where the entity has a `Health`, so players, zombies and
-items are sent by one method, and the query does not require `Health`. The clock advances last.
+items are sent by one method, and the query does not require `Health`. The clock is the first system of the
+simulation, not of the replication, so a server that replicates less often keeps game time.
 
 <include lang="csharp" meta='title="Systems/Replication.cs"'>../../../samples/VoxelServer/Systems/Replication.cs#entities</include>
 
@@ -309,20 +320,20 @@ them up, then loads the save beside them.
 ## Output [#output]
 
 ```text
-tick   200 (day  ): 50 players, 84 chunks, 3338 water, 0 zombies, 60 items
-tick   400 (night): 50 players, 113 chunks, 6366 water, 42 zombies, 109 items
-tick   600 (day  ): 50 players, 146 chunks, 11071 water, 121 zombies, 132 items
-tick   800 (day  ): 50 players, 139 chunks, 11999 water, 5 zombies, 104 items
-tick  1000 (night): 50 players, 127 chunks, 10938 water, 43 zombies, 84 items
-tick  1200 (day  ): 50 players, 128 chunks, 10864 water, 126 zombies, 84 items
-chunks: 160 generated, 68 unloaded, 36 loaded back
-blocks dug: 622; items: 473 picked up, 232 expired
-zombies: 244 spawned, 118 burned, 712 hits; player deaths: 86
-water: 15443 cells filled, 13723 ticks of bodies carried
-view: 4184 chunks sent, 2934 forgotten; 34896 entities came into view, 10735 left it, 17610 despawned
-sent: 35853 block updates, 2915396 entity updates (50668 KiB)
-top diggers: player 26 (22) player 20 (22) player 35 (21)
-restarted from the save: 50 players, 128 chunks, 10864 water, 126 zombies; 32 chunks in the region files
+tick   200 (day  ): 50 players, 84 chunks, 3324 water, 0 zombies, 59 items
+tick   400 (night): 50 players, 113 chunks, 6364 water, 43 zombies, 103 items
+tick   600 (day  ): 50 players, 146 chunks, 11043 water, 125 zombies, 123 items
+tick   800 (day  ): 50 players, 143 chunks, 12390 water, 13 zombies, 116 items
+tick  1000 (night): 50 players, 127 chunks, 10699 water, 44 zombies, 82 items
+tick  1200 (day  ): 50 players, 141 chunks, 11904 water, 129 zombies, 84 items
+chunks: 166 generated, 66 unloaded, 41 loaded back
+blocks dug: 606; items: 424 picked up, 241 expired
+zombies: 250 spawned, 121 burned, 803 hits; player deaths: 101
+water: 15144 cells filled, 15647 ticks of bodies carried
+view: 4352 chunks sent, 3102 forgotten; 34187 entities came into view, 10968 left it, 17382 despawned
+sent: 35486 block updates, 3035644 entity updates (52846 KiB)
+top diggers: player 37 (26) player 8 (22) player 27 (21)
+restarted from the save: 50 players, 141 chunks, 11904 water, 129 zombies; 25 chunks in the region files
 ```
 
 The world, the springs, the bots and the spawns come from integer hashes, so every run prints the same. The chunks

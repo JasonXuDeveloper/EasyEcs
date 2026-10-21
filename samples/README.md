@@ -17,7 +17,7 @@ Read them in this order:
 
 | # | Sample | What it teaches | Run |
 |---|---|---|---|
-| 1 | [HelloWorld](HelloWorld) | components, a tag, a singleton, three `[ForEach]` systems, `world.Update()` | `dotnet run --project samples/HelloWorld` |
+| 1 | [HelloWorld](HelloWorld) | components, a tag, a singleton, two `[ForEach]` systems and an `OnUpdate` one, `world.Update()` | `dotnet run --project samples/HelloWorld` |
 | 2 | [GameLoop](GameLoop) | a fixed-tick server: input from another thread as data, system groups, an index of clients, prefabs, change-tracked replication | `dotnet run --project samples/GameLoop -- --ticks 30` |
 | 3 | [SaveLoad](SaveLoad) | `Save` / `Load` of a world, `SaveEntities` / `LoadEntities` of a group, `MoveEntities` between worlds | `dotnet run --project samples/SaveLoad` |
 | 4 | [MultiWorld](MultiWorld) | one world per thread (one zone each), no locks | `dotnet run -c Release --project samples/MultiWorld` |
