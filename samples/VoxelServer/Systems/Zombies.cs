@@ -1,6 +1,6 @@
 using EasyEcs;
 
-namespace BlockWorld;
+namespace VoxelServer;
 
 // At night, every few seconds, a zombie rises 8 to 15 blocks from each player and hunts that player.
 public class NightSpawnSystem : EcsSystem
@@ -55,10 +55,11 @@ public class ZombieChaseSystem : EcsSystem
     }
 }
 
-// Zombies burn in daylight: one point a tick, so a zombie lasts a second after sunrise.
+// Zombies burn in daylight: one point a tick, so a zombie lasts a second after sunrise. One row at a time, on as many
+// threads as there are zombies to keep busy.
 public class SunburnSystem : EcsSystem
 {
-    [ForEach, With<Zombie>]
+    [ForEach(Parallel = true), With<Zombie>]
     static void Burn(ref Health health, in Clock clock)
     {
         if (!Rules.IsNight(clock)) health = new Health(health.Value - 1);

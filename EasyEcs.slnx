@@ -16,7 +16,7 @@
     <Project Path="samples/HotReload/HotReload.Plugin/HotReload.Plugin.csproj" />
     <Project Path="samples/HotReload/HotReload.Host/HotReload.Host.csproj" />
     <Project Path="samples/Actors/Actors.csproj" />
-    <Project Path="samples/BlockWorld/BlockWorld.csproj" />
+    <Project Path="samples/VoxelServer/VoxelServer.csproj" />
   </Folder>
   <Folder Name="/demo/">
     <Project Path="demo/EasyEcs.Demo/EasyEcs.Demo.csproj" />

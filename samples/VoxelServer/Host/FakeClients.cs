@@ -1,7 +1,7 @@
 using System.Numerics;
 using EasyEcs;
 
-namespace BlockWorld;
+namespace VoxelServer;
 
 // Not part of the lesson: stands in for the players' clients. A real server fills Input from each connection's
 // packets. A bot walks in one of eight directions (or stands) for five seconds and,
@@ -12,7 +12,7 @@ public class FakeClientsSystem : EcsSystem
     static readonly Vector2[] Directions =
         [Vector2.Zero, new(1, 0), new(D, D), new(0, 1), new(-D, D), new(-1, 0), new(-D, -D), new(0, -1), new(D, -D)];
 
-    [ForEach]
+    [ForEach(Parallel = true)]
     static void Play(in Player player, in Body body, in Clock clock, ref Input input)
     {
         var walk = Directions[Rules.Hash(player.Client, (int)(clock.Tick / 100)) % Directions.Length];

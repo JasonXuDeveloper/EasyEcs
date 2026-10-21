@@ -1,12 +1,13 @@
 using System.Numerics;
 using EasyEcs;
 
-namespace BlockWorld;
+namespace VoxelServer;
 
-// Turns a player's input into a horizontal velocity; gravity keeps the vertical one.
+// Turns a player's input into a horizontal velocity; gravity keeps the vertical one. Each row depends on nothing
+// but itself, so the rows are split across threads (Parallel = true).
 public class PlayerMoveSystem : EcsSystem
 {
-    [ForEach]
+    [ForEach(Parallel = true)]
     static void Walk(in Input input, ref Velocity velocity)
     {
         var v = velocity.Value;

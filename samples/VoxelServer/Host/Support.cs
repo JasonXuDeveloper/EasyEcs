@@ -1,4 +1,4 @@
-namespace BlockWorld;
+namespace VoxelServer;
 
 // Not part of the lesson: command-line options.
 static class Support

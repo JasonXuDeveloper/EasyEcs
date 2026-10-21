@@ -1,13 +1,14 @@
 using EasyEcs;
 
-namespace BlockWorld;
+namespace VoxelServer;
 
 // Digs the block under a player who asked to: the chunk's buffer loses the block (a tracked write, so the chunk is
-// sent again) and an item pops out of the hole.
+// sent again) and an item pops out of the hole. Water beside or above the hole flows again (a block update: it gets
+// its Flowing back), so a pit dug next to a lake fills.
 public class DigSystem : EcsSystem
 {
     [ForEach]
-    void Dig(Entity player, in Input input, in Position position, in Prefabs prefabs, ref Stats stats)
+    void Dig(Entity player, in Input input, in Position position, in Prefabs prefabs, in Clock clock, ref Stats stats)
     {
         if (!input.Dig) return;
         int x = (int)MathF.Floor(position.Value.X), y = (int)MathF.Floor(position.Value.Y) - 1;
@@ -15,13 +16,23 @@ public class DigSystem : EcsSystem
         if (y < 0 || !World.ChunkIndex.TryGet(Terrain.ChunkOf(x, z), out var chunk)) return;
 
         int slot = Terrain.IndexOf(x, y, z);
-        var kind = chunk.Read<DynamicBuffer<Block>>()[slot];   // a read: not a change
-        if (kind is Block.Air or Block.Bedrock) return;
-        chunk.Get<DynamicBuffer<Block>>().AsSpan()[slot] = Block.Air;
+        var kind = chunk.Block[slot];                          // a read: not a change
+        if (!Terrain.IsSolid(kind) || kind == Block.Bedrock) return;
+        chunk.WriteBlock().AsSpan()[slot] = Block.Air;
+        Wake(new BlockPos(x + 1, y, z), clock.Tick);
+        Wake(new BlockPos(x - 1, y, z), clock.Tick);
+        Wake(new BlockPos(x, y, z + 1), clock.Tick);
+        Wake(new BlockPos(x, y, z - 1), clock.Tick);
+        Wake(new BlockPos(x, y + 1, z), clock.Tick);
 
         var center = new System.Numerics.Vector3(x + 0.5f, y + 0.5f, z + 0.5f);
         World.Instantiate(prefabs.Item, new Position(center), new Item(kind, player));
         stats.BlocksDug++;
+    }
+
+    void Wake(BlockPos at, long tick)
+    {
+        if (World.WaterIndex.TryGet(at, out var water) && !water.HasFlowing) water.SetFlowing(tick + Rules.FlowDelay);
     }
 }
 

@@ -1,6 +1,6 @@
 using EasyEcs;
 
-namespace BlockWorld;
+namespace VoxelServer;
 
 // Where a block lives: the chunk of its column and its slot in that chunk's buffer.
 public static class Terrain
@@ -49,9 +49,32 @@ public static class Terrain
         if (y < 0) return Block.Bedrock;
         if (y >= Height) return Block.Air;
         if (!world.ChunkIndex.TryGet(ChunkOf(x, z), out var chunk)) return Block.Stone;
-        return chunk.Read<DynamicBuffer<Block>>()[IndexOf(x, y, z)];
+        return chunk.Block[IndexOf(x, y, z)];
     }
 
-    public static bool IsSolid(World world, float x, float y, float z) =>
-        BlockAt(world, (int)MathF.Floor(x), (int)MathF.Floor(y), (int)MathF.Floor(z)) != Block.Air;
+    // Water and air let a body through.
+    public static bool IsSolid(Block block) => block is not (Block.Air or Block.Water);
+
+    public static bool IsSolid(World world, float x, float y, float z) => IsSolid(BlockAt(world, Cell(x, y, z)));
+
+    public static Block BlockAt(World world, BlockPos at) => BlockAt(world, at.X, at.Y, at.Z);
+
+    // The block a point is in.
+    public static BlockPos Cell(float x, float y, float z) =>
+        new((int)MathF.Floor(x), (int)MathF.Floor(y), (int)MathF.Floor(z));
+
+    // Fills an air block with water: the chunk's buffer gets Block.Water (a tracked write, so the chunk is sent again)
+    // and the cell becomes an entity that will flow FlowDelay ticks from now.
+    public static void PourWater(World world, BlockPos at, BlockPos source, int level, long tick, ref Stats stats)
+    {
+        if (BlockAt(world, at) != Block.Air) return;   // a chunk that is not loaded reads as stone
+        PourWater(world, world.ChunkIndex.Get(ChunkOf(at.X, at.Z)), at, source, level, tick, ref stats);
+    }
+
+    public static void PourWater(World world, Entity chunk, BlockPos at, BlockPos source, int level, long tick, ref Stats stats)
+    {
+        chunk.WriteBlock().AsSpan()[IndexOf(at.X, at.Y, at.Z)] = Block.Water;
+        world.CreateEntity(new Water(at, source, level), new Flowing(tick + Rules.FlowDelay), new ChildOf(chunk));
+        stats.WaterCells++;
+    }
 }

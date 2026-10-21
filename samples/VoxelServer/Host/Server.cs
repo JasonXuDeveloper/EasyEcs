@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using EasyEcs;
 
-namespace BlockWorld;
+namespace VoxelServer;
 
 // Not part of the lesson: the tick loop and the report. The world's state is printed every ten seconds of game time
 // (deterministic, so CI compares it with the README); the time each system took goes to stderr.
@@ -31,7 +31,8 @@ public static class Server
         ref readonly var clock = ref world.Clock;
         Console.WriteLine(
             $"tick {clock.Tick,5} ({(Rules.IsNight(clock) ? "night" : "day  ")}): {world.Count<Player>()} players, " +
-            $"{world.Count<Chunk>()} chunks, {world.Count<Zombie>()} zombies, {world.Count<Item>()} items");
+            $"{world.Count<Chunk>()} chunks, {world.Count<Water>()} water, {world.Count<Zombie>()} zombies, " +
+            $"{world.Count<Item>()} items");
     }
 
     static void Totals(World world)
@@ -40,7 +41,8 @@ public static class Server
         Console.WriteLine($"chunks: {s.ChunksLoaded} loaded, {s.ChunksUnloaded} unloaded, {s.ChunkUpdates} sent");
         Console.WriteLine($"blocks dug: {s.BlocksDug}; items: {s.ItemsPickedUp} picked up, {s.ItemsExpired} expired");
         Console.WriteLine($"zombies: {s.ZombiesSpawned} spawned, {s.ZombiesBurned} burned, {s.Hits} hits; player deaths: {s.PlayerDeaths}");
-        Console.WriteLine($"position updates sent: {s.PositionUpdates}");
+        Console.WriteLine($"water: {s.WaterCells} cells poured, {s.Drifts} ticks of humanoids carried");
+        Console.WriteLine($"sent: {s.PositionUpdates} position updates, {s.Despawns} despawns");
     }
 
     // WorldOptions.MeasureSystems keeps the time and the allocations of every system.

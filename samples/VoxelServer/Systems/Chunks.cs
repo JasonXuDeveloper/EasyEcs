@@ -1,11 +1,12 @@
 using System.Runtime.CompilerServices;
 using EasyEcs;
 
-namespace BlockWorld;
+namespace VoxelServer;
 
 // Loads the chunks around every player and marks them as seen. A missing chunk is generated on the spot: an entity
-// with its Chunk key, its LastSeen tick and a buffer of 8,192 blocks. Twice a second is enough: a player walks four
-// blocks a second and the view reaches two chunks ahead.
+// with its Chunk key, its LastSeen tick and a buffer of 8,192 blocks, and, in one chunk in four, a spring of water
+// that starts to flow. Twice a second is enough: a player walks four blocks a second and the view reaches two chunks
+// ahead.
 public class ChunkLoadSystem : EcsSystem
 {
     public override int UpdateInterval => Rules.TicksPerSecond / 2;
@@ -21,29 +22,34 @@ public class ChunkLoadSystem : EcsSystem
             if (World.ChunkIndex.TryGet(pos, out var chunk)) chunk.LastSeen = new LastSeen(clock.Tick);
             else
             {
-                Create(World, pos, clock.Tick);
+                Create(World, pos, clock.Tick, ref stats);
                 stats.ChunksLoaded++;
             }
         }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    static void Create(World world, ChunkPos pos, long tick)
+    static void Create(World world, ChunkPos pos, long tick, ref Stats stats)
     {
         Span<Block> blocks = stackalloc Block[Terrain.BlocksPerChunk];
         Terrain.Generate(pos, blocks);
         var chunk = world.CreateEntity(new Chunk(pos), new LastSeen(tick), new DynamicBuffer<Block>());
-        chunk.Get<DynamicBuffer<Block>>().AddRange(blocks);
+        chunk.WriteBlock().AddRange(blocks);
+        if (!Rules.HasSpring(pos)) return;
+
+        int x = pos.X * Terrain.Size + Terrain.Size / 2, z = pos.Z * Terrain.Size + Terrain.Size / 2;
+        var spring = new BlockPos(x, Terrain.SurfaceHeight(x, z) + 1, z);
+        Terrain.PourWater(world, chunk, spring, spring, level: 0, tick, ref stats);
     }
 }
 
-// Frees the chunks no player has seen for a while. Destroying an entity in the middle of the loop is fine: structural
-// changes apply at once. (A real server would save a dug chunk first; see the SaveLoad sample.)
+// Frees the chunks no player has seen for a while; their water goes with them (each cell is a child of its chunk).
+// Slices = 20 spreads the check over a second: each tick visits a twentieth of the chunks, so the server never pays
+// for all of them in one tick. Destroying an entity in the middle of the loop is fine: structural changes apply at
+// once.
 public class ChunkUnloadSystem : EcsSystem
 {
-    public override int UpdateInterval => Rules.TicksPerSecond;
-
-    [ForEach, With<Chunk>]
+    [ForEach(Slices = Rules.TicksPerSecond), With<Chunk>]
     static void Unload(Entity chunk, in LastSeen seen, in Clock clock, ref Stats stats)
     {
         if (clock.Tick - seen.Tick <= Rules.UnloadAfter) return;

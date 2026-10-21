@@ -1,6 +1,6 @@
 using System.Numerics;
 
-namespace BlockWorld;
+namespace VoxelServer;
 
 // The numbers of the game, in ticks and blocks. A vanilla server runs 20 ticks a second (50 ms each).
 public static class Rules
@@ -18,8 +18,15 @@ public static class Rules
     public const int SpawnEvery = 100;         // ticks between two zombies per player at night
     public const int ItemLifetime = 300;
     public const float PickupRange = 1.5f;
+    public const int WaterReach = 7;           // blocks water runs from its spring on flat ground, as in Minecraft
+    public const int FlowDelay = 5;            // ticks before water spreads one block further
+    public const float FloatSpeed = 0.1f;      // the upward speed water gives a humanoid; gravity takes 0.08 back
+    public const float Current = 0.15f;        // the push of the water next to a spring, in blocks per tick
 
     public static bool IsNight(in Clock clock) => clock.Tick % clock.DayLength >= clock.DayLength / 2;
+
+    // One chunk in four has a spring in its middle.
+    public static bool HasSpring(ChunkPos chunk) => Hash(chunk.X, chunk.Z + 1000) % 4 == 0;
 
     // Players start on a line through the origin, three blocks apart, standing on the ground.
     public static Vector3 SpawnPoint(int client)

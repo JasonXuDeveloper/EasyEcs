@@ -1,6 +1,6 @@
 using EasyEcs;
 
-namespace BlockWorld;
+namespace VoxelServer;
 
 // A zombie with no health left is gone.
 public class ZombieDeathSystem : EcsSystem
