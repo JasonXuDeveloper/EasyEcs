@@ -127,7 +127,7 @@ available as Markdown: add `.md` to its URL.
 
 ## What EasyEcs does not do
 
-- It does not run on Unity, Godot or runtimes older than .NET 10.
+- It runs wherever .NET 10 runs, Godot 4 .NET projects that target `net10.0` included; not on Unity or runtimes older than .NET 10.
 - It has no whole-entity disable flag: add a tag and filter with `Without<T>`; `entity.Disable<T>()` hides one
   component and keeps its value.
 - It has no actor type. An actor is a pattern: one type per kind of actor that is its key component
