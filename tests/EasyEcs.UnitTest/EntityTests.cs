@@ -28,7 +28,7 @@ public class EntityTests
     }
 
     [Test]
-    public void CreateEntitiesPlacesABatchAndDestroyEntitiesRemovesMatches()
+    public void CreateEntitiesPlacesABatchAndDestroyAllRemovesMatches()
     {
         var existing = _world.CreateEntity(new Position(9, 9));
         var batch = new Entity[100];

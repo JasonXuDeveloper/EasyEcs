@@ -530,6 +530,21 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         return new QueryEnumerator<{{tps}}>(this, match, filter.Tick, {{bits}});
                     }
 
+                    /// <summary>
+                    /// Enumerate entities having all of <c>{{tps}}</c> (and matching <paramref name="filter"/>) to read
+                    /// them: the items hand out <c>ref readonly</c> refs and stamp nothing, so a <c>[Changed&lt;T&gt;]</c>
+                    /// reader does not see a row as written because it was read (<see cref="Query{{"{"}}{{tps}}{{"}"}}"/> stamps the
+                    /// rows of tracked components it visits). Allocation-free.
+                    /// </summary>
+                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                    public ReadEnumerator<{{tps}}> Read<{{tps}}>(in QueryFilter filter = default)
+                {{cons}}
+                    {
+                        filter.Whole();
+                        var match = Match<{{tps}}>(in filter, {{List(n, i => $"out var b{i}")}});
+                        return new ReadEnumerator<{{tps}}>(this, match, filter.Tick, {{bits}});
+                    }
+
                     /// <summary>Number of alive entities having all of <c>{{tps}}</c>. O(matching archetypes), plus O(rows / 64) for tables with rows to test.</summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public int Count<{{tps}}>(in QueryFilter filter = default)
@@ -1197,15 +1212,20 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
             """);
 
+        // Query items hand out refs (a visited row of a tracked component counts as written); Read items hand out
+        // ref readonly refs and stamp nothing. One template, two families.
+        foreach (bool read in new[] { false, true })
         for (int n = 1; n <= MaxArity; n++)
         {
             string tps = TypeParams(n);
+            string item = read ? "ReadItem" : "QueryItem", enumerator = read ? "ReadEnumerator" : "QueryEnumerator";
+            string refKind = read ? "ref readonly" : "ref";
             sb.Append($$"""
                 /// <summary>
-                /// One query result: the entity and refs into its row. Like every ref into ECS storage, the refs are valid
+                /// One {{(read ? "read-only query result: the entity and read-only refs into its row (nothing is stamped)" : "query result: the entity and refs into its row")}}. Like every ref into ECS storage, the refs are valid
                 /// until the next structural change; re-read through <see cref="Entity"/> after one.
                 /// </summary>
-                public readonly ref struct QueryItem<{{tps}}>
+                public readonly ref struct {{item}}<{{tps}}>
                 {{Constraints(n, "    ")}}
                 {
                     private readonly World _world;
@@ -1213,7 +1233,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     private readonly ref int _version;
                 {{Lines(n, i => $"    private readonly ref T{i} _c{i};")}}
 
-                    internal QueryItem(World world, int id, ref int version, {{List(n, i => $"ref T{i} c{i}")}})
+                    internal {{item}}(World world, int id, ref int version, {{List(n, i => $"ref T{i} c{i}")}})
                     {
                         _world = world;
                         _id = id;
@@ -1230,7 +1250,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                 {{Lines(n, i => $$"""
                     /// <summary>The current entity's T{{i}}, a reference into its row (the generator names it after the component: <c>item.Position</c>).</summary>
-                    public ref T{{i}} Component{{i}}
+                    public {{refKind}} T{{i}} Component{{i}}
                     {
                         [MethodImpl(MethodImplOptions.AggressiveInlining)]
                         get => ref _c{{i}};
@@ -1240,14 +1260,14 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 }
 
                 /// <summary>
-                /// Allocation-free query enumerator; safe under structural changes during iteration (same visiting rules as
+                /// Allocation-free {{(read ? "read-only " : "")}}query enumerator; safe under structural changes during iteration (same visiting rules as
                 /// ForEach). A ref struct: it holds refs into the current table, so a loop over it cannot <c>await</c>.
                 /// </summary>
                 /// <remarks>
                 /// Every member the loop calls is inlined and the cold work is static (<see cref="QueryWalk"/>, by value
                 /// in and out): the enumerator is never passed by reference, so its fields live in registers.
                 /// </remarks>
-                public ref struct QueryEnumerator<{{tps}}>
+                public ref struct {{enumerator}}<{{tps}}>
                 {{Constraints(n, "    ")}}
                 {
                     private readonly World _world;
@@ -1263,7 +1283,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     private nint _slot;
                     private nint _count; // rows of the current table to walk; negative: rows to test (QueryWalk.NextTested)
 
-                    internal QueryEnumerator(World world, QueryMatch match, ulong since, {{List(n, i => $"ushort b{i}")}})
+                    internal {{enumerator}}(World world, QueryMatch match, ulong since, {{List(n, i => $"ushort b{i}")}})
                     {
                         _world = world;
                         _match = match;
@@ -1272,7 +1292,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
 
                     /// <summary>The current entity and its components.</summary>
-                    public readonly QueryItem<{{tps}}> Current
+                    public readonly {{item}}<{{tps}}> Current
                     {
                         [MethodImpl(MethodImplOptions.AggressiveInlining)]
                         get
@@ -1284,7 +1304,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
 
                     /// <summary>The enumerator itself (<c>foreach</c> support, no allocation).</summary>
-                    public readonly QueryEnumerator<{{tps}}> GetEnumerator() => this;
+                    public readonly {{enumerator}}<{{tps}}> GetEnumerator() => this;
 
                     /// <summary>Move to the next matching entity. O(1) per row, plus the tables it steps over.</summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1330,38 +1350,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 {{Lines(n, i => $"        _r{i} = ref table.Base<T{i}>(_b{i});")}}
 
                     Found:
-                        // Items hand out refs: a visited row of a tracked component counts as written (a JIT-time
-                        // constant: no code for queries without tracked components).
-                        if ({{List(n, i => $"default(T{i}) is ITrackChanges", " || ")}}) Stamp(_walk, (int)_slot);
-                        return true;
-                    }
-
-                    [MethodImpl(MethodImplOptions.NoInlining)]
-                    private static void Stamp(QueryWalk walk, int slot)
-                    {
-                        var archetype = walk.Current;
-                        ulong tick = walk.World.ChangeTick;
-                        // Rows come in order: the summaries of a word are noted once per word and tick.
-                        if (slot >> 6 != walk.StampWord || tick != walk.StampTick)
-                        {
-                            StampWord(walk, archetype, slot, tick);
-                            return;
-                        }
-
-                {{Lines(n, i => $"        archetype.StampTick<T{i}>(slot, tick);")}}
-                    }
-
-                    // The first row of a word: a call in tail position, so the per-row Stamp keeps no register of
-                    // the summaries' code (its prologue would save them for every row).
-                    [MethodImpl(MethodImplOptions.NoInlining)]
-                    private static void StampWord(QueryWalk walk, Archetype archetype, int slot, ulong tick)
-                    {
-                        walk.StampWord = slot >> 6;
-                        walk.StampTick = tick;
-                {{Lines(n, i => $"        archetype.NoteVisited<T{i}>(slot, tick);")}}
-                {{Lines(n, i => $"        archetype.StampTick<T{i}>(slot, tick);")}}
-                    }
-
+                {{(read ? "        return true;\n    }\n" : Stamping(n))}}
                     /// <summary>Ends the walk early (<c>foreach</c> calls it); a walk that reaches the end ends by itself.</summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public void Dispose()
@@ -1377,4 +1366,40 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
         return sb.ToString();
     }
+
+    /// <summary>
+    /// The end of a <c>QueryEnumerator.MoveNext</c> and its stamping: items hand out refs, so a visited row of a tracked
+    /// component counts as written (a JIT-time constant: no code for queries without tracked components).
+    /// </summary>
+    private static string Stamping(int n) => $$"""
+                if ({{List(n, i => $"default(T{i}) is ITrackChanges", " || ")}}) Stamp(_walk, (int)_slot);
+                return true;
+            }
+
+            [MethodImpl(MethodImplOptions.NoInlining)]
+            private static void Stamp(QueryWalk walk, int slot)
+            {
+                var archetype = walk.Current;
+                ulong tick = walk.World.ChangeTick;
+                // Rows come in order: the summaries of a word are noted once per word and tick.
+                if (slot >> 6 != walk.StampWord || tick != walk.StampTick)
+                {
+                    StampWord(walk, archetype, slot, tick);
+                    return;
+                }
+
+        {{Lines(n, i => $"        archetype.StampTick<T{i}>(slot, tick);")}}
+            }
+
+            // The first row of a word: a call in tail position, so the per-row Stamp keeps no register of
+            // the summaries' code (its prologue would save them for every row).
+            [MethodImpl(MethodImplOptions.NoInlining)]
+            private static void StampWord(QueryWalk walk, Archetype archetype, int slot, ulong tick)
+            {
+                walk.StampWord = slot >> 6;
+                walk.StampTick = tick;
+        {{Lines(n, i => $"        archetype.NoteVisited<T{i}>(slot, tick);")}}
+        {{Lines(n, i => $"        archetype.StampTick<T{i}>(slot, tick);")}}
+            }
+        """;
 }

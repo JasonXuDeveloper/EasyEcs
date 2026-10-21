@@ -292,6 +292,31 @@ public class ChangedTests
     }
 
     [Test]
+    public void ReadStampsNothingAndQueryStampsWhatItVisits()
+    {
+        using var world = new World();
+        var entities = new Entity[10];
+        world.CreateEntities(entities, new Armor(1), new Seen(), new DynamicBuffer<DynamicBufferTests.Loot>());
+        world.AddSystem<ArmorWatch>();
+        world.Update();                                                       // the watch sees the creation once
+        world.Update();
+        ulong mark = world.ChangeTick;
+        var changed = QueryFilter.Create().Changed<Armor>(mark);
+
+        int sum = 0;
+        foreach (var item in world.Read<Armor>()) sum += item.Component1.Value;
+        foreach (var item in world.Read<Armor, DynamicBuffer<DynamicBufferTests.Loot>>(QueryFilter.Create().With<Seen>())) sum += item.Component2.Count;
+        Assert.That(sum, Is.EqualTo(10));
+        Assert.That(world.Count<Armor>(changed), Is.Zero);                    // reading wrote nothing
+        Assert.That(world.Count<DynamicBuffer<DynamicBufferTests.Loot>>(QueryFilter.Create().Changed<DynamicBuffer<DynamicBufferTests.Loot>>(mark)), Is.Zero);
+        world.Update();
+        Assert.That(entities[0].Seen.Count, Is.EqualTo(1));                   // nor did the watch see a change
+
+        foreach (var item in world.Query<Armor>()) sum += item.Component1.Value;
+        Assert.That(world.Count<Armor>(changed), Is.EqualTo(10));             // a query's items hand out refs: written
+    }
+
+    [Test]
     public void TicksFollowEntitiesThatMove()
     {
         using var world = new World();
