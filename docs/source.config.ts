@@ -41,6 +41,47 @@ function hasFullGitHistory() {
 /** Set by vite.config.ts for `--mode scripts`. */
 const contentOnly = process.env.DOCS_CONTENT_ONLY === '1';
 
+type CodeTransformer = NonNullable<
+  typeof rehypeCodeDefaultOptions.transformers
+>[number];
+
+/** A hast node, typed loosely: Shiki's hast types are another copy */
+interface CodeNode {
+  type: string;
+  value?: string;
+  children?: CodeNode[];
+}
+
+function textOf(node: CodeNode): string {
+  if (node.type === 'text') return node.value ?? '';
+  return node.type === 'element'
+    ? (node.children ?? []).map(textOf).join('')
+    : '';
+}
+
+/**
+ * The scripts read only the text of a code block (its Markdown form), so in
+ * `--mode scripts` a block is not highlighted: without `[!code ...]` notation
+ * it is tokenized as plain text (the `language-*` class keeps its language),
+ * and each line becomes one text node once the notation transformers (which
+ * need the real tokens) are done. A page's compiled code shrinks to a
+ * fraction, and so does the scripts' compile time.
+ */
+const plainCode: CodeTransformer = {
+  name: 'easyecs:plain-code',
+  enforce: 'post',
+  preprocess(code, options) {
+    if (!code.includes('[!code')) options.lang = 'text';
+  },
+  code(code) {
+    for (const line of code.children) {
+      if (line.type !== 'element') continue;
+      const text = textOf(line);
+      line.children = text ? [{ type: 'text', value: text }] : [];
+    }
+  },
+};
+
 /**
  * Frontmatter: Fumadocs' fields plus
  * - `seoTitle`: the <title> and social title when the page title alone is too
@@ -92,7 +133,13 @@ export default defineConfig({
   mdxOptions: {
     // `language-*` class on code blocks, so the Markdown copies keep the
     // language of each fence (src/lib/markdown.tsx).
-    rehypeCodeOptions: { ...rehypeCodeDefaultOptions, addLanguageClass: true },
+    rehypeCodeOptions: {
+      ...rehypeCodeDefaultOptions,
+      addLanguageClass: true,
+      transformers: contentOnly
+        ? [...(rehypeCodeDefaultOptions.transformers ?? []), plainCode]
+        : rehypeCodeDefaultOptions.transformers,
+    },
     remarkPlugins: [
       // `**` and `~~` next to CJK punctuation: CommonMark's flanking rules
       // leave `**实体组件系统（ECS）**这种` unparsed (a closing `**` after `）`

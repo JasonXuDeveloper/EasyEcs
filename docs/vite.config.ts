@@ -4,7 +4,13 @@ import { fileURLToPath } from 'node:url';
 import { reactRouter } from '@react-router/dev/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { fumadocsMdx } from 'fumadocs-mdx/vite';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, type Plugin, type PluginOption } from 'vite';
+
+type TransformObject = Extract<
+  NonNullable<Plugin['transform']>,
+  { handler: unknown }
+>;
+type TransformHandler = TransformObject['handler'];
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 
@@ -28,6 +34,40 @@ function serverOnlyPageExports(): Plugin {
       );
     },
   };
+}
+
+/**
+ * `react-router build` compiles every page in the client and then the server
+ * environment, in one process, and fumadocs-mdx compiles a page the same way
+ * in both (for a bundler, not for development). The second compile reuses the
+ * first, keyed by the module id and its source. Build only: in `dev` an
+ * included file can change while the page's own source does not.
+ */
+function compileOnce(plugins: PluginOption[]): PluginOption[] {
+  const compiled = new Map<string, ReturnType<TransformHandler>>();
+  for (const plugin of plugins.flat()) {
+    if (!plugin || !('name' in plugin) || plugin.name !== 'fumadocs-mdx:mdx')
+      continue;
+    // fumadocs-mdx sets the hook in its `config` hook, after this runs
+    let hook: Plugin['transform'];
+    Object.defineProperty(plugin, 'transform', {
+      enumerable: true,
+      get: () => hook,
+      set(value: TransformObject) {
+        const handler: TransformHandler = function (code, id, options) {
+          const key = `${id}\0${code}`;
+          let result = compiled.get(key);
+          if (result === undefined) {
+            result = value.handler.call(this, code, id, options);
+            compiled.set(key, result);
+          }
+          return result;
+        };
+        hook = { ...value, handler };
+      },
+    });
+  }
+  return plugins;
 }
 
 /**
@@ -61,14 +101,14 @@ function analyzerRules() {
 
 // `--mode scripts`: the scripts in scripts/ (run with vite-node) only load the
 // content, compiled without diagrams or highlighting (source.config.ts).
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
   if (mode === 'scripts') process.env.DOCS_CONTENT_ONLY = '1';
   return {
     plugins:
       mode === 'scripts'
         ? [fumadocsMdx()]
         : [
-            fumadocsMdx(),
+            command === 'build' ? compileOnce(fumadocsMdx()) : fumadocsMdx(),
             serverOnlyPageExports(),
             tailwindcss(),
             reactRouter(),

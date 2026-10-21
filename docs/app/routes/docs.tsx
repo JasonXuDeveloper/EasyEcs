@@ -82,7 +82,7 @@ export async function loader({ params }: Route.LoaderArgs) {
       lastModified && !Number.isNaN(lastModified.getTime())
         ? lastModified.toISOString()
         : undefined,
-    published: firstCommitDate(`content/${page.path}`),
+    published: await firstCommitDate(`content/${page.path}`),
     alternates: { en: own('en'), zh: own('zh') },
     breadcrumbs,
     faq: docExtras(page).faq
