@@ -108,7 +108,7 @@ world.Update();
 | The list | Hold it as |
 | --- | --- |
 | Plain values only its owner uses, sent or saved when it changes: item ids or stacks, waypoints, the hits of a tick | **`DynamicBuffer<T>`** |
-| Items with state of their own (durability, buffs with timers) that systems query or change one by one | **One entity per item** with an [`EntityId` link](/en/docs/guide/indexes-and-relations#entityid-keys) to the owner |
+| Items with state of their own (durability, buffs with timers) that systems query or change one by one | **One entity per item** with an [`EntityId`](/en/docs/guide/indexes-and-relations#entityid-keys) link to the owner |
 | A few values with a fixed maximum (4 cooldown slots, the last 8 inputs) | **A fixed `[InlineArray]` array** in an unmanaged component |
 | Data read and written as a whole with the save (quest progress, settings) | **A collection in a component**, changed through `ref` |
 
@@ -151,7 +151,7 @@ ref var stash = ref hero.GetOrAddLoot();                       // an empty buffe
 ```
 
 A relation's buffer gets no `WriteX()` or `GetOrAddX()`: its links are indexed and change only through
-[`Link` / `Unlink`](/en/docs/guide/indexes-and-relations#relations).
+[`Link`](/en/docs/guide/indexes-and-relations#relations) / [`Unlink`](/en/docs/guide/indexes-and-relations#relations).
 
 ### Copies [#copies]
 

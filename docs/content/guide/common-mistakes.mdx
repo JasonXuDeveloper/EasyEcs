@@ -365,7 +365,7 @@ foreach (var item in world.Read<Rating>())
 ```
 
 Caught by [EECS046](/en/docs/guide/analyzer#eecs046) (warning, with a code fix). More in
-[`Read`: a loop that only reads](/en/docs/guide/queries#read).
+[a loop that only reads](/en/docs/guide/queries#read).
 
 ### `[Removed<T>]` that takes `T` [#removed-takes-t]
 
@@ -542,7 +542,7 @@ await Task.Delay(100);
 if (hero.HasHealth) hero.Health.Value -= 10;
 ```
 
-Caught by the C# compiler. More in [across `await`](/en/docs/guide/refs-and-await#across-await).
+Caught by the C# compiler. More in [ref and await](/en/docs/guide/refs-and-await#across-await).
 
 ### Writing an indexed key through a `ref` [#indexed-by-ref]
 
@@ -868,7 +868,7 @@ public class Reap : EcsSystem
 ```
 
 Caught by [EECS010](/en/docs/guide/analyzer#eecs010). More in
-[parallel `[ForEach]` methods](/en/docs/guide/threading#parallel-foreach-methods).
+parallel [`[ForEach]`](/en/docs/guide/threading#parallel-foreach-methods) methods.
 
 ### `entity.Run` in a parallel method [#run-in-parallel]
 
@@ -906,7 +906,7 @@ public class HealAll : EcsSystem
 ```
 
 Caught by [EECS010](/en/docs/guide/analyzer#eecs010). More in
-[one entity: `entity.Run`](/en/docs/guide/queries#run-on-one-entity).
+[`entity.Run`](/en/docs/guide/queries#run-on-one-entity).
 
 ## Related [#related]
 

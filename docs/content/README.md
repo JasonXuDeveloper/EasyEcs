@@ -47,7 +47,7 @@ One page per concept, under [guide/](guide):
 | [Systems](https://ecs.xgamedev.net/en/docs/guide/systems) | [guide/systems.mdx](guide/systems.mdx) |
 | [Singletons](https://ecs.xgamedev.net/en/docs/guide/singletons) | [guide/singletons.mdx](guide/singletons.mdx) |
 | [Structural changes](https://ecs.xgamedev.net/en/docs/guide/structural-changes) | [guide/structural-changes.mdx](guide/structural-changes.mdx) |
-| [`ref` and `await`](https://ecs.xgamedev.net/en/docs/guide/refs-and-await) | [guide/refs-and-await.mdx](guide/refs-and-await.mdx) |
+| [ref and await](https://ecs.xgamedev.net/en/docs/guide/refs-and-await) | [guide/refs-and-await.mdx](guide/refs-and-await.mdx) |
 | [Change tracking](https://ecs.xgamedev.net/en/docs/guide/change-tracking) | [guide/change-tracking.mdx](guide/change-tracking.mdx) |
 | [Dynamic buffers](https://ecs.xgamedev.net/en/docs/guide/dynamic-buffers) | [guide/dynamic-buffers.mdx](guide/dynamic-buffers.mdx) |
 | [Indexes and relations](https://ecs.xgamedev.net/en/docs/guide/indexes-and-relations) | [guide/indexes-and-relations.mdx](guide/indexes-and-relations.mdx) |

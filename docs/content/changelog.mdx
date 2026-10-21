@@ -230,7 +230,7 @@ major or minor version that needs code changes? The
   is stale or lacks a component, and `entity.Run(ref job, filter)` also when a `QueryFilter` (`With`, `Without`,
   `WithAny`, `Changed`, `Removed`, a group) rejects it. The job's `Writes` stamp change ticks as in a pass, its `ref`
   parameters stay valid across its own structural changes, and its writes reach the moved row even when it throws.
-  See [one entity: `entity.Run`](/en/docs/guide/queries#run-on-one-entity).
+  See [`entity.Run`](/en/docs/guide/queries#run-on-one-entity).
 - A system group can filter through interfaces: `IGroupWith<T>` / `IGroupWithout<T>` on the group, or on an interface
   it implements, act as `[With<T>]` / `[Without<T>]`. A generic interface gives each type its own group
   (`IActorGroup<TActor> : IGroupWith<Inbox<TActor>>`), which attributes cannot express. See

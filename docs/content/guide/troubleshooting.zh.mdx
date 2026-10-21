@@ -16,22 +16,22 @@ faq: true
 | `Entity is not alive` | [失效或默认的句柄](#entity-not-alive) |
 | `Entity has no X component` | [缺少组件](#no-component) |
 | `Singleton X was not added to this world` | [缺少单例](#singleton-not-added) |
-| `Singleton X was added to this world already` | [对已有的单例调 `AddSingleton`](#singleton-exists) |
+| `Singleton X was added to this world already` | [单例添加了两次](#singleton-exists) |
 | `The entity is retired: it is only kept alive (tagged Retired)` | [克隆已退休的实体](#clone-retired) |
-| `The entity has no X (check HasValue)` | [空的 `Maybe<T>`](#maybe-empty) |
+| `The entity has no X (check HasValue)` | [空的可选组件](#maybe-empty) |
 | `X already belongs to a world` | [系统被添加了两次](#system-in-a-world) |
 | `[UpdateBefore] / [UpdateAfter] form a cycle` | [顺序成环](#ordering-cycle) |
-| `The ChildOf links form a cycle` | [`Descendants` 遇到 `ChildOf` 成环](#childof-cycle) |
-| `X cannot be disabled: remove it instead` | [禁用清理组件或 `ChildOf`](#cannot-disable) |
+| `The ChildOf links form a cycle` | [父实体成环](#childof-cycle) |
+| `X cannot be disabled: remove it instead` | [不能禁用的组件](#cannot-disable) |
 | `X cannot run while a query or system iterates the world` | [要等遍历结束的调用](#during-a-pass) |
 | `Not an EasyEcs save`、`The size of X changed`、`The fields of X changed`、`X was saved as`、`Types of this process share the save id`、`A damaged save` | [存档加载不了](#save-refused) |
 | `X is unique: entity … has key … already`、`X is unique: key … would be given to several entities at once`、`The save holds key … of unique X twice`、`X is unique, but its module registered no index` | [唯一键已被占用](#unique-key-taken) |
-| `A sliced filter (QueryFilter.Slice) applies to ForEach passes only` | [在 `ForEach` 之外用了分片过滤条件](#sliced-filter) |
+| `A sliced filter (QueryFilter.Slice) applies to ForEach passes only` | [在遍历之外用了分片过滤条件](#sliced-filter) |
 | `The world keeps no destroy log` | [销毁日志没开就去读](#no-destroy-log) |
 
 不抛异常的问题：[系统从不运行](#system-does-not-run)、[系统没有并行](#not-parallel)、[生成成员缺失](#member-missing)、
-[`entity.Run` 返回 `false`](#run-false)、[通过 `ref` 写的值丢了](#ref-lost)、[加载后组件不见了](#save-dropped-data)、[`MoveEntities` 没搬走的实体](#move-skipped)、
-[另一个生成器加上的接口](#other-generators)、[actor 键的 `ToString` 栈溢出](#key-tostring-overflow)。
+[单个实体上的 job 没有运行](#run-false)、[通过 ref 写的值丢了](#ref-lost)、[加载后组件不见了](#save-dropped-data)、[搬迁时留下的实体](#move-skipped)、
+[另一个生成器加上的接口](#other-generators)、[actor 键打印自己时栈溢出](#key-tostring-overflow)。
 
 ## 为什么结构变更报 “started while another one was running”？ [#structural-change-running]
 
@@ -96,7 +96,7 @@ InvalidOperationException: Entity has no Mana component
 
 `Get<T>()`（以及生成的 `entity.Mana`）要求组件存在；被移除或[被禁用](/zh/docs/guide/cleanup-and-disable)的组件都算不存在。
 **修法：**可有可无的地方用 `TryGet<T>(out var value)` 或生成的 `TryGetMana(out …)`，要默认值就用 `GetOrAdd<T>()`；在
-`[ForEach]` 方法里用 [`Maybe<T>` 参数](/zh/docs/guide/systems#maybe)，或者按 `[With<T>]` / `[Without<T>]` 拆成两个方法。
+`[ForEach]` 方法里用 [`Maybe<T>`](/zh/docs/guide/systems#maybe) 参数，或者按 `[With<T>]` / `[Without<T>]` 拆成两个方法。
 
 ## 为什么单例 “not added to this world”？ [#singleton-not-added]
 
@@ -274,7 +274,7 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
    去掉过滤条件再跑一次，就能和前两种情况分开。
 
 **修法：**把 `false` 当成请求的结果（actor 没了、单位死了），而不是错误；实体可能已被替换时，按 `EntityId` 重新查找
-（[单个实体：`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)）。
+（[`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)）。
 
 ## 为什么我的系统没有并行？ [#not-parallel]
 

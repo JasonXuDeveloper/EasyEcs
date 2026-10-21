@@ -22,12 +22,12 @@ after warm-up, and is covered by the unit tests and a BenchmarkDotNet benchmark.
 
 | Job | Features |
 | --- | --- |
-| [Simulate](#simulate) | [worlds and entities](#worlds-and-entities), [components and tags](#components-and-tags), [generated members](#generated-members), [systems and `[ForEach]`](#systems-and-foreach), [generic systems](#generic-systems), [filters](#filters), [optional components](#optional-components), [batch methods](#batch-methods), [singletons](#singletons), [ordering, groups and intervals](#system-groups-and-intervals), [slices](#slices), [immediate structural changes](#immediate-structural-changes), [ad-hoc queries](#ad-hoc-queries) |
+| [Simulate](#simulate) | [worlds and entities](#worlds-and-entities), [components and tags](#components-and-tags), [generated members](#generated-members), systems and [`[ForEach]`](#systems-and-foreach), [generic systems](#generic-systems), [filters](#filters), [optional components](#optional-components), [batch methods](#batch-methods), [singletons](#singletons), [ordering, groups and intervals](#system-groups-and-intervals), [slices](#slices), [immediate structural changes](#immediate-structural-changes), [ad-hoc queries](#ad-hoc-queries) |
 | [React to changes](#react) | [change tracking](#change-tracking), [writes that count only when the value changed](#write-only-when-changed), [removal detection](#removal-detection), [destroy log](#destroy-log), [cleanup components](#cleanup-components), [disable and enable](#disable-and-enable) |
 | [Find](#find) | [value indexes](#value-indexes), [unique keys](#unique-keys), [ordered ranges](#ordered-ranges), [table groups](#table-groups) |
 | [Structure](#structure) | [relations](#relations), [hierarchy](#hierarchy), [dynamic buffers](#dynamic-buffers), [prefabs and cloning](#prefabs-and-cloning) |
 | [Persist](#persist) | [snapshots](#snapshots), [saves](#saves), [migration](#migration), [unloading plugin types](#unloading) |
-| [Scale](#scale) | [one world per thread](#threading-model), [parallel systems](#parallel-systems), [parallel `[ForEach]`](#parallel-foreach), [bulk operations](#bulk-operations) |
+| [Scale](#scale) | [one world per thread](#threading-model), [parallel systems](#parallel-systems), parallel [`[ForEach]`](#parallel-foreach), [bulk operations](#bulk-operations) |
 | [Build and operate](#operate) | [analyzer and code fixes](#analyzer), [per-system timing](#per-system-timing), [the schedule](#schedule), [errors](#errors), [introspection](#introspection), [giving memory back](#trim-excess), [Native AOT](#native-aot), [hosting and testing](#hosting-and-testing), [templates and samples](#templates) |
 
 ## Simulate [#simulate]
@@ -215,7 +215,7 @@ bookkeeping.
 - **Skip it for:** per-tick logic: a system is ordered, scheduled and measured.
 - **Cost:** allocation-free. `Count` sums table counts; `Any` stops at the first match; a struct job is the fastest
   ad-hoc pass. `entity.Run` is O(1), plus O(1) per component its filter names.
-- **Guide:** [Queries and filters](/en/docs/guide/queries), [One entity: `entity.Run`](/en/docs/guide/queries#run-on-one-entity)
+- **Guide:** [Queries and filters](/en/docs/guide/queries), [`entity.Run`](/en/docs/guide/queries#run-on-one-entity)
 
 ## React to changes [#react]
 

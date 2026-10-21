@@ -129,7 +129,7 @@ var hit = new TakeHit { Damage = 30 };
 bool applied = unit.Run<Health, TakeHit>(ref hit);   // 在请求对应的实体上处理它
 ```
 
-`ref` 在下一次结构变更之前有效，跨 `await` 一律无效（[`ref` 与 `await`](/zh/docs/guide/refs-and-await)）。
+`ref` 在下一次结构变更之前有效，跨 `await` 一律无效（[ref 与 await](/zh/docs/guide/refs-and-await)）。
 
 ## 生成成员 [#generated-members]
 

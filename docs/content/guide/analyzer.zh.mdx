@@ -91,7 +91,7 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 
 每个参数都必须是以下之一：实现 `IComponent` 或 `ISingletonComponent` 的 `ref` / `in` / `ref readonly` 结构体，`IComponent`
 结构体的 `Span<T>` / `ReadOnlySpan<T>`，它的 `Maybe<T>`（可选组件），`Entity`，或者 `World`。
-[系统之外的 `[ForEach]` 方法](/zh/docs/guide/systems#foreach-outside-systems)还可以接收任意其他类型的值，由生成的入口从调用方传进来。
+[系统之外](/zh/docs/guide/systems#foreach-outside-systems)的 `[ForEach]` 方法还可以接收任意其他类型的值，由生成的入口从调用方传进来。
 
 ```csharp doccheck=expect-EECS002
 public class MoveSystem : EcsSystem

@@ -20,7 +20,7 @@ is allocation-free.
 </Callout>
 
 <Callout type="warn" title="Skip it for">
-  Per-tick logic: write a [`[ForEach]` method](/en/docs/guide/systems#foreach-methods) in a system instead. It is
+  Per-tick logic: write a [`[ForEach]`](/en/docs/guide/systems#foreach-methods) method in a system instead. It is
   generated, ordered with the other systems, scheduled in parallel stages and as fast as the fastest hand-written
   loop. Looking entities up by a value or by the entity they point at: use an
   [index](/en/docs/guide/indexes-and-relations), not a scan.
@@ -82,22 +82,22 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 
 | Need | Use |
 | --- | --- |
-| Per-entity logic of a system | a [`[ForEach]` method](/en/docs/guide/systems#foreach-methods) |
-| Arithmetic over many rows in a system | a [batch `[ForEach]` method](/en/docs/guide/systems#batch-methods) (spans, SIMD) |
+| Per-entity logic of a system | a [`[ForEach]`](/en/docs/guide/systems#foreach-methods) method |
+| Arithmetic over many rows in a system | a batch [`[ForEach]`](/en/docs/guide/systems#batch-methods) method (spans, SIMD) |
 | Heavy per-entity work in a system | [`[ForEach(Parallel = true)]`](/en/docs/guide/systems#parallel-methods) |
-| A component the entity may or may not have | a [`Maybe<T>` parameter](/en/docs/guide/systems#maybe), or two methods split by `With` / `Without` |
-| A pass outside systems, as a method | a [`[ForEach]` runner](/en/docs/guide/systems#foreach-outside-systems): a static method with a generated entry point |
+| A component the entity may or may not have | a [`Maybe<T>`](/en/docs/guide/systems#maybe) parameter, or two methods split by `With` / `Without` |
+| A pass outside systems, as a method | a [`[ForEach]`](/en/docs/guide/systems#foreach-outside-systems) runner: a static method with a generated entry point |
 | The fastest ad-hoc loop | `world.ForEach<T1..Tn, TJob>(ref job, filter)` with a [struct job](#foreach-a-struct-job) |
 | Ad-hoc loop that needs the `Entity` | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` |
 | Ad-hoc arithmetic over runs of rows | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` |
 | A job on one entity (a request, a message) | [`entity.Run<T1..Tn, TJob>(ref job, filter)`](#run-on-one-entity) |
-| Ad-hoc heavy work on several threads | [`ForEachParallel` / `ForEachEntityParallel`](#on-several-threads-foreachparallel-and-foreachentityparallel) |
+| Ad-hoc heavy work on several threads | [`ForEachParallel`](#on-several-threads-foreachparallel-and-foreachentityparallel) / [`ForEachEntityParallel`](#on-several-threads-foreachparallel-and-foreachentityparallel) |
 | A convenient loop (tools, tests, handlers) | `foreach (var item in world.Query<T1..Tn>(filter))` |
 | A loop that only reads (a save, a send, a report) | [`foreach (var item in world.Read<T1..Tn>(filter))`](#read): nothing stamped |
 | "How many …?" / "Is there any …?" | `world.Count<T1..Tn>(filter)` / `world.Any<T1..Tn>(filter)` |
 | Destroy every match | `world.DestroyAll<T1..Tn>(filter)` |
 | Only rows written or removed since a tick | `Changed<T>(tick)` / `Removed<T>(tick)`, `ChangedAny<T1..Tn>(tick)` / `RemovedAny<T1..Tn>(tick)` for any of several ([change tracking](/en/docs/guide/change-tracking)) |
-| A pass that writes only the rows whose value changed | a [`Mut<T>` parameter](/en/docs/guide/change-tracking#set-if-changed) of a `[ForEach]` method |
+| A pass that writes only the rows whose value changed | a [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) parameter of a `[ForEach]` method |
 | A share of the rows per pass, every row once per N passes | `Slice(index, of)` with a `ForEach` call, or [`[ForEach(Slices = N)]`](/en/docs/guide/systems#slices) |
 | Entities by a value, or pointing at an entity | `world.Index<T, TKey>().Find(key)` ([indexes](/en/docs/guide/indexes-and-relations)) |
 

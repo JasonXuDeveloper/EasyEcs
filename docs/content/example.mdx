@@ -56,10 +56,10 @@ EasyEcs' features to their place in this file.
 | [Components, tags, singletons](/en/docs/guide/entities-and-components) | `Position`, `Health`, `Player`, `Dead`; singletons `Battle`, `Rules`, `Waypoints` |
 | Generated members | `players[i].Position = …`, `SetZone`, `SetFrozen`, `RemoveBurning`, `SetDead`, `IsDead`, `HasAccount`, `TryGetMana`, `World.Battle`, `KillsIndex`, `AccountIndex`; buffers `player.Loot`, `WriteLoot()`; `DisableAttack` / `EnableAttack`; on prefabs `SetHealth`, `SetNpc`, `SetLifetime` |
 | [Systems](/en/docs/guide/systems), filters (`With`, `Without`, `WithAny`) | every system; `AfflictionSystem` counts burning **or** frozen units with `World.Count` |
-| [Parallel `[ForEach]`](/en/docs/guide/threading) | `SteeringSystem`; `Reports.HealFully` and `Reports.Scatter` in `NewRound` |
+| Parallel [`[ForEach]`](/en/docs/guide/threading) | `SteeringSystem`; `Reports.HealFully` and `Reports.Scatter` in `NewRound` |
 | Parallel systems (`WorldOptions.ParallelSystems`), [`DescribeSchedule`](/en/docs/guide/diagnostics#schedule) | `PlanningSystem` and `ManaSystem`: disjoint data; `Schedule()` shows it |
 | [Slices](/en/docs/guide/systems#slices) (`[ForEach(Slices = N)]`, `RunCount`) | `PlanningSystem` plans a quarter of the NPCs per run |
-| [`Mut<T>` and `SetIfChanged`](/en/docs/guide/change-tracking#set-if-changed) | `PlanningSystem.Plan` writes a goal only when it changes; `CombatSystem` and `RegenerationSystem` stamp `Health` only on a hit or a heal |
+| [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) and [`SetIfChanged`](/en/docs/guide/change-tracking#set-if-changed) | `PlanningSystem.Plan` writes a goal only when it changes; `CombatSystem` and `RegenerationSystem` stamp `Health` only on a hit or a heal |
 | Batch methods (`Span<T>`), SIMD | `MovementSystem`; `Reports.SumHealth` |
 | `[ForEach]` runners outside systems | `Reports` |
 | `Maybe<T>` | `RegenerationSystem` heals burning players less |

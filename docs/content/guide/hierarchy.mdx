@@ -8,7 +8,7 @@ icon: GitFork
 A ship carries turrets, a turret carries a gun, a squad leader leads its members. `ChildOf(parent)` links an entity
 to its parent: `world.Children(parent)` lists the children, and destroying the parent destroys its descendants, so a
 ship that sinks takes its turrets with it without a line of cleanup code. `ChildOf` is an
-[indexed `EntityId` link](/en/docs/guide/indexes-and-relations#entityid-keys) like any other, with the destroy cascade
+[indexed link](/en/docs/guide/indexes-and-relations#entityid-keys) by `EntityId` like any other, with the destroy cascade
 switched on.
 
 ## When to use it [#when-to-use-it]
@@ -63,7 +63,7 @@ foreach (var child in world.Children(ship)) { /* the turret */ }
 `world.Descendants(root)` walks the whole subtree below the root, depth first, each entity before its own children;
 the root itself is not one of them. It costs O(1) per entity and allocates nothing once warm. Use it where a whole tree
 is the unit (saving, moving or counting it); propagation that needs each parent's result goes through
-[`Children` level by level](#transform-propagation).
+[`Children`](#transform-propagation), level by level.
 
 ```csharp
 int parts = 0;

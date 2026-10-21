@@ -18,7 +18,7 @@ icon: Cog
 </Callout>
 
 <Callout type="warn" title="不适合">
-  请求或工具在两个 tick 之间跑的一次性遍历：写成 [`[ForEach]` runner](#foreach-outside-systems) 或者[查询](/zh/docs/guide/queries)。
+  请求或工具在两个 tick 之间跑的一次性遍历：写成 [`[ForEach]`](#foreach-outside-systems) runner 或者[查询](/zh/docs/guide/queries)。
   需要跨 tick 保留的状态：放进组件或[单例组件](/zh/docs/guide/singletons)，绝不放在系统字段里（[EECS007](/zh/docs/guide/analyzer#eecs007)）。
 </Callout>
 
@@ -321,7 +321,7 @@ world.Update();               // 固定 tick：默认分组
 写在分组结构体上的 `[With<T>]`、`[Without<T>]`、`[WithAny<T>]` 会加到分组里所有系统的每个 `[ForEach]` 方法上：整组系统都能排除
 被冻结或未激活的实体，不用在每个方法上重复写。分组的 `[WithAny<T>]` 并入方法自己的 `[WithAny<T>]` 集合，放宽的是“至少有一个”
 这个条件：分组写 `[WithAny<A>]`、方法写 `[WithAny<B>]`，选出的是有 `A` 或有 `B` 的实体。系统在 `OnUpdate` 里自己做的查询不受影响；
-[`[ForEach]` runner](#foreach-outside-systems) 不属于任何分组，分组过滤也管不到它。过滤特性写在不是分组的结构体上会编译报错
+[`[ForEach]`](#foreach-outside-systems) runner 不属于任何分组，分组过滤也管不到它。过滤特性写在不是分组的结构体上会编译报错
 （[EECS023](/zh/docs/guide/analyzer#eecs023)）。
 
 ```csharp

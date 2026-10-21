@@ -19,12 +19,12 @@ EasyEcs 的全部功能都在这一页，按它在服务器上承担的工作分
 
 | 用途 | 功能 |
 | --- | --- |
-| [模拟](#simulate) | [World 与实体](#worlds-and-entities)、[组件与标签](#components-and-tags)、[生成成员](#generated-members)、[系统与 `[ForEach]`](#systems-and-foreach)、[泛型系统](#generic-systems)、[过滤条件](#filters)、[可选组件](#optional-components)、[批量方法](#batch-methods)、[单例](#singletons)、[排序、分组与间隔](#system-groups-and-intervals)、[分片](#slices)、[立即生效的结构变更](#immediate-structural-changes)、[临时查询](#ad-hoc-queries) |
+| [模拟](#simulate) | [World 与实体](#worlds-and-entities)、[组件与标签](#components-and-tags)、[生成成员](#generated-members)、系统与 [`[ForEach]`](#systems-and-foreach)、[泛型系统](#generic-systems)、[过滤条件](#filters)、[可选组件](#optional-components)、[批量方法](#batch-methods)、[单例](#singletons)、[排序、分组与间隔](#system-groups-and-intervals)、[分片](#slices)、[立即生效的结构变更](#immediate-structural-changes)、[临时查询](#ad-hoc-queries) |
 | [响应变化](#react) | [变更追踪](#change-tracking)、[值变了才算写入](#write-only-when-changed)、[移除检测](#removal-detection)、[销毁日志](#destroy-log)、[清理组件](#cleanup-components)、[禁用与启用](#disable-and-enable) |
 | [查找](#find) | [值索引](#value-indexes)、[唯一键](#unique-keys)、[有序区间](#ordered-ranges)、[按值分表](#table-groups) |
 | [组织](#structure) | [关系](#relations)、[层级](#hierarchy)、[动态缓冲](#dynamic-buffers)、[预制体与克隆](#prefabs-and-cloning) |
 | [持久化](#persist) | [快照](#snapshots)、[存档](#saves)、[迁移](#migration)、[卸载插件类型](#unloading) |
-| [扩展](#scale) | [每个线程一个 World](#threading-model)、[并行系统](#parallel-systems)、[并行 `[ForEach]`](#parallel-foreach)、[批量操作](#bulk-operations) |
+| [扩展](#scale) | [每个线程一个 World](#threading-model)、[并行系统](#parallel-systems)、并行 [`[ForEach]`](#parallel-foreach)、[批量操作](#bulk-operations) |
 | [构建与运维](#operate) | [分析器与代码修复](#analyzer)、[系统耗时统计](#per-system-timing)、[调度](#schedule)、[异常处理](#errors)、[运行时自省](#introspection)、[归还内存](#trim-excess)、[Native AOT](#native-aot)、[托管与测试](#hosting-and-testing)、[模板与示例程序](#templates) |
 
 ## 模拟 [#simulate]
@@ -184,7 +184,7 @@ public class MovementSystem : EcsSystem
 - **别用于：** 每个 tick 都要跑的逻辑：系统有排序、有调度、有耗时统计。
 - **开销：** 零分配。`Count` 只是把表的行数加起来；`Any` 找到第一个就停；结构体 job 是最快的临时遍历。
   `entity.Run` 是 O(1)，过滤条件每多一个组件多 O(1)。
-- **指南：** [查询与过滤](/zh/docs/guide/queries)、[单个实体：`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)
+- **指南：** [查询与过滤](/zh/docs/guide/queries)、[`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)
 
 ## 响应变化 [#react]
 

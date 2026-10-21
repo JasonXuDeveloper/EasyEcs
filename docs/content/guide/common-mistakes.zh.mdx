@@ -344,7 +344,7 @@ foreach (var item in world.Read<Rating>())
 ```
 
 由 [EECS046](/zh/docs/guide/analyzer#eecs046) 发现（警告，带代码修复）。详见
-[`Read`：只读的循环](/zh/docs/guide/queries#read)。
+[只读的循环](/zh/docs/guide/queries#read)。
 
 ### `[Removed<T>]` 方法接收了 `T` [#removed-takes-t]
 
@@ -512,7 +512,7 @@ await Task.Delay(100);
 if (hero.HasHealth) hero.Health.Value -= 10;
 ```
 
-由 C# 编译器发现。详见[跨 `await`](/zh/docs/guide/refs-and-await#across-await)。
+由 C# 编译器发现。详见 [ref 与 await](/zh/docs/guide/refs-and-await#across-await)。
 
 ### 通过 `ref` 写被索引的键 [#indexed-by-ref]
 
@@ -819,7 +819,7 @@ public class Reap : EcsSystem
 }
 ```
 
-由 [EECS010](/zh/docs/guide/analyzer#eecs010) 发现。详见[并行 `[ForEach]` 方法](/zh/docs/guide/threading#parallel-foreach-methods)。
+由 [EECS010](/zh/docs/guide/analyzer#eecs010) 发现。详见并行 [`[ForEach]`](/zh/docs/guide/threading#parallel-foreach-methods) 方法。
 
 ### 在并行方法里调 `entity.Run` [#run-in-parallel]
 
@@ -855,7 +855,7 @@ public class HealAll : EcsSystem
 }
 ```
 
-由 [EECS010](/zh/docs/guide/analyzer#eecs010) 发现。详见[单个实体：`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)。
+由 [EECS010](/zh/docs/guide/analyzer#eecs010) 发现。详见[`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)。
 
 ## 相关页面 [#related]
 

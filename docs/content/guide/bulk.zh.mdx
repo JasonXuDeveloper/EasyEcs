@@ -57,7 +57,7 @@ int lifted = world.RemoveAll<Stun>();                        // 所有人解除�
 ### 对所有匹配实体禁用和启用 [#disable-all]
 
 `DisableAll<T>(filter)` 和 `EnableAll<T>(filter)` 就是对每个匹配实体执行
-[`Disable<T>()` 和 `Enable<T>()`](/zh/docs/guide/cleanup-and-disable#disable-a-component)：值保留，之后原样还回来。
+[`Disable<T>()`](/zh/docs/guide/cleanup-and-disable#disable-a-component) 和 [`Enable<T>()`](/zh/docs/guide/cleanup-and-disable#disable-a-component)：值保留，之后原样还回来。
 
 ```csharp
 int paused = world.DisableAll<Regen>(Rounds.Fighters);     // 暂停依赖 Regen 的回血系统
