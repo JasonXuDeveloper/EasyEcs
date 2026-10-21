@@ -187,6 +187,9 @@ public class CodeFixTests
     [TestCase("EECS038", "Keep the ref",
         "public static class U { public static void F(Entity e) { var t = e.T; t.V++; } }",
         "{ ref var t = ref e.WriteT(); t.V++; }")]
+    [TestCase("EECS046", "Read without stamping",
+        "public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<T>()) n += item.T.V; return n; } }",
+        "foreach (var item in w.Read<T>()) n += item.T.V;")]
     [TestCase("EECS039", "Take it by 'ref'",
         "public class S : EcsSystem { [ForEach] static void A(Mut<P> p, in Q q) { if (q.V > p.Value.V) p.Write().V = q.V; } }",
         "static void A(ref P p, in Q q) { if (q.V > p.V) p.V = q.V; }")]

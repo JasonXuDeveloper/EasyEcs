@@ -110,6 +110,14 @@ public sealed partial class EasyEcsAnalyzer
         "is not tracked has no stamps: a Mut of it is a 'ref' parameter behind a wrapper, Value and Write() where the " +
         "ref would do.", helpLinkUri: Help("EECS039"));
 
+    public static readonly DiagnosticDescriptor ReadOnlyQuery = new("EECS046", "A query loop that only reads tracked components",
+        "This loop only reads what '{0}' hands out, and the query stamps every row it visits of {1}; '{2}' reads them without stamping",
+        Category, DiagnosticSeverity.Warning, true,
+        "Query items hand out refs, so every row a query visits of a tracked component (ITrackChanges, DynamicBuffer<T>) " +
+        "counts as written, whether or not the loop writes through it: [Changed<T>] systems then visit rows nobody " +
+        "changed. Read<T1..Tn> walks the same rows with ref readonly items and stamps nothing.",
+        helpLinkUri: Help("EECS046"));
+
     /// <summary>Property keys of the diagnostics' code fixes: what the analyzer decided, the fix only applies it.</summary>
     public const string FixKind = "Fix", FixTitle = "Title", Replace = "Replace", Insert = "Insert", RemoveOthers = "Remove", WithType = "With";
 
@@ -846,7 +854,7 @@ public sealed partial class EasyEcsAnalyzer
     {
         var reference = (IPropertyReferenceOperation)context.Operation;
         var property = reference.Property;
-        if (!property.Name.StartsWith("Component") || property.ContainingType is not { Name: "QueryItem" } item
+        if (!property.Name.StartsWith("Component") || property.ContainingType is not { Name: "QueryItem" or "ReadItem" } item
             || item.ContainingNamespace?.ToDisplayString() != "EasyEcs" || reference.Syntax is not MemberAccessExpressionSyntax access
             || property.Type is not INamedTypeSymbol { IsGenericType: false } type) return;
         string replacement = access.Expression + "." + type.Name;
@@ -877,10 +885,28 @@ public sealed partial class EasyEcsAnalyzer
         }
     }
 
-    /// <summary>The <c>world.Query&lt;…&gt;(filter)</c> a foreach walks, or null.</summary>
+    /// <summary>The <c>world.Query&lt;…&gt;(filter)</c> or <c>world.Read&lt;…&gt;(filter)</c> a foreach walks, or null.</summary>
     private static IInvocationOperation? Query(IOperation collection, Core core) =>
-        Unwrap(collection) is IInvocationOperation { TargetMethod: { Name: "Query", TypeArguments.Length: > 0 } method } call
+        Unwrap(collection) is IInvocationOperation { TargetMethod: { Name: "Query" or "Read", TypeArguments.Length: > 0 } method } call
         && core.Is(method.ContainingType, core.World) && call.Instance != null ? call : null;
+
+    /// <summary>
+    /// Whether every use of the query item <paramref name="item"/> in <paramref name="body"/> reads: its entity, or a
+    /// component member whose ref the use cannot write through (<see cref="Uses.MayWrite"/>). Any other use of the item
+    /// (passed on, stored) counts as a write, so a missed read costs a missed warning, never a wrong one.
+    /// </summary>
+    private static bool ReadsOnly(IOperation body, ILocalSymbol item)
+    {
+        foreach (var use in body.Descendants().OfType<ILocalReferenceOperation>())
+        {
+            if (!SymbolEqualityComparer.Default.Equals(use.Local, item)) continue;
+            if (use.Parent is not IPropertyReferenceOperation { Property: var property } member) return false;
+            if (property.Name == "Entity" || property.ReturnsByRefReadonly) continue;
+            if (!property.ReturnsByRef || Uses.MayWrite(member)) return false;
+        }
+
+        return true;
+    }
 
     private static IOperation? Single(IOperation body) => body switch
     {
@@ -899,6 +925,16 @@ public sealed partial class EasyEcsAnalyzer
         string typeList = string.Join(", ", types.Select(t => t.ToMinimalDisplayString(model, at)));
         string? filter = query.Arguments.FirstOrDefault(a => !a.IsImplicit)?.Value.Syntax.ToString();
         var statement = Single(loop.Body);
+
+        // EECS046: a query that only reads tracked components.
+        if (query.TargetMethod.Name == "Query" && item != null && ReadsOnly(loop.Body, item)
+            && types.Where(t => Symbols.Implements(t, Symbols.TrackChanges)).Select(t => t.ToMinimalDisplayString(model, at)).ToArray() is { Length: > 0 } tracked
+            && query.Syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name: GenericNameSyntax queried } })
+        {
+            string read = "Read" + queried.TypeArgumentList;
+            context.ReportDiagnostic(Diagnostic.Create(ReadOnlyQuery, queried.GetLocation(), Fix(read, "Read without stamping"),
+                queried.ToString(), string.Join(", ", tracked), $"{world}.{read}"));
+        }
 
         // EECS032: a loop that only counts.
         if (statement is IExpressionStatementOperation { Operation: var step } && Counter(step) is { } counter && item != null && !Mentions(loop.Body, item))

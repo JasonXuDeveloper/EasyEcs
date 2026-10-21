@@ -70,7 +70,7 @@ public sealed partial class EasyEcsAnalyzer
         "{0}",
         Category, DiagnosticSeverity.Error, true,
         "QueryFilter.Slice(index, count) cuts each matching table for ForEach passes ([ForEach(Slices = N)], ForEach, " +
-        "ForEachEntity, ForEachBatch and their parallel forms). Query, Count, Any, DestroyEntities, entity.Run, SetAll, " +
+        "ForEachEntity, ForEachBatch and their parallel forms). Query, Read, Count, Any, DestroyAll, entity.Run, SetAll, " +
         "RemoveAll, DisableAll and EnableAll need every matching row and throw ArgumentException for a sliced filter; " +
         "Slice itself throws ArgumentOutOfRangeException for a count below 1 or an index outside [0, count).", helpLinkUri: Help("EECS044"));
 
@@ -90,13 +90,13 @@ public sealed partial class EasyEcsAnalyzer
     /// <summary>The World members a pass refuses (they throw while one iterates the world).</summary>
     private static readonly HashSet<string> PassRefused =
     [
-        "TrimExcess", "Capture", "Restore", "RemoveTypes", "GroupBy", "Save", "Load", "SaveEntities", "LoadEntities",
-        "LoadEntitiesInto", "MoveEntities",
+        "TrimExcess", "Capture", "Restore", "RemoveTypes", "GroupBy", "Save", "SaveWithout", "Load", "LoadKeeping",
+        "SaveEntities", "SaveEntitiesWith", "LoadEntities", "LoadEntitiesInto", "MoveEntities",
     ];
 
     /// <summary>The calls that need every matching row (they throw for a sliced filter).</summary>
     private static readonly HashSet<string> WholeRowCalls =
-        ["Query", "Count", "Any", "DestroyEntities", "SetAll", "RemoveAll", "DisableAll", "EnableAll"];
+        ["Query", "Read", "Count", "Any", "DestroyAll", "SetAll", "RemoveAll", "DisableAll", "EnableAll"];
 
     private static readonly HashSet<string> EntityTagWriters = ["Set", "GetOrAdd", "Remove", "SetIfChanged", "Disable", "Enable"];
 

@@ -20,7 +20,7 @@ var top = new Entity[3];
 Check(server.TopKillers(top) > 0, "a leaderboard");
 
 Entity from = default, to = default;
-foreach (var item in server.World.Query<DynamicBuffer<Loot>>())
+foreach (var item in server.World.Read<DynamicBuffer<Loot>>())
 {
     if (from == default && item.Component1.Count > 0) from = item.Entity;
     else if (to == default && item.Component1.Count < BattleServer.BagSize) to = item.Entity;

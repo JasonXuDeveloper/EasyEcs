@@ -278,12 +278,12 @@ public class ChangedTests
 
         entities[3].Get<Armor>() = new Armor(2);
         entities[70].Set(new Armor(2));
-        foreach (var _ in world.Query<Armor>(QueryFilter.Create().With<Stun>())) { } // matches nothing: no stamp
+        foreach (var _ in world.Read<Armor>(QueryFilter.Create().With<Stun>())) { } // matches nothing: no stamp
         Assert.That(world.Count<Armor>(changed), Is.EqualTo(2));
         Assert.That(world.Any<Armor>(changed), Is.True);
 
         int visited = 0;
-        foreach (var item in world.Query<Armor>(changed)) visited += item.Component1.Value;
+        foreach (var item in world.Read<Armor>(changed)) visited += item.Component1.Value;
         Assert.That(visited, Is.EqualTo(4));
 
         // Tick 0 selects every row having T; one filter has one tick; ChangedSince moves it.
@@ -314,7 +314,9 @@ public class ChangedTests
         world.Update();
         Assert.That(entities[0].Seen.Count, Is.EqualTo(1));                   // nor did the watch see a change
 
+#pragma warning disable EECS046 // the stamping of a query that only reads is what this test covers
         foreach (var item in world.Query<Armor>()) sum += item.Component1.Value;
+#pragma warning restore EECS046
         Assert.That(world.Count<Armor>(changed), Is.EqualTo(10));             // a query's items hand out refs: written
     }
 
@@ -348,7 +350,7 @@ public class ChangedTests
         entities[0].Destroy();                     // the last row moves into row 0, whose word was not written
         var changed = QueryFilter.Create().Changed<Armor>(mark);
         Assert.That(world.Count<Armor>(changed), Is.EqualTo(1));
-        foreach (var item in world.Query<Armor>(changed)) Assert.That(item.Entity, Is.EqualTo(entities[199]));
+        foreach (var item in world.Read<Armor>(changed)) Assert.That(item.Entity, Is.EqualTo(entities[199]));
     }
 
     [Test]
@@ -468,7 +470,7 @@ public class ChangedTests
 
         entities[0].Destroy(); // the last row moves into row 0 (block 0, not written since the mark): its summaries go with it
         var found = new System.Collections.Generic.List<Entity>();
-        foreach (var item in world.Query<Armor>(changed)) found.Add(item.Entity);
+        foreach (var item in world.Read<Armor>(changed)) found.Add(item.Entity);
         Assert.That(found, Is.EquivalentTo(new[] { entities[15_000], entities[19_999] }));
     }
 
@@ -650,7 +652,7 @@ public class ChangedTests
         Assert.That(world.Count<Armor>(filter), Is.EqualTo(1));
         frozen.Get<Armor>().Value++;
         var found = new System.Collections.Generic.List<Entity>();
-        foreach (var item in world.Query<Armor>(filter)) found.Add(item.Entity);
+        foreach (var item in world.Read<Armor>(filter)) found.Add(item.Entity);
         Assert.That(found, Is.EquivalentTo(new[] { stunned, frozen }));
     }
 
@@ -779,7 +781,7 @@ public class ChangedTests
         world.Update();
         Assert.That((calm.Health.Value, stunned.Health.Value, stunned.Armor.Value), Is.EqualTo((5, 4, 3)));
         int changed = 0;
-        foreach (var item in world.Query<Armor>(QueryFilter.Create().Changed<Armor>(mark)))
+        foreach (var item in world.Read<Armor>(QueryFilter.Create().Changed<Armor>(mark)))
         {
             Assert.That(item.Entity, Is.EqualTo(stunned));
             changed++;

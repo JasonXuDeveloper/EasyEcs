@@ -197,7 +197,7 @@ public class SerializationTests
         int sum = 0;
         foreach (var item in loaded.Query<Health>()) sum += item.Component1.Value;
         int loot = 0;
-        foreach (var item in loaded.Query<DynamicBuffer<DynamicBufferTests.Loot>>()) loot += item.Component1.Count;
+        foreach (var item in loaded.Read<DynamicBuffer<DynamicBufferTests.Loot>>()) loot += item.Component1.Count;
         Assert.That((loaded.EntityCount, sum, loot, loaded.GetSingleton<Score>()), Is.EqualTo((1100, 999 * 1000 / 2, 300, new Score(1, 2))));
     }
 
@@ -458,7 +458,7 @@ public class SerializationTests
         Assert.That((resumed.HasSingleton<Cache>(), resumed.GetSingleton<Score>()), Is.EqualTo((false, new Score(1, 2))));
         Assert.That((resumed.EntityCount, resumed.Count<Balance>(), resumed.Count<Session>()), Is.EqualTo((11, 10, 0)));
         int gold = 0;
-        foreach (var item in resumed.Query<Balance>()) gold += item.Component1.Gold;
+        foreach (var item in resumed.Read<Balance>()) gold += item.Component1.Gold;
         Assert.That(gold, Is.EqualTo(45));
 
         resumed.Load(bytes);                                                // without keep: the save lacks Config

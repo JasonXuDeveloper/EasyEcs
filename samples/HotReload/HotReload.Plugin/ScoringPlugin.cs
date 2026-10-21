@@ -20,7 +20,7 @@ public sealed class ScoringPlugin : IGamePlugin
     public string Status(World world)
     {
         int points = 0;
-        foreach (var item in world.Query<Score>())
+        foreach (var item in world.Read<Score>())
         {
             points += item.Score.Points;
         }

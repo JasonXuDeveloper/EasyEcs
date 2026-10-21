@@ -32,7 +32,7 @@ public class BattleServerTests
     {
         using var server = Run(300);
         int looted = 0;
-        foreach (var item in server.World.Query<DynamicBuffer<Loot>>())
+        foreach (var item in server.World.Read<DynamicBuffer<Loot>>())
         {
             Assert.That(item.Component1.Count, Is.InRange(0, BattleServer.BagSize));
             foreach (var loot in item.Component1) Assert.That(loot.Item, Is.InRange(0, 15));
@@ -48,7 +48,7 @@ public class BattleServerTests
     {
         using var server = Run(300);
         Entity from = default, to = default;
-        foreach (var item in server.World.Query<DynamicBuffer<Loot>>())
+        foreach (var item in server.World.Read<DynamicBuffer<Loot>>())
         {
             if (from == default && item.Component1.Count > 0) from = item.Entity;
             else if (to == default && item.Component1.Count < BattleServer.BagSize) to = item.Entity;
@@ -77,7 +77,7 @@ public class BattleServerTests
             int sent = server.Battle.Replicated;
             server.World.Update<Replication>();                               // nothing changed since the send
             Assert.That(server.Battle.Replicated, Is.EqualTo(sent));
-            foreach (var item in server.World.Query<Health, Replica>())      // every client copy is current
+            foreach (var item in server.World.Read<Health, Replica>())      // every client copy is current
             {
                 Assert.That(item.Replica.Health, Is.EqualTo(item.Health.Value));
                 Assert.That(item.Component2.Burning, Is.EqualTo(item.Entity.Has<Burning>()));  // fires lit and gone out
@@ -99,7 +99,7 @@ public class BattleServerTests
             ulong mark = server.World.ChangeTick;
             server.Tick();
             var written = new HashSet<Entity>();
-            foreach (var item in server.World.Query<Goal>(QueryFilter.Create().Changed<Goal>(mark))) written.Add(item.Entity);
+            foreach (var item in server.World.Read<Goal>(QueryFilter.Create().Changed<Goal>(mark))) written.Add(item.Entity);
 
             foreach (var (npc, goal) in before)
             {
@@ -318,7 +318,7 @@ public class BattleServerTests
         Assert.That(projectiles, Is.Positive);
         Assert.That(server.NewRound(), Is.EqualTo(projectiles));
         Assert.That(server.World.Any<Lifetime>(), Is.False);
-        foreach (var item in server.World.Query<Health>()) Assert.That(item.Component1.Value, Is.EqualTo(item.Component1.Max));
+        foreach (var item in server.World.Read<Health>()) Assert.That(item.Component1.Value, Is.EqualTo(item.Component1.Max));
         Assert.That(server.World.Children(server.NearestPlayer(default)).GetEnumerator().MoveNext(), Is.False);
         Assert.That(server.AnyoneAfflicted, Is.False);                       // statuses lifted in bulk
         Assert.That(server.Census().ReadyToAttack, Is.EqualTo(server.World.Count<Attack>(QueryFilter.Create().Without<Dead>())));
@@ -508,7 +508,7 @@ public class BattleServerTests
         Assert.That(server.Leave(player), Is.True);
         Assert.That(server.World.Count<Lifetime>(), Is.EqualTo(shots - own)); // its children went with it
         Assert.That(server.FriendsOf(player), Is.Zero);                       // the policy dropped the links
-        foreach (var item in server.World.Query<DynamicBuffer<Friend>>())
+        foreach (var item in server.World.Read<DynamicBuffer<Friend>>())
             foreach (var link in item.Component1) Assert.That(link.Target, Is.Not.EqualTo(player.Id));
         Assert.That(server.Leave(player), Is.False);
     }

@@ -35,7 +35,7 @@ public class GeneratorTests
     internal static async Task<Diagnostic[]> Costs(params string[] sources) =>
         (await Analyze(sources)).Where(d => IsPerformance(d.Id) || d.Id == "EECS034").OrderBy(d => d.Location.SourceSpan.Start).ToArray();
 
-    private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0 || id == "EECS039";
+    private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0 || id is "EECS039" or "EECS046";
 
     private static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources)
     {
@@ -462,7 +462,7 @@ public class GeneratorTests
     // EECS044: a sliced filter where every row is needed, and a constant slice out of range.
     [TestCase("public static class U { public static int F(World w) => w.Count<P>(QueryFilter.Create().Slice(0, 2)); }", "EECS044")]
     [TestCase("public static class U { public static bool F(World w) { var f = QueryFilter.Create().Slice(1, 4).With<Q>(); return w.Any<P>(f); } }", "EECS044")]
-    [TestCase("public static class U { static readonly QueryFilter Half = QueryFilter.Create().Slice(0, 2); public static void F(World w) { w.DestroyEntities<P>(Half); } }", "EECS044")]
+    [TestCase("public static class U { static readonly QueryFilter Half = QueryFilter.Create().Slice(0, 2); public static void F(World w) { w.DestroyAll<P>(Half); } }", "EECS044")]
     [TestCase("public static class U { public static int F(World w, int n) => w.SetAll(new Q(), QueryFilter.Create().Slice(0, n)); }", "EECS044")]
     [TestCase("public static class U { public static QueryFilter F() => QueryFilter.Create().Slice(3, 2); }", "EECS044")]
     [TestCase("public static class U { public static QueryFilter F() => QueryFilter.Create().Slice(0, 0); }", "EECS044")]
@@ -1285,6 +1285,10 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Entity e, ref P p) => p.V = e.Describe().Length; }", "EECS028")]
     [TestCase("public struct J : IForEachEntity<P> { public void Execute(Entity e, ref P p) => p.V = e.Read<Q>().V; }", "EECS027", "EECS033")]
     [TestCase("public struct J : IForEach<P> { public void Execute(ref P p) { var all = new System.Collections.Generic.List<int>(); p.V = all.Count; } }", "EECS028")]
+    // EECS046: a query that only reads tracked components.
+    [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<T, P>()) n += item.T.V + item.P.V; return n; } }", "EECS046")]
+    [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<DynamicBuffer<P>>()) n += item.Component1.Count; return n; } }", "EECS046")]
+    [TestCase("public static class U { public static void F(World w, System.Collections.Generic.List<Entity> all) { foreach (var item in w.Query<T>()) all.Add(item.Entity); } }", "EECS046")]
     public async Task UsageCostsAreReported(string source, params string[] ids)
     {
         var costs = await Costs(Components, Extra, source);
@@ -1299,6 +1303,11 @@ public class GeneratorTests
     [TestCase("public class S : EcsSystem { [ForEach] static void A(Mut<T> t, in P p) { if (p.V > 0) Helpers.Inc(ref t.Write().V); } }")]
     [TestCase("public class S : EcsSystem { public override int UpdateInterval => 1200; protected override void OnUpdate() => World.TrimExcess(); }")] // its cadence
     [TestCase("public struct J : IForEach<P> { public void Execute(ref P p) => p.V++; }")]
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<T>()) item.T.V++; } }")]                      // a write
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<T, P>()) { ref var t = ref item.T; t.V = item.P.V; } } }")]
+    [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Query<T, P>()) item.P.V = item.T.V; } }")]           // writes P: a Query
+    [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Query<P>()) n += item.P.V; return n; } }")]  // untracked
+    [TestCase("public static class U { public static int F(World w) { int n = 0; foreach (var item in w.Read<T>()) n += item.T.V; return n; } }")]   // already Read
     public async Task UsageCheapCodeIsNotReported(string source)
     {
         var costs = await Costs(Components, Extra, source);
@@ -1309,6 +1318,7 @@ public class GeneratorTests
     [TestCase("EECS037", DiagnosticSeverity.Warning)]
     [TestCase("EECS038", DiagnosticSeverity.Warning)]
     [TestCase("EECS039", DiagnosticSeverity.Info)]
+    [TestCase("EECS046", DiagnosticSeverity.Warning)]
     [TestCase("EECS040", DiagnosticSeverity.Error)]
     [TestCase("EECS041", DiagnosticSeverity.Error)]
     [TestCase("EECS042", DiagnosticSeverity.Error)]
