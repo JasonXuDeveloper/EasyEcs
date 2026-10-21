@@ -50,7 +50,8 @@ public static class Server
         Console.WriteLine($"sent: {s.BlockUpdates} block updates, {s.EntityUpdates} entity updates ({s.BytesSent / 1024} KiB)");
     }
 
-    // WorldOptions.MeasureSystems keeps the time and the allocations of every system.
+    // WorldOptions.MeasureSystems keeps the time and the allocations of every system. Each is shown per tick, so a system
+    // that runs every hundred ticks counts a hundredth of its runs and the column adds up to the average tick.
     static void Timings(World world, int ticks, TimeSpan budget)
     {
         double total = 0;
@@ -64,7 +65,7 @@ public static class Server
             $"average tick: {total / ticks:F3} ms of the {budget.TotalMilliseconds:F0} ms budget; " +
             $"allocated {allocated / 1024} KiB in {ticks} ticks");
         foreach (var system in world.Systems)
-            Console.Error.WriteLine($"  {system.GetType().Name,-22} {system.Stats.AverageTime.TotalMilliseconds:F4} ms, " +
+            Console.Error.WriteLine($"  {system.GetType().Name,-22} {system.Stats.TotalTime.TotalMilliseconds / ticks:F4} ms, " +
                                     $"{system.Stats.TotalAllocated / 1024} KiB");
     }
 }

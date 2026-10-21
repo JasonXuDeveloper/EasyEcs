@@ -30,8 +30,9 @@ public class NightSpawnSystem : EcsSystem
             else dz = dz < 0 ? -Rules.SpawnMin : Rules.SpawnMin;
         }
         var feet = Terrain.Cell(position.Value);
-        int x = feet.X + dx, z = feet.Z + dz, top = Terrain.TopAt(World, x, z);
-        if (top < 0 || Terrain.WaterAt(World, new BlockPos(x, top + 1, z)) > 0) return;
+        var near = new Nearby(World);
+        int x = feet.X + dx, z = feet.Z + dz, top = near.Top(x, z);
+        if (top < 0 || near.Water(new BlockPos(x, top + 1, z)) > 0) return;
         World.Instantiate(prefabs.Zombie, new Position(new Vector3(x + 0.5f, top + 1, z + 0.5f)),
             new InChunk(Terrain.ChunkOf(x, z)));
         stats.ZombiesSpawned++;
@@ -138,12 +139,13 @@ public class SunlightSystem : EcsSystem
     void Expose(Entity zombie, in Position position, in Clock clock)
     {
         var feet = Terrain.Cell(position.Value);
-        if (Terrain.WaterAt(World, feet) > 0)
+        var near = new Nearby(World);
+        if (near.Water(feet) > 0)
         {
             if (zombie.HasBurning) zombie.RemoveBurning();
             return;
         }
-        if (!Rules.IsNight(clock) && Terrain.UnderSky(World, feet)) zombie.SetBurning(Rules.BurnFor);
+        if (!Rules.IsNight(clock) && near.UnderSky(feet)) zombie.SetBurning(Rules.BurnFor);
     }
 }
 // #endregion sunlight

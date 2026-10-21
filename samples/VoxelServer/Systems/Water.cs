@@ -184,14 +184,15 @@ public class FloatSystem : EcsSystem
     {
         var p = position.Value;
         var at = Terrain.Cell(p);
-        int here = Math.Min(Terrain.WaterAt(World, at), Fluid.Falling);
+        var near = new Nearby(World);
+        int here = Math.Min(near.Water(at), Fluid.Falling);
         if (here == 0) return;
 
         var current = Vector2.Zero;
-        Push(ref current, at with { X = at.X + 1 }, here, new Vector2(1, 0));
-        Push(ref current, at with { X = at.X - 1 }, here, new Vector2(-1, 0));
-        Push(ref current, at with { Z = at.Z + 1 }, here, new Vector2(0, 1));
-        Push(ref current, at with { Z = at.Z - 1 }, here, new Vector2(0, -1));
+        Push(ref near, ref current, at with { X = at.X + 1 }, here, new Vector2(1, 0));
+        Push(ref near, ref current, at with { X = at.X - 1 }, here, new Vector2(-1, 0));
+        Push(ref near, ref current, at with { Z = at.Z + 1 }, here, new Vector2(0, 1));
+        Push(ref near, ref current, at with { Z = at.Z - 1 }, here, new Vector2(0, -1));
         if (current != Vector2.Zero) current = Vector2.Normalize(current) * Rules.Current;
 
         var v = velocity.Value;
@@ -200,10 +201,10 @@ public class FloatSystem : EcsSystem
     }
 
     // The pull toward a neighbour: the drop from this block's level to its, none toward a solid block.
-    void Push(ref Vector2 current, BlockPos neighbour, int here, Vector2 direction)
+    static void Push(ref Nearby near, ref Vector2 current, BlockPos neighbour, int here, Vector2 direction)
     {
-        if (Terrain.IsSolid(Terrain.BlockAt(World, neighbour))) return;
-        current += direction * (here - Math.Min(Terrain.WaterAt(World, neighbour), Fluid.Falling));
+        if (Terrain.IsSolid(near.Block(neighbour))) return;
+        current += direction * (here - Math.Min(near.Water(neighbour), Fluid.Falling));
     }
 }
 // #endregion float

@@ -44,21 +44,8 @@ public static class Terrain
         }
     }
 
-    // The block at a position. A chunk that is not loaded counts as stone, so nothing falls out of the world.
-    public static Block BlockAt(World world, int x, int y, int z)
-    {
-        if (y < 0) return Block.Bedrock;
-        if (y >= Height) return Block.Air;
-        if (!world.ChunkIndex.TryGet(ChunkOf(x, z), out var chunk)) return Block.Stone;
-        return chunk.Block[IndexOf(x, y, z)];
-    }
-
     // Only air lets a body through; water is not a block but the chunk's Fluid grid beside the blocks.
     public static bool IsSolid(Block block) => block != Block.Air;
-
-    public static bool IsSolid(World world, float x, float y, float z) => IsSolid(BlockAt(world, Cell(x, y, z)));
-
-    public static Block BlockAt(World world, BlockPos at) => BlockAt(world, at.X, at.Y, at.Z);
 
     // The block a point is in.
     public static BlockPos Cell(float x, float y, float z) =>
@@ -79,25 +66,6 @@ public static class Terrain
     // The chunks a view of `range` blocks reaches around `center`: foreach (var chunk in Terrain.ChunksAround(...)).
     public static ChunkSquare ChunksAround(ChunkPos center, float range) => new(center, Rules.ChunksIn(range));
 
-    // The highest solid block of a column, -1 if its chunk is not loaded.
-    public static int TopAt(World world, int x, int z)
-    {
-        if (!world.ChunkIndex.TryGet(ChunkOf(x, z), out var chunk)) return -1;
-        var blocks = chunk.Block.AsReadOnlySpan();
-        int y = Height - 1;
-        while (y > 0 && blocks[IndexOf(x, y, z)] == Block.Air) y--;
-        return y;
-    }
-
-    // Whether nothing solid is above a block: the sky reaches it.
-    public static bool UnderSky(World world, BlockPos at) => TopAt(world, at.X, at.Z) < at.Y;
-
-    // The water level at a block, 0 where there is none or the chunk is not loaded.
-    public static int WaterAt(World world, BlockPos at)
-    {
-        if (at.Y < 0 || at.Y >= Height || !world.ChunkIndex.TryGet(ChunkOf(at.X, at.Z), out var chunk)) return 0;
-        return chunk.Fluid[IndexOf(at.X, at.Y, at.Z)].Level;
-    }
 
     // The water of a chunk and of its four neighbours may move again: a block changed at `pos`, or water beside it.
     public static void Wake(World world, ChunkPos pos)
@@ -117,6 +85,72 @@ public static class Terrain
             count += levels.Length - levels.Count((byte)0);   // Count is vectorized
         }
         return count;
+    }
+}
+
+// The blocks and the water around one body. The chunk of the first block read is looked up in the chunk index once,
+// and the reads after it in the same chunk, most of them (a body is a block wide, a chunk sixteen), read its buffers
+// straight; a read across the edge looks up that chunk instead. Each buffer is fetched on its first read: a body out of
+// the water never fetches the blocks for FloatSystem. A ref struct, on the stack of one row: the spans stay valid until
+// the next structural change, and the systems that read through it make none before they are done with it.
+public ref struct Nearby(World world)
+{
+    ChunkPos _pos;
+    bool _looked;
+    Entity _chunk;                     // default when the chunk is not loaded
+    ReadOnlySpan<Block> _blocks;       // empty until read: a loaded chunk's buffers never are
+    ReadOnlySpan<Fluid> _water;
+
+    // The block at a position. A chunk that is not loaded counts as stone, so nothing falls out of the world.
+    public Block Block(int x, int y, int z)
+    {
+        if (y < 0) return VoxelServer.Block.Bedrock;
+        if (y >= Terrain.Height) return VoxelServer.Block.Air;
+        return Look(x, z) ? Blocks()[Terrain.IndexOf(x, y, z)] : VoxelServer.Block.Stone;
+    }
+
+    public Block Block(BlockPos at) => Block(at.X, at.Y, at.Z);
+
+    public bool IsSolid(float x, float y, float z) => Terrain.IsSolid(Block(Terrain.Cell(x, y, z)));
+
+    // The water level at a block, 0 where there is none or the chunk is not loaded.
+    public int Water(BlockPos at)
+    {
+        if (at.Y < 0 || at.Y >= Terrain.Height || !Look(at.X, at.Z)) return 0;
+        if (_water.IsEmpty) _water = _chunk.Fluid.AsReadOnlySpan();
+        return _water[Terrain.IndexOf(at.X, at.Y, at.Z)].Level;
+    }
+
+    // The highest solid block of a column, -1 if its chunk is not loaded.
+    public int Top(int x, int z)
+    {
+        if (!Look(x, z)) return -1;
+        var blocks = Blocks();
+        int y = Terrain.Height - 1;
+        while (y > 0 && blocks[Terrain.IndexOf(x, y, z)] == VoxelServer.Block.Air) y--;
+        return y;
+    }
+
+    // Whether nothing solid is above a block: the sky reaches it.
+    public bool UnderSky(BlockPos at) => Top(at.X, at.Z) < at.Y;
+
+    ReadOnlySpan<Block> Blocks()
+    {
+        if (_blocks.IsEmpty) _blocks = _chunk.Block.AsReadOnlySpan();
+        return _blocks;
+    }
+
+    // Whether the chunk of a column is loaded, looked up only when it is not the chunk of the last read.
+    bool Look(int x, int z)
+    {
+        var pos = Terrain.ChunkOf(x, z);
+        if (_looked && pos == _pos) return _chunk != default;
+        _looked = true;
+        _pos = pos;
+        _blocks = default;
+        _water = default;
+        if (!world.ChunkIndex.TryGet(pos, out _chunk)) _chunk = default;
+        return _chunk != default;
     }
 }
 

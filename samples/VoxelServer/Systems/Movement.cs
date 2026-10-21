@@ -36,15 +36,16 @@ public class PhysicsSystem : EcsSystem
     {
         var p = position.Value.Value;
         var v = velocity.Value;
-        if (body.OnGround && v == Vector3.Zero && Terrain.IsSolid(World, p.X, p.Y - 1, p.Z)) return;   // at rest
+        var near = new Nearby(World);
+        if (body.OnGround && v == Vector3.Zero && near.IsSolid(p.X, p.Y - 1, p.Z)) return;   // at rest
         v.Y = MathF.Max(v.Y - Rules.Gravity, -3.9f);
 
         float x = p.X + v.X, y = p.Y, z = p.Z + v.Z;
         bool blocked = false;
         if (v.X != 0 || v.Z != 0)
         {
-            bool feet = Terrain.IsSolid(World, x, y, z), head = Terrain.IsSolid(World, x, y + 1, z);
-            if (feet && !head && body.OnGround && !Terrain.IsSolid(World, x, y + 2, z)) y = MathF.Floor(y) + 1;
+            bool feet = near.IsSolid(x, y, z), head = near.IsSolid(x, y + 1, z);
+            if (feet && !head && body.OnGround && !near.IsSolid(x, y + 2, z)) y = MathF.Floor(y) + 1;
             else if (feet || head)
             {
                 (x, z) = (p.X, p.Z);
@@ -59,14 +60,14 @@ public class PhysicsSystem : EcsSystem
         for (int i = 0; i < steps; i++)
         {
             float next = y + step;
-            if (step < 0 && Terrain.IsSolid(World, x, next, z))
+            if (step < 0 && near.IsSolid(x, next, z))
             {
                 y = MathF.Floor(next) + 1;
                 v.Y = 0;
                 onGround = true;
                 break;
             }
-            if (step > 0 && Terrain.IsSolid(World, x, next + 1.8f, z))
+            if (step > 0 && near.IsSolid(x, next + 1.8f, z))
             {
                 v.Y = 0;
                 break;
