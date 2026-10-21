@@ -138,7 +138,7 @@ What the generator also decides for you:
 - **`INoStructuralChanges`** when the method is static, takes no `World` and uses its `Entity` only to read: the
   pass then skips the bookkeeping that keeps structural changes safe. A method that does change structure gets the
   safe loop.
-- **`Writes`**, from the `ref` parameters, so a structural change mid-pass carries exactly those writes to the
+- **`WriteMask`**, from the `ref` parameters, so a structural change mid-pass carries exactly those writes to the
   entity's new row, and tracked components count as written only through `ref`.
 - **The system's access** (reads and writes per component and singleton), which decides which systems may share a
   [parallel stage](#parallel-runner).
@@ -179,7 +179,7 @@ flowchart LR
 
 ## Change-tick summaries per word and per block [#change-ticks]
 
-A component marked `ITrackChanges` gets a hidden column of 8-byte ticks: each row's tick of its last write. On top
+A component marked `ITracked` gets a hidden column of 8-byte ticks: each row's tick of its last write. On top
 of it the table keeps summaries ([D23](/en/docs/decisions)):
 
 ```mermaid
@@ -195,7 +195,7 @@ flowchart TB
 A `[Changed<T>]` pass skips a table nobody wrote with one load, then unwritten blocks, then unwritten words (four
 summaries per SIMD compare), and finds the next written word of a block with one bit scan. Removing a tracked
 component stamps the row's tick while the row clears its presence bit, so `[Removed<T>]` needs no extra storage, and
-its own block summaries keep writes of `T` from making it visit their words. Components without `ITrackChanges` have
+its own block summaries keep writes of `T` from making it visit their words. Components without `ITracked` have
 no column and no stamping code: the checks are JIT-time constants.
 
 What a writer stamps decides what a reader visits. A `ref` parameter stamps every row its pass visits, with one fill

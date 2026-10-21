@@ -18,7 +18,7 @@ page for the first words of your message.
 | `Entity has no X component` | [A missing component](#no-component) |
 | `Singleton X was not added to this world` | [A missing singleton](#singleton-not-added) |
 | `Singleton X was added to this world already` | [`AddSingleton` on an existing singleton](#singleton-exists) |
-| `The entity was destroyed: it is only kept (tagged Destroyed)` | [Cloning a destroyed entity](#clone-destroyed) |
+| `The entity is retired: it is only kept alive (tagged Retired)` | [Cloning a retired entity](#clone-retired) |
 | `The entity has no X (check HasValue)` | [An empty `Maybe<T>`](#maybe-empty) |
 | `X already belongs to a world` | [A system added twice](#system-in-a-world) |
 | `[UpdateBefore] / [UpdateAfter] form a cycle` | [An ordering cycle](#ordering-cycle) |
@@ -82,19 +82,19 @@ throwing: `IsAlive`, `Has<T>()` and `TryGet<T>()`; `Destroy` on such a handle do
 components, resolving them with `world.TryGetEntity(id, out var entity)`
 ([entities and components](/en/docs/guide/entities-and-components)).
 
-## Why does `Clone` say the entity "was destroyed"? [#clone-destroyed]
+## Why does `Clone` say the entity is retired? [#clone-retired]
 
 ```text
-InvalidOperationException: The entity was destroyed: it is only kept (tagged Destroyed) until its cleanup components
+InvalidOperationException: The entity is retired: it is only kept alive (tagged Retired) until its cleanup components
 are removed, and cannot be cloned
 ```
 
 An entity with [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components) stays alive after
-`Destroy`, tagged `Destroyed`, until a system releases what those components hold. It is still alive, so `IsAlive` is
+`Destroy`, tagged `Retired`, until a system releases what those components hold. It is still alive, so `IsAlive` is
 true, but it is not brought back: `Clone()` refuses it, `MoveEntities` skips it and `SetAll` leaves it out unless the
-filter names `Destroyed`.
+filter names `Retired`.
 
-**Fix:** clone before destroying, or test `entity.IsDestroyed` where a handle may name a retired entity.
+**Fix:** clone before destroying, or test `entity.IsRetired` where a handle may name a retired entity.
 
 ## Why does `Get<T>()` say the entity has no component? [#no-component]
 
@@ -259,7 +259,7 @@ The write is checked before it changes anything, so the entity and the world are
 ArgumentException: A sliced filter (QueryFilter.Slice) applies to ForEach passes only: this call needs every matching row. (Parameter 'filter')
 ```
 
-`QueryFilter.Slice(index, count)` cuts each table into parts that only `ForEach`, `ForEachEntity`, `ForEachBatch` and
+`QueryFilter.Slice(index, of)` cuts each table into parts that only `ForEach`, `ForEachEntity`, `ForEachBatch` and
 their parallel forms visit. `Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run`, `SetAll` and the other bulk
 calls need every matching row and refuse it. **Fix:** pass those calls the filter without `Slice`; read the share a
 sliced system visited from `system.Stats.LastEntities` ([slices](/en/docs/guide/systems#slices)).
@@ -267,11 +267,11 @@ sliced system visited from `system.Stats.LastEntities` ([slices](/en/docs/guide/
 ## Why does `DestroyedSince` say there is no destroy log? [#no-destroy-log]
 
 ```text
-InvalidOperationException: The world keeps no destroy log: set WorldOptions.DestroyLog to its capacity
+InvalidOperationException: The world keeps no destroy log: set WorldOptions.DestroyLogCapacity to its capacity
 ```
 
 The destroy log is off by default: it costs 16 bytes per record, allocated with the world. **Fix:** create the world
-with `new WorldOptions { DestroyLog = n }`, `n` the destroys that may happen between two reads of the slowest reader.
+with `new WorldOptions { DestroyLogCapacity = n }`, `n` the destroys that may happen between two reads of the slowest reader.
 When `DestroyedSince` returns `false`, the reader fell further behind than the log holds: send it the whole state
 ([the destroy log](/en/docs/guide/change-tracking#destroy-log)).
 
@@ -287,8 +287,8 @@ Check, in this order:
 4. **Its interval is due:** with `UpdateInterval => N`, it runs on every N-th update of its group, first on the N-th,
    shifted by `UpdatePhase`.
 5. **Its filters match:** count what the method needs with `world.Count<T…>(filter)`. The group's filters apply to
-   every method of the group: `[With<T>]`, `[Without<T>]` and `[WithAny<T>]` on the group struct, and `IGroupWith<T>`
-   / `IGroupWithout<T>` from the group or any interface it implements (a generic actor interface carries them). A
+   every method of the group: `[With<T>]`, `[Without<T>]` and `[WithAny<T>]` on the group struct, and `ISystemGroupWith<T>`
+   / `ISystemGroupWithout<T>` from the group or any interface it implements (a generic actor interface carries them). A
    disabled component counts as absent.
 6. **There was something to see:** a `[Changed<T>]` method visits only rows written since its system last ran, and a
    `[Removed<T>]` method only entities that lost `T` since then
@@ -357,8 +357,8 @@ dropped without an error. Put `[NinoFormerName("Old.Namespace.Name")]` on the re
 ## Why did `MoveEntities` leave an entity behind? [#move-skipped]
 
 `MoveEntities` skips the ids it cannot move and counts only the others: a stale id, an id given twice, and an entity
-destroyed but kept for its [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components) (tagged
-`Destroyed`). The `moved` span holds `default` at a skipped id's position. A child left out of the group is not
+retired, kept for its [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components) (tagged
+`Retired`). The `moved` span holds `default` at a skipped id's position. A child left out of the group is not
 skipped: it is destroyed with its moved parent. A moved entity also leaves its cleanup components behind, on the
 retired original, so this world's systems release the resource once; the new entity does not have them.
 
@@ -368,7 +368,7 @@ give the target world its own resource components after the move.
 
 ## Why does the generator not see an interface another generator adds? [#other-generators]
 
-A component, singleton or system must declare its EasyEcs interface (`IComponent`, `ITrackChanges`,
+A component, singleton or system must declare its EasyEcs interface (`IComponent`, `ITracked`,
 `IIndexed<TKey>` and the others) in code you wrote. Source generators all run on the same input and none sees the
 others' output, so when another generator adds `IComponent` to a partial type, EasyEcs's generator never learns that
 the type is a component: it writes no members for it, and a load finds the type only once the process has used

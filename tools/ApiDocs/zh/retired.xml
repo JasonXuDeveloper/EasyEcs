@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.Retired" source="4a721b84c6a9">
+    <summary>
+      退休实体的标签：<c>Destroy</c> 发现实体上有 <see cref="T:EasyEcs.ICleanupComponent" />，于是去掉其他组件，让实体继续存活，
+      直到最后一个清理组件被移除（那时实体被释放，才算销毁）。清理系统用 <c>With&lt;Retired&gt;</c> 选出这些实体，获取资源的系统用
+      <c>Without&lt;Retired&gt;</c> 只选新实体。
+      <para>存档按它以前的名字（<c>EasyEcs.Destroyed</c>，4.7 之前这个标签的名字）记录它，所以改名之前写的存档读出来，退休的实体仍是退休的。</para>
+    </summary>
+  </member>
+</doc>

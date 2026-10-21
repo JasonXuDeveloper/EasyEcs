@@ -248,7 +248,7 @@ public readonly record struct HealRequest(EntityId Unit, int Amount, TaskComplet
 public struct Heal : IForEachEntity<Health>
 {
     public int Amount;
-    public static int Writes => 1;
+    public static int WriteMask => 1;
 
     public void Execute(Entity unit, ref Health health) => health.Value += Amount;
 }
@@ -296,7 +296,7 @@ public sealed class PublishStatus(StatusBoard board) : EcsSystem
     public override int UpdateInterval => 20;                          // once a second at 20 Hz
 
     protected override void OnUpdate() =>
-        _board.Publish(new ArenaStatus(World.UpdateCount, World.Count<Position>()));
+        _board.Publish(new ArenaStatus(World.DefaultUpdateCount, World.Count<Position>()));
 }
 ```
 
@@ -375,7 +375,7 @@ from replicating or saving the whole world again ([restart](/en/docs/guide/saves
   a loop per world). They share nothing, so they need no locks
   ([one world per thread](/en/docs/guide/threading#recommended-one-world-per-thread)). Lower
   `WorldOptions.MaxDegreeOfParallelism` when `ParallelSystems` worlds and Kestrel share the cores.
-- **Metrics:** with `WorldOptions.MeasureSystems`, read `system.Stats` (`Last`, `LastAllocated`, `LastEntities` and
+- **Metrics:** with `WorldOptions.MeasureSystems`, read `system.Stats` (`LastTime`, `LastAllocated`, `LastEntities` and
   their totals) for each system of `world.Systems` on the loop, between two updates, and publish a copy: as a status,
   or as a `Meter` that OpenTelemetry collects ([metrics](/en/docs/guide/diagnostics#metrics)). Log
   `world.DescribeSchedule()` once at startup, so each deployment's log says which systems ran together

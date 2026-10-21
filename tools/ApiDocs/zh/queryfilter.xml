@@ -73,21 +73,21 @@
     </summary>
     <exception cref="T:System.ArgumentException">前面的变更过滤条件用了另一个 tick。</exception>
   </member>
-  <member name="M:EasyEcs.QueryFilter.Slice(System.Int32,System.Int32)" source="f76d9139b735">
+  <member name="M:EasyEcs.QueryFilter.Slice(System.Int32,System.Int32)" source="5f4dc9596ad2">
     <summary>
-      只访问每个匹配表的 <paramref name="count" /> 片行中的第 <paramref name="index" /> 片：index 从 0 依次到
-      <paramref name="count" /> - 1 的这些遍历把每行访问一次，每次约为 1 / <paramref name="count" /> 的行。<c>[ForEach(Slices = N)]</c>
+      只访问每个匹配表的 <paramref name="of" /> 片行中的第 <paramref name="index" /> 片：index 从 0 依次到
+      <paramref name="of" /> - 1 的这些遍历把每行访问一次，每次约为 1 / <paramref name="of" /> 的行。<c>[ForEach(Slices = N)]</c>
       方法传入系统这次运行对应的那一片（<see cref="P:EasyEcs.EcsSystem.RunCount" /> mod N）。O(1)。
       <para>表按 64 行的倍数切分（它的存在位字），按遍历开始时的行数切，所以少于 64 行的表只有一块；匹配中的第 i 张表从第
-      (<paramref name="index" /> + i) mod <paramref name="count" /> 片开始切，所以很多张小表也会分散到各片上。两次遍历之间移动了的行
-      （交换删除用表的最后一行填空洞、结构变更把实体移到另一张表、表扩容或缩小跨过切分点）在 <paramref name="count" /> 次遍历的一轮里
+      (<paramref name="index" /> + i) mod <paramref name="of" /> 片开始切，所以很多张小表也会分散到各片上。两次遍历之间移动了的行
+      （交换删除用表的最后一行填空洞、结构变更把实体移到另一张表、表扩容或缩小跨过切分点）在 <paramref name="of" /> 次遍历的一轮里
       可能被跳过，也可能被访问两次；下一轮会再看到它们。</para>
       <para><c>ForEach</c>、<c>ForEachEntity</c>、<c>ForEachBatch</c> 以及它们的 <c>Parallel</c> 形式支持分片；需要所有匹配行的调用
       （<c>Query</c>、<c>Read</c>、<c>Count</c>、<c>Any</c>、<c>DestroyAll</c>、<c>entity.Run</c>、<c>SetAll</c> 和其他批量调用）遇到分片的过滤条件会抛
-      <see cref="T:System.ArgumentException" />。count 为 1 就是整张表。</para>
+      <see cref="T:System.ArgumentException" />。分 1 片就是整张表。</para>
     </summary>
     <exception cref="T:System.ArgumentOutOfRangeException">
-      <paramref name="count" /> 小于 1，或者 <paramref name="index" /> 不在 [0, <paramref name="count" />) 内。
+      <paramref name="of" /> 小于 1，或者 <paramref name="index" /> 不在 [0, <paramref name="of" />) 内。
     </exception>
   </member>
 </doc>

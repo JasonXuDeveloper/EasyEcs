@@ -269,7 +269,7 @@ interface Copy {
 
 const heroCode = `public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
-public record struct Health(int Value) : IComponent, ITrackChanges;
+public record struct Health(int Value) : IComponent, ITracked;
 public struct Dead : IComponent;                         // a tag
 public record struct Clock(float Dt) : ISingletonComponent;
 

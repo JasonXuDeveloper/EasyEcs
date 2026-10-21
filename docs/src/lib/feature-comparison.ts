@@ -441,8 +441,8 @@ const matchups: Matchup[] = [
     short: { en: 'a full scan after many writes', zh: '大量写入后的全表扫描' },
     anchor: 'change-tracking',
     why: {
-      en: "Not the way to do it in EasyEcs: the component is `ITrackChanges`, so each of the 1,000 writes also stamps its row's change tick, which `[Changed<T>]` needs and the scan ignores; Friflo's component is not tracked. `[Changed<T>]` does the same job faster than every library's scan.",
-      zh: '在 EasyEcs 里不该这么写：组件实现了 `ITrackChanges`，1,000 次写入每次都给所在行打上变更 tick，`[Changed<T>]` 要用它，扫描却用不上；Friflo 的组件没有追踪。同样的活，`[Changed<T>]` 比每个库的扫描都快。',
+      en: "Not the way to do it in EasyEcs: the component is `ITracked`, so each of the 1,000 writes also stamps its row's change tick, which `[Changed<T>]` needs and the scan ignores; Friflo's component is not tracked. `[Changed<T>]` does the same job faster than every library's scan.",
+      zh: '在 EasyEcs 里不该这么写：组件实现了 `ITracked`，1,000 次写入每次都给所在行打上变更 tick，`[Changed<T>]` 要用它，扫描却用不上；Friflo 的组件没有追踪。同样的活，`[Changed<T>]` 比每个库的扫描都快。',
     },
   },
   {

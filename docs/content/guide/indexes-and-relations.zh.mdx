@@ -203,28 +203,28 @@ public record struct MemberOf(EntityId Target) : IRelation;
 ```csharp
 var red = world.CreateEntity();
 var blue = world.CreateEntity();
-var knight = world.CreateEntity().AddRelation(new MemberOf(red)).AddRelation(new MemberOf(blue));   // 同时在两支队伍
+var knight = world.CreateEntity().Link(new MemberOf(red)).Link(new MemberOf(blue));   // 同时在两支队伍
 
 var parties = world.Relations<MemberOf>();                    // 存到局部变量或字段里
 int members = parties.Count(red);                             // O(1)
 foreach (var member in parties.Find(red)) { /* red 的每个成员 */ }
 int links = parties.Find(red).Count;                          // O(1)：循环会走过的链接数，先按它确定缓冲区大小
 int withMembers = parties.TargetCount;                        // O(1)：有成员的队伍有几个
-bool inBlue = knight.HasRelation<MemberOf>(blue);
-knight.RemoveRelation<MemberOf>(blue);                         // 退出 blue
+bool inBlue = knight.Links<MemberOf>(blue);
+knight.Unlink<MemberOf>(blue);                         // 退出 blue
 ```
 
-实体没有缓冲时，`AddRelation` 会先加上缓冲，再追加链接并建立索引。读取链接用 `Read<DynamicBuffer<T>>()` 或 `in` 参数；
-修改链接用 `AddRelation`、`RemoveRelation` 或整个缓冲的 `Set`，这样索引才能跟上（通过 `ref` 写入属于
+实体没有缓冲时，`Link` 会先加上缓冲，再追加链接并建立索引。读取链接用 `Read<DynamicBuffer<T>>()` 或 `in` 参数；
+修改链接用 `Link`、`Unlink` 或整个缓冲的 `Set`，这样索引才能跟上（通过 `ref` 写入属于
 [EECS015](/zh/docs/guide/analyzer#eecs015)）。
 
 只要有代码写出 `DynamicBuffer<MemberOf>`（`[ForEach]` 参数、一次 `Read`），生成器就会为这个关系生成具名成员：
 
 | 生成的成员 | 等价于 |
 | --- | --- |
-| `e.AddMemberOf(target)` | `e.AddRelation(new MemberOf(target))`，返回实体 |
-| `e.UnlinkMemberOf(target)` | `e.RemoveRelation<MemberOf>(target)`，返回删掉了几条链接 |
-| `e.LinksMemberOf(target)` | `e.HasRelation<MemberOf>(target)` |
+| `e.LinkMemberOf(target)` | `e.Link(new MemberOf(target))`，返回实体 |
+| `e.UnlinkMemberOf(target)` | `e.Unlink<MemberOf>(target)`，返回删掉了几条链接 |
+| `e.LinksMemberOf(target)` | `e.Links<MemberOf>(target)` |
 | `e.MemberOf` / `e.HasMemberOf` / `e.RemoveMemberOf()` | 全部链接（`ref readonly DynamicBuffer<MemberOf>`）、是否有链接、全部删掉 |
 | `world.MemberOfIndex` | `world.Relations<MemberOf>()` |
 
@@ -239,15 +239,15 @@ public class CountParties : EcsSystem
 ```
 
 ```csharp
-var paladin = world.CreateEntity(new PartyCount()).AddMemberOf(red).AddMemberOf(blue);
+var paladin = world.CreateEntity(new PartyCount()).LinkMemberOf(red).LinkMemberOf(blue);
 bool withBlue = paladin.LinksMemberOf(blue);                  // true
 paladin.UnlinkMemberOf(blue);                                 // 删掉 1 条链接
 int linked = paladin.MemberOf.Count;                          // 1
 int inRed = world.MemberOfIndex.Count(red);                   // 骑士和圣骑士
 ```
 
-`AddX` 的参数就是构造一条链接要的东西：每个公开构造函数一个重载；没有构造函数时，接收全部字段和带公开 `set` / `init` 的自动属性
-（`struct Ally : IRelation { public EntityId Target { get; init; } public int Weight; }` 得到 `e.AddAlly(target, weight)`）。
+`LinkX` 的参数就是构造一条链接要的东西：每个公开构造函数一个重载；没有构造函数时，接收全部字段和带公开 `set` / `init` 的自动属性
+（`struct Ally : IRelation { public EntityId Target { get; init; } public int Weight; }` 得到 `e.LinkAlly(target, weight)`）。
 关系没有 `WriteX()` 和 `GetOrAddX()`：链接带索引，只能通过上面这些调用修改。
 
 ### 目标被销毁时 [#target-policies]
@@ -283,15 +283,15 @@ public static class Friendships
     // 好友关系是两条链接，每个玩家身上一条，所以两边一起改。
     public static void Befriend(Entity a, Entity b)
     {
-        if (a.HasRelation<Friend>(b)) return;
-        a.AddRelation(new Friend(b));
-        b.AddRelation(new Friend(a));
+        if (a.Links<Friend>(b)) return;
+        a.Link(new Friend(b));
+        b.Link(new Friend(a));
     }
 
     public static void Unfriend(Entity a, Entity b)
     {
-        a.RemoveRelation<Friend>(b);
-        b.RemoveRelation<Friend>(a);
+        a.Unlink<Friend>(b);
+        b.Unlink<Friend>(a);
     }
 }
 ```
@@ -306,7 +306,7 @@ Friendships.Befriend(ana, ben);
 int bensFriends = friends.Count(ben);                      // 1：ana 链接到 ben
 
 ana.Destroy();                                             // ana 的链接随她消失，ben 指向她的那条也被删掉
-bool stillLinked = ben.HasRelation<Friend>(ana);           // false
+bool stillLinked = ben.Links<Friend>(ana);           // false
 ```
 
 每一方从自己的缓冲里读出自己的好友；而且每条链接都有对应的反向链接，所以 `friends.Count(player)`（指向这个玩家的链接数）也就是他的好友数。
@@ -444,14 +444,14 @@ arrows.WhenTargetDestroyed(TargetPolicy.Destroy);
 Entity red = world.CreateEntity();
 Entity blue = world.CreateEntity();
 Entity hero = world.CreateEntity();
-hero.AddRelation(new MemberOf(red));
-hero.AddRelation(new MemberOf(blue));
-world.CreateEntity().AddRelation(new MemberOf(red));
+hero.Link(new MemberOf(red));
+hero.Link(new MemberOf(blue));
+world.CreateEntity().Link(new MemberOf(red));
 
 var parties = world.Relations<MemberOf>();
 Console.WriteLine($"red has {parties.Count(red)} members, blue has {parties.Count(blue)}");
 
-hero.RemoveRelation<MemberOf>(blue);
+hero.Unlink<MemberOf>(blue);
 Console.WriteLine($"after the hero left: blue has {parties.Count(blue)}");
 
 archer.Destroy();

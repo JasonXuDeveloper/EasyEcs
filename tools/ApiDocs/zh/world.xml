@@ -18,9 +18,9 @@
       每个线程分四块，行与行开销不均时也能摊平。
     </summary>
   </member>
-  <member name="P:EasyEcs.World.ChangeTick" source="247e9495f664">
+  <member name="P:EasyEcs.World.ChangeTick" source="e9e9ff12b4d3">
     <summary>
-      当前的变更 tick。被追踪组件的行每次写入都记下它（<see cref="T:EasyEcs.ITrackChanges" />）。
+      当前的变更 tick。被追踪组件的行每次写入都记下它（<see cref="T:EasyEcs.ITracked" />）。
     </summary>
   </member>
   <member name="P:EasyEcs.World.Entities" source="e23724cbf7c2">
@@ -32,8 +32,8 @@
   <member name="P:EasyEcs.World.Systems" source="8ea3f54eaf95">
     <summary>所有分组的系统，每个分组内按执行顺序排列（默认分组在前）。零分配。</summary>
   </member>
-  <member name="P:EasyEcs.World.UpdateCount" source="72b6b197f5e6">
-    <summary>已经完成的 <see cref="M:EasyEcs.World.Update" /> 调用次数（默认分组）。</summary>
+  <member name="P:EasyEcs.World.DefaultUpdateCount" source="adb32d5e83a5">
+    <summary>已经完成的 <see cref="M:EasyEcs.World.Update" /> 调用次数：只数默认分组的更新（<see cref="M:EasyEcs.World.Update``1" /> 的运行不计入）。</summary>
   </member>
   <member name="M:EasyEcs.World.AddSingleton``1" source="2795a958722a">
     <summary>
@@ -105,7 +105,7 @@
       （见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.Describe" source="9cbe4fd505c8">
+  <member name="M:EasyEcs.World.DescribeTables" source="9cbe4fd505c8">
     <summary>
       列出 World 里的表，用于诊断（管理接口、监控面板）：每张表装了什么、有多满、占多少内存。冷路径：结果要分配内存；
       任何线程都能调用（正在变更的表可能读到一半）。
@@ -157,12 +157,12 @@
   <member name="M:EasyEcs.World.EnsureEntityCapacity(System.Int32)" source="c27f427b4f09">
     <summary>预先扩好实体存储，之后创建的实体不超过 <paramref name="capacity" /> 个就不会再扩容。</summary>
   </member>
-  <member name="M:EasyEcs.World.ForEach``3(``2@,EasyEcs.QueryFilter@)" source="51f0def3249d">
+  <member name="M:EasyEcs.World.ForEach``3(``2@,EasyEcs.QueryFilter@)" source="7462436280c2">
     <summary>
       对每个同时拥有 <c>T1, T2</c>（并匹配 <paramref name="filter" />）的实体，把它的组件交给 <paramref name="job" /> 执行。
       这是最快的遍历：按列从头到尾扫每个匹配的原型，O(匹配的原型数 + 行数)，零分配。job 里可以做结构变更，而且立即生效：
       每个实体最多访问一次（遍历途中新进入匹配原型的实体不访问，轮到之前就离开的实体跳过）；job 改变了当前实体的原型时，
-      它通过 ref 写的值会带到实体的新行（<c>IForEach.Writes</c>）。实现了 <see cref="T:EasyEcs.INoStructuralChanges" />
+      它通过 ref 写的值会带到实体的新行（<c>IForEach.WriteMask</c>）。实现了 <see cref="T:EasyEcs.INoStructuralChanges" />
       的 job 省掉这些簿记。
     </summary>
   </member>
@@ -173,12 +173,12 @@
       （<see cref="T:System.InvalidOperationException" />）。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.ForEachEntity``3(``2@,EasyEcs.QueryFilter@)" source="e9244d71a567">
+  <member name="M:EasyEcs.World.ForEachEntity``3(``2@,EasyEcs.QueryFilter@)" source="708f10698d4e">
     <summary>
       对每个同时拥有 <c>T1, T2</c>（并匹配 <paramref name="filter" />）的实体，把实体句柄和组件交给
       <paramref name="job" /> 执行。这是最快的遍历：按列从头到尾扫每个匹配的原型，O(匹配的原型数 + 行数)，零分配。
       job 里可以做结构变更，而且立即生效：每个实体最多访问一次（遍历途中新进入匹配原型的实体不访问，轮到之前就离开的实体跳过）；
-      job 改变了当前实体的原型时，它通过 ref 写的值会带到实体的新行（<c>IForEachEntity.Writes</c>）。实现了
+      job 改变了当前实体的原型时，它通过 ref 写的值会带到实体的新行（<c>IForEachEntity.WriteMask</c>）。实现了
       <see cref="T:EasyEcs.INoStructuralChanges" /> 的 job 省掉这些簿记。
     </summary>
   </member>
@@ -211,8 +211,11 @@
   <member name="M:EasyEcs.World.GetSingleton``1" source="94e90f9efefe">
     <summary>单例 <typeparamref name="T" /> 的 ref；没有添加过时抛异常。O(1)。</summary>
   </member>
-  <member name="M:EasyEcs.World.GetSystem``1" source="3c3a7509b01d">
-    <summary>取得类型为 <typeparamref name="T" /> 的系统，没有就返回 null。</summary>
+  <member name="M:EasyEcs.World.TryGetSystem``1(``0@)" source="f6721f062742">
+    <summary>
+      查找类型为 <typeparamref name="T" /> 的系统（给工具、测试和承载 World 的代码用，不要在别的系统里调用）。World 里没有时返回 false，
+      系统为 null。O(系统数)。
+    </summary>
   </member>
   <member name="M:EasyEcs.World.GroupBy``1" source="9181338b9284">
     <summary>
@@ -284,12 +287,12 @@
       存档里的某个实体有一个唯一键（<see cref="T:EasyEcs.IUniqueIndexed`1" />），而这个 World 里已有实体持有它：什么都不创建。
     </exception>
   </member>
-  <member name="M:EasyEcs.World.MoveEntities(EasyEcs.World,System.ReadOnlySpan{EasyEcs.EntityId},System.Span{EasyEcs.Entity})" source="50f2ad703ac1">
+  <member name="M:EasyEcs.World.MoveEntities(EasyEcs.World,System.ReadOnlySpan{EasyEcs.EntityId},System.Span{EasyEcs.Entity})" source="b028ebbae22a">
     <summary>
-      把 <paramref name="entities" />（失效的 id、重复的 id 和因清理组件而保留的已销毁实体跳过）搬到 <paramref name="target" />，即同一线程上的另一个 World：
+      把 <paramref name="entities" />（失效的 id、重复的 id 和退休实体，即因清理组件而保留的实体，都跳过）搬到 <paramref name="target" />，即同一线程上的另一个 World：
       目标 World 新建带着这些组件的实体，结果和 <see cref="M:EasyEcs.World.LoadEntities(System.ReadOnlySpan{System.Byte},System.Span{EasyEcs.Entity})" />
       读这组实体的存档一样，只是省掉了编码；然后在这边销毁它们（子实体一起销毁，所以层级要整棵一起搬）。清理组件
-      （<see cref="T:EasyEcs.ICleanupComponent" />）不会搬走：它们留在这边被销毁的实体上，交给本 World 的系统释放它们持有的资源，
+      （<see cref="T:EasyEcs.ICleanupComponent" />）不会搬走：它们留在这边的实体上（它现在退休了），交给本 World 的系统释放它们持有的资源，
       新实体没有这些组件。新句柄按顺序写进 <paramref name="moved" />（放得下多少写多少，跳过的 id 对应
       <see cref="T:EasyEcs.Entity" /> 的 default）；返回搬走的数量。id 列表写成 <c>CollectionsMarshal.AsSpan(list)</c>，不复制。
       O(实体数 × 组件数)。调用线程必须同时是两个 World 的所有者线程；任何一个 World 正在遍历时都不能调用。要搬的实体有一个唯一键
@@ -306,11 +309,11 @@
       （冷路径），之后 O(1)；存进局部变量或字段里复用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.RemoveAll``1(EasyEcs.QueryFilter@)" source="a2cfae7f96ca">
+  <member name="M:EasyEcs.World.RemoveAll``1(EasyEcs.QueryFilter@)" source="d12498803b02">
     <summary>
       从每个拥有组件 <typeparamref name="T" /> 且匹配 <paramref name="filter" /> 的存活实体上移除它，效果和逐个调用
       <c>Remove</c> 一样（行留在原处，清掉存在位）：<typeparamref name="T" /> 被禁用的实体，保留的值和
-      <see cref="T:EasyEcs.Disabled`1" /> 标签也一起去掉。因清理组件而保留的已销毁实体也会处理到：移除这些组件正是释放它们的方式
+      <see cref="T:EasyEcs.Disabled`1" /> 标签也一起去掉。退休实体（因清理组件而保留）也会处理到：移除这些组件正是释放它们的方式
       （它们没有别的组件）。返回处理的数量。O(匹配的表数 + 行数)。只能在所有者线程调用。
     </summary>
   </member>
@@ -363,12 +366,12 @@
       缓冲区够大之后不分配内存。O(传入的实体数 × 组件数)。遍历进行中不能调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.SetAll``1(``0@,EasyEcs.QueryFilter@)" source="f5fb5363f1ca">
+  <member name="M:EasyEcs.World.SetAll``1(``0@,EasyEcs.QueryFilter@)" source="353a29bd7934">
     <summary>
       给每个匹配 <paramref name="filter" /> 的存活实体设置组件 <typeparamref name="T" /> = <paramref name="value" />
-      （没有就添加，有就替换），效果和逐个调用 <c>Set</c> 一样：被追踪组件算作写入，索引和分组跟着更新。因清理组件而保留的已销毁实体
-      （带 <see cref="T:EasyEcs.Destroyed" /> 标签）不会被处理，除非 <paramref name="filter" /> 写明了 <see cref="T:EasyEcs.Destroyed" />
-      （<c>With&lt;Destroyed&gt;()</c>）：批量写入不会把它带回来。返回实体数量。
+      （没有就添加，有就替换），效果和逐个调用 <c>Set</c> 一样：被追踪组件算作写入，索引和分组跟着更新。退休实体（因清理组件而保留，
+      带 <see cref="T:EasyEcs.Retired" /> 标签）不会被处理，除非 <paramref name="filter" /> 写明了 <see cref="T:EasyEcs.Retired" />
+      （<c>With&lt;Retired&gt;()</c>）：批量写入不会把它带回来。返回实体数量。
       O(匹配的表数 + 行数)；缺少 <typeparamref name="T" /> 的实体搬一次行。只能在所有者线程调用。
     </summary>
   </member>
@@ -396,12 +399,12 @@
       让分组 <typeparamref name="TGroup" /> 里每个启用的系统更新一次（同步执行，零分配）。没有系统的分组什么都不做。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.LoadEntitiesInto(System.ReadOnlySpan{System.Byte},System.ReadOnlySpan{EasyEcs.Entity},System.Boolean)" source="a921182ba73c">
+  <member name="M:EasyEcs.World.LoadEntitiesInto(System.ReadOnlySpan{System.Byte},System.ReadOnlySpan{EasyEcs.Entity},System.Boolean)" source="c92c87ad698e">
     <summary>
       把 <see cref="M:EasyEcs.World.SaveEntities(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId})" /> 写出的组件放到已经存在的实体上（Actor 的实体先建好、记录后到的情形）：存档里第 i 个实体的组件
-      设到 <paramref name="into" />[i] 上，没有的加上，已有的覆盖，每个实体最多换一次表；存档里没有的组件保持不变。索引、分组和
+      设到 <paramref name="targets" />[i] 上，没有的加上，已有的覆盖，每个实体最多换一次表；存档里没有的组件保持不变。索引、分组和
       变更 tick 的表现和 <c>Set</c> 一样（加载的每个组件都算写入）；被禁用的组件读进来仍是禁用的，值也保留。
-      <see cref="T:EasyEcs.EntityId" /> 字段原来指向组内实体的，改为指向它在 <paramref name="into" /> 里对应的实体，其余的一律变成
+      <see cref="T:EasyEcs.EntityId" /> 字段原来指向组内实体的，改为指向它在 <paramref name="targets" /> 里对应的实体，其余的一律变成
       <see cref="P:EasyEcs.EntityId.Null" />；父实体不在组内的 <see cref="T:EasyEcs.ChildOf" /> 不会被设置。返回加载的实体数。
       O(实体数 × 组件数)。遍历进行中不能调用。
       <br />
@@ -409,7 +412,7 @@
       默认值）的也一样，所以 <c>[Changed&lt;T&gt;]</c> 系统和 <c>Since</c> 过滤条件不会因为这次加载访问该实体（从存储恢复的 Actor 内容和存储一致，
       “保存变化的部分”在代码写入之前不会保存它的任何东西）。存档里没有的组件保留各自的 tick。
     </summary>
-    <exception cref="T:System.ArgumentException"><paramref name="into" /> 没有按存档里的每个实体各给出一个本 World 的存活实体，或者同一个实体出现了不止一次。</exception>
+    <exception cref="T:System.ArgumentException"><paramref name="targets" /> 没有按存档里的每个实体各给出一个本 World 的存活实体，或者同一个实体出现了不止一次。</exception>
     <exception cref="T:System.IO.InvalidDataException">字节不是存档，或者把同一个唯一键给了多个实体。</exception>
     <exception cref="T:System.InvalidOperationException">
       加载的某个唯一键（<see cref="T:EasyEcs.IUniqueIndexed`1" />）被另一个实体持有，而不是它要加载到的那个实体（加载前对照 World 检查）：
@@ -432,11 +435,11 @@
       <see cref="T:EasyEcs.ChildOf" /> 索引一次。预热后不分配内存（遍历用的栈由 World 保留）。遍历中被销毁的实体会跳过。只能在所有者线程调用。
     </summary>
   </member>
-  <member name="P:EasyEcs.World.DestroyLogOldestTick" source="a1658d53f185">
+  <member name="P:EasyEcs.World.DestroyLogOldestTick" source="35ef7ee0ab38">
     <summary>
       <see cref="M:EasyEcs.World.DestroyedSince(System.UInt64,System.Span{EasyEcs.EntityId},System.Int32@)" /> 能回答的最旧的 tick：对任何不早于它的
       <c>since</c>，都会报告变更 tick 为 <c>since</c> 或之后销毁的每个实体；更早的 <c>since</c> 返回 false（记录已被覆盖）。
-      <see cref="P:EasyEcs.WorldOptions.DestroyLog" /> 的环第一次覆盖记录之前为 0；日志关闭时为 <see cref="F:System.UInt64.MaxValue" />。O(1)。
+      <see cref="P:EasyEcs.WorldOptions.DestroyLogCapacity" /> 的环第一次覆盖记录之前为 0；日志关闭时为 <see cref="F:System.UInt64.MaxValue" />。O(1)。
     </summary>
   </member>
   <member name="M:EasyEcs.World.DescribeSchedule" source="7f61b9f32d48">
@@ -447,23 +450,23 @@
       <see cref="M:EasyEcs.World.RemoveSystem``1" /> 发布的调度）。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.DestroyedSince(System.UInt64,System.Span{EasyEcs.EntityId},System.Int32@)" source="21640a27ca34">
+  <member name="M:EasyEcs.World.DestroyedSince(System.UInt64,System.Span{EasyEcs.EntityId},System.Int32@)" source="b201d69b676d">
     <summary>
       变更 tick 为 <paramref name="since" /> 或之后销毁的实体（规则和 <c>QueryFilter.Since</c> 一样：把 <see cref="P:EasyEcs.World.ChangeTick" />
-      记作标记，之后再传进来），来自 <see cref="P:EasyEcs.WorldOptions.DestroyLog" /> 的日志。每个读者保留自己的标记，所以确认到不同 tick 的读者
+      记作标记，之后再传进来），来自 <see cref="P:EasyEcs.WorldOptions.DestroyLogCapacity" /> 的日志。每个读者保留自己的标记，所以确认到不同 tick 的读者
       共用一份日志。<paramref name="count" /> 是一共有多少个；前 <c>min(count, into.Length)</c> 个写进 <paramref name="into" />，最旧的在前，
-      每个带着它当时的版本号（下标被回收后，新实体用的是另一个版本号）。长度为 <see cref="P:EasyEcs.WorldOptions.DestroyLog" /> 的 span
+      每个带着它当时的版本号（下标被回收后，新实体用的是另一个版本号）。长度为 <see cref="P:EasyEcs.WorldOptions.DestroyLogCapacity" /> 的 span
       总能放下全部。
       <br />
       实体的 id 不再存活（<see cref="M:EasyEcs.World.IsAlive(EasyEcs.EntityId)" /> 变成 false）时就算销毁：<c>Destroy</c>、<c>DestroyEntities</c>、<c>DestroyAll</c>、
       层级或关系的级联、用 <c>MoveEntities</c> 移出这个 World；带有 <see cref="T:EasyEcs.ICleanupComponent" /> 的实体在最后一个清理组件被移除时
-      （在那之前它仍存活，带着 <see cref="T:EasyEcs.Destroyed" /> 标签）；<see cref="M:EasyEcs.World.Restore(EasyEcs.WorldSnapshot)" /> 或 <c>Load</c>
+      （在那之前它已退休：仍存活，带着 <see cref="T:EasyEcs.Retired" /> 标签）；<see cref="M:EasyEcs.World.Restore(EasyEcs.WorldSnapshot)" /> 或 <c>Load</c>
       时，之前存活、之后不再存活（版本号相同）的每个实体。<see cref="M:EasyEcs.World.Dispose" /> 不记录。
       <br />
       <paramref name="since" /> 比 <see cref="P:EasyEcs.World.DestroyLogOldestTick" /> 更早时返回 false，什么都不写，<paramref name="count" /> 为 0：
       读者需要的记录已被覆盖，它必须重新同步（重新发送全部状态）。O(count)。零分配。所有者线程，或者并行阶段的某个线程。
     </summary>
-    <exception cref="T:System.InvalidOperationException">日志关闭（<see cref="P:EasyEcs.WorldOptions.DestroyLog" /> 为 0）。</exception>
+    <exception cref="T:System.InvalidOperationException">日志关闭（<see cref="P:EasyEcs.WorldOptions.DestroyLogCapacity" /> 为 0）。</exception>
     <exception cref="T:System.ObjectDisposedException">World 已经释放。</exception>
   </member>
   <member name="M:EasyEcs.World.Instantiate``2(EasyEcs.Prefab,``0@,``1@)" source="7d08c46cfb0b">
@@ -522,7 +525,7 @@
   <member name="M:EasyEcs.World.DestroyEntities(System.ReadOnlySpan{EasyEcs.EntityId})" source="2d48be690b74">
     <summary>
       销毁 <paramref name="entities" /> 里的实体（失效的 id 和重复的 id 会跳过；带有清理组件的实体会像 <see cref="M:EasyEcs.Entity.Destroy" /> 那样被
-      退役），返回销毁了多少个。整个列表只过一次结构闸门、只处理一次级联：id 列表用 <c>CollectionsMarshal.AsSpan(list)</c> 传入，不复制。
+      退休），返回销毁了多少个。整个列表只过一次结构闸门、只处理一次级联：id 列表用 <c>CollectionsMarshal.AsSpan(list)</c> 传入，不复制。
       按过滤条件销毁用 <c>DestroyAll</c>。O(实体数)。只能在所有者线程调用。
     </summary>
   </member>

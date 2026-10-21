@@ -13,10 +13,10 @@
       一个原型里的一段连续行：<paramref name="entities" /> 和每个 span 的第 i 个元素属于同一个实体。
     </summary>
   </member>
-  <member name="P:EasyEcs.IForEachBatch`1.OwnStamps" source="2e1683155cd1">
+  <member name="P:EasyEcs.IForEachBatch`1.SelfStamped" source="509352b3baa5">
     <summary>
-      <see cref="P:EasyEcs.IForEachBatch`1.Writes" /> 里由 job 自己打 tick、而且只在它写的行上打 tick 的组件（位的含义同
-      <see cref="P:EasyEcs.IForEachBatch`1.Writes" />；默认没有）：循环不给这些组件的行打 tick。生成的 job 标出它们的
+      <see cref="P:EasyEcs.IForEachBatch`1.WriteMask" /> 里由 job 自己打 tick、而且只在它写的行上打 tick 的组件（位的含义同
+      <see cref="P:EasyEcs.IForEachBatch`1.WriteMask" />；默认没有）：循环不给这些组件的行打 tick。生成的 job 标出它们的
       <see cref="T:EasyEcs.Mut`1" /> 参数。
     </summary>
   </member>

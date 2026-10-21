@@ -48,16 +48,6 @@ The world owning the entity (null for `default`).
 
 ## Methods
 
-### `AddRelation` [#addrelation]
-
-```csharp
-public Entity AddRelation<T>(in T relation) where T : struct, IRelation;
-```
-
-Link the entity to `relation`'s target: append it to the entity's [`DynamicBuffer`](/en/docs/reference/dynamicbuffer) (added first if missing) and to the relation index. Returns the entity. O(1) amortized; structural only when the buffer is added. Throws if the entity is not alive.
-
-**Complexity** ([API table](/en/docs/api)): O(1) amortized
-
 ### `Clone` [#clone]
 
 ```csharp
@@ -68,7 +58,7 @@ A new entity of the same world with a copy of every component of this one (a [`D
 
 **Exceptions**
 
-- `InvalidOperationException`: The entity was destroyed and is kept only for its cleanup components ([`Destroyed`](/en/docs/reference/destroyed)).
+- `InvalidOperationException`: The entity is retired: kept alive only for its cleanup components ([`Retired`](/en/docs/reference/retired)).
 
 **Complexity** ([API table](/en/docs/api)): O(c)
 
@@ -127,7 +117,7 @@ Whether both handles name the same entity of the same world: id and version. O(1
 public ref T Get<T>() where T : struct, IComponent;
 ```
 
-Ref to component `T`; throws if the entity does not have it or is not alive. Counts as a write of a tracked component ([`ITrackChanges`](/en/docs/reference/itrackchanges)). O(1).
+Ref to component `T`; throws if the entity does not have it or is not alive. Counts as a write of a tracked component ([`ITracked`](/en/docs/reference/itracked)). O(1).
 
 **Complexity** ([API table](/en/docs/api)): O(1)
 
@@ -182,16 +172,6 @@ Whether the entity has all of `T1, T2`; false for a destroyed or default handle.
 - `entity.Has<T>()`: O(1)
 - `entity.Has<T1..Tn>()`: O(n)
 
-### `HasRelation` [#hasrelation]
-
-```csharp
-public bool HasRelation<T>(EntityId target) where T : struct, IRelation;
-```
-
-Whether the entity links to `target` with a `T`. O(links of the entity).
-
-**Complexity** ([API table](/en/docs/api)): O(L)
-
 ### `IsDisabled` [#isdisabled]
 
 ```csharp
@@ -202,13 +182,33 @@ Whether component `T` is disabled ([`Entity.Disable`](/en/docs/reference/entity#
 
 **Complexity** ([API table](/en/docs/api)): O(1)
 
+### `Link` [#link]
+
+```csharp
+public Entity Link<T>(in T relation) where T : struct, IRelation;
+```
+
+Link the entity to `relation`'s target: append it to the entity's [`DynamicBuffer`](/en/docs/reference/dynamicbuffer) (added first if missing) and to the relation index. Returns the entity. O(1) amortized; structural only when the buffer is added. Throws if the entity is not alive.
+
+**Complexity** ([API table](/en/docs/api)): O(1) amortized
+
+### `Links` [#links]
+
+```csharp
+public bool Links<T>(EntityId target) where T : struct, IRelation;
+```
+
+Whether the entity links to `target` with a `T`. O(links of the entity).
+
+**Complexity** ([API table](/en/docs/api)): O(L)
+
 ### `Read` [#read]
 
 ```csharp
 public ref readonly T Read<T>() where T : struct, IComponent;
 ```
 
-Read-only ref to component `T`; throws if the entity does not have it or is not alive. Not a write: a tracked component ([`ITrackChanges`](/en/docs/reference/itrackchanges)) is not stamped. O(1).
+Read-only ref to component `T`; throws if the entity does not have it or is not alive. Not a write: a tracked component ([`ITracked`](/en/docs/reference/itracked)) is not stamped. O(1).
 
 **Complexity** ([API table](/en/docs/api)): O(1)
 
@@ -232,16 +232,6 @@ Remove 2 components; missing components are ignored. The entity keeps its row (n
 
 **Complexity** ([API table](/en/docs/api)): O(n)
 
-### `RemoveRelation` [#removerelation]
-
-```csharp
-public int RemoveRelation<T>(EntityId target) where T : struct, IRelation;
-```
-
-Drop the entity's links of kind `T` to `target` (every element with that target). Returns how many went; the buffer counts as written only when one did. O(links of the entity). Throws if the entity is not alive.
-
-**Complexity** ([API table](/en/docs/api)): O(L)
-
 ### `Run` [#run]
 
 ```csharp
@@ -258,7 +248,7 @@ public bool Run<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job) where T1
 
 One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
 
-Run `job` on this entity when it has all of `T1, T2`, with the refs `World.ForEachEntity` would give it: true when the job ran, false when the entity lacks a component or is not alive. The components the job writes (`IForEachEntity.Writes`) count as written; a structural change the job makes takes effect at once, and those writes are carried over to the entity's new row (also when the job throws). A job implementing [`INoStructuralChanges`](/en/docs/reference/inostructuralchanges) skips that bookkeeping. O(1), allocation-free.
+Run `job` on this entity when it has all of `T1, T2`, with the refs `World.ForEachEntity` would give it: true when the job ran, false when the entity lacks a component or is not alive. The components the job writes (`IForEachEntity.WriteMask`) count as written; a structural change the job makes takes effect at once, and those writes are carried over to the entity's new row (also when the job throws). A job implementing [`INoStructuralChanges`](/en/docs/reference/inostructuralchanges) skips that bookkeeping. O(1), allocation-free.
 
 **Complexity** ([API table](/en/docs/api)):
 
@@ -345,6 +335,16 @@ public ref T TryGetRef<T>(out bool found) where T : struct, IComponent;
 Ref to component `T` when the entity has it (`found`), else a null ref: check `found` before using it. False when the entity is not alive. Counts as a write of a tracked component when found. O(1).
 
 **Complexity** ([API table](/en/docs/api)): O(1)
+
+### `Unlink` [#unlink]
+
+```csharp
+public int Unlink<T>(EntityId target) where T : struct, IRelation;
+```
+
+Drop the entity's links of kind `T` to `target` (every element with that target). Returns how many went; the buffer counts as written only when one did. O(links of the entity). Throws if the entity is not alive.
+
+**Complexity** ([API table](/en/docs/api)): O(L)
 
 ## Operators
 

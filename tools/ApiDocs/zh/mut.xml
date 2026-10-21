@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.Mut`1" source="45d1ac1f7de2">
+  <member name="T:EasyEcs.Mut`1" source="67b385575e9c">
     <summary>
       <c>[ForEach]</c> 方法所访问实体的一个组件，只有方法真的写了它才算写入：
       <c>static void Aim(Mut&lt;Target&gt; target, in Position p) =&gt; target.SetIfChanged(new Target(Nearest(p)))</c>。
-      被追踪组件（<see cref="T:EasyEcs.ITrackChanges" />）的 <c>ref</c> 参数会给方法访问的每一行打 tick，于是
+      被追踪组件（<see cref="T:EasyEcs.ITracked" />）的 <c>ref</c> 参数会给方法访问的每一行打 tick，于是
       <c>[Changed&lt;T&gt;]</c> 的读者会访问值从没变过的行；通过 <see cref="T:EasyEcs.Mut`1" />，只有方法写过的行
       （<see cref="M:EasyEcs.Mut`1.Write" />、改变了值的 <see cref="M:EasyEcs.Mut`1.SetIfChanged(`0@)" />）才打 tick，每行的 tick 和
       <see cref="M:EasyEcs.Entity.Get``1" /> 打的完全一样。读 <see cref="P:EasyEcs.Mut`1.Value" /> 不打 tick。

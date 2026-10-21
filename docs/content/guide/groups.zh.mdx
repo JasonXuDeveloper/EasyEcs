@@ -67,7 +67,7 @@ for (int i = 0; i < 9; i++) world.CreateEntity(new Zone(i % 3), new Health(10 * 
 public struct SumHealth : IForEach<Health>
 {
     public int Total;
-    public static int Writes => 0;                             // 只读：没有哪一行算作被写过
+    public static int WriteMask => 0;                             // 只读：没有哪一行算作被写过
     public void Execute(ref Health health) => Total += health.Value;
 }
 
@@ -182,7 +182,7 @@ public struct SumHealth : IForEach<Health>
     public int Total;
 
     // 这个 job 只读：不把任何组件算作被写过（默认值 -1 表示全部算写入）。
-    public static int Writes => 0;
+    public static int WriteMask => 0;
 
     public void Execute(ref Health health)
     {

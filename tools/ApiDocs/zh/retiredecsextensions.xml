@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member name="T:EasyEcs.RetiredEcsExtensions" source="25a689915f8d">
+    <summary><see cref="T:EasyEcs.Retired" /> 的具名成员（生成）。</summary>
+  </member>
+  <member name="P:EasyEcs.RetiredEcsExtensions.&lt;G&gt;$84DED1C6BBD34F1223F2730C06F98F0A.IsRetired" source="97f5b0a2a896">
+    <summary>实体是否有标签 <see cref="T:EasyEcs.Retired" />。</summary>
+  </member>
+</doc>

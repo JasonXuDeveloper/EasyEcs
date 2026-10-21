@@ -174,7 +174,7 @@ world.ChildOfIndex.WhenTargetDestroyed(TargetPolicy.Remove);   // 孤儿变成�
 ```
 
 - 持有[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)的子实体不会被直接释放，而是“退休”：带着
-  `Destroyed` 标签保留清理组件，它自己的子实体照样随它而去。
+  `Retired` 标签保留清理组件，它自己的子实体照样随它而去。
 - 环（实体是自己的祖先）会正常结束：销毁其中任何一个，整个环都会被销毁。
 - `ChildOf` 不能被禁用（`Disable<ChildOf>()` 会抛异常）：父实体销毁时必须找得到子实体。
 

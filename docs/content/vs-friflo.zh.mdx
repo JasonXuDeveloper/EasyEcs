@@ -61,7 +61,7 @@ chunk，把结构变更记进命令缓冲；EasyEcs 从 `[ForEach]` 方法生成
 | 禁用 | `entity.Enabled = false` | 标签加 `[Without<T>]`，或 `entity.Disable<T>()` |
 | 索引组件 | `IIndexedComponent<TKey>`、`store.ComponentIndex<T, TKey>()[key]`、`ValueInRange` | `IIndexed<TKey>`、`world.Index<T, TKey>().Find(key)`、有序的 `Range` |
 | 指向实体 | `ILinkComponent`、`GetIncomingLinks<T>()` | `EntityId` 作键（`IIndexed<EntityId>`）、`index.Find(target)` |
-| 多条链接 | `ILinkRelation`、`AddRelation`、`GetRelations<T>()` | `IRelation`、`entity.AddRelation`、`world.Relations<T>()` |
+| 多条链接 | `ILinkRelation`、`AddRelation`、`GetRelations<T>()` | `IRelation`、`entity.Link`、`world.Relations<T>()` |
 | 层级 | `AddChild`、`ChildEntities` | `ChildOf(parent)`、`world.Children(parent)`、级联销毁 |
 | 移除回调 | `store.OnComponentRemoved += ...` | `[Removed<T>]`（没有回调） |
 | 并行查询 | `store.JobRunner = new ParallelJobRunner(n)`、`QueryJob.RunParallel()` | `[ForEach(Parallel = true)]` |

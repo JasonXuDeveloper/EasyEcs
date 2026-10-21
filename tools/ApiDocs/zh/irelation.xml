@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.IRelation" source="c53beb84e177">
+  <member name="T:EasyEcs.IRelation" source="a3c3771506a9">
     <summary>
       <see cref="T:EasyEcs.DynamicBuffer`1" /> 的元素，把所在实体链接到 <see cref="P:EasyEcs.IRelation.Target" />：一个实体可以有任意多条同一种链接
       （队伍的成员、商人卖的物品、一个 buff 作用的单位），<see cref="M:EasyEcs.World.Relations``1" /> 能找出链接到某个目标的实体。
-      链接用 <see cref="M:EasyEcs.Entity.AddRelation``1(``0@)" /> / <see cref="M:EasyEcs.Entity.RemoveRelation``1(EasyEcs.EntityId)" />
+      链接用 <see cref="M:EasyEcs.Entity.Link``1(``0@)" /> / <see cref="M:EasyEcs.Entity.Unlink``1(EasyEcs.EntityId)" />
       （或者对整个缓冲 <c>Set</c>）写入，索引才能跟上；读取用 <c>Read&lt;DynamicBuffer&lt;T&gt;&gt;()</c> 或 <c>in</c> 参数。
       和所有被索引的组件一样，分析器会报告通过 <c>ref</c> 的写入（EECS015）。
     </summary>

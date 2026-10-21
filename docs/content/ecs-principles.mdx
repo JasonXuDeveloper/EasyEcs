@@ -150,7 +150,7 @@ allowed ([EECS007](/en/docs/guide/analyzer#eecs007)).
 ### 3. Systems never reference systems [#3-systems-never-reference-systems]
 
 A system that holds another system ([EECS008](/en/docs/guide/analyzer#eecs008)), or reaches one through
-`World.GetSystem<T>()`, can no longer be removed, reordered or tested alone. Cooperate through data instead:
+`World.TryGetSystem<T>(out …)`, can no longer be removed, reordered or tested alone. Cooperate through data instead:
 
 - **Pipeline:** an earlier system writes a component, a later one reads it. Register the writer first, or order them
   with `[UpdateAfter<T>]`.
@@ -174,7 +174,7 @@ flowchart LR
     D -->|sets Dead| C[CorpseSystem]
 ```
 
-`GetSystem<T>()` is for tooling, tests and the code that hosts the world.
+`TryGetSystem<T>(out …)` is for tooling, tests and the code that hosts the world.
 
 ### 4. State changes are data [#4-state-changes-are-data]
 
@@ -184,7 +184,7 @@ that state later in the update, in the order of the schedule: movement and comba
 adding one changes no existing system.
 
 The same holds for what an entity leaves behind. A resource outside the world (a socket, a reserved seat) is a
-[cleanup component](/en/docs/guide/cleanup-and-disable): destroying the entity keeps it, tagged `Destroyed`, until a
+[cleanup component](/en/docs/guide/cleanup-and-disable): destroying the entity keeps it, tagged `Retired`, until a
 system releases the resource. There is no destroy event to subscribe to.
 
 ### 5. Choose the cheapest representation for frequent changes [#5-choose-the-cheapest-representation-for-frequent-changes]
@@ -195,7 +195,7 @@ that come and go (`Stunned`, `Burning`, `Dead`) are therefore cheap. For values 
 still cheaper than a structural change:
 
 - a countdown field (`Burning.Ticks`) instead of re-adding a component every tick;
-- change detection by change ticks: mark the component `ITrackChanges` and give the consumer `[Changed<T>]`, instead
+- change detection by change ticks: mark the component `ITracked` and give the consumer `[Changed<T>]`, instead
   of adding and removing a `Changed` tag or scanning every row ([change tracking](/en/docs/guide/change-tracking)).
   A write is any `ref` access, so a writer that may leave the value as it was writes through a `Mut<T>` parameter
   and `SetIfChanged` (`entity.SetIfChanged` / `SetXIfChanged` outside a `[ForEach]`), which stamps only a value that
@@ -209,7 +209,7 @@ still cheaper than a structural change:
   instead of template entities that every query must exclude.
 
 ```csharp
-public record struct Facing(float Angle) : IComponent, ITrackChanges;  // tracked: rows record their last write
+public record struct Facing(float Angle) : IComponent, ITracked;  // tracked: rows record their last write
 public record struct NetSync(Facing Sent) : IComponent;               // what clients last heard
 public record struct Outbox(int Updates) : ISingletonComponent;
 
@@ -293,8 +293,8 @@ Then pick the representation by what the items are:
 [System.Runtime.CompilerServices.InlineArray(4)]
 public struct Slots4 { private int _first; }                                 // 4 ints stored inline
 
-public struct Cooldowns : IComponent, ITrackChanges { public Slots4 ReadyAt; }  // unmanaged: nothing to share
-public struct Quests : IComponent, ITrackChanges                             // saved and loaded with the player
+public struct Cooldowns : IComponent, ITracked { public Slots4 ReadyAt; }  // unmanaged: nothing to share
+public struct Quests : IComponent, ITracked                             // saved and loaded with the player
 {
     public Dictionary<int, int> Progress;
 }
@@ -336,7 +336,7 @@ them:
 | --- | --- | --- |
 | Components are data | A class implementing `IComponent` | [EECS006](/en/docs/guide/analyzer#eecs006) |
 | [2. Systems are stateless](#2-systems-are-stateless) | A mutable field, settable property or event on a system | [EECS007](/en/docs/guide/analyzer#eecs007) |
-| [3. Systems never reference systems](#3-systems-never-reference-systems) | A system-typed member, `GetSystem<T>()` inside a system | [EECS008](/en/docs/guide/analyzer#eecs008) |
+| [3. Systems never reference systems](#3-systems-never-reference-systems) | A system-typed member, `TryGetSystem<T>(out …)` inside a system | [EECS008](/en/docs/guide/analyzer#eecs008) |
 | [5. Choose the cheapest representation](#5-choose-the-cheapest-representation-for-frequent-changes) | A `Query` loop that only reads tracked components (every row stamped) | [EECS046](/en/docs/guide/analyzer#eecs046) (warning) |
 | [6. Let the schedule order effects](#6-let-the-schedule-order-effects) | `[UpdateBefore<T>]` / `[UpdateAfter<T>]` in a cycle | [EECS019](/en/docs/guide/analyzer#eecs019) |
 | [7. Keep handles, not refs](#7-keep-entity-handles-never-refs-across-boundaries) | An `Entity` field in a component; a `ref` used after a structural change | [EECS017](/en/docs/guide/analyzer#eecs017), [EECS047](/en/docs/guide/analyzer#eecs047) (warnings) |

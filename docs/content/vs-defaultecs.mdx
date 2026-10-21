@@ -56,8 +56,8 @@ EasyEcs and allocates <BenchValue k="peers.defaultecs.alloc" /> per tick, where 
 | Parallel systems | `new ParallelSystem<T>(runner, systems)` | `WorldOptions.ParallelSystems` (conflicts from generated access) |
 | Parallel set system | `AEntitySetSystem` with a `DefaultParallelRunner` | `[ForEach(Parallel = true)]` |
 | Entity set | `world.GetEntities().With<A>().Without<B>().AsSet()` | a `QueryFilter`, `world.Query<A>(filter)`, `world.Count<A>(filter)` |
-| Changed since last look | `.WhenChanged<T>()` + `NotifyChanged<T>()` + `Complete()` | `ITrackChanges` + `[Changed<T>]` |
-| Removed since last look | `.WhenRemoved<T>()` + `Complete()` | `ITrackChanges` + `[Removed<T>]` |
+| Changed since last look | `.WhenChanged<T>()` + `NotifyChanged<T>()` + `Complete()` | `ITracked` + `[Changed<T>]` |
+| Removed since last look | `.WhenRemoved<T>()` + `Complete()` | `ITracked` + `[Removed<T>]` |
 | Index by value | `AsMultiMap<T>()`, `AsMap<T>()` | `IIndexed<TKey>`, `world.Index<T, TKey>()` |
 | Deferred changes | `EntityCommandRecorder`, `Record(e).Set<T>()`, `Execute()` | not needed |
 | Disable | `e.Disable()`, `e.Disable<T>()` | a tag and `[Without<T>]`, or `entity.DisableHp()` |

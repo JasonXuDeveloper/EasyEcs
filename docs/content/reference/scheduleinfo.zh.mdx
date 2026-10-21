@@ -21,7 +21,7 @@ World 怎样运行它的系统（[`World.DescribeSchedule`](/zh/docs/reference/w
 ### `ScheduleInfo` [#ctor]
 
 ```csharp
-public ScheduleInfo(GroupSchedule[] Groups);
+public ScheduleInfo(GroupInfo[] Groups);
 ```
 
 World 怎样运行它的系统（[`World.DescribeSchedule`](/zh/docs/reference/world#describeschedule)）：每个分组的阶段、每个系统读写什么、一个系统为什么要等前面的阶段，以及哪些冲突的系统只靠注册顺序排先后。这是一份用名字写成的描述，用来阅读（[`ScheduleInfo.ToString`](/zh/docs/reference/scheduleinfo#tostring)）或画图（[`ScheduleInfo.ToMermaid`](/zh/docs/reference/scheduleinfo#tomermaid)）；调度器不会再读它。
@@ -35,7 +35,7 @@ World 怎样运行它的系统（[`World.DescribeSchedule`](/zh/docs/reference/w
 ### `Groups` [#groups]
 
 ```csharp
-public GroupSchedule[] Groups { get; init; }
+public GroupInfo[] Groups { get; init; }
 ```
 
 含有系统的分组，默认分组排第一。
@@ -45,7 +45,7 @@ public GroupSchedule[] Groups { get; init; }
 ### `Deconstruct` [#deconstruct]
 
 ```csharp
-public void Deconstruct(out GroupSchedule[] Groups);
+public void Deconstruct(out GroupInfo[] Groups);
 ```
 
 ### `Equals` [#equals]

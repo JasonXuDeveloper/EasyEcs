@@ -42,7 +42,17 @@ public const int ParallelChunkRows = 16384;
 public ulong ChangeTick { get; }
 ```
 
-当前的变更 tick。被追踪组件的行每次写入都记下它（[`ITrackChanges`](/zh/docs/reference/itrackchanges)）。
+当前的变更 tick。被追踪组件的行每次写入都记下它（[`ITracked`](/zh/docs/reference/itracked)）。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(1)
+
+### `DefaultUpdateCount` [#defaultupdatecount]
+
+```csharp
+public long DefaultUpdateCount { get; }
+```
+
+已经完成的 [`World.Update`](/zh/docs/reference/world#update) 调用次数：只数默认分组的更新（[`World.Update`](/zh/docs/reference/world#update-2) 的运行不计入）。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
 
@@ -52,7 +62,7 @@ public ulong ChangeTick { get; }
 public ulong DestroyLogOldestTick { get; }
 ```
 
-[`World.DestroyedSince`](/zh/docs/reference/world#destroyedsince) 能回答的最旧的 tick：对任何不早于它的 `since`，都会报告变更 tick 为 `since` 或之后销毁的每个实体；更早的 `since` 返回 false（记录已被覆盖）。[`WorldOptions.DestroyLog`](/zh/docs/reference/worldoptions#destroylog) 的环第一次覆盖记录之前为 0；日志关闭时为 `MaxValue`。O(1)。
+[`World.DestroyedSince`](/zh/docs/reference/world#destroyedsince) 能回答的最旧的 tick：对任何不早于它的 `since`，都会报告变更 tick 为 `since` 或之后销毁的每个实体；更早的 `since` 返回 false（记录已被覆盖）。[`WorldOptions.DestroyLogCapacity`](/zh/docs/reference/worldoptions#destroylogcapacity) 的环第一次覆盖记录之前为 0；日志关闭时为 `MaxValue`。O(1)。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
 
@@ -85,16 +95,6 @@ public SystemList Systems { get; }
 所有分组的系统，每个分组内按执行顺序排列（默认分组在前）。零分配。
 
 **复杂度**（[API 表](/zh/docs/api)）：遍历 O(系统数)，`Count` 为 O(分组数)
-
-### `UpdateCount` [#updatecount]
-
-```csharp
-public long UpdateCount { get; }
-```
-
-已经完成的 [`World.Update`](/zh/docs/reference/world#update) 调用次数（默认分组）。
-
-**复杂度**（[API 表](/zh/docs/api)）：O(1)
 
 ## 方法 [#methods]
 
@@ -295,16 +295,6 @@ public World.Subtree Descendants(EntityId root);
 - `world.Descendants(root)`：子树里每个实体 O(1)
 - `world.Descendants(root).AddTo(ids, includeRoot)`：子树里每个实体 O(1)
 
-### `Describe` [#describe]
-
-```csharp
-public TableInfo[] Describe();
-```
-
-列出 World 里的表，用于诊断（管理接口、监控面板）：每张表装了什么、有多满、占多少内存。冷路径：结果要分配内存；任何线程都能调用（正在变更的表可能读到一半）。
-
-**复杂度**（[API 表](/zh/docs/api)）：O(表数 + 列数)
-
 ### `DescribeSchedule` [#describeschedule]
 
 ```csharp
@@ -314,6 +304,16 @@ public ScheduleInfo DescribeSchedule();
 World 怎样运行它的系统，用于诊断（启动日志、仪表盘、文档里的图）：每个分组的阶段，每个系统按名字列出的读写，一个系统为什么要等它前面的阶段（先后约束，或者冲突的数据），以及只靠注册顺序排先后的冲突系统对：反过来注册，它们的顺序就会颠倒。冷路径：结果要分配内存，每个分组 O(系统数³)；任何线程都能调用（它读的是最近一次 [`World.AddSystem`](/zh/docs/reference/world#addsystem) / [`World.RemoveSystem`](/zh/docs/reference/world#removesystem) 发布的调度）。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(分组数 × 系统数³)
+
+### `DescribeTables` [#describetables]
+
+```csharp
+public TableInfo[] DescribeTables();
+```
+
+列出 World 里的表，用于诊断（管理接口、监控面板）：每张表装了什么、有多满、占多少内存。冷路径：结果要分配内存；任何线程都能调用（正在变更的表可能读到一半）。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(表数 + 列数)
 
 ### `DestroyAll` [#destroyall]
 
@@ -341,7 +341,7 @@ public int DestroyAll<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in QueryFilter filter 
 public int DestroyEntities(params ReadOnlySpan<EntityId> entities);
 ```
 
-销毁 `entities` 里的实体（失效的 id 和重复的 id 会跳过；带有清理组件的实体会像 [`Entity.Destroy`](/zh/docs/reference/entity#destroy) 那样被退役），返回销毁了多少个。整个列表只过一次结构闸门、只处理一次级联：id 列表用 `CollectionsMarshal.AsSpan(list)` 传入，不复制。按过滤条件销毁用 `DestroyAll`。O(实体数)。只能在所有者线程调用。
+销毁 `entities` 里的实体（失效的 id 和重复的 id 会跳过；带有清理组件的实体会像 [`Entity.Destroy`](/zh/docs/reference/entity#destroy) 那样被退休），返回销毁了多少个。整个列表只过一次结构闸门、只处理一次级联：id 列表用 `CollectionsMarshal.AsSpan(list)` 传入，不复制。按过滤条件销毁用 `DestroyAll`。O(实体数)。只能在所有者线程调用。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(ids × c)
 
@@ -351,15 +351,15 @@ public int DestroyEntities(params ReadOnlySpan<EntityId> entities);
 public bool DestroyedSince(ulong since, Span<EntityId> into, out int count);
 ```
 
-变更 tick 为 `since` 或之后销毁的实体（规则和 `QueryFilter.Since` 一样：把 [`World.ChangeTick`](/zh/docs/reference/world#changetick) 记作标记，之后再传进来），来自 [`WorldOptions.DestroyLog`](/zh/docs/reference/worldoptions#destroylog) 的日志。每个读者保留自己的标记，所以确认到不同 tick 的读者共用一份日志。`count` 是一共有多少个；前 `min(count, into.Length)` 个写进 `into`，最旧的在前，每个带着它当时的版本号（下标被回收后，新实体用的是另一个版本号）。长度为 [`WorldOptions.DestroyLog`](/zh/docs/reference/worldoptions#destroylog) 的 span 总能放下全部。
+变更 tick 为 `since` 或之后销毁的实体（规则和 `QueryFilter.Since` 一样：把 [`World.ChangeTick`](/zh/docs/reference/world#changetick) 记作标记，之后再传进来），来自 [`WorldOptions.DestroyLogCapacity`](/zh/docs/reference/worldoptions#destroylogcapacity) 的日志。每个读者保留自己的标记，所以确认到不同 tick 的读者共用一份日志。`count` 是一共有多少个；前 `min(count, into.Length)` 个写进 `into`，最旧的在前，每个带着它当时的版本号（下标被回收后，新实体用的是另一个版本号）。长度为 [`WorldOptions.DestroyLogCapacity`](/zh/docs/reference/worldoptions#destroylogcapacity) 的 span 总能放下全部。
 
-实体的 id 不再存活（[`World.IsAlive`](/zh/docs/reference/world#isalive) 变成 false）时就算销毁：`Destroy`、`DestroyEntities`、`DestroyAll`、层级或关系的级联、用 `MoveEntities` 移出这个 World；带有 [`ICleanupComponent`](/zh/docs/reference/icleanupcomponent) 的实体在最后一个清理组件被移除时（在那之前它仍存活，带着 [`Destroyed`](/zh/docs/reference/destroyed) 标签）；[`World.Restore`](/zh/docs/reference/world#restore) 或 `Load` 时，之前存活、之后不再存活（版本号相同）的每个实体。[`World.Dispose`](/zh/docs/reference/world#dispose) 不记录。
+实体的 id 不再存活（[`World.IsAlive`](/zh/docs/reference/world#isalive) 变成 false）时就算销毁：`Destroy`、`DestroyEntities`、`DestroyAll`、层级或关系的级联、用 `MoveEntities` 移出这个 World；带有 [`ICleanupComponent`](/zh/docs/reference/icleanupcomponent) 的实体在最后一个清理组件被移除时（在那之前它已退休：仍存活，带着 [`Retired`](/zh/docs/reference/retired) 标签）；[`World.Restore`](/zh/docs/reference/world#restore) 或 `Load` 时，之前存活、之后不再存活（版本号相同）的每个实体。[`World.Dispose`](/zh/docs/reference/world#dispose) 不记录。
 
 `since` 比 [`World.DestroyLogOldestTick`](/zh/docs/reference/world#destroylogoldesttick) 更早时返回 false，什么都不写，`count` 为 0：读者需要的记录已被覆盖，它必须重新同步（重新发送全部状态）。O(count)。零分配。所有者线程，或者并行阶段的某个线程。
 
 **异常**
 
-- `InvalidOperationException`：日志关闭（[`WorldOptions.DestroyLog`](/zh/docs/reference/worldoptions#destroylog) 为 0）。
+- `InvalidOperationException`：日志关闭（[`WorldOptions.DestroyLogCapacity`](/zh/docs/reference/worldoptions#destroylogcapacity) 为 0）。
 - `ObjectDisposedException`：World 已经释放。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(count)
@@ -420,7 +420,7 @@ public void ForEach<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job, in Q
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-对每个同时拥有 `T1, T2`（并匹配 `filter`）的实体，把它的组件交给 `job` 执行。这是最快的遍历：按列从头到尾扫每个匹配的原型，O(匹配的原型数 + 行数)，零分配。job 里可以做结构变更，而且立即生效：每个实体最多访问一次（遍历途中新进入匹配原型的实体不访问，轮到之前就离开的实体跳过）；job 改变了当前实体的原型时，它通过 ref 写的值会带到实体的新行（`IForEach.Writes`）。实现了 [`INoStructuralChanges`](/zh/docs/reference/inostructuralchanges) 的 job 省掉这些簿记。
+对每个同时拥有 `T1, T2`（并匹配 `filter`）的实体，把它的组件交给 `job` 执行。这是最快的遍历：按列从头到尾扫每个匹配的原型，O(匹配的原型数 + 行数)，零分配。job 里可以做结构变更，而且立即生效：每个实体最多访问一次（遍历途中新进入匹配原型的实体不访问，轮到之前就离开的实体跳过）；job 改变了当前实体的原型时，它通过 ref 写的值会带到实体的新行（`IForEach.WriteMask`）。实现了 [`INoStructuralChanges`](/zh/docs/reference/inostructuralchanges) 的 job 省掉这些簿记。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)
 
@@ -460,7 +460,7 @@ public void ForEachEntity<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-对每个同时拥有 `T1, T2`（并匹配 `filter`）的实体，把实体句柄和组件交给 `job` 执行。这是最快的遍历：按列从头到尾扫每个匹配的原型，O(匹配的原型数 + 行数)，零分配。job 里可以做结构变更，而且立即生效：每个实体最多访问一次（遍历途中新进入匹配原型的实体不访问，轮到之前就离开的实体跳过）；job 改变了当前实体的原型时，它通过 ref 写的值会带到实体的新行（`IForEachEntity.Writes`）。实现了 [`INoStructuralChanges`](/zh/docs/reference/inostructuralchanges) 的 job 省掉这些簿记。
+对每个同时拥有 `T1, T2`（并匹配 `filter`）的实体，把实体句柄和组件交给 `job` 执行。这是最快的遍历：按列从头到尾扫每个匹配的原型，O(匹配的原型数 + 行数)，零分配。job 里可以做结构变更，而且立即生效：每个实体最多访问一次（遍历途中新进入匹配原型的实体不访问，轮到之前就离开的实体跳过）；job 改变了当前实体的原型时，它通过 ref 写的值会带到实体的新行（`IForEachEntity.WriteMask`）。实现了 [`INoStructuralChanges`](/zh/docs/reference/inostructuralchanges) 的 job 省掉这些簿记。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)
 
@@ -533,16 +533,6 @@ public ref T GetSingleton<T>() where T : struct, ISingletonComponent;
 单例 `T` 的 ref；没有添加过时抛异常。O(1)。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
-
-### `GetSystem` [#getsystem]
-
-```csharp
-public T GetSystem<T>() where T : EcsSystem;
-```
-
-取得类型为 `T` 的系统，没有就返回 null。
-
-**复杂度**（[API 表](/zh/docs/api)）：O(系统数)
 
 ### `GroupBy` [#groupby]
 
@@ -701,16 +691,16 @@ public int LoadEntities(ReadOnlySpan<byte> input, Span<Entity> entities = defaul
 ### `LoadEntitiesInto` [#loadentitiesinto]
 
 ```csharp
-public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> into, bool markWritten = true);
+public int LoadEntitiesInto(ReadOnlySpan<byte> input, ReadOnlySpan<Entity> targets, bool markWritten = true);
 ```
 
-把 [`World.SaveEntities`](/zh/docs/reference/world#saveentities) 写出的组件放到已经存在的实体上（Actor 的实体先建好、记录后到的情形）：存档里第 i 个实体的组件设到 `into`[i] 上，没有的加上，已有的覆盖，每个实体最多换一次表；存档里没有的组件保持不变。索引、分组和变更 tick 的表现和 `Set` 一样（加载的每个组件都算写入）；被禁用的组件读进来仍是禁用的，值也保留。[`EntityId`](/zh/docs/reference/entityid) 字段原来指向组内实体的，改为指向它在 `into` 里对应的实体，其余的一律变成 [`EntityId.Null`](/zh/docs/reference/entityid#null)；父实体不在组内的 [`ChildOf`](/zh/docs/reference/childof) 不会被设置。返回加载的实体数。O(实体数 × 组件数)。遍历进行中不能调用。
+把 [`World.SaveEntities`](/zh/docs/reference/world#saveentities) 写出的组件放到已经存在的实体上（Actor 的实体先建好、记录后到的情形）：存档里第 i 个实体的组件设到 `targets`[i] 上，没有的加上，已有的覆盖，每个实体最多换一次表；存档里没有的组件保持不变。索引、分组和变更 tick 的表现和 `Set` 一样（加载的每个组件都算写入）；被禁用的组件读进来仍是禁用的，值也保留。[`EntityId`](/zh/docs/reference/entityid) 字段原来指向组内实体的，改为指向它在 `targets` 里对应的实体，其余的一律变成 [`EntityId.Null`](/zh/docs/reference/entityid#null)；父实体不在组内的 [`ChildOf`](/zh/docs/reference/childof) 不会被设置。返回加载的实体数。O(实体数 × 组件数)。遍历进行中不能调用。
 
 `markWritten` 为 false 时，加载的组件不算写入：存档里的每个组件加载后都没有变更 tick，覆盖了之前写过的值（预制体的默认值）的也一样，所以 `[Changed<T>]` 系统和 `Since` 过滤条件不会因为这次加载访问该实体（从存储恢复的 Actor 内容和存储一致，“保存变化的部分”在代码写入之前不会保存它的任何东西）。存档里没有的组件保留各自的 tick。
 
 **异常**
 
-- `ArgumentException`：`into` 没有按存档里的每个实体各给出一个本 World 的存活实体，或者同一个实体出现了不止一次。
+- `ArgumentException`：`targets` 没有按存档里的每个实体各给出一个本 World 的存活实体，或者同一个实体出现了不止一次。
 - `InvalidDataException`：字节不是存档，或者把同一个唯一键给了多个实体。
 - `InvalidOperationException`：加载的某个唯一键（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)）被另一个实体持有，而不是它要加载到的那个实体（加载前对照 World 检查）：什么都不写。
 
@@ -743,7 +733,7 @@ public void LoadKeeping(ReadOnlySpan<byte> input, in ComponentSet keep, bool mar
 public int MoveEntities(World target, ReadOnlySpan<EntityId> entities, Span<Entity> moved = default);
 ```
 
-把 `entities`（失效的 id、重复的 id 和因清理组件而保留的已销毁实体跳过）搬到 `target`，即同一线程上的另一个 World：目标 World 新建带着这些组件的实体，结果和 [`World.LoadEntities`](/zh/docs/reference/world#loadentities) 读这组实体的存档一样，只是省掉了编码；然后在这边销毁它们（子实体一起销毁，所以层级要整棵一起搬）。清理组件（[`ICleanupComponent`](/zh/docs/reference/icleanupcomponent)）不会搬走：它们留在这边被销毁的实体上，交给本 World 的系统释放它们持有的资源，新实体没有这些组件。新句柄按顺序写进 `moved`（放得下多少写多少，跳过的 id 对应 [`Entity`](/zh/docs/reference/entity) 的 default）；返回搬走的数量。id 列表写成 `CollectionsMarshal.AsSpan(list)`，不复制。O(实体数 × 组件数)。调用线程必须同时是两个 World 的所有者线程；任何一个 World 正在遍历时都不能调用。要搬的实体有一个唯一键（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)），而 `target` 里已有实体持有它时，抛 `InvalidOperationException`，什么都不搬。
+把 `entities`（失效的 id、重复的 id 和退休实体，即因清理组件而保留的实体，都跳过）搬到 `target`，即同一线程上的另一个 World：目标 World 新建带着这些组件的实体，结果和 [`World.LoadEntities`](/zh/docs/reference/world#loadentities) 读这组实体的存档一样，只是省掉了编码；然后在这边销毁它们（子实体一起销毁，所以层级要整棵一起搬）。清理组件（[`ICleanupComponent`](/zh/docs/reference/icleanupcomponent)）不会搬走：它们留在这边的实体上（它现在退休了），交给本 World 的系统释放它们持有的资源，新实体没有这些组件。新句柄按顺序写进 `moved`（放得下多少写多少，跳过的 id 对应 [`Entity`](/zh/docs/reference/entity) 的 default）；返回搬走的数量。id 列表写成 `CollectionsMarshal.AsSpan(list)`，不复制。O(实体数 × 组件数)。调用线程必须同时是两个 World 的所有者线程；任何一个 World 正在遍历时都不能调用。要搬的实体有一个唯一键（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)），而 `target` 里已有实体持有它时，抛 `InvalidOperationException`，什么都不搬。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(实体数 × 组件数)
 
@@ -799,7 +789,7 @@ public RelationIndex<T> Relations<T>() where T : struct, IRelation;
 public int RemoveAll<T>(in QueryFilter filter = default) where T : struct, IComponent;
 ```
 
-从每个拥有组件 `T` 且匹配 `filter` 的存活实体上移除它，效果和逐个调用 `Remove` 一样（行留在原处，清掉存在位）：`T` 被禁用的实体，保留的值和 [`Disabled`](/zh/docs/reference/disabled) 标签也一起去掉。因清理组件而保留的已销毁实体也会处理到：移除这些组件正是释放它们的方式（它们没有别的组件）。返回处理的数量。O(匹配的表数 + 行数)。只能在所有者线程调用。
+从每个拥有组件 `T` 且匹配 `filter` 的存活实体上移除它，效果和逐个调用 `Remove` 一样（行留在原处，清掉存在位）：`T` 被禁用的实体，保留的值和 [`Disabled`](/zh/docs/reference/disabled) 标签也一起去掉。退休实体（因清理组件而保留）也会处理到：移除这些组件正是释放它们的方式（它们没有别的组件）。返回处理的数量。O(匹配的表数 + 行数)。只能在所有者线程调用。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)
 
@@ -947,7 +937,7 @@ public void SaveWithout(IBufferWriter<byte> output, in ComponentSet exclude);
 public int SetAll<T>(in T value, in QueryFilter filter = default) where T : struct, IComponent;
 ```
 
-给每个匹配 `filter` 的存活实体设置组件 `T` = `value`（没有就添加，有就替换），效果和逐个调用 `Set` 一样：被追踪组件算作写入，索引和分组跟着更新。因清理组件而保留的已销毁实体（带 [`Destroyed`](/zh/docs/reference/destroyed) 标签）不会被处理，除非 `filter` 写明了 [`Destroyed`](/zh/docs/reference/destroyed)（`With<Destroyed>()`）：批量写入不会把它带回来。返回实体数量。O(匹配的表数 + 行数)；缺少 `T` 的实体搬一次行。只能在所有者线程调用。
+给每个匹配 `filter` 的存活实体设置组件 `T` = `value`（没有就添加，有就替换），效果和逐个调用 `Set` 一样：被追踪组件算作写入，索引和分组跟着更新。退休实体（因清理组件而保留，带 [`Retired`](/zh/docs/reference/retired) 标签）不会被处理，除非 `filter` 写明了 [`Retired`](/zh/docs/reference/retired)（`With<Retired>()`）：批量写入不会把它带回来。返回实体数量。O(匹配的表数 + 行数)；缺少 `T` 的实体搬一次行。只能在所有者线程调用。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)
 
@@ -992,6 +982,16 @@ public bool TryGetSingleton<T>(out T value) where T : struct, ISingletonComponen
 单例 `T` 存在时，取得它的副本。O(1)。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
+
+### `TryGetSystem` [#trygetsystem]
+
+```csharp
+public bool TryGetSystem<T>(out T system) where T : EcsSystem;
+```
+
+查找类型为 `T` 的系统（给工具、测试和承载 World 的代码用，不要在别的系统里调用）。World 里没有时返回 false，系统为 null。O(系统数)。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(系统数)
 
 ### `Update` [#update]
 

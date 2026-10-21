@@ -186,7 +186,7 @@ world.ChildOfIndex.WhenTargetDestroyed(TargetPolicy.Remove);   // orphans become
 ```
 
 - A child that holds a [cleanup component](/en/docs/guide/cleanup-and-disable#cleanup-components) is retired, not freed:
-  it keeps its cleanup components with the `Destroyed` tag, and its own children go with it.
+  it keeps its cleanup components with the `Retired` tag, and its own children go with it.
 - A cycle (an entity that is its own ancestor) ends: destroying any of them destroys the loop.
 - `ChildOf` cannot be disabled (`Disable<ChildOf>()` throws): a parent's destroy must find its children.
 

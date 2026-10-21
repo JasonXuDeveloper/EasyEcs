@@ -1,11 +1,11 @@
 ---
 title: 变更追踪
-description: "只访问自系统上次运行以来被写过或被移除组件的实体：用 ITrackChanges、[Changed<T>] 和 [Removed<T>] 做状态同步、存盘和增量索引。"
+description: "只访问自系统上次运行以来被写过或被移除组件的实体：用 ITracked、[Changed<T>] 和 [Removed<T>] 做状态同步、存盘和增量索引。"
 icon: Radar
 ---
 
 很多系统只关心“变了什么”：把状态同步给客户端、把脏实体存盘、给移动过的单位重建空间索引。给组件加上
-`ITrackChanges`，再给方法加上 `[Changed<T>]`，这个方法就只会访问自系统上次运行以来 `T` 被写过的实体。
+`ITracked`，再给方法加上 `[Changed<T>]`，这个方法就只会访问自系统上次运行以来 `T` 被写过的实体。
 `[Removed<T>]` 则反过来，专门找出这段时间里失去了 `T` 的实体；被销毁的实体由[销毁日志](#destroy-log)报告。
 
 ## 什么时候用 [#when-to-use-it]
@@ -27,10 +27,10 @@ icon: Radar
 
 ### 标记组件 [#mark-the-component]
 
-`ITrackChanges` 会给组件加一列隐藏的 tick，每次写入都会记下发生的时间。
+`ITracked` 会给组件加一列隐藏的 tick，每次写入都会记下发生的时间。
 
 ```csharp
-public record struct Health(int Value) : IComponent, ITrackChanges;
+public record struct Health(int Value) : IComponent, ITracked;
 public record struct Replica(int Health) : IComponent;
 ```
 
@@ -73,14 +73,14 @@ world.Update();
 
 | 算写入 | 不算写入 |
 | --- | --- |
-| `[ForEach]` 方法和结构体 job（`Writes`）的 `ref T` 参数（批处理方法是 `Span<T>`） | `in T` 参数、`ReadOnlySpan<T>` |
+| `[ForEach]` 方法和结构体 job（`WriteMask`）的 `ref T` 参数（批处理方法是 `Span<T>`） | `in T` 参数、`ReadOnlySpan<T>` |
 | [`Mut<T>`](#set-if-changed) 参数：`Write()`，以及值不同时的 `SetIfChanged(value)`（只算这一行） | `Mut<T>.Value`，以及值相等时的 `SetIfChanged(value)` |
 | `Query` 的元素（枚举器会给访问到的每一行打上 tick） | [`world.Read<T1..Tn>`](/zh/docs/guide/queries#read) 的元素、`TryGet<T>(out T)`（拿到的是副本）、`entity.Read<T>()`（只读） |
 | `entity.Get<T>()`、找到时的 `TryGetRef<T>(out found)`、`GetOrAdd<T>()`、`Set(...)`，值不同时的 `SetIfChanged(value)` 和 `SetXIfChanged(…)` | `Has<T>()`，值相等时的 `SetIfChanged(value)` 和 `SetXIfChanged(…)` |
 | 带着该组件的 `CreateEntity(...)`、`CreateEntities(...)`、`Instantiate(...)`、`Clone()` | 移除组件（属于[移除](#removal-detection)） |
 | `entity.Enable<T>()`、`world.EnableAll<T>()`（保留的值回来了） | `entity.Disable<T>()`（算作移除） |
 | `world.Restore(snapshot)`、`world.Load(bytes)`、`LoadEntities(...)`、`LoadEntitiesInto(...)`（恢复或加载的每一行） | `LoadEntitiesInto(..., markWritten: false)`：记录里的每个组件 tick 都为 0，不管是覆盖的还是新加的。用于恢复持久化的记录，又不想把它再存一遍或再发一遍（[恢复记录](/zh/docs/guide/migration-and-unload#records)）。`world.Load(bytes, markWritten: false)`：加载的每一行 tick 都为 0，也没有哪一行算作移除，用于重启后接着跑存下的 World（[重启](/zh/docs/guide/saves#restart)） |
-| `entity.Run<…>(ref job)`（[单个实体](/zh/docs/guide/queries#run-on-one-entity)）：结构体 job 的 `Writes` 里的组件（job 没有重写 `Writes` 时是全部组件；只读的 job 声明 `Writes => 0`），只在 `Run` 返回 true 时打 tick | 返回 false 的 `entity.Run`：job 没有运行 |
+| `entity.Run<…>(ref job)`（[单个实体](/zh/docs/guide/queries#run-on-one-entity)）：结构体 job 的 `WriteMask` 里的组件（job 没有重写 `WriteMask` 时是全部组件；只读的 job 声明 `WriteMask => 0`），只在 `Run` 返回 true 时打 tick | 返回 false 的 `entity.Run`：job 没有运行 |
 
 [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers) 只能通过 `ref` 修改，所以它的写入总会被追踪到。
 
@@ -120,7 +120,7 @@ tick 之所以是调用参数，是因为“变化”总是相对于某个人上
 | `SetIfChanged(in value)` | 只有 `value` 和当前值不同时才存入并打 tick；返回是否写了 |
 
 ```csharp title="Patrol.cs"
-public record struct Position(float X, float Y) : IComponent, ITrackChanges;
+public record struct Position(float X, float Y) : IComponent, ITracked;
 public record struct Destination(float X, float Y) : IComponent;
 public record struct PositionReplica(float X, float Y) : IComponent;
 
@@ -173,7 +173,7 @@ bool moved = npcs[7].SetPositionIfChanged(1, 0);   // false：走了一步，已
   字段的组件请改成 record struct，让它按数值比较。
 - **`Mut<T>` 能用在哪：** 逐实体的方法，包括并行方法和会做结构变更的方法（实体挪了行之后再写，打的是新行）。批处理方法
   拿的是 span，不能用（[EECS009](/zh/docs/guide/analyzer#eecs009)）。建了索引或分组的组件从不通过 ref 写入
-  （[EECS015](/zh/docs/guide/analyzer#eecs015)），请用 `entity.SetXIfChanged(…)`。没有 `ITrackChanges` 的组件，
+  （[EECS015](/zh/docs/guide/analyzer#eecs015)），请用 `entity.SetXIfChanged(…)`。没有 `ITracked` 的组件，
   `Mut<T>` 就是普通的 `ref`。
 - **对调度器来说**，`Mut<T>` 参数就是对 `T` 的写入：这个系统不会和读 `T` 的系统排进同一个并行阶段。
 - **开销：** `Value` 零开销。每次 `Write()`，以及每次真正改了值的 `SetIfChanged`，都要找到实体所在的行（查一次实体记录）
@@ -185,7 +185,7 @@ bool moved = npcs[7].SetPositionIfChanged(1, 0);   // false：走了一步，已
 以来失去被追踪组件 `T` 的实体：
 
 ```csharp title="ReplicateFire.cs"
-public record struct Burning(int Ticks) : IComponent, ITrackChanges;   // 被追踪：移除也会被记录
+public record struct Burning(int Ticks) : IComponent, ITracked;   // 被追踪：移除也会被记录
 public record struct FireReplica(bool Burning) : IComponent;              // 客户端知道的着火状态
 
 public class ReplicateFire : EcsSystem
@@ -210,8 +210,8 @@ tick。被移除的行和普通行没有区别，方法照样能读写实体的�
   </Accordion>
   <Accordion title="被销毁的实体">
     被销毁的实体已经没有行了，所以 `[Removed<T>]` 不会访问它。它们由[销毁日志](#destroy-log)报告：
-    `world.DestroyedSince(tick, …)` 列出某个 tick 以来被销毁的实体，读取方有多少个都行。持有
-    [清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)时被销毁的实体会保留它的行直到这些组件被移除，
+    `world.DestroyedSince(tick, …)` 列出某个 tick 以来被销毁的实体，读取方有多少个都行。因持有
+    [清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)而被 `Destroy` 变成退休的实体会保留它的行直到这些组件被移除，
     但它失去其他组件同样不算移除：在它被释放、由销毁日志报告之前，什么都不会报告它。
   </Accordion>
   <Accordion title="没有不等于失去">
@@ -242,8 +242,8 @@ foreach (var item in world.Query<FireReplica>(FireOut.Since(mark))) item.FireRep
 对应的移除版本：失去了其中至少一个、而且还没补回来的行。
 
 ```csharp
-public record struct Armor(int Value) : IComponent, ITrackChanges;
-public record struct Poisoned(int Ticks) : IComponent, ITrackChanges;
+public record struct Armor(int Value) : IComponent, ITracked;
+public record struct Poisoned(int Ticks) : IComponent, ITracked;
 public record struct UnitReplica(int Health, int Armor, float X, float Y) : IComponent;
 public record struct StatusReplica(bool Burning, bool Poisoned) : IComponent;
 
@@ -267,7 +267,7 @@ public class ReplicateUnitSystem : EcsSystem
   这些组再和 `With`、`Without`、`Changed`、`Removed` 等其他条件取“与”。
 - **一个过滤条件只有一个 tick：** 过滤条件里的 `Changed`、`Removed`、`ChangedAny` 和 `RemovedAny` 都从同一个 tick 往后看
   （否则抛 `ArgumentException`），`Since(tick)` 会一起移动它们。
-- 每组 2 到 9 个组件，每个都要实现 `ITrackChanges`。和 `[Changed<T>]` 一样，方法会声明对每个组件的读取。
+- 每组 2 到 9 个组件，每个都要实现 `ITracked`。和 `[Changed<T>]` 一样，方法会声明对每个组件的读取。
 
 ### 所有客户端共用一个过滤条件 [#per-client]
 
@@ -315,7 +315,7 @@ for (int client = 0; client < acked.Length; client++)
 
 ## 被销毁的实体：销毁日志 [#destroy-log]
 
-被销毁的实体没有行，任何过滤条件都找不到它，可客户端还是得知道它离开了。把 `WorldOptions.DestroyLog` 设成一个容量，
+被销毁的实体没有行，任何过滤条件都找不到它，可客户端还是得知道它离开了。把 `WorldOptions.DestroyLogCapacity` 设成一个容量，
 World 就会用一个环形缓冲记下最近被销毁的实体，以及各自被销毁时的变更 tick；`world.DestroyedSince(since, into, out count)`
 列出在 `since` 及之后被销毁的实体。规则和 `Since(tick)` 一样，所以客户端确认到的那个 tick，既用来取变化，也用来取
 销毁。每个读取方各记各的 tick，多少个客户端都共用同一份日志。
@@ -344,7 +344,7 @@ public static class Despawns
 
 ```csharp
 // 容量要装得下客户端两次读取之间最长间隔里的销毁数。
-using var zone = new World(new WorldOptions { DestroyLog = 4096 });
+using var zone = new World(new WorldOptions { DestroyLogCapacity = 4096 });
 var gone = new EntityId[4096];                  // 所有客户端共用一个缓冲：4,096 个 id 装得下任何一次结果
 var goblin = zone.CreateEntity(new Health(30));
 ulong[] zoneAcks = [zone.ChangeTick];
@@ -357,12 +357,12 @@ Despawns.Send(zone, zoneAcks, gone);            // client 0: despawn 0v1
 - **返回 `false` 就要全量重发：** 读取方需要的记录被覆盖了。`DestroyedSince` 什么都不写，读取方把完整状态重新发一遍。
   `world.DestroyLogOldestTick` 是日志还能回答的最早 tick（环形缓冲第一次覆盖记录之前是 0）。日志容量撑不住真实客户端的
   延迟，客户端就会一遍又一遍地全量重发。
-- **`count`** 是被销毁的实体数，写进 `into` 的是最早的 `min(count, into.Length)` 个，从旧到新。长度为 `DestroyLog`
+- **`count`** 是被销毁的实体数，写进 `into` 的是最早的 `min(count, into.Length)` 个，从旧到新。长度为 `DestroyLogCapacity`
   的 span 总能装下全部。
 - **id 带着版本：** 每个 id 都是死掉的那一代实体，索引被复用后，新实体的版本不同，客户端那边的 id 映射不会错。
 - **什么算销毁：** `IsAlive` 变成 false 的那一刻。`Destroy`、`DestroyEntities`、[层级](/zh/docs/guide/hierarchy)或
   [关系](/zh/docs/guide/indexes-and-relations#target-policies)的级联销毁、`MoveEntities` 移出这个 World；带着
-  [清理组件](/zh/docs/guide/cleanup-and-disable)的实体在最后一个清理组件被移除时（在那之前它还活着，带着 `Destroyed`
+  [清理组件](/zh/docs/guide/cleanup-and-disable)的实体在最后一个清理组件被移除时（在那之前它还活着，带着 `Retired`
   标签）；`Restore` 和 `Load` 时，之前活着、之后不在了的每个实体。`Dispose` 不记录任何东西，日志本身也不进快照和存档。
 - **线程：** 在所有者线程上调用，或者在并行阶段的系统里调用。日志关闭时调用会抛 `InvalidOperationException`。
 
@@ -378,10 +378,10 @@ Despawns.Send(zone, zoneAcks, gone);            // client 0: despawn 0v1
 using EasyEcs;
 
 // 被追踪：每次写入都记下 tick，[Changed<Health>] 据此找到被写过的行。
-public record struct Health(int Value) : IComponent, ITrackChanges;
+public record struct Health(int Value) : IComponent, ITracked;
 
 // 被追踪：移除也会记下 tick，[Removed<Burning>] 据此找到失去它的单位。
-public record struct Burning(int Ticks) : IComponent, ITrackChanges;
+public record struct Burning(int Ticks) : IComponent, ITracked;
 
 // 上一次告诉客户端的单位状态。
 public record struct Replica(int Health) : IComponent;
@@ -503,7 +503,7 @@ written since the mark: 2
 - **所有客户端共用一个 `ChangedAny` 过滤条件**，用 `Since(ackTick)` 移动 tick，不要每个客户端、每个组件各跑一遍。
 - **优先写成系统，而不是查询。** `[Changed<T>]` 方法在碰到任何一行之前，会先跳过没人写过的表、4,096 行的块和 64 行的字。
   `Query` 会交出 ref，所以访问到的行都会被打上 tick；不能打 tick 的读取方（存盘、发包）用 `world.Read<T1..Tn>` 遍历，
-  或者用 `Writes => 0` 的结构体 job。
+  或者用 `WriteMask => 0` 的结构体 job。
 - **过滤条件放进 `static readonly` 字段**，用 `Since(mark)` 移动它的 tick，不要每次调用都新建一个。
 - **tick 要在一次更新刚结束时取。** 两次更新之间的写入共用一个 tick，在中间取的 tick 会把它之前的写入也一起选进来。
 
@@ -531,7 +531,7 @@ written since the mark: 2
 - **一组 `ChangedAny` / `RemovedAny`：** 组里的列在这个 tick 之后都没人写过的表直接跳过，之后和 `Changed` 一样按字和块跳过。
 - **销毁日志：** `new World` 时一次分配，每条记录 16 字节；每次销毁写一条记录。`DestroyedSince` 是 O(报告的实体数)，
   不分配内存。关闭时（默认），销毁不为它付任何代价。
-- **没有 `ITrackChanges` 的组件零开销：** 这些检查是 JIT 期常量。
+- **没有 `ITracked` 的组件零开销：** 这些检查是 JIT 期常量。
 
 所有功能的开销汇总在[性能指南](/zh/docs/performance#the-few-rows-that-changed-changedt)。
 
@@ -544,7 +544,7 @@ written since the mark: 2
 | `[Removed<T>]` 方法既没有组件参数也没有 `[With<U>]` | 没有任何东西说明方法要遍历什么 | [EECS003](/zh/docs/guide/analyzer#eecs003) |
 | 只读的参数写成了 `ref` | 访问到的每一行都算作已变化 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
 | 接收方还没有这些值，却用 `LoadEntitiesInto(..., markWritten: false)` 加载 | 加载的行不算变化，靠 `[Changed<T>]` 的同步永远不会发出去 | 代码审查：给新客户端同步时，自己发送完整状态 |
-| 指望 `[Removed<T>]` 报告被销毁的实体 | 它们没有行，任何过滤条件都访问不到 | 从[销毁日志](#destroy-log)读（`WorldOptions.DestroyLog`、`DestroyedSince`） |
+| 指望 `[Removed<T>]` 报告被销毁的实体 | 它们没有行，任何过滤条件都访问不到 | 从[销毁日志](#destroy-log)读（`WorldOptions.DestroyLogCapacity`、`DestroyedSince`） |
 | 销毁日志的容量小于客户端最长延迟内的销毁数 | 这个客户端每次读 `DestroyedSince` 都返回 false，一遍又一遍地全量重发 | 代码审查：容量按每秒销毁数乘以允许的延迟来定；关注 `DestroyLogOldestTick` |
 | 每个 tick 都重算、但很少变的值用 `ref` 参数写 | 访问到的每一行都算作已变化，下游每个 `[Changed<T>]` 读取方都要全部过一遍 | 代码审查：改用 [`Mut<T>`](#set-if-changed) 参数加 `SetIfChanged` |
 | 对带托管字段、又没实现 `IEquatable<T>` 的组件调 `SetIfChanged` | 抛 `NotSupportedException`；也不会生成 `SetXIfChanged` | [EECS040](/zh/docs/guide/analyzer#eecs040)：改成 record struct 或实现 `IEquatable<T>` |

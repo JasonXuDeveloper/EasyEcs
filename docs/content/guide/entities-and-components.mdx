@@ -37,7 +37,7 @@ A component is a struct that implements `IComponent`. A `record struct` gives yo
 ```csharp
 public record struct Position(float X, float Y) : IComponent;
 public record struct Health(int Value) : IComponent;
-public record struct Armor(int Value) : IComponent, ITrackChanges;   // writes are tracked
+public record struct Armor(int Value) : IComponent, ITracked;   // writes are tracked
 public record struct Name(string Value) : IComponent;                // managed fields are allowed
 public struct Dead : IComponent;                                     // a tag: no fields
 ```
@@ -229,14 +229,14 @@ the same.
 | Declared | Generated | Same as |
 | --- | --- | --- |
 | `record struct Position(float X, float Y) : IComponent` | `e.Position` (`ref`), `e.HasPosition`, `e.TryGetPosition(out p)`, `e.GetOrAddPosition()`, `e.SetPosition(x, y)`, `e.RemovePosition()` | `Get`, `Has`, `TryGet`, `GetOrAdd`, `Set(new Position(x, y))`, `Remove` |
-| a tracked component (`Armor : ITrackChanges`) | `e.Armor` is `ref readonly`; `e.WriteArmor()` returns the `ref`; `e.SetArmorIfChanged(v)` | `Read`; `Get` (stamped as written); `SetIfChanged(new Armor(v))` |
+| a tracked component (`Armor : ITracked`) | `e.Armor` is `ref readonly`; `e.WriteArmor()` returns the `ref`; `e.SetArmorIfChanged(v)` | `Read`; `Get` (stamped as written); `SetIfChanged(new Armor(v))` |
 | an indexed component (`Zone : IIndexed<int>`) | `e.Zone` is `ref readonly`, no `GetOrAddZone` or `WriteZone`; `e.SetZoneIfChanged(id)`; `world.ZoneIndex` | `Read`; `SetIfChanged(new Zone(id))`; `world.Index<Zone, int>()` |
 | a unique component (`Account : IUniqueIndexed<long>`) | as an indexed one; `world.AccountIndex.Get(key)`, `world.AccountIndex.TryGet(key, out e)` | the [one entity of a key](#unique-key) |
 | a grouped component (`Team : IGroup`) | `e.Team` is `ref readonly`, no `GetOrAddTeam` or `WriteTeam`; `e.SetTeamIfChanged(…)`; `filter.InTeam(group)` | `Read`; `SetIfChanged`; `filter.InGroup<Team>(group)` ([groups](/en/docs/guide/groups)) |
 | a tag (`struct Dead : IComponent`) | `e.IsDead`, `e.SetDead()`, `e.RemoveDead()` | `Has`, `Set(new Dead())`, `Remove` |
 | any component with fields, except a cleanup component | `e.DisableHealth()`, `e.EnableHealth()`, `e.IsHealthDisabled` | [`Disable` / `Enable`](/en/docs/guide/cleanup-and-disable) |
 | a buffer element some code names as `DynamicBuffer<Loot>` | `e.Loot` (`ref readonly`), `e.HasLoot`, `e.WriteLoot()`, `e.GetOrAddLoot()`, `e.RemoveLoot()` | `Read`, `Has`, `Get`, `GetOrAdd`, `Remove` of `DynamicBuffer<Loot>` ([dynamic buffers](/en/docs/guide/dynamic-buffers)) |
-| a relation (`MemberOf : IRelation`), once code names `DynamicBuffer<MemberOf>` | `e.AddMemberOf(target)`, `e.UnlinkMemberOf(target)`, `e.LinksMemberOf(target)`, `e.MemberOf` (`ref readonly`), `e.HasMemberOf`, `e.RemoveMemberOf()`, `world.MemberOfIndex` | `AddRelation`, `RemoveRelation`, `HasRelation`, `Read`, `Has`, `Remove`, `world.Relations<MemberOf>()` ([relations](/en/docs/guide/indexes-and-relations#relations)) |
+| a relation (`MemberOf : IRelation`), once code names `DynamicBuffer<MemberOf>` | `e.LinkMemberOf(target)`, `e.UnlinkMemberOf(target)`, `e.LinksMemberOf(target)`, `e.MemberOf` (`ref readonly`), `e.HasMemberOf`, `e.RemoveMemberOf()`, `world.MemberOfIndex` | `Link`, `Unlink`, `Links`, `Read`, `Has`, `Remove`, `world.Relations<MemberOf>()` ([relations](/en/docs/guide/indexes-and-relations#relations)) |
 | a singleton (`Clock : ISingletonComponent`) | `world.Clock` (`ref`), `world.HasClock`, `world.GetOrAddClock()`, `world.SetClock(…)`, `world.RemoveClock()` | [`GetSingleton`](/en/docs/guide/singletons), `HasSingleton`, `GetOrAddSingleton`, `GetOrAddSingleton() = …`, `RemoveSingleton` |
 | each `world.Query<Position, Velocity>()` the code calls | `item.Position`, `item.Velocity` | `item.Component1`, `item.Component2` |
 | any component, on a [prefab](/en/docs/guide/prefabs#generated-members) | `prefab.Position` (`ref readonly`), `HasPosition`, `SetPosition(x, y)`, `RemovePosition()`, `IsDead`, `SetDead()` | `Read`, `Has`, `Set`, `Remove` |
@@ -268,7 +268,7 @@ bool changed = hero.SetArmorIfChanged(6);                  // false: Armor is 6 
   both offer `world.ZoneIndex`, and each keeps its other members. A nested component or buffer element named like
   another struct of its namespace (`Npc.State` and `Player.State`) gets none at all: both would get `entity.State`.
 - EasyEcs's own `ChildOf` has them too (`entity.ChildOf`, `SetChildOf(parent)`, `world.ChildOfIndex`, ...; no
-  `DisableChildOf`), and the `Destroyed` tag has `entity.IsDestroyed`.
+  `DisableChildOf`), and the `Retired` tag has `entity.IsRetired`.
 
 ### Tags [#tags]
 
@@ -308,7 +308,7 @@ public record struct Position(float X, float Y) : IComponent;
 public record struct Health(int Value) : IComponent;
 
 // Tracked: the generated property is read-only, and a write is explicit.
-public record struct Armor(int Value) : IComponent, ITrackChanges;
+public record struct Armor(int Value) : IComponent, ITracked;
 
 // A tag: no fields, only filtered on.
 public struct Dead : IComponent;

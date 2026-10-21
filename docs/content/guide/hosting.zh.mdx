@@ -232,7 +232,7 @@ public readonly record struct HealRequest(EntityId Unit, int Amount, TaskComplet
 public struct Heal : IForEachEntity<Health>
 {
     public int Amount;
-    public static int Writes => 1;
+    public static int WriteMask => 1;
 
     public void Execute(Entity unit, ref Health health) => health.Value += Amount;
 }
@@ -279,7 +279,7 @@ public sealed class PublishStatus(StatusBoard board) : EcsSystem
     public override int UpdateInterval => 20;                          // 20 Hz 下每秒一次
 
     protected override void OnUpdate() =>
-        _board.Publish(new ArenaStatus(World.UpdateCount, World.Count<Position>()));
+        _board.Publish(new ArenaStatus(World.DefaultUpdateCount, World.Count<Position>()));
 }
 ```
 
@@ -353,7 +353,7 @@ public static class Restart
   不需要锁（[每线程一个 World](/zh/docs/guide/threading#recommended-one-world-per-thread)）。开了 `ParallelSystems` 的 World
   和 Kestrel 共用核心时，调低 `WorldOptions.MaxDegreeOfParallelism`。
 - **指标：**开启 `WorldOptions.MeasureSystems` 后，在循环里、两次更新之间，读 `world.Systems` 中每个系统的 `system.Stats`
-  （`Last`、`LastAllocated`、`LastEntities` 和它们的累计值），发布一份拷贝：随状态一起发布，或者做成一个 `Meter` 交给
+  （`LastTime`、`LastAllocated`、`LastEntities` 和它们的累计值），发布一份拷贝：随状态一起发布，或者做成一个 `Meter` 交给
   OpenTelemetry 采集（[指标](/zh/docs/guide/diagnostics#metrics)）。启动时把 `world.DescribeSchedule()` 写一次日志，每次部署的
   日志里就记着哪些系统一起跑（[调度](/zh/docs/guide/diagnostics#schedule)）。
 - **高峰过后的内存：**World 会留着最大那一波实体的行。一局比赛结束后，或者维护定时器发现 `world.EntityCount` 远低于峰值时，在循环里、

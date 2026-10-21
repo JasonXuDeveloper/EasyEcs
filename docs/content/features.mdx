@@ -37,7 +37,7 @@ The core of every tick: data in tables, logic in systems, and the loop that runs
 ```csharp
 public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
-public record struct Health(int Value) : IComponent, ITrackChanges;
+public record struct Health(int Value) : IComponent, ITracked;
 public record struct Armor(int Value) : IComponent;
 public struct Dead : IComponent;
 public record struct Clock(float Dt) : ISingletonComponent;
@@ -118,7 +118,7 @@ base class.
 `[With<T>]` requires a component that is not passed in, `[Without<T>]` excludes one, `[WithAny<T>]` requires one of
 several, `[Changed<T>]` and `[Removed<T>]` select by change tick. The same filters exist as a `QueryFilter` for
 ad-hoc code. A system group carries `[With<T>]`, `[Without<T>]` and `[WithAny<T>]` for all its systems, or
-implements `IGroupWith<T>` / `IGroupWithout<T>`, itself or through an interface it implements: a generic interface
+implements `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`, itself or through an interface it implements: a generic interface
 then gives each actor type its own filtered group, where an attribute could not name the type parameter.
 
 - **Use it for:** states (`[Without<Dead>]`), roles (`[With<Player>]`), alternatives
@@ -162,8 +162,8 @@ takes it as a `ref` or `in` parameter; `SingletonRef<T>` is a stable handle for 
 
 Systems run in registration order, moved by `[UpdateBefore<T>]` / `[UpdateAfter<T>]`. `[UpdateInGroup<G>]` puts a
 system in a group that runs on `world.Update<G>()` only. `UpdateInterval` and `UpdatePhase` run a system every N-th
-update, spread over phases; `Enabled` switches it off. A group's filters (`[Without<Frozen>]`, or `IGroupWith<T>` /
-`IGroupWithout<T>` on the group or an interface it implements) apply to every `[ForEach]` method of its systems.
+update, spread over phases; `Enabled` switches it off. A group's filters (`[Without<Frozen>]`, or `ISystemGroupWith<T>` /
+`ISystemGroupWithout<T>` on the group or an interface it implements) apply to every `[ForEach]` method of its systems.
 
 - **Use it for:** different cadences: input on every wake-up, simulation on a fixed tick, saving every few seconds;
   one group per kind of actor, declared once through a generic interface.
@@ -175,7 +175,7 @@ update, spread over phases; `Enabled` switches it off. A group's filters (`[With
 
 `[ForEach(Slices = N)]` spreads a method's rows over N runs of its system: each run visits one slice, about 1 / N of
 every matching table, cut at 64-row words, so every row is visited once per N runs. `system.RunCount` says which run
-this is (the slice is `RunCount % N`); `QueryFilter.Slice(index, count)` does the same for a struct job.
+this is (the slice is `RunCount % N`); `QueryFilter.Slice(index, of)` does the same for a struct job.
 
 - **Use it for:** work that may lag a little but costs too much on one tick: re-scoring AI targets, scanning for
   idle sessions, decaying values of a large population.
@@ -206,7 +206,7 @@ Iteration from any code: `foreach (var item in world.Query<T…>(filter))`, stru
 `ForEachEntity`), `world.Count` and `world.Any`. A static `[ForEach]` method outside a system gets a generated entry
 point (`Reports.CountAlive(world, ref alive)`) that runs it as a struct job with the caller's values.
 `entity.Run<Health, TakeHit>(ref job, filter)` runs a struct job on one entity, with the refs a pass would give it:
-`false` when the entity is not alive, lacks a component or fails the filter. A job's `static int Writes` names the
+`false` when the entity is not alive, lacks a component or fails the filter. A job's `static int WriteMask` names the
 components that count as written (default: all); a job implementing `INoStructuralChanges` skips the structural
 bookkeeping.
 
@@ -234,7 +234,7 @@ public class ReplicationSystem : EcsSystem
 
 ### Change tracking [#change-tracking]
 
-A component marked `ITrackChanges` records the change tick of each row's last write (any access that hands out a
+A component marked `ITracked` records the change tick of each row's last write (any access that hands out a
 `ref`). A `[Changed<T>]` method visits only the rows written since its system last ran, and
 `[ChangedAny<A, B>]` the rows where at least one of several components was written. `QueryFilter.Changed<T>(since)`
 and `ChangedAny<A, B>(since)` do the same for queries: keep one filter and run it with each client's acknowledged
@@ -280,7 +280,7 @@ with their other components: removing keeps the row and stamps its tick. `[Remov
 
 ### Destroy log [#destroy-log]
 
-With `WorldOptions.DestroyLog = n`, the world keeps the last n destroyed entities, each with the change tick of its
+With `WorldOptions.DestroyLogCapacity = n`, the world keeps the last n destroyed entities, each with the change tick of its
 destruction. `world.DestroyedSince(since, into, out count)` lists those destroyed since a reader's tick, so every
 client, each with its own acknowledged tick, learns which entities to delete. It returns false when the reader is
 older than the log (`DestroyLogOldestTick`): that client needs the whole state again.
@@ -295,7 +295,7 @@ older than the log (`DestroyLogOldestTick`): that client needs the whole state a
 ### Cleanup components [#cleanup-components]
 
 A component implementing `ICleanupComponent` outlives the destruction of its entity: destroying it removes the other
-components and adds the `Destroyed` tag, and the entity stays until a system releases the resource and removes the
+components and adds the `Retired` tag, and the entity stays until a system releases the resource and removes the
 last cleanup component.
 
 - **Use it for:** resources outside the world that must be released exactly once: a socket, a reserved seat, a
@@ -409,7 +409,7 @@ var guard = world.Instantiate(goblin, new ChildOf(archer));          // its own 
 
 A component indexed by an `EntityId` links each entity to one target (an arrow to its archer), and the index lists
 the entities pointing at a target. An `IRelation` element links an entity to many targets (a hero in several
-parties) through `AddRelation` / `RemoveRelation`, with `world.Relations<T>()` for the reverse lookup.
+parties) through `Link` / `Unlink`, with `world.Relations<T>()` for the reverse lookup.
 `WhenTargetDestroyed(TargetPolicy…)` decides what a link does when its target dies: keep, remove or destroy.
 
 - **Use it for:** ownership, party membership, the units a buff applies to, items with state of their own.
@@ -594,8 +594,8 @@ build; a few warnings flag code that works but costs.
 
 ### Per-system timing [#per-system-timing]
 
-With `WorldOptions.MeasureSystems`, every run of a system is measured: `system.Stats` holds `Runs`, `Last`, `Total`
-and `Average`, the bytes the run allocated (`LastAllocated`, `TotalAllocated`, helper threads of its parallel
+With `WorldOptions.MeasureSystems`, every run of a system is measured: `system.Stats` holds `Runs`, `LastTime`, `TotalTime`
+and `AverageTime`, the bytes the run allocated (`LastAllocated`, `TotalAllocated`, helper threads of its parallel
 `[ForEach]` methods included) and the entities its `[ForEach]` methods visited (`LastEntities`, `TotalEntities`).
 
 - **Use it for:** a diagnostics endpoint, a metrics exporter or a log line on a live server, to see which system
@@ -627,7 +627,7 @@ By default an exception a system throws propagates out of `Update()`. With
 
 ### Introspection [#introspection]
 
-`world.Describe()` lists tables with their columns, rows, capacity and bytes; `entity.Describe()` lists an entity's
+`world.DescribeTables()` lists tables with their columns, rows, capacity and bytes; `entity.Describe()` lists an entity's
 component values. A debugger shows an entity's components directly.
 
 - **Use it for:** admin tools, memory reports, debugging.

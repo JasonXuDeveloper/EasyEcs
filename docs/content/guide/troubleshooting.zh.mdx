@@ -17,7 +17,7 @@ faq: true
 | `Entity has no X component` | [缺少组件](#no-component) |
 | `Singleton X was not added to this world` | [缺少单例](#singleton-not-added) |
 | `Singleton X was added to this world already` | [对已有的单例调 `AddSingleton`](#singleton-exists) |
-| `The entity was destroyed: it is only kept (tagged Destroyed)` | [克隆已销毁的实体](#clone-destroyed) |
+| `The entity is retired: it is only kept alive (tagged Retired)` | [克隆已退休的实体](#clone-retired) |
 | `The entity has no X (check HasValue)` | [空的 `Maybe<T>`](#maybe-empty) |
 | `X already belongs to a world` | [系统被添加了两次](#system-in-a-world) |
 | `[UpdateBefore] / [UpdateAfter] form a cycle` | [顺序成环](#ordering-cycle) |
@@ -75,18 +75,18 @@ InvalidOperationException: Entity is not alive (destroyed, or a default handle)
 **修法：**实体可能在你拿到句柄之后死掉的地方，先查 `entity.IsAlive`；组件里存 `EntityId`，用
 `world.TryGetEntity(id, out var entity)` 解析（[实体与组件](/zh/docs/guide/entities-and-components)）。
 
-## 为什么 `Clone` 说实体 “was destroyed”？ [#clone-destroyed]
+## 为什么 `Clone` 说实体 “is retired”？ [#clone-retired]
 
 ```text
-InvalidOperationException: The entity was destroyed: it is only kept (tagged Destroyed) until its cleanup components
+InvalidOperationException: The entity is retired: it is only kept alive (tagged Retired) until its cleanup components
 are removed, and cannot be cloned
 ```
 
-带[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)的实体 `Destroy` 之后仍然活着，带上 `Destroyed` 标签，
+带[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)的实体 `Destroy` 之后仍然活着，带上 `Retired` 标签，
 直到某个系统释放了这些组件持有的资源。它还活着，`IsAlive` 为 true，但不会再被带回来：`Clone()` 拒绝它，`MoveEntities` 跳过它，
-过滤条件里没写 `Destroyed` 时 `SetAll` 也不碰它。
+过滤条件里没写 `Retired` 时 `SetAll` 也不碰它。
 
-**修法：** 在销毁之前克隆；句柄可能指向这种已销毁实体的地方，先看 `entity.IsDestroyed`。
+**修法：** 在销毁之前克隆；句柄可能指向退休实体的地方，先看 `entity.IsRetired`。
 
 ## 为什么 `Get<T>()` 说实体没有这个组件？ [#no-component]
 
@@ -233,17 +233,17 @@ World 都保持原样。
 ArgumentException: A sliced filter (QueryFilter.Slice) applies to ForEach passes only: this call needs every matching row. (Parameter 'filter')
 ```
 
-`QueryFilter.Slice(index, count)` 把每张表切成几份，只有 `ForEach`、`ForEachEntity`、`ForEachBatch` 及其并行形式会按份访问。
+`QueryFilter.Slice(index, of)` 把每张表切成几份，只有 `ForEach`、`ForEachEntity`、`ForEachBatch` 及其并行形式会按份访问。
 `Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run`、`SetAll` 和其他批量调用需要所有匹配的行，所以拒绝它。**修法：**给这些
 调用传不带 `Slice` 的过滤条件；分片系统访问了多少，看 `system.Stats.LastEntities`（[分片](/zh/docs/guide/systems#slices)）。
 
 ## 为什么 `DestroyedSince` 说没有销毁日志？ [#no-destroy-log]
 
 ```text
-InvalidOperationException: The world keeps no destroy log: set WorldOptions.DestroyLog to its capacity
+InvalidOperationException: The world keeps no destroy log: set WorldOptions.DestroyLogCapacity to its capacity
 ```
 
-销毁日志默认是关的：每条记录 16 字节，和 World 一起分配。**修法：**用 `new WorldOptions { DestroyLog = n }` 创建 World，`n` 是最慢的
+销毁日志默认是关的：每条记录 16 字节，和 World 一起分配。**修法：**用 `new WorldOptions { DestroyLogCapacity = n }` 创建 World，`n` 是最慢的
 读者两次读取之间可能发生的销毁次数。`DestroyedSince` 返回 `false`，说明这个读者落后的比日志装得下的还多：把完整状态重新发给它
 （[销毁日志](/zh/docs/guide/change-tracking#destroy-log)）。
 
@@ -257,7 +257,7 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
 3. **它的分组被更新了：**带 `[UpdateInGroup<G>]` 的系统只在 `world.Update<G>()` 时运行，`world.Update()` 永远不会跑它。
 4. **它的间隔到了：**`UpdateInterval => N` 时，它在所属分组每第 N 次更新时运行，第一次是第 N 次，再按 `UpdatePhase` 偏移。
 5. **它的过滤条件能匹配：**用 `world.Count<T…>(filter)` 数一数方法需要的实体。分组的过滤条件对分组里所有方法都生效：分组结构体上的
-   `[With<T>]`、`[Without<T>]`、`[WithAny<T>]`，以及分组自己或它实现的任何接口带来的 `IGroupWith<T>` / `IGroupWithout<T>`
+   `[With<T>]`、`[Without<T>]`、`[WithAny<T>]`，以及分组自己或它实现的任何接口带来的 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`
    （泛型 actor 接口就带着它们）。被禁用的组件算不存在。
 6. **确实有东西可看：**`[Changed<T>]` 方法只访问它的系统上次运行以来被写过的行，`[Removed<T>]` 方法只访问那之后失去 `T` 的实体
    （[变更追踪](/zh/docs/guide/change-tracking#ticks)）。
@@ -311,16 +311,16 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
 
 ## 为什么 `MoveEntities` 留下了某个实体？ [#move-skipped]
 
-`MoveEntities` 会跳过搬不了的 id，返回值只数搬走的：失效的 id、重复给出的 id，以及已经销毁、只为[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)
-留着的实体（带 `Destroyed` 标签）。被跳过的 id 在 `moved` 里对应的位置是 `default`。没放进这组的子实体不算跳过：它会随搬走的父实体一起被销毁。
-搬走的实体还会把清理组件留在原处、留在已销毁的原实体上，让这个 World 的系统只释放一次资源；新实体没有这些组件。
+`MoveEntities` 会跳过搬不了的 id，返回值只数搬走的：失效的 id、重复给出的 id，以及已经退休、只为[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)
+留着的实体（带 `Retired` 标签）。被跳过的 id 在 `moved` 里对应的位置是 `default`。没放进这组的子实体不算跳过：它会随搬走的父实体一起被销毁。
+搬走的实体还会把清理组件留在原处、留在退休的原实体上，让这个 World 的系统只释放一次资源；新实体没有这些组件。
 
 **修法：** 拿返回值和 id 个数比较；用 `world.Descendants(root).AddTo(ids, includeRoot: true)` 收集整棵子树
 （[迁移层级](/zh/docs/guide/hierarchy#moving)）；搬完之后在目标 World 里给它加上自己的资源组件。
 
 ## 为什么生成器看不到另一个生成器加上的接口？ [#other-generators]
 
-组件、单例和系统的 EasyEcs 接口（`IComponent`、`ITrackChanges`、`IIndexed<TKey>` 等）必须写在你自己的代码里。所有源生成器读的是
+组件、单例和系统的 EasyEcs 接口（`IComponent`、`ITracked`、`IIndexed<TKey>` 等）必须写在你自己的代码里。所有源生成器读的是
 同一份输入，谁也看不到别人的输出，所以另一个生成器给 partial 类型加上 `IComponent` 时，EasyEcs 的生成器并不知道它是组件：不会为它
 生成成员，加载存档时也要等进程用过这个类型才找得到它。把接口写在你自己的声明上；另一个生成器照样可以往同一个 partial 类型里加成员。
 

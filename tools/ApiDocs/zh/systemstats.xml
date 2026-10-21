@@ -8,16 +8,16 @@
       在两次更新之间读取；打开 <see cref="P:EasyEcs.WorldOptions.ParallelSystems" /> 时，每个系统各自记录自己的运行。
     </summary>
   </member>
-  <member name="P:EasyEcs.SystemStats.Average" source="493d7e63e58b">
+  <member name="P:EasyEcs.SystemStats.AverageTime" source="493d7e63e58b">
     <summary>每次运行的平均耗时（第一次运行前为零）。</summary>
   </member>
-  <member name="P:EasyEcs.SystemStats.Last" source="4da4f6cef651">
+  <member name="P:EasyEcs.SystemStats.LastTime" source="4da4f6cef651">
     <summary>最近一次运行的耗时。</summary>
   </member>
   <member name="P:EasyEcs.SystemStats.Runs" source="4c16f59609c5">
     <summary>到目前为止测量过的运行次数。</summary>
   </member>
-  <member name="P:EasyEcs.SystemStats.Total" source="ef4f9286c18c">
+  <member name="P:EasyEcs.SystemStats.TotalTime" source="ef4f9286c18c">
     <summary>所有测量过的运行加起来的耗时。</summary>
   </member>
   <member name="P:EasyEcs.SystemStats.LastAllocated" source="f0363014b8e0">

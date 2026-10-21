@@ -18,7 +18,7 @@ icon: RotateCcwClock
   见[变更追踪](/zh/docs/guide/change-tracking)。
 - `[ChangedAny<T1..Tn>]` / `[RemovedAny<T1..Tn>]` 以及 `QueryFilter.ChangedAny<T1..Tn>(since)` / `RemovedAny`：2 到 9 个被追踪组件里
   至少有一个被写过、或被移除的行。一个过滤条件存在字段里，用 `filter.Since(ack)` 服务每个客户端。见[变更追踪](/zh/docs/guide/change-tracking)。
-- `WorldOptions.DestroyLog` 和 `world.DestroyedSince(since, into, out count)`：某个读取方的 tick 以来销毁的实体，用来把实体的消失同步给确认 tick
+- `WorldOptions.DestroyLogCapacity` 和 `world.DestroyedSince(since, into, out count)`：某个读取方的 tick 以来销毁的实体，用来把实体的消失同步给确认 tick
   各不相同的客户端；读取方比日志还旧（`DestroyLogOldestTick`）时返回 false，需要重新同步。见[变更追踪](/zh/docs/guide/change-tracking)。
 - `IUniqueIndexed<TKey>`：一个键只对应一个实体，用 `index.Get(key)` / `TryGet(key, out e)` 查找；会让第二个实体拿到已被占用的键的写入，
   在改动任何东西之前就抛异常。见[索引与关系](/zh/docs/guide/indexes-and-relations)。
@@ -29,7 +29,7 @@ icon: RotateCcwClock
 - `world.Instantiate(prefab, in c1 … in cn)` 和 `Instantiate(prefab, entities, in c1 … in cn)`：实例带上最多九个自己的组件（父实体、位置、主人），
   只拷贝一次行。创建任何实体之前先检查唯一组件的键，给定的和预制体里的都查。见[预制体](/zh/docs/guide/prefabs)。
 - `world.TrimExcess()` 把峰值留下的内存还回去：删掉空表，缩小其他表，释放存档、读档和迁移用的缓冲。见[调试与诊断](/zh/docs/guide/diagnostics)。
-- `[ForEach(Slices = N)]` 把一个方法要处理的行分摊到系统的 N 次运行里；结构体 job 用 `QueryFilter.Slice(index, count)`，
+- `[ForEach(Slices = N)]` 把一个方法要处理的行分摊到系统的 N 次运行里；结构体 job 用 `QueryFilter.Slice(index, of)`，
   `EcsSystem.RunCount` 表示当前是第几次运行。见[系统](/zh/docs/guide/systems)。
 - `SystemStats` 记录每次运行分配的字节数（`LastAllocated`、`TotalAllocated`）和 `[ForEach]` 方法访问的实体数（`LastEntities`、`TotalEntities`）；
   `world.DescribeSchedule()` 描述各个阶段、等待关系和只靠注册顺序的系统对，可以输出文本或 mermaid 流程图。见[调试与诊断](/zh/docs/guide/diagnostics)。
@@ -46,8 +46,8 @@ icon: RotateCcwClock
   `[Changed<T>]` 的读取方不会当成写过。`Query` 照旧给它访问的被追踪组件的行打 tick。见[查询](/zh/docs/guide/queries#read)。
 - `world.DestroyEntities(ids)` 销毁一组 id，只过一次结构闸门、只处理一次级联；失效的 id 和重复的 id 会跳过。
   见[结构变更](/zh/docs/guide/structural-changes#bulk)。
-- `ChildOf` 和 `Destroyed` 像你自己的组件一样有生成成员：`entity.ChildOf`、`HasChildOf`、`TryGetChildOf`、`SetChildOf(parent)`、
-  `SetChildOfIfChanged(parent)`、`RemoveChildOf()`、`world.ChildOfIndex`、预制体上的写入方法，以及 `entity.IsDestroyed`。
+- `ChildOf` 和 `Retired` 像你自己的组件一样有生成成员：`entity.ChildOf`、`HasChildOf`、`TryGetChildOf`、`SetChildOf(parent)`、
+  `SetChildOfIfChanged(parent)`、`RemoveChildOf()`、`world.ChildOfIndex`、预制体上的写入方法，以及 `entity.IsRetired`。
   见[层级](/zh/docs/guide/hierarchy#reparent)。
 - 只把 `Entity` 当身份用（`Id`、`Version`、`IsAlive`、`==`、`EntityId`）的 `[ForEach]` 方法不再让系统单独运行：系统按其他参数调度。
   见[系统](/zh/docs/guide/systems)。
@@ -66,6 +66,13 @@ icon: RotateCcwClock
 - 改名，让名字说明调用做什么：`SaveEntities(output, ids, set)` 改为 `SaveEntitiesWith`，`EnsureCapacity<T1..Tn>(count)` 和
   `EnsureCapacity(prefab, count)` 改为 `Reserve`，`DestroyEntities<T1..Tn>(filter)` 改为 `DestroyAll`，关系生成的 `RemoveX(target)`
   改为 `UnlinkX(target)`（`RemoveX()` 仍然删掉整个缓冲区）。见[迁移指南](/zh/docs/migration#v4-7-renames)。
+- 改名，让名字说明它是什么：`ITrackChanges` 改为 `ITracked`，`IGroupWith<T>` / `IGroupWithout<T>` 改为
+  `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`，`Destroyed` 标签改为 `Retired`（`entity.IsRetired`；4.6 的存档照样能读），
+  `world.GetSystem<T>()` 改为 `TryGetSystem<T>(out T)`，`world.Describe()` 改为 `DescribeTables()`，`ColumnInfo.Without` 改为 `Absent`，
+  `SystemStats.Last` / `Total` / `Average` 改为 `LastTime` / `TotalTime` / `AverageTime`，`world.UpdateCount` 改为 `DefaultUpdateCount`，
+  `SystemAccess.RunsAlone()` 改为 `RunAlone()`，`TargetRules` 改为 `TargetPolicyExtensions`，`entity.AddRelation` / `RemoveRelation` /
+  `HasRelation` 改为 `Link` / `Unlink` / `Links`，关系生成的 `AddX(target)` 改为 `LinkX(target)`，job 的 `static int Writes` 改为
+  `WriteMask`，`LoadEntitiesInto` 的参数 `into` 改为 `targets`。见[迁移指南](/zh/docs/migration#v4-7-renames)。
 - 集合里有单例时，`SaveEntitiesWith(output, ids, set)` 抛 `ArgumentException`（实体组存档不写单例）。见[迁移指南](/zh/docs/migration#v4-7-save-entities)。
 - `EcsSystem` 新增公开的 `RunCount`：系统里同名的成员会隐藏它（警告 CS0108）。见[迁移指南](/zh/docs/migration#v4-7-run-count)。
 - 生成的类改了名（`HealthPrefabExtensions` 改为 `HealthEcsPrefabExtensions`，`LootBufferExtensions` 改为 `LootEcsBufferExtensions`）：
@@ -91,7 +98,7 @@ icon: RotateCcwClock
   现在这样的循环结束时不再留下计数。
 - 嵌套的组件或缓冲元素和所在命名空间里另一个结构体同名时，仍会生成一部分成员（`DisableX`、`InX`、`world.XIndex`、缓冲的成员），
   和另一个类型的成员同名，调用时编译不过（有歧义）。这样的类型现在不生成任何成员，用泛型 API 访问。
-- 关系的名字恰好是某个 `Entity` 成员的后缀（`Relation`，对应 `HasRelation`）时，会丢掉 `LinksX(target)`。
+- 关系的名字恰好是某个 `Entity` 成员的后缀时，会丢掉 `LinksX(target)`。
 - 同一命名空间里两个结构体生成的成员同名时（标签 `Dead` 和组件 `IsDead`、`Target` 和 `HasTarget`、`Zone : IIndexed<int>` 和单例
   `ZoneIndex`），每次调用这个成员都有歧义。现在两个类型都不生成它，其他成员照常保留。
 - internal 组件生成的属性（`entity.X`、`HasX`、`IsX`、`world.X`、`world.XIndex`）在看得到库内部成员的程序集（`InternalsVisibleTo`）里编译不过。
@@ -113,17 +120,17 @@ icon: RotateCcwClock
   见[快照](/zh/docs/guide/snapshots)。
 - 对实体还没有的被索引组件调用 `entity.GetOrAdd<T>()` 时不会通知值索引，`Find` 和 `Count` 要等下一次 `Set` 才能找到这个实体；
   现在默认值的键会进索引。见[索引与关系](/zh/docs/guide/indexes-and-relations)。
-- `MoveEntities` 会把已经销毁、因清理组件而保留的实体复制到目标 World 并算作已移动，而源 World 里它还在：同一个实体存在了两份。
+- `MoveEntities` 会把退休（因清理组件而保留）的实体复制到目标 World 并算作已移动，而源 World 里它还在：同一个实体存在了两份。
   这样的实体现在和失效的 id 一样被跳过。见[迁移](/zh/docs/guide/migration-and-unload#move-entities)。
 - `MoveEntities` 移动持有清理组件的实体时，也把清理组件复制给了新实体，而原实体还留着它们等待释放，资源因此被释放两次。
   现在清理组件只留在原处。见[迁移](/zh/docs/guide/migration-and-unload#move-entities)。
-- 过滤条件没写 `Destroyed` 的 `SetAll` 会处理到已经销毁、因清理组件而保留的实体，给它们加上组件，让它们重新出现在查询里。
+- 过滤条件没写 `Retired` 的 `SetAll` 会处理到退休（因清理组件而保留）的实体，给它们加上组件，让它们重新出现在查询里。
   现在不会碰它们。见[批量变更](/zh/docs/guide/bulk)。
-- 对已经销毁、因清理组件而保留的实体调用 `Clone()`，会再造出一个这样的实体，带着清理组件的副本；现在抛
+- 对退休（因清理组件而保留）的实体调用 `Clone()`，会再造出一个这样的实体，带着清理组件的副本；现在抛
   `InvalidOperationException`。见[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)。
 - 销毁持有清理组件的实体时，它失去其他组件被算作移除，`[Removed<T>]` 方法和 `Removed<T>(since)` 过滤条件会访问它，而没有清理组件的
   已销毁实体从不会被访问。现在实体退休不再算移除；它被释放后由销毁日志报告。见[移除检测](/zh/docs/guide/change-tracking#removal-detection)。
-- `LoadEntitiesInto` 接受 `into` 里重复出现的同一个实体，第二个存档实体会覆盖第一个；现在抛 `ArgumentException`。
+- `LoadEntitiesInto` 接受目标里重复出现的同一个实体，第二个存档实体会覆盖第一个；现在抛 `ArgumentException`。
   见[迁移](/zh/docs/guide/migration-and-unload#records)。
 - 在查询循环或系统里 `world.Instantiate(prefab)` 一个带成员的预制体会抛异常（`Snapshots cannot be captured or restored while a query iterates`），
   而不带成员的预制体在那里可以实例化。现在一组实体的副本和别的新行一样，生成器系统也能实例化它。见[预制体](/zh/docs/guide/prefabs)。

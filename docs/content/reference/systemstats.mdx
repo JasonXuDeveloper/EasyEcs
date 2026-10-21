@@ -14,21 +14,13 @@ How often and how long a system ran ([`WorldOptions.MeasureSystems`](/en/docs/re
 
 ## Properties
 
-### `Average` [#average]
+### `AverageTime` [#averagetime]
 
 ```csharp
-public TimeSpan Average { get; }
+public TimeSpan AverageTime { get; }
 ```
 
 Average time per run (zero before the first).
-
-### `Last` [#last]
-
-```csharp
-public TimeSpan Last { get; }
-```
-
-Time of the latest run.
 
 ### `LastAllocated` [#lastallocated]
 
@@ -46,6 +38,14 @@ public long LastEntities { get; }
 
 Entities the latest run's `[ForEach]` methods visited: the entities each method's query matched when its pass started (rows passing its filters and, for `[Changed<T>]` / `[Removed<T>]`, written or removed since the system last ran), summed over the methods; a `[ForEach(Slices = N)]` method counts the rows of the slice it visited. Queries made in [`EcsSystem.OnUpdate`](/en/docs/reference/ecssystem#onupdate) are not counted.
 
+### `LastTime` [#lasttime]
+
+```csharp
+public TimeSpan LastTime { get; }
+```
+
+Time of the latest run.
+
 ### `Runs` [#runs]
 
 ```csharp
@@ -53,14 +53,6 @@ public long Runs { get; }
 ```
 
 Runs measured so far.
-
-### `Total` [#total]
-
-```csharp
-public TimeSpan Total { get; }
-```
-
-Time of all measured runs.
 
 ### `TotalAllocated` [#totalallocated]
 
@@ -77,3 +69,11 @@ public long TotalEntities { get; }
 ```
 
 Entities all measured runs visited (see [`SystemStats.LastEntities`](/en/docs/reference/systemstats#lastentities)).
+
+### `TotalTime` [#totaltime]
+
+```csharp
+public TimeSpan TotalTime { get; }
+```
+
+Time of all measured runs.

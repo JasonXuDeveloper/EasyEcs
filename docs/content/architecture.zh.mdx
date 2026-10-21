@@ -59,7 +59,7 @@ flowchart TB
 
 ### 变更 tick [#change-ticks]
 
-标了 `ITrackChanges` 的组件会给每张含它的表带来一列隐藏的 8 字节 tick：每行最后一次写入时 World 的变更 tick。写入时打上 tick
+标了 `ITracked` 的组件会给每张含它的表带来一列隐藏的 8 字节 tick：每行最后一次写入时 World 的变更 tick。写入时打上 tick
 （一段连续行用一次向量化填充），同时维护三级摘要，让遍历跳过没人写过的部分。`[ForEach]` 方法的 `ref` 参数给遍历访问到的每一行
 打 tick；`Mut<T>` 参数改成按写入打 tick，只给真正写了的行打（方法不会搬动实体时直接按行打，会搬动时先查实体记录），它的 `SetIfChanged` 只在值不同时才打：
 
@@ -120,13 +120,13 @@ flowchart LR
 stateDiagram-v2
     state "空闲" as Free
     state "存活" as Alive
-    state "已销毁" as Destroyed
+    state "已退休" as Retired
     [*] --> Free
     Free --> Alive: CreateEntity / Instantiate / Clone
     Alive --> Alive: Set 新组件（行复制到另一张表）
     Alive --> Alive: Remove、Disable、重新添加（只翻存在位）
-    Alive --> Destroyed: 持有清理组件时 Destroy
-    Destroyed --> Free: 移除最后一个清理组件
+    Alive --> Retired: 持有清理组件时 Destroy
+    Retired --> Free: 移除最后一个清理组件
     Alive --> Free: Destroy（版本 + 1，删行，回收 id）
 ```
 
@@ -134,9 +134,9 @@ stateDiagram-v2
   组件里存 `EntityId`，不要存句柄。
 - id 后进先出地回收：刚释放的 id 缓存行还是热的，`Meta` 的大小也只取决于存活实体数的峰值。`Meta` 永不收缩（`Dispose` 时只清零），
   句柄访问它因此不需要边界检查。
-- 持有 [`ICleanupComponent`](/zh/docs/guide/cleanup-and-disable) 的实体被销毁时，失去其他组件，带着 `Destroyed` 标签留下，
+- 对持有 [`ICleanupComponent`](/zh/docs/guide/cleanup-and-disable) 的实体调用 `Destroy` 会让它退休：失去其他组件，带着 `Retired` 标签留下，
   直到某个系统移除它最后一个清理组件。
-- 开启 `WorldOptions.DestroyLog` 后，每个 id 不再存活时（销毁、级联、迁出、最后一个清理组件被移除、`Restore` 或 `Load` 拿掉的实体），
+- 开启 `WorldOptions.DestroyLogCapacity` 后，每个 id 不再存活时（销毁、级联、迁出、最后一个清理组件被移除、`Restore` 或 `Load` 拿掉的实体），
   World 都会把它记进一个固定大小的环，每条记录 16 字节（`EntityId` 加变更 tick），随 World 一起预分配。读者各自保存自己的 tick，用
   `DestroyedSince` 读；比环里最旧记录还旧的读者会被告知需要重新同步。关掉时销毁没有任何额外开销。
 
@@ -190,7 +190,7 @@ flowchart LR
   遍历把 World 的 `StorageVersion` 和上次看到的值比较：任何可能重新分配存储、搬行或翻存在位的改动都会让它加一，遍历随即从下一行起
   重新读取列引用和位。
 - job 改变了正在访问的实体的原型时，它通过 `ref` 写的东西落在旧行（现在是墓碑）里。job 返回后，遍历把 job 写的组件
-  （`Writes`，由 `ref` 参数生成）复制到实体的新行，写入一个都不会丢。
+  （`WriteMask`，由 `ref` 参数生成）复制到实体的新行，写入一个都不会丢。
 - `Query` 遵循同样的规则。它的枚举器把热状态（行号、行数、实体行、列引用）放在自己的字段里，循环调用的每个成员都内联，
   JIT 因此能把它们留在寄存器里。冷状态放在按线程池化的 `QueryWalk` 里，每张表、每次结构变更才访问一次。
   一个票据（ticket）用来区分遍历的当前使用者和已经结束的枚举器副本。

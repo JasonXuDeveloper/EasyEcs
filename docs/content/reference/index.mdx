@@ -15,22 +15,22 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`ChangedAttribute<T>`](/en/docs/reference/changedattribute) | The ForEachAttribute method visits only entities whose T was written since its system last ran (EcsSystem.LastRunTick; on the first run, every entity having it). |
 | [`ChildOfEcsExtensions`](/en/docs/reference/childofecsextensions) | The named members of ChildOf (generated). |
 | [`ChildOfEcsPrefabExtensions`](/en/docs/reference/childofecsprefabextensions) | The named members of ChildOf on a Prefab (generated). |
-| [`DestroyedEcsExtensions`](/en/docs/reference/destroyedecsextensions) | The named members of Destroyed (generated). |
 | [`DynamicBufferExtensions`](/en/docs/reference/dynamicbufferextensions) | The writes of a DynamicBuffer. |
 | [`EcsSystem`](/en/docs/reference/ecssystem) | Logic that runs on a world. |
 | [`ForEachAttribute`](/en/docs/reference/foreachattribute) | Runs a method of an EcsSystem (or a static method of any other type, through a generated entry point) for every entity matching its component parameters (and the WithAttribute / WithoutAttribute / WithAnyAttribute filters), each update, after EcsSystem.OnUpdate, in declaration order. |
-| [`GroupSchedule`](/en/docs/reference/groupschedule) | The systems of one group in stages (ScheduleInfo). |
+| [`GroupInfo`](/en/docs/reference/groupinfo) | The systems of one group in stages (ScheduleInfo). |
 | [`OrderedIndexExtensions`](/en/docs/reference/orderedindexextensions) | Ordered walks of a value index whose key is comparable (a score, a deadline, a level): ranges and sorted iteration for leaderboards, timers and matchmaking brackets. |
 | [`Prefab`](/en/docs/reference/prefab) | A recipe for entities: a set of component values that belongs to no world, so no query ever sees it. |
 | [`RelationIndex<T>`](/en/docs/reference/relationindex) | The links of relation T in one world, by target (World.Relations): which entities link to an entity, O(1) to start and O(1) per link. |
 | [`RemovedAnyAttribute<T1..T9>`](/en/docs/reference/removedanyattribute) | The ForEachAttribute method visits only entities that lost at least one of T1, T2 since its system last ran and have not got it back: QueryFilter.RemovedAny. |
 | [`RemovedAttribute<T>`](/en/docs/reference/removedattribute) | The ForEachAttribute method visits only entities that lost T since its system last ran (EcsSystem.LastRunTick) and have not got it back: replication sends the removal, a cleanup releases what the component stood for. |
+| [`RetiredEcsExtensions`](/en/docs/reference/retiredecsextensions) | The named members of Retired (generated). |
 | [`ScheduleInfo`](/en/docs/reference/scheduleinfo) | How a world runs its systems (World.DescribeSchedule): every group's stages, what each system reads and writes, why a system waits for an earlier stage, and which conflicting systems are ordered by nothing but their registration order. |
 | [`StageInfo`](/en/docs/reference/stageinfo) | One stage of a group: systems with no ordering and no conflict between them. |
 | [`StageWait`](/en/docs/reference/stagewait) | A system a later one waits for (SystemInfo.After). |
 | [`SystemInfo`](/en/docs/reference/systeminfo) | A system of a schedule and the data it declares (SystemAccess). |
-| [`SystemPair`](/en/docs/reference/systempair) | Two conflicting systems in execution order, ordered only by registration (GroupSchedule.RegistrationOrdered). |
-| [`TargetRules`](/en/docs/reference/targetrules) | Target policies of components that point at an entity (IIndexed of EntityId). |
+| [`SystemPair`](/en/docs/reference/systempair) | Two conflicting systems in execution order, ordered only by registration (GroupInfo.RegistrationOrdered). |
+| [`TargetPolicyExtensions`](/en/docs/reference/targetpolicyextensions) | Target policies of components that point at an entity (IIndexed of EntityId). |
 | [`UniqueIndexExtensions`](/en/docs/reference/uniqueindexextensions) | Lookups of a unique index (IUniqueIndexed): the one entity of a key. |
 | [`UpdateAfterAttribute<TSystem>`](/en/docs/reference/updateafterattribute) | Run this system after TSystem (and systems derived from it) of the same group: see UpdateBeforeAttribute. |
 | [`UpdateBeforeAttribute<TSystem>`](/en/docs/reference/updatebeforeattribute) | Run this system before TSystem (and systems derived from it) of the same group, whatever their registration order. |
@@ -51,7 +51,6 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`ColumnInfo`](/en/docs/reference/columninfo) | A column of a table (TableInfo). |
 | [`ComponentSet`](/en/docs/reference/componentset) | A set of component and singleton types, built once and kept (a static readonly field): the components a save writes (World.SaveEntitiesWith), the record of what persists without the runtime state around it; or, for a restart, the types a whole-world save leaves out (World.SaveWithout) and the singletons a load keeps (World.LoadKeeping). |
 | [`ComponentValue`](/en/docs/reference/componentvalue) | A component of an entity, as Entity.Describe reads it: a boxed copy of its value. |
-| [`Destroyed`](/en/docs/reference/destroyed) | Tag of an entity that was destroyed while holding ICleanupComponents: its other components are gone, it stays alive until its last cleanup component is removed. |
 | [`Disabled<T>`](/en/docs/reference/disabled) | The tag of an entity whose T is disabled (Entity.Disable): the entity keeps the value of T but lacks it for queries, Has and Get until Entity.Enable gives it back. |
 | [`DynamicBuffer<T>`](/en/docs/reference/dynamicbuffer) | A list of T per entity, held as a component: an inventory, a path, the hits of this tick. |
 | [`Entity`](/en/docs/reference/entity) | Handle to an entity: id + version + world (16 bytes). |
@@ -65,12 +64,13 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`ReadEnumerator<T1..T9>`](/en/docs/reference/readenumerator) | Allocation-free read-only query enumerator; safe under structural changes during iteration (same visiting rules as ForEach). |
 | [`ReadItem<T1..T9>`](/en/docs/reference/readitem) | One read-only query result: the entity and read-only refs into its row (nothing is stamped). |
 | [`RelationIndex<T>.Sources`](/en/docs/reference/relationindex-sources) | Enumerates the entities linking to one target (foreach), once per link. |
+| [`Retired`](/en/docs/reference/retired) | Tag of a retired entity: Destroy found ICleanupComponents on it, so it took the other components away and kept the entity alive until its last cleanup component is removed (then the entity is freed: destroyed). |
 | [`SingletonRef<T>`](/en/docs/reference/singletonref) | Handle to one world's singleton T. |
 | [`SystemAccess`](/en/docs/reference/systemaccess) | The data a system reads and writes, declared once when the system is added. |
 | [`SystemList`](/en/docs/reference/systemlist) | The systems of a world, every group in execution order (default group first): foreach it, or read SystemList.Count. |
 | [`SystemList.Enumerator`](/en/docs/reference/systemlist-enumerator) | Walks the groups and their systems. |
 | [`SystemStats`](/en/docs/reference/systemstats) | How often and how long a system ran (WorldOptions.MeasureSystems): EcsSystem.OnUpdate plus its [ForEach] methods, per run, with the bytes it allocated and the entities its [ForEach] methods visited. |
-| [`TableInfo`](/en/docs/reference/tableinfo) | A table: the entities with one set of component columns (World.Describe). |
+| [`TableInfo`](/en/docs/reference/tableinfo) | A table: the entities with one set of component columns (World.DescribeTables). |
 | [`ValueIndex<T, TKey>.Matches`](/en/docs/reference/valueindex-matches) | Enumerates the entities of one key (foreach). |
 | [`ValueIndex<T, TKey>.Ordered`](/en/docs/reference/valueindex-ordered) | Enumerates entities in key order (foreach): every entity of a key, then the next key. |
 | [`World.DescendantWalk`](/en/docs/reference/world-descendantwalk) | A depth-first walk of World.Descendants: a stack of the child lists still being read, given back to the world by World.DescendantWalk.Dispose (foreach calls it). |
@@ -81,20 +81,20 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 
 | Type | Summary |
 |---|---|
-| [`ICleanupComponent`](/en/docs/reference/icleanupcomponent) | Marks a component that outlives the destruction of its entity: destroying an entity holding one removes its other components and adds the Destroyed tag instead of freeing it, so a system can release what the component stands for (a socket, a reservation, a slot in another service) and then remove it. |
+| [`ICleanupComponent`](/en/docs/reference/icleanupcomponent) | Marks a component that outlives the destruction of its entity: destroying an entity holding one removes its other components and adds the Retired tag instead of freeing it, so a system can release what the component stands for (a socket, a reservation, a slot in another service) and then remove it. |
 | [`IComponent`](/en/docs/reference/icomponent) | Marks a struct as component data. |
 | [`IForEach<T1..T9>`](/en/docs/reference/iforeach) | Struct callback for World.ForEach. |
 | [`IForEachBatch<T1..T9>`](/en/docs/reference/iforeachbatch) | Struct callback for World.ForEachBatch: receives whole runs of rows as spans, one per component, so the job can process them with SIMD (System.Numerics.Vector, MemoryMarshal.Cast), and their entities (built only when indexed). |
 | [`IForEachEntity<T1..T9>`](/en/docs/reference/iforeachentity) | Like IForEach but also receives the Entity handle, built from the archetype's entity rows (id and version side by side) without a per-entity lookup. |
 | [`IGroup`](/en/docs/reference/igroup) | Marks a component whose value splits tables: in a world that called World.GroupBy, entities with different IGroup.Groups live in different tables, so a query of one group (QueryFilter.InGroup) walks only its own rows, contiguous in memory (a zone, a map, a match, a team). |
-| [`IGroupWith<T>`](/en/docs/reference/igroupwith) | A system group whose [ForEach] methods visit only entities with T, as WithAttribute on the group would. |
-| [`IGroupWithout<T>`](/en/docs/reference/igroupwithout) | A system group whose [ForEach] methods skip entities with T, as WithoutAttribute on the group would (see IGroupWith). |
 | [`IIndexed, IIndexed<TKey>`](/en/docs/reference/iindexed) | What every IIndexed is, so a component type is known to be indexed without reflection (a type test the JIT folds). |
 | [`INoStructuralChanges`](/en/docs/reference/inostructuralchanges) | Marks a ForEach job that makes no structural change (no create/destroy/add/remove/set on any entity of the world it iterates). |
 | [`IRelation`](/en/docs/reference/irelation) | An element of a DynamicBuffer that links its entity to IRelation.Target: an entity holds any number of links of one kind (the members of a party, the items a merchant offers, the units a buff applies to), and World.Relations finds the entities linking to a target. |
 | [`ISingletonComponent`](/en/docs/reference/isingletoncomponent) | Marks a struct as a world singleton: exactly one value per world (clock, configuration, shared state). |
 | [`ISystemGroup`](/en/docs/reference/isystemgroup) | Marker of a system group: systems marked UpdateInGroupAttribute run together when World.Update is called, independently of the default group run by World.Update. |
-| [`ITrackChanges`](/en/docs/reference/itrackchanges) | Marks a component whose changes are tracked: every row records the world's World.ChangeTick of its last write, and [Changed&lt;T&gt;] / QueryFilter.Changed&lt;T&gt;(since) select the rows written since a system last ran. |
+| [`ISystemGroupWith<T>`](/en/docs/reference/isystemgroupwith) | A system group whose [ForEach] methods visit only entities with T, as WithAttribute on the group would. |
+| [`ISystemGroupWithout<T>`](/en/docs/reference/isystemgroupwithout) | A system group whose [ForEach] methods skip entities with T, as WithoutAttribute on the group would (see ISystemGroupWith). |
+| [`ITracked`](/en/docs/reference/itracked) | Marks a component whose changes are tracked: every row records the world's World.ChangeTick of its last write, and [Changed&lt;T&gt;] / QueryFilter.Changed&lt;T&gt;(since) select the rows written since a system last ran. |
 | [`IUniqueIndexed, IUniqueIndexed<TKey>`](/en/docs/reference/iuniqueindexed) | What every IUniqueIndexed is, so a component type is known to be unique without reflection (a type test the JIT folds). |
 
 ## Enums
@@ -102,7 +102,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | Type | Summary |
 |---|---|
 | [`SystemErrorPolicy`](/en/docs/reference/systemerrorpolicy) | What an exception thrown by a system does (WorldOptions.SystemErrors). |
-| [`TargetPolicy`](/en/docs/reference/targetpolicy) | What happens to the links to an entity when it is destroyed (TargetRules.WhenTargetDestroyed, RelationIndex.WhenTargetDestroyed). |
+| [`TargetPolicy`](/en/docs/reference/targetpolicy) | What happens to the links to an entity when it is destroyed (TargetPolicyExtensions.WhenTargetDestroyed, RelationIndex.WhenTargetDestroyed). |
 
 ## Delegates
 

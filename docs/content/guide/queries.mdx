@@ -98,7 +98,7 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 | Destroy every match | `world.DestroyAll<T1..Tn>(filter)` |
 | Only rows written or removed since a tick | `Changed<T>(tick)` / `Removed<T>(tick)`, `ChangedAny<T1..Tn>(tick)` / `RemovedAny<T1..Tn>(tick)` for any of several ([change tracking](/en/docs/guide/change-tracking)) |
 | A pass that writes only the rows whose value changed | a [`Mut<T>` parameter](/en/docs/guide/change-tracking#set-if-changed) of a `[ForEach]` method |
-| A share of the rows per pass, every row once per N passes | `Slice(index, count)` with a `ForEach` call, or [`[ForEach(Slices = N)]`](/en/docs/guide/systems#slices) |
+| A share of the rows per pass, every row once per N passes | `Slice(index, of)` with a `ForEach` call, or [`[ForEach(Slices = N)]`](/en/docs/guide/systems#slices) |
 | Entities by a value, or pointing at an entity | `world.Index<T, TKey>().Find(key)` ([indexes](/en/docs/guide/indexes-and-relations)) |
 
 ### Filters [#filters]
@@ -113,7 +113,7 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 | `ChangedAny<T1..Tn>(since)` | entities where at least one of the tracked components it has was written at or after `since` | `[ChangedAny<T1, …, Tn>]` |
 | `RemovedAny<T1..Tn>(since)` | entities that lost at least one of the tracked components at or after `since` and still lack it | `[RemovedAny<T1, …, Tn>]` |
 | `InGroup<T>(group)` | entities whose `T` is in one [group](/en/docs/guide/groups) | none; the generated `filter.InTeam(group)` for an `IGroup` component `Team` |
-| `Slice(index, count)` | slice `index` of `count` of every matching table's rows, cut at 64-row words; `ForEach`, `ForEachEntity`, `ForEachBatch` and their `Parallel` forms only | `[ForEach(Slices = N)]` ([slices](/en/docs/guide/systems#slices)) |
+| `Slice(index, of)` | slice `index` of the `of` slices of every matching table's rows, cut at 64-row words; `ForEach`, `ForEachEntity`, `ForEachBatch` and their `Parallel` forms only | `[ForEach(Slices = N)]` ([slices](/en/docs/guide/systems#slices)) |
 | `Since(tick)` | the same filter, its `Changed`, `Removed`, `ChangedAny` and `RemovedAny` parts moved to another tick | |
 
 Every filter can be repeated and combined. The `ChangedAny` parts of a filter join one group that passes when any
@@ -123,7 +123,7 @@ filter holds one tick: its `Changed`, `Removed`, `ChangedAny` and `RemovedAny` p
 or [for each client](/en/docs/guide/change-tracking#per-client) with the tick it acknowledged:
 
 ```csharp
-public record struct Armor(int Value) : IComponent, ITrackChanges;
+public record struct Armor(int Value) : IComponent, ITracked;
 
 public static class Replication
 {
@@ -137,7 +137,7 @@ world.Update();
 int dirty = world.Count<Armor>(Replication.Dirty.Since(mark));
 ```
 
-`Slice(index, count)` keeps a pass to part of each table: passes with each index from 0 to `count - 1` in turn visit
+`Slice(index, of)` keeps a pass to part of each table: passes with each index from 0 to `count - 1` in turn visit
 every row once. Only the `ForEach` family honours it; `Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run` and
 the bulk calls (`SetAll`, `RemoveAll`, …) need every matching row and throw `ArgumentException` for a sliced filter.
 In a system, [`[ForEach(Slices = N)]`](/en/docs/guide/systems#slices) picks the slice for you.
@@ -149,9 +149,9 @@ The enumerator and its items are ref structs holding refs into the current table
 - a query loop cannot contain `await`, and an item cannot be stored: keep `item.Entity` instead;
 - `item.Position` (named after the component) and `item.Component1` are the same ref; named members are generated
   for each `Query<...>` shape your code calls;
-- items count as a write of every tracked (`ITrackChanges`) component they hand out, whether or not the loop stores
+- items count as a write of every tracked (`ITracked`) component they hand out, whether or not the loop stores
   through them. To read tracked components without stamping them (a save, a send), loop over
-  [`Read`](#read) instead, or use a struct job with `Writes => 0`, a `[ForEach]` method with `in` parameters, or
+  [`Read`](#read) instead, or use a struct job with `WriteMask => 0`, a `[ForEach]` method with `in` parameters, or
   `entity.Read<T>()` ([what counts as a write](/en/docs/guide/change-tracking#what-counts-as-a-write)).
 
 A loop may create, destroy, add and remove; the rules are in [Structural changes](/en/docs/guide/structural-changes).
@@ -178,7 +178,7 @@ closure, no allocation. `[ForEach]` methods compile to exactly this.
 ```csharp
 public struct Integrate : IForEach<Position, Velocity>, INoStructuralChanges
 {
-    public static int Writes => 1;          // Position (component 1); Velocity is only read
+    public static int WriteMask => 1;          // Position (component 1); Velocity is only read
 
     public void Execute(ref Position p, ref Velocity v)
     {
@@ -197,10 +197,10 @@ The job is passed by `ref`, so fields it accumulates (a sum, a count) are visibl
 components only, so the pass never loads the entity rows. A job that must hold a `ref` or a `Span` can be a
 `ref struct`, except for the `*Parallel` calls.
 
-#### What a job declares: `Writes` [#what-a-job-declares-writes]
+#### What a job declares: `WriteMask` [#what-a-job-declares-writes]
 
 Job parameters are all `ref`, so a job says which components it actually writes with an optional
-`static int Writes`: bit k - 1 for component k, default -1 (all of them). Only those count as written for
+`static int WriteMask`: bit k - 1 for component k, default -1 (all of them). Only those count as written for
 [change tracking](/en/docs/guide/change-tracking), and only those are carried over to the entity's new row when the
 job changes the archetype of the entity it visits. `INoStructuralChanges` promises that `Execute` never creates,
 destroys, adds or removes: the pass then skips the bookkeeping that keeps changes safe and freezes the structure, so
@@ -221,7 +221,7 @@ using System.Runtime.InteropServices;
 
 public struct KillTheWounded : IForEachEntity<Health>
 {
-    public static int Writes => 0;          // reads Health; the change is structural (a tag)
+    public static int WriteMask => 0;          // reads Health; the change is structural (a tag)
 
     public void Execute(Entity unit, ref Health hp)
     {
@@ -231,7 +231,7 @@ public struct KillTheWounded : IForEachEntity<Health>
 
 public struct Drift : IForEachBatch<Position, Velocity>
 {
-    public static int Writes => 1;
+    public static int WriteMask => 1;
 
     public void Execute(EntitySpan entities, Span<Position> positions, Span<Velocity> velocities)
     {
@@ -270,7 +270,7 @@ public static class Hits
 public struct TakeHit : IForEachEntity<Health>
 {
     public int Damage;
-    public static int Writes => 1;
+    public static int WriteMask => 1;
 
     public void Execute(Entity unit, ref Health hp)
     {
@@ -286,13 +286,13 @@ bool applied = unit.Run<Health, TakeHit>(ref hit, Hits.Alive);   // false: dead,
 ```
 
 Without a filter, `entity.Run<T1..Tn, TJob>(ref job)` checks only that the entity is alive and has the components.
-A job that only reads declares `Writes => 0`:
+A job that only reads declares `WriteMask => 0`:
 
 ```csharp
 public struct ReadHealth : IForEachEntity<Health>
 {
     public int Value;
-    public static int Writes => 0;          // reads only: nothing counts as written
+    public static int WriteMask => 0;          // reads only: nothing counts as written
 
     public void Execute(Entity unit, ref Health hp) => Value = hp.Value;
 }
@@ -303,11 +303,11 @@ var read = new ReadHealth();
 if (unit.Run<Health, ReadHealth>(ref read)) Console.WriteLine(read.Value);
 ```
 
-- **The refs survive the job's own structural changes**, as in `ForEachEntity`: the components in `Writes` are copied
+- **The refs survive the job's own structural changes**, as in `ForEachEntity`: the components in `WriteMask` are copied
   to the entity's new row after `Execute`, also when it throws, so what was written before the exception stays.
-- **Only `Writes` count as written** for [change tracking](/en/docs/guide/change-tracking), and only when `Run`
-  returns `true`. The default, `Writes => -1`, stamps every component the job takes; a job that writes nothing
-  declares `Writes => 0`.
+- **Only `WriteMask` count as written** for [change tracking](/en/docs/guide/change-tracking), and only when `Run`
+  returns `true`. The default, `WriteMask => -1`, stamps every component the job takes; a job that writes nothing
+  declares `WriteMask => 0`.
 - **`false` is not "dead"**: it also means a missing component or a filter that failed. Test `entity.IsAlive` when
   the reason matters.
 - **`INoStructuralChanges`** skips the bookkeeping and freezes the structure while the job runs, like a pass: a
@@ -335,7 +335,7 @@ and a structural change in the middle, against the same work written through the
 A job that implements `INoStructuralChanges` and writes only its own row can run on several threads.
 `ForEachParallel` (an `IForEach` job) and `ForEachEntityParallel` (an `IForEachEntity` job) cut the matching rows into
 chunks (about four per thread, a multiple of 64 rows, between 1,024 and `World.ParallelChunkRows` = 16,384; a multiple
-of 4,096 rows, at least 4,096, when the job's `Writes` include a tracked component, so that no two chunks share a
+of 4,096 rows, at least 4,096, when the job's `WriteMask` include a tracked component, so that no two chunks share a
 block's change-tick summary). The
 calling thread and up to `WorldOptions.MaxDegreeOfParallelism - 1` thread-pool threads run them, each with its own
 copy of the job, so state accumulated in its fields is not merged back. Fewer than two chunks run on the calling
@@ -344,7 +344,7 @@ thread.
 ```csharp
 public struct Heal : IForEach<Health>, INoStructuralChanges
 {
-    public static int Writes => 1;
+    public static int WriteMask => 1;
 
     public void Execute(ref Health health) => health.Value = Math.Min(health.Value + 10, 100);
 }
@@ -493,7 +493,7 @@ not a mover, but the job over `Position` alone counts it.
 | --- | --- | --- |
 | A `Query` loop every tick | A `[ForEach]` method in a system | Generated struct job, ordered and scheduled |
 | `QueryFilter.Create()…` at every call | A `static readonly` filter | The cache key is built once |
-| A `Query` that only reads tracked components | [`Read<T1..Tn>`](#read), a job with `Writes => 0`, or `in` parameters | `Query` items stamp what they hand out |
+| A `Query` that only reads tracked components | [`Read<T1..Tn>`](#read), a job with `WriteMask => 0`, or `in` parameters | `Query` items stamp what they hand out |
 | `ForEachEntity` when the entity is rarely used | A batch job with `EntitySpan` | Handles built only for the rows that need one |
 | A scalar loop over many rows | A batch job with `Vector<T>` | The JIT does not vectorize on its own |
 | `Count(...) > 0` | `Any(...)` | Stops at the first match ([EECS032](/en/docs/guide/analyzer#eecs032)) |
@@ -549,7 +549,7 @@ Against Friflo.Engine.ECS on the same world: one component, two components scala
 | `Changed`, `Removed`, `ChangedAny` or `RemovedAny` with different ticks in one filter | `ArgumentException` | At run time |
 | A sliced filter (`Slice`) passed to `Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run` or a bulk call | `ArgumentException`: the call needs every matching row | [EECS044](/en/docs/guide/analyzer#eecs044) |
 | `Update()` called from inside a query loop of the same world | Every system runs while the loop walks the tables, and the update closes the loop's holes under it: rows it has not reached move behind it and are missed | [EECS051](/en/docs/guide/analyzer#eecs051); [EECS034](/en/docs/guide/analyzer#eecs034) when called from a system |
-| An `entity.Run` job without `Writes` | The default (-1) stamps every tracked component the job takes | Declare `Writes` (`0` for a job that only reads) |
+| An `entity.Run` job without `WriteMask` | The default (-1) stamps every tracked component the job takes | Declare `WriteMask` (`0` for a job that only reads) |
 | `INoStructuralChanges` on a `Run` job that changes structure | `InvalidOperationException` at the change | At run time |
 | Treating `false` from `Run` as "dead" | It also means a missing component or a filter that failed | Code review: test `IsAlive` |
 | `QueryFilter.Create()…` built at every `Run` or query call | The filter is rebuilt and looked up at every call | Code review: a `static readonly` field |

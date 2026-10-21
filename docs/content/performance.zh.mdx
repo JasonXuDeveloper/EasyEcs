@@ -154,8 +154,8 @@ world.CreateEntities(garrison, new Position(0, 0), new Velocity(0, 0), new Healt
 | 系统之外、每个 tick 都跑的循环 | 通过入口运行的静态 `[ForEach]` 方法，或 struct job（`world.ForEach`） | <BenchValue k="runner.runner" />，`Query` 循环是 <BenchValue k="runner.query" /> |
 | 工具、测试或请求处理里的循环 | `foreach (var item in world.Query<...>())` | <BenchValue k="micro.queryIterate" />，struct job 是 <BenchValue k="micro.forEachIterate" />（10,000 个实体） |
 | “有多少？”/“有没有？” | `world.Count` / `world.Any` | 100,000 行需要逐位测试时 <BenchValue k="count.tested" /> |
-| 上次运行以来写过的少数行 | `ITrackChanges` + `[Changed<T>]` | <BenchValue k="changed.10" />，全扫描是 <BenchValue k="changed.10.scan" />（100,000 个里写了 10 个） |
-| 失去某个组件的实体 | `ITrackChanges` + `[Removed<T>]` | <BenchValue k="removed.10" />（100,000 个里移除了 10 个） |
+| 上次运行以来写过的少数行 | `ITracked` + `[Changed<T>]` | <BenchValue k="changed.10" />，全扫描是 <BenchValue k="changed.10.scan" />（100,000 个里写了 10 个） |
+| 失去某个组件的实体 | `ITracked` + `[Removed<T>]` | <BenchValue k="removed.10" />（100,000 个里移除了 10 个） |
 | 按值找实体 | [值索引](/zh/docs/guide/indexes-and-relations) | 见[下面](#benchmarks)的 `IndexBenchmark` |
 
 <BenchSource />
@@ -174,7 +174,7 @@ world.CreateEntities(garrison, new Position(0, 0), new Velocity(0, 0), new Healt
 | 逐实体 `[ForEach]` 里带分支的算术 | 用 `Vector<T>` 向量化的批量方法，分支改成掩码 | <BenchValue k="ops.iterate2" /> → <BenchValue k="ops.iterate2Simd" /> |
 | 热点临时循环里的 `foreach (var item in world.Query<...>())` | 配 `world.ForEach` 的 struct job | <BenchValue k="micro.queryIterate" /> → <BenchValue k="micro.forEachIterate" /> |
 | 每一行都要测的 `bool` 标志 | 配 `[With<T>]` / `[Without<T>]` 的标签 | 没有标签的行一次跳过 64 行；切换只翻一个位 |
-| 为了找少数变化的行扫描每一行 | `ITrackChanges` + `[Changed<T>]` | <BenchValue k="changed.10.scan" /> → <BenchValue k="changed.10" /> |
+| 为了找少数变化的行扫描每一行 | `ITracked` + `[Changed<T>]` | <BenchValue k="changed.10.scan" /> → <BenchValue k="changed.10" /> |
 | 循环里 `CreateEntity` / `Destroy` | `CreateEntities` / `DestroyAll`、`Instantiate(prefab, span)` | <BenchValue k="micro.churn" /> → <BenchValue k="micro.churnBatch" /> |
 | 逐个给每个实体设组件 | `world.SetAll` / `RemoveAll` | <BenchValue k="bulk.each" /> → <BenchValue k="bulk.setAll" /> |
 | 一个接 `Maybe<T>` 的方法 | 用 `[With<T>]` / `[Without<T>]` 拆成两个方法 | <BenchValue k="maybe.one" /> → <BenchValue k="maybe.two" /> |
@@ -246,14 +246,14 @@ public class BounceSimdSystem : EcsSystem
 ### 临时循环：struct job [#ad-hoc-loops-a-struct-job]
 
 `world.Query` 是工具和请求处理里方便的循环。系统之外每个 tick 都跑的循环，写成 struct job：`world.ForEach` 按表特化并
-内联它。标上 `INoStructuralChanges`，再声明它的 `Writes`（[job 要声明什么](/zh/docs/guide/queries)）。
+内联它。标上 `INoStructuralChanges`，再声明它的 `WriteMask`（[job 要声明什么](/zh/docs/guide/queries)）。
 
 ```csharp title="EnergyJob.cs"
 public struct EnergyJob : IForEach<Velocity>, INoStructuralChanges   // 不做结构变更：走精简循环
 {
     public float Total;   // 值字段在遍历期间留在寄存器里，最后只写回一次
 
-    public static int Writes => 0;   // 只读：没有哪一行算被改过
+    public static int WriteMask => 0;   // 只读：没有哪一行算被改过
 
     public void Execute(ref Velocity v) => Total += v.X * v.X + v.Y * v.Y;
 }
@@ -275,7 +275,7 @@ public ref struct CollectJob : IForEach<Position>, INoStructuralChanges
     public Span<float> Xs;   // 调用方的缓冲，长度不小于匹配的行数
     public int Count;
 
-    public static int Writes => 0;
+    public static int WriteMask => 0;
 
     public void Execute(ref Position p) => Xs[Count++] = p.X;
 }
@@ -335,11 +335,11 @@ public class StunnedTagSystem : EcsSystem   // 最快：让过滤来做判断
 
 ### 变了的少数行：`[Changed<T>]` [#the-few-rows-that-changed-changedt]
 
-同步或存盘系统如果扫描每一行，就要为没人写过的行买单。把组件标成 `ITrackChanges`，再用 `[Changed<T>]` 过滤：没写过的表、
+同步或存盘系统如果扫描每一行，就要为没人写过的行买单。把组件标成 `ITracked`，再用 `[Changed<T>]` 过滤：没写过的表、
 4,096 行的块和 64 行的字都会被跳过。用 `in` 接组件，访问才不会被算成写入。
 
 ```csharp title="ShieldReplicationSystem.cs"
-public record struct Shield(int Value) : IComponent, ITrackChanges;
+public record struct Shield(int Value) : IComponent, ITracked;
 public record struct ShieldReplica(int Value) : IComponent;
 
 public class ShieldReplicationSystem : EcsSystem
@@ -370,7 +370,7 @@ public class ShieldReplicationSystem : EcsSystem
 ```csharp title="ShieldLossSystem.cs"
 public class ShieldLossSystem : EcsSystem
 {
-    [ForEach, Removed<Shield>]                       // Shield : ITrackChanges（见上）
+    [ForEach, Removed<Shield>]                       // Shield : ITracked（见上）
     static void Send(ref ShieldReplica replica) => replica = new ShieldReplica(0);
 }
 ```
@@ -415,7 +415,7 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 - **生成时一次带齐组件**：`world.CreateEntity(a, b, c)` 直接把实体放进最终的表；定义一次的类型用
   `world.Instantiate(prefab)`。一次改多个组件可以用 `entity.Set(a, b)` / `entity.Remove<A, B>()`：写法更简洁，性能相同。
 - **用 `in` 读，用 `ref` 写**：`in` 参数、`entity.Read<T>()` 或生成的属性读取；`ref` 参数和 `entity.Get<T>()` 是写。对被
-  追踪的组件，`ref` 访问算一次写入；`Query` 循环访问的每一行都算；只读的 struct job 声明 `static int Writes => 0`。
+  追踪的组件，`ref` 访问算一次写入；`Query` 循环访问的每一行都算；只读的 struct job 声明 `static int WriteMask => 0`。
 - **不做结构变更的 `[ForEach]` 方法保持 `static`**，不拿 `World` 参数，`Entity` 只读：生成器会给它的 job 标上
   `INoStructuralChanges`，省掉每行的簿记。手写的 job 也照此标记。
 - **单例作为 `[ForEach]` 参数**（每一遍只解析一次），系统之外则持有一个 `SingletonRef<T>`（每次访问不用查找）。
@@ -635,7 +635,7 @@ tick 一次、用 `[Changed<T>]` 和 `[Removed<T>]` 做的同步。`BattleServer
 
 ### 内省与修剪 [#introspection-benchmarks]
 
-`IntrospectionBenchmark` 为仪表盘描述战斗服务器的 World（`world.Describe()`：每张表及其列、行数和字节），为调试器描述
+`IntrospectionBenchmark` 为仪表盘描述战斗服务器的 World（`world.DescribeTables()`：每张表及其列、行数和字节），为调试器描述
 一个实体（`entity.Describe()`，值会装箱），再描述它的系统调度（`world.DescribeSchedule()`）。每一项都会分配它返回的描述：
 它们是工具，不在 tick 路径上。`TrimBenchmark` 在高峰过后还回内存：100,000 个实体分布在 16 或 256 张表里，销毁到只剩百分之一，
 再调 `TrimExcess`；`TrimTrimmed` 是在已经没什么可还的 World 上调用，也就是它的固定开销。

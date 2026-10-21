@@ -76,7 +76,7 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS034](#eecs034) | Error | A system does not run a world update | |
 | [EECS035](#eecs035) | Error | `[ForEach(Slices = N)]` is 1 or more, and not on a change filter | |
 | [EECS036](#eecs036) | Error | A component is indexed by its one key | |
-| [EECS037](#eecs037) | Warning | A job's `Writes` names what `Execute` writes | The `Writes` it needs |
+| [EECS037](#eecs037) | Warning | A job's `WriteMask` names what `Execute` writes | The `WriteMask` it needs |
 | [EECS038](#eecs038) | Warning | A changed copy of a component is not dropped | `ref var` |
 | [EECS039](#eecs039) | Info | A `Mut<T>` is of a tracked component | `ref T` |
 | [EECS040](#eecs040) | Error | `SetIfChanged` can compare its type | |
@@ -84,7 +84,7 @@ EECS049, not also a cost of its parameters; a parallel instance method is EECS01
 | [EECS042](#eecs042) | Error | An indexed component is not changed while its index is walked | |
 | [EECS043](#eecs043) | Error | A record struct key does not print itself | Implement `Key` explicitly |
 | [EECS044](#eecs044) | Error | A sliced filter goes to passes only | |
-| [EECS045](#eecs045) | Error | `Destroyed` and `Disabled<T>` are the world's to write | |
+| [EECS045](#eecs045) | Error | `Retired` and `Disabled<T>` are the world's to write | |
 | [EECS046](#eecs046) | Warning | A loop that only reads tracked components uses `Read` | `Read<T1..Tn>` |
 | [EECS047](#eecs047) | Warning | A ref is not used after a structural change | |
 | [EECS048](#eecs048) | Error | Cleanup components and `ChildOf` are not disabled | |
@@ -253,8 +253,8 @@ public class SpawnSystem : EcsSystem
 **Systems must not reference systems.** Error. No code fix.
 
 A field, auto-property, event or primary-constructor parameter of a system has a system type (an array of systems or
-a type argument included), or a system looks another one up with `World.GetSystem<T>()`. Systems that call each other
-are coupled: neither can be removed, reordered or tested alone. `GetSystem` is for tools, tests and the code that
+a type argument included), or a system looks another one up with `World.TryGetSystem<T>(out …)`. Systems that call each other
+are coupled: neither can be removed, reordered or tested alone. `TryGetSystem` is for tools, tests and the code that
 hosts the world.
 
 ```csharp doccheck=expect-EECS008
@@ -443,7 +443,7 @@ made anyway, through a handle or a world kept elsewhere, breaks both: the pass k
 change inside a parallel stage throws.
 
 The rule reports a call to a structural member of `Entity` (`Set`, `Remove`, `Destroy`, `GetOrAdd`, `Clone`,
-`Disable`, `Enable`, `AddRelation`, `RemoveRelation`, `Run` (its job may change structure), and the generated `SetX`, `GetOrAddX`, `RemoveX`) or `World`
+`Disable`, `Enable`, `Link`, `Unlink`, `Run` (its job may change structure), and the generated `SetX`, `GetOrAddX`, `RemoveX`) or `World`
 (`CreateEntity`, `CreateEntities`, `Instantiate`, `Reserve`, `DestroyEntities`, `DestroyAll`, `SetAll`, `RemoveAll`, `DisableAll`,
 `EnableAll`, `Load`, `LoadKeeping`, `SaveWithout`, `SaveEntitiesWith`, `LoadEntities`, `LoadEntitiesInto`, `MoveEntities`, `GroupBy`, `RemoveTypes`, singletons, systems, `Update`,
 `Capture`, `Restore`, ...) in such a method. A world the method creates itself (`new World()` in a local) is its own.
@@ -584,7 +584,7 @@ public class TakePortals : EcsSystem
 would never run.
 
 ```csharp
-public record struct Burning(int Ticks) : IComponent, ITrackChanges;
+public record struct Burning(int Ticks) : IComponent, ITracked;
 public record struct Replica(int Health, bool Burning) : IComponent;
 ```
 
@@ -827,7 +827,7 @@ local or a `this ref` extension (`DynamicBuffer<T>.Add`) is a write, and keeps t
 only through `.Value` reads, and is reported the same way.
 
 ```csharp
-public record struct Armor(int Value) : IComponent, ITrackChanges;
+public record struct Armor(int Value) : IComponent, ITracked;
 ```
 
 ```csharp doccheck=expect-EECS025
@@ -929,7 +929,7 @@ array, a lambda that captures, a method group of an instance, LINQ, a string bui
 compiler removes (`[Conditional]`, such as `Debug.Assert`), console output (the write costs more than its string),
 and the `OnUpdate` of a system that overrides `UpdateInterval` (its author chose that cadence). The rule also covers
 the `Execute` of a hand-written job, and the cold calls that allocate by design: `TrimExcess`, `Capture()`,
-`Describe` and `DescribeSchedule` belong to a timer, a command or a test, not to every update.
+`Describe`, `DescribeTables` and `DescribeSchedule` belong to a timer, a command or a test, not to every update.
 
 ```csharp doccheck=expect-EECS028
 public class Steer : EcsSystem
@@ -1165,25 +1165,25 @@ public record struct Mount(EntityId Rider) : IComponent, IIndexed<EntityId> { pu
 
 ## EECS037 [#eecs037]
 
-**A job's `Writes` does not match what `Execute` writes.** Warning. Code fix: the `Writes` that `Execute` needs.
+**A job's `WriteMask` does not match what `Execute` writes.** Warning. Code fix: the `WriteMask` that `Execute` needs.
 
 A hand-written job (`IForEach<...>`, `IForEachEntity<...>`, `IForEachBatch<...>`) says which components it writes with
-`static int Writes` (bit `k - 1` for component `k`, `-1` for all of them, the default). The loop stamps the
+`static int WriteMask` (bit `k - 1` for component `k`, `-1` for all of them, the default). The loop stamps the
 [tracked](/en/docs/guide/change-tracking) components it names on every row it visits, and carries the others over
-when `Execute` moves the entity. A tracked component that `Execute` writes and `Writes` leaves out is never stamped,
+when `Execute` moves the entity. A tracked component that `Execute` writes and `WriteMask` leaves out is never stamped,
 so `[Changed<T>]` systems miss the change; one that `Execute` only reads is stamped on every row anyway, so they visit
-rows nobody changed. The rule compares a constant `Writes` (or the default) with the writes it sees in `Execute`, by
-the same test as EECS025, and leaves a computed `Writes` and the bits of `OwnStamps` alone.
+rows nobody changed. The rule compares a constant `WriteMask` (or the default) with the writes it sees in `Execute`, by
+the same test as EECS025, and leaves a computed `WriteMask` and the bits of `SelfStamped` alone.
 
 ```csharp
-public record struct Shield(int Value) : IComponent, ITrackChanges;
+public record struct Shield(int Value) : IComponent, ITracked;
 ```
 
 ```csharp doccheck=expect-EECS037
 public struct Recharge : IForEach<Shield>
 {
     public void Execute(ref Shield shield) => shield = new Shield(shield.Value + 1);
-    public static int Writes => 0;   // Shield is written and never stamped
+    public static int WriteMask => 0;   // Shield is written and never stamped
 }
 ```
 
@@ -1193,7 +1193,7 @@ Name what `Execute` writes:
 public struct Recharge : IForEach<Shield>
 {
     public void Execute(ref Shield shield) => shield = new Shield(shield.Value + 1);
-    public static int Writes => 0b1;
+    public static int WriteMask => 0b1;
 }
 ```
 
@@ -1231,7 +1231,7 @@ mana.Value -= 10;
 **A `Mut<T>` of a component that is not tracked.** Suggestion (Info). Code fix: `ref T`.
 
 [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) stamps only the rows a `[ForEach]` method writes, which only means
-something for a component with `ITrackChanges`. For any other component it is the same write as a `ref` parameter,
+something for a component with `ITracked`. For any other component it is the same write as a `ref` parameter,
 written longer (`.Value`, `.Write()`). The rule reports a `Mut<T>` of an untracked `T` used only through `.Value`
 and `.Write()`; one that calls `SetIfChanged` keeps its comparison.
 
@@ -1270,7 +1270,7 @@ boxing: an unmanaged type by its bytes, any other type through `IEquatable<T>`. 
 throws `NotSupportedException` on the first call; the generated `SetXIfChanged` exists only for types it can compare.
 
 ```csharp
-public struct Nickname : IComponent, ITrackChanges { public string Text; }
+public struct Nickname : IComponent, ITracked { public string Text; }
 ```
 
 ```csharp doccheck=expect-EECS040
@@ -1280,7 +1280,7 @@ hero.SetIfChanged(new Nickname { Text = "Ada" });   // NotSupportedException: no
 Make it a `record struct` (records implement `IEquatable<T>`), or implement `IEquatable<T>`:
 
 ```csharp
-public record struct Callsign(string Text) : IComponent, ITrackChanges;   // compared through IEquatable<Callsign>
+public record struct Callsign(string Text) : IComponent, ITracked;   // compared through IEquatable<Callsign>
 ```
 
 ```csharp
@@ -1319,7 +1319,7 @@ if (trim) world.TrimExcess();
 `index.Find(key)`, the ordered walks of an index (`Ascending`, `Descending`, `Range`, ...), `world.Children(parent)`,
 `world.Descendants(root)` and a relation index's `Find(target)` read the index's own lists as they go. Giving an
 entity the indexed component or a new key (`Set`, `SetIfChanged`, `GetOrAdd`, `Enable`, `SetAll`, `EnableAll`, a
-creation with the component, the generated `SetX`; `AddRelation` for a relation) adds it to a key, and a key that
+creation with the component, the generated `SetX`; `Link` for a relation) adds it to a key, and a key that
 emptied hands its list to the keys that grow next: the walk skips entities or visits others. The rule reports such a
 change inside a `foreach` over a walk of the same component's index. Removing the component, dropping links and
 destroying entities leave holes the walk steps past, and a change followed by a `break`, `return` or `throw` ends the
@@ -1364,11 +1364,11 @@ public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { M
 
 **A sliced filter where every row is needed.** Error. No code fix.
 
-[`QueryFilter.Slice(index, count)`](/en/docs/guide/systems#slices) cuts each table into `count` parts, and only
+[`QueryFilter.Slice(index, of)`](/en/docs/guide/systems#slices) cuts each table into `of` parts, and only
 passes (`ForEach`, `ForEachEntity`, `ForEachBatch` and their parallel forms) take one. `Query`, `Read`, `Count`, `Any`,
 `DestroyAll`, `entity.Run` and the bulk calls need every matching row, so they throw `ArgumentException` for a
 sliced filter. The rule follows the filter through locals and `static readonly` fields, and also reports a constant
-`Slice` call that throws `ArgumentOutOfRangeException` (`count` below 1, `index` outside `0..count - 1`).
+`Slice` call that throws `ArgumentOutOfRangeException` (`of` below 1, `index` outside `0..of - 1`).
 `Slice(0, 1)` is the whole table and is not sliced.
 
 ```csharp doccheck=expect-EECS044
@@ -1386,13 +1386,13 @@ int count = world.Count<Health>();
 
 **A tag the world keeps, written by hand.** Error. No code fix.
 
-`Destroyed` marks an entity kept for its [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components), and `Disabled<T>` marks a
+`Retired` marks an entity kept for its [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components), and `Disabled<T>` marks a
 component [hidden from queries](/en/docs/guide/cleanup-and-disable#disable-a-component). The world adds and removes them in `Destroy`,
-`Disable<T>()` and `Enable<T>()`, together with what they stand for: `Destroyed` with the destroy hooks and the
+`Disable<T>()` and `Enable<T>()`, together with what they stand for: `Retired` with the destroy hooks and the
 destroy log, `Disabled<T>` with the hidden value. Written directly (`Set`, `GetOrAdd`, `Remove`, `SetIfChanged`,
 `Disable` and `Enable` of the tag itself, `CreateEntity`, `CreateEntities`, `Instantiate`, `SetAll`, `RemoveAll`,
 `DisableAll`, `EnableAll`, `Prefab.Set`), the tag says something the world never did. Reading them (`Has`,
-`IsDisabled`, `With` / `Without` filters, `[With<Destroyed>]`) is how they are meant to be used.
+`IsDisabled`, `With` / `Without` filters, `[With<Retired>]`) is how they are meant to be used.
 
 ```csharp doccheck=expect-EECS045
 hero.Remove<Disabled<Health>>();   // the tag goes, the value stays hidden
@@ -1417,7 +1417,7 @@ component whose body uses the item only through `Entity` and component reads; a 
 or the item passed on keeps the `Query`.
 
 ```csharp
-public record struct Rating(int Value) : IComponent, ITrackChanges;
+public record struct Rating(int Value) : IComponent, ITracked;
 ```
 
 ```csharp doccheck=expect-EECS046
@@ -1466,7 +1466,7 @@ health.Value -= 5;
 **A component that cannot be disabled.** Error. No code fix.
 
 [`Disable<T>()`](/en/docs/guide/cleanup-and-disable#disable-a-component) hides a component and keeps its value. A
-[cleanup component](/en/docs/guide/cleanup-and-disable#cleanup-components) is what keeps a destroyed entity until
+[cleanup component](/en/docs/guide/cleanup-and-disable#cleanup-components) is what keeps a retired entity alive until
 its resources are released, and `ChildOf` is what a parent's destruction follows to find its
 [children](/en/docs/guide/hierarchy): hidden, either would be forgotten. `Disable<T>()` and `DisableAll<T>()` throw
 `InvalidOperationException` for them, and the generator writes no `DisableX` for them. The rule reports both calls.
@@ -1487,12 +1487,12 @@ unit.Remove<ChildOf>();
 
 A `[ForEach]` method visits the entities that pass all of its filters and those of its
 [group](/en/docs/guide/systems#system-groups): its component parameters, `[With<T>]`, `[Changed<T>]`, the group's
-`[With<T>]` and `IGroupWith<T>` require a component; `[Without<T>]` and `IGroupWithout<T>` exclude it. A component
+`[With<T>]` and `ISystemGroupWith<T>` require a component; `[Without<T>]` and `ISystemGroupWithout<T>` exclude it. A component
 both required and excluded leaves no entity to visit, so the method never runs and nothing says so. The rule
 reports the excluding filter.
 
 ```csharp doccheck=expect-EECS049
-public struct Living : IGroupWithout<Dead>;
+public struct Living : ISystemGroupWithout<Dead>;
 
 [UpdateInGroup<Living>]
 public class ReviveSystem : EcsSystem

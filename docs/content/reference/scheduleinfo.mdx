@@ -21,7 +21,7 @@ How a world runs its systems ([`World.DescribeSchedule`](/en/docs/reference/worl
 ### `ScheduleInfo` [#ctor]
 
 ```csharp
-public ScheduleInfo(GroupSchedule[] Groups);
+public ScheduleInfo(GroupInfo[] Groups);
 ```
 
 How a world runs its systems ([`World.DescribeSchedule`](/en/docs/reference/world#describeschedule)): every group's stages, what each system reads and writes, why a system waits for an earlier stage, and which conflicting systems are ordered by nothing but their registration order. A description in names, for reading ([`ScheduleInfo.ToString`](/en/docs/reference/scheduleinfo#tostring)) or drawing ([`ScheduleInfo.ToMermaid`](/en/docs/reference/scheduleinfo#tomermaid)); the scheduler does not read it back.
@@ -35,7 +35,7 @@ How a world runs its systems ([`World.DescribeSchedule`](/en/docs/reference/worl
 ### `Groups` [#groups]
 
 ```csharp
-public GroupSchedule[] Groups { get; init; }
+public GroupInfo[] Groups { get; init; }
 ```
 
 The groups that hold systems, the default group first.
@@ -45,7 +45,7 @@ The groups that hold systems, the default group first.
 ### `Deconstruct` [#deconstruct]
 
 ```csharp
-public void Deconstruct(out GroupSchedule[] Groups);
+public void Deconstruct(out GroupInfo[] Groups);
 ```
 
 ### `Equals` [#equals]

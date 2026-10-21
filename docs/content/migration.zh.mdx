@@ -11,7 +11,7 @@ icon: CircleArrowUp
 
 ## v4.6 → v4.7 [#v4-6-to-v4-7]
 
-四个调用和一个生成成员[改了名](#v4-7-renames)，编译器会找出每一处调用。除此之外，为 4.6 写的代码不用改就能编译，除非某个系统声明了名为
+一些调用、类型和生成成员[改了名](#v4-7-renames)，编译器会找出每一处用法，4.6 的存档照样能读。除此之外，为 4.6 写的代码不用改就能编译，除非某个系统声明了名为
 `RunCount` 的成员，某个文件引入的其他命名空间里有和新类型同名的类型，或者代码直接写出了[生成的类](#v4-7-generated-classes)的名字。
 有三个调用的行为变了；写被追踪组件的并行遍历切分行的方式也变了。[新的分析器规则](#v4-7-analyzer)会报告会抛异常或丢失写入的代码。
 
@@ -96,7 +96,8 @@ public class Spawner : EcsSystem
 
 ### 改名的调用 [#v4-7-renames]
 
-4.6 的四个调用和一个生成成员改了名，名字直接说明它做什么。旧名字已删除，编译器会指出每一处要改的调用：
+4.6 的一些调用、类型和生成成员改了名，名字直接说明它做什么。旧名字已删除，编译器会指出每一处要改的用法
+（[D64](/zh/docs/decisions#d64-names-of-4-7)）：
 
 | 4.6 | 4.7 | 原因 |
 |---|---|---|
@@ -105,6 +106,20 @@ public class Spawner : EcsSystem
 | `world.EnsureCapacity(prefab, count)` | `world.Reserve(prefab, count)` | 同上 |
 | `world.DestroyEntities<T1, …, Tn>(filter)` | `world.DestroyAll<T1, …, Tn>(filter)` | 按过滤条件的调用以 `All` 结尾，和 `SetAll`、`RemoveAll` 一致 |
 | `e.RemoveMemberOf(target)`（关系的生成成员） | `e.UnlinkMemberOf(target)` | `e.RemoveMemberOf()` 删掉整个缓冲区；少写一个参数不会再把所有链接删光 |
+| `e.AddMemberOf(target)`（关系的生成成员） | `e.LinkMemberOf(target)` | 这是建立一条链接，不是加一个组件；`LinkX` / `UnlinkX` / `LinksX` 读起来是一组 |
+| `entity.AddRelation(r)` / `RemoveRelation<T>(target)` / `HasRelation<T>(target)` | `entity.Link(r)` / `Unlink<T>(target)` / `Links<T>(target)` | 同一组调用的泛型版本 |
+| `ITrackChanges` | `ITracked` | 标记接口说明组件是什么，和 `IIndexed` 一致 |
+| `IGroupWith<T>` / `IGroupWithout<T>` | `ISystemGroupWith<T>` / `ISystemGroupWithout<T>` | 它们过滤的是系统分组，不是 `IGroup`（拆分表的组件） |
+| `Destroyed`（标签）、`entity.IsDestroyed` | `Retired`、`entity.IsRetired` | 实体还活着，只为清理组件留着；“销毁”现在只表示已经没了。4.6 的存档照样能读：标签保留了它存档里的名字 |
+| `world.GetSystem<T>()`（不存在时返回 null） | `world.TryGetSystem<T>(out T system)` | 找不到写在签名里；能用 `AddSystem` 返回的引用就用它 |
+| `world.Describe()` | `world.DescribeTables()` | 说明它描述的是什么；`entity.Describe()` 和 `DescribeSchedule()` 不变 |
+| `ColumnInfo.Without` | `ColumnInfo.Absent` | 不是 `Without` 过滤条件，而是表里缺这个组件的行数 |
+| `system.Stats.Last` / `Total` / `Average` | `LastTime` / `TotalTime` / `AverageTime` | 统计里还有次数和字节数 |
+| `world.UpdateCount` | `world.DefaultUpdateCount` | 它只数默认分组的更新 |
+| `SystemAccess.RunsAlone()` | `SystemAccess.RunAlone()` | 这是一条指令；`SystemInfo.RunsAlone`（一个事实）不变 |
+| `TargetRules`（`WhenTargetDestroyed` 所在的类） | `TargetPolicyExtensions` | 只有写出类名的代码要改 |
+| 手写 job 的 `static int Writes` | `static int WriteMask` | 它是位掩码，和 `SelfStamped` 一样 |
+| `LoadEntitiesInto(input, into: …)` | `LoadEntitiesInto(input, targets: …)` | 只有具名参数要改 |
 
 `world.DestroyEntities(ids)` 现在一次销毁一组 id，和 `SaveEntities`、`MoveEntities` 一样。4.6 带类型参数的调用对它编译不过，
 所以不会有调用悄悄换了意思。
@@ -131,10 +146,10 @@ public class Spawner : EcsSystem
 在 4.6 能编译的代码，到 4.7 可能编译失败。新的错误指出的是会抛异常或根本行不通的代码：
 [EECS040](/zh/docs/guide/analyzer#eecs040) 到 [EECS045](/zh/docs/guide/analyzer#eecs045)（对无法比较的类型调用 `SetIfChanged`、
 调用遍历期间会被拒绝的方法、遍历索引时往索引里加实体、会打印自身的 record struct 键、把切片过滤条件交给需要整行的调用、
-手动写 `Destroyed` 或 `Disabled<T>` 标签），[EECS048](/zh/docs/guide/analyzer#eecs048) 到 [EECS051](/zh/docs/guide/analyzer#eecs051)（禁用清理组件或 `ChildOf`、
+手动写 `Retired` 或 `Disabled<T>` 标签），[EECS048](/zh/docs/guide/analyzer#eecs048) 到 [EECS051](/zh/docs/guide/analyzer#eecs051)（禁用清理组件或 `ChildOf`、
 过滤条件没有实体能通过的 `[ForEach]` 方法、一个过滤条件里的第二个 `InGroup`、在查询循环里调用 `world.Update()`）；
 [EECS036](/zh/docs/guide/analyzer#eecs036) 现在也报告有两个索引键的普通组件。
-新的警告指出丢失的写入、可能指向错误行的 ref 或做了两遍的工作：[EECS037](/zh/docs/guide/analyzer#eecs037)（job 的 `Writes`）、
+新的警告指出丢失的写入、可能指向错误行的 ref 或做了两遍的工作：[EECS037](/zh/docs/guide/analyzer#eecs037)（job 的 `WriteMask`）、
 [EECS038](/zh/docs/guide/analyzer#eecs038)（改过的副本）、[EECS046](/zh/docs/guide/analyzer#eecs046)（只读追踪变化组件的
 `Query` 循环：改用 `Read` 遍历）、[EECS047](/zh/docs/guide/analyzer#eecs047)（结构变更之后还在用的 ref：重新获取）和
 [EECS052](/zh/docs/guide/analyzer#eecs052)（`CreateEntity` 或 `Instantiate` 之后紧跟 `Set`：把组件交给创建调用）。[EECS039](/zh/docs/guide/analyzer#eecs039) 是建议。大多数规则有代码修复；把警告当错误的构建，
@@ -148,7 +163,7 @@ public class Spawner : EcsSystem
 ### 新的公开类型 [#v4-7-new-types]
 
 `namespace EasyEcs` 里新增了 `Mut<T>`、`IUniqueIndexed` / `IUniqueIndexed<TKey>`、`UniqueIndexExtensions`、`ChangedAnyAttribute<…>`、
-`RemovedAnyAttribute<…>`、`ScheduleInfo`、`GroupSchedule`、`StageInfo`、`SystemInfo`、`StageWait` 和 `SystemPair`。某个文件引入的其他命名空间里
+`RemovedAnyAttribute<…>`、`ScheduleInfo`、`GroupInfo`、`StageInfo`、`SystemInfo`、`StageWait` 和 `SystemPair`，以及改名后的 `ITracked`、`ISystemGroupWith<T>`、`ISystemGroupWithout<T>`、`Retired` 和 `TargetPolicyExtensions`。某个文件引入的其他命名空间里
 有同名类型时，会报 CS0104（引用不明确）：写全限定名，或者用 `using` 起个别名。
 
 ## v4.3 → v4.4 [#v4-3-to-v4-4]
@@ -213,7 +228,7 @@ public partial record struct Rank(int Tier, int Points) : IComponent;   // 由�
 照着修，或者在确实有意这样写的地方抑制规则，并在旁边写明原因。比如有一个被追踪的 `Armor` 和一个计数用的 `Seen`：
 
 ```csharp
-public record struct Armor(int Value) : IComponent, ITrackChanges;
+public record struct Armor(int Value) : IComponent, ITracked;
 public record struct Seen(int Count) : IComponent;
 ```
 

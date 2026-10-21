@@ -87,12 +87,12 @@ dotnet add package EasyEcs
 | `buffer.DeleteEntity(id)` | `entity.Destroy()` |
 | `buffer.CreateEntity()` 再逐个 `AddComponent` | `world.CreateEntity(a, b, c)` |
 | `EntityBatch` + `query.Entities.ApplyBatch(batch)` | `world.SetAll(value, filter)`、`world.RemoveAll<T>(filter)` |
-| `store.OnComponentRemoved += ...` | `[ForEach, Removed<T>]`（`T : ITrackChanges`） |
-| 写入时加脏标签 | `T : ITrackChanges` + `[ForEach, Changed<T>]` |
+| `store.OnComponentRemoved += ...` | `[ForEach, Removed<T>]`（`T : ITracked`） |
+| 写入时加脏标签 | `T : ITracked` + `[ForEach, Changed<T>]` |
 | `IIndexedComponent<K>`、`store.ComponentIndex<T, K>()[key]` | `IIndexed<K>`、`world.Index<T, K>().Find(key)` |
 | `query.ValueInRange<T, K>(min, max)` | `world.Index<T, K>().Range(min, max)` |
 | `ILinkComponent`、`GetIncomingLinks<T>()` | `EntityId` 作键：`IIndexed<EntityId>`、`index.Find(target)` |
-| `ILinkRelation`、`AddRelation`、`GetRelations<T>()` | `IRelation`、`entity.AddRelation(...)`、`world.Relations<T>()` |
+| `ILinkRelation`、`AddRelation`、`GetRelations<T>()` | `IRelation`、`entity.Link(...)`、`world.Relations<T>()` |
 | `AddChild`、`ChildEntities` | `ChildOf(parent)`、`world.Children(parent)` |
 | `EntitySerializer`（JSON） | `world.Save(writer)` / `world.Load(bytes)`（二进制） |
 
@@ -235,7 +235,7 @@ world.Instantiate(Grunt, wave);
 收集失去某个组件的实体、每个 tick 读一次的订阅，改成一个方法。这个组件必须被追踪：
 
 ```csharp title="BuffReplication.cs"
-public record struct Buff(int Ticks) : IComponent, ITrackChanges;
+public record struct Buff(int Ticks) : IComponent, ITracked;
 public record struct Expired(int Count) : IComponent;
 
 public class BuffReplication : EcsSystem
@@ -273,7 +273,7 @@ world.Update();
 | 错误 | 后果 | 谁来发现 |
 | --- | --- | --- |
 | 两个 `IComponent` 都导入了 | 引用不明确 | 编译错误：给一个命名空间起别名 |
-| `[Removed<T>]` 用的组件没加追踪 | 移除不会被记录 | 给 `T` 加上 `ITrackChanges` |
+| `[Removed<T>]` 用的组件没加追踪 | 移除不会被记录 | 给 `T` 加上 `ITracked` |
 | `[Removed<T>]` 方法把 `T` 当参数 | 没有哪一行既有 `T` 又没有 `T` | [EECS016](/zh/docs/guide/analyzer#eecs016) |
 | 组件里存 `Entity`（Friflo 的链接组件就这么做） | 列里存了引用 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告）：存 `EntityId` |
 | 通过 `ref` 写索引组件（Friflo 在 `AddComponent` 时重建索引） | 索引看不到新键 | [EECS015](/zh/docs/guide/analyzer#eecs015)：用 `Set` |

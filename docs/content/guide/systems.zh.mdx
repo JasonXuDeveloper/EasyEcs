@@ -90,14 +90,14 @@ int dealt = world.BurnTotals.Damage;               // 10
 | `RunCount` | 在本次运行之前已经运行过的次数（第一次运行时为 0）；[分片](#slices)方法访问第 `RunCount % N` 片 |
 | `Stats`、`Error` | [运行统计](#measuring-systems)和[让它停用的异常](#errors) |
 
-`AddSystem<T>()` 返回系统实例；`GetSystem<T>()` 查找系统（给工具和测试用，不能在别的系统里用：[EECS008](/zh/docs/guide/analyzer#eecs008)）；
-`world.Systems` 列出所有系统，不分配内存；`UpdateCount` 统计默认分组的更新次数。一个系统只属于一个 World，加到第二个 World 会抛异常。
+`AddSystem<T>()` 返回系统实例；`TryGetSystem<T>(out system)` 查找系统（给工具和测试用，不能在别的系统里用：[EECS008](/zh/docs/guide/analyzer#eecs008)）；
+`world.Systems` 列出所有系统，不分配内存；`DefaultUpdateCount` 统计默认分组的更新次数。一个系统只属于一个 World，加到第二个 World 会抛异常。
 
 ```csharp
-var burn = world.GetSystem<BurnSystem>();
+if (world.TryGetSystem(out BurnSystem burn)) burn.Enabled = false;
 foreach (var system in world.Systems) Console.WriteLine(system.GetType().Name);
 world.RemoveSystem<BurnSystem>();                  // 会调用 OnDestroy
-long updates = world.UpdateCount;
+long updates = world.DefaultUpdateCount;
 ```
 
 ### 一次更新 [#one-update]
@@ -173,7 +173,7 @@ public class HungerSystem : EcsSystem
   也不能小于 1（[EECS035](/zh/docs/guide/analyzer#eecs035)）：系统每次运行都会推进自己的 `LastRunTick`，其他片里的行
   发生的变化就丢了。
 
-在系统之外，[`QueryFilter.Slice(index, count)`](/zh/docs/guide/queries#filters) 给 `ForEach` 调用做同样的事；带
+在系统之外，[`QueryFilter.Slice(index, of)`](/zh/docs/guide/queries#filters) 给 `ForEach` 调用做同样的事；带
 `Slices = N` 的 [runner](#foreach-outside-systems)，入口在 World 之后接收要访问的分片。
 
 ### `[ForEach]` 方法 [#foreach-methods]
@@ -196,9 +196,9 @@ public class HungerSystem : EcsSystem
 | `[With<T>]` | 实体必须有 `T`，`T` 不作为参数传入；可重复 |
 | `[Without<T>]` | 实体不能有 `T`；可重复 |
 | `[WithAny<T>]` | 实体至少要有方法上某个 `[WithAny<T>]` 的组件 |
-| `[Changed<T>]` | `T`（`ITrackChanges`）在系统上次运行之后被写过（[变更追踪](/zh/docs/guide/change-tracking)） |
-| `[Removed<T>]` | 实体在系统上次运行之后失去了 `T`（`ITrackChanges`）（[移除检测](/zh/docs/guide/change-tracking#removal-detection)） |
-| `[ChangedAny<T1, …, Tn>]` | 这些组件（2 到 9 个，`ITrackChanges`）中至少一个在系统上次运行之后被写过（[任意一个](/zh/docs/guide/change-tracking#changed-any)） |
+| `[Changed<T>]` | `T`（`ITracked`）在系统上次运行之后被写过（[变更追踪](/zh/docs/guide/change-tracking)） |
+| `[Removed<T>]` | 实体在系统上次运行之后失去了 `T`（`ITracked`）（[移除检测](/zh/docs/guide/change-tracking#removal-detection)） |
+| `[ChangedAny<T1, …, Tn>]` | 这些组件（2 到 9 个，`ITracked`）中至少一个在系统上次运行之后被写过（[任意一个](/zh/docs/guide/change-tracking#changed-any)） |
 | `[RemovedAny<T1, …, Tn>]` | 实体在系统上次运行之后至少失去了其中一个组件 |
 
 没有组件参数时，由第一个 `[With<T>]`（没有的话就是第一个 `[Changed<T>]`）指定要查询的组件：
@@ -337,7 +337,7 @@ public class MoveSystem : EcsSystem
 ```
 
 用泛型接口描述的分组没法用特性写出过滤条件：C# 不允许类型参数做特性的类型实参（在 `IActor<TActor>` 上写
-`[With<In<TActor>>]` 会报 CS8968）。这时让分组实现 `IGroupWith<T>` 或 `IGroupWithout<T>`，直接实现或通过接口继承都行，
+`[With<In<TActor>>]` 会报 CS8968）。这时让分组实现 `ISystemGroupWith<T>` 或 `ISystemGroupWithout<T>`，直接实现或通过接口继承都行，
 效果和特性一样：一个接口就能给每种 actor 类型各配一个分组。
 
 actor 模式再往前走一步：每种 actor 用一个类型，它同时是 actor 的键组件（建了索引，消息能找到自己的 actor）、actor 的系统分组，
@@ -346,7 +346,7 @@ actor 模式再往前走一步：每种 actor 用一个类型，它同时是 act
 ```csharp
 public struct In<TActor> : IComponent;             // 某一种 actor 的标签
 
-public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, IGroupWith<In<TSelf>>
+public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;   // IIndexed 要求 IEquatable
 
 // 键组件、索引键、系统分组都是这一个类型。Key 显式实现：公开的 Key 属性会被 record 的
@@ -403,7 +403,7 @@ public class CountOf<T> : EcsSystem where T : struct, IComponent   // world.AddS
 能通过它们返回结果。
 
 ```csharp
-public record struct Gold(int Amount) : IComponent, ITrackChanges;
+public record struct Gold(int Amount) : IComponent, ITracked;
 
 public static class Reports
 {
@@ -447,17 +447,17 @@ Census.CountAlive<Health>(world, ref alive);      // 泛型 runner：先写类�
 ### 统计系统耗时 [#measuring-systems]
 
 开启 `WorldOptions.MeasureSystems` 后，系统的每次运行（`OnUpdate` 加它的 `[ForEach]` 方法）都会被统计：`system.Stats` 里有 `Runs`、
-`Last`、`Total`、`Average`，这次运行分配的字节数（`LastAllocated`、`TotalAllocated`），以及 `[ForEach]` 方法匹配到的实体数
+`LastTime`、`TotalTime`、`AverageTime`，这次运行分配的字节数（`LastAllocated`、`TotalAllocated`），以及 `[ForEach]` 方法匹配到的实体数
 （`LastEntities`、`TotalEntities`）。每次运行读两次时钟、两次线程的分配计数器，每次 `[ForEach]` 遍历数一次匹配数；
 关闭时每次运行只多一次字段判断。在两次更新之间读取，比如放在诊断接口里：
 
 ```csharp
 var measured = new World(new WorldOptions { MeasureSystems = true });
 measured.AddSingleton<BurnTotals>();
-measured.AddSystem<BurnSystem>();
+var burn = measured.AddSystem<BurnSystem>();
 measured.Update();
-var stats = measured.GetSystem<BurnSystem>().Stats;
-Console.WriteLine($"burn: {stats.Last.TotalMicroseconds} μs, average {stats.Average.TotalMicroseconds} μs over {stats.Runs} runs");
+var stats = burn.Stats;
+Console.WriteLine($"burn: {stats.LastTime.TotalMicroseconds} μs, average {stats.AverageTime.TotalMicroseconds} μs over {stats.Runs} runs");
 ```
 
 ### 错误处理 [#errors]
@@ -620,7 +620,7 @@ run order: MoveSystem
 
 - **`[ForEach]` 方法**是一个结构体 job，JIT 把它内联进行循环：没有委托，不分配内存。
 - **每个系统每次更新：** 一次 `OnUpdate` 调用，每个生成的 job 一次调用，每个方法一次查询缓存查找。
-- **分组上的过滤条件**（分组类型上的 `[With<T>]`、`[Without<T>]`、`[WithAny<T>]`，以及 `IGroupWith<T>`、`IGroupWithout<T>`）
+- **分组上的过滤条件**（分组类型上的 `[With<T>]`、`[Without<T>]`、`[WithAny<T>]`，以及 `ISystemGroupWith<T>`、`ISystemGroupWithout<T>`）
   由生成器读取，运行时没有开销。被它排除的表每次更新也不花任何代价：查询缓存里只有匹配的表，World 里其他种类实体的表
   （其他类型的 actor）不会被这个分组的系统遍历。
 - **单例组件参数**每次遍历只解析一次，不是每个实体一次。
@@ -650,7 +650,7 @@ run order: MoveSystem
 | 排序形成环，或跨分组排序 | `AddSystem` 时抛异常；排序不生效 | [EECS019](/zh/docs/guide/analyzer#eecs019)、[EECS020](/zh/docs/guide/analyzer#eecs020) |
 | 方法参数用了 private 类型 | 生成的 job 引用不到它 | [EECS022](/zh/docs/guide/analyzer#eecs022) |
 | `[With<T>]`、`[Without<T>]` 或 `[WithAny<T>]` 写在不是分组的结构体上 | 编译报错：这个过滤不会起任何作用 | [EECS023](/zh/docs/guide/analyzer#eecs023) |
-| 分组的 `[With<T>]` 或 `IGroupWith<T>` 碰上方法的 `[Removed<T>]` | 要求一行既有 `T` 又没有 `T`：方法永远不会运行 | [EECS016](/zh/docs/guide/analyzer#eecs016) |
+| 分组的 `[With<T>]` 或 `ISystemGroupWith<T>` 碰上方法的 `[Removed<T>]` | 要求一行既有 `T` 又没有 `T`：方法永远不会运行 | [EECS016](/zh/docs/guide/analyzer#eecs016) |
 | 分组的 `[With<X>]` 碰上方法的 `[Without<X>]` | 没有实体能满足：方法永远不会运行 | [EECS049](/zh/docs/guide/analyzer#eecs049) |
 | 分组的 `[WithAny<A>]` 加方法的 `[WithAny<B>]`，当成“A 且 B” | 两个集合合并：选出有 `A` 或有 `B` 的实体 | 代码审查 |
 | record struct 的 actor 键上写公开的 `Key => this` | `ToString()` 无限打印 `Key`：栈溢出 | [EECS043](/zh/docs/guide/analyzer#eecs043)（有代码修复）：显式实现 `IIndexed<T>.Key` |

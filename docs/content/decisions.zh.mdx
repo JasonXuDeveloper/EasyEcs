@@ -71,13 +71,14 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D54](#d54-names) | 调用的名字说明它做什么 |
 | [D55](#d55-read) | `Read` 遍历查询不打 tick；EECS046 指出应该这样写的循环 |
 | [D56](#d56-not-added) | 不加：生成的 `AddSystems()`、从特性生成的缓存过滤条件、按组件的计数成员、命名的 `TryGetXRef` |
-| [D57](#d57-retired-is-destroyed) | 退休的实体就是已销毁的实体 |
+| [D57](#d57-retired-is-gone) | 退休的实体按已经没了处理 |
 | [D58](#d58-add-singleton) | `AddSingleton` 拒绝已存在的单例 |
 | [D59](#d59-analyzer-rules) | 跨结构变更的 ref、行不通的过滤条件、搬两次的创建：对应的规则 |
 | [D60](#d60-one-diagnostic-per-mistake) | 一个错误一条诊断 |
 | [D61](#d61-one-pass-guard) | 要等遍历结束的调用共用一个检查；带成员的预制体不在其中 |
 | [D62](#d62-generators-bind-outside-bodies) | 生成器在成员体外绑定类型名，比较符号不拼字符串 |
 | [D63](#d63-roslyn-features) | 较新的 Roslyn 特性：不用拦截器，其余已在用或不需要 |
+| [D64](#d64-names-of-4-7) | 4.7 的命名：名字说明它是什么 |
 
 ## D1. 状态变化即数据：没有事件和回调 [#d1-state-changes-are-data-no-events-or-callbacks]
 
@@ -698,7 +699,7 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 
 ## D40. 销毁的实体记进日志，每个读取方按自己的 tick 读 [#d40-a-destroy-log-read-by-tick]
 
-**决定。** `WorldOptions.DestroyLog = n` 维护一个环形缓冲，记下最近销毁的 n 个实体：每条是 `EntityId` 加销毁时的变更 tick（16 字节），
+**决定。** `WorldOptions.DestroyLogCapacity = n` 维护一个环形缓冲，记下最近销毁的 n 个实体：每条是 `EntityId` 加销毁时的变更 tick（16 字节），
 在 `new World` 时一次分配好。id 不再存活时写一条记录：`Destroy`、`DestroyEntities`、级联销毁、`MoveEntities` 搬出本 World、
 实体最后一个清理组件被移除，以及 `Restore` 或 `Load` 去掉的实体。`world.DestroyedSince(since, into, out count)` 报告 `since`
 及之后的记录；读取方需要的记录已被覆盖时返回 false，读取方重新同步。默认关闭。
@@ -717,7 +718,7 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 - **World 里给每个读取方存一个游标：** World 里多了每个客户端的状态，要跟着连接创建和释放。
 - **无界列表：** 内存随运行时长增长。
 - **把销毁的行留成过滤条件能看到的墓碑：** 每个查询都要为已经不在的行买单。
-- **持有清理组件的实体在销毁时就记录：** 日志会报告还活着（带 `Destroyed` 标签）的实体。
+- **持有清理组件的实体在销毁时就记录：** 日志会报告还活着（退休，带 `Retired` 标签）的实体。
 - **`Restore` 和 `Load` 时清空日志：** 每次回滚后所有读取方都要重新同步；记下它们去掉的实体，读取方就能保持精确。
 
 ## D41. 带组件的实例化一次拷贝直接落到最终的表 [#d41-instantiate-with-components]
@@ -942,7 +943,7 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 ## D53. EasyEcs 自带的组件在 EasyEcs 里生成成员；两个类型共有的名字谁都不生成 [#d53-own-members]
 
 **决定。** `ComponentGenerator` 在 EasyEcs 自己的编译里也为公开组件生成成员：`ChildOf` 拿到被索引组件的那些成员，但没有
-`DisableChildOf` / `EnableChildOf`（它不能被禁用）；`Destroyed` 标签只有 `entity.IsDestroyed`（由 World 添加和移除）。
+`DisableChildOf` / `EnableChildOf`（它不能被禁用）；`Retired` 标签只有 `entity.IsRetired`（由 World 添加和移除）。
 同一命名空间里两个结构体都会生成的成员名（标签 `Dead` 和组件 `IsDead` 的 `entity.IsDead`）两边都不生成；嵌套的组件或缓冲元素和所在命名空间里
 另一个结构体同名时，一个成员都不生成。生成的类名是 `{类型}` 加一个以 `Ecs` 开头的后缀（`HealthEcsExtensions`、`HealthEcsPrefabExtensions`、
 `LootEcsBufferExtensions`、`LootEcsPrefabBufferExtensions`），成员是 public 的，类和类型一样可见。
@@ -1013,25 +1014,26 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
   一行也没省。
 - **命名的 `TryGetXRef`。** `entity.TryGetRef<T>(out found)` 本来就少用；常用的调用已经有命名成员（`TryGetX`、`entity.X`）。
 
-## D57. 退休的实体就是已销毁的实体 [#d57-retired-is-destroyed]
+## D57. 退休的实体按已经没了处理 [#d57-retired-is-gone]
 
-**决定。** 持有清理组件时被销毁的实体（退休：保持存活、带 `Destroyed` 标签，直到清理组件被移除）在释放之外的每个调用里都按已销毁处理：
-过滤条件没写 `Destroyed` 时 `SetAll` 不碰它，`MoveEntities` 跳过它，`Clone` 抛异常，失去其他组件也不算移除（它们的变更 tick
-被清零，而不是打上新 tick）。被移动的实体，清理组件留在退休的原实体上。`RemoveAll` 仍然会处理到退休的实体。
+**决定。** 对持有清理组件的实体调用 `Destroy` 会让它退休：保持存活、带 `Retired` 标签，直到清理组件被移除。释放之外的每个调用都把它当作
+已经没了：过滤条件没写 `Retired` 时 `SetAll` 不碰它，`MoveEntities` 跳过它，`Clone` 抛异常，失去其他组件也不算移除（它们的变更 tick
+被清零，而不是打上新 tick）。被移动的实体，清理组件留在退休的原实体上。`RemoveAll` 仍然会处理到退休的实体。名字和文档里的“销毁”
+只表示已经没了：销毁日志在 id 被释放时记下它，退休的实体则是在最后一个清理组件被移除时。
 
 **原因。**
 - **一份资源只释放一次。** 清理组件代表 World 之外的东西（一个 socket、一个座位）。移动或克隆出它的副本，就会释放两次；
   退休的实体被移走，就会存在两份。
-- **和被释放的实体答案一致。** 没有清理组件的已销毁实体没有行：哪个过滤条件都找不到它，由销毁日志报告。退休只是为了释放才保留这一行，
+- **和被释放的实体答案一致。** 已销毁的实体没有行：哪个过滤条件都找不到它，由销毁日志报告。退休只是为了释放才保留这一行，
   所以 `[Removed<T>]` 读取方和批量写入看到的不能比被释放的实体更多。
-- **`RemoveAll` 就是释放。** 退休的实体只有清理组件和 `Destroyed`，`RemoveAll` 别的组件根本碰不到它；`RemoveAll` 清理组件正是清理
+- **`RemoveAll` 就是释放。** 退休的实体只有清理组件和 `Retired`，`RemoveAll` 别的组件根本碰不到它；`RemoveAll` 清理组件正是清理
   pass 释放它的方式。`DisableAll` 和 `EnableAll` 也碰不到它：清理组件不能被禁用。
-- **代价很小。** `SetAll` 在过滤条件里加上 `Without<Destroyed>`：没有这个标签列的表，每行不多做任何测试。
+- **代价很小。** `SetAll` 在过滤条件里加上 `Without<Retired>`：没有这个标签列的表，每行不多做任何测试。
   `BulkBenchmark.StunAndLift`（对 10 万个实体 `SetAll` + `RemoveAll`）前后测得一样，差别在运行噪声之内，两者都是 0 B。
 
 **考虑过的方案。**
 - **在批量遍历里逐行测试：** 每张表每行都多一个分支，而排除位在从没有过清理组件的表里毫无代价。
-- **交给过滤条件（手写 `Without<Destroyed>`）：** 默认调用就会让已销毁的实体复活。
+- **交给过滤条件（手写 `Without<Retired>`）：** 默认调用就会让退休的实体复活。
 
 ## D58. `AddSingleton` 拒绝已存在的单例 [#d58-add-singleton]
 
@@ -1051,7 +1053,7 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 | --- | --- | --- |
 | EECS047 结构变更之后还在用 ref | 警告 | ref 可能仍然正确（变更移动的是另一张表的行），所以规则只报它能追踪到的情况：同一个块，按顺序，ref、变更和使用之间没有分支、循环或 lambda |
 | EECS048 对清理组件或 `ChildOf` 调用 `Disable` | 错误 | `Disable<T>()` 和 `DisableAll<T>()` 对它们抛 `InvalidOperationException` |
-| EECS049 没有实体能通过的过滤条件 | 错误 | 一个组件既被要求（参数、`[With<T>]`、`[Changed<T>]`、分组的 `[With<T>]` 或 `IGroupWith<T>`）又被排除（`[Without<T>]`、`IGroupWithout<T>`）：方法永远不会运行 |
+| EECS049 没有实体能通过的过滤条件 | 错误 | 一个组件既被要求（参数、`[With<T>]`、`[Changed<T>]`、分组的 `[With<T>]` 或 `ISystemGroupWith<T>`）又被排除（`[Without<T>]`、`IGroupWithout<T>`）：方法永远不会运行 |
 | EECS050 一个过滤条件里的第二个分组 | 错误 | 换一个分组（另一个组件或另一个常量值）时 `InGroup` 抛 `ArgumentException` |
 | EECS051 遍历进行中更新 World | 错误 | 循环还在走表，所有系统就跑了一遍；更新还会填掉遍历留下的空洞，把循环还没走到的行挪到它身后，循环就漏掉了它们 |
 | EECS052 创建之后紧跟 `Set` | 警告，有代码修复 | `AccessBenchmark.CreateThenSet`：1,000 次只带一个组件的创建，再 `Set` 另一个组件，加上销毁，44.4 µs；同样的创建直接带两个组件 25.8 µs（1.73 倍），两者都是 0 B |
@@ -1092,7 +1094,7 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 | `[ForEach(Parallel = true)] static void A(..., ref Clock c)` | EECS010 | EECS025 | 它的消息已经说了“改成 `in`” |
 | 只计数、或对每个实体做同一个修改的查询循环 | EECS032、EECS030 | EECS046 | 修法去掉了循环，没有可读的了 |
 | `[ForEach]` 方法或 job 里的 `w.TrimExcess()` | EECS041、EECS013 | EECS028 | 调用在那里会抛异常，分配根本不会发生 |
-| 查询循环里的 `item.Entity.Remove<Destroyed>()` | EECS045 | EECS030 | 换成 `RemoveAll<Destroyed>` 是同一个错误 |
+| 查询循环里的 `item.Entity.Remove<Retired>()` | EECS045 | EECS030 | 换成 `RemoveAll<Retired>` 是同一个错误 |
 | `[ForEach]` 方法或 job 每行都 `e.Get<Q>()` | EECS027 | EECS033 | 修法把这次查找拿掉了 |
 | `var e = w.CreateEntity(a); e.Set(b);` | EECS052 | EECS033 | 修法把 `Set` 并进创建 |
 | `[ForEach] static void A(DynamicBuffer<T> items, ...)` | EECS002 | EECS012 | 修法相同（`in` / `ref`）；EECS002 是错误 |
@@ -1171,6 +1173,38 @@ C# 14 扩展成员和泛型特性。不用拦截器，也不用嵌入式特性�
 - **嵌入式特性**：特性随 EasyEcs.Core 发布，使用生成器的项目都引用它。
 
 **比较过。** 在上面每个候选处使用拦截器；系统代码用 `RegisterSourceOutput`（IDE 会在每次按键时生成它）；在后初始化阶段输出特性源码。
+
+## D64. 4.7 的命名：名字说明它是什么 [#d64-names-of-4-7]
+
+**决定。** 4.7 发布前做了一轮命名审查，在 [D54](#d54-names) 之外又改了这些名字：`ITrackChanges` → `ITracked`，
+`IGroupWith<T>` / `IGroupWithout<T>` → `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`，`Destroyed` 标签 → `Retired`
+（`entity.IsRetired`），`GetSystem<T>()` → `TryGetSystem<T>(out T)`，`world.Describe()` → `DescribeTables()`，
+`ColumnInfo.Without` → `Absent`，`SystemStats.Last` / `Total` / `Average` → `LastTime` / `TotalTime` / `AverageTime`，
+`UpdateCount` → `DefaultUpdateCount`，`SystemAccess.RunsAlone()` → `RunAlone()`，`TargetRules` → `TargetPolicyExtensions`，
+`AddRelation` / `RemoveRelation` / `HasRelation` → `Link` / `Unlink` / `Links`（生成成员是 `LinkX(target)`），job 的
+`Writes` / `OwnStamps` → `WriteMask` / `SelfStamped`，以及参数 `LoadEntitiesInto(input, targets)` 和 `QueryFilter.Slice(index, of)`。
+4.7 新增的名字发布时就用新名：`WorldOptions.DestroyLogCapacity`、`GroupInfo`。不保留别名；4.6 的存档照样能读。
+
+**原因。**
+- **一个词，一个意思。** “Group”既指系统分组，又指 `IGroup` 组件；“Without”既是过滤条件，又是一个计数；“Destroyed”既指被释放的实体，
+  又指为了清理组件而活着的实体（[D57](#d57-retired-is-gone)）。现在各有各的词，“销毁”只表示已经没了。
+- **签名说明会找不到。** World 里没有这个系统时，`GetSystem<T>()` 返回 null。`TryGetSystem` 把这一点写进签名；仓库里没有调用需要会抛异常的版本，
+  所以没有加：添加系统的代码留着 `AddSystem` 返回的引用。
+- **建立链接不是加组件。** `AddX(target)` 读起来像 `SetX`；`LinkX` / `UnlinkX` / `LinksX` 和泛型的 `Link` / `Unlink` / `Links`
+  是一组。泛型名字短，也有代价：名为 `Link`、`Unlink` 或 `Links` 的组件拿不到 `entity.X` 属性（实体上已有的名字，生成器会跳过），
+  其他成员照常生成。
+- **名字带上单位和种类。** `TimeSpan` 统计以 `Time` 结尾，和次数、字节数放在一起不会混；容量叫 `Capacity`；位掩码叫 `Mask`；
+  指令（`RunAlone()`）用动词，事实（`SystemInfo.RunsAlone`）不用。
+- **存档照样能读。** 存档按类型全名的哈希记录类型；`Retired` 标了 `[NinoFormerName("EasyEcs.Destroyed")]`，沿用旧 id，
+  所以 4.6 存档里的退休实体读出来仍是退休的（用一份 4.6 存档的字节测试过）。
+- **1.0 之前的规则：** 编译器会找出每一处用法，[迁移指南](/zh/docs/migration#v4-7-renames)列出了每个名字。
+
+**考虑过的方案。**
+- **保留一个版本的 `[Obsolete]` 别名：** 和 D54 一样，编译器已经能指出的改动，不值得在补全列表里放两个名字。
+- **在 `TryGetSystem` 旁边再加一个会抛异常的 `GetSystem`：** 没有调用需要它。
+- **关系只有生成成员（没有泛型 `Link<T>`）：** 那么对关系类型写的泛型代码（`Link<T>(in T)`）就没有入口。
+- **给 `Retired` 一个新的存档 id：** 每份带退休实体的存档都会读不了。
+- **把 `entity.Describe()` 和 `DescribeSchedule()` 也改名：** 它们的名字已经说明了描述的是什么。
 
 ## 相关页面 [#related]
 

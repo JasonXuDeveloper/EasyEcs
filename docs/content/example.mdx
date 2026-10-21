@@ -63,7 +63,7 @@ EasyEcs' features to their place in this file.
 | `[ForEach]` runners outside systems | `Reports` |
 | `Maybe<T>` | `RegenerationSystem` heals burning players less |
 | [Disabling components](/en/docs/guide/cleanup-and-disable) | a frozen unit's `Attack` and `Velocity`; `NewRound` enables them all in bulk |
-| [Cleanup components](/en/docs/guide/cleanup-and-disable) (`ICleanupComponent`, `Destroyed`) | `Spawn`: a destroyed NPC leaves it behind for `RespawnSystem.Revive` |
+| [Cleanup components](/en/docs/guide/cleanup-and-disable) (`ICleanupComponent`, `Retired`) | `Spawn`: a dead NPC is retired, kept for `RespawnSystem.Revive` |
 | [Hierarchy](/en/docs/guide/hierarchy) (`ChildOf`, `Children`, `Descendants`) | projectiles are children of their player; `Transfer` collects the subtree |
 | [Structural changes during passes](/en/docs/guide/structural-changes) | statuses, deaths, respawns, projectiles spawned and destroyed mid-pass |
 | [Prefabs](/en/docs/guide/prefabs) (`Prefab`, `Instantiate`, `Reserve`), cloning | `Hero`, `Grunt`, `Brute` (a variant of `Grunt`); `Mirror` clones a living unit |
@@ -84,7 +84,7 @@ EasyEcs' features to their place in this file.
 
 ### Components [#components]
 
-Every component is a plain `record struct`. Four markers change how the world stores one: `ITrackChanges` gives it
+Every component is a plain `record struct`. Four markers change how the world stores one: `ITracked` gives it
 a hidden column of change ticks (`Health`, `Burning` and `Goal` are replicated), `IGroup` splits tables by its value
 (one table set per `Zone`), `IIndexed<TKey>` keeps a value index of it (`Kills`, the leaderboard), and
 `IUniqueIndexed<TKey>` makes its key name one entity (`Account`: one hero per account). `Spawn` is a cleanup
@@ -137,7 +137,7 @@ other systems filter on.
 (its children), empties its bag, comes back next to a living friend found through its `Friend` links, and loses its
 statuses in one `Remove<Dead, Burning, Frozen>()`. An NPC writes where the next one should appear into its `Spawn`
 cleanup component, gives its loot to a player of its zone (one group's table to look at) and is destroyed: its
-`Spawn` stays behind with the `Destroyed` tag until `Revive` spawns the next NPC and removes it, which frees the old
+`Spawn` stays behind with the `Retired` tag until `Revive` spawns the next NPC and removes it, which frees the old
 entity.
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#respawn</include>
@@ -170,7 +170,7 @@ packet) has acknowledged an older tick, and each client has its own. `CatchUp` a
 state per client on the server: `ChangedAny<Health, Burning, Goal>` keeps one filter for the units where any of the
 three changed, and `Since(acked)` runs it with this client's tick; `Removed<Burning>` adds the fires that went out.
 Clients must also learn which units are gone, and a destroyed entity has no row left to find, so the world keeps a
-destroy log (`WorldOptions.DestroyLog`, a ring of the last destroyed ids): `DestroyedSince` lists the ids destroyed
+destroy log (`WorldOptions.DestroyLogCapacity`, a ring of the last destroyed ids): `DestroyedSince` lists the ids destroyed
 since the client's tick. When the client lags further back than the ring reaches, it returns false and the client gets
 the whole battle again.
 
@@ -282,7 +282,7 @@ links still point at the right entities.
 
 ### Diagnostics [#diagnostics]
 
-`Describe` lists every table with its columns, rows and bytes, for a dashboard. `Schedule` describes how the systems
+`DescribeTables` lists every table with its columns, rows and bytes, for a dashboard. `Schedule` describes how the systems
 run: the stages of each group, what every system reads and writes, and why it waits for an earlier stage; the server
 logs it once at startup. With `MeasureSystems` on, every system's runs are timed into `system.Stats`, with the bytes
 they allocated and the entities they visited.
@@ -306,7 +306,7 @@ while (running)
     if (server.WrittenSinceCheckpoint > 1_000) server.Checkpoint();
 }
 
-var gone = new EntityId[100_000];                         // WorldOptions.DestroyLog ids: room for them all
+var gone = new EntityId[100_000];                         // WorldOptions.DestroyLogCapacity ids: room for them all
 if (!server.CatchUp(acked, gone, out int updates, out int destroyed))   // acked: the tick a client confirmed
     SendWholeBattle();                                    // the client lags further back than the log reaches
 

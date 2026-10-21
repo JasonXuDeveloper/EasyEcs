@@ -24,18 +24,18 @@ public interface IForEach<T1, T2, T3, T4, T5, T6, T7, T8, T9> where T1 : struct,
 
 ## 属性 [#properties]
 
-### `OwnStamps` [#ownstamps]
+### `SelfStamped` [#selfstamped]
 
 ```csharp
-static virtual int OwnStamps { get; }
+static virtual int SelfStamped { get; }
 ```
 
-[`IForEach.Writes`](/zh/docs/reference/iforeach#writes) 里由 job 自己打 tick、而且只在它写的行上打 tick 的组件（位的含义同 [`IForEach.Writes`](/zh/docs/reference/iforeach#writes)；默认没有）：循环不给这些组件的行打 tick。生成的 job 标出它们的 [`Mut`](/zh/docs/reference/mut) 参数。
+[`IForEach.WriteMask`](/zh/docs/reference/iforeach#writemask) 里由 job 自己打 tick、而且只在它写的行上打 tick 的组件（位的含义同 [`IForEach.WriteMask`](/zh/docs/reference/iforeach#writemask)；默认没有）：循环不给这些组件的行打 tick。生成的 job 标出它们的 [`Mut`](/zh/docs/reference/mut) 参数。
 
-### `Writes` [#writes]
+### `WriteMask` [#writemask]
 
 ```csharp
-static virtual int Writes { get; }
+static virtual int WriteMask { get; }
 ```
 
 job 通过 ref 写入的组件：第 k 个组件对应第 k - 1 位（默认：全部）。job 改变了当前实体的原型时，ForEach 在 job 返回后，把这些组件从 ref 指向的那一行带到实体的新行。生成的 job 只标出它们的 `ref` 参数。

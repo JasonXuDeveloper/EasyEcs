@@ -190,7 +190,7 @@ public class LootSystem : EcsSystem { }
 
 public class KillRewards : EcsSystem
 {
-    protected override void OnUpdate() => World.GetSystem<LootSystem>();
+    protected override void OnUpdate() { if (World.TryGetSystem(out LootSystem loot)) loot.Enabled = false; }
 }
 ```
 
@@ -258,10 +258,10 @@ public class ShowGold : EcsSystem
 }
 ```
 
-变更 tick 要占一列，所以只有声明要它的组件才有。给组件加上 `ITrackChanges`：
+变更 tick 要占一列，所以只有声明要它的组件才有。给组件加上 `ITracked`：
 
 ```csharp
-public record struct Gold(int Amount) : IComponent, ITrackChanges;
+public record struct Gold(int Amount) : IComponent, ITracked;
 public record struct Hud(int Gold) : IComponent;
 
 public class ShowGold : EcsSystem
@@ -270,7 +270,7 @@ public class ShowGold : EcsSystem
 }
 ```
 
-由 C# 编译器发现（这个特性要求 `ITrackChanges`，报 CS0315）。详见[标记组件](/zh/docs/guide/change-tracking#mark-the-component)。
+由 C# 编译器发现（这个特性要求 `ITracked`，报 CS0315）。详见[标记组件](/zh/docs/guide/change-tracking#mark-the-component)。
 
 ### 通过 `ref` 读被追踪的组件 [#read-tracked-by-ref]
 
@@ -290,7 +290,7 @@ int amount = player.Gold.Amount;             // ref readonly：不打标记
 ### 只偶尔写入，却用 `ref` 拿追踪组件 [#ref-writes-every-row]
 
 ```csharp
-public record struct Facing(int Direction) : IComponent, ITrackChanges;   // 值变了才发给客户端
+public record struct Facing(int Direction) : IComponent, ITracked;   // 值变了才发给客户端
 ```
 
 ```csharp
@@ -325,7 +325,7 @@ public class Face : EcsSystem
 ### 只读追踪组件的 `Query` 循环 [#query-that-reads]
 
 ```csharp
-public record struct Rating(int Value) : IComponent, ITrackChanges;   // 变了就同步给客户端
+public record struct Rating(int Value) : IComponent, ITracked;   // 变了就同步给客户端
 ```
 
 ```csharp doccheck=expect-EECS046
@@ -349,7 +349,7 @@ foreach (var item in world.Read<Rating>())
 ### `[Removed<T>]` 方法接收了 `T` [#removed-takes-t]
 
 ```csharp
-public record struct Burning(int Ticks) : IComponent, ITrackChanges;
+public record struct Burning(int Ticks) : IComponent, ITracked;
 public record struct Glow(bool On) : IComponent;
 ```
 
@@ -374,7 +374,7 @@ public class Extinguish : EcsSystem
 ### 以为 `[Removed<T>]` 能报告被销毁的实体 [#removed-destroyed]
 
 ```csharp
-public record struct Avatar(int Skin) : IComponent, ITrackChanges;
+public record struct Avatar(int Skin) : IComponent, ITracked;
 public record struct Despawns(int Count) : ISingletonComponent;
 ```
 
@@ -390,7 +390,7 @@ public class CountDespawns : EcsSystem
 销毁日志，每个客户端用自己确认过的 tick 去读：
 
 ```csharp
-using var server = new World(new WorldOptions { DestroyLog = 4_096 });   // 客户端最多可能落后这么多次销毁
+using var server = new World(new WorldOptions { DestroyLogCapacity = 4_096 });   // 客户端最多可能落后这么多次销毁
 var gone = new EntityId[4_096];                                          // 只分配一次，所有客户端共用
 ulong acked = server.ChangeTick;                                          // 客户端最后确认的 tick
 server.Update();
@@ -466,10 +466,10 @@ public readonly record struct Guild(long Id) : IComponent;
 ```
 
 每加一种 actor 都要把分组再写一遍，而泛型接口没法用特性带上过滤条件：C# 不允许特性里出现类型参数（`[With<In<TSelf>>]` 是 CS8968）。
-接口 `IGroupWith<T>` 和 `IGroupWithout<T>` 可以写类型参数，所以一个泛型接口就能让每种 actor 类型同时成为自己的键组件、分组和过滤条件：
+接口 `ISystemGroupWith<T>` 和 `ISystemGroupWithout<T>` 可以写类型参数，所以一个泛型接口就能让每种 actor 类型同时成为自己的键组件、分组和过滤条件：
 
 ```csharp
-public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, IGroupWith<In<TSelf>>
+public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;
 
 public readonly record struct Shop(long Id) : IActor<Shop> { Shop IIndexed<Shop>.Key => this; }
@@ -731,7 +731,7 @@ world.Descendants(hero).AddTo(group, includeRoot: true);   // 英雄，然后是
 ### 恢复的记录又被存了回去 [#record-written-back]
 
 ```csharp
-public record struct Bank(long Gold) : IComponent, ITrackChanges;   // 需要持久化：变了就存
+public record struct Bank(long Gold) : IComponent, ITracked;   // 需要持久化：变了就存
 public record struct Connection(int Socket) : IComponent;           // 只在运行时存在
 ```
 
@@ -773,7 +773,7 @@ while (running)
 
 ```csharp
 world.Update();
-if (world.UpdateCount % 12_000 == 0 && world.EntityCount < 10_000)   // 20 Hz 下每十分钟一次，而且要等空闲时
+if (world.DefaultUpdateCount % 12_000 == 0 && world.EntityCount < 10_000)   // 20 Hz 下每十分钟一次，而且要等空闲时
     world.TrimExcess();
 ```
 
@@ -826,7 +826,7 @@ public class Reap : EcsSystem
 ```csharp
 public struct Mend : IForEachEntity<Health>
 {
-    public static int Writes => 1;
+    public static int WriteMask => 1;
 
     public void Execute(Entity target, ref Health hp) => hp.Value += 1;
 }

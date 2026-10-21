@@ -30,31 +30,31 @@ may make it ([Threading](/en/docs/guide/threading)).
 | Type | Kind | Purpose |
 | --- | --- | --- |
 | `World` | sealed class, `IDisposable` | Owns entities, components, singletons, indexes and systems. |
-| `WorldOptions` | sealed class | `ParallelSystems`, `MaxDegreeOfParallelism`, `InitialEntityCapacity`, `MeasureSystems`, `SystemErrors`, `DestroyLog` (init-only). |
+| `WorldOptions` | sealed class | `ParallelSystems`, `MaxDegreeOfParallelism`, `InitialEntityCapacity`, `MeasureSystems`, `SystemErrors`, `DestroyLogCapacity` (init-only). |
 | `Entity` | readonly struct | Handle: `Id`, `World`, `IsAlive`. A destroyed or default handle answers questions (`IsAlive`, `Has`, `TryGet`, `TryGetRef`) with false, throws on accesses and changes, and ignores `Destroy`. Converts to its `EntityId`. |
 | `EntityId` | readonly struct, unmanaged | `Index` and `Version`, 8 bytes: what a component stores to refer to an entity. `EntityId.Null` names none. |
 | `IComponent`, `ISingletonComponent` | marker interfaces | Component and singleton structs. An empty component is a tag. |
-| `ITrackChanges` | marker interface | Rows record the change tick of their last write or removal ([change tracking](/en/docs/guide/change-tracking)). |
+| `ITracked` | marker interface | Rows record the change tick of their last write or removal ([change tracking](/en/docs/guide/change-tracking)). |
 | `IIndexed<TKey>` | interface | A component the world indexes by its `Key`; written with `Set` (EECS015). An `EntityId` key makes it a link to an entity. |
 | `IUniqueIndexed<TKey>`, `UniqueIndexExtensions` | interface, extensions | An indexed component whose key names one entity: a write giving a second entity a taken key throws; `index.Get(key)`, `TryGet` ([indexes and relations](/en/docs/guide/indexes-and-relations)). |
 | `IRelation` | interface | An element of a `DynamicBuffer<T>` that links its entity to `Target` ([indexes and relations](/en/docs/guide/indexes-and-relations)). |
 | `ChildOf` | record struct | `ChildOf(EntityId Parent)`: the hierarchy; destroying a parent destroys its children ([hierarchy](/en/docs/guide/hierarchy)). |
 | `IGroup` | interface | A component whose `Group` value splits tables (`world.GroupBy<T>()`, [groups](/en/docs/guide/groups)). |
-| `ICleanupComponent`, `Destroyed` | marker interface, tag | An entity destroyed while it holds a cleanup component keeps it, tagged `Destroyed`, until it is removed ([cleanup and disable](/en/docs/guide/cleanup-and-disable)). |
+| `ICleanupComponent`, `Retired` | marker interface, tag | `Destroy` on an entity that holds a cleanup component retires it: it stays alive with the cleanup components, tagged `Retired`, until the last one is removed ([cleanup and disable](/en/docs/guide/cleanup-and-disable)). |
 | `Disabled<T>` | tag | Present while `T` is disabled: the value kept, the component hidden. |
 | `Prefab` | sealed class | A recipe of component values that belongs to no world ([prefabs](/en/docs/guide/prefabs)). |
-| `DynamicBuffer<T>` | struct, `IComponent, ITrackChanges` | A list per entity; writes through `DynamicBufferExtensions` on a `ref` ([dynamic buffers](/en/docs/guide/dynamic-buffers)). |
+| `DynamicBuffer<T>` | struct, `IComponent, ITracked` | A list per entity; writes through `DynamicBufferExtensions` on a `ref` ([dynamic buffers](/en/docs/guide/dynamic-buffers)). |
 | `ValueIndex<T, TKey>` | sealed class | `world.Index<T, TKey>()`: `Find`, `TryFind`, `Count`; ordered walks for a comparable key (`OrderedIndexExtensions`). |
 | `RelationIndex<T>` | sealed class | `world.Relations<T>()`: the entities linking to a target. |
-| `TargetPolicy`, `TargetRules` | enum, extensions | What destroying a target does to the links to it: `Keep`, `Remove`, `Destroy`. |
+| `TargetPolicy`, `TargetPolicyExtensions` | enum, extensions | What destroying a target does to the links to it: `Keep`, `Remove`, `Destroy`. |
 | `EcsSystem` | abstract class | `World`, `UpdateInterval`, `UpdatePhase`, `Enabled`, `Error`, `Stats`, `LastRunTick`, `RunCount`; `OnCreate` / `OnUpdate` / `OnDestroy` ([systems](/en/docs/guide/systems)). |
 | `ForEachAttribute` and its filters | attributes | `[ForEach]` (`Parallel = true`, `Slices = N`), `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<T1..Tn>]`, `[RemovedAny<T1..Tn>]`. |
 | `Maybe<T>` | ref struct | An optional component parameter of a `[ForEach]` method: `HasValue`, `Value`. |
 | `Mut<T>` | ref struct | A component parameter of a `[ForEach]` method that counts as written only on the rows the method writes: `Value`, `Write()`, `SetIfChanged(value)` ([change tracking](/en/docs/guide/change-tracking)). |
-| `ISystemGroup`, `IGroupWith<T>`, `IGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]` | interfaces, attributes | System groups (with filters through interfaces) and ordering. |
+| `ISystemGroup`, `ISystemGroupWith<T>`, `ISystemGroupWithout<T>`, `[UpdateInGroup<T>]`, `[UpdateBefore<T>]`, `[UpdateAfter<T>]` | interfaces, attributes | System groups (with filters through interfaces) and ordering. |
 | `SystemErrorPolicy` | enum | `Throw` (default) or `Disable`: what an exception in a system does. |
 | `SystemStats`, `SystemList` | readonly structs | A system's run count, times, allocated bytes and visited entities; `world.Systems`, allocation-free. |
-| `ScheduleInfo`, `GroupSchedule`, `StageInfo`, `SystemInfo`, `StageWait`, `SystemPair` | sealed records | What `world.DescribeSchedule()` returns: stages, reads and writes, waits, registration-only pairs; `ToString()`, `ToMermaid()`. |
+| `ScheduleInfo`, `GroupInfo`, `StageInfo`, `SystemInfo`, `StageWait`, `SystemPair` | sealed records | What `world.DescribeSchedule()` returns: stages, reads and writes, waits, registration-only pairs; `ToString()`, `ToMermaid()`. |
 | `SystemAccess` | struct | What a system reads and writes; filled only by generated code. |
 | `QueryFilter` | readonly struct | `With`, `Without`, `WithAny`, `Changed`, `Removed`, `ChangedAny`, `RemovedAny`, `InGroup`, `Since`, `Slice`; holds no object reference. |
 | `QueryEnumerator<T1..Tn>`, `QueryItem<T1..Tn>` | ref structs | The result of `Query`: `item.Entity` and refs into the row (`item.Position`). |
@@ -62,7 +62,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `SingletonRef<T>` | readonly struct | A stable singleton handle; `.Value` is `ref T`. |
 | `WorldSnapshot` | sealed class | A copy of a world in memory (`world.Capture()`). |
 | `ComponentSet` | readonly struct | Component and singleton types, built once: what `SaveEntitiesWith` writes, what `SaveWithout` leaves out, which singletons `LoadKeeping` keeps. |
-| `TableInfo`, `ColumnInfo`, `ComponentValue` | record structs | What `world.Describe()` and `entity.Describe()` return. |
+| `TableInfo`, `ColumnInfo`, `ComponentValue` | record structs | What `world.DescribeTables()` and `entity.Describe()` return. |
 
 ## Entities [#entities]
 
@@ -72,7 +72,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `world.CreateEntity()` | O(1) amortized | reuses recycled ids |
 | `world.CreateEntity(in T1 … in Tn)` | O(n) amortized | placed directly in its final table |
 | `world.CreateEntities(Span<Entity> entities, in T1 … in Tn)` | O(count × n) amortized | one gate pass and at most one table growth for the wave; writes the handles |
-| `entity.Destroy()` | O(c) | the table's last row fills the hole (a tombstone during a pass); recycles the id; a stale handle is ignored; unlinks indexed components; cascades to `ChildOf` children and applies target policies; with `WorldOptions.DestroyLog`, one 16-byte record |
+| `entity.Destroy()` | O(c) | the table's last row fills the hole (a tombstone during a pass); recycles the id; a stale handle is ignored; unlinks indexed components; cascades to `ChildOf` children and applies target policies; with `WorldOptions.DestroyLogCapacity`, one 16-byte record |
 | `world.DestroyAll<T1..Tn>(filter)` | O(M + S) | destroys every match in one gate pass and returns how many; safe during a pass |
 | `world.DestroyEntities(ids)` | O(ids × c) | destroys a list of ids in one gate pass and one cascade and returns how many; stale ids and repeats are skipped; safe during a pass |
 | `entity.IsAlive` / `world.IsAlive(id)` | O(1) | |
@@ -97,7 +97,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `entity.Remove<T1..Tn>()` | O(n) | clears presence bits, the row stays; missing components are ignored; a tracked component's removal is stamped (`[Removed<T>]`); returns the entity |
 | `entity.Disable<T>()` / `Enable<T>()` | O(1); the first disable in a table moves the row once | keeps the value while queries, `Has` and `Get` see it as gone; a disable counts as a removal, an enable as a write; returns false when there was nothing to do |
 | `entity.IsDisabled<T>()` | O(1) | |
-| generated: `entity.X`, `HasX`, `TryGetX`, `GetOrAddX()`, `SetX(…)`, `SetXIfChanged(…)`, `RemoveX()`, `WriteX()`, `DisableX()`, `EnableX()`, `IsXDisabled`; tags `IsX`, `SetX()`; `world.XIndex` | as the generic call | C# 14 extension members per component ([generated members](/en/docs/guide/entities-and-components)); `entity.X` is `Get`, or `Read` for a tracked or indexed component, whose writes use `WriteX()` or `SetX(…)`; `SetXIfChanged(…)` for a tracked, indexed or grouped component that can be compared; EasyEcs's own `ChildOf` has them too (no `DisableChildOf` / `EnableChildOf`: it cannot be disabled), and `Destroyed` has `entity.IsDestroyed` |
+| generated: `entity.X`, `HasX`, `TryGetX`, `GetOrAddX()`, `SetX(…)`, `SetXIfChanged(…)`, `RemoveX()`, `WriteX()`, `DisableX()`, `EnableX()`, `IsXDisabled`; tags `IsX`, `SetX()`; `world.XIndex` | as the generic call | C# 14 extension members per component ([generated members](/en/docs/guide/entities-and-components)); `entity.X` is `Get`, or `Read` for a tracked or indexed component, whose writes use `WriteX()` or `SetX(…)`; `SetXIfChanged(…)` for a tracked, indexed or grouped component that can be compared; EasyEcs's own `ChildOf` has them too (no `DisableChildOf` / `EnableChildOf`: it cannot be disabled), and `Retired` has `entity.IsRetired` |
 
 ## Prefabs and cloning [#prefabs-and-cloning]
 
@@ -119,7 +119,7 @@ component it has; components the source lacks stay absent and are not removals.
 | `world.Instantiate(prefab, in T1 … in Tn)` | O(c + n) amortized | the prefab's values plus the given ones (replacing the prefab's, or added; a disabled one given is enabled), in one row copy into the final table, no intermediate table; a given `ChildOf` links the hierarchy, a unique key is checked first; O(members × c) plus one move for a group, whose entity of the prefab passed gets the components |
 | `world.Instantiate(prefab, Span<Entity> entities, in T1 … in Tn)` | O(count × (c + n)) | the same values for every instance; one gate pass, at most one table growth, each given column filled at once |
 | `world.Reserve(prefab, count)` | O(c), plus one growth | pre-sizes the tables the next `count` instances go to, so a spawn wave never grows them during a tick |
-| `entity.Clone()` | O(c) | a new entity of the same world and table with a copy of every component; throws if not alive or destroyed (kept for its cleanup components) |
+| `entity.Clone()` | O(c) | a new entity of the same world and table with a copy of every component; throws if not alive or retired (kept for its cleanup components) |
 
 ## Dynamic buffers [#dynamic-buffers]
 
@@ -156,7 +156,7 @@ A snapshot, a save or a clone of a buffer column copies the elements: O(elements
 | `filter.Removed<T>(since)` / `[Removed<T>]` | as `Changed` | entities that lost a tracked `T` at or after `since` and still lack it; destroyed entities are not reported (the destroy log reports them) |
 | `filter.ChangedAny<T1..Tn>(since)` / `[ChangedAny<T1..Tn>]` | O(n) to build; a pass skips tables none of whose columns of the group was written since `since`, and blocks and words no column wrote | rows where at least one of 2 to 9 tracked components was written at or after `since`; all `ChangedAny` calls of a filter form one group, combined with the other filters by AND; one tick per filter |
 | `filter.RemovedAny<T1..Tn>(since)` / `[RemovedAny<T1..Tn>]` | as `ChangedAny` | entities that lost at least one of them at or after `since` and still lack it |
-| `filter.Slice(index, count)` / `[ForEach(Slices = N)]` | O(1); a pass visits about S / N rows, cut at 64-row words | the `ForEach` calls only (`Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run(ref job, filter)` and the bulk calls throw `ArgumentException`); a sliced method visits slice `RunCount % N`; not with `[Changed<T>]` / `[Removed<T>]` (EECS035) |
+| `filter.Slice(index, of)` / `[ForEach(Slices = N)]` | O(1); a pass visits about S / N rows, cut at 64-row words | the `ForEach` calls only (`Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run(ref job, filter)` and the bulk calls throw `ArgumentException`); a sliced method visits slice `RunCount % N`; not with `[Changed<T>]` / `[Removed<T>]` (EECS035) |
 | `filter.InGroup<T>(group)` | O(1); a pass walks only that group's tables | [groups](/en/docs/guide/groups) |
 | `filter.Since(since)` | O(1) | the filter with its `Changed`, `Removed`, `ChangedAny` and `RemovedAny` ticks moved, without rebuilding it: one filter, run with each client's tick |
 
@@ -176,7 +176,7 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 
 | API | Complexity | Notes |
 | --- | --- | --- |
-| `world.SetAll(in T value, filter)` | O(M + S) | `Set` on every match, a word of rows at a time; an entity lacking `T` moves once; destroyed entities kept for their cleanup components are left out unless the filter names `Destroyed`; returns how many |
+| `world.SetAll(in T value, filter)` | O(M + S) | `Set` on every match, a word of rows at a time; an entity lacking `T` moves once; retired entities (kept for their cleanup components) are left out unless the filter names `Retired`; returns how many |
 | `world.RemoveAll<T>(filter)` | O(M + S) | rows stay, presence bits clear; returns how many |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | O(M + S) | a table's rows move once, to the table with the `Disabled<T>` column; returns how many |
 
@@ -209,8 +209,8 @@ columns); `Load` O(rows). A taken key throws `InvalidOperationException` (a save
 | `world.Children(parent)` | O(1), then O(1) per child | the entities whose `ChildOf` points at `parent`; destroying a parent destroys them, and theirs |
 | `world.Descendants(root)` | O(1) per entity of the subtree | depth first, every level below `root`; 0 B once warm |
 | `world.Descendants(root).AddTo(ids, includeRoot)` | O(1) per entity of the subtree | appends the subtree to a `List<EntityId>`, the root first when asked, each parent before its children (the group `MoveEntities` / `SaveEntities` take as `CollectionsMarshal.AsSpan(ids)`); returns how many were added; allocates only when the list grows |
-| `entity.AddRelation(in T relation)` | O(1) amortized | appends to the entity's `DynamicBuffer<T>` (added first if missing) and to the relation index |
-| `entity.RemoveRelation<T>(target)` / `HasRelation<T>(target)` | O(L) | `RemoveRelation` returns how many links went; generated as `e.UnlinkX(target)` / `e.LinksX(target)` for a relation `X` |
+| `entity.Link(in T relation)` | O(1) amortized | appends to the entity's `DynamicBuffer<T>` (added first if missing) and to the relation index |
+| `entity.Unlink<T>(target)` / `Links<T>(target)` | O(L) | `Unlink` returns how many links went; generated as `e.UnlinkX(target)` / `e.LinksX(target)` for a relation `X` |
 | `world.Relations<T>()` | O(1); the first call creates it | the relation index; generated as `world.XIndex` for a relation `X` |
 | `relations.Count(target)` | O(1) | links to `target` |
 | `relations.TargetCount` | O(1) | distinct entities some link points at (how many guilds have a member), kept as links come and go |
@@ -238,8 +238,8 @@ columns); `Load` O(rows). A taken key throws `InvalidOperationException` (a save
 | `world.SaveEntitiesWith(output, ids, set)` | O(entities given × components) | only the components of a `ComponentSet` (built once: `ComponentSet.Create().With<T>()`, O(1) per type); a set naming a singleton throws `ArgumentException` |
 | `ComponentSet.Create().With<T>()` / `WithSingleton<T>()` / `With(type)` | O(1) each; `With(type)` one lookup (cold) | `With(type)` takes a component or a singleton type; `Contains<T>()` / `ContainsSingleton<T>()` O(1) |
 | `world.LoadEntities(input, entities)` | O(entities × components) | new ids; `EntityId` fields naming the group are rewritten, others become `EntityId.Null` |
-| `world.LoadEntitiesInto(input, entities, markWritten)` | O(entities × components) | onto entities that exist: each moves table at most once, the components the save lacks stay; `markWritten: false`: the loaded components count as never written |
-| `world.MoveEntities(target, ids, moved)` | O(entities × components) | to another world of this thread, without encoding; the originals are destroyed, keeping their cleanup components; destroyed entities are skipped |
+| `world.LoadEntitiesInto(input, targets, markWritten)` | O(entities × components) | onto entities that exist: each moves table at most once, the components the save lacks stay; `markWritten: false`: the loaded components count as never written |
+| `world.MoveEntities(target, ids, moved)` | O(entities × components) | to another world of this thread, without encoding; the originals are destroyed (retired, when they hold cleanup components, which stay with them); retired entities are skipped |
 | the `ids` / `entities` of these calls | O(1) to pass | spans: an array, `[a.Id, b.Id]` or `SaveEntities(output, a.Id, b.Id)` (built on the stack), a list as `CollectionsMarshal.AsSpan(list)`: no copy, no allocation |
 
 Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
@@ -251,7 +251,7 @@ Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
 | --- | --- | --- |
 | `world.AddSystem<T>(changesFromNow)` / `AddSystem(system, changesFromNow)` | O(s²), s = systems of its group | calls `OnCreate`; rebuilds the order and stages (cold); throws if the system already belongs to a world, or on an ordering cycle; `changesFromNow: true`: its first run sees only what is written after the call |
 | `world.RemoveSystem<T>()` | O(s²) | calls `OnDestroy`; returns whether a system was removed |
-| `world.GetSystem<T>()` | O(systems) | null when absent |
+| `world.TryGetSystem<T>(out system)` | O(systems) | false (and null) when absent |
 | `world.Update()` / `world.Update<TGroup>()` | Σ systems of the group | synchronous, allocation-free; throws `ObjectDisposedException` after `Dispose` |
 | `world.ChangeTick` | O(1) | grows by one per stage of systems and once after each update |
 | `world.AddSingleton<T>()` / `GetSingleton<T>()` / `GetOrAddSingleton<T>()` | O(1) | `ref T`; `AddSingleton` throws when the singleton exists; `GetSingleton` throws when missing |
@@ -259,13 +259,13 @@ Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
 | `world.TryGetSingleton<T>(out T)` / `HasSingleton<T>()` / `RemoveSingleton<T>()` | O(1) | `RemoveSingleton` returns false when it was not added |
 | generated: `world.X`, `HasX`, `GetOrAddX()`, `SetX(…)`, `RemoveX()` for a singleton `X` | as the generic call | |
 | `world.Systems` | O(systems) to walk, `Count` O(groups) | every group's systems in execution order, allocation-free |
-| `world.UpdateCount` | O(1) | default-group updates so far |
+| `world.DefaultUpdateCount` | O(1) | default-group updates so far |
 | `world.RemoveTypes(assembly)` / `RemoveTypes(context)` | O(entities with such components + tables + cached queries) | takes a plugin's systems, singletons, indexes and components out of the world so its `AssemblyLoadContext` can unload; allocates (cold) |
-| `world.Describe()` | O(tables + columns) | every table with its columns, rows, capacity and bytes; allocates (cold) |
+| `world.DescribeTables()` | O(tables + columns) | every table with its columns, rows, capacity and bytes; allocates (cold) |
 | `world.DescribeSchedule()` | O(groups × systems³) | every group's stages, each system's reads and writes, its waits and the registration-only pairs; allocates (cold); any thread |
 | `schedule.ToString()` / `ToMermaid()` | O(systems + waits + pairs) | the description as indented text, or as a mermaid flowchart; allocates |
 | `world.TrimExcess()` | O(tables × (cached queries + snapshots) + rows of the shrunk tables × columns) | drops empty tables (except those a snapshot holds rows of), shrinks the others to their rows rounded up to a power of two (64 at least), releases the buffers of saves, loads and migrations; allocates (cold); owner thread, not during a pass; dropped tables and edges are created again on demand |
-| `world.DestroyedSince(since, Span<EntityId> into, out int count)` | O(count) | the entities destroyed at or after `since`, oldest first; false (nothing written) when `since` is older than `DestroyLogOldestTick`: resynchronize; throws when `WorldOptions.DestroyLog` is 0; allocation-free; owner thread or a thread of a parallel stage |
+| `world.DestroyedSince(since, Span<EntityId> into, out int count)` | O(count) | the entities destroyed at or after `since`, oldest first; false (nothing written) when `since` is older than `DestroyLogOldestTick`: resynchronize; throws when `WorldOptions.DestroyLogCapacity` is 0; allocation-free; owner thread or a thread of a parallel stage |
 | `world.DestroyLogOldestTick` | O(1) | the oldest tick `DestroyedSince` answers for; `ulong.MaxValue` when the log is off |
 | `entity.Describe()` | O(c) | boxed copies of the entity's components, disabled ones marked; allocates (cold) |
 | `world.Dispose()` | O(systems + entities + tables) | `OnDestroy` on every system in reverse order, then releases storage |
@@ -273,9 +273,9 @@ Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
 `WorldOptions.SystemErrors`: `SystemErrorPolicy.Throw` (default: the exception propagates out of `Update()`, and of
 `Dispose` for `OnDestroy`) or `Disable` (the system is switched off and keeps the exception in `system.Error` until it
 is enabled again; a failed run still moves `LastRunTick` on). `WorldOptions.MeasureSystems` records every run into
-`system.Stats` (`Runs`, `Last`, `Total`, `Average`, `LastAllocated`, `TotalAllocated`, `LastEntities`,
+`system.Stats` (`Runs`, `LastTime`, `TotalTime`, `AverageTime`, `LastAllocated`, `TotalAllocated`, `LastEntities`,
 `TotalEntities`, all O(1) to read) for two timestamp reads and two allocation-counter reads per run (and per helper
-chunk of a parallel `[ForEach]`), plus one count of each `[ForEach]` pass's matches. `WorldOptions.DestroyLog` (default
+chunk of a parallel `[ForEach]`), plus one count of each `[ForEach]` pass's matches. `WorldOptions.DestroyLogCapacity` (default
 0, off) preallocates that many 16-byte records for `DestroyedSince`: O(capacity) once, at `new World`.
 
 Values and handles, all O(1): `entity.Id` / `World`, `id.Index` / `Version`, `==` / `Equals` / `GetHashCode` (id and

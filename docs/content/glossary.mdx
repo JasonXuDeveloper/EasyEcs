@@ -91,7 +91,7 @@ update; it keeps no state of its own and never calls another system. See [System
 A struct implementing `ISystemGroup`. Systems marked `[UpdateInGroup<G>]` run only on `world.Update<G>()`, so input,
 simulation and persistence can run at their own cadence. Systems without the attribute are in the default group,
 which `world.Update()` runs. A group can filter the entities of all its systems: `[With<T>]`, `[Without<T>]` and
-`[WithAny<T>]` on the group struct, or `IGroupWith<T>` / `IGroupWithout<T>` implemented by the group or an interface
+`[WithAny<T>]` on the group struct, or `ISystemGroupWith<T>` / `ISystemGroupWithout<T>` implemented by the group or an interface
 it implements (the way a generic interface gives each actor type its own group). See
 [Systems](/en/docs/guide/systems#system-groups).
 
@@ -149,7 +149,7 @@ what the later one sees. See [Debugging and diagnostics](/en/docs/guide/diagnost
 A struct implementing `IForEach<T…>`, `IForEachEntity<T…>` or `IForEachBatch<T…>` whose `Execute` method the row
 loop calls. The JIT inlines it, so there is no delegate and no virtual call per entity. The generator writes one for
 every `[ForEach]` method. `entity.Run<T…, TJob>(ref job)` runs an `IForEachEntity` job on one entity. A job's
-`static int Writes` names the components it writes; implementing `INoStructuralChanges` promises no structural change.
+`static int WriteMask` names the components it writes; implementing `INoStructuralChanges` promises no structural change.
 See [Queries and filters](/en/docs/guide/queries#foreach-a-struct-job).
 
 ## Batch method [#batch-method]
@@ -180,13 +180,13 @@ the tick of their last write, and each system records the tick it last ran at (`
 
 ## Tracked component [#tracked-component]
 
-A component that also implements `ITrackChanges`. Its rows record when they were written or removed, so
+A component that also implements `ITracked`. Its rows record when they were written or removed, so
 `[Changed<T>]` and `[Removed<T>]` visit only those rows. It costs 8 bytes per row; untracked components pay nothing.
 See [Change tracking](/en/docs/guide/change-tracking).
 
 ## Destroy log [#destroy-log]
 
-The ring of the last destroyed entities a world keeps when `WorldOptions.DestroyLog` is set, each with the change tick
+The ring of the last destroyed entities a world keeps when `WorldOptions.DestroyLogCapacity` is set, each with the change tick
 of its destruction. `world.DestroyedSince(since, …)` lists those destroyed since a reader's tick, so each client keeps
 its own mark. See [Change tracking](/en/docs/guide/change-tracking#destroy-log).
 
@@ -243,7 +243,7 @@ turns each into data, such as a request entity. See
 
 A pattern, not an EasyEcs type: an entity that handles messages addressed to it by key (a shop, a bank account, a
 player). One type per kind of actor is at once its key component (`IIndexed<TSelf>`, found through its index), its
-system group and the group's filter (`IGroupWith<In<TSelf>>`), declared once through a generic interface; a request
+system group and the group's filter (`ISystemGroupWith<In<TSelf>>`), declared once through a generic interface; a request
 runs on its entity with `entity.Run`. See
 [samples/Actors](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors).
 
@@ -285,8 +285,8 @@ map or match share tables, so a query of that group walks only its rows. Not to 
 
 ## Cleanup component [#cleanup-component]
 
-A component implementing `ICleanupComponent`. Destroying its entity removes the other components and adds the
-`Destroyed` tag; the entity stays until a system releases the resource (a socket, a seat) and removes the component.
+A component implementing `ICleanupComponent`. `Destroy` on its entity retires it instead of freeing it: the other components go and the
+`Retired` tag is added; the entity stays alive until a system releases the resource (a socket, a seat) and removes the component.
 Until then it is not moved, cloned or brought back by `SetAll`. See [Cleanup and disable](/en/docs/guide/cleanup-and-disable#cleanup-components).
 
 ## Disabled component [#disabled-component]

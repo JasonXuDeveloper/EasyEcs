@@ -33,7 +33,7 @@ icon: Box
 ```csharp
 public record struct Position(float X, float Y) : IComponent;
 public record struct Health(int Value) : IComponent;
-public record struct Armor(int Value) : IComponent, ITrackChanges;   // 写入会被追踪
+public record struct Armor(int Value) : IComponent, ITracked;   // 写入会被追踪
 public record struct Name(string Value) : IComponent;                // 可以有托管字段
 public struct Dead : IComponent;                                     // 标签：没有字段
 ```
@@ -213,14 +213,14 @@ bool both = hero.Has<Position, Health>();
 | 声明 | 生成 | 等价于 |
 | --- | --- | --- |
 | `record struct Position(float X, float Y) : IComponent` | `e.Position`（`ref`）、`e.HasPosition`、`e.TryGetPosition(out p)`、`e.GetOrAddPosition()`、`e.SetPosition(x, y)`、`e.RemovePosition()` | `Get`、`Has`、`TryGet`、`GetOrAdd`、`Set(new Position(x, y))`、`Remove` |
-| 被追踪的组件（`Armor : ITrackChanges`） | `e.Armor` 是 `ref readonly`；`e.WriteArmor()` 返回 `ref`；`e.SetArmorIfChanged(v)` | `Read`；`Get`（记为写入）；`SetIfChanged(new Armor(v))` |
+| 被追踪的组件（`Armor : ITracked`） | `e.Armor` 是 `ref readonly`；`e.WriteArmor()` 返回 `ref`；`e.SetArmorIfChanged(v)` | `Read`；`Get`（记为写入）；`SetIfChanged(new Armor(v))` |
 | 索引组件（`Zone : IIndexed<int>`） | `e.Zone` 是 `ref readonly`，没有 `GetOrAddZone` 和 `WriteZone`；`e.SetZoneIfChanged(id)`；`world.ZoneIndex` | `Read`；`SetIfChanged(new Zone(id))`；`world.Index<Zone, int>()` |
 | 唯一组件（`Account : IUniqueIndexed<long>`） | 同索引组件；外加 `world.AccountIndex.Get(key)`、`world.AccountIndex.TryGet(key, out e)` | [一个键对应的那个实体](#unique-key) |
 | 分组组件（`Team : IGroup`） | `e.Team` 是 `ref readonly`，没有 `GetOrAddTeam` 和 `WriteTeam`；`e.SetTeamIfChanged(…)`；`filter.InTeam(group)` | `Read`；`SetIfChanged`；`filter.InGroup<Team>(group)`（[分组](/zh/docs/guide/groups)） |
 | 标签（`struct Dead : IComponent`） | `e.IsDead`、`e.SetDead()`、`e.RemoveDead()` | `Has`、`Set(new Dead())`、`Remove` |
 | 任何带字段的组件（清理组件除外） | `e.DisableHealth()`、`e.EnableHealth()`、`e.IsHealthDisabled` | [`Disable` / `Enable`](/zh/docs/guide/cleanup-and-disable) |
 | 代码里写到 `DynamicBuffer<Loot>` 的缓冲元素 | `e.Loot`（`ref readonly`）、`e.HasLoot`、`e.WriteLoot()`、`e.GetOrAddLoot()`、`e.RemoveLoot()` | `DynamicBuffer<Loot>` 的 `Read`、`Has`、`Get`、`GetOrAdd`、`Remove`（[动态缓冲](/zh/docs/guide/dynamic-buffers)） |
-| 关系（`MemberOf : IRelation`），代码里写到 `DynamicBuffer<MemberOf>` 之后 | `e.AddMemberOf(target)`、`e.UnlinkMemberOf(target)`、`e.LinksMemberOf(target)`、`e.MemberOf`（`ref readonly`）、`e.HasMemberOf`、`e.RemoveMemberOf()`、`world.MemberOfIndex` | `AddRelation`、`RemoveRelation`、`HasRelation`、`Read`、`Has`、`Remove`、`world.Relations<MemberOf>()`（[关系](/zh/docs/guide/indexes-and-relations#relations)） |
+| 关系（`MemberOf : IRelation`），代码里写到 `DynamicBuffer<MemberOf>` 之后 | `e.LinkMemberOf(target)`、`e.UnlinkMemberOf(target)`、`e.LinksMemberOf(target)`、`e.MemberOf`（`ref readonly`）、`e.HasMemberOf`、`e.RemoveMemberOf()`、`world.MemberOfIndex` | `Link`、`Unlink`、`Links`、`Read`、`Has`、`Remove`、`world.Relations<MemberOf>()`（[关系](/zh/docs/guide/indexes-and-relations#relations)） |
 | 单例组件（`Clock : ISingletonComponent`） | `world.Clock`（`ref`）、`world.HasClock`、`world.GetOrAddClock()`、`world.SetClock(…)`、`world.RemoveClock()` | [`GetSingleton`](/zh/docs/guide/singletons)、`HasSingleton`、`GetOrAddSingleton`、`GetOrAddSingleton() = …`、`RemoveSingleton` |
 | 代码里调用过的每个 `world.Query<Position, Velocity>()` | `item.Position`、`item.Velocity` | `item.Component1`、`item.Component2` |
 | [预制体](/zh/docs/guide/prefabs#generated-members)上的任何组件 | `prefab.Position`（`ref readonly`）、`HasPosition`、`SetPosition(x, y)`、`RemovePosition()`、`IsDead`、`SetDead()` | `Read`、`Has`、`Set`、`Remove` |
@@ -245,7 +245,7 @@ bool changed = hero.SetArmorIfChanged(6);                  // false：Armor 已�
   都会生成 `entity.IsDead`，`Zone : IIndexed<int>` 和单例 `ZoneIndex` 都会生成 `world.ZoneIndex`，各自的其他成员照常生成。
   嵌套的组件或缓冲元素和所在命名空间里另一个结构体同名时（`Npc.State` 和 `Player.State`），一个成员都不生成：两者都会生成 `entity.State`。
 - EasyEcs 自带的 `ChildOf` 也有生成成员（`entity.ChildOf`、`SetChildOf(parent)`、`world.ChildOfIndex` 等，没有 `DisableChildOf`），
-  `Destroyed` 标签有 `entity.IsDestroyed`。
+  `Retired` 标签有 `entity.IsRetired`。
 
 ### 标签 [#tags]
 
@@ -279,7 +279,7 @@ public record struct Position(float X, float Y) : IComponent;
 public record struct Health(int Value) : IComponent;
 
 // 被追踪：生成的属性是只读的，写入要显式进行。
-public record struct Armor(int Value) : IComponent, ITrackChanges;
+public record struct Armor(int Value) : IComponent, ITracked;
 
 // 标签：没有字段，只用来过滤。
 public struct Dead : IComponent;

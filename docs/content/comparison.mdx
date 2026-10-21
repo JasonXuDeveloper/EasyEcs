@@ -77,7 +77,7 @@ From each package's public API and the comparison ports, which compile against t
 | Bulk create and destroy | ✅ `CreateEntities`, `DestroyAll(filter)`, `Instantiate(prefab, span)` | ⚠️ `CreateEntityBatch`; delete per entity | ⚠️ destroy by query | ❌ |
 | Reserve a table before creating into it | ✅ `Reserve<T1, …, Tn>(n)` | ✅ `EnsureCapacity` on the store and the archetype | ✅ `EnsureCapacity(signature, n)` | – |
 | Prefabs | ✅ `Prefab`: data outside every world | ⚠️ an entity of the store, copied with `CloneEntity` | ❌ | ⚠️ an entity copied with `CopyTo(world)` |
-| Change tracking (rows written since a tick) | ✅ `ITrackChanges`, `[Changed<T>]`, every `ref` write | ❌ | ❌ (events) | ✅ `WhenChanged<T>()` after `NotifyChanged<T>()` |
+| Change tracking (rows written since a tick) | ✅ `ITracked`, `[Changed<T>]`, every `ref` write | ❌ | ❌ (events) | ✅ `WhenChanged<T>()` after `NotifyChanged<T>()` |
 | Removal detection | ✅ `[Removed<T>]` | ⚠️ `OnComponentRemoved` events | ⚠️ `SubscribeComponentRemoved` events | ✅ `WhenRemoved<T>()` sets |
 | Value index | ✅ `IIndexed<TKey>`, ordered walks and ranges | ✅ `IIndexedComponent<TKey>`, ranges | ❌ | ✅ `EntityMap`, `EntityMultiMap` |
 | Tables split by a value | ✅ `GroupBy<T>` (`IGroup`) | – | – | – |

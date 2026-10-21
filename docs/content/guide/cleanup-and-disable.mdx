@@ -29,8 +29,8 @@ that greets new players needs to tell them apart: a **`Spawned` tag** marks them
 
 ### Cleanup components [#cleanup-components]
 
-An entity destroyed while it holds an `ICleanupComponent` is not freed. It loses every other component, gets the
-`Destroyed` tag (`entity.IsDestroyed`), and stays alive until its last cleanup component is removed:
+`Destroy` on an entity that holds an `ICleanupComponent` does not free it: it retires it. It loses every other
+component, gets the `Retired` tag (`entity.IsRetired`), and stays alive until its last cleanup component is removed:
 
 ```csharp
 public record struct Seat(int Number) : ICleanupComponent;   // a resource outside the world
@@ -40,7 +40,7 @@ public record struct Seats(int Released) : ISingletonComponent;
 ```csharp title="ReleaseSeats.cs"
 public class ReleaseSeats : EcsSystem
 {
-    [ForEach, With<Destroyed>, With<Seat>]                    // only entities already destroyed // [!code highlight]
+    [ForEach, With<Retired>, With<Seat>]                    // only retired entities         // [!code highlight]
     static void Release(Entity entity, ref Seats seats)
     {
         seats.Released++;                                     // give the seat back here
@@ -54,13 +54,13 @@ world.AddSingleton<Seats>();
 world.AddSystem<ReleaseSeats>();
 var guest = world.CreateEntity(new Seat(7), new Health(10));
 
-guest.Destroy();                       // alive, tagged Destroyed, Health gone
+guest.Destroy();                       // retired: alive, tagged Retired, Health gone
 world.Update();                        // ReleaseSeats frees it: guest.IsAlive is false
 ```
 
 - Every destroy path retires such entities: `Destroy`, `DestroyAll<T>()`, a [hierarchy](/en/docs/guide/hierarchy)
   cascade or a [target policy](/en/docs/guide/indexes-and-relations#target-policies).
-- A system that acquires the resource filters `Without<Destroyed>`: a retired entity still holds its cleanup
+- A system that acquires the resource filters `Without<Retired>`: a retired entity still holds its cleanup
   component, so without the filter it could acquire again after it left:
 
 ```csharp
@@ -68,7 +68,7 @@ public record struct NextSeat(int Number) : ISingletonComponent;
 
 public class AssignSeats : EcsSystem
 {
-    [ForEach, Without<Destroyed>]                            // never seat an entity that already left // [!code highlight]
+    [ForEach, Without<Retired>]                            // never seat an entity that already left // [!code highlight]
     static void Assign(ref Seat seat, ref NextSeat next)
     {
         if (seat.Number != 0) return;                        // already seated
@@ -82,8 +82,8 @@ public class AssignSeats : EcsSystem
 - A retired entity leaves its indexes, and its children go with it. Its other components are gone without a removal:
   `[Removed<T>]` does not visit it, as it visits no destroyed entity
   ([removal detection](/en/docs/guide/change-tracking#removal-detection)).
-- A retired entity is not brought back: `SetAll` leaves it out unless the filter names `Destroyed`
-  (`With<Destroyed>()`), `Clone()` throws, and `MoveEntities` skips it. `RemoveAll` of a cleanup component reaches
+- A retired entity is not brought back: `SetAll` leaves it out unless the filter names `Retired`
+  (`With<Retired>()`), `Clone()` throws, and `MoveEntities` skips it. `RemoveAll` of a cleanup component reaches
   it, since that is how it is released.
 - `MoveEntities` leaves cleanup components behind: the original is retired with them, the entity in the other world
   does not have them.
@@ -91,13 +91,13 @@ public class AssignSeats : EcsSystem
 
 ### Cleanup component or destroy log [#cleanup-or-destroy-log]
 
-The [destroy log](/en/docs/guide/change-tracking#destroy-log) (`WorldOptions.DestroyLog`, `world.DestroyedSince`) also
+The [destroy log](/en/docs/guide/change-tracking#destroy-log) (`WorldOptions.DestroyLogCapacity`, `world.DestroyedSince`) also
 reacts to entities going away. The two answer different questions:
 
 | | Cleanup component | Destroy log |
 | --- | --- | --- |
 | Use it to | Run code with the component's last value before the entity goes: close its socket, free its seat | Tell readers which entities went: replication to clients, an index of your own outside the world |
-| What the reader gets | The entity itself, alive and tagged `Destroyed`, with its cleanup components | `EntityId`s only: the entities are gone, their values with them |
+| What the reader gets | The entity itself, alive and tagged `Retired`, with its cleanup components | `EntityId`s only: the entities are gone, their values with them |
 | Readers | One release path: the entity is freed when its last cleanup component is removed | Any number, each from its own tick (every client at the tick it acknowledged) |
 | Missed? | Never: the entity waits for its system | A reader older than the ring is told to resynchronize (`DestroyedSince` returns `false`) |
 | Cost | A retired row until released | A fixed ring of 16-byte records, off by default |
@@ -232,7 +232,7 @@ project that references EasyEcs (`dotnet add package EasyEcs`) and run it with `
 ```csharp title="Components.cs" doccheck=example
 using EasyEcs;
 
-// A cleanup component: an entity destroyed while holding it stays until a system removes it.
+// A cleanup component: Destroy retires an entity holding it, which stays alive until a system removes it.
 public record struct Seat(int Number) : ICleanupComponent;
 
 public record struct Cooldown(int Ticks) : IComponent;
@@ -260,10 +260,10 @@ public class CooldownSystem : EcsSystem
     }
 }
 
-// Gives back the seats of destroyed players. Removing the last cleanup component frees the entity.
+// Gives back the seats of retired players. Removing the last cleanup component frees the entity.
 public class ReleaseSeatsSystem : EcsSystem
 {
-    [ForEach, With<Destroyed>, With<Seat>]
+    [ForEach, With<Retired>, With<Seat>]
     static void Release(Entity player, ref Seats seats)
     {
         seats.Released++;
@@ -296,9 +296,9 @@ player.EnableCooldown();
 world.Update();
 Console.WriteLine($"resumed: {player.Cooldown.Ticks} ticks left");
 
-// The player leaves. It keeps its seat and gets the Destroyed tag; everything else goes.
+// The player leaves. It keeps its seat and gets the Retired tag; everything else goes.
 player.Destroy();
-Console.WriteLine($"destroyed: alive {player.IsAlive}, tagged {player.IsDestroyed}");
+Console.WriteLine($"retired: alive {player.IsAlive}, tagged {player.IsRetired}");
 
 world.Update();
 int released = world.Seats.Released;
@@ -313,12 +313,12 @@ It prints:
 ```text
 stunned: has cooldown False, stunned players 1
 resumed: 2 ticks left
-destroyed: alive True, tagged True
+retired: alive True, tagged True
 after the update: alive False, seats released 1
 ```
 
 The cooldown went from 3 to 2: the update during the stun skipped it. Between `Destroy` and the next update the
-player is still alive, but only `ReleaseSeatsSystem` sees it, because it asks for `Destroyed`.
+player is still alive, but only `ReleaseSeatsSystem` sees it, because it asks for `Retired`.
 
 ## How to use it fast [#how-to-use-it-fast]
 
@@ -350,8 +350,8 @@ and enabled in bulk and one by one (`BulkBenchmark`):
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| A cleanup system without `With<Destroyed>` | It releases resources of live entities | Code review |
-| Never removing the last cleanup component | The retired entity stays forever | `world.Count<Destroyed>()` in your stats |
+| A cleanup system without `With<Retired>` | It releases resources of live entities | Code review |
+| Never removing the last cleanup component | The retired entity stays forever | `world.Count<Retired>()` in your stats |
 | `Disable<T>()` on a cleanup component or `ChildOf` | `InvalidOperationException` | [EECS048](/en/docs/guide/analyzer#eecs048) |
 | `Set` on a disabled component expecting it to stay disabled | `Set` enables it with the new value; use `Enable` to get the kept value back | By design |
 | Forgetting `Without<Inactive>` on a system | Pooled entities keep moving | Code review |

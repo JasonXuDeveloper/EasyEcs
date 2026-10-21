@@ -104,7 +104,7 @@ long tick = restarted.Clock.Tick;                                      // 1234
 保留集合里的单例，维持新进程设好的样子，加载的行也不带变更 tick。
 
 ```csharp
-public record struct Balance(int Gold) : IComponent, ITrackChanges;     // 要持久化；写过的余额要记下来
+public record struct Balance(int Gold) : IComponent, ITracked;     // 要持久化；写过的余额要记下来
 public record struct Connection(Stream Socket) : IComponent;              // 只在运行时有意义，没有 Nino 格式化器
 public record struct Rates(int Interest) : ISingletonComponent;           // 每个版本自己的配置
 public record struct Outbox(int Records) : ISingletonComponent;           // 等着写进数据库的记录

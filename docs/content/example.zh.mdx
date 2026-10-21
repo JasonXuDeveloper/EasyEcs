@@ -57,7 +57,7 @@ flowchart LR
 | 系统之外的 `[ForEach]` runner | `Reports` |
 | `Maybe<T>` | `RegenerationSystem`：着火的玩家回血更少 |
 | [禁用组件](/zh/docs/guide/cleanup-and-disable) | 被冻住单位的 `Attack` 和 `Velocity`；`NewRound` 批量重新启用 |
-| [清理组件](/zh/docs/guide/cleanup-and-disable)（`ICleanupComponent`、`Destroyed`） | `Spawn`：NPC 销毁后留下它，交给 `RespawnSystem.Revive` |
+| [清理组件](/zh/docs/guide/cleanup-and-disable)（`ICleanupComponent`、`Retired`） | `Spawn`：NPC 销毁后留下它，交给 `RespawnSystem.Revive` |
 | [层级](/zh/docs/guide/hierarchy)（`ChildOf`、`Children`、`Descendants`） | 投射物是玩家的子实体；`Transfer` 收集整棵子树 |
 | [遍历中的结构变更](/zh/docs/guide/structural-changes) | 遍历途中增删状态、死亡、复活、生成和销毁投射物 |
 | [预制体](/zh/docs/guide/prefabs)（`Prefab`、`Instantiate`、`Reserve`）与克隆 | `Hero`、`Grunt`、`Brute`（`Grunt` 的变体）；`Mirror` 克隆一个活着的单位 |
@@ -78,7 +78,7 @@ flowchart LR
 
 ### 组件 [#components]
 
-所有组件都是普通的 `record struct`。有四个标记接口会改变组件的存储方式：`ITrackChanges` 会给组件加一列隐藏的变更 tick
+所有组件都是普通的 `record struct`。有四个标记接口会改变组件的存储方式：`ITracked` 会给组件加一列隐藏的变更 tick
 （`Health`、`Burning` 和 `Goal` 需要同步）；`IGroup` 按值拆分表（每个 `Zone` 一组表）；`IIndexed<TKey>` 为它维护一个值索引
 （击杀榜 `Kills`）；`IUniqueIndexed<TKey>` 让一个键只对应一个实体（`Account`：一个账号只有一个英雄）。`Spawn` 是清理组件，`Loot` 和 `Friend` 是动态缓冲的元素，空结构体就是标签。
 
@@ -122,7 +122,7 @@ flowchart LR
 `RespawnSystem` 响应 `Dead` 标签，`DeathSystem` 根本不知道它存在。玩家复活时召回自己的投射物（子实体）、清空背包、
 顺着 `Friend` 关系找到一个活着的好友并出现在他身边，再用一次 `Remove<Dead, Burning, Frozen>()` 去掉所有状态。
 NPC 死亡时，把下一个 NPC 的出生点写进 `Spawn` 清理组件，把掉落交给同区域的一名玩家（只需看一个分组的表），然后被销毁：
-`Spawn` 带着 `Destroyed` 标签留下来，等 `Revive` 生成下一个 NPC 并移除它，旧实体才真正释放。
+`Spawn` 带着 `Retired` 标签留下来，等 `Revive` 生成下一个 NPC 并移除它，旧实体才真正释放。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#respawn</include>
 
@@ -150,7 +150,7 @@ NPC），以及通过 `ref` 写过的背包（`[Changed<DynamicBuffer<Loot>>]`�
 `ReplicationSystem` 面向每次同步都收到了的客户端。断开一阵再回来的客户端（重连、丢包）确认过的是更早的 tick，而且每个客户端
 各不相同。`CatchUp` 只凭这个 tick 就能回答，服务端不用给每个客户端存状态：`ChangedAny<Health, Burning, Goal>`
 只存一个过滤条件，选出三者任一变过的单位，`Since(acked)` 换上这个客户端的 tick 来跑；`Removed<Burning>` 再补上熄灭的火。
-客户端还得知道哪些单位没了，而被销毁的实体已经没有行可找，所以 World 开了销毁日志（`WorldOptions.DestroyLog`，一个环形缓冲，
+客户端还得知道哪些单位没了，而被销毁的实体已经没有行可找，所以 World 开了销毁日志（`WorldOptions.DestroyLogCapacity`，一个环形缓冲，
 记着最近销毁的 id）：`DestroyedSince` 列出这个 tick 以来销毁的 id。客户端落后得比环形缓冲还远时，它返回 false，
 客户端就重新拿一遍整场战斗。
 
@@ -249,7 +249,7 @@ job 声明了它写 `Health`，所以这次命中会打上变更 tick，随下�
 
 ### 诊断 [#diagnostics]
 
-`Describe` 列出每张表的列、行数和字节数，可以直接放进监控面板。`Schedule` 描述系统怎么跑：每个分组的阶段、每个系统读写什么、
+`DescribeTables` 列出每张表的列、行数和字节数，可以直接放进监控面板。`Schedule` 描述系统怎么跑：每个分组的阶段、每个系统读写什么、
 为什么要等前一个阶段；服务器启动时打一次日志。打开 `MeasureSystems` 后，每个系统的运行时间都记在 `system.Stats` 里，
 还有它分配的字节数和访问过的实体数。
 
@@ -272,7 +272,7 @@ while (running)
     if (server.WrittenSinceCheckpoint > 1_000) server.Checkpoint();
 }
 
-var gone = new EntityId[100_000];                         // WorldOptions.DestroyLog 个 id：一定装得下
+var gone = new EntityId[100_000];                         // WorldOptions.DestroyLogCapacity 个 id：一定装得下
 if (!server.CatchUp(acked, gone, out int updates, out int destroyed))   // acked：客户端确认过的 tick
     SendWholeBattle();                                    // 客户端落后得比日志还远
 

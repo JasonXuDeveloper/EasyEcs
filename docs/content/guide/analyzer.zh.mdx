@@ -67,7 +67,7 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS034](#eecs034) | 错误 | 系统里不执行World 更新 | |
 | [EECS035](#eecs035) | 错误 | `[ForEach(Slices = N)]` 至少为 1，且不能和变更过滤条件一起用 | |
 | [EECS036](#eecs036) | 错误 | 组件按它唯一的键建索引 | |
-| [EECS037](#eecs037) | 警告 | job 的 `Writes` 写明 `Execute` 写了什么 | `Execute` 需要的 `Writes` |
+| [EECS037](#eecs037) | 警告 | job 的 `WriteMask` 写明 `Execute` 写了什么 | `Execute` 需要的 `WriteMask` |
 | [EECS038](#eecs038) | 警告 | 改过的组件副本不被丢掉 | `ref var` |
 | [EECS039](#eecs039) | 信息 | `Mut<T>` 用于追踪变化的组件 | `ref T` |
 | [EECS040](#eecs040) | 错误 | `SetIfChanged` 能比较它的类型 | |
@@ -75,7 +75,7 @@ EECS029（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS042](#eecs042) | 错误 | 遍历索引时不修改被索引的组件 | |
 | [EECS043](#eecs043) | 错误 | record struct 键不打印自身 | 显式实现 `Key` |
 | [EECS044](#eecs044) | 错误 | 切片过滤条件只交给遍历 | |
-| [EECS045](#eecs045) | 错误 | `Destroyed` 和 `Disabled<T>` 由 World 来写 | |
+| [EECS045](#eecs045) | 错误 | `Retired` 和 `Disabled<T>` 由 World 来写 | |
 | [EECS046](#eecs046) | 警告 | 只读追踪变化组件的循环用 `Read` | `Read<T1..Tn>` |
 | [EECS047](#eecs047) | 警告 | 结构变更之后不再使用之前取的 ref | |
 | [EECS048](#eecs048) | 错误 | 清理组件和 `ChildOf` 不能禁用 | |
@@ -233,8 +233,8 @@ public class SpawnSystem : EcsSystem
 
 **系统不能引用系统。** 错误。没有代码修复。
 
-系统的字段、自动属性、事件或主构造函数参数是系统类型（系统数组、类型实参也算），或者系统用 `World.GetSystem<T>()` 去找另一个系统。
-互相调用的系统耦合在一起：谁都不能单独移除、调整顺序或测试。`GetSystem` 是给工具、测试和承载 World 的代码用的。
+系统的字段、自动属性、事件或主构造函数参数是系统类型（系统数组、类型实参也算），或者系统用 `World.TryGetSystem<T>(out …)` 去找另一个系统。
+互相调用的系统耦合在一起：谁都不能单独移除、调整顺序或测试。`TryGetSystem` 是给工具、测试和承载 World 的代码用的。
 
 ```csharp doccheck=expect-EECS008
 public class KillSystem : EcsSystem { }
@@ -408,7 +408,7 @@ public static class Bags
 World 改了结构，两件事都会出错：遍历还拿着指向已移动行的引用，并行阶段里的变更会抛异常。
 
 在这样的方法里，规则会报出对 `Entity` 结构成员（`Set`、`Remove`、`Destroy`、`GetOrAdd`、`Clone`、`Disable`、`Enable`、
-`AddRelation`、`RemoveRelation`、`Run`（它的 job 可能改结构），以及生成的 `SetX`、`GetOrAddX`、`RemoveX`）或 `World` 结构成员（`CreateEntity`、`CreateEntities`、
+`Link`、`Unlink`、`Run`（它的 job 可能改结构），以及生成的 `SetX`、`GetOrAddX`、`RemoveX`）或 `World` 结构成员（`CreateEntity`、`CreateEntities`、
 `Instantiate`、`Reserve`、`DestroyEntities`、`DestroyAll`、`SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`、`Load`、`LoadKeeping`、`SaveWithout`、`SaveEntitiesWith`、`LoadEntities`、`LoadEntitiesInto`、`MoveEntities`、
 `GroupBy`、`RemoveTypes`、单例、系统、`Update`、`Capture`、`Restore` 等）的调用。方法自己创建的 World（局部变量里的 `new World()`）
 不算。
@@ -539,7 +539,7 @@ public class TakePortals : EcsSystem
 要求它，等于要的是有 `T` 的实体：没有一行能同时满足两者，方法永远不会运行。
 
 ```csharp
-public record struct Burning(int Ticks) : IComponent, ITrackChanges;
+public record struct Burning(int Ticks) : IComponent, ITracked;
 public record struct Replica(int Health, bool Burning) : IComponent;
 ```
 
@@ -770,7 +770,7 @@ public static class Report
 （`DynamicBuffer<T>.Add`）都算写入，遇到这些就保留写访问。只通过 `.Value` 使用的 `Mut<T>` 参数是在读，同样会报。
 
 ```csharp
-public record struct Armor(int Value) : IComponent, ITrackChanges;
+public record struct Armor(int Value) : IComponent, ITracked;
 ```
 
 ```csharp doccheck=expect-EECS025
@@ -864,7 +864,7 @@ public class Drift : EcsSystem
 字符串（`$"..."`、`+`、`string.Format`、`ToString()`）、装箱，以及对接口做 `foreach`。不报告的情况：`throw` 里的代码、会被编译器
 去掉的调用（`[Conditional]`，例如 `Debug.Assert`）、控制台输出（写入本身比字符串更贵），以及重写了 `UpdateInterval` 的系统的
 `OnUpdate`（执行频率是作者选的）。规则同样覆盖手写 job 的 `Execute`，以及本来就要分配的冷调用：`TrimExcess`、`Capture()`、
-`Describe` 和 `DescribeSchedule` 属于定时器、命令或测试，不属于每次更新。
+`Describe`、`DescribeTables` 和 `DescribeSchedule` 属于定时器、命令或测试，不属于每次更新。
 
 ```csharp doccheck=expect-EECS028
 public class Steer : EcsSystem
@@ -1087,23 +1087,23 @@ public record struct Mount(EntityId Rider) : IComponent, IIndexed<EntityId> { pu
 
 ## EECS037 [#eecs037]
 
-**job 的 `Writes` 与 `Execute` 实际写入的不一致。** 警告。代码修复：改成 `Execute` 需要的 `Writes`。
+**job 的 `WriteMask` 与 `Execute` 实际写入的不一致。** 警告。代码修复：改成 `Execute` 需要的 `WriteMask`。
 
-手写的 job（`IForEach<...>`、`IForEachEntity<...>`、`IForEachBatch<...>`）用 `static int Writes` 声明它写哪些组件（第 `k` 个组件对应
+手写的 job（`IForEach<...>`、`IForEachEntity<...>`、`IForEachBatch<...>`）用 `static int WriteMask` 声明它写哪些组件（第 `k` 个组件对应
 第 `k - 1` 位，`-1` 表示全部，也是默认值）。循环会给它列出的[追踪变化的组件](/zh/docs/guide/change-tracking)在访问的每一行上打 tick，
-并在 `Execute` 移动实体时把其余的组件带过去。`Execute` 写了、`Writes` 却漏掉的追踪组件永远不会被打 tick，`[Changed<T>]` 系统就看不到
+并在 `Execute` 移动实体时把其余的组件带过去。`Execute` 写了、`WriteMask` 却漏掉的追踪组件永远不会被打 tick，`[Changed<T>]` 系统就看不到
 这次变化；`Execute` 只读的追踪组件仍会在每一行上被打 tick，`[Changed<T>]` 系统就会去处理没人改过的行。规则用与 EECS025 相同的判定，
-拿常量 `Writes`（或默认值）和它在 `Execute` 里看到的写入做比较；计算出来的 `Writes` 和 `OwnStamps` 里的位不在检查之列。
+拿常量 `WriteMask`（或默认值）和它在 `Execute` 里看到的写入做比较；计算出来的 `WriteMask` 和 `SelfStamped` 里的位不在检查之列。
 
 ```csharp
-public record struct Shield(int Value) : IComponent, ITrackChanges;
+public record struct Shield(int Value) : IComponent, ITracked;
 ```
 
 ```csharp doccheck=expect-EECS037
 public struct Recharge : IForEach<Shield>
 {
     public void Execute(ref Shield shield) => shield = new Shield(shield.Value + 1);
-    public static int Writes => 0;   // 写了 Shield，却从不打 tick
+    public static int WriteMask => 0;   // 写了 Shield，却从不打 tick
 }
 ```
 
@@ -1113,7 +1113,7 @@ public struct Recharge : IForEach<Shield>
 public struct Recharge : IForEach<Shield>
 {
     public void Execute(ref Shield shield) => shield = new Shield(shield.Value + 1);
-    public static int Writes => 0b1;
+    public static int WriteMask => 0b1;
 }
 ```
 
@@ -1148,7 +1148,7 @@ mana.Value -= 10;
 
 **不追踪变化的组件用了 `Mut<T>`。** 建议（信息级别）。代码修复：`ref T`。
 
-[`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 只给 `[ForEach]` 方法写过的行打 tick，这只对带 `ITrackChanges` 的组件有意义。
+[`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 只给 `[ForEach]` 方法写过的行打 tick，这只对带 `ITracked` 的组件有意义。
 对其他组件，它和 `ref` 参数是同一种写入，只是写法更长（`.Value`、`.Write()`）。规则报出只通过 `.Value` 和 `.Write()` 使用的、
 未追踪的 `T` 的 `Mut<T>`；调用了 `SetIfChanged` 的保留它的比较。
 
@@ -1186,7 +1186,7 @@ public class Clamp : EcsSystem
 `IEquatable<T>` 比较。两者都不是的托管结构体，第一次调用就抛 `NotSupportedException`；生成的 `SetXIfChanged` 只为能比较的类型生成。
 
 ```csharp
-public struct Nickname : IComponent, ITrackChanges { public string Text; }
+public struct Nickname : IComponent, ITracked { public string Text; }
 ```
 
 ```csharp doccheck=expect-EECS040
@@ -1196,7 +1196,7 @@ hero.SetIfChanged(new Nickname { Text = "Ada" });   // NotSupportedException：�
 改成 `record struct`（record 会实现 `IEquatable<T>`），或者自己实现 `IEquatable<T>`：
 
 ```csharp
-public record struct Callsign(string Text) : IComponent, ITrackChanges;   // 通过 IEquatable<Callsign> 比较
+public record struct Callsign(string Text) : IComponent, ITracked;   // 通过 IEquatable<Callsign> 比较
 ```
 
 ```csharp
@@ -1233,7 +1233,7 @@ if (trim) world.TrimExcess();
 
 `index.Find(key)`、索引的有序遍历（`Ascending`、`Descending`、`Range` 等）、`world.Children(parent)`、`world.Descendants(root)`
 和关系索引的 `Find(target)` 边走边读索引自己的列表。给实体加上被索引的组件或换一个新键（`Set`、`SetIfChanged`、`GetOrAdd`、`Enable`、
-`SetAll`、`EnableAll`、带着该组件创建实体、生成的 `SetX`；关系则是 `AddRelation`）会把它加进某个键，而一个变空的键会把它的列表交给接下来
+`SetAll`、`EnableAll`、带着该组件创建实体、生成的 `SetX`；关系则是 `Link`）会把它加进某个键，而一个变空的键会把它的列表交给接下来
 增长的键：遍历会跳过一些实体，或者走到别的实体。规则报出在 `foreach` 遍历某个组件的索引时，对同一个组件做的这类修改。移除组件、断开关系、
 销毁实体只会留下遍历会跳过的空洞；修改之后紧跟 `break`、`return` 或 `throw` 时，遍历在读下一个列表之前就结束了：这两种都不报。
 
@@ -1275,10 +1275,10 @@ public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { M
 
 **需要全部行的地方用了切片过滤条件。** 错误。没有代码修复。
 
-[`QueryFilter.Slice(index, count)`](/zh/docs/guide/systems#slices) 把每张表切成 `count` 份，只有遍历（`ForEach`、`ForEachEntity`、
+[`QueryFilter.Slice(index, of)`](/zh/docs/guide/systems#slices) 把每张表切成 `of` 份，只有遍历（`ForEach`、`ForEachEntity`、
 `ForEachBatch` 及其并行形式）接受其中一份。`Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run` 和批量调用需要每一个匹配的行，
 所以遇到切片过滤条件会抛 `ArgumentException`。规则会顺着局部变量和 `static readonly` 字段追踪过滤条件，还会报出会抛
-`ArgumentOutOfRangeException` 的常量 `Slice` 调用（`count` 小于 1，`index` 不在 `0..count - 1` 内）。`Slice(0, 1)` 就是整张表，不算切片。
+`ArgumentOutOfRangeException` 的常量 `Slice` 调用（`of` 小于 1，`index` 不在 `0..of - 1` 内）。`Slice(0, 1)` 就是整张表，不算切片。
 
 ```csharp doccheck=expect-EECS044
 var half = QueryFilter.Create().Slice(0, 2);
@@ -1295,12 +1295,12 @@ int count = world.Count<Health>();
 
 **手动写入由 World 维护的标签。** 错误。没有代码修复。
 
-`Destroyed` 标记一个因[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)而被保留的实体，`Disabled<T>` 标记一个
+`Retired` 标记一个因[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)而被保留的实体，`Disabled<T>` 标记一个
 [对查询隐藏](/zh/docs/guide/cleanup-and-disable#disable-a-component)的组件。World 在 `Destroy`、`Disable<T>()` 和 `Enable<T>()` 里
-添加和移除它们，同时处理它们所代表的东西：`Destroyed` 连带销毁钩子和销毁日志，`Disabled<T>` 连带被隐藏的值。直接写入它们
+添加和移除它们，同时处理它们所代表的东西：`Retired` 连带销毁钩子和销毁日志，`Disabled<T>` 连带被隐藏的值。直接写入它们
 （对标签本身调用 `Set`、`GetOrAdd`、`Remove`、`SetIfChanged`、`Disable`、`Enable`，以及 `CreateEntity`、`CreateEntities`、`Instantiate`、
 `SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`、`Prefab.Set`），标签说的就是 World 从没做过的事。读取它们（`Has`、`IsDisabled`、
-`With` / `Without` 过滤条件、`[With<Destroyed>]`）才是正确的用法。
+`With` / `Without` 过滤条件、`[With<Retired>]`）才是正确的用法。
 
 ```csharp doccheck=expect-EECS045
 hero.Remove<Disabled<Health>>();   // 标签没了，值却仍然隐藏着
@@ -1322,7 +1322,7 @@ hero.Enable<Health>();
 追踪变化的组件，而循环体只通过 `Entity` 和读取组件来使用 item；有写入、对组件取了 `ref`、或把 item 传给别处的，保留 `Query`。
 
 ```csharp
-public record struct Rating(int Value) : IComponent, ITrackChanges;
+public record struct Rating(int Value) : IComponent, ITracked;
 ```
 
 ```csharp doccheck=expect-EECS046
@@ -1368,7 +1368,7 @@ health.Value -= 5;
 **不能禁用的组件。** 错误。没有代码修复。
 
 [`Disable<T>()`](/zh/docs/guide/cleanup-and-disable#disable-a-component) 隐藏一个组件并保留它的值。
-[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)负责让已销毁的实体留到它的资源释放完，`ChildOf` 是父实体销毁时用来找到
+[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)负责让退休的实体留到它的资源释放完，`ChildOf` 是父实体销毁时用来找到
 [子实体](/zh/docs/guide/hierarchy)的依据：一旦被隐藏，两者都会被遗忘。所以 `Disable<T>()` 和 `DisableAll<T>()` 对它们抛
 `InvalidOperationException`，生成器也不为它们生成 `DisableX`。规则报出这两种调用。
 
@@ -1387,11 +1387,11 @@ unit.Remove<ChildOf>();
 **没有实体能通过的过滤条件。** 错误。没有代码修复。
 
 `[ForEach]` 方法访问的是通过它自己和它所在[分组](/zh/docs/guide/systems#system-groups)全部过滤条件的实体：组件参数、`[With<T>]`、
-`[Changed<T>]`、分组上的 `[With<T>]` 和 `IGroupWith<T>` 要求有某个组件；`[Without<T>]` 和 `IGroupWithout<T>` 要求没有。一个组件既被要求有、
+`[Changed<T>]`、分组上的 `[With<T>]` 和 `ISystemGroupWith<T>` 要求有某个组件；`[Without<T>]` 和 `ISystemGroupWithout<T>` 要求没有。一个组件既被要求有、
 又被要求没有，就没有实体可访问，方法永远不会运行，也没有任何提示。规则报在排除它的那个过滤条件上。
 
 ```csharp doccheck=expect-EECS049
-public struct Living : IGroupWithout<Dead>;
+public struct Living : ISystemGroupWithout<Dead>;
 
 [UpdateInGroup<Living>]
 public class ReviveSystem : EcsSystem

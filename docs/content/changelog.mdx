@@ -21,7 +21,7 @@ major or minor version that needs code changes? The
 - `[ChangedAny<T1..Tn>]` / `[RemovedAny<T1..Tn>]` and `QueryFilter.ChangedAny<T1..Tn>(since)` / `RemovedAny`: rows
   where at least one of 2 to 9 tracked components was written, or lost. One filter kept in a field serves every
   client with `filter.Since(ack)`. See [change tracking](/en/docs/guide/change-tracking).
-- `WorldOptions.DestroyLog` and `world.DestroyedSince(since, into, out count)`: the entities destroyed since a reader's
+- `WorldOptions.DestroyLogCapacity` and `world.DestroyedSince(since, into, out count)`: the entities destroyed since a reader's
   tick, for replicating despawns to clients that acknowledge at different ticks; false (resynchronize) when the reader
   is older than the log (`DestroyLogOldestTick`). See [change tracking](/en/docs/guide/change-tracking).
 - `IUniqueIndexed<TKey>`: a key that names one entity, found with `index.Get(key)` / `TryGet(key, out e)`; every write
@@ -39,7 +39,7 @@ major or minor version that needs code changes? The
   given ones and the prefab's, are checked before any entity is created. See [prefabs](/en/docs/guide/prefabs).
 - `world.TrimExcess()` gives back the memory a peak left: empty tables go, the others shrink, the buffers of saves,
   loads and migrations are released. See [debugging and diagnostics](/en/docs/guide/diagnostics).
-- `[ForEach(Slices = N)]` spreads a method's rows over N runs of its system; `QueryFilter.Slice(index, count)` does it
+- `[ForEach(Slices = N)]` spreads a method's rows over N runs of its system; `QueryFilter.Slice(index, of)` does it
   for a struct job, and `EcsSystem.RunCount` says which run is current. See [systems](/en/docs/guide/systems).
 - `SystemStats` records the bytes each run allocated (`LastAllocated`, `TotalAllocated`) and the entities its
   `[ForEach]` methods visited (`LastEntities`, `TotalEntities`); `world.DescribeSchedule()` describes the stages, the
@@ -62,9 +62,9 @@ major or minor version that needs code changes? The
   the rows of tracked components it visits, as before. See [queries](/en/docs/guide/queries#read).
 - `world.DestroyEntities(ids)` destroys a list of ids with one pass through the structural gate and one cascade;
   stale ids and repeats are skipped. See [structural changes](/en/docs/guide/structural-changes#bulk).
-- `ChildOf` and `Destroyed` have generated members like your own components: `entity.ChildOf`, `HasChildOf`,
+- `ChildOf` and `Retired` have generated members like your own components: `entity.ChildOf`, `HasChildOf`,
   `TryGetChildOf`, `SetChildOf(parent)`, `SetChildOfIfChanged(parent)`, `RemoveChildOf()`, `world.ChildOfIndex`, the
-  prefab writers, and `entity.IsDestroyed`. See [hierarchy](/en/docs/guide/hierarchy#reparent).
+  prefab writers, and `entity.IsRetired`. See [hierarchy](/en/docs/guide/hierarchy#reparent).
 - A `[ForEach]` method that uses its `Entity` only as an identity (`Id`, `Version`, `IsAlive`, `==`, an `EntityId`)
   no longer makes its system run alone: the system is scheduled by its other parameters. See
   [systems](/en/docs/guide/systems).
@@ -88,6 +88,14 @@ major or minor version that needs code changes? The
   `EnsureCapacity<T1..Tn>(count)` and `EnsureCapacity(prefab, count)` are `Reserve`, `DestroyEntities<T1..Tn>(filter)`
   is `DestroyAll`, and a relation's generated `RemoveX(target)` is `UnlinkX(target)` (`RemoveX()` still drops the
   whole buffer). See the [migration guide](/en/docs/migration#v4-7-renames).
+- Renamed, so each name says what the thing is: `ITrackChanges` is `ITracked`, `IGroupWith<T>` / `IGroupWithout<T>`
+  are `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`, the `Destroyed` tag is `Retired` (`entity.IsRetired`; saves of
+  4.6 still load), `world.GetSystem<T>()` is `TryGetSystem<T>(out T)`, `world.Describe()` is `DescribeTables()`,
+  `ColumnInfo.Without` is `Absent`, `SystemStats.Last` / `Total` / `Average` are `LastTime` / `TotalTime` /
+  `AverageTime`, `world.UpdateCount` is `DefaultUpdateCount`, `SystemAccess.RunsAlone()` is `RunAlone()`, `TargetRules`
+  is `TargetPolicyExtensions`, `entity.AddRelation` / `RemoveRelation` / `HasRelation` are `Link` / `Unlink` /
+  `Links`, a relation's generated `AddX(target)` is `LinkX(target)`, a job's `static int Writes` is `WriteMask`, and
+  `LoadEntitiesInto`'s parameter `into` is `targets`. See the [migration guide](/en/docs/migration#v4-7-renames).
 - `SaveEntitiesWith(output, ids, set)` throws `ArgumentException` when the set names a singleton (a group save writes
   none). See the [migration guide](/en/docs/migration#v4-7-save-entities).
 - `EcsSystem` has a public `RunCount`: a member of that name in a system hides it (warning CS0108). See the
@@ -120,7 +128,7 @@ major or minor version that needs code changes? The
 - A nested component or buffer element named like another struct of its namespace got some generated members
   (`DisableX`, `InX`, `world.XIndex`, a buffer's members) under the same names as the other type's, so calls to
   them did not compile (ambiguous). Such a type now gets no generated members; the generic API names it.
-- A relation named like an `Entity` member's suffix (`Relation`, for `HasRelation`) lost its `LinksX(target)`.
+- A relation named like the suffix of an `Entity` member lost its `LinksX(target)`.
 - Two structs of one namespace whose generated members shared a name (the tag `Dead` and the component `IsDead`,
   `Target` and `HasTarget`, `Zone : IIndexed<int>` and the singleton `ZoneIndex`) made every call of that member
   ambiguous. Neither type gets it now; both keep their other members.
@@ -153,23 +161,23 @@ major or minor version that needs code changes? The
 - `entity.GetOrAdd<T>()` of an indexed component that the entity lacked did not tell the value index, so `Find` and
   `Count` missed the entity until its next `Set`; the default value's key is now indexed. See
   [indexes and relations](/en/docs/guide/indexes-and-relations).
-- `MoveEntities` copied an entity destroyed already and kept for its cleanup components into the target world and
+- `MoveEntities` copied a retired entity (kept alive for its cleanup components) into the target world and
   counted it as moved, while it stayed in the source: it existed twice. Such entities are now skipped like stale ids.
   See [migration](/en/docs/guide/migration-and-unload#move-entities).
 - `MoveEntities` of an entity holding cleanup components copied them to the new entity too, while the original kept
   them to be released, so the resource was released twice. Cleanup components now stay behind only. See
   [migration](/en/docs/guide/migration-and-unload#move-entities).
-- `SetAll` without a filter naming `Destroyed` reached entities destroyed already and kept for their cleanup
-  components, giving them the component and bringing them back into queries. They are now left out. See
+- `SetAll` without a filter naming `Retired` reached retired entities (kept alive for their cleanup
+  components), giving them the component and bringing them back into queries. They are now left out. See
   [bulk changes](/en/docs/guide/bulk).
-- `Clone()` of an entity destroyed already and kept for its cleanup components made another such entity, with a copy
+- `Clone()` of a retired entity (kept alive for its cleanup components) made another such entity, with a copy
   of the cleanup components; it now throws `InvalidOperationException`. See
   [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components).
 - Destroying an entity that holds cleanup components counted the loss of its other components as removals, so
   `[Removed<T>]` methods and `Removed<T>(since)` filters visited it, while a destroyed entity without cleanup components
   is never visited. Retiring an entity is no longer a removal; the destroy log reports it once it is freed. See
   [removal detection](/en/docs/guide/change-tracking#removal-detection).
-- `LoadEntitiesInto` accepted the same entity twice in `into`, the second saved entity overwriting the first; it now
+- `LoadEntitiesInto` accepted the same entity twice in its targets, the second saved entity overwriting the first; it now
   throws `ArgumentException`. See [migration](/en/docs/guide/migration-and-unload#records).
 - `world.Instantiate(prefab)` of a prefab with members threw inside a query loop or a system (`Snapshots cannot be
   captured or restored while a query iterates`), though a prefab without members could be instantiated there. A

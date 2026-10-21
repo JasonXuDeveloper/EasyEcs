@@ -15,7 +15,7 @@ A column of a table ([`TableInfo`](/en/docs/reference/tableinfo)).
 #### Parameters
 
 - `Type`: The component type.
-- `Without`: Living rows of the table without the component (removed or disabled: no row moved).
+- `Absent`: Living rows of the table without the component (removed or disabled: no row moved).
 - `Group`: The group every row of the table is in, for an [`IGroup`](/en/docs/reference/igroup) component; else 0.
 
 ## Constructors
@@ -23,7 +23,7 @@ A column of a table ([`TableInfo`](/en/docs/reference/tableinfo)).
 ### `ColumnInfo` [#ctor]
 
 ```csharp
-public ColumnInfo(Type Type, int Without, int Group);
+public ColumnInfo(Type Type, int Absent, int Group);
 ```
 
 A column of a table ([`TableInfo`](/en/docs/reference/tableinfo)).
@@ -31,10 +31,18 @@ A column of a table ([`TableInfo`](/en/docs/reference/tableinfo)).
 **Parameters**
 
 - `Type`: The component type.
-- `Without`: Living rows of the table without the component (removed or disabled: no row moved).
+- `Absent`: Living rows of the table without the component (removed or disabled: no row moved).
 - `Group`: The group every row of the table is in, for an [`IGroup`](/en/docs/reference/igroup) component; else 0.
 
 ## Properties
+
+### `Absent` [#absent]
+
+```csharp
+public int Absent { get; init; }
+```
+
+Living rows of the table without the component (removed or disabled: no row moved).
 
 ### `Group` [#group]
 
@@ -52,20 +60,12 @@ public Type Type { get; init; }
 
 The component type.
 
-### `Without` [#without]
-
-```csharp
-public int Without { get; init; }
-```
-
-Living rows of the table without the component (removed or disabled: no row moved).
-
 ## Methods
 
 ### `Deconstruct` [#deconstruct]
 
 ```csharp
-public void Deconstruct(out Type Type, out int Without, out int Group);
+public void Deconstruct(out Type Type, out int Absent, out int Group);
 ```
 
 ### `Equals` [#equals]

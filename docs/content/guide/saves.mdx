@@ -118,7 +118,7 @@ of the set; `LoadKeeping(input, in keep, markWritten: false)` keeps the singleto
 and loads the rows without a change tick.
 
 ```csharp
-public record struct Balance(int Gold) : IComponent, ITrackChanges;     // persists; written balances are recorded
+public record struct Balance(int Gold) : IComponent, ITracked;     // persists; written balances are recorded
 public record struct Connection(Stream Socket) : IComponent;              // runtime only, no Nino formatter
 public record struct Rates(int Interest) : ISingletonComponent;           // configuration of each version
 public record struct Outbox(int Records) : ISingletonComponent;           // records waiting for the database

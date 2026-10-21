@@ -32,9 +32,9 @@
       或者停掉这个系统，把异常记进 <see cref="P:EasyEcs.EcsSystem.Error" />。
     </summary>
   </member>
-  <member name="P:EasyEcs.WorldOptions.DestroyLog" source="40aaf33ab2fd">
+  <member name="P:EasyEcs.WorldOptions.DestroyLogCapacity" source="ead16eb931a8">
     <summary>
-      销毁日志的容量（默认 0：关闭）：最近销毁的这么多个实体，每个带着它被销毁时的变更 tick，
+      销毁日志的容量（默认 0：关闭）：最近销毁的这么多个实体的 id（不再存活的：退休的实体在被释放时才记录），每个带着它被销毁时的变更 tick，
       <see cref="M:EasyEcs.World.DestroyedSince(System.UInt64,System.Span{EasyEcs.EntityId},System.Int32@)" /> 把它们报告给各自保留自己 tick 的读者
       （每个客户端一个同步标记）。预先分配（每条记录 16 字节）；之后一次销毁写一条记录，日志关闭时没有任何开销。容量按读者两次读取之间
       可能留下的最长间隔里的销毁数来定：更旧的读者会被告知要重新同步（<see cref="P:EasyEcs.World.DestroyLogOldestTick" />）。

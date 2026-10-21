@@ -48,16 +48,6 @@ public World World { get; }
 
 ## 方法 [#methods]
 
-### `AddRelation` [#addrelation]
-
-```csharp
-public Entity AddRelation<T>(in T relation) where T : struct, IRelation;
-```
-
-把实体链接到 `relation` 的目标：追加到实体的 [`DynamicBuffer`](/zh/docs/reference/dynamicbuffer)（没有就先添加）和关系索引里。返回实体。均摊 O(1)；只有添加缓冲时才是结构变更。实体不存活时抛异常。
-
-**复杂度**（[API 表](/zh/docs/api)）：均摊 O(1)
-
 ### `Clone` [#clone]
 
 ```csharp
@@ -68,7 +58,7 @@ public Entity Clone();
 
 **异常**
 
-- `InvalidOperationException`：这个实体已经销毁，只是因为清理组件才保留着（[`Destroyed`](/zh/docs/reference/destroyed)）。
+- `InvalidOperationException`：这个实体已退休：只是因为清理组件才保留着（[`Retired`](/zh/docs/reference/retired)）。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(c)
 
@@ -127,7 +117,7 @@ public override bool Equals(object obj);
 public ref T Get<T>() where T : struct, IComponent;
 ```
 
-组件 `T` 的 ref；实体没有它或者不存活时抛异常。对被追踪组件（[`ITrackChanges`](/zh/docs/reference/itrackchanges)）算一次写入。O(1)。
+组件 `T` 的 ref；实体没有它或者不存活时抛异常。对被追踪组件（[`ITracked`](/zh/docs/reference/itracked)）算一次写入。O(1)。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
 
@@ -182,16 +172,6 @@ public bool Has<T1, T2, T3, T4, T5, T6, T7, T8, T9>() where T1 : struct, ICompon
 - `entity.Has<T>()`：O(1)
 - `entity.Has<T1..Tn>()`：O(n)
 
-### `HasRelation` [#hasrelation]
-
-```csharp
-public bool HasRelation<T>(EntityId target) where T : struct, IRelation;
-```
-
-实体是否有 `T` 链接指向 `target`。O(实体的链接数)。
-
-**复杂度**（[API 表](/zh/docs/api)）：O(L)
-
 ### `IsDisabled` [#isdisabled]
 
 ```csharp
@@ -202,13 +182,33 @@ public bool IsDisabled<T>() where T : struct, IComponent;
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
 
+### `Link` [#link]
+
+```csharp
+public Entity Link<T>(in T relation) where T : struct, IRelation;
+```
+
+把实体链接到 `relation` 的目标：追加到实体的 [`DynamicBuffer`](/zh/docs/reference/dynamicbuffer)（没有就先添加）和关系索引里。返回实体。均摊 O(1)；只有添加缓冲时才是结构变更。实体不存活时抛异常。
+
+**复杂度**（[API 表](/zh/docs/api)）：均摊 O(1)
+
+### `Links` [#links]
+
+```csharp
+public bool Links<T>(EntityId target) where T : struct, IRelation;
+```
+
+实体是否有 `T` 链接指向 `target`。O(实体的链接数)。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(L)
+
 ### `Read` [#read]
 
 ```csharp
 public ref readonly T Read<T>() where T : struct, IComponent;
 ```
 
-组件 `T` 的只读 ref；实体没有它或者不存活时抛异常。不算写入：被追踪组件（[`ITrackChanges`](/zh/docs/reference/itrackchanges)）不打 tick。O(1)。
+组件 `T` 的只读 ref；实体没有它或者不存活时抛异常。不算写入：被追踪组件（[`ITracked`](/zh/docs/reference/itracked)）不打 tick。O(1)。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
 
@@ -232,16 +232,6 @@ public Entity Remove<T1, T2, T3, T4, T5, T6, T7, T8, T9>() where T1 : struct, IC
 
 **复杂度**（[API 表](/zh/docs/api)）：O(n)
 
-### `RemoveRelation` [#removerelation]
-
-```csharp
-public int RemoveRelation<T>(EntityId target) where T : struct, IRelation;
-```
-
-删掉实体指向 `target` 的 `T` 链接（目标是它的每一个元素）。返回删掉的数量；只有确实删掉了链接，缓冲区才算写入。O(实体的链接数)。实体不存活时抛异常。
-
-**复杂度**（[API 表](/zh/docs/api)）：O(L)
-
 ### `Run` [#run]
 
 ```csharp
@@ -258,7 +248,7 @@ public bool Run<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job) where T1
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-实体有 `T1, T2` 全部组件时，在它上面运行 `job`，传入的 ref 和 `World.ForEachEntity` 给的一样：job 运行了返回 true，实体缺组件或已不存活返回 false。job 写入的组件（`IForEachEntity.Writes`）算作写入；job 做的结构变更立即生效，这些写入会带到实体的新行上（job 抛异常时也一样）。实现了 [`INoStructuralChanges`](/zh/docs/reference/inostructuralchanges) 的 job 省掉这些簿记。O(1)，零分配。
+实体有 `T1, T2` 全部组件时，在它上面运行 `job`，传入的 ref 和 `World.ForEachEntity` 给的一样：job 运行了返回 true，实体缺组件或已不存活返回 false。job 写入的组件（`IForEachEntity.WriteMask`）算作写入；job 做的结构变更立即生效，这些写入会带到实体的新行上（job 抛异常时也一样）。实现了 [`INoStructuralChanges`](/zh/docs/reference/inostructuralchanges) 的 job 省掉这些簿记。O(1)，零分配。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 
@@ -345,6 +335,16 @@ public ref T TryGetRef<T>(out bool found) where T : struct, IComponent;
 实体拥有组件 `T` 时返回它的 ref，`found` 为 true；否则返回空 ref：用之前先检查 `found`。实体不存活时 `found` 为 false。找到时，对被追踪组件算一次写入。O(1)。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
+
+### `Unlink` [#unlink]
+
+```csharp
+public int Unlink<T>(EntityId target) where T : struct, IRelation;
+```
+
+删掉实体指向 `target` 的 `T` 链接（目标是它的每一个元素）。返回删掉的数量；只有确实删掉了链接，缓冲区才算写入。O(实体的链接数)。实体不存活时抛异常。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(L)
 
 ## 运算符 [#operators]
 

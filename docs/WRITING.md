@@ -140,7 +140,7 @@ Write the Chinese page for Chinese .NET and game server developers, as one of th
 translation of the English page: keep its content and structure, but write each sentence natively.
 
 - Terms: 实体、组件、系统、单例、标签、查询、原型（archetype，第一次出现时括注）、结构变更、变更追踪、预制体、动态缓冲、
-  索引、关系、快照、tick、World。API、类型名、特性名保持英文：`[ForEach]`、`ITrackChanges`、`World.Update()`。
+  索引、关系、快照、tick、World。API、类型名、特性名保持英文：`[ForEach]`、`ITracked`、`World.Update()`。
 - Short sentences, one point each. Use 你 sparingly; many sentences need no subject.
 - Full-width punctuation（，。：；（）、“”）in prose; half-width inside code. A space is not needed between Chinese and
   English or numbers.

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.TableInfo" source="4b6bc20c6b43">
-    <summary>一张表：拥有同一组组件列的实体（<see cref="M:EasyEcs.World.Describe" />）。</summary>
+  <member name="T:EasyEcs.TableInfo" source="10bebf5c3cb4">
+    <summary>一张表：拥有同一组组件列的实体（<see cref="M:EasyEcs.World.DescribeTables" />）。</summary>
     <param name="Columns">组件列，按位顺序排列（不列出变更 tick 列和 <see cref="T:EasyEcs.Disabled`1" /> 列）。</param>
     <param name="Entities">存活实体数。</param>
     <param name="Rows">已用的行：实体，加上进行中的查询留下的空洞（查询结束时补上）。</param>

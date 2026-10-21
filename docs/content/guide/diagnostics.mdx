@@ -7,7 +7,7 @@ icon: Stethoscope
 
 An entity is an id, and its data is spread over table columns, so a debugger watch on a handle shows little by
 itself, and a server that slows down does not say which system grew. EasyEcs answers both from data the world already
-has: `world.Describe()` lists the tables with their rows and bytes, `entity.Describe()` (and the debugger) shows an
+has: `world.DescribeTables()` lists the tables with their rows and bytes, `entity.Describe()` (and the debugger) shows an
 entity's component values, `system.Stats` times every system and counts what it allocated and visited,
 `world.DescribeSchedule()` shows which systems run together and why, and `system.Error` keeps the exception of a
 system that failed. When a peak has passed, `world.TrimExcess()` gives its memory back.
@@ -47,12 +47,12 @@ what a client sends back to name an entity.
 
 ### Look at the tables [#tables]
 
-`world.Describe()` returns one `TableInfo` per table: its `Columns` (each a component `Type`, the rows `Without` it,
+`world.DescribeTables()` returns one `TableInfo` per table: its `Columns` (each a component `Type`, the rows `Absent` from it,
 and its `Group` in a [grouped](/en/docs/guide/groups) world), its living `Entities`, the `Rows` in use, the
 `Capacity` allocated and the `Bytes` that costs.
 
 ```csharp
-foreach (var table in world.Describe())
+foreach (var table in world.DescribeTables())
 {
     var names = new List<string>();
     foreach (var column in table.Columns) names.Add(column.Type.Name);
@@ -64,7 +64,7 @@ What to read in it:
 
 - **Where the memory is:** `Bytes` per table, which grows with `Capacity`, not with `Entities`: a table that once
   held a wave keeps its rows for the next one, until [`TrimExcess`](#trim) shrinks it.
-- **Removed components:** a column's `Without` counts the rows that removed or disabled it, since
+- **Removed components:** a column's `Absent` counts the rows that removed or disabled it, since
   [removing keeps the row](/en/docs/guide/entities-and-components#storage). A large share means most entities of the
   table no longer have it.
 - **Combinations:** each distinct set of components is a table. Hundreds of small tables mean the code adds many
@@ -78,7 +78,7 @@ summing table counts.
 ### Time each system [#timing]
 
 With `WorldOptions.MeasureSystems`, every run of a system (its `OnUpdate` and its `[ForEach]` methods) is measured:
-`system.Stats` holds `Runs`, `Last`, `Total` and `Average`, plus the bytes and entities below. `world.Systems` lists the systems without allocating, so
+`system.Stats` holds `Runs`, `LastTime`, `TotalTime` and `AverageTime`, plus the bytes and entities below. `world.Systems` lists the systems without allocating, so
 a status page can show the slowest one ([measuring systems](/en/docs/guide/systems#measuring-systems)).
 
 ```csharp
@@ -94,7 +94,7 @@ using var measured = new World(new WorldOptions { MeasureSystems = true });
 measured.AddSystem<RegenSystem>();
 measured.Update();
 foreach (var system in measured.Systems)
-    Console.WriteLine($"{system.GetType().Name}: last {system.Stats.Last.TotalMicroseconds} μs");
+    Console.WriteLine($"{system.GetType().Name}: last {system.Stats.LastTime.TotalMicroseconds} μs");
 ```
 
 Each run also records what it allocated and how many entities it visited, so a status page can name the system that
@@ -117,7 +117,7 @@ What the entity count means:
 foreach (var system in measured.Systems)
 {
     var stats = system.Stats;
-    Console.WriteLine($"{system.GetType().Name}: {stats.Last.TotalMicroseconds} μs, " +
+    Console.WriteLine($"{system.GetType().Name}: {stats.LastTime.TotalMicroseconds} μs, " +
                       $"{stats.LastAllocated} B, {stats.LastEntities} entities");
 }
 ```
@@ -244,7 +244,7 @@ public sealed class SystemMetrics : IDisposable
             _tags[i++] = [new KeyValuePair<string, object>("system", system.GetType().Name)];
 
         _meter.CreateObservableGauge<double>("ecs.system.duration",
-            () => Read(static stats => stats.Last.TotalMilliseconds), unit: "ms");
+            () => Read(static stats => stats.LastTime.TotalMilliseconds), unit: "ms");
         _meter.CreateObservableGauge<long>("ecs.system.entities",
             () => Read(static stats => stats.LastEntities), unit: "{entity}");
         _meter.CreateObservableCounter<long>("ecs.system.allocated",
@@ -301,10 +301,10 @@ restoring as before), the entity records (handles index them unchecked), indexes
 
 ```csharp
 long before = 0;
-foreach (var table in world.Describe()) before += table.Bytes;
+foreach (var table in world.DescribeTables()) before += table.Bytes;
 world.TrimExcess();
 long after = 0;
-foreach (var table in world.Describe()) after += table.Bytes;
+foreach (var table in world.DescribeTables()) after += table.Bytes;
 Console.WriteLine($"gave back {before - after:N0} bytes of tables");
 ```
 
@@ -331,7 +331,7 @@ foreach (var system in guarded.Systems)
 ### Which thread [#threads]
 
 Read diagnostics on the world's owner thread between two updates, like the [hosting guide](/en/docs/guide/hosting#reads)
-publishes a status: the numbers then describe one finished tick. `world.Describe()` may also be called from another
+publishes a status: the numbers then describe one finished tick. `world.DescribeTables()` may also be called from another
 thread for a rough picture (it never corrupts the world), but a table changed at the same time may be read half-way.
 `world.DescribeSchedule()` is safe from any thread. `entity.Describe()`, `system.Stats` and `TrimExcess()` belong to
 the owner thread: another thread reads the stats through a copy, as [the metrics](#metrics) do.
@@ -430,13 +430,13 @@ public static class Diagnostics
     public static void PrintTables(World world)
     {
         Console.WriteLine($"{world.EntityCount} entities");
-        foreach (var table in world.Describe())
+        foreach (var table in world.DescribeTables())
         {
             var columns = new List<string>();
             foreach (var column in table.Columns)
             {
-                string without = column.Without > 0 ? $" ({column.Without} without)" : "";
-                columns.Add(column.Type.Name + without);
+                string absent = column.Absent > 0 ? $" ({column.Absent} absent)" : "";
+                columns.Add(column.Type.Name + absent);
             }
 
             Console.WriteLine($"  [{string.Join(", ", columns)}] {table.Entities} entities, " +
@@ -474,7 +474,7 @@ It prints:
 ```text
 1200 entities
   [] 0 entities, 64 rows allocated, 512 bytes
-  [Position, Velocity (1 without)] 1000 entities, 1024 rows allocated, 24,840 bytes
+  [Position, Velocity (1 absent)] 1000 entities, 1024 rows allocated, 24,840 bytes
   [Position, Cooldown, Health] 200 entities, 256 rows allocated, 6,256 bytes
 Entity 1000v1
   Position { X = 5, Y = 5 }
@@ -484,7 +484,7 @@ MoveSystem: 3 runs, on
 CooldownSystem: 3 runs, off: a cooldown went below zero
 ```
 
-The walker that stopped stays in its table, counted in `Velocity (1 without)`. The first table is the world's empty
+The walker that stopped stays in its table, counted in `Velocity (1 absent)`. The first table is the world's empty
 table, where `CreateEntity()` without components puts an entity. The guard shows the value the buggy system left,
 `Cooldown { Ticks = -1 }`, and `CooldownSystem` is off with its exception kept while `MoveSystem` goes on running:
 the third update did not stop at the bug.
@@ -493,7 +493,7 @@ the third update did not stop at the bug.
 
 | Instead of | Do | Why |
 | --- | --- | --- |
-| `Describe()` on every tick | On a request or a timer, between updates | It allocates its answer |
+| `DescribeTables()` / `Describe()` on every tick | On a request or a timer, between updates | It allocates its answer |
 | `entity.Describe()` to test for a component | `HasX`, `TryGetX`, a filter | No boxing, no allocation |
 | A stopwatch around `world.Update()` | `MeasureSystems` and `system.Stats` | Per system: two clock and two allocation counter reads per run, one `Count` per `[ForEach]` pass |
 | `GC.GetAllocatedBytesForCurrentThread()` around the whole tick | `system.Stats.LastAllocated` | Names the system, counts its parallel chunks too |
@@ -510,7 +510,7 @@ Describing the battle server's world for a dashboard, one entity for a debugger 
 
 ## What it costs [#what-it-costs]
 
-- **`world.Describe()`:** O(tables + columns); allocates one `TableInfo` per table and its columns.
+- **`world.DescribeTables()`:** O(tables + columns); allocates one `TableInfo` per table and its columns.
 - **`entity.Describe()`:** O(components of the entity); boxes each value.
 - **`MeasureSystems`:** per system run, two timestamp reads and two reads of the thread's allocation counter (two
   more per chunk a helper thread runs), and one `Count` per `[ForEach]` pass (O(matching tables), plus the row
@@ -527,8 +527,8 @@ Describing the battle server's world for a dashboard, one entity for a debugger 
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| `Describe()` in a system or every tick | Allocations on the hot path | Code review |
-| Reading `Describe()` from another thread during an update | Counts of a table caught half-way through a change | Read between updates on the owner thread |
+| `DescribeTables()` / `Describe()` in a system or every tick | Allocations on the hot path | Code review |
+| Reading `DescribeTables()` from another thread during an update | Counts of a table caught half-way through a change | Read between updates on the owner thread |
 | Expecting `Bytes` to drop when entities leave | Tables keep their capacity for the next wave | Call `TrimExcess()` after the peak |
 | `TrimExcess()` every tick | Tables dropped and rebuilt, growth paid again: allocations on the tick | Call it from a maintenance task ([common mistakes](/en/docs/guide/common-mistakes#trim-every-tick)) |
 | `TrimExcess()` inside a `Query` loop or a `[ForEach]` method | `InvalidOperationException` | [EECS041](/en/docs/guide/analyzer#eecs041): call it between updates |
@@ -551,6 +551,6 @@ Describing the battle server's world for a dashboard, one entity for a debugger 
     What an exception from EasyEcs means and how to fix it.
   </Card>
   <Card title="Architecture" href="/en/docs/architecture#storage-model">
-    The tables, columns and rows that `Describe` reports.
+    The tables, columns and rows that `DescribeTables` reports.
   </Card>
 </Cards>

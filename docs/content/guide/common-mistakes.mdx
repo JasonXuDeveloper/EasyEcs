@@ -203,7 +203,7 @@ public class LootSystem : EcsSystem { }
 
 public class KillRewards : EcsSystem
 {
-    protected override void OnUpdate() => World.GetSystem<LootSystem>();
+    protected override void OnUpdate() { if (World.TryGetSystem(out LootSystem loot)) loot.Enabled = false; }
 }
 ```
 
@@ -274,10 +274,10 @@ public class ShowGold : EcsSystem
 }
 ```
 
-Change ticks cost a column, so only components that ask for them have them. Mark the component `ITrackChanges`:
+Change ticks cost a column, so only components that ask for them have them. Mark the component `ITracked`:
 
 ```csharp
-public record struct Gold(int Amount) : IComponent, ITrackChanges;
+public record struct Gold(int Amount) : IComponent, ITracked;
 public record struct Hud(int Gold) : IComponent;
 
 public class ShowGold : EcsSystem
@@ -286,7 +286,7 @@ public class ShowGold : EcsSystem
 }
 ```
 
-Caught by the C# compiler (the attribute requires `ITrackChanges`: CS0315). More in
+Caught by the C# compiler (the attribute requires `ITracked`: CS0315). More in
 [mark the component](/en/docs/guide/change-tracking#mark-the-component).
 
 ### Reading a tracked component through a `ref` [#read-tracked-by-ref]
@@ -308,7 +308,7 @@ Caught by [EECS025](/en/docs/guide/analyzer#eecs025) (warning, with a code fix).
 ### A tracked component written only sometimes through a `ref` [#ref-writes-every-row]
 
 ```csharp
-public record struct Facing(int Direction) : IComponent, ITrackChanges;   // sent to clients when it changes
+public record struct Facing(int Direction) : IComponent, ITracked;   // sent to clients when it changes
 ```
 
 ```csharp
@@ -345,7 +345,7 @@ sometimes; [EECS025](/en/docs/guide/analyzer#eecs025) catches the one that never
 ### A `Query` loop that only reads tracked components [#query-that-reads]
 
 ```csharp
-public record struct Rating(int Value) : IComponent, ITrackChanges;   // replicated when it changes
+public record struct Rating(int Value) : IComponent, ITracked;   // replicated when it changes
 ```
 
 ```csharp doccheck=expect-EECS046
@@ -370,7 +370,7 @@ Caught by [EECS046](/en/docs/guide/analyzer#eecs046) (warning, with a code fix).
 ### `[Removed<T>]` that takes `T` [#removed-takes-t]
 
 ```csharp
-public record struct Burning(int Ticks) : IComponent, ITrackChanges;
+public record struct Burning(int Ticks) : IComponent, ITracked;
 public record struct Glow(bool On) : IComponent;
 ```
 
@@ -397,7 +397,7 @@ Caught by [EECS016](/en/docs/guide/analyzer#eecs016). More in
 ### Expecting `[Removed<T>]` to report destroyed entities [#removed-destroyed]
 
 ```csharp
-public record struct Avatar(int Skin) : IComponent, ITrackChanges;
+public record struct Avatar(int Skin) : IComponent, ITracked;
 public record struct Despawns(int Count) : ISingletonComponent;
 ```
 
@@ -413,7 +413,7 @@ public class CountDespawns : EcsSystem
 never told it is gone. Turn on the world's destroy log and read it with each client's own acknowledged tick:
 
 ```csharp
-using var server = new World(new WorldOptions { DestroyLog = 4_096 });   // the destroys a client may lag behind
+using var server = new World(new WorldOptions { DestroyLogCapacity = 4_096 });   // the destroys a client may lag behind
 var gone = new EntityId[4_096];                                          // allocated once, reused for every client
 ulong acked = server.ChangeTick;                                          // the client's last acknowledged tick
 server.Update();
@@ -491,12 +491,12 @@ public readonly record struct Guild(long Id) : IComponent;
 ```
 
 Every new kind of actor needs its group written again, and a generic interface cannot carry the filter as an
-attribute: C# refuses a type parameter there (`[With<In<TSelf>>]` is CS8968). The interfaces `IGroupWith<T>` and
-`IGroupWithout<T>` can name it, so one generic interface makes each actor type its own key component, group and
+attribute: C# refuses a type parameter there (`[With<In<TSelf>>]` is CS8968). The interfaces `ISystemGroupWith<T>` and
+`ISystemGroupWithout<T>` can name it, so one generic interface makes each actor type its own key component, group and
 filter:
 
 ```csharp
-public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, IGroupWith<In<TSelf>>
+public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;
 
 public readonly record struct Shop(long Id) : IActor<Shop> { Shop IIndexed<Shop>.Key => this; }
@@ -774,7 +774,7 @@ No rule catches it. More in [moving a hierarchy](/en/docs/guide/hierarchy#moving
 ### Restoring a record that is then saved again [#record-written-back]
 
 ```csharp
-public record struct Bank(long Gold) : IComponent, ITrackChanges;   // persistent: saved when it changes
+public record struct Bank(long Gold) : IComponent, ITracked;   // persistent: saved when it changes
 public record struct Connection(int Socket) : IComponent;           // runtime only
 ```
 
@@ -818,7 +818,7 @@ becomes churn, and each call also walks every table and cached query. Call it af
 
 ```csharp
 world.Update();
-if (world.UpdateCount % 12_000 == 0 && world.EntityCount < 10_000)   // every ten minutes at 20 Hz, once quiet
+if (world.DefaultUpdateCount % 12_000 == 0 && world.EntityCount < 10_000)   // every ten minutes at 20 Hz, once quiet
     world.TrimExcess();
 ```
 
@@ -875,7 +875,7 @@ Caught by [EECS010](/en/docs/guide/analyzer#eecs010). More in
 ```csharp
 public struct Mend : IForEachEntity<Health>
 {
-    public static int Writes => 1;
+    public static int WriteMask => 1;
 
     public void Execute(Entity target, ref Health hp) => hp.Value += 1;
 }

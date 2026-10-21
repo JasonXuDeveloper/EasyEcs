@@ -34,14 +34,14 @@ apply immediately. This page maps the concepts; it has no benchmarks against Uni
 | `ISharedComponentData` (chunks split by value) | `IGroup` + `world.GroupBy<T>()` | A table per group value; `QueryFilter.InGroup<T>(value)` walks one. |
 | `IBufferElementData` + `DynamicBuffer<T>` | `DynamicBuffer<T>` | A list per entity, held as a component; writes are tracked. |
 | `IEnableableComponent`, `SetComponentEnabled` | `entity.Disable<T>()` / `Enable<T>()` | The value stays and queries skip it; no row moves after the first time. |
-| `ICleanupComponentData` | `ICleanupComponent` + the `Destroyed` tag | A destroyed entity keeps its cleanup components until a system removes them. |
+| `ICleanupComponentData` | `ICleanupComponent` + the `Retired` tag | `Destroy` retires an entity that has cleanup components: it keeps them until a system removes them. |
 | `SystemAPI.GetSingleton<T>()` | `ISingletonComponent`, a `ref T` parameter of a `[ForEach]` method | Per-world singletons, no entity needed. |
 | `ISystem` / `SystemBase` with `OnCreate` / `OnUpdate` / `OnDestroy` | `EcsSystem` with `OnCreate` / `OnUpdate` / `OnDestroy` | Systems are stateless: state goes into components or singletons ([EECS007](/en/docs/guide/analyzer#eecs007)). |
 | `SystemAPI.Query<RefRW<A>, RefRO<B>>()` | a `[ForEach]` method taking `ref A`, `in B` | The generator writes the job; `ref` is a write, `in` a read. |
 | `IJobEntity` | a `[ForEach]` method (a generated struct job) | |
 | `ScheduleParallel` | `[ForEach(Parallel = true)]` | Chunks of rows on the thread pool; the analyzer rejects methods that would race ([EECS010](/en/docs/guide/analyzer#eecs010)). |
 | `EntityQuery` with `WithAll` / `WithNone` / `WithAny` | `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`; `QueryFilter` for ad-hoc calls | |
-| Change filter (`WithChangeFilter<T>`) | `ITrackChanges` + `[Changed<T>]` | Per row, not per chunk, and opt-in per component type. |
+| Change filter (`WithChangeFilter<T>`) | `ITracked` + `[Changed<T>]` | Per row, not per chunk, and opt-in per component type. |
 | Structural change events | `[Removed<T>]` | The entities that lost a tracked component since the system last ran. |
 | `EntityCommandBuffer` | none | `entity.Set`, `Remove`, `Destroy` apply at once, also mid-pass. |
 | `ComponentSystemGroup`, `[UpdateInGroup]` | `ISystemGroup`, `[UpdateInGroup<T>]`, `world.Update<TGroup>()` | |
@@ -125,7 +125,7 @@ method cannot change structure, and the analyzer says so.
 
 Unity's change filter works per chunk: a chunk counts as changed when any system had write access to it, so a filter
 returns whole chunks, written or not. EasyEcs tracks per row, opt-in per component: mark the component
-`ITrackChanges` and `[Changed<T>]` visits only the rows written through a `ref` since the system last ran, skipping
+`ITracked` and `[Changed<T>]` visits only the rows written through a `ref` since the system last ran, skipping
 unwritten tables, 4,096-row blocks and 64-row words. `[Removed<T>]` does the same for the entities that lost the
 component. See [change tracking](/en/docs/guide/change-tracking).
 

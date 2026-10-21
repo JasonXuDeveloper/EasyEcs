@@ -72,7 +72,7 @@ EasyEcs 领先，但不到上面的幅度；完整服务器 tick 就在这里。
 | 批量创建和销毁 | ✅ `CreateEntities`、`DestroyAll(filter)`、`Instantiate(prefab, span)` | ⚠️ `CreateEntityBatch`；逐个删除 | ⚠️ 按查询销毁 | ❌ |
 | 创建前预留一张表 | ✅ `Reserve<T1, …, Tn>(n)` | ✅ store 和 archetype 上的 `EnsureCapacity` | ✅ `EnsureCapacity(signature, n)` | – |
 | 预制体 | ✅ `Prefab`：不属于任何 World 的数据 | ⚠️ store 里的实体，用 `CloneEntity` 复制 | ❌ | ⚠️ 用 `CopyTo(world)` 复制的实体 |
-| 变更追踪（某 tick 之后写过的行） | ✅ `ITrackChanges`、`[Changed<T>]`，每次 `ref` 写入 | ❌ | ❌（事件） | ✅ `NotifyChanged<T>()` 之后的 `WhenChanged<T>()` |
+| 变更追踪（某 tick 之后写过的行） | ✅ `ITracked`、`[Changed<T>]`，每次 `ref` 写入 | ❌ | ❌（事件） | ✅ `NotifyChanged<T>()` 之后的 `WhenChanged<T>()` |
 | 移除检测 | ✅ `[Removed<T>]` | ⚠️ `OnComponentRemoved` 事件 | ⚠️ `SubscribeComponentRemoved` 事件 | ✅ `WhenRemoved<T>()` 集合 |
 | 值索引 | ✅ `IIndexed<TKey>`，有序遍历和区间 | ✅ `IIndexedComponent<TKey>`，区间 | ❌ | ✅ `EntityMap`、`EntityMultiMap` |
 | 按值拆表 | ✅ `GroupBy<T>`（`IGroup`） | – | – | – |

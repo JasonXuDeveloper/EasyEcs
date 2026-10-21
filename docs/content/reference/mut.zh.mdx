@@ -10,7 +10,7 @@ description: "[ForEach] 方法所访问实体的一个组件，只有方法真�
 public readonly ref struct Mut<T> where T : struct, IComponent
 ```
 
-`[ForEach]` 方法所访问实体的一个组件，只有方法真的写了它才算写入：`static void Aim(Mut<Target> target, in Position p) => target.SetIfChanged(new Target(Nearest(p)))`。被追踪组件（[`ITrackChanges`](/zh/docs/reference/itrackchanges)）的 `ref` 参数会给方法访问的每一行打 tick，于是 `[Changed<T>]` 的读者会访问值从没变过的行；通过 [`Mut`](/zh/docs/reference/mut)，只有方法写过的行（[`Mut.Write`](/zh/docs/reference/mut#write)、改变了值的 [`Mut.SetIfChanged`](/zh/docs/reference/mut#setifchanged)）才打 tick，每行的 tick 和 [`Entity.Get`](/zh/docs/reference/entity#get) 打的完全一样。读 [`Mut.Value`](/zh/docs/reference/mut#value) 不打 tick。
+`[ForEach]` 方法所访问实体的一个组件，只有方法真的写了它才算写入：`static void Aim(Mut<Target> target, in Position p) => target.SetIfChanged(new Target(Nearest(p)))`。被追踪组件（[`ITracked`](/zh/docs/reference/itracked)）的 `ref` 参数会给方法访问的每一行打 tick，于是 `[Changed<T>]` 的读者会访问值从没变过的行；通过 [`Mut`](/zh/docs/reference/mut)，只有方法写过的行（[`Mut.Write`](/zh/docs/reference/mut#write)、改变了值的 [`Mut.SetIfChanged`](/zh/docs/reference/mut#setifchanged)）才打 tick，每行的 tick 和 [`Entity.Get`](/zh/docs/reference/entity#get) 打的完全一样。读 [`Mut.Value`](/zh/docs/reference/mut#value) 不打 tick。
 
 调度器把这个参数当作写 `T`（并行阶段不会让这个系统和读它的系统同时运行）。逐实体方法都能用，包括 `[ForEach(Parallel = true)]` 方法和会做结构变更的方法（实体移动之后的写入给它的新行打 tick）；批处理方法接收 span，按段打 tick。对不追踪变更的组件，它就是普通的 `ref`。只在传入的那次调用内有效（ref struct）。被索引或分组的组件不能通过 ref 写（EECS015）。
 

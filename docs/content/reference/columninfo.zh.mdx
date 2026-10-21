@@ -15,7 +15,7 @@ public readonly struct ColumnInfo : IEquatable<ColumnInfo>
 #### 参数 [#parameters]
 
 - `Type`：组件类型。
-- `Without`：表里没有这个组件的存活行（移除或禁用的：不搬行）。
+- `Absent`：表里没有这个组件的存活行（移除或禁用的：不搬行）。
 - `Group`：列的组件是 [`IGroup`](/zh/docs/reference/igroup) 时，表里所有行所在的分组；否则为 0。
 
 ## 构造函数 [#constructors]
@@ -23,7 +23,7 @@ public readonly struct ColumnInfo : IEquatable<ColumnInfo>
 ### `ColumnInfo` [#ctor]
 
 ```csharp
-public ColumnInfo(Type Type, int Without, int Group);
+public ColumnInfo(Type Type, int Absent, int Group);
 ```
 
 表的一列（[`TableInfo`](/zh/docs/reference/tableinfo)）。
@@ -31,10 +31,18 @@ public ColumnInfo(Type Type, int Without, int Group);
 **参数**
 
 - `Type`：组件类型。
-- `Without`：表里没有这个组件的存活行（移除或禁用的：不搬行）。
+- `Absent`：表里没有这个组件的存活行（移除或禁用的：不搬行）。
 - `Group`：列的组件是 [`IGroup`](/zh/docs/reference/igroup) 时，表里所有行所在的分组；否则为 0。
 
 ## 属性 [#properties]
+
+### `Absent` [#absent]
+
+```csharp
+public int Absent { get; init; }
+```
+
+表里没有这个组件的存活行（移除或禁用的：不搬行）。
 
 ### `Group` [#group]
 
@@ -52,20 +60,12 @@ public Type Type { get; init; }
 
 组件类型。
 
-### `Without` [#without]
-
-```csharp
-public int Without { get; init; }
-```
-
-表里没有这个组件的存活行（移除或禁用的：不搬行）。
-
 ## 方法 [#methods]
 
 ### `Deconstruct` [#deconstruct]
 
 ```csharp
-public void Deconstruct(out Type Type, out int Without, out int Group);
+public void Deconstruct(out Type Type, out int Absent, out int Group);
 ```
 
 ### `Equals` [#equals]

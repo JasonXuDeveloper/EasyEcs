@@ -33,7 +33,7 @@ icon: Copy
 
 ```csharp title="Kinds.cs"
 public record struct Position(float X, float Y) : IComponent;
-public record struct Health(int Value, int Max) : IComponent, ITrackChanges;
+public record struct Health(int Value, int Max) : IComponent, ITracked;
 public record struct Attack(int Damage, int Cooldown) : IComponent;
 public struct Npc : IComponent;                                         // 标签
 

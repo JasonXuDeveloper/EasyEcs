@@ -34,7 +34,7 @@ EasyEcs 的全部功能都在这一页，按它在服务器上承担的工作分
 ```csharp
 public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
-public record struct Health(int Value) : IComponent, ITrackChanges;
+public record struct Health(int Value) : IComponent, ITracked;
 public record struct Armor(int Value) : IComponent;
 public struct Dead : IComponent;
 public record struct Clock(float Dt) : ISingletonComponent;
@@ -101,7 +101,7 @@ public class MovementSystem : EcsSystem
 
 `[With<T>]` 要求有某个不作为参数传入的组件，`[Without<T>]` 排除一个组件，`[WithAny<T>]` 要求几个里至少有一个，
 `[Changed<T>]` 和 `[Removed<T>]` 按变更 tick 选择。临时代码里有同样的 `QueryFilter`。系统分组上可以写 `[With<T>]`、`[Without<T>]`、
-`[WithAny<T>]`，对分组里的所有系统生效；也可以让分组自己或它实现的接口实现 `IGroupWith<T>` / `IGroupWithout<T>`。
+`[WithAny<T>]`，对分组里的所有系统生效；也可以让分组自己或它实现的接口实现 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`。
 这样一个泛型接口就能给每种 actor 类型各配一个带过滤的分组，特性做不到这一点，因为特性里不能写类型参数。
 
 - **适合：** 状态（`[Without<Dead>]`）、角色（`[With<Player>]`）、多选一（`[WithAny<Frozen>, WithAny<Stunned>]`）。
@@ -142,7 +142,7 @@ public class MovementSystem : EcsSystem
 
 系统按注册顺序执行，可以用 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 调整。`[UpdateInGroup<G>]` 把系统放进一个分组，只在
 `world.Update<G>()` 时执行。`UpdateInterval` 和 `UpdatePhase` 让系统每 N 次更新执行一次，并分散到不同相位；`Enabled` 关掉它。
-分组的过滤条件（`[Without<Frozen>]`，或分组自己、它实现的接口上的 `IGroupWith<T>` / `IGroupWithout<T>`）作用于分组里所有系统的 `[ForEach]` 方法。
+分组的过滤条件（`[Without<Frozen>]`，或分组自己、它实现的接口上的 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`）作用于分组里所有系统的 `[ForEach]` 方法。
 
 - **适合：** 不同的节奏：输入每次唤醒都处理，模拟按固定 tick 跑，存盘每隔几秒一次；每种 actor 一个分组，用一个泛型接口统一声明。
 - **开销：** 除了系统本身没有额外开销；空分组的更新什么都不做。排序成环会编译失败（[EECS019](/zh/docs/guide/analyzer#eecs019)）。
@@ -152,7 +152,7 @@ public class MovementSystem : EcsSystem
 
 `[ForEach(Slices = N)]` 把一个方法要处理的行分摊到系统的 N 次运行里：每次只访问一片，约占每张匹配表的 1/N，按 64 行的位字切分，
 所以每 N 次运行每行恰好访问一次。`system.RunCount` 表示这是第几次运行（这次的分片是 `RunCount % N`）；结构体 job 用
-`QueryFilter.Slice(index, count)` 做同样的事。
+`QueryFilter.Slice(index, of)` 做同样的事。
 
 - **适合：** 晚一点也无妨、但一个 tick 做完太贵的工作：重新给 AI 目标打分、扫描空闲会话、给大量实体做数值衰减。
 - **别用于：** `[Changed<T>]` / `[Removed<T>]` 方法，它们必须看到每一次变更（[EECS035](/zh/docs/guide/analyzer#eecs035)）；
@@ -177,7 +177,7 @@ public class MovementSystem : EcsSystem
 在任何代码里遍历：`foreach (var item in world.Query<T…>(filter))`、结构体 job（`world.ForEach`、`ForEachEntity`）、
 `world.Count` 和 `world.Any`。系统之外的静态 `[ForEach]` 方法会生成一个入口（`Reports.CountAlive(world, ref alive)`），
 带着调用方传入的值，当作结构体 job 执行。`entity.Run<Health, TakeHit>(ref job, filter)` 在单个实体上跑一个结构体 job，
-拿到的 `ref` 和遍历时一样：实体已销毁、缺组件或不满足过滤条件时返回 `false`。job 的 `static int Writes` 指明哪些组件算作写入（默认全部）；
+拿到的 `ref` 和遍历时一样：实体已销毁、缺组件或不满足过滤条件时返回 `false`。job 的 `static int WriteMask` 指明哪些组件算作写入（默认全部）；
 实现 `INoStructuralChanges` 的 job 省掉结构变更的簿记。
 
 - **适合：** 工具、测试、两次更新之间的请求处理、一次性的遍历；发给单个实体的请求或消息用 `entity.Run`。
@@ -202,7 +202,7 @@ public class ReplicationSystem : EcsSystem
 
 ### 变更追踪 [#change-tracking]
 
-标了 `ITrackChanges` 的组件，每行记录最后一次写入时的变更 tick（任何给出 `ref` 的访问都算写入）。`[Changed<T>]` 方法只访问本系统上次执行后
+标了 `ITracked` 的组件，每行记录最后一次写入时的变更 tick（任何给出 `ref` 的访问都算写入）。`[Changed<T>]` 方法只访问本系统上次执行后
 被写过的行，`[ChangedAny<A, B>]` 访问几个组件里至少有一个被写过的行。查询里用 `QueryFilter.Changed<T>(since)` 和
 `ChangedAny<A, B>(since)`：一个过滤条件存一份，每个客户端带着自己确认过的 tick 跑一遍（`filter.Since(ack)`），各自拿到自己上次确认以来的变化。
 
@@ -237,7 +237,7 @@ public class ReplicationSystem : EcsSystem
 
 ### 销毁日志 [#destroy-log]
 
-设置 `WorldOptions.DestroyLog = n` 后，World 记下最近销毁的 n 个实体，以及各自被销毁时的变更 tick。
+设置 `WorldOptions.DestroyLogCapacity = n` 后，World 记下最近销毁的 n 个实体，以及各自被销毁时的变更 tick。
 `world.DestroyedSince(since, into, out count)` 列出某个读取方的 tick 以来销毁的实体，所以每个客户端都能按自己确认过的 tick 知道该删哪些实体。
 读取方比日志还旧（早于 `DestroyLogOldestTick`）时返回 false：这个客户端需要重新下发全量状态。
 
@@ -248,7 +248,7 @@ public class ReplicationSystem : EcsSystem
 
 ### 清理组件 [#cleanup-components]
 
-实现 `ICleanupComponent` 的组件比它的实体活得久：销毁实体时，其他组件被移除，并加上 `Destroyed` 标签；实体一直保留，
+实现 `ICleanupComponent` 的组件比它的实体活得久：销毁实体时，其他组件被移除，并加上 `Retired` 标签；实体一直保留，
 直到某个系统释放资源、移除最后一个清理组件。
 
 - **适合：** World 之外、必须恰好释放一次的资源：一个连接、一个预留的座位、另一个服务里的槽位。
@@ -353,7 +353,7 @@ var guard = world.Instantiate(goblin, new ChildOf(archer));          // 自带�
 ### 关系 [#relations]
 
 以 `EntityId` 为键的索引组件，把每个实体链接到一个目标（箭指向弓箭手），索引能列出所有指向某个目标的实体。`IRelation` 元素把一个实体
-链接到多个目标（英雄同时在几个队伍里），用 `AddRelation` / `RemoveRelation` 维护，用 `world.Relations<T>()` 反查。
+链接到多个目标（英雄同时在几个队伍里），用 `Link` / `Unlink` 维护，用 `world.Relations<T>()` 反查。
 `WhenTargetDestroyed(TargetPolicy…)` 决定目标销毁时链接怎么处理：保留、移除，或者连带销毁。
 
 - **适合：** 归属关系、队伍成员、增益作用的单位、有自己状态的物品。
@@ -512,7 +512,7 @@ restarted.Load(bytes.WrittenSpan);
 
 ### 系统耗时统计 [#per-system-timing]
 
-打开 `WorldOptions.MeasureSystems` 后，系统的每次执行都会被统计：`system.Stats` 里有 `Runs`、`Last`、`Total` 和 `Average`，
+打开 `WorldOptions.MeasureSystems` 后，系统的每次执行都会被统计：`system.Stats` 里有 `Runs`、`LastTime`、`TotalTime` 和 `AverageTime`，
 这次执行分配的字节数（`LastAllocated`、`TotalAllocated`，包括它的并行 `[ForEach]` 方法在辅助线程上的分配），以及它的 `[ForEach]`
 方法访问的实体数（`LastEntities`、`TotalEntities`）。
 
@@ -540,7 +540,7 @@ restarted.Load(bytes.WrittenSpan);
 
 ### 运行时自省 [#introspection]
 
-`world.Describe()` 列出所有表及其列、行数、容量和字节数；`entity.Describe()` 列出一个实体的组件值。调试器里能直接看到实体的组件。
+`world.DescribeTables()` 列出所有表及其列、行数、容量和字节数；`entity.Describe()` 列出一个实体的组件值。调试器里能直接看到实体的组件。
 
 - **适合：** 管理后台、内存报告、调试。
 - **开销：** 生成描述时分配内存（冷路径），不碰热路径。

@@ -1,7 +1,7 @@
 ---
 title: 清理与禁用
 seoTitle: "C# ECS 的清理组件、组件禁用与对象池实体"
-description: 用 ICleanupComponent 和 Destroyed 标签保证外部资源只释放一次，用 Disable<T> 暂停组件，用标签整体关闭实体，并区分新创建的实体。
+description: 用 ICleanupComponent 和 Retired 标签保证外部资源只释放一次，用 Disable<T> 暂停组件，用标签整体关闭实体，并区分新创建的实体。
 icon: Recycle
 ---
 
@@ -27,7 +27,7 @@ icon: Recycle
 
 ### 清理组件 [#cleanup-components]
 
-持有 `ICleanupComponent` 的实体被销毁时不会立即释放。它失去其他所有组件，得到 `Destroyed` 标签（`entity.IsDestroyed`），一直活到最后一个清理组件被移除：
+对持有 `ICleanupComponent` 的实体调用 `Destroy` 不会释放它，而是让它退休。它失去其他所有组件，得到 `Retired` 标签（`entity.IsRetired`），一直活到最后一个清理组件被移除：
 
 ```csharp
 public record struct Seat(int Number) : ICleanupComponent;   // World 之外的资源
@@ -37,7 +37,7 @@ public record struct Seats(int Released) : ISingletonComponent;
 ```csharp title="ReleaseSeats.cs"
 public class ReleaseSeats : EcsSystem
 {
-    [ForEach, With<Destroyed>, With<Seat>]                    // 只处理已经销毁的实体 // [!code highlight]
+    [ForEach, With<Retired>, With<Seat>]                    // 只处理已退休的实体   // [!code highlight]
     static void Release(Entity entity, ref Seats seats)
     {
         seats.Released++;                                     // 在这里归还座位
@@ -51,20 +51,20 @@ world.AddSingleton<Seats>();
 world.AddSystem<ReleaseSeats>();
 var guest = world.CreateEntity(new Seat(7), new Health(10));
 
-guest.Destroy();                       // 仍然存活，带 Destroyed 标签，Health 没了
+guest.Destroy();                       // 退休：仍然存活，带 Retired 标签，Health 没了
 world.Update();                        // ReleaseSeats 释放它：guest.IsAlive 为 false
 ```
 
 - 所有销毁途径都会让这类实体“退休”：`Destroy`、`DestroyAll<T>()`、[层级](/zh/docs/guide/hierarchy)级联、
   [目标策略](/zh/docs/guide/indexes-and-relations#target-policies)。
-- 申请资源的系统用 `Without<Destroyed>` 过滤：退役的实体还留着清理组件，不过滤的话，它离开以后还可能再申请一次：
+- 申请资源的系统用 `Without<Retired>` 过滤：退休的实体还留着清理组件，不过滤的话，它离开以后还可能再申请一次：
 
 ```csharp
 public record struct NextSeat(int Number) : ISingletonComponent;
 
 public class AssignSeats : EcsSystem
 {
-    [ForEach, Without<Destroyed>]                            // 已经离开的实体不再分配座位 // [!code highlight]
+    [ForEach, Without<Retired>]                            // 已经离开的实体不再分配座位 // [!code highlight]
     static void Assign(ref Seat seat, ref NextSeat next)
     {
         if (seat.Number != 0) return;                        // 已经有座位
@@ -77,20 +77,20 @@ public class AssignSeats : EcsSystem
 - 再次销毁已退休的实体没有任何效果。从存活实体上移除清理组件，就只是移除而已。
 - 退休的实体会离开它所在的索引，它的子实体也随之而去。它的其他组件被拿掉，但不算移除：`[Removed<T>]` 不会访问它，
   就像不会访问任何已销毁的实体一样（[移除检测](/zh/docs/guide/change-tracking#removal-detection)）。
-- 退休的实体不会被带回来：过滤条件没写 `Destroyed`（`With<Destroyed>()`）时 `SetAll` 不会碰它，`Clone()` 会抛异常，
+- 退休的实体不会被带回来：过滤条件没写 `Retired`（`With<Retired>()`）时 `SetAll` 不会碰它，`Clone()` 会抛异常，
   `MoveEntities` 会跳过它。清理组件的 `RemoveAll` 会处理到它，因为释放它靠的就是这个。
 - `MoveEntities` 不带走清理组件：原实体带着它们退休，另一个 World 里的新实体没有它们。
 - 清理组件不能被禁用（`Disable<T>()` 会抛异常）：它必须留着等待释放。
 
 ### 清理组件还是销毁日志 [#cleanup-or-destroy-log]
 
-[销毁日志](/zh/docs/guide/change-tracking#destroy-log)（`WorldOptions.DestroyLog`、`world.DestroyedSince`）同样能对实体离开做出反应。
+[销毁日志](/zh/docs/guide/change-tracking#destroy-log)（`WorldOptions.DestroyLogCapacity`、`world.DestroyedSince`）同样能对实体离开做出反应。
 两者解决的是不同的问题：
 
 | | 清理组件 | 销毁日志 |
 | --- | --- | --- |
 | 用来 | 在实体离开前，拿组件最后的值执行代码：关掉它的 socket，还回它的座位 | 告诉读者哪些实体走了：向客户端同步，或者维护你自己在 World 之外的索引 |
-| 读者拿到什么 | 实体本身，还活着，带 `Destroyed` 标签和它的清理组件 | 只有 `EntityId`：实体已经没了，值也跟着没了 |
+| 读者拿到什么 | 实体本身，还活着，带 `Retired` 标签和它的清理组件 | 只有 `EntityId`：实体已经没了，值也跟着没了 |
 | 读者数量 | 只有一条释放路径：最后一个清理组件移除时实体才释放 | 任意多个，各自从自己的 tick 读起（每个客户端读到它确认过的 tick） |
 | 会不会漏 | 不会：实体一直等它的系统来处理 | 落后超过环大小的读者会被告知要重新同步（`DestroyedSince` 返回 `false`） |
 | 开销 | 释放之前留着一行退休的数据 | 一个固定大小的环，每条记录 16 字节，默认关闭 |
@@ -219,7 +219,7 @@ world.Update();
 ```csharp title="Components.cs" doccheck=example
 using EasyEcs;
 
-// 清理组件：带着它被销毁的实体会留下来，直到某个系统把它移除。
+// 清理组件：对带着它的实体调用 Destroy 会让实体退休并留下来，直到某个系统把它移除。
 public record struct Seat(int Number) : ICleanupComponent;
 
 public record struct Cooldown(int Ticks) : IComponent;
@@ -247,10 +247,10 @@ public class CooldownSystem : EcsSystem
     }
 }
 
-// 归还已销毁玩家的座位。最后一个清理组件被移除后，实体才被释放。
+// 归还已退休玩家的座位。最后一个清理组件被移除后，实体才被释放。
 public class ReleaseSeatsSystem : EcsSystem
 {
-    [ForEach, With<Destroyed>, With<Seat>]
+    [ForEach, With<Retired>, With<Seat>]
     static void Release(Entity player, ref Seats seats)
     {
         seats.Released++;
@@ -283,9 +283,9 @@ player.EnableCooldown();
 world.Update();
 Console.WriteLine($"resumed: {player.Cooldown.Ticks} ticks left");
 
-// 玩家离开。它留着座位并带上 Destroyed 标签，其他组件全部移除。
+// 玩家离开。它留着座位并带上 Retired 标签，其他组件全部移除。
 player.Destroy();
-Console.WriteLine($"destroyed: alive {player.IsAlive}, tagged {player.IsDestroyed}");
+Console.WriteLine($"retired: alive {player.IsAlive}, tagged {player.IsRetired}");
 
 world.Update();
 int released = world.Seats.Released;
@@ -300,12 +300,12 @@ Console.WriteLine($"after the update: alive {player.IsAlive}, seats released {re
 ```text
 stunned: has cooldown False, stunned players 1
 resumed: 2 ticks left
-destroyed: alive True, tagged True
+retired: alive True, tagged True
 after the update: alive False, seats released 1
 ```
 
 冷却从 3 变成 2：眩晕期间的那次更新跳过了它。从 `Destroy` 到下一次更新之间，玩家还活着，但只有 `ReleaseSeatsSystem` 看得到
-它，因为只有它要求了 `Destroyed`。
+它，因为只有它要求了 `Retired`。
 
 ## 怎么用得快 [#how-to-use-it-fast]
 
@@ -334,8 +334,8 @@ after the update: alive False, seats released 1
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
-| 清理系统没写 `With<Destroyed>` | 把存活实体的资源也释放了 | 代码审查 |
-| 从不移除最后一个清理组件 | 退休的实体永远留着 | 在统计里看 `world.Count<Destroyed>()` |
+| 清理系统没写 `With<Retired>` | 把存活实体的资源也释放了 | 代码审查 |
+| 从不移除最后一个清理组件 | 退休的实体永远留着 | 在统计里看 `world.Count<Retired>()` |
 | 对清理组件或 `ChildOf` 调用 `Disable<T>()` | 抛 `InvalidOperationException` | [EECS048](/zh/docs/guide/analyzer#eecs048) |
 | 对被禁用的组件 `Set`，以为它还是禁用状态 | `Set` 会用新值重新启用它；要拿回保留的值用 `Enable` | 设计如此 |
 | 系统忘了写 `Without<Inactive>` | 池里的实体还在动 | 代码审查 |

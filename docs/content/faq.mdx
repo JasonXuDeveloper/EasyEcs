@@ -50,7 +50,7 @@ The headline server tick of 100,000 entities takes <BenchValue k="tick.oneWorld"
 <BenchSource />
 
 What allocates, on purpose: creating a world, the first entity of a new component set (a new table), the first use
-of a query shape, a table or a `DynamicBuffer<T>` growing past its capacity, and cold tools such as `Describe`.
+of a query shape, a table or a `DynamicBuffer<T>` growing past its capacity, and cold tools such as `DescribeTables`.
 `InitialEntityCapacity`, `Reserve<T1, …, Tn>(count)`, `Reserve(prefab, count)` and
 `bag.EnsureCapacity(n)` move growth out of the tick. With `WorldOptions.MeasureSystems`, `system.Stats.LastAllocated`
 names the system that allocates ([diagnostics](/en/docs/guide/diagnostics#timing)).
@@ -109,7 +109,7 @@ test file per system ([Structuring a real project](/en/docs/guide/project-struct
 
 ## How do I debug an ECS world? [#debugging]
 
-Ask the world: `world.Describe()` lists the tables with their components, entities and bytes, `entity.Describe()`
+Ask the world: `world.DescribeTables()` lists the tables with their components, entities and bytes, `entity.Describe()`
 returns an entity's component values (the debugger shows them too when you expand an `Entity`), `system.Stats` times
 every system with `WorldOptions.MeasureSystems` and counts the bytes it allocated and the entities it visited,
 `world.DescribeSchedule()` shows the stages and why each system waits, and `system.Error` keeps the exception of a
@@ -195,9 +195,9 @@ scheduler, so systems could not run in parallel safely. What an event would say 
 | The event you want | Write it as |
 | --- | --- |
 | An entity died, others should react | a `Dead` tag; the systems that care filter `[With<Dead>]` |
-| A component was changed | mark it `ITrackChanges`; the consumer takes `[Changed<T>]` |
-| A component was removed (a buff expired) | mark it `ITrackChanges`; the consumer takes `[Removed<T>]` |
-| An entity was destroyed (a despawn to send) | turn on `WorldOptions.DestroyLog`; each consumer reads `world.DestroyedSince(itsTick, …)` |
+| A component was changed | mark it `ITracked`; the consumer takes `[Changed<T>]` |
+| A component was removed (a buff expired) | mark it `ITracked`; the consumer takes `[Removed<T>]` |
+| An entity was destroyed (a despawn to send) | turn on `WorldOptions.DestroyLogCapacity`; each consumer reads `world.DestroyedSince(itsTick, …)` |
 | A one-off message (a hit, a player input) | an entity holding the message, destroyed after its readers ran |
 | Input from another thread | a queue that one system drains on the owner thread |
 
@@ -274,7 +274,7 @@ foreach (var item in world.Query<Position, Velocity>())
 Three mistakes to avoid:
 
 - `var hp = entity.Health; hp.Value--;` changes a copy. Keep a `ref var`.
-- Read with `in`, not `ref`: every `ref` access to an `ITrackChanges` component counts as a change, so replication
+- Read with `in`, not `ref`: every `ref` access to an `ITracked` component counts as a change, so replication
   would send rows nobody changed. The generated property of a tracked component is read-only for this reason;
   `entity.WriteX()` is the write, and a loop that only reads walks `world.Read<…>()` instead of `Query`
   ([EECS046](/en/docs/guide/analyzer#eecs046)). A method that writes only some of the rows it visits takes `Mut<T>`, which stamps

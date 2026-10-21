@@ -233,7 +233,7 @@ public class ReceiveCommandsSystem(ConcurrentQueue<FireCommand> inbox) : EcsSyst
 ### 出问题时往里看 [#diagnostics]
 
 `WorldOptions.MeasureSystems` 给每个系统计时，`SystemErrors = SystemErrorPolicy.Disable` 让出错的系统停用而不是中断整个 tick，
-`world.Describe()` 列出所有表。需要时把它们加进宿主的选项里，见[调试与诊断](/zh/docs/guide/diagnostics)。
+`world.DescribeTables()` 列出所有表。需要时把它们加进宿主的选项里，见[调试与诊断](/zh/docs/guide/diagnostics)。
 
 </Step>
 <Step>

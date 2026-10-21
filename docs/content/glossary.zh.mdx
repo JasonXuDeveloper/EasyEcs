@@ -79,7 +79,7 @@ World 最初的几次更新：建好表、查询缓存和之后反复使用的�
 
 实现 `ISystemGroup` 的结构体。标了 `[UpdateInGroup<G>]` 的系统只在 `world.Update<G>()` 时执行，所以输入、模拟和存盘可以各按各的节奏跑。
 没标这个特性的系统属于默认分组，由 `world.Update()` 执行。分组可以给它所有的系统统一过滤实体：在分组结构体上写 `[With<T>]`、
-`[Without<T>]`、`[WithAny<T>]`，或者让分组自己、它实现的接口实现 `IGroupWith<T>` / `IGroupWithout<T>`（一个泛型接口就这样给每种
+`[Without<T>]`、`[WithAny<T>]`，或者让分组自己、它实现的接口实现 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`（一个泛型接口就这样给每种
 actor 类型各配一个分组）。见[系统](/zh/docs/guide/systems#system-groups)。
 
 ## 更新与 tick（Update、tick） [#update]
@@ -126,7 +126,7 @@ World 执行系统的顺序：每个[分组](#system-group)的[阶段](#stage)�
 
 实现 `IForEach<T…>`、`IForEachEntity<T…>` 或 `IForEachBatch<T…>` 的结构体，行循环调用它的 `Execute` 方法。JIT 会把它内联，
 所以每个实体既没有委托调用，也没有虚调用。生成器为每个 `[ForEach]` 方法写一个。`entity.Run<T…, TJob>(ref job)` 在单个实体上跑一个
-`IForEachEntity` job。job 的 `static int Writes` 指明它写哪些组件；实现 `INoStructuralChanges` 表示保证不做结构变更。
+`IForEachEntity` job。job 的 `static int WriteMask` 指明它写哪些组件；实现 `INoStructuralChanges` 表示保证不做结构变更。
 见[查询与过滤](/zh/docs/guide/queries#foreach-a-struct-job)。
 
 ## 批量方法（Batch method） [#batch-method]
@@ -152,12 +152,12 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 
 ## 被追踪的组件（Tracked component） [#tracked-component]
 
-同时实现了 `ITrackChanges` 的组件。它的行会记录何时被写入或移除，所以 `[Changed<T>]` 和 `[Removed<T>]` 只访问这些行。
+同时实现了 `ITracked` 的组件。它的行会记录何时被写入或移除，所以 `[Changed<T>]` 和 `[Removed<T>]` 只访问这些行。
 每行多 8 字节；不追踪的组件没有任何开销。见[变更追踪](/zh/docs/guide/change-tracking)。
 
 ## 销毁日志（Destroy log） [#destroy-log]
 
-设置了 `WorldOptions.DestroyLog` 时，World 保存的一个环形缓冲：最近销毁的实体，以及各自被销毁时的变更 tick。
+设置了 `WorldOptions.DestroyLogCapacity` 时，World 保存的一个环形缓冲：最近销毁的实体，以及各自被销毁时的变更 tick。
 `world.DestroyedSince(since, …)` 列出某个读取方的 tick 以来销毁的实体，所以每个客户端各自保存自己的 tick。见[变更追踪](/zh/docs/guide/change-tracking#destroy-log)。
 
 ## 结构变更（Structural change） [#structural-change]
@@ -203,7 +203,7 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 ## Actor [#actor]
 
 一种写法，不是 EasyEcs 的类型：按键接收消息的实体（一家商店、一个银行账户、一个玩家）。每种 actor 一个类型，它同时是键组件
-（`IIndexed<TSelf>`，通过索引找到）、系统分组和分组的过滤条件（`IGroupWith<In<TSelf>>`），用一个泛型接口统一声明；
+（`IIndexed<TSelf>`，通过索引找到）、系统分组和分组的过滤条件（`ISystemGroupWith<In<TSelf>>`），用一个泛型接口统一声明；
 请求用 `entity.Run` 在对应的实体上处理。见 [samples/Actors](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)。
 
 ## 预制体（Prefab） [#prefab]
@@ -240,7 +240,7 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 
 ## 清理组件（Cleanup component） [#cleanup-component]
 
-实现 `ICleanupComponent` 的组件。销毁它所在的实体时，其他组件被移除，并加上 `Destroyed` 标签；实体会一直保留，
+实现 `ICleanupComponent` 的组件。对它所在的实体调用 `Destroy` 不会释放实体，而是让它退休：其他组件被移除，加上 `Retired` 标签；实体会一直存活，
 直到某个系统释放了对应的资源（一个连接、一个座位）并移除这个组件。在那之前它不会被搬走、克隆，也不会被 `SetAll` 带回来。见[清理与禁用](/zh/docs/guide/cleanup-and-disable#cleanup-components)。
 
 ## 禁用的组件（Disabled component） [#disabled-component]

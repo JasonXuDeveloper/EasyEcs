@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.TargetPolicy" source="42f08dd40529">
+  <member name="T:EasyEcs.TargetPolicy" source="db2f468c9c0c">
     <summary>
-      实体销毁时，指向它的链接怎么处理（<see cref="M:EasyEcs.TargetRules.WhenTargetDestroyed``1(EasyEcs.ValueIndex{``0,EasyEcs.EntityId},EasyEcs.TargetPolicy)" />、
+      实体销毁时，指向它的链接怎么处理（<see cref="M:EasyEcs.TargetPolicyExtensions.WhenTargetDestroyed``1(EasyEcs.ValueIndex{``0,EasyEcs.EntityId},EasyEcs.TargetPolicy)" />、
       <see cref="M:EasyEcs.RelationIndex`1.WhenTargetDestroyed(EasyEcs.TargetPolicy)" />）。
     </summary>
   </member>

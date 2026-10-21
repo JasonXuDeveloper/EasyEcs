@@ -146,7 +146,7 @@ public class DeathSystem : EcsSystem
 
 ### 3. 系统从不引用系统 [#3-systems-never-reference-systems]
 
-持有另一个系统（[EECS008](/zh/docs/guide/analyzer#eecs008)），或者通过 `World.GetSystem<T>()` 拿到它的系统，再也没法单独移除、
+持有另一个系统（[EECS008](/zh/docs/guide/analyzer#eecs008)），或者通过 `World.TryGetSystem<T>(out …)` 拿到它的系统，再也没法单独移除、
 调整顺序或单独测试。改为通过数据协作：
 
 - **流水线：** 前一个系统写组件，后一个系统读。先注册写的那个，或者用 `[UpdateAfter<T>]` 排序。
@@ -169,7 +169,7 @@ flowchart LR
     D -->|设置 Dead| C[CorpseSystem]
 ```
 
-`GetSystem<T>()` 留给工具、测试和承载 World 的宿主代码。
+`TryGetSystem<T>(out …)` 留给工具、测试和承载 World 的宿主代码。
 
 ### 4. 状态变化就是数据 [#4-state-changes-are-data]
 
@@ -178,7 +178,7 @@ flowchart LR
 新增一个也不用改任何已有系统。
 
 实体留下的东西也一样。World 之外的资源（一个连接、一个预留的座位）用[清理组件](/zh/docs/guide/cleanup-and-disable)表示：
-销毁实体时它被保留下来，并打上 `Destroyed` 标签，直到某个系统释放资源。没有销毁事件需要订阅。
+销毁实体时它被保留下来，并打上 `Retired` 标签，直到某个系统释放资源。没有销毁事件需要订阅。
 
 ### 5. 频繁的变化选最便宜的表示 [#5-choose-the-cheapest-representation-for-frequent-changes]
 
@@ -186,7 +186,7 @@ flowchart LR
 只拷一次。所以给来来去去的状态（`Stunned`、`Burning`、`Dead`）用标签很便宜。但对每个 tick 都变的值，字段仍然比结构变更便宜：
 
 - 用倒计时字段（`Burning.Ticks`），不要每个 tick 重新添加组件；
-- 用变更 tick 检测变化：给组件加上 `ITrackChanges`，让消费方用 `[Changed<T>]`，不要增删一个 `Changed` 标签，也不要扫描每一行
+- 用变更 tick 检测变化：给组件加上 `ITracked`，让消费方用 `[Changed<T>]`，不要增删一个 `Changed` 标签，也不要扫描每一行
   （[变更追踪](/zh/docs/guide/change-tracking)）。任何 `ref` 访问都算写入，所以可能写入原值的一方改用 `Mut<T>`
   参数和 `SetIfChanged`（`[ForEach]` 之外用 `entity.SetIfChanged` / `SetXIfChanged`），值不同才打上 tick，读的一方就不用再比较
   （[值变了才写](/zh/docs/guide/change-tracking#set-if-changed)）；只读的循环走 `world.Read<T…>()`，它不打 tick；
@@ -196,7 +196,7 @@ flowchart LR
 - 实体的种类用[预制体](/zh/docs/guide/prefabs)：不属于任何 World 的数据，用到时再实例化，不要放一批模板实体，让每个查询都去排除它们。
 
 ```csharp
-public record struct Facing(float Angle) : IComponent, ITrackChanges;  // 被追踪：每行记录最后一次写入
+public record struct Facing(float Angle) : IComponent, ITracked;  // 被追踪：每行记录最后一次写入
 public record struct NetSync(Facing Sent) : IComponent;               // 客户端上次收到的值
 public record struct Outbox(int Updates) : ISingletonComponent;
 
@@ -273,8 +273,8 @@ public class DeathSystem : EcsSystem
 [System.Runtime.CompilerServices.InlineArray(4)]
 public struct Slots4 { private int _first; }                                 // 4 个 int 内联存放
 
-public struct Cooldowns : IComponent, ITrackChanges { public Slots4 ReadyAt; }  // 非托管：没有共享问题
-public struct Quests : IComponent, ITrackChanges                             // 随玩家一起保存和加载
+public struct Cooldowns : IComponent, ITracked { public Slots4 ReadyAt; }  // 非托管：没有共享问题
+public struct Quests : IComponent, ITracked                             // 随玩家一起保存和加载
 {
     public Dictionary<int, int> Progress;
 }
@@ -315,7 +315,7 @@ public static class PlayerRules
 | --- | --- | --- |
 | 组件是数据 | 一个实现了 `IComponent` 的类 | [EECS006](/zh/docs/guide/analyzer#eecs006) |
 | [2. 系统不保存状态](#2-systems-are-stateless) | 系统上的可变字段、可写属性或事件 | [EECS007](/zh/docs/guide/analyzer#eecs007) |
-| [3. 系统从不引用系统](#3-systems-never-reference-systems) | 类型为系统的成员，系统内调用 `GetSystem<T>()` | [EECS008](/zh/docs/guide/analyzer#eecs008) |
+| [3. 系统从不引用系统](#3-systems-never-reference-systems) | 类型为系统的成员，系统内调用 `TryGetSystem<T>(out …)` | [EECS008](/zh/docs/guide/analyzer#eecs008) |
 | [5. 频繁的变化选最便宜的表示](#5-choose-the-cheapest-representation-for-frequent-changes) | 只读追踪组件的 `Query` 循环（每一行都被打 tick） | [EECS046](/zh/docs/guide/analyzer#eecs046)（警告） |
 | [6. 让调度决定效果的先后](#6-let-the-schedule-order-effects) | `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 成环 | [EECS019](/zh/docs/guide/analyzer#eecs019) |
 | [7. 保存句柄，不要保存 ref](#7-keep-entity-handles-never-refs-across-boundaries) | 组件里的 `Entity` 字段；结构变更之后还用旧的 `ref` | [EECS017](/zh/docs/guide/analyzer#eecs017)、[EECS047](/zh/docs/guide/analyzer#eecs047)（警告） |

@@ -90,12 +90,12 @@ in your code. The generic calls after them (`Get<T>()`, `Set(c)`, `Remove<T>()`)
 | `buffer.DeleteEntity(id)` | `entity.Destroy()` |
 | `buffer.CreateEntity()` + `AddComponent` per component | `world.CreateEntity(a, b, c)` |
 | `EntityBatch` + `query.Entities.ApplyBatch(batch)` | `world.SetAll(value, filter)`, `world.RemoveAll<T>(filter)` |
-| `store.OnComponentRemoved += ...` | `[ForEach, Removed<T>]` (with `T : ITrackChanges`) |
-| A dirty tag added on write | `T : ITrackChanges` + `[ForEach, Changed<T>]` |
+| `store.OnComponentRemoved += ...` | `[ForEach, Removed<T>]` (with `T : ITracked`) |
+| A dirty tag added on write | `T : ITracked` + `[ForEach, Changed<T>]` |
 | `IIndexedComponent<K>`, `store.ComponentIndex<T, K>()[key]` | `IIndexed<K>`, `world.Index<T, K>().Find(key)` |
 | `query.ValueInRange<T, K>(min, max)` | `world.Index<T, K>().Range(min, max)` |
 | `ILinkComponent`, `GetIncomingLinks<T>()` | an `EntityId` key: `IIndexed<EntityId>`, `index.Find(target)` |
-| `ILinkRelation`, `AddRelation`, `GetRelations<T>()` | `IRelation`, `entity.AddRelation(...)`, `world.Relations<T>()` |
+| `ILinkRelation`, `AddRelation`, `GetRelations<T>()` | `IRelation`, `entity.Link(...)`, `world.Relations<T>()` |
 | `AddChild`, `ChildEntities` | `ChildOf(parent)`, `world.Children(parent)` |
 | `EntitySerializer` (JSON) | `world.Save(writer)` / `world.Load(bytes)` (binary) |
 
@@ -239,7 +239,7 @@ A subscription that collects the entities which lost a component, read once per 
 must be tracked:
 
 ```csharp title="BuffReplication.cs"
-public record struct Buff(int Ticks) : IComponent, ITrackChanges;
+public record struct Buff(int Ticks) : IComponent, ITracked;
 public record struct Expired(int Count) : IComponent;
 
 public class BuffReplication : EcsSystem
@@ -277,7 +277,7 @@ The two versions of the whole tick, on the same machine:
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
 | Both `IComponent`s imported | Ambiguous references | Compiler error: alias one namespace |
-| Keeping a `[Removed<T>]` component untracked | Removals are not recorded | Add `ITrackChanges` to `T` |
+| Keeping a `[Removed<T>]` component untracked | Removals are not recorded | Add `ITracked` to `T` |
 | Taking `T` as a parameter of a `[Removed<T>]` method | No row can both have and lack `T` | [EECS016](/en/docs/guide/analyzer#eecs016) |
 | Storing an `Entity` in a component (Friflo's link components do) | The column holds references | [EECS017](/en/docs/guide/analyzer#eecs017) (warning): store `EntityId` |
 | Writing an indexed component through `ref` (Friflo re-indexes on `AddComponent`) | The index cannot see the new key | [EECS015](/en/docs/guide/analyzer#eecs015): use `Set` |

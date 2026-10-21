@@ -36,8 +36,8 @@ dotnet add package EasyEcs
 | `AEntitySetSystem<T>`, `AComponentSystem<T, C>` | `EcsSystem` with `[ForEach]` methods | The generator writes the loop and the component access. |
 | `SequentialSystem<T>`, `ParallelSystem<T>` | `world.AddSystem<T>()`, `WorldOptions.ParallelSystems` | Order by registration or `[UpdateBefore<T>]` / `[UpdateAfter<T>]`. |
 | `World.Set<T>()` / `Get<T>()` | `ISingletonComponent` | A `ref` parameter of a `[ForEach]` method. |
-| `NotifyChanged<T>()` + `WhenChanged<T>()` | `ITrackChanges` + `[Changed<T>]` | Every `ref` write is the change. |
-| `WhenRemoved<T>()` | `ITrackChanges` + `[Removed<T>]` | No `Complete()` to call. |
+| `NotifyChanged<T>()` + `WhenChanged<T>()` | `ITracked` + `[Changed<T>]` | Every `ref` write is the change. |
+| `WhenRemoved<T>()` | `ITracked` + `[Removed<T>]` | No `Complete()` to call. |
 | `EntityCommandRecorder` | Direct calls | Changes apply at once. |
 | `Publish` / `Subscribe` | Data: components or singletons later systems read | No messages. |
 
@@ -201,7 +201,7 @@ changed.Complete();
 EasyEcs: mark the component tracked; every write through a `ref` is the change.
 
 ```csharp title="Replication.cs"
-public record struct Hp(int Value) : IComponent, ITrackChanges;
+public record struct Hp(int Value) : IComponent, ITracked;
 public record struct Replica(int Value) : IComponent;
 
 public class Replication : EcsSystem

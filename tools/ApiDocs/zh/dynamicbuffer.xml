@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.DynamicBuffer`1" source="6a65a9963302">
+  <member name="T:EasyEcs.DynamicBuffer`1" source="1755b030dcd1">
     <summary>
       每个实体一个 <typeparamref name="T" /> 列表，作为组件存放：背包、路径、这个 tick 的命中记录。写入要通过组件的 <c>ref</c>
       （<c>[ForEach]</c> 方法和 job 的 <c>ref</c> 参数、<see cref="M:EasyEcs.Entity.Get``1" />），所以它和
-      <see cref="T:EasyEcs.ITrackChanges" /> 组件的任何写入一样会记录下来，<c>[Changed&lt;DynamicBuffer&lt;T&gt;&gt;]</c>
+      <see cref="T:EasyEcs.ITracked" /> 组件的任何写入一样会记录下来，<c>[Changed&lt;DynamicBuffer&lt;T&gt;&gt;]</c>
       能选出列表变过的实体。通过 <c>in</c> 或 <see cref="M:EasyEcs.Entity.Read``1" /> 拿到的列表是只读的：修改方法
       （<see cref="T:EasyEcs.DynamicBufferExtensions" />）接收 <c>ref this</c>，所以通过只读引用写入根本编译不过。快照会复制元素
       （<see cref="M:EasyEcs.World.Capture" />）；搬行时列表跟着走。在容量以内添加元素不分配内存。

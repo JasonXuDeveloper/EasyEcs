@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.ICleanupComponent" source="e8df96371bb2">
+  <member name="T:EasyEcs.ICleanupComponent" source="5a0dad6c5df6">
     <summary>
-      标记一个比所在实体活得更久的组件：销毁持有它的实体时，实体不会释放，而是去掉其他组件、加上 <see cref="T:EasyEcs.Destroyed" />
+      标记一个比所在实体活得更久的组件：销毁持有它的实体时，实体不会释放，而是去掉其他组件、加上 <see cref="T:EasyEcs.Retired" />
       标签，让系统先释放这个组件代表的资源（一个 socket、一个预约、另一个服务里的一个名额），再移除组件。实体的最后一个清理组件移除后，
       实体才真正释放。用于 World 之外、必须恰好释放一次的资源。
     </summary>

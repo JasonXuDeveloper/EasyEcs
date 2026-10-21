@@ -63,7 +63,7 @@ older .NET (netstandard2.1, net6.0-8.0); EasyEcs needs .NET 10.
 | Disable | `entity.Enabled = false` | a tag and `[Without<T>]`, or `entity.Disable<T>()` |
 | Indexed component | `IIndexedComponent<TKey>`, `store.ComponentIndex<T, TKey>()[key]`, `ValueInRange` | `IIndexed<TKey>`, `world.Index<T, TKey>().Find(key)`, ordered `Range` |
 | Link to an entity | `ILinkComponent`, `GetIncomingLinks<T>()` | an `EntityId` key (`IIndexed<EntityId>`), `index.Find(target)` |
-| Many links | `ILinkRelation`, `AddRelation`, `GetRelations<T>()` | `IRelation`, `entity.AddRelation`, `world.Relations<T>()` |
+| Many links | `ILinkRelation`, `AddRelation`, `GetRelations<T>()` | `IRelation`, `entity.Link`, `world.Relations<T>()` |
 | Hierarchy | `AddChild`, `ChildEntities` | `ChildOf(parent)`, `world.Children(parent)`, cascading destroy |
 | Removal callback | `store.OnComponentRemoved += ...` | `[Removed<T>]` (no callback) |
 | Parallel query | `store.JobRunner = new ParallelJobRunner(n)`, `QueryJob.RunParallel()` | `[ForEach(Parallel = true)]` |

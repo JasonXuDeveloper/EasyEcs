@@ -24,18 +24,18 @@ One type per number of components, 1 to 9 (generated from one template); the mem
 
 ## Properties
 
-### `OwnStamps` [#ownstamps]
+### `SelfStamped` [#selfstamped]
 
 ```csharp
-static virtual int OwnStamps { get; }
+static virtual int SelfStamped { get; }
 ```
 
-Components among [`IForEachEntity.Writes`](/en/docs/reference/iforeachentity#writes) that the job stamps itself, only in the rows it writes (bits like [`IForEachEntity.Writes`](/en/docs/reference/iforeachentity#writes); default none): the loop leaves their rows unstamped. Generated jobs set their [`Mut`](/en/docs/reference/mut) parameters.
+Components among [`IForEachEntity.WriteMask`](/en/docs/reference/iforeachentity#writemask) that the job stamps itself, only in the rows it writes (bits like [`IForEachEntity.WriteMask`](/en/docs/reference/iforeachentity#writemask); default none): the loop leaves their rows unstamped. Generated jobs set their [`Mut`](/en/docs/reference/mut) parameters.
 
-### `Writes` [#writes]
+### `WriteMask` [#writemask]
 
 ```csharp
-static virtual int Writes { get; }
+static virtual int WriteMask { get; }
 ```
 
 Components the job writes through its refs: bit k - 1 for component k (default: all). When the job changes the archetype of the entity it visits, ForEach carries those components over from the row the refs point into to the entity's new row after the job returns. Generated jobs set only their `ref` parameters.

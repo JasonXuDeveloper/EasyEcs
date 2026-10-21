@@ -94,9 +94,9 @@ int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(group), Colle
 ```
 
 - The originals are destroyed with their children, so move a [hierarchy](/en/docs/guide/hierarchy#moving) together.
-- Cleanup components do not move: they stay on the destroyed originals, for the systems of this world to release,
+- Cleanup components do not move: they stay on the originals, now retired, for the systems of this world to release,
   and the new entities do not have them, so a resource is released once.
-- An entity destroyed already and kept for its cleanup components (tagged `Destroyed`) is skipped like a stale id: it
+- An entity retired already, kept for its cleanup components (tagged `Retired`), is skipped like a stale id: it
   is not copied, not counted, and its `moved` entry is `default`.
 - Both worlds must be owned by the calling thread; moving a world into itself is refused (`ArgumentException`).
 
@@ -289,7 +289,7 @@ public record struct Pet(EntityId Owner) : IComponent, IIndexed<EntityId>
 }
 
 // What persists of an actor, and what does not.
-public record struct Bank(long Gold) : IComponent, ITrackChanges;
+public record struct Bank(long Gold) : IComponent, ITracked;
 
 public record struct Connection(int Socket) : IComponent;
 ```

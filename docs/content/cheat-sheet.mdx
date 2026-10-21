@@ -13,8 +13,8 @@ The examples on this page share these declarations:
 ```csharp
 public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
-public record struct Health(int Value) : IComponent, ITrackChanges;          // tracked: writes are recorded
-public record struct Mana(int Value) : IComponent, ITrackChanges;
+public record struct Health(int Value) : IComponent, ITracked;          // tracked: writes are recorded
+public record struct Mana(int Value) : IComponent, ITracked;
 public record struct Team(int Id) : IComponent, IIndexed<int> { public int Key => Id; }
 public record struct Account(int Id) : IComponent, IUniqueIndexed<int> { public int Key => Id; }   // one entity per key
 public record struct Zone(int Id) : IComponent, IGroup { public int Group => Id; }
@@ -35,18 +35,18 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 | `struct X : IComponent` | Per-entity data, one column per type | [Entities and components](/en/docs/guide/entities-and-components) |
 | `struct X : IComponent` with no fields | A tag: a yes-or-no state used in filters | [Entities and components](/en/docs/guide/entities-and-components) |
 | `struct X : ISingletonComponent` | One value per world | [Singletons](/en/docs/guide/singletons) |
-| `: ITrackChanges` | Rows record the tick of their last write and removal | [Change tracking](/en/docs/guide/change-tracking) |
+| `: ITracked` | Rows record the tick of their last write and removal | [Change tracking](/en/docs/guide/change-tracking) |
 | `: IIndexed<TKey>` with `Key` | Found by value through `world.Index<T, TKey>()` | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `: IUniqueIndexed<TKey>` with `Key` | A key that names one entity: `index.Get(key)`; a write that would give a second entity the key throws | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `: IIndexed<EntityId>` | A link to one entity, found from the target | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `: IRelation` with `Target` | Many links per entity, kept in a buffer | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `: IGroup` with `Group` | Splits tables by value after `world.GroupBy<T>()` | [Groups](/en/docs/guide/groups) |
-| `: ICleanupComponent` | Outlives `Destroy`: the other components go, the entity gets the `Destroyed` tag and stays until a system removes the last cleanup component | [Cleanup and disable](/en/docs/guide/cleanup-and-disable) |
+| `: ICleanupComponent` | Outlives `Destroy`: the other components go, the entity gets the `Retired` tag and stays until a system removes the last cleanup component | [Cleanup and disable](/en/docs/guide/cleanup-and-disable) |
 | `Disabled<T>` | The tag an entity carries while its `T` is disabled: query it to find the paused ones | [Cleanup and disable](/en/docs/guide/cleanup-and-disable) |
 | `DynamicBuffer<T>` | A list per entity, every write tracked | [Dynamic buffers](/en/docs/guide/dynamic-buffers) |
 | `ChildOf(EntityId Parent)` | The built-in hierarchy link | [Hierarchy](/en/docs/guide/hierarchy) |
 | `struct G : ISystemGroup` | A group of systems with its own cadence | [Systems](/en/docs/guide/systems) |
-| `: IGroupWith<T>` / `IGroupWithout<T>` on a group (or an interface it implements) | The group's systems visit only entities with / without `T`; a generic interface gives each actor type its own filtered group | [Systems](/en/docs/guide/systems#group-filters) |
+| `: ISystemGroupWith<T>` / `ISystemGroupWithout<T>` on a group (or an interface it implements) | The group's systems visit only entities with / without `T`; a generic interface gives each actor type its own filtered group | [Systems](/en/docs/guide/systems#group-filters) |
 | `class S<T> : EcsSystem` | A generic system: each closed type (`S<Position>`) is a system of its own | [Systems](/en/docs/guide/systems#generic-systems) |
 
 Components are structs ([EECS006](/en/docs/guide/analyzer#eecs006)). Keep an entity link as an `EntityId`, not an
@@ -60,16 +60,16 @@ Components are structs ([EECS006](/en/docs/guide/analyzer#eecs006)). Keep an ent
 | `world.Update()` | Runs the default group's systems once |
 | `world.Update<TGroup>()` | Runs one system group |
 | `world.AddSystem<T>()` / `AddSystem(instance)` | Adds a system (runs `OnCreate`) |
-| `world.RemoveSystem<T>()` / `GetSystem<T>()` / `Systems` | Removes, finds, lists systems |
+| `world.RemoveSystem<T>()` / `TryGetSystem<T>(out s)` / `Systems` | Removes, finds, lists systems |
 | `world.EntityCount` / `Entities` | Live entities and an allocation-free walk over them |
 | `world.ChangeTick` | The current change tick |
-| `world.UpdateCount` | Completed `Update()` calls of the default group |
+| `world.DefaultUpdateCount` | Completed `Update()` calls of the default group |
 | `world.Reserve<T1, …, Tn>(n)` / `Reserve(prefab, n)` / `EnsureEntityCapacity(n)` | Pre-size before a known peak or a wave |
 | `world.TryGetEntity(id, out e)` / `GetEntity(id)` / `IsAlive(id)` | From an `EntityId` back to a checked handle |
-| `world.Describe()` | Tables, columns, rows and bytes, for tools |
+| `world.DescribeTables()` | Tables, columns, rows and bytes, for tools |
 | `world.DescribeSchedule()` | Every group's stages, each system's reads and writes, why it waits, the pairs only registration orders; `ToString()` / `ToMermaid()` |
 | `world.TrimExcess()` | Drops empty tables and shrinks the others after a peak, at a quiet moment |
-| `world.DestroyedSince(since, into, out count)` / `DestroyLogOldestTick` | Entities destroyed since a tick, with `WorldOptions.DestroyLog`; `false`: the reader is older than the log |
+| `world.DestroyedSince(since, into, out count)` / `DestroyLogOldestTick` | Entities destroyed since a tick, with `WorldOptions.DestroyLogCapacity`; `false`: the reader is older than the log |
 
 ```csharp
 Console.WriteLine(world.DescribeSchedule());        // stages, waits, registration-only pairs
@@ -99,7 +99,7 @@ members (`unit.Velocity`, `SetHealth(50)`, `RemoveDead()`), as in the example un
 | `entity.TryGetRef<T>(out bool found)` | `ref T` or a null ref | no |
 | `entity.Has<T>()` / `Has<A, B>()` | Presence of one or all | no |
 | `entity.Disable<T>()` / `Enable<T>()` / `IsDisabled<T>()` | Hides a component, keeping its value | yes |
-| `entity.Clone()` | A copy of the entity in its world; throws for a destroyed entity kept for its cleanup components | yes |
+| `entity.Clone()` | A copy of the entity in its world; throws for a retired entity (kept for its cleanup components) | yes |
 | `entity.Run<T1..T9, TJob>(ref job)` / `Run(ref job, filter)` | Runs an `IForEachEntity` job on this entity with the refs a pass gives; `false` when it is not alive, lacks a component or fails the filter | when the job makes one |
 | `entity.Destroy()` | Destroys it; its id is recycled with a new version | yes |
 | `entity.IsAlive` / `Id` / `World` | Handle state; every access checks the version | no |
@@ -118,7 +118,7 @@ if (unit.TryGetHealth(out var hp)) { /* hp is a copy */ }
 public struct TakeHit : IForEachEntity<Health>
 {
     public int Damage;
-    public static int Writes => 1;                  // bit 0: Health counts as written
+    public static int WriteMask => 1;                  // bit 0: Health counts as written
 
     public void Execute(Entity target, ref Health hp) => hp.Value -= Damage;
 }
@@ -146,7 +146,7 @@ inlined call to the generic API above.
 | Unique `Account` | `world.AccountIndex.Get(id)` / `TryGet(id, out e)` |
 | Grouped `Zone` | `filter.InZone(id)` (`InGroup<Zone>(id)`) |
 | Buffer element `Loot` | `e.Loot` (`ref readonly DynamicBuffer<Loot>`), `HasLoot`, `WriteLoot()`, `GetOrAddLoot()`, `RemoveLoot()` |
-| Relation `MemberOf` | `e.AddMemberOf(target)`, `UnlinkMemberOf(target)`, `LinksMemberOf(target)`, `world.MemberOfIndex` |
+| Relation `MemberOf` | `e.LinkMemberOf(target)`, `UnlinkMemberOf(target)`, `LinksMemberOf(target)`, `world.MemberOfIndex` |
 | Singleton `Clock` | `world.Clock` (`ref`), `HasClock`, `GetOrAddClock()`, `SetClock(…)`, `RemoveClock()` |
 | On a `Prefab` | `SetPosition(…)`, `RemovePosition()` return the prefab; `prefab.Position` (read-only), `HasPosition`, `IsDead` |
 | `world.Query<Position, Velocity>()` items | `item.Position`, `item.Velocity` |
@@ -210,12 +210,12 @@ public class DecaySystem : EcsSystem
 ```
 
 `[Changed<T>]` and `[Removed<T>]` go on methods only. A system group takes `[With<T>]`, `[Without<T>]` and
-`[WithAny<T>]` ([EECS023](/en/docs/guide/analyzer#eecs023) flags them on any other struct), or `IGroupWith<T>` /
-`IGroupWithout<T>`, which a generic group interface needs because an attribute cannot name a type parameter:
+`[WithAny<T>]` ([EECS023](/en/docs/guide/analyzer#eecs023) flags them on any other struct), or `ISystemGroupWith<T>` /
+`ISystemGroupWithout<T>`, which a generic group interface needs because an attribute cannot name a type parameter:
 
 ```csharp
 public struct In<TActor> : IComponent;              // the tag of one actor type
-public interface IActorGroup<TActor> : IGroupWith<In<TActor>> where TActor : struct;
+public interface IActorGroup<TActor> : ISystemGroupWith<In<TActor>> where TActor : struct;
 public struct Shop : IActorGroup<Shop>;             // the systems of [UpdateInGroup<Shop>] see In<Shop> entities only
 ```
 
@@ -230,7 +230,7 @@ public struct Shop : IActorGroup<Shop>;             // the systems of [UpdateInG
 | `Error` | The exception that disabled it under `SystemErrorPolicy.Disable` |
 | `LastRunTick` | The change tick of its last run |
 | `RunCount` | Runs before the current one (a sliced method visits slice `RunCount % N`) |
-| `Stats` | `Runs`, `Last`, `Total`, `Average`, `LastAllocated` / `TotalAllocated` (bytes), `LastEntities` / `TotalEntities` (matched when its pass starts) with `MeasureSystems` |
+| `Stats` | `Runs`, `LastTime`, `TotalTime`, `AverageTime`, `LastAllocated` / `TotalAllocated` (bytes), `LastEntities` / `TotalEntities` (matched when its pass starts) with `MeasureSystems` |
 
 Systems keep no state ([EECS007](/en/docs/guide/analyzer#eecs007)) and never reference each other
 ([EECS008](/en/docs/guide/analyzer#eecs008)). Guide: [Systems](/en/docs/guide/systems).
@@ -260,7 +260,7 @@ bool anyDead = world.Any<Dead>();
 | `world.ForEachBatch<…>(ref job, filter)` | `IForEachBatch<T…>`: runs of rows as spans |
 | `world.ForEachParallel` / `ForEachEntityParallel` | A struct job in chunks on several threads |
 | `Runner.Method(world, …)` | The entry point of a static `[ForEach]` method outside a system |
-| `static int Writes => mask` on a job | Components the job writes (bit k - 1 for component k), stamped for change tracking; default `-1`, all |
+| `static int WriteMask => mask` on a job | Components the job writes (bit k - 1 for component k), stamped for change tracking; default `-1`, all |
 | `: INoStructuralChanges` on a job | The job promises no structural change: no per-entity bookkeeping, structure frozen while it runs |
 
 | `QueryFilter` | Selects |
@@ -269,7 +269,7 @@ bool anyDead = world.Any<Dead>();
 | `.Changed<T>(since)` / `.Removed<T>(since)` | Written, or lost, at or after tick `since` |
 | `.ChangedAny<A, B>(since)` / `.RemovedAny<A, B>(since)` | At least one of them written, or lost, at or after `since` |
 | `.Since(tick)` | The same filter with a new tick: one filter, run with each client's tick |
-| `.Slice(index, count)` | Slice `index` of `count` of every table, for the `ForEach` calls only |
+| `.Slice(index, of)` | Slice `index` of the `of` slices of every table, for the `ForEach` calls only |
 | `.InGroup<T>(group)` | One group of a grouped component |
 
 Guide: [Queries and filters](/en/docs/guide/queries).
@@ -298,7 +298,7 @@ Guide: [Singletons](/en/docs/guide/singletons).
 | `Mut<T>.Write()`, a `SetIfChanged(value)` with a new value | `Mut<T>.Value`, a `SetIfChanged(value)` with the same value |
 | `Get<T>()`, `TryGetRef<T>` when found, `GetOrAdd<T>()`, `Set(…)`, `WriteX()` | `Read<T>()`, `TryGet<T>(out copy)`, `Has<T>()`, `e.X` of a tracked `X` |
 | Creating, instantiating, cloning, `Enable<T>()`, `Restore`, `Load`, `LoadEntitiesInto` | Removing or `Disable<T>()` (that is a removal, for `[Removed<T>]`) |
-| `entity.Run`: the components in the job's `Writes` | `Load(…, markWritten: false)`, `LoadEntitiesInto(…, markWritten: false)` |
+| `entity.Run`: the components in the job's `WriteMask` | `Load(…, markWritten: false)`, `LoadEntitiesInto(…, markWritten: false)` |
 
 ```csharp
 ulong mark = world.ChangeTick;
@@ -327,7 +327,7 @@ ulong ack = world.ChangeTick;                       // a client's acknowledged t
 world.Update();
 int toSend = world.Count<Health>(Dirty.Since(ack));
 
-using var replicated = new World(new WorldOptions { DestroyLog = 4096 });
+using var replicated = new World(new WorldOptions { DestroyLogCapacity = 4096 });
 ulong seen = replicated.ChangeTick;
 replicated.Update();
 var gone = new EntityId[4096];
@@ -348,7 +348,7 @@ Guide: [Change tracking](/en/docs/guide/change-tracking), with the
 | `index.Get(key)` / `TryGet(key, out e)` | The one entity of a unique key (`IUniqueIndexed<TKey>`); `Get` throws when none has it |
 | `index.Range(min, max)` / `RangeDescending` / `Ascending()` / `Descending()` | Sorted walks, for a comparable key |
 | `index.WhenTargetDestroyed(TargetPolicy.Keep / Remove / Destroy)` | What an `EntityId` link does when its target dies |
-| `entity.AddRelation(r)` / `RemoveRelation<T>(target)` / `HasRelation<T>(target)` | Many-to-many links |
+| `entity.Link(r)` / `Unlink<T>(target)` / `Links<T>(target)` | Many-to-many links |
 | `world.Relations<T>()` then `Find(target)` / `Count(target)` | Who links to a target |
 | `world.Children(parent)` | Entities whose `ChildOf` names the parent; destroying the parent destroys them (`ChildOf` starts with `TargetPolicy.Destroy`) |
 | `world.Descendants(root)` | The whole subtree, depth first, each entity before its children, root excluded; a `ChildOf` cycle throws `InvalidOperationException` |
@@ -385,7 +385,7 @@ Indexed and grouped components are written with `Set`, never through a `ref`
 | `world.CreateEntities(span, a, b, …)` | A wave with the same values |
 | `world.DestroyAll<T…>(filter)` | Destroys every match; returns how many |
 | `world.DestroyEntities(ids)` | Destroys a list of ids in one pass; returns how many |
-| `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | One component set or removed on every match; `SetAll` skips entities tagged `Destroyed` unless the filter names it |
+| `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | One component set or removed on every match; `SetAll` skips entities tagged `Retired` unless the filter names it |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | One component disabled or enabled on every match |
 
 ```csharp
@@ -434,7 +434,7 @@ Guide: [Dynamic buffers](/en/docs/guide/dynamic-buffers).
 | `ComponentSet.Create().With<T>()….WithSingleton<S>()` | Components (and, for whole-world saves, singletons), built once in a `static readonly` field |
 | `world.SaveEntitiesWith(writer, ids, set)` | A record: only the components of the set |
 | `world.LoadEntitiesInto(bytes, entities, markWritten: false)` | A record onto entities that exist; `markWritten: false` keeps it from counting as changed |
-| `world.MoveEntities(target, ids, moved)` | A group to another world of the thread, no encoding; skips destroyed entities kept for cleanup, and leaves cleanup components behind |
+| `world.MoveEntities(target, ids, moved)` | A group to another world of the thread, no encoding; skips retired entities (kept for cleanup), and leaves cleanup components behind |
 | `world.RemoveTypes(assembly or context)` | Drops a plugin's types before its context unloads |
 
 ```csharp
@@ -474,7 +474,7 @@ Guides: [Snapshots](/en/docs/guide/snapshots), [Saves](/en/docs/guide/saves),
 | `MaxDegreeOfParallelism` | processor count | Threads one parallel run uses at most |
 | `MeasureSystems` | `false` | Records `system.Stats` |
 | `SystemErrors` | `SystemErrorPolicy.Throw` | `Disable` switches a failing system off and goes on |
-| `DestroyLog` | 0 (off) | Capacity of the destroy log `DestroyedSince` reads, 16 bytes per record |
+| `DestroyLogCapacity` | 0 (off) | Capacity of the destroy log `DestroyedSince` reads, 16 bytes per record |
 
 ```csharp
 using var server = new World(new WorldOptions { ParallelSystems = true, SystemErrors = SystemErrorPolicy.Disable });

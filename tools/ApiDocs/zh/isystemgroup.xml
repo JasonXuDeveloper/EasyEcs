@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.ISystemGroup" source="dfa743abfbf9">
+  <member name="T:EasyEcs.ISystemGroup" source="d9c29cf4c9f9">
     <summary>
       系统分组的标记：标了 <see cref="T:EasyEcs.UpdateInGroupAttribute`1" /> 的系统在调用 <see cref="M:EasyEcs.World.Update``1" />
       时一起运行，和 <see cref="M:EasyEcs.World.Update" /> 运行的默认分组互不相干。节奏不同的工作放进不同的分组
@@ -16,8 +16,8 @@
       </code>
       分组上可以加 <see cref="T:EasyEcs.WithAttribute`1" />、<see cref="T:EasyEcs.WithoutAttribute`1" /> 和
       <see cref="T:EasyEcs.WithAnyAttribute`1" /> 过滤条件：生成器把它们加到分组里所有系统的每个 [ForEach] 方法上
-      （<c>[Without&lt;Inactive&gt;] public struct Gameplay : ISystemGroup;</c> 让整个分组都不处理不活跃的实体）；它实现的接口也可以带过滤条件：<see cref="T:EasyEcs.IGroupWith`1" />、
-      <see cref="T:EasyEcs.IGroupWithout`1" />。
+      （<c>[Without&lt;Inactive&gt;] public struct Gameplay : ISystemGroup;</c> 让整个分组都不处理不活跃的实体）；它实现的接口也可以带过滤条件：<see cref="T:EasyEcs.ISystemGroupWith`1" />、
+      <see cref="T:EasyEcs.ISystemGroupWithout`1" />。
       系统在 OnUpdate 里自己发起的查询不受影响。
     </summary>
   </member>

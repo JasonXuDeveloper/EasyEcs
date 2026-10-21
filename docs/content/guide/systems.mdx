@@ -95,15 +95,15 @@ int dealt = world.BurnTotals.Damage;               // 10
 | `RunCount` | how many times it ran before the current run (0 during the first); a [sliced](#slices) method visits slice `RunCount % N` |
 | `Stats`, `Error` | [measurements](#measuring-systems) and the [exception that switched it off](#errors) |
 
-`AddSystem<T>()` returns the system; `GetSystem<T>()` finds one (for tools and tests, never from another system:
-[EECS008](/en/docs/guide/analyzer#eecs008)); `world.Systems` lists every system without allocating; `UpdateCount`
+`AddSystem<T>()` returns the system; `TryGetSystem<T>(out system)` finds one (for tools and tests, never from another system:
+[EECS008](/en/docs/guide/analyzer#eecs008)); `world.Systems` lists every system without allocating; `DefaultUpdateCount`
 counts the default group's updates. A system belongs to one world: adding it to a second throws.
 
 ```csharp
-var burn = world.GetSystem<BurnSystem>();
+if (world.TryGetSystem(out BurnSystem burn)) burn.Enabled = false;
 foreach (var system in world.Systems) Console.WriteLine(system.GetType().Name);
 world.RemoveSystem<BurnSystem>();                  // OnDestroy runs
-long updates = world.UpdateCount;
+long updates = world.DefaultUpdateCount;
 ```
 
 ### One update [#one-update]
@@ -189,7 +189,7 @@ public class HungerSystem : EcsSystem
   sliced, and `Slices` must be at least 1 ([EECS035](/en/docs/guide/analyzer#eecs035)): every run moves the system's
   `LastRunTick`, so the changes made in the rows of the other slices would be lost.
 
-Outside systems, [`QueryFilter.Slice(index, count)`](/en/docs/guide/queries#filters) does the same for a `ForEach`
+Outside systems, [`QueryFilter.Slice(index, of)`](/en/docs/guide/queries#filters) does the same for a `ForEach`
 call; a [runner](#foreach-outside-systems) with `Slices = N` takes the slice to visit after the world.
 
 ### `[ForEach]` methods [#foreach-methods]
@@ -213,9 +213,9 @@ an instance method. Its parameters say what it runs over:
 | `[With<T>]` | the entity must have `T`, not passed in; repeatable |
 | `[Without<T>]` | the entity must not have `T`; repeatable |
 | `[WithAny<T>]` | the entity must have at least one of the method's `[WithAny<T>]` components |
-| `[Changed<T>]` | `T` (`ITrackChanges`) was written since the system last ran ([change tracking](/en/docs/guide/change-tracking)) |
-| `[Removed<T>]` | the entity lost `T` (`ITrackChanges`) since the system last ran ([removal detection](/en/docs/guide/change-tracking#removal-detection)) |
-| `[ChangedAny<T1, …, Tn>]` | at least one of the components (2 to 9, `ITrackChanges`) was written since the system last ran ([any of several](/en/docs/guide/change-tracking#changed-any)) |
+| `[Changed<T>]` | `T` (`ITracked`) was written since the system last ran ([change tracking](/en/docs/guide/change-tracking)) |
+| `[Removed<T>]` | the entity lost `T` (`ITracked`) since the system last ran ([removal detection](/en/docs/guide/change-tracking#removal-detection)) |
+| `[ChangedAny<T1, …, Tn>]` | at least one of the components (2 to 9, `ITracked`) was written since the system last ran ([any of several](/en/docs/guide/change-tracking#changed-any)) |
 | `[RemovedAny<T1, …, Tn>]` | the entity lost at least one of the components since the system last ran |
 
 With no component parameter, the first `[With<T>]` (else the first `[Changed<T>]`) names the queried component:
@@ -370,7 +370,7 @@ public class MoveSystem : EcsSystem
 
 A group that a generic interface describes cannot name its filter in an attribute: C# refuses a type parameter as the
 type argument of an attribute (`[With<In<TActor>>]` on `IActor<TActor>` is CS8968). The group implements
-`IGroupWith<T>` or `IGroupWithout<T>` instead, here or through an interface, and gets the same filter: one interface
+`ISystemGroupWith<T>` or `ISystemGroupWithout<T>` instead, here or through an interface, and gets the same filter: one interface
 then gives every actor type its group.
 
 The actor pattern goes one step further: one type per kind of actor is at once its key component (indexed, so a
@@ -379,7 +379,7 @@ message finds its actor), its system group and, through the interface, the group
 ```csharp
 public struct In<TActor> : IComponent;             // the tag of one kind of actor
 
-public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, IGroupWith<In<TSelf>>
+public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
     where TSelf : struct, IActor<TSelf>, IEquatable<TSelf>;   // IIndexed requires IEquatable
 
 // Key component, index key and system group in one type. Key is implemented explicitly: a public
@@ -440,7 +440,7 @@ Besides components, singletons, `Entity` and `World`, a runner may take values o
 takes them from the caller, `ref` ones included, so a runner can return results through them.
 
 ```csharp
-public record struct Gold(int Amount) : IComponent, ITrackChanges;
+public record struct Gold(int Amount) : IComponent, ITracked;
 
 public static class Reports
 {
@@ -486,7 +486,7 @@ Census.CountAlive<Health>(world, ref alive);      // a generic runner: the type 
 ### Measuring systems [#measuring-systems]
 
 With `WorldOptions.MeasureSystems`, every run of a system (its `OnUpdate` plus its `[ForEach]` methods) is measured:
-`system.Stats` holds `Runs`, `Last`, `Total` and `Average`, the bytes the run allocated (`LastAllocated`,
+`system.Stats` holds `Runs`, `LastTime`, `TotalTime` and `AverageTime`, the bytes the run allocated (`LastAllocated`,
 `TotalAllocated`) and the entities its `[ForEach]` methods matched (`LastEntities`, `TotalEntities`). Each run reads
 the clock and the thread's allocation counter twice, and each `[ForEach]` pass counts its matches once; off, it costs
 one field test per run. Read it between updates, for example from a diagnostics endpoint:
@@ -494,10 +494,10 @@ one field test per run. Read it between updates, for example from a diagnostics 
 ```csharp
 var measured = new World(new WorldOptions { MeasureSystems = true });
 measured.AddSingleton<BurnTotals>();
-measured.AddSystem<BurnSystem>();
+var burn = measured.AddSystem<BurnSystem>();
 measured.Update();
-var stats = measured.GetSystem<BurnSystem>().Stats;
-Console.WriteLine($"burn: {stats.Last.TotalMicroseconds} μs, average {stats.Average.TotalMicroseconds} μs over {stats.Runs} runs");
+var stats = burn.Stats;
+Console.WriteLine($"burn: {stats.LastTime.TotalMicroseconds} μs, average {stats.AverageTime.TotalMicroseconds} μs over {stats.Runs} runs");
 ```
 
 ### Errors [#errors]
@@ -668,8 +668,8 @@ needed, and a method that writes a singleton:
 
 - **A `[ForEach]` method** is a struct job the JIT inlines into the row loop: no delegate, no allocation.
 - **Per system and update:** the `OnUpdate` call, one call per generated job, and one query-cache lookup per method.
-- **A group's filters** (`[With<T>]`, `[Without<T>]`, `[WithAny<T>]` on the group type, `IGroupWith<T>`,
-  `IGroupWithout<T>`) are read by the generator, so they cost nothing at run time. The tables they exclude cost
+- **A group's filters** (`[With<T>]`, `[Without<T>]`, `[WithAny<T>]` on the group type, `ISystemGroupWith<T>`,
+  `ISystemGroupWithout<T>`) are read by the generator, so they cost nothing at run time. The tables they exclude cost
   nothing per update: a query's cache holds only the tables that match, so the tables of other kinds of entities in
   the world (other actor types) are never walked by the group's systems.
 - **Singleton parameters** are resolved once per pass, not per entity.
@@ -700,7 +700,7 @@ needed, and a method that writes a singleton:
 | Orderings in a cycle, or across groups | Throws on `AddSystem`; never applies | [EECS019](/en/docs/guide/analyzer#eecs019), [EECS020](/en/docs/guide/analyzer#eecs020) |
 | A private type in a method's parameters | The generated job cannot name it | [EECS022](/en/docs/guide/analyzer#eecs022) |
 | `[With<T>]`, `[Without<T>]` or `[WithAny<T>]` on a struct that is not a group | Compile error: the filter would do nothing | [EECS023](/en/docs/guide/analyzer#eecs023) |
-| A group's `[With<T>]` or `IGroupWith<T>` with a method's `[Removed<T>]` | Asks for rows that have and lack `T`: the method never runs | [EECS016](/en/docs/guide/analyzer#eecs016) |
+| A group's `[With<T>]` or `ISystemGroupWith<T>` with a method's `[Removed<T>]` | Asks for rows that have and lack `T`: the method never runs | [EECS016](/en/docs/guide/analyzer#eecs016) |
 | A group's `[With<X>]` with a method's `[Without<X>]` | No entity matches: the method never runs | [EECS049](/en/docs/guide/analyzer#eecs049) |
 | A group's `[WithAny<A>]` with a method's `[WithAny<B>]`, read as "A and B" | The sets merge: entities with `A` or `B` | Code review |
 | A public `Key => this` on a record struct actor key | `ToString()` prints `Key` forever: stack overflow | [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix): implement `IIndexed<T>.Key` explicitly |

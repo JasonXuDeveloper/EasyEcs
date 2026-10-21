@@ -26,20 +26,20 @@
   <member name="P:EasyEcs.Entity.World" source="bbba30a86dea">
     <summary>实体所属的 World（<c>default</c> 句柄为 null）。</summary>
   </member>
-  <member name="M:EasyEcs.Entity.AddRelation``1(``0@)" source="654f77f21a62">
+  <member name="M:EasyEcs.Entity.Link``1(``0@)" source="654f77f21a62">
     <summary>
       把实体链接到 <paramref name="relation" /> 的目标：追加到实体的 <see cref="T:EasyEcs.DynamicBuffer`1" />（没有就先添加）
       和关系索引里。返回实体。均摊 O(1)；只有添加缓冲时才是结构变更。实体不存活时抛异常。
     </summary>
   </member>
-  <member name="M:EasyEcs.Entity.Clone" source="73ff644ec603">
+  <member name="M:EasyEcs.Entity.Clone" source="2b54df37f7f4">
     <summary>
       在同一个 World 里新建一个实体，带上这个实体每个组件的副本（<see cref="T:EasyEcs.DynamicBuffer`1" /> 拿到自己的一份列表，
       索引收录副本，被追踪组件算作刚刚写入）；这个实体不存活时抛异常。要按模板创建实体，用 <see cref="T:EasyEcs.Prefab" />。
       O(组件数)。只能在所有者线程调用。
     </summary>
     <exception cref="T:System.InvalidOperationException">
-      这个实体已经销毁，只是因为清理组件才保留着（<see cref="T:EasyEcs.Destroyed" />）。
+      这个实体已退休：只是因为清理组件才保留着（<see cref="T:EasyEcs.Retired" />）。
     </exception>
   </member>
   <member name="M:EasyEcs.Entity.Describe" source="36ddeb3a1f64">
@@ -70,9 +70,9 @@
   <member name="M:EasyEcs.Entity.Equals(EasyEcs.Entity)" source="f6ae8a01d36a">
     <summary>两个句柄是否指向同一个 World 的同一个实体：id 和版本号都相同。O(1)。</summary>
   </member>
-  <member name="M:EasyEcs.Entity.Get``1" source="a0c95aba232d">
+  <member name="M:EasyEcs.Entity.Get``1" source="f589f3bb406a">
     <summary>
-      组件 <typeparamref name="T" /> 的 ref；实体没有它或者不存活时抛异常。对被追踪组件（<see cref="T:EasyEcs.ITrackChanges" />）
+      组件 <typeparamref name="T" /> 的 ref；实体没有它或者不存活时抛异常。对被追踪组件（<see cref="T:EasyEcs.ITracked" />）
       算一次写入。O(1)。
     </summary>
   </member>
@@ -92,7 +92,7 @@
   <member name="M:EasyEcs.Entity.Has``2" source="51dd3aa79ab8">
     <summary>实体是否同时拥有 <c>T1, T2</c>；句柄已经销毁或是 default 时返回 false。O(2)。</summary>
   </member>
-  <member name="M:EasyEcs.Entity.HasRelation``1(EasyEcs.EntityId)" source="e03baaead9ab">
+  <member name="M:EasyEcs.Entity.Links``1(EasyEcs.EntityId)" source="e03baaead9ab">
     <summary>实体是否有 <typeparamref name="T" /> 链接指向 <paramref name="target" />。O(实体的链接数)。</summary>
   </member>
   <member name="M:EasyEcs.Entity.IsDisabled``1" source="714ae6bc43bf">
@@ -101,10 +101,10 @@
       <see cref="T:EasyEcs.Disabled`1" />。O(1)。
     </summary>
   </member>
-  <member name="M:EasyEcs.Entity.Read``1" source="8dd2c18ec3c2">
+  <member name="M:EasyEcs.Entity.Read``1" source="65ab1210f2e1">
     <summary>
       组件 <typeparamref name="T" /> 的只读 ref；实体没有它或者不存活时抛异常。不算写入：被追踪组件
-      （<see cref="T:EasyEcs.ITrackChanges" />）不打 tick。O(1)。
+      （<see cref="T:EasyEcs.ITracked" />）不打 tick。O(1)。
     </summary>
   </member>
   <member name="M:EasyEcs.Entity.Remove``2" source="3ce16bab43f0">
@@ -113,7 +113,7 @@
       （见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
     </summary>
   </member>
-  <member name="M:EasyEcs.Entity.RemoveRelation``1(EasyEcs.EntityId)" source="c917b0bb4689">
+  <member name="M:EasyEcs.Entity.Unlink``1(EasyEcs.EntityId)" source="c917b0bb4689">
     <summary>
       删掉实体指向 <paramref name="target" /> 的 <typeparamref name="T" /> 链接（目标是它的每一个元素）。返回删掉的数量；只有确实删掉了链接，缓冲区才算写入。
       O(实体的链接数)。实体不存活时抛异常。
@@ -145,10 +145,10 @@
   <member name="M:EasyEcs.Entity.op_Implicit(EasyEcs.Entity)~EasyEcs.EntityId" source="b15c8d893c64">
     <summary>句柄的 <see cref="F:EasyEcs.Entity.Id" />：组件里存 id，不要存句柄。</summary>
   </member>
-  <member name="M:EasyEcs.Entity.Run``3(``2@)" source="7805fc26ee81">
+  <member name="M:EasyEcs.Entity.Run``3(``2@)" source="d2a7be3bd554">
     <summary>
       实体有 <c>T1, T2</c> 全部组件时，在它上面运行 <paramref name="job" />，传入的 ref 和 <c>World.ForEachEntity</c> 给的一样：
-      job 运行了返回 true，实体缺组件或已不存活返回 false。job 写入的组件（<c>IForEachEntity.Writes</c>）算作写入；job 做的结构变更
+      job 运行了返回 true，实体缺组件或已不存活返回 false。job 写入的组件（<c>IForEachEntity.WriteMask</c>）算作写入；job 做的结构变更
       立即生效，这些写入会带到实体的新行上（job 抛异常时也一样）。实现了 <see cref="T:EasyEcs.INoStructuralChanges" /> 的 job 省掉这些
       簿记。O(1)，零分配。
     </summary>

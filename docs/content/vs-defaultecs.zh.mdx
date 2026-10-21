@@ -55,8 +55,8 @@ netstandard1.1-2.1 和 Unity，EasyEcs 只支持 .NET 10。
 | 并行系统 | `new ParallelSystem<T>(runner, systems)` | `WorldOptions.ParallelSystems`（冲突由生成的访问集判断） |
 | 并行遍历集合 | 配 `DefaultParallelRunner` 的 `AEntitySetSystem` | `[ForEach(Parallel = true)]` |
 | 实体集合 | `world.GetEntities().With<A>().Without<B>().AsSet()` | `QueryFilter`、`world.Query<A>(filter)`、`world.Count<A>(filter)` |
-| 上次之后变过的 | `.WhenChanged<T>()` + `NotifyChanged<T>()` + `Complete()` | `ITrackChanges` + `[Changed<T>]` |
-| 上次之后被移除的 | `.WhenRemoved<T>()` + `Complete()` | `ITrackChanges` + `[Removed<T>]` |
+| 上次之后变过的 | `.WhenChanged<T>()` + `NotifyChanged<T>()` + `Complete()` | `ITracked` + `[Changed<T>]` |
+| 上次之后被移除的 | `.WhenRemoved<T>()` + `Complete()` | `ITracked` + `[Removed<T>]` |
 | 按值索引 | `AsMultiMap<T>()`、`AsMap<T>()` | `IIndexed<TKey>`、`world.Index<T, TKey>()` |
 | 延迟变更 | `EntityCommandRecorder`、`Record(e).Set<T>()`、`Execute()` | 不需要 |
 | 禁用 | `e.Disable()`、`e.Disable<T>()` | 标签加 `[Without<T>]`，或 `entity.DisableHp()` |

@@ -219,19 +219,19 @@ public record struct MemberOf(EntityId Target) : IRelation;
 ```csharp
 var red = world.CreateEntity();
 var blue = world.CreateEntity();
-var knight = world.CreateEntity().AddRelation(new MemberOf(red)).AddRelation(new MemberOf(blue));   // in two parties
+var knight = world.CreateEntity().Link(new MemberOf(red)).Link(new MemberOf(blue));   // in two parties
 
 var parties = world.Relations<MemberOf>();                    // keep it in a local or a field
 int members = parties.Count(red);                             // O(1)
 foreach (var member in parties.Find(red)) { /* each member of red */ }
 int links = parties.Find(red).Count;                          // O(1): the links the loop walks, to size a buffer
 int withMembers = parties.TargetCount;                        // O(1): how many parties have a member
-bool inBlue = knight.HasRelation<MemberOf>(blue);
-knight.RemoveRelation<MemberOf>(blue);                         // leaves blue
+bool inBlue = knight.Links<MemberOf>(blue);
+knight.Unlink<MemberOf>(blue);                         // leaves blue
 ```
 
-`AddRelation` adds the buffer if the entity has none, then appends the link and indexes it. Read the links with
-`Read<DynamicBuffer<T>>()` or an `in` parameter; write them with `AddRelation`, `RemoveRelation` or a `Set` of a whole
+`Link` adds the buffer if the entity has none, then appends the link and indexes it. Read the links with
+`Read<DynamicBuffer<T>>()` or an `in` parameter; write them with `Link`, `Unlink` or a `Set` of a whole
 buffer, so the index follows (a `ref` write is [EECS015](/en/docs/guide/analyzer#eecs015)).
 
 Once some code names `DynamicBuffer<MemberOf>` (a `[ForEach]` parameter, a `Read`), the generator adds named members
@@ -239,9 +239,9 @@ for the relation:
 
 | Generated | Same as |
 | --- | --- |
-| `e.AddMemberOf(target)` | `e.AddRelation(new MemberOf(target))`, returns the entity |
-| `e.UnlinkMemberOf(target)` | `e.RemoveRelation<MemberOf>(target)`, returns how many links went |
-| `e.LinksMemberOf(target)` | `e.HasRelation<MemberOf>(target)` |
+| `e.LinkMemberOf(target)` | `e.Link(new MemberOf(target))`, returns the entity |
+| `e.UnlinkMemberOf(target)` | `e.Unlink<MemberOf>(target)`, returns how many links went |
+| `e.LinksMemberOf(target)` | `e.Links<MemberOf>(target)` |
 | `e.MemberOf` / `e.HasMemberOf` / `e.RemoveMemberOf()` | the links (`ref readonly DynamicBuffer<MemberOf>`), whether it has any, drop them all |
 | `world.MemberOfIndex` | `world.Relations<MemberOf>()` |
 
@@ -256,16 +256,16 @@ public class CountParties : EcsSystem
 ```
 
 ```csharp
-var paladin = world.CreateEntity(new PartyCount()).AddMemberOf(red).AddMemberOf(blue);
+var paladin = world.CreateEntity(new PartyCount()).LinkMemberOf(red).LinkMemberOf(blue);
 bool withBlue = paladin.LinksMemberOf(blue);                  // true
 paladin.UnlinkMemberOf(blue);                                 // 1 link went
 int linked = paladin.MemberOf.Count;                          // 1
 int inRed = world.MemberOfIndex.Count(red);                   // the knight and the paladin
 ```
 
-`AddX` takes what builds a link: one overload per public constructor, or, without one, every field and
+`LinkX` takes what builds a link: one overload per public constructor, or, without one, every field and
 auto-property with a public `set` or `init` (`struct Ally : IRelation { public EntityId Target { get; init; } public
-int Weight; }` gets `e.AddAlly(target, weight)`). A relation gets no `WriteX()` or `GetOrAddX()`: its links are
+int Weight; }` gets `e.LinkAlly(target, weight)`). A relation gets no `WriteX()` or `GetOrAddX()`: its links are
 indexed, so they change only through the calls above.
 
 ### When the target is destroyed [#target-policies]
@@ -304,15 +304,15 @@ public static class Friendships
     // A friendship is two links, one on each player, so both sides change together.
     public static void Befriend(Entity a, Entity b)
     {
-        if (a.HasRelation<Friend>(b)) return;
-        a.AddRelation(new Friend(b));
-        b.AddRelation(new Friend(a));
+        if (a.Links<Friend>(b)) return;
+        a.Link(new Friend(b));
+        b.Link(new Friend(a));
     }
 
     public static void Unfriend(Entity a, Entity b)
     {
-        a.RemoveRelation<Friend>(b);
-        b.RemoveRelation<Friend>(a);
+        a.Unlink<Friend>(b);
+        b.Unlink<Friend>(a);
     }
 }
 ```
@@ -327,7 +327,7 @@ Friendships.Befriend(ana, ben);
 int bensFriends = friends.Count(ben);                      // 1: ana links to ben
 
 ana.Destroy();                                             // ana's link goes with her, ben's link to her is dropped
-bool stillLinked = ben.HasRelation<Friend>(ana);           // false
+bool stillLinked = ben.Links<Friend>(ana);           // false
 ```
 
 Each side reads its own friends from its buffer, and since every link has its mirror, `friends.Count(player)` (the
@@ -469,14 +469,14 @@ arrows.WhenTargetDestroyed(TargetPolicy.Destroy);
 Entity red = world.CreateEntity();
 Entity blue = world.CreateEntity();
 Entity hero = world.CreateEntity();
-hero.AddRelation(new MemberOf(red));
-hero.AddRelation(new MemberOf(blue));
-world.CreateEntity().AddRelation(new MemberOf(red));
+hero.Link(new MemberOf(red));
+hero.Link(new MemberOf(blue));
+world.CreateEntity().Link(new MemberOf(red));
 
 var parties = world.Relations<MemberOf>();
 Console.WriteLine($"red has {parties.Count(red)} members, blue has {parties.Count(blue)}");
 
-hero.RemoveRelation<MemberOf>(blue);
+hero.Unlink<MemberOf>(blue);
 Console.WriteLine($"after the hero left: blue has {parties.Count(blue)}");
 
 archer.Destroy();

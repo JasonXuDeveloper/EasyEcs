@@ -14,11 +14,11 @@ available as Markdown: add `.md` to its URL.
 - Store `EntityId`, not `Entity`, in components and buffers (EECS017).
 - `var hp = entity.Health;` copies the value: write through the `ref` (`ref var hp = ref entity.Health;`,
   `entity.Health.Value -= 10`), never a copy you then drop (EECS038).
-- Use the generated members: `entity.Health` (a `ref`; `ref readonly` for an `ITrackChanges` or indexed component,
+- Use the generated members: `entity.Health` (a `ref`; `ref readonly` for an `ITracked` or indexed component,
   written with `SetHealth(…)` or, for a tracked one, `WriteHealth()`), `HasHealth`, `SetHealth(100)`, `RemoveHealth()`,
   `IsDead` / `SetDead()` / `RemoveDead()` for tags, `world.Arena` for singletons, `item.Position` on query items.
   `entity.Read<T>()` reads without counting as a write. Prefer them to the generic calls (EECS033).
-- Components marked `ITrackChanges` record writes; indexed components (`IIndexed<TKey>`) are written with `Set` or
+- Components marked `ITracked` record writes; indexed components (`IIndexed<TKey>`) are written with `Set` or
   `SetX(…)`, never through a `ref` (EECS015), and never while a `foreach` walks their index (`Find`, `Children`,
   `Range`): collect the entities first (EECS042).
 - A key that must name one entity (an account id, a session token, a cell's occupant) is `IUniqueIndexed<TKey>`: look
@@ -28,10 +28,10 @@ available as Markdown: add `.md` to its URL.
 - A list per entity is a `DynamicBuffer<T>` component; never copy it by value (EECS012). Call
   `EnsureCapacity(n)` on it (and `world.Reserve<T…>(n)` on the world) before a wave of known size.
 - An external resource (a socket, a seat) lives in an `ICleanupComponent`: destroying the entity keeps it with the
-  `Destroyed` tag until a system releases the resource and removes the component. Never set or remove `Destroyed` or
+  `Retired` tag until a system releases the resource and removes the component. Never set or remove `Retired` or
   `Disabled<T>` yourself (EECS045): `Destroy`, `Disable<T>()` and `Enable<T>()` do. A cleanup component and `ChildOf`
-  are never disabled (EECS048). A destroyed entity stays destroyed: `MoveEntities` skips it (and a moved entity leaves
-  its cleanup components behind), `Clone()` throws, and `SetAll` reaches it only when the filter names `Destroyed`.
+  are never disabled (EECS048). A retired entity (kept for its cleanup components) stays retired: `MoveEntities` skips it (and a moved entity leaves
+  its cleanup components behind), `Clone()` throws, and `SetAll` reaches it only when the filter names `Retired`.
 - An optional component is a `Maybe<T>` parameter, but not in the hottest loops: there, write two methods with
   `[With<T>]` and `[Without<T>]`.
 
@@ -50,11 +50,11 @@ available as Markdown: add `.md` to its URL.
   takes spans, singletons and an `EntitySpan` only (EECS009).
 - Filters on a `[ForEach]` method: `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`.
   A `[Removed<T>]` method does not take `T` (EECS016). On a system group struct, for all its systems: `[With<T>]`,
-  `[Without<T>]`, `[WithAny<T>]` (on any other struct: EECS023), or `IGroupWith<T>` / `IGroupWithout<T>` implemented
+  `[Without<T>]`, `[WithAny<T>]` (on any other struct: EECS023), or `ISystemGroupWith<T>` / `ISystemGroupWithout<T>` implemented
   by the group or an interface it implements; a generic group interface needs the interfaces, as an attribute cannot
   name a type parameter. `[Changed<T>]` / `[Removed<T>]` go on methods only. A method never excludes what it or its
   group requires (EECS049), and a `QueryFilter` names one `InGroup` (EECS050).
-- React to changes with `[Changed<T>]` / `[Removed<T>]` on an `ITrackChanges` component, not with dirty flags.
+- React to changes with `[Changed<T>]` / `[Removed<T>]` on an `ITracked` component, not with dirty flags.
   For "any of these changed" use `[ChangedAny<A, B>]` / `[RemovedAny<A, B>]` (one attribute, not several `Changed`,
   which mean all of them).
 - A system that recomputes a tracked component every tick takes it as `Mut<T>` and writes with
@@ -64,7 +64,7 @@ available as Markdown: add `.md` to its URL.
   record struct, an `IEquatable<T>` or an unmanaged `T` (EECS040).
 - Per-client replication: keep one `static readonly QueryFilter` (`QueryFilter.Create().ChangedAny<A, B>(0)`) and run
   it with each client's acknowledged tick, `filter.Since(client.Ack)`; never one filter per client per tick.
-- Despawns for replication: set `WorldOptions.DestroyLog` to at least the destroys of the longest gap between two
+- Despawns for replication: set `WorldOptions.DestroyLogCapacity` to at least the destroys of the longest gap between two
   reads of a client, and call `world.DestroyedSince(client.Ack, buffer, out count)`; on `false`, send that client the
   whole state. `[Removed<T>]` does not see destroyed entities. A resource to release exactly once is a cleanup
   component, not the log.
@@ -83,7 +83,7 @@ available as Markdown: add `.md` to its URL.
   `IForEachEntity` job and a `static readonly` `QueryFilter`; it returns `false` when the entity is gone, lacks a
   component or fails the filter. It is structural: never inside a parallel `[ForEach]` (EECS010), never in a
   `[ForEach]` method without `Entity` or `World` (EECS013), never off the owner thread (EECS014). A job that makes no
-  structural change implements `INoStructuralChanges`; `static int Writes` names the components it writes, no more
+  structural change implements `INoStructuralChanges`; `static int WriteMask` names the components it writes, no more
   and no fewer (EECS037).
 - No events or callbacks: a state change is data (a tag, a component, a message entity, a tracked write). There is no
   command buffer and no `Added<T>`: add a tag such as `Spawned` and remove it in the system that reacts.
@@ -130,8 +130,8 @@ available as Markdown: add `.md` to its URL.
 - It has no whole-entity disable flag: add a tag and filter with `Without<T>`; `entity.Disable<T>()` hides one
   component and keeps its value.
 - It has no actor type. An actor is a pattern: one type per kind of actor that is its key component
-  (`IIndexed<TSelf>`), its system group and the group's filter (`IGroupWith<In<TSelf>>`), declared once through a
-  generic interface (`interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, IGroupWith<In<TSelf>>`).
+  (`IIndexed<TSelf>`), its system group and the group's filter (`ISystemGroupWith<In<TSelf>>`), declared once through a
+  generic interface (`interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>`).
   Implement `Key` explicitly on a record struct (`Shop IIndexed<Shop>.Key => this;`): a public `Key => this` makes
   the record's `ToString()` recurse until the stack overflows (EECS043).
   https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors
@@ -164,7 +164,7 @@ available as Markdown: add `.md` to its URL.
   file in `Systems/`, and `Program.cs` only as the host: it builds the world, sets every singleton before the first
   update and adds the systems in one method the tests share. Input from other threads goes through a queue held in a
   singleton. https://ecs.xgamedev.net/en/docs/guide/project-structure
-- To look inside a world: `world.Describe()` (tables, rows, bytes), `entity.Describe()`, `system.Stats` with
+- To look inside a world: `world.DescribeTables()` (tables, rows, bytes), `entity.Describe()`, `system.Stats` with
   `WorldOptions.MeasureSystems` (times, `LastAllocated` bytes, `LastEntities` visited), `system.Error` with
   `SystemErrorPolicy.Disable`; on the owner thread between updates, never in game logic.
   https://ecs.xgamedev.net/en/docs/guide/diagnostics

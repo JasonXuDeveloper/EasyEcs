@@ -14,21 +14,13 @@ public readonly struct SystemStats
 
 ## 属性 [#properties]
 
-### `Average` [#average]
+### `AverageTime` [#averagetime]
 
 ```csharp
-public TimeSpan Average { get; }
+public TimeSpan AverageTime { get; }
 ```
 
 每次运行的平均耗时（第一次运行前为零）。
-
-### `Last` [#last]
-
-```csharp
-public TimeSpan Last { get; }
-```
-
-最近一次运行的耗时。
 
 ### `LastAllocated` [#lastallocated]
 
@@ -46,6 +38,14 @@ public long LastEntities { get; }
 
 最近一次运行的 `[ForEach]` 方法访问的实体数：每个方法的遍历开始时它的查询匹配的实体（通过过滤条件的行；`[Changed<T>]` / `[Removed<T>]` 还要求在系统上次运行之后写过或移除过），各方法相加；`[ForEach(Slices = N)]` 方法只算它这次访问的那一片的行。[`EcsSystem.OnUpdate`](/zh/docs/reference/ecssystem#onupdate) 里做的查询不算。
 
+### `LastTime` [#lasttime]
+
+```csharp
+public TimeSpan LastTime { get; }
+```
+
+最近一次运行的耗时。
+
 ### `Runs` [#runs]
 
 ```csharp
@@ -53,14 +53,6 @@ public long Runs { get; }
 ```
 
 到目前为止测量过的运行次数。
-
-### `Total` [#total]
-
-```csharp
-public TimeSpan Total { get; }
-```
-
-所有测量过的运行加起来的耗时。
 
 ### `TotalAllocated` [#totalallocated]
 
@@ -77,3 +69,11 @@ public long TotalEntities { get; }
 ```
 
 所有测量过的运行访问的实体数（见 [`SystemStats.LastEntities`](/zh/docs/reference/systemstats#lastentities)）。
+
+### `TotalTime` [#totaltime]
+
+```csharp
+public TimeSpan TotalTime { get; }
+```
+
+所有测量过的运行加起来的耗时。

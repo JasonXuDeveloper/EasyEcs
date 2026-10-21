@@ -168,8 +168,8 @@ enumerator, a structural-change check. Pick the first row that fits:
 | A loop outside systems, every tick | a static `[ForEach]` method run through its entry point, or a struct job (`world.ForEach`) | <BenchValue k="runner.runner" />, against <BenchValue k="runner.query" /> for a `Query` loop |
 | A loop in a tool, a test or a request handler | `foreach (var item in world.Query<...>())` | <BenchValue k="micro.queryIterate" />, against <BenchValue k="micro.forEachIterate" /> for a struct job (10,000 entities) |
 | "How many?" / "Is there any?" | `world.Count` / `world.Any` | <BenchValue k="count.tested" /> for 100,000 rows whose bits must be tested |
-| The few rows written since the last run | `ITrackChanges` + `[Changed<T>]` | <BenchValue k="changed.10" /> instead of <BenchValue k="changed.10.scan" /> (10 of 100,000 written) |
-| The entities that lost a component | `ITrackChanges` + `[Removed<T>]` | <BenchValue k="removed.10" /> (10 of 100,000 removed) |
+| The few rows written since the last run | `ITracked` + `[Changed<T>]` | <BenchValue k="changed.10" /> instead of <BenchValue k="changed.10.scan" /> (10 of 100,000 written) |
+| The entities that lost a component | `ITracked` + `[Removed<T>]` | <BenchValue k="removed.10" /> (10 of 100,000 removed) |
 | Entities by value | a [value index](/en/docs/guide/indexes-and-relations) | see `IndexBenchmark` [below](#benchmarks) |
 
 <BenchSource />
@@ -190,7 +190,7 @@ benchmarks measure:
 | A per-entity `[ForEach]` doing arithmetic with branches | A batch method vectorized with `Vector<T>`, branches as masks | <BenchValue k="ops.iterate2" /> → <BenchValue k="ops.iterate2Simd" /> |
 | `foreach (var item in world.Query<...>())` in a hot ad-hoc loop | A struct job with `world.ForEach` | <BenchValue k="micro.queryIterate" /> → <BenchValue k="micro.forEachIterate" /> |
 | A `bool` flag tested in every row | A tag with `[With<T>]` / `[Without<T>]` | rows without the tag skipped 64 at a time; toggling flips a bit |
-| Scanning every row for the few that changed | `ITrackChanges` + `[Changed<T>]` | <BenchValue k="changed.10.scan" /> → <BenchValue k="changed.10" /> |
+| Scanning every row for the few that changed | `ITracked` + `[Changed<T>]` | <BenchValue k="changed.10.scan" /> → <BenchValue k="changed.10" /> |
 | `CreateEntity` / `Destroy` in a loop | `CreateEntities` / `DestroyAll`, `Instantiate(prefab, span)` | <BenchValue k="micro.churn" /> → <BenchValue k="micro.churnBatch" /> |
 | Setting a component on every entity one by one | `world.SetAll` / `RemoveAll` | <BenchValue k="bulk.each" /> → <BenchValue k="bulk.setAll" /> |
 | One method taking `Maybe<T>` | Two methods split by `[With<T>]` / `[Without<T>]` | <BenchValue k="maybe.one" /> → <BenchValue k="maybe.two" /> |
@@ -266,14 +266,14 @@ per-entity method: write one to vectorize it.
 
 `world.Query` is the convenient loop for tools and request handlers. For a loop that runs every tick outside a
 system, write a struct job: `world.ForEach` specializes and inlines it per table. Mark it `INoStructuralChanges` and
-declare its `Writes` ([what a job declares](/en/docs/guide/queries)).
+declare its `WriteMask` ([what a job declares](/en/docs/guide/queries)).
 
 ```csharp title="EnergyJob.cs"
 public struct EnergyJob : IForEach<Velocity>, INoStructuralChanges   // no structural change: the lean loop
 {
     public float Total;   // a value field stays in a register during the pass and is copied back once
 
-    public static int Writes => 0;   // reads only: no row counts as changed
+    public static int WriteMask => 0;   // reads only: no row counts as changed
 
     public void Execute(ref Velocity v) => Total += v.X * v.X + v.Y * v.Y;
 }
@@ -296,7 +296,7 @@ public ref struct CollectJob : IForEach<Position>, INoStructuralChanges
     public Span<float> Xs;   // the caller's buffer, at least as long as the matching rows
     public int Count;
 
-    public static int Writes => 0;
+    public static int WriteMask => 0;
 
     public void Execute(ref Position p) => Xs[Count++] = p.X;
 }
@@ -358,11 +358,11 @@ entity to another archetype and back.
 ### The few rows that changed: `[Changed<T>]` [#the-few-rows-that-changed-changedt]
 
 A replication or persistence system that scans every row pays for the rows nobody wrote. Mark the component
-`ITrackChanges` and filter with `[Changed<T>]`: unwritten tables, 4,096-row blocks and 64-row words are skipped.
+`ITracked` and filter with `[Changed<T>]`: unwritten tables, 4,096-row blocks and 64-row words are skipped.
 Take the component by `in`, so the visit does not count as a write.
 
 ```csharp title="ShieldReplicationSystem.cs"
-public record struct Shield(int Value) : IComponent, ITrackChanges;
+public record struct Shield(int Value) : IComponent, ITracked;
 public record struct ShieldReplica(int Value) : IComponent;
 
 public class ShieldReplicationSystem : EcsSystem
@@ -394,7 +394,7 @@ stamps its row, so `[Removed<T>]` visits only the entities that lost it, with th
 ```csharp title="ShieldLossSystem.cs"
 public class ShieldLossSystem : EcsSystem
 {
-    [ForEach, Removed<Shield>]                       // Shield : ITrackChanges (above)
+    [ForEach, Removed<Shield>]                       // Shield : ITracked (above)
     static void Send(ref ShieldReplica replica) => replica = new ShieldReplica(0);
 }
 ```
@@ -444,7 +444,7 @@ times every system run.
   components in one call: shorter, with the same cost as one call each.
 - **Read with `in`, write with `ref`**: `in` parameters, `entity.Read<T>()` or the generated property read; `ref`
   parameters and `entity.Get<T>()` write. A `ref` access counts as a write of a tracked component, and a `Query`
-  loop counts every row it visits; a struct job that only reads declares `static int Writes => 0`.
+  loop counts every row it visits; a struct job that only reads declares `static int WriteMask => 0`.
 - **Keep `[ForEach]` methods that make no structural change `static`**, without a `World` parameter and with
   read-only use of their `Entity`: the generator marks their job `INoStructuralChanges`, which skips the per-row
   bookkeeping. Mark hand-written jobs the same way.
@@ -689,7 +689,7 @@ of 10,000 or 100,000 players (`RemoveTypes`), the step before reloading game log
 
 ### Introspection and trimming [#introspection-benchmarks]
 
-`IntrospectionBenchmark` describes the battle server's world for a dashboard (`world.Describe()`: every table with
+`IntrospectionBenchmark` describes the battle server's world for a dashboard (`world.DescribeTables()`: every table with
 its columns, rows and bytes), one entity for a debugger (`entity.Describe()`, values boxed) and the schedule of its
 systems (`world.DescribeSchedule()`). Each allocates the description it returns: they are tools, not tick paths.
 `TrimBenchmark` gives memory back after a peak: 100,000 entities over 16 or 256 tables, all but one in a hundred

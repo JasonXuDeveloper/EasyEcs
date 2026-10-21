@@ -6,7 +6,7 @@ icon: Stethoscope
 ---
 
 实体只是一个 id，数据散在各张表的列里，所以在调试器里盯着一个句柄看不出什么；服务器变慢了，也不会告诉你是哪个系统变重了。
-这些问题都能用 World 手里现成的数据回答：`world.Describe()` 列出每张表的行数和字节数，`entity.Describe()`（以及调试器）显示
+这些问题都能用 World 手里现成的数据回答：`world.DescribeTables()` 列出每张表的行数和字节数，`entity.Describe()`（以及调试器）显示
 实体的组件值，`system.Stats` 记录每个系统的耗时、分配的字节和访问的实体数，`world.DescribeSchedule()` 说明哪些系统一起跑、
 为什么，`system.Error` 保存出错系统的异常。高峰过去之后，`world.TrimExcess()` 把多占的内存还回去。
 
@@ -41,12 +41,12 @@ foreach (var component in guard.Describe())
 
 ### 看所有的表 [#tables]
 
-`world.Describe()` 每张表返回一个 `TableInfo`：`Columns`（每列有组件的 `Type`、没有这个组件的行数 `Without`，以及
+`world.DescribeTables()` 每张表返回一个 `TableInfo`：`Columns`（每列有组件的 `Type`、没有这个组件的行数 `Absent`，以及
 [分组](/zh/docs/guide/groups) World 里的 `Group`）、存活实体数 `Entities`、在用的行数 `Rows`、已分配的行数 `Capacity`，
 以及这些行占的字节数 `Bytes`。
 
 ```csharp
-foreach (var table in world.Describe())
+foreach (var table in world.DescribeTables())
 {
     var names = new List<string>();
     foreach (var column in table.Columns) names.Add(column.Type.Name);
@@ -58,7 +58,7 @@ foreach (var table in world.Describe())
 
 - **内存在哪：** 看每张表的 `Bytes`。它跟着 `Capacity` 走，不跟着 `Entities` 走：一张表装过一波实体，行就留着给下一波用，
   直到 [`TrimExcess`](#trim) 把它缩小。
-- **移除过的组件：** 列的 `Without` 是移除或禁用了这个组件的行数，因为[移除时行保留](/zh/docs/guide/entities-and-components#storage)。
+- **移除过的组件：** 列的 `Absent` 是移除或禁用了这个组件的行数，因为[移除时行保留](/zh/docs/guide/entities-and-components#storage)。
   占比很大，说明这张表的大部分实体已经没有这个组件了。
 - **组件组合：** 每一种不同的组件组合就是一张表。几百张小表说明代码加出了很多种组合；[分组](/zh/docs/guide/groups)则是有意拆表。
   `Entities` 为 0 的表是以前装过实体的组合，`TrimExcess` 会把它们丢掉。
@@ -69,7 +69,7 @@ foreach (var table in world.Describe())
 ### 给每个系统计时 [#timing]
 
 打开 `WorldOptions.MeasureSystems` 后，每个系统的每次运行（`OnUpdate` 加上它的 `[ForEach]` 方法）都会被统计：`system.Stats`
-里有 `Runs`、`Last`、`Total`、`Average`，还有下面的字节数和实体数。`world.Systems` 列出所有系统且不分配内存，状态页可以直接找出最慢的那个
+里有 `Runs`、`LastTime`、`TotalTime`、`AverageTime`，还有下面的字节数和实体数。`world.Systems` 列出所有系统且不分配内存，状态页可以直接找出最慢的那个
 （[统计系统耗时](/zh/docs/guide/systems#measuring-systems)）。
 
 ```csharp
@@ -85,7 +85,7 @@ using var measured = new World(new WorldOptions { MeasureSystems = true });
 measured.AddSystem<RegenSystem>();
 measured.Update();
 foreach (var system in measured.Systems)
-    Console.WriteLine($"{system.GetType().Name}: last {system.Stats.Last.TotalMicroseconds} μs");
+    Console.WriteLine($"{system.GetType().Name}: last {system.Stats.LastTime.TotalMicroseconds} μs");
 ```
 
 每次运行还会记下分配了多少内存、访问了多少实体。状态页不光能找出最慢的系统，还能找出在制造垃圾的系统，或者人口涨了的系统：
@@ -105,7 +105,7 @@ foreach (var system in measured.Systems)
 foreach (var system in measured.Systems)
 {
     var stats = system.Stats;
-    Console.WriteLine($"{system.GetType().Name}: {stats.Last.TotalMicroseconds} μs, " +
+    Console.WriteLine($"{system.GetType().Name}: {stats.LastTime.TotalMicroseconds} μs, " +
                       $"{stats.LastAllocated} B, {stats.LastEntities} entities");
 }
 ```
@@ -226,7 +226,7 @@ public sealed class SystemMetrics : IDisposable
             _tags[i++] = [new KeyValuePair<string, object>("system", system.GetType().Name)];
 
         _meter.CreateObservableGauge<double>("ecs.system.duration",
-            () => Read(static stats => stats.Last.TotalMilliseconds), unit: "ms");
+            () => Read(static stats => stats.LastTime.TotalMilliseconds), unit: "ms");
         _meter.CreateObservableGauge<long>("ecs.system.entities",
             () => Read(static stats => stats.LastEntities), unit: "{entity}");
         _meter.CreateObservableCounter<long>("ecs.system.allocated",
@@ -278,10 +278,10 @@ public sealed class SystemMetrics : IDisposable
 
 ```csharp
 long before = 0;
-foreach (var table in world.Describe()) before += table.Bytes;
+foreach (var table in world.DescribeTables()) before += table.Bytes;
 world.TrimExcess();
 long after = 0;
-foreach (var table in world.Describe()) after += table.Bytes;
+foreach (var table in world.DescribeTables()) after += table.Bytes;
 Console.WriteLine($"gave back {before - after:N0} bytes of tables");
 ```
 
@@ -306,7 +306,7 @@ foreach (var system in guarded.Systems)
 ### 在哪个线程读 [#threads]
 
 在 World 的所有者线程上、两次更新之间读诊断数据，就像[托管指南](/zh/docs/guide/hosting#reads)发布状态那样：读到的是一个完整
-tick 之后的数字。`world.Describe()` 也可以在别的线程上调，看个大概（不会破坏 World），但同一时刻正在变的表可能读到一半。
+tick 之后的数字。`world.DescribeTables()` 也可以在别的线程上调，看个大概（不会破坏 World），但同一时刻正在变的表可能读到一半。
 `world.DescribeSchedule()` 在任何线程上都安全。`entity.Describe()`、`system.Stats` 和 `TrimExcess()` 只属于所有者线程：别的线程
 通过拷贝读统计，就像[指标](#metrics)那样。
 
@@ -404,13 +404,13 @@ public static class Diagnostics
     public static void PrintTables(World world)
     {
         Console.WriteLine($"{world.EntityCount} entities");
-        foreach (var table in world.Describe())
+        foreach (var table in world.DescribeTables())
         {
             var columns = new List<string>();
             foreach (var column in table.Columns)
             {
-                string without = column.Without > 0 ? $" ({column.Without} without)" : "";
-                columns.Add(column.Type.Name + without);
+                string absent = column.Absent > 0 ? $" ({column.Absent} absent)" : "";
+                columns.Add(column.Type.Name + absent);
             }
 
             Console.WriteLine($"  [{string.Join(", ", columns)}] {table.Entities} entities, " +
@@ -448,7 +448,7 @@ public static class Diagnostics
 ```text
 1200 entities
   [] 0 entities, 64 rows allocated, 512 bytes
-  [Position, Velocity (1 without)] 1000 entities, 1024 rows allocated, 24,840 bytes
+  [Position, Velocity (1 absent)] 1000 entities, 1024 rows allocated, 24,840 bytes
   [Position, Cooldown, Health] 200 entities, 256 rows allocated, 6,256 bytes
 Entity 1000v1
   Position { X = 5, Y = 5 }
@@ -458,7 +458,7 @@ MoveSystem: 3 runs, on
 CooldownSystem: 3 runs, off: a cooldown went below zero
 ```
 
-停下的行人还留在原来的表里，记在 `Velocity (1 without)` 中。第一张表是 World 的空表，不带组件的 `CreateEntity()` 会把实体放在
+停下的行人还留在原来的表里，记在 `Velocity (1 absent)` 中。第一张表是 World 的空表，不带组件的 `CreateEntity()` 会把实体放在
 这里。守卫身上留着出错系统写下的值 `Cooldown { Ticks = -1 }`；`CooldownSystem` 被关掉并保存了异常，`MoveSystem` 照常运行：
 第三次更新没有停在这个 bug 上。
 
@@ -466,7 +466,7 @@ CooldownSystem: 3 runs, off: a cooldown went below zero
 
 | 别这样 | 这样做 | 为什么 |
 | --- | --- | --- |
-| 每个 tick 都调 `Describe()` | 在请求或定时器里调，放在两次更新之间 | 它会分配返回值 |
+| 每个 tick 都调 `DescribeTables()` / `Describe()` | 在请求或定时器里调，放在两次更新之间 | 它会分配返回值 |
 | 用 `entity.Describe()` 判断有没有某个组件 | `HasX`、`TryGetX`、过滤条件 | 不装箱，不分配 |
 | 用秒表包住 `world.Update()` | `MeasureSystems` 和 `system.Stats` | 按系统统计：每次运行读两次时钟、两次分配计数器，每次 `[ForEach]` 遍历一次 `Count` |
 | 用 `GC.GetAllocatedBytesForCurrentThread()` 包住整个 tick | `system.Stats.LastAllocated` | 能指出是哪个系统，并行分块也算在内 |
@@ -483,7 +483,7 @@ CooldownSystem: 3 runs, off: a cooldown went below zero
 
 ## 开销 [#what-it-costs]
 
-- **`world.Describe()`：** O(表数 + 列数)；每张表分配一个 `TableInfo` 和它的列。
+- **`world.DescribeTables()`：** O(表数 + 列数)；每张表分配一个 `TableInfo` 和它的列。
 - **`entity.Describe()`：** O(实体的组件数)；每个值装箱一次。
 - **`MeasureSystems`：** 每次系统运行读两次时间戳、两次线程的分配计数器（辅助线程每跑一个分块再读两次），每次 `[ForEach]`
   遍历做一次 `Count`（O(匹配的表数)，加上过滤条件要测试的行字）。关掉时每次运行一次字段判断、每个分块一个分支。`SystemStats`
@@ -499,8 +499,8 @@ CooldownSystem: 3 runs, off: a cooldown went below zero
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
-| 在系统里或每个 tick 调 `Describe()` | 热路径上分配内存 | 代码审查 |
-| 更新进行中从别的线程读 `Describe()` | 读到正在变的表的中间状态 | 在所有者线程上、两次更新之间读 |
+| 在系统里或每个 tick 调 `DescribeTables()` / `Describe()` | 热路径上分配内存 | 代码审查 |
+| 更新进行中从别的线程读 `DescribeTables()` | 读到正在变的表的中间状态 | 在所有者线程上、两次更新之间读 |
 | 以为实体走了 `Bytes` 就会降 | 表保留容量给下一波实体 | 高峰过后调 `TrimExcess()` |
 | 每个 tick 都调 `TrimExcess()` | 表被丢掉又重建，扩容重新付一遍：tick 上出现分配 | 放进维护任务里调（[常见错误](/zh/docs/guide/common-mistakes#trim-every-tick)） |
 | 在 `Query` 循环或 `[ForEach]` 方法里调 `TrimExcess()` | `InvalidOperationException` | [EECS041](/zh/docs/guide/analyzer#eecs041)：在两次更新之间调 |
@@ -523,6 +523,6 @@ CooldownSystem: 3 runs, off: a cooldown went below zero
     EasyEcs 抛出的异常是什么意思，怎么修。
   </Card>
   <Card title="架构" href="/zh/docs/architecture#storage-model">
-    `Describe` 报告的表、列和行。
+    `DescribeTables` 报告的表、列和行。
   </Card>
 </Cards>

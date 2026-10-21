@@ -12,8 +12,8 @@ current API.
 
 ## v4.6 → v4.7 [#v4-6-to-v4-7]
 
-Four calls and one generated member are [renamed](#v4-7-renames): the compiler finds each call. Beyond that, code
-written for 4.6 compiles unchanged unless a system declares a member named `RunCount`, a file imports another
+Calls, types and generated members are [renamed](#v4-7-renames): the compiler finds each use, and saves of 4.6 still
+load. Beyond that, code written for 4.6 compiles unchanged unless a system declares a member named `RunCount`, a file imports another
 namespace with a type of the same name as one of the new ones, or code names a [generated class](#v4-7-generated-classes). Three calls behave differently, and parallel passes that
 write tracked components cut their rows differently. The [new analyzer rules](#v4-7-analyzer) report code that throws or
 loses writes.
@@ -105,8 +105,8 @@ before. Passes that write no tracked component chunk as before.
 
 ### Renamed calls [#v4-7-renames]
 
-Four calls and one generated member of 4.6 say in their names what they do now. The old names are gone, so the compiler points at every call
-to change:
+Calls, types and generated members of 4.6 say in their names what they do now. The old names are gone, so the
+compiler points at every use to change ([D64](/en/docs/decisions#d64-names-of-4-7)):
 
 | 4.6 | 4.7 | Why |
 |---|---|---|
@@ -115,6 +115,20 @@ to change:
 | `world.EnsureCapacity(prefab, count)` | `world.Reserve(prefab, count)` | the same |
 | `world.DestroyEntities<T1, …, Tn>(filter)` | `world.DestroyAll<T1, …, Tn>(filter)` | the filter's calls end in `All`, like `SetAll` and `RemoveAll` |
 | `e.RemoveMemberOf(target)` (a relation's generated member) | `e.UnlinkMemberOf(target)` | `e.RemoveMemberOf()` drops the whole buffer; one missing argument no longer drops every link |
+| `e.AddMemberOf(target)` (a relation's generated member) | `e.LinkMemberOf(target)` | a link is made, not a component added; `LinkX` / `UnlinkX` / `LinksX` read as one family |
+| `entity.AddRelation(r)` / `RemoveRelation<T>(target)` / `HasRelation<T>(target)` | `entity.Link(r)` / `Unlink<T>(target)` / `Links<T>(target)` | the same family, generic |
+| `ITrackChanges` | `ITracked` | a marker that says what the component is, like `IIndexed` |
+| `IGroupWith<T>` / `IGroupWithout<T>` | `ISystemGroupWith<T>` / `ISystemGroupWithout<T>` | they filter a system group, not an `IGroup` (the component that splits tables) |
+| `Destroyed` (the tag), `entity.IsDestroyed` | `Retired`, `entity.IsRetired` | the entity is alive, kept for its cleanup components; "destroyed" now means gone. Saves of 4.6 load: the tag keeps its saved name |
+| `world.GetSystem<T>()` (null when absent) | `world.TryGetSystem<T>(out T system)` | the miss is in the signature; keep the reference `AddSystem` returns where you can |
+| `world.Describe()` | `world.DescribeTables()` | what it describes; `entity.Describe()` and `DescribeSchedule()` stay |
+| `ColumnInfo.Without` | `ColumnInfo.Absent` | not the `Without` filter: the rows of the table that lack the component |
+| `system.Stats.Last` / `Total` / `Average` | `LastTime` / `TotalTime` / `AverageTime` | the stats also hold counts and bytes |
+| `world.UpdateCount` | `world.DefaultUpdateCount` | it counts the default group's updates only |
+| `SystemAccess.RunsAlone()` | `SystemAccess.RunAlone()` | an instruction; `SystemInfo.RunsAlone` (a fact) stays |
+| `TargetRules` (the class of `WhenTargetDestroyed`) | `TargetPolicyExtensions` | only code that names the class changes |
+| a hand-written job's `static int Writes` | `static int WriteMask` | a bit mask, like `SelfStamped` |
+| `LoadEntitiesInto(input, into: …)` | `LoadEntitiesInto(input, targets: …)` | only a named argument changes |
 
 `world.DestroyEntities(ids)` now destroys a list of ids in one call, like `SaveEntities` and `MoveEntities`. A call of
 4.6 with type arguments does not compile against it, so none changes meaning silently.
@@ -142,12 +156,12 @@ does: a static call (`HealthPrefabExtensions.SetHealth(prefab, 100)`), a `using 
 Code that compiled with 4.6 can fail the build with 4.7. The new errors name code that throws or cannot work:
 [EECS040](/en/docs/guide/analyzer#eecs040) to [EECS045](/en/docs/guide/analyzer#eecs045) (`SetIfChanged` of a type
 it cannot compare, a call a pass refuses, an indexed component added to while its index is walked, a record struct
-key that prints itself, a sliced filter given to a whole-row call, a `Destroyed` or `Disabled<T>` tag written by
+key that prints itself, a sliced filter given to a whole-row call, a `Retired` or `Disabled<T>` tag written by
 hand), [EECS048](/en/docs/guide/analyzer#eecs048) to [EECS051](/en/docs/guide/analyzer#eecs051) (`Disable` of a cleanup component or `ChildOf`, a `[ForEach]`
 method whose filters no entity passes, a second `InGroup` in one filter, `world.Update()` inside a query loop), and
 [EECS036](/en/docs/guide/analyzer#eecs036) now also reports a plain component with two index keys. The new
 warnings name a write that is lost, a ref that may point at the wrong row or work done twice:
-[EECS037](/en/docs/guide/analyzer#eecs037) (a job's `Writes`), [EECS038](/en/docs/guide/analyzer#eecs038) (a
+[EECS037](/en/docs/guide/analyzer#eecs037) (a job's `WriteMask`), [EECS038](/en/docs/guide/analyzer#eecs038) (a
 changed copy), [EECS046](/en/docs/guide/analyzer#eecs046) (a `Query` loop that only reads tracked components: loop
 over `Read`), [EECS047](/en/docs/guide/analyzer#eecs047) (a ref used after a structural change: take it again) and
 [EECS052](/en/docs/guide/analyzer#eecs052) (a `Set` right after `CreateEntity` or `Instantiate`: give the component to the creation).
@@ -163,8 +177,9 @@ fields. A world that measures pays that on every update; without `MeasureSystems
 ### New public types [#v4-7-new-types]
 
 `Mut<T>`, `IUniqueIndexed` / `IUniqueIndexed<TKey>`, `UniqueIndexExtensions`, `ChangedAnyAttribute<…>`,
-`RemovedAnyAttribute<…>`, `ScheduleInfo`, `GroupSchedule`, `StageInfo`, `SystemInfo`, `StageWait` and `SystemPair` are
-new in `namespace EasyEcs`. A file that imports another namespace with a type of one of these names gets CS0104
+`RemovedAnyAttribute<…>`, `ScheduleInfo`, `GroupInfo`, `StageInfo`, `SystemInfo`, `StageWait` and `SystemPair` are
+new in `namespace EasyEcs`, and so are the renamed `ITracked`, `ISystemGroupWith<T>`, `ISystemGroupWithout<T>`,
+`Retired` and `TargetPolicyExtensions`. A file that imports another namespace with a type of one of these names gets CS0104
 (ambiguous reference): qualify the name, or alias it with a `using` directive.
 
 ## v4.3 → v4.4 [#v4-3-to-v4-4]
@@ -236,7 +251,7 @@ and, where the change is mechanical, a code fix in the IDE. Apply the fix, or su
 deliberate, with the reason next to it. With a tracked `Armor` and a `Seen` counter:
 
 ```csharp
-public record struct Armor(int Value) : IComponent, ITrackChanges;
+public record struct Armor(int Value) : IComponent, ITracked;
 public record struct Seen(int Count) : IComponent;
 ```
 

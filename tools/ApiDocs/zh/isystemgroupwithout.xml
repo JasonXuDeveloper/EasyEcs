@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.IGroupWithout`1" source="c8fa9e00b439">
+  <member name="T:EasyEcs.ISystemGroupWithout`1" source="7c4e0d512eaa">
     <summary>
       系统分组：其中的 [ForEach] 方法跳过有 <typeparamref name="T" /> 的实体，效果和在分组上写 <see cref="T:EasyEcs.WithoutAttribute`1" />
-      一样（见 <see cref="T:EasyEcs.IGroupWith`1" />）。
+      一样（见 <see cref="T:EasyEcs.ISystemGroupWith`1" />）。
     </summary>
   </member>
 </doc>
